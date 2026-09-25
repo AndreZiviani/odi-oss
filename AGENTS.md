@@ -1,0 +1,133 @@
+# AGENTS.md
+
+Guidance for any coding agent (or human) working in this repository. Read
+the top-level `README.md` first for what this project is; this file is about
+how to work in it safely and correctly.
+
+## Layout
+
+    Makefile                the whole build; `make help` lists every target
+    toolchain/               our cross toolchain: gcc/binutils/uClibc-ng, built from source
+    kernel/                  Linux 6.18 for the RTL9602C
+      618/fetch.sh, mainline/, patches/, config
+      build.sh
+      extra/                 every file of our own, at its tree path (board, CPU cache, irqchip, timer, SPI NOR)
+      extra/drivers/net/ethernet/odi/   our own switch/GPON/NIC/OMCI/watchdog/ramlog drivers
+    packages/                upstream userland: busybox, dropbear, iproute2 (bridge-utils deliberately not built)
+    rootfs/skeleton/         /etc and the init chain, ours
+    image/                   assembles squashfs + uImage into a flashable tarball, and the on-device flasher (fwu.sh)
+    src/                     our own tools: diag, omci (omcid/omcli/omciprobe/omcicap), igmp, nv — freestanding
+    test/                    host-side and qemu-based test harnesses
+    tools/                   developer tooling: remote-build.sh, memprobe, regdump, regtrace, lint helpers
+    docs/                    KERNEL.md, TOOLS.md, SETTINGS.md, BUILDING.md, FLASHING.md, ACCESS.md, CROSS-COMPILING.md, IMPROVEMENTS.md, LICENSING.md
+
+## Build and test commands
+
+    make image-all           # everything, from a clean clone
+    make image                # just the tarball, once the pieces exist
+    make test                  # lint + test-host + test-omci (~2 min)
+    make test-host              # host-side unit tests, no Docker/stick needed
+    make lint                   # shellcheck + repo-specific checks, see below
+
+    kernel/build.sh              # the kernel alone (needs `make toolchain` first)
+    ODI_REMOTE=user@yourbuildhost tools/remote-build.sh 'make image-all'
+                                  # build on a native x86_64 Linux host instead of
+                                  # under emulation; see docs/BUILDING.md. ODI_REMOTE
+                                  # is a placeholder you must set — this repo names
+                                  # no host of its own.
+
+`docs/BUILDING.md` has the full breakdown of every build target.
+
+## House rules
+
+- **No proprietary or vendor-sourced code or references, anywhere in this
+  repo.** This project builds a complete replacement firmware from mainline
+  Linux, public specifications (ITU-T G.984.3, G.988, SFF-8472) and our own
+  independent implementation, written from hardware behaviour observed on
+  the device; it ships and links no proprietary code. Do not
+  add anything derived from, or copied from, a vendor's SDK or firmware
+  source, and do not name proprietary vendor files, functions or symbols in
+  code, comments, or docs — describing how the **stock (OEM) firmware
+  behaves**, as an observed black box, is fine and often necessary; reading
+  or citing its source is not.
+- **No apostrophes in shell-script comments.** A single quote inside a
+  single-quoted inline block (several scripts here run `docker run ... bash
+  -c '...'`, where the whole block is one shell word) silently terminates
+  the word and runs the rest of the line in the outer shell — this has cost
+  real debugging time more than once. Rephrase; do not escape.
+  `tools/check-inline-quotes.sh` (run by `make lint`) enforces this inside
+  inline `bash -c` blocks specifically, but the safest habit is to avoid
+  apostrophes in shell comments everywhere.
+- **Keep the mainline footprint minimal.** `kernel/618/patches/` holds only
+  edits to files that exist in mainline; every new file lives in the
+  `kernel/extra` overlay. Before adding a hunk to a mainline file, look for
+  a hook that already exists (mach headers, board callbacks, our own Kconfig
+  `select`s). Fold a fix into the patch it belongs to rather than stacking
+  a new one, so each patch stays one coherent change, and check
+  `tools/kernel-footprint.sh` before and after: the count only goes down
+  without a stated reason. This is what makes the next LTS port cheap.
+- **Check for existing lint/contribution rules before adding a new pattern.**
+  `make lint` (see below) is the authority; there is no separate
+  `CONTRIBUTING.md`. Search `tools/*lint*` and the `lint:` target in the
+  Makefile before assuming a check does not exist.
+
+### What `make lint` actually checks
+
+- `shellcheck` over every build/host script (bash), and separately, in POSIX
+  `sh` mode, over the scripts that run **on the device** (`rootfs/skeleton/`,
+  `tools/regdump/dump.sh`) — those are interpreted by busybox `ash`, not
+  bash, and a failure there costs a stick, not just a build.
+- `tools/check-inline-quotes.sh` — the apostrophe/inline-quote rule above.
+- A `git grep` guard against references to the private investigation
+  workspace this project was developed alongside (paths, document names,
+  internal task-tracking IDs). If you did your work in, or copied notes
+  from, an external workspace, restate the point in this repo's own words
+  rather than naming or linking that workspace.
+
+## Stick safety rules
+
+See `docs/FLASHING.md` for the full procedure; the essentials, because
+getting these wrong can brick a stick or take down the fiber service behind
+it:
+
+- **Flash only the inactive slot**, from the stock (OEM) firmware or from
+  this image — never the slot you are currently running from. `fwu.sh`
+  refuses to write the running slot itself, but do not rely on that as your
+  only check.
+- **A freshly flashed slot is inert until `nv setenv sw_tryactive <slot>`**,
+  which boots it exactly once with the watchdog armed.
+- **Never `sw_commit` a trial.** Commit only after you have booted the
+  trial image yourself and are satisfied with it. Committing before that
+  discards the only free safety net this mechanism gives you.
+- **A reboot with no commit returns to the stock (or previously committed)
+  firmware.** That is the whole point of the mechanism; do not "fix" a
+  stuck trial by writing `sw_commit` to make it stick — power-cycle it
+  instead, or fix the image and try again.
+
+## Dangerous commands
+
+- **`omcicli get tables` wedges the stock OMCI daemon.** omcid answers it
+  safely, but the same command on the stock slot takes the line down. Do not
+  run it.
+- **`diag` reading from a stdin that never closes waits forever** for the
+  next command. Always give it a pipe or a file that ends, and wrap it in
+  `timeout` in anything that must not stall (rcS, network.sh).
+- **Reading an undecoded SoC register address with `devmem`** can stall the
+  bus until the hardware watchdog resets the stick. Do not probe addresses
+  you cannot already account for from `docs/KERNEL.md` or the driver source.
+- **`omciprobe` (writes) and `omcicap` (capture)** both interfere with
+  `omcid` — see `docs/TOOLS.md` before running either against a device that
+  needs to stay provisioned.
+
+## Where the logs are
+
+- **The DRAM ramlog** (`docs/KERNEL.md`, `tools/memprobe/README.md`)
+  survives a watchdog reset (not a power cycle) and is the only way to see
+  console output from a boot that never came up on the network. Read it
+  from the *other* (working) slot after a reset, with `tools/memprobe`.
+- **`/etc/config/breadcrumbs`**, enabled with `: > /etc/config/breadcrumbs.on`
+  on the currently running image before a trial: one timestamped line per
+  boot stage, on the config partition, which survives a revert the same way
+  the ramlog does. `docs/FLASHING.md` has the procedure.
+- **`/var/log/`** on a booted image — `omcid.log` in particular records
+  every OMCI frame and driver call for that boot.

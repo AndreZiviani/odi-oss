@@ -1,0 +1,70 @@
+if MACH_RTL8686
+
+# The board selects, kept here so that the System type entry in
+# arch/mips/Kconfig stays a prompt and a help text. Hidden: always on
+# with the board. Uses the idioms of this kernel: irqdomain irqchip,
+# clocksource/clockevent driver, and no device tree (a plain board file
+# is simpler for a single fixed board with no variants).
+#
+# The CPU is CPU_R3000, the only CPU type SYS_HAS_CPU_R3000 makes
+# visible. The Lexra RLX5281 is R3000-class (KU/IE stack, rfe, 6-bit
+# ASID), so mainline takes its R3000 exception model with no edit. Two
+# things differ from a real R3000 and are handled in our own files:
+# the caches (cache.c, with cpu_has_3k_cache 0 so c-r3k.c never
+# installs), and the barriers. CPU_R3000 turns CPU_HAS_SYNC off, so
+# wmb()/rmb() emit nothing, and turns CPU_HAS_WB on, so mb()/iob() and
+# every readl()/writel() go through __wbflush, which board.c points at
+# a sync. The core does implement sync; see rtl8686-barrier.h.
+config RTL8686_SOC
+	def_bool MACH_RTL8686
+	select BOOT_RAW
+	select SYS_HAS_EARLY_PRINTK
+	select SYS_HAS_CPU_R3000
+	select SYS_SUPPORTS_32BIT_KERNEL
+	select CPU_SUPPORTS_32BIT_KERNEL
+	select SYS_SUPPORTS_BIG_ENDIAN
+	select DMA_NONCOHERENT
+	select IRQ_MIPS_CPU
+	select NO_IOPORT_MAP
+	select SYS_SUPPORTS_ARBIT_HZ
+	select MIPS_L1_CACHE_SHIFT_5
+
+config RTL8686_UART0
+	bool "UART0 (8250 platform serial)"
+	depends on MACH_RTL8686
+	select SERIAL_8250
+	select SERIAL_8250_CONSOLE
+	default y
+
+config RTL8686_NOR
+	bool "SPI NOR flash through the SoC SPI controller (SquashFS/JFFS2 partitions)"
+	depends on MACH_RTL8686
+	select MTD
+	select MTD_CMDLINE_PARTS
+	default y
+	help
+	  drivers/mtd/devices/rtl8686-spiflash.c -- a direct mtd_info
+	  driver for the SPI controller this board uses, not a
+	  CFI/JEDEC-probeable memory-mapped chip. No
+	  MTD_CFI/MTD_JEDECPROBE dependency: this board has neither.
+
+
+config ODI_EARLY_CRUMBS
+	bool "Early boot breadcrumbs and interrupt dump in the ramlog pages"
+	depends on MACH_RTL8686 && ODI_RAMLOG
+	default n
+	help
+	  Debugging a kernel that dies before its console works. Writes a
+	  4-byte tag and a step number into the ramlog page B header at
+	  points from the first instruction of kernel_entry through the
+	  board hooks (prom_init, plat_mem_setup, arch_init_irq,
+	  plat_time_init), then the interrupt entry, dispatch and timer
+	  markers, and prints the interrupt path state (CP0 Status/Cause,
+	  controller masks and pending bits, timer registers, exception
+	  vectors) once, through late_time_init. All stores go straight to
+	  DRAM through KSEG1 and survive a watchdog reset, so the stock
+	  firmware can read them back after a failed trial boot
+	  (tools/memprobe). All of it is in our own files; kernel/build.sh
+	  CRUMBS_CORE=1 adds crumbs in core files too (kernel/618/debug).
+
+endif

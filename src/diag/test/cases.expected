@@ -1,0 +1,48 @@
+pon get transceiver bias-current => [pon get transceiver bias-current]
+pon get transceiver rx-power => [pon get transceiver rx-power]
+pon get transceiver tx-power => [pon get transceiver tx-power]
+pon get transceiver temperature => [pon get transceiver temperature]
+pon get transceiver voltage => [pon get transceiver voltage]
+gpon get onu-state => [gpon get onu-state]
+gpon get alarm-status => [gpon get alarm-status]
+mib dump counter port all => [mib dump counter port <ports>] ports=0-31 all { }
+exit => [exit]
+pon get transceiver vendor-name => [pon get transceiver vendor-name]
+pon get transceiver part-number => [pon get transceiver part-number]
+pon get transceiver all => [pon get transceiver all]
+pon get transc rx-power => [pon get transceiver rx-power]
+p g t r => [pon get transceiver rx-power]
+pon get transceiver r => [pon get transceiver rx-power]
+pon get transceiver t => Ambiguous command at word 3
+pon get transceiver tx => [pon get transceiver tx-power]
+pon get transceiver te => [pon get transceiver temperature]
+pon get transceiver => Incomplete command
+pon get nonsense => Unrecognized command at word 2
+pon get transceiver rx-power extra => Trailing garbage after command at word 4
+gpon get flows => [gpon get flows]
+gpon g f => [gpon get flows]
+gpon get o => [gpon get onu-state]
+mib dump counter port 2 => [mib dump counter port <ports>] ports=2-2 { 2 }
+mib dump counter port 0,2-3 => [mib dump counter port <ports>] ports=0-3 { 0 2 3 }
+mib dump counter port 32 => Invalid value at word 4
+mib dump counter port 3-1 => Invalid value at word 4
+mib dump counter port x => Invalid value at word 4
+register get 0x701008 1 => [register get <address> <words>] u0=0x701008 u1=0x1
+register get 0 4 => [register get <address> <words>] u0=0x0 u1=0x4
+register get 0x214 => Incomplete command
+register set 0x48 0x08082001 => [register set <address> <value>] u0=0x48 u1=0x8082001
+register set 0x48 4294967295 => [register set <address> <value>] u0=0x48 u1=0xffffffff
+register set 0x48 4294967296 => Invalid value at word 3
+register set 0x48 0xzz => Invalid value at word 3
+reg g 0x1d0 1 => [register get <address> <words>] u0=0x1d0 u1=0x1
+help => [help]
+e => [exit]
+vlan get entry 1 => Unrecognized command at word 0
+    => (empty)
+?  => 16: [pon get transceiver vendor-name] [pon get transceiver part-number] [pon get transceiver temperature] [pon get transceiver voltage] [pon get transceiver bias-current] [pon get transceiver tx-power] [pon get transceiver rx-power] [pon get transceiver all] [gpon get onu-state] [gpon get alarm-status] [gpon get flows] [mib dump counter port <ports>] [register get <address> <words>] [register set <address> <value>] [help] [exit]
+? pon => 8: [pon get transceiver vendor-name] [pon get transceiver part-number] [pon get transceiver temperature] [pon get transceiver voltage] [pon get transceiver bias-current] [pon get transceiver tx-power] [pon get transceiver rx-power] [pon get transceiver all]
+? pon get transceiver  => 8: [pon get transceiver vendor-name] [pon get transceiver part-number] [pon get transceiver temperature] [pon get transceiver voltage] [pon get transceiver bias-current] [pon get transceiver tx-power] [pon get transceiver rx-power] [pon get transceiver all]
+? pon get transceiver t => 2: [pon get transceiver temperature] [pon get transceiver tx-power]
+? gpon get => 3: [gpon get onu-state] [gpon get alarm-status] [gpon get flows]
+? register get  => 1: [register get <address> <words>]
+? nothing => 0:

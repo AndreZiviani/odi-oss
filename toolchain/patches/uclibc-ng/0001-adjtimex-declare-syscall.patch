@@ -1,0 +1,25 @@
+adjtimex: include <unistd.h> for syscall()
+
+On a kernel without __NR_clock_adjtime -- which means anything older than
+2.6.39 -- adjtimex() falls through to the __NR_adjtimex branch and calls
+syscall() without a declaration in scope. With gcc 14 and later, an implicit
+function declaration is an error rather than a warning, so the build stops:
+
+    libc/sysdeps/linux/common/adjtimex.c:18:12: error: implicit declaration
+        of function 'syscall'; did you mean '_syscall0'?
+
+The branch is simply unexercised upstream: nobody builds uClibc-ng against a
+pre-2.6.39 kernel any more. This device runs 2.6.30.9.
+
+Worth reporting upstream; it is a real bug, not a local quirk.
+
+--- a/libc/sysdeps/linux/common/adjtimex.c
++++ b/libc/sysdeps/linux/common/adjtimex.c
+@@ -9,6 +9,7 @@
+ #include <sys/syscall.h>
+ #include <sys/timex.h>
+ #include <time.h>
++#include <unistd.h>
+ 
+ int adjtimex(struct timex *buf)
+ {

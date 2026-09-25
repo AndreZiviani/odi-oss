@@ -1,0 +1,35 @@
+# v6 parity load table, curated subset of parity-v6.table for the next
+# bisection trial: the ACL setup rows at 0x015010-0x015020 and the
+# ACL_PORT_ENABLE word (parity-v6.table indices 9-14), CLASSIFY_SETUP
+# (index 18), the three flood masks (indices 20-22), the DSCP remap word
+# at 0x01c0f4 (index 25) and the meter word at 0x025084 (index 35), in
+# parity-v6.table's own order. Excludes every PHY access, table funnel,
+# pin mux, port MAC, and SerDes indirect-access/debug entry, and excludes
+# the 14 entries already tried in odi-oss-260922-s8 (the hardcoded
+# odi_switch_parity_table[] in odi_switch_dal.c). Same format as
+# parity-v6.table: "offset value mask name" per line, hex, no 0x prefix.
+# 12 entries.
+# SW_0x015008
+00015010 0080c101 ffffffff SW_0x015008
+# SW_0x015008
+00015014 01424305 ffffffff SW_0x015008
+# SW_0x015008
+00015018 0240c101 ffffffff SW_0x015008
+# SW_0x015008
+0001501c 09e24393 ffffffff SW_0x015008
+# SW_0x015008
+00015020 09618284 ffffffff SW_0x015008
+# SW_0x015008|ACL_PORT_ENABLE
+00015040 0000000f ffffffff SW_0x015008|ACL_PORT_ENABLE
+# CLASSIFY_SETUP
+0001600c 00001c09 ffffffff CLASSIFY_SETUP
+# FLOOD_BCAST_PORTS
+0001c020 00000007 ffffffff FLOOD_BCAST_PORTS
+# FLOOD_UNKN_MCAST_PORTS
+0001c024 00000007 ffffffff FLOOD_UNKN_MCAST_PORTS
+# FLOOD_UNKN_UCAST_PORTS
+0001c028 00000007 ffffffff FLOOD_UNKN_UCAST_PORTS
+# PRIO_QUEUE_MAP|SW_0x01c0d4|SW_0x01c0f4
+0001c0f4 00000e03 ffffffff PRIO_QUEUE_MAP|SW_0x01c0d4|SW_0x01c0f4
+# SW_0x025084
+00025084 00008000 ffffffff SW_0x025084

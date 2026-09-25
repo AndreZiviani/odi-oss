@@ -1,0 +1,9 @@
+pon get transceiver bias-current
+pon get transceiver rx-power
+pon get transceiver tx-power
+pon get transceiver temperature
+pon get transceiver voltage
+gpon get onu-state
+gpon get alarm-status
+mib dump counter port all
+exit

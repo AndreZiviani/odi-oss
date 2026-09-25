@@ -1,0 +1,30 @@
+From: Andre Ziviani <andrepziviani@gmail.com>
+Date: Thu, 24 Sep 2026 14:38:20 -0300
+Subject: [PATCH] MIPS: r3k: probe the Lexra RLX5281
+
+The RLX5281 is an R3000-class core: CP0 Status keeps a KU/IE stack,
+exceptions return with rfe, EntryHi holds a 6-bit ASID at bit 6. The
+board builds it as plain CPU_R3000, so every one of those sites takes
+the R3000 branch mainline already has. The one thing missing is the
+probe: the core reports PRId 0x0000dc02 (legacy company, implementation
+0xdc), which matches neither case here, so cpu_probe() leaves the name
+NULL and the BUG_ON after the switch fires before trap_init(). Add the
+case. No MIPS_CPU_3K_CACHE: the Lexra caches are not R3000 isolated-cache
+caches, and the board installs its own cache code.
+
+---
+--- a/arch/mips/kernel/cpu-r3k-probe.c
++++ b/arch/mips/kernel/cpu-r3k-probe.c
+@@ -117,6 +117,12 @@
+ 			c->options |= MIPS_CPU_FPU;
+ 		c->tlbsize = 64;
+ 		break;
++	case PRID_COMP_LEGACY | 0xdc00:	/* Lexra RLX5281 */
++		c->cputype = CPU_R3000;
++		__cpu_name[cpu] = "RLX5281";
++		c->options = MIPS_CPU_TLB | MIPS_CPU_NOFPUEX;
++		c->tlbsize = 64;
++		break;
+ 	}
+ 
+ 	BUG_ON(!__cpu_name[cpu]);

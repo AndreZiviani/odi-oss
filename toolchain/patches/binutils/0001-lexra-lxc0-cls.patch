@@ -1,0 +1,40 @@
+Three Lexra instructions the RLX5281 core implements, encoded as the vendor
+prebuilt toolchain assembler emits them (2026-09-21):
+
+    mflxc0 rt, rd[, sel]   COP0, rs field 0b00011   0x40600000
+    mtlxc0 rt, rd[, sel]   COP0, rs field 0b00111   0x40e00000
+    cls    rd, rt          SPECIAL3, function 0x0e  0x7c00000e
+
+Membership I1 so they assemble at any -march; the kernel is built -march=mips2.
+
+--- a/opcodes/mips-opc.c
++++ b/opcodes/mips-opc.c
+@@ -998,6 +998,8 @@
+ {"clz",			"d,s",		0x00000016, 0xfc1f07ff, WR_1|RD_2,		0,		ALX,		0,	0 },
+ {"clz",			"d,s",		0x00000050, 0xfc1f07ff, WR_1|RD_2,		0,		I37,		0,	0 },
+ {"clz",			"U,s",		0x70000020, 0xfc0007ff, WR_1|RD_2,		0,		I32|N55,	0,	I37 },
++/* Lexra count leading sign bits (RLX5281).  */
++{"cls",			"d,t",		0x7c00000e, 0xffe007ff, WR_1|RD_2,		0,		I1,		0,	0 },
+ /* ctc0 is at the bottom of the table.  */
+ {"ctc1",		"t,g",		0x44c00000, 0xffe007ff,	RD_1|WR_CC|CM,		0,		I1,		0,	0 },
+ {"ctc1",		"t,S",		0x44c00000, 0xffe007ff,	RD_1|WR_CC|CM,		0,		I1,		0,	0 },
+@@ -1401,6 +1403,9 @@
+ {"mfps",		"t,P",		0x4000c800, 0xffe0ffc1,	WR_1|RD_C0|LC,		0,		M1|N5|EE,	0,	0 },
+ {"mfc0",		"t,G",		0x40000000, 0xffe007ff,	WR_1|RD_C0|LC,		0,		I1,		0,	0 },
+ {"mfc0",		"t,G,H",	0x40000000, 0xffe007f8,	WR_1|RD_C0|LC,		0,		I32,		0,	0 },
++/* Lexra LXC0 coprocessor read.  */
++{"mflxc0",		"t,G",		0x40600000, 0xffe007ff,	WR_1|RD_C0|LC,		0,		I1,		0,	0 },
++{"mflxc0",		"t,G,H",	0x40600000, 0xffe007f8,	WR_1|RD_C0|LC,		0,		I1,		0,	0 },
+ {"mfc1",		"t,S",		0x44000000, 0xffe007ff,	WR_1|RD_2|LC|FP_S,	0,		I1,		0,	0 },
+ {"mfc1",		"t,G",		0x44000000, 0xffe007ff,	WR_1|RD_2|LC|FP_S,	0,		I1,		0,	0 },
+ /* mfc2 is at the bottom of the table.  */
+@@ -1521,6 +1526,9 @@
+ {"mtps",		"t,P",		0x4080c800, 0xffe0ffc1,	RD_1|WR_C0|CM,		0,		M1|N5|EE,	0,	0 },
+ {"mtc0",		"t,G",		0x40800000, 0xffe007ff,	RD_1|WR_C0|WR_CC|CM,	0,		I1,		0,	0 },
+ {"mtc0",		"t,G,H",	0x40800000, 0xffe007f8,	RD_1|WR_C0|WR_CC|CM,	0,		I32,		0,	0 },
++/* Lexra LXC0 coprocessor write.  */
++{"mtlxc0",		"t,G",		0x40e00000, 0xffe007ff,	RD_1|WR_C0|WR_CC|CM,	0,		I1,		0,	0 },
++{"mtlxc0",		"t,G,H",	0x40e00000, 0xffe007f8,	RD_1|WR_C0|WR_CC|CM,	0,		I1,		0,	0 },
+ {"mtc1",		"t,S",		0x44800000, 0xffe007ff,	RD_1|WR_2|CM|FP_S,	0,		I1,		0,	0 },
+ {"mtc1",		"t,G",		0x44800000, 0xffe007ff,	RD_1|WR_2|CM|FP_S,	0,		I1,		0,	0 },
+ /* mtc2 is at the bottom of the table.  */

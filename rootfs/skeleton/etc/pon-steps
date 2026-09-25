@@ -1,0 +1,10 @@
+i2c 1
+i2cen 1
+gpon
+rxsd
+gpondrv
+gpondev
+omcimods
+gponsn auto
+gponpw auto
+gponact

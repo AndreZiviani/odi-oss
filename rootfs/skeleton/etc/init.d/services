@@ -1,0 +1,79 @@
+#!/bin/sh
+#
+# Our daemons. Backgrounded by rcS, so nothing here can cost the boot -- but
+# keep it that way: rcS runs as `sysinit`, before init starts the shells.
+#
+# Everything is ON by default: an image built from this tree is useful as
+# flashed. Turn a piece off by creating a file under /etc/config, which is the
+# jffs2 partition and survives reboots and reflashes:
+#
+#     touch /etc/config/dropbear.off && reboot
+
+#
+# A flag file that could not be READ is not a flag that is not SET. Every
+# `[ -f /etc/config/X.off ]` below is false when the jffs2 config partition
+# did not mount, because /etc/config then resolves to the empty ramfs
+# directory rcS created -- so each protective switch silently turns itself
+# off exactly when the machine is already in an unexpected state. That is a
+# deliberate fail OPEN here: dropbear, confd and metricsd are ways IN and
+# ways to SEE, and refusing to start them because a partition is missing
+# would turn a mount problem into no way to diagnose it. (The ssh host key
+# then lives in ramfs and is regenerated every boot, which is noisy but
+# works.) The GPON modules/omcid startup this file used to gate on the same
+# partition (fail CLOSED, on purpose -- a module that panics takes the trial
+# boot with it) now happens in rcS itself, on every kernel this repo builds;
+# see omci_modules() there.
+
+start() {
+	[ -f /etc/config/metricsd.off ] || [ ! -x /bin/metricsd ] || \
+		/bin/metricsd 9100 &
+
+	[ -f /etc/config/confd.off ] || [ ! -x /bin/confd ] || \
+		/bin/confd 80 &
+
+	# ON by default, like everything else here. Turning it off for a trial
+	# boot is an operational step taken on the RUNNING stick before the
+	# flash -- `touch /etc/config/dropbear.off` -- and not an image default:
+	# /etc/config is the jffs2 partition, fwu.sh never writes it, so the flag
+	# is already there when the new image first comes up. See
+	# docs/TRIAL-BOOT.md for why that is worth doing once.
+	if [ ! -f /etc/config/dropbear.off ] && [ -x /sbin/dropbear ]; then
+		mkdir -p /etc/config/dropbear.d
+		KEY=/etc/config/dropbear.d/ed25519
+		# -s, not -f: a zero-length key is what a power cut during the
+		# first-boot keygen leaves behind, and dropbear then dies while
+		# dropbearkey REFUSES to replace an existing file -- so without
+		# this the stick loses ssh permanently and nothing retries.
+		[ -e "$KEY" ] && [ ! -s "$KEY" ] && rm -f "$KEY"
+		# stdout is the public key and is noise; STDERR is not. This is the
+		# one command here whose failure costs ssh, and it failed silently
+		# once already -- no /dev/urandom, no key, no message.
+		[ -s "$KEY" ] || /sbin/dropbearkey -t ed25519 -f "$KEY" >/dev/null
+		# -E puts dropbear own log on STDERR, which rcS captures into
+		# /var/log/services.log. Without it dropbear switches to syslog as
+		# it daemonises, and nothing on this image runs a syslogd -- so an
+		# "Early exit: Failed to daemonize" reached the operator as ssh not
+		# answering, with no message anywhere to read.
+		# -D: public keys for root live beside the host key, on the jffs2
+		# partition, so they survive a reflash. confd /api/sshkeys writes
+		# that file; dropbear reads it on every login, no restart needed.
+		[ -s "$KEY" ] && /sbin/dropbear -E -r "$KEY" -D /etc/config/dropbear.d -p 22 &
+	fi
+
+	# The GPON modules/omcid startup used to happen here too, for a kernel
+	# whose rcS did not already do it. Every kernel this repo builds now
+	# does that in rcS itself (omci_modules(), called from the pon-steps
+	# loop), so there is nothing left for this script to start.
+
+	# The last breadcrumb, if rcS is leaving them (see rcS for what they are
+	# and why they are a switch). Same shape: swallowed on any failure.
+	if [ -f /etc/config/breadcrumbs.on ]; then
+		echo "$(cut -d" " -f1 /proc/uptime) services: done" >> /etc/config/breadcrumbs 2>/dev/null || true
+		sync
+	fi
+}
+
+case "$1" in
+start) start ;;
+*)     echo "usage: $0 start" >&2; exit 1 ;;
+esac

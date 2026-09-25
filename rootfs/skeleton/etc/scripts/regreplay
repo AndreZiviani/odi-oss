@@ -1,0 +1,52 @@
+#!/bin/sh
+# Replay a register script (tools/regtrace/sequence.py) through our diag.
+#
+#     regreplay <script>
+#
+# Line kinds: w <addr> <val> (one register write); t <tbl> <idx> d0..d4 ctrl
+# (one indirect-table entry: WR_DATA x5, then CTRL written VERBATIM as
+# recorded -- not reconstructed from a busy bit, see sequence.py's to_script
+# docstring: the isp1 reads-included baseline showed no spin-wait pattern
+# on this register, so there is nothing to poll for here).
+#
+# All diag commands for one script go through ONE /bin/diag process: table
+# fills are thousands of lines and a process per line would be far slower
+# than the boot step being replaced.
+# Batches of at most 2000 diag command lines: one /bin/diag process per
+# batch, so a large table fill (vlan is ~49000 register-set lines) never
+# runs one diag invocation past its 120s timeout. wc -l is absent on the
+# OEM but present on ours, so lines are counted in the loop instead.
+set -u
+S=${1:?script}
+BATCH_MAX=2000
+n=0; m=0; bn=0; batches=0; batch=/tmp/regreplay.batch; : > "$batch"
+flush() {
+	[ -s "$batch" ] || return 0
+	timeout 120 /bin/diag < "$batch" > /dev/null 2>&1
+	batches=$((batches + 1))
+	: > "$batch"
+	bn=0
+}
+while read -r kind a b c d e f g h; do
+	case $kind in
+	\#*) ;;
+	w)
+		echo "register set $a $b" >> "$batch"
+		n=$((n + 1)); bn=$((bn + 1))
+		[ "$bn" -ge "$BATCH_MAX" ] && flush
+		;;
+	t)
+		i=0
+		for v in $c $d $e $f $g; do
+			echo "register set 0x$(printf %08x $((0x12008 + 4 * i))) $v" >> "$batch"
+			i=$((i + 1)); bn=$((bn + 1))
+		done
+		echo "register set 0x00012000 $h" >> "$batch"
+		bn=$((bn + 1))
+		m=$((m + 1))
+		[ "$bn" -ge "$BATCH_MAX" ] && flush
+		;;
+	esac
+done < "$S"
+flush
+echo "regreplay: $n writes, $m table entries, $batches batches"

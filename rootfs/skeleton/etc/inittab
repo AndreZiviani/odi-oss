@@ -1,0 +1,14 @@
+# busybox init. Three things, and the order matters.
+#
+# sysinit runs to completion BEFORE any respawn entry starts, so anything that
+# blocks in rcS costs you every way back into the device -- both the serial
+# console and the network shell are respawn entries below.
+::sysinit:/etc/init.d/rcS
+
+# No telnet: ssh (dropbear) is the only network login. The trial boot and
+# its self-revert are the way back if ssh ever fails to come up.
+ttyS0::respawn:/bin/login -p
+
+::restart:/sbin/init
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount -a -r

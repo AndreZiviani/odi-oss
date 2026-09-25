@@ -1,0 +1,19 @@
+# Builder for our own cross toolchain: binutils, gcc and uClibc-ng.
+#
+# Also the container the kernel is built in with KTC=oss (kernel/build.sh):
+# bc for timeconst, mkimage for the uImage, kmod for the module tools.
+#
+# Native to the host architecture -- unlike the vendor prebuilt toolchain, whose binaries are 32-bit
+# x86 and force an emulated amd64 container on everything that touches them.
+FROM debian:bookworm
+
+RUN apt-get update -qq \
+	&& apt-get install -y -qq --no-install-recommends \
+		build-essential bison flex texinfo \
+		libgmp-dev libmpfr-dev libmpc-dev libisl-dev zlib1g-dev \
+		curl ca-certificates xz-utils bzip2 file rsync python3 perl patch \
+		gawk patch \
+		bc u-boot-tools kmod \
+	&& rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work

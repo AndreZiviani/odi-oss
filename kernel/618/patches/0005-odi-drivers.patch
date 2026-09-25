@@ -1,0 +1,26 @@
+From: Andre Ziviani <andrepziviani@gmail.com>
+Date: Thu, 24 Sep 2026 13:57:32 -0300
+Subject: [PATCH] net: hook the odi-oss drivers into drivers/net/ethernet
+
+Sources the Kconfig of our driver directory and visits it
+unconditionally; its own Kconfig and Makefile gate what builds. The
+directory (switch, NIC, GPON, OMCI, watchdog, ramlog) comes from the
+kernel/extra overlay, at drivers/net/ethernet/odi.
+
+---
+--- a/drivers/net/ethernet/Kconfig
++++ b/drivers/net/ethernet/Kconfig
+@@ -203,5 +203,6 @@
+ source "drivers/net/ethernet/wiznet/Kconfig"
+ source "drivers/net/ethernet/xilinx/Kconfig"
+ source "drivers/net/ethernet/xircom/Kconfig"
++source "drivers/net/ethernet/odi/Kconfig"
+ 
+ endif # ETHERNET
+--- a/drivers/net/ethernet/Makefile
++++ b/drivers/net/ethernet/Makefile
+@@ -108,3 +108,4 @@
+ obj-$(CONFIG_NET_VENDOR_SYNOPSYS) += synopsys/
+ obj-$(CONFIG_NET_VENDOR_PENSANDO) += pensando/
+ obj-$(CONFIG_OA_TC6) += oa_tc6.o
++obj-y += odi/

@@ -1,0 +1,10 @@
+<Config Name="ROOT">
+	<Dir Name="MIB_TABLE">
+		<Value Name="DEVICE_TYPE" Value="0"/>
+		<Value Name="LOID" Value="user-two"/>
+		<Value Name="LOID_OLD" Value="user-two"/>
+		<Value Name="LOID_PASSWD" Value="pw-two"/>
+		<Value Name="LOID_PASSWD_OLD" Value="pw-two"/>
+		<Value Name="GPON_PLOAM_PASSWD" Value="3132333435"/>
+	</Dir>
+</Config>

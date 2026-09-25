@@ -1,0 +1,12 @@
+<Config Name="ROOT">
+	<Dir Name="MIB_TABLE">
+		<Value Name="DEVICE_TYPE" Value="0"/>
+		<Value Name="LOID" Value="user-one"/>
+		<Value Name="LOID_OLD" Value="user-one"/>
+		<Value Name="LOID_PASSWD" Value="pw-current"/>
+		<Value Name="VLAN_CFG_TYPE" Value="1"/>
+		<Value Name="VLAN_MANU_MODE" Value="1"/>
+		<Value Name="VLAN_MANU_TAG_VID" Value="10"/>
+		<Value Name="VLAN_MANU_TAG_PRI" Value="0"/>
+	</Dir>
+</Config>

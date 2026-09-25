@@ -1,0 +1,21 @@
+From: Andre Ziviani <andrepziviani@gmail.com>
+Date: Thu, 24 Sep 2026 13:50:33 -0300
+Subject: [PATCH] mtd: build the RTL8686 SPI NOR controller driver
+
+One Makefile line. The driver, drivers/mtd/devices/rtl8686-spiflash.c,
+comes from the kernel/extra overlay: a direct mtd_info driver for the
+SoC SPI NOR command engine, registered as rtk_spi_nor_mtd, the name the
+bootloader mtdparts use. It stays under drivers/mtd so that its
+device_initcall runs after the cmdlinepart parser registers.
+
+---
+--- a/drivers/mtd/devices/Makefile
++++ b/drivers/mtd/devices/Makefile
+@@ -19,6 +19,7 @@
+ obj-$(CONFIG_MTD_ST_SPI_FSM)    += st_spi_fsm.o
+ obj-$(CONFIG_MTD_POWERNV_FLASH)	+= powernv_flash.o
+ obj-$(CONFIG_MTD_INTEL_DG)	+= mtd_intel_dg.o
++obj-$(CONFIG_RTL8686_NOR)	+= rtl8686-spiflash.o
+ 
+ 
+ CFLAGS_docg3.o			+= -I$(src)

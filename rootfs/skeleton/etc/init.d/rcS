@@ -1,0 +1,936 @@
+#!/bin/sh
+#
+# Boot. Deliberately NOT the vendor rc0..rc63 chain: that runs 8 scripts of
+# which most start things this image does not have, and one of them
+# (`pondetect`) rewrites PON_MODE and reboots after ~24 s of light without
+# sync.
+#
+# NOTHING HERE MAY BLOCK. See /etc/inittab.
+
+set -e
+# Every step also goes to the kernel log, which the DRAM ramlog keeps across a
+# watchdog reset: a boot that stalls before the config partition is mounted
+# (where the flash breadcrumbs live) still says how far it got.
+kmsg() { echo "rcS: $*" > /dev/kmsg 2>/dev/null || true; }
+
+# Guarded, every one. This script runs as sysinit under set -e, and sysinit
+# must COMPLETE before init starts a single respawn entry -- which is where both
+# ways back into the device live. A mount that fails is bad; a mount that fails
+# AND aborts the boot before any shell exists is unrecoverable. So each one
+# reports and carries on, and the damage stays proportional.
+/bin/mount -t proc  proc  /proc || echo "rcS: /proc did not mount" >&2
+kmsg "start"
+/bin/mount -t sysfs sysfs /sys  || echo "rcS: /sys did not mount" >&2
+/bin/mount -t ramfs ramfs /var  || echo "rcS: /var did not mount" >&2
+# On a kernel with devtmpfs built in, it is mounted on /dev before init
+# runs (CONFIG_DEVTMPFS_MOUNT): every node is there by name, the omcidrv misc
+# node included, and it tracks module loads by itself. Mounting the tmpfs
+# over it would hide all of that, so on that kernel this block is skipped
+# together with the hotplug helper and make-devices.sh below. 2.6.30 has no
+# devtmpfs and keeps the old path unchanged.
+DEVTMPFS=0
+if grep -q " /dev devtmpfs " /proc/mounts 2>/dev/null; then
+	DEVTMPFS=1
+else
+	/bin/mount -t tmpfs mdev  /dev  || echo "rcS: /dev did not mount" >&2
+fi
+
+# mdev, not udev: it is a busybox applet and this kernel has no devtmpfs.
+#
+# The HOTPLUG handler only. `mdev -s`, the coldplug scan, USED to run here and
+# does not any more: it walks /sys/dev/{char,block}, whose entries are named
+# MAJOR:MINOR, and recovers the real name from DEVNAME= in the uevent, which
+# Linux 2.6.30 never emits -- so it produced about 180 nodes called /dev/1:3
+# and /dev/4:64 and not one usable name. They are second names for nodes that
+# already have a real one, and a hazard to anything iterating /dev/*.
+#
+# Hotplug mode is a DIFFERENT code path and it works: the kernel passes
+# DEVPATH in the environment and mdev takes the name from its last component.
+# Measured on the booted image -- `echo add > /sys/class/misc/psaux/uevent`
+# creates /dev/psaux, by name. That is why this line stays: omcidrv registers
+# its char device with MISC_DYNAMIC_MINOR, so its minor is not knowable until
+# the module loads and no static node can exist for it. This is the only thing
+# that could ever create /dev/omcidrv with a usable name.
+[ "$DEVTMPFS" = 1 ] || /bin/echo /sbin/mdev > /proc/sys/kernel/hotplug || \
+	echo "rcS: could not register the hotplug helper" >&2
+
+# The nodes that matter. Nothing else creates them.
+#
+# The tmpfs mounted above HIDES the nodes baked into the squashfs by
+# rootfs/devices.pseudo -- an empty filesystem now covers them -- and since
+# `mdev -s` was dropped for the reason above, this script is the ONLY thing
+# that puts them back. No null, no console, no ttyS0, no urandom without it.
+#
+# Without this, dropbearkey fails for want of /dev/urandom and services runs it
+# as >/dev/null 2>&1, a redirection that ALSO fails, so the stick comes up with
+# no ssh and nothing on the console about it.
+#
+# Generated from rootfs/devices.pseudo at build time so the two cannot drift.
+[ "$DEVTMPFS" = 1 ] || /etc/scripts/make-devices.sh || echo "rcS: device nodes incomplete" >&2
+
+# Guarded like the mounts above, and for the same reason. If the ramfs mount
+# of /var failed -- which the line above deliberately tolerates -- then /var is
+# read-only squashfs and every one of these fails. Unguarded under `set -e`
+# that aborts sysinit, and init starts NO respawn entry until sysinit returns,
+# so the console, telnet and everything `services` starts are lost together.
+# With the watchdog kicker in the kernel the board then sits there looking
+# alive and answering nothing.
+for d in tmp log run lock config; do
+	mkdir -p "/var/$d" || echo "rcS: /var/$d could not be created" >&2
+done
+
+# The config partition is jffs2 and survives reflashing -- host keys, the
+# exporter override and the UI credentials live there.
+# Traced while trials n4 to n10 (2026-09-21) failed here without a word
+# from any of the failure paths in the script itself.
+kmsg "mounting the config partition"
+sh -x /etc/scripts/mount-config.sh > /tmp/mount-config.trace 2>&1 || echo "rcS: no config partition" >&2
+kmsg "config partition step done"
+# Trials n4 and n5 wrote nothing to the config partition at all -- the
+# silence that mount-config.sh itself would have explained, but its
+# stderr goes to a serial console nobody has on a trial boot. printk is
+# the one channel that survives the revert, so say it there too, once,
+# before anything downstream starts relying on /etc/config silently.
+if [ ! -f /var/run/config-mounted ] && [ -w /dev/kmsg ]; then
+	echo "rcS: config partition NOT mounted, breadcrumbs unavailable" > /dev/kmsg 2>/dev/null
+fi
+
+# BREADCRUMBS, for a boot nobody can watch. A trial boot on this device has no
+# serial console: if the kernel comes up and the host link does not, the box is
+# indistinguishable from one that never booted, and the revert then teaches
+# nothing. With /etc/config/breadcrumbs.on in place -- set by hand on the
+# running stick before the flash, like the .off switches -- rcS appends one
+# line per stage to /etc/config/breadcrumbs. That file lives on the jffs2
+# partition fwu.sh never touches, so it SURVIVES the revert and is readable
+# from the old image afterwards as /var/config/breadcrumbs.
+#
+# Off unless asked for: it is a write to mtd3 through a flash path the trial
+# itself is the first test of. Truncated at every boot, ~300 bytes, synced.
+# Every failure here is swallowed -- a diagnostic that can abort sysinit is a
+# diagnostic that costs the thing it was meant to observe.
+#
+# Defined here, right after the config partition mount attempt, rather than
+# further down where it used to live: the hard reboot backstop just below
+# needs it, and needs to be the very first thing this script does once
+# /var/config exists.
+crumb() {
+	kmsg "$*"
+	if [ -f /etc/config/breadcrumbs.on ]; then
+		echo "$(cut -d" " -f1 /proc/uptime) $*" >> /etc/config/breadcrumbs 2>/dev/null || true
+		sync
+	fi
+}
+if [ -f /etc/config/breadcrumbs.on ]; then
+	: > /etc/config/breadcrumbs 2>/dev/null || true
+fi
+crumb "config mounted; kernel $(uname -r); $(grep -c "^mtd" /proc/mtd) mtd partitions; $(cat /etc/version 2>/dev/null)"
+
+# Hard reboot backstop, belt and braces: s11 own self-heal job never fired --
+# either the arping it used kept succeeding (an asymmetric cut) or userland
+# wedged before the job ran its checks -- and isp1 stayed stranded past the
+# 10-minute window with no reboot. Trial f1 then wedged BEFORE that job could
+# even fork -- inside the rtk_init loop below, before "rcS done; services
+# launched" ever runs -- with no self-revert either, because the old backstop
+# lived inside omci_modules(), forked only after every rtk_init verb and PON
+# step had already run.
+#
+# Forked here instead -- the very first thing this script does once
+# /var/config is mounted, before entropy, before regtrace setup, before a
+# single rtk_init verb -- so it shares nothing with anything downstream but
+# the kernel: no dependency on omcid starting, on /proc/odi_omci existing, on
+# the rtk_init loop completing, on the trial job later in this file ever
+# running, or on any write anywhere below completing or hanging. A userland
+# wedge anywhere downstream of this line cannot prevent it. Same four-file
+# gate the trial mechanisms below use (sdkinit.mask added: the SDK-init
+# replay trials are a fourth way to stage a trial boot, same one-shot-slot
+# shape as the other three), so a normal boot forks nothing extra.
+if [ -f /var/config/modload.mask ] || [ -f /var/config/parity.table ] || \
+   [ -f /var/config/parity.mask ] || [ -f /var/config/sdkinit.mask ]; then
+	( sleep 600; sync; reboot ) &
+	crumb "trial backstop: unconditional reboot armed, 600 s from right after the config mount"
+fi
+
+# Entropy. Boot 50 (2026-09-21) logged "dropbear urandom read with 27
+# bits of entropy available": nothing on this board feeds the pool early, so
+# every daemon started by services draws from a nearly empty one. seedrng
+# (busybox-318 only; CLOCK_BOOTTIME is 2.6.39) credits the seed it saved on
+# the previous boot and writes a fresh one -- 256 bytes on the jffs2 config
+# partition, the one place that persists.
+if [ -x /bin/seedrng ] && [ -d /etc/config ]; then
+	mkdir -p /etc/config/seedrng 2>/dev/null && \
+		/bin/seedrng -d /etc/config/seedrng || echo "rcS: seedrng failed" >&2
+	# This early the pool is not yet initialised, so the seed saved above
+	# is seed.no-credit and the next boot cannot credit it either (boots
+	# 51 and 52 both came up with only that file). Ninety seconds in the
+	# pool is full and the same command saves seed.credit -- measured on
+	# p52 -- which the next boot then credits at this point.
+	( sleep 90; /bin/seedrng -d /etc/config/seedrng > /dev/null 2>&1 ) &
+fi
+
+# Register trace: with /etc/config/regtrace.on the ring
+# is dumped and cleared at every phase boundary, so 16384 entries never
+# overflow and each entry is labelled with the phase that produced it.
+REGTRACE=0
+[ -f /etc/config/regtrace.on ] && [ -r /proc/rtk_regtrace ] && REGTRACE=1
+regtrace_dump() {
+	[ "$REGTRACE" = 1 ] || return 0
+	echo "== $(cut -d" " -f1 /proc/uptime) $1" >> /tmp/regtrace.txt
+	cat /proc/rtk_regtrace >> /tmp/regtrace.txt
+	echo clear > /proc/rtk_regtrace
+}
+# With /etc/config/regtrace.rw the ring records reads too (echo on rw),
+# needed to see the poll pattern between indirect-table operations; a
+# writes-only trace never shows it.
+[ "$REGTRACE" = 1 ] && [ -f /etc/config/regtrace.rw ] && echo "on rw" > /proc/rtk_regtrace
+
+# /etc/config/regtrace.skip stages the same noise filter apply.c installs
+# for a regtrace-mark/regtrace-all capture (regtrace_clear_once() in
+# src/omci/respond/apply.c: the NIC IMR pair 0x012000-0x012fff and the
+# switch interrupt-mask pair 0x1d00c-0x1d010, both ~1600 writes/s outside any
+# OMCI command), but a plain regtrace.on capture never goes through
+# apply.c and so never gets it. Each line is fed to /proc/rtk_regtrace
+# verbatim, so the file holds the same "skip <lo_hex> <hi_hex>" syntax the
+# proc file itself accepts (regtrace_control()) -- hex, no "0x" prefix, matching apply.c own skip1/
+# skip2 strings above. Up to REGTRACE_SKIP_MAX (4) ranges are kept by the
+# kernel side; extra lines past that are silently ignored there, not by
+# this loop.
+if [ "$REGTRACE" = 1 ] && [ -s /etc/config/regtrace.skip ]; then
+	while read -r skip_line; do
+		[ -n "$skip_line" ] && echo "$skip_line" > /proc/rtk_regtrace
+	done < /etc/config/regtrace.skip
+fi
+
+# Experiments: SDK init steps named in /etc/config/skip-steps
+# (space or newline separated) are not run; the replay tool brings the
+# hardware to the same state from recorded data afterwards. Never intr,
+# irq or ponmac: those are not switch tables. A step skipped leaves a crumb.
+SKIP_STEPS=""
+[ -s /etc/config/skip-steps ] && SKIP_STEPS=$(tr "\n" " " < /etc/config/skip-steps)
+
+# Diagnostic escape hatch for bridge-driver trials. If activeBdgConn merely
+# removes the host management path while the kernel stays alive, this returns
+# to the committed OEM image without requiring a power cycle. A hard driver or
+# bus hang still prevents it, which is the distinction the probe is measuring.
+if [ -f /etc/config/bdgconn-probe ]; then
+	PROBE_SECS=$(sed -n '1p' /etc/config/bdgconn-probe 2>/dev/null)
+	case $PROBE_SECS in ''|*[!0-9]*) PROBE_SECS=300 ;; esac
+	(
+		sleep "$PROBE_SECS"
+		sync
+		reboot
+	) &
+	crumb "bridge probe: automatic reboot armed for $PROBE_SECS s"
+fi
+
+# Keep the watchdog kicked, the way the vendor rc34 does.
+#
+# U-Boot arms the hardware watchdog before a trial boot, and the kernel thread
+# that kicks it only does so while this flag is set. The kernel sets it itself
+# at init, so this is belt and braces -- but it is one line, it runs before
+# anything that could hang, and it is the line that matters if the kernel is
+# ever built with the watchdog left disabled.
+# An `if`, not `[ ... ] && ...`: this script runs under `set -e` and busybox ash
+# is not bash. The AND-OR form happens to be safe in both, and a boot script
+# that must never fail is the wrong place to depend on that.
+if [ -w /proc/watchdog/watchdog_flag ]; then
+	/bin/echo 1 > /proc/watchdog/watchdog_flag
+fi
+
+# Cosmetic, but it is the first thing a serial console or an ssh prompt shows,
+# and an unnamed box is one more thing to wonder about during a trial boot.
+# Guarded, like everything else here. sethostname needs a privilege the
+# chroot harness does not have, and under `set -e` an unguarded failure here
+# aborts sysinit -- which costs the ptys, the network and every way back in,
+# to set a cosmetic string. The harness caught exactly that.
+if [ -s /etc/hostname ]; then
+	/bin/hostname -F /etc/hostname || echo "rcS: hostname not set" >&2
+fi
+
+/sbin/ifconfig lo 127.0.0.1 up || echo "rcS: loopback did not come up" >&2
+
+# The switch SDK module inits, from here, in the vendor order, BEFORE the
+# network comes up. Our kernel runs the SDK core init, enables the PON PBO
+# IP and stops; the module inits it skips are what
+# makes frames pass between the CPU port and the host port (trials 9 to 12,
+# 2026-09-16), and the bisect in trials 12 and 13 found the host answering
+# after the sixteenth, "cpu". The six the vendor runs after it were added
+# once they had returned 0 live (boot 9, 2026-09-16). A crumb before and after
+# each step, so a step that hangs leaves its "start" behind for the next
+# boot to read. Running first also gives network.sh a working diag for the
+# SerDes check, which in trial 13 ran before the HAL was up and read
+# nothing.
+# "SDK-init replay" (CONFIG_ODI_SDKINIT): /var/config/sdkinit.mask,
+# when present, overrides which
+# rtk_init verbs the /proc/rtk_init dispatch replays from the
+# captured boot instead of calling into the vendor SDK -- one bit per
+# verb, odi_switch_sdkinit.h has the order. Absent, the kernel default
+# (every verb this table has data for) stands; this is the same "gated on
+# the file existing" shape as modload.mask/parity.mask below, and MUST run
+# before the rtk_init loop starts (unlike modload.mask, which only matters
+# once modules are loaded): a mask set after the first verb already ran
+# would be too late for that verb own bisection.
+if [ -r /var/config/sdkinit.mask ] && [ -w /proc/odi_omci ]; then
+	sdkinit_mask=$(cat /var/config/sdkinit.mask 2>/dev/null)
+	if [ -n "$sdkinit_mask" ]; then
+		if echo "sdkinit_mask $sdkinit_mask" > /proc/odi_omci 2>/var/log/sdkinit_mask.err; then
+			crumb "odi_switch sdkinit_mask: set to $sdkinit_mask before the rtk_init loop"
+		else
+			crumb "odi_switch sdkinit_mask: /proc/odi_omci write failed, see /var/log/sdkinit_mask.err"
+		fi
+	fi
+fi
+
+if [ -w /proc/rtk_init ]; then
+	# The order the stock firmware issues these verbs in: the interrupt
+	# module and the switch IRQ first, then every module. Without intr, acl and irq return
+	# error 15 (not initialised) and so does the GPON activate (boot 9, 2026-09-16).
+	# The six after cpu (rldp trap gpio time ponmac irq) returned 0 live on
+	# an earlier kernel; ponmac programs the PON MAC, the PBO and the PON SerDes.
+	regtrace_dump boot
+	for step in intr irq switch svlan stp oam acl qos sec rate classify stat trunk l2 vlan port mirror cpu rldp trap gpio time ponmac; do
+		case " $SKIP_STEPS " in *" $step "*)
+			case $step in
+			intr|irq|ponmac) ;;
+			*)
+				REPLAY_SCRIPT=""
+				if [ -s "/etc/config/replay/$step.txt" ]; then
+					REPLAY_SCRIPT="/etc/config/replay/$step.txt"
+				elif [ -s "/etc/config/replay/$step.txt.gz" ]; then
+					REPLAY_SCRIPT="/tmp/replay-$step.txt"
+					zcat "/etc/config/replay/$step.txt.gz" > "$REPLAY_SCRIPT" 2>/dev/null
+				fi
+				if [ -n "$REPLAY_SCRIPT" ]; then
+					/etc/scripts/regreplay "$REPLAY_SCRIPT" > "/tmp/regreplay-$step.log" 2>&1
+					REPLAY_LAST=$(sed -n '$p' "/tmp/regreplay-$step.log" 2>/dev/null)
+					crumb "rtk_init step $step: REPLAYED $REPLAY_LAST"
+				else
+					crumb "rtk_init step $step: SKIPPED (skip-steps)"
+				fi
+				continue
+				;;
+			esac ;;
+		esac
+		crumb "rtk_init step $step: start"
+		echo "$step" > /proc/rtk_init 2>/dev/null || echo "rcS: rtk_init $step failed to start" >&2
+		crumb "rtk_init step $step: ret $(cat /proc/rtk_init 2>/dev/null)"
+		regtrace_dump "rtk_init $step"
+	done
+fi
+
+# /dev/mem, for tools/memprobe (the RAM log console
+# is two DRAM pages and this is the only way to read them from here). mdev
+# does not create it: drivers/char/mem.c registers no sysfs device for it.
+if [ ! -c /dev/mem ]; then
+	mknod /dev/mem c 1 1 2>/dev/null || true
+fi
+
+# The management address. Runs after mount-config.sh because it reads the
+# address out of the config partition, and before services because dropbear
+# binding 0.0.0.0 on a box with no routable interface is the failure that
+# looks exactly like a panic from the outside.
+/etc/scripts/network.sh || echo "rcS: no management address" >&2
+crumb "network: $(ifconfig br0 2>/dev/null | sed -n "s/.*inet addr:\([0-9.]*\).*/\1/p") on br0, eth0 $(cat /sys/class/net/eth0/operstate 2>/dev/null)"
+# The host SerDes after network.sh, through our diag with the same timeout
+# it uses: HOST_SERDES_MODE 0x214 (Fiber 1G = 0x00260004), PHY_PATCH_STATUS
+# 0x110 (patch done bit0), PON_SERDES_MODE 0x1d0; and the eth0 interrupt count, which is
+# 0 when nothing from the host reaches the MAC (boot 7).
+if [ -f /etc/config/breadcrumbs.on ] && [ -x /bin/diag ]; then
+	regs=$(printf "register get 0x214 1\nregister get 0x110 1\nregister get 0x1d0 1\n" | timeout 10 /bin/diag 2>/dev/null | sed -n "s/^\(0x[0-9a-f]*\) *\(0x[0-9a-f]*\).*/\1=\2/p" | tr "\n" " ")
+	crumb "sds: ${regs:-diag gave nothing}; eth0 irq $(awk "/eth0/{print \$2}" /proc/interrupts 2>/dev/null)"
+fi
+
+# Unix98 ptys, for telnetd. It is the only consumer: busybox is built
+# CONFIG_FEATURE_DEVPTS=y so its getpty() opens /dev/ptmx and has no BSD
+# fallback compiled in, and until CONFIG_UNIX98_PTYS was turned on there was no
+# driver behind that node -- every inbound telnet connection killed the daemon.
+# Guarded, because losing devpts costs telnet and nothing else.
+if [ ! -d /dev/pts ]; then
+	# Same exposure as the /var directories above: if the tmpfs mount of /dev
+	# failed, /dev is read-only squashfs and this fails. /dev/pts is not in
+	# the image, so the guard above does not skip it.
+	/bin/mkdir -p /dev/pts || echo "rcS: /dev/pts could not be created" >&2
+fi
+/bin/mount -t devpts devpts /dev/pts || echo "rcS: no devpts, telnet will not work" >&2
+
+# The legacy BSD pty nodes, which are a SEPARATE mechanism and still needed:
+# dropbear is built without USE_DEV_PTMX and takes this path regardless of the
+# devpts mount above. mdev does not create them because they are not exposed
+# through sysfs. Without them an interactive ssh session has no tty.
+# CONFIG_LEGACY_PTY_COUNT is 16, so all sixteen pairs below have a driver.
+if [ ! -c /dev/ptyp0 ]; then
+	i=0
+	for c in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do
+		mknod "/dev/ptyp$c" c 2 "$i" 2>/dev/null || true
+		mknod "/dev/ttyp$c" c 3 "$i" 2>/dev/null || true
+		i=$((i + 1))
+	done
+fi
+
+# Redirected to a FILE, not left on the console.
+#
+# A trial boot has no serial access here, so console output is output nobody
+# reads. The one failure that matters most -- dropbearkey not producing a host
+# key, which costs ssh and says nothing -- happens inside this script, and this
+# is what makes it readable afterwards over the network that now exists.
+#
+# A file rather than a pipe: services backgrounds four daemons, and a pipe they
+# inherit is one nothing ever closes.
+/etc/init.d/services start >> /var/log/services.log 2>&1 &
+crumb "rcS done; services launched"
+
+# Userland heartbeat into the kernel log, trial mode only: every 30 s,
+# uptime, free memory and load, through /dev/kmsg into printk and so into
+# the RAM log. Trials 14 and 15 (2026-09-16) reset
+# silently after userland had stopped answering for a minute or two while
+# the kernel still answered ping; this is what puts a time on "userland
+# stopped" the next time, and says how much memory was left. The kernel
+# prints its own line once a minute.
+# Lockup detectors, trial mode: the soft-lockup threshold is 60 s by default
+# and the hardware watchdog fires 42 s after the last kick, so it never
+# spoke (trial 17). 20 s puts it ahead of the reset; hung tasks at 30 s.
+# /var is ramfs: nothing there is ever evicted, and omcid logs every OMCI
+# message (about 1.7 MB a day on a busy OLT) while dropbear logs every
+# login to services.log. Keep each log under LOG_MAX bytes by cutting it
+# back to its last LOG_KEEP bytes. The writers open them with >> (append),
+# so after the cut they carry on at the new end instead of their old offset.
+LOG_MAX=262144
+LOG_KEEP=131072
+(
+	while :; do
+		sleep 60
+		for f in /var/log/omcid.log /var/log/services.log; do
+			[ -f "$f" ] || continue
+			n=$(wc -c < "$f" 2>/dev/null)
+			[ "${n:-0}" -gt "$LOG_MAX" ] || continue
+			tail -c "$LOG_KEEP" "$f" > "$f.cut" 2>/dev/null && cat "$f.cut" > "$f"
+			rm -f "$f.cut"
+		done
+	done
+) &
+
+if [ -f /etc/config/breadcrumbs.on ]; then
+	[ -w /proc/sys/kernel/softlockup_thresh ] && echo 20 > /proc/sys/kernel/softlockup_thresh
+	[ -w /proc/sys/kernel/hung_task_timeout_secs ] && echo 30 > /proc/sys/kernel/hung_task_timeout_secs
+fi
+
+if [ -f /etc/config/breadcrumbs.on ] && [ -w /dev/kmsg ]; then
+	(
+		while :; do
+			echo "rcS: alive $(cut -d" " -f1 /proc/uptime) s, free $(awk "/MemFree/{print \$2}" /proc/meminfo) kB, load $(cut -d" " -f1-3 /proc/loadavg)" > /dev/kmsg 2>/dev/null
+			sleep 30
+		done
+	) &
+fi
+
+# Trial diagnostics, with breadcrumbs.on: what the network looks like from the
+# inside, written to the config partition so it survives the revert. Trial 9
+# (2026-09-16) booted completely and was unreachable, and nothing said why;
+# this is the answer to that. Bounded so it stays well under the 120 s
+# watchdog deadline and small on mtd3. No diag call here at all.
+GW=""
+REACHABLE=0
+BRIP=$(ifconfig br0 2>/dev/null | sed -n "s/.*inet addr:\([0-9.]*\).*/\1/p")
+[ -n "$BRIP" ] && GW="${BRIP%.*}.2"
+reachable() {
+	[ -n "$GW" ] && arping -c 1 -w 2 -I br0 "$GW" >/dev/null 2>&1
+}
+
+# In a background subshell: this is a debugging aid, and twice now rcS has
+# stopped inside it (boot 7, 2026-09-16, after the interrupts section;
+# isp2 boot 8 on k3, 2026-09-21, after the arping section, nothing in dmesg),
+# each time leaving the watchdog unconfirmed and the PON steps unrun. Nothing
+# here may stand between the box coming up and the confirmation below.
+if [ -f /etc/config/breadcrumbs.on ]; then (
+	sleep 3
+	D=/etc/config/trial-diag.txt
+	# One section per write, sync after each: the dump of trial 10 and 12
+	# ended mid-way twice because a later command blocked (a diag ioctl the
+	# TERM from timeout cannot end) and the deadline reset lost the unsynced
+	# tail. No diag here for that reason; the SerDes result is in the crumbs.
+	# Every section under timeout: boot 7 (2026-09-16) stopped after the
+	# interrupts section and never reached the watchdog confirmation, so one
+	# of these reads blocked for good. timeout returns even when the child
+	# is stuck in the kernel; rcS goes on to the confirmation below.
+	sec() { { echo "== $1"; shift; timeout 5 "$@" 2>&1; } >> "$D"; sync; }
+	: > "$D"
+	sec "$(cut -d" " -f1 /proc/uptime) trial-diag $(cat /etc/version 2>/dev/null)" true
+	sec "ifconfig -a" ifconfig -a
+	sec "brctl show" brctl show
+	sec "brctl showmacs br0" brctl showmacs br0
+	sec "ip -s link" ip -s link
+	sec "interrupts" cat /proc/interrupts
+	sec "net/dev" cat /proc/net/dev
+	sec "arp" cat /proc/net/arp
+	sec "soc ip enable 0xB800063C, sds 0x214" true
+	[ -n "$GW" ] && sec "arping $GW" arping -c 3 -w 6 -I br0 "$GW"
+	sec "services.log" cat /var/log/services.log
+	sec "dmesg" sh -c "dmesg | tail -n 90"
+) & fi
+
+# NIC=oss diagnostic, gated the same as the trial-diag block above but on
+# ONE more condition: a missing /var/run/config-mounted also means the
+# trial-diag block itself never got the config partition to write into,
+# so this is the only diagnostic that boot gets. printk instead of the
+# config partition for that reason -- the RAM log survives the revert
+# even when jffs2 never mounted. Background subshell, every command under
+# timeout 5: the trial-diag block above has twice hung rcS in this same
+# spot (boot 7, isp2 boot 8) and the WDOK confirmation below must
+# never wait on it.
+if { [ -f /etc/config/breadcrumbs.on ] || [ ! -f /var/run/config-mounted ]; } && [ -w /dev/kmsg ]; then (
+	klog() { echo "rcS diag: $*" > /dev/kmsg 2>/dev/null; }
+	klog "br0 $(timeout 5 ifconfig br0 2>/dev/null | sed -n "s/.*inet addr:\([0-9.]*\).*/\1/p")"
+	# n4 to n6 left nothing on the config partition and took the default
+	# address: say what the mount and the store look like from inside.
+	klog "config: mounted=$([ -f /var/run/config-mounted ] && echo yes || echo no) $(timeout 5 grep -c "" /proc/mounts 2>/dev/null) mounts, $(timeout 5 ls /etc/config 2>/dev/null | grep -c "") entries, breadcrumbs.on $([ -f /etc/config/breadcrumbs.on ] && echo present || echo absent)"
+	klog "config: $(timeout 5 grep " /var/config " /proc/mounts 2>/dev/null)"
+	klog "config: $(cat /tmp/mount-config.err 2>/dev/null)"
+	timeout 5 tail -n 6 /tmp/mount-config.trace 2>/dev/null | while read -r line; do klog "trace: $line"; done
+	timeout 5 grep " 26:\| 8:" /proc/interrupts 2>/dev/null | while read -r line; do
+		klog "irq: $line"
+	done
+	timeout 5 grep "eth0:\|eth0\.2:" /proc/net/dev 2>/dev/null | while read -r line; do
+		klog "net/dev: $line"
+	done
+	if [ -n "$GW" ]; then
+		if timeout 5 arping -c 1 -w 2 -I br0 "$GW" >/dev/null 2>&1; then
+			rc=0
+		else
+			rc=$?
+		fi
+		klog "arping $GW exit $rc"
+	else
+		klog "arping: no GW"
+	fi
+	timeout 5 ip -s link show eth0 2>/dev/null | awk '/RX:|TX:/{print; getline; print}' | while read -r line; do
+		klog "eth0: $line"
+	done
+) & fi
+
+# Tell the kernel watchdog kicker that userland is REACHABLE. Our kernel
+# resets the board at 120 s of uptime unless this file
+# has been written. Trial 9 confirmed on "br0 has an address" and sat
+# unreachable for good, so the bar is now an ARP reply from the host side:
+# a fixed host on the .2 of our subnet, present on every test stick. No
+# reply, no confirmation,
+# and the boot reverts by itself with the diagnostics above on flash.
+# The vendor proc directory is /proc/watchdog on an older firmware and
+# /proc/luna_watchdog on this one (same driver, renamed); the file is ours in both.
+WDOK=/proc/watchdog/userland_ok
+[ -w "$WDOK" ] || WDOK=/proc/luna_watchdog/userland_ok
+if [ -w "$WDOK" ]; then
+	if [ "$REACHABLE" = 1 ] || reachable; then
+		echo 1 > "$WDOK"
+		crumb "reachable: $GW answered arping, watchdog confirmed"
+	else
+		echo "rcS: no ARP reply from ${GW:-<no address>}, not confirming to the watchdog" >&2
+		crumb "unreachable: no ARP reply from ${GW:-<no address>}, watchdog NOT confirmed"
+	fi
+fi
+
+# The optics of the DFP-34X-2C2 (found on hardware, 2026-09-16). Two things the SDK never does on this board:
+# - PIN_GPIO_SELECT 0x048 := the OEM value 0x08082001 (GPIOs 0, 13, 19, 27 as
+#   GPIO). Without it the I2C pins of port 1 (the DDM, the module status)
+#   stay muxed away and every transaction ends in NO_ACK.
+# - SoC GPIO 13 as an output driven LOW: it is the module's TX-disable
+#   input. As an input (the reset default) the laser stays off, the module
+#   reports TX_DISABLE_STATE, and the OLT never hears the serial number.
+#   With it low the ONU went O3 -> O5 within 5 s.
+# GPIO 13 lives in the SoC GPIO ABCD block (DIR 0xb8003308, DATA 0xb800330c,
+# bit n = GPIO n), reached with busybox devmem on the physical address.
+# Done here, after the SDK inits and before the PON steps. /etc/config/
+# optics.off skips it.
+if [ ! -f /etc/config/optics.off ] && [ -x /bin/diag ] && [ -x /sbin/devmem ]; then
+	printf "register set 0x48 0x08082001\n" | timeout 10 /bin/diag >/dev/null 2>&1 || \
+		echo "rcS: PIN_GPIO_SELECT write failed" >&2
+	dat=$(devmem 0x1800330c 2>/dev/null); dir=$(devmem 0x18003308 2>/dev/null)
+	if [ -n "$dat" ] && [ -n "$dir" ]; then
+		devmem 0x1800330c 32 $(( dat & ~(1 << 13) )) 2>/dev/null
+		devmem 0x18003308 32 $(( dir | (1 << 13) )) 2>/dev/null
+		crumb "optics: PIN_GPIO_SELECT set, GPIO 13 low (laser TX enable); dir $(devmem 0x18003308 2>/dev/null) dat $(devmem 0x1800330c 2>/dev/null)"
+	else
+		echo "rcS: devmem could not read the SoC GPIO block" >&2
+	fi
+fi
+
+# The OMCI line side: odi_switch (built into this kernel, CONFIG_ODI_SWITCH=y)
+# and omcid. Called from the pon-steps loop by the "omcimods" line -- the
+# position matters, see there. Once.
+OMCI_MODS_DONE=0
+omci_modules() {
+	[ "$OMCI_MODS_DONE" = 1 ] && return 0
+	OMCI_MODS_DONE=1
+	[ -f /etc/config/modules.off ] && { crumb "omci modules: modules.off, skipped"; return 0; }
+	# No loadable modules to insmod: odi_switch is built into every kernel
+	# this repo ships (6.18, CONFIG_ODI_SWITCH=y), so this just runs the
+	# odi_switch init below and starts omcid. Losing this crumb-and-return
+	# for a kernel with no modules once meant 6.18 never started omcid and
+	# the OLT dropped the ONU from O5 every 30 s (isp1 trial 618y) -- kept
+	# as a visible line rather than folded away silently.
+	crumb "omci modules: kernel $(uname -r), no loadable OMCI modules"
+	# The switch-core platform init, at the ordering the vendor module
+	# actually ran it at: 2.6.30 own pf_rtk did this from its own module
+	# init, which "omcimods" load-modules.sh would have insmodded right
+	# here -- after the /proc/rtk_init "switch" verb and the rest of the
+	# SDK init (the for loop far above, which runs before network comes
+	# up at all) but before omcid starts and the OLT exchange can begin.
+	# Every one of our trials up to and including s6 triggered this by
+	# hand, minutes after boot, with omcid already registered and the OLT
+	# already retransmitting -- ordering, not content, was never tested
+	# until now. Gated on CONFIG_ODI_SWITCH=y in /etc/kernel-config, the
+	# same check the omcid-start line below already makes -- every kernel
+	# this repo builds sets it, so this is really just "is the config file
+	# there to read", the same fail-open posture as the rest of this file.
+	# The manual `echo init_platform[ mask] > /proc/odi_omci` trigger (ce2e318) is
+	# unchanged and still works afterward, for widening the mask or
+	# re-running by hand once the stick is up.
+	if grep -q "^CONFIG_ODI_SWITCH=y" /etc/kernel-config 2>/dev/null; then
+		# The hard reboot backstop used to fork here, belt and braces, before
+		# init_platform/parity/modload below ran a single write. It now forks
+		# right after the config partition mounts, near the top of this
+		# script (see the "Hard reboot backstop" comment there): trial f1
+		# wedged inside the rtk_init loop above, long before this function
+		# ever runs, so a backstop armed only here would never have gotten
+		# the chance to fire. One backstop, armed as early as the four gate
+		# files (modload.mask, parity.table, parity.mask, sdkinit.mask) can
+		# be read at all.
+		if [ -w /proc/odi_omci ] && echo init_platform > /proc/odi_omci 2>/var/log/init_platform.err; then
+			crumb "odi_switch platform init: triggered at rcS ordering ($(sed -n 's/^platform_init_rc //p' /proc/odi_omci 2>/dev/null))"
+		else
+			crumb "odi_switch platform init: /proc/odi_omci write failed, see /var/log/init_platform.err"
+		fi
+		# v6-parity bisection, two forms, gated by files on the config
+		# partition so a hardware bisection needs no rebuild and no
+		# hand-typed memprobe write. Neither file exists by default, so a
+		# normal boot's behaviour is unchanged either way.
+		#
+		# 1. /var/config/parity.table -- a loadable table, one
+		#    entry per line ("offset value mask name", hex, comments with
+		#    #), fed to the kernel via rootfs/skeleton/etc/scripts/
+		#    parity-load.sh (`parity_add` per entry, then one bare
+		#    `init_parity` to run everything just loaded, any table size).
+		#    tools/regdump/mkparity.py turns a regdump diff.py capture
+		#    into this format; tools/regdump/parity-v6.table is the
+		#    reference table for the v6-vs-s7 diff. Takes priority over
+		#    form 2 below when both files exist.
+		# 2. /var/config/parity.mask ("v6 parity table") -- the older, narrower form: a bare hex
+		#    or decimal bitmask against the 14 compiled-default entries
+		#    (odi_switch_parity_table[], odi_switch_dal.c) still built
+		#    into the kernel, same syntax `echo init_parity <mask> >
+		#    /proc/odi_omci` accepts by hand. Kept for re-testing a subset
+		#    of those 14 without a table file; superseded, not removed, by
+		#    form 1 once a custom table is what a trial actually needs.
+		if [ -r /var/config/parity.table ]; then
+			if [ -w /proc/odi_omci ] && [ -x /etc/scripts/parity-load.sh ]; then
+				if /etc/scripts/parity-load.sh /var/config/parity.table \
+					2>/var/log/parity-load.err; then
+					crumb "odi_switch v6 parity table: loaded from /var/config/parity.table ($(sed -n 's/^parity_active_count //p' /proc/odi_omci 2>/dev/null) active, rc $(sed -n 's/^parity_init_rc //p' /proc/odi_omci 2>/dev/null))"
+				else
+					crumb "odi_switch v6 parity table: parity-load.sh failed, see /var/log/parity-load.err"
+				fi
+			else
+				crumb "odi_switch v6 parity table: /var/config/parity.table present but /proc/odi_omci or parity-load.sh is not usable"
+			fi
+		elif [ -r /var/config/parity.mask ]; then
+			parity_mask=$(cat /var/config/parity.mask 2>/dev/null)
+			if [ -n "$parity_mask" ] && [ -w /proc/odi_omci ]; then
+				if echo "init_parity $parity_mask" > /proc/odi_omci 2>/var/log/init_parity.err; then
+					crumb "odi_switch v6 parity table: triggered at rcS ordering, mask $parity_mask ($(sed -n 's/^parity_init_rc //p' /proc/odi_omci 2>/dev/null))"
+				else
+					crumb "odi_switch v6 parity table: /proc/odi_omci write failed, see /var/log/init_parity.err"
+				fi
+			fi
+		fi
+		# Module-load replay ("module-load replay" / "modload category 0
+		# split"): omcidrv.ko/
+		# pf_rtk.ko's own captured module-load writes (6 categories --
+		# registers, CF sweeps, CF specific rules, VLAN row, L2_UC row,
+		# ACL rows -- odi_switch_dal.h has the full list), same syntax
+		# `echo init_modload <mask> > /proc/odi_omci` accepts by hand.
+		# Category 0 (the register writes) is itself bit-split since s13
+		# (17:50/17:53) found both the OLT-acceptance fix and the
+		# LAN-broadcast cut live inside it: bit 0 alone still means every
+		# category-0 register (unchanged, 0x3f still reproduces the full
+		# working replay); with bit 0 clear, bit 6 selects the three LUT
+		# flood-mask registers alone, bits 7 and up select every other
+		# register family individually, and bit 30 (with bit 0 clear)
+		# forces the flood masks to include the CPU port (0xf) instead
+		# of their captured value (0x7) -- odi_switch_dal.h has the exact
+		# family-to-bit table.
+		#
+		# "open stack by default": this used to run only when
+		# /var/config/modload.mask existed, i.e. only on a bisection
+		# trial -- every other category, and the CPU-forced flood masks
+		# with it, stayed off on a plain boot. 0x7FFFFFBE is now the
+		# default: every category-0 register bit except bit 0 itself
+		# (0x3e, s16 own working mask, "open stack by default")
+		# plus bit 30 (CPU-forced flood masks) and every category
+		# 1-5 family bit above it -- everything this replay knows how to
+		# do, minus the redundant "0x3f reproduces the same categories
+		# 0x3e already covers, one register write short" duplicate. The
+		# file still overrides when present, same as before, so a
+		# bisection trial that wants a narrower mask still gets it.
+		modload_mask="0x7FFFFFBE"
+		[ -r /var/config/modload.mask ] && modload_mask=$(cat /var/config/modload.mask 2>/dev/null)
+		if [ -n "$modload_mask" ] && [ -w /proc/odi_omci ]; then
+			if echo "init_modload $modload_mask" > /proc/odi_omci 2>/var/log/init_modload.err; then
+				crumb "odi_switch module-load replay: triggered at rcS ordering, mask $modload_mask ($(sed -n 's/^modload_init_rc //p' /proc/odi_omci 2>/dev/null))"
+			else
+				crumb "odi_switch module-load replay: /proc/odi_omci write failed, see /var/log/init_modload.err"
+			fi
+		fi
+	fi
+	# omcid answers the OLT through odi_switch, built into this kernel --
+	# no .ko to check for. Gated on /etc/kernel-config carrying
+	# CONFIG_ODI_SWITCH=y (the same file image/build.sh itself reads,
+	# KCONFIG, staged there on every build) rather than on that being
+	# unconditional, so an image shipped with no /etc/kernel-config
+	# (ALLOW_NO_KCONFIG=1) still does not start omcid against a driver it
+	# cannot confirm is there (s1 fixes, s2 fixes).
+	if grep -q "^CONFIG_ODI_SWITCH=y" /etc/kernel-config 2>/dev/null && [ -x /bin/omcid ]; then
+		/bin/omcid -a -d >> /var/log/omcid.log 2>&1 &
+		crumb "omcid started (apply mode, daemon)"
+	fi
+	# Self-healing trial mode: the full module-load replay (modload.mask 0x3f) cut isp1
+	# off the LAN within a minute without tripping the watchdog -- the
+	# kernel and this script both stayed alive, only the CPU-port
+	# forwarding path died, so nothing already in this file would have
+	# rebooted on its own, and recovery needed a manual power cycle. A
+	# second run of the same trial stayed stranded past the whole 10
+	# minute window with NO reboot at all -- the reachability check this
+	# job runs itself never took the "LAN lost" branch (either the arping
+	# from the stick to $GW kept succeeding, an asymmetric cut, or
+	# userland wedged before the job ran it at all) -- so this job is no
+	# longer the only thing standing between a bad mask and a stranded
+	# stick: the pre-init-steps backstop above is now the one that cannot
+	# be defeated by anything this job itself gets wrong.
+	#
+	# When a trial is staged -- any of the three files below exist -- a
+	# background job logs state to the config partition every 30 s for
+	# about 10 minutes (21 rounds: the first at 60 s uptime, giving omcid
+	# time to see its first frames, one every 30 s after that -- s13
+	# change) and watches LAN reachability the same way
+	# the watchdog confirmation
+	# earlier in this script already does: arping -I br0 at $GW, computed
+	# from br0's own address near the top of this file (.2 of whichever
+	# subnet the stick is on -- the same fixed host answers on every test
+	# stick, so this needs no per-stick edit). Two consecutive failures and it logs the
+	# loss, syncs, and reboots itself early. If neither branch fires --
+	# the LAN looks fine (or looked fine to this job, per the paragraph
+	# above) for the whole window -- it reboots unconditionally at the end
+	# of the last round anyway: item 1 of the 17:04 fix, so a trial that
+	# leaves the OLT exchange broken but the management path superficially
+	# reachable no longer needs a manual power cycle either. Either way,
+	# the one-shot trial slot is spent by the time it reboots, so the
+	# reboot lands back on the committed OEM image and /var/config/
+	# trial.log (jffs2, survives the revert) holds the evidence. The very
+	# first line this job writes, before any round, says it started at
+	# all -- item 3 of the 17:04 fix -- so a trial.log that stops after
+	# that line and nothing else means the job started and then wedged or
+	# was killed, distinct from a trial.log that never mentions starting
+	# at all (this whole block never ran) or one that ends on "trial
+	# window ended" (ran to completion, LAN looked fine throughout by this
+	# job own check). A boot with none of the three files staged never
+	# runs any of this.
+	#
+	# Round content, hardened after s11: the s11 trial.log showed round 0 completing
+	# /proc/odi_omci and then wedging forever inside `omcicli dump
+	# srvflow`, so the job never reached its arping check or reboot at
+	# all -- the SAME timeout wrapper this file uses successfully
+	# elsewhere (the sec() helper around the trial-diag block above) did
+	# NOT save it here, because `timeout` sending a signal only works if
+	# the child can act on it; a process blocked inside the vendor GPON/
+	# OMCI SDK own ioctl or proc path can enter an uninterruptible
+	# kernel wait (TASK_UNINTERRUPTIBLE) that no signal, TERM or KILL,
+	# can preempt -- and `timeout` itself then blocks forever in its own
+	# wait() for that child to exit. So this round calls NOTHING that
+	# reaches into that SDK: no `diag`, no `omcicli`, no `wget`. Only
+	# our own /proc/odi_omci (an in-memory seq_show, no MMIO or SDK call
+	# behind it), plain greps over omcid own request log on tmpfs, and
+	# `dmesg` (the kernel ring buffer) -- none of these have ever been
+	# seen to block in this codebase. `timeout 5` still wraps each one
+	# anyway, cheap insurance against an ordinary slow read, but it is
+	# not what makes this round safe: not calling into the SDK is. `arping`
+	# keeps its own kernel-level `-w` deadline (a raw-socket recv
+	# timeout, nothing SDK-side underneath it), so it stays as the
+	# reachability check per the coordinator own instruction.
+	#
+	# gpon_onu_state and gpon_omci_services are DROPPED, not replaced --
+	# both were read through exactly the two calls above (`diag` own "gpon
+	# get onu-state", `omcicli dump srvflow`), and nothing else in this
+	# image has another source for either one: the vendor GPON/OMCI SDK state
+	# lives behind those same ioctl/proc paths with no plain, always-
+	# available /proc file backing it (unlike /proc/odi_omci, which is
+	# ours). The mib-upload count is kept -- it is the coordinator own
+	# named "key indicator", comes from omcid own request log (each
+	# inbound PDU logged as "<- <type> tci ...",
+	# src/omci/respond/omcimsg.c), a plain grep over a tmpfs file, not a
+	# call into the SDK -- counting "mib-upload" lines while separately
+	# subtracting "mib-upload-next" ones, since the latter also starts
+	# with the former as a plain substring and this busybox grep is not
+	# assumed to have -E. A plain request count (every inbound PDU,
+	# "^<- ") is added alongside it, the same total cmd_requests/
+	# cmd_replies in /proc/odi_omci do not cover (those two count only
+	# ODI_OMCI_OP_CMD traffic, not the OMCI frames from the OLT).
+	if [ -f /var/config/modload.mask ] || [ -f /var/config/parity.table ] || [ -f /var/config/parity.mask ]; then
+		: > /var/config/trial.log 2>/dev/null
+		echo "trial started at $(cut -d" " -f1 /proc/uptime) s, GW=${GW:-none}, modload.mask=$([ -f /var/config/modload.mask ] && echo yes || echo no) parity.table=$([ -f /var/config/parity.table ] && echo yes || echo no) parity.mask=$([ -f /var/config/parity.mask ] && echo yes || echo no)" >> /var/config/trial.log 2>&1
+		sync
+		(
+			trial_round() {
+				{
+					echo "== $(cut -d" " -f1 /proc/uptime) round $1"
+					timeout 5 cat /proc/odi_omci 2>/dev/null
+					req_count=$(timeout 5 grep -c "^<- " /var/log/omcid.log 2>/dev/null)
+					mib_all=$(timeout 5 grep -c "^<- mib-upload" /var/log/omcid.log 2>/dev/null)
+					mib_next=$(timeout 5 grep -c "^<- mib-upload-next" /var/log/omcid.log 2>/dev/null)
+					echo "omcid_request_count ${req_count:-0}"
+					echo "mib_upload_count $((${mib_all:-0} - ${mib_next:-0}))"
+					timeout 5 dmesg 2>/dev/null | tail -n 3
+				} >> /var/config/trial.log 2>&1
+				sync
+			}
+			# Round 0 no longer fires immediately: omcid needs time to
+			# see its first frames from the OLT before a request/
+			# mib-upload count means anything, so the rounds start at
+			# 60 s uptime instead (coordinator instruction) -- roughly 60 s after this job itself starts, since
+			# it is forked only a few seconds into the boot (s11 own
+			# trial.log put round 0 at 8.21 s before this change).
+			sleep 60
+			trial_round 0
+			round=1
+			fails=0
+			rebooted=0
+			while [ "$round" -le 20 ]; do
+				sleep 30
+				trial_round "$round"
+				if [ -n "$GW" ] && arping -c 2 -w 3 -I br0 "$GW" >/dev/null 2>&1; then
+					fails=0
+				else
+					fails=$((fails + 1))
+					if [ "$fails" -ge 2 ]; then
+						echo "LAN lost at $(cut -d" " -f1 /proc/uptime)" >> /var/config/trial.log
+						sync
+						rebooted=1
+						reboot
+						break
+					fi
+				fi
+				round=$((round + 1))
+			done
+			# Item 1 of the 17:04 fix: an unconditional reboot at the end
+			# of the window regardless of what arping said, reached only
+			# when the loop above finished all 20 rounds without already
+			# rebooting early -- so a trial that never trips the
+			# reachability check (s11 own failure mode) still ends the
+			# same way a bad one does, evidence logged either way.
+			if [ "$rebooted" != 1 ]; then
+				echo "trial window ended at $(cut -d" " -f1 /proc/uptime), rebooting unconditionally" >> /var/config/trial.log
+				sync
+				reboot
+			fi
+		) &
+	fi
+}
+
+# The PON side, one step at a time, AFTER the box is reachable and the
+# watchdog is confirmed. /etc/config/pon-steps names SDK module inits, one per
+# line, out of the six the vendor runs after cpu: rldp trap gpio time ponmac
+# irq. They have never run on this stepping, so each boot adds one; a step
+# that hangs leaves its "start" crumb, the hardware watchdog resets the
+# board when the kicker starves, and U-Boot boots the committed slot.
+# ponmac is the one that programs the PON MAC, the PBO and the PON SerDes
+# (PON_SERDES_MODE 0x1d0 = 8 afterwards); irq registers the switch interrupt.
+# The list shipped in the image (/etc/pon-steps) is the order that took
+# isp1 to O5 on every boot since 2026-09-17; a file of the same name on the
+# config partition overrides it, which is how the list was found one step
+# per boot. Before p60 only the override existed, so a stick whose config
+# partition had never seen our image (isp2) would have booted with no PON.
+PON_STEPS=/etc/pon-steps
+[ -s /etc/config/pon-steps ] && PON_STEPS=/etc/config/pon-steps
+if [ -s "$PON_STEPS" ] && [ -w /proc/rtk_init ]; then
+	REGTRACE_ACT=0
+	while read -r step; do
+		[ -n "$step" ] || continue
+		verb=${step%% *}
+		# "gponsn auto" and "gponpw auto" take the values from the config
+		# store, so neither the serial number nor the PLOAM password is ever
+		# written into pon-steps or a crumb. GPON_SN is an HS key
+		# (lastgood_hs.xml), the password is in the CS file, stored as hex.
+		case $step in
+		"gponsn auto")
+			step="gponsn $(sed -n "s/.*Name=\"GPON_SN\" Value=\"\([^\"]*\)\".*/\1/p" /etc/config/lastgood_hs.xml 2>/dev/null | head -n 1)" ;;
+		"gponpw auto")
+			step="gponpw $(sed -n "s/.*Name=\"GPON_PLOAM_PASSWD\" Value=\"\([^\"]*\)\".*/\1/p" /etc/config/lastgood.xml 2>/dev/null | head -n 1)"
+			# An empty password (isp2: the OLT authenticates on the
+			# serial alone) is no password; the driver keeps its
+			# default rather than being handed an empty argument.
+			[ "$step" = "gponpw " ] && { crumb "pon step gponpw: none configured, skipped"; continue; } ;;
+		esac
+		# "omcimods" is not a kernel verb: it loads omcidrv + pf_rtk and
+		# starts omcid HERE, between gpondev and gponsn. pf_rtk registers
+		# its OMCI receive callback at load and the gpondrv/gpondev init
+		# wipes the table (boot 14: frames counted, none delivered); and
+		# omcidrv's load deactivates the ONU, so gponsn/gponpw/gponact
+		# come after it (boot 15: O1 forever when loaded last).
+		if [ "$step" = omcimods ]; then
+			omci_modules
+			regtrace_dump "pon step omcimods"
+			continue
+		fi
+		crumb "pon step $step: start"
+		echo "$step" > /proc/rtk_init 2>/dev/null || echo "rcS: rtk_init $verb failed to start" >&2
+		crumb "pon step $verb: ret $(cat /proc/rtk_init 2>/dev/null)"
+		regtrace_dump "pon step $verb"
+		if [ "$verb" = gponact ] && [ "$REGTRACE" = 1 ] && [ -f /etc/config/regtrace.act ]; then
+			# /etc/config/regtrace.act: capture the ring for the 120 s
+			# after gponact, through O5, at finer grain than the
+			# per-phase regtrace_dump above. Forked so it can never block
+			# PON step processing or the rest of boot (see "NOTHING HERE
+			# MAY BLOCK" at the top of this file): 60 rounds, 2 s apart,
+			# each appending a "# regtrace-act" marker line (iteration and
+			# uptime only -- no cheap /proc file exposes the GPON ONU
+			# state outside the vendor SDK's own blocking ioctl/proc
+			# path, same reasoning as the "gpon_onu_state ... DROPPED"
+			# comment on the trial job above, so it is omitted here too),
+			# then the ring contents, then clears it -- /tmp/regtrace-
+			# act.txt ends up a concatenation of dumps exactly like /tmp/
+			# regtrace.txt. tools/regtrace/decode.py already passes a
+			# line starting with "#" straight through instead of trying
+			# to split it as a trace entry (see test/
+			# regtrace_decode_test.sh for the regression test added
+			# alongside this). Only /proc/rtk_regtrace, `echo` and `cat`
+			# run in the loop -- no diag, omcicli or wget, which can
+			# block uninterruptibly inside the vendor SDK (same posture
+			# as the trial round far above).
+			(
+				i=0
+				while [ "$i" -lt 60 ]; do
+					i=$((i + 1))
+					echo "# regtrace-act iter=$i uptime=$(cut -d" " -f1 /proc/uptime)" >> /tmp/regtrace-act.txt
+					cat /proc/rtk_regtrace >> /tmp/regtrace-act.txt
+					echo clear > /proc/rtk_regtrace
+					sleep 2
+				done
+			) &
+			REGTRACE_ACT=1
+		fi
+	done < "$PON_STEPS"
+	# What the PON side looks like afterwards, through our diag (the HAL is
+	# up by now): PON_SERDES_MODE 0x1d0 (8 = GPON after ponmac), DSF_ONU_STATE
+	# 0x701010 (ONU state and id), DSF_LOS_SETUP 0x701040
+	# (loss of signal: is there light from an OLT at all).
+	regs=$(printf "register get 0x1d0 1\nregister get 0x701010 1\nregister get 0x701040 1\n" | timeout 10 /bin/diag 2>/dev/null | sed -n "s/^\(0x[0-9a-f]*\) *\(0x[0-9a-f]*\).*/\1=\2/p" | tr "\n" " ")
+	crumb "pon steps done; $regs"
+	# Nothing else may clear the ring during the 120 s regtrace.act owns:
+	# apply.c's regtrace_clear_once() cannot fire in that window either way
+	# -- it is only ever reached through regtrace_mark(), gated on /var/
+	# config/regtrace-mark or /var/config/regtrace-all, and neither is
+	# staged here -- so the one thing left that would race the background
+	# job's own clears is this plain per-phase dump-and-clear. Skip it
+	# when regtrace.act armed the job above; a boot without regtrace.act
+	# is unchanged.
+	[ "$REGTRACE_ACT" = 1 ] || regtrace_dump services
+fi
+
+
+exit 0

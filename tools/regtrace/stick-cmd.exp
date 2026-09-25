@@ -1,0 +1,11 @@
+set timeout [expr {[llength $argv] > 3 ? [lindex $argv 3] : 60}]
+set user [lindex $argv 0]
+set pw [lindex $argv 1]
+set cmd [lindex $argv 2]
+set host [lindex $argv 4]
+spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=8 $user@$host $cmd
+expect {
+    -re "(?i)password:" { send "$pw\r"; exp_continue }
+    eof {}
+    timeout { puts "TIMEOUT"; exit 1 }
+}

@@ -1,0 +1,6 @@
+<Config Name="ROOT">
+ <Dir Name="HW_MIB_TABLE">
+		<Value Name="GPON_SN" Value="ODIX00000002"/>
+		<Value Name="LOID_PASSWD_OLD" Value=""/>
+ </Dir>
+</Config>

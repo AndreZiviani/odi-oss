@@ -1,0 +1,272 @@
+# ODI DFP-34X-2C2 (RTL9602C / RTL8686, RLX5281) -- kernel 6.18 seed config.
+# Not a full .config: a fragment olddefconfig completes (kernel/build.sh
+# KVER=6.18). Size-minimised (-Os, DCE, SLUB_TINY, no io_uring/INET_DIAG,
+# PROC_SYSCTL kept, SquashFS with BLOCK+MISC_FILESYSTEMS, JFFS2, MTD,
+# 8250, devtmpfs, IPv4, bridge, 8021q, no modules), board selects per
+# arch/mips/Kconfig MACH_RTL8686 entry (CPU is CPU_R3000). Step 1 (CPU/
+# board port only, no odi-oss drivers): uImage 1,275,430 bytes. Step 2
+# (odi_wdt only): 1,284,813 bytes, +9,383 for NETDEVICES/ETHERNET/ODI_WDT.
+#
+# Step 2b: the full driver cascade (ODI_NIC through ODI_WDT -- see
+# kernel/extra/drivers/net/ethernet/odi/Kconfig's own depends-on chain).
+# None of these are "select"ed by their dependents, only gated by
+# "depends on" -- each has to be requested explicitly here, or
+# olddefconfig silently drops it (the ODI_WDT-only lesson from step 2,
+# now the standing rule for every layer). Nothing on this tree links any
+# proprietary switch driver, so CONFIG_ODI_SDK_OUT is functionally
+# a no-op gate here -- selected anyway because kernel/extra's shared
+# Makefile still gates odi_rtk_init.o (/proc/rtk_init) behind it.
+
+# Board / CPU
+CONFIG_MACH_RTL8686=y
+CONFIG_CPU_R3000=y
+CONFIG_32BIT=y
+CONFIG_CPU_BIG_ENDIAN=y
+CONFIG_RTL8686_UART0=y
+CONFIG_RTL8686_NOR=y
+CONFIG_HZ_250=y
+
+# Size (-Os, DCE, tiny slab, no modules)
+CONFIG_CC_OPTIMIZE_FOR_SIZE=y
+CONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y
+CONFIG_EXPERT=y
+CONFIG_SLUB_TINY=y
+# CONFIG_IO_URING is not set
+# CONFIG_INET_DIAG is not set
+# CONFIG_MODULES is not set
+CONFIG_PROC_SYSCTL=y
+# CONFIG_IKCONFIG is not set
+# CONFIG_DEBUG_KERNEL is not set
+# CONFIG_KALLSYMS is not set
+# printk ring: 6.18 sizes its descriptor metadata off this too (the default
+# 17 cost 540 KB); the ramlog console keeps the boot log anyway.
+CONFIG_LOG_BUF_SHIFT=14
+# CONFIG_FTRACE is not set
+# SysV IPC: omcid creates its CLI message queue with msgget ("no cli queue
+# (-89)" = ENOSYS without it, isp1 618y) and omcicli talks to it there.
+CONFIG_SYSVIPC=y
+# CONFIG_POSIX_MQUEUE is not set
+
+# Console / init. U-Boot passes the real command line in argv, built per
+# boot slot (patch 0023, prom_init copies it). CONFIG_CMDLINE is the
+# slot-0 line and only a fallback: BUILTIN_EXTEND puts it FIRST and the
+# bootloader arguments after it, so the per-slot root= and mtdparts=
+# win (the last occurrence of each is the one used). The default
+# FROM_BOOTLOADER appends the built-in line after the bootloader one,
+# which made the slot-0 root= win on a slot-1 boot (isp1 trial 618o).
+# The mtdparts= device name is "rtk_spi_nor_mtd", matching
+# drivers/mtd/devices/rtl8686-spiflash.c's map name.
+# print-fatal-signals=1 (mainline, no code): a process killed by a
+# core-dump signal (SIGSEGV, SIGBUS, SIGILL, ...) prints its registers
+# (epc, ra, Status, Cause, BadVA) to the console and so to the ramlog.
+# Without it a dying init leaves only "Attempted to kill init!".
+CONFIG_MIPS_CMDLINE_BUILTIN_EXTEND=y
+CONFIG_CMDLINE_BOOL=y
+CONFIG_CMDLINE="console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:256K(boot),8K(env),8K(env2),240K(config),1328K(k0)ro,2512K(r0)ro,1328K(k1),2512K(r1),4K@0ro,4K@0ro,4K@0ro,4K@0ro,1328K@512K(linux),2512K@1840K(rootfs) print-fatal-signals=1"
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+
+# Storage / filesystems. No MTD_CFI/MTD_JEDECPROBE/MTD_MAP_BANK_WIDTH_* --
+# this board's flash is driven by the SoC SPI controller
+# (drivers/mtd/devices/rtl8686-spiflash.c), not a memory-mapped
+# CFI-compliant chip, so both CFI symbols stay off.
+CONFIG_MTD=y
+# cmdlinepart parser for the mtdparts= above -- also selected by
+# arch/mips/rtl8686/Kconfig's RTL8686_NOR, named here too since it is
+# what makes the CONFIG_CMDLINE mtdparts= above actually partition the
+# flash rather than sit unused.
+CONFIG_MTD_CMDLINE_PARTS=y
+# mtdblock: root= names block major 31 (31:5 slot 0, 31:7 slot 1). Without
+# it the root mount finds no block device at all (isp1 trial 618n,
+# "Cannot open root device 31:5 ... error -6", empty partition list).
+CONFIG_MTD_BLOCK=y
+CONFIG_JFFS2_FS=y
+CONFIG_BLOCK=y
+CONFIG_MISC_FILESYSTEMS=y
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_XZ=y
+# squashfs keeps one data cache and SQUASHFS_FRAGMENT_CACHE_SIZE fragment
+# caches of one block each, unreclaimable: with the 1 MB blocks of our
+# rootfs that was 4 MB of slab on 6.18 (isp1 618z, Slab 7.7 MB, MemAvailable
+# 4.3 MB). FILE_DIRECT decompresses into the page cache (no data cache),
+# one fragment cache is enough on a single-core read-mostly root.
+CONFIG_SQUASHFS_FILE_DIRECT=y
+# FRAGMENT_CACHE_SIZE is only settable under SQUASHFS_EMBEDDED.
+CONFIG_SQUASHFS_EMBEDDED=y
+CONFIG_SQUASHFS_FRAGMENT_CACHE_SIZE=1
+CONFIG_XZ_DEC=y
+
+# Serial
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_CONSOLE=y
+# CONFIG_SERIAL_8250_PCI is not set
+CONFIG_SERIAL_8250_NR_UARTS=1
+CONFIG_SERIAL_8250_RUNTIME_UARTS=1
+
+# Networking: IPv4, bridge, 802.1q -- no IPv6, matching production
+CONFIG_NET=y
+CONFIG_INET=y
+# AF_PACKET: busybox arping (rcS confirms reachability to the watchdog
+# with it) and udhcpc. AF_UNIX: syslog and every local socket userland
+# expects. Missing here, trial 618x had arping exit 1 and never confirmed.
+CONFIG_PACKET=y
+CONFIG_UNIX=y
+# CONFIG_IPV6 is not set
+CONFIG_BRIDGE=y
+CONFIG_VLAN_8021Q=y
+
+# odi-oss drivers (kernel/618/patches/0005-odi-drivers.patch hooks them
+# into drivers/net/ethernet). NETDEVICES has no "default y" of its own
+# (unlike its ETHERNET submenu, which does) -- without it the whole
+# drivers/net/ethernet/ Kconfig subtree, every ODI_* symbol included,
+# stays invisible to olddefconfig and silently drops out no matter what
+# is requested below (the step-2 ODI_WDT-only lesson: CONFIG_ODI_WDT=y
+# here, but absent from the completed .config, uImage size unchanged,
+# odi_wdt missing from System.map, first build without this line).
+CONFIG_NETDEVICES=y
+CONFIG_ETHERNET=y
+
+# The WDT=oss cascade -- every layer named explicitly, same reasoning:
+# "depends on" only gates visibility, it does not select the symbol it
+# depends on, so ODI_WDT=y alone (with everything below off) would be
+# silently dropped again the same way ODI_WDT itself was without
+# NETDEVICES/ETHERNET above.
+CONFIG_ODI_NIC=y
+CONFIG_ODI_OMCI=y
+CONFIG_ODI_SWITCH=y
+CONFIG_ODI_GPON=y
+CONFIG_ODI_SDKINIT=y
+CONFIG_ODI_INTR=y
+CONFIG_ODI_BOARD=y
+CONFIG_ODI_SDK_OUT=y
+CONFIG_ODI_WDT=y
+
+# Kernel config diet (2026-09-24): every symbol turned off below gates a
+# syscall or /proc feature nothing in this userland reaches. Evidence for
+# each is a mips-linux-uclibc-objdump -d over every rootfs ELF (busybox,
+# dropbearmulti, ip, bridge, diag, nv, confd, metricsd, omcid, omcli,
+# omcicap, omciprobe) checked for a `li v0,N` (o32 syscall-number load --
+# arch/mips/kernel/syscalls/syscall_o32.tbl's number PLUS 4000, the o32
+# __NR_Linux base every raw syscall on this ABI actually uses -- a copied
+# generic-Linux constant is silently wrong here, same trap class as the
+# swapped socket constants and the EIDRM mismatch this tree already knows
+# about) immediately before a `syscall` instruction for
+# the number named -- a static binary carries the libc wrapper only if
+# something calls it, so no hit means unreachable, not just unobserved.
+# Shell scripts under rootfs/skeleton and the built etc/ were also grepped
+# for the userspace tool that would need each one. Three of these ARE
+# compiled into a shipped ELF but never reached by anything this rootfs
+# actually runs, noted where that applies rather than claimed unreachable.
+# Kept, explicitly not touched here: CONFIG_MULTIUSER (dropbear needs basic
+# uid/gid + capability plumbing even for a root-only login). Already off
+# by default and left alone: SYSFS_SYSCALL, PRINTK_TIME, KCMP, XFRM,
+# IP_MULTICAST, IP_ADVANCED_ROUTER, NETFILTER -- no seed line ever turned
+# them on, so there is nothing to remove and no saving to measure. Kept ON,
+# despite first being flagged as a candidate, because a syscall-number scan
+# cannot clear it (FILE_LOCKING) or because the scan itself first missed a
+# real caller (POSIX_TIMERS) -- see each below.
+
+# io_setup/io_submit/io_getevents/io_cancel/io_destroy (241-245): unreachable
+# in every rootfs ELF.
+# CONFIG_AIO is not set
+
+# inotify_init/_add_watch/_rm_watch (284,285,286) are unreachable everywhere;
+# inotify_init1 (329) IS compiled into ip (iproute2's ipnetns.c, for `ip
+# netns monitor`), but this rootfs never runs `ip netns` anything -- rcS and
+# every script here call only `ip -s link`. busybox's own .config already
+# has CONFIG_INOTIFYD unset.
+# CONFIG_INOTIFY_USER is not set
+
+# Kept on: busybox (the flock applet) and ip (iproute2's netns locking) both
+# reach flock (o32 4143), and fcntl record locks (F_SETLK, fs/locks.o)
+# cannot be ruled out by a syscall-number scan at all, since the lock
+# command is an argument, not a separate syscall number.
+CONFIG_FILE_LOCKING=y
+
+# name_to_handle_at/open_by_handle_at (339,340) ARE compiled into ip
+# (iproute2 lib/fs.c's cgroup2 helpers), but nothing here ever asks for a
+# cgroup2 path -- this kernel has no cgroup filesystem mounted or built.
+# CONFIG_FHANDLE is not set
+
+# signalfd/signalfd4 (317,324): unreachable in every ELF.
+# CONFIG_SIGNALFD is not set
+
+# timerfd_create/gettime/settime (321-323): unreachable in every ELF.
+# CONFIG_TIMERFD is not set
+
+# eventfd/eventfd2 (319,325): unreachable in every ELF.
+# CONFIG_EVENTFD is not set
+
+# Kept on: on 6.18 this symbol also builds kernel/time/itimer.c, so with it
+# off alarm (o32 4027) and setitimer (4104) return ENOSYS, and busybox
+# reaches both (arping, ping and timeout time out with them).
+CONFIG_POSIX_TIMERS=y
+
+# fadvise64 (254) is unreachable everywhere. madvise (218) IS compiled into
+# busybox (its yescrypt password-hash code calls it), but /etc/passwd here
+# is `openssl passwd -1` ($1$, MD5-crypt -- image/build.sh), never yescrypt,
+# so that code path never runs.
+# CONFIG_ADVISE_SYSCALLS is not set
+
+# rseq (367, selects MEMBARRIER) and membarrier (358): neither is reachable in
+# any ELF; uClibc-ng does not self-register rseq the way glibc/musl can.
+# CONFIG_RSEQ is not set
+# CONFIG_MEMBARRIER is not set
+
+# process_vm_readv/writev (345,346): unreachable in every ELF.
+# CONFIG_CROSS_MEMORY_ATTACH is not set
+
+# /proc/pid/{pagemap,smaps,clear_refs}: no script or our own src/ source
+# references any of the three.
+# CONFIG_PROC_PAGE_MONITOR is not set
+
+# Core dumps (also drops ELF_CORE, which depends on this): no core_pattern
+# reference anywhere in the tree, and the crash register dump we actually
+# rely on (print-fatal-signals=1 on CONFIG_CMDLINE above, into the ramlog)
+# is a separate mainline feature untouched by this.
+# CONFIG_COREDUMP is not set
+
+# Kept on (maintainer decision, 2026-09-24): the /proc/vmstat event
+# counters (pgfault, pgmajfault, allocstall, reclaim) are the memory
+# pressure signal the exporter is expected to read; unused today. About
+# 1.4 KB of uImage.
+CONFIG_VM_EVENT_COUNTERS=y
+
+# ethtool netlink uAPI: no ethtool binary ships, and metricsd reads SFP/link
+# state through our own /dev/odi_switch and /proc files, never an ethtool
+# ioctl or the netlink family this gates.
+# CONFIG_ETHTOOL_NETLINK is not set
+
+# Swap: this device boots from flash with no block device to swap to: no
+# swapon/mkswap anywhere in the tree, and the seed above never set a swap
+# suboption in the first place.
+# CONFIG_SWAP is not set
+
+# Firmware loader, for the register-replay tables the odi drivers load
+# from /lib/firmware/odi/ (ODI_SWITCH selects FW_LOADER; it was already on
+# by default). Plain filesystem lookup only: no sysfs/user-helper fallback,
+# no compressed firmware (squashfs already compresses them), no upload
+# interface, and no suspend-time firmware cache -- nothing here suspends,
+# and the tables are released as soon as they are applied.
+CONFIG_FW_LOADER=y
+# CONFIG_FW_LOADER_USER_HELPER is not set
+# CONFIG_FW_LOADER_COMPRESS is not set
+# CONFIG_FW_UPLOAD is not set
+# CONFIG_FW_CACHE is not set
+
+# odi_ramlog: standalone struct console driver, no dependency on the
+# cascade above. Just turn it on.
+CONFIG_ODI_RAMLOG=y
+
+# Lockup detectors: a task stuck in D state or a CPU spinning in the kernel
+# for 30 s gets its stack printed, which the ramlog keeps (the rare stall
+# after init starts, 2 in 13 boots, left no other trace).
+CONFIG_DETECT_HUNG_TASK=y
+CONFIG_DEFAULT_HUNG_TASK_TIMEOUT=30
+CONFIG_SOFTLOCKUP_DETECTOR=y
+
+# Early-boot breadcrumbs (all in our own files, arch/mips/rtl8686 and
+# mach-rtl8686): tag/step markers in the ramlog pages from kernel_entry
+# on, read back from the stock firmware after a failed trial boot. On by
+# default while the rare boot stall is open.
+CONFIG_ODI_EARLY_CRUMBS=y

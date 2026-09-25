@@ -1,0 +1,37 @@
+name: ci
+
+# Lint, the host-side tests, our freestanding binaries, and the OMCI daemon
+# under qemu. The toolchain, the kernel and the image are not built here: an
+# hour of compiling and two kernel trees this runner would fetch from third
+# parties on every run, and nothing in them is exercised without a stick.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lint (shellcheck, inline-quote check)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          make lint
+
+      - name: Host-side tests
+        run: make test-host
+
+      - name: Our binaries (freestanding, in the diag toolchain container)
+        run: make src
+
+      - name: diag, including the exporter contract under qemu
+        run: make test-diag
+
+      - name: OMCI daemon under qemu
+        run: make test-omci

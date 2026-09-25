@@ -1,0 +1,25 @@
+# Fetched, never committed: upstream tarballs, kernel trees.
+/build/
+dl/
+out/
+*.tar
+*.tar.*
+!docs/*.tar
+
+kernel/618/mainline/
+
+# A build artefact that once landed at the repo root and was committed by a
+# `git add -A`. It is a 1 MB kernel binary carrying the proprietary rtl86900
+# driver, which is exactly what this repo does NOT ship -- see docs/LICENSING.md.
+/uImage
+/vmlinux
+/linux.bin*
+/rootfs.img
+
+# Built by src/build.sh; the sources are tracked, the objects are not.
+src/*/build/
+src/*/*/build/
+__pycache__/
+
+# Public reference documents, fetched by tools/fetch-refs.sh (docs/REFERENCES.md).
+refs/

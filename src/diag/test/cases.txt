@@ -1,0 +1,48 @@
+pon get transceiver bias-current
+pon get transceiver rx-power
+pon get transceiver tx-power
+pon get transceiver temperature
+pon get transceiver voltage
+gpon get onu-state
+gpon get alarm-status
+mib dump counter port all
+exit
+pon get transceiver vendor-name
+pon get transceiver part-number
+pon get transceiver all
+pon get transc rx-power
+p g t r
+pon get transceiver r
+pon get transceiver t
+pon get transceiver tx
+pon get transceiver te
+pon get transceiver
+pon get nonsense
+pon get transceiver rx-power extra
+gpon get flows
+gpon g f
+gpon get o
+mib dump counter port 2
+mib dump counter port 0,2-3
+mib dump counter port 32
+mib dump counter port 3-1
+mib dump counter port x
+register get 0x701008 1
+register get 0 4
+register get 0x214
+register set 0x48 0x08082001
+register set 0x48 4294967295
+register set 0x48 4294967296
+register set 0x48 0xzz
+reg g 0x1d0 1
+help
+e
+vlan get entry 1
+   
+? 
+? pon
+? pon get transceiver 
+? pon get transceiver t
+? gpon get
+? register get 
+? nothing
