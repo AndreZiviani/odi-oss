@@ -46,7 +46,7 @@ $(BUILD):
 
 else
 
-RUN := docker run --rm -v $(CURDIR)/../../..:/src -w /src/src/omci/capture $(IMAGE)
+RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../../..:/src -w /src/src/omci/capture $(IMAGE)
 
 .PHONY: all image cap run size clean
 all: cap

@@ -122,7 +122,7 @@ test-diag:
 	$(MAKE) -C src/diag test selftest
 
 test-omci: src
-	docker run --rm -v "$(CURDIR)":/src -w /src/src/omci odi-diag-toolchain sh qemu-test.sh
+	docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v "$(CURDIR)":/src -w /src/src/omci odi-diag-toolchain sh qemu-test.sh
 
 lint:
 	shellcheck -S warning toolchain/*.sh kernel/*.sh packages/*.sh packages/*/*.sh \

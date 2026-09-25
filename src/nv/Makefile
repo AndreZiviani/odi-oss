@@ -45,7 +45,7 @@ $(BUILD):
 
 else
 
-RUN := docker run --rm -v $(CURDIR)/../..:/src -w /src/src/nv $(IMAGE)
+RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../..:/src -w /src/src/nv $(IMAGE)
 
 .PHONY: all image nv size test clean
 all: nv

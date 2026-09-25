@@ -77,7 +77,7 @@ $(BUILD):
 
 else
 
-RUN := docker run --rm -v $(CURDIR)/../..:/src -w /src/src/igmp $(IMAGE)
+RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../..:/src -w /src/src/igmp $(IMAGE)
 
 .PHONY: all image igmpd test size clean
 all: igmpd

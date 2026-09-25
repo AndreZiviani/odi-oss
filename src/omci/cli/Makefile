@@ -43,7 +43,7 @@ $(BUILD):
 
 else
 
-RUN := docker run --rm -v $(CURDIR)/../../..:/src -w /src/src/omci/cli $(IMAGE)
+RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../../..:/src -w /src/src/omci/cli $(IMAGE)
 
 .PHONY: all image cli run size clean
 all: cli

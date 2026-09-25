@@ -45,7 +45,7 @@ $(BUILD):
 
 else
 
-RUN := docker run --rm -v $(CURDIR)/../../..:/src -w /src/src/omci/probe $(IMAGE)
+RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../../..:/src -w /src/src/omci/probe $(IMAGE)
 
 .PHONY: all image probe generate run size clean
 all: probe

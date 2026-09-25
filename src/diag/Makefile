@@ -92,7 +92,7 @@ else
 
 # The repository root is mounted, not only this directory: hw.c includes
 # the netlink transport from ../omci.
-RUN := docker run --rm -v $(CURDIR)/../..:/src -w /src/src/diag $(IMAGE)
+RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../..:/src -w /src/src/diag $(IMAGE)
 
 .PHONY: all image diag test selftest exporter-test l2-test run verify size clean help
 

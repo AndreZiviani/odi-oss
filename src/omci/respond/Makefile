@@ -85,7 +85,7 @@ $(BUILD):
 
 else
 
-RUN := docker run --rm -v $(CURDIR)/../../..:/src -w /src/src/omci/respond $(IMAGE)
+RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../../..:/src -w /src/src/omci/respond $(IMAGE)
 
 .PHONY: all image cap run size test clean
 all: cap
@@ -122,5 +122,5 @@ endif
 .PHONY: qemu-test
 qemu-test: cap
 	$(MAKE) -C ../cli
-	docker run --rm -v $(CURDIR)/../../..:/src -w /src/src/omci \
+	docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../../..:/src -w /src/src/omci \
 	        $(IMAGE) sh qemu-test.sh
