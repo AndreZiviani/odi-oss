@@ -121,8 +121,10 @@ test-host:
 test-diag:
 	$(MAKE) -C src/diag test selftest
 
+# Runs as root in the container: the harness creates /var/config and other
+# system paths inside it, and writes nothing into the mounted tree.
 test-omci: src
-	docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v "$(CURDIR)":/src -w /src/src/omci odi-diag-toolchain sh qemu-test.sh
+	docker run --rm -v "$(CURDIR)":/src -w /src/src/omci odi-diag-toolchain sh qemu-test.sh
 
 lint:
 	shellcheck -S warning toolchain/*.sh kernel/*.sh packages/*.sh packages/*/*.sh \
