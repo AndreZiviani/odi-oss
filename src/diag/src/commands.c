@@ -5,6 +5,7 @@
 #include "gpon_status.h"
 #include "mib.h"
 #include "omci_flows.h"
+#include "l2.h"
 
 /* Width of the syntax column in the help listing: the longest syntax line
  * plus two spaces. */
@@ -285,6 +286,10 @@ int cmd_run(const struct parsed *p)
 		return cmd_reg_get(p->u[0], p->u[1]);
 	case CMD_REG_SET:
 		return cmd_reg_set(p->u[0], p->u[1]);
+	case CMD_L2_ALL:
+		return cmd_l2_all();
+	case CMD_L2_INDEX:
+		return cmd_l2_index(p->u[0]);
 	}
 	return 1;
 }

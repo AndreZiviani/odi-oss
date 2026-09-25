@@ -10,23 +10,25 @@ how to work in it safely and correctly.
     toolchain/               our cross toolchain: gcc/binutils/uClibc-ng, built from source
     kernel/                  Linux 6.18 for the RTL9602C
       618/fetch.sh, mainline/, patches/, config
+      618/debug/             debug-only patches, applied with CRUMBS_CORE=1
       build.sh
       extra/                 every file of our own, at its tree path (board, CPU cache, irqchip, timer, SPI NOR)
       extra/drivers/net/ethernet/odi/   our own switch/GPON/NIC/OMCI/watchdog/ramlog drivers
     packages/                upstream userland: busybox, dropbear, iproute2 (bridge-utils deliberately not built)
-    rootfs/skeleton/         /etc and the init chain, ours
+    rootfs/skeleton/         /etc and the init chain, ours; lib/firmware/odi/ the register replay tables
     image/                   assembles squashfs + uImage into a flashable tarball, and the on-device flasher (fwu.sh)
     src/                     our own tools: diag, omci (omcid/omcli/omciprobe/omcicap), igmp, nv — freestanding
     test/                    host-side and qemu-based test harnesses
-    tools/                   developer tooling: remote-build.sh, memprobe, regdump, regtrace, lint helpers
-    docs/                    KERNEL.md, TOOLS.md, SETTINGS.md, BUILDING.md, FLASHING.md, ACCESS.md, CROSS-COMPILING.md, IMPROVEMENTS.md, LICENSING.md
+    tools/                   developer tooling: remote-build.sh, kernel-footprint.sh, fetch-refs.sh, memprobe, regdump, regtrace, lint helpers
+    docs/                    KERNEL.md, TOOLS.md, SETTINGS.md, BUILDING.md, FLASHING.md, ACCESS.md, CROSS-COMPILING.md, IMPROVEMENTS.md, LICENSING.md, REFERENCES.md; kb/ field notes
 
 ## Build and test commands
 
     make image-all           # everything, from a clean clone
     make image                # just the tarball, once the pieces exist
-    make test                  # lint + test-host + test-omci (~2 min)
+    make test                  # lint + test-host + test-diag + test-omci (~2 min)
     make test-host              # host-side unit tests, no Docker/stick needed
+    make test-diag              # diag, including the exporter contract (byte-for-byte goldens)
     make lint                   # shellcheck + repo-specific checks, see below
 
     kernel/build.sh              # the kernel alone (needs `make toolchain` first)
@@ -66,6 +68,10 @@ how to work in it safely and correctly.
   a new one, so each patch stays one coherent change, and check
   `tools/kernel-footprint.sh` before and after: the count only goes down
   without a stated reason. This is what makes the next LTS port cheap.
+- **Name the test sticks by their line, ISP1 and ISP2**, in code, comments,
+  docs and commit messages, and never write a credential, a serial number
+  or another identity value from a real stick into the tree. `make lint`
+  does not check this; the review does.
 - **Check for existing lint/contribution rules before adding a new pattern.**
   `make lint` (see below) is the authority; there is no separate
   `CONTRIBUTING.md`. Search `tools/*lint*` and the `lint:` target in the
@@ -99,6 +105,12 @@ it:
 - **Never `sw_commit` a trial.** Commit only after you have booted the
   trial image yourself and are satisfied with it. Committing before that
   discards the only free safety net this mechanism gives you.
+- **rcS confirms userland to the watchdog within 120 s on every boot**, or
+  the board resets (`docs/FLASHING.md`). The confirmation needs no network;
+  only with `/etc/config/confirm-arp` (development) does it wait for an ARP
+  reply from the `.2` address of the management subnet. Do not change the
+  confirmation or the deadline without reading `rcS` and `odi_wdt.c`
+  together.
 - **A reboot with no commit returns to the stock (or previously committed)
   firmware.** That is the whole point of the mechanism; do not "fix" a
   stuck trial by writing `sw_commit` to make it stick — power-cycle it
@@ -123,8 +135,12 @@ it:
 
 - **The DRAM ramlog** (`docs/KERNEL.md`, `tools/memprobe/README.md`)
   survives a watchdog reset (not a power cycle) and is the only way to see
-  console output from a boot that never came up on the network. Read it
-  from the *other* (working) slot after a reset, with `tools/memprobe`.
+  console output from a boot that never came up on the network. After a
+  reset, read it from the *other* (working) slot: `cat
+  /proc/odi_ramlog_prev` when that slot runs this image (check its slot and
+  build id are the failed boot's), `tools/memprobe` when it runs the stock
+  one. With `print-fatal-signals=1` it also holds the registers of any
+  process killed by a signal.
 - **`/etc/config/breadcrumbs`**, enabled with `: > /etc/config/breadcrumbs.on`
   on the currently running image before a trial: one timestamped line per
   boot stage, on the config partition, which survives a revert the same way

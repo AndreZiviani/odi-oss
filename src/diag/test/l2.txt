@@ -1,0 +1,7 @@
+l2-table ?
+l2-table get all
+l2-table get entry address valid
+l2-table get index 8
+l2-table get index 9
+l2-table get index 1024
+exit

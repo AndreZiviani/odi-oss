@@ -1,22 +1,31 @@
-/* The three switch accessors igmpd programs through: the stock switch
- * driver's L2 multicast socket options.
+/* The switch accessors igmpd programs through: three /dev/odi_sw ioctls,
+ * answered by odi_switch_l2.c in our kernel (odi_reg.c dispatches them under
+ * odi_switch_lock).
  *
- * These moved here from diag, which no longer carries any socket-option
- * layer. No option here is answered by our 6.18 kernel -- odi_switch has no
- * netlink op for the L2 multicast table -- so on our image every call fails
- * with -99 (ENOPROTOOPT) and program.c says so. They stay because igmpd is
- * still a dry run by default and its hardware path is not yet ported.
+ *   igmp_sw_mode        how IPv4 multicast is looked up (L2_LOOKUP_SETUP bit 23):
+ *                       0 on MAC + VID/FID, the mode these entries serve
+ *   igmp_sw_mcast_add   place a static L2 multicast entry by the hardware
+ *                       hash; m->index is the row it landed on
+ *   igmp_sw_mcast_del   remove the entry with the same key; m->found says
+ *                       whether there was one
  *
- * An entry is IGMP_MAC_ENTRY_WORDS host words (entry.h); each call packs
- * them big-endian into the driver's 516-byte exchange buffer.
+ * These replace three stock-driver socket options that no 6.18 kernel
+ * answers (every call failed with -99). The file keeps its name so the
+ * history of that change stays in one place.
+ *
+ * Each returns 0 or a negative errno: -2 when /dev/odi_sw is missing, -25
+ * when the kernel predates these ioctls, -22 for an entry the driver
+ * refuses, -28 when the key hash bucket is full, -16 when the table engine
+ * stayed busy.
  */
 #ifndef ODI_IGMP_SWITCH_OPT_H
 #define ODI_IGMP_SWITCH_OPT_H
 
 #include <stdint.h>
+#include "odi_sw_ioctl.h"
 
-int rtk_l2_ipmcMode_get(uint32_t *mode);
-int rtk_l2_mcastAddr_add(uint32_t *entry);
-int rtk_l2_mcastAddr_del(const uint32_t *entry);
+int igmp_sw_mode(uint32_t *ipmc_on_group);
+int igmp_sw_mcast_add(struct odi_sw_l2_mcast *m);
+int igmp_sw_mcast_del(struct odi_sw_l2_mcast *m);
 
 #endif

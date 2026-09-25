@@ -13,10 +13,13 @@ driver set -- no proprietary NIC driver is ever built on this tree.
 and Makefile here decide what builds, from `ODI_NIC` down the dependency
 chain to `ODI_WDT`.
 
-Proven on hardware 2026-09-21: all five
-acceptance criteria passed over this driver -- management on `br0`, IRQ 26,
-`gpon_onu_state 5`, `gpon_omci_services 6`, and an Internet path through
-the stick. See `docs/IMPROVEMENTS.md` for what remains undecided.
+Proven on hardware 2026-09-21, and again on 6.18 with this release on
+both lines (ISP1 and ISP2): management on `br0`, `gpon_onu_state 5`,
+`gpon_omci_services 6`, and an Internet path through the stick. Bulk
+forwarding does not pass through this driver: the switch forwards between
+the fibre and the host port in hardware, and the CPU port carries only
+management (ssh, the web UI, the exporter) and OMCI. A soak that wants to
+exercise this driver has to move data to and from the stick itself.
 
 Scope: a bridge ONU with management on `br0` -- no multi-WAN, no
 software bridge fast-path (redundant with the kernel bridge already in
@@ -25,8 +28,9 @@ SRAM.
 
 ## The interface to odi_omci
 
-Besides its net_devices, `odi_nic.c` exports two entry points, both used
-only by `odi_omci.c`:
+Besides its net_devices, `odi_nic.c` provides two entry points, declared
+in `odi_nic.h` and used only by `odi_omci.c` (everything is built in, so
+nothing is `EXPORT_SYMBOL`ed):
 
 - `int odi_nic_rxhook_register(int portmask, int priority, odi_rxhook_fn rx)`
   / `odi_nic_rxhook_unregister` (same signature) -- a callback for a
@@ -54,8 +58,29 @@ handler installed or a disabled NAPI context -- trial n4 found the
 original ordering bug on hardware.
 `odi_quiesce_hw()` is the shared teardown -- masks interrupts, stops the
 ring engine -- called from both the `ndo_stop`/remove path of the module
-itself and from `wdt_pre_reset_hook`, so a watchdog-triggered reset
-quiesces the hardware the same way an orderly unload does.
+itself, from the reboot and panic notifiers, and from
+`wdt_pre_reset_hook`, so a watchdog-triggered reset quiesces the hardware
+the same way an orderly unload does.
+
+The engine may already be running when the kernel starts: the loader
+before us leaves its RX ring live, and this driver only resets the NIC at
+its first `ndo_open`. `prom_init()` in the board file stops it (the two
+RUN registers, `rtl8686regs.h`) before the kernel owns any memory;
+`docs/KERNEL.md` ("The board") has the failure that caused.
+
+Error paths:
+
+- RX refill maps the replacement buffer before handing the slot back. If
+  the allocation or the mapping fails, the frame is dropped and the
+  still-mapped old buffer is recycled into the slot, so the hardware never
+  points at freed memory. `odi_rings_free` unmaps and frees each slot once.
+- TX stops every queue when the ring is full and wakes them at half ring
+  (`ODI_TX_WAKE_USED`), with `smp_mb()` on both sides. There is no
+  TX-complete interrupt, so while a queue is stopped `tx_stall_work`
+  reclaims every 10 ms; without it a stopped queue with no RX traffic
+  would never wake.
+- Every `dma_map_single()` is checked with `dma_mapping_error()`, and the
+  init path unwinds in reverse order.
 
 Host-testable core: `odi_nic_hw.h` (register offsets, descriptor layout,
 CPU-tag pack/unpack, ring index arithmetic) has no kernel dependency and is
@@ -90,3 +115,8 @@ It consumes RX frames ahead of any other hook (an
 the priority-ordered dispatch in `odi_nic.c`) and sends replies with
 `odi_nic_tx_words()` directly. Part of the standard `kernel/build.sh`
 driver set.
+
+`NETLINK_USERSOCK` accepts senders without privileges, and every message
+here either drives the switch or answers the OLT, so `odi_omci_nl_input()`
+drops anything from a sender without `CAP_NET_ADMIN`
+(`netlink_capable()`), with a rate-limited warning.

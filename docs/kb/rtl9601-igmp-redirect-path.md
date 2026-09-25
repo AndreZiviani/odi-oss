@@ -5,7 +5,7 @@ interface at all — they're delivered to userland over the same
 kernel-to-userland redirect mechanism OMCI uses, but on a different
 channel, with a source port field that's one-based instead of zero-based.
 
-*Last verified: 2026-09-14*
+*Last verified: 2026-09-14 (the stock firmware); the caveat below 2026-09-25*
 
 ---
 
@@ -33,6 +33,11 @@ channel (uid 4) prepends 3 bytes where the OMCI channel (uid 1) prepends 4.
 
 There is a payload size cap of 1600 bytes; the kernel drops anything
 longer.
+
+This describes the stock firmware. On this repository's kernel the
+redirect transport (`odi_omci.c`) delivers only OMCI frames (RX reason 246,
+redirect type 1); nothing delivers IGMP on uid 4, and `igmpd` is shipped
+but not started, so IGMP snooping is off on this image.
 
 ## Why it matters
 

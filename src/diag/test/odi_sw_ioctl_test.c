@@ -6,6 +6,7 @@
  */
 #include <stdio.h>
 #include <stdint.h>
+#include <stddef.h>
 #include "odi_sw_ioctl.h"
 
 static int failures;
@@ -43,6 +44,17 @@ int main(void)
 	check(mips_ioc(2 | 4, 'S', 5, sizeof(struct odi_sw_ddm))
 	      == ODI_SW_IOC_DDM_GET, "ODI_SW_IOC_DDM_GET");
 
+	check(mips_ioc(2 | 4, 'S', 6, sizeof(struct odi_sw_l2_row))
+	      == ODI_SW_IOC_L2_GET, "ODI_SW_IOC_L2_GET");
+	check(mips_ioc(2 | 4, 'S', 7, sizeof(struct odi_sw_l2_row))
+	      == ODI_SW_IOC_L2_NEXT, "ODI_SW_IOC_L2_NEXT");
+	check(mips_ioc(2 | 4, 'S', 8, sizeof(struct odi_sw_l2_mcast))
+	      == ODI_SW_IOC_L2_MC_ADD, "ODI_SW_IOC_L2_MC_ADD");
+	check(mips_ioc(2 | 4, 'S', 9, sizeof(struct odi_sw_l2_mcast))
+	      == ODI_SW_IOC_L2_MC_DEL, "ODI_SW_IOC_L2_MC_DEL");
+	check(mips_ioc(2 /* READ */, 'S', 10, sizeof(struct odi_sw_l2_mode))
+	      == ODI_SW_IOC_L2_MODE, "ODI_SW_IOC_L2_MODE");
+
 	/* Struct sizes the marshalling actually depends on -- a size that
 	 * silently grew (padding, a wider field) would still compile and
 	 * still ioctl() successfully; only the request number would then
@@ -51,6 +63,26 @@ int main(void)
 	check(sizeof(struct odi_sw_soc) == 8, "struct odi_sw_soc is 8 bytes");
 	check(sizeof(struct odi_sw_mib) == 16, "struct odi_sw_mib is 16 bytes");
 	check(sizeof(struct odi_sw_ddm) == 28, "struct odi_sw_ddm is 28 bytes");
+	check(sizeof(struct odi_sw_l2_row) == 48, "struct odi_sw_l2_row is 48 bytes");
+	check(sizeof(struct odi_sw_l2_mcast) == 28, "struct odi_sw_l2_mcast is 28 bytes");
+	check(sizeof(struct odi_sw_l2_mode) == 8, "struct odi_sw_l2_mode is 8 bytes");
+	/* The same offsets test/odi_switch_l2_test.c asserts on the kernel
+	 * copy: the two restatements agree field for field, not just in
+	 * total size. */
+	check(offsetof(struct odi_sw_l2_row, raw) == 4 &&
+	      offsetof(struct odi_sw_l2_row, mac) == 16 &&
+	      offsetof(struct odi_sw_l2_row, key) == 22 &&
+	      offsetof(struct odi_sw_l2_row, type) == 24 &&
+	      offsetof(struct odi_sw_l2_row, age) == 27 &&
+	      offsetof(struct odi_sw_l2_row, flags) == 28 &&
+	      offsetof(struct odi_sw_l2_row, group) == 44,
+	      "struct odi_sw_l2_row field offsets");
+	check(offsetof(struct odi_sw_l2_mcast_req, key) == 6 &&
+	      offsetof(struct odi_sw_l2_mcast_req, ivl) == 8 &&
+	      offsetof(struct odi_sw_l2_mcast_req, ext_ports) == 16 &&
+	      offsetof(struct odi_sw_l2_mcast, index) == 20 &&
+	      offsetof(struct odi_sw_l2_mcast, found) == 24,
+	      "struct odi_sw_l2_mcast field offsets");
 
 	printf("%s (%d failures)\n", failures ? "FAILED" : "all ok", failures);
 	return failures != 0;

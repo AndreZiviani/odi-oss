@@ -6,7 +6,7 @@ and the switch through the interfaces our kernel provides, and nothing else:
 
 | interface | driver | used for |
 |---|---|---|
-| `/dev/odi_sw` ioctls | `odi_reg.c`, `odi_ddm.c` | register get/set, MIB counters, DDM |
+| `/dev/odi_sw` ioctls | `odi_reg.c`, `odi_ddm.c`, `odi_switch_l2.c` | register get/set, MIB counters, DDM, the L2 table |
 | `/proc/odi_gpon` | `odi_gpon.c` | ONU state, the LOS sample |
 | odi_omci netlink, `OMCI_FLOWS_CMD` | `odi_omci.c`, `odi_switch_cmd.c` | GEM flows |
 
@@ -19,8 +19,8 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
 
 |  | before | now |
 |---|---|---|
-| size | 373,280 bytes | 18,168 bytes |
-| commands | 1,973 parsed, 929 wired, a handful working on 6.18 | 16, all working on 6.18 |
+| size | 373,280 bytes | 21,208 bytes |
+| commands | 1,973 parsed, 929 wired, a handful working on 6.18 | 19, all working on 6.18 |
 | links | nothing | nothing |
 
 ## Commands
@@ -39,6 +39,9 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
     gpon get alarm-status             LOS, LOF and LOM, live from the GPON block
     gpon get flows                    GEM flows omcid programmed, as odi_switch recorded them
     mib dump counter port <ports>     switch port MIB counters; all = every port that answers
+    l2-table get all                  every valid L2 table row: learned MACs, multicast groups
+    l2-table get entry address valid  the same, in the stock spelling (odi-ui sends it)
+    l2-table get index <index>        one L2 table row by number, valid or not, with raw words
     register get <address> <words>    read switch-core registers, four per line
     register set <address> <value>    write one switch-core register
     help                              list the commands
@@ -61,6 +64,21 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
   out, not printed as zero.
 - The module serial number has no DDM selector in the driver, so there is no
   command for it.
+- `l2-table get all` walks the L2 lookup table in the kernel (1,024 rows, or
+  1,088 with the CAM rows on) and prints one line per valid row, under the
+  header words of the stock listing (`MACAddress Spa Fid Age Vid State Ext
+  Hash`) plus `Type` (`uc`, `mc`, `ipmc`), `Ports` (multicast members) and
+  `Index`. A reader that zips a row against its header, as odi-ui does,
+  reads both. `l2-table get entry address valid` is the same listing under
+  the stock syntax, kept because confd sends it to either firmware.
+- `l2-table get index <n>` prints one row whether valid or not, and its
+  three raw words (hardware bits 95..64, 63..32, 31..0): the check that the
+  decode matches the hardware. "Valid" is the table engine answer to the
+  read (its status HIT bit), not a bit of the row: read back, every row has
+  bit 77 set, and an empty row carries its bucket (row / 4) in the low MAC
+  octet, so `get index 0x6d` on an empty row prints
+  `00:00:00:00:00:1B ... valid no  raw 0x00002000 0x00000000 0x0000001b`.
+  `docs/KERNEL.md` ("The L2 table") has the readout behind this.
 
 Everything else in `/proc/odi_gpon`, `/proc/odi_omci`, `/proc/odi_intr` and
 `/proc/rtk_init` is plain text; read those with `cat`.
@@ -157,13 +175,17 @@ Everything runs in a container; nothing but Docker is needed on the host.
     make diag                                    # the binary
     make test                                    # parser, conversions, ioctl numbers, natively
     make exporter-test                           # the exporter contract, under qemu
-    make selftest                                # exporter-test plus the conversion vectors on MIPS
+    make l2-test                                 # the l2-table listing against test/l2.golden
+    make selftest                                # both, plus the conversion vectors on MIPS
     make run ARGS='pon get transceiver rx-power' # under qemu-user (no hardware there)
     make verify                                  # ELF32 / big-endian / MIPS / static
 
 `qemu-mips-static` emulates a full MIPS32 CPU and runs `mul` and `clz`,
-which trap on the RLX5281. Before shipping a build, run the exporter
-project's `scripts/isa-audit.sh build/diag` in the toolchain container.
+which trap on the RLX5281, so a clean run under qemu says nothing about the
+instruction set. `image/build.sh` runs `packages/isa-audit.sh` over every
+ELF it ships, diag included, and refuses the image on a hit; to check a
+build by hand, `packages/isa-audit.sh src/diag/build/diag` from the
+repository root.
 
 ## Adding a command
 

@@ -3,7 +3,9 @@
  * odi_reg.c -- /dev/odi_sw, a misc device exposing the switch-core
  * register, SoC-address, and per-port MIB accessors odi_switch_dal.c
  * implements (odi_switch_dal.h has the per-leaf mapping and what is left
- * out). Replaces the stock kernel's handling of RTK_OPT_REGISTER,
+ * out), and the L2 lookup table of odi_switch_l2.c: row readback, the
+ * valid-row walk behind `diag l2-table`, and the L2 multicast add/delete
+ * igmpd programs groups with. Replaces the stock kernel's handling of RTK_OPT_REGISTER,
  * RTK_OPT_ADDRESS_GET/SET, RTK_OPT_SOC_GET and RTK_OPT_STAT_PORT for our
  * own userland: src/diag reads this device directly. There is no vendor
  * sockopt fallback anywhere in this tree.
@@ -58,8 +60,17 @@
 #include "odi_switch_dal.h"
 #include "odi_switch_reg.h" /* odi_switch_lock */
 #include "odi_ddm.h"
+#include "odi_switch_l2.h"
 
 #define DRV_NAME "odi_reg"
+
+/* odi_switch_l2.c answers -1 for an engine that stayed busy and plain
+ * negative errno values otherwise.
+ */
+static long odi_sw_l2_errno(int rc)
+{
+	return rc == -1 ? -EBUSY : rc;
+}
 
 /* No SoC offset has a confirmed-safe row yet -- see this file's own
  * header comment. Refuses everything rather than defining an empty
@@ -161,6 +172,55 @@ static long odi_sw_ioctl_cmd(unsigned int cmd, void __user *argp)
 		}
 		return 0;
 	}
+	case ODI_SW_IOC_L2_GET:
+	case ODI_SW_IOC_L2_NEXT: {
+		struct odi_sw_l2_row row;
+		u32 index;
+		int rc;
+
+		if (copy_from_user(&row, argp, sizeof(row)))
+			return -EFAULT;
+		index = row.index;
+		if (cmd == ODI_SW_IOC_L2_GET)
+			rc = odi_switch_l2_read(index, &row);
+		else
+			rc = odi_switch_l2_next(&index, &row);
+		if (rc)
+			return odi_sw_l2_errno(rc);
+		if (copy_to_user(argp, &row, sizeof(row)))
+			return -EFAULT;
+		return 0;
+	}
+	case ODI_SW_IOC_L2_MC_ADD:
+	case ODI_SW_IOC_L2_MC_DEL: {
+		struct odi_sw_l2_mcast m;
+		int rc, found = 0;
+
+		if (copy_from_user(&m, argp, sizeof(m)))
+			return -EFAULT;
+		m.index = 0;
+		if (cmd == ODI_SW_IOC_L2_MC_ADD) {
+			rc = odi_switch_l2_mcast_add(&m.req, &m.index);
+			found = 1;
+		} else {
+			rc = odi_switch_l2_mcast_del(&m.req, &found);
+		}
+		if (rc)
+			return odi_sw_l2_errno(rc);
+		m.found = found;
+		if (copy_to_user(argp, &m, sizeof(m)))
+			return -EFAULT;
+		return 0;
+	}
+	case ODI_SW_IOC_L2_MODE: {
+		struct odi_sw_l2_mode mode;
+
+		mode.ipmc_on_group = odi_switch_l2_ipmc_mode();
+		mode.rows = odi_switch_l2_rows();
+		if (copy_to_user(argp, &mode, sizeof(mode)))
+			return -EFAULT;
+		return 0;
+	}
 	default:
 		return -ENOTTY;
 	}
@@ -197,4 +257,4 @@ module_init(odi_reg_init);
 module_exit(odi_reg_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("odi-oss /dev/odi_sw -- register/SoC/MIB ioctls (stock sockopt replacement)");
+MODULE_DESCRIPTION("odi-oss /dev/odi_sw -- register/SoC/MIB/L2 table ioctls (stock sockopt replacement)");

@@ -88,7 +88,7 @@
 # `minor >> 1` and refuses FMODE_WRITE when `minor & 1`, so this is enforced by
 # the kernel rather than by the mode bits -- opening mtd1ro for writing is
 # -EACCES whoever you are. The stock vendor image ships its own eight. This is
-# what docs/TRIAL-BOOT.md wants for the backup step: a mistyped redirection
+# what docs/FLASHING.md wants for the backup step: a mistyped redirection
 # onto mtd1ro cannot destroy the environment.
 /dev/mtd0ro  c 400 0 0 90 1
 /dev/mtd1ro  c 400 0 0 90 3

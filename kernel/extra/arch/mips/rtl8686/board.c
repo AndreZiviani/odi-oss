@@ -8,7 +8,7 @@
  * platform_device registration in a device_initcall -- is simpler than a
  * DT the board will never need a second copy of.
  *
- * Board init (prom.c/setup.c-equivalent) in one file. GPIO/LED/USB-PHY/
+ * Board init in one file. GPIO/LED/USB-PHY/
  * pushbutton board code is NOT ported here -- out of scope for this
  * build. The switch/NIC/GPON/OMCI/watchdog/ramlog drivers this board
  * needs are separate files under drivers/net/ethernet/odi/ (CONFIG_ODI_*),

@@ -2,8 +2,9 @@
 
 One cross toolchain, ours, built from source: **binutils 2.47, gcc 16.2.0 and
 uClibc-ng 1.0.59**, targeting `mips-linux-uclibc`, big-endian, o32, soft
-float. It builds everything in the image: the kernel, the two GPON modules,
-busybox, dropbear, iproute2 and our own tools.
+float. It builds the kernel, busybox, dropbear and iproute2; our own
+freestanding tools use a separate, stock compiler (see "Freestanding tools"
+below).
 
     make toolchain          # build-oss-toolchain.sh, into the Docker volume odi-oss-toolchain-318
     make toolchain-audit    # audit-toolchain.sh: the target libraries carry no illegal instruction
@@ -40,7 +41,7 @@ uClibc-ng starts from its defconfig; `build-oss-toolchain.sh` sets what this
 device needs and records why beside each line. Beyond the architecture and
 the Lexra flags: SHA-256/512 crypt (root passwords), the resolver (nslookup),
 pty support with the BSD fallback, and four features the packages once
-shimmed around and now take from the libc: SUSv3 legacy calls (`mktemp`),
+shimmed around and now take from the libc: SUSv3/SUSv4 legacy calls (`mktemp`),
 libutil (`openpty`), the stack-protector runtime (`__stack_chk_fail` with a
 random guard) and `nftw`. Left off on purpose: 64-bit `time_t` (its stat
 path needs `statx`, a 4.11 syscall this kernel lacks), utmp/utmpx (a
@@ -62,17 +63,21 @@ decodes them. The kernel (`docs/KERNEL.md`) emits none of them today:
     cls    rd, rt          SPECIAL3, function 0x0e  0x7c00000e
 
 Kernel-side ISA overrides (`cache` is MIPS III, `movn` MIPS IV, `mtc0` with a
-select field MIPS32) are `.set` directives in the kernel sources
-(`kernel/extra/`, `kernel/618/patches/`), not assembler changes.
+select field MIPS32) are `.set` directives in our own kernel sources
+(`kernel/extra/`), not assembler changes.
 
 ## Freestanding tools
 
-`diag`, `omcid`, `omcli` and `nv` are `-nostdlib -nostartfiles -static` and
-link no libc at all: that is what lets `metricsd` and `confd` be dropped onto
-a running stick without reflashing, and keeps the recovery tools working
-when everything else is broken. They build with our toolchain, and also
-with Debian's `gcc-mips-linux-gnu` at `-march=mips1` (`Dockerfile.freestanding`),
-which is what CI uses. `docs/CROSS-COMPILING.md` has the worked example.
+`diag`, `omcid`, `omcli`, `omciprobe`, `omcicap`, `igmpd` and `nv` are
+`-nostdlib -nostartfiles -static` and link no libc at all: they depend on the
+kernel syscall ABI and nothing else, which lets them be dropped onto a
+running stick (the stock image included) without reflashing, and keeps the
+recovery tools working when everything else is broken. They do not use the
+toolchain above: `src/build.sh` builds them with Debian's
+`gcc-mips-linux-gnu` at `-march=mips1`, in the `odi-diag-toolchain`
+container (`src/diag/Dockerfile`; `Dockerfile.freestanding` here is the same
+file), locally and in CI alike. `docs/CROSS-COMPILING.md` has the worked
+example.
 
 ## Verifying, rather than trusting
 

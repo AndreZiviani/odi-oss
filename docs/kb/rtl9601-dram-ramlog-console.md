@@ -4,7 +4,7 @@ This device has no serial console, but two specific DRAM pages survive a
 watchdog reset (though not a full power cycle): mirroring the kernel log
 into them lets the next boot read the previous, failed kernel's last words.
 
-*Last verified: 2026-09-23*
+*Last verified: 2026-09-25*
 
 ---
 
@@ -59,6 +59,18 @@ hooking the kernel's own log-output routine directly rather than a
 dedicated console driver — with the same DRAM pages and the same
 survive-a-reset property; that earlier mechanism is now build history, but
 the two-pages-survive-a-reset hardware fact holds for both.
+
+Once both slots can run this image, the boot after a failed trial is ours
+too, and its own console would overwrite the failed log at startup. So the
+driver first copies both pages into a static buffer, before it writes
+anything, and keeps that copy readable for the whole boot as
+`/proc/odi_ramlog_prev` (decoded) and `/proc/odi_ramlog_prev_raw` (the
+8192 raw bytes, page A then page B), both root only. It reaches one boot
+back. The last 64 bytes of page A hold a small per-boot metadata block (a
+boot counter that survives warm resets, the slot from the last `root=`,
+the image build id, and the early-crumb pair of the previous boot), so the
+copy says which boot and which image it came from; `docs/KERNEL.md` has
+the layout.
 
 ## Telling a timed event from a stalled instruction
 

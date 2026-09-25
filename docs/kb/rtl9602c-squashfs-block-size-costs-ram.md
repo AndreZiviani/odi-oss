@@ -6,7 +6,7 @@ device, using large (1 MB) filesystem blocks measurably costs several
 megabytes of RAM compared to smaller blocks and a leaner cache
 configuration.
 
-*Last verified: 2026-09-23*
+*Last verified: 2026-09-25*
 
 ---
 
@@ -37,9 +37,11 @@ one specific cause — the improvement is real and measured, but the split
 between "block size" and "cache tuning" specifically is not proven. This
 same combination of settings was, in one round of boot-reliability testing,
 an unconfirmed suspect in a couple of otherwise-unexplained init-time
-stalls — treat it as a strong, measured improvement worth using, but one
-that deserves a longer reliability soak before being considered fully
-settled.
+stalls. It was cleared: those stalls were very likely the CPU-port NIC DMA the loader
+leaves running, writing received frames into pages the kernel had already
+given out (the board code now stops it in `prom_init()`, see
+`docs/KERNEL.md`); the image with these squashfs settings has since passed
+a 15-boot loop and a 3-hour soak.
 
 ## See also
 

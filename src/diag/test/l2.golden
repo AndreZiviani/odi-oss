@@ -1,0 +1,30 @@
+RTK.0> l2-table ?
+  l2-table get all                  every valid L2 table row: learned MACs, multicast groups
+  l2-table get entry address valid  the same, in the stock spelling (odi-ui sends it)
+  l2-table get index <index>        one L2 table row by number, valid or not, with raw words
+RTK.0> l2-table get all
+L2 table: 1024 rows, IPv4 multicast looked up on MAC + VID/FID
+MACAddress        Spa Fid Age Vid  State  Ext Hash Type Ports Index
+78:54:2E:07:64:63 2   0   6   1    Auto   0   SVL  uc   -     0x008
+02:11:22:33:44:55 0   0   7   1    Auto   0   SVL  uc   -     0x04c
+01:00:5E:01:02:03 -   -   -   1    Static -   IVL  mc   0x1   0x3a1
+3 entries
+RTK.0> l2-table get entry address valid
+L2 table: 1024 rows, IPv4 multicast looked up on MAC + VID/FID
+MACAddress        Spa Fid Age Vid  State  Ext Hash Type Ports Index
+78:54:2E:07:64:63 2   0   6   1    Auto   0   SVL  uc   -     0x008
+02:11:22:33:44:55 0   0   7   1    Auto   0   SVL  uc   -     0x04c
+01:00:5E:01:02:03 -   -   -   1    Static -   IVL  mc   0x1   0x3a1
+3 entries
+RTK.0> l2-table get index 8
+MACAddress        Spa Fid Age Vid  State  Ext Hash Type Ports Index
+78:54:2E:07:64:63 2   0   6   1    Auto   0   SVL  uc   -     0x008
+valid yes  raw 0x00002034 0x00017854 0x2e076463  (bits 95..64 63..32 31..0)
+RTK.0> l2-table get index 9
+MACAddress        Spa Fid Age Vid  State  Ext Hash Type Ports Index
+02:11:22:33:44:55 0   0   0   0    Auto   0   SVL  uc   -     0x009
+valid no  raw 0x00000000 0x00000211 0x22334455  (bits 95..64 63..32 31..0)
+RTK.0> l2-table get index 1024
+% no such row: the table has 1024 (0 to 1023)
+RTK.0> exit
+

@@ -4,7 +4,7 @@ To read optical diagnostics (DDM) and switch metrics from the stock
 firmware, script the existing `diag` CLI rather than link against the
 vendor's own optics/switch library directly.
 
-*Last verified: 2026-09-15*
+*Last verified: 2026-09-25*
 
 ---
 
@@ -54,6 +54,15 @@ added to the batched form once it has been shown, empirically, to
 terminate correctly when fed on stdin rather than as a command-line
 argument — that is a property of the specific command, not of the CLI in
 general.
+
+## On this image
+
+The decision still holds for the exporter, which has to read the stock
+image too. On this image `diag` is no longer the stock tool: it is our own
+small CLI (`src/diag/`) over our kernel interfaces, and it exits cleanly
+at end of input. The commands the exporter sends keep the stock syntax and
+output byte for byte, pinned by a golden-file test (`make test-diag`), so
+the same batched scrape works against either firmware.
 
 ## See also
 

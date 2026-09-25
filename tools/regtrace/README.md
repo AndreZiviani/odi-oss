@@ -1,10 +1,21 @@
 # Register trace
 
-The odi driver set (`kernel/extra/drivers/net/ethernet/odi/odi_switch.c`,
-`odi_switch_reg.h`) keeps a ring of every register write made through it
-(32768 entries, 512 KB static); `/proc/rtk_regtrace` reads it. With
-`/etc/config/regtrace.on` on the stick, rcS dumps the ring at every boot
-phase into `/tmp/regtrace.txt`.
+**Status: the tracer is not in the kernel this repository builds.** The
+ring described below (`/proc/rtk_regtrace`, every register write recorded,
+32768 entries) was a patch on the earlier kernel that still linked the
+vendor switch SDK, and it was dropped with that SDK: `grep -r rtk_regtrace
+kernel/extra` finds only comments. What remains is the captures' offline
+tooling -- `decode.py`, `compare.py`, `sequence.py`, the replay-table
+generators and `replayblob.py` -- which is how the register-replay tables
+our drivers load (`/lib/firmware/odi/`, "Replay tables in the image" at the
+end) were produced, and still how they are checked and regenerated. The
+hooks on the stick are inert on this kernel: `rcS` dumps only when
+`/proc/rtk_regtrace` is readable, and omcid writes its marks only when it
+can open it. The rest of this file describes the tracer as it worked, since
+that is what the captures record.
+
+With `/etc/config/regtrace.on` on the stick, rcS dumped the ring at every
+boot phase into `/tmp/regtrace.txt`:
 
     scp -O root@<stick>:/tmp/regtrace.txt boot.txt
     sh tools/regtrace/capture.sh <stick> <root-password> "omci provisioning" boot.txt
@@ -21,8 +32,9 @@ this repository; the decoder takes its path.
 ## Attributing writes to an OMCI command
 
 `echo mark <hex32> > /proc/rtk_regtrace` pushes one kind-M ring entry
-carrying a caller-defined tag; `omci_drv_call()` in `src/omci/respond/
-apply.c` writes one before and one after every `getsockopt()` it issues,
+carrying a caller-defined tag; omcid (`src/omci/respond/apply.c`) writes
+one before and one after every driver command it issues (then a
+`getsockopt()`, now the `ODI_OMCI_OP_CMD` netlink call),
 tagging bit 31 with the phase (0 before, 1 after) and bits 0..30 with the
 OMCI driver command number, whenever `/var/config/regtrace-mark` exists
 on the stick. `decode.py` groups the writes between a before/after pair
@@ -61,7 +73,7 @@ set (after) disarms. `echo armonly 0` turns it back off.
 
 `armonly` is not always enough by itself: a single long command can be noisy
 enough on its own to wrap the whole ring before its own after-mark lands.
-On isp1, cmd 51 (MIB reset) alone pushed over 16k writes with `armonly`
+On ISP1, cmd 51 (MIB reset) alone pushed over 16k writes with `armonly`
 already on, more than 16k of them at 0x012000-0x01202c -- what the v3
 comment here called "CPU-port NIC interrupt registers" (0x12000/0x12008)
 turned out, once the register map identified them, to be
@@ -188,7 +200,7 @@ line, plain register writes stay `w` lines in their original position.
     python3 tools/regtrace/sequence.py <trace.txt> --phase "rtk_init vlan" --summary
 
 No poll line is emitted. The original design expected the stock driver to
-spin-wait on `TABLE_CMD` bit 31 between table operations; the isp1
+spin-wait on `TABLE_CMD` bit 31 between table operations; the ISP1
 reads-included baseline capture showed neither half of that: the recorded
 CTRL write never carries the busy bit, and the read that follows it is
 one-shot, not a loop. The `t` line therefore carries the CTRL word RAW, as recorded, and
@@ -210,14 +222,14 @@ process), rather than trusting whatever regreplay the running image was
 flashed with. A stick flashed before a sequence.py/regreplay format change
 (the `t` line lost its `spa=/method=` comment and gained a raw CTRL word as
 its last column, commit `9d6c934`) would otherwise silently misparse
-table-entry lines: the Task 4 dry run on isp1's `odi-oss-260921-r2` (flashed
+table-entry lines: a dry run on ISP1's `odi-oss-260921-r2` (flashed
 one commit before that fix) hit exactly this, on the harmless `stp` script
 (no table entries) before it could reach one that had them. This is for
 POST-boot experiments only -- testing a replay script by hand without a
 reboot.
 
 rcS reads two flags from the config partition for the skip/replace
-experiment (`docs/TRIAL-BOOT.md` has the full procedure):
+experiment:
 `/etc/config/skip-steps` (space- or newline-separated `rtk_init` step names
 to leave out of the boot loop; never `intr`, `irq`, `ponmac`) and
 `/etc/config/regtrace.rw` (switches the ring to `on rw`).
@@ -253,3 +265,21 @@ output path:
 
     python3 tools/regtrace/mksdkinit.py boot.txt rootfs/skeleton/lib/firmware/odi/sdkinit.bin
     python3 tools/regtrace/replayblob.py dump rootfs/skeleton/lib/firmware/odi/sdkinit.bin
+
+`mkmodload.py` takes the register listing as a second argument
+(`mkmodload.py <capture.txt> <regmap.txt> [out.bin]`); that listing is
+generated from the stock firmware and not kept here, which is one reason
+the blobs are committed rather than rebuilt by `make`.
+
+## The other files
+
+- `compare.py <dump-a> <dump-b>` -- two raw dumps compared by command
+  bracket, or as final values per address (`--stream`).
+- `gpon_replay_compare.py <expected> <actual>` -- two write streams
+  compared position by position, in order; used by the GPON replay host
+  test.
+- `capture.sh`, `replay.sh` -- the capture pull and the post-boot replay
+  above; `stick-cmd.exp` and `stick-push.exp` are the `expect` helpers
+  they use to answer a password prompt (`user password cmd [timeout]
+  host`, `user password src dst host`). Both take the password on the
+  command line: use them only against a trial stick on your own network.

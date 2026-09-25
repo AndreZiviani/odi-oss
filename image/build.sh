@@ -282,9 +282,10 @@ fi
 # worth less than nothing, so one is generated per build and printed; pass
 # ROOT_PW to choose your own, or ROOT_PW=none for an empty password.
 #
-# MD5 crypt ($1$), not SHA-512: the libc here is uClibc 0.9.30.3 from 2010 and
-# its crypt() does DES and MD5 only. A $6$ hash would never match and the
-# account would simply be unloginable.
+# MD5 crypt ($1$): the toolchain builds uClibc-ng 1.0.59 (toolchain/README.md),
+# which does support SHA-256/512 crypt (UCLIBC_HAS_SHA512_CRYPT_IMPL=y in
+# toolchain/build-oss-toolchain.sh) -- this is a choice of hash scheme, not a
+# libc limitation, kept as-is here.
 say "accounts"
 mkdir -p "$OUT"
 PW=${ROOT_PW:-}

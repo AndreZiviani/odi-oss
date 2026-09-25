@@ -36,7 +36,7 @@ start() {
 	# flash -- `touch /etc/config/dropbear.off` -- and not an image default:
 	# /etc/config is the jffs2 partition, fwu.sh never writes it, so the flag
 	# is already there when the new image first comes up. See
-	# docs/TRIAL-BOOT.md for why that is worth doing once.
+	# docs/FLASHING.md ("Trial-booting it") for why that is worth doing once.
 	if [ ! -f /etc/config/dropbear.off ] && [ -x /sbin/dropbear ]; then
 		mkdir -p /etc/config/dropbear.d
 		KEY=/etc/config/dropbear.d/ed25519

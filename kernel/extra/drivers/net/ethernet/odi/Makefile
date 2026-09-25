@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 obj-$(CONFIG_ODI_NIC) += odi_nic.o
 obj-$(CONFIG_ODI_OMCI) += odi_omci.o
-obj-$(CONFIG_ODI_SWITCH) += odi_switch.o odi_switch_cmd.o odi_switch_dal.o odi_switch_tbl.o odi_reg.o odi_i2c.o odi_ddm.o
+obj-$(CONFIG_ODI_SWITCH) += odi_switch.o odi_switch_cmd.o odi_switch_dal.o odi_switch_tbl.o odi_switch_l2.o odi_reg.o odi_i2c.o odi_ddm.o
 # odi_replay_blob.o/odi_replay_fw.o -- the register-replay tables (modload
 # here, sdkinit and the GPON boot init below) are firmware files under
 # /lib/firmware/odi/, not linked data: validated and decoded by

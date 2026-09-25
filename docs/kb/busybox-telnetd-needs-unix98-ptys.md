@@ -39,6 +39,8 @@ node, and the pseudo-terminal filesystem actually mounted at `/dev/pts`.
 
 **A from-source replacement image using a current mainline kernel does not
 have this problem** — Unix98 PTY support and `devpts` are standard there.
+This repository's image ships no telnetd at all (busybox is built without
+it); ssh is its only network login.
 
 ## The neighbouring trap
 

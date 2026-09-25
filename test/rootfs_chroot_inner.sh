@@ -284,7 +284,7 @@ else
 	bad "services start generated no host key even with /dev/urandom present"
 fi
 
-# The OTHER half, because a trial boot depends on it. TRIAL-BOOT.md says to
+# The OTHER half, because a trial boot depends on it. docs/FLASHING.md says to
 # `touch /etc/config/dropbear.off` on the running stick before flashing, so
 # that the new image does not write a host key to mtd3 -- the one partition
 # fwu.sh never touches and the self-reverting trial therefore does not undo.

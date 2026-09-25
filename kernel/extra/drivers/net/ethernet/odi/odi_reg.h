@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * odi_reg.h -- the /dev/odi_sw ioctl ABI: switch-core register get/set,
- * SoC-address get, and per-port MIB counter get. The replacement
+ * SoC-address get, per-port MIB counter get, and the L2 lookup table
+ * (row readback, the valid-row walk, L2 multicast add/delete). The replacement
  * for the four register-only sockopts the stock kernel answers (RTK_OPT_
  * REGISTER, RTK_OPT_ADDRESS_GET/SET, RTK_OPT_SOC_GET, RTK_OPT_STAT_PORT),
  * plus RTK_OPT_TRANSCEIVER (DDM, ODI_SW_IOC_DDM_GET -- odi_ddm.c/odi_i2c.c
@@ -42,6 +43,7 @@
 #endif
 
 #include "odi_ddm.h" /* ODI_DDM_BUF_LEN, for struct odi_sw_ddm below */
+#include "odi_switch_l2.h" /* struct odi_sw_l2_row / _mcast_req, below */
 
 /* Switch-core register get/set -- one word at a caller-given offset, no
  * field decode. Covers RTK_OPT_ADDRESS_GET/SET and RTK_OPT_REGISTER
@@ -92,10 +94,46 @@ struct odi_sw_ddm {
 	uint8_t raw[ODI_DDM_BUF_LEN];
 };
 
+/* The L2 lookup table (odi_switch_l2.h has the row layout).
+ *
+ * L2_GET reads the row at .index, valid or not, and decodes it. L2_NEXT
+ * returns the first VALID row at or after .index (and sets .index to it),
+ * or fails with ENOENT past the last one: a caller walks the table with
+ * .index = found + 1. Both return the three raw words next to the decode,
+ * so a reader can check the layout against the hardware. The argument is
+ * struct odi_sw_l2_row itself (odi_switch_l2.h), 48 bytes.
+ */
+
+/* L2 multicast add/delete, through the hardware hash of (mac, key, ivl).
+ * Out: .index, the row the entry landed on (add); .found, whether a
+ * delete matched a row. Fails EINVAL for a unicast, broadcast or reserved
+ * 01:80:c2:00:00:0x address and for member bits past the ports; ENOSPC
+ * when the key hash bucket is full.
+ */
+struct odi_sw_l2_mcast {
+	struct odi_sw_l2_mcast_req req;
+	uint32_t index;
+	uint32_t found;
+};
+
+/* ipmc_on_group: L2_LOOKUP_SETUP.IPMC_ON_GROUP (0 = IPv4 multicast is switched on MAC +
+ * VID/FID, the mode MAC-keyed multicast entries serve). rows: how many
+ * rows the walk covers, 1024 with the CAM rows off, 1088 with them on.
+ */
+struct odi_sw_l2_mode {
+	uint32_t ipmc_on_group;
+	uint32_t rows;
+};
+
 #define ODI_SW_IOC_REG_GET	0xC0085301U	/* _IOWR('S', 1, struct odi_sw_reg) */
 #define ODI_SW_IOC_REG_SET	0x80085302U	/* _IOW ('S', 2, struct odi_sw_reg) */
 #define ODI_SW_IOC_SOC_GET	0xC0085303U	/* _IOWR('S', 3, struct odi_sw_soc) */
 #define ODI_SW_IOC_MIB_GET	0xC0105304U	/* _IOWR('S', 4, struct odi_sw_mib) */
 #define ODI_SW_IOC_DDM_GET	0xC01C5305U	/* _IOWR('S', 5, struct odi_sw_ddm) */
+#define ODI_SW_IOC_L2_GET	0xC0305306U	/* _IOWR('S', 6, struct odi_sw_l2_row) */
+#define ODI_SW_IOC_L2_NEXT	0xC0305307U	/* _IOWR('S', 7, struct odi_sw_l2_row) */
+#define ODI_SW_IOC_L2_MC_ADD	0xC01C5308U	/* _IOWR('S', 8, struct odi_sw_l2_mcast) */
+#define ODI_SW_IOC_L2_MC_DEL	0xC01C5309U	/* _IOWR('S', 9, struct odi_sw_l2_mcast) */
+#define ODI_SW_IOC_L2_MODE	0x4008530AU	/* _IOR ('S', 10, struct odi_sw_l2_mode) */
 
 #endif /* ODI_REG_H */

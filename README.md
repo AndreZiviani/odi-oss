@@ -44,17 +44,18 @@ the same hardware.
 | area | stock (OEM) firmware | this firmware |
 |---|---|---|
 | source | closed | fully open: mainline Linux + our own drivers and userland, all built from source, no proprietary code shipped or linked |
-| kernel | Linux 2.6.30 | Linux 6.18 (current LTS) |
+| kernel | Linux 2.6.30 | Linux 6.18.53 (current LTS), carried as 19 changed lines in 6 mainline files plus our own overlay, so the next LTS port is cheap |
 | switch / GPON MAC driver | closed | our own GPL driver, an independent implementation, built straight into the kernel |
 | GPON/OMCI daemon | closed | our own `omcid`, with `omcli`/`omcicli`, `omciprobe` and `omcicap` tooling around it |
-| switch/optics CLI (`diag`) | closed; some commands crash or hang the CLI | our own small CLI over our kernel's interfaces: optics, GPON state, alarms and flows, port MIB counters, register access; batches commands and always exits cleanly |
+| switch/optics CLI (`diag`) | closed; some commands crash or hang the CLI | our own CLI over our kernel's interfaces: optics, GPON state, alarms and flows, port MIB counters, the MAC table, register access; batches commands and always exits cleanly; the exporter's commands are byte-compatible with the stock CLI |
 | optics (DDM) readout | closed | our own SFF-8472 reader, exposed through `diag` |
-| multicast | closed IGMP handling | `igmpd`, an IGMP snooping daemon, observe-only and not started by default (see [`docs/TOOLS.md`](docs/TOOLS.md)) |
-| web UI | closed, minimal | `confd` (a separate project): same port, SSH-key management, build/version info |
+| multicast | closed IGMP handling | IGMP snooping is off (not used: one UNI port leaves little to prune). `igmpd` ships but is not started (see [`docs/TOOLS.md`](docs/TOOLS.md)) |
+| web UI | closed, minimal | `confd` (a separate project): same port; offers only the 21 settings this image reads, each marked LIVE, SERVICE RESTART, INTERRUPTS INTERNET or REBOOT, and applies them without a reboot where it can; firmware upload and write to the inactive slot; SSH-key management; build/version info |
 | metrics | none | a Prometheus exporter, `metricsd` (a separate project), including whether the OLT actually provisioned service, not just link state |
 | SSH | an old dropbear needing legacy algorithms re-enabled on the client | a current dropbear, ed25519 host key, `scp` in both directions |
 | toolchain | a decade-old vendor cross-compiler | our own gcc / binutils / uClibc-ng, built from source, targeting the CPU's actual instruction set |
-| boot safety | undocumented | one-shot trial boot (`sw_tryactive`) plus a watchdog that self-reverts a hang |
+| boot safety | undocumented | one-shot trial boot (`sw_tryactive`) plus a watchdog that self-reverts a hang or a boot whose userland never comes up |
+| boot debugging | none (no serial console) | every console line mirrored into DRAM that survives a watchdog reset; the next boot of this image shows the failed one in `/proc/odi_ramlog_prev`, with fatal-signal register dumps and early-boot crumbs |
 
 Every row above is backed by something you can read or run in this repo:
 [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md) has the detail and the
@@ -75,11 +76,27 @@ could not otherwise see: [`docs/FLASHING.md`](docs/FLASHING.md).
 **First login**, once the trial image is up: ssh as `root`, with
 the password `image/build.sh` generated for that build
 (`out/image/root-password-<version>.txt`), or the web UI on port 80
-(default `admin`/`admin`). Add your own SSH key and turn the password login
-off from there. Full detail, including every port and how to move files on
+(default `admin`/`admin`). Add your own SSH key from there; the root
+password stays valid beside it (it is baked into the read-only rootfs, and
+`ROOT_PW=` at build time chooses it). Full detail, including every port and how to move files on
 and off the stick: [`docs/ACCESS.md`](docs/ACCESS.md).
 
 ## Status and limitations
+
+**Tested on real sticks.** The current release,
+`odi-oss-260925-618z1` ([`CHANGELOG.md`](CHANGELOG.md)), runs on two
+DFP-34X-2C2 sticks on two different ISPs' GPON networks:
+
+- **ISP1**: 15 of 15 consecutive trial boots reached a confirmed userland
+  (75-81 s from `reboot`), then a 3-hour soak with a sample every 10
+  minutes came out clean: ONU state O5 throughout, every data round trip
+  through the stick's own NIC checksummed correctly, no receive or transmit
+  errors, no kernel errors, flat free memory.
+- **ISP2**: carrying a household's Internet link (PPPoE through the stick,
+  about 52 MB/s on a 20 MB download, the same as the image before it).
+
+Both run it as a one-shot trial over the stock firmware, which stays the
+committed slot on each; neither has had this image committed.
 
 This is new, actively developed firmware. Before relying on it:
 
@@ -88,11 +105,18 @@ This is new, actively developed firmware. Before relying on it:
 - `diag` is not the stock CLI: it carries only the commands our kernel can
   answer (`diag help` lists them). The handful the Prometheus exporter uses
   keep the stock syntax and output, so the exporter reads either firmware.
-- `igmpd` ships but nothing starts it, and its switch writes fail on the
-  6.18 kernel. Treat multicast/IGMP snooping as not implemented.
-- The web UI edits the stock firmware's config store, and most of its keys do
-  nothing on this image; a few of its buttons (Apply, Reset, firmware Write)
-  cannot work here. [`docs/SETTINGS.md`](docs/SETTINGS.md) says which.
+- IGMP snooping is off. `igmpd` ships but nothing starts it, and its switch
+  writes fail on the 6.18 kernel; our kernel does not deliver IGMP frames to
+  it either (the OMCI transport passes only OMCI frames up). The stick does
+  not prune multicast.
+- The config store is shared with the stock firmware: of its 184 keys this
+  image reads 21, and the UI shows the other 163 read-only.
+  [`docs/SETTINGS.md`](docs/SETTINGS.md) has each one and what applying it
+  costs.
+- The watchdog is armed on every boot: if the kernel hangs or the boot
+  scripts never finish within 120 s, the board resets (a trial falls back
+  to the committed slot). A stick that boots but is unreachable is not
+  reset; power-cycle it. See [`docs/FLASHING.md`](docs/FLASHING.md).
 - Builds are not bit-reproducible: the kernel and the image manifest embed
   build time, so two builds of the same tree are equivalent, not identical.
 - There is no serial console on this device. If a trial boot goes wrong and
@@ -103,7 +127,7 @@ This is new, actively developed firmware. Before relying on it:
 ## Documentation
 
 - [`docs/KERNEL.md`](docs/KERNEL.md) — the 6.18 kernel port: CPU, board, boot,
-  our drivers, how to build it.
+  the config, our drivers, the ramlog, how to build and check it.
 - [`docs/TOOLS.md`](docs/TOOLS.md) — every CLI and daemon: what it does, how
   to run and restart it, what it reads, where it logs, who starts it.
 - [`docs/SETTINGS.md`](docs/SETTINGS.md) — every setting the web UI and the
@@ -121,6 +145,9 @@ This is new, actively developed firmware. Before relying on it:
   above, expanded, with what backs each claim.
 - [`docs/LICENSING.md`](docs/LICENSING.md) — what license covers what in this
   tree.
+- [`docs/REFERENCES.md`](docs/REFERENCES.md) — the public specifications the
+  GPON code is written against, and how to fetch them.
+- [`CHANGELOG.md`](CHANGELOG.md) — what each release changed.
 - [`docs/kb/README.md`](docs/kb/README.md) — field notes on the device and the
   stock firmware's behaviour, from reverse-engineering real sticks.
 - [`AGENTS.md`](AGENTS.md) — repo layout, build/test commands and house rules,

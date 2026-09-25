@@ -1,6 +1,6 @@
 /* omcli -- omcicli, without the race.
  *
- * Phase 5 of replacing omci_app (see ../PLAN.md). The wire format is the
+ * See ../README.md for the design rationale. The wire format is the
  * vendor's, so this drives the stock daemon today and our own later: one
  * System V message queue, a 20-byte header and a 240-byte payload with the
  * command id in word 0. What changes is everything around it.

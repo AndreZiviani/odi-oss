@@ -1,13 +1,12 @@
-/* The 36-byte L2 multicast entry, byte by byte.
+/* The L2 multicast request igmpd hands /dev/odi_sw, byte by byte, and the
+ * command-line number parsers the one-shot mode uses.
  *
- * Nothing here talks to the driver -- that cannot be tested without a stick --
- * so what is pinned is the one thing that can be: that the bytes land at the
- * offsets a vendor caller was observed to write, and that nothing else moves.
- *
- * Checking the whole 36 bytes rather than the five fields is the point. A
- * field written at the wrong offset still passes a test that only reads the
- * offset it wrote, and an entry with a stray byte in it is the failure that
- * forwards multicast to the wrong port.
+ * Nothing here talks to the driver -- that cannot be tested without a stick
+ * (the kernel side has its own host test against a model of the table) -- so
+ * what is pinned is the request: every byte of the 28, not only the fields
+ * written. A field at the wrong offset still passes a test that only reads the
+ * offset it wrote, and a stray byte in the key is an entry the switch files
+ * under a different group.
  */
 #include "entry.h"
 #include "io.h"
@@ -25,13 +24,13 @@ static void ok(int cond, const char *what)
 }
 
 /* Every byte except the ones named, which must be zero. */
-static int only(const uint8_t *b, const int *keep, int nkeep)
+static int only(const uint8_t *b, unsigned len, const int *keep, int nkeep)
 {
-	for (int i = 0; i < 36; i++) {
+	for (unsigned i = 0; i < len; i++) {
 		int named = 0;
 
 		for (int k = 0; k < nkeep; k++)
-			if (keep[k] == i)
+			if (keep[k] == (int)i)
 				named = 1;
 		if (!named && b[i] != 0) {
 			out_fmt("      byte %d is 0x%x, expected 0\n", i, b[i]);
@@ -43,9 +42,12 @@ static int only(const uint8_t *b, const int *keep, int nkeep)
 
 int main(void)
 {
-	uint32_t e[IGMP_MAC_ENTRY_WORDS];
-	uint8_t *b = (uint8_t *)e;
+	struct odi_sw_l2_mcast m;
+	uint8_t *b = (uint8_t *)&m;
 	uint8_t mac[6];
+	uint32_t v;
+
+	ok(sizeof m == 28, "the request is the 28-byte ioctl argument");
 
 	/* 239.1.2.3 -- the low 23 bits, so the leading 1 of 239 is dropped. */
 	igmp_group_mac(mac, 0xef010203);
@@ -65,49 +67,63 @@ int main(void)
 		   "224.1.2.3 and 225.1.2.3 map to the same MAC, as the hardware does");
 	}
 
-	/* The full entry, vid applying. */
-	igmp_mac_entry(e, 0x0064, 0xef010203, 0x0000000a, 1);
-	ok(b[0] == 0x00 && b[1] == 0x64, "the vid is a big-endian halfword at +0");
-	ok(b[2] == 0x01 && b[3] == 0x00 && b[4] == 0x5e &&
-	   b[5] == 0x01 && b[6] == 0x02 && b[7] == 0x03,
-	   "the MAC is six bytes at +2, not three halfwords somewhere else");
-	ok(b[8] == 0 && b[9] == 0 && b[10] == 0 && b[11] == 0,
-	   "+8 is left zero, which is the only value it was seen to hold");
-	ok(b[12] == 0 && b[13] == 0 && b[14] == 0 && b[15] == 0x0a,
-	   "the port mask is a big-endian word at +12");
-	ok(b[24] == 0 && b[25] == 0 && b[26] == 0 && b[27] == IGMP_ENTRY_F_VID,
-	   "the flags word at +24 has bit 1 set when the vid applies");
+	/* Keyed on the VID (lookup on MAC + VID/FID). Big-endian target:
+	 *   +0  mac[6]         01 00 5e 01 02 03
+	 *   +6  key (u16)      00 64
+	 *   +8  ivl (u32)      00 00 00 01
+	 *   +12 ports (u32)    00 00 00 05
+	 *   +16 ext_ports, +20 index, +24 found: zero */
+	for (unsigned i = 0; i < sizeof m; i++)
+		b[i] = 0xa5;
+	ok(igmp_mac_entry(&m, 0x0064, 0xef010203, 0x5, 1) == 0, "a two-port join builds");
+	ok(b[0] == 0x01 && b[1] == 0x00 && b[2] == 0x5e &&
+	   b[3] == 0x01 && b[4] == 0x02 && b[5] == 0x03, "the group MAC at +0");
+	ok(b[6] == 0x00 && b[7] == 0x64, "the VID key at +6");
+	ok(b[11] == 1, "IVL set at +8: keyed on the VID");
+	ok(b[15] == 0x05, "the member mask at +12");
 	{
-		static const int keep[] = {1, 2, 3, 4, 5, 6, 7, 15, 27};
-		ok(only(b, keep, 9), "and nothing else in the 36 bytes is touched");
+		static const int keep[] = {0, 2, 3, 4, 5, 7, 11, 15};
+		ok(only(b, sizeof m, keep, 8), "and nothing else, output fields included, is set");
 	}
 
-	/* ipmcMode not 0: no vid, and the flag goes with it. */
-	igmp_mac_entry(e, 0x0064, 0xef010203, 0x0000000a, 0);
-	ok(b[0] == 0 && b[1] == 0, "with the vid not applying the field is zero");
-	ok(b[27] == 0, "and the flag is clear, not left over from the vid case");
-	ok(b[15] == 0x0a, "the port mask is unaffected by the mode");
+	/* Lookup on the group address: filtering id 0, no VID, no IVL. */
+	ok(igmp_mac_entry(&m, 0x0064, 0xef010203, 0x1, 0) == 0, "an SVL join builds");
+	ok(b[6] == 0 && b[7] == 0 && b[11] == 0, "without the vid the key and IVL are zero");
+	ok(b[15] == 0x01, "the member mask is unaffected by the mode");
 
-	/* A delete passes no mask. The vendor never writes +12 on that path,
-	 * and a zeroed entry is the same bytes -- which is what makes one
-	 * builder correct for both. */
-	igmp_mac_entry(e, 0x0064, 0xef010203, 0, 1);
-	ok(b[12] == 0 && b[13] == 0 && b[14] == 0 && b[15] == 0,
-	   "a delete entry carries no port mask");
-	ok(b[2] == 0x01 && b[7] == 0x03 && b[1] == 0x64,
-	   "and still carries the key: the vid and the MAC");
+	/* A delete passes no mask; the key is the MAC and the VID. */
+	ok(igmp_mac_entry(&m, 0x0064, 0xef010203, 0, 1) == 0, "a delete builds");
+	ok(b[15] == 0 && b[5] == 0x03 && b[7] == 0x64 && b[11] == 1,
+	   "a delete carries the key and no members");
 
-	/* A full 32-bit mask, to catch a builder that truncated to a byte. */
-	igmp_mac_entry(e, 1, 0xe0000001, 0xdeadbeef, 1);
-	ok(b[12] == 0xde && b[13] == 0xad && b[14] == 0xbe && b[15] == 0xef,
-	   "a wide port mask survives all four bytes");
+	/* A VID wider than 12 bits is cut to the field, not carried into IVL. */
+	igmp_mac_entry(&m, 0xf123, 0xef010203, 1, 1);
+	ok(b[6] == 0x01 && b[7] == 0x23, "the key is 12 bits");
 
-	/* The entry is nine words, and the accessor reads it as words. If the
-	 * byte writes above landed in the wrong word the wrapper would stage
-	 * the wrong offsets. */
-	igmp_mac_entry(e, 0x0102, 0xe0000001, 0x00030004, 1);
-	ok(e[0] == 0x01020100 && e[3] == 0x00030004 && e[6] == IGMP_ENTRY_F_VID,
-	   "read back as words, the fields are in words 0, 3 and 6");
+	/* Bit 4 and up name ports the switch does not have: refused, and the
+	 * request is left zeroed rather than half built. */
+	ok(igmp_mac_entry(&m, 1, 0xef010203, 0x10, 1) == -1,
+	   "a mask past the four switch ports is refused");
+	{
+		static const int none[] = {-1};
+		ok(only(b, sizeof m, none, 0), "and the refused request is all zero");
+	}
+
+	/* The one-shot parsers. */
+	ok(igmp_parse_ipv4("239.1.2.3", &v) && v == 0xef010203, "a dotted group parses");
+	ok(igmp_parse_ipv4("224.0.0.1", &v) && v == 0xe0000001, "224.0.0.1 parses");
+	ok(!igmp_parse_ipv4("239.1.2", &v), "three parts are refused");
+	ok(!igmp_parse_ipv4("239.1.2.3.4", &v), "five parts are refused");
+	ok(!igmp_parse_ipv4("239.1.256.3", &v), "a part over 255 is refused");
+	ok(!igmp_parse_ipv4("239..2.3", &v), "an empty part is refused");
+	ok(!igmp_parse_ipv4("0239.1.2.3", &v), "a four-digit part is refused");
+	ok(igmp_parse_num("0x1", &v) && v == 1, "0x1 parses");
+	ok(igmp_parse_num("10", &v) && v == 10, "decimal parses");
+	ok(igmp_parse_num("4294967295", &v) && v == 0xffffffffu, "the largest decimal parses");
+	ok(!igmp_parse_num("4294967296", &v), "one past it is refused");
+	ok(!igmp_parse_num("0x", &v) && !igmp_parse_num("", &v), "no digits is refused");
+	ok(!igmp_parse_num("0x123456789", &v), "nine hex digits are refused");
+	ok(!igmp_parse_num("12a", &v), "trailing junk is refused");
 
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();

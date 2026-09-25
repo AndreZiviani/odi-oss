@@ -135,14 +135,14 @@
  * two PBO base registers, and every capture writes the same pair: the UL
  * base register (0xf020e8) gets 0x01eff000 and the DL one (0xf0a0b8)
  * gets 0x016ff000 (test/fixtures/isp1-260923-g4-sdkinit-filtered.txt).
- * Both follow one rule, read from the vendor 2.6.30 prom.c
- * (bsp_pbo_mem_auto(), reference only): UL = mem_size - (1 MiB + 4 KB),
- * DL = mem_size - bank_size - (1 MiB + 4 KB), with bank_size = mem_size /
- * 4 on this 4-bank 32 MB part. So
+ * Both follow one arithmetic rule, cross-checked against our own register
+ * captures: UL = mem_size - (1 MiB + 4 KB), DL = mem_size - bank_size -
+ * (1 MiB + 4 KB), with bank_size = mem_size / 4 on this 4-bank 32 MB part.
+ * So
  *   DL: [0x016ff000, 0x01800000)   UL: [0x01eff000, 0x02000000)
- * The DL reservation used to start at 0x01700000 (the vendor Kconfig
- * default, which bsp_pbo_mem_auto() overrides): pfn 0x16ff, the first
- * page the engine owns, went to the page allocator.
+ * The DL reservation used to start at 0x01700000, one page short of the
+ * arithmetic above: pfn 0x16ff, the first page the engine owns, went to
+ * the page allocator.
  *
  * Both DRAM pages this board's own ramlog uses (0x017ff000 and
  * 0x01fff000) are the barrier pages of these two windows, so reserving

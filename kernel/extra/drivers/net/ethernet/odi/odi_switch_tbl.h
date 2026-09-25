@@ -171,7 +171,10 @@ int odi_switch_table_write(uint32_t table, uint32_t index, const uint32_t *data,
  * A prior unverified read-side implementation (same handshake with
  * IS_WRITE=0) was removed with no capture ever exercising it, no test
  * covering it, and no caller; reintroduce it against a real 't'-entry
- * capture if one ever turns up.
+ * capture if one ever turns up. The L2 lookup table is the exception, and
+ * it has its own reader: odi_switch_l2.c drives this same register block
+ * under TABLE_KIND 0, with the access methods and the status word the LUT
+ * needs and these tables do not.
  */
 
 #endif /* ODI_SWITCH_TBL_H */

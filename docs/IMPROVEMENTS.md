@@ -26,6 +26,27 @@ independent implementation built straight into the kernel; there is no proprieta
 kernel module in this image at all. `docs/KERNEL.md` has the CPU, board and
 driver detail.
 
+**Cheap to carry forward.** The port touches 19 lines in 6 mainline files
+(`tools/kernel-footprint.sh`): the CPU probe case, the board's System type
+entry, and the Kconfig and Makefile lines that reach our overlay. Every
+other line is a file of our own in `kernel/extra/`, copied over the tree.
+The CPU is built as mainline's own `CPU_R3000`, so no core exception, TLB
+or context-switch code is patched.
+
+**No trust in what the hardware was left doing.** The loader leaves the
+NIC's receive DMA running into memory the kernel then hands out; our board
+code stops it before the kernel owns a page. The icache, which does not
+snoop, is invalidated whenever a page gets new contents for a process. The
+PON packet-buffer windows are reserved exactly where the hardware puts
+them. `docs/KERNEL.md` has each one.
+
+**Smaller and leaner.** A size-optimised config with every syscall family
+nothing in the rootfs can reach turned off (the config says why, option by
+option, and which ones are kept on purpose), and the register replay tables
+loaded from `/lib/firmware/odi/` only while they are applied rather than
+compiled in: about 84 KB of spare room in the 1328 KB kernel partition,
+and about 484 KB of RAM that the tables no longer hold.
+
 **A hung kernel resets itself, and so does a stuck boot script.** The
 watchdog kicker (`odi_wdt.c`) tracks a userland-confirmation deadline in
 addition to "the kernel is alive," so a boot that hangs before its init
@@ -35,7 +56,13 @@ kernel that panics outright. See `docs/KERNEL.md` and `docs/FLASHING.md`.
 **A boot you cannot see is not a boot you cannot debug.** There is no serial
 console on this device; the DRAM ramlog console (`odi_ramlog.c`) mirrors
 every kernel console line into DRAM that survives a watchdog reset, so a
-failed trial can be read back from the other slot afterward.
+failed trial can be read back from the other slot afterward: with
+`tools/memprobe` from the stock image, or `cat /proc/odi_ramlog_prev` from
+the next boot of this one, which saves the previous boot's pages before it
+writes its own and says which boot, slot and build they came from. A
+process killed by a signal prints its registers there
+(`print-fatal-signals=1`), and early-boot crumbs say how far a kernel got
+that died before its first console line.
 
 **One-shot trial boots by design.** `fwu.sh` refuses to write the slot you
 are running from or the slot the bootloader still trusts, and a freshly
@@ -55,20 +82,27 @@ proprietary daemon or kernel module in the path. `docs/TOOLS.md` covers
 bias current, tx/rx power), exposed through `diag` and the Prometheus
 exporter.
 
-**IGMP snooping/proxy (`igmpd`)**, watching group membership and
-programming the switch to match — currently shipped in observe-only mode by
-default (`docs/TOOLS.md`), so treat multicast as an area still maturing
-rather than a finished feature.
+**IGMP snooping (`igmpd`)**: the group state machine and the switch
+programming (static L2 multicast entries through `/dev/odi_sw`) are written
+and host-tested, but it is shipped and not started: on this kernel no IGMP
+frame reaches it, and it cannot yet send a trapped report or query on
+(`docs/TOOLS.md` has why that rules out starting it). Treat multicast as an
+area still maturing rather than a finished feature.
+
+**The MAC table.** `diag l2-table get all` reads the switch L2 lookup table
+back -- learned addresses with the port each was learned on, and multicast
+groups with their members -- and the web UI shows it.
 
 ## The `diag` CLI
 
-**Our own command set, over our own kernel.** `diag` carries only commands
-our kernel can answer: the transceiver's DDM readings, GPON state, alarms
-and GEM flows, per-port MIB counters, and switch-core register access
-(`diag help` lists them, `src/diag/README.md` explains each). The commands
-the Prometheus exporter runs keep the stock CLI's syntax and output byte for
-byte, so one exporter build reads both this firmware and the stock one; a
-test under qemu pins that output.
+**Our own command set, over our own kernel.** `diag` is a hand-written
+command table, each with its own help: the transceiver's DDM
+readings, GPON state, alarms and GEM flows, per-port MIB counters, the L2
+(MAC) table, and switch-core register access (`diag help` lists them, `src/diag/README.md`
+explains each). The commands the Prometheus exporter runs keep the stock
+CLI's syntax and output byte for byte, so one exporter build reads both
+this firmware and the stock one; `make test-diag` pins that output under
+qemu against golden files.
 
 **Batched on stdin, always exits.** `diag` reads commands from stdin one per
 line and stops cleanly at EOF, rather than requiring a terminal; see
@@ -93,7 +127,18 @@ is exactly what a factory reset erases.
 
 **`confd`**, our own web UI (a separate project), on the same port the
 stock firmware's UI uses, reading the OMCI daemon through the same command
-shapes as `omcli`. **`metricsd`**, a Prometheus exporter (also a separate
+shapes as `omcli`.
+
+**Settings that say what they cost.** Of the 184 keys in the config store
+the stock firmware shares with this image, the UI offers for editing only
+the 21 this image actually reads, each marked with what applying it costs:
+LIVE, SERVICE RESTART, INTERRUPTS INTERNET or REBOOT, the last two behind a
+confirmation. The other 163 are shown read-only and still round-trip
+through backup and restore. `apply.sh` applies the management addresses
+live and the OMCI settings without a reboot (it re-ranges the ONU), the
+firmware page writes an uploaded image to the inactive slot
+(`fwu_starter.sh`), and the OLT identity keys are reported only behind an
+explicit switch. `docs/SETTINGS.md` has every key and control. **`metricsd`**, a Prometheus exporter (also a separate
 project), including `gpon_omci_services` — how many services the OLT has
 actually provisioned, so a stick that is optically up but not provisioned
 is visible as such rather than reading as healthy.
@@ -104,7 +149,9 @@ Every ELF that reaches the image — kernel, packages, our own tools — passes
 an instruction audit (`packages/isa-audit.sh`, `packages/isa-allowlist.sh`)
 against what the RLX5281 actually implements, as a build gate rather than a
 report: a binary carrying an instruction this CPU traps on does not ship.
-`make test` runs lint, the host-side unit tests and the OMCI daemon under
-qemu (about 130 checks) without touching a stick; `make image-all` builds
-the whole image from a clean clone. See `docs/BUILDING.md` and
+`make test` runs lint, the host-side unit tests, `diag`'s tests (the
+exporter contract included) and the OMCI daemon under qemu (about 130
+checks) without touching a stick, and CI runs the same on every push and
+pull request (`.github/workflows/ci.yml`); `make image-all` builds the
+whole image from a clean clone. See `docs/BUILDING.md` and
 `docs/CROSS-COMPILING.md`.

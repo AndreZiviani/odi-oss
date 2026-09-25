@@ -29,6 +29,8 @@ enum cmd_id {
 	CMD_MIB_DUMP,
 	CMD_REG_GET,
 	CMD_REG_SET,
+	CMD_L2_ALL,
+	CMD_L2_INDEX,
 };
 
 struct cmd_def {

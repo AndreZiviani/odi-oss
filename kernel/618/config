@@ -48,7 +48,7 @@ CONFIG_SYSVIPC=y
 # CONFIG_POSIX_MQUEUE is not set
 
 # Console / init. U-Boot passes the real command line in argv, built per
-# boot slot (patch 0023, prom_init copies it). CONFIG_CMDLINE is the
+# boot slot; our board code's prom_init copies it. CONFIG_CMDLINE is the
 # slot-0 line and only a fallback: BUILTIN_EXTEND puts it FIRST and the
 # bootloader arguments after it, so the per-slot root= and mtdparts=
 # win (the last occurrence of each is the one used). The default
@@ -233,7 +233,7 @@ CONFIG_POSIX_TIMERS=y
 CONFIG_VM_EVENT_COUNTERS=y
 
 # ethtool netlink uAPI: no ethtool binary ships, and metricsd reads SFP/link
-# state through our own /dev/odi_switch and /proc files, never an ethtool
+# state through our own /dev/odi_sw and /proc files, never an ethtool
 # ioctl or the netlink family this gates.
 # CONFIG_ETHTOOL_NETLINK is not set
 

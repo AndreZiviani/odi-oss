@@ -24,7 +24,7 @@ is xmlconfig's own split, recovered from its descriptor table.
 Added 2026-09-24, also invented:
 
 - `cfg_csonly*` -- `GPON_PLOAM_PASSWD` and `LOID_PASSWD_OLD` in the cs file,
-  the layout isp1 actually has. omcid reads each key from whichever file
+  the layout ISP1 actually has. omcid reads each key from whichever file
   carries it.
 - `cfg_vlan_type0.xml`, `cfg_vlan_nopri.xml` -- the manual VLAN gated off by
   `VLAN_CFG_TYPE` 0, and by an empty priority.

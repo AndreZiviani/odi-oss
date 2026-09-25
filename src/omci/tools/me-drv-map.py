@@ -26,8 +26,8 @@ def drv_commands():
     # find the rootfs or dies on an exception returns no output, every lookup
     # below misses, and this tool reports "0 of 81 managed entities reach the
     # driver directly" -- which reads as a finding rather than as a failure.
-    # PLAN.md quotes this tool's count, so a confident zero is worse than a
-    # traceback.
+    # This tool's count gets quoted in commit messages and reports, so a
+    # confident zero is worse than a traceback.
     r = subprocess.run([sys.executable, os.path.join(HERE, 'omci-drv-api.py')],
                        capture_output=True, text=True)
     if r.returncode != 0:

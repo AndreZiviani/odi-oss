@@ -71,8 +71,12 @@ reg 0x02304c SWITCH_GLOBAL_MISC 1:1=IPG_COMP_ON 3:2=TX_CRC_MODE
 reg 0x020004 PORT_MAC_MISC     4:4=SMALL_IPG_TAG 2:2=SMALL_PKT
 # switch get output-drop port <ports> state
 reg 0x011054 PORT_OUT_DROP     0:0=DROP_ON
-# l2-table get arp-usage-as-known / cam full-act
-reg 0x017000 L2_LOOKUP_SETUP   28:28=ARP_AS_KNOWN 29:29=CAM_FULL_ACTION 22:22=AGE_ON_LINK_DOWN 21:21=CAM_OFF 20:0=AGE_TICKS
+# l2-table get arp-usage-as-known / cam full-act; IPMC_ON_GROUP: IPv4
+# multicast looked up on the group address rather than MAC + VID/FID
+reg 0x017000 L2_LOOKUP_SETUP   28:28=ARP_AS_KNOWN 29:29=CAM_FULL_ACTION 23:23=IPMC_ON_GROUP 22:22=AGE_ON_LINK_DOWN 21:21=CAM_OFF 20:0=AGE_TICKS
+# per port: what the switch does with IGMP/MLD control frames, 0 forward,
+# 1 drop, 2 trap to the CPU (the stock init writes 0x400: data on, all forward)
+reg 0x01105c IGMP_PORT_ACTION  10:10=MCAST_DATA_ON 9:8=MLD2 7:6=MLD1 5:4=IGMP3 3:2=IGMP2 1:0=IGMP1
 # bandwidth get ingress flow-control port <ports> state
 reg 0x020010 PORT_ING_METER    1:1=FLOWCTRL_ON
 # bandwidth get|set ingress bypass-packet state
@@ -164,8 +168,9 @@ reg 0x011018 MAX_FRAME_LEN_1   13:0=BYTES
 reg 0x01101c DSCP_REMARK_MAP   5:0=DSCP
 
 # Indirect table access (odi_switch_tbl.c)
-reg 0x012000 TABLE_CMD         31:31=START 20:9=ROW 6:4=METHOD 3:3=IS_WRITE 2:0=TABLE_KIND
-reg 0x012004 TABLE_STATUS      13:13=IN_PROGRESS
+reg 0x012000 TABLE_CMD         31:31=START 20:9=ROW 8:7=WALK_PORT 6:4=METHOD 3:3=IS_WRITE 2:0=TABLE_KIND
+# HIT, IN_CAM and ROW: what an L2 table hash access found or placed (odi_switch_l2.c)
+reg 0x012004 TABLE_STATUS      13:13=IN_PROGRESS 12:12=HIT 10:10=IN_CAM 9:0=ROW
 reg 0x012008 TABLE_WRITE_WORD
 reg 0x01201c TABLE_READ_WORD
 

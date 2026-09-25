@@ -46,3 +46,11 @@ vlan get entry 1
 ? gpon get
 ? register get 
 ? nothing
+l2-table get all
+l2-table get entry address valid
+l2-table g e a v
+l2-table get index 0x3ff
+l2-table get index
+l2-table get
+? l2-table
+? l2-table get e

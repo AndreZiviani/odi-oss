@@ -21,7 +21,7 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `confd` | daemon, the web UI | `/etc/init.d/services` | TCP 80 | `/var/log/services.log` | stays dead |
 | `metricsd` | daemon, the Prometheus exporter | `/etc/init.d/services` | TCP 9100 | `/var/log/services.log` | stays dead |
 | `dropbear` | daemon, ssh and scp | `/etc/init.d/services` | TCP 22 | `/var/log/services.log` (`-E`) | stays dead |
-| `igmpd` | daemon, IGMP snooping | nothing (shipped, not started) | odi_omci netlink (redirect type 4) | stdout | -- |
+| `igmpd` | daemon, IGMP snooping | nothing (shipped, not started; see its section) | odi_omci netlink (redirect type 4), `/dev/odi_sw` | stdout | -- |
 | `login` | serial console login | inittab `respawn` | ttyS0 | -- | respawned |
 | `diag` | CLI: optics, GPON state, counters, registers | you, rcS, network.sh, metricsd, confd | `/dev/odi_sw`, `/proc/odi_gpon`, netlink | stdout | -- |
 | `omcli` / `omcicli` | CLI for omcid | you, metricsd, confd | omcid's queues | stdout | -- |
@@ -50,7 +50,9 @@ everything slow. In order, rcS:
 2. seeds entropy (`seedrng`, seed kept in `/etc/config/seedrng`), sets up
    the optional register trace, sets the hostname and `lo`;
 3. runs the switch SDK init verbs through `/proc/rtk_init` (`intr` ...
-   `ponmac`), one crumb before and after each;
+   `ponmac`), one crumb before and after each; the kernel loads the
+   register replay behind each verb from `/lib/firmware/odi/sdkinit.bin`
+   and releases it again (`docs/KERNEL.md`);
 4. brings up management networking with `/etc/scripts/network.sh` (host
    SerDes check, MAC, `br0` over `eth0.2`, the address, and the second
    address `br0:2` when `LAN_ENABLE_IP2` is 1);
@@ -58,9 +60,10 @@ everything slow. In order, rcS:
    `/var/log/services.log`: `metricsd 9100`, `confd 80`, then `dropbear`
    (generating the ed25519 host key on first boot). Each can be turned off
    with a `.off` file, see `docs/SETTINGS.md`;
-6. confirms to the watchdog once the host answers ARP
-   (`/proc/luna_watchdog/userland_ok`); without that the board resets at
-   120 s of uptime;
+6. confirms to the watchdog (`/proc/luna_watchdog/userland_ok`); without
+   that the board resets at 120 s of uptime. The network is not a
+   condition, unless `/etc/config/confirm-arp` exists (development: then
+   only after an ARP reply from the `.2` of the `br0` subnet);
 7. drives the optics (`PIN_GPIO_SELECT`, laser TX-enable on GPIO 13);
 8. runs the PON steps, one per line from `/etc/pon-steps` (or
    `/etc/config/pon-steps` when that exists): `i2c 1`, `i2cen 1`, `gpon`,
@@ -133,7 +136,8 @@ The separate odi-ui project, fetched as a release. Serves the UI and its
 JSON API on the port given as its only argument (`confd 80` here), HTTP
 Basic with the credential in `/etc/config/confd.auth` (`user:password`;
 default `admin` / `admin` while that file is absent). It reads its pages and
-four `.tsv` tables from `/etc/confd/`, and any file of the same name in
+five `.tsv` tables (`keys`, `meta`, `consumers`, `features`, `settings`)
+from `/etc/confd/`, and any file of the same name in
 `/etc/config/confd/` overrides the shipped one; `settings.tsv` among them
 is the list of keys this image reads and what applying each costs. It runs
 `/etc/scripts/flash`, `/etc/scripts/apply.sh`, `/etc/scripts/fwu_starter.sh`,
@@ -172,18 +176,62 @@ so adding a key needs no restart. `/bin/scp` is the same multi-call binary
 ### `igmpd` -- IGMP snooping (shipped, not started)
 
     igmpd [-w] [-f] [-n COUNT]
+    igmpd [-w] -j GROUP -p PORTS [-v VID]
+    igmpd [-w] -l GROUP [-v VID]
 
     -w         WRITE the entries to the switch. Off by default.
     -n COUNT   stop after COUNT frames (0, the default, is forever)
     -f         start even if a live process holds uid 4
+    -j GROUP   one-shot: program GROUP with member PORTS (hardware port
+               bits, 0x1 the UNI) and exit
+    -l GROUP   one-shot: remove GROUP and exit
+    -v VID     the VID a one-shot names (default 0); printed only, the
+               entry is keyed on filtering id 0 (SVL)
     -h         this text; registers nothing
 
-Registers for packet-redirect type 4, describes every IGMP frame the switch
-traps to the CPU and keeps the group and router-port state. Nothing starts
-it. On this kernel its switch programming cannot work: the three L2
-multicast writes it makes go through a socket-option path the 6.18 kernel
-does not have and fail with -99, with or without `-w`. Treat it as a
-diagnostic that prints what it sees.
+As a daemon it registers for packet-redirect type 4, describes every IGMP
+frame the switch traps to the CPU, keeps the group and router-port state,
+and with `-w` programs each change into the switch as a static L2
+multicast entry: the group MAC (01:00:5e and the low 23 bits), keyed on
+filtering id 0 (SVL), with the joined ports as members. Not on the VID the
+report came in on: every VLAN on this image is shared, which the stick shows
+in its own table (every learned address is an SVL row on filtering id 0,
+the VID-14-tagged one from the PON included), so an entry keyed on a VID
+would never match a frame. `docs/KERNEL.md` ("The L2 table") has the row
+layout. The writes go
+through `/dev/odi_sw` (`ODI_SW_IOC_L2_MC_ADD`/`_DEL`, `odi_switch_l2.c`);
+`diag l2-table get all` shows the result.
+
+`-j` and `-l` drive that same switch path by hand, without registering
+anything, so an entry can be put in and checked without an IGMP frame:
+
+    igmpd -w -j 239.1.2.3 -p 0x1        # member: the UNI
+    diag l2-table get all               # 01:00:5E:01:02:03 ... SVL mc 0x1
+    igmpd -w -l 239.1.2.3               # a second -l: no such entry in the switch
+
+Without `-w` both print the entry they would write and touch nothing.
+
+**Nothing starts it, on purpose.** On this kernel the daemon never sees a
+frame, for three reasons that each rule out starting it at boot:
+
+- the switch forwards IGMP rather than trapping it: the stock init (which
+  rcS replays) leaves every IGMP and MLD action in `IGMP_PORT_ACTION`
+  (0x01105c + 4 * port) at forward, so no IGMP frame reaches the CPU;
+- odi_omci delivers only OMCI frames (RX reason 246) on its redirect
+  channel; nothing hands a trapped IGMP frame to type 4;
+- and igmpd has no transmit path. Turning the trap on would take every
+  host report away from the OLT, and every OLT query away from the host,
+  until igmpd sent each one on itself. The OLT would then let the
+  membership lapse and stop sending the stream.
+
+What snooping would buy here is small. The stick has one UNI, so there is
+no second LAN port to prune multicast from; the OLT already sends a
+multicast GEM only for groups someone joined. The one saving left is the
+CPU: the image floods unknown multicast to all four ports, the CPU port
+included, and a static entry per joined group would keep that traffic off
+the CPU. That is worth a trap and a transmit path only once there is a
+multicast source to test against. Until then `SNOOPING_ENABLED` stays out
+of the UI (`docs/SETTINGS.md`).
 
 ## CLIs
 
@@ -198,6 +246,9 @@ reference; the commands:
     gpon get alarm-status             LOS, LOF and LOM, live
     gpon get flows                    GEM flows omcid programmed
     mib dump counter port <ports>     port MIB counters; all, 2, 0-3, 0,2-3
+    l2-table get all                  the MAC table: every valid L2 table row
+    l2-table get entry address valid  the same, in the stock spelling
+    l2-table get index <index>        one row by number, with its raw words
     register get <address> <words>    switch-core register read
     register set <address> <value>    switch-core register write
     help                              the list, with descriptions
@@ -215,6 +266,43 @@ pipe or a file and wrap it in `timeout` (rcS and network.sh use
 `timeout 10`). Over ssh, pipe inside the remote command
 (`ssh root@<stick> 'printf "...\n" | diag'`): `ssh root@<stick> diag < file`
 reaches diag as an immediate end of input.
+
+`l2-table get all` walks the switch L2 lookup table (1,024 hashed rows,
+plus the 64 CAM rows while those are on, as they are on this image: 1,088)
+and prints one line
+per valid row:
+
+    L2 table: 1088 rows, IPv4 multicast looked up on MAC + VID/FID
+    MACAddress        Spa Fid Age Vid  State  Ext Hash Type Ports Index
+    BC:24:11:05:B3:24 0   0   7   0    Auto   0   SVL  uc   -     0x06c
+    01:00:5E:01:02:03 -   -   -   0    Static -   SVL  mc   0x1   0x17c
+    00:E4:06:4C:C6:F4 2   0   7   14   Auto   0   SVL  uc   -     0x270 ctag
+    04:9F:CA:78:72:82 0   0   7   0    Auto   0   SVL  uc   -     0x364
+    38:3A:21:28:27:C8 3   0   7   0    Auto   0   SVL  uc   -     0x390
+    5 entries
+
+(a trial stick, with `igmpd -w -j 239.1.2.3 -p 0x1` in place: the host
+on the UNI, the OLT side on the PON with its C-tag, the stick own CPU
+port, and the static group.)
+
+`Spa` is the port a unicast address was learned on (0 the UNI, 2 the PON,
+3 the CPU), `Age` counts down from 7 and stops at 0, `Auto` is learned and
+`Static` written. A multicast row has no source port or age and lists its
+member ports instead. The header words are the stock listing's, which is
+what lets the web UI read either; `l2-table get entry address valid` is
+kept as a second spelling because confd sends it, and the same confd runs on
+the stock slot. `l2-table get index <n>` reads one row whatever its state
+and prints its three raw words, for checking the layout against the
+hardware. All three are read-only.
+
+Which rows are listed is the table engine answer, not a bit of the row:
+after each row read the engine reports whether the row holds an entry
+(TABLE_STATUS.HIT, 0x012004 bit 12). The row own bit 77, which a write sets
+to place an entry, reads back set on every row, empty ones included, and an
+empty row reads back with its bucket in the low MAC octet -- so a listing
+that trusted bit 77 showed all 1,024 hashed rows as `00:00:00:00:00:NN`. `get
+index` still prints any row, with `valid yes` or `valid no` from the
+engine.
 
 The commands the exporter runs keep the stock CLI's syntax and output byte
 for byte, and `register get` keeps its `0x<address> 0x<value>` layout for
@@ -383,12 +471,12 @@ drivers behind them.
 
 | file | read | write |
 |---|---|---|
-| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM (diag, metricsd) | register writes (diag) |
+| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
 | `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters, init results | `init_platform [mask]`, `init_modload <mask>`, `init_parity <mask>`, `parity_add ...`, `sdkinit_mask <mask>` (rcS does these once) |
 | `/proc/odi_intr` | interrupt dispatch counters | -- |
 | `/proc/rtk_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
-| `/proc/luna_watchdog/userland_ok` | -- | `1`: userland is reachable, stop the 120 s reset |
+| `/proc/luna_watchdog/userland_ok` | -- | `1`: userland is up, stop the 120 s reset |
 | `/proc/luna_watchdog/watchdog_flag` | -- | `1`: keep kicking the hardware watchdog |
 | `/proc/odi_ramlog_prev` | the previous boot's DRAM ramlog, decoded: this boot's counter and slot, the previous boot's counter, slot, build id and last early crumb, then its first 4016 bytes and its last 4080 (root only) | -- |
 | `/proc/odi_ramlog_prev_raw` | the same two pages as 8192 raw bytes, page A then page B, for `ramlog-read.sh`-style decoding off the stick (root only) | -- |
@@ -442,6 +530,10 @@ this repository:
   unanswered until it is started again.
 - `diag register set`, writes to `/proc/rtk_init` or `/proc/odi_omci`, and
   `regreplay` reprogram the hardware under a running stack.
+- `igmpd -w` (the daemon or `-j`/`-l`) writes static L2 multicast entries.
+  The driver refuses unicast, broadcast and 01:80:c2:00:00:0x addresses, but
+  a wrong member mask on a group that carries traffic misforwards it
+  silently. `diag l2-table` itself only reads.
 - Reading an undecoded SoC register address with `devmem` can stall the bus
   until the watchdog resets the stick.
 - `nv setenv sw_commit` removes the trial-boot fallback; `flash_eraseall` on

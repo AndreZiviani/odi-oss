@@ -9,6 +9,7 @@ point in this build.
     kernel/618/fetch.sh    fetches and verifies linux-6.18.53.tar.xz
     kernel/618/mainline/   the pristine tree it extracts, gitignored
     kernel/618/patches/    our edits to mainline files, applied in order
+    kernel/618/debug/      debug-only edits, applied with CRUMBS_CORE=1
     kernel/extra/          every file of our own, laid over the tree at its path
     kernel/618/config      the seed config; make olddefconfig completes it
     kernel/build.sh        builds it all, in a container, with our toolchain
@@ -65,6 +66,33 @@ the board file registers exactly this stick's UART and flash controller and
 reserves the PON DMA windows, and the boot command line (which slot, which
 MAC, etc.) comes from U-Boot's `argv`, built per boot slot.
 
+Two things in the board file exist because the hardware is not idle when
+this kernel starts:
+
+- **The NIC DMA is stopped in `prom_init()`.** The loader that runs before
+  us leaves the CPU-port NIC's receive engine running, on its own
+  descriptor ring and buffers. `odi_nic` resets and reprograms the NIC
+  only at its first `ndo_open`, from rcS, so until then every frame that
+  arrived was written through the loader's descriptors: the payload into
+  its buffers, the descriptor write-back into its ring slot, both in pages
+  this kernel had long since handed out. The symptom was a page of
+  `/bin/busybox` text in the page cache overwritten after init started, and
+  every exec of it taking the same SIGBUS until the watchdog reset the
+  board, in roughly one boot in six on some kernel layouts. `prom_init()`
+  now writes 0 to the NIC's two RUN registers (`RTL8686_NIC_RUN`,
+  `RTL8686_NIC_RUN1`, `rtl8686regs.h`) with two uncached stores, before
+  this kernel owns a single page; 20 of 20 boots of the same layout were
+  clean after it.
+- **The PBO DMA windows are reserved where the hardware has them.** The
+  PON MAC's packet-buffer engine owns two DRAM ranges, each 1 MiB plus a
+  4 KB barrier page: downstream `[0x016ff000, 0x01800000)` and upstream
+  `[0x01eff000, 0x02000000)`, the bases every replayed switch init writes
+  to the two PBO base registers. `plat_mem_setup()` `memblock_reserve()`s
+  both. The downstream reservation used to start one page higher, at
+  `0x01700000`, which gave the engine's first page to the page allocator.
+  The two ramlog pages (below) are the barrier pages of these windows, so
+  the same reservations protect them.
+
 ## The CPU
 
 The RLX5281 is a Lexra core, R3000-class rather than a full MIPS32
@@ -107,22 +135,22 @@ documented in anything we have and was never measured; 64 KB with 32-byte
 lines would need 16 ways to be free of aliases at 4 KB pages, so a
 virtually indexed one very likely has 8 KB or more per way, and lines of
 a physical page filled through a user mapping at another colour survive
-an invalidate through the kernel alias. The history: 618h2 failed 4 of 9
-boots (init killed right after `Run /sbin/init`) while
-`flush_data_cache_page()` only wrote the dcache back; the per-line 0x1b
-(c4e1248) took 618h3 to 15/15, which fits stale lines of freed initmem,
-filled at the kernel colour. 618n1 (k618 + config diet + plain
-CPU_R3000) then failed with that fix in place: busybox `login` took a
-store address error (AdES, BadVA 0xffffe0b0) at EPC 0x00421c04, whose
-bytes in memory are `jr ra` -- an instruction that cannot store, so the
-CPU ran something other than memory. The diet moved the kernel layout and
-the allocation pattern; a line left at a user colour by the page's
-previous life is the case the per-line op cannot cover. The fix assumes
-nothing about the indexing: a whole-cache invalidate is correct for any
-of them. Not the cause: an ASID-tagged virtual icache (no flush on ASID
-wrap, `cpu_has_vtag_icache` 0) would fail on most boots, since rcS wraps
-the 64 ASIDs many times, and a per-page fix would not have taken 4 of 9
-failures to 0 of 15.
+an invalidate through the kernel alias. The fix assumes nothing about the
+indexing: a whole-cache invalidate is correct for any of them. Not a
+concern: an ASID-tagged virtual icache (no flush on ASID wrap,
+`cpu_has_vtag_icache` 0) would fail on most boots, since rcS wraps the 64
+ASIDs many times.
+
+The history, corrected. This work started from boots where init or
+busybox `login` died of SIGBUS right after `Run /sbin/init`, and a stale
+icache fitted the first of them. The later ones showed that memory itself
+was wrong: `print-fatal-signals=1` (see "The config") printed the
+registers, and the faulting word in the page cache decoded as an RX
+descriptor. The real cause was the NIC DMA the loader leaves running (see
+"The board"), which is now stopped. The icache change stays: the hole it
+closes is real (nothing else invalidates the icache when a page gets new
+contents) and it cost no measurable boot time, but it is not what made
+those boots fail.
 
 Cost. CCTL clears the icache as one operation; no document we have gives
 its cycle count, and it is at most one cycle per line (2048 lines) if it
@@ -217,18 +245,149 @@ and GPON hardware are driven.
 |---|---|
 | `odi_nic.c` | the CPU-port Ethernet DMA engine (rings, NAPI, TX/RX) |
 | `odi_switch.c`, `odi_switch_{tbl,dal,cmd}.c` | the switch fabric: MMIO map, indirect table access, the OMCI command dispatch `omcid` drives it through |
+| `odi_switch_l2.c` | the L2 lookup table: row readback and the valid-row walk (the MAC table), L2 multicast add/delete (igmpd) |
 | `odi_gpon*.c` | the GPON MAC block: the O1–O7 activation state machine and PLOAM codec (ITU-T G.984.3), register leaves, the interrupt handler |
 | `odi_omci.c` | the netlink transport that carries OMCI frames between the kernel and `omcid` |
 | `odi_intr.c` | the shared switch/GPON interrupt line, demultiplexed to the drivers above |
-| `odi_board.c` | board-init: LED and I2C core bring-up |
+| `odi_board.c`, `odi_board_data.c` | board-init: LED and I2C core bring-up, an ordered 88-write replay built into the kernel (it runs before any filesystem) |
+| `odi_rtk_init.c`, `odi_switch_sdkinit.c`, `odi_gpon_init.c` | `/proc/rtk_init`, the SDK-init and PON verbs rcS writes, and the register replays behind them |
+| `odi_replay_blob.c`, `odi_replay_fw.c` | the replay tables as firmware files: parser and loader (below) |
 | `odi_i2c.c`, `odi_ddm.c` | the I2C bus to the optical module, and SFF-8472 DDM (temperature, voltage, bias, tx/rx power) readout |
-| `odi_reg.c` | `/dev/odi_sw`: register/SoC/MIB access for our own userland (`diag`, `metricsd`) |
+| `odi_reg.c` | `/dev/odi_sw`: register/SoC/MIB/DDM/L2-table access for our own userland (`diag`, `metricsd`, `igmpd`) |
 | `odi_wdt.c` | the watchdog kicker — see below |
 | `odi_ramlog.c` | the DRAM ring-buffer console — see below |
 
 The switch/GPON/OMCI/board pieces are all built statically into `vmlinux`;
 there are no loadable kernel modules for the datapath, and none of this
 repo's build can produce one — `image/build.sh` stages zero `.ko` files.
+Every `CONFIG_ODI_*` symbol is `bool`, so nothing is exported either: the
+drivers call each other through plain declarations in shared headers
+(`odi_nic.h`, `odi_switch_api.h`).
+
+### Register replay tables are firmware files
+
+The three captured write sequences the drivers replay — the SDK-init
+verbs (`sdkinit.bin`, 267 KB), the module-load replay (`modload.bin`,
+130 KB) and the GPON boot init (`gpon_init.bin`, 91 KB) — are not compiled
+into the kernel. They ship in the rootfs as `/lib/firmware/odi/*.bin`
+(committed under `rootfs/skeleton/lib/firmware/odi/`) and are loaded with
+`request_firmware()` when a trigger needs one, then released: nothing
+stays resident, which gave back about 484 KB of RAM and 8.5 KB of uImage.
+Every trigger comes after the root filesystem is mounted: the sdkinit and
+modload replays run from rcS writes to `/proc/rtk_init` and
+`/proc/odi_omci`, and the GPON init runs once, at the first activation of
+a boot (it is loaded in process context before the GPON lock is taken).
+Later re-activations take their own path and do not reload it.
+
+The format is our own (`odi_replay_blob.h` is the byte-level reference,
+`tools/regtrace/replayblob.py` writes and dumps it): a 24-byte big-endian
+header (magic, version, table id, header size, record size, count, a
+reserved word, and a CRC-32 over the header and every record) followed by
+36-byte records, parsed byte by byte. A truncated, corrupt or
+mis-generated file is refused whole, never half applied.
+`CONFIG_FW_LOADER` is on for this (the Kconfig `select`s it) with plain
+filesystem lookup only: no user-mode helper, no compressed firmware, no
+firmware cache. `test/odi_replay_blob_test.sh` (in `make test-host`) runs
+the C parser and the GPON init replay against the host mock, and has the
+Python writer validate and dump each committed file, so the writer and
+the reader are checked against the same bytes.
+
+### Locking
+
+The switch has one set of shared engines — the indirect table access, the
+command state, the multi-register sequences, the I2C master — reached from
+netlink (`omcid`), `/dev/odi_sw` (`diag`, `metricsd`), `/proc` writes and
+the GPON interrupt path. `odi_switch.c` has the full comment; in short:
+
+- `odi_switch_lock`, a mutex, serialises the table engine and every
+  multi-register sequence. Process context only; it may sleep inside
+  (the replays call `request_firmware()`).
+- `odi_switch_dsf_lock`, an IRQ-safe spinlock, covers the few registers
+  the GPON atomic path does touch: the downstream GEM and Alloc-ID CAM
+  handshakes, the flow type and slot map, the encryption bits. It is a
+  leaf, and nothing is printed under it.
+- `odi_i2c_lock`, a mutex, covers the whole I2C byte sequence (setup,
+  address, start, poll, read, per byte): the DDM ioctl, the `/proc`
+  readers, the transceiver command and the sdkinit I2C verbs. Without it
+  a `diag` reading and an exporter DDM poll could interleave and read each
+  other's bytes.
+- `odi_wdt_flag_lock` serialises the watchdog enable writers, so two can
+  no longer each start a kicker thread.
+
+The order is `odi_switch_lock -> odi_i2c_lock`, `odi_switch_lock ->
+odi_gpon_lock -> odi_switch_dsf_lock` and, from the hard IRQ,
+`odi_intr_lock -> odi_gpon_lock -> odi_switch_dsf_lock`; the host mock
+aborts on a recursive acquire or on releasing a lock not held.
+
+### The OMCI netlink socket needs `CAP_NET_ADMIN`
+
+`odi_omci` speaks on `NETLINK_USERSOCK`, which accepts senders without any
+privilege. Every message that registers for a redirect type or sends a
+driver command is refused unless the sender has `CAP_NET_ADMIN`
+(`netlink_capable()`), so only root can answer the OLT or drive the switch
+through it.
+
+### The NIC
+
+`odi_nic.c` is a small driver for one DMA engine, but three of its error
+paths were wrong before this release, none seen on a stick: an RX refill
+that failed to allocate handed the hardware a descriptor still pointing at
+a freed buffer (it now maps the replacement first and, on failure, drops
+the frame and recycles the mapped buffer); a full TX ring stopped the
+queue with nothing to wake it (there is no TX-complete interrupt, so a
+10 ms delayed work reclaims while a queue is stopped, and the queue wakes
+at half ring); and no DMA mapping was checked (`dma_mapping_error()` now
+guards all three). The init error path now unwinds in reverse.
+`kernel/extra/drivers/net/ethernet/odi/README.md` has the rest.
+
+### The L2 table
+
+`odi_switch_l2.c` reads the switch L2 lookup table (1,024 hashed rows, four
+ways per bucket, then 64 CAM rows, walked while L2_LOOKUP_SETUP.CAM_OFF is
+clear -- it is, on this image) through the shared indirect table engine at 0x012000, one row per
+access. A row is 78 bits in three words, read back from TABLE_READ_WORD
+0..2 in that order with no reversal; `odi_switch_l2.h` has the field table.
+
+**Validity is the engine answer, not a row bit.** After a by-row read,
+TABLE_STATUS (0x012004) has HIT (bit 12) set when the row holds an entry and
+clear when it is empty; its low ten bits echo the row read either way. Bit
+77, the valid flag a write sends, reads back set on every row. Checked on
+ISP1 (image 618p2) with four learned addresses, reading all 1,024 rows and
+TABLE_STATUS after each:
+
+    row    status      raw (bits 95..64 63..32 31..0)     decodes as
+    0x06c  0x0000106c  0x00002038 0x0000bc24 0x1105b324   BC:24:11:05:B3:24 port 0 age 7
+    0x270  0x00001270  0x0000203d 0x000e00e4 0x064cc6f4   00:E4:06:4C:C6:F4 port 2 VID 14 C-tag
+    0x364  0x00001364  0x00002038 0x0000049f 0xca787282   04:9F:CA:78:72:82 port 0 age 7
+    0x390  0x00001390  0x0000203e 0x0000383a 0x212827c8   38:3A:21:28:27:C8 port 3 age 7
+    other  the row     0x00002000 0x00000000 row / 4      nothing: 1,020 rows, HIT clear
+
+HIT was set after exactly those four reads, and on none of the 64 CAM rows
+(read the same way: leftover words, bit 77 clear, TABLE_STATUS.IN_CAM set). The 1,020 empty rows all read
+0x00002000 0x00000000 and their bucket number (row / 4) in word 0 -- the low
+MAC octet -- which suggests the table stores only the part of the MAC its
+bucket does not already imply and rebuilds the rest on the way out. A driver
+that took bit 77 for validity (618p2 did) lists every row of the table as a
+learned `00:00:00:00:00:NN`. The host test (`test/odi_switch_l2_test.c`)
+models the table this way and replays the readout above.
+
+**Keys.** All four learned rows are SVL (bit 63 clear) on filtering id 0,
+the VID-14-tagged one from the PON included; on a unicast row bits 48..59
+hold the VID of the learned frame, not a lookup key. So every VLAN on this
+image is shared, and the multicast entries igmpd writes are keyed the same
+way: SVL, filtering id 0, static (bit 62), member ports in bits 66..69, and
+valid (bit 77) set; a delete sends the key alone (MAC, filtering id, IVL)
+with valid clear. Both go through the engine hash (TABLE_CMD method 0) and
+report the row from TABLE_STATUS. On ISP1, `igmpd -w -j 239.1.2.3 -p 0x1`
+landed on row 0x17c as 0x00002004 0x40000100 0x5e010203, and `-l` returned
+that row to empty.
+
+HIT after a hash *write* is not "the key was there": a delete write of a
+key never in the table comes back with HIT set and the row the key hashes
+to. A hash *read* (method 0, read, the key in TABLE_WRITE_WORD) does
+answer it -- HIT and the row for a present key, HIT clear for an absent
+one -- so a delete looks the key up first and writes only when it is
+found.
 
 ## Building it
 
@@ -250,6 +409,60 @@ address on this kernel line. Output is `build/kernel-618/uImage`, plus
 automatically by `image/build.sh`, which ships the `.config` on the device
 as `/etc/kernel-config` for reference and for `rcS` to gate platform init on.
 
+`VERSION=<image version> kernel/build.sh` stamps that version into the
+ramlog metadata block (below) as the build id; without it the kernel
+takes the same `odi-oss-<date>-<rev>` default `image/build.sh` uses.
+`CRUMBS_CORE=1` also applies `kernel/618/debug/` (see "Early crumbs").
+
+## The config
+
+`kernel/618/config` is a fragment, not a full `.config`: `olddefconfig`
+completes it. It is sized for a 1328 KB kernel partition: `-Os`, dead code
+elimination, `SLUB_TINY`, no modules, no kallsyms, a 16 KB printk ring
+(`LOG_BUF_SHIFT=14`; the ramlog keeps the boot log anyway), IPv4, bridge
+and 802.1Q only. Every line carries its reason in a comment there.
+
+**The syscall diet.** Options whose syscalls nothing in the rootfs can
+reach are off: `AIO`, `SIGNALFD`, `TIMERFD`, `EVENTFD`, `INOTIFY_USER`,
+`FHANDLE`, `ADVISE_SYSCALLS`, `RSEQ`, `MEMBARRIER`,
+`CROSS_MEMORY_ATTACH`, `PROC_PAGE_MONITOR`, `COREDUMP`,
+`ETHTOOL_NETLINK` and `SWAP`. "Unreachable" was established by scanning
+every ELF in the rootfs for the syscall number loaded right before each
+`syscall` instruction, using the o32 numbers (4000 + N), and by grepping
+the scripts for the tools that would need each one. A few of those
+syscalls are compiled into a shipped binary but reached only by a path this
+image never runs (`inotify_init1` in `ip netns monitor`, `madvise` in
+busybox's yescrypt code, the handle syscalls in iproute2's cgroup2
+helpers); the config comments say which.
+
+Deliberately kept on, and why:
+
+- `POSIX_TIMERS`: on 6.18 it also builds `kernel/time/itimer.c`, so with
+  it off `alarm` and `setitimer` return `ENOSYS`, and busybox `arping`,
+  `ping` and `timeout` (rcS uses `arping`) stop timing out.
+- `FILE_LOCKING`: busybox `flock` and iproute2 reach `flock`, and `fcntl`
+  record locks cannot be ruled out by a syscall-number scan at all.
+- `VM_EVENT_COUNTERS`: the `/proc/vmstat` event counters are the memory
+  pressure signal the exporter is meant to read. About 1.4 KB.
+- `SYSVIPC`: omcid serves `omcli`/`omcicli` over a SysV message queue.
+- `MULTIUSER`: dropbear needs the uid/gid plumbing even for a root-only
+  login.
+
+**Debug aids that stay on.** `print-fatal-signals=1` is on the built-in
+command line: a process killed by SIGSEGV, SIGBUS or SIGILL prints its
+registers (`epc`, `ra`, `Status`, `Cause`, `BadVA`) to the console, and so
+to the ramlog, where a dying init otherwise leaves only "Attempted to kill
+init!". The hung-task detector (30 s) and the soft-lockup detector are on
+for the same reason, and so are the early crumbs (`CONFIG_ODI_EARLY_CRUMBS`,
+below).
+
+**The command line.** `CONFIG_CMDLINE` is only the slot-0 fallback
+(`root=31:5` and the `mtdparts=` table). With
+`MIPS_CMDLINE_BUILTIN_EXTEND` it goes first and U-Boot's per-slot
+arguments after it, so the bootloader's `root=` and `mtdparts=` win (the
+last occurrence of each is the one used); the default ordering made the
+slot-0 `root=` win on a slot-1 boot.
+
 ## The boot command line and the watchdog
 
 U-Boot passes a per-slot command line in `argv`: which root device
@@ -259,13 +472,19 @@ U-Boot passes a per-slot command line in `argv`: which root device
 U-Boot arms the hardware watchdog before handing over to a **trial** boot
 (`nv setenv sw_tryactive <slot>`, see `docs/FLASHING.md`); the kernel's job
 is to keep kicking it. `odi_wdt.c` is a small, from-scratch kicker thread:
-it arms and kicks at the same operating point U-Boot's own `en_wdt` already
-sets, and — critically — it also tracks a **userland confirmation**
-deadline, not just "the kernel is alive." A kernel that boots fine but whose
-init scripts hang before confirming still gets reset, rather than sitting up
-forever on an image nobody can reach. `wdt_pre_reset_hook()` (called from
-`odi_nic.c`) quiesces the NIC's DMA engine before a watchdog-triggered reset,
-the same way an orderly shutdown would.
+it arms the watchdog itself at init, on every boot, at the same operating
+point U-Boot's own `en_wdt` sets, and — critically — it also tracks a
+**userland confirmation** deadline, not just "the kernel is alive." Unless
+something writes `1` to `/proc/luna_watchdog/userland_ok` within 120 s of
+uptime, the kernel forces the reset itself. rcS writes it once its own
+steps have run (the network is not a condition; with the development
+flag `/etc/config/confirm-arp` it waits for an ARP reply from the `.2`
+address of the `br0` subnet instead), so a kernel that boots fine but
+whose init scripts hang still gets reset. Before that
+forced reset, the watchdog calls `wdt_pre_reset_hook`, which `odi_nic.c`
+sets to its own quiesce function, so the NIC's DMA engine is stopped the
+same way an orderly shutdown would stop it. The proc directory keeps the
+stock firmware's name so rcS works on both.
 
 ## The DRAM ramlog console
 
@@ -366,10 +585,26 @@ files and is not part of the normal build.
 
 ## Verifying a build
 
-Every object this build actually compiles is checked, and every ELF that
-reaches the image is disassembled and checked again
-(`packages/isa-audit.sh`, `packages/isa-allowlist.sh`) for instructions the
-RLX5281 does not implement — see `docs/CROSS-COMPILING.md`. `make test`
-(host-side, no stick needed) and `make test-host` cover the switch/GPON/OMCI
-driver logic that has no kernel dependency, built and run natively against
-the same headers the kernel build uses.
+`image/build.sh` disassembles every ELF in the rootfs and fails on an
+instruction the RLX5281 does not implement (`packages/isa-audit.sh`,
+`packages/isa-allowlist.sh`, see `docs/CROSS-COMPILING.md`). The kernel is
+not in the rootfs, so check it by hand after a kernel change:
+
+    packages/isa-audit.sh build/kernel-618/vmlinux    # must find nothing
+    tools/kernel-footprint.sh                         # 19 lines, 6 mainline files today
+
+and, with the toolchain's `mips-linux-uclibc-objdump -d` on that
+`vmlinux`, count `eret` and `tne`: both must be 0 (the first proves the
+R3000 exception model, the second a trap-free `BUG_ON()`).
+
+`kernel/build.sh` ends with `BUILD OK: <n> warnings`. The release build
+prints 22, all GCC 16's "'retain' attribute ignored" in mainline
+networking files (`net/core/filter.c`, `net/core/xdp.c`,
+`net/ipv4/tcp_cong.c`, `net/ipv4/tcp_cubic.c`): a toolchain and mainline
+mismatch, not ours. Any other warning is from our files and is a
+regression.
+
+`make test-host` (no stick, no kernel build) covers the switch, GPON,
+OMCI, NIC, watchdog, ramlog and replay-table logic that has no kernel
+dependency, built and run natively against the same sources the kernel
+build uses.

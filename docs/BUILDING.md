@@ -13,12 +13,12 @@ already done (Docker layers, pinned tarballs, `.built-with` stamps):
 |---|---|
 | `make toolchain` | builds gcc 16.2.0 / binutils 2.47 / uClibc-ng 1.0.59 for this CPU, into the Docker volume `odi-oss-toolchain-318` (see `toolchain/README.md`) |
 | `make toolchain-audit` | proves the built target libraries carry no instruction this CPU traps on |
-| `make kernel` | Linux 6.18 for the RTL9602C — `docs/KERNEL.md` |
+| `make kernel` | Linux 6.18.53 for the RTL9602C (`VERSION=` stamps the ramlog build id, `CRUMBS_CORE=1` adds the debug crumbs) — `docs/KERNEL.md` |
 | `make busybox` | upstream busybox, our config fragment, ISA-audited |
 | `make packages` | busybox, then dropbear (with `scp`) and iproute2 |
 | `make src` | our own tools (`diag`, `omcid`, `omcli`, `omciprobe`, `omcicap`, `nv`, `igmpd`), freestanding, into `out/bin` — `docs/CROSS-COMPILING.md` |
-| `make releases` | fetches `confd` and `metricsd` as pinned release assets |
-| `make image` | assembles the flashable tarball into `out/image/` |
+| `make releases` | fetches `confd` and `metricsd` as pinned, checksummed release assets (confd v1.0.4, metricsd v1.0.3; `CONFD_TAG=`/`METRICSD_TAG=` to override, or `CONFD_BIN=` for a local `confd` build) |
+| `make image` | assembles the flashable tarball into `out/image/`: squashfs rootfs (with the register replay tables in `/lib/firmware/odi/`), the uImage, `fwu.sh` and `md5.txt` |
 
 `make image` alone (without the rest) works once the pieces it needs already
 exist from a previous build.
@@ -35,10 +35,16 @@ implement, adding a `build.sh` there is a small, self-contained change.
 
 ## Verifying a build
 
-    make test          # lint + test-host + test-omci, about two minutes
+    make test          # lint + test-host + test-diag + test-omci, about two minutes
     make lint           # shellcheck every script, plus a couple of repo-specific checks
     make test-host      # host-side unit tests for driver logic that has no kernel dependency
+    make test-diag      # diag parser and conversions, and the exporter contract under qemu
     make test-omci      # omcid under qemu-user, about 130 checks, no stick needed
+
+CI (`.github/workflows/ci.yml`) runs `make lint`, `make test-host`,
+`make src`, `make test-diag` and `make test-omci` on every push to `main`
+and every pull request; the toolchain, kernel and image are not built
+there.
 
 Every ELF that reaches the image — kernel, busybox, dropbear, iproute2, our
 own tools — passes an instruction audit (`packages/isa-audit.sh`,

@@ -5,7 +5,7 @@ older R3000 CPU class; giving this CPU family a fresh Kconfig identity
 without also selecting that class silently gets the wrong model and dies on
 the very first exception return.
 
-*Last verified: 2026-09-23*
+*Last verified: 2026-09-25*
 
 ---
 
@@ -45,14 +45,16 @@ compiled code should contain zero uses of the R4000-family
 return-from-exception instruction.
 
 The simpler alternative, which needs no core-file edit at all, is to
-build the CPU as the plain R3000 selector. Its cost is the barrier model:
+build the CPU as the plain R3000 selector. This is what the current build
+does: the only core-file edit left is the probe case that names the
+core's processor id. Its cost is the barrier model:
 the R3000 selector assumes no `sync` instruction, so the ordinary write
 and read barriers compile to nothing, and full barriers go through a
 board-supplied write-buffer flush hook. On this core, which does
 implement `sync`, the board has to point that hook at a `sync` and use
 its own `sync` wherever DMA ordering depends on it (docs/KERNEL.md,
-"The CPU"). That route has passed the static gates but has not yet had
-a hardware trial.
+"The CPU"). Built that way, the image passed a 15-boot loop and a
+3-hour traffic soak on hardware with no kernel error.
 
 ## Evidence
 

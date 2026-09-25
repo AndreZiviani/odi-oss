@@ -890,7 +890,8 @@ check "a pointer of zero programs nothing at all" "$got" "2"
 # A Set that fills the third pointer. The vendor gates this on the pointer
 # having CHANGED, against the row as it was before the Set; our store keeps one
 # row and overwrites it, so the guard is dropped and all three are re-sent.
-# That is more than the vendor sends and never less -- see PLAN.md's backlog.
+# That is more than the vendor sends and never less -- see README.md, "Where
+# this differs from the vendor daemon, and why".
 $Q cli/build/omcli --inject 0084480a012a0001080080030000000000000000000000000000000000000000000000000000000000000028bd97df34 > /dev/null 2>&1
 sleep 1
 got=$(grep -o 'set slot 2 mask 1 kind 2 cir 1000 cbs 2000 -> 0' /tmp/omcid2.log | head -1)

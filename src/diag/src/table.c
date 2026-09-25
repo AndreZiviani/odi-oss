@@ -31,6 +31,16 @@ const struct cmd_def cmd_table[] = {
 	{ "mib dump counter port <ports>",
 	  "switch port MIB counters; all = every port that answers",
 	  CMD_MIB_DUMP, 0 },
+	{ "l2-table get all",
+	  "every valid L2 table row: learned MACs, multicast groups",
+	  CMD_L2_ALL, 0 },
+	/* The stock spelling of the same listing: confd sends it, and the
+	 * same confd runs on the stock slot, whose diag knows only this. */
+	{ "l2-table get entry address valid",
+	  "the same, in the stock spelling (odi-ui sends it)", CMD_L2_ALL, 0 },
+	{ "l2-table get index <index>",
+	  "one L2 table row by number, valid or not, with raw words",
+	  CMD_L2_INDEX, 0 },
 	{ "register get <address> <words>",
 	  "read switch-core registers, four per line", CMD_REG_GET, 0 },
 	{ "register set <address> <value>",

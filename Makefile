@@ -82,6 +82,7 @@ test-host:
 	bash test/odi_switch_test.sh
 	bash test/odi_switch_mmio_bounds_test.sh
 	bash test/odi_switch_tbl_desc_test.sh
+	bash test/odi_switch_l2_test.sh
 	bash test/odi_switch_dal_test.sh
 	bash test/odi_reg_test.sh
 	bash test/odi_switch_cmd_test.sh
@@ -146,15 +147,28 @@ lint:
 		exit 1; \
 	fi
 	@echo "no private-workspace references: clean"
+	@# AGENTS.md: describing how the stock (OEM) firmware behaves, as an
+	@# observed black box (a shipped binary own exported symbols, librtk.so
+	@# and the like), is fine; naming a file or function read out of the
+	@# vendor own SOURCE is not. This catches known vendor SOURCE citations
+	@# specifically -- it is intentionally narrow (not e.g. a bare "rtk_" or
+	@# "bsp_" prefix) because those prefixes are also how this tree spells
+	@# sockopt ABI names and its own driver symbols.
+	@if git grep -nE 'prom\.c|re8686|c-rlx\.c|apollo|bsp_[a-z_]+\(' -- . ':!Makefile'; then \
+		echo "lint: found a vendor SOURCE file/function reference above -- describe the observed (black-box) behavior instead, and put vendor attribution in commit history/docs, per AGENTS.md" >&2; \
+		exit 1; \
+	fi
+	@echo "no vendor source citations: clean"
 
 clean:
 	rm -rf build out
 
-# Also drops the kernel trees and the download cache. The
-# toolchain we build ourselves is in a Docker volume and survives this on
-# purpose -- it costs ~30 minutes to rebuild and nothing in the tree depends
-# on its contents. Remove it deliberately:
+# Also drops the kernel trees and the download cache. The Docker volumes the
+# build uses -- odi-oss-toolchain-318 (the toolchain we build ourselves) and
+# odi-kbuild-618 (the kernel build workdir) -- survive this on purpose: they
+# cost real time to rebuild and nothing in the tree depends on their
+# contents. Remove them deliberately:
 #
-#     docker volume rm odi-oss-toolchain
+#     docker volume rm odi-oss-toolchain-318 odi-kbuild-618
 distclean: clean
 	rm -rf kernel/618/mainline dl

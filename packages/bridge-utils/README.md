@@ -17,14 +17,19 @@ command names:
 | `lib/libmib.so` | the path `/bin/brctl` |
 
 Five verbs in total: **addbr, addif, delif, setageing, stp**. No shell script
-in the image calls `brctl` at all, and neither does anything in our own
-`rootfs/skeleton`.
+in that image calls `brctl` at all.
+
+Our own `rootfs/skeleton` does: `etc/scripts/network.sh` builds `br0` with
+`brctl addbr`, `show`, `stp`, `setfd` and `addif`, and the rcS trial
+diagnostics print `brctl show` and `brctl showmacs br0`. All of them are
+busybox applet verbs.
 
 ## What we already ship
 
-busybox's `brctl` applet, enabled in `../busybox/config.fragment`, built with
-`CONFIG_FEATURE_BRCTL_FANCY=y` and `CONFIG_FEATURE_BRCTL_SHOW=y` — verified in
-the produced `.config` and in the strings of `out/busybox`. That covers
+busybox's `brctl` applet, enabled with `CONFIG_BRCTL=y` in
+`../busybox/config.fragment`. `CONFIG_FEATURE_BRCTL_FANCY` and
+`CONFIG_FEATURE_BRCTL_SHOW` are not in the fragment; they come on from
+busybox's own `defconfig`, which `../busybox/build.sh` starts from. That covers
 `addbr`, `delbr`, `addif`, `delif`, `show`, `showstp`, `setageing`, `setfd`,
 `sethello`, `setmaxage`, `setpathcost`, `setportprio`, `setbridgeprio` and
 `stp`. It is a superset of the five verbs above, at zero extra bytes, because
@@ -41,6 +46,7 @@ it. That is the whole difference.
 ## What would change this
 
 A rootfs script or one of our own daemons needing a `brctl` verb busybox does
-not implement. There is no such verb today. If one appears, the package is a
+not implement. There is no such verb today: every verb `network.sh` and rcS
+use is in the list above. If one appears, the package is a
 short `build.sh` away — bridge-utils 1.7.1 is small, pure ioctl, and has no
 dependency this toolchain lacks.

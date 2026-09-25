@@ -94,6 +94,43 @@ int hw_stat_port_get(uint32_t port, uint32_t counter, uint64_t *value)
 	return 0;
 }
 
+#define ODI_ENOENT (-2)
+
+int hw_l2_get(uint32_t index, struct odi_sw_l2_row *row)
+{
+	row->index = index;
+	return sw_ioctl(ODI_SW_IOC_L2_GET, row);
+}
+
+int hw_l2_next(uint32_t *index, struct odi_sw_l2_row *row)
+{
+	int rc;
+
+	row->index = *index;
+	rc = sw_ioctl(ODI_SW_IOC_L2_NEXT, row);
+	if (rc == ODI_ENOENT)
+		return 1;
+	if (rc != 0)
+		return rc;
+	*index = row->index;
+	return 0;
+}
+
+int hw_l2_mode(uint32_t *rows, uint32_t *ipmc_on_group)
+{
+	struct odi_sw_l2_mode m;
+	int rc;
+
+	m.rows = 0;
+	m.ipmc_on_group = 0;
+	rc = sw_ioctl(ODI_SW_IOC_L2_MODE, &m);
+	if (rc != 0)
+		return rc;
+	*rows = m.rows;
+	*ipmc_on_group = m.ipmc_on_group;
+	return 0;
+}
+
 /* Reads the whole of /proc/odi_gpon into buf. Returns the byte count, or a
  * negative value when the file cannot be opened or is empty. */
 static long gpon_proc_read(char *buf, unsigned long max)

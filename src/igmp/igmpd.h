@@ -3,7 +3,8 @@
  * The frames do not arrive on a netdev. The switch traps IGMP and MLD control
  * packets to the CPU with rx reason 215, and igmp_drv hands them to whichever
  * userland app registered for packet-redirect uid 4. That is the same
- * mechanism omcid already speaks on uid 1, with a different prefix.
+ * mechanism omcid already speaks on uid 1, with a different prefix. That is
+ * the stock kernel; on ours nothing delivers uid 4 yet (main.c).
  *
  * This header is the wire format and nothing else. The state machine lives
  * above it.

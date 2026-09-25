@@ -259,9 +259,20 @@ static inline int odi_mock_locks_idle(void)
 #define ODI_MOCK_TBL_ACCESS_LO	0x012000U
 #define ODI_MOCK_TBL_ACCESS_HI	0x01202cU
 
+/* An optional device model: called after every register write lands in
+ * regs[], so a test can make a register behave like hardware -- the L2
+ * test (odi_switch_l2_test.c) answers a TABLE_CMD write by filling
+ * TABLE_READ_WORD and TABLE_STATUS the way the lookup table would. NULL
+ * (the default, and what odi_mock_reset() leaves alone) is the plain
+ * register file every other test expects.
+ */
+static void (*odi_mock_write_hook)(uint32_t off, uint32_t val);
+
 static inline void odi_reg_write(uint32_t off, uint32_t val)
 {
 	odi_mock.regs[odi_mock_slot(off)] = val;
+	if (odi_mock_write_hook)
+		odi_mock_write_hook(off, val);
 	if (off >= ODI_MOCK_TBL_ACCESS_LO && off <= ODI_MOCK_TBL_ACCESS_HI)
 		return;
 	/* Deliberately does NOT touch the table run-tracking state

@@ -12,7 +12,17 @@ README first if you have not already.
 
    `root=31:5` is slot 0, `root=31:7` is slot 1.
 
-2. **Record the bootloader environment**, so there is something to compare
+2. **Make sure the host side will answer ARP on the `.2` address.** This
+   image arms the watchdog on every boot, and rcS confirms to it only once
+   `arping` gets a reply from the `.2` address of the stick's management
+   subnet (`192.168.1.2` for the default `192.168.1.1`; see
+   `docs/SETTINGS.md` for the management address). With no reply within
+   120 s of uptime the kernel resets the board. On a trial that means a
+   fall-back to the committed slot; on a committed slot it means a reboot
+   loop. So give the host port that address (as well as any other) before
+   the trial.
+
+3. **Record the bootloader environment**, so there is something to compare
    against afterwards, and so you know what to restore if something goes
    wrong with the environment itself rather than the image:
 
@@ -21,11 +31,11 @@ README first if you have not already.
    Keep `sw_tryactive`, `sw_commit`, `sw_active`, and the version strings.
    **`sw_commit` must already equal the running slot.** That is what the
    revert path (`boot_by_commit`) reads on the next boot; `fwu.sh` itself
-   refuses to write the slot named by `sw_commit`, but confirm it yourself —
-   the failure this protects against is a trial reverting *into* the
-   unproven image instead of away from it.
+   refuses to write the slot named by `sw_commit` (in either environment
+   copy), but confirm it yourself — the failure this protects against is a
+   trial reverting *into* the unproven image instead of away from it.
 
-3. **Copy the tarball to the stick.** `/tmp` is ramfs on a device with a few
+4. **Copy the tarball to the stick.** `/tmp` is ramfs on a device with a few
    MB of free RAM, so do not unpack the whole tarball — `fwu.sh` streams
    each member out of it with `tar -O` and needs only itself and the
    checksum file on disk beside it:
@@ -65,22 +75,33 @@ This boots the slot **exactly once**, with the hardware watchdog armed.
 U-Boot rewrites `sw_tryactive` back to "don't retry" and saves *before*
 handing over, so the trial cannot loop.
 
-**What this catches, and what it does not.** The watchdog is kicked by a
-kernel thread that needs nothing from userland (`docs/KERNEL.md`), so a
-kernel that is alive keeps kicking it even if the boot scripts above it are
-completely stuck — no network, no ssh, nothing answering. That state does
-**not** self-revert on its own from the stuck side: it reverts on the *next*
-boot, because `sw_tryactive` was already cleared, so a power cycle brings
-the previous (committed) image straight back with nothing lost — it just
-needs your hand on the power. A kernel that panics, or never mounts a root
-filesystem, does trigger the watchdog itself and reverts without any
-intervention at all.
+**What this catches, and what it does not.** A kernel that panics, hangs,
+or never mounts a root filesystem stops kicking the watchdog, and the board
+resets. A kernel that is alive keeps kicking it, but it also holds a
+**userland deadline** (`docs/KERNEL.md`): unless rcS has confirmed within
+120 s of uptime, the kernel forces the reset itself. So a boot whose
+scripts hang reverts too. rcS confirms without looking at the network, so
+a boot whose management path never comes up stays up; power-cycle it. For
+development, `/etc/config/confirm-arp` makes rcS confirm only after an ARP
+reply from the `.2` address of the `br0` subnet, so an unreachable trial
+reverts by itself; never leave it on a stick whose host is not on `.2`. Because U-Boot cleared `sw_tryactive` before
+handing over, every one of those resets lands on the committed slot, with
+nothing lost and nothing to do by hand. What it cannot catch is an image
+that confirms and then misbehaves (unreachable, or answers ARP but not ssh): that
+stays up until you power-cycle it, which also brings the committed image
+back.
 
 **Never write `sw_commit` before this.** Making the trial slot permanent
-throws away the only free safety net there is. Commit only from the running
+throws away the only free safety net there is, and **never write it from a
+script or while a trial is still being evaluated** (a boot loop, a soak):
+every trial is a separate `sw_tryactive`. Commit only from the running
 trial image, once you are satisfied:
 
     nv setenv sw_commit <slot>
+
+A trial image can itself be re-tried as often as you like: from the
+committed image, `nv setenv sw_tryactive <slot>` and `reboot` again. The
+slot is not rewritten, so each boot tests the same image.
 
 ## If it does not come up
 
@@ -99,14 +120,27 @@ all.
   trial of a brand-new image if you would rather not add any write to the
   config partition until you have seen the image boot at all; turn it on
   for the next one.
-- **Boot the other (working) image** and read the DRAM ramlog back with
-  `tools/memprobe` (`tools/memprobe/README.md`, `docs/KERNEL.md`): it
-  survives the watchdog reset and holds the last console output the failed
-  trial produced, including a stamp confirming whether U-Boot handed off to
-  the new kernel at all. When the working image is ours too, it saved the
-  failed trial's pages before overwriting them: `cat /proc/odi_ramlog_prev`
-  (the boot counter one below the running one, and the trial's slot and
-  build id, confirm it is the trial).
+- **Read the failed boot's console from DRAM.** The ramlog pages survive
+  the watchdog reset (not a power cycle) and hold the first 4 KB and the
+  last 4 KB of the failed boot's console, the last early-boot crumb it
+  reached (`docs/KERNEL.md`, "Early crumbs"), and, with
+  `print-fatal-signals=1`, the registers of any process that died of a
+  signal.
+  - **From the stock image**, which knows nothing of these pages: push
+    `tools/memprobe` and read them back
+    (`tools/memprobe/README.md`, `tools/memprobe/ramlog-read.sh`).
+  - **From this image** (a committed slot of ours, or a later trial of
+    ours): the kernel copied both pages before its own ramlog wrote
+    anything, so
+
+        cat /proc/odi_ramlog_prev          # decoded
+        cat /proc/odi_ramlog_prev_raw > p  # 8192 raw bytes, page A then B
+
+    The first line is this boot (`boot=N slot=S`), the second the previous
+    one (`boot=N-1 slot=... build=... crumb=...`): check that slot and
+    build id are the trial's before reading on. It reaches one boot back
+    only, and a boot of the stock image in between writes nothing, so the
+    boot counter says which boot of ours it was.
 - **Power-cycle the stick** if nothing else answers after a few minutes —
   see "What this catches" above for why that alone can be enough.
 - If both slots end up unbootable, recovery needs the board's UART header;
@@ -120,6 +154,7 @@ all.
     omcli get sn                the same command shapes the stock CLI answers
     diag                       the switch/optics CLI, batched on stdin
     cat /var/log/omcid.log     every OMCI frame and driver call this boot
+    cat /proc/odi_ramlog_prev  the previous boot of this image, from DRAM
 
 `docs/ACCESS.md` covers getting in over ssh or the web UI, and moving
 files on and off the stick.

@@ -96,3 +96,90 @@ int __wrap_hw_stat_port_get(uint32_t port, uint32_t counter, uint64_t *value)
 		*value = (port + 1) * 1000u * (counter + 1) + counter;
 	return 0;
 }
+
+/* The L2 table for test/l2.txt: 1024 rows (the CAM rows off, as the stock
+ * init leaves them), three valid rows -- a learned host on the PON side,
+ * one on the UNI, and a multicast group with the UNI as its only member.
+ * Row 9 holds data but is not valid, so the listing must skip it and the
+ * single-row read must still show it. */
+#include "odi_sw_ioctl.h"
+
+static void fake_l2_row(uint32_t index, struct odi_sw_l2_row *r)
+{
+	static const uint8_t pon_host[6] = { 0x78, 0x54, 0x2e, 0x07, 0x64, 0x63 };
+	static const uint8_t uni_host[6] = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 };
+	static const uint8_t group[6] = { 0x01, 0x00, 0x5e, 0x01, 0x02, 0x03 };
+	const uint8_t *mac = 0;
+
+	for (unsigned i = 0; i < sizeof *r; i++)
+		((uint8_t *)r)[i] = 0;
+	r->index = index;
+	if (index == 8) {
+		mac = pon_host;
+		r->type = ODI_SW_L2_UCAST;
+		r->port = 2;
+		r->age = 6;
+		r->key = 1;
+		r->flags = ODI_SW_L2_F_VALID;
+		r->raw[0] = 0x2e076463u;
+		r->raw[1] = 0x00017854u;
+		r->raw[2] = 0x00002034u;
+	} else if (index == 9) {
+		mac = uni_host;
+		r->type = ODI_SW_L2_UCAST;
+		r->raw[0] = 0x22334455u;
+		r->raw[1] = 0x00000211u;
+	} else if (index == 0x4c) {
+		mac = uni_host;
+		r->type = ODI_SW_L2_UCAST;
+		r->port = 0;
+		r->age = 7;
+		r->key = 1;
+		r->flags = ODI_SW_L2_F_VALID;
+		r->raw[0] = 0x22334455u;
+		r->raw[1] = 0x00010211u;
+		r->raw[2] = 0x00002038u;
+	} else if (index == 0x3a1) {
+		mac = group;
+		r->type = ODI_SW_L2_MCAST;
+		r->key = 1;
+		r->ports = 0x1;
+		r->flags = ODI_SW_L2_F_VALID | ODI_SW_L2_F_STATIC | ODI_SW_L2_F_IVL;
+		r->raw[0] = 0x5e010203u;
+		r->raw[1] = 0xc0010100u;
+		r->raw[2] = 0x00002004u;
+	}
+	if (mac)
+		for (int i = 0; i < 6; i++)
+			r->mac[i] = mac[i];
+}
+
+int __wrap_hw_l2_mode(uint32_t *rows, uint32_t *ipmc_on_group);
+int __wrap_hw_l2_mode(uint32_t *rows, uint32_t *ipmc_on_group)
+{
+	*rows = 1024;
+	*ipmc_on_group = 0;
+	return 0;
+}
+
+int __wrap_hw_l2_get(uint32_t index, struct odi_sw_l2_row *row);
+int __wrap_hw_l2_get(uint32_t index, struct odi_sw_l2_row *row)
+{
+	if (index >= 1024)      /* the CAM rows are off */
+		return -22;
+	fake_l2_row(index, row);
+	return 0;
+}
+
+int __wrap_hw_l2_next(uint32_t *index, struct odi_sw_l2_row *row);
+int __wrap_hw_l2_next(uint32_t *index, struct odi_sw_l2_row *row)
+{
+	for (uint32_t i = *index; i < 1024; i++) {
+		fake_l2_row(i, row);
+		if (row->flags & ODI_SW_L2_F_VALID) {
+			*index = i;
+			return 0;
+		}
+	}
+	return 1;
+}

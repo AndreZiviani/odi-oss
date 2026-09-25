@@ -43,7 +43,7 @@ LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
 # Everything but the hardware layer, shared by diag and diag_fake.
 CORE := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/shell.o $(BUILD)/parse.o \
         $(BUILD)/table.o $(BUILD)/commands.o $(BUILD)/io.o $(BUILD)/ddm.o \
-        $(BUILD)/gpon_status.o
+        $(BUILD)/gpon_status.o $(BUILD)/l2.o $(BUILD)/l2_fmt.o
 
 $(BIN): $(CORE) $(BUILD)/hw.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
@@ -52,7 +52,7 @@ $(BIN): $(CORE) $(BUILD)/hw.o
 # The exporter contract test: the real binary, with the accessors the
 # exporter's commands reach answered by test/hw_fake.c instead.
 FAKE_WRAP := hw_transceiver_get hw_gpon_status_get hw_gpon_alarms_get \
-             hw_stat_port_get
+             hw_stat_port_get hw_l2_mode hw_l2_get hw_l2_next
 
 $(BUILD)/diag_fake: $(CORE) $(BUILD)/hw.o test/hw_fake.c | $(BUILD)
 	$(CC) $(CFLAGS) $(LDFLAGS) $(foreach f,$(FAKE_WRAP),-Wl,--wrap=$(f)) \
@@ -94,7 +94,7 @@ else
 # the netlink transport from ../omci.
 RUN := docker run --rm -v $(CURDIR)/../..:/src -w /src/src/diag $(IMAGE)
 
-.PHONY: all image diag test selftest exporter-test run verify size clean help
+.PHONY: all image diag test selftest exporter-test l2-test run verify size clean help
 
 all: diag
 
@@ -121,6 +121,9 @@ test:
 	cc -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/odi_sw_ioctl_test \
 	   test/odi_sw_ioctl_test.c
 	@$(BUILD)/odi_sw_ioctl_test
+	cc -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/l2_format_test \
+	   test/l2_format_test.c src/l2_fmt.c
+	@$(BUILD)/l2_format_test
 	@python3 test/regnames_test.py
 
 # The exporter contract: test/exporter.txt is the batch sfp-exporter sends
@@ -141,6 +144,17 @@ exporter-test: image
 	  || { diff -u test/exporter_eof.golden $(BUILD)/exporter_eof.out; exit 1; }
 	@echo "exporter contract: output byte-identical to the golden files"
 
+# The L2 table listing: test/l2.txt through the same fake-hardware binary,
+# the table answered by test/hw_fake.c, diffed against test/l2.golden. The
+# first two listings must be identical: one is our spelling, the other the
+# stock one odi-ui sends.
+l2-test: image
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/diag_fake
+	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/diag_fake < test/l2.txt' > $(BUILD)/l2.out
+	@cmp $(BUILD)/l2.out test/l2.golden \
+	  || { diff -u test/l2.golden $(BUILD)/l2.out; exit 1; }
+	@echo "l2-table: output byte-identical to test/l2.golden"
+
 # The conversion vectors, run on the target under qemu rather than natively.
 # fmt_selftest goes further and diffs out_fmt against the host's printf over
 # every conversion the handlers' format strings use.
@@ -148,7 +162,7 @@ exporter-test: image
 # `make selftest SEED=$$RANDOM` explores instead.
 SEED ?= 1
 
-selftest: image exporter-test
+selftest: image exporter-test l2-test
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/ddm_selftest
 	@$(RUN) qemu-mips-static $(BUILD)/ddm_selftest
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/fmt_selftest
@@ -185,6 +199,7 @@ help:
 	@echo "  make diag           build the freestanding MIPS binary"
 	@echo "  make test           parser and conversion tests, natively (no container)"
 	@echo "  make exporter-test  the exporter contract, under qemu"
+	@echo "  make l2-test        the l2-table listing against its golden file, under qemu"
 	@echo "  make selftest       exporter-test plus the conversion vectors, under qemu"
 	@echo "  make run ARGS='pon get transceiver rx-power'"
 	@echo "  make verify         confirm ELF32 / big-endian / MIPS / static"

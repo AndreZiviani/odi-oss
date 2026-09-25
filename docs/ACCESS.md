@@ -64,8 +64,10 @@ older way still works too and needs nothing on the stick:
     ssh root@<stick> 'cat > /tmp/x.tar' < odi-oss-<version>.tar
     ssh root@<stick> 'cat /var/log/omcid.log' > omcid.log
 
-**Watch the memory.** `/tmp` is ramfs on a 27 MB device with about 8 MB free;
-a 2.6 MB image tarball fits once, not twice. `echo 3 > /proc/sys/vm/drop_caches`
+**Watch the memory.** `/tmp` is ramfs (a link into `/var`), and RAM is all
+there is: about 15 MB is available on a running stick (`MemAvailable` in
+`/proc/meminfo`), and nothing written to ramfs is ever evicted. A 2.6 MB
+image tarball fits, but do not leave copies behind. `echo 3 > /proc/sys/vm/drop_caches`
 first if it is tight, and unpack only what you need (`fwu.sh` streams the
 rest).
 

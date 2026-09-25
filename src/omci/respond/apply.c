@@ -6,8 +6,8 @@
 
 /* omcid -- answer the OLT's OMCI opening.
  *
- * Phase 3 of replacing omci_app (see ../PLAN.md). Phase 2 captured what the OLT
- * says when an ONU re-registers, and it is short: a MIB reset, then five gets
+ * See ../README.md for the design rationale. What the OLT says when an ONU
+ * re-registers was captured once and is short: a MIB reset, then five gets
  * across three managed entities.
  *
  *     mib-reset  class 2    OntData

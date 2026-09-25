@@ -29,5 +29,7 @@ What the code uses them for:
 - G.984.3 clauses 12.2 to 12.4 and Amd1: encryption, key exchange and
   key switch-over; Annex A.2: AES golden vectors (host tests).
 
-Register names in the drivers are the names of the RTL9602C register map;
-that map is not public and is not in this repository.
+G.988 (OMCI) and SFF-8472 (optics DDM) are cited by clause in the code too
+but are not fetched by the script. Register names in the drivers are our
+own (`src/diag/tools/regnames.txt`); no register map is in this repository
+(`docs/LICENSING.md`).

@@ -1,4 +1,4 @@
-/* Programming the switch, over the accessors in switch_opt.c.
+/* Programming the switch, over the /dev/odi_sw ioctls in switch_opt.c.
  *
  * Named program.c rather than hw.c on purpose: diag owns a hw.h on the same
  * include path, and two headers with one name is a collision that resolves
@@ -10,9 +10,11 @@
  * prints what it would do until it is told otherwise, and the first run on a
  * stick can be watched before it is trusted.
  *
- * The MAC path only. The IP path -- rtk_l2_ipMcastAddr_* on a 68-byte entry --
- * has two fields nothing was observed to write, and an entry with a guessed
- * field in it is exactly the failure above.
+ * The MAC path only: static L2 multicast entries keyed on the group MAC.
+ * With IPv4 multicast looked up on MAC + VID/FID -- the stock setting, which
+ * our init replays -- that is what the switch consults for multicast data. An
+ * IPv4 route entry (keyed on the group address) would serve the other lookup
+ * mode, which nothing on this image selects.
  */
 #include "program.h"
 #include "entry.h"
@@ -20,7 +22,6 @@
 #include "io.h"
 
 static int hw_enabled;
-static int hw_vid_valid = 1;
 
 void igmp_hw_set_enabled(int on)
 {
@@ -32,35 +33,38 @@ int igmp_hw_enabled(void)
 	return hw_enabled;
 }
 
-/* The vendor writes the VID into the entry only when ipmcMode is 0. Asked once
- * at startup rather than per entry: it is a mode, not a per-group property,
- * and the accessor is a 516-byte socket round trip.
+/* The entry is keyed on filtering id 0 (SVL), in either lookup mode, and
+ * the VID plays no part in the key.
  *
- * A failure to read it leaves the VID in place, which is the behaviour in the
- * mode this device is expected to be in, and says so. */
+ * Why not the VID (IVL): whether the switch looks a destination up on
+ * MAC + VID or on MAC + filtering id follows how the VLAN it arrived on
+ * is set up, and on this image every VLAN is shared. The stick shows it
+ * in its own table: every address it learned is an SVL row on filtering
+ * id 0, the one learned from VID-14-tagged frames off the PON included
+ * (docs/KERNEL.md, "The L2 table"). An IVL entry keyed on a VID would sit
+ * in the table and never match a frame.
+ *
+ * The lookup mode is still read and printed: with IPv4 multicast looked
+ * up on the group address rather than the MAC, a MAC-keyed entry is not
+ * consulted at all, and that is worth saying before writing one. */
 int igmp_hw_probe(void)
 {
 	uint32_t mode = 0;
-	int rc = rtk_l2_ipmcMode_get(&mode);
+	int rc = igmp_sw_mode(&mode);
 
-	/* -99 is ENOPROTOOPT: the vendor switch driver behind this sockopt is
-	 * not in the kernel (a 6.18 image), and odi_switch has no netlink op
-	 * that reads the multicast lookup mode back. Say that, rather than a
-	 * bare error number that reads like a transient failure. */
-	if (rc == -99) {
-		out("ipmcMode: no netlink equivalent on this kernel (the vendor "
-		    "switch sockopt is absent); assuming the vid applies\n");
-		hw_vid_valid = 1;
+	if (rc == -25) {
+		out("lookup mode: this kernel has no L2 multicast ioctl on "
+		    "/dev/odi_sw (ENOTTY)\n");
 		return rc;
 	}
 	if (rc != 0) {
-		out_fmt("ipmcMode unreadable (%d); assuming the vid applies\n", rc);
-		hw_vid_valid = 1;
+		out_fmt("lookup mode unreadable (%d)\n", rc);
 		return rc;
 	}
-	hw_vid_valid = (mode == 0);
-	out_fmt("ipmcMode %d: the entry vid %s\n", mode,
-		hw_vid_valid ? "applies" : "is left zero");
+	out_fmt("IPv4 multicast looked up on %s: the entry is keyed on "
+		"filtering id 0 (SVL)%s\n",
+		mode ? "the group address" : "MAC + VID/FID",
+		mode ? ", and this mode does not consult it" : "");
 	return 0;
 }
 
@@ -78,37 +82,53 @@ static void show(const char *what, uint16_t vid, uint32_t group, uint32_t ports)
 	out_fmt(" ports 0x%x%s\n", ports, hw_enabled ? "" : "  (not written)");
 }
 
+static const char *sw_err(int rc)
+{
+	switch (rc) {
+	case -2:  return "no /dev/odi_sw";
+	case -16: return "table engine busy";
+	case -22: return "refused by the driver";
+	case -25: return "no L2 multicast ioctl in this kernel";
+	case -28: return "hash bucket full";
+	}
+	return "failed";
+}
+
 int igmp_hw_group_set(uint16_t vid, uint32_t group, uint32_t ports)
 {
-	uint32_t e[IGMP_MAC_ENTRY_WORDS];
+	struct odi_sw_l2_mcast m;
 	int rc;
 
 	show("set", vid, group, ports);
 	if (!hw_enabled)
 		return 0;
-	igmp_mac_entry(e, vid, group, ports, hw_vid_valid);
-	/* add is an in/out call: librtk copies the whole entry back over ours
-	 * after the sockopt. Nothing is read from it here, but the buffer has
-	 * to be writable and per-call, which is why it is a local. */
-	rc = rtk_l2_mcastAddr_add(e);
+	if (igmp_mac_entry(&m, vid, group, ports, 0) != 0) {
+		out_fmt("  not written: ports 0x%x name a port the switch does not have\n",
+			ports);
+		return -22;
+	}
+	rc = igmp_sw_mcast_add(&m);
 	if (rc)
-		out_fmt("  rtk_l2_mcastAddr_add: %d\n", rc);
+		out_fmt("  l2 multicast add: %d (%s)\n", rc, sw_err(rc));
+	else
+		out_fmt("  written, row 0x%x\n", m.index);
 	return rc;
 }
 
 int igmp_hw_group_del(uint16_t vid, uint32_t group)
 {
-	uint32_t e[IGMP_MAC_ENTRY_WORDS];
+	struct odi_sw_l2_mcast m;
 	int rc;
 
 	show("del", vid, group, 0);
 	if (!hw_enabled)
 		return 0;
-	/* The port mask is not part of the key -- the vendor delete path never
-	 * writes it -- so zero, which is also what the zeroed entry holds. */
-	igmp_mac_entry(e, vid, group, 0, hw_vid_valid);
-	rc = rtk_l2_mcastAddr_del(e);
+	/* The member mask is not part of the key, so zero. */
+	igmp_mac_entry(&m, vid, group, 0, 0);
+	rc = igmp_sw_mcast_del(&m);
 	if (rc)
-		out_fmt("  rtk_l2_mcastAddr_del: %d\n", rc);
+		out_fmt("  l2 multicast del: %d (%s)\n", rc, sw_err(rc));
+	else if (!m.found)
+		out("  no such entry in the switch\n");
 	return rc;
 }

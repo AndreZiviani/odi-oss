@@ -222,20 +222,6 @@ if [ -f /etc/config/bdgconn-probe ]; then
 	crumb "bridge probe: automatic reboot armed for $PROBE_SECS s"
 fi
 
-# Keep the watchdog kicked, the way the vendor rc34 does.
-#
-# U-Boot arms the hardware watchdog before a trial boot, and the kernel thread
-# that kicks it only does so while this flag is set. The kernel sets it itself
-# at init, so this is belt and braces -- but it is one line, it runs before
-# anything that could hang, and it is the line that matters if the kernel is
-# ever built with the watchdog left disabled.
-# An `if`, not `[ ... ] && ...`: this script runs under `set -e` and busybox ash
-# is not bash. The AND-OR form happens to be safe in both, and a boot script
-# that must never fail is the wrong place to depend on that.
-if [ -w /proc/watchdog/watchdog_flag ]; then
-	/bin/echo 1 > /proc/watchdog/watchdog_flag
-fi
-
 # Cosmetic, but it is the first thing a serial console or an ssh prompt shows,
 # and an unnamed box is one more thing to wonder about during a trial boot.
 # Guarded, like everything else here. sethostname needs a privilege the
@@ -506,24 +492,32 @@ if { [ -f /etc/config/breadcrumbs.on ] || [ ! -f /var/run/config-mounted ]; } &&
 	done
 ) & fi
 
-# Tell the kernel watchdog kicker that userland is REACHABLE. Our kernel
-# resets the board at 120 s of uptime unless this file
-# has been written. Trial 9 confirmed on "br0 has an address" and sat
-# unreachable for good, so the bar is now an ARP reply from the host side:
-# a fixed host on the .2 of our subnet, present on every test stick. No
-# reply, no confirmation,
-# and the boot reverts by itself with the diagnostics above on flash.
+# Tell the kernel watchdog kicker that userland is up. Our kernel resets
+# the board at 120 s of uptime unless this file has been written, so the
+# deadline only catches a boot that never gets this far (a hung kernel or
+# a wedged rcS); on a trial boot that reset is what reverts to the
+# committed slot. The confirmation needs no network: the host may sit on
+# any address, and a stick that boots but is unreachable is fixed with a
+# power cycle, not a reboot loop.
+#
+# Development only: with /etc/config/confirm-arp present the bar is an ARP
+# reply from the .2 of our subnet (a fixed test host), so a trial that
+# comes up unreachable reverts by itself with the diagnostics above on
+# flash. Never enable it on a stick whose host does not answer on .2.
 # The vendor proc directory is /proc/watchdog on an older firmware and
 # /proc/luna_watchdog on this one (same driver, renamed); the file is ours in both.
 WDOK=/proc/watchdog/userland_ok
 [ -w "$WDOK" ] || WDOK=/proc/luna_watchdog/userland_ok
 if [ -w "$WDOK" ]; then
-	if [ "$REACHABLE" = 1 ] || reachable; then
+	if [ ! -f /etc/config/confirm-arp ]; then
 		echo 1 > "$WDOK"
-		crumb "reachable: $GW answered arping, watchdog confirmed"
+		crumb "userland up, watchdog confirmed"
+	elif [ "$REACHABLE" = 1 ] || reachable; then
+		echo 1 > "$WDOK"
+		crumb "reachable: $GW answered arping, watchdog confirmed (confirm-arp)"
 	else
-		echo "rcS: no ARP reply from ${GW:-<no address>}, not confirming to the watchdog" >&2
-		crumb "unreachable: no ARP reply from ${GW:-<no address>}, watchdog NOT confirmed"
+		echo "rcS: confirm-arp set and no ARP reply from ${GW:-<no address>}, not confirming to the watchdog" >&2
+		crumb "unreachable: no ARP reply from ${GW:-<no address>}, watchdog NOT confirmed (confirm-arp)"
 	fi
 fi
 

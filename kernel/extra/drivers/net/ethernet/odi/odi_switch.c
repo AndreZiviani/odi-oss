@@ -46,7 +46,8 @@ void __iomem *odi_switch_base;
  *
  * odi_switch_lock (mutex, process context only). Protects the indirect
  * table engine (TABLE_WRITE_WORD, TABLE_CMD, TABLE_STATUS, one handshake
- * per odi_switch_table_write()), the command-layer shadow state in
+ * per odi_switch_table_write(), and the L2 lookup-table reads, walk and
+ * multicast writes of odi_switch_l2.c), the command-layer shadow state in
  * odi_switch_cmd.c (T-CONT, GEM flow, bridge and CF tables), the trigger
  * bookkeeping and loaded parity table in odi_switch_dal.c, the sdkinit
  * mask, the /proc/odi_omci result buffers, and every multi-register

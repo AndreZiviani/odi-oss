@@ -139,12 +139,9 @@ config ODI_SDK_OUT
 	      PON-step verbs), or treating it as a no-op (intr/irq). A verb
 	      this boot's replay tables have no data for returns -ENOSYS
 	      and logs, rather than silently doing nothing.
-	  The register-trace tracer (/proc/rtk_regtrace) has its hook
-	  points inside this driver set itself (odi_switch.c,
-	  odi_switch_tbl.c, odi_switch_reg.h) -- nothing depends on a
-	  proprietary tree for it. src/diag is not guarded by this config at
-	  all: it is userland, and every one of its commands reads
-	  /dev/odi_sw (odi_reg.c, ODI_SWITCH) or /proc/odi_gpon directly.
+	  src/diag is not guarded by this config at all: it is userland, and
+	  every one of its commands reads /dev/odi_sw (odi_reg.c, ODI_SWITCH)
+	  or /proc/odi_gpon directly.
 	  There is no proprietary sockopt handler anywhere in this tree, and
 	  no sockopt fallback in src/diag either -- it implements only the
 	  16 hand-written commands its README documents, not the stock

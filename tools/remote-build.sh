@@ -18,7 +18,8 @@
 # Docker, and kernel/618/mainline already in place under
 # $ODI_REMOTE_DIR/kernel/618/ (kernel/618/fetch.sh there once, the same way;
 # it is gigabytes and does not change on every build, so step 1 above
-# excludes it). docs/REMOTE-BUILD.md has the one-time setup.
+# excludes it). docs/BUILDING.md ("Building on a remote host") has the
+# one-time setup.
 #
 # USAGE:
 #   ODI_REMOTE=user@host tools/remote-build.sh '<command to run remotely>'

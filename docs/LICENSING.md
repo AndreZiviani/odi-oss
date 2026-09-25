@@ -24,6 +24,20 @@ GPON and OMCI, SFF-8472 for optics), hardware behaviour observed on this
 board, and the behaviour of the stock firmware observed as a black box. All
 GPL-2.0, same as the kernel tree it extends.
 
+### The register replay tables
+
+`rootfs/skeleton/lib/firmware/odi/` holds three binary files
+(`sdkinit.bin`, `modload.bin`, `gpon_init.bin`) that the kernel loads with
+`request_firmware()`. They are data, not code, and not vendor files: each
+is a list of register writes (address, value, table words) recorded with
+`tools/regtrace` from this board's own hardware while the stock firmware
+initialised it, and packed by our own generators into our own format
+(`odi_replay_blob.h`). They carry no strings and no identity: the serial
+number words of the GPON table are zero, and the kernel fills them in from
+the config store at boot. They are committed rather than generated at build
+time because the register listing the generators need is itself read from
+the stock firmware binary (below) and is not in this tree.
+
 ## The toolchain and upstream packages: their own licenses
 
 Built from source, unmodified except where noted, each keeping its own
@@ -85,9 +99,10 @@ restate them.
 
 ## Public references this code is written against
 
-`docs/REFERENCES.md` — the ITU-T and SFF specifications the GPON and optics
-code implement, with their identity and checksums, fetched by
+`docs/REFERENCES.md` — the ITU-T documents the GPON code implements (G.984.3
+and its Amendment 1), with their identity and checksums, fetched by
 `tools/fetch-refs.sh` rather than stored here (their own copyright terms
-forbid redistribution). Register names used in driver comments are this
-device's own register map, which is not itself public and is not included
-in this repository; nothing beyond the names themselves is carried over.
+forbid redistribution). G.988 (OMCI) and SFF-8472 (optics) are cited by
+clause in the code but not fetched. Register names in the drivers and
+scripts are ours (`src/diag/tools/regnames.txt`, above); no register
+description from any other source is included in this repository.

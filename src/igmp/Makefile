@@ -26,8 +26,8 @@ CFLAGS := -std=c11 -Os -Wall -Wextra \
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
            -Wl,--gc-sections
 
-# switch_opt.c holds the three switch accessors this daemon calls; see its
-# header for why no 6.18 kernel answers them.
+# switch_opt.c holds the three /dev/odi_sw ioctls this daemon programs the
+# switch with; its header lists them.
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o $(BUILD)/group.o \
         $(BUILD)/entry.o $(BUILD)/program.o $(BUILD)/switch_opt.o \
         $(BUILD)/main.o
@@ -44,7 +44,7 @@ $(GTEST): test/group_test.c group.h igmpd.h $(BUILD)/start.o $(BUILD)/io.o $(BUI
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/group_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/group.o
 
-$(ETEST): test/entry_test.c entry.h $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/entry.o
+$(ETEST): test/entry_test.c entry.h $(DIAG)/src/odi_sw_ioctl.h $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/entry.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/entry_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/entry.o
 
@@ -60,16 +60,16 @@ $(BUILD)/frame.o: frame.c igmpd.h | $(BUILD)
 $(BUILD)/group.o: group.c group.h igmpd.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/entry.o: entry.c entry.h | $(BUILD)
+$(BUILD)/entry.o: entry.c entry.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/program.o: program.c program.h entry.h switch_opt.h | $(BUILD)
+$(BUILD)/program.o: program.c program.h entry.h switch_opt.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/switch_opt.o: switch_opt.c switch_opt.h entry.h $(DIAG)/src/sys.h | $(BUILD)
+$(BUILD)/switch_opt.o: switch_opt.c switch_opt.h $(DIAG)/src/odi_sw_ioctl.h $(DIAG)/src/sys.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c igmpd.h group.h program.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/main.o: main.c igmpd.h group.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD):

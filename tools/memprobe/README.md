@@ -1,6 +1,6 @@
 # memprobe and the RAM log console
 
-`memprobe` is a 36 KB static MIPS tool that reads and writes physical memory
+`memprobe` is a small static MIPS tool (built from `memprobe.c` with the command below; the binary is not committed) that reads and writes physical memory
 through `/dev/mem` on the stick, from ANY kernel that runs there, the stock
 (OEM) one included. It exists because the device has no serial console:
 `CONFIG_ODI_RAMLOG` (`kernel/extra/drivers/net/ethernet/odi/odi_ramlog.c`)
@@ -26,6 +26,23 @@ Use:
     memprobe reg 18001004              # one 32-bit register by physical address
     memprobe set 1B010004 A0000000     # write one register, read it back
     CTL=/tmp/odi_ctl tools/memprobe/ramlog-read.sh out/dir   # both pages, decoded
+
+`ramlog-read.sh` runs `/tmp/memprobe d` on the stick over an existing ssh
+control socket (`CTL`, default `/tmp/odi_ctl`: open one first with
+`ssh -M -S /tmp/odi_ctl -fN root@<stick>`), saves `pageA.bin` and
+`pageB.bin` in the directory given, and prints: both page headers, the
+early crumb in page B (`CONFIG_ODI_EARLY_CRUMBS`, tag and step, while it is
+still ASCII), the page A metadata block when its `RLGM` magic is there
+(boot counter, slot, build id, and the crumb stash at page A `+4088`: the
+last crumb of the boot before), then the page A text and the page B ring
+in order. `kernel/extra/drivers/net/ethernet/odi/odi_ramlog.h` has the
+layout.
+
+From one of our own images there is no need to push anything:
+`/proc/odi_ramlog_prev` is the same decoding, done by the kernel, of the
+pages as the previous boot left them, and `/proc/odi_ramlog_prev_raw` is the
+8192 raw bytes (page A, then page B), so
+`head -c 4096` and `tail -c 4096` of it are the two `.bin` files above.
 
 Read `docs/FLASHING.md` for how this fits the trial procedure. It has caught
 kernel bugs across several trial boots that were not visible any other way.

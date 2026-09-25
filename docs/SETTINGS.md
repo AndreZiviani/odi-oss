@@ -37,17 +37,18 @@ classes, in this document and beside it in the UI:
 **What INTERRUPTS INTERNET costs.** `apply.sh omci` deactivates the ONU,
 restarts omcid, and re-activates it: the OLT sees the ONU range again,
 resets its MIB and provisions every service from scratch, and the new omcid
-builds them with the settings as they now are. The re-activation itself is
-O1 to O5 in about five seconds (the forced re-activation measured
-2026-09-22); the provisioning after it takes as long as the OLT takes. On
-6.18 the time from Apply to service back has **not been measured yet**.
+builds them with the settings as they now are. Measured on ISP1 with the
+6.18 kernel: the ONU was back at O5, with its six OMCI services provisioned
+again and one omcid running, about 13 s after `apply.sh omci` started. The
+provisioning after the re-activation takes as long as the OLT takes, so
+another OLT may be slower.
 Without the re-activation a restart would change nothing the OLT sees:
 omcid reads the store once, at start, and builds connections only when the
 OLT provisions them.
 
 **Every REBOOT also interrupts internet.** A reboot takes the ONU off the
-line: on ISP1, 80 to 87 s from `reboot` until the management address
-answers, then the PON steps range the ONU back to O5. And on a stick running
+line: on ISP1, 75 to 81 s from `reboot` until userland confirms (the
+management address answers), then the PON steps range the ONU back to O5. And on a stick running
 a **trial slot**, a reboot does not come back to this image: it boots the
 committed slot, which is normally the stock firmware (`docs/FLASHING.md`).
 The UI's reboot confirmation says which slot it comes back on.
@@ -160,7 +161,7 @@ stock slot. `omcli ident` shows what is stored and whether it is reported.
 | Ping (Tools) | IPv4 literals, three packets | LIVE |
 | Kernel log (Tools) | the ring buffer, read without consuming it | -- |
 | Status: optics, ONU state, alarms, counters | `diag` batch | -- |
-| Read the MAC table (Status) | **not yet**, disabled: `diag` has no L2-table command, and the switch driver needs a table readback first (a kernel change, planned after the patch minimisation) | -- |
+| Read the MAC table (Status) | works: confd runs `diag l2-table get entry address valid` (the stock spelling of `diag l2-table get all`), which walks the switch L2 lookup table through `/dev/odi_sw`; read-only | -- |
 | Services, MIB | `omcicli` answered by omcid | -- |
 | Firmware: Upload | into `/tmp/img.tar`, which is RAM (8 MB cap) | -- |
 | Firmware: Write | `fwu_starter.sh`: the inactive slot only, in the background; the page follows its log | -- (then Try) |
@@ -203,7 +204,7 @@ restore.
 | `FIBER_MODE`, `LAN_SDS_MODE` | `network.sh` always sets the host SerDes to Fiber 1G; the UI never writes them |
 | `LASER_POLARITY_TYPE`, `PON_LED_SPEC` | rcS drives the laser enable itself; there is no PON LED |
 | `SUSER_NAME`, `SUSER_PASSWORD`, `USER_*`, `E8BDUSER_*`, `SUPER_*` | stock firmware accounts; this image logs in as root with SSH keys or the per-build password |
-| `SNOOPING_ENABLED`, `RTK_IGMP_*` | nothing starts `igmpd`, and its switch writes fail on this kernel; with one UNI there is nothing to prune |
+| `SNOOPING_ENABLED`, `RTK_IGMP_*` | `igmpd` can program the switch now, but it never receives a frame: the switch forwards IGMP instead of trapping it, nothing delivers a trapped frame to it, and it cannot send one on, so turning snooping on would cut the OLT off from the reports. With one UNI the only gain would be keeping unknown multicast off the CPU port. `docs/TOOLS.md` has the details |
 | `DNS_MODE`, `DNS1`-`DNS3` | a bridge resolves nothing |
 | `SW_PORT_TBL[*]`, `AUTO_PVC_SEARCH_TBL[*]` | omcid programs the switch from the OLT's MIB |
 | `WAN_*`, `LAN_RIP`, `LAN_AUTOSEARCH`, `UPNP*`, `SYSLOG*`, `NTP_EXT_ITF`, `TFTP_SERVER_ADDR`, `POSIX_TZ_STRING`, `REBOOT_TIME`, `DHCP_PORT_FILTER`, `BR_*`, `SNMP_SYS_NAME`, `DEVICE_NAME`, `RTK_DEVID_*`, `RTK_DEVINFO_*`, `HW_CWMP_*`, `INIT_*`, `MP_*`, `SPC_*`, `MIB_*_MAC_CTRL`, and the other stock gateway keys (`BYTE`, `WORD`, `OUI`, `PORT_REMAPPING`, ...) | home-gateway and TR-069 features of the stock firmware |
@@ -228,6 +229,7 @@ applies to every later image.
 | `optics.off` | skip the optics setup: **the laser stays off, no service** | REBOOT |
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |
 | `breadcrumbs.on` | boot crumbs, `trial-diag.txt` and a heartbeat, on flash | REBOOT |
+| `confirm-arp` | development only: confirm the boot to the watchdog only after an ARP reply from the `.2` of the `br0` subnet, so an unreachable trial reverts by itself; **a stick whose host is not on `.2` then resets every 120 s** | REBOOT |
 | `bdgconn-probe` | reboot unconditionally after the number of seconds it holds (300 if empty) | REBOOT, repeatedly |
 | `modload.mask`, `parity.table`, `parity.mask`, `sdkinit.mask` | bring-up trial knobs: each one also **arms an unconditional reboot 600 s into every boot** | REBOOT, repeatedly |
 | `skip-steps`, `replay/` | skip, or replay from a recording, switch init steps | REBOOT |
@@ -242,10 +244,12 @@ that runs this image as its committed slot, they reboot it every few minutes.
 
 ## Not verified yet
 
-- `apply.sh omci` on the 6.18 kernel: the deactivate/activate verbs and the
-  omcid restart are each exercised, the whole sequence against an OLT is not,
-  and the time until the services are back is not measured.
-- `apply.sh network` on a stick (the host test drives a stub `ifconfig`).
+- `apply.sh omci` against more than one OLT: it was run end to end once, on
+  ISP1 (above).
+- `apply.sh network` moving the primary address on a stick. Adding and
+  removing the second address live was checked on ISP1 (`br0:2` came and
+  went, the primary address and O5 untouched); the host test drives a stub
+  `ifconfig` for the rest.
 - `fwu_starter.sh` writing a slot from the UI (the guards and the background
   job are host-tested; `fwu.sh` itself is the flasher used by hand).
 - The OLT identity keys against an OLT that checks them; LOID against a CTC

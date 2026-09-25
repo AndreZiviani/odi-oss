@@ -13,33 +13,86 @@ void igmp_group_mac(uint8_t *mac, uint32_t group)
 	mac[5] = (uint8_t)(group & 0xff);
 }
 
-void igmp_mac_entry(uint32_t *e, uint16_t vid, uint32_t group, uint32_t ports,
-		    int vid_valid)
+int igmp_mac_entry(struct odi_sw_l2_mcast *m, uint16_t vid, uint32_t group,
+		   uint32_t ports, int vid_valid)
 {
-	/* Aliasing a word array through unsigned char is what the standard
-	 * allows, and the target is big-endian, so the byte offsets below are
-	 * the offsets librtk copies. */
-	uint8_t *b = (uint8_t *)e;
-	uint32_t flags = 0;
+	uint8_t *b = (uint8_t *)m;
 
-	for (int i = 0; i < IGMP_MAC_ENTRY_WORDS; i++)
-		e[i] = 0;
-
+	/* Zeroed whole, the output fields with it: nothing left over from the
+	 * previous group can reach the kernel. */
+	for (unsigned i = 0; i < sizeof *m; i++)
+		b[i] = 0;
+	if (ports & ~IGMP_HW_PORTS_MASK)
+		return -1;
+	igmp_group_mac(m->req.mac, group);
 	if (vid_valid) {
-		b[0] = (uint8_t)(vid >> 8);
-		b[1] = (uint8_t)vid;
-		flags |= IGMP_ENTRY_F_VID;
+		m->req.key = (uint16_t)(vid & 0xfff);
+		m->req.ivl = 1;
 	}
-	igmp_group_mac(b + 2, group);
-	/* +8 is left zero. The vendor zeroes it explicitly in one branch and
-	 * writes nothing to it in the other, so zero is the only value it has
-	 * ever been observed to hold. */
-	b[12] = (uint8_t)(ports >> 24);
-	b[13] = (uint8_t)(ports >> 16);
-	b[14] = (uint8_t)(ports >> 8);
-	b[15] = (uint8_t)ports;
-	b[24] = (uint8_t)(flags >> 24);
-	b[25] = (uint8_t)(flags >> 16);
-	b[26] = (uint8_t)(flags >> 8);
-	b[27] = (uint8_t)flags;
+	m->req.ports = ports;
+	return 0;
+}
+
+int igmp_parse_num(const char *s, uint32_t *out)
+{
+	uint32_t v = 0;
+	int n = 0;
+
+	if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+		for (s += 2; *s; s++, n++) {
+			uint32_t d;
+
+			if (*s >= '0' && *s <= '9')
+				d = (uint32_t)(*s - '0');
+			else if (*s >= 'a' && *s <= 'f')
+				d = (uint32_t)(*s - 'a' + 10);
+			else if (*s >= 'A' && *s <= 'F')
+				d = (uint32_t)(*s - 'A' + 10);
+			else
+				return 0;
+			if (n >= 8)
+				return 0;
+			v = (v << 4) | d;
+		}
+	} else {
+		for (; *s; s++, n++) {
+			if (*s < '0' || *s > '9')
+				return 0;
+			if (v > 429496729u || (v == 429496729u && *s > '5'))
+				return 0;
+			v = v * 10 + (uint32_t)(*s - '0');
+		}
+	}
+	if (n == 0)
+		return 0;
+	*out = v;
+	return 1;
+}
+
+int igmp_parse_ipv4(const char *s, uint32_t *out)
+{
+	uint32_t a = 0;
+
+	for (int part = 0; part < 4; part++) {
+		uint32_t v = 0;
+		int n = 0;
+
+		for (; *s >= '0' && *s <= '9'; s++, n++) {
+			v = v * 10 + (uint32_t)(*s - '0');
+			if (v > 255 || n >= 3)
+				return 0;
+		}
+		if (n == 0)
+			return 0;
+		a = (a << 8) | v;
+		if (part < 3) {
+			if (*s != '.')
+				return 0;
+			s++;
+		}
+	}
+	if (*s)
+		return 0;
+	*out = a;
+	return 1;
 }

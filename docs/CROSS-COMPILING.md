@@ -101,12 +101,16 @@ socket-call numbers and constants in particular do **not** match the generic
 Linux ones (`getsockopt` is a different number here, `SOCK_STREAM` and
 `SOCK_DGRAM` are swapped, `O_SYNC`'s bit pattern differs), and a wrong
 constant is a syscall that "succeeds" at doing the wrong thing rather than
-failing loudly.
+failing loudly. The same applies in the other direction: to find out whether
+a binary can reach a syscall (the kernel config diet did this for every
+ELF in the rootfs, `docs/KERNEL.md`), look for the o32 number, 4000 + N,
+loaded right before a `syscall` instruction. A scan for the bare table
+number finds nothing and "proves" every syscall unused.
 
 A three-argument syscall is a single inline `syscall` instruction (`$v0` =
 number, `$a0`-`$a2` = args, `$a3` != 0 on return means error); anything
-needing a fourth or more (like `mmap2`) goes through `__syscall6` in the same
-file, which reshuffles the o32 calling convention's register/stack split
+needing a fourth or more (like `mmap2`) goes through `__syscall6`, declared
+in `sys.h` and written in `start.S`, which reshuffles the o32 calling convention's register/stack split
 into what the kernel expects.
 
 ### uClibc-ng linked: cross-compiling a normal autotools/kbuild project

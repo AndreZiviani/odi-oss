@@ -20,6 +20,15 @@ Stored config is otherwise read only at boot (see the [config store note](rtl960
 
 Measured: the ONU returned to full operational state (O5), port counters kept advancing, and an established PPPoE session **survived untouched** (verified by pushing TCP traffic through it, not merely by checking interface state). Around 2 MB crossed the PON port during a two-minute gap with the daemon dead.
 
+## On this image
+
+The stock startup script does not exist here. `/etc/scripts/apply.sh omci`
+is the equivalent for our `omcid`: it deactivates the ONU (`gpondeact`),
+restarts `omcid` with `-r` so the new one first clears the bridge
+connections the old one left, and re-activates (`gponact`), so the OLT
+provisions it again from scratch. That path does interrupt forwarding for
+the re-ranging, unlike the bare restart measured above.
+
 ## See also
 
 - [Config store](rtl9601-config-store.md)

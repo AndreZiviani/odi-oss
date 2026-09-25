@@ -9,12 +9,21 @@
  * to print every entry it would write. Run it that way first, against a live
  * OLT, and the output answers the question the vendor daemon cannot be asked:
  * who is joining what, and when does it lapse.
+ *
+ * On our 6.18 kernel the switch half works (switch_opt.c, /dev/odi_sw) and
+ * the receive half does not yet: odi_omci delivers only OMCI frames on its
+ * redirect channel, and the switch forwards IGMP rather than trapping it to
+ * the CPU (the stock init leaves every IGMP/MLD action at forward). Trapping
+ * it would also need this daemon to send each report and query on, which it
+ * does not do -- so it is not started at boot. -j and -l drive the switch
+ * path by hand. docs/TOOLS.md has the whole reasoning.
  */
 #include "sys.h"
 #include "io.h"
 #include "igmpd.h"
 #include "group.h"
 #include "program.h"
+#include "entry.h"
 #include "../omci/nl.h"
 #include "../omci/redirect_guard.h"
 
@@ -130,6 +139,8 @@ static uint32_t now_seconds(int *warned)
 static void usage(void)
 {
 	out("usage: igmpd [-w] [-f] [-n COUNT]\n"
+	    "       igmpd [-w] -j GROUP -p PORTS [-v VID]\n"
+	    "       igmpd [-w] -l GROUP [-v VID]\n"
 	    "  Registers for packet-redirect uid 4, describes every IGMP control\n"
 	    "  frame the switch traps to the CPU, and keeps the group state.\n"
 	    "  -w         WRITE the entries to the switch. Off by default: this\n"
@@ -137,7 +148,31 @@ static void usage(void)
 	    "             misforwards rather than failing.\n"
 	    "  -n COUNT   stop after COUNT frames (0, the default, is forever)\n"
 	    "  -f         start even if a live process holds uid 4\n"
+	    "  -j GROUP   one-shot: program GROUP (a.b.c.d) with member PORTS\n"
+	    "             (-p, hardware port bits: 0x1 the UNI) and exit; the\n"
+	    "             same switch path the daemon uses, no uid 4, no state\n"
+	    "  -l GROUP   one-shot: remove GROUP from the switch and exit\n"
+	    "  -v VID     the VID the one-shot names (default 0); printed only:\n"
+	    "             the entry is keyed on filtering id 0 (SVL)\n"
 	    "  -h         this text; registers nothing\n");
+}
+
+/* The one-shot join or leave: the daemon own switch path, driven by hand, so
+ * a trial can check an entry lands in the table (diag l2-table get all)
+ * without an IGMP frame ever reaching the CPU. */
+static int one_shot(int join, uint32_t group, uint32_t ports, uint32_t vid)
+{
+	int rc;
+
+	if ((group >> 28) != 0xe) {
+		out("not an IPv4 multicast group (224.0.0.0/4)\n");
+		return 2;
+	}
+	igmp_hw_probe();
+	rc = join ? igmp_hw_group_set((uint16_t)vid, group, ports)
+		  : igmp_hw_group_del((uint16_t)vid, group);
+	out_flush();
+	return rc ? 1 : 0;
 }
 
 static int parse_uint(const char *s, uint32_t *out_v)
@@ -165,7 +200,9 @@ int main(int argc, char **argv)
 	/* nl_open fills tid only on success, and gcc cannot see the early
 	 * return between the two. */
 	uint32_t tid = 0, want = 0, seen = 0;
-	int force = 0;
+	int force = 0, shot = 0;
+	uint32_t shot_group = 0, shot_ports = 0, shot_vid = 0;
+	int have_ports = 0;
 	long fd;
 
 	for (int i = 1; i < argc; i++) {
@@ -181,10 +218,36 @@ int main(int argc, char **argv)
 				usage();
 				return 2;
 			}
+		} else if ((str_eq(argv[i], "-j") || str_eq(argv[i], "-l")) &&
+			   i + 1 < argc && !shot) {
+			shot = argv[i][1] == 'j' ? 1 : 2;
+			if (!igmp_parse_ipv4(argv[++i], &shot_group)) {
+				usage();
+				return 2;
+			}
+		} else if (str_eq(argv[i], "-p") && i + 1 < argc) {
+			if (!igmp_parse_num(argv[++i], &shot_ports)) {
+				usage();
+				return 2;
+			}
+			have_ports = 1;
+		} else if (str_eq(argv[i], "-v") && i + 1 < argc) {
+			if (!igmp_parse_num(argv[++i], &shot_vid) || shot_vid > 4095) {
+				usage();
+				return 2;
+			}
 		} else {
 			usage();
 			return 2;
 		}
+	}
+
+	if (shot) {
+		if (shot == 1 && !have_ports) {
+			usage();
+			return 2;
+		}
+		return one_shot(shot == 1, shot_group, shot_ports, shot_vid);
 	}
 
 	fd = nl_open(&tid, RCV_TIMEOUT_US);

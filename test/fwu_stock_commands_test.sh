@@ -10,7 +10,7 @@
 #     fwu: no MTD partition named k1
 #
 # and exited -- accusing the flash map, which is the one failure mode
-# docs/TRIAL-BOOT.md teaches you to fear. Nothing was written, so it was
+# docs/FLASHING.md teaches you to fear. Nothing was written, so it was
 # fail-safe, but it cost the first flash. Neither of the other two fwu
 # harnesses could see it: test/fwu_guard_test.sh runs the script under the
 # HOST's bash and test/flash_harness_test.sh runs it under OUR busybox inside

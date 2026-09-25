@@ -1,7 +1,8 @@
 /* Hardware access, through the interfaces our own kernel provides.
  *
- *   /dev/odi_sw      switch-core register get/set, per-port MIB counters and
- *                    the transceiver DDM block (odi_reg.c, odi_ddm.c)
+ *   /dev/odi_sw      switch-core register get/set, per-port MIB counters,
+ *                    the transceiver DDM block and the L2 lookup table
+ *                    (odi_reg.c, odi_ddm.c, odi_switch_l2.c)
  *   /proc/odi_gpon   the GPON state machine state and the last LOS sample
  *                    (odi_gpon.c)
  *   netlink          the GEM flows odi_switch recorded (odi_omci.c,
@@ -66,6 +67,16 @@ int hw_gpon_alarms_get(uint32_t *alarms, uint32_t *known);
  * for; both come back as a failure. */
 #define MIB_COUNT 69
 int hw_stat_port_get(uint32_t port, uint32_t counter, uint64_t *value);
+
+/* The L2 lookup table (odi_switch_l2.c). hw_l2_get reads one row by number,
+ * valid or not; hw_l2_next the first valid row at or after *index, setting
+ * *index to it, and returns 1 when there is none left. hw_l2_mode gives the
+ * number of rows and the IPv4 multicast lookup mode. All three return a
+ * negative value when the driver refuses or has no such ioctl. */
+struct odi_sw_l2_row;
+int hw_l2_get(uint32_t index, struct odi_sw_l2_row *row);
+int hw_l2_next(uint32_t *index, struct odi_sw_l2_row *row);
+int hw_l2_mode(uint32_t *rows, uint32_t *ipmc_on_group);
 
 /* The GEM flows odi_switch recorded. Returns 0 when answered, 1 when there is
  * no netlink command path, and 2 when the path answered but the kernel has no
