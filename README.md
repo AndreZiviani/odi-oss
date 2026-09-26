@@ -86,6 +86,15 @@ Every row above is backed by something you can read or run in this repo:
 [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md) has the detail and the
 verification for each one.
 
+## Screenshots
+
+| Web UI ([odi-ui](https://github.com/AndreZiviani/odi-ui)) | `diag` on the stick |
+|---|---|
+| ![Web UI status page: optics, registration state, forwarding counters and the learned MAC table](docs/images/ui-mactable.png) | ![diag output: optics readings, ONU state O5, all GPON alarms clear](docs/images/term-diag.png) |
+
+Identifiers in the screenshots are placeholders. More pages in the
+[odi-ui README](https://github.com/AndreZiviani/odi-ui#screenshots).
+
 ## Quick start
 
 **Get an image**, either a published release or your own build:
