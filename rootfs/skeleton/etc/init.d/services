@@ -57,7 +57,19 @@ start() {
 		# -D: public keys for root live beside the host key, on the jffs2
 		# partition, so they survive a reflash. confd /api/sshkeys writes
 		# that file; dropbear reads it on every login, no restart needed.
-		[ -s "$KEY" ] && /sbin/dropbear -E -r "$KEY" -D /etc/config/dropbear.d -p 22 &
+		#
+		# /etc/odi-keys-only is written by image/build.sh only for
+		# ROOT_PW=locked (docs/BUILDING.md): the account has no usable
+		# password hash either way, but -s here also refuses password
+		# auth at the protocol level, so a public release image never
+		# offers a password prompt to try against. A source build with
+		# the default per-build password does not carry this file, so it
+		# keeps password login as today.
+		if [ -f /etc/odi-keys-only ]; then
+			[ -s "$KEY" ] && /sbin/dropbear -s -E -r "$KEY" -D /etc/config/dropbear.d -p 22 &
+		else
+			[ -s "$KEY" ] && /sbin/dropbear -E -r "$KEY" -D /etc/config/dropbear.d -p 22 &
+		fi
 	fi
 
 	# The GPON modules/omcid startup used to happen here too, for a kernel

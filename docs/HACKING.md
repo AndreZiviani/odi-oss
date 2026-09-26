@@ -202,8 +202,11 @@ command on stdin. The command is any shell line, so
   assets. [Feature toggles](#build-variables) has every variable.
 - **The root password** is generated per build and written to
   `out/image/root-password-<version>.txt`; `ROOT_PW=` chooses it,
-  `ROOT_PW=none` leaves it empty. It is baked into the read-only rootfs, so
-  keep the file for as long as that image runs anywhere.
+  `ROOT_PW=none` leaves it empty, `ROOT_PW=locked` ships no password at all
+  and starts dropbear with `-s` (`.github/workflows/release.yml` builds
+  every release this way). It is baked into the read-only rootfs, so keep
+  the file for as long as that image runs anywhere. All three shapes are
+  `image/gen-root-account.sh`, tested by `test/root_pw_test.sh`.
 
 ### confd and metricsd
 
@@ -237,6 +240,12 @@ tags (`v*`, `odi-oss-*`) and manual runs it adds `make src` on its own. The
 toolchain, kernel and image are **not** built in CI: 25 minutes of compiling
 and nothing in them runs without a stick. Build the kernel yourself before
 you push a kernel change.
+
+`.github/workflows/release.yml`, on a `v*` tag only, does build the full
+image (`VERSION=` from the tag, `ROOT_PW=locked`) and publishes it as a
+GitHub release: the tarball, `SHA256SUMS`, and notes from
+`tools/release-notes.sh` (the tag's own `CHANGELOG.md` section plus a
+flash-and-first-login paragraph).
 
 ## The recovery mechanism
 
@@ -788,7 +797,7 @@ prints the `CONFIG_ODI_*` it got).
 | `KERNEL`, `KCONFIG` | `image/build.sh:48`, `:39` | uImage to ship, and its `.config` (shipped as `/etc/kernel-config`) | `build/kernel-618/uImage` and the `config` beside it |
 | `BUSYBOX`, `BIN_DIR`, `PKG_DIR`, `ASSET_DIR` | `image/build.sh:37`, `:43`, `:46`, `:44` | where the pieces are | `out/busybox`, `out/bin`, `out`, `out/confd-assets` |
 | `COMP`, `BS` | `image/build.sh:29`, `:30` | squashfs compressor and block size | `xz`, 262144 |
-| `ROOT_PW` | `image/build.sh:291` | root password; `none` for empty | generated, 14 characters |
+| `ROOT_PW` | `image/build.sh:292` | root password; `none` for empty, `locked` for no password at all (keys only) | generated, 14 characters |
 | `ALLOW_PARTIAL=1` | `image/build.sh:158`, `:189`, `:199` | build without confd assets or a package | 0 |
 | `ALLOW_NO_KCONFIG=1` | `image/build.sh:297` | build without `/etc/kernel-config` (the `.config`, shipped for reference) | 0 |
 | `GITHUB_TOKEN`, `USE_CURL=1` | `src/fetch-releases.sh`, `tools/remote-build.sh` | optional token, raises the anonymous rate limit for the curl download; skip `gh` even when present | none; 0 |

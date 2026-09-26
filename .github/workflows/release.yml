@@ -1,0 +1,54 @@
+name: release
+
+# Pushing a vX.Y.Z tag builds the full flashable image -- kernel, packages,
+# our own tools, confd and metricsd from their own public releases -- with
+# ROOT_PW=locked (docs/BUILDING.md): a public release image ships keys-only,
+# never a per-build password baked into a squashfs anyone can unpack. The
+# result is published as a GitHub release: the tarball, its SHA256SUMS, and
+# release notes built from CHANGELOG.md by tools/release-notes.sh.
+#
+# This is the one workflow here that actually builds the kernel and the
+# image (ci.yml deliberately does not: about an hour of compiling a runner
+# would spend on every push). Expect this job to take several minutes.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+
+      - name: Build the release image (keys-only root)
+        run: VERSION="$VERSION" ROOT_PW=locked make image-all
+
+      - name: Checksums
+        working-directory: out/image
+        run: sha256sum "$VERSION.tar" > SHA256SUMS
+
+      - name: No password file made it into the release
+        working-directory: out/image
+        run: |
+          if ls root-password*.txt >/dev/null 2>&1; then
+            echo "release.yml: a root-password file exists for a ROOT_PW=locked build -- refusing to publish" >&2
+            exit 1
+          fi
+
+      - name: Release notes
+        run: tools/release-notes.sh "$VERSION" > /tmp/release-notes.md
+
+      - name: Publish the GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$VERSION" \
+            "out/image/$VERSION.tar" out/image/SHA256SUMS \
+            --title "$VERSION" \
+            --notes-file /tmp/release-notes.md

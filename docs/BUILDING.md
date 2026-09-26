@@ -124,8 +124,24 @@ fails the build rather than shipping.
 (`ROOT_PW=` to choose your own, `ROOT_PW=none` for none), hashes it with
 SHA-512 crypt (`$6$`, `openssl passwd -6`, default rounds) and writes the
 plaintext to `out/image/root-password-<version>.txt`, because a shared
-default baked into a public image is worse than no default. `VERSION=` names
-the build;
+default baked into a public image is worse than no default. This is the
+default for a source build.
+
+`ROOT_PW=locked` ships root with **no password at all** instead: the
+account's password field is `!`, a hash no `crypt()` ever produces, and the
+image also carries `/etc/odi-keys-only`, which `/etc/init.d/services` reads
+to start dropbear with `-s` (refuse password logins outright), so ssh does
+not even offer a password prompt. This is what the published releases build
+with — a per-build password baked into a squashfs anyone can unpack is not
+a secret. First access to a `ROOT_PW=locked` image is through the web UI
+(`confd`, port 80 — the built-in `admin`/`admin` until a password is set),
+whose SSH-key admin page can add a key for root; `docs/FLASHING.md` has the
+exact steps. The three shapes (`locked`, `none`, the default password) are
+written by `image/gen-root-account.sh`, which `test/root_pw_test.sh`
+(`make test-host`) exercises directly — no kernel or busybox needed for
+that one.
+
+`VERSION=` names the build;
 `ALLOW_PARTIAL=1` lets you build an image missing an optional package or
 `confd`'s assets (useful while iterating); `ALLOW_NO_KCONFIG=1` builds
 without shipping `/etc/kernel-config`, the `.config` kept on the device for

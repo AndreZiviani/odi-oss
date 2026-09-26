@@ -3,8 +3,23 @@
 Releases of the flashable image. Trial builds between releases are not
 listed here.
 
-## Unreleased
+## v1.0.0 — 2026-09-26
 
+The first tagged release, built and published by `.github/workflows/release.yml`
+on push of a `v*` tag. `SHA256SUMS` beside the tarball on the
+[release page](https://github.com/AndreZiviani/odi-oss/releases) is what to
+check the download against.
+
+- **Release images are keys-only.** `ROOT_PW=locked` (the release workflow's
+  default; `docs/BUILDING.md`) ships root with no password at all — the
+  `/etc/passwd` field is `!` and dropbear runs with `-s`, so ssh does not
+  even offer a password prompt. A source build still defaults to a random
+  per-build password unless it also passes `ROOT_PW=locked`. First access to
+  a keys-only image is through the web UI (`confd`, port 80, `admin`/`admin`
+  until you change it), whose SSH-key admin page adds a key for root;
+  `docs/FLASHING.md` and `docs/ACCESS.md` have the exact steps. The three
+  shapes (`locked`, `none`, the default password) are written by the new
+  `image/gen-root-account.sh`, tested on its own by `test/root_pw_test.sh`.
 - **confd v1.0.5.** Config page reorder, MIB class picker, text sweep in the
   web UI.
 - **Prebuilt toolchain.** The gcc 16.2.0 / binutils 2.47 / uClibc-ng 1.0.59

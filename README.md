@@ -71,7 +71,7 @@ the same hardware.
 | web UI | closed, minimal | `confd` (a separate project): same port; offers only the 21 settings this image reads, each marked LIVE, SERVICE RESTART, INTERRUPTS INTERNET or REBOOT, and applies them without a reboot where it can; the switch MAC table; firmware upload and write to the inactive slot; SSH-key management; build/version info |
 | metrics | none | a Prometheus exporter, `metricsd` (a separate project), including whether the OLT actually provisioned service, not just link state |
 | SSH | an old dropbear needing legacy algorithms re-enabled on the client | a current dropbear, ed25519 host key, `scp` in both directions |
-| login security | telnet enabled by default, and a fixed, well-known default login (`admin`/`admin`) | no telnet; ssh only, with SSH keys or a root password generated per build and stored as a SHA-512 crypt hash |
+| login security | telnet enabled by default, and a fixed, well-known default login (`admin`/`admin`) | no telnet; ssh only. A release image ships with root locked (keys only, no password); a source build defaults to a password generated per build and stored as a SHA-512 crypt hash. Either way, the web UI's own `admin`/`admin` default must still be changed by the operator |
 | memory | about 1.1 MB free after a cache drop, with the stock services running | about 15 MB available: our drivers load the switch and GPON register tables from firmware files, apply them and free them |
 | kernel size | fits its partition with little to spare | about 83 KB spare (1,274,429 of 1,359,872 bytes), after cutting kernel features nothing on the stick uses and the driver bring-up scaffolding |
 | reboot | not measured | `reboot` resets at once through a watchdog restart handler; back in the stock image about 73 s later |
@@ -88,23 +88,44 @@ verification for each one.
 
 ## Quick start
 
-**Build** (needs Docker; see [`docs/BUILDING.md`](docs/BUILDING.md) for the
-full breakdown and remote-build option):
+**Get an image**, either a published release or your own build:
 
-    make image-all      # pulls the toolchain; kernel, packages, our tools, the image
-    make image          # just the tarball, out/image/<version>.tar, once the pieces above exist
+- **Release** (recommended if you are not changing the code): download
+  `<version>.tar` and `SHA256SUMS` from
+  [Releases](https://github.com/AndreZiviani/odi-oss/releases), and check
+  the tarball against the checksum file before flashing anything. Release
+  images ship keys-only — see "First login" below.
+- **Build** (needs Docker; see [`docs/BUILDING.md`](docs/BUILDING.md) for the
+  full breakdown and remote-build option):
+
+      make image-all      # pulls the toolchain; kernel, packages, our tools, the image
+      make image          # just the tarball, out/image/<version>.tar, once the pieces above exist
+
+  A source build defaults to a random per-build root password
+  (`ROOT_PW=locked` builds the same keys-only image the releases ship).
 
 **Flash**, into the slot you are not running, and trial-boot it — never
 commit on the first boot. Full procedure, including how to read a boot you
 could not otherwise see: [`docs/FLASHING.md`](docs/FLASHING.md).
 
-**First login**, once the trial image is up: ssh as `root`, with
-the password `image/build.sh` generated for that build
-(`out/image/root-password-<version>.txt`), or the web UI on port 80
-(default `admin`/`admin`). Add your own SSH key from there; the root
-password stays valid beside it (it is baked into the read-only rootfs, and
-`ROOT_PW=` at build time chooses it). Full detail, including every port and how to move files on
-and off the stick: [`docs/ACCESS.md`](docs/ACCESS.md).
+**First login**, once the trial image is up:
+
+- **Release image, or a source build with `ROOT_PW=locked`**: root has no
+  password at all (ssh with a password is refused). Open the web UI on
+  port 80 — `admin`/`admin` until you change it — and add your SSH public
+  key under its SSH-key admin page; `ssh root@<stick>` with that key then
+  works, and keeps working across reboots and re-flashes (the key lives on
+  the config partition, not in the image).
+- **A default source build**: ssh as `root` with the password
+  `image/build.sh` generated for that build
+  (`out/image/root-password-<version>.txt`), or the web UI the same way as
+  above. Add your own SSH key from there; the root password stays valid
+  beside it.
+
+Either way, change the web UI's own default credential first — it is what a
+freshly reset or freshly flashed stick answers to. Full detail, including
+every port and how to move files on and off the stick:
+[`docs/ACCESS.md`](docs/ACCESS.md).
 
 ## Status and limitations
 

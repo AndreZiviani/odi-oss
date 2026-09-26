@@ -18,11 +18,18 @@ default credential, not a locked door.
 
 ## The root password
 
-Every image build generates its own: `out/image/root-password-<version>.txt`
-beside the tarball. It is the ssh password for `root`, baked into
-`/etc/passwd` on the read-only squashfs as a SHA-512 crypt hash (`$6$`):
-`passwd` on the stick cannot change it. The build file is the source of
-truth; for anything you do more than once, use keys.
+A **release image is keys-only**: `ROOT_PW=locked` (`docs/BUILDING.md`)
+leaves root with no password at all (the `/etc/passwd` field is `!`, and
+dropbear runs with `-s`, refusing password logins outright — ssh does not
+even prompt for one). First access is through the web UI below, whose
+SSH-key admin page adds a key for root.
+
+A **source build**, unless it also passes `ROOT_PW=locked`, generates its
+own password: `out/image/root-password-<version>.txt` beside the tarball.
+It is the ssh password for `root`, baked into `/etc/passwd` on the
+read-only squashfs as a SHA-512 crypt hash (`$6$`): `passwd` on the stick
+cannot change it. The build file is the source of truth; for anything you
+do more than once, use keys.
 
 ## SSH keys (the way to do it)
 

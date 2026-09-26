@@ -272,7 +272,12 @@ fi
 
 # The root account. A shared default password baked into a public build is
 # worth less than nothing, so one is generated per build and printed; pass
-# ROOT_PW to choose your own, or ROOT_PW=none for an empty password.
+# ROOT_PW to choose your own, ROOT_PW=none for an empty password, or
+# ROOT_PW=locked for no password at all -- the shape a public release image
+# ships with, since a release tarball cannot carry a secret (docs/BUILDING.md,
+# "The root password and image versioning"). File writing for all three
+# lives in image/gen-root-account.sh, so it is testable on its own
+# (test/root_pw_test.sh).
 #
 # SHA-512 crypt ($6$): the toolchain builds uClibc-ng with the SHA-512 crypt
 # (the uclibc toolchain image, toolchain/README.md), and both verifiers on
@@ -284,13 +289,17 @@ fi
 # benchmark under qemu, scaled to its measured BogoMIPS): no case for more
 # or fewer.
 say "accounts"
-mkdir -p "$OUT"
 PW=${ROOT_PW:-}
-if [ "$PW" = none ]; then
-	echo 'root::0:0:root:/root:/bin/sh' > "$STAGE/etc/passwd"
-	rm -f "$OUT/root-password.txt"
+case "$PW" in
+none)
+	"$ROOT/image/gen-root-account.sh" "$STAGE" "$OUT" "$VERSION" none
 	echo "  root has NO password (ROOT_PW=none)"
-else
+	;;
+locked)
+	"$ROOT/image/gen-root-account.sh" "$STAGE" "$OUT" "$VERSION" locked
+	echo "  root password LOCKED (ROOT_PW=locked) -- keys only, see docs/FLASHING.md"
+	;;
+*)
 	gen=
 	if [ -z "$PW" ]; then
 		# Bounded read, then cut: `tr < /dev/urandom | head -c` gives tr
@@ -300,17 +309,10 @@ else
 		gen=" (generated)"
 	fi
 	HASH=$(run openssl passwd -6 "$PW")
-	echo "root:$HASH:0:0:root:/root:/bin/sh" > "$STAGE/etc/passwd"
-	printf '%s\n' "$PW" > "$OUT/root-password.txt"
-	chmod 600 "$OUT/root-password.txt"
-	# And a copy named for this version: the file above is overwritten by
-	# the next build, which locks you out of an image still running on a
-	# stick. Never cleaned by the build.
-	printf '%s\n' "$PW" > "$OUT/root-password-$VERSION.txt"
-	chmod 600 "$OUT/root-password-$VERSION.txt"
+	"$ROOT/image/gen-root-account.sh" "$STAGE" "$OUT" "$VERSION" password "$PW" "$HASH"
 	echo "  root password$gen -> out/image/root-password.txt"
-fi
-chmod 644 "$STAGE/etc/passwd"
+	;;
+esac
 
 # Every ELF that is about to be squashed, not just the ones we remember to
 # name. A binary carrying an instruction this core lacks links clean and traps

@@ -99,6 +99,7 @@ test: lint test-host test-diag test-omci
 	@echo "ok"
 
 test-host:
+	bash test/root_pw_test.sh
 	bash test/flash_test.sh
 	bash test/fwu_guard_test.sh
 	bash test/fwu_starter_test.sh
