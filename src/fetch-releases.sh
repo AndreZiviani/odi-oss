@@ -28,12 +28,11 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 # Two ways to download, because a build host need not have gh:
 #
-#   gh      when it is installed and logged in (gh auth status), which
-#           covers private repositories through its own login;
-#   curl    otherwise. A public repository needs nothing; a private one
-#           needs GITHUB_TOKEN (any token that can read the repository
-#           contents), and goes through the REST API, since the plain
-#           /releases/download/ URL does not accept a token.
+#   gh      when it is installed and logged in (gh auth status);
+#   curl    otherwise. Both repositories are public, so no login or token
+#           is needed; an optional GITHUB_TOKEN, if set, only raises the
+#           anonymous rate limit and routes the download through the REST
+#           API instead of the plain /releases/download/ URL.
 #
 # USE_CURL=1 skips gh even when it is there.
 # Either way the asset is checked against the release SHA256SUMS below, so
@@ -81,7 +80,7 @@ fetch_asset() {
 			curl_asset "$repo" "$tag" "$asset" "$dest.part" || {
 				rm -f "$dest.part"
 				echo "  could not download $asset from $repo $tag." >&2
-				echo "  A private repository needs GITHUB_TOKEN (or a logged-in gh)." >&2
+				echo "  Rate-limited? Set GITHUB_TOKEN (or use a logged-in gh)." >&2
 				exit 1
 			}
 		fi

@@ -13,15 +13,14 @@ The containers are `amd64`; on any other host they run under emulation,
 which is slow for the toolchain and the kernel
 ([remote host](#building-on-a-remote-host)).
 
-`confd` (the web UI) comes from a **private** repository. `make releases`
-downloads it either with `gh`, when `gh` is installed and logged in, or
-with `curl` and a `GITHUB_TOKEN` that can read that repository. `metricsd`
-is public and needs neither.
+`confd` (the web UI) and `metricsd` (the exporter) are both public releases;
+`make releases` downloads them with `gh` when it is installed, or with
+`curl` otherwise. No login or token is required; an optional `GITHUB_TOKEN`
+only raises the anonymous rate limit.
 
 ## From a clean clone
 
     git clone git@github.com:AndreZiviani/odi-oss.git && cd odi-oss
-    export GITHUB_TOKEN=<token>    # only without a logged-in gh
     make image-all
 
 That is the whole build. It runs these steps, in this order, each one its
@@ -53,12 +52,12 @@ password the image was built with is in
 `make image` alone (without the rest) works once the pieces it needs
 already exist; on a fresh tree it names every missing one and stops.
 
-If `make releases` cannot reach the private repository, there are two ways
-round it: run `make releases` on a machine that can, and copy what it
-writes -- `out/bin/metricsd`, `out/bin/confd`, `out/bin/releases.env` and
-the `out/confd-assets/` directory -- to the same paths in the build tree
-before `make image`; or build without the exporter and the UI,
-`ALLOW_PARTIAL=1 make image`.
+If `make releases` cannot reach GitHub (offline build host, rate limit),
+there are two ways round it: run `make releases` on a machine that can, and
+copy what it writes -- `out/bin/metricsd`, `out/bin/confd`,
+`out/bin/releases.env` and the `out/confd-assets/` directory -- to the same
+paths in the build tree before `make image`; or build without the exporter
+and the UI, `ALLOW_PARTIAL=1 make image`.
 
 ### Several builds on one Docker host
 
@@ -76,22 +75,17 @@ and published by the odi-toolchain repository
 (<https://github.com/AndreZiviani/odi-toolchain>) and pinned by digest in
 `toolchain/images.env`; `toolchain/image.sh` pulls each on first use.
 
-**While the packages are private**, pulling needs a one-time
-`docker login ghcr.io` with a GitHub token that has `read:packages`:
-
-    echo "$TOKEN" | docker login ghcr.io -u <github user> --password-stdin
+The packages are public: an anonymous pull works, no login or token needed.
+A failed pull (offline build host, rate limit) prints the fallback: build
+the images from the odi-toolchain repository (`make -C odi-toolchain
+uclibc freestanding`, about an hour for the first) and point `OSS_IMAGE=` /
+`DIAG_IMAGE=` at the local tags. `toolchain/README.md` has the details.
 
 On a native x86_64 host with 8 cores, from a fresh tree and fresh volumes,
 the kernel, the packages, our tools and the image take about three and a
 half minutes once the images are pulled (measured 2026-09-25; the kernel
 fetch and the release downloads come on top). Building the uclibc
 toolchain itself used to add about an hour to a first build.
-
-Once they are public, an anonymous pull works and no login is needed. A
-failed pull prints both that and the fallback: build the images from the
-odi-toolchain repository (`make -C odi-toolchain uclibc freestanding`, about
-an hour for the first) and point `OSS_IMAGE=` / `DIAG_IMAGE=` at the local
-tags. `toolchain/README.md` has the details.
 
 ## bridge-utils
 
@@ -115,10 +109,8 @@ implement, adding a `build.sh` there is a small, self-contained change.
 CI (`.github/workflows/ci.yml`) runs `make lint`, `make test-host`,
 `make test-diag` and `make test-omci` on every push to `main` and every
 pull request, and adds `make src` on release tags and manual runs; the
-kernel and image are not built there. It pulls the freestanding toolchain
-image with the workflow `GITHUB_TOKEN`; while the package is private, that
-works only once the package grants this repository read access (package
-settings on GitHub, "Manage Actions access").
+kernel and image are not built there. It pulls the public freestanding
+toolchain image anonymously, no login needed.
 
 Every ELF that reaches the image — kernel, busybox, dropbear, iproute2, our
 own tools — passes an instruction audit (`packages/isa-audit.sh`,
@@ -154,9 +146,9 @@ your local `out/image/`. `ODI_REMOTE` is required and names no host of its
 own; `ODI_REMOTE_DIR` defaults to `/root/odi/odi-oss`. The remote host needs
 the prerequisites above. The kernel tree and the download cache are not
 synced (the tree is gigabytes): the first build there fetches them, later
-ones reuse them. A remote host without a logged-in `gh` needs the token for
-`make releases`; set `GITHUB_TOKEN` locally and the script hands it to the
-remote command on stdin, never on a command line:
+ones reuse them. `make releases` needs no token on the remote host either;
+an optional `GITHUB_TOKEN`, if you want the higher rate limit, is handed to
+the remote command on stdin, never on a command line:
 
     GITHUB_TOKEN=$(gh auth token) ODI_REMOTE=user@yourbuildhost tools/remote-build.sh 'make image-all'
 

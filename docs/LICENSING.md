@@ -60,9 +60,11 @@ so it does not appear above.
 
 `src/diag`, `src/omci`, `src/igmp`, `src/nv`, the rootfs skeleton
 (`rootfs/skeleton/`), and every build script in this repo are entirely
-ours, written for this project. They are licensed under the **GNU General Public License, version 2 only**
-(GPL-2.0-only), the same license as the kernel; the full text is in
-[`LICENSE`](../LICENSE).
+ours, written for this project. They are licensed under the **GNU General
+Public License, version 2 or later** (GPL-2.0-or-later). The kernel patches
+and drivers under `kernel/618/patches/` and `kernel/extra/` are also
+GPL-2.0-or-later, combined into a GPL-2.0-only kernel as upstream ships it.
+The full GPL-2.0 text (correct for "or later") is in [`LICENSE`](../LICENSE).
 
 ### `src/diag`: what comes from the stock firmware, and what is ours
 

@@ -18,21 +18,12 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      # The toolchain images (toolchain/images.env) are pulled by digest from
-      # ghcr.io. Once the packages are public this step is unnecessary and
-      # harmless; while they are private the pull needs it, and the package
-      # must grant this repository read access (package settings, Manage
-      # Actions access).
-      - name: Log in to ghcr.io (needed only while the toolchain packages are private)
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Lint (shellcheck, inline-quote check)
         run: |
@@ -53,14 +44,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The toolchain images (toolchain/images.env) are pulled by digest from
-      # ghcr.io. Once the packages are public this step is unnecessary and
-      # harmless; while they are private the pull needs it, and the package
-      # must grant this repository read access (package settings, Manage
-      # Actions access).
-      - name: Log in to ghcr.io (needed only while the toolchain packages are private)
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
       # Fetches linux-6.18.53 fresh (kernel/618/fetch.sh) and re-checks its
       # pinned SHA-256 and the upstream GPG signature; packs it into
       # build/kernel-618/tree.tar. Does not compile it -- that is the ~hour
@@ -71,9 +54,8 @@ jobs:
       - name: Our binaries (freestanding, in the freestanding toolchain image)
         run: make src
 
-      # `make releases` needs a token for the private odi-ui repository this
-      # runner does not have, so it is skipped here; image/build.sh already
-      # refuses to assemble a partial image (ALLOW_PARTIAL=1 overrides that,
+      # `make releases` is skipped here; image/build.sh already refuses to
+      # assemble a partial image (ALLOW_PARTIAL=1 overrides that,
       # deliberately not set), so `make image` on this tree -- kernel and
       # packages never built -- must fail, and must say what it is missing
       # rather than fail silently or on an unrelated error.
@@ -96,14 +78,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      # The toolchain images (toolchain/images.env) are pulled by digest from
-      # ghcr.io. Once the packages are public this step is unnecessary and
-      # harmless; while they are private the pull needs it, and the package
-      # must grant this repository read access (package settings, Manage
-      # Actions access).
-      - name: Log in to ghcr.io (needed only while the toolchain packages are private)
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Our binaries (freestanding, in the freestanding toolchain image)
         run: make src

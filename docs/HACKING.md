@@ -105,8 +105,9 @@ and runs the PON steps, which start `omcid` and activate the GPON MAC.
 
 Docker, bash, GNU make, git, `curl`, `xz`, `gpg` and `shasum` (the kernel
 fetch), and for the host tests a C compiler, Python 3 and `shellcheck`.
-`make releases` needs either a logged-in `gh` or a `GITHUB_TOKEN` that can
-read the private odi-ui repository ([confd and metricsd](#confd-and-metricsd)).
+`make releases` downloads public releases with `gh` when installed, or
+`curl` otherwise; no login or token is required
+([confd and metricsd](#confd-and-metricsd)).
 Everything that compiles for the target runs in containers. The toolchains
 are prebuilt images, pinned by digest in `toolchain/images.env` and pulled
 on first use ([Toolchain images](#toolchain-images)). The uclibc one is
@@ -121,15 +122,9 @@ Both come from the odi-toolchain repository
 publishes them; `toolchain/README.md` has what each contains. Nothing here
 builds a compiler any more.
 
-**While the packages are private**, log in once with a GitHub token that
-has `read:packages`, and never commit that token or leave it in a shared
-host shell history:
-
-    echo "$TOKEN" | docker login ghcr.io -u <github user> --password-stdin
-
-Once they are public no login is needed. A failed pull says so and prints
-the fallback: build the images from source in the odi-toolchain repository
-and export `OSS_IMAGE=odi-toolchain-uclibc:local` /
+The packages are public: no login is needed. A failed pull says so and
+prints the fallback: build the images from source in the odi-toolchain
+repository and export `OSS_IMAGE=odi-toolchain-uclibc:local` /
 `DIAG_IMAGE=odi-toolchain-freestanding:local`.
 
 To move a pin: tag a new version in odi-toolchain, take the digest from its
@@ -139,7 +134,6 @@ file by file against one built with the old pin.
 ### From a clean clone
 
     git clone git@github.com:AndreZiviani/odi-oss.git && cd odi-oss
-    export GITHUB_TOKEN=<token>    # only without a logged-in gh
     make image-all                 # out/image/<version>.tar, a few minutes on an 8-core x86_64 host
 
 The toolchain images bring their own kernel headers, so `kernel-tree` no
@@ -190,9 +184,10 @@ build), runs the command there, and copies `out/image/*.tar`, the password
 files and build logs back. `ODI_REMOTE` has no default; `ODI_REMOTE_DIR`
 defaults to `/root/odi/odi-oss`. The kernel tree and `dl/` are excluded
 from the sync (the tree is gigabytes); the first build on the remote host
-fetches them. Without a logged-in `gh` there, set `GITHUB_TOKEN` locally:
-the script passes it to the remote command on stdin. The command is any
-shell line, so `'VERSION=odi-oss-260925-mine make kernel image'` works too.
+fetches them. `make releases` needs no token there either; an optional
+`GITHUB_TOKEN`, if you want the higher rate limit, is passed to the remote
+command on stdin. The command is any shell line, so
+`'VERSION=odi-oss-260925-mine make kernel image'` works too.
 
 ### Iterating
 
@@ -216,8 +211,8 @@ The web UI (`confd`, the odi-ui project) and the Prometheus exporter
 (`metricsd`, the odi-sfp-exporter project) are separate repositories with their
 own releases. `src/fetch-releases.sh` downloads the pinned tags
 (`CONFD_TAG`, `METRICSD_TAG`; the defaults are in the script) with `gh`
-when it is installed and logged in, otherwise with `curl` (odi-ui is
-private, so that path needs `GITHUB_TOKEN`; `USE_CURL=1` forces it), verifies
+when it is installed and logged in, otherwise with `curl` (`USE_CURL=1`
+forces it); both repos are public, so neither path needs a token, verifies
 each asset against the release's `SHA256SUMS`, caches them in
 `dl/releases/`, and records the tags in `out/bin/releases.env`, which
 `image/build.sh` copies into `/etc/odi-build`.
@@ -796,7 +791,7 @@ prints the `CONFIG_ODI_*` it got).
 | `ROOT_PW` | `image/build.sh:291` | root password; `none` for empty | generated, 14 characters |
 | `ALLOW_PARTIAL=1` | `image/build.sh:158`, `:189`, `:199` | build without confd assets or a package | 0 |
 | `ALLOW_NO_KCONFIG=1` | `image/build.sh:297` | build without `/etc/kernel-config` (the `.config`, shipped for reference) | 0 |
-| `GITHUB_TOKEN`, `USE_CURL=1` | `src/fetch-releases.sh`, `tools/remote-build.sh` | token for the curl download of the private confd release; skip `gh` even when present | none; 0 |
+| `GITHUB_TOKEN`, `USE_CURL=1` | `src/fetch-releases.sh`, `tools/remote-build.sh` | optional token, raises the anonymous rate limit for the curl download; skip `gh` even when present | none; 0 |
 | `METRICSD_TAG`, `CONFD_TAG`, `*_REPO` | `src/fetch-releases.sh` | releases to fetch; `CONFD_TAG=` (empty) with `CONFD_BIN` for a local confd | pinned in the script |
 | `CONFD_BIN`, `CONFD_ASSETS` | `src/fetch-releases.sh:82`, `:88` | local confd binary and its odi-ui checkout | none; `$(dirname $CONFD_BIN)/..` |
 | `ODI_REMOTE`, `ODI_REMOTE_DIR` | `tools/remote-build.sh:36`, `:37` | remote build host and directory | required; `/root/odi/odi-oss` |

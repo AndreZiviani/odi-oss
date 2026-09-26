@@ -185,8 +185,18 @@ This is new, actively developed firmware. Before relying on it:
 ## License
 
 Our own code (kernel patches and drivers, `src/`, the rootfs skeleton and the
-build scripts) is GPL-2.0-only, the same license as the Linux kernel; see
-[`LICENSE`](LICENSE).
+build scripts) is GPL-2.0-or-later; see [`LICENSE`](LICENSE). The kernel
+itself stays GPL-2.0-only, as upstream ships it — our patches and drivers
+are GPL-2.0-or-later, combined into a GPL-2.0 kernel, which GPL-2.0-or-later
+permits.
 The toolchain and every upstream package it builds (busybox, dropbear,
 iproute2) keep their own upstream licenses. See
 [`docs/LICENSING.md`](docs/LICENSING.md) for the full breakdown.
+
+## Related repositories
+
+- [odi-ui](https://github.com/AndreZiviani/odi-ui) — the web UI, `confd`.
+- [odi-sfp-exporter](https://github.com/AndreZiviani/odi-sfp-exporter) — the
+  Prometheus exporter, `metricsd`.
+- [odi-toolchain](https://github.com/AndreZiviani/odi-toolchain) — the
+  prebuilt build images shared by all three.

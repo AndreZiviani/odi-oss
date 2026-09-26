@@ -19,13 +19,13 @@
 # excludes it: the first build there fetches it (kernel/tree.sh), and later
 # ones reuse it.
 #
-# GITHUB_TOKEN, when set here, is handed to the remote command on stdin
-# (never on a command line, never written to a file) and exported there:
-# make releases needs it for the private confd repository on a host without
-# a logged-in gh, and while the toolchain images are private, a pull needs
-# it too. So this script also logs the remote Docker in with it before the
-# build (GITHUB_ACTOR, default from `gh api user`, names the account) and
-# logs it back out after -- the token only ever reaches the docker
+# GITHUB_TOKEN is optional: everything it touches (make releases, the
+# toolchain image pull) is public and needs no login. Setting it only raises
+# the anonymous rate limit. When set here, it is handed to the remote
+# command on stdin (never on a command line, never written to a file) and
+# exported there; this script also logs the remote Docker in with it before
+# the build (GITHUB_ACTOR, default from `gh api user`, names the account)
+# and logs it back out after -- the token only ever reaches the docker
 # credential store, for the duration of the build, and nothing here writes
 # it to a file of its own.
 #
