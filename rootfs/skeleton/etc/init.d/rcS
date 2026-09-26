@@ -1,0 +1,221 @@
+#!/bin/sh
+#
+# /etc/init.d/rcS -- the boot, run by init as sysinit (/etc/inittab). One
+# stage after another; docs/BOOT.md has what each stage does and why it is
+# where it is.
+#
+# Nothing here may block and nothing may abort. init starts no respawn
+# entry, so no shell and no way back in, until sysinit returns; this runs
+# under set -e, so every step that can fail is guarded, reports and carries
+# on.
+#
+# /etc/init.d/rcS.dev, when present, adds the development aids
+# (breadcrumbs.on, confirm-arp, the pon-steps override) by redefining the
+# functions below. Without it they do nothing.
+
+set -e
+
+# Every step also goes to the kernel log, which the DRAM ramlog keeps across
+# a watchdog reset.
+kmsg() { echo "rcS: $*" > /dev/kmsg 2>/dev/null || true; }
+crumb() { kmsg "$*"; }
+dev_hook() { :; }
+dev_confirm_ok() { return 0; }
+pon_steps() { pon_steps_default; }	# defined with the PON steps below
+if [ -r /etc/init.d/rcS.dev ]; then
+	. /etc/init.d/rcS.dev
+fi
+
+# ---- mounts. /dev is devtmpfs, mounted by the kernel before init
+# (CONFIG_DEVTMPFS_MOUNT), with every node by name.
+/bin/mount -t proc  proc  /proc || echo "rcS: /proc did not mount" >&2
+kmsg "start"
+/bin/mount -t sysfs sysfs /sys  || echo "rcS: /sys did not mount" >&2
+/bin/mount -t ramfs ramfs /var  || echo "rcS: /var did not mount" >&2
+for d in tmp log run lock config; do
+	mkdir -p "/var/$d" || echo "rcS: /var/$d could not be created" >&2
+done
+
+# ---- the config partition: jffs2, shared with the stock slot, never
+# written by fwu.sh. Host keys, the UI credentials and every switch file
+# live there. Traced, because a failure here leaves nothing else behind.
+kmsg "mounting the config partition"
+sh -x /etc/scripts/mount-config.sh > /tmp/mount-config.trace 2>&1 || echo "rcS: no config partition" >&2
+kmsg "config partition step done"
+if [ ! -f /var/run/config-mounted ]; then
+	kmsg "config partition NOT mounted, breadcrumbs unavailable"
+fi
+dev_hook config
+crumb "config mounted; kernel $(uname -r); $(grep -c "^mtd" /proc/mtd) mtd partitions; $(cat /etc/version 2>/dev/null)"
+
+# ---- entropy. Nothing on this board feeds the pool early, so without a
+# seed every daemon starts on a nearly empty one. seedrng credits the seed
+# the previous boot saved and writes a fresh one. This early the pool is
+# not initialised, so the fresh seed is not creditable; the second run, 90 s
+# in, saves one the next boot can credit.
+if [ -x /bin/seedrng ] && [ -d /etc/config ]; then
+	mkdir -p /etc/config/seedrng 2>/dev/null && \
+		/bin/seedrng -d /etc/config/seedrng || echo "rcS: seedrng failed" >&2
+	( sleep 90; /bin/seedrng -d /etc/config/seedrng > /dev/null 2>&1 ) &
+fi
+
+# sethostname can fail (the chroot harness has no privilege for it), and a
+# cosmetic string must not cost the boot.
+if [ -s /etc/hostname ]; then
+	/bin/hostname -F /etc/hostname || echo "rcS: hostname not set" >&2
+fi
+/sbin/ifconfig lo 127.0.0.1 up || echo "rcS: loopback did not come up" >&2
+
+# ---- the switch SDK-init verbs, in the order the stock firmware issues
+# them, before the network: without them no frame passes between the CPU
+# port and the host port, and network.sh needs diag for its SerDes check.
+# A crumb before and after each, so a verb that hangs names itself.
+if [ -w /proc/odi_init ]; then
+	for step in intr irq switch svlan stp oam acl qos sec rate classify stat trunk l2 vlan port mirror cpu rldp trap gpio time ponmac; do
+		crumb "odi_init step $step: start"
+		echo "$step" > /proc/odi_init 2>/dev/null || echo "rcS: odi_init $step failed to start" >&2
+		crumb "odi_init step $step: ret $(cat /proc/odi_init 2>/dev/null)"
+	done
+fi
+
+# ---- the management address, from the config partition, before the
+# services: dropbear bound on a box with no address looks like a panic.
+/etc/scripts/network.sh || echo "rcS: no management address" >&2
+crumb "network: $(ifconfig br0 2>/dev/null | sed -n "s/.*inet addr:\([0-9.]*\).*/\1/p") on br0, eth0 $(cat /sys/class/net/eth0/operstate 2>/dev/null)"
+dev_hook network
+
+# ---- ptys. devpts, for the /dev/ptmx that dropbear opens for an
+# interactive session; the BSD pairs are the fallback it can also scan.
+# devtmpfs normally has the BSD nodes; they are made here if it does not.
+if [ ! -d /dev/pts ]; then
+	/bin/mkdir -p /dev/pts || echo "rcS: /dev/pts could not be created" >&2
+fi
+/bin/mount -t devpts devpts /dev/pts || echo "rcS: no devpts, telnet will not work" >&2
+if [ ! -c /dev/ptyp0 ]; then
+	i=0
+	for c in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do
+		mknod "/dev/ptyp$c" c 2 "$i" 2>/dev/null || true
+		mknod "/dev/ttyp$c" c 3 "$i" 2>/dev/null || true
+		i=$((i + 1))
+	done
+fi
+
+# ---- the services (metricsd, confd, dropbear), in the background, their
+# output to a file: a trial has no console, and a pipe they inherit would
+# never close.
+/etc/init.d/services start >> /var/log/services.log 2>&1 &
+crumb "rcS done; services launched"
+
+# /var is ramfs and nothing there is evicted; omcid logs every OMCI frame
+# (about 1.7 MB a day on a busy OLT). Each log is cut back to its last
+# LOG_KEEP bytes past LOG_MAX. The writers append, so they carry on at the
+# new end.
+LOG_MAX=262144
+LOG_KEEP=131072
+(
+	while :; do
+		sleep 60
+		for f in /var/log/omcid.log /var/log/services.log; do
+			[ -f "$f" ] || continue
+			n=$(wc -c < "$f" 2>/dev/null)
+			[ "${n:-0}" -gt "$LOG_MAX" ] || continue
+			tail -c "$LOG_KEEP" "$f" > "$f.cut" 2>/dev/null && cat "$f.cut" > "$f"
+			rm -f "$f.cut"
+		done
+	done
+) &
+dev_hook services
+
+# ---- the watchdog confirmation. odi_wdt resets the board at 120 s of
+# uptime unless this is written, which is what reverts a trial that never
+# gets here. It needs no network: a stick that boots unreachable is fixed
+# with a power cycle, not a reboot loop (confirm-arp, in rcS.dev, is the
+# development exception). Before the PON steps, so a PON problem cannot
+# cost the confirmation.
+WDOK=/proc/odi_wdt/userland_ok
+if [ -w "$WDOK" ] && dev_confirm_ok; then
+	echo 1 > "$WDOK"
+	crumb "userland up, watchdog confirmed"
+fi
+
+# ---- the PON steps.
+
+# One /proc/odi_init verb. The crumbs name the verb only: gponsn and
+# gponpw carry the serial number and the PLOAM password.
+pon_step() {
+	crumb "pon step ${1%% *}: start"
+	echo "$1" > /proc/odi_init 2>/dev/null || echo "rcS: odi_init ${1%% *} failed to start" >&2
+	crumb "pon step ${1%% *}: ret $(cat /proc/odi_init 2>/dev/null)"
+}
+
+# The serial number (an HS key) and the PLOAM password (hex, in the CS
+# file) come from the config store, never from a file of ours. An empty
+# password (an OLT that authenticates on the serial alone) is not sent:
+# the driver keeps its default.
+pon_step_gponsn() {
+	pon_step "gponsn $(sed -n "s/.*Name=\"GPON_SN\" Value=\"\([^\"]*\)\".*/\1/p" /etc/config/lastgood_hs.xml 2>/dev/null | head -n 1)"
+}
+pon_step_gponpw() {
+	pw=$(sed -n "s/.*Name=\"GPON_PLOAM_PASSWD\" Value=\"\([^\"]*\)\".*/\1/p" /etc/config/lastgood.xml 2>/dev/null | head -n 1)
+	if [ -n "$pw" ]; then
+		pon_step "gponpw $pw"
+	else
+		crumb "pon step gponpw: none configured, skipped"
+	fi
+}
+
+# The switch init the stock OMCI modules made when they loaded (platform
+# settings, module-load replay), then omcid. /etc/config/modules.off skips
+# both.
+omci_start() {
+	if [ -f /etc/config/modules.off ]; then
+		crumb "omci: modules.off, switch init and omcid skipped"
+		return 0
+	fi
+	if [ ! -w /proc/odi_omci ]; then
+		crumb "omci: no /proc/odi_omci, switch init and omcid skipped"
+		return 0
+	fi
+	if echo switch_init > /proc/odi_omci 2>/var/log/switch_init.err; then
+		crumb "odi_switch init: platform settings and module-load replay done"
+	else
+		crumb "odi_switch init: /proc/odi_omci write failed, see /var/log/switch_init.err"
+	fi
+	if [ -x /bin/omcid ]; then
+		/bin/omcid -a -d >> /var/log/omcid.log 2>&1 &
+		crumb "omcid started (apply mode, daemon)"
+	fi
+}
+
+# The order is fixed by the hardware. The switch init and omcid go after
+# gpondev: the omcid receive path must be registered after the
+# gpondrv/gpondev init, which clears the table it lives in, and the switch
+# init deactivates the ONU, so gponsn, gponpw and gponact come after it.
+pon_steps_default() {
+	pon_step "i2c 1"
+	pon_step "i2cen 1"
+	pon_step gpon
+	pon_step rxsd
+	pon_step gpondrv
+	pon_step gpondev
+	omci_start
+	pon_step_gponsn
+	pon_step_gponpw
+	pon_step gponact
+}
+
+if [ -w /proc/odi_init ]; then
+	# The optics first, before any PON step and outside the step list:
+	# PIN_GPIO_SELECT for the module I2C pins and the laser TX enable
+	# (odi_board.h). /etc/config/optics.off leaves the laser off.
+	if [ -f /etc/config/optics.off ]; then
+		crumb "optics: optics.off, laser left off"
+	else
+		pon_step optics
+	fi
+	pon_steps
+	crumb "pon steps done"
+	dev_hook pon
+fi
+
+exit 0

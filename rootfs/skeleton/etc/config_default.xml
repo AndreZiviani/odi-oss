@@ -1,0 +1,13 @@
+<Config Name="ROOT">
+	<Dir Name="MIB_TABLE">
+		<Value Name="DEVICE_TYPE" Value="0"/>
+		<Value Name="DUAL_MGMT_MODE" Value="1"/>
+		<Value Name="OMCI_CUSTOM_BDP" Value="258"/>
+		<Value Name="OMCI_CUSTOM_ME" Value="65536"/>
+		<Value Name="OMCI_CUSTOM_RDP" Value="4"/>
+		<Value Name="LOID" Value=""/>
+		<Value Name="LOID_PASSWD" Value=""/>
+		<Value Name="LOID_OLD" Value=""/>
+		<Value Name="LOID_PASSWD_OLD" Value=""/>
+	</Dir>
+</Config>

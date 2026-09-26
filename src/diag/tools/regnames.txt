@@ -1,0 +1,233 @@
+# Our names for the RTL9602C registers, read by tools/regmap-extract.py.
+#
+# The register table itself -- every address, width, array and port range,
+# and every field bit range -- is read out of the stock firmware binary
+# (librtk.so on the device). The binary carries no usable names for any of
+# it, so every name in this project is ours: the ones below, chosen for what
+# our code, scripts and docs actually touch, and a mechanical default for the
+# rest.
+#
+# Defaults, for anything not listed here:
+#   register   <BLOCK>_0x<address>, BLOCK from the block lines below, or R
+#              for an address in no block: SW_0x023038, GPON_0x701010
+#   field      F_<msb>_<lsb>, or F_<bit> for a one-bit field: F_15_8, F_5
+#   reserved   RSVD_<msb>_<lsb> (the binary marks these with field id 0)
+#
+# Line formats:
+#   block <first> <last> <PREFIX>
+#   reg <address> <NAME> [<msb>:<lsb>=<FIELD> ...]
+#
+# A reg line names a register by its address (the base address, for an
+# array) and a field by its bit range. The extractor refuses an address that
+# is not in the table, a bit range that is not one of that register's
+# fields, and a name used twice -- so a name here cannot silently drift off
+# the thing it names when the base firmware changes.
+#
+# Where a name came from, when it is not obvious: the diag command whose
+# handler touches the field (from the command tree), the rcS or network.sh
+# step that writes it, or the odi_gpon/odi_switch driver's use of it. The
+# kernel register headers (odi_gpon_hw.h, odi_switch_hw.h) use exactly
+# these names; test/regnames_kernel_test.py holds them to this file.
+
+block 0x000000 0x6fffff SW
+block 0x700000 0x7fffff GPON
+block 0xf00000 0xffffff PONQ
+
+# ---- chip identity and packaging (regmap_test.c anchors, read on a stick)
+
+# 0x96021800 on our sticks: 0x9602, then the suffix letters as 1 = A.
+reg 0x010000 CHIP_ID_WORD      31:16=PART_NUMBER 15:11=SUFFIX_1 10:6=SUFFIX_2 5:1=SUFFIX_3
+reg 0x010004 CHIP_REV_WORD
+reg 0x010008 PKG_OPTION        31:28=OPT_KEY 4:0=OPT_MODE
+reg 0x0001b0 PKG_MODEL_SEL     5:0=MODEL_SEL
+reg 0x0001f0 PKG_STRAP_STATE   16:0=STRAP_BITS
+reg 0x023024 FUSE_PKG_WORD     15:0=PKG_CODE
+reg 0x700010 PONMAC_REVISION   31:0=REV
+
+# ---- pin mux, host SerDes (rcS, etc/scripts/network.sh)
+
+# One bit per SoC pin, 1 = the pin is a plain GPIO. rcS writes the whole
+# word 0x08082001 so the optics I2C pins come back from the mux.
+reg 0x000048 PIN_GPIO_SELECT   0:0=AS_GPIO
+# The host-side (LAN) SerDes: mode select and the Fiber 1G sequence.
+reg 0x000214 HOST_SERDES_MODE  15:15=PCIE_SELECT 13:13=HOLD_CLK_GLITCH 8:8=PHY_SIDE_SEL 4:0=LINK_MODE
+reg 0x000110 PHY_PATCH_STATUS  0:0=PATCH_DONE
+reg 0x0001d0 PON_SERDES_MODE   4:0=LINK_MODE
+reg 0x021c00 HOST_FIBER_POWER  11:11=POWER_DOWN
+reg 0x022e4c HOST_FIBER_TX     15:14=TX_MODE
+reg 0x023004 I2C_MASTER_SETUP
+
+# ---- switch MAC and forwarding, by the diag command that uses each field
+
+# iol get max-length / error-length
+reg 0x023038 MAC_COMPAT_A      8:8=IOL_MAX_LEN 7:7=IOL_ERR_LEN
+# switch get 48-pass-1 state / back-pressure
+reg 0x02303c MAC_COMPAT_B      0:0=PASS_48_1 2:2=BACKPRESSURE_MODE
+# iol get 16-collision, switch get ipg-compensation
+reg 0x023040 MAC_COMPAT_C      4:4=IOL_COLLISION_16 0:0=IPG_COMP_MODE
+# switch get ipg-compensation state / tx-crc
+reg 0x02304c SWITCH_GLOBAL_MISC 1:1=IPG_COMP_ON 3:2=TX_CRC_MODE
+# switch get small-ipg-tag / small-pkt port <ports> state
+reg 0x020004 PORT_MAC_MISC     4:4=SMALL_IPG_TAG 2:2=SMALL_PKT
+# switch get output-drop port <ports> state
+reg 0x011054 PORT_OUT_DROP     0:0=DROP_ON
+# l2-table get arp-usage-as-known / cam full-act; IPMC_ON_GROUP: IPv4
+# multicast looked up on the group address rather than MAC + VID/FID
+reg 0x017000 L2_LOOKUP_SETUP   28:28=ARP_AS_KNOWN 29:29=CAM_FULL_ACTION 23:23=IPMC_ON_GROUP 22:22=AGE_ON_LINK_DOWN 21:21=CAM_OFF 20:0=AGE_TICKS
+# per port: what the switch does with IGMP/MLD control frames, 0 forward,
+# 1 drop, 2 trap to the CPU (the stock init writes 0x400: data on, all forward)
+reg 0x01105c IGMP_PORT_ACTION  10:10=MCAST_DATA_ON 9:8=MLD2 7:6=MLD1 5:4=IGMP3 3:2=IGMP2 1:0=IGMP1
+# bandwidth get ingress flow-control port <ports> state
+reg 0x020010 PORT_ING_METER    1:1=FLOWCTRL_ON
+# bandwidth get|set ingress bypass-packet state
+reg 0x0230d0 ING_METER_GLOBAL  0:0=BYPASS_PKT_ON
+# debug get|set hsb ...
+reg 0x028000 DBG_HSB_CTL       21:21=SNAP_VALID 20:13=CAPTURE_REASON 4:2=CAPTURE_MODE 1:1=SRC_USER_DATA
+# debug get|set hsd ...
+reg 0x02a0b4 DBG_HSD_CTL       16:16=SNAP_VALID 15:8=CAPTURE_REASON 7:6=CAPTURE_MODE 5:3=ING_PORT 2:0=EGR_PORT
+
+# ---- EPON MAC, by the diag command that uses each field
+
+# epon get priority-to-sid llid-idx <n>
+reg 0x01c0c8 EPON_PRIO_SID_MAP 1:0=SID
+# epon get|set laser-off|laser-on shift-time
+reg 0x036008 EPON_LASER_TIMING 24:20=LASER_OFF_SHIFT 19:15=LASER_ON_SHIFT
+# epon get|set register pendding-grant
+reg 0x036010 EPON_GRANT_QUEUE  8:1=PENDING_GRANTS
+# epon get|set stop-local-time state
+reg 0x036038 EPON_MISC_CTL     4:4=LOCAL_TIME_HOLD
+# epon set mpcp-gate action / mpcp-invalid-len action
+reg 0x03609c EPON_MPCP_ACTION  1:1=GATE_ASIC_ONLY 0:0=BAD_LEN_DROP
+# epon get local-time
+reg 0x0360f4 EPON_LOCAL_CLOCK  31:0=TICKS
+# epon get|set grant-shift
+reg 0x0360fc EPON_GRANT_OFFSET 31:0=SHIFT
+# epon set stop-sync-olt-localtime state
+reg 0x036188 EPON_TIME_SYNC_OPT 5:5=NO_OLT_TIME_SYNC
+
+# ---- GPON MAC, as the odi_gpon driver uses it (G.984.3 terms)
+
+reg 0x70000c PONMAC_RESET      8:8=RESET_COMPLETE 0:0=RESET_REQ
+reg 0x700020 PONMAC_DECRYPT_BYPASS 0:0=BYPASS
+reg 0x700040 PONMAC_IRQ_ENABLE 6:6=US_GEM 5:5=US_FRAMER 4:4=DS_GEM 3:3=DS_DECRYPT 2:2=DS_CAPTURE 1:1=DS_FRAMER
+reg 0x700044 PONMAC_IRQ_PENDING 6:6=US_GEM 5:5=US_FRAMER 4:4=DS_GEM 3:3=DS_DECRYPT 2:2=DS_CAPTURE 1:1=DS_FRAMER
+
+# Downstream framer
+reg 0x701000 DSF_IRQ_EVENT     0:0=LOS_CHG 1:1=LOF_CHG 2:2=FEC_CHG 3:3=LOM_CHG 8:8=SN_REQUEST 9:9=RANGING_REQUEST 10:10=PLOAM_RX 11:11=PPS_CHG 15:15=ANY_EVENT
+reg 0x701004 DSF_IRQ_ENABLE
+reg 0x701008 DSF_ALARM_STATE   0:0=LOS_NOW 1:1=LOF_NOW 2:2=FEC_NOW 3:3=LOM_NOW
+reg 0x701010 DSF_ONU_STATE     15:8=ASSIGNED_ONU_ID 3:0=ACTIVATION_STATE
+reg 0x701014 DSF_SETUP
+reg 0x701040 DSF_LOS_SETUP     0:0=OPTICS_LOS_ON 1:1=OPTICS_LOS_INVERT 2:2=CLOCK_LOS_ON 3:3=CLOCK_LOS_INVERT 4:4=LOS_DEBOUNCE 8:8=OPTICS_LOS_NOW 10:10=CLOCK_LOS_NOW
+reg 0x701080 DSF_PLOAM_RX_CTL  0:0=POP 4:4=FIFO_FULL 5:5=FIFO_EMPTY
+reg 0x7010a0 DSF_PLOAM_RX_WORD 15:0=MSG_WORD
+reg 0x701180 DSF_BIP_ERR_BLOCKS 31:0=COUNT
+
+# Downstream decryption keys
+reg 0x703010 DSK_SWITCH_ARM    15:15=ARM 14:14=ACTIVE_SLOT
+reg 0x703014 DSK_SWITCH_FRAME  29:0=SUPERFRAME
+reg 0x703020 DSK_KEY_LOAD      15:15=WRITE_REQ 14:14=WRITE_DONE 7:7=SLOT 2:0=WORD_INDEX
+reg 0x703024 DSK_KEY_WORD      15:0=KEY_BITS
+
+# Upstream framer
+reg 0x705000 USF_IRQ_EVENT     0:0=DYING_GASP_SENT 2:2=FEC_CHG 5:5=URGENT_Q_EMPTY 7:7=NORMAL_Q_EMPTY 8:8=SD_TOO_LONG 9:9=SD_MISMATCH 10:10=ALL_Q_EMPTY 15:15=ANY_EVENT
+reg 0x705004 USF_IRQ_ENABLE
+reg 0x705008 USF_STATE         7:7=NORMAL_Q_EMPTY 5:5=URGENT_Q_EMPTY 2:2=FEC_ON
+reg 0x705010 USF_ONU_ID        15:8=TX_ONU_ID
+reg 0x705040 USF_MIN_RESP_DELAY 15:7=DELAY_HI 6:0=DELAY_LO
+reg 0x705044 USF_EQ_DELAY      26:24=FRAMES 17:0=EQD
+reg 0x70504c USF_LASER_MARGIN  13:8=ON_MARGIN 5:0=OFF_MARGIN
+reg 0x705054 USF_BURST_HDR_SETUP 11:8=REPEAT 7:0=LENGTH
+reg 0x705080 USF_BURST_HDR_BYTE 7:0=VALUE
+reg 0x7050c0 USF_PLOAM_TX_CTL  0:0=PUSH 4:4=URGENT_FULL 5:5=URGENT_EMPTY 6:6=NORMAL_FULL 7:7=NORMAL_EMPTY 10:8=MSG_TYPE
+reg 0x7050e0 USF_PLOAM_TX_WORD 15:0=MSG_WORD
+reg 0x705100 USF_PLOAM_TX_SETUP 0:0=ONU_ID_OVERRIDE 1:1=CRC_INSERT 4:4=FLUSH
+reg 0x705184 USF_DYING_GASP    8:8=ACTIVE 7:4=SENT_COUNT 3:0=SEND_LIMIT
+
+# GEM-port and T-CONT CAMs, as odi_switch provisions them
+reg 0x7010c0 DSF_ALLOC_CAM_CTL 15:15=REQ 14:14=DONE 9:8=OP 4:0=CAM_ROW
+reg 0x7010c4 DSF_ALLOC_CAM_WDATA 11:0=ALLOC_ID
+reg 0x701100 DSF_GEM_CAM_CTL   15:15=REQ 14:14=DONE 9:8=OP 6:0=CAM_ROW
+reg 0x701104 DSF_GEM_CAM_WDATA 11:0=GEM_PORT
+reg 0x701400 DSF_GEM_FLOW_TYPE 4:0=FLAGS
+reg 0x706400 US_GEM_PORT_MAP   11:0=GEM_PORT
+
+# ---- switch core, as the odi_switch driver and odi_i2c use it
+
+# Indirect PHY and I2C access
+reg 0x000000 PHY_ACCESS_DATA   15:0=WRITE_DATA
+reg 0x000004 PHY_ACCESS_CMD    22:22=WRITE 21:21=START 20:0=ADDRESS
+reg 0x0000b8 I2C_BYTE_ADDR
+reg 0x0000c0 I2C_CMD           3:3=NOT_ACKED 2:2=IN_PROGRESS 1:1=WRITE 0:0=START
+reg 0x0000c8 I2C_READ_DATA
+reg 0x0001b4 PORT_FORCE_SELECT
+
+# Frame length and DSCP remark
+reg 0x011008 PORT_MAX_FRAME_SEL 1:1=GIGA_PROFILE 0:0=FE_PROFILE
+reg 0x011018 MAX_FRAME_LEN_1   13:0=BYTES
+reg 0x01101c DSCP_REMARK_MAP   5:0=DSCP
+
+# Indirect table access (odi_switch_tbl.c)
+reg 0x012000 TABLE_CMD         31:31=START 20:9=ROW 8:7=WALK_PORT 6:4=METHOD 3:3=IS_WRITE 2:0=TABLE_KIND
+# HIT, IN_CAM and ROW: what an L2 table hash access found or placed (odi_switch_l2.c)
+reg 0x012004 TABLE_STATUS      13:13=IN_PROGRESS 12:12=HIT 10:10=IN_CAM 9:0=ROW
+reg 0x012008 TABLE_WRITE_WORD
+reg 0x01201c TABLE_READ_WORD
+
+# VLAN and SVLAN
+reg 0x013000 VLAN_ACCEPT_FRAMES
+reg 0x013004 VLAN_INGRESS_CHECK 0:0=ON
+reg 0x013008 VLAN_SETUP        4:4=VID4095_MODE 3:3=VID0_MODE 0:0=FILTER_ON
+reg 0x01300c PORT_VLAN_INDEX
+reg 0x013020 PROTO_VLAN_GROUP
+reg 0x013030 PORT_PROTO_VLAN   15:13=PRIO 12:1=VLAN_INDEX 0:0=IN_USE
+reg 0x014004 PORT_SVLAN_INDEX
+reg 0x01400c SVLAN_SETUP       27:27=FILTER_ON 3:2=UNTAGGED_ACTION 1:0=PRIO_SOURCE
+reg 0x0230c4 SVLAN_UPLINK_PORTS 0:0=UPLINK
+reg 0x02a000 PORT_EGRESS_TAG_MODE
+
+# ACL and classification
+reg 0x015040 ACL_PORT_ENABLE
+reg 0x01600c CLASSIFY_SETUP    12:5=PATTERN1_COUNT 3:3=PON_SELECT 2:2=DS_NO_MATCH_ACTION 1:0=US_NO_MATCH_ACTION
+reg 0x016010 CLASSIFY_PATTERN_SEL 0:0=PATTERN
+
+# Flooding and reserved link-local multicast (01:80:C2:00:00:xx)
+reg 0x01c020 FLOOD_BCAST_PORTS
+reg 0x01c024 FLOOD_UNKN_MCAST_PORTS
+reg 0x01c028 FLOOD_UNKN_UCAST_PORTS
+reg 0x01c030 IPMC_VLAN_LEAK
+reg 0x01c038 LINK_MCAST_00
+reg 0x01c03c LINK_MCAST_01
+reg 0x01c040 LINK_MCAST_02
+reg 0x01c044 LINK_MCAST_03
+reg 0x01c048 LINK_MCAST_04
+reg 0x01c04c LINK_MCAST_08
+reg 0x01c050 LINK_MCAST_0D
+reg 0x01c054 LINK_MCAST_0E
+reg 0x01c058 LINK_MCAST_10
+reg 0x01c05c LINK_MCAST_11
+reg 0x01c060 LINK_MCAST_12
+reg 0x01c064 LINK_MCAST_13
+reg 0x01c068 LINK_MCAST_18
+reg 0x01c06c LINK_MCAST_1A
+reg 0x01c070 LINK_MCAST_20
+reg 0x01c074 LINK_MCAST_21
+reg 0x01c078 LINK_MCAST_22
+reg 0x01c07c LINK_MCAST_CDP
+reg 0x01c080 LINK_MCAST_SSTP
+reg 0x01c0b0 PRIO_QUEUE_MAP    2:0=QUEUE
+reg 0x01c0c0 PORT_QUEUE_MAP
+
+# Chip interrupt controller (odi_gpon_isr.c): bit n is source ordinal n
+reg 0x01d000 CHIP_IRQ_SETUP    0:0=POLARITY_SEL
+reg 0x01d00c CHIP_IRQ_ENABLE   10:10=GPON 7:7=ACL 0:0=LINK_CHANGE
+reg 0x01d010 CHIP_IRQ_PENDING  10:10=GPON 7:7=ACL 0:0=LINK_CHANGE
+
+# Per-port MIB counter blocks (odi_sw_mib_get)
+reg 0x032000 PORT_TX_COUNTERS
+reg 0x032200 PORT_RX_COUNTERS
+reg 0x032400 PORT_OAM_COUNTERS
+
+# PON queue block
+reg 0xf020a8 PONQ_COUNT_MASK
+reg 0xf0213c PONQ_STREAM_VALID 0:0=STREAM_ON

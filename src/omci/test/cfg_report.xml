@@ -1,0 +1,8 @@
+<Config Name="ROOT">
+	<Dir Name="MIB_TABLE">
+		<Value Name="OMCI_SW_VER1" Value="ODI-TEST-A"/>
+		<Value Name="OMCI_SW_VER2" Value="ODI-TEST-B"/>
+		<Value Name="OMCC_VER" Value="160"/>
+		<Value Name="OMCI_VENDOR_PRODUCT_CODE" Value="4660"/>
+	</Dir>
+</Config>

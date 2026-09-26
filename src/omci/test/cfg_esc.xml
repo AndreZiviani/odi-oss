@@ -1,0 +1,6 @@
+<Config Name="ROOT">
+	<Dir Name="MIB_TABLE">
+		<Value Name="LOID" Value="a&amp;b&lt;c&gt;d&quot;e&apos;f"/>
+		<Value Name="LOID_OLD" Value="a&amp;b&lt;c&gt;d&quot;e&apos;f"/>
+	</Dir>
+</Config>

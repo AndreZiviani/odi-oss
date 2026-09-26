@@ -1,0 +1,129 @@
+# Overrides applied on top of `make defconfig`, one per line, in .config syntax.
+#
+# Two jobs: turn off what this device has no use for, and turn ON the applets the
+# vendor's busybox 1.12.4 was configured without -- their absence is a
+# documented trap on this device, because a missing applet writes to stderr,
+# yields an EMPTY pipeline, and empty reads as "no data". That produced a
+# confident wrong conclusion in one session.
+
+# --- static, because this image guarantees nothing about a shared libc ---
+CONFIG_STATIC=y
+
+# --- the Lexra flags, and the only place they actually land ---
+# mips2 rather than mips1 because ll/sc/sync are legal here (measured by executing them on the device),
+# and the three MIPS-II instructions that are NOT legal -- beql, bnel and the
+# teq emitted for divide-by-zero -- are exactly what the other two flags
+# suppress. packages/isa-audit.sh is what proves it rather than this comment.
+CONFIG_EXTRA_CFLAGS="-march=mips2 -mno-branch-likely -mdivide-breaks"
+
+# --- the applets whose absence has actually cost us ---
+CONFIG_HEAD=y
+CONFIG_TAIL=y
+CONFIG_TR=y
+CONFIG_WC=y
+CONFIG_SEQ=y
+CONFIG_BASENAME=y
+CONFIG_NOHUP=y
+CONFIG_SETSID=y
+CONFIG_PKILL=y
+CONFIG_PGREP=y
+
+# --- login accounting: off, because there is nowhere to write it ---
+# The rootfs is a read-only squashfs with no /var/log, and the device has no
+# concept of a login record -- dropbear is configured the same way and for the
+# same reason.
+#
+# It is ALSO a hard build requirement here, which is the part worth recording.
+# busybox libbb.h decides between utmpx.h and utmp.h by uClibc VERSION, and
+# treats anything at or above 0.9.34 as having utmpx unconditionally. uClibc-ng
+# 1.0.59 reports 1.0.59 and yet leaves __UCLIBC_HAS_UTMPX__ undefined unless it
+# is configured for it -- so busybox includes a header that was never
+# installed and every file including libbb.h dies on it. The version test is
+# the bug; turning the feature off is the honest fix for this device, since
+# nothing here would use the records.
+# CONFIG_FEATURE_UTMP is not set
+# CONFIG_FEATURE_WTMP is not set
+
+# --- what the init chain and the ways back in need ---
+CONFIG_INIT=y
+# CONFIG_TELNETD is not set
+CONFIG_LOGIN=y
+CONFIG_MDEV=y
+CONFIG_FEATURE_MDEV_CONF=y
+CONFIG_INSMOD=y
+CONFIG_RMMOD=y
+CONFIG_LSMOD=y
+CONFIG_MOUNT=y
+CONFIG_UMOUNT=y
+CONFIG_IFCONFIG=y
+CONFIG_ROUTE=y
+CONFIG_BRCTL=y
+CONFIG_UDHCPC=y
+CONFIG_SYSLOGD=y
+CONFIG_KLOGD=y
+
+# --- no IPv6, because the KERNEL has none ---
+# IPv6 is off in kernel/618/config, as it was in the vendor kernel
+# (no inet6, no icmpv6, no ndisc, no tcp_v6; the only "ipv6" strings in it
+# are Realtek switch API names for multicast pattern matching). An ONU
+# bridges; it does not route. The libc is built without IPv6 to match.
+# CONFIG_FEATURE_IPV6 is not set
+# CONFIG_UDHCPC6 is not set
+# CONFIG_PING6 is not set
+# CONFIG_TRACEROUTE6 is not set
+
+# --- busybox's cut-down ip: we ship real iproute2, so this is redundant ---
+# CONFIG_IP is not set
+# CONFIG_IPADDR is not set
+# CONFIG_IPLINK is not set
+# CONFIG_IPROUTE is not set
+# CONFIG_IPTUNNEL is not set
+# CONFIG_IPRULE is not set
+# CONFIG_IPNEIGH is not set
+# CONFIG_FEATURE_IP_ADDRESS is not set
+# CONFIG_FEATURE_IP_LINK is not set
+# CONFIG_FEATURE_IP_ROUTE is not set
+# CONFIG_FEATURE_IP_TUNNEL is not set
+# CONFIG_FEATURE_IP_RULE is not set
+# CONFIG_FEATURE_IP_NEIGH is not set
+
+# --- what the vendor image could not have ---
+# Five applets the 2010 libc could not link (nslookup, fallocate, unshare) or
+# the 2.6.30 kernel had no syscall for (nsenter: setns is Linux 3.0; sync -d/-f:
+# syncfs is 2.6.39; seedrng: CLOCK_BOOTTIME is 2.6.39). All in; build.sh proves
+# each one is in the applet table.
+CONFIG_NSLOOKUP=y
+CONFIG_FALLOCATE=y
+CONFIG_UNSHARE=y
+CONFIG_NSENTER=y
+CONFIG_FEATURE_SYNC_FANCY=y
+CONFIG_SEEDRNG=y
+
+# --- not wanted on a bridge with 16 MB of flash ---
+# CONFIG_INETD is not set
+# CONFIG_HTTPD is not set
+# CONFIG_FTPD is not set
+# CONFIG_TFTPD is not set
+
+# --- the flasher's own tools ---
+# fwu.sh erases with flash_eraseall, and busybox has it `default n`. So our own
+# image could not flash the other slot: the erase failed with "applet not
+# found" and fwu.sh announced the slot was UNBOOTABLE, which was false because
+# nothing had been erased. Stock has it; we did not.
+CONFIG_FLASH_ERASEALL=y
+
+# And the two we ship for no reason. This board is SPI NOR -- proven by a
+# 4,096-byte erase size on every partition of /proc/mtd, which no NAND device
+# has -- so a NAND writer and a NAND dumper are two applets that can only ever
+# be pointed at the wrong thing.
+# CONFIG_NANDWRITE is not set
+# CONFIG_NANDDUMP is not set
+
+# --- tc: off, because nothing here uses it and it no longer builds ---
+# Traffic shaping on this device is the switch hardware, queues OMCI
+# programs, not Linux qdiscs; no script or binary in the image calls tc. And
+# busybox 1.38.0 networking/tc.c still needs the CBQ qdisc UAPI
+# (TCA_CBQ_RATE and friends), which Linux 6.18 removed from its headers, so
+# against our sysroot the applet does not compile at all. It was on only as
+# a busybox default.
+# CONFIG_TC is not set

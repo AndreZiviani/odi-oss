@@ -1,0 +1,5 @@
+<Config Name="ROOT">
+ <Dir Name="HW_MIB_TABLE">
+		<Value Name="GPON_ONU_MODEL" Value=""/>
+ </Dir>
+</Config>

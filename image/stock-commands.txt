@@ -1,0 +1,108 @@
+# Commands available on the STOCK vendor image, which is what image/fwu.sh has
+# to run on for the FIRST flash. Anything not in this list is not there, and a
+# missing command does not fail loudly: the pipeline yields empty, empty reads
+# as "no data", and fwu.sh reported "no MTD partition named k1" -- accusing the
+# flash map.
+#
+# Derived from the 96 entries of /bin on the V1.0-220923 rootfs: 52 busybox
+# 1.12.4 applet symlinks plus real vendor binaries. /sbin is a symlink to /bin,
+# so there is no second directory to check -- and note that resolving that
+# symlink with the rootfs merely unpacked on a host escapes the tree and finds
+# the HOST's binaries, which is how dd was first misread as present.
+#
+# Notably ABSENT: head wc dd tail tr sort which basename dirname seq xargs
+# find stat env readlink. `command -v` is absent too: the ash builtin table
+# does not carry it ("ash: command: not found", measured under qemu-mips).
+# `printf` IS available as an ash builtin despite having no /bin entry.
+# --- busybox applets ---
+ash
+awk
+cat
+chmod
+cksum
+cmp
+cp
+cut
+date
+df
+diff
+echo
+egrep
+expr
+fuser
+grep
+halt
+ifconfig
+init
+insmod
+kill
+killall
+klogd
+linuxrc
+ln
+ls
+lsmod
+md5sum
+mdev
+mkdir
+mknod
+mount
+mv
+nc
+pidof
+ping
+ping6
+poweroff
+ps
+reboot
+rm
+rmmod
+route
+sed
+sh
+sleep
+stty
+tar
+top
+traceroute
+umount
+vconfig
+# --- real vendor binaries fwu.sh may rely on ---
+flash_eraseall
+nv
+# --- ash builtins and shell keywords ---
+printf
+test
+read
+local
+return
+exit
+shift
+set
+unset
+export
+eval
+exec
+trap
+type
+ulimit
+umask
+wait
+break
+continue
+if
+then
+else
+elif
+fi
+for
+while
+until
+do
+done
+case
+esac
+in
+function
+true
+false

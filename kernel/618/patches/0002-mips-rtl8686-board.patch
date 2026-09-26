@@ -1,0 +1,50 @@
+From: Andre Ziviani <andrepziviani@gmail.com>
+Date: Thu, 24 Sep 2026 14:22:03 -0300
+Subject: [PATCH] MIPS: hook the RTL8686/RTL9602C board (ODI DFP-34X-2C2) into arch/mips
+
+A single fixed board: 32 MB DRAM, UART0, SPI NOR, no device tree. This
+patch holds only the lines in mainline files that make it reachable: the
+System type entry, the source of arch/mips/rtl8686/Kconfig and the
+Kbuild.platforms line. The board itself is ours and comes from the
+kernel/extra overlay: arch/mips/rtl8686/ (board file, Kconfig with the
+board selects, Makefile, Platform) and
+arch/mips/include/asm/mach-rtl8686/ (kernel entry, feature overrides,
+IRQ numbering, register map). The CPU is CPU_R3000, selected there
+through SYS_HAS_CPU_R3000; it needs no Kconfig entry of its own.
+
+---
+--- a/arch/mips/Kbuild.platforms
++++ b/arch/mips/Kbuild.platforms
+@@ -22,6 +22,7 @@
+ platform-$(CONFIG_MACH_NINTENDO64)	+= n64/
+ platform-$(CONFIG_PIC32MZDA)		+= pic32/
+ platform-$(CONFIG_RALINK)		+= ralink/
++platform-$(CONFIG_MACH_RTL8686)		+= rtl8686/
+ platform-$(CONFIG_MIKROTIK_RB532)	+= rb532/
+ platform-$(CONFIG_SGI_IP22)		+= sgi-ip22/
+ platform-$(CONFIG_SGI_IP27)		+= sgi-ip27/
+--- a/arch/mips/Kconfig
++++ b/arch/mips/Kconfig
+@@ -139,6 +139,14 @@
+ choice
+ 	prompt "System type"
+ 	default MIPS_GENERIC_KERNEL
++
++config MACH_RTL8686
++	bool "Realtek RTL8686/RTL9602C (ODI DFP-34X-2C2)"
++	help
++	  The ODI DFP-34X-2C2 GPON SFP ONU stick: a Realtek RTL9602C SoC
++	  (RTL8686 family) with a Lexra RLX5281 core, 32 MB of DRAM, SPI NOR
++	  flash and no device tree. The board selects are in
++	  arch/mips/rtl8686/Kconfig.
+ 
+ config MIPS_GENERIC_KERNEL
+ 	bool "Generic board-agnostic MIPS kernel"
+@@ -1061,6 +1069,7 @@
+ source "arch/mips/ath79/Kconfig"
+ source "arch/mips/bcm47xx/Kconfig"
+ source "arch/mips/bcm63xx/Kconfig"
++source "arch/mips/rtl8686/Kconfig"
+ source "arch/mips/bmips/Kconfig"
+ source "arch/mips/econet/Kconfig"
+ source "arch/mips/generic/Kconfig"

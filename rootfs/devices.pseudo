@@ -1,0 +1,113 @@
+# Device nodes baked into the image, in mksquashfs -pf syntax: the /dev of
+# the squashfs itself. On 6.18 the kernel mounts devtmpfs on /dev before
+# init (CONFIG_DEVTMPFS_MOUNT), which covers these with its own nodes, so
+# they matter only to a kernel that does not.
+#
+# mksquashfs applies these without root, so the build needs no privileges.
+#
+#   <path> <type> <mode> <uid> <gid> <major> <minor>
+#
+# /dev itself is a real directory in the staging tree, not declared here: when
+# both exist mksquashfs keeps the real one and warns about the pseudo entry.
+
+# The four every program assumes exist.
+/dev/console c 600 0 0 5 1
+/dev/null    c 666 0 0 1 3
+/dev/zero    c 666 0 0 1 5
+/dev/tty     c 666 0 0 5 0
+
+# The kernel log ring, write only (drivers/char/mem.c:906,946 registers minor
+# 11 unconditionally and gives it a .write and no .read). This image runs NO
+# syslogd -- busybox is built without the applet -- so /dev/log has no reader
+# and everything that calls syslog(3) writes into nothing. That is how a
+# dropbear that failed to daemonise left no trace anywhere. /dev/kmsg is the
+# one place a boot-time failure can be put where dmesg still has it later.
+/dev/kmsg c 600 0 0 1 11
+
+# Entropy, and there is only ONE node here on purpose.
+#
+# /dev/urandom has to be static: it has no sysfs entry, so nothing populating
+# /dev from /sys will ever create it. Without it dropbearkey exits with
+# "Failure reading random device /dev/urandom" and the stick comes up with no
+# host key and no ssh. Reproduced by test/rootfs_chroot_test.sh.
+#
+# /dev/random IS DELIBERATELY ABSENT. It is the blocking pool, and on this
+# machine a one-byte read never returns -- measured on the booted image, where
+# an unbounded read killed the audit probe. A read of it inside rcS would hang
+# sysinit, and init starts no respawn entry until sysinit completes: no
+# console, no telnet, no ssh, on a box that looks alive until the watchdog
+# resets it. Nothing here reads it -- dropbear and dropbearkey use
+# DROPBEAR_URANDOM_DEV with no fallback, and the only other reference in the
+# rootfs, busybox seedrng, seeds from getrandom() and opens /dev/random only
+# when that syscall is missing, then only to poll it with a zero timeout. So
+# the node was a trap and nothing else: absent, a caller gets ENOENT
+# and can say so; present, it hangs. The stock vendor image ships it and gets
+# away with it for the same reason we did.
+/dev/urandom c 666 0 0 1 9
+
+# The Unix98 pty multiplexer. Without this node busybox telnetd cannot get a
+# pty at all: it is built CONFIG_FEATURE_DEVPTS=y, so its getpty() opens
+# /dev/ptmx and has no BSD fallback compiled in. rcS mounts devpts on /dev/pts
+# for the slave side; this is the master.
+/dev/ptmx c 666 0 0 5 2
+
+# The serial console. ttyS0 is the one inittab respawns a login on.
+/dev/ttyS0 c 600 0 0 4 64
+/dev/ttyS1 c 600 0 0 4 65
+
+# Flash. Major 90 is MTD char (minor 2n for mtdN, 2n+1 for the read-only
+# alias); major 31 is mtdblock, and jffs2 needs the block node. FOURTEEN
+# partitions on this board, 0..13 -- read from /proc/mtd on both sticks:
+# boot, env, env2, config, k0, r0, k1, r1, four 4K placeholders, then linux
+# and rootfs, which are aliases onto whichever slot is running. Nothing
+# resolves a partition by number: mount-config.sh and fwu.sh both look the
+# name up in /proc/mtd.
+/dev/mtd0  c 600 0 0 90 0
+/dev/mtd1  c 600 0 0 90 2
+/dev/mtd2  c 600 0 0 90 4
+/dev/mtd3  c 600 0 0 90 6
+/dev/mtd4  c 600 0 0 90 8
+/dev/mtd5  c 600 0 0 90 10
+/dev/mtd6  c 600 0 0 90 12
+/dev/mtd7  c 600 0 0 90 14
+/dev/mtd8  c 600 0 0 90 16
+/dev/mtd9  c 600 0 0 90 18
+/dev/mtd10 c 600 0 0 90 20
+/dev/mtd11 c 600 0 0 90 22
+/dev/mtd12 c 600 0 0 90 24
+/dev/mtd13 c 600 0 0 90 26
+# The READ-ONLY aliases, on the odd minors. mtdchar.c reads the partition as
+# `minor >> 1` and refuses FMODE_WRITE when `minor & 1`, so this is enforced by
+# the kernel rather than by the mode bits -- opening mtd1ro for writing is
+# -EACCES whoever you are. The stock vendor image ships its own eight. This is
+# what docs/FLASHING.md wants for the backup step: a mistyped redirection
+# onto mtd1ro cannot destroy the environment.
+/dev/mtd0ro  c 400 0 0 90 1
+/dev/mtd1ro  c 400 0 0 90 3
+/dev/mtd2ro  c 400 0 0 90 5
+/dev/mtd3ro  c 400 0 0 90 7
+/dev/mtd4ro  c 400 0 0 90 9
+/dev/mtd5ro  c 400 0 0 90 11
+/dev/mtd6ro  c 400 0 0 90 13
+/dev/mtd7ro  c 400 0 0 90 15
+/dev/mtd8ro  c 400 0 0 90 17
+/dev/mtd9ro  c 400 0 0 90 19
+/dev/mtd10ro c 400 0 0 90 21
+/dev/mtd11ro c 400 0 0 90 23
+/dev/mtd12ro c 400 0 0 90 25
+/dev/mtd13ro c 400 0 0 90 27
+
+/dev/mtdblock0  b 600 0 0 31 0
+/dev/mtdblock1  b 600 0 0 31 1
+/dev/mtdblock2  b 600 0 0 31 2
+/dev/mtdblock3  b 600 0 0 31 3
+/dev/mtdblock4  b 600 0 0 31 4
+/dev/mtdblock5  b 600 0 0 31 5
+/dev/mtdblock6  b 600 0 0 31 6
+/dev/mtdblock7  b 600 0 0 31 7
+/dev/mtdblock8  b 600 0 0 31 8
+/dev/mtdblock9  b 600 0 0 31 9
+/dev/mtdblock10 b 600 0 0 31 10
+/dev/mtdblock11 b 600 0 0 31 11
+/dev/mtdblock12 b 600 0 0 31 12
+/dev/mtdblock13 b 600 0 0 31 13

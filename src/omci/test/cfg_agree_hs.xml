@@ -1,0 +1,8 @@
+<Config Name="ROOT">
+ <Dir Name="HW_MIB_TABLE">
+		<Value Name="PON_MODE" Value="1"/>
+		<Value Name="GPON_SN" Value="ODIX00000001"/>
+		<Value Name="GPON_PLOAM_PASSWD" Value="0123456789"/>
+		<Value Name="LOID_PASSWD_OLD" Value="pw-current"/>
+ </Dir>
+</Config>

@@ -1,0 +1,7 @@
+<Config Name="ROOT">
+	<Dir Name="MIB_TABLE">
+		<Value Name="LOID" Value="user-new"/>
+		<Value Name="LOID_OLD" Value=""/>
+		<Value Name="LOID_PASSWD" Value="pw-new"/>
+	</Dir>
+</Config>

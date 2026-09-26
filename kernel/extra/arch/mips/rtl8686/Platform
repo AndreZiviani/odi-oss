@@ -1,0 +1,8 @@
+#
+# ODI DFP-34X-2C2 (Realtek RTL9602C / RTL8686 platform family, RLX5281 CPU)
+#
+# -march/-Wa Lexra overrides come from the toolchain's own KCFLAGS -- nothing
+# board-specific needed here on that front.
+#
+cflags-$(CONFIG_MACH_RTL8686)	+= -I$(srctree)/arch/mips/include/asm/mach-rtl8686
+load-$(CONFIG_MACH_RTL8686)	+= 0x80000000

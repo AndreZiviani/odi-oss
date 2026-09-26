@@ -1,0 +1,215 @@
+RTK.0> pon get transceiver bias-current
+Bias Current: 14.350000 mA
+RTK.0> pon get transceiver rx-power
+Rx Power: -22.924298  dBm
+RTK.0> pon get transceiver tx-power
+Tx Power: 2.287339  dBm
+RTK.0> pon get transceiver temperature
+Temperature: 42.359375 C
+RTK.0> pon get transceiver voltage
+Voltage: 3.170300 V
+RTK.0> gpon get onu-state
+ONU state: Operation State(O5) 
+RTK.0> gpon get alarm-status
+Alarm LOS, status: clear
+Alarm LOF, status: occur
+Alarm LOM, status: clear
+% SF, SD, TX Too Long, TX Mismatch: not tracked by odi_gpon
+RTK.0> mib dump counter port all
+Port: 0
+ifInOctets                         :                      1000
+ifInUcastPkts                      :                      2001
+ifInMulticastPkts                  :                      3002
+ifInBroadcastPkts                  :                      4003
+ifOutOctets                        :                      6005
+ifOutDiscards                      :                      7006
+ifOutMulticastPkts                 :                      9008
+ifOutBroadcastPkts                 :                     10009
+dot1dTpPortInDiscards              :                     12011
+dot1dTpHcPortInDiscards            :                     13012
+dot3OutPauseFrames                 :                     15014
+dot3OutPauseOnFrames               :                     16015
+dot3StatsFcsErrors                 :                     18017
+dot3StatsSingleCollisionFrames     :                     19018
+dot3StatsDeferredTransmissions     :                     21020
+dot3StatsLateCollisions            :                     22021
+dot3StatsFrameTooLongs             :                     24023
+dot3StatsSymbolErrors              :                     25024
+etherStatsDropEvents               :                     27026
+etherStatsOctets                   :                     28027
+etherStatsMulticastPkts            :                     30029
+etherStatsUndersizePkts            :                     31030
+etherStatsFragments                :                     33032
+etherStatsJabbers                  :                     34033
+etherStatsCRCAlignErrors           :                     36035
+etherStatsPkts64Octets             :                     37036
+etherStatsPkts128to255Octets       :                     39038
+etherStatsPkts256to511Octets       :                     40039
+etherStatsPkts1024to1518Octets     :                     42041
+etherStatsTxOctets                 :                     43042
+etherStatsTxOversizePkts           :                     45044
+etherStatsTxPkts64Octets           :                     46045
+etherStatsTxPkts128to255Octets     :                     48047
+etherStatsTxPkts256to511Octets     :                     49048
+etherStatsTxPkts1024to1518Octets   :                     51050
+etherStatsTxPkts1519toMaxOctets    :                     52051
+etherStatsTxMulticastPkts          :                     54053
+etherStatsTxFragments              :                     55054
+etherStatsTxCRCAlignErrors         :                     57056
+etherStatsRxUndersizePkts          :                     58057
+etherStatsRxOversizePkts           :                     60059
+etherStatsRxPkts64Octets           :                     61060
+etherStatsRxPkts128to255Octets     :                     63062
+etherStatsRxPkts256to511Octets     :                     64063
+etherStatsRxPkts1024to1518Octets   :                     66065
+etherStatsRxPkts1519toMaxOctets    :                     67066
+outOamPduPkts                      :                     69068
+
+Port: 1
+ifInOctets                         :                         0
+ifInUcastPkts                      :                         0
+ifInMulticastPkts                  :                         0
+ifInBroadcastPkts                  :                         0
+ifOutOctets                        :                         0
+ifOutDiscards                      :                         0
+ifOutMulticastPkts                 :                         0
+ifOutBroadcastPkts                 :                         0
+dot1dTpPortInDiscards              :                         0
+dot1dTpHcPortInDiscards            :                         0
+dot3OutPauseFrames                 :                         0
+dot3OutPauseOnFrames               :                         0
+dot3StatsFcsErrors                 :                         0
+dot3StatsSingleCollisionFrames     :                         0
+dot3StatsDeferredTransmissions     :                         0
+dot3StatsLateCollisions            :                         0
+dot3StatsFrameTooLongs             :                         0
+dot3StatsSymbolErrors              :                         0
+etherStatsDropEvents               :                         0
+etherStatsOctets                   :                         0
+etherStatsMulticastPkts            :                         0
+etherStatsUndersizePkts            :                         0
+etherStatsFragments                :                         0
+etherStatsJabbers                  :                         0
+etherStatsCRCAlignErrors           :                         0
+etherStatsPkts64Octets             :                         0
+etherStatsPkts128to255Octets       :                         0
+etherStatsPkts256to511Octets       :                         0
+etherStatsPkts1024to1518Octets     :                         0
+etherStatsTxOctets                 :                         0
+etherStatsTxOversizePkts           :                         0
+etherStatsTxPkts64Octets           :                         0
+etherStatsTxPkts128to255Octets     :                         0
+etherStatsTxPkts256to511Octets     :                         0
+etherStatsTxPkts1024to1518Octets   :                         0
+etherStatsTxPkts1519toMaxOctets    :                         0
+etherStatsTxMulticastPkts          :                         0
+etherStatsTxFragments              :                         0
+etherStatsTxCRCAlignErrors         :                         0
+etherStatsRxUndersizePkts          :                         0
+etherStatsRxOversizePkts           :                         0
+etherStatsRxPkts64Octets           :                         0
+etherStatsRxPkts128to255Octets     :                         0
+etherStatsRxPkts256to511Octets     :                         0
+etherStatsRxPkts1024to1518Octets   :                         0
+etherStatsRxPkts1519toMaxOctets    :                         0
+outOamPduPkts                      :                         0
+
+Port: 2
+ifInOctets                         :                      3000
+ifInUcastPkts                      :                      6001
+ifInMulticastPkts                  :                      9002
+ifInBroadcastPkts                  :                     12003
+ifOutOctets                        :                     18005
+ifOutDiscards                      :                     21006
+ifOutMulticastPkts                 :                     27008
+ifOutBroadcastPkts                 :                     30009
+dot1dTpPortInDiscards              :                     36011
+dot1dTpHcPortInDiscards            :                     39012
+dot3OutPauseFrames                 :                     45014
+dot3OutPauseOnFrames               :                     48015
+dot3StatsFcsErrors                 :                     54017
+dot3StatsSingleCollisionFrames     :                     57018
+dot3StatsDeferredTransmissions     :                     63020
+dot3StatsLateCollisions            :                     66021
+dot3StatsFrameTooLongs             :                     72023
+dot3StatsSymbolErrors              :                     75024
+etherStatsDropEvents               :                     81026
+etherStatsOctets                   :                     84027
+etherStatsMulticastPkts            :                     90029
+etherStatsUndersizePkts            :                     93030
+etherStatsFragments                :                     99032
+etherStatsJabbers                  :                    102033
+etherStatsCRCAlignErrors           :                    108035
+etherStatsPkts64Octets             :                    111036
+etherStatsPkts128to255Octets       :                    117038
+etherStatsPkts256to511Octets       :                    120039
+etherStatsPkts1024to1518Octets     :                    126041
+etherStatsTxOctets                 :                    129042
+etherStatsTxOversizePkts           :                    135044
+etherStatsTxPkts64Octets           :                    138045
+etherStatsTxPkts128to255Octets     :                    144047
+etherStatsTxPkts256to511Octets     :                    147048
+etherStatsTxPkts1024to1518Octets   :                    153050
+etherStatsTxPkts1519toMaxOctets    :                    156051
+etherStatsTxMulticastPkts          :                    162053
+etherStatsTxFragments              :                    165054
+etherStatsTxCRCAlignErrors         :                    171056
+etherStatsRxUndersizePkts          :                    174057
+etherStatsRxOversizePkts           :                    180059
+etherStatsRxPkts64Octets           :                    183060
+etherStatsRxPkts128to255Octets     :                    189062
+etherStatsRxPkts256to511Octets     :                    192063
+etherStatsRxPkts1024to1518Octets   :                    198065
+etherStatsRxPkts1519toMaxOctets    :                    201066
+outOamPduPkts                      :                    207068
+
+Port: 3
+ifInOctets                         :            20015998343868
+ifInUcastPkts                      :                      8001
+ifInMulticastPkts                  :                     12002
+ifInBroadcastPkts                  :                     16003
+ifOutOctets                        :                     24005
+ifOutDiscards                      :                     28006
+ifOutMulticastPkts                 :                     36008
+ifOutBroadcastPkts                 :                     40009
+dot1dTpPortInDiscards              :                     48011
+dot1dTpHcPortInDiscards            :                     52012
+dot3OutPauseFrames                 :                     60014
+dot3OutPauseOnFrames               :                     64015
+dot3StatsFcsErrors                 :                     72017
+dot3StatsSingleCollisionFrames     :                     76018
+dot3StatsDeferredTransmissions     :                     84020
+dot3StatsLateCollisions            :                     88021
+dot3StatsFrameTooLongs             :                     96023
+dot3StatsSymbolErrors              :                    100024
+etherStatsDropEvents               :                    108026
+etherStatsOctets                   :                    112027
+etherStatsMulticastPkts            :                    120029
+etherStatsUndersizePkts            :                    124030
+etherStatsFragments                :                    132032
+etherStatsJabbers                  :                    136033
+etherStatsCRCAlignErrors           :                    144035
+etherStatsPkts64Octets             :                    148036
+etherStatsPkts128to255Octets       :                    156038
+etherStatsPkts256to511Octets       :                    160039
+etherStatsPkts1024to1518Octets     :                    168041
+etherStatsTxOctets                 :                    172042
+etherStatsTxOversizePkts           :                    180044
+etherStatsTxPkts64Octets           :                    184045
+etherStatsTxPkts128to255Octets     :                    192047
+etherStatsTxPkts256to511Octets     :                    196048
+etherStatsTxPkts1024to1518Octets   :                    204050
+etherStatsTxPkts1519toMaxOctets    :                    208051
+etherStatsTxMulticastPkts          :                    216053
+etherStatsTxFragments              :                    220054
+etherStatsTxCRCAlignErrors         :                    228056
+etherStatsRxUndersizePkts          :                    232057
+etherStatsRxOversizePkts           :                    240059
+etherStatsRxPkts64Octets           :                    244060
+etherStatsRxPkts128to255Octets     :                    252062
+etherStatsRxPkts256to511Octets     :                    256063
+etherStatsRxPkts1024to1518Octets   :                    264065
+etherStatsRxPkts1519toMaxOctets    :                    268066
+outOamPduPkts                      :                    276068
+
+RTK.0> 

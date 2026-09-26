@@ -1,0 +1,8 @@
+<Config Name="ROOT">
+	<Dir Name="MIB_TABLE">
+		<Value Name="OMCI_SW_VER1" Value=""/>
+		<Value Name="OMCI_SW_VER2" Value=""/>
+		<Value Name="OMCC_VER" Value=""/>
+		<Value Name="OMCI_VENDOR_PRODUCT_CODE" Value=""/>
+	</Dir>
+</Config>

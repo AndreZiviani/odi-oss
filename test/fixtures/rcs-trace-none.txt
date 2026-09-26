@@ -1,0 +1,136 @@
+exec /bin/mount ["/bin/mount", "-t", "proc", "proc", "/proc"]
+exec /bin/mount ["/bin/mount", "-t", "sysfs", "sysfs", "/sys"]
+exec /bin/mount ["/bin/mount", "-t", "ramfs", "ramfs", "/var"]
+exec /bin/mkdir ["mkdir", "-p", "/var/tmp"]
+exec /bin/mkdir ["mkdir", "-p", "/var/log"]
+exec /bin/mkdir ["mkdir", "-p", "/var/run"]
+exec /bin/mkdir ["mkdir", "-p", "/var/lock"]
+exec /bin/mkdir ["mkdir", "-p", "/var/config"]
+exec /bin/sh ["sh", "-x", "/etc/scripts/mount-config.sh"]
+exec /bin/grep ["grep", "-F", "\"config\"", "/proc/mtd"]
+exec /bin/sed ["sed", "-n", "s/^mtd\\([0-9]*\\):.*/\\1/p"]
+exec /bin/head ["head", "-n", "1"]
+exec /bin/mkdir ["mkdir", "-p", "/var/config"]
+exec /bin/mknod ["mknod", "/dev/mtdblock3", "b", "31", "3"]
+exec /bin/mount ["mount", "-t", "jffs2", "/dev/mtdblock3", "/var/config"]
+exec /bin/mkdir ["mkdir", "-p", "/var/run"]
+exec /bin/uname ["uname", "-r"]
+exec /bin/grep ["grep", "-c", "^mtd", "/proc/mtd"]
+exec /bin/cat ["cat", "/etc/version"]
+exec /bin/mkdir ["mkdir", "-p", "/etc/config/seedrng"]
+exec /bin/seedrng ["/bin/seedrng", "-d", "/etc/config/seedrng"]
+exec /bin/sleep ["sleep", "90"]
+exec /bin/hostname ["/bin/hostname", "-F", "/etc/hostname"]
+exec /sbin/ifconfig ["/sbin/ifconfig", "lo", "127.0.0.1", "up"]
+write /proc/odi_init "intr\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "irq\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "switch\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "svlan\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "stp\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "oam\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "acl\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "qos\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "sec\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "rate\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "classify\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "stat\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "trunk\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "l2\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "vlan\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "port\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "mirror\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "cpu\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "rldp\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "trap\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "gpio\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "time\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "ponmac\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+exec /etc/scripts/network.sh ["/etc/scripts/network.sh"]
+exec /sbin/ifconfig ["ifconfig", "br0"]
+exec /bin/sed ["sed", "-n", "s/.*inet addr:\\([0-9.]*\\).*/\\1/p"]
+exec /bin/cat ["cat", "/sys/class/net/eth0/operstate"]
+exec /bin/mount ["/bin/mount", "-t", "devpts", "devpts", "/dev/pts"]
+exec /bin/mknod ["mknod", "/dev/ptyp0", "c", "2", "0"]
+exec /bin/mknod ["mknod", "/dev/ttyp0", "c", "3", "0"]
+exec /bin/mknod ["mknod", "/dev/ptyp1", "c", "2", "1"]
+exec /bin/mknod ["mknod", "/dev/ttyp1", "c", "3", "1"]
+exec /bin/mknod ["mknod", "/dev/ptyp2", "c", "2", "2"]
+exec /bin/mknod ["mknod", "/dev/ttyp2", "c", "3", "2"]
+exec /bin/mknod ["mknod", "/dev/ptyp3", "c", "2", "3"]
+exec /bin/mknod ["mknod", "/dev/ttyp3", "c", "3", "3"]
+exec /bin/mknod ["mknod", "/dev/ptyp4", "c", "2", "4"]
+exec /bin/mknod ["mknod", "/dev/ttyp4", "c", "3", "4"]
+exec /bin/mknod ["mknod", "/dev/ptyp5", "c", "2", "5"]
+exec /bin/mknod ["mknod", "/dev/ttyp5", "c", "3", "5"]
+exec /bin/mknod ["mknod", "/dev/ptyp6", "c", "2", "6"]
+exec /bin/mknod ["mknod", "/dev/ttyp6", "c", "3", "6"]
+exec /bin/mknod ["mknod", "/dev/ptyp7", "c", "2", "7"]
+exec /bin/mknod ["mknod", "/dev/ttyp7", "c", "3", "7"]
+exec /bin/mknod ["mknod", "/dev/ptyp8", "c", "2", "8"]
+exec /bin/mknod ["mknod", "/dev/ttyp8", "c", "3", "8"]
+exec /bin/mknod ["mknod", "/dev/ptyp9", "c", "2", "9"]
+exec /bin/mknod ["mknod", "/dev/ttyp9", "c", "3", "9"]
+exec /bin/mknod ["mknod", "/dev/ptypa", "c", "2", "10"]
+exec /bin/mknod ["mknod", "/dev/ttypa", "c", "3", "10"]
+exec /bin/mknod ["mknod", "/dev/ptypb", "c", "2", "11"]
+exec /bin/mknod ["mknod", "/dev/ttypb", "c", "3", "11"]
+exec /bin/mknod ["mknod", "/dev/ptypc", "c", "2", "12"]
+exec /bin/mknod ["mknod", "/dev/ttypc", "c", "3", "12"]
+exec /bin/mknod ["mknod", "/dev/ptypd", "c", "2", "13"]
+exec /bin/mknod ["mknod", "/dev/ttypd", "c", "3", "13"]
+exec /bin/mknod ["mknod", "/dev/ptype", "c", "2", "14"]
+exec /bin/mknod ["mknod", "/dev/ttype", "c", "3", "14"]
+exec /bin/mknod ["mknod", "/dev/ptypf", "c", "2", "15"]
+exec /bin/mknod ["mknod", "/dev/ttypf", "c", "3", "15"]
+exec /etc/init.d/services ["/etc/init.d/services", "start"]
+exec /bin/sleep ["sleep", "60"]
+write /proc/odi_wdt/userland_ok "1\n"
+write /proc/odi_init "optics\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "i2c 1\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "i2cen 1\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "gpon\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "rxsd\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "gpondrv\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "gpondev\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_omci "switch_init\n"
+exec /bin/omcid ["/bin/omcid", "-a", "-d"]
+exec /bin/sed ["sed", "-n", "s/.*Name=\"GPON_SN\" Value=\"\\([^\"]*\\)\".*/\\1/p", "/etc/config/lastgood_hs.xml"]
+exec /bin/head ["head", "-n", "1"]
+write /proc/odi_init "gponsn ODIT00000001\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+exec /bin/sed ["sed", "-n", "s/.*Name=\"GPON_PLOAM_PASSWD\" Value=\"\\([^\"]*\\)\".*/\\1/p", "/etc/config/lastgood.xml"]
+exec /bin/head ["head", "-n", "1"]
+write /proc/odi_init "gponpw 30303030303030303030\n"
+exec /bin/cat ["cat", "/proc/odi_init"]
+write /proc/odi_init "gponact\n"
+exec /bin/cat ["cat", "/proc/odi_init"]

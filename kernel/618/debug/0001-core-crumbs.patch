@@ -1,0 +1,125 @@
+From: Andre Ziviani <andrepziviani@gmail.com>
+Date: Thu, 24 Sep 2026 14:52:52 -0300
+Subject: [PATCH] MIPS: rtl8686: early-boot crumbs in core files (debug only)
+
+Not part of the normal build: kernel/build.sh applies kernel/618/debug/
+only with CRUMBS_CORE=1, on top of kernel/618/patches, and the crumbs
+store only with CONFIG_ODI_EARLY_CRUMBS=y. They cover the stretch no
+board hook reaches: the head.S tail (K3BS .bss cleared, K4JS about to
+enter start_kernel), the first line of start_kernel (K5SK), cpu_probe
+(K6CB/K7CA around it in setup_arch, KR* inside it). The normal crumb
+trail picks up again in prom_init (K8PB). Ported to a new kernel only
+when someone needs it.
+
+---
+--- a/arch/mips/kernel/head.S
++++ b/arch/mips/kernel/head.S
+@@ -102,6 +102,7 @@
+ 	PTR_ADDIU	t0, LONGSIZE
+ 	LONG_S		zero, (t0)
+ 	bne		t0, t1, 1b
++	odi_crumb	0x4b334253, 3, t0, t1	# "K3BS", .bss cleared
+ 
+ 	LONG_S		a0, fw_arg0		# firmware arguments
+ 	LONG_S		a1, fw_arg1
+@@ -119,6 +120,7 @@
+ 	back_to_back_c0_hazard
+ 	set_saved_sp	sp, t0, t1
+ 	PTR_SUBU	sp, 4 * SZREG		# init stack pointer
++	odi_crumb	0x4b344a53, 4, t0, t1	# "K4JS", to start_kernel
+ 
+ #ifdef CONFIG_RELOCATABLE
+ 	/* Copy kernel and apply the relocations */
+--- a/init/main.c
++++ b/init/main.c
+@@ -108,6 +108,7 @@
+ #include <net/net_namespace.h>
+ 
+ #include <asm/io.h>
++#include <asm/mach-rtl8686/odi-early-crumb.h>
+ #include <asm/setup.h>
+ #include <asm/sections.h>
+ #include <asm/cacheflush.h>
+@@ -872,6 +873,7 @@
+ 	char *command_line;
+ 	char *after_dashes;
+ 
++	ODI_EARLY_CRUMB("K5SK", 5);	/* start_kernel() reached */
+ 	set_task_stack_end_magic(&init_task);
+ 	smp_setup_processor_id();
+ 	debug_objects_early_init();
+--- a/arch/mips/kernel/setup.c
++++ b/arch/mips/kernel/setup.c
+@@ -45,6 +45,7 @@
+ #include <asm/mips-cps.h>
+ #include <asm/prom.h>
+ #include <asm/fw/fw.h>
++#include <asm/mach-rtl8686/odi-early-crumb.h>
+ 
+ #ifdef CONFIG_MIPS_ELF_APPENDED_DTB
+ char __section(".appended_dtb") __appended_dtb[0x100000];
+@@ -769,7 +770,9 @@
+ 
+ void __init setup_arch(char **cmdline_p)
+ {
++	ODI_EARLY_CRUMB("K6CB", 6);	/* about to call cpu_probe() */
+ 	cpu_probe();
++	ODI_EARLY_CRUMB("K7CA", 7);	/* cpu_probe() returned */
+ 	mips_cm_probe();
+ 	prom_init();
+ 
+--- a/arch/mips/kernel/cpu-r3k-probe.c
++++ b/arch/mips/kernel/cpu-r3k-probe.c
+@@ -25,6 +25,8 @@
+ 
+ #include "fpu-probe.h"
+ 
++#include <asm/mach-rtl8686/odi-early-crumb.h>
++
+ /* Hardware capabilities */
+ unsigned int elf_hwcap __read_mostly;
+ EXPORT_SYMBOL_GPL(elf_hwcap);
+@@ -70,6 +72,7 @@
+ 	struct cpuinfo_mips *c = &current_cpu_data;
+ 	unsigned int cpu = smp_processor_id();
+ 
++	ODI_EARLY_CRUMB("KRPB", 60);	/* cpu_probe() entered */
+ 	/*
+ 	 * Set a default elf platform, cpu probe may later
+ 	 * overwrite it with a more precise value
+@@ -88,6 +91,7 @@
+ 	c->srsets = 1;
+ 
+ 	c->processor_id = read_c0_prid();
++	ODI_EARLY_CRUMB("KRID", 61);	/* PRId read (0x0000dc02 on the RLX5281) */
+ 	switch (c->processor_id & (PRID_COMP_MASK | PRID_IMP_MASK)) {
+ 	case PRID_COMP_LEGACY | PRID_IMP_R2000:
+ 		c->cputype = CPU_R2000;
+@@ -122,9 +126,11 @@
+ 		__cpu_name[cpu] = "RLX5281";
+ 		c->options = MIPS_CPU_TLB | MIPS_CPU_NOFPUEX;
+ 		c->tlbsize = 64;
++		ODI_EARLY_CRUMB("KRTD", 63);	/* RLX5281 case taken */
+ 		break;
+ 	}
+ 
++	ODI_EARLY_CRUMB("KRBO", 64);	/* about to evaluate the BUG_ON checks */
+ 	BUG_ON(!__cpu_name[cpu]);
+ 	BUG_ON(c->cputype == CPU_UNKNOWN);
+ 
+@@ -134,6 +140,7 @@
+ 	 * manually setup otherwise it could trigger some nasty bugs.
+ 	 */
+ 	BUG_ON(current_cpu_type() != c->cputype);
++	ODI_EARLY_CRUMB("KRBD", 65);	/* BUG_ON checks passed */
+ 
+ 	if (mips_fpu_disabled)
+ 		c->options &= ~MIPS_CPU_FPU;
+@@ -146,6 +153,7 @@
+ 	c->vmbits = 31;
+ 
+ 	reserve_exception_space(0, 0x400);
++	ODI_EARLY_CRUMB("KRRD", 69);	/* cpu_probe() about to return */
+ }
+ 
+ void cpu_report(void)

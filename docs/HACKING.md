@@ -1,0 +1,856 @@
+# Hacking on odi-oss
+
+For a developer who has never seen this project and wants to change it.
+The rest of the docs describe the firmware as a user sees it; this one is
+about how it is built, how it is kept from bricking a stick, how it is
+tested, and which traps have already cost someone a day. Where another
+document already says something well, this one links to it rather than
+repeating it. Two things are complete here and nowhere else: the recovery
+mechanism ([Recovery](#the-recovery-mechanism)) and the list of traps
+([Gotchas](#gotchas)). [Feature toggles](#feature-toggles) is the
+developer reference for every switch, parameter and build variable.
+
+[`AGENTS.md`](../AGENTS.md) holds the house rules in short form. Read it
+too; nothing here overrides it.
+
+## Contents
+
+1. [Orientation](#orientation)
+2. [Building](#building)
+3. [The recovery mechanism](#the-recovery-mechanism)
+4. [Testing](#testing)
+5. [Gotchas](#gotchas)
+6. [Feature toggles](#feature-toggles)
+7. [Making a change](#making-a-change)
+
+## Orientation
+
+### What the image is
+
+A complete replacement firmware for the **ODI DFP-34X-2C2**, a GPON ONU in
+an SFP stick: Linux **6.18** (the current longterm line), our own drivers
+for the switch, the GPON MAC, the CPU-port NIC and the OMCI transport, our
+own userland daemons and CLIs, and our own gcc/binutils/uClibc-ng
+toolchain. Nothing proprietary is shipped or linked. The stock firmware
+(Linux 2.6.30, closed) normally stays in the other boot slot.
+
+| | |
+|---|---|
+| SoC | Realtek RTL9602C (the die; marketed as RTL9601D, [`docs/kb/rtl9602c-chip-identity.md`](kb/rtl9602c-chip-identity.md)) |
+| CPU | Lexra RLX5281: MIPS-I plus a few MIPS-II instructions, big-endian, no FPU, R3000-style exceptions and caches |
+| RAM / flash | 32 MB DRAM / 8 MB SPI NOR |
+| ports | one UNI (the SFP edge, SerDes to the host), the PON, and the CPU port (the stick's own IP stack) |
+| console | a UART on the board, no connector: in practice, no serial console |
+| boot | U-Boot, two kernel+rootfs slots, a one-shot trial boot, a hardware watchdog |
+
+The flash map comes from the `mtdparts=` table U-Boot passes (and the
+fallback in `kernel/618/config`): `boot` 256K, `env` and `env2` 8K each,
+`config` 240K (jffs2, shared by both slots), `k0` 1328K, `r0` 2512K, `k1`
+1328K, `r1` 2512K. Slot 0 boots with `root=31:5`, slot 1 with `root=31:7`.
+
+### The boot, in one paragraph
+
+U-Boot picks a slot ([below](#the-recovery-mechanism)), decompresses the
+LZMA uImage and jumps to `kernel_entry` with a per-slot command line in
+`argv`. The board code (`kernel/extra/arch/mips/rtl8686/`) stops the NIC DMA
+the loader left running, installs the RLX5281 cache code, reserves the PON
+DMA windows and the two ramlog pages, and the drivers under
+`kernel/extra/drivers/net/ethernet/odi/` come up built in (there are no
+modules). `/etc/init.d/rcS` then mounts the config partition, writes the
+switch SDK-init verbs to `/proc/odi_init`, brings up `br0` with
+`/etc/scripts/network.sh`, starts `services` (metricsd, confd, dropbear) in
+the background, **confirms userland to the watchdog**, drives the optics,
+and runs the PON steps, which start `omcid` and activate the GPON MAC.
+`docs/BOOT.md` has each stage and why it is where it is;
+`/etc/init.d/rcS.dev` adds the development aids.
+
+### Repo layout
+
+| path | what | read first |
+|---|---|---|
+| `Makefile` | the whole build and the gates; `make help` | `lint:` and `test-host:` |
+| `toolchain/` | gcc 16.2.0, binutils 2.47, uClibc-ng 1.0.59 for this CPU, built in a container into a Docker volume | [`toolchain/README.md`](../toolchain/README.md) |
+| `kernel/618/fetch.sh`, `mainline/` | fetches and GPG-verifies linux-6.18.53; `mainline/` is the pristine tree (gitignored) | |
+| `kernel/618/patches/` | **only** edits to files mainline already has: 19 lines in 6 files today (`tools/kernel-footprint.sh`) | [`docs/KERNEL.md`](KERNEL.md) "Patches and the overlay" |
+| `kernel/618/debug/` | debug-only mainline edits, applied with `CRUMBS_CORE=1` | |
+| `kernel/618/config` | the seed config, completed by `olddefconfig`; every line has its reason | "The config" in KERNEL.md |
+| `kernel/extra/` | every file of our own, at its path in the kernel tree: board, cache, irqchip, timer, SPI NOR, `drivers/net/ethernet/odi/` | [`kernel/extra/README.md`](../kernel/extra/README.md), the odi driver `README.md` |
+| `kernel/build.sh` | builds the kernel in a container with our toolchain | its header |
+| `src/` | our own userland: `diag`, `omci` (`omcid`, `omcli`/`omcicli`, `omciprobe`, `omcicap`), `igmp`, `nv`; freestanding binaries | [`src/diag/README.md`](../src/diag/README.md), [`src/omci/README.md`](../src/omci/README.md) |
+| `src/fetch-releases.sh` | pulls `metricsd` and `confd`, separate projects, as pinned checksummed releases | |
+| `packages/` | upstream busybox, dropbear, iproute2, statically linked against our uClibc-ng; the ISA audits | `packages/isa-audit.sh` |
+| `rootfs/skeleton/` | `/etc` (rcS, services, network.sh, apply.sh, flash, ...) and the register replay tables in `lib/firmware/odi/` | [`rootfs/README.md`](../rootfs/README.md), then `etc/init.d/rcS` |
+| `image/` | squashfs + uImage into a flashable tarball; `fwu.sh`, the on-device flasher | [`image/README.md`](../image/README.md) |
+| `test/` | host-side unit tests (C unity builds against a register mock, shell tests of the on-device scripts) and manual qemu harnesses | [Testing](#testing) |
+| `tools/` | `remote-build.sh`, `kernel-footprint.sh`, `check-inline-quotes.sh`, `fetch-refs.sh`; `memprobe` (physical memory from any kernel), `regdump`, `regtrace` (offline tooling for the register captures the replay tables came from) | each directory's `README.md` |
+| `docs/` | user and developer docs; `docs/kb/` field notes on the hardware and the stock firmware | [`docs/kb/README.md`](kb/README.md) |
+
+### Where to start reading
+
+- **Kernel or drivers**: `docs/KERNEL.md` end to end, then
+  `kernel/extra/drivers/net/ethernet/odi/README.md`, then the driver you
+  care about and its host test in `test/`.
+- **Boot and userland**: `rootfs/skeleton/etc/init.d/rcS` with
+  `docs/BOOT.md`, then `rcS.dev`, `docs/TOOLS.md`, `docs/SETTINGS.md`.
+- **OMCI**: `src/omci/README.md`, `docs/REFERENCES.md` for the ITU-T
+  specs (`tools/fetch-refs.sh` fetches them), and the OMCI notes in
+  `docs/kb/`.
+- **A tool of your own on the stick**: `docs/CROSS-COMPILING.md`.
+
+## Building
+
+`docs/BUILDING.md` is the full reference; this is the working summary.
+
+### Prerequisites
+
+Docker, bash, GNU make, git, `curl`, `xz`, `gpg` and `shasum` (the kernel
+fetch), and for the host tests a C compiler, Python 3 and `shellcheck`.
+`make releases` needs either a logged-in `gh` or a `GITHUB_TOKEN` that can
+read the private odi-ui repository ([confd and metricsd](#confd-and-metricsd)).
+Everything that compiles for the target runs in containers. The toolchains
+are prebuilt images, pinned by digest in `toolchain/images.env` and pulled
+on first use ([Toolchain images](#toolchain-images)). The uclibc one is
+`amd64`: on Apple silicon or any other non-x86_64 host it runs under
+emulation, which is slow for the kernel. Use a remote build host
+([below](#remote-builds)).
+
+### Toolchain images
+
+Both come from the odi-toolchain repository
+(<https://github.com/AndreZiviani/odi-toolchain>), which builds and
+publishes them; `toolchain/README.md` has what each contains. Nothing here
+builds a compiler any more.
+
+**While the packages are private**, log in once with a GitHub token that
+has `read:packages`, and never commit that token or leave it in a shared
+host shell history:
+
+    echo "$TOKEN" | docker login ghcr.io -u <github user> --password-stdin
+
+Once they are public no login is needed. A failed pull says so and prints
+the fallback: build the images from source in the odi-toolchain repository
+and export `OSS_IMAGE=odi-toolchain-uclibc:local` /
+`DIAG_IMAGE=odi-toolchain-freestanding:local`.
+
+To move a pin: tag a new version in odi-toolchain, take the digest from its
+publish run, change `toolchain/images.env`, rebuild, and compare the image
+file by file against one built with the old pin.
+
+### From a clean clone
+
+    git clone git@github.com:AndreZiviani/odi-oss.git && cd odi-oss
+    export GITHUB_TOKEN=<token>    # only without a logged-in gh
+    make image-all                 # out/image/<version>.tar, a few minutes on an 8-core x86_64 host
+
+The toolchain images bring their own kernel headers, so `kernel-tree` no
+longer gates them; `image-all` still runs it first, since `kernel` needs
+it. `make image-all` runs, in order: `kernel-tree` (fetch and verify
+linux-6.18.53, pack it into `build/kernel-618/tree.tar`), `toolchain` (pull
+the two pinned images, under a minute), `toolchain-audit`, `kernel`
+(2 min), `packages`, `src`, `releases`, `image`. After the first build
+every target skips work it has already done; a second `make image-all`
+takes about a minute. `docs/BUILDING.md` has the per-step timings.
+
+### Targets
+
+| target | what | output |
+|---|---|---|
+| `make kernel-tree` | `kernel/tree.sh`: fetch (`kernel/618/fetch.sh`) and pack the pristine tree; run by `kernel` (the toolchain is prebuilt and no longer needs it) | `kernel/618/mainline`, `build/kernel-618/tree.tar` |
+| `make toolchain` / `toolchain-audit` | pull the pinned toolchain images; the audit re-proves the uclibc target libraries carry no instruction this CPU traps on | the images in `toolchain/images.env` |
+| `make kernel` | `kernel/build.sh` | `build/kernel-618/{uImage,vmlinux,System.map,config}` |
+| `make busybox`, `make packages` | busybox, then dropbear and iproute2, static, ISA-audited | `out/` |
+| `make src` | our freestanding binaries | `out/bin/` |
+| `make releases` | `src/fetch-releases.sh` | `out/bin/{metricsd,confd}`, `out/confd-assets/` |
+| `make image` | `image/build.sh` (runs `make src` first; names every other missing input and stops) | `out/image/<version>.tar`, `root-password-<version>.txt` |
+| `make image-all` | all of the above, in order, from a clean clone | |
+| `make test` | `lint`, `test-host`, `test-diag`, `test-omci` | [Testing](#testing) |
+| `make clean` / `distclean` | `build/` and `out/`; also the kernel tree and `dl/` | the Docker volumes survive both |
+
+### Docker volumes and images
+
+| name | kind | what |
+|---|---|---|
+| `odi-kbuild-618` | volume | the kernel build tree (`VOL=`); incremental between runs |
+| `odi-toolchain-uclibc` | image | the uclibc-ng toolchain at `/opt/oss` and the kernel and package build container (`OSS_IMAGE=`, `packages/oss-env.sh`); pinned in `toolchain/images.env` |
+| `odi-toolchain-freestanding` | image | Debian `gcc-mips-linux-gnu` plus `qemu-mips-static`: builds `src/`, runs `test-diag` and `test-omci` (`DIAG_IMAGE=`); pinned in `toolchain/images.env` |
+| `odi-oss-image` | image | squashfs and tar tooling for `image/build.sh` |
+
+`docker volume rm odi-kbuild-618` is the only way to drop the volume;
+nothing in the tree depends on its exact contents. Every name in the table
+has an override (`VOL`, `OSS_IMAGE`, `DIAG_IMAGE`, `TOOLS_IMAGE`), so two
+builds on one Docker host can share nothing: `docs/BUILDING.md`, "Several
+builds on one Docker host".
+
+### Remote builds
+
+    ODI_REMOTE=user@buildhost tools/remote-build.sh 'make image-all'
+
+rsyncs the working tree (tracked and untracked, so uncommitted changes
+build), runs the command there, and copies `out/image/*.tar`, the password
+files and build logs back. `ODI_REMOTE` has no default; `ODI_REMOTE_DIR`
+defaults to `/root/odi/odi-oss`. The kernel tree and `dl/` are excluded
+from the sync (the tree is gigabytes); the first build on the remote host
+fetches them. Without a logged-in `gh` there, set `GITHUB_TOKEN` locally:
+the script passes it to the remote command on stdin. The command is any
+shell line, so `'VERSION=odi-oss-260925-mine make kernel image'` works too.
+
+### Iterating
+
+- **Kernel**: an edit to an overlay file rebuilds incrementally. Adding or
+  removing an overlay file, or changing a patch, the seed config or
+  `kernel/build.sh`, re-extracts the tree. `FRESH=1` forces that.
+  `COMPILE_ONLY=1` stops at `vmlinux` (no uImage), for disassembly checks.
+- **Image**: `KERNEL=` and `KCONFIG=` point `image/build.sh` at a kernel
+  built elsewhere; `VERSION=` names the build (and should match the
+  `VERSION=` the kernel was built with, so the ramlog build id matches the
+  image); `ALLOW_PARTIAL=1` builds without an optional package or confd
+  assets. [Feature toggles](#build-variables) has every variable.
+- **The root password** is generated per build and written to
+  `out/image/root-password-<version>.txt`; `ROOT_PW=` chooses it,
+  `ROOT_PW=none` leaves it empty. It is baked into the read-only rootfs, so
+  keep the file for as long as that image runs anywhere.
+
+### confd and metricsd
+
+The web UI (`confd`, the odi-ui project) and the Prometheus exporter
+(`metricsd`, the odi-sfp-exporter project) are separate repositories with their
+own releases. `src/fetch-releases.sh` downloads the pinned tags
+(`CONFD_TAG`, `METRICSD_TAG`; the defaults are in the script) with `gh`
+when it is installed and logged in, otherwise with `curl` (odi-ui is
+private, so that path needs `GITHUB_TOKEN`; `USE_CURL=1` forces it), verifies
+each asset against the release's `SHA256SUMS`, caches them in
+`dl/releases/`, and records the tags in `out/bin/releases.env`, which
+`image/build.sh` copies into `/etc/odi-build`.
+
+To ship a **local confd build**, set `CONFD_TAG` to the empty string and
+point `CONFD_BIN` at the binary; its web assets are taken from `web/` and
+`schema/` in the parent of the binary's directory (`odi-ui/build/confd`
+means `odi-ui/`), or from the checkout `CONFD_ASSETS=` names:
+
+    CONFD_TAG= CONFD_BIN=../odi-ui/build/confd make releases image
+
+confd reads `/etc/confd/` for the whole UI and its `.tsv` tables; a confd
+without them starts and answers 404 to everything, so check the "asset
+files" line the script prints. A UI change that adds a setting has to land
+in odi-ui `schema/settings.tsv` and `docs/SETTINGS.md` together.
+
+### What CI runs
+
+`.github/workflows/ci.yml`: on pull requests and pushes to `main`, `make
+lint`, `make test-host`, `make test-diag` and `make test-omci`. On release
+tags (`v*`, `odi-oss-*`) and manual runs it adds `make src` on its own. The
+toolchain, kernel and image are **not** built in CI: 25 minutes of compiling
+and nothing in them runs without a stick. Build the kernel yourself before
+you push a kernel change.
+
+## The recovery mechanism
+
+Everything about working on this device rests on one fact: **a new image is
+only ever booted once, on trial, and any failure puts the stick back on the
+image that was already trusted.** Understand this section before flashing
+anything. The user-facing procedure is `docs/FLASHING.md`; this is the
+mechanism behind it.
+
+### Two slots and three variables
+
+Each slot is a kernel partition and a rootfs partition (`k0`/`r0`,
+`k1`/`r1`). The config partition is shared. The U-Boot environment (`env`,
+with a redundant copy in `env2`, read and written by our `nv`) decides
+which slot boots:
+
+| variable | meaning |
+|---|---|
+| `sw_commit` | the trusted slot: every ordinary boot goes here |
+| `sw_tryactive` | `0` or `1`: boot that slot **once**; `2`: no trial pending |
+| `sw_active` | U-Boot's record of what it last booted; never set it by hand |
+
+`bootcmd` is (read off a stick with `nv getenv`; the full text is in
+[`docs/kb/rtl9601-uboot-trial-boot.md`](kb/rtl9601-uboot-trial-boot.md)):
+
+    bootcmd           = if sw_tryactive == 2; then boot_by_commit; else boot_by_tryactive; fi
+    boot_by_commit    = boot the slot named by sw_commit
+    boot_by_tryactive = setenv sw_tryactive 2; setenv sw_active <n>; saveenv; run en_wdt; boot slot <n>
+
+The trial path writes `sw_tryactive` back to `2` and saves **before** it
+arms the watchdog and jumps, so a trial cannot loop: whatever happens
+next, the following boot takes `boot_by_commit`. Only `0` is tested for
+slot 0; any other value that is not `2` boots slot 1, so write `0` or `1`
+and nothing else.
+
+### What sends a trial back
+
+| event during a trial | next boot |
+|---|---|
+| kernel panics, hangs, never mounts root | the watchdog U-Boot armed resets the board: committed slot |
+| kernel alive, but rcS never confirms within 120 s of uptime | `odi_wdt` forces the reset: committed slot |
+| `reboot`, `reboot -f`, the web UI's reboot | committed slot |
+| power cycle | committed slot (and the ramlog is lost) |
+| image confirms, then misbehaves (no network, no ssh) | **stays up** until you power-cycle it |
+
+`reboot` resets at once: odi_wdt registers a restart handler that stops
+the NIC DMA, then forces the watchdog reset (enable alone, then a kick;
+the kick is what restarts the count), about 0.3 s. Reboot to the stock
+image answering again is about 73 s, most of it U-Boot and the stock boot.
+`halt` and `poweroff` do not stop the board: the stick has no power
+switch, so the watchdog is re-armed and resets it about 42 s later
+(docs/KERNEL.md, "Reboot, halt and power-off").
+
+On a **committed** slot of ours the same watchdog and deadline are armed
+(`odi_wdt` arms the watchdog itself on every boot, not only on trials), so
+a hang there becomes a reboot loop on that slot. That is the cost of
+committing an image you have not watched come up.
+
+### The userland deadline
+
+`odi_wdt.c` kicks the hardware watchdog from a kernel thread, so a kernel
+that is merely alive would never be reset. It therefore also holds a
+deadline: unless something writes `1` to
+`/proc/odi_wdt/userland_ok` within `ODI_WDT_USERLAND_DEADLINE_S`
+(120 s) of uptime, it stops the NIC DMA (`wdt_pre_reset_hook`) and forces
+the reset itself. The directory was named after the stock firmware
+(`luna_watchdog`) until a cleanup gave it our own name, once rcS no longer
+needed to share a line with the stock image.
+
+rcS writes it (`rootfs/skeleton/etc/init.d/rcS`, "the watchdog
+confirmation") after the SDK-init verbs, networking and the `services` launch, and
+**before** the optics and the PON steps. The confirmation does not look at
+the network: a trial whose management path never comes up stays up, and
+you power-cycle it. For development there is
+`/etc/config/confirm-arp` (read by `rcS.dev`): with it, rcS confirms only after an ARP reply
+from the `.2` address of the `br0` subnet, so an unreachable trial reverts
+by itself **and keeps its ramlog** (a watchdog reset preserves DRAM; a
+power cycle does not). Never leave `confirm-arp` on a stick whose host is
+not on `.2`: every boot then resets at 120 s. The confirmation and the
+deadline are one mechanism; change neither without reading `rcS`,
+`rcS.dev` and `odi_wdt.c` together.
+
+### Never `sw_commit` a trial
+
+`sw_commit` is the only thing that makes an image permanent, and writing it
+throws away the fallback. Write it only from the running trial image, after
+you have watched it work, by hand, and never from a script, a boot loop or
+a soak: every trial boot is its own `nv setenv sw_tryactive <slot>`. A slot
+can be re-tried any number of times without reflashing.
+
+Two further facts:
+
+- **Something other than you can move `sw_commit`.** On one stick it changed
+  by itself about 80 s after a trial booted the stock image's management
+  stack (an operator-driven OMCI software-image activate and commit). Our
+  `omcid` never writes the boot environment, but read `sw_commit` back
+  after every trial rather than assume it.
+- **`fwu.sh` refuses to write the running slot or the slot `sw_commit`
+  names** (in either environment copy), and the kernel's `mtdparts` marks
+  the running pair read-only, so flashing the wrong slot takes more than one
+  mistake. Check `sw_commit` equals the running slot before a trial anyway:
+  a trial must revert *away* from the new image, not into it.
+
+### Reading a boot you could not see
+
+There is no serial console, so a trial that never answered is otherwise one
+bit of information. Four records survive a revert:
+
+- **The DRAM ramlog.** `odi_ramlog.c` mirrors every console line into two
+  DRAM pages no kernel maps (`0x017ff000`: the first 4016 bytes and a
+  64-byte per-boot metadata block; `0x01fff000`: a ring of the last 4080).
+  They survive a watchdog reset or `reboot`, not a power cycle.
+  - From **our** image (the next boot of ours), before its own ramlog
+    writes: `cat /proc/odi_ramlog_prev` (decoded) or
+    `/proc/odi_ramlog_prev_raw` (8192 bytes). The first two lines give this
+    boot's counter and slot and the previous boot's counter, slot, build id
+    and last early crumb: **check the slot and build id are the trial's**
+    before reading on. It reaches one boot back; a stock boot in between
+    writes nothing.
+  - From the **stock** image: push `tools/memprobe` and run
+    `tools/memprobe/ramlog-read.sh` ([`tools/memprobe/README.md`](../tools/memprobe/README.md)).
+    Check `MemFree` first: pushing a file larger than free RAM into the
+    stock image's ramfs has rebooted a stick.
+- **Fatal-signal register dumps.** `print-fatal-signals=1` is on the
+  built-in command line, so a process killed by SIGSEGV, SIGBUS or SIGILL
+  prints `epc`, `ra`, `Status`, `Cause` and `BadVA` into the ramlog. That
+  is how the loader's running NIC DMA was found (a page of `/bin/busybox`
+  overwritten by an RX descriptor).
+- **Early crumbs.** `CONFIG_ODI_EARLY_CRUMBS` stores a 4-byte tag and a
+  step in page B at each board hook, from `K1EN` (first instruction) to
+  `TICK` (timer interrupts counting): the last pair says how far a kernel
+  got that died before its first console line. `CRUMBS_CORE=1` adds crumbs
+  inside mainline's `head.S`, `start_kernel` and `cpu_probe`. The trail is
+  in `docs/KERNEL.md` ("Early crumbs").
+- **Boot breadcrumbs on flash.** `: > /etc/config/breadcrumbs.on`, set from
+  the running image before the trial, makes rcS (through `rcS.dev`) append one timestamped line
+  per stage to `/etc/config/breadcrumbs`, write a network snapshot to
+  `/etc/config/trial-diag.txt`, log a heartbeat and lower the lockup
+  thresholds. The config partition is shared and never written by
+  `fwu.sh`, so read them from the image you land back on.
+
+A trick for telling a timed event (a deadline, a watchdog) from a stalled
+instruction: if the last line printed moves between otherwise identical
+trials but the uptime at death does not, it is the timer, not the code at
+that line ([`docs/kb/rtl9601-dram-ramlog-console.md`](kb/rtl9601-dram-ramlog-console.md)).
+
+### When a stick seems bricked
+
+In order:
+
+1. **Wait two and a half minutes.** A hung trial resets at 120 s (the
+   userland deadline), and the stock image then needs its own boot time.
+2. **Power-cycle it.** With `sw_tryactive` already back at `2`, every boot
+   after a trial is the committed slot. (This loses the ramlog; if the
+   stick still answers ARP but not ssh, a reset that preserves DRAM is not
+   available from outside, so take the loss.)
+3. **Once it answers**, read `nv getenv` (`sw_commit`, `sw_tryactive`,
+   `sw_active`), then the breadcrumbs and the ramlog as above.
+4. **Up, but no service on the stock image?** The stock firmware runs a
+   PON-mode detector: after about 24 s of light without PON sync it
+   rewrites `PON_MODE` in the config store to the other PON type (GPON to
+   EPON) and reboots, and it then looks dead on a GPON line. Anything that
+   keeps the fibre lit while the stock image cannot sync can trigger it (a
+   bench fibre, a fibre fault, an experiment that stops its OMCI stack),
+   and no log survives the reboot to say so. `flash get
+   PON_MODE`; on a GPON stick it is `1` (as in
+   `rootfs/skeleton/etc/config_default_hs.xml`), and `flash set PON_MODE 1`
+   puts it back. Setting `PON_DETECT_ENABLE` to 0 stops the rewrite but not
+   the detector; a stick still on the factory placeholder serial never runs
+   it. Our image is GPON only and never rewrites the PON type.
+   [`docs/kb/rtl9601-pondetect-pon-mode-rewrite.md`](kb/rtl9601-pondetect-pon-mode-rewrite.md).
+5. **Rebooting every 120 s?** `confirm-arp` left on a stick whose host is
+   not on `.2` holds the confirmation back on every boot; remove it
+   ([Feature toggles](#switch-files-on-the-config-partition)). An older
+   image of ours also rebooted on purpose with `bdgconn-probe` there. A
+   committed image of ours that never confirms loops every 120 s: if it is reachable
+   inside that window, `echo 1 > /proc/odi_wdt/userland_ok` stops
+   this boot's reset, and `nv setenv sw_commit <the other slot>` gets you
+   off it.
+6. **Both slots unbootable**: the board UART is the only way in. Every rule
+   above exists to keep you from here.
+
+## Testing
+
+### The gates
+
+| gate | what it proves | needs |
+|---|---|---|
+| `make lint` | shellcheck over every script (on-device ones as POSIX `sh`, since busybox ash runs them), the inline-quote check, the private-workspace and vendor-citation greps | `shellcheck`, git |
+| `make test-host` | about 45 host tests: driver logic, the on-device scripts, the replay tables and their generators | cc, bash, Python 3 |
+| `make test-diag` | diag's parser and conversions natively, then under qemu: the conversion vectors, the L2 listing golden, **the exporter contract** | Docker |
+| `make test-omci` | builds `src/`, runs `omcid` under qemu-user (about 130 checks) | Docker |
+| `make test` | all four, about two minutes | |
+| kernel build | `BUILD OK: <n> warnings`: 22 today, all GCC 16 "retain attribute ignored" in mainline networking files; any other warning is ours and a regression | toolchain |
+| kernel ISA and footprint | `packages/isa-audit.sh build/kernel-618/vmlinux` finds nothing; `objdump -d vmlinux` has no `eret` and no `tne`; `tools/kernel-footprint.sh` does not grow without a stated reason | kernel build |
+| image build | every ELF in the rootfs passes `isa-audit.sh` and `isa-allowlist.sh`; uImage and rootfs fit their partitions | full build |
+| trial | [On hardware](#on-hardware) | a stick of your own |
+
+### Host tests
+
+The kernel drivers are written so that their logic compiles on the host.
+Each C test is a **unity build**: `test/odi_switch_test.c` `#include`s
+`test/odi_switch_mock.h` and then the driver `.c` files themselves
+(`kernel/extra/drivers/net/ethernet/odi/odi_switch_tbl.c`, ...), so the
+test runs the same lines the kernel runs. `odi_switch_mock.h` replaces
+`odi_reg_read()`/`odi_reg_write()` with a flat register model covering the
+switch-core, GPON and counter windows plus a write log; an address outside
+every window aborts the test rather than corrupting a slot, and the mock
+aborts on a recursive lock or on releasing a lock not held. Kernel-only
+code sits behind `#ifdef __KERNEL__`. A new driver file gets a
+`test/<name>_test.c` and a `test/<name>_test.sh` wrapper (copy one, it is
+five lines), and the wrapper goes into the `test-host` list in the
+Makefile.
+
+Tests replay what real sticks did: captured register sequences
+(`test/fixtures/`), the committed replay tables in
+`rootfs/skeleton/lib/firmware/odi/` (parsed by the C reader and dumped by
+the Python writer, so both are checked against the same bytes), a captured
+GPON re-activation, and OLT command sequences from both ISPs.
+
+The on-device shell scripts (`apply.sh`, `network.sh`, `flash`, `fwu.sh`,
+`fwu_starter.sh`) are tested on the host too: they take their paths from
+overridable variables (`ODI_INIT=`, `CONF=`, `IFCONFIG=`, ...), and the
+tests point those at FIFOs, stubs and captured `/proc` files. Keep that
+shape when you add one.
+
+### test-diag: the exporter contract
+
+`metricsd` sends one fixed batch of commands to `diag` per scrape and
+parses the output. The same exporter build also reads the **stock**
+firmware's `diag`, so those commands keep the stock syntax and output byte
+for byte. `make exporter-test` (inside `test-diag`) runs the batch in
+`src/diag/test/exporter.txt` through the real binary under qemu, answered
+by a fake hardware layer, and compares the output with
+`src/diag/test/exporter.golden` (and once more without the trailing
+`exit`). If you change anything the exporter reads, the golden files fail
+and you have changed the contract: fix the code, or change the exporter
+first. `src/diag/README.md` ("The exporter contract") has the rules.
+
+### test-omci
+
+`src/omci/qemu-test.sh`, in the freestanding toolchain image as root
+(it creates `/var/config` inside the container). qemu-user cannot open
+our own netlink protocol number (`NETLINK_ODI`), so there is no line side:
+it injects frames on the message queue, and checks the MIB store, the
+45-command CLI protocol and
+the dump renderers against output captured from live sticks. Full OLT
+sessions are not covered here; they are exercised through the kernel side
+in `test/odi_switch_isp2_test.c` and on hardware.
+
+### Manual harnesses
+
+Under `test/`, not in any make target, each with its requirements in its
+header: `fwu_stock_commands_test.sh` and `fwu_stock_flash_test.sh` (does
+`fwu.sh` run on the stock image's busybox 1.12.4 with 52 applets, and
+flash for real), `image_tar_format_test.sh` (can that busybox's `tar` read
+our tarball), `rootfs_chroot_test.sh` (the boot scripts in a qemu-user
+chroot of the staged rootfs), `uimage_header_test.sh` (the header U-Boot
+reads). Run them when you touch `fwu.sh`, the tarball, or rcS.
+
+### Pure refactors: prove the machine code did not change
+
+A change that should not change behaviour (a comment pass, a rename, a
+header move, a dead `#if` arm removed) is proven by the disassembly, not by
+a trial:
+
+    dis() {   # disassemble build/kernel-618/vmlinux with the toolchain objdump
+        docker run --rm -v "$PWD/build/kernel-618:/k:ro" \
+            "$(packages/oss-env.sh)" mips-linux-uclibc-objdump -d /k/vmlinux | tail -n +3
+    }
+    git checkout <base>;   VERSION=cmp COMPILE_ONLY=1 kernel/build.sh && dis > before.s
+    git checkout <branch>; VERSION=cmp COMPILE_ONLY=1 kernel/build.sh && dis > after.s
+    diff before.s after.s && echo identical
+
+Pin `VERSION` so the ramlog build id string is the same in both builds.
+An empty diff means the change is a no-op for the CPU; say so in the
+commit message. For a file split or move, where addresses shift, compare
+per function with the addresses normalised: every non-static function
+identical, each static-inlining difference named. The same works for a
+userland binary (`omcid`, `diag`) with its own objdump. `tools/kernel-footprint.sh`
+before and after shows what a patch change costs the next LTS port.
+
+### On hardware
+
+Only on a stick you own and can power-cycle, with the stock firmware
+committed in the other slot. The ISPs' OLTs differ in how they provision,
+so a change to OMCI or the datapath needs a trial on a live line, not only
+on a bench fibre.
+
+- **A trial boot**: flash the inactive slot, `nv setenv sw_tryactive
+  <slot>`, `reboot` (`docs/FLASHING.md`). Check: `/proc/cmdline` shows the
+  trial slot, `cat /proc/odi_wdt/userland_ok` says `userland_ok=1`,
+  `omcli state` reaches O5 with the services provisioned, `dmesg` has no
+  new warning, `/etc/odi-build` names your build.
+- **A boot loop**: repeat the trial from the committed image, one
+  `sw_tryactive` per boot, and record each boot (ramlog counter, time to
+  confirm, ONU state). The releases are qualified with 15 consecutive
+  trials; bugs that live in the boot (the NIC DMA one hit one boot in six)
+  need that many.
+- **A soak**: hours with a sample every few minutes: ONU state, the switch
+  MIB counters (`diag mib dump counter port all`), `ip -s link` errors,
+  `dmesg`, `MemFree`, the exporter's scrape. **Subscriber traffic is
+  forwarded by the switch hardware and never reaches the CPU**
+  ([`docs/kb/rtl9601-forwarding-visibility.md`](kb/rtl9601-forwarding-visibility.md)),
+  so a busy line exercises the switch and the GPON MAC but not `odi_nic`.
+  To test the NIC path, send traffic to the stick itself: copy a file of a
+  few MB to it and back over scp and compare checksums, in every sample.
+
+## Gotchas
+
+Each of these has cost real time. The pointer says where the evidence is.
+
+**Hardware and boot**
+
+- **No serial console.** The UART exists on the board, not on the SFP edge.
+  Everything about debugging here goes through the ramlog, crumbs and
+  breadcrumbs ([above](#reading-a-boot-you-could-not-see)), and every boot
+  change goes through a trial.
+- **The loader leaves the NIC DMA running.** The CPU-port NIC's receive
+  engine keeps writing frames through the loader's descriptors into pages
+  Linux has handed out; the symptom was a SIGBUS in `/bin/busybox` about one
+  boot in six. `prom_init()` stops it with two uncached stores before the
+  kernel owns a page. Do not move that later. `docs/KERNEL.md` "The board".
+- **The RLX5281 needs the R3000 exception model.** It keeps CP0 `Status` as
+  a KU/IE stack and returns with `rfe`; the kernel is `CONFIG_CPU_R3000`,
+  and `objdump -d vmlinux | grep -cw eret` must print 0. The CPU also has
+  to be named in the R3K probe (PRId `0x0000dc02`), or a `BUG_ON()` runs
+  `break` before any exception vector exists: a silent hang.
+  [`docs/kb/rtl9602c-rlx5281-kernel-needs-r3000-exception-model.md`](kb/rtl9602c-rlx5281-kernel-needs-r3000-exception-model.md).
+- **The icache does not snoop the dcache**, and how it is indexed is
+  unknown, so a per-line invalidate cannot be trusted to hit every alias.
+  `flush_data_cache_page()` writes the dcache back and invalidates the
+  **whole** icache. Any new path that gives a page new contents for
+  execution has to end there. `docs/KERNEL.md` "The CPU".
+- **`wmb()` is nothing on this build.** `CPU_R3000` turns `CPU_HAS_SYNC`
+  off, so mainline `wmb()`, `rmb()` and `dma_wmb()` emit no instruction. Use
+  `rtl8686_sync()` (`asm/mach-rtl8686/rtl8686-barrier.h`) for DMA ordering
+  (a descriptor body before its ownership bit). `docs/KERNEL.md` "The CPU".
+- **There is no clocksource.** No CP0 Count/Compare and no free-running
+  counter; timekeeping is the jiffies clocksource, advanced by the TIMER0
+  tick interrupt. With interrupts off, `jiffies` and `ktime_get()` stand
+  still, so a poll bounded by a clock in atomic context never times out.
+  `odi_poll_reg()` (`odi_switch_reg.h`) is built on 6.18
+  `read_poll_timeout_atomic()`, which counts its bound in delay steps
+  rather than reading a clock; use it, or count iterations yourself.
+  `kernel/extra/arch/mips/rtl8686/time.c`.
+- **Reading an undecoded SoC address stalls the bus** until the watchdog
+  resets the stick. Do not probe with `devmem` or `memprobe` outside
+  addresses you can account for; the drivers bound every MMIO access
+  (`odi_switch_mmio_offset_in_bounds()`).
+  [`docs/kb/rtl9602c-undecoded-address-read-takes-the-stick-down.md`](kb/rtl9602c-undecoded-address-read-takes-the-stick-down.md).
+- **The kernel partition is 1,359,872 bytes** (the LZMA uImage), and
+  `image/build.sh` refuses a bigger one. The config is on a diet (no
+  modules, no kallsyms, `SLUB_TINY`, a list of unreachable syscalls off).
+  Before turning an option off, map it to every syscall it removes and
+  scan the rootfs ELFs for the o32 number (4000 + N) loaded before
+  `syscall`. Three must stay on: `POSIX_TIMERS` (on 6.18 it also builds
+  `itimer.c`; off, `alarm`/`setitimer` return ENOSYS and busybox `arping`,
+  `ping` and `timeout` never time out, which rcS depends on),
+  `FILE_LOCKING` (busybox `flock`, iproute2, and `fcntl` locks a scan
+  cannot see) and `VM_EVENT_COUNTERS` (the exporter's memory pressure
+  signal). `docs/KERNEL.md` "The config".
+- **Squashfs is XZ with 256 KiB blocks.** Mainline squashfs has no LZMA
+  (the stock image's format), and 6.18 keeps caches of whole blocks, so
+  the block size is RAM on a 32 MB board.
+  [`docs/kb/rtl9602c-squashfs-block-size-costs-ram.md`](kb/rtl9602c-squashfs-block-size-costs-ram.md).
+- **The L2 table's valid signal is the HIT bit of TABLE_STATUS after the
+  read**, not the row's valid bit (bit 77 reads back set on every row). A
+  hash *write* also reports HIT for an absent key, so a delete looks the key
+  up with a hash *read* first. `docs/KERNEL.md` "The L2 table".
+
+**Instruction set and ABI**
+
+- **The CPU traps on instructions a normal MIPS toolchain emits**: `mul`,
+  `clz` (all of SPECIAL2), `teq`/`tne`/`tge`/`tlt` and their forms, and the
+  branch-likely `beql`/`bnel`. Every build uses `-march=mips2
+  -mno-branch-likely -mdivide-breaks`, including the toolchain's own target
+  libraries, and every ELF in the image passes `packages/isa-audit.sh` (a
+  deny list) and `packages/isa-allowlist.sh` (only mnemonics confirmed on
+  the device). Run both on anything you build yourself. The kernel adds
+  `-U_MIPS_ISA -D_MIPS_ISA=_MIPS_ISA_MIPS1` so `BUG_ON()` does not become
+  `tne`. [`docs/CROSS-COMPILING.md`](CROSS-COMPILING.md),
+  [`docs/kb/rtl9601-isa-map.md`](kb/rtl9601-isa-map.md).
+- **MIPS o32 is not the generic Linux ABI**, and every difference fails
+  silently. Syscalls are numbered from 4000 (`exit` is 4001), and an error
+  comes back in `$a3`, not as a negative return. `struct sigaction` has
+  `sa_flags` first. `SOCK_STREAM` is 2 and `SOCK_DGRAM` 1 (swapped),
+  `SOL_SOCKET` is `0xffff`. errno values differ (`ETIMEDOUT` is 145,
+  `EIDRM` 36). The ioctl direction bits sit elsewhere (a write is
+  `0x80000000`). Take every constant from the MIPS `<asm/*.h>` headers,
+  never from another architecture. `src/diag/src/sys.h` has the ones our
+  tools use. [`docs/kb/mips-o32-syscall-abi-traps.md`](kb/mips-o32-syscall-abi-traps.md).
+- **Two build styles.** Everything in `src/` is freestanding (`-nostdlib`,
+  our own `_start` and syscall layer, built with Debian's
+  `gcc-mips-linux-gnu` at `-march=mips1`), which also makes it run on the
+  stock image. Everything in `packages/` links statically against our
+  uClibc-ng; the builds refuse a binary with a `PT_INTERP`. There are no
+  shared libraries in the image.
+  [`docs/kb/rtl9601-freestanding-over-libc.md`](kb/rtl9601-freestanding-over-libc.md).
+
+**Userland and data**
+
+- **The config store is shared with the stock firmware.** The jffs2
+  `config` partition is not part of a slot: both images read it, and a
+  reflash never touches it. Of its 184 keys this image reads 21; the UI
+  shows the rest read-only. **Never delete a key** this image does not use
+  (the stock slot still reads it), never erase the partition (it holds the
+  serial number and MAC the line authenticates on), and keep backups whole.
+  `docs/SETTINGS.md`, [`docs/kb/rtl9601-config-store.md`](kb/rtl9601-config-store.md).
+- **Every setting has an apply class**: LIVE, SERVICE RESTART, INTERRUPTS
+  INTERNET, REBOOT. A new setting needs its class decided, the apply path
+  (`apply.sh network` or `apply.sh omci`, or a reboot), the odi-ui schema
+  row and the `docs/SETTINGS.md` row, together.
+- **The exporter contract.** The `diag` commands `metricsd` sends keep the
+  stock CLI's syntax and output byte for byte; `make test-diag` pins them.
+  `/proc/odi_gpon` and anything else the exporter or confd parses are
+  interfaces too.
+- **`diag` waits forever on a stdin that never closes.** Give it a pipe or a
+  file, and `timeout` in anything that must not stall (rcS, network.sh).
+- **`omcicli get tables` wedges the stock OMCI daemon.** Ours answers it; do
+  not run it on the stock slot. `omcicap` and `omciprobe -f` interfere with
+  a running `omcid` (`docs/TOOLS.md`).
+- **Daemons are not supervised.** A daemon that dies stays dead; restart it
+  with `setsid` so the end of your ssh session cannot SIGHUP it (`omcid`
+  treats SIGHUP as stop). `docs/TOOLS.md` "Restarting a daemon".
+- **`/var` is RAM.** Every log is gone at reboot; only the ramlog and the
+  breadcrumbs survive.
+
+**Repo rules**
+
+- **No apostrophes in shell comments.** Several scripts run a block as
+  `docker run ... bash -c '...'`, where the whole block is one
+  single-quoted word; an apostrophe in a comment inside it ends the word,
+  and the rest of the block runs in the outer shell. Rephrase ("the kernel
+  own config", "does not"), do not escape. `tools/check-inline-quotes.sh`
+  checks inline blocks; avoid them everywhere.
+- **No vendor-sourced code, and no vendor source file or function names**
+  in code, comments or docs. Describing what the stock firmware *does*, as a
+  black box (its shipped binaries, their exported symbols, what it writes),
+  is fine and often necessary. `make lint` greps for a narrow list of known
+  vendor source citations; the review catches the rest. `AGENTS.md`.
+- **No private references.** `make lint` greps tracked files for paths and
+  document names of the private workspace this project grew up beside, and
+  for home-directory paths. It greps only **tracked** files, so `git add`
+  a new file before you trust a clean lint. Name the test sticks by their
+  line, ISP1 and ISP2, and never commit a credential, serial number or MAC
+  from a real stick.
+- **Comments say what is true now.** The why, in the fewest lines that
+  carry it: an invariant, a hardware fact, an ordering or lock rule, what
+  a magic value means or that it is not decoded, and where the evidence
+  is (a fixture, a test, a docs anchor). No trial or boot ids, dates, old
+  patch numbers or "used to": git history is the record, and the commit
+  body is where a finding goes. `make lint` greps `kernel/extra`,
+  `rootfs/skeleton` and `src` for the common markers. Derivations belong
+  in `docs/` (`docs/SWITCH.md`, `docs/KERNEL.md`, `docs/BOOT.md`).
+- **Mainline footprint.** `kernel/618/patches/` is only for lines in files
+  mainline already has; new files go in `kernel/extra/`. Fold a fix into
+  the patch it belongs to. `tools/kernel-footprint.sh` only goes down
+  without a stated reason.
+- **Builds are not bit-reproducible**: the kernel's version string, the
+  ramlog build id and the image manifest embed the build time and version.
+  Two builds of one tree are equivalent, not identical; compare
+  disassembly, not files.
+
+## Feature toggles
+
+Every switch, parameter and build variable, from the code on `k618`. The
+**class** column says who it is for: *prod* (a supported setting) or *dev*
+(a development aid, safe but not for a production stick).
+`docs/SETTINGS.md` remains the user-facing description of the switch files
+a user may set; this table adds where each one is read.
+
+Line numbers are for `k618` at the time of writing and drift; grep for the
+name.
+
+### Switch files on the config partition
+
+`/etc/config` is a symlink to `/var/config`, the jffs2 config partition; a
+file there survives reflashing and applies to every later image. All are
+read at boot unless stated. rcS paths are
+`rootfs/skeleton/etc/init.d/rcS`.
+
+| file | read at | effect | default | class |
+|---|---|---|---|---|
+| `dropbear.off`, `confd.off`, `metricsd.off` | `etc/init.d/services:40`, `:31`, `:28` | that daemon is not started | absent: all three run | prod |
+| `lan-ip` | `etc/scripts/network.sh:48` | management address, one line; overrides `LAN_IP_ADDR`, netmask then 255.255.255.0; live with `apply.sh network` | absent: `LAN_IP_ADDR`, else 192.168.1.1/24 | prod |
+| `sds.off` | `network.sh:242` | skip the host SerDes check and fix | absent | prod (escape hatch) |
+| `optics.off` | rcS, before `pon_steps` | skip the `optics` verb, `PIN_GPIO_SELECT` and the laser TX enable (GPIO 13): **laser off, no service** | absent | prod (escape hatch) |
+| `modules.off` | rcS `:191`; `etc/scripts/apply.sh:42` | skip the switch init (platform settings and module-load replay) and `omcid`: **no OMCI**; `apply.sh omci` refuses | absent | prod (escape hatch) |
+| `pon-steps` | `etc/init.d/rcS.dev:184` | replaces the built-in PON steps: one verb per line, or `omcimods`, `gponsn auto`, `gponpw auto` (`docs/BOOT.md`); a wrong list means no PON | absent | dev |
+| `omci-identity.on` | `src/omci/respond/omcid.h:318`, loaded `cfgstore.c:645` | omcid reports the OLT identity keys (`OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, ...); `apply.sh omci` | absent: built-in values | prod |
+| `breadcrumbs.on` | `rcS.dev:26`, `:52`, `:61`, `:75`, `:86`, `:105`; `services:70` | boot crumbs to `breadcrumbs`, `trial-diag.txt`, a 30 s heartbeat to the kernel log, soft-lockup 20 s and hung-task 30 s | absent | dev |
+| `confirm-arp` | `rcS.dev:165` | confirm the watchdog only after an ARP reply from `.2` of `br0`; **resets every 120 s if the host is elsewhere** | absent: confirm unconditionally | dev |
+| `confd.auth`, `confd/`, `dropbear.d/authorized_keys` | confd (odi-ui); dropbear via `services:60` (`-D`) | UI credential, UI overrides, root SSH keys | admin/admin; image assets; none | prod |
+
+State files, not switches: `seedrng/` (entropy seed, rcS `:56`),
+`dropbear.d/ed25519` (host key, generated on first boot), `breadcrumbs`,
+`trial-diag.txt` (outputs of the dev rows).
+Settings in the XML store itself (`lastgood.xml`, `lastgood_hs.xml`) are
+`docs/SETTINGS.md`.
+
+### Kernel parameters and the command line
+
+Built-in drivers take parameters as `<object>.<name>=` on the command
+line, or at run time through `/sys/module/<object>/parameters/<name>`. The
+command line is `CONFIG_CMDLINE` (`kernel/618/config:65`) followed by
+U-Boot's per-slot `argv` (`MIPS_CMDLINE_BUILTIN_EXTEND`), so a parameter
+added to `CONFIG_CMDLINE` takes effect after a kernel rebuild; U-Boot's
+`root=` and `mtdparts=` win because they come last.
+
+| parameter | defined | effect | default | when | class |
+|---|---|---|---|---|---|
+| `odi_nic.debug` | `odi_nic.c:51` (bool, 0644) | trace the first interrupts and RX descriptors to the console; at the first open (so only when set on the command line) also the ring register read-backs and a NIC state dump 15 s and 45 s later | off | boot, or live for the traces | dev |
+| `print-fatal-signals=1` | `kernel/618/config:65` (mainline) | register dump of any process killed by SIGSEGV/SIGBUS/SIGILL, into the ramlog | on | boot | prod (debug aid) |
+
+### Kconfig
+
+Our symbols; the seed config (`kernel/618/config`) sets each one. The
+four driver symbols sit in one menu that depends on `MACH_RTL8686`
+(`olddefconfig` silently drops a symbol whose dependency is off; the build
+prints the `CONFIG_ODI_*` it got).
+
+| symbol | defined | builds | seed | class |
+|---|---|---|---|---|
+| `MACH_RTL8686` | `kernel/618/patches/0002` | the board (System type) | y | prod |
+| `RTL8686_UART0`, `RTL8686_NOR` | `arch/mips/rtl8686/Kconfig:32`, `:39` | the 8250 UART; the SPI NOR MTD driver | y | prod |
+| `ODI_EARLY_CRUMBS` | `arch/mips/rtl8686/Kconfig:52` | the early boot crumbs in the ramlog pages | y (Kconfig default n) | prod (debug aid) |
+| `ODI_NIC` | `drivers/net/ethernet/odi/Kconfig:5` | `odi_nic.c`, the CPU-port NIC | y | prod |
+| `ODI_SWITCH` | `:12` | the switch core, the OMCI transport and `/proc/odi_omci`, the GPON MAC and the switch interrupt, `/proc/odi_init` and the SDK-init replay, the board-init replay, `/dev/odi_sw` and I2C/DDM (selects `FW_LOADER`, `CRC32`) | y | prod |
+| `ODI_WDT` | `:26` | the watchdog kicker, the userland deadline and the restart handler | y | prod |
+| `ODI_RAMLOG` | `:34` | the DRAM ramlog console and `/proc/odi_ramlog_prev*` | y | prod |
+
+### Build variables
+
+| variable | read in | effect | default |
+|---|---|---|---|
+| `VERSION` | `image/build.sh:36`, `kernel/build.sh:85` | image name, `/etc/version`, the ramlog build id | `odi-oss-<yymmdd>-<git describe>` |
+| `ODI_BUILD_ID` | `kernel/build.sh:85` | the ramlog build id alone (39 chars, safe set) | `VERSION` |
+| `FRESH=1` | `kernel/build.sh:62`; `packages/*/build.sh` | re-extract the kernel tree / rebuild a package from clean | 0 |
+| `CRUMBS_CORE=1` | `kernel/build.sh:76` | also apply `kernel/618/debug/*.patch` (crumbs in mainline core files) | 0 |
+| `COMPILE_ONLY=1` | `kernel/build.sh:145` | stop after `vmlinux`, no uImage | 0 |
+| `VOL` | `kernel/build.sh:57` | kernel build volume | `odi-kbuild-618` |
+| `WORK` | `kernel/build.sh:56` | kernel output directory | `build/kernel-618` |
+| `KVER` | `kernel/build.sh:50` | accepted only as `6.18` | `6.18` |
+| `OSS_IMAGE`, `DIAG_IMAGE` | `toolchain/image.sh`, `toolchain/images.env`, `src/*/Makefile`, `Makefile` (`test-omci`) | the uclibc and freestanding toolchain images, e.g. a local build from odi-toolchain | the pinned digests in `toolchain/images.env` |
+| `TOOLS_IMAGE` | `image/build.sh` | squashfs and tar tooling image | `odi-oss-image` |
+| `DL`, `OUT` | `kernel/618/fetch.sh:17` | download cache, tree location | `dl/`, `kernel/618/mainline` |
+| `ALT_URLS` | `packages/fetch.sh:34` | extra mirrors for package tarballs (a Software Heritage fallback is built in) | none |
+| `KERNEL`, `KCONFIG` | `image/build.sh:48`, `:39` | uImage to ship, and its `.config` (shipped as `/etc/kernel-config`) | `build/kernel-618/uImage` and the `config` beside it |
+| `BUSYBOX`, `BIN_DIR`, `PKG_DIR`, `ASSET_DIR` | `image/build.sh:37`, `:43`, `:46`, `:44` | where the pieces are | `out/busybox`, `out/bin`, `out`, `out/confd-assets` |
+| `COMP`, `BS` | `image/build.sh:29`, `:30` | squashfs compressor and block size | `xz`, 262144 |
+| `ROOT_PW` | `image/build.sh:291` | root password; `none` for empty | generated, 14 characters |
+| `ALLOW_PARTIAL=1` | `image/build.sh:158`, `:189`, `:199` | build without confd assets or a package | 0 |
+| `ALLOW_NO_KCONFIG=1` | `image/build.sh:297` | build without `/etc/kernel-config` (the `.config`, shipped for reference) | 0 |
+| `GITHUB_TOKEN`, `USE_CURL=1` | `src/fetch-releases.sh`, `tools/remote-build.sh` | token for the curl download of the private confd release; skip `gh` even when present | none; 0 |
+| `METRICSD_TAG`, `CONFD_TAG`, `*_REPO` | `src/fetch-releases.sh` | releases to fetch; `CONFD_TAG=` (empty) with `CONFD_BIN` for a local confd | pinned in the script |
+| `CONFD_BIN`, `CONFD_ASSETS` | `src/fetch-releases.sh:82`, `:88` | local confd binary and its odi-ui checkout | none; `$(dirname $CONFD_BIN)/..` |
+| `ODI_REMOTE`, `ODI_REMOTE_DIR` | `tools/remote-build.sh:36`, `:37` | remote build host and directory | required; `/root/odi/odi-oss` |
+
+### /proc and /dev control files
+
+Writing any of these by hand reprograms hardware under a running stack; do
+it on a trial stick only. `docs/TOOLS.md` "Kernel control files" has the
+read side.
+
+| file | defined | write | read | class |
+|---|---|---|---|---|
+| `/proc/odi_init` | `odi_init.c` | one verb, optional argument: the SDK-init verbs (`intr` ... `ponmac`, `i2c`, `i2cen`, `gpon`, `rxsd`), `optics`, and the GPON verbs (`gpondrv`, `gpondev`, `gponsn <sn>`, `gponpw <hex>`, `gponact`, `gpondeact`, `gponstat`) | the last verb's return code | prod (`rtk_init` under the stock firmware) |
+| `/proc/odi_omci` | `odi_omci.c:451` | `switch_init` (`:398`): the platform settings and the module-load replay | redirect registrations and pids, frame and command counters | prod |
+| `/proc/odi_wdt/userland_ok` | `odi_wdt.c:543` | `1`: userland is up, cancel the 120 s reset | `userland_ok=N deadline=120 uptime=N` | prod (`luna_watchdog` under the stock firmware) |
+| `/proc/odi_wdt/watchdog_flag` | `odi_wdt.c:541` | `1` arm and kick; `0` disable the watchdog and stop the kicker | `watchdog_flag=N` | dev |
+| `/proc/odi_gpon` | `odi_gpon.c:786` | none | ONU state, ONU id, PLOAM counters, serial | prod (`diag` reads it for the exporter; its format is an interface) |
+| `/proc/odi_ramlog_prev`, `_raw` | `odi_ramlog.c:483` | none | the previous boot's ramlog (root only) | prod (debug aid) |
+| `/dev/odi_sw` | `odi_reg.c:191` | ioctls `REG_SET`, `L2_MC_ADD`/`DEL` | ioctls `REG_GET`, `MIB_GET`, `DDM_GET`, `L2_GET`/`NEXT`, `L2_MODE` (`odi_reg.h:118`) | prod |
+
+The `odi_omci` netlink transport rides on its own private protocol number
+(`NETLINK_ODI`; the stock firmware used `NETLINK_USERSOCK`) and refuses
+senders without `CAP_NET_ADMIN`.
+
+## Making a change
+
+1. **Read first.** The file's header and the section of `docs/KERNEL.md`,
+   `docs/TOOLS.md` or the driver README that covers it; `docs/kb/` for the
+   hardware; `git log -p` for the file, since the commit bodies carry the
+   reasoning.
+2. **Small commits, one change each**, subject `area: what changed`
+   (`odi_switch_l2: ...`, `rcS: ...`, `docs: ...`), a body that says why and
+   what was measured. Sign them if you can (`git commit -S`; the
+   maintainer signs with an SSH key). No `Signed-off-by:` in the kernel
+   patch files (`docs/KERNEL.md` says why).
+3. **Run the gates**: `make test` always; the kernel build, the ISA audit
+   and the footprint for a kernel change; the image build for anything that
+   ships; the disassembly diff for a refactor. Put the evidence in the
+   commit body.
+4. **Trial it on your own stick**, never on one carrying someone's only
+   connection: stock committed in the other slot, `: >
+   /etc/config/breadcrumbs.on` first, `confirm-arp` if your host sits on
+   `.2`, `sw_tryactive`, never `sw_commit`. Record what you saw.
+5. **Update the docs in the same change**: `docs/SETTINGS.md` for a
+   setting, `docs/TOOLS.md` for a command, `docs/KERNEL.md` for a driver,
+   this file for a toggle or a trap, `CHANGELOG.md` when a release is cut.
+6. **Write down what you learned about the hardware** as a field note in
+   `docs/kb/`: one claim per note, a title that states the claim, a
+   one-paragraph summary, `*Last verified: <date>*`, then `## What`, `##
+   Why it matters`, `## Evidence` (what was run, on which line, what came
+   back) and `## See also`. Only what was observed or reproduced goes in; a
+   hypothesis stays in the commit message or the issue. Add the note to
+   the table in `docs/kb/README.md` by hand. Describe the stock firmware
+   by its behaviour, never by its source.
+
+[`CONTRIBUTING.md`](../CONTRIBUTING.md) has the short version, and how to
+report an issue.
