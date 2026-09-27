@@ -452,11 +452,15 @@ static void odi_init_hw_rings(void)
 			(u32)odi.rx_ring_dma, odi_r32(ODI_NIC_RX1_RING),
 			odi_r8(ODI_NIC_RX1_LAST), odi_r8(ODI_NIC_RX1_LAST_HI), odi_r8(ODI_NIC_RX1_COUNT));
 
-	/* The stock watermarks are not known: a quarter and three quarters of
-	 * the ring. They only change backpressure timing.
+	/* Free-descriptor watermarks, scaled to keep the OEM's own
+	 * near-exhaustion trigger proportion against our ring depth: see
+	 * ODI_NIC_FC_ON_FRACTION/ODI_NIC_FC_OFF_FRACTION in odi_nic_hw.h. A
+	 * flat quarter/three-quarter split asserted PAUSE toward the switch
+	 * CPU port at ordinary traffic levels; this only asserts near real
+	 * ring exhaustion.
 	 */
-	odi_w8(ODI_NIC_FC_ON_LEVEL, ODI_RX_RING_DEPTH / 4);
-	odi_w8(ODI_NIC_FC_OFF_LEVEL, (ODI_RX_RING_DEPTH * 3) / 4);
+	odi_w8(ODI_NIC_FC_ON_LEVEL, ODI_NIC_FC_ON_FRACTION(ODI_RX_RING_DEPTH));
+	odi_w8(ODI_NIC_FC_OFF_LEVEL, ODI_NIC_FC_OFF_FRACTION(ODI_RX_RING_DEPTH));
 
 	odi_w32(ODI_NIC_R13FC, 0);
 

@@ -3,6 +3,19 @@
 Releases of the flashable image. Trial builds between releases are not
 listed here.
 
+## Unreleased
+
+- Fixed the odi_nic driver asserting PAUSE toward the switch CPU port at
+  ordinary traffic levels. `ODI_NIC_FC_ON_LEVEL`/`ODI_NIC_FC_OFF_LEVEL`
+  (the free-descriptor watermarks that gate the NIC's own flow control)
+  were derived as a flat quarter/three-quarter of the RX ring depth,
+  asserting PAUSE at only 75% ring-used and holding it until the ring
+  drained back to 25% used — a band wide enough for ordinary NAPI
+  scheduling jitter at a few packets a second to cross and hold, with no
+  real congestion behind it. Rescaled to the stock firmware's own
+  near-exhaustion trigger proportion (assert near 94% used, deassert near
+  81% used) instead, so PAUSE only fires near actual ring exhaustion.
+
 ## v1.0.1 — 2026-09-27
 
 `metricsd` (the Prometheus exporter) v1.1.1, up from v1.0.3. The `diag`
