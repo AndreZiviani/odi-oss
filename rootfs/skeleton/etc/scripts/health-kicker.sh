@@ -24,7 +24,14 @@ HEALTH_KICK=/proc/odi_wdt/health_kick
 HEALTH_PERIOD_S=${HEALTH_PERIOD_S:-30}
 HEALTH_MEM_FLOOR_KB=${HEALTH_MEM_FLOOR_KB:-2048}
 
-[ -w "$HEALTH_KICK" ] || exit 0
+# Idle forever, rather than exit, on a kernel without /proc/odi_wdt (any
+# kernel but this repo's own -- the qemu test harness included): exiting
+# here would have supervise() (rootfs/skeleton/etc/scripts/supervise.sh)
+# treat a plain "nothing to do" as a crash and burn its whole restart
+# budget doing nothing, uselessly, in the first couple of minutes of boot.
+if [ ! -w "$HEALTH_KICK" ]; then
+	while :; do sleep 3600; done
+fi
 
 omcid_ok() {
 	[ -f /etc/config/modules.off ] && return 0
