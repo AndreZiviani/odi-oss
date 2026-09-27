@@ -129,8 +129,23 @@
 #define ODI_NIC_R13FC		0x13FC
 
 #define ODI_NIC_RX1_COUNT		0x1430	/* RX ring 1 descriptor count, 8-bit */
-#define ODI_NIC_FC_ON_LEVEL	0x1431	/* flow-control turn-on watermark */
-#define ODI_NIC_FC_OFF_LEVEL	0x1432	/* flow-control turn-off watermark */
+#define ODI_NIC_FC_ON_LEVEL	0x1431	/* flow-control turn-on watermark, free descriptors */
+#define ODI_NIC_FC_OFF_LEVEL	0x1432	/* flow-control turn-off watermark, free descriptors */
+
+/* The stock firmware's own watermarks trigger only within a few
+ * descriptors of true ring exhaustion (assert near 94% used, deassert
+ * near 81% used), not at a flat quarter/three-quarter of the ring: that
+ * flatter split asserts PAUSE at only 75% used and holds it until the
+ * ring drains all the way to 25% used, a band wide enough for ordinary
+ * NAPI scheduling jitter at a few packets a second to cross and hold,
+ * with no real congestion behind it. Scale the same ~1/16 and ~3/16
+ * fraction of the ring instead, so PAUSE only fires near actual
+ * exhaustion regardless of how deep ODI_RX_RING_DEPTH is.
+ */
+#define ODI_NIC_FC_ON_FRACTION(depth)	(((depth) / 16U) ? ((depth) / 16U) : 1U)
+#define ODI_NIC_FC_OFF_FRACTION(depth)	\
+	((((depth) * 3U / 16U) > ODI_NIC_FC_ON_FRACTION(depth)) ? \
+	 ((depth) * 3U / 16U) : (ODI_NIC_FC_ON_FRACTION(depth) + 1U))
 
 #define ODI_NIC_RUN		0x1434	/* master go/doorbell register, 32-bit */
 #define ODI_NIC_RUN_TX_KICK	(1U << 0)	/* ring 1 doorbell -- the only ring we use */

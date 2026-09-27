@@ -438,7 +438,8 @@ In order:
 | `make test-host` | about 45 host tests: driver logic, the on-device scripts, the replay tables and their generators | cc, bash, Python 3 |
 | `make test-diag` | diag's parser and conversions natively, then under qemu: the conversion vectors, the L2 listing golden, **the exporter contract** | Docker |
 | `make test-omci` | builds `src/`, runs `omcid` under qemu-user (about 130 checks) | Docker |
-| `make test` | all four, about two minutes | |
+| `make test-qemu` | boots the real rootfs (busybox, inittab, services, dropbear, confd, metricsd) full-system under `qemu-system-mips -M malta`; checks ssh/web UI/exporter and the resilience scenarios (see below) | Docker, `qemu-system-mips`, `busybox`/`packages`/`src`/`releases` already built |
+| `make test` | `lint`, `test-host`, `test-diag`, `test-omci` (not `test-qemu`, which needs a built rootfs and is not part of the ~2-minute default set), about two minutes | |
 | kernel build | `BUILD OK: <n> warnings`: 22 today, all GCC 16 "retain attribute ignored" in mainline networking files; any other warning is ours and a regression | toolchain |
 | kernel ISA and footprint | `packages/isa-audit.sh build/kernel-618/vmlinux` finds nothing; `objdump -d vmlinux` has no `eret` and no `tne`; `tools/kernel-footprint.sh` does not grow without a stated reason | kernel build |
 | image build | every ELF in the rootfs passes `isa-audit.sh` and `isa-allowlist.sh`; uImage and rootfs fit their partitions | full build |
@@ -495,6 +496,76 @@ it injects frames on the message queue, and checks the MIB store, the
 the dump renderers against output captured from live sticks. Full OLT
 sessions are not covered here; they are exercised through the kernel side
 in `test/odi_switch_isp2_test.c` and on hardware.
+
+### test-qemu: the real rootfs, full system, on a stock kernel
+
+`make busybox packages src releases` first (or `make image` once, which
+does all four); then `make test-qemu`, which runs
+`test/qemu/build-initramfs.sh` and `test/qemu/run-qemu.sh`.
+
+**What it covers.** The whole busybox init chain -- `inittab`, `rcS`,
+`services` -- unmodified, packed as an initramfs instead of the flashed
+squashfs+uImage (no block device or MTD in qemu, and no need to build our
+own RTL9602C kernel just to boot this): our tmpfs caps, `oom_score_adj`,
+`supervise()` respawn and sysctls, dropbear/confd/metricsd for real, and
+the resilience scenarios from `docs/SETTINGS.md` ("Resilience") -- filling
+`/tmp` to `ENOSPC`, an OOM (a busybox-only memory hog, no compiled tool
+needed), and `kill -9` on each critical daemon, checked over real ssh
+(a test-only key, `test/qemu/id_test`, baked into the harness's initramfs
+only) and real HTTP to confd and metricsd.
+
+**What it does NOT cover**, because the kernel underneath is a STOCK
+mainline build (`odi-toolchain-qemu-kernel-malta`, below), never this
+repository's own kernel: `kernel/extra`, every `odi_*` driver, the switch,
+the GPON MAC, `/proc/odi_init`/`/proc/odi_omci`/`/proc/odi_wdt` -- none of
+it exists under qemu. rcS's own fail-open checks (`[ -w /proc/odi_init ]`
+and friends) already skip every hardware step cleanly when those are
+absent, exactly as they would on any kernel without them, so no
+qemu-specific flag or patch to rcS was needed for that part. Two
+consequences worth knowing: omcid never starts (nothing this harness can
+do about it -- there is no `/proc/odi_omci` to register against), so
+`/bin/diag` is swapped for a stub (`test/qemu/diag-stub.sh`, initramfs-only,
+never in a flashed image) that answers metricsd's fixed command batch with
+`src/diag/test/exporter.golden`, the same fixture `test-diag` checks
+byte-for-byte -- so the exporter has real, checkable data to serve; and
+the health-kicker scenario can only show the kicker WITHHOLDING its kick
+under pressure, never the watchdog actually resetting the board, since
+that needs the real `odi_wdt` hardware model.
+
+**The kernel image.** `odi-toolchain-qemu-kernel-malta`
+(`toolchain/images.env`, pulled like the other two toolchain images) is
+linux-6.18.53, `malta_defconfig` plus a small fragment (initramfs,
+devtmpfs/tmpfs, pcnet32/virtio-net, and **big-endian** -- `malta_defconfig`
+defaults to little-endian, which would refuse to exec this repository's
+big-endian binaries), built in the odi-toolchain repository and published
+from a `qemu-malta-vN` tag so this repository's CI never has to build a
+kernel from source on every run. To rebuild it after a fragment change:
+in a checkout of `odi-toolchain`, `make qemu-kernel-malta` (about ten
+minutes), then `QEMU_KERNEL_IMAGE=odi-toolchain-qemu-kernel-malta:local
+make test-qemu` here to try the local build before tagging a release
+there.
+
+**Two things this harness needed that a flashed image does not**, both
+measured, not guessed, while first bringing qemu-system-mips boots up:
+QEMU's `-net user` (SLIRP) hostfwd only delivers packets to a guest
+address within SLIRP's OWN subnet (`10.0.2.0/24` by default) -- the
+device's real static default (`192.168.1.1`, outside that subnet) never
+received a single forwarded packet, even with a custom `net=`/`host=`
+override on the qemu command line, while the plain default subnet worked
+immediately; `run-qemu.sh` addresses the box at `10.0.2.15` through
+`network.sh`'s own `/etc/config/lan-ip` override, applied from `rcS.dev`'s
+`dev_hook` (wrapped, not replaced -- see `test/qemu/build-initramfs.sh`).
+And `CONFIG_DEVTMPFS_MOUNT`'s automatic `/dev` populate only runs on the
+normal root-mount path, which a pure initramfs boot (`-initrd` +
+`rdinit=`, no `root=`) skips entirely -- without a `mount -t devtmpfs
+devtmpfs /dev` first, `/dev/null`, `/dev/console`, `/dev/kmsg` and
+`/dev/urandom` do not exist, and a shell redirection like `> /dev/kmsg`
+then silently CREATES them as empty regular files instead of erroring,
+which is a very quiet way to lose every `crumb` and have dropbear key
+generation and `seedrng` look like they succeeded while writing into fake
+files. The harness's `/init` (its only rootfs addition that is not "the
+real rootfs, unmodified" -- one `mount` then `exec /sbin/init`) fixes this
+before the real `rcS` ever runs.
 
 ### Manual harnesses
 

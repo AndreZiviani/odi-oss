@@ -5,6 +5,57 @@ listed here.
 
 ## Unreleased
 
+## v1.0.2 — 2026-09-27
+
+**Resilience.** A 20 MB `scp` into `/tmp` on ISP1 exhausted RAM (`/tmp` was
+ramfs, unbounded and unreclaimable): the OOM killer took dropbear, confd
+and omcid, none of them restarted, and the box stayed unmanageable until a
+power cycle even though the hardware datapath kept forwarding on its own.
+Fixed together (`docs/SETTINGS.md`, "Resilience"; `docs/IMPROVEMENTS.md`):
+
+- `/tmp` (`/var/tmp`) and `/var` are size-capped tmpfs (8 MB / 6 MB)
+  instead of unbounded ramfs, so a full `/tmp` gives `ENOSPC` rather than
+  taking the box down with it.
+- `oom_score_adj`: `-1000` for omcid and dropbear, `-500` for confd, the
+  kernel default (`0`) for metricsd -- the one daemon whose loss costs
+  neither management access nor GPON state.
+- omcid, dropbear, confd and metricsd now restart automatically if they
+  die, rate-limited to 5 restarts per 60 s window (`supervise()`,
+  `rootfs/skeleton/etc/scripts/supervise.sh`).
+- A periodic health kicker (`rootfs/skeleton/etc/scripts/health-kicker.sh`,
+  `/proc/odi_wdt/health_kick`, `kernel/extra/drivers/net/ethernet/odi/odi_wdt.c`)
+  resets the board through the watchdog if userland health (omcid alive,
+  `MemAvailable` above a floor) stops being reported later in the boot --
+  independent of, and in addition to, the one-shot boot confirmation
+  (`/proc/odi_wdt/userland_ok`) this image already had, which only ever
+  covered a boot that never comes up at all.
+- `vm.min_free_kbytes` raised to 1536 (from the kernel default of roughly
+  128 KB on a box this size) at boot.
+
+**A qemu full-system test harness** (`make test-qemu`, `docs/HACKING.md`):
+boots the real rootfs (busybox, inittab, services, dropbear, confd,
+metricsd -- unmodified) under `qemu-system-mips -M malta`, standing in for
+the RTL9602C board qemu cannot emulate, and checks ssh (a test-only key),
+the web UI and the exporter, plus the resilience scenarios above, end to
+end. The kernel it boots is a stock, prebuilt mainline build
+(`ghcr.io/andreziviani/odi-toolchain-qemu-kernel-malta`, a new image
+published from the odi-toolchain repository, `toolchain/images.env`), not
+this repository's own -- so CI never has to build a kernel from source to
+run it. Runs in CI on every push and pull request
+(`.github/workflows/ci.yml`).
+
+**Fixed the odi_nic driver asserting PAUSE** toward the switch CPU port at
+ordinary traffic levels (merged from branch `cpu-pause`).
+`ODI_NIC_FC_ON_LEVEL`/`ODI_NIC_FC_OFF_LEVEL` (the free-descriptor
+watermarks that gate the NIC's own flow control) were derived as a flat
+quarter/three-quarter of the RX ring depth, asserting PAUSE at only 75%
+ring-used and holding it until the ring drained back to 25% used — a band
+wide enough for ordinary NAPI scheduling jitter at a few packets a second
+to cross and hold, with no real congestion behind it. Rescaled to the
+stock firmware's own near-exhaustion trigger proportion (assert near 94%
+used, deassert near 81% used) instead, so PAUSE only fires near actual
+ring exhaustion. Verified on hardware: 3003 → 13 PAUSE frames/min on ISP1.
+
 - **Lint no longer chokes on binary files.** The plan/task-id grep in
   `make lint` now skips binary files (`git grep -I`); `docs/images/*.png`
   matched the pattern as raw bytes on the CI runner only, never locally.

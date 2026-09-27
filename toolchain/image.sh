@@ -2,8 +2,9 @@
 #
 # Print the toolchain image to build in, pulling it first if it is not here.
 #
-#     toolchain/image.sh oss     # uClibc-ng toolchain: kernel, busybox, dropbear, iproute2
-#     toolchain/image.sh diag    # freestanding toolchain: everything in src/
+#     toolchain/image.sh oss         # uClibc-ng toolchain: kernel, busybox, dropbear, iproute2
+#     toolchain/image.sh diag        # freestanding toolchain: everything in src/
+#     toolchain/image.sh qemu-kernel # stock malta kernel for make test-qemu
 #
 # Both are pinned by digest in toolchain/images.env, the one place that says
 # which toolchain this tree builds with. OSS_IMAGE and DIAG_IMAGE override
@@ -23,7 +24,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 case ${1:-} in
 oss)  ref=${OSS_IMAGE:-$OSS_IMAGE_PINNED};   var=OSS_IMAGE;  local_tag=odi-toolchain-uclibc:local;       target=uclibc ;;
 diag) ref=${DIAG_IMAGE:-$DIAG_IMAGE_PINNED}; var=DIAG_IMAGE; local_tag=odi-toolchain-freestanding:local; target=freestanding ;;
-*)    echo "usage: toolchain/image.sh oss|diag" >&2; exit 1 ;;
+qemu-kernel) ref=${QEMU_KERNEL_IMAGE:-$QEMU_KERNEL_IMAGE_PINNED}; var=QEMU_KERNEL_IMAGE; local_tag=odi-toolchain-qemu-kernel-malta:local; target=qemu-kernel-malta ;;
+*)    echo "usage: toolchain/image.sh oss|diag|qemu-kernel" >&2; exit 1 ;;
 esac
 
 if docker image inspect "$ref" >/dev/null 2>&1; then

@@ -143,6 +143,55 @@ static void test_userland_confirm_prevents_the_deadline(void)
 	CHECK(!(odi_wdt_deadline_tick(&st, 200) & ODI_WDT_ACTION_FORCE_RESET), "userland_ok=1 suppresses the forced reset entirely");
 }
 
+/* ---- Periodic health-kick mode: independent of userland_ok, off until
+ * the first odi_wdt_note_health(), one-shot like the boot deadline. ------- */
+
+static void test_health_miss_disarmed_until_first_kick(void)
+{
+	struct odi_wdt_deadline_state st;
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1; /* boot deadline already satisfied */
+
+	CHECK(!(odi_wdt_deadline_tick(&st, 100000) & ODI_WDT_ACTION_FORCE_RESET),
+	      "no health-driven reset ever, with health_kick never written");
+}
+
+static void test_health_miss_fires_once_past_period(void)
+{
+	struct odi_wdt_deadline_state st;
+	unsigned int actions;
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1;
+
+	odi_wdt_note_health(&st, 200);
+	CHECK(st.health_period_s == ODI_WDT_HEALTH_PERIOD_S, "first health_kick seeds the default period");
+
+	CHECK(!(odi_wdt_deadline_tick(&st, 200 + ODI_WDT_HEALTH_PERIOD_S) & ODI_WDT_ACTION_HEALTH_MISS),
+	      "no health miss AT exactly the period (check is uptime_s > last + period)");
+	actions = odi_wdt_deadline_tick(&st, 200 + ODI_WDT_HEALTH_PERIOD_S + 1);
+	CHECK(actions & ODI_WDT_ACTION_HEALTH_MISS, "health miss fires once the period is exceeded");
+	CHECK(actions & ODI_WDT_ACTION_FORCE_RESET, "a health miss also carries FORCE_RESET");
+	CHECK(!(odi_wdt_deadline_tick(&st, 500) & ODI_WDT_ACTION_HEALTH_MISS), "not signaled again on a later tick");
+}
+
+static void test_health_kick_resets_the_period(void)
+{
+	struct odi_wdt_deadline_state st;
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1;
+
+	odi_wdt_note_health(&st, 0);
+	odi_wdt_note_health(&st, 20); /* a fresh kick before the period elapses */
+	CHECK(!(odi_wdt_deadline_tick(&st, 45) & ODI_WDT_ACTION_HEALTH_MISS),
+	      "a fresh kick pushes the deadline out (45 s since boot, 25 s since the last kick)");
+}
+
 /* ---- Real arm/kick/disable/force-reset sequences, against the SoC
  * window of test/odi_soc_mock.h. ---------------------------------------- */
 
@@ -209,6 +258,10 @@ int main(void)
 	test_disabled_watchdog_never_stalls_or_deadlines();
 	test_userland_deadline_fires_once_past_120s();
 	test_userland_confirm_prevents_the_deadline();
+
+	test_health_miss_disarmed_until_first_kick();
+	test_health_miss_fires_once_past_period();
+	test_health_kick_resets_the_period();
 
 	test_arm_writes_the_uboot_matching_value();
 	test_kick_is_real_read_modify_write_on_kick_reg();

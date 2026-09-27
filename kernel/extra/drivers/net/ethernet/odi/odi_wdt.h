@@ -77,6 +77,15 @@ extern void (*wdt_pre_reset_hook)(void);
 #define ODI_WDT_STALL_MAX_REPORTS	3U
 #define ODI_WDT_USERLAND_DEADLINE_S	120U
 
+/* Periodic health-kick mode (docs/SETTINGS.md): off until the first write
+ * to /proc/odi_wdt/health_kick, which arms it and seeds the period at this
+ * default if none is set yet. Independent of the one-shot boot deadline
+ * above: a stick that confirmed at boot and later stops reporting health
+ * (the kicker died, or MemAvailable fell below its floor) still resets, on
+ * its own deadline, once armed.
+ */
+#define ODI_WDT_HEALTH_PERIOD_S		30U
+
 /* ---- Portable core (no __KERNEL__ dependency, host-testable) ---------- */
 
 /* odi_wdt_ctrl_encode() -- packs the five the control register fields into one
@@ -115,6 +124,7 @@ enum odi_wdt_action {
 	ODI_WDT_ACTION_HEARTBEAT	= 1U << 0,
 	ODI_WDT_ACTION_STALL_REPORT	= 1U << 1,
 	ODI_WDT_ACTION_FORCE_RESET	= 1U << 2,
+	ODI_WDT_ACTION_HEALTH_MISS	= 1U << 3,	/* always paired with FORCE_RESET; distinguishes the log line */
 };
 
 struct odi_wdt_deadline_state {
@@ -124,6 +134,10 @@ struct odi_wdt_deadline_state {
 	int userland_ok;		/* set by odi_wdt_userland_confirm() */
 	int watchdog_enabled;		/* mirrors odi_wdt_state.enabled -- a disabled watchdog never stalls or deadlines */
 	int reset_signaled;		/* FORCE_RESET already returned once -- see odi_wdt_deadline_tick() below */
+	unsigned int health_period_s;	/* 0 = periodic health monitoring off (default) */
+	unsigned int last_health_s;	/* uptime at the last health kick */
+	int health_armed;		/* set by odi_wdt_note_health() on its first call */
+	int health_reset_signaled;	/* HEALTH_MISS already returned once, same one-shot shape as reset_signaled */
 };
 
 void odi_wdt_deadline_state_init(struct odi_wdt_deadline_state *st);
@@ -132,6 +146,13 @@ void odi_wdt_deadline_state_init(struct odi_wdt_deadline_state *st);
  * kicking, in the real driver) so the stall check has a last-kick time.
  */
 void odi_wdt_note_kick(struct odi_wdt_deadline_state *st, unsigned int uptime_s);
+
+/* odi_wdt_note_health() -- call once per userland health confirmation (a
+ * write to /proc/odi_wdt/health_kick). Arms periodic monitoring on its
+ * first call, seeding health_period_s at ODI_WDT_HEALTH_PERIOD_S if the
+ * period was never configured (still 0).
+ */
+void odi_wdt_note_health(struct odi_wdt_deadline_state *st, unsigned int uptime_s);
 
 /* odi_wdt_deadline_tick() -- one evaluation at the given uptime. Returns
  * the OR of every action due this tick. HEARTBEAT is due at most once
