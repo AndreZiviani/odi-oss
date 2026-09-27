@@ -60,14 +60,19 @@ QEMU_PID=$!
 say "waiting for ssh (up to ${BOOT_TIMEOUT}s)"
 up=0
 for _ in $(seq 1 "$BOOT_TIMEOUT"); do
-	if ssh "${SSH_OPTS[@]}" root@127.0.0.1 true 2>/dev/null; then
+	if ssh "${SSH_OPTS[@]}" root@127.0.0.1 true 2>"$WORK/ssh-wait.log"; then
 		up=1
 		break
 	fi
 	kill -0 "$QEMU_PID" 2>/dev/null || { cat "$WORK/qemu.log" >&2; fail "qemu exited before ssh came up"; }
 	sleep 1
 done
-[ "$up" = 1 ] || { tail -80 "$WORK/qemu.log" >&2; fail "ssh never answered within ${BOOT_TIMEOUT}s"; }
+if [ "$up" != 1 ]; then
+	echo "== last ssh attempt, verbose ==" >&2
+	ssh -v "${SSH_OPTS[@]}" root@127.0.0.1 true 2>&1 | tail -60 >&2
+	tail -80 "$WORK/qemu.log" >&2
+	fail "ssh never answered within ${BOOT_TIMEOUT}s"
+fi
 echo "  ssh key auth ok"
 
 sshx() { ssh "${SSH_OPTS[@]}" root@127.0.0.1 "$@"; }
