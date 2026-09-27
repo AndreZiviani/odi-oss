@@ -79,6 +79,14 @@ void odi_wdt_note_kick(struct odi_wdt_deadline_state *st, unsigned int uptime_s)
 	st->last_kick_s = uptime_s;
 }
 
+void odi_wdt_note_health(struct odi_wdt_deadline_state *st, unsigned int uptime_s)
+{
+	st->last_health_s = uptime_s;
+	if (!st->health_period_s)
+		st->health_period_s = ODI_WDT_HEALTH_PERIOD_S;
+	st->health_armed = 1;
+}
+
 unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned int uptime_s)
 {
 	unsigned int actions = ODI_WDT_ACTION_NONE;
@@ -99,6 +107,13 @@ unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned i
 	    uptime_s > ODI_WDT_USERLAND_DEADLINE_S) {
 		st->reset_signaled = 1;
 		actions |= ODI_WDT_ACTION_FORCE_RESET;
+	}
+
+	if (st->watchdog_enabled && st->health_armed && st->health_period_s &&
+	    !st->health_reset_signaled &&
+	    uptime_s > st->last_health_s + st->health_period_s) {
+		st->health_reset_signaled = 1;
+		actions |= ODI_WDT_ACTION_FORCE_RESET | ODI_WDT_ACTION_HEALTH_MISS;
 	}
 
 	return actions;
@@ -265,9 +280,14 @@ static void odi_wdt_deadline_timer_fn(struct timer_list *odi_timer_arg)
 		dump_stack();
 	}
 
-	if (actions & ODI_WDT_ACTION_FORCE_RESET) {
+	if (actions & ODI_WDT_ACTION_HEALTH_MISS)
+		pr_emerg(DRV_NAME ": health kick missed for over %u s (uptime %u) -- resetting\n",
+			 odi_wdt_state.health_period_s, uptime_s);
+	else if (actions & ODI_WDT_ACTION_FORCE_RESET)
 		pr_emerg(DRV_NAME ": userland did not confirm within %u s (uptime %u) -- resetting\n",
 			 ODI_WDT_USERLAND_DEADLINE_S, uptime_s);
+
+	if (actions & ODI_WDT_ACTION_FORCE_RESET) {
 		odi_wdt_reset_now();
 		while (1)
 			;
@@ -420,6 +440,41 @@ static const struct proc_ops odi_wdt_userland_fops = {
 	.proc_lseek = seq_lseek, .proc_release = single_release, .proc_write = odi_wdt_userland_write,
 };
 
+/* /proc/odi_wdt/health_kick -- periodic health confirmation, independent of
+ * userland_ok above. A write of any value arms it (odi_wdt_note_health())
+ * and resets the deadline; reading shows the period and how long ago the
+ * last kick landed. Nothing writes this unless a supervised health kicker
+ * is running (docs/SETTINGS.md), so a stick that never starts one behaves
+ * exactly as before this feature existed.
+ */
+static int odi_wdt_health_show(struct seq_file *seq, void *v)
+{
+	unsigned int uptime_s = odi_wdt_uptime_s();
+
+	seq_printf(seq, "period=%u armed=%d last_kick=%u uptime=%u\n",
+		   odi_wdt_state.health_period_s, odi_wdt_state.health_armed,
+		   odi_wdt_state.last_health_s, uptime_s);
+	return 0;
+}
+
+static int odi_wdt_health_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, odi_wdt_health_show, NULL);
+}
+
+static ssize_t odi_wdt_health_write(struct file *file, const char __user *buf,
+				     size_t size, loff_t *pos)
+{
+	odi_wdt_note_health(&odi_wdt_state, odi_wdt_uptime_s());
+	pr_info(DRV_NAME ": health_kick, period=%u\n", odi_wdt_state.health_period_s);
+	return size;
+}
+
+static const struct proc_ops odi_wdt_health_fops = {
+	.proc_open = odi_wdt_health_open, .proc_read = seq_read,
+	.proc_lseek = seq_lseek, .proc_release = single_release, .proc_write = odi_wdt_health_write,
+};
+
 static int __init odi_wdt_init(void)
 {
 	odi_wdt_deadline_state_init(&odi_wdt_state);
@@ -443,6 +498,8 @@ static int __init odi_wdt_init(void)
 		pr_err(DRV_NAME ": create /proc/odi_wdt/watchdog_flag failed\n");
 	if (!proc_create("userland_ok", 0644, odi_wdt_proc_dir, &odi_wdt_userland_fops))
 		pr_err(DRV_NAME ": create /proc/odi_wdt/userland_ok failed\n");
+	if (!proc_create("health_kick", 0644, odi_wdt_proc_dir, &odi_wdt_health_fops))
+		pr_err(DRV_NAME ": create /proc/odi_wdt/health_kick failed\n");
 
 	register_restart_handler(&odi_wdt_restart_nb);
 	register_reboot_notifier(&odi_wdt_reboot_nb);

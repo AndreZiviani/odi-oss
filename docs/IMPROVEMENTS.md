@@ -145,6 +145,23 @@ project), including `gpon_omci_services` — how many services the OLT has
 actually provisioned, so a stick that is optically up but not provisioned
 is visible as such rather than reading as healthy.
 
+## Resilience
+
+A 20 MB `scp` into `/tmp` exhausted RAM on a running stick (`/tmp` was
+ramfs, unbounded and unreclaimable): the OOM killer took dropbear, confd
+and omcid, none of them restarted, and the box stayed unmanageable until a
+power cycle, even though the hardware datapath kept forwarding on its own.
+Fixed four ways, together (`docs/SETTINGS.md`, "Resilience"): `/tmp` and
+`/var` are size-capped tmpfs instead of unbounded ramfs, so a full `/tmp`
+gives `ENOSPC` rather than taking the box down with it; `oom_score_adj`
+biases the OOM killer away from omcid, dropbear and confd; those four
+critical daemons (omcid, dropbear, confd, metricsd) now restart
+automatically, rate-limited, if they die (`supervise()`); and a periodic
+health kicker resets the board through the watchdog if userland health
+stops being reported later in the boot, not only if it never starts in the
+first place — the one-shot `/proc/odi_wdt/userland_ok` confirmation this
+image already had only ever covered the second case.
+
 ## Build and verification
 
 Every ELF that reaches the image — kernel, packages, our own tools — passes
@@ -154,6 +171,8 @@ report: a binary carrying an instruction this CPU traps on does not ship.
 `make test` runs lint, the host-side unit tests, `diag`'s tests (the
 exporter contract included) and the OMCI daemon under qemu (about 130
 checks) without touching a stick, and CI runs the same on every push and
-pull request (`.github/workflows/ci.yml`); `make image-all` builds the
-whole image from a clean clone. See `docs/BUILDING.md` and
-`docs/CROSS-COMPILING.md`.
+pull request (`.github/workflows/ci.yml`); `make test-qemu` goes further,
+booting the real rootfs full-system on a stock kernel and checking
+ssh/web UI/exporter plus the resilience scenarios above end to end
+(`docs/HACKING.md`); `make image-all` builds the whole image from a clean
+clone. See `docs/BUILDING.md` and `docs/CROSS-COMPILING.md`.

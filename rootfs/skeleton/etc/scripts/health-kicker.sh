@@ -1,0 +1,49 @@
+#!/bin/sh
+# health-kicker.sh -- periodic confirmation to /proc/odi_wdt/health_kick
+# (docs/SETTINGS.md, kernel/extra/drivers/net/ethernet/odi/odi_wdt.c):
+# independent of the one-shot boot confirmation rcS already writes to
+# /proc/odi_wdt/userland_ok. Started by rcS as a supervised process
+# (supervise.sh) after that boot confirmation; a supervisor restart of
+# THIS script does not change what the kernel side does with a late kick --
+# a kick that arrives past health_period is a miss regardless of why.
+#
+# Kicks only while BOTH hold:
+#   - omcid is running, unless /etc/config/modules.off says it should not be
+#     (the same flag the omci_start() function in rcS reads -- a stick with OMCI turned
+#     off intentionally must not be reset for omcid being absent);
+#   - MemAvailable is at or above HEALTH_MEM_FLOOR_KB.
+#
+# A miss on either forces a reset (through odi_wdt, wdt_pre_reset_hook
+# quiesces the NIC DMA first) instead of leaving the stick reachable but
+# degraded -- the 2026-09-27 OOM (dropbear, confd and omcid all killed,
+# free memory at 0.86 MB, stayed at O5 but unmanageable until a power
+# cycle) is exactly the case this exists to reset out of on its own.
+set -u
+
+HEALTH_KICK=/proc/odi_wdt/health_kick
+HEALTH_PERIOD_S=${HEALTH_PERIOD_S:-30}
+HEALTH_MEM_FLOOR_KB=${HEALTH_MEM_FLOOR_KB:-2048}
+
+[ -w "$HEALTH_KICK" ] || exit 0
+
+omcid_ok() {
+	[ -f /etc/config/modules.off ] && return 0
+	for p in /proc/[0-9]*; do
+		[ "$(cat "$p/comm" 2>/dev/null)" = "omcid" ] && return 0
+	done
+	return 1
+}
+
+mem_ok() {
+	avail=$(sed -n 's/^MemAvailable:[[:space:]]*\([0-9]*\).*/\1/p' /proc/meminfo 2>/dev/null)
+	[ -n "$avail" ] && [ "$avail" -ge "$HEALTH_MEM_FLOOR_KB" ]
+}
+
+while :; do
+	sleep "$HEALTH_PERIOD_S"
+	if omcid_ok && mem_ok; then
+		echo 1 > "$HEALTH_KICK" 2>/dev/null || true
+	else
+		echo "health-kicker: withholding kick (omcid_ok=$(omcid_ok && echo 1 || echo 0) mem_ok=$(mem_ok && echo 1 || echo 0))" > /dev/kmsg 2>/dev/null || true
+	fi
+done

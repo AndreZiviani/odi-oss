@@ -4,7 +4,7 @@
 
 .PHONY: help kernel-tree toolchain toolchain-audit kernel packages busybox \
 	src releases image image-all clean distclean lint test test-host test-omci \
-	test-diag test-rcs
+	test-diag test-rcs test-qemu
 
 help:
 	@echo "targets:"
@@ -21,6 +21,7 @@ help:
 	@echo "  test            lint + the host-side tests + diag + the OMCI daemon under qemu (~2 min)"
 	@echo "  lint            shellcheck every script here"
 	@echo "  test-rcs        the rcS action trace against its goldens (needs out/busybox, docker)"
+	@echo "  test-qemu       boot the real rootfs under qemu-system-mips, ssh/web/exporter + resilience scenarios"
 	@echo
 	@echo "Nothing here flashes anything. See docs/FLASHING.md."
 	@echo "An image is INERT when flashed; nv setenv sw_tryactive <slot> boots it once."
@@ -40,7 +41,8 @@ kernel-tree:
 include toolchain/images.env
 OSS_IMAGE ?= $(OSS_IMAGE_PINNED)
 DIAG_IMAGE ?= $(DIAG_IMAGE_PINNED)
-export OSS_IMAGE DIAG_IMAGE
+QEMU_KERNEL_IMAGE ?= $(QEMU_KERNEL_IMAGE_PINNED)
+export OSS_IMAGE DIAG_IMAGE QEMU_KERNEL_IMAGE
 
 toolchain:
 	./toolchain/image.sh oss
@@ -161,20 +163,34 @@ test-omci: src
 test-rcs:
 	bash test/rcs_trace_test.sh
 
+# Full-system: the real rootfs (busybox, inittab, services, dropbear,
+# confd, metricsd, our sysctls and tmpfs caps) booted under
+# qemu-system-mips on a STOCK malta kernel (odi-toolchain-qemu-kernel-malta,
+# toolchain/images.env), never our own RTL9602C kernel -- see
+# test/qemu/run-qemu.sh header and docs/HACKING.md for exactly what this
+# does and does not cover. Needs busybox, packages, src and releases built
+# first (out/busybox, out/*), and qemu-system-mips on PATH.
+test-qemu:
+	./toolchain/image.sh qemu-kernel >/dev/null
+	./test/qemu/build-initramfs.sh
+	./test/qemu/run-qemu.sh
+
 lint:
 	shellcheck -S warning toolchain/*.sh kernel/*.sh packages/*.sh packages/*/*.sh \
-	          image/*.sh tools/*.sh src/*.sh test/*.sh
+	          image/*.sh tools/*.sh src/*.sh test/*.sh test/qemu/*.sh
 	@# The scripts that actually run ON the device, checked as POSIX sh
 	@# because busybox ash is what interprets them -- not bash. These were
 	@# outside the lint entirely until 2026-09-14, which is backwards: they
 	@# are the only ones whose failure costs a stick rather than a build.
 	@# tools/regdump/dump.sh joins them here for the same reason: it is
 	@# pushed to and run on the stick, against a minimal busybox, not
-	@# built or run on the host.
-	shellcheck -S warning -s sh rootfs/skeleton/etc/init.d/* rootfs/skeleton/etc/scripts/*.sh rootfs/skeleton/etc/scripts/flash tools/regdump/dump.sh
+	@# built or run on the host. test/qemu/diag-stub.sh and memhog.sh are
+	@# the same shape one step removed: they run under busybox ash INSIDE
+	@# the qemu guest, never on the build host.
+	shellcheck -S warning -s sh rootfs/skeleton/etc/init.d/* rootfs/skeleton/etc/scripts/*.sh rootfs/skeleton/etc/scripts/flash tools/regdump/dump.sh test/qemu/diag-stub.sh test/qemu/memhog.sh
 	@echo "shellcheck: clean"
 	@./tools/check-inline-quotes.sh toolchain/*.sh kernel/*.sh packages/*.sh \
-	          packages/*/*.sh image/*.sh src/*.sh tools/*.sh test/*.sh
+	          packages/*/*.sh image/*.sh src/*.sh tools/*.sh test/*.sh test/qemu/*.sh
 	@# This repo is public; the private investigation workspace it was
 	@# developed alongside is not, and none of its paths or document names
 	@# may leak into tracked files here. Excludes this Makefile itself,

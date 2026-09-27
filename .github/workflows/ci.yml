@@ -2,11 +2,13 @@ name: ci
 
 # Pull requests and pushes to main run the tests: lint, the host-side
 # tests, diag with the exporter contract, and the OMCI daemon under qemu
-# (which builds the binaries it runs), plus a clean-build check (fetch and
+# (which builds the binaries it runs), a clean-build check (fetch and
 # verify the pinned kernel tree, build src, then confirm `make image` fails
-# closed and names what it is missing -- nothing here is flashed or booted).
-# A release tag runs the full suite: the tests, then the build of every
-# freestanding binary in src/ on its own. The kernel itself and the full
+# closed and names what it is missing -- nothing here is flashed or booted),
+# and test-qemu (boots the real rootfs full-system on a STOCK kernel from
+# odi-toolchain, never this repository's own -- docs/HACKING.md). A release
+# tag runs the full suite: the tests, then the build of every freestanding
+# binary in src/ on its own. This repository's own kernel and the full
 # image are not built here: about an hour of compiling this runner would
 # spend, and nothing in either is exercised without a stick.
 on:
@@ -106,6 +108,28 @@ jobs:
             echo "make image: failed as expected, but did not name the missing inputs" >&2
             exit 1
           }
+
+  test-qemu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: qemu-system-mips
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-mips
+
+      # Everything test-qemu boots except the kernel (a stock, prebuilt
+      # image, toolchain/images.env): busybox, dropbear/ip/bridge, our own
+      # freestanding tools, and confd/metricsd from their own releases.
+      - name: busybox, packages, src, releases
+        run: |
+          make busybox
+          make packages
+          make src
+          make releases
+
+      - name: Boot the real rootfs under qemu-system-mips and check it
+        run: make test-qemu
 
   full:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'

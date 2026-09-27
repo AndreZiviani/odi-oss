@@ -31,11 +31,18 @@ reset: a trial that never answered still says how far it got
 
 ## The stages
 
-1. **Mounts.** `/proc`, `/sys` and `/var` (ramfs). `/dev` is devtmpfs,
-   mounted by the kernel before init (`CONFIG_DEVTMPFS_MOUNT`), so every
-   device node, `/dev/mem` and the pty nodes included, is there by name.
-   The five `/var` directories follow, each guarded: if the ramfs mount
-   failed, `/var` is the read-only squashfs.
+1. **Mounts.** `/proc`, `/sys` and `/var` -- tmpfs, capped at 6 MB
+   (`VAR_TMPFS_SIZE`), not the unbounded ramfs earlier images used. `/dev`
+   is devtmpfs, mounted by the kernel before init (`CONFIG_DEVTMPFS_MOUNT`),
+   so every device node, `/dev/mem` and the pty nodes included, is there by
+   name. The five `/var` directories follow, each guarded: if the tmpfs
+   mount failed, `/var` is the read-only squashfs. `/tmp` (`/var/tmp`) then
+   gets its OWN tmpfs, capped separately at 8 MB
+   (`VAR_TMP_TMPFS_SIZE`) -- the one place scp/sftp and a firmware upload's
+   staging area write, and the place `docs/SETTINGS.md` ("Resilience")
+   explains sizing for. Neither cap reserves memory up front; both just
+   turn "eats all of RAM" into "gives ENOSPC". `vm.min_free_kbytes` is
+   raised to 1536 here too (`docs/SETTINGS.md` has the reasoning).
 2. **The config partition** (`/etc/scripts/mount-config.sh`, run under
    `sh -x` into `/tmp/mount-config.trace`): the jffs2 partition shared with
    the stock slot, found by its mtd name, mounted on `/var/config`
@@ -71,17 +78,26 @@ reset: a trial that never answered still says how far it got
    in the background, with their output appended to
    `/var/log/services.log`. A file rather than the console, because a trial
    has no console, and rather than a pipe, because a pipe the daemons
-   inherit is one nothing ever closes.
-9. **The log trim**, a background loop: `/var` is ramfs, nothing there is
-   evicted, and omcid logs every OMCI frame (about 1.7 MB a day on a busy
-   OLT). Past 256 KB each log is cut back to its last 128 KB; the writers
-   append, so they carry on at the new end.
+   inherit is one nothing ever closes. Each is started through
+   `supervise()` (`/etc/scripts/supervise.sh`, `docs/SETTINGS.md`), which
+   sets its `oom_score_adj` right after the fork and restarts it,
+   rate-limited, if it dies; omcid (started later, in the PON steps below)
+   goes through the same helper.
+9. **The log trim**, a background loop: `/var` is tmpfs now, capped, but
+   still not evicted on its own, and omcid logs every OMCI frame (about
+   1.7 MB a day on a busy OLT). Past 256 KB each log is cut back to its
+   last 128 KB; the writers append, so they carry on at the new end.
 10. **The watchdog confirmation**, `echo 1 > /proc/odi_wdt/userland_ok`.
     odi_wdt resets the board at 120 s of uptime unless this is written,
     which is what reverts a trial that never gets here (a hung kernel or a
     wedged rcS). It needs no network: a stick that boots but is unreachable
     is fixed with a power cycle, not a reboot loop. It comes before the PON
     steps, so a problem on the PON side cannot cost the confirmation.
+    Right after it, the health kicker starts (also supervised): a periodic
+    confirmation, independent of this one-shot boot confirmation, that
+    resets the board later in the boot if userland health stops being
+    reported -- `docs/SETTINGS.md` ("Resilience") has the period, the
+    memory floor and why it exists.
 11. **The optics**, the `/proc/odi_init` verb `optics` (`odi_board.c`),
     because the SDK verbs never set them up on this board:
     `PIN_GPIO_SELECT` 0x048 = 0x08082001 (without it the port-1 I2C pins,

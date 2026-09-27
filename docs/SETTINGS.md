@@ -250,6 +250,31 @@ table: where each file is read, its default, and which ones are development
 aids, together with the kernel parameters, build variables and
 `/proc` control files.
 
+## Resilience (v1.0.2)
+
+Not config-partition settings -- there is no UI or file toggle for any of
+these, they are fixed at boot -- but they answer the same question this
+document answers for everything else: what does this image actually do,
+and what does applying it cost. Background: a 20 MB `scp` into `/tmp` on
+ISP1 (2026-09-27) exhausted RAM (`/tmp` was ramfs, unbounded and
+unreclaimable), the OOM killer took dropbear, confd and omcid, and none of
+them restarted -- the stick stayed at O5 (the hardware datapath keeps
+forwarding on its own) but was unmanageable until a power cycle.
+
+| what | value | why |
+|---|---|---|
+| `/tmp` (`/var/tmp`) size cap | 8 MB tmpfs | fits a firmware upload (`fwu_starter.sh` stages the tarball there, about 2.6 MB, plus its unpacked squashfs/uImage) and an scp of a few MB with room to spare; past it, a write gets `ENOSPC`, not a system-wide OOM |
+| `/var` (log/run/lock/config fallback) size cap | 6 MB tmpfs | `/var/log` is separately trimmed at 256 KB past a 128 KB floor already (rcS); this is the outer bound if that trim ever falls behind |
+| `oom_score_adj` | omcid, dropbear: `-1000` (never killed while anything else can be); confd: `-500`; metricsd: `0`, the kernel default | omcid and dropbear are what keeps the ONU provisioned and the box reachable; confd is a convenience next after them; metricsd is the one daemon whose loss costs neither -- first in line if the killer has to take something |
+| respawn | omcid, dropbear, confd, metricsd: restarted automatically if they die, rate-limited to 5 restarts per 60 s window, then the supervisor gives up and logs why (`supervise()`, `rootfs/skeleton/etc/scripts/supervise.sh`) | a daemon that cannot stay up for a minute is a problem for the health kicker/watchdog below to escalate, not something a restart loop should spin on forever |
+| health kicker period | 30 s (`ODI_WDT_HEALTH_PERIOD_S`, `kernel/extra/drivers/net/ethernet/odi/odi_wdt.h`) | a supervised process (`rootfs/skeleton/etc/scripts/health-kicker.sh`) writes `/proc/odi_wdt/health_kick` every 30 s, but only while omcid is running (or intentionally off, `modules.off`) and `MemAvailable` is at or above the floor below. A kick that arrives late by more than the period resets the board through the watchdog -- independent of, and in addition to, the one-shot boot confirmation `/proc/odi_wdt/userland_ok` already gave |
+| health kicker memory floor | 2048 KB `MemAvailable` (`HEALTH_MEM_FLOOR_KB`) | below this the box is judged to be in the same state the 2026-09-27 OOM left it in (0.86 MB free) -- reachable in principle but not usably so, and worth resetting out of automatically rather than waiting for someone to notice |
+| `vm.min_free_kbytes` | 1536 (`rcS`, up from the kernel's own default of roughly 128 KB on a box this size) | keeps a slightly larger page-allocator reserve free under pressure, so the OOM killer and a starved `oom_score_adj -1000` daemon get a better chance to make forward progress instead of every allocator racing for the same last few pages |
+
+`make test-qemu` (`docs/HACKING.md`) exercises all of the above except the
+watchdog reset itself, which needs `/proc/odi_wdt` -- real hardware, not the
+stock kernel the harness boots.
+
 ## Not verified yet
 
 - `apply.sh omci` against more than one OLT: it was run end to end once, on

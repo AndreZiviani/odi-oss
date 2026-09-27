@@ -8,7 +8,15 @@
 # jffs2 partition and survives reboots and reflashes:
 #
 #     touch /etc/config/dropbear.off && reboot
-
+#
+# Every daemon here is started through supervise() (/etc/scripts/supervise.sh,
+# docs/SETTINGS.md): it sets the daemon oom_score_adj right after the fork
+# and restarts it, rate-limited, if it dies -- omcid (started from rcS, not
+# here) goes through the same helper. metricsd is deliberately left at the
+# kernel default (0): it is the one daemon whose loss does not cost
+# management access or GPON state, so it is the first thing the OOM killer
+# should take if it has to take something at all.
+. /etc/scripts/supervise.sh
 #
 # A flag file that could not be READ is not a flag that is not SET. Every
 # `[ -f /etc/config/X.off ]` below is false when the jffs2 config partition
@@ -26,10 +34,10 @@
 
 start() {
 	[ -f /etc/config/metricsd.off ] || [ ! -x /bin/metricsd ] || \
-		/bin/metricsd 9100 &
+		supervise metricsd 0 /bin/metricsd 9100
 
 	[ -f /etc/config/confd.off ] || [ ! -x /bin/confd ] || \
-		/bin/confd 80 &
+		supervise confd -500 /bin/confd 80
 
 	# ON by default, like everything else here. Turning it off for a trial
 	# boot is an operational step taken on the RUNNING stick before the
@@ -65,10 +73,14 @@ start() {
 		# offers a password prompt to try against. A source build with
 		# the default per-build password does not carry this file, so it
 		# keeps password login as today.
+		# -F: run in the foreground, one connection or not -- supervise()
+		# needs the pid it forked to BE dropbear, not a parent that
+		# daemonises and exits right after (odi_wdt.h/supervise.sh have the
+		# same trap spelled out for the kernel side).
 		if [ -f /etc/odi-keys-only ]; then
-			[ -s "$KEY" ] && /sbin/dropbear -s -E -r "$KEY" -D /etc/config/dropbear.d -p 22 &
+			[ -s "$KEY" ] && supervise dropbear -1000 /sbin/dropbear -s -F -E -r "$KEY" -D /etc/config/dropbear.d -p 22
 		else
-			[ -s "$KEY" ] && /sbin/dropbear -E -r "$KEY" -D /etc/config/dropbear.d -p 22 &
+			[ -s "$KEY" ] && supervise dropbear -1000 /sbin/dropbear -F -E -r "$KEY" -D /etc/config/dropbear.d -p 22
 		fi
 	fi
 

@@ -44,8 +44,10 @@ telnetd) and no syslog daemon running: every daemon's own output is the log.
 no `respawn` entry until it returns -- so rcS never blocks, and backgrounds
 everything slow. In order, rcS:
 
-1. mounts `/proc`, `/sys`, `/var` (ramfs), makes the `/var` directories,
-   and mounts the jffs2 `config` partition on `/var/config`
+1. mounts `/proc`, `/sys`, `/var` (tmpfs, capped at 6 MB) and `/var/tmp`
+   (its own tmpfs, capped at 8 MB -- `/tmp` is a symlink to it), makes the
+   `/var` directories, raises `vm.min_free_kbytes`, and mounts the jffs2
+   `config` partition on `/var/config`
    (`/etc/scripts/mount-config.sh`; `/etc/config` is a symlink to it);
 2. seeds entropy (`seedrng`, seed kept in `/etc/config/seedrng`), sets the
    hostname and `lo`;
@@ -59,11 +61,18 @@ everything slow. In order, rcS:
 5. starts `/etc/init.d/services` in the background, output appended to
    `/var/log/services.log`: `metricsd 9100`, `confd 80`, then `dropbear`
    (generating the ed25519 host key on first boot). Each can be turned off
-   with a `.off` file, see `docs/SETTINGS.md`;
+   with a `.off` file, see `docs/SETTINGS.md`. Each is started through
+   `supervise()` (`/etc/scripts/supervise.sh`), which sets its
+   `oom_score_adj` and restarts it, rate-limited, if it dies;
 6. confirms to the watchdog (`/proc/odi_wdt/userland_ok`); without
    that the board resets at 120 s of uptime. The network is not a
    condition, unless `/etc/config/confirm-arp` exists (development: then
-   only after an ARP reply from the `.2` of the `br0` subnet);
+   only after an ARP reply from the `.2` of the `br0` subnet). Right
+   after, the health kicker starts (`/etc/scripts/health-kicker.sh`, also
+   supervised): a periodic confirmation, independent of the one above,
+   that resets the board later in the boot if userland health (omcid
+   alive, `MemAvailable` above a floor) stops being reported --
+   `docs/SETTINGS.md` ("Resilience");
 7. drives the optics, the `optics` verb of `/proc/odi_init` (`PIN_GPIO_SELECT`, laser TX-enable on GPIO 13);
 8. runs the PON steps: `i2c 1`, `i2cen 1`, `gpon`, `rxsd`, `gpondrv`,
    `gpondev`, then the switch init (the platform settings and module-load
@@ -463,6 +472,8 @@ need a reboot.
 | `/etc/scripts/network.sh` | host SerDes check (and fix), MAC, `br0` over `eth0.2`, the addresses | yes: it checks before it writes, and re-running it is how a management-path problem is debugged |
 | `/etc/scripts/network.sh addr [-n]` | only the addresses: the primary and the second one (`br0:2`), live; `-n` says what it would change | yes; this is `apply.sh network` |
 | `/etc/scripts/mount-config.sh [name] [dir]` | find mtd `config` by name, mount it jffs2 | only if it is not mounted |
+| `/etc/scripts/supervise.sh` | not run directly: sourced by `rcS`/`services`, which backgrounds a daemon, sets its `oom_score_adj`, and restarts it (rate-limited) if it dies | n/a |
+| `/etc/scripts/health-kicker.sh` | periodic confirmation to `/proc/odi_wdt/health_kick` while omcid is alive and `MemAvailable` is above its floor; started by `rcS`, supervised | yes, but it already loops forever on its own |
 
 ## Kernel control files
 
@@ -475,8 +486,9 @@ drivers behind them.
 | `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
-| `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset |
+| `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
 | `/proc/odi_wdt/watchdog_flag` | -- | `1`: keep kicking the hardware watchdog |
+| `/proc/odi_wdt/health_kick` | period, armed, last kick, uptime | any value: periodic confirmation (`health-kicker.sh`, `docs/SETTINGS.md`); a kick arriving later than the period resets the board, independent of `userland_ok` above and active for as long as the boot runs, not just at boot |
 | `/proc/odi_ramlog_prev` | the previous boot's DRAM ramlog, decoded: this boot's counter and slot, the previous boot's counter, slot, build id and last early crumb, then its first 4016 bytes and its last 4080 (root only) | -- |
 | `/proc/odi_ramlog_prev_raw` | the same two pages as 8192 raw bytes, page A then page B, for `ramlog-read.sh`-style decoding off the stick (root only) | -- |
 

@@ -25,16 +25,40 @@ pon_steps() { pon_steps_default; }	# defined with the PON steps below
 if [ -r /etc/init.d/rcS.dev ]; then
 	. /etc/init.d/rcS.dev
 fi
+. /etc/scripts/supervise.sh
 
 # ---- mounts. /dev is devtmpfs, mounted by the kernel before init
 # (CONFIG_DEVTMPFS_MOUNT), with every node by name.
 /bin/mount -t proc  proc  /proc || echo "rcS: /proc did not mount" >&2
 kmsg "start"
 /bin/mount -t sysfs sysfs /sys  || echo "rcS: /sys did not mount" >&2
-/bin/mount -t ramfs ramfs /var  || echo "rcS: /var did not mount" >&2
+# /var: tmpfs, not ramfs, with an overall size cap (docs/SETTINGS.md) --
+# log/run/lock and the config-partition FALLBACK when jffs2 does not mount
+# (mount-config.sh below). /tmp (a symlink to /var/tmp,
+# rtl9601-rootfs-symlinks-into-var in the KB) gets its OWN, separate tmpfs
+# a moment later: it is the one place scp/sftp writes and the firmware
+# the upload staging area (fwu_starter.sh FWU_DIR, an image tarball a few MB
+# plus its unpacked squashfs/uImage) land, and it must give ENOSPC on its
+# own cap rather than eat the memory every other daemon needs. Neither cap
+# reserves RAM up front -- "size=" bounds usage, it does not pin pages --
+# so this is strictly safer than the unbounded ramfs it replaces, never
+# more expensive.
+VAR_TMPFS_SIZE=${VAR_TMPFS_SIZE:-6m}
+VAR_TMP_TMPFS_SIZE=${VAR_TMP_TMPFS_SIZE:-8m}
+/bin/mount -t tmpfs -o "size=$VAR_TMPFS_SIZE,mode=1777" tmpfs /var || echo "rcS: /var did not mount" >&2
 for d in tmp log run lock config; do
 	mkdir -p "/var/$d" || echo "rcS: /var/$d could not be created" >&2
 done
+/bin/mount -t tmpfs -o "size=$VAR_TMP_TMPFS_SIZE,mode=1777" tmpfs /var/tmp || echo "rcS: /var/tmp (tmp) tmpfs did not mount" >&2
+
+# vm.min_free_kbytes: the kernel default on a 32 MB box is small (around
+# 128 KB) -- raised modestly so the page allocator always keeps a slightly
+# larger reserve free, giving a starved critical daemon (oom_score_adj
+# -1000 below) and the OOM killer itself a better chance to make forward
+# progress instead of every allocator racing for the same last few pages.
+# docs/SETTINGS.md has the number and the reasoning; not a cgroup or memcg
+# limit, just the global watermark.
+echo 1536 > /proc/sys/vm/min_free_kbytes 2>/dev/null || echo "rcS: vm.min_free_kbytes not set" >&2
 
 # ---- the config partition: jffs2, shared with the stock slot, never
 # written by fwu.sh. Host keys, the UI credentials and every switch file
@@ -138,6 +162,17 @@ if [ -w "$WDOK" ] && dev_confirm_ok; then
 	crumb "userland up, watchdog confirmed"
 fi
 
+# ---- the health kicker: a periodic confirmation, independent of the
+# one-shot boot confirmation above, that resets the board if userland
+# health stops being reported later in the boot (docs/SETTINGS.md). Off
+# entirely if /proc/odi_wdt/health_kick does not exist (odi_wdt.c),
+# supervised like every other daemon so a health-kicker crash restarts the
+# kicker itself rather than silently going quiet.
+if [ -x /etc/scripts/health-kicker.sh ]; then
+	supervise health-kicker 0 /etc/scripts/health-kicker.sh
+	crumb "health kicker started"
+fi
+
 # ---- the PON steps.
 
 # One /proc/odi_init verb. The crumbs name the verb only: gponsn and
@@ -182,8 +217,8 @@ omci_start() {
 		crumb "odi_switch init: /proc/odi_omci write failed, see /var/log/switch_init.err"
 	fi
 	if [ -x /bin/omcid ]; then
-		/bin/omcid -a -d >> /var/log/omcid.log 2>&1 &
-		crumb "omcid started (apply mode, daemon)"
+		supervise omcid -1000 /bin/omcid -a -d >> /var/log/omcid.log 2>&1
+		crumb "omcid started (apply mode, daemon, supervised)"
 	fi
 }
 
