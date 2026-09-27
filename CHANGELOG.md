@@ -3,6 +3,17 @@
 Releases of the flashable image. Trial builds between releases are not
 listed here.
 
+## v1.0.1 — 2026-09-27
+
+`metricsd` (the Prometheus exporter) v1.1.1, up from v1.0.3. The `diag`
+commands the exporter sends are unchanged (the exporter contract goldens
+in `src/diag/test/` still pass byte for byte), but its metric output
+changed: `oversize` is now a frame-size bucket rather than a receive-error
+`kind`, there is a new frame-size histogram, and an octet-counter wrap
+guard. No odi-oss doc or golden pinned the old `kind="oversize"` label or
+`gpon_port_receive_errors_total` by name, so nothing else in this repo
+needed updating.
+
 ## v1.0.0 — 2026-09-26
 
 The first tagged release, built and published by `.github/workflows/release.yml`

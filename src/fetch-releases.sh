@@ -20,7 +20,7 @@ mkdir -p "$OUT" "$DL"
 # below, so it takes its default only when unset: with :- an empty value
 # became the default tag again and CONFD_BIN was never reached.
 METRICSD_REPO=${METRICSD_REPO:-AndreZiviani/odi-sfp-exporter}
-METRICSD_TAG=${METRICSD_TAG:-v1.0.3}
+METRICSD_TAG=${METRICSD_TAG:-v1.1.1}
 CONFD_REPO=${CONFD_REPO:-AndreZiviani/odi-ui}
 CONFD_TAG=${CONFD_TAG-v1.0.5}
 
