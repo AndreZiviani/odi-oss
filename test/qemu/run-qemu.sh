@@ -43,7 +43,14 @@ docker rm "$cid" >/dev/null
 
 SSH_KEY=$ROOT/test/qemu/id_test
 KEY_ARGS=()
-[ -f "$SSH_KEY" ] && KEY_ARGS=(-i "$SSH_KEY")
+if [ -f "$SSH_KEY" ]; then
+	# git checkout gives this file mode 644 (no exec bit tracked, nothing
+	# else), which a strict ssh client (measured: Ubuntu's OpenSSH, not
+	# every build) refuses outright as an unprotected private key file,
+	# silently falling through to "no more authentication methods".
+	chmod 600 "$SSH_KEY"
+	KEY_ARGS=(-i "$SSH_KEY")
+fi
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	-o ConnectTimeout=3 -o LogLevel=ERROR -p "$SSH_PORT" "${KEY_ARGS[@]}")
 
