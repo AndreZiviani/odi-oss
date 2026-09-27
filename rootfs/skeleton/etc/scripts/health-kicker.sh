@@ -15,9 +15,9 @@
 #
 # A miss on either forces a reset (through odi_wdt, wdt_pre_reset_hook
 # quiesces the NIC DMA first) instead of leaving the stick reachable but
-# degraded -- the 2026-09-27 OOM (dropbear, confd and omcid all killed,
-# free memory at 0.86 MB, stayed at O5 but unmanageable until a power
-# cycle) is exactly the case this exists to reset out of on its own.
+# degraded: an OOM that takes dropbear, confd and omcid without any of
+# them coming back leaves the hardware datapath forwarding on its own but
+# the box otherwise unmanageable, exactly the case this resets out of.
 set -u
 
 HEALTH_KICK=/proc/odi_wdt/health_kick
