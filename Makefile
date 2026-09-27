@@ -209,7 +209,7 @@ lint:
 	@# a goldens name is described by what it is, not by its gate name; a
 	@# milestone by what it does, not by a trial image name. CHANGELOG.md
 	@# is the one place a release name belongs.
-	@if git grep -n -E '(^|[^A-Za-z0-9_.])R[1-4]\.[0-9]+([^A-Za-z0-9_]|$$)|(^|[^A-Za-z0-9_.])D[1-9]([^A-Za-z0-9_]|$$)|(^|[^A-Za-z0-9_.])M(1[0-3]|[1-9])([^A-Za-z0-9_]|$$)|(^|[^A-Za-z0-9_.])U1([^A-Za-z0-9_]|$$)|G-(trace|drv|rcs|host|ident|size|hw)|(^|[^A-Za-z0-9_.])T[1-4]([^A-Za-z0-9_]|$$)|\bbatch [AB]\b|since (the )?(step )?(R[1-4]\.[0-9]+|D[1-9]|M[1-9][0-3]?|U1|T[1-4])\b' \
+	@if git grep -n -I -E '(^|[^A-Za-z0-9_.])R[1-4]\.[0-9]+([^A-Za-z0-9_]|$$)|(^|[^A-Za-z0-9_.])D[1-9]([^A-Za-z0-9_]|$$)|(^|[^A-Za-z0-9_.])M(1[0-3]|[1-9])([^A-Za-z0-9_]|$$)|(^|[^A-Za-z0-9_.])U1([^A-Za-z0-9_]|$$)|G-(trace|drv|rcs|host|ident|size|hw)|(^|[^A-Za-z0-9_.])T[1-4]([^A-Za-z0-9_]|$$)|\bbatch [AB]\b|since (the )?(step )?(R[1-4]\.[0-9]+|D[1-9]|M[1-9][0-3]?|U1|T[1-4])\b' \
 		-- kernel/extra rootfs/skeleton src tools test docs '*.md' \
 		':!Makefile' ':!CHANGELOG.md' ':!src/omci/test' ':!src/omci/generated' \
 		':!*.golden' ':!*fixtures*'; then \
