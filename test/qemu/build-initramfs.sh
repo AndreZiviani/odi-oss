@@ -175,6 +175,15 @@ dev_hook() {
 		# plain default subnet did, bridged, immediately.
 		echo 10.0.2.15 > /etc/config/lan-ip
 		;;
+	services)
+		# Mirrors services.log to the console a few seconds in: the only
+		# way to see WHY dropbear/confd/metricsd did not come up when the
+		# harness fails before ssh ever answers, since services' own
+		# stdout/stderr never reaches the console otherwise (rcS redirects
+		# it to the file). Diagnostic only; costs nothing when everything
+		# starts cleanly.
+		( sleep 15; echo "== qemu harness: /var/log/services.log =="; cat /var/log/services.log 2>&1; echo "== end services.log ==" ) > /dev/console 2>&1 &
+		;;
 	esac
 }
 DEVHOOK
