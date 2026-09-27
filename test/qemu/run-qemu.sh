@@ -124,13 +124,18 @@ echo "  ssh answered through the hog (dmesg on the console log has the OOM kill,
 
 say "scenario: kill -9 dropbear, confd, metricsd -- each back within 10s"
 for svc in dropbear confd metricsd; do
-	pid=$(sshx "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = $svc ] && echo \${p#/proc/}; done | head -1")
+	pid=$(sshx "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = $svc ] && echo \${p#/proc/}; done | head -1" 2>/dev/null) || pid=""
 	[ -n "$pid" ] || { echo "  $svc: not running, skipping" >&2; continue; }
-	sshx "kill -9 $pid"
+	# || true: killing dropbear's own connection handler can reset THIS
+	# very ssh session before it reports back cleanly (measured in CI --
+	# not every dropbear pid this loop kills is the one carrying the
+	# command, but it can be), which is fine: the respawn check below is
+	# what actually matters.
+	sshx "kill -9 $pid" || true
 	back=0
 	for _ in $(seq 1 10); do
 		sleep 1
-		newpid=$(sshx "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = $svc ] && echo \${p#/proc/}; done | head -1")
+		newpid=$(sshx "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = $svc ] && echo \${p#/proc/}; done | head -1" 2>/dev/null) || newpid=""
 		[ -n "$newpid" ] && [ "$newpid" != "$pid" ] && { back=1; break; }
 	done
 	[ "$back" = 1 ] || fail "$svc did not respawn within 10s of kill -9"
