@@ -50,3 +50,8 @@ Keep commits small and each about one change, with a subject like
 whether you trial-booted it, on which kind of line, and what you saw.
 Never ask anyone to `sw_commit` an image that has not been through a
 trial.
+
+If your change affects users, the build, or the docs, add an entry under
+`## Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) in the same commit; a
+release moves `Unreleased` into a version section named after the tag. CI
+checks this on every pull request unless it is labelled `no-changelog`.

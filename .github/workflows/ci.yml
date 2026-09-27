@@ -20,6 +20,41 @@ permissions:
   contents: read
 
 jobs:
+  changelog:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: PR touches CHANGELOG.md, or is docs/CI-only, or is labelled no-changelog
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          case ",$LABELS," in
+            *,no-changelog,*)
+              echo "changelog: no-changelog label set, skipping"
+              exit 0
+              ;;
+          esac
+
+          changed=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          echo "$changed"
+
+          non_exempt=$(echo "$changed" | grep -Ev '^(docs/|\.github/)' || true)
+          if [ -z "$non_exempt" ]; then
+            echo "changelog: docs-only or CI-only change, no CHANGELOG.md entry required"
+            exit 0
+          fi
+
+          if ! echo "$changed" | grep -qx "CHANGELOG.md"; then
+            echo "changelog: this PR changes files outside docs/CI but does not touch CHANGELOG.md" >&2
+            echo "changelog: add an entry under \"## Unreleased\", or apply the no-changelog label" >&2
+            exit 1
+          fi
+
   test:
     runs-on: ubuntu-latest
     steps:

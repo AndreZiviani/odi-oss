@@ -78,6 +78,10 @@ behind every rule here.
   docs and commit messages, and never write a credential, a serial number
   or another identity value from a real stick into the tree. `make lint`
   does not check this; the review does.
+- **Every change that affects users, the build, or the docs adds an entry
+  under `## Unreleased` in `CHANGELOG.md`, in the same commit.** A release
+  moves `Unreleased` into a version section named after the tag
+  (`tools/release-notes.sh` reads that section by heading).
 - **Check for existing lint/contribution rules before adding a new pattern.**
   `make lint` (see below) is the authority. `docs/HACKING.md` is the full
   contributor guide (the recovery mechanism, the gates, the known traps,

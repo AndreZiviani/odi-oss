@@ -3,6 +3,12 @@
 Releases of the flashable image. Trial builds between releases are not
 listed here.
 
+## Unreleased
+
+- **Lint no longer chokes on binary files.** The plan/task-id grep in
+  `make lint` now skips binary files (`git grep -I`); `docs/images/*.png`
+  matched the pattern as raw bytes on the CI runner only, never locally.
+
 ## v1.0.1 — 2026-09-27
 
 `metricsd` (the Prometheus exporter) v1.1.1, up from v1.0.3. The `diag`
