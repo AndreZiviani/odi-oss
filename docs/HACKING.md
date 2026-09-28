@@ -567,10 +567,12 @@ run here too (unconditionally); `svc-ntpd.sh` is exercised against
 `NTP_SERVER`, a fixture value the harness writes straight to
 `/var/config/lastgood.xml` (there is no real config partition here either)
 pointing at 10.0.2.2, the qemu user-net gateway address SLIRP maps to the
-host's own loopback -- `run-qemu.sh` starts a plain NTP server there
-(busybox or a system `ntpd`, whichever is on the build host `PATH`) and
-checks the guest clock actually gets corrected. No responder on the build
-host: that one scenario is skipped, logged, not failed.
+host's own loopback -- `run-qemu.sh` uses the NTP server the build host
+already runs on UDP 123 if there is one, otherwise starts a host busybox
+`ntpd -l` for the scenario, steps the guest clock to 2000-01-01, restarts
+ntpd with `apply.sh ntp` and checks the clock is corrected within 60 s.
+No responder on the build host: that one scenario is skipped, logged, not
+failed.
 
 **What it does NOT cover**, because the kernel underneath is a STOCK
 mainline build (`odi-toolchain-qemu-kernel-malta`, below), never this
