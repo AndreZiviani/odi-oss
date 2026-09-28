@@ -30,7 +30,7 @@ classes, in this document and beside it in the UI:
 | class | meaning | how it is applied |
 |---|---|---|
 | **LIVE** | takes effect at once, no interruption | `apply.sh network`; the UI runs it straight after the save |
-| **SERVICE RESTART** | a daemon restarts; the fibre service stays up | none of the keys needs this today |
+| **SERVICE RESTART** | a daemon restarts; the fibre service stays up | `apply.sh syslog`/`apply.sh ntp` |
 | **INTERRUPTS INTERNET** | applied without a reboot, but the fibre service drops while it is | `apply.sh omci`; the UI offers "Apply now" behind a confirmation |
 | **REBOOT** | read only at boot | a reboot; the UI offers "Reboot now" behind a confirmation |
 
@@ -75,6 +75,8 @@ The UI's reboot confirmation says which slot it comes back on.
 | `OMCI_VENDOR_PRODUCT_CODE` | Vendor product code | ONU2-G attribute 3, decimal | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
 | `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto` | REBOOT |
+| `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R`; empty means local only (the circular buffer, `logread`) | `svc-syslogd.sh` | SERVICE RESTART |
+| `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client) | `svc-ntpd.sh` | SERVICE RESTART |
 
 Why the two REBOOT keys cannot be applied live:
 

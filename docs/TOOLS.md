@@ -20,7 +20,10 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `omcid` | daemon, the OMCI stack | inittab `respawn` (`/etc/scripts/svc-omcid.sh`) | odi_omci netlink (redirect type 1), SysV queues for `omcli`/`omcicli` | `/var/log/omcid.log` | respawned |
 | `confd` | daemon, the web UI | inittab `respawn` (`/etc/scripts/svc-confd.sh`) | TCP 80 | `/var/log/services.log` | respawned |
 | `metricsd` | daemon, the Prometheus exporter | inittab `respawn` (`/etc/scripts/svc-metricsd.sh`) | TCP 9100 | `/var/log/services.log` | respawned |
-| `dropbear` | daemon, ssh and scp | inittab `respawn` (`/etc/scripts/svc-dropbear.sh`) | TCP 22 | `/var/log/services.log` (`-E`) | respawned |
+| `dropbear` | daemon, ssh and scp | inittab `respawn` (`/etc/scripts/svc-dropbear.sh`) | TCP 22 | syslog (every login) | respawned |
+| `syslogd` | daemon, the system log | inittab `respawn` (`/etc/scripts/svc-syslogd.sh`) | UDP 514, if `SYSLOG_SERVER` is set | its own circular buffer (`logread`) | respawned |
+| `klogd` | daemon, kernel log to syslog | inittab `respawn` (`/etc/scripts/svc-klogd.sh`) | -- | syslogd | respawned |
+| `ntpd` | daemon, NTP client (opt-in) | inittab `respawn` (`/etc/scripts/svc-ntpd.sh`), only while `NTP_SERVER` is set | UDP 123 to `NTP_SERVER` | syslog | respawned |
 | `igmpd` | daemon, IGMP snooping | nothing (shipped, not started; see its section) | odi_omci netlink (redirect type 4), `/dev/odi_sw` | stdout | -- |
 | `login` | serial console login | inittab `respawn` | ttyS0 | -- | respawned |
 | `diag` | CLI: optics, GPON state, counters, registers | you, rcS, network.sh, metricsd, confd | `/dev/odi_sw`, `/proc/odi_gpon`, netlink | stdout | -- |
@@ -198,14 +201,33 @@ Its `path` label is `argv[0]`, so a hand-started copy is visible as such.
 
 Started by services as
 
-    /sbin/dropbear -E -r /etc/config/dropbear.d/ed25519 -D /etc/config/dropbear.d -p 22
+    /sbin/dropbear -r /etc/config/dropbear.d/ed25519 -D /etc/config/dropbear.d -p 22
 
-`-E` sends its log to stderr, which lands in `/var/log/services.log` (every
-login is logged). The host key and `authorized_keys` live on the config
-partition, so both survive a reflash; the keys file is read at every login,
-so adding a key needs no restart. `/bin/scp` is the same multi-call binary
-(legacy scp protocol: OpenSSH 9+ clients need `scp -O`). See
-`docs/ACCESS.md`.
+No `-E`: dropbear logs through syslog by default (every login is logged),
+same as everything else here that can reach it -- `logread` shows it. The
+host key and `authorized_keys` live on the config partition, so both
+survive a reflash; the keys file is read at every login, so adding a key
+needs no restart. `/bin/scp` is the same multi-call binary (legacy scp
+protocol: OpenSSH 9+ clients need `scp -O`). See `docs/ACCESS.md`.
+
+### `syslogd`/`klogd` -- the system log
+
+Two respawn entries, `svc-syslogd.sh`/`svc-klogd.sh`: syslogd in the
+foreground with a 64 KB circular buffer (`-n -C64`), read with `logread`;
+klogd (`-n`) forwards kernel messages into it. Neither exists on the stock
+image. With `SYSLOG_SERVER`
+set in the config store (docs/SETTINGS.md), syslogd also adds `-L -R
+host[:port]`: forwarded remotely, kept in the local circular buffer too.
+`apply.sh syslog` restarts it without a reboot.
+
+### `ntpd` -- NTP client (opt-in)
+
+`svc-ntpd.sh` starts busybox ntpd (`-n -p NTP_SERVER`) only while
+`NTP_SERVER` is set in the config store (docs/SETTINGS.md); unset, the
+respawn entry runs the same off-flag placeholder every other disabled
+service uses, and does nothing. Also new versus stock, which has no RTC
+and no NTP client at all. `apply.sh ntp` starts or stops it, live, when
+the setting changes.
 
 ### `igmpd` -- IGMP snooping (shipped, not started)
 
@@ -275,7 +297,7 @@ Our own CLI over our kernel's interfaces. `src/diag/README.md` is the full
 reference; the commands:
 
     pon get transceiver vendor-name|part-number|temperature|voltage|
-                        bias-current|tx-power|rx-power|all
+                        bias-current|tx-power|rx-power|all|alarm-status
     gpon get onu-state                GPON state machine state, O1-O7
     gpon get alarm-status             LOS, LOF and LOM, live
     gpon get flows                    GEM flows omcid programmed

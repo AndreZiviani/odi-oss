@@ -21,6 +21,18 @@
 #                        the manual VLAN keys, the LOID, the PLOAM password and
 #                        the OLT identity keys.
 #
+#     apply.sh syslog    SERVICE RESTART. Restarts syslogd so it re-reads
+#                        SYSLOG_SERVER. No OMCI interruption, no reboot: the
+#                        respawn entry (svc-syslogd.sh) checks the store on
+#                        every start the same way every other svc-*.sh does,
+#                        so killing the running one is the whole apply.
+#
+#     apply.sh ntp       SERVICE RESTART. Restarts ntpd so it re-reads
+#                        NTP_SERVER -- starting it for the first time if the
+#                        key was just set, or stopping it if just cleared
+#                        (svc-ntpd.sh's own off-flag-shaped gate on the key
+#                        being present at all).
+#
 # Why omci needs the re-activation. omcid reads the store once, at start, and
 # builds connections only when the OLT provisions them. A restart alone gives
 # a daemon with the new settings and an empty MIB, while the switch keeps the
@@ -120,9 +132,45 @@ omci() {
 	[ -n "$new" ] || exit 1
 }
 
+# restart_respawn <name>: kill whatever is running under this daemon's
+# respawn entry (respawn.sh execs the daemon itself in place, so its pid IS
+# what pidof finds -- same as omci() above using `pidof omcid`) and let
+# init's own respawn bring it back, re-reading the store: every svc-*.sh
+# checks it fresh on every start, off flag and setting both. Also the way a
+# daemon that was off (or, for ntpd, unconfigured) starts for the first
+# time: respawn-off.sh's own pid does not match $name, so this just reports
+# nothing was running, and the next scheduled respawn of that placeholder
+# (it loops in one-hour sleeps, so this does not START it sooner -- restart
+# the respawn-off.sh pid itself, found the same way, when the one-hour wait
+# would otherwise delay it) is what picks up the change. To take effect at
+# once either way, this restarts whichever of the two is currently running.
+restart_respawn() {
+	name=$1
+	pid=$(pidof "$name" 2>/dev/null | head -n 1)
+	if [ -z "$pid" ]; then
+		pid=$(pgrep -f "/etc/scripts/respawn-off.sh" 2>/dev/null | head -n 1)
+	fi
+	if [ -z "$pid" ]; then
+		say "$name: no running process found, nothing to restart"
+		return 0
+	fi
+	kill "$pid" 2>/dev/null
+	say "$name (pid $pid) restarted; init will bring it back with the new setting"
+}
+
+syslog() {
+	restart_respawn syslogd
+}
+
+ntp() {
+	restart_respawn ntpd
+}
+
 case "${1:-}" in
 network) network ;;
 omci)    omci ;;
-*)       echo "usage: $0 network|omci" >&2; exit 1 ;;
+syslog)  syslog ;;
+ntp)     ntp ;;
+*)       echo "usage: $0 network|omci|syslog|ntp" >&2; exit 1 ;;
 esac
 exit 0

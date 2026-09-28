@@ -1,8 +1,9 @@
 #!/bin/sh
 #
-# /etc/init.d/services -- manual control over metricsd, confd, dropbear and
-# omcid. Since v1.0.4 each is its own `respawn` entry in /etc/inittab
-# (docs/SETTINGS.md, "native over hand-rolled"): init starts all four right
+# /etc/init.d/services -- manual control over syslogd, klogd, ntpd,
+# metricsd, confd, dropbear and omcid. Since v1.0.4 each is its own
+# `respawn` entry in /etc/inittab
+# (docs/SETTINGS.md, "native over hand-rolled"): init starts all right
 # after rcS (sysinit) returns and restarts whichever one exits, forever, on
 # its own -- there is no boot-time "start" step here any more. This script
 # is now only a hand tool for stopping or restarting one at the prompt.
@@ -20,12 +21,15 @@
 set -u
 
 usage() {
-	echo "usage: $0 {stop|start} {metricsd|confd|dropbear|omcid}" >&2
+	echo "usage: $0 {stop|start} {syslogd|klogd|ntpd|metricsd|confd|dropbear|omcid}" >&2
 	exit 1
 }
 
 svc_comm() {
 	case "$1" in
+	syslogd) echo syslogd ;;
+	klogd) echo klogd ;;
+	ntpd) echo ntpd ;;
 	metricsd) echo metricsd ;;
 	confd) echo confd ;;
 	dropbear) echo dropbear ;;

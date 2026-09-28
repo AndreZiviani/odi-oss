@@ -32,6 +32,14 @@ enum ddm_sel {
 	DDM_SEL_COUNT    = 7,
 };
 
+/* Alarm/warning flags plus the optical LOS status bit: one contiguous
+ * 8-byte A2h read (odi_ddm.h's ODI_DDM_ALARM_STATUS, which this mirrors).
+ * Not one of the DDM_SEL_COUNT selectors above -- it is not part of the
+ * seven-reading RTK_OPT_TRANSCEIVER mirror -- so it goes through its own
+ * accessor, hw_transceiver_alarms_get(), rather than hw_transceiver_get().
+ */
+#define DDM_SEL_ALARM_STATUS 7
+
 /* The raw DDMI block one selector returns. */
 #define DDM_RAW_LEN 24
 
@@ -53,6 +61,12 @@ int hw_addr_set(uint32_t addr, uint32_t value);
 
 /* Fills DDM_RAW_LEN bytes of raw DDMI for `sel`. */
 int hw_transceiver_get(int sel, uint8_t out[DDM_RAW_LEN]);
+
+/* Alarm and warning flags for temperature, voltage, bias current, tx power
+ * and rx power (SFF-8472 A2h bytes 112-113/116-117: bit 15 down to bit 6,
+ * two bits -- high, low -- per field, in the field order above), plus the
+ * optical RX_LOS status bit (byte 110 bit 1). Returns 0 on success. */
+int hw_transceiver_alarms_get(uint32_t *alarms, uint32_t *warnings, int *los);
 
 /* The GPON state machine's current state, 0-7. */
 int hw_gpon_status_get(uint32_t *state);

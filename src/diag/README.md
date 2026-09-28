@@ -35,6 +35,7 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
     pon get transceiver tx-power      optical transmit power, dBm
     pon get transceiver rx-power      optical receive power, dBm
     pon get transceiver all           all seven transceiver readings above
+    pon get transceiver alarm-status  alarm/warning flags and optical LOS (SFF-8472 A2h 110-117)
     gpon get onu-state                GPON state machine state, O1-O7
     gpon get alarm-status             LOS, LOF and LOM, live from the GPON block
     gpon get flows                    GEM flows omcid programmed, as odi_switch recorded them
@@ -64,6 +65,13 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
   out, not printed as zero.
 - The module serial number has no DDM selector in the driver, so there is no
   command for it.
+- `pon get transceiver alarm-status` reads the module's own alarm and warning
+  flags (SFF-8472 A2h bytes 112/113 and 116/117 -- the module's firmware sets
+  these against its own internal thresholds, so this is a direct read, not a
+  computed one) and the optical RX_LOS status bit (byte 110), one line each
+  in the same "clear"/"occur" phrasing `gpon get alarm-status` uses. It is
+  named "Optical LOS" there to avoid confusion with `gpon get alarm-status`'s
+  own LOS, a different condition on a different block.
 - `l2-table get all` walks the L2 lookup table in the kernel (1,024 rows, or
   1,088 with the CAM rows on) and prints one line per valid row, under the
   header words of the stock listing (`MACAddress Spa Fid Age Vid State Ext

@@ -176,20 +176,23 @@ int main(void)
 		     sizeof m_rx_power / sizeof m_rx_power[0],
 		     10 * log10(0x0032 / 10000.0), " dBm", "rx-power");
 
-	/* An unsupported selector (the module serial number, ODI_DDM_* has
-	 * no entry for it -- selector 7) is refused
-	 * rather than answered with garbage.
+	/* An unsupported selector (the module serial number: ODI_DDM_* has
+	 * no entry for it, the capture never exercises it -- see odi_ddm.h's
+	 * own header comment) is refused rather than answered with garbage.
+	 * 7 itself is now ODI_DDM_ALARM_STATUS (odi_ddm.h); the serial
+	 * number was never given a selector value of its own, so this uses
+	 * a value clearly past every selector this file defines instead.
 	 */
 	{
 		uint8_t raw[24];
 
 		mock_table = NULL;
 		mock_table_n = 0;
-		if (odi_ddm_get(7, raw) == 0) {
-			printf("  %-14s expected refusal, got success  FAIL\n", "sn (7)");
+		if (odi_ddm_get(99, raw) == 0) {
+			printf("  %-14s expected refusal, got success  FAIL\n", "sn (99)");
 			failures++;
 		} else {
-			printf("  %-14s refused, as expected  ok\n", "sn (7)");
+			printf("  %-14s refused, as expected  ok\n", "sn (99)");
 		}
 	}
 

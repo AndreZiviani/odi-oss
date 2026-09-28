@@ -59,6 +59,52 @@ against upstream, verifies whatever it finds the way the existing fetch
 scripts always have, runs the test suite against the result, and opens a PR
 only if that passes. Its first real run already found and verified a kernel
 point-release bump, linux 6.18.53 -> 6.18.54, included in this change.
+||||||| parent of 99a0a0e (optics: model alarm/warning flags, LOS and a scriptable transceiver)
+||||||| parent of 8a4266c (syslog and ntp: new respawn services, both opt-in via the config store)
+**An opt-in NTP client.** The stock image has no RTC and no NTP client at
+all. `svc-ntpd.sh`, a new
+respawn entry, starts busybox `ntpd` in the foreground against
+`NTP_SERVER` (docs/SETTINGS.md) only while that key is set; unset, it runs
+the same off-flag placeholder every other disabled service uses, so the
+static inittab entry does nothing rather than needing to be commented out.
+`apply.sh ntp` (SERVICE RESTART) starts or stops it live, no reboot,
+whenever the setting changes. Covered end to end in `test-qemu`: the
+harness points `NTP_SERVER` at the qemu user-net gateway address and
+checks the guest clock is actually corrected against a host-side NTP
+responder (skipped, not failed, when the build host has none).
+
+**syslogd and klogd, with a circular buffer `logread` reads, plus optional
+remote forwarding.** The stock image has neither a syslog daemon nor
+anywhere central `logread` can read from.
+Two new respawn entries,
+`svc-syslogd.sh`/`svc-klogd.sh`, start busybox syslogd/klogd in the
+foreground with a 64 KB circular buffer (`-C64`), the same off-flag and
+config-store-read idiom every other `svc-*.sh` here uses. Setting
+`SYSLOG_SERVER` in the config store (docs/SETTINGS.md) adds `-R host:port
+-L`: forwarded remotely, kept locally too. `dropbear` now logs through
+syslog like everything else here, instead of straight to
+`/var/log/services.log` (dropped its own `-E`, which is what was
+redirecting it away from syslog); `confd`, `metricsd` and `omcid` have no
+syslog option of their own to switch on, so their existing `/var/log/*.log`
+files are unchanged. `apply.sh syslog` (SERVICE RESTART) restarts syslogd
+without a reboot or an OMCI interruption.
+
+**The optics model gets alarm/warning flags and an optical LOS status, plus
+a scriptable host-side transceiver behind the same modelled I2C controller
+the driver tests already use.** `pon get transceiver alarm-status` reads
+SFF-8472 A2h's alarm and warning flags (bytes 112/113, 116/117) and the
+RX_LOS status bit (byte 110) in one contiguous 8-byte transaction
+(`odi_ddm.h`'s new `ODI_DDM_ALARM_STATUS` selector, `hw_transceiver_alarms_get()`
+on the diag side). `test/odi_optics_model.h` adds a full scriptable SFF-8472
+device (A0h/A2h pages, an "absent module" mode, and the IO_GPIO_EN routing
+gate from `docs/kb/dfp34x-optics-on-i2c-port1-gated-by-io-gpio-en.md`) behind
+`odi_switch_mock.h`'s existing register write-hook, so a host test can drive
+a real I2C transaction through `odi_i2c_read_bytes()`/`odi_ddm_get()` into
+NACK, low-rx-power alarm/warning, or LOS scenarios rather than a fixed byte
+table. The exporter contract (`src/diag/test/exporter.txt`) gains the new
+command and three scripted-scenario goldens (rx power drifting to about
+-28 dBm, LOS asserted, module absent). See `docs/HACKING.md`, "Optics
+model", for how to script a scenario.
 
 ## v1.0.4 — 2026-09-28
 

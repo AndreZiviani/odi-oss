@@ -47,6 +47,15 @@
 #define ODI_DDM_SFF8472_A2_RX_POWER_OFF	104U
 #define ODI_DDM_SFF8472_A2_FIELD_LEN		2U
 
+/* Optional Status/Control (byte 110, bit 1 = RX_LOS) through the warning
+ * flags (byte 117), read as one contiguous 8-byte run: 110-111 (status/
+ * control, reserved), 112-113 (alarm flags), 114-115 (reserved), 116-117
+ * (warning flags) -- public SFF-8472 layout, same section that already
+ * documents the five numeric fields above.
+ */
+#define ODI_DDM_SFF8472_A2_ALARM_WARN_OFF	110U
+#define ODI_DDM_SFF8472_A2_ALARM_WARN_LEN	8U
+
 int odi_ddm_get(int type, uint8_t out[ODI_DDM_BUF_LEN])
 {
 	uint32_t sel, addr;
@@ -80,6 +89,10 @@ int odi_ddm_get(int type, uint8_t out[ODI_DDM_BUF_LEN])
 	case ODI_DDM_RX_POWER:
 		sel = ODI_I2C_SEL_A2; addr = ODI_DDM_SFF8472_A2_RX_POWER_OFF;
 		n = ODI_DDM_SFF8472_A2_FIELD_LEN;
+		break;
+	case ODI_DDM_ALARM_STATUS:
+		sel = ODI_I2C_SEL_A2; addr = ODI_DDM_SFF8472_A2_ALARM_WARN_OFF;
+		n = ODI_DDM_SFF8472_A2_ALARM_WARN_LEN;
 		break;
 	default:
 #ifdef __KERNEL__

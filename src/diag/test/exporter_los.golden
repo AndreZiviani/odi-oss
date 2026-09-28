@@ -29,7 +29,7 @@ Warning Tx Power high, status: clear
 Warning Tx Power low, status: clear
 Warning Rx Power high, status: clear
 Warning Rx Power low, status: clear
-Optical LOS, status: clear
+Optical LOS, status: occur
 RTK.0> gpon get onu-state
 ONU state: Operation State(O5) 
 RTK.0> gpon get alarm-status
