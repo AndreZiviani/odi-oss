@@ -77,14 +77,38 @@ extern void (*wdt_pre_reset_hook)(void);
 #define ODI_WDT_STALL_MAX_REPORTS	3U
 #define ODI_WDT_USERLAND_DEADLINE_S	120U
 
-/* Periodic health-kick mode (docs/SETTINGS.md): off until the first write
- * to /proc/odi_wdt/health_kick, which arms it and seeds the period at this
- * default if none is set yet. Independent of the one-shot boot deadline
- * above: a stick that confirmed at boot and later stops reporting health
- * (the kicker died, or MemAvailable fell below its floor) still resets, on
- * its own deadline, once armed.
+/* ---- Per-client ping deadlines (docs/SETTINGS.md, "Watchdog rules") ------
+ *
+ * Replaces the v1.0.2 userland health-kicker (a separate process guessing
+ * at omcid's liveness from /proc). Each client pings its OWN deadline from
+ * its OWN main loop; the kernel is the only judge and the only thing that
+ * still owns the hardware watchdog. A client is registered (name + deadline)
+ * once, normally at boot from rcS; its first ping arms the deadline. Missing
+ * an armed deadline stops the kicker, exactly like the boot confirmation
+ * above.
  */
-#define ODI_WDT_HEALTH_PERIOD_S		30U
+#define ODI_WDT_MAX_CLIENTS		4U
+#define ODI_WDT_CLIENT_NAME_LEN		16U
+
+/* omcid pings every few seconds (main.c); 60 s gives it ample margin over
+ * ordinary scheduling jitter and the netlink poll cadence while still
+ * catching a hang well inside a human's patience for "is it back yet".
+ */
+#define ODI_WDT_OMCID_DEADLINE_S	60U
+
+/* ---- Kernel-side memory floor ---------------------------------------
+ *
+ * si_mem_available() (kernel/mm/util.c), sampled every ODI_WDT_TICK_INTERVAL_S,
+ * converted to KB. Below the floor for ODI_WDT_MEM_FLOOR_CONSEC consecutive
+ * samples (15 s at the default tick) stops the kicker -- the same floor and
+ * the same "OOM took the box and nothing came back" case the v1.0.2 health
+ * kicker existed to catch (docs/SETTINGS.md, "Resilience"), now judged by
+ * the kernel itself instead of a userland process that can itself be a
+ * casualty of the same OOM. Several consecutive samples, not one, so a
+ * single allocation spike does not reset a box that is otherwise fine.
+ */
+#define ODI_WDT_MEM_FLOOR_KB		2048U
+#define ODI_WDT_MEM_FLOOR_CONSEC	3U
 
 /* ---- Portable core (no __KERNEL__ dependency, host-testable) ---------- */
 
@@ -124,7 +148,16 @@ enum odi_wdt_action {
 	ODI_WDT_ACTION_HEARTBEAT	= 1U << 0,
 	ODI_WDT_ACTION_STALL_REPORT	= 1U << 1,
 	ODI_WDT_ACTION_FORCE_RESET	= 1U << 2,
-	ODI_WDT_ACTION_HEALTH_MISS	= 1U << 3,	/* always paired with FORCE_RESET; distinguishes the log line */
+	ODI_WDT_ACTION_CLIENT_MISS	= 1U << 3,	/* always paired with FORCE_RESET; a registered client missed its deadline */
+	ODI_WDT_ACTION_MEM_FLOOR	= 1U << 4,	/* always paired with FORCE_RESET; MemAvailable below floor, N consecutive checks */
+};
+
+struct odi_wdt_client {
+	char name[ODI_WDT_CLIENT_NAME_LEN];
+	unsigned int deadline_s;	/* 0 = slot unused */
+	unsigned int last_ping_s;
+	int armed;			/* set by the first ping; unarmed clients are never checked */
+	int reset_signaled;		/* one-shot, same shape as odi_wdt_deadline_state.reset_signaled */
 };
 
 struct odi_wdt_deadline_state {
@@ -134,10 +167,9 @@ struct odi_wdt_deadline_state {
 	int userland_ok;		/* set by odi_wdt_userland_confirm() */
 	int watchdog_enabled;		/* mirrors odi_wdt_state.enabled -- a disabled watchdog never stalls or deadlines */
 	int reset_signaled;		/* FORCE_RESET already returned once -- see odi_wdt_deadline_tick() below */
-	unsigned int health_period_s;	/* 0 = periodic health monitoring off (default) */
-	unsigned int last_health_s;	/* uptime at the last health kick */
-	int health_armed;		/* set by odi_wdt_note_health() on its first call */
-	int health_reset_signaled;	/* HEALTH_MISS already returned once, same one-shot shape as reset_signaled */
+	struct odi_wdt_client clients[ODI_WDT_MAX_CLIENTS];
+	unsigned int mem_low_streak;	/* consecutive ticks with free_kb below the floor */
+	int mem_reset_signaled;	/* MEM_FLOOR already returned once, same one-shot shape */
 };
 
 void odi_wdt_deadline_state_init(struct odi_wdt_deadline_state *st);
@@ -147,26 +179,42 @@ void odi_wdt_deadline_state_init(struct odi_wdt_deadline_state *st);
  */
 void odi_wdt_note_kick(struct odi_wdt_deadline_state *st, unsigned int uptime_s);
 
-/* odi_wdt_note_health() -- call once per userland health confirmation (a
- * write to /proc/odi_wdt/health_kick). Arms periodic monitoring on its
- * first call, seeding health_period_s at ODI_WDT_HEALTH_PERIOD_S if the
- * period was never configured (still 0).
+/* odi_wdt_client_register() -- idempotent: a name already registered just
+ * gets its deadline updated (rcS may be called more than once in a
+ * development boot). Returns the client's slot index (>= 0), or -1 if every
+ * slot is taken and the name is new. Does not arm the deadline -- that is
+ * the client's own first ping.
  */
-void odi_wdt_note_health(struct odi_wdt_deadline_state *st, unsigned int uptime_s);
+int odi_wdt_client_register(struct odi_wdt_deadline_state *st, const char *name,
+			     unsigned int deadline_s);
 
-/* odi_wdt_deadline_tick() -- one evaluation at the given uptime. Returns
- * the OR of every action due this tick. HEARTBEAT is due at most once
- * per ODI_WDT_HEARTBEAT_INTERVAL_S; STALL_REPORT only while the watchdog
- * is enabled, a kick has been observed at least once, more than
- * ODI_WDT_STALL_THRESHOLD_S has passed since it, and fewer than
- * ODI_WDT_STALL_MAX_REPORTS have already been issued; FORCE_RESET only
- * while the watchdog is enabled, userland_ok is still 0, and uptime_s has
- * passed ODI_WDT_USERLAND_DEADLINE_S -- and only ONCE (the caller is
- * expected to act on it by resetting the board; a host test instead sees
- * it returned exactly once and never again on a state that keeps ticking
- * past the deadline, because the real hardware path never reaches a
- * second tick).
+/* odi_wdt_client_ping() -- arms the client on its first call. Returns 0 on a
+ * known (registered) client, -1 if no client of that name is registered --
+ * a ping from an unregistered name is a configuration bug, not something to
+ * silently create a client for.
  */
-unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned int uptime_s);
+int odi_wdt_client_ping(struct odi_wdt_deadline_state *st, const char *name,
+			 unsigned int uptime_s);
+
+/* odi_wdt_deadline_tick() -- one evaluation at the given uptime, told the
+ * current free memory in KB (si_mem_available() in the real driver; supplied
+ * directly in the host test). Returns the OR of every action due this tick.
+ * HEARTBEAT is due at most once per ODI_WDT_HEARTBEAT_INTERVAL_S;
+ * STALL_REPORT only while the watchdog is enabled, a kick has been observed
+ * at least once, more than ODI_WDT_STALL_THRESHOLD_S has passed since it,
+ * and fewer than ODI_WDT_STALL_MAX_REPORTS have already been issued;
+ * FORCE_RESET (alone) only while the watchdog is enabled, userland_ok is
+ * still 0, and uptime_s has passed ODI_WDT_USERLAND_DEADLINE_S; CLIENT_MISS
+ * (with FORCE_RESET) once any armed, registered client has gone more than
+ * its own deadline_s since its last ping; MEM_FLOOR (with FORCE_RESET) once
+ * free_kb has stayed below ODI_WDT_MEM_FLOOR_KB for ODI_WDT_MEM_FLOOR_CONSEC
+ * consecutive ticks. Every FORCE_RESET-triggering condition is one-shot
+ * (the caller is expected to act on it by resetting the board; a host test
+ * instead sees it returned exactly once and never again on a state that
+ * keeps ticking past the deadline, because the real hardware path never
+ * reaches a second tick).
+ */
+unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned int uptime_s,
+				    unsigned long free_kb);
 
 #endif /* ODI_WDT_H */

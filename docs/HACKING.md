@@ -328,6 +328,13 @@ not on `.2`: every boot then resets at 120 s. The confirmation and the
 deadline are one mechanism; change neither without reading `rcS`,
 `rcS.dev` and `odi_wdt.c` together.
 
+This one-shot boot deadline is one of three independent rules odi_wdt
+enforces after boot too -- a per-client ping deadline (omcid pings its own
+60 s deadline from its own main loop, `/proc/odi_wdt/ping`) and a
+kernel-side `MemAvailable` floor -- `docs/SETTINGS.md`, "Watchdog rules"
+has the full design and why a v1.0.2 userland version of the second rule
+was withdrawn.
+
 ### Never `sw_commit` a trial
 
 `sw_commit` is the only thing that makes an image permanent, and writing it
@@ -528,9 +535,11 @@ do about it -- there is no `/proc/odi_omci` to register against), so
 never in a flashed image) that answers metricsd's fixed command batch with
 `src/diag/test/exporter.golden`, the same fixture `test-diag` checks
 byte-for-byte -- so the exporter has real, checkable data to serve; and
-the health-kicker scenario can only show the kicker WITHHOLDING its kick
-under pressure, never the watchdog actually resetting the board, since
-that needs the real `odi_wdt` hardware model.
+none of the odi_wdt watchdog rules (boot confirmation, per-client ping
+deadlines, the memory floor) can be exercised end to end here, only that
+rcS's client registration and omcid's own ping degrade harmlessly without
+`/proc/odi_wdt` -- the rules themselves are host-tested
+(`test/odi_wdt_test.c`) against a fake clock instead.
 
 **The kernel image.** `odi-toolchain-qemu-kernel-malta`
 (`toolchain/images.env`, pulled like the other two toolchain images) is
@@ -886,8 +895,11 @@ read side.
 |---|---|---|---|---|
 | `/proc/odi_init` | `odi_init.c` | one verb, optional argument: the SDK-init verbs (`intr` ... `ponmac`, `i2c`, `i2cen`, `gpon`, `rxsd`), `optics`, and the GPON verbs (`gpondrv`, `gpondev`, `gponsn <sn>`, `gponpw <hex>`, `gponact`, `gpondeact`, `gponstat`) | the last verb's return code | prod (`rtk_init` under the stock firmware) |
 | `/proc/odi_omci` | `odi_omci.c:451` | `switch_init` (`:398`): the platform settings and the module-load replay | redirect registrations and pids, frame and command counters | prod |
-| `/proc/odi_wdt/userland_ok` | `odi_wdt.c:543` | `1`: userland is up, cancel the 120 s reset | `userland_ok=N deadline=120 uptime=N` | prod (`luna_watchdog` under the stock firmware) |
-| `/proc/odi_wdt/watchdog_flag` | `odi_wdt.c:541` | `1` arm and kick; `0` disable the watchdog and stop the kicker | `watchdog_flag=N` | dev |
+| `/proc/odi_wdt/userland_ok` | `odi_wdt.c:533` | `1`: userland is up, cancel the 120 s reset | `userland_ok=N deadline=120 uptime=N` | prod (`luna_watchdog` under the stock firmware) |
+| `/proc/odi_wdt/watchdog_flag` | `odi_wdt.c:488` | `1` arm and kick; `0` disable the watchdog and stop the kicker | `watchdog_flag=N` | dev |
+| `/proc/odi_wdt/register` | `odi_wdt.c:597` | `"<name> <deadline_s>"`: register or update a watchdog client (rcS does this once per client at boot) | -- | prod |
+| `/proc/odi_wdt/ping` | `odi_wdt.c:625` | `"<name>"`: a registered client's own ping; arms its deadline on the first call | -- | prod (omcid, every 15 s: `src/omci/respond/main.c`, `wdt_ping()`) |
+| `/proc/odi_wdt/clients` | `odi_wdt.c:648` | none | one line per client: `name=... deadline=... armed=... last_ping_age=...` | dev (debugging) |
 | `/proc/odi_gpon` | `odi_gpon.c:786` | none | ONU state, ONU id, PLOAM counters, serial | prod (`diag` reads it for the exporter; its format is an interface) |
 | `/proc/odi_ramlog_prev`, `_raw` | `odi_ramlog.c:483` | none | the previous boot's ramlog (root only) | prod (debug aid) |
 | `/dev/odi_sw` | `odi_reg.c:191` | ioctls `REG_SET`, `L2_MC_ADD`/`DEL` | ioctls `REG_GET`, `MIB_GET`, `DDM_GET`, `L2_GET`/`NEXT`, `L2_MODE` (`odi_reg.h:118`) | prod |

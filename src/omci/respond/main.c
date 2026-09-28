@@ -9,6 +9,28 @@
 #include "omcid.h"
 #include "../redirect_guard.h"
 
+/* wdt_ping() -- the odi_wdt watchdog rule this daemon owns (docs/SETTINGS.md,
+ * "Watchdog rules"): a cheap write to /proc/odi_wdt/ping every few seconds
+ * from this OWN main loop, not a separate probing process. rcS registers
+ * "omcid" with its deadline at boot (/proc/odi_wdt/register); the kernel
+ * arms it on the first ping here and resets the board if this stops
+ * arriving. A missing /proc/odi_wdt (host, qemu, a stock kernel) makes the
+ * open fail and the write a silent no-op -- exactly as intended off real
+ * hardware.
+ */
+#define WDT_PING_PATH   "/proc/odi_wdt/ping"
+#define WDT_PING_NAME   "omcid"
+
+static void wdt_ping(void)
+{
+	long fd = sys_open(WDT_PING_PATH, O_WRONLY);
+
+	if (fd < 0)
+		return;
+	sys_write((int)fd, WDT_PING_NAME, sizeof(WDT_PING_NAME) - 1);
+	sys_close((int)fd);
+}
+
 /* A redirect type dropped without deregistering keeps the kernel delivering
  * to a dead netlink port, with an unthrottled printk per frame; the OLT
  * retries hard, and the console storm can starve the kernel thread that kicks
@@ -243,10 +265,17 @@ int main(int argc, char **argv)
 		}
 		{
 			static unsigned tick;
+			static unsigned wdt_secs;
 
 			if (++tick % (1000000 / NL_POLL_US) == 0) {
 				onu_state_sample();
 				serial_refresh(1);
+				/* Every 15 s: a quarter of the 60 s deadline
+				 * odi_wdt.h/rcS register omcid with, so an
+				 * occasional missed tick (a slow OLT frame,
+				 * a stalled CLI client) never costs a reset. */
+				if (++wdt_secs % 15 == 0)
+					wdt_ping();
 			}
 		}
 		if (qos_dirty && quiet >= 1000000 / NL_POLL_US) {

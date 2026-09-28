@@ -63,17 +63,21 @@ static void test_force_reset_value_is_e_bit_alone(void)
 
 /* ---- Deadline/heartbeat/stall-report decision function ----------------- */
 
+/* free_kb well above ODI_WDT_MEM_FLOOR_KB, so it never interferes with a
+ * test not about the memory floor. */
+#define AMPLE_KB (ODI_WDT_MEM_FLOOR_KB + 1024U)
+
 static void test_heartbeat_fires_every_60s_not_before(void)
 {
 	struct odi_wdt_deadline_state st;
 
 	odi_wdt_deadline_state_init(&st);
-	CHECK(!(odi_wdt_deadline_tick(&st, 0) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at uptime 0 (first one is due at 60 s)");
-	CHECK(!(odi_wdt_deadline_tick(&st, 30) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat again at 30 s");
-	CHECK(!(odi_wdt_deadline_tick(&st, 59) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at 59 s");
-	CHECK(odi_wdt_deadline_tick(&st, 60) & ODI_WDT_ACTION_HEARTBEAT, "heartbeat fires again at 60 s");
-	CHECK(!(odi_wdt_deadline_tick(&st, 119) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at 119 s");
-	CHECK(odi_wdt_deadline_tick(&st, 120) & ODI_WDT_ACTION_HEARTBEAT, "heartbeat fires again at 120 s");
+	CHECK(!(odi_wdt_deadline_tick(&st, 0, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at uptime 0 (first one is due at 60 s)");
+	CHECK(!(odi_wdt_deadline_tick(&st, 30, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat again at 30 s");
+	CHECK(!(odi_wdt_deadline_tick(&st, 59, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at 59 s");
+	CHECK(odi_wdt_deadline_tick(&st, 60, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT, "heartbeat fires again at 60 s");
+	CHECK(!(odi_wdt_deadline_tick(&st, 119, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at 119 s");
+	CHECK(odi_wdt_deadline_tick(&st, 120, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT, "heartbeat fires again at 120 s");
 }
 
 /* Stall report: enabled, at least one kick observed, more than 15 s since
@@ -87,16 +91,16 @@ static void test_stall_report_fires_past_15s_capped_at_3(void)
 	st.watchdog_enabled = 1;
 	odi_wdt_note_kick(&st, 10);
 
-	CHECK(!(odi_wdt_deadline_tick(&st, 24) & ODI_WDT_ACTION_STALL_REPORT), "no stall report at 24 s (14 s since the kick)");
-	CHECK(odi_wdt_deadline_tick(&st, 26) & ODI_WDT_ACTION_STALL_REPORT, "stall report fires at 26 s (16 s since the kick)");
+	CHECK(!(odi_wdt_deadline_tick(&st, 24, AMPLE_KB) & ODI_WDT_ACTION_STALL_REPORT), "no stall report at 24 s (14 s since the kick)");
+	CHECK(odi_wdt_deadline_tick(&st, 26, AMPLE_KB) & ODI_WDT_ACTION_STALL_REPORT, "stall report fires at 26 s (16 s since the kick)");
 	CHECK(st.stall_reports == 1, "one stall report issued");
-	CHECK(odi_wdt_deadline_tick(&st, 27) & ODI_WDT_ACTION_STALL_REPORT, "second stall report at 27 s, still no new kick");
-	CHECK(odi_wdt_deadline_tick(&st, 28) & ODI_WDT_ACTION_STALL_REPORT, "third stall report at 28 s");
+	CHECK(odi_wdt_deadline_tick(&st, 27, AMPLE_KB) & ODI_WDT_ACTION_STALL_REPORT, "second stall report at 27 s, still no new kick");
+	CHECK(odi_wdt_deadline_tick(&st, 28, AMPLE_KB) & ODI_WDT_ACTION_STALL_REPORT, "third stall report at 28 s");
 	CHECK(st.stall_reports == 3, "three stall reports issued");
-	CHECK(!(odi_wdt_deadline_tick(&st, 29) & ODI_WDT_ACTION_STALL_REPORT), "no fourth stall report -- capped at 3");
+	CHECK(!(odi_wdt_deadline_tick(&st, 29, AMPLE_KB) & ODI_WDT_ACTION_STALL_REPORT), "no fourth stall report -- capped at 3");
 
 	odi_wdt_note_kick(&st, 29);
-	CHECK(!(odi_wdt_deadline_tick(&st, 40) & ODI_WDT_ACTION_STALL_REPORT), "a fresh kick keeps the cap from re-triggering (11 s since the new kick)");
+	CHECK(!(odi_wdt_deadline_tick(&st, 40, AMPLE_KB) & ODI_WDT_ACTION_STALL_REPORT), "a fresh kick keeps the cap from re-triggering (11 s since the new kick)");
 }
 
 /* A disabled watchdog never stalls or deadlines (a userland-driven
@@ -112,8 +116,8 @@ static void test_disabled_watchdog_never_stalls_or_deadlines(void)
 	st.watchdog_enabled = 0;
 	odi_wdt_note_kick(&st, 0);
 
-	CHECK(!(odi_wdt_deadline_tick(&st, 200) & ODI_WDT_ACTION_STALL_REPORT), "disabled watchdog: no stall report even long after the last kick");
-	CHECK(!(odi_wdt_deadline_tick(&st, 200) & ODI_WDT_ACTION_FORCE_RESET), "disabled watchdog: no forced reset even long past the deadline");
+	CHECK(!(odi_wdt_deadline_tick(&st, 200, AMPLE_KB) & ODI_WDT_ACTION_STALL_REPORT), "disabled watchdog: no stall report even long after the last kick");
+	CHECK(!(odi_wdt_deadline_tick(&st, 200, AMPLE_KB) & ODI_WDT_ACTION_FORCE_RESET), "disabled watchdog: no forced reset even long past the deadline");
 }
 
 /* Userland deadline: fires once, past 120 s, only while userland_ok is
@@ -127,9 +131,9 @@ static void test_userland_deadline_fires_once_past_120s(void)
 	odi_wdt_deadline_state_init(&st);
 	st.watchdog_enabled = 1;
 
-	CHECK(!(odi_wdt_deadline_tick(&st, 120) & ODI_WDT_ACTION_FORCE_RESET), "no forced reset AT exactly 120 s (the check is uptime_s > deadline)");
-	CHECK(odi_wdt_deadline_tick(&st, 121) & ODI_WDT_ACTION_FORCE_RESET, "forced reset fires once uptime passes 120 s");
-	CHECK(!(odi_wdt_deadline_tick(&st, 130) & ODI_WDT_ACTION_FORCE_RESET), "not signaled again on a later tick");
+	CHECK(!(odi_wdt_deadline_tick(&st, 120, AMPLE_KB) & ODI_WDT_ACTION_FORCE_RESET), "no forced reset AT exactly 120 s (the check is uptime_s > deadline)");
+	CHECK(odi_wdt_deadline_tick(&st, 121, AMPLE_KB) & ODI_WDT_ACTION_FORCE_RESET, "forced reset fires once uptime passes 120 s");
+	CHECK(!(odi_wdt_deadline_tick(&st, 130, AMPLE_KB) & ODI_WDT_ACTION_FORCE_RESET), "not signaled again on a later tick");
 }
 
 static void test_userland_confirm_prevents_the_deadline(void)
@@ -140,25 +144,35 @@ static void test_userland_confirm_prevents_the_deadline(void)
 	st.watchdog_enabled = 1;
 	st.userland_ok = 1; /* rcS already wrote 1 to userland_ok before the deadline */
 
-	CHECK(!(odi_wdt_deadline_tick(&st, 200) & ODI_WDT_ACTION_FORCE_RESET), "userland_ok=1 suppresses the forced reset entirely");
+	CHECK(!(odi_wdt_deadline_tick(&st, 200, AMPLE_KB) & ODI_WDT_ACTION_FORCE_RESET), "userland_ok=1 suppresses the forced reset entirely");
 }
 
-/* ---- Periodic health-kick mode: independent of userland_ok, off until
- * the first odi_wdt_note_health(), one-shot like the boot deadline. ------- */
+/* ---- Per-client ping deadlines: register sets the deadline, the first
+ * ping arms it, missing an armed deadline resets (with FORCE_RESET), and a
+ * client never registered or never yet pinged is never checked. --------- */
 
-static void test_health_miss_disarmed_until_first_kick(void)
+static void test_unregistered_client_ping_is_refused(void)
+{
+	struct odi_wdt_deadline_state st;
+
+	odi_wdt_deadline_state_init(&st);
+	CHECK(odi_wdt_client_ping(&st, "omcid", 5) < 0, "a ping from a name nobody registered is refused");
+}
+
+static void test_registered_but_unarmed_client_never_resets(void)
 {
 	struct odi_wdt_deadline_state st;
 
 	odi_wdt_deadline_state_init(&st);
 	st.watchdog_enabled = 1;
-	st.userland_ok = 1; /* boot deadline already satisfied */
+	st.userland_ok = 1;
+	CHECK(odi_wdt_client_register(&st, "omcid", 60) >= 0, "register succeeds into a free slot");
 
-	CHECK(!(odi_wdt_deadline_tick(&st, 100000) & ODI_WDT_ACTION_FORCE_RESET),
-	      "no health-driven reset ever, with health_kick never written");
+	CHECK(!(odi_wdt_deadline_tick(&st, 100000, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS),
+	      "no reset from a registered client that never pinged -- omcid never started (modules.off) is not a fault");
 }
 
-static void test_health_miss_fires_once_past_period(void)
+static void test_client_miss_fires_once_past_its_own_deadline(void)
 {
 	struct odi_wdt_deadline_state st;
 	unsigned int actions;
@@ -166,19 +180,62 @@ static void test_health_miss_fires_once_past_period(void)
 	odi_wdt_deadline_state_init(&st);
 	st.watchdog_enabled = 1;
 	st.userland_ok = 1;
+	odi_wdt_client_register(&st, "omcid", 60);
+	CHECK(odi_wdt_client_ping(&st, "omcid", 200) == 0, "the first ping arms the deadline");
 
-	odi_wdt_note_health(&st, 200);
-	CHECK(st.health_period_s == ODI_WDT_HEALTH_PERIOD_S, "first health_kick seeds the default period");
-
-	CHECK(!(odi_wdt_deadline_tick(&st, 200 + ODI_WDT_HEALTH_PERIOD_S) & ODI_WDT_ACTION_HEALTH_MISS),
-	      "no health miss AT exactly the period (check is uptime_s > last + period)");
-	actions = odi_wdt_deadline_tick(&st, 200 + ODI_WDT_HEALTH_PERIOD_S + 1);
-	CHECK(actions & ODI_WDT_ACTION_HEALTH_MISS, "health miss fires once the period is exceeded");
-	CHECK(actions & ODI_WDT_ACTION_FORCE_RESET, "a health miss also carries FORCE_RESET");
-	CHECK(!(odi_wdt_deadline_tick(&st, 500) & ODI_WDT_ACTION_HEALTH_MISS), "not signaled again on a later tick");
+	CHECK(!(odi_wdt_deadline_tick(&st, 260, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS),
+	      "no miss AT exactly the deadline (uptime_s > last_ping + deadline)");
+	actions = odi_wdt_deadline_tick(&st, 261, AMPLE_KB);
+	CHECK(actions & ODI_WDT_ACTION_CLIENT_MISS, "miss fires once the deadline is exceeded");
+	CHECK(actions & ODI_WDT_ACTION_FORCE_RESET, "a client miss also carries FORCE_RESET");
+	CHECK(!(odi_wdt_deadline_tick(&st, 500, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS), "not signaled again on a later tick");
 }
 
-static void test_health_kick_resets_the_period(void)
+static void test_client_ping_pushes_its_own_deadline_out(void)
+{
+	struct odi_wdt_deadline_state st;
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1;
+	odi_wdt_client_register(&st, "omcid", 60);
+	odi_wdt_client_ping(&st, "omcid", 0);
+	odi_wdt_client_ping(&st, "omcid", 20); /* a fresh ping before the deadline elapses */
+
+	CHECK(!(odi_wdt_deadline_tick(&st, 45, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS),
+	      "a fresh ping pushes the deadline out (45 s since boot, 25 s since the last ping)");
+}
+
+static void test_client_register_is_idempotent_on_name(void)
+{
+	struct odi_wdt_deadline_state st;
+	int slot1, slot2;
+
+	odi_wdt_deadline_state_init(&st);
+	slot1 = odi_wdt_client_register(&st, "omcid", 60);
+	slot2 = odi_wdt_client_register(&st, "omcid", 90); /* re-registered with a new deadline */
+	CHECK(slot1 == slot2, "the same name reuses its slot rather than taking a second one");
+	CHECK(st.clients[slot2].deadline_s == 90, "re-registering updates the deadline");
+}
+
+static void test_client_slots_are_limited(void)
+{
+	struct odi_wdt_deadline_state st;
+	char name[ODI_WDT_CLIENT_NAME_LEN];
+	unsigned int i;
+
+	odi_wdt_deadline_state_init(&st);
+	for (i = 0; i < ODI_WDT_MAX_CLIENTS; i++) {
+		name[0] = 'a' + (char)i;
+		name[1] = '\0';
+		CHECK(odi_wdt_client_register(&st, name, 60) >= 0, "every slot up to the max registers fine");
+	}
+	CHECK(odi_wdt_client_register(&st, "one-too-many", 60) < 0, "one past the max is refused, not silently dropped");
+}
+
+/* ---- Kernel-side memory floor: consecutive low samples, not one. ------- */
+
+static void test_mem_floor_needs_consecutive_low_samples(void)
 {
 	struct odi_wdt_deadline_state st;
 
@@ -186,10 +243,26 @@ static void test_health_kick_resets_the_period(void)
 	st.watchdog_enabled = 1;
 	st.userland_ok = 1;
 
-	odi_wdt_note_health(&st, 0);
-	odi_wdt_note_health(&st, 20); /* a fresh kick before the period elapses */
-	CHECK(!(odi_wdt_deadline_tick(&st, 45) & ODI_WDT_ACTION_HEALTH_MISS),
-	      "a fresh kick pushes the deadline out (45 s since boot, 25 s since the last kick)");
+	CHECK(!(odi_wdt_deadline_tick(&st, 10, ODI_WDT_MEM_FLOOR_KB - 1) & ODI_WDT_ACTION_MEM_FLOOR),
+	      "one low sample alone does not reset (needs ODI_WDT_MEM_FLOOR_CONSEC in a row)");
+	CHECK(!(odi_wdt_deadline_tick(&st, 15, AMPLE_KB) & ODI_WDT_ACTION_MEM_FLOOR),
+	      "a single healthy sample in between resets the streak");
+}
+
+static void test_mem_floor_fires_after_consecutive_low_samples(void)
+{
+	struct odi_wdt_deadline_state st;
+	unsigned int t, actions = 0;
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1;
+
+	for (t = 0; t < ODI_WDT_MEM_FLOOR_CONSEC; t++)
+		actions = odi_wdt_deadline_tick(&st, 10 + t * ODI_WDT_TICK_INTERVAL_S, ODI_WDT_MEM_FLOOR_KB - 1);
+	CHECK(actions & ODI_WDT_ACTION_MEM_FLOOR, "MEM_FLOOR fires on the Nth consecutive low sample");
+	CHECK(actions & ODI_WDT_ACTION_FORCE_RESET, "a memory-floor miss also carries FORCE_RESET");
+	CHECK(!(odi_wdt_deadline_tick(&st, 1000, 0) & ODI_WDT_ACTION_MEM_FLOOR), "not signaled again on a later tick");
 }
 
 /* ---- Real arm/kick/disable/force-reset sequences, against the SoC
@@ -259,9 +332,15 @@ int main(void)
 	test_userland_deadline_fires_once_past_120s();
 	test_userland_confirm_prevents_the_deadline();
 
-	test_health_miss_disarmed_until_first_kick();
-	test_health_miss_fires_once_past_period();
-	test_health_kick_resets_the_period();
+	test_unregistered_client_ping_is_refused();
+	test_registered_but_unarmed_client_never_resets();
+	test_client_miss_fires_once_past_its_own_deadline();
+	test_client_ping_pushes_its_own_deadline_out();
+	test_client_register_is_idempotent_on_name();
+	test_client_slots_are_limited();
+
+	test_mem_floor_needs_consecutive_low_samples();
+	test_mem_floor_fires_after_consecutive_low_samples();
 
 	test_arm_writes_the_uboot_matching_value();
 	test_kick_is_real_read_modify_write_on_kick_reg();

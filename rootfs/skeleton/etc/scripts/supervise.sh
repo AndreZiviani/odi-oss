@@ -9,9 +9,10 @@
 # Backgrounds <cmd...>, sets its oom_score_adj, waits for it to exit, and
 # restarts it -- up to SUPERVISE_MAX_RESTARTS times inside any
 # SUPERVISE_WINDOW_S window. Past that it stops and logs why: a daemon that
-# cannot stay up for even a minute is a problem for the health kicker and
-# the watchdog to escalate (docs/SETTINGS.md), not something a restart loop
-# should spin on forever.
+# cannot stay up for even a minute is a problem for the watchdog to escalate
+# (docs/SETTINGS.md, "Watchdog rules" -- a client whose respawns burn its
+# own ping deadline still stops the kicker eventually), not something a
+# restart loop should spin on forever.
 #
 # Assumes <cmd...> runs in the FOREGROUND (none of metricsd, confd,
 # dropbear or omcid double-forks to daemonize itself -- the trailing `&` at

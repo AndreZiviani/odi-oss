@@ -93,11 +93,14 @@ reset: a trial that never answered still says how far it got
     wedged rcS). It needs no network: a stick that boots but is unreachable
     is fixed with a power cycle, not a reboot loop. It comes before the PON
     steps, so a problem on the PON side cannot cost the confirmation.
-    Right after it, the health kicker starts (also supervised): a periodic
-    confirmation, independent of this one-shot boot confirmation, that
-    resets the board later in the boot if userland health stops being
-    reported -- `docs/SETTINGS.md` ("Resilience") has the period, the
-    memory floor and why it exists.
+    Right after it, rcS registers omcid as a watchdog client
+    (`echo "omcid 60" > /proc/odi_wdt/register`) -- a deadline independent
+    of this one-shot boot confirmation, that the kernel enforces once
+    omcid's own main loop starts pinging it: missing it later in the boot
+    resets the board just as surely as never confirming does.
+    `docs/SETTINGS.md` ("Watchdog rules") has every deadline, the memory
+    floor, and why the userland process this replaced (v1.0.2) was
+    withdrawn.
 11. **The optics**, the `/proc/odi_init` verb `optics` (`odi_board.c`),
     because the SDK verbs never set them up on this board:
     `PIN_GPIO_SELECT` 0x048 = 0x08082001 (without it the port-1 I2C pins,

@@ -7,9 +7,17 @@
  *  - the arm, kick, disable and force-reset sequences, through odi_soc.c,
  *    tested on the host against test/odi_soc_mock.h;
  *  - kernel only: the kicker thread, the deadline timer, the restart
- *    handler, the halt/power-off notifier and /proc/odi_wdt (two entries,
- *    watchdog_flag and userland_ok; the stock firmware calls the directory
- *    /proc/luna_watchdog, a name our own entries owe nothing to).
+ *    handler, the halt/power-off notifier and /proc/odi_wdt (watchdog_flag,
+ *    userland_ok, register, ping, clients; the stock firmware calls the
+ *    directory /proc/luna_watchdog, a name our own entries owe nothing to).
+ *
+ * The kernel is the ONLY owner of the hardware watchdog: it stops kicking
+ * (so the board resets) when any of three rules fails -- (a) the one-shot
+ * boot confirmation (userland_ok) within ODI_WDT_USERLAND_DEADLINE_S; (b) a
+ * registered client's own ping deadline (register/ping/clients below); (c)
+ * MemAvailable held below a floor for several consecutive checks. There is
+ * no separate userland process guessing at any of this from /proc (the
+ * v1.0.2 health-kicker) -- see docs/SETTINGS.md, "Watchdog rules".
  */
 #include "odi_wdt.h"
 #include "odi_soc.h"
@@ -79,17 +87,81 @@ void odi_wdt_note_kick(struct odi_wdt_deadline_state *st, unsigned int uptime_s)
 	st->last_kick_s = uptime_s;
 }
 
-void odi_wdt_note_health(struct odi_wdt_deadline_state *st, unsigned int uptime_s)
+/* Tiny, portable (kernel and host) string helpers -- no dependency on which
+ * libc/kernel string.h flavour is in scope, and no assumption the caller's
+ * name is already NUL-terminated within ODI_WDT_CLIENT_NAME_LEN.
+ */
+static int odi_wdt_streq(const char *a, const char *b)
 {
-	st->last_health_s = uptime_s;
-	if (!st->health_period_s)
-		st->health_period_s = ODI_WDT_HEALTH_PERIOD_S;
-	st->health_armed = 1;
+	unsigned int i;
+
+	for (i = 0; i < ODI_WDT_CLIENT_NAME_LEN; i++) {
+		if (a[i] != b[i])
+			return 0;
+		if (a[i] == '\0')
+			return 1;
+	}
+	return 1;
 }
 
-unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned int uptime_s)
+static void odi_wdt_strlcpy(char *dst, const char *src, unsigned int size)
+{
+	unsigned int i;
+
+	for (i = 0; i + 1 < size && src[i] != '\0'; i++)
+		dst[i] = src[i];
+	dst[i] = '\0';
+}
+
+static struct odi_wdt_client *client_find(struct odi_wdt_deadline_state *st, const char *name)
+{
+	int i;
+
+	for (i = 0; i < (int)ODI_WDT_MAX_CLIENTS; i++) {
+		if (st->clients[i].deadline_s && odi_wdt_streq(st->clients[i].name, name))
+			return &st->clients[i];
+	}
+	return NULL;
+}
+
+int odi_wdt_client_register(struct odi_wdt_deadline_state *st, const char *name,
+			     unsigned int deadline_s)
+{
+	struct odi_wdt_client *c = client_find(st, name);
+	int i;
+
+	if (!c) {
+		for (i = 0; i < (int)ODI_WDT_MAX_CLIENTS; i++) {
+			if (!st->clients[i].deadline_s) {
+				c = &st->clients[i];
+				odi_wdt_strlcpy(c->name, name, ODI_WDT_CLIENT_NAME_LEN);
+				break;
+			}
+		}
+	}
+	if (!c)
+		return -1;
+	c->deadline_s = deadline_s;
+	return (int)(c - st->clients);
+}
+
+int odi_wdt_client_ping(struct odi_wdt_deadline_state *st, const char *name,
+			 unsigned int uptime_s)
+{
+	struct odi_wdt_client *c = client_find(st, name);
+
+	if (!c)
+		return -1;
+	c->last_ping_s = uptime_s;
+	c->armed = 1;
+	return 0;
+}
+
+unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned int uptime_s,
+				    unsigned long free_kb)
 {
 	unsigned int actions = ODI_WDT_ACTION_NONE;
+	int i;
 
 	if (uptime_s >= st->last_beat_s + ODI_WDT_HEARTBEAT_INTERVAL_S) {
 		st->last_beat_s = uptime_s;
@@ -109,11 +181,30 @@ unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned i
 		actions |= ODI_WDT_ACTION_FORCE_RESET;
 	}
 
-	if (st->watchdog_enabled && st->health_armed && st->health_period_s &&
-	    !st->health_reset_signaled &&
-	    uptime_s > st->last_health_s + st->health_period_s) {
-		st->health_reset_signaled = 1;
-		actions |= ODI_WDT_ACTION_FORCE_RESET | ODI_WDT_ACTION_HEALTH_MISS;
+	if (st->watchdog_enabled) {
+		for (i = 0; i < (int)ODI_WDT_MAX_CLIENTS; i++) {
+			struct odi_wdt_client *c = &st->clients[i];
+
+			if (!c->deadline_s || !c->armed || c->reset_signaled)
+				continue;
+			if (uptime_s > c->last_ping_s + c->deadline_s) {
+				c->reset_signaled = 1;
+				actions |= ODI_WDT_ACTION_FORCE_RESET | ODI_WDT_ACTION_CLIENT_MISS;
+			}
+		}
+	}
+
+	if (st->watchdog_enabled) {
+		if (free_kb < ODI_WDT_MEM_FLOOR_KB) {
+			if (st->mem_low_streak < ODI_WDT_MEM_FLOOR_CONSEC)
+				st->mem_low_streak++;
+		} else {
+			st->mem_low_streak = 0;
+		}
+		if (st->mem_low_streak >= ODI_WDT_MEM_FLOOR_CONSEC && !st->mem_reset_signaled) {
+			st->mem_reset_signaled = 1;
+			actions |= ODI_WDT_ACTION_FORCE_RESET | ODI_WDT_ACTION_MEM_FLOOR;
+		}
 	}
 
 	return actions;
@@ -264,15 +355,30 @@ static void odi_wdt_thread_maintain(int on)
 	}
 }
 
+static void odi_wdt_log_client_miss(unsigned int uptime_s)
+{
+	int i;
+
+	for (i = 0; i < (int)ODI_WDT_MAX_CLIENTS; i++) {
+		struct odi_wdt_client *c = &odi_wdt_state.clients[i];
+
+		if (c->deadline_s && c->armed && c->reset_signaled &&
+		    uptime_s > c->last_ping_s + c->deadline_s)
+			pr_emerg(DRV_NAME ": client %.*s missed its %u s deadline (last ping %u s ago) -- resetting\n",
+				 (int)ODI_WDT_CLIENT_NAME_LEN, c->name,
+				 c->deadline_s, uptime_s - c->last_ping_s);
+	}
+}
+
 static void odi_wdt_deadline_timer_fn(struct timer_list *odi_timer_arg)
 {
 	unsigned int uptime_s = odi_wdt_uptime_s();
-	unsigned int actions = odi_wdt_deadline_tick(&odi_wdt_state, uptime_s);
-
+	unsigned long free_kb = si_mem_available() * (PAGE_SIZE / 1024);
+	unsigned int actions = odi_wdt_deadline_tick(&odi_wdt_state, uptime_s, free_kb);
 
 	if (actions & ODI_WDT_ACTION_HEARTBEAT)
-		pr_info(DRV_NAME ": alive at %u s, free %lu pages, userland_ok=%d\n",
-			uptime_s, nr_free_pages(), odi_wdt_state.userland_ok);
+		pr_info(DRV_NAME ": alive at %u s, free %lu pages (%lu KB available), userland_ok=%d\n",
+			uptime_s, nr_free_pages(), free_kb, odi_wdt_state.userland_ok);
 
 	if (actions & ODI_WDT_ACTION_STALL_REPORT) {
 		pr_warn(DRV_NAME ": kicker silent for over %u s at %u s uptime -- current %s pid %d\n",
@@ -280,10 +386,17 @@ static void odi_wdt_deadline_timer_fn(struct timer_list *odi_timer_arg)
 		dump_stack();
 	}
 
-	if (actions & ODI_WDT_ACTION_HEALTH_MISS)
-		pr_emerg(DRV_NAME ": health kick missed for over %u s (uptime %u) -- resetting\n",
-			 odi_wdt_state.health_period_s, uptime_s);
-	else if (actions & ODI_WDT_ACTION_FORCE_RESET)
+	/* Each rule logs its own line, clearly, before the reset -- this is
+	 * read from the DRAM ramlog on the next boot (docs/SETTINGS.md), the
+	 * only place that says which rule fired.
+	 */
+	if (actions & ODI_WDT_ACTION_MEM_FLOOR)
+		pr_emerg(DRV_NAME ": MemAvailable %lu KB below the %u KB floor for %u consecutive checks -- resetting\n",
+			 free_kb, ODI_WDT_MEM_FLOOR_KB, ODI_WDT_MEM_FLOOR_CONSEC);
+	if (actions & ODI_WDT_ACTION_CLIENT_MISS)
+		odi_wdt_log_client_miss(uptime_s);
+	if ((actions & ODI_WDT_ACTION_FORCE_RESET) &&
+	    !(actions & (ODI_WDT_ACTION_MEM_FLOOR | ODI_WDT_ACTION_CLIENT_MISS)))
 		pr_emerg(DRV_NAME ": userland did not confirm within %u s (uptime %u) -- resetting\n",
 			 ODI_WDT_USERLAND_DEADLINE_S, uptime_s);
 
@@ -440,39 +553,123 @@ static const struct proc_ops odi_wdt_userland_fops = {
 	.proc_lseek = seq_lseek, .proc_release = single_release, .proc_write = odi_wdt_userland_write,
 };
 
-/* /proc/odi_wdt/health_kick -- periodic health confirmation, independent of
- * userland_ok above. A write of any value arms it (odi_wdt_note_health())
- * and resets the deadline; reading shows the period and how long ago the
- * last kick landed. Nothing writes this unless a supervised health kicker
- * is running (docs/SETTINGS.md), so a stick that never starts one behaves
- * exactly as before this feature existed.
+/* Parses "<name> <deadline_s>" (register) or "<name>" (ping) out of a
+ * proc write. copy_from_user once, into a fixed buffer -- neither a client
+ * name nor a deadline needs more than this.
  */
-static int odi_wdt_health_show(struct seq_file *seq, void *v)
+static int odi_wdt_parse_write(const char __user *buf, size_t size, char *name,
+				unsigned int *deadline_s)
 {
-	unsigned int uptime_s = odi_wdt_uptime_s();
+	char tmp[32] = { 0 };
+	int len = (size >= sizeof(tmp)) ? (int)sizeof(tmp) - 1 : (int)size;
+	char *p = tmp;
+	int i;
 
-	seq_printf(seq, "period=%u armed=%d last_kick=%u uptime=%u\n",
-		   odi_wdt_state.health_period_s, odi_wdt_state.health_armed,
-		   odi_wdt_state.last_health_s, uptime_s);
+	if (!buf || copy_from_user(tmp, buf, len))
+		return -EFAULT;
+	while (*p == ' ')
+		p++;
+	for (i = 0; i < (int)ODI_WDT_CLIENT_NAME_LEN - 1 && *p && *p != ' ' && *p != '\n'; i++, p++)
+		name[i] = *p;
+	name[i] = '\0';
+	if (i == 0)
+		return -EINVAL;
+	if (deadline_s) {
+		while (*p == ' ')
+			p++;
+		if (*p < '0' || *p > '9')
+			return -EINVAL;
+		*deadline_s = 0;
+		while (*p >= '0' && *p <= '9') {
+			*deadline_s = *deadline_s * 10 + (unsigned int)(*p - '0');
+			p++;
+		}
+	}
 	return 0;
 }
 
-static int odi_wdt_health_open(struct inode *inode, struct file *file)
+/* /proc/odi_wdt/register -- "<name> <deadline_s>", e.g. "omcid 60". rcS
+ * writes this once per required client at boot (docs/SETTINGS.md,
+ * "Watchdog rules"). Idempotent: registering an already-known name just
+ * updates its deadline. Does not arm anything -- the client's own first
+ * ping does that.
+ */
+static ssize_t odi_wdt_register_write(struct file *file, const char __user *buf,
+				       size_t size, loff_t *pos)
 {
-	return single_open(file, odi_wdt_health_show, NULL);
-}
+	char name[ODI_WDT_CLIENT_NAME_LEN];
+	unsigned int deadline_s;
+	int rc;
 
-static ssize_t odi_wdt_health_write(struct file *file, const char __user *buf,
-				     size_t size, loff_t *pos)
-{
-	odi_wdt_note_health(&odi_wdt_state, odi_wdt_uptime_s());
-	pr_info(DRV_NAME ": health_kick, period=%u\n", odi_wdt_state.health_period_s);
+	rc = odi_wdt_parse_write(buf, size, name, &deadline_s);
+	if (rc)
+		return rc;
+	if (odi_wdt_client_register(&odi_wdt_state, name, deadline_s) < 0) {
+		pr_err(DRV_NAME ": register: no free client slot for %s\n", name);
+		return -ENOSPC;
+	}
+	pr_info(DRV_NAME ": client %s registered, deadline %u s\n", name, deadline_s);
 	return size;
 }
 
-static const struct proc_ops odi_wdt_health_fops = {
-	.proc_open = odi_wdt_health_open, .proc_read = seq_read,
-	.proc_lseek = seq_lseek, .proc_release = single_release, .proc_write = odi_wdt_health_write,
+static const struct proc_ops odi_wdt_register_fops = {
+	.proc_write = odi_wdt_register_write,
+};
+
+/* /proc/odi_wdt/ping -- "<name>", e.g. "omcid", written every few seconds
+ * from the client's OWN main loop (src/omci/respond/main.c). Arms the
+ * client's deadline on its first call. A ping from a name nobody
+ * registered is refused (-EINVAL): it is a configuration mismatch, not a
+ * client to silently start trusting.
+ */
+static ssize_t odi_wdt_ping_write(struct file *file, const char __user *buf,
+				   size_t size, loff_t *pos)
+{
+	char name[ODI_WDT_CLIENT_NAME_LEN];
+	int rc;
+
+	rc = odi_wdt_parse_write(buf, size, name, NULL);
+	if (rc)
+		return rc;
+	if (odi_wdt_client_ping(&odi_wdt_state, name, odi_wdt_uptime_s()) < 0)
+		return -EINVAL;
+	return size;
+}
+
+static const struct proc_ops odi_wdt_ping_fops = {
+	.proc_write = odi_wdt_ping_write,
+};
+
+/* /proc/odi_wdt/clients -- read-only, one line per registered slot, for
+ * debugging on the running stick (docs/SETTINGS.md): name, its deadline,
+ * whether the first ping has armed it yet, and how long ago the last ping
+ * landed.
+ */
+static int odi_wdt_clients_show(struct seq_file *seq, void *v)
+{
+	unsigned int uptime_s = odi_wdt_uptime_s();
+	int i;
+
+	for (i = 0; i < (int)ODI_WDT_MAX_CLIENTS; i++) {
+		struct odi_wdt_client *c = &odi_wdt_state.clients[i];
+
+		if (!c->deadline_s)
+			continue;
+		seq_printf(seq, "name=%.*s deadline=%u armed=%d last_ping_age=%u\n",
+			   (int)ODI_WDT_CLIENT_NAME_LEN, c->name, c->deadline_s, c->armed,
+			   c->armed ? uptime_s - c->last_ping_s : 0);
+	}
+	return 0;
+}
+
+static int odi_wdt_clients_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, odi_wdt_clients_show, NULL);
+}
+
+static const struct proc_ops odi_wdt_clients_fops = {
+	.proc_open = odi_wdt_clients_open, .proc_read = seq_read,
+	.proc_lseek = seq_lseek, .proc_release = single_release,
 };
 
 static int __init odi_wdt_init(void)
@@ -498,8 +695,12 @@ static int __init odi_wdt_init(void)
 		pr_err(DRV_NAME ": create /proc/odi_wdt/watchdog_flag failed\n");
 	if (!proc_create("userland_ok", 0644, odi_wdt_proc_dir, &odi_wdt_userland_fops))
 		pr_err(DRV_NAME ": create /proc/odi_wdt/userland_ok failed\n");
-	if (!proc_create("health_kick", 0644, odi_wdt_proc_dir, &odi_wdt_health_fops))
-		pr_err(DRV_NAME ": create /proc/odi_wdt/health_kick failed\n");
+	if (!proc_create("register", 0200, odi_wdt_proc_dir, &odi_wdt_register_fops))
+		pr_err(DRV_NAME ": create /proc/odi_wdt/register failed\n");
+	if (!proc_create("ping", 0200, odi_wdt_proc_dir, &odi_wdt_ping_fops))
+		pr_err(DRV_NAME ": create /proc/odi_wdt/ping failed\n");
+	if (!proc_create("clients", 0444, odi_wdt_proc_dir, &odi_wdt_clients_fops))
+		pr_err(DRV_NAME ": create /proc/odi_wdt/clients failed\n");
 
 	register_restart_handler(&odi_wdt_restart_nb);
 	register_reboot_notifier(&odi_wdt_reboot_nb);
