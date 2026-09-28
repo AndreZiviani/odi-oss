@@ -12,15 +12,22 @@ Added `write_proc_bounded`/`read_proc_bounded` (`scripts/rcs-lib.sh`,
 `timeout $PROC_WRITE_TIMEOUT_S sh -c '...'`, 5 s default) for the bare
 `echo verb > /proc/odi_init`/`/proc/odi_omci` writes a plain `timeout`
 wrapper cannot reach (they are the calling shell's own `write(2)`, not a
-forked command) -- used by `rcS`'s switch SDK-init loop and `odi_wdt`
-register, `rcs-lib.sh`'s PON steps and `switch_init`, and `apply.sh`'s
+forked command) -- used by the `odi_wdt` register write (`rcS`),
+`rcs-lib.sh`'s PON steps and `switch_init`, and `apply.sh`'s
 `gpondeact`/`gponpw`/`gponact`. `fwu_starter.sh`'s `nv getenv sw_active`
 fallback gained a plain `timeout 5`. `docs/SETTINGS.md` gained a "Bounded
-waits" section listing the pattern per case, including the one documented
-exception (`rcS.dev`'s dev-hook diag probes: a process parked in an
-uninterruptible-sleep kernel wait ignores `timeout`'s signal too). No
-change needed in `network.sh` or `rcS.dev`'s confirm-arp path -- both
-already wrapped every `diag`/`arping`/`/proc` call in `timeout`.
+waits" section listing the pattern per case, including two documented
+exceptions: `rcS.dev`'s dev-hook diag probes (a process parked in an
+uninterruptible-sleep kernel wait ignores `timeout`'s signal too), and
+`rcS`'s 23-step switch SDK-init loop -- every boot, no exception, and
+`write_proc_bounded` would have turned each step's zero-fork builtin
+`echo`/`cat` into a `timeout`+`sh` fork pair, close to 90 extra fork/execs
+on the path this image has fought hardest to keep fast (rc2 to rc3: 85-90 s
+boot down to 31 s), for a step that has never been observed to hang; the
+existing before/after crumb already names a stuck one in the ramlog if it
+ever does. No change needed in `network.sh` or `rcS.dev`'s confirm-arp
+path -- both already wrapped every `diag`/`arping`/`/proc` call in
+`timeout`.
 
 **`confd` pinned to v1.0.6.** Same rule applied on the odi-ui side: bounded
 every `run_to_buf`/`run_script_to_buf` child wait in the confd daemon

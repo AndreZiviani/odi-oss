@@ -111,12 +111,23 @@ fi
 # them, before the network: without them no frame passes between the CPU
 # port and the host port, and network.sh needs diag for its SerDes check.
 # A crumb before and after each, so a verb that hangs names itself.
+#
+# Deliberately NOT write_proc_bounded here (docs/SETTINGS.md, "Bounded
+# waits"): this loop is the hottest part of the boot -- 23 steps, every
+# boot, no exception -- and turning each `echo`/`cat` builtin into a
+# `timeout`+`sh` fork pair nearly doubled the process count on the one path
+# this image has fought hardest to keep fast (rc2 to rc3: 85-90 s boot down
+# to 31 s). No step here has ever been observed to hang; the crumb before
+# and after each already names a stuck one in the ramlog if it ever does.
+# The bound is worth the fork cost on apply.sh's gpondeact/gponpw/gponact
+# (a handful of calls, user-triggered, off the boot path) and on
+# rcs-lib.sh's PON steps and switch_init (a handful of calls, once per
+# boot) -- not on a 23-iteration loop with no history of hanging.
 if [ -w /proc/odi_init ]; then
 	for step in intr irq switch svlan stp oam acl qos sec rate classify stat trunk l2 vlan port mirror cpu rldp trap gpio time ponmac; do
 		crumb "odi_init step $step: start"
-		write_proc_bounded /proc/odi_init "$step" 2>/dev/null || \
-			echo "rcS: odi_init $step failed to start" >&2
-		crumb "odi_init step $step: ret $(read_proc_bounded /proc/odi_init)"
+		echo "$step" > /proc/odi_init 2>/dev/null || echo "rcS: odi_init $step failed to start" >&2
+		crumb "odi_init step $step: ret $(cat /proc/odi_init 2>/dev/null)"
 	done
 fi
 

@@ -310,10 +310,10 @@ not the stock kernel the harness boots; those are host-tested instead
 ## Bounded waits
 
 Every command a script here runs, and every wait one process does on
-another, is bounded -- found necessary the hard way (rc3, claro,
-2026-09-28): a stuck omcid left both `metricsd`'s own child wait and
-`vq_ensure()`'s queue-reclaim logic waiting on it forever (CHANGELOG.md,
-"Unreleased"). The pattern:
+another, is bounded unless there is a stated reason not to -- found
+necessary the hard way (rc3, claro, 2026-09-28): a stuck omcid left both
+`metricsd`'s own child wait and `vq_ensure()`'s queue-reclaim logic
+waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
 
 - **A forked command**: `timeout SECS cmd args...` (busybox `timeout`,
   built into this image's busybox -- `packages/busybox/config.fragment`).
@@ -325,18 +325,28 @@ another, is bounded -- found necessary the hard way (rc3, claro,
   nothing to wrap unless the write runs inside a process of its own.
   `write_proc_bounded`/`read_proc_bounded` (`scripts/rcs-lib.sh`, sourced by
   `rcS`, `rcS.pon` and `apply.sh`) do exactly that: `timeout
-  $PROC_WRITE_TIMEOUT_S sh -c '...'`, default 5 s. Used by the switch
-  SDK-init loop and the `odi_wdt` register write (`rcS`), every PON step and
-  the `switch_init` verb (`rcs-lib.sh`), and `gpondeact`/`gponpw`/`gponact`
-  (`apply.sh`).
-- **A documented exception**: `rcS.dev`'s SerDes/trial-diag dev hook
-  deliberately runs no `diag` call of its own reasoning ("a diag ioctl can
-  block where timeout cannot") -- `timeout` sends a signal to the process
-  it started, and a process parked in an uninterruptible-sleep (`D` state)
-  kernel wait ignores every signal, that one included. This bounds the
-  ordinary hang (a driver waiting on a lock or a condition that resolves
-  on its own, which is what has actually been observed) but is not a
-  guarantee against every kind of stuck kernel call.
+  $PROC_WRITE_TIMEOUT_S sh -c '...'`, default 5 s. Used by every PON step
+  and the `switch_init` verb (`rcs-lib.sh`), the `odi_wdt` register write
+  (`rcS`), and `gpondeact`/`gponpw`/`gponact` (`apply.sh`) -- a handful of
+  calls each, off the tightest part of the boot or off it altogether.
+- **A documented exception, by cost rather than by risk**: `rcS`'s switch
+  SDK-init loop (23 verbs, every boot, no exception) deliberately still
+  uses a bare `echo`/`cat` -- `write_proc_bounded` turns a zero-fork shell
+  builtin into a `timeout`+`sh` fork pair, and at 23 steps that is up to
+  ~90 extra fork/execs on the one path this image has fought hardest to
+  keep fast (rc2 to rc3: 85-90 s boot down to 31 s). No step in this loop
+  has ever been observed to hang; the crumb before and after each already
+  names a stuck one in the ramlog if it ever does. Bound a hot, unproven
+  path only if it actually hangs -- do not pay the fork cost everywhere on
+  principle.
+- **A documented exception, by kernel behaviour**: `rcS.dev`'s
+  SerDes/trial-diag dev hook deliberately runs no `diag` call of its own
+  reasoning ("a diag ioctl can block where timeout cannot") -- `timeout`
+  sends a signal to the process it started, and a process parked in an
+  uninterruptible-sleep (`D` state) kernel wait ignores every signal, that
+  one included. This bounds the ordinary hang (a driver waiting on a lock
+  or a condition that resolves on its own, which is what has actually been
+  observed) but is not a guarantee against every kind of stuck kernel call.
 - **The freestanding C daemons** (`odi-sfp-exporter`'s `metricsd`, this
   image's own `omcid`) have no `timeout` binary to shell out to: they poll
   the child's pipe with a timeout and `SIGKILL` + reap it on expiry
