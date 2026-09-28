@@ -90,7 +90,10 @@ through `flash get`) use it for exactly the names in `ODI_KEYS` at the top of
 An empty value removes the key. `flash all cs` appends the odi keys that hold a
 value as `<Value/>` lines so confd sees them. A line that is not `KEY=value` for
 a listed key is ignored and kept. A factory reset (`flash default cs`) does not
-clear this file.
+clear this file. They must never be written into `lastgood*.xml`: measured on a
+claro stick (2026-09-28), the OEM image boots with an unknown key added to that
+file and ignores it on load, but its first save rewrites the file from its
+in-memory table and silently drops the key.
 
 Why the two REBOOT keys cannot be applied live:
 
