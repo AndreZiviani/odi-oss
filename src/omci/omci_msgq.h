@@ -59,6 +59,7 @@
 #define MQ_E2BIG            7
 #define MQ_EINVAL          22
 #define MQ_EIDRM           36
+#define MQ_EEXIST          17   /* below the MIPS-divergent range: same as x86/arm */
 
 struct omci_msg {
 	uint32_t mtype;                       /* the SysV message type */

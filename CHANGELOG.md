@@ -5,6 +5,27 @@ listed here.
 
 ## Unreleased
 
+**`metricsd` pinned to v1.1.2.** Fixes the matching hardware-trial bug on the
+exporter side: `metricsd`'s own child wait (`omcicli dump srvflow`) had no
+timeout either, so a stuck omcid (the queue-reclaim bug above) hung the whole
+exporter, not just the omcicli queue. See odi-sfp-exporter's CHANGELOG
+(v1.1.2) for the fix -- bounded child waits, `gpon_omci_up` reporting a
+timeout as a metric instead of silence.
+
+**A respawned omcid reclaims the 0x800 (omcicli) queue instead of waiting
+forever for `omci_app`.** Hardware trial (rc3, claro, 2026-09-28): after
+`kill -9 omcid` + respawn, `vq_ensure()`'s `IPC_CREAT|IPC_EXCL` failed
+`EEXIST` against the queue the previous omcid instance left behind (`kill
+-9` skips `on_signal()`'s `mq_remove()`), and the daemon logged "the
+omcicli queue is still omci_app's" and never served it again -- 42 queued
+requests piled up unanswered. `omci_app` never runs on this image at all
+(`src/omci/README.md`), so a stale queue at 0x800 can only be a dead
+instance of omcid's own: `vq_ensure()` (`src/omci/respond/vqsrv.c`) now
+removes it and recreates on `EEXIST`, same as `mq_open_fresh()` already
+does for the omcli queue. `src/omci/qemu-test.sh` gained a `kill -9` +
+respawn scenario asserting the reclaim and that `dump srvflow` (the
+exporter's own command) answers within 2 s afterwards.
+
 **The omcid watchdog ping is wall-clock-gated now, not loop-iteration-counted.**
 Hardware trial (rc2, claro, 2026-09-28): filling `/tmp` to `ENOSPC` left
 `last_ping_age` at 27 s against the 15 s the main loop was supposed to

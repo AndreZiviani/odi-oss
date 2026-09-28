@@ -373,15 +373,36 @@ static void vq_dispatch(void)
  * nor omcicli can use the key: our msgrcv fails forever and the client's
  * msgget finds nothing. Create it instead, and keep trying until it is ours.
  * Checked about once a second, since until it succeeds there is nothing to
- * serve anyway. */
+ * serve anyway.
+ *
+ * omci_app never runs on this image at all (../README.md: this replaces it
+ * outright), so a queue already sitting at 0x800 here is never a stock
+ * daemon's -- it can only be a previous omcid's, left behind because a
+ * respawn goes through kill -9 (inittab has no graceful stop), which skips
+ * on_signal()'s mq_remove(). IPC_EXCL then fails EEXIST forever and this
+ * daemon waits out a queue nobody but a dead instance of itself ever held,
+ * while requests pile up unanswered. Since there is no real owner to wait
+ * for on our image, reclaim it instead: remove whatever is there and create
+ * fresh, exactly like mq_open_fresh() does for the omcli queue. */
 void vq_ensure(void)
 {
 	static unsigned tick;
+	long rc;
 
 	if (vq >= 0 || (tick++ % (1000000 / NL_POLL_US)))
 		return;
-	vq = __syscall6(__NR_ipc, IPC_MSGGET, OMCI_MQ_KEY,
+	rc = __syscall6(__NR_ipc, IPC_MSGGET, OMCI_MQ_KEY,
 			IPC_CREAT | IPC_EXCL | 0600, 0, 0, 0);
+	if (rc == -MQ_EEXIST) {
+		long old = __syscall6(__NR_ipc, IPC_MSGGET, OMCI_MQ_KEY, 0,
+				      0, 0, 0);
+
+		if (old >= 0)
+			mq_remove(old);
+		rc = __syscall6(__NR_ipc, IPC_MSGGET, OMCI_MQ_KEY,
+				IPC_CREAT | IPC_EXCL | 0600, 0, 0, 0);
+	}
+	vq = rc;
 	if (vq >= 0) {
 		vq_is_ours = 1;
 		out("[cli] took the omcicli queue\n");
