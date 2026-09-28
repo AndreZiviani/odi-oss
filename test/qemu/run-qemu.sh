@@ -179,4 +179,58 @@ say "scenario: rcS registration of the omcid watchdog client is a no-op without 
 # rcS did not abort trying.
 sshx 'test -e /proc/odi_wdt && echo present || echo absent'
 
+say "scenario: NTP_SERVER syncs the guest clock (opt-in, skips if no host responder)"
+# The guest config fixture (build-initramfs.sh) sets NTP_SERVER=10.0.2.2,
+# the qemu user-net gateway address -- SLIRP maps it straight to the host
+# own loopback, so a plain NTP server bound there answers svc-ntpd.sh in
+# the guest without any extra guestfwd wiring. Tried in order: a busybox
+# on PATH serving with -l, then a system ntpd. Neither found: skipped, not
+# failed -- a real, bounded responder is not always on hand, and this
+# harness does not hand-roll a fake NTP protocol server as a substitute.
+NTP_HOST_PID=""
+NTP_HOST_LOG="$WORK/host-ntpd.log"
+start_ntp_responder() {
+	if command -v busybox >/dev/null 2>&1 && busybox ntpd --help 2>&1 | grep -q ' -l'; then
+		busybox ntpd -n -l -N >"$NTP_HOST_LOG" 2>&1 &
+		NTP_HOST_PID=$!
+		return 0
+	fi
+	if command -v ntpd >/dev/null 2>&1; then
+		ntpd -n -l >"$NTP_HOST_LOG" 2>&1 &
+		NTP_HOST_PID=$!
+		return 0
+	fi
+	return 1
+}
+if start_ntp_responder; then
+	sleep 1
+	if kill -0 "$NTP_HOST_PID" 2>/dev/null; then
+		echo "  host NTP responder up (pid $NTP_HOST_PID), reachable at 10.0.2.2:123 from the guest"
+		# A deliberately wrong guest clock, far enough in the past that
+		# the first ntpd correction steps rather than slews -- proves
+		# ntpd actually set the clock, not just that it was already close.
+		sshx "date -u -s '2000-01-01 00:00:00'" >/dev/null
+		before=$(sshx date -u +%s)
+		host_now=$(date -u +%s)
+		synced=0
+		for _ in $(seq 1 30); do
+			sleep 1
+			now=$(sshx date -u +%s) || continue
+			diff=$((now > host_now ? now - host_now : host_now - now))
+			[ "$diff" -lt 10 ] && { synced=1; break; }
+		done
+		if [ "$synced" = 1 ]; then
+			echo "  guest clock corrected: was $before, now within 10s of host wall time"
+		else
+			echo "$(cat "$NTP_HOST_LOG" 2>/dev/null)" >&2
+			fail "guest clock did not sync against NTP_SERVER within 30s"
+		fi
+	else
+		echo "  host NTP responder failed to start ($(cat "$NTP_HOST_LOG" 2>/dev/null)) -- skipping"
+	fi
+	kill "$NTP_HOST_PID" 2>/dev/null || true
+else
+	echo "  no busybox/ntpd on this host -- skipping (see docs/HACKING.md, test-qemu)"
+fi
+
 say "all scenarios passed"

@@ -562,7 +562,15 @@ the resilience scenarios from `docs/SETTINGS.md` ("Resilience") -- filling
 `/tmp` to `ENOSPC`, an OOM (a busybox-only memory hog, no compiled tool
 needed), and `kill -9` on each critical daemon, checked over real ssh
 (a test-only key, `test/qemu/id_test`, baked into the harness's initramfs
-only) and real HTTP to confd and metricsd.
+only) and real HTTP to confd and metricsd. `svc-syslogd.sh`/`svc-klogd.sh`
+run here too (unconditionally); `svc-ntpd.sh` is exercised against
+`NTP_SERVER`, a fixture value the harness writes straight to
+`/var/config/lastgood.xml` (there is no real config partition here either)
+pointing at 10.0.2.2, the qemu user-net gateway address SLIRP maps to the
+host's own loopback -- `run-qemu.sh` starts a plain NTP server there
+(busybox or a system `ntpd`, whichever is on the build host `PATH`) and
+checks the guest clock actually gets corrected. No responder on the build
+host: that one scenario is skipped, logged, not failed.
 
 **What it does NOT cover**, because the kernel underneath is a STOCK
 mainline build (`odi-toolchain-qemu-kernel-malta`, below), never this

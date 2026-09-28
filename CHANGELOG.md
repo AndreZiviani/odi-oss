@@ -68,7 +68,10 @@ respawn entry, starts busybox `ntpd` in the foreground against
 the same off-flag placeholder every other disabled service uses, so the
 static inittab entry does nothing rather than needing to be commented out.
 `apply.sh ntp` (SERVICE RESTART) starts or stops it live, no reboot,
-whenever the setting changes.
+whenever the setting changes. Covered end to end in `test-qemu`: the
+harness points `NTP_SERVER` at the qemu user-net gateway address and
+checks the guest clock is actually corrected against a host-side NTP
+responder (skipped, not failed, when the build host has none).
 
 **syslogd and klogd, with a circular buffer `logread` reads, plus optional
 remote forwarding.** The stock image has neither a syslog daemon nor
