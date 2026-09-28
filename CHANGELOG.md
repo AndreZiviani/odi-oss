@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.0.7 — 2026-09-28
+
 - Pins odi-ui confd v1.0.7 (was v1.0.6): `SYSLOG_SERVER` and `NTP_SERVER` are
   now set from the web UI (Config, other). Saving one runs `apply.sh syslog` /
   `apply.sh ntp`, so syslogd or ntpd restarts under init respawn with the new
