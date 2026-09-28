@@ -75,8 +75,8 @@ The UI's reboot confirmation says which slot it comes back on.
 | `OMCI_VENDOR_PRODUCT_CODE` | Vendor product code | ONU2-G attribute 3, decimal | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
 | `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto` | REBOOT |
-| `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R`; empty means local only (the circular buffer, `logread`) | `svc-syslogd.sh` | SERVICE RESTART |
-| `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client) | `svc-ntpd.sh` | SERVICE RESTART |
+| `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R`; empty means local only (the circular buffer, `logread`). Set from the web UI (Config, other) since odi-ui v1.0.7, which saves it and runs `apply.sh syslog`; the UI cannot clear it | `svc-syslogd.sh` | SERVICE RESTART |
+| `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Set from the web UI (Config, other) since odi-ui v1.0.7, which saves it and runs `apply.sh ntp`; the UI cannot clear it | `svc-ntpd.sh` | SERVICE RESTART |
 
 Why the two REBOOT keys cannot be applied live:
 
