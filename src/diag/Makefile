@@ -58,12 +58,27 @@ $(BIN): $(CORE) $(BUILD)/hw.o
 
 # The exporter contract test: the real binary, with the accessors the
 # exporter's commands reach answered by test/hw_fake.c instead.
-FAKE_WRAP := hw_transceiver_get hw_gpon_status_get hw_gpon_alarms_get \
-             hw_stat_port_get hw_l2_mode hw_l2_get hw_l2_next
+FAKE_WRAP := hw_transceiver_get hw_transceiver_alarms_get hw_gpon_status_get \
+             hw_gpon_alarms_get hw_stat_port_get hw_l2_mode hw_l2_get hw_l2_next
 
-$(BUILD)/diag_fake: $(CORE) $(BUILD)/hw.o test/hw_fake.c | $(BUILD)
+$(BUILD)/diag_fake: $(CORE) $(BUILD)/hw.o test/hw_fake.c test/hw_fake_common.inc | $(BUILD)
 	$(CC) $(CFLAGS) $(LDFLAGS) $(foreach f,$(FAKE_WRAP),-Wl,--wrap=$(f)) \
 	      -o $@ test/hw_fake.c $(CORE) $(BUILD)/hw.o
+
+# The three scripted optics scenarios (rx power drift, LOS asserted, module
+# absent) -- same command batch (test/exporter.txt), same CORE, a different
+# fixture file each. See test/hw_fake_rx_drift.c/hw_fake_los.c/hw_fake_absent.c.
+$(BUILD)/diag_fake_rx_drift: $(CORE) $(BUILD)/hw.o test/hw_fake_rx_drift.c test/hw_fake_common.inc | $(BUILD)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(foreach f,$(FAKE_WRAP),-Wl,--wrap=$(f)) \
+	      -o $@ test/hw_fake_rx_drift.c $(CORE) $(BUILD)/hw.o
+
+$(BUILD)/diag_fake_los: $(CORE) $(BUILD)/hw.o test/hw_fake_los.c test/hw_fake_common.inc | $(BUILD)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(foreach f,$(FAKE_WRAP),-Wl,--wrap=$(f)) \
+	      -o $@ test/hw_fake_los.c $(CORE) $(BUILD)/hw.o
+
+$(BUILD)/diag_fake_absent: $(CORE) $(BUILD)/hw.o test/hw_fake_absent.c test/hw_fake_common.inc | $(BUILD)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(foreach f,$(FAKE_WRAP),-Wl,--wrap=$(f)) \
+	      -o $@ test/hw_fake_absent.c $(CORE) $(BUILD)/hw.o
 
 $(BUILD)/hw.o: src/hw.c src/hw.h src/odi_sw_ioctl.h src/gpon_status.h \
                $(OMCI)/nl.h $(UAPI)/omci_flows.h | $(BUILD)
@@ -101,7 +116,7 @@ else
 # the netlink transport from ../omci.
 RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../..:/src -w /src/src/diag $(IMAGE)
 
-.PHONY: all image diag test selftest exporter-test l2-test run verify size clean help
+.PHONY: all image diag test selftest exporter-test exporter-optics-test l2-test run verify size clean help
 
 all: diag
 
@@ -151,6 +166,24 @@ exporter-test: image
 	  || { diff -u test/exporter_eof.golden $(BUILD)/exporter_eof.out; exit 1; }
 	@echo "exporter contract: output byte-identical to the golden files"
 
+# The three scripted optics scenarios, same batch (test/exporter.txt)
+# against each scenario's own fixture binary and golden file.
+exporter-optics-test: image
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/diag_fake_rx_drift $(BUILD)/diag_fake_los $(BUILD)/diag_fake_absent
+	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/diag_fake_rx_drift < test/exporter.txt' \
+	    > $(BUILD)/exporter_rx_drift.out
+	@cmp $(BUILD)/exporter_rx_drift.out test/exporter_rx_drift.golden \
+	  || { diff -u test/exporter_rx_drift.golden $(BUILD)/exporter_rx_drift.out; exit 1; }
+	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/diag_fake_los < test/exporter.txt' \
+	    > $(BUILD)/exporter_los.out
+	@cmp $(BUILD)/exporter_los.out test/exporter_los.golden \
+	  || { diff -u test/exporter_los.golden $(BUILD)/exporter_los.out; exit 1; }
+	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/diag_fake_absent < test/exporter.txt' \
+	    > $(BUILD)/exporter_absent.out
+	@cmp $(BUILD)/exporter_absent.out test/exporter_absent.golden \
+	  || { diff -u test/exporter_absent.golden $(BUILD)/exporter_absent.out; exit 1; }
+	@echo "exporter contract, optics scenarios: rx drift, LOS, absent all match"
+
 # The L2 table listing: test/l2.txt through the same fake-hardware binary,
 # the table answered by test/hw_fake.c, diffed against test/l2.golden. The
 # first two listings must be identical: one is our spelling, the other the
@@ -169,7 +202,7 @@ l2-test: image
 # `make selftest SEED=$$RANDOM` explores instead.
 SEED ?= 1
 
-selftest: image exporter-test l2-test
+selftest: image exporter-test exporter-optics-test l2-test
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/ddm_selftest
 	@$(RUN) qemu-mips-static $(BUILD)/ddm_selftest
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/fmt_selftest
@@ -206,6 +239,7 @@ help:
 	@echo "  make diag           build the freestanding MIPS binary"
 	@echo "  make test           parser and conversion tests, natively (no container)"
 	@echo "  make exporter-test  the exporter contract, under qemu"
+	@echo "  make exporter-optics-test  the same batch, three scripted optics scenarios"
 	@echo "  make l2-test        the l2-table listing against its golden file, under qemu"
 	@echo "  make selftest       exporter-test plus the conversion vectors, under qemu"
 	@echo "  make run ARGS='pon get transceiver rx-power'"

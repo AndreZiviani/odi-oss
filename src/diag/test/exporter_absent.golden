@@ -1,35 +1,15 @@
 RTK.0> pon get transceiver bias-current
-Bias Current: 14.350000 mA
+% transceiver read failed
 RTK.0> pon get transceiver rx-power
-Rx Power: -22.924298  dBm
+% transceiver read failed
 RTK.0> pon get transceiver tx-power
-Tx Power: 2.287339  dBm
+% transceiver read failed
 RTK.0> pon get transceiver temperature
-Temperature: 42.359375 C
+% transceiver read failed
 RTK.0> pon get transceiver voltage
-Voltage: 3.170300 V
+% transceiver read failed
 RTK.0> pon get transceiver alarm-status
-Alarm Temperature high, status: clear
-Alarm Temperature low, status: clear
-Alarm Voltage high, status: clear
-Alarm Voltage low, status: clear
-Alarm Bias Current high, status: clear
-Alarm Bias Current low, status: clear
-Alarm Tx Power high, status: clear
-Alarm Tx Power low, status: clear
-Alarm Rx Power high, status: clear
-Alarm Rx Power low, status: clear
-Warning Temperature high, status: clear
-Warning Temperature low, status: clear
-Warning Voltage high, status: clear
-Warning Voltage low, status: clear
-Warning Bias Current high, status: clear
-Warning Bias Current low, status: clear
-Warning Tx Power high, status: clear
-Warning Tx Power low, status: clear
-Warning Rx Power high, status: clear
-Warning Rx Power low, status: clear
-Optical LOS, status: clear
+% transceiver alarm status read failed
 RTK.0> gpon get onu-state
 ONU state: Operation State(O5) 
 RTK.0> gpon get alarm-status

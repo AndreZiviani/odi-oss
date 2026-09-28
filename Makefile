@@ -136,6 +136,7 @@ test-host:
 	bash test/odi_board_test.sh
 	bash test/odi_i2c_test.sh
 	bash test/odi_ddm_test.sh
+	bash test/odi_optics_model_test.sh
 	bash test/odi_init_test.sh
 	bash test/odi_wdt_test.sh
 	bash test/odi_ramlog_test.sh

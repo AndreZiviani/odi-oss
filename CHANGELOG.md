@@ -59,6 +59,23 @@ against upstream, verifies whatever it finds the way the existing fetch
 scripts always have, runs the test suite against the result, and opens a PR
 only if that passes. Its first real run already found and verified a kernel
 point-release bump, linux 6.18.53 -> 6.18.54, included in this change.
+||||||| parent of 99a0a0e (optics: model alarm/warning flags, LOS and a scriptable transceiver)
+**The optics model gets alarm/warning flags and an optical LOS status, plus
+a scriptable host-side transceiver behind the same modelled I2C controller
+the driver tests already use.** `pon get transceiver alarm-status` reads
+SFF-8472 A2h's alarm and warning flags (bytes 112/113, 116/117) and the
+RX_LOS status bit (byte 110) in one contiguous 8-byte transaction
+(`odi_ddm.h`'s new `ODI_DDM_ALARM_STATUS` selector, `hw_transceiver_alarms_get()`
+on the diag side). `test/odi_optics_model.h` adds a full scriptable SFF-8472
+device (A0h/A2h pages, an "absent module" mode, and the IO_GPIO_EN routing
+gate from `docs/kb/dfp34x-optics-on-i2c-port1-gated-by-io-gpio-en.md`) behind
+`odi_switch_mock.h`'s existing register write-hook, so a host test can drive
+a real I2C transaction through `odi_i2c_read_bytes()`/`odi_ddm_get()` into
+NACK, low-rx-power alarm/warning, or LOS scenarios rather than a fixed byte
+table. The exporter contract (`src/diag/test/exporter.txt`) gains the new
+command and three scripted-scenario goldens (rx power drifting to about
+-28 dBm, LOS asserted, module absent). See `docs/HACKING.md`, "Optics
+model", for how to script a scenario.
 
 ## v1.0.4 — 2026-09-28
 

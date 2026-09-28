@@ -493,6 +493,48 @@ by a fake hardware layer, and compares the output with
 and you have changed the contract: fix the code, or change the exporter
 first. `src/diag/README.md` ("The exporter contract") has the rules.
 
+### Optics model
+
+`test/odi_optics_model.h` (host build only) is a scriptable SFF-8472
+transceiver behind the same modelled I2C controller `odi_i2c_test.c` and
+`odi_ddm_test.c` already use (`test/odi_switch_mock.h`): two 256-byte pages
+(A0h identity, A2h DDMI), the `IO_GPIO_EN`/`PIN_GPIO_SELECT` routing gate
+(`docs/kb/dfp34x-optics-on-i2c-port1-gated-by-io-gpio-en.md`) and an
+"absent module" mode, both surfaced as I2C NACK exactly the way the real
+device does.
+
+To script a scenario in a new test:
+
+1. `odi_mock_reset()`, then `odi_optics_model_reset()` (installs the write
+   hook and resets both pages to the isp1 capture's identity strings).
+2. `odi_optics_set_a2_word(offset, raw)` for any of the five numeric DDM
+   fields (`odi_ddm.c` has the offsets), `odi_optics_set_alarms(alarms,
+   warnings, los)` for the alarm/warning bits and the optical LOS status
+   bit, `odi_optics_set_present(0)` for an absent module.
+3. Write `ODI_SW_PIN_GPIO_SELECT(0)` yourself (`odi_reg_write`) with the
+   value `odi_board_optics()` writes at boot, `ODI_OPTICS_GPIO_SELECT_VALUE`
+   -- the model does not assume it, so a test can also exercise the
+   not-yet-routed NACK path.
+4. Drive `odi_i2c_read_bytes()`/`odi_ddm_get()` as usual; a scenario that
+   should NACK gets `-ENXIO` back.
+
+Alarm and warning bits are stated directly by the scenario, not derived
+from threshold math this repo does not model: a real SFF-8472 module
+computes them against its own internal calibration and only exposes the
+resulting bits, which is exactly what `ODI_DDM_ALARM_STATUS` reads.
+`test/odi_optics_model_test.c` has the routing-gate, absent-module,
+rx-power-drift and LOS scenarios end to end; the exporter contract
+(above) covers the same three scenarios at the `diag` CLI layer, in
+`src/diag/test/hw_fake_rx_drift.c`/`hw_fake_los.c`/`hw_fake_absent.c` and
+their own golden files.
+
+The real-hardware `diag` optics readout is not exercised inside
+`test-qemu`: that harness boots a stock, generic `qemu-system-mips` malta
+kernel for userland-level testing (see its own section below), never our
+RTL9602C kernel, so `/dev/odi_sw` and the real `odi_i2c`/`odi_ddm` drivers
+do not exist in that guest. The host-side driver tests, the diag readout
+test above and the exporter contract are the coverage for this path.
+
 ### test-omci
 
 `src/omci/qemu-test.sh`, in the freestanding toolchain image as root

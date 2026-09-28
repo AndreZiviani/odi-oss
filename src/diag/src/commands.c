@@ -108,6 +108,51 @@ static int cmd_alarm_status(void)
 	return 0;
 }
 
+/* -------------------------------------------------------- transceiver alarms */
+
+/* One "Alarm/Warning <name>, status: clear|occur" line per SFF-8472 A2h
+ * alarm/warning bit (same phrasing as cmd_alarm_status's GPON alarms above,
+ * so the exporter's "anything but clear is asserted" scan works the same
+ * way here), then one line for the optical RX_LOS status bit -- named
+ * "Optical LOS" so it cannot be confused with cmd_alarm_status's upstream
+ * framing LOS, a different condition from a different block. Bit order is
+ * SFF-8472's own: high alarm/warning before low, in field order temperature,
+ * voltage, bias current, tx power, rx power.
+ */
+static int cmd_transceiver_alarms(void)
+{
+	static const struct {
+		const char *name;
+		uint16_t bit;
+	} field[] = {
+		{ "Temperature high", 0x8000 },
+		{ "Temperature low",  0x4000 },
+		{ "Voltage high",     0x2000 },
+		{ "Voltage low",      0x1000 },
+		{ "Bias Current high", 0x0800 },
+		{ "Bias Current low",  0x0400 },
+		{ "Tx Power high",    0x0200 },
+		{ "Tx Power low",     0x0100 },
+		{ "Rx Power high",    0x0080 },
+		{ "Rx Power low",     0x0040 },
+	};
+	uint32_t alarms = 0, warnings = 0;
+	int los = 0;
+
+	if (hw_transceiver_alarms_get(&alarms, &warnings, &los) != 0) {
+		out("% transceiver alarm status read failed\n");
+		return 1;
+	}
+	for (unsigned i = 0; i < sizeof field / sizeof field[0]; i++)
+		out_fmt("Alarm %s, status: %s\n", field[i].name,
+			(alarms & field[i].bit) ? "occur" : "clear");
+	for (unsigned i = 0; i < sizeof field / sizeof field[0]; i++)
+		out_fmt("Warning %s, status: %s\n", field[i].name,
+			(warnings & field[i].bit) ? "occur" : "clear");
+	out_fmt("Optical LOS, status: %s\n", los ? "occur" : "clear");
+	return 0;
+}
+
 /* What odi_switch recorded when omcid programmed each flow (cmd 25): the
  * software record, not a read of the hardware tables. The traffic type is
  * the byte written at creation, so a later AES enable does not show, and a
@@ -278,6 +323,8 @@ int cmd_run(const struct parsed *p)
 		return cmd_onu_state();
 	case CMD_ALARM_STATUS:
 		return cmd_alarm_status();
+	case CMD_TRANSCEIVER_ALARMS:
+		return cmd_transceiver_alarms();
 	case CMD_GPON_FLOWS:
 		return cmd_gpon_flows();
 	case CMD_MIB_DUMP:

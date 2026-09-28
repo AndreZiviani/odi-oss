@@ -79,6 +79,29 @@ int hw_transceiver_get(int sel, uint8_t out[DDM_RAW_LEN])
 	return 0;
 }
 
+/* raw[0] = A2h byte 110 (status/control, bit 1 = RX_LOS), raw[2]/raw[3] =
+ * bytes 112/113 (alarm flags), raw[6]/raw[7] = bytes 116/117 (warning
+ * flags) -- see odi_ddm.c's own comment for the full 8-byte layout this
+ * mirrors. *alarms/*warnings pack byte 112 in the high 8 bits and byte 113
+ * in the low 8 bits, matching the bit order SFF-8472 documents.
+ */
+int hw_transceiver_alarms_get(uint32_t *alarms, uint32_t *warnings, int *los)
+{
+	struct odi_sw_ddm d;
+	int i, rc;
+
+	d.type = DDM_SEL_ALARM_STATUS;
+	for (i = 0; i < DDM_RAW_LEN; i++)
+		d.raw[i] = 0;
+	rc = sw_ioctl(ODI_SW_IOC_DDM_GET, &d);
+	if (rc != 0)
+		return rc;
+	*los = (d.raw[0] & 0x02) != 0;
+	*alarms = ((uint32_t)d.raw[2] << 8) | d.raw[3];
+	*warnings = ((uint32_t)d.raw[6] << 8) | d.raw[7];
+	return 0;
+}
+
 int hw_stat_port_get(uint32_t port, uint32_t counter, uint64_t *value)
 {
 	struct odi_sw_mib m;

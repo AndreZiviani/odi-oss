@@ -275,7 +275,7 @@ Our own CLI over our kernel's interfaces. `src/diag/README.md` is the full
 reference; the commands:
 
     pon get transceiver vendor-name|part-number|temperature|voltage|
-                        bias-current|tx-power|rx-power|all
+                        bias-current|tx-power|rx-power|all|alarm-status
     gpon get onu-state                GPON state machine state, O1-O7
     gpon get alarm-status             LOS, LOF and LOM, live
     gpon get flows                    GEM flows omcid programmed
