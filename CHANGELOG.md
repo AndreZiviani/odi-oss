@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.0.5 — 2026-09-28
+
 **A respawned omcid resumes instead of getting re-provisioned: zero
 outage, not eighteen seconds.** v1.0.4's `omci-respawn-reprovision.sh` made
 a respawn recover, but through a visible re-range (O5 -> O1 -> O5).
