@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Pins odi-ui confd v1.0.7 (was v1.0.6): `SYSLOG_SERVER` and `NTP_SERVER` are
+  now set from the web UI (Config, other). Saving one runs `apply.sh syslog` /
+  `apply.sh ntp`, so syslogd or ntpd restarts under init respawn with the new
+  value; no reboot, fibre service untouched. confd refuses empty values, so
+  clearing either key still needs a shell.
+
 ## v1.0.6 — 2026-09-28
 
 Same changes as the v1.0.5 tag, which was never released: its release run
