@@ -75,8 +75,22 @@ The UI's reboot confirmation says which slot it comes back on.
 | `OMCI_VENDOR_PRODUCT_CODE` | Vendor product code | ONU2-G attribute 3, decimal | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
 | `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto` | REBOOT |
-| `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R`; empty means local only (the circular buffer, `logread`). Set from the web UI (Config, other) since odi-ui v1.0.7, which saves it and runs `apply.sh syslog`; the UI cannot clear it | `svc-syslogd.sh` | SERVICE RESTART |
-| `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Set from the web UI (Config, other) since odi-ui v1.0.7, which saves it and runs `apply.sh ntp`; the UI cannot clear it | `svc-ntpd.sh` | SERVICE RESTART |
+| `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R`; empty means local only (the circular buffer, `logread`). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh syslog`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-syslogd.sh` | SERVICE RESTART |
+| `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh ntp`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-ntpd.sh` | SERVICE RESTART |
+
+Odi-only keys. `SYSLOG_SERVER` and `NTP_SERVER` are the only keys this image
+has that the stock firmware never had, so they are not in `lastgood.xml` and
+`flash` (which edits keys already in the XML) could not save them. They live
+in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
+config partition, written by temp file and rename in the same directory.
+`flash set` / `flash get` and `svc-syslogd.sh` / `svc-ntpd.sh` (which read
+through `flash get`) use it for exactly the names in `ODI_KEYS` at the top of
+`rootfs/skeleton/etc/scripts/flash`; every other key still goes to
+`lastgood*.xml`, so the stock image reads its own keys and ignores this file.
+An empty value removes the key. `flash all cs` appends the odi keys that hold a
+value as `<Value/>` lines so confd sees them. A line that is not `KEY=value` for
+a listed key is ignored and kept. A factory reset (`flash default cs`) does not
+clear this file.
 
 Why the two REBOOT keys cannot be applied live:
 

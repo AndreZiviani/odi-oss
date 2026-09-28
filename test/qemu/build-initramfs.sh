@@ -185,17 +185,19 @@ dev_hook() {
 		# NOT deliver packets to the guest at all (measured), while the
 		# plain default subnet did, bridged, immediately.
 		echo 10.0.2.15 > /etc/config/lan-ip
-		# NTP_SERVER, read the same way every other config-store key is
-		# (svc-ntpd.sh config_get, sed on Name="KEY" Value="..."): this
-		# harness has no real jffs2 config partition (the comment above
-		# already covers that), so a minimal fixture file stands in for
-		# it, same posture as the lan-ip override just above. 10.0.2.2 is
-		# the qemu user-net gateway address, which SLIRP maps straight to
-		# the host own loopback -- run-qemu.sh starts a host-side NTP
-		# responder there before boot.
+		# The config store. /var/config is a plain writable directory here
+		# (no MTD, see above) and the REAL /etc/scripts/flash runs against
+		# it: a stock-shaped lastgood.xml for the stock keys, and
+		# /var/config/odi.conf, where flash keeps the odi-only keys
+		# (SYSLOG_SERVER, NTP_SERVER). NTP_SERVER=10.0.2.2 is the qemu
+		# user-net gateway address, which SLIRP maps straight to the host own
+		# loopback -- run-qemu.sh starts a host-side NTP responder there
+		# before boot. The seed goes through flash set, so the harness
+		# exercises the same write path a web UI save takes.
 		mkdir -p /var/config
-		printf '<Config><Item Name="NTP_SERVER" Value="10.0.2.2"/></Config>\n' \
+		printf '<Config>\n\t<Value Name="LAN_IP_ADDR" Value="10.0.2.15"/>\n</Config>\n' \
 			> /var/config/lastgood.xml
+		/etc/scripts/flash set NTP_SERVER 10.0.2.2 > /dev/null
 		;;
 	services)
 		# Mirrors services.log to the console a few seconds in: the only

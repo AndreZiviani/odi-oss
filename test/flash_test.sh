@@ -129,6 +129,44 @@ t "a slash cannot run sed commands against another key" "VLAN_MANU_TAG_VID=11" \
 t "and leaves no stray quote in the document" "0" \
   "$(grep -c 'Value="999""' "$T/cs.xml")"
 
+# odi-only keys (SYSLOG_SERVER, NTP_SERVER): a plain KEY=value file, since the
+# stock XML has never carried them. A real config dir, so the rename is real.
+cfg="$T/config"
+mkdir -p "$cfg"
+cp "$T/cs.xml" "$cfg/lastgood.xml"
+cp "$T/hs.xml" "$cfg/lastgood_hs.xml"
+export CS="$cfg/lastgood.xml" HS="$cfg/lastgood_hs.xml" ODI_CONF="$cfg/odi.conf"
+xml_before=$(cksum < "$CS")
+t "set on an odi key stores it and echoes it" "SYSLOG_SERVER=192.168.0.3" "$(sh $F set SYSLOG_SERVER 192.168.0.3)"
+t "and get reads it back"                   "SYSLOG_SERVER=192.168.0.3" "$(sh $F get SYSLOG_SERVER)"
+t "it landed in odi.conf, not the XML"      "SYSLOG_SERVER=192.168.0.3" "$(cat "$ODI_CONF")"
+t "and the stock XML is byte for byte as it was" "$xml_before" "$(cksum < "$CS")"
+t "a second odi key sits beside the first"  "NTP_SERVER=pool.ntp.org:123" "$(sh $F set NTP_SERVER pool.ntp.org:123)"
+t "and does not disturb it"                 "SYSLOG_SERVER=192.168.0.3" "$(sh $F get SYSLOG_SERVER)"
+t "an odi key can be replaced"              "SYSLOG_SERVER=logs.lan" "$(sh $F set SYSLOG_SERVER logs.lan)"
+t "and only one line holds it"              "1" "$(grep -c '^SYSLOG_SERVER=' "$ODI_CONF")"
+t "flash all cs carries the odi keys too"   "2" "$(sh $F all cs | grep -c 'Name="\(SYSLOG\|NTP\)_SERVER" Value=')"
+t "and still ends with the closing tag"     "</Config>" "$(sh $F all cs | tail -n 1)"
+t "a stock key still goes to the XML"       "LAN_IP_ADDR=10.0.0.9" "$(sh $F set LAN_IP_ADDR 10.0.0.9)"
+t "and the odi file is untouched by it"     "2" "$(wc -l < "$ODI_CONF" | tr -d ' ')"
+t "an empty value clears the key"           "SYSLOG_SERVER=" "$(sh $F set SYSLOG_SERVER '')"
+t "so get fails for it"                     "GET fail." "$(sh $F get SYSLOG_SERVER 2>&1)"
+t "and the other key survives"              "NTP_SERVER=pool.ntp.org:123" "$(sh $F get NTP_SERVER)"
+t "flash all cs no longer lists the cleared one" "0" "$(sh $F all cs | grep -c 'SYSLOG_SERVER')"
+printf 'garbage line\n=novalue\nSYSLOG_SERVERX=nope\n#SYSLOG_SERVER=no\n' >> "$ODI_CONF"
+t "garbage lines are never read as a value" "GET fail." "$(sh $F get SYSLOG_SERVER 2>&1)"
+t "a set keeps other lines as they are"     "SYSLOG_SERVER=a.b" "$(sh $F set SYSLOG_SERVER a.b)"
+t "and the garbage is still there"          "4" "$(grep -c 'garbage line\|=novalue\|SYSLOG_SERVERX\|#SYSLOG' "$ODI_CONF")"
+t "no temp file is left behind"             "0" "$(find "$cfg" -name '*tmp*' | wc -l | tr -d ' ')"
+sh $F set SYSLOG_SERVER 'a"b' >/dev/null 2>&1
+t "a quote in an odi value is refused"      "SYSLOG_SERVER=a.b" "$(sh $F get SYSLOG_SERVER)"
+nl=$(printf 'a\nNTP_SERVER=evil')
+sh $F set SYSLOG_SERVER "$nl" >/dev/null 2>&1
+t "a newline cannot smuggle a second key"   "NTP_SERVER=pool.ntp.org:123" "$(sh $F get NTP_SERVER)"
+rm -rf "$cfg"
+sh $F set SYSLOG_SERVER x >/dev/null 2>&1
+t "with no config dir a set fails rather than inventing one" "1" "$([ -e "$cfg" ] && echo 0 || echo 1)"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" = 0 ]

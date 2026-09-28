@@ -239,4 +239,39 @@ else
 	echo "  no NTP server on this host and no busybox ntpd applet -- skipping (see docs/HACKING.md, test-qemu)"
 fi
 
+say "scenario: a web UI save of SYSLOG_SERVER is read back by svc-syslogd.sh"
+# The path a stick takes: confd runs the REAL /etc/scripts/flash set against the
+# writable config dir, then /api/apply restarts syslogd under init respawn and
+# svc-syslogd.sh reads the value back through flash get. SYSLOG_SERVER is an
+# odi-only key (not in the stock XML), which is what once could not be saved.
+syslogd_args() {
+	# shellcheck disable=SC2016
+	sshx 'for p in /proc/[0-9]*; do [ "$(cat $p/comm 2>/dev/null)" = syslogd ] && tr "\0" " " < $p/cmdline; done' 2>/dev/null || true
+}
+UIAUTH=admin:admin
+res=$(curl -s -u "$UIAUTH" -X POST --data 'SYSLOG_SERVER=10.0.2.2:5514' "http://127.0.0.1:$HTTP_PORT/api/config") || res=""
+case "$res" in *'"ok":true'*) ;; *) fail "web UI save of SYSLOG_SERVER failed: $res" ;; esac
+[ "$(sshx 'grep -c "^SYSLOG_SERVER=10.0.2.2:5514$" /etc/config/odi.conf')" = 1 ] || fail "odi.conf does not hold SYSLOG_SERVER"
+sshx '/etc/scripts/flash get SYSLOG_SERVER' | grep -qx 'SYSLOG_SERVER=10.0.2.2:5514' || fail "flash get SYSLOG_SERVER does not read the saved value"
+sshx 'grep -q "Name=\"LAN_IP_ADDR\" Value=\"10.0.2.15\"" /etc/config/lastgood.xml' || fail "a stock key in lastgood.xml was touched"
+curl -s -u "$UIAUTH" -X POST --data 'what=syslog' "http://127.0.0.1:$HTTP_PORT/api/apply" >/dev/null || true
+ok=0
+for _ in $(seq 1 15); do
+	syslogd_args | grep -q -- '-R 10.0.2.2:5514' && { ok=1; break; }
+	sleep 1
+done
+[ "$ok" = 1 ] || fail "syslogd is not running with -R 10.0.2.2:5514 after apply (args: $(syslogd_args))"
+echo "  saved through the UI, stored in odi.conf, syslogd running with -R 10.0.2.2:5514"
+# Clearing: an empty value removes the key, and syslogd comes back without -R.
+sshx '/etc/scripts/flash set SYSLOG_SERVER ""' >/dev/null
+sshx '/etc/scripts/apply.sh syslog' >/dev/null || true
+ok=0
+for _ in $(seq 1 15); do
+	a=$(syslogd_args)
+	[ -n "$a" ] && ! echo "$a" | grep -q -- '-R ' && { ok=1; break; }
+	sleep 1
+done
+[ "$ok" = 1 ] || fail "syslogd still forwards after the key was cleared (args: $(syslogd_args))"
+echo "  cleared: syslogd back to local only"
+
 say "all scenarios passed"

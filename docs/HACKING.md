@@ -564,15 +564,18 @@ needed), and `kill -9` on each critical daemon, checked over real ssh
 (a test-only key, `test/qemu/id_test`, baked into the harness's initramfs
 only) and real HTTP to confd and metricsd. `svc-syslogd.sh`/`svc-klogd.sh`
 run here too (unconditionally); `svc-ntpd.sh` is exercised against
-`NTP_SERVER`, a fixture value the harness writes straight to
-`/var/config/lastgood.xml` (there is no real config partition here either)
-pointing at 10.0.2.2, the qemu user-net gateway address SLIRP maps to the
+`NTP_SERVER`, seeded with the real `flash set` into
+`/var/config/odi.conf` (a plain writable directory, there is no real config
+partition here) pointing at 10.0.2.2, the qemu user-net gateway address SLIRP maps to the
 host's own loopback -- `run-qemu.sh` uses the NTP server the build host
 already runs on UDP 123 if there is one, otherwise starts a host busybox
 `ntpd -l` for the scenario, steps the guest clock to 2000-01-01, restarts
 ntpd with `apply.sh ntp` and checks the clock is corrected within 60 s.
 No responder on the build host: that one scenario is skipped, logged, not
-failed.
+failed. A further scenario saves `SYSLOG_SERVER` through the web UI
+(`POST /api/config`, then `/api/apply what=syslog`) and asserts syslogd runs with
+`-R <host>`, then clears it with `flash set KEY ""` and asserts `-R` is gone: the
+real `flash` against a writable config dir, not a stub.
 
 **What it does NOT cover**, because the kernel underneath is a STOCK
 mainline build (`odi-toolchain-qemu-kernel-malta`, below), never this
