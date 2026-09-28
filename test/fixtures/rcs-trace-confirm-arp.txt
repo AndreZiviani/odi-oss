@@ -70,6 +70,7 @@ exec /bin/cat ["cat", "/proc/odi_init"]
 write /proc/odi_init "ponmac\n"
 exec /bin/cat ["cat", "/proc/odi_init"]
 exec /etc/scripts/network.sh ["/etc/scripts/network.sh"]
+exec /bin/mkdir ["mkdir", "-p", "/var/run"]
 exec /sbin/ifconfig ["ifconfig", "br0"]
 exec /bin/sed ["sed", "-n", "s/.*inet addr:\\([0-9.]*\\).*/\\1/p"]
 exec /bin/cat ["cat", "/sys/class/net/eth0/operstate"]
@@ -108,10 +109,6 @@ exec /bin/mknod ["mknod", "/dev/ptypf", "c", "2", "15"]
 exec /bin/mknod ["mknod", "/dev/ttypf", "c", "3", "15"]
 exec /etc/init.d/services ["/etc/init.d/services", "start"]
 exec /bin/sleep ["sleep", "60"]
-exec /sbin/ifconfig ["ifconfig", "br0"]
-exec /bin/sed ["sed", "-n", "s/.*inet addr:\\([0-9.]*\\).*/\\1/p"]
-exec /bin/arping ["arping", "-c", "1", "-w", "2", "-I", "br0", "192.168.0.2"]
-write /proc/odi_wdt/userland_ok "1\n"
 write /proc/odi_init "optics\n"
 exec /bin/cat ["cat", "/proc/odi_init"]
 write /proc/odi_init "i2c 1\n"
@@ -145,6 +142,10 @@ exec /bin/cut ["cut", "-d.", "-f1", "/proc/uptime"]
 exec /bin/sleep ["sleep", "1"]
 exec /bin/omcid ["/bin/omcid", "-a", "-d"]
 exec /bin/cut ["cut", "-d.", "-f1", "/proc/uptime"]
+exec /sbin/ifconfig ["ifconfig", "br0"]
+exec /bin/sed ["sed", "-n", "s/.*inet addr:\\([0-9.]*\\).*/\\1/p"]
+exec /bin/arping ["arping", "-c", "1", "-w", "2", "-I", "br0", "192.168.0.2"]
+write /proc/odi_wdt/userland_ok "1\n"
 exec /bin/sed ["sed", "-n", "s/.*Name=\"GPON_SN\" Value=\"\\([^\"]*\\)\".*/\\1/p", "/etc/config/lastgood_hs.xml"]
 exec /bin/head ["head", "-n", "1"]
 write /proc/odi_init "gponsn ODIT00000001\n"
