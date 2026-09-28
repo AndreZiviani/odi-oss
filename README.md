@@ -66,8 +66,10 @@ the same hardware.
 | switch / GPON MAC driver | closed | our own GPL driver, an independent implementation, built straight into the kernel |
 | GPON/OMCI daemon | closed | our own `omcid`, with `omcli`/`omcicli`, `omciprobe` and `omcicap` tooling around it |
 | switch/optics CLI (`diag`) | closed; some commands crash or hang the CLI | our own CLI over our kernel's interfaces: optics, GPON state, alarms and flows, port MIB counters, the MAC table, register access; batches commands and always exits cleanly; the exporter's commands are byte-compatible with the stock CLI |
-| optics (DDM) readout | closed | our own SFF-8472 reader, exposed through `diag` |
+| optics (DDM) readout | closed | our own SFF-8472 reader, exposed through `diag`: temperature, voltage, bias current, tx/rx power, plus alarm/warning flags and optical LOS status (`pon get transceiver alarm-status`) |
 | multicast | closed IGMP handling | IGMP snooping is off (not used: one UNI port leaves little to prune). `igmpd` ships but is not started (see [`docs/TOOLS.md`](docs/TOOLS.md)) |
+| system log | none: no syslogd, nowhere central to read a log from | `syslogd`/`klogd`, a 64 KB circular buffer `logread` reads, optional remote forwarding (`SYSLOG_SERVER`) |
+| clock | none: no RTC, no NTP client | opt-in `ntpd` (`NTP_SERVER`) |
 | web UI | closed, minimal | `confd` (a separate project): same port; offers only the 21 settings this image reads, each marked LIVE, SERVICE RESTART, INTERRUPTS INTERNET or REBOOT, and applies them without a reboot where it can; the switch MAC table; firmware upload and write to the inactive slot; SSH-key management; build/version info |
 | metrics | none | a Prometheus exporter, `metricsd` (a separate project), including whether the OLT actually provisioned service, not just link state |
 | SSH | an old dropbear needing legacy algorithms re-enabled on the client | a current dropbear, ed25519 host key, `scp` in both directions |

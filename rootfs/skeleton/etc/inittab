@@ -20,14 +20,23 @@
 # its self-revert are the way back if ssh ever fails to come up.
 ttyS0::respawn:/bin/login -p
 
-# metricsd, confd, dropbear, omcid: each restarted the instant it exits,
-# forever, by init itself -- no supervise.sh, no restart budget, no rate
-# limit (docs/SETTINGS.md, "native over hand-rolled"). Every entry is a
-# script, not the daemon directly: each checks its own /etc/config/<name>.off
-# flag first (rootfs/skeleton/etc/scripts/svc-*.sh) and sets its
-# oom_score_adj right before exec-ing the daemon in place
+# syslogd, klogd, ntpd, metricsd, confd, dropbear, omcid: each restarted the
+# instant it exits, forever, by init itself -- no supervise.sh, no restart
+# budget, no rate limit (docs/SETTINGS.md, "native over hand-rolled"). Every
+# entry is a script, not the daemon directly: each checks its own
+# /etc/config/<name>.off flag first (rootfs/skeleton/etc/scripts/svc-*.sh)
+# and sets its oom_score_adj right before exec-ing the daemon in place
 # (rootfs/skeleton/etc/scripts/respawn.sh), so the pid init tracks is always
 # the daemon itself, never a parent that already exited.
+#
+# syslogd/klogd/ntpd are new vs. the stock image, which has neither a
+# syslog daemon nor an NTP client (kb/systems/rtl9601-no-clock-no-
+# syslog.md). ntpd's own script gates on NTP_SERVER being set in the config
+# store (docs/SETTINGS.md); this entry is always here, static like every
+# other inittab line, and does nothing until that key is set.
+::respawn:/etc/scripts/svc-syslogd.sh
+::respawn:/etc/scripts/svc-klogd.sh
+::respawn:/etc/scripts/svc-ntpd.sh
 ::respawn:/etc/scripts/svc-metricsd.sh
 ::respawn:/etc/scripts/svc-confd.sh
 ::respawn:/etc/scripts/svc-dropbear.sh

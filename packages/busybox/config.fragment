@@ -60,7 +60,24 @@ CONFIG_ROUTE=y
 CONFIG_BRCTL=y
 CONFIG_UDHCPC=y
 CONFIG_SYSLOGD=y
+# The circular buffer in shared memory (-C), not a log file: `logread`
+# reads it, and it cannot fill the config or root partition the way a file
+# would. Sized in svc-syslogd.sh (-C64, 64 KB); this just builds the
+# feature in. -R (forward to SYSLOG_SERVER) needs FEATURE_REMOTE_LOG too.
+CONFIG_FEATURE_IPC_SYSLOG=y
+CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=64
+CONFIG_FEATURE_REMOTE_LOG=y
+CONFIG_LOGREAD=y
 CONFIG_KLOGD=y
+# ntpd: opt-in client (NTP_SERVER, docs/SETTINGS.md), off by default in
+# stock (kb/systems/rtl9601-no-clock-no-syslog.md: no RTC, no NTP client
+# there at all) -- this image closes that gap. FEATURE_NTPD_SERVER: the
+# same binary can also answer as a server, used by the qemu harness as the
+# NTP responder for test/qemu (test/qemu/run-qemu.sh), so no second NTP
+# implementation is needed on either side.
+CONFIG_NTPD=y
+CONFIG_FEATURE_NTPD_SERVER=y
+CONFIG_FEATURE_NTPD_CONF=n
 
 # --- no IPv6, because the KERNEL has none ---
 # IPv6 is off in kernel/618/config, as it was in the vendor kernel

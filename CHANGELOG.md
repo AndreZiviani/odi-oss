@@ -60,6 +60,32 @@ scripts always have, runs the test suite against the result, and opens a PR
 only if that passes. Its first real run already found and verified a kernel
 point-release bump, linux 6.18.53 -> 6.18.54, included in this change.
 ||||||| parent of 99a0a0e (optics: model alarm/warning flags, LOS and a scriptable transceiver)
+||||||| parent of 8a4266c (syslog and ntp: new respawn services, both opt-in via the config store)
+**An opt-in NTP client.** The stock image has no RTC and no NTP client at
+all (`kb/systems/rtl9601-no-clock-no-syslog.md`). `svc-ntpd.sh`, a new
+respawn entry, starts busybox `ntpd` in the foreground against
+`NTP_SERVER` (docs/SETTINGS.md) only while that key is set; unset, it runs
+the same off-flag placeholder every other disabled service uses, so the
+static inittab entry does nothing rather than needing to be commented out.
+`apply.sh ntp` (SERVICE RESTART) starts or stops it live, no reboot,
+whenever the setting changes.
+
+**syslogd and klogd, with a circular buffer `logread` reads, plus optional
+remote forwarding.** The stock image has neither a syslog daemon nor
+anywhere central `logread` can read from
+(`kb/systems/rtl9601-no-clock-no-syslog.md`). Two new respawn entries,
+`svc-syslogd.sh`/`svc-klogd.sh`, start busybox syslogd/klogd in the
+foreground with a 64 KB circular buffer (`-C64`), the same off-flag and
+config-store-read idiom every other `svc-*.sh` here uses. Setting
+`SYSLOG_SERVER` in the config store (docs/SETTINGS.md) adds `-R host:port
+-L`: forwarded remotely, kept locally too. `dropbear` now logs through
+syslog like everything else here, instead of straight to
+`/var/log/services.log` (dropped its own `-E`, which is what was
+redirecting it away from syslog); `confd`, `metricsd` and `omcid` have no
+syslog option of their own to switch on, so their existing `/var/log/*.log`
+files are unchanged. `apply.sh syslog` (SERVICE RESTART) restarts syslogd
+without a reboot or an OMCI interruption.
+
 **The optics model gets alarm/warning flags and an optical LOS status, plus
 a scriptable host-side transceiver behind the same modelled I2C controller
 the driver tests already use.** `pon get transceiver alarm-status` reads
