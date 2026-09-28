@@ -159,6 +159,15 @@ dev_hook() {
 		# group or others") -- measured, not a guess. Harmless on a real
 		# device, whose root really is 0755 squashfs already.
 		chmod 0755 / 2>/dev/null || true
+		# rcS confirms the watchdog only when /var/run/config-mounted
+		# exists (mount-config.sh writes it on a real jffs2 mount) -- this
+		# harness has no MTD device for qemu to mount at all (the header
+		# above already says so), so without this the harness would revert
+		# at 120 s every run regardless of whether ssh actually comes up.
+		# The lan-ip override just below is the same kind of stand-in: real
+		# management config, faked because the storage it would come from
+		# does not exist here.
+		mkdir -p /var/run && : > /var/run/config-mounted
 		if [ -f /etc/qemu-test/authorized_keys ]; then
 			mkdir -p /var/config/dropbear.d
 			cp /etc/qemu-test/authorized_keys /var/config/dropbear.d/authorized_keys
