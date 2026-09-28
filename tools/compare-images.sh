@@ -31,7 +31,9 @@ TAR1=${1:?usage: compare-images.sh <tar1> <tar2>}
 TAR2=${2:?usage: compare-images.sh <tar1> <tar2>}
 
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+# sudo unsquashfs below leaves root-owned files under $WORK; a plain rm -rf,
+# run as the non-root caller of this script, cannot remove them.
+trap 'sudo rm -rf "$WORK"' EXIT
 DIRA=$WORK/a DIRB=$WORK/b
 mkdir -p "$DIRA" "$DIRB"
 tar -xf "$TAR1" -C "$DIRA"
@@ -57,9 +59,13 @@ done
 
 # rootfs is a squashfs image: compare the trees inside it, not the
 # compressed bytes (the squashfs metadata ordering mksquashfs itself picks is not at issue
-# here; the tolerated-file list above is).
-unsquashfs -d "$WORK/rootfs-a" "$DIRA/rootfs" >/dev/null
-unsquashfs -d "$WORK/rootfs-b" "$DIRB/rootfs" >/dev/null
+# here; the tolerated-file list above is). rootfs/devices.pseudo puts real
+# character/block device nodes in the image, which unsquashfs can only
+# recreate as an actual superuser -- sudo, not a fallback, on any runner
+# where this script runs unprivileged.
+sudo unsquashfs -d "$WORK/rootfs-a" "$DIRA/rootfs" >/dev/null
+sudo unsquashfs -d "$WORK/rootfs-b" "$DIRB/rootfs" >/dev/null
+sudo chmod -R a+rX "$WORK/rootfs-a" "$WORK/rootfs-b"
 
 rootfs_diff=$(diff -rq "$WORK/rootfs-a" "$WORK/rootfs-b" || true)
 unexpected=$(echo "$rootfs_diff" | grep -vE \
