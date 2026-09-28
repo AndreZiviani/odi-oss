@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.0.4 — 2026-09-28
+
 **A respawned omcid gets provisioned again, not just restarted.** Hardware
 finding (rc5, claro, 2026-09-28): after `kill -9 omcid`, init respawns it
 within 8 s and it pings and serves `omcicli`, but `gpon_omci_services`
