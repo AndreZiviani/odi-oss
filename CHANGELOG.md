@@ -5,6 +5,26 @@ listed here.
 
 ## Unreleased
 
+**A respawned omcid resumes instead of getting re-provisioned: zero
+outage, not eighteen seconds.** v1.0.4's `omci-respawn-reprovision.sh` made
+a respawn recover, but through a visible re-range (O5 -> O1 -> O5).
+`omcid` now snapshots its whole MIB -- every managed entity, the MIB data
+sync counter, and the bookkeeping that maps an entity to what is actually
+programmed in the switch (GEM flow ids, T-CONT map, broadcast flow,
+service table) -- to `/var/run/omcid-mib.snap` after every Create, Set or
+Delete, written atomically with a version header and a CRC32. A respawned
+`omcid` whose PON is still O5 and whose snapshot names this same device
+loads it by plain memory copy and resumes answering -- no re-registration,
+and not one switch-programming driver call, because the datapath was
+never touched. `omci-respawn-reprovision.sh` waits briefly on `omcid`'s own
+decision (`/var/run/omcid-resume-decision`) and skips its deactivate/
+reactivate sequence entirely on a "resumed" decision; anything else (no
+snapshot, a mismatched device, not O5, or a MIB the OLT has since reset --
+which deletes the snapshot) falls back to the v1.0.4 path unchanged. See
+docs/BOOT.md, "Resume without re-registration", and
+`src/omci/resume-test.sh`, the driver-call golden replayed across a
+`kill -9` and respawn.
+
 ## v1.0.4 — 2026-09-28
 
 **A respawned omcid gets provisioned again, not just restarted.** Hardware

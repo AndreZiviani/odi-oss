@@ -239,6 +239,28 @@ void gen_no_vlan_filter_rule(struct omci_vlan_oper *vr);
 void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc);
 extern struct tcont_slot tcont_map[TCONT_MAX];
 void mib_reset_all(void);
+extern uint16_t alarm_snapshot;
+
+/* ---------------------------------------------------------------- snapshot
+ *
+ * omcid's own MIB state (the rows, the table-attribute pool, the flow and
+ * T-CONT bookkeeping, the service table -- everything that maps a managed
+ * entity to switch programming), persisted to tmpfs so a respawned process
+ * can resume answering the OLT without re-registration. See snapshot.c and
+ * docs/BOOT.md, "Resume without re-registration".
+ */
+#define SNAPSHOT_PATH          "/var/run/omcid-mib.snap"
+#define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
+#define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
+void snapshot_save(void);
+void snapshot_invalidate(void);
+/* onu_state: the driver's ONU state (5 == O5). Returns 1 and repopulates the
+ * MIB and its bookkeeping when a valid, matching snapshot was loaded; 0
+ * otherwise, leaving everything exactly as it was (empty, for a fresh
+ * process) -- the caller then falls back to the ordinary re-registration
+ * path. */
+int snapshot_try_resume(uint32_t onu_state);
+void snapshot_write_decision(int resumed);
 /* `creating` separates a Create from a Set. Class 47 needs it: the stock stack
  * drives the MAC learning limit and the flooding mask from the create arm
  * unconditionally, and the traffic descriptors only from the set arm, gated

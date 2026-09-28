@@ -54,6 +54,7 @@ XML
 run() {
 	env PATH="$T/bin:$PATH" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
 	    ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" UPTIME="$T/uptime" \
+	    RESUME_DECISION="$T/resume-decision" DECISION_WAIT=0 \
 	    DEACT_HOLD=0 REGISTER_WAIT=3 sh "$R" 2>&1
 }
 
@@ -83,9 +84,41 @@ t "an empty PLOAM password is not sent, as at boot" "^gpondeact gponact $" "$(tr
 
 : > "$T/verbs"
 env ODI_INIT="$T/no-such-proc-file" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
+    RESUME_DECISION="$T/resume-decision" DECISION_WAIT=0 \
     REGISTER_WAIT=1 DEACT_HOLD=0 sh "$R" > /dev/null 2>&1; rc=$?
 t "no PON verbs on this kernel (qemu's stock kernel) -- a no-op, not a failure" "^0$" "$rc"
 t "and touches nothing" "^0$" "$(wc -c < "$T/verbs" | tr -d ' ')"
+
+# Resume without re-registration (docs/BOOT.md): a "resumed" decision from
+# the respawned omcid skips the whole gpondeact/gponact dance.
+: > "$T/verbs"
+printf 'resumed\n' > "$T/resume-decision"
+start_omcid
+sleep 1
+env PATH="$T/bin:$PATH" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
+    ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" UPTIME="$T/uptime" \
+    RESUME_DECISION="$T/resume-decision" DECISION_WAIT=3 \
+    DEACT_HOLD=0 REGISTER_WAIT=3 sh "$R" > /dev/null 2>&1; rc=$?
+sleep 1
+t "a resumed decision succeeds" "^0$" "$rc"
+t "and issues no PON verb at all" "^0$" "$(wc -c < "$T/verbs" | tr -d ' ')"
+[ -f "$T/omcid.pid" ] && kill "$(cat "$T/omcid.pid")" 2>/dev/null
+rm -f "$T/resume-decision"
+
+# No decision file at all within DECISION_WAIT: the safe fallback, not a hang.
+: > "$T/verbs"
+start_omcid
+sleep 1
+env PATH="$T/bin:$PATH" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
+    ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" UPTIME="$T/uptime" \
+    RESUME_DECISION="$T/no-such-decision-file" DECISION_WAIT=1 \
+    DEACT_HOLD=0 REGISTER_WAIT=3 sh "$R" > /dev/null; rc=$?
+sleep 1
+t "no decision within the wait falls back to reprovision" "^0$" "$rc"
+# cs.xml's PLOAM password was cleared by the block above (as at boot), so
+# this reprovision sends no gponpw either -- same shape as that test.
+t "and still reprovisions" "^gpondeact gponact $" "$(tr '\n' ' ' < "$T/verbs")"
+[ -f "$T/omcid.pid" ] && kill "$(cat "$T/omcid.pid")" 2>/dev/null
 
 # svc-omcid.sh: static guard that the marker gate still wires the two
 # branches the way docs/BOOT.md describes -- the reprovision script is

@@ -115,7 +115,7 @@ their VLAN rules, over the odi_omci netlink command path into the
 `odi_switch` driver built into the kernel (`docs/KERNEL.md`). This is the
 daemon that decides whether the OLT sees a working ONU.
 
-    omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex]
+    omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state]
 
     -a          program the switch (apply mode); without it, dry run
     -r          restart: first remove every bridge connection a previous
@@ -123,8 +123,17 @@ daemon that decides whether the OLT sees a working ONU.
     -d          daemon: no frame or idle limit
     -w units    exit after this many idle 5 s units (default 24)
     -c hex      use this capability blob instead of the driver one
+    -s state    use this ONU state for the resume decision instead of
+                asking the driver (test only; see docs/BOOT.md, "Resume
+                without re-registration")
     -f          start even if a live process holds redirect type 1
     -h          this text; starts nothing
+
+At startup, before opening the OLT-facing socket, a respawned `omcid` also
+decides whether to resume its MIB from `/var/run/omcid-mib.snap` instead of
+starting empty -- see docs/BOOT.md, "Resume without re-registration". That
+snapshot is written after every Create, Set or Delete, and deleted on a
+MIB reset; none of it is a command-line concern beyond `-s`.
 
 rcS runs `/bin/omcid -a -d >> /var/log/omcid.log 2>&1 &` when
 `/proc/odi_omci` is writable (the switch driver is there) and

@@ -67,7 +67,7 @@ static void catch_signals(int fd, uint32_t tid)
 
 static void usage(void)
 {
-	out("usage: omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex]\n"
+	out("usage: omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state]\n"
 	    "\n"
 	    "The OMCI responder: registers for redirect type 1 and answers the\n"
 	    "OLT, and serves the omcli and omcicli queues.\n"
@@ -78,6 +78,8 @@ static void usage(void)
 	    "  -d          daemon: no frame or idle limit\n"
 	    "  -w units    exit after this many idle 5 s units (default 24)\n"
 	    "  -c hex      use this capability blob instead of the driver one\n"
+	    "  -s state    use this ONU state for the resume decision instead\n"
+	    "              of asking the driver (test only, see docs/BOOT.md)\n"
 	    "  -f          start even if a live process holds redirect type 1\n"
 	    "  -h          this text; starts nothing\n");
 }
@@ -89,6 +91,11 @@ int main(int argc, char **argv)
 	int idle = 0, maxidle = 24, n = 0, want = 400, force = 0, restart = 0;
 	int quiet = 0;
 	unsigned long frames_seen = 0;
+	/* -s: an ONU state to use instead of asking the driver, the same
+	 * reason -c takes a capability blob -- a test harness with no line
+	 * side has no driver to answer command 13 either. */
+	int state_from_arg = 0;
+	uint32_t state_arg = 0;
 
 	/* Every argument is matched whole, and anything unrecognised stops the
 	 * program before it opens a socket: a mistyped flag must not start a
@@ -141,6 +148,14 @@ int main(int argc, char **argv)
 			maxidle = 0;
 			for (const char *s = argv[++i]; *s >= '0' && *s <= '9'; s++)
 				maxidle = maxidle * 10 + (*s - '0');
+		}
+		/* -s state: use this ONU state (5 == O5) for the resume
+		 * decision instead of asking the driver. Test-only, like -c. */
+		else if (str_eq(argv[i], "-s") && i + 1 < argc) {
+			state_arg = 0;
+			for (const char *s = argv[++i]; *s >= '0' && *s <= '9'; s++)
+				state_arg = state_arg * 10 + (uint32_t)(*s - '0');
+			state_from_arg = 1;
 		} else {
 			out_fmt("omcid: unknown argument %s\n", argv[i]);
 			usage();
@@ -206,6 +221,36 @@ int main(int argc, char **argv)
 		ident.loid[0] ? "set" : "none",
 		vlanCfg.manual ? "on" : "off",
 		report.on ? "on" : "off");
+
+	/* Resume without re-registration (docs/BOOT.md): a respawned omcid
+	 * whose PON is still O5, with a snapshot on disk for this exact
+	 * device, loads it and answers from it -- no re-registration, no
+	 * switch reprogramming, because the datapath is already in hardware
+	 * (see kb rtl9601-omci-reapply-without-reboot). Everything else (no
+	 * snapshot, a mismatched device, not O5, or a MIB the OLT has since
+	 * reset -- mib_reset_all() deletes the snapshot itself) falls back to
+	 * the ordinary path below unchanged.
+	 *
+	 * The decision file is written before anything else here can fail or
+	 * block, so omci-respawn-reprovision.sh -- backgrounded by
+	 * svc-omcid.sh at the same moment this process starts -- only has to
+	 * wait on it briefly, not for full registration. Unlinked first so a
+	 * decision from an earlier run never answers for this one. */
+	{
+		uint32_t st = 0;
+		int resumed;
+
+		sys_unlink(RESUME_DECISION_PATH);
+		if (state_from_arg)
+			st = state_arg;
+		else if (fd < 0 || omci_getOnuState(&st) != 0)
+			st = 0;
+		resumed = snapshot_try_resume(st);
+		snapshot_write_decision(resumed);
+		out_fmt("resume: onu state %d, %s\n", (long)st,
+			resumed ? "snapshot loaded, resuming without re-registration"
+				: "no valid snapshot for this state -- falling back to re-registration");
+	}
 
 	if (restart && apply_hw && fd >= 0) {
 		/* Deactivating an id the driver does not hold is not an error
