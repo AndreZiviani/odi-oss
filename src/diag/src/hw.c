@@ -82,8 +82,8 @@ int hw_transceiver_get(int sel, uint8_t out[DDM_RAW_LEN])
 /* raw[0] = A2h byte 110 (status/control, bit 1 = RX_LOS), raw[2]/raw[3] =
  * bytes 112/113 (alarm flags), raw[6]/raw[7] = bytes 116/117 (warning
  * flags) -- see odi_ddm.c's own comment for the full 8-byte layout this
- * mirrors. *alarms/*warnings pack byte 112 in the high 8 bits and byte 113
- * in the low 8 bits, matching the bit order SFF-8472 documents.
+ * mirrors. alarms and warnings each pack byte 112 in the high 8 bits and
+ * byte 113 in the low 8 bits, matching the bit order SFF-8472 documents.
  */
 int hw_transceiver_alarms_get(uint32_t *alarms, uint32_t *warnings, int *los)
 {
