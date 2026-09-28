@@ -5,6 +5,45 @@ listed here.
 
 ## Unreleased
 
+**A registered watchdog client is armed at registration, not on its own
+first ping.** Hardware trial (rc4, claro, 2026-09-28): omcid answered two
+omcicli commands after registering with odi_omci, then stopped -- 0x800
+filled to its 64-message cap, `gpon_omci_services` stayed 0 for 5+ minutes,
+and `/proc/odi_wdt/clients` showed `armed=0` at 279 s uptime: a client that
+never pings at all was never armed, so odi_wdt's per-client deadline never
+had anything to check, and a daemon stuck before its first ping was never
+reset. Investigated thoroughly (the rc4 diff, three separate
+`qemu-mips-static` reproduction attempts combining a CLI flood -- matching
+metricsd v1.1.2's/confd v1.0.6's own 2 s-timeout-then-SIGKILL pattern --
+with the real mib-reset/mib-upload/mib-upload-next sequence from the
+trace, single- and dual-flooder); none reproduced the stall itself
+(qemu-user has no netlink, so this needs either real line timing/volume or
+a mechanism outside the CLI/MIB-volume angle). Closed the watchdog gap
+regardless, since it is a real, independently-justified bug:
+`odi_wdt_client_register()`
+(`kernel/extra/drivers/net/ethernet/odi/odi_wdt.c`) now takes the
+registration uptime and arms immediately, so "never pinged" is caught by
+the same deadline as "pinged once and then stalled". This changes the
+previously-intentional "registered but unarmed never resets" behaviour (the
+modules.off dev case), so `rcS` now only registers "omcid" with odi_wdt
+under the same two conditions `svc-omcid.sh` gates the actual exec on
+(`/etc/config/modules.off` absent and `/bin/omcid` executable) -- a dev
+image that will never start omcid no longer registers it either, so there
+is no legitimate registered-but-silent-forever case left. `test/odi_wdt_test.c`
+rewritten to match (`test_registered_but_never_pinged_client_still_resets`,
+`test_client_reregister_resets_the_clock`).
+
+**`mq_send()` (`src/omci/omci_msgq.h`) is bounded too.** The one SysV IPC
+call left in this daemon's whole "bound every wait" sweep that was still a
+bare blocking `msgsnd` -- every client (`omcli`/`omcicli`, so confd and
+metricsd both) uses it to enqueue a request onto 0x800 or the native queue,
+and it had no `IPC_NOWAIT` of its own. metricsd's/confd's own timeouts
+SIGKILL the *child*, which does not stop it parking in `msgsnd` first if
+the queue omcid owns is momentarily full -- exactly when several such
+clients pile in at once. Now `IPC_NOWAIT` plus a bounded retry (100 x 5 ms),
+the same shape omcid's own reply paths already use (`vqsrv.c`'s
+`vq_reply()`, `clisrv.c`'s `cli_chunk()`).
+
 **Every wait on another process is bounded now, not only the two hit on
 hardware.** Audited every `diag`, `omcli`/`omcicli`, `arping`, `nv` and
 `/proc` verb write/read in `rootfs/skeleton/etc/` for an unbounded wait.

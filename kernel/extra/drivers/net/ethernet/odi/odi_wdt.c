@@ -125,7 +125,7 @@ static struct odi_wdt_client *client_find(struct odi_wdt_deadline_state *st, con
 }
 
 int odi_wdt_client_register(struct odi_wdt_deadline_state *st, const char *name,
-			     unsigned int deadline_s)
+			     unsigned int deadline_s, unsigned int uptime_s)
 {
 	struct odi_wdt_client *c = client_find(st, name);
 	int i;
@@ -142,6 +142,14 @@ int odi_wdt_client_register(struct odi_wdt_deadline_state *st, const char *name,
 	if (!c)
 		return -1;
 	c->deadline_s = deadline_s;
+	/* Armed from registration, not from the first ping -- see the header
+	 * comment. A re-registration (the idempotent path above) also resets
+	 * the clock, same as the client's own first ping would: rcS re-running
+	 * in a development boot must not carry a stale, already-expired
+	 * deadline into the new run.
+	 */
+	c->last_ping_s = uptime_s;
+	c->armed = 1;
 	return (int)(c - st->clients);
 }
 
@@ -591,8 +599,9 @@ static int odi_wdt_parse_write(const char __user *buf, size_t size, char *name,
 /* /proc/odi_wdt/register -- "<name> <deadline_s>", e.g. "omcid 60". rcS
  * writes this once per required client at boot (docs/SETTINGS.md,
  * "Watchdog rules"). Idempotent: registering an already-known name just
- * updates its deadline. Does not arm anything -- the client's own first
- * ping does that.
+ * updates its deadline. Arms immediately, counted from now: a client that
+ * registers and then never pings at all is caught by its own deadline,
+ * the same as one that pinged once and then stalled (odi_wdt.h).
  */
 static ssize_t odi_wdt_register_write(struct file *file, const char __user *buf,
 				       size_t size, loff_t *pos)
@@ -604,7 +613,8 @@ static ssize_t odi_wdt_register_write(struct file *file, const char __user *buf,
 	rc = odi_wdt_parse_write(buf, size, name, &deadline_s);
 	if (rc)
 		return rc;
-	if (odi_wdt_client_register(&odi_wdt_state, name, deadline_s) < 0) {
+	if (odi_wdt_client_register(&odi_wdt_state, name, deadline_s,
+				     odi_wdt_uptime_s()) < 0) {
 		pr_err(DRV_NAME ": register: no free client slot for %s\n", name);
 		return -ENOSPC;
 	}

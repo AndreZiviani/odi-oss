@@ -147,9 +147,10 @@ static void test_userland_confirm_prevents_the_deadline(void)
 	CHECK(!(odi_wdt_deadline_tick(&st, 200, AMPLE_KB) & ODI_WDT_ACTION_FORCE_RESET), "userland_ok=1 suppresses the forced reset entirely");
 }
 
-/* ---- Per-client ping deadlines: register sets the deadline, the first
- * ping arms it, missing an armed deadline resets (with FORCE_RESET), and a
- * client never registered or never yet pinged is never checked. --------- */
+/* ---- Per-client ping deadlines: register arms the deadline immediately,
+ * counted from the registration uptime -- a client that never pings at all
+ * is caught exactly like one that pinged once and then stalled -- and a
+ * client never registered is never checked. ------------------------------ */
 
 static void test_unregistered_client_ping_is_refused(void)
 {
@@ -159,17 +160,21 @@ static void test_unregistered_client_ping_is_refused(void)
 	CHECK(odi_wdt_client_ping(&st, "omcid", 5) < 0, "a ping from a name nobody registered is refused");
 }
 
-static void test_registered_but_unarmed_client_never_resets(void)
+static void test_registered_but_never_pinged_client_still_resets(void)
 {
 	struct odi_wdt_deadline_state st;
 
 	odi_wdt_deadline_state_init(&st);
 	st.watchdog_enabled = 1;
 	st.userland_ok = 1;
-	CHECK(odi_wdt_client_register(&st, "omcid", 60) >= 0, "register succeeds into a free slot");
+	CHECK(odi_wdt_client_register(&st, "omcid", 60, 10) >= 0, "register succeeds into a free slot");
 
-	CHECK(!(odi_wdt_deadline_tick(&st, 100000, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS),
-	      "no reset from a registered client that never pinged -- omcid never started (modules.off) is not a fault");
+	CHECK(!(odi_wdt_deadline_tick(&st, 69, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS),
+	      "no miss before the registration-counted deadline elapses");
+	CHECK(odi_wdt_deadline_tick(&st, 71, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS,
+	      "a client that registers and never pings at all is still caught: rcS only "
+	      "registers a client it is about to start (svc-omcid.sh gates that), so "
+	      "there is no longer a legitimate registered-but-silent-forever case");
 }
 
 static void test_client_miss_fires_once_past_its_own_deadline(void)
@@ -180,8 +185,8 @@ static void test_client_miss_fires_once_past_its_own_deadline(void)
 	odi_wdt_deadline_state_init(&st);
 	st.watchdog_enabled = 1;
 	st.userland_ok = 1;
-	odi_wdt_client_register(&st, "omcid", 60);
-	CHECK(odi_wdt_client_ping(&st, "omcid", 200) == 0, "the first ping arms the deadline");
+	odi_wdt_client_register(&st, "omcid", 60, 0);
+	CHECK(odi_wdt_client_ping(&st, "omcid", 200) == 0, "a later ping still pushes the deadline out");
 
 	CHECK(!(odi_wdt_deadline_tick(&st, 260, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS),
 	      "no miss AT exactly the deadline (uptime_s > last_ping + deadline)");
@@ -198,7 +203,7 @@ static void test_client_ping_pushes_its_own_deadline_out(void)
 	odi_wdt_deadline_state_init(&st);
 	st.watchdog_enabled = 1;
 	st.userland_ok = 1;
-	odi_wdt_client_register(&st, "omcid", 60);
+	odi_wdt_client_register(&st, "omcid", 60, 0);
 	odi_wdt_client_ping(&st, "omcid", 0);
 	odi_wdt_client_ping(&st, "omcid", 20); /* a fresh ping before the deadline elapses */
 
@@ -212,10 +217,32 @@ static void test_client_register_is_idempotent_on_name(void)
 	int slot1, slot2;
 
 	odi_wdt_deadline_state_init(&st);
-	slot1 = odi_wdt_client_register(&st, "omcid", 60);
-	slot2 = odi_wdt_client_register(&st, "omcid", 90); /* re-registered with a new deadline */
+	slot1 = odi_wdt_client_register(&st, "omcid", 60, 0);
+	slot2 = odi_wdt_client_register(&st, "omcid", 90, 5); /* re-registered with a new deadline */
 	CHECK(slot1 == slot2, "the same name reuses its slot rather than taking a second one");
 	CHECK(st.clients[slot2].deadline_s == 90, "re-registering updates the deadline");
+}
+
+static void test_client_reregister_resets_the_clock(void)
+{
+	struct odi_wdt_deadline_state st;
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1;
+	odi_wdt_client_register(&st, "omcid", 60, 0);
+
+	CHECK(odi_wdt_deadline_tick(&st, 61, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS,
+	      "sanity: the first registration's deadline has indeed passed");
+
+	odi_wdt_deadline_state_init(&st); /* a fresh boot, not a stale in-memory reset */
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1;
+	odi_wdt_client_register(&st, "omcid", 60, 0);
+	odi_wdt_client_register(&st, "omcid", 60, 55); /* re-registered late in the same boot */
+
+	CHECK(!(odi_wdt_deadline_tick(&st, 61, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS),
+	      "re-registering resets last_ping_s to the new registration time, not the old one");
 }
 
 static void test_client_slots_are_limited(void)
@@ -228,9 +255,9 @@ static void test_client_slots_are_limited(void)
 	for (i = 0; i < ODI_WDT_MAX_CLIENTS; i++) {
 		name[0] = 'a' + (char)i;
 		name[1] = '\0';
-		CHECK(odi_wdt_client_register(&st, name, 60) >= 0, "every slot up to the max registers fine");
+		CHECK(odi_wdt_client_register(&st, name, 60, 0) >= 0, "every slot up to the max registers fine");
 	}
-	CHECK(odi_wdt_client_register(&st, "one-too-many", 60) < 0, "one past the max is refused, not silently dropped");
+	CHECK(odi_wdt_client_register(&st, "one-too-many", 60, 0) < 0, "one past the max is refused, not silently dropped");
 }
 
 /* ---- Kernel-side memory floor: consecutive low samples, not one. ------- */
@@ -333,10 +360,11 @@ int main(void)
 	test_userland_confirm_prevents_the_deadline();
 
 	test_unregistered_client_ping_is_refused();
-	test_registered_but_unarmed_client_never_resets();
+	test_registered_but_never_pinged_client_still_resets();
 	test_client_miss_fires_once_past_its_own_deadline();
 	test_client_ping_pushes_its_own_deadline_out();
 	test_client_register_is_idempotent_on_name();
+	test_client_reregister_resets_the_clock();
 	test_client_slots_are_limited();
 
 	test_mem_floor_needs_consecutive_low_samples();

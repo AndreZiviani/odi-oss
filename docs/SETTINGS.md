@@ -265,7 +265,7 @@ kernel itself.
 | rule | deadline / floor | armed by | source |
 |---|---|---|---|
 | boot confirmation | 120 s of uptime (`ODI_WDT_USERLAND_DEADLINE_S`) | always, from boot | rcS writes `1` to `/proc/odi_wdt/userland_ok` once userland is up (unchanged from v1.0.1); `/etc/config/confirm-arp` (development) makes that wait for an ARP reply from the `.2` address first |
-| per-client ping deadline | one per registered client, e.g. 60 s for omcid (`ODI_WDT_OMCID_DEADLINE_S`) | the client's own FIRST ping | rcS registers each required client once, by name and deadline, with `echo "<name> <deadline_s>" > /proc/odi_wdt/register` (idempotent: re-registering just updates the deadline). The client itself pings its own deadline from its own main loop with `echo "<name>" > /proc/odi_wdt/ping` -- omcid does this every 15 s (`src/omci/respond/main.c`, `wdt_ping()`), a quarter of its 60 s deadline. A registered client that never pings (`modules.off`, or a kernel too old to have `/proc/odi_wdt/register`) is never checked -- it is simply unarmed, not a fault |
+| per-client ping deadline | one per registered client, e.g. 60 s for omcid (`ODI_WDT_OMCID_DEADLINE_S`) | registration itself, counted from that moment | rcS registers each required client once, by name and deadline, with `echo "<name> <deadline_s>" > /proc/odi_wdt/register` (idempotent: re-registering just updates the deadline AND resets the clock). The client itself pings its own deadline from its own main loop with `echo "<name>" > /proc/odi_wdt/ping` -- omcid does this every 15 s (`src/omci/respond/main.c`, `wdt_ping()`), a quarter of its 60 s deadline. A registered client that never pings at all is caught the same way one that pinged once and then stalled is (fixed 2026-09-28, hardware trial rc4: a client armed only by its own first ping is never checked if that first ping never comes, which is exactly the shape a daemon stuck before it ever pings takes). Because of this, rcS only registers a client under the same conditions that will actually start it (`svc-omcid.sh`'s own `modules.off`/binary-exists gate, mirrored in rcS before the `/proc/odi_wdt/register` write) -- a kernel too old to have `/proc/odi_wdt/register` still degrades to "never checked", silently, same as before |
 | memory floor | `MemAvailable` below 2048 KB (`ODI_WDT_MEM_FLOOR_KB`) for 3 consecutive 5 s checks (`ODI_WDT_MEM_FLOOR_CONSEC`) | always, from boot | sampled by the kernel itself every tick (`si_mem_available()`, `kernel/extra/drivers/net/ethernet/odi/odi_wdt.c`) -- no userland reader to lose along with the memory it would be reporting on. Several consecutive samples, not one, so a single allocation spike does not reset a box that is otherwise fine. This is the same "OOM took the box and nothing came back" case a 20 MB `scp` into an unbounded `/tmp` produced on ISP1 (2026-09-27), now caught kernel-side instead of by a process that OOM can also kill |
 
 Debugging: `cat /proc/odi_wdt/clients` shows one line per registered
@@ -278,11 +278,13 @@ consecutive checks"`.
 
 Registering a new client (say, dropbear or confd, neither wired up today)
 means two things, both required: rcS gets an
-`echo "name deadline_s" > /proc/odi_wdt/register` line at boot, and the
-client's own main loop gets a periodic
-`echo name > /proc/odi_wdt/ping` well inside that deadline. Neither alone
-does anything -- a registered-but-never-pinged client is inert by design
-(see the table above), and a ping to a name nobody registered is refused.
+`echo "name deadline_s" > /proc/odi_wdt/register` line at boot, gated on
+that client actually being about to start (mirror whatever `svc-<name>.sh`
+already checks), and the client's own main loop gets a periodic
+`echo name > /proc/odi_wdt/ping` well inside that deadline. The registration
+line alone is enough to arm the deadline (see the table above) -- omitting
+the ping is a bug that gets the board reset once the deadline elapses, not
+a silent no-op -- and a ping to a name nobody registered is refused.
 
 ## Resilience
 

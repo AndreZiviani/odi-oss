@@ -184,11 +184,16 @@ dev_hook services
 # rules"): a client pings its OWN deadline from its OWN main loop (omcid
 # does, in src/omci/respond/main.c), and the kernel stops kicking the
 # hardware watchdog if an armed client misses its deadline. Registering
-# only sets the deadline; it does not arm anything, so a stick whose
-# kernel predates /proc/odi_wdt/register (none we ship, but a stray old
-# image) just sees the write fail silently and behaves as if no client
-# were registered at all.
-if [ -w /proc/odi_wdt/register ]; then
+# arms the deadline immediately, counted from registration -- a client that
+# never pings at all is caught exactly like one that stalls after pinging
+# once (odi_wdt.h) -- so this must only run for a client that is actually
+# about to start. Gated on the same two conditions svc-omcid.sh checks
+# before it execs omcid: a dev image with /etc/config/modules.off, or one
+# missing the binary, must not register a client the kernel will then wait
+# on forever. A stick whose kernel predates /proc/odi_wdt/register (none we
+# ship, but a stray old image) just sees the write fail silently and
+# behaves as if no client were registered at all.
+if [ -w /proc/odi_wdt/register ] && [ ! -f /etc/config/modules.off ] && [ -x /bin/omcid ]; then
 	write_proc_bounded /proc/odi_wdt/register "omcid $ODI_WDT_OMCID_DEADLINE_S" 2>/dev/null || \
 		echo "rcS: could not register omcid with odi_wdt" >&2
 	crumb "odi_wdt: omcid registered, deadline ${ODI_WDT_OMCID_DEADLINE_S}s"
