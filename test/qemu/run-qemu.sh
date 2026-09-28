@@ -85,6 +85,28 @@ echo "  ssh key auth ok"
 
 sshx() { ssh "${SSH_OPTS[@]}" root@127.0.0.1 "$@"; }
 
+say "fstab mounts: /var and /var/tmp are tmpfs with the configured size"
+# The root cause of v1.0.2 through v1.0.4-rc1 (kernel/618/config had no
+# CONFIG_SHMEM/CONFIG_TMPFS, so a capped tmpfs mount rejected size= and
+# /var stayed read-only): this is the assertion that would have caught it,
+# read straight off /proc/mounts rather than trusted from a mount -a exit
+# code. /etc/fstab has the sizes (6m, 8m); the kernel reports them back in
+# KB.
+MOUNTS=$(sshx cat /proc/mounts)
+echo "$MOUNTS" | grep -qE '^tmpfs /var tmpfs .*size=6144k' || fail "/var is not tmpfs size=6m -- $(echo "$MOUNTS" | grep ' /var ')"
+echo "$MOUNTS" | grep -qE '^tmpfs /var/tmp tmpfs .*size=8192k' || fail "/var/tmp is not tmpfs size=8m -- $(echo "$MOUNTS" | grep ' /var/tmp ')"
+# The config partition needs a real MTD device (mtd:config, /etc/fstab)
+# this harness does not have (no MTD in qemu, docs/HACKING.md) -- so it is
+# normally absent here. If one ever does show up at /var/config, it must
+# be the real jffs2 mount a flashed image gets, never something softer
+# that would silently mask a mismatch.
+if echo "$MOUNTS" | grep -q ' /var/config '; then
+	echo "$MOUNTS" | grep -qE '^mtd:config /var/config jffs2 ' || fail "/var/config is mounted but not jffs2 -- $(echo "$MOUNTS" | grep ' /var/config ')"
+	echo "  /var, /var/tmp tmpfs with configured sizes; /var/config jffs2"
+else
+	echo "  /var, /var/tmp tmpfs with configured sizes; /var/config absent (no MTD under qemu, expected)"
+fi
+
 say "web UI (confd, port $HTTP_PORT)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$HTTP_PORT/" || true)
 # 401: the confd default, unauthenticated (admin/admin until set) -- still

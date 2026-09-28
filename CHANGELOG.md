@@ -15,12 +15,13 @@ not readable at boot, and `rcS` confirmed the watchdog (`userland_ok`)
 unconditionally, before `omci_start`/`switch_init` even ran -- so a stick
 that came up with a guessed, unreachable address, or a failed `switch_init`
 (`/proc/odi_omci write failed` in the ramlog), still confirmed and never
-reverted. `network.sh` now marks `/var/run/network-configured` only when
-the applied address came from config, not the guess; `rcS` gained
-`confirm_watchdog()`, called right after `omci_start`, which requires the
-config partition mounted, a real (non-guessed) management address, and a
-successful `switch_init` before writing `userland_ok` -- still with no ARP
-or reachability dependency. `test/rcs_trace_inner.sh`'s `network.sh` stub
+reverted. `rcS` gained `confirm_watchdog()`, called right after
+`omci_start`, which requires the config partition mounted, a real
+(non-guessed) management address, and a successful `switch_init` before
+writing `userland_ok` -- still with no ARP or reachability dependency. (The
+"real, non-guessed address" check was reworked again below, into a live
+`network.sh configured` call, superseding the flag file this paragraph
+originally described.) `test/rcs_trace_inner.sh`'s `network.sh` stub
 updated to match.
 
 **Mounts are declarative now, and "config mounted" is a live check, not a
@@ -41,6 +42,41 @@ must not be traced into `/tmp` -- `/tmp` is a symlink to `/var/tmp`, which
 does not exist until that same call has mounted `/var`, and a shell
 redirected into a missing directory never runs the command at all
 (`make test-qemu` caught this one: ssh never came up).
+
+**Root cause, confirmed on a stick: `kernel/618/config` had neither
+`CONFIG_SHMEM` nor `CONFIG_TMPFS`.** Every fix above treated the symptom
+(no management network, `/var` read-only) as a boot-order or gating
+problem; the actual cause was one line below both mounts in the fstab
+rewrite: a `mount -t tmpfs ... size=6m` on a kernel with neither symbol
+falls through to `mm/shmem.c`'s `!CONFIG_SHMEM` stub (`ramfs_get_sb`),
+which mounts fine but rejects `size=` outright (`Invalid argument`) --
+confirmed with the exact error on real hardware. That is why the capped
+`/var` and `/var/tmp` mounts silently never landed, `/var` stayed the
+read-only squashfs, and nothing downstream of it (the config partition,
+`/var/log`) could be created. Fixed by enabling `CONFIG_SHMEM=y` and
+`CONFIG_TMPFS=y` in `kernel/618/config` -- uImage grew from about
+1,274,6xx to 1,281,554 bytes, comfortably under the 1,359,872-byte
+partition cap (78,318 bytes spare). Two more gates against a repeat:
+`required_mounts_ok()` (new, in `rcS`) checks `/proc/mounts` for `/var`
+and `/var/tmp` both actually being tmpfs right after the second `mount -a`
+and logs to kmsg the moment either is missing, and `confirm_watchdog()`
+now refuses to confirm without it, on top of the existing config-partition
+and `switch_init` checks. The `odi-toolchain-qemu-kernel-malta` kernel
+fragment gained explicit `CONFIG_SHMEM`/`CONFIG_MTD`/`CONFIG_JFFS2_FS`
+lines (already implied by `malta_defconfig`'s defaults, so no new kernel
+tag was needed this time, but the previous mismatch was exactly this kind
+of implicit-default drift going unnoticed) and `make test-qemu` gained an
+assertion reading `/proc/mounts` for `/var`/`/var/tmp` tmpfs at their
+configured sizes -- the check that would have caught this the first time.
+
+**The `/var/run/network-configured` flag file is gone.** `rcS`'s watchdog
+confirmation asked a flag written once, at boot, whether `network.sh` had
+applied a real (non-guessed) address. Replaced with `network.sh
+configured`, a new live-check mode: it recomputes the same IP `network.sh`
+would apply at boot and reads it straight back off `br0` (or `eth0`, if
+the bridge path failed) via `/proc/mounts`-style live inspection, so a
+later re-address or a `network.sh addr` that failed cannot leave a stale
+`configured` flag behind.
 
 ## v1.0.3 — 2026-09-28
 

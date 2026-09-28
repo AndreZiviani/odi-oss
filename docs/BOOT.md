@@ -48,6 +48,14 @@ reset: a trial that never answered still says how far it got
    `mtd:config` in the second. Neither tmpfs cap reserves memory up front;
    both just turn "eats all of RAM" into "gives ENOSPC". `vm.min_free_kbytes` is
    raised to 1536 here too (`docs/SETTINGS.md` has the reasoning).
+   Right after the second `mount -a`, `required_mounts_ok()` greps the live
+   `/proc/mounts` for `/var` and `/var/tmp` both actually being tmpfs --
+   the check that would have caught v1.0.2 through v1.0.4-rc1's root
+   cause (`kernel/618/config` had neither `CONFIG_SHMEM` nor
+   `CONFIG_TMPFS`, so a capped `size=` mount is rejected with EINVAL and
+   falls back silently to a ramfs-backed stub, leaving `/var` whatever
+   squashfs shipped, read-only) -- logged to kmsg the moment either is
+   missing, and consulted again by the watchdog confirmation (stage 11).
 2. **The config partition**: mounted by the `mount -a` above
    (`mtd:config /var/config jffs2`, `/etc/fstab`) -- the jffs2 partition
    shared with the stock slot, found by MTD partition NAME, no
@@ -117,11 +125,18 @@ reset: a trial that never answered still says how far it got
     no ARP, no ping (`confirm-arp`, in `rcS.dev`, is the development
     exception that adds that on top) -- but it does refuse to confirm
     unless management is at least POSSIBLE:
+    - `required_mounts_ok()`: every `/etc/fstab` mount the boot depends on
+      other than the config partition -- `/var` and `/var/tmp`, both
+      tmpfs -- actually landed (stage 1's live `/proc/mounts` check, not a
+      flag; a missing one is logged to kmsg the moment `mount -a` finishes,
+      not only when this asks);
     - `config_mounted()`: the config partition actually mounted (stage 2's
       live mount-table check, not a flag);
-    - `/var/run/network-configured`: `network.sh` applied a real address
-      from config, not its `DEF_IP` guess (`docs/BOOT.md` stage 6, and
-      `network.sh`'s own header);
+    - `network.sh configured`: a live re-check, off the interface itself
+      (`br0`, or `eth0` if the bridge path failed), that the address
+      currently applied is the one from config, not `network.sh`'s
+      `DEF_IP` guess -- not a flag file written once at boot and never
+      rechecked;
     - `SWITCH_INIT_OK`: `omci_start`'s `switch_init` did not fail.
 
     v1.0.2 and v1.0.3 both confirmed unconditionally and stayed up

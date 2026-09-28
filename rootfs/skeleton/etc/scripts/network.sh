@@ -21,6 +21,13 @@
 #                           the second one (LAN_ENABLE_IP2, LAN_IP_ADDR2,
 #                           LAN_SUBNET2). No link, MAC or SerDes is touched.
 #     network.sh addr -n    say what `addr` would change, change nothing
+#     network.sh configured live check: exit 0 only if the address rcS's
+#                           confirm_watchdog needs is BOTH a configured one
+#                           (not the DEF_IP guess) AND actually applied right
+#                           now on br0 (or eth0, if the bridge path failed).
+#                           No flag file written at boot to trust later --
+#                           recomputes the same IP this boot would have
+#                           applied and reads it straight off the interface.
 #
 # `addr` is what /etc/scripts/apply runs after the web UI saves one of those
 # keys, so they take effect without a reboot. Moving the primary moves every
@@ -32,7 +39,8 @@ DRY=0
 case "$MODE" in
 boot) ;;
 addr) [ "${2:-}" = -n ] && DRY=1 ;;
-*)    echo "usage: $0 [addr [-n]]" >&2; exit 1 ;;
+configured) ;;
+*)    echo "usage: $0 [addr [-n]|configured]" >&2; exit 1 ;;
 esac
 
 CONF=${CONF:-/var/config/lastgood.xml}
@@ -66,10 +74,10 @@ xmlval() {
 IP=""
 MASK=""
 # Set once we know the address came from the config partition or
-# /etc/config/lan-ip, never from DEF_IP. rcS reads /var/run/network-configured
-# (written below, at the end of a successful boot-mode run) as one of the
-# gates before it confirms the watchdog: a fallback address is not
-# management, it is a guess nobody configured.
+# /etc/config/lan-ip, never from DEF_IP. `network.sh configured` (below)
+# is what rcS's confirm_watchdog calls, live, as one of the gates before it
+# confirms the watchdog: a fallback address is not management, it is a
+# guess nobody configured.
 NET_CONFIGURED=1
 
 if [ -s "$OVERRIDE" ]; then
@@ -153,6 +161,18 @@ if [ "$MODE" = addr ]; then
 	fi
 	secondary "$dev"
 	exit 0
+fi
+
+if [ "$MODE" = configured ]; then
+	dev=$IF
+	[ -d "$SYSNET/$BR" ] && dev=$BR
+	cur=$(addr_of "$dev")
+	if [ "$NET_CONFIGURED" = 1 ] && [ "$cur" = "$IP $MASK" ]; then
+		echo "network: $dev holds the configured address $IP"
+		exit 0
+	fi
+	echo "network: $dev does not hold a configured address (has ${cur:-none}, want $IP, configured=$NET_CONFIGURED)" >&2
+	exit 1
 fi
 
 # The host-side SerDes, before anything else touches the link.
@@ -357,10 +377,8 @@ fi
 
 # Reaching here means an address applied -- either from config/lan-ip
 # (NET_CONFIGURED) or the DEF_IP guess, bridged or direct. Only the former
-# is worth rcS confirming the watchdog on.
-if [ "$NET_CONFIGURED" = 1 ]; then
-	mkdir -p /var/run 2>/dev/null
-	: > /var/run/network-configured 2>/dev/null
-fi
+# is worth rcS confirming the watchdog on, and rcS asks that live
+# (`network.sh configured`, above), by re-deriving IP/NET_CONFIGURED and
+# reading the interface, not by trusting a flag written here.
 
 exit 0

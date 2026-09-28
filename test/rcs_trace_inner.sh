@@ -53,11 +53,12 @@ stage() {
 	# regular file and are taken from the trace, not from the file.
 	P=$R/proc
 	mkdir -p "$P/net" "$P/sys/kernel" "$P/odi_wdt"
-	# The config partition already mounted: real hardware would only reach
-	# rcS's confirm_watchdog with this line present if mount -a's jffs2
-	# entry actually landed, and mount is stubbed below to a blind
-	# success that never updates this file itself.
-	printf 'rootfs / rootfs rw 0 0\ndevtmpfs /dev devtmpfs rw 0 0\nproc /proc proc rw 0 0\nmtd:config /var/config jffs2 rw 0 0\n' > "$P/mounts"
+	# The config partition and the two tmpfs mounts already landed: real
+	# hardware would only reach rcS's confirm_watchdog with these lines
+	# present if both mount -a passes actually worked (kernel/618/config
+	# has CONFIG_SHMEM/CONFIG_TMPFS, the root cause fix), and mount is
+	# stubbed below to a blind success that never updates this file itself.
+	printf 'rootfs / rootfs rw 0 0\ndevtmpfs /dev devtmpfs rw 0 0\nproc /proc proc rw 0 0\ntmpfs /var tmpfs rw 0 0\ntmpfs /var/tmp tmpfs rw 0 0\nmtd:config /var/config jffs2 rw 0 0\n' > "$P/mounts"
 	printf '12.34 10.00\n' > "$P/uptime"
 	printf 'dev:    size   erasesize  name\nmtd0: 00040000 00010000 "boot"\nmtd3: 00100000 00010000 "config"\n' > "$P/mtd"
 	printf '           CPU0\n  8:          0   rlx-irq  apl_sw\n 26:          0   rlx-irq  eth0\n' > "$P/interrupts"
@@ -94,11 +95,14 @@ stage() {
 	stub "$R/bin/omcid" 'exit 0'
 	stub "$R/sbin/ip" 'exit 0'
 	stub "$R/sbin/brctl" 'exit 0'
-	# Real network.sh only leaves /var/run/network-configured when it read a
-	# real address (not its DEF_IP fallback); this stub simulates that
-	# configured case, since $R/var/config/lastgood.xml above has no
-	# LAN_IP_ADDR but a real boot with a mounted config partition would.
-	stub "$R/etc/scripts/network.sh" 'mkdir -p /var/run; : > /var/run/network-configured; exit 0'
+	# Real network.sh only exits 0 on `network.sh configured` when it
+	# applied a real address (not its DEF_IP fallback); this stub simulates
+	# that configured case unconditionally, since $R/var/config/lastgood.xml
+	# above has no LAN_IP_ADDR but a real boot with a mounted config
+	# partition would (rcS calls it both with no args, at boot, and with
+	# "configured", from confirm_watchdog -- this stub answers both the
+	# same way).
+	stub "$R/etc/scripts/network.sh" 'exit 0'
 	stub "$R/etc/init.d/services" 'exit 0'
 	[ -e "$R/bin/seedrng" ] && stub "$R/bin/seedrng" 'exit 0'
 	# A sleep over 5 s parks forever, so the endless background loops stop

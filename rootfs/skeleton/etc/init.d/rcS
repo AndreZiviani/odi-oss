@@ -36,6 +36,25 @@ CONFIG_DIR=/var/config
 config_mounted() {
 	grep -qE "^[^ ]+ $CONFIG_DIR jffs2 " /proc/mounts 2>/dev/null && [ -d /etc/config ]
 }
+
+# Every /etc/fstab entry the rest of the boot depends on, other than the
+# config partition (config_mounted, above, already covers that one): /var
+# and /var/tmp, both tmpfs. A missing entry here means a capped mount
+# silently never landed -- the ramfs-fallback size= rejection that cost
+# v1.0.2 through v1.0.4-rc1 (no CONFIG_SHMEM/CONFIG_TMPFS, kernel/618/config),
+# or the /tmp-redirect trap this rcS rewrite hit once already -- and /var is
+# left whatever squashfs shipped, read-only. Checked against the live table,
+# logged to kmsg the moment it is found missing.
+required_mounts_ok() {
+	ok=1
+	for m in /var /var/tmp; do
+		grep -qE "^[^ ]+ $m tmpfs " /proc/mounts 2>/dev/null || {
+			kmsg "required mount missing: $m (tmpfs)"
+			ok=0
+		}
+	done
+	[ "$ok" = 1 ]
+}
 if [ -r /etc/init.d/rcS.dev ]; then
 	. /etc/init.d/rcS.dev
 fi
@@ -87,6 +106,7 @@ ODI_WDT_OMCID_DEADLINE_S=${ODI_WDT_OMCID_DEADLINE_S:-60}
 # limit, just the global watermark.
 echo 1536 > /proc/sys/vm/min_free_kbytes 2>/dev/null || echo "rcS: vm.min_free_kbytes not set" >&2
 /bin/mount -a >> /tmp/mount-a.trace 2>&1 || echo "rcS: mount -a (pass 2) reported a failure, see /tmp/mount-a.trace" >&2
+required_mounts_ok || true
 
 # ---- the config partition: jffs2, shared with the stock slot, never
 # written by fwu.sh. Host keys, the UI credentials and every switch file
@@ -183,26 +203,33 @@ dev_hook services
 # uptime unless this is written, which is what reverts a trial that never
 # gets here. It needs no network REACHABILITY -- no ARP, no ping (confirm-arp,
 # in rcS.dev, is the development exception that adds that on top) -- but it
-# does need proof that management is even POSSIBLE: the config partition
-# actually mounted (config_mounted, above -- the live mount table, not a
-# flag set once and never rechecked), a real management address applied
-# rather than network.sh's DEF_IP guess (/var/run/network-configured), and
-# switch_init not having failed (SWITCH_INIT_OK, set by omci_start below).
-# Any one missing and the stick would come up unreachable and stay up
-# forever without this gate -- exactly what left v1.0.2 and v1.0.3
-# unreachable on real hardware while qemu's stubbed mount/network.sh never
-# exercised the failure. Called right after omci_start, still before
-# gponsn/gponpw/gponact, so an unrelated PON/optics problem still cannot
-# cost the confirmation.
+# does need proof that management is even POSSIBLE: every required mount
+# landed (required_mounts_ok, above -- /var and /var/tmp, both tmpfs, not
+# only the config partition), the config partition itself mounted
+# (config_mounted -- the live mount table, not a flag set once and never
+# rechecked), a real management address applied rather than network.sh's
+# DEF_IP guess (network.sh configured, below -- a live check of what
+# address br0/eth0 actually carries, not a flag file written once at boot
+# and never rechecked either), and switch_init not having failed
+# (SWITCH_INIT_OK, set by omci_start below). Any one missing and the stick
+# would come up unreachable and stay up forever without this gate --
+# exactly what left v1.0.2 and v1.0.3 unreachable on real hardware while
+# qemu's stubbed mount/network.sh never exercised the failure. Called
+# right after omci_start, still before gponsn/gponpw/gponact, so an
+# unrelated PON/optics problem still cannot cost the confirmation.
 WDOK=/proc/odi_wdt/userland_ok
 SWITCH_INIT_OK=1
 confirm_watchdog() {
 	[ -w "$WDOK" ] || return 0
+	if ! required_mounts_ok; then
+		crumb "watchdog NOT confirmed: a required mount is missing"
+		return 0
+	fi
 	if ! config_mounted; then
 		crumb "watchdog NOT confirmed: config partition not mounted"
 		return 0
 	fi
-	if [ ! -f /var/run/network-configured ]; then
+	if ! /etc/scripts/network.sh configured >/dev/null 2>&1; then
 		crumb "watchdog NOT confirmed: no management address configured"
 		return 0
 	fi
