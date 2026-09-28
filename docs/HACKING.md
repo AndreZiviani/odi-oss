@@ -511,10 +511,11 @@ does all four); then `make test-qemu`, which runs
 `test/qemu/build-initramfs.sh` and `test/qemu/run-qemu.sh`.
 
 **What it covers.** The whole busybox init chain -- `inittab`, `rcS`,
-`services` -- unmodified, packed as an initramfs instead of the flashed
-squashfs+uImage (no block device or MTD in qemu, and no need to build our
-own RTL9602C kernel just to boot this): our tmpfs caps, `oom_score_adj`,
-`supervise()` respawn and sysctls, dropbear/confd/metricsd for real, and
+`rcS.pon`, the `svc-*.sh` respawn entries -- unmodified, packed as an
+initramfs instead of the flashed squashfs+uImage (no block device or MTD
+in qemu, and no need to build our own RTL9602C kernel just to boot this):
+our tmpfs caps, `oom_score_adj`, busybox init `respawn` and sysctls,
+dropbear/confd/metricsd/omcid for real, and
 the resilience scenarios from `docs/SETTINGS.md` ("Resilience") -- filling
 `/tmp` to `ENOSPC`, an OOM (a busybox-only memory hog, no compiled tool
 needed), and `kill -9` on each critical daemon, checked over real ssh
@@ -553,6 +554,36 @@ in a checkout of `odi-toolchain`, `make qemu-kernel-malta` (about ten
 minutes), then `QEMU_KERNEL_IMAGE=odi-toolchain-qemu-kernel-malta:local
 make test-qemu` here to try the local build before tagging a release
 there.
+
+**Filesystem/mm parity with `kernel/618/config`.** v1.0.2 through
+v1.0.4-rc1 shipped a flashable kernel with neither `CONFIG_SHMEM` nor
+`CONFIG_TMPFS` (a capped tmpfs mount silently falls back to a ramfs-backed
+stub that rejects `size=`, so `/var` and `/var/tmp` never landed) while
+this qemu kernel had `CONFIG_TMPFS` on the whole time -- `test-qemu` never
+had a chance to catch the mismatch. `qemu-kernel-malta/config.fragment` (in
+`odi-toolchain`) now pins `CONFIG_SHMEM`, `CONFIG_TMPFS`,
+`CONFIG_TMPFS_POSIX_ACL`, `CONFIG_MTD` and `CONFIG_JFFS2_FS` explicitly --
+the filesystem/mm symbols `rootfs/skeleton/etc/fstab` here actually
+depends on -- rather than leaving them to whatever `malta_defconfig`
+happens to default to. There is no automated inheritance from
+`kernel/618/config` across the two repositories; keeping the fragment a
+superset of that file's filesystem/mm block is a by-hand rule, enforced in
+practice by `run-qemu.sh`'s fstab-mounts assertion (below), which fails
+loudly if a required mount is not the type or size `/etc/fstab` says it
+should be. When `kernel/618/config` gains a new filesystem/mm symbol its
+runtime behavior depends on, mirror it into the fragment in the same
+change and note it here.
+
+**test-qemu asserts the fstab mounts, not just that ssh comes up.** Right
+after ssh answers, `run-qemu.sh` reads `/proc/mounts` over ssh and checks
+`/var` and `/var/tmp` are both tmpfs at the size `/etc/fstab` configures
+(`size=6144k`/`size=8192k` -- the kernel echoes `/etc/fstab`'s `6m`/`8m`
+back in KB) -- exactly the assertion that would have caught the
+`CONFIG_SHMEM`/`CONFIG_TMPFS` regression above before it ever reached
+hardware. It also checks that IF a mount shows up at `/var/config` (this
+harness has no MTD device, so normally none does -- "What this does NOT
+cover", above), it is a real `jffs2` mount, matching what a flashed image
+gets, never something softer that would mask a mismatch.
 
 **Two things this harness needed that a flashed image does not**, both
 measured, not guessed, while first bringing qemu-system-mips boots up:
@@ -748,9 +779,11 @@ Each of these has cost real time. The pointer says where the evidence is.
 - **`omcicli get tables` wedges the stock OMCI daemon.** Ours answers it; do
   not run it on the stock slot. `omcicap` and `omciprobe -f` interfere with
   a running `omcid` (`docs/TOOLS.md`).
-- **Daemons are not supervised.** A daemon that dies stays dead; restart it
-  with `setsid` so the end of your ssh session cannot SIGHUP it (`omcid`
-  treats SIGHUP as stop). `docs/TOOLS.md` "Restarting a daemon".
+- **Daemons are `respawn` entries, not sessions.** metricsd, confd,
+  dropbear and omcid are forked by busybox init itself and restarted the
+  instant one exits; `kill` alone brings a new one back within seconds, no
+  `setsid` needed any more (`docs/TOOLS.md` "Restarting a daemon"). Use
+  `/etc/init.d/services stop <name>` to keep one down across restarts.
 - **`/var` is RAM.** Every log is gone at reboot; only the ramlog and the
   breadcrumbs survive.
 

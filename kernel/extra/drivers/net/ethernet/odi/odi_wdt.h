@@ -182,11 +182,22 @@ void odi_wdt_note_kick(struct odi_wdt_deadline_state *st, unsigned int uptime_s)
 /* odi_wdt_client_register() -- idempotent: a name already registered just
  * gets its deadline updated (rcS may be called more than once in a
  * development boot). Returns the client's slot index (>= 0), or -1 if every
- * slot is taken and the name is new. Does not arm the deadline -- that is
- * the client's own first ping.
+ * slot is taken and the name is new.
+ *
+ * Arms the deadline immediately, counted from `uptime_s` (the moment of
+ * registration), not from the client's own first ping. A client that never
+ * pings at all used to go unnoticed forever -- unarmed clients were never
+ * checked by odi_wdt_deadline_tick() -- which is exactly the shape a daemon
+ * stuck before its first ping takes: registered, silent, and never reset.
+ * Registration is the caller's promise that the client is about to run
+ * (rcS only registers a client it is also about to start; see
+ * docs/SETTINGS.md, "Watchdog rules"), so treating "never pinged" the same
+ * as "missed its own ping" is safe -- there is no longer a legitimate
+ * registered-but-never-started case to protect. A later ping still just
+ * pushes the deadline out, same as any other.
  */
 int odi_wdt_client_register(struct odi_wdt_deadline_state *st, const char *name,
-			     unsigned int deadline_s);
+			     unsigned int deadline_s, unsigned int uptime_s);
 
 /* odi_wdt_client_ping() -- arms the client on its first call. Returns 0 on a
  * known (registered) client, -1 if no client of that name is registered --

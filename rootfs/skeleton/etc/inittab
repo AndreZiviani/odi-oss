@@ -1,13 +1,37 @@
-# busybox init. Three things, and the order matters.
+# busybox init. Four kinds of entry, and the order among the KINDS matters
+# more than the order within this file: init runs every sysinit entry to
+# completion, in file order, before starting anything else; then every wait
+# entry, each to completion; then fires every once entry without waiting for
+# it; and only then starts (and, forever after, restarts on exit) every
+# respawn entry. docs/BOOT.md has the full reasoning.
 #
-# sysinit runs to completion BEFORE any respawn entry starts, so anything that
-# blocks in rcS costs you every way back into the device -- both the serial
-# console and the network shell are respawn entries below.
+# sysinit: rcS. Mounts, the config partition, the management address, the
+# switch SDK-init verbs -- everything the respawn entries below need already
+# in place. Nothing starts until this returns, so anything that blocks here
+# costs every way back into the device at once.
 ::sysinit:/etc/init.d/rcS
+
+# once: rcS.pon, the PON steps (docs/BOOT.md, "The PON steps"). Runs
+# concurrently with the respawn entries below coming up -- it does not wait
+# for them, and only one step (gponact) waits, bounded, for omcid.
+::once:/etc/init.d/rcS.pon
 
 # No telnet: ssh (dropbear) is the only network login. The trial boot and
 # its self-revert are the way back if ssh ever fails to come up.
 ttyS0::respawn:/bin/login -p
+
+# metricsd, confd, dropbear, omcid: each restarted the instant it exits,
+# forever, by init itself -- no supervise.sh, no restart budget, no rate
+# limit (docs/SETTINGS.md, "native over hand-rolled"). Every entry is a
+# script, not the daemon directly: each checks its own /etc/config/<name>.off
+# flag first (rootfs/skeleton/etc/scripts/svc-*.sh) and sets its
+# oom_score_adj right before exec-ing the daemon in place
+# (rootfs/skeleton/etc/scripts/respawn.sh), so the pid init tracks is always
+# the daemon itself, never a parent that already exited.
+::respawn:/etc/scripts/svc-metricsd.sh
+::respawn:/etc/scripts/svc-confd.sh
+::respawn:/etc/scripts/svc-dropbear.sh
+::respawn:/etc/scripts/svc-omcid.sh
 
 ::restart:/sbin/init
 ::ctrlaltdel:/sbin/reboot

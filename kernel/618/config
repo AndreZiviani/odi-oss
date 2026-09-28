@@ -69,6 +69,14 @@ CONFIG_MTD_CMDLINE_PARTS=y
 # "Cannot open root device 31:5 ... error -6", empty partition list).
 CONFIG_MTD_BLOCK=y
 CONFIG_JFFS2_FS=y
+# Without these two, mount -t tmpfs falls through to mm/shmem.c's
+# !CONFIG_SHMEM stub (ramfs_get_sb): it mounts, but rejects size= with
+# EINVAL, so a capped /var or /var/tmp mount fails, /var stays whatever
+# squashfs shipped (read-only), and nothing under it -- config partition,
+# /var/log -- can be created. Confirmed on a stick (root cause, v1.0.2
+# through v1.0.4-rc1: no management network, /var read-only).
+CONFIG_SHMEM=y
+CONFIG_TMPFS=y
 CONFIG_BLOCK=y
 CONFIG_MISC_FILESYSTEMS=y
 CONFIG_SQUASHFS=y

@@ -1,0 +1,22 @@
+# /etc/fstab -- consumed by `mount -a` in rcS (docs/BOOT.md, stage 1). Not
+# exhaustive and not one pass: nothing here can mount before /var itself
+# does (tmpfs, fresh and empty), and mount(8) never creates a missing
+# mountpoint -- rcS runs `mount -a` once for proc/sysfs/var/devpts, makes
+# the /var subdirectories (tmp, log, run, lock, config) THEN, and runs
+# `mount -a` a second time to pick up /var/tmp and /var/config, which had
+# nowhere to land the first time.
+#
+# mtd:config resolves the jffs2 partition by its MTD partition NAME
+# (get_mtd_device_nm, part of core MTD whenever CONFIG_MTD=y, kernel/618/
+# config confirms it here) straight from this board's mtdparts= -- no
+# /dev/mtdblockN node and no /proc/mtd lookup needed, which is what
+# rootfs/skeleton/etc/scripts/mount-config.sh used to do by hand (and what
+# mdev racing to create that node used to risk).
+#
+# <fs>         <mountpoint>  <type>   <options>            <dump> <pass>
+proc           /proc         proc     defaults             0      0
+sysfs          /sys          sysfs    defaults             0      0
+tmpfs          /var          tmpfs    size=6m,mode=1777     0      0
+tmpfs          /var/tmp      tmpfs    size=8m,mode=1777     0      0
+devpts         /dev/pts      devpts   defaults             0      0
+mtd:config     /var/config   jffs2    defaults             0      0

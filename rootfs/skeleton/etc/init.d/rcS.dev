@@ -1,7 +1,8 @@
 # shellcheck shell=sh
 #
-# /etc/init.d/rcS.dev -- the development aids of the boot, sourced by rcS
-# (it ships in the image). Each is off unless its file is on the config
+# /etc/init.d/rcS.dev -- the development aids of the boot, sourced by both
+# rcS (sysinit) and rcS.pon (the PON steps, once rcS returns; docs/BOOT.md)
+# -- it ships in the image. Each is off unless its file is on the config
 # partition, set by hand on a running stick before a trial:
 #
 #   breadcrumbs.on  one timestamped line per stage appended to
@@ -102,7 +103,7 @@ dev_services() {
 	fi
 	# Also when the config partition did not mount: then this is the
 	# only diagnostic the boot gets, and printk the only channel left.
-	if { [ -f /etc/config/breadcrumbs.on ] || [ ! -f /var/run/config-mounted ]; } && [ -w /dev/kmsg ]; then
+	if { [ -f /etc/config/breadcrumbs.on ] || ! config_mounted; } && [ -w /dev/kmsg ]; then
 		dev_klog_diag &
 	fi
 }
@@ -137,9 +138,9 @@ dev_klog_diag() {
 	klog() { echo "rcS diag: $*" > /dev/kmsg 2>/dev/null; }
 	dev_gw
 	klog "br0 $(timeout 5 ifconfig br0 2>/dev/null | sed -n "s/.*inet addr:\([0-9.]*\).*/\1/p")"
-	klog "config: mounted=$([ -f /var/run/config-mounted ] && echo yes || echo no) $(timeout 5 grep -c "" /proc/mounts 2>/dev/null) mounts, $(timeout 5 ls /etc/config 2>/dev/null | grep -c "") entries, breadcrumbs.on $([ -f /etc/config/breadcrumbs.on ] && echo present || echo absent)"
+	klog "config: mounted=$(config_mounted && echo yes || echo no) $(timeout 5 grep -c "" /proc/mounts 2>/dev/null) mounts, $(timeout 5 ls /etc/config 2>/dev/null | grep -c "") entries, breadcrumbs.on $([ -f /etc/config/breadcrumbs.on ] && echo present || echo absent)"
 	klog "config: $(timeout 5 grep " /var/config " /proc/mounts 2>/dev/null)"
-	klog "config: $(cat /tmp/mount-config.err 2>/dev/null)"
+	timeout 5 tail -n 6 /tmp/mount-a.trace 2>/dev/null | while read -r line; do klog "mount -a: $line"; done
 	timeout 5 tail -n 6 /tmp/mount-config.trace 2>/dev/null | while read -r line; do klog "trace: $line"; done
 	timeout 5 grep " 26:\| 8:" /proc/interrupts 2>/dev/null | while read -r line; do
 		klog "irq: $line"
@@ -177,9 +178,12 @@ dev_confirm_ok() {
 }
 
 # /etc/config/pon-steps: one step per line, a /proc/odi_init verb with its
-# argument, or one of three words: omcimods (the switch init and omcid),
-# "gponsn auto" and "gponpw auto" (the values from the config store). A
-# wrong list means no PON.
+# argument, or one of four words: omcimods (the switch init, now -- since
+# omcid itself starts as its own inittab respawn entry, not from here),
+# "gponsn auto" and "gponpw auto" (the values from the config store), and
+# gponact (waits for the omcid odi_omci registration first, bounded --
+# rcs-lib.sh, pon_step_gponact -- same as the built-in list). A wrong list
+# means no PON.
 pon_steps() {
 	if [ ! -s /etc/config/pon-steps ]; then
 		pon_steps_default
@@ -189,9 +193,10 @@ pon_steps() {
 	while read -r step; do
 		case $step in
 		'') ;;
-		omcimods) omci_start ;;
+		omcimods) omci_start; confirm_watchdog ;;
 		"gponsn auto") pon_step_gponsn ;;
 		"gponpw auto") pon_step_gponpw ;;
+		gponact) pon_step_gponact ;;
 		*) pon_step "$step" ;;
 		esac
 	done < /etc/config/pon-steps

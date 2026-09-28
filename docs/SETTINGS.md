@@ -265,7 +265,7 @@ kernel itself.
 | rule | deadline / floor | armed by | source |
 |---|---|---|---|
 | boot confirmation | 120 s of uptime (`ODI_WDT_USERLAND_DEADLINE_S`) | always, from boot | rcS writes `1` to `/proc/odi_wdt/userland_ok` once userland is up (unchanged from v1.0.1); `/etc/config/confirm-arp` (development) makes that wait for an ARP reply from the `.2` address first |
-| per-client ping deadline | one per registered client, e.g. 60 s for omcid (`ODI_WDT_OMCID_DEADLINE_S`) | the client's own FIRST ping | rcS registers each required client once, by name and deadline, with `echo "<name> <deadline_s>" > /proc/odi_wdt/register` (idempotent: re-registering just updates the deadline). The client itself pings its own deadline from its own main loop with `echo "<name>" > /proc/odi_wdt/ping` -- omcid does this every 15 s (`src/omci/respond/main.c`, `wdt_ping()`), a quarter of its 60 s deadline. A registered client that never pings (`modules.off`, or a kernel too old to have `/proc/odi_wdt/register`) is never checked -- it is simply unarmed, not a fault |
+| per-client ping deadline | one per registered client, e.g. 60 s for omcid (`ODI_WDT_OMCID_DEADLINE_S`) | registration itself, counted from that moment | rcS registers each required client once, by name and deadline, with `echo "<name> <deadline_s>" > /proc/odi_wdt/register` (idempotent: re-registering just updates the deadline AND resets the clock). The client itself pings its own deadline from its own main loop with `echo "<name>" > /proc/odi_wdt/ping` -- omcid does this every 15 s (`src/omci/respond/main.c`, `wdt_ping()`), a quarter of its 60 s deadline. A registered client that never pings at all is caught the same way one that pinged once and then stalled is (fixed 2026-09-28, hardware trial rc4: a client armed only by its own first ping is never checked if that first ping never comes, which is exactly the shape a daemon stuck before it ever pings takes). Because of this, rcS only registers a client under the same conditions that will actually start it (`svc-omcid.sh`'s own `modules.off`/binary-exists gate, mirrored in rcS before the `/proc/odi_wdt/register` write) -- a kernel too old to have `/proc/odi_wdt/register` still degrades to "never checked", silently, same as before |
 | memory floor | `MemAvailable` below 2048 KB (`ODI_WDT_MEM_FLOOR_KB`) for 3 consecutive 5 s checks (`ODI_WDT_MEM_FLOOR_CONSEC`) | always, from boot | sampled by the kernel itself every tick (`si_mem_available()`, `kernel/extra/drivers/net/ethernet/odi/odi_wdt.c`) -- no userland reader to lose along with the memory it would be reporting on. Several consecutive samples, not one, so a single allocation spike does not reset a box that is otherwise fine. This is the same "OOM took the box and nothing came back" case a 20 MB `scp` into an unbounded `/tmp` produced on ISP1 (2026-09-27), now caught kernel-side instead of by a process that OOM can also kill |
 
 Debugging: `cat /proc/odi_wdt/clients` shows one line per registered
@@ -278,11 +278,13 @@ consecutive checks"`.
 
 Registering a new client (say, dropbear or confd, neither wired up today)
 means two things, both required: rcS gets an
-`echo "name deadline_s" > /proc/odi_wdt/register` line at boot, and the
-client's own main loop gets a periodic
-`echo name > /proc/odi_wdt/ping` well inside that deadline. Neither alone
-does anything -- a registered-but-never-pinged client is inert by design
-(see the table above), and a ping to a name nobody registered is refused.
+`echo "name deadline_s" > /proc/odi_wdt/register` line at boot, gated on
+that client actually being about to start (mirror whatever `svc-<name>.sh`
+already checks), and the client's own main loop gets a periodic
+`echo name > /proc/odi_wdt/ping` well inside that deadline. The registration
+line alone is enough to arm the deadline (see the table above) -- omitting
+the ping is a bug that gets the board reset once the deadline elapses, not
+a silent no-op -- and a ping to a name nobody registered is refused.
 
 ## Resilience
 
@@ -299,13 +301,60 @@ these, they are fixed at boot.
 | `/tmp` (`/var/tmp`) size cap | 8 MB tmpfs | fits a firmware upload (`fwu_starter.sh` stages the tarball there, about 2.6 MB, plus its unpacked squashfs/uImage) and an scp of a few MB with room to spare; past it, a write gets `ENOSPC`, not a system-wide OOM |
 | `/var` (log/run/lock/config fallback) size cap | 6 MB tmpfs | `/var/log` is separately trimmed at 256 KB past a 128 KB floor already (rcS); this is the outer bound if that trim ever falls behind |
 | `oom_score_adj` | omcid, dropbear: `-1000` (never killed while anything else can be); confd: `-500`; metricsd: `0`, the kernel default | omcid and dropbear are what keeps the ONU provisioned and the box reachable; confd is a convenience next after them; metricsd is the one daemon whose loss costs neither -- first in line if the killer has to take something |
-| respawn | omcid, dropbear, confd, metricsd: restarted automatically if they die, rate-limited to 5 restarts per 60 s window, then the supervisor gives up and logs why (`supervise()`, `rootfs/skeleton/etc/scripts/supervise.sh`) | a daemon that cannot stay up for a minute is a problem for the watchdog rules above to escalate, not something a restart loop should spin on forever |
+| respawn | omcid, dropbear, confd, metricsd: each an `/etc/inittab` `respawn` entry (`/etc/scripts/svc-*.sh`, execing into `/etc/scripts/respawn.sh`), restarted the instant it exits, forever, by busybox init itself -- no restart budget, no rate limit | native over hand-rolled: a v1.0.4 trial on hardware killed omcid with `kill -9` and it stayed dead -- the old `supervise()` shell loop had lost track of it -- while busybox init, which forked the process itself and never lost the pid, does not have that failure mode; a daemon that still cannot stay up is still a problem for the watchdog rules above to escalate, not for a restart loop |
 | `vm.min_free_kbytes` | 1536 (`rcS`, up from the kernel's own default of roughly 128 KB on a box this size) | keeps a slightly larger page-allocator reserve free under pressure, so the OOM killer and a starved `oom_score_adj -1000` daemon get a better chance to make forward progress instead of every allocator racing for the same last few pages |
 
 `make test-qemu` (`docs/HACKING.md`) exercises everything above except the
 watchdog rules themselves, which need `/proc/odi_wdt` -- real hardware,
 not the stock kernel the harness boots; those are host-tested instead
 (`test/odi_wdt_test.c`, against a fake clock).
+
+## Bounded waits
+
+Every command a script here runs, and every wait one process does on
+another, is bounded unless there is a stated reason not to -- found
+necessary the hard way (rc3, claro, 2026-09-28): a stuck omcid left both
+`metricsd`'s own child wait and `vq_ensure()`'s queue-reclaim logic
+waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
+
+- **A forked command**: `timeout SECS cmd args...` (busybox `timeout`,
+  built into this image's busybox -- `packages/busybox/config.fragment`).
+  Already the shape of every `diag` call (`network.sh`'s `sds_read`/
+  `sds_write`, 10 s; `rcS.dev`'s dev-hook diag probes, 10 s) and of the
+  `/proc` reads and `arping` in `rcS.dev`'s confirm-arp path (5 s, 2 s).
+- **A bare `echo verb > /proc/odi_init` or `/proc/odi_omci`**: this is the
+  calling shell's own `write(2)`, not a forked command, so `timeout` has
+  nothing to wrap unless the write runs inside a process of its own.
+  `write_proc_bounded`/`read_proc_bounded` (`scripts/rcs-lib.sh`, sourced by
+  `rcS`, `rcS.pon` and `apply.sh`) do exactly that: `timeout
+  $PROC_WRITE_TIMEOUT_S sh -c '...'`, default 5 s. Used by every PON step
+  and the `switch_init` verb (`rcs-lib.sh`), the `odi_wdt` register write
+  (`rcS`), and `gpondeact`/`gponpw`/`gponact` (`apply.sh`) -- a handful of
+  calls each, off the tightest part of the boot or off it altogether.
+- **A documented exception, by cost rather than by risk**: `rcS`'s switch
+  SDK-init loop (23 verbs, every boot, no exception) deliberately still
+  uses a bare `echo`/`cat` -- `write_proc_bounded` turns a zero-fork shell
+  builtin into a `timeout`+`sh` fork pair, and at 23 steps that is up to
+  ~90 extra fork/execs on the one path this image has fought hardest to
+  keep fast (rc2 to rc3: 85-90 s boot down to 31 s). No step in this loop
+  has ever been observed to hang; the crumb before and after each already
+  names a stuck one in the ramlog if it ever does. Bound a hot, unproven
+  path only if it actually hangs -- do not pay the fork cost everywhere on
+  principle.
+- **A documented exception, by kernel behaviour**: `rcS.dev`'s
+  SerDes/trial-diag dev hook deliberately runs no `diag` call of its own
+  reasoning ("a diag ioctl can block where timeout cannot") -- `timeout`
+  sends a signal to the process it started, and a process parked in an
+  uninterruptible-sleep (`D` state) kernel wait ignores every signal, that
+  one included. This bounds the ordinary hang (a driver waiting on a lock
+  or a condition that resolves on its own, which is what has actually been
+  observed) but is not a guarantee against every kind of stuck kernel call.
+- **The freestanding C daemons** (`odi-sfp-exporter`'s `metricsd`, this
+  image's own `omcid`) have no `timeout` binary to shell out to: they poll
+  the child's pipe with a timeout and `SIGKILL` + reap it on expiry
+  instead (`drain_bounded()`/`kill_and_reap()`,
+  odi-sfp-exporter's `src/syscall.h`) and report the failure as a metric
+  (`gpon_omci_up`) rather than going silent.
 
 ## Not verified yet
 

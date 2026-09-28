@@ -5,21 +5,24 @@
 # (docs/HACKING.md) calls this after test/qemu/build-initramfs.sh.
 #
 # What this DOES exercise: the real busybox init chain, inittab, rcS,
-# services, dropbear, confd, metricsd, the tmpfs caps, oom_score_adj,
-# supervise() respawn, and sysctls -- everything under rootfs/skeleton,
-# unpatched.
+# rcS.pon, the svc-*.sh respawn entries, dropbear, confd, metricsd, omcid,
+# the tmpfs caps, oom_score_adj, busybox init respawn, and sysctls --
+# everything under rootfs/skeleton, unpatched.
 #
 # What this does NOT exercise (docs/HACKING.md has the full list): our own
 # kernel (kernel/extra, the odi_* drivers) is not built or booted here at
 # all -- a stock kernel stands in for the RTL9602C board qemu cannot
 # emulate. So there is no /proc/odi_wdt, no /proc/odi_init, no switch, no
-# GPON, no real omcid (omci_start() in rcS skips it, exactly as it does on
-# any kernel without /proc/odi_omci) -- and no watchdog reset path at all:
-# none of the three odi_wdt rules (boot confirmation, per-client ping
-# deadlines, the memory floor; docs/SETTINGS.md, "Watchdog rules") can be
-# exercised end to end here, only that rcS and omcid degrade harmlessly
-# without /proc/odi_wdt. That needs the real hardware or the host-side
-# coverage of the rules themselves (test/odi_wdt_test.c).
+# GPON: omcid still starts (svc-omcid.sh only gates on modules.off and the
+# binary existing, not on /proc/odi_omci), but degrades harmlessly exactly
+# as it does on any kernel without /proc/odi_omci -- no netlink, no
+# registration, message-queue commands still served -- and there is no
+# watchdog reset path at all: none of the three odi_wdt rules (boot
+# confirmation, per-client ping deadlines, the memory floor;
+# docs/SETTINGS.md, "Watchdog rules") can be exercised end to end here,
+# only that rcS.pon and omcid degrade harmlessly without /proc/odi_wdt.
+# That needs the real hardware or the host-side coverage of the rules
+# themselves (test/odi_wdt_test.c).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BUILD=${1:-$ROOT/build/qemu-initramfs}
@@ -85,6 +88,28 @@ echo "  ssh key auth ok"
 
 sshx() { ssh "${SSH_OPTS[@]}" root@127.0.0.1 "$@"; }
 
+say "fstab mounts: /var and /var/tmp are tmpfs with the configured size"
+# The root cause of v1.0.2 through v1.0.4-rc1 (kernel/618/config had no
+# CONFIG_SHMEM/CONFIG_TMPFS, so a capped tmpfs mount rejected size= and
+# /var stayed read-only): this is the assertion that would have caught it,
+# read straight off /proc/mounts rather than trusted from a mount -a exit
+# code. /etc/fstab has the sizes (6m, 8m); the kernel reports them back in
+# KB.
+MOUNTS=$(sshx cat /proc/mounts)
+echo "$MOUNTS" | grep -qE '^tmpfs /var tmpfs .*size=6144k' || fail "/var is not tmpfs size=6m -- $(echo "$MOUNTS" | grep ' /var ')"
+echo "$MOUNTS" | grep -qE '^tmpfs /var/tmp tmpfs .*size=8192k' || fail "/var/tmp is not tmpfs size=8m -- $(echo "$MOUNTS" | grep ' /var/tmp ')"
+# The config partition needs a real MTD device (mtd:config, /etc/fstab)
+# this harness does not have (no MTD in qemu, docs/HACKING.md) -- so it is
+# normally absent here. If one ever does show up at /var/config, it must
+# be the real jffs2 mount a flashed image gets, never something softer
+# that would silently mask a mismatch.
+if echo "$MOUNTS" | grep -q ' /var/config '; then
+	echo "$MOUNTS" | grep -qE '^mtd:config /var/config jffs2 ' || fail "/var/config is mounted but not jffs2 -- $(echo "$MOUNTS" | grep ' /var/config ')"
+	echo "  /var, /var/tmp tmpfs with configured sizes; /var/config jffs2"
+else
+	echo "  /var, /var/tmp tmpfs with configured sizes; /var/config absent (no MTD under qemu, expected)"
+fi
+
 say "web UI (confd, port $HTTP_PORT)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$HTTP_PORT/" || true)
 # 401: the confd default, unauthenticated (admin/admin until set) -- still
@@ -123,8 +148,8 @@ done
 [ "$up" = 1 ] || fail "ssh dead after the memory hog"
 echo "  ssh answered through the hog (dmesg on the console log has the OOM kill, if any fired)"
 
-say "scenario: kill -9 dropbear, confd, metricsd -- each back within 10s"
-for svc in dropbear confd metricsd; do
+say "scenario: kill -9 dropbear, confd, metricsd, omcid -- each back within 10s"
+for svc in dropbear confd metricsd omcid; do
 	pid=$(sshx "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = $svc ] && echo \${p#/proc/}; done | head -1" 2>/dev/null) || pid=""
 	[ -n "$pid" ] || { echo "  $svc: not running, skipping" >&2; continue; }
 	# || true: killing dropbear's own connection handler can reset THIS

@@ -84,7 +84,7 @@ if [ -n "$root" ]; then
 	[ "$root" = "$(mtd_idx r1)" ] && running=1
 fi
 if [ -z "$running" ]; then
-	running=$("$NV" getenv sw_active 2>/dev/null | sed -n "s/^sw_active=//p")
+	running=$(timeout 5 "$NV" getenv sw_active 2>/dev/null | sed -n "s/^sw_active=//p")
 	case "$running" in 0|1) ;; *) running= ;; esac
 fi
 [ -n "$running" ] || die "cannot tell which slot is running; refusing to write either"

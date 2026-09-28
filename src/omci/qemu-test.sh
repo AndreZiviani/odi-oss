@@ -878,8 +878,44 @@ got=$(grep -o '\[dry 45/0002\] mac learn limit port 0 = 9 -> 0' /tmp/omcid2.log 
 check "a changed MacLearningDepth sets the single UNI's limit" \
       "$got" "[dry 45/0002] mac learn limit port 0 = 9 -> 0"
 
+# --------------------------------------------------- respawn: reclaiming 0x800
+#
+# On real hardware inittab respawns omcid after a crash or a manual
+# kill -9, and kill -9 skips on_signal()'s cleanup -- the 0x800 queue
+# omcicli/dump srvflow/vqsrv serve survives the dead process. Before the
+# vq_ensure() fix this made IPC_CREAT|IPC_EXCL fail EEXIST forever and the
+# respawned omcid logged "the omcicli queue is still omci_app's" -- wrong,
+# since omci_app never runs on this image at all (../README.md): the queue
+# was only ever a previous instance of omcid's own.
+kill -9 %1 2>/dev/null
+wait 2>/dev/null
+
+$Q respond/build/omcid -w 9 -c "$CAPS" > /tmp/omcid3.log 2>&1 &
+sleep 2
+
+got=$(grep -c 'still omci_app' /tmp/omcid3.log)
+check "a respawned omcid does not treat the stale queue as a stranger's" \
+      "$got" "0"
+got=$(grep -c 'took the omcicli queue' /tmp/omcid3.log)
+check "it reclaims 0x800 instead" "$got" "1"
+
+# The exporter's own command against a respawned omcid, timed: it must not be
+# one of the 42 that piled up unanswered when this was broken.
+start=$(date +%s)
+out=$($Q cli/build/omcli dump srvflow 2>&1)
+end=$(date +%s)
+got=$([ "$((end - start))" -le 2 ] && echo yes || echo no)
+check "dump srvflow answers within 2s of a respawn" "$got" "yes"
+# This instance has nothing provisioned (a fresh MIB, no frames injected
+# into it), so cli_conn() (show.c) prints no SERVID rows at all -- it
+# omits unused ones, unlike the vendor's 256-row dump. "0 services" is
+# still the real vendor-format trailer line, not the empty string a
+# silently dropped or malformed reply would leave.
+got=$(echo "$out" | tail -n 1)
+check "and it is the real vendor-format srvflow dump, not silence" "$got" "0 services"
+
 # The daemon log lives inside the container, so keep it when a check fails.
-[ "$fail" -eq 0 ] || cp /tmp/omcid2.log /src/src/omci/qemu-test.log 2>/dev/null || true
+[ "$fail" -eq 0 ] || cp /tmp/omcid3.log /src/src/omci/qemu-test.log 2>/dev/null || true
 kill %1 2>/dev/null
 wait 2>/dev/null
 

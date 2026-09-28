@@ -5,7 +5,248 @@ listed here.
 
 ## Unreleased
 
+**A respawned omcid gets provisioned again, not just restarted.** Hardware
+finding (rc5, claro, 2026-09-28): after `kill -9 omcid`, init respawns it
+within 8 s and it pings and serves `omcicli`, but `gpon_omci_services`
+stays 0 for 200+ s -- the OLT had already provisioned this ONU and does not
+re-send the MIB to a fresh omcid with an empty one. `svc-omcid.sh` now
+tells a respawn apart from the boot's first start with a marker under
+`/var/run` (tmpfs, gone at the next reboot) and, on a respawn, backgrounds
+`omci-respawn-reprovision.sh`: deactivate, wait for the new omcid to
+register, re-apply the PLOAM password, hold, reactivate -- the same
+hardware-proven sequence the web UI's `apply.sh omci` already uses, forcing
+the OLT to re-range and re-provision. The two callers now share that tail
+as `rcs-lib.sh`'s `omci_reactivate` rather than keeping two copies. The
+respawned omcid process itself is never touched -- init already supervises
+it as a `respawn` entry, so killing or restarting it from here would only
+trigger another respawn. `docs/BOOT.md` has the new "Respawn
+re-provisioning" section.
+
+**A registered watchdog client is armed at registration, not on its own
+first ping.** Hardware trial (rc4, claro, 2026-09-28): omcid answered two
+omcicli commands after registering with odi_omci, then stopped -- 0x800
+filled to its 64-message cap, `gpon_omci_services` stayed 0 for 5+ minutes,
+and `/proc/odi_wdt/clients` showed `armed=0` at 279 s uptime: a client that
+never pings at all was never armed, so odi_wdt's per-client deadline never
+had anything to check, and a daemon stuck before its first ping was never
+reset. Investigated thoroughly (the rc4 diff, three separate
+`qemu-mips-static` reproduction attempts combining a CLI flood -- matching
+metricsd v1.1.2's/confd v1.0.6's own 2 s-timeout-then-SIGKILL pattern --
+with the real mib-reset/mib-upload/mib-upload-next sequence from the
+trace, single- and dual-flooder); none reproduced the stall itself
+(qemu-user has no netlink, so this needs either real line timing/volume or
+a mechanism outside the CLI/MIB-volume angle). Closed the watchdog gap
+regardless, since it is a real, independently-justified bug:
+`odi_wdt_client_register()`
+(`kernel/extra/drivers/net/ethernet/odi/odi_wdt.c`) now takes the
+registration uptime and arms immediately, so "never pinged" is caught by
+the same deadline as "pinged once and then stalled". This changes the
+previously-intentional "registered but unarmed never resets" behaviour (the
+modules.off dev case), so `rcS` now only registers "omcid" with odi_wdt
+under the same two conditions `svc-omcid.sh` gates the actual exec on
+(`/etc/config/modules.off` absent and `/bin/omcid` executable) -- a dev
+image that will never start omcid no longer registers it either, so there
+is no legitimate registered-but-silent-forever case left. `test/odi_wdt_test.c`
+rewritten to match (`test_registered_but_never_pinged_client_still_resets`,
+`test_client_reregister_resets_the_clock`).
+
+**`mq_send()` (`src/omci/omci_msgq.h`) is bounded too.** The one SysV IPC
+call left in this daemon's whole "bound every wait" sweep that was still a
+bare blocking `msgsnd` -- every client (`omcli`/`omcicli`, so confd and
+metricsd both) uses it to enqueue a request onto 0x800 or the native queue,
+and it had no `IPC_NOWAIT` of its own. metricsd's/confd's own timeouts
+SIGKILL the *child*, which does not stop it parking in `msgsnd` first if
+the queue omcid owns is momentarily full -- exactly when several such
+clients pile in at once. Now `IPC_NOWAIT` plus a bounded retry (100 x 5 ms),
+the same shape omcid's own reply paths already use (`vqsrv.c`'s
+`vq_reply()`, `clisrv.c`'s `cli_chunk()`).
+
+**Every wait on another process is bounded now, not only the two hit on
+hardware.** Audited every `diag`, `omcli`/`omcicli`, `arping`, `nv` and
+`/proc` verb write/read in `rootfs/skeleton/etc/` for an unbounded wait.
+Added `write_proc_bounded`/`read_proc_bounded` (`scripts/rcs-lib.sh`,
+`timeout $PROC_WRITE_TIMEOUT_S sh -c '...'`, 5 s default) for the bare
+`echo verb > /proc/odi_init`/`/proc/odi_omci` writes a plain `timeout`
+wrapper cannot reach (they are the calling shell's own `write(2)`, not a
+forked command) -- used by the `odi_wdt` register write (`rcS`),
+`rcs-lib.sh`'s PON steps and `switch_init`, and `apply.sh`'s
+`gpondeact`/`gponpw`/`gponact`. `fwu_starter.sh`'s `nv getenv sw_active`
+fallback gained a plain `timeout 5`. `docs/SETTINGS.md` gained a "Bounded
+waits" section listing the pattern per case, including two documented
+exceptions: `rcS.dev`'s dev-hook diag probes (a process parked in an
+uninterruptible-sleep kernel wait ignores `timeout`'s signal too), and
+`rcS`'s 23-step switch SDK-init loop -- every boot, no exception, and
+`write_proc_bounded` would have turned each step's zero-fork builtin
+`echo`/`cat` into a `timeout`+`sh` fork pair, close to 90 extra fork/execs
+on the path this image has fought hardest to keep fast (rc2 to rc3: 85-90 s
+boot down to 31 s), for a step that has never been observed to hang; the
+existing before/after crumb already names a stuck one in the ramlog if it
+ever does. No change needed in `network.sh` or `rcS.dev`'s confirm-arp
+path -- both already wrapped every `diag`/`arping`/`/proc` call in
+`timeout`.
+
+**`confd` pinned to v1.0.6.** Same rule applied on the odi-ui side: bounded
+every `run_to_buf`/`run_script_to_buf` child wait in the confd daemon
+itself (omcicli, diag, flash, apply, ping, fwu, reboot, md5sum, nv --
+odi-ui's own CHANGELOG has the full list and the per-command timeouts),
+plus an ssh connect/keepalive bound on the maintainer scripts
+(`scripts/deploy.sh` and the capture/schema-drift tools) that had none.
+
+**`metricsd` pinned to v1.1.2.** Fixes the matching hardware-trial bug on the
+exporter side: `metricsd`'s own child wait (`omcicli dump srvflow`) had no
+timeout either, so a stuck omcid (the queue-reclaim bug above) hung the whole
+exporter, not just the omcicli queue. See odi-sfp-exporter's CHANGELOG
+(v1.1.2) for the fix -- bounded child waits, `gpon_omci_up` reporting a
+timeout as a metric instead of silence.
+
+**A respawned omcid reclaims the 0x800 (omcicli) queue instead of waiting
+forever for `omci_app`.** Hardware trial (rc3, claro, 2026-09-28): after
+`kill -9 omcid` + respawn, `vq_ensure()`'s `IPC_CREAT|IPC_EXCL` failed
+`EEXIST` against the queue the previous omcid instance left behind (`kill
+-9` skips `on_signal()`'s `mq_remove()`), and the daemon logged "the
+omcicli queue is still omci_app's" and never served it again -- 42 queued
+requests piled up unanswered. `omci_app` never runs on this image at all
+(`src/omci/README.md`), so a stale queue at 0x800 can only be a dead
+instance of omcid's own: `vq_ensure()` (`src/omci/respond/vqsrv.c`) now
+removes it and recreates on `EEXIST`, same as `mq_open_fresh()` already
+does for the omcli queue. `src/omci/qemu-test.sh` gained a `kill -9` +
+respawn scenario asserting the reclaim and that `dump srvflow` (the
+exporter's own command) answers within 2 s afterwards.
+
+**The omcid watchdog ping is wall-clock-gated now, not loop-iteration-counted.**
+Hardware trial (rc2, claro, 2026-09-28): filling `/tmp` to `ENOSPC` left
+`last_ping_age` at 27 s against the 15 s the main loop was supposed to
+guarantee. Root cause: the loop counted `NL_POLL_US`-spaced iterations and
+called `1000000/NL_POLL_US` of them "one second" -- true only if every
+iteration takes exactly `NL_POLL_US`; one slow iteration (a full apply on
+an OMCI frame, a write that blocks while `/tmp` is nearly full) stretches a
+counted second past its real length, so 15 counted seconds can cover well
+more than 15 real ones. The `src/omci/respond/main.c` main loop now reads
+`CLOCK_MONOTONIC` (`sys_clock_gettime`, already available) and gates both
+the 1 s sample tick and the 15 s `wdt_ping()` on elapsed wall-clock time
+instead, independent of how long any one iteration takes.
+
+**Daemons are `/etc/inittab` `respawn` entries now, not `supervise.sh`.**
+Hardware trial (rc2, claro, 2026-09-28): `kill -9` of omcid was not
+respawned, and `odi_wdt` correctly reset the board 61 s later when omcid
+missed its ping deadline -- the old shell-loop supervisor
+(`rootfs/skeleton/etc/scripts/supervise.sh`, removed) had lost track of
+the child. Native over hand-rolled: busybox init forks each daemon itself
+and never loses the pid. metricsd, confd, dropbear and omcid are each now
+a `respawn` entry running a small per-daemon script
+(`rootfs/skeleton/etc/scripts/svc-*.sh`) that checks its own
+`/etc/config/<name>.off` flag and execs into `respawn.sh` (sets
+`oom_score_adj`, then execs the daemon in the foreground; dropbear already
+ran `-F`, and omcid `-d` was never a daemonize flag either -- neither ever
+double-forked). `/etc/init.d/services` is now a `stop`/`start` hand tool
+(writes/clears the `.off` flag and kills the current process so init
+restarts it at once) rather than a boot-time launcher.
+
+**The PON steps split into `rcS` (sysinit) and a new `rcS.pon` (`once`),
+so daemon respawn no longer waits on them.** Mounts, the config partition
+and the management address stay in `rcS`, which every respawn entry still
+waits on (busybox init starts nothing until sysinit returns); the PON
+steps (optics, the switch init, `gponsn`/`gponpw`/`gponact`) moved to
+`rcS.pon`, a `once` entry started in the same breath as the four daemon
+`respawn` entries -- the same real-world concurrency `services start &`
+already had with them. Since omcid now starts concurrently rather than
+being forked inline mid-PON-steps, `gponact` first polls the live
+`/proc/odi_omci` registration table for omcid, bounded at 10 s, rather
+than assuming it has already registered (an OLT that activates before
+omcid is up would otherwise see its first OMCI frames dropped
+unregistered). Shared functions (`config_mounted`, `crumb`,
+`confirm_watchdog`, the PON step helpers) live in a new
+`rootfs/skeleton/etc/scripts/rcs-lib.sh`, sourced by both scripts. The
+`make test-rcs` golden traces were regenerated and reviewed by hand: the
+`rcS` trace shrinks to the stages that stayed in it; the PON steps and the
+watchdog confirmation no longer appear (they are `rcS.pon` now, untraced
+by this harness, which only ever ran `rcS` itself). The `make test-qemu`
+`kill -9` resilience scenario now also covers omcid, which starts under
+qemu for the first time (previously gated on `/proc/odi_omci`, absent
+there; the new `svc-omcid.sh` gates only on `/etc/config/modules.off` and
+the binary existing, so it starts, and degrades harmlessly exactly as it
+already did on any kernel without `/proc/odi_omci`).
+
+**v1.0.2 and v1.0.3 are both also withdrawn: no management network on real
+hardware.** Trialled on claro (2026-09-28), v1.0.3 hung unreachable for 10+
+minutes with no ARP reply for the configured management address, and did
+not self-revert -- the same symptom the v1.0.3 watchdog redesign was
+supposed to have fixed. Root cause: `network.sh` falls back to a guessed
+`DEF_IP` (192.168.1.1) whenever the config partition or `lastgood.xml` is
+not readable at boot, and `rcS` confirmed the watchdog (`userland_ok`)
+unconditionally, before `omci_start`/`switch_init` even ran -- so a stick
+that came up with a guessed, unreachable address, or a failed `switch_init`
+(`/proc/odi_omci write failed` in the ramlog), still confirmed and never
+reverted. `rcS` gained `confirm_watchdog()`, called right after
+`omci_start`, which requires the config partition mounted, a real
+(non-guessed) management address, and a successful `switch_init` before
+writing `userland_ok` -- still with no ARP or reachability dependency. (The
+"real, non-guessed address" check was reworked again below, into a live
+`network.sh configured` call, superseding the flag file this paragraph
+originally described.) `test/rcs_trace_inner.sh`'s `network.sh` stub
+updated to match.
+
+**Mounts are declarative now, and "config mounted" is a live check, not a
+flag.** `/etc/fstab` (new) lists every mount rcS makes -- `proc`, `sysfs`,
+`/var` and `/var/tmp` (tmpfs, capped), `devpts`, and the config partition
+as `mtd:config /var/config jffs2` (found by MTD partition NAME, no
+`/dev/mtdblockN` node, no `/proc/mtd` lookup, no `mdev` race to lose --
+`mount-config.sh` is cut down to the one thing left that a mount option
+cannot express, the `/etc/config` symlink check). rcS runs `mount -a`
+twice (creating the `/var` subdirectories in between -- `mount` never
+makes a missing mountpoint, and nothing under `/var` exists until `/var`
+itself has landed). `config_mounted()`, the one place anything asks
+whether the config partition is mounted, now greps the live
+`/proc/mounts` for a real jffs2 mount at `/var/config` plus the symlink
+resolving, instead of trusting a flag file `mount-config.sh` wrote once
+and nothing ever rechecked. Caught in the rewrite: the first `mount -a`
+must not be traced into `/tmp` -- `/tmp` is a symlink to `/var/tmp`, which
+does not exist until that same call has mounted `/var`, and a shell
+redirected into a missing directory never runs the command at all
+(`make test-qemu` caught this one: ssh never came up).
+
+**Root cause, confirmed on a stick: `kernel/618/config` had neither
+`CONFIG_SHMEM` nor `CONFIG_TMPFS`.** Every fix above treated the symptom
+(no management network, `/var` read-only) as a boot-order or gating
+problem; the actual cause was one line below both mounts in the fstab
+rewrite: a `mount -t tmpfs ... size=6m` on a kernel with neither symbol
+falls through to `mm/shmem.c`'s `!CONFIG_SHMEM` stub (`ramfs_get_sb`),
+which mounts fine but rejects `size=` outright (`Invalid argument`) --
+confirmed with the exact error on real hardware. That is why the capped
+`/var` and `/var/tmp` mounts silently never landed, `/var` stayed the
+read-only squashfs, and nothing downstream of it (the config partition,
+`/var/log`) could be created. Fixed by enabling `CONFIG_SHMEM=y` and
+`CONFIG_TMPFS=y` in `kernel/618/config` -- uImage grew from about
+1,274,6xx to 1,281,554 bytes, comfortably under the 1,359,872-byte
+partition cap (78,318 bytes spare). Two more gates against a repeat:
+`required_mounts_ok()` (new, in `rcS`) checks `/proc/mounts` for `/var`
+and `/var/tmp` both actually being tmpfs right after the second `mount -a`
+and logs to kmsg the moment either is missing, and `confirm_watchdog()`
+now refuses to confirm without it, on top of the existing config-partition
+and `switch_init` checks. The `odi-toolchain-qemu-kernel-malta` kernel
+fragment gained explicit `CONFIG_SHMEM`/`CONFIG_MTD`/`CONFIG_JFFS2_FS`
+lines (already implied by `malta_defconfig`'s defaults, so no new kernel
+tag was needed this time, but the previous mismatch was exactly this kind
+of implicit-default drift going unnoticed) and `make test-qemu` gained an
+assertion reading `/proc/mounts` for `/var`/`/var/tmp` tmpfs at their
+configured sizes -- the check that would have caught this the first time.
+
+**The `/var/run/network-configured` flag file is gone.** `rcS`'s watchdog
+confirmation asked a flag written once, at boot, whether `network.sh` had
+applied a real (non-guessed) address. Replaced with `network.sh
+configured`, a new live-check mode: it recomputes the same IP `network.sh`
+would apply at boot and reads it straight back off `br0` (or `eth0`, if
+the bridge path failed) via `/proc/mounts`-style live inspection, so a
+later re-address or a `network.sh addr` that failed cannot leave a stale
+`configured` flag behind.
+
 ## v1.0.3 — 2026-09-28
+
+**WITHDRAWN.** Broken on hardware: no management network. Root cause,
+confirmed after the fact (v1.0.4 below): `kernel/618/config` had neither
+`CONFIG_SHMEM` nor `CONFIG_TMPFS`, so the capped `/var` tmpfs mount failed
+and the config partition never mounted. Release images deleted from
+GitHub 2026-09-28. Use v1.0.1 or v1.0.4.
 
 **v1.0.2 is withdrawn (marked pre-release) and must not be used.** Trialled
 on claro (2026-09-27), it hung for 15 minutes with no ARP or ping despite
@@ -64,6 +305,12 @@ reviewed by hand: the only differences are the tmpfs mounts and omcid's
 supervise-restart loop against this harness's stub binary.
 
 ## v1.0.2 — 2026-09-27
+
+**WITHDRAWN.** Broken on hardware: no management network. Root cause,
+confirmed after the fact (v1.0.4 below): `kernel/618/config` had neither
+`CONFIG_SHMEM` nor `CONFIG_TMPFS`, so the capped `/var` tmpfs mount failed
+and the config partition never mounted. Release images deleted from
+GitHub 2026-09-28. Use v1.0.1 or v1.0.4.
 
 **Resilience.** A 20 MB `scp` into `/tmp` on ISP1 exhausted RAM (`/tmp` was
 ramfs, unbounded and unreclaimable): the OOM killer took dropbear, confd

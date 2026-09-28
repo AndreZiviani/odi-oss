@@ -82,6 +82,24 @@ behind every rule here.
   under `## Unreleased` in `CHANGELOG.md`, in the same commit.** A release
   moves `Unreleased` into a version section named after the tag
   (`tools/release-notes.sh` reads that section by heading).
+- **Every wait on another process is bounded.** A stuck omcid has, on
+  hardware, left both a shell script and the exporter waiting on it
+  forever (`CHANGELOG.md`, "Unreleased"). See `docs/SETTINGS.md`, "Bounded
+  waits", for the pattern per case — a forked command goes through busybox
+  `timeout` (already built; `packages/busybox/config.fragment`), a bare
+  `echo verb > /proc/...` write goes through `write_proc_bounded`/
+  `read_proc_bounded` (`rootfs/skeleton/etc/scripts/rcs-lib.sh`), and a
+  freestanding C daemon polls its child with a timeout and `SIGKILL`s it on
+  expiry rather than blocking in `read()`/`waitpid()`. Pick a real bound for
+  the specific call, not a copy-pasted one, and document it next to the
+  call when it is not obvious. Two documented exceptions exist: `rcS.dev`'s
+  dev-hook diag probes (a process parked in an uninterruptible-sleep kernel
+  wait ignores `timeout`'s signal too, so a hang of that specific kind is
+  not fixable this way and is not pretended to be), and `rcS`'s 23-step
+  switch SDK-init loop, every boot with no exception, left unbounded on
+  cost rather than risk -- `write_proc_bounded` turns a zero-fork builtin
+  into a fork pair, and no step there has ever been observed to hang. Bound
+  a hot, unproven path only once it actually hangs.
 - **Check for existing lint/contribution rules before adding a new pattern.**
   `make lint` (see below) is the authority. `docs/HACKING.md` is the full
   contributor guide (the recovery mechanism, the gates, the known traps,

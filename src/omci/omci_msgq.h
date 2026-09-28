@@ -59,6 +59,7 @@
 #define MQ_E2BIG            7
 #define MQ_EINVAL          22
 #define MQ_EIDRM           36
+#define MQ_EEXIST          17   /* below the MIPS-divergent range: same as x86/arm */
 
 struct omci_msg {
 	uint32_t mtype;                       /* the SysV message type */
@@ -143,18 +144,42 @@ static inline long mq_remove(long qid)
 	return __syscall6(__NR_ipc, IPC_MSGCTL, qid, IPC_RMID, 0, 0, 0);
 }
 
-static inline long mq_send(long qid, const struct omci_msg *m)
-{
-	return __syscall6(__NR_ipc, IPC_MSGSND, qid, OMCI_MQ_LEN - 4, 0,
-			  (long)m, 0);
-}
-
 /* The same two calls for a message that is not the vendor's fixed 260 bytes:
  * omcid's own protocol frames are variable length. */
 static inline long mq_snd_flags(long qid, const void *m, unsigned long n,
 				int flags)
 {
 	return __syscall6(__NR_ipc, IPC_MSGSND, qid, (long)n, flags, (long)m, 0);
+}
+
+/* mq_send() -- a client enqueuing a command onto a queue omcid (or, on the
+ * omcli protocol, confd/metricsd) also reads.
+ *
+ * A plain blocking msgsnd (flags 0) waits in the kernel until there is room,
+ * with no bound of its own: every client that shells out to omcicli/omcli
+ * now has its OWN timeout around the whole child (metricsd's
+ * OMCICLI_TIMEOUT_MS, confd's *_TIMEOUT_MS -- both odi-sfp-exporter and
+ * odi-ui's own "Bound every wait" fixes), but that bound is a SIGKILL from
+ * outside; it does not stop this call from parking in D state first, and a
+ * daemon that is briefly slow (a bursty MIB upload, a respawn) is exactly
+ * when several such clients pile in at once. IPC_NOWAIT plus a short bounded
+ * retry -- the same shape omcid's own replies use (vqsrv.c, clisrv.c) --
+ * means a client backs off and reports failure instead of becoming one more
+ * thing silently waiting on another process forever.
+ */
+#define MQ_SEND_RETRIES   100
+#define MQ_SEND_RETRY_NS  (5 * 1000 * 1000)   /* 5 ms; 500 ms total */
+
+static inline long mq_send(long qid, const struct omci_msg *m)
+{
+	for (int tries = 0; tries < MQ_SEND_RETRIES; tries++) {
+		long rc = mq_snd_flags(qid, m, OMCI_MQ_LEN - 4, IPC_NOWAIT);
+
+		if (rc >= 0 || rc != -MQ_EAGAIN)
+			return rc;
+		sys_nanosleep(0, MQ_SEND_RETRY_NS);
+	}
+	return -MQ_EAGAIN;
 }
 
 static inline long mq_rcv_flags(long qid, void *m, unsigned long n,
