@@ -34,6 +34,60 @@ read_proc_bounded() {
 	path=$1
 	timeout "$PROC_WRITE_TIMEOUT_S" cat "$path" 2>/dev/null
 }
+
+# uptime_s: seconds since boot, from $UPTIME (default /proc/uptime, a
+# fixture path under test). Shared so apply.sh and omci_reactivate below
+# measure DEACT_HOLD off the same clock.
+UPTIME=${UPTIME:-/proc/uptime}
+uptime_s() { cut -d. -f1 "$UPTIME"; }
+
+# omci_reactivate <t0> <register_wait> <deact_hold>
+#
+# The tail of the hardware-proven re-provisioning sequence: wait for
+# whatever omcid is currently running to register with odi_omci (redirect
+# type 1), re-apply the PLOAM password from the CS file, hold until
+# <deact_hold> seconds have passed since <t0>, then reactivate (gponact).
+# The caller must already have written gpondeact -- this only covers the
+# part downstream of it, since the two callers differ there: apply.sh's
+# `omci` restart also stops the old omcid and starts a new one first;
+# svc-omcid.sh's automatic re-provisioning after a respawn (docs/BOOT.md,
+# "Respawn re-provisioning") must not touch the omcid process at all, since
+# init is already supervising it as a respawn entry and killing or starting
+# one from here would just trigger another respawn.
+#
+# Echoes the pid that registered, or nothing if REGISTER_WAIT ran out
+# (activation is attempted either way, as apply.sh's did); returns 1 if the
+# final gponact write itself failed, 0 otherwise.
+omci_reactivate() {
+	t0=$1 register_wait=$2 deact_hold=$3
+	odi_init=${ODI_INIT:-/proc/odi_init}
+	odi_omci=${ODI_OMCI:-/proc/odi_omci}
+	cs=${CS:-/etc/config/lastgood.xml}
+
+	found=
+	i=0
+	while [ "$i" -lt "$register_wait" ]; do
+		sleep 1
+		i=$((i + 1))
+		p=$(pidof omcid)
+		if [ -n "$p" ] && grep -q "registered:.*type=1 pid=$p" "$odi_omci" 2>/dev/null; then
+			found=$p
+			break
+		fi
+	done
+
+	# The PLOAM password is read here the way rcS reads it at boot (the
+	# gponpw auto step): from the CS file, hex, skipped when empty.
+	pw=$(sed -n "s/.*Name=\"GPON_PLOAM_PASSWD\" Value=\"\([^\"]*\)\".*/\1/p" "$cs" 2>/dev/null | head -n 1)
+	[ -n "$pw" ] && { write_proc_bounded "$odi_init" "gponpw $pw" 2>/dev/null || true; }
+
+	while [ $(( $(uptime_s) - t0 )) -lt "$deact_hold" ]; do
+		sleep 1
+	done
+	write_proc_bounded "$odi_init" gponact 2>/dev/null || return 1
+	echo "$found"
+}
+
 dev_hook() { :; }
 dev_confirm_ok() { return 0; }
 pon_steps() { pon_steps_default; }	# the rcS.dev pon-steps override replaces this

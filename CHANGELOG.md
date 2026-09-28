@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+**A respawned omcid gets provisioned again, not just restarted.** Hardware
+finding (rc5, claro, 2026-09-28): after `kill -9 omcid`, init respawns it
+within 8 s and it pings and serves `omcicli`, but `gpon_omci_services`
+stays 0 for 200+ s -- the OLT had already provisioned this ONU and does not
+re-send the MIB to a fresh omcid with an empty one. `svc-omcid.sh` now
+tells a respawn apart from the boot's first start with a marker under
+`/var/run` (tmpfs, gone at the next reboot) and, on a respawn, backgrounds
+`omci-respawn-reprovision.sh`: deactivate, wait for the new omcid to
+register, re-apply the PLOAM password, hold, reactivate -- the same
+hardware-proven sequence the web UI's `apply.sh omci` already uses, forcing
+the OLT to re-range and re-provision. The two callers now share that tail
+as `rcs-lib.sh`'s `omci_reactivate` rather than keeping two copies. The
+respawned omcid process itself is never touched -- init already supervises
+it as a `respawn` entry, so killing or restarting it from here would only
+trigger another respawn. `docs/BOOT.md` has the new "Respawn
+re-provisioning" section.
+
 **A registered watchdog client is armed at registration, not on its own
 first ping.** Hardware trial (rc4, claro, 2026-09-28): omcid answered two
 omcicli commands after registering with odi_omci, then stopped -- 0x800

@@ -209,6 +209,50 @@ steps, running concurrently with the four respawn entries just started.
     is activating without a registered omcid, rather than hanging the
     boot on a missing or wedged daemon.
 
+## Respawn re-provisioning
+
+What happens when omcid dies mid-boot, not at boot. Hardware finding (rc5,
+claro, 2026-09-28): `kill -9 omcid` -- init respawns it within a few seconds
+(`svc-omcid.sh`, `/etc/scripts/respawn.sh`), it pings the watchdog and
+serves `omcicli` again, but `gpon_omci_services` stays 0 indefinitely. The
+OLT has already provisioned this ONU from the first boot's MIB and does
+not re-send it to a fresh omcid that starts with an empty one -- nothing
+else on the ONU side asks it to. The proven fix, already used by the web
+UI's live "apply omci" path (`apply.sh omci`), is to force the OLT to
+re-range: deactivate the ONU, let the OLT see it go, then reactivate --
+which resets its MIB view and makes it provision the ONU again from
+scratch, this time into the omcid that is actually running.
+
+`svc-omcid.sh` tells a respawn apart from the first start of the boot with
+a marker under `/var/run` (`SVC_OMCID_MARKER`, default
+`/var/run/svc-omcid.started`): tmpfs, so it is gone at the next reboot,
+same as every other per-boot flag this image keeps (`docs/BOOT.md`
+elsewhere; `/var` is capped tmpfs, stage 1 above). The first start of the
+boot creates the marker and does nothing else -- rcS.pon's own `gponact`
+(stage 13) already provisions that one, the ordinary way. Every later
+start (the marker already exists) instead backgrounds
+`omci-respawn-reprovision.sh` and returns immediately, so `svc-omcid.sh`
+still hands off to `respawn.sh`/`omcid` without waiting on anything --
+nothing here may cost the respawn its own turn to run.
+
+`omci-respawn-reprovision.sh` does NOT touch the omcid process itself:
+by the time it runs, init is already supervising it as a `respawn` entry,
+and killing or starting one from this script would just trigger another
+respawn -- and another run of this script. It only drives `/proc/odi_init`:
+write `gpondeact`, wait (bounded) for the omcid that is now running to
+register with `/proc/odi_omci` (redirect type 1), re-apply the PLOAM
+password from the config store, hold three seconds, then `gponact` --
+`rcs-lib.sh`'s `omci_reactivate`, the same tail function `apply.sh`'s
+`omci` restart calls after it stops the old omcid and starts a new one.
+The two callers share that tail rather than keeping two copies of the
+hardware-measured sequence (deactivate, wait, password, three-second hold,
+activate) to drift apart.
+
+On a kernel with no `/proc/odi_init` (the qemu system harness's stock
+malta kernel, or a dev image with `modules.off`) `omci-respawn-reprovision.sh`
+is a no-op: there are no PON verbs to drive, so it exits at once rather
+than waiting out its own timeouts for nothing.
+
 ## The development aids: rcS.dev
 
 `/etc/init.d/rcS.dev` ships in the image and is sourced by rcS. It

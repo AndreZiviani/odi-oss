@@ -53,8 +53,6 @@ CS=${CS:-/etc/config/lastgood.xml}
 MODULES_OFF=${MODULES_OFF:-/etc/config/modules.off}
 SERVICES_LOG=${SERVICES_LOG:-/var/log/services.log}
 
-UPTIME=${UPTIME:-/proc/uptime}
-
 # How long each wait may take, in seconds.
 STOP_WAIT=${STOP_WAIT:-10}          # omcid deregisters and exits on SIGTERM; slack
 REGISTER_WAIT=${REGISTER_WAIT:-10}  # the new omcid registers for redirect type 1
@@ -62,8 +60,6 @@ DEACT_HOLD=${DEACT_HOLD:-3}         # deactivated at least this long, as measure
 
 say() { echo "apply: $*"; }
 die() { echo "apply: $*" >&2; exit 1; }
-
-uptime_s() { cut -d. -f1 "$UPTIME"; }
 
 network() {
 	[ -x "$NETWORK" ] || die "no $NETWORK"
@@ -108,32 +104,18 @@ omci() {
 	# treats SIGHUP as stop. -r clears the bridge connections the old one
 	# left in the switch before this one builds its own.
 	setsid "$OMCID" -a -d -r >> "$OMCID_LOG" 2>&1 < /dev/null &
-	new=
-	i=0
-	while [ "$i" -lt "$REGISTER_WAIT" ]; do
-		sleep 1
-		i=$((i + 1))
-		new=$(pidof omcid)
-		[ -n "$new" ] && grep -q "registered:.*type=1 pid=$new" "$ODI_OMCI" 2>/dev/null && break
-		new=
-	done
+
+	# The wait for registration, the PLOAM password re-apply, the hold and
+	# the final gponact are the tail svc-omcid.sh's automatic
+	# re-provisioning (docs/BOOT.md) also runs, after a respawn -- shared
+	# as rcs-lib.sh's omci_reactivate rather than kept as a second copy.
+	new=$(omci_reactivate "$t0" "$REGISTER_WAIT" "$DEACT_HOLD") \
+		|| die "gponact FAILED: the ONU stays off the line until a reboot"
 	if [ -n "$new" ]; then
 		say "omcid $new registered for OMCI"
 	else
 		say "omcid did not register within ${REGISTER_WAIT} s -- activating anyway, see $OMCID_LOG" >&2
 	fi
-
-	# The PLOAM password is read here the way rcS reads it at boot (the
-	# gponpw auto step): from the CS file, hex, skipped when empty.
-	pw=$(sed -n "s/.*Name=\"GPON_PLOAM_PASSWD\" Value=\"\([^\"]*\)\".*/\1/p" "$CS" 2>/dev/null | head -n 1)
-	if [ -n "$pw" ]; then
-		write_proc_bounded "$ODI_INIT" "gponpw $pw" 2>/dev/null || say "gponpw failed, the old password stays" >&2
-	fi
-
-	while [ $(( $(uptime_s) - t0 )) -lt "$DEACT_HOLD" ]; do
-		sleep 1
-	done
-	write_proc_bounded "$ODI_INIT" gponact 2>/dev/null || die "gponact FAILED: the ONU stays off the line until a reboot"
 	say "ONU re-activated; the OLT provisions it again within about a minute"
 	[ -n "$new" ] || exit 1
 }
