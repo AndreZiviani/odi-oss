@@ -35,8 +35,13 @@ set -u
 
 # write_proc_bounded: the bounded /proc-verb write rcS and rcS.pon already
 # use, reused here rather than a second copy -- see rcs-lib.sh for what
-# `timeout` does and does not catch on these.
-. /etc/scripts/rcs-lib.sh
+# `timeout` does and does not catch on these. Relative to the directory
+# this script lives in, not a fixed /etc/scripts/ path, so
+# test/apply_test.sh (which runs this file straight out of the working
+# tree) finds the real one beside it instead of a device path that does
+# not exist off the stick.
+RCS_LIB=${RCS_LIB:-$(dirname "$0")/rcs-lib.sh}
+. "$RCS_LIB"
 
 ODI_INIT=${ODI_INIT:-/proc/odi_init}
 ODI_OMCI=${ODI_OMCI:-/proc/odi_omci}
