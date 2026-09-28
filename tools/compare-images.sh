@@ -85,7 +85,22 @@ for side in a b; do
 	sudo find "$WORK/rootfs-$side" -inum "$inum" -delete
 done
 
-rootfs_diff=$(diff -rq "$WORK/rootfs-a" "$WORK/rootfs-b" 2>/dev/null || true)
+# dev/ is checked separately, not by plain diff: every node there is a
+# character or block special file (rootfs/devices.pseudo), and GNU diff
+# reports two special files as "differ" on sight, whether or not they
+# actually match, because it never reads their content. What identifies a
+# device node -- name, type, major:minor -- is checked explicitly instead;
+# dev/ is then excluded from the general diff below so that harmless "differ"
+# noise cannot mask a real difference elsewhere in the same run.
+dev_listing() { (cd "$1/dev" && find . | LC_ALL=C sort | xargs -I{} stat --format='%n %F %t:%T' {}); }
+dev_diff=$(diff <(dev_listing "$WORK/rootfs-a") <(dev_listing "$WORK/rootfs-b") || true)
+if [ -n "$dev_diff" ]; then
+	echo "compare-images.sh: dev/ differs (name, type or major:minor -- not tolerated):" >&2
+	echo "$dev_diff" >&2
+	fail=1
+fi
+
+rootfs_diff=$(diff -rq -x dev "$WORK/rootfs-a" "$WORK/rootfs-b" 2>/dev/null || true)
 unexpected=$(echo "$rootfs_diff" | grep -vE \
 	'^Files .*/etc/version and .*/etc/version differ$|^Files .*/etc/odi-build and .*/etc/odi-build differ$|^Files .*/etc/passwd and .*/etc/passwd differ$' \
 	| sed '/^$/d' || true)
