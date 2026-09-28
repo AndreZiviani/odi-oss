@@ -12,7 +12,10 @@ a respawn recover, but through a visible re-range (O5 -> O1 -> O5).
 sync counter, and the bookkeeping that maps an entity to what is actually
 programmed in the switch (GEM flow ids, T-CONT map, broadcast flow,
 service table) -- to `/var/run/omcid-mib.snap` after every Create, Set or
-Delete, written atomically with a version header and a CRC32. A respawned
+Delete, and again after the quiet-second `us_qos_rebuild()`/`bdgconn_rebuild()`
+that actually fills the flow, T-CONT and service-table bookkeeping (the
+message handler alone snapshots too early to catch it), written atomically
+with a version header and a CRC32. A respawned
 `omcid` whose PON is still O5 and whose snapshot names this same device
 loads it by plain memory copy and resumes answering -- no re-registration,
 and not one switch-programming driver call, because the datapath was

@@ -348,10 +348,21 @@ int main(int argc, char **argv)
 		if (qos_dirty && quiet >= 1000000 / NL_POLL_US) {
 			qos_dirty = 0;
 			us_qos_rebuild();
+			/* The flow ids and T-CONT map us_qos_rebuild() just
+			 * settled are exactly the "maps a managed entity to
+			 * switch programming" half of a resume snapshot
+			 * (docs/BOOT.md) -- the Create/Set handler that set
+			 * qos_dirty already saved one, but the rebuild that
+			 * actually fills these tables runs here, a quiet
+			 * second later. Without this a snapshot taken between
+			 * that message and this rebuild describes a MIB whose
+			 * bookkeeping has not caught up with it yet. */
+			snapshot_save();
 		}
 		if (conn_dirty && quiet >= 1000000 / NL_POLL_US) {
 			conn_dirty = 0;
 			bdgconn_rebuild();
+			snapshot_save();       /* see the qos_dirty arm above */
 		}
 		if (fd < 0) {
 			/* No line side: pace the loop as the netlink
