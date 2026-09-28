@@ -22,40 +22,62 @@ crumb() { kmsg "$*"; }
 dev_hook() { :; }
 dev_confirm_ok() { return 0; }
 pon_steps() { pon_steps_default; }	# defined with the PON steps below
+
+# The one place anything asks "is the config partition actually mounted".
+# Not a flag file (one written once, at mount time, would say yes even if
+# the mount were later lazily unmounted, remounted elsewhere, or never
+# really landed for a reason `mount`'s exit code missed) -- the live mount
+# table, checked fresh every call: a real jffs2 mount at CONFIG_DIR, AND
+# /etc/config (the symlink the whole rest of rcS reads through) actually
+# resolving there. No awk: mount-config.sh already found it SIGBUS on this
+# board this early in boot, so this stays grep/sed like the rest of the
+# boot path.
+CONFIG_DIR=/var/config
+config_mounted() {
+	grep -qE "^[^ ]+ $CONFIG_DIR jffs2 " /proc/mounts 2>/dev/null && [ -d /etc/config ]
+}
 if [ -r /etc/init.d/rcS.dev ]; then
 	. /etc/init.d/rcS.dev
 fi
 . /etc/scripts/supervise.sh
 
 # ---- mounts. /dev is devtmpfs, mounted by the kernel before init
-# (CONFIG_DEVTMPFS_MOUNT), with every node by name.
-/bin/mount -t proc  proc  /proc || echo "rcS: /proc did not mount" >&2
+# (CONFIG_DEVTMPFS_MOUNT), with every node by name. Declarative, from
+# /etc/fstab (docs/BOOT.md): proc, sysfs, /var (tmpfs, an overall size cap,
+# docs/SETTINGS.md), /var/tmp (its OWN, separate, bigger tmpfs -- the one
+# place scp/sftp and a firmware upload's staging area write, and must give
+# ENOSPC on its own cap rather than eat the memory every other daemon
+# needs), devpts, and the config partition (mtd:config, jffs2, by MTD
+# partition NAME -- no /dev/mtdblockN node, no /proc/mtd lookup, no mdev
+# race to win). Neither tmpfs cap reserves RAM up front -- "size=" bounds
+# usage, it does not pin pages.
+#
+# One `mount -a` cannot do all six in a single pass: /var/tmp and
+# /var/config are paths UNDER /var, which does not exist as a mountpoint
+# with any subdirectories of its own until the /var line above it has
+# already landed (mount never creates a missing mountpoint), so this runs
+# `mount -a` once for what needs nothing more than /proc and /sys, creates
+# the five /var subdirectories, then runs it again for the two that
+# needed them. Already-mounted entries are skipped harmlessly the second
+# time.
 kmsg "start"
-/bin/mount -t sysfs sysfs /sys  || echo "rcS: /sys did not mount" >&2
-# /var: tmpfs, not ramfs, with an overall size cap (docs/SETTINGS.md) --
-# log/run/lock and the config-partition FALLBACK when jffs2 does not mount
-# (mount-config.sh below). /tmp (a symlink to /var/tmp,
-# rtl9601-rootfs-symlinks-into-var in the KB) gets its OWN, separate tmpfs
-# a moment later: it is the one place scp/sftp writes and the firmware
-# the upload staging area (fwu_starter.sh FWU_DIR, an image tarball a few MB
-# plus its unpacked squashfs/uImage) land, and it must give ENOSPC on its
-# own cap rather than eat the memory every other daemon needs. Neither cap
-# reserves RAM up front -- "size=" bounds usage, it does not pin pages --
-# so this is strictly safer than the unbounded ramfs it replaces, never
-# more expensive.
-VAR_TMPFS_SIZE=${VAR_TMPFS_SIZE:-6m}
-VAR_TMP_TMPFS_SIZE=${VAR_TMP_TMPFS_SIZE:-8m}
+mkdir -p /dev/pts 2>/dev/null || echo "rcS: /dev/pts could not be created" >&2
+# The first `mount -a` cannot be traced into /tmp: /tmp is a symlink to
+# /var/tmp, and neither exists as a directory until /var itself has been
+# mounted, which is what this call is for -- ash treats a `>` target whose
+# parent is missing as a redirection error and never runs the command at
+# all, silently skipping every mount in the list. Whatever busybox mount
+# prints goes to the inherited stdout/stderr instead, same as every other
+# unguarded step here.
+/bin/mount -a || echo "rcS: mount -a (pass 1) reported a failure" >&2
+for d in tmp log run lock config; do
+	mkdir -p "/var/$d" || echo "rcS: /var/$d could not be created" >&2
+done
 # omcid own ping deadline to odi_wdt (docs/SETTINGS.md, "Watchdog rules");
 # matches ODI_WDT_OMCID_DEADLINE_S in odi_wdt.h, kept here too since rcS is
 # what actually writes it and a kernel/rootfs pair should never disagree
 # silently.
 ODI_WDT_OMCID_DEADLINE_S=${ODI_WDT_OMCID_DEADLINE_S:-60}
-/bin/mount -t tmpfs -o "size=$VAR_TMPFS_SIZE,mode=1777" tmpfs /var || echo "rcS: /var did not mount" >&2
-for d in tmp log run lock config; do
-	mkdir -p "/var/$d" || echo "rcS: /var/$d could not be created" >&2
-done
-/bin/mount -t tmpfs -o "size=$VAR_TMP_TMPFS_SIZE,mode=1777" tmpfs /var/tmp || echo "rcS: /var/tmp (tmp) tmpfs did not mount" >&2
-
 # vm.min_free_kbytes: the kernel default on a 32 MB box is small (around
 # 128 KB) -- raised modestly so the page allocator always keeps a slightly
 # larger reserve free, giving a starved critical daemon (oom_score_adj
@@ -64,14 +86,19 @@ done
 # docs/SETTINGS.md has the number and the reasoning; not a cgroup or memcg
 # limit, just the global watermark.
 echo 1536 > /proc/sys/vm/min_free_kbytes 2>/dev/null || echo "rcS: vm.min_free_kbytes not set" >&2
+/bin/mount -a >> /tmp/mount-a.trace 2>&1 || echo "rcS: mount -a (pass 2) reported a failure, see /tmp/mount-a.trace" >&2
 
 # ---- the config partition: jffs2, shared with the stock slot, never
 # written by fwu.sh. Host keys, the UI credentials and every switch file
-# live there. Traced, because a failure here leaves nothing else behind.
-kmsg "mounting the config partition"
-sh -x /etc/scripts/mount-config.sh > /tmp/mount-config.trace 2>&1 || echo "rcS: no config partition" >&2
-kmsg "config partition step done"
-if [ ! -f /var/run/config-mounted ]; then
+# live there. The mount itself is the /etc/fstab line above (mount -a,
+# pass 2); mount-config.sh, still traced under `sh -x` so a failure here
+# leaves something in the ramlog, only confirms /etc/config -- a symlink
+# baked into the read-only squashfs -- actually resolves to where it
+# landed. config_mounted() (above) is the one place anything else asks
+# whether it is really there: the live mount table, not a flag set once
+# here and never rechecked.
+sh -x /etc/scripts/mount-config.sh > /tmp/mount-config.trace 2>&1 || echo "rcS: config partition symlink check failed" >&2
+if ! config_mounted; then
 	kmsg "config partition NOT mounted, breadcrumbs unavailable"
 fi
 dev_hook config
@@ -113,13 +140,10 @@ fi
 crumb "network: $(ifconfig br0 2>/dev/null | sed -n "s/.*inet addr:\([0-9.]*\).*/\1/p") on br0, eth0 $(cat /sys/class/net/eth0/operstate 2>/dev/null)"
 dev_hook network
 
-# ---- ptys. devpts, for the /dev/ptmx that dropbear opens for an
-# interactive session; the BSD pairs are the fallback it can also scan.
-# devtmpfs normally has the BSD nodes; they are made here if it does not.
-if [ ! -d /dev/pts ]; then
-	/bin/mkdir -p /dev/pts || echo "rcS: /dev/pts could not be created" >&2
-fi
-/bin/mount -t devpts devpts /dev/pts || echo "rcS: no devpts, telnet will not work" >&2
+# ---- ptys. devpts is mounted on /dev/pts already (the /etc/fstab mounts,
+# above), for the /dev/ptmx that dropbear opens for an interactive session;
+# the BSD pairs made here are the fallback it can also scan. devtmpfs
+# normally has them.
 if [ ! -c /dev/ptyp0 ]; then
 	i=0
 	for c in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do
@@ -160,20 +184,21 @@ dev_hook services
 # gets here. It needs no network REACHABILITY -- no ARP, no ping (confirm-arp,
 # in rcS.dev, is the development exception that adds that on top) -- but it
 # does need proof that management is even POSSIBLE: the config partition
-# mounted (mount-config.sh, /var/run/config-mounted), a real management
-# address applied rather than network.sh's DEF_IP guess
-# (/var/run/network-configured), and switch_init not having failed
-# (SWITCH_INIT_OK, set by omci_start below). Any one missing and the stick
-# would come up unreachable and stay up forever without this gate -- exactly
-# what left v1.0.2 and v1.0.3 unreachable on real hardware while qemu's
-# stubbed mount/network.sh never exercised the failure. Called right after
-# omci_start, still before gponsn/gponpw/gponact, so an unrelated PON/optics
-# problem still cannot cost the confirmation.
+# actually mounted (config_mounted, above -- the live mount table, not a
+# flag set once and never rechecked), a real management address applied
+# rather than network.sh's DEF_IP guess (/var/run/network-configured), and
+# switch_init not having failed (SWITCH_INIT_OK, set by omci_start below).
+# Any one missing and the stick would come up unreachable and stay up
+# forever without this gate -- exactly what left v1.0.2 and v1.0.3
+# unreachable on real hardware while qemu's stubbed mount/network.sh never
+# exercised the failure. Called right after omci_start, still before
+# gponsn/gponpw/gponact, so an unrelated PON/optics problem still cannot
+# cost the confirmation.
 WDOK=/proc/odi_wdt/userland_ok
 SWITCH_INIT_OK=1
 confirm_watchdog() {
 	[ -w "$WDOK" ] || return 0
-	if [ ! -f /var/run/config-mounted ]; then
+	if ! config_mounted; then
 		crumb "watchdog NOT confirmed: config partition not mounted"
 		return 0
 	fi

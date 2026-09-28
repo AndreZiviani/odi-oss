@@ -53,7 +53,11 @@ stage() {
 	# regular file and are taken from the trace, not from the file.
 	P=$R/proc
 	mkdir -p "$P/net" "$P/sys/kernel" "$P/odi_wdt"
-	printf 'rootfs / rootfs rw 0 0\ndevtmpfs /dev devtmpfs rw 0 0\nproc /proc proc rw 0 0\n' > "$P/mounts"
+	# The config partition already mounted: real hardware would only reach
+	# rcS's confirm_watchdog with this line present if mount -a's jffs2
+	# entry actually landed, and mount is stubbed below to a blind
+	# success that never updates this file itself.
+	printf 'rootfs / rootfs rw 0 0\ndevtmpfs /dev devtmpfs rw 0 0\nproc /proc proc rw 0 0\nmtd:config /var/config jffs2 rw 0 0\n' > "$P/mounts"
 	printf '12.34 10.00\n' > "$P/uptime"
 	printf 'dev:    size   erasesize  name\nmtd0: 00040000 00010000 "boot"\nmtd3: 00100000 00010000 "config"\n' > "$P/mtd"
 	printf '           CPU0\n  8:          0   rlx-irq  apl_sw\n 26:          0   rlx-irq  eth0\n' > "$P/interrupts"

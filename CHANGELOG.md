@@ -23,6 +23,25 @@ successful `switch_init` before writing `userland_ok` -- still with no ARP
 or reachability dependency. `test/rcs_trace_inner.sh`'s `network.sh` stub
 updated to match.
 
+**Mounts are declarative now, and "config mounted" is a live check, not a
+flag.** `/etc/fstab` (new) lists every mount rcS makes -- `proc`, `sysfs`,
+`/var` and `/var/tmp` (tmpfs, capped), `devpts`, and the config partition
+as `mtd:config /var/config jffs2` (found by MTD partition NAME, no
+`/dev/mtdblockN` node, no `/proc/mtd` lookup, no `mdev` race to lose --
+`mount-config.sh` is cut down to the one thing left that a mount option
+cannot express, the `/etc/config` symlink check). rcS runs `mount -a`
+twice (creating the `/var` subdirectories in between -- `mount` never
+makes a missing mountpoint, and nothing under `/var` exists until `/var`
+itself has landed). `config_mounted()`, the one place anything asks
+whether the config partition is mounted, now greps the live
+`/proc/mounts` for a real jffs2 mount at `/var/config` plus the symlink
+resolving, instead of trusting a flag file `mount-config.sh` wrote once
+and nothing ever rechecked. Caught in the rewrite: the first `mount -a`
+must not be traced into `/tmp` -- `/tmp` is a symlink to `/var/tmp`, which
+does not exist until that same call has mounted `/var`, and a shell
+redirected into a missing directory never runs the command at all
+(`make test-qemu` caught this one: ssh never came up).
+
 ## v1.0.3 — 2026-09-28
 
 **v1.0.2 is withdrawn (marked pre-release) and must not be used.** Trialled
