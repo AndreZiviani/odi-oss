@@ -1,0 +1,108 @@
+name: dependency-bump
+
+# Weekly: checks every pinned upstream version (tools/bump-deps.sh) --
+# Linux 6.18.y, busybox, dropbear, iproute2, the three odi-toolchain image
+# digests, and the odi-sfp-exporter/odi-ui release tags -- against what is
+# actually current, rewrites the pins that are behind, runs the test suite
+# against the result, and opens a PR only if that suite passes. A bump that
+# fails the tests is left uncommitted; the job fails instead, so it shows
+# up in the Actions tab rather than as a silent no-op.
+#
+# Not on pull_request or push: this touches nothing unless a schedule or a
+# manual run says to, and every commit it makes is its own PR through the
+# normal review path -- nothing here pushes to main directly.
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check upstream versions, rewrite any pin that is behind
+        run: tools/bump-deps.sh | tee /tmp/bump-summary.txt
+
+      - name: Anything to do?
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "changed=0" >> "$GITHUB_OUTPUT"
+            echo "dependency-bump: everything already at its latest pinned version"
+          else
+            echo "changed=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: CHANGELOG entry
+        if: steps.diff.outputs.changed == '1'
+        run: |
+          {
+            echo
+            echo "**Automated dependency bump.**"
+            sed -n 's/^bumped: /- /p' /tmp/bump-summary.txt
+            echo
+          } > /tmp/changelog-entry.md
+          awk '
+            /^## Unreleased/ && !done { print; while ((getline line < "/tmp/changelog-entry.md") > 0) print line; done=1; next }
+            { print }
+          ' CHANGELOG.md > /tmp/CHANGELOG.md.new
+          mv /tmp/CHANGELOG.md.new CHANGELOG.md
+
+      - name: Lint (shellcheck, inline-quote check)
+        if: steps.diff.outputs.changed == '1'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          make lint
+
+      - name: Host-side tests, diag, OMCI daemon
+        if: steps.diff.outputs.changed == '1'
+        run: make test
+
+      # Fetches and verifies whatever kernel/618/fetch.sh now points at
+      # (GPG included) without compiling it -- the same tradeoff the ci.yml
+      # clean-build job makes, for the same reason: a full kernel build is
+      # about an hour, which this weekly job does not need to spend to
+      # prove the new pin is genuine.
+      - name: "Kernel pin: fetch and verify"
+        if: steps.diff.outputs.changed == '1'
+        run: make kernel-tree
+
+      - name: busybox, dropbear, iproute2 still build against the new pins
+        if: steps.diff.outputs.changed == '1'
+        run: |
+          make busybox
+          make packages
+
+      - name: Our own binaries, and the metricsd/confd release fetch
+        if: steps.diff.outputs.changed == '1'
+        run: |
+          make src
+          make releases
+
+      - name: Open the PR
+        if: steps.diff.outputs.changed == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch="dep-bump-$(date -u +%Y%m%d)"
+          git checkout -b "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add kernel/618/fetch.sh packages/*/build.sh toolchain/images.env \
+            src/fetch-releases.sh CHANGELOG.md
+          git commit -m "deps: weekly upstream version check
+
+          $(cat /tmp/bump-summary.txt)"
+          git push -u origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "deps: weekly upstream version check ($(date -u +%Y-%m-%d))" \
+            --body "Automated (dependency-bump.yml): every pin tools/bump-deps.sh found behind, tested with \`make lint test kernel-tree busybox packages src releases\` before this PR was opened.
+
+          $(cat /tmp/bump-summary.txt)"

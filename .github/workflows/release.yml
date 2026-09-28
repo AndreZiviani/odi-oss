@@ -4,18 +4,36 @@ name: release
 # our own tools, confd and metricsd from their own public releases -- with
 # ROOT_PW=locked (docs/BUILDING.md): a public release image ships keys-only,
 # never a per-build password baked into a squashfs anyone can unpack. The
-# result is published as a GitHub release: the tarball, its SHA256SUMS, and
-# release notes built from CHANGELOG.md by tools/release-notes.sh.
+# result is published as a GitHub release: the tarball, its SHA256SUMS, an
+# SBOM (tools/generate-sbom.sh), release notes built from CHANGELOG.md by
+# tools/release-notes.sh, and a build-provenance + SBOM attestation for the
+# tarball, its checksums and the SBOM itself -- see docs/FLASHING.md,
+# "Verifying a release", for how to check them.
 #
 # This is the one workflow here that actually builds the kernel and the
 # image (ci.yml deliberately does not: about an hour of compiling a runner
 # would spend on every push). Expect this job to take several minutes.
+#
+# concurrency: a tag push has landed here twice for the same ref before
+# (the tag itself pushed, then the branch it was cut from merged a moment
+# later under the same name) -- two runs racing on the same VERSION, the
+# second one failing outright at "gh release create" because the release
+# the first run made already exists. The group serialises them instead of
+# cancelling either (a half-finished release build is worse than a slow
+# second one), and the publish step below is idempotent on top of that, so
+# a rerun -- whatever triggers it -- can never fail this way again.
 on:
   push:
     tags: ['v*']
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -41,14 +59,53 @@ jobs:
             exit 1
           fi
 
+      # Reads the pins already in the tree (kernel/618/fetch.sh,
+      # packages/*/build.sh, toolchain/images.env) plus the metricsd/confd
+      # tags make image-all actually fetched (out/bin/releases.env) --
+      # tools/generate-sbom.sh header has the detail.
+      - name: SBOM
+        run: tools/generate-sbom.sh "$VERSION" out/bin/releases.env > out/image/sbom.cdx.json
+
       - name: Release notes
         run: tools/release-notes.sh "$VERSION" > /tmp/release-notes.md
 
+      # Provenance for the image, its checksums and the SBOM: signed,
+      # keyless, tied to this workflow run. gh attestation verify checks
+      # them against the file bytes, so this has to run before either is
+      # renamed -- and before the SBOM step output is touched again.
+      - name: Attest build provenance (image tarball + checksums)
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            out/image/${{ env.VERSION }}.tar
+            out/image/SHA256SUMS
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@v3
+        with:
+          subject-path: out/image/${{ env.VERSION }}.tar
+          sbom-path: out/image/sbom.cdx.json
+
+      # Idempotent: a rerun for a VERSION whose release already exists (the
+      # concurrency group above is about ordering, not about preventing
+      # this -- a manual workflow_dispatch retry or a second tag push still
+      # lands here) edits the existing release and re-uploads its assets
+      # with --clobber instead of failing on "already exists".
       - name: Publish the GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$VERSION" \
-            "out/image/$VERSION.tar" out/image/SHA256SUMS \
-            --title "$VERSION" \
-            --notes-file /tmp/release-notes.md
+          assets=(
+            "out/image/$VERSION.tar"
+            out/image/SHA256SUMS
+            out/image/sbom.cdx.json
+          )
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "release.yml: $VERSION already exists, updating notes and re-uploading assets" >&2
+            gh release edit "$VERSION" --title "$VERSION" --notes-file /tmp/release-notes.md
+            gh release upload "$VERSION" "${assets[@]}" --clobber
+          else
+            gh release create "$VERSION" "${assets[@]}" \
+              --title "$VERSION" \
+              --notes-file /tmp/release-notes.md
+          fi

@@ -4,6 +4,27 @@ The full procedure for putting an image built here onto a stick, and for
 getting back out if it does not come up. Read "Safety model" in the top-level
 README first if you have not already.
 
+## Verifying a release
+
+Every GitHub release (`.github/workflows/release.yml`) ships four files
+beside the image tarball: `SHA256SUMS`, a CycloneDX SBOM (`sbom.cdx.json`,
+built by `tools/generate-sbom.sh` from the pins already in this tree --
+kernel, toolchain, busybox/dropbear/iproute2, and the metricsd/confd tags
+this build actually fetched), and two GitHub attestations covering the
+tarball: build provenance (this came from this repository's `release.yml`,
+from this commit) and an SBOM attestation (this SBOM describes this
+tarball). Checking them needs only `gh`, already authenticated:
+
+    gh attestation verify odi-oss-<version>.tar -R AndreZiviani/odi-oss
+    sha256sum -c SHA256SUMS
+
+`gh attestation verify` checks both attestation types against the file on
+disk and reports which workflow run produced them; a mismatch (wrong file,
+tampered tarball, or a build from a fork) fails loudly rather than silently
+serving a false positive. The SBOM itself is human-readable JSON --
+`jq . sbom.cdx.json`, or open it in anything that reads CycloneDX -- and is
+also covered by `gh attestation verify sbom.cdx.json -R AndreZiviani/odi-oss`.
+
 ## Before anything
 
 1. **Find out which slot is running**, and flash the *other* one:
