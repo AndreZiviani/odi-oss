@@ -41,6 +41,7 @@ set -u
 # tree) finds the real one beside it instead of a device path that does
 # not exist off the stick.
 RCS_LIB=${RCS_LIB:-$(dirname "$0")/rcs-lib.sh}
+# shellcheck source=./rcs-lib.sh
 . "$RCS_LIB"
 
 ODI_INIT=${ODI_INIT:-/proc/odi_init}
