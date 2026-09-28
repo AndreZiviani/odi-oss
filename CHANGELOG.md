@@ -55,6 +55,14 @@ that rcS's client registration degrades harmlessly without
 `/proc/odi_wdt`), and the `cpu-pause` PAUSE-watermark fix (verified on
 hardware, ISP1, 2026-09-27).
 
+**Fixed `make test-rcs`'s golden traces**, stale since v1.0.2 (d7839bd
+added the `/var`/`/tmp` tmpfs mounts and wrapped omcid in `supervise()`
+but never regenerated `test/fixtures/rcs-trace-*.txt`) -- `test-rcs` had
+been failing since v1.0.2 and nobody had run it, since it needs
+Docker+ptrace and is not part of `make test` or CI. Regenerated and
+reviewed by hand: the only differences are the tmpfs mounts and omcid's
+supervise-restart loop against this harness's stub binary.
+
 ## v1.0.2 — 2026-09-27
 
 **Resilience.** A 20 MB `scp` into `/tmp` on ISP1 exhausted RAM (`/tmp` was
