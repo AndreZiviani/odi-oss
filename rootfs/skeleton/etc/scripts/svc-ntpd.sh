@@ -9,7 +9,7 @@
 # boot: setting NTP_SERVER and running `apply.sh ntp` starts it with no
 # reboot, and clearing it stops it the same way.
 [ -f /etc/config/ntpd.off ] && exec /etc/scripts/respawn-off.sh
-[ -x /usr/sbin/ntpd ] || exec /etc/scripts/respawn-off.sh
+[ -x /bin/ntpd ] || exec /etc/scripts/respawn-off.sh
 
 config_get() {
 	for f in /var/config/lastgood.xml /var/config/lastgood_hs.xml; do
@@ -30,4 +30,4 @@ SERVER=$(config_get NTP_SERVER || true)
 # so ntpd keeps disciplining the clock for as long as it runs, rather than
 # setting it once and exiting (which would just have init respawn it,
 # stepping the clock repeatedly instead of slewing it).
-exec /etc/scripts/respawn.sh 0 /var/log/services.log /usr/sbin/ntpd -n -p "$SERVER"
+exec /etc/scripts/respawn.sh 0 /var/log/services.log /bin/ntpd -n -p "$SERVER"
