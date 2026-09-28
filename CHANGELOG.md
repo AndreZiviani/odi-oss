@@ -28,6 +28,38 @@ docs/BOOT.md, "Resume without re-registration", and
 `src/omci/resume-test.sh`, the driver-call golden replayed across a
 `kill -9` and respawn.
 
+**Release CI: no more double-publish on a tag, plus SBOM and attestations.**
+A tag has landed on `release.yml` twice before, the second run failing at
+`gh release create` because the first already made the release; the workflow
+now serialises same-tag runs (`concurrency:`) and its publish step is
+idempotent (edits and re-uploads with `--clobber` if the release already
+exists, instead of failing). Every release now also ships a CycloneDX SBOM
+(`tools/generate-sbom.sh`, built from the pins already in this tree) and
+build-provenance + SBOM attestations for the tarball, its checksums and the
+SBOM itself; `docs/FLASHING.md` says how to verify them.
+
+**Reproducibility check, and a real kernel non-determinism it found.** `ci.yml`
+gained a `reproducible` job (tags and `workflow_dispatch` only -- a full image
+build twice is too slow to run on every PR) that builds the same version in
+two clean checkouts, each with its own docker build-cache volume, and diffs
+the tarballs member by member (`tools/compare-images.sh`), tolerating only the
+documented build-time stamps (`etc/version`, `etc/odi-build`, busybox and
+every applet hardlinked to it, and the `/etc/passwd` that `ROOT_PW=locked`
+writes). Its first real run caught a genuine bug: `kernel/build.sh` set no
+`SOURCE_DATE_EPOCH`/`KBUILD_BUILD_TIMESTAMP`/`KBUILD_BUILD_USER`/`KBUILD_BUILD_HOST`,
+so every kernel build embedded its own real build time, host and account
+(`scripts/mkcompile_h`) and no two builds of the same commit ever produced
+the same `uImage`. Now pinned: the timestamp from the commit being built,
+fixed strings for the user and host.
+
+**Weekly dependency check.** A new `dependency-bump.yml` (`tools/bump-deps.sh`)
+checks the Linux point release, busybox, dropbear, iproute2, the three
+odi-toolchain image digests and the odi-sfp-exporter/odi-ui release tags
+against upstream, verifies whatever it finds the way the existing fetch
+scripts always have, runs the test suite against the result, and opens a PR
+only if that passes. Its first real run already found and verified a kernel
+point-release bump, linux 6.18.53 -> 6.18.54, included in this change.
+
 ## v1.0.4 — 2026-09-28
 
 **A respawned omcid gets provisioned again, not just restarted.** Hardware

@@ -140,3 +140,56 @@ jobs:
 
       - name: Our binaries (freestanding, in the freestanding toolchain image)
         run: make src
+
+  # Builds the full flashable image twice, in two separate checkouts, and
+  # diffs the two tarballs member by member (tools/compare-images.sh):
+  # proof that the release build depends on the sources and the pinned
+  # toolchain/kernel/package versions, and on nothing else -- wall-clock
+  # time and build-host identity included, once the documented stamps
+  # (etc/version, etc/odi-build, the banner busybox compiles into itself,
+  # the /etc/passwd ROOT_PW=locked writes) are set aside.
+  #
+  # Tags and workflow_dispatch only, not pull_request: this is `image-all`
+  # run twice, about 25 minutes native each per the top-level Makefile
+  # estimate, and a runner is slower than that. Twice that on every PR push
+  # would make the queue the bottleneck for everything else in this file;
+  # release.yml already pays for one full build on every tag, so a second
+  # one here to compare against costs the same order of time, not double
+  # the total cost of the workflow.
+  reproducible:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: build-a
+
+      - uses: actions/checkout@v7
+        with:
+          path: build-b
+
+      - name: Version for this comparison
+        run: echo "VERSION=${GITHUB_REF_NAME:-repro-dispatch}" >> "$GITHUB_ENV"
+
+      - name: squashfs-tools (unsquashfs, for the comparison step)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq squashfs-tools
+
+      # Distinct VOL names: the docker build cache kernel/build.sh uses is a
+      # named volume (odi-kbuild-618 by default), and both steps share the
+      # same docker daemon on this runner. Without this, Build B would reuse
+      # the incremental cache Build A left behind, and the two builds never
+      # being truly independent would go unnoticed -- the same failure mode
+      # this job exists to catch, just hidden instead of shown.
+      - name: Build A
+        working-directory: build-a
+        run: VERSION="$VERSION" ROOT_PW=locked VOL=odi-kbuild-618-a make image-all
+
+      - name: Build B
+        working-directory: build-b
+        run: VERSION="$VERSION" ROOT_PW=locked VOL=odi-kbuild-618-b make image-all
+
+      - name: Compare the two tarballs
+        run: |
+          build-a/tools/compare-images.sh \
+            "build-a/out/image/$VERSION.tar" "build-b/out/image/$VERSION.tar"

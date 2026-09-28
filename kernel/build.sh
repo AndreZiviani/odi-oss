@@ -83,6 +83,16 @@ GITREV=$(git -C "$ROOT" describe --always --dirty --abbrev=7 2>/dev/null || echo
 ODI_BUILD_ID=${ODI_BUILD_ID:-${VERSION:-odi-oss-$(date +%y%m%d)-$GITREV}}
 ODI_BUILD_ID=$(printf '%s' "$ODI_BUILD_ID" | tr -cd 'A-Za-z0-9._+-' | cut -c1-39)
 echo "--- build id: $ODI_BUILD_ID"
+# Reproducibility: scripts/mkcompile_h embeds the build timestamp, user and
+# host into every vmlinux unless told otherwise, so two builds of the same
+# commit a minute apart -- or on two different runners -- never matched
+# bit-for-bit (found by the ci.yml reproducible job the first time it ran for
+# real). SOURCE_DATE_EPOCH is the committer date of HEAD: identical for any
+# two checkouts of the same commit, unlike "now". KBUILD_BUILD_USER/HOST are
+# fixed strings for the same reason -- the actual build host and account
+# are exactly the kind of stamp this build is not supposed to carry.
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || echo 0)}
+KBUILD_BUILD_TIMESTAMP=${KBUILD_BUILD_TIMESTAMP:-$(date -u -d "@$SOURCE_DATE_EPOCH" 2>/dev/null || date -u -r "$SOURCE_DATE_EPOCH")}
 docker run --rm -v "$VOL":/build \
 	-v "$WORK:/out" -v "$ROOT/kernel/618/patches:/patches:ro" \
 	-v "$ROOT/kernel/618/debug:/debug:ro" -e CRUMBS_CORE="$CRUMBS_CORE" \
@@ -90,6 +100,9 @@ docker run --rm -v "$VOL":/build \
 	-w /build \
 	-e SCRIPTHASH="$SCRIPTHASH" -e PATCHHASH="$PATCHHASH" -e FRESH="${FRESH:-0}" \
 	-e ODI_BUILD_ID="$ODI_BUILD_ID" \
+	-e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+	-e KBUILD_BUILD_TIMESTAMP="$KBUILD_BUILD_TIMESTAMP" \
+	-e KBUILD_BUILD_USER=odi-oss -e KBUILD_BUILD_HOST=reproducible \
 	-e TCBIN="$TCBIN" -e XC="$XC" -e KCFLAGS="$KCFLAGS" -e COMPILE_ONLY="${COMPILE_ONLY:-0}" "$IMAGE" bash -c '
 set -e
 STAMP=/build/.stamp
