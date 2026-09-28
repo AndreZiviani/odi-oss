@@ -175,13 +175,19 @@ jobs:
       - name: squashfs-tools (unsquashfs, for the comparison step)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq squashfs-tools
 
+      # Distinct VOL names: the docker build cache kernel/build.sh uses is a
+      # named volume (odi-kbuild-618 by default), and both steps share the
+      # same docker daemon on this runner. Without this, Build B would reuse
+      # the incremental cache Build A left behind, and the two builds never
+      # being truly independent would go unnoticed -- the same failure mode
+      # this job exists to catch, just hidden instead of shown.
       - name: Build A
         working-directory: build-a
-        run: VERSION="$VERSION" ROOT_PW=locked make image-all
+        run: VERSION="$VERSION" ROOT_PW=locked VOL=odi-kbuild-618-a make image-all
 
       - name: Build B
         working-directory: build-b
-        run: VERSION="$VERSION" ROOT_PW=locked make image-all
+        run: VERSION="$VERSION" ROOT_PW=locked VOL=odi-kbuild-618-b make image-all
 
       - name: Compare the two tarballs
         run: |

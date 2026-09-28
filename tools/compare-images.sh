@@ -8,9 +8,17 @@
 # Tolerated differences, because each is a stamp the build deliberately
 # writes at build time rather than derives from the sources:
 #   - etc/version, etc/odi-build   the build timestamp (image/build.sh)
-#   - bin/busybox                  busybox compiles its own --help banner
-#                                   with __DATE__/__TIME__; two builds a
-#                                   second apart never match bit-for-bit
+#   - busybox, and every applet    busybox compiles its own --help banner
+#     hardlinked to it             with __DATE__/__TIME__, so the one
+#                                   busybox binary never matches bit-for-bit
+#                                   between two builds -- and every applet
+#                                   name in bin/ and sbin/ is a hardlink to
+#                                   that same binary, so they all show as
+#                                   differing files for the same one reason.
+#                                   Found and identified by the inode they
+#                                   share with bin/busybox on each side, not
+#                                   by name, so a new applet needs no edit
+#                                   here.
 #   - etc/passwd                   only differs under ROOT_PW modes that
 #                                   generate a random password; the
 #                                   reproducibility job itself always
@@ -67,9 +75,19 @@ sudo unsquashfs -d "$WORK/rootfs-a" "$DIRA/rootfs" >/dev/null
 sudo unsquashfs -d "$WORK/rootfs-b" "$DIRB/rootfs" >/dev/null
 sudo chmod -R a+rX "$WORK/rootfs-a" "$WORK/rootfs-b"
 
-rootfs_diff=$(diff -rq "$WORK/rootfs-a" "$WORK/rootfs-b" || true)
+# Delete busybox and every applet hardlinked to it, on both sides, before
+# the tree diff: found by inode, not by name, so this does not need
+# updating when the applet list in packages/busybox/build.sh changes.
+for side in a b; do
+	bb="$WORK/rootfs-$side/bin/busybox"
+	[ -f "$bb" ] || continue
+	inum=$(stat -c %i "$bb")
+	sudo find "$WORK/rootfs-$side" -inum "$inum" -delete
+done
+
+rootfs_diff=$(diff -rq "$WORK/rootfs-a" "$WORK/rootfs-b" 2>/dev/null || true)
 unexpected=$(echo "$rootfs_diff" | grep -vE \
-	'^Files .*/etc/version and .*/etc/version differ$|^Files .*/etc/odi-build and .*/etc/odi-build differ$|^Files .*/bin/busybox and .*/bin/busybox differ$|^Files .*/etc/passwd and .*/etc/passwd differ$' \
+	'^Files .*/etc/version and .*/etc/version differ$|^Files .*/etc/odi-build and .*/etc/odi-build differ$|^Files .*/etc/passwd and .*/etc/passwd differ$' \
 	| sed '/^$/d' || true)
 if [ -n "$rootfs_diff" ]; then
 	echo "compare-images.sh: rootfs differences (tolerated ones filtered out below the line, if any):" >&2

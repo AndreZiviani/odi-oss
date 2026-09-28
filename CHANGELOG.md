@@ -38,12 +38,19 @@ exists, instead of failing). Every release now also ships a CycloneDX SBOM
 build-provenance + SBOM attestations for the tarball, its checksums and the
 SBOM itself; `docs/FLASHING.md` says how to verify them.
 
-**Reproducibility check.** `ci.yml` gained a `reproducible` job (tags and
-`workflow_dispatch` only -- a full image build twice is too slow to run on
-every PR) that builds the same version in two clean checkouts and diffs the
-tarballs member by member (`tools/compare-images.sh`), tolerating only the
-documented build-time stamps (`etc/version`, `etc/odi-build`, the busybox
-banner, and the `/etc/passwd` that `ROOT_PW=locked` writes).
+**Reproducibility check, and a real kernel non-determinism it found.** `ci.yml`
+gained a `reproducible` job (tags and `workflow_dispatch` only -- a full image
+build twice is too slow to run on every PR) that builds the same version in
+two clean checkouts, each with its own docker build-cache volume, and diffs
+the tarballs member by member (`tools/compare-images.sh`), tolerating only the
+documented build-time stamps (`etc/version`, `etc/odi-build`, busybox and
+every applet hardlinked to it, and the `/etc/passwd` that `ROOT_PW=locked`
+writes). Its first real run caught a genuine bug: `kernel/build.sh` set no
+`SOURCE_DATE_EPOCH`/`KBUILD_BUILD_TIMESTAMP`/`KBUILD_BUILD_USER`/`KBUILD_BUILD_HOST`,
+so every kernel build embedded its own real build time, host and account
+(`scripts/mkcompile_h`) and no two builds of the same commit ever produced
+the same `uImage`. Now pinned: the timestamp from the commit being built,
+fixed strings for the user and host.
 
 **Weekly dependency check.** A new `dependency-bump.yml` (`tools/bump-deps.sh`)
 checks the Linux point release, busybox, dropbear, iproute2, the three
