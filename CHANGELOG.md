@@ -5,6 +5,24 @@ listed here.
 
 ## Unreleased
 
+**v1.0.2 and v1.0.3 are both also withdrawn: no management network on real
+hardware.** Trialled on claro (2026-09-28), v1.0.3 hung unreachable for 10+
+minutes with no ARP reply for the configured management address, and did
+not self-revert -- the same symptom the v1.0.3 watchdog redesign was
+supposed to have fixed. Root cause: `network.sh` falls back to a guessed
+`DEF_IP` (192.168.1.1) whenever the config partition or `lastgood.xml` is
+not readable at boot, and `rcS` confirmed the watchdog (`userland_ok`)
+unconditionally, before `omci_start`/`switch_init` even ran -- so a stick
+that came up with a guessed, unreachable address, or a failed `switch_init`
+(`/proc/odi_omci write failed` in the ramlog), still confirmed and never
+reverted. `network.sh` now marks `/var/run/network-configured` only when
+the applied address came from config, not the guess; `rcS` gained
+`confirm_watchdog()`, called right after `omci_start`, which requires the
+config partition mounted, a real (non-guessed) management address, and a
+successful `switch_init` before writing `userland_ok` -- still with no ARP
+or reachability dependency. `test/rcs_trace_inner.sh`'s `network.sh` stub
+updated to match.
+
 ## v1.0.3 — 2026-09-28
 
 **v1.0.2 is withdrawn (marked pre-release) and must not be used.** Trialled

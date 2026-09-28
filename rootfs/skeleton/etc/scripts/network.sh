@@ -65,6 +65,12 @@ xmlval() {
 
 IP=""
 MASK=""
+# Set once we know the address came from the config partition or
+# /etc/config/lan-ip, never from DEF_IP. rcS reads /var/run/network-configured
+# (written below, at the end of a successful boot-mode run) as one of the
+# gates before it confirms the watchdog: a fallback address is not
+# management, it is a guess nobody configured.
+NET_CONFIGURED=1
 
 if [ -s "$OVERRIDE" ]; then
 	IP=$(head -n 1 "$OVERRIDE" 2>/dev/null)
@@ -78,6 +84,7 @@ fi
 
 if [ -z "$IP" ]; then
 	IP=$DEF_IP
+	NET_CONFIGURED=0
 	echo "network: no address in $CONF, falling back to $IP" >&2
 fi
 [ -n "$MASK" ] || MASK=$DEF_MASK
@@ -346,6 +353,14 @@ if [ "$bridged" = 0 ]; then
 	secondary "$IF"
 else
 	secondary "$BR"
+fi
+
+# Reaching here means an address applied -- either from config/lan-ip
+# (NET_CONFIGURED) or the DEF_IP guess, bridged or direct. Only the former
+# is worth rcS confirming the watchdog on.
+if [ "$NET_CONFIGURED" = 1 ]; then
+	mkdir -p /var/run 2>/dev/null
+	: > /var/run/network-configured 2>/dev/null
 fi
 
 exit 0

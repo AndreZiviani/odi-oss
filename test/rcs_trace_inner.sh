@@ -90,7 +90,11 @@ stage() {
 	stub "$R/bin/omcid" 'exit 0'
 	stub "$R/sbin/ip" 'exit 0'
 	stub "$R/sbin/brctl" 'exit 0'
-	stub "$R/etc/scripts/network.sh" 'exit 0'
+	# Real network.sh only leaves /var/run/network-configured when it read a
+	# real address (not its DEF_IP fallback); this stub simulates that
+	# configured case, since $R/var/config/lastgood.xml above has no
+	# LAN_IP_ADDR but a real boot with a mounted config partition would.
+	stub "$R/etc/scripts/network.sh" 'mkdir -p /var/run; : > /var/run/network-configured; exit 0'
 	stub "$R/etc/init.d/services" 'exit 0'
 	[ -e "$R/bin/seedrng" ] && stub "$R/bin/seedrng" 'exit 0'
 	# A sleep over 5 s parks forever, so the endless background loops stop

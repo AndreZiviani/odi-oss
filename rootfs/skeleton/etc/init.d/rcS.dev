@@ -189,7 +189,7 @@ pon_steps() {
 	while read -r step; do
 		case $step in
 		'') ;;
-		omcimods) omci_start ;;
+		omcimods) omci_start; confirm_watchdog ;;
 		"gponsn auto") pon_step_gponsn ;;
 		"gponpw auto") pon_step_gponpw ;;
 		*) pon_step "$step" ;;

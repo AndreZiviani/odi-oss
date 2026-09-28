@@ -157,15 +157,38 @@ dev_hook services
 
 # ---- the watchdog confirmation. odi_wdt resets the board at 120 s of
 # uptime unless this is written, which is what reverts a trial that never
-# gets here. It needs no network: a stick that boots unreachable is fixed
-# with a power cycle, not a reboot loop (confirm-arp, in rcS.dev, is the
-# development exception). Before the PON steps, so a PON problem cannot
-# cost the confirmation.
+# gets here. It needs no network REACHABILITY -- no ARP, no ping (confirm-arp,
+# in rcS.dev, is the development exception that adds that on top) -- but it
+# does need proof that management is even POSSIBLE: the config partition
+# mounted (mount-config.sh, /var/run/config-mounted), a real management
+# address applied rather than network.sh's DEF_IP guess
+# (/var/run/network-configured), and switch_init not having failed
+# (SWITCH_INIT_OK, set by omci_start below). Any one missing and the stick
+# would come up unreachable and stay up forever without this gate -- exactly
+# what left v1.0.2 and v1.0.3 unreachable on real hardware while qemu's
+# stubbed mount/network.sh never exercised the failure. Called right after
+# omci_start, still before gponsn/gponpw/gponact, so an unrelated PON/optics
+# problem still cannot cost the confirmation.
 WDOK=/proc/odi_wdt/userland_ok
-if [ -w "$WDOK" ] && dev_confirm_ok; then
+SWITCH_INIT_OK=1
+confirm_watchdog() {
+	[ -w "$WDOK" ] || return 0
+	if [ ! -f /var/run/config-mounted ]; then
+		crumb "watchdog NOT confirmed: config partition not mounted"
+		return 0
+	fi
+	if [ ! -f /var/run/network-configured ]; then
+		crumb "watchdog NOT confirmed: no management address configured"
+		return 0
+	fi
+	if [ "$SWITCH_INIT_OK" != 1 ]; then
+		crumb "watchdog NOT confirmed: switch_init failed"
+		return 0
+	fi
+	dev_confirm_ok || return 0
 	echo 1 > "$WDOK"
 	crumb "userland up, watchdog confirmed"
-fi
+}
 
 # ---- register the watchdog clients. The kernel (odi_wdt), not a userland
 # process, judges every deadline from here on (docs/SETTINGS.md, "Watchdog
@@ -223,6 +246,7 @@ omci_start() {
 	if echo switch_init > /proc/odi_omci 2>/var/log/switch_init.err; then
 		crumb "odi_switch init: platform settings and module-load replay done"
 	else
+		SWITCH_INIT_OK=0
 		crumb "odi_switch init: /proc/odi_omci write failed, see /var/log/switch_init.err"
 	fi
 	if [ -x /bin/omcid ]; then
@@ -243,6 +267,7 @@ pon_steps_default() {
 	pon_step gpondrv
 	pon_step gpondev
 	omci_start
+	confirm_watchdog
 	pon_step_gponsn
 	pon_step_gponpw
 	pon_step gponact
