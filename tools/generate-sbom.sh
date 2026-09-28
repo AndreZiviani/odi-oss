@@ -52,6 +52,12 @@ component() {
 	echo '{'
 	echo '  "bomFormat": "CycloneDX",'
 	echo '  "specVersion": "1.5",'
+	# CycloneDX requires a serialNumber (a URN UUID). It is derived from the
+	# version and the commit, not random, so the same source gives the same SBOM.
+	src=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo nogit)
+	h=$(printf "%s %s" "$VERSION" "$src" | sha256sum 2>/dev/null || printf "%s %s" "$VERSION" "$src" | shasum -a 256)
+	h=${h%% *}
+	printf "  \"serialNumber\": \"urn:uuid:%s-%s-5%s-a%s-%s\",\n" "$(echo "$h" | cut -c1-8)" "$(echo "$h" | cut -c9-12)" "$(echo "$h" | cut -c14-16)" "$(echo "$h" | cut -c18-20)" "$(echo "$h" | cut -c21-32)"
 	echo '  "version": 1,'
 	printf '  "metadata": {"timestamp": "%s", "component": {"type": "firmware", "name": "odi-oss", "version": "%s"}},\n' "$now" "$VERSION"
 	echo '  "components": ['

@@ -5,7 +5,13 @@ listed here.
 
 ## Unreleased
 
-## v1.0.5 — 2026-09-28
+## v1.0.6 — 2026-09-28
+
+Same changes as the v1.0.5 tag, which was never released: its release run
+failed at the SBOM attestation because the CycloneDX SBOM had no
+`serialNumber`, which the attestation action requires. `tools/generate-sbom.sh`
+now emits one, derived from the version and the commit so the SBOM stays
+reproducible.
 
 **A respawned omcid resumes instead of getting re-provisioned: zero
 outage, not eighteen seconds.** v1.0.4's `omci-respawn-reprovision.sh` made
