@@ -62,7 +62,7 @@ point-release bump, linux 6.18.53 -> 6.18.54, included in this change.
 ||||||| parent of 99a0a0e (optics: model alarm/warning flags, LOS and a scriptable transceiver)
 ||||||| parent of 8a4266c (syslog and ntp: new respawn services, both opt-in via the config store)
 **An opt-in NTP client.** The stock image has no RTC and no NTP client at
-all (`kb/systems/rtl9601-no-clock-no-syslog.md`). `svc-ntpd.sh`, a new
+all. `svc-ntpd.sh`, a new
 respawn entry, starts busybox `ntpd` in the foreground against
 `NTP_SERVER` (docs/SETTINGS.md) only while that key is set; unset, it runs
 the same off-flag placeholder every other disabled service uses, so the
@@ -75,8 +75,8 @@ responder (skipped, not failed, when the build host has none).
 
 **syslogd and klogd, with a circular buffer `logread` reads, plus optional
 remote forwarding.** The stock image has neither a syslog daemon nor
-anywhere central `logread` can read from
-(`kb/systems/rtl9601-no-clock-no-syslog.md`). Two new respawn entries,
+anywhere central `logread` can read from.
+Two new respawn entries,
 `svc-syslogd.sh`/`svc-klogd.sh`, start busybox syslogd/klogd in the
 foreground with a 64 KB circular buffer (`-C64`), the same off-flag and
 config-store-read idiom every other `svc-*.sh` here uses. Setting

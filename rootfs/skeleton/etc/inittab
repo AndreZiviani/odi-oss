@@ -30,8 +30,7 @@ ttyS0::respawn:/bin/login -p
 # the daemon itself, never a parent that already exited.
 #
 # syslogd/klogd/ntpd are new vs. the stock image, which has neither a
-# syslog daemon nor an NTP client (kb/systems/rtl9601-no-clock-no-
-# syslog.md). ntpd's own script gates on NTP_SERVER being set in the config
+# syslog daemon nor an NTP client. ntpd's own script gates on NTP_SERVER being set in the config
 # store (docs/SETTINGS.md); this entry is always here, static like every
 # other inittab line, and does nothing until that key is set.
 ::respawn:/etc/scripts/svc-syslogd.sh

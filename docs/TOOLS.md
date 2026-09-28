@@ -215,7 +215,7 @@ protocol: OpenSSH 9+ clients need `scp -O`). See `docs/ACCESS.md`.
 Two respawn entries, `svc-syslogd.sh`/`svc-klogd.sh`: syslogd in the
 foreground with a 64 KB circular buffer (`-n -C64`), read with `logread`;
 klogd (`-n`) forwards kernel messages into it. Neither exists on the stock
-image (`kb/systems/rtl9601-no-clock-no-syslog.md`). With `SYSLOG_SERVER`
+image. With `SYSLOG_SERVER`
 set in the config store (docs/SETTINGS.md), syslogd also adds `-L -R
 host[:port]`: forwarded remotely, kept in the local circular buffer too.
 `apply.sh syslog` restarts it without a reboot.

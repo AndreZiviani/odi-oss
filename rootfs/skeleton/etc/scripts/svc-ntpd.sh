@@ -1,7 +1,6 @@
 #!/bin/sh
 # svc-ntpd.sh -- the /etc/inittab respawn entry for ntpd. Opt-in: the
-# stock image has no NTP client at all (kb/systems/rtl9601-no-clock-no-
-# syslog.md), and this one starts ntpd only when NTP_SERVER is set in the
+# stock image has no NTP client at all, and this one starts ntpd only when NTP_SERVER is set in the
 # config store (docs/SETTINGS.md). The inittab entry is static (busybox
 # init reads it once, at boot), so the gate lives here, in the script this
 # same respawn entry always execs into -- the standard off-flag idiom
