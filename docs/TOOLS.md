@@ -17,10 +17,10 @@ source here; `/etc/odi-build` on the stick records which releases went in
 
 | program | kind | started by | talks on | logs to | if it dies |
 |---|---|---|---|---|---|
-| `omcid` | daemon, the OMCI stack | rcS, at the `omcimods` PON step | odi_omci netlink (redirect type 1), SysV queues for `omcli`/`omcicli` | `/var/log/omcid.log` | stays dead; the OLT gets no OMCI answers |
-| `confd` | daemon, the web UI | `/etc/init.d/services` | TCP 80 | `/var/log/services.log` | stays dead |
-| `metricsd` | daemon, the Prometheus exporter | `/etc/init.d/services` | TCP 9100 | `/var/log/services.log` | stays dead |
-| `dropbear` | daemon, ssh and scp | `/etc/init.d/services` | TCP 22 | `/var/log/services.log` (`-E`) | stays dead |
+| `omcid` | daemon, the OMCI stack | inittab `respawn` (`/etc/scripts/svc-omcid.sh`) | odi_omci netlink (redirect type 1), SysV queues for `omcli`/`omcicli` | `/var/log/omcid.log` | respawned |
+| `confd` | daemon, the web UI | inittab `respawn` (`/etc/scripts/svc-confd.sh`) | TCP 80 | `/var/log/services.log` | respawned |
+| `metricsd` | daemon, the Prometheus exporter | inittab `respawn` (`/etc/scripts/svc-metricsd.sh`) | TCP 9100 | `/var/log/services.log` | respawned |
+| `dropbear` | daemon, ssh and scp | inittab `respawn` (`/etc/scripts/svc-dropbear.sh`) | TCP 22 | `/var/log/services.log` (`-E`) | respawned |
 | `igmpd` | daemon, IGMP snooping | nothing (shipped, not started; see its section) | odi_omci netlink (redirect type 4), `/dev/odi_sw` | stdout | -- |
 | `login` | serial console login | inittab `respawn` | ttyS0 | -- | respawned |
 | `diag` | CLI: optics, GPON state, counters, registers | you, rcS, network.sh, metricsd, confd | `/dev/odi_sw`, `/proc/odi_gpon`, netlink | stdout | -- |
@@ -33,16 +33,18 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `fwu_starter.sh` | CLI: write an uploaded tarball to the inactive slot | confd, you | runs `fwu.sh` from the tarball | `/tmp/fwu.log`, `/tmp/fwu.state` | -- |
 | `apply.sh` | CLI: apply saved settings without a reboot | confd, you | `network.sh addr`; `/proc/odi_init`, omcid | stdout | -- |
 
-Nothing supervises the daemons. Only the serial `login` is a `respawn`
-entry in `/etc/inittab`; a daemon that exits stays gone until you start it
-again or reboot. There is no telnet server (busybox is built without
-telnetd) and no syslog daemon running: every daemon's own output is the log.
+Every daemon -- `omcid`, `confd`, `metricsd`, `dropbear` -- and the serial
+`login` are all `respawn` entries in `/etc/inittab`: busybox init restarts
+whichever one exits, forever, the instant it does (no restart budget, no
+rate limit -- `docs/SETTINGS.md`, "native over hand-rolled"). There is no
+telnet server (busybox is built without telnetd) and no syslog daemon
+running: every daemon's own output is the log.
 
 ## How the image starts things
 
 `/etc/inittab` runs `/etc/init.d/rcS` as `sysinit`, and busybox init starts
-no `respawn` entry until it returns -- so rcS never blocks, and backgrounds
-everything slow. In order, rcS:
+no `once` or `respawn` entry until it returns -- so rcS never blocks, and
+backgrounds everything slow. In order, rcS:
 
 1. mounts `/proc`, `/sys`, `/var` (tmpfs, capped at 6 MB) and `/var/tmp`
    (its own tmpfs, capped at 8 MB -- `/tmp` is a symlink to it), makes the
@@ -58,32 +60,44 @@ everything slow. In order, rcS:
 4. brings up management networking with `/etc/scripts/network.sh` (host
    SerDes check, MAC, `br0` over `eth0.2`, the address, and the second
    address `br0:2` when `LAN_ENABLE_IP2` is 1);
-5. starts `/etc/init.d/services` in the background, output appended to
-   `/var/log/services.log`: `metricsd 9100`, `confd 80`, then `dropbear`
-   (generating the ed25519 host key on first boot). Each can be turned off
-   with a `.off` file, see `docs/SETTINGS.md`. Each is started through
-   `supervise()` (`/etc/scripts/supervise.sh`), which sets its
-   `oom_score_adj` and restarts it, rate-limited, if it dies;
-6. confirms to the watchdog (`/proc/odi_wdt/userland_ok`); without
-   that the board resets at 120 s of uptime. The network is not a
-   condition, unless `/etc/config/confirm-arp` exists (development: then
-   only after an ARP reply from the `.2` of the `br0` subnet). Right
-   after, rcS registers omcid as a watchdog client
-   (`/proc/odi_wdt/register`, 60 s deadline): omcid pings its own deadline
-   from its own main loop once it starts, and the kernel -- the only owner
-   of the hardware watchdog -- stops kicking if an armed client's deadline
-   is missed, `docs/SETTINGS.md` ("Watchdog rules");
-7. drives the optics, the `optics` verb of `/proc/odi_init` (`PIN_GPIO_SELECT`, laser TX-enable on GPIO 13);
-8. runs the PON steps: `i2c 1`, `i2cen 1`, `gpon`, `rxsd`, `gpondrv`,
+5. registers omcid as a watchdog client (`/proc/odi_wdt/register`, 60 s
+   deadline): omcid pings its own deadline from its own main loop once it
+   starts, and the kernel -- the only owner of the hardware watchdog --
+   stops kicking if an armed client's deadline is missed,
+   `docs/SETTINGS.md` ("Watchdog rules").
+
+rcS returns there. Busybox init then fires `/etc/init.d/rcS.pon` (a `once`
+entry -- started, not waited for) and starts the four daemon `respawn`
+entries in the same breath: `metricsd`, `confd` and `dropbear`
+(`/etc/scripts/svc-metricsd.sh`, `svc-confd.sh`, `svc-dropbear.sh`;
+`dropbear` generates the ed25519 host key on first boot) and `omcid`
+(`/etc/scripts/svc-omcid.sh`, `-a -d`). Each can be turned off with a
+`.off` file, see `docs/SETTINGS.md`; each script sets its own
+`oom_score_adj` right before it execs the daemon in place
+(`/etc/scripts/respawn.sh`), and busybox init restarts whichever one exits,
+forever, on its own -- no `supervise()`, no restart budget any more.
+
+Concurrently with those four, `rcS.pon`:
+
+6. drives the optics, the `optics` verb of `/proc/odi_init`
+   (`PIN_GPIO_SELECT`, laser TX-enable on GPIO 13);
+7. runs the PON steps: `i2c 1`, `i2cen 1`, `gpon`, `rxsd`, `gpondrv`,
    `gpondev`, then the switch init (the platform settings and module-load
-   replay, through `/proc/odi_omci`) and `omcid -a -d`, then `gponsn`,
-   `gponpw` and `gponact`, the serial number and PLOAM password taken from
-   the config store. `/etc/config/pon-steps` replaces the list
+   replay, through `/proc/odi_omci`) and the watchdog confirmation
+   (`/proc/odi_wdt/userland_ok`; without it the board resets at 120 s of
+   uptime -- the network is not a condition, unless `/etc/config/confirm-arp`
+   exists, development only, then only after an ARP reply from the `.2` of
+   the `br0` subnet), then `gponsn` and `gponpw` (serial number and PLOAM
+   password from the config store), then `gponact` -- which first polls
+   `/proc/odi_omci` for the omcid registration itself, bounded at 10 s,
+   since omcid now starts as its own respawn entry rather than being forked
+   inline here. `/etc/config/pon-steps` replaces the whole list
    (development, `docs/BOOT.md`).
 
 `docs/BOOT.md` has why each stage is where it is, and the development
 aids of `/etc/init.d/rcS.dev` (`breadcrumbs.on`, `confirm-arp`,
-`pon-steps`). A background job in rcS also trims `/var/log/omcid.log` and
+`pon-steps`), shared by rcS and rcS.pon. A background job in rcS also
+trims `/var/log/omcid.log` and
 `/var/log/services.log` once a minute: past 256 KB each is cut back to its
 last 128 KB. `/var` is RAM, so every log is gone at reboot; the only
 records that survive one are the DRAM ramlog (`/proc/odi_ramlog_prev` on
@@ -472,7 +486,8 @@ need a reboot.
 | `/etc/scripts/network.sh` | host SerDes check (and fix), MAC, `br0` over `eth0.2`, the addresses | yes: it checks before it writes, and re-running it is how a management-path problem is debugged |
 | `/etc/scripts/network.sh addr [-n]` | only the addresses: the primary and the second one (`br0:2`), live; `-n` says what it would change | yes; this is `apply.sh network` |
 | `/etc/scripts/mount-config.sh [name] [dir]` | find mtd `config` by name, mount it jffs2 | only if it is not mounted |
-| `/etc/scripts/supervise.sh` | not run directly: sourced by `rcS`/`services`, which backgrounds a daemon, sets its `oom_score_adj`, and restarts it (rate-limited) if it dies | n/a |
+| `/etc/scripts/respawn.sh <oom> <log> <cmd...>` | not run directly: exec-ed by each `svc-*.sh` inittab entry, sets `oom_score_adj` then execs the daemon in place | n/a |
+| `/etc/init.d/services {stop\|start} <name>` | write/clear `/etc/config/<name>.off` and kill the current process so busybox init restarts it at once (`docs/SETTINGS.md`) | yes |
 
 ## Kernel control files
 
@@ -509,27 +524,35 @@ PON MAC under a running omcid; do it on a trial stick only.
 
 ## Restarting a daemon
 
-Nothing restarts them for you. Start the new one in its own session with
-`setsid`, so the end of your ssh session cannot signal it -- omcid in
-particular treats SIGHUP as "stop":
+Since v1.0.4, all four (metricsd, confd, dropbear, omcid) are `respawn`
+entries in `/etc/inittab` (`docs/SETTINGS.md`, "native over hand-rolled"):
+busybox init, which forked each one itself, restarts it the instant it
+exits -- there is no session to SIGHUP any more, since the daemon is a
+child of init (pid 1), never of your ssh session. So the plain way to
+restart one is just to kill it:
 
-    kill $(pidof metricsd); setsid /bin/metricsd 9100 >> /var/log/services.log 2>&1 < /dev/null &
-    kill $(pidof confd);    setsid /bin/confd 80     >> /var/log/services.log 2>&1 < /dev/null &
-    kill $(pidof omcid); sleep 1
-    setsid /bin/omcid -a -d >> /var/log/omcid.log 2>&1 < /dev/null &
+    kill $(pidof metricsd)
+    kill $(pidof confd)
+    kill $(pidof omcid)
+
+each comes back with a new pid within a second or two, no `setsid` needed.
+For dropbear, kill the listening process (the one without `-2` in `ps`);
+open sessions are separate processes and stay up.
 
 After an omcid restart, check `cat /proc/odi_omci` shows `registered:
-type=1` with the new pid, and `omcli state`. The one measured restart
-(2026-09-23, ISP1) re-registered, dropped no frame and held O5; the new
-omcid has an empty MIB until the OLT provisions again, so settings it reads
-from the MIB or the config store are not re-applied by a restart alone.
+type=1` with the new pid, and `omcli state`. The new omcid has an empty
+MIB until the OLT provisions again, so settings it reads from the MIB or
+the config store are not re-applied by a restart alone.
 `/etc/scripts/apply.sh omci` is the restart that does re-apply them: it
 re-ranges the ONU around the restart, and interrupts internet for it.
 
-For dropbear, kill the listening process (the one without `-2` in `ps`);
-open sessions are separate processes and stay up. Start it again with the
-command line above under `setsid`. Or reboot: every daemon starts clean, and
-on a stick running a trial slot the reboot goes back to the committed slot.
+`/etc/init.d/services {stop|start} <name>` (metricsd, confd, dropbear or
+omcid) is for turning one off across restarts: `stop` writes
+`/etc/config/<name>.off` (so it stays off across a reboot, until removed)
+and kills the current process; `start` clears the flag and kills whatever
+is currently running under that entry, so init brings the real daemon back
+at once. A plain `kill` alone, with no `.off` flag, always just comes back
+-- that is the whole point of `respawn`.
 
 ## Dangerous or risky commands
 

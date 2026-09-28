@@ -511,10 +511,11 @@ does all four); then `make test-qemu`, which runs
 `test/qemu/build-initramfs.sh` and `test/qemu/run-qemu.sh`.
 
 **What it covers.** The whole busybox init chain -- `inittab`, `rcS`,
-`services` -- unmodified, packed as an initramfs instead of the flashed
-squashfs+uImage (no block device or MTD in qemu, and no need to build our
-own RTL9602C kernel just to boot this): our tmpfs caps, `oom_score_adj`,
-`supervise()` respawn and sysctls, dropbear/confd/metricsd for real, and
+`rcS.pon`, the `svc-*.sh` respawn entries -- unmodified, packed as an
+initramfs instead of the flashed squashfs+uImage (no block device or MTD
+in qemu, and no need to build our own RTL9602C kernel just to boot this):
+our tmpfs caps, `oom_score_adj`, busybox init `respawn` and sysctls,
+dropbear/confd/metricsd/omcid for real, and
 the resilience scenarios from `docs/SETTINGS.md` ("Resilience") -- filling
 `/tmp` to `ENOSPC`, an OOM (a busybox-only memory hog, no compiled tool
 needed), and `kill -9` on each critical daemon, checked over real ssh
@@ -778,9 +779,11 @@ Each of these has cost real time. The pointer says where the evidence is.
 - **`omcicli get tables` wedges the stock OMCI daemon.** Ours answers it; do
   not run it on the stock slot. `omcicap` and `omciprobe -f` interfere with
   a running `omcid` (`docs/TOOLS.md`).
-- **Daemons are not supervised.** A daemon that dies stays dead; restart it
-  with `setsid` so the end of your ssh session cannot SIGHUP it (`omcid`
-  treats SIGHUP as stop). `docs/TOOLS.md` "Restarting a daemon".
+- **Daemons are `respawn` entries, not sessions.** metricsd, confd,
+  dropbear and omcid are forked by busybox init itself and restarted the
+  instant one exits; `kill` alone brings a new one back within seconds, no
+  `setsid` needed any more (`docs/TOOLS.md` "Restarting a daemon"). Use
+  `/etc/init.d/services stop <name>` to keep one down across restarts.
 - **`/var` is RAM.** Every log is gone at reboot; only the ramlog and the
   breadcrumbs survive.
 

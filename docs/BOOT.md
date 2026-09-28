@@ -1,19 +1,31 @@
 # The boot, stage by stage
 
-What `/etc/init.d/rcS` does and why each stage sits where it does. The
-script itself says what each block does; this is the reasoning behind the
-order, for someone about to change it. `docs/TOOLS.md` ("How the image
-starts things") is the short list; `docs/HACKING.md` has the recovery
-mechanism the boot confirms to.
+What `/etc/init.d/rcS` (and, after it, `rcS.pon`) does and why each stage
+sits where it does. The scripts themselves say what each block does; this
+is the reasoning behind the order, for someone about to change it.
+`docs/TOOLS.md` ("How the image starts things") is the short list;
+`docs/HACKING.md` has the recovery mechanism the boot confirms to.
+
+rcS is the `/etc/inittab` `sysinit` entry; `rcS.pon` (the PON steps, stages
+6 onward below) is a `once` entry started right after rcS returns, at the
+same moment init starts the four daemon `respawn` entries (metricsd,
+confd, dropbear, omcid) -- init does not wait for a `once` entry, so
+`rcS.pon` runs concurrently with all four coming up. `rcs-lib.sh` holds
+the functions both scripts share (`config_mounted`, `crumb`,
+`confirm_watchdog`, the PON step helpers) so they never drift into two
+copies of the same logic.
 
 ## The rules every stage follows
 
 **Nothing may block.** `/etc/inittab` runs rcS as `sysinit`, and busybox
-init starts no `respawn` entry until sysinit returns. The serial login is
-the one respawn entry, and ssh only starts from `services`, which rcS
-launches: anything that blocks in rcS costs every way back into the device
-at once. So every slow step runs in the background, and every read that
-could stall (diag, arping, anything over the network) runs under `timeout`.
+init starts no `once` or `respawn` entry until sysinit returns. The serial
+login and the four daemons are all `respawn` entries: anything that blocks
+in rcS costs every way back into the device at once. So every slow step
+runs in the background, and every read that could stall (diag, arping,
+anything over the network) runs under `timeout`. `rcS.pon`, once started,
+can take its time -- a slow or stuck PON step no longer costs ssh, the web
+UI or the exporter their turn to start, since those are independent
+respawn entries by the time it runs.
 
 **Nothing may abort.** rcS runs under `set -e`, which is what stops a
 typo from going unnoticed, but an aborted sysinit loses the same things a
@@ -96,29 +108,43 @@ reset: a trial that never answered still says how far it got
    session; the BSD pairs (`/dev/ptypN`/`/dev/ttypN`) made here are a
    fallback it can also scan. devtmpfs normally provides them; rcS makes
    sixteen pairs if `/dev/ptyp0` is missing.
-8. **The services** (`/etc/init.d/services`: metricsd, confd, dropbear),
-   in the background, with their output appended to
-   `/var/log/services.log`. A file rather than the console, because a trial
-   has no console, and rather than a pipe, because a pipe the daemons
-   inherit is one nothing ever closes. Each is started through
-   `supervise()` (`/etc/scripts/supervise.sh`, `docs/SETTINGS.md`), which
-   sets its `oom_score_adj` right after the fork and restarts it,
-   rate-limited, if it dies; omcid (started later, in the PON steps below)
-   goes through the same helper.
+8. **The daemons are not started here any more.** metricsd, confd,
+   dropbear and omcid are each their own `respawn` entry in `/etc/inittab`
+   (`/etc/scripts/svc-*.sh`, `docs/SETTINGS.md`, "native over hand-rolled"):
+   busybox init starts all four the moment this script returns and
+   restarts whichever one exits, forever, on its own -- no rate limit, no
+   restart budget, and no chance of losing track of the pid the way the
+   old shell-loop `supervise()` once did on hardware. Each script sets its
+   own `oom_score_adj` right before it execs the daemon in place
+   (`/etc/scripts/respawn.sh`), with its output appended to
+   `/var/log/services.log` (`/var/log/omcid.log` for omcid) -- a file
+   rather than the console, because a trial has no console, and rather
+   than a pipe, because a pipe the daemons inherit is one nothing ever
+   closes.
 9. **The log trim**, a background loop: `/var` is tmpfs now, capped, but
    still not evicted on its own, and omcid logs every OMCI frame (about
    1.7 MB a day on a busy OLT). Past 256 KB each log is cut back to its
    last 128 KB; the writers append, so they carry on at the new end.
 10. **Registering the watchdog clients**
-    (`echo "omcid 60" > /proc/odi_wdt/register`), right after the services
-    start: a deadline the kernel enforces once omcid's own main loop starts
-    pinging it, independent of the one-shot boot confirmation below --
-    missing it later in the boot resets the board just as surely as never
-    confirming does.
+    (`echo "omcid 60" > /proc/odi_wdt/register`): a deadline the kernel
+    enforces once omcid's own main loop starts pinging it, independent of
+    the one-shot boot confirmation below -- missing it later in the boot
+    resets the board just as surely as never confirming does. This still
+    happens here, inside rcS, before the daemon respawn entries start:
+    only the deadline is set, nothing is armed, so it does not matter that
+    omcid itself has not started yet.
+
+rcS returns here; everything from this point on is `rcS.pon`, the PON
+steps, running concurrently with the four respawn entries just started.
+
 11. **The watchdog confirmation**, `confirm_watchdog()`
     (`echo 1 > /proc/odi_wdt/userland_ok`), called from `pon_steps_default`
     right after `omci_start` -- still before `gponsn`/`gponpw`/`gponact`, so
-    a problem on the PON/optics side cannot cost it. odi_wdt resets the
+    a problem on the PON/optics side cannot cost it. This never depended on
+    omcid actually being up (only on `SWITCH_INIT_OK`, decided a few lines
+    above in the same script), so moving the omcid startup itself out to a
+    respawn entry does not change anything about when this fires. odi_wdt
+    resets the
     board at 120 s of uptime unless this is written, which is what reverts
     a trial that never gets here (a hung kernel, a wedged rcS, or one of
     the three checks below failing). It needs no network REACHABILITY --
@@ -157,19 +183,31 @@ reset: a trial that never answered still says how far it got
     steps and outside their list, so a `pon-steps` override keeps it;
     `optics.off` skips it.
 13. **The PON steps**, each one `/proc/odi_init` verb: `i2c 1`, `i2cen 1`,
-    `gpon`, `rxsd`, `gpondrv`, `gpondev`, then the switch init and omcid,
-    then `gponsn`, `gponpw` and `gponact`. The order is fixed by the
-    hardware. omcid registers its receive path in a table that the
-    `gpondrv`/`gpondev` init clears, so it starts after them (before, the
-    OMCI frames were counted and none delivered); the switch init
-    deactivates the ONU, so the activation steps come after it (with the
-    switch init last, the ONU stayed in O1). The switch init is the
-    `switch_init` write of `/proc/odi_omci`: the platform settings and the
-    module-load replay the stock OMCI kernel modules made when they loaded
-    (`docs/SWITCH.md`). The serial number and the PLOAM password come from
-    the config store (`GPON_SN` in the HS file, `GPON_PLOAM_PASSWD` as hex
-    in the CS file); an empty password is not sent. The crumbs name the
-    verb only, so neither value reaches a log.
+    `gpon`, `rxsd`, `gpondrv`, `gpondev`, then the switch init, then
+    `gponsn`, `gponpw` and `gponact`. The order is fixed by the hardware.
+    The switch init deactivates the ONU, so the activation steps come
+    after it (with the switch init last, the ONU stayed in O1); the switch
+    init is the `switch_init` write of `/proc/odi_omci`: the platform
+    settings and the module-load replay the stock OMCI kernel modules made
+    when they loaded (`docs/SWITCH.md`). The serial number and the PLOAM
+    password come from the config store (`GPON_SN` in the HS file,
+    `GPON_PLOAM_PASSWD` as hex in the CS file); an empty password is not
+    sent. The crumbs name the verb only, so neither value reaches a log.
+
+    omcid itself no longer starts here -- it is its own `respawn` entry,
+    running concurrently with this whole script -- but it must still
+    register its receive path (redirect type 1, `/proc/odi_omci`) in a
+    table that the `gpondrv`/`gpondev` init clears (before, the OMCI
+    frames were counted and none delivered), and it must be registered
+    before `gponact`, since the OLT can start sending OMCI frames the
+    instant the ONU activates (a frame with nobody registered is
+    `dropped_unregistered`, in the odi_omci kernel driver). So `gponact`
+    (`pon_step_gponact`, `rcs-lib.sh`) polls the
+    live `/proc/odi_omci` registration table first, once a second, bounded
+    at 10 s, rather than assuming omcid has already caught up by the time
+    this line runs -- and proceeds anyway if it never does, logging that it
+    is activating without a registered omcid, rather than hanging the
+    boot on a missing or wedged daemon.
 
 ## The development aids: rcS.dev
 
@@ -202,8 +240,10 @@ leave there is readable from the image the stick reverts to.
   host is not on `.2`: every boot then resets at 120 s.
 - **`pon-steps`**: a list that replaces the built-in PON steps, one per
   line: a `/proc/odi_init` verb with its argument, or `omcimods` (the
-  switch init and omcid), `gponsn auto` or `gponpw auto` (the values from
-  the config store). It is how the order above was found, one step per
+  switch init only, now -- omcid starts as its own respawn entry
+  regardless), `gponsn auto` or `gponpw auto` (the values from the config
+  store), or `gponact` (waits for the omcid registration first, bounded,
+  same as the built-in list). It is how the order above was found, one step per
   boot. A wrong list means no PON.
 
 `breadcrumbs.on` and `confirm-arp` are documented for users in

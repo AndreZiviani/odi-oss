@@ -5,6 +5,60 @@ listed here.
 
 ## Unreleased
 
+**The omcid watchdog ping is wall-clock-gated now, not loop-iteration-counted.**
+Hardware trial (rc2, claro, 2026-09-28): filling `/tmp` to `ENOSPC` left
+`last_ping_age` at 27 s against the 15 s the main loop was supposed to
+guarantee. Root cause: the loop counted `NL_POLL_US`-spaced iterations and
+called `1000000/NL_POLL_US` of them "one second" -- true only if every
+iteration takes exactly `NL_POLL_US`; one slow iteration (a full apply on
+an OMCI frame, a write that blocks while `/tmp` is nearly full) stretches a
+counted second past its real length, so 15 counted seconds can cover well
+more than 15 real ones. The `src/omci/respond/main.c` main loop now reads
+`CLOCK_MONOTONIC` (`sys_clock_gettime`, already available) and gates both
+the 1 s sample tick and the 15 s `wdt_ping()` on elapsed wall-clock time
+instead, independent of how long any one iteration takes.
+
+**Daemons are `/etc/inittab` `respawn` entries now, not `supervise.sh`.**
+Hardware trial (rc2, claro, 2026-09-28): `kill -9` of omcid was not
+respawned, and `odi_wdt` correctly reset the board 61 s later when omcid
+missed its ping deadline -- the old shell-loop supervisor
+(`rootfs/skeleton/etc/scripts/supervise.sh`, removed) had lost track of
+the child. Native over hand-rolled: busybox init forks each daemon itself
+and never loses the pid. metricsd, confd, dropbear and omcid are each now
+a `respawn` entry running a small per-daemon script
+(`rootfs/skeleton/etc/scripts/svc-*.sh`) that checks its own
+`/etc/config/<name>.off` flag and execs into `respawn.sh` (sets
+`oom_score_adj`, then execs the daemon in the foreground; dropbear already
+ran `-F`, and omcid `-d` was never a daemonize flag either -- neither ever
+double-forked). `/etc/init.d/services` is now a `stop`/`start` hand tool
+(writes/clears the `.off` flag and kills the current process so init
+restarts it at once) rather than a boot-time launcher.
+
+**The PON steps split into `rcS` (sysinit) and a new `rcS.pon` (`once`),
+so daemon respawn no longer waits on them.** Mounts, the config partition
+and the management address stay in `rcS`, which every respawn entry still
+waits on (busybox init starts nothing until sysinit returns); the PON
+steps (optics, the switch init, `gponsn`/`gponpw`/`gponact`) moved to
+`rcS.pon`, a `once` entry started in the same breath as the four daemon
+`respawn` entries -- the same real-world concurrency `services start &`
+already had with them. Since omcid now starts concurrently rather than
+being forked inline mid-PON-steps, `gponact` first polls the live
+`/proc/odi_omci` registration table for omcid, bounded at 10 s, rather
+than assuming it has already registered (an OLT that activates before
+omcid is up would otherwise see its first OMCI frames dropped
+unregistered). Shared functions (`config_mounted`, `crumb`,
+`confirm_watchdog`, the PON step helpers) live in a new
+`rootfs/skeleton/etc/scripts/rcs-lib.sh`, sourced by both scripts. The
+`make test-rcs` golden traces were regenerated and reviewed by hand: the
+`rcS` trace shrinks to the stages that stayed in it; the PON steps and the
+watchdog confirmation no longer appear (they are `rcS.pon` now, untraced
+by this harness, which only ever ran `rcS` itself). The `make test-qemu`
+`kill -9` resilience scenario now also covers omcid, which starts under
+qemu for the first time (previously gated on `/proc/odi_omci`, absent
+there; the new `svc-omcid.sh` gates only on `/etc/config/modules.off` and
+the binary existing, so it starts, and degrades harmlessly exactly as it
+already did on any kernel without `/proc/odi_omci`).
+
 **v1.0.2 and v1.0.3 are both also withdrawn: no management network on real
 hardware.** Trialled on claro (2026-09-28), v1.0.3 hung unreachable for 10+
 minutes with no ARP reply for the configured management address, and did
@@ -80,6 +134,12 @@ later re-address or a `network.sh addr` that failed cannot leave a stale
 
 ## v1.0.3 — 2026-09-28
 
+**WITHDRAWN.** Broken on hardware: no management network. Root cause,
+confirmed after the fact (v1.0.4 below): `kernel/618/config` had neither
+`CONFIG_SHMEM` nor `CONFIG_TMPFS`, so the capped `/var` tmpfs mount failed
+and the config partition never mounted. Release images deleted from
+GitHub 2026-09-28. Use v1.0.1 or v1.0.4.
+
 **v1.0.2 is withdrawn (marked pre-release) and must not be used.** Trialled
 on claro (2026-09-27), it hung for 15 minutes with no ARP or ping despite
 the SFP link staying up, and did not self-revert: the ramlog showed the
@@ -137,6 +197,12 @@ reviewed by hand: the only differences are the tmpfs mounts and omcid's
 supervise-restart loop against this harness's stub binary.
 
 ## v1.0.2 — 2026-09-27
+
+**WITHDRAWN.** Broken on hardware: no management network. Root cause,
+confirmed after the fact (v1.0.4 below): `kernel/618/config` had neither
+`CONFIG_SHMEM` nor `CONFIG_TMPFS`, so the capped `/var` tmpfs mount failed
+and the config partition never mounted. Release images deleted from
+GitHub 2026-09-28. Use v1.0.1 or v1.0.4.
 
 **Resilience.** A 20 MB `scp` into `/tmp` on ISP1 exhausted RAM (`/tmp` was
 ramfs, unbounded and unreclaimable): the OOM killer took dropbear, confd

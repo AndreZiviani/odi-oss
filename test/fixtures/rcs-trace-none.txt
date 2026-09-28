@@ -100,54 +100,5 @@ exec /bin/mknod ["mknod", "/dev/ptype", "c", "2", "14"]
 exec /bin/mknod ["mknod", "/dev/ttype", "c", "3", "14"]
 exec /bin/mknod ["mknod", "/dev/ptypf", "c", "2", "15"]
 exec /bin/mknod ["mknod", "/dev/ttypf", "c", "3", "15"]
-exec /etc/init.d/services ["/etc/init.d/services", "start"]
 exec /bin/sleep ["sleep", "60"]
 exec /bin/grep ["grep", "-qE", "^[^ ]+ /var/config jffs2 ", "/proc/mounts"]
-write /proc/odi_init "optics\n"
-exec /bin/cat ["cat", "/proc/odi_init"]
-write /proc/odi_init "i2c 1\n"
-exec /bin/cat ["cat", "/proc/odi_init"]
-write /proc/odi_init "i2cen 1\n"
-exec /bin/cat ["cat", "/proc/odi_init"]
-write /proc/odi_init "gpon\n"
-exec /bin/cat ["cat", "/proc/odi_init"]
-write /proc/odi_init "rxsd\n"
-exec /bin/cat ["cat", "/proc/odi_init"]
-write /proc/odi_init "gpondrv\n"
-exec /bin/cat ["cat", "/proc/odi_init"]
-write /proc/odi_init "gpondev\n"
-exec /bin/cat ["cat", "/proc/odi_init"]
-write /proc/odi_omci "switch_init\n"
-exec /bin/cut ["cut", "-d.", "-f1", "/proc/uptime"]
-exec /bin/omcid ["/bin/omcid", "-a", "-d"]
-exec /bin/cut ["cut", "-d.", "-f1", "/proc/uptime"]
-exec /bin/sleep ["sleep", "1"]
-exec /bin/omcid ["/bin/omcid", "-a", "-d"]
-exec /bin/cut ["cut", "-d.", "-f1", "/proc/uptime"]
-exec /bin/sleep ["sleep", "1"]
-exec /bin/omcid ["/bin/omcid", "-a", "-d"]
-exec /bin/cut ["cut", "-d.", "-f1", "/proc/uptime"]
-exec /bin/sleep ["sleep", "1"]
-exec /bin/omcid ["/bin/omcid", "-a", "-d"]
-exec /bin/cut ["cut", "-d.", "-f1", "/proc/uptime"]
-exec /bin/sleep ["sleep", "1"]
-exec /bin/omcid ["/bin/omcid", "-a", "-d"]
-exec /bin/cut ["cut", "-d.", "-f1", "/proc/uptime"]
-exec /bin/sleep ["sleep", "1"]
-exec /bin/omcid ["/bin/omcid", "-a", "-d"]
-exec /bin/cut ["cut", "-d.", "-f1", "/proc/uptime"]
-exec /bin/grep ["grep", "-qE", "^[^ ]+ /var tmpfs ", "/proc/mounts"]
-exec /bin/grep ["grep", "-qE", "^[^ ]+ /var/tmp tmpfs ", "/proc/mounts"]
-exec /bin/grep ["grep", "-qE", "^[^ ]+ /var/config jffs2 ", "/proc/mounts"]
-exec /etc/scripts/network.sh ["/etc/scripts/network.sh", "configured"]
-write /proc/odi_wdt/userland_ok "1\n"
-exec /bin/sed ["sed", "-n", "s/.*Name=\"GPON_SN\" Value=\"\\([^\"]*\\)\".*/\\1/p", "/etc/config/lastgood_hs.xml"]
-exec /bin/head ["head", "-n", "1"]
-write /proc/odi_init "gponsn ODIT00000001\n"
-exec /bin/cat ["cat", "/proc/odi_init"]
-exec /bin/sed ["sed", "-n", "s/.*Name=\"GPON_PLOAM_PASSWD\" Value=\"\\([^\"]*\\)\".*/\\1/p", "/etc/config/lastgood.xml"]
-exec /bin/head ["head", "-n", "1"]
-write /proc/odi_init "gponpw 30303030303030303030\n"
-exec /bin/cat ["cat", "/proc/odi_init"]
-write /proc/odi_init "gponact\n"
-exec /bin/cat ["cat", "/proc/odi_init"]

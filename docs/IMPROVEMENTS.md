@@ -156,7 +156,9 @@ Fixed several ways, together (`docs/SETTINGS.md`, "Resilience" and
 unbounded ramfs, so a full `/tmp` gives `ENOSPC` rather than taking the box
 down with it; `oom_score_adj` biases the OOM killer away from omcid,
 dropbear and confd; those four critical daemons (omcid, dropbear, confd,
-metricsd) restart automatically, rate-limited, if they die (`supervise()`);
+metricsd) restart automatically the instant they die, forked and tracked
+by busybox init itself (`/etc/inittab` `respawn` entries, not a hand-rolled
+supervisor loop);
 and the kernel's own odi_wdt watchdog -- the only owner of the hardware
 watchdog, with no separate userland process guessing at anything from
 `/proc` -- stops kicking (so the board resets) if omcid misses its own

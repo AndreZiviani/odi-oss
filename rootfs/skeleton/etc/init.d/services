@@ -1,103 +1,83 @@
 #!/bin/sh
 #
-# Our daemons. Backgrounded by rcS, so nothing here can cost the boot -- but
-# keep it that way: rcS runs as `sysinit`, before init starts the shells.
+# /etc/init.d/services -- manual control over metricsd, confd, dropbear and
+# omcid. Since v1.0.4 each is its own `respawn` entry in /etc/inittab
+# (docs/SETTINGS.md, "native over hand-rolled"): init starts all four right
+# after rcS (sysinit) returns and restarts whichever one exits, forever, on
+# its own -- there is no boot-time "start" step here any more. This script
+# is now only a hand tool for stopping or restarting one at the prompt.
 #
-# Everything is ON by default: an image built from this tree is useful as
-# flashed. Turn a piece off by creating a file under /etc/config, which is the
-# jffs2 partition and survives reboots and reflashes:
-#
-#     touch /etc/config/dropbear.off && reboot
-#
-# Every daemon here is started through supervise() (/etc/scripts/supervise.sh,
-# docs/SETTINGS.md): it sets the daemon oom_score_adj right after the fork
-# and restarts it, rate-limited, if it dies -- omcid (started from rcS, not
-# here) goes through the same helper. metricsd is deliberately left at the
-# kernel default (0): it is the one daemon whose loss does not cost
-# management access or GPON state, so it is the first thing the OOM killer
-# should take if it has to take something at all.
-. /etc/scripts/supervise.sh
-#
-# A flag file that could not be READ is not a flag that is not SET. Every
-# `[ -f /etc/config/X.off ]` below is false when the jffs2 config partition
-# did not mount, because /etc/config then resolves to the empty ramfs
-# directory rcS created -- so each protective switch silently turns itself
-# off exactly when the machine is already in an unexpected state. That is a
-# deliberate fail OPEN here: dropbear, confd and metricsd are ways IN and
-# ways to SEE, and refusing to start them because a partition is missing
-# would turn a mount problem into no way to diagnose it. (The ssh host key
-# then lives in ramfs and is regenerated every boot, which is noisy but
-# works.) The GPON modules/omcid startup this file used to gate on the same
-# partition (fail CLOSED, on purpose -- a module that panics takes the trial
-# boot with it) now happens in rcS itself, on every kernel this repo builds;
-# see omci_modules() there.
+# stop <name>: writes /etc/config/<name>.off (jffs2, survives a reflash;
+# needs the config partition mounted) and kills the running process. Its
+# svc-<name>.sh entry (rootfs/skeleton/etc/scripts/) checks the flag on
+# every exec, so the very next respawn -- immediate, since killing it IS
+# what triggers that respawn -- execs the placeholder instead of the
+# daemon; init keeps "respawning" that harmlessly forever.
+# start <name>: removes the flag and kills whatever is currently running
+# under that entry (the daemon already, or the placeholder), so init
+# restarts it at once, into the daemon this time. No `kill -HUP 1` and no
+# reboot needed either way.
+set -u
 
-start() {
-	[ -f /etc/config/metricsd.off ] || [ ! -x /bin/metricsd ] || \
-		supervise metricsd 0 /bin/metricsd 9100
-
-	[ -f /etc/config/confd.off ] || [ ! -x /bin/confd ] || \
-		supervise confd -500 /bin/confd 80
-
-	# ON by default, like everything else here. Turning it off for a trial
-	# boot is an operational step taken on the RUNNING stick before the
-	# flash -- `touch /etc/config/dropbear.off` -- and not an image default:
-	# /etc/config is the jffs2 partition, fwu.sh never writes it, so the flag
-	# is already there when the new image first comes up. See
-	# docs/FLASHING.md ("Trial-booting it") for why that is worth doing once.
-	if [ ! -f /etc/config/dropbear.off ] && [ -x /sbin/dropbear ]; then
-		mkdir -p /etc/config/dropbear.d
-		KEY=/etc/config/dropbear.d/ed25519
-		# -s, not -f: a zero-length key is what a power cut during the
-		# first-boot keygen leaves behind, and dropbear then dies while
-		# dropbearkey REFUSES to replace an existing file -- so without
-		# this the stick loses ssh permanently and nothing retries.
-		[ -e "$KEY" ] && [ ! -s "$KEY" ] && rm -f "$KEY"
-		# stdout is the public key and is noise; STDERR is not. This is the
-		# one command here whose failure costs ssh, and it failed silently
-		# once already -- no /dev/urandom, no key, no message.
-		[ -s "$KEY" ] || /sbin/dropbearkey -t ed25519 -f "$KEY" >/dev/null
-		# -E puts dropbear own log on STDERR, which rcS captures into
-		# /var/log/services.log. Without it dropbear switches to syslog as
-		# it daemonises, and nothing on this image runs a syslogd -- so an
-		# "Early exit: Failed to daemonize" reached the operator as ssh not
-		# answering, with no message anywhere to read.
-		# -D: public keys for root live beside the host key, on the jffs2
-		# partition, so they survive a reflash. confd /api/sshkeys writes
-		# that file; dropbear reads it on every login, no restart needed.
-		#
-		# /etc/odi-keys-only is written by image/build.sh only for
-		# ROOT_PW=locked (docs/BUILDING.md): the account has no usable
-		# password hash either way, but -s here also refuses password
-		# auth at the protocol level, so a public release image never
-		# offers a password prompt to try against. A source build with
-		# the default per-build password does not carry this file, so it
-		# keeps password login as today.
-		# -F: run in the foreground, one connection or not -- supervise()
-		# needs the pid it forked to BE dropbear, not a parent that
-		# daemonises and exits right after (odi_wdt.h/supervise.sh have the
-		# same trap spelled out for the kernel side).
-		if [ -f /etc/odi-keys-only ]; then
-			[ -s "$KEY" ] && supervise dropbear -1000 /sbin/dropbear -s -F -E -r "$KEY" -D /etc/config/dropbear.d -p 22
-		else
-			[ -s "$KEY" ] && supervise dropbear -1000 /sbin/dropbear -F -E -r "$KEY" -D /etc/config/dropbear.d -p 22
-		fi
-	fi
-
-	# The GPON modules/omcid startup used to happen here too, for a kernel
-	# whose rcS did not already do it. Every kernel this repo builds now
-	# does that in rcS itself (omci_modules(), called from the pon-steps
-	# loop), so there is nothing left for this script to start.
-
-	# The last breadcrumb, if rcS is leaving them (see rcS for what they are
-	# and why they are a switch). Same shape: swallowed on any failure.
-	if [ -f /etc/config/breadcrumbs.on ]; then
-		echo "$(cut -d" " -f1 /proc/uptime) services: done" >> /etc/config/breadcrumbs 2>/dev/null || true
-		sync
-	fi
+usage() {
+	echo "usage: $0 {stop|start} {metricsd|confd|dropbear|omcid}" >&2
+	exit 1
 }
 
-case "$1" in
-start) start ;;
-*)     echo "usage: $0 start" >&2; exit 1 ;;
+svc_comm() {
+	case "$1" in
+	metricsd) echo metricsd ;;
+	confd) echo confd ;;
+	dropbear) echo dropbear ;;
+	omcid) echo omcid ;;
+	*) echo "" ;;
+	esac
+}
+
+# Kills every process whose /proc/<pid>/comm is exactly $1: the daemon
+# itself once respawn.sh has exec-ed into it (comm becomes the daemon own
+# name), never anything else on this image.
+kill_by_comm() {
+	for p in /proc/[0-9]*; do
+		[ "$(cat "$p/comm" 2>/dev/null)" = "$1" ] && kill -9 "${p#/proc/}" 2>/dev/null
+	done
+}
+
+# Kills every process whose cmdline mentions $1: used to reach the
+# respawn-off.sh placeholder, which always execs with its own path as
+# argv0 and matches nothing else running on this image.
+kill_by_cmdline() {
+	for p in /proc/[0-9]*; do
+		tr '\0' ' ' < "$p/cmdline" 2>/dev/null | grep -q "$1" && kill -9 "${p#/proc/}" 2>/dev/null
+	done
+}
+
+[ $# -eq 2 ] || usage
+action=$1
+svc=$2
+comm=$(svc_comm "$svc")
+[ -n "$comm" ] || usage
+
+case "$action" in
+stop)
+	mkdir -p /etc/config 2>/dev/null
+	: > "/etc/config/$svc.off" 2>/dev/null ||
+		echo "$0: could not write /etc/config/$svc.off -- config partition mounted?" >&2
+	kill_by_comm "$comm"
+	echo "$svc: stopped ($svc.off written; $0 start $svc, or a reboot without the flag, brings it back)"
+	;;
+start)
+	rm -f "/etc/config/$svc.off" 2>/dev/null
+	kill_by_comm "$comm"
+	# The placeholder (respawn-off.sh) always execs under that same path
+	# regardless of which .off entry launched it, so this can also kill an
+	# unrelated stopped services placeholder -- harmless: init just
+	# restarts it, its own .off flag is unchanged, and it goes straight
+	# back to waiting.
+	kill_by_cmdline "respawn-off.sh"
+	echo "$svc: start requested (flag cleared, current process killed so init restarts it)"
+	;;
+*)
+	usage
+	;;
 esac

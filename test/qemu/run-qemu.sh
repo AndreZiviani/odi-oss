@@ -5,21 +5,24 @@
 # (docs/HACKING.md) calls this after test/qemu/build-initramfs.sh.
 #
 # What this DOES exercise: the real busybox init chain, inittab, rcS,
-# services, dropbear, confd, metricsd, the tmpfs caps, oom_score_adj,
-# supervise() respawn, and sysctls -- everything under rootfs/skeleton,
-# unpatched.
+# rcS.pon, the svc-*.sh respawn entries, dropbear, confd, metricsd, omcid,
+# the tmpfs caps, oom_score_adj, busybox init respawn, and sysctls --
+# everything under rootfs/skeleton, unpatched.
 #
 # What this does NOT exercise (docs/HACKING.md has the full list): our own
 # kernel (kernel/extra, the odi_* drivers) is not built or booted here at
 # all -- a stock kernel stands in for the RTL9602C board qemu cannot
 # emulate. So there is no /proc/odi_wdt, no /proc/odi_init, no switch, no
-# GPON, no real omcid (omci_start() in rcS skips it, exactly as it does on
-# any kernel without /proc/odi_omci) -- and no watchdog reset path at all:
-# none of the three odi_wdt rules (boot confirmation, per-client ping
-# deadlines, the memory floor; docs/SETTINGS.md, "Watchdog rules") can be
-# exercised end to end here, only that rcS and omcid degrade harmlessly
-# without /proc/odi_wdt. That needs the real hardware or the host-side
-# coverage of the rules themselves (test/odi_wdt_test.c).
+# GPON: omcid still starts (svc-omcid.sh only gates on modules.off and the
+# binary existing, not on /proc/odi_omci), but degrades harmlessly exactly
+# as it does on any kernel without /proc/odi_omci -- no netlink, no
+# registration, message-queue commands still served -- and there is no
+# watchdog reset path at all: none of the three odi_wdt rules (boot
+# confirmation, per-client ping deadlines, the memory floor;
+# docs/SETTINGS.md, "Watchdog rules") can be exercised end to end here,
+# only that rcS.pon and omcid degrade harmlessly without /proc/odi_wdt.
+# That needs the real hardware or the host-side coverage of the rules
+# themselves (test/odi_wdt_test.c).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BUILD=${1:-$ROOT/build/qemu-initramfs}
@@ -145,8 +148,8 @@ done
 [ "$up" = 1 ] || fail "ssh dead after the memory hog"
 echo "  ssh answered through the hog (dmesg on the console log has the OOM kill, if any fired)"
 
-say "scenario: kill -9 dropbear, confd, metricsd -- each back within 10s"
-for svc in dropbear confd metricsd; do
+say "scenario: kill -9 dropbear, confd, metricsd, omcid -- each back within 10s"
+for svc in dropbear confd metricsd omcid; do
 	pid=$(sshx "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = $svc ] && echo \${p#/proc/}; done | head -1" 2>/dev/null) || pid=""
 	[ -n "$pid" ] || { echo "  $svc: not running, skipping" >&2; continue; }
 	# || true: killing dropbear's own connection handler can reset THIS

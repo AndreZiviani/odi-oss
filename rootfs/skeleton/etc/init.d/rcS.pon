@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# /etc/init.d/rcS.pon -- the PON steps, run by init as a `once` entry right
+# after /etc/init.d/rcS (sysinit) returns (docs/BOOT.md). init does not wait
+# for a `once` entry before moving on to start the `respawn` entries
+# (dropbear, confd, metricsd, omcid) in the same breath, so this runs
+# concurrently with them coming up -- the PON steps never depended on any of
+# those four actually being up except omcid, for the one step gated on it
+# below (pon_step_gponact, rcs-lib.sh).
+#
+# Split out of rcS so that init own guarantee -- nothing starts a respawn
+# entry until sysinit returns -- is not stretched to cover the PON steps
+# too: they can be slow (an i2c/GPON verb that stalls) or fail without
+# costing ssh, dropbear, confd or metricsd their turn to start.
+
+set -e
+
+. /etc/scripts/rcs-lib.sh
+if [ -r /etc/init.d/rcS.dev ]; then
+	. /etc/init.d/rcS.dev
+fi
+
+if [ -w /proc/odi_init ]; then
+	# The optics first, before any PON step and outside the step list:
+	# PIN_GPIO_SELECT for the module I2C pins and the laser TX enable
+	# (odi_board.h). /etc/config/optics.off leaves the laser off.
+	if [ -f /etc/config/optics.off ]; then
+		crumb "optics: optics.off, laser left off"
+	else
+		pon_step optics
+	fi
+	pon_steps
+	crumb "pon steps done"
+	dev_hook pon
+fi
+
+exit 0

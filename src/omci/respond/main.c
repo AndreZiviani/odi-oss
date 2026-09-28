@@ -264,18 +264,40 @@ int main(int argc, char **argv)
 			quiet++;
 		}
 		{
-			static unsigned tick;
-			static unsigned wdt_secs;
+			/* CLOCK_MONOTONIC-gated, not loop-iteration-counted: this
+			 * used to count NL_POLL_US-spaced ticks and call a
+			 * counted 1000000/NL_POLL_US of them "one second", which
+			 * only holds if every iteration takes exactly NL_POLL_US.
+			 * One slow iteration -- a full apply on an OMCI frame, a
+			 * write that blocks while /tmp is nearly full -- stretches
+			 * a counted second past its real length, and 15 counted
+			 * seconds can cover well more than 15 real ones: seen on
+			 * hardware as a 27 s last_ping_age against the 15 s this
+			 * comment used to promise. Wall-clock elapsed time keeps
+			 * the real cadence regardless of how long any one
+			 * iteration takes. */
+			static long last_sample_s = -1;
+			static long last_ping_s = -1;
+			long now_s, now_ns;
 
-			if (++tick % (1000000 / NL_POLL_US) == 0) {
-				onu_state_sample();
-				serial_refresh(1);
+			if (sys_clock_gettime(CLOCK_MONOTONIC, &now_s, &now_ns) == 0) {
+				if (last_sample_s < 0)
+					last_sample_s = now_s;
+				if (last_ping_s < 0)
+					last_ping_s = now_s;
+				if (now_s - last_sample_s >= 1) {
+					last_sample_s = now_s;
+					onu_state_sample();
+					serial_refresh(1);
+				}
 				/* Every 15 s: a quarter of the 60 s deadline
 				 * odi_wdt.h/rcS register omcid with, so an
-				 * occasional missed tick (a slow OLT frame,
-				 * a stalled CLI client) never costs a reset. */
-				if (++wdt_secs % 15 == 0)
+				 * occasional missed beat (a slow OLT frame, a
+				 * stalled CLI client) never costs a reset. */
+				if (now_s - last_ping_s >= 15) {
+					last_ping_s = now_s;
 					wdt_ping();
+				}
 			}
 		}
 		if (qos_dirty && quiet >= 1000000 / NL_POLL_US) {
