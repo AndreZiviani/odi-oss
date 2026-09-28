@@ -307,6 +307,43 @@ watchdog rules themselves, which need `/proc/odi_wdt` -- real hardware,
 not the stock kernel the harness boots; those are host-tested instead
 (`test/odi_wdt_test.c`, against a fake clock).
 
+## Bounded waits
+
+Every command a script here runs, and every wait one process does on
+another, is bounded -- found necessary the hard way (rc3, claro,
+2026-09-28): a stuck omcid left both `metricsd`'s own child wait and
+`vq_ensure()`'s queue-reclaim logic waiting on it forever (CHANGELOG.md,
+"Unreleased"). The pattern:
+
+- **A forked command**: `timeout SECS cmd args...` (busybox `timeout`,
+  built into this image's busybox -- `packages/busybox/config.fragment`).
+  Already the shape of every `diag` call (`network.sh`'s `sds_read`/
+  `sds_write`, 10 s; `rcS.dev`'s dev-hook diag probes, 10 s) and of the
+  `/proc` reads and `arping` in `rcS.dev`'s confirm-arp path (5 s, 2 s).
+- **A bare `echo verb > /proc/odi_init` or `/proc/odi_omci`**: this is the
+  calling shell's own `write(2)`, not a forked command, so `timeout` has
+  nothing to wrap unless the write runs inside a process of its own.
+  `write_proc_bounded`/`read_proc_bounded` (`scripts/rcs-lib.sh`, sourced by
+  `rcS`, `rcS.pon` and `apply.sh`) do exactly that: `timeout
+  $PROC_WRITE_TIMEOUT_S sh -c '...'`, default 5 s. Used by the switch
+  SDK-init loop and the `odi_wdt` register write (`rcS`), every PON step and
+  the `switch_init` verb (`rcs-lib.sh`), and `gpondeact`/`gponpw`/`gponact`
+  (`apply.sh`).
+- **A documented exception**: `rcS.dev`'s SerDes/trial-diag dev hook
+  deliberately runs no `diag` call of its own reasoning ("a diag ioctl can
+  block where timeout cannot") -- `timeout` sends a signal to the process
+  it started, and a process parked in an uninterruptible-sleep (`D` state)
+  kernel wait ignores every signal, that one included. This bounds the
+  ordinary hang (a driver waiting on a lock or a condition that resolves
+  on its own, which is what has actually been observed) but is not a
+  guarantee against every kind of stuck kernel call.
+- **The freestanding C daemons** (`odi-sfp-exporter`'s `metricsd`, this
+  image's own `omcid`) have no `timeout` binary to shell out to: they poll
+  the child's pipe with a timeout and `SIGKILL` + reap it on expiry
+  instead (`drain_bounded()`/`kill_and_reap()`,
+  odi-sfp-exporter's `src/syscall.h`) and report the failure as a metric
+  (`gpon_omci_up`) rather than going silent.
+
 ## Not verified yet
 
 - `apply.sh omci` against more than one OLT: it was run end to end once, on

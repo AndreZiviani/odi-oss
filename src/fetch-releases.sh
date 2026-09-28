@@ -22,7 +22,7 @@ mkdir -p "$OUT" "$DL"
 METRICSD_REPO=${METRICSD_REPO:-AndreZiviani/odi-sfp-exporter}
 METRICSD_TAG=${METRICSD_TAG:-v1.1.2}
 CONFD_REPO=${CONFD_REPO:-AndreZiviani/odi-ui}
-CONFD_TAG=${CONFD_TAG-v1.0.5}
+CONFD_TAG=${CONFD_TAG-v1.0.6}
 
 have() { command -v "$1" >/dev/null 2>&1; }
 

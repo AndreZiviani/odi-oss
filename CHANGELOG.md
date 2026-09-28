@@ -5,6 +5,30 @@ listed here.
 
 ## Unreleased
 
+**Every wait on another process is bounded now, not only the two hit on
+hardware.** Audited every `diag`, `omcli`/`omcicli`, `arping`, `nv` and
+`/proc` verb write/read in `rootfs/skeleton/etc/` for an unbounded wait.
+Added `write_proc_bounded`/`read_proc_bounded` (`scripts/rcs-lib.sh`,
+`timeout $PROC_WRITE_TIMEOUT_S sh -c '...'`, 5 s default) for the bare
+`echo verb > /proc/odi_init`/`/proc/odi_omci` writes a plain `timeout`
+wrapper cannot reach (they are the calling shell's own `write(2)`, not a
+forked command) -- used by `rcS`'s switch SDK-init loop and `odi_wdt`
+register, `rcs-lib.sh`'s PON steps and `switch_init`, and `apply.sh`'s
+`gpondeact`/`gponpw`/`gponact`. `fwu_starter.sh`'s `nv getenv sw_active`
+fallback gained a plain `timeout 5`. `docs/SETTINGS.md` gained a "Bounded
+waits" section listing the pattern per case, including the one documented
+exception (`rcS.dev`'s dev-hook diag probes: a process parked in an
+uninterruptible-sleep kernel wait ignores `timeout`'s signal too). No
+change needed in `network.sh` or `rcS.dev`'s confirm-arp path -- both
+already wrapped every `diag`/`arping`/`/proc` call in `timeout`.
+
+**`confd` pinned to v1.0.6.** Same rule applied on the odi-ui side: bounded
+every `run_to_buf`/`run_script_to_buf` child wait in the confd daemon
+itself (omcicli, diag, flash, apply, ping, fwu, reboot, md5sum, nv --
+odi-ui's own CHANGELOG has the full list and the per-command timeouts),
+plus an ssh connect/keepalive bound on the maintainer scripts
+(`scripts/deploy.sh` and the capture/schema-drift tools) that had none.
+
 **`metricsd` pinned to v1.1.2.** Fixes the matching hardware-trial bug on the
 exporter side: `metricsd`'s own child wait (`omcicli dump srvflow`) had no
 timeout either, so a stuck omcid (the queue-reclaim bug above) hung the whole

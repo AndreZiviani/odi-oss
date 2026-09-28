@@ -114,8 +114,9 @@ fi
 if [ -w /proc/odi_init ]; then
 	for step in intr irq switch svlan stp oam acl qos sec rate classify stat trunk l2 vlan port mirror cpu rldp trap gpio time ponmac; do
 		crumb "odi_init step $step: start"
-		echo "$step" > /proc/odi_init 2>/dev/null || echo "rcS: odi_init $step failed to start" >&2
-		crumb "odi_init step $step: ret $(cat /proc/odi_init 2>/dev/null)"
+		write_proc_bounded /proc/odi_init "$step" 2>/dev/null || \
+			echo "rcS: odi_init $step failed to start" >&2
+		crumb "odi_init step $step: ret $(read_proc_bounded /proc/odi_init)"
 	done
 fi
 
@@ -177,7 +178,7 @@ dev_hook services
 # image) just sees the write fail silently and behaves as if no client
 # were registered at all.
 if [ -w /proc/odi_wdt/register ]; then
-	echo "omcid $ODI_WDT_OMCID_DEADLINE_S" > /proc/odi_wdt/register 2>/dev/null || \
+	write_proc_bounded /proc/odi_wdt/register "omcid $ODI_WDT_OMCID_DEADLINE_S" 2>/dev/null || \
 		echo "rcS: could not register omcid with odi_wdt" >&2
 	crumb "odi_wdt: omcid registered, deadline ${ODI_WDT_OMCID_DEADLINE_S}s"
 fi

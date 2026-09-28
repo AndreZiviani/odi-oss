@@ -33,6 +33,11 @@
 # once, at the first activation of a boot. A new GPON_SN needs a reboot.
 set -u
 
+# write_proc_bounded: the bounded /proc-verb write rcS and rcS.pon already
+# use, reused here rather than a second copy -- see rcs-lib.sh for what
+# `timeout` does and does not catch on these.
+. /etc/scripts/rcs-lib.sh
+
 ODI_INIT=${ODI_INIT:-/proc/odi_init}
 ODI_OMCI=${ODI_OMCI:-/proc/odi_omci}
 OMCID=${OMCID:-/bin/omcid}
@@ -69,7 +74,7 @@ omci() {
 	[ -x "$OMCID" ] || die "no $OMCID"
 
 	t0=$(uptime_s)
-	echo gpondeact > "$ODI_INIT" 2>/dev/null || die "gpondeact failed; nothing else was touched"
+	write_proc_bounded "$ODI_INIT" gpondeact 2>/dev/null || die "gpondeact failed; nothing else was touched"
 	say "ONU deactivated (internet is down from here)"
 
 	old=$(pidof omcid)
@@ -116,13 +121,13 @@ omci() {
 	# gponpw auto step): from the CS file, hex, skipped when empty.
 	pw=$(sed -n "s/.*Name=\"GPON_PLOAM_PASSWD\" Value=\"\([^\"]*\)\".*/\1/p" "$CS" 2>/dev/null | head -n 1)
 	if [ -n "$pw" ]; then
-		echo "gponpw $pw" > "$ODI_INIT" 2>/dev/null || say "gponpw failed, the old password stays" >&2
+		write_proc_bounded "$ODI_INIT" "gponpw $pw" 2>/dev/null || say "gponpw failed, the old password stays" >&2
 	fi
 
 	while [ $(( $(uptime_s) - t0 )) -lt "$DEACT_HOLD" ]; do
 		sleep 1
 	done
-	echo gponact > "$ODI_INIT" 2>/dev/null || die "gponact FAILED: the ONU stays off the line until a reboot"
+	write_proc_bounded "$ODI_INIT" gponact 2>/dev/null || die "gponact FAILED: the ONU stays off the line until a reboot"
 	say "ONU re-activated; the OLT provisions it again within about a minute"
 	[ -n "$new" ] || exit 1
 }

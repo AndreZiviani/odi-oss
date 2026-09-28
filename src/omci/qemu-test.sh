@@ -906,8 +906,13 @@ out=$($Q cli/build/omcli dump srvflow 2>&1)
 end=$(date +%s)
 got=$([ "$((end - start))" -le 2 ] && echo yes || echo no)
 check "dump srvflow answers within 2s of a respawn" "$got" "yes"
-got=$(echo "$out" | grep -c '^SERVID ')
-check "and it is the real vendor-format srvflow dump, not silence" "$got" "1"
+# This instance has nothing provisioned (a fresh MIB, no frames injected
+# into it), so cli_conn() (show.c) prints no SERVID rows at all -- it
+# omits unused ones, unlike the vendor's 256-row dump. "0 services" is
+# still the real vendor-format trailer line, not the empty string a
+# silently dropped or malformed reply would leave.
+got=$(echo "$out" | tail -n 1)
+check "and it is the real vendor-format srvflow dump, not silence" "$got" "0 services"
 
 # The daemon log lives inside the container, so keep it when a check fails.
 [ "$fail" -eq 0 ] || cp /tmp/omcid3.log /src/src/omci/qemu-test.log 2>/dev/null || true

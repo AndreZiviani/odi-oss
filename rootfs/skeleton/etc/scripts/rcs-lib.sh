@@ -10,6 +10,30 @@
 
 kmsg() { echo "rcS: $*" > /dev/kmsg 2>/dev/null || true; }
 crumb() { kmsg "$*"; }
+
+# Bounded write into a driver /proc verb file (odi_init, odi_omci, and
+# friends). A bare `echo x > file` is a write(2) the calling shell performs
+# directly, not a forked command -- `timeout` only bounds a process it
+# starts, so the write has to run inside one for `timeout` to reach it at
+# all. This is a documented limit, not a guarantee: a write the kernel driver
+# blocks on in D state (uninterruptible sleep) ignores every signal,
+# including the one `timeout` sends -- see rcS.dev, the note on why a diag
+# ioctl gets no `timeout` wrapper there either. It still catches the ordinary
+# case (a driver waiting on a lock or a condition that resolves on its own),
+# which is what "odi_init step hangs the boot" would actually look like.
+#
+# The line goes through positional parameters ($1/$2 inside the inner shell),
+# not string interpolation into the script text, so a value containing shell
+# metacharacters (a password from the config store, say) is never re-parsed.
+PROC_WRITE_TIMEOUT_S=${PROC_WRITE_TIMEOUT_S:-5}
+write_proc_bounded() {
+	path=$1 line=$2
+	timeout "$PROC_WRITE_TIMEOUT_S" sh -c 'echo "$1" > "$2"' _ "$line" "$path"
+}
+read_proc_bounded() {
+	path=$1
+	timeout "$PROC_WRITE_TIMEOUT_S" cat "$path" 2>/dev/null
+}
 dev_hook() { :; }
 dev_confirm_ok() { return 0; }
 pon_steps() { pon_steps_default; }	# the rcS.dev pon-steps override replaces this
@@ -42,8 +66,9 @@ required_mounts_ok() {
 
 pon_step() {
 	crumb "pon step ${1%% *}: start"
-	echo "$1" > /proc/odi_init 2>/dev/null || echo "rcS: odi_init ${1%% *} failed to start" >&2
-	crumb "pon step ${1%% *}: ret $(cat /proc/odi_init 2>/dev/null)"
+	write_proc_bounded /proc/odi_init "$1" 2>/dev/null || \
+		echo "rcS: odi_init ${1%% *} failed to start" >&2
+	crumb "pon step ${1%% *}: ret $(read_proc_bounded /proc/odi_init)"
 }
 
 # The serial number (an HS key) and the PLOAM password (hex, in the CS
@@ -103,7 +128,7 @@ omci_start() {
 		crumb "omci: no /proc/odi_omci, switch init skipped"
 		return 0
 	fi
-	if echo switch_init > /proc/odi_omci 2>/var/log/switch_init.err; then
+	if write_proc_bounded /proc/odi_omci switch_init 2>/var/log/switch_init.err; then
 		crumb "odi_switch init: platform settings and module-load replay done"
 	else
 		SWITCH_INIT_OK=0
