@@ -23,6 +23,16 @@
 # store are network.sh, which parses the XML directly, and confd. So here the
 # file IS the configuration.
 #
+# ODI-ONLY KEYS. SYSLOG_SERVER and NTP_SERVER exist only on this image: the
+# stock lastgood*.xml has never carried them, and this script only edits keys
+# that are already in those files, so a set on them failed ("no such key") and
+# a get printed "GET fail.". They live in a plain KEY=value file on the config
+# partition instead, /var/config/odi.conf (= /etc/config/odi.conf). The stock
+# firmware ignores that file, and every stock key keeps going to the XML
+# exactly as before. Add a name to ODI_KEYS below to add a key; the list is
+# documented in docs/SETTINGS.md. An empty value REMOVES the key, which is how
+# one is cleared. A line that is not KEY=value is left alone and never read.
+#
 # /var/config is jffs2 and read-write. Writes go to a temporary file and are
 # renamed over the target, so a power cut leaves the old file intact rather
 # than a half-written one.
@@ -32,6 +42,8 @@ CS=${CS:-/var/config/lastgood.xml}
 HS=${HS:-/var/config/lastgood_hs.xml}
 DEFAULTS=${DEFAULTS:-/etc/config_default.xml}
 TMPDIR_=${TMPDIR_:-/var/tmp}
+ODI_CONF=${ODI_CONF:-/var/config/odi.conf}
+ODI_KEYS="SYSLOG_SERVER NTP_SERVER"
 
 usage() {
 	echo "usage: flash all {cs|hs}" >&2
@@ -45,6 +57,26 @@ usage() {
 # so ELAN_MAC_ADDR cannot be satisfied by ELAN_MAC_ADDR2.
 value_of() {
 	sed -n "s/.*Name=\"$1\" Value=\"\([^\"]*\)\".*/\1/p" "$2" 2>/dev/null | head -n 1
+}
+
+is_odi_key() {
+	for k_ in $ODI_KEYS; do [ "$k_" = "$1" ] && return 0; done
+	return 1
+}
+
+# The key is a validated name from ODI_KEYS, so it is safe inside the pattern.
+odi_value_of() {
+	sed -n "s/^$1=\(.*\)\$/\1/p" "$ODI_CONF" 2>/dev/null | head -n 1
+}
+
+# The odi keys that hold a value, as XML lines in the shape of the stock ones,
+# so confd (which parses `flash all cs` by that shape) sees them.
+odi_xml() {
+	for k_ in $ODI_KEYS; do
+		v_=$(odi_value_of "$k_")
+		[ -n "$v_" ] && printf '\t\t<Value Name="%s" Value="%s"/>\n' "$k_" "$v_"
+	done
+	return 0
 }
 
 has_key() {
@@ -65,11 +97,25 @@ all)
 		echo "flash: $f is not there -- is the config partition mounted?" >&2
 		exit 1
 	fi
-	cat "$f"
+	if [ "$2" = cs ]; then
+		last=$(tail -n 1 "$f")
+		case "$last" in
+		"</"*) sed '$d' "$f"; odi_xml; printf '%s\n' "$last" ;;
+		*)     cat "$f"; odi_xml ;;
+		esac
+	else
+		cat "$f"
+	fi
 	;;
 
 get)
 	[ $# -eq 2 ] || usage
+	if is_odi_key "$2"; then
+		v=$(odi_value_of "$2")
+		[ -n "$v" ] && { printf '%s=%s\n' "$2" "$v"; exit 0; }
+		echo "GET fail." >&2
+		exit 1
+	fi
 	for f in "$CS" "$HS"; do
 		if has_key "$2" "$f"; then
 			printf '%s=%s\n' "$2" "$(value_of "$2" "$f")"
@@ -94,6 +140,8 @@ set)
 	# escaping them would store something the operator did not type.
 	case "$val" in
 	*[\"\<\&]*) echo "flash: value may not contain a quote, < or &" >&2; exit 1 ;;
+	*"
+"*) echo "flash: value may not contain a newline" >&2; exit 1 ;;
 	esac
 	# It ALSO lands in a sed REPLACEMENT delimited by /, where \ and / are
 	# special: a value carrying / ends the replacement and everything after
@@ -102,6 +150,30 @@ set)
 	# to the rejection above -- it is what makes the byte stored in the file
 	# the byte the operator typed.
 	esc=$(printf '%s' "$val" | sed 's/[\\/]/\\&/g')
+
+	if is_odi_key "$key"; then
+		dir=$(dirname "$ODI_CONF")
+		if [ ! -d "$dir" ]; then
+			echo "flash: $dir is not there -- is the config partition mounted?" >&2
+			exit 1
+		fi
+		# Temp file in the SAME directory, so the rename is one jffs2 rename
+		# and a power cut leaves the old file whole. Other lines are kept
+		# as they are; only this key is replaced (or dropped when empty).
+		tmp="$ODI_CONF.tmp.$$"
+		{
+			grep -v "^$key=" "$ODI_CONF" 2>/dev/null
+			[ -n "$val" ] && printf '%s=%s\n' "$key" "$val"
+			true
+		} > "$tmp" || { echo "flash: could not write $tmp" >&2; rm -f "$tmp"; exit 1; }
+		if ! mv "$tmp" "$ODI_CONF"; then
+			echo "flash: could not install the new $ODI_CONF" >&2
+			rm -f "$tmp"
+			exit 1
+		fi
+		printf '%s=%s\n' "$key" "$(odi_value_of "$key")"
+		exit 0
+	fi
 
 	target=""
 	for f in "$CS" "$HS"; do

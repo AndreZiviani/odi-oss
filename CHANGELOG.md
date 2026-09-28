@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- Fixes `SYSLOG_SERVER` and `NTP_SERVER` never saving from the web UI on a real
+  stick (`did not stick, device holds ''`; `flash get` printed `GET fail.`). Both
+  are keys the stock firmware never had, and `flash` only edited keys already in
+  `lastgood*.xml`. They now live in `/etc/config/odi.conf`, a plain `KEY=value`
+  file written by temp file and rename; `flash set/get`, `flash all cs` and
+  `svc-syslogd.sh` / `svc-ntpd.sh` use it for those names, and an empty value
+  clears the key. Stock keys and the XML are untouched, and the stock image
+  ignores the file. test-qemu now runs the real `flash` against a writable
+  config dir (it used to seed a fixture XML) and asserts a UI save of
+  `SYSLOG_SERVER` reaches `syslogd -R`.
+- Pins odi-ui confd v1.0.8 (was v1.0.7): the Config page can clear
+  `SYSLOG_SERVER` and `NTP_SERVER` (an empty value removes the key).
+
 ## v1.0.7 — 2026-09-28
 
 - Pins odi-ui confd v1.0.7 (was v1.0.6): `SYSLOG_SERVER` and `NTP_SERVER` are

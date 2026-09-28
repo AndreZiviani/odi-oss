@@ -6,17 +6,11 @@
 # svc-metricsd.sh and every other svc-*.sh here.
 [ -f /etc/config/syslogd.off ] && exec /etc/scripts/respawn-off.sh
 [ -x /sbin/syslogd ] || exec /etc/scripts/respawn-off.sh
-
-# The config store read, same sed-on-XML-attribute approach network.sh
-# uses for LAN_IP_ADDR: CS first, then HS (docs/SETTINGS.md, "omcid looks
-# for each key in both files").
+# The store read goes through flash, the one accessor: SYSLOG_SERVER and
+# NTP_SERVER are odi-only keys that flash keeps in /etc/config/odi.conf, not in
+# the stock XML (see flash). `flash get` prints KEY=value; no value, no output.
 config_get() {
-	for f in /var/config/lastgood.xml /var/config/lastgood_hs.xml; do
-		[ -f "$f" ] || continue
-		v=$(sed -n "s/.*Name=\"$1\" Value=\"\([^\"]*\)\".*/\1/p" "$f" 2>/dev/null | head -n 1)
-		[ -n "$v" ] && { printf '%s\n' "$v"; return 0; }
-	done
-	return 1
+	/etc/scripts/flash get "$1" 2>/dev/null | sed 's/^[^=]*=//' | grep .
 }
 
 SERVER=$(config_get SYSLOG_SERVER || true)

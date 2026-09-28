@@ -10,13 +10,11 @@
 [ -f /etc/config/ntpd.off ] && exec /etc/scripts/respawn-off.sh
 [ -x /bin/ntpd ] || exec /etc/scripts/respawn-off.sh
 
+# The store read goes through flash, the one accessor: SYSLOG_SERVER and
+# NTP_SERVER are odi-only keys that flash keeps in /etc/config/odi.conf, not in
+# the stock XML (see flash). `flash get` prints KEY=value; no value, no output.
 config_get() {
-	for f in /var/config/lastgood.xml /var/config/lastgood_hs.xml; do
-		[ -f "$f" ] || continue
-		v=$(sed -n "s/.*Name=\"$1\" Value=\"\([^\"]*\)\".*/\1/p" "$f" 2>/dev/null | head -n 1)
-		[ -n "$v" ] && { printf '%s\n' "$v"; return 0; }
-	done
-	return 1
+	/etc/scripts/flash get "$1" 2>/dev/null | sed 's/^[^=]*=//' | grep .
 }
 
 SERVER=$(config_get NTP_SERVER || true)
