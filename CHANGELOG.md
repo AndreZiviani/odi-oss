@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.0.8 — 2026-09-28
+
 - Fixes `SYSLOG_SERVER` and `NTP_SERVER` never saving from the web UI on a real
   stick (`did not stick, device holds ''`; `flash get` printed `GET fail.`). Both
   are keys the stock firmware never had, and `flash` only edited keys already in
