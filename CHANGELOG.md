@@ -14,7 +14,9 @@ listed here.
   clears the key. Stock keys and the XML are untouched, and the stock image
   ignores the file. test-qemu now runs the real `flash` against a writable
   config dir (it used to seed a fixture XML) and asserts a UI save of
-  `SYSLOG_SERVER` reaches `syslogd -R`. Clearing from the UI needs odi-ui v1.0.8.
+  `SYSLOG_SERVER` reaches `syslogd -R`.
+- Pins odi-ui confd v1.0.8 (was v1.0.7): the Config page can clear
+  `SYSLOG_SERVER` and `NTP_SERVER` (an empty value removes the key).
 
 ## v1.0.7 — 2026-09-28
 
