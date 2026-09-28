@@ -213,8 +213,9 @@ struct getnext_ctx getnext;
 /* How many alarm records the last Get All Alarms promised. Always zero today --
  * nothing here raises an alarm -- but it is what Get All Alarms Next is
  * measured against, so the two cannot drift apart. 13 of the vendor's classes
- * raise alarms. */
-static uint16_t alarm_snapshot;
+ * raise alarms. Not static: snapshot.c persists and restores it across a
+ * respawn, alongside the MIB data sync counter. */
+uint16_t alarm_snapshot;
 
 /* A Get of a big attribute: report the byte length and remember the value.
  *
@@ -529,6 +530,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		send_resp(fd, tid, f, body, 3);
 		mib_data_sync++;
 		apply_entity(c, inst, r, mask, 1);
+		snapshot_save();
 		out_fmt("-> created (%d rows held)\n", (long)mib_count());
 		return;
 	}
@@ -541,8 +543,10 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		body[0] = r ? OMCI_OK : OMCI_ERR_UNKNOWN_ME;
 		send_resp(fd, tid, f, body, 1);
 		mib_data_sync++;
-		if (r)
+		if (r) {
 			apply_entity(c, inst, r, mask, 0);
+			snapshot_save();
+		}
 		out_fmt("-> set mask %04x%s\n", (long)mask,
 			r && r->truncated ? " (row truncated)" : "");
 		return;
@@ -556,6 +560,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		body[0] = OMCI_OK;
 		send_resp(fd, tid, f, body, 1);
 		mib_data_sync++;
+		snapshot_save();
 		out("-> deleted\n");
 		return;
 	}

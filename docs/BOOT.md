@@ -253,6 +253,55 @@ malta kernel, or a dev image with `modules.off`) `omci-respawn-reprovision.sh`
 is a no-op: there are no PON verbs to drive, so it exits at once rather
 than waiting out its own timeouts for nothing.
 
+## Resume without re-registration
+
+Re-provisioning above works, but costs a re-range: the ONU visibly drops
+to O1 and climbs back to O5, an outage of ten to eighteen seconds measured
+on claro. Since v1.0.5 `omcid` keeps enough of its own state on tmpfs
+that most respawns need none of that: it resumes answering the OLT from
+exactly where the killed process left off, with no outage at all, because
+the switch datapath was never touched to begin with (see
+`kb/rtl9601-omci-reapply-without-reboot.md` -- the hardware forwards
+whether or not anything is alive on the control plane).
+
+After every OMCI message that changes the MIB (Create, Set, Delete) `omcid`
+writes `/var/run/omcid-mib.snap`: every managed entity it holds, the MIB
+data sync counter, the (always zero today) alarm sequence number, and the
+bookkeeping that maps a managed entity to what is actually programmed in
+the switch -- the GEM flow ids, the T-CONT map, the broadcast flow, the
+service (bridge connection) table. Written atomically, temp file then
+rename, same as `cfgstore.c`'s own config writes, with a version header and
+a CRC32 -- a torn write is never mistaken for a valid snapshot. A MIB reset
+(from the OLT, or the CLI) deletes it at once: a MIB the OLT just discarded
+must never be resumed into.
+
+At startup, before anything that could block, a fresh `omcid` asks the
+driver for the ONU state (the same call `onu_state_sample()` polls once a
+second, command 13). If it is O5 -- the OLT is holding this ONU active, so
+whatever provisioned it is still true -- and the snapshot on disk names the
+same device (device id and serial, both read at startup regardless), it is
+loaded: every array `omcid` keeps is repopulated by a plain memory copy,
+nothing here calls `apply_entity()` or any driver function, so a resume
+issues not one switch-programming driver call. Anything else -- no
+snapshot, a mismatched device, a state below O5, or a snapshot whose CRC or
+version does not check out -- falls back to the ordinary re-registration
+path unchanged.
+
+`omcid` writes its decision to `/var/run/omcid-resume-decision`
+(`"resumed"` or `"reprovision"`) before doing anything else that could
+fail or block, so `omci-respawn-reprovision.sh` -- backgrounded by
+`svc-omcid.sh` the same moment `omcid` starts -- only has to wait on that
+file briefly (`DECISION_WAIT`, 5 s default), not for full registration. A
+`"resumed"` decision skips the deactivate/reactivate dance entirely and
+exits; anything else (including no file at all inside the wait, the safe
+default) runs the re-provisioning this section used to be the whole story
+of.
+
+Test-only: `-s state` (main.c) uses a given ONU state for the resume
+decision instead of asking the driver, the same reason `-c` takes a
+capability blob -- a harness with no line side has no driver to answer
+command 13 either (`src/omci/resume-test.sh`).
+
 ## The development aids: rcS.dev
 
 `/etc/init.d/rcS.dev` ships in the image and is sourced by rcS. It
