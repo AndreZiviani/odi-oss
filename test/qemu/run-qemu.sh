@@ -14,11 +14,12 @@
 # all -- a stock kernel stands in for the RTL9602C board qemu cannot
 # emulate. So there is no /proc/odi_wdt, no /proc/odi_init, no switch, no
 # GPON, no real omcid (omci_start() in rcS skips it, exactly as it does on
-# any kernel without /proc/odi_omci) -- and no watchdog reset path: the
-# health-kicker scenario below can only confirm the kicker WITHHOLDS a
-# kick under the conditions that should trigger a reset, not that the
-# board actually resets, which needs the real odi_wdt hardware model this
-# harness does not have.
+# any kernel without /proc/odi_omci) -- and no watchdog reset path at all:
+# none of the three odi_wdt rules (boot confirmation, per-client ping
+# deadlines, the memory floor; docs/SETTINGS.md, "Watchdog rules") can be
+# exercised end to end here, only that rcS and omcid degrade harmlessly
+# without /proc/odi_wdt. That needs the real hardware or the host-side
+# coverage of the rules themselves (test/odi_wdt_test.c).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BUILD=${1:-$ROOT/build/qemu-initramfs}
@@ -142,8 +143,15 @@ for svc in dropbear confd metricsd; do
 	echo "  $svc: respawned (pid $pid -> $newpid)"
 done
 
-say "scenario: health kicker withholds its kick under memory pressure (no odi_wdt in qemu -- see the file header)"
-sshx 'grep -q health-kicker /var/log/services.log /var/log/*.log 2>/dev/null; echo checked=$?' || true
-echo "  not exercised end to end: qemu has no /proc/odi_wdt (odi_wdt.c gates itself off entirely without it)"
+say "scenario: rcS registration of the omcid watchdog client is a no-op without /proc/odi_wdt"
+# v1.0.3: no more userland health-kicker to withhold a kick -- odi_wdt owns
+# every rule itself (docs/SETTINGS.md, "Watchdog rules"). Nothing here to
+# exercise end to end: qemu has no /proc/odi_wdt, so rcS's
+# "echo omcid 60 > /proc/odi_wdt/register" is skipped ([ -w ... ] false),
+# and omcid's own wdt_ping() (src/omci/respond/main.c) opens a path that
+# does not exist and silently no-ops -- both already implied by every
+# scenario above having booted and stayed reachable. This just confirms
+# rcS did not abort trying.
+sshx 'test -e /proc/odi_wdt && echo present || echo absent'
 
 say "all scenarios passed"

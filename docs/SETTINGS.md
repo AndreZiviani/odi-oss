@@ -250,30 +250,62 @@ table: where each file is read, its default, and which ones are development
 aids, together with the kernel parameters, build variables and
 `/proc` control files.
 
-## Resilience (v1.0.2)
+## Watchdog rules
 
-Not config-partition settings -- there is no UI or file toggle for any of
-these, they are fixed at boot -- but they answer the same question this
-document answers for everything else: what does this image actually do,
-and what does applying it cost. Background: a 20 MB `scp` into `/tmp` on
-ISP1 (2026-09-27) exhausted RAM (`/tmp` was ramfs, unbounded and
-unreclaimable), the OOM killer took dropbear, confd and omcid, and none of
-them restarted -- the stick stayed at O5 (the hardware datapath keeps
-forwarding on its own) but was unmanageable until a power cycle.
+**The kernel (`odi_wdt`) is the only owner of the hardware watchdog.** It
+stops kicking -- so the board resets -- when any one of three independent
+rules fails. There is no separate userland process guessing at any of this
+from `/proc`: v1.0.2 shipped one (a "health kicker") and withdrew it the
+same day (`CHANGELOG.md`, v1.0.2) after it withheld its kick correctly on
+claro but the kernel had no enforcement of its own, so the board never
+reset and the trial hung for 15 minutes until someone power-cycled it. In
+this design every rule is judged, and every reset is forced, by the
+kernel itself.
+
+| rule | deadline / floor | armed by | source |
+|---|---|---|---|
+| boot confirmation | 120 s of uptime (`ODI_WDT_USERLAND_DEADLINE_S`) | always, from boot | rcS writes `1` to `/proc/odi_wdt/userland_ok` once userland is up (unchanged from v1.0.1); `/etc/config/confirm-arp` (development) makes that wait for an ARP reply from the `.2` address first |
+| per-client ping deadline | one per registered client, e.g. 60 s for omcid (`ODI_WDT_OMCID_DEADLINE_S`) | the client's own FIRST ping | rcS registers each required client once, by name and deadline, with `echo "<name> <deadline_s>" > /proc/odi_wdt/register` (idempotent: re-registering just updates the deadline). The client itself pings its own deadline from its own main loop with `echo "<name>" > /proc/odi_wdt/ping` -- omcid does this every 15 s (`src/omci/respond/main.c`, `wdt_ping()`), a quarter of its 60 s deadline. A registered client that never pings (`modules.off`, or a kernel too old to have `/proc/odi_wdt/register`) is never checked -- it is simply unarmed, not a fault |
+| memory floor | `MemAvailable` below 2048 KB (`ODI_WDT_MEM_FLOOR_KB`) for 3 consecutive 5 s checks (`ODI_WDT_MEM_FLOOR_CONSEC`) | always, from boot | sampled by the kernel itself every tick (`si_mem_available()`, `kernel/extra/drivers/net/ethernet/odi/odi_wdt.c`) -- no userland reader to lose along with the memory it would be reporting on. Several consecutive samples, not one, so a single allocation spike does not reset a box that is otherwise fine. This is the same "OOM took the box and nothing came back" case a 20 MB `scp` into an unbounded `/tmp` produced on ISP1 (2026-09-27), now caught kernel-side instead of by a process that OOM can also kill |
+
+Debugging: `cat /proc/odi_wdt/clients` shows one line per registered
+client -- name, deadline, whether the first ping has armed it, and how
+long ago the last ping landed. Every reset logs which rule fired,
+ramlog-visible, before it happens (`odi_wdt_deadline_timer_fn()`):
+`"userland did not confirm within 120 s"`, `"client omcid missed its 60 s
+deadline"`, or `"MemAvailable ... below the 2048 KB floor for 3
+consecutive checks"`.
+
+Registering a new client (say, dropbear or confd, neither wired up today)
+means two things, both required: rcS gets an
+`echo "name deadline_s" > /proc/odi_wdt/register` line at boot, and the
+client's own main loop gets a periodic
+`echo name > /proc/odi_wdt/ping` well inside that deadline. Neither alone
+does anything -- a registered-but-never-pinged client is inert by design
+(see the table above), and a ping to a name nobody registered is refused.
+
+## Resilience
+
+Background, unchanged from v1.0.2: a 20 MB `scp` into `/tmp` on ISP1
+(2026-09-27) exhausted RAM (`/tmp` was ramfs, unbounded and unreclaimable),
+the OOM killer took dropbear, confd and omcid, and none of them
+restarted -- the stick stayed at O5 (the hardware datapath keeps
+forwarding on its own) but was unmanageable until a power cycle. Not
+config-partition settings -- there is no UI or file toggle for any of
+these, they are fixed at boot.
 
 | what | value | why |
 |---|---|---|
 | `/tmp` (`/var/tmp`) size cap | 8 MB tmpfs | fits a firmware upload (`fwu_starter.sh` stages the tarball there, about 2.6 MB, plus its unpacked squashfs/uImage) and an scp of a few MB with room to spare; past it, a write gets `ENOSPC`, not a system-wide OOM |
 | `/var` (log/run/lock/config fallback) size cap | 6 MB tmpfs | `/var/log` is separately trimmed at 256 KB past a 128 KB floor already (rcS); this is the outer bound if that trim ever falls behind |
 | `oom_score_adj` | omcid, dropbear: `-1000` (never killed while anything else can be); confd: `-500`; metricsd: `0`, the kernel default | omcid and dropbear are what keeps the ONU provisioned and the box reachable; confd is a convenience next after them; metricsd is the one daemon whose loss costs neither -- first in line if the killer has to take something |
-| respawn | omcid, dropbear, confd, metricsd: restarted automatically if they die, rate-limited to 5 restarts per 60 s window, then the supervisor gives up and logs why (`supervise()`, `rootfs/skeleton/etc/scripts/supervise.sh`) | a daemon that cannot stay up for a minute is a problem for the health kicker/watchdog below to escalate, not something a restart loop should spin on forever |
-| health kicker period | 30 s (`ODI_WDT_HEALTH_PERIOD_S`, `kernel/extra/drivers/net/ethernet/odi/odi_wdt.h`) | a supervised process (`rootfs/skeleton/etc/scripts/health-kicker.sh`) writes `/proc/odi_wdt/health_kick` every 30 s, but only while omcid is running (or intentionally off, `modules.off`) and `MemAvailable` is at or above the floor below. A kick that arrives late by more than the period resets the board through the watchdog -- independent of, and in addition to, the one-shot boot confirmation `/proc/odi_wdt/userland_ok` already gave |
-| health kicker memory floor | 2048 KB `MemAvailable` (`HEALTH_MEM_FLOOR_KB`) | below this the box is judged to be in the same state the 2026-09-27 OOM left it in (0.86 MB free) -- reachable in principle but not usably so, and worth resetting out of automatically rather than waiting for someone to notice |
+| respawn | omcid, dropbear, confd, metricsd: restarted automatically if they die, rate-limited to 5 restarts per 60 s window, then the supervisor gives up and logs why (`supervise()`, `rootfs/skeleton/etc/scripts/supervise.sh`) | a daemon that cannot stay up for a minute is a problem for the watchdog rules above to escalate, not something a restart loop should spin on forever |
 | `vm.min_free_kbytes` | 1536 (`rcS`, up from the kernel's own default of roughly 128 KB on a box this size) | keeps a slightly larger page-allocator reserve free under pressure, so the OOM killer and a starved `oom_score_adj -1000` daemon get a better chance to make forward progress instead of every allocator racing for the same last few pages |
 
-`make test-qemu` (`docs/HACKING.md`) exercises all of the above except the
-watchdog reset itself, which needs `/proc/odi_wdt` -- real hardware, not the
-stock kernel the harness boots.
+`make test-qemu` (`docs/HACKING.md`) exercises everything above except the
+watchdog rules themselves, which need `/proc/odi_wdt` -- real hardware,
+not the stock kernel the harness boots; those are host-tested instead
+(`test/odi_wdt_test.c`, against a fake clock).
 
 ## Not verified yet
 

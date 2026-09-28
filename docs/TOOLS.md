@@ -68,11 +68,11 @@ everything slow. In order, rcS:
    that the board resets at 120 s of uptime. The network is not a
    condition, unless `/etc/config/confirm-arp` exists (development: then
    only after an ARP reply from the `.2` of the `br0` subnet). Right
-   after, the health kicker starts (`/etc/scripts/health-kicker.sh`, also
-   supervised): a periodic confirmation, independent of the one above,
-   that resets the board later in the boot if userland health (omcid
-   alive, `MemAvailable` above a floor) stops being reported --
-   `docs/SETTINGS.md` ("Resilience");
+   after, rcS registers omcid as a watchdog client
+   (`/proc/odi_wdt/register`, 60 s deadline): omcid pings its own deadline
+   from its own main loop once it starts, and the kernel -- the only owner
+   of the hardware watchdog -- stops kicking if an armed client's deadline
+   is missed, `docs/SETTINGS.md` ("Watchdog rules");
 7. drives the optics, the `optics` verb of `/proc/odi_init` (`PIN_GPIO_SELECT`, laser TX-enable on GPIO 13);
 8. runs the PON steps: `i2c 1`, `i2cen 1`, `gpon`, `rxsd`, `gpondrv`,
    `gpondev`, then the switch init (the platform settings and module-load
@@ -473,7 +473,6 @@ need a reboot.
 | `/etc/scripts/network.sh addr [-n]` | only the addresses: the primary and the second one (`br0:2`), live; `-n` says what it would change | yes; this is `apply.sh network` |
 | `/etc/scripts/mount-config.sh [name] [dir]` | find mtd `config` by name, mount it jffs2 | only if it is not mounted |
 | `/etc/scripts/supervise.sh` | not run directly: sourced by `rcS`/`services`, which backgrounds a daemon, sets its `oom_score_adj`, and restarts it (rate-limited) if it dies | n/a |
-| `/etc/scripts/health-kicker.sh` | periodic confirmation to `/proc/odi_wdt/health_kick` while omcid is alive and `MemAvailable` is above its floor; started by `rcS`, supervised | yes, but it already loops forever on its own |
 
 ## Kernel control files
 
@@ -488,7 +487,9 @@ drivers behind them.
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
 | `/proc/odi_wdt/watchdog_flag` | -- | `1`: keep kicking the hardware watchdog |
-| `/proc/odi_wdt/health_kick` | period, armed, last kick, uptime | any value: periodic confirmation (`health-kicker.sh`, `docs/SETTINGS.md`); a kick arriving later than the period resets the board, independent of `userland_ok` above and active for as long as the boot runs, not just at boot |
+| `/proc/odi_wdt/register` | -- | `"<name> <deadline_s>"`, e.g. `omcid 60`: register (or update) a watchdog client; idempotent, does not arm anything (`docs/SETTINGS.md`, "Watchdog rules") |
+| `/proc/odi_wdt/ping` | -- | `"<name>"`: a registered client's own ping; arms its deadline on the first call, refused (`-EINVAL`) for an unregistered name |
+| `/proc/odi_wdt/clients` | one line per registered client: name, deadline, armed, last-ping age | -- |
 | `/proc/odi_ramlog_prev` | the previous boot's DRAM ramlog, decoded: this boot's counter and slot, the previous boot's counter, slot, build id and last early crumb, then its first 4016 bytes and its last 4080 (root only) | -- |
 | `/proc/odi_ramlog_prev_raw` | the same two pages as 8192 raw bytes, page A then page B, for `ramlog-read.sh`-style decoding off the stick (root only) | -- |
 

@@ -5,6 +5,64 @@ listed here.
 
 ## Unreleased
 
+## v1.0.3 — 2026-09-28
+
+**v1.0.2 is withdrawn (marked pre-release) and must not be used.** Trialled
+on claro (2026-09-27), it hung for 15 minutes with no ARP or ping despite
+the SFP link staying up, and did not self-revert: the ramlog showed the
+new userland health-kicker withholding its kick
+(`health-kicker: withholding kick (omcid_ok=0 mem_ok=1)`) every 30 s while
+`odi_wdt` kept kicking the hardware regardless
+(`odi_wdt: alive at 799 s ... userland_ok=1`), because `userland_ok` is a
+one-shot flag latched at boot -- the kernel never enforced the health
+kicker's periodic confirmation at all. v1.0.1's plain 120 s boot-only
+deadline was, ironically, safer: it at least reset a boot that never
+confirmed, which is more than v1.0.2's unenforced addition did. The
+root cause of `omcid_ok=0` itself was not fully recoverable from that
+boot: the DRAM ramlog is a two-page ring buffer and only the later page
+survived, so the rcS/PON-step portion of that boot is gone. The redesign
+below removes the userland health-kicker and the failure mode it
+depended on entirely, rather than patching around one unconfirmed cause.
+
+**Watchdog redesign: the kernel (`odi_wdt`) is now the only owner of the
+hardware watchdog** (`docs/SETTINGS.md`, "Watchdog rules"; `docs/BOOT.md`).
+Three independent rules, judged and enforced kernel-side, any one of
+which stops the kicker:
+
+- the one-shot boot confirmation, unchanged from v1.0.1
+  (`/proc/odi_wdt/userland_ok`, 120 s, the `confirm-arp` dev opt-in kept);
+- a per-client ping deadline: rcS registers a client by name and deadline
+  (`/proc/odi_wdt/register`, e.g. `omcid 60`), the client pings its own
+  deadline from its own main loop (`/proc/odi_wdt/ping`) -- omcid does
+  this every 15 s (`src/omci/respond/main.c`) -- and the kernel resets the
+  board if an armed client's deadline is missed. `/proc/odi_wdt/clients`
+  shows each client's state (armed, last-ping age) for debugging;
+- a kernel-side memory floor: `MemAvailable` (`si_mem_available()`, no
+  userland reader to lose along with the memory it reports on) held below
+  2048 KB for 3 consecutive 5 s checks.
+
+The v1.0.2 userland health-kicker (`health-kicker.sh`,
+`/proc/odi_wdt/health_kick`) is removed entirely. Every reset now logs
+which rule fired, ramlog-visible, before it happens. Host-tested against
+a fake clock (`test/odi_wdt_test.c`); the reset itself needs real
+hardware to verify (`/proc/odi_wdt`, not exercised by `make test-qemu`).
+
+**Every other v1.0.2 change was reviewed and kept**, unless noted:
+size-capped `/tmp`/`/var` tmpfs, `oom_score_adj` biasing, daemon respawn
+via `supervise()`, `vm.min_free_kbytes`, `make test-qemu` (the qemu
+full-system harness, its health-kicker scenario replaced with a check
+that rcS's client registration degrades harmlessly without
+`/proc/odi_wdt`), and the `cpu-pause` PAUSE-watermark fix (verified on
+hardware, ISP1, 2026-09-27).
+
+**Fixed `make test-rcs`'s golden traces**, stale since v1.0.2 (d7839bd
+added the `/var`/`/tmp` tmpfs mounts and wrapped omcid in `supervise()`
+but never regenerated `test/fixtures/rcs-trace-*.txt`) -- `test-rcs` had
+been failing since v1.0.2 and nobody had run it, since it needs
+Docker+ptrace and is not part of `make test` or CI. Regenerated and
+reviewed by hand: the only differences are the tmpfs mounts and omcid's
+supervise-restart loop against this harness's stub binary.
+
 ## v1.0.2 — 2026-09-27
 
 **Resilience.** A 20 MB `scp` into `/tmp` on ISP1 exhausted RAM (`/tmp` was

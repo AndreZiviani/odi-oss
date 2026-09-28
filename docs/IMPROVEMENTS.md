@@ -151,16 +151,22 @@ A 20 MB `scp` into `/tmp` exhausted RAM on a running stick (`/tmp` was
 ramfs, unbounded and unreclaimable): the OOM killer took dropbear, confd
 and omcid, none of them restarted, and the box stayed unmanageable until a
 power cycle, even though the hardware datapath kept forwarding on its own.
-Fixed four ways, together (`docs/SETTINGS.md`, "Resilience"): `/tmp` and
-`/var` are size-capped tmpfs instead of unbounded ramfs, so a full `/tmp`
-gives `ENOSPC` rather than taking the box down with it; `oom_score_adj`
-biases the OOM killer away from omcid, dropbear and confd; those four
-critical daemons (omcid, dropbear, confd, metricsd) now restart
-automatically, rate-limited, if they die (`supervise()`); and a periodic
-health kicker resets the board through the watchdog if userland health
-stops being reported later in the boot, not only if it never starts in the
-first place — the one-shot `/proc/odi_wdt/userland_ok` confirmation this
-image already had only ever covered the second case.
+Fixed several ways, together (`docs/SETTINGS.md`, "Resilience" and
+"Watchdog rules"): `/tmp` and `/var` are size-capped tmpfs instead of
+unbounded ramfs, so a full `/tmp` gives `ENOSPC` rather than taking the box
+down with it; `oom_score_adj` biases the OOM killer away from omcid,
+dropbear and confd; those four critical daemons (omcid, dropbear, confd,
+metricsd) restart automatically, rate-limited, if they die (`supervise()`);
+and the kernel's own odi_wdt watchdog -- the only owner of the hardware
+watchdog, with no separate userland process guessing at anything from
+`/proc` -- stops kicking (so the board resets) if omcid misses its own
+ping deadline (60 s, `/proc/odi_wdt/ping`) or if `MemAvailable` stays below
+a floor for several consecutive checks, in addition to the one-shot boot
+confirmation (`/proc/odi_wdt/userland_ok`) this image already had. A first
+version of the periodic check (v1.0.2, a separate userland health-kicker
+process) shipped briefly and was withdrawn: it could withhold its kick
+without the kernel enforcing the deadline, so a hang it correctly detected
+still did not reset the board (`CHANGELOG.md`, v1.0.2).
 
 ## Build and verification
 

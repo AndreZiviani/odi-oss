@@ -45,6 +45,11 @@ kmsg "start"
 # more expensive.
 VAR_TMPFS_SIZE=${VAR_TMPFS_SIZE:-6m}
 VAR_TMP_TMPFS_SIZE=${VAR_TMP_TMPFS_SIZE:-8m}
+# omcid own ping deadline to odi_wdt (docs/SETTINGS.md, "Watchdog rules");
+# matches ODI_WDT_OMCID_DEADLINE_S in odi_wdt.h, kept here too since rcS is
+# what actually writes it and a kernel/rootfs pair should never disagree
+# silently.
+ODI_WDT_OMCID_DEADLINE_S=${ODI_WDT_OMCID_DEADLINE_S:-60}
 /bin/mount -t tmpfs -o "size=$VAR_TMPFS_SIZE,mode=1777" tmpfs /var || echo "rcS: /var did not mount" >&2
 for d in tmp log run lock config; do
 	mkdir -p "/var/$d" || echo "rcS: /var/$d could not be created" >&2
@@ -162,15 +167,19 @@ if [ -w "$WDOK" ] && dev_confirm_ok; then
 	crumb "userland up, watchdog confirmed"
 fi
 
-# ---- the health kicker: a periodic confirmation, independent of the
-# one-shot boot confirmation above, that resets the board if userland
-# health stops being reported later in the boot (docs/SETTINGS.md). Off
-# entirely if /proc/odi_wdt/health_kick does not exist (odi_wdt.c),
-# supervised like every other daemon so a health-kicker crash restarts the
-# kicker itself rather than silently going quiet.
-if [ -x /etc/scripts/health-kicker.sh ]; then
-	supervise health-kicker 0 /etc/scripts/health-kicker.sh
-	crumb "health kicker started"
+# ---- register the watchdog clients. The kernel (odi_wdt), not a userland
+# process, judges every deadline from here on (docs/SETTINGS.md, "Watchdog
+# rules"): a client pings its OWN deadline from its OWN main loop (omcid
+# does, in src/omci/respond/main.c), and the kernel stops kicking the
+# hardware watchdog if an armed client misses its deadline. Registering
+# only sets the deadline; it does not arm anything, so a stick whose
+# kernel predates /proc/odi_wdt/register (none we ship, but a stray old
+# image) just sees the write fail silently and behaves as if no client
+# were registered at all.
+if [ -w /proc/odi_wdt/register ]; then
+	echo "omcid $ODI_WDT_OMCID_DEADLINE_S" > /proc/odi_wdt/register 2>/dev/null || \
+		echo "rcS: could not register omcid with odi_wdt" >&2
+	crumb "odi_wdt: omcid registered, deadline ${ODI_WDT_OMCID_DEADLINE_S}s"
 fi
 
 # ---- the PON steps.
