@@ -92,6 +92,33 @@ check "get sn takes the vendor queue and its shape" "$got" "1"
 got=$($Q cli/build/omcli get devmode 2>&1)
 check "get devmode answers as the vendor does" "$got" "DevMode: bridge"
 
+# Entities the ONU creates for itself (omci_autonomous[]) have no store row
+# until the OLT sets one of their attributes, and most never are. The dump
+# used to walk the rows alone, so `mib get 7` (SWImage) and `mib get 262`
+# (T-CONT) answered "0 rows" on a provisioned stick while a MIB upload listed
+# every one of them. Nothing here has set either class.
+got=$($Q cli/build/omcli mib get 7 --vendor 2>&1 | tail -1)
+check "an autonomous class is dumped: both SWImage instances" "$got" "2 rows"
+got=$($Q cli/build/omcli mib get 7 --vendor 2>&1 | sed -n '1p')
+check "in the same block as an OLT-created entity" "$got" "7 SWImage 0"
+# attr_value, not the zeroed row: instance 0 is the active image.
+got=$($Q cli/build/omcli mib get 7 0 --vendor 2>&1 | grep '^    Active ')
+check "with the values a Get returns, not zeros" "$got" "    Active                   01"
+got=$($Q cli/build/omcli mib 262 2>&1 | grep -c '^262 Tcont ')
+check "omcli mib lists every autonomous T-CONT" "$got" "16"
+got=$($Q cli/build/omcli mib getattr 7 0 3 2>&1)
+check "mib getattr reads an autonomous entity" "$got" "class 7 entity 0 attr 3 = 01"
+# One shape for every outcome: a vendor-rendered class with instances, one
+# with none, and a name that is no class all end with the row count.
+got=$($Q cli/build/omcli mib get 256 --vendor 2>&1 | tail -1)
+check "a vendor-rendered autonomous class (ONU-G) ends with its count" "$got" "1 row"
+got=$($Q cli/build/omcli mib get 171 --vendor 2>&1)
+check "a vendor-rendered class with no instance says 0 rows" "$got" "0 rows"
+got=$($Q cli/build/omcli mib get NoSuchTable --vendor 2>&1)
+check "a name that is no class is refused, not read as every class" "$got" \
+      "no managed entity called NoSuchTable
+0 rows"
+
 # The rest needs the capability blob (port map, flow and T-CONT counts), so
 # restart with one captured from a real stick.
 kill %1 2>/dev/null
@@ -472,7 +499,7 @@ DscpToPbitMapping:
 	0x000000
 	0x000000
 ================================='
-got=$($Q cli/build/omcli mib get 171 --vendor 2>&1 | sed -n '4,38p')
+got=$($Q cli/build/omcli mib get 171 --vendor 2>&1 | sed -n '4,37p')
 check "class 171 matches the captured dump byte for byte" "$got" "$want"
 
 # The same table in words, in OUR dump only; the vendor dump above stays byte

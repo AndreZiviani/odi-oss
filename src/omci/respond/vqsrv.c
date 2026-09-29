@@ -168,22 +168,28 @@ static void vq_dispatch(void)
 		vq_reply(id, (uint32_t)onu_o5_seconds(), 0, 0, 0);
 		return;
 	case 33: {                               /* mib getattr */
-		struct mib_row *r = mib_find((uint16_t)cls, ent);
 		const struct omci_class *c = find_class((uint16_t)cls);
 		char v[48];
 		int k = 0;
 
-		if (r && c && arg && arg < c->nattr) {
+		/* Any entity this ONU holds, autonomous ones included, with
+		 * the value a Get returns (attr_value), not only the rows the
+		 * OLT created -- the same rule as mib_dump(). */
+		if (c && (mib_find((uint16_t)cls, ent) ||
+			  instance_is_autonomous((uint16_t)cls, ent)) &&
+		    arg && arg < c->nattr && arg <= 16) {
+			uint8_t val[MIB_ROW_MAX];
 			uint16_t w = attr_width(c, (unsigned)arg);
-			int off = attr_offset(c, (unsigned)arg);
 
-			if (off + (int)w > MIB_ROW_MAX)
-				w = 0;           /* would read into the next row */
-			for (uint16_t b = 0; b < w && off >= 0 && k < 40; b++) {
+			if (w > MIB_ROW_MAX)
+				w = 0;
+			if (w)
+				attr_value(c, ent, (unsigned)arg, val);
+			for (uint16_t b = 0; b < w && k < 40; b++) {
 				static const char hex[] = "0123456789abcdef";
 
-				v[k++] = hex[(r->data[off + b] >> 4) & 15];
-				v[k++] = hex[r->data[off + b] & 15];
+				v[k++] = hex[(val[b] >> 4) & 15];
+				v[k++] = hex[val[b] & 15];
 			}
 		}
 		v[k] = 0;
@@ -293,7 +299,6 @@ static void vq_dispatch(void)
 	case 29: {                               /* mib get */
 		const char *name = (const char *)vreq.p + OMCI_P_NAME;
 		uint32_t want = 0;
-		int n = 0;
 
 		if (name[0]) {
 			for (const char *p = name; *p; p++)
@@ -305,45 +310,20 @@ static void vq_dispatch(void)
 						want = omci_classes[i].classId;
 						break;
 					}
-		}
-		/* The vendor's format, for the classes that have a renderer.
-		 * Scripts on the stick parse this output by key, so a class
-		 * something parses has to come out the way it expects; the
-		 * rest fall back to our own dump, which nothing parses. */
-		{
-			uint16_t banner = 0;
-			int vendored = 0;
-
-			for (int i = 0; i < MIB_ROWS; i++) {
-				const struct omci_class *c;
-
-				if (!mib[i].used)
-					continue;
-				if (want && mib[i].classId != want)
-					continue;
-				if (arg != 0xffffffffu
-				    && mib[i].inst != (uint16_t)arg)
-					continue;
-				c = find_class(mib[i].classId);
-				if (c && vendor_row_exists(c)) {
-					if (banner != mib[i].classId) {
-						v_banner(c);
-						banner = mib[i].classId;
-					}
-					vendor_row(&mib[i], c);
-					vendored = 1;
-				} else {
-					cli_row(&mib[i]);
-				}
-				n++;
+			/* A name that is no class used to leave `want` at
+			 * zero, and zero is "every class": a typo dumped the
+			 * whole MIB. "0" itself still means every class. */
+			if (!want && !(name[0] == '0' && !name[1])) {
+				out_fmt("no managed entity called %s\n", name);
+				out("0 rows\n");
+				break;
 			}
-			/* The vendor prints no row count. A script that reads
-			 * to end of file does not care, but one that reads a
-			 * fixed number of lines would. */
-			if (!vendored)
-				out_fmt("%d row%s\n", (long)n,
-					n == 1 ? "" : "s");
 		}
+		/* The vendor's format for the classes that have a renderer
+		 * (scripts on the stick parse those by key), our own dump for
+		 * the rest, over every entity -- autonomous ones included --
+		 * and always closed by the row count. See mib_dump(). */
+		mib_dump((uint16_t)want, arg != 0xffffffffu, (uint16_t)arg, 1);
 		break;
 	}
 	case 35:                                 /* dump qmap */

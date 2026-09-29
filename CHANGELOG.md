@@ -51,6 +51,22 @@ listed here.
   after checking the trial (`docs/FLASHING.md`, "Committing"). Host-tested
   against a stub nv (`test/slot_state_test.sh`); test-qemu checks the file
   and the login banner under the real busybox and dropbear.
+- Fixes `omcicli mib get <class>` answering `0 rows` for every entity the
+  ONU creates for itself (ONT data, SWImage, ONT2-G, the T-CONTs, ANI-G, the
+  traffic schedulers, ...), found on ISP1: the dump walked only the store
+  rows, which exist for an autonomous entity only once the OLT sets one of
+  its attributes, while a MIB upload listed all 301. So the web UI showed
+  an empty software version and no T-CONTs. `omcicli mib get`, `omcli mib`
+  and `omcicli mib getattr` now cover every entity, autonomous and
+  OLT-created, sorted by class and instance, with the values a Get returns
+  (what the OLT wrote, else the built-in answer), not the zeroes of an
+  unwritten row. Every dump now has one shape: the vendor-rendered classes
+  (84, 131, 171, 256) print their banner and blocks as before, every other
+  class prints omcid's own block, and every answer, empty or not, ends with
+  one `N rows` line (the vendor-rendered ones had none, so an empty answer
+  printed nothing at all). A name that is no class (`mib get Foo`) is
+  refused instead of dumping the whole MIB. test-omci covers an autonomous
+  class, the vendor-rendered and the empty shapes, and `getattr`.
 
 ## v1.0.8 — 2026-09-28
 

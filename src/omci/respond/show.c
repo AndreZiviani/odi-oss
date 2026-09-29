@@ -331,7 +331,7 @@ uint32_t cli_mib(void)
 {
 	const char *sel = cli_arg(1);
 	uint32_t cls = 0, inst = 0;
-	int want_inst = cli_num(2, &inst), n = 0;
+	int want_inst = cli_num(2, &inst);
 
 	/* A selector is a class id, a table name, or "all". Taking a name and
 	 * quietly ignoring it -- which is what this did first -- turns
@@ -348,18 +348,57 @@ uint32_t cli_mib(void)
 			return OMCLI_ENOCMD;
 		}
 	}
-	for (int i = 0; i < MIB_ROWS; i++) {
-		if (!mib[i].used)
+	mib_dump((uint16_t)cls, want_inst, (uint16_t)inst, 0);
+	return OMCLI_OK;
+}
+
+/* Both MIB dumps, ours and the vendor-shaped one, over the same entities:
+ * every autonomous one and every one the OLT created (mib_entities()), each
+ * with the values a Get would return (mib_view()), not the raw row.
+ *
+ * One shape for every class and every outcome. A class with a vendor
+ * renderer prints its banner once and one block per instance; any other
+ * class prints our own block; and every dump, empty or not, vendor-shaped
+ * or not, ends with one "N rows" line. The vendor printed no count for its
+ * rendered classes, which left an empty answer and a missing class looking
+ * the same as a truncated one; the scripts that parse this output match on
+ * the key at the start of a line, and "N rows" has no key. */
+int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor)
+{
+	const struct mib_ent *e;
+	int count = mib_entities(cls, want_inst, inst, &e), n = 0;
+	uint16_t banner = 0;
+	int bannered = 0;
+
+	for (int i = 0; i < count; i++) {
+		const struct omci_class *c = find_class(e[i].cls);
+		const struct mib_row *v;
+
+		if (!c) {
+			/* No model: nothing to render beyond what was stored. */
+			const struct mib_row *r = mib_find(e[i].cls, e[i].inst);
+
+			if (r) {
+				cli_row(r);
+				n++;
+			}
 			continue;
-		if (cls && mib[i].classId != cls)
-			continue;
-		if (want_inst && mib[i].inst != inst)
-			continue;
-		cli_row(&mib[i]);
+		}
+		v = mib_view(c, e[i].inst);
+		if (vendor && vendor_row_exists(c)) {
+			if (!bannered || banner != c->classId) {
+				v_banner(c);
+				banner = c->classId;
+				bannered = 1;
+			}
+			vendor_row(v, c);
+		} else {
+			cli_row(v);
+		}
 		n++;
 	}
 	out_fmt("%d row%s\n", (long)n, n == 1 ? "" : "s");
-	return OMCLI_OK;
+	return n;
 }
 
 uint32_t cli_flows(void)

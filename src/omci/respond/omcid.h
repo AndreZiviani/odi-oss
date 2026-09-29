@@ -211,6 +211,17 @@ struct mib_row *mib_add(uint16_t cls, uint16_t inst);
 void mib_del(uint16_t cls, uint16_t inst);
 int mib_count(void);
 struct mib_row *mib_row_at(int i);
+/* Every entity, autonomous and OLT-created, and one entity's effective
+ * values: see mibstore.c. The CLI dumps go through these, never the rows
+ * alone. */
+struct mib_ent { uint16_t cls, inst; };
+#define MIB_ENTS_MAX 512                 /* 301 autonomous + MIB_ROWS */
+int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
+		 const struct mib_ent **out);
+const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
+/* show.c: the dump behind `omcli mib` (vendor 0) and `omcicli mib get`
+ * (vendor 1). Always ends with an "N rows" line; returns N. */
+int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor);
 extern int conn_dirty;
 extern int qos_dirty;
 void bdgconn_rebuild(void);
