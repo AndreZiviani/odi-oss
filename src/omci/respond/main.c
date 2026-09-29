@@ -238,18 +238,27 @@ int main(int argc, char **argv)
 	 * decision from an earlier run never answers for this one. */
 	{
 		uint32_t st = 0;
-		int resumed;
+		int resumed, restart;
+		const char *why = "no_snapshot";
+		long prev = sys_open(RESUME_DECISION_PATH, O_RDONLY);
 
+		/* The decision file is on tmpfs and every omcid writes one, so
+		 * finding one says an omcid already ran this boot: this is a
+		 * respawn or an apply.sh restart, not the first start. */
+		restart = prev >= 0;
+		if (prev >= 0)
+			sys_close((int)prev);
 		sys_unlink(RESUME_DECISION_PATH);
 		if (state_from_arg)
 			st = state_arg;
 		else if (fd < 0 || omci_getOnuState(&st) != 0)
 			st = 0;
-		resumed = snapshot_try_resume(st);
+		resumed = snapshot_try_resume(st, &why);
 		snapshot_write_decision(resumed);
 		out_fmt("resume: onu state %d, %s\n", (long)st,
 			resumed ? "snapshot loaded, resuming without re-registration"
 				: "no valid snapshot for this state -- falling back to re-registration");
+		ev_start(restart, resumed, why, st);
 	}
 
 	if (restart && apply_hw && fd >= 0) {
@@ -334,6 +343,7 @@ int main(int argc, char **argv)
 					last_sample_s = now_s;
 					onu_state_sample();
 					serial_refresh(1);
+					ev_tick();
 				}
 				/* Every 15 s: a quarter of the 60 s deadline
 				 * odi_wdt.h/rcS register omcid with, so an

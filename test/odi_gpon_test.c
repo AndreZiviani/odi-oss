@@ -9,7 +9,8 @@
  * Deactivate, Disable_Serial_Number to O7 and re-enable, the O6 POPUP
  * state entered by LOS and left by a directed POPUP message, Request_Key
  * producing the 2 Encryption_Key fragments an AES-128 key needs per
- * clause 9.2.4.5, and Key_switching_time scheduling.
+ * clause 9.2.4.5, Key_switching_time scheduling, and the cause and side
+ * odi_gpon_fsm_cause() reports for every event the driver logs.
  *
  * The FSM own every side effect goes through struct odi_gpon_fsm_ops; this
  * file own "mock" is a plain action recorder (kind + scalar payload +,
@@ -759,6 +760,59 @@ static void test_key_switching_time(void)
 	      "Key_switching_time schedules the switch at the OLT-supplied superframe count");
 }
 
+/* The cause the driver logs with every event=onu_state line
+ * (odi_gpon_fsm_cause()): the name and the side that started it, for
+ * every event, and for each downstream message that moves the FSM. The
+ * side is the whole point of the line -- an outage that starts with
+ * side=olt was the ISP, one with side=local was this stick.
+ */
+static void check_cause(enum odi_gpon_event ev, const struct odi_gpon_ploam *msg,
+			const char *name, const char *side, const char *what)
+{
+	struct odi_gpon_fsm_cause c;
+
+	odi_gpon_fsm_cause(ev, msg, &c);
+	CHECK(c.name && strcmp(c.name, name) == 0, what);
+	CHECK(c.side && strcmp(c.side, side) == 0, what);
+}
+
+static void test_transition_causes(void)
+{
+	struct odi_gpon_ploam msg;
+
+	check_cause(ODI_GPON_EVENT_ACTIVATE, NULL, "activate", "local", "activate is local");
+	check_cause(ODI_GPON_EVENT_DEACTIVATE, NULL, "deactivate", "local", "deactivate is local");
+	check_cause(ODI_GPON_EVENT_TO1_EXPIRE, NULL, "to1_expired", "timer", "TO1 is a timer");
+	check_cause(ODI_GPON_EVENT_TO2_EXPIRE, NULL, "to2_expired", "timer", "TO2 is a timer");
+	check_cause(ODI_GPON_EVENT_LOS, NULL, "los", "line", "LOS is the line");
+	check_cause(ODI_GPON_EVENT_LOS_CLEAR, NULL, "los_cleared", "line", "LOS clear is the line");
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, NULL, "ploam_unknown", "olt",
+		    "a PLOAM that was not captured is still the OLT");
+
+	msg = ds_upstream_overhead();
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, &msg, "upstream_overhead", "olt", "Upstream_Overhead");
+	msg = ds_assign_onu_id(TEST_ASSIGNED_ONU_ID, test_sn);
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, &msg, "assign_onu_id", "olt", "Assign_ONU-ID");
+	msg = ds_ranging_time(TEST_ASSIGNED_ONU_ID, 0x1234U);
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, &msg, "ranging_time", "olt", "Ranging_Time");
+	msg = ds_deactivate_onu_id(TEST_ASSIGNED_ONU_ID);
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, &msg, "deactivate_onu_id", "olt", "Deactivate_ONU-ID");
+	msg = ds_popup(ODI_GPON_ONU_ID_BROADCAST);
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, &msg, "popup", "olt", "POPUP");
+	msg = ds_disable_serial_number(ODI_GPON_DISABLE_SN_DISABLE, test_sn);
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, &msg, "disable_serial_number", "olt",
+		    "Disable_Serial_Number, disable");
+	msg = ds_disable_serial_number(ODI_GPON_DISABLE_SN_ENABLE, test_sn);
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, &msg, "enable_serial_number", "olt",
+		    "Disable_Serial_Number, enable");
+	msg = ds_disable_serial_number(ODI_GPON_DISABLE_SN_ENABLE_ALL, test_sn);
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, &msg, "enable_all_serial_numbers", "olt",
+		    "Disable_Serial_Number, enable all");
+	msg = ds_request_key(TEST_ASSIGNED_ONU_ID);
+	check_cause(ODI_GPON_EVENT_PLOAM_RX, &msg, "ploam_other", "olt",
+		    "a message that never moves the FSM");
+}
+
 int main(void)
 {
 	test_wire_pack_unpack_roundtrip();
@@ -771,6 +825,7 @@ int main(void)
 	test_popup_to_o6_and_back();
 	test_request_key_two_fragments();
 	test_key_switching_time();
+	test_transition_causes();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

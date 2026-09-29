@@ -51,6 +51,28 @@ listed here.
   after checking the trial (`docs/FLASHING.md`, "Committing"). Host-tested
   against a stub nv (`test/slot_state_test.sh`); test-qemu checks the file
   and the login banner under the real busybox and dropbear.
+- **Link and provisioning events in syslog: after an outage the log says
+  who started it.** One greppable `event=` line per event, `key=value`
+  after it (docs/TOOLS.md, "Link and provisioning events", has the table
+  and how to read an outage with it). From the GPON driver, as printk
+  through klogd: every ONU state change (`event=onu_state from=O5 to=O2
+  in_state_s=... cause=deactivate_onu_id side=olt`), where `side` is `olt`
+  (a PLOAM message: deactivate, disable serial number, ranging), `timer`
+  (TO1/TO2), `line` or `local` (gponact/gpondeact), and the downstream LOS
+  bit going on and off (`event=los`), sampled at every interrupt and every
+  BER interval, so a fibre pull in O5 shows within 10 s. From omcid, to
+  `/dev/log` (facility daemon, the syslog(3) datagram; omcid has no libc)
+  and to omcid.log: its start (`run=boot|restart`, `mode=resume` or
+  `reregister` and why), an OLT or CLI MIB reset, the MIB upload, the first
+  and last write of a provisioning burst with its totals (`provision_end
+  creates=82 sets=102 ...` for the ISP1 session), and the reboot and
+  software-download requests it refuses. Rate limited on both sides (30
+  and 20 lines a minute, each saying what it dropped); nothing per
+  message. The old rate-limited `odi_gpon: state O4 -> O5 (onu_id 3)`
+  line is replaced by `event=onu_state`. test-host covers the cause
+  mapping, test-omci (`events-test.sh`) every omcid line against the ISP1
+  session, and test-qemu that kernel messages and omcid lines reach
+  `logread`.
 - Fixes `omcicli mib get <class>` answering `0 rows` for every entity the
   ONU creates for itself (ONT data, SWImage, ONT2-G, the T-CONTs, ANI-G, the
   traffic schedulers, ...), found on ISP1: the dump walked only the store

@@ -200,6 +200,7 @@ static void vq_dispatch(void)
 		return;
 	}
 	case 32:                                 /* mib reset */
+		ev_mib_reset("local");
 		mib_reset_all();
 		return;
 	case 4:                                  /* set logfile -- nothing to do */

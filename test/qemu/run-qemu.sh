@@ -212,6 +212,34 @@ n=$(sshx 'logread | grep -c dropbear' 2>/dev/null) || n=0
 [ "$n" -gt 0 ] || fail "logread has no dropbear lines"
 echo "  syslogd, klogd up; logread has $n dropbear lines"
 
+say "event lines reach syslog: the kernel through klogd, omcid through /dev/log"
+# The odi_gpon event=onu_state lines are printk (a stock malta kernel has no
+# odi_gpon to print them), so the kernel path is checked with a line of our
+# own through /dev/kmsg: printk -> klogd -> syslogd, the path they take. A
+# line written from userspace keeps facility user (the kernel does not let
+# /dev/kmsg claim kern), so only the tag and the priority are matched.
+sshx 'echo "<5>odi-test: event=klogd_path" > /dev/kmsg' || true
+n=0
+for _ in 1 2 3 4 5; do
+	n=$(sshx 'logread | grep -c "[a-z]*\.notice kernel: .*odi-test: event=klogd_path"' 2>/dev/null) || n=0
+	[ "$n" -gt 0 ] && break
+	sleep 1
+done
+[ "$n" -gt 0 ] || fail "a kernel message did not reach logread through klogd"
+# omcid's start line, from the respawn scenario above, and a CLI MIB reset:
+# both straight to /dev/log (src/omci/respond/events.c), facility daemon.
+n=$(sshx 'logread | grep -c "daemon.[a-z]* omcid\[[0-9]*\]: event=start "' 2>/dev/null) || n=0
+[ "$n" -gt 0 ] || fail "logread has no omcid event=start line"
+sshx '/bin/omcli -f mib reset' >/dev/null 2>&1 || true
+n=0
+for _ in 1 2 3 4 5; do
+	n=$(sshx 'logread | grep -c "daemon.notice omcid\[[0-9]*\]: event=mib_reset side=local "' 2>/dev/null) || n=0
+	[ "$n" -gt 0 ] && break
+	sleep 1
+done
+[ "$n" -gt 0 ] || fail "logread has no omcid event=mib_reset line"
+echo "  kernel and omcid event lines both in logread"
+
 say "scenario: NTP_SERVER syncs the guest clock (opt-in, skips if no host responder)"
 # The guest config fixture (build-initramfs.sh) sets NTP_SERVER=10.0.2.2,
 # the qemu user-net gateway address -- SLIRP maps it straight to the host

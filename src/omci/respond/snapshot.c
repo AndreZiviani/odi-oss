@@ -229,7 +229,14 @@ void snapshot_save(void)
 		     (uint32_t)(p - snapbuf));
 }
 
-int snapshot_try_resume(uint32_t onu_state)
+/* Why a resume was refused, for omcid's event=start line (events.c). */
+static int refuse(const char **why, const char *reason)
+{
+	*why = reason;
+	return 0;
+}
+
+int snapshot_try_resume(uint32_t onu_state, const char **why)
 {
 	static uint8_t buf[SNAP_BUF_MAX];
 	const uint8_t *p;
@@ -237,32 +244,32 @@ int snapshot_try_resume(uint32_t onu_state)
 	uint16_t rows, servs;
 
 	if (onu_state != 5)
-		return 0;
+		return refuse(why, "not_o5");
 	fd = sys_open(SNAPSHOT_PATH, O_RDONLY);
 	if (fd < 0)
-		return 0;
+		return refuse(why, "no_snapshot");
 	n = sys_read((int)fd, buf, sizeof buf);
 	sys_close((int)fd);
 	/* Header plus at least the fixed tail and its own crc; anything
 	 * shorter is not a snapshot this code wrote. */
 	if (n < 26 + 2 + (long)sizeof(tblpool) + (long)sizeof(flow_us) +
 		(long)sizeof(flow_ds) + 4 + (long)sizeof(tcont_map) + 2 + 4)
-		return 0;
+		return refuse(why, "bad_snapshot");
 
 	p = buf;
 	if (p[0] != SNAP_MAGIC0 || p[1] != SNAP_MAGIC1 ||
 	    p[2] != SNAP_MAGIC2 || p[3] != SNAP_MAGIC3)
-		return 0;
+		return refuse(why, "bad_snapshot");
 	p += 4;
 	if (get_u16(&p) != SNAP_VERSION)
-		return 0;
+		return refuse(why, "bad_snapshot");
 
 	{
 		uint32_t stored = nl_get32(buf + n - 4);
 		uint32_t calc = crc32_calc(buf, (uint32_t)n - 4);
 
 		if (stored != calc)
-			return 0;
+			return refuse(why, "bad_snapshot");
 	}
 
 	{
@@ -272,10 +279,10 @@ int snapshot_try_resume(uint32_t onu_state)
 		get_raw(&p, snap_serial, 9);
 		for (int i = 0; i < 8; i++)
 			if (snap_devid[i] != devid[i])
-				return 0;
+				return refuse(why, "other_device");
 		for (int i = 0; i < 9; i++)
 			if (snap_serial[i] != serial[i])
-				return 0;
+				return refuse(why, "other_device");
 	}
 
 	{
@@ -284,7 +291,7 @@ int snapshot_try_resume(uint32_t onu_state)
 
 		rows = get_u16(&p);
 		if (rows > MIB_ROWS)
-			return 0;
+			return refuse(why, "bad_snapshot");
 		for (int i = 0; i < MIB_ROWS; i++)
 			mib[i].used = 0;
 		for (uint16_t i = 0; i < rows; i++) {
@@ -319,7 +326,7 @@ int snapshot_try_resume(uint32_t onu_state)
 
 		servs = get_u16(&p);
 		if (servs > SERV_MAX)
-			return 0;
+			return refuse(why, "bad_snapshot");
 		for (int i = 0; i < SERV_MAX; i++)
 			servtab[i].in_use = 0;
 		for (uint16_t i = 0; i < servs; i++) {
@@ -335,6 +342,7 @@ int snapshot_try_resume(uint32_t onu_state)
 		mib_data_sync = sync;
 		alarm_snapshot = alarm;
 	}
+	*why = "resumed";
 	return 1;
 }
 

@@ -613,6 +613,73 @@ PON MAC under a running omcid; do it on a trial stick only.
 | `dmesg` | the kernel ring buffer, including `rcS:` progress lines | nothing; the web UI's Tools tab shows it too |
 | DRAM ramlog | console output of the last boot | a watchdog reset, not a power cut (`tools/memprobe` from the stock image; `/proc/odi_ramlog_prev` from ours, one boot back) |
 | `/etc/config/breadcrumbs`, `trial-diag.txt`, `trial.log` | one line per boot stage, network state, trial rounds | reboots and reflashes (config partition); only with `breadcrumbs.on` or a trial knob |
+| `logread` (syslogd) | kernel messages (through klogd), dropbear logins, and the `event=` lines below | nothing locally (64 KB, RAM); everything, forwarded, with `SYSLOG_SERVER` |
+
+## Link and provisioning events
+
+After an outage the question is who started it: the ISP (the fibre, the OLT)
+or this stick. Every event that can answer it is one line, `event=<name>`
+followed by `key=value` pairs, in syslog -- so `logread | grep event=` on the
+stick, or the collector `SYSLOG_SERVER` names (docs/SETTINGS.md), has the
+whole story in order, with syslogd's timestamps. Nothing is logged per
+message: a whole provisioning session is six lines.
+
+The kernel's lines are printk (`kernel: odi_gpon: event=...`, facility kern),
+which klogd hands to syslogd; the ONU state machine lives in the driver, so
+that is where they come from. omcid's are `omcid[pid]: event=...`, facility
+daemon, sent to `/dev/log` the way syslog(3) does (omcid has no libc), and
+the same line goes to `/var/log/omcid.log` among the frames around it.
+
+| line | level | when |
+|---|---|---|
+| `odi_gpon: event=onu_state from=O5 to=O2 in_state_s=3605.120 cause=deactivate_onu_id side=olt onu_id=0` | notice when leaving O5 or entering O7, else info | every ONU state change: the state left, how long it lasted, and why |
+| `odi_gpon: event=los state=on onu_state=O5` | notice | the downstream LOS bit set; sampled at every GPON interrupt and every BER interval (10 s on both ISPs), which keeps running in O5 when the light goes |
+| `odi_gpon: event=los state=off lasted_s=42.310 onu_state=O5` | info | the LOS bit clear again |
+| `omcid: event=start run=boot mode=reregister reason=not_o5 onu_state=O2 rows=0` | notice on `run=restart`, else info | omcid starting: the first start of the boot or a later one (a respawn, `apply.sh omci`), and whether it resumed from its snapshot (`mode=resume`) or starts empty for the OLT to re-provision; `reason` is `not_o5`, `no_snapshot`, `bad_snapshot` or `other_device` |
+| `omcid: event=mib_reset side=olt rows=161 mib_data_sync=184 services=6` | notice | a MIB reset: `side=olt` from the OLT, `side=local` from `omcicli mib reset`; what it threw away |
+| `omcid: event=mib_upload_begin entities=301` / `event=mib_upload_end entities=301 duration_s=0.009` | info | the OLT reading the MIB back; an upload it abandons has no end line |
+| `omcid: event=provision_begin op=set class=256 inst=0 after_mib_reset=1` | info | the first Create, Set or Delete of a burst; `after_mib_reset=1` is a full re-provisioning |
+| `omcid: event=provision_end creates=82 sets=102 deletes=0 duration_s=0.827 rows=161 services=6 after_mib_reset=1` | info | 10 s after the burst's last write: what it added up to (Gets and Tests do not count) |
+| `omcid: event=olt_reboot class=256 inst=0 result=not_supported` | notice | the OLT asked for a reboot; omcid does not do it |
+| `omcid: event=sw_image op=download_start inst=1 result=not_supported` | notice | a software download (`op=download_start`, `download_end` with `sections=N`, `activate`, `commit`); omcid refuses each |
+| `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
+
+`cause` and `side` on `event=onu_state`:
+
+| cause | side | meaning |
+|---|---|---|
+| `upstream_overhead`, `assign_onu_id`, `ranging_time` | olt | the OLT ranging this ONU: O2 to O3, O3 to O4, O4 to O5 |
+| `deactivate_onu_id` | olt | the OLT deactivated this ONU (Deactivate_ONU-ID): back to O2 |
+| `disable_serial_number` | olt | the OLT disabled this serial number (rogue ONU handling, or by hand at the OLT): O7, laser off |
+| `enable_serial_number`, `enable_all_serial_numbers` | olt | re-enabled: O7 to O2 |
+| `popup` | olt | POPUP: O6 back to O4 or O5 |
+| `to1_expired` | timer | O3 or O4 to O2: the OLT did not finish ranging within TO1 (10 s) |
+| `to2_expired` | timer | O6 to O1: no POPUP within TO2 |
+| `los`, `los_cleared` | line | loss of signal; not wired to the state machine today (`event=los` reports the bit instead), listed for when it is |
+| `gponact`, `gpondeact` | local | this side: the boot activation, a respawn re-provisioning (`omci-respawn-reprovision.sh`), `apply.sh omci`, or a write to `/proc/odi_init` by hand |
+| `ploam_other`, `ploam_unknown` | olt | a transition after any other downstream message; not expected |
+
+Reading an outage:
+
+- `event=los state=on`, then `event=onu_state from=O5 ... side=olt` once the
+  light is back: the fibre, or the OLT side of it.
+- `event=onu_state from=O5 ... cause=deactivate_onu_id side=olt` with no LOS:
+  the OLT dropped this ONU. A `mib_reset side=olt` and a provisioning burst
+  follow if it re-provisions.
+- `event=start run=restart mode=reregister` from omcid, then
+  `from=O5 ... cause=gpondeact side=local`: omcid died and this side forced
+  the re-registration. `mode=resume` and no state change: omcid died and
+  nothing on the line noticed.
+- `event=olt_reboot` followed by a deactivation: the OLT gave up on a
+  reboot this image refuses.
+- A board reset by the watchdog leaves no line here (the syslog buffer is in
+  RAM, and forwarding stops with the board); the ramlog of the next boot
+  records it (docs/KERNEL.md).
+
+Rate limits: the kernel lines have their own printk ratelimit, 30 a minute
+(the kernel prints how many it dropped); omcid's, 20 a minute, with an
+`event=suppressed` line for what it dropped. A flapping ONU (O2 to O3 to O2
+every 10 s) stays well under either.
 
 ## Restarting a daemon
 

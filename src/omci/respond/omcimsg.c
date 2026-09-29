@@ -312,6 +312,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	uint8_t body[32];
 
 	omci_frames_handled++;
+	if (mt == OMCI_MT_MIB_UPLOAD_NEXT)
+		ev_mib_upload_next(nl_get16(f + 8));
 	if (mt == OMCI_MT_MIB_UPLOAD_NEXT && nl_get16(f + 8) > 2 &&
 	    (unsigned)nl_get16(f + 8) + 1 < omci_autonomous_count) {
 		handle_upload_next(fd, tid, f);   /* 301 of these; do not log */
@@ -357,11 +359,18 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		}
 	}
 
+	/* Before the AR check: a download section usually asks for no
+	 * acknowledgement, and it still has to be counted. */
+	if (mt == OMCI_MT_REBOOT ||
+	    (mt >= OMCI_MT_START_SW_DOWNLOAD && mt <= OMCI_MT_COMMIT_SW))
+		ev_olt_command(mt, cls, inst);
+
 	if (!(f[2] & OMCI_AR)) {                 /* nothing to answer */
 		out("   (no ack requested)\n");
 		return;
 	}
 	if (mt == OMCI_MT_MIB_RESET) {
+		ev_mib_reset("olt");
 		mib_reset_all();
 		body[0] = OMCI_OK;
 		send_resp(fd, tid, f, body, 1);
@@ -423,6 +432,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * work with, and it simply started the cycle again. */
 		nl_put16(body, (uint16_t)(omci_autonomous_count + mib_count()));
 		send_resp(fd, tid, f, body, 2);
+		ev_mib_upload((uint16_t)(omci_autonomous_count + mib_count()));
 		out_fmt("-> %d managed entities to upload (%d autonomous, %d held)\n",
 			(long)(omci_autonomous_count + mib_count()),
 			(long)omci_autonomous_count, (long)mib_count());
@@ -528,6 +538,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		body[1] = 0;                     /* attribute execution mask */
 		body[2] = 0;
 		send_resp(fd, tid, f, body, 3);
+		ev_config_write(mt, cls, inst);
 		mib_data_sync++;
 		apply_entity(c, inst, r, mask, 1);
 		snapshot_save();
@@ -542,6 +553,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 			mib_write(r, c, mask, f + 10, 30);
 		body[0] = r ? OMCI_OK : OMCI_ERR_UNKNOWN_ME;
 		send_resp(fd, tid, f, body, 1);
+		if (r)
+			ev_config_write(mt, cls, inst);
 		mib_data_sync++;
 		if (r) {
 			apply_entity(c, inst, r, mask, 0);
@@ -559,6 +572,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		mib_del(cls, inst);
 		body[0] = OMCI_OK;
 		send_resp(fd, tid, f, body, 1);
+		ev_config_write(mt, cls, inst);
 		mib_data_sync++;
 		snapshot_save();
 		out("-> deleted\n");

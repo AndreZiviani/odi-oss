@@ -36,6 +36,12 @@
 #define OMCI_MT_GET_ALL_ALARMS      11
 #define OMCI_MT_GET_ALL_ALARMS_NEXT 12
 #define OMCI_MT_TEST                18
+#define OMCI_MT_START_SW_DOWNLOAD   19
+#define OMCI_MT_DOWNLOAD_SECTION    20
+#define OMCI_MT_END_SW_DOWNLOAD     21
+#define OMCI_MT_ACTIVATE_SW         22
+#define OMCI_MT_COMMIT_SW           23
+#define OMCI_MT_REBOOT              25
 #define OMCI_MT_SYNC_TIME           24
 #define OMCI_MT_TEST_RESULT         27
 #define OMCI_MT_GET_NEXT        26
