@@ -155,7 +155,9 @@ It reads, from the config store, once at start: the manual VLAN
 the serial number until the kernel reports one (`GPON_SN`), the LOID keys
 (answered in the CTC LOID-authentication entity), the five OLT identity keys
 (reported only while `/etc/config/omci-identity.on` exists), and
-`DUAL_MGMT_MODE` and the `OMCI_CUSTOM_*` masks for display only. Each key is
+`DUAL_MGMT_MODE` and the `OMCI_CUSTOM_*` masks for display only; and, from
+`/etc/config/odi.conf`, `OMCI_UNKNOWN_ME_OK` (its start-up line `unknown
+entities: ...` says which way). Each key is
 looked up in both store files, the one xmlconfig assigns it to first. Its
 start-up line in the log says what it found (`store: loid ..., manual vlan
 ..., identity report ...`). A change takes effect with `apply.sh omci`;
@@ -679,6 +681,7 @@ PON MAC under a running omcid; do it on a trial stick only.
 | where | what | survives |
 |---|---|---|
 | `/var/log/omcid.log` | every OMCI frame and driver call, omcid's startup | nothing (RAM, trimmed to 128-256 KB) |
+| `/var/log/omcid-unknown.txt` | each managed entity class and message type the OLT sent that omcid does not model, with a count ("Link and provisioning events") | an omcid respawn, not a reboot (RAM) |
 | `/var/log/services.log` | stderr of services: dropbear logins, confd, metricsd | nothing (RAM, trimmed) |
 | `/var/log/*.err` | the rcS `/proc/odi_omci` writes that failed | nothing |
 | `dmesg` | the kernel ring buffer, including `rcS:` progress lines | nothing; the web UI's Tools tab shows it too |
@@ -693,7 +696,8 @@ or this stick. Every event that can answer it is one line, `event=<name>`
 followed by `key=value` pairs, in syslog -- so `logread | grep event=` on the
 stick, or the collector `SYSLOG_SERVER` names (docs/SETTINGS.md), has the
 whole story in order, with syslogd's timestamps. Nothing is logged per
-message: a whole provisioning session is six lines.
+message: a whole provisioning session is six lines, plus one per thing the
+OLT sent that omcid does not model (nine on ISP1).
 
 The kernel's lines are printk (`kernel: odi_gpon: event=...`, facility kern),
 which klogd hands to syslogd; the ONU state machine lives in the driver, so
@@ -713,6 +717,8 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=provision_end creates=82 sets=102 deletes=0 duration_s=0.827 rows=161 services=6 after_mib_reset=1` | info | 10 s after the burst's last write: what it added up to (Gets and Tests do not count) |
 | `omcid: event=olt_reboot class=256 inst=0 result=not_supported` | notice | the OLT asked for a reboot; omcid does not do it |
 | `omcid: event=sw_image op=download_start inst=1 result=not_supported` | notice | a software download (`op=download_start`, `download_end` with `sections=N`, `activate`, `commit`); omcid refuses each |
+| `omcid: event=unknown_me class=351 op=create mt=4` | notice | the first request this boot for a managed entity class omcid has no model for, per class and operation (`op` is `create`, `set`, `get`, `delete`, `get_next` or `test`; `mt` the message type); answered "unknown entity" unless `OMCI_UNKNOWN_ME_OK=1` (docs/SETTINGS.md) |
+| `omcid: event=unknown_msg type=17 class=256` | notice | the first frame this boot of a message type omcid does not handle, per type, with the class of that first frame; answered "not supported" |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 
 `cause` and `side` on `event=onu_state`:
@@ -746,6 +752,21 @@ Reading an outage:
 - A board reset by the watchdog leaves no line here (the syslog buffer is in
   RAM, and forwarding stops with the board); the ramlog of the next boot
   records it (docs/KERNEL.md).
+
+What omcid does not model. Each unknown (class, operation) and each unknown
+message type is one line per boot, however often the OLT repeats it, and
+`/var/log/omcid-unknown.txt` keeps all of them with a count and the uptime of
+the first, even the ones the rate limit dropped:
+
+    unknown_me class=351 op=create mt=4 count=1 first_uptime_s=38
+    unknown_msg type=17 class=256 count=9 first_uptime_s=39
+
+A respawned omcid reads the file back first, so "once" holds across a
+restart; `/var/log` is RAM, so a reboot starts it empty. It holds 32 distinct
+entries and counts the rest on an `overflow` line. `diag-bundle.sh` collects
+it with the rest of `/var/log`, as `odi-diag/log/omcid-unknown.txt`. On ISP1
+the OLT sends class 351 once and message types 17 and 1 to ONU-G three times
+each per provisioning: those three lines are what a session looks like there.
 
 Rate limits: the kernel lines have their own printk ratelimit, 30 a minute
 (the kernel prints how many it dropped); omcid's, 20 a minute, with an

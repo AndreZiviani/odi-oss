@@ -655,3 +655,68 @@ const char *report_sw_ver(uint16_t inst)
 		return report.swVer[inst];
 	return REPORT_DEFAULT_SW_VER;
 }
+
+/* ------------------------------------------------ odi-only keys
+ *
+ * Keys the stock firmware never had live in CFG_ODI_PATH, plain KEY=value
+ * lines written by `flash set` (rootfs/skeleton/etc/scripts/flash, ODI_KEYS),
+ * never in the XML store: the stock image drops an unknown key there on its
+ * first save (docs/SETTINGS.md, "Odi-only keys"). One read of the whole file
+ * per call, into a bounded buffer: the file holds a handful of keys, so
+ * anything past CFG_ODI_MAX is not a file flash wrote and reads as absent. */
+#define CFG_ODI_MAX 4096
+static char odibuf[CFG_ODI_MAX];
+
+static int cfg_odi_read(const char *path)
+{
+	long fd = sys_open(path, 0);
+	int n = 0;
+
+	if (fd < 0)
+		return -1;
+	while (n < CFG_ODI_MAX - 1) {
+		long r = sys_read((int)fd, odibuf + n, CFG_ODI_MAX - 1 - n);
+
+		if (r <= 0)
+			break;
+		n += (int)r;
+	}
+	sys_close((int)fd);
+	odibuf[n] = 0;
+	return n;
+}
+
+/* The value of `key`, NUL-terminated in `out`; returns its length (0: present
+ * and empty), or -1 when the file or the key is not there. The first line
+ * that matches wins, as flash get reads it. */
+int cfg_odi_get(const char *path, const char *key, char *out, int max)
+{
+	int n = cfg_odi_read(path), klen = str_len(key);
+
+	if (max > 0)
+		out[0] = 0;
+	if (n < 0)
+		return -1;
+	for (int i = 0; i < n; ) {
+		int e = i, k;
+
+		while (e < n && odibuf[e] != '\n')
+			e++;
+		for (k = 0; k < klen && i + k < e && odibuf[i + k] == key[k]; k++)
+			;
+		if (k == klen && i + k < e && odibuf[i + k] == '=') {
+			int v = i + k + 1, o = 0;
+
+			/* A line cut off by CFG_ODI_MAX is not a whole value. */
+			if (e == n && n == CFG_ODI_MAX - 1)
+				return -1;
+			for (; v < e && odibuf[v] != '\r'; v++, o++)
+				if (o < max - 1)
+					out[o] = odibuf[v];
+			out[o < max - 1 ? o : max - 1] = 0;
+			return o;
+		}
+		i = e + 1;
+	}
+	return -1;
+}

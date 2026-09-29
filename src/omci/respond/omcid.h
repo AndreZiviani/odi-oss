@@ -264,6 +264,10 @@ extern uint16_t alarm_snapshot;
 #define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
 #define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
 void snapshot_save(void);
+/* Write `buf` to `tmp`, then rename it over `path`: a reader never sees a
+ * half-written file. 0 on success. */
+int atomic_write(const char *path, const char *tmp, const uint8_t *buf,
+		 uint32_t n);
 void snapshot_invalidate(void);
 /* onu_state: the driver's ONU state (5 == O5). Returns 1 and repopulates the
  * MIB and its bookkeeping when a valid, matching snapshot was loaded; 0
@@ -368,6 +372,18 @@ void ev_mib_upload_next(uint16_t seq);
 void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_tick(void);
+/* What the OLT sent that omcid does not model: one event line and one
+ * summary line per unknown class and operation, or unknown message type,
+ * per boot (events.c, UNKNOWN_PATH). ev_msg_known() is whether omcid knows
+ * the message type at all, answered or deliberately refused. */
+#define UNKNOWN_PATH     "/var/log/omcid-unknown.txt"
+#define UNKNOWN_TMP_PATH "/var/log/omcid-unknown.txt.tmp"
+int ev_msg_known(uint8_t mt);
+void ev_unknown_me(uint16_t cls, uint8_t mt);
+void ev_unknown_msg(uint8_t mt, uint16_t cls);
+/* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
+ * class omcid does not model with success instead of "unknown entity". */
+extern int unknown_me_ok;
 
 /* ------------------------------------------------------------ config store
  *
@@ -424,6 +440,8 @@ void cfg_load_report_from(const char *cs, const char *hs, const char *sw);
 const char *report_sw_ver(uint16_t inst);
 void cfg_show_vlan(void);
 int cfg_get(const char *path, const char *key, char *out, int max);
+#define CFG_ODI_PATH "/var/config/odi.conf"
+int cfg_odi_get(const char *path, const char *key, char *out, int max);
 extern const char *const CFG_CS_PATH;
 void cfg_load_identity(void);
 void cfg_load_identity_from(const char *cs, const char *hs);

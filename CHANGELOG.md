@@ -5,6 +5,25 @@ listed here.
 
 ## Unreleased
 
+- omcid logs what it does not model, once per boot: `event=unknown_me
+  class=<n> op=<create|set|get|delete|get_next|test>` for a managed entity
+  class it has no model for and `event=unknown_msg type=<n> class=<n>` for a
+  message type it does not handle, each first sighting one syslog line (the
+  usual 20-a-minute event limit applies), every sighting counted in
+  `/var/log/omcid-unknown.txt`, which `diag-bundle.sh` collects as
+  `odi-diag/log/omcid-unknown.txt`. A respawned omcid reads the file back
+  and does not log the same thing twice in one boot. The ISP1 OLT session
+  already shows three: class 351, and message types 17 and 1 sent to ONU-G.
+- New odi-only key `OMCI_UNKNOWN_ME_OK` (`/etc/config/odi.conf`, default
+  off): `1` answers a Create, Set or Get of a class omcid does not model with
+  success instead of "unknown entity", the counterpart of the stock
+  `OMCI_FAKE_OK`, for an OLT that stalls on the error. Nothing is stored, a
+  Get answers no attributes, MIB data sync counts the faked writes. Read at
+  omcid start: INTERRUPTS INTERNET (`apply.sh omci`). `docs/SETTINGS.md` has
+  the risk.
+- omcid no longer counts a refused Set (an unknown class) in MIB data sync:
+  the OLT counts only the writes it was told succeeded.
+
 ## v1.1.1 — 2026-09-29
 
 - Pins odi-ui confd v1.1.1 (was v1.1.0): the trial banner no longer claims
@@ -14,6 +33,7 @@ listed here.
   assigned Alloc-IDs.
 - The README web UI screenshot now links odi-ui (single source) instead of
   a copy in docs/images.
+||||||| parent of 46e80f7 (omcid: log unknown entities and message types once per boot; OMCI_UNKNOWN_ME_OK)
 ## v1.1.0 — 2026-09-29
 
 - Pins odi-ui confd v1.1.0 (was v1.0.8): the redesigned web UI (Status,
