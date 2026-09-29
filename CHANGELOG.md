@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.1.1 — 2026-09-29
+
 - Pins odi-ui confd v1.1.1 (was v1.1.0): the trial banner no longer claims
   what the other partition holds; "Keep" is "Commit" everywhere, with a
   "What committing means" note under the partitions; a smaller receive
