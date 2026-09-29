@@ -356,6 +356,93 @@ struct mib_row *mib_row_at(int i)
 	return (i >= 0 && i < MIB_ROWS) ? &mib[i] : 0;
 }
 
+/* Every managed entity this ONU holds, for the CLI: the ones it creates for
+ * itself (omci_autonomous[], which a MIB upload reports) and the ones the OLT
+ * created, one entry each, sorted by class and then instance.
+ *
+ * The store alone is not the MIB. An autonomous entity has a row only once
+ * the OLT sets one of its attributes, and most never are -- SWImage, ONT2-G,
+ * the T-CONTs of an OLT that assigns Alloc-IDs by PLOAM -- so a dump that
+ * walked the rows answered "0 rows" for exactly the entities a user looks
+ * up first. `cls` 0 is every class; `want_inst` limits it to one instance.
+ * Returns the count; the entries stay valid until the next call. */
+static struct mib_ent ents[MIB_ENTS_MAX];
+
+static void ent_add(int *n, uint16_t cls, uint16_t inst)
+{
+	int i;
+
+	for (i = 0; i < *n; i++)
+		if (ents[i].cls == cls && ents[i].inst == inst)
+			return;
+	if (*n >= MIB_ENTS_MAX)
+		return;
+	/* Insertion sort: a few hundred entries, once per CLI request. */
+	for (i = *n; i > 0 && (ents[i - 1].cls > cls ||
+			       (ents[i - 1].cls == cls && ents[i - 1].inst > inst)); i--)
+		ents[i] = ents[i - 1];
+	ents[i].cls = cls;
+	ents[i].inst = inst;
+	(*n)++;
+}
+
+int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
+		 const struct mib_ent **out)
+{
+	int n = 0;
+
+	for (unsigned i = 0; i < omci_autonomous_count; i++) {
+		const struct omci_instance *e = &omci_autonomous[i];
+
+		if ((cls && e->classId != cls) || (want_inst && e->inst != inst))
+			continue;
+		ent_add(&n, e->classId, e->inst);
+	}
+	for (int i = 0; i < MIB_ROWS; i++) {
+		if (!mib[i].used || (cls && mib[i].classId != cls) ||
+		    (want_inst && mib[i].inst != inst))
+			continue;
+		ent_add(&n, mib[i].classId, mib[i].inst);
+	}
+	*out = ents;
+	return n;
+}
+
+/* One entity as the OLT would read it: every attribute through attr_value(),
+ * so what the OLT wrote wins and everything else is the built-in answer (the
+ * defaults, the identity, ONT data's MIB data sync) -- the same bytes a Get
+ * returns, where the row itself holds zeros for every attribute nobody
+ * wrote. The table attribute, `written` and `truncated` come from the row
+ * when there is one. The result is one static row, valid until the next
+ * call; the renderers of show.c take it exactly as they take a stored row. */
+const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst)
+{
+	static struct mib_row v;
+	const struct mib_row *r = mib_find(c->classId, inst);
+	uint8_t tmp[MIB_ROW_MAX];
+
+	for (unsigned i = 0; i < sizeof v; i++)
+		((uint8_t *)&v)[i] = 0;
+	v.classId = c->classId;
+	v.inst = inst;
+	v.used = 1;
+	v.tbl_head = r ? r->tbl_head : MIB_TBL_NONE;
+	v.tbl_count = r ? r->tbl_count : 0;
+	v.truncated = r ? r->truncated : 0;
+	v.written = r ? r->written : 0;
+	for (unsigned k = 1; k < c->nattr && k <= 16; k++) {
+		uint16_t w = attr_width(c, k);
+		int off = attr_offset(c, k);
+
+		if (!w || off < 0 || off + w > MIB_ROW_MAX)
+			continue;
+		attr_value(c, inst, k, tmp);
+		for (uint16_t b = 0; b < w; b++)
+			v.data[off + b] = tmp[b];
+	}
+	return &v;
+}
+
 int mib_count(void)
 {
 	int n = 0;

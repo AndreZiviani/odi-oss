@@ -387,7 +387,9 @@ omcli uses omcid's own queue and commands:
     omcli state                          serial, device, ONU state, MIB sync
     omcli conn                           the bridge connections omcid built
     omcli flows                          the GEM flow tables, per direction
-    omcli mib [all|classId] [entityId]   the MIB as the OLT provisioned it
+    omcli mib [all|classId] [entityId]   every managed entity, the ONU's own
+                                         and the OLT's, with the values a Get
+                                         returns; ends with an `N rows` line
     omcli caps                           the device capability blob, decoded
     omcli tcont                          T-CONT entity id to driver index
     omcli vlan [cs.xml]                  the manual VLAN from the config store,
