@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Pins odi-ui confd v1.1.1 (was v1.1.0): the trial banner no longer claims
+  what the other partition holds; "Keep" is "Commit" everywhere, with a
+  "What committing means" note under the partitions; a smaller receive
+  readout; forwarding rates to 2 decimals; the T-CONT card counts only
+  assigned Alloc-IDs.
+- The README web UI screenshot now links odi-ui (single source) instead of
+  a copy in docs/images.
 ## v1.1.0 — 2026-09-29
 
 - Pins odi-ui confd v1.1.0 (was v1.0.8): the redesigned web UI (Status,
