@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- Pins odi-ui confd v1.2.0 (was v1.1.1): light/dark toggle, equal readout
+  sizes, the VLAN keys as LIVE, rows for ONU_HW_VERSION, OLT_SW_DOWNLOAD and
+  OMCI_UNKNOWN_ME_OK, and every setting and risky option value saying whether
+  it disrupts the link.
 - Upstream OMCI and upstream data survive a second provisioning in one boot.
   The kernel placed each upstream priority queue (driver command 23) by a
   count of the calls since boot and ignored the direction and T-CONT in its
