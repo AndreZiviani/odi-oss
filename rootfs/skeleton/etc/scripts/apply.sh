@@ -11,15 +11,38 @@
 #                        primary drops the connection that asked for it, so
 #                        the answer has to leave first.
 #
-#     apply.sh omci      INTERRUPTS INTERNET, for about ten seconds plus
-#                        however long the OLT takes to provision again.
-#                        Deactivates the ONU, restarts omcid so it reads the
-#                        store again, and re-activates: the OLT sees the ONU
-#                        range again, resets its MIB and provisions it from
-#                        scratch, and the new omcid builds every service with
-#                        the settings as they are now. This is what applies
-#                        the manual VLAN keys, the LOID, the PLOAM password and
-#                        the OLT identity keys.
+#     apply.sh omci [SECONDS]
+#                        Tells the running omcid to reread the config store
+#                        (SIGHUP, the Unix convention for a reload) and waits,
+#                        bounded, for the outcome. omcid compares the store
+#                        with what it is running and does the least that
+#                        applies:
+#                          - nothing changed: says so, touches nothing;
+#                          - only the VLAN keys (VLAN_CFG_TYPE, VLAN_MANU_MODE,
+#                            VLAN_MANU_TAG_VID, VLAN_MANU_TAG_PRI): rebuilds
+#                            the bridge connections in place from the MIB it
+#                            holds. LIVE: the fibre stays in O5, nothing is
+#                            re-ranged;
+#                          - anything the OLT has to see again (GPON_SN, the
+#                            PLOAM password, the LOID keys, the identity keys
+#                            and switch, OMCI_UNKNOWN_ME_OK): omcid
+#                            deactivates the ONU, clears its MIB, hands the
+#                            driver the new serial number and password and
+#                            activates again, and the OLT provisions it from
+#                            scratch. INTERRUPTS INTERNET for about ten
+#                            seconds plus the OLT provisioning time. The
+#                            process is never restarted.
+#                        It waits SECONDS (default 20, APPLY_WAIT; the web UI
+#                        gives this script 25) for the outcome: reload done,
+#                        or for a re-registration back in O5 with services,
+#                        and reports how long that took. A re-registration
+#                        still running at the bound is reported as running and
+#                        is not a failure; omcid carries on and finishes it.
+#                        Exit 1 when no omcid runs, when omcid does not answer
+#                        the signal, or when the reload failed.
+#                        It never starts an omcid: init owns the process
+#                        (inittab respawns svc-omcid.sh), and a second one
+#                        made the ONU cycle through O1 to O3 on hardware.
 #
 #     apply.sh syslog    SERVICE RESTART. Restarts syslogd so it re-reads
 #                        SYSLOG_SERVER. No OMCI interruption, no reboot: the
@@ -33,42 +56,30 @@
 #                        (svc-ntpd.sh's own off-flag-shaped gate on the key
 #                        being present at all).
 #
-# Why omci needs the re-activation. omcid reads the store once, at start, and
-# builds connections only when the OLT provisions them. A restart alone gives
-# a daemon with the new settings and an empty MIB, while the switch keeps the
-# old connections, until the OLT next audits the MIB -- which may be never.
-# gpondeact and gponact are the kernel verbs rcS itself uses; the sequence
-# (deactivate, three seconds, activate) is the forced re-activation measured
-# on hardware: O1 to O5 in about five seconds, OMCI resumed by itself.
+# Why a signal and not a restart. omcid reads the store at start and builds
+# connections only when the OLT provisions them, so a changed store needs
+# either a new process with an empty MIB (which the OLT then has to be forced
+# to reprovision, and which init would respawn on top of) or the running
+# process rereading it. The second is what SIGHUP has always meant, and the
+# only one that leaves a VLAN-only change without a re-ranging. omcid does the
+# gpondeact/gponact steps itself when a re-registration is needed
+# (src/omci/respond/reload.c, docs/SETTINGS.md "How apply works").
 #
-# The serial number is not re-applied: the kernel writes it into the PON MAC
-# once, at the first activation of a boot. A new GPON_SN needs a reboot.
+# What omcid tells this script is in /var/run/omcid-reload, one key=value per
+# line, replaced whole by a rename: id (pid.sequence), state (running or
+# done), changed, action, result, keys (names, never values), duration_ms,
+# o5_ms, services.
+#
 set -u
 
-# write_proc_bounded: the bounded /proc-verb write rcS and rcS.pon already
-# use, reused here rather than a second copy -- see rcs-lib.sh for what
-# `timeout` does and does not catch on these. Relative to the directory
-# this script lives in, not a fixed /etc/scripts/ path, so
-# test/apply_test.sh (which runs this file straight out of the working
-# tree) finds the real one beside it instead of a device path that does
-# not exist off the stick.
-RCS_LIB=${RCS_LIB:-$(dirname "$0")/rcs-lib.sh}
-# shellcheck source=./rcs-lib.sh
-. "$RCS_LIB"
-
-ODI_INIT=${ODI_INIT:-/proc/odi_init}
-ODI_OMCI=${ODI_OMCI:-/proc/odi_omci}
-OMCID=${OMCID:-/bin/omcid}
-OMCID_LOG=${OMCID_LOG:-/var/log/omcid.log}
+RELOAD_STATUS=${RELOAD_STATUS:-/var/run/omcid-reload}
 NETWORK=${NETWORK:-/etc/scripts/network.sh}
-CS=${CS:-/etc/config/lastgood.xml}
 MODULES_OFF=${MODULES_OFF:-/etc/config/modules.off}
 SERVICES_LOG=${SERVICES_LOG:-/var/log/services.log}
 
 # How long each wait may take, in seconds.
-STOP_WAIT=${STOP_WAIT:-10}          # omcid deregisters and exits on SIGTERM; slack
-REGISTER_WAIT=${REGISTER_WAIT:-10}  # the new omcid registers for redirect type 1
-DEACT_HOLD=${DEACT_HOLD:-3}         # deactivated at least this long, as measured
+ACK_WAIT=${ACK_WAIT:-5}             # omcid takes the signal and starts the reload
+APPLY_WAIT=${APPLY_WAIT:-20}        # the outcome; under the web UI 25 s bound
 
 say() { echo "apply: $*"; }
 die() { echo "apply: $*" >&2; exit 1; }
@@ -82,54 +93,66 @@ network() {
 	say "applying in one second"
 }
 
+# status_get <key>: one value of the status file, empty when absent.
+status_get() { sed -n "s/^$1=//p" "$RELOAD_STATUS" 2>/dev/null | head -n 1; }
+
+# secs <milliseconds>: whole and tenths of a second, for the report.
+secs() { echo "$(( ${1:-0} / 1000 )).$(( ${1:-0} % 1000 / 100 ))"; }
+
 omci() {
-	[ ! -f "$MODULES_OFF" ] || die "$MODULES_OFF is set: this boot runs no omcid, nothing to restart"
-	[ -w "$ODI_INIT" ] || die "no $ODI_INIT: this kernel has no PON verbs"
-	[ -x "$OMCID" ] || die "no $OMCID"
+	wait_s=${1:-$APPLY_WAIT}
+	[ ! -f "$MODULES_OFF" ] || die "$MODULES_OFF is set: this boot runs no omcid, nothing to reload"
+	pids=$(pidof omcid 2>/dev/null)
+	[ -n "$pids" ] || die "no omcid is running: nothing to reload (init respawns it; see /var/log/omcid.log)"
 
-	t0=$(uptime_s)
-	write_proc_bounded "$ODI_INIT" gpondeact 2>/dev/null || die "gpondeact failed; nothing else was touched"
-	say "ONU deactivated (internet is down from here)"
+	before=$(status_get id)
+	# shellcheck disable=SC2086 # one pid per word
+	kill -HUP $pids 2>/dev/null || die "could not signal omcid $pids"
+	say "omcid $pids told to reload its configuration"
 
-	old=$(pidof omcid)
-	if [ -n "$old" ]; then
-		# shellcheck disable=SC2086 # one pid per word
-		kill $old 2>/dev/null
-		i=0
-		while [ "$i" -lt "$STOP_WAIT" ] && pidof omcid > /dev/null 2>&1; do
-			sleep 1
-			i=$((i + 1))
-		done
-		if pidof omcid > /dev/null 2>&1; then
-			# A process that will not deregister is worse than one that
-			# was killed: a new omcid refuses to start while a live one
-			# holds redirect type 1.
-			say "omcid $old did not stop on SIGTERM, killing it"
-			# shellcheck disable=SC2086
-			kill -9 $old 2>/dev/null
-			sleep 1
-		fi
-		say "omcid $old stopped"
+	# The acknowledgement: a new run appears in the status file. A daemon
+	# that never writes one is an older build, where SIGHUP means stop.
+	i=0
+	while :; do
+		id=$(status_get id)
+		[ -n "$id" ] && [ "$id" != "$before" ] && break
+		[ "$i" -lt "$ACK_WAIT" ] || die "omcid did not answer the signal within ${ACK_WAIT} s (an older build treats SIGHUP as stop; init respawns it)"
+		sleep 1
+		i=$((i + 1))
+	done
+
+	# The outcome, bounded. Counted in iterations of one second: this is
+	# also what runs under the test fixture, where uptime is a constant.
+	i=0
+	while [ "$(status_get state)" != "done" ] && [ "$i" -lt "$wait_s" ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+
+	changed=$(status_get changed) result=$(status_get result)
+	keys=$(status_get keys)
+	if [ "$(status_get state)" != "done" ]; then
+		say "$changed: still working after ${wait_s} s (${result}); omcid carries on and logs event=reload_done when it ends"
+		return 0
 	fi
-
-	# Its own session and no terminal, so no SIGHUP can reach it: omcid
-	# treats SIGHUP as stop. -r clears the bridge connections the old one
-	# left in the switch before this one builds its own.
-	setsid "$OMCID" -a -d -r >> "$OMCID_LOG" 2>&1 < /dev/null &
-
-	# The wait for registration, the PLOAM password re-apply, the hold and
-	# the final gponact are the tail svc-omcid.sh's automatic
-	# re-provisioning (docs/BOOT.md) also runs, after a respawn -- shared
-	# as rcs-lib.sh's omci_reactivate rather than kept as a second copy.
-	new=$(omci_reactivate "$t0" "$REGISTER_WAIT" "$DEACT_HOLD") \
-		|| die "gponact FAILED: the ONU stays off the line until a reboot"
-	if [ -n "$new" ]; then
-		say "omcid $new registered for OMCI"
-	else
-		say "omcid did not register within ${REGISTER_WAIT} s -- activating anyway, see $OMCID_LOG" >&2
-	fi
-	say "ONU re-activated; the OLT provisions it again within about a minute"
-	[ -n "$new" ] || exit 1
+	dur=$(secs "$(status_get duration_ms)")
+	case "$changed:$result" in
+	none:ok)
+		say "nothing changed in the store; nothing done" ;;
+	vlan:ok)
+		say "VLAN handling changed ($keys): connections rebuilt in place in ${dur} s, the ONU stayed in O5" ;;
+	identity:ok)
+		say "identity changed ($keys): the ONU re-registered and is back in O5 with $(status_get services) service(s) after $(secs "$(status_get o5_ms)") s (omcid $(status_get duration_ms) ms in all)" ;;
+	*)
+		say "$changed ($keys): $result after ${dur} s -- see /var/log/omcid.log (event=reload_done)" >&2
+		case $result in
+		failed)         say "the driver refused a step; the ONU may be off the line until the next reload or a reboot" >&2 ;;
+		timeout)        say "the ONU did not reach O5 in time; the OLT may not know the new identity" >&2 ;;
+		no_services)    say "the ONU is in O5 but the OLT built no services" >&2 ;;
+		sn_not_applied) say "the ONU is back, but the driver did not take the new serial number" >&2 ;;
+		esac
+		return 1 ;;
+	esac
 }
 
 # restart_respawn <name>: kill whatever is running under this daemon's
@@ -168,9 +191,9 @@ ntp() {
 
 case "${1:-}" in
 network) network ;;
-omci)    omci ;;
+omci)    shift; omci "$@" || exit 1 ;;
 syslog)  syslog ;;
 ntp)     ntp ;;
-*)       echo "usage: $0 network|omci|syslog|ntp" >&2; exit 1 ;;
+*)       echo "usage: $0 network|omci [seconds]|syslog|ntp" >&2; exit 1 ;;
 esac
 exit 0

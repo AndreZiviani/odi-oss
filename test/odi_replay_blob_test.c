@@ -309,8 +309,41 @@ static void test_gpon_init_apply(void)
 	odi_replay_fw_release(&fw);
 }
 
+/* A serial number set after boot rewrites the armed slot and nothing else:
+ * the six message words between the two USF_PLOAM_TX_CTL writes, the four
+ * serial words carrying the new number. */
+static void test_gpon_init_apply_serial(void)
+{
+	static const uint8_t sn[8] = { 'O', 'D', 'I', 'Y', 0xa1, 0xb2, 0xc3, 0xd4 };
+	struct odi_replay_fw fw;
+	unsigned int i;
+
+	if (odi_replay_fw_load(ODI_REPLAY_TABLE_GPON_INIT, &fw)) {
+		CHECK(0, "test setup: gpon_init.bin loads");
+		return;
+	}
+	odi_mock_reset();
+	CHECK(odi_gpon_init_apply_serial(&fw.blob, sn) == 8U,
+	      "serial rearm: eight records, the CTL open, six words, the CTL arm");
+	odi_mock_table_flush();
+	CHECK(odi_mock.log_n == 8U, "serial rearm: eight register writes");
+	if (odi_mock.log_n == 8U) {
+		CHECK(odi_mock.log[0].addr == 0x7050c0U && odi_mock.log[0].val == 0x600U,
+		      "serial rearm: opens the slot");
+		CHECK(odi_mock.log[7].addr == 0x7050c0U && odi_mock.log[7].val == 0x601U,
+		      "serial rearm: arms it");
+		for (i = 0; i < 4U; i++)
+			CHECK(odi_mock.log[2U + i].addr == GPON_SN_WORD1_OFF + 4U * i &&
+			      odi_mock.log[2U + i].val ==
+				      (((uint32_t)sn[2U * i] << 8) | sn[2U * i + 1U]),
+			      "serial rearm: a serial word carries the new number");
+	}
+	odi_replay_fw_release(&fw);
+}
+
 int main(void)
 {
+	test_gpon_init_apply_serial();
 	test_shipped_tables_parse();
 	test_missing_file();
 	test_header_defects();

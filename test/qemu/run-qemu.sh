@@ -240,6 +240,51 @@ done
 [ "$n" -gt 0 ] || fail "logread has no omcid event=mib_reset line"
 echo "  kernel and omcid event lines both in logread"
 
+say "scenario: apply.sh omci reloads the running omcid on SIGHUP -- one pid, no second omcid, ever"
+# The bug this pins (hardware, 2026-09-29): apply.sh omci stopped omcid and
+# started its OWN beside the one init respawns, so every respawn found it
+# running, exited 1 and forced the ONU down and up again -- 44 exits in two
+# minutes, never reaching O5. apply.sh now only signals; omcid rereads the
+# store itself. Under the real inittab: the pid is the same before and after
+# every apply, its parent is init, there is exactly one omcid at any time,
+# and omcid.log holds no second start. This kernel has no /proc/odi_init, so
+# an identity change is refused by the driver step and reported as failed --
+# which still must not restart anything.
+omcid_pids() { sshx 'pidof omcid' 2>/dev/null || true; }
+pid0=$(omcid_pids)
+[ -n "$pid0" ] && [ "$(echo "$pid0" | wc -w | tr -d ' ')" = 1 ] || fail "want exactly one omcid before the scenario, got: $pid0"
+starts0=$(sshx 'grep -c "event=start " /var/log/omcid.log')
+ppid=$(sshx "sed 's/^[0-9]* ([^)]*) . \([0-9]*\) .*/\1/' /proc/$pid0/stat")
+[ "$ppid" = 1 ] || fail "omcid ($pid0) is not a child of init (parent $ppid)"
+out=$(sshx '/etc/scripts/apply.sh omci') || fail "apply.sh omci with nothing changed failed: $out"
+echo "$out" | grep -q 'nothing changed' || fail "apply.sh omci did not say nothing changed: $out"
+echo "  unchanged store: $(echo "$out" | tail -n 1)"
+# The four VLAN keys, added to the store the way the stock file carries them.
+sshx 'sed -i "s#</Config>#\t<Value Name=\"VLAN_CFG_TYPE\" Value=\"1\"/>\n\t<Value Name=\"VLAN_MANU_MODE\" Value=\"1\"/>\n\t<Value Name=\"VLAN_MANU_TAG_VID\" Value=\"77\"/>\n\t<Value Name=\"VLAN_MANU_TAG_PRI\" Value=\"0\"/>\n</Config>#" /var/config/lastgood.xml'
+out=$(sshx '/etc/scripts/apply.sh omci') || fail "apply.sh omci after a VLAN change failed: $out"
+echo "$out" | grep -q 'VLAN handling changed (VLAN_CFG_TYPE,VLAN_MANU_MODE,VLAN_MANU_TAG_VID,VLAN_MANU_TAG_PRI): connections rebuilt in place' || fail "apply.sh omci did not report an in-place VLAN rebuild: $out"
+echo "  VLAN keys changed: $(echo "$out" | tail -n 1)"
+[ "$(omcid_pids)" = "$pid0" ] || fail "omcid pid changed across a VLAN apply: $pid0 -> $(omcid_pids)"
+sshx '/etc/scripts/flash set OMCI_UNKNOWN_ME_OK 1' >/dev/null
+rc=0
+out=$(sshx '/etc/scripts/apply.sh omci' 2>&1) || rc=$?
+[ "$rc" = 1 ] || fail "apply.sh omci with an identity change and no PON verbs should exit 1, got $rc: $out"
+echo "$out" | grep -q 'identity (OMCI_UNKNOWN_ME_OK): failed' || fail "apply.sh omci did not name the failed identity reload: $out"
+echo "  identity key, no /proc/odi_init: refused and reported ($(echo "$out" | tail -n 2 | head -n 1))"
+sshx '/etc/scripts/flash set OMCI_UNKNOWN_ME_OK ""' >/dev/null
+sleep 5
+[ "$(omcid_pids)" = "$pid0" ] || fail "omcid pid changed (a respawn, or a second one): $pid0 -> $(omcid_pids)"
+starts1=$(sshx 'grep -c "event=start " /var/log/omcid.log')
+[ "$starts1" = "$starts0" ] || fail "omcid.log holds $((starts1 - starts0)) new event=start line(s): omcid was started again"
+n=0
+for _ in 1 2 3 4 5; do
+	n=$(sshx 'logread | grep -c "daemon.notice omcid\[[0-9]*\]: event=reload changed=vlan action=rebuild"' 2>/dev/null) || n=0
+	[ "$n" -gt 0 ] && break
+	sleep 1
+done
+[ "$n" -gt 0 ] || fail "logread has no omcid event=reload line"
+echo "  pid $pid0 throughout (child of init), no new event=start, the reload lines reached logread"
+
 say "scenario: NTP_SERVER syncs the guest clock (opt-in, skips if no host responder)"
 # The guest config fixture (build-initramfs.sh) sets NTP_SERVER=10.0.2.2,
 # the qemu user-net gateway address -- SLIRP maps it straight to the host

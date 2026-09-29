@@ -34,7 +34,7 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `flash` | CLI: the config store | confd, you | `/var/config/lastgood*.xml` | stderr | -- |
 | `fwu.sh` | CLI: flash one slot | you, `fwu_starter.sh` (from the image tarball) | mtd `k0`/`r0` or `k1`/`r1` | stdout | -- |
 | `fwu_starter.sh` | CLI: write an uploaded tarball to the inactive slot | confd, you | runs `fwu.sh` from the tarball | `/tmp/fwu.log`, `/tmp/fwu.state` | -- |
-| `apply.sh` | CLI: apply saved settings without a reboot | confd, you | `network.sh addr`; `/proc/odi_init`, omcid | stdout | -- |
+| `apply.sh` | CLI: apply saved settings without a reboot | confd, you | `network.sh addr`; SIGHUP to omcid | stdout | -- |
 | `diag-bundle.sh` | CLI: the diagnostics bundle, secrets redacted | confd (`GET /api/diag`), you | reads logs, `/proc`, `nv`, the exporter | the tar.gz it writes | -- |
 
 Every daemon -- `omcid`, `confd`, `metricsd`, `dropbear` -- and the serial
@@ -124,10 +124,11 @@ their VLAN rules, over the odi_omci netlink command path into the
 daemon that decides whether the OLT sees a working ONU.
 
     omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state] [-g file]
+          [-i file] [-j seconds]
 
     -a          program the switch (apply mode); without it, dry run
     -r          restart: first remove every bridge connection a previous
-                omcid left in the switch (with -a; apply.sh passes it)
+                omcid left in the switch (with -a)
     -d          daemon: no frame or idle limit
     -w units    exit after this many idle 5 s units (default 24)
     -c hex      use this capability blob instead of the driver one
@@ -136,6 +137,9 @@ daemon that decides whether the OLT sees a working ONU.
                 without re-registration")
     -g file     read the Alloc-IDs and the serial from this file instead
                 of /proc/odi_gpon (test only)
+    -i file     append the driver verbs of a reload to this file instead of
+                writing /proc/odi_init (test only)
+    -j seconds  how long a reload waits for O5 (default 150; test only)
     -f          start even if a live process holds redirect type 1
     -h          this text; starts nothing
 
@@ -145,13 +149,13 @@ starting empty -- see docs/BOOT.md, "Resume without re-registration". That
 snapshot is written after every Create, Set or Delete, and deleted on a
 MIB reset; none of it is a command-line concern beyond `-s`.
 
-rcS runs `/bin/omcid -a -d >> /var/log/omcid.log 2>&1 &` when
-`/proc/odi_omci` is writable (the switch driver is there) and
-`/etc/config/modules.off` is absent. Arguments are matched whole;
+init runs `/etc/scripts/svc-omcid.sh`, a `respawn` entry that execs
+`/bin/omcid -a -d` into `/var/log/omcid.log`, unless
+`/etc/config/modules.off` is set; nothing else starts an omcid. Arguments are matched whole;
 anything unrecognised exits before a socket is opened, and a second omcid
 refuses to start while a live one holds redirect type 1 (`-f` overrides).
 
-It reads, from the config store, once at start: the manual VLAN
+It reads, from the config store, at start and again on SIGHUP (below): the manual VLAN
 (`VLAN_MANU_TAG_VID` and `VLAN_MANU_TAG_PRI`, applied only with
 `VLAN_CFG_TYPE` 1 and `VLAN_MANU_MODE` 1, as the stock firmware gates them;
 any other mode is transparent, `docs/SETTINGS.md`, "VLAN handling"),
@@ -168,8 +172,8 @@ download and discards the image, reject refuses it; it never flashes and never
 reboots (docs/SETTINGS.md, "Software download from the OLT"). Each key is
 looked up in both store files, the one xmlconfig assigns it to first. Its
 start-up line in the log says what it found (`store: loid ..., manual vlan
-..., identity report ...`). A change takes effect with `apply.sh omci`;
-`docs/SETTINGS.md` has what each one does.
+..., identity report ...`). A change takes effect with `apply.sh omci`, which
+sends the SIGHUP; `docs/SETTINGS.md` has what each one does.
 
 The T-CONT Alloc-IDs are the OLT's own. A T-CONT (ME 262) the OLT set over
 OMCI keeps the Alloc-ID it was set to (G.988 9.2.2). One it never set -- ISP1
@@ -187,11 +191,43 @@ call to `/var/log/omcid.log`, about 1.7 MB a day on a busy OLT before the
 trim. `omcli` and `omcicli` are its clients; `cat /proc/odi_omci` shows the
 kernel side (who holds each redirect type, frames delivered and dropped).
 
-On SIGINT, SIGTERM or **SIGHUP** it deregisters from the OMCI channel and
-exits, so start it detached from your ssh session (see "Restarting a
-daemon" below). While it is not running the OLT's OMCI goes unanswered;
-after a restart it starts with an empty MIB and keeps the switch
-programming already in place until the OLT provisions it again.
+On SIGINT or SIGTERM it deregisters from the OMCI channel and exits, and init
+respawns it (see "Restarting a daemon" below). While it is not running the
+OLT's OMCI goes unanswered; after a respawn it resumes from its snapshot or
+starts with an empty MIB and keeps the switch programming already in place
+until the OLT provisions it again.
+
+**SIGHUP rereads the config store**, the Unix convention for a reload, and is
+what `apply.sh omci` sends. The handler sets a flag and the main loop does the
+work, so a second SIGHUP during a reload is folded into one more reload and the
+watchdog ping never stops. omcid compares what it reads with what it is
+running (only what the OLT or a connection would see: with the identity
+switch off the report keys do not count) and does the least that applies:
+
+| what changed | what omcid does | the ONU |
+|---|---|---|
+| nothing | logs `event=reload changed=none` | untouched |
+| only `VLAN_CFG_TYPE`, `VLAN_MANU_MODE`, `VLAN_MANU_TAG_VID`, `VLAN_MANU_TAG_PRI` | tears the bridge connections down and builds them again from the MIB it holds, by the same `bdgconn_rebuild()` the first build uses | stays in O5, nothing re-ranged |
+| `GPON_SN`, `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity switch, `OMCI_UNKNOWN_ME_OK` (with or without VLAN keys) | writes `gpondeact` to `/proc/odi_init`, clears its MIB as a MIB reset does (`event=mib_reset side=local`), holds three seconds, hands the driver the serial number (`gponsn`, only if it changed) and the password (`gponpw`), writes `gponact`, and waits for O5 and the services | deactivated and ranged again; the process is never restarted |
+
+The re-registration is a state machine advanced by the main loop, so no step
+sleeps: the CLI, the queues and the watchdog ping are served while the ONU is
+down. It ends when `/proc/odi_gpon` says O5 and at least one service exists,
+at `result=timeout` (O5 not reached) or `result=no_services` after 150 s, or
+at `result=failed` when the driver refused `gpondeact` (nothing was touched,
+and omcid goes back to the values it was running with, so the next SIGHUP
+tries again) or `gponact` (the ONU is left off the line). A refused `gponsn`
+does not stop the activation: the ONU comes back on the old serial number and
+the result is `sn_not_applied`. The serial number is rewritten into the
+PLOAM slot the boot activation armed, and only while the ONU is deactivated.
+
+Three event lines tell the story (below): `event=reload changed=... action=...
+keys=...` (key names, never values), `event=reload_step verb=... rc=...` for
+each driver verb, and `event=reload_done ... result=... duration_s=...
+[o5_s=...] services=N`. They are never rate limited. `/var/run/omcid-reload`
+holds the same outcome for `apply.sh` (`id` pid.sequence, `state`, `changed`,
+`action`, `result`, `keys`, `duration_ms`, `o5_ms`, `services`), replaced whole
+by a rename; omcid removes a stale one at start.
 
 ### `confd` -- the web UI
 
@@ -614,15 +650,26 @@ output in `/tmp/fwu.log` and its outcome in `/tmp/fwu.state` (`running`,
 
 `network` runs `network.sh addr -n` to print the plan, then `network.sh addr`
 one second later, detached -- moving the primary address drops the
-connection that asked for it, so the answer leaves first. `omci` writes
-`gpondeact` to `/proc/odi_init`, stops omcid (SIGTERM, `kill -9` after 10 s),
-starts `setsid /bin/omcid -a -d -r` and waits for it to register, re-sends the
-PLOAM password the way rcS does (`gponpw`, from the CS file, skipped when
-empty), and after at least three seconds deactivated writes `gponact`. The
-OLT then ranges the ONU and provisions it again. Refuses with
-`/etc/config/modules.off`. Exits non-zero when omcid did not register (the
-ONU is re-activated anyway). Serial number changes are not applied: those
-need a reboot.
+connection that asked for it, so the answer leaves first. `omci [seconds]`
+sends SIGHUP to the running omcid (`pidof omcid`) and waits for its answer in
+`/var/run/omcid-reload`: first that omcid took the signal (5 s), then the
+outcome (20 s, `APPLY_WAIT` or the argument; the web UI gives the script 25).
+omcid decides what the change needs (the table under `omcid`): nothing, a
+VLAN rebuild in place, or a re-registration. The report says which:
+
+    apply: omcid 412 told to reload its configuration
+    apply: VLAN handling changed (VLAN_MANU_TAG_VID): connections rebuilt in place in 0.4 s, the ONU stayed in O5
+
+    apply: identity changed (GPON_SN): the ONU re-registered and is back in O5 with 6 service(s) after 41.3 s (omcid 44700 ms in all)
+
+A re-registration still running at the bound is reported as still working and
+is not a failure. Exit 1 when no omcid runs (or `/etc/config/modules.off` is
+set), when omcid does not answer the signal within 5 s (an older build treats
+SIGHUP as stop), or when the reload's result is `failed`, `timeout`,
+`no_services` or `sn_not_applied`. It never starts an omcid and writes
+nothing to the driver: init owns the process, and a second omcid started here
+used to make the ONU cycle through O1 to O3 while init's respawn entry
+re-provisioned around it.
 
 ### `diag-bundle.sh` -- the diagnostics bundle
 
@@ -731,7 +778,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `odi_gpon: event=onu_state from=O5 to=O2 in_state_s=3605.120 cause=deactivate_onu_id side=olt onu_id=0` | notice when leaving O5 or entering O7, else info | every ONU state change: the state left, how long it lasted, and why |
 | `odi_gpon: event=los state=on onu_state=O5` | notice | the downstream LOS bit set; sampled at every GPON interrupt and every BER interval (10 s on both ISPs), which keeps running in O5 when the light goes |
 | `odi_gpon: event=los state=off lasted_s=42.310 onu_state=O5` | info | the LOS bit clear again |
-| `omcid: event=start run=boot mode=reregister reason=not_o5 onu_state=O2 rows=0` | notice on `run=restart`, else info | omcid starting: the first start of the boot or a later one (a respawn, `apply.sh omci`), and whether it resumed from its snapshot (`mode=resume`) or starts empty for the OLT to re-provision; `reason` is `not_o5`, `no_snapshot`, `bad_snapshot` or `other_device` |
+| `omcid: event=start run=boot mode=reregister reason=not_o5 onu_state=O2 rows=0` | notice on `run=restart`, else info | omcid starting: the first start of the boot or a later one (a respawn), and whether it resumed from its snapshot (`mode=resume`) or starts empty for the OLT to re-provision; `reason` is `not_o5`, `no_snapshot`, `bad_snapshot` or `other_device` |
 | `omcid: event=mib_reset side=olt rows=161 mib_data_sync=184 services=6` | notice | a MIB reset: `side=olt` from the OLT, `side=local` from `omcicli mib reset`; what it threw away |
 | `omcid: event=mib_upload_begin entities=301` / `event=mib_upload_end entities=301 duration_s=0.009` | info | the OLT reading the MIB back; an upload it abandons has no end line |
 | `omcid: event=provision_begin op=set class=256 inst=0 after_mib_reset=1` | info | the first Create, Set or Delete of a burst; `after_mib_reset=1` is a full re-provisioning |
@@ -742,6 +789,9 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=unknown_me class=351 op=create mt=4` | notice | the first request this boot for a managed entity class omcid has no model for, per class and operation (`op` is `create`, `set`, `get`, `delete`, `get_next` or `test`; `mt` the message type); answered "unknown entity" unless `OMCI_UNKNOWN_ME_OK=1` (docs/SETTINGS.md) |
 | `omcid: event=unknown_msg type=17 class=256` | notice | the first frame this boot of a message type omcid does not handle, per type, with the class of that first frame; answered "not supported" |
 | `omcid: event=vlan_fwdop code=0x06 inst=18 result=unsupported built_as=0x10` | notice | a class 84 forward operation no bridge rule can express (negative filtering, filtering by TCI and MAC address, a code past G.988 table 9.3.11-1): built as 0x10 instead, once per code per omcid run |
+| `omcid: event=reload changed=vlan action=rebuild keys=VLAN_MANU_TAG_VID` | notice | omcid took a SIGHUP (`apply.sh omci`) and reread the store: `changed` is `none`, `vlan` (bridge connections rebuilt in place, the ONU stays in O5) or `identity` (`action=reregister`: the ONU is deactivated and ranged again); `keys` names the store keys that differ, never their values. Never rate limited |
+| `omcid: event=reload_step verb=gponsn rc=0` | info, notice when `rc` is not 0 | one driver verb of a re-registration (`gpondeact`, `gponsn`, `gponpw`, `gponact`) and its errno (0 is success) |
+| `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 
 `cause` and `side` on `event=onu_state`:
@@ -756,7 +806,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `to1_expired` | timer | O3 or O4 to O2: the OLT did not finish ranging within TO1 (10 s) |
 | `to2_expired` | timer | O6 to O1: no POPUP within TO2 |
 | `los`, `los_cleared` | line | loss of signal; not wired to the state machine today (`event=los` reports the bit instead), listed for when it is |
-| `gponact`, `gpondeact` | local | this side: the boot activation, a respawn re-provisioning (`omci-respawn-reprovision.sh`), `apply.sh omci`, or a write to `/proc/odi_init` by hand |
+| `gponact`, `gpondeact` | local | this side: the boot activation, a respawn re-provisioning (`omci-respawn-reprovision.sh`), a re-registration omcid makes on SIGHUP (`apply.sh omci`), or a write to `/proc/odi_init` by hand |
 | `ploam_other`, `ploam_unknown` | olt | a transition after any other downstream message; not expected |
 
 Reading an outage:
@@ -766,6 +816,10 @@ Reading an outage:
 - `event=onu_state from=O5 ... cause=deactivate_onu_id side=olt` with no LOS:
   the OLT dropped this ONU. A `mib_reset side=olt` and a provisioning burst
   follow if it re-provisions.
+- `event=reload changed=identity ...` from omcid, then `cause=gpondeact
+  side=local` and, some seconds later, the OLT ranging the ONU again and
+  `event=reload_done result=ok`: `apply.sh omci` re-registered the ONU after an
+  identity key changed, and the process never restarted (no `event=start`).
 - `event=start run=restart mode=reregister` from omcid, then
   `from=O5 ... cause=gpondeact side=local`: omcid died and this side forced
   the re-registration. `mode=resume` and no state change: omcid died and
@@ -804,8 +858,8 @@ every 10 s) stays well under either.
 Since v1.0.4, all four (metricsd, confd, dropbear, omcid) are `respawn`
 entries in `/etc/inittab` (`docs/SETTINGS.md`, "native over hand-rolled"):
 busybox init, which forked each one itself, restarts it the instant it
-exits -- there is no session to SIGHUP any more, since the daemon is a
-child of init (pid 1), never of your ssh session. So the plain way to
+exits -- no session hang-up can reach the daemon, since it is a child of
+init (pid 1), never of your ssh session. So the plain way to
 restart one is just to kill it:
 
     kill $(pidof metricsd)
@@ -817,11 +871,16 @@ For dropbear, kill the listening process (the one without `-2` in `ps`);
 open sessions are separate processes and stay up.
 
 After an omcid restart, check `cat /proc/odi_omci` shows `registered:
-type=1` with the new pid, and `omcli state`. The new omcid has an empty
-MIB until the OLT provisions again, so settings it reads from the MIB or
-the config store are not re-applied by a restart alone.
-`/etc/scripts/apply.sh omci` is the restart that does re-apply them: it
-re-ranges the ONU around the restart, and interrupts internet for it.
+type=1` with the new pid, and `omcli state`. The new omcid resumes from its
+snapshot when the ONU is still in O5, and otherwise has an empty MIB until
+the OLT provisions again. To make it reread the config store there is no
+need to restart it: `kill -HUP $(pidof omcid)` does that, and
+`/etc/scripts/apply.sh omci` is the same signal with a report of the outcome
+(a VLAN change is rebuilt in place, an identity change re-registers the ONU
+and interrupts internet for it). Do not start an omcid by hand next to the
+one init runs: the second refuses to start while the first holds the OMCI
+channel, and one started with `-f` takes it and leaves init's respawn entry
+re-provisioning around a stranger.
 
 `/etc/init.d/services {stop|start} <name>` (metricsd, confd, dropbear or
 omcid) is for turning one off across restarts: `stop` writes
@@ -838,8 +897,7 @@ this repository:
 
 - `omcicap` takes the OMCI channel from omcid (it refuses without `-f`), and
   `omciprobe -f` writes behind omcid's back.
-- Killing omcid, or letting an ssh session hang it up, leaves the OLT
-  unanswered until it is started again.
+- Killing omcid leaves the OLT unanswered until init has respawned it.
 - `diag register set` and writes to `/proc/odi_init` or `/proc/odi_omci`
   reprogram the hardware under a running stack.
 - `igmpd -w` (the daemon or `-j`/`-l`) writes static L2 multicast entries.

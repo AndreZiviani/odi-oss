@@ -22,6 +22,10 @@
  * loop; a missing /dev/log (qemu, a shell with syslogd stopped) costs the
  * syslog copy and nothing else.
  *
+ * The reload lines (below) are the exception: an operator's SIGHUP is what
+ * makes one, apply.sh reads the outcome elsewhere, and a reload that
+ * finishes must always be logged as finished.
+ *
  * Rate limited, since a misbehaving OLT can repeat any of these: at most
  * EV_BURST lines per EV_WINDOW_S, and the first line of the next window says
  * how many were dropped (event=suppressed), as the kernel's ratelimit does.
@@ -254,6 +258,53 @@ void ev_start(int restart, int resumed, const char *why, uint32_t onu_state)
 	ev_state(&e, onu_state);
 	ev_num(&e, "rows", (unsigned long)mib_count());
 	ev_emit(&e, restart ? EV_SEV_NOTICE : EV_SEV_INFO);
+}
+
+/* A config reload on SIGHUP (reload.c). Three lines, never rate limited
+ * (a reload is an operator's act):
+ *
+ *   event=reload changed=<none|vlan|identity> action=<none|rebuild|reregister>
+ *                keys=<store key names>
+ *   event=reload_step verb=<gpondeact|gponsn|gponpw|gponact> rc=<errno>
+ *   event=reload_done changed=.. action=.. result=<ok|failed|timeout|
+ *                no_services|sn_not_applied> duration_s=.. [o5_s=..] services=..
+ */
+void ev_reload(const char *changed, const char *action, const char *keys)
+{
+	struct evline e;
+
+	ev_begin(&e, "reload");
+	ev_str(&e, "changed", changed);
+	ev_str(&e, "action", action);
+	if (keys && keys[0])
+		ev_str(&e, "keys", keys);
+	ev_write(&e, EV_SEV_NOTICE);
+}
+
+void ev_reload_step(const char *verb, long rc)
+{
+	struct evline e;
+
+	ev_begin(&e, "reload_step");
+	ev_str(&e, "verb", verb);
+	ev_num(&e, "rc", (unsigned long)(rc < 0 ? -rc : rc));
+	ev_write(&e, rc ? EV_SEV_NOTICE : EV_SEV_INFO);
+}
+
+void ev_reload_done(const char *changed, const char *action, const char *result,
+		    long duration_ms, long o5_ms, unsigned services)
+{
+	struct evline e;
+
+	ev_begin(&e, "reload_done");
+	ev_str(&e, "changed", changed);
+	ev_str(&e, "action", action);
+	ev_str(&e, "result", result);
+	ev_secs(&e, "duration_s", duration_ms);
+	if (o5_ms >= 0)
+		ev_secs(&e, "o5_s", o5_ms);
+	ev_num(&e, "services", services);
+	ev_write(&e, EV_SEV_NOTICE);
 }
 
 /* The provisioning burst: the first Create/Set/Delete opens it, EV_PROV_QUIET_S

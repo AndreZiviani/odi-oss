@@ -29,22 +29,57 @@ classes, in this document and beside it in the UI:
 
 | class | meaning | how it is applied |
 |---|---|---|
-| **LIVE** | takes effect at once, no interruption | `apply.sh network`; the UI runs it straight after the save |
+| **LIVE** | takes effect at once, no interruption | `apply.sh network` (the management addresses) or `apply.sh omci` (the four VLAN keys, rebuilt in place); the UI runs it straight after the save |
 | **SERVICE RESTART** | a daemon restarts; the fibre service stays up | `apply.sh syslog`/`apply.sh ntp` |
 | **INTERRUPTS INTERNET** | applied without a reboot, but the fibre service drops while it is | `apply.sh omci`; the UI offers "Apply now" behind a confirmation |
 | **REBOOT** | read only at boot | a reboot; the UI offers "Reboot now" behind a confirmation |
 
-**What INTERRUPTS INTERNET costs.** `apply.sh omci` deactivates the ONU,
-restarts omcid, and re-activates it: the OLT sees the ONU range again,
-resets its MIB and provisions every service from scratch, and the new omcid
-builds them with the settings as they now are. Measured on ISP1 with the
-6.18 kernel: the ONU was back at O5, with its six OMCI services provisioned
-again and one omcid running, about 13 s after `apply.sh omci` started. The
-provisioning after the re-activation takes as long as the OLT takes, so
-another OLT may be slower.
-Without the re-activation a restart would change nothing the OLT sees:
-omcid reads the store once, at start, and builds connections only when the
-OLT provisions them.
+**How apply works (`apply.sh omci`).** The script sends SIGHUP to the
+running omcid, the Unix convention for "reread your configuration", and
+waits for its answer; it never starts or restarts an omcid, init owns the
+process. omcid rereads the store and compares it with what it is running:
+
+- **Nothing changed**: logged (`event=reload changed=none`), nothing done.
+- **Only the four VLAN keys changed** (`VLAN_CFG_TYPE`, `VLAN_MANU_MODE`
+  including transparent mode 0, `VLAN_MANU_TAG_VID`, `VLAN_MANU_TAG_PRI`):
+  omcid tears the bridge connections down and builds them again from the MIB
+  it holds, by the same code as the first build. The ONU stays in O5 and is
+  not re-ranged: **LIVE**. The rules it builds are the ones a fresh omcid
+  builds from the same MIB and store (`src/omci/reload-test.sh` compares them
+  byte for byte).
+- **Anything the OLT must see again** changed (`GPON_SN`,
+  `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`,
+  `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity
+  switch, `OMCI_UNKNOWN_ME_OK`): **INTERRUPTS INTERNET**. omcid itself writes
+  `gpondeact`, clears its MIB as a MIB reset does, holds three seconds, gives
+  the driver the new serial number and password (`gponsn`, `gponpw`, the
+  same verbs rcS writes at boot), writes `gponact`, and the OLT sees the ONU
+  range again, resets its MIB and provisions every service from scratch. The
+  process stays up: no respawn, no snapshot resume, no second omcid. The
+  report keys count only while the identity switch is on, since with it off
+  they are stored and shown, never sent.
+
+The script reports which of the three happened and, for a re-registration,
+how long until the ONU was back in O5 with services; it waits 20 s by
+default (`APPLY_WAIT`), inside the 25 s the web UI gives it, and a
+re-registration still running then is reported as running, not as failed.
+Exit 1: no omcid running, no answer to the signal, or a `failed`, `timeout`,
+`no_services` or `sn_not_applied` result (`docs/TOOLS.md`, "omcid"). Every
+step is an `event=reload` line in syslog (`docs/TOOLS.md`, "Link and
+provisioning events").
+
+A serial number is applied by rewriting the PLOAM slot the boot activation
+armed, which the driver allows only while the ONU is deactivated; the
+password is read by the driver at every Request_Password, so it needs only
+the verb. Measured on ISP1 with the 6.18 kernel, for the earlier apply that
+restarted omcid: the ONU back at O5 with its six services about 13 s after
+the command. The in-daemon re-registration writes the same kernel verbs and
+has not been timed on a stick yet (below, "Not verified yet").
+The earlier apply started a second omcid beside the one init respawns, and
+each respawn found the first still running and forced the line down and up
+again: 44 forced re-activations in two minutes, the ONU cycling O1 to O3 and
+never reaching O5. There is one omcid now, and a genuine crash still
+respawns and re-provisions as before (`docs/BOOT.md`).
 
 **Every REBOOT also interrupts internet.** A reboot takes the ONU off the
 line: on ISP1, 75 to 81 s from `reboot` until userland confirms (the
@@ -62,22 +97,22 @@ The UI's reboot confirmation says which slot it comes back on.
 | `LAN_ENABLE_IP2` | Second management address | 1 adds a second address on `br0:2`, 0 removes it | `network.sh` | LIVE |
 | `LAN_IP_ADDR2` | Second management IP | that address (both sticks store 192.168.100.1) | `network.sh` | LIVE |
 | `LAN_SUBNET2` | Second management netmask | its netmask | `network.sh` | LIVE |
-| `VLAN_CFG_TYPE` | VLAN config mode | 1 lets the manual tag through; anything else is no manual tag | omcid | INTERRUPTS INTERNET |
-| `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid | INTERRUPTS INTERNET |
-| `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid | INTERRUPTS INTERNET |
-| `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of that tag | omcid | INTERRUPTS INTERNET |
-| `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password, stored as hex; empty means none is sent | rcS `gponpw auto`; `apply.sh omci` re-sends it | INTERRUPTS INTERNET |
-| `LOID`, `LOID_PASSWD` | LOID, LOID password | answered to CTC-profile OLTs in the LOID authentication entity | omcid | INTERRUPTS INTERNET |
-| `LOID_OLD`, `LOID_PASSWD_OLD` | LOID (in force) | the value actually answered when it differs from the one above | omcid | INTERRUPTS INTERNET |
-| `OMCI_SW_VER1`, `OMCI_SW_VER2` | Software version, image 0/1 | the version reported for each software image (ME 7 attribute 1, 14 characters) | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
-| `GPON_ONU_MODEL` | ONU model (identity) | the equipment id in ONU2-G (attribute 1, 20 characters) | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
-| `OMCC_VER` | OMCC version | ONU2-G attribute 2, decimal | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
-| `OMCI_VENDOR_PRODUCT_CODE` | Vendor product code | ONU2-G attribute 3, decimal | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
-| `ONU_HW_VERSION` | ONU hardware version (identity) | the Version in ONU-G (attribute 2, at most 14 printable ASCII characters), the hardware version some OLTs whitelist. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below) | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
+| `VLAN_CFG_TYPE` | VLAN config mode | 1 lets the manual tag through; anything else is no manual tag | omcid, on SIGHUP | LIVE |
+| `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
+| `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
+| `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of that tag | omcid, on SIGHUP | LIVE |
+| `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password, stored as hex; empty means none is sent | rcS `gponpw auto`; omcid re-sends it on a re-registration | INTERRUPTS INTERNET |
+| `LOID`, `LOID_PASSWD` | LOID, LOID password | answered to CTC-profile OLTs in the LOID authentication entity | omcid, on SIGHUP | INTERRUPTS INTERNET |
+| `LOID_OLD`, `LOID_PASSWD_OLD` | LOID (in force) | the value actually answered when it differs from the one above | omcid, on SIGHUP | INTERRUPTS INTERNET |
+| `OMCI_SW_VER1`, `OMCI_SW_VER2` | Software version, image 0/1 | the version reported for each software image (ME 7 attribute 1, 14 characters) | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
+| `GPON_ONU_MODEL` | ONU model (identity) | the equipment id in ONU2-G (attribute 1, 20 characters) | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
+| `OMCC_VER` | OMCC version | ONU2-G attribute 2, decimal | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
+| `OMCI_VENDOR_PRODUCT_CODE` | Vendor product code | ONU2-G attribute 3, decimal | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
+| `ONU_HW_VERSION` | ONU hardware version (identity) | the Version in ONU-G (attribute 2, at most 14 printable ASCII characters), the hardware version some OLTs whitelist. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below) | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
 | `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto` | REBOOT |
 | `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R` -- kernel messages and the link and provisioning `event=` lines included (docs/TOOLS.md, "Link and provisioning events"); empty means local only (the circular buffer, `logread`). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh syslog`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-syslogd.sh` | SERVICE RESTART |
-| `OMCI_UNKNOWN_ME_OK` | Answer unknown entities with success | `1` answers a Create, Set or Get of a managed entity class omcid has no model for with success instead of "unknown entity" (result 4), the counterpart of the stock `OMCI_FAKE_OK`; anything else, or absent, keeps the error. Default off. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). For an OLT that stalls its provisioning at an "unknown entity" answer; the risk is below | omcid, at start | INTERRUPTS INTERNET |
+| `OMCI_UNKNOWN_ME_OK` | Answer unknown entities with success | `1` answers a Create, Set or Get of a managed entity class omcid has no model for with success instead of "unknown entity" (result 4), the counterpart of the stock `OMCI_FAKE_OK`; anything else, or absent, keeps the error. Default off. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). For an OLT that stalls its provisioning at an "unknown entity" answer; the risk is below | omcid, at start and on SIGHUP | INTERRUPTS INTERNET |
 | `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh ntp`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-ntpd.sh` | SERVICE RESTART |
 | `OLT_SW_DOWNLOAD` | OLT software download | what omcid answers when the OLT pushes a software image: `accept` (the default, also when the key is absent, empty or any other value) answers every step with success and discards the image; `reject` answers "not supported", as omcid did before. Nothing is ever written to flash or the U-Boot environment and the stick never reboots, in either mode ("Software download from the OLT" below). Odi-only key, kept in `/etc/config/odi.conf` | omcid, at every Start software download, Activate and Commit | LIVE (the next download) |
 
@@ -274,7 +309,7 @@ the old answers.
 | control (tab) | on this image | apply |
 |---|---|---|
 | Save (Config) | writes the keys, reads each back, then applies LIVE ones and offers the rest | per key, above |
-| Apply now (save bar, OLT identity) | `apply.sh omci`, after a confirmation | INTERRUPTS INTERNET |
+| Apply now (save bar, OLT identity) | `apply.sh omci`, after a confirmation: omcid re-registers the ONU | INTERRUPTS INTERNET |
 | Reboot now (save bar, Firmware) | reboots, after a confirmation naming the slot it comes back on | REBOOT |
 | OLT identity switch (Config) | creates or removes `/etc/config/omci-identity.on` | INTERRUPTS INTERNET (with Apply now) |
 | Stock keys (tab) | the 163 keys only the stock firmware reads, read-only | -- |
@@ -562,8 +597,14 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
   yet; nor has `slot-state.sh` read a real environment (it is tested against
   a stub nv, on the host and under qemu).
 
-- `apply.sh omci` against more than one OLT: it was run end to end once, on
-  ISP1 (above).
+- The SIGHUP reload on a stick, both halves: the in-place VLAN rebuild (host
+  tested against the driver-call trace of both ISP sessions, never run against
+  the real switch) and the re-registration (the verbs, their order, the
+  timing, and above all a new `GPON_SN` reaching the line through the
+  rewritten PLOAM slot, which is host tested as a register sequence only). The
+  earlier apply, which restarted omcid, was run end to end once, on ISP1. The
+  signal handler returns to the kernel signal return (`omcid` has no libc), so
+  it is also the first omcid handler that does not exit.
 - `apply.sh network` moving the primary address on a stick. Adding and
   removing the second address live was checked on ISP1 (`br0:2` came and
   went, the primary address and O5 untouched); the host test drives a stub

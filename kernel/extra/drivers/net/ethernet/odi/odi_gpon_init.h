@@ -37,4 +37,14 @@ struct odi_replay_blob;	/* odi_replay_blob.h */
 void odi_gpon_init_apply(const struct odi_replay_blob *table,
 			 const uint8_t serial_number[8], const uint8_t password[10]);
 
+/* Writes a new serial number into the PLOAM slot the boot replay armed,
+ * after boot: only the run of records that arms that slot, not the whole
+ * table. The hardware answers the OLT ranging with what this slot holds, so
+ * a new serial number reaches the line only through it. Returns the
+ * records applied, 0 when the table has no such run. Same locking rules as
+ * odi_gpon_init_apply().
+ */
+unsigned int odi_gpon_init_apply_serial(const struct odi_replay_blob *table,
+					const uint8_t serial_number[8]);
+
 #endif /* ODI_GPON_INIT_H */

@@ -601,7 +601,8 @@ int odi_gpon_verb(const char *verb, const char *arg)
 	 * runs under odi_switch_lock (odi_init.c), and the flag is
 	 * checked again under odi_gpon_lock.
 	 */
-	if (!strcmp(verb, "gponact") && !READ_ONCE(odi_gpon_booted))
+	if ((!strcmp(verb, "gponact") && !READ_ONCE(odi_gpon_booted)) ||
+	    (!strcmp(verb, "gponsn") && READ_ONCE(odi_gpon_booted)))
 		init_fw_rc = odi_replay_fw_load(ODI_REPLAY_TABLE_GPON_INIT, &init_fw);
 
 	spin_lock_irqsave(&odi_gpon_lock, flags);
@@ -619,6 +620,21 @@ int odi_gpon_verb(const char *verb, const char *arg)
 		uint8_t sn[8];
 
 		rc = odi_gpon_parse_sn(arg, sn);
+		if (rc == 0 && odi_gpon_booted) {
+			/* After boot the serial number that reaches the line is
+			 * the one in the armed PLOAM slot, so a new one has to
+			 * rewrite that slot, and only while the ONU is
+			 * deactivated: the OLT assigns an ONU-ID to the serial
+			 * it heard, and the driver compares the next
+			 * assignment with the one it holds.
+			 */
+			if (odi_gpon_fsm_inst.state != ODI_GPON_STATE_O1)
+				rc = -EBUSY;
+			else if (init_fw_rc)
+				rc = init_fw_rc;
+			else if (!odi_gpon_init_apply_serial(&init_fw.blob, sn))
+				rc = -ENOENT;
+		}
 		if (rc == 0)
 			odi_gpon_fsm_set_serial_number(&odi_gpon_fsm_inst, sn);
 	} else if (!strcmp(verb, "gponpw")) {

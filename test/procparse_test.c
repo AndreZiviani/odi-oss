@@ -43,6 +43,19 @@ int main(void)
 	   "malformed entry skipped");
 	ok(holder("registered: type=1 pid=", 1, &pid) == 0, "truncated pid: not a hit");
 
+	puts("/proc/odi_gpon state line");
+	{
+		static const char f[] = "state 5 (O5)\nonu_id 26\n";
+		static const char g[] = "onu_id 26\nstate 1 (O1)\nsn 00\n";
+
+		ok(pp_gpon_state(f, (unsigned)strlen(f)) == 5, "state 5");
+		ok(pp_gpon_state(g, (unsigned)strlen(g)) == 1, "state on a later line");
+		ok(pp_gpon_state("state 12 (?)\n", 14) == -1, "two digits rejected");
+		ok(pp_gpon_state("state x\n", 8) == -1, "not a digit rejected");
+		ok(pp_gpon_state("last_los_ms 5 state 3\n", 22) == -1, "only at a line start");
+		ok(pp_gpon_state("", 0) == -1, "empty read: cannot tell");
+	}
+
 	puts("/proc/odi_gpon sn line");
 	{
 		static const char f[] = "state 5 (O5)\nonu_id 26\nsn 414243440011aaff00\n";

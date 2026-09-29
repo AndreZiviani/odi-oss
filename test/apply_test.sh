@@ -2,10 +2,13 @@
 #
 # rootfs/skeleton/etc/scripts/apply.sh, off the device.
 #
-# /proc/odi_init is a FIFO here with a reader that logs every verb written to
-# it, so the ORDER is what gets checked: deactivate, stop the old omcid, start
-# a new one with -r, password, activate. omcid is a stub that registers in a
-# fake /proc/odi_omci and waits for SIGTERM, as the real one deregisters on it.
+# apply.sh omci sends SIGHUP to the running omcid and reads the outcome from
+# the status file omcid writes. omcid here is a stub that traps SIGHUP and
+# writes the file the way src/omci/respond/reload.c does (its real behaviour
+# is src/omci/reload-test.sh). What is checked is the script: it never starts
+# an omcid, never touches the driver, sends the signal to the pid pidof
+# names, waits for a NEW run (a stale status file answers nothing), reports
+# each outcome, and is bounded when the daemon is silent or slow.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 A=$PWD/rootfs/skeleton/etc/scripts/apply.sh
@@ -16,70 +19,116 @@ t() {
 	else echo "FAIL  $1"; echo "        wanted /$2/, got:"; printf '%s\n' "$3" | sed 's/^/        /'; fail=$((fail + 1)); fi
 }
 mkdir -p "$T/bin"
-mkfifo "$T/odi_init"
-( while :; do cat "$T/odi_init" >> "$T/verbs" 2>/dev/null || break; done ) &
-reader=$!
-cleanup() { kill "$reader" 2>/dev/null; [ -f "$T/omcid.pid" ] && kill "$(cat "$T/omcid.pid")" 2>/dev/null; rm -rf "$T"; }
+cleanup() { [ -f "$T/omcid.pid" ] && kill "$(cat "$T/omcid.pid")" 2>/dev/null; rm -rf "$T"; }
 trap cleanup EXIT
 
-printf '#!/bin/sh\nexec "$@"\n' > "$T/bin/setsid"
+# pidof: the stub daemon, while it lives. A plain shell cannot name its own
+# processes, so the stub keeps its pid in a file.
 cat > "$T/bin/pidof" <<PIDOF
 #!/bin/sh
 [ -f "$T/omcid.pid" ] && p=\$(cat "$T/omcid.pid") && kill -0 "\$p" 2>/dev/null && { echo "\$p"; exit 0; }
 exit 1
 PIDOF
-cat > "$T/omcid" <<OMCID
+# setsid is how the old script started its own omcid; it logs itself and
+# runs the command, so the network apply further down still works.
+cat > "$T/bin/setsid" <<SETSID
 #!/bin/sh
-echo "omcid \$*" >> "$T/verbs"
+echo "setsid \$*" >> "$T/started"
+exec "\$@"
+SETSID
+chmod +x "$T/bin/pidof" "$T/bin/setsid"
+
+# The stub daemon. On SIGHUP it writes what $T/script says: one line per
+# phase, "state changed action result keys duration_ms o5_ms services delay",
+# delay in seconds before the line is written. No script: it ignores the
+# signal, as an older build that does not write a status file would.
+cat > "$T/daemon" <<DAEMON
+#!/bin/bash
 echo \$\$ > "$T/omcid.pid"
-echo "registered: type=1 pid=\$\$" > "$T/odi_omci"
-trap 'rm -f "$T/omcid.pid"; exit 0' TERM
-while :; do sleep 1; done
-OMCID
-chmod +x "$T/bin/setsid" "$T/bin/pidof" "$T/omcid"
-echo "100.00 90.00" > "$T/uptime"
-cat > "$T/cs.xml" <<'XML'
-<Config Name="ROOT">
-	<Dir Name="MIB_TABLE">
-		<Value Name="GPON_PLOAM_PASSWD" Value="3132333435"/>
-	</Dir>
-</Config>
-XML
-
-run() {
-	env PATH="$T/bin:$PATH" ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" OMCID="$T/omcid" \
-	    OMCID_LOG="$T/omcid.log" CS="$T/cs.xml" MODULES_OFF="$T/modules.off" UPTIME="$T/uptime" \
-	    DEACT_HOLD=0 NETWORK="$T/network.sh" SERVICES_LOG="$T/services.log" sh "$A" "$@" 2>&1
+n=0
+trap 'reload' HUP
+reload() {
+	[ -f "$T/script" ] || return
+	n=\$((n + 1))
+	while read -r state changed action result keys dur o5 svc delay; do
+		[ "\$delay" -gt 0 ] && sleep "\$delay"
+		{
+			echo "id=\$\$.\$n"; echo "state=\$state"; echo "changed=\$changed"
+			echo "action=\$action"; echo "result=\$result"; echo "keys=\$keys"
+			echo "duration_ms=\$dur"
+			[ "\$o5" != - ] && echo "o5_ms=\$o5"
+			echo "services=\$svc"
+		} > "$T/status.new"
+		mv "$T/status.new" "$T/status"
+	done < "$T/script"
 }
-
-# A running omcid to replace.
-"$T/omcid" > /dev/null 2>&1 &
+while :; do sleep 1; done
+DAEMON
+chmod +x "$T/daemon"
+"$T/daemon" > /dev/null 2>&1 &
 sleep 1
 first=$(cat "$T/omcid.pid")
-: > "$T/verbs"
 
+run() {
+	env PATH="$T/bin:$PATH" RELOAD_STATUS="$T/status" MODULES_OFF="$T/modules.off" \
+	    ACK_WAIT=2 APPLY_WAIT=4 NETWORK="$T/network.sh" SERVICES_LOG="$T/services.log" \
+	    sh "$A" "$@" 2>&1
+}
+: > "$T/started"
+
+# Nothing changed.
+echo "done none none ok - 12 - 6 0" > "$T/script"
 out=$(run omci); rc=$?
-sleep 1
-t "apply omci succeeds" "^0$" "$rc"
-t "it says the internet is down while it runs" "internet is down" "$out"
-t "the old omcid is stopped" "omcid $first stopped" "$out"
-t "a new one registers" "registered for OMCI" "$out"
-verbs=$(tr '\n' ' ' < "$T/verbs")
-t "deactivate, restart with -r, password, activate -- in that order" \
-  "^gpondeact omcid -a -d -r gponpw 3132333435 gponact $" "$verbs"
-t "and the new omcid is not the old one" "yes" "$([ "$(cat "$T/omcid.pid")" != "$first" ] && echo yes)"
+t "unchanged: exit 0" "^0$" "$rc"
+t "unchanged: says nothing was done" "nothing changed" "$out"
+t "the signal went to the running omcid" "told to reload" "$out"
 
-: > "$T/verbs"
-sed -i.bak 's/Value="3132333435"/Value=""/' "$T/cs.xml"
-run omci > /dev/null
-sleep 1
-t "an empty PLOAM password is not sent, as at boot" "^gpondeact omcid -a -d -r gponact $" "$(tr '\n' ' ' < "$T/verbs")"
-
-touch "$T/modules.off"; : > "$T/verbs"
+# A VLAN-only change.
+printf 'running vlan rebuild pending VLAN_MANU_TAG_VID 0 - 6 0\ndone vlan rebuild ok VLAN_MANU_TAG_VID 400 - 6 0\n' > "$T/script"
 out=$(run omci); rc=$?
-t "modules.off refuses" "no omcid" "$out"
-t "and touches nothing" "^0$" "$(wc -c < "$T/verbs" | tr -d ' ')"
+t "vlan: exit 0" "^0$" "$rc"
+t "vlan: rebuilt in place, and the ONU stayed" "VLAN handling changed (VLAN_MANU_TAG_VID): connections rebuilt in place in 0.4 s, the ONU stayed in O5" "$out"
+t "vlan: still the same omcid" "^$first$" "$(cat "$T/omcid.pid")"
+
+# A re-registration that finishes in time.
+printf 'running identity reregister pending GPON_SN 100 - 0 0\ndone identity reregister ok GPON_SN,LOID 2600 2100 6 1\n' > "$T/script"
+out=$(run omci); rc=$?
+t "identity: exit 0" "^0$" "$rc"
+t "identity: back in O5 with services, and how long" "back in O5 with 6 service(s) after 2.1 s" "$out"
+
+# A failure is reported and exits 1.
+for r in failed timeout no_services sn_not_applied; do
+	printf 'done identity reregister %s GPON_SN 900 - 0 0\n' "$r" > "$T/script"
+	out=$(run omci); rc=$?
+	t "$r: exit 1" "^1$" "$rc"
+	t "$r: named" "identity (GPON_SN): $r" "$out"
+done
+
+# Still running at the bound: reported, not a failure.
+printf 'running identity reregister activated GPON_SN 100 - 0 0\n' > "$T/script"
+out=$(run omci 2); rc=$?
+t "running at the bound: exit 0" "^0$" "$rc"
+t "running at the bound: says it carries on" "still working after 2 s" "$out"
+
+# A stale status file is not an answer: the new run has to have a new id.
+echo "done vlan rebuild ok VLAN_MANU_TAG_VID 100 - 0 0" > "$T/script"
+cp "$T/status" "$T/status.old"
+rm -f "$T/script"
+out=$(run omci); rc=$?
+t "an omcid that never answers: exit 1" "^1$" "$rc"
+t "and it says why" "did not answer the signal" "$out"
+
+# No omcid at all.
+kill "$(cat "$T/omcid.pid")"; wait 2>/dev/null; rm -f "$T/omcid.pid"
+out=$(run omci); rc=$?
+t "no omcid: exit 1" "^1$" "$rc"
+t "no omcid: says so" "no omcid is running" "$out"
+touch "$T/modules.off"
+out=$(run omci); rc=$?
+t "modules.off: exit 1, says why" "modules.off.*nothing to reload" "$out"
 rm -f "$T/modules.off"
+
+t "apply omci never started a process of its own (no setsid, no omcid)" "^0$" "$(wc -c < "$T/started" | tr -d ' ')"
 
 cat > "$T/network.sh" <<'NET'
 #!/bin/sh
