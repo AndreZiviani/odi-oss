@@ -381,6 +381,11 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
 
 ## Not verified yet
 
+- `nv commit` on a stick: the commit sequence is host-tested against a fake
+  flash, but writing both real env partitions has not been run on hardware
+  yet; nor has `slot-state.sh` read a real environment (it is tested against
+  a stub nv, on the host and under qemu).
+
 - `apply.sh omci` against more than one OLT: it was run end to end once, on
   ISP1 (above).
 - `apply.sh network` moving the primary address on a stick. Adding and

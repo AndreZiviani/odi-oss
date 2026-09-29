@@ -341,13 +341,18 @@ kernel-side `MemAvailable` floor -- `docs/SETTINGS.md`, "Watchdog rules"
 has the full design and why a v1.0.2 userland version of the second rule
 was withdrawn.
 
-### Never `sw_commit` a trial
+### Committing a trial
 
 `sw_commit` is the only thing that makes an image permanent, and writing it
-throws away the fallback. Write it only from the running trial image, after
-you have watched it work, by hand, and never from a script, a boot loop or
-a soak: every trial boot is its own `nv setenv sw_tryactive <slot>`. A slot
-can be re-tried any number of times without reflashing.
+throws away the fallback: a committed image that later crashes resets into
+itself, with no route back to the other slot. Write it by hand, from the
+running trial image, with `nv commit <slot>` (both environment copies,
+verified), after you have watched the trial work -- and never from a
+script, a boot loop or a soak: every trial boot is its own `nv setenv
+sw_tryactive <slot>`, and a slot can be re-tried any number of times
+without reflashing. Until it is committed the image says so: the ssh login
+banner, `gpon_uncommitted` and the `OdiUncommittedImage` alert
+(`docs/FLASHING.md`, "Committing").
 
 Two further facts:
 
@@ -1041,7 +1046,8 @@ senders without `CAP_NET_ADMIN`.
 4. **Trial it on your own stick**, never on one carrying someone's only
    connection: stock committed in the other slot, `: >
    /etc/config/breadcrumbs.on` first, `confirm-arp` if your host sits on
-   `.2`, `sw_tryactive`, never `sw_commit`. Record what you saw.
+   `.2`, `sw_tryactive`, never `sw_commit` before it has run. Record what
+   you saw.
 5. **Update the docs in the same change**: `docs/SETTINGS.md` for a
    setting, `docs/TOOLS.md` for a command, `docs/KERNEL.md` for a driver,
    this file for a toggle or a trap, `CHANGELOG.md` when a release is cut.

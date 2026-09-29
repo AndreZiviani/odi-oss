@@ -46,9 +46,12 @@ made permanent:
   no root filesystem, `init` never starting — the watchdog resets the board
   and the bootloader falls back to the slot it already trusts. Nothing is
   lost, and nothing needs to be done by hand.
-- **Never commit a trial.** Making a slot permanent (`sw_commit`) throws that
-  safety net away; do it only after you have booted the trial image, watched
-  it work, and are willing to lose the fallback if you are wrong. The full
+- **Commit a trial yourself, once you have watched it work.** Making a slot
+  permanent (`sw_commit`) throws that safety net away: a committed image
+  that later crashes reboots into itself, with no way back to the other
+  slot. `nv commit <slot>`, run on the trial, writes both copies of the boot
+  environment and reads each back. Until you do, the image says it is a
+  trial: at every ssh login, and as `gpon_uncommitted` on the exporter. The full
   procedure, including recovery if something still goes wrong, is in
   [`docs/FLASHING.md`](docs/FLASHING.md).
 
@@ -79,6 +82,7 @@ the same hardware.
 | reboot | not measured | `reboot` resets at once through a watchdog restart handler; back in the stock image about 73 s later |
 | toolchain | a decade-old vendor cross-compiler | our own gcc / binutils / uClibc-ng, built from source, targeting the CPU's actual instruction set; published as prebuilt container images pinned by digest, so a build pulls the toolchain instead of compiling it for an hour: a clean image build takes about 3.5 minutes on a native 8-core host (building the toolchain from source is still one command) |
 | boot safety | undocumented | one-shot trial boot (`sw_tryactive`) plus a watchdog the kernel alone owns and enforces (`docs/SETTINGS.md`, "Watchdog rules"): it self-reverts a boot whose userland never confirms, a registered daemon (omcid) that stops pinging its own deadline, or `MemAvailable` held below a floor -- boot confirmation does not depend on the network. Every rule is host-tested against a fake clock (`test/odi_wdt_test.c`); the reset itself needs hardware to verify, not yet run on this redesign |
+| committing a trial | by hand (`nv setenv sw_commit`), no sign that a boot is a trial | by hand with `nv commit <slot>`: both environment copies, in a power-cut-safe order, each read back, refusing any slot that is not the running one (host-tested against a fake flash that fails at every step, `src/nv/test/test_commit.c`); an uncommitted image says so at every ssh login and as `gpon_uncommitted` / `gpon_committed_slot` on the exporter, from `/var/run/odi-slot` |
 | boot reliability | not a concern of the stock image | two bootloader leftovers found and fixed: NIC DMA still running into memory the kernel reuses (stopped first thing at boot), and an instruction cache that does not see new code (invalidated whenever a page can run); release images boot 15 of 15 in a row |
 | boot debugging | none (no serial console) | every console line mirrored into DRAM that survives a watchdog reset; the next boot of this image shows the failed one in `/proc/odi_ramlog_prev`, with fatal-signal register dumps and early-boot crumbs |
 | memory pressure (OOM) | a 20 MB scp into `/tmp` (unbounded ramfs) took `MemAvailable` to 0.86 MB and the OOM killer took dropbear, confd and omcid, none of them restarted, unmanageable until a power cycle -- reproduced on ISP1, 2026-09-27 | `/tmp` and `/var` are size-capped tmpfs (8 MB / 6 MB, `docs/SETTINGS.md`), so a full `/tmp` gives ENOSPC instead of taking down the box; `oom_score_adj` biases the OOM killer away from omcid/dropbear/confd; the four critical daemons restart the instant they die, as `/etc/inittab` `respawn` entries busybox init forks and tracks itself, not a hand-rolled supervisor loop; the kernel itself resets the board if `MemAvailable` stays below a floor for several consecutive checks, in addition to (not instead of) the omcid own ping deadline -- a first version of the second check (v1.0.2, a separate userland process) shipped and was withdrawn the same day for withholding its kick with nothing kernel-side enforcing it, so a hang it correctly saw still never reset the board |
@@ -116,8 +120,8 @@ Identifiers in the screenshots are placeholders. More pages in the
   A source build defaults to a random per-build root password
   (`ROOT_PW=locked` builds the same keys-only image the releases ship).
 
-**Flash**, into the slot you are not running, and trial-boot it — never
-commit on the first boot. Full procedure, including how to read a boot you
+**Flash**, into the slot you are not running, and trial-boot it — commit
+it with `nv commit <slot>` only once you have checked it yourself. Full procedure, including how to read a boot you
 could not otherwise see: [`docs/FLASHING.md`](docs/FLASHING.md).
 
 **First login**, once the trial image is up:

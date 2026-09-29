@@ -103,6 +103,8 @@ test: lint test-host test-diag test-omci
 test-host:
 	bash test/root_pw_test.sh
 	bash test/flash_test.sh
+	bash test/slot_state_test.sh
+	$(MAKE) -C src/nv test
 	bash test/fwu_guard_test.sh
 	bash test/fwu_starter_test.sh
 	bash test/network_addr_test.sh

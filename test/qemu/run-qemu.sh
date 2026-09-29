@@ -87,6 +87,30 @@ fi
 echo "  ssh key auth ok"
 
 sshx() { ssh "${SSH_OPTS[@]}" root@127.0.0.1 "$@"; }
+# What an interactive login prints: dropbear shows /etc/motd only for a
+# login shell on a pty, never for `ssh host cmd`, so this asks for a shell
+# and feeds it exit.
+login_banner() {
+	printf 'exit\n' | timeout 20 ssh -tt "${SSH_OPTS[@]}" root@127.0.0.1 2>/dev/null | tr -d '\r' || true
+}
+
+say "scenario: slot-state.sh, the inittab once entry, wrote the slot state at boot"
+# The malta kernel boots with no root=31:N and no U-Boot environment: the
+# state file must still exist, with the running slot and uncommitted left
+# empty (unknown, never a guessed 0), the motd must say so, and dropbear
+# must print that motd on an interactive login -- the native path the
+# TRIAL BOOT notice takes on a stick.
+ok=0
+for _ in $(seq 1 20); do
+	sshx 'grep -qx "uncommitted=" /var/run/odi-slot' 2>/dev/null && { ok=1; break; }
+	sleep 1
+done
+[ "$ok" = 1 ] || { sshx 'cat /var/run/odi-slot' >&2 || true; fail "slot-state.sh wrote no /var/run/odi-slot with uncommitted= at boot"; }
+sshx 'grep -qx "running=" /var/run/odi-slot' || fail "odi-slot names a running slot qemu does not have"
+sshx 'grep -q "SLOT STATE UNKNOWN" /etc/motd' || fail "/etc/motd does not carry the unknown-state notice"
+banner=$(login_banner)
+echo "$banner" | grep -q "SLOT STATE UNKNOWN" || fail "dropbear did not print /etc/motd at an interactive login"
+echo "  /var/run/odi-slot written (state unknown under qemu), motd printed at login"
 
 say "fstab mounts: /var and /var/tmp are tmpfs with the configured size"
 # The root cause of v1.0.2 through v1.0.4-rc1 (kernel/618/config had no
@@ -273,5 +297,34 @@ for _ in $(seq 1 15); do
 done
 [ "$ok" = 1 ] || fail "syslogd still forwards after the key was cleared (args: $(syslogd_args))"
 echo "  cleared: syslogd back to local only"
+
+say "scenario: slot-state.sh on a trial (fixtures, real busybox)"
+# The same script under the real busybox ash, sed and timeout, against a stub
+# nv printing the two copies in the real format: slot 1 running, both copies
+# still committing slot 0. test/slot_state_test.sh has the other shapes.
+sshx 'sh -s' <<'GUEST'
+set -e
+A=/tmp/ss; rm -rf $A; mkdir -p $A
+echo "console=ttyS0 root=31:7" > $A/cmdline
+printf 'mtd5: 00300000 00001000 "r0"\nmtd7: 00300000 00001000 "r1"\n' > $A/mtd
+cat > $A/nv <<'NV'
+#!/bin/sh
+case "$1" in
+getenv)   printf 'Valid environment: 2\nsw_active=1\nsw_commit=0\nsw_tryactive=2\n\n' ;;
+fallback) printf 'Fallback environment: 1\nsw_active=0\nsw_commit=0\nsw_tryactive=1\n\n' ;;
+*) exit 1 ;;
+esac
+NV
+chmod +x $A/nv
+NV=$A/nv PROC_CMDLINE=$A/cmdline PROC_MTD=$A/mtd /etc/scripts/slot-state.sh
+GUEST
+sshx 'grep -qx "uncommitted=1" /var/run/odi-slot && grep -qx "running=1" /var/run/odi-slot && grep -qx "next_boot=0" /var/run/odi-slot' || \
+	{ sshx 'cat /var/run/odi-slot' >&2 || true; fail "odi-slot does not record the trial"; }
+banner=$(login_banner)
+echo "$banner" | grep -q "TRIAL BOOT: running slot 1, which is not committed (sw_commit=0 in both copies)" || \
+	fail "the login banner does not carry the TRIAL BOOT notice (got: $banner)"
+sshx 'logread | grep -q "slot-state: TRIAL BOOT: running slot 1"' || fail "the TRIAL BOOT notice did not reach syslog"
+sshx 'rm -rf /tmp/ss'
+echo "  odi-slot records uncommitted=1, the login banner and syslog carry the TRIAL BOOT notice"
 
 say "all scenarios passed"

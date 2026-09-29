@@ -142,9 +142,11 @@ it:
   only check.
 - **A freshly flashed slot is inert until `nv setenv sw_tryactive <slot>`**,
   which boots it exactly once with the watchdog armed.
-- **Never `sw_commit` a trial.** Commit only after you have booted the
-  trial image yourself and are satisfied with it. Committing before that
-  discards the only free safety net this mechanism gives you.
+- **Never `sw_commit` a trial before it has proven itself.** Commit only
+  from the booted trial image, with `nv commit <slot>`, once you have
+  checked it yourself. Committing before that discards the only free safety
+  net this mechanism gives you, and a committed image that later crashes
+  reboots into itself with no way back to the other slot.
 - **rcS confirms userland to the watchdog within 120 s on every boot**, or
   the board resets (`docs/FLASHING.md`). The confirmation needs no network;
   only with `/etc/config/confirm-arp` (development) does it wait for an ARP
@@ -155,6 +157,10 @@ it:
   firmware.** That is the whole point of the mechanism; do not "fix" a
   stuck trial by writing `sw_commit` to make it stick — power-cycle it
   instead, or fix the image and try again.
+- **Nothing commits a trial automatically, and nothing should.** A trial is
+  committed only by a person, with `nv commit <slot>`. Until then the image
+  says so (`slot-state.sh`: the ssh login banner, `/var/run/odi-slot`,
+  `gpon_uncommitted`); do not add code that acts on that state.
 
 ## Dangerous commands
 

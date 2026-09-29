@@ -113,15 +113,11 @@ handing over, every one of those resets lands on the committed slot, with
 nothing lost and nothing to do by hand. What it cannot catch is an image
 that confirms and then misbehaves (unreachable, or answers ARP but not ssh): that
 stays up until you power-cycle it, which also brings the committed image
-back.
+back -- as long as the trial has not been committed ("Committing",
+below).
 
 **Never write `sw_commit` before this.** Making the trial slot permanent
-throws away the only free safety net there is, and **never write it from a
-script or while a trial is still being evaluated** (a boot loop, a soak):
-every trial is a separate `sw_tryactive`. Commit only from the running
-trial image, once you are satisfied:
-
-    nv setenv sw_commit <slot>
+before it has booted throws away the only free safety net there is.
 
 A trial image can itself be re-tried as often as you like: from the
 committed image, `nv setenv sw_tryactive <slot>` and `reboot` again. The
@@ -135,6 +131,62 @@ U-Boot and the stock boot. `halt` and `poweroff` do not stop the stick
 for good: it has no power switch, so both leave the watchdog armed and
 hang, and the board resets about 42 s later. From a trial slot, every one of these lands on the
 committed slot.
+
+## Committing
+
+**The update procedure ends with you committing the trial by hand**, from
+the running trial image, once you have checked it yourself: logged in,
+the ONU in O5 (`omcli state`), traffic flowing, whatever the change was
+meant to do doing it.
+
+    nv commit <slot>          # the running slot; nv refuses any other
+    nv getenv sw_commit; nv fallback sw_commit     # both name the new slot
+    slot-state.sh             # clears the login notice and gpon_uncommitted
+
+`nv commit` (`docs/TOOLS.md`) writes `sw_commit` into the primary
+environment copy, reads it back, then into the fallback copy, reads it
+back, then reads both once more. It refuses a slot that is not the running
+one or not `sw_active`, and an environment whose two copies are not both
+valid; it never writes `sw_active`, and it is safe to interrupt at every
+step. `nv setenv sw_commit <slot>` also still works but writes only the
+primary copy; nv then prints that the fallback copy still names the old
+slot, and `nv setenv -c <copy> sw_commit <slot>` makes it agree. `nv
+commit` does both, in the safe order, and checks them.
+
+**Know what committing costs.** Once committed, every reset boots this
+image. An image that later crashes, hangs or fails to confirm -- next
+boot, or next month -- resets into itself again, forever: nothing on the
+stick sends it back to the other slot. The only way out is a boot that
+gets far enough for you to log in and point `sw_commit` back, or the UART.
+So commit only an image you have watched work.
+
+### The reminders
+
+Nothing commits a trial for you. So that an uncommitted image is never
+mistaken for a committed one, `/etc/scripts/slot-state.sh` (an
+`/etc/inittab` `once` entry) reads the environment at every boot and, while
+`sw_commit` in either copy names another slot than the running one, says
+so in three places:
+
+- **the ssh login banner** (`/etc/motd`, printed by dropbear at every
+  interactive login):
+
+      *** TRIAL BOOT: running slot 1, which is not committed (sw_commit=0 in
+      both copies). The next reboot returns to slot 0. Commit with: nv commit
+      1 && slot-state.sh
+
+  or `HALF COMMITTED` when only the fallback copy still names the other
+  slot (a plain `nv setenv sw_commit` did that), naming which copy says
+  what;
+- **the exporter**: `gpon_uncommitted 1`, with `gpon_boot_slot` and
+  `gpon_committed_slot{copy=...}` beside it (odi-sfp-exporter's
+  `docs/METRICS.md`), from the state file `/var/run/odi-slot`
+  (`docs/TOOLS.md`, "Slot state");
+- **an alert**: `OdiUncommittedImage`, a warning once `gpon_uncommitted`
+  has been 1 for 30 minutes (odi-sfp-exporter's `prometheus/alerts.yml`).
+
+The file is written at boot: after `nv commit`, run `slot-state.sh` (it is
+on the ssh `PATH`) to clear the banner and the metric without a reboot.
 
 ## If it does not come up
 
