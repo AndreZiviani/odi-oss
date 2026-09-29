@@ -110,7 +110,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `OMCI_VENDOR_PRODUCT_CODE` | Vendor product code | ONU2-G attribute 3, decimal | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ONU_HW_VERSION` | ONU hardware version (identity) | the Version in ONU-G (attribute 2, at most 14 printable ASCII characters), the hardware version some OLTs whitelist. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below) | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
-| `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto` | REBOOT |
+| `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto`; omcid on SIGHUP | INTERRUPTS INTERNET |
 | `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R` -- kernel messages and the link and provisioning `event=` lines included (docs/TOOLS.md, "Link and provisioning events"); empty means local only (the circular buffer, `logread`). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh syslog`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-syslogd.sh` | SERVICE RESTART |
 | `OMCI_UNKNOWN_ME_OK` | Answer unknown entities with success | `1` answers a Create, Set or Get of a managed entity class omcid has no model for with success instead of "unknown entity" (result 4), the counterpart of the stock `OMCI_FAKE_OK`; anything else, or absent, keeps the error. Default off. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). For an OLT that stalls its provisioning at an "unknown entity" answer; the risk is below | omcid, at start and on SIGHUP | INTERRUPTS INTERNET |
 | `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh ntp`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-ntpd.sh` | SERVICE RESTART |
@@ -154,16 +154,19 @@ omcid reads `OLT_SW_DOWNLOAD` straight from `odi.conf` (it has no shell to run
 `flash get`, and the file is read whole into a 4 KB buffer each time, a line
 past that reading as absent.
 
-Why the two REBOOT keys cannot be applied live:
+Why `ELAN_MAC_ADDR` cannot be applied live, and what changed for `GPON_SN`:
 
 - `ELAN_MAC_ADDR`: Linux refuses a new MAC on an interface that is up, so
   `network.sh` sets it on `eth0` and its host port with the links down,
   before `br0` exists. Doing that on a running stick takes down every way in
   in the middle of the change, with nothing to put it back if it fails.
-- `GPON_SN`: the kernel writes the serial into the PON MAC once, at the
-  first activation of a boot (the `gpon_init` replay); a later `gponsn` verb
-  updates only its own copy, not what goes upstream. Rewriting it live needs
-  a kernel change.
+- `GPON_SN` is no longer in this list: the kernel writes the serial into the
+  PON MAC at the first activation of a boot (the `gpon_init` replay), and a
+  `gponsn` verb after boot used to update only the driver's own copy, not what
+  goes upstream. It now rewrites the PLOAM slot that replay armed, while the
+  ONU is deactivated (`-EBUSY` in any other state), which is what a
+  re-registration by omcid does. Not run on a stick yet ("Not verified yet");
+  a reboot applies it as before.
 
 Details that bite:
 
