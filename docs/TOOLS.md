@@ -97,6 +97,10 @@ Concurrently with those four, `rcS.pon`:
    inline here. `/etc/config/pon-steps` replaces the whole list
    (development, `docs/BOOT.md`).
 
+A second `once` entry, `/etc/scripts/slot-state.sh`, starts with them: it
+writes the slot state file and the login notice (below, "Slot state") and
+exits.
+
 `docs/BOOT.md` has why each stage is where it is, and the development
 aids of `/etc/init.d/rcS.dev` (`breadcrumbs.on`, `confirm-arp`,
 `pon-steps`), shared by rcS and rcS.pon. A background job in rcS also
@@ -447,6 +451,7 @@ in service.
     nv getenv [name]              print one variable, or all of them
     nv setenv [-c 1|2] name value set one (in the copy that was read, or copy 1|2)
     nv fallback [name]            read the OTHER copy, the one U-Boot falls back to
+    nv commit slot                sw_commit=slot in BOTH copies, verified
 
 Reads and writes the redundant environment (mtd `env` and `env2`) with a
 CRC check and no vendor library. It is what arms and commits a trial boot:
@@ -455,6 +460,51 @@ CRC check and no vendor library. It is what arms and commits a trial boot:
 needs; a power cut in that window leaves that copy invalid and U-Boot on
 the other, stale one. **Never write `sw_commit` before you have booted and
 verified a trial from the running image.**
+
+`commit` is the commit, as one operation: `sw_commit=<slot>` into the
+primary copy (the one U-Boot boots from), read back and compared byte for
+byte, then into the fallback copy the same way, then both read again. It
+refuses, before writing anything, a slot other than the one the kernel was
+booted from (`root=` in `/proc/cmdline`) or than `sw_active` in the
+primary, and an environment whose two copies are not both valid; it never
+writes `sw_active`. A copy that already says so is not rewritten, so a
+second run writes nothing. Exit 0 means both copies now commit the slot;
+anything else says which step failed and whether the fallback copy was
+touched (it never is before the primary has verified). Interrupting it is
+safe at every step: until the primary is verified the fallback still holds
+the old environment, and after that the primary wins with the new one.
+It is how a trial is committed, by hand, once you have checked it
+(`docs/FLASHING.md`, "Committing"); run `slot-state.sh` after it to refresh
+the login notice and the exporter.
+
+### Slot state -- `/var/run/odi-slot`
+
+`/etc/scripts/slot-state.sh` writes it at every boot (an `/etc/inittab`
+`once` entry), and again whenever it is run by hand. It only reads the
+environment (`nv getenv`, `nv fallback`) and `/proc/cmdline`, never writes
+either, and replaces the file by rename. One `KEY=value` per line, always
+all nine keys, a value empty when it cannot be told:
+
+| key | value |
+|---|---|
+| `running` | the slot the kernel was booted from, `0` or `1` (`root=31:N` naming `r0` or `r1`) |
+| `sw_active` | `sw_active` in the primary copy, `0` or `1` |
+| `sw_tryactive` | `sw_tryactive` in the primary copy, as stored (`2` when no trial is pending) |
+| `primary_copy` | `1` or `2`: the copy U-Boot boots from (`env` or `env2`); empty when neither is valid |
+| `primary_sw_commit` | `sw_commit` in that copy, `0` or `1` |
+| `fallback_copy` | the other copy, `1` or `2`; empty when it is not valid |
+| `fallback_sw_commit` | `sw_commit` in that copy, `0` or `1` |
+| `next_boot` | the slot the next reset boots: `sw_tryactive` when it is `0` or `1`, else `primary_sw_commit` |
+| `uncommitted` | `1` when a valid copy's `sw_commit` is not `running`; `0` when every valid copy names it; empty when the running slot or the environment cannot be read |
+
+The exporter (metricsd) turns it into `gpon_boot_slot`,
+`gpon_committed_slot` and `gpon_uncommitted`; the web UI reads it for its
+trial banner. When `uncommitted` is not `0` the same script puts a one-line
+notice in `/var/run/motd` (`/etc/motd`, which dropbear prints at every
+interactive login) and in syslog (tag `slot-state`) -- `TRIAL BOOT`,
+`HALF COMMITTED` (the fallback copy still names the other slot) or `SLOT
+STATE UNKNOWN`, each naming the copies and the command that clears it; when
+it is `0` the motd is empty.
 
 ### `flash` -- the config store
 

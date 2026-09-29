@@ -28,6 +28,29 @@ listed here.
 - docs/TOOLS.md lists the exporter metrics `gpon_boot_count` and
   `gpon_last_reset_reason{reason,client}`, which read the reason above
   (odi-sfp-exporter, after v1.1.2).
+- New `nv commit <slot>`, now the documented way to commit a trial by hand
+  once you have checked it (`docs/FLASHING.md`, "Committing"): `sw_commit`
+  into both U-Boot environment copies, the primary first and read back byte
+  for byte, only then the fallback, then both re-read. Refuses a slot that
+  is not running (`root=` in `/proc/cmdline`) or not `sw_active`, and an
+  environment without two valid copies; never writes `sw_active`.
+  Host-tested against a fake flash that fails at every step
+  (`src/nv/test/test_commit.c`, now part of `make test-host` with the
+  existing `nv` block tests).
+- An uncommitted image now says so. `/etc/scripts/slot-state.sh`, a new
+  `/etc/inittab` `once` entry, reads the U-Boot environment at boot (never
+  writes it) and records the running slot (`root=` in `/proc/cmdline`),
+  `sw_active`, `sw_tryactive`, both copies of `sw_commit`, the next boot
+  slot and `uncommitted` (1 when either copy names another slot) in
+  `/var/run/odi-slot`, a `KEY=value` file for the exporter and the web UI
+  (format in `docs/TOOLS.md`, "Slot state"). While uncommitted it puts a
+  `TRIAL BOOT` (or `HALF COMMITTED`, naming the copy that disagrees)
+  notice with the exact `nv commit` command in `/etc/motd`, which dropbear
+  prints at every interactive login, and in syslog. Nothing commits a
+  trial automatically: the update procedure ends with a manual `nv commit`
+  after checking the trial (`docs/FLASHING.md`, "Committing"). Host-tested
+  against a stub nv (`test/slot_state_test.sh`); test-qemu checks the file
+  and the login banner under the real busybox and dropbear.
 
 ## v1.0.8 — 2026-09-28
 

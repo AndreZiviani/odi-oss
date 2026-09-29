@@ -16,6 +16,12 @@
 # for them, and only one step (gponact) waits, bounded, for omcid.
 ::once:/etc/init.d/rcS.pon
 
+# once: slot-state.sh. Records which slot is running and whether sw_commit
+# (in both environment copies) names it, into /var/run/odi-slot for the
+# exporter and the web UI, and into /var/run/motd (/etc/motd) for ssh
+# logins. Reads only; bounded; exits (docs/FLASHING.md, "Committing").
+::once:/etc/scripts/slot-state.sh
+
 # No telnet: ssh (dropbear) is the only network login. The trial boot and
 # its self-revert are the way back if ssh ever fails to come up.
 ttyS0::respawn:/bin/login -p

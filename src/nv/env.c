@@ -151,3 +151,14 @@ int env_set(uint8_t *buf, uint32_t len, const char *key, const char *value)
 	env_crc_store(buf, env_crc32(buf + ENV_HDR_LEN, len - ENV_HDR_LEN));
 	return 1;
 }
+
+int env_pick(const uint8_t *b1, int ok1, const uint8_t *b2, int ok2)
+{
+	if (ok1 && ok2)
+		return b2[ENV_HDR_CRC] > b1[ENV_HDR_CRC] ? 2 : 1;
+	if (ok1)
+		return 1;
+	if (ok2)
+		return 2;
+	return 0;
+}

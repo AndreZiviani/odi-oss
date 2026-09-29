@@ -15,6 +15,12 @@ the functions both scripts share (`config_mounted`, `crumb`,
 `confirm_watchdog`, the PON step helpers) so they never drift into two
 copies of the same logic.
 
+A second `once` entry, `/etc/scripts/slot-state.sh`, starts at the same
+moment. It is not a boot stage: it reads the U-Boot environment (never
+writes it), records the running slot and whether it is committed in
+`/var/run/odi-slot`, and puts a notice in `/etc/motd` when it is not
+(`docs/FLASHING.md`, "Committing"). Nothing in the boot waits for it.
+
 ## The rules every stage follows
 
 **Nothing may block.** `/etc/inittab` runs rcS as `sysinit`, and busybox

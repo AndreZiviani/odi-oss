@@ -50,4 +50,13 @@ int env_get(const uint8_t *buf, uint32_t len, const char *key,
  * would not fit -- in which case `buf` is left untouched. */
 int env_set(uint8_t *buf, uint32_t len, const char *key, const char *value);
 
+/* Which of the redundant pair wins: 1 for `env`, 2 for `env2`, 0 when
+ * neither is valid. `ok1`/`ok2` say whether that copy passed env_valid; the
+ * blocks are only read for their flags byte. With both valid the HIGHER
+ * flags byte wins and a tie goes to `env` -- the rule the stock nv follows
+ * (on isp2, flags 0x00 in env and 0x01 in env2 reads "Valid environment:
+ * 2"). The one definition, so the reader and `nv commit` cannot disagree
+ * about which copy is the primary. */
+int env_pick(const uint8_t *b1, int ok1, const uint8_t *b2, int ok2);
+
 #endif

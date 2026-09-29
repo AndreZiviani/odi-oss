@@ -27,7 +27,7 @@ CFLAGS := -std=c11 -Os -Wall -Wextra \
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
            -Wl,--gc-sections
 
-OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/env.o $(BUILD)/main.o
+OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/env.o $(BUILD)/commit.o $(BUILD)/main.o
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
@@ -42,7 +42,10 @@ $(BUILD)/io.o: $(DIAG)/src/io.c $(DIAG)/src/io.h | $(BUILD)
 $(BUILD)/env.o: env.c env.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c env.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/commit.o: commit.c commit.h env.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/main.o: main.c env.h commit.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD):
@@ -65,12 +68,17 @@ nv: image
 size: nv
 	@$(RUN) sh -c 'ls -l $(BIN); $(CROSS)size $(BIN)'
 
-# The block logic has no syscalls in it, so it is tested on the host against a
-# block built to the device's layout. The WRITE path is not covered -- see the
-# header of main.c.
+# The block logic and the commit sequence have no syscalls in them, so they
+# are tested on the host: the block against one built to the device layout,
+# `nv commit` against a fake pair of partitions that can fail a write or a
+# read-back at any step (test/test_commit.c). The partition I/O itself
+# (MEMERASE, write(2) on /dev/mtdN) is not covered -- see the header of main.c.
 test:
-	@cc -std=c11 -Wall -Wextra -o $(BUILD)/test_env test/test_env.c env.c && \
+	@mkdir -p $(BUILD)
+	@cc -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_env test/test_env.c env.c && \
 	 $(BUILD)/test_env
+	@cc -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_commit test/test_commit.c commit.c env.c && \
+	 $(BUILD)/test_commit
 
 clean:
 	rm -rf $(BUILD)

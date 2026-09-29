@@ -7,6 +7,7 @@
  *     nv getenv [parameter_name]
  *     nv setenv [-c 1|2] parameter_name value
  *     nv fallback [parameter_name]
+ *     nv commit slot
  *
  * It matters more than its size: `sw_tryactive` and `sw_commit` are set
  * through it, and those are the one-shot safe-boot mechanism this project
@@ -42,10 +43,19 @@
  * however many times it is run. Because env_set preserves the flags byte,
  * writing the loser leaves it losing -- this cannot change which copy U-Boot
  * picks, only what the loser says.
+
+ *
+ * `commit slot` is the one operation that writes both: sw_commit=<slot> into
+ * the primary, read back, then into the fallback, read back, then both read
+ * again -- refusing any slot that is not the running one (root= in
+ * /proc/cmdline) and not sw_active in the primary. commit.h has the
+ * sequence and why it is safe to interrupt. It is the one way to commit
+ * both copies, so nobody has to act on the NOTE lines setenv prints.
  */
 #include "sys.h"
 #include "io.h"
 #include "env.h"
+#include "commit.h"
 
 /* MEMERASE = _IOW('M', 2, struct erase_info_user).
  *
@@ -161,7 +171,8 @@ static uint8_t      alt[ENV_MAX];
 static struct mtd_part alt_part;
 static unsigned int alt_len;              /* 0 when there is no valid other copy */
 
-static int read_part(const char *name, struct mtd_part *m, uint8_t *dst)
+/* The whole partition, raw: its size, or 0 when it cannot be read in full. */
+static unsigned int read_raw(const char *name, struct mtd_part *m, uint8_t *dst)
 {
 	char path[16];
 	unsigned int got = 0;
@@ -181,7 +192,12 @@ static int read_part(const char *name, struct mtd_part *m, uint8_t *dst)
 		got += (unsigned int)n;
 	}
 	sys_close(fd);
-	return got == m->size && env_valid(dst, m->size);
+	return got == m->size ? m->size : 0;
+}
+
+static int read_part(const char *name, struct mtd_part *m, uint8_t *dst)
+{
+	return read_raw(name, m, dst) && env_valid(dst, m->size);
 }
 
 /* Both copies are read, and the valid one with the HIGHER flags byte wins --
@@ -201,7 +217,7 @@ static unsigned int env_load(struct mtd_part *part)
 	if (ok2)
 		m2.copy = 2;
 	if (ok1 && ok2) {
-		if (other[ENV_HDR_CRC] > blk[ENV_HDR_CRC]) {
+		if (env_pick(blk, ok1, other, ok2) == 2) {
 			for (unsigned int i = 0; i < m1.size; i++)
 				alt[i] = blk[i];
 			alt_part = m1;
@@ -246,7 +262,7 @@ static unsigned int env_load_copy(int copy, struct mtd_part *part)
 	return m.size;
 }
 
-static int env_store(const struct mtd_part *m)
+static int env_store_buf(const struct mtd_part *m, const uint8_t *src)
 {
 	struct erase_info_user e;
 	char path[16];
@@ -268,7 +284,7 @@ static int env_store(const struct mtd_part *m)
 		return 0;
 	}
 	while (done < m->size) {
-		long n = sys_write(fd, blk + done, m->size - done);
+		long n = sys_write(fd, src + done, m->size - done);
 
 		if (n <= 0) {
 			out("nv: short write -- the environment is now ERASED\n");
@@ -281,11 +297,104 @@ static int env_store(const struct mtd_part *m)
 	return 1;
 }
 
+static int env_store(const struct mtd_part *m)
+{
+	return env_store_buf(m, blk);
+}
+
+/* The partition I/O `nv commit` runs on (commit.h). Each call looks the
+ * partition up by name again, so nothing cached can point a write at the
+ * wrong one. */
+static const char *copy_name(int copy)
+{
+	return copy == 2 ? "env2" : "env";
+}
+
+static uint32_t io_read(void *ctx, int copy, uint8_t *buf)
+{
+	struct mtd_part m;
+
+	(void)ctx;
+	return read_raw(copy_name(copy), &m, buf);
+}
+
+static int io_write(void *ctx, int copy, const uint8_t *buf, uint32_t len)
+{
+	struct mtd_part m;
+
+	(void)ctx;
+	if (!mtd_find(copy_name(copy), &m) || m.size != len)
+		return 0;
+	return env_store_buf(&m, buf);
+}
+
+/* The slot the kernel was booted from: U-Boot passes root=31:N, 31 being
+ * mtdblock and N the index of the rootfs partition, and the partitions are
+ * named r0 and r1 (the same reading image/fwu.sh makes). -1 when it cannot
+ * tell -- no root=31:, or an index that is neither. */
+static int running_slot(void)
+{
+	static char cmd[1024];
+	struct mtd_part m;
+	const char *p;
+	long n;
+	int fd = (int)sys_open("/proc/cmdline", O_RDONLY);
+	int idx;
+
+	if (fd < 0)
+		return -1;
+	n = sys_read(fd, cmd, sizeof cmd - 1);
+	sys_close(fd);
+	if (n <= 0)
+		return -1;
+	cmd[n] = '\0';
+	for (p = cmd; *p; p++) {
+		if ((p == cmd || p[-1] == ' ') && str_has_prefix(p, "root=31:"))
+			break;
+	}
+	if (!*p)
+		return -1;
+	p += 8;
+	if (!digit(*p))
+		return -1;
+	idx = (int)hex_or_dec(&p, 0);
+	if (*p && *p != ' ' && *p != '\n')
+		return -1;
+	if (mtd_find("r0", &m) && m.index == idx)
+		return 0;
+	if (mtd_find("r1", &m) && m.index == idx)
+		return 1;
+	return -1;
+}
+
+static int commit(const char *arg)
+{
+	struct env_io io = { 0, io_read, io_write };
+	struct env_commit_report r;
+	int slot = str_eq(arg, "0") ? 0 : str_eq(arg, "1") ? 1 : -1;
+	int running = running_slot();
+	int rc = env_commit(&io, slot, running, &r);
+
+	out_fmt("nv: commit %s: %s\n", arg, env_commit_msg(rc));
+	if (rc == NVC_NOT_RUNNING) {
+		if (running < 0)
+			out("nv: running slot unknown (no root=31:N naming r0 or r1)\n");
+		else
+			out_fmt("nv: running slot is %d\n", (long)running);
+	}
+	if (r.primary)
+		out_fmt("nv: primary copy %d %s, fallback copy %d %s\n",
+			(long)r.primary, r.wrote_primary ? "written" : "unchanged",
+			(long)r.fallback, r.wrote_fallback ? "written" : "unchanged");
+	return rc == NVC_DONE || rc == NVC_ALREADY ? 0 : 1;
+}
+
 static void usage(void)
 {
 	out("Usage: nv getenv [parameter_name]\n"
 	    "       nv setenv [-c 1|2] parameter_name value\n"
-	    "       nv fallback [parameter_name]\n");
+	    "       nv fallback [parameter_name]\n"
+	    "       nv commit slot\n");
 }
 
 int main(int argc, char **argv)
@@ -296,6 +405,16 @@ int main(int argc, char **argv)
 	if (argc < 2) {
 		usage();
 		return 1;
+	}
+	/* Before env_load: commit reads both copies itself, through the same
+	 * partition I/O it writes with, and has its own answer for a missing
+	 * or invalid one. */
+	if (str_eq(argv[1], "commit")) {
+		if (argc != 3) {
+			usage();
+			return 1;
+		}
+		return commit(argv[2]);
 	}
 	len = env_load(&part);
 	if (!len) {
