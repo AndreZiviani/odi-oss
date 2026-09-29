@@ -606,7 +606,13 @@ No responder on the build host: that one scenario is skipped, logged, not
 failed. A further scenario saves `SYSLOG_SERVER` through the web UI
 (`POST /api/config`, then `/api/apply what=syslog`) and asserts syslogd runs with
 `-R <host>`, then clears it with `flash set KEY ""` and asserts `-R` is gone: the
-real `flash` against a writable config dir, not a stub.
+real `flash` against a writable config dir, not a stub. The last scenario
+plants known secrets (a PLOAM and a LOID password in `lastgood.xml`, a web UI
+password in `confd.auth`, all three quoted in a log file, as text and hex),
+runs `/etc/scripts/diag-bundle.sh`, and asserts the bundle holds the expected
+files, a redacted config copy and an exporter scrape, and none of the
+secrets anywhere; with a confd that has `GET /api/diag` it asserts the same
+of the web UI download (an older confd answers 404, and that half is skipped).
 
 **What it does NOT cover**, because the kernel underneath is a STOCK
 mainline build (`odi-toolchain-qemu-kernel-malta`, below), never this

@@ -354,5 +354,58 @@ echo "$banner" | grep -q "TRIAL BOOT: running slot 1, which is not committed (sw
 sshx 'logread | grep -q "slot-state: TRIAL BOOT: running slot 1"' || fail "the TRIAL BOOT notice did not reach syslog"
 sshx 'rm -rf /tmp/ss'
 echo "  odi-slot records uncommitted=1, the login banner and syslog carry the TRIAL BOOT notice"
+say "scenario: the diagnostics bundle is produced, and no secret is in it"
+# Known secret values, planted where a real stick keeps them: the PLOAM and
+# LOID passwords in lastgood.xml, the web UI password in confd.auth, and all
+# three quoted in a log file, as text and as hex, the way a careless log line
+# would. diag-bundle.sh must redact them in the config copy and scrub them
+# from every other file. Last, because the web password changes here.
+DIAG_PLOAM=51656d7550776431
+DIAG_LOIDPW=QemuLoidPw-8203
+DIAG_WEBPW=QemuWebPw-4711
+DIAG_LOIDPW_HEX=$(printf '%s' "$DIAG_LOIDPW" | od -An -v -tx1 | tr -d ' \n')
+sshx "printf '<Config>\n\t<Value Name=\"LAN_IP_ADDR\" Value=\"10.0.2.15\"/>\n\t<Value Name=\"GPON_PLOAM_PASSWD\" Value=\"%s\"/>\n\t<Value Name=\"LOID_PASSWD\" Value=\"%s\"/>\n</Config>\n' $DIAG_PLOAM $DIAG_LOIDPW > /etc/config/lastgood.xml"
+sshx "grep -c '$DIAG_LOIDPW' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant the LOID password in lastgood.xml"
+sshx "printf 'admin:%s\n' '$DIAG_WEBPW' > /etc/config/confd.auth"
+sshx "echo 'harness: ploam=$DIAG_PLOAM loid=$DIAG_LOIDPW hex=$DIAG_LOIDPW_HEX web=$DIAG_WEBPW' > /var/log/qemu-secrets.log"
+sshx '/etc/scripts/diag-bundle.sh /tmp/odi-diag.tar.gz' > "$WORK/diag-bundle.out" 2>&1 ||
+	{ cat "$WORK/diag-bundle.out" >&2; fail "diag-bundle.sh failed"; }
+tail -n 1 "$WORK/diag-bundle.out" | grep -qx /tmp/odi-diag.tar.gz || fail "diag-bundle.sh did not name its output: $(cat "$WORK/diag-bundle.out")"
+sshx 'cat /tmp/odi-diag.tar.gz' > "$WORK/diag.tar.gz"
+mkdir "$WORK/diag"
+tar -xzf "$WORK/diag.tar.gz" -C "$WORK/diag" || fail "the bundle is not a readable tar.gz"
+D=$WORK/diag/odi-diag
+for f in MANIFEST.txt dmesg.txt meminfo.txt mounts.txt uptime.txt ps.txt nv.txt metrics.txt \
+	config/lastgood.xml log/qemu-secrets.log log/services.log; do
+	[ -s "$D/$f" ] || fail "the bundle has no $f (MANIFEST: $(cat "$D/MANIFEST.txt" 2>/dev/null))"
+done
+grep -q '^gpon_' "$D/metrics.txt" || fail "the bundle has no exporter scrape"
+grep -q 'Name="GPON_PLOAM_PASSWD" Value="REDACTED"' "$D/config/lastgood.xml" || fail "GPON_PLOAM_PASSWD is not redacted in the config copy"
+grep -q 'Name="LAN_IP_ADDR" Value="10.0.2.15"' "$D/config/lastgood.xml" || fail "the config copy lost a key that is not a secret"
+[ ! -e "$D/config/confd.auth" ] || fail "confd.auth is in the bundle"
+for secret in "$DIAG_PLOAM" "$DIAG_LOIDPW" "$DIAG_LOIDPW_HEX" "$DIAG_WEBPW"; do
+	if grep -r -l -F "$secret" "$D"; then
+		fail "a secret value is in the bundle, in the files above"
+	fi
+done
+echo "  $(wc -c < "$WORK/diag.tar.gz" | tr -d ' ') bytes, $(find "$D" -type f | wc -l | tr -d ' ') files; config redacted, no planted secret in any file"
+# The same bundle through the web UI, when this confd has the route (odi-ui
+# with GET /api/diag; an older release answers 404, which is skipped).
+code=$(curl -s -m 90 -u "admin:$DIAG_WEBPW" -o "$WORK/diag-api.tar.gz" -w '%{http_code}' "http://127.0.0.1:$HTTP_PORT/api/diag") || code=000
+case "$code" in
+200)
+	mkdir "$WORK/diag-api"
+	tar -xzf "$WORK/diag-api.tar.gz" -C "$WORK/diag-api" || fail "/api/diag did not serve a readable tar.gz"
+	[ -s "$WORK/diag-api/odi-diag/MANIFEST.txt" ] || fail "/api/diag served a bundle without MANIFEST.txt"
+	for secret in "$DIAG_PLOAM" "$DIAG_LOIDPW" "$DIAG_LOIDPW_HEX" "$DIAG_WEBPW"; do
+		if grep -r -l -F "$secret" "$WORK/diag-api"; then
+			fail "a secret value is in the /api/diag bundle, in the files above"
+		fi
+	done
+	echo "  /api/diag: served the bundle, no planted secret in it"
+	;;
+404) echo "  /api/diag: not in this confd release, skipped" ;;
+*) fail "/api/diag answered $code" ;;
+esac
 
 say "all scenarios passed"
