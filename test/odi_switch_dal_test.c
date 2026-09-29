@@ -282,84 +282,84 @@ int main(int argc, char **argv)
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf1, sizeof(cf1) / sizeof(cf1[0]),
-				     vo1, sizeof(vo1) / sizeof(vo1[0]));
+				     vo1, sizeof(vo1) / sizeof(vo1[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-1.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf2, sizeof(cf2) / sizeof(cf2[0]),
-				     vo2, sizeof(vo2) / sizeof(vo2[0]));
+				     vo2, sizeof(vo2) / sizeof(vo2[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-2.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf3, sizeof(cf3) / sizeof(cf3[0]),
-				     vo3, sizeof(vo3) / sizeof(vo3[0]));
+				     vo3, sizeof(vo3) / sizeof(vo3[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-3.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf4, sizeof(cf4) / sizeof(cf4[0]),
-				     vo4, sizeof(vo4) / sizeof(vo4[0]));
+				     vo4, sizeof(vo4) / sizeof(vo4[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-4.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf5, sizeof(cf5) / sizeof(cf5[0]),
-				     vo5, sizeof(vo5) / sizeof(vo5[0]));
+				     vo5, sizeof(vo5) / sizeof(vo5[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-5.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf6, sizeof(cf6) / sizeof(cf6[0]),
-				     vo6, sizeof(vo6) / sizeof(vo6[0]));
+				     vo6, sizeof(vo6) / sizeof(vo6[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-6.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf7, sizeof(cf7) / sizeof(cf7[0]),
-				     vo7, sizeof(vo7) / sizeof(vo7[0]));
+				     vo7, sizeof(vo7) / sizeof(vo7[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-7.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf8, sizeof(cf8) / sizeof(cf8[0]),
-				     vo8, sizeof(vo8) / sizeof(vo8[0]));
+				     vo8, sizeof(vo8) / sizeof(vo8[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-8.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf9, sizeof(cf9) / sizeof(cf9[0]),
-				     vo9, sizeof(vo9) / sizeof(vo9[0]));
+				     vo9, sizeof(vo9) / sizeof(vo9[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-9.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf10, sizeof(cf10) / sizeof(cf10[0]),
-				     vo10, sizeof(vo10) / sizeof(vo10[0]));
+				     vo10, sizeof(vo10) / sizeof(vo10[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-10.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf11, sizeof(cf11) / sizeof(cf11[0]),
-				     vo11, sizeof(vo11) / sizeof(vo11[0]));
+				     vo11, sizeof(vo11) / sizeof(vo11[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-11.txt", 51);
 
 	odi_mock_reset();
 	odi_mock_mark(51);
 	odi_sw_cf_add(cf12, sizeof(cf12) / sizeof(cf12[0]),
-				     vo12, sizeof(vo12) / sizeof(vo12[0]));
+				     vo12, sizeof(vo12) / sizeof(vo12[0]), 0);
 	odi_mock_mark(0x80000000U | 51U);
 	dump_bracket(out_dir, "dal-cmd51-12.txt", 51);
 

@@ -23,6 +23,7 @@ struct odi_sw_bdgconn_slot {
 	int us_row, ds_row;	/* CF row index, -1 when the leg is absent */
 	uint32_t vlan_vid;	/* 0: no VLAN row of its own */
 	uint32_t vlan_val;
+	uint32_t vlan_any;	/* 0, or its members in every row 2..4094 */
 };
 static struct odi_sw_bdgconn_slot odi_sw_bdgconn[ODI_SW_CMD_BDGCONN_MAX];
 
@@ -239,9 +240,31 @@ static void cf_act_ds_fwd(struct odi_sw_cf_leg *l, uint32_t pmsk)
 		     ((pmsk & 0xfU) << ODI_SW_CF_A2_DS_PMSK_SHIFT);
 }
 
+/* Whether a rule forwards tagged frames of any VID unchanged: no VID in its
+ * filter, not an untagged-only filter, and both tag actions transparent.
+ * omcid builds these for a line with no VLAN filter (the forward-all rule),
+ * for class 84 codes that bridge tagged frames without looking at the VID,
+ * and for the priority-only filters. No capture of the stock image has one.
+ * Such a rule has no VID of its own to put a VLAN row on, so it puts its
+ * members on every row: with VLAN filtering on, a tagged frame whose VID
+ * row lists neither the UNI nor the PON is dropped at ingress
+ * (docs/SWITCH.md, "CF rows"), and the rows the sweep leaves are 0.
+ */
+static int rule_passes_any_vid(const struct omci_vlan_oper *r)
+{
+	if ((r->filter.outer_mode | r->filter.inner_mode) & OMCI_TAGF_UNTAGGED)
+		return 0;
+	if ((r->filter.inner_mode & (OMCI_TAGF_VID | OMCI_TAGF_TCI)) && r->filter.inner.vid < 4096U)
+		return 0;
+	if (r->out.out_tag.vid < 4096U)
+		return 0;
+	return r->inner_act.tag_op == OMCI_TAGOP_PASS && r->outer_act.tag_op == OMCI_TAGOP_PASS;
+}
+
 /* Both legs of one bridge rule, plus its VLAN row. */
 static void bdgconn_derive(const struct omci_bdgconn *b, struct odi_sw_cf_leg *us,
-			   struct odi_sw_cf_leg *ds, uint32_t *vlan_vid, uint32_t *vlan_val)
+			   struct odi_sw_cf_leg *ds, uint32_t *vlan_vid, uint32_t *vlan_val,
+			   uint32_t *vlan_any)
 {
 	const struct omci_vlan_oper *r = &b->vlan_op;
 	const struct omci_vlan_out *o = &r->out;
@@ -253,6 +276,7 @@ static void bdgconn_derive(const struct omci_bdgconn *b, struct odi_sw_cf_leg *u
 	ds->present = 0;
 	*vlan_vid = 0;
 	*vlan_val = 0;
+	*vlan_any = 0;
 
 	/* The upstream rule names its source port only when uni_mask holds
 	 * exactly one UNI (ISP1 1 and 5 alike -> port 0); with none (a VEIP
@@ -261,6 +285,10 @@ static void bdgconn_derive(const struct omci_bdgconn *b, struct odi_sw_cf_leg *u
 	for (i = 0; i < 4U; i++)
 		if (uni == (1U << i))
 			one_uni = (int)i;
+
+	if (rule_passes_any_vid(r))
+		*vlan_any = ODI_SW_VLAN_ROW((uni ? uni : ODI_SW_BOARD_UNI_PORTS) |
+					    (1U << ODI_SW_PON_PORT), 0);
 
 	if (b->dir & OMCI_DIR_US) {
 		cf_match_filter(us, &r->filter, 0, one_uni);
@@ -471,10 +499,24 @@ static int cf_same_row(int idx, const struct odi_sw_cf_leg *l)
 	       odi_sw_cf[idx].act[1] == l->act[1] && odi_sw_cf[idx].act[2] == l->act[2];
 }
 
+/* What every row 2..4094 carries: the members of the active services that
+ * pass any VID (rule_passes_any_vid()), 0 when there are none.
+ */
+static uint32_t vlan_default(void)
+{
+	uint32_t v = 0;
+	unsigned int i;
+
+	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++)
+		if (odi_sw_bdgconn[i].used)
+			v |= odi_sw_bdgconn[i].vlan_any;
+	return v;
+}
+
 /* The VLAN row of vid as the active services define it together. */
 static uint32_t vlan_row_of(uint32_t vid)
 {
-	uint32_t v = 0;
+	uint32_t v = vlan_default();
 	unsigned int i;
 
 	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++)
@@ -514,6 +556,12 @@ static void bdgconn_release(struct odi_sw_bdgconn_slot *sl)
 	cf_remove(sl->us_row);
 	cf_remove(sl->ds_row);
 	sl->used = 0;
+	if (sl->vlan_any) {
+		/* Its members were on every row: take them off all of them. */
+		for (vid = 2; vid <= ODI_SW_VLAN_ID_LAST_SWEPT; vid++)
+			odi_sw_vlan_row_set(vid, vlan_row_of(vid));
+		return;
+	}
 	if (vid)
 		odi_sw_vlan_row_set(vid, vlan_row_of(vid));
 }
@@ -523,13 +571,13 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 	struct omci_bdgconn *b = (struct omci_bdgconn *)buf;
 	struct odi_sw_bdgconn_slot *sl = NULL;
 	struct odi_sw_cf_leg us, ds;
-	uint32_t vlan_vid, vlan_val;
+	uint32_t vlan_vid, vlan_val, vlan_any;
 	unsigned int i;
 
 	if (!b || len < sizeof(*b))
 		return -1;
 
-	bdgconn_derive(b, &us, &ds, &vlan_vid, &vlan_val);
+	bdgconn_derive(b, &us, &ds, &vlan_vid, &vlan_val, &vlan_any);
 	odi_sw_cf_out_n = 0;
 
 	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++) {
@@ -575,6 +623,7 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 		sl->ds_row = -1;
 		sl->vlan_vid = 0;
 		sl->vlan_val = 0;
+		sl->vlan_any = 0;
 		sl->used = 1;
 		if (us.present)
 			sl->us_row = cf_insert(&us);
@@ -588,9 +637,10 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 	}
 	sl->vlan_vid = vlan_vid;
 	sl->vlan_val = vlan_val;
+	sl->vlan_any = vlan_any;
 
 	odi_sw_cf_add(odi_sw_cf_out, odi_sw_cf_out_n,
-				      odi_sw_vlan_out, vlan_overrides());
+				      odi_sw_vlan_out, vlan_overrides(), vlan_default());
 	return 0;
 }
 

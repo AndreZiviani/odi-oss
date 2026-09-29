@@ -198,6 +198,10 @@ struct odi_sw_vlan_override {
 #define ODI_SW_CF_DS_UNI_ACT_FWD	3U	/* forward to UNI_PMSK */
 #define ODI_SW_CF_TAG_SRC_ASSIGN	1U	/* the *_VID_ACT / *_PRI_ACT value */
 
+/* The last VLAN row the second pass of cmd 51 rewrites; 4095 keeps the
+ * first-pass sentinel. */
+#define ODI_SW_VLAN_ID_LAST_SWEPT	4094U
+
 /* VLAN row fields. */
 #define ODI_SW_VLAN_ROW_MBR_MASK	0xfU
 #define ODI_SW_VLAN_ROW_UNTAG_SHIFT	4
@@ -206,10 +210,13 @@ struct odi_sw_vlan_override {
 
 /* The whole sequence of one cmd 51: the CF rows in the order given, the
  * VLAN table in two passes and the fixed register template around them.
- * vlan_over lists the rows 2..4094 of the second VLAN pass that are not 0.
+ * vlan_over lists the rows 2..4094 of the second VLAN pass that differ
+ * from vlan_default, which every other row of that pass gets (0 unless a
+ * service passes any VID, odi_switch_bdgconn.c).
  */
 void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
-		   const struct odi_sw_vlan_override *vlan_over, unsigned int n_over);
+		   const struct odi_sw_vlan_override *vlan_over, unsigned int n_over,
+		   uint32_t vlan_default);
 
 /* Invalidates CF row idx: an all-zero rule row and action row. No capture
  * shows a delete; this is the encoding the layout implies.

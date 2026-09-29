@@ -389,6 +389,9 @@ void ev_alloc_ids(const uint16_t *ids, unsigned n);
  * `size` < 0 leaves out size and window. */
 void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
 		 long sections, const char *crc, const char *result);
+/* A class 84 forward operation no bridge rule can express, built as
+ * `used` instead: logged once per code for the life of the process. */
+void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used);
 void ev_tick(void);
 /* What the OLT sent that omcid does not model: one event line and one
  * summary line per unknown class and operation, or unknown message type,

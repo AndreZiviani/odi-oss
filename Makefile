@@ -122,6 +122,7 @@ test-host:
 	bash test/odi_reg_test.sh
 	bash test/odi_switch_cmd_test.sh
 	bash test/odi_switch_isp2_test.sh
+	bash test/odi_switch_bdgconn_vlan_test.sh
 	bash test/odi_switch_init_platform_test.sh
 	bash test/odi_omci_test.sh
 	bash test/regdump_test.sh
@@ -161,10 +162,12 @@ test-diag:
 # identical, with zero driver calls. swdl-test.sh runs a whole OLT software
 # download, activate and commit in both OLT_SW_DOWNLOAD modes, under
 # qemu -strace, and asserts nothing opens /dev/mtd, execs or reboots.
+# vlan-test.sh builds both ISP sessions with the manual tag on and off
+# (transparent) and checks the bridge rules.
 test-omci: src
 	$(MAKE) -C src/omci/respond drvtrace
 	docker run --rm -v "$(CURDIR)":/src -w /src/src/omci "$(DIAG_IMAGE)" \
-		sh -c 'sh qemu-test.sh && sh drv-test.sh && sh resume-test.sh && sh events-test.sh && sh swdl-test.sh'
+		sh -c 'sh qemu-test.sh && sh drv-test.sh && sh resume-test.sh && sh events-test.sh && sh swdl-test.sh && sh vlan-test.sh'
 
 # The rcS action trace: what rcS executes and writes under /proc, for
 # three flag sets, against test/fixtures/rcs-trace-*.txt. Not part of `test`:

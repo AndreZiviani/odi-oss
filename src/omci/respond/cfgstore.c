@@ -579,6 +579,15 @@ void cfg_show_vlan(void)
 			(long)vlanCfg.vid, (long)vlanCfg.pri);
 	else
 		out("manual tag  not applied (needs type 1, mode 1, a vid and a pri)\n");
+	/* The two ways a service can carry its VLAN (docs/SETTINGS.md,
+	 * "VLAN handling"): the stick adds the manual tag to untagged frames,
+	 * or it adds none and the router tags, every tag passing through as
+	 * the OLT provisioned it (FwdOp of class 84 still applies). */
+	if (vlanCfg.manual)
+		out_fmt("handling    stick tags: vid %d added to untagged frames\n",
+			(long)vlanCfg.vid);
+	else
+		out("handling    transparent: no tag added or removed, the router tags\n");
 }
 
 /* What is safe to print. The serial is on the label and the OLT ranges on it,

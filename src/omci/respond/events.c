@@ -668,6 +668,29 @@ void ev_unknown_msg(uint8_t mt, uint16_t cls)
 	unk_note(1, cls, mt);
 }
 
+/* A VLAN filter forward operation (class 84 FwdOp) omcid cannot build and
+ * replaces (apply_bridge.c, bp_rules()). Once per code for the life of the
+ * process: the rebuild runs after every provisioning burst and would say it
+ * again each time. The code is two hex digits, as G.988 prints it. */
+void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used)
+{
+	static uint8_t seen[256 / 8];
+	static const char hex[] = "0123456789abcdef";
+	char c[5] = { '0', 'x', hex[code >> 4], hex[code & 15], 0 };
+	char u[5] = { '0', 'x', hex[used >> 4], hex[used & 15], 0 };
+	struct evline e;
+
+	if (seen[code >> 3] & (1u << (code & 7)))
+		return;
+	seen[code >> 3] |= (uint8_t)(1u << (code & 7));
+	ev_begin(&e, "vlan_fwdop");
+	ev_str(&e, "code", c);
+	ev_num(&e, "inst", inst);
+	ev_str(&e, "result", "unsupported");
+	ev_str(&e, "built_as", u);
+	ev_emit(&e, EV_SEV_NOTICE);
+}
+
 /* Once a second, from the main loop. */
 void ev_tick(void)
 {
