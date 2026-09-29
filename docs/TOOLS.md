@@ -123,7 +123,7 @@ their VLAN rules, over the odi_omci netlink command path into the
 `odi_switch` driver built into the kernel (`docs/KERNEL.md`). This is the
 daemon that decides whether the OLT sees a working ONU.
 
-    omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state]
+    omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state] [-g file]
 
     -a          program the switch (apply mode); without it, dry run
     -r          restart: first remove every bridge connection a previous
@@ -134,6 +134,8 @@ daemon that decides whether the OLT sees a working ONU.
     -s state    use this ONU state for the resume decision instead of
                 asking the driver (test only; see docs/BOOT.md, "Resume
                 without re-registration")
+    -g file     read the Alloc-IDs and the serial from this file instead
+                of /proc/odi_gpon (test only)
     -f          start even if a live process holds redirect type 1
     -h          this text; starts nothing
 
@@ -151,15 +153,34 @@ refuses to start while a live one holds redirect type 1 (`-f` overrides).
 
 It reads, from the config store, once at start: the manual VLAN
 (`VLAN_MANU_TAG_VID` and `VLAN_MANU_TAG_PRI`, applied only with
-`VLAN_CFG_TYPE` 1 and `VLAN_MANU_MODE` 1, as the stock firmware gates them),
+`VLAN_CFG_TYPE` 1 and `VLAN_MANU_MODE` 1, as the stock firmware gates them;
+any other mode is transparent, `docs/SETTINGS.md`, "VLAN handling"),
 the serial number until the kernel reports one (`GPON_SN`), the LOID keys
-(answered in the CTC LOID-authentication entity), the five OLT identity keys
-(reported only while `/etc/config/omci-identity.on` exists), and
-`DUAL_MGMT_MODE` and the `OMCI_CUSTOM_*` masks for display only. Each key is
+(answered in the CTC LOID-authentication entity), the six OLT identity keys
+(the ONU-G hardware version, `ONU_HW_VERSION`, from `/etc/config/odi.conf`;
+all six reported only while `/etc/config/omci-identity.on` exists), and
+`DUAL_MGMT_MODE` and the `OMCI_CUSTOM_*` masks for display only; and, from
+`/etc/config/odi.conf`, `OMCI_UNKNOWN_ME_OK` (its start-up line `unknown
+entities: ...` says which way). At every
+Start software download, Activate and Commit from the OLT it reads
+`OLT_SW_DOWNLOAD` from `/etc/config/odi.conf`: accept (the default) answers the
+download and discards the image, reject refuses it; it never flashes and never
+reboots (docs/SETTINGS.md, "Software download from the OLT"). Each key is
 looked up in both store files, the one xmlconfig assigns it to first. Its
 start-up line in the log says what it found (`store: loid ..., manual vlan
 ..., identity report ...`). A change takes effect with `apply.sh omci`;
 `docs/SETTINGS.md` has what each one does.
+
+The T-CONT Alloc-IDs are the OLT's own. A T-CONT (ME 262) the OLT set over
+OMCI keeps the Alloc-ID it was set to (G.988 9.2.2). One it never set -- ISP1
+sets none -- takes the next Alloc-ID the OLT assigned by PLOAM that no set
+T-CONT claims, in assignment order, from the kernel's list (`alloc_ids` in
+`/proc/odi_gpon`, read once a second); with none left it reads 0x00FF,
+unassigned, and is not programmed. That is what a MIB upload and a Get of the
+AllocID answer, and what goes to the driver. When the kernel list changes (an
+assignment, a deallocation, a re-ranging) the T-CONTs bound to it are
+reprogrammed a quiet second later; `omcli tcont` shows each binding and where
+it came from.
 
 It logs every OMCI frame in and out (`<-` / `->` lines) and every driver
 call to `/var/log/omcid.log`, about 1.7 MB a day on a busy OLT before the
@@ -421,12 +442,14 @@ omcli uses omcid's own queue and commands:
                                          and the OLT's, with the values a Get
                                          returns; ends with an `N rows` line
     omcli caps                           the device capability blob, decoded
-    omcli tcont                          T-CONT entity id to driver index
+    omcli tcont                          T-CONT entity id to driver index, the
+                                         PLOAM Alloc-IDs, and each T-CONT's
+                                         Alloc-ID and where it came from
     omcli vlan [cs.xml]                  the manual VLAN from the config store,
                                          and whether the tag is applied
-    omcli ident [cs.xml hs.xml]          the identity and the OLT identity
-                                         keys, and whether those are reported
-                                         (passwords are never printed)
+    omcli ident [cs.xml hs.xml [odi.conf]]  the identity and the OLT
+                                         identity keys, and whether those are
+                                         reported (passwords are never printed)
     omcli bridge <ingress|any> <gem> <dir>   build one bridge rule by hand
     omcli cfgset <file> <dir> <key> <v>  write one key into a config store
     omcli help
@@ -660,7 +683,7 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
-| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number, the Alloc-IDs the OLT assigned (`alloc_ids`) | -- |
+| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first) | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
@@ -679,6 +702,7 @@ PON MAC under a running omcid; do it on a trial stick only.
 | where | what | survives |
 |---|---|---|
 | `/var/log/omcid.log` | every OMCI frame and driver call, omcid's startup | nothing (RAM, trimmed to 128-256 KB) |
+| `/var/log/omcid-unknown.txt` | each managed entity class and message type the OLT sent that omcid does not model, with a count ("Link and provisioning events") | an omcid respawn, not a reboot (RAM) |
 | `/var/log/services.log` | stderr of services: dropbear logins, confd, metricsd | nothing (RAM, trimmed) |
 | `/var/log/*.err` | the rcS `/proc/odi_omci` writes that failed | nothing |
 | `dmesg` | the kernel ring buffer, including `rcS:` progress lines | nothing; the web UI's Tools tab shows it too |
@@ -693,7 +717,8 @@ or this stick. Every event that can answer it is one line, `event=<name>`
 followed by `key=value` pairs, in syslog -- so `logread | grep event=` on the
 stick, or the collector `SYSLOG_SERVER` names (docs/SETTINGS.md), has the
 whole story in order, with syslogd's timestamps. Nothing is logged per
-message: a whole provisioning session is six lines.
+message: a whole provisioning session is six lines, plus one per thing the
+OLT sent that omcid does not model (nine on ISP1).
 
 The kernel's lines are printk (`kernel: odi_gpon: event=...`, facility kern),
 which klogd hands to syslogd; the ONU state machine lives in the driver, so
@@ -711,8 +736,12 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=mib_upload_begin entities=301` / `event=mib_upload_end entities=301 duration_s=0.009` | info | the OLT reading the MIB back; an upload it abandons has no end line |
 | `omcid: event=provision_begin op=set class=256 inst=0 after_mib_reset=1` | info | the first Create, Set or Delete of a burst; `after_mib_reset=1` is a full re-provisioning |
 | `omcid: event=provision_end creates=82 sets=102 deletes=0 duration_s=0.827 rows=161 services=6 after_mib_reset=1` | info | 10 s after the burst's last write: what it added up to (Gets and Tests do not count) |
+| `omcid: event=alloc_ids count=5 ids=282,794,1050,1306,538` | info | the Alloc-IDs the OLT assigned by PLOAM (`/proc/odi_gpon`), when omcid first reads them and whenever they change: ranging, a deallocation, a re-ranging (`ids=none`); the T-CONTs the OLT does not set are bound to them |
 | `omcid: event=olt_reboot class=256 inst=0 result=not_supported` | notice | the OLT asked for a reboot; omcid does not do it |
-| `omcid: event=sw_image op=download_start inst=1 result=not_supported` | notice | a software download (`op=download_start`, `download_end` with `sections=N`, `activate`, `commit`); omcid refuses each |
+| `omcid: event=sw_image op=download_start inst=1 size=2621440 window=32 result=ok` | notice | a software download step from the OLT: `op=download_start` (the image size and sections per window), `download_end` (`sections=N`, the sections accepted, and `crc=ok` or `bad`), `activate`, `commit`. `result` is `ok`; `not_supported` with `OLT_SW_DOWNLOAD=reject`; `refused_active` (a download to the image that is active or committed), `refused_invalid` (activate or commit of an image that is not valid), `crc_error`, `size_mismatch`, `short` or `no_download` otherwise. Accepted or not, the image is discarded and nothing is flashed (docs/SETTINGS.md, "Software download from the OLT") |
+| `omcid: event=unknown_me class=351 op=create mt=4` | notice | the first request this boot for a managed entity class omcid has no model for, per class and operation (`op` is `create`, `set`, `get`, `delete`, `get_next` or `test`; `mt` the message type); answered "unknown entity" unless `OMCI_UNKNOWN_ME_OK=1` (docs/SETTINGS.md) |
+| `omcid: event=unknown_msg type=17 class=256` | notice | the first frame this boot of a message type omcid does not handle, per type, with the class of that first frame; answered "not supported" |
+| `omcid: event=vlan_fwdop code=0x06 inst=18 result=unsupported built_as=0x10` | notice | a class 84 forward operation no bridge rule can express (negative filtering, filtering by TCI and MAC address, a code past G.988 table 9.3.11-1): built as 0x10 instead, once per code per omcid run |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 
 `cause` and `side` on `event=onu_state`:
@@ -743,9 +772,27 @@ Reading an outage:
   nothing on the line noticed.
 - `event=olt_reboot` followed by a deactivation: the OLT gave up on a
   reboot this image refuses.
+- `event=sw_image op=activate ... result=ok`, then a deactivation or a new
+  `download_start`: the OLT expected the ONU to reboot into the image it
+  sent; omcid only reports it active (docs/SETTINGS.md).
 - A board reset by the watchdog leaves no line here (the syslog buffer is in
   RAM, and forwarding stops with the board); the ramlog of the next boot
   records it (docs/KERNEL.md).
+
+What omcid does not model. Each unknown (class, operation) and each unknown
+message type is one line per boot, however often the OLT repeats it, and
+`/var/log/omcid-unknown.txt` keeps all of them with a count and the uptime of
+the first, even the ones the rate limit dropped:
+
+    unknown_me class=351 op=create mt=4 count=1 first_uptime_s=38
+    unknown_msg type=17 class=256 count=9 first_uptime_s=39
+
+A respawned omcid reads the file back first, so "once" holds across a
+restart; `/var/log` is RAM, so a reboot starts it empty. It holds 32 distinct
+entries and counts the rest on an `overflow` line. `diag-bundle.sh` collects
+it with the rest of `/var/log`, as `odi-diag/log/omcid-unknown.txt`. On ISP1
+the OLT sends class 351 once and message types 17 and 1 to ONU-G three times
+each per provisioning: those three lines are what a session looks like there.
 
 Rate limits: the kernel lines have their own printk ratelimit, 30 a minute
 (the kernel prints how many it dropped); omcid's, 20 a minute, with an

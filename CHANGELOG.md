@@ -5,6 +5,96 @@ listed here.
 
 ## Unreleased
 
+- omcid takes the T-CONT Alloc-IDs from the OLT instead of a table captured
+  on one ISP1 session. A T-CONT the OLT sets over OMCI keeps what it set
+  (G.988 9.2.2, as ISP2 does); one it never sets (ISP1 sets none) is bound to
+  the next Alloc-ID the OLT assigned by PLOAM, in assignment order, from
+  `alloc_ids` in `/proc/odi_gpon`, and reads 0x00FF (unassigned, not
+  programmed) when there is none. A MIB upload and a Get of the AllocID
+  answer the same. A change in the PLOAM list reprograms the T-CONTs bound
+  to it, and logs `event=alloc_ids`. Before, an OLT assigning any other
+  Alloc-IDs got ISP1's reported and sent to the driver. `omcli tcont` shows
+  each T-CONT's Alloc-ID and its source; `omcid -g` reads a file in place
+  of `/proc/odi_gpon` for the tests.
+- omcid no longer treats a deleted or MIB-reset row as live: the store walk
+  behind the upstream QoS and bridge-connection rebuilds handed out free
+  slots, which keep the class and data of their last row. After one OLT
+  session and a MIB reset, the next rebuild programmed every GEM port and
+  T-CONT of the old session again (seen under qemu: the ISP1 session, then
+  the ISP2 one, into one omcid).
+- The kernel releases an Alloc-ID the OLT deallocates (Assign_Alloc-ID type
+  255, G.984.3 9.2.3.9): its CAM row is deleted and freed for the next
+  assignment, and it leaves `alloc_ids`. Before, a deallocation was stored as
+  one more assignment.
+- omcid logs what it does not model, once per boot: `event=unknown_me
+  class=<n> op=<create|set|get|delete|get_next|test>` for a managed entity
+  class it has no model for and `event=unknown_msg type=<n> class=<n>` for a
+  message type it does not handle, each first sighting one syslog line (the
+  usual 20-a-minute event limit applies), every sighting counted in
+  `/var/log/omcid-unknown.txt`, which `diag-bundle.sh` collects as
+  `odi-diag/log/omcid-unknown.txt`. A respawned omcid reads the file back
+  and does not log the same thing twice in one boot. The ISP1 OLT session
+  already shows three: class 351, and message types 17 and 1 sent to ONU-G.
+- New odi-only key `OMCI_UNKNOWN_ME_OK` (`/etc/config/odi.conf`, default
+  off): `1` answers a Create, Set or Get of a class omcid does not model with
+  success instead of "unknown entity", the counterpart of the stock
+  `OMCI_FAKE_OK`, for an OLT that stalls on the error. Nothing is stored, a
+  Get answers no attributes, MIB data sync counts the faked writes. Read at
+  omcid start: INTERRUPTS INTERNET (`apply.sh omci`). `docs/SETTINGS.md` has
+  the risk.
+- omcid no longer counts a refused Set (an unknown class) in MIB data sync:
+  the OLT counts only the writes it was told succeeded.
+- omcid accepts a software download from the OLT instead of refusing it, and
+  never installs it: Start, Download section (acknowledged per G.988 window,
+  a window with a missing section refused so the OLT resends it), End (the
+  image CRC-32 and size checked), Activate and Commit are answered with
+  success, the image is counted and discarded, and the software image entity
+  reports the flags the OLT expects (`is_valid`, `is_active`,
+  `is_committed`) for the rest of the boot. Nothing is written to flash or the
+  U-Boot environment and the stick never reboots. A new odi-only key,
+  `OLT_SW_DOWNLOAD` in `/etc/config/odi.conf`: `accept` (the default) or
+  `reject` (the old "not supported" answers), read at every download. Every
+  step is an `event=sw_image` line with the sections and `crc=ok|bad`. ISP2's
+  End software download to ONU-G at every session start is no longer logged
+  as a software image step. `make test-omci` runs both modes, under
+  `qemu -strace` for accept, and asserts no flash, exec or reboot.
+- Transparent VLAN handling, documented as a choice (`docs/SETTINGS.md`,
+  "VLAN handling"): `VLAN_MANU_MODE` 0 is "router tags" -- the stick adds
+  and removes no tag and every frame passes with its own tags, so one port
+  can carry internet, IPTV and voice as router subinterfaces; 1 is "stick
+  tags", the manual `VLAN_MANU_TAG_VID`. No new key: 0 is the stock
+  firmware's own "no manual tag", so both slots agree. On a line without
+  class 84 (ISP2) transparent builds forward-all rules, which now also put
+  the UNI and PON on every VLAN row; on a class 84 line (ISP1, FwdOp 0x10)
+  the listed VIDs pass tagged and untagged frames are discarded, as the OLT
+  provisions. `omcli vlan` prints the mode (`handling` line) and omcid says
+  `manual vlan off (transparent)` at start. `src/omci/vlan-test.sh` (in
+  `make test-omci`) builds both ISP sessions in both modes.
+
+- omcid reads the class 84 forward operation (FwdOp, G.988 table 9.3.11-1)
+  and every entry of its VLAN filter list, up to twelve. Before, it built one
+  VID filter from the first entry whatever the code, which is only right for
+  0x10 (the mandatory code; ISP1 sends it with one entry per port, so
+  nothing changes there) and dropped every VLAN after the first on a
+  multi-VLAN port. Now: 0x00 forwards everything, 0x01 untagged only,
+  0x02/0x15 tagged frames of any VID, and the positive filters -- by VID
+  (0x03/0x04/0x0f/0x10/0x1c/0x1d), priority (0x07/0x08/0x11/0x12/0x1e/0x1f) or
+  both (0x0b/0x0c/0x13/0x14/0x20/0x21) -- one rule per entry, plus an
+  untagged rule for the codes that bridge untagged frames (the manual
+  add-tag rule when the manual tag is on). Negative filtering (0x05/0x06/
+  0x09/0x0a/0x0d/0x0e), filtering by TCI and MAC address (0x16-0x1b) and
+  codes past the table are built as 0x10 and logged once per code as
+  `event=vlan_fwdop code=0x.. inst=.. result=unsupported built_as=0x10`.
+  Every code has a check in `make test-omci`; the ISP1 and ISP2 driver-call
+  goldens are unchanged.
+- The switch driver gives a bridge rule that passes tagged frames of any VID
+  (forward-all, tagged-only, a priority filter) VLAN table membership on
+  every row 2..4094 (UNI and PON, tagged), and takes it off every row when
+  the rule is released. Those rules have no VID of their own to put a row
+  on, and the rows the cmd 51 sweep leaves are 0; a VID filter keeps its own
+  row as before. No stock capture has such a rule, so no golden moves;
+  `test/odi_switch_bdgconn_vlan_test.sh` pins the rows.
+
 ## v1.1.1 — 2026-09-29
 
 - Pins odi-ui confd v1.1.1 (was v1.1.0): the trial banner no longer claims
@@ -14,6 +104,8 @@ listed here.
   assigned Alloc-IDs.
 - The README web UI screenshot now links odi-ui (single source) instead of
   a copy in docs/images.
+
+||||||| parent of 46e80f7 (omcid: log unknown entities and message types once per boot; OMCI_UNKNOWN_ME_OK)
 ## v1.1.0 — 2026-09-29
 
 - Pins odi-ui confd v1.1.0 (was v1.0.8): the redesigned web UI (Status,

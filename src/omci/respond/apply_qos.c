@@ -4,6 +4,7 @@
  * class 268 handlers. See omcid.h.
  */
 #include "omcid.h"
+#include "../procparse.h"
 
 /* ------------------------------------------------------- priority queues
  *
@@ -478,6 +479,139 @@ static uint32_t tcont_index(uint16_t meId)
 			return tcont_map[i].index;
 	return 0xffff;                   /* no T-CONT of that name */
 }
+/* ------------------------------------------------- the T-CONT Alloc-IDs
+ *
+ * G.988 9.2.2: T-CONT attribute 1 links the entity to an Alloc-ID the OLT
+ * assigned by PLOAM (Assign_Alloc-ID, G.984.3 9.2.3.9), and the OLT sets
+ * it; until then it reads 0x00FF, unassigned. ISP2 sets it. ISP1 never
+ * does: it assigns five Alloc-IDs by PLOAM and points its GEM ports at
+ * T-CONTs 0x8000..0x8004 it never wrote, and the stock stack serves that by
+ * binding the PLOAM Alloc-IDs to its T-CONT entities itself, in the order
+ * they were assigned (its MIB on ISP1: 0x8000..0x8004 hold the five in
+ * PLOAM order, the other eleven 0x00FF). This does the same, from the list
+ * the kernel keeps (/proc/odi_gpon, alloc_ids), so the Alloc-IDs are this
+ * OLT's own rather than ones read off another line:
+ *
+ *   - a T-CONT the OLT set keeps what it set, 0x00FF included;
+ *   - every other T-CONT, in entity-id order, takes the next assigned
+ *     Alloc-ID that no set T-CONT claims, in assignment order;
+ *   - the rest read 0x00FF, and tcont_apply() refuses them.
+ *
+ * Binding by position also keeps T-CONT k on the kernel's Alloc-ID CAM row
+ * k, which is the order its upstream queue and flow words are laid out in
+ * (odi_switch_cmd.c, cmd 23 and 25). */
+#define ALLOC_ID_UNASSIGNED 0x00ffu
+
+const char *gpon_proc_path = "/proc/odi_gpon";
+static uint16_t ploam_alloc[TCONT_MAX];
+static int ploam_alloc_n = -1;           /* -1: not read yet, or unreadable */
+
+/* Read the kernel's list again. Returns 1 when it changed since the last
+ * read, 0 otherwise; the first read is no change, since whatever was
+ * programmed before it -- by a resumed snapshot -- was built from the same
+ * list. An unreadable file or line (no kernel of ours, a truncated read)
+ * counts as no Alloc-IDs: nothing to bind to. */
+int alloc_ids_refresh(void)
+{
+	char buf[1024];
+	uint16_t ids[TCONT_MAX];
+	long fd, n;
+	int got = -1, changed, readable, first = ploam_alloc_n < 0;
+
+	fd = sys_open(gpon_proc_path, O_RDONLY);
+	if (fd >= 0) {
+		/* One read: the line is the sixth of the file, well inside the
+		 * first kilobyte, and a seq_file read never blocks. */
+		n = sys_read((int)fd, buf, sizeof buf);
+		sys_close((int)fd);
+		if (n > 0)
+			got = pp_gpon_alloc_ids(buf, (unsigned)n, ids, TCONT_MAX);
+	}
+	readable = got >= 0;
+	if (got < 0)
+		got = 0;
+	changed = ploam_alloc_n != got;
+	for (int i = 0; i < got; i++)
+		if (changed || ploam_alloc[i] != ids[i]) {
+			changed = 1;
+			ploam_alloc[i] = ids[i];
+		}
+	ploam_alloc_n = got;
+	/* No line at all (qemu, a stock kernel) is not an event. */
+	if (changed && readable)
+		ev_alloc_ids(ploam_alloc, (unsigned)got);
+	return changed && !first;
+}
+
+unsigned alloc_ids_assigned(const uint16_t **ids)
+{
+	if (ploam_alloc_n < 0)
+		alloc_ids_refresh();
+	*ids = ploam_alloc;
+	return (unsigned)ploam_alloc_n;
+}
+
+/* The Alloc-ID the OLT wrote into T-CONT `meId`, or -1 if it wrote none. */
+static int tcont_olt_alloc(uint16_t meId)
+{
+	const struct omci_class *c = find_class(OMCI_ME_TCONT);
+	struct mib_row *r = mib_find(OMCI_ME_TCONT, meId);
+
+	if (!c || !r || !(r->written & (1u << (16 - 1))))
+		return -1;
+	return (int)row_u32(r, c, 1);
+}
+
+uint16_t tcont_alloc_id(uint16_t meId, int *src)
+{
+	const uint16_t *ids;
+	unsigned n = alloc_ids_assigned(&ids), nt = 0;
+	uint16_t inst[TCONT_MAX];
+	int set[TCONT_MAX], pos = -1, k = 0;
+
+	if (src)
+		*src = TCONT_ALLOC_NONE;
+	/* The T-CONTs are ONU-created (omci_autonomous[], in entity-id
+	 * order), sixteen here: what each was set to, gathered once, since a
+	 * MIB upload asks this for every one of them. An id that is not
+	 * among them is no T-CONT of this ONU. */
+	for (unsigned i = 0; i < omci_autonomous_count && nt < TCONT_MAX; i++)
+		if (omci_autonomous[i].classId == OMCI_ME_TCONT) {
+			inst[nt] = omci_autonomous[i].inst;
+			set[nt] = tcont_olt_alloc(inst[nt]);
+			nt++;
+		}
+	for (unsigned t = 0; t < nt; t++) {
+		if (inst[t] == meId) {
+			if (set[t] >= 0) {
+				if (src)
+					*src = TCONT_ALLOC_OLT;
+				return (uint16_t)set[t];
+			}
+			pos = k;
+			break;
+		}
+		if (set[t] < 0)
+			k++;
+	}
+	if (pos < 0)
+		return ALLOC_ID_UNASSIGNED;
+	for (unsigned i = 0; i < n; i++) {
+		int claimed = 0;
+
+		for (unsigned t = 0; t < nt && !claimed; t++)
+			claimed = set[t] == (int)ids[i];
+		if (claimed)
+			continue;
+		if (pos-- == 0) {
+			if (src)
+				*src = TCONT_ALLOC_PLOAM;
+			return ids[i];
+		}
+	}
+	return ALLOC_ID_UNASSIGNED;
+}
+
 /* Program one T-CONT: from a Set of its Alloc-ID, or on demand when a GEM
  * port CTP names it and the OLT never set it (the row already carries the
  * value). The driver hands back the index; the dry run uses allocation order. */

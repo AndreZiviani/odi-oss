@@ -829,6 +829,37 @@ static void hw_alloc_id_delete(unsigned int row)
 	odi_reg_write(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, ind);
 }
 
+/* Assign_Alloc-ID with type 255 (G.984.3 9.2.3.9, "deallocate"): the OLT
+ * takes that Alloc-ID back. Its CAM row is deleted with the same MODE=3
+ * leaf gpondeact uses, under the same lock, and the row is free for the
+ * next assignment. The default (ONU-ID) row is never released here: it
+ * belongs to the ONU-ID, not to an Assign_Alloc-ID. An Alloc-ID this
+ * driver does not hold is not an error, the OLT repeats every message.
+ * Returns the row released, or -1.
+ */
+int odi_gpon_hw_alloc_id_release(uint16_t alloc_id)
+{
+	unsigned long flags;
+	unsigned int row;
+
+	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++) {
+		if (row == ODI_GPON_HW_ALLOC_ROW_DEFAULT)
+			continue;
+		if ((odi_gpon_hw.alloc_used & (1UL << row)) &&
+		    odi_gpon_hw.alloc_id_values[row] == alloc_id)
+			break;
+	}
+	if (row == ODI_GPON_HW_ALLOC_ROWS)
+		return -1;
+
+	spin_lock_irqsave(&odi_switch_dsf_lock, flags);
+	hw_alloc_id_delete(row);
+	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
+	odi_gpon_hw.alloc_used &= ~(1UL << row);
+	odi_gpon_hw.alloc_id_values[row] = 0;
+	return (int)row;
+}
+
 /* GEM downstream port-ID CAM row delete -- same MODE=3 story as the
  * Alloc-ID delete above (react.txt L28-29: IND 0x340/0x8340, no PORT_WR
  * write), against DSF_GEM_CAM_CTL instead.

@@ -312,6 +312,17 @@ dropped at ingress: the likely reason ISP2 discarded every downstream
 frame at the PON port while this table was replayed from the ISP1
 capture, where VID 10 had no row until the ninth call.
 
+A rule that passes tagged frames of any VID -- no VID in its filter, not
+untagged-only, both tag actions transparent: forward-all, tagged-only or a
+priority filter, all from the class 84 forward operation -- has no VID for a
+row of its own, so while it is active every row 2..4094 carries its members
+(UNI and PON, tagged, 0x5), ORed into the service rows; releasing it
+rewrites every row without it (`odi_switch_bdgconn.c`,
+`rule_passes_any_vid()`, pinned by `test/odi_switch_bdgconn_vlan_test.c`).
+No capture has such a rule; whether the hardware drops a tagged frame on a
+0 row with the final `VLAN_SETUP` of cmd 51 (`FILTER_ON` 0) is not
+measured, and this keeps such a frame from depending on it.
+
 A CF row delete (`odi_sw_cf_del()`) writes an all-zero rule row, VALID
 clear, and an all-zero action row. No capture shows a delete; this is the
 encoding the layout implies and the one the platform sweep uses.

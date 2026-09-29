@@ -363,48 +363,331 @@ void ev_mib_upload_next(uint16_t seq)
 	ev_emit(&e, EV_SEV_INFO);
 }
 
-/* A reboot or a software image download the OLT asked for. omcid answers
- * neither (the OLT gets "not supported"), so each attempt is worth a line:
- * an OLT that follows a refused reboot with a deactivation is an outage the
- * ISP started. Download sections are counted, not logged: an image is
- * thousands of them. */
-static unsigned long sw_sections;
-
+/* A reboot the OLT asked for. omcid does not do it (the OLT gets "not
+ * supported"), so each request is worth a line: an OLT that follows a refused
+ * reboot with a deactivation is an outage the ISP started. */
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst)
 {
 	struct evline e;
-	const char *op = 0;
 
-	if (mt == OMCI_MT_DOWNLOAD_SECTION) {
-		sw_sections++;
+	if (mt != OMCI_MT_REBOOT)
 		return;
-	}
-	if (mt == OMCI_MT_REBOOT) {
-		ev_begin(&e, "olt_reboot");
-		ev_num(&e, "class", cls);
-		ev_num(&e, "inst", inst);
-		ev_str(&e, "result", "not_supported");
-		ev_emit(&e, EV_SEV_NOTICE);
-		return;
-	}
-	if (mt == OMCI_MT_START_SW_DOWNLOAD) {
-		op = "download_start";
-		sw_sections = 0;
-	} else if (mt == OMCI_MT_END_SW_DOWNLOAD) {
-		op = "download_end";
-	} else if (mt == OMCI_MT_ACTIVATE_SW) {
-		op = "activate";
-	} else if (mt == OMCI_MT_COMMIT_SW) {
-		op = "commit";
-	}
-	if (!op)
-		return;
+	ev_begin(&e, "olt_reboot");
+	ev_num(&e, "class", cls);
+	ev_num(&e, "inst", inst);
+	ev_str(&e, "result", "not_supported");
+	ev_emit(&e, EV_SEV_NOTICE);
+}
+
+/* One step of a software download, activate or commit (swimage.c). Download
+ * sections are counted there, not logged: an image is thousands of them. */
+void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
+		 long sections, const char *crc, const char *result)
+{
+	struct evline e;
+
 	ev_begin(&e, "sw_image");
 	ev_str(&e, "op", op);
 	ev_num(&e, "inst", inst);
-	if (mt == OMCI_MT_END_SW_DOWNLOAD)
-		ev_num(&e, "sections", sw_sections);
-	ev_str(&e, "result", "not_supported");
+	if (size >= 0) {
+		ev_num(&e, "size", (unsigned long)size);
+		ev_num(&e, "window", window);
+	}
+	if (sections >= 0)
+		ev_num(&e, "sections", (unsigned long)sections);
+	if (crc)
+		ev_str(&e, "crc", crc);
+	ev_str(&e, "result", result);
+	ev_emit(&e, EV_SEV_NOTICE);
+}
+
+/* The Alloc-IDs the OLT assigned by PLOAM, whenever the kernel list
+ * changes (apply_qos.c binds the T-CONTs the OLT does not set to them):
+ * during ranging, on a deallocation, and when a re-ranging clears them. */
+void ev_alloc_ids(const uint16_t *ids, unsigned n)
+{
+	struct evline e;
+
+	ev_begin(&e, "alloc_ids");
+	ev_num(&e, "count", n);
+	ev_put(&e, " ids=");
+	for (unsigned i = 0; i < n; i++) {
+		if (i)
+			ev_put(&e, ",");
+		ev_putu(&e, ids[i]);
+	}
+	if (!n)
+		ev_put(&e, "none");
+	ev_emit(&e, EV_SEV_INFO);
+}
+
+/* ------------------------------------------- what omcid does not model
+ *
+ * An OLT of another vendor can send a managed entity class omcid has no
+ * model for, or a message type it does not handle. Each is worth one line,
+ * not one per frame: an OLT that stalls on an answer retries the same
+ * request for as long as it waits. So each unknown (class, operation) pair
+ * and each unknown message type is logged once per boot, as
+ * event=unknown_me or event=unknown_msg, and kept with a count in
+ * UNKNOWN_PATH, which diag-bundle.sh collects with the rest of /var/log.
+ *
+ * "Per boot", not per process: /var/log is tmpfs, so the file itself is the
+ * record of this boot, and a respawned omcid reads it back before it logs
+ * anything, rather than logging every unknown again. Counts are rewritten
+ * at most once a second (ev_tick()); a new entry is written at once. */
+#define UNK_MAX      32
+#define UNK_BUF      4096
+
+struct unk_entry {
+	uint16_t cls;            /* unknown_me: the class; unknown_msg: the
+				  * class of the first frame of that type */
+	uint8_t mt;
+	uint8_t msg;             /* 1: an unknown message type */
+	unsigned long count;
+	unsigned long first_s;   /* monotonic seconds, i.e. uptime */
+};
+
+static struct unk_entry unk[UNK_MAX];
+static int unk_n, unk_loaded, unk_dirty;
+static unsigned long unk_overflow;
+static char unkbuf[UNK_BUF];
+
+int ev_msg_known(uint8_t mt)
+{
+	return mt == OMCI_MT_CREATE || mt == OMCI_MT_DELETE ||
+	       mt == OMCI_MT_SET || mt == OMCI_MT_GET ||
+	       mt == OMCI_MT_GET_ALL_ALARMS || mt == OMCI_MT_GET_ALL_ALARMS_NEXT ||
+	       mt == OMCI_MT_MIB_UPLOAD || mt == OMCI_MT_MIB_UPLOAD_NEXT ||
+	       mt == OMCI_MT_MIB_RESET || mt == OMCI_MT_TEST ||
+	       (mt >= OMCI_MT_START_SW_DOWNLOAD && mt <= OMCI_MT_REBOOT) ||
+	       mt == OMCI_MT_GET_NEXT;
+}
+
+static const char *unk_op(uint8_t mt)
+{
+	switch (mt) {
+	case OMCI_MT_CREATE:   return "create";
+	case OMCI_MT_DELETE:   return "delete";
+	case OMCI_MT_SET:      return "set";
+	case OMCI_MT_GET:      return "get";
+	case OMCI_MT_GET_NEXT: return "get_next";
+	case OMCI_MT_TEST:     return "test";
+	default:               return 0;
+	}
+}
+
+/* The number after `key` on one line, or -1. */
+static long unk_field(const char *l, int n, const char *key)
+{
+	int k = str_len(key);
+
+	for (int i = 0; i + k <= n; i++) {
+		int j = 0;
+		long v = 0;
+
+		if (i && l[i - 1] != ' ')
+			continue;
+		while (j < k && l[i + j] == key[j])
+			j++;
+		if (j < k)
+			continue;
+		if (i + k >= n || l[i + k] < '0' || l[i + k] > '9')
+			return -1;
+		for (j = i + k; j < n && l[j] >= '0' && l[j] <= '9'; j++)
+			v = v * 10 + (l[j] - '0');
+		return v;
+	}
+	return -1;
+}
+
+static int unk_prefix(const char *l, int n, const char *p)
+{
+	int k = str_len(p);
+
+	if (n < k)
+		return 0;
+	for (int i = 0; i < k; i++)
+		if (l[i] != p[i])
+			return 0;
+	return 1;
+}
+
+/* The entries an earlier omcid of this boot wrote. A line this does not
+ * recognise is dropped at the next rewrite. */
+static void unk_load(void)
+{
+	long fd, r;
+	int n = 0;
+
+	unk_loaded = 1;
+	fd = sys_open(UNKNOWN_PATH, O_RDONLY);
+	if (fd < 0)
+		return;
+	while (n < UNK_BUF - 1 && (r = sys_read((int)fd, unkbuf + n,
+						 UNK_BUF - 1 - n)) > 0)
+		n += (int)r;
+	sys_close((int)fd);
+	for (int i = 0; i < n && unk_n < UNK_MAX; ) {
+		int e = i;
+		const char *l = unkbuf + i;
+		long cls, mt, cnt, first;
+		int msg = -1;
+
+		while (e < n && unkbuf[e] != '\n')
+			e++;
+		if (unk_prefix(l, e - i, "unknown_me "))
+			msg = 0;
+		else if (unk_prefix(l, e - i, "unknown_msg "))
+			msg = 1;
+		cls = unk_field(l, e - i, "class=");
+		mt = unk_field(l, e - i, msg ? "type=" : "mt=");
+		cnt = unk_field(l, e - i, "count=");
+		first = unk_field(l, e - i, "first_uptime_s=");
+		if (msg >= 0 && cls >= 0 && cls <= 0xffff && mt >= 0 && mt <= 0xff &&
+		    cnt >= 0 && first >= 0) {
+			struct unk_entry *u = &unk[unk_n++];
+
+			u->cls = (uint16_t)cls;
+			u->mt = (uint8_t)mt;
+			u->msg = (uint8_t)msg;
+			u->count = (unsigned long)cnt;
+			u->first_s = (unsigned long)first;
+		} else if (unk_prefix(l, e - i, "overflow ") &&
+			   (cnt = unk_field(l, e - i, "count=")) >= 0) {
+			unk_overflow = (unsigned long)cnt;
+		}
+		i = e + 1;
+	}
+}
+
+static void unk_line(struct evline *e, const struct unk_entry *u)
+{
+	const char *op = unk_op(u->mt);
+
+	e->n = 0;
+	if (u->msg) {
+		ev_put(e, "unknown_msg");
+		ev_num(e, "type", u->mt);
+		ev_num(e, "class", u->cls);
+	} else {
+		ev_put(e, "unknown_me");
+		ev_num(e, "class", u->cls);
+		if (op)
+			ev_str(e, "op", op);
+		else
+			ev_num(e, "op", u->mt);
+		ev_num(e, "mt", u->mt);
+	}
+}
+
+static void unk_save(void)
+{
+	static const char head[] =
+		"# omcid: what the OLT sent that omcid does not model, this boot.\n"
+		"# One line per class and operation (unknown_me) or message type\n"
+		"# (unknown_msg); docs/TOOLS.md, \"Link and provisioning events\".\n";
+	int n = 0;
+
+	for (int i = 0; head[i] && n < UNK_BUF - 1; i++)
+		unkbuf[n++] = head[i];
+	for (int i = 0; i < unk_n; i++) {
+		struct evline e;
+
+		unk_line(&e, &unk[i]);
+		ev_num(&e, "count", unk[i].count);
+		ev_num(&e, "first_uptime_s", unk[i].first_s);
+		for (int k = 0; k < e.n && n < UNK_BUF - 1; k++)
+			unkbuf[n++] = e.b[k];
+		if (n < UNK_BUF - 1)
+			unkbuf[n++] = '\n';
+	}
+	if (unk_overflow) {
+		struct evline e;
+
+		e.n = 0;
+		ev_put(&e, "overflow");
+		ev_num(&e, "count", unk_overflow);
+		ev_put(&e, " (more distinct unknowns than the table holds)\n");
+		for (int k = 0; k < e.n && n < UNK_BUF - 1; k++)
+			unkbuf[n++] = e.b[k];
+	}
+	/* A failed write (a full /var) costs this copy; the next change
+	 * tries again. */
+	(void)atomic_write(UNKNOWN_PATH, UNKNOWN_TMP_PATH,
+			   (const uint8_t *)unkbuf, (uint32_t)n);
+	unk_dirty = 0;
+}
+
+static void unk_note(uint8_t msg, uint16_t cls, uint8_t mt)
+{
+	struct evline e;
+	struct unk_entry *u;
+
+	if (!unk_loaded)
+		unk_load();
+	for (int i = 0; i < unk_n; i++) {
+		u = &unk[i];
+		if (u->msg == msg && u->mt == mt && (msg || u->cls == cls)) {
+			u->count++;
+			unk_dirty = 1;
+			return;
+		}
+	}
+	if (unk_n >= UNK_MAX) {
+		unk_overflow++;
+		unk_dirty = 1;
+		return;
+	}
+	u = &unk[unk_n++];
+	u->msg = msg;
+	u->cls = cls;
+	u->mt = mt;
+	u->count = 1;
+	u->first_s = (unsigned long)ev_now().s;
+	unk_save();
+	/* The summary line is the event line minus the counters; the rate
+	 * limit may drop the event, never the file entry. */
+	unk_line(&e, u);
+	{
+		struct evline ev;
+
+		ev_begin(&ev, msg ? "unknown_msg" : "unknown_me");
+		for (int k = msg ? 11 : 10; k < e.n && ev.n < EV_LINE_MAX - 1; k++)
+			ev.b[ev.n++] = e.b[k];
+		ev_emit(&ev, EV_SEV_NOTICE);
+	}
+}
+
+void ev_unknown_me(uint16_t cls, uint8_t mt)
+{
+	unk_note(0, cls, mt);
+}
+
+void ev_unknown_msg(uint8_t mt, uint16_t cls)
+{
+	unk_note(1, cls, mt);
+}
+
+/* A VLAN filter forward operation (class 84 FwdOp) omcid cannot build and
+ * replaces (apply_bridge.c, bp_rules()). Once per code for the life of the
+ * process: the rebuild runs after every provisioning burst and would say it
+ * again each time. The code is two hex digits, as G.988 prints it. */
+void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used)
+{
+	static uint8_t seen[256 / 8];
+	static const char hex[] = "0123456789abcdef";
+	char c[5] = { '0', 'x', hex[code >> 4], hex[code & 15], 0 };
+	char u[5] = { '0', 'x', hex[used >> 4], hex[used & 15], 0 };
+	struct evline e;
+
+	if (seen[code >> 3] & (1u << (code & 7)))
+		return;
+	seen[code >> 3] |= (uint8_t)(1u << (code & 7));
+	ev_begin(&e, "vlan_fwdop");
+	ev_str(&e, "code", c);
+	ev_num(&e, "inst", inst);
+	ev_str(&e, "result", "unsupported");
+	ev_str(&e, "built_as", u);
 	ev_emit(&e, EV_SEV_NOTICE);
 }
 
@@ -413,4 +696,6 @@ void ev_tick(void)
 {
 	if (prov.open && ev_ms_since(prov.last, ev_now()) >= EV_PROV_QUIET_S * 1000L)
 		prov_close();
+	if (unk_dirty)
+		unk_save();
 }

@@ -318,9 +318,11 @@ void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
  * As the stock `omcicli dump conn` shows on ISP1: one connection per
  * (UNI-side bridge port) x (GEM-side bridge port), direction Both, ingress
  * 0x0101 (PPTP Ethernet UNI) and 0x0601 (VEIP), egress the GEM port of the
- * GEM IW TP of the bridge port, and the VLAN rule from the class 84 row on
- * the GEM-side port: FILTER VID <tci>, or with no filter entries untagged in
- * and the manual VLAN added (stock service 0: NO TAG, assign VID 11).
+ * GEM IW TP of the bridge port, and the VLAN rules from the class 84 row on
+ * the GEM-side port (bp_rules()): per its forward operation, one filter per
+ * list entry, an untagged or a tagged rule, or with no filter entries
+ * untagged in and the manual VLAN added (stock service 0: NO TAG, assign
+ * VID 11).
  * Multicast (direction 2 CTPs) is left to bc_gem_update. Rebuilt whole --
  * tear down, derive, add -- OLT_QUIET_MS after the last OMCI frame, since
  * the OLT sends these entities in no reliable order. */
@@ -360,6 +362,236 @@ static void gen_vid_filter_rule(struct omci_vlan_oper *vr, unsigned vid, int pbi
 	vr->out.out_tag.pri  = pbit >= 0 ? (uint32_t)pbit : OMCI_PRI_ANY;
 	vr->out.out_tag.vid  = vid;
 	vr->out.out_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
+}
+
+/* Class 84, VLAN tagging filter data: its forward operation (FwdOp), G.988
+ * table 9.3.11-1. Each code is two halves: what happens to a tagged frame
+ * (bridged without looking, discarded, or investigated against the VLAN
+ * filter list by VID, priority or the whole TCI) and to an untagged one
+ * (bridged or discarded). The list holds up to twelve TCIs, the first
+ * NumOfEntries valid.
+ *
+ * What a bridge rule can say: forward everything, forward untagged only,
+ * forward tagged only, and a positive filter on VID, priority or both --
+ * the (h) action, "admitted if and only if it matches, both ways". It
+ * cannot say (g), negative filtering (forward all BUT the listed TCIs), or
+ * (j), positive filtering by TCI and destination MAC with no flooding:
+ * those codes are built as 0x10 is, and logged once (event=vlan_fwdop).
+ * The table repeats itself (0x0f/0x1c are 0x03 again, and so on); the
+ * repeats differ only in the letter, not in what reaches a rule here. */
+enum { FWD_TAG_ALL, FWD_TAG_NONE, FWD_TAG_VID, FWD_TAG_PRI, FWD_TAG_TCI };
+
+struct fwdop { uint8_t tagged, untagged_fwd, supported; };
+
+#define FWDOP_MANDATORY 0x10
+
+static struct fwdop fwdop_decode(uint32_t code)
+{
+	struct fwdop f = { FWD_TAG_VID, 0, 1 };
+
+	switch (code) {
+	case 0x00: f.tagged = FWD_TAG_ALL;  f.untagged_fwd = 1; break;
+	case 0x01: f.tagged = FWD_TAG_NONE; f.untagged_fwd = 1; break;
+	case 0x02: case 0x15:
+		f.tagged = FWD_TAG_ALL; break;
+	case 0x03: case 0x0f: case 0x1c:
+		f.untagged_fwd = 1; break;
+	case 0x04: case 0x10: case 0x1d:
+		break;
+	case 0x07: case 0x11: case 0x1e:
+		f.tagged = FWD_TAG_PRI; f.untagged_fwd = 1; break;
+	case 0x08: case 0x12: case 0x1f:
+		f.tagged = FWD_TAG_PRI; break;
+	case 0x0b: case 0x13: case 0x20:
+		f.tagged = FWD_TAG_TCI; f.untagged_fwd = 1; break;
+	case 0x0c: case 0x14: case 0x21:
+		f.tagged = FWD_TAG_TCI; break;
+	default:                         /* (g), (j), and past the table */
+		f.supported = 0;
+		break;
+	}
+	return f;
+}
+
+/* Every frame from the UNI into the bridge, untagged only: no tag added,
+ * none removed, and the downstream leg matches untagged frames only. */
+static void gen_untagged_rule(struct omci_vlan_oper *vr)
+{
+	struct omci_bdgconn tmp;
+
+	rule_init(&tmp);
+	*vr = tmp.vlan_op;
+	vr->rule_gen = OMCI_VLAN_OPER_FORWARD_UNTAG;
+	vr->filter.outer_mode = OMCI_TAGF_UNTAGGED;
+	vr->filter.inner_mode = OMCI_TAGF_UNTAGGED;
+	vr->filter.outer.tpid = OMCI_FILTER_TPID_DO_NOT;
+	vr->filter.inner.tpid = OMCI_FILTER_TPID_DO_NOT;
+	vr->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	vr->out.tag_count = 0;
+	vr->out.tpid = OMCI_OUT_TPID_8100;
+}
+
+/* Tagged frames of any VID and priority, unchanged. */
+static void gen_tagged_rule(struct omci_vlan_oper *vr)
+{
+	struct omci_bdgconn tmp;
+
+	rule_init(&tmp);
+	*vr = tmp.vlan_op;
+	vr->rule_gen = OMCI_VLAN_OPER_FORWARD_SINGLETAG;
+	vr->filter.inner_mode = OMCI_TAGF_TAGGED;
+	vr->filter.inner.tpid = OMCI_FILTER_TPID_DO_NOT;
+	vr->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	vr->out.tag_count = 1;
+	vr->out.tpid = OMCI_OUT_TPID_8100;
+}
+
+/* Tagged frames of one priority, any VID, unchanged: the (h) action on the
+ * user priority, the 802.1p mapper code 0x12. */
+static void gen_pri_filter_rule(struct omci_vlan_oper *vr, unsigned pri)
+{
+	struct omci_bdgconn tmp;
+
+	rule_init(&tmp);
+	*vr = tmp.vlan_op;
+	vr->rule_gen = OMCI_VLAN_OPER_FILTER_INNER_PRI;
+	vr->filter.inner_mode = OMCI_TAGF_TAGGED | OMCI_TAGF_PRI;
+	vr->filter.inner.pri = pri;
+	vr->filter.inner.tpid = OMCI_FILTER_TPID_DO_NOT;
+	vr->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	vr->out.tag_count = 1;
+	vr->out.tpid = OMCI_OUT_TPID_8100;
+	vr->out.out_tag.pri = pri;
+}
+
+/* The rules of one GEM-side bridge port: at most one per filter entry, one
+ * for untagged frames, one for tagged ones. */
+#define BP_RULES_MAX 14
+
+struct bp_rule {
+	struct omci_vlan_oper vr;
+	const char *kind;
+	int vid, pri;                    /* for the log line; -1 none */
+};
+
+static int bp_put(struct bp_rule *rules, int n, const char *kind, int vid, int pri)
+{
+	for (int i = 0; i < n; i++)
+		if (rules[i].kind == kind && rules[i].vid == vid && rules[i].pri == pri)
+			return n;        /* a repeated list entry: one rule */
+	if (n >= BP_RULES_MAX)
+		return n;
+	rules[n].kind = kind;
+	rules[n].vid = vid;
+	rules[n].pri = pri;
+	return n + 1;
+}
+
+/* The manual tag, when on, is the untagged handoff (kb and SETTINGS.md,
+ * "manual VLAN"): VLAN_MANU_TAG_VID added to what comes in untagged. The
+ * stock stack builds it for the class 84 entry that carries that VID, and
+ * with no class 84 at all; so does this, and it stands in for the plain
+ * untagged rule of a code that bridges untagged frames. */
+/* *manual says whether the list itself names the manual VID: such a port
+ * is installed first (the caller orders by it, as the stock stack does). */
+static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
+		    struct bp_rule *rules, int *manual)
+{
+	const struct omci_class *c84 = find_class(OMCI_ME_VLAN_TAGGING_FILTER_DATA);
+	struct mib_row *vt = c84 ? mib_find(OMCI_ME_VLAN_TAGGING_FILTER_DATA, bp) : 0;
+	uint32_t nent = vt ? row_u32(vt, c84, 3) : 0, code = vt ? row_u32(vt, c84, 2) : 0;
+	struct fwdop f;
+	uint8_t tbl[24];
+	int n = 0;
+
+	*manual = 0;
+	/* Downstream only (multicast) under the manual tag: the tag comes off. */
+	if (dir == 2 && mvid >= 0) {
+		n = bp_put(rules, n, "manual-remove", mvid, vlanCfg.pri);
+		gen_manual_vlan_rule(&rules[0].vr, mvid, vlanCfg.pri, 1);
+		return n;
+	}
+	/* No class 84, or one with an empty list: as before any FwdOp was
+	 * read -- the manual tag, else everything forwarded. An investigating
+	 * code over an empty list would discard every tagged frame, which no
+	 * line has been seen to mean. */
+	if (!vt || !nent) {
+		if (mvid >= 0) {
+			n = bp_put(rules, n, "manual-add", mvid, vlanCfg.pri);
+			gen_manual_vlan_rule(&rules[0].vr, mvid, vlanCfg.pri, 0);
+		} else {
+			n = bp_put(rules, n, "forward-all", -1, -1);
+			gen_no_vlan_filter_rule(&rules[0].vr);
+		}
+		return n;
+	}
+	f = fwdop_decode(code);
+	if (!f.supported) {
+		ev_vlan_fwdop(bp, (uint8_t)code, FWDOP_MANDATORY);
+		f = fwdop_decode(FWDOP_MANDATORY);
+	}
+	if (nent > 12)
+		nent = 12;
+	for (unsigned b = 0; b < sizeof tbl; b++)
+		tbl[b] = 0;
+	attr_value(c84, bp, 1, tbl);
+
+	if (f.tagged == FWD_TAG_ALL && f.untagged_fwd && mvid < 0) {
+		n = bp_put(rules, n, "forward-all", -1, -1);
+		gen_no_vlan_filter_rule(&rules[0].vr);
+		return n;
+	}
+	for (unsigned e = 0; e < nent && f.tagged >= FWD_TAG_VID; e++) {
+		int vid = (int)(((unsigned)tbl[2 * e] << 8 | tbl[2 * e + 1]) & 0xfff);
+		int pri = tbl[2 * e] >> 5;
+		int had = n;
+
+		if (f.tagged != FWD_TAG_PRI && vid == mvid) {
+			/* The service VID is the untagged handoff. OEM still has
+			 * a class-84 row for it, but builds the manual add-tag
+			 * rule. */
+			if (*manual)
+				continue;
+			n = bp_put(rules, n, "manual-add", mvid, vlanCfg.pri);
+			if (n > had) {
+				gen_manual_vlan_rule(&rules[had].vr, mvid, vlanCfg.pri, 0);
+				*manual = 1;
+			}
+		} else if (f.tagged == FWD_TAG_VID) {
+			n = bp_put(rules, n, "vid-filter", vid, pbit);
+			if (n > had)
+				gen_vid_filter_rule(&rules[had].vr, (unsigned)vid, pbit);
+		} else if (f.tagged == FWD_TAG_TCI) {
+			n = bp_put(rules, n, "tci-filter", vid, pri);
+			if (n > had)
+				gen_vid_filter_rule(&rules[had].vr, (unsigned)vid, pri);
+		} else {
+			n = bp_put(rules, n, "pri-filter", -1, pri);
+			if (n > had)
+				gen_pri_filter_rule(&rules[had].vr, (unsigned)pri);
+		}
+	}
+	if (f.tagged == FWD_TAG_ALL) {
+		int had = n;
+
+		n = bp_put(rules, n, "tagged", -1, -1);
+		if (n > had)
+			gen_tagged_rule(&rules[had].vr);
+	}
+	if (f.untagged_fwd && !*manual) {
+		int had = n;
+
+		if (mvid >= 0) {
+			n = bp_put(rules, n, "manual-add", mvid, vlanCfg.pri);
+			if (n > had)
+				gen_manual_vlan_rule(&rules[had].vr, mvid, vlanCfg.pri, 0);
+		} else {
+			n = bp_put(rules, n, "untagged", -1, -1);
+			if (n > had)
+				gen_untagged_rule(&rules[had].vr);
+		}
+	}
+	return n;
 }
 
 void bdgconn_rebuild(void)
@@ -402,7 +634,7 @@ void bdgconn_rebuild(void)
 	for (int pass = 0; pass < 3; pass++) {
 		for (int i = 0; i < MIB_ROWS; i++) {
 			int row = pass == 1 ? MIB_ROWS - 1 - i : i;
-			struct mib_row *r = mib_row_at(row), *iw, *ctp, *vt, *mapper;
+			struct mib_row *r = mib_row_at(row), *iw, *ctp, *mapper;
 			struct mib_row *tgt_iw[8];
 			int tgt_pbit[8], ntgt = 0;
 			uint32_t tpType;
@@ -467,10 +699,9 @@ void bdgconn_rebuild(void)
 				}
 			}
 			for (int t = 0; t < ntgt; t++) {
-			struct omci_vlan_oper vr;
-			uint32_t port, dir, nent = 0, vid = 0;
-			int serviceVid, pbit = tgt_pbit[t];
-			uint8_t tbl[24];
+			struct bp_rule rules[BP_RULES_MAX];
+			uint32_t port, dir;
+			int nrules, manual;
 
 			iw = tgt_iw[t];
 			ctp = mib_find(OMCI_ME_GEM_PORT_CTP, (uint16_t)row_u32(iw, tpType == 3 ? c266 : c281, 1));
@@ -478,33 +709,14 @@ void bdgconn_rebuild(void)
 				continue;
 			port = row_u32(ctp, c268, 1);
 			dir = row_u32(ctp, c268, 3);
-			vt = mib_find(OMCI_ME_VLAN_TAGGING_FILTER_DATA, r->inst);
-			if (vt) {
-				nent = row_u32(vt, c84, 3);
-				for (unsigned b = 0; b < sizeof tbl; b++)
-					tbl[b] = 0;
-				attr_value(c84, r->inst, 1, tbl);
-				vid = ((unsigned)tbl[0] << 8 | tbl[1]) & 0xfff;
-			}
-			serviceVid = vt && nent && mvid >= 0 &&
-				vid == (unsigned)mvid;
-			if (tpType == 3 && ((pass == 0 && !serviceVid) ||
-					    (pass == 1 && serviceVid)))
+			nrules = bp_rules(r->inst, tgt_pbit[t], mvid, dir, rules, &manual);
+			if (tpType == 3 && ((pass == 0 && !manual) ||
+					    (pass == 1 && manual)))
 				continue;
-			if (dir == 2 && mvid >= 0) {
-				gen_manual_vlan_rule(&vr, mvid, vlanCfg.pri, 1);
-			} else if (vt && nent) {
-				/* The service VID is the untagged handoff. OEM still has a
-				 * class-84 row for it, but builds the manual add-tag rule. */
-				if (vid == (unsigned)mvid)
-					gen_manual_vlan_rule(&vr, mvid, vlanCfg.pri, 0);
-				else
-					gen_vid_filter_rule(&vr, vid, pbit);
-			} else if (mvid >= 0) {
-				gen_manual_vlan_rule(&vr, mvid, vlanCfg.pri, 0);
-			} else {
-				gen_no_vlan_filter_rule(&vr);
-			}
+			for (int k = 0; k < nrules; k++) {
+			out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
+				apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
+				rules[k].kind, (long)rules[k].vid, (long)rules[k].pri);
 			for (int g = 0; g < ning; g++) {
 				int id;
 
@@ -513,12 +725,13 @@ void bdgconn_rebuild(void)
 				 * seen has one. */
 				if (ingress_bridge[g] != (int)row_u32(r, c47, 1))
 					continue;
-				id = bdgconn_add(ingress[g], (uint16_t)port, dir, &vr);
+				id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rules[k].vr);
 				if (id >= 0 && conn_nservs < SERV_MAX) {
 					conn_servs[conn_nservs++] = id;
 					added++;
 				}
 			}
+			}                        /* rules of this target */
 			}                        /* targets of this bridge port */
 		}
 	}

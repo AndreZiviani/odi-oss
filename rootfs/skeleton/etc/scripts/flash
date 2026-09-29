@@ -23,7 +23,7 @@
 # store are network.sh, which parses the XML directly, and confd. So here the
 # file IS the configuration.
 #
-# ODI-ONLY KEYS. SYSLOG_SERVER and NTP_SERVER exist only on this image: the
+# ODI-ONLY KEYS. The keys in ODI_KEYS below exist only on this image: the
 # stock lastgood*.xml has never carried them, and this script only edits keys
 # that are already in those files, so a set on them failed ("no such key") and
 # a get printed "GET fail.". They live in a plain KEY=value file on the config
@@ -46,7 +46,7 @@ HS=${HS:-/var/config/lastgood_hs.xml}
 DEFAULTS=${DEFAULTS:-/etc/config_default.xml}
 TMPDIR_=${TMPDIR_:-/var/tmp}
 ODI_CONF=${ODI_CONF:-/var/config/odi.conf}
-ODI_KEYS="SYSLOG_SERVER NTP_SERVER"
+ODI_KEYS="SYSLOG_SERVER NTP_SERVER ONU_HW_VERSION OMCI_UNKNOWN_ME_OK OLT_SW_DOWNLOAD"
 
 usage() {
 	echo "usage: flash all {cs|hs}" >&2

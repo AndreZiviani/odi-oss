@@ -77,6 +77,7 @@ OLTs, or other firmware revisions) are welcome as issues or PRs.
 | [The stock OMCI daemon is eight processes, not eight threads](rtl9601-omci-app-process-tree.md) | OMCI daemon process structure |
 | [GEM flows and T-CONTs alone forward nothing: the bridge-connection rule carries it](rtl9601-omci-bridge-connection.md) | the bridge-connection descriptor that actually enables forwarding |
 | [The device's capability tables come from one read-only driver query](rtl9601-omci-device-capabilities.md) | device capability query |
+| [An OLT may never set a T-CONT's Alloc-ID over OMCI; the stock stack then binds the PLOAM Alloc-IDs to its T-CONTs in assignment order](rtl9601-omci-tcont-alloc-id-from-ploam.md) | T-CONT Alloc-ID binding |
 | [The OMCI southbound is a single socket option with a dense command space](rtl9601-omci-driver-interface.md) | OMCI-to-hardware transport and its behavioral traps |
 | [Reading a G.988 extended-VLAN tagging entry: the single added tag comes from the inner treatment word](rtl9601-omci-extvlan-table.md) | extended VLAN tagging table (class 171) layout |
 | [The firmware's feature bitmasks are fully decodable from the shipped image](rtl9601-omci-feature-bitmasks.md) | feature bitmask decoding |

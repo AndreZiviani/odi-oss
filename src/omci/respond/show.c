@@ -477,6 +477,33 @@ uint32_t cli_tcont(void)
 		}
 	if (!n)
 		out("  (none allocated)\n");
+	{
+		const uint16_t *ids;
+		unsigned na = alloc_ids_assigned(&ids), unassigned = 0;
+		static const char *const from[] = { "unassigned", "olt", "ploam" };
+
+		out_fmt("alloc-ids the olt assigned (ploam): %d", (long)na);
+		for (unsigned i = 0; i < na; i++)
+			out_fmt(" %d", (long)ids[i]);
+		out("\nt-cont alloc-ids (olt: set over omci; ploam: bound in "
+		    "assignment order):\n");
+		for (unsigned i = 0; i < omci_autonomous_count; i++) {
+			const struct omci_instance *e = &omci_autonomous[i];
+			int src;
+			uint16_t a;
+
+			if (e->classId != OMCI_ME_TCONT)
+				continue;
+			a = tcont_alloc_id(e->inst, &src);
+			if (src == TCONT_ALLOC_NONE && a == 0x00ff) {
+				unassigned++;
+				continue;
+			}
+			out_fmt("  me %04x alloc %d (%s)\n", (long)e->inst,
+				(long)a, from[src]);
+		}
+		out_fmt("  %d more unassigned (255)\n", (long)unassigned);
+	}
 	return OMCLI_OK;
 }
 
@@ -629,11 +656,12 @@ uint32_t cli_vlan(void)
  * passwords are never printed -- see cfg_show_identity. */
 uint32_t cli_ident(void)
 {
-	const char *cs = cli_arg(1), *hs = cli_arg(2);
+	const char *cs = cli_arg(1), *hs = cli_arg(2), *odi = cli_arg(3);
 
 	if (cs && hs) {
 		cfg_load_identity_from(cs, hs);
-		cfg_load_report_from(cs, hs, CFG_REPORT_SWITCH);
+		cfg_load_report_from(cs, hs, CFG_REPORT_SWITCH,
+				     odi ? odi : CFG_ODI_PATH);
 	} else {
 		cfg_load_identity();
 		cfg_load_report();
@@ -809,7 +837,7 @@ uint32_t cli_help(void)
 	    "  state                          serial, device, onu state\n"
 	    "  provision                      what the OLT provisioned: T-CONTs,\n"
 	    "                                 GEM ports, VLANs, traffic descriptors\n"
-	    "  ident [cs] [hs]                identity from the config store\n"
+	    "  ident [cs hs [odi]]            identity from the config store\n"
 	    "  cfgset <file> <dir> <key> <v>  write one key into a config store\n"
 	    "  help\n");
 	return OMCLI_OK;

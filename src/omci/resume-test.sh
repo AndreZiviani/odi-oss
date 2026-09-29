@@ -38,6 +38,11 @@ mkdir -p /var/config /var/run
 rm -f /var/config/lastgood_hs.xml /var/run/omcid-mib.snap /var/run/omcid-mib.snap.tmp \
       /var/run/omcid-resume-decision
 
+# The PLOAM Alloc-IDs of each line, as drv-test.sh gives them (omcid -g):
+# the T-CONT bindings are part of what a resumed instance must answer.
+printf 'alloc_ids 5 282 794 1050 1306 538\n' > /tmp/resume-gpon-isp1
+printf 'alloc_ids 1 348\n' > /tmp/resume-gpon-isp2
+
 for isp in isp1 isp2; do
 	cp "$FIX/omci-store-$isp.xml" /var/config/lastgood.xml
 
@@ -46,7 +51,7 @@ for isp in isp1 isp2; do
 
 	# 1: a whole session into a first, daemon-mode instance (-d: no idle
 	# exit -- this one has to still be up when we kill it).
-	$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" > "$before_log" 2>&1 &
+	$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-$isp > "$before_log" 2>&1 &
 	pid=$!
 	sleep 2
 	$Q cli/build/omcli --inject-file "$FIX/omci-session-$isp.txt" > /tmp/resume-inject-$isp.txt 2>&1
@@ -72,7 +77,7 @@ for isp in isp1 isp2; do
 	# 4: a fresh instance, -s 5 standing in for "PON is O5" (qemu has no
 	# netlink to ask the driver over). -w 1: it may idle-exit once our
 	# three dumps are done, the same as a drv-test.sh run.
-	$Q respond/build/omcid-drvtrace -a -w 1 -c "$CAPS" -s 5 > "$after_log" 2>&1 &
+	$Q respond/build/omcid-drvtrace -a -w 1 -c "$CAPS" -s 5 -g /tmp/resume-gpon-$isp > "$after_log" 2>&1 &
 	pid=$!
 	sleep 2
 

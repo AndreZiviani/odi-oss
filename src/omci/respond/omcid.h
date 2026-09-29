@@ -162,6 +162,19 @@ struct flow_slot { uint16_t port; uint8_t used; };
 #define TCONT_MAX 32
 struct tcont_slot { uint16_t meId; uint16_t index; uint8_t used; };
 
+/* Where a T-CONT's Alloc-ID comes from (apply_qos.c, "the T-CONT
+ * Alloc-IDs"): set by the OLT over OMCI, bound from the PLOAM assignments,
+ * or none (0x00FF). */
+#define TCONT_ALLOC_NONE  0
+#define TCONT_ALLOC_OLT   1
+#define TCONT_ALLOC_PLOAM 2
+/* The file the kernel lists the PLOAM Alloc-IDs in (and the serial);
+ * omcid -g points it elsewhere for a test. */
+extern const char *gpon_proc_path;
+int alloc_ids_refresh(void);
+unsigned alloc_ids_assigned(const uint16_t **ids);
+uint16_t tcont_alloc_id(uint16_t meId, int *src);
+
 /* Everything that crosses a module boundary. */
 extern uint8_t serial[9];
 /* Fill serial[] from the kernel, or the config store until the kernel has
@@ -264,6 +277,10 @@ extern uint16_t alarm_snapshot;
 #define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
 #define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
 void snapshot_save(void);
+/* Write `buf` to `tmp`, then rename it over `path`: a reader never sees a
+ * half-written file. 0 on success. */
+int atomic_write(const char *path, const char *tmp, const uint8_t *buf,
+		 uint32_t n);
 void snapshot_invalidate(void);
 /* onu_state: the driver's ONU state (5 == O5). Returns 1 and repopulates the
  * MIB and its bookkeeping when a valid, matching snapshot was loaded; 0
@@ -367,7 +384,45 @@ void ev_mib_upload(uint16_t total);
 void ev_mib_upload_next(uint16_t seq);
 void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst);
+void ev_alloc_ids(const uint16_t *ids, unsigned n);
+/* One software image step: `sections` < 0 and `crc` 0 leave those keys out,
+ * `size` < 0 leaves out size and window. */
+void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
+		 long sections, const char *crc, const char *result);
+/* A class 84 forward operation no bridge rule can express, built as
+ * `used` instead: logged once per code for the life of the process. */
+void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used);
 void ev_tick(void);
+/* What the OLT sent that omcid does not model: one event line and one
+ * summary line per unknown class and operation, or unknown message type,
+ * per boot (events.c, UNKNOWN_PATH). ev_msg_known() is whether omcid knows
+ * the message type at all, answered or deliberately refused. */
+#define UNKNOWN_PATH     "/var/log/omcid-unknown.txt"
+#define UNKNOWN_TMP_PATH "/var/log/omcid-unknown.txt.tmp"
+int ev_msg_known(uint8_t mt);
+void ev_unknown_me(uint16_t cls, uint8_t mt);
+void ev_unknown_msg(uint8_t mt, uint16_t cls);
+/* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
+ * class omcid does not model with success instead of "unknown entity". */
+extern int unknown_me_ok;
+
+/* ------------------------------------------------ software download (swimage.c)
+ *
+ * Start / Download section / End software download, Activate and Commit
+ * image, from the OLT. OLT_SW_DOWNLOAD (odi.conf) picks accept (the default:
+ * answered with success, the image counted, CRC-checked and discarded) or
+ * reject (not supported). Nothing here writes flash, the U-Boot environment,
+ * or reboots. */
+void send_resp(int fd, uint32_t tid, const uint8_t *req,
+	       const uint8_t *contents, uint16_t clen);
+void sw_handle(int fd, uint32_t tid, const uint8_t *f, const struct omci_class *c);
+/* The class 7 flags a Get reports: attribute 2 is_committed, 3 is_active,
+ * 4 is_valid. */
+uint8_t sw_flag(uint16_t inst, unsigned attr);
+#define SWIMAGE_PATH     "/var/run/omcid-swimage"
+#define SWIMAGE_TMP_PATH "/var/run/omcid-swimage.tmp"
+int atomic_write(const char *path, const char *tmp, const uint8_t *buf,
+		 uint32_t n);
 
 /* ------------------------------------------------------------ config store
  *
@@ -400,6 +455,7 @@ struct onu_vlan_cfg {
 #define REPORT_DEFAULT_SW_VER   "0.0.0"
 #define REPORT_SW_VER_LEN       14       /* class 7 attribute 1 */
 #define REPORT_MODEL_LEN        20       /* class 257 attribute 1 */
+#define REPORT_HW_VER_LEN       14       /* class 256 attribute 2 */
 #define REPORT_OMCC_VER_MAX     255      /* class 257 attribute 2, one byte */
 #define REPORT_PRODUCT_CODE_MAX 65535    /* class 257 attribute 3, two bytes */
 struct onu_report {
@@ -407,6 +463,10 @@ struct onu_report {
 	int  swVerLen[2];                    /* -1 absent, 0 empty */
 	char model[REPORT_MODEL_LEN + 1];
 	int  modelLen;
+	/* ONU_HW_VERSION, odi.conf: -1 absent or empty, -2 set but not
+	 * reportable (longer than 14 or not printable ASCII). */
+	char hwVer[REPORT_HW_VER_LEN + 1];
+	int  hwVerLen;
 	int  omccVer;                        /* -1: absent, empty or not a number */
 	int  productCode;                    /* likewise */
 	uint8_t on;                          /* CFG_REPORT_SWITCH exists */
@@ -420,10 +480,17 @@ void cfg_load_vlan(void);
 void cfg_load_vlan_from(const char *cs);
 int cfg_manual_vid(void);
 void cfg_load_report(void);
-void cfg_load_report_from(const char *cs, const char *hs, const char *sw);
+void cfg_load_report_from(const char *cs, const char *hs, const char *sw,
+			  const char *odi);
 const char *report_sw_ver(uint16_t inst);
+const char *report_hw_ver(void);
 void cfg_show_vlan(void);
 int cfg_get(const char *path, const char *key, char *out, int max);
+/* The odi-only keys (docs/SETTINGS.md, "Odi-only keys"): KEY=value lines in
+ * CFG_ODI_PATH, which the stock firmware never reads. Returns the value
+ * length (0 present and empty), -1 absent or unreadable. */
+#define CFG_ODI_PATH "/var/config/odi.conf"
+int cfg_odi_get(const char *path, const char *key, char *out, int max);
 extern const char *const CFG_CS_PATH;
 void cfg_load_identity(void);
 void cfg_load_identity_from(const char *cs, const char *hs);

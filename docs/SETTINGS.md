@@ -63,7 +63,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `LAN_IP_ADDR2` | Second management IP | that address (both sticks store 192.168.100.1) | `network.sh` | LIVE |
 | `LAN_SUBNET2` | Second management netmask | its netmask | `network.sh` | LIVE |
 | `VLAN_CFG_TYPE` | VLAN config mode | 1 lets the manual tag through; anything else is no manual tag | omcid | INTERRUPTS INTERNET |
-| `VLAN_MANU_MODE` | Manual VLAN mode | 1 tags with the VID and priority below; anything else is no manual tag | omcid | INTERRUPTS INTERNET |
+| `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid | INTERRUPTS INTERNET |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid | INTERRUPTS INTERNET |
 | `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of that tag | omcid | INTERRUPTS INTERNET |
 | `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password, stored as hex; empty means none is sent | rcS `gponpw auto`; `apply.sh omci` re-sends it | INTERRUPTS INTERNET |
@@ -73,18 +73,23 @@ The UI's reboot confirmation says which slot it comes back on.
 | `GPON_ONU_MODEL` | ONU model (identity) | the equipment id in ONU2-G (attribute 1, 20 characters) | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `OMCC_VER` | OMCC version | ONU2-G attribute 2, decimal | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `OMCI_VENDOR_PRODUCT_CODE` | Vendor product code | ONU2-G attribute 3, decimal | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
+| `ONU_HW_VERSION` | ONU hardware version (identity) | the Version in ONU-G (attribute 2, at most 14 printable ASCII characters), the hardware version some OLTs whitelist. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below) | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
 | `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto` | REBOOT |
 | `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R` -- kernel messages and the link and provisioning `event=` lines included (docs/TOOLS.md, "Link and provisioning events"); empty means local only (the circular buffer, `logread`). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh syslog`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-syslogd.sh` | SERVICE RESTART |
+| `OMCI_UNKNOWN_ME_OK` | Answer unknown entities with success | `1` answers a Create, Set or Get of a managed entity class omcid has no model for with success instead of "unknown entity" (result 4), the counterpart of the stock `OMCI_FAKE_OK`; anything else, or absent, keeps the error. Default off. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). For an OLT that stalls its provisioning at an "unknown entity" answer; the risk is below | omcid, at start | INTERRUPTS INTERNET |
 | `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh ntp`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-ntpd.sh` | SERVICE RESTART |
+| `OLT_SW_DOWNLOAD` | OLT software download | what omcid answers when the OLT pushes a software image: `accept` (the default, also when the key is absent, empty or any other value) answers every step with success and discards the image; `reject` answers "not supported", as omcid did before. Nothing is ever written to flash or the U-Boot environment and the stick never reboots, in either mode ("Software download from the OLT" below). Odi-only key, kept in `/etc/config/odi.conf` | omcid, at every Start software download, Activate and Commit | LIVE (the next download) |
 
-Odi-only keys. `SYSLOG_SERVER` and `NTP_SERVER` are the only keys this image
-has that the stock firmware never had, so they are not in `lastgood.xml` and
+Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
+`OMCI_UNKNOWN_ME_OK` and `OLT_SW_DOWNLOAD` are the only
+keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
 in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
 config partition, written by temp file and rename in the same directory.
 `flash set` / `flash get` and `svc-syslogd.sh` / `svc-ntpd.sh` (which read
-through `flash get`) use it for exactly the names in `ODI_KEYS` at the top of
+through `flash get`) use it, and omcid reads `ONU_HW_VERSION` from it directly
+at start (the first `KEY=value` line for the key wins, as with `flash get`), for exactly the names in `ODI_KEYS` at the top of
 `rootfs/skeleton/etc/scripts/flash`; every other key still goes to
 `lastgood*.xml`, so the stock image reads its own keys and ignores this file.
 An empty value removes the key. `flash all cs` appends the odi keys that hold a
@@ -94,6 +99,25 @@ clear this file. They must never be written into `lastgood*.xml`: measured on a
 claro stick (2026-09-28), the OEM image boots with an unknown key added to that
 file and ignores it on load, but its first save rewrites the file from its
 in-memory table and silently drops the key.
+
+**The risk of `OMCI_UNKNOWN_ME_OK`.** The OLT is told a class was created or
+set when nothing was: omcid keeps no row for it and programs nothing from it.
+If the entity carried part of a service (a VLAN rule, a queue, a vendor
+extension the OLT relies on), that part is silently missing while the OLT
+believes it is in place -- the ONU reaches O5 and looks provisioned, and the
+service may still not work. A Get answers success with no attributes, and a
+MIB upload never lists the entity, so an OLT that audits the MIB against what
+it wrote can find the difference and resynchronise, over and over. MIB data
+sync counts each faked Create and Set, as the OLT does. Delete and Test of an
+unknown class already answer success without the key. Turn it on only when
+`logread | grep event=unknown_me` (or `/var/log/omcid-unknown.txt`) shows the
+OLT stopping at such a class, and check the service afterwards. It does not
+touch unknown message types (`event=unknown_msg`), which still answer "not
+supported".
+omcid reads `OLT_SW_DOWNLOAD` straight from `odi.conf` (it has no shell to run
+`flash get` through): the first `OLT_SW_DOWNLOAD=` line wins, as it does for
+`flash get`, and the file is read whole into a 4 KB buffer each time, a line
+past that reading as absent.
 
 Why the two REBOOT keys cannot be applied live:
 
@@ -121,6 +145,8 @@ Details that bite:
   services carry no manual tag. Both lines run 1/1 (ISP1: VID 11, priority 0,
   read 2026-09-24; ISP2: VID 10 in the stored backup), so neither changes.
   `omcli vlan` prints whether the tag is applied.
+- **Transparent is `VLAN_MANU_MODE` 0**, not a key of its own: "VLAN
+  handling" below.
 - **The OLD LOID wins.** When `LOID` and `LOID_OLD` differ, the OLD value is
   answered -- including an empty OLD beside a set LOID, which answers
   nothing; the same for the passwords. That is the stock rule, kept so both
@@ -136,10 +162,42 @@ Details that bite:
   regenerated: take a backup first.
 - **A key cannot be cleared from the UI**: `flash set` refuses an empty value.
 
+### VLAN handling: the stick tags, or the router does
+
+A service's VLAN comes from one of two places, and `VLAN_MANU_MODE` picks
+which:
+
+| `VLAN_MANU_MODE` | name | what the stick does | the router |
+|---|---|---|---|
+| 1 (with `VLAN_CFG_TYPE` 1, a VID and a priority) | stick tags | adds `VLAN_MANU_TAG_VID`/`_PRI` to untagged frames upstream and removes it downstream (and from multicast); every other service as the OLT provisions it | sends the service untagged |
+| 0 | router tags (transparent) | adds and removes no tag; every frame passes with the tags it has, both ways | tags each VLAN itself: internet, IPTV and voice on one port, as subinterfaces |
+
+Transparent is the stock firmware's own meaning of mode 0 ("no manual
+tag"), so both slots of a stick agree on it and no odi-only key is needed:
+a second key would only raise the question of which of two wins. The VID
+stays in `VLAN_MANU_TAG_VID`, so switching back is one value. `omcli vlan`
+prints the mode in force on its `handling` line, and omcid's start-up line
+says `manual vlan off (transparent)`.
+
+What passes in transparent mode is still what the OLT provisioned. On a line
+whose OLT sends class 84 VLAN filters, their forward operation (FwdOp, G.988
+table 9.3.11-1, `docs/TOOLS.md`) decides: ISP1 sends FwdOp 0x10 with one VID
+per GEM port (10 to 14), so the router's frames tagged with those VIDs pass,
+each on its own GEM port, and untagged frames are discarded -- the OLT asked
+for that. A line with no class 84 (ISP2) gets one forward-all rule per GEM
+port: every tag, and untagged frames, both ways. The switch then carries
+every VID 2..4094 on the UNI and the PON (`docs/SWITCH.md`, "CF rows").
+With the manual tag on, a FwdOp that bridges untagged frames gets the
+add-tag rule in place of a plain untagged one.
+
+Measured under qemu for both shapes (`src/omci/vlan-test.sh`); on hardware,
+not yet: PPPoE discovery on ISP2 and DHCP on ISP1 through router-tagged
+subinterfaces are the checks to run.
+
 ### The OLT identity keys, and their switch
 
-`OMCI_SW_VER1`, `OMCI_SW_VER2`, `GPON_ONU_MODEL`, `OMCC_VER` and
-`OMCI_VENDOR_PRODUCT_CODE` are reported to the OLT **only while
+`OMCI_SW_VER1`, `OMCI_SW_VER2`, `GPON_ONU_MODEL`, `OMCC_VER`,
+`OMCI_VENDOR_PRODUCT_CODE` and `ONU_HW_VERSION` are reported to the OLT **only while
 `/etc/config/omci-identity.on` exists** (the UI's "OLT identity" switch on the
 Config tab). Off, or with a key empty or absent, omcid answers what it always
 has:
@@ -150,6 +208,20 @@ has:
 | ONU2-G, Equipment id | the device id (`RTL9602C`) | `GPON_ONU_MODEL` |
 | ONU2-G, OMCC version | 0x80 | `OMCC_VER` |
 | ONU2-G, Vendor product code | 15, the captured stock value | `OMCI_VENDOR_PRODUCT_CODE` |
+| ONU-G, Version (hardware version) | the device id (`RTL9602C`) | `ONU_HW_VERSION` |
+
+`ONU_HW_VERSION` is odi-only (`/etc/config/odi.conf`, set with `flash set
+ONU_HW_VERSION <value>` or from the UI), so unlike the other five neither
+stick carries it until someone sets it. A value longer than the attribute (14
+characters) or with anything outside printable ASCII is ignored whole, not
+cut: a truncated version is a different version to an OLT that whitelists it,
+so the device id is answered instead and `omcli ident` says why. The stock
+store keeps a key of its own, `HW_HWVER` (lastgood_hs.xml; on our sticks one
+of `RTL960x`, `TCG2232` or a 14-character vendor string, depending on which
+firmware wrote the store), which this image does not read: nothing on file
+shows which ONU-G value the stock firmware derives from it, and a value an ISP
+whitelists is better set on purpose than inherited. Copying it by hand is
+`flash set ONU_HW_VERSION "$(flash get HW_HWVER | cut -d= -f2)"`.
 
 The switch exists because the plain rule -- an empty key keeps today's value
 -- does not keep today's value on our sticks: **both already store all five,
@@ -162,6 +234,40 @@ the equipment id from `RTL9602C` to `IGD`. With the switch off, nothing
 changes. The stock firmware may also rewrite `OMCI_SW_VER1/2` itself when it
 boots, so a value set here does not necessarily survive a fall-back to the
 stock slot. `omcli ident` shows what is stored and whether it is reported.
+
+### Software download from the OLT
+
+An OLT can push a firmware image to the ONU over OMCI (G.988: Start software
+download, Download section, End software download, Activate image, Commit
+image, on the software image entity). This image never runs an ISP firmware,
+and omcid never installs one. What `OLT_SW_DOWNLOAD` chooses is only what the
+OLT is told:
+
+| step | `accept` (default) | `reject` |
+|---|---|---|
+| Start software download | success, with the window size the OLT asked for; refused (parameter error) for the image that is active or committed, as G.988 and the stock stack do; the image then reads not valid | not supported |
+| Download section | the last section of each window is acknowledged; a window with a section missing is a processing error, so the OLT sends it again; every byte goes through the CRC and is dropped | not supported |
+| End software download | success when the CRC-32 the OLT sends matches the image and the size matches Start; a processing error otherwise; the image then reads valid | not supported |
+| Activate image | success; that image now reads active, the other not. **No reboot** | not supported |
+| Commit image | success; that image now reads committed, the other not | not supported |
+
+The flags are what omcid **reports** in the software image entity
+(`is_committed`, `is_active`, `is_valid`), for the OLT to read back. The real
+slots, `sw_commit` and `sw_tryactive` are never touched: `make test-omci` runs
+a whole download under `qemu -strace` and asserts no open of `/dev/mtd`, no
+exec (so no `nv`) and no reboot. The flags hold for the rest of the boot,
+across an omcid respawn (in `/var/run/omcid-swimage`, RAM), and a reboot comes
+back reporting image 0 committed and active again. The version each image
+reports stays `OMCI_SW_VER1`/`OMCI_SW_VER2` (with the OLT identity switch on)
+or `0.0.0`: no OMCI download message carries a version string -- it is only
+inside the ISP image, which is discarded unread.
+
+What the OLT does next is its own business, and untested on any line: an OLT
+that expects the ONU to reboot into the new image after Activate, and to
+report the new version, may time out waiting, or repeat the download at every
+boot. Every step is one `event=sw_image` line (`docs/TOOLS.md`, "Link and
+provisioning events"), so the log shows it if it does; `reject` goes back to
+the old answers.
 
 ## Web UI controls
 
@@ -285,7 +391,8 @@ restore.
 |---|---|
 | `DEVICE_TYPE` | this image is a bridge (SFU) only |
 | `OMCI_CUSTOM_BDP`, `OMCI_CUSTOM_RDP`, `OMCI_CUSTOM_MCAST`, `OMCI_CUSTOM_ME`, `DUAL_MGMT_MODE` | select stock OMCI plugins; omcid only displays them (`omcicli get cflag`, `get dmmode`) |
-| `OMCI_FAKE_OK`, `OMCI_OLT_MODE`, `OMCI_VEIP_SLOT_ID`, `OMCI_PORT_TYPE`, `OMCI_TM_OPT`, `OMCI_WAN_QOS_QUEUE_NUM` | stock OMCI stack options with no counterpart in omcid |
+| `OMCI_FAKE_OK` | the stock OMCI stack option; this image reads its own odi-only `OMCI_UNKNOWN_ME_OK` instead (above), so the stock slot keeps its own setting |
+| `OMCI_OLT_MODE`, `OMCI_VEIP_SLOT_ID`, `OMCI_PORT_TYPE`, `OMCI_TM_OPT`, `OMCI_WAN_QOS_QUEUE_NUM` | stock OMCI stack options with no counterpart in omcid |
 | `OMCI_LOGFILE`, `OMCI_LOGFILE_MASK`, `OMCI_DBGLVL` | omcid always logs every frame to `/var/log/omcid.log` |
 | `PON_MODE`, `PON_DETECT_ENABLE`, `EPON_*` | this image is GPON only and never rewrites the PON type |
 | `PON_VENDOR_ID`, `MAC_KEY`, `GPON_PLOAM_FORMAT` | the vendor id comes from `GPON_SN`; the other two are read by the stock firmware only. Keep them in backups |
@@ -309,7 +416,7 @@ applies to every later image.
 
 | file | effect | apply |
 |---|---|---|
-| `omci-identity.on` | report the five OLT identity keys (above); the UI toggles it | INTERRUPTS INTERNET (`apply.sh omci`) |
+| `omci-identity.on` | report the six OLT identity keys (above); the UI toggles it | INTERRUPTS INTERNET (`apply.sh omci`) |
 | `dropbear.off`, `confd.off`, `metricsd.off` | that daemon is not started | REBOOT |
 | `lan-ip` | the management address, one line; overrides `LAN_IP_ADDR` | LIVE (`apply.sh network`) |
 | `pon-steps` | development: a PON step list that replaces the built-in one (`docs/BOOT.md`); a wrong list means no PON | REBOOT |
