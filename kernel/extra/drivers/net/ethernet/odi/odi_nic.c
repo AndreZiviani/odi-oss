@@ -323,6 +323,13 @@ static int odi_rings_alloc(struct device *dev)
 		odi.tx_ring[i].opts1 = (i == ODI_TX_RING_DEPTH - 1) ? ODI_TXD_WRAP : 0;
 	}
 
+	/* The hardware starts both rings at index 0 after odi_reset_hw(), so
+	 * a reopen after the last close starts ours there too.
+	 */
+	odi.rx_head = 0;
+	odi.tx_tail = 0;
+	odi.tx_reclaim = 0;
+
 	return 0;
 }
 
@@ -440,27 +447,25 @@ static void odi_init_hw_rings(void)
 	odi_w32(ODI_NIC_RX1_RING, (u32)odi.rx_ring_dma);
 
 	/* RX1_LAST is the depth minus one, 12 bits split low byte / high
-	 * nibble; RX1_COUNT is a separate 8-bit register (odi_nic_hw.h), and a
-	 * wider write clobbers its neighbours.
+	 * nibble; RX1_CPU_IDX and the two thresholds are single bytes of one
+	 * word (odi_nic_hw.h), and a wider write clobbers its neighbours.
+	 * Every one of them fits its low byte (the BUILD_BUG_ONs in
+	 * odi_nic_init()), so no high nibble is written.
 	 */
 	odi_w8(ODI_NIC_RX1_LAST, (u8)((ODI_RX_RING_DEPTH - 1) & 0xFF));
 	odi_w8(ODI_NIC_RX1_LAST_HI, (u8)(((ODI_RX_RING_DEPTH - 1) >> 8) & 0x0F));
-	odi_w8(ODI_NIC_RX1_COUNT, (u8)(ODI_RX_RING_DEPTH & 0xFF));
+
+	/* Flow control: every descriptor starts out handed to the hardware,
+	 * and odi_rx_cpu_idx_update() moves the index along from here.
+	 */
+	odi_w8(ODI_NIC_FC_ON_LEVEL, ODI_NIC_FC_ON);
+	odi_w8(ODI_NIC_FC_OFF_LEVEL, ODI_NIC_FC_OFF);
+	odi_w8(ODI_NIC_RX1_CPU_IDX, (u8)odi_nic_rx_cpu_idx(0, ODI_RX_RING_DEPTH));
 
 	if (odi_nic_debug)
-		pr_info(DRV_NAME ": rx1_ring wrote 0x%08x read back 0x%08x, rx1_last read back %u/%u, rx1_count read back %u\n",
+		pr_info(DRV_NAME ": rx1_ring wrote 0x%08x read back 0x%08x, rx1_last read back %u/%u, fc word read back 0x%08x\n",
 			(u32)odi.rx_ring_dma, odi_r32(ODI_NIC_RX1_RING),
-			odi_r8(ODI_NIC_RX1_LAST), odi_r8(ODI_NIC_RX1_LAST_HI), odi_r8(ODI_NIC_RX1_COUNT));
-
-	/* Free-descriptor watermarks, scaled to keep the OEM's own
-	 * near-exhaustion trigger proportion against our ring depth: see
-	 * ODI_NIC_FC_ON_FRACTION/ODI_NIC_FC_OFF_FRACTION in odi_nic_hw.h. A
-	 * flat quarter/three-quarter split asserted PAUSE toward the switch
-	 * CPU port at ordinary traffic levels; this only asserts near real
-	 * ring exhaustion.
-	 */
-	odi_w8(ODI_NIC_FC_ON_LEVEL, ODI_NIC_FC_ON_FRACTION(ODI_RX_RING_DEPTH));
-	odi_w8(ODI_NIC_FC_OFF_LEVEL, ODI_NIC_FC_OFF_FRACTION(ODI_RX_RING_DEPTH));
+			odi_r8(ODI_NIC_RX1_LAST), odi_r8(ODI_NIC_RX1_LAST_HI), odi_r32(ODI_NIC_RX1_CPU_IDX));
 
 	odi_w32(ODI_NIC_R13FC, 0);
 
@@ -794,6 +799,16 @@ static struct net_device *odi_dev_for_port(unsigned int src_port)
 
 static unsigned int odi_rx_log_count;
 
+/* Tell the flow-control logic how far the CPU has handed descriptors back
+ * (odi_nic_hw.h, RX1_CPU_IDX), after their own bits: the index must never
+ * count a descriptor the engine cannot see as its own yet.
+ */
+static void odi_rx_cpu_idx_update(void)
+{
+	odi_dma_wmb();
+	odi_w8(ODI_NIC_RX1_CPU_IDX, (u8)odi_nic_rx_cpu_idx(odi.rx_head, ODI_RX_RING_DEPTH));
+}
+
 static int odi_poll(struct napi_struct *napi, int budget)
 {
 	int done = 0;
@@ -893,6 +908,9 @@ requeue:
 		odi.rx_head = odi_ring_next(odi.rx_head, ODI_RX_RING_DEPTH);
 		done++;
 	}
+
+	if (done)
+		odi_rx_cpu_idx_update();
 
 	odi.napi_polls++;
 	odi_tx_reclaim();
@@ -997,10 +1015,10 @@ static void odi_state_dump_work(struct work_struct *work)
 		if (!(odi.rx_ring[i].opts1 & ODI_RXD_HW))
 			rx_owned_clear++;
 
-	pr_info(DRV_NAME ": dump%d ring: tx1_ring=0x%08x tx1_index=0x%08x rx1_ring=0x%08x rx1_index=0x%08x rx1_count=0x%08x rx_head=%u tx_tail=%u tx_reclaim=%u tx_own=%u rx_clear=%u rxd0_opts1=0x%08x\n",
+	pr_info(DRV_NAME ": dump%d ring: tx1_ring=0x%08x tx1_index=0x%08x rx1_ring=0x%08x rx1_index=0x%08x rx1_fc=0x%08x rx_head=%u tx_tail=%u tx_reclaim=%u tx_own=%u rx_clear=%u rxd0_opts1=0x%08x\n",
 		odi.state_dump_fire,
 		odi_r32(ODI_NIC_TX1_RING), odi_r32(ODI_NIC_TX1_INDEX),
-		odi_r32(ODI_NIC_RX1_RING), odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_COUNT),
+		odi_r32(ODI_NIC_RX1_RING), odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_CPU_IDX),
 		odi.rx_head, odi.tx_tail, odi.tx_reclaim, tx_own, rx_owned_clear,
 		odi.rx_ring[0].opts1);
 
@@ -1224,6 +1242,11 @@ err:
 static int __init odi_nic_init(void)
 {
 	int ret;
+
+	/* One byte each, high nibbles left at 0: odi_init_hw_rings(). */
+	BUILD_BUG_ON(ODI_RX_RING_DEPTH > 256);
+	BUILD_BUG_ON(ODI_NIC_FC_OFF > 255 || ODI_NIC_FC_OFF >= ODI_RX_RING_DEPTH);
+	BUILD_BUG_ON(ODI_NIC_FC_ON >= ODI_NIC_FC_OFF);
 
 	odi_mmio = ioremap(CPHYSADDR(ODI_NIC_MMIO_BASE), ODI_NIC_MMIO_SIZE);
 	if (!odi_mmio) {

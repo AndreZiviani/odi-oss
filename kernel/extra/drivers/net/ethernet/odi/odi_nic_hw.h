@@ -112,40 +112,50 @@
 
 #define ODI_NIC_RX1_RING		0x13F0
 #define ODI_NIC_RX1_INDEX		0x13F4
-/* RX ring 1 depth, expressed as (depth - 1), split low/high because the
- * field is wider than one register's own byte lane.
- * Distinct from RX1_COUNT below, which is a separate register
- * pair for the flow-control watermarks, not the ring depth itself -- a
- * prior revision programmed only RX1_COUNT and never wrote this pair, so the
- * hardware never learned the actual ring depth (left at its reset value).
- * Recorded as the leading suspect for the n1/n3 hang alongside the RING_IRQ_MASK/
- * RING_IRQS misrouting fixed above: an unprogrammed ring size plausibly
- * has the hardware treat the ring as always-empty (immediate, continuous
- * RX_NO_DESC), which is exactly the kind of unacknowledged, storming interrupt
- * source that RING_IRQ_MASK misrouting would then make invisible to our handler.
+/* RX ring 1 depth, expressed as (depth - 1), split low byte / high nibble
+ * because the field is wider than one byte lane. Left at its reset value,
+ * the hardware does not know where the ring ends. Not the same thing as
+ * RX1_CPU_IDX below, which also starts at depth - 1 but then moves.
  */
 #define ODI_NIC_RX1_LAST	0x13F6	/* low byte of (depth - 1) */
 #define ODI_NIC_RX1_LAST_HI	0x13F7	/* high nibble, bits 8:11 of (depth - 1) */
 #define ODI_NIC_R13FC		0x13FC
 
-#define ODI_NIC_RX1_COUNT		0x1430	/* RX ring 1 descriptor count, 8-bit */
-#define ODI_NIC_FC_ON_LEVEL	0x1431	/* flow-control turn-on watermark, free descriptors */
-#define ODI_NIC_FC_OFF_LEVEL	0x1432	/* flow-control turn-off watermark, free descriptors */
-
-/* The stock firmware's own watermarks trigger only within a few
- * descriptors of true ring exhaustion (assert near 94% used, deassert
- * near 81% used), not at a flat quarter/three-quarter of the ring: that
- * flatter split asserts PAUSE at only 75% used and holds it until the
- * ring drains all the way to 25% used, a band wide enough for ordinary
- * NAPI scheduling jitter at a few packets a second to cross and hold,
- * with no real congestion behind it. Scale the same ~1/16 and ~3/16
- * fraction of the ring instead, so PAUSE only fires near actual
- * exhaustion regardless of how deep ODI_RX_RING_DEPTH is.
+/* RX ring 1 flow control. The NIC asserts PAUSE toward the switch CPU
+ * port (with ODI_NIC_PAUSE TX flow control on) when the descriptors
+ * available to it -- from its own position up to the last one the CPU
+ * handed back -- fall to FC_ON, and releases it at FC_OFF. The CPU index is
+ * the driver's to keep current, like a tail doorbell: the hardware does not
+ * learn it from the own bits. Left at its init value, the hardware index
+ * comes within FC_ON of it once per lap of the ring and PAUSE is asserted
+ * with the ring empty. The live stock register (word 0x96103000, RXCDO
+ * index 152 in the same read) shows the index two behind the hardware and
+ * thresholds 16/48.
+ *
+ * RX1_CPU_IDX is bits 7:0 of the index; bits 11:8 are the high nibble of
+ * the byte at 0x1433, whose low nibble holds bits 11:8 of FC_ON (bits 11:8
+ * of FC_OFF are elsewhere). With ODI_RX_RING_DEPTH and both thresholds
+ * below 256 every high nibble is 0, the reset value, and none is written.
  */
-#define ODI_NIC_FC_ON_FRACTION(depth)	(((depth) / 16U) ? ((depth) / 16U) : 1U)
-#define ODI_NIC_FC_OFF_FRACTION(depth)	\
-	((((depth) * 3U / 16U) > ODI_NIC_FC_ON_FRACTION(depth)) ? \
-	 ((depth) * 3U / 16U) : (ODI_NIC_FC_ON_FRACTION(depth) + 1U))
+#define ODI_NIC_RX1_CPU_IDX	0x1430	/* last RX descriptor handed back, bits 7:0 */
+#define ODI_NIC_FC_ON_LEVEL	0x1431	/* assert PAUSE at <= this many available */
+#define ODI_NIC_FC_OFF_LEVEL	0x1432	/* release PAUSE at >= this many available */
+
+/* A margin in descriptors, not a fraction of the ring: what it has to
+ * cover is the frames that still arrive between the assert and the switch
+ * acting on it. These are the stock values; with the CPU index kept
+ * current they fire only with 48 of 64 descriptors waiting for the CPU.
+ */
+#define ODI_NIC_FC_ON		16U
+#define ODI_NIC_FC_OFF		48U
+
+/* The CPU index after the descriptor before next_to_inspect was handed
+ * back: the one just returned, or depth - 1 (all of them) on a fresh ring.
+ */
+static inline unsigned int odi_nic_rx_cpu_idx(unsigned int next_to_inspect, unsigned int depth)
+{
+	return next_to_inspect ? next_to_inspect - 1 : depth - 1;
+}
 
 #define ODI_NIC_RUN		0x1434	/* master go/doorbell register, 32-bit */
 #define ODI_NIC_RUN_TX_KICK	(1U << 0)	/* ring 1 doorbell -- the only ring we use */

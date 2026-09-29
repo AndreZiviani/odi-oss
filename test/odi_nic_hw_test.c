@@ -6,8 +6,9 @@
  *
  * Covers: RX/TX descriptor word layout (own bit position,
  * length masks), CPU-tag pack for a frame to a given port and unpack of a
- * received tag (src port, reason, VLAN fields), and ring index arithmetic
- * (wrap, full, empty).
+ * received tag (src port, reason, VLAN fields), ring index arithmetic
+ * (wrap, full, empty), and the RX flow-control CPU index against a model
+ * of the hardware comparator.
  */
 #include <stdio.h>
 #include <string.h>
@@ -116,6 +117,58 @@ static void test_ring_wrap_full_empty(void)
 	CHECK(!odi_ring_is_full(head, tail, depth), "consuming one entry un-fulls the ring");
 }
 
+/* The comparator as the flow-control registers describe it: the hardware
+ * counts the descriptors from its own index up to the CPU index as
+ * available, asserts PAUSE at <= FC_ON and releases it at >= FC_OFF.
+ * Walks the hardware index through `laps` laps with the CPU keeping up
+ * (every descriptor handed back before the next frame), and returns how
+ * many times PAUSE was asserted. `track` 0 is a CPU index written once at
+ * init and never again.
+ */
+static unsigned int fc_asserts(int track, unsigned int init_idx, unsigned int laps)
+{
+	unsigned int depth = ODI_RX_RING_DEPTH, cpu = init_idx, hw, n, asserts = 0;
+	int paused = 0;
+
+	for (n = 0; n < laps * depth; n++) {
+		unsigned int avail;
+
+		hw = n % depth;			/* the next descriptor the engine fills */
+		avail = (cpu + depth - hw) % depth;
+		if (!paused && avail <= ODI_NIC_FC_ON) {
+			paused = 1;
+			asserts++;
+		} else if (paused && avail >= ODI_NIC_FC_OFF) {
+			paused = 0;
+		}
+		/* the frame lands in hw, the poll hands it back */
+		if (track)
+			cpu = odi_nic_rx_cpu_idx(odi_ring_next(hw, depth), depth);
+	}
+	return asserts;
+}
+
+static void test_rx_flow_control(void)
+{
+	unsigned int depth = ODI_RX_RING_DEPTH;
+
+	CHECK(odi_nic_rx_cpu_idx(0, depth) == depth - 1, "a fresh ring hands every descriptor to the hardware");
+	CHECK(odi_nic_rx_cpu_idx(1, depth) == 0, "after descriptor 0 comes back the index is 0");
+	CHECK(odi_nic_rx_cpu_idx(depth - 1, depth) == depth - 2, "the index trails next-to-inspect by one");
+
+	CHECK(ODI_NIC_FC_ON < ODI_NIC_FC_OFF, "PAUSE is released above where it is asserted");
+	CHECK(ODI_NIC_FC_OFF < depth, "the release point is reachable in this ring");
+	CHECK(depth <= 256 && ODI_NIC_FC_OFF <= 255, "index and thresholds fit their low byte");
+
+	CHECK(fc_asserts(1, odi_nic_rx_cpu_idx(0, depth), 100) == 0,
+	      "an index kept current never asserts PAUSE while the CPU keeps up");
+	/* The bug this replaces: the index written once, as the depth. Once
+	 * per lap, and once more when the first frame lands on it.
+	 */
+	CHECK(fc_asserts(0, depth, 100) >= 100 && fc_asserts(0, depth, 100) <= 101,
+	      "a frozen index asserts PAUSE once per lap of an empty ring");
+}
+
 int main(void)
 {
 	test_rx_own_bit();
@@ -124,6 +177,7 @@ int main(void)
 	test_cpu_tag_pack_for_port();
 	test_cpu_tag_unpack_for_rx();
 	test_ring_wrap_full_empty();
+	test_rx_flow_control();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

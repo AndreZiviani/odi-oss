@@ -8,6 +8,20 @@ listed here.
 - AGENTS.md has a release checklist: every change since the last tag has an
   entry, no merge debris, `Unreleased` moved into the tag section, and the
   published notes checked (odi-oss also checks its confd/metricsd pins).
+- Fixes the NIC sending PAUSE frames toward the switch CPU port (port 3) with
+  its receive ring empty: 1-6 per second on both test lines, about 12 a
+  minute plus bursts of up to 50 a second, where the stock firmware sends
+  none. The register next to the flow-control thresholds is the index of
+  the last receive descriptor the CPU handed back, which the hardware
+  compares against its own; `odi_nic` wrote it once at init and never
+  again, so once per lap of the ring the hardware saw itself within the
+  threshold of it. The driver now writes it after every poll, starts it at
+  depth - 1, and uses the stock thresholds (assert at 16 descriptors left,
+  release at 48) as a margin in descriptors. This replaces the v1.0.2
+  rescale of those thresholds, which only shrank the window. The ring
+  indices are also reset when the rings are reallocated, to match the
+  hardware after its reset. `test/odi_nic_hw_test.c` checks the index
+  against a model of the comparator.
 
 ## v1.2.0 — 2026-09-29
 
