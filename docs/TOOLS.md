@@ -713,6 +713,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=provision_end creates=82 sets=102 deletes=0 duration_s=0.827 rows=161 services=6 after_mib_reset=1` | info | 10 s after the burst's last write: what it added up to (Gets and Tests do not count) |
 | `omcid: event=olt_reboot class=256 inst=0 result=not_supported` | notice | the OLT asked for a reboot; omcid does not do it |
 | `omcid: event=sw_image op=download_start inst=1 result=not_supported` | notice | a software download (`op=download_start`, `download_end` with `sections=N`, `activate`, `commit`); omcid refuses each |
+| `omcid: event=vlan_fwdop code=0x06 inst=18 result=unsupported built_as=0x10` | notice | a class 84 forward operation no bridge rule can express (negative filtering, filtering by TCI and MAC address, a code past G.988 table 9.3.11-1): built as 0x10 instead, once per code per omcid run |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 
 `cause` and `side` on `event=onu_state`:

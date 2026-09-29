@@ -16,7 +16,6 @@
 
 /* The VLAN table: 4096 rows by VID. */
 #define ODI_SW_VLAN_ID_COUNT		4096U
-#define ODI_SW_VLAN_ID_LAST_SWEPT	4094U	/* the second pass stops here */
 #define ODI_SW_VLAN_MEMBERS_SENTINEL	0xf0U	/* the first pass, every row */
 #define ODI_SW_VLAN_MEMBERS_IDX0_2ND	0xffU	/* row 0, second write */
 #define ODI_SW_VLAN_MEMBERS_IDX1_1ST	0x0003f8ffU	/* row 1, first write */
@@ -78,7 +77,8 @@ static void classify_rma_ctrl_pass(void)
 }
 
 void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
-				   const struct odi_sw_vlan_override *vlan_over, unsigned int n_over)
+				   const struct odi_sw_vlan_override *vlan_over, unsigned int n_over,
+				   uint32_t vlan_default)
 {
 	unsigned int i;
 	uint32_t idx;
@@ -190,11 +190,12 @@ void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
 	v = ODI_SW_VLAN_MEMBERS_IDX1_2ND;
 	(void)odi_switch_table_write(ODI_SW_TBL_VLAN_MEMBERS, 1, &v, 1);
 
-	/* Second VLAN pass, rows 2..4094: 0 except the service rows the
-	 * caller lists. Row 4095 keeps the sentinel: no capture rewrites it.
+	/* Second VLAN pass, rows 2..4094: vlan_default (0 in every capture)
+	 * except the service rows the caller lists. Row 4095 keeps the
+	 * sentinel: no capture rewrites it.
 	 */
 	for (idx = 2; idx <= ODI_SW_VLAN_ID_LAST_SWEPT; idx++) {
-		v = 0;
+		v = vlan_default;
 		for (i = 0; i < n_over; i++) {
 			if (vlan_over[i].idx == idx) {
 				v = vlan_over[i].val;

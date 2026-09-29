@@ -941,8 +941,128 @@ check "dump srvflow answers within 2s of a respawn" "$got" "yes"
 got=$(echo "$out" | tail -n 1)
 check "and it is the real vendor-format srvflow dump, not silence" "$got" "0 services"
 
+# ------------------------------------------- class 84's forward operation
+#
+# FwdOp (G.988 table 9.3.11-1) says what the bridge port does with a tagged
+# frame (bridge it, discard it, or filter it on VID, priority or the whole
+# TCI against the list) and with an untagged one (bridge or discard).
+# bp_rules() (respond/apply_bridge.c) turns each code into bridge rules;
+# the rebuild logs one "rule" line per rule, which is what is checked here.
+# A fresh daemon, no config store (no manual tag): bridge 1 with the UNI
+# 0x0101 and a GEM-side port 47/0012 onto GEM IW TP 3, GEM 1000, whose
+# class 84 row lists VID 100 priority 0 and VID 200 priority 5.
+kill %1 2>/dev/null
+wait 2>/dev/null
+rm -f /var/config/lastgood.xml /var/config/lastgood_hs.xml
+$Q respond/build/omcid -w 30 -c "$CAPS" > /tmp/omcid4.log 2>&1 &
+sleep 2
+
+f84() {   # f84 <tci> <mt> <class> <inst> <contents hex>: one frame, zero padded
+	c=$5
+	while [ ${#c} -lt 64 ]; do c=${c}0; done
+	printf '%s%s0a%s%s%s0000002800000000' "$1" "$2" "$3" "$4" "$c"
+}
+for f in "$(f84 0101 44 010c 0003 03e8800003800600)" \
+         "$(f84 0102 44 010a 0003 00030500010000000200)" \
+         "$(f84 0103 44 002f 0011 000101010101)" \
+         "$(f84 0104 44 002f 0012 000102030003)" \
+         "$(f84 0105 44 0054 0012 0064a0c800000000000000000000000000000000000000001002)"; do
+	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
+done
+sleep 3
+# rules_since <line>: the rule lines of 47/0012 logged after that line.
+# Only the last rebuild counts: each one prints its rules, then a summary.
+rules_since() {
+	tail -n +"$(($1 + 1))" /tmp/omcid4.log | awk '
+		/47\/0012 gem 1000 rule / { sub(/.*47\/0012 gem 1000 rule /, ""); cur = cur $0 "\n" }
+		/bridge connections rebuilt/ { last = cur; cur = "" }
+		END { printf "%s", last }'
+}
+got=$(rules_since 0)
+check "FwdOp 0x10 (the mandatory code): one VID filter per list entry" "$got" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1"
+
+fwdop() {   # fwdop <code>: Set FwdOp, wait for the rebuild, print its rules
+	n=$(wc -l < /tmp/omcid4.log)
+	$Q cli/build/omcli --inject "$(f84 0110 48 0054 0012 "4000$1")" > /dev/null 2>&1
+	sleep 2
+	rules_since "$n"
+}
+check "0x04: the same, by its other number" "$(fwdop 04)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1"
+check "0x03: the VID filters and untagged frames bridged" "$(fwdop 03)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1
+untagged vid -1 pri -1"
+got=$(grep 'bridge connections rebuilt' /tmp/omcid4.log | tail -1 | sed 's/.*rebuilt: //')
+check "and each of the three is a connection the UNI gets" "$got" "1 ingress x gem = 3"
+check "0x00: no investigation at all, one forward-all rule" "$(fwdop 00)" \
+      "forward-all vid -1 pri -1"
+check "0x01: tagged discarded, untagged bridged" "$(fwdop 01)" \
+      "untagged vid -1 pri -1"
+check "0x02: tagged bridged without looking, untagged discarded" "$(fwdop 02)" \
+      "tagged vid -1 pri -1"
+check "0x15: the same as 0x02" "$(fwdop 15)" "tagged vid -1 pri -1"
+check "0x12 (the 802.1p mapper code): a priority filter per entry" "$(fwdop 12)" \
+      "pri-filter vid -1 pri 0
+pri-filter vid -1 pri 5"
+check "0x14: VID and priority together, the whole TCI" "$(fwdop 14)" \
+      "tci-filter vid 100 pri 0
+tci-filter vid 200 pri 5"
+check "0x13: the TCI filters and untagged frames" "$(fwdop 13)" \
+      "tci-filter vid 100 pri 0
+tci-filter vid 200 pri 5
+untagged vid -1 pri -1"
+check "0x0f and 0x1c repeat 0x03" "$(fwdop 0f) / $(fwdop 1c)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1
+untagged vid -1 pri -1 / vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1
+untagged vid -1 pri -1"
+
+# Negative filtering (g) and positive filtering by TCI and MAC address (j)
+# have no bridge rule: built as 0x10, and said once per code.
+check "0x06 (negative filtering): built as 0x10" "$(fwdop 06)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1"
+got=$(grep '^event=vlan_fwdop' /tmp/omcid4.log)
+check "and logged as an event line" "$got" \
+      "event=vlan_fwdop code=0x06 inst=18 result=unsupported built_as=0x10"
+fwdop 04 > /dev/null
+fwdop 06 > /dev/null
+got=$(grep -c '^event=vlan_fwdop code=0x06' /tmp/omcid4.log)
+check "once per code, however often it is rebuilt" "$got" "1"
+check "0x17 (TCI and MAC address): built as 0x10 too" "$(fwdop 17)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1"
+got=$(grep -c '^event=vlan_fwdop code=0x17 inst=18 result=unsupported built_as=0x10' /tmp/omcid4.log)
+check "with its own line" "$got" "1"
+check "past the table (0x22): built as 0x10" "$(fwdop 22)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1"
+
+# The manual tag on (VID 10, priority 0 from the fixture store): an
+# untagged-bridging code builds the manual add-tag rule in place of the
+# plain untagged one, and a list entry that IS the manual VID becomes that
+# rule too, as the stock stack builds it.
+$Q cli/build/omcli vlan test/cfg_agree.xml > /dev/null 2>&1
+check "0x03 under the manual tag: the add-tag rule takes untagged frames" "$(fwdop 03)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1
+manual-add vid 10 pri 0"
+check "0x00 under the manual tag: add-tag for untagged, tagged unchanged" "$(fwdop 00)" \
+      "tagged vid -1 pri -1
+manual-add vid 10 pri 0"
+$Q cli/build/omcli --inject "$(f84 01f0 48 0054 0012 80000064000a)" > /dev/null 2>&1
+sleep 2
+check "0x10 with the manual VID in the list: that entry is the add-tag rule" "$(fwdop 10)" \
+      "vid-filter vid 100 pri -1
+manual-add vid 10 pri 0"
+
 # The daemon log lives inside the container, so keep it when a check fails.
-[ "$fail" -eq 0 ] || cp /tmp/omcid3.log /src/src/omci/qemu-test.log 2>/dev/null || true
+[ "$fail" -eq 0 ] || cp /tmp/omcid4.log /src/src/omci/qemu-test.log 2>/dev/null || true
 kill %1 2>/dev/null
 wait 2>/dev/null
 

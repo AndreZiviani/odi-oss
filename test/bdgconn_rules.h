@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * bdgconn_rules.h -- the bridge rules omcid sends with cmd 51, rebuilt for
- * the host tests. The three builders mirror the generators in
+ * the host tests. The builders mirror the generators in
  * src/omci/respond/apply_bridge.c field for field (rule_init, gen_manual_vlan_rule,
- * gen_vid_filter_rule): those are static inside omcid and pull in its whole
+ * gen_vid_filter_rule and the forward-operation rules): those are static inside omcid and pull in its whole
  * MIB, so they are restated here rather than linked. If one of them
  * changes, the replay tests that use this header stop matching their
  * captures, which is the point.
@@ -95,6 +95,64 @@ static inline void bdg_gen_vid_filter(struct omci_vlan_oper *vr, unsigned vid, i
 	vr->out.out_tag.pri = pbit >= 0 ? (uint32_t)pbit : OMCI_PRI_ANY;
 	vr->out.out_tag.vid = vid;
 	vr->out.out_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
+}
+
+/* The rules the class 84 forward operation adds (apply_bridge.c:
+ * gen_no_vlan_filter_rule, gen_untagged_rule, gen_tagged_rule,
+ * gen_pri_filter_rule). */
+static inline void bdg_gen_forward_all(struct omci_vlan_oper *vr)
+{
+	struct omci_bdgconn tmp;
+
+	bdg_rule_init(&tmp);
+	*vr = tmp.vlan_op;
+	vr->rule_gen = OMCI_VLAN_OPER_FORWARD_ALL;
+}
+
+static inline void bdg_gen_untagged(struct omci_vlan_oper *vr)
+{
+	struct omci_bdgconn tmp;
+
+	bdg_rule_init(&tmp);
+	*vr = tmp.vlan_op;
+	vr->rule_gen = OMCI_VLAN_OPER_FORWARD_UNTAG;
+	vr->filter.outer_mode = OMCI_TAGF_UNTAGGED;
+	vr->filter.inner_mode = OMCI_TAGF_UNTAGGED;
+	vr->filter.outer.tpid = OMCI_FILTER_TPID_DO_NOT;
+	vr->filter.inner.tpid = OMCI_FILTER_TPID_DO_NOT;
+	vr->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	vr->out.tag_count = 0;
+	vr->out.tpid = OMCI_OUT_TPID_8100;
+}
+
+static inline void bdg_gen_tagged(struct omci_vlan_oper *vr)
+{
+	struct omci_bdgconn tmp;
+
+	bdg_rule_init(&tmp);
+	*vr = tmp.vlan_op;
+	vr->rule_gen = OMCI_VLAN_OPER_FORWARD_SINGLETAG;
+	vr->filter.inner_mode = OMCI_TAGF_TAGGED;
+	vr->filter.inner.tpid = OMCI_FILTER_TPID_DO_NOT;
+	vr->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	vr->out.tag_count = 1;
+	vr->out.tpid = OMCI_OUT_TPID_8100;
+}
+
+static inline void bdg_gen_pri_filter(struct omci_vlan_oper *vr, unsigned pri)
+{
+	struct omci_bdgconn tmp;
+
+	bdg_rule_init(&tmp);
+	*vr = tmp.vlan_op;
+	vr->rule_gen = OMCI_VLAN_OPER_FILTER_INNER_PRI;
+	vr->filter.inner_mode = OMCI_TAGF_TAGGED | OMCI_TAGF_PRI;
+	vr->filter.inner.pri = pri;
+	vr->filter.inner.tpid = OMCI_FILTER_TPID_DO_NOT;
+	vr->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	vr->out.tag_count = 1;
+	vr->out.tpid = OMCI_OUT_TPID_8100;
+	vr->out.out_tag.pri = pri;
 }
 
 /* The 160-byte descriptor as bdgconn_add() sends it. */

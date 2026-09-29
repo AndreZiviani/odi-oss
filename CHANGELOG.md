@@ -5,6 +5,30 @@ listed here.
 
 ## Unreleased
 
+- omcid reads the class 84 forward operation (FwdOp, G.988 table 9.3.11-1)
+  and every entry of its VLAN filter list, up to twelve. Before, it built one
+  VID filter from the first entry whatever the code, which is only right for
+  0x10 (the mandatory code; ISP1 sends it with one entry per port, so
+  nothing changes there) and dropped every VLAN after the first on a
+  multi-VLAN port. Now: 0x00 forwards everything, 0x01 untagged only,
+  0x02/0x15 tagged frames of any VID, and the positive filters -- by VID
+  (0x03/0x04/0x0f/0x10/0x1c/0x1d), priority (0x07/0x08/0x11/0x12/0x1e/0x1f) or
+  both (0x0b/0x0c/0x13/0x14/0x20/0x21) -- one rule per entry, plus an
+  untagged rule for the codes that bridge untagged frames (the manual
+  add-tag rule when the manual tag is on). Negative filtering (0x05/0x06/
+  0x09/0x0a/0x0d/0x0e), filtering by TCI and MAC address (0x16-0x1b) and
+  codes past the table are built as 0x10 and logged once per code as
+  `event=vlan_fwdop code=0x.. inst=.. result=unsupported built_as=0x10`.
+  Every code has a check in `make test-omci`; the ISP1 and ISP2 driver-call
+  goldens are unchanged.
+- The switch driver gives a bridge rule that passes tagged frames of any VID
+  (forward-all, tagged-only, a priority filter) VLAN table membership on
+  every row 2..4094 (UNI and PON, tagged), and takes it off every row when
+  the rule is released. Those rules have no VID of their own to put a row
+  on, and the rows the cmd 51 sweep leaves are 0; a VID filter keeps its own
+  row as before. No stock capture has such a rule, so no golden moves;
+  `test/odi_switch_bdgconn_vlan_test.sh` pins the rows.
+
 ## v1.1.1 — 2026-09-29
 
 - Pins odi-ui confd v1.1.1 (was v1.1.0): the trial banner no longer claims

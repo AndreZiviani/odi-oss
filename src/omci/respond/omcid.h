@@ -367,6 +367,9 @@ void ev_mib_upload(uint16_t total);
 void ev_mib_upload_next(uint16_t seq);
 void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst);
+/* A class 84 forward operation no bridge rule can express, built as
+ * `used` instead: logged once per code for the life of the process. */
+void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used);
 void ev_tick(void);
 
 /* ------------------------------------------------------------ config store
