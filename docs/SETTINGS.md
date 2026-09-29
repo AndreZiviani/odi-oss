@@ -293,7 +293,11 @@ long ago the last ping landed. Every reset logs which rule fired,
 ramlog-visible, before it happens (`odi_wdt_deadline_timer_fn()`):
 `"userland did not confirm within 120 s"`, `"client omcid missed its 60 s
 deadline"`, or `"MemAvailable ... below the 2048 KB floor for 3
-consecutive checks"`.
+consecutive checks"`. The rule is also recorded as the ramlog reset
+reason, so the next boot shows it as `reason=wdt_userland`,
+`reason=wdt_client:omcid` or `reason=wdt_mem` on the `previous boot:` line
+of `/proc/odi_ramlog_prev` (`docs/HACKING.md`, "Reading a boot you could
+not see"), and metricsd exports it as `gpon_last_reset_reason`.
 
 Registering a new client (say, dropbear or confd, neither wired up today)
 means two things, both required: rcS gets an

@@ -5,9 +5,10 @@ through `/dev/mem` on the stick, from ANY kernel that runs there, the stock
 (OEM) one included. It exists because the device has no serial console:
 `CONFIG_ODI_RAMLOG` (`kernel/extra/drivers/net/ethernet/odi/odi_ramlog.c`)
 mirrors every console line into two DRAM pages that nothing else uses and
-that survive a reset -- physical `0x017ff000` (the first 4016 bytes of the
-log, then a 64-byte boot metadata block; 4080 bytes of log from older
-images) and `0x01fff000` (a ring of the last 4080) -- so after a trial boot
+that survive a reset -- physical `0x017ff000` (the first 3984 bytes of the
+log, then a 32-byte reset reason block and a 64-byte boot metadata block;
+4016 bytes and no reason block from format 1 images, 4080 bytes of log
+from older ones) and `0x01fff000` (a ring of the last 4080) -- so after a trial boot
 reverts, the old image can read what the new kernel said. When the old
 image is ours as well, `/proc/odi_ramlog_prev` already holds the same two
 pages as the reverted boot left them (`docs/KERNEL.md`), no memprobe needed.

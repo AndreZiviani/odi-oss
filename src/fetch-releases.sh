@@ -21,6 +21,13 @@ mkdir -p "$OUT" "$DL"
 # became the default tag again and CONFD_BIN was never reached.
 METRICSD_REPO=${METRICSD_REPO:-AndreZiviani/odi-sfp-exporter}
 METRICSD_TAG=${METRICSD_TAG:-v1.1.2}
+# METRICSD_BIN=<path> puts a local odi-sfp-exporter build (its build/metricsd)
+# in the image instead of the release, for a trial of an unreleased exporter.
+# The manifest then says exporter=local.
+if [ -n "${METRICSD_BIN:-}" ]; then
+	[ -f "$METRICSD_BIN" ] || { echo "METRICSD_BIN=$METRICSD_BIN is not a file" >&2; exit 1; }
+	METRICSD_TAG=local
+fi
 CONFD_REPO=${CONFD_REPO:-AndreZiviani/odi-ui}
 CONFD_TAG=${CONFD_TAG-v1.0.8}
 
@@ -103,12 +110,18 @@ verify_sum() {
 # /etc/odi-build as exporter= and confd= lines, which the exporter itself
 # reports as gpon_image_info labels).
 printf 'METRICSD_TAG=%s\nCONFD_TAG=%s\n' "$METRICSD_TAG" "${CONFD_TAG:-local}" > "$OUT/releases.env"
-echo "metricsd  <- $METRICSD_REPO $METRICSD_TAG"
-bin=$(fetch_asset "$METRICSD_REPO" "$METRICSD_TAG" metricsd)
-sums=$(fetch_asset "$METRICSD_REPO" "$METRICSD_TAG" SHA256SUMS)
-verify_sum "$sums" "$bin" metricsd
-install -m 755 "$bin" "$OUT/metricsd"
-echo "  verified, $(wc -c < "$bin" | tr -d ' ') bytes"
+if [ -n "${METRICSD_BIN:-}" ]; then
+	echo "metricsd  <- METRICSD_BIN=$METRICSD_BIN"
+	install -m 755 "$METRICSD_BIN" "$OUT/metricsd"
+	echo "  local, $(wc -c < "$METRICSD_BIN" | tr -d ' ') bytes"
+else
+	echo "metricsd  <- $METRICSD_REPO $METRICSD_TAG"
+	bin=$(fetch_asset "$METRICSD_REPO" "$METRICSD_TAG" metricsd)
+	sums=$(fetch_asset "$METRICSD_REPO" "$METRICSD_TAG" SHA256SUMS)
+	verify_sum "$sums" "$bin" metricsd
+	install -m 755 "$bin" "$OUT/metricsd"
+	echo "  verified, $(wc -c < "$bin" | tr -d ' ') bytes"
+fi
 
 # confd is NOT self-contained. It reads /etc/confd/ for the whole web UI and
 # for four .tsv data files, so the release carries an asset bundle beside the

@@ -32,6 +32,9 @@
 # exactly as before. Add a name to ODI_KEYS below to add a key; the list is
 # documented in docs/SETTINGS.md. An empty value REMOVES the key, which is how
 # one is cleared. A line that is not KEY=value is left alone and never read.
+# A get on an odi key that holds no value prints KEY= and succeeds, like a
+# stock key present with an empty value: the key is known, it is only empty.
+# "GET fail." stays for a name that is no key at all.
 #
 # /var/config is jffs2 and read-write. Writes go to a temporary file and are
 # renamed over the target, so a power cut leaves the old file intact rather
@@ -111,10 +114,8 @@ all)
 get)
 	[ $# -eq 2 ] || usage
 	if is_odi_key "$2"; then
-		v=$(odi_value_of "$2")
-		[ -n "$v" ] && { printf '%s=%s\n' "$2" "$v"; exit 0; }
-		echo "GET fail." >&2
-		exit 1
+		printf '%s=%s\n' "$2" "$(odi_value_of "$2")"
+		exit 0
 	fi
 	for f in "$CS" "$HS"; do
 		if has_key "$2" "$f"; then

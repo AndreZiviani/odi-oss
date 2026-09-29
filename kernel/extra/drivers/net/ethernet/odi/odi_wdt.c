@@ -21,6 +21,7 @@
  */
 #include "odi_wdt.h"
 #include "odi_soc.h"
+#include "odi_ramlog.h"
 
 #ifdef __KERNEL__
 #include <linux/module.h>
@@ -218,6 +219,34 @@ unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned i
 	return actions;
 }
 
+/* The same miss test odi_wdt_log_client_miss() uses to name a client. */
+static int odi_wdt_client_missed(const struct odi_wdt_client *c, unsigned int uptime_s)
+{
+	return c->deadline_s && c->armed && c->reset_signaled &&
+	       uptime_s > c->last_ping_s + c->deadline_s;
+}
+
+uint32_t odi_wdt_reset_reason(const struct odi_wdt_deadline_state *st, unsigned int actions,
+			       unsigned int uptime_s, const char **client)
+{
+	int i;
+
+	if (!(actions & ODI_WDT_ACTION_FORCE_RESET))
+		return ODI_RAMLOG_REASON_NONE;
+	if (actions & ODI_WDT_ACTION_MEM_FLOOR)
+		return ODI_RAMLOG_REASON_WDT_MEM;
+	if (actions & ODI_WDT_ACTION_CLIENT_MISS) {
+		for (i = 0; i < (int)ODI_WDT_MAX_CLIENTS; i++) {
+			if (odi_wdt_client_missed(&st->clients[i], uptime_s)) {
+				*client = st->clients[i].name;
+				break;
+			}
+		}
+		return ODI_RAMLOG_REASON_WDT_CLIENT;
+	}
+	return ODI_RAMLOG_REASON_WDT_USERLAND;
+}
+
 /* ---- Register access ------------------------------------------------------ */
 
 /* Through odi_soc.c and its allowlist; test/odi_soc_mock.h on the host. */
@@ -370,8 +399,7 @@ static void odi_wdt_log_client_miss(unsigned int uptime_s)
 	for (i = 0; i < (int)ODI_WDT_MAX_CLIENTS; i++) {
 		struct odi_wdt_client *c = &odi_wdt_state.clients[i];
 
-		if (c->deadline_s && c->armed && c->reset_signaled &&
-		    uptime_s > c->last_ping_s + c->deadline_s)
+		if (odi_wdt_client_missed(c, uptime_s))
 			pr_emerg(DRV_NAME ": client %.*s missed its %u s deadline (last ping %u s ago) -- resetting\n",
 				 (int)ODI_WDT_CLIENT_NAME_LEN, c->name,
 				 c->deadline_s, uptime_s - c->last_ping_s);
@@ -395,9 +423,16 @@ static void odi_wdt_deadline_timer_fn(struct timer_list *odi_timer_arg)
 	}
 
 	/* Each rule logs its own line, clearly, before the reset -- this is
-	 * read from the DRAM ramlog on the next boot (docs/SETTINGS.md), the
-	 * only place that says which rule fired.
+	 * read from the DRAM ramlog on the next boot (docs/SETTINGS.md). The
+	 * rule is also recorded first, as the ramlog reset reason, so the
+	 * next boot has it as reason= even when the text is cut short.
 	 */
+	if (actions & ODI_WDT_ACTION_FORCE_RESET) {
+		const char *client = NULL;
+
+		odi_ramlog_note_reason(odi_wdt_reset_reason(&odi_wdt_state, actions, uptime_s, &client),
+				       client);
+	}
 	if (actions & ODI_WDT_ACTION_MEM_FLOOR)
 		pr_emerg(DRV_NAME ": MemAvailable %lu KB below the %u KB floor for %u consecutive checks -- resetting\n",
 			 free_kb, ODI_WDT_MEM_FLOOR_KB, ODI_WDT_MEM_FLOOR_CONSEC);

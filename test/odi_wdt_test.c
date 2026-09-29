@@ -292,6 +292,47 @@ static void test_mem_floor_fires_after_consecutive_low_samples(void)
 	CHECK(!(odi_wdt_deadline_tick(&st, 1000, 0) & ODI_WDT_ACTION_MEM_FLOOR), "not signaled again on a later tick");
 }
 
+/* ---- The reset reason recorded in the ramlog before each forced reset:
+ * the rule that fired, from the actions of the same tick. ---------------- */
+
+static void test_reset_reason_names_the_rule(void)
+{
+	struct odi_wdt_deadline_state st;
+	const char *client = NULL;
+	unsigned int t, actions = 0;
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	CHECK(odi_wdt_reset_reason(&st, odi_wdt_deadline_tick(&st, 100, AMPLE_KB), 100, &client) ==
+	      ODI_RAMLOG_REASON_NONE, "no forced reset, no reason");
+	actions = odi_wdt_deadline_tick(&st, 121, AMPLE_KB);
+	CHECK(odi_wdt_reset_reason(&st, actions, 121, &client) == ODI_RAMLOG_REASON_WDT_USERLAND &&
+	      client == NULL, "an unconfirmed boot is wdt_userland, with no client");
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1;
+	odi_wdt_client_register(&st, "confd", 600, 0);
+	odi_wdt_client_register(&st, "omcid", 60, 0);
+	actions = odi_wdt_deadline_tick(&st, 61, AMPLE_KB);
+	CHECK(odi_wdt_reset_reason(&st, actions, 61, &client) == ODI_RAMLOG_REASON_WDT_CLIENT,
+	      "a client miss is wdt_client");
+	CHECK(client && strcmp(client, "omcid") == 0,
+	      "and names the client that missed, not the first registered one");
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	odi_wdt_client_register(&st, "omcid", 60, 110);
+	st.clients[0].last_ping_s = 60;	/* due at 121 s, the same tick as the other two rules */
+	client = NULL;
+	for (t = 0; t < ODI_WDT_MEM_FLOOR_CONSEC; t++)
+		actions = odi_wdt_deadline_tick(&st, 111 + t * ODI_WDT_TICK_INTERVAL_S, ODI_WDT_MEM_FLOOR_KB - 1);
+	CHECK((actions & ODI_WDT_ACTION_MEM_FLOOR) && (actions & ODI_WDT_ACTION_CLIENT_MISS) && st.reset_signaled,
+	      "memory floor, client miss and the userland deadline all due in one tick");
+	CHECK(odi_wdt_reset_reason(&st, actions, 121, &client) == ODI_RAMLOG_REASON_WDT_MEM,
+	      "memory first: a starved box also misses pings");
+}
+
 /* ---- Real arm/kick/disable/force-reset sequences, against the SoC
  * window of test/odi_soc_mock.h. ---------------------------------------- */
 
@@ -369,6 +410,7 @@ int main(void)
 
 	test_mem_floor_needs_consecutive_low_samples();
 	test_mem_floor_fires_after_consecutive_low_samples();
+	test_reset_reason_names_the_rule();
 
 	test_arm_writes_the_uboot_matching_value();
 	test_kick_is_real_read_modify_write_on_kick_reg();
