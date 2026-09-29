@@ -99,7 +99,7 @@ verification for each one.
 
 | Web UI ([odi-ui](https://github.com/AndreZiviani/odi-ui)) | `diag` on the stick |
 |---|---|
-| ![Web UI status page: optics, registration state, forwarding counters and the learned MAC table](docs/images/ui-mactable.png) | ![diag output: optics readings, ONU state O5, all GPON alarms clear](docs/images/term-diag.png) |
+| ![Web UI: forwarding counters and the learned MAC table](https://raw.githubusercontent.com/AndreZiviani/odi-ui/main/docs/screenshots/ui-mactable.png) | ![diag output: optics readings, ONU state O5, all GPON alarms clear](docs/images/term-diag.png) |
 
 Identifiers in the screenshots are placeholders. More pages in the
 [odi-ui README](https://github.com/AndreZiviani/odi-ui#screenshots).
