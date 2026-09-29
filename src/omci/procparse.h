@@ -119,6 +119,24 @@ static inline int pp_gpon_sn(const char *buf, unsigned len, uint8_t sn[8])
 	return 0;
 }
 
+/* The ONU state number from /proc/odi_gpon's first line, "state 5 (O5)":
+ * 1 to 7 for O1 to O7, or -1 when there is no such line or the number is
+ * not a digit. "cannot tell" is -1, never a state. */
+static inline int pp_gpon_state(const char *buf, unsigned len)
+{
+	int at = pp_find_line(buf, len, "state");
+	unsigned i;
+
+	if (at < 0)
+		return -1;
+	i = (unsigned)at + 6;
+	if (i >= len || buf[i] < '0' || buf[i] > '9')
+		return -1;
+	if (i + 1 < len && buf[i + 1] >= '0' && buf[i + 1] <= '9')
+		return -1;
+	return buf[i] - '0';
+}
+
 /* The Alloc-IDs from /proc/odi_gpon's "alloc_ids" line: a count, then
  * that many decimal ids, in CAM row order (the order the OLT assigned
  * them, a released row reused first). Returns the number stored in out[]

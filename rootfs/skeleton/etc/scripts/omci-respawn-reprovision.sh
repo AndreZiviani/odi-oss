@@ -13,10 +13,9 @@
 # needs nothing from this script -- the datapath was never touched) or
 # "reprovision" (no snapshot, a mismatched device, not O5, or a MIB the OLT
 # has since reset). This script waits, briefly, for that decision, then
-# either exits or forces the OLT to re-range and re-provision the same way
-# the proven `apply.sh omci` restart does -- deactivate, wait for the
-# (already respawned) omcid to register, re-apply the PLOAM password, hold,
-# reactivate (rcs-lib.sh's omci_reactivate, the same tail apply.sh uses) --
+# either exits or forces the OLT to re-range and re-provision -- deactivate,
+# wait for the (already respawned) omcid to register, re-apply the PLOAM
+# password, hold, reactivate (rcs-lib.sh's omci_reactivate) --
 # without touching the omcid process itself: init is already supervising
 # it as a respawn entry, so killing or starting one from here would only
 # trigger another respawn, and another run of this script.

@@ -223,8 +223,9 @@ claro, 2026-09-28): `kill -9 omcid` -- init respawns it within a few seconds
 serves `omcicli` again, but `gpon_omci_services` stays 0 indefinitely. The
 OLT has already provisioned this ONU from the first boot's MIB and does
 not re-send it to a fresh omcid that starts with an empty one -- nothing
-else on the ONU side asks it to. The proven fix, already used by the web
-UI's live "apply omci" path (`apply.sh omci`), is to force the OLT to
+else on the ONU side asks it to. The proven fix, the same one omcid
+makes for itself when an identity key changes (`apply.sh omci`, "Reload on
+SIGHUP" in `docs/TOOLS.md`), is to force the OLT to
 re-range: deactivate the ONU, let the OLT see it go, then reactivate --
 which resets its MIB view and makes it provision the ONU again from
 scratch, this time into the omcid that is actually running.
@@ -248,11 +249,13 @@ respawn -- and another run of this script. It only drives `/proc/odi_init`:
 write `gpondeact`, wait (bounded) for the omcid that is now running to
 register with `/proc/odi_omci` (redirect type 1), re-apply the PLOAM
 password from the config store, hold three seconds, then `gponact` --
-`rcs-lib.sh`'s `omci_reactivate`, the same tail function `apply.sh`'s
-`omci` restart calls after it stops the old omcid and starts a new one.
-The two callers share that tail rather than keeping two copies of the
-hardware-measured sequence (deactivate, wait, password, three-second hold,
-activate) to drift apart.
+`rcs-lib.sh`'s `omci_reactivate`. `apply.sh omci` no longer calls it: it
+used to stop omcid and start its own beside init's respawn entry, and each
+respawn then found that omcid still running, exited 1 and ran this script's
+deactivation again (44 in two minutes on hardware, the ONU cycling O1 to O3).
+`apply.sh omci` now sends SIGHUP and omcid re-registers itself
+(`src/omci/respond/reload.c`); nothing outside init starts omcid, and this
+script runs only after a genuine crash-respawn, as before.
 
 On a kernel with no `/proc/odi_init` (the qemu system harness's stock
 malta kernel, or a dev image with `modules.off`) `omci-respawn-reprovision.sh`

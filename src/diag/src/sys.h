@@ -129,6 +129,7 @@ static inline long sys_create(const char *path, int flags, int mode)
 #define O_WRONLY  1
 #define O_CREAT   0x0100
 #define O_TRUNC   0x0200
+#define O_APPEND  0x0008              /* MIPS: not the x86 0x400 */
 
 static inline long sys_close(int fd)
 {

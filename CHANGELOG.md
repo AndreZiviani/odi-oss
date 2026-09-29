@@ -22,6 +22,45 @@ listed here.
   and requires the OMCC path and every upstream queue word to be what the
   first provisioning left.
 - CHANGELOG.md: three stray merge-conflict marker lines removed.
+- `apply.sh omci` no longer stops omcid and starts its own beside the one
+  init respawns. That was the bug: every respawn of `svc-omcid.sh` found the
+  stray omcid holding redirect type 1, exited 1, and its re-provisioning path
+  ran `gpondeact`/`gponact` -- 44 exits in about two minutes on hardware, the
+  ONU cycling O1 to O3 and never reaching O5 until the stray was killed. The
+  script now sends SIGHUP to the running omcid (`pidof`), waits, bounded, for
+  the outcome in `/var/run/omcid-reload` and reports it (`apply.sh omci
+  [seconds]`, 20 s by default, inside the web UI's 25 s); it exits 1 when no
+  omcid runs or none answers, and never starts a process. Init owns omcid; a
+  genuine crash still respawns and re-provisions as before.
+- omcid reloads on SIGHUP (the Unix convention for rereading configuration)
+  instead of being restarted: it rereads the store (`lastgood*.xml`,
+  `odi.conf`, `omci-identity.on`) and compares it with what it runs. Nothing
+  changed: logged, nothing done. Only `VLAN_CFG_TYPE`, `VLAN_MANU_MODE`,
+  `VLAN_MANU_TAG_VID` or `VLAN_MANU_TAG_PRI`: the bridge connections and
+  VLAN rules are torn down and built again in place from the MIB it holds,
+  by the same code as the first build, with the ONU staying in O5; the rules
+  are byte for byte a fresh omcid's (`src/omci/reload-test.sh` compares both
+  ISP sessions, with a new tag and with transparent mode). `GPON_SN`,
+  `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`,
+  `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity
+  switch or `OMCI_UNKNOWN_ME_OK`: omcid itself writes `gpondeact`, clears its
+  MIB as a MIB reset does, holds three seconds, gives the driver the new
+  serial number and password (`gponsn`, `gponpw`), writes `gponact` and lets
+  the OLT provision it again, in the same process (no respawn, no snapshot
+  resume). The re-registration is a state machine in the main loop: nothing
+  sleeps, the watchdog ping and the CLI keep being served, a second SIGHUP
+  during it folds into one more reload, and it gives up after 150 s. New
+  lines `event=reload`, `event=reload_step` and `event=reload_done` (never
+  rate limited; key names, never values) and `/var/run/omcid-reload` say
+  what happened. `omcid -i file -j seconds` are test flags.
+- The kernel takes a new serial number after boot: `gponsn` while the ONU is
+  deactivated now rewrites the PLOAM slot the boot activation armed (the
+  serial-number slot of `gpon_init.bin`, found by its `sn_word` records)
+  instead of only the driver's copy, which the OLT would then have failed to
+  match on the next Assign_ONU-ID. In any other state it answers `-EBUSY` and
+  changes nothing. Before, a new `GPON_SN` needed a reboot.
+- The four VLAN keys are LIVE now: they apply through `apply.sh omci` without
+  dropping the fibre service (odi-ui schema moves with this).
 - omcid takes the T-CONT Alloc-IDs from the OLT instead of a table captured
   on one ISP1 session. A T-CONT the OLT sets over OMCI keeps what it set
   (G.988 9.2.2, as ISP2 does); one it never sets (ISP1 sets none) is bound to

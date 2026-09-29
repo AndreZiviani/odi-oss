@@ -750,3 +750,153 @@ const char *report_hw_ver(void)
 		return report.hwVer;
 	return (const char *)devid;
 }
+
+/* ------------------------------------------------ OMCI_UNKNOWN_ME_OK
+ *
+ * Only the value 1 turns it on: anything else, an absent key included, keeps
+ * the "unknown entity" answer. */
+void cfg_load_unknown_me(void)
+{
+	char v[4];
+
+	unknown_me_ok = cfg_odi_get(CFG_ODI_PATH, "OMCI_UNKNOWN_ME_OK",
+				    v, sizeof v) == 1 && v[0] == '1';
+}
+
+/* ------------------------------------------------------- config reload
+ *
+ * Every key omcid holds, read again, and the comparison that decides what a
+ * SIGHUP does (reload.c). What is compared is what the OLT or a connection
+ * would see, not the bytes on disk: a key that is absent and one that is
+ * empty are the same to the OLT, the report keys count only while the
+ * identity switch is on (with it off they are stored and shown, never sent),
+ * and a LOID is the one the vendor rule picks (LOID_OLD wins). */
+void cfg_load_all(void)
+{
+	cfg_load_identity();
+	cfg_load_vlan();
+	cfg_load_report();
+	cfg_load_unknown_me();
+}
+
+void cfg_snap_take(struct cfg_snap *s)
+{
+	s->ident = ident;
+	s->vlan = vlanCfg;
+	s->report = report;
+	s->unknown_me_ok = unknown_me_ok;
+}
+
+void cfg_snap_restore(const struct cfg_snap *s)
+{
+	ident = s->ident;
+	vlanCfg = s->vlan;
+	report = s->report;
+	unknown_me_ok = s->unknown_me_ok;
+}
+
+/* Two optional strings are the same when both are unset or empty, or both
+ * hold the same text. */
+static int opt_same(const char *a, int alen, const char *b, int blen)
+{
+	int ea = alen > 0, eb = blen > 0;
+
+	if (!ea || !eb)
+		return ea == eb;
+	return str_eq(a, b);
+}
+
+unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
+{
+	unsigned m = 0;
+
+	if (!opt_same(o->ident.sn, o->ident.snLen, n->ident.sn, n->ident.snLen))
+		m |= CFGD_SN;
+	if (!opt_same(o->ident.ploam, o->ident.ploamLen, n->ident.ploam,
+		      n->ident.ploamLen))
+		m |= CFGD_PLOAM;
+	if (!str_eq(o->ident.loid, n->ident.loid))
+		m |= CFGD_LOID;
+	if (!str_eq(o->ident.loidPwd, n->ident.loidPwd))
+		m |= CFGD_LOID_PWD;
+	if (o->report.on != n->report.on)
+		m |= CFGD_SWITCH;
+	if (o->report.on || n->report.on) {
+		if (!opt_same(o->report.swVer[0], o->report.swVerLen[0],
+			      n->report.swVer[0], n->report.swVerLen[0]))
+			m |= CFGD_SW_VER1;
+		if (!opt_same(o->report.swVer[1], o->report.swVerLen[1],
+			      n->report.swVer[1], n->report.swVerLen[1]))
+			m |= CFGD_SW_VER2;
+		if (!opt_same(o->report.model, o->report.modelLen,
+			      n->report.model, n->report.modelLen))
+			m |= CFGD_MODEL;
+		if (o->report.omccVer != n->report.omccVer)
+			m |= CFGD_OMCC_VER;
+		if (o->report.productCode != n->report.productCode)
+			m |= CFGD_PRODUCT;
+		if (!opt_same(o->report.hwVer, o->report.hwVerLen,
+			      n->report.hwVer, n->report.hwVerLen))
+			m |= CFGD_HW_VER;
+	}
+	if (o->unknown_me_ok != n->unknown_me_ok)
+		m |= CFGD_UNKNOWN_ME;
+	if (o->vlan.type != n->vlan.type)
+		m |= CFGD_VLAN_TYPE;
+	if (o->vlan.mode != n->vlan.mode)
+		m |= CFGD_VLAN_MODE;
+	if (o->vlan.vid != n->vlan.vid)
+		m |= CFGD_VLAN_VID;
+	/* An absent priority reads as 0, so its presence shows only in whether
+	 * the manual tag applies at all (type 1, mode 1, VID and priority). */
+	if (o->vlan.pri != n->vlan.pri ||
+	    (o->vlan.manual != n->vlan.manual && !(m & CFGD_VLAN)))
+		m |= CFGD_VLAN_PRI;
+	return m;
+}
+
+void cfg_diff_names(unsigned mask, char *out, int max)
+{
+	static const struct { unsigned bit; const char *name; } names[] = {
+		{ CFGD_SN, "GPON_SN" },
+		{ CFGD_PLOAM, "GPON_PLOAM_PASSWD" },
+		{ CFGD_LOID, "LOID" },
+		{ CFGD_LOID_PWD, "LOID_PASSWD" },
+		{ CFGD_SW_VER1, "OMCI_SW_VER1" },
+		{ CFGD_SW_VER2, "OMCI_SW_VER2" },
+		{ CFGD_MODEL, "GPON_ONU_MODEL" },
+		{ CFGD_OMCC_VER, "OMCC_VER" },
+		{ CFGD_PRODUCT, "OMCI_VENDOR_PRODUCT_CODE" },
+		{ CFGD_HW_VER, "ONU_HW_VERSION" },
+		{ CFGD_SWITCH, "omci-identity.on" },
+		{ CFGD_UNKNOWN_ME, "OMCI_UNKNOWN_ME_OK" },
+		{ CFGD_VLAN_TYPE, "VLAN_CFG_TYPE" },
+		{ CFGD_VLAN_MODE, "VLAN_MANU_MODE" },
+		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },
+		{ CFGD_VLAN_PRI, "VLAN_MANU_TAG_PRI" },
+	};
+	int o = 0;
+
+	for (unsigned i = 0; i < sizeof names / sizeof names[0]; i++) {
+		if (!(mask & names[i].bit))
+			continue;
+		if (o && o < max - 1)
+			out[o++] = ',';
+		for (const char *p = names[i].name; *p && o < max - 1; p++)
+			out[o++] = *p;
+	}
+	out[o < max ? o : max - 1] = 0;
+}
+
+/* The serial number as "gponsn" takes it: four ASCII vendor characters and
+ * eight hex digits, twelve in all. Anything else is not sent, the driver
+ * would refuse it. NULL when the store holds no usable one. */
+const char *cfg_sn_label(const struct onu_identity *id)
+{
+	if (id->snLen != 12)
+		return 0;
+	for (int i = 4; i < 12; i++)
+		if (hex_nib(id->sn[i]) < 0)
+			return 0;
+	return id->sn;
+}

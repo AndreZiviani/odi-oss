@@ -577,6 +577,20 @@ the dump renderers against output captured from live sticks. Full OLT
 sessions are not covered here; they are exercised through the kernel side
 in `test/odi_switch_isp2_test.c` and on hardware.
 
+The driver-call goldens (`drv-test.sh`, the two ISP sessions through
+`omcid-drvtrace`), `resume-test.sh`, `events-test.sh`, `swdl-test.sh`,
+`vlan-test.sh` and `reload-test.sh` run after it. `reload-test.sh` is the
+SIGHUP reload: a VLAN change rebuilt in place is compared, driver call for
+driver call and connection dump for connection dump, with a fresh omcid that
+had the new settings from its first frame (both ISPs, a new tag and
+transparent mode); an identity change is followed through the verbs
+(`omcid -i file` collects them in rcS order), the MIB clear, the hold, O5
+and services (`-g file` stands for `/proc/odi_gpon`), the failure results and
+a burst of SIGHUPs; and a dry-run daemon walks every key through its class.
+`test/apply_test.sh` covers `apply.sh omci` against a stub omcid that only
+traps SIGHUP, and `make test-qemu` runs it under the real inittab: one omcid
+pid across every apply, a child of init, no second `event=start`.
+
 ### test-qemu: the real rootfs, full system, on a stock kernel
 
 `make busybox packages src releases` first (or `make image` once, which

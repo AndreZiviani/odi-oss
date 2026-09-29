@@ -53,18 +53,25 @@ static int serial_from_kernel(uint8_t sn[8])
 	return 0;
 }
 
+static unsigned serial_asked;
+
+void serial_forget(void)
+{
+	serial_src = 0;
+	serial_asked = 0;
+}
+
 int serial_refresh(int log)
 {
-	static unsigned asked;
 	uint8_t sn[8];
 
 	if (serial_src == 2)
 		return 0;
 	/* Once a second from the main loop; a kernel that still has no serial
 	 * after fifteen minutes is not going to get one from waiting. */
-	if (asked >= 900)
+	if (serial_asked >= 900)
 		return serial_src ? 0 : -1;
-	asked++;
+	serial_asked++;
 	if (serial_from_kernel(sn) == 0) {
 		for (int i = 0; i < 8; i++)
 			serial[i] = sn[i];

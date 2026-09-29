@@ -31,6 +31,11 @@ static void wdt_ping(void)
 	sys_close((int)fd);
 }
 
+/* SIGHUP does not stop the daemon: it asks it to reread the config store
+ * (reload.c). The handler returns, which needs the kernel-provided signal
+ * return (the vdso trampoline on MIPS); it stores one flag and does nothing
+ * else. */
+
 /* A redirect type dropped without deregistering keeps the kernel delivering
  * to a dead netlink port, with an unthrottled printk per frame; the OLT
  * retries hard, and the console storm can starve the kernel thread that kicks
@@ -59,8 +64,8 @@ static void catch_signals(int fd, uint32_t tid)
 {
 	nl_fd = fd;
 	nl_tid = tid;
-	out_fmt("signal handlers: hup %d int %d term %d\n",
-		sys_signal(1, on_signal),        /* the session going away */
+	/* SIGHUP is installed at the top of main() and only sets a flag. */
+	out_fmt("signal handlers: int %d term %d\n",
 		sys_signal(2, on_signal),
 		sys_signal(15, on_signal));      /* what kill sends */
 }
@@ -83,6 +88,9 @@ static void usage(void)
 	    "              of asking the driver (test only, see docs/BOOT.md)\n"
 	    "  -g file     read the Alloc-IDs and the serial from this file\n"
 	    "              instead of /proc/odi_gpon (test only)\n"
+	    "  -i file     append the driver verbs of a reload to this file\n"
+	    "              instead of /proc/odi_init (test only)\n"
+	    "  -j seconds  how long a reload waits for O5 (test only)\n"
 	    "  -f          start even if a live process holds redirect type 1\n"
 	    "  -h          this text; starts nothing\n");
 }
@@ -99,6 +107,10 @@ int main(int argc, char **argv)
 	 * side has no driver to answer command 13 either. */
 	int state_from_arg = 0;
 	uint32_t state_arg = 0;
+
+	/* First thing: an apply.sh SIGHUP that lands while omcid is still
+	 * starting must set the flag, not take the default action and kill it. */
+	sys_signal(1, reload_on_hup);
 
 	/* Every argument is matched whole, and anything unrecognised stops the
 	 * program before it opens a socket: a mistyped flag must not start a
@@ -164,6 +176,16 @@ int main(int argc, char **argv)
 		 * file, the same reason as -s: qemu has no kernel of ours. */
 		else if (str_eq(argv[i], "-g") && i + 1 < argc) {
 			gpon_proc_path = argv[++i];
+		}
+		/* -i file: where the reload writes the driver verbs instead of
+		 * /proc/odi_init, and -j seconds: how long it waits for O5 and
+		 * services; both test only. */
+		else if (str_eq(argv[i], "-i") && i + 1 < argc) {
+			odi_init_path = argv[++i];
+		} else if (str_eq(argv[i], "-j") && i + 1 < argc) {
+			reload_o5_wait_s = 0;
+			for (const char *s = argv[++i]; *s >= '0' && *s <= '9'; s++)
+				reload_o5_wait_s = reload_o5_wait_s * 10 + (*s - '0');
 		} else {
 			out_fmt("omcid: unknown argument %s\n", argv[i]);
 			usage();
@@ -229,17 +251,11 @@ int main(int argc, char **argv)
 		ident.loid[0] ? "set" : "none",
 		vlanCfg.manual ? "on" : "off (transparent)",
 		report.on ? "on" : "off");
-	{
-		/* Only the value 1 turns it on: anything else, an absent key
-		 * included, keeps the "unknown entity" answer. */
-		char v[4];
-
-		unknown_me_ok = cfg_odi_get(CFG_ODI_PATH, "OMCI_UNKNOWN_ME_OK",
-					    v, sizeof v) == 1 && v[0] == '1';
-		out_fmt("unknown entities: %s\n", unknown_me_ok
-			? "answered ok (OMCI_UNKNOWN_ME_OK=1)"
-			: "answered unknown entity");
-	}
+	cfg_load_unknown_me();
+	out_fmt("unknown entities: %s\n", unknown_me_ok
+		? "answered ok (OMCI_UNKNOWN_ME_OK=1)"
+		: "answered unknown entity");
+	reload_init();
 
 	/* Resume without re-registration (docs/BOOT.md): a respawned omcid
 	 * whose PON is still O5, with a snapshot on disk for this exact
@@ -319,6 +335,9 @@ int main(int argc, char **argv)
 	out_flush();
 
 	while (n < want && idle < maxidle * (5000000 / NL_POLL_US)) {
+		/* SIGHUP: reread the store (reload.c). Cheap when idle, and
+		 * never blocks, so the ping below keeps going. */
+		reload_poll();
 		/* Serving a queue is not idling; with no line side it is the
 		 * only thing that resets the -w count. */
 		if (cli_poll() || vq_poll())

@@ -36,8 +36,7 @@ read_proc_bounded() {
 }
 
 # uptime_s: seconds since boot, from $UPTIME (default /proc/uptime, a
-# fixture path under test). Shared so apply.sh and omci_reactivate below
-# measure DEACT_HOLD off the same clock.
+# fixture path under test), for omci_reactivate below.
 UPTIME=${UPTIME:-/proc/uptime}
 uptime_s() { cut -d. -f1 "$UPTIME"; }
 
@@ -48,15 +47,15 @@ uptime_s() { cut -d. -f1 "$UPTIME"; }
 # type 1), re-apply the PLOAM password from the CS file, hold until
 # <deact_hold> seconds have passed since <t0>, then reactivate (gponact).
 # The caller must already have written gpondeact -- this only covers the
-# part downstream of it, since the two callers differ there: apply.sh's
-# `omci` restart also stops the old omcid and starts a new one first;
-# svc-omcid.sh's automatic re-provisioning after a respawn (docs/BOOT.md,
-# "Respawn re-provisioning") must not touch the omcid process at all, since
-# init is already supervising it as a respawn entry and killing or starting
-# one from here would just trigger another respawn.
+# part downstream of it. Its one caller is omci-respawn-reprovision.sh, the
+# automatic re-provisioning after a respawn (docs/BOOT.md, "Respawn
+# re-provisioning"), which must not touch the omcid process at all: init is
+# already supervising it as a respawn entry, and killing or starting one
+# from here would just trigger another respawn. (apply.sh omci does not use
+# it: omcid re-registers itself on SIGHUP.)
 #
 # Echoes the pid that registered, or nothing if REGISTER_WAIT ran out
-# (activation is attempted either way, as apply.sh's did); returns 1 if the
+# (activation is attempted either way); returns 1 if the
 # final gponact write itself failed, 0 otherwise.
 omci_reactivate() {
 	t0=$1 register_wait=$2 deact_hold=$3

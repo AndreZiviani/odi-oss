@@ -168,7 +168,7 @@ test-diag:
 test-omci: src
 	$(MAKE) -C src/omci/respond drvtrace
 	docker run --rm -v "$(CURDIR)":/src -w /src/src/omci "$(DIAG_IMAGE)" \
-		sh -c 'sh qemu-test.sh && sh drv-test.sh && sh resume-test.sh && sh events-test.sh && sh swdl-test.sh && sh vlan-test.sh'
+		sh -c 'sh qemu-test.sh && sh drv-test.sh && sh resume-test.sh && sh events-test.sh && sh swdl-test.sh && sh vlan-test.sh && sh reload-test.sh'
 
 # The rcS action trace: what rcS executes and writes under /proc, for
 # three flag sets, against test/fixtures/rcs-trace-*.txt. Not part of `test`:

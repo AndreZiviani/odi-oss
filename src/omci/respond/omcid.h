@@ -177,6 +177,9 @@ uint16_t tcont_alloc_id(uint16_t meId, int *src);
 
 /* Everything that crosses a module boundary. */
 extern uint8_t serial[9];
+/* Forget where serial[] came from, so the next serial_refresh() reads it
+ * again: after the serial number was set in the driver. */
+void serial_forget(void);
 /* Fill serial[] from the kernel, or the config store until the kernel has
  * one; cheap once the kernel has answered. 0 when serial[] is set. `log`
  * says where it came from on stdout -- only from the main loop, never while
@@ -385,6 +388,12 @@ void ev_mib_upload_next(uint16_t seq);
 void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_alloc_ids(const uint16_t *ids, unsigned n);
+/* A config reload (reload.c): the decision, a step that failed, and the
+ * outcome. `keys` is store key names only, never values. */
+void ev_reload(const char *changed, const char *action, const char *keys);
+void ev_reload_step(const char *verb, long rc);
+void ev_reload_done(const char *changed, const char *action, const char *result,
+		    long duration_ms, long o5_ms, unsigned services);
 /* One software image step: `sections` < 0 and `crc` 0 leave those keys out,
  * `size` < 0 leaves out size and window. */
 void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
@@ -405,6 +414,21 @@ void ev_unknown_msg(uint8_t mt, uint16_t cls);
 /* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
  * class omcid does not model with success instead of "unknown entity". */
 extern int unknown_me_ok;
+
+/* ------------------------------------------------ reload on SIGHUP (reload.c)
+ *
+ * The handler only sets a flag; reload_poll(), called from the main loop,
+ * does the work and drives the re-registration as a state machine, so the
+ * loop (and its watchdog ping) never blocks for it. */
+#define RELOAD_STATUS_PATH     "/var/run/omcid-reload"
+#define RELOAD_STATUS_TMP_PATH "/var/run/omcid-reload.tmp"
+#define ODI_INIT_PATH          "/proc/odi_init"
+extern volatile int reload_pending;
+extern const char *odi_init_path;
+extern long reload_o5_wait_s;
+void reload_init(void);
+void reload_on_hup(int sig);
+void reload_poll(void);
 
 /* ------------------------------------------------ software download (swimage.c)
  *
@@ -476,6 +500,50 @@ struct onu_report {
 extern struct onu_identity ident;
 extern struct onu_vlan_cfg vlanCfg;
 extern struct onu_report report;
+
+/* ------------------------------------------------------ config reload
+ *
+ * SIGHUP rereads the store and acts on what changed (reload.c). The keys
+ * fall in two classes: those that change only how a service is tagged
+ * (rebuilt in place), and those the OLT has to see again (the ONU
+ * re-registers). cfg_snap_diff() answers which, from the values omcid holds
+ * and the ones just read. */
+struct cfg_snap {
+	struct onu_identity ident;
+	struct onu_vlan_cfg vlan;
+	struct onu_report report;
+	int unknown_me_ok;
+};
+/* Identity class: one bit per key the OLT reads. */
+#define CFGD_SN         (1u << 0)
+#define CFGD_PLOAM      (1u << 1)
+#define CFGD_LOID       (1u << 2)
+#define CFGD_LOID_PWD   (1u << 3)
+#define CFGD_SW_VER1    (1u << 4)
+#define CFGD_SW_VER2    (1u << 5)
+#define CFGD_MODEL      (1u << 6)
+#define CFGD_OMCC_VER   (1u << 7)
+#define CFGD_PRODUCT    (1u << 8)
+#define CFGD_HW_VER     (1u << 9)
+#define CFGD_SWITCH     (1u << 10)
+#define CFGD_UNKNOWN_ME (1u << 11)
+#define CFGD_IDENTITY   0x0fffu
+/* VLAN class: the four keys that pick how a connection is tagged. */
+#define CFGD_VLAN_TYPE  (1u << 12)
+#define CFGD_VLAN_MODE  (1u << 13)
+#define CFGD_VLAN_VID   (1u << 14)
+#define CFGD_VLAN_PRI   (1u << 15)
+#define CFGD_VLAN       0xf000u
+void cfg_snap_take(struct cfg_snap *s);
+void cfg_snap_restore(const struct cfg_snap *s);
+/* Reread every key the daemon holds, the way startup reads them. */
+void cfg_load_all(void);
+void cfg_load_unknown_me(void);
+unsigned cfg_snap_diff(const struct cfg_snap *old, const struct cfg_snap *cur);
+/* The store key names of a diff mask, comma separated, into out. */
+void cfg_diff_names(unsigned mask, char *out, int max);
+/* The SN the driver takes in "gponsn": the 12-character label, or NULL. */
+const char *cfg_sn_label(const struct onu_identity *id);
 void cfg_load_vlan(void);
 void cfg_load_vlan_from(const char *cs);
 int cfg_manual_vid(void);
