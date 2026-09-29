@@ -656,11 +656,12 @@ uint32_t cli_vlan(void)
  * passwords are never printed -- see cfg_show_identity. */
 uint32_t cli_ident(void)
 {
-	const char *cs = cli_arg(1), *hs = cli_arg(2);
+	const char *cs = cli_arg(1), *hs = cli_arg(2), *odi = cli_arg(3);
 
 	if (cs && hs) {
 		cfg_load_identity_from(cs, hs);
-		cfg_load_report_from(cs, hs, CFG_REPORT_SWITCH);
+		cfg_load_report_from(cs, hs, CFG_REPORT_SWITCH,
+				     odi ? odi : CFG_ODI_PATH);
 	} else {
 		cfg_load_identity();
 		cfg_load_report();
@@ -836,7 +837,7 @@ uint32_t cli_help(void)
 	    "  state                          serial, device, onu state\n"
 	    "  provision                      what the OLT provisioned: T-CONTs,\n"
 	    "                                 GEM ports, VLANs, traffic descriptors\n"
-	    "  ident [cs] [hs]                identity from the config store\n"
+	    "  ident [cs hs [odi]]            identity from the config store\n"
 	    "  cfgset <file> <dir> <key> <v>  write one key into a config store\n"
 	    "  help\n");
 	return OMCLI_OK;

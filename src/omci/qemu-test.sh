@@ -697,7 +697,46 @@ check "switch on, keys empty: the software version stays 0.0.0" \
 got=$(ask 0e18 0101 0000 e000 | cut -c1-68)
 check "switch on, keys empty: ONU2-G stays as it was" "$got" "0e18290a0101000000e000${Z20}80000f"
 rm -f /var/config/omci-identity.on
-$Q cli/build/omcli ident test/cfg_agree.xml test/cfg_agree_hs.xml > /dev/null 2>&1
+
+# ONU-G (256) attribute 2, Version, 14 bytes: the hardware version some OLTs
+# whitelist. ONU_HW_VERSION is an odi-only key, in odi.conf beside the XML
+# store (the third argument of `omcli ident` names the file), and follows the
+# same switch as the five keys above. Under qemu the driver has no device id,
+# so the default answer is fourteen zero bytes.
+Z14=0000000000000000000000000000
+printf 'NTP_SERVER=10.0.0.1\nONU_HW_VERSION=ODI-HW-01\n' > /tmp/odi-hw.conf
+printf 'ONU_HW_VERSION=\n' > /tmp/odi-hw-empty.conf
+printf 'ONU_HW_VERSION=ABCDEFGHIJKLMNO\n' > /tmp/odi-hw-long.conf
+printf 'ONU_HW_VERSION=ABCDEFGHIJKLMN\n' > /tmp/odi-hw-max.conf
+hwident() {   # hwident <odi.conf> -> the hw version line of omcli ident
+	$Q cli/build/omcli ident test/cfg_report.xml test/cfg_report_hs.xml "$1" 2>&1 | grep '^hw version'
+}
+got=$(hwident /tmp/odi-hw.conf)
+check "omcli ident shows ONU_HW_VERSION as stored, not reported" \
+      "$got" "hw version  ODI-HW-01 (not reported)"
+got=$(ask 0e19 0100 0000 4000 | cut -c1-50)
+check "hw version set, switch off: ONU-G Version stays the device id" \
+      "$got" "0e19290a01000000004000$Z14"
+: > /var/config/omci-identity.on
+hwident /tmp/odi-hw.conf > /dev/null
+got=$(ask 0e1a 0100 0000 4000 | cut -c1-50)
+check "switch on: ONU_HW_VERSION is the ONU-G Version" \
+      "$got" "0e1a290a010000000040004f44492d48572d30310000000000"
+got=$(hwident /tmp/odi-hw-max.conf)
+got2=$(ask 0e1b 0100 0000 4000 | cut -c1-50)
+check "fourteen characters fill the attribute exactly" \
+      "$got / $got2" "hw version  ABCDEFGHIJKLMN / 0e1b290a010000000040004142434445464748494a4b4c4d4e"
+got=$(hwident /tmp/odi-hw-long.conf)
+check "fifteen characters are refused whole, not cut" "$got" \
+      "hw version  (ONU_HW_VERSION ignored: more than 14 characters or not printable; the device id)"
+got=$(ask 0e1c 0100 0000 4000 | cut -c1-50)
+check "and the OLT sees the device id instead" "$got" "0e1c290a01000000004000$Z14"
+got=$(hwident /tmp/odi-hw-empty.conf)
+got2=$(ask 0e1d 0100 0000 4000 | cut -c1-50)
+check "an empty key keeps the device id" \
+      "$got / $got2" "hw version  (not in odi.conf: the device id) / 0e1d290a01000000004000$Z14"
+rm -f /var/config/omci-identity.on
+$Q cli/build/omcli ident test/cfg_agree.xml test/cfg_agree_hs.xml /tmp/odi-hw-empty.conf > /dev/null 2>&1
 
 # ------------------------------------------------------------------- class 45
 #
