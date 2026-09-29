@@ -385,6 +385,10 @@ void ev_mib_upload_next(uint16_t seq);
 void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_alloc_ids(const uint16_t *ids, unsigned n);
+/* One software image step: `sections` < 0 and `crc` 0 leave those keys out,
+ * `size` < 0 leaves out size and window. */
+void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
+		 long sections, const char *crc, const char *result);
 void ev_tick(void);
 /* What the OLT sent that omcid does not model: one event line and one
  * summary line per unknown class and operation, or unknown message type,
@@ -398,6 +402,24 @@ void ev_unknown_msg(uint8_t mt, uint16_t cls);
 /* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
  * class omcid does not model with success instead of "unknown entity". */
 extern int unknown_me_ok;
+
+/* ------------------------------------------------ software download (swimage.c)
+ *
+ * Start / Download section / End software download, Activate and Commit
+ * image, from the OLT. OLT_SW_DOWNLOAD (odi.conf) picks accept (the default:
+ * answered with success, the image counted, CRC-checked and discarded) or
+ * reject (not supported). Nothing here writes flash, the U-Boot environment,
+ * or reboots. */
+void send_resp(int fd, uint32_t tid, const uint8_t *req,
+	       const uint8_t *contents, uint16_t clen);
+void sw_handle(int fd, uint32_t tid, const uint8_t *f, const struct omci_class *c);
+/* The class 7 flags a Get reports: attribute 2 is_committed, 3 is_active,
+ * 4 is_valid. */
+uint8_t sw_flag(uint16_t inst, unsigned attr);
+#define SWIMAGE_PATH     "/var/run/omcid-swimage"
+#define SWIMAGE_TMP_PATH "/var/run/omcid-swimage.tmp"
+int atomic_write(const char *path, const char *tmp, const uint8_t *buf,
+		 uint32_t n);
 
 /* ------------------------------------------------------------ config store
  *

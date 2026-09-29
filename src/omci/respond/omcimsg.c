@@ -25,8 +25,8 @@ volatile int nl_fd = -1;
 
 volatile uint32_t nl_tid;
 
-static void send_resp(int fd, uint32_t tid, const uint8_t *req,
-		      const uint8_t *contents, uint16_t clen)
+void send_resp(int fd, uint32_t tid, const uint8_t *req,
+	       const uint8_t *contents, uint16_t clen)
 {
 	uint16_t i;
 
@@ -353,6 +353,11 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		handle_upload_next(fd, tid, f);   /* 301 of these; do not log */
 		return;
 	}
+	/* A software image is thousands of these: counted, not logged. */
+	if (mt == OMCI_MT_DOWNLOAD_SECTION) {
+		sw_handle(fd, tid, f, c);
+		return;
+	}
 	out_fmt("<- %-16s tci %-5d class %-5d %-22s inst %d\n",
 		mt == OMCI_MT_GET ? "get" :
 		mt == OMCI_MT_MIB_RESET ? "mib-reset" :
@@ -365,6 +370,11 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		mt == OMCI_MT_GET_ALL_ALARMS ? "get-all-alarms" :
 		mt == OMCI_MT_GET_ALL_ALARMS_NEXT ? "get-all-alarms-next" :
 		mt == OMCI_MT_SYNC_TIME ? "sync-time" :
+		mt == OMCI_MT_START_SW_DOWNLOAD ? "start-sw-download" :
+		mt == OMCI_MT_END_SW_DOWNLOAD ? "end-sw-download" :
+		mt == OMCI_MT_ACTIVATE_SW ? "activate-image" :
+		mt == OMCI_MT_COMMIT_SW ? "commit-image" :
+		mt == OMCI_MT_REBOOT ? "reboot" :
 		mt == OMCI_MT_TEST ? "test" : "?",
 		(long)nl_get16(f), (long)cls, c ? c->name : "(unknown)", (long)inst);
 	/* Anything unnamed is what phase 4 has to learn, so show the type and
@@ -400,10 +410,12 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	else if (!c && addresses_entity(mt))
 		ev_unknown_me(cls, mt);
 
-	/* Before the AR check: a download section usually asks for no
-	 * acknowledgement, and it still has to be counted. */
-	if (mt == OMCI_MT_REBOOT ||
-	    (mt >= OMCI_MT_START_SW_DOWNLOAD && mt <= OMCI_MT_COMMIT_SW))
+	/* The software download steps answer for themselves (swimage.c). */
+	if (mt >= OMCI_MT_START_SW_DOWNLOAD && mt <= OMCI_MT_COMMIT_SW) {
+		sw_handle(fd, tid, f, c);
+		return;
+	}
+	if (mt == OMCI_MT_REBOOT)
 		ev_olt_command(mt, cls, inst);
 
 	if (!(f[2] & OMCI_AR)) {                 /* nothing to answer */

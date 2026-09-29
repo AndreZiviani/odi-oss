@@ -46,7 +46,7 @@ HS=${HS:-/var/config/lastgood_hs.xml}
 DEFAULTS=${DEFAULTS:-/etc/config_default.xml}
 TMPDIR_=${TMPDIR_:-/var/tmp}
 ODI_CONF=${ODI_CONF:-/var/config/odi.conf}
-ODI_KEYS="SYSLOG_SERVER NTP_SERVER ONU_HW_VERSION OMCI_UNKNOWN_ME_OK"
+ODI_KEYS="SYSLOG_SERVER NTP_SERVER ONU_HW_VERSION OMCI_UNKNOWN_ME_OK OLT_SW_DOWNLOAD"
 
 usage() {
 	echo "usage: flash all {cs|hs}" >&2
