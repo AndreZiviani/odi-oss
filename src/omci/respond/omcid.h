@@ -269,8 +269,11 @@ void snapshot_invalidate(void);
  * MIB and its bookkeeping when a valid, matching snapshot was loaded; 0
  * otherwise, leaving everything exactly as it was (empty, for a fresh
  * process) -- the caller then falls back to the ordinary re-registration
- * path. */
-int snapshot_try_resume(uint32_t onu_state);
+ * path.
+ * *why names the outcome: "resumed", or why not -- "not_o5", "no_snapshot",
+ * "bad_snapshot" (short, wrong magic or version, bad crc) or "other_device"
+ * (another device id or serial number). */
+int snapshot_try_resume(uint32_t onu_state, const char **why);
 void snapshot_write_decision(int resumed);
 /* `creating` separates a Create from a Set. Class 47 needs it: the stock stack
  * drives the MAC learning limit and the flooding mask from the create arm
@@ -318,6 +321,7 @@ uint32_t cli_flows(void);
 uint32_t cli_caps(void);
 uint32_t cli_tcont(void);
 uint32_t cli_state(void);
+uint32_t cli_provision(void);
 uint32_t cli_conn(void);
 void qmap_dump(void);
 uint32_t cli_bridge(void);
@@ -351,6 +355,19 @@ void handle(int fd, uint32_t tid, const uint8_t *f);
 /* OMCI frames handle() has taken, from the line or injected: the main loop
  * times the quiet second before its rebuilds on this, not on CLI traffic. */
 extern unsigned long omci_frames_handled;
+
+/* ------------------------------------------------------------- event lines
+ *
+ * One "event=..." line per link or provisioning event, to omcid.log and to
+ * syslog (facility daemon). See events.c and docs/TOOLS.md, "Link and
+ * provisioning events". `side` is "olt" or "local". */
+void ev_start(int restart, int resumed, const char *why, uint32_t onu_state);
+void ev_mib_reset(const char *side);
+void ev_mib_upload(uint16_t total);
+void ev_mib_upload_next(uint16_t seq);
+void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
+void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst);
+void ev_tick(void);
 
 /* ------------------------------------------------------------ config store
  *

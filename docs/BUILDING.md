@@ -37,7 +37,7 @@ RAM, default `JOBS=4`, measured 2026-09-25:
 | `make kernel` | Linux 6.18.53 for the RTL9602C (`VERSION=` stamps the ramlog build id, `CRUMBS_CORE=1` adds the debug crumbs) — `docs/KERNEL.md` | 2 min |
 | `make packages` | busybox (`make busybox`), our config fragment, then dropbear (with `scp`) and iproute2, all ISA-audited | 2 min |
 | `make src` | our own tools (`diag`, `omcid`, `omcli`, `omciprobe`, `omcicap`, `nv`, `igmpd`), freestanding, into `out/bin` — `docs/CROSS-COMPILING.md` | 10 s |
-| `make releases` | fetches `confd` and `metricsd` as pinned, checksummed release assets (confd v1.0.4, metricsd v1.1.1; `CONFD_TAG=`/`METRICSD_TAG=` to override, or `CONFD_TAG= CONFD_BIN=<binary>` for a local `confd` build) | 5 s |
+| `make releases` | fetches `confd` and `metricsd` as pinned, checksummed release assets (confd v1.0.4, metricsd v1.1.1; `CONFD_TAG=`/`METRICSD_TAG=` to override, or `CONFD_TAG= CONFD_BIN=<binary>` / `METRICSD_TAG= METRICSD_BIN=<binary>` for a local `confd` / `metricsd` build) | 5 s |
 | `make image` | assembles the flashable tarball into `out/image/`: squashfs rootfs (with the register replay tables in `/lib/firmware/odi/`), the uImage, `fwu.sh` and `md5.txt` | 15 s |
 
 Total: about six minutes from `git clone` to `out/image/<version>.tar` once

@@ -194,6 +194,7 @@ static void cli_dispatch(void)
 	else if (str_eq(verb, "conn"))   status = cli_conn();
 	else if (str_eq(verb, "bridge")) status = cli_bridge();
 	else if (str_eq(verb, "state"))  status = cli_state();
+	else if (str_eq(verb, "provision")) status = cli_provision();
 	else if (str_eq(verb, "ident"))  status = cli_ident();
 	else if (str_eq(verb, "vlan"))   status = cli_vlan();
 	else if (str_eq(verb, "cfgset")) status = cli_cfgset();

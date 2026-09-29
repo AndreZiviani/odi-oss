@@ -182,4 +182,28 @@ void odi_gpon_fsm_handle_event(struct odi_gpon_fsm *fsm, const struct odi_gpon_f
 				void *ctx, enum odi_gpon_event event,
 				const struct odi_gpon_ploam *msg);
 
+/* Why the FSM moved, as the driver logs it (odi_gpon.c, the event=onu_state
+ * line; docs/TOOLS.md, "Link and provisioning events", has the table).
+ * `name` is the event or the downstream PLOAM message that drove the
+ * transition; `side` is who started it:
+ *
+ *   olt    a downstream PLOAM message (Deactivate_ONU-ID, Disable_Serial_
+ *          Number, Upstream_Overhead, ...)
+ *   timer  TO1 or TO2 expired: the OLT stopped ranging this ONU, or the
+ *          POPUP window closed without a POPUP message
+ *   line   loss of signal, or its clearing
+ *   local  a driver command from this side (gponact, gpondeact)
+ *
+ * Both strings are static and never NULL. msg is only read for
+ * ODI_GPON_EVENT_PLOAM_RX and may be NULL otherwise; NULL there reads as an
+ * unknown message.
+ */
+struct odi_gpon_fsm_cause {
+	const char *name;
+	const char *side;
+};
+
+void odi_gpon_fsm_cause(enum odi_gpon_event event, const struct odi_gpon_ploam *msg,
+			struct odi_gpon_fsm_cause *out);
+
 #endif /* ODI_GPON_FSM_H */

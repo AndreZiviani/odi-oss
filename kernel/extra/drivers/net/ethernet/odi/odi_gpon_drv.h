@@ -84,6 +84,13 @@ void odi_gpon_get_eqd(uint32_t *multframe, uint32_t *inframe);
 /* PLOAM totals: rx drained by odi_gpon_isr_poll(), tx sent upstream. */
 void odi_gpon_get_ploam_counts(unsigned int *rx, unsigned int *tx);
 
+/* The Alloc-IDs the OLT assigned by Assign_Alloc-ID PLOAM and this driver
+ * wrote into the CAM, in row order, at most `max` of them; the default
+ * (OMCC) row, which carries the ONU-ID, is left out. Returns the count.
+ * For /proc/odi_gpon's alloc_ids line: the T-CONTs the ISP gave this ONU.
+ */
+unsigned int odi_gpon_get_alloc_ids(uint16_t *out, unsigned int max);
+
 /* ---- odi_gpon_hw.c leaves the PLOAM dispatch in odi_gpon_isr.c calls
  * directly, for the message types outside the FSM (Acknowledge, GEM port,
  * Alloc-ID). odi_gpon_hw_test_seed_active() is host-build only.

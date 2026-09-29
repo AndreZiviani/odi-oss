@@ -903,6 +903,19 @@ void odi_gpon_get_eqd(uint32_t *multframe, uint32_t *inframe)
 	*inframe = odi_gpon_hw.eqd_inframe;
 }
 
+unsigned int odi_gpon_get_alloc_ids(uint16_t *out, unsigned int max)
+{
+	unsigned int row, n = 0;
+
+	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS && n < max; row++) {
+		if (row == ODI_GPON_HW_ALLOC_ROW_DEFAULT)
+			continue;
+		if (odi_gpon_hw.alloc_used & (1UL << row))
+			out[n++] = odi_gpon_hw.alloc_id_values[row];
+	}
+	return n;
+}
+
 void odi_gpon_get_ploam_counts(unsigned int *rx, unsigned int *tx)
 {
 	*rx = odi_gpon_hw.ploam_rx_count;

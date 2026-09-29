@@ -416,6 +416,77 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 	}
 }
 
+/* The downstream message that can move the FSM, named for the log line.
+ * Only the types Table 10-1 acts on are named; every other type is
+ * GEM/T-CONT/key programming that never changes state.
+ */
+static const char *odi_gpon_fsm_ploam_cause(const struct odi_gpon_ploam *msg)
+{
+	struct odi_gpon_ds_disable_serial_number dsn;
+
+	if (!msg)
+		return "ploam_unknown";
+	switch (msg->type) {
+	case ODI_GPON_DS_UPSTREAM_OVERHEAD:
+		return "upstream_overhead";
+	case ODI_GPON_DS_ASSIGN_ONU_ID:
+		return "assign_onu_id";
+	case ODI_GPON_DS_RANGING_TIME:
+		return "ranging_time";
+	case ODI_GPON_DS_DEACTIVATE_ONU_ID:
+		return "deactivate_onu_id";
+	case ODI_GPON_DS_POPUP:
+		return "popup";
+	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER:
+	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER_ZTE:
+		odi_gpon_decode_disable_serial_number(msg, &dsn);
+		if (dsn.code == ODI_GPON_DISABLE_SN_DISABLE)
+			return "disable_serial_number";
+		if (dsn.code == ODI_GPON_DISABLE_SN_ENABLE)
+			return "enable_serial_number";
+		return "enable_all_serial_numbers";
+	default:
+		return "ploam_other";
+	}
+}
+
+void odi_gpon_fsm_cause(enum odi_gpon_event event, const struct odi_gpon_ploam *msg,
+			struct odi_gpon_fsm_cause *out)
+{
+	out->name = "unknown";
+	out->side = "unknown";
+	switch (event) {
+	case ODI_GPON_EVENT_ACTIVATE:
+		out->name = "activate";
+		out->side = "local";
+		break;
+	case ODI_GPON_EVENT_DEACTIVATE:
+		out->name = "deactivate";
+		out->side = "local";
+		break;
+	case ODI_GPON_EVENT_TO1_EXPIRE:
+		out->name = "to1_expired";
+		out->side = "timer";
+		break;
+	case ODI_GPON_EVENT_TO2_EXPIRE:
+		out->name = "to2_expired";
+		out->side = "timer";
+		break;
+	case ODI_GPON_EVENT_LOS:
+		out->name = "los";
+		out->side = "line";
+		break;
+	case ODI_GPON_EVENT_LOS_CLEAR:
+		out->name = "los_cleared";
+		out->side = "line";
+		break;
+	case ODI_GPON_EVENT_PLOAM_RX:
+		out->name = odi_gpon_fsm_ploam_cause(msg);
+		out->side = "olt";
+		break;
+	}
+}
+
 void odi_gpon_fsm_handle_event(struct odi_gpon_fsm *fsm, const struct odi_gpon_fsm_ops *ops,
 				void *ctx, enum odi_gpon_event event,
 				const struct odi_gpon_ploam *msg)
