@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- omcid accepts a software download from the OLT instead of refusing it, and
+  never installs it: Start, Download section (acknowledged per G.988 window,
+  a window with a missing section refused so the OLT resends it), End (the
+  image CRC-32 and size checked), Activate and Commit are answered with
+  success, the image is counted and discarded, and the software image entity
+  reports the flags the OLT expects (`is_valid`, `is_active`,
+  `is_committed`) for the rest of the boot. Nothing is written to flash or the
+  U-Boot environment and the stick never reboots. A new odi-only key,
+  `OLT_SW_DOWNLOAD` in `/etc/config/odi.conf`: `accept` (the default) or
+  `reject` (the old "not supported" answers), read at every download. Every
+  step is an `event=sw_image` line with the sections and `crc=ok|bad`. ISP2's
+  End software download to ONU-G at every session start is no longer logged
+  as a software image step. `make test-omci` runs both modes, under
+  `qemu -strace` for accept, and asserts no flash, exec or reboot.
+
 ## v1.1.1 — 2026-09-29
 
 - Pins odi-ui confd v1.1.1 (was v1.1.0): the trial banner no longer claims

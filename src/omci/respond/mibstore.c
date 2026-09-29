@@ -572,9 +572,11 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		}
 	} else if (c->classId == OMCI_ME_SOFTWARE_IMAGE) { /* software image */
 		if (k == 1) put_str(out, n, report_sw_ver(inst));
-		else if (k == 2) out[0] = (inst == 0);  /* is committed */
-		else if (k == 3) out[0] = (inst == 0);  /* is active */
-		else if (k == 4) out[0] = 1;            /* is valid */
+		/* is committed, is active, is valid: image 0 all three and
+		 * image 1 valid, until an accepted download, activate or
+		 * commit from the OLT moves them (swimage.c). Reported only:
+		 * the slots themselves never change. */
+		else if (k >= 2 && k <= 4) out[0] = sw_flag(inst, k);
 	} else if (c->classId == OMCI_ME_CTC_LOID_AUTH) { /* CTC LOID authentication */
 		/* The LOID and its password from the config store (LOID and
 		 * LOID_PASSWD in lastgood.xml, both empty on isp1), AuthStatus 0

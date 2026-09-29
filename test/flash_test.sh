@@ -129,7 +129,7 @@ t "a slash cannot run sed commands against another key" "VLAN_MANU_TAG_VID=11" \
 t "and leaves no stray quote in the document" "0" \
   "$(grep -c 'Value="999""' "$T/cs.xml")"
 
-# odi-only keys (SYSLOG_SERVER, NTP_SERVER): a plain KEY=value file, since the
+# odi-only keys (SYSLOG_SERVER, NTP_SERVER, OLT_SW_DOWNLOAD): a plain KEY=value file, since the
 # stock XML has never carried them. A real config dir, so the rename is real.
 cfg="$T/config"
 mkdir -p "$cfg"
@@ -159,6 +159,9 @@ sh $F get SYSLOG_SERVER >/dev/null 2>&1; rc=$?
 t "and succeeds: a known key, only empty"   "0" "$rc"
 t "the svc-*.sh read of it is empty"        "" "$(sh $F get SYSLOG_SERVER 2>/dev/null | sed 's/^[^=]*=//' | grep .)"
 t "and the other key survives"              "NTP_SERVER=pool.ntp.org:123" "$(sh $F get NTP_SERVER)"
+t "OLT_SW_DOWNLOAD is an odi key too"       "OLT_SW_DOWNLOAD=reject" "$(sh $F set OLT_SW_DOWNLOAD reject)"
+t "and reads back from odi.conf, where omcid reads it" "1" "$(grep -c '^OLT_SW_DOWNLOAD=reject$' "$ODI_CONF")"
+t "cleared, it reads empty (omcid then accepts)" "OLT_SW_DOWNLOAD=" "$(sh $F set OLT_SW_DOWNLOAD '')"
 t "flash all cs no longer lists the cleared one" "0" "$(sh $F all cs | grep -c 'SYSLOG_SERVER')"
 printf 'garbage line\n=novalue\nSYSLOG_SERVERX=nope\n#SYSLOG_SERVER=no\n' >> "$ODI_CONF"
 t "garbage lines are never read as a value" "SYSLOG_SERVER=" "$(sh $F get SYSLOG_SERVER 2>&1)"

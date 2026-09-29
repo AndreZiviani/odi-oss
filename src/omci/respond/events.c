@@ -363,48 +363,41 @@ void ev_mib_upload_next(uint16_t seq)
 	ev_emit(&e, EV_SEV_INFO);
 }
 
-/* A reboot or a software image download the OLT asked for. omcid answers
- * neither (the OLT gets "not supported"), so each attempt is worth a line:
- * an OLT that follows a refused reboot with a deactivation is an outage the
- * ISP started. Download sections are counted, not logged: an image is
- * thousands of them. */
-static unsigned long sw_sections;
-
+/* A reboot the OLT asked for. omcid does not do it (the OLT gets "not
+ * supported"), so each request is worth a line: an OLT that follows a refused
+ * reboot with a deactivation is an outage the ISP started. */
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst)
 {
 	struct evline e;
-	const char *op = 0;
 
-	if (mt == OMCI_MT_DOWNLOAD_SECTION) {
-		sw_sections++;
+	if (mt != OMCI_MT_REBOOT)
 		return;
-	}
-	if (mt == OMCI_MT_REBOOT) {
-		ev_begin(&e, "olt_reboot");
-		ev_num(&e, "class", cls);
-		ev_num(&e, "inst", inst);
-		ev_str(&e, "result", "not_supported");
-		ev_emit(&e, EV_SEV_NOTICE);
-		return;
-	}
-	if (mt == OMCI_MT_START_SW_DOWNLOAD) {
-		op = "download_start";
-		sw_sections = 0;
-	} else if (mt == OMCI_MT_END_SW_DOWNLOAD) {
-		op = "download_end";
-	} else if (mt == OMCI_MT_ACTIVATE_SW) {
-		op = "activate";
-	} else if (mt == OMCI_MT_COMMIT_SW) {
-		op = "commit";
-	}
-	if (!op)
-		return;
+	ev_begin(&e, "olt_reboot");
+	ev_num(&e, "class", cls);
+	ev_num(&e, "inst", inst);
+	ev_str(&e, "result", "not_supported");
+	ev_emit(&e, EV_SEV_NOTICE);
+}
+
+/* One step of a software download, activate or commit (swimage.c). Download
+ * sections are counted there, not logged: an image is thousands of them. */
+void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
+		 long sections, const char *crc, const char *result)
+{
+	struct evline e;
+
 	ev_begin(&e, "sw_image");
 	ev_str(&e, "op", op);
 	ev_num(&e, "inst", inst);
-	if (mt == OMCI_MT_END_SW_DOWNLOAD)
-		ev_num(&e, "sections", sw_sections);
-	ev_str(&e, "result", "not_supported");
+	if (size >= 0) {
+		ev_num(&e, "size", (unsigned long)size);
+		ev_num(&e, "window", window);
+	}
+	if (sections >= 0)
+		ev_num(&e, "sections", (unsigned long)sections);
+	if (crc)
+		ev_str(&e, "crc", crc);
+	ev_str(&e, "result", result);
 	ev_emit(&e, EV_SEV_NOTICE);
 }
 

@@ -41,7 +41,9 @@ import sys
 MT = {
     'create': 4, 'delete': 6, 'set': 8, 'get': 9, 'get-all-alarms': 11,
     'get-all-alarms-next': 12, 'mib-upload': 13, 'mib-upload-next': 14,
-    'mib-reset': 15, 'test': 18, 'sync-time': 24, 'get-next': 26,
+    'mib-reset': 15, 'test': 18, 'start-sw-download': 19,
+    'end-sw-download': 21, 'activate-image': 22, 'commit-image': 23,
+    'sync-time': 24, 'reboot': 25, 'get-next': 26,
 }
 ZEROED = {131}   # OltG
 HDR = re.compile(r'^<- (\S+)\s+tci (\d+)\s+class (\d+)\s+.*\binst (\d+)\s*$')

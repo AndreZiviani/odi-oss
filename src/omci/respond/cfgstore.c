@@ -186,6 +186,59 @@ next:
 	return -1;
 }
 
+/* One odi-only key out of /etc/config/odi.conf (docs/SETTINGS.md, "Odi-only
+ * keys"): a plain KEY=value file the flash script writes by temp file and
+ * rename, never XML. Returns the value length (0: present and empty), or -1
+ * when the file or the key is not there. The whole file is read once per call
+ * into a bounded buffer; a line the buffer cuts reads as absent. First match
+ * wins, as `flash get` reads it (sed ... | head -n 1). */
+static char odibuf[4096];
+
+int cfg_odi_get(const char *path, const char *key, char *out, int max)
+{
+	long fd;
+	int n = 0, klen = str_len(key);
+
+	if (max <= 0)
+		return -1;
+	fd = sys_open(path, 0);
+	if (fd < 0)
+		return -1;
+	for (;;) {
+		long r = sys_read((int)fd, odibuf + n, sizeof odibuf - 1 - n);
+
+		if (r <= 0)
+			break;
+		n += (int)r;
+		if (n >= (int)sizeof odibuf - 1)
+			break;
+	}
+	sys_close((int)fd);
+	for (int i = 0; i < n; ) {
+		int e = i, k = 0;
+
+		while (e < n && odibuf[e] != '\n')
+			e++;
+		if (e == n && n >= (int)sizeof odibuf - 1)
+			break;                   /* a line cut by the buffer */
+		while (k < klen && i + k < e && odibuf[i + k] == key[k])
+			k++;
+		if (k == klen && i + k < e && odibuf[i + k] == '=') {
+			int v = i + k + 1, len = 0;
+
+			while (v + len < e && odibuf[v + len] != '\r' &&
+			       len < max - 1) {
+				out[len] = odibuf[v + len];
+				len++;
+			}
+			out[len] = 0;
+			return len;
+		}
+		i = e + 1;
+	}
+	return -1;
+}
+
 /* Replace one key's value, or insert the key, and write the file back.
  *
  * Deliberately NOT what `flash set` does. That runs `xmlconfig -s` to update

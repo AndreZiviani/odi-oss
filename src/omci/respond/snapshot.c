@@ -120,7 +120,7 @@ static uint32_t crc32_calc(const uint8_t *p, uint32_t n)
 /* Same shape as cfgstore.c's own write: a temp file in the same directory,
  * written in full or not at all, then renamed over the target -- a reader
  * (the next boot's resume attempt) never sees a half-written snapshot. */
-static int atomic_write(const char *path, const char *tmp, const uint8_t *buf,
+int atomic_write(const char *path, const char *tmp, const uint8_t *buf,
 			uint32_t n)
 {
 	long fd = sys_create(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);

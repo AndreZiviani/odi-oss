@@ -97,7 +97,8 @@ sleep 1
 got=$(grep -c '^event=mib_reset side=local rows=161 ' "$log")
 check "a CLI MIB reset is logged as local" "$got" "1"
 
-# What omcid refuses, and the OLT may act on: a reboot, a software download.
+# What the OLT may act on: a reboot, which omcid refuses, and a software
+# download, which it accepts and discards (OLT_SW_DOWNLOAD, swdl-test.sh).
 $Q cli/build/omcli --inject "$(frame 0e01 59 0100 0000)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(frame 0e02 53 0007 0001)" > /dev/null 2>&1
 sleep 1
@@ -105,8 +106,8 @@ got=$(grep '^event=olt_reboot ' "$log")
 check "an OLT reboot request" "$got" \
       "event=olt_reboot class=256 inst=0 result=not_supported"
 got=$(grep '^event=sw_image ' "$log")
-check "a software download start" "$got" \
-      "event=sw_image op=download_start inst=1 result=not_supported"
+check "a software download start, accepted by default (swdl-test.sh has the rest)" "$got" \
+      "event=sw_image op=download_start inst=1 size=0 window=1 result=ok"
 
 # Rate limited: 30 more reboot requests, back to back, and the window of 20
 # lines a minute already holds 9 (start, OLT reset, upload begin and end,

@@ -77,9 +77,10 @@ The UI's reboot confirmation says which slot it comes back on.
 | `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto` | REBOOT |
 | `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R` -- kernel messages and the link and provisioning `event=` lines included (docs/TOOLS.md, "Link and provisioning events"); empty means local only (the circular buffer, `logread`). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh syslog`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-syslogd.sh` | SERVICE RESTART |
 | `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh ntp`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-ntpd.sh` | SERVICE RESTART |
+| `OLT_SW_DOWNLOAD` | OLT software download | what omcid answers when the OLT pushes a software image: `accept` (the default, also when the key is absent, empty or any other value) answers every step with success and discards the image; `reject` answers "not supported", as omcid did before. Nothing is ever written to flash or the U-Boot environment and the stick never reboots, in either mode ("Software download from the OLT" below). Odi-only key, kept in `/etc/config/odi.conf` | omcid, at every Start software download, Activate and Commit | LIVE (the next download) |
 
-Odi-only keys. `SYSLOG_SERVER` and `NTP_SERVER` are the only keys this image
-has that the stock firmware never had, so they are not in `lastgood.xml` and
+Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER` and `OLT_SW_DOWNLOAD` are the
+keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
 in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
 config partition, written by temp file and rename in the same directory.
@@ -94,6 +95,11 @@ clear this file. They must never be written into `lastgood*.xml`: measured on a
 claro stick (2026-09-28), the OEM image boots with an unknown key added to that
 file and ignores it on load, but its first save rewrites the file from its
 in-memory table and silently drops the key.
+
+omcid reads `OLT_SW_DOWNLOAD` straight from `odi.conf` (it has no shell to run
+`flash get` through): the first `OLT_SW_DOWNLOAD=` line wins, as it does for
+`flash get`, and the file is read whole into a 4 KB buffer each time, a line
+past that reading as absent.
 
 Why the two REBOOT keys cannot be applied live:
 
@@ -162,6 +168,40 @@ the equipment id from `RTL9602C` to `IGD`. With the switch off, nothing
 changes. The stock firmware may also rewrite `OMCI_SW_VER1/2` itself when it
 boots, so a value set here does not necessarily survive a fall-back to the
 stock slot. `omcli ident` shows what is stored and whether it is reported.
+
+### Software download from the OLT
+
+An OLT can push a firmware image to the ONU over OMCI (G.988: Start software
+download, Download section, End software download, Activate image, Commit
+image, on the software image entity). This image never runs an ISP firmware,
+and omcid never installs one. What `OLT_SW_DOWNLOAD` chooses is only what the
+OLT is told:
+
+| step | `accept` (default) | `reject` |
+|---|---|---|
+| Start software download | success, with the window size the OLT asked for; refused (parameter error) for the image that is active or committed, as G.988 and the stock stack do; the image then reads not valid | not supported |
+| Download section | the last section of each window is acknowledged; a window with a section missing is a processing error, so the OLT sends it again; every byte goes through the CRC and is dropped | not supported |
+| End software download | success when the CRC-32 the OLT sends matches the image and the size matches Start; a processing error otherwise; the image then reads valid | not supported |
+| Activate image | success; that image now reads active, the other not. **No reboot** | not supported |
+| Commit image | success; that image now reads committed, the other not | not supported |
+
+The flags are what omcid **reports** in the software image entity
+(`is_committed`, `is_active`, `is_valid`), for the OLT to read back. The real
+slots, `sw_commit` and `sw_tryactive` are never touched: `make test-omci` runs
+a whole download under `qemu -strace` and asserts no open of `/dev/mtd`, no
+exec (so no `nv`) and no reboot. The flags hold for the rest of the boot,
+across an omcid respawn (in `/var/run/omcid-swimage`, RAM), and a reboot comes
+back reporting image 0 committed and active again. The version each image
+reports stays `OMCI_SW_VER1`/`OMCI_SW_VER2` (with the OLT identity switch on)
+or `0.0.0`: no OMCI download message carries a version string -- it is only
+inside the ISP image, which is discarded unread.
+
+What the OLT does next is its own business, and untested on any line: an OLT
+that expects the ONU to reboot into the new image after Activate, and to
+report the new version, may time out waiting, or repeat the download at every
+boot. Every step is one `event=sw_image` line (`docs/TOOLS.md`, "Link and
+provisioning events"), so the log shows it if it does; `reject` goes back to
+the old answers.
 
 ## Web UI controls
 

@@ -155,7 +155,11 @@ It reads, from the config store, once at start: the manual VLAN
 the serial number until the kernel reports one (`GPON_SN`), the LOID keys
 (answered in the CTC LOID-authentication entity), the five OLT identity keys
 (reported only while `/etc/config/omci-identity.on` exists), and
-`DUAL_MGMT_MODE` and the `OMCI_CUSTOM_*` masks for display only. Each key is
+`DUAL_MGMT_MODE` and the `OMCI_CUSTOM_*` masks for display only. At every
+Start software download, Activate and Commit from the OLT it reads
+`OLT_SW_DOWNLOAD` from `/etc/config/odi.conf`: accept (the default) answers the
+download and discards the image, reject refuses it; it never flashes and never
+reboots (docs/SETTINGS.md, "Software download from the OLT"). Each key is
 looked up in both store files, the one xmlconfig assigns it to first. Its
 start-up line in the log says what it found (`store: loid ..., manual vlan
 ..., identity report ...`). A change takes effect with `apply.sh omci`;
@@ -712,7 +716,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=provision_begin op=set class=256 inst=0 after_mib_reset=1` | info | the first Create, Set or Delete of a burst; `after_mib_reset=1` is a full re-provisioning |
 | `omcid: event=provision_end creates=82 sets=102 deletes=0 duration_s=0.827 rows=161 services=6 after_mib_reset=1` | info | 10 s after the burst's last write: what it added up to (Gets and Tests do not count) |
 | `omcid: event=olt_reboot class=256 inst=0 result=not_supported` | notice | the OLT asked for a reboot; omcid does not do it |
-| `omcid: event=sw_image op=download_start inst=1 result=not_supported` | notice | a software download (`op=download_start`, `download_end` with `sections=N`, `activate`, `commit`); omcid refuses each |
+| `omcid: event=sw_image op=download_start inst=1 size=2621440 window=32 result=ok` | notice | a software download step from the OLT: `op=download_start` (the image size and sections per window), `download_end` (`sections=N`, the sections accepted, and `crc=ok` or `bad`), `activate`, `commit`. `result` is `ok`; `not_supported` with `OLT_SW_DOWNLOAD=reject`; `refused_active` (a download to the image that is active or committed), `refused_invalid` (activate or commit of an image that is not valid), `crc_error`, `size_mismatch`, `short` or `no_download` otherwise. Accepted or not, the image is discarded and nothing is flashed (docs/SETTINGS.md, "Software download from the OLT") |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 
 `cause` and `side` on `event=onu_state`:
@@ -743,6 +747,9 @@ Reading an outage:
   nothing on the line noticed.
 - `event=olt_reboot` followed by a deactivation: the OLT gave up on a
   reboot this image refuses.
+- `event=sw_image op=activate ... result=ok`, then a deactivation or a new
+  `download_start`: the OLT expected the ONU to reboot into the image it
+  sent; omcid only reports it active (docs/SETTINGS.md).
 - A board reset by the watchdog leaves no line here (the syslog buffer is in
   RAM, and forwarding stops with the board); the ramlog of the next boot
   records it (docs/KERNEL.md).
