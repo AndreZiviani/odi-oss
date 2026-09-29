@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Pins odi-ui confd v1.1.0 (was v1.0.8): the redesigned web UI (Status,
+  Config with subtabs, OMCI, System), a trial-boot banner with "Keep this
+  image", `GET /api/diag` for the diagnostics bundle. Pins odi-sfp-exporter
+  v1.2.0 (was v1.1.2): `gpon_boot_count`, `gpon_last_reset_reason`,
+  `gpon_config_info`, `gpon_uncommitted` and the slot series,
+  `gpon_provision_*`, and the alert rules in its `prometheus/alerts.yml`.
 - Adds `/etc/scripts/diag-bundle.sh`, the diagnostics bundle: the previous
   boot ramlog, `/var/log/*`, dmesg, `/etc/odi-build`, `/etc/version`,
   `/proc/odi_wdt/*`, uptime, meminfo, mounts, `ps`, the slot variables from

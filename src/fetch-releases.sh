@@ -20,7 +20,7 @@ mkdir -p "$OUT" "$DL"
 # below, so it takes its default only when unset: with :- an empty value
 # became the default tag again and CONFD_BIN was never reached.
 METRICSD_REPO=${METRICSD_REPO:-AndreZiviani/odi-sfp-exporter}
-METRICSD_TAG=${METRICSD_TAG:-v1.1.2}
+METRICSD_TAG=${METRICSD_TAG:-v1.2.0}
 # METRICSD_BIN=<path> puts a local odi-sfp-exporter build (its build/metricsd)
 # in the image instead of the release, for a trial of an unreleased exporter.
 # The manifest then says exporter=local.
@@ -29,7 +29,7 @@ if [ -n "${METRICSD_BIN:-}" ]; then
 	METRICSD_TAG=local
 fi
 CONFD_REPO=${CONFD_REPO:-AndreZiviani/odi-ui}
-CONFD_TAG=${CONFD_TAG-v1.0.8}
+CONFD_TAG=${CONFD_TAG-v1.1.0}
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
