@@ -76,12 +76,24 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 		call(25, &g, sizeof g);
 	}
 
-	/* 14-21: cmd 23, instances 1-8 -- pre-T-CONT flow-control baseline. */
-	for (i = 0; i < 8; i++) {
-		struct omci_priq pq;
+	/* 14-21: cmd 23, instances 1-8 -- the eight downstream priority
+	 * queues, with the arguments omcid sends for them
+	 * (test/fixtures/omci-drv-golden-isp1.txt): dir DS, switch port and
+	 * priority 0, and the Weight of each class 277 row (WRR when it is 2
+	 * or more).
+	 */
+	{
+		static const uint16_t ds_weight[8] = { 1, 1, 0x1e, 0x18, 0x13, 0x0e, 0x09, 0x04 };
 
-		memset(&pq, 0, sizeof pq);
-		call(23, &pq, sizeof pq);
+		for (i = 0; i < 8; i++) {
+			struct omci_priq pq;
+
+			memset(&pq, 0, sizeof pq);
+			pq.weight = ds_weight[i];
+			pq.wrr = ds_weight[i] >= 2;
+			pq.dir = OMCI_GEMFLOW_DS;
+			call(23, &pq, sizeof pq);
+		}
 	}
 
 	/* 22: cmd 13 -- state poll. */
@@ -94,8 +106,13 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 	/* 28: cmd 13 -- state poll. */
 	call(13, NULL, 0);
 
-	/* 29-38: cmd 21 then cmd 23 (full program), 5 times -- one pair per T-CONT. */
+	/* 29-38: cmd 21 then cmd 23 (full program), 5 times -- one pair per
+	 * T-CONT. The queue is the only one of its T-CONT (ordinal 0), on the
+	 * T-CONT index cmd 21 handed back, with the Weight omcid sends for it
+	 * (the same golden).
+	 */
 	for (i = 0; i < 5; i++) {
+		static const uint16_t us_weight[5] = { 1, 0x1e, 0x18, 0x04, 0x04 };
 		struct omci_tcont t;
 		struct omci_priq pq;
 
@@ -110,6 +127,11 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 		call(21, &t, sizeof t);
 
 		memset(&pq, 0, sizeof pq);
+		pq.index = 0;
+		pq.owner = (uint16_t)t.index;
+		pq.weight = us_weight[i];
+		pq.wrr = us_weight[i] >= 2;
+		pq.dir = OMCI_GEMFLOW_US;
 		call(23, &pq, sizeof pq);
 	}
 

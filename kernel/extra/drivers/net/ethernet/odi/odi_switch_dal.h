@@ -70,13 +70,14 @@ void odi_sw_ponmac_transceiver_get(uint32_t gpio_lo, uint32_t gpio_hi);
 
 /* --- odi_switch_qos.c ----------------------------------------------------- */
 
-/* cmd 23 before any T-CONT exists: one write of PORT_QUEUE_MAP. */
+/* cmd 23, a downstream queue: one write of PORT_QUEUE_MAP. */
 void odi_sw_ponmac_queue_add(uint32_t th);
 
-/* cmd 23 once a T-CONT exists: seven PONQ_COUNT_MASK writes, the
- * scheduling slot of queue n among them (odi_sw_qos_sched_set()). The
- * order of +208 and +212/+213 depends on n (the first queue writes +208
- * first); use_213 picks +213 over +212.
+/* cmd 23, an upstream queue on T-CONT n: seven PONQ_COUNT_MASK writes,
+ * the scheduler word of T-CONT n among them (odi_sw_qos_sched_set()) and
+ * +207, the set of T-CONTs in use (bitmask_207). The order of +208 and
+ * +212/+213 depends on n (T-CONT 0 writes +208 first); use_213 picks +213
+ * over +212.
  */
 void odi_sw_ponmac_queue_add_ext(uint32_t n, uint32_t bitmask_207, uint32_t base_15,
 				  uint32_t sched_value, uint32_t val_208,
@@ -90,7 +91,7 @@ void odi_sw_ponmac_flow_queue_set(uint32_t slot, uint32_t gem_port_id, uint32_t 
 				   uint32_t word235_a, uint32_t word235_b,
 				   uint32_t val_2021, int use_21);
 
-/* The scheduling slot of queue n, PONQ_COUNT_MASK +190+n. */
+/* The scheduler word of T-CONT n, PONQ_COUNT_MASK +190+n. */
 void odi_sw_qos_sched_set(uint32_t n, uint32_t value);
 
 /* --- odi_switch_ds_gem.c -------------------------------------------------- */

@@ -29,12 +29,11 @@ struct odi_sw_tcont_slot {
 static struct odi_sw_tcont_slot odi_sw_tcont[ODI_SW_CMD_TCONT_MAX];
 static unsigned int odi_sw_tcont_n;
 
-/* cmd 23 has two register shapes (odi_switch_dal.h), and nothing in the
- * argument says which: the capture shows the first while no T-CONT
- * exists and the second after, so that is the test used. The second
- * shape takes a queue ordinal, counted here.
+/* cmd 23, upstream: the T-CONTs that have their queue, one bit per T-CONT
+ * index (the scheduler the queue belongs to). PONQ_COUNT_MASK +207 is this
+ * set plus the OMCC T-CONT (below), rewritten by every upstream queue.
  */
-static unsigned int odi_sw_priq_full_n;
+static uint32_t odi_sw_us_sched_used;
 
 /* cmd 25: omcid chooses the flow id (the one the port already holds in
  * that direction, else the lowest free one: uapi/omci_gemflow.h), and the
@@ -73,12 +72,10 @@ static const uint32_t odi_sw_cmd25_val2021[] = {
 };
 static const int odi_sw_cmd25_use21[] = { 0, 0, 0, 0, 1 };
 
-/* cmd 23 once a T-CONT exists, replayed: the PONQ_COUNT_MASK words of
- * the five captured queues, by queue ordinal.
+/* cmd 23, upstream, replayed: the PONQ_COUNT_MASK words of the five
+ * captured queues whose fields are not decoded, by T-CONT index (one queue
+ * per T-CONT in the capture, T-CONT n holding queue n).
  */
-static const uint32_t odi_sw_cmd23_bitmask_207[] = {
-	0x10001U, 0x10003U, 0x10007U, 0x1000fU, 0x1001fU,
-};
 static const uint32_t odi_sw_cmd23_base_15[] = { 0x6U, 0xeU, 0x16U, 0x1eU, 0x26U };
 static const uint32_t odi_sw_cmd23_val_208[] = { 0x0U, 0x2U, 0x6U, 0xeU, 0x1eU };
 static const uint32_t odi_sw_cmd23_bitmask_212_213[] = {
@@ -86,8 +83,20 @@ static const uint32_t odi_sw_cmd23_bitmask_212_213[] = {
 };
 static const int odi_sw_cmd23_use_213[] = { 0, 0, 0, 1, 1 };
 
+/* The T-CONT schedulers of PONQ_COUNT_MASK: +190+n is the word of T-CONT
+ * n, +207 the set of T-CONTs in use, one bit each. T-CONT 16 is the OMCC,
+ * on the default Alloc-ID (the ONU-ID, Alloc-ID CAM row 16): the module-load
+ * replay writes its word, +206 = 1, and +207 = 0x10000 before any OMCI, and
+ * the ISP1 capture adds one bit per T-CONT to that 0x10000 (0x10001 ..
+ * 0x1001f). So an upstream queue may use T-CONTs 0-15 only: n = 16 would
+ * overwrite the OMCC word and n = 17 would be +207 itself. That is also the
+ * 16 T-CONTs cmd 3 reports.
+ */
+#define ODI_SW_CMD23_US_TCONTS		16U
+#define ODI_SW_CMD23_OMCC_TCONT_BIT	(1U << 16)
+
 /* Replayed scalars. */
-#define ODI_SW_CMD23_PORT_QUEUE_MAP	0xd4U	/* cmd 23 before any T-CONT */
+#define ODI_SW_CMD23_PORT_QUEUE_MAP	0xd4U	/* cmd 23, a downstream queue */
 #define ODI_SW_CMD30_A408		0xde1U	/* cmd 30, the three UNI PHY words */
 #define ODI_SW_CMD30_A412		0x0U
 #define ODI_SW_CMD30_A400		0x3a00U
@@ -99,7 +108,7 @@ void odi_switch_cmd_reset_state(void)
 	unsigned int i;
 
 	odi_sw_tcont_n = 0;
-	odi_sw_priq_full_n = 0;
+	odi_sw_us_sched_used = 0;
 	odi_sw_transceiver_n = 0;
 	for (i = 0; i < ODI_SW_CMD_TCONT_MAX; i++)
 		odi_sw_tcont[i].used = 0;
@@ -177,33 +186,46 @@ static int cmd_flooding_port_mask(void *buf, uint32_t len)
 	return 0;
 }
 
-/* cmd 23 (odi_sw_priq_full_n above has which shape). */
+/* cmd 23: a priority queue (uapi/omci_gemflow.h, struct omci_priq), in one
+ * of two register shapes, and the argument says which. A downstream queue
+ * writes PORT_QUEUE_MAP; the ISP1 capture sends its eight before any T-CONT
+ * exists, all with the same word. An upstream queue writes the scheduler
+ * words of the T-CONT it names (owner, the index cmd 21 handed back): its
+ * slot is that T-CONT, not a count of calls, so provisioning the same MIB
+ * again -- a MIB reset, a respawned omcid, a re-registration -- writes the
+ * same words to the same places. Only the captured shape is programmed,
+ * one queue per T-CONT on T-CONTs 0-15; anything else is refused rather
+ * than written into the words of another T-CONT, the OMCC among them.
+ */
 static int cmd_pri_queue(void *buf, uint32_t len)
 {
-	(void)buf; (void)len;
+	const struct omci_priq *q = (const struct omci_priq *)buf;
+	unsigned int t, ref;
 
-	if (odi_sw_tcont_n == 0) {
+	if (!q || len < sizeof(*q))
+		return -1;
+
+	if (q->dir == OMCI_GEMFLOW_DS) {
 		odi_sw_ponmac_queue_add(ODI_SW_CMD23_PORT_QUEUE_MAP);
 		return 0;
 	}
+	if (q->dir != OMCI_GEMFLOW_US)
+		return -1;
 
-	{
-		unsigned int n = odi_sw_priq_full_n;
-
-		if (n >= ODI_SW_CMD_PRIQ_MAX)
-			return ODI_SW_EOPNOTSUPP;
-		if (n >= 5) {
-			/* Past the five captured queues: repeat the last. */
-			n = 4;
-		}
-		/* The scheduling slot of queue n gets 1 << n. */
-		odi_sw_ponmac_queue_add_ext(odi_sw_priq_full_n, odi_sw_cmd23_bitmask_207[n],
-					     odi_sw_cmd23_base_15[n],
-					     (uint32_t)1U << odi_sw_priq_full_n,
-					     odi_sw_cmd23_val_208[n], odi_sw_cmd23_bitmask_212_213[n],
-					     odi_sw_cmd23_use_213[n]);
+	t = q->owner;
+	if (t >= ODI_SW_CMD23_US_TCONTS || q->index != 0) {
+		ODI_SW_CMD_LOG("cmd 23: upstream queue %u of T-CONT %u not supported "
+			       "(one queue per T-CONT, T-CONTs 0-%u)\n", (unsigned int)q->index,
+			       t, ODI_SW_CMD23_US_TCONTS - 1U);
+		return ODI_SW_EOPNOTSUPP;
 	}
-	odi_sw_priq_full_n++;
+	/* Past the five captured T-CONTs, the undecoded words of the last. */
+	ref = t < 5U ? t : 4U;
+	odi_sw_us_sched_used |= 1U << t;
+	odi_sw_ponmac_queue_add_ext(t, ODI_SW_CMD23_OMCC_TCONT_BIT | odi_sw_us_sched_used,
+				     odi_sw_cmd23_base_15[ref], 1U << t,
+				     odi_sw_cmd23_val_208[ref], odi_sw_cmd23_bitmask_212_213[ref],
+				     odi_sw_cmd23_use_213[ref]);
 	return 0;
 }
 
