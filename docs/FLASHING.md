@@ -170,8 +170,13 @@ all.
         cat /proc/odi_ramlog_prev_raw > p  # 8192 raw bytes, page A then B
 
     The first line is this boot (`boot=N slot=S`), the second the previous
-    one (`boot=N-1 slot=... build=... crumb=...`): check that slot and
-    build id are the trial's before reading on. It reaches one boot back
+    one (`boot=N-1 slot=... build=... crumb=... reason=...`): check that
+    slot and build id are the trial's before reading on. `reason=` is why
+    it reset, as the kernel recorded it: `wdt_client:<name>`, `wdt_mem`,
+    `wdt_userland`, `reboot`, `halt`, `poweroff`, `panic`, `oops`, `power`
+    (DRAM lost: a power cycle) or `unknown` (the pages survived, nothing
+    recorded one: a hang the hardware watchdog caught). `docs/HACKING.md`,
+    "Reading a boot you could not see", has the full table. It reaches one boot back
     only, and a boot of the stock image in between writes nothing, so the
     boot counter says which boot of ours it was.
 - **Power-cycle the stick** if nothing else answers after a few minutes —

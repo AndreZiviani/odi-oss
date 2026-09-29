@@ -8,7 +8,8 @@
 [ -x /sbin/syslogd ] || exec /etc/scripts/respawn-off.sh
 # The store read goes through flash, the one accessor: SYSLOG_SERVER and
 # NTP_SERVER are odi-only keys that flash keeps in /etc/config/odi.conf, not in
-# the stock XML (see flash). `flash get` prints KEY=value; no value, no output.
+# the stock XML (see flash). `flash get` prints KEY=value, KEY= when unset;
+# the grep turns an empty value into no output.
 config_get() {
 	/etc/scripts/flash get "$1" 2>/dev/null | sed 's/^[^=]*=//' | grep .
 }

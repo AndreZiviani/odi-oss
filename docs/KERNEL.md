@@ -552,8 +552,8 @@ The decoded file starts with two lines, then the page text the same way
 `tools/memprobe/ramlog-read.sh` prints it:
 
     this boot: boot=8 slot=0
-    previous boot: boot=7 slot=1 build=odi-oss-260924-618k1 crumb=TICK/51234
-    ---- page A: first 4016 bytes ----
+    previous boot: boot=7 slot=1 build=odi-oss-260924-618k1 crumb=TICK/51234 reason=reboot
+    ---- page A: first 3984 bytes ----
     ...
     ---- page B: last 4080 of 51234 bytes ----
     ...
@@ -573,13 +573,45 @@ right after the page headers (`odi_ramlog.h` has the layout):
 | `+0` | magic `RLGM` |
 | `+4` | boot counter: the previous value + 1 when the magic was valid, else 1. It counts boots of this image since the last power cycle |
 | `+8` | slot, 0 or 1, from the last `root=` on the command line (`31:5` is slot 0, `31:7` slot 1); `0xffffffff` when neither |
-| `+12` | block format, 1 |
+| `+12` | block format: 2 (1 before the reset reason block, below) |
 | `+16` | build id, 40 bytes NUL padded: `ODI_BUILD_ID` from `kernel/build.sh`, which is the image `VERSION` when one is set for the kernel build, else the `odi-oss-<date>-<rev>` default `image/build.sh` uses |
 | `+56`, `+60` | the crumb stash (below) |
 
-Page A text now stops at 4016 bytes, so the block is never overwritten.
-Readers that take `min(count, 4080)` bytes still read exactly the text;
-a page written by an older image (text to 4080 bytes) has no `RLGM` magic.
+Page A text now stops at 3984 bytes, so neither block is ever
+overwritten. Readers that take `min(count, 4080)` bytes still read exactly
+the text; a page written by an older image (text to 4080 bytes) has no
+`RLGM` magic, and one written by a format 1 image (text to 4016 bytes, no
+reason block) has format 1.
+
+### The reset reason block
+
+The 32 bytes before the metadata block (`+4000`) record why the boot
+ended, so the next one does not have to guess from the free text at the
+end of page B. The metadata block keeps its offset, so its crumb stash is
+still where `kernel_entry_setup` writes it and a format 1 kernel still
+counts boots across ours.
+
+| offset | field |
+|---|---|
+| `+0` | magic `RLGR` |
+| `+4` | reason code, `ODI_RAMLOG_REASON_*` in `odi_ramlog.h` |
+| `+8` | detail, 16 bytes NUL padded: the client name for a client miss |
+| `+24` | reserved, zero |
+
+`odi_ramlog_meta_stamp()` writes it empty at boot. From then on the last
+writer wins: `odi_wdt.c` records the rule that fired (`wdt_client`,
+`wdt_mem`, `wdt_userland`) just before it forces the reset, and
+`odi_ramlog.c` registers, at `early_initcall`, a reboot notifier
+(`reboot`, `halt`, `poweroff`; the reboot syscall path, which an emergency
+restart skips), a panic notifier at the highest priority (`panic`) and a
+die notifier (`oops`, kernel-mode only: `do_be()` in
+`arch/mips/kernel/traps.c` sends every bus error, a user one too, down the
+same chain). The next boot renders it as `reason=` at the end of the
+`previous boot:` line: the recorded name, `power` when neither page magic
+survived, and `unknown` when the pages survived but nothing wrote a
+reason. The 6.18 kernel is `ARCH=mips`; none of `kernel/618/patches`
+touches `traps.c`, `kernel/panic.c` or `kernel/reboot.c`, so these are the
+mainline chains.
 Build the kernel with the image version to have them match:
 `VERSION=odi-oss-260924-618k1 kernel/build.sh`.
 

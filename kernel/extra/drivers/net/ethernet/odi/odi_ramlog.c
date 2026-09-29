@@ -7,7 +7,8 @@
  *    memory format primitives (odi_ramlog_rd32()/wr32(), odi_ramlog_page_
  *    reset(), odi_ramlog_boot_stamp(), odi_ramlog_write() and its two
  *    static helpers), and the previous-boot half (odi_ramlog_parse_slot(),
- *    odi_ramlog_meta_stamp(), odi_ramlog_save_prev(), odi_ramlog_render()).
+ *    odi_ramlog_meta_stamp(), odi_ramlog_reason_set(), odi_ramlog_save_prev(),
+ *    odi_ramlog_render()).
  *    test/odi_ramlog_test.c exercises this half
  *    directly, unity-build style, against a pair of on-stack byte arrays
  *    standing in for the two DRAM pages.
@@ -23,7 +24,8 @@
  *    printed before this call runs, so nothing between the first printk
  *    and this initcall is lost; CON_ENABLED keeps it active regardless of
  *    what the "console=" cmdline names (this driver has no tty of its
- *    own for anything to select).
+ *    own for anything to select). Also the reboot, panic and die
+ *    notifiers that record a reset reason (odi_ramlog.h).
  */
 #include "odi_ramlog.h"
 
@@ -37,6 +39,11 @@
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/notifier.h>
+#include <linux/reboot.h>
+#include <linux/panic_notifier.h>
+#include <linux/kdebug.h>
+#include <linux/ptrace.h>
 #include <generated/utsrelease.h>
 #include <asm/bootinfo.h>
 #else
@@ -191,11 +198,83 @@ uint32_t odi_ramlog_meta_stamp(unsigned char ODI_RAMLOG_MEM *page_a, uint32_t sl
 		if (c)
 			build_id++;
 	}
+	/* No reason yet: whatever reset this boot records one later. */
+	odi_ramlog_wr32(page_a, ODI_RAMLOG_REASON_OFF + ODI_RAMLOG_R_CODE, ODI_RAMLOG_REASON_NONE);
+	for (i = ODI_RAMLOG_R_DETAIL; i < ODI_RAMLOG_REASON_SIZE; i++)
+		odi_ramlog_wb(page_a, ODI_RAMLOG_REASON_OFF + i, 0);
+	odi_ramlog_wr32(page_a, ODI_RAMLOG_REASON_OFF + ODI_RAMLOG_R_MAGIC, ODI_RAMLOG_MAGIC_R);
 	/* The magic last: a reset in the middle leaves no half-written block
 	 * that passes for a valid one.
 	 */
 	odi_ramlog_wr32(m, ODI_RAMLOG_M_MAGIC, ODI_RAMLOG_MAGIC_M);
 	return boot;
+}
+
+void odi_ramlog_reason_set(unsigned char ODI_RAMLOG_MEM *page_a, uint32_t code,
+			   const char *detail)
+{
+	unsigned char ODI_RAMLOG_MEM *m = page_a + ODI_RAMLOG_META_OFF;
+	unsigned char ODI_RAMLOG_MEM *r = page_a + ODI_RAMLOG_REASON_OFF;
+	unsigned int i;
+
+	if (odi_ramlog_rd32(m, ODI_RAMLOG_M_MAGIC) != ODI_RAMLOG_MAGIC_M ||
+	    odi_ramlog_rd32(m, ODI_RAMLOG_M_FMT) < 2 ||
+	    odi_ramlog_rd32(r, ODI_RAMLOG_R_MAGIC) != ODI_RAMLOG_MAGIC_R)
+		return;
+	for (i = 0; i < ODI_RAMLOG_DETAIL_LEN; i++) {
+		unsigned char c = (detail && i < ODI_RAMLOG_DETAIL_LEN - 1) ? (unsigned char)*detail : 0;
+
+		odi_ramlog_wb(r, ODI_RAMLOG_R_DETAIL + i, c);
+		if (c)
+			detail++;
+	}
+	odi_ramlog_wr32(r, ODI_RAMLOG_R_CODE, code);
+}
+
+const char *odi_ramlog_reason_name(uint32_t code)
+{
+	switch (code) {
+	case ODI_RAMLOG_REASON_WDT_CLIENT:	return "wdt_client";
+	case ODI_RAMLOG_REASON_WDT_MEM:		return "wdt_mem";
+	case ODI_RAMLOG_REASON_WDT_USERLAND:	return "wdt_userland";
+	case ODI_RAMLOG_REASON_REBOOT:		return "reboot";
+	case ODI_RAMLOG_REASON_HALT:		return "halt";
+	case ODI_RAMLOG_REASON_POWEROFF:	return "poweroff";
+	case ODI_RAMLOG_REASON_PANIC:		return "panic";
+	case ODI_RAMLOG_REASON_OOPS:		return "oops";
+	default:				return "unknown";
+	}
+}
+
+/* The reason of a saved page A, as `reason=` renders it: the name, and for
+ * a client miss ":" and the client, each byte outside [A-Za-z0-9._-] shown
+ * as '_' so the value stays one token for a line parser. "unknown" when
+ * the block is missing (a format 1 image) or holds no reason.
+ */
+static void odi_ramlog_reason_str(const unsigned char *a, int fmt2, char *out, unsigned int len)
+{
+	const unsigned char *r = a + ODI_RAMLOG_REASON_OFF;
+	uint32_t code = ODI_RAMLOG_REASON_NONE;
+	unsigned int n, i;
+
+	if (fmt2 && odi_ramlog_rd32(r, ODI_RAMLOG_R_MAGIC) == ODI_RAMLOG_MAGIC_R)
+		code = odi_ramlog_rd32(r, ODI_RAMLOG_R_CODE);
+	snprintf(out, len, "%s", odi_ramlog_reason_name(code));
+	if (code != ODI_RAMLOG_REASON_WDT_CLIENT)
+		return;
+	n = (unsigned int)strlen(out);
+	if (n + 1 < len)
+		out[n++] = ':';
+	for (i = 0; i < ODI_RAMLOG_DETAIL_LEN - 1 && r[ODI_RAMLOG_R_DETAIL + i] && n + 1 < len; i++) {
+		unsigned char c = r[ODI_RAMLOG_R_DETAIL + i];
+		int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			 (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+
+		out[n++] = ok ? (char)c : '_';
+	}
+	if (i == 0 && n + 1 < len)
+		out[n++] = '?';
+	out[n] = 0;
 }
 
 void odi_ramlog_save_prev(unsigned char *prev, const unsigned char ODI_RAMLOG_MEM *page_a,
@@ -256,14 +335,16 @@ void odi_ramlog_render(const unsigned char *prev, uint32_t now_boot, uint32_t no
 	int a_ok = odi_ramlog_rd32(a, 0) == ODI_RAMLOG_MAGIC_A;
 	int b_ok = odi_ramlog_rd32(b, 0) == ODI_RAMLOG_MAGIC_B;
 	int m_ok = a_ok && odi_ramlog_rd32(m, ODI_RAMLOG_M_MAGIC) == ODI_RAMLOG_MAGIC_M;
-	char line[160], tag[12], slot[12], build[ODI_RAMLOG_BUILD_LEN];
+	int fmt2 = m_ok && odi_ramlog_rd32(m, ODI_RAMLOG_M_FMT) >= 2;
+	char line[200], tag[12], slot[12], build[ODI_RAMLOG_BUILD_LEN];
+	char reason[12 + ODI_RAMLOG_DETAIL_LEN];
 	unsigned int i;
 
 	odi_ramlog_slot_str(now_slot, slot, sizeof(slot));
 	snprintf(line, sizeof(line), "this boot: boot=%u slot=%s\n", (unsigned int)now_boot, slot);
 	if (!a_ok && !b_ok) {
 		snprintf(line + strlen(line), sizeof(line) - strlen(line),
-			 "previous boot: none (page A magic 0x%08x, page B magic 0x%08x)\n",
+			 "previous boot: none (page A magic 0x%08x, page B magic 0x%08x) reason=power\n",
 			 (unsigned int)odi_ramlog_rd32(a, 0), (unsigned int)odi_ramlog_rd32(b, 0));
 		odi_ramlog_emit_str(emit, ctx, line);
 		return;
@@ -271,6 +352,7 @@ void odi_ramlog_render(const unsigned char *prev, uint32_t now_boot, uint32_t no
 	odi_ramlog_emit_str(emit, ctx, line);
 
 	odi_ramlog_tag_str(b + 8, tag, sizeof(tag));
+	odi_ramlog_reason_str(a, fmt2, reason, sizeof(reason));
 	if (m_ok) {
 		for (i = 0; i < ODI_RAMLOG_BUILD_LEN - 1; i++) {
 			unsigned char c = m[ODI_RAMLOG_M_BUILD + i];
@@ -282,18 +364,19 @@ void odi_ramlog_render(const unsigned char *prev, uint32_t now_boot, uint32_t no
 		build[i] = 0;
 		odi_ramlog_slot_str(odi_ramlog_rd32(m, ODI_RAMLOG_M_SLOT), slot, sizeof(slot));
 		snprintf(line, sizeof(line),
-			 "previous boot: boot=%u slot=%s build=%s crumb=%s/%u\n",
+			 "previous boot: boot=%u slot=%s build=%s crumb=%s/%u reason=%s\n",
 			 (unsigned int)odi_ramlog_rd32(m, ODI_RAMLOG_M_BOOT), slot,
-			 build[0] ? build : "?", tag, (unsigned int)odi_ramlog_rd32(b, 12));
+			 build[0] ? build : "?", tag, (unsigned int)odi_ramlog_rd32(b, 12), reason);
 	} else {
 		snprintf(line, sizeof(line),
-			 "previous boot: no metadata block (an older image) crumb=%s/%u\n",
-			 tag, (unsigned int)odi_ramlog_rd32(b, 12));
+			 "previous boot: no metadata block (an older image) crumb=%s/%u reason=%s\n",
+			 tag, (unsigned int)odi_ramlog_rd32(b, 12), reason);
 	}
 	odi_ramlog_emit_str(emit, ctx, line);
 
 	if (a_ok) {
-		unsigned int cap = m_ok ? ODI_RAMLOG_A_DATA : ODI_RAMLOG_DATA;
+		unsigned int cap = fmt2 ? ODI_RAMLOG_A_DATA :
+				   m_ok ? ODI_RAMLOG_A_DATA_FMT1 : ODI_RAMLOG_DATA;
 		unsigned int len = na < cap ? na : cap;
 
 		snprintf(line, sizeof(line), "---- page A: first %u bytes ----\n", len);
@@ -459,6 +542,74 @@ static int __init odi_ramlog_console_init(void)
 	return 0;
 }
 console_initcall(odi_ramlog_console_init);
+
+/* ---- Reset reason: odi_ramlog_note_reason() and the notifiers ---------- */
+
+void odi_ramlog_note_reason(uint32_t code, const char *detail)
+{
+	odi_ramlog_reason_set(ODI_RAMLOG_PAGE_A, code, detail);
+}
+
+/* The reboot syscall path: kernel_restart(), kernel_halt() and
+ * kernel_power_off() run this chain before device shutdown. An emergency
+ * restart (panic, sysrq) skips it, so a panic keeps its own reason.
+ */
+static int odi_ramlog_reboot_notify(struct notifier_block *nb, unsigned long action, void *data)
+{
+	if (action == SYS_RESTART)
+		odi_ramlog_note_reason(ODI_RAMLOG_REASON_REBOOT, NULL);
+	else if (action == SYS_HALT)
+		odi_ramlog_note_reason(ODI_RAMLOG_REASON_HALT, NULL);
+	else if (action == SYS_POWER_OFF)
+		odi_ramlog_note_reason(ODI_RAMLOG_REASON_POWEROFF, NULL);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block odi_ramlog_reboot_nb = {
+	.notifier_call	= odi_ramlog_reboot_notify,
+};
+
+static int odi_ramlog_panic_notify(struct notifier_block *nb, unsigned long action, void *data)
+{
+	odi_ramlog_note_reason(ODI_RAMLOG_REASON_PANIC, NULL);
+	return NOTIFY_DONE;
+}
+
+/* INT_MAX: first on the chain, before any notifier that could itself hang. */
+static struct notifier_block odi_ramlog_panic_nb = {
+	.notifier_call	= odi_ramlog_panic_notify,
+	.priority	= INT_MAX,
+};
+
+/* arch/mips/kernel/traps.c die() calls notify_die(DIE_OOPS) for a kernel
+ * oops, and do_be() for every bus error, a user-mode one included, before
+ * it decides; only kernel-mode regs are an oops. If the oops then panics,
+ * the panic notifier overwrites this.
+ */
+static int odi_ramlog_die_notify(struct notifier_block *nb, unsigned long action, void *data)
+{
+	struct die_args *args = data;
+
+	if (action == DIE_OOPS && !(args && args->regs && user_mode(args->regs)))
+		odi_ramlog_note_reason(ODI_RAMLOG_REASON_OOPS, NULL);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block odi_ramlog_die_nb = {
+	.notifier_call	= odi_ramlog_die_notify,
+};
+
+/* early_initcall: before every driver initcall, so a panic or oops in a
+ * driver probe is recorded too. One that comes earlier stays "unknown".
+ */
+static int __init odi_ramlog_notifiers_init(void)
+{
+	register_reboot_notifier(&odi_ramlog_reboot_nb);
+	atomic_notifier_chain_register(&panic_notifier_list, &odi_ramlog_panic_nb);
+	register_die_notifier(&odi_ramlog_die_nb);
+	return 0;
+}
+early_initcall(odi_ramlog_notifiers_init);
 
 /* ---- /proc/odi_ramlog_prev, /proc/odi_ramlog_prev_raw ------------------- */
 

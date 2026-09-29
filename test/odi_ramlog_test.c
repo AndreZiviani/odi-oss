@@ -275,10 +275,12 @@ static void test_boot_stamp_starts_fresh_even_with_valid_prior_content(void)
 
 static void test_layout_constants_agree(void)
 {
-	CHECK(ODI_RAMLOG_META_OFF == 4032 && ODI_RAMLOG_A_DATA == 4016,
-	      "metadata block is the last 64 bytes of page A, text capped at 4016");
-	CHECK(ODI_RAMLOG_HDR + ODI_RAMLOG_A_DATA == ODI_RAMLOG_META_OFF,
-	      "page A text ends exactly where the metadata block starts");
+	CHECK(ODI_RAMLOG_META_OFF == 4032 && ODI_RAMLOG_REASON_OFF == 4000 && ODI_RAMLOG_A_DATA == 3984,
+	      "metadata block is the last 64 bytes of page A, the reason block the 32 before, text capped at 3984");
+	CHECK(ODI_RAMLOG_HDR + ODI_RAMLOG_A_DATA == ODI_RAMLOG_REASON_OFF &&
+	      ODI_RAMLOG_REASON_OFF + ODI_RAMLOG_REASON_SIZE == ODI_RAMLOG_META_OFF,
+	      "page A text ends where the reason block starts, which ends where the metadata block starts");
+	CHECK(ODI_RAMLOG_A_DATA_FMT1 == 4016, "a format 1 page A ran text to 4016 bytes");
 	CHECK(ODI_CRUMB_STASH == ODI_RAMLOG_PAGE_A_KSEG1 + ODI_RAMLOG_META_OFF + ODI_RAMLOG_M_CRUMB_TAG,
 	      "the asm crumb stash address is the metadata crumb tag word");
 	CHECK(ODI_CRUMB_PAGE_B == ODI_RAMLOG_PAGE_B_KSEG1, "crumbs and ramlog agree on page B");
@@ -317,6 +319,10 @@ static void test_meta_stamp_counts_boots(void)
 	      "build id stored with its NUL");
 	CHECK(m[ODI_RAMLOG_M_BUILD + ODI_RAMLOG_BUILD_LEN - 1] == 0, "build id NUL padded");
 	CHECK(m[ODI_RAMLOG_M_CRUMB_TAG] == 0x55, "the stash words are not the driver's to write");
+	CHECK(odi_ramlog_rd32(page_a, ODI_RAMLOG_REASON_OFF + ODI_RAMLOG_R_MAGIC) == ODI_RAMLOG_MAGIC_R &&
+	      odi_ramlog_rd32(page_a, ODI_RAMLOG_REASON_OFF + ODI_RAMLOG_R_CODE) == ODI_RAMLOG_REASON_NONE &&
+	      page_a[ODI_RAMLOG_REASON_OFF + ODI_RAMLOG_R_DETAIL] == 0,
+	      "the stamp starts the reason block empty");
 
 	/* A whole boot's worth of text does not reach the block. */
 	memset(big, 'x', sizeof(big));
@@ -403,13 +409,13 @@ static void test_save_prev_and_render_previous_boot(void)
 
 	odi_ramlog_render(prev, 2, 0, render_emit, &r);
 	CHECK(strstr(r.s, "this boot: boot=2 slot=0\n") == r.s, "first line: the running boot");
-	CHECK(strstr(r.s, "previous boot: boot=1 slot=1 build=odi-oss-260924-618k1 crumb=TICK/4242\n") != NULL,
-	      "second line: the previous boot's metadata and last crumb");
+	CHECK(strstr(r.s, "previous boot: boot=1 slot=1 build=odi-oss-260924-618k1 crumb=TICK/4242 reason=unknown\n") != NULL,
+	      "second line: the previous boot's metadata, last crumb, and no recorded reason");
 	{
-		const char *ha = strstr(r.s, "---- page A: first 4016 bytes ----\n");
+		const char *ha = strstr(r.s, "---- page A: first 3984 bytes ----\n");
 		const char *hb = strstr(r.s, "---- page B: last 4080 of ");
 
-		CHECK(ha && memcmp(ha + strlen("---- page A: first 4016 bytes ----\n"), expect,
+		CHECK(ha && memcmp(ha + strlen("---- page A: first 3984 bytes ----\n"), expect,
 				   ODI_RAMLOG_A_DATA) == 0,
 		      "page A section is the head of the previous log");
 		CHECK(hb != NULL, "page B section present");
@@ -432,8 +438,8 @@ static void test_render_no_previous_and_older_image(void)
 	memset(prev, 0x55, sizeof(prev));
 	odi_ramlog_render(prev, 1, ODI_RAMLOG_SLOT_UNKNOWN, render_emit, &r);
 	CHECK(strstr(r.s, "this boot: boot=1 slot=?\n") == r.s, "unknown slot prints as ?");
-	CHECK(strstr(r.s, "previous boot: none (page A magic 0x55555555") != NULL,
-	      "cold start: no previous boot, and why");
+	CHECK(strstr(r.s, "previous boot: none (page A magic 0x55555555, page B magic 0x55555555) reason=power\n") != NULL,
+	      "cold start: no previous boot, why, and the reason a power cycle");
 	CHECK(strstr(r.s, "---- page") == NULL, "no page sections without a valid page");
 
 	/* An older image: text up to 4080 bytes in page A, no metadata block,
@@ -445,12 +451,112 @@ static void test_render_no_previous_and_older_image(void)
 	odi_ramlog_wr32(b, 4, 5);
 	r.len = 0;
 	odi_ramlog_render(prev, 3, 1, render_emit, &r);
-	CHECK(strstr(r.s, "previous boot: no metadata block (an older image) crumb=0x00000000/0\n") != NULL,
-	      "older image: said so, crumb in hex");
+	CHECK(strstr(r.s, "previous boot: no metadata block (an older image) crumb=0x00000000/0 reason=unknown\n") != NULL,
+	      "older image: said so, crumb in hex, reason unknown");
 	CHECK(strstr(r.s, "---- page A: first 4080 bytes ----\n") != NULL,
 	      "older image: page A text runs to 4080 bytes");
 	CHECK(strstr(r.s, "---- page B: last 5 of 5 bytes ----\nyyyyy\n") != NULL,
 	      "a short unwrapped ring, newline added after it");
+}
+
+/* Boot 1 of this image with the reason block, then boot 2 renders it. */
+static const char *render_after(uint32_t code, const char *detail, int fmt)
+{
+	static unsigned char page_a[ODI_RAMLOG_PAGE_SIZE], page_b[ODI_RAMLOG_PAGE_SIZE];
+	static unsigned char prev[ODI_RAMLOG_PREV_SIZE];
+	static struct render_buf r;
+	const char *line;
+
+	memset((void *)page_a, 0x55, sizeof(page_a));
+	memset((void *)page_b, 0x55, sizeof(page_b));
+	odi_ramlog_boot_stamp(page_a, page_b);
+	odi_ramlog_meta_stamp(page_a, 1, "v1.0.9");
+	odi_ramlog_write(page_a, page_b, "hello\n", 6);
+	if (fmt == 1)
+		odi_ramlog_wr32(page_a, ODI_RAMLOG_META_OFF + ODI_RAMLOG_M_FMT, 1);
+	if (code != ODI_RAMLOG_REASON_NONE)
+		odi_ramlog_reason_set(page_a, code, detail);
+	odi_ramlog_save_prev(prev, page_a, page_b, 0);
+	r.len = 0;
+	r.s[0] = 0;
+	odi_ramlog_render(prev, 2, 1, render_emit, &r);
+	line = strstr(r.s, "previous boot: ");
+	return line ? line : "";
+}
+
+static int line_is(const char *got, const char *want)
+{
+	size_t n = strlen(want);
+
+	return strncmp(got, want, n) == 0 && got[n] == '\n';
+}
+
+static void test_reason_recorded_and_rendered(void)
+{
+	static const struct { uint32_t code; const char *detail, *want; } cases[] = {
+		{ ODI_RAMLOG_REASON_WDT_CLIENT, "omcid", "wdt_client:omcid" },
+		{ ODI_RAMLOG_REASON_WDT_MEM, NULL, "wdt_mem" },
+		{ ODI_RAMLOG_REASON_WDT_USERLAND, NULL, "wdt_userland" },
+		{ ODI_RAMLOG_REASON_REBOOT, NULL, "reboot" },
+		{ ODI_RAMLOG_REASON_HALT, NULL, "halt" },
+		{ ODI_RAMLOG_REASON_POWEROFF, NULL, "poweroff" },
+		{ ODI_RAMLOG_REASON_PANIC, NULL, "panic" },
+		{ ODI_RAMLOG_REASON_OOPS, NULL, "oops" },
+		{ 99, NULL, "unknown" },
+		{ ODI_RAMLOG_REASON_WDT_CLIENT, "bad name=x", "wdt_client:bad_name_x" },
+		{ ODI_RAMLOG_REASON_WDT_CLIENT, "", "wdt_client:?" },
+		{ ODI_RAMLOG_REASON_WDT_CLIENT, "0123456789abcdefXYZ", "wdt_client:0123456789abcde" },
+	};
+	char want[160];
+	unsigned int i;
+
+	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		snprintf(want, sizeof(want),
+			 "previous boot: boot=1 slot=1 build=v1.0.9 crumb=0x00000000/0 reason=%s",
+			 cases[i].want);
+		CHECK(line_is(render_after(cases[i].code, cases[i].detail, 2), want), cases[i].want);
+	}
+	CHECK(line_is(render_after(ODI_RAMLOG_REASON_NONE, NULL, 2),
+		      "previous boot: boot=1 slot=1 build=v1.0.9 crumb=0x00000000/0 reason=unknown"),
+	      "nothing recorded: unknown");
+	CHECK(line_is(render_after(ODI_RAMLOG_REASON_PANIC, NULL, 1),
+		      "previous boot: boot=1 slot=1 build=v1.0.9 crumb=0x00000000/0 reason=unknown"),
+	      "a format 1 block has no reason, whatever bytes sit where format 2 keeps one");
+}
+
+static void test_reason_last_writer_wins_and_needs_a_stamp(void)
+{
+	static unsigned char page_a[ODI_RAMLOG_PAGE_SIZE];
+	unsigned char *r = page_a + ODI_RAMLOG_REASON_OFF;
+
+	memset((void *)page_a, 0x55, sizeof(page_a));
+	odi_ramlog_reason_set(page_a, ODI_RAMLOG_REASON_PANIC, NULL);
+	CHECK(odi_ramlog_rd32(r, ODI_RAMLOG_R_CODE) == 0x55555555U,
+	      "no metadata block yet: nothing is written");
+
+	odi_ramlog_meta_stamp(page_a, 0, "b");
+	odi_ramlog_reason_set(page_a, ODI_RAMLOG_REASON_OOPS, NULL);
+	odi_ramlog_reason_set(page_a, ODI_RAMLOG_REASON_WDT_CLIENT, "omcid");
+	odi_ramlog_reason_set(page_a, ODI_RAMLOG_REASON_PANIC, NULL);
+	CHECK(odi_ramlog_rd32(r, ODI_RAMLOG_R_CODE) == ODI_RAMLOG_REASON_PANIC && r[ODI_RAMLOG_R_DETAIL] == 0,
+	      "the last reason wins and clears an earlier detail");
+
+	odi_ramlog_reason_set(page_a, ODI_RAMLOG_REASON_WDT_CLIENT, "omcid");
+	CHECK(odi_ramlog_meta_stamp(page_a, 0, "b") == 2, "the next boot counts on");
+	CHECK(odi_ramlog_rd32(r, ODI_RAMLOG_R_CODE) == ODI_RAMLOG_REASON_NONE && r[ODI_RAMLOG_R_DETAIL] == 0,
+	      "the next boot own stamp clears the reason");
+
+	{
+		char big[ODI_RAMLOG_DATA + 10];
+		unsigned char page_b[ODI_RAMLOG_PAGE_SIZE];
+
+		odi_ramlog_reason_set(page_a, ODI_RAMLOG_REASON_REBOOT, NULL);
+		memset(big, 'x', sizeof(big));
+		odi_ramlog_write(page_a, page_b, big, sizeof(big));
+		CHECK(odi_ramlog_rd32(r, ODI_RAMLOG_R_MAGIC) == ODI_RAMLOG_MAGIC_R &&
+		      odi_ramlog_rd32(r, ODI_RAMLOG_R_CODE) == ODI_RAMLOG_REASON_REBOOT,
+		      "a full page of text does not reach the reason block");
+	}
 }
 
 int main(void)
@@ -473,6 +579,8 @@ int main(void)
 	test_meta_stamp_counts_boots();
 	test_save_prev_and_render_previous_boot();
 	test_render_no_previous_and_older_image();
+	test_reason_recorded_and_rendered();
+	test_reason_last_writer_wins_and_needs_a_stamp();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

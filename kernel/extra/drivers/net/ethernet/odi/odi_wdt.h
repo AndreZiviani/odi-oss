@@ -228,4 +228,15 @@ int odi_wdt_client_ping(struct odi_wdt_deadline_state *st, const char *name,
 unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned int uptime_s,
 				    unsigned long free_kb);
 
+/* odi_wdt_reset_reason() -- the ODI_RAMLOG_REASON_* code (odi_ramlog.h)
+ * for the actions one odi_wdt_deadline_tick() returned, recorded in the
+ * ramlog before the reset: ODI_RAMLOG_REASON_NONE without FORCE_RESET,
+ * else WDT_MEM, WDT_CLIENT or WDT_USERLAND, in that order when several
+ * fired in the same tick -- memory first, as a starved box also misses
+ * pings. For WDT_CLIENT, *client is set to the first client in slot order
+ * that missed its deadline (odi_wdt.c logs every one of them).
+ */
+uint32_t odi_wdt_reset_reason(const struct odi_wdt_deadline_state *st, unsigned int actions,
+			       unsigned int uptime_s, const char **client);
+
 #endif /* ODI_WDT_H */

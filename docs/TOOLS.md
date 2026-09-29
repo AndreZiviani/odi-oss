@@ -192,10 +192,19 @@ The separate odi-sfp-exporter project, fetched as a release. `metricsd [port]`,
 default 9100, any path answers. One scrape runs one `diag` batch (optics,
 ONU state, alarms, per-port MIB counters) and one `omcicli dump srvflow`,
 and reads `/proc/meminfo`, `/proc/net/dev`, `/proc/loadavg`,
-`/proc/uptime` and `/etc/odi-build`. `gpon_omci_services` -- how many
+`/proc/uptime`, `/etc/odi-build` and, once per boot,
+`/proc/odi_ramlog_prev`. `gpon_omci_services` -- how many
 services the OLT provisioned -- is what tells "reachable but unconfigured"
 apart from a working ONU; `gpon_image_info` says which image is running.
 Its `path` label is `argv[0]`, so a hand-started copy is visible as such.
+`gpon_boot_count` is this boot's ramlog boot counter (boots of this image
+since the last power cycle), and `gpon_last_reset_reason{reason="..."} 1`
+is why the previous boot ended, the `reason=` of `/proc/odi_ramlog_prev`
+(`docs/HACKING.md`, "Reading a boot you could not see"): `wdt_client`
+with a `client` label (e.g. `client="omcid"`), `wdt_mem`, `wdt_userland`,
+`reboot`, `halt`, `poweroff`, `panic`, `oops`, `power` or `unknown`. An
+alert on `gpon_last_reset_reason{reason=~"wdt_.*"}` fires after a watchdog
+reset. Both need an exporter newer than v1.1.2.
 
 ### `dropbear` -- ssh and scp
 
@@ -536,7 +545,7 @@ drivers behind them.
 | `/proc/odi_wdt/register` | -- | `"<name> <deadline_s>"`, e.g. `omcid 60`: register (or update) a watchdog client; idempotent, does not arm anything (`docs/SETTINGS.md`, "Watchdog rules") |
 | `/proc/odi_wdt/ping` | -- | `"<name>"`: a registered client's own ping; arms its deadline on the first call, refused (`-EINVAL`) for an unregistered name |
 | `/proc/odi_wdt/clients` | one line per registered client: name, deadline, armed, last-ping age | -- |
-| `/proc/odi_ramlog_prev` | the previous boot's DRAM ramlog, decoded: this boot's counter and slot, the previous boot's counter, slot, build id and last early crumb, then its first 4016 bytes and its last 4080 (root only) | -- |
+| `/proc/odi_ramlog_prev` | the previous boot's DRAM ramlog, decoded: this boot's counter and slot, the previous boot's counter, slot, build id, last early crumb and reset reason (`reason=`, `docs/HACKING.md`), then its first 3984 bytes and its last 4080 (root only) | -- |
 | `/proc/odi_ramlog_prev_raw` | the same two pages as 8192 raw bytes, page A then page B, for `ramlog-read.sh`-style decoding off the stick (root only) | -- |
 
 Writing a verb or an init command by hand re-programs the switch or the

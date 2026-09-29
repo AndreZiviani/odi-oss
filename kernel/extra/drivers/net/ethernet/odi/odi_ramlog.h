@@ -30,13 +30,16 @@
  *     offset 12   u32   tag2  (page A only: JSK, see below)
  *     offset 16   ODI_RAMLOG_DATA (4080) bytes of log text
  *
- *   Page A: the first ODI_RAMLOG_A_DATA (4016) bytes ever written, then
+ *   Page A: the first ODI_RAMLOG_A_DATA (3984) bytes ever written, then
  *   frozen -- count stops advancing once it reaches ODI_RAMLOG_A_DATA.
  *   The last ODI_RAMLOG_META_SIZE (64) bytes of the page hold the boot
- *   metadata block below instead of text. An older reader that takes
- *   min(count, 4080) bytes from +16 still reads exactly the text, because
- *   count never exceeds 4016; a page written by an older image (text up
- *   to 4080 bytes, no metadata) is told apart by the metadata magic.
+ *   metadata block below, and the ODI_RAMLOG_REASON_SIZE (32) bytes before
+ *   them the reset reason block, instead of text. An older reader that
+ *   takes min(count, 4080) bytes from +16 still reads exactly the text,
+ *   because count never exceeds 3984; a page written by an older image
+ *   (text up to 4080 bytes, no metadata) is told apart by the metadata
+ *   magic, and one written by a format 1 image (text up to 4016 bytes, no
+ *   reason block) by the metadata format.
  *   Page B: a ring of the LAST ODI_RAMLOG_DATA bytes -- count keeps
  *   advancing without limit, byte n lands at offset 16 + (n % 4080);
  *   ramlog-read.sh reconstructs chronological order from count % 4080.
@@ -76,9 +79,30 @@
  *     +8   u32   slot, 0 or 1, from the last root= on the command line
  *                (31:5 is slot 0, 31:7 slot 1); ODI_RAMLOG_SLOT_UNKNOWN
  *     +12  u32   ODI_RAMLOG_META_FMT, the layout version of this block
+ *                and the one before it: 1 = no reason block, text to
+ *                4016 bytes; 2 = the reason block below, text to 3984
  *     +16  40    build id, NUL padded (ODI_RAMLOG_BUILD_ID, see below)
  *     +56  u32   crumb stash: tag  } written by kernel_entry_setup, NOT
  *     +60  u32   crumb stash: step } by this driver (see below)
+ *
+ * Reset reason block, page A +4000 (ODI_RAMLOG_REASON_OFF), 32 bytes,
+ * directly before the metadata block, so that block and its crumb stash
+ * keep the offsets format 1 readers and kernel_entry_setup use:
+ *
+ *     +0   u32   magic ODI_RAMLOG_MAGIC_R ("RLGR")
+ *     +4   u32   reason, an ODI_RAMLOG_REASON_* code
+ *     +8   16    detail, NUL padded: the client name for WDT_CLIENT
+ *     +24  8     reserved, zero
+ *
+ * odi_ramlog_meta_stamp() writes it with ODI_RAMLOG_REASON_NONE at boot;
+ * the kernel then overwrites the reason at the moment it knows one
+ * (odi_ramlog_note_reason(), the last writer wins): odi_wdt.c for each of
+ * its three rules, this driver own reboot, panic and die notifiers for the
+ * rest. On the next boot the saved copy is rendered as `reason=` on the
+ * "previous boot:" line: the recorded name, `unknown` when the block is
+ * valid but nothing was recorded (a hang the hardware watchdog caught, a
+ * reset nobody logged, a format 1 image), and `power` when neither page
+ * magic survived (DRAM lost its contents: a power cycle).
  *
  * The build id is ODI_BUILD_ID from kernel/build.sh (the image VERSION
  * when one is set, else the same odi-oss-<date>-<rev> default
@@ -131,16 +155,20 @@
 #define ODI_RAMLOG_TAG_JSK	0x4a534b20U	/* "JSK " */
 
 #define ODI_RAMLOG_MAGIC_M	0x524c474dU	/* "RLGM", the metadata block */
+#define ODI_RAMLOG_MAGIC_R	0x524c4752U	/* "RLGR", the reset reason block */
 
 #define ODI_RAMLOG_HDR		16U		/* magic + count + tag1 + tag2 */
 #define ODI_RAMLOG_DATA		4080U		/* one 4096-byte page minus ODI_RAMLOG_HDR */
 #define ODI_RAMLOG_PAGE_SIZE	(ODI_RAMLOG_HDR + ODI_RAMLOG_DATA)
 
-/* Page A metadata block, see the file header. */
+/* Page A metadata and reset reason blocks, see the file header. */
 #define ODI_RAMLOG_META_SIZE	64U
 #define ODI_RAMLOG_META_OFF	(ODI_RAMLOG_PAGE_SIZE - ODI_RAMLOG_META_SIZE)	/* 4032 */
-#define ODI_RAMLOG_A_DATA	(ODI_RAMLOG_DATA - ODI_RAMLOG_META_SIZE)	/* 4016 */
-#define ODI_RAMLOG_META_FMT	1U
+#define ODI_RAMLOG_REASON_SIZE	32U
+#define ODI_RAMLOG_REASON_OFF	(ODI_RAMLOG_META_OFF - ODI_RAMLOG_REASON_SIZE)	/* 4000 */
+#define ODI_RAMLOG_A_DATA	(ODI_RAMLOG_REASON_OFF - ODI_RAMLOG_HDR)	/* 3984 */
+#define ODI_RAMLOG_A_DATA_FMT1	(ODI_RAMLOG_META_OFF - ODI_RAMLOG_HDR)		/* 4016 */
+#define ODI_RAMLOG_META_FMT	2U
 #define ODI_RAMLOG_M_MAGIC	0U
 #define ODI_RAMLOG_M_BOOT	4U
 #define ODI_RAMLOG_M_SLOT	8U
@@ -150,6 +178,26 @@
 #define ODI_RAMLOG_M_CRUMB_TAG	56U		/* = ODI_CRUMB_STASH in odi-early-crumb.h */
 #define ODI_RAMLOG_M_CRUMB_STEP	60U
 #define ODI_RAMLOG_SLOT_UNKNOWN	0xffffffffU
+
+#define ODI_RAMLOG_R_MAGIC	0U
+#define ODI_RAMLOG_R_CODE	4U
+#define ODI_RAMLOG_R_DETAIL	8U
+#define ODI_RAMLOG_DETAIL_LEN	16U		/* = ODI_WDT_CLIENT_NAME_LEN */
+
+/* Reset reasons. The numbers are the on-memory format: never renumber,
+ * only append. The rendered names are in odi_ramlog_reason_name().
+ */
+enum odi_ramlog_reason {
+	ODI_RAMLOG_REASON_NONE		= 0,	/* "unknown": nothing recorded one */
+	ODI_RAMLOG_REASON_WDT_CLIENT	= 1,	/* odi_wdt: a client missed its deadline; detail = name */
+	ODI_RAMLOG_REASON_WDT_MEM	= 2,	/* odi_wdt: MemAvailable below the floor */
+	ODI_RAMLOG_REASON_WDT_USERLAND	= 3,	/* odi_wdt: userland did not confirm the boot */
+	ODI_RAMLOG_REASON_REBOOT	= 4,	/* reboot notifier, SYS_RESTART (the reboot syscall) */
+	ODI_RAMLOG_REASON_HALT		= 5,	/* reboot notifier, SYS_HALT; the watchdog then resets */
+	ODI_RAMLOG_REASON_POWEROFF	= 6,	/* reboot notifier, SYS_POWER_OFF; likewise */
+	ODI_RAMLOG_REASON_PANIC		= 7,	/* panic notifier */
+	ODI_RAMLOG_REASON_OOPS		= 8,	/* die notifier, a kernel-mode oops that did not panic */
+};
 
 /* The saved copy: page A then page B, as the previous boot left them. */
 #define ODI_RAMLOG_PREV_SIZE	(2U * ODI_RAMLOG_PAGE_SIZE)
@@ -218,6 +266,21 @@ uint32_t odi_ramlog_parse_slot(const char *cmdline);
 uint32_t odi_ramlog_meta_stamp(unsigned char ODI_RAMLOG_MEM *page_a, uint32_t slot,
 			       const char *build_id);
 
+/* odi_ramlog_reason_set() -- record `code` (and `detail`, may be NULL, cut
+ * to ODI_RAMLOG_DETAIL_LEN - 1 characters) in page A reason block. The
+ * detail first, the code last. Nothing is written unless this boot own
+ * metadata block is in place (magic and format 2), so a call before
+ * odi_ramlog_meta_stamp() cannot plant a reason in a stale page.
+ */
+void odi_ramlog_reason_set(unsigned char ODI_RAMLOG_MEM *page_a, uint32_t code,
+			   const char *detail);
+
+/* odi_ramlog_reason_name() -- the rendered name of a code: "wdt_client",
+ * "wdt_mem", "wdt_userland", "reboot", "halt", "poweroff", "panic",
+ * "oops", and "unknown" for NONE or any code this build does not know.
+ */
+const char *odi_ramlog_reason_name(uint32_t code);
+
 /* odi_ramlog_save_prev() -- copy both pages into `prev`
  * (ODI_RAMLOG_PREV_SIZE bytes). With `crumbs_stashed` set (the kernel was
  * built with CONFIG_ODI_EARLY_CRUMBS, so kernel_entry_setup moved the page
@@ -248,6 +311,17 @@ void odi_ramlog_render(const unsigned char *prev, uint32_t now_boot, uint32_t no
  */
 #ifdef __KERNEL__
 void odi_ramlog_early_console_init(void);
+
+/* odi_ramlog_note_reason() -- odi_ramlog_reason_set() on the live page A.
+ * Any context, including panic and a dying timer: plain uncached stores,
+ * no lock. A no-op stub when CONFIG_ODI_RAMLOG is off, so odi_wdt.c calls
+ * it unconditionally.
+ */
+#if IS_ENABLED(CONFIG_ODI_RAMLOG)
+void odi_ramlog_note_reason(uint32_t code, const char *detail);
+#else
+static inline void odi_ramlog_note_reason(uint32_t code, const char *detail) { }
+#endif
 #endif
 
 #endif /* ODI_RAMLOG_H */

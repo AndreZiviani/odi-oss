@@ -5,6 +5,30 @@ listed here.
 
 ## Unreleased
 
+- The kernel records why each boot ended, and the next boot of this image
+  shows it: `/proc/odi_ramlog_prev` now ends its `previous boot:` line with
+  `reason=` -- `wdt_client:<name>`, `wdt_mem`, `wdt_userland` (written by
+  `odi_wdt` just before it forces the reset), `reboot`, `halt`, `poweroff`
+  (a reboot notifier), `panic` (a panic notifier), `oops` (a die notifier,
+  kernel mode only), `power` when neither ramlog page survived (DRAM lost: a
+  power cycle), and `unknown` when the pages survived but nothing recorded a
+  reason (a hang the hardware watchdog caught). The existing fields and
+  lines are unchanged. It lives in a new 32-byte reason block in page A
+  just before the metadata block, which keeps its offset (format 2), so page
+  A now keeps the first 3984 bytes of the log, not 4016.
+  `tools/memprobe/ramlog-read.sh` decodes it; host tests cover the block,
+  the render and the watchdog rule chosen when several fire at once.
+- `flash get` on an odi-only key that holds no value (`SYSLOG_SERVER`,
+  `NTP_SERVER`) now prints `KEY=` and exits 0, like a stock key present with
+  an empty value, instead of `GET fail.` and 1. A name that is no key at all
+  still fails. `svc-syslogd.sh` and `svc-ntpd.sh` read both the same way.
+- `METRICSD_BIN=<binary>` puts a local odi-sfp-exporter build in the image
+  instead of the pinned release (`src/fetch-releases.sh`), for trials of an
+  unreleased exporter.
+- docs/TOOLS.md lists the exporter metrics `gpon_boot_count` and
+  `gpon_last_reset_reason{reason,client}`, which read the reason above
+  (odi-sfp-exporter, after v1.1.2).
+
 ## v1.0.8 — 2026-09-28
 
 - Fixes `SYSLOG_SERVER` and `NTP_SERVER` never saving from the web UI on a real

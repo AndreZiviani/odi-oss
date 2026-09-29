@@ -227,6 +227,12 @@ means `odi-ui/`), or from the checkout `CONFD_ASSETS=` names:
 
     CONFD_TAG= CONFD_BIN=../odi-ui/build/confd make releases image
 
+A **local metricsd build** is one self-contained binary: point
+`METRICSD_BIN` at it (`odi-sfp-exporter/build/metricsd`) and the release
+is not fetched; the manifest then says `exporter=local`:
+
+    METRICSD_BIN=../odi-sfp-exporter/build/metricsd make releases image
+
 confd reads `/etc/confd/` for the whole UI and its `.tsv` tables; a confd
 without them starts and answers 404 to everything, so check the "asset
 files" line the script prints. A UI change that adds a setting has to land
@@ -362,16 +368,36 @@ There is no serial console, so a trial that never answered is otherwise one
 bit of information. Four records survive a revert:
 
 - **The DRAM ramlog.** `odi_ramlog.c` mirrors every console line into two
-  DRAM pages no kernel maps (`0x017ff000`: the first 4016 bytes and a
-  64-byte per-boot metadata block; `0x01fff000`: a ring of the last 4080).
-  They survive a watchdog reset or `reboot`, not a power cycle.
+  DRAM pages no kernel maps (`0x017ff000`: the first 3984 bytes, a 32-byte
+  reset reason block and a 64-byte per-boot metadata block; `0x01fff000`: a
+  ring of the last 4080). They survive a watchdog reset or `reboot`, not a
+  power cycle.
   - From **our** image (the next boot of ours), before its own ramlog
     writes: `cat /proc/odi_ramlog_prev` (decoded) or
     `/proc/odi_ramlog_prev_raw` (8192 bytes). The first two lines give this
     boot's counter and slot and the previous boot's counter, slot, build id
-    and last early crumb: **check the slot and build id are the trial's**
-    before reading on. It reaches one boot back; a stock boot in between
-    writes nothing.
+    and last early crumb, and why it reset (`reason=`, below): **check the
+    slot and build id are the trial's** before reading on. It reaches one
+    boot back; a stock boot in between writes nothing.
+  - **Why it reset.** The kernel records the reason at the moment it knows
+    it, and the next boot prints it at the end of the `previous boot:`
+    line, e.g.
+    `previous boot: boot=30 slot=1 build=v1.0.9 crumb=TICK/15028 reason=wdt_client:omcid`:
+
+    | `reason=` | recorded by |
+    |---|---|
+    | `wdt_client:<name>` | `odi_wdt`: that registered client missed its ping deadline |
+    | `wdt_mem` | `odi_wdt`: MemAvailable stayed below the floor |
+    | `wdt_userland` | `odi_wdt`: rcS never confirmed the boot (`userland_ok`) |
+    | `reboot`, `halt`, `poweroff` | the reboot notifier: the `reboot` syscall path |
+    | `panic` | the panic notifier |
+    | `oops` | the die notifier: a kernel oops that did not panic, followed by a reset nothing else recorded |
+    | `power` | nothing: neither page magic survived, so DRAM lost its contents (a power cycle, a cold boot). The line is then `previous boot: none (...) reason=power` |
+    | `unknown` | nothing: the pages survived but no reason was written -- a hang the hardware watchdog caught, an emergency restart (sysrq), a panic before `early_initcall`, or a previous boot of an image older than the reason block |
+
+    The last writer wins, so an oops that then panics reads `panic`. The
+    watchdog rules still log their own line too, so the free text at the
+    end of page B says the same thing in more detail.
   - From the **stock** image: push `tools/memprobe` and run
     `tools/memprobe/ramlog-read.sh` ([`tools/memprobe/README.md`](../tools/memprobe/README.md)).
     Check `MemFree` first: pushing a file larger than free RAM into the
@@ -970,6 +996,7 @@ prints the `CONFIG_ODI_*` it got).
 | `ALLOW_NO_KCONFIG=1` | `image/build.sh:297` | build without `/etc/kernel-config` (the `.config`, shipped for reference) | 0 |
 | `GITHUB_TOKEN`, `USE_CURL=1` | `src/fetch-releases.sh`, `tools/remote-build.sh` | optional token, raises the anonymous rate limit for the curl download; skip `gh` even when present | none; 0 |
 | `METRICSD_TAG`, `CONFD_TAG`, `*_REPO` | `src/fetch-releases.sh` | releases to fetch; `CONFD_TAG=` (empty) with `CONFD_BIN` for a local confd | pinned in the script |
+| `METRICSD_BIN` | `src/fetch-releases.sh:24` | local metricsd binary instead of the release | none |
 | `CONFD_BIN`, `CONFD_ASSETS` | `src/fetch-releases.sh:82`, `:88` | local confd binary and its odi-ui checkout | none; `$(dirname $CONFD_BIN)/..` |
 | `ODI_REMOTE`, `ODI_REMOTE_DIR` | `tools/remote-build.sh:36`, `:37` | remote build host and directory | required; `/root/odi/odi-oss` |
 
@@ -983,13 +1010,13 @@ read side.
 |---|---|---|---|---|
 | `/proc/odi_init` | `odi_init.c` | one verb, optional argument: the SDK-init verbs (`intr` ... `ponmac`, `i2c`, `i2cen`, `gpon`, `rxsd`), `optics`, and the GPON verbs (`gpondrv`, `gpondev`, `gponsn <sn>`, `gponpw <hex>`, `gponact`, `gpondeact`, `gponstat`) | the last verb's return code | prod (`rtk_init` under the stock firmware) |
 | `/proc/odi_omci` | `odi_omci.c:451` | `switch_init` (`:398`): the platform settings and the module-load replay | redirect registrations and pids, frame and command counters | prod |
-| `/proc/odi_wdt/userland_ok` | `odi_wdt.c:533` | `1`: userland is up, cancel the 120 s reset | `userland_ok=N deadline=120 uptime=N` | prod (`luna_watchdog` under the stock firmware) |
-| `/proc/odi_wdt/watchdog_flag` | `odi_wdt.c:488` | `1` arm and kick; `0` disable the watchdog and stop the kicker | `watchdog_flag=N` | dev |
-| `/proc/odi_wdt/register` | `odi_wdt.c:597` | `"<name> <deadline_s>"`: register or update a watchdog client (rcS does this once per client at boot) | -- | prod |
-| `/proc/odi_wdt/ping` | `odi_wdt.c:625` | `"<name>"`: a registered client's own ping; arms its deadline on the first call | -- | prod (omcid, every 15 s: `src/omci/respond/main.c`, `wdt_ping()`) |
-| `/proc/odi_wdt/clients` | `odi_wdt.c:648` | none | one line per client: `name=... deadline=... armed=... last_ping_age=...` | dev (debugging) |
+| `/proc/odi_wdt/userland_ok` | `odi_wdt.c:568` | `1`: userland is up, cancel the 120 s reset | `userland_ok=N deadline=120 uptime=N` | prod (`luna_watchdog` under the stock firmware) |
+| `/proc/odi_wdt/watchdog_flag` | `odi_wdt.c:523` | `1` arm and kick; `0` disable the watchdog and stop the kicker | `watchdog_flag=N` | dev |
+| `/proc/odi_wdt/register` | `odi_wdt.c:632` | `"<name> <deadline_s>"`: register or update a watchdog client (rcS does this once per client at boot) | -- | prod |
+| `/proc/odi_wdt/ping` | `odi_wdt.c:660` | `"<name>"`: a registered client's own ping; arms its deadline on the first call | -- | prod (omcid, every 15 s: `src/omci/respond/main.c`, `wdt_ping()`) |
+| `/proc/odi_wdt/clients` | `odi_wdt.c:683` | none | one line per client: `name=... deadline=... armed=... last_ping_age=...` | dev (debugging) |
 | `/proc/odi_gpon` | `odi_gpon.c:786` | none | ONU state, ONU id, PLOAM counters, serial | prod (`diag` reads it for the exporter; its format is an interface) |
-| `/proc/odi_ramlog_prev`, `_raw` | `odi_ramlog.c:483` | none | the previous boot's ramlog (root only) | prod (debug aid) |
+| `/proc/odi_ramlog_prev`, `_raw` | `odi_ramlog.c:635` | none | the previous boot's ramlog (root only) | prod (debug aid) |
 | `/dev/odi_sw` | `odi_reg.c:191` | ioctls `REG_SET`, `L2_MC_ADD`/`DEL` | ioctls `REG_GET`, `MIB_GET`, `DDM_GET`, `L2_GET`/`NEXT`, `L2_MODE` (`odi_reg.h:118`) | prod |
 
 The `odi_omci` netlink transport rides on its own private protocol number
