@@ -35,6 +35,7 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `fwu.sh` | CLI: flash one slot | you, `fwu_starter.sh` (from the image tarball) | mtd `k0`/`r0` or `k1`/`r1` | stdout | -- |
 | `fwu_starter.sh` | CLI: write an uploaded tarball to the inactive slot | confd, you | runs `fwu.sh` from the tarball | `/tmp/fwu.log`, `/tmp/fwu.state` | -- |
 | `apply.sh` | CLI: apply saved settings without a reboot | confd, you | `network.sh addr`; `/proc/odi_init`, omcid | stdout | -- |
+| `diag-bundle.sh` | CLI: the diagnostics bundle, secrets redacted | confd (`GET /api/diag`), you | reads logs, `/proc`, `nv`, the exporter | the tar.gz it writes | -- |
 
 Every daemon -- `omcid`, `confd`, `metricsd`, `dropbear` -- and the serial
 `login` are all `respawn` entries in `/etc/inittab`: busybox init restarts
@@ -599,6 +600,47 @@ OLT then ranges the ONU and provisions it again. Refuses with
 `/etc/config/modules.off`. Exits non-zero when omcid did not register (the
 ONU is re-activated anyway). Serial number changes are not applied: those
 need a reboot.
+
+### `diag-bundle.sh` -- the diagnostics bundle
+
+    /etc/scripts/diag-bundle.sh [OUT]      default OUT: /tmp/odi-diag.tar.gz
+
+Collects what a bug report needs into one tar.gz, `odi-diag/` inside, and
+prints OUT: the previous boot ramlog (`/proc/odi_ramlog_prev`), the tail of
+every `/var/log` file (256 KB each, 1 MB in all), `dmesg`, `/etc/odi-build`,
+`/etc/version`, `/proc/odi_wdt/{watchdog_flag,userland_ok,clients}`,
+`uptime`, `/proc/meminfo`, `/proc/mounts`, `/proc/cmdline`, `ps`,
+`sw_active`, `sw_commit`, `sw_tryactive` and `sw_version0/1` from both
+environment copies (`nv getenv` and `nv fallback`), one scrape of the
+exporter, and the config store. `MANIFEST.txt` lists every step with its
+exit status and size, and which keys were redacted. The web UI serves the
+same file as "Download a diagnostics bundle" on the Admin tab (odi-ui
+`GET /api/diag`, which only runs this and streams the result).
+
+**Redaction.** In the copies of `lastgood.xml`, `lastgood_hs.xml` and
+`odi.conf`, the value of every key below is replaced by `REDACTED` (an empty
+value stays empty, so "not set" still shows):
+
+- by name: `GPON_PLOAM_PASSWD`, `LOID_PASSWD`, `LOID_PASSWD_OLD`,
+  `USER_PASSWORD`, `SUSER_PASSWORD`, `E8BDUSER_PASSWORD`, `SUPER_PASSWORD`,
+  `MAC_KEY`, `HW_FON_KEYWORD`;
+- and any key whose name contains `PASS`, `PWD`, `PSK`, `SECRET`, `TOKEN`,
+  `KEY`, `COMMUNITY` or `CRED`.
+
+Then every secret value found that way, plus the web UI password from
+`/etc/config/confd.auth`, is scrubbed from every file in the bundle, as text
+and as upper- and lowercase hex, in case a log quoted one; values shorter
+than three characters are redacted in the config copies only.
+`confd.auth`, the dropbear keys and `/etc/passwd` are never collected. Kept
+on purpose: `GPON_SN`, `ELAN_MAC_ADDR` and `LOID`, which identify the stick
+but authenticate nothing without the passwords -- remove them by hand before
+posting a bundle publicly if that matters to you.
+
+Every command runs under busybox `timeout` (5 s, 10 s for the exporter
+scrape), and a bundle over 2 MB is refused rather than written. Exits 1, with
+the reason on stderr and no OUT left behind, when it cannot finish.
+`make test-qemu` plants known secrets in the config, `confd.auth` and a log,
+and asserts none of them is anywhere in the bundle.
 
 ## Boot scripts you can run again
 

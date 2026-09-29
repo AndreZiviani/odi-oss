@@ -174,7 +174,8 @@ stock slot. `omcli ident` shows what is stored and whether it is reported.
 | Stock keys (tab) | the 163 keys only the stock firmware reads, read-only | -- |
 | Config UI credentials (Admin) | `/etc/config/confd.auth` | LIVE (sign in again) |
 | SSH keys (Admin) | `/etc/config/dropbear.d/authorized_keys`, read at every login | LIVE |
-| Download a full config backup (Admin) | both stores, every key, identity included | -- |
+| Download a full config backup (Admin) | both stores, every key, identity included; `tools/config-backup.sh` takes the same file from a host (below) | -- |
+| Download a diagnostics bundle (Admin) | logs, the previous boot ramlog, slot state and the config with every password redacted, as a tar.gz (`/etc/scripts/diag-bundle.sh`, `docs/TOOLS.md`) | -- |
 | Restore (Admin) | writes the differences, every key, through the same checks as Save | per key; restored keys are not applied |
 | Reset the service config (Admin) | `flash default cs`: merges `/etc/config_default.xml` into CS (below) | LOID keys: INTERRUPTS INTERNET; the rest are stock-only |
 | Ping (Tools) | IPv4 literals, three packets | LIVE |
@@ -203,6 +204,74 @@ The Firmware tab shows, for the running partition, the image it runs
 `sw_version0/1` beside it when they differ: `fwu.sh` does not update that
 record unless asked, so it often still names the firmware the slot held
 before.
+
+### Backing up from a host
+
+The config partition is the one thing on a stick nothing can regenerate: a
+reflash never touches it, and losing it (or a silent change to the serial,
+PLOAM password, LOID or VLAN) is an outage. `tools/config-backup.sh` takes the
+same backup the Admin tab downloads (odi-ui `GET /api/backup`), from any
+Linux or macOS host with `curl`, and keeps a dated copy only when the
+settings changed:
+
+    ODI_HOST=192.168.1.1 ODI_AUTH_FILE=/etc/odi/ui.auth tools/config-backup.sh
+
+| variable | meaning | default |
+|---|---|---|
+| `ODI_HOST` | the stick management address | required |
+| `ODI_AUTH_FILE` | a file holding the web UI `user:password`, one line | -- |
+| `ODI_USER`, `ODI_PASSWORD` | the same credential from the environment, when there is no file | -- |
+| `ODI_BACKUP_DIR` | where the copies go | `./odi-config/<ODI_HOST>` |
+| `ODI_KEEP` | how many copies to keep | 30 |
+| `ODI_TIMEOUT` | seconds for the whole download (`curl -m`) | 20 |
+| `ODI_PORT` | confd port | 80 |
+
+Copies are named `odi-config-<UTC time>.xml`, mode 600 in a directory made
+mode 700: they hold every identity key and password in clear. A run whose
+settings match the newest copy writes nothing (the leading comment, which
+names the confd build, is not compared, so a UI upgrade alone is not a
+change); the oldest copies past `ODI_KEEP` are removed. The credential goes
+to curl on stdin, never on its command line. Exit status 0 means the backup
+was taken (new or unchanged), 1 that it failed -- the stick was unreachable,
+refused the credential, or sent something that is not a backup -- and 2 a
+usage error, so a scheduler can alert on it. Restore a copy with the Admin
+tab "Restore".
+
+Every 6 hours from cron, mailing only on failure:
+
+    0 */6 * * *  ODI_HOST=192.168.1.1 ODI_AUTH_FILE=/etc/odi/ui.auth ODI_BACKUP_DIR=/srv/odi-config/isp1 /opt/odi-oss/tools/config-backup.sh >/dev/null
+
+Or as a systemd timer, `/etc/systemd/system/odi-config-backup.service`:
+
+    [Unit]
+    Description=Back up the ODI stick config store
+    Wants=network-online.target
+    After=network-online.target
+
+    [Service]
+    Type=oneshot
+    Environment=ODI_HOST=192.168.1.1
+    Environment=ODI_AUTH_FILE=/etc/odi/ui.auth
+    Environment=ODI_BACKUP_DIR=/srv/odi-config/isp1
+    ExecStart=/opt/odi-oss/tools/config-backup.sh
+
+and `/etc/systemd/system/odi-config-backup.timer`:
+
+    [Unit]
+    Description=Back up the ODI stick config store every 6 hours
+
+    [Timer]
+    OnCalendar=00/6:00
+    RandomizedDelaySec=10min
+    Persistent=true
+
+    [Install]
+    WantedBy=timers.target
+
+then `systemctl enable --now odi-config-backup.timer`; a failed run shows in
+`systemctl --failed`. The exporter reports a hash of each config file
+(`gpon_config_info`, odi-sfp-exporter), so an alert on a change can point at
+the backup taken before it.
 
 ## Keys this image stores but does not use
 
