@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Adds `ONU_HW_VERSION`, an odi-only key (`/etc/config/odi.conf`): the ONU-G
+  Version (attribute 2, the hardware version some OLTs whitelist), reported
+  only with the OLT identity switch on, like the other identity keys. At most
+  14 printable characters; a longer or non-printable value is ignored whole
+  and the device id is answered, as before. `omcli ident` shows it. Applied
+  with `apply.sh omci` (INTERRUPTS INTERNET). The stock `HW_HWVER` key is not
+  read (docs/SETTINGS.md, "The OLT identity keys").
+
 ## v1.1.1 — 2026-09-29
 
 - Pins odi-ui confd v1.1.1 (was v1.1.0): the trial banner no longer claims
@@ -14,6 +22,7 @@ listed here.
   assigned Alloc-IDs.
 - The README web UI screenshot now links odi-ui (single source) instead of
   a copy in docs/images.
+
 ## v1.1.0 — 2026-09-29
 
 - Pins odi-ui confd v1.1.0 (was v1.0.8): the redesigned web UI (Status,

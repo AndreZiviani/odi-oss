@@ -400,6 +400,7 @@ struct onu_vlan_cfg {
 #define REPORT_DEFAULT_SW_VER   "0.0.0"
 #define REPORT_SW_VER_LEN       14       /* class 7 attribute 1 */
 #define REPORT_MODEL_LEN        20       /* class 257 attribute 1 */
+#define REPORT_HW_VER_LEN       14       /* class 256 attribute 2 */
 #define REPORT_OMCC_VER_MAX     255      /* class 257 attribute 2, one byte */
 #define REPORT_PRODUCT_CODE_MAX 65535    /* class 257 attribute 3, two bytes */
 struct onu_report {
@@ -407,6 +408,10 @@ struct onu_report {
 	int  swVerLen[2];                    /* -1 absent, 0 empty */
 	char model[REPORT_MODEL_LEN + 1];
 	int  modelLen;
+	/* ONU_HW_VERSION, odi.conf: -1 absent or empty, -2 set but not
+	 * reportable (longer than 14 or not printable ASCII). */
+	char hwVer[REPORT_HW_VER_LEN + 1];
+	int  hwVerLen;
 	int  omccVer;                        /* -1: absent, empty or not a number */
 	int  productCode;                    /* likewise */
 	uint8_t on;                          /* CFG_REPORT_SWITCH exists */
@@ -420,10 +425,17 @@ void cfg_load_vlan(void);
 void cfg_load_vlan_from(const char *cs);
 int cfg_manual_vid(void);
 void cfg_load_report(void);
-void cfg_load_report_from(const char *cs, const char *hs, const char *sw);
+void cfg_load_report_from(const char *cs, const char *hs, const char *sw,
+			  const char *odi);
 const char *report_sw_ver(uint16_t inst);
+const char *report_hw_ver(void);
 void cfg_show_vlan(void);
 int cfg_get(const char *path, const char *key, char *out, int max);
+/* The odi-only keys (docs/SETTINGS.md, "Odi-only keys"): KEY=value lines in
+ * CFG_ODI_PATH, which the stock firmware never reads. Returns the value
+ * length (0 present and empty), -1 absent or unreadable. */
+#define CFG_ODI_PATH "/var/config/odi.conf"
+int cfg_odi_get(const char *path, const char *key, char *out, int max);
 extern const char *const CFG_CS_PATH;
 void cfg_load_identity(void);
 void cfg_load_identity_from(const char *cs, const char *hs);

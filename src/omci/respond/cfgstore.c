@@ -186,6 +186,57 @@ next:
 	return -1;
 }
 
+/* One odi-only key out of odi.conf, the plain KEY=value file `flash` keeps
+ * beside the XML store (rootfs/skeleton/etc/scripts/flash, ODI_KEYS). Same
+ * contract as cfg_get: the value length, 0 for present and empty, -1 for a
+ * missing file or key. The first line for the key wins, as `flash get` reads
+ * it; a line that is not KEY=value is skipped. One bounded read per call: the
+ * file holds a handful of short lines, and anything past the buffer is
+ * treated as absent rather than read in pieces. */
+static char odibuf[4096];
+
+int cfg_odi_get(const char *path, const char *key, char *out, int max)
+{
+	long fd = sys_open(path, 0);
+	int n = 0, klen = str_len(key);
+
+	if (fd < 0)
+		return -1;
+	for (;;) {
+		long r = sys_read((int)fd, odibuf + n, sizeof odibuf - 1 - n);
+
+		if (r <= 0)
+			break;
+		n += (int)r;
+		if (n >= (int)sizeof odibuf - 1)
+			break;
+	}
+	sys_close((int)fd);
+	for (int i = 0; i < n;) {
+		int end = i, k = 0;
+
+		while (end < n && odibuf[end] != '\n')
+			end++;
+		/* A line cut off by the buffer is not a whole value. */
+		if (end >= n && n >= (int)sizeof odibuf - 1)
+			break;
+		while (k < klen && i + k < end && odibuf[i + k] == key[k])
+			k++;
+		if (k == klen && i + k < end && odibuf[i + k] == '=') {
+			int v = i + k + 1, len = end - v, o;
+
+			if (len > 0 && odibuf[end - 1] == '\r')
+				len--;
+			for (o = 0; o < len && o < max - 1; o++)
+				out[o] = odibuf[v + o];
+			out[o] = 0;
+			return len;
+		}
+		i = end + 1;
+	}
+	return -1;
+}
+
 /* Replace one key's value, or insert the key, and write the file back.
  *
  * Deliberately NOT what `flash set` does. That runs `xmlconfig -s` to update
@@ -563,6 +614,13 @@ void cfg_show_identity(void)
 		out_fmt("onu model   %s%s\n", report.model, report.on ? "" : " (not reported)");
 	else
 		out("onu model   (not in the store: the device id)\n");
+	if (report.hwVerLen > 0)
+		out_fmt("hw version  %s%s\n", report.hwVer, report.on ? "" : " (not reported)");
+	else if (report.hwVerLen == -2)
+		out("hw version  (ONU_HW_VERSION ignored: more than 14 characters or "
+		    "not printable; the device id)\n");
+	else
+		out("hw version  (not in odi.conf: the device id)\n");
 	if (report.omccVer >= 0)
 		out_fmt("omcc ver    %d%s\n", (long)report.omccVer, report.on ? "" : " (not reported)");
 	else
@@ -575,21 +633,28 @@ void cfg_show_identity(void)
 
 /* ------------------------------------------------ what the OLT is told
  *
- * Five keys describe this ONU to the OLT, in two managed entities:
+ * Six keys describe this ONU to the OLT, in three managed entities:
  *
  *     OMCI_SW_VER1, OMCI_SW_VER2   software image (class 7) instance 0 and 1,
  *                                  attribute 1 Version, 14 bytes
  *     GPON_ONU_MODEL               ONU2-G (class 257) attribute 1, Equipment
  *                                  id, 20 bytes -- "IGD" on the vendor stack,
  *                                  the same string both sticks store
+ *     ONU_HW_VERSION               ONU-G (class 256) attribute 2, Version, 14
+ *                                  bytes: the hardware version some OLTs
+ *                                  whitelist. An odi-only key, in odi.conf,
+ *                                  not the XML store
  *     OMCC_VER                     ONU2-G attribute 2, one byte
  *     OMCI_VENDOR_PRODUCT_CODE     ONU2-G attribute 3, two bytes
  *
  * An empty or absent key keeps what omcid has always answered: "0.0.0", the
- * device id, 0x80 and the captured product code.
+ * device id (both for ONU2-G and ONU-G), 0x80 and the captured product code.
+ * So does an ONU_HW_VERSION that does not fit the attribute: more than 14
+ * characters, or anything outside printable ASCII, is ignored whole rather
+ * than cut, since a truncated version is a different version to a whitelist.
  *
  * Reported only while CFG_REPORT_SWITCH exists, and that is not caution for
- * its own sake. Both our sticks already carry all five, written by the vendor
+ * its own sake. Both our sticks already carry the five XML keys, written by the vendor
  * firmware (it rewrites OMCI_SW_VER1/2 itself as it boots and flashes), so
  * honouring them unconditionally would change what both OLTs see today --
  * the software version from "0.0.0" to the vendor string and the equipment id
@@ -614,7 +679,8 @@ static int cfg_num_str(const char *s, int n, int max)
 	return v;
 }
 
-void cfg_load_report_from(const char *cs, const char *hs, const char *sw)
+void cfg_load_report_from(const char *cs, const char *hs, const char *sw,
+			  const char *odi)
 {
 	char buf[32];
 	int n;
@@ -630,6 +696,15 @@ void cfg_load_report_from(const char *cs, const char *hs, const char *sw)
 	report.omccVer = cfg_num_str(buf, n, REPORT_OMCC_VER_MAX);
 	n = cfg_get_either(cs, hs, "OMCI_VENDOR_PRODUCT_CODE", buf, sizeof buf);
 	report.productCode = cfg_num_str(buf, n, REPORT_PRODUCT_CODE_MAX);
+	n = cfg_odi_get(odi, "ONU_HW_VERSION", buf, sizeof buf);
+	report.hwVerLen = n > 0 ? n : -1;
+	if (n > REPORT_HW_VER_LEN)
+		report.hwVerLen = -2;
+	for (int i = 0; report.hwVerLen > 0 && i < n; i++)
+		if (buf[i] < 0x20 || buf[i] > 0x7e)
+			report.hwVerLen = -2;
+	for (int i = 0; i <= REPORT_HW_VER_LEN; i++)
+		report.hwVer[i] = (report.hwVerLen > 0 && i < n) ? buf[i] : 0;
 	{
 		long fd = sys_open(sw, 0);
 
@@ -642,7 +717,7 @@ void cfg_load_report_from(const char *cs, const char *hs, const char *sw)
 
 void cfg_load_report(void)
 {
-	cfg_load_report_from(CFG_CS, CFG_HS, CFG_REPORT_SWITCH);
+	cfg_load_report_from(CFG_CS, CFG_HS, CFG_REPORT_SWITCH, CFG_ODI_PATH);
 }
 
 /* The software-image version to answer for instance `inst`: the key, or the
@@ -654,4 +729,15 @@ const char *report_sw_ver(uint16_t inst)
 	if (report.on && inst < 2 && report.swVerLen[inst] > 0)
 		return report.swVer[inst];
 	return REPORT_DEFAULT_SW_VER;
+}
+
+/* ONU-G Version: ONU_HW_VERSION when reported, else the device id omcid has
+ * always answered. */
+const char *report_hw_ver(void)
+{
+	if (!report.loaded)
+		cfg_load_report();
+	if (report.on && report.hwVerLen > 0)
+		return report.hwVer;
+	return (const char *)devid;
 }

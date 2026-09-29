@@ -550,7 +550,7 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		serial_refresh(0);
 		if (k == 1) { out[0] = serial[0]; out[1] = serial[1];
 			      out[2] = serial[2]; out[3] = serial[3]; }
-		else if (k == 2) put_str(out, n, (const char *)devid);
+		else if (k == 2) put_str(out, n, report_hw_ver());
 		else if (k == 3) for (int i = 0; i < 8; i++) out[i] = serial[i];
 	} else if (c->classId == OMCI_ME_ONU2_G) { /* ONU2-G */
 		/* Attribute 2 is the OMCC version, per the vendor's own table

@@ -153,8 +153,9 @@ It reads, from the config store, once at start: the manual VLAN
 (`VLAN_MANU_TAG_VID` and `VLAN_MANU_TAG_PRI`, applied only with
 `VLAN_CFG_TYPE` 1 and `VLAN_MANU_MODE` 1, as the stock firmware gates them),
 the serial number until the kernel reports one (`GPON_SN`), the LOID keys
-(answered in the CTC LOID-authentication entity), the five OLT identity keys
-(reported only while `/etc/config/omci-identity.on` exists), and
+(answered in the CTC LOID-authentication entity), the six OLT identity keys
+(the ONU-G hardware version, `ONU_HW_VERSION`, from `/etc/config/odi.conf`;
+all six reported only while `/etc/config/omci-identity.on` exists), and
 `DUAL_MGMT_MODE` and the `OMCI_CUSTOM_*` masks for display only. Each key is
 looked up in both store files, the one xmlconfig assigns it to first. Its
 start-up line in the log says what it found (`store: loid ..., manual vlan
@@ -424,9 +425,9 @@ omcli uses omcid's own queue and commands:
     omcli tcont                          T-CONT entity id to driver index
     omcli vlan [cs.xml]                  the manual VLAN from the config store,
                                          and whether the tag is applied
-    omcli ident [cs.xml hs.xml]          the identity and the OLT identity
-                                         keys, and whether those are reported
-                                         (passwords are never printed)
+    omcli ident [cs.xml hs.xml [odi.conf]]  the identity and the OLT
+                                         identity keys, and whether those are
+                                         reported (passwords are never printed)
     omcli bridge <ingress|any> <gem> <dir>   build one bridge rule by hand
     omcli cfgset <file> <dir> <key> <v>  write one key into a config store
     omcli help

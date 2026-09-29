@@ -73,18 +73,20 @@ The UI's reboot confirmation says which slot it comes back on.
 | `GPON_ONU_MODEL` | ONU model (identity) | the equipment id in ONU2-G (attribute 1, 20 characters) | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `OMCC_VER` | OMCC version | ONU2-G attribute 2, decimal | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `OMCI_VENDOR_PRODUCT_CODE` | Vendor product code | ONU2-G attribute 3, decimal | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
+| `ONU_HW_VERSION` | ONU hardware version (identity) | the Version in ONU-G (attribute 2, at most 14 printable ASCII characters), the hardware version some OLTs whitelist. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below) | omcid, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
 | `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto` | REBOOT |
 | `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R` -- kernel messages and the link and provisioning `event=` lines included (docs/TOOLS.md, "Link and provisioning events"); empty means local only (the circular buffer, `logread`). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh syslog`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-syslogd.sh` | SERVICE RESTART |
 | `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh ntp`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-ntpd.sh` | SERVICE RESTART |
 
-Odi-only keys. `SYSLOG_SERVER` and `NTP_SERVER` are the only keys this image
-has that the stock firmware never had, so they are not in `lastgood.xml` and
+Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER` and `ONU_HW_VERSION` are the only
+keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
 in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
 config partition, written by temp file and rename in the same directory.
 `flash set` / `flash get` and `svc-syslogd.sh` / `svc-ntpd.sh` (which read
-through `flash get`) use it for exactly the names in `ODI_KEYS` at the top of
+through `flash get`) use it, and omcid reads `ONU_HW_VERSION` from it directly
+at start (the first `KEY=value` line for the key wins, as with `flash get`), for exactly the names in `ODI_KEYS` at the top of
 `rootfs/skeleton/etc/scripts/flash`; every other key still goes to
 `lastgood*.xml`, so the stock image reads its own keys and ignores this file.
 An empty value removes the key. `flash all cs` appends the odi keys that hold a
@@ -138,8 +140,8 @@ Details that bite:
 
 ### The OLT identity keys, and their switch
 
-`OMCI_SW_VER1`, `OMCI_SW_VER2`, `GPON_ONU_MODEL`, `OMCC_VER` and
-`OMCI_VENDOR_PRODUCT_CODE` are reported to the OLT **only while
+`OMCI_SW_VER1`, `OMCI_SW_VER2`, `GPON_ONU_MODEL`, `OMCC_VER`,
+`OMCI_VENDOR_PRODUCT_CODE` and `ONU_HW_VERSION` are reported to the OLT **only while
 `/etc/config/omci-identity.on` exists** (the UI's "OLT identity" switch on the
 Config tab). Off, or with a key empty or absent, omcid answers what it always
 has:
@@ -150,6 +152,20 @@ has:
 | ONU2-G, Equipment id | the device id (`RTL9602C`) | `GPON_ONU_MODEL` |
 | ONU2-G, OMCC version | 0x80 | `OMCC_VER` |
 | ONU2-G, Vendor product code | 15, the captured stock value | `OMCI_VENDOR_PRODUCT_CODE` |
+| ONU-G, Version (hardware version) | the device id (`RTL9602C`) | `ONU_HW_VERSION` |
+
+`ONU_HW_VERSION` is odi-only (`/etc/config/odi.conf`, set with `flash set
+ONU_HW_VERSION <value>` or from the UI), so unlike the other five neither
+stick carries it until someone sets it. A value longer than the attribute (14
+characters) or with anything outside printable ASCII is ignored whole, not
+cut: a truncated version is a different version to an OLT that whitelists it,
+so the device id is answered instead and `omcli ident` says why. The stock
+store keeps a key of its own, `HW_HWVER` (lastgood_hs.xml; on our sticks one
+of `RTL960x`, `TCG2232` or a 14-character vendor string, depending on which
+firmware wrote the store), which this image does not read: nothing on file
+shows which ONU-G value the stock firmware derives from it, and a value an ISP
+whitelists is better set on purpose than inherited. Copying it by hand is
+`flash set ONU_HW_VERSION "$(flash get HW_HWVER | cut -d= -f2)"`.
 
 The switch exists because the plain rule -- an empty key keeps today's value
 -- does not keep today's value on our sticks: **both already store all five,
@@ -309,7 +325,7 @@ applies to every later image.
 
 | file | effect | apply |
 |---|---|---|
-| `omci-identity.on` | report the five OLT identity keys (above); the UI toggles it | INTERRUPTS INTERNET (`apply.sh omci`) |
+| `omci-identity.on` | report the six OLT identity keys (above); the UI toggles it | INTERRUPTS INTERNET (`apply.sh omci`) |
 | `dropbear.off`, `confd.off`, `metricsd.off` | that daemon is not started | REBOOT |
 | `lan-ip` | the management address, one line; overrides `LAN_IP_ADDR` | LIVE (`apply.sh network`) |
 | `pon-steps` | development: a PON step list that replaces the built-in one (`docs/BOOT.md`); a wrong list means no PON | REBOOT |

@@ -170,6 +170,8 @@ t "a quote in an odi value is refused"      "SYSLOG_SERVER=a.b" "$(sh $F get SYS
 nl=$(printf 'a\nNTP_SERVER=evil')
 sh $F set SYSLOG_SERVER "$nl" >/dev/null 2>&1
 t "a newline cannot smuggle a second key"   "NTP_SERVER=pool.ntp.org:123" "$(sh $F get NTP_SERVER)"
+t "the ONU-G hardware version is an odi key too" "ONU_HW_VERSION=TEST-HW-1" "$(sh $F set ONU_HW_VERSION TEST-HW-1)"
+t "and lands in odi.conf, where omcid reads it" "1" "$(grep -c '^ONU_HW_VERSION=TEST-HW-1$' "$ODI_CONF")"
 rm -rf "$cfg"
 sh $F set SYSLOG_SERVER x >/dev/null 2>&1
 t "with no config dir a set fails rather than inventing one" "1" "$([ -e "$cfg" ] && echo 0 || echo 1)"
