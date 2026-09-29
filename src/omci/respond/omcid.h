@@ -162,6 +162,19 @@ struct flow_slot { uint16_t port; uint8_t used; };
 #define TCONT_MAX 32
 struct tcont_slot { uint16_t meId; uint16_t index; uint8_t used; };
 
+/* Where a T-CONT's Alloc-ID comes from (apply_qos.c, "the T-CONT
+ * Alloc-IDs"): set by the OLT over OMCI, bound from the PLOAM assignments,
+ * or none (0x00FF). */
+#define TCONT_ALLOC_NONE  0
+#define TCONT_ALLOC_OLT   1
+#define TCONT_ALLOC_PLOAM 2
+/* The file the kernel lists the PLOAM Alloc-IDs in (and the serial);
+ * omcid -g points it elsewhere for a test. */
+extern const char *gpon_proc_path;
+int alloc_ids_refresh(void);
+unsigned alloc_ids_assigned(const uint16_t **ids);
+uint16_t tcont_alloc_id(uint16_t meId, int *src);
+
 /* Everything that crosses a module boundary. */
 extern uint8_t serial[9];
 /* Fill serial[] from the kernel, or the config store until the kernel has
@@ -367,6 +380,7 @@ void ev_mib_upload(uint16_t total);
 void ev_mib_upload_next(uint16_t seq);
 void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst);
+void ev_alloc_ids(const uint16_t *ids, unsigned n);
 void ev_tick(void);
 
 /* ------------------------------------------------------------ config store

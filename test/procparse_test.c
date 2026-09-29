@@ -1,6 +1,7 @@
 /* procparse_test.c -- src/omci/procparse.h against the shapes our drivers
  * print: /proc/odi_omci "registered:" (odi_omci.c) and the /proc/odi_gpon
- * "sn" line (odi_gpon.c), plus the config store label form of GPON_SN.
+ * "sn" and "alloc_ids" lines (odi_gpon.c), plus the config store label
+ * form of GPON_SN.
  * Host-side: the header touches no syscalls. Part of `make test-host`. */
 #include <stdio.h>
 #include <string.h>
@@ -57,6 +58,35 @@ int main(void)
 		ok(pp_gpon_sn("snx 0011223344556677\n", 21, sn) == -1, "other key rejected");
 		ok(pp_gpon_sn("state 5\n", 8, sn) == -1, "no sn line");
 		ok(pp_gpon_sn("sn 0011223344556677", 19, sn) == 0, "no trailing newline");
+	}
+
+	puts("/proc/odi_gpon alloc_ids line");
+	{
+		static const char f[] = "state 5 (O5)\nsn 414243440011aaff\n"
+			"ploam ds_rx 9 us_tx 9\nalloc_ids 5 282 794 1050 1306 538\n"
+			"ploam_type ds 0x0a 15\n";
+		uint16_t ids[8];
+		int n;
+
+		n = pp_gpon_alloc_ids(f, (unsigned)strlen(f), ids, 8);
+		ok(n == 5 && ids[0] == 282 && ids[1] == 794 && ids[4] == 538,
+		   "five ids, in order");
+		ok(pp_gpon_alloc_ids(f, (unsigned)strlen(f), ids, 2) == 2 && ids[1] == 794,
+		   "capped at max");
+		ok(pp_gpon_alloc_ids("alloc_ids 0\n", 12, ids, 8) == 0, "none assigned: 0");
+		ok(pp_gpon_alloc_ids("alloc_ids 0", 11, ids, 8) == 0, "no trailing newline");
+		ok(pp_gpon_alloc_ids("state 5\n", 8, ids, 8) == -1, "no line: cannot tell");
+		ok(pp_gpon_alloc_ids("alloc_ids 2 282\n", 16, ids, 8) == -1,
+		   "short of its count rejected");
+		ok(pp_gpon_alloc_ids("alloc_ids 1 4096\n", 17, ids, 8) == -1,
+		   "past 12 bits rejected");
+		ok(pp_gpon_alloc_ids("alloc_ids 1 282 7\n", 18, ids, 8) == -1,
+		   "more than its count rejected");
+		ok(pp_gpon_alloc_ids("alloc_ids 1 28x\n", 16, ids, 8) == -1,
+		   "not a number rejected");
+		ok(pp_gpon_alloc_ids("alloc_idsx 1 5\n", 15, ids, 8) == -1, "other key rejected");
+		ok(pp_gpon_alloc_ids("alloc_ids 1 282", 12, ids, 8) == -1,
+		   "cut inside an id rejected");
 	}
 
 	puts("GPON_SN label form");

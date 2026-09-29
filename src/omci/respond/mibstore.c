@@ -43,7 +43,7 @@ static int serial_from_kernel(uint8_t sn[8])
 			sn[i] = buf[i];
 		return 0;
 	}
-	fd = sys_open("/proc/odi_gpon", O_RDONLY);
+	fd = sys_open(gpon_proc_path, O_RDONLY);
 	if (fd < 0)
 		return -1;
 	n = sys_read((int)fd, proc, sizeof proc);
@@ -350,10 +350,13 @@ void mib_del(uint16_t cls, uint16_t inst)
 	}
 }
 
-/* The i-th slot of the store, used or not, for callers that walk a class. */
+/* The i-th slot of the store, for callers that walk a class: 0 for a slot
+ * that holds no row. A free slot keeps the class and data of the row it
+ * last held, so handing it out made a deleted entity -- or, after a MIB
+ * reset, the whole previous MIB -- part of every rebuild again. */
 struct mib_row *mib_row_at(int i)
 {
-	return (i >= 0 && i < MIB_ROWS) ? &mib[i] : 0;
+	return (i >= 0 && i < MIB_ROWS && mib[i].used) ? &mib[i] : 0;
 }
 
 /* Every managed entity this ONU holds, for the CLI: the ones it creates for
@@ -603,6 +606,13 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		} else if (k == 8) out[0] = PRIQ_DEFAULT_WEIGHT;
 		else if (k == 14) { out[0] = 0; out[1] = 0xff; } /* PktDropMaxP */
 		else if (k == 15) out[0] = 9;          /* QueueDropWQ */
+	} else if (c->classId == OMCI_ME_TCONT && k == 1 && n >= 2) { /* T-CONT */
+		/* AllocID, when the OLT has not set it: the PLOAM assignment
+		 * bound to this T-CONT, or 0x00FF (apply_qos.c). */
+		uint16_t a = tcont_alloc_id(inst, 0);
+
+		out[0] = (uint8_t)(a >> 8);
+		out[1] = (uint8_t)a;
 	} else if (c->classId == OMCI_ME_TRAFFIC_SCHEDULER) { /* traffic scheduler */
 		/* ISP1's sixteen are identical apart from their identity:
 		 * TcontPtr is the entity id, SchedulerPtr 0, Policy 2,

@@ -68,6 +68,7 @@ static void catch_signals(int fd, uint32_t tid)
 static void usage(void)
 {
 	out("usage: omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state]\n"
+	    "             [-g file]\n"
 	    "\n"
 	    "The OMCI responder: registers for redirect type 1 and answers the\n"
 	    "OLT, and serves the omcli and omcicli queues.\n"
@@ -80,6 +81,8 @@ static void usage(void)
 	    "  -c hex      use this capability blob instead of the driver one\n"
 	    "  -s state    use this ONU state for the resume decision instead\n"
 	    "              of asking the driver (test only, see docs/BOOT.md)\n"
+	    "  -g file     read the Alloc-IDs and the serial from this file\n"
+	    "              instead of /proc/odi_gpon (test only)\n"
 	    "  -f          start even if a live process holds redirect type 1\n"
 	    "  -h          this text; starts nothing\n");
 }
@@ -156,6 +159,11 @@ int main(int argc, char **argv)
 			for (const char *s = argv[++i]; *s >= '0' && *s <= '9'; s++)
 				state_arg = state_arg * 10 + (uint32_t)(*s - '0');
 			state_from_arg = 1;
+		}
+		/* -g file: the /proc/odi_gpon shape (alloc_ids, sn) from a
+		 * file, the same reason as -s: qemu has no kernel of ours. */
+		else if (str_eq(argv[i], "-g") && i + 1 < argc) {
+			gpon_proc_path = argv[++i];
 		} else {
 			out_fmt("omcid: unknown argument %s\n", argv[i]);
 			usage();
@@ -343,6 +351,15 @@ int main(int argc, char **argv)
 					last_sample_s = now_s;
 					onu_state_sample();
 					serial_refresh(1);
+					/* A T-CONT bound to a PLOAM Alloc-ID
+					 * follows the kernel list: a new
+					 * assignment or a release reprograms
+					 * the upstream graph a quiet second
+					 * later, like any Set. */
+					if (alloc_ids_refresh())
+						for (int t = 0; t < TCONT_MAX; t++)
+							if (tcont_map[t].used)
+								qos_dirty = 1;
 					ev_tick();
 				}
 				/* Every 15 s: a quarter of the 60 s deadline

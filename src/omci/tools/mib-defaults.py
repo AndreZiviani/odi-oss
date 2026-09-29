@@ -16,15 +16,17 @@ Only autonomous instances (generated/omci_autonomous.c) are taken, and never
 classes 2 (OntData), 148, 157, 340, 134 (OLT-written credentials), 65530
 (LOID: from the config store), 131 (OLT-G: what the OLT wrote about itself),
 ONT-G attributes 1-3 (the live identity, mibstore special-cases them), the
-circuit pack serial number (6/3, part of one stick's own serial) or the
-private VLAN config's manual VID (10212/3, one ISP's VLAN). The dump itself
+circuit pack serial number (6/3, part of one stick's own serial), the
+private VLAN config's manual VID (10212/3, one ISP's VLAN) or the T-CONT
+Alloc-IDs (262/1: what one OLT assigned that line by PLOAM, which omcid
+binds from the kernel at run time, respond/apply_qos.c). The dump itself
 is private; only device capability values reach the generated file."""
 import json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEN = os.path.join(HERE, '..', 'generated')
 SKIP_CLASSES = {2, 131, 148, 157, 340, 134, 65530}
-SKIP_ATTRS = {(256, 1), (256, 2), (256, 3), (6, 3), (10212, 3)}
+SKIP_ATTRS = {(256, 1), (256, 2), (256, 3), (6, 3), (10212, 3), (262, 1)}
 MAX_W = 32
 
 def autonomous():

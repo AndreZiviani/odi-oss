@@ -5,7 +5,7 @@
 # so the counts below are the counts of that real session.
 #
 # What this covers: every omcid event line on the omcid.log side -- start,
-# the OLT MIB reset, the MIB upload, one provisioning burst and its summary,
+# the PLOAM Alloc-IDs, the OLT MIB reset, the MIB upload, one provisioning burst and its summary,
 # a CLI (local) MIB reset, an OLT reboot request, a software download start --
 # and the rate limit. The syslog side, the same line through /dev/log to
 # busybox syslogd, needs a syslogd, so test/qemu/run-qemu.sh checks it on the
@@ -48,7 +48,9 @@ rm -f /var/config/lastgood_hs.xml
 rm -f /var/run/omcid-resume-decision
 
 log=/tmp/omcid-events.log
-$Q respond/build/omcid -w 8 -c "$CAPS" > "$log" 2>&1 &
+# The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon lists them.
+printf 'alloc_ids 5 282 794 1050 1306 538\n' > /tmp/events-gpon
+$Q respond/build/omcid -w 8 -c "$CAPS" -g /tmp/events-gpon > "$log" 2>&1 &
 sleep 2
 
 # No netlink under qemu, so no ONU state: not O5, so no resume.
@@ -76,9 +78,12 @@ check "and its end, at the Next that answers the last entity" "$got" \
 got=$(grep '^event=provision_end ' "$log" | sed 's/ duration_s=[0-9.]*//')
 check "and closes with the session's own counts" "$got" \
       "event=provision_end creates=82 sets=102 deletes=0 rows=161 services=6 after_mib_reset=1"
+got=$(grep '^event=alloc_ids ' "$log")
+check "the PLOAM Alloc-IDs, once, when first read" "$got" \
+      "event=alloc_ids count=5 ids=282,794,1050,1306,538"
 # Nothing per message: the whole session is a handful of lines.
 got=$(grep -c '^event=' "$log")
-check "a whole provisioning session is six event lines" "$got" "6"
+check "a whole provisioning session is seven event lines" "$got" "7"
 
 # `omcli provision`: what that session provisioned.
 out=$($Q cli/build/omcli provision 2>&1)
@@ -109,8 +114,8 @@ check "a software download start" "$got" \
       "event=sw_image op=download_start inst=1 result=not_supported"
 
 # Rate limited: 30 more reboot requests, back to back, and the window of 20
-# lines a minute already holds 9 (start, OLT reset, upload begin and end,
-# provision begin and end, CLI reset, reboot, sw_image).
+# lines a minute already holds 10 (start, Alloc-IDs, OLT reset, upload begin
+# and end, provision begin and end, CLI reset, reboot, sw_image).
 : > /tmp/reboots.txt
 i=0
 while [ "$i" -lt 30 ]; do

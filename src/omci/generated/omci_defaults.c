@@ -60,45 +60,29 @@ const struct omci_default omci_defaults[] = {
 	{ 257, 0x0000, 11, 2, { 0x00, 0x7f } },	/* ConnectivityCapability */
 	{ 257, 0x0000, 13, 2, { 0x00, 0x3b } },	/* QosConfigurationFlexibility */
 	{ 257, 0x0000, 14, 2, { 0x00, 0x01 } },	/* PriorityQueueScaleFactor */
-	{ 262, 0x8000, 1, 2, { 0x01, 0x1a } },	/* AllocID */
 	{ 262, 0x8000, 2, 1, { 0x01 } },	/* ModeInd */
 	{ 262, 0x8000, 3, 1, { 0x01 } },	/* Policy */
-	{ 262, 0x8001, 1, 2, { 0x03, 0x1a } },	/* AllocID */
 	{ 262, 0x8001, 2, 1, { 0x01 } },	/* ModeInd */
 	{ 262, 0x8001, 3, 1, { 0x01 } },	/* Policy */
-	{ 262, 0x8002, 1, 2, { 0x04, 0x1a } },	/* AllocID */
 	{ 262, 0x8002, 2, 1, { 0x01 } },	/* ModeInd */
 	{ 262, 0x8002, 3, 1, { 0x01 } },	/* Policy */
-	{ 262, 0x8003, 1, 2, { 0x05, 0x1a } },	/* AllocID */
 	{ 262, 0x8003, 2, 1, { 0x01 } },	/* ModeInd */
 	{ 262, 0x8003, 3, 1, { 0x01 } },	/* Policy */
-	{ 262, 0x8004, 1, 2, { 0x02, 0x1a } },	/* AllocID */
 	{ 262, 0x8004, 2, 1, { 0x01 } },	/* ModeInd */
 	{ 262, 0x8004, 3, 1, { 0x01 } },	/* Policy */
-	{ 262, 0x8005, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x8005, 2, 1, { 0x01 } },	/* ModeInd */
 	{ 262, 0x8005, 3, 1, { 0x01 } },	/* Policy */
-	{ 262, 0x8006, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x8006, 2, 1, { 0x01 } },	/* ModeInd */
 	{ 262, 0x8006, 3, 1, { 0x01 } },	/* Policy */
-	{ 262, 0x8007, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x8007, 2, 1, { 0x01 } },	/* ModeInd */
 	{ 262, 0x8007, 3, 1, { 0x01 } },	/* Policy */
-	{ 262, 0x8008, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x8008, 2, 1, { 0x01 } },	/* ModeInd */
-	{ 262, 0x8009, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x8009, 2, 1, { 0x01 } },	/* ModeInd */
-	{ 262, 0x800a, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x800a, 2, 1, { 0x01 } },	/* ModeInd */
-	{ 262, 0x800b, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x800b, 2, 1, { 0x01 } },	/* ModeInd */
-	{ 262, 0x800c, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x800c, 2, 1, { 0x01 } },	/* ModeInd */
-	{ 262, 0x800d, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x800d, 2, 1, { 0x01 } },	/* ModeInd */
-	{ 262, 0x800e, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x800e, 2, 1, { 0x01 } },	/* ModeInd */
-	{ 262, 0x800f, 1, 2, { 0x00, 0xff } },	/* AllocID */
 	{ 262, 0x800f, 2, 1, { 0x01 } },	/* ModeInd */
 	{ 263, 0x8001, 1, 1, { 0x01 } },	/* SRInd */
 	{ 263, 0x8001, 2, 2, { 0x00, 0x10 } },	/* NumOfTcont */
@@ -1776,4 +1760,4 @@ const struct omci_default omci_defaults[] = {
 	{ 10212, 0x0000, 1, 1, { 0x01 } },	/* Type */
 	{ 10212, 0x0000, 2, 1, { 0x01 } },	/* ManualMode */
 };
-const unsigned omci_defaults_count = 1771;
+const unsigned omci_defaults_count = 1755;

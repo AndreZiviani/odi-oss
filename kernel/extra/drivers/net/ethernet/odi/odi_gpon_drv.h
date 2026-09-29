@@ -86,7 +86,9 @@ void odi_gpon_get_ploam_counts(unsigned int *rx, unsigned int *tx);
 
 /* The Alloc-IDs the OLT assigned by Assign_Alloc-ID PLOAM and this driver
  * wrote into the CAM, in row order, at most `max` of them; the default
- * (OMCC) row, which carries the ONU-ID, is left out. Returns the count.
+ * (OMCC) row, which carries the ONU-ID, is left out. Row order is the
+ * assignment order, except that a row a deallocation freed is reused first.
+ * Returns the count.
  * For /proc/odi_gpon's alloc_ids line: the T-CONTs the ISP gave this ONU.
  */
 unsigned int odi_gpon_get_alloc_ids(uint16_t *out, unsigned int max);
@@ -103,6 +105,7 @@ void odi_gpon_hw_ack_send(uint8_t onu_id, const struct odi_gpon_ploam *acked);
 void odi_gpon_hw_gem_port_configure(uint16_t gem_port_id, int activate);
 int odi_gpon_hw_gem_port_encrypted(uint16_t gem_port_id, int encrypted);
 int odi_gpon_hw_alloc_id_assign(uint16_t alloc_id);
+int odi_gpon_hw_alloc_id_release(uint16_t alloc_id);
 void odi_gpon_hw_eqd_rewrite(uint32_t eqd_bits);
 
 /* ---- Seams for odi_gpon.c, which owns the kernel clock and timers while

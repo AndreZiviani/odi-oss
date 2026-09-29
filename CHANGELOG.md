@@ -5,6 +5,28 @@ listed here.
 
 ## Unreleased
 
+- omcid takes the T-CONT Alloc-IDs from the OLT instead of a table captured
+  on one ISP1 session. A T-CONT the OLT sets over OMCI keeps what it set
+  (G.988 9.2.2, as ISP2 does); one it never sets (ISP1 sets none) is bound to
+  the next Alloc-ID the OLT assigned by PLOAM, in assignment order, from
+  `alloc_ids` in `/proc/odi_gpon`, and reads 0x00FF (unassigned, not
+  programmed) when there is none. A MIB upload and a Get of the AllocID
+  answer the same. A change in the PLOAM list reprograms the T-CONTs bound
+  to it, and logs `event=alloc_ids`. Before, an OLT assigning any other
+  Alloc-IDs got ISP1's reported and sent to the driver. `omcli tcont` shows
+  each T-CONT's Alloc-ID and its source; `omcid -g` reads a file in place
+  of `/proc/odi_gpon` for the tests.
+- omcid no longer treats a deleted or MIB-reset row as live: the store walk
+  behind the upstream QoS and bridge-connection rebuilds handed out free
+  slots, which keep the class and data of their last row. After one OLT
+  session and a MIB reset, the next rebuild programmed every GEM port and
+  T-CONT of the old session again (seen under qemu: the ISP1 session, then
+  the ISP2 one, into one omcid).
+- The kernel releases an Alloc-ID the OLT deallocates (Assign_Alloc-ID type
+  255, G.984.3 9.2.3.9): its CAM row is deleted and freed for the next
+  assignment, and it leaves `alloc_ids`. Before, a deallocation was stored as
+  one more assignment.
+
 ## v1.1.1 — 2026-09-29
 
 - Pins odi-ui confd v1.1.1 (was v1.1.0): the trial banner no longer claims

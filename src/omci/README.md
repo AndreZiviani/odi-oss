@@ -110,6 +110,7 @@ those shipped binaries, kept here as provenance rather than in the code.
 | `apply_priq()` | `PriQDrvCfg` (`mib_PriQ.so`), `omci_wrapper_setPriQueue` | sent on a class 277 Set; the stock setPriQueue returns before the driver for an upstream queue (bit 15) |
 | queue weights | `mibTable_init` of `mib_PriQ.so` | the initial values the stock queue table stages |
 | `tcont_apply()` | `TcontDrvCfg` | Alloc-IDs it refuses: 0xff and 4096 or more |
+| `tcont_alloc_id()` | the T-CONT AllocID values of the stock MIB on ISP1 | a T-CONT the OLT never set takes the next PLOAM Alloc-ID (`/proc/odi_gpon`, `alloc_ids`) in assignment order, as the stock MIB shows it doing; an OMCI-set one keeps its value (G.988 9.2.2) |
 | `bc_gem_update()`, `bc_gem_withdraw()` | `MacBriPortCfgDataDrvCfg` | the broadcast flow lookup and its delete arm |
 | `apply_mbpcd()`, `delete_mbpcd()` | `MacBriPortCfgDataDrvCfg` | its create, set and delete arms; the global default learning limit is in `gInfo[0xe4]`, runtime data that no store in the binary writes, so it is not recovered |
 | `mbpcd_uni_rate()` | `omci_apply_traffic_descriptor_to_uni_port` | whole |

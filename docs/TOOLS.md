@@ -123,7 +123,7 @@ their VLAN rules, over the odi_omci netlink command path into the
 `odi_switch` driver built into the kernel (`docs/KERNEL.md`). This is the
 daemon that decides whether the OLT sees a working ONU.
 
-    omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state]
+    omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state] [-g file]
 
     -a          program the switch (apply mode); without it, dry run
     -r          restart: first remove every bridge connection a previous
@@ -134,6 +134,8 @@ daemon that decides whether the OLT sees a working ONU.
     -s state    use this ONU state for the resume decision instead of
                 asking the driver (test only; see docs/BOOT.md, "Resume
                 without re-registration")
+    -g file     read the Alloc-IDs and the serial from this file instead
+                of /proc/odi_gpon (test only)
     -f          start even if a live process holds redirect type 1
     -h          this text; starts nothing
 
@@ -160,6 +162,17 @@ looked up in both store files, the one xmlconfig assigns it to first. Its
 start-up line in the log says what it found (`store: loid ..., manual vlan
 ..., identity report ...`). A change takes effect with `apply.sh omci`;
 `docs/SETTINGS.md` has what each one does.
+
+The T-CONT Alloc-IDs are the OLT's own. A T-CONT (ME 262) the OLT set over
+OMCI keeps the Alloc-ID it was set to (G.988 9.2.2). One it never set -- ISP1
+sets none -- takes the next Alloc-ID the OLT assigned by PLOAM that no set
+T-CONT claims, in assignment order, from the kernel's list (`alloc_ids` in
+`/proc/odi_gpon`, read once a second); with none left it reads 0x00FF,
+unassigned, and is not programmed. That is what a MIB upload and a Get of the
+AllocID answer, and what goes to the driver. When the kernel list changes (an
+assignment, a deallocation, a re-ranging) the T-CONTs bound to it are
+reprogrammed a quiet second later; `omcli tcont` shows each binding and where
+it came from.
 
 It logs every OMCI frame in and out (`<-` / `->` lines) and every driver
 call to `/var/log/omcid.log`, about 1.7 MB a day on a busy OLT before the
@@ -421,7 +434,9 @@ omcli uses omcid's own queue and commands:
                                          and the OLT's, with the values a Get
                                          returns; ends with an `N rows` line
     omcli caps                           the device capability blob, decoded
-    omcli tcont                          T-CONT entity id to driver index
+    omcli tcont                          T-CONT entity id to driver index, the
+                                         PLOAM Alloc-IDs, and each T-CONT's
+                                         Alloc-ID and where it came from
     omcli vlan [cs.xml]                  the manual VLAN from the config store,
                                          and whether the tag is applied
     omcli ident [cs.xml hs.xml]          the identity and the OLT identity
@@ -660,7 +675,7 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
-| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number, the Alloc-IDs the OLT assigned (`alloc_ids`) | -- |
+| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first) | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
@@ -711,6 +726,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=mib_upload_begin entities=301` / `event=mib_upload_end entities=301 duration_s=0.009` | info | the OLT reading the MIB back; an upload it abandons has no end line |
 | `omcid: event=provision_begin op=set class=256 inst=0 after_mib_reset=1` | info | the first Create, Set or Delete of a burst; `after_mib_reset=1` is a full re-provisioning |
 | `omcid: event=provision_end creates=82 sets=102 deletes=0 duration_s=0.827 rows=161 services=6 after_mib_reset=1` | info | 10 s after the burst's last write: what it added up to (Gets and Tests do not count) |
+| `omcid: event=alloc_ids count=5 ids=282,794,1050,1306,538` | info | the Alloc-IDs the OLT assigned by PLOAM (`/proc/odi_gpon`), when omcid first reads them and whenever they change: ranging, a deallocation, a re-ranging (`ids=none`); the T-CONTs the OLT does not set are bound to them |
 | `omcid: event=olt_reboot class=256 inst=0 result=not_supported` | notice | the OLT asked for a reboot; omcid does not do it |
 | `omcid: event=sw_image op=download_start inst=1 result=not_supported` | notice | a software download (`op=download_start`, `download_end` with `sections=N`, `activate`, `commit`); omcid refuses each |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |

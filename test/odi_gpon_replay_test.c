@@ -219,5 +219,49 @@ int main(int argc, char **argv)
 		fclose(f);
 	}
 
+	/* After the captured sequence, so none of this is in the compared
+	 * write log: Assign_Alloc-ID type 255 releases an Alloc-ID (G.984.3
+	 * 9.2.3.9), read three times like every downstream message, and the
+	 * next assignment takes the freed row. /proc/odi_gpon (alloc_ids) is
+	 * odi_gpon_get_alloc_ids(), which omcid binds its T-CONTs to.
+	 */
+	{
+		static const struct fixture_msg release_794 = { TEST_ONU_ID,
+			ODI_GPON_DS_ASSIGN_ALLOC_ID,
+			{ 0x31, 0xa0, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, 3 };
+		static const struct fixture_msg assign_1000 = { TEST_ONU_ID,
+			ODI_GPON_DS_ASSIGN_ALLOC_ID,
+			{ 0x3e, 0x80, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, 3 };
+		static const uint16_t after_release[] = { 282, 1050, 1306, 538 };
+		static const uint16_t after_assign[] = { 282, 1000, 1050, 1306, 538 };
+		uint16_t ids[32];
+		unsigned int n;
+
+		n = odi_gpon_get_alloc_ids(ids, 32);
+		if (n != 5 || ids[0] != 282 || ids[1] != 794 || ids[4] != 538) {
+			fprintf(stderr, "odi_gpon_replay_test: %u Alloc-IDs after the capture, expected the five assigned\n", n);
+			return 1;
+		}
+		for (r = 0; r < release_794.repeats; r++)
+			feed_one(&fsm, &release_794);
+		n = odi_gpon_get_alloc_ids(ids, 32);
+		if (n != 4 || memcmp(ids, after_release, sizeof after_release)) {
+			fprintf(stderr, "odi_gpon_replay_test: deallocate 794 left %u Alloc-IDs, expected 282 1050 1306 538\n", n);
+			return 1;
+		}
+		for (r = 0; r < assign_1000.repeats; r++)
+			feed_one(&fsm, &assign_1000);
+		n = odi_gpon_get_alloc_ids(ids, 32);
+		if (n != 5 || memcmp(ids, after_assign, sizeof after_assign)) {
+			fprintf(stderr, "odi_gpon_replay_test: assign 1000 after the release gave %u Alloc-IDs, expected it in the freed row\n", n);
+			return 1;
+		}
+		if (!odi_mock_locks_idle()) {
+			fprintf(stderr, "odi_gpon_replay_test: a switch lock is still held after the release\n");
+			return 1;
+		}
+		printf("odi_gpon_replay_test: Alloc-ID release and reuse ok\n");
+	}
+
 	return 0;
 }

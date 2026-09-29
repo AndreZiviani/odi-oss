@@ -408,6 +408,26 @@ void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst)
 	ev_emit(&e, EV_SEV_NOTICE);
 }
 
+/* The Alloc-IDs the OLT assigned by PLOAM, whenever the kernel list
+ * changes (apply_qos.c binds the T-CONTs the OLT does not set to them):
+ * during ranging, on a deallocation, and when a re-ranging clears them. */
+void ev_alloc_ids(const uint16_t *ids, unsigned n)
+{
+	struct evline e;
+
+	ev_begin(&e, "alloc_ids");
+	ev_num(&e, "count", n);
+	ev_put(&e, " ids=");
+	for (unsigned i = 0; i < n; i++) {
+		if (i)
+			ev_put(&e, ",");
+		ev_putu(&e, ids[i]);
+	}
+	if (!n)
+		ev_put(&e, "none");
+	ev_emit(&e, EV_SEV_INFO);
+}
+
 /* Once a second, from the main loop. */
 void ev_tick(void)
 {

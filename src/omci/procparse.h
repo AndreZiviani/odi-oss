@@ -7,7 +7,9 @@
  *                    (kernel/extra/drivers/net/ethernet/odi/odi_omci.c,
  *                    odi_omci_proc_show).
  *   /proc/odi_gpon   a "sn <16 hex digits>" line -- the serial number the
- *                    GPON block ranges with (odi_gpon.c, odi_gpon_proc_show).
+ *                    GPON block ranges with -- and "alloc_ids <n> <id>...",
+ *                    the Alloc-IDs the OLT assigned by PLOAM (odi_gpon.c,
+ *                    odi_gpon_proc_show).
  */
 #ifndef ODI_OMCI_PROCPARSE_H
 #define ODI_OMCI_PROCPARSE_H
@@ -115,6 +117,49 @@ static inline int pp_gpon_sn(const char *buf, unsigned len, uint8_t sn[8])
 	for (unsigned k = 0; k < 8; k++)
 		sn[k] = tmp[k];
 	return 0;
+}
+
+/* The Alloc-IDs from /proc/odi_gpon's "alloc_ids" line: a count, then
+ * that many decimal ids, in CAM row order (the order the OLT assigned
+ * them, a released row reused first). Returns the number stored in out[]
+ * (at most max), or -1 when there is no such line or it is malformed:
+ * short of its count, an id past 4095 (a 12-bit G.984.3 Alloc-ID), or
+ * anything else on the line. "cannot tell" and "none assigned" differ,
+ * and a caller treats -1 as the former. */
+static inline int pp_gpon_alloc_ids(const char *buf, unsigned len, uint16_t *out,
+				    unsigned max)
+{
+	int at = pp_find_line(buf, len, "alloc_ids");
+	unsigned i, count = 0, got = 0;
+	int digits = 0;
+
+	if (at < 0)
+		return -1;
+	i = (unsigned)at + 9;                   /* past "alloc_ids" */
+	if (i >= len || buf[i] != ' ')
+		return -1;
+	for (i++; i < len && buf[i] >= '0' && buf[i] <= '9'; i++, digits++)
+		if ((count = count * 10 + (unsigned)(buf[i] - '0')) > 4096)
+			return -1;
+	if (!digits)
+		return -1;
+	for (unsigned k = 0; k < count; k++) {
+		uint32_t v = 0;
+
+		if (i >= len || buf[i] != ' ')
+			return -1;
+		digits = 0;
+		for (i++; i < len && buf[i] >= '0' && buf[i] <= '9'; i++, digits++)
+			if ((v = v * 10 + (uint32_t)(buf[i] - '0')) > 4095)
+				return -1;
+		if (!digits)
+			return -1;
+		if (got < max)
+			out[got++] = (uint16_t)v;
+	}
+	if (i < len && buf[i] != '\n')
+		return -1;
+	return (int)got;
 }
 
 /* The config store keeps GPON_SN as it is printed on the label: four vendor
