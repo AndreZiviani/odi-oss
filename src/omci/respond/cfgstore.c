@@ -847,7 +847,10 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		m |= CFGD_VLAN_MODE;
 	if (o->vlan.vid != n->vlan.vid)
 		m |= CFGD_VLAN_VID;
-	if (o->vlan.pri != n->vlan.pri)
+	/* An absent priority reads as 0, so its presence shows only in whether
+	 * the manual tag applies at all (type 1, mode 1, VID and priority). */
+	if (o->vlan.pri != n->vlan.pri ||
+	    (o->vlan.manual != n->vlan.manual && !(m & CFGD_VLAN)))
 		m |= CFGD_VLAN_PRI;
 	return m;
 }

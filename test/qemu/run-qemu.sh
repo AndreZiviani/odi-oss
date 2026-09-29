@@ -259,10 +259,11 @@ ppid=$(sshx "sed 's/^[0-9]* ([^)]*) . \([0-9]*\) .*/\1/' /proc/$pid0/stat")
 out=$(sshx '/etc/scripts/apply.sh omci') || fail "apply.sh omci with nothing changed failed: $out"
 echo "$out" | grep -q 'nothing changed' || fail "apply.sh omci did not say nothing changed: $out"
 echo "  unchanged store: $(echo "$out" | tail -n 1)"
-# The four VLAN keys, added to the store the way the stock file carries them.
+# The four VLAN keys, added to the store the way the stock file carries them
+# (a priority of 0 is what an absent one reads as, so it is not a change of its own).
 sshx 'sed -i "s#</Config>#\t<Value Name=\"VLAN_CFG_TYPE\" Value=\"1\"/>\n\t<Value Name=\"VLAN_MANU_MODE\" Value=\"1\"/>\n\t<Value Name=\"VLAN_MANU_TAG_VID\" Value=\"77\"/>\n\t<Value Name=\"VLAN_MANU_TAG_PRI\" Value=\"0\"/>\n</Config>#" /var/config/lastgood.xml'
 out=$(sshx '/etc/scripts/apply.sh omci') || fail "apply.sh omci after a VLAN change failed: $out"
-echo "$out" | grep -q 'VLAN handling changed (VLAN_CFG_TYPE,VLAN_MANU_MODE,VLAN_MANU_TAG_VID,VLAN_MANU_TAG_PRI): connections rebuilt in place' || fail "apply.sh omci did not report an in-place VLAN rebuild: $out"
+echo "$out" | grep -q 'VLAN handling changed (VLAN_CFG_TYPE,VLAN_MANU_MODE,VLAN_MANU_TAG_VID): connections rebuilt in place' || fail "apply.sh omci did not report an in-place VLAN rebuild: $out"
 echo "  VLAN keys changed: $(echo "$out" | tail -n 1)"
 [ "$(omcid_pids)" = "$pid0" ] || fail "omcid pid changed across a VLAN apply: $pid0 -> $(omcid_pids)"
 sshx '/etc/scripts/flash set OMCI_UNKNOWN_ME_OK 1' >/dev/null

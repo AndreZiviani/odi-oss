@@ -65,7 +65,7 @@ store() {   # store <mode> <vid> <pri> [extra lines]
 		<Value Name="VLAN_CFG_TYPE" Value="1"/>
 		<Value Name="VLAN_MANU_MODE" Value="$1"/>
 		<Value Name="VLAN_MANU_TAG_VID" Value="$2"/>
-		<Value Name="VLAN_MANU_TAG_PRI" Value="$3"/>
+$(if [ -n "$3" ]; then printf '\t\t<Value Name="VLAN_MANU_TAG_PRI" Value="%s"/>\n' "$3"; fi)
 ${4:-}	</Dir>
 </Config>
 EOF
@@ -386,6 +386,10 @@ reload_is() {
 	fi
 }
 reload_is "same store"                         none ""                    none
+store 1 11 ""
+reload_is "VLAN_MANU_TAG_PRI removed (absent reads as 0, but the tag stops applying)" vlan VLAN_MANU_TAG_PRI rebuild
+store 1 11 0
+reload_is "VLAN_MANU_TAG_PRI back, still 0" vlan VLAN_MANU_TAG_PRI     rebuild
 store 1 11 5
 reload_is "VLAN_MANU_TAG_PRI"                  vlan VLAN_MANU_TAG_PRI     rebuild
 store 1 12 5
