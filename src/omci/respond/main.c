@@ -219,7 +219,7 @@ int main(int argc, char **argv)
 	cfg_load_report();
 	out_fmt("store: loid %s, manual vlan %s, identity report %s\n",
 		ident.loid[0] ? "set" : "none",
-		vlanCfg.manual ? "on" : "off",
+		vlanCfg.manual ? "on" : "off (transparent)",
 		report.on ? "on" : "off");
 
 	/* Resume without re-registration (docs/BOOT.md): a respawned omcid

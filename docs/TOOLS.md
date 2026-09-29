@@ -151,7 +151,8 @@ refuses to start while a live one holds redirect type 1 (`-f` overrides).
 
 It reads, from the config store, once at start: the manual VLAN
 (`VLAN_MANU_TAG_VID` and `VLAN_MANU_TAG_PRI`, applied only with
-`VLAN_CFG_TYPE` 1 and `VLAN_MANU_MODE` 1, as the stock firmware gates them),
+`VLAN_CFG_TYPE` 1 and `VLAN_MANU_MODE` 1, as the stock firmware gates them;
+any other mode is transparent, `docs/SETTINGS.md`, "VLAN handling"),
 the serial number until the kernel reports one (`GPON_SN`), the LOID keys
 (answered in the CTC LOID-authentication entity), the five OLT identity keys
 (reported only while `/etc/config/omci-identity.on` exists), and

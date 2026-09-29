@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- Transparent VLAN handling, documented as a choice (`docs/SETTINGS.md`,
+  "VLAN handling"): `VLAN_MANU_MODE` 0 is "router tags" -- the stick adds
+  and removes no tag and every frame passes with its own tags, so one port
+  can carry internet, IPTV and voice as router subinterfaces; 1 is "stick
+  tags", the manual `VLAN_MANU_TAG_VID`. No new key: 0 is the stock
+  firmware's own "no manual tag", so both slots agree. On a line without
+  class 84 (ISP2) transparent builds forward-all rules, which now also put
+  the UNI and PON on every VLAN row; on a class 84 line (ISP1, FwdOp 0x10)
+  the listed VIDs pass tagged and untagged frames are discarded, as the OLT
+  provisions. `omcli vlan` prints the mode (`handling` line) and omcid says
+  `manual vlan off (transparent)` at start. `src/omci/vlan-test.sh` (in
+  `make test-omci`) builds both ISP sessions in both modes.
+
 - omcid reads the class 84 forward operation (FwdOp, G.988 table 9.3.11-1)
   and every entry of its VLAN filter list, up to twelve. Before, it built one
   VID filter from the first entry whatever the code, which is only right for

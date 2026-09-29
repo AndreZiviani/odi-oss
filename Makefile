@@ -159,11 +159,12 @@ test-diag:
 # drv-test.sh is the driver-call golden, against a test build of omcid.
 # resume-test.sh replays that same golden across a kill -9 and respawn:
 # the resumed instance's MIB and switch bookkeeping must come back
-# identical, with zero driver calls.
+# identical, with zero driver calls. vlan-test.sh builds both ISP sessions
+# with the manual tag on and off (transparent) and checks the bridge rules.
 test-omci: src
 	$(MAKE) -C src/omci/respond drvtrace
 	docker run --rm -v "$(CURDIR)":/src -w /src/src/omci "$(DIAG_IMAGE)" \
-		sh -c 'sh qemu-test.sh && sh drv-test.sh && sh resume-test.sh && sh events-test.sh'
+		sh -c 'sh qemu-test.sh && sh drv-test.sh && sh resume-test.sh && sh events-test.sh && sh vlan-test.sh'
 
 # The rcS action trace: what rcS executes and writes under /proc, for
 # three flag sets, against test/fixtures/rcs-trace-*.txt. Not part of `test`:

@@ -63,7 +63,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `LAN_IP_ADDR2` | Second management IP | that address (both sticks store 192.168.100.1) | `network.sh` | LIVE |
 | `LAN_SUBNET2` | Second management netmask | its netmask | `network.sh` | LIVE |
 | `VLAN_CFG_TYPE` | VLAN config mode | 1 lets the manual tag through; anything else is no manual tag | omcid | INTERRUPTS INTERNET |
-| `VLAN_MANU_MODE` | Manual VLAN mode | 1 tags with the VID and priority below; anything else is no manual tag | omcid | INTERRUPTS INTERNET |
+| `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid | INTERRUPTS INTERNET |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid | INTERRUPTS INTERNET |
 | `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of that tag | omcid | INTERRUPTS INTERNET |
 | `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password, stored as hex; empty means none is sent | rcS `gponpw auto`; `apply.sh omci` re-sends it | INTERRUPTS INTERNET |
@@ -121,6 +121,8 @@ Details that bite:
   services carry no manual tag. Both lines run 1/1 (ISP1: VID 11, priority 0,
   read 2026-09-24; ISP2: VID 10 in the stored backup), so neither changes.
   `omcli vlan` prints whether the tag is applied.
+- **Transparent is `VLAN_MANU_MODE` 0**, not a key of its own: "VLAN
+  handling" below.
 - **The OLD LOID wins.** When `LOID` and `LOID_OLD` differ, the OLD value is
   answered -- including an empty OLD beside a set LOID, which answers
   nothing; the same for the passwords. That is the stock rule, kept so both
@@ -135,6 +137,38 @@ Details that bite:
   `GPON_ONU_MODEL`) need the UI's confirmation tick.** They cannot be
   regenerated: take a backup first.
 - **A key cannot be cleared from the UI**: `flash set` refuses an empty value.
+
+### VLAN handling: the stick tags, or the router does
+
+A service's VLAN comes from one of two places, and `VLAN_MANU_MODE` picks
+which:
+
+| `VLAN_MANU_MODE` | name | what the stick does | the router |
+|---|---|---|---|
+| 1 (with `VLAN_CFG_TYPE` 1, a VID and a priority) | stick tags | adds `VLAN_MANU_TAG_VID`/`_PRI` to untagged frames upstream and removes it downstream (and from multicast); every other service as the OLT provisions it | sends the service untagged |
+| 0 | router tags (transparent) | adds and removes no tag; every frame passes with the tags it has, both ways | tags each VLAN itself: internet, IPTV and voice on one port, as subinterfaces |
+
+Transparent is the stock firmware's own meaning of mode 0 ("no manual
+tag"), so both slots of a stick agree on it and no odi-only key is needed:
+a second key would only raise the question of which of two wins. The VID
+stays in `VLAN_MANU_TAG_VID`, so switching back is one value. `omcli vlan`
+prints the mode in force on its `handling` line, and omcid's start-up line
+says `manual vlan off (transparent)`.
+
+What passes in transparent mode is still what the OLT provisioned. On a line
+whose OLT sends class 84 VLAN filters, their forward operation (FwdOp, G.988
+table 9.3.11-1, `docs/TOOLS.md`) decides: ISP1 sends FwdOp 0x10 with one VID
+per GEM port (10 to 14), so the router's frames tagged with those VIDs pass,
+each on its own GEM port, and untagged frames are discarded -- the OLT asked
+for that. A line with no class 84 (ISP2) gets one forward-all rule per GEM
+port: every tag, and untagged frames, both ways. The switch then carries
+every VID 2..4094 on the UNI and the PON (`docs/SWITCH.md`, "CF rows").
+With the manual tag on, a FwdOp that bridges untagged frames gets the
+add-tag rule in place of a plain untagged one.
+
+Measured under qemu for both shapes (`src/omci/vlan-test.sh`); on hardware,
+not yet: PPPoE discovery on ISP2 and DHCP on ISP1 through router-tagged
+subinterfaces are the checks to run.
 
 ### The OLT identity keys, and their switch
 
