@@ -8,11 +8,11 @@
  *
  * The commands an ISP1 or ISP2 provisioning run sends are implemented,
  * with the state they need: a T-CONT list, the downstream and upstream
- * GEM flow tables indexed by the flow id omcid sends, the queue ordinal
- * of cmd 23, and for cmd 51/50 the service list and the CF table derived
- * from the bridge rules (odi_switch_bdgconn.c). Every other command is a
- * no-op success where the stock driver writes nothing, a value from that
- * state, or -EOPNOTSUPP, logged once.
+ * GEM flow tables indexed by the flow id omcid sends, the T-CONTs with
+ * an upstream queue (cmd 23), and for cmd 51/50 the service list and the
+ * CF table derived from the bridge rules (odi_switch_bdgconn.c). Every
+ * other command is a no-op success where the stock driver writes nothing,
+ * a value from that state, or -EOPNOTSUPP, logged once.
  *
  * odi_switch_cmd_reset_state() empties all of it: once at boot, and in
  * the host tests between scenarios.
@@ -27,13 +27,13 @@
 #endif
 
 /* Well above one ISP1 provisioning run (5 T-CONTs, 6 DS and 5 US GEM
- * flows, 12 bridge connections, 13 priority-queue calls), so a second
- * provisioning pass does not wrap into another service slot.
+ * flows, 12 bridge connections), so a second provisioning pass does not
+ * wrap into another service slot. Priority queues need no table: cmd 23
+ * addresses one by the T-CONT it names.
  */
 #define ODI_SW_CMD_TCONT_MAX	32
 #define ODI_SW_CMD_GEM_DS_MAX	64
 #define ODI_SW_CMD_GEM_US_MAX	64
-#define ODI_SW_CMD_PRIQ_MAX	64
 #define ODI_SW_CMD_BDGCONN_MAX	128
 
 /* The command numbers the dispatch handles that have no OMCI_*_CMD

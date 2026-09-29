@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- Upstream OMCI and upstream data survive a second provisioning in one boot.
+  The kernel placed each upstream priority queue (driver command 23) by a
+  count of the calls since boot and ignored the direction and T-CONT in its
+  argument, so the second ISP1 provisioning (an omcid identity reload, a
+  respawned omcid, any re-registration or QoS rebuild) wrote T-CONTs 5 to
+  17: it overwrote the scheduler word of the OMCC T-CONT and cleared the
+  OMCC and the five data T-CONTs from the T-CONT enable word. The ONU still
+  ranged to O5, but the OLT got no OMCI answer and deactivated it every
+  30 s until a reboot (seen on ISP1 at the second identity reload). A
+  downstream queue now writes only its port queue map, an upstream one the
+  words of the T-CONT it names, T-CONTs 0 to 15 and one queue per T-CONT
+  (the captured shape; anything else is refused and logged instead of
+  landing on another T-CONT). `test/odi_reregister_test.sh` provisions ISP1
+  three times in one boot, with two deactivations and an OLT deallocation,
+  and requires the OMCC path and every upstream queue word to be what the
+  first provisioning left.
+- CHANGELOG.md: three stray merge-conflict marker lines removed.
 - omcid takes the T-CONT Alloc-IDs from the OLT instead of a table captured
   on one ISP1 session. A T-CONT the OLT sets over OMCI keeps what it set
   (G.988 9.2.2, as ISP2 does); one it never sets (ISP1 sets none) is bound to
@@ -105,7 +122,6 @@ listed here.
 - The README web UI screenshot now links odi-ui (single source) instead of
   a copy in docs/images.
 
-||||||| parent of 46e80f7 (omcid: log unknown entities and message types once per boot; OMCI_UNKNOWN_ME_OK)
 ## v1.1.0 — 2026-09-29
 
 - Pins odi-ui confd v1.1.0 (was v1.0.8): the redesigned web UI (Status,
@@ -217,8 +233,6 @@ against upstream, verifies whatever it finds the way the existing fetch
 scripts always have, runs the test suite against the result, and opens a PR
 only if that passes. Its first real run already found and verified a kernel
 point-release bump, linux 6.18.53 -> 6.18.54, included in this change.
-||||||| parent of 99a0a0e (optics: model alarm/warning flags, LOS and a scriptable transceiver)
-||||||| parent of 8a4266c (syslog and ntp: new respawn services, both opt-in via the config store)
 **An opt-in NTP client.** The stock image has no RTC and no NTP client at
 all. `svc-ntpd.sh`, a new
 respawn entry, starts busybox `ntpd` in the foreground against

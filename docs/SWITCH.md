@@ -191,18 +191,31 @@ commands, from the command table of the shipped binary:
   the same word, 0x7. The word holds the bit of every port, so the four
   writes are one value repeated, not one per port; the repeat is kept
   because the host replay compares brackets write for write.
-- **cmd 23** has two shapes. Before any T-CONT exists it writes
-  `PORT_QUEUE_MAP` (0x01c0c0; the word at 0x01c0a0 is never written) with
-  0xd4, identical in the first eight instances. The register holds a 2-bit
-  index per port, which 0xd4 does not fit, so it is written raw. Once
-  T-CONTs are being created (instances 9 to 13, interleaved with cmd 21)
-  it writes seven `PONQ_COUNT_MASK` words: +207 (one bit per queue,
-  cumulative), +15 (8 more per instance), +190+n (the scheduling slot of
-  queue n, value 0), +208 and +212 or +213, +60+n (0) and +125+n (0x3ffff).
-  The order of +208 and +212/+213 depends on n: the first queue (n 0, the
-  only instance where +208 is 0) writes +208 first, every later queue
-  writes it second, in all five instances. +212 is used for instances 9 to
-  11 and +213 for 12 and 13.
+- **cmd 23** has two shapes, and the direction in its argument picks one.
+  A downstream queue writes `PORT_QUEUE_MAP` (0x01c0c0; the word at
+  0x01c0a0 is never written) with 0xd4, identical in the eight instances
+  ISP1 sends, all before any T-CONT exists. The register holds a 2-bit
+  index per port, which 0xd4 does not fit, so it is written raw. An
+  upstream queue (instances 9 to 13, interleaved with cmd 21) writes seven
+  `PONQ_COUNT_MASK` words for the T-CONT it names, n: +207 (one bit per
+  T-CONT in use), +15 (8 more per T-CONT), +190+n (the scheduler word of
+  T-CONT n, 1 << n), +208 and +212 or +213, +60+n (0) and +125+n
+  (0x3ffff). The order of +208 and +212/+213 depends on n: T-CONT 0 (the
+  only instance where +208 is 0) writes +208 first, every later one writes
+  it second, in all five instances. +212 is used for instances 9 to 11 and
+  +213 for 12 and 13.
+
+  T-CONT 16 is the OMCC, on the default Alloc-ID (the ONU-ID, Alloc-ID CAM
+  row 16). The module-load replay writes its scheduler word, +206 = 1, and
+  +207 = 0x10000 before any OMCI, and every upstream queue keeps bit 16 in
+  +207. So an upstream queue is programmed on T-CONTs 0-15 only, and only
+  as the one queue of its T-CONT, the shape captured; anything else is
+  refused. The slot is the T-CONT, not a count of calls, so provisioning
+  the same MIB again in one boot (a MIB reset, a respawned omcid, a
+  re-registration) writes the same words; counting calls reaches T-CONTs
+  16 and 17 on the second ISP1 provisioning, which clears the OMCC from
+  +207 and stops upstream OMCI. `test/odi_reregister_test.sh` provisions
+  three times in one boot and requires the same words after each.
 - **cmd 25** programs both directions. The downstream side is the DS GEM
   port CAM row and its `DSF_GEM_FLOW_TYPE` word (FLAGS 3 for the
   OMCI/broadcast port, 2 for data), plus the slot record the AES path
