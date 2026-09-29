@@ -304,6 +304,40 @@ static void handle_get_next(int fd, uint32_t tid, const uint8_t *f,
 
 unsigned long omci_frames_handled;
 
+int unknown_me_ok;
+
+/* The operations that name one managed entity: an unknown class on any of
+ * them is event=unknown_me. MIB reset, upload and the alarm walks address
+ * ONT data whatever the class field says, so they never are. */
+static int addresses_entity(uint8_t mt)
+{
+	return mt == OMCI_MT_CREATE || mt == OMCI_MT_DELETE ||
+	       mt == OMCI_MT_SET || mt == OMCI_MT_GET ||
+	       mt == OMCI_MT_GET_NEXT || mt == OMCI_MT_TEST;
+}
+
+/* OMCI_UNKNOWN_ME_OK: success for a Create, Set or Get of a class omcid has
+ * no model for, the answer the stock stack gives with OMCI_FAKE_OK. Nothing
+ * is stored, so a Get answers an empty attribute mask and a MIB upload never
+ * lists the entity; MIB data sync still counts a faked Create or Set, as the
+ * OLT counts every write it was told succeeded. docs/SETTINGS.md has the
+ * risk. Returns 1 when it answered. */
+static int fake_unknown(int fd, uint32_t tid, const uint8_t *f, uint8_t mt)
+{
+	uint8_t body[3] = { OMCI_OK, 0, 0 };
+
+	if (!unknown_me_ok ||
+	    (mt != OMCI_MT_CREATE && mt != OMCI_MT_SET && mt != OMCI_MT_GET))
+		return 0;
+	/* Create: result and attribute execution mask. Get: result and the
+	 * answered mask, none. Set: the result alone. */
+	send_resp(fd, tid, f, body, mt == OMCI_MT_SET ? 1 : 3);
+	if (mt != OMCI_MT_GET)
+		mib_data_sync++;
+	out("-> ok (unknown entity, answered by OMCI_UNKNOWN_ME_OK)\n");
+	return 1;
+}
+
 void handle(int fd, uint32_t tid, const uint8_t *f)
 {
 	uint8_t mt = OMCI_MT(f[2]);
@@ -358,6 +392,13 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 			out_char('\n');
 		}
 	}
+
+	/* Before the AR check, so a request that asks for no answer is
+	 * recorded too. */
+	if (!ev_msg_known(mt))
+		ev_unknown_msg(mt, cls);
+	else if (!c && addresses_entity(mt))
+		ev_unknown_me(cls, mt);
 
 	/* Before the AR check: a download section usually asks for no
 	 * acknowledgement, and it still has to be counted. */
@@ -508,6 +549,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		struct mib_row *r = c ? mib_add(cls, inst) : 0;
 		uint16_t mask;
 
+		if (!c && fake_unknown(fd, tid, f, mt))
+			return;
 		if (!r) {
 			body[0] = c ? OMCI_ERR_CMD : OMCI_ERR_UNKNOWN_ME;
 			send_resp(fd, tid, f, body, 1);
@@ -549,13 +592,18 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		struct mib_row *r = c ? mib_add(cls, inst) : 0;
 		uint16_t mask = nl_get16(f + 8);
 
+		if (!c && fake_unknown(fd, tid, f, mt))
+			return;
 		if (r)
 			mib_write(r, c, mask, f + 10, 30);
 		body[0] = r ? OMCI_OK : OMCI_ERR_UNKNOWN_ME;
 		send_resp(fd, tid, f, body, 1);
 		if (r)
 			ev_config_write(mt, cls, inst);
-		mib_data_sync++;
+		/* Only a Set that succeeded: the OLT counts the ones it was
+		 * told succeeded, and a refused one is not among them. */
+		if (r)
+			mib_data_sync++;
 		if (r) {
 			apply_entity(c, inst, r, mask, 0);
 			snapshot_save();
@@ -582,6 +630,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		handle_test(fd, tid, f, cls);
 		return;
 	}
+	if (!c && fake_unknown(fd, tid, f, mt))
+		return;
 	body[0] = c ? OMCI_ERR_CMD : OMCI_ERR_UNKNOWN_ME;
 	send_resp(fd, tid, f, body, 1);
 	out("-> not supported yet\n");

@@ -77,9 +77,11 @@ The UI's reboot confirmation says which slot it comes back on.
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
 | `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto` | REBOOT |
 | `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R` -- kernel messages and the link and provisioning `event=` lines included (docs/TOOLS.md, "Link and provisioning events"); empty means local only (the circular buffer, `logread`). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh syslog`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-syslogd.sh` | SERVICE RESTART |
+| `OMCI_UNKNOWN_ME_OK` | Answer unknown entities with success | `1` answers a Create, Set or Get of a managed entity class omcid has no model for with success instead of "unknown entity" (result 4), the counterpart of the stock `OMCI_FAKE_OK`; anything else, or absent, keeps the error. Default off. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). For an OLT that stalls its provisioning at an "unknown entity" answer; the risk is below | omcid, at start | INTERRUPTS INTERNET |
 | `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh ntp`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-ntpd.sh` | SERVICE RESTART |
 
-Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER` and `ONU_HW_VERSION` are the only
+Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION` and
+`OMCI_UNKNOWN_ME_OK` are the only
 keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
 in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
@@ -96,6 +98,21 @@ clear this file. They must never be written into `lastgood*.xml`: measured on a
 claro stick (2026-09-28), the OEM image boots with an unknown key added to that
 file and ignores it on load, but its first save rewrites the file from its
 in-memory table and silently drops the key.
+
+**The risk of `OMCI_UNKNOWN_ME_OK`.** The OLT is told a class was created or
+set when nothing was: omcid keeps no row for it and programs nothing from it.
+If the entity carried part of a service (a VLAN rule, a queue, a vendor
+extension the OLT relies on), that part is silently missing while the OLT
+believes it is in place -- the ONU reaches O5 and looks provisioned, and the
+service may still not work. A Get answers success with no attributes, and a
+MIB upload never lists the entity, so an OLT that audits the MIB against what
+it wrote can find the difference and resynchronise, over and over. MIB data
+sync counts each faked Create and Set, as the OLT does. Delete and Test of an
+unknown class already answer success without the key. Turn it on only when
+`logread | grep event=unknown_me` (or `/var/log/omcid-unknown.txt`) shows the
+OLT stopping at such a class, and check the service afterwards. It does not
+touch unknown message types (`event=unknown_msg`), which still answer "not
+supported".
 
 Why the two REBOOT keys cannot be applied live:
 
@@ -301,7 +318,8 @@ restore.
 |---|---|
 | `DEVICE_TYPE` | this image is a bridge (SFU) only |
 | `OMCI_CUSTOM_BDP`, `OMCI_CUSTOM_RDP`, `OMCI_CUSTOM_MCAST`, `OMCI_CUSTOM_ME`, `DUAL_MGMT_MODE` | select stock OMCI plugins; omcid only displays them (`omcicli get cflag`, `get dmmode`) |
-| `OMCI_FAKE_OK`, `OMCI_OLT_MODE`, `OMCI_VEIP_SLOT_ID`, `OMCI_PORT_TYPE`, `OMCI_TM_OPT`, `OMCI_WAN_QOS_QUEUE_NUM` | stock OMCI stack options with no counterpart in omcid |
+| `OMCI_FAKE_OK` | the stock OMCI stack option; this image reads its own odi-only `OMCI_UNKNOWN_ME_OK` instead (above), so the stock slot keeps its own setting |
+| `OMCI_OLT_MODE`, `OMCI_VEIP_SLOT_ID`, `OMCI_PORT_TYPE`, `OMCI_TM_OPT`, `OMCI_WAN_QOS_QUEUE_NUM` | stock OMCI stack options with no counterpart in omcid |
 | `OMCI_LOGFILE`, `OMCI_LOGFILE_MASK`, `OMCI_DBGLVL` | omcid always logs every frame to `/var/log/omcid.log` |
 | `PON_MODE`, `PON_DETECT_ENABLE`, `EPON_*` | this image is GPON only and never rewrites the PON type |
 | `PON_VENDOR_ID`, `MAC_KEY`, `GPON_PLOAM_FORMAT` | the vendor id comes from `GPON_SN`; the other two are read by the stock firmware only. Keep them in backups |

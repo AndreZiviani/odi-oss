@@ -229,6 +229,17 @@ int main(int argc, char **argv)
 		ident.loid[0] ? "set" : "none",
 		vlanCfg.manual ? "on" : "off",
 		report.on ? "on" : "off");
+	{
+		/* Only the value 1 turns it on: anything else, an absent key
+		 * included, keeps the "unknown entity" answer. */
+		char v[4];
+
+		unknown_me_ok = cfg_odi_get(CFG_ODI_PATH, "OMCI_UNKNOWN_ME_OK",
+					    v, sizeof v) == 1 && v[0] == '1';
+		out_fmt("unknown entities: %s\n", unknown_me_ok
+			? "answered ok (OMCI_UNKNOWN_ME_OK=1)"
+			: "answered unknown entity");
+	}
 
 	/* Resume without re-registration (docs/BOOT.md): a respawned omcid
 	 * whose PON is still O5, with a snapshot on disk for this exact

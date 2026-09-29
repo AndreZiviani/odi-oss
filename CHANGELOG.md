@@ -26,14 +26,24 @@ listed here.
   255, G.984.3 9.2.3.9): its CAM row is deleted and freed for the next
   assignment, and it leaves `alloc_ids`. Before, a deallocation was stored as
   one more assignment.
-||||||| 5d31d02
-- Adds `ONU_HW_VERSION`, an odi-only key (`/etc/config/odi.conf`): the ONU-G
-  Version (attribute 2, the hardware version some OLTs whitelist), reported
-  only with the OLT identity switch on, like the other identity keys. At most
-  14 printable characters; a longer or non-printable value is ignored whole
-  and the device id is answered, as before. `omcli ident` shows it. Applied
-  with `apply.sh omci` (INTERRUPTS INTERNET). The stock `HW_HWVER` key is not
-  read (docs/SETTINGS.md, "The OLT identity keys").
+- omcid logs what it does not model, once per boot: `event=unknown_me
+  class=<n> op=<create|set|get|delete|get_next|test>` for a managed entity
+  class it has no model for and `event=unknown_msg type=<n> class=<n>` for a
+  message type it does not handle, each first sighting one syslog line (the
+  usual 20-a-minute event limit applies), every sighting counted in
+  `/var/log/omcid-unknown.txt`, which `diag-bundle.sh` collects as
+  `odi-diag/log/omcid-unknown.txt`. A respawned omcid reads the file back
+  and does not log the same thing twice in one boot. The ISP1 OLT session
+  already shows three: class 351, and message types 17 and 1 sent to ONU-G.
+- New odi-only key `OMCI_UNKNOWN_ME_OK` (`/etc/config/odi.conf`, default
+  off): `1` answers a Create, Set or Get of a class omcid does not model with
+  success instead of "unknown entity", the counterpart of the stock
+  `OMCI_FAKE_OK`, for an OLT that stalls on the error. Nothing is stored, a
+  Get answers no attributes, MIB data sync counts the faked writes. Read at
+  omcid start: INTERRUPTS INTERNET (`apply.sh omci`). `docs/SETTINGS.md` has
+  the risk.
+- omcid no longer counts a refused Set (an unknown class) in MIB data sync:
+  the OLT counts only the writes it was told succeeded.
 
 ## v1.1.1 — 2026-09-29
 
@@ -45,6 +55,7 @@ listed here.
 - The README web UI screenshot now links odi-ui (single source) instead of
   a copy in docs/images.
 
+||||||| parent of 46e80f7 (omcid: log unknown entities and message types once per boot; OMCI_UNKNOWN_ME_OK)
 ## v1.1.0 — 2026-09-29
 
 - Pins odi-ui confd v1.1.0 (was v1.0.8): the redesigned web UI (Status,
