@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.1.0 — 2026-09-29
+
 - Pins odi-ui confd v1.1.0 (was v1.0.8): the redesigned web UI (Status,
   Config with subtabs, OMCI, System), a trial-boot banner with "Keep this
   image", `GET /api/diag` for the diagnostics bundle. Pins odi-sfp-exporter
