@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.2.0 — 2026-09-29
+
 - Pins odi-ui confd v1.2.0 (was v1.1.1): light/dark toggle, equal readout
   sizes, the VLAN keys as LIVE, rows for ONU_HW_VERSION, OLT_SW_DOWNLOAD and
   OMCI_UNKNOWN_ME_OK, and every setting and risky option value saying whether
