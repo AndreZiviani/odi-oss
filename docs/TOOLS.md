@@ -210,6 +210,32 @@ with a `client` label (e.g. `client="omcid"`), `wdt_mem`, `wdt_userland`,
 alert on `gpon_last_reset_reason{reason=~"wdt_.*"}` fires after a watchdog
 reset. Both need an exporter newer than v1.1.2.
 
+From the first odi-sfp-exporter release after v1.1.2 on, the
+`gpon_provision_*` families say what the ISP provisioned, so a plan change --
+a speed tier, a moved VLAN, another T-CONT -- shows up in Grafana:
+
+| metric | from |
+|---|---|
+| `gpon_provision_tconts`, `gpon_provision_tcont_info{alloc_id}` | `/proc/odi_gpon`, `alloc_ids`: the Alloc-IDs the OLT assigned by PLOAM |
+| `gpon_provision_gem_ports`, `gpon_provision_gem_port_info{gem_port,direction}` | `omcicli provision`: the GEM port network CTPs the OLT created |
+| `gpon_provision_vlan_info{vlan,source}` | the same: each VID, once per place (`vlan_filter`, `ext_vlan_filter`, `ext_vlan_treatment`) |
+| `gpon_provision_traffic_descriptors`, `gpon_provision_traffic_descriptor_{cir,pir}_bytes_per_second{descriptor}` | the same: the OLT's traffic descriptors (ME 280) and their rates |
+| `gpon_provision_mib_entities`, `gpon_provision_mib_data_sync` | the same: what omcid holds, and the MIB data sync counter |
+
+`omcicli provision` is one more fork per scrape, under the same 2 s bound as
+`dump srvflow` and skipped when that one timed out. Its answer, one line per
+item, all numbers decimal:
+
+    tcont me=32768 alloc_id=282 index=0      a T-CONT omcid programmed
+    gem me=2 port=1434 direction=3 tcont_me=32768 us_td=0 ds_td=0
+    vlan vid=10 source=vlan_filter           sorted by VID, one per source
+    td me=1 cir=12500000 pir=62500000 cbs=0 pbs=0
+    summary rows=161 tconts=5 gem_ports=6 vlans=6 traffic_descriptors=0 services=6 mib_data_sync=184
+
+The `tcont` lines are omcid's view (the T-CONTs its GEM ports use, with the
+Alloc-ID a Get of the T-CONT returns); the exporter takes the T-CONTs from
+`/proc/odi_gpon` instead, the OLT's own assignment.
+
 ### `dropbear` -- ssh and scp
 
 Started by services as
@@ -385,6 +411,9 @@ One binary; `/bin/omcicli` is a symlink to `omcli`. When omcid is running,
 omcli uses omcid's own queue and commands:
 
     omcli state                          serial, device, ONU state, MIB sync
+    omcli provision                      what the OLT provisioned: T-CONTs,
+                                         GEM ports, VLANs, traffic descriptors
+                                         (the format is under metricsd)
     omcli conn                           the bridge connections omcid built
     omcli flows                          the GEM flow tables, per direction
     omcli mib [all|classId] [entityId]   every managed entity, the ONU's own
@@ -589,7 +618,7 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
-| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number | -- |
+| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number, the Alloc-IDs the OLT assigned (`alloc_ids`) | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |

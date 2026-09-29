@@ -663,6 +663,140 @@ uint32_t cli_cfgset(void)
 	return OMCLI_OK;
 }
 
+/* `provision` -- what the OLT provisioned, one line per item, for metricsd
+ * (gpon_provision_*, odi-sfp-exporter) and for a person comparing two days:
+ *
+ *   tcont me=<id> alloc_id=<n> index=<n>     a T-CONT omcid programmed
+ *   gem me=<id> port=<n> direction=<1|2|3> tcont_me=<id> us_td=<id> ds_td=<id>
+ *   vlan vid=<n> source=<vlan_filter|ext_vlan_filter|ext_vlan_treatment>
+ *   td me=<id> cir=<B/s> pir=<B/s> cbs=<B> pbs=<B>
+ *   summary rows=<n> tconts=<n> gem_ports=<n> vlans=<n> traffic_descriptors=<n>
+ *           services=<n> mib_data_sync=<n>
+ *
+ * All numbers decimal. A VLAN is listed once per (vid, source), whichever
+ * entities name it: an ISP plan change moves a VID, not an entity count.
+ * The T-CONT lines are the ones omcid programmed into the switch; the
+ * Alloc-IDs the OLT assigned by PLOAM are the kernel's (/proc/odi_gpon,
+ * alloc_ids), which is the list to trust where the two differ. */
+#define PROV_VLANS 32
+
+static struct { uint16_t vid; uint8_t src; } prov_vlan[PROV_VLANS];
+static int prov_nvlan;
+static const char *const prov_vlan_src[] = {
+	"vlan_filter", "ext_vlan_filter", "ext_vlan_treatment" };
+
+static void prov_vlan_add(uint16_t vid, uint8_t src)
+{
+	if (vid > EVTOCD_VID_MAX)
+		return;
+	int i;
+
+	for (i = 0; i < prov_nvlan; i++)
+		if (prov_vlan[i].vid == vid && prov_vlan[i].src == src)
+			return;
+	if (prov_nvlan >= PROV_VLANS)
+		return;
+	/* Sorted by VID, then source: the store slot order the rows arrive
+	 * in is not stable across sessions, and a diff of two days should
+	 * show a changed VID, not a reshuffle. */
+	for (i = prov_nvlan; i > 0 && (prov_vlan[i - 1].vid > vid ||
+			(prov_vlan[i - 1].vid == vid && prov_vlan[i - 1].src > src)); i--)
+		prov_vlan[i] = prov_vlan[i - 1];
+	prov_vlan[i].vid = vid;
+	prov_vlan[i].src = src;
+	prov_nvlan++;
+}
+
+uint32_t cli_provision(void)
+{
+	int tconts = 0, gems = 0, tds = 0;
+	unsigned services = 0;
+
+	prov_nvlan = 0;
+	for (int i = 0; i < TCONT_MAX; i++) {
+		const struct omci_class *c = find_class(OMCI_ME_TCONT);
+		uint8_t b[2] = { 0, 0 };
+
+		if (!tcont_map[i].used || !c)
+			continue;
+		attr_value(c, tcont_map[i].meId, 1, b);
+		out_fmt("tcont me=%u alloc_id=%u index=%u\n",
+			(unsigned long)tcont_map[i].meId,
+			(unsigned long)((b[0] << 8) | b[1]),
+			(unsigned long)tcont_map[i].index);
+		tconts++;
+	}
+	for (int i = 0; i < MIB_ROWS; i++) {
+		const struct mib_row *r = &mib[i];
+		const struct omci_class *c;
+
+		if (!r->used || !(c = find_class(r->classId)))
+			continue;
+		if (r->classId == OMCI_ME_GEM_PORT_CTP) {
+			out_fmt("gem me=%u port=%u direction=%u tcont_me=%u "
+				"us_td=%u ds_td=%u\n", (unsigned long)r->inst,
+				(unsigned long)row_u32(r, c, 1),
+				(unsigned long)row_u32(r, c, 3),
+				(unsigned long)row_u32(r, c, 2),
+				(unsigned long)row_u32(r, c, 5),
+				(unsigned long)row_u32(r, c, 9));
+			gems++;
+		} else if (r->classId == OMCI_ME_TRAFFIC_DESCRIPTOR) {
+			out_fmt("td me=%u cir=%u pir=%u cbs=%u pbs=%u\n",
+				(unsigned long)r->inst,
+				(unsigned long)row_u32(r, c, 1),
+				(unsigned long)row_u32(r, c, 2),
+				(unsigned long)row_u32(r, c, 3),
+				(unsigned long)row_u32(r, c, 4));
+			tds++;
+		} else if (r->classId == OMCI_ME_VLAN_TAGGING_FILTER_DATA) {
+			int off = attr_offset(c, 1);
+			uint32_t n = row_u32(r, c, 3);
+
+			for (uint32_t k = 0; k < n && k < 12 && off >= 0 &&
+			     off + (int)(k * 2 + 2) <= MIB_ROW_MAX; k++)
+				prov_vlan_add((uint16_t)(((r->data[off + k * 2] << 8) |
+					r->data[off + k * 2 + 1]) & 0xfff), 0);
+		} else if (r->classId == OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA) {
+			for (uint8_t t = r->tbl_head; t != MIB_TBL_NONE;
+			     t = tblpool[t].next) {
+				struct evtocd_entry e;
+
+				evtocd_decode(tblpool[t].data, &e);
+				/* A filter VID counts only where its tag is
+				 * examined at all: priority 15 ignores the
+				 * tag, 14 is a default rule, and VID 4096 is
+				 * do-not-filter (above EVTOCD_VID_MAX). */
+				if (e.f_out_pri < EVTOCD_F_PRI_DEFAULT_RULE)
+					prov_vlan_add(e.f_out_vid, 1);
+				if (e.f_in_pri < EVTOCD_F_PRI_DEFAULT_RULE)
+					prov_vlan_add(e.f_in_vid, 1);
+				/* A treatment VID counts only where a tag is
+				 * added (priority 15 adds none) and the VID
+				 * is assigned, not copied (4096/4097). */
+				if (e.remove_tags != EVTOCD_T_DISCARD_FRAME) {
+					if (e.t_out_pri != EVTOCD_T_PRI_DO_NOT_ADD)
+						prov_vlan_add(e.t_out_vid, 2);
+					if (e.t_in_pri != EVTOCD_T_PRI_DO_NOT_ADD)
+						prov_vlan_add(e.t_in_vid, 2);
+				}
+			}
+		}
+	}
+	for (int i = 0; i < prov_nvlan; i++)
+		out_fmt("vlan vid=%u source=%s\n", (unsigned long)prov_vlan[i].vid,
+			prov_vlan_src[prov_vlan[i].src]);
+	for (int i = 0; i < SERV_MAX; i++)
+		services += servtab[i].in_use ? 1u : 0u;
+	out_fmt("summary rows=%u tconts=%u gem_ports=%u vlans=%u "
+		"traffic_descriptors=%u services=%u mib_data_sync=%u\n",
+		(unsigned long)mib_count(), (unsigned long)tconts,
+		(unsigned long)gems, (unsigned long)prov_nvlan,
+		(unsigned long)tds, (unsigned long)services,
+		(unsigned long)mib_data_sync);
+	return OMCLI_OK;
+}
+
 uint32_t cli_help(void)
 {
 	out("omcid commands\n"
@@ -673,6 +807,8 @@ uint32_t cli_help(void)
 	    "  conn                           the bridge connections we built\n"
 	    "  bridge <ingress|any> <gem> <dir>  build one N:1 all-pass rule\n"
 	    "  state                          serial, device, onu state\n"
+	    "  provision                      what the OLT provisioned: T-CONTs,\n"
+	    "                                 GEM ports, VLANs, traffic descriptors\n"
 	    "  ident [cs] [hs]                identity from the config store\n"
 	    "  cfgset <file> <dir> <key> <v>  write one key into a config store\n"
 	    "  help\n");

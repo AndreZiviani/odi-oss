@@ -761,6 +761,8 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 	int irq_isr_rc, irq_imr_rc;
 	unsigned int irq_spurious;
 	uint32_t last_top_sts, last_ds_dlt, last_us_sts;
+	uint16_t alloc_ids[32];
+	unsigned int n_alloc;
 
 	(void)v;
 
@@ -783,6 +785,7 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 	last_top_sts = odi_gpon_last_top_sts_nonzero;
 	last_ds_dlt = odi_gpon_last_ds_dlt_nonzero;
 	last_us_sts = odi_gpon_last_us_sts_nonzero;
+	n_alloc = odi_gpon_get_alloc_ids(alloc_ids, ARRAY_SIZE(alloc_ids));
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 
 	{
@@ -795,6 +798,13 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 		   sn[0], sn[1], sn[2], sn[3], sn[4], sn[5], sn[6], sn[7]);
 	seq_printf(seq, "eqd multiframe %u inframe %u\n", eqd.multiframe, eqd.inframe);
 	seq_printf(seq, "ploam ds_rx %u us_tx %u\n", counts.ds_rx, counts.us_tx);
+	/* The Alloc-IDs the OLT assigned (Assign_Alloc-ID), one line: the
+	 * count, then each id. metricsd reads it for gpon_provision_tcont_info.
+	 */
+	seq_printf(seq, "alloc_ids %u", n_alloc);
+	for (i = 0; i < n_alloc; i++)
+		seq_printf(seq, " %u", (unsigned int)alloc_ids[i]);
+	seq_putc(seq, '\n');
 
 	for (i = 0; i < 256U; i++) {
 		if (odi_gpon_ds_type_count[i])

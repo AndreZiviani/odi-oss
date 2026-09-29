@@ -321,6 +321,7 @@ uint32_t cli_flows(void);
 uint32_t cli_caps(void);
 uint32_t cli_tcont(void);
 uint32_t cli_state(void);
+uint32_t cli_provision(void);
 uint32_t cli_conn(void);
 void qmap_dump(void);
 uint32_t cli_bridge(void);

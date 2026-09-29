@@ -80,6 +80,17 @@ check "and closes with the session's own counts" "$got" \
 got=$(grep -c '^event=' "$log")
 check "a whole provisioning session is six event lines" "$got" "6"
 
+# `omcli provision`: what that session provisioned.
+out=$($Q cli/build/omcli provision 2>&1)
+got=$(echo "$out" | grep '^summary ')
+check "provision: the summary" "$got" \
+      "summary rows=161 tconts=5 gem_ports=6 vlans=6 traffic_descriptors=0 services=6 mib_data_sync=184"
+got=$(echo "$out" | grep -c '^gem me=[0-9]* port=[0-9]* direction=[123] tcont_me=')
+check "provision: one line per GEM port" "$got" "6"
+got=$(echo "$out" | grep '^vlan ' | tr '\n' ';')
+check "provision: the VLANs, once per source" "$got" \
+      "vlan vid=1 source=ext_vlan_treatment;vlan vid=10 source=vlan_filter;vlan vid=11 source=vlan_filter;vlan vid=12 source=vlan_filter;vlan vid=13 source=vlan_filter;vlan vid=14 source=vlan_filter;"
+
 # A MIB reset from the CLI is this side's, not the OLT's.
 $Q cli/build/omcli -f mib reset > /dev/null 2>&1
 sleep 1
