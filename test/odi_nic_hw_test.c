@@ -178,6 +178,27 @@ static void test_rx_flow_control(void)
  * At the end the flood stops, the last poll drains the ring, and *paused
  * says whether the comparator is still asserting PAUSE.
  */
+static void write_idx(unsigned int *cpu, unsigned int *last, unsigned int *min_step,
+		      unsigned int v)
+{
+	unsigned int step = (v + ODI_RX_RING_DEPTH - *last) % ODI_RX_RING_DEPTH;
+
+	if (step < *min_step)
+		*min_step = step;
+	*last = v;
+	*cpu = v;
+}
+
+static void fc(int *pause, unsigned int cpu, unsigned int hw)
+{
+	unsigned int avail = (cpu + ODI_RX_RING_DEPTH - hw) % ODI_RX_RING_DEPTH;
+
+	if (!*pause && avail <= ODI_NIC_FC_ON)
+		*pause = 1;
+	else if (*pause && avail >= ODI_NIC_FC_OFF)
+		*pause = 0;
+}
+
 static unsigned int flood(int per_desc, int *paused)
 {
 	enum { DEPTH = ODI_RX_RING_DEPTH, BUDGET = 64, POLLS = 200 };
@@ -190,34 +211,27 @@ static unsigned int flood(int per_desc, int *paused)
 		own_hw[i] = 1;
 		filled[i] = 0;
 	}
-#define WRITE_IDX(v) do { unsigned int s_ = ((v) + DEPTH - last) % DEPTH; \
-		if (s_ < min_step) min_step = s_; last = (v); cpu = (v); } while (0)
-#define FC() do { unsigned int a_ = (cpu + DEPTH - hw) % DEPTH; \
-		if (!pause && a_ <= ODI_NIC_FC_ON) pause = 1; \
-		else if (pause && a_ >= ODI_NIC_FC_OFF) pause = 0; } while (0)
 	for (p = 0; p < POLLS + 1; p++) {
 		arrivals = (p < POLLS) ? DEPTH : 0;
 		/* the ring fills up before the poll runs */
 		while (arrivals && own_hw[hw]) {
-			own_hw[hw] = 0; filled[hw] = 1; hw = (hw + 1) % DEPTH; arrivals--; FC();
+			own_hw[hw] = 0; filled[hw] = 1; hw = (hw + 1) % DEPTH; arrivals--; fc(&pause, cpu, hw);
 		}
 		for (i = 0; i < BUDGET && filled[head]; i++) {
 			filled[head] = 0; own_hw[head] = 1;
 			head = (head + 1) % DEPTH;
 			if (per_desc)
-				WRITE_IDX(odi_nic_rx_cpu_idx(head, DEPTH));
-			FC();
+				write_idx(&cpu, &last, &min_step, odi_nic_rx_cpu_idx(head, DEPTH));
+			fc(&pause, cpu, hw);
 			/* and refills behind the poll */
 			if (arrivals && own_hw[hw]) {
-				own_hw[hw] = 0; filled[hw] = 1; hw = (hw + 1) % DEPTH; arrivals--; FC();
+				own_hw[hw] = 0; filled[hw] = 1; hw = (hw + 1) % DEPTH; arrivals--; fc(&pause, cpu, hw);
 			}
 		}
 		if (!per_desc && i)
-			WRITE_IDX(odi_nic_rx_cpu_idx(head, DEPTH));
-		FC();
+			write_idx(&cpu, &last, &min_step, odi_nic_rx_cpu_idx(head, DEPTH));
+		fc(&pause, cpu, hw);
 	}
-#undef WRITE_IDX
-#undef FC
 	*paused = pause;
 	return min_step;
 }
