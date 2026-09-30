@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- docs: repair text merged into CHANGELOG.md by union-resolved rebases: the
+  v1.1.0 section had lost the entries of five changes merged the same
+  morning (the ramlog reset reason and `flash get` of an unset key, `nv
+  commit` and `slot-state.sh`, the autonomous entities in the MIB dumps, the
+  link and provisioning events, `omcli provision`), restored below from their
+  commits; a stray blank line inside the v1.2.0 list is removed, and
+  test/qemu/run-qemu.sh has its blank line back before the diagnostics scenario.
+
 ## v1.2.1 — 2026-09-29
 
 - Pins odi-sfp-exporter v1.2.1 (was v1.2.0): its alert rules no longer count
@@ -173,7 +181,6 @@ listed here.
   provisions. `omcli vlan` prints the mode (`handling` line) and omcid says
   `manual vlan off (transparent)` at start. `src/omci/vlan-test.sh` (in
   `make test-omci`) builds both ISP sessions in both modes.
-
 - omcid reads the class 84 forward operation (FwdOp, G.988 table 9.3.11-1)
   and every entry of its VLAN filter list, up to twelve. Before, it built one
   VID filter from the first entry whatever the code, which is only right for
@@ -216,6 +223,102 @@ listed here.
   v1.2.0 (was v1.1.2): `gpon_boot_count`, `gpon_last_reset_reason`,
   `gpon_config_info`, `gpon_uncommitted` and the slot series,
   `gpon_provision_*`, and the alert rules in its `prometheus/alerts.yml`.
+- The kernel records why each boot ended, and the next boot of this image
+  shows it: `/proc/odi_ramlog_prev` now ends its `previous boot:` line with
+  `reason=` -- `wdt_client:<name>`, `wdt_mem`, `wdt_userland` (written by
+  `odi_wdt` just before it forces the reset), `reboot`, `halt`, `poweroff`
+  (a reboot notifier), `panic` (a panic notifier), `oops` (a die notifier,
+  kernel mode only), `power` when neither ramlog page survived (DRAM lost: a
+  power cycle), and `unknown` when the pages survived but nothing recorded a
+  reason (a hang the hardware watchdog caught). The existing fields and
+  lines are unchanged. It lives in a new 32-byte reason block in page A
+  just before the metadata block, which keeps its offset (format 2), so page
+  A now keeps the first 3984 bytes of the log, not 4016.
+  `tools/memprobe/ramlog-read.sh` decodes it; host tests cover the block,
+  the render and the watchdog rule chosen when several fire at once.
+- `flash get` on an odi-only key that holds no value (`SYSLOG_SERVER`,
+  `NTP_SERVER`) now prints `KEY=` and exits 0, like a stock key present with
+  an empty value, instead of `GET fail.` and 1. A name that is no key at all
+  still fails. `svc-syslogd.sh` and `svc-ntpd.sh` read both the same way.
+- `METRICSD_BIN=<binary>` puts a local odi-sfp-exporter build in the image
+  instead of the pinned release (`src/fetch-releases.sh`), for trials of an
+  unreleased exporter.
+- docs/TOOLS.md lists the exporter metrics `gpon_boot_count` and
+  `gpon_last_reset_reason{reason,client}`, which read the reason above
+  (odi-sfp-exporter, after v1.1.2).
+- New `nv commit <slot>`, now the documented way to commit a trial by hand
+  once you have checked it (`docs/FLASHING.md`, "Committing"): `sw_commit`
+  into both U-Boot environment copies, the primary first and read back byte
+  for byte, only then the fallback, then both re-read. Refuses a slot that
+  is not running (`root=` in `/proc/cmdline`) or not `sw_active`, and an
+  environment without two valid copies; never writes `sw_active`.
+  Host-tested against a fake flash that fails at every step
+  (`src/nv/test/test_commit.c`, now part of `make test-host` with the
+  existing `nv` block tests).
+- An uncommitted image now says so. `/etc/scripts/slot-state.sh`, a new
+  `/etc/inittab` `once` entry, reads the U-Boot environment at boot (never
+  writes it) and records the running slot (`root=` in `/proc/cmdline`),
+  `sw_active`, `sw_tryactive`, both copies of `sw_commit`, the next boot
+  slot and `uncommitted` (1 when either copy names another slot) in
+  `/var/run/odi-slot`, a `KEY=value` file for the exporter and the web UI
+  (format in `docs/TOOLS.md`, "Slot state"). While uncommitted it puts a
+  `TRIAL BOOT` (or `HALF COMMITTED`, naming the copy that disagrees)
+  notice with the exact `nv commit` command in `/etc/motd`, which dropbear
+  prints at every interactive login, and in syslog. Nothing commits a
+  trial automatically: the update procedure ends with a manual `nv commit`
+  after checking the trial (`docs/FLASHING.md`, "Committing"). Host-tested
+  against a stub nv (`test/slot_state_test.sh`); test-qemu checks the file
+  and the login banner under the real busybox and dropbear.
+- Fixes `omcicli mib get <class>` answering `0 rows` for every entity the
+  ONU creates for itself (ONT data, SWImage, ONT2-G, the T-CONTs, ANI-G, the
+  traffic schedulers, ...), found on ISP1: the dump walked only the store
+  rows, which exist for an autonomous entity only once the OLT sets one of
+  its attributes, while a MIB upload listed all 301. So the web UI showed
+  an empty software version and no T-CONTs. `omcicli mib get`, `omcli mib`
+  and `omcicli mib getattr` now cover every entity, autonomous and
+  OLT-created, sorted by class and instance, with the values a Get returns
+  (what the OLT wrote, else the built-in answer), not the zeroes of an
+  unwritten row. Every dump now has one shape: the vendor-rendered classes
+  (84, 131, 171, 256) print their banner and blocks as before, every other
+  class prints omcid's own block, and every answer, empty or not, ends with
+  one `N rows` line (the vendor-rendered ones had none, so an empty answer
+  printed nothing at all). A name that is no class (`mib get Foo`) is
+  refused instead of dumping the whole MIB. test-omci covers an autonomous
+  class, the vendor-rendered and the empty shapes, and `getattr`.
+- **Link and provisioning events in syslog: after an outage the log says
+  who started it.** One greppable `event=` line per event, `key=value`
+  after it (docs/TOOLS.md, "Link and provisioning events", has the table
+  and how to read an outage with it). From the GPON driver, as printk
+  through klogd: every ONU state change (`event=onu_state from=O5 to=O2
+  in_state_s=... cause=deactivate_onu_id side=olt`), where `side` is `olt`
+  (a PLOAM message: deactivate, disable serial number, ranging), `timer`
+  (TO1/TO2), `line` or `local` (gponact/gpondeact), and the downstream LOS
+  bit going on and off (`event=los`), sampled at every interrupt and every
+  BER interval, so a fibre pull in O5 shows within 10 s. From omcid, to
+  `/dev/log` (facility daemon, the syslog(3) datagram; omcid has no libc)
+  and to omcid.log: its start (`run=boot|restart`, `mode=resume` or
+  `reregister` and why), an OLT or CLI MIB reset, the MIB upload, the first
+  and last write of a provisioning burst with its totals (`provision_end
+  creates=82 sets=102 ...` for the ISP1 session), and the reboot and
+  software-download requests it refuses. Rate limited on both sides (30
+  and 20 lines a minute, each saying what it dropped); nothing per
+  message. The old rate-limited `odi_gpon: state O4 -> O5 (onu_id 3)`
+  line is replaced by `event=onu_state`. test-host covers the cause
+  mapping, test-omci (`events-test.sh`) every omcid line against the ISP1
+  session, and test-qemu that kernel messages and omcid lines reach
+  `logread`.
+- New `omcli provision` and `alloc_ids` in `/proc/odi_gpon`, for the
+  exporter's `gpon_provision_*` metrics, so an ISP plan change (speed tier,
+  VLAN, T-CONT) shows on a graph. `omcli provision` prints one line per T-CONT
+  omcid programmed, GEM port network CTP, VLAN (from the VLAN tagging filter
+  data and the extended VLAN tagging table, matched or set, sorted by VID) and
+  traffic descriptor, and a summary line. `/proc/odi_gpon` gains `alloc_ids`:
+  the Alloc-IDs the OLT assigned by Assign_Alloc-ID, the T-CONT list the
+  exporter uses. omcid's own T-CONT Alloc-IDs can differ from it: for an OLT
+  that never sets them over OMCI (ISP1), a Get answered the value captured from
+  the stock stack. `METRICSD_TAG= METRICSD_BIN=<binary>` builds an image with a
+  local exporter, as `CONFD_BIN` does for confd. `events-test.sh` checks the
+  provision answer for the ISP1 session.
 - Adds `/etc/scripts/diag-bundle.sh`, the diagnostics bundle: the previous
   boot ramlog, `/var/log/*`, dmesg, `/etc/odi-build`, `/etc/version`,
   `/proc/odi_wdt/*`, uptime, meminfo, mounts, `ps`, the slot variables from
