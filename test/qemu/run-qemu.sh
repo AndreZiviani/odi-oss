@@ -400,6 +400,7 @@ echo "$banner" | grep -q "TRIAL BOOT: running slot 1, which is not committed (sw
 sshx 'logread | grep -q "slot-state: TRIAL BOOT: running slot 1"' || fail "the TRIAL BOOT notice did not reach syslog"
 sshx 'rm -rf /tmp/ss'
 echo "  odi-slot records uncommitted=1, the login banner and syslog carry the TRIAL BOOT notice"
+
 say "scenario: the diagnostics bundle is produced, and no secret is in it"
 # Known secret values, planted where a real stick keeps them: the PLOAM and
 # LOID passwords in lastgood.xml, the web UI password in confd.auth, and all
