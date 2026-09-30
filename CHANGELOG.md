@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.2.1 — 2026-09-29
+
 - Pins odi-sfp-exporter v1.2.1 (was v1.2.0): its alert rules no longer count
   the port-3 undersize frames (one per upstream OMCI reply, harmless).
 - AGENTS.md has a release checklist: every change since the last tag has an
