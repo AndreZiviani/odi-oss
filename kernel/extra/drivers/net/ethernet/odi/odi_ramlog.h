@@ -197,6 +197,7 @@ enum odi_ramlog_reason {
 	ODI_RAMLOG_REASON_POWEROFF	= 6,	/* reboot notifier, SYS_POWER_OFF; likewise */
 	ODI_RAMLOG_REASON_PANIC		= 7,	/* panic notifier */
 	ODI_RAMLOG_REASON_OOPS		= 8,	/* die notifier, a kernel-mode oops that did not panic */
+	ODI_RAMLOG_REASON_WDT_CPU_RX	= 9,	/* odi_wdt: CPU port offered frames, the NIC took none */
 };
 
 /* The saved copy: page A then page B, as the previous boot left them. */
@@ -277,7 +278,7 @@ void odi_ramlog_reason_set(unsigned char ODI_RAMLOG_MEM *page_a, uint32_t code,
 
 /* odi_ramlog_reason_name() -- the rendered name of a code: "wdt_client",
  * "wdt_mem", "wdt_userland", "reboot", "halt", "poweroff", "panic",
- * "oops", and "unknown" for NONE or any code this build does not know.
+ * "oops", "wdt_cpu_rx", and "unknown" for NONE or any code this build does not know.
  */
 const char *odi_ramlog_reason_name(uint32_t code);
 

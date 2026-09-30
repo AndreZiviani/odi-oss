@@ -23,6 +23,8 @@
 #include "odi_replay_blob.h"
 #include "odi_switch_cmd.h"
 #include "odi_switch_api.h"
+#include "odi_nic.h"
+#include "odi_wdt.h"
 
 #define DRV_NAME "odi_switch"
 
@@ -188,12 +190,51 @@ int odi_switch_mmio_ensure(void)
 	return 0;
 }
 
+/* The CPU-port RX rule of odi_wdt (odi_wdt.h): what the switch offered
+ * port 3, by the src/diag/src/mib.h counter index (odi_switch_mib.c), and
+ * what odi_nic took. Plain MMIO reads of free-running counters, safe from
+ * the watchdog timer; the sum wraps like each counter does.
+ */
+#define ODI_SW_CPU_PORT	3U
+
+static int odi_switch_cpu_rx_sample(u32 *offered, u32 *taken)
+{
+	static const uint8_t counters[] = {
+		7,	/* ifOutUcastPkts */
+		8,	/* ifOutMulticastPkts */
+		9,	/* ifOutBroadcastPkts */
+		6,	/* ifOutDiscards */
+		13,	/* dot3InPauseFrames: our own PAUSE holding it back */
+	};
+	u32 sum = 0;
+	unsigned int i;
+
+	if (!odi_switch_base || !odi_nic_rx_taken(taken))
+		return -1;
+	for (i = 0; i < ARRAY_SIZE(counters); i++) {
+		uint64_t v;
+
+		if (odi_sw_mib_get(ODI_SW_CPU_PORT, counters[i], &v) != 0)
+			return -1;
+		sum += (u32)v;
+	}
+	*offered = sum;
+	return 0;
+}
+
+static const struct odi_wdt_cpu_rx_ops odi_switch_cpu_rx_ops = {
+	.sample = odi_switch_cpu_rx_sample,
+	.report = odi_nic_report,
+};
+
 static int __init odi_switch_init(void)
 {
 	int rc = odi_switch_mmio_ensure();
 
 	if (rc)
 		return rc;
+
+	WRITE_ONCE(wdt_cpu_rx_ops, &odi_switch_cpu_rx_ops);
 
 	mutex_lock(&odi_switch_lock);
 	odi_switch_cmd_reset_state();

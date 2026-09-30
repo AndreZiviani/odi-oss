@@ -502,6 +502,7 @@ static void test_reason_recorded_and_rendered(void)
 		{ ODI_RAMLOG_REASON_POWEROFF, NULL, "poweroff" },
 		{ ODI_RAMLOG_REASON_PANIC, NULL, "panic" },
 		{ ODI_RAMLOG_REASON_OOPS, NULL, "oops" },
+		{ ODI_RAMLOG_REASON_WDT_CPU_RX, NULL, "wdt_cpu_rx" },
 		{ 99, NULL, "unknown" },
 		{ ODI_RAMLOG_REASON_WDT_CLIENT, "bad name=x", "wdt_client:bad_name_x" },
 		{ ODI_RAMLOG_REASON_WDT_CLIENT, "", "wdt_client:?" },

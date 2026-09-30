@@ -59,4 +59,11 @@ int odi_nic_rxhook_register(int portmask, int priority, odi_rxhook_fn rx);
 /* A raw frame, its length, and the descriptor words the caller filled. */
 int odi_nic_tx_words(const void *frame, unsigned short len, const struct odi_tx_words *tx);
 
+/* For odi_wdt, through the CPU-port RX rule (odi_wdt.h): the RX
+ * descriptors taken back so far, false while no device is open; and one
+ * line of NIC state for the log before a reset.
+ */
+bool odi_nic_rx_taken(u32 *taken);
+void odi_nic_report(void);
+
 #endif /* ODI_NIC_H */

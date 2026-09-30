@@ -119,12 +119,13 @@ struct odi_nic {
 	struct odi_port ports[ODI_NUM_DEVS];
 	int irq_requested;
 
-	/* Interrupt-storm guard: more than ODI_IRQ_STORM_TRIP_COUNT interrupts
-	 * within ODI_IRQ_STORM_WINDOW_MS masks the NIC and disables the line.
-	 * A masked, limping boot beats a silent livelock.
+	/* Interrupt-storm guard (odi_nic_hw.h, odi_irq_storm_note()): more
+	 * than ODI_IRQ_STORM_TRIP_COUNT interrupts that do no work within
+	 * ODI_IRQ_STORM_WINDOW_MS mask the NIC and disable the line. A masked,
+	 * limping boot beats a silent livelock; odi_wdt resets a NIC left
+	 * that way (the CPU-port RX rule, docs/SETTINGS.md).
 	 */
-	unsigned long irq_window_start;	/* jiffies at first IRQ */
-	unsigned int irq_window_count;
+	struct odi_irq_storm irq_storm;
 	int irq_storm_tripped;
 
 	/* The development state dump, after the first open only
@@ -143,6 +144,12 @@ struct odi_nic {
 	/* Diagnostic counters for the dump, read without locking. */
 	unsigned int irq_entries;
 	unsigned int napi_polls;
+
+	/* RX descriptors the poll has taken back from the hardware, frames
+	 * and drops alike: odi_wdt's measure of RX progress. Never reset, so
+	 * a reader only ever looks at the difference.
+	 */
+	u32 rx_taken;
 };
 
 static struct odi_nic odi;
@@ -323,6 +330,13 @@ static int odi_rings_alloc(struct device *dev)
 		odi.tx_ring[i].opts1 = (i == ODI_TX_RING_DEPTH - 1) ? ODI_TXD_WRAP : 0;
 	}
 
+	/* The hardware starts both rings at index 0 after odi_reset_hw(), so
+	 * a reopen after the last close starts ours there too.
+	 */
+	odi.rx_head = 0;
+	odi.tx_tail = 0;
+	odi.tx_reclaim = 0;
+
 	return 0;
 }
 
@@ -440,27 +454,25 @@ static void odi_init_hw_rings(void)
 	odi_w32(ODI_NIC_RX1_RING, (u32)odi.rx_ring_dma);
 
 	/* RX1_LAST is the depth minus one, 12 bits split low byte / high
-	 * nibble; RX1_COUNT is a separate 8-bit register (odi_nic_hw.h), and a
-	 * wider write clobbers its neighbours.
+	 * nibble; RX1_CPU_IDX and the two thresholds are single bytes of one
+	 * word (odi_nic_hw.h), and a wider write clobbers its neighbours.
+	 * Every one of them fits its low byte (the BUILD_BUG_ONs in
+	 * odi_nic_init()), so no high nibble is written.
 	 */
 	odi_w8(ODI_NIC_RX1_LAST, (u8)((ODI_RX_RING_DEPTH - 1) & 0xFF));
 	odi_w8(ODI_NIC_RX1_LAST_HI, (u8)(((ODI_RX_RING_DEPTH - 1) >> 8) & 0x0F));
-	odi_w8(ODI_NIC_RX1_COUNT, (u8)(ODI_RX_RING_DEPTH & 0xFF));
+
+	/* Flow control: every descriptor starts out handed to the hardware,
+	 * and odi_rx_cpu_idx_update() moves the index along from here.
+	 */
+	odi_w8(ODI_NIC_FC_ON_LEVEL, ODI_NIC_FC_ON);
+	odi_w8(ODI_NIC_FC_OFF_LEVEL, ODI_NIC_FC_OFF);
+	odi_w8(ODI_NIC_RX1_CPU_IDX, (u8)odi_nic_rx_cpu_idx(0, ODI_RX_RING_DEPTH));
 
 	if (odi_nic_debug)
-		pr_info(DRV_NAME ": rx1_ring wrote 0x%08x read back 0x%08x, rx1_last read back %u/%u, rx1_count read back %u\n",
+		pr_info(DRV_NAME ": rx1_ring wrote 0x%08x read back 0x%08x, rx1_last read back %u/%u, fc word read back 0x%08x\n",
 			(u32)odi.rx_ring_dma, odi_r32(ODI_NIC_RX1_RING),
-			odi_r8(ODI_NIC_RX1_LAST), odi_r8(ODI_NIC_RX1_LAST_HI), odi_r8(ODI_NIC_RX1_COUNT));
-
-	/* Free-descriptor watermarks, scaled to keep the OEM's own
-	 * near-exhaustion trigger proportion against our ring depth: see
-	 * ODI_NIC_FC_ON_FRACTION/ODI_NIC_FC_OFF_FRACTION in odi_nic_hw.h. A
-	 * flat quarter/three-quarter split asserted PAUSE toward the switch
-	 * CPU port at ordinary traffic levels; this only asserts near real
-	 * ring exhaustion.
-	 */
-	odi_w8(ODI_NIC_FC_ON_LEVEL, ODI_NIC_FC_ON_FRACTION(ODI_RX_RING_DEPTH));
-	odi_w8(ODI_NIC_FC_OFF_LEVEL, ODI_NIC_FC_OFF_FRACTION(ODI_RX_RING_DEPTH));
+			odi_r8(ODI_NIC_RX1_LAST), odi_r8(ODI_NIC_RX1_LAST_HI), odi_r32(ODI_NIC_RX1_CPU_IDX));
 
 	odi_w32(ODI_NIC_R13FC, 0);
 
@@ -516,7 +528,7 @@ static void odi_init_hw(struct net_device *mac_dev)
  */
 static void odi_start_hw(void)
 {
-	odi_w16(ODI_NIC_IRQ_MASK, ODI_NIC_IRQ_RX_OK | ODI_NIC_IRQ_RX_RUNT | ODI_NIC_IRQ_RX_FIFO_FULL | ODI_NIC_IRQ_RX_NO_DESC);
+	odi_w16(ODI_NIC_IRQ_MASK, ODI_NIC_IRQ_RX_SOURCES);
 	odi_w32(ODI_NIC_RUN1, ODI_NIC_RUN1_VAL);
 	odi_w32(ODI_NIC_RUN, ODI_NIC_RUN_VAL);
 }
@@ -794,6 +806,19 @@ static struct net_device *odi_dev_for_port(unsigned int src_port)
 
 static unsigned int odi_rx_log_count;
 
+/* Tell the flow-control logic how far the CPU has handed descriptors back
+ * (odi_nic_hw.h, RX1_CPU_IDX), after the own bit: the index must never
+ * count a descriptor the engine cannot see as its own yet. Once per
+ * descriptor, as the stock driver does, so the index only ever moves by
+ * one: once per poll it could move by the whole NAPI budget, which is the
+ * ring depth, and a full poll then wrote the same byte as the one before.
+ */
+static void odi_rx_cpu_idx_update(void)
+{
+	odi_dma_wmb();
+	odi_w8(ODI_NIC_RX1_CPU_IDX, (u8)odi_nic_rx_cpu_idx(odi.rx_head, ODI_RX_RING_DEPTH));
+}
+
 static int odi_poll(struct napi_struct *napi, int budget)
 {
 	int done = 0;
@@ -891,6 +916,8 @@ requeue:
 		d->opts1 = ODI_RXD_HANDOFF(odi.rx_head == ODI_RX_RING_DEPTH - 1 ? ODI_RXD_WRAP : 0);
 
 		odi.rx_head = odi_ring_next(odi.rx_head, ODI_RX_RING_DEPTH);
+		odi_rx_cpu_idx_update();
+		odi.rx_taken++;
 		done++;
 	}
 
@@ -899,23 +926,20 @@ requeue:
 
 	if (done < budget) {
 		napi_complete(napi);
-		odi_w16(ODI_NIC_IRQ_MASK, ODI_NIC_IRQ_RX_OK | ODI_NIC_IRQ_RX_RUNT | ODI_NIC_IRQ_RX_FIFO_FULL | ODI_NIC_IRQ_RX_NO_DESC);
+		odi_w16(ODI_NIC_IRQ_MASK, ODI_NIC_IRQ_RX_SOURCES);
 	}
 	return done;
 }
 
-/* odi_nic.debug logs the first 20 interrupts. The storm guard trips at
- * ODI_IRQ_STORM_TRIP_COUNT interrupts within ODI_IRQ_STORM_WINDOW_MS: the
- * signature of an interrupt nobody acks, re-firing forever.
+/* odi_nic.debug logs the first 20 interrupts. The storm guard
+ * (odi_irq_storm_note()) counts only the entries that schedule no RX work.
  */
-#define ODI_IRQ_STORM_WINDOW_MS		2000
-#define ODI_IRQ_STORM_TRIP_COUNT	5000
 static unsigned int odi_irq_log_count;
 
 static irqreturn_t odi_irq(int irq, void *dev_id)
 {
+	int work = 0;
 	u16 isr;
-	u32 imr_now;
 
 	odi.irq_entries++;	/* every entry: did the line fire at all */
 
@@ -929,43 +953,34 @@ static irqreturn_t odi_irq(int irq, void *dev_id)
 		odi_irq_log_count++;
 	}
 
-	if (!isr) {
-		/* Not ours (the line is shared). IRQ_NONE lets the storm guard
-		 * count re-entries.
-		 */
-		goto count_and_check;
-	}
+	/* Not ours (the line is shared): the kernel spurious-interrupt
+	 * detector counts IRQ_NONE, so a line stuck with nothing set for us
+	 * is its business, not the guard below.
+	 */
+	if (!isr)
+		return IRQ_NONE;
 
 	odi_w16(ODI_NIC_IRQ_STATUS, isr);	/* write-1-clear */
 
-	if (isr & (ODI_NIC_IRQ_RX_OK | ODI_NIC_IRQ_RX_NO_DESC | ODI_NIC_IRQ_RX_RUNT | ODI_NIC_IRQ_RX_FIFO_FULL)) {
+	if (isr & ODI_NIC_IRQ_RX_SOURCES) {
 		odi_w16(ODI_NIC_IRQ_MASK, 0);	/* mask RX sources until poll re-arms them */
-		napi_schedule(&odi.napi);
-	}
-
-count_and_check:
-	if (odi.irq_window_count == 0)
-		odi.irq_window_start = jiffies;
-	odi.irq_window_count++;
-
-	if (time_before(jiffies, odi.irq_window_start + msecs_to_jiffies(ODI_IRQ_STORM_WINDOW_MS))) {
-		if (odi.irq_window_count > ODI_IRQ_STORM_TRIP_COUNT) {
-			imr_now = odi_r32(ODI_NIC_RING_IRQ_MASK);
-			odi_w16(ODI_NIC_IRQ_MASK, 0);
-			odi_w32(ODI_NIC_RING_IRQ_MASK, 0);
-			odi.irq_storm_tripped = 1;
-			pr_alert(DRV_NAME ": interrupt storm, masked -- last irq_status=0x%04x ring_irq_mask was 0x%08x\n",
-				 isr, imr_now);
-			disable_irq_nosync(ODI_NIC_IRQ_NUM);
-			return IRQ_HANDLED;
+		if (napi_schedule_prep(&odi.napi)) {
+			__napi_schedule(&odi.napi);
+			work = 1;
 		}
-	} else {
-		/* window rolled over clean: not a storm, reset and keep counting */
-		odi.irq_window_start = jiffies;
-		odi.irq_window_count = 1;
 	}
 
-	return isr ? IRQ_HANDLED : IRQ_NONE;
+	if (odi_irq_storm_note(&odi.irq_storm, jiffies_to_msecs(jiffies), work)) {
+		u32 imr_now = odi_r32(ODI_NIC_RING_IRQ_MASK);
+
+		odi_w16(ODI_NIC_IRQ_MASK, 0);
+		odi_w32(ODI_NIC_RING_IRQ_MASK, 0);
+		odi.irq_storm_tripped = 1;
+		pr_alert(DRV_NAME ": interrupt storm, masked -- last irq_status=0x%04x ring_irq_mask was 0x%08x\n",
+			 isr, imr_now);
+		disable_irq_nosync(ODI_NIC_IRQ_NUM);
+	}
+	return IRQ_HANDLED;
 }
 
 /* odi_nic.debug: the NIC registers, the ring state and the counters, three
@@ -997,10 +1012,10 @@ static void odi_state_dump_work(struct work_struct *work)
 		if (!(odi.rx_ring[i].opts1 & ODI_RXD_HW))
 			rx_owned_clear++;
 
-	pr_info(DRV_NAME ": dump%d ring: tx1_ring=0x%08x tx1_index=0x%08x rx1_ring=0x%08x rx1_index=0x%08x rx1_count=0x%08x rx_head=%u tx_tail=%u tx_reclaim=%u tx_own=%u rx_clear=%u rxd0_opts1=0x%08x\n",
+	pr_info(DRV_NAME ": dump%d ring: tx1_ring=0x%08x tx1_index=0x%08x rx1_ring=0x%08x rx1_index=0x%08x rx1_fc=0x%08x rx_head=%u tx_tail=%u tx_reclaim=%u tx_own=%u rx_clear=%u rxd0_opts1=0x%08x\n",
 		odi.state_dump_fire,
 		odi_r32(ODI_NIC_TX1_RING), odi_r32(ODI_NIC_TX1_INDEX),
-		odi_r32(ODI_NIC_RX1_RING), odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_COUNT),
+		odi_r32(ODI_NIC_RX1_RING), odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_CPU_IDX),
 		odi.rx_head, odi.tx_tail, odi.tx_reclaim, tx_own, rx_owned_clear,
 		odi.rx_ring[0].opts1);
 
@@ -1040,8 +1055,7 @@ static int odi_ndo_open(struct net_device *dev)
 			return ret;
 		}
 		odi.napi_dev = dev;
-		odi.irq_window_start = 0;
-		odi.irq_window_count = 0;
+		odi.irq_storm.count = 0;
 		odi.irq_storm_tripped = 0;
 		odi_irq_log_count = 0;
 		odi_init_hw(dev);
@@ -1093,6 +1107,28 @@ static int odi_ndo_stop(struct net_device *dev)
 		odi_rings_free(&odi_pdev->dev);
 	}
 	return 0;
+}
+
+/* ---- For odi_wdt (odi_nic.h) ------------------------------------------- */
+
+bool odi_nic_rx_taken(u32 *taken)
+{
+	if (atomic_read(&odi_open_count) == 0)
+		return false;	/* closed: no RX expected, nothing to judge */
+	*taken = READ_ONCE(odi.rx_taken);
+	return true;
+}
+
+/* One line, from the watchdog timer right before it resets: MMIO reads
+ * and plain fields only. rx1_fc is the word at RX1_CPU_IDX (index, then
+ * the two thresholds); rx1_index has the hardware index in its high half.
+ */
+void odi_nic_report(void)
+{
+	pr_emerg(DRV_NAME ": irq_status=0x%04x irq_mask=0x%04x rx1_index=0x%08x rx1_fc=0x%08x pause=0x%02x rx_head=%u rx_taken=%u irq_entries=%u napi_polls=%u storm=%d\n",
+		 odi_r16(ODI_NIC_IRQ_STATUS), odi_r16(ODI_NIC_IRQ_MASK),
+		 odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_CPU_IDX), odi_r8(ODI_NIC_PAUSE),
+		 odi.rx_head, odi.rx_taken, odi.irq_entries, odi.napi_polls, odi.irq_storm_tripped);
 }
 
 static int odi_ndo_set_mac_address(struct net_device *dev, void *p)
@@ -1224,6 +1260,11 @@ err:
 static int __init odi_nic_init(void)
 {
 	int ret;
+
+	/* One byte each, high nibbles left at 0: odi_init_hw_rings(). */
+	BUILD_BUG_ON(ODI_RX_RING_DEPTH > 256);
+	BUILD_BUG_ON(ODI_NIC_FC_OFF > 255 || ODI_NIC_FC_OFF >= ODI_RX_RING_DEPTH);
+	BUILD_BUG_ON(ODI_NIC_FC_ON >= ODI_NIC_FC_OFF);
 
 	odi_mmio = ioremap(CPHYSADDR(ODI_NIC_MMIO_BASE), ODI_NIC_MMIO_SIZE);
 	if (!odi_mmio) {

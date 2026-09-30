@@ -292,6 +292,108 @@ static void test_mem_floor_fires_after_consecutive_low_samples(void)
 	CHECK(!(odi_wdt_deadline_tick(&st, 1000, 0) & ODI_WDT_ACTION_MEM_FLOOR), "not signaled again on a later tick");
 }
 
+/* ---- CPU-port RX liveness ----------------------------------------------- */
+
+static void cpu_rx_state(struct odi_wdt_deadline_state *st)
+{
+	odi_wdt_deadline_state_init(st);
+	st->watchdog_enabled = 1;
+	st->userland_ok = 1;
+}
+
+/* The flood that wedged the NIC: the switch keeps offering, nothing taken. */
+static void test_cpu_rx_stall_fires_after_consecutive_ticks(void)
+{
+	struct odi_wdt_deadline_state st;
+	unsigned int t, actions = 0;
+	uint32_t offered = 1000;
+
+	cpu_rx_state(&st);
+	CHECK(odi_wdt_cpu_rx_tick(&st, 1, offered, 500) == ODI_WDT_ACTION_NONE, "the first sample only sets the baseline");
+	for (t = 1; t < ODI_WDT_CPU_RX_STALL_TICKS; t++) {
+		offered += 300;
+		actions = odi_wdt_cpu_rx_tick(&st, 1, offered, 500);
+		CHECK(actions == ODI_WDT_ACTION_NONE, "not before ODI_WDT_CPU_RX_STALL_TICKS stalled ticks");
+	}
+	offered += 300;
+	actions = odi_wdt_cpu_rx_tick(&st, 1, offered, 500);
+	CHECK(actions & ODI_WDT_ACTION_CPU_RX_STALL, "CPU_RX_STALL on the Nth tick with frames offered and none taken");
+	CHECK(actions & ODI_WDT_ACTION_FORCE_RESET, "and it carries FORCE_RESET");
+	CHECK(odi_wdt_cpu_rx_tick(&st, 1, offered + 300, 500) == ODI_WDT_ACTION_NONE, "one-shot");
+	CHECK(odi_wdt_reset_reason(&st, actions, 100, NULL) == ODI_RAMLOG_REASON_WDT_CPU_RX,
+	      "the ramlog reason is wdt_cpu_rx");
+}
+
+static void test_cpu_rx_idle_port_never_resets(void)
+{
+	struct odi_wdt_deadline_state st;
+	unsigned int t;
+	int fired = 0;
+
+	cpu_rx_state(&st);
+	for (t = 0; t < 1000; t++)
+		fired |= odi_wdt_cpu_rx_tick(&st, 1, 42, 7) != ODI_WDT_ACTION_NONE;
+	CHECK(!fired, "nothing offered, nothing taken: an idle port never resets");
+}
+
+static void test_cpu_rx_progress_clears_and_idle_ticks_do_not(void)
+{
+	struct odi_wdt_deadline_state st;
+	unsigned int t;
+	uint32_t offered = 0, taken = 0;
+	int fired = 0;
+
+	cpu_rx_state(&st);
+	odi_wdt_cpu_rx_tick(&st, 1, offered, taken);
+	/* A busy port the NIC keeps up with, including one tick in a
+	 * hundred where the sample caught frames not yet taken. */
+	for (t = 0; t < 1000; t++) {
+		offered += 50;
+		if (t % 100)
+			taken += 50;
+		fired |= odi_wdt_cpu_rx_tick(&st, 1, offered, taken) != ODI_WDT_ACTION_NONE;
+	}
+	CHECK(!fired, "any descriptor taken clears the count");
+
+	/* Stalled ticks with idle ticks between them still add up. */
+	for (t = 0; t < 2 * ODI_WDT_CPU_RX_STALL_TICKS; t++) {
+		if (t % 2 == 0)
+			offered += 5;
+		fired |= (odi_wdt_cpu_rx_tick(&st, 1, offered, taken) & ODI_WDT_ACTION_CPU_RX_STALL) != 0;
+	}
+	CHECK(fired, "an idle tick neither counts nor clears a stall");
+}
+
+static void test_cpu_rx_counts_wrap_and_invalid_forgets(void)
+{
+	struct odi_wdt_deadline_state st;
+	unsigned int t;
+	int fired = 0;
+	uint32_t offered = 0xfffffff0U, taken = 0xfffffffeU;
+
+	cpu_rx_state(&st);
+	odi_wdt_cpu_rx_tick(&st, 1, offered, taken);
+	for (t = 0; t < 100; t++) {
+		offered += 7;
+		taken += 7;
+		fired |= odi_wdt_cpu_rx_tick(&st, 1, offered, taken) != ODI_WDT_ACTION_NONE;
+	}
+	CHECK(!fired, "counts that wrap past 2^32 are still progress");
+
+	/* No device open (sample invalid) in the middle of a stall: start over. */
+	for (t = 0; t < ODI_WDT_CPU_RX_STALL_TICKS - 1; t++)
+		odi_wdt_cpu_rx_tick(&st, 1, offered += 9, taken);
+	odi_wdt_cpu_rx_tick(&st, 0, 0, 0);
+	for (t = 0; t < ODI_WDT_CPU_RX_STALL_TICKS - 1; t++)
+		fired |= odi_wdt_cpu_rx_tick(&st, 1, offered += 9, taken) != ODI_WDT_ACTION_NONE;
+	CHECK(!fired, "an invalid sample (no NIC device open) forgets the stall");
+
+	st.watchdog_enabled = 0;
+	for (t = 0; t < 3 * ODI_WDT_CPU_RX_STALL_TICKS; t++)
+		fired |= odi_wdt_cpu_rx_tick(&st, 1, offered += 9, taken) != ODI_WDT_ACTION_NONE;
+	CHECK(!fired, "a disabled watchdog never resets");
+}
+
 /* ---- The reset reason recorded in the ramlog before each forced reset:
  * the rule that fired, from the actions of the same tick. ---------------- */
 
@@ -411,6 +513,11 @@ int main(void)
 	test_mem_floor_needs_consecutive_low_samples();
 	test_mem_floor_fires_after_consecutive_low_samples();
 	test_reset_reason_names_the_rule();
+
+	test_cpu_rx_stall_fires_after_consecutive_ticks();
+	test_cpu_rx_idle_port_never_resets();
+	test_cpu_rx_progress_clears_and_idle_ticks_do_not();
+	test_cpu_rx_counts_wrap_and_invalid_forgets();
 
 	test_arm_writes_the_uboot_matching_value();
 	test_kick_is_real_read_modify_write_on_kick_reg();

@@ -393,6 +393,7 @@ bit of information. Four records survive a revert:
     |---|---|
     | `wdt_client:<name>` | `odi_wdt`: that registered client missed its ping deadline |
     | `wdt_mem` | `odi_wdt`: MemAvailable stayed below the floor |
+    | `wdt_cpu_rx` | `odi_wdt`: the switch kept offering frames to the CPU port and the NIC took none for 30 s |
     | `wdt_userland` | `odi_wdt`: rcS never confirmed the boot (`userland_ok`) |
     | `reboot`, `halt`, `poweroff` | the reboot notifier: the `reboot` syscall path |
     | `panic` | the panic notifier |

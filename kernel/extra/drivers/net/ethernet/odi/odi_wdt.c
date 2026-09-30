@@ -219,6 +219,37 @@ unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned i
 	return actions;
 }
 
+unsigned int odi_wdt_cpu_rx_tick(struct odi_wdt_deadline_state *st, int valid,
+				  uint32_t offered, uint32_t taken)
+{
+	uint32_t d_offered, d_taken;
+
+	if (!valid) {
+		st->cpu_rx_have = 0;
+		st->cpu_rx_stall = 0;
+		return ODI_WDT_ACTION_NONE;
+	}
+	d_offered = offered - st->cpu_rx_offered;
+	d_taken = taken - st->cpu_rx_taken;
+	st->cpu_rx_offered = offered;
+	st->cpu_rx_taken = taken;
+	if (!st->cpu_rx_have) {
+		st->cpu_rx_have = 1;
+		return ODI_WDT_ACTION_NONE;
+	}
+	if (d_taken)
+		st->cpu_rx_stall = 0;
+	else if (d_offered && st->cpu_rx_stall < ODI_WDT_CPU_RX_STALL_TICKS)
+		st->cpu_rx_stall++;
+
+	if (st->watchdog_enabled && !st->cpu_rx_reset_signaled &&
+	    st->cpu_rx_stall >= ODI_WDT_CPU_RX_STALL_TICKS) {
+		st->cpu_rx_reset_signaled = 1;
+		return ODI_WDT_ACTION_FORCE_RESET | ODI_WDT_ACTION_CPU_RX_STALL;
+	}
+	return ODI_WDT_ACTION_NONE;
+}
+
 /* The same miss test odi_wdt_log_client_miss() uses to name a client. */
 static int odi_wdt_client_missed(const struct odi_wdt_client *c, unsigned int uptime_s)
 {
@@ -235,6 +266,8 @@ uint32_t odi_wdt_reset_reason(const struct odi_wdt_deadline_state *st, unsigned 
 		return ODI_RAMLOG_REASON_NONE;
 	if (actions & ODI_WDT_ACTION_MEM_FLOOR)
 		return ODI_RAMLOG_REASON_WDT_MEM;
+	if (actions & ODI_WDT_ACTION_CPU_RX_STALL)
+		return ODI_RAMLOG_REASON_WDT_CPU_RX;
 	if (actions & ODI_WDT_ACTION_CLIENT_MISS) {
 		for (i = 0; i < (int)ODI_WDT_MAX_CLIENTS; i++) {
 			if (odi_wdt_client_missed(&st->clients[i], uptime_s)) {
@@ -319,6 +352,9 @@ static void odi_wdt_force_reset(void)
  * be stopped first (kernel/extra/drivers/net/ethernet/odi/README.md).
  */
 void (*wdt_pre_reset_hook)(void);
+
+/* wdt_cpu_rx_ops -- declared in odi_wdt.h, set by odi_switch.c. */
+const struct odi_wdt_cpu_rx_ops *wdt_cpu_rx_ops;
 
 /* Stop the NIC DMA, then reset through the watchdog. The quiesce is MMIO
  * writes only, so this is safe with interrupts off. The hook is called
@@ -411,6 +447,11 @@ static void odi_wdt_deadline_timer_fn(struct timer_list *odi_timer_arg)
 	unsigned int uptime_s = odi_wdt_uptime_s();
 	unsigned long free_kb = si_mem_available() * (PAGE_SIZE / 1024);
 	unsigned int actions = odi_wdt_deadline_tick(&odi_wdt_state, uptime_s, free_kb);
+	const struct odi_wdt_cpu_rx_ops *rx_ops = READ_ONCE(wdt_cpu_rx_ops);
+	u32 rx_offered = 0, rx_taken = 0;
+	int rx_valid = rx_ops && rx_ops->sample(&rx_offered, &rx_taken) == 0;
+
+	actions |= odi_wdt_cpu_rx_tick(&odi_wdt_state, rx_valid, rx_offered, rx_taken);
 
 	if (actions & ODI_WDT_ACTION_HEARTBEAT)
 		pr_info(DRV_NAME ": alive at %u s, free %lu pages (%lu KB available), userland_ok=%d\n",
@@ -436,10 +477,18 @@ static void odi_wdt_deadline_timer_fn(struct timer_list *odi_timer_arg)
 	if (actions & ODI_WDT_ACTION_MEM_FLOOR)
 		pr_emerg(DRV_NAME ": MemAvailable %lu KB below the %u KB floor for %u consecutive checks -- resetting\n",
 			 free_kb, ODI_WDT_MEM_FLOOR_KB, ODI_WDT_MEM_FLOOR_CONSEC);
+	if (actions & ODI_WDT_ACTION_CPU_RX_STALL) {
+		pr_emerg(DRV_NAME ": CPU port offered frames for %u ticks (%u s) and the NIC took none (offered %u, taken %u) -- resetting\n",
+			 ODI_WDT_CPU_RX_STALL_TICKS, ODI_WDT_CPU_RX_STALL_TICKS * ODI_WDT_TICK_INTERVAL_S,
+			 rx_offered, rx_taken);
+		if (rx_ops->report)
+			rx_ops->report();
+	}
 	if (actions & ODI_WDT_ACTION_CLIENT_MISS)
 		odi_wdt_log_client_miss(uptime_s);
 	if ((actions & ODI_WDT_ACTION_FORCE_RESET) &&
-	    !(actions & (ODI_WDT_ACTION_MEM_FLOOR | ODI_WDT_ACTION_CLIENT_MISS)))
+	    !(actions & (ODI_WDT_ACTION_MEM_FLOOR | ODI_WDT_ACTION_CLIENT_MISS |
+			 ODI_WDT_ACTION_CPU_RX_STALL)))
 		pr_emerg(DRV_NAME ": userland did not confirm within %u s (uptime %u) -- resetting\n",
 			 ODI_WDT_USERLAND_DEADLINE_S, uptime_s);
 

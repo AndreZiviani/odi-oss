@@ -600,7 +600,7 @@ counts boots across ours.
 
 `odi_ramlog_meta_stamp()` writes it empty at boot. From then on the last
 writer wins: `odi_wdt.c` records the rule that fired (`wdt_client`,
-`wdt_mem`, `wdt_userland`) just before it forces the reset, and
+`wdt_mem`, `wdt_cpu_rx`, `wdt_userland`) just before it forces the reset, and
 `odi_ramlog.c` registers, at `early_initcall`, a reboot notifier
 (`reboot`, `halt`, `poweroff`; the reboot syscall path, which an emergency
 restart skips), a panic notifier at the highest priority (`panic`) and a
