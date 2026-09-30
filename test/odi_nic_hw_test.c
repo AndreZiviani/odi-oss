@@ -7,8 +7,9 @@
  * Covers: RX/TX descriptor word layout (own bit position,
  * length masks), CPU-tag pack for a frame to a given port and unpack of a
  * received tag (src port, reason, VLAN fields), ring index arithmetic
- * (wrap, full, empty), and the RX flow-control CPU index against a model
- * of the hardware comparator.
+ * (wrap, full, empty), the RX flow-control CPU index against a model
+ * of the hardware comparator, idle and under a flood, and the
+ * interrupt-storm guard.
  */
 #include <stdio.h>
 #include <string.h>
@@ -169,6 +170,110 @@ static void test_rx_flow_control(void)
 	      "a frozen index asserts PAUSE once per lap of an empty ring");
 }
 
+/* A flood, descriptor by descriptor: one frame arrives for every one the
+ * poll takes (the CPU never gets ahead), DMA governed by own bits alone,
+ * NAPI budget 64 (NAPI_POLL_WEIGHT) against a 64-deep ring. Records the
+ * CPU index writes, either after every descriptor (per_desc) or once at
+ * the end of each poll, and returns the smallest step between two writes.
+ * At the end the flood stops, the last poll drains the ring, and *paused
+ * says whether the comparator is still asserting PAUSE.
+ */
+static unsigned int flood(int per_desc, int *paused)
+{
+	enum { DEPTH = ODI_RX_RING_DEPTH, BUDGET = 64, POLLS = 200 };
+	int own_hw[DEPTH], filled[DEPTH];
+	unsigned int hw = 0, head = 0, cpu = odi_nic_rx_cpu_idx(0, DEPTH), i, p;
+	unsigned int min_step = DEPTH, last = cpu, arrivals;
+	int pause = 0;
+
+	for (i = 0; i < DEPTH; i++) {
+		own_hw[i] = 1;
+		filled[i] = 0;
+	}
+#define WRITE_IDX(v) do { unsigned int s_ = ((v) + DEPTH - last) % DEPTH; \
+		if (s_ < min_step) min_step = s_; last = (v); cpu = (v); } while (0)
+#define FC() do { unsigned int a_ = (cpu + DEPTH - hw) % DEPTH; \
+		if (!pause && a_ <= ODI_NIC_FC_ON) pause = 1; \
+		else if (pause && a_ >= ODI_NIC_FC_OFF) pause = 0; } while (0)
+	for (p = 0; p < POLLS + 1; p++) {
+		arrivals = (p < POLLS) ? DEPTH : 0;
+		/* the ring fills up before the poll runs */
+		while (arrivals && own_hw[hw]) {
+			own_hw[hw] = 0; filled[hw] = 1; hw = (hw + 1) % DEPTH; arrivals--; FC();
+		}
+		for (i = 0; i < BUDGET && filled[head]; i++) {
+			filled[head] = 0; own_hw[head] = 1;
+			head = (head + 1) % DEPTH;
+			if (per_desc)
+				WRITE_IDX(odi_nic_rx_cpu_idx(head, DEPTH));
+			FC();
+			/* and refills behind the poll */
+			if (arrivals && own_hw[hw]) {
+				own_hw[hw] = 0; filled[hw] = 1; hw = (hw + 1) % DEPTH; arrivals--; FC();
+			}
+		}
+		if (!per_desc && i)
+			WRITE_IDX(odi_nic_rx_cpu_idx(head, DEPTH));
+		FC();
+	}
+#undef WRITE_IDX
+#undef FC
+	*paused = pause;
+	return min_step;
+}
+
+static void test_rx_flow_control_flood(void)
+{
+	int paused;
+
+	/* Once per poll, a poll that takes the whole budget writes the same
+	 * byte as the poll before: the index did not move, to the hardware. */
+	CHECK(flood(0, &paused) == 0, "per-poll writes: a full-budget poll repeats the last index");
+	CHECK(flood(1, &paused) == 1, "per-descriptor writes: every write moves the index by exactly one");
+	CHECK(!paused, "after the flood the comparator releases PAUSE");
+}
+
+/* The storm guard the flood tripped, and its replacement. The old policy
+ * counted every interrupt entry; the new one only entries that schedule
+ * no RX work (odi_irq_storm_note()).
+ */
+static int old_storm_note(struct odi_irq_storm *s, unsigned long now_ms)
+{
+	if (s->count == 0 || now_ms - s->window_start_ms >= ODI_IRQ_STORM_WINDOW_MS) {
+		s->window_start_ms = now_ms;
+		s->count = 0;
+	}
+	return ++s->count > ODI_IRQ_STORM_TRIP_COUNT;
+}
+
+static void test_irq_storm_guard(void)
+{
+	struct odi_irq_storm olds = {0}, news = {0}, stuck = {0};
+	int old_trip = 0, new_trip = 0, stuck_trip = 0;
+	unsigned long us;
+
+	/* 5000 frames a second for 3 s, one interrupt each, every one of them
+	 * scheduling the poll: the NAPI shape of a CPU that keeps up. */
+	for (us = 0; us < 3000000UL; us += 200) {
+		old_trip |= old_storm_note(&olds, us / 1000);
+		new_trip |= odi_irq_storm_note(&news, us / 1000, 1);
+	}
+	CHECK(old_trip, "the old guard trips on a flood of legitimate interrupts (the test E wedge)");
+	CHECK(!new_trip, "the new guard ignores interrupts that schedule the poll");
+
+	/* A status bit that fires again as soon as it is acked, no work. */
+	for (us = 0; us < 3000000UL; us += 100)
+		stuck_trip |= odi_irq_storm_note(&stuck, us / 1000, 0);
+	CHECK(stuck_trip, "an interrupt that does no work still trips it");
+
+	/* A slow trickle of idle entries never does. */
+	stuck.count = 0;
+	stuck_trip = 0;
+	for (us = 0; us < 60000000UL; us += 1000)
+		stuck_trip |= odi_irq_storm_note(&stuck, us / 1000, 0);
+	CHECK(!stuck_trip, "1000 idle entries a second stay under the trip count");
+}
+
 int main(void)
 {
 	test_rx_own_bit();
@@ -178,6 +283,8 @@ int main(void)
 	test_cpu_tag_unpack_for_rx();
 	test_ring_wrap_full_empty();
 	test_rx_flow_control();
+	test_rx_flow_control_flood();
+	test_irq_storm_guard();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

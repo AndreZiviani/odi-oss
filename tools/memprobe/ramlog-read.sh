@@ -32,7 +32,7 @@ if all(32<=c<127 for c in crumb_tag):
 # RLGR, reason code, 16-byte detail); without it (an older image), at 4080.
 # count never passes the cap, so min(count, cap) is exact for all three.
 REASONS={0:'unknown',1:'wdt_client',2:'wdt_mem',3:'wdt_userland',4:'reboot',
-         5:'halt',6:'poweroff',7:'panic',8:'oops'}
+         5:'halt',6:'poweroff',7:'panic',8:'oops',9:'wdt_cpu_rx'}
 mm,mboot,mslot,mfmt=struct.unpack('>IIII',a[4032:4048])
 alen=min(na,4080)
 if ma==0x524c4741 and mm==0x524c474d:

@@ -50,6 +50,9 @@
 #define ODI_NIC_IRQ_SOFT		(1U << 10)
 #define ODI_NIC_IRQ_LINK	(1U << 8)	/* defined, not the real link source */
 #define ODI_NIC_IRQ_ALL	0xFFFFU
+/* The sources odi_irq() hands to the poll, and the mask the poll re-arms. */
+#define ODI_NIC_IRQ_RX_SOURCES	(ODI_NIC_IRQ_RX_OK | ODI_NIC_IRQ_RX_RUNT | \
+				 ODI_NIC_IRQ_RX_FIFO_FULL | ODI_NIC_IRQ_RX_NO_DESC)
 
 #define ODI_NIC_XFER_STATUS		0x34	/* 32-bit, aggregate TX/RX status */
 
@@ -177,6 +180,38 @@ static inline unsigned int odi_nic_rx_cpu_idx(unsigned int next_to_inspect, unsi
  * both. Bit meanings beyond these fields are not decoded here.
  */
 #define ODI_NIC_RUN1_VAL	0x30010001U
+
+/* ---- Interrupt-storm guard -------------------------------------------
+ *
+ * The signature of a storm is an interrupt that does no work: a status bit
+ * that is acked and fires again, or the line firing while the poll is
+ * already scheduled with the RX sources masked. An entry that schedules the
+ * poll is never one: with NAPI and a CPU that keeps up, every received frame
+ * is its own interrupt, so a flood of thousands of frames a second is
+ * thousands of legitimate interrupts a second. Counting those tripped the
+ * guard and left RX off for good. `now_ms` is any millisecond clock; the
+ * window restarts once it has run out.
+ */
+#define ODI_IRQ_STORM_WINDOW_MS		2000U
+#define ODI_IRQ_STORM_TRIP_COUNT	5000U
+
+struct odi_irq_storm {
+	unsigned long window_start_ms;
+	unsigned int count;	/* idle entries in the current window, 0 = no window */
+};
+
+/* Returns 1 when this entry trips the guard. */
+static inline int odi_irq_storm_note(struct odi_irq_storm *s, unsigned long now_ms,
+				      int scheduled_work)
+{
+	if (scheduled_work)
+		return 0;
+	if (s->count == 0 || now_ms - s->window_start_ms >= ODI_IRQ_STORM_WINDOW_MS) {
+		s->window_start_ms = now_ms;
+		s->count = 0;
+	}
+	return ++s->count > ODI_IRQ_STORM_TRIP_COUNT;
+}
 
 /* ---- Descriptor rings -------------------------------------------------- */
 

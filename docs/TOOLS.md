@@ -263,7 +263,7 @@ Its `path` label is `argv[0]`, so a hand-started copy is visible as such.
 since the last power cycle), and `gpon_last_reset_reason{reason="..."} 1`
 is why the previous boot ended, the `reason=` of `/proc/odi_ramlog_prev`
 (`docs/HACKING.md`, "Reading a boot you could not see"): `wdt_client`
-with a `client` label (e.g. `client="omcid"`), `wdt_mem`, `wdt_userland`,
+with a `client` label (e.g. `client="omcid"`), `wdt_mem`, `wdt_cpu_rx`, `wdt_userland`,
 `reboot`, `halt`, `poweroff`, `panic`, `oops`, `power` or `unknown`. An
 alert on `gpon_last_reset_reason{reason=~"wdt_.*"}` fires after a watchdog
 reset. Both need an exporter newer than v1.1.2.

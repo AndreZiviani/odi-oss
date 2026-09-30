@@ -43,6 +43,17 @@
  * enough, no EXPORT_SYMBOL.
  */
 extern void (*wdt_pre_reset_hook)(void);
+
+/* wdt_cpu_rx_ops -- set by odi_switch.c, the one place that sees both the
+ * switch MIB and odi_nic, for the CPU-port RX rule below. sample() returns
+ * 0 and the two running counts, or nonzero when there is nothing to judge
+ * (no NIC device open); report() logs the NIC state before the reset.
+ */
+struct odi_wdt_cpu_rx_ops {
+	int (*sample)(u32 *offered, u32 *taken);
+	void (*report)(void);
+};
+extern const struct odi_wdt_cpu_rx_ops *wdt_cpu_rx_ops;
 #endif
 
 /* ---- SOC_WDT_CTRL fields --------------------------------------------- */
@@ -110,6 +121,20 @@ extern void (*wdt_pre_reset_hook)(void);
 #define ODI_WDT_MEM_FLOOR_KB		2048U
 #define ODI_WDT_MEM_FLOOR_CONSEC	3U
 
+/* ---- CPU-port RX liveness -------------------------------------------
+ *
+ * The management path is the switch CPU port (port 3) and the NIC behind
+ * it. If the switch keeps offering it frames -- delivered (port 3
+ * ifOut{Ucast,Multicast,Broadcast}Pkts), dropped for it (ifOutDiscards),
+ * or held back by our own PAUSE (dot3InPauseFrames) -- while the NIC takes
+ * no RX descriptor back, the NIC is wedged and nothing else notices: the
+ * kernel and omcid are fine, only the stick is unreachable. That many
+ * consecutive ticks with frames offered and none taken stops the kicker.
+ * A tick with nothing offered neither counts nor clears (an idle port
+ * never resets); any descriptor taken clears it.
+ */
+#define ODI_WDT_CPU_RX_STALL_TICKS	6U	/* 30 s at ODI_WDT_TICK_INTERVAL_S */
+
 /* ---- Portable core (no __KERNEL__ dependency, host-testable) ---------- */
 
 /* odi_wdt_ctrl_encode() -- packs the five the control register fields into one
@@ -150,6 +175,7 @@ enum odi_wdt_action {
 	ODI_WDT_ACTION_FORCE_RESET	= 1U << 2,
 	ODI_WDT_ACTION_CLIENT_MISS	= 1U << 3,	/* always paired with FORCE_RESET; a registered client missed its deadline */
 	ODI_WDT_ACTION_MEM_FLOOR	= 1U << 4,	/* always paired with FORCE_RESET; MemAvailable below floor, N consecutive checks */
+	ODI_WDT_ACTION_CPU_RX_STALL	= 1U << 5,	/* always paired with FORCE_RESET; frames offered to port 3, none taken, N ticks */
 };
 
 struct odi_wdt_client {
@@ -170,6 +196,11 @@ struct odi_wdt_deadline_state {
 	struct odi_wdt_client clients[ODI_WDT_MAX_CLIENTS];
 	unsigned int mem_low_streak;	/* consecutive ticks with free_kb below the floor */
 	int mem_reset_signaled;	/* MEM_FLOOR already returned once, same one-shot shape */
+	int cpu_rx_have;		/* a previous sample to diff against */
+	uint32_t cpu_rx_offered;	/* last sample, running counts */
+	uint32_t cpu_rx_taken;
+	unsigned int cpu_rx_stall;	/* ticks with frames offered and none taken, since the last taken */
+	int cpu_rx_reset_signaled;	/* CPU_RX_STALL already returned once */
 };
 
 void odi_wdt_deadline_state_init(struct odi_wdt_deadline_state *st);
@@ -228,12 +259,23 @@ int odi_wdt_client_ping(struct odi_wdt_deadline_state *st, const char *name,
 unsigned int odi_wdt_deadline_tick(struct odi_wdt_deadline_state *st, unsigned int uptime_s,
 				    unsigned long free_kb);
 
+/* odi_wdt_cpu_rx_tick() -- the CPU-port RX rule, once per tick, given
+ * whether there is a sample (`valid`, 0 while no NIC device is open, which
+ * also forgets the previous one) and the two running counts. Returns
+ * FORCE_RESET | CPU_RX_STALL, once, when ODI_WDT_CPU_RX_STALL_TICKS ticks
+ * in a row (idle ticks skipped) saw frames offered and none taken, while
+ * the watchdog is enabled; else ODI_WDT_ACTION_NONE. Counts wrap freely:
+ * only differences are used.
+ */
+unsigned int odi_wdt_cpu_rx_tick(struct odi_wdt_deadline_state *st, int valid,
+				  uint32_t offered, uint32_t taken);
+
 /* odi_wdt_reset_reason() -- the ODI_RAMLOG_REASON_* code (odi_ramlog.h)
  * for the actions one odi_wdt_deadline_tick() returned, recorded in the
  * ramlog before the reset: ODI_RAMLOG_REASON_NONE without FORCE_RESET,
- * else WDT_MEM, WDT_CLIENT or WDT_USERLAND, in that order when several
- * fired in the same tick -- memory first, as a starved box also misses
- * pings. For WDT_CLIENT, *client is set to the first client in slot order
+ * else WDT_MEM, WDT_CPU_RX, WDT_CLIENT or WDT_USERLAND, in that order
+ * when several fired in the same tick -- memory first, as a starved box
+ * also misses pings. For WDT_CLIENT, *client is set to the first client in slot order
  * that missed its deadline (odi_wdt.c logs every one of them).
  */
 uint32_t odi_wdt_reset_reason(const struct odi_wdt_deadline_state *st, unsigned int actions,

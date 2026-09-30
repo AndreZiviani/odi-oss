@@ -500,16 +500,19 @@ kernel itself.
 | boot confirmation | 120 s of uptime (`ODI_WDT_USERLAND_DEADLINE_S`) | always, from boot | rcS writes `1` to `/proc/odi_wdt/userland_ok` once userland is up (unchanged from v1.0.1); `/etc/config/confirm-arp` (development) makes that wait for an ARP reply from the `.2` address first |
 | per-client ping deadline | one per registered client, e.g. 60 s for omcid (`ODI_WDT_OMCID_DEADLINE_S`) | registration itself, counted from that moment | rcS registers each required client once, by name and deadline, with `echo "<name> <deadline_s>" > /proc/odi_wdt/register` (idempotent: re-registering just updates the deadline AND resets the clock). The client itself pings its own deadline from its own main loop with `echo "<name>" > /proc/odi_wdt/ping` -- omcid does this every 15 s (`src/omci/respond/main.c`, `wdt_ping()`), a quarter of its 60 s deadline. A registered client that never pings at all is caught the same way one that pinged once and then stalled is (fixed 2026-09-28, hardware trial rc4: a client armed only by its own first ping is never checked if that first ping never comes, which is exactly the shape a daemon stuck before it ever pings takes). Because of this, rcS only registers a client under the same conditions that will actually start it (`svc-omcid.sh`'s own `modules.off`/binary-exists gate, mirrored in rcS before the `/proc/odi_wdt/register` write) -- a kernel too old to have `/proc/odi_wdt/register` still degrades to "never checked", silently, same as before |
 | memory floor | `MemAvailable` below 2048 KB (`ODI_WDT_MEM_FLOOR_KB`) for 3 consecutive 5 s checks (`ODI_WDT_MEM_FLOOR_CONSEC`) | always, from boot | sampled by the kernel itself every tick (`si_mem_available()`, `kernel/extra/drivers/net/ethernet/odi/odi_wdt.c`) -- no userland reader to lose along with the memory it would be reporting on. Several consecutive samples, not one, so a single allocation spike does not reset a box that is otherwise fine. This is the same "OOM took the box and nothing came back" case a 20 MB `scp` into an unbounded `/tmp` produced on ISP1 (2026-09-27), now caught kernel-side instead of by a process that OOM can also kill |
+| CPU-port RX | 6 consecutive 5 s checks (`ODI_WDT_CPU_RX_STALL_TICKS`, 30 s) in which the switch offered frames to the CPU port and the NIC took no RX descriptor back | whenever a NIC device is open | the kernel samples it each tick: "offered" is port 3 `ifOutUcastPkts` + `ifOutMulticastPkts` + `ifOutBroadcastPkts` + `ifOutDiscards` + `dot3InPauseFrames` from the switch MIB (delivered, dropped for it, or held back by our own PAUSE), "taken" is the descriptors the `odi_nic` poll handed back (`odi_switch.c`, `odi_switch_cpu_rx_sample()`). A check with nothing offered neither counts nor clears, so an idle CPU port never resets; any descriptor taken clears it. This is the case where the kernel, omcid and the switch datapath are all fine and only the stick itself is unreachable -- a flood that tripped the NIC interrupt-storm guard did that on ISP1 (2026-09-29), with no other rule able to see it. Before the reset it logs one line of NIC state (`odi_nic_report()`) |
 
 Debugging: `cat /proc/odi_wdt/clients` shows one line per registered
 client -- name, deadline, whether the first ping has armed it, and how
 long ago the last ping landed. Every reset logs which rule fired,
 ramlog-visible, before it happens (`odi_wdt_deadline_timer_fn()`):
 `"userland did not confirm within 120 s"`, `"client omcid missed its 60 s
-deadline"`, or `"MemAvailable ... below the 2048 KB floor for 3
-consecutive checks"`. The rule is also recorded as the ramlog reset
-reason, so the next boot shows it as `reason=wdt_userland`,
-`reason=wdt_client:omcid` or `reason=wdt_mem` on the `previous boot:` line
+deadline"`, `"MemAvailable ... below the 2048 KB floor for 3
+consecutive checks"`, or `"CPU port offered frames for 6 ticks (30 s) and
+the NIC took none"` followed by the `odi_nic:` state line. The rule is also
+recorded as the ramlog reset reason, so the next boot shows it as
+`reason=wdt_userland`, `reason=wdt_client:omcid`, `reason=wdt_mem` or
+`reason=wdt_cpu_rx` on the `previous boot:` line
 of `/proc/odi_ramlog_prev` (`docs/HACKING.md`, "Reading a boot you could
 not see"), and metricsd exports it as `gpon_last_reset_reason`.
 

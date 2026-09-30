@@ -242,6 +242,7 @@ const char *odi_ramlog_reason_name(uint32_t code)
 	case ODI_RAMLOG_REASON_POWEROFF:	return "poweroff";
 	case ODI_RAMLOG_REASON_PANIC:		return "panic";
 	case ODI_RAMLOG_REASON_OOPS:		return "oops";
+	case ODI_RAMLOG_REASON_WDT_CPU_RX:	return "wdt_cpu_rx";
 	default:				return "unknown";
 	}
 }

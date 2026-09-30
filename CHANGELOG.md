@@ -20,8 +20,27 @@ listed here.
   release at 48) as a margin in descriptors. This replaces the v1.0.2
   rescale of those thresholds, which only shrank the window. The ring
   indices are also reset when the rings are reallocated, to match the
-  hardware after its reset. `test/odi_nic_hw_test.c` checks the index
-  against a model of the comparator.
+  hardware after its reset. The index is written after every descriptor,
+  as the stock does, not once per poll: a poll that took the whole NAPI
+  budget (the ring depth) wrote the same byte as the poll before.
+  `test/odi_nic_hw_test.c` checks the index against a model of the
+  comparator, idle and under a flood.
+- Fixes a flood of frames to the stick (`ping -f` at 1400 bytes, ISP1)
+  leaving the management path dead until a power cycle: the `odi_nic`
+  interrupt-storm guard counted every interrupt, and with NAPI a CPU that
+  keeps up takes one interrupt per frame, so 2500 frames a second for 2 s
+  masked the NIC and disabled its interrupt for good. It now counts only
+  interrupts that schedule no RX work (a status bit that fires again, or
+  the line firing while the poll is already scheduled); a line with
+  nothing set for us is left to the kernel spurious-interrupt detector.
+- New watchdog rule, CPU-port RX: `odi_wdt` resets the board when the switch
+  keeps offering frames to the CPU port (port 3 delivered, discarded or
+  held back by our PAUSE, from the switch MIB) for 30 s while the NIC takes
+  none, logging one line of NIC state first; the ramlog reason is
+  `wdt_cpu_rx`. An idle CPU port never counts. A trial that wedges the
+  management path now reverts by itself instead of needing a power cycle.
+  Host-tested in `test/odi_wdt_test.c`; `docs/SETTINGS.md`, "Watchdog
+  rules".
 
 ## v1.2.0 — 2026-09-29
 
