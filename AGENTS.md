@@ -193,3 +193,24 @@ it:
   the ramlog does. `docs/FLASHING.md` has the procedure.
 - **`/var/log/`** on a booted image — `omcid.log` in particular records
   every OMCI frame and driver call for that boot.
+
+## Release checklist
+
+A release is cut only when the maintainer asks for one. Before tagging:
+
+1. **Every change since the last tag is in the changelog.** Walk
+   `git log --oneline <last-tag>..origin/main` and check that each merged
+   change has its entry under `## Unreleased`. Add any that are missing in
+   the release commit.
+2. **No merge debris.** `grep -nE '^(<<<<<<<|=======|>>>>>>>)' CHANGELOG.md`
+   finds nothing.
+3. **Move `## Unreleased` into the version section** named after the tag,
+   with the date, and leave an empty `## Unreleased` above it. Commit it as
+   `CHANGELOG: <tag>`, then tag that commit (`git tag -s`).
+4. **Check the published release** (`gh release view <tag>`): the assets are
+   there and the notes are the new section, not an empty one.
+5. **odi-oss only: the pins match.** `src/fetch-releases.sh` pins the latest
+   odi-ui (`CONFD_TAG`) and odi-sfp-exporter (`METRICSD_TAG`) releases that
+   should ship. If a sibling repo has unreleased changes the image needs,
+   release it first and bump the pin, with its own changelog entry, before
+   tagging odi-oss.

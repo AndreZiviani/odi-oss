@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- AGENTS.md has a release checklist: every change since the last tag has an
+  entry, no merge debris, `Unreleased` moved into the tag section, and the
+  published notes checked (odi-oss also checks its confd/metricsd pins).
+
 ## v1.2.0 — 2026-09-29
 
 - Pins odi-ui confd v1.2.0 (was v1.1.1): light/dark toggle, equal readout
