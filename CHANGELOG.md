@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+**Automated dependency bump.**
+- linux 6.18.54 -> 6.18.55
+
+
 - docs: repair text merged into CHANGELOG.md by union-resolved rebases: the
   v1.1.0 section had lost the entries of five changes merged the same
   morning (the ramlog reset reason and `flash get` of an unset key, `nv
