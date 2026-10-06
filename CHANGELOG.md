@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- gpon: the equalization delay follows G.984.3 more closely (issue 29, an
+  OLT that deactivates the ONU a few milliseconds after O5). Three changes,
+  none of which alters the registers written on the two test lines:
+  - the DELAY_HI term is added to the delay before it is split into FRAMES and
+    INFRAME, so INFRAME never reaches a whole frame; before, a delay whose
+    remainder was 118400 bits or more (about a quarter of all fibre lengths)
+    left INFRAME above a frame and FRAMES one short;
+  - a Ranging_Time with the protection path bit set is ignored, in O4 and in
+    the repeats read in O5, instead of being applied as the main path delay;
+  - an Upstream_Overhead that enables the pre-assigned delay now has it
+    written to USF_EQ_DELAY before ranging (units of 32 bytes), where it was
+    discarded and 0 written.
+  New host test `test/odi_gpon_eqd_test.sh` covers the split (a no-carry case
+  identical to the old result, and carry cases), the pre-assigned delay and
+  the protection path rule.
 - gpon: `/proc/odi_gpon` shows the PLOAM content, for debugging an OLT that
   deactivates the ONU right after O5 (issue 29). Each `ploam_ring` entry now
   carries the ONU-ID and the 10 content bytes in hex; two new lines show the

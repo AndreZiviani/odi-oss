@@ -243,11 +243,24 @@ static void hw_set_onu_id(void *ctx, uint8_t onu_id)
  *      says nothing new about the MULTFRAME/frame-division half of the
  *      formula (delay is 0 here, so that term does not exercise it).
  *
- * So: MULTFRAME = delay / frame_bits (integer), INFRAME = (delay %
- * frame_bits) + (DELAY_HI << 7), delay = 0 before ranging. This
- * reproduces both observed register values bit-for-bit from quantities
- * the capture itself gives (frame_bits is a given constant, not fit to
- * the data). FLAGGED: only one distinct NONZERO delay value exists
+ * So: total = delay + (DELAY_HI << 7), MULTFRAME = total / frame_bits,
+ * INFRAME = total % frame_bits, delay = 0 before ranging (or the
+ * pre-assigned delay, see hw_set_upstream_overhead()). This reproduces
+ * both observed register values bit-for-bit from quantities the capture
+ * itself gives (frame_bits is a given constant, not fit to the data).
+ *
+ * The additive term goes in BEFORE the division. G.984.3 defines the
+ * equalization delay as one total delay; splitting it into
+ * whole frames and a remainder is only a way to write it into two fields,
+ * so the remainder must stay below one frame. Dividing first and adding
+ * DELAY_HI << 7 to the remainder afterwards
+ * gives the same total but leaves INFRAME above one frame, with FRAMES one
+ * short, whenever the remainder is within DELAY_HI << 7 of a frame (about a
+ * quarter of all fibre lengths). Both captures have a remainder far from
+ * that edge, so they cannot tell the two orders apart; the total is the
+ * same, the register encoding is not.
+ *
+ * FLAGGED: only one distinct NONZERO delay value exists
  * across both captures (same fibre length) -- the DELAY_HI additive
  * term is now confirmed at two
  * different points, but the frame-division half of the formula is still
@@ -260,14 +273,15 @@ static void hw_set_onu_id(void *ctx, uint8_t onu_id)
 static void hw_apply_eqd(uint32_t eqd_bits)
 {
 	uint32_t min_delay, min_delay1;
-	uint32_t multframe, inframe;
+	uint32_t total, multframe, inframe;
 	uint32_t reg;
 
 	min_delay = odi_reg_read(ODI_GPON_USF_MIN_RESP_DELAY_OFF);
 	min_delay1 = ODI_GPON_USF_MIN_RESP_DELAY_DELAY_HI_GET(min_delay);
 
-	multframe = eqd_bits / (uint32_t)ODI_GPON_HW_US_FRAME_BITS;
-	inframe = (eqd_bits % (uint32_t)ODI_GPON_HW_US_FRAME_BITS) + (min_delay1 << 7);
+	total = eqd_bits + (min_delay1 << 7);
+	multframe = total / (uint32_t)ODI_GPON_HW_US_FRAME_BITS;
+	inframe = total % (uint32_t)ODI_GPON_HW_US_FRAME_BITS;
 
 	odi_gpon_hw.eqd_multframe = multframe;
 	odi_gpon_hw.eqd_inframe = inframe;
@@ -356,7 +370,6 @@ static void hw_set_upstream_overhead(void *ctx, uint8_t guard_bits, uint8_t type
 				      uint8_t power_level_mode)
 {
 	(void)ctx;
-	(void)preassigned_delay;
 	(void)power_level_mode;
 
 	odi_gpon_hw.boh_pattern = type3_pattern;
@@ -371,12 +384,18 @@ static void hw_set_upstream_overhead(void *ctx, uint8_t guard_bits, uint8_t type
 
 	odi_reg_write(ODI_GPON_DSF_SETUP_OFF, odi_reg_read(ODI_GPON_DSF_SETUP_OFF));
 
-	/* USF_EQ_DELAY is ALSO written here, before any ranging -- with no
-	 * delay yet to apply, the formula's own additive DELAY_HI term is
-	 * all that lands in it (hw_apply_eqd()'s own comment has the evidence
-	 * and why this is a second confirming data point, not a coincidence).
+	/* USF_EQ_DELAY is ALSO written here, before any ranging. G.984.3
+	 * clause 9.2.3.1 lets the OLT pre-assign the equalization delay in
+	 * Upstream_Overhead (units of 32 bytes, so 256 bits each); the FSM
+	 * hands over 0 when the OLT did not enable it. The OLT then computes
+	 * the Ranging_Time delay on the assumption that this ONU already
+	 * applied the pre-assigned value, so ignoring it shifts every ranged
+	 * burst by that amount. With no pre-assigned delay only the formula's
+	 * own additive DELAY_HI term lands in the register (hw_apply_eqd()'s
+	 * own comment has the evidence and why this is a second confirming
+	 * data point, not a coincidence).
 	 */
-	hw_apply_eqd(0U);
+	hw_apply_eqd((uint32_t)preassigned_delay * 32U * 8U);
 }
 
 static void hw_send_us_ploam(void *ctx, const struct odi_gpon_ploam *msg)

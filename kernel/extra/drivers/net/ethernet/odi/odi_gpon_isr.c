@@ -48,7 +48,11 @@ static void odi_gpon_isr_dispatch(struct odi_gpon_fsm *fsm, const struct odi_gpo
 		 */
 		if (prev_state == ODI_GPON_STATE_O5 && fsm->state == ODI_GPON_STATE_O5) {
 			odi_gpon_decode_ranging_time(msg, &ranging);
-			odi_gpon_hw_eqd_rewrite(ranging.eqd);
+			/* A protection path EqD (G.984.3 9.2.3.4) is not ours:
+			 * the FSM ignores it in O4 and so does this rewrite.
+			 */
+			if (!ranging.protection_path)
+				odi_gpon_hw_eqd_rewrite(ranging.eqd);
 		}
 		break;
 

@@ -813,6 +813,66 @@ static void test_transition_causes(void)
 		    "a message that never moves the FSM");
 }
 
+/* G.984.3 9.2.3.4: a Ranging_Time with the protection path bit set carries
+ * the protection path EqD. The FSM leaves O4 alone for it, writes no EqD,
+ * and still takes the main path message that follows.
+ */
+static void test_ranging_protection_path_ignored(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	struct odi_gpon_ploam msg;
+
+	fsm_setup(&fsm, &rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_ACTIVATE, NULL);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS_CLEAR, NULL);
+	msg = ds_upstream_overhead();
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	msg = ds_assign_onu_id(TEST_ASSIGNED_ONU_ID, test_sn);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O4, "setup reaches O4 before the protection path test");
+
+	rec_reset(&rec);
+	msg = ds_ranging_time(TEST_ASSIGNED_ONU_ID, 0x00050001U);
+	msg.content[0] = 1U;	/* protection path */
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O4, "a protection path Ranging_Time leaves the ONU in O4");
+	CHECK(rec.n == 0U, "a protection path Ranging_Time produces no action at all (no EqD write)");
+
+	msg = ds_ranging_time(TEST_ASSIGNED_ONU_ID, 0x00050001U);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O5, "the main path Ranging_Time that follows takes the ONU to O5");
+	CHECK(find_action(&rec, 0, ACT_SET_EQD) >= 0, "the main path Ranging_Time writes the EqD");
+}
+
+/* G.984.3 9.2.3.1: the pre-assigned delay is handed to the leaf only when
+ * the e flag is set, 0 otherwise.
+ */
+static void test_preassigned_delay_flag(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	struct odi_gpon_ploam msg;
+	int i;
+
+	fsm_setup(&fsm, &rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_ACTIVATE, NULL);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS_CLEAR, NULL);
+	msg = ds_upstream_overhead();	/* e=1, delay 0x0010 */
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	i = find_action(&rec, 0, ACT_SET_UPSTREAM_OVERHEAD);
+	CHECK(i >= 0 && (rec.log[i].b >> 8) == 0x0010U, "e flag set: the pre-assigned delay reaches the leaf");
+
+	fsm_setup(&fsm, &rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_ACTIVATE, NULL);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS_CLEAR, NULL);
+	msg = ds_upstream_overhead();
+	msg.content[7] = 0x00U;	/* e=0 */
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	i = find_action(&rec, 0, ACT_SET_UPSTREAM_OVERHEAD);
+	CHECK(i >= 0 && (rec.log[i].b >> 8) == 0U, "e flag clear: the leaf gets a zero pre-assigned delay");
+}
+
 int main(void)
 {
 	test_wire_pack_unpack_roundtrip();
@@ -820,6 +880,8 @@ int main(void)
 	test_us_encoders();
 	test_activation_scenario();
 	test_to1_timeout_reverts();
+	test_ranging_protection_path_ignored();
+	test_preassigned_delay_flag();
 	test_deactivate();
 	test_disable_serial_number_to_o7_and_reenable();
 	test_popup_to_o6_and_back();
