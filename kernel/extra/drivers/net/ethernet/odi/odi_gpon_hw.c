@@ -90,6 +90,14 @@ struct odi_gpon_hw_state {
 	uint32_t eqd_multframe;
 	uint32_t eqd_inframe;
 
+	/* USF_MIN_RESP_DELAY as read by the last USF_EQ_DELAY write, and the
+	 * snapshot of the last write a Ranging_Time caused (debug only,
+	 * /proc/odi_gpon): the delay bits it carried, that register value and
+	 * the MULTFRAME/INFRAME written.
+	 */
+	uint32_t eqd_min_resp;
+	struct odi_gpon_ranging_dbg rng;
+
 	/* The last DSK_SWITCH_FRAME value armed, and whether one has
 	 * been armed at all yet -- hw_switch_key()'s own dedup guard.
 	 */
@@ -263,6 +271,7 @@ static void hw_apply_eqd(uint32_t eqd_bits)
 
 	odi_gpon_hw.eqd_multframe = multframe;
 	odi_gpon_hw.eqd_inframe = inframe;
+	odi_gpon_hw.eqd_min_resp = min_delay;
 
 	reg = 0;
 	reg = ODI_GPON_USF_EQ_DELAY_FRAMES_SET(reg, multframe);
@@ -308,11 +317,24 @@ static void hw_set_ext_burst_length(uint8_t pre_ranged_bytes, uint8_t ranged_byt
 		hw_write_boh((uint32_t)odi_gpon_hw.boh_fixed_bytes + pre_ranged_bytes);
 }
 
+/* hw_apply_eqd() for an EqD that came from a Ranging_Time message, keeping
+ * what it wrote for /proc/odi_gpon.
+ */
+static void hw_apply_ranging_eqd(uint32_t eqd_bits)
+{
+	hw_apply_eqd(eqd_bits);
+	odi_gpon_hw.rng.valid = 1U;
+	odi_gpon_hw.rng.eqd_bits = eqd_bits;
+	odi_gpon_hw.rng.min_resp_delay = odi_gpon_hw.eqd_min_resp;
+	odi_gpon_hw.rng.multframe = odi_gpon_hw.eqd_multframe;
+	odi_gpon_hw.rng.inframe = odi_gpon_hw.eqd_inframe;
+}
+
 static void hw_set_eqd(void *ctx, uint32_t eqd_bits)
 {
 	(void)ctx;
 
-	hw_apply_eqd(eqd_bits);
+	hw_apply_ranging_eqd(eqd_bits);
 
 	/* Ranged bursts: the Extended_Burst_Length ranged count when the OLT
 	 * sent one, else the default length (see hw_write_boh()).
@@ -580,7 +602,7 @@ const struct odi_gpon_fsm_ops *odi_gpon_hw_ops(void)
  */
 void odi_gpon_hw_eqd_rewrite(uint32_t eqd_bits)
 {
-	hw_apply_eqd(eqd_bits);
+	hw_apply_ranging_eqd(eqd_bits);
 }
 
 /* ---- GEM port / Alloc-ID / Acknowledge -- not FSM ops, called directly
@@ -932,6 +954,11 @@ void odi_gpon_get_eqd(uint32_t *multframe, uint32_t *inframe)
 {
 	*multframe = odi_gpon_hw.eqd_multframe;
 	*inframe = odi_gpon_hw.eqd_inframe;
+}
+
+void odi_gpon_get_ranging_dbg(struct odi_gpon_ranging_dbg *out)
+{
+	*out = odi_gpon_hw.rng;
 }
 
 unsigned int odi_gpon_get_alloc_ids(uint16_t *out, unsigned int max)

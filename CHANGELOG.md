@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- gpon: `/proc/odi_gpon` shows the PLOAM content, for debugging an OLT that
+  deactivates the ONU right after O5 (issue 29). Each `ploam_ring` entry now
+  carries the ONU-ID and the 10 content bytes in hex; two new lines show the
+  last Upstream_Overhead decoded (guard, preambles, pattern, delimiter, the
+  pre-assigned delay flag and value in 32-byte units and in bits, power level)
+  and the last Ranging_Time (EqD bits, protection path bit, the
+  USF_MIN_RESP_DELAY value read and the MULTFRAME/INFRAME written). The kernel
+  log gets one `event=ranging` line per O4 to O5 transition, on the same
+  ratelimit as `event=onu_state`. No behaviour change; the ring grows by
+  128 bytes of RAM and the decoded copies take about 50.
+
 **Automated dependency bump.**
 - linux 6.18.54 -> 6.18.55
 

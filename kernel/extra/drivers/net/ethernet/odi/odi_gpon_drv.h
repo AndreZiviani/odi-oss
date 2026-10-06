@@ -81,6 +81,20 @@ uint32_t odi_gpon_chip_irq_demux(void (*gpon)(void));
  */
 void odi_gpon_get_eqd(uint32_t *multframe, uint32_t *inframe);
 
+/* What the last Ranging_Time-driven USF_EQ_DELAY write used and wrote, for
+ * /proc/odi_gpon (debug only): the delay bits the message carried, the
+ * USF_MIN_RESP_DELAY value read at that moment, and the MULTFRAME/INFRAME
+ * written. valid is 0 until the first one.
+ */
+struct odi_gpon_ranging_dbg {
+	uint32_t valid;
+	uint32_t eqd_bits;
+	uint32_t min_resp_delay;
+	uint32_t multframe;
+	uint32_t inframe;
+};
+void odi_gpon_get_ranging_dbg(struct odi_gpon_ranging_dbg *out);
+
 /* PLOAM totals: rx drained by odi_gpon_isr_poll(), tx sent upstream. */
 void odi_gpon_get_ploam_counts(unsigned int *rx, unsigned int *tx);
 
