@@ -214,3 +214,10 @@ A release is cut only when the maintainer asks for one. Before tagging:
    should ship. If a sibling repo has unreleased changes the image needs,
    release it first and bump the pin, with its own changelog entry, before
    tagging odi-oss.
+
+**A pre-release for testing** (also only when the maintainer asks) is a tag
+with a hyphen after the next version, `v1.2.2-beta.1`, signed, on the commit
+to test. It skips steps 3 and 5: `## Unreleased` stays where it is and
+becomes the notes, and the build ships whatever the pins say.
+`.github/workflows/release.yml` publishes it as a GitHub pre-release, never
+marked latest. Check it as in step 4.

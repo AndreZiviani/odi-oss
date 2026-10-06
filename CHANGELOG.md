@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- release: a tag with a hyphen after the version (`v1.2.2-beta.1`) is
+  published as a GitHub pre-release, not marked latest, with the
+  `## Unreleased` changelog section as its notes under a test-build warning;
+  AGENTS.md describes it next to the release checklist. Lets a reporter test
+  a fix without a full release.
 - gpon: the equalization delay follows G.984.3 more closely (issue 29, an
   OLT that deactivates the ONU a few milliseconds after O5). Three changes,
   none of which alters the registers written on the two test lines:
