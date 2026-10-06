@@ -15,6 +15,9 @@ listed here.
   log gets one `event=ranging` line per O4 to O5 transition, on the same
   ratelimit as `event=onu_state`. No behaviour change; the ring grows by
   128 bytes of RAM and the decoded copies take about 50.
+  The `ploam_ring` timestamps and `last_los_ms` are now milliseconds since
+  boot; they were raw jiffies, which start near 2^32 and wrapped minutes
+  after boot.
 
 **Automated dependency bump.**
 - linux 6.18.54 -> 6.18.55

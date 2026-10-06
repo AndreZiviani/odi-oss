@@ -227,7 +227,7 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
 {
 	struct odi_gpon_ploam_entry *e = &odi_gpon_ring[odi_gpon_ring_head];
 
-	e->timestamp_ms = (u32)jiffies_to_msecs(jiffies);
+	e->timestamp_ms = (u32)jiffies_to_msecs(jiffies - INITIAL_JIFFIES);
 	e->direction = (u8)dir;
 	e->onu_id = msg->onu_id;
 	e->type = msg->type;
@@ -404,7 +404,7 @@ static void odi_gpon_los_sample(void)
 	unsigned int ms;
 
 	if (los && !odi_gpon_last_los_state) {
-		odi_gpon_last_los_ms = jiffies_to_msecs(jiffies);
+		odi_gpon_last_los_ms = jiffies_to_msecs(jiffies - INITIAL_JIFFIES);
 		odi_gpon_los_since = jiffies;
 		if (__ratelimit(&odi_gpon_event_rs))
 			pr_notice("odi_gpon: event=los state=on onu_state=%s\n",
