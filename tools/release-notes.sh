@@ -4,19 +4,40 @@
 # given version, plus a short flash-and-first-login paragraph. Used by
 # .github/workflows/release.yml to build the release body; also runnable by
 # hand -- tools/release-notes.sh v1.0.0.
+#
+# A pre-release tag (a hyphen after the version, v1.2.2-beta.1) has no
+# CHANGELOG section of its own: its notes are the `## Unreleased` section,
+# under a line saying it is a test build.
 set -euo pipefail
 VERSION=${1:?usage: release-notes.sh <version, e.g. v1.0.0> [CHANGELOG.md]}
 CHANGELOG=${2:-$(dirname "$0")/../CHANGELOG.md}
 
 [ -f "$CHANGELOG" ] || { echo "release-notes.sh: no such file: $CHANGELOG" >&2; exit 1; }
 
-section=$(awk -v ver="## $VERSION " '
-	index($0, ver) == 1 { found = 1; next }
+heading="## $VERSION "
+case "$VERSION" in
+*-*) heading="## Unreleased" ;;
+esac
+
+section=$(awk -v ver="$heading" '
+	index($0 " ", ver) == 1 { found = 1; next }
 	found && /^## / { exit }
 	found { print }
 ' "$CHANGELOG")
 [ -n "$section" ] ||
-	{ echo "release-notes.sh: no CHANGELOG.md section starting \"## $VERSION \"" >&2; exit 1; }
+	{ echo "release-notes.sh: no CHANGELOG.md section starting \"$heading\"" >&2; exit 1; }
+
+case "$VERSION" in
+*-*)
+	cat <<EOF
+**Pre-release for testing.** Not a supported release: it carries the
+changes merged since the last release, listed below as they stand in
+\`CHANGELOG.md\` (\`## Unreleased\`). Trial-boot it and keep your current image
+committed until it has proved itself on your line.
+
+EOF
+	;;
+esac
 
 # Trim leading and trailing blank lines from the extracted section.
 printf '%s\n' "$section" | sed -e '/./,$!d' -e ':a' -e '/^\n*$/{$d;N;ba' -e '}'

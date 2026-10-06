@@ -10,6 +10,10 @@ name: release
 # tarball, its checksums and the SBOM itself -- see docs/FLASHING.md,
 # "Verifying a release", for how to check them.
 #
+# A tag with a hyphen after the version (v1.2.2-beta.1) is a test build: it
+# is published as a GitHub pre-release, never marked latest, with the
+# `## Unreleased` changelog section as its notes (tools/release-notes.sh).
+#
 # This is the one workflow here that actually builds the kernel and the
 # image (ci.yml deliberately does not: about an hour of compiling a runner
 # would spend on every push). Expect this job to take several minutes.
@@ -100,12 +104,16 @@ jobs:
             out/image/SHA256SUMS
             out/image/sbom.cdx.json
           )
+          flags=()
+          case "$VERSION" in
+          *-*) flags=(--prerelease --latest=false) ;;
+          esac
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "release.yml: $VERSION already exists, updating notes and re-uploading assets" >&2
-            gh release edit "$VERSION" --title "$VERSION" --notes-file /tmp/release-notes.md
+            gh release edit "$VERSION" --title "$VERSION" --notes-file /tmp/release-notes.md "${flags[@]}"
             gh release upload "$VERSION" "${assets[@]}" --clobber
           else
             gh release create "$VERSION" "${assets[@]}" \
               --title "$VERSION" \
-              --notes-file /tmp/release-notes.md
+              --notes-file /tmp/release-notes.md "${flags[@]}"
           fi
