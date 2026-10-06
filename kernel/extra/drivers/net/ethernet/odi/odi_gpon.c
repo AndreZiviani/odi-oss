@@ -205,6 +205,15 @@ static bool odi_gpon_ds_type_known(uint8_t type)
 	}
 }
 
+/* The last Upstream_Overhead and Ranging_Time received, decoded, for
+ * /proc/odi_gpon and the ranging event line: what the OLT asked for, next to
+ * what the driver wrote (odi_gpon_get_ranging_dbg()). Debug only.
+ */
+static struct odi_gpon_ds_upstream_overhead odi_gpon_last_uo;
+static bool odi_gpon_last_uo_valid;
+static struct odi_gpon_ds_ranging_time odi_gpon_last_rng;
+static bool odi_gpon_last_rng_valid;
+
 static struct odi_gpon_ploam_entry odi_gpon_ring[ODI_GPON_PLOAM_RING_LEN];
 static unsigned int odi_gpon_ring_head;
 static unsigned int odi_gpon_ring_count;
@@ -218,8 +227,9 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
 {
 	struct odi_gpon_ploam_entry *e = &odi_gpon_ring[odi_gpon_ring_head];
 
-	e->timestamp_ms = (u32)jiffies_to_msecs(jiffies);
+	e->timestamp_ms = (u32)jiffies_to_msecs(jiffies - INITIAL_JIFFIES);
 	e->direction = (u8)dir;
+	e->onu_id = msg->onu_id;
 	e->type = msg->type;
 	memcpy(e->content, msg->content, sizeof(e->content));
 	odi_gpon_ring_head = (odi_gpon_ring_head + 1U) % ODI_GPON_PLOAM_RING_LEN;
@@ -230,6 +240,13 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
 		odi_gpon_last_ds = *msg;
 		odi_gpon_last_ds_valid = true;
 		odi_gpon_ds_type_count[msg->type]++;
+		if (msg->type == ODI_GPON_DS_UPSTREAM_OVERHEAD) {
+			odi_gpon_decode_upstream_overhead(msg, &odi_gpon_last_uo);
+			odi_gpon_last_uo_valid = true;
+		} else if (msg->type == ODI_GPON_DS_RANGING_TIME) {
+			odi_gpon_decode_ranging_time(msg, &odi_gpon_last_rng);
+			odi_gpon_last_rng_valid = true;
+		}
 		if (!odi_gpon_ds_type_known(msg->type))
 			ODI_GPON_LOG("unexpected downstream PLOAM type 0x%02x\n", msg->type);
 	} else {
@@ -311,6 +328,29 @@ static void odi_gpon_elapsed(unsigned long since, unsigned long *s, unsigned int
 	*ms = jiffies_to_msecs(d % HZ);
 }
 
+/* The event=ranging line, once per O4 -> O5 transition: what the Ranging_Time
+ * carried (EqD in bits, protection path bit), whether the Upstream_Overhead
+ * before it announced a pre-assigned delay, and the registers written. Same
+ * ratelimit as the onu_state line. Called under the lock, after the
+ * transition.
+ */
+static void odi_gpon_note_ranging(enum odi_gpon_state prev, enum odi_gpon_state now)
+{
+	struct odi_gpon_ranging_dbg dbg;
+
+	if (prev != ODI_GPON_STATE_O4 || now != ODI_GPON_STATE_O5 ||
+	    !odi_gpon_last_rng_valid || !odi_gpon_last_uo_valid)
+		return;
+	if (!__ratelimit(&odi_gpon_event_rs))
+		return;
+	odi_gpon_get_ranging_dbg(&dbg);
+	pr_info("odi_gpon: event=ranging eqd_bits=%u protection=%u preassigned=%u preassigned_delay=%u multframe=%u inframe=%u onu_id=%u\n",
+		odi_gpon_last_rng.eqd, odi_gpon_last_rng.protection_path,
+		odi_gpon_last_uo.preassigned_delay_en,
+		(unsigned int)odi_gpon_last_uo.preassigned_delay,
+		dbg.multframe, dbg.inframe, (unsigned int)odi_gpon_fsm_inst.onu_id);
+}
+
 /* The event=onu_state line, for every entry point below that can move the
  * FSM: called under the lock, after the call, with the state before it and
  * why it ran (odi_gpon_fsm_cause(), or a verb's own name).
@@ -324,6 +364,7 @@ static void odi_gpon_note_transition(enum odi_gpon_state prev,
 
 	if (now == prev)
 		return;
+	odi_gpon_note_ranging(prev, now);
 	odi_gpon_elapsed(odi_gpon_state_since, &secs, &ms);
 	odi_gpon_state_since = jiffies;
 	if (!__ratelimit(&odi_gpon_event_rs))
@@ -363,7 +404,7 @@ static void odi_gpon_los_sample(void)
 	unsigned int ms;
 
 	if (los && !odi_gpon_last_los_state) {
-		odi_gpon_last_los_ms = jiffies_to_msecs(jiffies);
+		odi_gpon_last_los_ms = jiffies_to_msecs(jiffies - INITIAL_JIFFIES);
 		odi_gpon_los_since = jiffies;
 		if (__ratelimit(&odi_gpon_event_rs))
 			pr_notice("odi_gpon: event=los state=on onu_state=%s\n",
@@ -779,6 +820,10 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 	uint32_t last_top_sts, last_ds_dlt, last_us_sts;
 	uint16_t alloc_ids[32];
 	unsigned int n_alloc;
+	struct odi_gpon_ds_upstream_overhead uo;
+	struct odi_gpon_ds_ranging_time rng;
+	struct odi_gpon_ranging_dbg rdbg;
+	bool uo_valid, rng_valid;
 
 	(void)v;
 
@@ -802,6 +847,11 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 	last_ds_dlt = odi_gpon_last_ds_dlt_nonzero;
 	last_us_sts = odi_gpon_last_us_sts_nonzero;
 	n_alloc = odi_gpon_get_alloc_ids(alloc_ids, ARRAY_SIZE(alloc_ids));
+	uo = odi_gpon_last_uo;
+	uo_valid = odi_gpon_last_uo_valid;
+	rng = odi_gpon_last_rng;
+	rng_valid = odi_gpon_last_rng_valid;
+	odi_gpon_get_ranging_dbg(&rdbg);
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 
 	{
@@ -842,12 +892,32 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 		   irq_attached ? 1 : 0, irq_isr_rc, irq_imr_rc);
 	seq_printf(seq, "last_los_ms %lu state %d\n", last_los, last_los_state);
 
+	/* The last Upstream_Overhead (G.984.3 9.2.3.1) and Ranging_Time
+	 * (9.2.3.4) the OLT sent, decoded. The pre-assigned delay is in units
+	 * of 32 bytes, so 32 * 8 bits each.
+	 */
+	if (uo_valid)
+		seq_printf(seq, "upstream_overhead guard %u type1 %u type2 %u pattern 0x%02x delimiter %02x%02x%02x preassigned_delay_en %u sn_mask %u extra_sn_tx %u power_level_mode %u preassigned_delay %u bits %u\n",
+			   uo.guard_bits, uo.type1_preamble_bits, uo.type2_preamble_bits,
+			   uo.type3_pattern, uo.delimiter[0], uo.delimiter[1], uo.delimiter[2],
+			   uo.preassigned_delay_en, uo.sn_mask_enabled, uo.extra_sn_tx,
+			   uo.power_level_mode, (unsigned int)uo.preassigned_delay,
+			   (unsigned int)uo.preassigned_delay * 32U * 8U);
+	else
+		seq_puts(seq, "upstream_overhead none\n");
+	if (rng_valid)
+		seq_printf(seq, "ranging_time eqd_bits %u protection_path %u min_resp_delay 0x%08x multframe %u inframe %u\n",
+			   rng.eqd, rng.protection_path, rdbg.min_resp_delay,
+			   rdbg.multframe, rdbg.inframe);
+	else
+		seq_puts(seq, "ranging_time none\n");
+
 	seq_printf(seq, "ploam_ring %u entries\n", count);
 	for (i = 0; i < count && i < ODI_GPON_PLOAM_RING_LEN; i++) {
-		seq_printf(seq, "  %u %s type 0x%02x\n",
+		seq_printf(seq, "  %u %s onu_id 0x%02x type 0x%02x content %10ph\n",
 			   ring[i].timestamp_ms,
 			   ring[i].direction == ODI_GPON_PLOAM_US ? "us" : "ds",
-			   ring[i].type);
+			   ring[i].onu_id, ring[i].type, ring[i].content);
 	}
 
 	return 0;

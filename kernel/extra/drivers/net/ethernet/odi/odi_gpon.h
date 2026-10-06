@@ -127,6 +127,7 @@ enum odi_gpon_ploam_dir {
 struct odi_gpon_ploam_entry {
 	u32 timestamp_ms;	/* jiffies_to_msecs() at capture time */
 	u8 direction;		/* enum odi_gpon_ploam_dir */
+	u8 onu_id;		/* raw ONU-ID byte (octet 1) */
 	u8 type;		/* raw PLOAM message-type byte */
 	u8 content[10];		/* raw 10-byte PLOAM content field */
 };

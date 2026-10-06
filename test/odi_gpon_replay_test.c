@@ -219,6 +219,23 @@ int main(int argc, char **argv)
 		fclose(f);
 	}
 
+	/* The /proc/odi_gpon debug snapshot of the last Ranging_Time write:
+	 * the captured delay, the register value read at that moment, and
+	 * the MULTFRAME/INFRAME written (the formula's own comment in
+	 * odi_gpon_hw.c works the same numbers).
+	 */
+	{
+		struct odi_gpon_ranging_dbg dbg;
+
+		odi_gpon_get_ranging_dbg(&dbg);
+		if (!dbg.valid || dbg.eqd_bits != 227172U || dbg.min_resp_delay != 0x9132U ||
+		    dbg.multframe != 1U || dbg.inframe != 108772U) {
+			fprintf(stderr, "odi_gpon_replay_test: ranging snapshot %u/%u/0x%x/%u/%u, expected 227172/0x9132/1/108772\n",
+				dbg.valid, dbg.eqd_bits, dbg.min_resp_delay, dbg.multframe, dbg.inframe);
+			return 1;
+		}
+	}
+
 	/* After the captured sequence, so none of this is in the compared
 	 * write log: Assign_Alloc-ID type 255 releases an Alloc-ID (G.984.3
 	 * 9.2.3.9), read three times like every downstream message, and the
