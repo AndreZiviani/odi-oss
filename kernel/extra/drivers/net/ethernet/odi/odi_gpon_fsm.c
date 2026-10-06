@@ -319,9 +319,14 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 	case ODI_GPON_STATE_O2:
 		if (msg->type == ODI_GPON_DS_UPSTREAM_OVERHEAD) {
 			odi_gpon_decode_upstream_overhead(msg, &boh);
+			/* G.984.3 9.2.3.1: the pre-assigned delay applies only
+			 * when the e flag is set; otherwise the field is not
+			 * meaningful and the ONU starts from a zero delay.
+			 */
 			ops->set_upstream_overhead(ctx, boh.guard_bits, boh.type1_preamble_bits,
 						    boh.type2_preamble_bits, boh.type3_pattern,
-						    boh.delimiter, boh.preassigned_delay,
+						    boh.delimiter,
+						    boh.preassigned_delay_en ? boh.preassigned_delay : 0U,
 						    boh.power_level_mode);
 			ops->start_to1(ctx);
 			fsm->state = ODI_GPON_STATE_O3;
@@ -351,6 +356,15 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 		 */
 		if (msg->type == ODI_GPON_DS_RANGING_TIME) {
 			odi_gpon_decode_ranging_time(msg, &ranging);
+			/* G.984.3 9.2.3.4: with the protection path bit set the
+			 * message carries the EqD of the protection path, which
+			 * is not the path this ONU ranged on. Applying it would
+			 * mis-time every burst, so it is ignored: no EqD write,
+			 * no state change. The OLT sends the main path message
+			 * separately.
+			 */
+			if (ranging.protection_path)
+				break;
 			/* This driver's own O4->O5 sequence: stop TO1, apply
 			 * EqD, flush the pre-ranging US PLOAM buffer, set
 			 * state, then force the port link up.

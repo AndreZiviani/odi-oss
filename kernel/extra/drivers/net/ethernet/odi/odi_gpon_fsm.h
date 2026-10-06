@@ -94,6 +94,11 @@ struct odi_gpon_fsm_ops {
 	 * clause 9.2.3.1) -- not itself a state transition (the O2->O3
 	 * transition and the TO1 start that go with receiving this message
 	 * are the FSM's own doing, not this leaf's own).
+	 *
+	 * preassigned_delay is the pre-assigned delay in 32-byte units, and
+	 * is 0 whenever the message's e flag is clear: the flag is folded
+	 * into the value here so the leaf never applies a delay the OLT did
+	 * not enable.
 	 */
 	void (*set_upstream_overhead)(void *ctx, uint8_t guard_bits, uint8_t type1_preamble_bits,
 				       uint8_t type2_preamble_bits, uint8_t type3_pattern,

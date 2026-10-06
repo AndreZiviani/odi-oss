@@ -137,6 +137,7 @@ test-host:
 	bash test/odi_gpon_replay_test.sh
 	bash test/odi_reregister_test.sh
 	bash test/odi_gpon_irq_test.sh
+	bash test/odi_gpon_eqd_test.sh
 	bash test/odi_board_test.sh
 	bash test/odi_i2c_test.sh
 	bash test/odi_ddm_test.sh
