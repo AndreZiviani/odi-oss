@@ -17,6 +17,7 @@
 #include <asm/bootinfo.h>
 #include <asm/cacheflush.h>
 #include <asm/fw/fw.h>
+#include <asm/idle.h>
 #include <asm/time.h>
 #include <asm/irq_cpu.h>
 #include <asm/wbflush.h>
@@ -169,9 +170,35 @@ static void __init rtl8686_irq_debug_dump(void)
 }
 #endif
 
+/*
+ * The idle loop. CPU_R3000 has no wait instruction of its own, so without
+ * a cpu_wait the generic loop spins at full speed whenever nothing runs.
+ * The RLX5281 has the Lexra SLEEP instruction (0x42000038: COP0, function
+ * 0x38; the assembler here does not know the mnemonic), which stops the
+ * core until the next interrupt. arch_cpu_idle() is entered with
+ * interrupts off and must return with them off. Interrupts are enabled
+ * just before SLEEP so one can wake it; one that lands between the two is
+ * taken at once and SLEEP then waits for the next, at most one 4 ms tick
+ * later (the tick is periodic for this reason, kernel/618/config).
+ */
+static void __cpuidle rtl8686_sleep(void)
+{
+	raw_local_irq_enable();
+	__asm__ __volatile__(
+		"	.set	push		\n"
+		"	.set	noreorder	\n"
+		"	.word	0x42000038	\n"	/* sleep */
+		"	nop			\n"
+		"	nop			\n"
+		"	.set	pop		\n");
+	raw_local_irq_disable();
+}
+
 void __init plat_time_init(void)
 {
 	ODI_EARLY_CRUMB("KETM", 14);	/* plat_time_init() entered */
+	/* After trap_init() and check_wait(), which sets nothing for R3000. */
+	cpu_wait = rtl8686_sleep;
 	rtl8686_clockevent_init();
 #ifdef CONFIG_ODI_EARLY_CRUMBS
 	late_time_init = rtl8686_irq_debug_dump;

@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- kernel: the idle loop stops the CPU with the Lexra SLEEP instruction
+  until the next interrupt, where it used to spin at full speed (the
+  R3000 model has no wait instruction). On ISP1 the module runs about
+  1.9 C cooler relative to the ISP2 stick, and idle ping rises from 0.28 to
+  0.33 ms. The tick is periodic again (`CONFIG_NO_HZ_IDLE` off, high-
+  resolution timers kept): tickless idle measured no gain, and the periodic
+  tick bounds a wake-up missed just before SLEEP at 4 ms. The kernel image
+  is 3.8 KB smaller.
 - build: `kernel/tree.sh` fetches the kernel again when
   `kernel/618/mainline` holds a different release than the one pinned in
   `kernel/618/fetch.sh`, and rebuilds the tree tarball unless its new stamp
@@ -16,11 +24,9 @@ listed here.
   even after the tree was fetched again. Release builds start clean and were
   not affected.
 - kernel: TIMER0 gets a oneshot mode (counter mode, 3.125 MHz, 28-bit delta)
-  next to the periodic tick, and `CONFIG_HIGH_RES_TIMERS` and
-  `CONFIG_NO_HZ_IDLE` are on, so the kernel runs high-resolution timers
-  (1 ns resolution in `/proc/timer_list` on ISP1). The idle tick does not
-  stop yet: something keeps a timer due within one tick, so the timer
-  interrupt still runs at about 240 a second. Oneshot is opt-in at boot: a short self-test
+  next to the periodic tick, and `CONFIG_HIGH_RES_TIMERS` is on, so the
+  kernel runs high-resolution timers (1 ns resolution in `/proc/timer_list`
+  on ISP1). Oneshot is opt-in at boot: a short self-test
   times a programmed event against TIMER1, and if it does not fire the
   kernel prints one warning and stays on the 250 Hz periodic tick exactly as
   before. A reprogram never touches a running timer (stop, clear, write,

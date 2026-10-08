@@ -241,14 +241,28 @@ says so. Otherwise it prints one warning, `oneshot self-test failed, staying
 periodic`, and the kernel keeps the HZ tick it had before. The board needs
 TIMER1 for the test, so a board without a working clocksource stays
 periodic too. With oneshot on and TIMER1 as a continuous clocksource, the
-core switches the tick to oneshot itself and `CONFIG_HIGH_RES_TIMERS` and
-`CONFIG_NO_HZ_IDLE` take effect. On hardware (ISP1, 2026-10-08) the
-self-test passed, `/proc/timer_list` shows the clockevent in oneshot mode
-with a 1 ns resolution, and the watchdog still reset the stick about 60 s
-after omcid was stopped. NO_HZ_IDLE saves nothing yet: the idle tick never
-stops (`tick_stopped 0`) and the timer interrupt still runs at about 240 a
-second, because something keeps a timer due within one tick; what it is
-has not been looked at.
+core switches to it for `CONFIG_HIGH_RES_TIMERS`. On hardware (ISP1,
+2026-10-08) the self-test passed, `/proc/timer_list` shows the clockevent
+in oneshot mode with a 1 ns resolution, and the watchdog still reset the
+stick about 60 s after omcid was stopped.
+
+The tick stays periodic (`CONFIG_HZ_PERIODIC`). `CONFIG_NO_HZ_IDLE` was
+tried and saved nothing: the idle tick never stopped and the timer
+interrupt kept running at about 240 a second, since kernel timers expired
+about every other tick. It could not save power anyway while the idle loop
+spun.
+
+**Idle sleeps.** `CPU_R3000` has no wait instruction, so with no `cpu_wait`
+the idle loop spins at full speed. The RLX5281 implements the Lexra SLEEP
+instruction (0x42000038, written as a `.word` since the assembler does not
+know it), which stops the core until the next interrupt: `board.c` sets
+`cpu_wait` to it. Interrupts are enabled just before SLEEP, so one that
+lands in between is taken first and SLEEP then waits for the next
+interrupt, at most one 4 ms tick later; that bound is why the tick stays
+periodic. On ISP1 (2026-10-08) the stick ran about 1.9 C cooler relative to
+the ISP2 stick on the previous image (the gap between the two module
+temperatures went from 6.1-6.8 C to 4.4-4.8 C), and idle ping went from
+0.28 to 0.33 ms.
 
 Reprogramming a timer that is a few microseconds from expiry can lose its
 interrupt on this timer family. `rtl8686_program()` therefore never
