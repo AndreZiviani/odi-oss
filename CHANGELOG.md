@@ -24,11 +24,9 @@ listed here.
   even after the tree was fetched again. Release builds start clean and were
   not affected.
 - kernel: TIMER0 gets a oneshot mode (counter mode, 3.125 MHz, 28-bit delta)
-  next to the periodic tick, and `CONFIG_HIGH_RES_TIMERS` and
-  `CONFIG_NO_HZ_IDLE` are on, so the kernel runs high-resolution timers
-  (1 ns resolution in `/proc/timer_list` on ISP1). The idle tick does not
-  stop yet: something keeps a timer due within one tick, so the timer
-  interrupt still runs at about 240 a second. Oneshot is opt-in at boot: a short self-test
+  next to the periodic tick, and `CONFIG_HIGH_RES_TIMERS` is on, so the
+  kernel runs high-resolution timers (1 ns resolution in `/proc/timer_list`
+  on ISP1). Oneshot is opt-in at boot: a short self-test
   times a programmed event against TIMER1, and if it does not fire the
   kernel prints one warning and stays on the 250 Hz periodic tick exactly as
   before. A reprogram never touches a running timer (stop, clear, write,
