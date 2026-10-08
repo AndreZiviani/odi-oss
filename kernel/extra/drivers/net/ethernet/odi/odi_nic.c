@@ -30,6 +30,8 @@
 #include <linux/notifier.h>
 #include <linux/panic_notifier.h>
 #include <linux/unaligned.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #include <asm/mach-rtl8686/irq.h>
 #include <asm/mach-rtl8686/rtl8686regs.h>
 
@@ -134,16 +136,28 @@ struct odi_nic {
 	struct delayed_work state_dump_work;
 	int state_dump_fire;		/* 0 before first firing, 1 after it */
 
-	/* TX reclaim while the queues are stopped. There is no TX interrupt,
-	 * and reclaim otherwise runs only from NAPI (RX) and ndo_start_xmit,
-	 * which a stopped queue no longer calls: with no RX traffic nothing
-	 * would ever wake the queues again.
+	/* TX reclaim runs from NAPI (RX and the TX-completion interrupt) and
+	 * from ndo_start_xmit. Two safety nets cover an interrupt that does
+	 * not come, so a missing TOK is the old polled behaviour and never a
+	 * TX stall: tx_stall_work, while the queues are stopped (a stopped
+	 * queue no longer calls ndo_start_xmit, and with no RX traffic nothing
+	 * else would wake it), and tx_backstop_work, armed by every frame
+	 * queued and re-armed while descriptors remain in flight.
 	 */
 	struct delayed_work tx_stall_work;
+	struct delayed_work tx_backstop_work;
 
-	/* Diagnostic counters for the dump, read without locking. */
+	/* Diagnostic counters (/proc/odi_nic, the dump, the pre-reset line),
+	 * read without locking.
+	 */
 	unsigned int irq_entries;
 	unsigned int napi_polls;
+	unsigned int tok_irqs;		/* entries with the TX-completion bit set */
+	unsigned int tok_work;		/* ... of which scheduled a reclaim */
+	unsigned int tok_idle;		/* ... of which found nothing to reclaim */
+	unsigned int tx_queued;		/* frames queued, under odi.lock */
+	u32 tok_seen_queued;		/* tx_queued at the last idle TOK, irq context only */
+	unsigned int backstop_reclaims;	/* work runs that freed descriptors the interrupt had not */
 
 	/* RX descriptors the poll has taken back from the hardware, frames
 	 * and drops alike: odi_wdt's measure of RX progress. Never reset, so
@@ -528,7 +542,7 @@ static void odi_init_hw(struct net_device *mac_dev)
  */
 static void odi_start_hw(void)
 {
-	odi_w16(ODI_NIC_IRQ_MASK, ODI_NIC_IRQ_RX_SOURCES);
+	odi_w16(ODI_NIC_IRQ_MASK, ODI_NIC_IRQ_POLL_SOURCES);
 	odi_w32(ODI_NIC_RUN1, ODI_NIC_RUN1_VAL);
 	odi_w32(ODI_NIC_RUN, ODI_NIC_RUN_VAL);
 }
@@ -583,6 +597,7 @@ static struct notifier_block odi_panic_nb = { .notifier_call = odi_reboot_notify
  */
 #define ODI_TX_WAKE_USED	(ODI_TX_RING_DEPTH / 2)
 #define ODI_TX_STALL_POLL_MS	10	/* tx_stall_work period while stopped */
+#define ODI_TX_BACKSTOP_MS	100	/* tx_backstop_work period while frames are in flight */
 
 static int odi_nic_xmit_desc(unsigned int port_mask, unsigned int prio, int dislrn,
 			      const void *data, unsigned int len)
@@ -654,8 +669,12 @@ static int odi_nic_xmit_raw(u32 opts1, u32 opts2, u32 opts3,
 	odi.tx_dma[idx] = dma;
 	odi.tx_len[idx] = len;
 	odi.tx_tail = odi_ring_next(idx, ODI_TX_RING_DEPTH);
+	odi.tx_queued++;
 
 	odi_w32(ODI_NIC_RUN, odi_r32(ODI_NIC_RUN) | ODI_NIC_RUN_TX_KICK);
+
+	/* No-op while already pending: the period runs from the first frame. */
+	schedule_delayed_work(&odi.tx_backstop_work, msecs_to_jiffies(ODI_TX_BACKSTOP_MS));
 
 	spin_unlock_irqrestore(&odi.lock, flags);
 	return 0;
@@ -686,13 +705,31 @@ static bool odi_tx_any_stopped(void)
 	return false;
 }
 
-/* Reclaim runs from NAPI poll, from ndo_start_xmit and, while the queues
- * are stopped, from tx_stall_work: there is no TX interrupt.
+/* True when the oldest descriptor in flight has been handed back, i.e. a
+ * reclaim would free something. From the interrupt handler, to tell a
+ * TX-completion entry with work from one without.
  */
-static void odi_tx_reclaim(void)
+static bool odi_tx_reclaimable(void)
 {
 	unsigned long flags;
-	unsigned int used;
+	bool ready;
+
+	spin_lock_irqsave(&odi.lock, flags);
+	ready = odi.tx_reclaim != odi.tx_tail &&
+		!(odi.tx_ring[odi.tx_reclaim].opts1 & ODI_TXD_HW);
+	spin_unlock_irqrestore(&odi.lock, flags);
+	return ready;
+}
+
+/* Reclaim runs from the NAPI poll (scheduled by RX and by the TX-completion
+ * interrupt), from ndo_start_xmit and, as safety nets for a missing
+ * interrupt, from tx_stall_work and tx_backstop_work. Returns how many
+ * descriptors it freed.
+ */
+static unsigned int odi_tx_reclaim(void)
+{
+	unsigned long flags;
+	unsigned int used, freed = 0;
 
 	spin_lock_irqsave(&odi.lock, flags);
 	while (odi.tx_reclaim != odi.tx_tail) {
@@ -705,6 +742,7 @@ static void odi_tx_reclaim(void)
 		kfree(odi.tx_buf[odi.tx_reclaim]);
 		odi.tx_buf[odi.tx_reclaim] = NULL;
 		odi.tx_reclaim = odi_ring_next(odi.tx_reclaim, ODI_TX_RING_DEPTH);
+		freed++;
 	}
 	used = odi_ring_used(odi.tx_reclaim, odi.tx_tail, ODI_TX_RING_DEPTH);
 	spin_unlock_irqrestore(&odi.lock, flags);
@@ -716,6 +754,7 @@ static void odi_tx_reclaim(void)
 	smp_mb();
 	if (used <= ODI_TX_WAKE_USED)
 		odi_tx_wake_queues();
+	return freed;
 }
 
 static void odi_tx_stop_queues(void)
@@ -737,9 +776,28 @@ static void odi_tx_stop_queues(void)
 
 static void odi_tx_stall_work(struct work_struct *work)
 {
-	odi_tx_reclaim();
+	if (odi_tx_reclaim())
+		odi.backstop_reclaims++;
 	if (odi_tx_any_stopped())
 		schedule_delayed_work(&odi.tx_stall_work, msecs_to_jiffies(ODI_TX_STALL_POLL_MS));
+}
+
+/* Frees what the TX-completion interrupt (or the next poll) has not, then
+ * re-arms while frames remain in flight. With the interrupt working it finds
+ * nothing and backstop_reclaims stays put.
+ */
+static void odi_tx_backstop_work(struct work_struct *work)
+{
+	bool in_flight;
+	unsigned long flags;
+
+	if (odi_tx_reclaim())
+		odi.backstop_reclaims++;
+	spin_lock_irqsave(&odi.lock, flags);
+	in_flight = odi.tx_reclaim != odi.tx_tail;
+	spin_unlock_irqrestore(&odi.lock, flags);
+	if (in_flight)
+		schedule_delayed_work(&odi.tx_backstop_work, msecs_to_jiffies(ODI_TX_BACKSTOP_MS));
 }
 
 static netdev_tx_t odi_start_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -926,13 +984,14 @@ requeue:
 
 	if (done < budget) {
 		napi_complete(napi);
-		odi_w16(ODI_NIC_IRQ_MASK, ODI_NIC_IRQ_RX_SOURCES);
+		odi_w16(ODI_NIC_IRQ_MASK, ODI_NIC_IRQ_POLL_SOURCES);
 	}
 	return done;
 }
 
 /* odi_nic.debug logs the first 20 interrupts. The storm guard
- * (odi_irq_storm_note()) counts only the entries that schedule no RX work.
+ * (odi_irq_storm_note()) counts only the entries that schedule no poll
+ * work, RX or TX reclaim.
  */
 static unsigned int odi_irq_log_count;
 
@@ -962,12 +1021,25 @@ static irqreturn_t odi_irq(int irq, void *dev_id)
 
 	odi_w16(ODI_NIC_IRQ_STATUS, isr);	/* write-1-clear */
 
-	if (isr & ODI_NIC_IRQ_RX_SOURCES) {
-		odi_w16(ODI_NIC_IRQ_MASK, 0);	/* mask RX sources until poll re-arms them */
+	if (isr & ODI_NIC_IRQ_TX_OK)
+		odi.tok_irqs++;
+
+	if (odi_nic_irq_has_work(isr, (isr & ODI_NIC_IRQ_TX_OK) ? odi_tx_reclaimable() : 0)) {
+		odi_w16(ODI_NIC_IRQ_MASK, 0);	/* mask the poll sources until the poll re-arms them */
 		if (napi_schedule_prep(&odi.napi)) {
 			__napi_schedule(&odi.napi);
 			work = 1;
+			if (isr & ODI_NIC_IRQ_TX_OK)
+				odi.tok_work++;
 		}
+	} else if (isr & ODI_NIC_IRQ_TX_OK) {
+		odi.tok_idle++;
+		/* The transmit path got to the descriptor first: not a storm
+		 * while it keeps queueing frames. Without any TX activity
+		 * between two such entries it is, and the guard counts it.
+		 */
+		if (odi_nic_tx_progress(&odi.tok_seen_queued, READ_ONCE(odi.tx_queued)))
+			work = 1;
 	}
 
 	if (odi_irq_storm_note(&odi.irq_storm, jiffies_to_msecs(jiffies), work)) {
@@ -1019,8 +1091,9 @@ static void odi_state_dump_work(struct work_struct *work)
 		odi.rx_head, odi.tx_tail, odi.tx_reclaim, tx_own, rx_owned_clear,
 		odi.rx_ring[0].opts1);
 
-	pr_info(DRV_NAME ": dump%d counters: irq_entries=%u napi_polls=%u eth0 tx=%lu rx=%lu drop=%lu eth0.2 tx=%lu rx=%lu drop=%lu\n",
+	pr_info(DRV_NAME ": dump%d counters: irq_entries=%u napi_polls=%u tok_irqs=%u tok_work=%u tok_idle=%u backstop_reclaims=%u eth0 tx=%lu rx=%lu drop=%lu eth0.2 tx=%lu rx=%lu drop=%lu\n",
 		odi.state_dump_fire, odi.irq_entries, odi.napi_polls,
+		odi.tok_irqs, odi.tok_work, odi.tok_idle, odi.backstop_reclaims,
 		eth0 ? eth0->stats.tx_packets : 0, eth0 ? eth0->stats.rx_packets : 0,
 		eth0 ? eth0->stats.tx_dropped : 0,
 		eth0_2 ? eth0_2->stats.tx_packets : 0, eth0_2 ? eth0_2->stats.rx_packets : 0,
@@ -1074,6 +1147,11 @@ static int odi_ndo_open(struct net_device *dev)
 
 		odi.irq_entries = 0;
 		odi.napi_polls = 0;
+		odi.tok_irqs = 0;
+		odi.tok_work = 0;
+		odi.tok_idle = 0;
+		odi.tok_seen_queued = READ_ONCE(odi.tx_queued);
+		odi.backstop_reclaims = 0;
 		odi.state_dump_fire = 0;
 		if (odi_nic_debug)
 			schedule_delayed_work(&odi.state_dump_work,
@@ -1104,6 +1182,10 @@ static int odi_ndo_stop(struct net_device *dev)
 			free_irq(ODI_NIC_IRQ_NUM, &odi);
 			odi.irq_requested = 0;
 		}
+		/* The backstop is armed by every queued frame, not only from a
+		 * stopped queue: cancel it once the hardware is quiet too.
+		 */
+		cancel_delayed_work_sync(&odi.tx_backstop_work);
 		odi_rings_free(&odi_pdev->dev);
 	}
 	return 0;
@@ -1125,10 +1207,26 @@ bool odi_nic_rx_taken(u32 *taken)
  */
 void odi_nic_report(void)
 {
-	pr_emerg(DRV_NAME ": irq_status=0x%04x irq_mask=0x%04x rx1_index=0x%08x rx1_fc=0x%08x pause=0x%02x rx_head=%u rx_taken=%u irq_entries=%u napi_polls=%u storm=%d\n",
+	pr_emerg(DRV_NAME ": irq_status=0x%04x irq_mask=0x%04x rx1_index=0x%08x rx1_fc=0x%08x pause=0x%02x rx_head=%u rx_taken=%u irq_entries=%u napi_polls=%u tok_irqs=%u tok_work=%u backstop_reclaims=%u storm=%d\n",
 		 odi_r16(ODI_NIC_IRQ_STATUS), odi_r16(ODI_NIC_IRQ_MASK),
 		 odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_CPU_IDX), odi_r8(ODI_NIC_MSR),
-		 odi.rx_head, odi.rx_taken, odi.irq_entries, odi.napi_polls, odi.irq_storm_tripped);
+		 odi.rx_head, odi.rx_taken, odi.irq_entries, odi.napi_polls,
+		 odi.tok_irqs, odi.tok_work, odi.backstop_reclaims, odi.irq_storm_tripped);
+}
+
+/* /proc/odi_nic: the interrupt and reclaim counters, one per line. tok_irqs
+ * is the number of interrupt entries that carried the TX-completion bit:
+ * zero under TX traffic means the interrupt does not fire on this unit and
+ * every reclaim came from the poll, the xmit path or the backstop.
+ * backstop_reclaims counts work runs that freed descriptors nothing else
+ * had: it stays near zero when the interrupt is doing its job.
+ */
+static int odi_nic_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "irq_entries %u\nnapi_polls %u\ntok_irqs %u\ntok_work %u\ntok_idle %u\nbackstop_reclaims %u\nrx_taken %u\nstorm_tripped %d\n",
+		   odi.irq_entries, odi.napi_polls, odi.tok_irqs, odi.tok_work,
+		   odi.tok_idle, odi.backstop_reclaims, odi.rx_taken, odi.irq_storm_tripped);
+	return 0;
 }
 
 static int odi_ndo_set_mac_address(struct net_device *dev, void *p)
@@ -1278,6 +1376,7 @@ static int __init odi_nic_init(void)
 
 	spin_lock_init(&odi.lock);
 	INIT_DELAYED_WORK(&odi.tx_stall_work, odi_tx_stall_work);
+	INIT_DELAYED_WORK(&odi.tx_backstop_work, odi_tx_backstop_work);
 	INIT_DELAYED_WORK(&odi.state_dump_work, odi_state_dump_work);
 
 	/* Before the net devices: the first ndo_open starts the DMA engine,
@@ -1290,6 +1389,8 @@ static int __init odi_nic_init(void)
 	ret = odi_nic_register_netdevs();
 	if (ret)
 		goto err_notifiers;
+
+	proc_create_single("odi_nic", 0444, NULL, odi_nic_proc_show);
 
 	pr_info(DRV_NAME ": %d net devices registered, IRQ %d\n", ODI_NUM_DEVS, ODI_NIC_IRQ_NUM);
 	return 0;
