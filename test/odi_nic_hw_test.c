@@ -319,6 +319,52 @@ static void test_tok_work(void)
 	CHECK(idle_trip, "TOK with nothing to reclaim, over and over, still trips it");
 }
 
+/* A TOK with nothing to reclaim, while the transmit path keeps queueing
+ * frames and reclaiming them first (a busy flood): never a storm. */
+static void test_tok_idle_tx_progress(void)
+{
+	struct odi_irq_storm busy = {0}, stuck = {0}, mixed = {0};
+	uint32_t seen_busy = 0, seen_stuck = 0, seen_mixed = 0, queued = 0;
+	int busy_trip = 0, stuck_trip = 0, mixed_trip = 0;
+	unsigned long us;
+
+	CHECK(!odi_nic_tx_progress(&seen_busy, 0), "no frame queued: no progress");
+	CHECK(odi_nic_tx_progress(&seen_busy, 1) && seen_busy == 1, "a frame queued: progress, and remembered");
+	CHECK(!odi_nic_tx_progress(&seen_busy, 1), "the same count again: none");
+	seen_busy = 0;
+
+	/* 10000 idle TOK a second for 10 s, a frame queued between each. */
+	for (us = 0; us < 10000000UL; us += 100) {
+		queued++;
+		busy_trip |= odi_irq_storm_note(&busy, us / 1000,
+			odi_nic_irq_has_work(ODI_NIC_IRQ_TX_OK, 0) ||
+			odi_nic_tx_progress(&seen_busy, queued));
+	}
+	CHECK(!busy_trip, "sustained idle TOK with TX progress never trips");
+
+	/* The same entries with no frame queued at all. */
+	for (us = 0; us < 3000000UL; us += 100)
+		stuck_trip |= odi_irq_storm_note(&stuck, us / 1000,
+			odi_nic_irq_has_work(ODI_NIC_IRQ_TX_OK, 0) ||
+			odi_nic_tx_progress(&seen_stuck, 0));
+	CHECK(stuck_trip, "idle TOK with no TX progress still trips");
+
+	/* Traffic stops mid-run: the re-firing source is caught after it. */
+	queued = 0;
+	for (us = 0; us < 2000000UL; us += 100) {
+		if (us < 1000000UL)
+			queued++;
+		mixed_trip |= odi_irq_storm_note(&mixed, us / 1000,
+			odi_nic_irq_has_work(ODI_NIC_IRQ_TX_OK, 0) ||
+			odi_nic_tx_progress(&seen_mixed, queued));
+	}
+	for (us = 2000000UL; us < 5000000UL; us += 100)
+		mixed_trip |= odi_irq_storm_note(&mixed, us / 1000,
+			odi_nic_irq_has_work(ODI_NIC_IRQ_TX_OK, 0) ||
+			odi_nic_tx_progress(&seen_mixed, queued));
+	CHECK(mixed_trip, "once TX stops, the re-firing TOK trips it");
+}
+
 int main(void)
 {
 	test_rx_own_bit();
@@ -331,6 +377,7 @@ int main(void)
 	test_rx_flow_control_flood();
 	test_irq_storm_guard();
 	test_tok_work();
+	test_tok_idle_tx_progress();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

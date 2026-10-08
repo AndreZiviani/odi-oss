@@ -263,6 +263,22 @@ static inline int odi_irq_storm_note(struct odi_irq_storm *s, unsigned long now_
 	return ++s->count > ODI_IRQ_STORM_TRIP_COUNT;
 }
 
+/* A TX-completion entry that finds nothing to reclaim is not a storm while
+ * frames were queued since the last such entry: the transmit path reclaimed
+ * the descriptor before the interrupt ran, which is what a busy single
+ * stream does thousands of times a second. `seen` is the caller's copy of
+ * the queued-frame counter at the last such entry; returns 1 (and updates
+ * it) when the counter advanced. A TOK that re-fires with no TX activity at
+ * all returns 0 and stays an idle entry for the guard.
+ */
+static inline int odi_nic_tx_progress(uint32_t *seen, uint32_t queued_now)
+{
+	if (queued_now == *seen)
+		return 0;
+	*seen = queued_now;
+	return 1;
+}
+
 /* ---- Descriptor rings -------------------------------------------------- */
 
 #define ODI_DESC_ALIGN		256U	/* ring base must be 256-byte aligned */

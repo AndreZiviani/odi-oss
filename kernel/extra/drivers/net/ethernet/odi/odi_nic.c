@@ -155,6 +155,8 @@ struct odi_nic {
 	unsigned int tok_irqs;		/* entries with the TX-completion bit set */
 	unsigned int tok_work;		/* ... of which scheduled a reclaim */
 	unsigned int tok_idle;		/* ... of which found nothing to reclaim */
+	unsigned int tx_queued;		/* frames queued, under odi.lock */
+	u32 tok_seen_queued;		/* tx_queued at the last idle TOK, irq context only */
 	unsigned int backstop_reclaims;	/* work runs that freed descriptors the interrupt had not */
 
 	/* RX descriptors the poll has taken back from the hardware, frames
@@ -667,6 +669,7 @@ static int odi_nic_xmit_raw(u32 opts1, u32 opts2, u32 opts3,
 	odi.tx_dma[idx] = dma;
 	odi.tx_len[idx] = len;
 	odi.tx_tail = odi_ring_next(idx, ODI_TX_RING_DEPTH);
+	odi.tx_queued++;
 
 	odi_w32(ODI_NIC_RUN, odi_r32(ODI_NIC_RUN) | ODI_NIC_RUN_TX_KICK);
 
@@ -1031,6 +1034,12 @@ static irqreturn_t odi_irq(int irq, void *dev_id)
 		}
 	} else if (isr & ODI_NIC_IRQ_TX_OK) {
 		odi.tok_idle++;
+		/* The transmit path got to the descriptor first: not a storm
+		 * while it keeps queueing frames. Without any TX activity
+		 * between two such entries it is, and the guard counts it.
+		 */
+		if (odi_nic_tx_progress(&odi.tok_seen_queued, READ_ONCE(odi.tx_queued)))
+			work = 1;
 	}
 
 	if (odi_irq_storm_note(&odi.irq_storm, jiffies_to_msecs(jiffies), work)) {
@@ -1141,6 +1150,7 @@ static int odi_ndo_open(struct net_device *dev)
 		odi.tok_irqs = 0;
 		odi.tok_work = 0;
 		odi.tok_idle = 0;
+		odi.tok_seen_queued = READ_ONCE(odi.tx_queued);
 		odi.backstop_reclaims = 0;
 		odi.state_dump_fire = 0;
 		if (odi_nic_debug)

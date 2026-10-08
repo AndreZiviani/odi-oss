@@ -15,7 +15,11 @@ listed here.
   shows `tok_irqs`, `tok_work`, `tok_idle` and `backstop_reclaims`, and the
   same counters join the debug dump and the pre-reset line. Whether the
   hardware raises the interrupt per frame with the programmed IO_CMD is
-  unconfirmed until a trial: `tok_irqs` stays 0 if it does not. Host test
+  unconfirmed until a trial: `tok_irqs` stays 0 if it does not. A TOK that finds
+  nothing to reclaim because the transmit path took the descriptor first (a
+  busy flood, about 2300 such entries per 2 s on one stream) does not count
+  toward the storm guard while frames keep being queued; a TOK that re-fires
+  with no TX activity still does. Host test
   `odi_nic_hw_test` covers the work rule and the guard.
 - docs: the NIC, GPIO and I2C register fields that were decoded by
   cross-checking against an independent driver for a later chip of the same
