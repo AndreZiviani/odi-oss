@@ -82,10 +82,17 @@ Error paths:
   still-mapped old buffer is recycled into the slot, so the hardware never
   points at freed memory. `odi_rings_free` unmaps and frees each slot once.
 - TX stops every queue when the ring is full and wakes them at half ring
-  (`ODI_TX_WAKE_USED`), with `smp_mb()` on both sides. There is no
-  TX-complete interrupt, so while a queue is stopped `tx_stall_work`
-  reclaims every 10 ms; without it a stopped queue with no RX traffic
-  would never wake.
+  (`ODI_TX_WAKE_USED`), with `smp_mb()` on both sides. Completed
+  descriptors are reclaimed from the NAPI poll, which the TX-completion
+  interrupt (IMR/ISR bit 6) schedules when there is something to reclaim;
+  an entry that carries reclaim work counts as work for the storm guard.
+  Two safety nets keep a missing interrupt from becoming a stall:
+  `tx_stall_work` reclaims every 10 ms while a queue is stopped (without
+  it a stopped queue with no RX traffic would never wake), and
+  `tx_backstop_work` every 100 ms while frames are in flight. `/proc/odi_nic`
+  shows `tok_irqs` (entries carrying the TX-completion bit) and
+  `backstop_reclaims` (work runs that freed descriptors nothing else had),
+  so a run shows whether the interrupt fires.
 - Every `dma_map_single()` is checked with `dma_mapping_error()`, and the
   init path unwinds in reverse order.
 

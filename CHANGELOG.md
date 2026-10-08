@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- nic: TX descriptors are reclaimed from the TX-completion interrupt (IMR/ISR
+  bit 6) through the NAPI poll, where before nothing but RX traffic, the next
+  transmit or the 10 ms stall work reclaimed them. A completion that has
+  descriptors to reclaim counts as work for the interrupt storm guard, so TX
+  load cannot trip it. A new 100 ms backstop reclaims while frames are in
+  flight, so an interrupt that does not fire degrades to the old behaviour,
+  never to a TX stall; the IO_CMD value is unchanged. `/proc/odi_nic` (new)
+  shows `tok_irqs`, `tok_work`, `tok_idle` and `backstop_reclaims`, and the
+  same counters join the debug dump and the pre-reset line. Whether the
+  hardware raises the interrupt per frame with the programmed IO_CMD is
+  unconfirmed until a trial: `tok_irqs` stays 0 if it does not. Host test
+  `odi_nic_hw_test` covers the work rule and the guard.
 - docs: the NIC, GPIO and I2C register fields that were decoded by
   cross-checking against an independent driver for a later chip of the same
   family now have names, in the code. No value written changes: the I2C setup

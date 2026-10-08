@@ -288,6 +288,37 @@ static void test_irq_storm_guard(void)
 	CHECK(!stuck_trip, "1000 idle entries a second stay under the trip count");
 }
 
+/* TX completion in the poll: an entry that brings reclaim work is work for
+ * the storm guard, one that finds nothing to reclaim is idle.
+ */
+static void test_tok_work(void)
+{
+	struct odi_irq_storm s = {0}, idle = {0};
+	int trip = 0, idle_trip = 0;
+	unsigned long us;
+
+	CHECK(ODI_NIC_IRQ_TX_OK == 0x40, "TX completion is bit 6");
+	CHECK(!(ODI_NIC_IRQ_TX_OK & ODI_NIC_IRQ_RX_SOURCES), "TX completion is not an RX source");
+	CHECK(ODI_NIC_IRQ_POLL_SOURCES == (ODI_NIC_IRQ_RX_SOURCES | 0x40U), "the poll re-arms RX and TX completion");
+	CHECK(odi_nic_irq_has_work(ODI_NIC_IRQ_TX_OK, 1), "TOK with a descriptor to reclaim is work");
+	CHECK(!odi_nic_irq_has_work(ODI_NIC_IRQ_TX_OK, 0), "TOK with nothing to reclaim is not");
+	CHECK(odi_nic_irq_has_work(ODI_NIC_IRQ_RX_OK, 0), "an RX source is work whatever the TX ring holds");
+	CHECK(!odi_nic_irq_has_work(ODI_NIC_IRQ_TX_ERR, 1), "a source the poll does not own is not");
+
+	/* 5000 TX completions a second for 3 s, each with descriptors to
+	 * reclaim: the guard must stay quiet, as it does for RX. */
+	for (us = 0; us < 3000000UL; us += 200)
+		trip |= odi_irq_storm_note(&s, us / 1000,
+					   odi_nic_irq_has_work(ODI_NIC_IRQ_TX_OK, 1));
+	CHECK(!trip, "a flood of TOK that each bring reclaim work does not trip the guard");
+
+	/* A TOK that re-fires with nothing to reclaim is a storm. */
+	for (us = 0; us < 3000000UL; us += 100)
+		idle_trip |= odi_irq_storm_note(&idle, us / 1000,
+						odi_nic_irq_has_work(ODI_NIC_IRQ_TX_OK, 0));
+	CHECK(idle_trip, "TOK with nothing to reclaim, over and over, still trips it");
+}
+
 int main(void)
 {
 	test_rx_own_bit();
@@ -299,6 +330,7 @@ int main(void)
 	test_rx_flow_control();
 	test_rx_flow_control_flood();
 	test_irq_storm_guard();
+	test_tok_work();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

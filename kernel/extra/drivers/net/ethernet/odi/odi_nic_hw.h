@@ -45,14 +45,35 @@
 #define ODI_NIC_IRQ_RX_RUNT	(1U << 2)
 #define ODI_NIC_IRQ_RX_FIFO_FULL		(1U << 4)	/* RX FIFO overflow: n7/n8 saw it on every interrupt */
 #define ODI_NIC_IRQ_RX_NO_DESC		(1U << 5)	/* ring 1 descriptor unavailable */
+/* TX completion: a descriptor went back to the CPU. Same bit position in
+ * the mask and the status register. Whether the hardware raises it for every
+ * frame with the IO_CMD value we program is judged from the tok_irqs counter
+ * in /proc/odi_nic, not assumed: odi_nic.c reclaims without it all the same.
+ */
+#define ODI_NIC_IRQ_TX_OK		(1U << 6)
 #define ODI_NIC_IRQ_TX_ERR		(1U << 7)
 #define ODI_NIC_IRQ_TX_NO_DESC		(1U << 9)
 #define ODI_NIC_IRQ_SOFT		(1U << 10)
 #define ODI_NIC_IRQ_LINK	(1U << 8)	/* defined, not the real link source */
 #define ODI_NIC_IRQ_ALL	0xFFFFU
-/* The sources odi_irq() hands to the poll, and the mask the poll re-arms. */
+/* The sources odi_irq() hands to the poll, and the mask the poll re-arms:
+ * the RX sources, and TX completion for the reclaim.
+ */
 #define ODI_NIC_IRQ_RX_SOURCES	(ODI_NIC_IRQ_RX_OK | ODI_NIC_IRQ_RX_RUNT | \
 				 ODI_NIC_IRQ_RX_FIFO_FULL | ODI_NIC_IRQ_RX_NO_DESC)
+#define ODI_NIC_IRQ_POLL_SOURCES	(ODI_NIC_IRQ_RX_SOURCES | ODI_NIC_IRQ_TX_OK)
+
+/* Whether an interrupt entry brings the poll work. An RX source always
+ * does. A TX completion does only while a descriptor is waiting to be
+ * reclaimed: one the reclaim in ndo_start_xmit already took is an entry
+ * with nothing to do, and the storm guard counts it as such. A TOK that has
+ * descriptors to reclaim is work, never a storm.
+ */
+static inline int odi_nic_irq_has_work(uint32_t isr, int tx_reclaimable)
+{
+	return (isr & ODI_NIC_IRQ_RX_SOURCES) ||
+	       ((isr & ODI_NIC_IRQ_TX_OK) && tx_reclaimable);
+}
 
 #define ODI_NIC_XFER_STATUS		0x34	/* 32-bit, aggregate TX/RX status */
 
