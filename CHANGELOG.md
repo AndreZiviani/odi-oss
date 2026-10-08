@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- build: `kernel/tree.sh` fetches the kernel again when
+  `kernel/618/mainline` holds a different release than the one pinned in
+  `kernel/618/fetch.sh`, and rebuilds the tree tarball unless its new stamp
+  (`build/kernel-618/tree.tar.version`) names the pinned release. Before, a
+  checkout that already had a tree kept building the old kernel after a pin
+  bump, with no warning: a local build after the 6.18.55 bump still produced
+  6.18.54. Release builds start from a clean tree and were not affected.
 - kernel: TIMER0 gets a oneshot mode (counter mode, 3.125 MHz, 28-bit delta)
   next to the periodic tick, and `CONFIG_HIGH_RES_TIMERS` and
   `CONFIG_NO_HZ_IDLE` are on, so the kernel runs high-resolution timers
