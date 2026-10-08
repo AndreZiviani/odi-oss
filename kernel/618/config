@@ -13,11 +13,13 @@ CONFIG_CPU_BIG_ENDIAN=y
 CONFIG_RTL8686_UART0=y
 CONFIG_RTL8686_NOR=y
 CONFIG_HZ_250=y
-# Tickless idle and hrtimers: TIMER0 has a counter-mode oneshot (time.c),
-# and the TIMER1 clocksource is continuous, which the tick core needs.
-# NO_HZ_IDLE selects NO_HZ_COMMON and TICK_ONESHOT; HIGH_RES_TIMERS needs
-# the same oneshot support (GENERIC_CLOCKEVENTS is already on).
-CONFIG_NO_HZ_IDLE=y
+# High-resolution timers: TIMER0 has a counter-mode oneshot (time.c), and
+# the TIMER1 clocksource is continuous, which the tick core needs. The tick
+# stays periodic (HZ_PERIODIC): the idle sleep in board.c enables
+# interrupts just before the sleep instruction, so an interrupt that lands
+# in between is only noticed at the next wake-up, and the periodic tick
+# bounds that at 4 ms. Tickless idle measured no gain anyway (docs/KERNEL.md).
+CONFIG_HZ_PERIODIC=y
 CONFIG_HIGH_RES_TIMERS=y
 
 # Size (-Os, DCE, tiny slab, no modules)

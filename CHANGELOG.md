@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- kernel: the idle loop stops the CPU with the Lexra SLEEP instruction
+  until the next interrupt, where it used to spin at full speed (the
+  R3000 model has no wait instruction). On ISP1 the module runs about
+  1.9 C cooler relative to the ISP2 stick, and idle ping rises from 0.28 to
+  0.33 ms. The tick is periodic again (`CONFIG_NO_HZ_IDLE` off, high-
+  resolution timers kept): tickless idle measured no gain, and the periodic
+  tick bounds a wake-up missed just before SLEEP at 4 ms. The kernel image
+  is 3.8 KB smaller.
 - build: `kernel/tree.sh` fetches the kernel again when
   `kernel/618/mainline` holds a different release than the one pinned in
   `kernel/618/fetch.sh`, and rebuilds the tree tarball unless its new stamp
