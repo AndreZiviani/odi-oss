@@ -85,6 +85,15 @@
 #define RTL8686_TIMER_BLOCK_SIZE	0x10
 #define RTL8686_TIMER1_DIV		64
 
+/* TIMER0 in counter mode (RTL8686_TIMER_PERIODIC clear): counts DATA ticks
+ * from the enable write, raises the interrupt and stops. DATA is 28 bits.
+ * The divisor is the low 16 bits of CTRL; oneshot uses the same /64 as
+ * TIMER1 (3.125 MHz at the 200 MHz LX clock), so the two timers share a
+ * rate. The periodic tick keeps RTL8686_TIMER_PRESCALE.
+ */
+#define RTL8686_TIMER0_ONESHOT_DIV	RTL8686_TIMER1_DIV
+#define RTL8686_TIMER_DATA_MASK		0x0fffffffu
+
 /* SPI NOR flash: the memory-mapped read window, valid once
  * rtl8686-spiflash.c has configured it (not CFI). U-Boot boots the slots
  * with bootm 0x94080000 and 0x94440000, k0 and k1 in this window.
