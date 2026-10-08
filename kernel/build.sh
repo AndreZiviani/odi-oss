@@ -62,7 +62,10 @@ trap on_exit_618 EXIT
 "$ROOT/kernel/tree.sh" "$WORK/tree.tar"
 cp "$SEED" "$WORK/seed.config"
 hash_of() { (sha256sum 2>/dev/null || shasum -a 256) | cut -d' ' -f1; }
-SCRIPTHASH=$(cat "$0" "$SEED" | hash_of)
+# The pinned kernel release (the tree.tar stamp kernel/tree.sh writes) is
+# part of the script stamp, so a pin bump re-extracts /build/src instead of
+# building the old sources the volume still holds.
+SCRIPTHASH=$(cat "$0" "$SEED" "$WORK/tree.tar.version" | hash_of)
 # The overlay file list (names, not contents) is part of the patch stamp: a
 # file added to or removed from kernel/extra re-extracts the tree, so a
 # deleted overlay file does not linger in /build/src. A content edit alone
