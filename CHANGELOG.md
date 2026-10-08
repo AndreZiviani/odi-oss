@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- kernel: TIMER1 is registered as a free-running clocksource
+  (`rtl8686-timer1`, 28 bits at 3.125 MHz) and as `sched_clock`, so
+  `ktime_get()` and scheduler timestamps have sub-tick resolution instead of
+  the 4 ms jiffies step. The TIMER0 tick is unchanged. If TIMER1 does not
+  count at boot, one warning is printed and the kernel keeps the jiffies
+  clocksource. On ISP1 it is the current clocksource and kept time exactly
+  over 61 s across a counter wrap, with no timekeeping warnings.
+  `rtl8686_cpu_hz` is renamed `rtl8686_lx_hz`: it is the LX bus clock, not
+  the CPU clock.
 - nic: TX descriptors are reclaimed from the TX-completion interrupt (IMR/ISR
   bit 6) through the NAPI poll, where before nothing but RX traffic, the next
   transmit or the 10 ms stall work reclaimed them. A completion that has

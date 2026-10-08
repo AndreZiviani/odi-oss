@@ -43,8 +43,10 @@ extern void odi_ramlog_early_console_init(void);
 /* 32 MB DRAM, the only configuration of this board. */
 #define RTL8686_MEM_SIZE	(32 << 20)
 
-/* The LX bus clock of UART0 and TIMER0; time.c reads it here. */
-unsigned int rtl8686_cpu_hz = RTL8686_LX_HZ;
+/* The LX bus clock (the clock UART0 and the SoC timers count from), not
+ * the CPU clock; time.c reads it here.
+ */
+unsigned int rtl8686_lx_hz = RTL8686_LX_HZ;
 
 /* CPU_R3000 selects CPU_HAS_WB, so mb(), iob() and the barrier before
  * each readl()/writel() call through this pointer; a sync drains the

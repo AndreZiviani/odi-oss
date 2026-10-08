@@ -213,9 +213,17 @@ registers, routing to CPU interrupt lines IP2–IP7. The periodic tick
 (`arch/mips/rtl8686/time.c`, from `plat_time_init()`) comes from hardware
 timer TIMER0, programmed once for a fixed
 HZ-periodic interrupt — this SoC's timer is not a general comparator, so
-there is no dynamic `set_next_event()`. There is also no free-running counter
-usable as a clocksource; timekeeping falls back to the kernel's own jiffies
-clocksource.
+there is no dynamic `set_next_event()` and no oneshot mode. The RLX5281 has
+no CP0 Count/Compare, so the clocksource is a second SoC timer, TIMER1, run
+free with no interrupt: a 28-bit counter at the LX clock / 64 (3.125 MHz,
+wrapping about every 85.9 s), registered as `rtl8686-timer1` with a
+matching `sched_clock`. On hardware (ISP1, 2026-10-08) it is the current
+clocksource, and `/proc/uptime` advanced 61.02 s over 61 s of wall time
+across a counter wrap, with no timekeeping-watchdog warnings. At
+init the driver checks that the counter moves (and whether it counts up or
+down) and, if it does not, registers nothing and keeps the jiffies
+clocksource, so `ktime_get()` is then coarse (~1/HZ) and stands still with
+interrupts off.
 
 ## NOR flash
 

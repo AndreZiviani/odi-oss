@@ -802,11 +802,15 @@ Each of these has cost real time. The pointer says where the evidence is.
   off, so mainline `wmb()`, `rmb()` and `dma_wmb()` emit no instruction. Use
   `rtl8686_sync()` (`asm/mach-rtl8686/rtl8686-barrier.h`) for DMA ordering
   (a descriptor body before its ownership bit). `docs/KERNEL.md` "The CPU".
-- **There is no clocksource.** No CP0 Count/Compare and no free-running
-  counter; timekeeping is the jiffies clocksource, advanced by the TIMER0
-  tick interrupt. With interrupts off, `jiffies` and `ktime_get()` stand
-  still, so a poll bounded by a clock in atomic context never times out.
-  `odi_poll_reg()` (`odi_switch_reg.h`) is built on 6.18
+- **The clocksource is a SoC timer, and may fall back to jiffies.** No CP0
+  Count/Compare; `rtl8686-timer1` (TIMER1, free-running, 3.125 MHz, 28 bits)
+  is the clocksource and `sched_clock`, and the TIMER0 tick interrupt only
+  drives the scheduler tick (verified on hardware).
+  If TIMER1 does not count at boot the driver prints a warning and the
+  kernel stays on the jiffies clocksource, where with interrupts off
+  `jiffies` and `ktime_get()` stand still and a poll bounded by a clock in
+  atomic context never times out. Do not rely on a clock-bounded atomic
+  poll either way: `odi_poll_reg()` (`odi_switch_reg.h`) is built on 6.18
   `read_poll_timeout_atomic()`, which counts its bound in delay steps
   rather than reading a clock; use it, or count iterations yourself.
   `kernel/extra/arch/mips/rtl8686/time.c`.
