@@ -34,9 +34,10 @@ listed here.
   flight, so an interrupt that does not fire degrades to the old behaviour,
   never to a TX stall; the IO_CMD value is unchanged. `/proc/odi_nic` (new)
   shows `tok_irqs`, `tok_work`, `tok_idle` and `backstop_reclaims`, and the
-  same counters join the debug dump and the pre-reset line. Whether the
-  hardware raises the interrupt per frame with the programmed IO_CMD is
-  unconfirmed until a trial: `tok_irqs` stays 0 if it does not. A TOK that finds
+  same counters join the debug dump and the pre-reset line. On ISP1 the
+  interrupt fires with the stock IO_CMD (147 of the first 161 entries had
+  work, 5 backstop reclaims), and four parallel ping floods plus a 30 MB
+  transfer ran with no loss, no pause frames and no storm trip. A TOK that finds
   nothing to reclaim because the transmit path took the descriptor first (a
   busy flood, about 2300 such entries per 2 s on one stream) does not count
   toward the storm guard while frames keep being queued; a TOK that re-fires
