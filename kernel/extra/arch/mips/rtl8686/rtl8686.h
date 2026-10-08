@@ -10,7 +10,7 @@
 #include <linux/linkage.h>
 
 /* board.c: the LX bus clock, read by time.c. */
-extern unsigned int rtl8686_cpu_hz;
+extern unsigned int rtl8686_lx_hz;
 
 /* irq.c, from arch_init_irq(). */
 void __init rtl8686_irq_init(void);

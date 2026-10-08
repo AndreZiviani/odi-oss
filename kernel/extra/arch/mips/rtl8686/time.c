@@ -8,25 +8,29 @@
  * interrupt, with set_next_event() left unimplemented -- periodic-only is
  * what this SoC offers from Linux.
  *
- * No clocksource is registered: the RLX5281 has no CP0 Count/Compare, and
- * this SoC has no other free-running counter usable as a clocksource.
- * Timekeeping falls back to the jiffies clocksource built into the kernel --
- * coarse (~1/HZ resolution).
+ * The clocksource is TIMER1, a second block of the same layout, run as a
+ * free-running 28-bit counter with no interrupt (the RLX5281 has no CP0
+ * Count/Compare). Verified on hardware: it is the current clocksource and
+ * keeps time exactly across a counter wrap. If TIMER1 does not count
+ * at init, no clocksource is registered and timekeeping stays on the
+ * kernel jiffies clocksource (~1/HZ resolution), advanced by the TIMER0
+ * tick.
  *
  * The TIMER0_CTRL/TIMER0_PERIOD/TIMER0_IRQ layout used here is the RTL9602C one; other
  * chips of the same family place their timer registers differently and
  * are not supported.
  *
- * TIMER0_PERIOD scale: REG32(TIMER0_PERIOD) = MHz * (DIVISOR / HZ) -- MHz is the CPU
- * clock in MHz (not Hz), and DIVISOR/HZ (1000/HZ, integral for every HZ
+ * TIMER0_PERIOD scale: REG32(TIMER0_PERIOD) = MHz * (DIVISOR / HZ) -- MHz is the LX
+ * bus clock in MHz (not Hz), and DIVISOR/HZ (1000/HZ, integral for every HZ
  * this port uses) is computed before the multiply. Computing
- * (cpu_hz / HZ) * divisor with cpu_hz in raw Hz overflows u32 by six orders
+ * (lx_hz / HZ) * divisor with lx_hz in raw Hz overflows u32 by six orders
  * of magnitude (e.g. HZ=250, 180 MHz: 720,000,000,000, silently wrapped to
  * a nonsense count) -- TIMER0 never reaches that count, so no timer interrupt
  * arrives and calibrate_delay() hangs waiting on jiffies that never
  * advance. Keep the MHz-first, divisor/HZ-before-multiply grouping exactly.
  */
 #include <linux/clockchips.h>
+#include <linux/clocksource.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -115,9 +119,103 @@ static irqreturn_t rtl8686_timer_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+/*
+ * TIMER1 clocksource: DATA = 0x0fffffff, CTRL = divisor | enable |
+ * periodic, so it counts the LX clock / 64 and wraps in about 85.9 s. The
+ * mask matches the 28-bit DATA field. Whether CNT counts up or down is
+ * decided at init (rtl8686_timer1_probe), and read inverts a down-counter.
+ */
+#define RTL8686_TIMER1_MASK	GENMASK(27, 0)
+
+static void __iomem *rtl8686_timer1;
+static bool rtl8686_timer1_down;
+
+static inline u32 rtl8686_timer1_raw(void)
+{
+	return readl(rtl8686_timer1 + RTL8686_TIMER_CNT) & RTL8686_TIMER1_MASK;
+}
+
+static u64 rtl8686_timer1_read(struct clocksource *cs)
+{
+	u32 v = rtl8686_timer1_raw();
+
+	return rtl8686_timer1_down ? RTL8686_TIMER1_MASK - v : v;
+}
+
+static u64 notrace rtl8686_timer1_sched_read(void)
+{
+	return rtl8686_timer1_read(NULL);
+}
+
+static struct clocksource rtl8686_clocksource = {
+	.name	= "rtl8686-timer1",
+	.rating	= 300,
+	.read	= rtl8686_timer1_read,
+	.mask	= CLOCKSOURCE_MASK(28),
+	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
+};
+
+/*
+ * Check that TIMER1 moves and which way. A bounded poll of the register
+ * itself (up to 1000 reads), not udelay(): plat_time_init() runs before
+ * calibrate_delay(), so udelay() has no calibrated loop count here. A
+ * 3.125 MHz counter advances every 320 ns, far less than one MMIO read.
+ * Returns true and sets rtl8686_timer1_down when it counts. A step of more
+ * than half the range means it went backwards.
+ */
+static bool __init rtl8686_timer1_probe(void)
+{
+	u32 first = rtl8686_timer1_raw();
+	int i;
+
+	for (i = 0; i < 1000; i++) {
+		u32 step = (rtl8686_timer1_raw() - first) & RTL8686_TIMER1_MASK;
+
+		if (!step)
+			continue;
+		rtl8686_timer1_down = step > RTL8686_TIMER1_MASK / 2;
+		return true;
+	}
+	return false;
+}
+
+static void __init rtl8686_clocksource_init(unsigned int lx_hz)
+{
+	unsigned long rate = lx_hz / RTL8686_TIMER1_DIV;
+
+	rtl8686_timer1 = ioremap(RTL8686_TIMER1_BASE, RTL8686_TIMER_BLOCK_SIZE);
+	if (!rtl8686_timer1) {
+		pr_warn("rtl8686-timer1: ioremap failed, no clocksource\n");
+		return;
+	}
+
+	/* Counter off, interrupt off, then reload value and the whole
+	 * control word in one write (see the note in
+	 * rtl8686_set_state_periodic()).
+	 */
+	writel(0, rtl8686_timer1 + RTL8686_TIMER_CTRL);
+	writel(0, rtl8686_timer1 + RTL8686_TIMER_INT);
+	writel(RTL8686_TIMER1_MASK, rtl8686_timer1 + RTL8686_TIMER_DATA);
+	writel(RTL8686_TIMER_EN | RTL8686_TIMER_PERIODIC | RTL8686_TIMER1_DIV,
+	       rtl8686_timer1 + RTL8686_TIMER_CTRL);
+
+	if (!rtl8686_timer1_probe()) {
+		pr_warn("rtl8686-timer1: counter does not move, no clocksource (jiffies stays)\n");
+		writel(0, rtl8686_timer1 + RTL8686_TIMER_CTRL);
+		iounmap(rtl8686_timer1);
+		rtl8686_timer1 = NULL;
+		return;
+	}
+
+	sched_clock_register(rtl8686_timer1_sched_read, 28, rate);
+	clocksource_register_hz(&rtl8686_clocksource, rate);
+	pr_info("rtl8686-timer1: clocksource at %lu Hz, counts %s\n", rate,
+		rtl8686_timer1_down ? "down" : "up");
+}
+
 void __init rtl8686_clockevent_init(void)
 {
-	unsigned int cpu_hz = rtl8686_cpu_hz;
+	unsigned int lx_hz = rtl8686_lx_hz;
 	unsigned int divisor = RTL8686_TIMER_PRESCALE;
 	unsigned int irq = RTL8686_IRQ_BASE + RTL8686_IRQ_TIMER0;
 	int ret;
@@ -133,9 +231,9 @@ void __init rtl8686_clockevent_init(void)
 
 	writel(divisor, rtl8686_timer0 + (RTL8686_TIMER0_CTRL - RTL8686_TIMER0_PERIOD));
 	/* MHz first, then (divisor/HZ) -- see the file header for why this
-	 * is not (cpu_hz / HZ) * divisor.
+	 * is not (lx_hz / HZ) * divisor.
 	 */
-	writel((cpu_hz / 1000000) * (divisor / HZ),
+	writel((lx_hz / 1000000) * (divisor / HZ),
 	       rtl8686_timer0 + (RTL8686_TIMER0_PERIOD - RTL8686_TIMER0_PERIOD));
 
 	/*
@@ -159,4 +257,6 @@ void __init rtl8686_clockevent_init(void)
 		panic("rtl8686-timer: request_irq failed (%d)", ret);
 
 	rtl8686_set_state_periodic(&rtl8686_clockevent);
+
+	rtl8686_clocksource_init(lx_hz);
 }

@@ -72,6 +72,19 @@
 #define RTL8686_TIMER_IRQ_PEND		BIT(16)
 #define RTL8686_TIMER_PRESCALE	1000
 
+/* TIMER1: same per-timer block layout as TIMER0, 0x10 bytes further on.
+ * Used as a free-running clocksource, no interrupt (time.c). DATA is the
+ * 28-bit reload value, CNT the live count, CTRL the enable/mode/divisor
+ * word, INT the interrupt enable and pending bits.
+ */
+#define RTL8686_TIMER1_BASE		(RTL8686_TIMER_BASE + 0x10)
+#define RTL8686_TIMER_DATA		0x00
+#define RTL8686_TIMER_CNT		0x04
+#define RTL8686_TIMER_CTRL		0x08
+#define RTL8686_TIMER_INT		0x0C
+#define RTL8686_TIMER_BLOCK_SIZE	0x10
+#define RTL8686_TIMER1_DIV		64
+
 /* SPI NOR flash: the memory-mapped read window, valid once
  * rtl8686-spiflash.c has configured it (not CFI). U-Boot boots the slots
  * with bootm 0x94080000 and 0x94440000, k0 and k1 in this window.
