@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fetch and verify linux-6.18.53 (the current longterm release, per
-# kernel.org/releases.json checked 2026-09-23) from cdn.kernel.org for
+# Fetch and verify the 6.18 longterm release pinned in VERSION below
+# (tools/bump-deps.sh moves the pin) from cdn.kernel.org for
 # kernel/build.sh KVER=6.18. Two independent checks: a pinned SHA-256 of the
 # tarball, and a GPG verification of the upstream .tar.sign against Greg
 # Kroah-Hartman stable-release key, fingerprint pinned so a compromised
