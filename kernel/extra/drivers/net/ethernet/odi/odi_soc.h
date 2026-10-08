@@ -30,12 +30,24 @@
 #define SOC_CLK_RST_EN		0x0044U	/* clock/reset enable, board init */
 #define SOC_IP_EN		0x063cU	/* IP enable; bit 5 is the PON PBO block */
 #define SOC_WDT_KICK		0x3260U	/* odi_wdt.h has the three WDT registers */
+/* Watchdog interrupt/status: phase 1 pending at bit 31, phase 2 at bit 30.
+ * Not read or written by the driver; allowlisted only. Decode cross-checked
+ * against an independent driver for a later chip of the same family
+ * (mainline realtek_otto_wdt); values unchanged.
+ */
 #define SOC_WDT_STATUS		0x3264U
 #define SOC_WDT_CTRL		0x3268U
-#define SOC_GPIO_DIR		0x3308U	/* GPIO A-D direction, bit n = GPIO n, 1 = output */
-#define SOC_GPIO_DATA		0x330cU	/* GPIO A-D data, bit n = GPIO n */
-#define SOC_GPIO_REG_3324	0x3324U	/* GPIO A-D block, not decoded; replayed only */
-#define SOC_GPIO_REG_3328	0x3328U	/* the same */
+/* GPIO: bank 0 (A-D) has direction at 0x3308 and data at 0x330c; bank 1 has
+ * its direction at 0x3324 and its data at 0x3328, the same layout 0x1c
+ * further on. The bank 1 decode is cross-checked against an independent
+ * driver for a later chip of the same family; those two are only replayed,
+ * with the values the stock firmware writes, which are unchanged. Which pins
+ * the replayed values drive is not decoded.
+ */
+#define SOC_GPIO_DIR		0x3308U	/* GPIO bank 0 direction, bit n = GPIO n, 1 = output */
+#define SOC_GPIO_DATA		0x330cU	/* GPIO bank 0 data, bit n = GPIO n */
+#define SOC_GPIO_B1_DIR		0x3324U	/* GPIO bank 1 direction; replayed only */
+#define SOC_GPIO_B1_DATA	0x3328U	/* GPIO bank 1 data; replayed only */
 
 /* Maps the window once, whoever asks first: board init, the watchdog and
  * the odi_init verbs each call it from their initcall. 0 or -ENODEV.

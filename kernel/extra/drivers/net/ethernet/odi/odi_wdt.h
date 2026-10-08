@@ -7,7 +7,8 @@
  * The three registers, SoC-window offsets (odi_soc.h):
  *
  *   SOC_WDT_KICK    bit 31 written back into the current value kicks
- *   SOC_WDT_STATUS  not used; on the allowlist so the block has no gap
+ *   SOC_WDT_STATUS  interrupt/status (phase 1 bit 31, phase 2 bit 30); not
+ *                   used, on the allowlist so the block has no gap
  *   SOC_WDT_CTRL    bit 31 ENABLE, bits 30:29 PRESCALE, 26:22 TIMEOUT1,
  *                   19:15 TIMEOUT2, 1:0 RESET_MODE
  *

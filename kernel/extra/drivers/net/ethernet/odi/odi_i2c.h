@@ -12,8 +12,8 @@
  * I2C_MASTER_SETUP (base 0x023004, port 1 instance 0x023008). I2C_CMD's
  * bit names are used directly; I2C_MASTER_SETUP's fields have no names
  * of ours, so ODI_I2C_SEL_A0/_A2 below are the two words a capture of a
- * working DDM read shows written verbatim, never reconstructed field by
- * field.
+ * working DDM read shows written verbatim; the fields they are now built
+ * from are a decode of those words, asserted equal to them.
  *
  * Transaction shape, from a capture of `pon get transceiver <keyword>`
  * against a stock boot that still ran its own I2C init (one bracket
@@ -45,13 +45,39 @@
 #define ODI_I2C_CMD_IN_PROGRESS 0x00000004u	/* IN_PROGRESS -- 1 while the transaction runs */
 #define ODI_I2C_CMD_NOT_ACKED   0x00000008u	/* NOT_ACKED -- device did not acknowledge */
 
+/* I2C_MASTER_SETUP fields. The decode is cross-checked against an
+ * independent driver for a later chip of the same family; the values are
+ * unchanged from the captured words. Both words carry data width and
+ * memory-address width 0; what the other codes mean is not decoded.
+ *   9:0    CLK_DIV, clock divider (0x13a in both words)
+ *   11:10  data width code
+ *   13:12  memory-address width code
+ *   20:14  DEV_ADDR, the 7-bit bus address: 0x50 (A0h) or 0x51 (A2h)
+ *   21, 25 set in both captured words; not decoded
+ */
+#define ODI_I2C_SETUP_CLK_DIV(v)	(((uint32_t)(v) & 0x3ffu) << 0)
+#define ODI_I2C_SETUP_DATA_WIDTH(v)	(((uint32_t)(v) & 0x3u) << 10)
+#define ODI_I2C_SETUP_MEM_ADDR_WIDTH(v)	(((uint32_t)(v) & 0x3u) << 12)
+#define ODI_I2C_SETUP_DEV_ADDR(v)	(((uint32_t)(v) & 0x7fu) << 14)
+#define ODI_I2C_SETUP_BIT21		(1u << 21)	/* set, not decoded */
+#define ODI_I2C_SETUP_BIT25		(1u << 25)	/* set, not decoded */
+
+#define ODI_I2C_SETUP_CLK_DIV_CAPTURED	0x13au
+#define ODI_I2C_SETUP(dev_addr) \
+	(ODI_I2C_SETUP_CLK_DIV(ODI_I2C_SETUP_CLK_DIV_CAPTURED) | \
+	 ODI_I2C_SETUP_DATA_WIDTH(0) | ODI_I2C_SETUP_MEM_ADDR_WIDTH(0) | \
+	 ODI_I2C_SETUP_DEV_ADDR(dev_addr) | ODI_I2C_SETUP_BIT21 | ODI_I2C_SETUP_BIT25)
+
 /* The two I2C_MASTER_SETUP words the capture writes: SFF-8472 device address
  * A0h (identification: vendor name, part number) and A2h (DDMI:
- * temperature, voltage, bias current, Tx/Rx power). Captured verbatim,
- * see this file's own header comment.
+ * temperature, voltage, bias current, Tx/Rx power).
  */
-#define ODI_I2C_SEL_A0   0x0234013au
-#define ODI_I2C_SEL_A2   0x0234413au
+#define ODI_I2C_SEL_A0   ODI_I2C_SETUP(0x50)
+#define ODI_I2C_SEL_A2   ODI_I2C_SETUP(0x51)
+
+/* The values are the captured literals, bit for bit. */
+_Static_assert(ODI_I2C_SEL_A0 == 0x0234013au, "I2C A0h setup word changed");
+_Static_assert(ODI_I2C_SEL_A2 == 0x0234413au, "I2C A2h setup word changed");
 
 /* Bound on the IN_PROGRESS poll: about 5 ms, 512 reads 10 us apart. The
  * longest run the capture shows was about 116 consecutive IN_PROGRESS

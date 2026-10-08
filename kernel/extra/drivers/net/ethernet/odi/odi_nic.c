@@ -476,7 +476,7 @@ static void odi_init_hw_rings(void)
 
 	odi_w32(ODI_NIC_R13FC, 0);
 
-	odi_w8(ODI_NIC_PAUSE, odi_r8(ODI_NIC_PAUSE) | ODI_NIC_PAUSE_ON);
+	odi_w8(ODI_NIC_MSR, odi_r8(ODI_NIC_MSR) | ODI_NIC_MSR_FC_ON);
 }
 
 /* The station (own MAC) address; there is one register pair for all five
@@ -1002,7 +1002,7 @@ static void odi_state_dump_work(struct work_struct *work)
 		odi.state_dump_fire,
 		odi_r16(ODI_NIC_IRQ_STATUS), odi_r16(ODI_NIC_IRQ_MASK), odi_r32(ODI_NIC_RING_IRQ_MASK),
 		odi_r32(ODI_NIC_RING_IRQ_STATUS), odi_r32(ODI_NIC_RUN), odi_r32(ODI_NIC_RUN1),
-		odi_r32(ODI_NIC_XFER_STATUS), odi_r8(ODI_NIC_PAUSE), odi_r32(ODI_NIC_TAG_CTRL),
+		odi_r32(ODI_NIC_XFER_STATUS), odi_r8(ODI_NIC_MSR), odi_r32(ODI_NIC_TAG_CTRL),
 		odi_r32(ODI_NIC_FIFO_CFG));
 
 	for (i = 0; i < ODI_TX_RING_DEPTH; i++)
@@ -1127,7 +1127,7 @@ void odi_nic_report(void)
 {
 	pr_emerg(DRV_NAME ": irq_status=0x%04x irq_mask=0x%04x rx1_index=0x%08x rx1_fc=0x%08x pause=0x%02x rx_head=%u rx_taken=%u irq_entries=%u napi_polls=%u storm=%d\n",
 		 odi_r16(ODI_NIC_IRQ_STATUS), odi_r16(ODI_NIC_IRQ_MASK),
-		 odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_CPU_IDX), odi_r8(ODI_NIC_PAUSE),
+		 odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_CPU_IDX), odi_r8(ODI_NIC_MSR),
 		 odi.rx_head, odi.rx_taken, odi.irq_entries, odi.napi_polls, odi.irq_storm_tripped);
 }
 
