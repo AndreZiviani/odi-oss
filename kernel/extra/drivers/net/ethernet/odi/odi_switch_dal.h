@@ -147,7 +147,9 @@ int odi_switch_gpon_encrypt_port(uint16_t gem_port_id, int enable);
  *
  * A VLAN table row (one word, by VID): 3..0 member ports, 7..4 the members
  * that send untagged, 8 FID/MSTI, 9 S-VLAN IVL/SVL, 10 IVL/SVL, 17..11
- * extension port mask.
+ * extension port mask. The stock default row words (for example 0x0003f8ff)
+ * are not decoded beyond the member and untag nibbles our code uses; a later
+ * chip of the family uses a different, wider layout.
  */
 struct odi_sw_cf_entry {
 	uint32_t idx;

@@ -93,13 +93,33 @@
 	((((uint32_t)(vdsl_port) & 0xF) << 4) | ((uint32_t)(pon_port) & 0xF) | \
 	 (((uint32_t)(sid) & 0xFFFFFU) << 8))
 
-#define ODI_NIC_PAUSE		0x58	/* 8-bit */
-/* The three flow-control enables live in the high nibble of the byte at
- * 0x58: the live stock firmware reads 0xf0 there, ours read 0x10 after
- * writing bits 0-2 (which did not stick). Which of bits 5-7 is which is
- * not decoded; the stock firmware has all three set together.
+/* The MAC status register. Its high byte (bits 31:24) is the byte at 0x58 on
+ * this big-endian target, and the driver reads and writes it as a byte.
+ * Bits 7:5 are control, bits 4:0 are status and read-only. Decode
+ * cross-checked against an independent driver for a later chip of the same
+ * family; values unchanged. The byte reads 0xf0 on a stick running this
+ * driver (bits 7:4 set, 3:0 clear), which fits the decode below.
  */
-#define ODI_NIC_PAUSE_ON		0xE0U
+#define ODI_NIC_MSR		0x58	/* 8-bit access */
+#define ODI_NIC_MSR_FORCE_FC	(1U << 7)	/* force flow control */
+#define ODI_NIC_MSR_RX_FC_EN	(1U << 6)	/* RX flow control enable */
+#define ODI_NIC_MSR_TX_FC_EN	(1U << 5)	/* TX flow control enable */
+#define ODI_NIC_MSR_SPEED_1000	(1U << 4)	/* status: 1000 Mb/s */
+#define ODI_NIC_MSR_SPEED_10	(1U << 3)	/* status: 10 Mb/s */
+/* Status: link. It reads clear on a running stick whose CPU port carries
+ * traffic, so what it tracks on this chip is unconfirmed; nothing here
+ * reads it.
+ */
+#define ODI_NIC_MSR_LINK	(1U << 2)
+#define ODI_NIC_MSR_TX_PAUSE_ST	(1U << 1)	/* status: TX pause */
+#define ODI_NIC_MSR_RX_PAUSE_ST	(1U << 0)	/* status: RX pause */
+
+/* The three flow-control controls the driver sets together, as the stock
+ * firmware has them. The write is a read-modify-write of the byte, so the
+ * status bits are written back as read.
+ */
+#define ODI_NIC_MSR_FC_ON	(ODI_NIC_MSR_FORCE_FC | ODI_NIC_MSR_RX_FC_EN | ODI_NIC_MSR_TX_FC_EN)
+typedef char odi_nic_msr_fc_on_is_0xe0[(ODI_NIC_MSR_FC_ON == 0xE0U) ? 1 : -1];
 
 #define ODI_NIC_RING_IRQ_MASK		0xD0	/* multi-ring RX mask, 32-bit */
 #define ODI_NIC_RING_IRQ_STATUS		0xD8	/* multi-ring, write-1-clear */
@@ -110,7 +130,16 @@
 #define ODI_NIC_TX1_RING		0x1300
 #define ODI_NIC_TX1_INDEX		0x1304
 
-#define ODI_NIC_RX_RING_MAP	0x1370	/* one 32-bit word per RX ring, 1..6, step 4 */
+/* The priority-to-ring route register at 0x1370: one field per internal
+ * priority, eight of them, each a ring number (0..6) in its own 4-bit slot,
+ * priority n at bits 4n+2:4n. Not one word per ring. The value below sends
+ * priorities 0 and 1 to ring 0, then 2..7 to rings 1..6. The words that
+ * follow it, up to 0x1384, are written with the same value as the stock
+ * firmware does; what they are is not decoded. Cross-checked against an
+ * independent driver for a later chip of the same family (the register and
+ * its purpose; the slot layout is read off the constant); values unchanged.
+ */
+#define ODI_NIC_RX_RING_MAP	0x1370	/* the route register; six words are written, step 4 */
 #define ODI_NIC_RX_RING_MAP_1TO1 0x65432100U
 
 #define ODI_NIC_RX1_RING		0x13F0
@@ -125,7 +154,7 @@
 #define ODI_NIC_R13FC		0x13FC
 
 /* RX ring 1 flow control. The NIC asserts PAUSE toward the switch CPU
- * port (with ODI_NIC_PAUSE TX flow control on) when the descriptors
+ * port (with ODI_NIC_MSR_TX_FC_EN on) when the descriptors
  * available to it -- from its own position up to the last one the CPU
  * handed back -- fall to FC_ON, and releases it at FC_OFF. The CPU index is
  * the driver's to keep current, like a tail doorbell: the hardware does not

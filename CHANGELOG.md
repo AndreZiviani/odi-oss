@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- docs: the NIC, GPIO and I2C register fields that were decoded by
+  cross-checking against an independent driver for a later chip of the same
+  family now have names, in the code. No value written changes: the I2C setup
+  words are built from the named fields and asserted equal to the literals
+  they replace, and the kernel objects of every odi driver are byte-identical
+  to the previous build. NIC 0x58 is the MAC status register (flow-control
+  controls at bits 7:5, speed and link status below; it reads 0xf0 on a
+  running stick); 0x1370 is a priority-to-ring route register, not one word
+  per ring; GPIO 0x3324/0x3328 are bank 1 direction and data; 0x3264 is the
+  watchdog interrupt/status register; the I2C setup word has clock divider,
+  widths and a 7-bit device address. The VLAN row layout is left as it was; a
+  note says the stock default row words are not decoded beyond the nibbles
+  our code uses.
 - release: a tag with a hyphen after the version (`v1.2.2-beta.1`) is
   published as a GitHub pre-release, not marked latest, with the
   `## Unreleased` changelog section as its notes under a test-build warning;

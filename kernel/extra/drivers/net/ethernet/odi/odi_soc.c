@@ -68,8 +68,8 @@ static const uint32_t odi_soc_allowlist[] = {
 	SOC_WDT_CTRL,
 	SOC_GPIO_DIR,
 	SOC_GPIO_DATA,
-	SOC_GPIO_REG_3324,
-	SOC_GPIO_REG_3328,
+	SOC_GPIO_B1_DIR,
+	SOC_GPIO_B1_DATA,
 };
 
 static int odi_soc_allowed(uint32_t off)

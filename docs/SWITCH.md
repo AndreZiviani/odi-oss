@@ -317,7 +317,9 @@ The action, 67 bits over three words (word 0 is bits 95..64):
 A VLAN table row is one word by VID: bits 3..0 the member ports (bit n =
 switch port n: 0 UNI, 2 PON, 3 CPU), 7..4 the members that send the frame
 untagged, 8 FID/MSTI, 9 S-VLAN check IVL/SVL, 10 IVL/SVL, 17..11 the
-extension port mask. A service VLAN is 0x15 when the UNI sees it untagged
+extension port mask. The stock default row words (for example
+0x0003f8ff) are not decoded beyond the member and untag nibbles our code
+uses, and a later chip of the family uses a different, wider layout. A service VLAN is 0x15 when the UNI sees it untagged
 (members UNI and PON, untagged on the UNI: ISP1 VID 11, ISP2 stock VID
 10) and 0x5 when the UNI sees it tagged (ISP1 VIDs 10, 12 to 14). With
 VLAN filtering on, a frame whose VID row does not list the ingress port is
