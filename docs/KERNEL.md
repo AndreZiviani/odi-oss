@@ -209,11 +209,16 @@ caches, no FPU. It does not call `__cpu_has_fpu()`, which toggles CP0
 
 The board's own interrupt controller (`arch/mips/rtl8686/irq.c`, called
 from `arch_init_irq()`) is a legacy IRQ domain fed from GIMR/GISR
-registers, routing to CPU interrupt lines IP2–IP7. The periodic tick
+registers, routing to CPU interrupt lines IP2–IP7. The system tick
 (`arch/mips/rtl8686/time.c`, from `plat_time_init()`) comes from hardware
-timer TIMER0, programmed once for a fixed
-HZ-periodic interrupt — this SoC's timer is not a general comparator, so
-there is no dynamic `set_next_event()` and no oneshot mode. The RLX5281 has
+timer TIMER0, a clockevent with two modes. Periodic mode (control bit 24
+set) auto-reloads at HZ=250 and is what the kernel boots with. Counter mode
+(bit 24 clear) counts DATA ticks from the enable write, raises the interrupt
+and stops, which is a oneshot comparator: `set_next_event()` writes the
+delta (28 bits) and re-enables. In counter mode the divisor is 64, the same
+3.125 MHz as the clocksource (320 ns a tick), against 200 kHz for the
+periodic tick; each state callback writes the whole control word, so the
+periodic tick is programmed exactly as before. The RLX5281 has
 no CP0 Count/Compare, so the clocksource is a second SoC timer, TIMER1, run
 free with no interrupt: a 28-bit counter at the LX clock / 64 (3.125 MHz,
 wrapping about every 85.9 s), registered as `rtl8686-timer1` with a
@@ -224,6 +229,36 @@ init the driver checks that the counter moves (and whether it counts up or
 down) and, if it does not, registers nothing and keeps the jiffies
 clocksource, so `ktime_get()` is then coarse (~1/HZ) and stands still with
 interrupts off.
+
+**Oneshot is opt-in at boot, behind a self-test.** Before registering the clockevent, `rtl8686_oneshot_selftest()`
+arms a 1 ms event and then a minimum-delta (32 tick, about 10 us) event
+through the same code `set_next_event()` uses, and polls the pending bit,
+timing the wait on TIMER1 (bounded by 20 ms of TIMER1 time and a read
+count, since `udelay()` is not calibrated that early). Only if both fire does
+the device advertise `CLOCK_EVT_FEAT_ONESHOT`, and the dmesg line
+`rtl8686-timer0: oneshot self-test passed (1000 us event fired after N us)`
+says so. Otherwise it prints one warning, `oneshot self-test failed, staying
+periodic`, and the kernel keeps the HZ tick it had before. The board needs
+TIMER1 for the test, so a board without a working clocksource stays
+periodic too. With oneshot on and TIMER1 as a continuous clocksource, the
+core switches the tick to oneshot itself and `CONFIG_HIGH_RES_TIMERS` and
+`CONFIG_NO_HZ_IDLE` take effect. On hardware (ISP1, 2026-10-08) the
+self-test passed, `/proc/timer_list` shows the clockevent in oneshot mode
+with a 1 ns resolution, and the watchdog still reset the stick about 60 s
+after omcid was stopped. NO_HZ_IDLE saves nothing yet: the idle tick never
+stops (`tick_stopped 0`) and the timer interrupt still runs at about 240 a
+second, because something keeps a timer due within one tick; what it is
+has not been looked at.
+
+Reprogramming a timer that is a few microseconds from expiry can lose its
+interrupt on this timer family. `rtl8686_program()` therefore never
+reprograms a running timer: it stops the counter, clears the stale pending
+bit, writes DATA, then the enabling control word. The minimum delta keeps
+the event further out than that write sequence takes, and as a backstop
+TIMER1 gives the elapsed time: if a whole delta has passed and the pending
+bit is not set, `set_next_event()` returns `-ETIME` and the core retries
+with a longer delta. The 32-tick minimum passed the boot self-test; a lost
+interrupt near expiry has not been provoked on purpose.
 
 ## NOR flash
 

@@ -144,6 +144,7 @@ test-host:
 	bash test/odi_optics_model_test.sh
 	bash test/odi_init_test.sh
 	bash test/odi_wdt_test.sh
+	bash test/rtl8686_time_test.sh
 	bash test/odi_ramlog_test.sh
 	bash test/procparse_test.sh
 	bash test/odi_switch_flows_test.sh

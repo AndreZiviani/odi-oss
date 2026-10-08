@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- kernel: TIMER0 gets a oneshot mode (counter mode, 3.125 MHz, 28-bit delta)
+  next to the periodic tick, and `CONFIG_HIGH_RES_TIMERS` and
+  `CONFIG_NO_HZ_IDLE` are on, so the kernel runs high-resolution timers
+  (1 ns resolution in `/proc/timer_list` on ISP1). The idle tick does not
+  stop yet: something keeps a timer due within one tick, so the timer
+  interrupt still runs at about 240 a second. Oneshot is opt-in at boot: a short self-test
+  times a programmed event against TIMER1, and if it does not fire the
+  kernel prints one warning and stays on the 250 Hz periodic tick exactly as
+  before. A reprogram never touches a running timer (stop, clear, write,
+  enable), and an event that may have been lost returns `-ETIME`. On ISP1
+  the self-test passed and the watchdog still resets about 60 s after
+  omcid stops. New host test `test/rtl8686_time_test.sh`.
 - kernel: TIMER1 is registered as a free-running clocksource
   (`rtl8686-timer1`, 28 bits at 3.125 MHz) and as `sched_clock`, so
   `ktime_get()` and scheduler timestamps have sub-tick resolution instead of
