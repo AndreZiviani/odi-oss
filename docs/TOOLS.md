@@ -556,7 +556,8 @@ verified a trial from the running image.**
 primary copy (the one U-Boot boots from), read back and compared byte for
 byte, then into the fallback copy the same way, then both read again. It
 refuses, before writing anything, a slot other than the one the kernel was
-booted from (`root=` in `/proc/cmdline`) or than `sw_active` in the
+booted from (the last `root=` in `/proc/cmdline`, the one the kernel
+mounted: the built-in slot-0 line comes before U-Boot's) or than `sw_active` in the
 primary, and an environment whose two copies are not both valid; it never
 writes `sw_active`. A copy that already says so is not rewritten, so a
 second run writes nothing. Exit 0 means both copies now commit the slot;

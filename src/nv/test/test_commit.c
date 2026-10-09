@@ -263,6 +263,30 @@ int main(void)
 		   "a flags tie: env is the primary and goes first");
 	}
 
+	/* The running slot's root=: the last one, as the kernel takes it. The
+	 * built-in slot-0 line comes first on every boot (issue #42). */
+	{
+		const char *b = "console=ttyS0,115200 root=31:5 mtdparts=x print-fatal-signals=1";
+
+		ck(cmdline_root_index("console=ttyS0,115200 root=31:5 mtdparts=x\n") == 5,
+		   "one root=: slot 0");
+		ck(cmdline_root_index("console=ttyS0,115200 mtdparts=y root=31:7\n") == 7,
+		   "one root=: slot 1");
+		{
+			char two[256];
+
+			snprintf(two, sizeof two, "%s %s", b, "console=ttyS0,115200 mtdparts=y root=31:7\n");
+			ck(cmdline_root_index(two) == 7, "built-in root=31:5 then U-Boot root=31:7: the last wins");
+			snprintf(two, sizeof two, "%s %s", b, "console=ttyS0,115200 mtdparts=y root=31:5\n");
+			ck(cmdline_root_index(two) == 5, "both root=31:5: slot 0");
+		}
+		ck(cmdline_root_index("root=31:7 root=/dev/ram\n") == -1,
+		   "a last root= that is not 31:N: unknown");
+		ck(cmdline_root_index("console=ttyS0 noroot=31:7\n") == -1, "no root=: unknown");
+		ck(cmdline_root_index("root=31:7x\n") == -1, "trailing junk: unknown");
+		ck(cmdline_root_index("root=31:\n") == -1, "no index: unknown");
+	}
+
 	for (int i = NVC_DONE; i <= NVC_FINAL; i++)
 		if (!strcmp(env_commit_msg(i), "unknown result"))
 			ck(0, "every result has a message");

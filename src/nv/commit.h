@@ -76,4 +76,12 @@ int env_commit(const struct env_io *io, int slot, int running,
 /* One line, no newline, for the rc. */
 const char *env_commit_msg(int rc);
 
+/* The N of the root=31:N the kernel mounted, from the text of
+ * /proc/cmdline; -1 when there is none. The kernel takes the LAST root=, and
+ * the command line holds two: CONFIG_CMDLINE (slot 0, root=31:5) comes first
+ * and U-Boot's per-slot arguments after it (MIPS_CMDLINE_BUILTIN_EXTEND), so
+ * on a slot-1 boot the first one names the wrong slot. A last root= that is
+ * not 31:N is -1 too: that is what the kernel mounted. */
+int cmdline_root_index(const char *cmd);
+
 #endif

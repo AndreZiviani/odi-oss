@@ -331,12 +331,12 @@ static int io_write(void *ctx, int copy, const uint8_t *buf, uint32_t len)
 /* The slot the kernel was booted from: U-Boot passes root=31:N, 31 being
  * mtdblock and N the index of the rootfs partition, and the partitions are
  * named r0 and r1 (the same reading image/fwu.sh makes). -1 when it cannot
- * tell -- no root=31:, or an index that is neither. */
+ * tell -- no root=31:, or an index that is neither. Which root= counts is
+ * cmdline_root_index()'s business (commit.h). */
 static int running_slot(void)
 {
 	static char cmd[1024];
 	struct mtd_part m;
-	const char *p;
 	long n;
 	int fd = (int)sys_open("/proc/cmdline", O_RDONLY);
 	int idx;
@@ -348,17 +348,8 @@ static int running_slot(void)
 	if (n <= 0)
 		return -1;
 	cmd[n] = '\0';
-	for (p = cmd; *p; p++) {
-		if ((p == cmd || p[-1] == ' ') && str_has_prefix(p, "root=31:"))
-			break;
-	}
-	if (!*p)
-		return -1;
-	p += 8;
-	if (!digit(*p))
-		return -1;
-	idx = (int)hex_or_dec(&p, 0);
-	if (*p && *p != ' ' && *p != '\n')
+	idx = cmdline_root_index(cmd);
+	if (idx < 0)
 		return -1;
 	if (mtd_find("r0", &m) && m.index == idx)
 		return 0;
