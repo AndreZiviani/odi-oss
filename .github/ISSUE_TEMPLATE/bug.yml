@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work on a stick running odi-oss
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: The first line of `cat /etc/version`, or the version on the web UI Status page.
+      placeholder: v1.2.2
+    validations:
+      required: true
+  - type: input
+    id: isp
+    attributes:
+      label: ISP and OLT
+      description: Your ISP, and the OLT vendor if you know it.
+    validations:
+      required: true
+  - type: textarea
+    id: bundle
+    attributes:
+      label: Diagnostics bundle
+      description: |
+        Download it from the web UI (Admin, "Download a diagnostics bundle"), or run
+        `/etc/scripts/diag-bundle.sh` on the stick and copy `/tmp/odi-diag.tar.gz` off it.
+        Then drag the .tar.gz file into this box.
+
+        Passwords are removed, and the serial number, MACs and LOID are cut to their last
+        four characters. Look it over before posting anyway: it holds your logs and
+        configuration. If the stick cannot boot our image, say so here instead.
+    validations:
+      required: false
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Workarounds you tried, other hardware involved (router, media converter), when it started.

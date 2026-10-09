@@ -415,6 +415,20 @@ sshx "printf '<Config>\n\t<Value Name=\"LAN_IP_ADDR\" Value=\"10.0.2.15\"/>\n\t<
 sshx "grep -c '$DIAG_LOIDPW' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant the LOID password in lastgood.xml"
 sshx "printf 'admin:%s\n' '$DIAG_WEBPW' > /etc/config/confd.auth"
 sshx "echo 'harness: ploam=$DIAG_PLOAM loid=$DIAG_LOIDPW hex=$DIAG_LOIDPW_HEX web=$DIAG_WEBPW' > /var/log/qemu-secrets.log"
+# The identity, masked unless --full: the serial (text, the hex spelling of
+# /proc/odi_gpon, and the space-separated %ph spelling), the MAC with and
+# without colons, and the LOID, in the config and quoted in a log.
+DIAG_SN=QEMU1234ABCD
+DIAG_SN_MIXED=QEMU1234abcd
+DIAG_SN_HEX=51454d551234abcd
+DIAG_SN_PH="51 45 4d 55 12 34 ab cd"
+DIAG_MAC=02A1B2C3D4E5
+DIAG_MAC_COLON=02:a1:b2:c3:d4:e5
+DIAG_LOID=QemuLoid-77665544
+sshx "printf '<Config>\n\t<Value Name=\"GPON_SN\" Value=\"%s\"/>\n\t<Value Name=\"ELAN_MAC_ADDR\" Value=\"%s\"/>\n</Config>\n' $DIAG_SN $DIAG_MAC > /etc/config/lastgood_hs.xml"
+sshx "sed -i 's|</Config>|\t<Value Name=\"LOID\" Value=\"$DIAG_LOID\"/>\n</Config>|' /etc/config/lastgood.xml"
+sshx "grep -c '$DIAG_LOID' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant the LOID in lastgood.xml"
+sshx "echo 'harness: sn=$DIAG_SN mixed=$DIAG_SN_MIXED snhex=$DIAG_SN_HEX ph=$DIAG_SN_PH mac=$DIAG_MAC_COLON loid=$DIAG_LOID' > /var/log/qemu-ident.log"
 sshx '/etc/scripts/diag-bundle.sh /tmp/odi-diag.tar.gz' > "$WORK/diag-bundle.out" 2>&1 ||
 	{ cat "$WORK/diag-bundle.out" >&2; fail "diag-bundle.sh failed"; }
 tail -n 1 "$WORK/diag-bundle.out" | grep -qx /tmp/odi-diag.tar.gz || fail "diag-bundle.sh did not name its output: $(cat "$WORK/diag-bundle.out")"
@@ -423,7 +437,8 @@ mkdir "$WORK/diag"
 tar -xzf "$WORK/diag.tar.gz" -C "$WORK/diag" || fail "the bundle is not a readable tar.gz"
 D=$WORK/diag/odi-diag
 for f in MANIFEST.txt dmesg.txt meminfo.txt mounts.txt uptime.txt ps.txt nv.txt metrics.txt \
-	config/lastgood.xml log/qemu-secrets.log log/services.log; do
+	config/lastgood.xml config/lastgood_hs.xml log/qemu-secrets.log log/qemu-ident.log \
+	log/services.log pon/diag.txt pon/omcli_state.txt; do
 	[ -s "$D/$f" ] || fail "the bundle has no $f (MANIFEST: $(cat "$D/MANIFEST.txt" 2>/dev/null))"
 done
 grep -q '^gpon_' "$D/metrics.txt" || fail "the bundle has no exporter scrape"
@@ -435,7 +450,28 @@ for secret in "$DIAG_PLOAM" "$DIAG_LOIDPW" "$DIAG_LOIDPW_HEX" "$DIAG_WEBPW"; do
 		fail "a secret value is in the bundle, in the files above"
 	fi
 done
-echo "  $(wc -c < "$WORK/diag.tar.gz" | tr -d ' ') bytes, $(find "$D" -type f | wc -l | tr -d ' ') files; config redacted, no planted secret in any file"
+for ident in "$DIAG_SN" "$DIAG_SN_MIXED" "$DIAG_SN_HEX" "$DIAG_SN_PH" "$DIAG_MAC" "$DIAG_MAC_COLON" "$DIAG_LOID"; do
+	if grep -r -l -i -F "$ident" "$D"; then
+		fail "an identifier ($ident) is unmasked in the bundle, in the files above"
+	fi
+done
+grep -q 'Name="GPON_SN" Value="MASKED-ABCD"' "$D/config/lastgood_hs.xml" || fail "GPON_SN is not masked to its last four in the config copy"
+grep -q 'mac=MASKED-D4E5 ' "$D/log/qemu-ident.log" || fail "the colon MAC is not masked in the log: $(cat "$D/log/qemu-ident.log")"
+grep -q '^identity: masked' "$D/MANIFEST.txt" || fail "MANIFEST does not say the identity is masked"
+echo "  $(wc -c < "$WORK/diag.tar.gz" | tr -d ' ') bytes, $(find "$D" -type f | wc -l | tr -d ' ') files; config redacted, no planted secret or identifier in any file"
+# --full keeps the identity, and still no secret.
+sshx '/etc/scripts/diag-bundle.sh --full /tmp/odi-diag-full.tar.gz' > "$WORK/diag-full.out" 2>&1 ||
+	{ cat "$WORK/diag-full.out" >&2; fail "diag-bundle.sh --full failed"; }
+sshx 'cat /tmp/odi-diag-full.tar.gz' > "$WORK/diag-full.tar.gz"
+mkdir "$WORK/diag-full"
+tar -xzf "$WORK/diag-full.tar.gz" -C "$WORK/diag-full" || fail "the --full bundle is not a readable tar.gz"
+grep -q "Name=\"GPON_SN\" Value=\"$DIAG_SN\"" "$WORK/diag-full/odi-diag/config/lastgood_hs.xml" || fail "--full masked GPON_SN"
+for secret in "$DIAG_PLOAM" "$DIAG_LOIDPW" "$DIAG_LOIDPW_HEX" "$DIAG_WEBPW"; do
+	if grep -r -l -F "$secret" "$WORK/diag-full"; then
+		fail "a secret value is in the --full bundle, in the files above"
+	fi
+done
+echo "  --full: identity kept, no planted secret"
 # The same bundle through the web UI, when this confd has the route (odi-ui
 # with GET /api/diag; an older release answers 404, which is skipped).
 code=$(curl -s -m 90 -u "admin:$DIAG_WEBPW" -o "$WORK/diag-api.tar.gz" -w '%{http_code}' "http://127.0.0.1:$HTTP_PORT/api/diag") || code=000
@@ -444,9 +480,9 @@ case "$code" in
 	mkdir "$WORK/diag-api"
 	tar -xzf "$WORK/diag-api.tar.gz" -C "$WORK/diag-api" || fail "/api/diag did not serve a readable tar.gz"
 	[ -s "$WORK/diag-api/odi-diag/MANIFEST.txt" ] || fail "/api/diag served a bundle without MANIFEST.txt"
-	for secret in "$DIAG_PLOAM" "$DIAG_LOIDPW" "$DIAG_LOIDPW_HEX" "$DIAG_WEBPW"; do
-		if grep -r -l -F "$secret" "$WORK/diag-api"; then
-			fail "a secret value is in the /api/diag bundle, in the files above"
+	for secret in "$DIAG_PLOAM" "$DIAG_LOIDPW" "$DIAG_LOIDPW_HEX" "$DIAG_WEBPW" "$DIAG_SN" "$DIAG_MAC_COLON" "$DIAG_LOID"; do
+		if grep -r -l -i -F "$secret" "$WORK/diag-api"; then
+			fail "a secret or identifier is in the /api/diag bundle, in the files above"
 		fi
 	done
 	echo "  /api/diag: served the bundle, no planted secret in it"

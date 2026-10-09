@@ -319,7 +319,7 @@ the old answers.
 | Config UI credentials (Admin) | `/etc/config/confd.auth` | LIVE (sign in again) |
 | SSH keys (Admin) | `/etc/config/dropbear.d/authorized_keys`, read at every login | LIVE |
 | Download a full config backup (Admin) | both stores, every key, identity included; `tools/config-backup.sh` takes the same file from a host (below) | -- |
-| Download a diagnostics bundle (Admin) | logs, the previous boot ramlog, slot state and the config with every password redacted, as a tar.gz (`/etc/scripts/diag-bundle.sh`, `docs/TOOLS.md`) | -- |
+| Download a diagnostics bundle (Admin) | logs, the previous boot ramlog, slot state, the GPON/OMCI state and the config, every password redacted and the serial number, MACs and LOID masked, as a tar.gz (`/etc/scripts/diag-bundle.sh`, `docs/TOOLS.md`) | -- |
 | Restore (Admin) | writes the differences, every key, through the same checks as Save | per key; restored keys are not applied |
 | Reset the service config (Admin) | `flash default cs`: merges `/etc/config_default.xml` into CS (below) | LOID keys: INTERRUPTS INTERNET; the rest are stock-only |
 | Ping (Tools) | IPv4 literals, three packets | LIVE |
