@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- nv: `nv commit 1` works on a stick running slot 1. It read the running
+  slot from the first `root=` in `/proc/cmdline`, but that one is the
+  built-in slot-0 line (`root=31:5`); U-Boot's per-slot `root=` comes after
+  it and is the one the kernel mounts. So on slot 1 it always refused, with
+  "running slot is 0", and wrote nothing. It now takes the last `root=`,
+  tested on the host with both lines (issue #42). `slot-state.sh`,
+  `fwu_starter.sh`, `fwu.sh` and the web UI read the slot correctly and are
+  unchanged; `test/fwu_guard_test.sh` gains the two-`root=` case.
+
 - kernel: the idle loop stops the CPU with the Lexra SLEEP instruction
   until the next interrupt, where it used to spin at full speed (the
   R3000 model has no wait instruction). On ISP1 the module runs about

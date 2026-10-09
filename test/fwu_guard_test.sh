@@ -74,6 +74,15 @@ check "allows the idle slot (isp1 flashing 1)" \
 check "allows the idle slot (isp2 flashing 0)" \
       "running slot is 1, target is 0 -- ok" \
       "$(run "console=ttyS0,115200 root=31:7 mtdparts=rtk_spi_nor_mtd:..." 0)"
+# The real slot-1 command line: the built-in slot-0 line first, then
+# U-Boot's arguments; the kernel mounts the last root= (issue #42).
+DUP="console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:... print-fatal-signals=1 console=ttyS0,115200 mtdparts=rtk_spi_nor_mtd:... root=31:7"
+check "two root=: refuses the running slot, the last one (slot 1)" \
+      "RUNNING FROM" \
+      "$(run "$DUP" 1)"
+check "two root=: allows slot 0 while slot 1 runs" \
+      "running slot is 1, target is 0 -- ok" \
+      "$(run "$DUP" 0)"
 # The revert target. Refusing the running slot protects the write; sw_commit
 # is what protects the box afterwards, and nothing checked it until now.
 check "refuses when sw_commit names the slot being written" \

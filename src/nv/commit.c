@@ -127,3 +127,24 @@ const char *env_commit_msg(int rc)
 	default:                  return "unknown result";
 	}
 }
+
+int cmdline_root_index(const char *cmd)
+{
+	const char *p, *last = 0;
+	int idx = 0;
+
+	for (p = cmd; *p; p++)
+		if ((p == cmd || p[-1] == ' ') && p[0] == 'r' && p[1] == 'o' &&
+		    p[2] == 'o' && p[3] == 't' && p[4] == '=')
+			last = p + 5;
+	if (!last || last[0] != '3' || last[1] != '1' || last[2] != ':')
+		return -1;
+	p = last + 3;
+	if (*p < '0' || *p > '9')
+		return -1;
+	while (*p >= '0' && *p <= '9' && idx < 1000)
+		idx = idx * 10 + (*p++ - '0');
+	if (*p && *p != ' ' && *p != '\n')
+		return -1;
+	return idx;
+}
