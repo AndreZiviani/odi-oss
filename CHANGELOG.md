@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- switch: an upstream GEM flow is mapped to the queue of its own T-CONT
+  (`PON_SID2QID`, 7 bits a flow), and only its entry changes. cmd 25
+  used to replay the five words captured on ISP1 by flow id modulo 5, so
+  on an ISP with six upstream flows (MTS, issue #42) the sixth flow
+  replayed flow 0's word and unmapped flows 1-3: the ONU reached O5 and
+  OMCI completed, but the service on flow 2 had no upstream queue and DHCP
+  failed. A flow on a queue cmd 23 does not program (any but queue 0 of
+  T-CONTs 0-15) is refused and logged. The global PBO thresholds
+  (`PON_SID_GLB_TH`) follow the number of flows in use and keep the fifth
+  captured pair past five. ISP1's five flows get the same register words
+  as before (boot5 golden).
 - nv: `nv commit 1` works on a stick running slot 1. It read the running
   slot from the first `root=` in `/proc/cmdline`, but that one is the
   built-in slot-0 line (`root=31:5`); U-Boot's per-slot `root=` comes after
@@ -13,7 +24,6 @@ listed here.
   tested on the host with both lines (issue #42). `slot-state.sh`,
   `fwu_starter.sh`, `fwu.sh` and the web UI read the slot correctly and are
   unchanged; `test/fwu_guard_test.sh` gains the two-`root=` case.
-
 - kernel: the idle loop stops the CPU with the Lexra SLEEP instruction
   until the next interrupt, where it used to spin at full speed (the
   R3000 model has no wait instruction). On ISP1 the module runs about

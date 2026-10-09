@@ -270,7 +270,7 @@ int main(int argc, char **argv)
 	/* cmd 25, US instance 7 -- cfgGemFlow US side, boot5 lines 196-202. */
 	odi_mock_reset();
 	odi_mock_mark(25);
-	odi_sw_ponmac_flow_queue_set(0, 0x59a, 1, 0x1ee01b08, 0x1ee01e40, 0x07efdf80, 0);
+	odi_sw_ponmac_flow_queue_set(0, 0x59a, 0, 1, 0x1ee01b08, 0x1ee01e40, 0, 0x07efdf80);
 	odi_mock_mark(0x80000000U | 25U);
 	dump_bracket(out_dir, "dal-cmd25-us.txt", 25);
 

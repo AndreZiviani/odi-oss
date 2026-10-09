@@ -471,7 +471,7 @@ static inline uint32_t ODI_SW_DSF_GEM_FLOW_TYPE_FLAGS_DECRYPT_SET(uint32_t reg, 
 
 /* US_GEM_PORT_MAP: 0x706400, array 0..127 -- upstream flow to GEM port */
 #define ODI_SW_US_GEM_PORT_MAP_BASE	0x706400U
-#define ODI_SW_US_GEM_PORT_MAP(n)	(ODI_SW_US_GEM_PORT_MAP_BASE + 4U * (uint32_t)(n))	/* slots used: 0,1,2,3,4 of 0..127 */
+#define ODI_SW_US_GEM_PORT_MAP(n)	(ODI_SW_US_GEM_PORT_MAP_BASE + 4U * (uint32_t)(n))	/* slot: the upstream flow id, 0..63 */
 static inline uint32_t ODI_SW_US_GEM_PORT_MAP_GEM_PORT_SET(uint32_t reg, uint32_t val)
 {
 	return (reg & ~(0xfffU << 0)) | ((val & 0xfffU) << 0);
@@ -480,9 +480,10 @@ static inline uint32_t ODI_SW_US_GEM_PORT_MAP_GEM_PORT_SET(uint32_t reg, uint32_
 /* ---- PON queue block, 0xf00000 */
 
 /* PONQ_COUNT_MASK: 0xf020a8, one word per slot. The table declares a
- * 1-bit field, but the captures write wider values to several slots
- * (0xf020f8, 0xf020fc, 0xf023e8, 0xf023f8, 0xf023fc): another, unnamed
- * register owns those words, so the word is written raw, never a field.
+ * 1-bit field, but other registers of the PON queue block share the window
+ * (PON_SID2QID at 0xf020f8, PON_SIDVALID at 0xf0213c, PON_SID_GLB_TH at
+ * 0xf02454, the WFQ words at 0xf023e8-0xf023fc: odi_switch_qos.c), so the
+ * word is written raw, never a field.
  */
 #define ODI_SW_PONQ_COUNT_MASK_BASE	0xf020a8U
 #define ODI_SW_PONQ_COUNT_MASK(n)	(ODI_SW_PONQ_COUNT_MASK_BASE + 4U * (uint32_t)(n))	/* slots: 0..259, the ones used are in odi_switch_qos.c */
