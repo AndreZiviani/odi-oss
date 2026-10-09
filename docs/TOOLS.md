@@ -35,7 +35,7 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `fwu.sh` | CLI: flash one slot | you, `fwu_starter.sh` (from the image tarball) | mtd `k0`/`r0` or `k1`/`r1` | stdout | -- |
 | `fwu_starter.sh` | CLI: write an uploaded tarball to the inactive slot | confd, you | runs `fwu.sh` from the tarball | `/tmp/fwu.log`, `/tmp/fwu.state` | -- |
 | `apply.sh` | CLI: apply saved settings without a reboot | confd, you | `network.sh addr`; SIGHUP to omcid | stdout | -- |
-| `diag-bundle.sh` | CLI: the diagnostics bundle, secrets redacted | confd (`GET /api/diag`), you | reads logs, `/proc`, `nv`, the exporter | the tar.gz it writes | -- |
+| `diag-bundle.sh` | CLI: the diagnostics bundle, secrets redacted, identity masked | confd (`GET /api/diag`), you | reads logs, `/proc`, `nv`, the exporter | the tar.gz it writes | -- |
 
 Every daemon -- `omcid`, `confd`, `metricsd`, `dropbear` -- and the serial
 `login` are all `respawn` entries in `/etc/inittab`: busybox init restarts
@@ -674,7 +674,7 @@ re-provisioned around it.
 
 ### `diag-bundle.sh` -- the diagnostics bundle
 
-    /etc/scripts/diag-bundle.sh [OUT]      default OUT: /tmp/odi-diag.tar.gz
+    /etc/scripts/diag-bundle.sh [--full] [OUT]   default OUT: /tmp/odi-diag.tar.gz
 
 Collects what a bug report needs into one tar.gz, `odi-diag/` inside, and
 prints OUT: the previous boot ramlog (`/proc/odi_ramlog_prev`), the tail of
@@ -684,9 +684,25 @@ every `/var/log` file (256 KB each, 1 MB in all), `dmesg`, `/etc/odi-build`,
 `sw_active`, `sw_commit`, `sw_tryactive` and `sw_version0/1` from both
 environment copies (`nv getenv` and `nv fallback`), one scrape of the
 exporter, and the config store. `MANIFEST.txt` lists every step with its
-exit status and size, and which keys were redacted. The web UI serves the
-same file as "Download a diagnostics bundle" on the Admin tab (odi-ui
-`GET /api/diag`, which only runs this and streams the result).
+exit status and size, which keys were redacted, and whether the identity
+was masked. The web UI serves the same file as "Download a diagnostics
+bundle" on the Admin tab (odi-ui `GET /api/diag`, which only runs this and
+streams the result).
+
+Under `pon/`, the GPON and OMCI state a PON problem needs:
+
+| file | from |
+|---|---|
+| `diag.txt` | one `diag` run: `gpon get onu-state`, `gpon get alarm-status`, `gpon get flows`, `mib dump counter port all`, and `register get 0xf020a8 240`, the PON queue window that cmd 23 and 25 write (`docs/SWITCH.md`) |
+| `odi_gpon.txt` | `/proc/odi_gpon`: PLOAM state, Alloc-IDs, counters, the PLOAM ring (bodies withheld, below) |
+| `odi_omci.txt` | `/proc/odi_omci`: the OMCI channel counters |
+| `omcli_{state,provision,flows,tcont,conn}.txt` | `omcli`: what omcid holds and programmed |
+| `omcli_mib_<class>.txt` | `omcli mib <class>` for ONU-G, ONU2-G, PPTP Ethernet UNI, VEIP, the bridge and mapper classes, VLAN filtering and extended VLAN tagging, T-CONT, ANI-G, GEM ports and interworking points, priority queues, traffic schedulers and descriptors, multicast |
+
+The MIB classes are a fixed list, not the whole MIB: an OLT can push
+credentials through OMCI (SIP user data, authentication methods, large
+strings, the TR-069 server), and none of those classes is collected. When
+omcid does not answer `omcli state`, the other `omcli` steps are skipped.
 
 **Redaction.** In the copies of `lastgood.xml`, `lastgood_hs.xml` and
 `odi.conf`, the value of every key below is replaced by `REDACTED` (an empty
@@ -700,18 +716,32 @@ value stays empty, so "not set" still shows):
 
 Then every secret value found that way, plus the web UI password from
 `/etc/config/confd.auth`, is scrubbed from every file in the bundle, as text
-and as upper- and lowercase hex, in case a log quoted one; values shorter
-than three characters are redacted in the config copies only.
-`confd.auth`, the dropbear keys and `/etc/passwd` are never collected. Kept
-on purpose: `GPON_SN`, `ELAN_MAC_ADDR` and `LOID`, which identify the stick
-but authenticate nothing without the passwords -- remove them by hand before
-posting a bundle publicly if that matters to you.
+and as upper- and lowercase hex, run together and space-separated, in case a
+log quoted one; values shorter than three characters are redacted in the
+config copies only. `confd.auth`, the dropbear keys and `/etc/passwd` are
+never collected.
+
+**Masking.** Many OLTs authenticate an ONU by its serial number alone, so a
+bundle posted in a public issue would hand out what it takes to clone the
+line. By default the serial number (`GPON_SN` and the one in
+`/proc/odi_gpon`), the MACs (`ELAN_MAC_ADDR` and every interface) and the
+LOID (`LOID`, `LOID_OLD`) are replaced in every file, in every spelling
+(text, hex, a MAC with or without separators), by `MASKED-` and their last
+four characters, which still tells two sticks apart. `--full` keeps them,
+for a bundle you send privately; the web UI never passes it.
+
+The PLOAM ring in `/proc/odi_gpon` prints the first ten bytes of each
+message body, which can cut a value in two where the scrub cannot find it.
+So the bodies of Password and Encryption_Key are always withheld, and those
+that carry the serial number (Serial_Number_ONU, Acknowledge,
+Serial_Number_Mask, Assign_ONU-ID, Disable_Serial_Number) unless `--full`.
 
 Every command runs under busybox `timeout` (5 s, 10 s for the exporter
 scrape), and a bundle over 2 MB is refused rather than written. Exits 1, with
 the reason on stderr and no OUT left behind, when it cannot finish.
-`make test-qemu` plants known secrets in the config, `confd.auth` and a log,
-and asserts none of them is anywhere in the bundle.
+`make test-qemu` plants known secrets and identifiers in the config,
+`confd.auth` and a log, asserts none of them is anywhere in the bundle, and
+that `--full` keeps the identifiers but still no secret.
 
 ## Boot scripts you can run again
 

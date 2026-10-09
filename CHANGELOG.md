@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- diag-bundle: the bundle collects the GPON and OMCI state under `pon/`
+  (ONU state, alarms, GEM flows, port counters, the PON queue registers
+  cmd 23 and 25 write, `/proc/odi_gpon`, `/proc/odi_omci`, and `omcli`
+  state, provision, flows, T-CONTs, connections and the datapath MIB
+  classes), what issue #42 had to ask for by hand. It now masks the serial
+  number, the MACs and the LOID in every file and spelling, to `MASKED-`
+  and their last four characters: many OLTs authenticate by serial number
+  alone, so a bundle posted publicly could clone the line. `--full` keeps
+  them for a bundle shared privately; the web UI never passes it. Secrets
+  are also scrubbed as space-separated hex, and the PLOAM ring withholds
+  the message bodies that carry the password, a key fragment or the
+  serial. A bug report issue template asks for the bundle.
+
 - switch: an upstream GEM flow is mapped to the queue of its own T-CONT
   (`PON_SID2QID`, 7 bits a flow), and only its entry changes. cmd 25
   used to replay the five words captured on ISP1 by flow id modulo 5, so
