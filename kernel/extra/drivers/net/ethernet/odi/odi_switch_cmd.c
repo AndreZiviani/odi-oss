@@ -57,20 +57,38 @@ static const uint32_t odi_sw_cmd10_gpio_lo[] = { 0x62, 0x68, 0x66, 0x64, 0x60 };
 static const uint32_t odi_sw_cmd10_gpio_hi[] = { 0x63, 0x69, 0x67, 0x65, 0x61 };
 static unsigned int odi_sw_transceiver_n;
 
-/* cmd 25 upstream, replayed: PONQ_COUNT_MASK +235 (two writes) and +20 or
- * +21 (use21) of the five captured flows, by upstream flow id modulo 5.
- * Nothing in the argument maps to them.
+/* cmd 25 upstream, PON_SID_GLB_TH: the global ON/OFF thresholds, two
+ * writes (ON, then OFF) per flow, by the number of upstream flows in use.
+ * The capture has one to five; each flow lowers ON by 150, OFF trails it
+ * by 160. Past five the fifth pair is kept: a sixth value would be a
+ * guess, and the fifth pair is what a six-flow ISP ran with (issue #42).
  */
-static const uint32_t odi_sw_cmd25_w235a[] = {
+static const uint32_t odi_sw_cmd25_glb_th_on[] = {
 	0x1ee01b08U, 0x1e4a1e40U, 0x1db41daaU, 0x1d1e1d14U, 0x1c881c7eU,
 };
-static const uint32_t odi_sw_cmd25_w235b[] = {
+static const uint32_t odi_sw_cmd25_glb_th_off[] = {
 	0x1ee01e40U, 0x1e4a1daaU, 0x1db41d14U, 0x1d1e1c7eU, 0x1c881be8U,
 };
-static const uint32_t odi_sw_cmd25_val2021[] = {
-	0x07efdf80U, 0x07efc080U, 0x07e08080U, 0x00608080U, 0x07efdf84U,
-};
-static const int odi_sw_cmd25_use21[] = { 0, 0, 0, 0, 1 };
+
+/* cmd 25 upstream, PON_SID2QID: the upstream queue of each flow, 7 bits a
+ * flow, four flows a word. Kept here and written a whole word at a time;
+ * a flow nothing has mapped reads 63, the value the capture shows for
+ * every flow not yet programmed.
+ */
+#define ODI_SW_SID2QID_BITS	7U
+#define ODI_SW_SID2QID_PER_WORD	4U
+#define ODI_SW_SID2QID_UNMAPPED	0x3fU
+static uint8_t odi_sw_sid2qid[ODI_SW_CMD_GEM_US_MAX];
+
+static uint32_t sid2qid_word(uint32_t w)
+{
+	uint32_t i, v = 0;
+
+	for (i = 0; i < ODI_SW_SID2QID_PER_WORD; i++)
+		v |= (uint32_t)odi_sw_sid2qid[w * ODI_SW_SID2QID_PER_WORD + i]
+		     << (i * ODI_SW_SID2QID_BITS);
+	return v;
+}
 
 /* cmd 23, upstream, replayed: the PONQ_COUNT_MASK words of the five
  * captured queues whose fields are not decoded, by T-CONT index (one queue
@@ -117,6 +135,8 @@ void odi_switch_cmd_reset_state(void)
 		odi_sw_gem_ds_used[i] = 0;
 	for (i = 0; i < sizeof(odi_sw_gem_us_used) / sizeof(odi_sw_gem_us_used[0]); i++)
 		odi_sw_gem_us_used[i] = 0;
+	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
+		odi_sw_sid2qid[i] = ODI_SW_SID2QID_UNMAPPED;
 	for (i = 0; i < OMCI_FLOWS_MAX; i++) {
 		odi_sw_gem_ds_gem[i] = 0;
 		odi_sw_gem_ds_cfg[i] = 0;
@@ -310,7 +330,7 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 	}
 
 	if (g->dir == OMCI_GEMFLOW_US) {
-		uint32_t slot = g->flow_id, bitmask_37 = 0, i;
+		uint32_t slot = g->flow_id, sidvalid = 0, n = 0, i;
 
 		if (g->gem_port == 0xfffU) {
 			/* OMCI channel: downstream-only, no US table entry. */
@@ -318,22 +338,38 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 		}
 		if (slot >= ODI_SW_CMD_GEM_US_MAX)
 			return ODI_SW_EOPNOTSUPP;
-		flow_mark(odi_sw_gem_us_used, slot);
-
-		/* PONQ_COUNT_MASK +37: one bit per upstream flow in use (1, 3,
-		 * 7, 0xf, 0x1f on ISP1); only the low 32 fit the word.
+		/* The flow queues on its T-CONT's queue. cmd 23 gives T-CONT
+		 * t one queue, physical queue t (its PON_SCH_QMAP word is
+		 * 1 << t), and refuses any other, so a flow on queue 0 of
+		 * T-CONT t maps to queue t.
 		 */
-		for (i = 0; i < 32U && i < ODI_SW_CMD_GEM_US_MAX; i++)
-			if (flow_used(odi_sw_gem_us_used, i))
-				bitmask_37 |= 1U << i;
-		{
-			unsigned int ref = slot % 5;
+		if (g->tcont >= ODI_SW_CMD23_US_TCONTS || g->queue != 0) {
+			ODI_SW_CMD_LOG("cmd 25: upstream flow %u on queue %u of T-CONT %u "
+				       "not supported (one queue per T-CONT, T-CONTs 0-%u)\n",
+				       (unsigned int)slot, (unsigned int)g->queue,
+				       (unsigned int)g->tcont, ODI_SW_CMD23_US_TCONTS - 1U);
+			return ODI_SW_EOPNOTSUPP;
+		}
+		flow_mark(odi_sw_gem_us_used, slot);
+		odi_sw_sid2qid[slot] = (uint8_t)g->tcont;
 
-			odi_sw_ponmac_flow_queue_set(slot, g->gem_port, bitmask_37,
-						      odi_sw_cmd25_w235a[ref],
-						      odi_sw_cmd25_w235b[ref],
-						      odi_sw_cmd25_val2021[ref],
-						      odi_sw_cmd25_use21[ref]);
+		/* PON_SIDVALID: one bit per upstream flow in use, the word
+		 * this flow is in (1, 3, 7, 0xf, 0x1f on ISP1).
+		 */
+		for (i = 0; i < 32U; i++)
+			if (flow_used(odi_sw_gem_us_used, (slot & ~31U) + i))
+				sidvalid |= 1U << i;
+		for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
+			if (flow_used(odi_sw_gem_us_used, i))
+				n++;
+		{
+			unsigned int ref = n < 5U ? n - 1U : 4U;
+			uint32_t w = slot / ODI_SW_SID2QID_PER_WORD;
+
+			odi_sw_ponmac_flow_queue_set(slot, g->gem_port, slot / 32U, sidvalid,
+						      odi_sw_cmd25_glb_th_on[ref],
+						      odi_sw_cmd25_glb_th_off[ref],
+						      w, sid2qid_word(w));
 		}
 		if (slot < OMCI_FLOWS_MAX)
 			odi_sw_gem_us_gem[slot] = g->gem_port;

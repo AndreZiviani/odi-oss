@@ -142,6 +142,7 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 		memset(&g, 0, sizeof g);
 		g.flow_id = (uint32_t)i;
 		g.gem_port = us_port_id[i];
+		g.tcont = (uint32_t)i;	/* boot5 omcid: flow i on T-CONT index i */
 		g.dir = OMCI_GEMFLOW_US;
 		call(25, &g, sizeof g);
 	}

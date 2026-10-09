@@ -83,13 +83,15 @@ void odi_sw_ponmac_queue_add_ext(uint32_t n, uint32_t bitmask_207, uint32_t base
 				  uint32_t sched_value, uint32_t val_208,
 				  uint32_t bitmask_212_213, int use_213);
 
-/* cmd 25, upstream side: US_GEM_PORT_MAP(slot), then the PONQ_COUNT_MASK
- * words of the flow (+37, +235 twice, +20 or +21 by use_21). The fields
- * of these words are not decoded.
+/* cmd 25, upstream side: US_GEM_PORT_MAP(slot), then word sidvalid_word of
+ * PON_SIDVALID (+37), PON_SID_GLB_TH (+235) twice (the ON then the OFF
+ * threshold, each written as the whole word), and word sid2qid_word of
+ * PON_SID2QID (+20). The caller computes every word.
  */
-void odi_sw_ponmac_flow_queue_set(uint32_t slot, uint32_t gem_port_id, uint32_t bitmask_37,
-				   uint32_t word235_a, uint32_t word235_b,
-				   uint32_t val_2021, int use_21);
+void odi_sw_ponmac_flow_queue_set(uint32_t slot, uint32_t gem_port_id,
+				   uint32_t sidvalid_word, uint32_t sidvalid,
+				   uint32_t glb_th_on, uint32_t glb_th_off,
+				   uint32_t sid2qid_word, uint32_t sid2qid);
 
 /* The scheduler word of T-CONT n, PONQ_COUNT_MASK +190+n. */
 void odi_sw_qos_sched_set(uint32_t n, uint32_t value);

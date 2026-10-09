@@ -220,9 +220,25 @@ commands, from the command table of the shipped binary:
   port CAM row and its `DSF_GEM_FLOW_TYPE` word (FLAGS 3 for the
   OMCI/broadcast port, 2 for data), plus the slot record the AES path
   reads (below). The upstream side writes `US_GEM_PORT_MAP(slot)`, then
-  `PONQ_COUNT_MASK` +37 (cumulative), +235 twice (two sub-fields, one
-  write each) and +20, or +21 for the last of the five ISP1 instances; the
-  fields of these words are not decoded.
+  three registers of the PON queue block that share `PONQ_COUNT_MASK`'s
+  window, named as the chip's register map names them:
+  - +37 `PON_SIDVALID`, one bit per upstream flow in use (the word the
+    flow is in);
+  - +235 `PON_SID_GLB_TH`, the global ON (bits 28:16) and OFF (12:0)
+    thresholds, written twice, ON then OFF. They depend on the number of
+    flows in use: from one to five, ON drops by 150 per flow and OFF
+    trails it by 160. Past five the fifth pair is kept;
+  - +20 + slot/4 `PON_SID2QID`, the upstream queue of each flow, 7 bits a
+    flow and four flows a word, 63 for a flow not mapped. The flow's queue
+    is its T-CONT's: cmd 23 gives T-CONT t the one queue t (its scheduler
+    map word is 1 << t), so a flow on T-CONT t maps to queue t. The driver
+    keeps the table and writes the flow's whole word.
+
+  The driver used to replay the five captured words by flow id modulo 5,
+  where flow n sits on T-CONT n. A sixth flow then replayed flow 0's
+  `PON_SID2QID` word, which unmapped flows 1-3: on an ISP with six
+  upstream flows, the service on flow 2 had no upstream queue and DHCP
+  never left (issue #42).
 - **cmd 10**: the port-1 I2C master device select (`I2C_MASTER_SETUP(1)`,
   0x234413a), then GPIO 29 and GPIO 31, twice: GPIO 29 takes the two
   values of the instance (0x62, then 0x63 in the first), GPIO 31 is always
