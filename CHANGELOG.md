@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- diag-bundle: a secret value shorter than eight characters is scrubbed
+  only where it stands as a whole token, no letter or digit touching it as
+  text and no hex digit touching it as hex. Before, every occurrence went,
+  so the factory USER_PASSWORD `user` turned `userland_ok` into
+  `REDACTEDland_ok` in MANIFEST.txt and dmesg, which both mangled the logs
+  and told the reader the password, and its hex could cut into a register
+  word. A short LOID gets the same rule, so a numeric one no longer cuts
+  digits out of counters. Longer values are scrubbed everywhere, as before.
+
 - diag-bundle: the bundle collects the GPON and OMCI state under `pon/`
   (ONU state, alarms, GEM flows, port counters, the PON queue registers
   cmd 23 and 25 write, `/proc/odi_gpon`, `/proc/odi_omci`, and `omcli`

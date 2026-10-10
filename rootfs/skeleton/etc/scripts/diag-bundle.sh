@@ -28,7 +28,9 @@
 # value stays empty, so "not set" is still visible. Then every non-empty
 # secret value found -- those keys, plus the web UI password from
 # /etc/config/confd.auth -- is scrubbed from EVERY file in the bundle, as
-# text, as hex and as space-separated hex, in case a log quoted one.
+# text, as hex and as space-separated hex, in case a log quoted one. A value
+# shorter than SHORT_LEN is scrubbed only where it stands as a whole token,
+# so a USER_PASSWORD of "user" does not turn userland_ok into REDACTEDland_ok.
 # confd.auth, the dropbear keys and /etc/passwd are never collected at all.
 #
 # What is masked: the serial number, the MACs and the LOID (IDENT_KEYS, the
@@ -68,6 +70,16 @@ SECRET_KEYS="GPON_PLOAM_PASSWD LOID_PASSWD LOID_PASSWD_OLD USER_PASSWORD
 SUSER_PASSWORD E8BDUSER_PASSWORD SUPER_PASSWORD MAC_KEY HW_FON_KEYWORD"
 SECRET_WORDS="PASS PWD PSK SECRET TOKEN KEY COMMUNITY CRED"
 IDENT_KEYS="GPON_SN ELAN_MAC_ADDR LOID LOID_OLD"
+# Below SHORT_LEN characters a value is scrubbed as a whole token only: as
+# text, where no letter or digit touches it on either side, and as hex,
+# where no hex digit does. A short value is often a word or a piece of one
+# (the factory USER_PASSWORD is "user", inside "userland"), and its hex
+# spelling, 14 digits at most, can sit inside the hex of a register dump;
+# a substring scrub there mangles the file and, by the hole it leaves,
+# tells the reader the value. From eight characters on, an accidental
+# match is unlikely: few words in logs, paths and names are that long, and
+# the hex spelling (16 digits) is wider than any register word printed.
+SHORT_LEN=8
 # ONU-G, ONU2-G, PPTP Ethernet UNI, MAC bridge service profile and port,
 # VLAN tagging filter, 802.1p mapper, T-CONT, ANI-G, GEM interworking TP,
 # GEM port network CTP, priority queue, traffic scheduler, traffic
@@ -306,22 +318,32 @@ fi
 cat /sys/class/net/*/address 2>/dev/null |
 	grep -v -x -i -e '00:00:00:00:00:00' -e 'ff:ff:ff:ff:ff:ff' >> "$idents"
 
-# The scrub rules, as LENGTH TAB PATTERN TAB REPLACEMENT. They run longest
-# first, so a value never loses a piece to a shorter one inside it.
+# The scrub rules, as LENGTH TAB KIND TAB PATTERN TAB REPLACEMENT. They run
+# longest first, so a value never loses a piece to a shorter one inside it.
+# KIND is any (every occurrence), word (a whole token of text) or hex (a
+# whole token of hex digits); see SHORT_LEN.
 rules=$work/rules
 : > "$rules"
-rule() { printf '%d\t%s\t%s\n' "${#1}" "$1" "$2" >> "$rules"; }
+rule() { printf '%d\t%s\t%s\t%s\n' "${#1}" "${3:-any}" "$1" "$2" >> "$rules"; }
 hexof() { printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n'; }
 upper() { printf '%s' "$1" | tr 'a-z' 'A-Z'; }
 lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
 spaced() { printf '%s' "$1" | sed 's/../& /g; s/ $//'; }
-# hexforms VALUE REPLACEMENT: VALUE as hex, both cases, run together and
-# space-separated (the kernel %ph spelling).
+# hexforms VALUE REPLACEMENT [KIND]: VALUE as hex, both cases, run together
+# and space-separated (the kernel %ph spelling).
 hexforms() {
 	for x in "$1" "$(upper "$1")"; do
-		rule "$x" "$2"
-		[ "${#x}" -gt 2 ] && rule "$(spaced "$x")" "$2"
+		rule "$x" "$2" "$3"
+		[ "${#x}" -gt 2 ] && rule "$(spaced "$x")" "$2" "$3"
 	done
+}
+# kinds VALUE: set tk and hk, the KIND of the text and of the hex rules.
+kinds() {
+	if [ "${#1}" -ge "$SHORT_LEN" ]; then
+		tk=any hk=any
+	else
+		tk=word hk=hex
+	fi
 }
 
 # Secrets: every value found, as text and as the hex of its bytes. Values
@@ -330,22 +352,27 @@ hexforms() {
 # logs and hide nothing worth hiding.
 sort -u "$secrets" | while IFS= read -r v; do
 	[ "${#v}" -ge 3 ] || continue
-	rule "$v" REDACTED
-	hexforms "$(hexof "$v")" REDACTED
+	kinds "$v"
+	rule "$v" REDACTED "$tk"
+	hexforms "$(hexof "$v")" REDACTED "$hk"
 done
 
 # Identity, unless --full: MASKED- and the last four letters or digits, or
-# MASKED alone for a value too short to give four away.
+# MASKED alone for a value too short to give four away. The serial and the
+# MACs are never short, but the LOID is free text from the ISP and can be:
+# a LOID of 1234 scrubbed as a substring would cut digits out of every
+# counter, so it gets the whole-token rule of a short secret.
 if [ "$full" = 0 ]; then
 	sort -u "$idents" | while IFS= read -r v; do
 		[ "${#v}" -ge 3 ] || continue
 		bare=$(printf '%s' "$v" | tr -cd 'A-Za-z0-9')
 		m=MASKED
 		[ "${#bare}" -ge 10 ] && m=MASKED-${bare#"${bare%????}"}
+		kinds "$v"
 		for x in "$v" "$(upper "$v")" "$(lower "$v")"; do
-			rule "$x" "$m"
+			rule "$x" "$m" "$tk"
 		done
-		hexforms "$(hexof "$v")" "$m"
+		hexforms "$(hexof "$v")" "$m" "$hk"
 		# A MAC: every separator, both cases.
 		if printf '%s' "$bare" | grep -q -x '[0-9A-Fa-f]\{12\}'; then
 			lo=$(lower "$bare")
@@ -372,9 +399,26 @@ if [ "$full" = 0 ]; then
 	done
 fi
 
+# A token rule is plain POSIX BRE, no \b, \< or alternation: a bound is a
+# character outside the class, kept by \1 and \2, or the start or end of
+# the line, each its own command. A match takes its bounds with it, so of
+# two tokens one character apart the first pass replaces only one and the
+# second pass the other.
 script=$work/scrub.sed
-sort -u "$rules" | sort -t "$(printf '\t')" -k1,1nr | while IFS="$(printf '\t')" read -r _ pat rep; do
-	printf 's/%s/%s/g\n' "$(printf '%s' "$pat" | sed 's/[]\/$*.^[]/\\&/g')" "$rep"
+tab=$(printf '\t')
+sort -u "$rules" | sort -t "$tab" -k1,1nr | while IFS="$tab" read -r _ kind pat rep; do
+	p=$(printf '%s' "$pat" | sed 's/[]\/$*.^[]/\\&/g')
+	case $kind in
+	word) c=A-Za-z0-9 ;;
+	hex) c=0-9A-Fa-f ;;
+	*) printf 's/%s/%s/g\n' "$p" "$rep"; continue ;;
+	esac
+	for _ in 1 2; do
+		printf 's/\\([^%s]\\)%s\\([^%s]\\)/\\1%s\\2/g\n' "$c" "$p" "$c" "$rep"
+	done
+	printf 's/^%s\\([^%s]\\)/%s\\1/\n' "$p" "$c" "$rep"
+	printf 's/\\([^%s]\\)%s$/\\1%s/\n' "$c" "$p" "$rep"
+	printf 's/^%s$/%s/\n' "$p" "$rep"
 done > "$script"
 if [ -s "$script" ]; then
 	find "$b" -type f | while IFS= read -r f; do
