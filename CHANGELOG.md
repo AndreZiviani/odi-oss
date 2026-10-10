@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- diag-bundle: the bundle collects the optics module under `module/`, to
+  tell which laser driver a stick has and what state its calibration is
+  in: A0h whole, A2h with the page select as found, and in `chip.txt` the
+  page select, the laser driver id (A2h page 2 byte 0xa0, 0x6a for a
+  Semtech GN25L95), the UX3320 variant markers (page 2 bytes 0x80 and
+  0xdc) and INIT_STATE (page 3 byte 0xf0), with the upper half of pages
+  0, 2, 3, 4, 5 and 6. Each page select is read back, since a chip can
+  refuse one (a GN25L95 refuses page 3), and a page is dumped only when
+  it took. Selecting a page is the one write the bundle makes; the page
+  found is written back and read back, also when the bundle is
+  interrupted, and `chip.txt` records both. The module serial (A0h bytes
+  68-83) is blanked in `a0.txt` and masked in every other file like the
+  other identifiers, unless `--full`. Without the I2C bus every module
+  step is listed as failed and the bundle still succeeds.
+
 - diag-bundle: a secret value shorter than eight characters is scrubbed
   only where it stands as a whole token, no letter or digit touching it as
   text and no hex digit touching it as hex. Before, every occurrence went,

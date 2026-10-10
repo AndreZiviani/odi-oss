@@ -20,8 +20,16 @@
 # replaced by REDACTED, and under pon/ the GPON and OMCI state: diag (ONU
 # state, alarms, GEM flows, port counters, the PON queue registers that
 # cmd 23 and 25 write), /proc/odi_gpon, /proc/odi_omci, and omcli (state,
-# provision, flows, tcont, conn, and the MIB classes in OMCI_CLASSES).
-# MANIFEST.txt lists each step, its exit status and its size.
+# provision, flows, tcont, conn, and the MIB classes in OMCI_CLASSES), and
+# under module/ the optics module on /dev/i2c-0: A0h whole (a0.txt), A2h
+# with the page select as found (a2.txt), and in chip.txt the page select,
+# the laser driver identity (A2h page 2 byte 0xa0, 0x6a for a GN25L95;
+# bytes 0x80 and 0xdc, the UX3320 variant markers) and the UX3320
+# INIT_STATE (page 3 byte 0xf0), with the upper half of every page in
+# I2C_PAGES that could be selected (a2-p<N>.txt). Selecting a page is the
+# one write the bundle makes anywhere; the page found is put back and read
+# back, and chip.txt records both. MANIFEST.txt lists each step, its exit
+# status and its size.
 #
 # What is redacted, in the config copies: the keys in SECRET_KEYS below,
 # and any key whose name contains one of the words in SECRET_WORDS. An empty
@@ -33,8 +41,9 @@
 # so a USER_PASSWORD of "user" does not turn userland_ok into REDACTEDland_ok.
 # confd.auth, the dropbear keys and /etc/passwd are never collected at all.
 #
-# What is masked: the serial number, the MACs and the LOID (IDENT_KEYS, the
-# serial in /proc/odi_gpon, the interface MACs). Many OLTs authenticate by
+# What is masked: the serial number, the MACs, the LOID and the module
+# serial (IDENT_KEYS, the serial in /proc/odi_gpon, the interface MACs, A0h
+# bytes 68-83, which are also blanked in module/a0.txt). Many OLTs authenticate by
 # serial number alone, so a bundle posted in a public issue would otherwise
 # hand out what it takes to clone the line. Each is replaced, in every file
 # and in every spelling (text, hex, MAC with and without separators), by
@@ -55,7 +64,9 @@
 # LOG_FILE_MAX bytes and all of /var/log together by LOG_TOTAL_MAX, and the
 # archive by BUNDLE_MAX, past which it is refused rather than served. When
 # omcid does not answer omcli state, the other omcli steps are skipped, so a
-# hung omcid costs one timeout rather than one per step.
+# hung omcid costs one timeout rather than one per step. Each i2c command
+# has its own STEP_TIMEOUT_S, and the first failure among the page selects
+# ends them and goes to the restore.
 
 STEP_TIMEOUT_S=${STEP_TIMEOUT_S:-5}
 METRICS_TIMEOUT_S=${METRICS_TIMEOUT_S:-10}
@@ -89,6 +100,9 @@ OMCI_CLASSES="256 257 11 45 47 84 130 262 263 266 268 277 278 280 281 309 310 32
 GPON_PROC=${GPON_PROC:-/proc/odi_gpon}
 PONQ_BASE=0xf020a8	# PONQ_COUNT_MASK +0, through +239 (docs/SWITCH.md)
 PONQ_WORDS=240
+# The A2h pages whose upper half module/ dumps, in this order: 2 and 3 first,
+# they carry the laser driver identity and state.
+I2C_PAGES="2 3 0 4 5 6"
 
 full=0
 if [ "$1" = --full ]; then
@@ -99,7 +113,14 @@ out=${1:-/tmp/odi-diag.tar.gz}
 work=$(mktemp -d /tmp/odi-diag.XXXXXX) || { echo "diag-bundle: cannot create a work directory in /tmp" >&2; exit 1; }
 b=$work/odi-diag
 mkdir "$b"
-trap 'rm -rf "$work"' EXIT
+# restore_page is set while the module section has a page selected that
+# is not the one it found (below): an exit then puts that page back.
+restore_page=
+cleanup() {
+	[ -n "$restore_page" ] && timeout "$STEP_TIMEOUT_S" i2cset -y 0 0x51 0x7f "$restore_page" 2>/dev/null
+	rm -rf "$work"
+}
+trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
 fail() { echo "diag-bundle: $*" >&2; rm -f "$out"; exit 1; }
@@ -209,6 +230,108 @@ else
 	manifest - - "pon/omcli_* (skipped: omcid did not answer omcli state)"
 fi
 
+# module/: the optics module on /dev/i2c-0 (docs/TOOLS.md), to tell which
+# laser driver the stick has and what state its calibration is in. A0h
+# whole and A2h as found come first, with no write at all.
+mkdir "$b/module"
+step module/a0.txt i2cdump -y 0 0x50
+step module/a2.txt i2cdump -y 0 0x51
+
+# The module serial, A0h bytes 68-83, as text: blank, NUL and 0xff are
+# padding, anything else unprintable is dropped. It joins the identity
+# below, and unless --full its 16 bytes are blanked in a0.txt, hex and
+# ASCII, as XX and X (how i2cdump shows a byte it could not read): the
+# dump splits it over two lines, where no scrub rule would find it.
+awk '
+function h(c) { return index("0123456789abcdef", c) - 1 }
+$1 == "40:" { for (i = 6; i <= 17; i++) s = s " " $i }
+$1 == "50:" { for (i = 2; i <= 5; i++) s = s " " $i }
+END {
+	n = split(s, x, " ")
+	for (i = 1; i <= n; i++) {
+		if (x[i] !~ /^[0-9a-f][0-9a-f]$/)
+			continue
+		c = h(substr(x[i], 1, 1)) * 16 + h(substr(x[i], 2, 1))
+		if (c > 32 && c < 127)
+			v = v sprintf("%c", c)
+		else if (c == 32 || c == 0 || c == 255)
+			v = v " "
+	}
+	gsub(/^ +| +$/, "", v)
+	if (v != "")
+		print v
+}' "$b/module/a0.txt" > "$work/module.serial"
+if [ "$full" = 0 ]; then
+	awk '
+	# i2cdump: "40: " and 16 "hh ", three spaces, 16 ASCII characters.
+	function blank(line, from, to,   j) {
+		for (j = from; j <= to; j++) {
+			line = substr(line, 1, 4 + 3 * j) "XX" substr(line, 7 + 3 * j)
+			line = substr(line, 1, 55 + j) "X" substr(line, 57 + j)
+		}
+		return line
+	}
+	$1 == "40:" { $0 = blank($0, 4, 15) }
+	$1 == "50:" { $0 = blank($0, 0, 3) }
+	{ print }' "$b/module/a0.txt" > "$work/a0.blank" && mv "$work/a0.blank" "$b/module/a0.txt"
+fi
+
+# The paged tables, in one short block: note A2h byte 127 (the page
+# select), select each page in I2C_PAGES and read 127 back, since a chip
+# can refuse a page and keep the one it had (a GN25L95 refuses 3), read
+# the discriminators and dump the upper half of each page that took, then
+# select the page as found again and read it back. The first failure ends
+# the selects and goes straight to that restore; so does a signal, through
+# the EXIT trap, which writes restore_page while it is set. The page
+# select is the only write the kernel accepts on this bus (docs/TOOLS.md),
+# and a flock keeps two bundles from interleaving their selects.
+i2c() { timeout "$STEP_TIMEOUT_S" "$@" 2>&1; }
+module_pages() {
+	flock -n 9 || { echo "page work skipped: no page lock (another bundle is selecting pages, or flock failed)"; return 1; }
+	p0=$(i2c i2cget -y 0 0x51 0x7f) || { echo "page select (A2h byte 127): unreadable: $p0"; return 1; }
+	case $p0 in
+	0x[0-9a-f][0-9a-f]) ;;
+	*) echo "page select (A2h byte 127): unexpected: $p0"; return 1 ;;
+	esac
+	echo "page select (A2h byte 127) as found: $p0"
+	restore_page=$p0
+	for p in $I2C_PAGES; do
+		i2c i2cset -y 0 0x51 0x7f "$p" > "$work/i2c.out" || { echo "select $p: failed: $(cat "$work/i2c.out")"; break; }
+		got=$(i2c i2cget -y 0 0x51 0x7f) || { echo "select $p: read back failed: $got"; break; }
+		if [ "$got" != "$(printf '0x%02x' "$p")" ]; then
+			echo "select $p: reads back $got, did not take: page $p not shown"
+			continue
+		fi
+		echo "select $p: reads back $got, page $p shown"
+		case $p in
+		2)
+			for r in 0xa0 0x80 0xdc; do
+				v=$(i2c i2cget -y 0 0x51 "$r") || v="failed: $v"
+				echo "  page 2 byte $r: $v"
+				[ "$r" = 0xa0 ] && id=$v
+			done
+			case $id in
+			0x6a) echo "  laser driver: Semtech GN25L95 (page 2 byte 0xa0 = 0x6a)" ;;
+			0x??) echo "  laser driver: not a GN25L95 (page 2 byte 0xa0 is not 0x6a)" ;;
+			*) echo "  laser driver: unknown (page 2 byte 0xa0 unread)" ;;
+			esac
+			;;
+		3)
+			v=$(i2c i2cget -y 0 0x51 0xf0) || v="failed: $v"
+			echo "  page 3 byte 0xf0 (UX3320 INIT_STATE): $v"
+			;;
+		esac
+		step "module/a2-p$p.txt" i2cdump -y -r 0x80-0xff 0 0x51 || break
+	done
+	i2c i2cset -y 0 0x51 0x7f "$restore_page" > "$work/i2c.out" || { echo "restore $restore_page: failed: $(cat "$work/i2c.out")"; return 1; }
+	got=$(i2c i2cget -y 0 0x51 0x7f) || { echo "restore $restore_page: read back failed: $got"; return 1; }
+	echo "page select restored: wrote $restore_page, reads back $got"
+	[ "$got" = "$restore_page" ] || return 1
+	restore_page=
+}
+module_pages > "$b/module/chip.txt" 2>&1 9> /tmp/odi-diag-i2c.lock
+manifest "$?" "$(size_of "$b/module/chip.txt")" module/chip.txt
+
 # /var/log: the tail of each file, newest lines being the ones that matter,
 # within a total budget.
 mkdir "$b/log"
@@ -283,8 +406,9 @@ fi
 
 # The identity: the IDENT_KEYS values from the config store, the serial in
 # /proc/odi_gpon (16 hex digits; its first four bytes are the vendor id, so
-# it is also turned into the text spelling the config uses), and the MAC of
-# every interface. Collected even with --full, which only skips the rules.
+# it is also turned into the text spelling the config uses), the MAC of
+# every interface, and the module serial from A0h. Collected even with
+# --full, which only skips the rules.
 idents=$work/idents
 : > "$idents"
 for f in lastgood.xml lastgood_hs.xml odi.conf; do
@@ -317,6 +441,7 @@ if [ -f "$work/gpon.raw" ]; then
 fi
 cat /sys/class/net/*/address 2>/dev/null |
 	grep -v -x -i -e '00:00:00:00:00:00' -e 'ff:ff:ff:ff:ff:ff' >> "$idents"
+cat "$work/module.serial" >> "$idents" 2>/dev/null
 
 # The scrub rules, as LENGTH TAB KIND TAB PATTERN TAB REPLACEMENT. They run
 # longest first, so a value never loses a piece to a shorter one inside it.
@@ -425,7 +550,7 @@ if [ -s "$script" ]; then
 		sed -i -f "$script" "$f"
 	done
 fi
-rm -f "$secrets" "$idents" "$rules" "$script" "$work/gpon.raw"
+rm -f "$secrets" "$idents" "$rules" "$script" "$work/gpon.raw" "$work/module.serial" "$work/i2c.out"
 
 tar -czf "$out.part" -C "$work" odi-diag || { rm -f "$out.part"; fail "tar failed"; }
 n=$(size_of "$out.part")

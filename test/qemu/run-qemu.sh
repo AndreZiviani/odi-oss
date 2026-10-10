@@ -456,6 +456,14 @@ for f in MANIFEST.txt dmesg.txt meminfo.txt mounts.txt uptime.txt ps.txt nv.txt 
 	[ -s "$D/$f" ] || fail "the bundle has no $f (MANIFEST: $(cat "$D/MANIFEST.txt" 2>/dev/null))"
 done
 grep -q '^gpon_' "$D/metrics.txt" || fail "the bundle has no exporter scrape"
+# qemu has no optics I2C bus: every module step is listed with a failing
+# status, no page was dumped, and the bundle above still succeeded.
+for f in module/a0.txt module/a2.txt module/chip.txt; do
+	awk -v f="$f" '$3 == f && $1 ~ /^[0-9]+$/ && $1 != 0 { ok = 1 } END { exit !ok }' "$D/MANIFEST.txt" ||
+		fail "MANIFEST does not list $f with a failing status: $(grep module/ "$D/MANIFEST.txt")"
+done
+! grep -q 'module/a2-p' "$D/MANIFEST.txt" || fail "a page was dumped with no I2C bus: $(grep module/ "$D/MANIFEST.txt")"
+echo "  module/: a0, a2 and chip listed with a failing status (no I2C bus in qemu), the bundle still succeeds"
 grep -q 'Name="GPON_PLOAM_PASSWD" Value="REDACTED"' "$D/config/lastgood.xml" || fail "GPON_PLOAM_PASSWD is not redacted in the config copy"
 grep -q 'Name="LAN_IP_ADDR" Value="10.0.2.15"' "$D/config/lastgood.xml" || fail "the config copy lost a key that is not a secret"
 [ ! -e "$D/config/confd.auth" ] || fail "confd.auth is in the bundle"
