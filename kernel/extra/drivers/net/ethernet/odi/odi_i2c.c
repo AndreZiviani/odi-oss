@@ -65,6 +65,30 @@ static int odi_i2c_poll_done(uint32_t *last_cmd)
 	return (*last_cmd & ODI_I2C_CMD_NOT_ACKED) ? -ENXIO : 0;
 }
 
+/* Starts the transaction already set up and waits for it; a failure is
+ * logged, rate limited.
+ */
+static int odi_i2c_start(uint32_t sel, uint32_t addr, uint32_t cmd)
+{
+	uint32_t cmd_val;
+	int rc;
+
+	odi_reg_write(ODI_I2C_CMD, cmd);
+	rc = odi_i2c_poll_done(&cmd_val);
+#ifdef __KERNEL__
+	if (rc == -ENXIO)
+		pr_info_ratelimited("odi_i2c: nack sel=0x%08x addr=0x%08x cmd=0x%08x\n",
+				    sel, addr, cmd_val);
+	else if (rc)
+		pr_info_ratelimited("odi_i2c: poll timeout sel=0x%08x addr=0x%08x cmd=0x%08x\n",
+				    sel, addr, cmd_val);
+#else
+	(void)sel;
+	(void)addr;
+#endif
+	return rc;
+}
+
 int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n)
 {
 	unsigned int i;
@@ -72,10 +96,15 @@ int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n
 
 	if (n == 0)
 		return 0;
+	/* I2C_BYTE_ADDR is one byte wide on this bus (memory-address width
+	 * code 0): a run past byte 255 has no next address to go to.
+	 */
+	if (addr > 0xffU || n > 0x100U - addr)
+		return -EINVAL;
 
 	/* Every byte is five steps on one controller, and the controller keeps
 	 * no per-caller state: a second reader (the exporter DDM poll against
-	 * a /proc/odi_omci ddm write, say) interleaved between them gets
+	 * an i2cdump on /dev/i2c-0, say) interleaved between them gets
 	 * bytes meant for the other caller. odi_i2c_lock (odi_switch.c) holds
 	 * the whole run, all n bytes, so a multi-byte field is also read in
 	 * one piece. Process context only: the poll busy-waits in udelay()
@@ -97,27 +126,9 @@ int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n
 		odi_reg_write(ODI_I2C_BYTE_ADDR, a);
 
 		/* Start: START set, WRITE clear -- a read. */
-		odi_reg_write(ODI_I2C_CMD, ODI_I2C_CMD_START);
-
-		{
-			uint32_t cmd_val;
-			int poll_rc = odi_i2c_poll_done(&cmd_val);
-
-			if (poll_rc != 0) {
-#ifdef __KERNEL__
-				if (cmd_val & ODI_I2C_CMD_NOT_ACKED)
-					pr_info_ratelimited(
-						"odi_i2c: nack sel=0x%08x addr=0x%08x cmd=0x%08x\n",
-						sel, a, cmd_val);
-				else
-					pr_info_ratelimited(
-						"odi_i2c: poll timeout sel=0x%08x addr=0x%08x cmd=0x%08x\n",
-						sel, a, cmd_val);
-#endif
-				rc = poll_rc;
-				break;
-			}
-		}
+		rc = odi_i2c_start(sel, a, ODI_I2C_CMD_START);
+		if (rc != 0)
+			break;
 
 #ifdef __KERNEL__
 		out[i] = (uint8_t)(odi_reg_read(ODI_I2C_READ_DATA) & 0xffU);
@@ -126,6 +137,23 @@ int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n
 		(void)odi_reg_read(ODI_I2C_READ_DATA); /* touched for shape symmetry, unused */
 #endif
 	}
+	mutex_unlock(&odi_i2c_lock);
+	return rc;
+}
+
+int odi_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
+{
+	int rc;
+
+	if (sel != ODI_I2C_SEL_A2 || addr != ODI_I2C_A2_PAGE_SELECT)
+		return -EPERM;
+
+	mutex_lock(&odi_i2c_lock);
+	odi_reg_write(ODI_I2C_MASTER_SETUP, sel);
+	odi_reg_write(ODI_I2C_WRITE_DATA, val);
+	odi_reg_write(ODI_I2C_BYTE_ADDR, addr);
+	/* Start: START and WRITE set. */
+	rc = odi_i2c_start(sel, addr, ODI_I2C_CMD_START | ODI_I2C_CMD_WRITE);
 	mutex_unlock(&odi_i2c_lock);
 	return rc;
 }

@@ -10,6 +10,11 @@
  * address, the second the two-byte A2h numeric read every other DDM
  * field shares the same shape as).
  *
+ * odi_i2c_write_byte(): the page select write shape (device select, data,
+ * address, I2C_CMD START|WRITE), and the refusal of every other target
+ * before any register is touched. odi_i2c_read_bytes() also refuses a run
+ * past byte 255.
+ *
  * The busy-poll timeout path is not exercised here: the host
  * odi_poll_reg() (test/odi_switch_mock.h) finishes every operation at
  * once, and the START write leaves IN_PROGRESS clear in the mock.
@@ -148,6 +153,56 @@ int main(void)
 	 * reads back to back also prove it was released.
 	 */
 	CHECK(odi_mock_locks_idle(), "odi_i2c_lock released on return");
+
+	puts("odi_i2c_write_byte: the page select, A2h byte 127:");
+	odi_mock_reset();
+	rc = odi_i2c_write_byte(ODI_I2C_SEL_A2, ODI_I2C_A2_PAGE_SELECT, 0x04);
+	CHECK(rc == 0, "returns 0");
+	CHECK(odi_mock.log_n == 4, "4 register writes: select, data, address, command");
+	if (odi_mock.log_n == 4) {
+		CHECK(odi_mock.log[0].addr == ODI_I2C_MASTER_SETUP &&
+		      odi_mock.log[0].val == ODI_I2C_SEL_A2, "I2C_MASTER_SETUP carries the A2h select");
+		CHECK(odi_mock.log[1].addr == ODI_I2C_WRITE_DATA &&
+		      odi_mock.log[1].val == 0x04, "I2C_WRITE_DATA carries the byte");
+		CHECK(odi_mock.log[2].addr == ODI_I2C_BYTE_ADDR &&
+		      odi_mock.log[2].val == ODI_I2C_A2_PAGE_SELECT, "I2C_BYTE_ADDR is 127");
+		CHECK(odi_mock.log[3].addr == ODI_I2C_CMD &&
+		      odi_mock.log[3].val == (ODI_I2C_CMD_START | ODI_I2C_CMD_WRITE),
+		      "I2C_CMD write is START|WRITE, and it comes last");
+	}
+	CHECK(odi_mock_locks_idle(), "odi_i2c_lock released after a write");
+
+	puts("odi_i2c_write_byte: every other target is refused untouched:");
+	{
+		static const struct { uint32_t sel, addr; } refused[] = {
+			{ ODI_I2C_SEL_A2, 0x7e },		/* the byte below the page select */
+			{ ODI_I2C_SEL_A2, 0x80 },		/* the paged upper half */
+			{ ODI_I2C_SEL_A2, 0x00 },
+			{ ODI_I2C_SEL_A0, ODI_I2C_A2_PAGE_SELECT },	/* same byte, the A0h EEPROM */
+			{ ODI_I2C_SETUP(0x52), ODI_I2C_A2_PAGE_SELECT },
+		};
+		unsigned int i;
+
+		for (i = 0; i < sizeof refused / sizeof refused[0]; i++) {
+			odi_mock_reset();
+			rc = odi_i2c_write_byte(refused[i].sel, refused[i].addr, 0x02);
+			CHECK(rc == -EPERM, "refused with -EPERM");
+			CHECK(odi_mock.log_n == 0, "and no register written");
+		}
+	}
+
+	puts("odi_i2c_read_bytes: a run past byte 255 is refused untouched:");
+	{
+		uint8_t b[8];
+
+		odi_mock_reset();
+		rc = odi_i2c_read_bytes(ODI_I2C_SEL_A2, 250, b, 8);
+		CHECK(rc == -EINVAL, "250 + 8 bytes: -EINVAL");
+		rc = odi_i2c_read_bytes(ODI_I2C_SEL_A2, 0x100, b, 1);
+		CHECK(rc == -EINVAL, "address 256: -EINVAL");
+		CHECK(odi_mock.log_n == 0, "no register written");
+		CHECK(odi_mock_locks_idle(), "odi_i2c_lock never taken");
+	}
 
 	printf("%s (%d failures)\n", failures ? "FAILED" : "all ok", failures);
 	return failures != 0;

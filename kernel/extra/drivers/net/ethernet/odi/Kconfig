@@ -14,6 +14,7 @@ config ODI_SWITCH
 	depends on ODI_NIC
 	select FW_LOADER
 	select CRC32
+	select I2C
 	help
 	  Everything between the NIC and the fibre: the switch-core register
 	  and table layer, the OMCI driver commands and their netlink
@@ -21,7 +22,9 @@ config ODI_SWITCH
 	  machine and PLOAM and the switch interrupt, /proc/odi_init with
 	  the SDK-init verbs, the board-init replay and /dev/odi_sw. The
 	  register replay tables are firmware files under /lib/firmware/odi/
-	  (hence FW_LOADER, and CRC32 to check each file).
+	  (hence FW_LOADER, and CRC32 to check each file). The optics I2C
+	  port is an i2c adapter (hence I2C; I2C_CHARDEV gives it
+	  /dev/i2c-0).
 
 config ODI_WDT
 	bool "Watchdog kicker and userland deadline (RTL9602C)"

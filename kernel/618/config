@@ -130,6 +130,17 @@ CONFIG_ODI_NIC=y
 CONFIG_ODI_SWITCH=y
 CONFIG_ODI_WDT=y
 
+# The optics I2C port as i2c-0 (odi_i2c_adapter.c, selected by ODI_SWITCH),
+# and /dev/i2c-0 for busybox i2cget/i2cdump/i2cset. Nothing else: no
+# legacy /proc compat, no bit-banging or SMBus helper modules.
+CONFIG_I2C=y
+CONFIG_I2C_CHARDEV=y
+# CONFIG_I2C_COMPAT is not set
+# CONFIG_I2C_HELPER_AUTO is not set
+# With I2C on, the PS/2 mouse driver adds an SMBus companion for Synaptics
+# touchpads by default; nothing here has one.
+# CONFIG_MOUSE_PS2_SYNAPTICS_SMBUS is not set
+
 # Kernel config diet (2026-09-24): every symbol turned off below gates a
 # syscall or /proc feature nothing in this userland reaches. Evidence for
 # each is a mips-linux-uclibc-objdump -d over every rootfs ELF (busybox,

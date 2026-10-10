@@ -27,6 +27,7 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `igmpd` | daemon, IGMP snooping | nothing (shipped, not started; see its section) | odi_omci netlink (redirect type 4), `/dev/odi_sw` | stdout | -- |
 | `login` | serial console login | inittab `respawn` | ttyS0 | -- | respawned |
 | `diag` | CLI: optics, GPON state, counters, registers | you, rcS, network.sh, metricsd, confd | `/dev/odi_sw`, `/proc/odi_gpon`, netlink | stdout | -- |
+| `i2cget` / `i2cdump` / `i2cset` | CLI: the optics module I2C devices (busybox) | you | `/dev/i2c-0` | stdout | -- |
 | `omcli` / `omcicli` | CLI for omcid | you, metricsd, confd | omcid's queues | stdout | -- |
 | `omciprobe` | CLI: one raw driver command | you | odi_omci netlink | stdout | -- |
 | `omcicap` | CLI: capture the OMCI channel | you | odi_omci netlink (takes type 1) | stdout | -- |
@@ -462,6 +463,42 @@ for byte, and `register get` keeps its `0x<address> 0x<value>` layout for
 rcS and network.sh. `register set` writes the switch core
 directly: it is how rcS and network.sh program the optics and the host
 SerDes, and a wrong value there can take the host link away.
+
+### `i2cget`, `i2cdump`, `i2cset` -- the optics module over I2C
+
+The module's own I2C devices are on `/dev/i2c-0`, the SoC optics port
+(`odi_i2c_adapter.c`): 0x50 is A0h, the identification EEPROM (vendor,
+part number, serial), and 0x51 is A2h, the diagnostics, served by the
+laser driver chip. The busybox applets read them:
+
+    i2cdump -y 0 0x50               # A0h, all 256 bytes
+    i2cdump -y 0 0x51               # A2h: DDM in 96-105, page select at 127,
+                                    # the selected page in 128-255
+    i2cget -y 0 0x51 0x7f           # which page is selected
+    i2cset -y 0 0x51 0x7f 2         # select page 2
+
+The controller does one byte per transaction, behind a device select and a
+byte address, so the adapter offers byte-data reads (`i2cget`, `i2cdump`
+mode `b`, the default), I2C block reads (`i2cdump` mode `i`) and nothing
+else: `i2cdetect` cannot scan it, since there is no transaction without a
+byte address. Only 0x50 and 0x51 are answered; any other address fails
+with "No such device or address", because the controller does not report
+a missing device and a read there would return the previous byte read. Every transaction is bounded in the kernel (5 ms a byte) and
+shares one lock with the exporter's DDM reads, so neither needs pausing.
+
+The one write the kernel accepts is the page select, A2h byte 127. Any
+other `i2cset` fails with "Operation not permitted" before anything reaches
+the bus: the other pages are the laser driver's own tables, and a stray
+write there could change how the laser is driven. To look at a page, note
+the current one and put it back afterwards:
+
+    p=$(i2cget -y 0 0x51 0x7f); i2cset -y 0 0x51 0x7f 2
+    i2cget -y 0 0x51 0xa0           # page 2, byte 0xa0
+    i2cset -y 0 0x51 0x7f "$p"
+
+On the ISP1 stick page 2 byte 0xa0 reads 0x6a, which the stock firmware's
+start-up takes for a Semtech GN25L95 laser driver. A0h bytes 68-83 are the
+module serial number: mask them before posting a dump.
 
 ### `omcli` and `omcicli` -- the omcid client
 

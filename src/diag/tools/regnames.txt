@@ -157,6 +157,9 @@ reg 0x706400 US_GEM_PORT_MAP   11:0=GEM_PORT
 # Indirect PHY and I2C access
 reg 0x000000 PHY_ACCESS_DATA   15:0=WRITE_DATA
 reg 0x000004 PHY_ACCESS_CMD    22:22=WRITE 21:21=START 20:0=ADDRESS
+# I2C_WRITE_DATA: the byte a write transaction (I2C_CMD START|WRITE) stores
+# at I2C_BYTE_ADDR; odi_i2c.c writes the optics page select with it.
+reg 0x0000b0 I2C_WRITE_DATA
 reg 0x0000b8 I2C_BYTE_ADDR
 reg 0x0000c0 I2C_CMD           3:3=NOT_ACKED 2:2=IN_PROGRESS 1:1=WRITE 0:0=START
 reg 0x0000c8 I2C_READ_DATA
