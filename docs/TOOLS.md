@@ -36,7 +36,7 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `fwu.sh` | CLI: flash one slot | you, `fwu_starter.sh` (from the image tarball) | mtd `k0`/`r0` or `k1`/`r1` | stdout | -- |
 | `fwu_starter.sh` | CLI: write an uploaded tarball to the inactive slot | confd, you | runs `fwu.sh` from the tarball | `/tmp/fwu.log`, `/tmp/fwu.state` | -- |
 | `apply.sh` | CLI: apply saved settings without a reboot | confd, you | `network.sh addr`; SIGHUP to omcid | stdout | -- |
-| `diag-bundle.sh` | CLI: the diagnostics bundle, secrets redacted, identity masked | confd (`GET /api/diag`), you | reads logs, `/proc`, `nv`, the exporter | the tar.gz it writes | -- |
+| `diag-bundle.sh` | CLI: the diagnostics bundle, secrets redacted, identity masked | confd (`GET /api/diag`), you | reads logs, `/proc`, `nv`, the exporter, the optics module (`/dev/i2c-0`) | the tar.gz it writes | -- |
 
 Every daemon -- `omcid`, `confd`, `metricsd`, `dropbear` -- and the serial
 `login` are all `respawn` entries in `/etc/inittab`: busybox init restarts
@@ -498,7 +498,8 @@ the current one and put it back afterwards:
 
 On the ISP1 stick page 2 byte 0xa0 reads 0x6a, which the stock firmware's
 start-up takes for a Semtech GN25L95 laser driver. A0h bytes 68-83 are the
-module serial number: mask them before posting a dump.
+module serial number: mask them before posting a dump. `diag-bundle.sh`
+collects all of this, masked, under `module/`.
 
 ### `omcli` and `omcicli` -- the omcid client
 
@@ -741,6 +742,27 @@ credentials through OMCI (SIP user data, authentication methods, large
 strings, the TR-069 server), and none of those classes is collected. When
 omcid does not answer `omcli state`, the other `omcli` steps are skipped.
 
+Under `module/`, the optics module on `/dev/i2c-0`, which tells which laser
+driver the stick has and what state its calibration is in:
+
+| file | from |
+|---|---|
+| `a0.txt` | `i2cdump -y 0 0x50`: A0h, the identification EEPROM, bytes 68-83 (the module serial) blanked as `XX` unless `--full` |
+| `a2.txt` | `i2cdump -y 0 0x51`: A2h with the page select as found, untouched: DDM, and the upper half of whatever page was selected |
+| `chip.txt` | A2h byte 127 (the page select) as found; for each page selected, what byte 127 read back; page 2 bytes 0xa0 (0x6a: Semtech GN25L95), 0x80 and 0xdc (the UX3320 variant markers); page 3 byte 0xf0 (UX3320 INIT_STATE); and the page select written back and read back |
+| `a2-p<N>.txt` | `i2cdump -y -r 0x80-0xff 0 0x51` with page N selected, for N in 2, 3, 0, 4, 5, 6, only when byte 127 read back N |
+
+Selecting a page is the one write the bundle makes anywhere, and the only
+one the kernel accepts on this bus. A chip may refuse a page and keep the
+one it had (a GN25L95 refuses page 3), which is why each select is read
+back and a page is dumped only when it took. The page work is one short
+block under a lock (`flock` on `/tmp/odi-diag-i2c.lock`, so two bundles
+never interleave their selects): the first failure ends the selects, and
+the page found is always written back, also when the bundle is
+interrupted. Without the bus (qemu, or a build without the adapter)
+every `module/` step is listed in `MANIFEST.txt` with a failing status
+and the bundle still succeeds.
+
 **Redaction.** In the copies of `lastgood.xml`, `lastgood_hs.xml` and
 `odi.conf`, the value of every key below is replaced by `REDACTED` (an empty
 value stays empty, so "not set" still shows):
@@ -761,8 +783,10 @@ never collected.
 **Masking.** Many OLTs authenticate an ONU by its serial number alone, so a
 bundle posted in a public issue would hand out what it takes to clone the
 line. By default the serial number (`GPON_SN` and the one in
-`/proc/odi_gpon`), the MACs (`ELAN_MAC_ADDR` and every interface) and the
-LOID (`LOID`, `LOID_OLD`) are replaced in every file, in every spelling
+`/proc/odi_gpon`), the MACs (`ELAN_MAC_ADDR` and every interface), the
+LOID (`LOID`, `LOID_OLD`) and the module serial (A0h bytes 68-83, also
+blanked in `module/a0.txt`, where the dump splits it over two lines) are
+replaced in every file, in every spelling
 (text, hex, a MAC with or without separators), by `MASKED-` and their last
 four characters, which still tells two sticks apart. `--full` keeps them,
 for a bundle you send privately; the web UI never passes it.
@@ -774,11 +798,12 @@ that carry the serial number (Serial_Number_ONU, Acknowledge,
 Serial_Number_Mask, Assign_ONU-ID, Disable_Serial_Number) unless `--full`.
 
 Every command runs under busybox `timeout` (5 s, 10 s for the exporter
-scrape), and a bundle over 2 MB is refused rather than written. Exits 1, with
+scrape; each `i2cget`, `i2cset` and `i2cdump` on its own), and a bundle over 2 MB is refused rather than written. Exits 1, with
 the reason on stderr and no OUT left behind, when it cannot finish.
 `make test-qemu` plants known secrets and identifiers in the config,
 `confd.auth` and a log, asserts none of them is anywhere in the bundle, and
-that `--full` keeps the identifiers but still no secret.
+that `--full` keeps the identifiers but still no secret; and that the
+`module/` steps are listed, failing, in a bundle that still succeeds.
 
 ## Boot scripts you can run again
 
