@@ -429,6 +429,20 @@ sshx "printf '<Config>\n\t<Value Name=\"GPON_SN\" Value=\"%s\"/>\n\t<Value Name=
 sshx "sed -i 's|</Config>|\t<Value Name=\"LOID\" Value=\"$DIAG_LOID\"/>\n</Config>|' /etc/config/lastgood.xml"
 sshx "grep -c '$DIAG_LOID' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant the LOID in lastgood.xml"
 sshx "echo 'harness: sn=$DIAG_SN mixed=$DIAG_SN_MIXED snhex=$DIAG_SN_HEX ph=$DIAG_SN_PH mac=$DIAG_MAC_COLON loid=$DIAG_LOID' > /var/log/qemu-ident.log"
+# A short secret, the factory USER_PASSWORD, which is also a piece of
+# words the bundle carries: scrubbed where it stands alone, as text and as
+# hex, and left inside a longer word (userland_ok, in MANIFEST.txt here,
+# where qemu has no /proc/odi_wdt) or a longer hex word (reg=).
+DIAG_SHORT=user
+DIAG_SHORT_HEX=75736572
+DIAG_SHORT_PH="75 73 65 72"
+DIAG_SHORT_LINE="harness: short=$DIAG_SHORT userland_ok=1 hex=$DIAG_SHORT_HEX ph=$DIAG_SHORT_PH reg=0x00${DIAG_SHORT_HEX}ff"
+sshx "sed -i 's|</Config>|\t<Value Name=\"USER_PASSWORD\" Value=\"$DIAG_SHORT\"/>\n</Config>|' /etc/config/lastgood.xml"
+sshx "grep -c 'Value=\"$DIAG_SHORT\"' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant USER_PASSWORD in lastgood.xml"
+sshx "echo '$DIAG_SHORT_LINE' > /var/log/qemu-short.log"
+# token_in VALUE CLASS DIR: the files under DIR where VALUE stands as a
+# whole token, no character of CLASS touching it on either side.
+token_in() { grep -r -l -E "(^|[^$2])$1([^$2]|\$)" "$3"; }
 sshx '/etc/scripts/diag-bundle.sh /tmp/odi-diag.tar.gz' > "$WORK/diag-bundle.out" 2>&1 ||
 	{ cat "$WORK/diag-bundle.out" >&2; fail "diag-bundle.sh failed"; }
 tail -n 1 "$WORK/diag-bundle.out" | grep -qx /tmp/odi-diag.tar.gz || fail "diag-bundle.sh did not name its output: $(cat "$WORK/diag-bundle.out")"
@@ -458,6 +472,15 @@ done
 grep -q 'Name="GPON_SN" Value="MASKED-ABCD"' "$D/config/lastgood_hs.xml" || fail "GPON_SN is not masked to its last four in the config copy"
 grep -q 'mac=MASKED-D4E5 ' "$D/log/qemu-ident.log" || fail "the colon MAC is not masked in the log: $(cat "$D/log/qemu-ident.log")"
 grep -q '^identity: masked' "$D/MANIFEST.txt" || fail "MANIFEST does not say the identity is masked"
+if token_in "$DIAG_SHORT" A-Za-z0-9 "$D" || token_in "$DIAG_SHORT_HEX" 0-9A-Fa-f "$D" ||
+	token_in "$DIAG_SHORT_PH" 0-9A-Fa-f "$D"; then
+	fail "the short secret stands as a token in the bundle, in the files above"
+fi
+grep -q 'Name="USER_PASSWORD" Value="REDACTED"' "$D/config/lastgood.xml" || fail "USER_PASSWORD is not redacted in the config copy"
+want="harness: short=REDACTED userland_ok=1 hex=REDACTED ph=REDACTED reg=0x00${DIAG_SHORT_HEX}ff"
+grep -qxF "$want" "$D/log/qemu-short.log" || fail "the short secret was scrubbed wrong: got '$(cat "$D/log/qemu-short.log")', want '$want'"
+grep -q -E ' odi_wdt_userland_ok\.txt( |$)' "$D/MANIFEST.txt" || fail "MANIFEST lost the odi_wdt_userland_ok.txt name: $(grep odi_wdt "$D/MANIFEST.txt")"
+echo "  short secret: scrubbed as a token (text, hex, %ph), kept inside userland_ok and a longer hex word"
 echo "  $(wc -c < "$WORK/diag.tar.gz" | tr -d ' ') bytes, $(find "$D" -type f | wc -l | tr -d ' ') files; config redacted, no planted secret or identifier in any file"
 # --full keeps the identity, and still no secret.
 sshx '/etc/scripts/diag-bundle.sh --full /tmp/odi-diag-full.tar.gz' > "$WORK/diag-full.out" 2>&1 ||
@@ -471,6 +494,9 @@ for secret in "$DIAG_PLOAM" "$DIAG_LOIDPW" "$DIAG_LOIDPW_HEX" "$DIAG_WEBPW"; do
 		fail "a secret value is in the --full bundle, in the files above"
 	fi
 done
+if token_in "$DIAG_SHORT" A-Za-z0-9 "$WORK/diag-full" || token_in "$DIAG_SHORT_HEX" 0-9A-Fa-f "$WORK/diag-full"; then
+	fail "the short secret stands as a token in the --full bundle, in the files above"
+fi
 echo "  --full: identity kept, no planted secret"
 # The same bundle through the web UI, when this confd has the route (odi-ui
 # with GET /api/diag; an older release answers 404, which is skipped).
