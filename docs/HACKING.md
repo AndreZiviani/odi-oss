@@ -998,9 +998,9 @@ prints the `CONFIG_ODI_*` it got).
 | `RTL8686_UART0`, `RTL8686_NOR` | `arch/mips/rtl8686/Kconfig:32`, `:39` | the 8250 UART; the SPI NOR MTD driver | y | prod |
 | `ODI_EARLY_CRUMBS` | `arch/mips/rtl8686/Kconfig:52` | the early boot crumbs in the ramlog pages | y (Kconfig default n) | prod (debug aid) |
 | `ODI_NIC` | `drivers/net/ethernet/odi/Kconfig:5` | `odi_nic.c`, the CPU-port NIC | y | prod |
-| `ODI_SWITCH` | `:12` | the switch core, the OMCI transport and `/proc/odi_omci`, the GPON MAC and the switch interrupt, `/proc/odi_init` and the SDK-init replay, the board-init replay, `/dev/odi_sw` and I2C/DDM (selects `FW_LOADER`, `CRC32`) | y | prod |
-| `ODI_WDT` | `:26` | the watchdog kicker, the userland deadline and the restart handler | y | prod |
-| `ODI_RAMLOG` | `:34` | the DRAM ramlog console and `/proc/odi_ramlog_prev*` | y | prod |
+| `ODI_SWITCH` | `:12` | the switch core, the OMCI transport and `/proc/odi_omci`, the GPON MAC and the switch interrupt, `/proc/odi_init` and the SDK-init replay, the board-init replay, `/dev/odi_sw`, I2C/DDM and the i2c adapter `i2c-0` (selects `FW_LOADER`, `CRC32`, `I2C`) | y | prod |
+| `ODI_WDT` | `:29` | the watchdog kicker, the userland deadline and the restart handler | y | prod |
+| `ODI_RAMLOG` | `:37` | the DRAM ramlog console and `/proc/odi_ramlog_prev*` | y | prod |
 
 ### Build variables
 

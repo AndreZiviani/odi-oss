@@ -7,6 +7,7 @@
 obj-$(CONFIG_ODI_NIC) += odi_nic.o
 obj-$(CONFIG_ODI_SWITCH) += odi_omci.o
 obj-$(CONFIG_ODI_SWITCH) += odi_switch.o odi_switch_cmd.o odi_switch_bdgconn.o odi_switch_tbl.o odi_switch_l2.o odi_reg.o odi_i2c.o odi_ddm.o
+obj-$(CONFIG_ODI_SWITCH) += odi_i2c_adapter.o
 obj-$(CONFIG_ODI_SWITCH) += odi_switch_port.o odi_switch_qos.o odi_switch_ds_gem.o odi_switch_cf.o \
 			   odi_switch_platform.o odi_switch_mib.o
 obj-$(CONFIG_ODI_SWITCH) += odi_replay.o odi_replay_blob.o odi_replay_fw.o

@@ -71,15 +71,17 @@ void __iomem *odi_switch_base;
  * release), and nothing is acquired while it is held.
  *
  * odi_i2c_lock (mutex, process context only). Protects the port-1 I2C
- * master byte sequence (I2C_MASTER_SETUP, I2C_BYTE_ADDR, I2C_CMD,
- * I2C_READ_DATA): a DDM read is setup, address, start, poll, read per
- * byte, and a second reader in between returns the wrong bytes. Taken by
- * odi_i2c_read_bytes() (DDM_GET), by cmd 10
+ * master byte sequence (I2C_MASTER_SETUP, I2C_WRITE_DATA, I2C_BYTE_ADDR,
+ * I2C_CMD, I2C_READ_DATA): a DDM read is setup, address, start, poll, read
+ * per byte, and a second reader in between returns the wrong bytes. Taken
+ * by odi_i2c_read_bytes() and odi_i2c_write_byte() (DDM_GET, and the i2c
+ * adapter, odi_i2c_adapter.c, under the i2c core bus lock), by cmd 10
  * (odi_sw_ponmac_transceiver_get() writes the same I2C_MASTER_SETUP) and
  * by the sdkinit i2c and i2cen verbs, the last two under odi_switch_lock.
  *
  * Lock order, outermost first:
  *   odi_switch_lock -> odi_i2c_lock
+ *   i2c core bus lock (i2c-0) -> odi_i2c_lock
  *   odi_switch_lock -> odi_gpon_lock -> odi_switch_dsf_lock
  *   odi_gpon_lock -> odi_switch_dsf_lock  (the switch interrupt handler)
  * No inversion is possible: the two mutexes are only taken in process

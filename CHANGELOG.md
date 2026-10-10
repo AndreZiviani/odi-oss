@@ -14,6 +14,22 @@ listed here.
   word. A short LOID gets the same rule, so a numeric one no longer cuts
   digits out of counters. Longer values are scrubbed everywhere, as before.
 
+- kernel: the optics I2C port is an i2c adapter, `/dev/i2c-0`, so the
+  module's own devices (A0h = 0x50, A2h = 0x51, the laser driver chip) can
+  be read with busybox `i2cget` and `i2cdump`, to tell which laser driver a
+  stick has and what state it is in. Reading them used to mean driving the
+  I2C master by hand with `diag register set`/`get`, with the exporter,
+  omcid and confd paused. The adapter shares the one lock and the one byte
+  routine with the DDM reads, so neither has to stop for the other. The
+  controller does one byte behind a byte address per transaction, so the
+  adapter offers SMBus byte-data and I2C block reads (no `i2cdetect`), of
+  0x50 and 0x51 only: the controller does not report an absent device,
+  and a read of one returns the previous byte read. The only write
+  accepted is the A2h page select (byte 127, `i2cset -y 0 0x51 0x7f
+  <page>`), to read the paged tables; any other write is refused with
+  EPERM before it reaches the bus. `docs/TOOLS.md` has the commands. The
+  kernel image is 7.6 KB larger (the i2c core and i2c-dev).
+
 - diag-bundle: the bundle collects the GPON and OMCI state under `pon/`
   (ONU state, alarms, GEM flows, port counters, the PON queue registers
   cmd 23 and 25 write, `/proc/odi_gpon`, `/proc/odi_omci`, and `omcli`

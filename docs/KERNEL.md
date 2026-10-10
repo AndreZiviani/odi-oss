@@ -311,6 +311,7 @@ and GPON hardware are driven.
 | `odi_soc.c` | the SoC system-controller window: one `ioremap()`, named offsets, the one allowlist every driver access there goes through (the replays, the watchdog, the optics) |
 | `odi_replay_blob.c`, `odi_replay_fw.c` | the replay tables as firmware files: parser and loader (below) |
 | `odi_i2c.c`, `odi_ddm.c` | the I2C bus to the optical module, and SFF-8472 DDM (temperature, voltage, bias, tx/rx power) readout |
+| `odi_i2c_adapter.c` | that bus as i2c adapter `i2c-0` (SMBus byte-data reads, I2C block reads, and the A2h page-select write only), for `i2cget`/`i2cdump` on `/dev/i2c-0` |
 | `odi_reg.c` | `/dev/odi_sw`: register/SoC/MIB/DDM/L2-table access for our own userland (`diag`, `metricsd`, `igmpd`) |
 | `odi_wdt.c` | the watchdog kicker — see below |
 | `odi_ramlog.c` | the DRAM ring-buffer console — see below |
@@ -368,14 +369,15 @@ the GPON interrupt path. `odi_switch.c` has the full comment; in short:
   handshakes, the flow type and slot map, the encryption bits. It is a
   leaf, and nothing is printed under it.
 - `odi_i2c_lock`, a mutex, covers the whole I2C byte sequence (setup,
-  address, start, poll, read, per byte): the DDM ioctl, the `/proc`
-  readers, the transceiver command and the sdkinit I2C verbs. Without it
-  a `diag` reading and an exporter DDM poll could interleave and read each
-  other's bytes.
+  address, start, poll, read, per byte): the DDM ioctl, the i2c adapter
+  (`/dev/i2c-0`), the transceiver command and the sdkinit I2C verbs.
+  Without it an `i2cdump` and an exporter DDM poll could interleave and
+  read each other's bytes.
 - `odi_wdt_flag_lock` serialises the watchdog enable writers, so two can
   no longer each start a kicker thread.
 
-The order is `odi_switch_lock -> odi_i2c_lock`, `odi_switch_lock ->
+The order is `odi_switch_lock -> odi_i2c_lock`, the i2c core's bus lock
+`-> odi_i2c_lock`, `odi_switch_lock ->
 odi_gpon_lock -> odi_switch_dsf_lock` and, from the hard IRQ,
 `odi_gpon_lock -> odi_switch_dsf_lock`; the host mock
 aborts on a recursive acquire or on releasing a lock not held.
