@@ -61,10 +61,12 @@
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/hex.h>
+#include <linux/slab.h>
 
 #endif
 
 #include "odi_gpon.h"
+#include "odi_gpon_ctr.h"
 #include "odi_gpon_drv.h"
 #include "odi_gpon_hw.h"
 #include "odi_gpon_init.h"
@@ -158,6 +160,16 @@ static bool odi_gpon_line_watch;
  */
 static uint32_t odi_gpon_ber_period_ms;
 static uint8_t odi_gpon_rei_seq;
+
+/* The link counters (odi_gpon_ctr.h): sampled every second from the boot
+ * gponact on, under odi_gpon_lock, and by the BER timer before each REI.
+ * One second keeps every 32-bit counter far from full at line rate and
+ * bounds the state times to a second; the line check feeds the alarm
+ * accounting every 100 ms besides (odi_gpon_line_check()).
+ */
+static struct odi_gpon_ctr odi_gpon_ctr_inst;
+static struct timer_list odi_gpon_ctr_timer;
+#define ODI_GPON_CTR_PERIOD_MS	1000U
 
 /* ---- Counters and the PLOAM ring for /proc/odi_gpon -------------------
  *
@@ -414,6 +426,7 @@ static void odi_gpon_note_transition(enum odi_gpon_state prev,
 
 	if (now == prev)
 		return;
+	odi_gpon_ctr_note_transition(&odi_gpon_ctr_inst, prev, now);
 	odi_gpon_note_ranging(prev, now);
 	odi_gpon_elapsed(odi_gpon_state_since, &secs, &ms);
 	odi_gpon_state_since = jiffies;
@@ -477,6 +490,8 @@ static void odi_gpon_line_check(void)
 	int los;
 
 	odi_gpon_line_sample(&odi_gpon_fsm_inst, odi_gpon_line_watch, &smp);
+	odi_gpon_ctr_note_alarms(&odi_gpon_ctr_inst, smp.alarms,
+				 jiffies_to_msecs(jiffies - INITIAL_JIFFIES));
 
 	los = (smp.alarms & ODI_GPON_DSF_ALARM_STATE_LOS_NOW) ? 1 : 0;
 	if (los && !odi_gpon_last_los_state)
@@ -493,6 +508,24 @@ static void odi_gpon_line_check(void)
 }
 
 /* ---- Timer callbacks --------------------------------------------------- */
+
+/* One counter sample now; with the lock held. */
+static void odi_gpon_ctr_sample_locked(void)
+{
+	odi_gpon_ctr_sample(&odi_gpon_ctr_inst, jiffies_to_msecs(jiffies - INITIAL_JIFFIES),
+			    odi_gpon_fsm_inst.state);
+}
+
+static void odi_gpon_ctr_fn(struct timer_list *odi_timer_arg)
+{
+	unsigned long flags;
+
+	(void)odi_timer_arg;
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	odi_gpon_ctr_sample_locked();
+	mod_timer(&odi_gpon_ctr_timer, jiffies + msecs_to_jiffies(ODI_GPON_CTR_PERIOD_MS));
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+}
 
 static void odi_gpon_to1_fn(struct timer_list *odi_timer_arg)
 {
@@ -547,14 +580,13 @@ static void odi_gpon_ber_fn(struct timer_list *odi_timer_arg)
 		return;
 	}
 
-	/* The one register the react capture reads immediately before every
-	 * REI send -- used directly as the REI's own error count, matching
-	 * that one capture exactly; whether this counter is clear-on-read
-	 * (making every read already the correct "since the last REI" delta)
-	 * or free-running (which would need this driver to track its own
-	 * baseline and subtract) is UNVERIFIED with only one sample.
+	/* The REI error count is DSF_BIP_ERR_BLOCKS, the register the react
+	 * capture reads before every REI send. It clears when read, so only
+	 * the counter sampler reads it: brought up to date here, it hands
+	 * over the blocks counted in O5 since the last REI.
 	 */
-	bip_err = odi_reg_read(ODI_GPON_DSF_BIP_ERR_BLOCKS_OFF);
+	odi_gpon_ctr_sample_locked();
+	bip_err = odi_gpon_ctr_rei_take(&odi_gpon_ctr_inst);
 	odi_gpon_rei_seq = (odi_gpon_rei_seq + 1U) & 0x0fU;
 	odi_gpon_encode_rei(odi_gpon_fsm_inst.onu_id, bip_err, odi_gpon_rei_seq, &rei);
 	odi_gpon_hw_send_us_ploam(&rei);
@@ -673,6 +705,8 @@ int odi_gpon_init(void)
 	odi_gpon_booted = false;
 	odi_gpon_ber_period_ms = 0U;
 	odi_gpon_state_since = jiffies;
+	odi_gpon_ctr_reset(&odi_gpon_ctr_inst);
+	timer_setup(&odi_gpon_ctr_timer, odi_gpon_ctr_fn, 0);
 
 	timer_setup(&odi_gpon_to1_timer, odi_gpon_to1_fn, 0);
 	timer_setup(&odi_gpon_to2_timer, odi_gpon_to2_fn, 0);
@@ -801,6 +835,8 @@ int odi_gpon_verb(const char *verb, const char *arg)
 			odi_gpon_fsm_inst.state = ODI_GPON_STATE_O2;
 			odi_gpon_fsm_inst.onu_id = 0U;
 			odi_gpon_booted = true;
+			/* The block is set up: the counter sampler starts. */
+			mod_timer(&odi_gpon_ctr_timer, jiffies + msecs_to_jiffies(ODI_GPON_CTR_PERIOD_MS));
 		} else {
 			odi_gpon_verb_activate(&odi_gpon_fsm_inst);
 		}
@@ -904,6 +940,28 @@ void odi_gpon_ploam_ring_get(struct odi_gpon_ploam_entry *ring, unsigned int *co
 }
 
 /* ---- /proc/odi_gpon ---------------------------------------------------- */
+
+static void odi_gpon_proc_put(void *ctx, const char *line)
+{
+	seq_puts(ctx, line);
+}
+
+/* The link counters, from a copy taken under the lock: the formatting runs
+ * with interrupts on.
+ */
+static void odi_gpon_proc_show_ctr(struct seq_file *seq)
+{
+	struct odi_gpon_ctr *snap = kmalloc(sizeof(*snap), GFP_KERNEL);
+	unsigned long flags;
+
+	if (!snap)
+		return;
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	*snap = odi_gpon_ctr_inst;
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+	odi_gpon_ctr_show(snap, odi_gpon_proc_put, seq);
+	kfree(snap);
+}
 
 static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 {
@@ -1013,6 +1071,8 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 			   rdbg.multframe, rdbg.inframe);
 	else
 		seq_puts(seq, "ranging_time none\n");
+
+	odi_gpon_proc_show_ctr(seq);
 
 	seq_printf(seq, "ploam_ring %u entries\n", count);
 	for (i = 0; i < count && i < ODI_GPON_PLOAM_RING_LEN; i++) {

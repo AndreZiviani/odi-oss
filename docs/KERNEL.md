@@ -303,7 +303,7 @@ and GPON hardware are driven.
 | `odi_nic.c` | the CPU-port Ethernet DMA engine (rings, NAPI, TX/RX) |
 | `odi_switch.c`, `odi_switch_{tbl,dal,cmd}.c` | the switch fabric: MMIO map, indirect table access, the OMCI command dispatch `omcid` drives it through |
 | `odi_switch_l2.c` | the L2 lookup table: row readback and the valid-row walk (the MAC table), L2 multicast add/delete (igmpd) |
-| `odi_gpon*.c` | the GPON MAC block: the O1–O7 activation state machine and PLOAM codec (ITU-T G.984.3), register leaves, the interrupt handler, and the switch interrupt line, whose one consumer it is |
+| `odi_gpon*.c` | the GPON MAC block: the O1–O7 activation state machine and PLOAM codec (ITU-T G.984.3), register leaves, the interrupt handler, the switch interrupt line, whose one consumer it is, and the link counters (`odi_gpon_ctr.c`, below) |
 | `odi_omci.c` | the netlink transport that carries OMCI frames between the kernel and `omcid` |
 | `odi_board.c`, `odi_board_data.c` | board-init: LED and I2C core bring-up, an ordered 88-write replay built into the kernel (it runs before any filesystem) |
 | `odi_init.c`, `odi_switch_sdkinit.c`, `odi_gpon_init.c` | `/proc/odi_init`, the SDK-init and PON verbs rcS writes, and the register replays behind them |
@@ -391,6 +391,51 @@ registers for a redirect type or sends a driver command is refused unless
 the sender has `CAP_NET_ADMIN` (`netlink_capable()`), so only root can
 answer the OLT or drive the switch
 through it.
+
+### The GPON link counters
+
+The GPON MAC counts what happens on the line in 43 counters, in three
+banks: the downstream framer block at `0x701180`-`0x7011c8` (BIP errors,
+FEC corrections, PLend, BWmap, PLOAMd and GEM counts), the downstream GEM
+counters behind the `DS_GEM_MISC_SEL` selector (Ethernet frames, FCS
+errors, OMCI), and the upstream ones behind `USF_MISC_SEL` (bursts, PLOAMu,
+DBRu, GEM frames and bytes). Every one **clears when it is read** and stays
+at all ones once full: a second read 10 s after a first comes back small
+(observed on ISP2), and a counter never read since the block was reset
+reads `0xffffffff`. Several registers carry two counts in 16-bit halves
+(one in an 8/8/16 split), so a register is read once and split, never read
+per field.
+
+A clear-on-read counter is only sound with one reader, so `odi_gpon_ctr.c`
+is it. A timer runs it once a second from the boot `gponact` on, under
+`odi_gpon_lock`, and it adds each read into a 64-bit total; a read of all
+ones adds what it read and counts a saturated sample, since that second
+lost counts. The first sample only clears. One second keeps every 32-bit
+count far from full at line rate; a 16-bit upstream GEM frame count fills
+above 65535 frames a second, which the saturated count shows. The same
+sample records the DS and US FEC state, the superframe count and the time
+spent in each ONU state; the transition note counts every ONU state
+change by state left and entered. The LOS, LOF and LOM bits of
+`DSF_ALARM_STATE` are counted from every reading of the register, the
+sample's and each of the line check's (every 100 ms while the ONU is
+activated, and at every interrupt): a bit set that was clear at the
+previous reading is an event, and the time from one reading to the next
+is added to each alarm set at the first. So a loss is timed to the line
+poll while it runs, and to the second after a `gpondeact`.
+
+The REI the BER timer sends carries `DSF_BIP_ERR_BLOCKS` since the last
+REI, and that register is one of these: the BER timer takes a sample
+first and hands over the blocks counted in O5 since its last REI, so the
+REI and the totals share the one read. A `diag register get` or `memprobe`
+read of any of these registers by hand takes its count away from both.
+
+`/proc/odi_gpon` prints the totals (`docs/TOOLS.md`, "/proc/odi_gpon")
+from a copy taken under the lock; `metricsd` exports them.
+`test/odi_gpon_ctr_test.c` runs the sampler against a register model that
+clears on read: one read per register per sample, the field split,
+accumulation past 2^32, saturation, the REI hand-over, the alarm and state
+times across a wrapping clock, and the `/proc` lines against
+`test/fixtures/odi_gpon_ctr.txt`.
 
 ### The NIC
 

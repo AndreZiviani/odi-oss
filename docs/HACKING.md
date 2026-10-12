@@ -1047,7 +1047,7 @@ read side.
 | `/proc/odi_wdt/register` | `odi_wdt.c:632` | `"<name> <deadline_s>"`: register or update a watchdog client (rcS does this once per client at boot) | -- | prod |
 | `/proc/odi_wdt/ping` | `odi_wdt.c:660` | `"<name>"`: a registered client's own ping; arms its deadline on the first call | -- | prod (omcid, every 15 s: `src/omci/respond/main.c`, `wdt_ping()`) |
 | `/proc/odi_wdt/clients` | `odi_wdt.c:683` | none | one line per client: `name=... deadline=... armed=... last_ping_age=...` | dev (debugging) |
-| `/proc/odi_gpon` | `odi_gpon.c:786` | none | ONU state, ONU id, PLOAM counters, serial | prod (`diag` reads it for the exporter; its format is an interface) |
+| `/proc/odi_gpon` | `odi_gpon.c:786` | none | ONU state, ONU id, PLOAM counters, serial, the GPON link counters and alarm and state times (`docs/TOOLS.md`) | prod (`diag`, `omcid` and `metricsd` read it; its format is an interface) |
 | `/proc/odi_ramlog_prev`, `_raw` | `odi_ramlog.c:635` | none | the previous boot's ramlog (root only) | prod (debug aid) |
 | `/dev/odi_sw` | `odi_reg.c:191` | ioctls `REG_SET`, `L2_MC_ADD`/`DEL` | ioctls `REG_GET`, `MIB_GET`, `DDM_GET`, `L2_GET`/`NEXT`, `L2_MODE` (`odi_reg.h:118`) | prod |
 
