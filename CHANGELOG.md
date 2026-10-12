@@ -23,6 +23,19 @@ listed here.
   logged as an error with its entry, and the clean runs once more.
   `docs/SWITCH.md`, "GPON boot init". Not run on a stick yet.
 
+- ci: the pull request wall time drops from about 13 minutes to a few. The
+  `test` job is split into `lint`, `host`, `diag` and an `omci` matrix with
+  one job per OMCI suite (`qemu`, `drv`, `resume`, `events`, `swdl`, `vlan`,
+  `reload`), all side by side; every check still runs. `make test-omci`
+  still runs all the suites, now through one target each
+  (`make test-omci-<suite>`) after `make test-omci-build`, which builds only
+  omcli and omcid. The qemu-test.sh and events-test.sh harnesses used
+  `kill %1`, which a non-interactive `sh` rejects ("No such process"), so
+  the daemons were never killed: each `wait` sat out the daemon idle exit
+  (`-w`), 4.5 minutes in qemu-test.sh alone. They now kill the pid they
+  started; as a result the respawn check really does `kill -9` the daemon,
+  which it did not before. shellcheck is taken from the runner image.
+
 - diag-bundle: the bundle collects the optics module under `module/`, to
   tell which laser driver a stick has and what state its calibration is
   in: A0h whole, A2h with the page select as found, and in `chip.txt` the

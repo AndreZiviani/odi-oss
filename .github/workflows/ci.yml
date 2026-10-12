@@ -1,6 +1,6 @@
 name: ci
 
-# Pull requests and pushes to main run the tests: lint, the host-side
+# Pull requests and pushes to main run the tests, as parallel jobs: lint, the host-side
 # tests, diag with the exporter contract, and the OMCI daemon under qemu
 # (which builds the binaries it runs), a clean-build check (fetch and
 # verify the pinned kernel tree, build src, then confirm `make image` fails
@@ -57,24 +57,54 @@ jobs:
             exit 1
           fi
 
-  test:
+  # Four jobs side by side instead of one job running four steps: the
+  # slowest of them, not their sum, is the wall time of a pull request.
+  # shellcheck is on the runner image; the install is only a fallback.
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - name: Lint (shellcheck, inline-quote check)
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          command -v shellcheck >/dev/null || {
+            sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          }
           make lint
+
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
 
       - name: Host-side tests
         run: make test-host
 
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
       - name: diag, including the exporter contract under qemu
         run: make test-diag
 
-      - name: OMCI daemon under qemu
-        run: make test-omci
+  # The OMCI daemon under qemu-user, one job per suite (src/omci/*-test.sh,
+  # `make test-omci-<suite>`); `make test-omci` runs them all in one go.
+  # Each job builds only omcli and omcid.
+  omci:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [qemu, drv, resume, events, swdl, vlan, reload]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build omcli and omcid
+        run: make test-omci-build
+
+      - name: "OMCI daemon under qemu: ${{ matrix.suite }}"
+        run: make test-omci-${{ matrix.suite }}
 
   clean-build:
     runs-on: ubuntu-latest
@@ -133,7 +163,7 @@ jobs:
 
   full:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    needs: test
+    needs: [lint, host, diag, omci]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

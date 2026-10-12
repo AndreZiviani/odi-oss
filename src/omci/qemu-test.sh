@@ -31,8 +31,22 @@ check() {
 	fi
 }
 
+# wait_count <file> <fixed string> <count> <seconds>: the string shows at
+# least <count> times within the time (a bounded poll in place of a fixed
+# sleep). Returns 1 on timeout, and the check that follows then fails.
+wait_count() {
+	i=0
+	while [ "$i" -lt $(( $4 * 10 )) ]; do
+		[ "$(grep -c -F -- "$2" "$1")" -ge "$3" ] && return 0
+		sleep 0.1
+		i=$((i + 1))
+	done
+	return 1
+}
+
 $Q respond/build/omcid -w 3 > /tmp/omcid.log 2>&1 &
-sleep 2
+pid=$!
+wait_count /tmp/omcid.log "answering as" 1 10
 
 # A Create for VlanTagFilterData instance 3, carrying one filter entry for
 # VID 10 -- the same VID the captured stick had at that instance, so the
@@ -121,14 +135,15 @@ check "a name that is no class is refused, not read as every class" "$got" \
 
 # The rest needs the capability blob (port map, flow and T-CONT counts), so
 # restart with one captured from a real stick.
-kill %1 2>/dev/null
-wait 2>/dev/null
+kill "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
 sleep 1
 
 CAPS=020000ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000000000000010000000300000002ffffffff000000000000001000000040000000800000000800000000000000100000000f00000440
 
 $Q respond/build/omcid -w 9 -c "$CAPS" > /tmp/omcid2.log 2>&1 &
-sleep 2
+pid=$!
+wait_count /tmp/omcid2.log "answering as" 1 10
 
 got=$($Q cli/build/omcli caps 2>&1 | sed -n '4p')
 check "the capability blob decodes as the stick's does" \
@@ -953,11 +968,12 @@ check "a changed MacLearningDepth sets the single UNI's limit" \
 # respawned omcid logged "the omcicli queue is still omci_app's" -- wrong,
 # since omci_app never runs on this image at all (../README.md): the queue
 # was only ever a previous instance of omcid's own.
-kill -9 %1 2>/dev/null
-wait 2>/dev/null
+kill -9 "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
 
 $Q respond/build/omcid -w 9 -c "$CAPS" > /tmp/omcid3.log 2>&1 &
-sleep 2
+pid=$!
+wait_count /tmp/omcid3.log "answering as" 1 10
 
 got=$(grep -c 'still omci_app' /tmp/omcid3.log)
 check "a respawned omcid does not treat the stale queue as a stranger's" \
@@ -990,11 +1006,12 @@ check "and it is the real vendor-format srvflow dump, not silence" "$got" "0 ser
 # A fresh daemon, no config store (no manual tag): bridge 1 with the UNI
 # 0x0101 and a GEM-side port 47/0012 onto GEM IW TP 3, GEM 1000, whose
 # class 84 row lists VID 100 priority 0 and VID 200 priority 5.
-kill %1 2>/dev/null
-wait 2>/dev/null
+kill "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
 rm -f /var/config/lastgood.xml /var/config/lastgood_hs.xml
 $Q respond/build/omcid -w 30 -c "$CAPS" > /tmp/omcid4.log 2>&1 &
-sleep 2
+pid=$!
+wait_count /tmp/omcid4.log "answering as" 1 10
 
 f84() {   # f84 <tci> <mt> <class> <inst> <contents hex>: one frame, zero padded
 	c=$5
@@ -1025,7 +1042,7 @@ vid-filter vid 200 pri -1"
 fwdop() {   # fwdop <code>: Set FwdOp, wait for the rebuild, print its rules
 	n=$(wc -l < /tmp/omcid4.log)
 	$Q cli/build/omcli --inject "$(f84 0110 48 0054 0012 "4000$1")" > /dev/null 2>&1
-	sleep 2
+	wait_count /tmp/omcid4.log "bridge connections rebuilt" "$(( $(grep -c -F 'bridge connections rebuilt' /tmp/omcid4.log) + 1 ))" 10
 	rules_since "$n"
 }
 check "0x04: the same, by its other number" "$(fwdop 04)" \
@@ -1102,8 +1119,8 @@ manual-add vid 10 pri 0"
 
 # The daemon log lives inside the container, so keep it when a check fails.
 [ "$fail" -eq 0 ] || cp /tmp/omcid4.log /src/src/omci/qemu-test.log 2>/dev/null || true
-kill %1 2>/dev/null
-wait 2>/dev/null
+kill "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 exit "$fail"

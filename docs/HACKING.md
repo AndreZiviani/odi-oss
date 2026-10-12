@@ -241,7 +241,9 @@ in odi-ui `schema/settings.tsv` and `docs/SETTINGS.md` together.
 ### What CI runs
 
 `.github/workflows/ci.yml`: on pull requests and pushes to `main`, `make
-lint`, `make test-host`, `make test-diag` and `make test-omci`. On release
+lint`, `make test-host`, `make test-diag` and `make test-omci`, each as its
+own parallel job; `test-omci` is a matrix with one job per suite
+(`make test-omci-<suite>`, after `make test-omci-build`). On release
 tags (`v*`, `odi-oss-*`) and manual runs it adds `make src` on its own. The
 toolchain, kernel and image are **not** built in CI: 25 minutes of compiling
 and nothing in them runs without a stick. Build the kernel yourself before

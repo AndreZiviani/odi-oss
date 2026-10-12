@@ -53,6 +53,7 @@ log=/tmp/omcid-events.log
 # The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon lists them.
 printf 'alloc_ids 5 282 794 1050 1306 538\n' > /tmp/events-gpon
 $Q respond/build/omcid -w 8 -c "$CAPS" -g /tmp/events-gpon > "$log" 2>&1 &
+pid=$!
 sleep 2
 
 # No netlink under qemu, so no ONU state: not O5, so no resume.
@@ -184,8 +185,8 @@ check "a flood is cut at 20 event lines a minute" "$got" "20"
 # read back, so what the first process logged is not logged again. This one
 # starts with OMCI_UNKNOWN_ME_OK=1, which answers unknown entities with
 # success: nothing stored, an empty Get, MIB data sync counting the writes.
-kill -9 %1 2>/dev/null
-wait 2>/dev/null
+kill -9 "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
 printf 'SYSLOG_SERVER=\nOMCI_UNKNOWN_ME_OK=1\n' > /var/config/odi.conf
 log2=/tmp/omcid-events2.log
 $Q respond/build/omcid -w 3 -c "$CAPS" > "$log2" 2>&1 &
@@ -226,7 +227,7 @@ check "nothing is stored, and MIB data sync counts the faked writes" \
       "rows=0 mib_data_sync=3"
 [ "$fail" -eq 0 ] || cp "$log2" /src/src/omci/events-test2.log 2>/dev/null || true
 kill "$pid2" 2>/dev/null
-wait 2>/dev/null
+wait "$pid2" 2>/dev/null
 rm -f /var/config/odi.conf
 
 if [ "$fail" -eq 0 ]; then echo "events-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
