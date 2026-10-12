@@ -378,8 +378,8 @@ the GPON interrupt path. `odi_switch.c` has the full comment; in short:
 
 The order is `odi_switch_lock -> odi_i2c_lock`, the i2c core's bus lock
 `-> odi_i2c_lock`, `odi_switch_lock ->
-odi_gpon_lock -> odi_switch_dsf_lock` and, from the hard IRQ,
-`odi_gpon_lock -> odi_switch_dsf_lock`; the host mock
+odi_gpon_lock -> odi_switch_dsf_lock` and, from the hard IRQ and the
+GPON timers, `odi_gpon_lock -> odi_switch_dsf_lock`; the host mock
 aborts on a recursive acquire or on releasing a lock not held.
 
 ### The OMCI netlink socket needs `CAP_NET_ADMIN`

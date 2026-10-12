@@ -89,6 +89,34 @@ static void odi_gpon_fsm_send_password(const struct odi_gpon_fsm *fsm,
 	ops->send_us_ploam(ctx, &reply);
 }
 
+/* The ONU-ID this FSM holds (from O4 on) discarded: what Deactivate_ONU-ID
+ * does (clause 9.2.3.5, "Effect of receipt": the ONU-ID, OMCI Port-ID and
+ * Alloc-IDs are discarded), and what every fall from O4, O5 or O6 back to
+ * O1 or O2 implies, since the next ONU-ID comes from a new Assign_ONU-ID in
+ * O3. The leaf (odi_gpon_hw.c, hw_set_onu_id()) also takes down the
+ * Alloc-ID and OMCC port rows tied to it, so the next activation starts
+ * from empty tables. Written as the broadcast ID, see
+ * odi_gpon_fsm_do_activate().
+ */
+static void odi_gpon_fsm_discard_onu_id(struct odi_gpon_fsm *fsm,
+					 const struct odi_gpon_fsm_ops *ops, void *ctx)
+{
+	fsm->onu_id = 0;
+	ops->set_onu_id(ctx, ODI_GPON_ONU_ID_BROADCAST);
+}
+
+/* Back to Initial (O1) after a loss of signal or a TO2 expiry: the laser
+ * gate closes as it does on ACTIVATE, and opens again on the O1 -> O2
+ * PSync row (odi_gpon_fsm_do_los_clear()).
+ */
+static void odi_gpon_fsm_enter_o1(struct odi_gpon_fsm *fsm, const struct odi_gpon_fsm_ops *ops,
+				   void *ctx)
+{
+	ops->laser_enable(ctx, 0);
+	fsm->state = ODI_GPON_STATE_O1;
+	ops->set_state(ctx, ODI_GPON_STATE_O1);
+}
+
 void odi_gpon_fsm_init(struct odi_gpon_fsm *fsm)
 {
 	memset(fsm, 0, sizeof(*fsm));
@@ -156,14 +184,14 @@ static void odi_gpon_fsm_apply_deactivate(struct odi_gpon_fsm *fsm,
 		ops->stop_to2(ctx);
 
 	ops->laser_enable(ctx, 0);
-	fsm->onu_id = 0;
-	ops->set_onu_id(ctx, ODI_GPON_ONU_ID_BROADCAST);	/* see odi_gpon_fsm_do_activate()'s own comment */
+	odi_gpon_fsm_discard_onu_id(fsm, ops, ctx);
 	fsm->state = ODI_GPON_STATE_O2;
 	ops->set_state(ctx, ODI_GPON_STATE_O2);
 }
 
 /* Table 10-1, "Timer TO1 expires" row: Serial_Number(O3) and Ranging(O4)
- * both => O2.
+ * both => O2. From O4 the ONU-ID assigned in O3 is discarded: the attempt
+ * that got it was abandoned, and the next one starts at Assign_ONU-ID.
  */
 static void odi_gpon_fsm_do_to1_expire(struct odi_gpon_fsm *fsm, const struct odi_gpon_fsm_ops *ops,
 					void *ctx)
@@ -172,13 +200,16 @@ static void odi_gpon_fsm_do_to1_expire(struct odi_gpon_fsm *fsm, const struct od
 		return;	/* stale/unrelated expiry, nothing to do */
 
 	ops->stop_to1(ctx);
+	if (fsm->state == ODI_GPON_STATE_O4)
+		odi_gpon_fsm_discard_onu_id(fsm, ops, ctx);
 	fsm->state = ODI_GPON_STATE_O2;
 	ops->set_state(ctx, ODI_GPON_STATE_O2);
 }
 
 /* Table 10-1, "Timer TO2 expires" row: POPUP(O6) => O1 (not O5 -- the ONU
  * could not reacquire sync in time, so it falls all the way back to
- * Initial, clause 10.2.2 f)).
+ * Initial, clause 10.2.2 f)). It ranges again from O2, so the ONU-ID goes.
+ * The port link went down on entering O6 and stays down.
  */
 static void odi_gpon_fsm_do_to2_expire(struct odi_gpon_fsm *fsm, const struct odi_gpon_fsm_ops *ops,
 					void *ctx)
@@ -187,29 +218,39 @@ static void odi_gpon_fsm_do_to2_expire(struct odi_gpon_fsm *fsm, const struct od
 		return;
 
 	ops->stop_to2(ctx);
-	fsm->state = ODI_GPON_STATE_O1;
-	ops->set_state(ctx, ODI_GPON_STATE_O1);
+	odi_gpon_fsm_discard_onu_id(fsm, ops, ctx);
+	odi_gpon_fsm_enter_o1(fsm, ops, ctx);
 }
 
 /* Table 10-1, "ONU detects LOS or LOF" row: Standby(O2) => O1;
- * Serial_Number(O3) stops TO1 => O1; Ranging(O4) stops TO1 => O1;
- * Operation(O5) ceases upstream tx, starts TO2, => O6. O1/O6/O7 are
- * dashes (O6's own LOS handling is the PSync-recovery row instead, see
- * odi_gpon_fsm_do_los_clear()).
+ * Serial_Number(O3) stops TO1 => O1; Ranging(O4) stops TO1 => O1, its
+ * ONU-ID discarded; Operation(O5) ceases upstream tx, starts TO2, => O6.
+ * O1/O6/O7 are dashes (O6's own LOS handling is the PSync-recovery row
+ * instead, see odi_gpon_fsm_do_los_clear()).
+ *
+ * "Ceases upstream transmission" is the O6 state write: with the light or
+ * the framing gone there is no bandwidth map, so no grant to answer.
+ * Whether the MAC also refuses a grant on the O6 state alone, once the
+ * light is back and before TO2 runs out, is not decoded, and neither is
+ * any register that gates the transmitter by itself (laser_enable() is a
+ * no-op leaf, odi_gpon_hw.c). The port link goes down too, so the switch
+ * stops queueing frames for the PON while nothing can carry them.
  */
 static void odi_gpon_fsm_do_los(struct odi_gpon_fsm *fsm, const struct odi_gpon_fsm_ops *ops,
 				 void *ctx)
 {
 	switch (fsm->state) {
 	case ODI_GPON_STATE_O2:
-		fsm->state = ODI_GPON_STATE_O1;
-		ops->set_state(ctx, ODI_GPON_STATE_O1);
+		odi_gpon_fsm_enter_o1(fsm, ops, ctx);
 		break;
 	case ODI_GPON_STATE_O3:
+		ops->stop_to1(ctx);
+		odi_gpon_fsm_enter_o1(fsm, ops, ctx);
+		break;
 	case ODI_GPON_STATE_O4:
 		ops->stop_to1(ctx);
-		fsm->state = ODI_GPON_STATE_O1;
-		ops->set_state(ctx, ODI_GPON_STATE_O1);
+		odi_gpon_fsm_discard_onu_id(fsm, ops, ctx);
+		odi_gpon_fsm_enter_o1(fsm, ops, ctx);
 		break;
 	case ODI_GPON_STATE_O5:
 		ops->link_force_up(ctx, 0);
@@ -276,6 +317,12 @@ static int odi_gpon_fsm_handle_disable_sn(struct odi_gpon_fsm *fsm,
 			ops->link_force_up(ctx, 0);
 		odi_gpon_fsm_stop_timers_for_state(fsm, ops, ctx);
 		ops->laser_enable(ctx, 0);
+		/* Re-enable "re-examines" every parameter, the ONU-ID
+		 * included (clause 10.2.2 g)): the one held from O4 on goes.
+		 */
+		if (fsm->state == ODI_GPON_STATE_O4 || fsm->state == ODI_GPON_STATE_O5 ||
+		    fsm->state == ODI_GPON_STATE_O6)
+			odi_gpon_fsm_discard_onu_id(fsm, ops, ctx);
 		fsm->state = ODI_GPON_STATE_O7;
 		ops->set_state(ctx, ODI_GPON_STATE_O7);
 	} else if (dsn.code == ODI_GPON_DISABLE_SN_ENABLE) {
@@ -421,9 +468,14 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 				fsm->state = ODI_GPON_STATE_O4;
 				ops->set_state(ctx, ODI_GPON_STATE_O4);
 			} else if (msg->onu_id == fsm->onu_id) {
+				/* Back to Operation with everything O5 had: the
+				 * link that entering O6 forced down comes back up,
+				 * in the O4 -> O5 order (state, then link).
+				 */
 				ops->stop_to2(ctx);
 				fsm->state = ODI_GPON_STATE_O5;
 				ops->set_state(ctx, ODI_GPON_STATE_O5);
+				ops->link_force_up(ctx, 1);
 			}
 		}
 		break;
@@ -499,6 +551,29 @@ void odi_gpon_fsm_cause(enum odi_gpon_event event, const struct odi_gpon_ploam *
 		out->side = "olt";
 		break;
 	}
+}
+
+int odi_gpon_fsm_line_event(const struct odi_gpon_fsm *fsm, int alarm, enum odi_gpon_event *event)
+{
+	switch (fsm->state) {
+	case ODI_GPON_STATE_O1:
+		if (alarm)
+			return 0;
+		*event = ODI_GPON_EVENT_LOS_CLEAR;
+		return 1;
+	case ODI_GPON_STATE_O2:
+	case ODI_GPON_STATE_O3:
+	case ODI_GPON_STATE_O4:
+	case ODI_GPON_STATE_O5:
+		if (!alarm)
+			return 0;
+		*event = ODI_GPON_EVENT_LOS;
+		return 1;
+	case ODI_GPON_STATE_O6:
+	case ODI_GPON_STATE_O7:
+		break;
+	}
+	return 0;
 }
 
 void odi_gpon_fsm_handle_event(struct odi_gpon_fsm *fsm, const struct odi_gpon_fsm_ops *ops,

@@ -190,6 +190,8 @@ static void hw_set_state(void *ctx, enum odi_gpon_state state)
 	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF, reg);
 }
 
+static void hw_release_rows(void);
+
 /* Both hardware ONU-ID registers get the ONU-ID value written before the
  * FSM state transition is written -- this leaf, called before set_state()
  * by the O3 handler in odi_gpon_fsm.c, matches that ordering by
@@ -197,17 +199,27 @@ static void hw_set_state(void *ctx, enum odi_gpon_state state)
  * CAM row: react.txt L330 shows the same instant the
  * ONU-ID is assigned, row 16 of the Alloc-ID table is written with that
  * same ONU-ID value (the G.984.3 convention that the default/OMCC
- * Alloc-ID equals the ONU-ID). Only for a real (nonzero) assignment --
- * the O1/O2 reset paths call this with 0 and do not touch the CAM (no
- * capture evidence either way for a protocol-driven Deactivate_ONU-ID
- * own CAM footprint; the administrative gpondeact verb's own teardown,
- * which IS evidenced, goes through odi_gpon_verb_deactivate() instead).
+ * Alloc-ID equals the ONU-ID).
+ *
+ * The broadcast ID is the FSM discarding the ONU-ID it held (odi_gpon_fsm.h,
+ * set_onu_id). G.984.3 clause 9.2.3.5 discards the OMCI Port-ID and the
+ * Alloc-IDs with it, so every row this layer wrote for the activation
+ * goes first, by the same teardown gpondeact makes (hw_release_rows()),
+ * which the gpondeact capture evidences row for row. A row left valid
+ * would keep this ONU answering grants for an Alloc-ID the OLT is free to
+ * give another ONU once this one is gone; the next activation writes
+ * every row again (Assign_ONU-ID, Assign_Alloc-ID, Configure_Port-ID).
+ * With nothing written yet (the O1 reset of gponact after gpondeact) it
+ * writes nothing.
  */
 static void hw_set_onu_id(void *ctx, uint8_t onu_id)
 {
 	uint32_t reg;
 
 	(void)ctx;
+
+	if (onu_id == ODI_GPON_ONU_ID_BROADCAST)
+		hw_release_rows();
 
 	reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
 	reg = ODI_GPON_DSF_ONU_STATE_ASSIGNED_ONU_ID_SET(reg, onu_id);
@@ -916,34 +928,19 @@ static void hw_gem_port_delete(unsigned int row)
 	odi_reg_write(ODI_SW_DSF_GEM_CAM_CTL_OFF, ind);
 }
 
-void odi_gpon_verb_deactivate(struct odi_gpon_fsm *fsm)
+/* Every Alloc-ID CAM row this layer wrote (the default/OMCC row included)
+ * and the OMCC GEM port row with its flow type, upstream map and
+ * stream-valid gate, deleted in the gpondeact capture order (react.txt
+ * L10-37). These are DSF state the process-context GEM flow path shares:
+ * odi_switch_dsf_lock (odi_switch.c), released again before the caller
+ * goes on to hw_set_onu_id() register writes, since a real ONU-ID write
+ * reaches odi_switch_gpon_alloc_write(), which takes it itself.
+ */
+static void hw_release_rows(void)
 {
 	unsigned long flags;
-	uint32_t reg;
 	unsigned int row;
 
-	odi_reg_write(ODI_GPON_PONMAC_IRQ_ENABLE_OFF, 0U);
-	odi_reg_write(ODI_GPON_DSF_IRQ_ENABLE_OFF, 0U);
-	odi_reg_write(ODI_GPON_DSF_IRQ_ENABLE_OFF, 0U);
-	odi_reg_write(ODI_GPON_PONMAC_IRQ_ENABLE_OFF, 0x22U);
-
-	/* State O5 -> a transient value (state + 1) -> O1, exactly as
-	 * captured (react.txt L7-9: 0x1a05 -> 0x1a06 -> 0x1a01) -- the
-	 * transient write purpose is not resolved (unexplained); reproduced
-	 * as observed, not silently smoothed over into a single write.
-	 */
-	reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
-	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF,
-		       ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)fsm->state + 1U));
-	reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
-	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF,
-		       ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)ODI_GPON_STATE_O1));
-
-	/* The CAM deletes and the DSF_GEM_FLOW_TYPE clear are DSF state the
-	 * process-context GEM flow path shares: odi_switch_dsf_lock
-	 * (odi_switch.c), released before hw_set_onu_id() below, which can
-	 * reach odi_switch_gpon_alloc_write() and take it itself.
-	 */
 	spin_lock_irqsave(&odi_switch_dsf_lock, flags);
 	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++) {
 		if (odi_gpon_hw.alloc_used & (1UL << row))
@@ -962,7 +959,30 @@ void odi_gpon_verb_deactivate(struct odi_gpon_fsm *fsm)
 		odi_gpon_hw.gem_port_active = 0;
 	}
 	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
+}
 
+void odi_gpon_verb_deactivate(struct odi_gpon_fsm *fsm)
+{
+	uint32_t reg;
+
+	odi_reg_write(ODI_GPON_PONMAC_IRQ_ENABLE_OFF, 0U);
+	odi_reg_write(ODI_GPON_DSF_IRQ_ENABLE_OFF, 0U);
+	odi_reg_write(ODI_GPON_DSF_IRQ_ENABLE_OFF, 0U);
+	odi_reg_write(ODI_GPON_PONMAC_IRQ_ENABLE_OFF, 0x22U);
+
+	/* State O5 -> a transient value (state + 1) -> O1, exactly as
+	 * captured (react.txt L7-9: 0x1a05 -> 0x1a06 -> 0x1a01) -- the
+	 * transient write purpose is not resolved (unexplained); reproduced
+	 * as observed, not silently smoothed over into a single write.
+	 */
+	reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
+	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF,
+		       ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)fsm->state + 1U));
+	reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
+	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF,
+		       ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)ODI_GPON_STATE_O1));
+
+	/* The row teardown (hw_release_rows()), then the ONU-ID registers. */
 	hw_set_onu_id(NULL, ODI_GPON_ONU_ID_BROADCAST);
 
 	fsm->state = ODI_GPON_STATE_O1;

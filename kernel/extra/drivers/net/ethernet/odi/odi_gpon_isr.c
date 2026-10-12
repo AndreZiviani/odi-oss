@@ -3,7 +3,9 @@
  * odi_gpon_isr.c -- odi_gpon_isr_poll(), the top-level GPON MAC block
  * interrupt servicing entry point, against G.984.3 clause 5.8 (GTC
  * framing): mask the top interrupt, read the aggregate status, drain and
- * dispatch every queued downstream PLOAM message, restore the mask. This
+ * dispatch every queued downstream PLOAM message, restore the mask; and
+ * odi_gpon_line_sample(), the LOS/LOF level the interrupt and the timers
+ * feed to the FSM. This
  * is the only place a PLOAM message type dictates register work beyond
  * what struct odi_gpon_fsm_ops covers -- odi_gpon_fsm.c's own header comment
  * lists Acknowledge/GEM-port/Alloc-ID handling as deliberately out of the
@@ -191,6 +193,42 @@ unsigned int odi_gpon_isr_poll(struct odi_gpon_fsm *fsm, struct odi_gpon_isr_pol
 	}
 
 	return n;
+}
+
+/* ---- The line alarm (odi_gpon_drv.h) ----------------------------------- */
+
+/* DSF_ALARM_STATE holds the framer own live alarm levels; on a working
+ * line both ISPs read LOS and LOF clear in O5, and a fibre pull sets LOS
+ * for as long as the light is gone. A sample is acted on as read, with no
+ * software debounce on top: G.984.3 gives an intermittent loss its own
+ * window, O6 and TO2, and a filter in front of it would only delay
+ * O5 -> O6. LOM is not fed: Table 10-1 acts on LOS and LOF alone. A plain
+ * register read, side effect free, unlike DSF_IRQ_EVENT, whose read would
+ * take pending bits from the interrupt.
+ */
+void odi_gpon_line_sample(struct odi_gpon_fsm *fsm, int watch, struct odi_gpon_line_sample *out)
+{
+	uint32_t alarms = odi_reg_read(ODI_GPON_DSF_ALARM_STATE_OFF);
+	int down = (alarms & (ODI_GPON_DSF_ALARM_STATE_LOS_NOW |
+			      ODI_GPON_DSF_ALARM_STATE_LOF_NOW)) != 0U;
+	enum odi_gpon_event event;
+
+	out->alarms = alarms;
+	out->fed = 0;
+	out->event = ODI_GPON_EVENT_LOS;
+	out->cause = "";
+	if (!watch || !odi_gpon_fsm_line_event(fsm, down, &event))
+		return;
+
+	odi_gpon_fsm_handle_event(fsm, odi_gpon_hw_ops(), NULL, event, NULL);
+	out->fed = 1;
+	out->event = event;
+	if (event == ODI_GPON_EVENT_LOS_CLEAR)
+		out->cause = "los_cleared";
+	else if (alarms & ODI_GPON_DSF_ALARM_STATE_LOS_NOW)
+		out->cause = "los";
+	else
+		out->cause = "lof";
 }
 
 /* ---- The switch interrupt line (odi_gpon_drv.h) ----------------------- */

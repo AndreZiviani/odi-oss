@@ -11,20 +11,21 @@
  * Three independent pieces live in this one file:
  *
  *  - The one struct odi_gpon_fsm this driver runs, one spinlock
- *    serialising every touch of it (the hard-IRQ handler, the three kernel
+ *    serialising every touch of it (the hard-IRQ handler, the four kernel
  *    timers below, and every /proc/odi_init verb), and the switch
  *    interrupt line: the GPON block is its one consumer, so this file
  *    requests it at boot, with every source masked, and gpondrv unmasks the
  *    GPON source (odi_gpon_chip_irq_*(), odi_gpon_isr.c).
  *
- *  - Three kernel timers (TO1, TO2, the BER-interval/REI send) armed and
- *    disarmed reactively: after every call that can move the FSM (the ISR,
- *    gponact/gpondeact, and the timers' own expiry handlers), this file
- *    re-evaluates the current state and (re)arms exactly the timer(s) that
- *    state implies, rather than threading an arm/disarm call through
- *    struct odi_gpon_fsm_ops (whose own start_to1/stop_to1/etc leaves are
- *    deliberate no-ops, odi_gpon_hw.c's own comment -- arming/disarming a
- *    real kernel timer is this file's own concern, not a register leaf).
+ *  - Four kernel timers (TO1, TO2, the BER-interval/REI send, the line
+ *    alarm poll) armed and disarmed reactively: after every call that can
+ *    move the FSM (the ISR, gponact/gpondeact, and the timers' own expiry
+ *    handlers), this file re-evaluates the current state and arms exactly
+ *    the timer(s) that state implies, rather than threading an arm/disarm
+ *    call through struct odi_gpon_fsm_ops (whose own start_to1/stop_to1/
+ *    etc leaves are deliberate no-ops, odi_gpon_hw.c's own comment --
+ *    arming/disarming a real kernel timer is this file's own concern, not
+ *    a register leaf).
  *    The BER-interval period itself
  *    (frames, from the OLT's own BER_Interval PLOAM) and the REI send
  *    (odi_gpon_hw_send_us_ploam(), the BIP-error-count register read) are
@@ -36,12 +37,12 @@
  *    number, EqD, PLOAM rx/tx totals AND per-type counts, the REI count,
  *    TO1/TO2 expiry counts, the interrupt count and the ISR-attach result
  *    (irq_attached/isr_rc/imr_rc, see odi_gpon_irq_attach()), the last DS
- *    LOS status-bit read, and the last 32 PLOAM messages in either
+ *    LOS edge seen, and the last 32 PLOAM messages in either
  *    direction with an uptime timestamp -- filled from odi_gpon_drv.h
  *    getters plus this file's own ring buffer (odi_gpon_hw_set_ploam_log(),
  *    since the core stays kernel-clock-independent, see above).
  *
- * odi_gpon_init() -- the one-time bring-up (FSM/PLOAM state, the three
+ * odi_gpon_init() -- the one-time bring-up (FSM/PLOAM state, the four
  * timers) -- runs from this file's module_init(), at kernel boot, before
  * rcS writes the first PON-step verb; so does the line request. The GPON
  * source is unmasked later, by gpondrv, where a stock boot capture shows
@@ -76,10 +77,10 @@
 
 /* The link event lines (docs/TOOLS.md, "Link and provisioning events"): one
  * "odi_gpon: event=..." line of key=value pairs per ONU state transition and
- * per LOS edge, KERN_NOTICE when the link goes (leaving O5, entering O7, LOS
- * asserted) and KERN_INFO otherwise. klogd hands them to syslogd, and
- * SYSLOG_SERVER sends them off the stick: nothing of our own between the
- * printk and the collector. Their own ratelimit rather than the shared
+ * per LOS or LOF edge, KERN_NOTICE when the link goes (leaving O5, entering
+ * O7, LOS or LOF asserted) and KERN_INFO otherwise. klogd hands them to
+ * syslogd, and SYSLOG_SERVER sends them off the stick: nothing of our own
+ * between the printk and the collector. Their own ratelimit rather than the shared
  * printk one: 30 a minute is three times what a flapping ONU produces
  * (O2 -> O3 -> O2 on every 10 s TO1) and still bounds a PLOAM storm, and
  * ___ratelimit() itself prints how many it dropped.
@@ -87,6 +88,7 @@
 static DEFINE_RATELIMIT_STATE(odi_gpon_event_rs, 60 * HZ, 30);
 static unsigned long odi_gpon_state_since;	/* jiffies of the last transition */
 static unsigned long odi_gpon_los_since;	/* jiffies of the last LOS rising edge */
+static unsigned long odi_gpon_lof_since;	/* jiffies of the last LOF rising edge */
 /* The downstream PLOAM the current interrupt drained, if any: the cause of
  * whatever transition that interrupt makes (odi_gpon_isr_poll() drains at
  * most one message per call).
@@ -103,7 +105,7 @@ static bool odi_gpon_last_ds_valid;
 #include <asm/mach-rtl8686/rtl8686regs.h>
 #define ODI_GPON_IRQ	RTL8686_VIRQ(RTL8686_IRQ_SWITCH)
 
-/* ---- Driver state: one FSM, one lock, three timers -------------------- */
+/* ---- Driver state: one FSM, one lock, four timers --------------------- */
 
 static struct odi_gpon_fsm odi_gpon_fsm_inst;
 static DEFINE_SPINLOCK(odi_gpon_lock);
@@ -122,9 +124,32 @@ static bool odi_gpon_booted;
 static struct timer_list odi_gpon_to1_timer;
 static struct timer_list odi_gpon_to2_timer;
 static struct timer_list odi_gpon_ber_timer;
+static struct timer_list odi_gpon_line_timer;
 
 #define ODI_GPON_TO1_MS	10000U	/* G.984.3 clause 10.2.1 recommended initial value */
 #define ODI_GPON_TO2_MS	100U	/* G.984.3 clause 10.2.1 recommended initial value */
+
+/* The line alarm poll (odi_gpon_line_check()). The interrupt samples the
+ * alarm too, and LOS_CHG/LOF_CHG are unmasked, but nothing shows those
+ * interrupts arrive for every loss, and a pulled fibre stops the PLOAM
+ * traffic that raises the others; the BER timer, the one periodic timer
+ * this file had, runs only in O5, only once the OLT sent BER_Interval, and
+ * at the period the OLT picks (10 s on both ISPs), so a loss shorter than
+ * that, ended between two of its samples, was never seen at all, and O1
+ * has no timer to see the light come back. So this timer runs in every
+ * state while the ONU is activated (odi_gpon_line_watch). 100 ms is TO2,
+ * the time G.984.3 gives an ONU to come back from an intermittent loss: a
+ * loss the poll misses is shorter than the window the standard itself
+ * allows for one. Its cost is one register read under the lock per tick.
+ */
+#define ODI_GPON_LINE_POLL_MS	100U
+
+/* Whether the line drives the FSM: set by a gponact that activated the ONU,
+ * cleared by gpondeact. Until then, and after it, the alarm is only read
+ * and logged: an ONU this side stopped stays in O1 when the light comes
+ * back, until the next gponact.
+ */
+static bool odi_gpon_line_watch;
 
 /* 0 = BER timer not armed (no BER_Interval received yet this activation, or
  * not in O5) -- distinct from odi_gpon_hw_get_ber_interval_frames()'s own
@@ -148,6 +173,7 @@ static unsigned int odi_gpon_to2_expiries;
 static unsigned int odi_gpon_rei_count;
 static unsigned long odi_gpon_last_los_ms;	/* 0 = never observed since init */
 static int odi_gpon_last_los_state;		/* the DS LOS status bit, last read */
+static int odi_gpon_last_lof_state;		/* the DS LOF status bit, last read */
 
 /* Spurious-interrupt and per-sub-block last-nonzero-STS bookkeeping,
  * odi_gpon_isr_poll()'s own struct odi_gpon_isr_poll_status out-parameter
@@ -258,19 +284,43 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
 
 /* ---- Timer (re)arming, called with odi_gpon_lock held ----------------- */
 
+/* TO1 and TO2 are armed only when not already pending, so they run from the
+ * state entry and nothing extends them: TO1 bounds O3 and O4 together
+ * (G.984.3 clause 10.2.1, "the overall time an ONU can sojourn in states O3
+ * and O4"), so it is left running across O3 -> O4, and TO2 bounds one stay
+ * in O6. Re-arming them on every call let each interrupt, and now every
+ * line poll, push the deadline back, and a TO the poll keeps moving never
+ * expires. A state left and entered again always passes through a call
+ * here in between (each entry point feeds at most one PLOAM and one line
+ * event), which deletes the timer, so a new entry starts a fresh one.
+ */
 static void odi_gpon_timers_sync(void)
 {
 	enum odi_gpon_state st = odi_gpon_fsm_inst.state;
 
-	if (st == ODI_GPON_STATE_O3 || st == ODI_GPON_STATE_O4)
-		mod_timer(&odi_gpon_to1_timer, jiffies + msecs_to_jiffies(ODI_GPON_TO1_MS));
-	else
+	if (st == ODI_GPON_STATE_O3 || st == ODI_GPON_STATE_O4) {
+		if (!timer_pending(&odi_gpon_to1_timer))
+			mod_timer(&odi_gpon_to1_timer,
+				  jiffies + msecs_to_jiffies(ODI_GPON_TO1_MS));
+	} else {
 		timer_delete(&odi_gpon_to1_timer);
+	}
 
-	if (st == ODI_GPON_STATE_O6)
-		mod_timer(&odi_gpon_to2_timer, jiffies + msecs_to_jiffies(ODI_GPON_TO2_MS));
-	else
+	if (st == ODI_GPON_STATE_O6) {
+		if (!timer_pending(&odi_gpon_to2_timer))
+			mod_timer(&odi_gpon_to2_timer,
+				  jiffies + msecs_to_jiffies(ODI_GPON_TO2_MS));
+	} else {
 		timer_delete(&odi_gpon_to2_timer);
+	}
+
+	if (odi_gpon_line_watch) {
+		if (!timer_pending(&odi_gpon_line_timer))
+			mod_timer(&odi_gpon_line_timer,
+				  jiffies + msecs_to_jiffies(ODI_GPON_LINE_POLL_MS));
+	} else {
+		timer_delete(&odi_gpon_line_timer);
+	}
 
 	if (st == ODI_GPON_STATE_O5) {
 		uint32_t frames = odi_gpon_hw_get_ber_interval_frames();
@@ -388,34 +438,58 @@ static void odi_gpon_note_event(enum odi_gpon_state prev, enum odi_gpon_event ev
 	odi_gpon_note_transition(prev, &cause);
 }
 
-/* The DS LOS status bit, sampled -- from the interrupt and from the BER
- * timer, never polled on a timer of its own. It does NOT drive an FSM
- * LOS/LOS_CLEAR event (odi_gpon_isr_entry() has why); this only reports its
- * edges, as event=los. The BER timer is what catches a fibre pull in O5:
- * with no light there is no downstream PLOAM and no interrupt, but the FSM
- * stays in O5 and that timer keeps running every BER interval (10 s on both
- * ISPs). A plain register read, side-effect free. Called with the lock held.
+/* One alarm bit, its edges as event=<name> lines: state=on with the ONU
+ * state the loss found, state=off with how long it lasted. *last and
+ * *since are that bit own record.
  */
-static void odi_gpon_los_sample(void)
+static void odi_gpon_alarm_edge(const char *name, int now, int *last, unsigned long *since,
+				enum odi_gpon_state st)
 {
-	uint32_t ds_sts = odi_reg_read(ODI_GPON_DSF_ALARM_STATE_OFF);
-	int los = (ds_sts & ODI_GPON_DSF_ALARM_STATE_LOS_NOW) ? 1 : 0;
 	unsigned long secs;
 	unsigned int ms;
 
-	if (los && !odi_gpon_last_los_state) {
-		odi_gpon_last_los_ms = jiffies_to_msecs(jiffies - INITIAL_JIFFIES);
-		odi_gpon_los_since = jiffies;
+	if (now && !*last) {
+		*since = jiffies;
 		if (__ratelimit(&odi_gpon_event_rs))
-			pr_notice("odi_gpon: event=los state=on onu_state=%s\n",
-				  odi_gpon_state_name(odi_gpon_fsm_inst.state));
-	} else if (!los && odi_gpon_last_los_state) {
-		odi_gpon_elapsed(odi_gpon_los_since, &secs, &ms);
+			pr_notice("odi_gpon: event=%s state=on onu_state=%s\n",
+				  name, odi_gpon_state_name(st));
+	} else if (!now && *last) {
+		odi_gpon_elapsed(*since, &secs, &ms);
 		if (__ratelimit(&odi_gpon_event_rs))
-			pr_info("odi_gpon: event=los state=off lasted_s=%lu.%03u onu_state=%s\n",
-				secs, ms, odi_gpon_state_name(odi_gpon_fsm_inst.state));
+			pr_info("odi_gpon: event=%s state=off lasted_s=%lu.%03u onu_state=%s\n",
+				name, secs, ms, odi_gpon_state_name(st));
 	}
-	odi_gpon_last_los_state = los;
+	*last = now;
+}
+
+/* The line alarm, sampled and fed to the FSM (odi_gpon_line_sample(),
+ * odi_gpon_fsm_line_event()): from the interrupt, every timer callback and
+ * the line poll. The LOS and LOF edges are logged with the state the
+ * sample found, before the event=onu_state line of the transition they
+ * cause (cause=los, lof or los_cleared, side=line). Called with the lock
+ * held; the caller then runs odi_gpon_timers_sync(), which arms TO2 on an
+ * O5 -> O6.
+ */
+static void odi_gpon_line_check(void)
+{
+	struct odi_gpon_line_sample smp;
+	enum odi_gpon_state prev = odi_gpon_fsm_inst.state;
+	int los;
+
+	odi_gpon_line_sample(&odi_gpon_fsm_inst, odi_gpon_line_watch, &smp);
+
+	los = (smp.alarms & ODI_GPON_DSF_ALARM_STATE_LOS_NOW) ? 1 : 0;
+	if (los && !odi_gpon_last_los_state)
+		odi_gpon_last_los_ms = jiffies_to_msecs(jiffies - INITIAL_JIFFIES);
+	odi_gpon_alarm_edge("los", los, &odi_gpon_last_los_state, &odi_gpon_los_since, prev);
+	odi_gpon_alarm_edge("lof", (smp.alarms & ODI_GPON_DSF_ALARM_STATE_LOF_NOW) ? 1 : 0,
+			    &odi_gpon_last_lof_state, &odi_gpon_lof_since, prev);
+
+	if (smp.fed) {
+		struct odi_gpon_fsm_cause cause = { smp.cause, "line" };
+
+		odi_gpon_note_transition(prev, &cause);
+	}
 }
 
 /* ---- Timer callbacks --------------------------------------------------- */
@@ -432,6 +506,7 @@ static void odi_gpon_to1_fn(struct timer_list *odi_timer_arg)
 	odi_gpon_fsm_handle_event(&odi_gpon_fsm_inst, odi_gpon_hw_ops(), NULL,
 				   ODI_GPON_EVENT_TO1_EXPIRE, NULL);
 	odi_gpon_note_event(prev, ODI_GPON_EVENT_TO1_EXPIRE, NULL);
+	odi_gpon_line_check();	/* O2 with the light gone goes on to O1 */
 	odi_gpon_timers_sync();
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 }
@@ -448,6 +523,11 @@ static void odi_gpon_to2_fn(struct timer_list *odi_timer_arg)
 	odi_gpon_fsm_handle_event(&odi_gpon_fsm_inst, odi_gpon_hw_ops(), NULL,
 				   ODI_GPON_EVENT_TO2_EXPIRE, NULL);
 	odi_gpon_note_event(prev, ODI_GPON_EVENT_TO2_EXPIRE, NULL);
+	/* The light may have come back inside the O6 window, with no POPUP:
+	 * O1 then goes on to O2 at once, since no LOS edge is left to wait
+	 * for.
+	 */
+	odi_gpon_line_check();
 	odi_gpon_timers_sync();
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 }
@@ -460,8 +540,9 @@ static void odi_gpon_ber_fn(struct timer_list *odi_timer_arg)
 
 	(void)odi_timer_arg;
 	spin_lock_irqsave(&odi_gpon_lock, flags);
-	odi_gpon_los_sample();
+	odi_gpon_line_check();
 	if (odi_gpon_fsm_inst.state != ODI_GPON_STATE_O5) {
+		odi_gpon_timers_sync();	/* a loss just found: TO2 for O6 */
 		spin_unlock_irqrestore(&odi_gpon_lock, flags);
 		return;
 	}
@@ -482,6 +563,17 @@ static void odi_gpon_ber_fn(struct timer_list *odi_timer_arg)
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 }
 
+static void odi_gpon_line_fn(struct timer_list *odi_timer_arg)
+{
+	unsigned long flags;
+
+	(void)odi_timer_arg;
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	odi_gpon_line_check();
+	odi_gpon_timers_sync();	/* re-arms this timer while the line is watched */
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+}
+
 /* ---- ISR ---------------------------------------------------------------
  *
  * odi_gpon_isr_entry() services the GPON block, called by
@@ -498,14 +590,13 @@ static void odi_gpon_isr_entry(void)
 	spin_lock_irqsave(&odi_gpon_lock, flags);
 	odi_gpon_irq_count++;
 
-	/* The DS LOS status bit, for /proc/odi_gpon's "last_los" and the
-	 * event=los line (odi_gpon_los_sample()). This does NOT drive an FSM
-	 * LOS/LOS_CLEAR event (odi_gpon_fsm.h defines those events, but no
-	 * capture ever exercised the real DSF_ALARM_STATE/DLT LOS/LOF
-	 * sequence -- wiring a made-up sequence with zero evidence would be
-	 * worse than leaving O6/POPUP unautomated).
+	/* The line first, then the PLOAM: a loss found here moves the FSM
+	 * before the message is dispatched, so the message meets the state
+	 * the line put the ONU in (O6, where only POPUP, Deactivate_ONU-ID
+	 * and Disable_Serial_Number act; O1, where nothing does), and one
+	 * read as the light comes back meets O2.
 	 */
-	odi_gpon_los_sample();
+	odi_gpon_line_check();
 
 	prev = odi_gpon_fsm_inst.state;
 	odi_gpon_last_ds_valid = false;
@@ -586,6 +677,8 @@ int odi_gpon_init(void)
 	timer_setup(&odi_gpon_to1_timer, odi_gpon_to1_fn, 0);
 	timer_setup(&odi_gpon_to2_timer, odi_gpon_to2_fn, 0);
 	timer_setup(&odi_gpon_ber_timer, odi_gpon_ber_fn, 0);
+	timer_setup(&odi_gpon_line_timer, odi_gpon_line_fn, 0);
+	odi_gpon_line_watch = false;
 
 	/* The line, with every source masked; gpondrv unmasks GPON. */
 	odi_gpon_chip_irq_reset();
@@ -723,6 +816,15 @@ int odi_gpon_verb(const char *verb, const char *arg)
 	} else {
 		rc = -ENOENT;
 	}
+
+	/* An activated ONU follows the line from here on, from the first
+	 * poll ODI_GPON_LINE_POLL_MS later or the first interrupt; a
+	 * deactivated one is left in O1.
+	 */
+	if (!strcmp(verb, "gponact") && rc == 0)
+		odi_gpon_line_watch = true;
+	else if (!strcmp(verb, "gpondeact"))
+		odi_gpon_line_watch = false;
 
 	{
 		/* A verb is this side acting, whatever it does to the state:

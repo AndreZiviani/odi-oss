@@ -54,6 +54,25 @@ struct odi_gpon_isr_poll_status {
  */
 unsigned int odi_gpon_isr_poll(struct odi_gpon_fsm *fsm, struct odi_gpon_isr_poll_status *status);
 
+/* The downstream line alarm, sampled: DSF_ALARM_STATE (0x701008) read once
+ * and its LOS and LOF bits fed to the FSM as one level
+ * (odi_gpon_fsm_line_event()), from the interrupt and from odi_gpon.c own
+ * timers. watch is 0 until gponact and after gpondeact: the line is then
+ * only read, so an ONU this side stopped stays in O1 whatever the light
+ * does. out->alarms is the register as read (LOM and FEC included, for
+ * the event=los/lof lines); out->fed says whether an FSM event ran, and
+ * then out->event is that event and out->cause its name for the
+ * event=onu_state line: "los" (LOS set), "lof" (LOF alone) or
+ * "los_cleared" (both clear).
+ */
+struct odi_gpon_line_sample {
+	uint32_t alarms;
+	int fed;
+	enum odi_gpon_event event;
+	const char *cause;
+};
+void odi_gpon_line_sample(struct odi_gpon_fsm *fsm, int watch, struct odi_gpon_line_sample *out);
+
 /* The switch interrupt line (IRQ 8, "apl_sw"), whose one consumer is the
  * GPON block: CHIP_IRQ_* in odi_switch_hw.h.
  *

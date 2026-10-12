@@ -7,7 +7,9 @@
  * Covers: PLOAM wire codec round trips, a full O1-O5 activation scenario
  * asserting the recorded action sequence, TO1 timeout reverting to O2,
  * Deactivate, Disable_Serial_Number to O7 and re-enable, the O6 POPUP
- * state entered by LOS and left by a directed POPUP message, Request_Key
+ * state entered by LOS and left by a directed POPUP message or by TO2 to
+ * O1, the LOS/LOF row of Table 10-1 in every state and the level-to-event
+ * map the driver line sampling feeds (odi_gpon_fsm_line_event()), Request_Key
  * producing the 2 Encryption_Key fragments an AES-128 key needs per
  * clause 9.2.4.5, Key_switching_time scheduling, and the cause and side
  * odi_gpon_fsm_cause() reports for every event the driver logs.
@@ -613,6 +615,9 @@ static void test_disable_serial_number_to_o7_and_reenable(void)
 	      "entering O7 disables the laser");
 	CHECK(i_state_o7 >= 0 && rec.log[i_state_o7].a == ODI_GPON_STATE_O7,
 	      "entering O7 writes state O7");
+	CHECK(fsm.onu_id == 0U && find_action(&rec, 0, ACT_SET_ONU_ID) >= 0 &&
+	      rec.log[find_action(&rec, 0, ACT_SET_ONU_ID)].a == ODI_GPON_ONU_ID_BROADCAST,
+	      "disabling from O5 gives up the ONU-ID (re-enable re-examines it, 10.2.2 g))");
 
 	rec_reset(&rec);
 	msg = ds_disable_serial_number(ODI_GPON_DISABLE_SN_ENABLE, test_sn);
@@ -766,6 +771,265 @@ static void test_key_switching_time(void)
  * side is the whole point of the line -- an outage that starts with
  * side=olt was the ISP, one with side=local was this stick.
  */
+/* Drives fsm from O1 to `target` (O2, O3 or O4), the same messages as
+ * drive_to_o5() up to that point.
+ */
+static void drive_to(struct odi_gpon_fsm *fsm, struct recorder *rec, enum odi_gpon_state target)
+{
+	struct odi_gpon_ploam msg;
+
+	odi_gpon_fsm_handle_event(fsm, &test_ops, rec, ODI_GPON_EVENT_ACTIVATE, NULL);
+	odi_gpon_fsm_handle_event(fsm, &test_ops, rec, ODI_GPON_EVENT_LOS_CLEAR, NULL);
+	if (target == ODI_GPON_STATE_O2)
+		return;
+	msg = ds_upstream_overhead();
+	odi_gpon_fsm_handle_event(fsm, &test_ops, rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	if (target == ODI_GPON_STATE_O3)
+		return;
+	msg = ds_assign_onu_id(TEST_ASSIGNED_ONU_ID, test_sn);
+	odi_gpon_fsm_handle_event(fsm, &test_ops, rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+}
+
+/* The index of the first set_state action writing `state`, or -1. */
+static int find_state(const struct recorder *r, unsigned int from, enum odi_gpon_state state)
+{
+	int i = (int)from;
+
+	while ((i = find_action(r, (unsigned int)i, ACT_SET_STATE)) >= 0) {
+		if (r->log[i].a == (uint32_t)state)
+			return i;
+		i++;
+	}
+	return -1;
+}
+
+/* G.984.3 Table 10-1, "ONU detects LOS or LOF": O2 => O1; O3 stops TO1 =>
+ * O1; O4 stops TO1 => O1 and gives up the ONU-ID it was ranging with
+ * (the next one comes from a new Assign_ONU-ID). Every fall to O1 closes
+ * the laser gate, as ACTIVATE does, so the PSync row can open it again.
+ */
+static void test_los_before_o5_falls_to_o1(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	int i_stop, i_id, i_o1;
+
+	fsm_setup(&fsm, &rec);
+	drive_to(&fsm, &rec, ODI_GPON_STATE_O2);
+	CHECK(fsm.state == ODI_GPON_STATE_O2, "setup reaches O2 before the O2 LOS test");
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS, NULL);
+	CHECK(fsm.state == ODI_GPON_STATE_O1, "LOS in O2 falls back to O1 (Table 10-1)");
+	CHECK(find_state(&rec, 0, ODI_GPON_STATE_O1) >= 0, "LOS in O2 writes state O1");
+	CHECK(find_action(&rec, 0, ACT_SET_ONU_ID) < 0, "LOS in O2 has no ONU-ID to give up");
+	CHECK(find_action(&rec, 0, ACT_LASER_ENABLE) >= 0 &&
+	      rec.log[find_action(&rec, 0, ACT_LASER_ENABLE)].a == 0U, "LOS in O2 closes the laser gate");
+
+	fsm_setup(&fsm, &rec);
+	drive_to(&fsm, &rec, ODI_GPON_STATE_O3);
+	CHECK(fsm.state == ODI_GPON_STATE_O3, "setup reaches O3 before the O3 LOS test");
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS, NULL);
+	i_stop = find_action(&rec, 0, ACT_STOP_TO1);
+	i_o1 = find_state(&rec, 0, ODI_GPON_STATE_O1);
+	CHECK(fsm.state == ODI_GPON_STATE_O1, "LOS in O3 falls back to O1 (Table 10-1)");
+	CHECK(i_stop >= 0 && i_o1 > i_stop, "LOS in O3 stops TO1, then writes O1");
+	CHECK(find_action(&rec, 0, ACT_SET_ONU_ID) < 0, "LOS in O3 has no ONU-ID to give up");
+
+	fsm_setup(&fsm, &rec);
+	drive_to(&fsm, &rec, ODI_GPON_STATE_O4);
+	CHECK(fsm.state == ODI_GPON_STATE_O4 && fsm.onu_id == TEST_ASSIGNED_ONU_ID,
+	      "setup reaches O4 with an ONU-ID before the O4 LOS test");
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS, NULL);
+	i_stop = find_action(&rec, 0, ACT_STOP_TO1);
+	i_id = find_action(&rec, 0, ACT_SET_ONU_ID);
+	i_o1 = find_state(&rec, 0, ODI_GPON_STATE_O1);
+	CHECK(fsm.state == ODI_GPON_STATE_O1, "LOS in O4 falls back to O1 (Table 10-1)");
+	CHECK(fsm.onu_id == 0U, "LOS in O4 gives up the ONU-ID");
+	CHECK(i_stop >= 0 && i_id > i_stop && i_o1 > i_id,
+	      "LOS in O4: stop TO1, discard the ONU-ID, then write O1");
+	CHECK(i_id >= 0 && rec.log[i_id].a == ODI_GPON_ONU_ID_BROADCAST,
+	      "the ONU-ID is discarded as the broadcast ID");
+
+	/* O1, O6 and O7 are dashes in that row. */
+	fsm_setup(&fsm, &rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_ACTIVATE, NULL);
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS, NULL);
+	CHECK(fsm.state == ODI_GPON_STATE_O1 && rec.n == 0U, "LOS in O1 does nothing (dash)");
+}
+
+/* Table 10-1, TO1 expiry from O4: => O2, the ONU-ID assigned in O3 given
+ * up, so a stale ID (and the default Alloc-ID row the leaf ties to it)
+ * does not outlive the attempt that got it.
+ */
+static void test_to1_in_o4_discards_onu_id(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	int i_id, i_o2;
+
+	fsm_setup(&fsm, &rec);
+	drive_to(&fsm, &rec, ODI_GPON_STATE_O4);
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_TO1_EXPIRE, NULL);
+	i_id = find_action(&rec, 0, ACT_SET_ONU_ID);
+	i_o2 = find_state(&rec, 0, ODI_GPON_STATE_O2);
+	CHECK(fsm.state == ODI_GPON_STATE_O2 && fsm.onu_id == 0U, "TO1 in O4: O2, no ONU-ID");
+	CHECK(i_id >= 0 && rec.log[i_id].a == ODI_GPON_ONU_ID_BROADCAST && i_o2 > i_id,
+	      "TO1 in O4 discards the ONU-ID before writing O2");
+
+	/* From O3 there is none to discard. */
+	fsm_setup(&fsm, &rec);
+	drive_to(&fsm, &rec, ODI_GPON_STATE_O3);
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_TO1_EXPIRE, NULL);
+	CHECK(fsm.state == ODI_GPON_STATE_O2 && find_action(&rec, 0, ACT_SET_ONU_ID) < 0,
+	      "TO1 in O3: O2, no ONU-ID write");
+}
+
+/* A fibre pull in O5 and the light back inside TO2: O5 => O6 on LOS (link
+ * down, TO2 started); the LOS clearing leaves the ONU in O6 (Table 10-1,
+ * PSync row: "remain in O6"), waiting for the OLT; a directed POPUP then
+ * returns it to O5 with everything it had, the port link forced up again.
+ */
+static void test_los_in_o5_recovers_by_popup(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	struct odi_gpon_ploam msg;
+	int i_link, i_to2, i_o6, i_o5;
+
+	fsm_setup(&fsm, &rec);
+	drive_to_o5(&fsm, &rec);
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS, NULL);
+	i_link = find_action(&rec, 0, ACT_LINK_FORCE_UP);
+	i_to2 = find_action(&rec, 0, ACT_START_TO2);
+	i_o6 = find_state(&rec, 0, ODI_GPON_STATE_O6);
+	CHECK(fsm.state == ODI_GPON_STATE_O6, "LOS in O5 enters O6");
+	CHECK(i_link >= 0 && rec.log[i_link].a == 0U, "LOS in O5 forces the port link down");
+	CHECK(i_link < i_to2 && i_to2 < i_o6, "O5 -> O6: link down, start TO2, write O6, in order");
+	CHECK(fsm.onu_id == TEST_ASSIGNED_ONU_ID, "O6 keeps the ONU-ID (POPUP may bring it back)");
+	CHECK(find_action(&rec, 0, ACT_SET_ONU_ID) < 0, "O5 -> O6 writes no ONU-ID");
+
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS_CLEAR, NULL);
+	CHECK(fsm.state == ODI_GPON_STATE_O6 && rec.n == 0U,
+	      "the LOS clearing inside TO2 leaves the ONU in O6, no action (PSync row)");
+
+	rec_reset(&rec);
+	msg = ds_popup(TEST_ASSIGNED_ONU_ID);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	i_o5 = find_state(&rec, 0, ODI_GPON_STATE_O5);
+	i_link = find_action(&rec, 0, ACT_LINK_FORCE_UP);
+	CHECK(fsm.state == ODI_GPON_STATE_O5, "a directed POPUP after the clear returns to O5");
+	CHECK(find_action(&rec, 0, ACT_STOP_TO2) >= 0, "the directed POPUP stops TO2");
+	CHECK(i_o5 >= 0 && i_link > i_o5 && rec.log[i_link].a == 1U,
+	      "back in O5 the port link is forced up again, after the state write");
+	CHECK(fsm.onu_id == TEST_ASSIGNED_ONU_ID, "the ONU-ID survives a directed POPUP");
+
+	/* A POPUP addressed to another ONU does nothing here. */
+	fsm_setup(&fsm, &rec);
+	drive_to_o5(&fsm, &rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS, NULL);
+	rec_reset(&rec);
+	msg = ds_popup(TEST_ASSIGNED_ONU_ID + 1U);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O6 && rec.n == 0U, "a POPUP for another ONU leaves O6 alone");
+}
+
+/* No POPUP inside TO2: TO2 expiry => O1, the ONU-ID given up, the laser
+ * gate closed; the light back then takes O1 to O2 and the ONU ranges again
+ * from scratch.
+ */
+static void test_to2_expiry_falls_to_o1_and_reranges(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	struct odi_gpon_ploam msg;
+	int i_stop, i_id, i_laser, i_o1;
+
+	fsm_setup(&fsm, &rec);
+	drive_to_o5(&fsm, &rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS, NULL);
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_TO2_EXPIRE, NULL);
+	i_stop = find_action(&rec, 0, ACT_STOP_TO2);
+	i_id = find_action(&rec, 0, ACT_SET_ONU_ID);
+	i_laser = find_action(&rec, 0, ACT_LASER_ENABLE);
+	i_o1 = find_state(&rec, 0, ODI_GPON_STATE_O1);
+	CHECK(fsm.state == ODI_GPON_STATE_O1 && fsm.onu_id == 0U, "TO2 expiry: O1, no ONU-ID");
+	CHECK(i_stop >= 0 && i_id > i_stop && i_laser > i_id && i_o1 > i_laser,
+	      "TO2 expiry: stop TO2, discard the ONU-ID, laser gate off, write O1");
+	CHECK(i_id >= 0 && rec.log[i_id].a == ODI_GPON_ONU_ID_BROADCAST,
+	      "TO2 expiry writes the broadcast ONU-ID");
+	CHECK(find_action(&rec, 0, ACT_LINK_FORCE_UP) < 0, "the link stays down from O6, no second write");
+
+	/* A second TO2 (a stale timer) in O1 is a dash. */
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_TO2_EXPIRE, NULL);
+	CHECK(fsm.state == ODI_GPON_STATE_O1 && rec.n == 0U, "TO2 expiry outside O6 does nothing");
+
+	/* The light back: O1 => O2, laser gate open, and a full ranging. */
+	rec_reset(&rec);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_LOS_CLEAR, NULL);
+	CHECK(fsm.state == ODI_GPON_STATE_O2, "the LOS clearing in O1 moves to O2");
+	CHECK(find_action(&rec, 0, ACT_LASER_ENABLE) >= 0 &&
+	      rec.log[find_action(&rec, 0, ACT_LASER_ENABLE)].a == 1U, "O1 -> O2 opens the laser gate");
+	msg = ds_upstream_overhead();
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	msg = ds_assign_onu_id(TEST_ASSIGNED_ONU_ID + 1U, test_sn);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	msg = ds_ranging_time(TEST_ASSIGNED_ONU_ID + 1U, 0x00050001U);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O5 && fsm.onu_id == TEST_ASSIGNED_ONU_ID + 1U,
+	      "re-ranged to O5 on the ONU-ID the OLT gave this time");
+}
+
+/* odi_gpon_fsm_line_event(): the LOS/LOF level against every state, the
+ * table the line sampling of odi_gpon.c feeds the FSM through.
+ */
+static void test_line_event_levels(void)
+{
+	static const struct {
+		enum odi_gpon_state state;
+		int alarm;
+		int fed;
+		enum odi_gpon_event event;
+	} rows[] = {
+		{ ODI_GPON_STATE_O1, 1, 0, 0 },
+		{ ODI_GPON_STATE_O1, 0, 1, ODI_GPON_EVENT_LOS_CLEAR },
+		{ ODI_GPON_STATE_O2, 1, 1, ODI_GPON_EVENT_LOS },
+		{ ODI_GPON_STATE_O2, 0, 0, 0 },
+		{ ODI_GPON_STATE_O3, 1, 1, ODI_GPON_EVENT_LOS },
+		{ ODI_GPON_STATE_O3, 0, 0, 0 },
+		{ ODI_GPON_STATE_O4, 1, 1, ODI_GPON_EVENT_LOS },
+		{ ODI_GPON_STATE_O4, 0, 0, 0 },
+		{ ODI_GPON_STATE_O5, 1, 1, ODI_GPON_EVENT_LOS },
+		{ ODI_GPON_STATE_O5, 0, 0, 0 },
+		{ ODI_GPON_STATE_O6, 1, 0, 0 },
+		{ ODI_GPON_STATE_O6, 0, 0, 0 },
+		{ ODI_GPON_STATE_O7, 1, 0, 0 },
+		{ ODI_GPON_STATE_O7, 0, 0, 0 },
+	};
+	struct odi_gpon_fsm fsm;
+	enum odi_gpon_event ev;
+	unsigned int i;
+	char what[96];
+
+	for (i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+		odi_gpon_fsm_init(&fsm);
+		fsm.state = rows[i].state;
+		ev = ODI_GPON_EVENT_ACTIVATE;
+		snprintf(what, sizeof(what), "line level %d in O%d", rows[i].alarm, (int)rows[i].state);
+		CHECK(odi_gpon_fsm_line_event(&fsm, rows[i].alarm, &ev) == rows[i].fed, what);
+		if (rows[i].fed)
+			CHECK(ev == rows[i].event, what);
+	}
+}
+
 static void check_cause(enum odi_gpon_event ev, const struct odi_gpon_ploam *msg,
 			const char *name, const char *side, const char *what)
 {
@@ -885,6 +1149,11 @@ int main(void)
 	test_deactivate();
 	test_disable_serial_number_to_o7_and_reenable();
 	test_popup_to_o6_and_back();
+	test_los_before_o5_falls_to_o1();
+	test_to1_in_o4_discards_onu_id();
+	test_los_in_o5_recovers_by_popup();
+	test_to2_expiry_falls_to_o1_and_reranges();
+	test_line_event_levels();
 	test_request_key_two_fragments();
 	test_key_switching_time();
 	test_transition_causes();
