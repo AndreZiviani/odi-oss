@@ -170,6 +170,13 @@ static inline void odi_mock_reset(void)
  */
 static int odi_mock_log_reads;
 
+/* An optional device model for reads: called before every odi_reg_read()
+ * takes its value from regs[], so a register can change while it is being
+ * polled (odi_gpon_init_clean_test.c: a GPON MAC reset that finishes after
+ * some number of reads). NULL by default.
+ */
+static void (*odi_mock_read_hook)(uint32_t off);
+
 static inline void odi_mock_log_append(char kind, uint32_t addr, uint32_t val)
 {
 	if (odi_mock.log_n < ODI_MOCK_LOG_MAX) {
@@ -185,7 +192,11 @@ static inline void odi_mock_log_append(char kind, uint32_t addr, uint32_t val)
 
 static inline uint32_t odi_reg_read(uint32_t off)
 {
-	uint32_t val = odi_mock.regs[odi_mock_slot(off)];
+	uint32_t val;
+
+	if (odi_mock_read_hook)
+		odi_mock_read_hook(off);
+	val = odi_mock.regs[odi_mock_slot(off)];
 
 	if (odi_mock_log_reads && !(off >= ODI_MOCK_TBL_ACCESS_LO && off <= ODI_MOCK_TBL_ACCESS_HI))
 		odi_mock_log_append('r', off, val);

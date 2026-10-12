@@ -39,6 +39,7 @@
 
 /* PONMAC_RESET: 0x70000c */
 #define ODI_GPON_PONMAC_RESET_OFF	0x70000cU
+#define ODI_GPON_PONMAC_RESET_RESET_COMPLETE	(1U << 8)	/* set once a RESET_REQ pulse has finished */
 static inline uint32_t ODI_GPON_PONMAC_RESET_RESET_COMPLETE_GET(uint32_t reg)
 {
 	return (reg >> 8) & 0x1U;

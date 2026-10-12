@@ -5,6 +5,24 @@ listed here.
 
 ## Unreleased
 
+- kernel: after a power cut the stick reached O5 and the OLT deactivated
+  it over and over, with OMCI never starting, until one boot of the stock
+  firmware; a warm reboot of this image did not help (#42, very likely
+  #29). The GPON MAC tables are on-chip RAM, and a power-up leaves them
+  full of valid-looking garbage: read back on a stick after a power cut,
+  120 of the 128 GEM-port CAM rows and all 32 Alloc-ID CAM rows were
+  valid with random entries, so the ONU answered bandwidth grants meant
+  for other ONUs. The boot replay did clear them, but right after the
+  GPON MAC soft reset and without waiting for it to finish, and a block
+  still in reset drops those writes. Every boot now waits for the reset
+  to complete (bounded, 20000 reads 1 us apart, logged with the reads it
+  took), then clears every GEM-port and Alloc-ID CAM row and every
+  downstream flow type word and reads every row back, before any row of
+  this ONU is programmed and before activation. dmesg has one line with
+  what the boot found and one with what it left; a row that survives is
+  logged as an error with its entry, and the clean runs once more.
+  `docs/SWITCH.md`, "GPON boot init". Not run on a stick yet.
+
 - diag-bundle: the bundle collects the optics module under `module/`, to
   tell which laser driver a stick has and what state its calibration is
   in: A0h whole, A2h with the page select as found, and in `chip.txt` the

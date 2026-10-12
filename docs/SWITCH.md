@@ -149,6 +149,69 @@ The downstream default-forward rule is in this file: `CLS_RULE_B[255]`,
 `CLS_MASK_B[255]` and `CLS_DS_ACTION[255]`, a wildcard downstream rule
 whose action is force-forward (`UNI_ACT` 1).
 
+## GPON boot init
+
+`gpon_init.bin` is the GPON MAC bring-up the PON steps `gpondrv` to
+`gponact` made in the capture, replayed once per boot by the first
+`gponact` (`odi_gpon_init.c`), after `gponsn` has given it the serial
+number. Early in it the table pulses `PONMAC_RESET.RESET_REQ` (0x70000c
+bit 0). The replay stops after the record that releases it and, before
+it goes on:
+
+1. **waits for the reset.** It reads `PONMAC_RESET` until `RESET_COMPLETE`
+   (bit 8) is set, at most 20000 reads 1 us apart, and logs the number of
+   reads (`odi_gpon: GPON MAC reset complete after N reads`), or an error
+   with the register value when the bound runs out. The stock driver
+   waits for the same bit; a register capture of its bring-up shows about
+   a hundred reads.
+2. **cleans the GPON tables.** Every `DSF_GEM_FLOW_TYPE` word (128) is
+   written to 0, and every row of the GEM-port CAM (128 rows,
+   `DSF_GEM_CAM_CTL` 0x701100) and of the Alloc-ID CAM (32 rows,
+   `DSF_ALLOC_CAM_CTL` 0x7010c0) is cleared with a CAM request of `OP` 3,
+   each polled for `DONE` with the bound of every CAM poll.
+3. **reads every row back.** A request of `OP` 2 per row sets
+   `ROW_VALID` (bit 13) when the row still holds an entry, with the entry
+   in `DSF_GEM_CAM_RDATA` / `DSF_ALLOC_CAM_RDATA`; the flow type words are
+   read directly. The same read runs before the clean, so the log shows
+   what the boot found and what it left:
+
+       odi_gpon: GPON tables before the clean: GEM-port CAM 120/128 valid, Alloc-ID CAM 32/32 valid, flow type 119/128 set
+       odi_gpon: GPON tables clean after 1 pass(es): GEM-port CAM 0/128, Alloc-ID CAM 0/32, flow type 0/128
+
+   A row still set after the clean is logged as an error, with the first
+   such row and its entry, and the whole clean runs once more. If rows
+   survive that too (or a CAM request never finishes), the error line
+   says so and the activation goes ahead: the ONU is no worse off than
+   without the clean, and the line is in dmesg and the ramlog.
+
+Then the rest of the table runs: it programs this ONU and activates it.
+Every row of ours (the ONU-ID row, the OMCC GEM port, the T-CONTs and
+flows) is written later, as the OLT assigns it, so all of them land in
+clean tables.
+
+Why: the three tables are on-chip RAM. A warm reset keeps whatever the
+last session left in them, which is this ONU's own, still valid entries.
+A power-up leaves whatever the RAM came up with: read back on a stick after
+a power cut, 120 of the 128 GEM-port rows and all 32 Alloc-ID rows were
+valid with random entries, and about 120 flow type words were not zero.
+With 30 foreign Alloc-IDs in its CAM the ONU answers bandwidth grants meant
+for other ONUs; that stick accepted about nine times the bandwidth map
+entries of a warm boot, ranged to O5 and was deactivated by the OLT 21
+times in 150 s, and OMCI never started. Before this clean the replay
+carried its own clean of the same rows, issued right after the reset
+release with no wait: on that stick the clears of GEM-port rows 0 to 119
+and of every Alloc-ID row were lost, and only rows 120 to 127 came out
+clear, so a block still in reset drops what reaches it. A warm reboot of
+the same image kept the garbage; one boot of the stock firmware, which
+waits for the reset, cleaned it.
+
+The replay's own clean records (and its clear of the 256-entry multicast
+MAC filter table that follows them) still run; after the wait they land
+in a block that is out of reset. `test/odi_gpon_init_clean_test.sh` runs
+the clean against a model of the two CAMs whose reset drops writes for a
+while after its release, and checks that the plain replay leaves the
+garbage and this one does not.
+
 ## Command leaves
 
 `odi_switch_dal.h` declares one leaf per group of switch-core writes an
