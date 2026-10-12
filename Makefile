@@ -168,10 +168,21 @@ test-diag:
 # qemu -strace, and asserts nothing opens /dev/mtd, execs or reboots.
 # vlan-test.sh builds both ISP sessions with the manual tag on and off
 # (transparent) and checks the bridge rules.
-test-omci: src
-	$(MAKE) -C src/omci/respond drvtrace
-	docker run --rm -v "$(CURDIR)":/src -w /src/src/omci "$(DIAG_IMAGE)" \
-		sh -c 'sh qemu-test.sh && sh drv-test.sh && sh resume-test.sh && sh events-test.sh && sh swdl-test.sh && sh vlan-test.sh && sh reload-test.sh'
+# One target per suite (test-omci-<suite>) so CI can run them as parallel
+# jobs; test-omci runs them all, in this order, and stops at the first failure.
+# Each suite needs only omcli and omcid (plus its drvtrace build), which
+# test-omci-build makes: the rest of src/ is built by `make src`.
+OMCI_SUITES := qemu drv resume events swdl vlan reload
+
+test-omci: test-omci-build
+	@for s in $(OMCI_SUITES); do $(MAKE) --no-print-directory test-omci-$$s || exit 1; done
+
+test-omci-build:
+	$(MAKE) -C src/omci/cli
+	$(MAKE) -C src/omci/respond cap drvtrace
+
+$(OMCI_SUITES:%=test-omci-%): test-omci-%:
+	docker run --rm -v "$(CURDIR)":/src -w /src/src/omci "$(DIAG_IMAGE)" sh $*-test.sh
 
 # The rcS action trace: what rcS executes and writes under /proc, for
 # three flag sets, against test/fixtures/rcs-trace-*.txt. Not part of `test`:
