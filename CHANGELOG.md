@@ -67,6 +67,9 @@ listed here.
   restart them, so with PLOAM traffic flowing TO1 never expired in O3 or
   O4; TO1 now bounds O3 and O4 together, 10 s, as G.984.3 10.2.1 says.
 
+**Automated dependency bump.**
+- linux 6.18.55 -> 6.18.56
+
 - diag-bundle: the bundle collects the optics module under `module/`, to
   tell which laser driver a stick has and what state its calibration is
   in: A0h whole, A2h with the page select as found, and in `chip.txt` the
