@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.3.0 — 2026-10-12
+
 - confd v1.2.1 (was v1.2.0): the Config page no longer shows `NTP_SERVER`
   and `SYSLOG_SERVER` empty after a reload on this image (odi-ui #14).
 
@@ -52,7 +54,8 @@ listed here.
   the same thresholds where it used to pause. The kernel parameter
   `odi_switch.host_pause=1` (command line, or live through
   `/sys/module/odi_switch/parameters/host_pause`) restores the stock
-  behaviour. `docs/SWITCH.md`, "Host port PAUSE". Not run on a stick yet.
+  behaviour. `docs/SWITCH.md`, "Host port PAUSE". Verified on a stick: no
+  PAUSE toward the host through a fibre pull.
 
 - kernel: after a power cut the stick reached O5 and the OLT deactivated
   it over and over, with OMCI never starting, until one boot of the stock
@@ -70,7 +73,9 @@ listed here.
   this ONU is programmed and before activation. dmesg has one line with
   what the boot found and one with what it left; a row that survives is
   logged as an error with its entry, and the clean runs once more.
-  `docs/SWITCH.md`, "GPON boot init". Not run on a stick yet.
+  `docs/SWITCH.md`, "GPON boot init". Verified on a stick across three
+  power cuts: 108-125 garbage GEM-port rows and all 32 Alloc-ID rows found
+  and cleared in one pass, O5 and service without a stock boot.
 
 - ci: the pull request wall time drops from about 13 minutes to a few. The
   `test` job is split into `lint`, `host`, `diag` and an `omci` matrix with
