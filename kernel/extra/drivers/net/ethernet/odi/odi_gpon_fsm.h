@@ -57,8 +57,8 @@ enum odi_gpon_event {
 	ODI_GPON_EVENT_PLOAM_RX,	/* a downstream PLOAM message arrived; msg is non-NULL */
 	ODI_GPON_EVENT_TO1_EXPIRE,	/* the O3/O4 ranging-wait timer expired (G.984.3 clause 10.2.1) */
 	ODI_GPON_EVENT_TO2_EXPIRE,	/* the O6 popup-window timer expired (G.984.3 clause 10.2.1) */
-	ODI_GPON_EVENT_LOS,		/* loss of optical signal detected */
-	ODI_GPON_EVENT_LOS_CLEAR,	/* LOS condition cleared */
+	ODI_GPON_EVENT_LOS,		/* LOS or LOF detected (odi_gpon_fsm_line_event()) */
+	ODI_GPON_EVENT_LOS_CLEAR,	/* LOS and LOF both clear again */
 };
 
 /* Every side effect the FSM can produce, as calls into this ops table.
@@ -77,6 +77,10 @@ struct odi_gpon_fsm_ops {
 	 * (DSF_ONU_STATE.ASSIGNED_ONU_ID, USF_ONU_ID) -- called
 	 * before set_state() on the O3->O4 transition, matching this
 	 * driver's own documented register-write ordering for that step.
+	 * ODI_GPON_ONU_ID_BROADCAST discards the ID held: every state
+	 * change that gives up an assigned ONU-ID writes it (activate,
+	 * Deactivate_ONU-ID, Disable_Serial_Number, TO1 in O4, LOS/LOF in
+	 * O4, TO2), and the leaf releases what was tied to that ID.
 	 */
 	void (*set_onu_id)(void *ctx, uint8_t onu_id);
 
@@ -139,10 +143,10 @@ struct odi_gpon_fsm_ops {
 	 */
 	void (*switch_key)(void *ctx, uint32_t switch_superframe);
 
-	/* Force the switch-core PON port MAC link state: entering O5 forces
-	 * link up independent of GTC LOS/LOF; this FSM also calls it with 0
-	 * on leaving O5. This SoC's own switch fabric is outside what G.984.3
-	 * itself specifies.
+	/* Force the switch-core PON port MAC link state: entering O5 (from
+	 * O4, or from O6 on a directed POPUP) forces link up independent of
+	 * GTC LOS/LOF; this FSM calls it with 0 on leaving O5. This SoC's
+	 * own switch fabric is outside what G.984.3 itself specifies.
 	 */
 	void (*link_force_up)(void *ctx, int up);
 
@@ -179,6 +183,22 @@ void odi_gpon_fsm_set_serial_number(struct odi_gpon_fsm *fsm, const uint8_t seri
 void odi_gpon_fsm_set_password(struct odi_gpon_fsm *fsm, const uint8_t password[10]);
 void odi_gpon_fsm_set_aes_key(struct odi_gpon_fsm *fsm, const uint8_t key[16]);
 
+/* The line alarm as a level, mapped to the event Table 10-1 acts on in the
+ * current state: alarm is LOS or LOF asserted (clause 10.2.5.3 c), d):
+ * either one counts, and both must clear). Asserted in O2-O5 is
+ * ODI_GPON_EVENT_LOS; clear in O1 is ODI_GPON_EVENT_LOS_CLEAR (the PSync
+ * row: O1 => O2). Everything else is no event: O6 waits for POPUP or TO2
+ * whatever the line does, O7 ignores it, and a level that matches the
+ * state needs nothing. Returns 1 and sets *event when there is one.
+ *
+ * A level rather than an edge, so a caller that samples it can feed every
+ * sample: a loss that starts and ends between two samples is missed, but
+ * a state that disagrees with the line is always corrected by the next
+ * one -- including O1 after TO2 when the light came back inside the O6
+ * window, where no edge is left to see.
+ */
+int odi_gpon_fsm_line_event(const struct odi_gpon_fsm *fsm, int alarm, enum odi_gpon_event *event);
+
 /* The pure transition function. msg is only read for
  * ODI_GPON_EVENT_PLOAM_RX (must be non-NULL then); ignored (may be NULL)
  * for every other event.
@@ -196,7 +216,7 @@ void odi_gpon_fsm_handle_event(struct odi_gpon_fsm *fsm, const struct odi_gpon_f
  *          Number, Upstream_Overhead, ...)
  *   timer  TO1 or TO2 expired: the OLT stopped ranging this ONU, or the
  *          POPUP window closed without a POPUP message
- *   line   loss of signal, or its clearing
+ *   line   loss of signal or of framing (LOS, LOF), or its clearing
  *   local  a driver command from this side (gponact, gpondeact)
  *
  * Both strings are static and never NULL. msg is only read for

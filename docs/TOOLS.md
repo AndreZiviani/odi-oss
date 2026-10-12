@@ -869,8 +869,9 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | line | level | when |
 |---|---|---|
 | `odi_gpon: event=onu_state from=O5 to=O2 in_state_s=3605.120 cause=deactivate_onu_id side=olt onu_id=0` | notice when leaving O5 or entering O7, else info | every ONU state change: the state left, how long it lasted, and why |
-| `odi_gpon: event=los state=on onu_state=O5` | notice | the downstream LOS bit set; sampled at every GPON interrupt and every BER interval (10 s on both ISPs), which keeps running in O5 when the light goes |
-| `odi_gpon: event=los state=off lasted_s=42.310 onu_state=O5` | info | the LOS bit clear again |
+| `odi_gpon: event=los state=on onu_state=O5` | notice | the downstream LOS bit set, with the state the loss found; sampled at every GPON interrupt and every 100 ms while the ONU is activated, so a fibre pull shows within 100 ms even with no interrupt. The `event=onu_state` line of what it does to the state follows it (`cause=los`) |
+| `odi_gpon: event=los state=off lasted_s=42.310 onu_state=O1` | info | the LOS bit clear again |
+| `odi_gpon: event=lof state=on onu_state=O5` / `event=lof state=off lasted_s=...` | notice / info | the same for LOF, loss of downstream framing: light without a GPON frame the framer can lock to |
 | `omcid: event=start run=boot mode=reregister reason=not_o5 onu_state=O2 rows=0` | notice on `run=restart`, else info | omcid starting: the first start of the boot or a later one (a respawn), and whether it resumed from its snapshot (`mode=resume`) or starts empty for the OLT to re-provision; `reason` is `not_o5`, `no_snapshot`, `bad_snapshot` or `other_device` |
 | `omcid: event=mib_reset side=olt rows=161 mib_data_sync=184 services=6` | notice | a MIB reset: `side=olt` from the OLT, `side=local` from `omcicli mib reset`; what it threw away |
 | `omcid: event=mib_upload_begin entities=301` / `event=mib_upload_end entities=301 duration_s=0.009` | info | the OLT reading the MIB back; an upload it abandons has no end line |
@@ -892,20 +893,27 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | cause | side | meaning |
 |---|---|---|
 | `upstream_overhead`, `assign_onu_id`, `ranging_time` | olt | the OLT ranging this ONU: O2 to O3, O3 to O4, O4 to O5 |
-| `deactivate_onu_id` | olt | the OLT deactivated this ONU (Deactivate_ONU-ID): back to O2 |
+| `deactivate_onu_id` | olt | the OLT deactivated this ONU (Deactivate_ONU-ID): back to O2, its ONU-ID, Alloc-IDs and OMCC port given up until the OLT ranges it again |
 | `disable_serial_number` | olt | the OLT disabled this serial number (rogue ONU handling, or by hand at the OLT): O7, laser off |
 | `enable_serial_number`, `enable_all_serial_numbers` | olt | re-enabled: O7 to O2 |
 | `popup` | olt | POPUP: O6 back to O4 or O5 |
-| `to1_expired` | timer | O3 or O4 to O2: the OLT did not finish ranging within TO1 (10 s) |
-| `to2_expired` | timer | O6 to O1: no POPUP within TO2 |
-| `los`, `los_cleared` | line | loss of signal; not wired to the state machine today (`event=los` reports the bit instead), listed for when it is |
+| `to1_expired` | timer | O3 or O4 to O2: the OLT did not finish ranging within TO1 (10 s from entering O3) |
+| `to2_expired` | timer | O6 to O1: no POPUP within TO2 (100 ms); the ONU-ID and every Alloc-ID and OMCC row go, and it ranges again once the light is back |
+| `los`, `lof` | line | loss of signal, or of framing alone (G.984.3 Table 10-1, "ONU detects LOS or LOF"): O5 to O6 (TO2 starts), O2, O3 or O4 to O1 |
+| `los_cleared` | line | LOS and LOF both clear: O1 to O2, and the OLT ranges the ONU again; also right after `to2_expired` when the light came back inside the O6 window |
 | `gponact`, `gpondeact` | local | this side: the boot activation, a respawn re-provisioning (`omci-respawn-reprovision.sh`), a re-registration omcid makes on SIGHUP (`apply.sh omci`), or a write to `/proc/odi_init` by hand |
 | `ploam_other`, `ploam_unknown` | olt | a transition after any other downstream message; not expected |
 
 Reading an outage:
 
-- `event=los state=on`, then `event=onu_state from=O5 ... side=olt` once the
-  light is back: the fibre, or the OLT side of it.
+- `event=los state=on`, `event=onu_state from=O5 to=O6 ... cause=los`,
+  `from=O6 to=O1 ... cause=to2_expired`, then, once the light is back,
+  `event=los state=off`, `from=O1 to=O2 ... cause=los_cleared` and the
+  ranging (`upstream_overhead`, `assign_onu_id`, `ranging_time`): the
+  fibre, or the OLT side of it, and the ONU coming back by itself. With
+  the light back, an ONU that goes O2 to O3 and back on `to1_expired`
+  again and again is on an OLT that does not take it: a fibre to another
+  ISP, or a serial number this OLT does not know.
 - `event=onu_state from=O5 ... cause=deactivate_onu_id side=olt` with no LOS:
   the OLT dropped this ONU. A `mib_reset side=olt` and a provisioning burst
   follow if it re-provisions.

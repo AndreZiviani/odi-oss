@@ -36,6 +36,37 @@ listed here.
   started; as a result the respawn check really does `kill -9` the daemon,
   which it did not before. shellcheck is taken from the runner image.
 
+- gpon: a loss of signal or of framing now drives the ONU state machine,
+  as G.984.3 Table 10-1 has it. In O5 the ONU enters O6 (POPUP), forces
+  the PON port link down and starts TO2 (100 ms); a directed POPUP brings
+  it back to O5 with everything it had, and with none TO2 takes it to O1,
+  where the light coming back takes it to O2 and the OLT ranges it again.
+  In O2, O3 and O4 a loss goes straight to O1. Before, the driver only
+  logged `event=los` and stayed in O5: on ISP2 a fibre pull of a few
+  seconds left the stick claiming O5 while the OLT had deregistered it
+  (no bandwidth granted, OMCI and PPPoE dead) until a reboot. The line is
+  read every 100 ms while the ONU is activated, as well as at every
+  interrupt, since a pulled fibre stops the downstream traffic that raises
+  them; `event=lof` lines join `event=los`, and the transitions say
+  `cause=los`, `lof`, `to2_expired` or `los_cleared` (`docs/TOOLS.md`).
+  Refs #42, #29.
+
+- gpon: giving up the ONU-ID now gives up what was tied to it, as the
+  gpondeact verb already did: every Alloc-ID CAM row this activation
+  wrote, the default one included, and the OMCC GEM port with its flow
+  type, upstream map and stream-valid gate. That is TO2 expiry, a loss in
+  O4, TO1 expiry in O4 and Disable_Serial_Number from O4 to O6 (both kept
+  their ONU-ID until now), and Deactivate_ONU-ID (G.984.3 9.2.3.5).
+  Before, those rows stayed valid into the next ranging, and an Alloc-ID
+  the OLT did not assign again stayed in the CAM, answering grants that
+  could be another ONU's.
+  `/proc/odi_gpon` lists no Alloc-ID until the OLT assigns them again,
+  which omcid already follows (`event=alloc_ids ids=none`).
+
+- gpon: TO1 and TO2 run from the state entry. Every interrupt used to
+  restart them, so with PLOAM traffic flowing TO1 never expired in O3 or
+  O4; TO1 now bounds O3 and O4 together, 10 s, as G.984.3 10.2.1 says.
+
 - diag-bundle: the bundle collects the optics module under `module/`, to
   tell which laser driver a stick has and what state its calibration is
   in: A0h whole, A2h with the page select as found, and in `chip.txt` the
