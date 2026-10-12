@@ -985,6 +985,7 @@ added to `CONFIG_CMDLINE` takes effect after a kernel rebuild; U-Boot's
 | parameter | defined | effect | default | when | class |
 |---|---|---|---|---|---|
 | `odi_nic.debug` | `odi_nic.c:51` (bool, 0644) | trace the first interrupts and RX descriptors to the console; at the first open (so only when set on the command line) also the ring register read-backs and a NIC state dump 15 s and 45 s later | off | boot, or live for the traces | dev |
+| `odi_switch.host_pause` | `odi_switch.c:194` (bool, 0644) | let the host port send PAUSE frames to the host, as the stock image does (`docs/SWITCH.md`, "Host port PAUSE"); off, the switch drops at its own buffers instead | off | boot, or live: applied at once | prod (escape hatch) |
 | `print-fatal-signals=1` | `kernel/618/config:65` (mainline) | register dump of any process killed by SIGSEGV/SIGBUS/SIGILL, into the ramlog | on | boot | prod (debug aid) |
 
 ### Kconfig

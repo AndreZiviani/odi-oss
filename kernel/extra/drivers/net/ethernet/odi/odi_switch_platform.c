@@ -115,6 +115,16 @@ static void odi_switch_platform_reserved_vid(void)
 	odi_reg_write(ODI_SW_SVLAN_SETUP_OFF, reg);
 }
 
+/* PAUSE toward the host per odi_sw_host_pause: off by default, so a
+ * congested switch drops at its own buffers instead of stalling the host
+ * NIC (docs/SWITCH.md#host-port-pause). Ours: the stock image lets the
+ * SerDes auto-negotiation turn it on.
+ */
+static void odi_switch_platform_host_pause(void)
+{
+	odi_sw_host_pause_apply();
+}
+
 static const struct {
 	void (*fn)(void);
 	const char *name;
@@ -125,6 +135,7 @@ static const struct {
 	{ odi_switch_platform_l2, "l2" },
 	{ odi_switch_platform_cf_sweep, "cf sweep" },
 	{ odi_switch_platform_reserved_vid, "reserved vid" },
+	{ odi_switch_platform_host_pause, "host pause" },
 };
 
 /* The log names the step before it touches hardware, so a log cut short

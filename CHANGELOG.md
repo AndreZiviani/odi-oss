@@ -35,6 +35,22 @@ listed here.
   Host-tested against a clear-on-read register model
   (`test/odi_gpon_ctr_test.c`).
 
+- kernel: a stuck stick no longer takes the host NIC down with PAUSE
+  frames. When the upstream stopped draining (no grants from the OLT, or a
+  scrambled Alloc-ID CAM), the host port sent XOFF after XOFF to the host,
+  as the stock firmware does: it negotiates PAUSE with the host. An Intel
+  10G NIC behind it obeyed, stalled its transmit queue past the 5 s
+  watchdog and reset itself in a loop, 103,979 and 5,890,332 XOFF frames
+  received on the two ports. The platform settings now force the port's
+  transmit PAUSE off (`PORT_FORCE_ABILITY(0)` and `PORT_FORCE_SELECT(0)`
+  bit 6), and cmd 32, which rewrote that select word with 0 at every
+  provisioning, keeps the bit; receiving PAUSE stays negotiated and the
+  advertisement is unchanged. The switch then drops at its own buffers, at
+  the same thresholds where it used to pause. The kernel parameter
+  `odi_switch.host_pause=1` (command line, or live through
+  `/sys/module/odi_switch/parameters/host_pause`) restores the stock
+  behaviour. `docs/SWITCH.md`, "Host port PAUSE". Not run on a stick yet.
+
 - kernel: after a power cut the stick reached O5 and the OLT deactivated
   it over and over, with OMCI never starting, until one boot of the stock
   firmware; a warm reboot of this image did not help (#42, very likely

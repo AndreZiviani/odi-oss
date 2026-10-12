@@ -28,6 +28,7 @@
 #define ODI_SW_LOG(fmt, ...) pr_info("odi_switch: " fmt, ##__VA_ARGS__)
 #else
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 #define ODI_SW_LOG(fmt, ...) printf("odi_switch: " fmt, ##__VA_ARGS__)
 #endif
@@ -54,10 +55,28 @@ void odi_sw_port_autoneg_get(void);
 void odi_sw_port_autoneg_set(uint32_t reg_a408, uint32_t reg_a412, uint32_t reg_a400);
 
 /* cmd 32: PORT_FORCE_SELECT of a port. The admin state the command also
- * carries has no register write in any capture.
+ * carries has no register write in any capture. _set clears every FORCE
+ * bit but the ones the host-port PAUSE policy keeps (below).
  */
 uint32_t odi_sw_port_force_get(uint32_t port);
 void odi_sw_port_force_set(uint32_t port);
+
+/* The host port: the UNI, switch port 0, the SerDes link to the host. */
+#define ODI_SW_HOST_PORT		0U
+
+/* Whether the host port may send PAUSE frames to the host: false (the
+ * default) forces its TX_PAUSE ability off, true leaves it to the
+ * auto-negotiation with the host. Receiving PAUSE is not touched either
+ * way. The kernel parameter odi_switch.host_pause (odi_switch.c) sets it.
+ * docs/SWITCH.md#host-port-pause has why.
+ */
+extern bool odi_sw_host_pause;
+
+/* Applies odi_sw_host_pause to the host port: the forced TX_PAUSE value
+ * (0), then its FORCE_SELECT bit, and logs the ability the port then runs
+ * with. Idempotent; the caller holds odi_switch_lock.
+ */
+void odi_sw_host_pause_apply(void);
 
 /* cmd 64: FLOOD_UNKN_UCAST_PORTS, one bit per port. */
 uint32_t odi_sw_l2_flood_mask_get(void);

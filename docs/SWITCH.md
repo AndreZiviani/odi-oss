@@ -104,6 +104,10 @@ the fields it owns. Board ports: UNI 0, PON 2, CPU 3; port 1 is unused.
   replay carries the captured row).
 - **reserved vid**: `VLAN_SETUP.VID0_MODE = VID4095_MODE = 1` (tag), as the
   stock stick reads, and `SVLAN_SETUP.PRIO_SOURCE = 1` (C-TAG priority).
+- **host pause**: `PORT_FORCE_ABILITY(0).TX_PAUSE = 0`, then
+  `PORT_FORCE_SELECT(0).TX_PAUSE = 1`: the host port never sends PAUSE
+  frames to the host. Ours, not the stock image's; see
+  [Host port PAUSE](#host-port-pause).
 
 Left out altogether:
 
@@ -248,7 +252,11 @@ commands, from the command table of the shipped binary:
 - **cmd 32**: `PORT_FORCE_SELECT(0) = 0`, every FORCE bit clear, so speed
   and duplex come from the PHY. The admin state the command carries has no
   register write in any capture; the leaf that took it did nothing and is
-  gone.
+  gone. Ours keeps one bit: `TX_PAUSE` stays forced on port 0 (the word is
+  0x40) unless `odi_switch.host_pause` is set, since a 0 would hand PAUSE
+  back to the auto-negotiation at every provisioning
+  ([Host port PAUSE](#host-port-pause)). The host tests compare this
+  bracket with the capture under the stock policy.
 - **cmd 64**: the capture writes `FLOOD_UNKN_UCAST_PORTS` (0x01c028, not
   `FLOOD_BCAST_PORTS` at 0x01c020, which no capture writes) four times with
   the same word, 0x7. The word holds the bit of every port, so the four
@@ -461,3 +469,87 @@ mask save and restore the stock handler makes around it.
 Setting the bit on every data port at creation was rejected: a port the
 OLT does not encrypt would then be decrypted into garbage, and nothing here
 could tell. Every OLT seen so far encrypts every data port.
+
+## Host port PAUSE
+
+Port 0 is the host port: the SerDes link to the host, in Fiber 1G
+(1000BASE-X) with auto-negotiation on (`network.sh` sets the mode). The
+stock image leaves the port's abilities to that negotiation, and the host
+NICs seen so far advertise PAUSE both ways, so the port ends up able to
+send PAUSE frames to the host. A live register dump of a stick on the stock
+modules reads `PORT_ABILITY(0) = 0xfe`: 1000 Mb/s, full duplex, fibre, link
+up, PAUSE received and sent, negotiated. This image forces the sending side
+off and leaves the rest alone.
+
+Why: when the upstream stops draining (no grants from the OLT, or garbage
+in the Alloc-ID CAM, see [GPON boot init](#gpon-boot-init)), frames from
+the host pile up in the switch, and the port sends XOFF after XOFF for as
+long as the stall lasts. A host NIC that honours them stalls its transmit
+queue; Linux declares a transmit timeout after 5 s and resets the adapter,
+over and over (seen on an Intel 10G NIC behind both test sticks: about
+100,000 and 5.9 million XOFF frames received, and adapter resets for as
+long as the stick stayed stuck). An ONU drops at its own queue when its
+upstream cannot drain, and TCP adapts; that is what the switch does when
+the port does not send PAUSE.
+
+The registers, one word per port, with the bit layout of the stock
+register table:
+
+| register | offset | role |
+|---|---|---|
+| `PORT_FORCE_ABILITY` | 0x000180 | the value a port runs with for each field forced |
+| `PORT_ABILITY` | 0x000198 | read-only: the ability the port runs with |
+| `PORT_FORCE_SELECT` | 0x0001b4 | one bit per field: 1 forced value, 0 negotiated |
+
+In all three, bit 6 is `TX_PAUSE` (the port sends PAUSE), bit 5 `RX_PAUSE`
+(it obeys PAUSE it receives), bit 4 the link, bits 1:0 the speed. The
+select works field by field: the stock image forces the CPU port whole
+(`PORT_FORCE_SELECT(3) = 0xfff`, `PORT_FORCE_ABILITY(3) = 0x16`: 1000 Mb/s,
+full duplex, link, no PAUSE), and the host port not at all.
+
+The platform settings write `PORT_FORCE_ABILITY(0).TX_PAUSE = 0`, then
+`PORT_FORCE_SELECT(0).TX_PAUSE = 1`, value before select so the port never
+runs on a stale forced value, each a read-modify-write of the one bit, and
+log the ability the port then reads (read right after the write; the
+line below is the one expected on a stick, not yet seen):
+
+    odi_switch: host port PAUSE toward the host off: ability 0x0be (link 1, tx pause 0, rx pause 1)
+ cmd 32 rewrites
+`PORT_FORCE_SELECT(0)` at every provisioning; its leaf keeps the bit
+([Command leaves](#command-leaves)). `test/odi_host_pause_test.c` checks
+both words after the platform settings, after the whole ISP1 provisioning
+twice over, and through the parameter below.
+
+What is left alone:
+
+- **Receiving PAUSE.** `RX_PAUSE` stays negotiated, so a host that sends
+  PAUSE is still obeyed. In practice the host sends none.
+- **The advertisement.** A 1000BASE-X link negotiates PAUSE with two bits
+  each way, and against a partner that advertises both, no advertisement
+  of ours resolves to "receive only": clearing ours would turn PAUSE off in
+  both directions and needs a renegotiation, a link flap. So the host still
+  resolves PAUSE as on in both directions (`ethtool -a`); it is the port's
+  own transmitter that never sends.
+- **The buffer thresholds.** The switch has a second set of ingress
+  thresholds for ports that do not send PAUSE, where it drops instead of
+  pausing. On a live stick they hold the same values as the PAUSE ones
+  (0x0230dc and 0x0230e4, the global pair, both on 0x200 / off 0x1f4
+  pages; 0x0230f4 and 0x0230ec, the per-port pair, both on 0xf0 / off 0xea),
+  so the host port now drops frames where it used to pause the host. No
+  drop policy of our own is added.
+
+`odi_switch.host_pause` is the escape hatch, a kernel parameter (default
+`N`). Set to `Y` it clears the select bit and the port goes back to the
+negotiated PAUSE, as the stock image runs; on the command line it takes
+effect with the platform settings, and written to
+`/sys/module/odi_switch/parameters/host_pause` on a running stick it is
+applied at once (both directions, idempotent).
+
+To see it on a stick: `register get 0x198 1` in `diag` reads
+`PORT_ABILITY(0)` (bit 6 clear: the port does not send PAUSE); the
+exporter's `gpon_port_pause_frames_total{port="0",direction="transmit"}`
+(`dot3OutPauseFrames`) counts PAUSE frames the port sent, and stays flat;
+the host's `ethtool -S` `rx_flow_control_xoff` stays flat. The meaning of
+bit 6 as the sending side (bit 5 receiving) is the one thing here not yet
+seen on hardware: that is what these three readings check.
+

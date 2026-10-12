@@ -80,6 +80,13 @@ int main(int argc, char **argv)
 	odi_mock_reset();
 	odi_switch_cmd_reset_state();
 
+	/* The brackets are the stock image, which leaves PAUSE toward the
+	 * host to the auto-negotiation: its cmd 32 writes PORT_FORCE_SELECT 0.
+	 * Ours keeps TX_PAUSE forced there by default;
+	 * odi_host_pause_test.c checks that.
+	 */
+	odi_sw_host_pause = true;
+
 	/* ODI_SWITCH_CMD_TEST_INIT_PLATFORM=1 runs the platform init first,
 	 * as a boot does: odi_switch_init_platform_test.sh uses it to check
 	 * that those writes (before any mark) leave the 91 brackets alone.
