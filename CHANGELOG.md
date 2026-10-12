@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- confd v1.2.1 (was v1.2.0): the Config page no longer shows `NTP_SERVER`
+  and `SYSLOG_SERVER` empty after a reload on this image (odi-ui #14).
+
 - metricsd v1.3.0 (was v1.2.1): exports the GPON link counters the driver
   now accumulates (`gpon_ds_fec_codewords_total`, `gpon_ds_bip_error_*`,
   `gpon_ds_bwmap_allocations_total`, `gpon_alarm_events_total`,
