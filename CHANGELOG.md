@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- metricsd v1.3.0 (was v1.2.1): exports the GPON link counters the driver
+  now accumulates (`gpon_ds_fec_codewords_total`, `gpon_ds_bip_error_*`,
+  `gpon_ds_bwmap_allocations_total`, `gpon_alarm_events_total`,
+  `gpon_alarm_seconds_total`, `gpon_onu_state_*`, `gpon_fec_active` and
+  more; odi-sfp-exporter docs/METRICS.md, "The GPON link").
+
 - kernel: the GPON link counters. The GPON MAC counts the line in 43
   counters (BIP errors, FEC corrected bits, bytes and codewords and the
   uncorrectable ones, PLend, BWmap, PLOAMd and GEM errors, the BWmap
