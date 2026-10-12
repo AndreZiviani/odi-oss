@@ -131,6 +131,7 @@ test-host:
 	bash test/mksdkinit_test.sh
 	bash test/odi_switch_sdkinit_replay_test.sh
 	bash test/odi_replay_blob_test.sh
+	bash test/odi_gpon_init_clean_test.sh
 	bash test/odi_switch_ds_encrypt_test.sh
 	bash test/omci_ageing_time_test.sh
 	bash test/odi_gpon_test.sh

@@ -271,14 +271,22 @@ static void test_record_rules(void)
 /* gpon_init.bin through odi_gpon_init_apply(): one register write per
  * record (no table rows in this capture), in order, with the four
  * serial-number words carrying this box serial number, never the zeros
- * the public table holds.
+ * the public table holds. Right after the record that releases the GPON
+ * MAC reset, the table clean (odi_gpon_init.h) adds its own writes: on
+ * the plain mock register file every CAM row reads back clear, so one
+ * pass, a read of every row before it and after it.
  */
+#define GPON_INIT_RESET_RELEASE	361U	/* PONMAC_RESET = 0, the record before the clean */
+#define GPON_CAM_ROWS		(ODI_GPON_INIT_GEM_ROWS + ODI_GPON_INIT_ALLOC_ROWS)
+#define GPON_CLEAN_WRITES	(2U * GPON_CAM_ROWS + ODI_GPON_INIT_GEM_ROWS + 2U * GPON_CAM_ROWS + \
+				 2U * GPON_CAM_ROWS)
+
 static void test_gpon_init_apply(void)
 {
 	static const uint8_t sn[8] = { 'O', 'D', 'I', 'X', 0x12, 0x34, 0x56, 0x78 };
 	static const uint8_t pw[10];
 	struct odi_replay_fw fw;
-	unsigned int i, w, sn_seen = 0;
+	unsigned int i, w, rec, sn_seen = 0;
 
 	if (odi_replay_fw_load(ODI_REPLAY_TABLE_GPON_INIT, &fw)) {
 		CHECK(0, "test setup: gpon_init.bin loads");
@@ -287,13 +295,32 @@ static void test_gpon_init_apply(void)
 	odi_mock_reset();
 	odi_gpon_init_apply(&fw.blob, sn, pw);
 	odi_mock_table_flush();
+	CHECK(odi_mock_locks_idle(), "gpon init: no lock left held");
 
-	CHECK(odi_mock.log_n == GPON_INIT_RECORDS, "gpon init: one register write per record");
+	CHECK(odi_mock.log_n == GPON_INIT_RECORDS + GPON_CLEAN_WRITES,
+	      "gpon init: one register write per record, plus the table clean");
+	CHECK(odi_mock.log[GPON_INIT_RESET_RELEASE].addr == ODI_GPON_PONMAC_RESET_OFF &&
+	      odi_mock.log[GPON_INIT_RESET_RELEASE].val == 0U,
+	      "gpon init: the clean follows the reset release");
+	for (i = GPON_INIT_RESET_RELEASE + 1U;
+	     i < GPON_INIT_RESET_RELEASE + 1U + GPON_CLEAN_WRITES && i < odi_mock.log_n; i++) {
+		uint32_t a = odi_mock.log[i].addr;
+
+		CHECK(a == ODI_SW_DSF_GEM_CAM_CTL_OFF || a == ODI_SW_DSF_ALLOC_CAM_CTL_OFF ||
+		      (a >= ODI_SW_DSF_GEM_FLOW_TYPE(0) &&
+		       a <= ODI_SW_DSF_GEM_FLOW_TYPE(ODI_GPON_INIT_GEM_ROWS - 1U)),
+		      "gpon init: the clean writes only the CAM controls and the flow types");
+	}
 	for (i = 0; i < odi_mock.log_n; i++) {
 		const struct odi_mock_write *e = &odi_mock.log[i];
 		struct odi_replay_event ev;
 
-		odi_replay_blob_event(&fw.blob, i, &ev);
+		if (i > GPON_INIT_RESET_RELEASE && i <= GPON_INIT_RESET_RELEASE + GPON_CLEAN_WRITES)
+			continue;
+		rec = i > GPON_INIT_RESET_RELEASE ? i - GPON_CLEAN_WRITES : i;
+		if (rec >= fw.blob.count)
+			break;
+		odi_replay_blob_event(&fw.blob, rec, &ev);
 		CHECK(e->kind == 'W' && e->addr == ev.offset, "gpon init: writes follow the table order");
 		if (ev.sn_word == 0) {
 			CHECK(e->val == ev.value, "gpon init: a literal record writes its own value");

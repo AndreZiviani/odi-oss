@@ -383,6 +383,7 @@ static inline uint32_t ODI_SW_CHIP_IRQ_ENABLE_ACL_GET(uint32_t reg)
 /* DSF_ALLOC_CAM_CTL: 0x7010c0 -- alloc-ID/T-CONT CAM control */
 #define ODI_SW_DSF_ALLOC_CAM_CTL_OFF	0x7010c0U
 #define ODI_SW_DSF_ALLOC_CAM_CTL_DONE	(1U << 14)	/* set when the request is done */
+#define ODI_SW_DSF_ALLOC_CAM_CTL_ROW_VALID	(1U << 13)	/* after a read (OP 2): the row holds an entry */
 static inline uint32_t ODI_SW_DSF_ALLOC_CAM_CTL_REQ_SET(uint32_t reg, uint32_t val)
 {
 	return (reg & ~(0x1U << 15)) | ((val & 0x1U) << 15);
@@ -405,9 +406,19 @@ static inline uint32_t ODI_SW_DSF_ALLOC_CAM_WDATA_ALLOC_ID_SET(uint32_t reg, uin
 	return (reg & ~(0xfffU << 0)) | ((val & 0xfffU) << 0);
 }
 
+/* DSF_ALLOC_CAM_RDATA: 0x7010cc -- the Alloc-ID a read (OP 2) found in
+ * the row
+ */
+#define ODI_SW_DSF_ALLOC_CAM_RDATA_OFF	0x7010ccU
+static inline uint32_t ODI_SW_DSF_ALLOC_CAM_RDATA_ALLOC_ID_GET(uint32_t reg)
+{
+	return (reg >> 0) & 0xfffU;
+}
+
 /* DSF_GEM_CAM_CTL: 0x701100 -- downstream GEM-port CAM control */
 #define ODI_SW_DSF_GEM_CAM_CTL_OFF	0x701100U
 #define ODI_SW_DSF_GEM_CAM_CTL_DONE	(1U << 14)	/* set when the request is done */
+#define ODI_SW_DSF_GEM_CAM_CTL_ROW_VALID	(1U << 13)	/* after a read (OP 2): the row holds an entry */
 static inline uint32_t ODI_SW_DSF_GEM_CAM_CTL_REQ_GET(uint32_t reg)
 {
 	return (reg >> 15) & 0x1U;
@@ -440,6 +451,15 @@ static inline uint32_t ODI_SW_DSF_GEM_CAM_CTL_CAM_ROW_SET(uint32_t reg, uint32_t
 static inline uint32_t ODI_SW_DSF_GEM_CAM_WDATA_GEM_PORT_SET(uint32_t reg, uint32_t val)
 {
 	return (reg & ~(0xfffU << 0)) | ((val & 0xfffU) << 0);
+}
+
+/* DSF_GEM_CAM_RDATA: 0x70110c -- the GEM port a read (OP 2) found in the
+ * row
+ */
+#define ODI_SW_DSF_GEM_CAM_RDATA_OFF	0x70110cU
+static inline uint32_t ODI_SW_DSF_GEM_CAM_RDATA_GEM_PORT_GET(uint32_t reg)
+{
+	return (reg >> 0) & 0xfffU;
 }
 
 /* DSF_GEM_FLOW_TYPE: 0x701400, array 0..127, one word per GEM-port CAM

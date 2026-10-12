@@ -25,7 +25,8 @@
  * The GPON verbs go through a host stand-in for odi_gpon_verb() (odi_gpon.c
  * is kernel only) that does what that function does on the boot path:
  * gpondrv enables the GPON interrupt type, gponsn keeps the serial number,
- * the first gponact replays gpon_init.bin with it. The boot-time reset of
+ * the first gponact replays gpon_init.bin with it (the GPON MAC reset in
+ * it completes at once, golden_write_hook()). The boot-time reset of
  * the interrupt line (odi_gpon_chip_irq_reset(), at module init) is not a
  * boot step of rcS, and not here.
  */
@@ -181,6 +182,16 @@ static void isp2_cmds(void)
 	call(51, &b, sizeof b);
 }
 
+/* The one piece of hardware the boot stream waits on: the GPON MAC reset
+ * of the gpon_init replay, which finishes as soon as its request is
+ * released, so the wait reads PONMAC_RESET once.
+ */
+static void golden_write_hook(uint32_t off, uint32_t val)
+{
+	if (off == ODI_GPON_PONMAC_RESET_OFF && !ODI_GPON_PONMAC_RESET_RESET_REQ_GET(val))
+		odi_mock.regs[odi_mock_slot(off)] = val | ODI_GPON_PONMAC_RESET_RESET_COMPLETE;
+}
+
 int main(int argc, char **argv)
 {
 	static const char *const main_loop[] = {
@@ -206,6 +217,7 @@ int main(int argc, char **argv)
 	odi_mock_reset();
 	odi_switch_cmd_reset_state();
 	odi_mock_log_reads = 1;
+	odi_mock_write_hook = golden_write_hook;
 
 	fprintf(out, "# boot golden, ISP%d\n# phase: board\n", isp);
 	odi_board_init();
