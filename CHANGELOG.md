@@ -5,6 +5,30 @@ listed here.
 
 ## Unreleased
 
+- kernel: the GPON link counters. The GPON MAC counts the line in 43
+  counters (BIP errors, FEC corrected bits, bytes and codewords and the
+  uncorrectable ones, PLend, BWmap, PLOAMd and GEM errors, the BWmap
+  allocations the OLT grants this ONU, idle and non-idle GEM frames,
+  downstream Ethernet, FCS errors and OMCI, upstream bursts, PLOAMu, DBRu,
+  GEM frames and bytes), and every one clears when it is read, so any
+  reader takes counts from every other. The driver is now their one
+  reader: it samples them once a second, from the boot `gponact` on, into
+  64-bit totals, and counts a sample that read a counter full. The same
+  sample tracks FEC in use per direction and the superframe count; LOS,
+  LOF and LOM events and seconds come from every alarm reading, the
+  100 ms line poll's included; and the driver counts time in each ONU
+  state and every state transition. All of it is in `/proc/odi_gpon`,
+  new lines between `ranging_time` and `ploam_ring` (`docs/TOOLS.md`,
+  "/proc/odi_gpon: the link counters"); the first odi-sfp-exporter
+  release after v1.2.1 exports it. A weak fibre shows as FEC corrections
+  and BIP errors climbing; an ONU stuck at O5 after the OLT dropped it, as
+  BWmap allocations standing still. The REI carries the BIP error blocks
+  counted in O5 since the previous REI, from the same samples. It used to
+  read the register itself: the same count, except that the first REI
+  after O5 carried everything since the register was last read.
+  Host-tested against a clear-on-read register model
+  (`test/odi_gpon_ctr_test.c`).
+
 - kernel: after a power cut the stick reached O5 and the OLT deactivated
   it over and over, with OMCI never starting, until one boot of the stock
   firmware; a warm reboot of this image did not help (#42, very likely

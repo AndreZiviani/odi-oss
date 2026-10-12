@@ -295,6 +295,17 @@ The `tcont` lines are omcid's view (the T-CONTs its GEM ports use, with the
 Alloc-ID a Get of the T-CONT returns); the exporter takes the T-CONTs from
 `/proc/odi_gpon` instead, the OLT's own assignment.
 
+From the first odi-sfp-exporter release after v1.2.1 on, the same read of
+`/proc/odi_gpon` gives the GPON link: every `ctr` total as a `*_total`
+counter (`gpon_ds_bip_error_blocks_total`,
+`gpon_ds_fec_codewords_total{result}`, `gpon_ds_bwmap_allocations_total`,
+`gpon_us_gem_bytes_total`, ...), `gpon_alarm_events_total{alarm}` and
+`gpon_alarm_seconds_total{alarm}`, `gpon_onu_state_seconds_total{state}`,
+`gpon_onu_state_transitions_total{from,to}`, `gpon_fec_active{direction}`,
+and the driver's PLOAM, REI, TO1/TO2 and interrupt counts. The exporter's
+`docs/METRICS.md`, "The GPON link", has the list and the PromQL for a weak
+fibre and a stuck ONU.
+
 ### `dropbear` -- ssh and scp
 
 Started by services as
@@ -823,7 +834,7 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
-| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the last 32 PLOAM messages in full (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes) | -- |
+| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters, the serial number, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), the link counters and the alarm and ONU state times (below), and the last 32 PLOAM messages in full (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes) | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
@@ -836,6 +847,57 @@ drivers behind them.
 
 Writing a verb or an init command by hand re-programs the switch or the
 PON MAC under a running omcid; do it on a trial stick only.
+
+### /proc/odi_gpon: the link counters
+
+Between `ranging_time` and `ploam_ring`, one fact per line, a key and then
+words, all numbers decimal. The GPON MAC counters clear when they are
+read, so the driver is their one reader (`docs/KERNEL.md`, "The GPON link
+counters"): it samples them once a second from the boot `gponact` on and
+prints 64-bit totals since its first sample. Times are milliseconds: to
+the second for the ONU states, to the 100 ms line poll for the alarms while
+the ONU is activated.
+
+    ctr_samples 11                    samples taken since boot
+    alarm_now los 0                   the live DSF_ALARM_STATE bits at the last
+    alarm_now lof 0                   reading (absent before the first
+    alarm_now lom 0                   sample): los, lof, lom
+    fec_now ds 1                      FEC in use: downstream (the OLT sends
+    fec_now us 1                      it), upstream (the ONU sends it)
+    ds_superframe 305491896           the downstream superframe count
+    alarm_events los 1                clear -> set, as read; one per alarm
+    alarm_ms los 2000                 time seen set; one per alarm
+    onu_state_ms O5 8000              time in each state, O1 to O7
+    onu_transitions O4 O5 1           state changes, by state left and
+                                      entered; only pairs that happened
+    ctr ds_bip_err_blocks 4           every counter, always
+    ctr_saturated ds_gem_idle 1       samples that read it full; only
+                                      counters that ever were
+
+The `ctr` names, by bank: downstream framer `ds_bip_err_blocks`,
+`ds_bip_err_bits`, `ds_fec_corrected_bits`, `ds_fec_corrected_bytes`,
+`ds_fec_corrected_cw`, `ds_fec_uncorrectable_cw`, `ds_superframe_loss`,
+`ds_plend_fail`, `ds_ploam_accepted`, `ds_ploam_crc_err`,
+`ds_ploam_overflow`, `ds_bwmap_crc_err`, `ds_bwmap_overflow`,
+`ds_bwmap_invalid_0`, `ds_bwmap_invalid_1`, `ds_sn_requests`,
+`ds_ranging_requests`, `ds_bwmap_accepted`, `ds_gem_los`,
+`ds_gem_hec_corrected`, `ds_gem_idle`, `ds_gem_len_mismatch`,
+`ds_gem_port_mismatch`, `ds_gem_non_idle`, `ds_plend_corrected`,
+`ds_plend_uncorrectable`, `ds_blen_too_long`; downstream GEM
+`ds_eth_multicast`, `ds_eth_unicast`, `ds_eth_multicast_fwd`,
+`ds_eth_multicast_leak`, `ds_eth_fcs_err`, `ds_gem_over_interleave`,
+`ds_omci`; upstream `us_bursts`, `us_ploam`, `us_dbru`, `us_gem_frames`,
+`us_ploam_cpu_normal`, `us_ploam_cpu_urgent`, `us_ploam_no_message`,
+`us_ploam_sn`, `us_gem_bytes`. `kernel/extra/drivers/net/ethernet/odi/odi_gpon_ctr.c`
+has the register and field of each, and `test/fixtures/odi_gpon_ctr.txt`
+a whole block. `ds_bwmap_accepted` is the one to watch for a stuck ONU:
+on ISP2 it runs about 2,070 a second when served, stops when the OLT has
+deregistered the ONU that still says O5, and runs about nine times faster
+when the Alloc-ID table holds rows the OLT never assigned.
+
+New lines go in as new keys; a parser skips a key or a counter name it
+does not know. Reading one of these registers by hand (`diag register
+get`, `memprobe`) takes its count away from the totals and from the REI.
 
 ## Logs
 

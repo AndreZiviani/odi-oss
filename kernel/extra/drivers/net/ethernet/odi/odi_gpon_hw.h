@@ -171,14 +171,42 @@ static inline uint32_t ODI_GPON_DSF_LOS_SETUP_CLOCK_LOS_NOW_GET(uint32_t reg)
 	return (reg >> 10) & 0x1U;
 }
 
-/* DSF_BIP_ERR_BLOCKS: 0x701180 -- downstream BIP error block count, read
- * once per BER interval to build the REI upstream PLOAM (G.984.3 clause
- * 9.2.4.8) -- the one register the react capture reads immediately before
- * every REI send, in the steady state that follows O5. The per-bit count
- * next to it (0x701184) is never read in either capture available --
- * not used here.
+/* DSF_SUPERFRAME: 0x701048 -- the downstream superframe counter, as the
+ * framer keeps it (G.984.3 clause 8.1.3.2: the low 30 bits of the Ident
+ * field, one count per 125 us frame)
+ */
+#define ODI_GPON_DSF_SUPERFRAME_OFF	0x701048U
+static inline uint32_t ODI_GPON_DSF_SUPERFRAME_COUNT_GET(uint32_t reg)
+{
+	return (reg >> 0) & 0x3fffffffU;
+}
+
+/* The downstream link counters, 0x701180-0x7011c8: each clears when it is
+ * read and stays at all ones once full, so the one reader is the counter
+ * sampler (odi_gpon_ctr.c, which has the field layout of the shared
+ * registers). The REI upstream PLOAM (G.984.3 clause 9.2.4.8) carries the
+ * DSF_BIP_ERR_BLOCKS count, the register the react capture reads before
+ * every REI send; the sampler keeps it for the BER timer.
  */
 #define ODI_GPON_DSF_BIP_ERR_BLOCKS_OFF	0x701180U
+#define ODI_GPON_DSF_BIP_ERR_BITS_OFF	0x701184U
+#define ODI_GPON_DSF_FEC_CORR_BITS_OFF	0x701188U
+#define ODI_GPON_DSF_FEC_CORR_BYTES_OFF	0x70118cU
+#define ODI_GPON_DSF_FEC_CORR_CW_OFF	0x701190U
+#define ODI_GPON_DSF_FEC_UNCORR_CW_OFF	0x701194U
+#define ODI_GPON_DSF_SYNC_ERRS_OFF	0x701198U
+#define ODI_GPON_DSF_PLOAM_OK_OFF	0x70119cU
+#define ODI_GPON_DSF_PLOAM_ERRS_OFF	0x7011a0U
+#define ODI_GPON_DSF_BWMAP_ERRS_OFF	0x7011a4U
+#define ODI_GPON_DSF_BWMAP_INVALID_OFF	0x7011a8U
+#define ODI_GPON_DSF_ACTIVATION_REQS_OFF	0x7011acU
+#define ODI_GPON_DSF_BWMAP_OK_OFF	0x7011b0U
+#define ODI_GPON_DSF_GEM_LOS_OFF	0x7011b4U
+#define ODI_GPON_DSF_GEM_HEC_CORR_OFF	0x7011b8U
+#define ODI_GPON_DSF_GEM_IDLE_OFF	0x7011bcU
+#define ODI_GPON_DSF_GEM_ERRS_OFF	0x7011c0U
+#define ODI_GPON_DSF_GEM_NON_IDLE_OFF	0x7011c4U
+#define ODI_GPON_DSF_PLEND_CORR_OFF	0x7011c8U
 
 /* DSF_PLOAM_RX_CTL: 0x701080 -- downstream PLOAM FIFO handshake */
 #define ODI_GPON_DSF_PLOAM_RX_CTL_OFF	0x701080U
@@ -210,6 +238,15 @@ static inline uint32_t ODI_GPON_DSF_PLOAM_RX_WORD_MSG_WORD_GET(uint32_t reg)
 {
 	return (reg >> 0) & 0xffffU;
 }
+
+/* ---- Downstream GEM, 0x704000-0x7040ff */
+
+/* DS_GEM_MISC_SEL: 0x704064 and DS_GEM_MISC_COUNT: 0x704068 -- one
+ * counter at a time: write its index to the selector, read the count.
+ * Clear on read (odi_gpon_ctr.c has the indices).
+ */
+#define ODI_GPON_DS_GEM_MISC_SEL_OFF	0x704064U
+#define ODI_GPON_DS_GEM_MISC_COUNT_OFF	0x704068U
 
 /* ---- Upstream framer, 0x705000-0x7052ff */
 
@@ -434,6 +471,12 @@ static inline uint32_t ODI_GPON_USF_DYING_GASP_SEND_LIMIT_GET(uint32_t reg)
 {
 	return (reg >> 0) & 0xfU;
 }
+
+/* USF_MISC_SEL: 0x705140 and USF_MISC_COUNT: 0x705148 -- the upstream
+ * counters, selected the same way as DS_GEM_MISC_SEL. Clear on read.
+ */
+#define ODI_GPON_USF_MISC_SEL_OFF	0x705140U
+#define ODI_GPON_USF_MISC_COUNT_OFF	0x705148U
 
 /* ---- Downstream key engine, 0x703000-0x70329f */
 
