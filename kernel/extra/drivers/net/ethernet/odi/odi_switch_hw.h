@@ -81,9 +81,44 @@ static inline uint32_t ODI_SW_PHY_ACCESS_CMD_ADDRESS_SET(uint32_t reg, uint32_t 
 #define ODI_SW_PIN_GPIO_SELECT_BASE	0x00048U
 #define ODI_SW_PIN_GPIO_SELECT(n)	(ODI_SW_PIN_GPIO_SELECT_BASE + 4U * (uint32_t)(n))	/* slots used: 29, 31 of 0..63 */
 
-/* PORT_FORCE_SELECT: 0x0001b4, one word per port */
+/* PORT_FORCE_ABILITY: 0x000180, one word per port -- the value a port
+ * runs with for each ability field PORT_FORCE_SELECT forces
+ */
+#define ODI_SW_PORT_FORCE_ABILITY_BASE	0x00180U
+#define ODI_SW_PORT_FORCE_ABILITY(n)	(ODI_SW_PORT_FORCE_ABILITY_BASE + 4U * (uint32_t)(n))	/* slots used: 0 of 0..3 */
+static inline uint32_t ODI_SW_PORT_FORCE_ABILITY_TX_PAUSE_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x1U << 6)) | ((val & 0x1U) << 6);
+}
+
+/* PORT_ABILITY: 0x000198, one word per port, read-only -- the ability a
+ * port runs with, negotiated or forced field by field
+ */
+#define ODI_SW_PORT_ABILITY_BASE	0x00198U
+#define ODI_SW_PORT_ABILITY(n)	(ODI_SW_PORT_ABILITY_BASE + 4U * (uint32_t)(n))	/* slots used: 0 of 0..3 */
+static inline uint32_t ODI_SW_PORT_ABILITY_TX_PAUSE_GET(uint32_t reg)
+{
+	return (reg >> 6) & 0x1U;
+}
+static inline uint32_t ODI_SW_PORT_ABILITY_RX_PAUSE_GET(uint32_t reg)
+{
+	return (reg >> 5) & 0x1U;
+}
+static inline uint32_t ODI_SW_PORT_ABILITY_LINK_UP_GET(uint32_t reg)
+{
+	return (reg >> 4) & 0x1U;
+}
+
+/* PORT_FORCE_SELECT: 0x0001b4, one word per port -- one bit per ability
+ * field: 1 runs the port with the PORT_FORCE_ABILITY value of that field,
+ * 0 with the negotiated one
+ */
 #define ODI_SW_PORT_FORCE_SELECT_BASE	0x001b4U
 #define ODI_SW_PORT_FORCE_SELECT(n)	(ODI_SW_PORT_FORCE_SELECT_BASE + 4U * (uint32_t)(n))	/* slots used: 0,1,2,3 of 0..3 */
+static inline uint32_t ODI_SW_PORT_FORCE_SELECT_TX_PAUSE_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x1U << 6)) | ((val & 0x1U) << 6);
+}
 
 /* ---- Frame length, DSCP remark */
 

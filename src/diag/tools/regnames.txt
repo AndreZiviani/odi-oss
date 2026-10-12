@@ -197,7 +197,12 @@ reg 0x0000b0 I2C_WRITE_DATA
 reg 0x0000b8 I2C_BYTE_ADDR
 reg 0x0000c0 I2C_CMD           3:3=NOT_ACKED 2:2=IN_PROGRESS 1:1=WRITE 0:0=START
 reg 0x0000c8 I2C_READ_DATA
-reg 0x0001b4 PORT_FORCE_SELECT
+# Per-port MAC ability (docs/SWITCH.md#host-port-pause). PORT_FORCE_SELECT
+# picks, field by field, whether a port runs with the PORT_FORCE_ABILITY
+# value or the negotiated one; PORT_ABILITY is the result, read-only.
+reg 0x000180 PORT_FORCE_ABILITY 6:6=TX_PAUSE 5:5=RX_PAUSE
+reg 0x000198 PORT_ABILITY      6:6=TX_PAUSE 5:5=RX_PAUSE 4:4=LINK_UP
+reg 0x0001b4 PORT_FORCE_SELECT 6:6=TX_PAUSE 5:5=RX_PAUSE
 
 # Frame length and DSCP remark
 reg 0x011008 PORT_MAX_FRAME_SEL 1:1=GIGA_PROFILE 0:0=FE_PROFILE

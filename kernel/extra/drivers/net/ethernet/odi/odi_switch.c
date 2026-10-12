@@ -12,6 +12,8 @@
  * and the PON queue counters (+0xF00000) (odi_switch_hw.h).
  */
 #include <linux/module.h>
+#include <linux/moduleparam.h>
+#include <linux/kstrtox.h>
 #include <linux/kernel.h>
 #include <linux/io.h>
 #include <linux/ratelimit.h>
@@ -142,6 +144,11 @@ void odi_reg_write(uint32_t off, uint32_t val)
  * steps themselves, because loading modload.bin sleeps and needs the kernel.
  * Returns 0, or the loader error (already logged).
  */
+/* Set once the platform settings have run, under odi_switch_lock: from
+ * then on a change of odi_switch.host_pause applies at once.
+ */
+static bool odi_switch_platform_done;
+
 int odi_switch_boot_init(void)
 {
 	struct odi_replay_fw fw;
@@ -149,6 +156,7 @@ int odi_switch_boot_init(void)
 
 	lockdep_assert_held(&odi_switch_lock);
 	odi_switch_init_platform();
+	odi_switch_platform_done = true;
 	rc = odi_replay_fw_load(ODI_REPLAY_TABLE_MODLOAD, &fw);
 	if (rc)
 		return rc;
@@ -156,6 +164,35 @@ int odi_switch_boot_init(void)
 	odi_replay_fw_release(&fw);
 	return 0;
 }
+
+/* odi_switch.host_pause: PAUSE frames toward the host on the host port,
+ * off (the default) or left to the auto-negotiation. On the command line
+ * it is read before the switch is mapped and takes effect with the
+ * platform settings; written to /sys/module/odi_switch/parameters/host_pause
+ * after them it is applied at once, the same two register writes.
+ */
+static int odi_switch_host_pause_param_set(const char *val, const struct kernel_param *kp)
+{
+	bool on;
+	int rc;
+
+	rc = kstrtobool(val, &on);
+	if (rc)
+		return rc;
+	mutex_lock(&odi_switch_lock);
+	odi_sw_host_pause = on;
+	if (odi_switch_platform_done)
+		odi_sw_host_pause_apply();
+	mutex_unlock(&odi_switch_lock);
+	return 0;
+}
+
+static const struct kernel_param_ops odi_switch_host_pause_param_ops = {
+	.set = odi_switch_host_pause_param_set,
+	.get = param_get_bool,
+};
+module_param_cb(host_pause, &odi_switch_host_pause_param_ops, &odi_sw_host_pause, 0644);
+MODULE_PARM_DESC(host_pause, "send PAUSE frames to the host when the switch is congested (default: no, the switch drops)");
 
 int odi_poll_reg(uint32_t off, uint32_t mask, uint32_t want,
 		 unsigned int delay_us, unsigned int timeout_us, uint32_t *last)
