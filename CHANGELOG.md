@@ -34,8 +34,7 @@ listed here.
   the daemons were never killed: each `wait` sat out the daemon idle exit
   (`-w`), 4.5 minutes in qemu-test.sh alone. They now kill the pid they
   started; as a result the respawn check really does `kill -9` the daemon,
-  which it did not before. shellcheck is taken from the runner image, and
-  the qemu-system-mips install skips recommended packages.
+  which it did not before. shellcheck is taken from the runner image.
 
 - diag-bundle: the bundle collects the optics module under `module/`, to
   tell which laser driver a stick has and what state its calibration is
