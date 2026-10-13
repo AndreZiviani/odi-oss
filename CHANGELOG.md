@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- slot-state.sh: safe to run again after a commit, which the web UI now does
+  (odi-ui: the Commit button runs `nv commit` and then this script, so
+  `/var/run/odi-slot`, the login notice and `gpon_uncommitted` follow the
+  environment instead of staying as the boot left them). It sets its own
+  `PATH` because confd starts its children with an empty environment, and a
+  run after the first of a boot no longer waits up to 30 s for syslogd to
+  appear before logging, which would have held the UI's reply. The first
+  run of a boot keeps the bounded wait. `test/slot_state_test.sh` covers the
+  run with no environment and both waits.
+
 - kernel: every Request_Key now gets a fresh AES key from the kernel RNG.
   The ONU answered every one with 16 zero bytes, because nothing ever set
   the key, so on an OLT that encrypts the data ports (ISP1 does) the

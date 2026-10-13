@@ -56,6 +56,10 @@ printf 'mtd5: 00300000 00001000 "r0"\nmtd7: 00300000 00001000 "r1"\n' > "$T/mtd"
 # env1 / env2: the pairs of each copy; $T/primary: which one U-Boot boots.
 setup() {
 	rm -f "$T/state" "$T/motd" "$T/log"
+	envs "$@"
+}
+# The same, leaving the state file alone: the stick after the boot.
+envs() {
 	printf 'bootdelay=1\nsw_active=%s\nsw_commit=%s\nsw_tryactive=%s\n' "$2" "$3" "$4" > "$T/env1"
 	printf 'bootdelay=1\nsw_active=%s\nsw_commit=%s\nsw_tryactive=%s\n' "$5" "$6" "$7" > "$T/env2"
 	echo "$1" > "$T/primary"
@@ -162,6 +166,43 @@ setup 2        0 0 1                      1 0 2
 run
 if [ -z "$(find "$T" -maxdepth 1 -name '*.tmp.*')" ]; then ok "no temp files left"; else no "no temp files left"; fi
 if [ "$(wc -l < "$T/state" | tr -d ' ')" = 9 ]; then ok "the state file has its nine keys"; else no "the state file has its nine keys"; fi
+
+# After `nv commit` the web UI runs this again. confd starts its children
+# with NO environment, and the script must neither depend on a PATH it was not
+# given nor sit out the boot-time wait for syslogd a second time.
+echo "== a refresh after a commit (the web UI path)"
+setup 2        0 0 1                      1 0 2
+run
+envs 2         1 1 2                      1 1 2
+rm -f "$T/devlog" "$T/log"
+SH=$(command -v sh)
+# SLOT_STATE_PATH only adds the directory of this host's timeout (homebrew's
+# is outside the system dirs); with no PATH given, the script still has to
+# find sed, head and sleep by itself.
+TD=$(dirname "$(command -v timeout || echo "$T/bin/timeout")")
+env -i SLOT_STATE_PATH="$T/bin:$TD:/usr/bin:/bin" NV="$T/bin/nv" LOGGER="$T/bin/logger" \
+    PROC_CMDLINE="$T/cmdline" PROC_MTD="$T/mtd" STATE="$T/state" MOTD="$T/motd" \
+    DEV_LOG="$T/devlog" "$SH" "$S" > "$T/out" 2>&1
+st "a run with no environment re-reads the committed state" "uncommitted=0"
+st "and sw_commit of both copies" "primary_sw_commit=1"
+quiet "and the notice is cleared"
+# Back to a trial, no /dev/log and a long wait: the refresh must not wait.
+envs 2         0 0 1                      1 0 2
+rm -f "$T/log"
+t0=$SECONDS
+env PATH="$T/bin:$PATH" NV="$T/bin/nv" LOGGER="$T/bin/logger" LOG_WAIT_S=4 \
+    PROC_CMDLINE="$T/cmdline" PROC_MTD="$T/mtd" STATE="$T/state" MOTD="$T/motd" \
+    DEV_LOG="$T/devlog" "$SH" "$S" > "$T/out" 2>&1
+if [ $((SECONDS - t0)) -lt 2 ]; then ok "a later run does not wait for syslogd"; else no "a later run does not wait for syslogd (took $((SECONDS - t0)) s)"; fi
+logged "and still logs the notice" "TRIAL BOOT: running slot 1"
+# The first run of a boot (no state file yet) keeps its bounded wait.
+rm -f "$T/state" "$T/log"
+t0=$SECONDS
+env PATH="$T/bin:$PATH" NV="$T/bin/nv" LOGGER="$T/bin/logger" LOG_WAIT_S=2 \
+    PROC_CMDLINE="$T/cmdline" PROC_MTD="$T/mtd" STATE="$T/state" MOTD="$T/motd" \
+    DEV_LOG="$T/devlog" "$SH" "$S" > "$T/out" 2>&1
+if [ $((SECONDS - t0)) -ge 2 ]; then ok "the first run of a boot still waits for syslogd"; else no "the first run of a boot still waits for syslogd"; fi
+logged "and logs after the wait" "TRIAL BOOT: running slot 1"
 
 echo
 echo "$pass passed, $fail failed"
