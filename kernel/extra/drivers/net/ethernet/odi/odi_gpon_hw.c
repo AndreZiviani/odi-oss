@@ -58,7 +58,7 @@ struct odi_gpon_hw_state {
 	/* USF_BURST_HDR_SETUP.LENGTH for the ranged (O5) burst: Extended_Burst_Length ranged
 	 * count once the OLT sent one, else the default below.
 	 */
-	uint8_t boh_ranged_len;
+	uint16_t boh_ranged_len;
 	int eqd_applied;	/* set_eqd() ran: bursts use the ranged length */
 
 	/* Alloc-ID (T-CONT) CAM row bookkeeping (odi_gpon_hw.c's own
@@ -314,7 +314,10 @@ static void hw_apply_eqd(uint32_t eqd_bits)
  */
 #define ODI_GPON_HW_BOH_LEN_WIDE	0x0cU	/* pre-ranging, no Extended_Burst_Length yet */
 #define ODI_GPON_HW_BOH_LEN_RANGED	0x19U	/* ranged, no Extended_Burst_Length seen */
-#define ODI_GPON_HW_BOH_LEN_MAX	0x3fU	/* USF_BURST_HDR_SETUP.LENGTH field width guard */
+/* LENGTH is an 8-bit field. 252 is the largest burst overhead the stock
+ * driver accepts; a longer request is cut there rather than wrapped.
+ */
+#define ODI_GPON_HW_BOH_LEN_MAX	252U
 
 static void hw_write_boh(uint32_t len)
 {
@@ -336,7 +339,7 @@ static void hw_set_ext_burst_length(uint8_t pre_ranged_bytes, uint8_t ranged_byt
 {
 	if (!odi_gpon_hw.boh_valid)
 		return;	/* no Upstream_Overhead yet: nothing to extend */
-	odi_gpon_hw.boh_ranged_len = (uint8_t)(odi_gpon_hw.boh_fixed_bytes + ranged_bytes);
+	odi_gpon_hw.boh_ranged_len = (uint16_t)(odi_gpon_hw.boh_fixed_bytes + ranged_bytes);
 	if (odi_gpon_hw.eqd_applied)
 		hw_write_boh(odi_gpon_hw.boh_ranged_len);
 	else
