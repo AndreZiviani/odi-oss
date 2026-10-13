@@ -375,6 +375,7 @@ static inline uint32_t ODI_GPON_USF_BURST_HDR_BYTE_VALUE_SET(uint32_t reg, uint3
  * priority queues
  */
 #define ODI_GPON_USF_PLOAM_TX_CTL_OFF	0x7050c0U
+#define ODI_GPON_USF_PLOAM_TX_CTL_URGENT_FULL	(1U << 4)
 static inline uint32_t ODI_GPON_USF_PLOAM_TX_CTL_PUSH_GET(uint32_t reg)
 {
 	return (reg >> 0) & 0x1U;

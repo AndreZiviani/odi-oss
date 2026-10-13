@@ -29,10 +29,12 @@
 #include <linux/string.h>
 #include <linux/printk.h>
 #define ODI_GPON_HW_LOG(fmt, ...) pr_info_once("odi_gpon_hw: " fmt, ##__VA_ARGS__)
+#define ODI_GPON_HW_WARN(fmt, ...) pr_warn_ratelimited("odi_gpon_hw: " fmt, ##__VA_ARGS__)
 #else
 #include <string.h>
 #include <stdio.h>
 #define ODI_GPON_HW_LOG(fmt, ...) printf("odi_gpon_hw: " fmt, ##__VA_ARGS__)
+#define ODI_GPON_HW_WARN(fmt, ...) printf("odi_gpon_hw: " fmt, ##__VA_ARGS__)
 #endif
 
 /* ---- Small hardware-shadow state this leaf layer keeps, documented at
@@ -86,6 +88,7 @@ struct odi_gpon_hw_state {
 
 	unsigned int ploam_rx_count;
 	unsigned int ploam_tx_count;
+	unsigned int ploam_us_dropped;	/* not pushed: the upstream queue stayed full */
 
 	uint32_t eqd_multframe;
 	uint32_t eqd_inframe;
@@ -413,6 +416,15 @@ static void hw_set_upstream_overhead(void *ctx, uint8_t guard_bits, uint8_t type
 	hw_apply_eqd((uint32_t)preassigned_delay * 32U * 8U);
 }
 
+/* How long a reply waits for room in the upstream queue: 1 ms, eight
+ * upstream frames. The queue drains one message per PLOAMu the OLT
+ * grants, so a full queue that does not move in 1 ms is an OLT that
+ * stopped granting, and waiting longer only keeps interrupts off (the
+ * caller holds odi_gpon_lock). The poll step is 5 us.
+ */
+#define ODI_GPON_HW_US_PLOAM_WAIT_US	1000U
+#define ODI_GPON_HW_US_PLOAM_STEP_US	5U
+
 static void hw_send_us_ploam(void *ctx, const struct odi_gpon_ploam *msg)
 {
 	uint16_t words[6];
@@ -432,6 +444,21 @@ static void hw_send_us_ploam(void *ctx, const struct odi_gpon_ploam *msg)
 	ind = 0;
 	ind = ODI_GPON_USF_PLOAM_TX_CTL_MSG_TYPE_SET(ind, ODI_GPON_PLOAM_TYPE_REPLY);
 	odi_reg_write(ODI_GPON_USF_PLOAM_TX_CTL_OFF, ind);
+
+	/* MSG_TYPE 1 is the urgent queue (the PLOAMu counters count every
+	 * reply there, us_ploam_cpu_urgent), so URGENT_FULL is the bit that
+	 * says whether a push would land. A push into a full queue is lost
+	 * without a trace; one that cannot be queued in the bound is counted
+	 * instead (/proc/odi_gpon, ploam_us_dropped). The OLT repeats what it
+	 * does not see answered, and deactivates an ONU that stays silent.
+	 */
+	if (odi_poll_reg(ODI_GPON_USF_PLOAM_TX_CTL_OFF, ODI_GPON_USF_PLOAM_TX_CTL_URGENT_FULL, 0U,
+			 ODI_GPON_HW_US_PLOAM_STEP_US, ODI_GPON_HW_US_PLOAM_WAIT_US, NULL)) {
+		odi_gpon_hw.ploam_us_dropped++;
+		ODI_GPON_HW_WARN("upstream PLOAM type 0x%02x not sent: queue full for %u us\n",
+				 msg->type, ODI_GPON_HW_US_PLOAM_WAIT_US);
+		return;
+	}
 
 	for (i = 0; i < ODI_GPON_US_PLOAM_WORDS; i++)
 		odi_reg_write(ODI_GPON_USF_PLOAM_TX_WORD(i), words[i]);
@@ -1020,6 +1047,11 @@ void odi_gpon_get_ploam_counts(unsigned int *rx, unsigned int *tx)
 {
 	*rx = odi_gpon_hw.ploam_rx_count;
 	*tx = odi_gpon_hw.ploam_tx_count;
+}
+
+unsigned int odi_gpon_get_ploam_us_dropped(void)
+{
+	return odi_gpon_hw.ploam_us_dropped;
 }
 
 void odi_gpon_hw_note_ploam_rx(const struct odi_gpon_ploam *msg)

@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- kernel: an upstream PLOAM reply now waits for room in the queue instead
+  of being pushed blind. Every reply (Acknowledge, Encryption_Key,
+  Password, REI) goes into the urgent upstream queue, and the driver never
+  read the queue's full bit, so a reply pushed into a full queue, for
+  example during the six Encryption_Key fragments of a Request_Key, was
+  lost without a trace; the OLT repeats an unanswered message and
+  deactivates an ONU that stays silent. Each push now waits up to 1 ms
+  (eight upstream frames) for room, and a reply that finds no room is not
+  pushed and is counted on a new `/proc/odi_gpon` line, `ploam_us_dropped`
+  (`us_tx` counts only what was pushed), with a rate-limited log line. On
+  both test lines in steady state `us_tx` already equals the urgent PLOAMu
+  counter, so the count is expected to stay 0. Host-tested against the
+  register model (`test/odi_gpon_us_ploam_test.c`).
+
 - rootfs: `flash set` and `flash default cs` replace `lastgood.xml` and
   `lastgood_hs.xml` with a rename inside `/var/config`. They used to build
   the file in `/var/tmp` and `mv` it over the store, but `/var/tmp` is a
