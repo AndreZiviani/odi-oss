@@ -5,6 +5,27 @@ listed here.
 
 ## Unreleased
 
+- kernel: every Request_Key now gets a fresh AES key from the kernel RNG.
+  The ONU answered every one with 16 zero bytes, because nothing ever set
+  the key, so on an OLT that encrypts the data ports (ISP1 does) the
+  downstream encryption protected nothing. G.984.3 clause 12.3 has the ONU
+  generate a cryptographically unpredictable key per request and
+  increment the Key_Index with each one; the Key_Index was a fixed 0x02
+  and now counts 1, 2, ... from boot. The key sent upstream in the six
+  Encryption_Key fragments is the one written into the shadow key slot,
+  and each of its eight words is now waited for (bounded) before the next
+  one goes into the same register. A Request_Key that replaces a key
+  already scheduled lets the next Key_Switching_Time be written even when
+  it repeats the old frame number. With all keys zero, a fault in the key
+  load or the key switch could not show; with a real key it would show as
+  every encrypted downstream port going silent at the first switch.
+  `/proc/odi_gpon` is world-readable, so its PLOAM ring now prints the
+  eight key bytes of each upstream Encryption_Key (type 0x05) as `xx`,
+  keeping the Key_Index and Frag_Index; nothing else prints the key.
+  Host-tested end to end against the register model
+  (`test/odi_gpon_aes_key_test.c`, and `test/odi_gpon_test.c` for the
+  ring).
+
 - kernel: the `gponpw` verb accepts short hex, with an explicit `0x`
   prefix. A value that registers today keeps its meaning: exactly 20
   characters are hex, and 1 to 10 characters are text even when every

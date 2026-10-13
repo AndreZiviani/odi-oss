@@ -57,6 +57,14 @@ static const uint8_t captured_aes_key[16] = {
 	0xed, 0xbb, 0xb4, 0x74, 0xfb, 0x27, 0x0a, 0xbe,
 };
 
+/* The driver draws a new key per Request_Key; here the draw is the key
+ * the capture shows.
+ */
+static void captured_key_source(uint8_t key[16])
+{
+	memcpy(key, captured_aes_key, sizeof(captured_aes_key));
+}
+
 #define TEST_ONU_ID	0x1aU	/* this box own assigned ID in the capture -- not sensitive */
 #define TEST_GEM_PORT	0x01aU
 
@@ -162,7 +170,7 @@ int main(int argc, char **argv)
 	odi_gpon_fsm_init(&fsm);
 	odi_gpon_fsm_set_serial_number(&fsm, dummy_sn);
 	odi_gpon_fsm_set_password(&fsm, dummy_pw);
-	odi_gpon_fsm_set_aes_key(&fsm, captured_aes_key);
+	odi_gpon_hw_test_set_key_source(captured_key_source);
 
 	/* Seed "already active" state -- both the FSM own fields and the
 	 * mock registers a real re-activation trial would already have set
@@ -170,6 +178,10 @@ int main(int argc, char **argv)
 	 */
 	fsm.state = ODI_GPON_STATE_O5;
 	fsm.onu_id = TEST_ONU_ID;
+	/* One key exchanged in that cycle: the captured Request_Key reports
+	 * Key_Index 2, the next one.
+	 */
+	fsm.key_index = 1U;
 	odi_gpon_hw_test_seed_active(TEST_GEM_PORT, seed_alloc_rows,
 				      sizeof(seed_alloc_rows) / sizeof(seed_alloc_rows[0]));
 	poke_reg(ODI_GPON_DSF_ONU_STATE_OFF, 0x1a05U);

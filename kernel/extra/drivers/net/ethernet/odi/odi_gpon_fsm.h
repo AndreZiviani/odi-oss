@@ -132,6 +132,12 @@ struct odi_gpon_fsm_ops {
 	 */
 	void (*laser_enable)(void *ctx, int enable);
 
+	/* Fill key with a fresh 128-bit AES key, for one Request_Key: G.984.3
+	 * clause 12.3 has the ONU generate a cryptographically unpredictable
+	 * key for every request. The leaf draws it from the kernel RNG.
+	 */
+	void (*new_key)(void *ctx, uint8_t key[16]);
+
 	/* Load one 128-bit AES key into the given hitless-switch slot
 	 * (ODI_GPON_DSK_SLOT_CURRENT/_NEXT).
 	 */
@@ -166,22 +172,23 @@ struct odi_gpon_fsm {
 	uint8_t onu_id;			/* 0 until Assign_ONU-ID (O3->O4) */
 	uint8_t serial_number[8];	/* set once, before activation starts */
 	uint8_t password[10];		/* set once, before activation starts */
-	uint8_t aes_key[16];		/* the key this ONU reports on Request_Key (G.984.3 clause 9.2.4.5) */
-	/* Key_Index (content[0] of every Encryption_Key fragment, clause
-	 * 9.2.4.5) -- 0x02 in every capture this driver has seen; whether
-	 * it changes across more than the one Request_Key cycle captured so
-	 * far is unverified, so this stays a fixed field this driver does
-	 * not itself increment.
+	/* The key last generated for a Request_Key and reported upstream in
+	 * the Encryption_Key fragments (G.984.3 clause 9.2.4.5); zero until
+	 * the first Request_Key.
+	 */
+	uint8_t aes_key[16];
+	/* Key_Index of that key (content[0] of every Encryption_Key fragment,
+	 * clause 9.2.4.5): incremented for each key generated (clause 12.3),
+	 * so all six fragments of one key carry the same index and the next
+	 * key a different one. 0 until the first Request_Key, then 1, 2, ...,
+	 * wrapping at 8 bits; kept across activations.
 	 */
 	uint8_t key_index;
 };
 
-#define ODI_GPON_KEY_INDEX_DEFAULT	0x02U
-
 void odi_gpon_fsm_init(struct odi_gpon_fsm *fsm);
 void odi_gpon_fsm_set_serial_number(struct odi_gpon_fsm *fsm, const uint8_t serial_number[8]);
 void odi_gpon_fsm_set_password(struct odi_gpon_fsm *fsm, const uint8_t password[10]);
-void odi_gpon_fsm_set_aes_key(struct odi_gpon_fsm *fsm, const uint8_t key[16]);
 
 /* The line alarm as a level, mapped to the event Table 10-1 acts on in the
  * current state: alarm is LOS or LOF asserted (clause 10.2.5.3 c), d):

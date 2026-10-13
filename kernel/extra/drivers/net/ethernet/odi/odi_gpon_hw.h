@@ -515,6 +515,7 @@ static inline uint32_t ODI_GPON_DSK_SWITCH_FRAME_SUPERFRAME_SET(uint32_t reg, ui
  * write, targeting one of the two hitless-switch key slots
  */
 #define ODI_GPON_DSK_KEY_LOAD_OFF	0x703020U
+#define ODI_GPON_DSK_KEY_LOAD_WRITE_DONE	(1U << 14)	/* set once the word written is taken */
 static inline uint32_t ODI_GPON_DSK_KEY_LOAD_WRITE_REQ_GET(uint32_t reg)
 {
 	return (reg >> 15) & 0x1U;

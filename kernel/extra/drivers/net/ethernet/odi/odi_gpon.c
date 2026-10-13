@@ -1087,10 +1087,17 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 
 	seq_printf(seq, "ploam_ring %u entries\n", count);
 	for (i = 0; i < count && i < ODI_GPON_PLOAM_RING_LEN; i++) {
-		seq_printf(seq, "  %u %s onu_id 0x%02x type 0x%02x content %10ph\n",
+		char content[ODI_GPON_PLOAM_RING_CONTENT_CHARS];
+
+		/* The live AES key of an Encryption_Key is masked: this file
+		 * is world-readable (odi_gpon_ploam_ring_content()).
+		 */
+		odi_gpon_ploam_ring_content(ring[i].direction == ODI_GPON_PLOAM_US,
+					    ring[i].type, ring[i].content, content);
+		seq_printf(seq, "  %u %s onu_id 0x%02x type 0x%02x content %s\n",
 			   ring[i].timestamp_ms,
 			   ring[i].direction == ODI_GPON_PLOAM_US ? "us" : "ds",
-			   ring[i].onu_id, ring[i].type, ring[i].content);
+			   ring[i].onu_id, ring[i].type, content);
 	}
 
 	return 0;

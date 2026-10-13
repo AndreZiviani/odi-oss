@@ -121,7 +121,6 @@ void odi_gpon_fsm_init(struct odi_gpon_fsm *fsm)
 {
 	memset(fsm, 0, sizeof(*fsm));
 	fsm->state = ODI_GPON_STATE_O1;
-	fsm->key_index = ODI_GPON_KEY_INDEX_DEFAULT;
 }
 
 void odi_gpon_fsm_set_serial_number(struct odi_gpon_fsm *fsm, const uint8_t serial_number[8])
@@ -132,11 +131,6 @@ void odi_gpon_fsm_set_serial_number(struct odi_gpon_fsm *fsm, const uint8_t seri
 void odi_gpon_fsm_set_password(struct odi_gpon_fsm *fsm, const uint8_t password[10])
 {
 	memcpy(fsm->password, password, ODI_GPON_PLOAM_CONTENT_LEN);
-}
-
-void odi_gpon_fsm_set_aes_key(struct odi_gpon_fsm *fsm, const uint8_t key[16])
-{
-	memcpy(fsm->aes_key, key, ODI_GPON_AES_KEY_BYTES);
 }
 
 /* ---- Event handlers ---- */
@@ -429,12 +423,16 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 
 	case ODI_GPON_STATE_O5:
 		if (msg->type == ODI_GPON_DS_REQUEST_KEY) {
-			/* Both fragments, each sent 3x, alternating (0,1,0,1,0,1),
-			 * not 3 of fragment 0 followed by 3 of fragment 1.
-			 * Loaded into hardware's own inactive key slot only AFTER
-			 * all six sends -- ops->load_key(), not part of this
-			 * loop.
+			/* G.984.3 clause 12.3: a new key for every request, with
+			 * a new Key_Index, and a new request before the switch
+			 * replaces the key still waiting in the shadow slot
+			 * (clause 12.4). Both fragments, each sent 3x,
+			 * alternating (0,1,0,1,0,1), not 3 of fragment 0
+			 * followed by 3 of fragment 1. The same key is loaded
+			 * into the inactive hardware slot after all six sends.
 			 */
+			ops->new_key(ctx, fsm->aes_key);
+			fsm->key_index++;
 			for (rep = 0; rep < 3U; rep++) {
 				for (i = 0; i < ODI_GPON_KEY_FRAGMENTS; i++) {
 					odi_gpon_encode_encryption_key_fragment(fsm->onu_id,

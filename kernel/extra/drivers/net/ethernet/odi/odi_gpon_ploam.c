@@ -187,3 +187,25 @@ void odi_gpon_encode_acknowledge(uint8_t onu_id, uint8_t acked_type,
 	out->content[0] = acked_type;
 	memcpy(&out->content[1], acked_content_9, 9U);
 }
+
+void odi_gpon_ploam_ring_content(int upstream, uint8_t type,
+				 const uint8_t content[ODI_GPON_PLOAM_CONTENT_LEN],
+				 char out[ODI_GPON_PLOAM_RING_CONTENT_CHARS])
+{
+	static const char hex[] = "0123456789abcdef";
+	int key = upstream && type == ODI_GPON_US_ENCRYPTION_KEY;
+	unsigned int i;
+
+	for (i = 0; i < ODI_GPON_PLOAM_CONTENT_LEN; i++) {
+		char *o = &out[3U * i];
+
+		if (key && i >= 2U) {
+			o[0] = 'x';
+			o[1] = 'x';
+		} else {
+			o[0] = hex[content[i] >> 4];
+			o[1] = hex[content[i] & 0xfU];
+		}
+		o[2] = (i + 1U < ODI_GPON_PLOAM_CONTENT_LEN) ? ' ' : '\0';
+	}
+}
