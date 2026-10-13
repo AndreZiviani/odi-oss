@@ -72,12 +72,12 @@ static void test_heartbeat_fires_every_60s_not_before(void)
 	struct odi_wdt_deadline_state st;
 
 	odi_wdt_deadline_state_init(&st);
-	CHECK(!(odi_wdt_deadline_tick(&st, 0, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at uptime 0 (first one is due at 60 s)");
-	CHECK(!(odi_wdt_deadline_tick(&st, 30, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat again at 30 s");
-	CHECK(!(odi_wdt_deadline_tick(&st, 59, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at 59 s");
-	CHECK(odi_wdt_deadline_tick(&st, 60, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT, "heartbeat fires again at 60 s");
-	CHECK(!(odi_wdt_deadline_tick(&st, 119, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at 119 s");
-	CHECK(odi_wdt_deadline_tick(&st, 120, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT, "heartbeat fires again at 120 s");
+	CHECK(!(odi_wdt_deadline_tick(&st, 0, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at uptime 0 (first one is due at 600 s)");
+	CHECK(!(odi_wdt_deadline_tick(&st, 60, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat at 60 s: one a minute filled the syslog ring");
+	CHECK(!(odi_wdt_deadline_tick(&st, 599, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at 599 s");
+	CHECK(odi_wdt_deadline_tick(&st, 600, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT, "heartbeat fires at 600 s");
+	CHECK(!(odi_wdt_deadline_tick(&st, 1199, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat yet at 1199 s");
+	CHECK(odi_wdt_deadline_tick(&st, 1200, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT, "heartbeat fires again at 1200 s");
 }
 
 /* Stall report: enabled, at least one kick observed, more than 15 s since

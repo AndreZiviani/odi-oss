@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- The syslog ring keeps days instead of hours. On a release image it
+  cycled in about 3-4 hours: the serial-console `login`, respawned by init,
+  gave up at its prompt after 60 s and restarted every minute (two lines
+  each time), and `odi_wdt` printed its heartbeat every minute. The
+  console entry is now `askfirst` (press Enter on the console, then
+  `login` runs, with no timeout before that), and the heartbeat is every
+  10 minutes (`ODI_WDT_HEARTBEAT_INTERVAL_S`).
+
 - The diagnostics bundle includes the syslog ring (`syslog.txt`, from
   `logread`). omcid sends its `event=` lines (ONU state changes, OMCI
   provisioning, re-registrations) only to syslog, so a bundle had no record

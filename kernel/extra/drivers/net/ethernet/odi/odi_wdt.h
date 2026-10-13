@@ -84,7 +84,7 @@ extern const struct odi_wdt_cpu_rx_ops *wdt_cpu_rx_ops;
 #define ODI_WDT_RESET_MODE	0U
 
 #define ODI_WDT_KICK_INTERVAL_S		5U
-#define ODI_WDT_HEARTBEAT_INTERVAL_S	60U
+#define ODI_WDT_HEARTBEAT_INTERVAL_S	600U
 #define ODI_WDT_STALL_THRESHOLD_S	15U
 #define ODI_WDT_STALL_MAX_REPORTS	3U
 #define ODI_WDT_USERLAND_DEADLINE_S	120U
