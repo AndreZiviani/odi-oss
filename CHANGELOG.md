@@ -5,12 +5,30 @@ listed here.
 
 ## Unreleased
 
+## v1.4.0 — 2026-10-13
+
+Read before updating:
+
+- **The laser now lights only on the laser driver chip this image is
+  tested with** (the Semtech GN25L95 of the ODI DFP-34X-2C2). On a stick
+  with another laser driver the image does not switch the laser on or start
+  the GPON MAC, so the ONU does not register: `dmesg | grep 'odi_board:
+  laser'` says so. That protects the
+  other subscribers on the OLT port from a stick whose laser this image
+  does not know how to drive. If your stick ran v1.3.0 without trouble,
+  `flash set ODI_LASER_UNVERIFIED 1` and a reboot switch it on again.
+- **With `VLAN_CFG_TYPE` 0 the stick now applies the VLAN the OLT asks for**
+  (class 171, a single "untagged frames get VLAN X" rule), as the stock
+  firmware does; until now type 0 passed frames untouched. On such a line,
+  remove the VLAN from the router. Manual mode (`VLAN_CFG_TYPE` 1) is
+  unchanged.
+
 - kernel: a downstream PLOAM type the driver does not handle is logged
   once per boot instead of on every message. Some OLTs send type 0x18
   (Sleep_Allow, G.984.3 Annex E) every few seconds, which filled `dmesg`
   (#42). The stick does not advertise power saving (no ONU dynamic power
-  management control ME), so it does not act on it. `ploam_type ds` in `/proc/odi_gpon` still
-  counts every one.
+  management control ME), so it does not act on it. `ploam_type ds` in
+  `/proc/odi_gpon` still counts every one.
 
 - omcid: the OLT's class 171 (extended VLAN tagging operation) now drives
   the tagging when the stick is not in manual mode (`VLAN_CFG_TYPE` other
@@ -102,8 +120,9 @@ listed here.
   `ctr ds_ploam_accepted`, leaving the two apart for good (by 6 on one
   ISP1 boot).
 
-- slot-state.sh: safe to run again after a commit, which the web UI now does
-  (odi-ui: the Commit button runs `nv commit` and then this script, so
+- slot-state.sh: safe to run again after a commit, for a web UI that does
+  (odi-ui #15, not in this release's confd v1.2.1: its Commit button will
+  run `nv commit` and then this script, so
   `/var/run/odi-slot`, the login notice and `gpon_uncommitted` follow the
   environment instead of staying as the boot left them). It sets its own
   `PATH` because confd starts its children with an empty environment, and a
