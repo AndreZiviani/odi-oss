@@ -88,6 +88,22 @@ have_cmd() {
 	return 1
 }
 
+# The tools this script cannot do without, checked BEFORE anything else. A
+# missing applet does not fail loudly -- the pipeline goes empty -- so name it
+# here, while nothing has been touched. The list is deliberately short: the
+# stock images differ (the HSGQ M110 has no `cut`, which this script used to
+# call), so everything else is done with the shell itself (parameter expansion,
+# `read`, `case`). tar, sed, cksum, md5sum and cmp are what is left, and there
+# is no shell-only way to unpack a tar or hash a stream.
+missing=
+for _t in tar sed cksum md5sum cmp; do
+	have_cmd "$_t" || missing="$missing $_t"
+done
+if [ -n "$missing" ]; then
+	echo "fwu: this image lacks:$missing. Nothing has been touched." >&2
+	exit 1
+fi
+
 # Find the partitions by NAME in /proc/mtd, never by a fixed number: this board
 # has fourteen and the numbering is not a promise.
 mtd_of() {
@@ -215,7 +231,19 @@ part_size() {
 	sed -n "s/^$1: \([0-9a-f]*\) .*/\1/p" "$PROC_MTD" | sed -n '1p'
 }
 fits() {
-	have=$(tar -xf "$tarball" "$1" -O | cksum | cut -d' ' -f2)
+	# cksum prints "<crc> <bytes>". Split it with parameter expansion: `cut`
+	# is on the V1.0-220923 stock image but NOT on every vendor stock (the
+	# HSGQ M110 has none), and a missing applet here made the size empty.
+	ck=$(tar -xf "$tarball" "$1" -O | cksum)
+	have=${ck#* }
+	have=${have%% *}
+	case $have in
+	"" | *[!0-9]*)
+		echo "fwu: cannot size $1 (cksum said: ${ck:-nothing}). Nothing has been" >&2
+		echo "     touched." >&2
+		return 1
+		;;
+	esac
 	cap=$((0x$(part_size "$2")))
 	if [ "$have" -gt "$cap" ]; then
 		echo "fwu: $1 is $have bytes and /dev/$2 holds $cap. REFUSING." >&2
@@ -234,7 +262,8 @@ check() {
 		echo "fwu: md5.txt has no line for $1" >&2
 		return 1
 	fi
-	got=$(tar -xf "$tarball" "$1" -O | md5sum | cut -d' ' -f1)
+	got=$(tar -xf "$tarball" "$1" -O | md5sum)
+	got=${got%% *}
 	if [ "$want" != "$got" ]; then
 		echo "fwu: $1 md5 mismatch -- expected $want, got $got" >&2
 		return 1

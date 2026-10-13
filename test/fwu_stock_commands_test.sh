@@ -55,7 +55,9 @@ ok "the allowlist carries $n_allowed commands"
 # Comments and the CONTENTS of quoted strings go first. Without that, an
 # ordinary message like "(run from the unpacked image)" is split on its parens
 # and contributes `run` and `image` as command words.
-code=$(sed -e "s/'[^']*'/''/g" -e 's/"[^"]*"/""/g' -e 's/#.*//' "$FWU")
+# `${x#pat}` carries a `#` that is not a comment, and `{` is a command
+# separator below, so a parameter expansion is collapsed to one word first.
+code=$(sed -e 's/\$[{][^}]*[}]/V/g' -e "s/'[^']*'/''/g" -e 's/"[^"]*"/""/g' -e 's/#.*//' "$FWU")
 
 used=$(
 	printf '%s\n' "$code" |
