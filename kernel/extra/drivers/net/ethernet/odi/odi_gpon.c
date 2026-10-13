@@ -924,6 +924,7 @@ void odi_gpon_ploam_counts_get(struct odi_gpon_ploam_counts *counts)
 	odi_gpon_get_ploam_counts(&rx, &tx);
 	counts->ds_rx = rx;
 	counts->us_tx = tx;
+	counts->us_dropped = odi_gpon_get_ploam_us_dropped();
 }
 
 void odi_gpon_ploam_ring_get(struct odi_gpon_ploam_entry *ring, unsigned int *count)
@@ -1024,6 +1025,10 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 		   sn[0], sn[1], sn[2], sn[3], sn[4], sn[5], sn[6], sn[7]);
 	seq_printf(seq, "eqd multiframe %u inframe %u\n", eqd.multiframe, eqd.inframe);
 	seq_printf(seq, "ploam ds_rx %u us_tx %u\n", counts.ds_rx, counts.us_tx);
+	/* Replies the upstream queue had no room for within the bounded wait
+	 * (odi_gpon_hw.c, hw_send_us_ploam()); not part of us_tx.
+	 */
+	seq_printf(seq, "ploam_us_dropped %u\n", counts.us_dropped);
 	/* The Alloc-IDs the OLT assigned (Assign_Alloc-ID), one line: the
 	 * count, then each id. metricsd reads it for gpon_provision_tcont_info.
 	 */

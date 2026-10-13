@@ -100,14 +100,16 @@ struct odi_gpon_eqd {
 };
 void odi_gpon_eqd_get(struct odi_gpon_eqd *eqd);
 
-/* Lifetime PLOAM message counters: downstream received, upstream sent. Not
- * broken down by message type at this interface -- a per-type breakdown
- * needs the real PLOAM type enum, odi_gpon_ploam.h's own, and this header
- * stays independent of it (see file header, "thin interface").
+/* Lifetime PLOAM message counters: downstream received, upstream sent,
+ * upstream dropped on a full queue. Not broken down by message type at
+ * this interface -- a per-type breakdown needs the real PLOAM type enum,
+ * odi_gpon_ploam.h's own, and this header stays independent of it (see
+ * file header, "thin interface").
  */
 struct odi_gpon_ploam_counts {
 	u32 ds_rx;
 	u32 us_tx;
+	u32 us_dropped;	/* not sent: the upstream queue stayed full */
 };
 void odi_gpon_ploam_counts_get(struct odi_gpon_ploam_counts *counts);
 

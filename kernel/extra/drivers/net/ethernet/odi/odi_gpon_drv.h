@@ -117,6 +117,11 @@ void odi_gpon_get_ranging_dbg(struct odi_gpon_ranging_dbg *out);
 /* PLOAM totals: rx drained by odi_gpon_isr_poll(), tx sent upstream. */
 void odi_gpon_get_ploam_counts(unsigned int *rx, unsigned int *tx);
 
+/* Upstream PLOAM messages not sent because the upstream queue stayed full
+ * for the whole bounded wait; not counted in tx.
+ */
+unsigned int odi_gpon_get_ploam_us_dropped(void);
+
 /* The Alloc-IDs the OLT assigned by Assign_Alloc-ID PLOAM and this driver
  * wrote into the CAM, in row order, at most `max` of them; the default
  * (OMCC) row, which carries the ONU-ID, is left out. Row order is the
