@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- The diagnostics bundle no longer scrubs a secret made of one repeated
+  character from its other files. The factory PLOAM password is twenty
+  zeros, and scrubbing it replaced every run of zeros in the MIB dumps
+  (VLAN filter tables, priority queues, extended VLAN rules) with
+  `REDACTED`, which made a reporter's bundle hard to read. Such a value is
+  still redacted in the config copy. The qemu harness plants one and checks
+  both.
+
 ## v1.4.1 - 2026-10-13
 
 - Pins: confd v1.3.0 (odi-ui: the Commit button commits both U-Boot

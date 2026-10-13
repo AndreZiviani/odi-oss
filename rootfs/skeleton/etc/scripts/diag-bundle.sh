@@ -476,9 +476,14 @@ kinds() {
 # Secrets: every value found, as text and as the hex of its bytes. Values
 # shorter than three characters are redacted in the config copies above
 # but not scrubbed from the rest: a two-character match would shred the
-# logs and hide nothing worth hiding.
+# logs and hide nothing worth hiding. Nor is a value made of one repeated
+# character: the factory PLOAM password is twenty zeros, and scrubbing it
+# replaced every run of zeros in the MIB dumps with REDACTED (seen in a
+# reporter's bundle), while a password of all zeros is no secret to keep.
 sort -u "$secrets" | while IFS= read -r v; do
 	[ "${#v}" -ge 3 ] || continue
+	first=${v%"${v#?}"}
+	case "$v" in *[!"$first"]*) ;; *) continue ;; esac
 	kinds "$v"
 	rule "$v" REDACTED "$tk"
 	hexforms "$(hexof "$v")" REDACTED "$hk"
