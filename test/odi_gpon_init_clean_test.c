@@ -14,6 +14,10 @@
  *     failure: the replay used to go on writing at once, and its own
  *     clean of the tables was lost.
  *
+ * The downstream multicast filter is a third CAM of the same shape (256
+ * rows, DS_MC_FILTER_CTL), and its self-test words read 0x8000 (done, no
+ * failure) unless a case says otherwise.
+ *
  * Each case starts from the state a power-up left on a stick (most rows
  * valid with random entries, most flow type words not zero) and checks the
  * report and the tables afterwards: a plain power-up, clears lost in the
@@ -41,13 +45,13 @@ static int failures;
 /* ---- the model ----------------------------------------------------------- */
 
 struct cam_model {
-	int valid[ODI_GPON_INIT_GEM_ROWS];
-	uint32_t entry[ODI_GPON_INIT_GEM_ROWS];
-	int sticky[ODI_GPON_INIT_GEM_ROWS];	/* a clear of this row is ignored */
+	int valid[ODI_GPON_INIT_MC_ROWS];
+	uint32_t entry[ODI_GPON_INIT_MC_ROWS];
+	int sticky[ODI_GPON_INIT_MC_ROWS];	/* a clear of this row is ignored */
 };
 
 static struct {
-	struct cam_model gem, alloc;
+	struct cam_model gem, alloc, mc;
 	unsigned int drop_clears;	/* the first N clear requests are ignored */
 	unsigned int reset_accesses;	/* bus accesses the reset lasts after its release */
 	int reset_never_completes;
@@ -74,7 +78,7 @@ static void cam_request(struct cam_model *c, uint32_t ctl_off, uint32_t rdata_of
 	switch (op) {
 	case 1:
 		c->valid[row] = 1;
-		c->entry[row] = *reg(wdata_off) & 0xfffU;
+		c->entry[row] = *reg(wdata_off) & (c == &m.mc ? 0xffffffffU : 0xfffU);
 		break;
 	case 2:
 		if (c->valid[row])
@@ -134,6 +138,9 @@ static void model_write(uint32_t off, uint32_t val)
 	else if (off == ODI_SW_DSF_ALLOC_CAM_CTL_OFF && (val & (1U << 15)))
 		cam_request(&m.alloc, off, ODI_SW_DSF_ALLOC_CAM_RDATA_OFF,
 			    ODI_SW_DSF_ALLOC_CAM_WDATA_OFF, 0x1fU, val);
+	else if (off == ODI_GPON_DS_MC_FILTER_CTL_OFF && (val & (1U << 15)))
+		cam_request(&m.mc, off, ODI_GPON_DS_MC_FILTER_RDATA_OFF,
+			    0x704088U /* its write data, unused by the driver */, 0xffU, val);
 	else if (off == ODI_GPON_PONMAC_RESET_OFF) {
 		if (m.reset_req && !(val & 1U)) {
 			m.reset_released_at = m.seq;
@@ -149,7 +156,9 @@ static void model_write(uint32_t off, uint32_t val)
 
 /* What vero read back after a power cut: GEM-port rows 0..119 valid with
  * mostly-ones port ids, rows 120..127 clear, every Alloc-ID row valid,
- * flow type words 1..119 not zero.
+ * flow type words 1..119 not zero. Nobody has read the multicast filter
+ * after a power cut: here every third row holds a random word, and its
+ * self-test words read done.
  */
 static void power_up(void)
 {
@@ -170,6 +179,21 @@ static void power_up(void)
 		m.alloc.valid[r] = 1;
 		m.alloc.entry[r] = 0xe00U | r;
 	}
+	for (r = 0; r < ODI_GPON_INIT_MC_ROWS; r++) {
+		m.mc.valid[r] = r % 3U == 1U;
+		m.mc.entry[r] = 0x5e000000U | (r * 0x10101U);
+	}
+	for (r = 0; r < ODI_GPON_INIT_MC_BIST_WORDS; r++)
+		*reg(ODI_GPON_DS_MC_FILTER_BIST(r)) = ODI_GPON_DS_MC_FILTER_BIST_ALL_BIST_DONE;
+}
+
+static unsigned int mc_rows_valid(void)
+{
+	unsigned int r, n = 0;
+
+	for (r = 0; r < ODI_GPON_INIT_MC_ROWS; r++)
+		n += m.mc.valid[r] ? 1U : 0U;
+	return n;
 }
 
 static int tables_clear(void)
@@ -182,7 +206,7 @@ static int tables_clear(void)
 	for (r = 0; r < ODI_GPON_INIT_ALLOC_ROWS; r++)
 		if (m.alloc.valid[r])
 			return 0;
-	return 1;
+	return mc_rows_valid() == 0U;
 }
 
 /* ---- the cases ----------------------------------------------------------- */
@@ -206,6 +230,13 @@ static void test_power_up(void)
 	CHECK(r.before.alloc_seen[0] == 0xe00U && r.before.alloc_seen[7] == 0xe07U &&
 	      r.before.gem_seen[1] == (0xf00U | 37U),
 	      "power-up: the first values of the valid rows are kept for the log");
+	CHECK(r.before.mc_valid == 85U && r.before.mc_row == 1 &&
+	      r.before.mc_data == (0x5e000000U | 0x10101U),
+	      "power-up: the multicast filter rows found, the first with its word");
+	CHECK(r.after.mc_valid == 0U && r.after.mc_row == -1,
+	      "power-up: every multicast filter row reads back clear");
+	CHECK(r.mc_bist[0] == 0x8000U && r.mc_bist[7] == 0x8000U && r.mc_bist_bad == 0U,
+	      "power-up: the self-test words are reported, none bad");
 	CHECK(tables_clear(), "power-up: the model agrees");
 	CHECK(odi_mock_locks_idle(), "power-up: odi_switch_dsf_lock released");
 }
@@ -238,6 +269,40 @@ static void test_sticky_row(void)
 	CHECK(r.after.alloc_valid == 0U && r.after.flow_type_set == 0U,
 	      "sticky row: the rest is clear");
 	CHECK(odi_mock_locks_idle(), "sticky row: odi_switch_dsf_lock released");
+}
+
+/* A multicast filter row that never clears: the clean fails and names
+ * it, like a CAM row; a self-test word with a FAIL bit is counted and
+ * never written.
+ */
+static void test_mc_filter(void)
+{
+	struct odi_gpon_clean_report r;
+	unsigned int i, bist_writes = 0;
+
+	power_up();
+	CHECK(odi_gpon_init_clean_tables(&r) == 0 && mc_rows_valid() == 0U,
+	      "multicast filter: every row cleared");
+
+	power_up();
+	m.mc.sticky[200] = 1;
+	m.mc.valid[200] = 1;
+	*reg(ODI_GPON_DS_MC_FILTER_BIST(3)) = ODI_GPON_DS_MC_FILTER_BIST_ALL_BIST_DONE |
+					      ODI_GPON_DS_MC_FILTER_BIST_BIST_FAIL;
+	*reg(ODI_GPON_DS_MC_FILTER_BIST(5)) = 0;
+	CHECK(odi_gpon_init_clean_tables(&r) == -EIO, "multicast filter: a sticky row is -EIO");
+	CHECK(r.passes == 2U && r.after.mc_valid == 1U && r.after.mc_row == 200 &&
+	      r.after.gem_valid == 0U && r.after.alloc_valid == 0U,
+	      "multicast filter: the sticky row named, the CAMs clear");
+	CHECK(r.mc_bist_bad == 2U && r.mc_bist[3] == 0x8080U && r.mc_bist[5] == 0U,
+	      "multicast filter: a failed and a never-run self-test word counted");
+	for (i = 0; i < odi_mock.log_n; i++)
+		if (odi_mock.log[i].kind == 'W' &&
+		    odi_mock.log[i].addr >= ODI_GPON_DS_MC_FILTER_BIST(0) &&
+		    odi_mock.log[i].addr <= ODI_GPON_DS_MC_FILTER_BIST(ODI_GPON_INIT_MC_BIST_WORDS - 1U))
+			bist_writes++;
+	CHECK(bist_writes == 0U, "multicast filter: the self-test words are never written");
+	CHECK(odi_mock_locks_idle(), "multicast filter: odi_switch_dsf_lock released");
 }
 
 static void test_stuck_flow_type(void)
@@ -360,6 +425,9 @@ static void test_boot_table_cold(void)
 	CHECK(odi_gpon_init_last_clean()->before.gem_valid == 120U,
 	      "cold: the report has the garbage the clean found");
 	CHECK(gem_rows_valid() == 0U, "cold: no GEM-port row left valid");
+	CHECK(odi_gpon_init_last_clean()->before.mc_valid == 85U &&
+	      odi_gpon_init_last_clean()->after.mc_valid == 0U && mc_rows_valid() == 0U,
+	      "cold: the multicast filter found dirty, read back clear");
 	for (r = 0; r < ODI_GPON_INIT_ALLOC_ROWS; r++)
 		CHECK(!m.alloc.valid[r], "cold: no Alloc-ID row left valid");
 	for (r = 0; r < ODI_GPON_INIT_GEM_ROWS; r++)
@@ -430,6 +498,7 @@ int main(void)
 	test_warm_names_the_entries();
 	test_first_pass_lost();
 	test_sticky_row();
+	test_mc_filter();
 	test_stuck_flow_type();
 	test_cam_never_answers();
 	test_reset_wait();

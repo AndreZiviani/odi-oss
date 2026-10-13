@@ -248,6 +248,39 @@ static inline uint32_t ODI_GPON_DSF_PLOAM_RX_WORD_MSG_WORD_GET(uint32_t reg)
 #define ODI_GPON_DS_GEM_MISC_SEL_OFF	0x704064U
 #define ODI_GPON_DS_GEM_MISC_COUNT_OFF	0x704068U
 
+/* DS_MC_FILTER_CTL: 0x704084 -- the downstream multicast MAC filter, 256
+ * rows, one request at a time, with the layout and handshake of the DSF
+ * CAM control words: the word with REQ clear, the same with REQ set, then
+ * DONE. OP 2 reads a row (ROW_VALID, and DS_MC_FILTER_RDATA), OP 3 clears
+ * it.
+ */
+#define ODI_GPON_DS_MC_FILTER_CTL_OFF	0x704084U
+#define ODI_GPON_DS_MC_FILTER_CTL_REQ	(1U << 15)
+#define ODI_GPON_DS_MC_FILTER_CTL_DONE	(1U << 14)
+#define ODI_GPON_DS_MC_FILTER_CTL_ROW_VALID	(1U << 13)
+static inline uint32_t ODI_GPON_DS_MC_FILTER_CTL_OP_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x3U << 8)) | ((val & 0x3U) << 8);
+}
+static inline uint32_t ODI_GPON_DS_MC_FILTER_CTL_ROW_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0xffU << 0)) | ((val & 0xffU) << 0);
+}
+
+/* DS_MC_FILTER_RDATA: 0x704090 -- the row a read (OP 2) returned */
+#define ODI_GPON_DS_MC_FILTER_RDATA_OFF	0x704090U
+
+/* DS_MC_FILTER_BIST: 0x70428c, eight words -- the built-in self-test
+ * status of the filter RAM, not filter content: ALL_BIST_DONE when the
+ * self-test of the downstream GEM RAMs has run, a FAIL bit when it found
+ * a fault. Never written: the other fields start a test.
+ */
+#define ODI_GPON_DS_MC_FILTER_BIST_BASE	0x70428cU
+#define ODI_GPON_DS_MC_FILTER_BIST(n)	(ODI_GPON_DS_MC_FILTER_BIST_BASE + 4U * (uint32_t)(n))
+#define ODI_GPON_DS_MC_FILTER_BIST_ALL_BIST_DONE	(1U << 15)
+#define ODI_GPON_DS_MC_FILTER_BIST_DRF_BIST_FAIL	(1U << 9)
+#define ODI_GPON_DS_MC_FILTER_BIST_BIST_FAIL	(1U << 7)
+
 /* ---- Upstream framer, 0x705000-0x7052ff */
 
 /* USF_IRQ_EVENT: 0x705000 */
