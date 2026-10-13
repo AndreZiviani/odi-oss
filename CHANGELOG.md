@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- kernel: the 64-bit port counters (ifInOctets and ifOutOctets, and so
+  the exporter's octet rates) no longer jump by 4 GiB once in a while.
+  Their two 32-bit halves were read low then high with nothing holding
+  them together, so a read that straddled a wrap of the low half, about
+  every 34 s per direction at gigabit line rate, paired the old low half
+  with the new high one. They are now read high, low, high, and read
+  again when the high half moved in between (three tries at most, then
+  the low half's top bit decides). Host-tested against a counter that
+  advances between reads (`test/odi_reg_test.c`); not yet run on a stick.
+
 - kernel: the switch ACL tables are cleared at boot. ACL ingress is on for
   the UNI and PON ports, and the 96 rule and action rows live in RAM that
   survives a reset: after a warm boot from the stock firmware (a trial

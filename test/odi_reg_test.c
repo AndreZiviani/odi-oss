@@ -19,6 +19,41 @@
 
 static int failures;
 
+/* A 64-bit counter behind the ifInOctets pair of port 2 (RX rows 0/1),
+ * advancing by step at every read of either word, the two words not
+ * latched together: what a read sees across a wrap of the low word.
+ */
+static uint64_t wide_cnt, wide_step;
+static unsigned int wide_reads;
+
+static void wide_hook(uint32_t off)
+{
+	uint32_t lo_off = ODI_SW_PORT_RX_COUNTERS(2, 0);
+
+	if (off != lo_off && off != lo_off + 4U)
+		return;
+	odi_mock.regs[odi_mock_slot(lo_off)] = (uint32_t)wide_cnt;
+	odi_mock.regs[odi_mock_slot(lo_off + 4U)] = (uint32_t)(wide_cnt >> 32);
+	wide_cnt += wide_step;
+	wide_reads++;
+}
+
+/* ifInOctets read once with the counter starting at start: the value. */
+static uint64_t wide_read_from(uint64_t start, uint64_t step)
+{
+	uint64_t v = 0;
+
+	odi_mock_reset();
+	wide_cnt = start;
+	wide_step = step;
+	wide_reads = 0;
+	odi_mock_read_hook = wide_hook;
+	if (odi_sw_mib_get(2, 0, &v) != 0)
+		v = 0;
+	odi_mock_read_hook = NULL;
+	return v;
+}
+
 #define CHECK(cond, msg) do { \
 	if (!(cond)) { \
 		fprintf(stderr, "FAIL: %s (%s:%d)\n", msg, __FILE__, __LINE__); \
@@ -77,6 +112,36 @@ int main(void)
 	CHECK(odi_sw_mib_get(4, 53, &v64) != 0, "mib_get refuses port 4 (only 0-3 exist)");
 	CHECK(odi_sw_mib_get(2, 27, &v64) != 0,
 	      "mib_get refuses etherStatsOctets (27), left unmapped -- ambiguous stock diag dup");
+
+	/* A 64-bit counter read while its low word wraps: never 4 GiB off.
+	 * Starting 0x10 below the wrap, 0x20 a read, a low-then-high read
+	 * gets the old low word with the new high one (0x2fffffff0); the
+	 * value must lie between the start and what the reads made of it.
+	 */
+	{
+		static const uint64_t starts[] = {
+			0x1fffffff0ULL, 0x1ffffffe8ULL, 0x2fffffffcULL, 0x12345678ULL,
+		};
+		unsigned int i;
+
+		for (i = 0; i < sizeof starts / sizeof starts[0]; i++) {
+			v64 = wide_read_from(starts[i], 0x20U);
+			CHECK(v64 >= starts[i] && v64 < wide_cnt,
+			      "mib_get: a 64-bit counter read across a low-word wrap is not torn");
+		}
+		CHECK(wide_read_from(0x1fffffff0ULL, 0x20U) == 0x200000070ULL && wide_reads == 6U,
+		      "mib_get: a high word that moved is read again (high, low, high, twice)");
+		CHECK(wide_read_from(0x700000040ULL, 0) == 0x700000040ULL && wide_reads == 3U,
+		      "mib_get: a still counter takes one high, low, high");
+		/* A high word that moves at every read (4 GiB a read): the
+		 * retries stop at their bound and the low word top bit picks
+		 * the side of the wrap.
+		 */
+		v64 = wide_read_from(0x500000010ULL, 0x100000000ULL);
+		CHECK(wide_reads == 9U, "mib_get: the retries are bounded (three tries)");
+		CHECK((uint32_t)v64 == 0x10U && (v64 >> 32) == (uint32_t)((wide_cnt - 0x100000000ULL) >> 32),
+		      "mib_get: after the last try a low word with the top bit clear goes with the second high");
+	}
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
