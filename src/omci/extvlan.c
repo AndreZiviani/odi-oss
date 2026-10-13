@@ -195,6 +195,69 @@ void evtocd_action(const struct evtocd_entry *e, uint16_t input_tpid,
 	out->transparent = (out->tags_removed == 0 && out->tags_added == 0);
 }
 
+/* ------------------------------------- the one shape the datapath applies ----- */
+
+/* Whether a default rule leaves the datapath alone: it drops the frames it is
+ * the default for, or passes them unchanged. A default rule that adds or
+ * removes tags is a shape the builder does not model. */
+static int default_is_plain(const struct evtocd_entry *e)
+{
+	struct evtocd_action a;
+
+	evtocd_action(e, 0x8100, 0x8100, &a);
+	return a.discard || a.transparent;
+}
+
+const char *evtocd_olt_tag(const uint8_t *tbl, int n, int *vid, int *pri)
+{
+	struct evtocd_entry e, add;
+	struct evtocd_action a;
+	int have = 0;
+
+	if (n < 1)
+		return "the table is empty";
+	for (int i = 0; i < n; i++) {
+		evtocd_decode(tbl + i * EVTOCD_ENTRY_LEN, &e);
+		evtocd_action(&e, 0x8100, 0x8100, &a);
+		if (evtocd_default_rule_tags(&e) >= 0) {
+			if (!default_is_plain(&e))
+				return "a default rule adds or removes tags";
+			continue;
+		}
+		if (a.tags_in != EVTOCD_UNTAGGED)
+			return "a rule for tagged frames";
+		if (have)
+			return "more than one rule for untagged frames";
+		have = 1;
+		add = e;
+	}
+	if (!have)
+		return "no rule for untagged frames";
+
+	evtocd_action(&add, 0x8100, 0x8100, &a);
+	if (a.discard)
+		return "untagged frames are discarded";
+	if (add.f_ethertype != EVTOCD_F_ET_DO_NOT_FILTER)
+		return "the untagged rule filters on the EtherType";
+	if (a.tags_removed || a.tags_added != 1)
+		return "the untagged rule does not add exactly one tag";
+	if (a.add[0].vid_src != EVTOCD_VID_ASSIGN || a.add[0].vid < 1 ||
+	    a.add[0].vid > EVTOCD_VID_MAX)
+		return "the added VID is not a concrete 1..4094";
+	if (a.add[0].pri_src != EVTOCD_PRI_ASSIGN ||
+	    a.add[0].pri > EVTOCD_PRI_MAX)
+		return "the added priority is not a concrete 0..7";
+	/* 4 is 0x8100 outright; 0 copies the filter's TPID, which an untagged
+	 * rule does not have, and the manual rule leaves it at 0x8100 too. The
+	 * output-TPID variants could name 0x88a8. */
+	if (add.t_in_tpid != EVTOCD_T_TPID_8100 &&
+	    add.t_in_tpid != EVTOCD_T_TPID_COPY_INNER)
+		return "the added tag's TPID is not 0x8100";
+	*vid = a.add[0].vid;
+	*pri = a.add[0].pri;
+	return 0;
+}
+
 /* ------------------------------------------------ rendering one entry ----- */
 /*
  * Freestanding, so no snprintf: a cursor and explicit bounds. Every append

@@ -166,4 +166,11 @@ void evtocd_action(const struct evtocd_entry *e, uint16_t input_tpid,
 int evtocd_describe(const struct evtocd_entry *e, uint16_t input_tpid,
 		    uint16_t output_tpid, char *buf, int max);
 
+/* The one shape of class 171 the datapath builds a rule from: `n` entries of
+ * one instance, an untagged rule that adds a single tag with a concrete VID
+ * (1..4094) and priority (0..7) at TPID 0x8100, and nothing else but default
+ * rules that drop or pass. Returns NULL and the tag in *vid / *pri, or a
+ * static reason naming what was not supported -- what an operator reports. */
+const char *evtocd_olt_tag(const uint8_t *tbl, int n, int *vid, int *pri);
+
 #endif

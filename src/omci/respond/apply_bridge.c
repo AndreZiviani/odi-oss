@@ -3,6 +3,7 @@
  * connection from the MIB (bdgconn_rebuild()). See omcid.h.
  */
 #include "omcid.h"
+#include "../extvlan.h"
 
 int conn_dirty;
 
@@ -464,6 +465,67 @@ static void gen_pri_filter_rule(struct omci_vlan_oper *vr, unsigned pri)
 	vr->out.out_tag.pri = pri;
 }
 
+/* The priority of the tag the manual rules add: VLAN_MANU_TAG_PRI, or the
+ * one the OLT's class 171 names (olt_tag()). Set by bdgconn_rebuild(). */
+static int tag_pri;
+
+/* The tag the OLT's class 171 provisions on the UNI, when the stick is not in
+ * manual mode (VLAN_CFG_TYPE other than 1, as the stock firmware gates it):
+ * the one shape evtocd_olt_tag() accepts, in the instance associated with the
+ * Ethernet UNI (AssociationType 2). Our ISPs run type 1, so neither reaches
+ * this (ISP1's UNI instance adds VID 1, which is not its service VID 11).
+ * Returns the VID with *pri set, or -1 for none; any other shape stays
+ * transparent and is logged once, which is what an operator reports.
+ * Called before the rules are built, so a change of class 171 (Set, Create,
+ * Delete) is picked up by the rebuild it sets conn_dirty for. */
+#define EXTVLAN_ASSOC_ETH_UNI 2
+#define EXTVLAN_ENTRIES_MAX   12
+
+static int olt_tag(int *pri)
+{
+	static const char *logged;
+	static int logged_vid = -1, logged_pri = -1;
+	const struct omci_class *c171 = find_class(OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA);
+	const char *why = 0;
+	int vid = -1;
+
+	if (!c171 || !cfg_olt_tagging())
+		return -1;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		struct mib_row *r = mib_row_at(i);
+		uint8_t tbl[EXTVLAN_ENTRIES_MAX * EVTOCD_ENTRY_LEN];
+		int n = 0, p = 0, v = 0;
+
+		if (!r || r->classId != OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA ||
+		    row_u32(r, c171, 1) != EXTVLAN_ASSOC_ETH_UNI)
+			continue;
+		for (uint8_t t = r->tbl_head; t != MIB_TBL_NONE &&
+		     n < EXTVLAN_ENTRIES_MAX; t = tblpool[t].next, n++)
+			for (int b = 0; b < EVTOCD_ENTRY_LEN; b++)
+				tbl[n * EVTOCD_ENTRY_LEN + b] = tblpool[t].data[b];
+		why = evtocd_olt_tag(tbl, n, &v, &p);
+		if (!why) {
+			vid = v;
+			*pri = p;
+			if (logged || logged_vid != v || logged_pri != p)
+				out_fmt("   ext vlan 171/%04x: untagged frames get VLAN %d pri %d from the OLT\n",
+					(long)r->inst, (long)v, (long)p);
+			logged = 0;
+			logged_vid = v;
+			logged_pri = p;
+			return vid;
+		}
+		break;
+	}
+	if (why && why != logged) {
+		out_fmt("   ext vlan: OLT rule not applied (%s), transparent\n", why);
+		logged = why;
+		logged_vid = -1;
+		logged_pri = -1;
+	}
+	return -1;
+}
+
 /* The rules of one GEM-side bridge port: at most one per filter entry, one
  * for untagged frames, one for tagged ones. */
 #define BP_RULES_MAX 14
@@ -507,8 +569,8 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	*manual = 0;
 	/* Downstream only (multicast) under the manual tag: the tag comes off. */
 	if (dir == 2 && mvid >= 0) {
-		n = bp_put(rules, n, "manual-remove", mvid, vlanCfg.pri);
-		gen_manual_vlan_rule(&rules[0].vr, mvid, vlanCfg.pri, 1);
+		n = bp_put(rules, n, "manual-remove", mvid, tag_pri);
+		gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 1);
 		return n;
 	}
 	/* No class 84, or one with an empty list: as before any FwdOp was
@@ -517,8 +579,8 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	 * line has been seen to mean. */
 	if (!vt || !nent) {
 		if (mvid >= 0) {
-			n = bp_put(rules, n, "manual-add", mvid, vlanCfg.pri);
-			gen_manual_vlan_rule(&rules[0].vr, mvid, vlanCfg.pri, 0);
+			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
+			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0);
 		} else {
 			n = bp_put(rules, n, "forward-all", -1, -1);
 			gen_no_vlan_filter_rule(&rules[0].vr);
@@ -552,9 +614,9 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 			 * rule. */
 			if (*manual)
 				continue;
-			n = bp_put(rules, n, "manual-add", mvid, vlanCfg.pri);
+			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
 			if (n > had) {
-				gen_manual_vlan_rule(&rules[had].vr, mvid, vlanCfg.pri, 0);
+				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
 				*manual = 1;
 			}
 		} else if (f.tagged == FWD_TAG_VID) {
@@ -582,9 +644,9 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		int had = n;
 
 		if (mvid >= 0) {
-			n = bp_put(rules, n, "manual-add", mvid, vlanCfg.pri);
+			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
 			if (n > had)
-				gen_manual_vlan_rule(&rules[had].vr, mvid, vlanCfg.pri, 0);
+				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
 		} else {
 			n = bp_put(rules, n, "untagged", -1, -1);
 			if (n > had)
@@ -628,6 +690,9 @@ void bdgconn_rebuild(void)
 	/* The manual tag, gated on VLAN_CFG_TYPE and VLAN_MANU_MODE as the
 	 * stock stack gates it (cfgstore.c); -1 builds no manual tag. */
 	mvid = cfg_manual_vid();
+	tag_pri = vlanCfg.pri;
+	if (mvid < 0)
+		mvid = olt_tag(&tag_pri);
 	/* Service ids are classifier priority. OEM installs the configured
 	 * untagged service first, the other unicast services in reverse MIB order,
 	 * and the broad downstream multicast rule last. */

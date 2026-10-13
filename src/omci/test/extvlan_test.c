@@ -299,6 +299,42 @@ int main(void)
 		}
 	}
 
+	/* The one shape the datapath applies (evtocd_olt_tag). The tables are
+	 * what the OLTs provision: issue #29's Huawei, and claro's. */
+	{
+		uint8_t tbl[3 * EVTOCD_ENTRY_LEN];
+		int vid = 0, pri = 0;
+		const char *why;
+
+		/* untagged -> add VLAN 100 pri 0 tpid 0x8100 (f8000000f8000000000f800000000324) */
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 100, 4);
+		/* single- and double-tagged defaults: discard */
+		build(tbl + 16, 15, 4096, 0,  14, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
+		build(tbl + 32, 14, 4096, 0,  14, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
+		why = evtocd_olt_tag(tbl, 3, &vid, &pri);
+		ok(!why && vid == 100 && pri == 0, "#29: untagged adds VLAN 100 pri 0");
+
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  5, 1, 4);
+		why = evtocd_olt_tag(tbl, 3, &vid, &pri);
+		ok(!why && vid == 1 && pri == 5, "claro: untagged adds VLAN 1, priority kept");
+
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  8, 100, 4);
+		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "copy-inner priority on untagged is not applied");
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 4096, 4);
+		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "VID 4096 is not a concrete VID");
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 4095, 4);
+		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "VID 4095 is reserved");
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 100, 6);
+		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "an output-TPID tag is not applied");
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  1, 15, 4096, 0,  0, 100, 4);
+		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "removing a tag as well is not applied");
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 0, 200, 4,  0, 100, 4);
+		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "two added tags are not applied");
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
+		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "untagged frames discarded is not applied");
+		ok(evtocd_olt_tag(tbl, 0, &vid, &pri) != 0, "an empty table is not applied");
+	}
+
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();
 	return failures ? 1 : 0;

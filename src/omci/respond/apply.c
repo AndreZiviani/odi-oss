@@ -56,6 +56,7 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 		qos_dirty = 1;
 	if (c && (c->classId == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA ||
 		  c->classId == OMCI_ME_VLAN_TAGGING_FILTER_DATA ||
+		  c->classId == OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA ||
 		  c->classId == OMCI_ME_GEM_IW_TP ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
 		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
