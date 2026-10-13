@@ -18,6 +18,7 @@
 #include <linux/errno.h>
 #include <linux/printk.h>
 #include <linux/ratelimit.h>
+#include <linux/sprintf.h>
 #include <linux/string.h>
 #define ODI_GPON_INIT_UDELAY(us)	udelay(us)
 #define ODI_GPON_INIT_INFO(fmt, ...)	pr_info("odi_gpon: " fmt, ##__VA_ARGS__)
@@ -125,12 +126,13 @@ static int odi_gpon_cam_request(const struct odi_gpon_cam *cam, unsigned int row
 }
 
 /* Reads every row of one CAM. Returns the rows found valid; *row and *val
- * get the first of them (row -1 when none). A request that never finishes
- * ends the walk: the block is not answering, and every further row would
- * cost a whole poll bound with interrupts off.
+ * get the first of them (row -1 when none), seen[] the values of the first
+ * ODI_GPON_INIT_SEEN_MAX. A request that never finishes ends the walk: the
+ * block is not answering, and every further row would cost a whole poll
+ * bound with interrupts off.
  */
 static unsigned int odi_gpon_cam_count(const struct odi_gpon_cam *cam, int *row, uint32_t *val,
-				       int *timed_out)
+				       uint32_t *seen, int *timed_out)
 {
 	/* ROW_VALID is bit 13 in both control words. */
 	const uint32_t valid = cam->gem ? ODI_SW_DSF_GEM_CAM_CTL_ROW_VALID :
@@ -147,12 +149,15 @@ static unsigned int odi_gpon_cam_count(const struct odi_gpon_cam *cam, int *row,
 		}
 		if (!(ctl & valid))
 			continue;
-		if (*row < 0) {
+		if (n < ODI_GPON_INIT_SEEN_MAX) {
 			uint32_t d = odi_reg_read(cam->rdata);
 
-			*row = (int)r;
-			*val = cam->gem ? ODI_SW_DSF_GEM_CAM_RDATA_GEM_PORT_GET(d) :
-					  ODI_SW_DSF_ALLOC_CAM_RDATA_ALLOC_ID_GET(d);
+			seen[n] = cam->gem ? ODI_SW_DSF_GEM_CAM_RDATA_GEM_PORT_GET(d) :
+					     ODI_SW_DSF_ALLOC_CAM_RDATA_ALLOC_ID_GET(d);
+			if (*row < 0) {
+				*row = (int)r;
+				*val = seen[n];
+			}
 		}
 		n++;
 	}
@@ -168,9 +173,9 @@ static void odi_gpon_tables_count(struct odi_gpon_table_count *c)
 
 	c->timed_out = 0;
 	c->gem_valid = odi_gpon_cam_count(&odi_gpon_cam_gem, &c->gem_row, &c->gem_port,
-					  &c->timed_out);
+					  c->gem_seen, &c->timed_out);
 	c->alloc_valid = odi_gpon_cam_count(&odi_gpon_cam_alloc, &c->alloc_row, &c->alloc_id,
-					    &c->timed_out);
+					    c->alloc_seen, &c->timed_out);
 	c->flow_type_set = 0;
 	for (r = 0; r < ODI_GPON_INIT_GEM_ROWS; r++)
 		if (odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(r)))
@@ -271,14 +276,47 @@ static uint32_t odi_gpon_init_reset_release(const struct odi_replay_blob *table)
 	return table->count;
 }
 
+/* "a b c" for the first values of a census, "+n" for the rest, "none"
+ * when there are none.
+ */
+size_t odi_gpon_init_seen_str(char *buf, size_t len, const uint32_t *seen, unsigned int valid)
+{
+	unsigned int i, shown = valid < ODI_GPON_INIT_SEEN_MAX ? valid : ODI_GPON_INIT_SEEN_MAX;
+	size_t used = 0;
+	int n;
+
+	buf[0] = '\0';
+	if (!valid)
+		return (size_t)snprintf(buf, len, "none");
+	for (i = 0; i < shown && used < len; i++) {
+		n = snprintf(buf + used, len - used, "%s%u", i ? " " : "", (unsigned int)seen[i]);
+		if (n < 0)
+			break;
+		used += (size_t)n;
+	}
+	if (valid > shown && used < len) {
+		n = snprintf(buf + used, len - used, " +%u", valid - shown);
+		if (n > 0)
+			used += (size_t)n;
+	}
+	return used < len ? used : len - 1;
+}
+
 static void odi_gpon_init_clean_log(const struct odi_gpon_clean_report *r, int rc)
 {
 	const struct odi_gpon_table_count *b = &r->before, *a = &r->after;
+	char gem[96], alloc[96];
 
 	ODI_GPON_INIT_INFO("GPON tables before the clean: GEM-port CAM %u/%u valid, Alloc-ID CAM %u/%u valid, flow type %u/%u set%s\n",
 			   b->gem_valid, ODI_GPON_INIT_GEM_ROWS, b->alloc_valid,
 			   ODI_GPON_INIT_ALLOC_ROWS, b->flow_type_set, ODI_GPON_INIT_GEM_ROWS,
 			   b->timed_out ? " (a CAM read timed out)" : "");
+	if (b->gem_valid || b->alloc_valid) {
+		odi_gpon_init_seen_str(gem, sizeof(gem), b->gem_seen, b->gem_valid);
+		odi_gpon_init_seen_str(alloc, sizeof(alloc), b->alloc_seen, b->alloc_valid);
+		ODI_GPON_INIT_INFO("GPON tables before the clean held GEM ports %s; Alloc-IDs %s\n",
+				   gem, alloc);
+	}
 	if (rc == 0) {
 		ODI_GPON_INIT_INFO("GPON tables clean after %u pass(es): GEM-port CAM 0/%u, Alloc-ID CAM 0/%u, flow type 0/%u\n",
 				   r->passes, ODI_GPON_INIT_GEM_ROWS, ODI_GPON_INIT_ALLOC_ROWS,
