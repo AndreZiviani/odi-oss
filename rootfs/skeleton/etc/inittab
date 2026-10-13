@@ -24,7 +24,12 @@
 
 # No telnet: ssh (dropbear) is the only network login. The trial boot and
 # its self-revert are the way back if ssh ever fails to come up.
-ttyS0::respawn:/bin/login -p
+# askfirst, not respawn: login gives up after 60 s at its prompt, so a
+# respawned login on a console nobody uses exited and restarted every
+# minute, two syslog lines each time, enough on their own to cycle the
+# 64 KB ring in a few hours. askfirst waits for Enter, with no timeout, and
+# only then runs login.
+ttyS0::askfirst:/bin/login -p
 
 # syslogd, klogd, ntpd, metricsd, confd, dropbear, omcid: each restarted the
 # instant it exits, forever, by init itself -- no supervise.sh, no restart
