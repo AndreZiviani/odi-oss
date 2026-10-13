@@ -440,6 +440,14 @@ DIAG_SHORT_LINE="harness: short=$DIAG_SHORT userland_ok=1 hex=$DIAG_SHORT_HEX ph
 sshx "sed -i 's|</Config>|\t<Value Name=\"USER_PASSWORD\" Value=\"$DIAG_SHORT\"/>\n</Config>|' /etc/config/lastgood.xml"
 sshx "grep -c 'Value=\"$DIAG_SHORT\"' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant USER_PASSWORD in lastgood.xml"
 sshx "echo '$DIAG_SHORT_LINE' > /var/log/qemu-short.log"
+# A degenerate secret, the factory PLOAM password of twenty zeros: redacted
+# in the config copy like any secret, but not scrubbed from the rest, where
+# it would eat every run of zeros in the MIB dumps.
+DIAG_ZERO=00000000000000000000
+DIAG_ZERO_LINE="harness: table 0052${DIAG_ZERO}${DIAG_ZERO}0000"
+sshx "sed -i 's|</Config>|\t<Value Name=\"LOID_PASSWD_OLD\" Value=\"$DIAG_ZERO\"/>\n</Config>|' /etc/config/lastgood.xml"
+sshx "grep -c 'Value=\"$DIAG_ZERO\"' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant LOID_PASSWD_OLD in lastgood.xml"
+sshx "echo '$DIAG_ZERO_LINE' > /var/log/qemu-zero.log"
 # The same values sent to syslog (through /dev/kmsg and klogd: the image has
 # no logger), which the bundle copies from logread. klogd loses the first
 # kernel line after syslogd restarts (its socket send fails once, then it
@@ -500,6 +508,8 @@ if token_in "$DIAG_SHORT" A-Za-z0-9 "$D" || token_in "$DIAG_SHORT_HEX" 0-9A-Fa-f
 	fail "the short secret stands as a token in the bundle, in the files above"
 fi
 grep -q 'Name="USER_PASSWORD" Value="REDACTED"' "$D/config/lastgood.xml" || fail "USER_PASSWORD is not redacted in the config copy"
+grep -q 'Name="LOID_PASSWD_OLD" Value="REDACTED"' "$D/config/lastgood.xml" || fail "an all-zero secret is not redacted in the config copy"
+grep -qxF "$DIAG_ZERO_LINE" "$D/log/qemu-zero.log" || fail "an all-zero secret was scrubbed from a log: got '$(cat "$D/log/qemu-zero.log")'"
 want="harness: short=REDACTED userland_ok=1 hex=REDACTED ph=REDACTED reg=0x00${DIAG_SHORT_HEX}ff"
 grep -qxF "$want" "$D/log/qemu-short.log" || fail "the short secret was scrubbed wrong: got '$(cat "$D/log/qemu-short.log")', want '$want'"
 grep -q -E ' odi_wdt_userland_ok\.txt( |$)' "$D/MANIFEST.txt" || fail "MANIFEST lost the odi_wdt_userland_ok.txt name: $(grep odi_wdt "$D/MANIFEST.txt")"
