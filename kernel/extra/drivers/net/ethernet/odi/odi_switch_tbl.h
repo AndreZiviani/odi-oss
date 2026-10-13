@@ -95,9 +95,15 @@ void odi_switch_vlan_egress_tag_group_write(uint32_t ingress_mask, const uint32_
  */
 int odi_switch_table_write(uint32_t table, uint32_t index, const uint32_t *data, uint32_t n_words);
 
-/* There is no table read: no capture holds one for these tables. The L2
- * table has its own reader, odi_switch_l2.c, on the same register block
- * under TABLE_KIND 0.
+/* One row back, the same handshake with IS_WRITE 0: TABLE_CMD, the poll,
+ * then TABLE_READ_WORD[0..n-1], returned in the order
+ * odi_switch_table_write() takes them (data[0] is TABLE_READ_WORD[n-1]),
+ * so a row read back compares word for word with the row written. 0, or
+ * -ETIMEDOUT from the poll (data then untouched), or -EOPNOTSUPP for a
+ * table the descriptors do not cover. The caller holds odi_switch_lock.
+ * The L2 table has its own reader, odi_switch_l2.c, which also needs the
+ * status word the engine leaves behind.
  */
+int odi_switch_table_read(uint32_t table, uint32_t index, uint32_t *data, uint32_t n_words);
 
 #endif /* ODI_SWITCH_TBL_H */

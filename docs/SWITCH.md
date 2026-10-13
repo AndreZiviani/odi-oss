@@ -78,6 +78,32 @@ the fields it owns. Board ports: UNI 0, PON 2, CPU 3; port 1 is unused.
   verb writes. `PATTERN1_COUNT` is the boundary between the two CF pattern
   partitions and grows with the services the stock stack has provisioned,
   so it is allocator state, not a boot constant, and is not written.
+- **acl clean**: every row of the three ACL tables (96 each: the rule
+  pattern, kind 2 rows 128-223; the rule mask, kind 2 rows 0-95; the
+  action, kind 3) is read back, written all-zero and read back again,
+  before the next step turns ACL ingress on. The table RAM survives a
+  reset and a reboot: after a power cut it holds random words, and after
+  a warm boot from the stock firmware it holds that firmware's rules (a
+  stick back on this image after a stock boot showed a stock rule 3,
+  matching 192.168.0.1, next to the module-load replay's rule 1). A rule
+  is valid when bit 144 of its pattern row is set (bit 16 of word 0 in
+  `odi_switch_table_write()` order); the module-load replay writes rule 1
+  with it set. The step logs what it found and what it left:
+
+      odi_switch: ACL rows before the clean: 2/96 rules valid (first 1), 4/96 rows not empty
+      odi_switch: ACL rows clean after 1 pass(es): 0/96 rules valid, 0/96 rows not empty
+
+  A row still not empty after a second pass, or a read that timed out,
+  gives `ACL rows NOT clean after 2 passes` with the counts; the boot
+  goes on. The module-load replay then writes rule 1 (pattern, mask and
+  action), the only ACL row this image uses.
+
+  The L2 table is not cleared here. Whether an L2 row is in use is the
+  engine's HIT answer to a read, not a bit of the row, so nothing shows
+  that writing a row all-zero by number removes its entry; removing one
+  is a delete by key through the hash, and this driver deletes only
+  multicast keys. Learned rows age out; what an earlier image left there
+  is listed by `diag l2-table get all`.
 - **acl**: `ACL_PORT_ENABLE`, one bit per port. The `switch` verb clears
   every port; the stock stick reads `0x5` (UNI and PON). Two writes, one per
   port, as the stock module load makes them.

@@ -151,3 +151,41 @@ int odi_switch_table_write(uint32_t table, uint32_t index, const uint32_t *data,
 
 	return rc;
 }
+
+int odi_switch_table_read(uint32_t table, uint32_t index, uint32_t *data, uint32_t n_words)
+{
+	const struct odi_sw_table_desc *desc;
+	uint32_t ctrl;
+	uint32_t i;
+	int rc;
+
+	if (table >= sizeof(odi_sw_table_desc) / sizeof(odi_sw_table_desc[0]))
+		return ODI_SW_EOPNOTSUPP;
+	desc = &odi_sw_table_desc[table];
+	if (desc->datareg_num == 0 || n_words != desc->datareg_num)
+		return ODI_SW_EOPNOTSUPP;
+
+	lockdep_assert_held(&odi_switch_lock);
+
+	ctrl = odi_reg_read(ODI_SW_TABLE_CMD_OFF);
+	ctrl = ODI_SW_TABLE_CMD_ROW_SET(ctrl, index + desc->addr_offset);
+	ctrl = ODI_SW_TABLE_CMD_METHOD_SET(ctrl, 1);
+	ctrl = ODI_SW_TABLE_CMD_IS_WRITE_SET(ctrl, 0); /* read */
+	ctrl = ODI_SW_TABLE_CMD_TABLE_KIND_SET(ctrl, desc->type);
+	ctrl = ODI_SW_TABLE_CMD_START_SET(ctrl, 1);
+	odi_reg_write(ODI_SW_TABLE_CMD_OFF, ctrl);
+
+	rc = odi_poll_reg(ODI_SW_TABLE_STATUS_OFF, ODI_SW_TABLE_STATUS_IN_PROGRESS, 0,
+			  ODI_SW_TABLE_POLL_DELAY_US, ODI_SW_TABLE_POLL_US, NULL);
+	if (rc) {
+		ODI_SW_TBL_POLL_TIMEOUT_LOG("read", table, index);
+		return rc;
+	}
+
+	for (i = 0; i < n_words; i++)
+		data[i] = odi_reg_read(ODI_SW_TABLE_READ_WORD(n_words - 1U - i));
+
+	ODI_SW_TABLE_TRACE('t', table, index, data, n_words);
+
+	return 0;
+}

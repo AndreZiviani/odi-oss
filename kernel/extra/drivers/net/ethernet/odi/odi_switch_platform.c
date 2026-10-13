@@ -2,7 +2,8 @@
 /*
  * odi_switch_platform.c -- the switch-core state the stock OMCI kernel
  * modules set up when they loaded: the platform settings, each a
- * read-modify-write of the fields it owns, and the module-load replay.
+ * read-modify-write of the fields it owns, the clean of the ACL tables,
+ * and the module-load replay.
  * rcS runs both once, through the switch_init write of /proc/odi_omci,
  * after the odi_init "switch" verb whose baseline they narrow and before
  * omcid starts (docs/SWITCH.md#platform-init, #module-load-replay). Board
@@ -27,6 +28,129 @@ static void odi_switch_platform_classify(void)
 
 	reg = ODI_SW_CLASSIFY_SETUP_US_NO_MATCH_ACTION_SET(reg, 1);
 	odi_reg_write(ODI_SW_CLASSIFY_SETUP_OFF, reg);
+}
+
+/* The three ACL tables, 96 rows each: the rule pattern, the rule mask
+ * (the same table kind, pattern rows 128 up) and the action.
+ */
+#define ODI_SW_ACL_ROW_COUNT		96U
+#define ODI_SW_ACL_RULE_WORDS		5U
+#define ODI_SW_ACL_ACTION_WORDS		3U
+
+/* VALID of a rule: bit 144 of the pattern row, bit 16 of word 0 in the
+ * order odi_switch_table_write() takes a row. The module-load replay
+ * writes rule 1 with it set; a row with it clear matches nothing.
+ */
+#define ODI_SW_ACL_PATTERN_VALID	(1U << 16)
+
+struct odi_sw_acl_count {
+	unsigned int valid;	/* rules with VALID set */
+	unsigned int used;	/* rows with a non-zero word in any of the three tables */
+	unsigned int unread;	/* row reads that timed out */
+	int first_valid;	/* the first rule with VALID set, -1 when none */
+};
+
+static const struct {
+	uint32_t table;
+	uint32_t words;
+} odi_sw_acl_tables[] = {
+	{ ODI_SW_TBL_ACL_PATTERN, ODI_SW_ACL_RULE_WORDS },
+	{ ODI_SW_TBL_ACL_PATTERN_MASK, ODI_SW_ACL_RULE_WORDS },
+	{ ODI_SW_TBL_ACL_ACTIONS, ODI_SW_ACL_ACTION_WORDS },
+};
+
+#define ODI_SW_ACL_TABLES \
+	(sizeof(odi_sw_acl_tables) / sizeof(odi_sw_acl_tables[0]))
+
+/* Reads every row of the three tables back, a table at a time. */
+static void odi_switch_platform_acl_count(struct odi_sw_acl_count *c)
+{
+	uint32_t used[(ODI_SW_ACL_ROW_COUNT + 31U) / 32U] = { 0 };
+	uint32_t row[ODI_SW_ACL_RULE_WORDS];
+	uint32_t t, r, i;
+
+	c->valid = 0;
+	c->used = 0;
+	c->unread = 0;
+	c->first_valid = -1;
+	for (t = 0; t < ODI_SW_ACL_TABLES; t++) {
+		for (r = 0; r < ODI_SW_ACL_ROW_COUNT; r++) {
+			if (odi_switch_table_read(odi_sw_acl_tables[t].table, r, row,
+						  odi_sw_acl_tables[t].words)) {
+				c->unread++;
+				continue;
+			}
+			if (odi_sw_acl_tables[t].table == ODI_SW_TBL_ACL_PATTERN &&
+			    (row[0] & ODI_SW_ACL_PATTERN_VALID)) {
+				c->valid++;
+				if (c->first_valid < 0)
+					c->first_valid = (int)r;
+			}
+			for (i = 0; i < odi_sw_acl_tables[t].words; i++)
+				if (row[i])
+					used[r / 32U] |= 1U << (r % 32U);
+		}
+	}
+	for (r = 0; r < ODI_SW_ACL_ROW_COUNT; r++)
+		if (used[r / 32U] & (1U << (r % 32U)))
+			c->used++;
+}
+
+/* Every row of the three tables written all-zero; the first failed write,
+ * or 0.
+ */
+static int odi_switch_platform_acl_clear(void)
+{
+	static const uint32_t zero[ODI_SW_ACL_RULE_WORDS] = { 0 };
+	uint32_t t, r;
+	int rc = 0, w;
+
+	for (t = 0; t < ODI_SW_ACL_TABLES; t++) {
+		for (r = 0; r < ODI_SW_ACL_ROW_COUNT; r++) {
+			w = odi_switch_table_write(odi_sw_acl_tables[t].table, r, zero,
+						   odi_sw_acl_tables[t].words);
+			if (w && !rc)
+				rc = w;
+		}
+	}
+	return rc;
+}
+
+/* The ACL tables live in RAM that neither a reset nor a reboot clears:
+ * they come up holding random words after a power cut, and the rules of
+ * whatever ran before after a warm boot (the stock firmware after a trial
+ * fell back to it). ACL ingress is on for the UNI and PON ports (the next
+ * step), and the module-load replay writes only rule 1, so every row is
+ * cleared here, before either, and read back: a leftover rule with VALID
+ * set would match ahead of everything on those ports. Two passes at most,
+ * like the GPON tables; the counts go to the log.
+ */
+static void odi_switch_platform_acl_clean(void)
+{
+	struct odi_sw_acl_count before, after;
+	unsigned int pass;
+	int rc = 0;
+
+	odi_switch_platform_acl_count(&before);
+	ODI_SW_LOG("ACL rows before the clean: %u/%u rules valid (first %d), %u/%u rows not empty%s\n",
+		   before.valid, ODI_SW_ACL_ROW_COUNT, before.first_valid, before.used,
+		   ODI_SW_ACL_ROW_COUNT, before.unread ? " (a row read timed out)" : "");
+	for (pass = 1; pass <= 2U; pass++) {
+		rc = odi_switch_platform_acl_clear();
+		odi_switch_platform_acl_count(&after);
+		if (rc == 0 && (after.used || after.unread))
+			rc = -1;
+		if (rc == 0)
+			break;
+	}
+	if (rc == 0) {
+		ODI_SW_LOG("ACL rows clean after %u pass(es): 0/%u rules valid, 0/%u rows not empty\n",
+			   pass, ODI_SW_ACL_ROW_COUNT, ODI_SW_ACL_ROW_COUNT);
+		return;
+	}
+	ODI_SW_LOG("ACL rows NOT clean after 2 passes (%d): %u/%u rules valid (first %d), %u/%u rows not empty, %u row reads timed out\n",
+		   rc, after.valid, ODI_SW_ACL_ROW_COUNT, after.first_valid, after.used,
+		   ODI_SW_ACL_ROW_COUNT, after.unread);
 }
 
 /* ACL ingress on the UNI and PON ports, one port per write as captured. */
@@ -130,6 +254,7 @@ static const struct {
 	const char *name;
 } odi_switch_platform_steps[] = {
 	{ odi_switch_platform_classify, "classify" },
+	{ odi_switch_platform_acl_clean, "acl clean" },
 	{ odi_switch_platform_acl, "acl" },
 	{ odi_switch_platform_vlan, "vlan" },
 	{ odi_switch_platform_l2, "l2" },

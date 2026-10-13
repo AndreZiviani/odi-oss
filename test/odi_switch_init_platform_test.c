@@ -65,7 +65,7 @@ static unsigned int count_kind_table(char kind, uint32_t table)
 	for (i = 0; i < odi_mock.log_n; i++) {
 		if (odi_mock.log[i].kind != kind)
 			continue;
-		if (kind == 'T' || kind == 't') {
+		if (kind == 'T' || kind == 't' || kind == 'R') {
 			if (((odi_mock.log[i].addr >> 16) & 0xffffU) == table)
 				n++;
 		} else if (kind == 'D') {
@@ -92,6 +92,50 @@ static void test_sequence(void)
 	 */
 	CHECK(w_at(pos, ODI_SW_CLASSIFY_SETUP_OFF, 0x00000001U), "classify: CLASSIFY_SETUP US_PERMIT=1");
 	pos++;
+
+	/* Step "acl clean": every row of the three ACL tables read, written
+	 * all-zero and read again, a table at a time, all before ACL ingress
+	 * is enabled. In the mock every row reads zero, so each table's 96
+	 * reads (t) and 96 writes (T) are one run: one t or T, its D words,
+	 * and an R of 96. No plain-register write in between.
+	 */
+	{
+		static const struct { uint32_t table; unsigned int words; } acl[3] = {
+			{ ODI_SW_TBL_ACL_PATTERN, 5 },
+			{ ODI_SW_TBL_ACL_PATTERN_MASK, 5 },
+			{ ODI_SW_TBL_ACL_ACTIONS, 3 },
+		};
+		unsigned int k, first_acl_w = pos;
+
+		while (first_acl_w < odi_mock.log_n && odi_mock.log[first_acl_w].kind != 'W')
+			first_acl_w++;
+		for (k = 0; k < 3; k++) {
+			CHECK(count_kind_table('t', acl[k].table) == 2,
+			      "acl clean: two read runs per ACL table (before and after)");
+			CHECK(count_kind_table('T', acl[k].table) == 1,
+			      "acl clean: one write run per ACL table");
+			CHECK(count_kind_table('D', acl[k].table) == 3 * acl[k].words,
+			      "acl clean: the D words of the three runs");
+			CHECK(count_kind_table('R', acl[k].table) == 3,
+			      "acl clean: each run 96 rows long");
+		}
+		for (i = pos; i < first_acl_w; i++)
+			if (odi_mock.log[i].kind == 'R')
+				CHECK(odi_mock.log[i].val == 96, "acl clean: a run covers all 96 rows");
+		{
+			unsigned int runs_n = 0;
+
+			for (k = 0; k < 3; k++)
+				runs_n += 3 * (acl[k].words + 2);	/* t/T, D words, R; three runs */
+			/* The R of the last run is only written when the next
+			 * table op breaks it (the cf sweep), after the enable
+			 * writes: one entry fewer before them.
+			 */
+			CHECK(first_acl_w - pos == runs_n - 1,
+			      "acl clean: nothing but the nine ACL runs before ACL ingress is enabled");
+		}
+		pos = first_acl_w;
+	}
 
 	/* Step "acl": ACL_PORT_ENABLE, one RMW per port -- UNI (bit 0) then PON (bit 2). */
 	CHECK(w_at(pos, ODI_SW_ACL_PORT_ENABLE_OFF, 0x00000001U), "acl: ACL_PORT_ENABLE UNI port bit");
