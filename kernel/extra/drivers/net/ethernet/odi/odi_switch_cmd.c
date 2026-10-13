@@ -310,6 +310,7 @@ static uint32_t flow_extent(const uint32_t *map, uint32_t max)
 static int cmd_gem_flow(void *buf, uint32_t len)
 {
 	struct omci_gemflow *g = (struct omci_gemflow *)buf;
+	int rc;
 
 	if (!g || len < sizeof(*g))
 		return -1;
@@ -320,7 +321,13 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 
 		if (idx >= ODI_SW_CMD_GEM_DS_MAX)
 			return ODI_SW_EOPNOTSUPP;
-		odi_sw_gpon_usflow_set(idx, g->gem_port, traffic_cfg);
+		/* A CAM write that did not complete is no flow: omcid does
+		 * not claim it on a nonzero return, and neither does this
+		 * table.
+		 */
+		rc = odi_sw_gpon_usflow_set(idx, g->gem_port, traffic_cfg);
+		if (rc)
+			return rc;
 		if (idx < OMCI_FLOWS_MAX) {
 			odi_sw_gem_ds_gem[idx] = g->gem_port;
 			odi_sw_gem_ds_cfg[idx] = traffic_cfg;

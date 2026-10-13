@@ -26,12 +26,14 @@
 #include <linux/types.h>
 #include <linux/printk.h>
 #define ODI_SW_LOG(fmt, ...) pr_info("odi_switch: " fmt, ##__VA_ARGS__)
+#define ODI_SW_WARN(fmt, ...) pr_warn_ratelimited("odi_switch: " fmt, ##__VA_ARGS__)
 #define ODI_SW_ERR(fmt, ...) pr_err("odi_switch: " fmt, ##__VA_ARGS__)
 #else
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #define ODI_SW_LOG(fmt, ...) printf("odi_switch: " fmt, ##__VA_ARGS__)
+#define ODI_SW_WARN(fmt, ...) printf("odi_switch: " fmt, ##__VA_ARGS__)
 #define ODI_SW_ERR(fmt, ...) printf("odi_switch: " fmt, ##__VA_ARGS__)
 #endif
 
@@ -129,10 +131,12 @@ void odi_sw_qos_sched_set(uint32_t n, uint32_t value);
  * TRAFFIC_CFG of slot idx (odi_switch_gpon_ds_port_write()), the slot
  * record, and the AES bit when an Encrypted_Port-ID for the port came
  * before it. traffic_cfg: FLAGS, 3 for the OMCI/broadcast GEM port, 2 for
- * data. A slot past ODI_SWITCH_DS_SLOT_COUNT is written but not recorded,
- * and logged as an error: AES could never be set on it.
+ * data. Returns 0, or -ETIMEDOUT when the CAM write did not complete; no
+ * slot is recorded and no AES bit set then. A slot past
+ * ODI_SWITCH_DS_SLOT_COUNT is written but not recorded, and logged as an
+ * error: AES could never be set on it.
  */
-void odi_sw_gpon_usflow_set(uint32_t idx, uint32_t gem_port_id, uint32_t traffic_cfg);
+int odi_sw_gpon_usflow_set(uint32_t idx, uint32_t gem_port_id, uint32_t traffic_cfg);
 
 /* Which DS slot holds which GEM port: recorded when cmd 25 creates the
  * port, looked up when an Encrypted_Port-ID PLOAM names it. _reset, which
