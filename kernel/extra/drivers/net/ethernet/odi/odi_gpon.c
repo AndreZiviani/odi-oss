@@ -57,6 +57,7 @@
 #include <linux/timer.h>
 #include <linux/jiffies.h>
 #include <linux/printk.h>
+#include <linux/bitmap.h>
 #include <linux/ratelimit.h>
 #include <linux/string.h>
 #include <linux/errno.h>
@@ -251,6 +252,11 @@ static bool odi_gpon_last_rng_valid;
 static struct odi_gpon_ploam_entry odi_gpon_ring[ODI_GPON_PLOAM_RING_LEN];
 static unsigned int odi_gpon_ring_head;
 static unsigned int odi_gpon_ring_count;
+/* Downstream PLOAM types outside odi_gpon_ds_type_known() already logged
+ * this boot. Some OLTs send amendment types (0x18) every few seconds; one
+ * line per type is enough, odi_gpon_ds_type_count[] keeps the count.
+ */
+static DECLARE_BITMAP(odi_gpon_ds_unknown_logged, 256);
 
 /* odi_gpon_hw_set_ploam_log()'s own callback -- called from inside
  * odi_gpon_hw.c/odi_gpon_isr.c while odi_gpon_lock is already held by this
@@ -279,8 +285,10 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
 			odi_gpon_decode_ranging_time(msg, &odi_gpon_last_rng);
 			odi_gpon_last_rng_valid = true;
 		}
-		if (!odi_gpon_ds_type_known(msg->type))
-			ODI_GPON_LOG("unexpected downstream PLOAM type 0x%02x\n", msg->type);
+		if (!odi_gpon_ds_type_known(msg->type) &&
+		    !__test_and_set_bit(msg->type, odi_gpon_ds_unknown_logged))
+			ODI_GPON_LOG("unexpected downstream PLOAM type 0x%02x (logged once; ploam_type ds counts it)\n",
+				     msg->type);
 	} else {
 		odi_gpon_us_type_count[msg->type]++;
 		if (msg->type == ODI_GPON_US_REI)

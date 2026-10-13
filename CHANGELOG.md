@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- kernel: a downstream PLOAM type the driver does not handle is logged
+  once per boot instead of on every message. Some OLTs send type 0x18
+  every few seconds, which filled `dmesg` (#42). The driver does not act
+  on it, and the lines that send it register and carry traffic. `ploam_type ds` in `/proc/odi_gpon` still
+  counts every one.
+
 - omcid: the OLT's class 171 (extended VLAN tagging operation) now drives
   the tagging when the stick is not in manual mode (`VLAN_CFG_TYPE` other
   than 1), as the stock firmware does. Until now omcid decoded and stored
