@@ -125,6 +125,12 @@ struct odi_mock_state {
 	int poll_stuck;		/* odi_poll_reg() times out: an engine that never finishes */
 	uint16_t ds_ploam[ODI_MOCK_DS_PLOAM_MAX][6];	/* queued, head first */
 	unsigned int ds_ploam_n;
+	/* FIFO_EMPTY trailing a pop: this many reads of the control word
+	 * after each pop still return its value from before the pop.
+	 */
+	unsigned int ds_ploam_lag;
+	unsigned int ds_ploam_stale_reads;
+	uint32_t ds_ploam_stale_ctl;
 	struct odi_mock_write log[ODI_MOCK_LOG_MAX];
 	unsigned int log_n;
 	uint64_t ns;		/* fake timestamp, incremented per entry */
@@ -213,6 +219,10 @@ static inline uint32_t odi_reg_read(uint32_t off)
 	if (odi_mock_read_hook)
 		odi_mock_read_hook(off);
 	val = odi_mock.regs[odi_mock_slot(off)];
+	if (off == ODI_MOCK_DS_PLOAM_CTL && odi_mock.ds_ploam_stale_reads) {
+		odi_mock.ds_ploam_stale_reads--;
+		val = odi_mock.ds_ploam_stale_ctl;
+	}
 
 	if (odi_mock_log_reads && !(off >= ODI_MOCK_TBL_ACCESS_LO && off <= ODI_MOCK_TBL_ACCESS_HI))
 		odi_mock_log_append('r', off, val);
@@ -350,6 +360,13 @@ static inline void odi_mock_ds_ploam_queue(const uint16_t words[6])
 
 static inline void odi_mock_ds_ploam_pop(void)
 {
+	if (odi_mock.ds_ploam_lag) {
+		/* The value the control word held before the pop handshake:
+		 * not empty, the message just taken.
+		 */
+		odi_mock.ds_ploam_stale_ctl = 0U;
+		odi_mock.ds_ploam_stale_reads = odi_mock.ds_ploam_lag;
+	}
 	if (odi_mock.ds_ploam_n) {
 		odi_mock.ds_ploam_n--;
 		memmove(odi_mock.ds_ploam[0], odi_mock.ds_ploam[1],

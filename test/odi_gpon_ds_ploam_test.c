@@ -4,9 +4,10 @@
  * odi_gpon_isr_poll() against test/odi_switch_mock.h and its PLOAM FIFO
  * model: one PLOAM_RX interrupt with several messages queued drains them
  * all, in order, each dispatched to the FSM; one queued message is drained
- * exactly as before (one pop handshake); a FIFO that never reads empty
- * stops at the bound; and the per-message hook sees each message with the
- * state it found.
+ * exactly as before (one pop handshake); a FIFO_EMPTY that trails the pop
+ * by one read does not make a message count twice; a FIFO that never
+ * reads empty stops at the bound; and the per-message hook sees each
+ * message with the state it found.
  */
 #include "odi_switch_unity.h"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_gpon_ploam.c"
@@ -163,6 +164,50 @@ static void test_one_message_unchanged(void)
 	CHECK(ctl_writes == 2U, "one pop handshake, IND=0 then IND=1, nothing more");
 }
 
+/* FIFO_EMPTY trailing the pop by one read of the control word: the drain
+ * must not take the message it just popped for a second one. A second
+ * dispatch would send a second Acknowledge, and for a Request_Key a
+ * second key under a new Key_Index.
+ */
+static void test_empty_lags_pop(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct odi_gpon_ploam m;
+	unsigned int n, rx, tx;
+
+	setup(&fsm);
+	fsm.state = ODI_GPON_STATE_O5;
+	fsm.onu_id = TEST_ONU_ID;
+	odi_mock.ds_ploam_lag = 1;
+	m = ds(TEST_ONU_ID, ODI_GPON_DS_BER_INTERVAL);
+	m.content[4] = 0x38U;
+	queue(&m);
+	n = odi_gpon_isr_poll(&fsm, NULL);
+	odi_gpon_get_ploam_counts(&rx, &tx);
+	CHECK(n == 1U && rx == 1U, "one queued message is drained once, status lagging or not");
+	CHECK(tx == 1U, "and acknowledged once");
+	CHECK(pops() == 1U, "no pop of an empty FIFO");
+
+	queue(&m);
+	queue(&m);
+	queue(&m);
+	poke(ODI_GPON_DSF_IRQ_EVENT_OFF, ODI_GPON_DSF_IRQ_EVENT_PLOAM_RX);
+	n = odi_gpon_isr_poll(&fsm, NULL);
+	odi_gpon_get_ploam_counts(&rx, &tx);
+	CHECK(n == 3U && rx == 4U && tx == 4U, "three queued, three drained and acknowledged");
+	CHECK(odi_mock.ds_ploam_n == 0U, "the FIFO is left empty");
+
+	setup(&fsm);
+	fsm.state = ODI_GPON_STATE_O5;
+	fsm.onu_id = TEST_ONU_ID;
+	odi_mock.ds_ploam_lag = 1;
+	m = ds(TEST_ONU_ID, ODI_GPON_DS_REQUEST_KEY);
+	queue(&m);
+	(void)odi_gpon_isr_poll(&fsm, NULL);
+	odi_gpon_get_ploam_counts(&rx, &tx);
+	CHECK(rx == 1U && tx == 6U, "one Request_Key, one key: six fragments, not twelve");
+}
+
 /* A FIFO_EMPTY that never sets: the drain stops at the bound. */
 static void stuck_fifo_hook(uint32_t off, uint32_t val)
 {
@@ -232,6 +277,7 @@ int main(void)
 	test_two_copies_two_acks();
 	test_one_message_unchanged();
 	test_stuck_fifo_bounded();
+	test_empty_lags_pop();
 	test_hook_per_message();
 	CHECK(odi_mock_locks_idle(), "no lock left held");
 	if (failures) {

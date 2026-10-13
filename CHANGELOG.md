@@ -15,9 +15,11 @@ listed here.
   the OLT went quiet. The stock firmware drains in a loop too: a capture
   shows it popping two messages in one interrupt. The drain runs until the
   FIFO reads empty, at most 16 messages per interrupt; one queued message
-  is drained exactly as before. Each message is logged and re-arms the
-  TO1/TO2 timers on its own, so a burst that moves the ONU through several
-  states in one interrupt logs every transition. On both test lines in
+  is drained exactly as before, and after a pop the FIFO counts as empty
+  if either of two status reads says so, so a status that trails the pop
+  cannot make the message just taken count twice. Each message is logged
+  and re-arms the TO1/TO2 timers on its own, so a burst that moves the
+  ONU through several states in one interrupt logs every transition. On both test lines in
   steady state the FIFO already reads empty and every PLOAM received was
   handled, so no change is expected there. Host-tested against a FIFO
   model (`test/odi_gpon_ds_ploam_test.c`).

@@ -181,7 +181,19 @@ unsigned int odi_gpon_isr_poll(struct odi_gpon_fsm *fsm, struct odi_gpon_isr_pol
 				enum odi_gpon_state prev;
 				unsigned int i;
 
+				/* After a pop, FIFO_EMPTY is read twice and the
+				 * FIFO counts as empty if either read says so: a
+				 * status that trails the pop by an access would
+				 * otherwise show the message just taken as still
+				 * there, and it would be read and dispatched a
+				 * second time, with a pop of an empty FIFO. Not
+				 * needed on the first read, which no pop of ours
+				 * precedes, so a lone message costs no more reads
+				 * than before.
+				 */
 				ploam_ind = odi_reg_read(ODI_GPON_DSF_PLOAM_RX_CTL_OFF);
+				if (n && !ODI_GPON_DSF_PLOAM_RX_CTL_FIFO_EMPTY_GET(ploam_ind))
+					ploam_ind = odi_reg_read(ODI_GPON_DSF_PLOAM_RX_CTL_OFF);
 				if (ODI_GPON_DSF_PLOAM_RX_CTL_FIFO_EMPTY_GET(ploam_ind))
 					break;
 
