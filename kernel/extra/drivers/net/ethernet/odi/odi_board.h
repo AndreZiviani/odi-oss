@@ -29,12 +29,19 @@ extern const unsigned int odi_board_init_event_count;
  */
 void odi_board_init(void);
 
-/* The optics, which the SDK-init verbs never set up on this board: the
- * odi_init verb `optics`, the first PON step. PIN_GPIO_SELECT = 0x08082001
- * (SoC pins 0, 13, 19 and 27 as plain GPIO; without it the port-1 I2C
- * pins, DDM and the module status, stay muxed away and every transaction
- * ends in NO_ACK), then the laser driver is identified, and only then
- * GPIO 13, the TX-disable input of the module, is driven low as an
+/* The optics pins, which the SDK-init verbs never set up on this board:
+ * the odi_init verb `optics`, the first PON step. PIN_GPIO_SELECT =
+ * 0x08082001 (SoC pins 0, 13, 19 and 27 as plain GPIO; without it the
+ * port-1 I2C pins, DDM and the module status, stay muxed away and every
+ * transaction ends in NO_ACK). The laser is left alone (odi_board_laser()).
+ * The caller holds odi_switch_lock. Returns 0.
+ */
+int odi_board_optics(void);
+
+/* The laser: the odi_init verb `laser`, run after `i2c` and `i2cen` (the
+ * I2C controller answers only after them: before, a read returns 0 with
+ * no error) and before `gponact`. It identifies the laser driver, and only
+ * then drives GPIO 13, the TX-disable input of the module, low as an
  * output: as an input, its reset state, the laser stays off and the OLT
  * never hears the serial number.
  *
@@ -52,9 +59,9 @@ void odi_board_init(void);
 #define ODI_BOARD_LDD_ID_PAGE		2U	/* A2h page that holds the id byte */
 #define ODI_BOARD_LDD_ID_OFF		0xa0U	/* the id byte, in that page */
 #define ODI_BOARD_LDD_ID_GN25L95	0x6aU
-int odi_board_optics(const char *arg);
+int odi_board_laser(const char *arg);
 
-/* What the last optics verb found and did, for /proc/odi_gpon and the
+/* What the last laser verb found and did, for /proc/odi_gpon and the
  * GPON activation gate: laser_on is 1 only after the verb drove the
  * TX-disable line low; ldd_id is the id byte read, or -1 when the probe
  * failed or never ran.

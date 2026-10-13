@@ -815,12 +815,12 @@ int odi_gpon_verb(const char *verb, const char *arg)
 		if (rc == 0)
 			odi_gpon_fsm_set_password(&odi_gpon_fsm_inst, pw);
 	} else if (!strcmp(verb, "gponact") && !laser.laser_on) {
-		/* The optics verb kept the laser off (odi_board.h): an
+		/* The laser verb kept the laser off (odi_board.h): an
 		 * unknown laser driver may light outside the ONU's timeslots
 		 * and take down every other ONU on the OLT port, so the MAC
 		 * is not started either.
 		 */
-		pr_err("odi_gpon: gponact refused: the laser is off (optics verb: laser driver id %d)\n",
+		pr_err("odi_gpon: gponact refused: the laser is off (laser verb: laser driver id %d)\n",
 		       laser.ldd_id);
 		rc = -EPERM;
 	} else if (!strcmp(verb, "gponact")) {

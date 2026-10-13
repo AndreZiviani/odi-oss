@@ -226,9 +226,24 @@ confirm_watchdog() {
 # omcid startup itself) must not race ahead of it; the switch init
 # deactivates the ONU, so gponsn, gponpw and gponact -- gated on omcid,
 # above -- come after it.
+# The laser TX enable, once the I2C steps have the controller answering: on
+# only for the laser driver this image was validated with, otherwise left
+# off and gponact refused (odi_board.h). ODI_LASER_UNVERIFIED=1 in odi.conf
+# forces it on (docs/SETTINGS.md); /etc/config/optics.off leaves it off.
+pon_step_laser() {
+	if [ -f /etc/config/optics.off ]; then
+		crumb "pon step laser: optics.off, laser left off"
+	elif grep -q '^ODI_LASER_UNVERIFIED=1$' /etc/config/odi.conf 2>/dev/null; then
+		pon_step "laser unverified"
+	else
+		pon_step laser
+	fi
+}
+
 pon_steps_default() {
 	pon_step "i2c 1"
 	pon_step "i2cen 1"
+	pon_step_laser
 	pon_step gpon
 	pon_step rxsd
 	pon_step gpondrv

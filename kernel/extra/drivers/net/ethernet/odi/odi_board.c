@@ -69,13 +69,18 @@ static int odi_board_ldd_id(void)
 	return rc ? -1 : (int)id;
 }
 
-int odi_board_optics(const char *arg)
+int odi_board_optics(void)
+{
+	odi_reg_write(ODI_SW_PIN_GPIO_SELECT(0), ODI_BOARD_PIN_GPIO_SELECT);
+	ODI_BOARD_LOG("optics: PIN_GPIO_SELECT 0x%08x\n", (unsigned int)ODI_BOARD_PIN_GPIO_SELECT);
+	return 0;
+}
+
+int odi_board_laser(const char *arg)
 {
 	const uint32_t bit = 1U << ODI_BOARD_GPIO_TX_DISABLE;
 	int unverified = arg && !strcmp(arg, "unverified");
 	int rc, id;
-
-	odi_reg_write(ODI_SW_PIN_GPIO_SELECT(0), ODI_BOARD_PIN_GPIO_SELECT);
 
 	id = odi_board_ldd_id();
 	odi_board_laser_state.ldd_id = id;
@@ -83,9 +88,9 @@ int odi_board_optics(const char *arg)
 	if (id != (int)ODI_BOARD_LDD_ID_GN25L95 && !unverified) {
 		odi_board_laser_state.laser_on = 0;
 		if (id < 0)
-			ODI_BOARD_LOG("optics: no answer from the laser driver id byte; laser left OFF, GPON activation refused\n");
+			ODI_BOARD_LOG("laser: no answer from the laser driver id byte; laser left OFF, GPON activation refused\n");
 		else
-			ODI_BOARD_LOG("optics: laser driver id 0x%02x is not the GN25L95 (0x%02x) this image was validated with; laser left OFF, GPON activation refused (ODI_LASER_UNVERIFIED=1 overrides, only on an OLT port with no other ONU)\n",
+			ODI_BOARD_LOG("laser: laser driver id 0x%02x is not the GN25L95 (0x%02x) this image was validated with; laser left OFF, GPON activation refused (ODI_LASER_UNVERIFIED=1 overrides, only on an OLT port with no other ONU)\n",
 				      (unsigned int)id, (unsigned int)ODI_BOARD_LDD_ID_GN25L95);
 		return -ENODEV;
 	}
@@ -95,10 +100,10 @@ int odi_board_optics(const char *arg)
 	if (!rc)
 		rc = odi_soc_write(SOC_GPIO_DIR, odi_soc_read(SOC_GPIO_DIR) | bit);
 	odi_board_laser_state.laser_on = !rc;
-	ODI_BOARD_LOG("optics: laser driver id 0x%02x%s, PIN_GPIO_SELECT 0x%08x, GPIO %u low: dir 0x%08x dat 0x%08x, rc %d\n",
+	ODI_BOARD_LOG("laser: laser driver id 0x%02x%s, GPIO %u low: dir 0x%08x dat 0x%08x, rc %d\n",
 		      (unsigned int)(id < 0 ? 0xff : id),
 		      id == (int)ODI_BOARD_LDD_ID_GN25L95 ? " (GN25L95)" : " (UNVERIFIED, forced on)",
-		      (unsigned int)ODI_BOARD_PIN_GPIO_SELECT, ODI_BOARD_GPIO_TX_DISABLE,
+		      ODI_BOARD_GPIO_TX_DISABLE,
 		      (unsigned int)odi_soc_read(SOC_GPIO_DIR),
 		      (unsigned int)odi_soc_read(SOC_GPIO_DATA), rc);
 	return rc;

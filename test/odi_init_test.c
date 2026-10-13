@@ -46,11 +46,18 @@ int odi_gpon_verb(const char *verb, const char *arg)
 }
 
 static int stub_optics_calls;
-static const char *stub_optics_last_arg;
+static int stub_laser_calls;
+static const char *stub_laser_last_arg;
 
-int odi_board_optics(const char *arg)
+int odi_board_laser(const char *arg)
 {
-	stub_optics_last_arg = arg;
+	stub_laser_last_arg = arg;
+	stub_laser_calls++;
+	return 0;
+}
+
+int odi_board_optics(void)
+{
 	stub_optics_calls++;
 	return 0;
 }
@@ -96,9 +103,9 @@ int main(void)
 	stub_optics_calls = 0;
 	rc = odi_init_apply("optics", NULL);
 	CHECK(rc == 0 && stub_optics_calls == 1, "optics calls odi_board_optics() once");
-	rc = odi_init_apply("optics", "unverified");
-	CHECK(rc == 0 && stub_optics_calls == 2 && stub_optics_last_arg &&
-	      !strcmp(stub_optics_last_arg, "unverified"), "optics passes its argument on");
+	rc = odi_init_apply("laser", "unverified");
+	CHECK(rc == 0 && stub_laser_calls == 1 && stub_optics_calls == 1 && stub_laser_last_arg &&
+	      !strcmp(stub_laser_last_arg, "unverified"), "laser calls odi_board_laser() with its argument");
 	CHECK(stub_sdkinit_calls == 0 && stub_gpon_calls == 0, "optics calls neither replay");
 
 	/* Every PON-step verb routes to odi_gpon_verb(), arg passed through. */

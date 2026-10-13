@@ -6,7 +6,8 @@
  *   1. the board replay (odi_board_init());
  *   2. the odi_init verbs of the rcS main loop, through the real
  *      /proc/odi_init dispatch (odi_init_apply());
- *   3. the PON steps up to gpondev: optics, i2c, i2cen, gpon, rxsd, gpondrv;
+ *   3. the PON steps up to gpondev: optics, i2c, i2cen, laser, gpon, rxsd,
+ *      gpondrv;
  *   4. init_platform, every item, as the rcS /proc/odi_omci write asks;
  *   5. the module-load replay (modload.bin carries the production
  *      selection);
@@ -252,6 +253,7 @@ int main(int argc, char **argv)
 	verb("optics", NULL);
 	verb("i2c", "1");
 	verb("i2cen", "1");
+	verb("laser", NULL);
 	verb("gpon", NULL);
 	verb("rxsd", NULL);
 	verb("gpondrv", NULL);

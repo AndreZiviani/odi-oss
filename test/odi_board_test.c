@@ -131,7 +131,7 @@ static void optics_setup(int ldd_id, uint8_t page)
 }
 
 /* Any laser driver but the GN25L95, or none answering: the I2C pins are
- * routed (the probe needs them), GPIO 13 is left alone, the laser stays
+ * routed by optics, the laser verb leaves GPIO 13 alone, the laser stays
  * off and GPON activation is refused (odi_gpon.c reads laser_on).
  */
 static void test_optics_unknown_laser_driver(void)
@@ -139,7 +139,7 @@ static void test_optics_unknown_laser_driver(void)
 	struct odi_board_laser l;
 
 	optics_setup(0x55, 0U);
-	CHECK(odi_board_optics(NULL) == -ENODEV, "unknown laser driver: -ENODEV");
+	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == -ENODEV, "unknown laser driver: -ENODEV");
 	CHECK(odi_mock.log_n == 1 && odi_mock.log[0].addr == 0x48U,
 	      "unknown laser driver: only PIN_GPIO_SELECT is written, GPIO 13 untouched");
 	CHECK(odi_soc_mock.regs[SOC_GPIO_DIR / 4] == 0x00000004U, "unknown laser driver: GPIO 13 still an input");
@@ -148,12 +148,12 @@ static void test_optics_unknown_laser_driver(void)
 	CHECK(fake_a2_page == 0U, "unknown laser driver: page select put back");
 
 	optics_setup(-1, 0U);
-	CHECK(odi_board_optics(NULL) == -ENODEV, "no answer: -ENODEV");
+	CHECK(odi_board_laser(NULL) == -ENODEV, "no answer: -ENODEV");
 	odi_board_laser_get(&l);
 	CHECK(!l.laser_on && l.ldd_id == -1, "no answer: laser off, id -1");
 
 	optics_setup(0x55, 0U);
-	CHECK(odi_board_optics("unverified") == 0, "unverified: forced on");
+	CHECK(odi_board_laser("unverified") == 0, "unverified: forced on");
 	odi_board_laser_get(&l);
 	CHECK(l.laser_on && l.unverified && l.ldd_id == 0x55, "unverified: laser on, flagged");
 	CHECK(odi_soc_mock.regs[SOC_GPIO_DIR / 4] == 0x00002004U, "unverified: GPIO 13 an output");
@@ -164,7 +164,7 @@ static void test_optics(void)
 	struct odi_board_laser l;
 
 	optics_setup(0x6a, 2U);
-	CHECK(odi_board_optics(NULL) == 0, "optics returns 0");
+	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == 0, "optics and laser return 0");
 	odi_board_laser_get(&l);
 	CHECK(l.laser_on && l.ldd_id == 0x6a, "GN25L95: laser on");
 	CHECK(fake_a2_page == 2U && fake_page_writes == 1, "page 2 already selected: left as found, no restore write");
