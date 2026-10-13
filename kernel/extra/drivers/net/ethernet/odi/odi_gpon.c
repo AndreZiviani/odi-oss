@@ -93,12 +93,6 @@ static DEFINE_RATELIMIT_STATE(odi_gpon_event_rs, 60 * HZ, 30);
 static unsigned long odi_gpon_state_since;	/* jiffies of the last transition */
 static unsigned long odi_gpon_los_since;	/* jiffies of the last LOS rising edge */
 static unsigned long odi_gpon_lof_since;	/* jiffies of the last LOF rising edge */
-/* The downstream PLOAM the current interrupt drained, if any: the cause of
- * whatever transition that interrupt makes (odi_gpon_isr_poll() drains at
- * most one message per call).
- */
-static struct odi_gpon_ploam odi_gpon_last_ds;
-static bool odi_gpon_last_ds_valid;
 
 /* The switch interrupt, "apl_sw": the board irqchip numbers its sources
  * from RTL8686_IRQ_BASE, so switch bit 8 is irq 16. Not shared: nothing
@@ -277,8 +271,6 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
 		odi_gpon_ring_count++;
 
 	if (dir == 0U) {
-		odi_gpon_last_ds = *msg;
-		odi_gpon_last_ds_valid = true;
 		odi_gpon_ds_type_count[msg->type]++;
 		if (msg->type == ODI_GPON_DS_UPSTREAM_OVERHEAD) {
 			odi_gpon_decode_upstream_overhead(msg, &odi_gpon_last_uo);
@@ -305,8 +297,9 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
  * in O6. Re-arming them on every call let each interrupt, and now every
  * line poll, push the deadline back, and a TO the poll keeps moving never
  * expires. A state left and entered again always passes through a call
- * here in between (each entry point feeds at most one PLOAM and one line
- * event), which deletes the timer, so a new entry starts a fresh one.
+ * here in between (each entry point feeds at most one line event, and the
+ * interrupt syncs after each PLOAM it drains, odi_gpon_isr_msg()), which
+ * deletes the timer, so a new entry starts a fresh one.
  */
 static void odi_gpon_timers_sync(void)
 {
@@ -615,10 +608,21 @@ static void odi_gpon_line_fn(struct timer_list *odi_timer_arg)
  * source is pending; the demux acks the source afterwards. The GPON block
  * masks and unmasks its own PONMAC_IRQ_ENABLE inside odi_gpon_isr_poll().
  */
+
+/* After each downstream message odi_gpon_isr_poll() dispatched, under the
+ * lock: the event=onu_state line for the transition that message caused,
+ * and the timers for the state it left, so a state left and entered again
+ * within one interrupt still restarts its timer.
+ */
+static void odi_gpon_isr_msg(enum odi_gpon_state prev, const struct odi_gpon_ploam *msg)
+{
+	odi_gpon_note_event(prev, ODI_GPON_EVENT_PLOAM_RX, msg);
+	odi_gpon_timers_sync();
+}
+
 static void odi_gpon_isr_entry(void)
 {
 	unsigned long flags;
-	enum odi_gpon_state prev;
 	struct odi_gpon_isr_poll_status poll_status;
 
 	spin_lock_irqsave(&odi_gpon_lock, flags);
@@ -632,11 +636,11 @@ static void odi_gpon_isr_entry(void)
 	 */
 	odi_gpon_line_check();
 
-	prev = odi_gpon_fsm_inst.state;
-	odi_gpon_last_ds_valid = false;
+	/* Each message drained moves the FSM on its own and is logged and
+	 * timed by odi_gpon_isr_msg(); the sync after covers an interrupt
+	 * that drained none.
+	 */
 	odi_gpon_isr_poll(&odi_gpon_fsm_inst, &poll_status);
-	odi_gpon_note_event(prev, ODI_GPON_EVENT_PLOAM_RX,
-			    odi_gpon_last_ds_valid ? &odi_gpon_last_ds : NULL);
 	odi_gpon_timers_sync();
 
 	if (poll_status.top_sts == 0U)
@@ -687,6 +691,7 @@ int odi_gpon_init(void)
 	odi_gpon_hw_reset();
 	odi_gpon_fsm_init(&odi_gpon_fsm_inst);
 	odi_gpon_hw_set_ploam_log(odi_gpon_ploam_log);
+	odi_gpon_isr_set_msg_hook(odi_gpon_isr_msg);
 	odi_gpon_booted = false;
 	odi_gpon_ber_period_ms = 0U;
 	odi_gpon_state_since = jiffies;
@@ -834,7 +839,15 @@ int odi_gpon_verb(const char *verb, const char *arg)
 			odi_gpon_fsm_inst.state = ODI_GPON_STATE_O2;
 			odi_gpon_fsm_inst.onu_id = 0U;
 			odi_gpon_booted = true;
-			/* The block is set up: the counter sampler starts. */
+			/* The block is set up: the counter sampler starts, with
+			 * its baseline (the first sample only clears) taken
+			 * here rather than a period later. The downstream
+			 * framer runs from the replay above, and a PLOAM it
+			 * accepts in that first second would reach ds_rx but
+			 * be cleared out of ds_ploam_accepted by a late
+			 * baseline: the two would differ for good.
+			 */
+			odi_gpon_ctr_sample_locked();
 			mod_timer(&odi_gpon_ctr_timer, jiffies + msecs_to_jiffies(ODI_GPON_CTR_PERIOD_MS));
 		} else {
 			odi_gpon_verb_activate(&odi_gpon_fsm_inst);

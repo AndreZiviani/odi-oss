@@ -46,13 +46,22 @@ struct odi_gpon_isr_poll_status {
 };
 
 /* GPON block ISR body (G.984.3 clause 5.8): masks PONMAC_IRQ_ENABLE, reads
- * PONMAC_IRQ_PENDING, drains at most one downstream PLOAM message and
- * dispatches it (FSM, then Acknowledge/GEM-port/Alloc-ID handling), acks
- * the upstream sub-block, restores the mask. Returns the number of
- * messages drained, so a replay test can loop until it returns 0. status
- * may be NULL; otherwise it is filled on every call.
+ * PONMAC_IRQ_PENDING, drains every queued downstream PLOAM message until
+ * the FIFO reads empty (at most 16 per call) and dispatches each in turn
+ * (FSM, then Acknowledge/GEM-port/Alloc-ID handling), acks the upstream
+ * sub-block, restores the mask. Returns the number of messages drained.
+ * status may be NULL; otherwise it is filled on every call.
  */
 unsigned int odi_gpon_isr_poll(struct odi_gpon_fsm *fsm, struct odi_gpon_isr_poll_status *status);
+
+/* Called by odi_gpon_isr_poll() after each message it dispatched, with the
+ * FSM state before that message and the message: odi_gpon.c logs the
+ * transition it caused and re-arms the timers per message, since one call
+ * can move the FSM several times. Called with the caller's lock held; NULL
+ * (the default) calls nothing.
+ */
+typedef void (*odi_gpon_isr_msg_fn)(enum odi_gpon_state prev, const struct odi_gpon_ploam *msg);
+void odi_gpon_isr_set_msg_hook(odi_gpon_isr_msg_fn fn);
 
 /* The downstream line alarm, sampled: DSF_ALARM_STATE (0x701008) read once
  * and its LOS and LOF bits fed to the FSM as one level

@@ -5,6 +5,30 @@ listed here.
 
 ## Unreleased
 
+- kernel: the GPON interrupt now drains every queued downstream PLOAM
+  message, not one. The PLOAM_RX event is one bit for however many
+  messages arrived, so two queued during one interrupt (an activation
+  burst, the three copies the OLT sends of every message) left the second
+  in the FIFO until the next message came in, and the lag never shrank;
+  the last message of a burst (the third Deactivate_ONU-ID, a
+  Key_Switching_Time, an Encrypted_Port-ID) was handled late, or never if
+  the OLT went quiet. The stock firmware drains in a loop too: a capture
+  shows it popping two messages in one interrupt. The drain runs until the
+  FIFO reads empty, at most 16 messages per interrupt; one queued message
+  is drained exactly as before, and after a pop the FIFO counts as empty
+  if either of two status reads says so, so a status that trails the pop
+  cannot make the message just taken count twice. Each message is logged
+  and re-arms the TO1/TO2 timers on its own, so a burst that moves the
+  ONU through several states in one interrupt logs every transition. On both test lines in
+  steady state the FIFO already reads empty and every PLOAM received was
+  handled, so no change is expected there. Host-tested against a FIFO
+  model (`test/odi_gpon_ds_ploam_test.c`). The counter sampler now takes
+  its baseline (the first sample, which only clears) in the boot
+  `gponact` instead of a second later: a PLOAM the framer accepted in
+  that second was counted in `ploam ds_rx` but cleared out of
+  `ctr ds_ploam_accepted`, leaving the two apart for good (by 6 on one
+  ISP1 boot).
+
 - slot-state.sh: safe to run again after a commit, which the web UI now does
   (odi-ui: the Commit button runs `nv commit` and then this script, so
   `/var/run/odi-slot`, the login notice and `gpon_uncommitted` follow the

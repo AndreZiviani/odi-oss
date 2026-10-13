@@ -3,7 +3,8 @@
  * odi_gpon_isr.c -- odi_gpon_isr_poll(), the top-level GPON MAC block
  * interrupt servicing entry point, against G.984.3 clause 5.8 (GTC
  * framing): mask the top interrupt, read the aggregate status, drain and
- * dispatch every queued downstream PLOAM message, restore the mask; and
+ * dispatch every queued downstream PLOAM message (bounded), restore the
+ * mask; and
  * odi_gpon_line_sample(), the LOS/LOF level the interrupt and the timers
  * feed to the FSM. This
  * is the only place a PLOAM message type dictates register work beyond
@@ -15,6 +16,30 @@
 #include "odi_gpon_hw.h"
 #include "odi_switch_reg.h"
 #include "odi_switch_hw.h"
+
+#ifdef __KERNEL__
+#include <linux/printk.h>
+#define ODI_GPON_ISR_WARN(fmt, ...) pr_warn_ratelimited("odi_gpon: " fmt, ##__VA_ARGS__)
+#else
+#include <stdio.h>
+#define ODI_GPON_ISR_WARN(fmt, ...) printf("odi_gpon: " fmt, ##__VA_ARGS__)
+#endif
+
+/* The most downstream PLOAM messages one interrupt drains. The FIFO depth
+ * is not decoded; the most queued at one interrupt in any capture is two
+ * (the stock driver popping two in one pass, twice, early in an
+ * activation). The bound only keeps a FIFO_EMPTY that never sets from
+ * looping with interrupts off; what it leaves is drained at the next
+ * interrupt.
+ */
+#define ODI_GPON_DS_PLOAM_DRAIN_MAX	16U
+
+static odi_gpon_isr_msg_fn odi_gpon_isr_msg_hook;
+
+void odi_gpon_isr_set_msg_hook(odi_gpon_isr_msg_fn fn)
+{
+	odi_gpon_isr_msg_hook = fn;
+}
 
 /* Every downstream PLOAM message is fed to the FSM first (it owns the
  * state-machine-relevant types and silently ignores the rest, by design,
@@ -138,24 +163,39 @@ unsigned int odi_gpon_isr_poll(struct odi_gpon_fsm *fsm, struct odi_gpon_isr_pol
 		ds_dlt = odi_reg_read(ODI_GPON_DSF_IRQ_EVENT_OFF);
 
 		if (ds_dlt & ODI_GPON_DSF_IRQ_EVENT_PLOAM_RX) {
-			/* One drain per bracket, not a while-not-empty loop:
-			 * every PLOAM_RX-triggered pass this driver has
-			 * captured drains exactly one message -- no batched
-			 * multi-message drain was ever observed, and the
-			 * G.984.3 clause 5.4 handshake is a single
-			 * check-then-drain sequence, not a loop. A caller sees
-			 * more queued messages the same way the real
-			 * shared-IRQ line does: another interrupt, i.e.
-			 * another odi_gpon_isr() call (this function's own
-			 * return value is exactly "was there one to drain
-			 * on this call").
+			/* Every message queued, until FIFO_EMPTY, at most
+			 * ODI_GPON_DS_PLOAM_DRAIN_MAX. PLOAM_RX is one event
+			 * bit for however many messages arrived since the last
+			 * read: two queued during one interrupt raise it once,
+			 * and draining one per interrupt would leave the
+			 * second waiting for the next message from the OLT,
+			 * the lag never shrinking. The stock driver drains in
+			 * a loop too; the react capture has it popping two
+			 * messages in one pass. With one message queued this
+			 * is the old single drain plus one more read of the
+			 * control word.
 			 */
-			ploam_ind = odi_reg_read(ODI_GPON_DSF_PLOAM_RX_CTL_OFF);
-
-			if (!ODI_GPON_DSF_PLOAM_RX_CTL_FIFO_EMPTY_GET(ploam_ind)) {
+			while (n < ODI_GPON_DS_PLOAM_DRAIN_MAX) {
 				uint16_t words[6];
 				struct odi_gpon_ploam msg;
+				enum odi_gpon_state prev;
 				unsigned int i;
+
+				/* After a pop, FIFO_EMPTY is read twice and the
+				 * FIFO counts as empty if either read says so: a
+				 * status that trails the pop by an access would
+				 * otherwise show the message just taken as still
+				 * there, and it would be read and dispatched a
+				 * second time, with a pop of an empty FIFO. Not
+				 * needed on the first read, which no pop of ours
+				 * precedes, so a lone message costs no more reads
+				 * than before.
+				 */
+				ploam_ind = odi_reg_read(ODI_GPON_DSF_PLOAM_RX_CTL_OFF);
+				if (n && !ODI_GPON_DSF_PLOAM_RX_CTL_FIFO_EMPTY_GET(ploam_ind))
+					ploam_ind = odi_reg_read(ODI_GPON_DSF_PLOAM_RX_CTL_OFF);
+				if (ODI_GPON_DSF_PLOAM_RX_CTL_FIFO_EMPTY_GET(ploam_ind))
+					break;
 
 				for (i = 0; i < ODI_GPON_DS_PLOAM_WORDS; i++)
 					words[i] = (uint16_t)odi_reg_read(ODI_GPON_DSF_PLOAM_RX_WORD(i));
@@ -168,9 +208,14 @@ unsigned int odi_gpon_isr_poll(struct odi_gpon_fsm *fsm, struct odi_gpon_isr_pol
 				odi_reg_write(ODI_GPON_DSF_PLOAM_RX_CTL_OFF,
 					      ODI_GPON_DSF_PLOAM_RX_CTL_POP_SET(0, 1));
 
+				prev = fsm->state;
 				odi_gpon_isr_dispatch(fsm, &msg);
 				n++;
+				if (odi_gpon_isr_msg_hook)
+					odi_gpon_isr_msg_hook(prev, &msg);
 			}
+			if (n == ODI_GPON_DS_PLOAM_DRAIN_MAX)
+				ODI_GPON_ISR_WARN("downstream PLOAM drain stopped at %u messages\n", n);
 		}
 	}
 

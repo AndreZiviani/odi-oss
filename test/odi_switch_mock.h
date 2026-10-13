@@ -106,9 +106,31 @@ struct odi_mock_write {
 #define ODI_MOCK_LOG_MAX	32768
 #endif
 
+/* The downstream PLOAM FIFO, modeled because the driver drains it until
+ * it reads empty: DSF_PLOAM_RX_CTL (0x701080) bit 5 FIFO_EMPTY, the head
+ * message in DSF_PLOAM_RX_WORD (0x7010a0, six words), and a write with bit
+ * 0 (POP) set dequeuing the head. A test queues messages with
+ * odi_mock_ds_ploam_queue(). A test that instead pokes the control word
+ * and the six words itself has queued one message: the pop empties the
+ * FIFO.
+ */
+#define ODI_MOCK_DS_PLOAM_CTL		0x701080U
+#define ODI_MOCK_DS_PLOAM_WORD(n)	(0x7010a0U + 4U * (uint32_t)(n))
+#define ODI_MOCK_DS_PLOAM_EMPTY		(1U << 5)
+#define ODI_MOCK_DS_PLOAM_POP		1U
+#define ODI_MOCK_DS_PLOAM_MAX		32U
+
 struct odi_mock_state {
 	uint32_t regs[ODI_MOCK_WORDS];
 	int poll_stuck;		/* odi_poll_reg() times out: an engine that never finishes */
+	uint16_t ds_ploam[ODI_MOCK_DS_PLOAM_MAX][6];	/* queued, head first */
+	unsigned int ds_ploam_n;
+	/* FIFO_EMPTY trailing a pop: this many reads of the control word
+	 * after each pop still return its value from before the pop.
+	 */
+	unsigned int ds_ploam_lag;
+	unsigned int ds_ploam_stale_reads;
+	uint32_t ds_ploam_stale_ctl;
 	struct odi_mock_write log[ODI_MOCK_LOG_MAX];
 	unsigned int log_n;
 	uint64_t ns;		/* fake timestamp, incremented per entry */
@@ -197,6 +219,10 @@ static inline uint32_t odi_reg_read(uint32_t off)
 	if (odi_mock_read_hook)
 		odi_mock_read_hook(off);
 	val = odi_mock.regs[odi_mock_slot(off)];
+	if (off == ODI_MOCK_DS_PLOAM_CTL && odi_mock.ds_ploam_stale_reads) {
+		odi_mock.ds_ploam_stale_reads--;
+		val = odi_mock.ds_ploam_stale_ctl;
+	}
 
 	if (odi_mock_log_reads && !(off >= ODI_MOCK_TBL_ACCESS_LO && off <= ODI_MOCK_TBL_ACCESS_HI))
 		odi_mock_log_append('r', off, val);
@@ -307,9 +333,53 @@ static inline int odi_mock_locks_idle(void)
  */
 static void (*odi_mock_write_hook)(uint32_t off, uint32_t val);
 
+/* The head of the modeled FIFO into the registers, or FIFO_EMPTY. */
+static inline void odi_mock_ds_ploam_show(void)
+{
+	unsigned int i;
+
+	if (!odi_mock.ds_ploam_n) {
+		odi_mock.regs[odi_mock_slot(ODI_MOCK_DS_PLOAM_CTL)] |= ODI_MOCK_DS_PLOAM_EMPTY;
+		return;
+	}
+	odi_mock.regs[odi_mock_slot(ODI_MOCK_DS_PLOAM_CTL)] &= ~ODI_MOCK_DS_PLOAM_EMPTY;
+	for (i = 0; i < 6U; i++)
+		odi_mock.regs[odi_mock_slot(ODI_MOCK_DS_PLOAM_WORD(i))] = odi_mock.ds_ploam[0][i];
+}
+
+static inline void odi_mock_ds_ploam_queue(const uint16_t words[6])
+{
+	if (odi_mock.ds_ploam_n >= ODI_MOCK_DS_PLOAM_MAX) {
+		fprintf(stderr, "odi_switch_mock: more than %u downstream PLOAMs queued\n",
+			ODI_MOCK_DS_PLOAM_MAX);
+		abort();
+	}
+	memcpy(odi_mock.ds_ploam[odi_mock.ds_ploam_n++], words, 6U * sizeof(words[0]));
+	odi_mock_ds_ploam_show();
+}
+
+static inline void odi_mock_ds_ploam_pop(void)
+{
+	if (odi_mock.ds_ploam_lag) {
+		/* The value the control word held before the pop handshake:
+		 * not empty, the message just taken.
+		 */
+		odi_mock.ds_ploam_stale_ctl = 0U;
+		odi_mock.ds_ploam_stale_reads = odi_mock.ds_ploam_lag;
+	}
+	if (odi_mock.ds_ploam_n) {
+		odi_mock.ds_ploam_n--;
+		memmove(odi_mock.ds_ploam[0], odi_mock.ds_ploam[1],
+			odi_mock.ds_ploam_n * sizeof(odi_mock.ds_ploam[0]));
+	}
+	odi_mock_ds_ploam_show();
+}
+
 static inline void odi_reg_write(uint32_t off, uint32_t val)
 {
 	odi_mock.regs[odi_mock_slot(off)] = val;
+	if (off == ODI_MOCK_DS_PLOAM_CTL && (val & ODI_MOCK_DS_PLOAM_POP))
+		odi_mock_ds_ploam_pop();
 	if (odi_mock_write_hook)
 		odi_mock_write_hook(off, val);
 	if (off >= ODI_MOCK_TBL_ACCESS_LO && off <= ODI_MOCK_TBL_ACCESS_HI)

@@ -854,7 +854,7 @@ Between `ranging_time` and `ploam_ring`, one fact per line, a key and then
 words, all numbers decimal. The GPON MAC counters clear when they are
 read, so the driver is their one reader (`docs/KERNEL.md`, "The GPON link
 counters"): it samples them once a second from the boot `gponact` on and
-prints 64-bit totals since its first sample. Times are milliseconds: to
+prints 64-bit totals since its first sample, taken in that `gponact`. Times are milliseconds: to
 the second for the ONU states, to the 100 ms line poll for the alarms while
 the ONU is activated.
 

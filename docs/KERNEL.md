@@ -410,7 +410,9 @@ A clear-on-read counter is only sound with one reader, so `odi_gpon_ctr.c`
 is it. A timer runs it once a second from the boot `gponact` on, under
 `odi_gpon_lock`, and it adds each read into a 64-bit total; a read of all
 ones adds what it read and counts a saturated sample, since that second
-lost counts. The first sample only clears. One second keeps every 32-bit
+lost counts. The first sample only clears, and is taken in the boot
+`gponact` itself, right after the replay starts the block, so nothing
+the framer counts is lost to it. One second keeps every 32-bit
 count far from full at line rate; a 16-bit upstream GEM frame count fills
 above 65535 frames a second, which the saturated count shows. The same
 sample records the DS and US FEC state, the superframe count and the time
