@@ -179,6 +179,43 @@ rm -rf "$cfg"
 sh $F set SYSLOG_SERVER x >/dev/null 2>&1
 t "with no config dir a set fails rather than inventing one" "1" "$([ -e "$cfg" ] && echo 0 || echo 1)"
 
+# Installing over the store: /var/tmp is a tmpfs and /var/config jffs2, so an
+# mv from the temp directory is a copy that removes the target first. The
+# file must reach the target by a rename inside the target's own directory.
+# A shim mv records every move; a shim cp can be made to fail.
+mkdir -p "$cfg"
+cp "$T/cs.xml" "$CS"
+cp "$T/hs.xml" "$HS"
+shim="$T/shim"; mkdir -p "$shim"
+cat > "$shim/mv" <<'SH'
+#!/bin/sh
+echo "$1 $2" >> "$MVLOG"
+exec /bin/mv "$@"
+SH
+cat > "$shim/cp" <<'SH'
+#!/bin/sh
+[ -n "${CP_FAIL:-}" ] && exit 1
+exec /bin/cp "$@"
+SH
+chmod +x "$shim/mv" "$shim/cp"
+export MVLOG="$T/mv.log"
+: > "$MVLOG"
+PATH="$shim:$PATH" sh $F set VLAN_MANU_TAG_VID 12 >/dev/null
+last=$(grep " $CS\$" "$MVLOG" | tail -1)
+t "a set reaches CS by a rename from beside it" "$(dirname "$CS")" "$(dirname "${last%% *}")"
+t "and the value is stored"           "VLAN_MANU_TAG_VID=12" "$(sh $F get VLAN_MANU_TAG_VID)"
+t "no .new file is left beside it"    "0" "$(find "$(dirname "$CS")" -maxdepth 1 -name '*.new.*' | wc -l | tr -d ' ')"
+before=$(cat "$CS")
+CP_FAIL=1 PATH="$shim:$PATH" sh $F set VLAN_MANU_TAG_VID 13 >/dev/null 2>&1
+t "a failed copy fails the set"       "1" "$(CP_FAIL=1 PATH="$shim:$PATH" sh $F set VLAN_MANU_TAG_VID 13 >/dev/null 2>&1; echo $?)"
+t "and leaves CS as it was"           "$before" "$(cat "$CS")"
+t "and leaves no temp files"          "0" "$(find "$T/var" "$(dirname "$CS")" -maxdepth 1 \( -name 'flash.*' -o -name '*.new.*' \) | wc -l | tr -d ' ')"
+: > "$MVLOG"
+cp "$T/rcs.xml" "$cfg/reset.xml"
+CS="$cfg/reset.xml" HS="$T/rhs.xml" DEFAULTS="$T/def.xml" PATH="$shim:$PATH" sh $F default cs >/dev/null 2>&1
+last=$(grep " $cfg/reset.xml\$" "$MVLOG" | tail -1)
+t "default cs reaches CS by a rename from beside it" "$cfg" "$(dirname "${last%% *}")"
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" = 0 ]
