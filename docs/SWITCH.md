@@ -234,7 +234,7 @@ Every row of ours (the ONU-ID row, the OMCC GEM port, the T-CONTs and
 flows) is written later, as the OLT assigns it, so all of them land in
 clean tables.
 
-Why: the three tables are on-chip RAM. A warm reset keeps whatever the
+Why: these tables are on-chip RAM. A warm reset keeps whatever the
 last session left in them, which is this ONU's own, still valid entries.
 A power-up leaves whatever the RAM came up with: read back on a stick after
 a power cut, 120 of the 128 GEM-port rows and all 32 Alloc-ID rows were
@@ -256,7 +256,9 @@ MAC filter table that follows them, issued back to back with no wait for
 reset. The boot table sets the filter up to be consulted for downstream
 multicast (`GPON_GEM_DS_MC_CFG` 0x704080 ends at 0x59: no IPv4 or IPv6
 force pass or drop), so a row it left behind could change which groups
-get through; nobody has read the filter after a power cut yet. `test/odi_gpon_init_clean_test.sh` runs
+get through; the clean above now reads it back and clears it as well, but
+what a stick holds there after a power cut has not been seen yet.
+`test/odi_gpon_init_clean_test.sh` runs
 the clean against a model of the two CAMs whose reset drops writes for a
 while after its release, and checks that the plain replay leaves the
 garbage and this one does not.
@@ -533,6 +535,13 @@ every flow cmd 25 accepts. Not reproduced from the capture: the CAM
 rewrite around the bit (it writes the same GEM id back), and the interrupt
 mask save and restore the stock handler makes around it.
 
+The key itself is new for every Request_Key: the driver draws 16 bytes
+from the kernel RNG (`hw_new_key()` in `odi_gpon_hw.c`), as G.984.3 clause
+12.3 asks ("cryptographically unpredictable"). A request that arrives before
+the RNG is initialised still gets a key, with a one-time warning, because
+no key would make the OLT ask again and then deactivate the ONU.
+`test/odi_gpon_aes_key_test.sh` runs it against the register model.
+
 Setting the bit on every data port at creation was rejected: a port the
 OLT does not encrypt would then be decrypted into garbage, and nothing here
 could tell. Every OLT seen so far encrypts every data port.
@@ -581,8 +590,8 @@ log the ability the port then reads (read right after the write; the
 line below is the one expected on a stick, not yet seen):
 
     odi_switch: host port PAUSE toward the host off: ability 0x0be (link 1, tx pause 0, rx pause 1)
- cmd 32 rewrites
-`PORT_FORCE_SELECT(0)` at every provisioning; its leaf keeps the bit
+
+cmd 32 rewrites `PORT_FORCE_SELECT(0)` at every provisioning; its leaf keeps the bit
 ([Command leaves](#command-leaves)). `test/odi_host_pause_test.c` checks
 both words after the platform settings, after the whole ISP1 provisioning
 twice over, and through the parameter below.

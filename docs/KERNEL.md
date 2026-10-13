@@ -1,12 +1,12 @@
 # The kernel
 
-Linux **6.18.53**, the current longterm release, built for the RTL9602C.
+Linux **6.18.56**, the current longterm release, built for the RTL9602C.
 There is no dual-kernel build any more: `kernel/build.sh` builds 6.18 and
 nothing else, from a pristine `cdn.kernel.org` tree with our own patches and
 drivers on top — no vendor kernel tree is fetched, patched or linked at any
 point in this build.
 
-    kernel/618/fetch.sh    fetches and verifies linux-6.18.53.tar.xz
+    kernel/618/fetch.sh    fetches and verifies linux-6.18.56.tar.xz
     kernel/618/mainline/   the pristine tree it extracts, gitignored
     kernel/618/patches/    our edits to mainline files, applied in order
     kernel/618/debug/      debug-only edits, applied with CRUMBS_CORE=1
@@ -305,7 +305,7 @@ and GPON hardware are driven.
 | `odi_switch_l2.c` | the L2 lookup table: row readback and the valid-row walk (the MAC table), L2 multicast add/delete (igmpd) |
 | `odi_gpon*.c` | the GPON MAC block: the O1–O7 activation state machine and PLOAM codec (ITU-T G.984.3), register leaves, the interrupt handler, the switch interrupt line, whose one consumer it is, and the link counters (`odi_gpon_ctr.c`, below) |
 | `odi_omci.c` | the netlink transport that carries OMCI frames between the kernel and `omcid` |
-| `odi_board.c`, `odi_board_data.c` | board-init: LED and I2C core bring-up, an ordered 88-write replay built into the kernel (it runs before any filesystem) |
+| `odi_board.c`, `odi_board_data.c` | board-init: LED and I2C core bring-up, an ordered 88-write replay built into the kernel (it runs before any filesystem), and the `laser` verb: the laser is switched on only when the laser driver id is the GN25L95 (0x6a), or after `laser unverified` (see `docs/BOOT.md`) |
 | `odi_init.c`, `odi_switch_sdkinit.c`, `odi_gpon_init.c` | `/proc/odi_init`, the SDK-init and PON verbs rcS writes, and the register replays behind them |
 | `odi_replay.c` | the one replay loop every captured write sequence goes through (`docs/SWITCH.md`, "Register replays") |
 | `odi_soc.c` | the SoC system-controller window: one `ioremap()`, named offsets, the one allowlist every driver access there goes through (the replays, the watchdog, the optics) |
@@ -446,9 +446,10 @@ paths were wrong before this release, none seen on a stick: an RX refill
 that failed to allocate handed the hardware a descriptor still pointing at
 a freed buffer (it now maps the replacement first and, on failure, drops
 the frame and recycles the mapped buffer); a full TX ring stopped the
-queue with nothing to wake it (there is no TX-complete interrupt, so a
-10 ms delayed work reclaims while a queue is stopped, and the queue wakes
-at half ring); and no DMA mapping was checked (`dma_mapping_error()` now
+queue with nothing to wake it (reclaim now runs from NAPI on the
+TX-completion interrupt, and two delayed works cover an interrupt that
+does not come: one every 10 ms while a queue is stopped, one every 100 ms
+while frames are in flight; the queue wakes at half ring); and no DMA mapping was checked (`dma_mapping_error()` now
 guards all three). The init error path now unwinds in reverse.
 `kernel/extra/drivers/net/ethernet/odi/README.md` has the rest.
 

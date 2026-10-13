@@ -58,9 +58,11 @@ DMA windows and the two ramlog pages, and the drivers under
 `kernel/extra/drivers/net/ethernet/odi/` come up built in (there are no
 modules). `/etc/init.d/rcS` then mounts the config partition, writes the
 switch SDK-init verbs to `/proc/odi_init`, brings up `br0` with
-`/etc/scripts/network.sh`, starts `services` (metricsd, confd, dropbear) in
-the background, **confirms userland to the watchdog**, drives the optics,
-and runs the PON steps, which start `omcid` and activate the GPON MAC.
+`/etc/scripts/network.sh` and returns. Init then starts the daemons (syslogd,
+klogd, ntpd, metricsd, confd, dropbear, omcid) as `respawn` entries, and
+`/etc/init.d/rcS.pon` runs beside them: it drives the optics and the PON
+steps, **confirms userland to the watchdog** after the switch init, and
+activates the GPON MAC once `omcid` has registered.
 `docs/BOOT.md` has each stage and why it is where it is;
 `/etc/init.d/rcS.dev` adds the development aids.
 
@@ -70,7 +72,7 @@ and runs the PON steps, which start `omcid` and activate the GPON MAC.
 |---|---|---|
 | `Makefile` | the whole build and the gates; `make help` | `lint:` and `test-host:` |
 | `toolchain/` | gcc 16.2.0, binutils 2.47, uClibc-ng 1.0.59 for this CPU, built in a container into a Docker volume | [`toolchain/README.md`](../toolchain/README.md) |
-| `kernel/618/fetch.sh`, `mainline/` | fetches and GPG-verifies linux-6.18.53; `mainline/` is the pristine tree (gitignored) | |
+| `kernel/618/fetch.sh`, `mainline/` | fetches and GPG-verifies linux-6.18.56; `mainline/` is the pristine tree (gitignored) | |
 | `kernel/618/patches/` | **only** edits to files mainline already has: 19 lines in 6 files today (`tools/kernel-footprint.sh`) | [`docs/KERNEL.md`](KERNEL.md) "Patches and the overlay" |
 | `kernel/618/debug/` | debug-only mainline edits, applied with `CRUMBS_CORE=1` | |
 | `kernel/618/config` | the seed config, completed by `olddefconfig`; every line has its reason | "The config" in KERNEL.md |
@@ -82,7 +84,7 @@ and runs the PON steps, which start `omcid` and activate the GPON MAC.
 | `rootfs/skeleton/` | `/etc` (rcS, services, network.sh, apply.sh, flash, ...) and the register replay tables in `lib/firmware/odi/` | [`rootfs/README.md`](../rootfs/README.md), then `etc/init.d/rcS` |
 | `image/` | squashfs + uImage into a flashable tarball; `fwu.sh`, the on-device flasher | [`image/README.md`](../image/README.md) |
 | `test/` | host-side unit tests (C unity builds against a register mock, shell tests of the on-device scripts) and manual qemu harnesses | [Testing](#testing) |
-| `tools/` | `remote-build.sh`, `kernel-footprint.sh`, `check-inline-quotes.sh`, `fetch-refs.sh`; `memprobe` (physical memory from any kernel), `regdump`, `regtrace` (offline tooling for the register captures the replay tables came from) | each directory's `README.md` |
+| `tools/` | `remote-build.sh`, `kernel-footprint.sh`, `check-inline-quotes.sh`, `fetch-refs.sh`, `bump-deps.sh` (moves the pinned upstream versions), `compare-images.sh` and `objdiff.sh`, `generate-sbom.sh`, `release-notes.sh`, `config-backup.sh`; `memprobe` (physical memory from any kernel), `regdump`, `regtrace` (offline tooling for the register captures the replay tables came from) | each directory's `README.md` |
 | `docs/` | user and developer docs; `docs/kb/` field notes on the hardware and the stock firmware | [`docs/kb/README.md`](kb/README.md) |
 
 ### Where to start reading
@@ -91,7 +93,8 @@ and runs the PON steps, which start `omcid` and activate the GPON MAC.
   `kernel/extra/drivers/net/ethernet/odi/README.md`, then the driver you
   care about and its host test in `test/`.
 - **Boot and userland**: `rootfs/skeleton/etc/init.d/rcS` with
-  `docs/BOOT.md`, then `rcS.dev`, `docs/TOOLS.md`, `docs/SETTINGS.md`.
+  `docs/BOOT.md`, then `rcS.pon` and `etc/scripts/rcs-lib.sh` (the PON
+  steps), `rcS.dev`, `docs/TOOLS.md`, `docs/SETTINGS.md`.
 - **OMCI**: `src/omci/README.md`, `docs/REFERENCES.md` for the ITU-T
   specs (`tools/fetch-refs.sh` fetches them), and the OMCI notes in
   `docs/kb/`.
@@ -139,7 +142,7 @@ file by file against one built with the old pin.
 The toolchain images bring their own kernel headers, so `kernel-tree` no
 longer gates them; `image-all` still runs it first, since `kernel` needs
 it. `make image-all` runs, in order: `kernel-tree` (fetch and verify
-linux-6.18.53, pack it into `build/kernel-618/tree.tar`), `toolchain` (pull
+linux-6.18.56, pack it into `build/kernel-618/tree.tar`), `toolchain` (pull
 the two pinned images, under a minute), `toolchain-audit`, `kernel`
 (2 min), `packages`, `src`, `releases`, `image`. After the first build
 every target skips work it has already done; a second `make image-all`
@@ -240,20 +243,29 @@ in odi-ui `schema/settings.tsv` and `docs/SETTINGS.md` together.
 
 ### What CI runs
 
-`.github/workflows/ci.yml`: on pull requests and pushes to `main`, `make
-lint`, `make test-host`, `make test-diag` and `make test-omci`, each as its
-own parallel job; `test-omci` is a matrix with one job per suite
-(`make test-omci-<suite>`, after `make test-omci-build`). On release
-tags (`v*`, `odi-oss-*`) and manual runs it adds `make src` on its own. The
-toolchain, kernel and image are **not** built in CI: 25 minutes of compiling
-and nothing in them runs without a stick. Build the kernel yourself before
-you push a kernel change.
+`.github/workflows/ci.yml`, on pull requests and pushes to `main`: a
+`changelog` check (a pull request has to touch `CHANGELOG.md`, unless it is
+docs or CI only, or labelled `no-changelog`), `make lint`, `make
+test-host`, `make test-diag` and `make test-omci`, each as its own parallel
+job; `test-omci` is a matrix with one job per suite
+(`make test-omci-<suite>`, after `make test-omci-build`). Two more jobs
+run on every push: `clean-build` (`make kernel-tree` and `make src`, then
+checks that `make image` on a partial tree fails closed and names what is
+missing) and `test-qemu` (`make test-qemu`, below). On release tags (`v*`,
+`odi-oss-*`) and manual runs it adds `make src` on its own and a
+`reproducible` job: `make image-all` twice in two checkouts, compared member
+by member with `tools/compare-images.sh`. The kernel and the full image are
+**not** built on a pull request: a kernel build is tens of minutes and
+nothing in it runs without a stick. Build the kernel yourself before you
+push a kernel change.
 
 `.github/workflows/release.yml`, on a `v*` tag only, does build the full
 image (`VERSION=` from the tag, `ROOT_PW=locked`) and publishes it as a
-GitHub release: the tarball, `SHA256SUMS`, and notes from
-`tools/release-notes.sh` (the tag's own `CHANGELOG.md` section plus a
-flash-and-first-login paragraph).
+GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
+attestations, and notes from `tools/release-notes.sh` (the tag's own
+`CHANGELOG.md` section plus a flash-and-first-login paragraph).
+`.github/workflows/dependency-bump.yml` runs `tools/bump-deps.sh` every
+Monday and opens a pull request only if the tests pass against the new pins.
 
 ## The recovery mechanism
 
@@ -323,17 +335,21 @@ the reset itself. The directory was named after the stock firmware
 (`luna_watchdog`) until a cleanup gave it our own name, once rcS no longer
 needed to share a line with the stock image.
 
-rcS writes it (`rootfs/skeleton/etc/init.d/rcS`, "the watchdog
-confirmation") after the SDK-init verbs, networking and the `services` launch, and
-**before** the optics and the PON steps. The confirmation does not look at
-the network: a trial whose management path never comes up stays up, and
-you power-cycle it. For development there is
+`rcS.pon` writes it (`confirm_watchdog()` in
+`rootfs/skeleton/etc/scripts/rcs-lib.sh`, called from `pon_steps_default`)
+after the optics pins, the I2C, laser, GPON verbs and the switch init, and
+**before** `gponsn`, `gponpw` and `gponact`, so a problem on the optics
+side cannot cost it. It refuses to confirm when `/var` or `/var/tmp` is not
+tmpfs, when the config partition is not mounted, when `network.sh
+configured` finds no configured management address, or when the switch init
+failed. It does not look at reachability: a trial whose management path
+comes up wrong stays up, and you power-cycle it. For development there is
 `/etc/config/confirm-arp` (read by `rcS.dev`): with it, rcS confirms only after an ARP reply
 from the `.2` address of the `br0` subnet, so an unreachable trial reverts
 by itself **and keeps its ramlog** (a watchdog reset preserves DRAM; a
 power cycle does not). Never leave `confirm-arp` on a stick whose host is
 not on `.2`: every boot then resets at 120 s. The confirmation and the
-deadline are one mechanism; change neither without reading `rcS`,
+deadline are one mechanism; change neither without reading `rcs-lib.sh`,
 `rcS.dev` and `odi_wdt.c` together.
 
 This one-shot boot deadline is one of three independent rules odi_wdt
@@ -475,11 +491,12 @@ In order:
 
 | gate | what it proves | needs |
 |---|---|---|
-| `make lint` | shellcheck over every script (on-device ones as POSIX `sh`, since busybox ash runs them), the inline-quote check, the private-workspace and vendor-citation greps | `shellcheck`, git |
-| `make test-host` | about 45 host tests: driver logic, the on-device scripts, the replay tables and their generators | cc, bash, Python 3 |
+| `make lint` | shellcheck over every script (on-device ones as POSIX `sh`, since busybox ash runs them), the inline-quote check, and the greps for private-workspace references, machine-local paths, trial history in comments, internal plan ids and vendor source citations | `shellcheck`, git |
+| `make test-host` | about 60 host tests: driver logic, the on-device scripts, the replay tables and their generators | cc, bash, Python 3 |
 | `make test-diag` | diag's parser and conversions natively, then under qemu: the conversion vectors, the L2 listing golden, **the exporter contract** | Docker |
 | `make test-omci` | builds `src/`, runs `omcid` under qemu-user (about 130 checks) | Docker |
 | `make test-qemu` | boots the real rootfs (busybox, inittab, services, dropbear, confd, metricsd) full-system under `qemu-system-mips -M malta`; checks ssh/web UI/exporter and the resilience scenarios (see below) | Docker, `qemu-system-mips`, `busybox`/`packages`/`src`/`releases` already built |
+| `make test-rcs` | the rcS action trace (what rcS executes and writes under `/proc`, for three flag sets) against its goldens; not part of `make test` | Docker with ptrace, `out/busybox` |
 | `make test` | `lint`, `test-host`, `test-diag`, `test-omci` (not `test-qemu`, which needs a built rootfs and is not part of the ~2-minute default set), about two minutes | |
 | kernel build | `BUILD OK: <n> warnings`: 22 today, all GCC 16 "retain attribute ignored" in mainline networking files; any other warning is ours and a regression | toolchain |
 | kernel ISA and footprint | `packages/isa-audit.sh build/kernel-618/vmlinux` finds nothing; `objdump -d vmlinux` has no `eret` and no `tne`; `tools/kernel-footprint.sh` does not grow without a stated reason | kernel build |
@@ -821,6 +838,17 @@ Each of these has cost real time. The pointer says where the evidence is.
   addresses you can account for; the drivers bound every MMIO access
   (`odi_switch_mmio_offset_in_bounds()`).
   [`docs/kb/rtl9602c-undecoded-address-read-takes-the-stick-down.md`](kb/rtl9602c-undecoded-address-read-takes-the-stick-down.md).
+- **The laser stays off on a laser driver we have not validated.** The
+  `laser` PON verb reads the laser driver id (A2h page 2, byte `0xa0`) and
+  drives SoC GPIO 13 (TX disable) low only for the Semtech GN25L95 (`0x6a`).
+  Any other id, or none answering, leaves the laser off and makes
+  `gponact` fail with `-EPERM`; `gponsn` and `gponpw` still run. On another
+  board the laser may need set-up this image does not do, and a laser lit
+  outside its timeslots takes down every ONU on the OLT port.
+  `ODI_LASER_UNVERIFIED=1` in `odi.conf` (`laser unverified`) overrides it,
+  for an OLT port with no other ONU. `/proc/odi_gpon` shows `laser on X
+  ldd_id Y unverified Z`. `odi_board.c` (`odi_board_laser()`), `odi_gpon.c`
+  (`odi_gpon_verb()`), `docs/BOOT.md` stage 13.
 - **The kernel partition is 1,359,872 bytes** (the LZMA uImage), and
   `image/build.sh` refuses a bigger one. The config is on a diet (no
   modules, no kallsyms, `SLUB_TINY`, a list of unreachable syscalls off).
@@ -878,6 +906,10 @@ Each of these has cost real time. The pointer says where the evidence is.
   shows the rest read-only. **Never delete a key** this image does not use
   (the stock slot still reads it), never erase the partition (it holds the
   serial number and MAC the line authenticates on), and keep backups whole.
+  `flash set` and `flash default` install the new file by rename on the
+  config partition's own filesystem (`install_over()` in
+  `rootfs/skeleton/etc/scripts/flash`), so a power cut leaves the old file,
+  not half of the new one; keep that shape in any script that writes there.
   `docs/SETTINGS.md`, [`docs/kb/rtl9601-config-store.md`](kb/rtl9601-config-store.md).
 - **Every setting has an apply class**: LIVE, SERVICE RESTART, INTERRUPTS
   INTERNET, REBOOT. A new setting needs its class decided, the apply path
@@ -892,8 +924,8 @@ Each of these has cost real time. The pointer says where the evidence is.
 - **`omcicli get tables` wedges the stock OMCI daemon.** Ours answers it; do
   not run it on the stock slot. `omcicap` and `omciprobe -f` interfere with
   a running `omcid` (`docs/TOOLS.md`).
-- **Daemons are `respawn` entries, not sessions.** metricsd, confd,
-  dropbear and omcid are forked by busybox init itself and restarted the
+- **Daemons are `respawn` entries, not sessions.** syslogd, klogd, ntpd,
+  metricsd, confd, dropbear and omcid are forked by busybox init itself and restarted the
   instant one exits; `kill` alone brings a new one back within seconds, no
   `setsid` needed any more (`docs/TOOLS.md` "Restarting a daemon"). Use
   `/etc/init.d/services stop <name>` to keep one down across restarts.
@@ -956,18 +988,19 @@ read at boot unless stated. rcS paths are
 
 | file | read at | effect | default | class |
 |---|---|---|---|---|
-| `dropbear.off`, `confd.off`, `metricsd.off` | `etc/init.d/services:40`, `:31`, `:28` | that daemon is not started | absent: all three run | prod |
-| `lan-ip` | `etc/scripts/network.sh:48` | management address, one line; overrides `LAN_IP_ADDR`, netmask then 255.255.255.0; live with `apply.sh network` | absent: `LAN_IP_ADDR`, else 192.168.1.1/24 | prod |
-| `sds.off` | `network.sh:242` | skip the host SerDes check and fix | absent | prod (escape hatch) |
-| `optics.off` | rcS, before `pon_steps` | skip the `optics` verb, `PIN_GPIO_SELECT` and the laser TX enable (GPIO 13): **laser off, no service** | absent | prod (escape hatch) |
-| `modules.off` | rcS `:191`; `etc/scripts/apply.sh:42` | skip the switch init (platform settings and module-load replay) and `omcid`: **no OMCI**; `apply.sh omci` refuses | absent | prod (escape hatch) |
-| `pon-steps` | `etc/init.d/rcS.dev:184` | replaces the built-in PON steps: one verb per line, or `omcimods`, `gponsn auto`, `gponpw auto` (`docs/BOOT.md`); a wrong list means no PON | absent | dev |
-| `omci-identity.on` | `src/omci/respond/omcid.h:318`, loaded `cfgstore.c:645` | omcid reports the OLT identity keys (`OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, ...); `apply.sh omci` | absent: built-in values | prod |
-| `breadcrumbs.on` | `rcS.dev:26`, `:52`, `:61`, `:75`, `:86`, `:105`; `services:70` | boot crumbs to `breadcrumbs`, `trial-diag.txt`, a 30 s heartbeat to the kernel log, soft-lockup 20 s and hung-task 30 s | absent | dev |
-| `confirm-arp` | `rcS.dev:165` | confirm the watchdog only after an ARP reply from `.2` of `br0`; **resets every 120 s if the host is elsewhere** | absent: confirm unconditionally | dev |
-| `confd.auth`, `confd/`, `dropbear.d/authorized_keys` | confd (odi-ui); dropbear via `services:60` (`-D`) | UI credential, UI overrides, root SSH keys | admin/admin; image assets; none | prod |
+| `syslogd.off`, `klogd.off`, `ntpd.off`, `metricsd.off`, `confd.off`, `dropbear.off` | the first line of each `etc/scripts/svc-<name>.sh`; written by `services stop <name>` | that daemon's respawn entry runs a placeholder (`respawn-off.sh`) instead | absent: all run | prod |
+| `lan-ip` | `etc/scripts/network.sh` (`OVERRIDE`, line 48) | management address, one line; overrides `LAN_IP_ADDR`, netmask then 255.255.255.0; live with `apply.sh network` | absent: `LAN_IP_ADDR`, else 192.168.1.1/24 | prod |
+| `sds.off` | `network.sh:252` | skip the host SerDes check and fix | absent | prod (escape hatch) |
+| `optics.off` | `pon_step_laser()`, `etc/scripts/rcs-lib.sh` | skip the `laser` verb, so the laser TX enable (GPIO 13) is never driven: **laser off, `gponact` refused, no service**. The `optics` verb (`PIN_GPIO_SELECT`) still runs | absent | prod (escape hatch) |
+| `modules.off` | `rcS:196`, `omci_start()` and `svc-omcid.sh`; `etc/scripts/apply.sh:77` | skip the switch init (platform settings and module-load replay) and `omcid`: **no OMCI**; `apply.sh omci` refuses | absent | prod (escape hatch) |
+| `pon-steps` | `etc/init.d/rcS.dev:188` | replaces the built-in PON steps: one verb per line, or `omcimods` (switch init, then the watchdog confirmation), `gponsn auto`, `gponpw auto`, `gponact` (`docs/BOOT.md`); a plain `laser` line ignores `optics.off` and `ODI_LASER_UNVERIFIED`; a wrong list means no PON | absent | dev |
+| `omci-identity.on` | `src/omci/respond/omcid.h:478` (`CFG_REPORT_SWITCH`), `cfgstore.c:882` | omcid reports the OLT identity keys (`OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, ...); `apply.sh omci` | absent: built-in values | prod |
+| `breadcrumbs.on` | `rcS.dev:27`, `:53`, `:62`, `:76`, `:87`, `:106` | boot crumbs to `breadcrumbs`, `trial-diag.txt`, a 30 s heartbeat to the kernel log, soft-lockup 20 s and hung-task 30 s | absent | dev |
+| `confirm-arp` | `rcS.dev:169` | confirm the watchdog only after an ARP reply from `.2` of `br0`; **resets every 120 s if the host is elsewhere** | absent: confirm unconditionally | dev |
+| `odi.conf` | `etc/scripts/flash` (`ODI_KEYS`), written by `flash set`; `ODI_LASER_UNVERIFIED` is read by `pon_step_laser()` | odi-only keys: `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`, `OMCI_UNKNOWN_ME_OK`, `OLT_SW_DOWNLOAD`, `ODI_LASER_UNVERIFIED` (`docs/SETTINGS.md`); `ODI_LASER_UNVERIFIED=1` lights the laser on an unvalidated laser driver | absent: none set | prod |
+| `confd.auth`, `confd/`, `dropbear.d/authorized_keys` | confd (odi-ui); dropbear via `svc-dropbear.sh` (`-D`) | UI credential, UI overrides, root SSH keys | admin/admin; image assets; none | prod |
 
-State files, not switches: `seedrng/` (entropy seed, rcS `:56`),
+State files, not switches: `seedrng/` (entropy seed, rcS `:97`),
 `dropbear.d/ed25519` (host key, generated on first boot), `breadcrumbs`,
 `trial-diag.txt` (outputs of the dev rows).
 Settings in the XML store itself (`lastgood.xml`, `lastgood_hs.xml`) are
@@ -977,16 +1010,16 @@ Settings in the XML store itself (`lastgood.xml`, `lastgood_hs.xml`) are
 
 Built-in drivers take parameters as `<object>.<name>=` on the command
 line, or at run time through `/sys/module/<object>/parameters/<name>`. The
-command line is `CONFIG_CMDLINE` (`kernel/618/config:65`) followed by
+command line is `CONFIG_CMDLINE` (`kernel/618/config:61`) followed by
 U-Boot's per-slot `argv` (`MIPS_CMDLINE_BUILTIN_EXTEND`), so a parameter
 added to `CONFIG_CMDLINE` takes effect after a kernel rebuild; U-Boot's
 `root=` and `mtdparts=` win because they come last.
 
 | parameter | defined | effect | default | when | class |
 |---|---|---|---|---|---|
-| `odi_nic.debug` | `odi_nic.c:51` (bool, 0644) | trace the first interrupts and RX descriptors to the console; at the first open (so only when set on the command line) also the ring register read-backs and a NIC state dump 15 s and 45 s later | off | boot, or live for the traces | dev |
+| `odi_nic.debug` | `odi_nic.c:53` (bool, 0644) | trace the first interrupts and RX descriptors to the console; at the first open (so only when set on the command line) also the ring register read-backs and a NIC state dump 15 s and 45 s later | off | boot, or live for the traces | dev |
 | `odi_switch.host_pause` | `odi_switch.c:194` (bool, 0644) | let the host port send PAUSE frames to the host, as the stock image does (`docs/SWITCH.md`, "Host port PAUSE"); off, the switch drops at its own buffers instead | off | boot, or live: applied at once | prod (escape hatch) |
-| `print-fatal-signals=1` | `kernel/618/config:65` (mainline) | register dump of any process killed by SIGSEGV/SIGBUS/SIGILL, into the ramlog | on | boot | prod (debug aid) |
+| `print-fatal-signals=1` | `kernel/618/config:61` (mainline) | register dump of any process killed by SIGSEGV/SIGBUS/SIGILL, into the ramlog | on | boot | prod (debug aid) |
 
 ### Kconfig
 
@@ -1009,13 +1042,13 @@ prints the `CONFIG_ODI_*` it got).
 
 | variable | read in | effect | default |
 |---|---|---|---|
-| `VERSION` | `image/build.sh:36`, `kernel/build.sh:85` | image name, `/etc/version`, the ramlog build id | `odi-oss-<yymmdd>-<git describe>` |
-| `ODI_BUILD_ID` | `kernel/build.sh:85` | the ramlog build id alone (39 chars, safe set) | `VERSION` |
-| `FRESH=1` | `kernel/build.sh:62`; `packages/*/build.sh` | re-extract the kernel tree / rebuild a package from clean | 0 |
-| `CRUMBS_CORE=1` | `kernel/build.sh:76` | also apply `kernel/618/debug/*.patch` (crumbs in mainline core files) | 0 |
-| `COMPILE_ONLY=1` | `kernel/build.sh:145` | stop after `vmlinux`, no uImage | 0 |
-| `VOL` | `kernel/build.sh:57` | kernel build volume | `odi-kbuild-618` |
-| `WORK` | `kernel/build.sh:56` | kernel output directory | `build/kernel-618` |
+| `VERSION` | `image/build.sh:36`, `kernel/build.sh:86` | image name, `/etc/version`, the ramlog build id | `odi-oss-<yymmdd>-<git describe>` |
+| `ODI_BUILD_ID` | `kernel/build.sh:86` | the ramlog build id alone (39 chars, safe set) | `VERSION` |
+| `FRESH=1` | `kernel/build.sh:114`; `packages/*/build.sh` | re-extract the kernel tree / rebuild a package from clean | 0 |
+| `CRUMBS_CORE=1` | `kernel/build.sh:77` | also apply `kernel/618/debug/*.patch` (crumbs in mainline core files) | 0 |
+| `COMPILE_ONLY=1` | `kernel/build.sh:159` | stop after `vmlinux`, no uImage | 0 |
+| `VOL` | `kernel/build.sh:55` | kernel build volume | `odi-kbuild-618` |
+| `WORK` | `kernel/build.sh:54` | kernel output directory | `build/kernel-618` |
 | `KVER` | `kernel/build.sh:50` | accepted only as `6.18` | `6.18` |
 | `OSS_IMAGE`, `DIAG_IMAGE` | `toolchain/image.sh`, `toolchain/images.env`, `src/*/Makefile`, `Makefile` (`test-omci`) | the uclibc and freestanding toolchain images, e.g. a local build from odi-toolchain | the pinned digests in `toolchain/images.env` |
 | `TOOLS_IMAGE` | `image/build.sh` | squashfs and tar tooling image | `odi-oss-image` |
@@ -1023,15 +1056,15 @@ prints the `CONFIG_ODI_*` it got).
 | `ALT_URLS` | `packages/fetch.sh:34` | extra mirrors for package tarballs (a Software Heritage fallback is built in) | none |
 | `KERNEL`, `KCONFIG` | `image/build.sh:48`, `:39` | uImage to ship, and its `.config` (shipped as `/etc/kernel-config`) | `build/kernel-618/uImage` and the `config` beside it |
 | `BUSYBOX`, `BIN_DIR`, `PKG_DIR`, `ASSET_DIR` | `image/build.sh:37`, `:43`, `:46`, `:44` | where the pieces are | `out/busybox`, `out/bin`, `out`, `out/confd-assets` |
-| `COMP`, `BS` | `image/build.sh:29`, `:30` | squashfs compressor and block size | `xz`, 262144 |
+| `COMP`, `BS` | `image/build.sh:27`, `:28` | squashfs compressor and block size | `xz`, 262144 |
 | `ROOT_PW` | `image/build.sh:292` | root password; `none` for empty, `locked` for no password at all (keys only) | generated, 14 characters |
-| `ALLOW_PARTIAL=1` | `image/build.sh:158`, `:189`, `:199` | build without confd assets or a package | 0 |
-| `ALLOW_NO_KCONFIG=1` | `image/build.sh:297` | build without `/etc/kernel-config` (the `.config`, shipped for reference) | 0 |
+| `ALLOW_PARTIAL=1` | `image/build.sh:74`, `:170`, `:198` | build without confd assets or a package | 0 |
+| `ALLOW_NO_KCONFIG=1` | `image/build.sh:267` | build without `/etc/kernel-config` (the `.config`, shipped for reference) | 0 |
 | `GITHUB_TOKEN`, `USE_CURL=1` | `src/fetch-releases.sh`, `tools/remote-build.sh` | optional token, raises the anonymous rate limit for the curl download; skip `gh` even when present | none; 0 |
 | `METRICSD_TAG`, `CONFD_TAG`, `*_REPO` | `src/fetch-releases.sh` | releases to fetch; `CONFD_TAG=` (empty) with `CONFD_BIN` for a local confd | pinned in the script |
-| `METRICSD_BIN` | `src/fetch-releases.sh:24` | local metricsd binary instead of the release | none |
-| `CONFD_BIN`, `CONFD_ASSETS` | `src/fetch-releases.sh:82`, `:88` | local confd binary and its odi-ui checkout | none; `$(dirname $CONFD_BIN)/..` |
-| `ODI_REMOTE`, `ODI_REMOTE_DIR` | `tools/remote-build.sh:36`, `:37` | remote build host and directory | required; `/root/odi/odi-oss` |
+| `METRICSD_BIN` | `src/fetch-releases.sh:27` | local metricsd binary instead of the release | none |
+| `CONFD_BIN`, `CONFD_ASSETS` | `src/fetch-releases.sh:144`, `:150` | local confd binary and its odi-ui checkout | none; `$(dirname $CONFD_BIN)/..` |
+| `ODI_REMOTE`, `ODI_REMOTE_DIR` | `tools/remote-build.sh:46`, `:47` | remote build host and directory | required; `/root/odi/odi-oss` |
 
 ### /proc and /dev control files
 
@@ -1041,15 +1074,15 @@ read side.
 
 | file | defined | write | read | class |
 |---|---|---|---|---|
-| `/proc/odi_init` | `odi_init.c` | one verb, optional argument: the SDK-init verbs (`intr` ... `ponmac`, `i2c`, `i2cen`, `gpon`, `rxsd`), `optics`, and the GPON verbs (`gpondrv`, `gpondev`, `gponsn <sn>`, `gponpw <hex>`, `gponact`, `gpondeact`, `gponstat`) | the last verb's return code | prod (`rtk_init` under the stock firmware) |
-| `/proc/odi_omci` | `odi_omci.c:451` | `switch_init` (`:398`): the platform settings and the module-load replay | redirect registrations and pids, frame and command counters | prod |
-| `/proc/odi_wdt/userland_ok` | `odi_wdt.c:568` | `1`: userland is up, cancel the 120 s reset | `userland_ok=N deadline=120 uptime=N` | prod (`luna_watchdog` under the stock firmware) |
-| `/proc/odi_wdt/watchdog_flag` | `odi_wdt.c:523` | `1` arm and kick; `0` disable the watchdog and stop the kicker | `watchdog_flag=N` | dev |
-| `/proc/odi_wdt/register` | `odi_wdt.c:632` | `"<name> <deadline_s>"`: register or update a watchdog client (rcS does this once per client at boot) | -- | prod |
-| `/proc/odi_wdt/ping` | `odi_wdt.c:660` | `"<name>"`: a registered client's own ping; arms its deadline on the first call | -- | prod (omcid, every 15 s: `src/omci/respond/main.c`, `wdt_ping()`) |
-| `/proc/odi_wdt/clients` | `odi_wdt.c:683` | none | one line per client: `name=... deadline=... armed=... last_ping_age=...` | dev (debugging) |
-| `/proc/odi_gpon` | `odi_gpon.c:786` | none | ONU state, ONU id, PLOAM counters, serial, the GPON link counters and alarm and state times (`docs/TOOLS.md`) | prod (`diag`, `omcid` and `metricsd` read it; its format is an interface) |
-| `/proc/odi_ramlog_prev`, `_raw` | `odi_ramlog.c:635` | none | the previous boot's ramlog (root only) | prod (debug aid) |
+| `/proc/odi_init` | `odi_init.c` | one verb, optional argument: the SDK-init verbs (`intr` ... `ponmac`, `i2c`, `i2cen`, `gpon`, `rxsd`), `optics`, `laser` (or `laser unverified`: light the laser whatever the laser driver id says), and the GPON verbs (`gpondrv`, `gpondev`, `gponsn <sn>`, `gponpw <pw>`, `gponact` (refused with `-EPERM` while the laser is off), `gpondeact`, `gponstat`); `<pw>` is 20 hex digits, `0x` plus up to 20 hex digits, or up to 10 characters of text | the last verb's return code | prod (`rtk_init` under the stock firmware) |
+| `/proc/odi_omci` | `odi_omci.c:452` | `switch_init` (`:415`): the platform settings and the module-load replay | redirect registrations and pids, frame and command counters | prod |
+| `/proc/odi_wdt/userland_ok` | `odi_wdt.c:790` | `1`: userland is up, cancel the 120 s reset | `userland_ok=N deadline=120 uptime=N` | prod (`luna_watchdog` under the stock firmware) |
+| `/proc/odi_wdt/watchdog_flag` | `odi_wdt.c:788` | `1` arm and kick; `0` disable the watchdog and stop the kicker | `watchdog_flag=N` | dev |
+| `/proc/odi_wdt/register` | `odi_wdt.c:792` | `"<name> <deadline_s>"`: register or update a watchdog client (rcS does this once per client at boot) | -- | prod |
+| `/proc/odi_wdt/ping` | `odi_wdt.c:794` | `"<name>"`: a registered client's own ping; arms its deadline on the first call | -- | prod (omcid, every 15 s: `src/omci/respond/main.c`, `wdt_ping()`) |
+| `/proc/odi_wdt/clients` | `odi_wdt.c:796` | none | one line per client: `name=... deadline=... armed=... last_ping_age=...` | dev (debugging) |
+| `/proc/odi_gpon` | `odi_gpon.c:1144` | none | ONU state, ONU id, PLOAM counters (`ploam_us_dropped`: upstream replies that found no room), serial, the laser line (`laser on X ldd_id Y unverified Z`), the GPON link counters and alarm and state times (`docs/TOOLS.md`) | prod (`diag`, `omcid` and `metricsd` read it; its format is an interface) |
+| `/proc/odi_ramlog_prev`, `_raw` | `odi_ramlog.c:645` | none | the previous boot's ramlog (root only) | prod (debug aid) |
 | `/dev/odi_sw` | `odi_reg.c:191` | ioctls `REG_SET`, `L2_MC_ADD`/`DEL` | ioctls `REG_GET`, `MIB_GET`, `DDM_GET`, `L2_GET`/`NEXT`, `L2_MODE` (`odi_reg.h:118`) | prod |
 
 The `odi_omci` netlink transport rides on its own private protocol number
