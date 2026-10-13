@@ -19,8 +19,12 @@ listed here.
   it repeats the old frame number. With all keys zero, a fault in the key
   load or the key switch could not show; with a real key it would show as
   every encrypted downstream port going silent at the first switch.
+  `/proc/odi_gpon` is world-readable, so its PLOAM ring now prints the
+  eight key bytes of each upstream Encryption_Key (type 0x05) as `xx`,
+  keeping the Key_Index and Frag_Index; nothing else prints the key.
   Host-tested end to end against the register model
-  (`test/odi_gpon_aes_key_test.c`).
+  (`test/odi_gpon_aes_key_test.c`, and `test/odi_gpon_test.c` for the
+  ring).
 
 - kernel: the `gponpw` verb accepts short hex, with an explicit `0x`
   prefix. A value that registers today keeps its meaning: exactly 20

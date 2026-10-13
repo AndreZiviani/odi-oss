@@ -789,6 +789,70 @@ static void test_request_key_two_fragments(void)
 	CHECK(second == first + 1U, "the next Request_Key reports its key under the next Key_Index");
 }
 
+/* True when the rendered ring content holds any key byte at its place as
+ * two hex digits, or the key's hex anywhere in it.
+ */
+static int render_shows_key(const char *out, const uint8_t key[16], unsigned int frag)
+{
+	static const char hex[] = "0123456789abcdef";
+	unsigned int i;
+
+	for (i = 0; i < ODI_GPON_KEY_FRAGMENT_BYTES; i++) {
+		uint8_t b = key[frag * ODI_GPON_KEY_FRAGMENT_BYTES + i];
+		const char *o = &out[3U * (2U + i)];
+
+		if (o[0] == hex[b >> 4] && o[1] == hex[b & 0xfU])
+			return 1;
+	}
+	return 0;
+}
+
+/* /proc/odi_gpon is world-readable: its PLOAM ring must never print the
+ * key an Encryption_Key carries. Every message one Request_Key sends is
+ * rendered as the ring renders it.
+ */
+static void test_ring_masks_key(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	struct odi_gpon_ploam msg;
+	char out[ODI_GPON_PLOAM_RING_CONTENT_CHARS], want[ODI_GPON_PLOAM_RING_CONTENT_CHARS];
+	unsigned int i, n = 0;
+
+	fsm_setup(&fsm, &rec);
+	drive_to_o5(&fsm, &rec);
+	rec_reset(&rec);
+	msg = ds_request_key(TEST_ASSIGNED_ONU_ID);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+
+	for (i = 0; i < rec.n; i++) {
+		const struct odi_gpon_ploam *m = &rec.log[i].ploam;
+
+		if (rec.log[i].kind != ACT_SEND_US_PLOAM || m->type != ODI_GPON_US_ENCRYPTION_KEY)
+			continue;
+		odi_gpon_ploam_ring_content(1, m->type, m->content, out);
+		CHECK(!render_shows_key(out, test_key, m->content[1]),
+		      "no key byte of an Encryption_Key reaches the ring");
+		snprintf(want, sizeof(want), "%02x %02x xx xx xx xx xx xx xx xx",
+			 m->content[0], m->content[1]);
+		CHECK(strcmp(out, want) == 0,
+		      "Key_Index and Frag_Index stay readable, the eight key bytes print as xx");
+		n++;
+	}
+	CHECK(n == 6U, "all six fragments rendered");
+
+	/* Every other message prints in full, including a downstream type
+	 * 0x05 (another message type downstream).
+	 */
+	memset(&msg, 0, sizeof(msg));
+	for (i = 0; i < ODI_GPON_PLOAM_CONTENT_LEN; i++)
+		msg.content[i] = (uint8_t)(0xa0U + i);
+	odi_gpon_ploam_ring_content(0, ODI_GPON_US_ENCRYPTION_KEY, msg.content, out);
+	CHECK(strcmp(out, "a0 a1 a2 a3 a4 a5 a6 a7 a8 a9") == 0, "a downstream 0x05 prints in full");
+	odi_gpon_ploam_ring_content(1, ODI_GPON_US_REI, msg.content, out);
+	CHECK(strcmp(out, "a0 a1 a2 a3 a4 a5 a6 a7 a8 a9") == 0, "another upstream type prints in full");
+}
+
 static void test_key_switching_time(void)
 {
 	struct odi_gpon_fsm fsm;
@@ -1199,6 +1263,7 @@ int main(void)
 	test_to2_expiry_falls_to_o1_and_reranges();
 	test_line_event_levels();
 	test_request_key_two_fragments();
+	test_ring_masks_key();
 	test_key_switching_time();
 	test_transition_causes();
 

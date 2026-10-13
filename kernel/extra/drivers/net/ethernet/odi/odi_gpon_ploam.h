@@ -318,4 +318,16 @@ void odi_gpon_encode_rei(uint8_t onu_id, uint32_t error_count, uint8_t sequence,
 void odi_gpon_encode_acknowledge(uint8_t onu_id, uint8_t acked_type,
 				  const uint8_t acked_content_9[9], struct odi_gpon_ploam *out);
 
+/* The 10 content bytes of a PLOAM message as the /proc/odi_gpon ring prints
+ * them: two lowercase hex digits per byte, a space between bytes, NUL
+ * ended. An upstream Encryption_Key carries the live AES key in content
+ * bytes 2..9, and /proc/odi_gpon is world-readable, so those eight print
+ * as "xx"; its Key_Index and Frag_Index (bytes 0 and 1) stay. Every other
+ * message prints in full. upstream is 1 for a message this ONU sent.
+ */
+#define ODI_GPON_PLOAM_RING_CONTENT_CHARS	(3U * ODI_GPON_PLOAM_CONTENT_LEN)
+void odi_gpon_ploam_ring_content(int upstream, uint8_t type,
+				 const uint8_t content[ODI_GPON_PLOAM_CONTENT_LEN],
+				 char out[ODI_GPON_PLOAM_RING_CONTENT_CHARS]);
+
 #endif /* ODI_GPON_PLOAM_H */
