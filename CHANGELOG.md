@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- kernel: the `gponpw` verb accepts short hex, with an explicit `0x`
+  prefix. A value that registers today keeps its meaning: exactly 20
+  characters are hex, and 1 to 10 characters are text even when every
+  character is a hex digit ("123456" is six ASCII bytes). Short hex is not
+  guessed at, because it cannot be told from text; `0x` followed by 2 to 20
+  hex digits (an even number) is those bytes, zero-padded to the 10 sent.
+  Anything else (11 to 19 characters, more than 20, 20 with a non-hex digit)
+  was refused without a word while activation went on with no password; it
+  is now logged, by length only, and leaves the old password in place.
+  `GPON_PLOAM_FORMAT` is still read by nothing: what it selects is not
+  known. The parser moved to `odi_gpon_pw.c`, with `test/odi_gpon_pw_test.sh`
+  covering every length from 1 to 20 in each form.
+
 - fwu.sh: no longer calls `cut`. The HSGQ M110 stock firmware has no `cut`
   applet, so the size check of the first flash from it came out empty and a
   user had to patch the script. The cksum and md5sum fields are now split
