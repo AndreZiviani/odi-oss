@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- omcid: the OLT's class 171 (extended VLAN tagging operation) now drives
+  the tagging when the stick is not in manual mode (`VLAN_CFG_TYPE` other
+  than 1), as the stock firmware does. Until now omcid decoded and stored
+  the table but built only the manual rule or a transparent one, so an OLT
+  that provisions the service VLAN through class 171 (a Huawei one: "untagged
+  frames: add VLAN 100") reached the router tagged. The supported shape is the
+  Ethernet-UNI instance with one untagged-frames rule that adds a single tag
+  with a concrete VID (1..4094) and priority (0..7), plus default
+  drop/pass rules; it builds the same rule as the manual tag. Any other shape
+  stays transparent and is logged once (`OLT rule not applied (...)`). The
+  rule is rebuilt when class 171 is set, created or deleted. The manual tag
+  keeps priority: ISP1 and ISP2 (type 1) are unchanged. Host-tested in
+  `src/omci/test/extvlan_test.c` and `src/omci/vlan-test.sh`. Refs #29.
+
 - kernel: the GPON boot clean covers the downstream multicast MAC filter.
   Its 256 rows are on-chip RAM like the GEM-port and Alloc-ID CAMs, and
   the boot table has it consulted for downstream multicast, but the only

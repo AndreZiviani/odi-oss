@@ -547,6 +547,7 @@ const char *cfg_sn_label(const struct onu_identity *id);
 void cfg_load_vlan(void);
 void cfg_load_vlan_from(const char *cs);
 int cfg_manual_vid(void);
+int cfg_olt_tagging(void);
 void cfg_load_report(void);
 void cfg_load_report_from(const char *cs, const char *hs, const char *sw,
 			  const char *odi);

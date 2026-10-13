@@ -97,7 +97,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `LAN_ENABLE_IP2` | Second management address | 1 adds a second address on `br0:2`, 0 removes it | `network.sh` | LIVE |
 | `LAN_IP_ADDR2` | Second management IP | that address (both sticks store 192.168.100.1) | `network.sh` | LIVE |
 | `LAN_SUBNET2` | Second management netmask | its netmask | `network.sh` | LIVE |
-| `VLAN_CFG_TYPE` | VLAN config mode | 1 lets the manual tag through; anything else is no manual tag | omcid, on SIGHUP | LIVE |
+| `VLAN_CFG_TYPE` | VLAN config mode | 1 lets the manual tag through; anything else is no manual tag, and the OLT's class 171 rule drives the tagging when it has the supported shape ("VLAN handling" below) | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of that tag | omcid, on SIGHUP | LIVE |
@@ -210,6 +210,32 @@ which:
 |---|---|---|---|
 | 1 (with `VLAN_CFG_TYPE` 1, a VID and a priority) | stick tags | adds `VLAN_MANU_TAG_VID`/`_PRI` to untagged frames upstream and removes it downstream (and from multicast); every other service as the OLT provisions it | sends the service untagged |
 | 0 | router tags (transparent) | adds and removes no tag; every frame passes with the tags it has, both ways | tags each VLAN itself: internet, IPTV and voice on one port, as subinterfaces |
+
+**Not in manual mode: the OLT's own rule.** With `VLAN_CFG_TYPE` other than
+1 (0 is what a stock stick with no key reads), the stock firmware applies the
+extended VLAN tagging operation (class 171) the OLT provisions, and so does
+omcid, for one shape only: the instance associated with the Ethernet UNI
+(association type 2) has a rule for untagged frames that adds a single tag
+with a concrete VID (1 to 4094) and priority (0 to 7) at TPID 0x8100, and
+nothing else but default rules that drop or pass. It builds the same rule as
+the manual tag with that VID and priority: untagged frames get the tag
+upstream, the tag is removed downstream and from multicast, and the router
+sees untagged frames. A Huawei OLT's "untagged frames: add VLAN 100 pri 0"
+is this shape (`omcli mib 171` prints the rule). omcid logs
+`untagged frames get VLAN <vid> pri <p> from the OLT` when it applies one.
+Any other shape (a rule for tagged frames, VID or priority copied from a tag,
+two tags, an EtherType filter, a discard of untagged frames, no class 171 at
+all) stays transparent, and omcid logs once
+`OLT rule not applied (<reason>), transparent`; that line is what to report.
+The rule follows class 171 as the OLT changes it (Set, Create, Delete).
+
+The manual tag is checked first and never yields: with `VLAN_CFG_TYPE` 1 the
+table is not read, whatever `VLAN_MANU_MODE` says. That matters on ISP1,
+whose UNI instance adds VLAN 1 while its service VID is 11, and on ISP2,
+whose only instance sits on the VEIP with the "no VID" sentinel: both run
+type 1, so neither changes. A stick of that shape moved to type 0 would tag
+with VLAN 1, as the stock firmware does; to be transparent keep type 1 and
+set `VLAN_MANU_MODE` to 0.
 
 Transparent is the stock firmware's own meaning of mode 0 ("no manual
 tag"), so both slots of a stick agree on it and no odi-only key is needed:

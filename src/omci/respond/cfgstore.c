@@ -557,6 +557,17 @@ int cfg_manual_vid(void)
 	return vlanCfg.manual ? vlanCfg.vid : -1;
 }
 
+/* Whether the OLT's class 171 may drive the tagging: the stock firmware does
+ * it with every VLAN_CFG_TYPE but 1 (type 1 is the manual tag, and with mode
+ * 0 the router tags: neither looks at class 171). The one place this gate is
+ * applied, beside cfg_manual_vid(). */
+int cfg_olt_tagging(void)
+{
+	if (!vlanCfg.loaded)
+		cfg_load_vlan();
+	return vlanCfg.type != VLAN_CFG_TYPE_MANUAL;
+}
+
 void cfg_load_vlan(void)
 {
 	cfg_load_vlan_from(CFG_CS);
