@@ -79,7 +79,7 @@ static inline uint32_t ODI_SW_PHY_ACCESS_CMD_ADDRESS_SET(uint32_t reg, uint32_t 
 
 /* PIN_GPIO_SELECT: 0x000048, one bit per SoC pin, 1 = plain GPIO */
 #define ODI_SW_PIN_GPIO_SELECT_BASE	0x00048U
-#define ODI_SW_PIN_GPIO_SELECT(n)	(ODI_SW_PIN_GPIO_SELECT_BASE + 4U * (uint32_t)(n))	/* slots used: 29, 31 of 0..63 */
+#define ODI_SW_PIN_GPIO_SELECT(n)	(ODI_SW_PIN_GPIO_SELECT_BASE + 4U * (uint32_t)(n))	/* slots used: 0 of 0..63 */
 
 /* PORT_FORCE_ABILITY: 0x000180, one word per port -- the value a port
  * runs with for each ability field PORT_FORCE_SELECT forces
@@ -388,12 +388,6 @@ static inline uint32_t ODI_SW_CHIP_IRQ_ENABLE_ACL_GET(uint32_t reg)
  * status, same bit layout as CHIP_IRQ_ENABLE.
  */
 #define ODI_SW_CHIP_IRQ_PENDING_OFF	0x1d010U
-
-/* ---- I2C master */
-
-/* I2C_MASTER_SETUP: 0x023004, array 0..1 */
-#define ODI_SW_I2C_MASTER_SETUP_BASE	0x23004U
-#define ODI_SW_I2C_MASTER_SETUP(n)	(ODI_SW_I2C_MASTER_SETUP_BASE + 4U * (uint32_t)(n))	/* slots used: 1 of 0..1 */
 
 /* ---- MIB counters */
 

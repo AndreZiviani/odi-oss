@@ -86,11 +86,6 @@ void odi_sw_host_pause_apply(void);
 uint32_t odi_sw_l2_flood_mask_get(void);
 void odi_sw_l2_flood_mask_set(uint32_t mask);
 
-/* cmd 10: the I2C select of the transceiver status read, twice: the
- * device-select word, then GPIO 29 (gpio_lo, then gpio_hi) and GPIO 31.
- */
-void odi_sw_ponmac_transceiver_get(uint32_t gpio_lo, uint32_t gpio_hi);
-
 /* --- odi_switch_qos.c ----------------------------------------------------- */
 
 /* cmd 23, a downstream queue: one write of PORT_QUEUE_MAP. */
