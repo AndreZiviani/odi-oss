@@ -246,5 +246,40 @@ check "omcli vlan: mode 0 is transparent" "$got" \
       "handling    transparent: no tag added or removed, the router tags"
 wait "$pid"
 
+# ---- a bridge port of TP type 5 (GEM IW TP, no mapper) ----------------------
+#
+# Some OLTs attach the data GEM to the bridge directly: class 47 TPType 5,
+# TPPointer the GEM IW TP. omcid used to walk only TPType 3 (mapper) and 6
+# (multicast), so such a line got no service at all. The ISP2 session plus a
+# synthetic GEM (port 1000) on its bridge (0x0010) through a type-5 port, and
+# a second type-5 port on an IW TP with interworking option 6 (downstream
+# broadcast), which stays the broadcast flow and gets no connection.
+tp5() {
+	session none
+	frame 44 010c 0050 "03e8800003800700000008"   # GEM CTP: port 1000, T-CONT 0x8000
+	frame 44 010a 0050 "0050010010"                 # GEM IW TP -> CTP 0x50, MAC bridged LAN
+	frame 44 002f 0060 "0010020500500014"           # bridge port, TPType 5 -> IW TP 0x50
+	frame 44 010c 0051 "0ffd000002"                 # GEM CTP: port 4093, downstream only
+	frame 44 010a 0051 "0051060010"                 # GEM IW TP -> CTP 0x51, broadcast
+	frame 44 002f 0061 "0010030500510014"           # bridge port, TPType 5 -> IW TP 0x51
+}
+tp5 > /tmp/s-tp5.txt
+store 1 0
+run171 tp5-trans /tmp/s-tp5.txt
+got=$(rebuild /tmp/omcid-171-tp5-trans.log 0 | grep -e '47/0060' -e '47/0061')
+check "TPType 5: the GEM behind it gets a connection" "$got" "47/0060 gem 1000 rule forward-all vid -1 pri -1"
+store 1 1
+run171 tp5-man /tmp/s-tp5.txt
+got=$(rebuild /tmp/omcid-171-tp5-man.log 0 | grep -e '47/0060' -e '47/0061')
+check "TPType 5, manual tag: the GEM behind it carries VID 10" "$got" "47/0060 gem 1000 rule manual-add vid 10 pri 0"
+
+# ---- VLAN_MANU_TAG_PRI 255 is the stock no-tag sentinel ----------------------
+sed 's/"VLAN_MANU_TAG_PRI" Value="[0-9]*"/"VLAN_MANU_TAG_PRI" Value="255"/' \
+	"$FIX/omci-store-isp2.xml" > /var/config/lastgood.xml
+grep -q '"VLAN_MANU_TAG_PRI" Value="255"' /var/config/lastgood.xml || { echo "FAIL  the isp2 store has no VLAN_MANU_TAG_PRI"; fail=$((fail + 1)); }
+run171 pri255 /tmp/s-tp5.txt
+got=$(rebuild /tmp/omcid-171-pri255.log 0 | grep -c 'manual-add')
+check "VLAN_MANU_TAG_PRI 255: no manual tag" "$got" "0"
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 exit "$fail"

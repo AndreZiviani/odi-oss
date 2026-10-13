@@ -529,7 +529,9 @@ static int cfg_num(const char *path, const char *key, int missing)
  * VID and the priority are present; every other combination hands omci_app the
  * 65535/255 sentinels, which is no manual tag at all. ISP1 and ISP2 both run
  * 1/1 with a VID and a priority, so the applied path never triggers on
- * either. */
+ * either. A store that holds the sentinel itself (VLAN_MANU_TAG_PRI 255, or
+ * anything past 7, which no 802.1p tag can carry) is no manual tag too, as
+ * omci_app reads it; it used to switch the tag on with that priority. */
 #define VLAN_CFG_TYPE_MANUAL  1
 #define VLAN_MANU_MODE_TAG    1
 
@@ -544,7 +546,7 @@ void cfg_load_vlan_from(const char *cs)
 	vlanCfg.pri  = pri < 0 ? 0 : pri;
 	vlanCfg.manual = vlanCfg.type == VLAN_CFG_TYPE_MANUAL
 		&& vlanCfg.mode == VLAN_MANU_MODE_TAG
-		&& vlanCfg.vid >= 0 && pri >= 0;
+		&& vlanCfg.vid >= 0 && pri >= 0 && pri <= 7;
 	vlanCfg.loaded = 1;
 }
 
