@@ -17,9 +17,8 @@
  * not through the switch-core leaves: it needs no per-leaf register mapping,
  * only the I2C indirect-controller trigger sequence odi_i2c.c reproduces
  * from a capture of a working vendor DDM read, and odi_ddm.c's own
- * selector table. (odi_switch_port.c
- * odi_sw_ponmac_transceiver_get() is a GPIO enable pair from an unrelated
- * OMCI command, not this read, and is untouched by this.) odi_ddm.h only
+ * selector table. OMCI cmd 10 (odi_switch_cmd.c) reads its numeric
+ * fields through the same odi_ddm_get(). odi_ddm.h only
  * names selectors 0-6 (ODI_DDM_*): the module serial number (our
  * selector 7, RTK_DDM_SN) has no captured reference and is refused here
  * (odi_ddm_get()'s default case); src/diag has no command that reads it

@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- kernel: an OLT's optical test of the ONU now gets the module's real
+  readings. When the OLT sends a Test to the ANI-G, omcid answers with
+  the supply voltage, Rx and Tx power, laser bias and temperature it asks
+  the driver for one at a time (cmd 10), and the driver returned success
+  with nothing in the answer: every result read 0 V, no light at either
+  end, 0 mA and 0 C. The command replayed the register writes of a stock
+  capture, which are the start of a two-byte DDM read (the A2h device
+  select, the byte address, START), without waiting for the read to
+  finish or taking the byte, and it left that read running on the I2C
+  master when it let other readers in. Cmd 10 is now the same DDM read
+  `diag` and the exporter use (`odi_ddm_get()`, both bytes under the I2C
+  lock), at the SFF-8472 A2h offset of the type omcid asks for, and the
+  word goes back where omcid reads it; any other type is refused without
+  touching the bus. Its register writes are still the capture's, byte
+  for byte. Host-tested (`test/odi_switch_cmd10_test.c`); not run on a
+  stick yet, as neither ISP's OLT has sent a Test since.
+
 - kernel: the GPON CAM deletes are waited for, and a CAM write that did
   not complete no longer counts as done. The Alloc-ID and GEM port
   deletes (on Deactivate_ONU-ID, gpondeact, LOS or TO1 in O4, TO2, and

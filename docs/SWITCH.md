@@ -256,7 +256,7 @@ commands, from the command table of the shipped binary:
 
 | cmd | stock name | leaf | file |
 |---|---|---|---|
-| 10 | getTransceiverStatus | `odi_sw_ponmac_transceiver_get` | `odi_switch_port.c` |
+| 10 | getTransceiverStatus | `odi_ddm_get` | `odi_ddm.c` |
 | 23 | setPriQueue | `odi_sw_ponmac_queue_add`, `_add_ext` | `odi_switch_qos.c` |
 | 25 | cfgGemFlow | `odi_sw_gpon_usflow_set` (downstream), `odi_sw_ponmac_flow_queue_set` (upstream) | `odi_switch_ds_gem.c`, `odi_switch_qos.c` |
 | 30 | setPortAutoNegoAbility | `odi_sw_port_autoneg_get`, `_set` | `odi_switch_port.c` |
@@ -336,11 +336,22 @@ commands, from the command table of the shipped binary:
   `PON_SID2QID` word, which unmapped flows 1-3: on an ISP with six
   upstream flows, the service on flow 2 had no upstream queue and DHCP
   never left (issue #42).
-- **cmd 10**: the port-1 I2C master device select (`I2C_MASTER_SETUP(1)`,
-  0x234413a), then GPIO 29 and GPIO 31, twice: GPIO 29 takes the two
-  values of the instance (0x62, then 0x63 in the first), GPIO 31 is always
-  1. It shares the I2C master with the DDM read, so it takes
-  `odi_i2c_lock`.
+- **cmd 10**: one SFF-8472 DDM word, for the ANI-G Test result. omcid
+  sends `{type, data[32]}` with the type (2 temperature, 3 supply voltage,
+  4 bias current, 5 Tx power, 6 Rx power, the `odi_ddm.h` selectors) as a
+  big-endian word at bytes 0-3, and reads the A2h word back, big-endian,
+  at `data[0..1]`. The command is a DDM read through `odi_ddm_get()`,
+  both bytes under `odi_i2c_lock`. Its writes are the capture's: the
+  A2h device select (0x234413a in `I2C_MASTER_SETUP`, port 1), the byte
+  address in `I2C_BYTE_ADDR` (0xbc) and START in `I2C_CMD` (0xc4), once
+  per byte; the five captured instances are A2h 98, 104, 102, 100 and 96,
+  the order omcid asks for voltage, Rx, Tx, bias and temperature.
+
+  The driver used to replay those writes with no completion poll and no
+  read of `I2C_READ_DATA`, taking 0xbc and 0xc4 for GPIO pin selects: the
+  command returned 0 with nothing in `data`, so every ANI-G Test result
+  reported 0 V, no light, 0 mA and 0 C, and the transaction it started
+  was still running when it released `odi_i2c_lock`.
 
 ### Bridge connections
 

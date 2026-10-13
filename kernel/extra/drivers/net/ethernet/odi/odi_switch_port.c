@@ -2,8 +2,7 @@
 /*
  * odi_switch_port.c -- port and L2 leaves: L2 ageing (cmd 62), the UNI PHY
  * auto-negotiation (cmd 30), the port force select (cmd 32), the flood
- * mask (cmd 64), the I2C select of the transceiver read (cmd 10), and the
- * PAUSE policy of the host port.
+ * mask (cmd 64) and the PAUSE policy of the host port.
  * odi_switch_dal.h has the contract, docs/SWITCH.md#command-leaves the
  * capture each sequence reproduces.
  */
@@ -16,14 +15,6 @@
 #define ODI_SW_PHY_ADDR_A400		0xa400U
 #define ODI_SW_PHY_ADDR_A408		0xa408U
 #define ODI_SW_PHY_ADDR_A412		0xa412U
-
-/* cmd 10: the device-select word of the port-1 I2C master, and the two
- * GPIO pins of the transceiver I2C select. Pin 29 takes gpio_lo, then
- * gpio_hi; pin 31 is always driven to 1, its role not decoded.
- */
-#define ODI_SW_I2C_PORT1_DEVSEL		0x234413aU
-#define ODI_SW_GPIO_PIN_I2C_SELECT	29U
-#define ODI_SW_GPIO_PIN_I2C_STROBE	31U
 
 void odi_sw_l2_aging_set(uint32_t age_spd, uint32_t linkdown_ageout)
 {
@@ -153,22 +144,4 @@ void odi_sw_l2_flood_mask_set(uint32_t mask)
 
 	for (i = 0; i < ODI_SW_PORT_COUNT; i++)
 		odi_reg_write(ODI_SW_FLOOD_UNKN_UCAST_PORTS_BASE, mask);
-}
-
-void odi_sw_ponmac_transceiver_get(uint32_t gpio_lo, uint32_t gpio_hi)
-{
-	unsigned int i;
-
-	/* I2C_MASTER_SETUP(1) is the device select of the I2C master a DDM
-	 * read drives, so a DDM read in progress would carry on with this
-	 * select word: odi_i2c_lock (odi_switch.c).
-	 */
-	mutex_lock(&odi_i2c_lock);
-	for (i = 0; i < 2; i++) {
-		odi_reg_write(ODI_SW_I2C_MASTER_SETUP(1), ODI_SW_I2C_PORT1_DEVSEL);
-		odi_reg_write(ODI_SW_PIN_GPIO_SELECT(ODI_SW_GPIO_PIN_I2C_SELECT), gpio_lo);
-		odi_reg_write(ODI_SW_PIN_GPIO_SELECT(ODI_SW_GPIO_PIN_I2C_STROBE), 1);
-		gpio_lo = gpio_hi;
-	}
-	mutex_unlock(&odi_i2c_lock);
 }

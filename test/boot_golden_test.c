@@ -45,9 +45,12 @@
 /* odi_board_optics() identifies the laser driver over I2C before it lights
  * the laser (odi_board.h). A GN25L95 here, with no register traffic, so the
  * captured sequence is unchanged: page select 2, byte 0xa0 reads 0x6a.
+ * Only odi_board.c is pointed at these two (the defines around its
+ * include); everything else, the cmd 10 DDM reads included, goes through
+ * the real odi_i2c.c that odi_switch_unity.h links.
  */
 static uint8_t fake_a2_page = 0;
-int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n)
+static int fake_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n)
 {
 	(void)sel;
 	if (n != 1)
@@ -55,7 +58,7 @@ int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n
 	*out = addr == 0x7fU ? fake_a2_page : (fake_a2_page == 2U && addr == 0xa0U ? 0x6aU : 0U);
 	return 0;
 }
-int odi_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
+static int fake_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
 {
 	(void)sel;
 	if (addr != 0x7fU)
@@ -63,7 +66,11 @@ int odi_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
 	fake_a2_page = val;
 	return 0;
 }
+#define odi_i2c_read_bytes fake_i2c_read_bytes
+#define odi_i2c_write_byte fake_i2c_write_byte
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_board.c"
+#undef odi_i2c_read_bytes
+#undef odi_i2c_write_byte
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_gpon_ploam.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_gpon_fsm.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_gpon_hw.c"

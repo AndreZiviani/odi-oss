@@ -258,12 +258,25 @@ int main(int argc, char **argv)
 	odi_mock_mark(0x80000000U | 23U);
 	dump_bracket(out_dir, "dal-cmd23-ext.txt", 23);
 
-	/* cmd 10, instance 1 -- getTransceiverStatus, boot5 lines 99-106. */
-	odi_mock_reset();
-	odi_mock_mark(10);
-	odi_sw_ponmac_transceiver_get(0x62, 0x63);
-	odi_mock_mark(0x80000000U | 10U);
-	dump_bracket(out_dir, "dal-cmd10.txt", 10);
+	/* cmd 10, instance 1 -- getTransceiverStatus, boot5 lines 99-106:
+	 * the supply-voltage DDM read (A2h 98-99) cmd 10 makes. The
+	 * bracket holds its writes; the word must also come back, which the
+	 * captured writes alone never showed.
+	 */
+	{
+		uint8_t raw[ODI_DDM_BUF_LEN];
+
+		odi_mock_reset();
+		odi_unity_sfp_a2[98] = 0x7c;
+		odi_unity_sfp_a2[99] = 0x25;
+		odi_mock_mark(10);
+		if (odi_ddm_get(ODI_DDM_VOLTAGE, raw) != 0 || raw[0] != 0x7c || raw[1] != 0x25) {
+			fprintf(stderr, "odi_switch_dal_test: cmd 10 voltage read did not return A2h 98-99\n");
+			return 1;
+		}
+		odi_mock_mark(0x80000000U | 10U);
+		dump_bracket(out_dir, "dal-cmd10.txt", 10);
+	}
 
 	/* cmd 25, DS instance 1 -- cfgGemFlow DS side, boot5 lines 35-40. */
 	odi_mock_reset();

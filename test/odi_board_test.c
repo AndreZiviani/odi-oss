@@ -35,11 +35,14 @@
 
 /* The laser driver behind A2h, as odi_board_optics() sees it: a page
  * select and the id byte at page 2 0xa0 (fake_ldd_id; -1 = no answer).
+ * odi_switch_unity.h links the real odi_i2c.c (cmd 10 reads DDM through
+ * it), so these two stand in for it under their own names, and only
+ * odi_board.c is pointed at them (the defines around its include).
  */
 static int fake_ldd_id = 0x6a;
 static uint8_t fake_a2_page;
 static int fake_page_writes;
-int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n)
+static int fake_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n)
 {
 	(void)sel;
 	if (n != 1 || fake_ldd_id < 0)
@@ -48,7 +51,7 @@ int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n
 	       (fake_a2_page == 2U && addr == 0xa0U ? (uint8_t)fake_ldd_id : 0U);
 	return 0;
 }
-int odi_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
+static int fake_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
 {
 	(void)sel;
 	if (addr != 0x7fU)
@@ -58,7 +61,11 @@ int odi_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
 	return 0;
 }
 
+#define odi_i2c_read_bytes fake_i2c_read_bytes
+#define odi_i2c_write_byte fake_i2c_write_byte
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_board.c"
+#undef odi_i2c_read_bytes
+#undef odi_i2c_write_byte
 
 static int failures;
 

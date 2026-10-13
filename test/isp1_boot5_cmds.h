@@ -99,9 +99,20 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 	/* 22: cmd 13 -- state poll. */
 	call(13, NULL, 0);
 
-	/* 23-27: cmd 10, instances 1-5 -- SFP DDM reads for one GetTransceiverStatus. */
-	for (i = 0; i < 5; i++)
-		call(10, NULL, 0);
+	/* 23-27: cmd 10, instances 1-5 -- the five DDM words of one ANI-G
+	 * Test, in the order omcid asks for them (voltage, Rx power, Tx
+	 * power, bias, temperature): {type as a big-endian word, data[32]}.
+	 */
+	{
+		static const uint8_t ddm_type[5] = { 3, 6, 5, 4, 2 };
+		uint8_t t[36];
+
+		for (i = 0; i < 5; i++) {
+			memset(t, 0, sizeof t);
+			t[3] = ddm_type[i];
+			call(10, t, sizeof t);
+		}
+	}
 
 	/* 28: cmd 13 -- state poll. */
 	call(13, NULL, 0);

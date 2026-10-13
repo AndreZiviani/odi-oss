@@ -3,7 +3,8 @@
  * odi_switch_cmd.c -- odi_switch_cmd(), the OMCI driver command dispatch
  * (odi_switch_cmd.h), and the commands other than cmd 51/50
  * (odi_switch_bdgconn.c). Every register write goes through a leaf of
- * odi_switch_dal.h; no register offset appears here.
+ * odi_switch_dal.h, or for cmd 10 the DDM read of odi_ddm.c; no register
+ * offset appears here.
  *
  * Values marked "replayed" are what the ISP1 provisioning capture shows
  * per instance (test/fixtures/isp1-260922-boot5.txt), written by instance
@@ -12,6 +13,7 @@
 #include "odi_switch_cmd.h"
 #include "odi_switch_dal.h"
 #include "odi_gpon.h"
+#include "odi_ddm.h"
 
 #include "uapi/omci_gemflow.h"
 #include "uapi/omci_bdgconn.h"
@@ -48,14 +50,6 @@ static uint32_t odi_sw_gem_us_used[(ODI_SW_CMD_GEM_US_MAX + 31) / 32];
 static uint32_t odi_sw_gem_ds_gem[OMCI_FLOWS_MAX];
 static uint32_t odi_sw_gem_ds_cfg[OMCI_FLOWS_MAX];
 static uint32_t odi_sw_gem_us_gem[OMCI_FLOWS_MAX];
-
-/* cmd 10, replayed: the GPIO 29 pair of each call. It varies from call to
- * call with no OMCI attribute behind it, so it is counted here: the five
- * captured pairs in order, then the fifth again (no capture has a sixth).
- */
-static const uint32_t odi_sw_cmd10_gpio_lo[] = { 0x62, 0x68, 0x66, 0x64, 0x60 };
-static const uint32_t odi_sw_cmd10_gpio_hi[] = { 0x63, 0x69, 0x67, 0x65, 0x61 };
-static unsigned int odi_sw_transceiver_n;
 
 /* cmd 25 upstream, PON_SID_GLB_TH: the global ON/OFF thresholds, two
  * writes (ON, then OFF) per flow, by the number of upstream flows in use.
@@ -127,7 +121,6 @@ void odi_switch_cmd_reset_state(void)
 
 	odi_sw_tcont_n = 0;
 	odi_sw_us_sched_used = 0;
-	odi_sw_transceiver_n = 0;
 	for (i = 0; i < ODI_SW_CMD_TCONT_MAX; i++)
 		odi_sw_tcont[i].used = 0;
 	odi_switch_bdgconn_reset();
@@ -415,16 +408,38 @@ static int cmd_ds_bc_gem_flow(void *buf, uint32_t len)
 	return 0;
 }
 
-/* cmd 10 (odi_sw_cmd10_gpio_lo above has the replay). */
+/* cmd 10: one SFF-8472 DDM word of the optics, for the ANI-G Test result
+ * omcid sends (src/omci/respond/omcimsg.c, ddm_word()). The argument is
+ * {type, data[32]}: type a big-endian word at bytes 0-3, one of the
+ * odi_ddm.h numeric selectors (2 temperature, 3 supply voltage, 4 bias
+ * current, 5 Tx power, 6 Rx power); the answer is the raw A2h word,
+ * big-endian, at data[0..1], the rest of data zeroed. The read is the
+ * one DDM_GET makes (odi_ddm_get(), odi_i2c_lock held for both bytes),
+ * whose writes are the same as the stock command's: device select A2h,
+ * byte address, start, once per byte. Any other type, a short buffer or
+ * a failed read is an error, and omcid then reports 0 for that field.
+ */
+#define ODI_SW_CMD10_DATA_OFF	4U
+#define ODI_SW_CMD10_MIN_LEN	(ODI_SW_CMD10_DATA_OFF + 2U)
+
 static int cmd_transceiver_status(void *buf, uint32_t len)
 {
-	unsigned int n = odi_sw_transceiver_n;
+	uint8_t *b = (uint8_t *)buf;
+	uint8_t raw[ODI_DDM_BUF_LEN];
+	uint32_t type, i;
 
-	(void)buf; (void)len;
-	if (n >= 5)
-		n = 4;
-	odi_sw_ponmac_transceiver_get(odi_sw_cmd10_gpio_lo[n], odi_sw_cmd10_gpio_hi[n]);
-	odi_sw_transceiver_n++;
+	if (!b || len < ODI_SW_CMD10_MIN_LEN)
+		return -1;
+	type = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) |
+	       ((uint32_t)b[2] << 8) | b[3];
+	if (type < ODI_DDM_TEMPERATURE || type > ODI_DDM_RX_POWER)
+		return -1;
+	if (odi_ddm_get((int)type, raw) != 0)
+		return -1;
+	for (i = ODI_SW_CMD10_DATA_OFF; i < len; i++)
+		b[i] = 0;
+	b[ODI_SW_CMD10_DATA_OFF] = raw[0];
+	b[ODI_SW_CMD10_DATA_OFF + 1U] = raw[1];
 	return 0;
 }
 
