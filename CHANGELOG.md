@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Pins: confd v1.3.0 (odi-ui: the Commit button commits both U-Boot
+  environment copies and refreshes the slot state; Config shows no control
+  or value for a key the current mode ignores), metricsd v1.4.0 (a port
+  counter reset is no longer read as a 32-bit wrap), and the uClibc-ng
+  toolchain uclibc-v3: `syslog()` reconnects when syslogd has restarted, so
+  klogd, dropbear and ntpd no longer lose their first line after a syslogd
+  restart (seen on a stick: the first kernel line after one never reached
+  `logread`). Rebuilt with it, only dropbear differs from the uclibc-v2
+  build, apart from the documented build stamps.
+
 - The syslog ring keeps days instead of hours. On a release image it
   cycled in about 3-4 hours: the serial-console `login`, respawned by init,
   gave up at its prompt after 60 s and restarted every minute (two lines
