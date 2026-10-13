@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- kernel: downstream AES is no longer lost when the OLT sends
+  Encrypted_Port-ID before OMCI has created the GEM port, or on flows 32
+  to 63. The driver dropped an Encrypted_Port-ID for a port with no
+  downstream flow yet, and one OLT sends it right after O5, before any
+  OMCI; the port was then created with AES off, and every downstream
+  frame on it arrived as undecrypted garbage. The flag is now kept per
+  GEM port and applied when cmd 25 creates the flow, and when it writes
+  an existing flow again (an OMCI MIB reset), which used to clear the
+  bit with no new PLOAM to set it back. The kept flags are forgotten
+  with the ONU-ID, since the next activation configures the ports again.
+  The DS slot table also held 32 of the 64 flows cmd 25 accepts, so
+  flows 32 to 63 never got AES; it now covers all 64, and a slot outside
+  it would be logged as an error rather than skipped silently.
+  `docs/SWITCH.md`, "Downstream AES". Host-tested
+  (`test/odi_switch_ds_encrypt_test.c`).
+
 - kernel, rootfs: the laser is switched on only on the laser driver this
   image was validated with. Before lighting it, a new `laser` PON
   step (after the I2C steps, which the probe needs) reads the laser
