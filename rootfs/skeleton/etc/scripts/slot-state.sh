@@ -2,7 +2,10 @@
 # slot-state.sh -- record, at boot, which slot is running and whether it is
 # committed, and say so where it will be seen (docs/FLASHING.md,
 # "Committing"). Run by /etc/inittab as a `once` entry; also safe to run by
-# hand at any time, which is how the notice is refreshed after `nv commit`.
+# hand at any time, which is how the notice is refreshed after `nv commit`:
+# the web UI (confd, which runs its children with an EMPTY environment) runs
+# it after a commit, so it sets its own PATH and does not wait for syslogd
+# on a run after the first of a boot.
 #
 # An image of ours is UNCOMMITTED when sw_commit, in either copy of the
 # U-Boot environment, is not the running slot: the next reset (or, for the
@@ -24,6 +27,11 @@
 # The running slot is read the way fwu.sh and nv read it: root=31:N in
 # /proc/cmdline, N the index of the MTD partition named r0 or r1.
 set -u
+
+# confd starts its children with no environment at all. Make the lookups of
+# timeout, sed, head, sleep and logger independent of whoever calls this.
+PATH=${SLOT_STATE_PATH:-/sbin:/usr/sbin:/bin:/usr/bin}${PATH:+:$PATH}
+export PATH
 
 NV=${NV:-/bin/nv}
 LOGGER=${LOGGER:-logger}
@@ -101,6 +109,12 @@ else
 	notice="HALF COMMITTED: running slot $running is committed in the primary copy ($primary_copy), but the fallback copy ($fallback_copy) still says sw_commit=${commit_f:-unset}; if the primary copy is ever lost, U-Boot boots that instead. Fix with: nv commit $running && slot-state.sh"
 fi
 
+# The state file is rebuilt on every boot (/var is tmpfs), so its presence
+# means an earlier run this boot: the syslogd race below is a boot-time
+# problem only, and a refresh after a commit must not hang on it.
+first_run=1
+[ -e "$STATE" ] && first_run=0
+
 # Temp file beside the target, then rename: a reader never sees half of it.
 put() {
 	mkdir -p "$(dirname "$1")" 2>/dev/null
@@ -134,8 +148,10 @@ fi
 [ -n "$notice" ] || exit 0
 # At boot this runs in the same breath as the syslogd respawn entry, and a
 # line logged before syslogd owns /dev/log is lost. Bounded: with syslogd
-# off the socket never appears and the line is dropped after LOG_WAIT_S.
+# off the socket never appears and the line is dropped after LOG_WAIT_S. Only
+# on the first run of a boot; a refresh logs at once or not at all.
 i=0
+[ "$first_run" = 1 ] || i=$LOG_WAIT_S
 while [ ! -e "$DEV_LOG" ] && [ "$i" -lt "$LOG_WAIT_S" ]; do
 	sleep 1
 	i=$((i + 1))

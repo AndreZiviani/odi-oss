@@ -621,7 +621,7 @@ the login notice and the exporter.
 ### Slot state -- `/var/run/odi-slot`
 
 `/etc/scripts/slot-state.sh` writes it at every boot (an `/etc/inittab`
-`once` entry), and again whenever it is run by hand. It only reads the
+`once` entry), and again whenever it is run by hand or after a commit from the web UI (confd runs it with no environment, so it sets its own `PATH`; a run after the first of a boot does not wait for syslogd). It only reads the
 environment (`nv getenv`, `nv fallback`) and `/proc/cmdline`, never writes
 either, and replaces the file by rename. One `KEY=value` per line, always
 all nine keys, a value empty when it cannot be told:
