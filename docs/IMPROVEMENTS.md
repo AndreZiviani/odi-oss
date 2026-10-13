@@ -46,7 +46,7 @@ them. `docs/KERNEL.md` has each one.
 nothing in the rootfs can reach turned off (the config says why, option by
 option, and which ones are kept on purpose), and the register replay tables
 loaded from `/lib/firmware/odi/` only while they are applied rather than
-compiled in: about 84 KB of spare room in the 1328 KB kernel partition,
+compiled in: about 60 KB of spare room in the 1328 KB kernel partition,
 and about 484 KB of RAM that the tables no longer hold.
 
 **A hung kernel resets itself, and so does a stuck boot script.** The
@@ -94,6 +94,37 @@ area still maturing rather than a finished feature.
 **The MAC table.** `diag l2-table get all` reads the switch L2 lookup table
 back -- learned addresses with the port each was learned on, and multicast
 groups with their members -- and the web UI shows it.
+
+## The GPON link
+
+**Loss of fibre is followed.** A loss of signal or of framing in O5 now
+drives the ONU state machine as G.984.3 Table 10-1 says (to O6, then O1
+when TO2 runs out, and back to O2 when the light returns), so the OLT ranges
+the stick again instead of finding it still in O5. `docs/TOOLS.md`, "Link and
+provisioning events"; `test/odi_gpon_los_test.c`.
+
+**The GPON tables are cleaned at every boot.** The GEM-port and Alloc-ID
+CAMs, the flow-type words and the downstream multicast filter come up full
+of garbage after a power cut. The boot waits for the MAC reset, clears every
+row, reads it back and logs what it found; the switch ACL tables get the same
+treatment. `docs/SWITCH.md`, "GPON boot init" and "Platform init";
+`test/odi_gpon_init_clean_test.c`, `test/odi_switch_acl_clean_test.c`.
+
+**Downstream encryption is real.** Every Request_Key gets a fresh key from
+the kernel RNG, and an Encrypted_Port-ID that arrives before OMCI has created
+the GEM port is kept and applied (`docs/SWITCH.md`, "Downstream AES").
+
+**The line counters have one reader.** The GPON MAC counters clear on read,
+so the driver samples them once a second into 64-bit totals in
+`/proc/odi_gpon` (`docs/TOOLS.md`, "/proc/odi_gpon: the link counters").
+
+**The laser is not lit blind.** It goes on only for the laser driver chip
+this image is tested with, and GPON activation is refused otherwise
+(`docs/BOOT.md`, stage 13; `ODI_LASER_UNVERIFIED` in `docs/SETTINGS.md`;
+`test/odi_board_test.c`).
+
+**The host port does not send PAUSE** toward the host, so a stuck upstream
+cannot stall the host's NIC (`docs/SWITCH.md`, "Host port PAUSE").
 
 ## The `diag` CLI
 

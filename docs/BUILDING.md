@@ -31,13 +31,13 @@ RAM, default `JOBS=4`, measured 2026-09-25:
 
 | step | what it does | first run |
 |---|---|---|
-| `make kernel-tree` | fetches linux-6.18.53 from cdn.kernel.org, checks its SHA-256 and GPG signature, extracts it to `kernel/618/mainline` and packs it into `build/kernel-618/tree.tar` (`kernel/tree.sh`) | 1.5 min (mostly the 150 MB download) |
+| `make kernel-tree` | fetches linux-6.18.56 from cdn.kernel.org, checks its SHA-256 and GPG signature, extracts it to `kernel/618/mainline` and packs it into `build/kernel-618/tree.tar` (`kernel/tree.sh`) | 1.5 min (mostly the 150 MB download) |
 | `make toolchain` | pulls the two prebuilt toolchain images, pinned by digest in `toolchain/images.env`: gcc 16.2.0 / binutils 2.47 / uClibc-ng 1.0.59 for this CPU, and the freestanding Debian cross-gcc (see `toolchain/README.md`, and "The toolchain images" below) | under a minute, once the images pull |
 | `make toolchain-audit` | re-proves the target libraries in the uclibc image carry no instruction this CPU traps on (the image build already refused any) | seconds |
-| `make kernel` | Linux 6.18.53 for the RTL9602C (`VERSION=` stamps the ramlog build id, `CRUMBS_CORE=1` adds the debug crumbs) — `docs/KERNEL.md` | 2 min |
+| `make kernel` | Linux 6.18.56 for the RTL9602C (`VERSION=` stamps the ramlog build id, `CRUMBS_CORE=1` adds the debug crumbs) — `docs/KERNEL.md` | 2 min |
 | `make packages` | busybox (`make busybox`), our config fragment, then dropbear (with `scp`) and iproute2, all ISA-audited | 2 min |
 | `make src` | our own tools (`diag`, `omcid`, `omcli`, `omciprobe`, `omcicap`, `nv`, `igmpd`), freestanding, into `out/bin` — `docs/CROSS-COMPILING.md` | 10 s |
-| `make releases` | fetches `confd` and `metricsd` as pinned, checksummed release assets (confd v1.0.4, metricsd v1.1.1; `CONFD_TAG=`/`METRICSD_TAG=` to override, or `CONFD_TAG= CONFD_BIN=<binary>` / `METRICSD_TAG= METRICSD_BIN=<binary>` for a local `confd` / `metricsd` build) | 5 s |
+| `make releases` | fetches `confd` and `metricsd` as pinned, checksummed release assets (confd v1.2.1, metricsd v1.3.0; `CONFD_TAG=`/`METRICSD_TAG=` to override, or `CONFD_TAG= CONFD_BIN=<binary>` / `METRICSD_TAG= METRICSD_BIN=<binary>` for a local `confd` / `metricsd` build) | 5 s |
 | `make image` | assembles the flashable tarball into `out/image/`: squashfs rootfs (with the register replay tables in `/lib/firmware/odi/`), the uImage, `fwu.sh` and `md5.txt` | 15 s |
 
 Total: about six minutes from `git clone` to `out/image/<version>.tar` once
@@ -105,11 +105,13 @@ implement, adding a `build.sh` there is a small, self-contained change.
     make test-diag      # diag parser and conversions, and the exporter contract under qemu
     make test-omci      # omcid under qemu-user, about 130 checks, no stick needed
     make test-rcs       # the rcS action trace against its goldens; needs out/busybox, not in `make test`
+    make test-qemu      # boots the real rootfs under qemu-system-mips; needs the built pieces, not in `make test`
 
 CI (`.github/workflows/ci.yml`) runs `make lint`, `make test-host`,
-`make test-diag` and `make test-omci` on every push to `main` and every
-pull request, and adds `make src` on release tags and manual runs; the
-kernel and image are not built there. It pulls the public freestanding
+`make test-diag` and `make test-omci` (one job per suite) on every push to
+`main` and every pull request, plus `make test-qemu` (after `make busybox`,
+`packages`, `src` and `releases`), and adds `make src` on release tags and
+manual runs; the kernel and image are not built there. It pulls the public freestanding
 toolchain image anonymously, no login needed.
 
 Every ELF that reaches the image — kernel, busybox, dropbear, iproute2, our

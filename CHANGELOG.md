@@ -5,6 +5,24 @@ listed here.
 
 ## Unreleased
 
+### Changed
+
+- Docs: refreshed for v1.4.0. README: kernel version, the host-PAUSE row
+  (now verified on a stick), the VLAN handling row (class 171 rule with
+  `VLAN_CFG_TYPE` other than 1), the kernel size spare, the status of the two
+  sticks, and a note for updaters on the laser guard (a stick with another
+  laser driver chip stays dark until `ODI_LASER_UNVERIFIED` is set). Also:
+  FLASHING (check the laser on the trial; `fwu.sh` names missing tools and
+  uses no `cut`), BUILDING (kernel 6.18.56, confd and metricsd pins, CI runs
+  `make test-qemu`), SWITCH (the random AES key per Request_Key, multicast
+  filter wording), KERNEL (the NIC TX-completion interrupt, the laser verb),
+  IMPROVEMENTS (a GPON link section), LICENSING (dropbear version), BOOT
+  and HACKING (the respawn daemon list, the laser step, `slot-state.sh`, the
+  CI jobs, stale line references, kernel 6.18.56), TOOLS and SETTINGS (the
+  laser step and `ODI_LASER_UNVERIFIED`, `gponact` refused while the laser is
+  off, the OLT class 171 rule, `optics.off`, the daemon switch files, the
+  `/proc/odi_wdt` rows). Each claim was checked against the code on `main`.
+
 ## v1.4.0 — 2026-10-13
 
 Read before updating:

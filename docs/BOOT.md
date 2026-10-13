@@ -8,9 +8,9 @@ is the reasoning behind the order, for someone about to change it.
 
 rcS is the `/etc/inittab` `sysinit` entry; `rcS.pon` (the PON steps, stages
 6 onward below) is a `once` entry started right after rcS returns, at the
-same moment init starts the four daemon `respawn` entries (metricsd,
-confd, dropbear, omcid) -- init does not wait for a `once` entry, so
-`rcS.pon` runs concurrently with all four coming up. `rcs-lib.sh` holds
+same moment init starts the daemon `respawn` entries (syslogd, klogd, ntpd,
+metricsd, confd, dropbear, omcid) -- init does not wait for a `once` entry,
+so `rcS.pon` runs concurrently with all of them coming up. `rcs-lib.sh` holds
 the functions both scripts share (`config_mounted`, `crumb`,
 `confirm_watchdog`, the PON step helpers) so they never drift into two
 copies of the same logic.
@@ -18,14 +18,18 @@ copies of the same logic.
 A second `once` entry, `/etc/scripts/slot-state.sh`, starts at the same
 moment. It is not a boot stage: it reads the U-Boot environment (never
 writes it), records the running slot and whether it is committed in
-`/var/run/odi-slot`, and puts a notice in `/etc/motd` when it is not
-(`docs/FLASHING.md`, "Committing"). Nothing in the boot waits for it.
+`/var/run/odi-slot`, and puts a notice in `/var/run/motd` (`/etc/motd` is a
+link to it) when it is not (`docs/FLASHING.md`, "Committing"). The running
+slot is the last `root=31:N` on the kernel command line. Nothing in the boot
+waits for it, and it is safe to run again by hand: the web UI runs it after a
+commit to refresh the notice, and a run after the first of a boot does not
+wait for syslogd.
 
 ## The rules every stage follows
 
 **Nothing may block.** `/etc/inittab` runs rcS as `sysinit`, and busybox
 init starts no `once` or `respawn` entry until sysinit returns. The serial
-login and the four daemons are all `respawn` entries: anything that blocks
+login and the daemons are all `respawn` entries: anything that blocks
 in rcS costs every way back into the device at once. So every slow step
 runs in the background, and every read that could stall (diag, arping,
 anything over the network) runs under `timeout`. `rcS.pon`, once started,
@@ -114,10 +118,11 @@ reset: a trial that never answered still says how far it got
    session; the BSD pairs (`/dev/ptypN`/`/dev/ttypN`) made here are a
    fallback it can also scan. devtmpfs normally provides them; rcS makes
    sixteen pairs if `/dev/ptyp0` is missing.
-8. **The daemons are not started here any more.** metricsd, confd,
-   dropbear and omcid are each their own `respawn` entry in `/etc/inittab`
+8. **The daemons are not started here any more.** syslogd, klogd, ntpd,
+   metricsd, confd, dropbear and omcid are each their own `respawn` entry
+   in `/etc/inittab`
    (`/etc/scripts/svc-*.sh`, `docs/SETTINGS.md`, "native over hand-rolled"):
-   busybox init starts all four the moment this script returns and
+   busybox init starts all of them the moment this script returns and
    restarts whichever one exits, forever, on its own -- no rate limit, no
    restart budget, and no chance of losing track of the pid the way the
    old shell-loop `supervise()` once did on hardware. Each script sets its
@@ -141,7 +146,7 @@ reset: a trial that never answered still says how far it got
     omcid itself has not started yet.
 
 rcS returns here; everything from this point on is `rcS.pon`, the PON
-steps, running concurrently with the four respawn entries just started.
+steps, running concurrently with the respawn entries just started.
 
 11. **The watchdog confirmation**, `confirm_watchdog()`
     (`echo 1 > /proc/odi_wdt/userland_ok`), called from `pon_steps_default`
@@ -197,18 +202,26 @@ steps, running concurrently with the four respawn entries just started.
     stays off, the module reports TX_DISABLE_STATE and the OLT never hears
     the serial number; with it low the ONU went from O3 to O5 within 5 s.
     For any other laser driver, or none answering, the laser stays off
-    and `gponact` is refused: another board may need laser set-up this
-    image does not do, and a laser lit outside its timeslots takes down
-    every ONU on the OLT port. `ODI_LASER_UNVERIFIED=1` (odi.conf) forces
-    it on; `optics.off` leaves it off. The order is fixed by the hardware.
+    and the verb fails: another board may need laser set-up this image
+    does not do, and a laser lit outside its timeslots takes down every
+    ONU on the OLT port. `gponact` is then refused (`-EPERM`, `odi_gpon:
+    gponact refused: the laser is off` in the kernel log, whoever writes
+    the verb). `gponsn` and `gponpw` still run. `ODI_LASER_UNVERIFIED=1`
+    (odi.conf) makes `pon_step_laser` write `laser unverified`, which
+    lights the laser whatever the id says; `optics.off` skips the verb and
+    leaves it off. `/proc/odi_gpon` shows the result as
+    `laser on X ldd_id Y unverified Z` (`ldd_id` -1: no answer). The order
+    is fixed by the hardware.
     The switch init deactivates the ONU, so the activation steps come
     after it (with the switch init last, the ONU stayed in O1); the switch
     init is the `switch_init` write of `/proc/odi_omci`: the platform
     settings and the module-load replay the stock OMCI kernel modules made
     when they loaded (`docs/SWITCH.md`). The serial number and the PLOAM
     password come from the config store (`GPON_SN` in the HS file,
-    `GPON_PLOAM_PASSWD` as hex in the CS file); an empty password is not
-    sent. The crumbs name the verb only, so neither value reaches a log.
+    `GPON_PLOAM_PASSWD` in the CS file); an empty password is not sent.
+    `gponpw` takes the stored value in any of its forms: 20 hex digits,
+    `0x` and up to 20 hex digits, or up to 10 characters of text
+    (`odi_gpon_parse_pw`, `odi_gpon_pw.c`). The crumbs name the verb only, so neither value reaches a log.
 
     omcid itself no longer starts here -- it is its own `respawn` entry,
     running concurrently with this whole script -- but it must still
@@ -234,8 +247,8 @@ serves `omcicli` again, but `gpon_omci_services` stays 0 indefinitely. The
 OLT has already provisioned this ONU from the first boot's MIB and does
 not re-send it to a fresh omcid that starts with an empty one -- nothing
 else on the ONU side asks it to. The proven fix, the same one omcid
-makes for itself when an identity key changes (`apply.sh omci`, "Reload on
-SIGHUP" in `docs/TOOLS.md`), is to force the OLT to
+makes for itself when an identity key changes (`apply.sh omci`, "SIGHUP
+rereads the config store" in `docs/TOOLS.md`), is to force the OLT to
 re-range: deactivate the ONU, let the OLT see it go, then reactivate --
 which resets its MIB view and makes it provision the ONU again from
 scratch, this time into the omcid that is actually running.
@@ -352,10 +365,11 @@ leave there is readable from the image the stick reverts to.
   host is not on `.2`: every boot then resets at 120 s.
 - **`pon-steps`**: a list that replaces the built-in PON steps, one per
   line: a `/proc/odi_init` verb with its argument, or `omcimods` (the
-  switch init only, now -- omcid starts as its own respawn entry
-  regardless), `gponsn auto` or `gponpw auto` (the values from the config
+  switch init, then the watchdog confirmation -- omcid starts as its own
+  respawn entry regardless), `gponsn auto` or `gponpw auto` (the values from the config
   store), or `gponact` (waits for the omcid registration first, bounded,
-  same as the built-in list). It is how the order above was found, one step per
+  same as the built-in list). A plain `laser` line is the verb itself:
+  it ignores `optics.off` and `ODI_LASER_UNVERIFIED`. It is how the order above was found, one step per
   boot. A wrong list means no PON.
 
 `breadcrumbs.on` and `confirm-arp` are documented for users in

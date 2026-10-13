@@ -38,12 +38,12 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `apply.sh` | CLI: apply saved settings without a reboot | confd, you | `network.sh addr`; SIGHUP to omcid | stdout | -- |
 | `diag-bundle.sh` | CLI: the diagnostics bundle, secrets redacted, identity masked | confd (`GET /api/diag`), you | reads logs, `/proc`, `nv`, the exporter, the optics module (`/dev/i2c-0`) | the tar.gz it writes | -- |
 
-Every daemon -- `omcid`, `confd`, `metricsd`, `dropbear` -- and the serial
-`login` are all `respawn` entries in `/etc/inittab`: busybox init restarts
-whichever one exits, forever, the instant it does (no restart budget, no
-rate limit -- `docs/SETTINGS.md`, "native over hand-rolled"). There is no
-telnet server (busybox is built without telnetd) and no syslog daemon
-running: every daemon's own output is the log.
+Every daemon -- `omcid`, `confd`, `metricsd`, `dropbear`, `syslogd`, `klogd`
+and `ntpd` -- and the serial `login` are all `respawn` entries in
+`/etc/inittab`: busybox init restarts whichever one exits, forever, the
+instant it does (no restart budget, no rate limit -- `docs/SETTINGS.md`,
+"native over hand-rolled"). There is no telnet server (busybox is built
+without telnetd).
 
 ## How the image starts things
 
@@ -84,9 +84,9 @@ forever, on its own -- no `supervise()`, no restart budget any more.
 
 Concurrently with those four, `rcS.pon`:
 
-6. drives the optics, the `optics` verb of `/proc/odi_init`
-   (`PIN_GPIO_SELECT`, laser TX-enable on GPIO 13);
-7. runs the PON steps: `i2c 1`, `i2cen 1`, `gpon`, `rxsd`, `gpondrv`,
+6. sets the optics pins, the `optics` verb of `/proc/odi_init`
+   (`PIN_GPIO_SELECT` only, outside the step list);
+7. runs the PON steps: `i2c 1`, `i2cen 1`, `laser`, `gpon`, `rxsd`, `gpondrv`,
    `gpondev`, then the switch init (the platform settings and module-load
    replay, through `/proc/odi_omci`) and the watchdog confirmation
    (`/proc/odi_wdt/userland_ok`; without it the board resets at 120 s of
@@ -98,6 +98,16 @@ Concurrently with those four, `rcS.pon`:
    since omcid now starts as its own respawn entry rather than being forked
    inline here. `/etc/config/pon-steps` replaces the whole list
    (development, `docs/BOOT.md`).
+
+   The `laser` step reads the id byte of the laser driver chip (A2h page 2,
+   byte 0xa0) and drives the TX-enable (SoC GPIO 13) only for the Semtech
+   GN25L95 (id 0x6a). On any other chip, or when the id cannot be read, the
+   laser stays off and `gponact` is refused (`-EPERM`; `dmesg` says why).
+   `ODI_LASER_UNVERIFIED=1` in `/etc/config/odi.conf` makes the boot run
+   `laser unverified` instead, which switches the laser on regardless
+   (`docs/SETTINGS.md`); `/etc/config/optics.off` skips the step.
+   `/proc/odi_gpon` shows the outcome: `laser on <0|1> ldd_id <id> unverified
+   <0|1>`.
 
 A second `once` entry, `/etc/scripts/slot-state.sh`, starts with them: it
 writes the slot state file and the login notice (below, "Slot state") and
@@ -159,7 +169,9 @@ refuses to start while a live one holds redirect type 1 (`-f` overrides).
 It reads, from the config store, at start and again on SIGHUP (below): the manual VLAN
 (`VLAN_MANU_TAG_VID` and `VLAN_MANU_TAG_PRI`, applied only with
 `VLAN_CFG_TYPE` 1 and `VLAN_MANU_MODE` 1, as the stock firmware gates them;
-any other mode is transparent, `docs/SETTINGS.md`, "VLAN handling"),
+with `VLAN_CFG_TYPE` other than 1 it applies the OLT's own class 171 rule when
+it has the one supported shape, otherwise the service is transparent,
+`docs/SETTINGS.md`, "VLAN handling"),
 the serial number until the kernel reports one (`GPON_SN`), the LOID keys
 (answered in the CTC LOID-authentication entity), the six OLT identity keys
 (the ONU-G hardware version, `ONU_HW_VERSION`, from `/etc/config/odi.conf`;
@@ -308,9 +320,12 @@ fibre and a stuck ONU.
 
 ### `dropbear` -- ssh and scp
 
-Started by services as
+Started by `svc-dropbear.sh` (through `respawn.sh`) as
 
-    /sbin/dropbear -r /etc/config/dropbear.d/ed25519 -D /etc/config/dropbear.d -p 22
+    /sbin/dropbear -F -r /etc/config/dropbear.d/ed25519 -D /etc/config/dropbear.d -p 22
+
+(`-s` is added on an image built with `ROOT_PW=locked`, which refuses
+password logins.)
 
 No `-E`: dropbear logs through syslog by default (every login is logged),
 same as everything else here that can reach it -- `logread` shows it. The
@@ -659,8 +674,9 @@ config partition, `/var/config/lastgood.xml` (CS, the service keys) and
     flash default cs         merge /etc/config_default.xml into CS
 
 `set` only changes a key that already exists, refuses values carrying a
-quote, `<` or `&`, and replaces the file by rename so a power cut leaves the
-old one. It changes the file and nothing else: whatever reads the key reads
+quote, `<` or `&`, and installs the file by rename (the new copy is written
+beside the target, compared with the source, then renamed over it) so a power
+cut leaves the old one whole. It changes the file and nothing else: whatever reads the key reads
 it at its own time, or when `apply.sh` makes it. confd writes every setting
 through it. `default cs` sets every key the image defaults file names to its
 default (adding one that is in neither file) and leaves every other key, and
@@ -677,7 +693,10 @@ Travels inside the image tarball, not in the rootfs:
 
 Refuses the running slot, checks both members' md5 and sizes before erasing
 anything, streams them out of the tarball, and never touches the config
-partition. `docs/FLASHING.md` is the procedure.
+partition. It needs only `tar`, `sed`, `cksum`, `md5sum` and `cmp` (no `cut`,
+which some stock images lack, so the first flash can run on stock firmware)
+and names a missing one before touching anything. It writes `sw_version<slot>`
+to the U-Boot environment only with `FWU_RECORD_VERSION=1`. `docs/FLASHING.md` is the procedure.
 
 ### `fwu_starter.sh` -- the same, from the web UI
 
@@ -834,13 +853,13 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
-| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters (`ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms), the serial number, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), the link counters and the alarm and ONU state times (below), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
+| `/proc/odi_gpon` | ONU state, ONU id, PLOAM counters (`ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), the serial number, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), the link counters and the alarm and ONU state times (below), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
 | `/proc/odi_wdt/watchdog_flag` | -- | `1`: keep kicking the hardware watchdog |
-| `/proc/odi_wdt/register` | -- | `"<name> <deadline_s>"`, e.g. `omcid 60`: register (or update) a watchdog client; idempotent, does not arm anything (`docs/SETTINGS.md`, "Watchdog rules") |
-| `/proc/odi_wdt/ping` | -- | `"<name>"`: a registered client's own ping; arms its deadline on the first call, refused (`-EINVAL`) for an unregistered name |
+| `/proc/odi_wdt/register` | -- | `"<name> <deadline_s>"`, e.g. `omcid 60`: register (or update) a watchdog client; idempotent, arms the deadline from that moment and resets its clock (`docs/SETTINGS.md`, "Watchdog rules") |
+| `/proc/odi_wdt/ping` | -- | `"<name>"`: a registered client's own ping, which restarts its deadline; refused (`-EINVAL`) for an unregistered name |
 | `/proc/odi_wdt/clients` | one line per registered client: name, deadline, armed, last-ping age | -- |
 | `/proc/odi_ramlog_prev` | the previous boot's DRAM ramlog, decoded: this boot's counter and slot, the previous boot's counter, slot, build id, last early crumb and reset reason (`reason=`, `docs/HACKING.md`), then its first 3984 bytes and its last 4080 (root only) | -- |
 | `/proc/odi_ramlog_prev_raw` | the same two pages as 8192 raw bytes, page A then page B, for `ramlog-read.sh`-style decoding off the stick (root only) | -- |
@@ -931,6 +950,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | line | level | when |
 |---|---|---|
 | `odi_gpon: event=onu_state from=O5 to=O2 in_state_s=3605.120 cause=deactivate_onu_id side=olt onu_id=0` | notice when leaving O5 or entering O7, else info | every ONU state change: the state left, how long it lasted, and why |
+| `odi_gpon: event=ranging eqd_bits=... protection=... preassigned=... preassigned_delay=... multframe=... inframe=... onu_id=1` | info | once per O4 to O5 transition: what the Ranging_Time decoded to and the delay written |
 | `odi_gpon: event=los state=on onu_state=O5` | notice | the downstream LOS bit set, with the state the loss found; sampled at every GPON interrupt and every 100 ms while the ONU is activated, so a fibre pull shows within 100 ms even with no interrupt. The `event=onu_state` line of what it does to the state follows it (`cause=los`) |
 | `odi_gpon: event=los state=off lasted_s=42.310 onu_state=O1` | info | the LOS bit clear again |
 | `odi_gpon: event=lof state=on onu_state=O5` / `event=lof state=off lasted_s=...` | notice / info | the same for LOF, loss of downstream framing: light without a GPON frame the framer can lock to |
@@ -1018,8 +1038,8 @@ every 10 s) stays well under either.
 
 ## Restarting a daemon
 
-Since v1.0.4, all four (metricsd, confd, dropbear, omcid) are `respawn`
-entries in `/etc/inittab` (`docs/SETTINGS.md`, "native over hand-rolled"):
+Since v1.0.4, every daemon (metricsd, confd, dropbear, omcid, and later
+syslogd, klogd and ntpd) is a `respawn` entry in `/etc/inittab` (`docs/SETTINGS.md`, "native over hand-rolled"):
 busybox init, which forked each one itself, restarts it the instant it
 exits -- no session hang-up can reach the daemon, since it is a child of
 init (pid 1), never of your ssh session. So the plain way to
@@ -1045,8 +1065,8 @@ one init runs: the second refuses to start while the first holds the OMCI
 channel, and one started with `-f` takes it and leaves init's respawn entry
 re-provisioning around a stranger.
 
-`/etc/init.d/services {stop|start} <name>` (metricsd, confd, dropbear or
-omcid) is for turning one off across restarts: `stop` writes
+`/etc/init.d/services {stop|start} <name>` (syslogd, klogd, ntpd, metricsd,
+confd, dropbear or omcid) is for turning one off across restarts: `stop` writes
 `/etc/config/<name>.off` (so it stays off across a reboot, until removed)
 and kills the current process; `start` clears the flag and kills whatever
 is currently running under that entry, so init brings the real daemon back

@@ -50,7 +50,7 @@ upstream license:
 | uClibc-ng | 1.0.59 | LGPL-2.1 |
 | Linux kernel headers (used to build uClibc-ng) | matches the kernel version they are paired with | GPL-2.0, with the usual "headers do not make your program a derivative work" exception |
 | busybox | 1.38.0 | GPL-2.0 |
-| dropbear (+ its `scp`) | current | MIT-style (dropbear's own license, not GPL) |
+| dropbear (+ its `scp`) | 2026.94 | MIT-style (dropbear's own license, not GPL) |
 | iproute2 | 7.2.0 | GPL-2.0 |
 
 `bridge-utils` is deliberately not built at all (`packages/bridge-utils/README.md`),

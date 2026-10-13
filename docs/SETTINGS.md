@@ -101,7 +101,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of that tag | omcid, on SIGHUP | LIVE |
-| `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password: exactly 20 hex digits are 10 bytes, 1 to 10 characters are the text itself (even if they are hex digits), `0x` and 2 to 20 hex digits are those bytes zero-padded; anything else is refused and logged, keeping the old password; empty means none is sent | rcS `gponpw auto`; omcid re-sends it on a re-registration | INTERRUPTS INTERNET |
+| `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password: exactly 20 hex digits are 10 bytes, 1 to 10 characters are the text itself (even if they are hex digits), `0x` and 2 to 20 hex digits are those bytes zero-padded; anything else is refused and logged, keeping the old password; empty means none is sent | the `gponpw` PON step in rcS (`rcs-lib.sh`, `pon_step_gponpw`, skipped when empty); omcid re-sends it on a re-registration | INTERRUPTS INTERNET |
 | `LOID`, `LOID_PASSWD` | LOID, LOID password | answered to CTC-profile OLTs in the LOID authentication entity | omcid, on SIGHUP | INTERRUPTS INTERNET |
 | `LOID_OLD`, `LOID_PASSWD_OLD` | LOID (in force) | the value actually answered when it differs from the one above | omcid, on SIGHUP | INTERRUPTS INTERNET |
 | `OMCI_SW_VER1`, `OMCI_SW_VER2` | Software version, image 0/1 | the version reported for each software image (ME 7 attribute 1, 14 characters) | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
@@ -110,11 +110,11 @@ The UI's reboot confirmation says which slot it comes back on.
 | `OMCI_VENDOR_PRODUCT_CODE` | Vendor product code | ONU2-G attribute 3, decimal | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ONU_HW_VERSION` | ONU hardware version (identity) | the Version in ONU-G (attribute 2, at most 14 printable ASCII characters), the hardware version some OLTs whitelist. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below) | omcid, on SIGHUP, with `omci-identity.on` | INTERRUPTS INTERNET |
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
-| `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | rcS `gponsn auto`; omcid on SIGHUP | INTERRUPTS INTERNET |
+| `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | the `gponsn` PON step in rcS (`rcs-lib.sh`, `pon_step_gponsn`); omcid on SIGHUP | INTERRUPTS INTERNET |
 | `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R` -- kernel messages and the link and provisioning `event=` lines included (docs/TOOLS.md, "Link and provisioning events"); empty means local only (the circular buffer, `logread`). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh syslog`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-syslogd.sh` | SERVICE RESTART |
 | `OMCI_UNKNOWN_ME_OK` | Answer unknown entities with success | `1` answers a Create, Set or Get of a managed entity class omcid has no model for with success instead of "unknown entity" (result 4), the counterpart of the stock `OMCI_FAKE_OK`; anything else, or absent, keeps the error. Default off. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). For an OLT that stalls its provisioning at an "unknown entity" answer; the risk is below | omcid, at start and on SIGHUP | INTERRUPTS INTERNET |
 | `NTP_SERVER` | NTP server | starts `ntpd` against this server; empty means no NTP client runs at all (new versus stock, which has neither an RTC nor an NTP client). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh ntp`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-ntpd.sh` | SERVICE RESTART |
-| `ODI_LASER_UNVERIFIED` | Laser on an unverified laser driver | `1` switches the laser on even when the laser driver chip is not the Semtech GN25L95 this image was validated with; anything else, or absent, keeps the laser off on such a stick and refuses GPON activation (`/proc/odi_gpon` `laser on 0`, the reason in `dmesg`, `odi_board: laser:`). Other boards may need laser set-up this image does not do; a laser that lights outside its timeslots takes down every other ONU on the OLT port. Set it only on an OLT port with no other ONU. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `laser` PON step at boot | REBOOT |
+| `ODI_LASER_UNVERIFIED` | Laser on an unverified laser driver | `1` switches the laser on even when the laser driver chip is not the Semtech GN25L95 this image was validated with (the boot runs the `laser unverified` form of the `laser` PON verb); anything else, or absent, keeps the laser off on such a stick and refuses GPON activation: the `gponact` verb fails (`-EPERM`, so `apply.sh omci` reports a re-registration as `failed`), `/proc/odi_gpon` shows `laser on 0 ldd_id <id byte, or -1> unverified 0`, and the reason is in `dmesg` (`odi_board: laser:`). A forced laser shows `laser on 1 ldd_id <id> unverified 1`. Other boards may need laser set-up this image does not do; a laser that lights outside its timeslots takes down every other ONU on the OLT port. Set it only on an OLT port with no other ONU. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `laser` PON step at boot | REBOOT |
 | `OLT_SW_DOWNLOAD` | OLT software download | what omcid answers when the OLT pushes a software image: `accept` (the default, also when the key is absent, empty or any other value) answers every step with success and discards the image; `reject` answers "not supported", as omcid did before. Nothing is ever written to flash or the U-Boot environment and the stick never reboots, in either mode ("Software download from the OLT" below). Odi-only key, kept in `/etc/config/odi.conf` | omcid, at every Start software download, Activate and Commit | LIVE (the next download) |
 
 Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
@@ -482,11 +482,11 @@ applies to every later image.
 | file | effect | apply |
 |---|---|---|
 | `omci-identity.on` | report the six OLT identity keys (above); the UI toggles it | INTERRUPTS INTERNET (`apply.sh omci`) |
-| `dropbear.off`, `confd.off`, `metricsd.off` | that daemon is not started | REBOOT |
+| `dropbear.off`, `confd.off`, `metricsd.off`, `syslogd.off`, `klogd.off`, `ntpd.off` | that daemon is not started (`/etc/init.d/services stop <name>` writes the flag and kills the process; `start` removes it) | REBOOT |
 | `lan-ip` | the management address, one line; overrides `LAN_IP_ADDR` | LIVE (`apply.sh network`) |
 | `pon-steps` | development: a PON step list that replaces the built-in one (`docs/BOOT.md`); a wrong list means no PON | REBOOT |
 | `sds.off` | skip the host SerDes check and fix in `network.sh` | REBOOT |
-| `optics.off` | skip the optics setup: **the laser stays off, no service** | REBOOT |
+| `optics.off` | skip the `laser` PON step (the I2C steps still run): **the laser stays off, no service** | REBOOT |
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |
 | `breadcrumbs.on` | development: boot crumbs, `trial-diag.txt` and a heartbeat, on flash | REBOOT |
 | `confirm-arp` | development only: confirm the boot to the watchdog only after an ARP reply from the `.2` of the `br0` subnet, so an unreachable trial reverts by itself; **a stick whose host is not on `.2` then resets every 120 s** | REBOOT |
@@ -593,11 +593,13 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
   calling shell's own `write(2)`, not a forked command, so `timeout` has
   nothing to wrap unless the write runs inside a process of its own.
   `write_proc_bounded`/`read_proc_bounded` (`scripts/rcs-lib.sh`, sourced by
-  `rcS`, `rcS.pon` and `apply.sh`) do exactly that: `timeout
+  `rcS`, `rcS.pon` and `omci-respawn-reprovision.sh`) do exactly that: `timeout
   $PROC_WRITE_TIMEOUT_S sh -c '...'`, default 5 s. Used by every PON step
   and the `switch_init` verb (`rcs-lib.sh`), the `odi_wdt` register write
-  (`rcS`), and `gpondeact`/`gponpw`/`gponact` (`apply.sh`) -- a handful of
-  calls each, off the tightest part of the boot or off it altogether.
+  (`rcS`), and the `gpondeact`/`gponpw`/`gponact` writes of the respawn
+  re-provisioning (`omci-respawn-reprovision.sh`, `omci_reactivate()`) -- a
+  handful of calls each, off the tightest part of the boot or off it
+  altogether. (`apply.sh omci` writes none of them: omcid does, on SIGHUP.)
 - **A documented exception, by cost rather than by risk**: `rcS`'s switch
   SDK-init loop (23 verbs, every boot, no exception) deliberately still
   uses a bare `echo`/`cat` -- `write_proc_bounded` turns a zero-fork shell

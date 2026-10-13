@@ -77,6 +77,9 @@ also covered by `gh attestation verify sbom.cdx.json -R AndreZiviani/odi-oss`.
 - refuses to write the slot it is currently running from, cross-checked
   against `/proc/cmdline` and `sw_active`, and refuses outright rather than
   guessing if it cannot tell;
+- names up front any tool it needs that the running image lacks (`tar`,
+  `sed`, `cksum`, `md5sum`, `cmp`; it uses no `cut`, which some stock
+  firmwares do not have), before it touches anything;
 - verifies both members (kernel and rootfs) and checks they fit their
   partitions **before** erasing anything, so a bad tarball never leaves you
   with an erased partition and nothing to put in it;
@@ -98,6 +101,15 @@ Clean up afterward:
 This boots the slot **exactly once**, with the hardware watchdog armed.
 U-Boot rewrites `sw_tryactive` back to "don't retry" and saves *before*
 handing over, so the trial cannot loop.
+
+**Check the laser on the trial.** The image switches the laser on only when
+the laser driver chip reads back as the Semtech GN25L95 (id 0x6a) it is
+tested with. On a stick with another laser driver it stays off and GPON
+activation is refused, so the ONU never leaves O1 and the trial looks like a
+dead line: `dmesg | grep 'odi_board: laser'` says which, and
+`grep '^laser' /proc/odi_gpon` shows `laser on 0 ldd_id <id> unverified 0`.
+`flash set ODI_LASER_UNVERIFIED 1` and a reboot override it (`docs/SETTINGS.md`);
+do that only on a stick you know. Check this before you commit.
 
 **What this catches, and what it does not.** A kernel that panics, hangs,
 or never mounts a root filesystem stops kicking the watchdog, and the board

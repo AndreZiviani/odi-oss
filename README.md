@@ -65,15 +65,15 @@ the same hardware.
 | area | stock (OEM) firmware | this firmware |
 |---|---|---|
 | source | closed | fully open: mainline Linux + our own drivers and userland, all built from source, no proprietary code shipped or linked |
-| kernel | Linux 2.6.30 | Linux 6.18.53 (current LTS), carried as 19 changed lines in 6 mainline files plus our own overlay, so the next LTS port is cheap |
+| kernel | Linux 2.6.30 | Linux 6.18.56 (current LTS), carried as 19 changed lines in 6 mainline files plus our own overlay, so the next LTS port is cheap |
 | switch / GPON MAC driver | closed | our own GPL driver, an independent implementation, built straight into the kernel |
 | fibre loss (LOS/LOF) | leaves O5 on a loss and ranges again when the light is back (seen during a fibre swap) | the same, by G.984.3 Table 10-1: a loss of signal or of framing in O5 enters O6 and, with no POPUP within TO2 (100 ms), O1, giving up the ONU-ID, the Alloc-IDs and the OMCC port; the light back takes it to O2 and the OLT ranges it again. The line is sampled every 100 ms as well as on interrupts, so a pulled fibre is seen with no downstream traffic at all. v1.2.1 and earlier stayed in O5 through a fibre pull while the OLT deregistered them, until a reboot (ISP2). Host-tested against the register model (`test/odi_gpon_los_test.c`); not yet trialled on hardware |
-| flow control toward the host | the host port negotiates PAUSE with the host, so a stick whose upstream stops draining sends a continuous stream of XOFF frames: an Intel 10G NIC behind it received about 5.9 million, stalled its transmit queue and reset itself in a loop | the host port never sends PAUSE (its transmit side forced off, receive left negotiated): when the upstream cannot drain, the switch drops at its own buffers, as an ONU should, and the host link stays up. Kernel parameter `odi_switch.host_pause` restores the stock behaviour, live or at boot ([`docs/SWITCH.md`](docs/SWITCH.md), "Host port PAUSE"). Host-tested against the register model (`test/odi_host_pause_test.c`); not yet trialled on hardware |
+| flow control toward the host | the host port negotiates PAUSE with the host, so a stick whose upstream stops draining sends a continuous stream of XOFF frames: an Intel 10G NIC behind it received about 5.9 million, stalled its transmit queue and reset itself in a loop | the host port never sends PAUSE (its transmit side forced off, receive left negotiated): when the upstream cannot drain, the switch drops at its own buffers, as an ONU should, and the host link stays up. Kernel parameter `odi_switch.host_pause` restores the stock behaviour, live or at boot ([`docs/SWITCH.md`](docs/SWITCH.md), "Host port PAUSE"). Host-tested against the register model (`test/odi_host_pause_test.c`) and verified on a stick: no PAUSE toward the host through a fibre pull |
 | GPON/OMCI daemon | closed | our own `omcid`, with `omcli`/`omcicli`, `omciprobe` and `omcicap` tooling around it |
 | switch/optics CLI (`diag`) | closed; some commands crash or hang the CLI | our own CLI over our kernel's interfaces: optics, GPON state, alarms and flows, port MIB counters, the MAC table, register access; batches commands and always exits cleanly; the exporter's commands are byte-compatible with the stock CLI |
 | optics (DDM) readout | closed | our own SFF-8472 reader, exposed through `diag`: temperature, voltage, bias current, tx/rx power, plus alarm/warning flags and optical LOS status (`pon get transceiver alarm-status`); the same readings answer an OLT's optical test of the ANI-G over OMCI; the module's own I2C devices (A0h, A2h and the laser driver's pages) readable with `i2cget`/`i2cdump` on `/dev/i2c-0`, writes limited to the page select |
 | VLAN filtering (class 84) | users report multi-VLAN lines losing all but one VLAN (Anime4000/RTL960x issues #89, #447) | every entry of the VLAN filter list gets its rule (up to 12), and the forward operation is read (G.988 table 9.3.11-1): forward all, untagged only, tagged only, positive filtering by VID, priority or both, untagged bridged or discarded; the negative and MAC-address filtering codes, which a bridge rule cannot express, are built as the mandatory 0x10 and logged (`event=vlan_fwdop`); every code checked under qemu (`make test-omci`) |
-| VLAN handling | manual tag (`VLAN_MANU_MODE` 1) or none | the same two, documented as a choice: "stick tags" (the manual VID) or "router tags" (transparent, `VLAN_MANU_MODE` 0): no tag added or removed, every VLAN the OLT carries passes to the router, internet, IPTV and voice on one port; both line shapes (with and without class 84) checked under qemu (`docs/SETTINGS.md`, "VLAN handling") |
+| VLAN handling | manual tag (`VLAN_MANU_MODE` 1), or with `VLAN_CFG_TYPE` other than 1 the VLAN the OLT asks for in class 171 | the same, documented as a choice: "stick tags" (the manual VID), "router tags" (transparent, `VLAN_MANU_MODE` 0: no tag added or removed, every VLAN the OLT carries passes to the router, internet, IPTV and voice on one port), or, since v1.4.0 with `VLAN_CFG_TYPE` other than 1, the OLT's own class 171 rule when it is a single "untagged frames get VLAN X" rule (any other shape stays transparent and is logged once); both line shapes (with and without class 84) checked under qemu (`docs/SETTINGS.md`, "VLAN handling") |
 | applying a changed setting | closed (earlier builds of this firmware restarted omcid beside the one init respawns) | `apply.sh omci` sends the running omcid SIGHUP and it rereads the store itself: a changed VLAN setting rebuilds the bridge connections in place with the ONU still in O5 (rules byte for byte a fresh daemon's, checked against both ISP sessions under qemu); a changed identity key deactivates and re-registers the ONU inside the same process. Nothing starts a second omcid, which on hardware once cycled the ONU through O1 to O3 (`docs/SETTINGS.md`, "How apply works") |
 | multicast | closed IGMP handling | IGMP snooping is off (not used: one UNI port leaves little to prune). `igmpd` ships but is not started (see [`docs/TOOLS.md`](docs/TOOLS.md)) |
 | system log | none: no syslogd, nowhere central to read a log from | `syslogd`/`klogd`, a 64 KB circular buffer `logread` reads, optional remote forwarding (`SYSLOG_SERVER`); one greppable `event=` line per link or provisioning event -- every ONU state change with the state it left, how long it was there and whether the OLT, a timer, the fibre or this side caused it; OLT MIB resets, uploads, provisioning bursts (N creates/sets), reboot and software-download requests; every managed entity class or message type the OLT sends that omcid does not model, once per boot and counted in `/var/log/omcid-unknown.txt` (the ISP1 OLT sends three); omcid resuming or re-registering -- so the log says who started an outage (`docs/TOOLS.md`, "Link and provisioning events") |
@@ -85,7 +85,7 @@ the same hardware.
 | SSH | an old dropbear needing legacy algorithms re-enabled on the client | a current dropbear, ed25519 host key, `scp` in both directions |
 | login security | telnet enabled by default, and a fixed, well-known default login (`admin`/`admin`) | no telnet; ssh only. A release image ships with root locked (keys only, no password); a source build defaults to a password generated per build and stored as a SHA-512 crypt hash. Either way, the web UI's own `admin`/`admin` default must still be changed by the operator |
 | memory | about 1.1 MB free after a cache drop, with the stock services running | about 15 MB available: our drivers load the switch and GPON register tables from firmware files, apply them and free them |
-| kernel size | fits its partition with little to spare | about 63 KB spare (1,295,847 of 1,359,872 bytes), after cutting kernel features nothing on the stick uses and the driver bring-up scaffolding |
+| kernel size | fits its partition with little to spare | about 60 KB spare (1,299,459 of 1,359,872 bytes, the 2026-10-13 build), after cutting kernel features nothing on the stick uses and the driver bring-up scaffolding |
 | reboot | not measured | `reboot` resets at once through a watchdog restart handler; back in the stock image about 73 s later |
 | toolchain | a decade-old vendor cross-compiler | our own gcc / binutils / uClibc-ng, built from source, targeting the CPU's actual instruction set; published as prebuilt container images pinned by digest, so a build pulls the toolchain instead of compiling it for an hour: a clean image build takes about 3.5 minutes on a native 8-core host (building the toolchain from source is still one command) |
 | boot safety | undocumented | one-shot trial boot (`sw_tryactive`) plus a watchdog the kernel alone owns and enforces (`docs/SETTINGS.md`, "Watchdog rules"): it self-reverts a boot whose userland never confirms, a registered daemon (omcid) that stops pinging its own deadline, `MemAvailable` held below a floor, or a CPU-port NIC that takes no frame for 30 s while the switch keeps offering them (the stick unreachable with everything else healthy) -- boot confirmation does not depend on the network. Every rule is host-tested against a fake clock (`test/odi_wdt_test.c`); the reset itself needs hardware to verify, not yet run on this redesign |
@@ -133,6 +133,24 @@ Identifiers in the screenshots are placeholders. More pages in the
 it with `nv commit <slot>` only once you have checked it yourself. Full procedure, including how to read a boot you
 could not otherwise see: [`docs/FLASHING.md`](docs/FLASHING.md).
 
+**Updating from an older release?** Two things changed in v1.4.0 that you
+can see on the line:
+
+- **The laser stays off unless the laser driver chip is the one this image
+  is tested with** (the Semtech GN25L95, id 0x6a, of the DFP-34X-2C2). On a
+  stick with another laser driver, or none that answers, the image does not
+  switch the laser on and refuses GPON activation, so the ONU stays dark
+  and never registers. `dmesg | grep 'odi_board: laser'` says why, and
+  `/proc/odi_gpon` shows `laser on 0 ldd_id <id> unverified 0`. If you know
+  your stick's laser is fine (it ran an earlier release without trouble),
+  `flash set ODI_LASER_UNVERIFIED 1` and a reboot switch it on anyway
+  ([`docs/SETTINGS.md`](docs/SETTINGS.md), which says what a laser lit
+  outside its timeslots does to the other ONUs on the port). Check this on
+  the trial boot, before you commit.
+- With `VLAN_CFG_TYPE` 0, the stick now applies the VLAN the OLT asks for
+  (class 171) as the stock firmware does. On such a line, remove the VLAN
+  from the router.
+
 **First login**, once the trial image is up:
 
 - **Release image, or a source build with `ROOT_PW=locked`**: root has no
@@ -154,9 +172,12 @@ every port and how to move files on and off the stick:
 
 ## Status and limitations
 
-**Tested on real sticks.** The current release,
-`odi-oss-260925-618z1` ([`CHANGELOG.md`](CHANGELOG.md)), runs on two
-DFP-34X-2C2 sticks on two different ISPs' GPON networks:
+**Tested on real sticks.** The current release is v1.4.0
+([`CHANGELOG.md`](CHANGELOG.md)). The firmware runs on two DFP-34X-2C2
+sticks on two different ISPs' GPON networks, and both now run it as their
+committed image, with the stock firmware kept in the other slot. The
+figures below were measured on an earlier release,
+`odi-oss-260925-618z1`:
 
 - **ISP1**: 15 of 15 consecutive trial boots reached a confirmed userland
   (75-81 s from `reboot`), then a 3-hour soak with a sample every 10
@@ -166,8 +187,8 @@ DFP-34X-2C2 sticks on two different ISPs' GPON networks:
 - **ISP2**: carrying a household's Internet link (PPPoE through the stick,
   about 52 MB/s on a 20 MB download, the same as the image before it).
 
-Both run it as a one-shot trial over the stock firmware, which stays the
-committed slot on each; neither has had this image committed.
+Each stick was first run as a one-shot trial over the stock firmware, as
+the safety model above describes, and committed only after that.
 
 This is new, actively developed firmware. Before relying on it:
 
