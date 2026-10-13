@@ -71,6 +71,7 @@
 #include "odi_gpon_drv.h"
 #include "odi_gpon_hw.h"
 #include "odi_gpon_init.h"
+#include "odi_gpon_pw.h"
 #include "odi_replay_blob.h"
 #include "odi_switch_reg.h"
 
@@ -665,9 +666,9 @@ static irqreturn_t odi_gpon_irq(int irq, void *dev_id)
  * /proc/odi_init dispatch hands this file the raw
  * verb argument text unmodified, the same text rcS already trims. The
  * formats: gponsn takes a 12-character argument (4 literal ASCII vendor-ID
- * bytes + 8 hex characters for the 4 specific bytes); gponpw takes either
- * 20 hex characters or 1-10 literal ASCII characters, or no argument at all
- * (this board's own config never captured a gponpw argument).
+ * bytes + 8 hex characters for the 4 specific bytes); gponpw takes the stored
+ * password text, parsed by odi_gpon_pw.c (hex of any even length up to 20,
+ * or 1-10 literal characters, zero-padded), or no argument at all.
  */
 static int odi_gpon_parse_sn(const char *arg, uint8_t sn[8])
 {
@@ -677,23 +678,6 @@ static int odi_gpon_parse_sn(const char *arg, uint8_t sn[8])
 	if (hex2bin(&sn[4U], &arg[4U], 4U))
 		return -EINVAL;
 	return 0;
-}
-
-static int odi_gpon_parse_pw(const char *arg, uint8_t pw[10])
-{
-	size_t len;
-
-	memset(pw, 0, 10U);
-	if (!arg)
-		return 0;
-	len = strlen(arg);
-	if (len == 20U)
-		return hex2bin(pw, arg, 10U) ? -EINVAL : 0;
-	if (len >= 1U && len <= 10U) {
-		memcpy(pw, arg, len);
-		return 0;
-	}
-	return -EINVAL;
 }
 
 /* ---- odi_gpon_drv.h-facing entry points -------------------------------- */
@@ -814,6 +798,9 @@ int odi_gpon_verb(const char *verb, const char *arg)
 		rc = odi_gpon_parse_pw(arg, pw);
 		if (rc == 0)
 			odi_gpon_fsm_set_password(&odi_gpon_fsm_inst, pw);
+		else	/* the length only: the text is the secret */
+			pr_warn("odi_gpon: gponpw: %zu characters is not a usable PLOAM password (hex up to 20 digits, or text up to 10), keeping the old one\n",
+				arg ? strlen(arg) : (size_t)0);
 	} else if (!strcmp(verb, "gponact") && !laser.laser_on) {
 		/* The laser verb kept the laser off (odi_board.h): an
 		 * unknown laser driver may light outside the ONU's timeslots

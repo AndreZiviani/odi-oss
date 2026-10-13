@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- kernel: the `gponpw` verb reads the stored PLOAM password in every form
+  the store can hold. It accepted exactly 20 characters as hex and 1 to 10
+  as text, so a 5 character password stored as hex (10 digits) went out as
+  ten literal digits, and one of 6 to 9 characters (12 to 18 digits) was
+  refused without a word while activation went on with no password. Now an
+  even run of 2 to 20 hex digits (with or without a `0x` prefix) is those
+  bytes, anything else up to 10 characters is text, both zero-padded to the
+  10 bytes sent, and an unusable value is logged (its length, never the
+  text) and leaves the old password in place. A text password of 2 to 10
+  characters that is all hex digits ("1234") is read as hex, as the store
+  holds it. `GPON_PLOAM_FORMAT` is still read by nothing: what it selects
+  is not known. The parser moved to `odi_gpon_pw.c`, with
+  `test/odi_gpon_pw_test.sh` covering every length from 1 to 20 in both
+  forms.
+
 - fwu.sh: no longer calls `cut`. The HSGQ M110 stock firmware has no `cut`
   applet, so the size check of the first flash from it came out empty and a
   user had to patch the script. The cksum and md5sum fields are now split
