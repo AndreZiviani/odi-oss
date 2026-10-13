@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * odi_gpon_eqd_test.c -- the USF_EQ_DELAY value odi_gpon_hw.c writes, against
+ * odi_gpon_eqd_test.c -- the USF_EQ_DELAY and burst overhead values odi_gpon_hw.c writes, against
  * test/odi_switch_mock.h: the split of the equalization delay into FRAMES and
  * INFRAME (the DELAY_HI term goes in before the division), the pre-assigned
  * delay of Upstream_Overhead (G.984.3 clause 9.2.3.1), and a Ranging_Time
@@ -125,6 +125,40 @@ static void test_preassigned_delay(void)
 	      "pre-assigned 600: INFRAME");
 }
 
+static uint32_t boh_length(void)
+{
+	return ODI_GPON_USF_BURST_HDR_SETUP_LENGTH_GET(
+		odi_mock.regs[odi_mock_slot(ODI_GPON_USF_BURST_HDR_SETUP_OFF)]);
+}
+
+/* USF_BURST_HDR_SETUP.LENGTH = the fixed guard/delimiter bytes plus the
+ * Extended_Burst_Length count. Guard 32 bits, no type 1/2 preamble: 7
+ * fixed bytes. Vero's pre-ranged count 50 gives the captured 0x39; counts
+ * past the old 63-byte clamp must reach the 8-bit field, up to 252.
+ */
+static void test_burst_overhead_length(void)
+{
+	static const uint8_t delim[3] = { 0xab, 0x59, 0x83 };
+
+	setup();
+	odi_gpon_hw_ops()->set_upstream_overhead(NULL, 32U, 0U, 0U, 0xaaU, delim, 0U, 0U);
+	CHECK(boh_length() == 0x0cU, "before Extended_Burst_Length: 0x0c");
+	odi_gpon_hw_ext_burst_length(50U, 18U);
+	CHECK(boh_length() == 0x39U, "pre-ranged 50: the captured 0x39");
+	odi_gpon_hw_ext_burst_length(100U, 18U);
+	CHECK(boh_length() == 107U, "pre-ranged 100: 107, no longer cut to 63");
+	odi_gpon_hw_ext_burst_length(250U, 18U);
+	CHECK(boh_length() == 252U, "pre-ranged 250: cut at 252");
+
+	/* Ranged: the ranged count, kept for after O5, must not wrap past 255. */
+	odi_gpon_hw_eqd_rewrite(227172U);
+	odi_gpon_hw.eqd_applied = 1;
+	odi_gpon_hw_ext_burst_length(250U, 250U);
+	CHECK(boh_length() == 252U, "ranged 250: cut at 252, not wrapped to 1");
+	odi_gpon_hw_ext_burst_length(41U, 18U);
+	CHECK(boh_length() == 25U, "ranged 18: 25 = 0x19, as captured");
+}
+
 /* A Ranging_Time reaches odi_gpon_isr_poll() through the PLOAM RX FIFO. */
 static void feed_ranging(struct odi_gpon_fsm *fsm, uint8_t onu_id, uint8_t protection, uint32_t eqd)
 {
@@ -180,6 +214,7 @@ int main(void)
 	test_split();
 	test_preassigned_delay();
 	test_protection_path_ignored();
+	test_burst_overhead_length();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- kernel: an OLT that asks for a burst preamble longer than 56 bytes
+  (Extended_Burst_Length) gets it. The burst overhead length was cut at 63
+  bytes, though its field is 8 bits, and a ranged length past 255 wrapped
+  to a few bytes; it is now cut at 252, the largest the stock driver
+  accepts. A cut preamble can keep the OLT from locking on the bursts,
+  so the stick never ranges. Neither test line asks for that much (57 is
+  the most seen); host-tested with long counts.
+
 - kernel: the boot log names what the GPON tables held before the clean:
   the first eight GEM ports and Alloc-IDs found valid, after the counts
   (`GPON tables before the clean held GEM ports ...; Alloc-IDs ...`).
