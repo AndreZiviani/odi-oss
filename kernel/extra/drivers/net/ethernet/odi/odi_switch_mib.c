@@ -100,6 +100,36 @@ static const struct odi_sw_mib_map odi_sw_mib_map[] = {
 	{ 67, ODI_SW_MIB_OAM, 1 },	/* inOamPduPkts */
 };
 
+/* A wide counter at addr: low word at addr, high word at addr + 4.
+ * Nothing shows the hardware latching the high word when the low one is
+ * read, so a low-then-high read across the moment the low word wraps
+ * pairs the new high word with the old low one, 4 GiB too many
+ * (ifInOctets wraps about every 34 s at line rate). High, low, high: two
+ * equal highs bracket the low read, and the pair is consistent; the
+ * second high is the one kept, which is also right if the hardware does
+ * latch on the low read. A change means the low word wrapped in between:
+ * read again, ODI_SW_MIB_WIDE_TRIES times at most. If every try saw a
+ * wrap, the top bit of the low word says which side of it the low read
+ * fell (set: before, with the first high; clear: after, with the
+ * second): three reads a few bus cycles apart cannot move it by 2^31.
+ */
+#define ODI_SW_MIB_WIDE_TRIES	3U
+
+static uint64_t odi_sw_mib_wide_read(uint32_t addr)
+{
+	uint32_t hi = 0, lo = 0, hi2 = 0;
+	unsigned int i;
+
+	for (i = 0; i < ODI_SW_MIB_WIDE_TRIES; i++) {
+		hi = odi_reg_read(addr + 4U);
+		lo = odi_reg_read(addr);
+		hi2 = odi_reg_read(addr + 4U);
+		if (hi == hi2)
+			return ((uint64_t)hi2 << 32) | lo;
+	}
+	return ((uint64_t)((lo & 0x80000000U) ? hi : hi2) << 32) | lo;
+}
+
 int odi_sw_mib_get(uint32_t port, uint32_t counter, uint64_t *value)
 {
 	unsigned int i;
@@ -124,14 +154,10 @@ int odi_sw_mib_get(uint32_t port, uint32_t counter, uint64_t *value)
 			addr = ODI_SW_PORT_OAM_COUNTERS(port, row);
 			break;
 		}
-		if (m->row & ODI_SW_MIB_WIDE) {
-			uint32_t lo = odi_reg_read(addr);
-			uint32_t hi = odi_reg_read(addr + 4U);
-
-			*value = ((uint64_t)hi << 32) | lo;
-		} else {
+		if (m->row & ODI_SW_MIB_WIDE)
+			*value = odi_sw_mib_wide_read(addr);
+		else
 			*value = odi_reg_read(addr);
-		}
 		return 0;
 	}
 	return -1;

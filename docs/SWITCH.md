@@ -464,7 +464,13 @@ stock diag, from the `PORT_TX_COUNTERS`, `PORT_RX_COUNTERS` and
 ifOutOctets, are two consecutive words, the low half at the lower
 address: a live ISP1 counter that had not yet passed 32 bits read back
 nonzero high and zero low with the halves the other way round, and
-`test/odi_reg_test.c` pins the order. Left unmapped, and refused: the
+`test/odi_reg_test.c` pins the order. The two words are read high, low,
+high, and again (three tries at most) when the two highs differ: nothing
+shows the hardware latching one half when the other is read, and a
+low-then-high read across a wrap of the low word, about every 34 s at
+line rate for the octet counters, came back 4 GiB too high. Should all
+three tries see a wrap, the top bit of the low word tells which high it
+goes with. Left unmapped, and refused: the
 stock duplicates (a direction-specific name such as etherStatsTx... next
 to a direction-less etherStats... that no register tells apart:
 etherStatsOctets, the broadcast and multicast counts, the undersize and
