@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- fwu.sh: no longer calls `cut`. The HSGQ M110 stock firmware has no `cut`
+  applet, so the size check of the first flash from it came out empty and a
+  user had to patch the script. The cksum and md5sum fields are now split
+  with parameter expansion, an unreadable size is a refusal instead of an
+  empty number, and the tools left (tar, sed, cksum, md5sum, cmp) are checked
+  up front and named before anything is touched.
+  `test/fwu_minimal_path_test.sh` runs the script through both member checks
+  with only those five tools on PATH; `cut` is off `image/stock-commands.txt`.
+
 - kernel: the 64-bit port counters (ifInOctets and ifOutOctets, and so
   the exporter's octet rates) no longer jump by 4 GiB once in a while.
   Their two 32-bit halves were read low then high with nothing holding
