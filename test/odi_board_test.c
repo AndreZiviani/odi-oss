@@ -31,6 +31,33 @@
 #include "odi_replay_fw_host.h"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_sdkinit.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_board_data.c"
+#include <errno.h>
+
+/* The laser driver behind A2h, as odi_board_optics() sees it: a page
+ * select and the id byte at page 2 0xa0 (fake_ldd_id; -1 = no answer).
+ */
+static int fake_ldd_id = 0x6a;
+static uint8_t fake_a2_page;
+static int fake_page_writes;
+int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n)
+{
+	(void)sel;
+	if (n != 1 || fake_ldd_id < 0)
+		return -ENXIO;
+	*out = addr == 0x7fU ? fake_a2_page :
+	       (fake_a2_page == 2U && addr == 0xa0U ? (uint8_t)fake_ldd_id : 0U);
+	return 0;
+}
+int odi_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
+{
+	(void)sel;
+	if (addr != 0x7fU)
+		return -EPERM;
+	fake_a2_page = val;
+	fake_page_writes++;
+	return 0;
+}
+
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_board.c"
 
 static int failures;
@@ -92,13 +119,55 @@ static void test_soc_addresses_allowlisted(void)
 /* The optics verb: PIN_GPIO_SELECT, then GPIO 13 low, level before
  * direction, every other GPIO bit left as it was.
  */
-static void test_optics(void)
+static void optics_setup(int ldd_id, uint8_t page)
 {
 	odi_mock_reset();
 	odi_soc_mock_reset();
 	odi_soc_mock.regs[SOC_GPIO_DATA / 4] = 0x00002001U;
 	odi_soc_mock.regs[SOC_GPIO_DIR / 4] = 0x00000004U;
-	CHECK(odi_board_optics() == 0, "optics returns 0");
+	fake_ldd_id = ldd_id;
+	fake_a2_page = page;
+	fake_page_writes = 0;
+}
+
+/* Any laser driver but the GN25L95, or none answering: the I2C pins are
+ * routed (the probe needs them), GPIO 13 is left alone, the laser stays
+ * off and GPON activation is refused (odi_gpon.c reads laser_on).
+ */
+static void test_optics_unknown_laser_driver(void)
+{
+	struct odi_board_laser l;
+
+	optics_setup(0x55, 0U);
+	CHECK(odi_board_optics(NULL) == -ENODEV, "unknown laser driver: -ENODEV");
+	CHECK(odi_mock.log_n == 1 && odi_mock.log[0].addr == 0x48U,
+	      "unknown laser driver: only PIN_GPIO_SELECT is written, GPIO 13 untouched");
+	CHECK(odi_soc_mock.regs[SOC_GPIO_DIR / 4] == 0x00000004U, "unknown laser driver: GPIO 13 still an input");
+	odi_board_laser_get(&l);
+	CHECK(!l.laser_on && l.ldd_id == 0x55 && !l.unverified, "unknown laser driver: laser off, id recorded");
+	CHECK(fake_a2_page == 0U, "unknown laser driver: page select put back");
+
+	optics_setup(-1, 0U);
+	CHECK(odi_board_optics(NULL) == -ENODEV, "no answer: -ENODEV");
+	odi_board_laser_get(&l);
+	CHECK(!l.laser_on && l.ldd_id == -1, "no answer: laser off, id -1");
+
+	optics_setup(0x55, 0U);
+	CHECK(odi_board_optics("unverified") == 0, "unverified: forced on");
+	odi_board_laser_get(&l);
+	CHECK(l.laser_on && l.unverified && l.ldd_id == 0x55, "unverified: laser on, flagged");
+	CHECK(odi_soc_mock.regs[SOC_GPIO_DIR / 4] == 0x00002004U, "unverified: GPIO 13 an output");
+}
+
+static void test_optics(void)
+{
+	struct odi_board_laser l;
+
+	optics_setup(0x6a, 2U);
+	CHECK(odi_board_optics(NULL) == 0, "optics returns 0");
+	odi_board_laser_get(&l);
+	CHECK(l.laser_on && l.ldd_id == 0x6a, "GN25L95: laser on");
+	CHECK(fake_a2_page == 2U && fake_page_writes == 1, "page 2 already selected: left as found, no restore write");
 	CHECK(odi_mock.log_n == 3, "optics makes three writes");
 	CHECK(odi_mock.log[0].kind == 'W' && odi_mock.log[0].addr == 0x48U &&
 	      odi_mock.log[0].val == 0x08082001U, "first PIN_GPIO_SELECT = 0x08082001");
@@ -113,6 +182,7 @@ static int run_unit_checks(void)
 	test_replay_order_and_kinds();
 	test_soc_addresses_allowlisted();
 	test_optics();
+	test_optics_unknown_laser_driver();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

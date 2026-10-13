@@ -46,9 +46,11 @@ int odi_gpon_verb(const char *verb, const char *arg)
 }
 
 static int stub_optics_calls;
+static const char *stub_optics_last_arg;
 
-int odi_board_optics(void)
+int odi_board_optics(const char *arg)
 {
+	stub_optics_last_arg = arg;
 	stub_optics_calls++;
 	return 0;
 }
@@ -94,6 +96,9 @@ int main(void)
 	stub_optics_calls = 0;
 	rc = odi_init_apply("optics", NULL);
 	CHECK(rc == 0 && stub_optics_calls == 1, "optics calls odi_board_optics() once");
+	rc = odi_init_apply("optics", "unverified");
+	CHECK(rc == 0 && stub_optics_calls == 2 && stub_optics_last_arg &&
+	      !strcmp(stub_optics_last_arg, "unverified"), "optics passes its argument on");
 	CHECK(stub_sdkinit_calls == 0 && stub_gpon_calls == 0, "optics calls neither replay");
 
 	/* Every PON-step verb routes to odi_gpon_verb(), arg passed through. */

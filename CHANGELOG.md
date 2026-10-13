@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- kernel, rootfs: the laser is switched on only on the laser driver this
+  image was validated with. Before lighting it, the `optics` step reads
+  the laser driver chip's id over I2C (A2h page 2, byte 0xa0, the same
+  check the stock firmware makes); a Semtech GN25L95 (0x6a), the chip in
+  the DFP-34X-2C2 sticks this image is tested on, gets the laser as
+  before. Any other answer, or none, leaves the laser off, and GPON
+  activation is refused, so the GPON MAC never transmits either. Another
+  board may need laser set-up this image does not do, or wire the laser
+  differently, and a laser that lights outside its timeslots takes down
+  every other ONU on the OLT port: a user running v1.2.1 on another
+  stick saw exactly that. `/proc/odi_gpon` gains `laser on <0|1> ldd_id
+  <id> unverified <0|1>`, and `dmesg` (`odi_board: optics:`) says why.
+  `ODI_LASER_UNVERIFIED=1` (`flash set ODI_LASER_UNVERIFIED 1`, an odi
+  key in `/etc/config/odi.conf`) switches it on anyway, for a test on
+  an OLT port with no other ONU (docs/SETTINGS.md).
+
 - kernel: an upstream PLOAM reply now waits for room in the queue instead
   of being pushed blind. Every reply (Acknowledge, Encryption_Key,
   Password, REI) goes into the urgent upstream queue, and the driver never

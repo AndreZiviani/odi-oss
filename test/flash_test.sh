@@ -161,6 +161,8 @@ t "the svc-*.sh read of it is empty"        "" "$(sh $F get SYSLOG_SERVER 2>/dev
 t "and the other key survives"              "NTP_SERVER=pool.ntp.org:123" "$(sh $F get NTP_SERVER)"
 t "OLT_SW_DOWNLOAD is an odi key too"       "OLT_SW_DOWNLOAD=reject" "$(sh $F set OLT_SW_DOWNLOAD reject)"
 t "and reads back from odi.conf, where omcid reads it" "1" "$(grep -c '^OLT_SW_DOWNLOAD=reject$' "$ODI_CONF")"
+t "ODI_LASER_UNVERIFIED is an odi key too" "ODI_LASER_UNVERIFIED=1" "$(sh $F set ODI_LASER_UNVERIFIED 1)"
+t "in odi.conf, the exact line rcS.pon greps" "1" "$(grep -c '^ODI_LASER_UNVERIFIED=1$' "$ODI_CONF")"
 t "cleared, it reads empty (omcid then accepts)" "OLT_SW_DOWNLOAD=" "$(sh $F set OLT_SW_DOWNLOAD '')"
 t "flash all cs no longer lists the cleared one" "0" "$(sh $F all cs | grep -c 'SYSLOG_SERVER')"
 printf 'garbage line\n=novalue\nSYSLOG_SERVERX=nope\n#SYSLOG_SERVER=no\n' >> "$ODI_CONF"

@@ -22,10 +22,15 @@ fi
 
 if [ -w /proc/odi_init ]; then
 	# The optics first, before any PON step and outside the step list:
-	# PIN_GPIO_SELECT for the module I2C pins and the laser TX enable
-	# (odi_board.h). /etc/config/optics.off leaves the laser off.
+	# PIN_GPIO_SELECT for the module I2C pins, then the laser TX enable,
+	# but only for the laser driver this image was validated with
+	# (odi_board.h); otherwise the laser stays off and gponact is refused.
+	# ODI_LASER_UNVERIFIED=1 in odi.conf forces it on (docs/SETTINGS.md).
+	# /etc/config/optics.off leaves the laser off.
 	if [ -f /etc/config/optics.off ]; then
 		crumb "optics: optics.off, laser left off"
+	elif grep -q '^ODI_LASER_UNVERIFIED=1$' /etc/config/odi.conf 2>/dev/null; then
+		pon_step "optics unverified"
 	else
 		pon_step optics
 	fi
