@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- rootfs: `flash set` and `flash default cs` replace `lastgood.xml` and
+  `lastgood_hs.xml` with a rename inside `/var/config`. They used to build
+  the file in `/var/tmp` and `mv` it over the store, but `/var/tmp` is a
+  tmpfs and `/var/config` jffs2, so that `mv` deleted the store file and
+  then copied the new one in: a power cut or a full partition during a
+  save could lose the configuration or the ONU identity (serial number,
+  MAC). The new file is now copied beside the old one, compared, and
+  renamed over it. Checked on a stick: same content, new inode, nothing
+  left behind.
+
 - kernel: an OLT that asks for a burst preamble longer than 56 bytes
   (Extended_Burst_Length) gets it. The burst overhead length was cut at 63
   bytes, though its field is 8 bits, and a ranged length past 255 wrapped

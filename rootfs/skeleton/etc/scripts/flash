@@ -36,9 +36,10 @@
 # stock key present with an empty value: the key is known, it is only empty.
 # "GET fail." stays for a name that is no key at all.
 #
-# /var/config is jffs2 and read-write. Writes go to a temporary file and are
-# renamed over the target, so a power cut leaves the old file intact rather
-# than a half-written one.
+# /var/config is jffs2 and read-write. Writes are built in a temporary file,
+# copied next to the target and renamed over it, so a power cut leaves the
+# old file intact rather than a half-written one. The temporary directory is
+# a tmpfs: an mv from there is a copy, which removes the target first.
 set -u
 
 CS=${CS:-/var/config/lastgood.xml}
@@ -47,6 +48,20 @@ DEFAULTS=${DEFAULTS:-/etc/config_default.xml}
 TMPDIR_=${TMPDIR_:-/var/tmp}
 ODI_CONF=${ODI_CONF:-/var/config/odi.conf}
 ODI_KEYS="SYSLOG_SERVER NTP_SERVER ONU_HW_VERSION OMCI_UNKNOWN_ME_OK OLT_SW_DOWNLOAD"
+
+# install_over TMP TARGET: puts TMP in place of TARGET in one rename on
+# TARGET's own filesystem. TMP is copied beside TARGET, checked against
+# TMP, then renamed; TMP is removed either way. Returns non-zero, with
+# TARGET untouched, if any step fails.
+install_over() {
+	_new="$2.new.$$"
+	if cp "$1" "$_new" && cmp -s "$1" "$_new" && mv "$_new" "$2"; then
+		rm -f "$1"
+		return 0
+	fi
+	rm -f "$1" "$_new"
+	return 1
+}
 
 usage() {
 	echo "usage: flash all {cs|hs}" >&2
@@ -198,9 +213,8 @@ set)
 		rm -f "$tmp"
 		exit 1
 	fi
-	if ! mv "$tmp" "$target"; then
+	if ! install_over "$tmp" "$target"; then
 		echo "flash: could not install the new $target" >&2
-		rm -f "$tmp"
 		exit 1
 	fi
 	# confd reads this line back and parses up to the = sign. printf, not
@@ -274,9 +288,8 @@ EOF_PAIRS
 		rm -f "$tmp"
 		exit 1
 	fi
-	if ! mv "$tmp" "$CS"; then
+	if ! install_over "$tmp" "$CS"; then
 		echo "flash: could not install the new $CS" >&2
-		rm -f "$tmp"
 		exit 1
 	fi
 	echo "Reset CS to default configuration success."
