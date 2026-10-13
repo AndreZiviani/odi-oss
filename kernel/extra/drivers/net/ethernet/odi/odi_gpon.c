@@ -253,8 +253,9 @@ static struct odi_gpon_ploam_entry odi_gpon_ring[ODI_GPON_PLOAM_RING_LEN];
 static unsigned int odi_gpon_ring_head;
 static unsigned int odi_gpon_ring_count;
 /* Downstream PLOAM types outside odi_gpon_ds_type_known() already logged
- * this boot. Some OLTs send amendment types (0x18) every few seconds; one
- * line per type is enough, odi_gpon_ds_type_count[] keeps the count.
+ * this boot. Some OLTs send the optional G.984.3 annex messages every few
+ * seconds (0x18 Sleep_Allow, Annex E; 0x15 PON-ID, Annex C); one line per
+ * type is enough, odi_gpon_ds_type_count[] keeps the count.
  */
 static DECLARE_BITMAP(odi_gpon_ds_unknown_logged, 256);
 
