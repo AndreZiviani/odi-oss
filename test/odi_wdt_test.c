@@ -160,6 +160,26 @@ static void test_unregistered_client_ping_is_refused(void)
 	CHECK(odi_wdt_client_ping(&st, "omcid", 5) < 0, "a ping from a name nobody registered is refused");
 }
 
+/* `services stop omcid` releases omcid's deadline by registering it with 0
+ * (rootfs/skeleton/etc/init.d/services): the client is then never checked,
+ * and its slot is free for the next registration. */
+static void test_register_with_zero_deadline_releases_the_client(void)
+{
+	struct odi_wdt_deadline_state st;
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1;
+	CHECK(odi_wdt_client_register(&st, "omcid", 60, 10) >= 0, "omcid registers");
+	CHECK(odi_wdt_client_register(&st, "omcid", 0, 20) >= 0, "omcid re-registers with deadline 0");
+	CHECK(!(odi_wdt_deadline_tick(&st, 500, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS),
+	      "a released client is never checked, however long it stays silent");
+	CHECK(odi_wdt_client_ping(&st, "omcid", 501) < 0, "and a ping from it is refused, as from any unknown name");
+	CHECK(odi_wdt_client_register(&st, "omcid", 60, 600) >= 0, "registering it again succeeds");
+	CHECK(odi_wdt_deadline_tick(&st, 661, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS,
+	      "and its deadline counts from that registration");
+}
+
 static void test_registered_but_never_pinged_client_still_resets(void)
 {
 	struct odi_wdt_deadline_state st;
@@ -503,6 +523,7 @@ int main(void)
 	test_userland_confirm_prevents_the_deadline();
 
 	test_unregistered_client_ping_is_refused();
+	test_register_with_zero_deadline_releases_the_client();
 	test_registered_but_never_pinged_client_still_resets();
 	test_client_miss_fires_once_past_its_own_deadline();
 	test_client_ping_pushes_its_own_deadline_out();

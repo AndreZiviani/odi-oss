@@ -7,7 +7,7 @@ IRQ/timer/NOR handling, our own driver directory
 (`kernel/extra/drivers/net/ethernet/odi/`), how the boot command
 line and the watchdog work, and the DRAM ramlog console.
 
-    kernel/618/fetch.sh    fetch and verify linux-6.18.53.tar.xz
+    kernel/618/fetch.sh    fetch and verify the pinned linux-6.18.x tarball (VERSION there)
     kernel/618/mainline/   the pristine tree it extracts (gitignored)
     kernel/618/patches/    our edits to mainline files, applied in order
     kernel/618/debug/      debug-only patches, applied with CRUMBS_CORE=1

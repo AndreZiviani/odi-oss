@@ -95,9 +95,11 @@ extern const struct odi_wdt_cpu_rx_ops *wdt_cpu_rx_ops;
  * at omcid's liveness from /proc). Each client pings its OWN deadline from
  * its OWN main loop; the kernel is the only judge and the only thing that
  * still owns the hardware watchdog. A client is registered (name + deadline)
- * once, normally at boot from rcS; its first ping arms the deadline. Missing
- * an armed deadline stops the kicker, exactly like the boot confirmation
- * above.
+ * once, normally at boot from rcS, and registering arms the deadline,
+ * counted from that moment, so a client that never pings is caught too.
+ * Registering with deadline 0 releases the client (services stop omcid).
+ * Missing an armed deadline stops the kicker, exactly like the boot
+ * confirmation above.
  */
 #define ODI_WDT_MAX_CLIENTS		4U
 #define ODI_WDT_CLIENT_NAME_LEN		16U
@@ -183,7 +185,7 @@ struct odi_wdt_client {
 	char name[ODI_WDT_CLIENT_NAME_LEN];
 	unsigned int deadline_s;	/* 0 = slot unused */
 	unsigned int last_ping_s;
-	int armed;			/* set by the first ping; unarmed clients are never checked */
+	int armed;			/* set at registration (and by every ping) */
 	int reset_signaled;		/* one-shot, same shape as odi_wdt_deadline_state.reset_signaled */
 };
 

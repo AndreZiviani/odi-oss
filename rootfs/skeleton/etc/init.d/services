@@ -18,7 +18,26 @@
 # under that entry (the daemon already, or the placeholder), so init
 # restarts it at once, into the daemon this time. No `kill -HUP 1` and no
 # reboot needed either way.
+#
+# omcid is also a watchdog client (rcS registers it with a 60 s ping
+# deadline, docs/SETTINGS.md "Watchdog rules"): stopping it without
+# releasing that deadline resets the stick a minute later. So `stop omcid`
+# re-registers it with deadline 0, which frees the client (odi_wdt.c
+# client_find skips a zero deadline), and `start omcid` registers it again
+# before killing the placeholder; the deadline counts from that moment and
+# omcid pings within 15 s of starting.
 set -u
+OMCID_DEADLINE_S=${ODI_WDT_OMCID_DEADLINE_S:-60}
+WDT_REGISTER=${WDT_REGISTER:-/proc/odi_wdt/register}
+CONFIG_DIR=${CONFIG_DIR:-/etc/config}
+
+# Writes "omcid <deadline>" to the watchdog, when there is one; bounded,
+# since a /proc write that blocks would hang the prompt.
+wdt_omcid() {
+	[ -w "$WDT_REGISTER" ] || return 0
+	timeout 5 sh -c 'echo "omcid $1" > "$2"' sh "$1" "$WDT_REGISTER" 2>/dev/null ||
+		echo "$0: could not set the omcid watchdog deadline to $1" >&2
+}
 
 usage() {
 	echo "usage: $0 {stop|start} {syslogd|klogd|ntpd|metricsd|confd|dropbear|omcid}" >&2
@@ -64,14 +83,16 @@ comm=$(svc_comm "$svc")
 
 case "$action" in
 stop)
-	mkdir -p /etc/config 2>/dev/null
-	: > "/etc/config/$svc.off" 2>/dev/null ||
-		echo "$0: could not write /etc/config/$svc.off -- config partition mounted?" >&2
+	mkdir -p "$CONFIG_DIR" 2>/dev/null
+	: > "$CONFIG_DIR/$svc.off" 2>/dev/null ||
+		echo "$0: could not write $CONFIG_DIR/$svc.off -- config partition mounted?" >&2
+	[ "$svc" = omcid ] && wdt_omcid 0
 	kill_by_comm "$comm"
 	echo "$svc: stopped ($svc.off written; $0 start $svc, or a reboot without the flag, brings it back)"
 	;;
 start)
-	rm -f "/etc/config/$svc.off" 2>/dev/null
+	rm -f "$CONFIG_DIR/$svc.off" 2>/dev/null
+	[ "$svc" = omcid ] && wdt_omcid "$OMCID_DEADLINE_S"
 	kill_by_comm "$comm"
 	# The placeholder (respawn-off.sh) always execs under that same path
 	# regardless of which .off entry launched it, so this can also kill an

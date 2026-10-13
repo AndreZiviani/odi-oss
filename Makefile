@@ -111,6 +111,7 @@ test-host:
 	bash test/network_addr_test.sh
 	bash test/apply_test.sh
 	bash test/omci_respawn_test.sh
+	bash test/services_off_test.sh
 	bash test/regtrace_decode_test.sh
 	bash test/regtrace_compare_test.sh
 	bash test/regtrace_compare_stream_test.sh
