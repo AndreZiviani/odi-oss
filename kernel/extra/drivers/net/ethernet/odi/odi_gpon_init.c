@@ -164,7 +164,47 @@ static unsigned int odi_gpon_cam_count(const struct odi_gpon_cam *cam, int *row,
 	return n;
 }
 
-/* Reads back every row of the three tables. The caller holds
+/* One multicast filter request, the CAM handshake on DS_MC_FILTER_CTL.
+ * Same returns as odi_gpon_cam_request().
+ */
+static int odi_gpon_mc_request(unsigned int row, uint32_t op, uint32_t *ctl)
+{
+	uint32_t ind;
+
+	ind = ODI_GPON_DS_MC_FILTER_CTL_OP_SET(0, op);
+	ind = ODI_GPON_DS_MC_FILTER_CTL_ROW_SET(ind, row);
+	odi_reg_write(ODI_GPON_DS_MC_FILTER_CTL_OFF, ind);
+	odi_reg_write(ODI_GPON_DS_MC_FILTER_CTL_OFF, ind | ODI_GPON_DS_MC_FILTER_CTL_REQ);
+	return odi_poll_reg(ODI_GPON_DS_MC_FILTER_CTL_OFF, ODI_GPON_DS_MC_FILTER_CTL_DONE,
+			    ODI_GPON_DS_MC_FILTER_CTL_DONE, ODI_SW_TABLE_POLL_DELAY_US,
+			    ODI_SW_TABLE_POLL_US, ctl);
+}
+
+/* Reads every multicast filter row, as odi_gpon_cam_count() does a CAM. */
+static void odi_gpon_mc_count(struct odi_gpon_table_count *c)
+{
+	unsigned int r;
+	uint32_t ctl;
+
+	c->mc_valid = 0;
+	c->mc_row = -1;
+	c->mc_data = 0;
+	for (r = 0; r < ODI_GPON_INIT_MC_ROWS; r++) {
+		if (odi_gpon_mc_request(r, ODI_GPON_CAM_OP_READ, &ctl)) {
+			c->timed_out = 1;
+			break;
+		}
+		if (!(ctl & ODI_GPON_DS_MC_FILTER_CTL_ROW_VALID))
+			continue;
+		if (c->mc_row < 0) {
+			c->mc_row = (int)r;
+			c->mc_data = odi_reg_read(ODI_GPON_DS_MC_FILTER_RDATA_OFF);
+		}
+		c->mc_valid++;
+	}
+}
+
+/* Reads back every row of the four tables. The caller holds
  * odi_switch_dsf_lock.
  */
 static void odi_gpon_tables_count(struct odi_gpon_table_count *c)
@@ -180,10 +220,11 @@ static void odi_gpon_tables_count(struct odi_gpon_table_count *c)
 	for (r = 0; r < ODI_GPON_INIT_GEM_ROWS; r++)
 		if (odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(r)))
 			c->flow_type_set++;
+	odi_gpon_mc_count(c);
 }
 
-/* One clean of the three tables. Returns 0, or -ETIMEDOUT at the first
- * CAM request that never finished. The caller holds odi_switch_dsf_lock.
+/* One clean of the four tables. Returns 0, or -ETIMEDOUT at the first
+ * request that never finished. The caller holds odi_switch_dsf_lock.
  */
 static int odi_gpon_tables_clear(void)
 {
@@ -198,12 +239,34 @@ static int odi_gpon_tables_clear(void)
 	for (r = 0; r < ODI_GPON_INIT_ALLOC_ROWS; r++)
 		if (odi_gpon_cam_request(&odi_gpon_cam_alloc, r, ODI_GPON_CAM_OP_CLEAR, &ctl))
 			return -ETIMEDOUT;
+	for (r = 0; r < ODI_GPON_INIT_MC_ROWS; r++)
+		if (odi_gpon_mc_request(r, ODI_GPON_CAM_OP_CLEAR, &ctl))
+			return -ETIMEDOUT;
 	return 0;
 }
 
 static int odi_gpon_tables_are_clear(const struct odi_gpon_table_count *c)
 {
-	return !c->timed_out && !c->gem_valid && !c->alloc_valid && !c->flow_type_set;
+	return !c->timed_out && !c->gem_valid && !c->alloc_valid && !c->flow_type_set &&
+	       !c->mc_valid;
+}
+
+/* The multicast filter self-test words, read once; nothing here writes
+ * them.
+ */
+static void odi_gpon_mc_bist_read(struct odi_gpon_clean_report *r)
+{
+	const uint32_t fail = ODI_GPON_DS_MC_FILTER_BIST_BIST_FAIL |
+			      ODI_GPON_DS_MC_FILTER_BIST_DRF_BIST_FAIL;
+	unsigned int i;
+
+	r->mc_bist_bad = 0;
+	for (i = 0; i < ODI_GPON_INIT_MC_BIST_WORDS; i++) {
+		r->mc_bist[i] = odi_reg_read(ODI_GPON_DS_MC_FILTER_BIST(i));
+		if ((r->mc_bist[i] & fail) ||
+		    !(r->mc_bist[i] & ODI_GPON_DS_MC_FILTER_BIST_ALL_BIST_DONE))
+			r->mc_bist_bad++;
+	}
 }
 
 int odi_gpon_init_clean_tables(struct odi_gpon_clean_report *r)
@@ -212,6 +275,7 @@ int odi_gpon_init_clean_tables(struct odi_gpon_clean_report *r)
 	int rc = 0;
 
 	memset(r, 0, sizeof(*r));
+	odi_gpon_mc_bist_read(r);
 	spin_lock_irqsave(&odi_switch_dsf_lock, flags);
 	odi_gpon_tables_count(&r->before);
 	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
@@ -227,12 +291,13 @@ int odi_gpon_init_clean_tables(struct odi_gpon_clean_report *r)
 			rc = -EIO;
 		if (rc == 0 || r->passes == 2U)
 			break;
-		ODI_GPON_INIT_ERR("GPON tables not clean after pass 1 (%d): GEM-port CAM %u/%u valid (row %d port %u), Alloc-ID CAM %u/%u valid (row %d id %u), flow type %u/%u set; cleaning again\n",
+		ODI_GPON_INIT_ERR("GPON tables not clean after pass 1 (%d): GEM-port CAM %u/%u valid (row %d port %u), Alloc-ID CAM %u/%u valid (row %d id %u), flow type %u/%u set, multicast filter %u/%u valid (row %d); cleaning again\n",
 				  rc, r->after.gem_valid, ODI_GPON_INIT_GEM_ROWS, r->after.gem_row,
 				  (unsigned int)r->after.gem_port, r->after.alloc_valid,
 				  ODI_GPON_INIT_ALLOC_ROWS, r->after.alloc_row,
 				  (unsigned int)r->after.alloc_id, r->after.flow_type_set,
-				  ODI_GPON_INIT_GEM_ROWS);
+				  ODI_GPON_INIT_GEM_ROWS, r->after.mc_valid, ODI_GPON_INIT_MC_ROWS,
+				  r->after.mc_row);
 	}
 	r->rc = rc;
 	return rc;
@@ -317,17 +382,24 @@ static void odi_gpon_init_clean_log(const struct odi_gpon_clean_report *r, int r
 		ODI_GPON_INIT_INFO("GPON tables before the clean held GEM ports %s; Alloc-IDs %s\n",
 				   gem, alloc);
 	}
+	ODI_GPON_INIT_INFO("GPON multicast filter before the clean: %u/%u rows valid (row %d 0x%08x); self-test words %08x %08x %08x %08x %08x %08x %08x %08x%s\n",
+			   b->mc_valid, ODI_GPON_INIT_MC_ROWS, b->mc_row, (unsigned int)b->mc_data,
+			   (unsigned int)r->mc_bist[0], (unsigned int)r->mc_bist[1],
+			   (unsigned int)r->mc_bist[2], (unsigned int)r->mc_bist[3],
+			   (unsigned int)r->mc_bist[4], (unsigned int)r->mc_bist[5],
+			   (unsigned int)r->mc_bist[6], (unsigned int)r->mc_bist[7],
+			   r->mc_bist_bad ? " (a self-test failed or never ran)" : "");
 	if (rc == 0) {
-		ODI_GPON_INIT_INFO("GPON tables clean after %u pass(es): GEM-port CAM 0/%u, Alloc-ID CAM 0/%u, flow type 0/%u\n",
+		ODI_GPON_INIT_INFO("GPON tables clean after %u pass(es): GEM-port CAM 0/%u, Alloc-ID CAM 0/%u, flow type 0/%u, multicast filter 0/%u\n",
 				   r->passes, ODI_GPON_INIT_GEM_ROWS, ODI_GPON_INIT_ALLOC_ROWS,
-				   ODI_GPON_INIT_GEM_ROWS);
+				   ODI_GPON_INIT_GEM_ROWS, ODI_GPON_INIT_MC_ROWS);
 		return;
 	}
-	ODI_GPON_INIT_ERR("GPON tables NOT clean after %u passes (%d): GEM-port CAM %u/%u valid (row %d port %u), Alloc-ID CAM %u/%u valid (row %d id %u), flow type %u/%u set; activating anyway, the OLT may deactivate this ONU\n",
+	ODI_GPON_INIT_ERR("GPON tables NOT clean after %u passes (%d): GEM-port CAM %u/%u valid (row %d port %u), Alloc-ID CAM %u/%u valid (row %d id %u), flow type %u/%u set, multicast filter %u/%u valid (row %d); activating anyway, the OLT may deactivate this ONU\n",
 			  r->passes, rc, a->gem_valid, ODI_GPON_INIT_GEM_ROWS, a->gem_row,
 			  (unsigned int)a->gem_port, a->alloc_valid, ODI_GPON_INIT_ALLOC_ROWS,
 			  a->alloc_row, (unsigned int)a->alloc_id, a->flow_type_set,
-			  ODI_GPON_INIT_GEM_ROWS);
+			  ODI_GPON_INIT_GEM_ROWS, a->mc_valid, ODI_GPON_INIT_MC_ROWS, a->mc_row);
 }
 
 static struct odi_gpon_clean_report odi_gpon_init_report;

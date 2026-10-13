@@ -150,6 +150,15 @@ reg 0x7011c8 DSF_PLEND_CORR    31:24=BLEN_TOO_LONG 23:16=UNCORRECTABLE 15:0=CORR
 reg 0x704064 DS_GEM_MISC_SEL   3:0=INDEX
 reg 0x704068 DS_GEM_MISC_COUNT 31:0=COUNT
 
+# Downstream GEM multicast MAC filter: 256 rows behind one request
+# register with the handshake of the DSF CAMs (OP 2 read, OP 3 clear); the
+# GPON boot clean (odi_gpon_init.c) reads every row back and clears it.
+# DS_MC_FILTER_BIST is not part of the filter: it is the self-test status
+# of its RAM, eight words, read only.
+reg 0x704084 DS_MC_FILTER_CTL  15:15=REQ 14:14=DONE 13:13=ROW_VALID 9:8=OP 7:0=ROW
+reg 0x704090 DS_MC_FILTER_RDATA 31:0=DATA
+reg 0x70428c DS_MC_FILTER_BIST 15:15=ALL_BIST_DONE 9:9=DRF_BIST_FAIL 7:7=BIST_FAIL
+
 # Downstream decryption keys
 reg 0x703010 DSK_SWITCH_ARM    15:15=ARM 14:14=ACTIVE_SLOT
 reg 0x703014 DSK_SWITCH_FRAME  29:0=SUPERFRAME

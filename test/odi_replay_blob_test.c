@@ -277,7 +277,8 @@ static void test_record_rules(void)
  * pass, a read of every row before it and after it.
  */
 #define GPON_INIT_RESET_RELEASE	361U	/* PONMAC_RESET = 0, the record before the clean */
-#define GPON_CAM_ROWS		(ODI_GPON_INIT_GEM_ROWS + ODI_GPON_INIT_ALLOC_ROWS)
+#define GPON_CAM_ROWS		(ODI_GPON_INIT_GEM_ROWS + ODI_GPON_INIT_ALLOC_ROWS + \
+				 ODI_GPON_INIT_MC_ROWS)
 #define GPON_CLEAN_WRITES	(2U * GPON_CAM_ROWS + ODI_GPON_INIT_GEM_ROWS + 2U * GPON_CAM_ROWS + \
 				 2U * GPON_CAM_ROWS)
 
@@ -307,9 +308,10 @@ static void test_gpon_init_apply(void)
 		uint32_t a = odi_mock.log[i].addr;
 
 		CHECK(a == ODI_SW_DSF_GEM_CAM_CTL_OFF || a == ODI_SW_DSF_ALLOC_CAM_CTL_OFF ||
+		      a == ODI_GPON_DS_MC_FILTER_CTL_OFF ||
 		      (a >= ODI_SW_DSF_GEM_FLOW_TYPE(0) &&
 		       a <= ODI_SW_DSF_GEM_FLOW_TYPE(ODI_GPON_INIT_GEM_ROWS - 1U)),
-		      "gpon init: the clean writes only the CAM controls and the flow types");
+		      "gpon init: the clean writes only the request controls and the flow types");
 	}
 	for (i = 0; i < odi_mock.log_n; i++) {
 		const struct odi_mock_write *e = &odi_mock.log[i];

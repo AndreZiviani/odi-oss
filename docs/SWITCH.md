@@ -196,17 +196,32 @@ it goes on:
    a hundred reads.
 2. **cleans the GPON tables.** Every `DSF_GEM_FLOW_TYPE` word (128) is
    written to 0, and every row of the GEM-port CAM (128 rows,
-   `DSF_GEM_CAM_CTL` 0x701100) and of the Alloc-ID CAM (32 rows,
-   `DSF_ALLOC_CAM_CTL` 0x7010c0) is cleared with a CAM request of `OP` 3,
-   each polled for `DONE` with the bound of every CAM poll.
+   `DSF_GEM_CAM_CTL` 0x701100), of the Alloc-ID CAM (32 rows,
+   `DSF_ALLOC_CAM_CTL` 0x7010c0) and of the downstream multicast MAC
+   filter (256 rows, `DS_MC_FILTER_CTL` 0x704084, the same control word
+   layout) is cleared with a request of `OP` 3, each polled for `DONE`
+   with the bound of every CAM poll.
 3. **reads every row back.** A request of `OP` 2 per row sets
    `ROW_VALID` (bit 13) when the row still holds an entry, with the entry
-   in `DSF_GEM_CAM_RDATA` / `DSF_ALLOC_CAM_RDATA`; the flow type words are
-   read directly. The same read runs before the clean, so the log shows
-   what the boot found and what it left:
+   in `DSF_GEM_CAM_RDATA` / `DSF_ALLOC_CAM_RDATA` / `DS_MC_FILTER_RDATA`
+   (0x704090); the flow type words are read directly. The same read runs
+   before the clean, so the log shows what the boot found and what it
+   left:
 
        odi_gpon: GPON tables before the clean: GEM-port CAM 120/128 valid, Alloc-ID CAM 32/32 valid, flow type 119/128 set
-       odi_gpon: GPON tables clean after 1 pass(es): GEM-port CAM 0/128, Alloc-ID CAM 0/32, flow type 0/128
+       odi_gpon: GPON multicast filter before the clean: 0/256 rows valid (row -1 0x00000000); self-test words 00008000 00008000 00008000 00008000 00008000 00008000 00008000 00008000
+       odi_gpon: GPON tables clean after 1 pass(es): GEM-port CAM 0/128, Alloc-ID CAM 0/32, flow type 0/128, multicast filter 0/256
+
+   The multicast filter line also carries the eight words of
+   `DS_MC_FILTER_BIST` (0x70428c), read and never written. They are not
+   filter content: their fields are the built-in self-test status of the
+   filter RAM, the same layout as the words beside them for the other
+   downstream GEM RAMs, and 0x8000 is `ALL_BIST_DONE` alone, the test run
+   and passed. A word with `BIST_FAIL` (bit 7) or `DRF_BIST_FAIL` (bit 9)
+   set, or `ALL_BIST_DONE` clear, adds "(a self-test failed or never
+   ran)". The register list carries no reset values, so what a word
+   reads straight after a power-up is not known yet. The other fields
+   start a test, which is why nothing writes them.
 
    A row still set after the clean is logged as an error, with the first
    such row and its entry, and the whole clean runs once more. If rows
@@ -236,8 +251,12 @@ the same image kept the garbage; one boot of the stock firmware, which
 waits for the reset, cleaned it.
 
 The replay's own clean records (and its clear of the 256-entry multicast
-MAC filter table that follows them) still run; after the wait they land
-in a block that is out of reset. `test/odi_gpon_init_clean_test.sh` runs
+MAC filter table that follows them, issued back to back with no wait for
+`DONE`) still run; after the wait they land in a block that is out of
+reset. The boot table sets the filter up to be consulted for downstream
+multicast (`GPON_GEM_DS_MC_CFG` 0x704080 ends at 0x59: no IPv4 or IPv6
+force pass or drop), so a row it left behind could change which groups
+get through; nobody has read the filter after a power cut yet. `test/odi_gpon_init_clean_test.sh` runs
 the clean against a model of the two CAMs whose reset drops writes for a
 while after its release, and checks that the plain replay leaves the
 garbage and this one does not.

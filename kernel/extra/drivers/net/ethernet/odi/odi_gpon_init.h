@@ -65,10 +65,20 @@ unsigned int odi_gpon_init_apply_serial(const struct odi_replay_blob *table,
  * ONUs, and the OLT deactivates it. So every boot clears every row of the
  * three and reads every row back, before the first row of ours is
  * programmed and before activation.
+ *
+ * The downstream multicast MAC filter is the same kind of RAM, and the
+ * boot replay sets it up to be consulted for downstream multicast (no
+ * IPv4 or IPv6 force pass), so a leftover row could change which
+ * downstream multicast groups get through. The boot table
+ * clears its 256 rows itself, back to back with no wait; the clean clears
+ * them too, one request at a time and waited for, and reads them back.
+ * Its self-test words are read for the log and never written.
  */
 #define ODI_GPON_INIT_GEM_ROWS		128U	/* GEM-port CAM rows, and DSF_GEM_FLOW_TYPE words */
 #define ODI_GPON_INIT_ALLOC_ROWS	32U	/* Alloc-ID CAM rows */
 #define ODI_GPON_INIT_SEEN_MAX		8U	/* row values kept per CAM for the log */
+#define ODI_GPON_INIT_MC_ROWS		256U	/* downstream multicast filter rows */
+#define ODI_GPON_INIT_MC_BIST_WORDS	8U	/* DS_MC_FILTER_BIST words */
 
 /* What a read of every row found. */
 struct odi_gpon_table_count {
@@ -86,6 +96,9 @@ struct odi_gpon_table_count {
 	 */
 	uint32_t gem_seen[ODI_GPON_INIT_SEEN_MAX];
 	uint32_t alloc_seen[ODI_GPON_INIT_SEEN_MAX];
+	unsigned int mc_valid;		/* multicast filter rows a read finds valid */
+	int mc_row;			/* the first of them, -1 if none */
+	uint32_t mc_data;		/* what that row holds (DS_MC_FILTER_RDATA) */
 };
 
 struct odi_gpon_clean_report {
@@ -96,6 +109,11 @@ struct odi_gpon_clean_report {
 	/* Filled by odi_gpon_init_apply() only: */
 	int reset_rc;				/* odi_gpon_init_reset_wait(), or 1 when the table has no reset */
 	unsigned int reset_polls;		/* the reads it took */
+	/* DS_MC_FILTER_BIST as found before the clean, and the words with a
+	 * FAIL bit set or ALL_BIST_DONE clear.
+	 */
+	uint32_t mc_bist[ODI_GPON_INIT_MC_BIST_WORDS];
+	unsigned int mc_bist_bad;
 };
 
 /* Waits for PONMAC_RESET.RESET_COMPLETE after a RESET_REQ pulse, at most
@@ -108,9 +126,10 @@ struct odi_gpon_clean_report {
 #define ODI_GPON_INIT_RESET_POLLS	20000U
 int odi_gpon_init_reset_wait(unsigned int *polls);
 
-/* Clears every row of the GEM-port CAM and the Alloc-ID CAM (each a CAM
- * request with OP 3, polled for DONE) and writes every DSF_GEM_FLOW_TYPE
- * word to 0, then reads every row back (OP 2, ROW_VALID) and every word.
+/* Clears every row of the GEM-port CAM, the Alloc-ID CAM and the
+ * multicast filter (each a request with OP 3, polled for DONE) and writes
+ * every DSF_GEM_FLOW_TYPE word to 0, then reads every row back (OP 2,
+ * ROW_VALID) and every word.
  * A row still set is logged and the whole clean runs once more. Fills
  * *r and returns 0 when every row reads back clear, -EIO when some row
  * survived both passes, -ETIMEDOUT when a CAM request never finished.

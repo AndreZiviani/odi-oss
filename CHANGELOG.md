@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- kernel: the GPON boot clean covers the downstream multicast MAC filter.
+  Its 256 rows are on-chip RAM like the GEM-port and Alloc-ID CAMs, and
+  the boot table has it consulted for downstream multicast, but the only
+  clear it got was the boot table's own, 256 requests back to back with
+  no wait, never read back. The clean now clears every row with the CAM
+  handshake (each request waited for), reads every row back before and
+  after, retries once, and logs what it found and left (`GPON multicast
+  filter before the clean: N/256 rows valid ...`, and `multicast filter
+  0/256` in the `clean after` line). The same line reports the eight
+  `DS_MC_FILTER_BIST` words (0x70428c), which are the filter RAM's
+  self-test status, not filter rows: 0x8000 means the test ran and
+  passed, and they are never written. Host-tested
+  (`test/odi_gpon_init_clean_test.c`, now with a model of the filter);
+  not yet run on a stick.
+
 - kernel: an OLT's optical test of the ONU now gets the module's real
   readings. When the OLT sends a Test to the ANI-G, omcid answers with
   the supply voltage, Rx and Tx power, laser bias and temperature it asks
