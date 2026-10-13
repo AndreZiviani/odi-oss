@@ -839,7 +839,15 @@ int odi_gpon_verb(const char *verb, const char *arg)
 			odi_gpon_fsm_inst.state = ODI_GPON_STATE_O2;
 			odi_gpon_fsm_inst.onu_id = 0U;
 			odi_gpon_booted = true;
-			/* The block is set up: the counter sampler starts. */
+			/* The block is set up: the counter sampler starts, with
+			 * its baseline (the first sample only clears) taken
+			 * here rather than a period later. The downstream
+			 * framer runs from the replay above, and a PLOAM it
+			 * accepts in that first second would reach ds_rx but
+			 * be cleared out of ds_ploam_accepted by a late
+			 * baseline: the two would differ for good.
+			 */
+			odi_gpon_ctr_sample_locked();
 			mod_timer(&odi_gpon_ctr_timer, jiffies + msecs_to_jiffies(ODI_GPON_CTR_PERIOD_MS));
 		} else {
 			odi_gpon_verb_activate(&odi_gpon_fsm_inst);

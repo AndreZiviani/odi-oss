@@ -22,7 +22,12 @@ listed here.
   ONU through several states in one interrupt logs every transition. On both test lines in
   steady state the FIFO already reads empty and every PLOAM received was
   handled, so no change is expected there. Host-tested against a FIFO
-  model (`test/odi_gpon_ds_ploam_test.c`).
+  model (`test/odi_gpon_ds_ploam_test.c`). The counter sampler now takes
+  its baseline (the first sample, which only clears) in the boot
+  `gponact` instead of a second later: a PLOAM the framer accepted in
+  that second was counted in `ploam ds_rx` but cleared out of
+  `ctr ds_ploam_accepted`, leaving the two apart for good (by 6 on one
+  ISP1 boot).
 
 - slot-state.sh: safe to run again after a commit, which the web UI now does
   (odi-ui: the Commit button runs `nv commit` and then this script, so
