@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- kernel: the boot log names what the GPON tables held before the clean:
+  the first eight GEM ports and Alloc-IDs found valid, after the counts
+  (`GPON tables before the clean held GEM ports ...; Alloc-IDs ...`).
+  A previous session's own entries (a warm boot) and power-up garbage
+  used to look the same, as counts only (#29).
+
 ## v1.3.0 — 2026-10-12
 
 - confd v1.2.1 (was v1.2.0): the Config page no longer shows `NTP_SERVER`

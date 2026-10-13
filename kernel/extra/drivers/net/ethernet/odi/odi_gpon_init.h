@@ -18,6 +18,7 @@
 #ifdef __KERNEL__
 #include <linux/types.h>
 #else
+#include <stddef.h>
 #include <stdint.h>
 #endif
 
@@ -67,6 +68,7 @@ unsigned int odi_gpon_init_apply_serial(const struct odi_replay_blob *table,
  */
 #define ODI_GPON_INIT_GEM_ROWS		128U	/* GEM-port CAM rows, and DSF_GEM_FLOW_TYPE words */
 #define ODI_GPON_INIT_ALLOC_ROWS	32U	/* Alloc-ID CAM rows */
+#define ODI_GPON_INIT_SEEN_MAX		8U	/* row values kept per CAM for the log */
 
 /* What a read of every row found. */
 struct odi_gpon_table_count {
@@ -78,6 +80,12 @@ struct odi_gpon_table_count {
 	int alloc_row;			/* the first valid Alloc-ID row, -1 if none */
 	uint32_t alloc_id;		/* the Alloc-ID that row holds */
 	int timed_out;			/* a CAM request never finished: the counts stop there */
+	/* The first ODI_GPON_INIT_SEEN_MAX values of the valid rows, in row
+	 * order: what tells a previous session's own entries from power-up
+	 * garbage in the log.
+	 */
+	uint32_t gem_seen[ODI_GPON_INIT_SEEN_MAX];
+	uint32_t alloc_seen[ODI_GPON_INIT_SEEN_MAX];
 };
 
 struct odi_gpon_clean_report {
@@ -114,5 +122,11 @@ int odi_gpon_init_clean_tables(struct odi_gpon_clean_report *r);
  * Read under the same lock the apply ran under (odi_gpon_lock).
  */
 const struct odi_gpon_clean_report *odi_gpon_init_last_clean(void);
+
+/* Formats the values a census kept ("63 319 1087", "+n" for rows past
+ * ODI_GPON_INIT_SEEN_MAX, "none" for no valid row) into buf; returns the
+ * length written. For the boot log.
+ */
+size_t odi_gpon_init_seen_str(char *buf, size_t len, const uint32_t *seen, unsigned int valid);
 
 #endif /* ODI_GPON_INIT_H */

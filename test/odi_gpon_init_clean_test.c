@@ -203,6 +203,9 @@ static void test_power_up(void)
 	      r.after.gem_row == -1 && r.after.alloc_row == -1 && !r.after.timed_out,
 	      "power-up: every row reads back clear");
 	CHECK(r.passes == 1U, "power-up: one pass");
+	CHECK(r.before.alloc_seen[0] == 0xe00U && r.before.alloc_seen[7] == 0xe07U &&
+	      r.before.gem_seen[1] == (0xf00U | 37U),
+	      "power-up: the first values of the valid rows are kept for the log");
 	CHECK(tables_clear(), "power-up: the model agrees");
 	CHECK(odi_mock_locks_idle(), "power-up: odi_switch_dsf_lock released");
 }
@@ -391,9 +394,40 @@ static void test_boot_table_reset_stuck(void)
 	odi_replay_fw_release(&fw);
 }
 
+/* A warm boot after a session that had ONU-ID 63 and Alloc-IDs 319 and
+ * 1087: the log names them, which is what tells them from garbage.
+ */
+static void test_warm_names_the_entries(void)
+{
+	struct odi_gpon_clean_report r;
+	char buf[96];
+
+	power_up();
+	memset(&m.gem, 0, sizeof(m.gem));
+	memset(&m.alloc, 0, sizeof(m.alloc));
+	m.alloc.valid[0] = 1; m.alloc.entry[0] = 63U;
+	m.alloc.valid[1] = 1; m.alloc.entry[1] = 319U;
+	m.alloc.valid[5] = 1; m.alloc.entry[5] = 1087U;
+	CHECK(odi_gpon_init_clean_tables(&r) == 0, "warm: clean");
+	CHECK(r.before.alloc_valid == 3U, "warm: three Alloc-ID rows");
+	odi_gpon_init_seen_str(buf, sizeof(buf), r.before.alloc_seen, r.before.alloc_valid);
+	CHECK(strcmp(buf, "63 319 1087") == 0, "warm: the Alloc-IDs, in row order");
+	odi_gpon_init_seen_str(buf, sizeof(buf), r.before.gem_seen, r.before.gem_valid);
+	CHECK(strcmp(buf, "none") == 0, "warm: no GEM-port row reads none");
+
+	power_up();
+	CHECK(odi_gpon_init_clean_tables(&r) == 0, "power-up again: clean");
+	odi_gpon_init_seen_str(buf, sizeof(buf), r.before.alloc_seen, r.before.alloc_valid);
+	CHECK(strcmp(buf, "3584 3585 3586 3587 3588 3589 3590 3591 +24") == 0,
+	      "power-up: eight values, then the count of the rest");
+	odi_gpon_init_seen_str(buf, 8, r.before.alloc_seen, r.before.alloc_valid);
+	CHECK(strlen(buf) < 8U, "a short buffer stays terminated");
+}
+
 int main(void)
 {
 	test_power_up();
+	test_warm_names_the_entries();
 	test_first_pass_lost();
 	test_sticky_row();
 	test_stuck_flow_type();
