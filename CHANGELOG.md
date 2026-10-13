@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- kernel: the switch ACL tables are cleared at boot. ACL ingress is on for
+  the UNI and PON ports, and the 96 rule and action rows live in RAM that
+  survives a reset: after a warm boot from the stock firmware (a trial
+  that fell back, or a stick moved from it) its rules were still there
+  next to ours, and after a power cut the rows hold random words, where a
+  row with its valid bit set would match frames ahead of everything else.
+  Only rule 1 was ever written. The platform init now reads every row of
+  the rule pattern, rule mask and action tables, writes each all-zero,
+  reads them back, and logs the counts (`ACL rows before the clean: N/96
+  rules valid ..., ACL rows clean after 1 pass(es)`), before ACL ingress
+  is enabled and before the module-load replay writes rule 1. The L2
+  table is not cleared: `docs/SWITCH.md`, "Platform init", says why.
+  Host-tested against a model of the table engine
+  (`test/odi_switch_acl_clean_test.c`); not yet run on a stick.
+
 - kernel: downstream AES is no longer lost when the OLT sends
   Encrypted_Port-ID before OMCI has created the GEM port, or on flows 32
   to 63. The driver dropped an Encrypted_Port-ID for a port with no
