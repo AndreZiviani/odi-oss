@@ -65,6 +65,7 @@
 
 #endif
 
+#include "odi_board.h"
 #include "odi_gpon.h"
 #include "odi_gpon_ctr.h"
 #include "odi_gpon_drv.h"
@@ -751,6 +752,7 @@ int odi_gpon_verb(const char *verb, const char *arg)
 	int init_fw_rc = -ENOENT;
 	unsigned long flags;
 	enum odi_gpon_state prev;
+	struct odi_board_laser laser;
 	int rc = 0;
 
 	if (!verb)
@@ -773,6 +775,7 @@ int odi_gpon_verb(const char *verb, const char *arg)
 	    (!strcmp(verb, "gponsn") && READ_ONCE(odi_gpon_booted)))
 		init_fw_rc = odi_replay_fw_load(ODI_REPLAY_TABLE_GPON_INIT, &init_fw);
 
+	odi_board_laser_get(&laser);
 	spin_lock_irqsave(&odi_gpon_lock, flags);
 	prev = odi_gpon_fsm_inst.state;
 
@@ -811,6 +814,15 @@ int odi_gpon_verb(const char *verb, const char *arg)
 		rc = odi_gpon_parse_pw(arg, pw);
 		if (rc == 0)
 			odi_gpon_fsm_set_password(&odi_gpon_fsm_inst, pw);
+	} else if (!strcmp(verb, "gponact") && !laser.laser_on) {
+		/* The laser verb kept the laser off (odi_board.h): an
+		 * unknown laser driver may light outside the ONU's timeslots
+		 * and take down every other ONU on the OLT port, so the MAC
+		 * is not started either.
+		 */
+		pr_err("odi_gpon: gponact refused: the laser is off (laser verb: laser driver id %d)\n",
+		       laser.ldd_id);
+		rc = -EPERM;
 	} else if (!strcmp(verb, "gponact")) {
 		if (!odi_gpon_booted && init_fw_rc) {
 			/* No boot table (odi_replay_fw_load() logged why):
@@ -1055,6 +1067,13 @@ static int odi_gpon_proc_show(struct seq_file *seq, void *v)
 		   last_top_sts, last_ds_dlt, last_us_sts);
 	seq_printf(seq, "irq_attached %d isr_rc %d imr_rc %d\n",
 		   irq_attached ? 1 : 0, irq_isr_rc, irq_imr_rc);
+	{
+		struct odi_board_laser laser;
+
+		odi_board_laser_get(&laser);
+		seq_printf(seq, "laser on %d ldd_id %d unverified %d\n",
+			   laser.laser_on, laser.ldd_id, laser.unverified);
+	}
 	seq_printf(seq, "last_los_ms %lu state %d\n", last_los, last_los_state);
 
 	/* The last Upstream_Overhead (G.984.3 9.2.3.1) and Ranging_Time

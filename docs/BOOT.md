@@ -177,20 +177,30 @@ steps, running concurrently with the four respawn entries just started.
     `docs/SETTINGS.md` ("Watchdog rules") has every deadline, the memory
     floor, and why the userland process this replaced (v1.0.2) was
     withdrawn.
-12. **The optics**, the `/proc/odi_init` verb `optics` (`odi_board.c`),
+12. **The optics pins**, the `/proc/odi_init` verb `optics` (`odi_board.c`),
     because the SDK verbs never set them up on this board:
     `PIN_GPIO_SELECT` 0x048 = 0x08082001 (without it the port-1 I2C pins,
     DDM and the module status, stay muxed away and every transaction ends
-    in NO_ACK), and SoC GPIO 13, the TX-disable input of the module, as an
-    output driven low, the level set before the direction. As an input,
-    its reset default, the laser stays off, the module reports
-    TX_DISABLE_STATE and the OLT never hears the serial number; with it
-    low the ONU went from O3 to O5 within 5 s. It runs before the PON
-    steps and outside their list, so a `pon-steps` override keeps it;
-    `optics.off` skips it.
+    in NO_ACK). It runs before the PON steps and outside their list, so a
+    `pon-steps` override keeps it.
 13. **The PON steps**, each one `/proc/odi_init` verb: `i2c 1`, `i2cen 1`,
-    `gpon`, `rxsd`, `gpondrv`, `gpondev`, then the switch init, then
-    `gponsn`, `gponpw` and `gponact`. The order is fixed by the hardware.
+    `laser`, `gpon`, `rxsd`, `gpondrv`, `gpondev`, then the switch init,
+    then `gponsn`, `gponpw` and `gponact`.
+
+    `laser` (`odi_board.c`) needs the I2C controller, which answers only
+    after `i2c` and `i2cen` (before them a read returns 0 with no error).
+    It reads the laser driver chip's id (A2h page 2, byte 0xa0, putting
+    the page select back) and switches the laser on only for the Semtech
+    GN25L95 (0x6a) this image is validated with: SoC GPIO 13, the
+    TX-disable input of the module, as an output driven low, the level
+    set before the direction. As an input, its reset default, the laser
+    stays off, the module reports TX_DISABLE_STATE and the OLT never hears
+    the serial number; with it low the ONU went from O3 to O5 within 5 s.
+    For any other laser driver, or none answering, the laser stays off
+    and `gponact` is refused: another board may need laser set-up this
+    image does not do, and a laser lit outside its timeslots takes down
+    every ONU on the OLT port. `ODI_LASER_UNVERIFIED=1` (odi.conf) forces
+    it on; `optics.off` leaves it off. The order is fixed by the hardware.
     The switch init deactivates the ONU, so the activation steps come
     after it (with the switch init last, the ONU stayed in O1); the switch
     init is the `switch_init` write of `/proc/odi_omci`: the platform

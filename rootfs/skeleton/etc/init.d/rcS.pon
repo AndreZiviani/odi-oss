@@ -21,14 +21,11 @@ if [ -r /etc/init.d/rcS.dev ]; then
 fi
 
 if [ -w /proc/odi_init ]; then
-	# The optics first, before any PON step and outside the step list:
-	# PIN_GPIO_SELECT for the module I2C pins and the laser TX enable
-	# (odi_board.h). /etc/config/optics.off leaves the laser off.
-	if [ -f /etc/config/optics.off ]; then
-		crumb "optics: optics.off, laser left off"
-	else
-		pon_step optics
-	fi
+	# The optics pins first, before any PON step and outside the step
+	# list: PIN_GPIO_SELECT for the module I2C pins (odi_board.h). The
+	# laser itself is the `laser` step, after the I2C steps
+	# (pon_step_laser, rcs-lib.sh).
+	pon_step optics
 	pon_steps
 	crumb "pon steps done"
 	dev_hook pon

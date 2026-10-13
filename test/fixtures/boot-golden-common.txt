@@ -7993,8 +7993,6 @@ W 111f8 7
 # odi_init ponmac: rc 0
 # phase: pon steps to gpondev
 W 48 8082001
-w b800330c 0
-w b8003308 2000
 # odi_init optics: rc 0
 r 23008 0
 W 23008 2200031
@@ -8108,6 +8106,9 @@ W 23018 1026040
 r 23018 1026040
 W 23018 1026040
 # odi_init i2cen 1: rc 0
+w b800330c 0
+w b8003308 2000
+# odi_init laser: rc 0
 r f020f8 0
 W f020f8 3f
 r f0213c 0

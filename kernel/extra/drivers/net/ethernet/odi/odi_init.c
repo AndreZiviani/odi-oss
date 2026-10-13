@@ -6,6 +6,8 @@
  *   - "intr", "irq": no-ops; odi_gpon already reset the switch
  *     interrupt registers and requested the line at boot;
  *   - "optics": odi_board_optics(), the first PON step;
+ *   - "laser": odi_board_laser(), after i2c/i2cen ("laser unverified" forces
+ *     the laser on, odi_board.h);
  *   - the seven GPON verbs (gpondrv gpondev gponsn gponpw gponact
  *     gpondeact gponstat): odi_gpon_verb();
  *   - every other verb (the 21 switch steps and the PON steps i2c, i2cen,
@@ -59,6 +61,8 @@ static int odi_init_apply(const char *name, const char *arg)
 		return 0;
 	if (!strcmp(name, "optics"))
 		return odi_board_optics();
+	if (!strcmp(name, "laser"))
+		return odi_board_laser(arg);
 	if (odi_init_is_gpon_verb(name))
 		return odi_gpon_verb(name, arg);
 	if (odi_switch_sdkinit_verb(name) == 0)

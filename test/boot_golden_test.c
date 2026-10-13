@@ -6,7 +6,8 @@
  *   1. the board replay (odi_board_init());
  *   2. the odi_init verbs of the rcS main loop, through the real
  *      /proc/odi_init dispatch (odi_init_apply());
- *   3. the PON steps up to gpondev: optics, i2c, i2cen, gpon, rxsd, gpondrv;
+ *   3. the PON steps up to gpondev: optics, i2c, i2cen, laser, gpon, rxsd,
+ *      gpondrv;
  *   4. init_platform, every item, as the rcS /proc/odi_omci write asks;
  *   5. the module-load replay (modload.bin carries the production
  *      selection);
@@ -41,6 +42,27 @@
 #include "odi_replay_fw_host.h"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_sdkinit.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_board_data.c"
+/* odi_board_optics() identifies the laser driver over I2C before it lights
+ * the laser (odi_board.h). A GN25L95 here, with no register traffic, so the
+ * captured sequence is unchanged: page select 2, byte 0xa0 reads 0x6a.
+ */
+static uint8_t fake_a2_page = 0;
+int odi_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n)
+{
+	(void)sel;
+	if (n != 1)
+		return -EINVAL;
+	*out = addr == 0x7fU ? fake_a2_page : (fake_a2_page == 2U && addr == 0xa0U ? 0x6aU : 0U);
+	return 0;
+}
+int odi_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
+{
+	(void)sel;
+	if (addr != 0x7fU)
+		return -EPERM;
+	fake_a2_page = val;
+	return 0;
+}
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_board.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_gpon_ploam.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_gpon_fsm.c"
@@ -231,6 +253,7 @@ int main(int argc, char **argv)
 	verb("optics", NULL);
 	verb("i2c", "1");
 	verb("i2cen", "1");
+	verb("laser", NULL);
 	verb("gpon", NULL);
 	verb("rxsd", NULL);
 	verb("gpondrv", NULL);
