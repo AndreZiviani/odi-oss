@@ -133,11 +133,13 @@ unsigned int odi_gpon_get_alloc_ids(uint16_t *out, unsigned int max);
 
 /* ---- odi_gpon_hw.c leaves the PLOAM dispatch in odi_gpon_isr.c calls
  * directly, for the message types outside the FSM (Acknowledge, GEM port,
- * Alloc-ID). odi_gpon_hw_test_seed_active() is host-build only.
+ * Alloc-ID). odi_gpon_hw_test_seed_active() and
+ * odi_gpon_hw_test_set_key_source() are host-build only.
  */
 void odi_gpon_hw_reset(void);
 void odi_gpon_hw_test_seed_active(uint16_t gem_port_id, const unsigned int *alloc_rows,
 				   unsigned int n_alloc_rows);
+void odi_gpon_hw_test_set_key_source(void (*fn)(uint8_t key[16]));
 void odi_gpon_hw_note_ploam_rx(const struct odi_gpon_ploam *msg);
 void odi_gpon_hw_ack_send(uint8_t onu_id, const struct odi_gpon_ploam *acked);
 void odi_gpon_hw_gem_port_configure(uint16_t gem_port_id, int activate);

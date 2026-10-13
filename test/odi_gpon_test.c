@@ -48,6 +48,7 @@ enum action_kind {
 	ACT_START_TO2,
 	ACT_STOP_TO2,
 	ACT_LASER_ENABLE,
+	ACT_NEW_KEY,
 	ACT_LOAD_KEY,
 	ACT_SWITCH_KEY,
 	ACT_LINK_FORCE_UP,
@@ -59,7 +60,7 @@ struct action {
 	uint32_t a;
 	uint32_t b;
 	struct odi_gpon_ploam ploam;	/* valid for ACT_SEND_US_PLOAM */
-	uint8_t key[16];		/* valid for ACT_LOAD_KEY */
+	uint8_t key[16];		/* valid for ACT_NEW_KEY and ACT_LOAD_KEY */
 };
 
 #define MAX_ACTIONS 256
@@ -148,6 +149,14 @@ static void cb_laser_enable(void *ctx, int enable)
 {
 	rec_push((struct recorder *)ctx, ACT_LASER_ENABLE, (uint32_t)enable, 0, NULL, NULL);
 }
+/* What the next new_key() call hands the FSM, as the kernel RNG would. */
+static uint8_t next_key[16];
+
+static void cb_new_key(void *ctx, uint8_t key[16])
+{
+	memcpy(key, next_key, 16U);
+	rec_push((struct recorder *)ctx, ACT_NEW_KEY, 0, 0, NULL, key);
+}
 static void cb_load_key(void *ctx, unsigned int slot, const uint8_t key[16])
 {
 	rec_push((struct recorder *)ctx, ACT_LOAD_KEY, (uint32_t)slot, 0, NULL, key);
@@ -176,6 +185,7 @@ static const struct odi_gpon_fsm_ops test_ops = {
 	.start_to2 = cb_start_to2,
 	.stop_to2 = cb_stop_to2,
 	.laser_enable = cb_laser_enable,
+	.new_key = cb_new_key,
 	.load_key = cb_load_key,
 	.switch_key = cb_switch_key,
 	.link_force_up = cb_link_force_up,
@@ -412,7 +422,7 @@ static void fsm_setup(struct odi_gpon_fsm *fsm, struct recorder *rec)
 	odi_gpon_fsm_init(fsm);
 	odi_gpon_fsm_set_serial_number(fsm, test_sn);
 	odi_gpon_fsm_set_password(fsm, test_pw);
-	odi_gpon_fsm_set_aes_key(fsm, test_key);
+	memcpy(next_key, test_key, sizeof(next_key));
 	rec_reset(rec);
 }
 
@@ -692,57 +702,91 @@ static void test_popup_to_o6_and_back(void)
 	CHECK(fsm.state == ODI_GPON_STATE_O1, "TO2 expiry in O6 falls back to O1, not O5");
 }
 
-static void test_request_key_two_fragments(void)
+/* One Request_Key, checked against what new_key() handed out: a new key,
+ * reported in the 6 fragment sends with one Key_Index, then loaded into
+ * the next slot. Returns the Key_Index the fragments carried.
+ */
+static unsigned int check_one_request_key(struct odi_gpon_fsm *fsm, struct recorder *rec,
+					  const uint8_t key[16])
 {
-	struct odi_gpon_fsm fsm;
-	struct recorder rec;
 	struct odi_gpon_ploam msg;
-	unsigned int i, count = 0, expect_idx = 0;
+	unsigned int i, count = 0, expect_idx = 0, key_index = 0;
 	uint8_t rebuilt[16];
-	int i_load = -1;
+	int i_new, i_load = -1;
 
-	fsm_setup(&fsm, &rec);
-	drive_to_o5(&fsm, &rec);
-	rec_reset(&rec);
-
+	memcpy(next_key, key, sizeof(next_key));
+	rec_reset(rec);
 	msg = ds_request_key(TEST_ASSIGNED_ONU_ID);
-	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	odi_gpon_fsm_handle_event(fsm, &test_ops, rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
 
-	CHECK(fsm.state == ODI_GPON_STATE_O5, "Request_Key does not change state");
+	CHECK(fsm->state == ODI_GPON_STATE_O5, "Request_Key does not change state");
+	i_new = find_action(rec, 0, ACT_NEW_KEY);
+	CHECK(i_new == 0, "a new key is drawn first, before any fragment is sent (G.984.3 12.3)");
+	CHECK(find_action(rec, (unsigned int)i_new + 1U, ACT_NEW_KEY) < 0,
+	      "exactly one new key per Request_Key");
 
 	/* Each of the 2 fragments sent 3x, alternating (0,1,0,1,0,1) -- the
 	 * observed order, not the 2-total order this driver sent before this
 	 * pass.
 	 */
 	memset(rebuilt, 0, sizeof(rebuilt));
-	for (i = 0; i < rec.n; i++) {
-		if (rec.log[i].kind == ACT_SEND_US_PLOAM &&
-		    rec.log[i].ploam.type == ODI_GPON_US_ENCRYPTION_KEY) {
-			unsigned int idx = rec.log[i].ploam.content[1];	/* Frag_Index */
+	for (i = 0; i < rec->n; i++) {
+		if (rec->log[i].kind == ACT_SEND_US_PLOAM &&
+		    rec->log[i].ploam.type == ODI_GPON_US_ENCRYPTION_KEY) {
+			unsigned int idx = rec->log[i].ploam.content[1];	/* Frag_Index */
 			unsigned int off = idx * ODI_GPON_KEY_FRAGMENT_BYTES;
 
-			CHECK(rec.log[i].ploam.content[0] == fsm.key_index,
-			      "each Encryption_Key fragment carries this ONU own Key_Index");
+			if (count == 0)
+				key_index = rec->log[i].ploam.content[0];
+			CHECK(rec->log[i].ploam.content[0] == key_index,
+			      "all six fragments of one key carry the same Key_Index");
+			CHECK(rec->log[i].ploam.content[0] == fsm->key_index,
+			      "and it is the Key_Index the FSM holds for that key");
 			CHECK(idx == expect_idx % ODI_GPON_KEY_FRAGMENTS,
 			      "the fragments alternate 0,1,0,1,0,1, not 3 of 0 then 3 of 1");
 			expect_idx++;
-			memcpy(&rebuilt[off], &rec.log[i].ploam.content[2],
+			memcpy(&rebuilt[off], &rec->log[i].ploam.content[2],
 			       ODI_GPON_KEY_FRAGMENT_BYTES);
 			count++;
-		} else if (rec.log[i].kind == ACT_LOAD_KEY) {
+		} else if (rec->log[i].kind == ACT_LOAD_KEY) {
 			i_load = (int)i;
 		}
 	}
 	CHECK(count == 3U * ODI_GPON_KEY_FRAGMENTS,
 	      "Request_Key produces exactly 6 Encryption_Key fragment sends (2 fragments x3)");
-	CHECK(memcmp(rebuilt, test_key, 16U) == 0,
-	      "the fragments reassemble this ONU own configured AES key");
-	CHECK(i_load >= 0 && (unsigned int)i_load == rec.n - 1U,
+	CHECK(memcmp(rebuilt, key, 16U) == 0,
+	      "the fragments reassemble the key new_key() drew for this request");
+	CHECK(memcmp(fsm->aes_key, key, 16U) == 0, "the FSM keeps that key as the one reported");
+	CHECK(i_load >= 0 && (unsigned int)i_load == rec->n - 1U,
 	      "load_key runs last, after all six fragment sends (the observed order)");
-	CHECK(i_load >= 0 && rec.log[i_load].a == ODI_GPON_DSK_SLOT_NEXT,
+	CHECK(i_load >= 0 && rec->log[i_load].a == ODI_GPON_DSK_SLOT_NEXT,
 	      "the generated key is loaded into the inactive (next) hardware slot");
-	CHECK(i_load >= 0 && memcmp(rec.log[i_load].key, test_key, 16U) == 0,
+	CHECK(i_load >= 0 && memcmp(rec->log[i_load].key, key, 16U) == 0,
 	      "load_key receives the same key the fragments reported upstream");
+	return key_index;
+}
+
+static void test_request_key_two_fragments(void)
+{
+	static const uint8_t second_key[16] = {
+		0xf0, 0xe1, 0xd2, 0xc3, 0xb4, 0xa5, 0x96, 0x87,
+		0x78, 0x69, 0x5a, 0x4b, 0x3c, 0x2d, 0x1e, 0x0f,
+	};
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	unsigned int first, second;
+
+	fsm_setup(&fsm, &rec);
+	CHECK(fsm.key_index == 0U, "no key generated yet: Key_Index 0");
+	drive_to_o5(&fsm, &rec);
+
+	/* G.984.3 clause 12.3: the Key_Index is incremented for each key the
+	 * ONU generates on request, so the OLT can tell one key from the next.
+	 */
+	first = check_one_request_key(&fsm, &rec, test_key);
+	second = check_one_request_key(&fsm, &rec, second_key);
+	CHECK(first == 1U, "the first key carries Key_Index 1");
+	CHECK(second == first + 1U, "the next Request_Key reports its key under the next Key_Index");
 }
 
 static void test_key_switching_time(void)

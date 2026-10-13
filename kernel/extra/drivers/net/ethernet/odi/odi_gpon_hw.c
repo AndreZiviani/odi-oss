@@ -28,6 +28,7 @@
 #ifdef __KERNEL__
 #include <linux/string.h>
 #include <linux/printk.h>
+#include <linux/random.h>
 #define ODI_GPON_HW_LOG(fmt, ...) pr_info_once("odi_gpon_hw: " fmt, ##__VA_ARGS__)
 #define ODI_GPON_HW_WARN(fmt, ...) pr_warn_ratelimited("odi_gpon_hw: " fmt, ##__VA_ARGS__)
 #else
@@ -154,9 +155,16 @@ static struct odi_gpon_hw_state odi_gpon_hw;
  */
 #define ODI_GPON_HW_PON_SID_INDEX	2U
 
+#ifndef __KERNEL__
+static void (*odi_gpon_hw_test_key_fn)(uint8_t key[16]);
+#endif
+
 void odi_gpon_hw_reset(void)
 {
 	memset(&odi_gpon_hw, 0, sizeof(odi_gpon_hw));
+#ifndef __KERNEL__
+	odi_gpon_hw_test_key_fn = NULL;
+#endif
 }
 
 #ifndef __KERNEL__
@@ -179,6 +187,17 @@ void odi_gpon_hw_test_seed_active(uint16_t gem_port_id, const unsigned int *allo
 		odi_gpon_hw.alloc_used |= (1UL << alloc_rows[i]);
 		odi_gpon_hw.alloc_id_values[alloc_rows[i]] = 0;	/* value irrelevant to a delete */
 	}
+}
+
+/* Test/replay-harness seam only, like the one above: where the host build
+ * of hw_new_key() takes its keys from. NULL (the default, and after
+ * odi_gpon_hw_reset()) is a fixed pseudo-random sequence, a different
+ * non-zero key on every call; the replay test sets the key its capture
+ * reported.
+ */
+void odi_gpon_hw_test_set_key_source(void (*fn)(uint8_t key[16]))
+{
+	odi_gpon_hw_test_key_fn = fn;
 }
 #endif /* !__KERNEL__ */
 
@@ -580,7 +599,55 @@ static void hw_load_key(void *ctx, unsigned int slot, const uint8_t key[16])
 		odi_reg_write(ODI_GPON_DSK_KEY_LOAD_OFF, ind);
 		ind = ODI_GPON_DSK_KEY_LOAD_WRITE_REQ_SET(ind, 1);
 		odi_reg_write(ODI_GPON_DSK_KEY_LOAD_OFF, ind);
+
+		/* The next word goes into the same DSK_KEY_WORD register, so
+		 * this one has to be taken first: WRITE_DONE, with the bound
+		 * of every CAM poll. A word lost here leaves a key the OLT
+		 * never sent, and every encrypted port undecryptable from the
+		 * switch on; the log says which word.
+		 */
+		if (odi_poll_reg(ODI_GPON_DSK_KEY_LOAD_OFF, ODI_GPON_DSK_KEY_LOAD_WRITE_DONE,
+				 ODI_GPON_DSK_KEY_LOAD_WRITE_DONE, ODI_SW_TABLE_POLL_DELAY_US,
+				 ODI_SW_TABLE_POLL_US, NULL))
+			ODI_GPON_HW_WARN("key slot %u word %u: load not done\n", slot, i);
 	}
+
+	/* A key loaded for the next switch replaces the one a Key_Switching_Time
+	 * may already have armed for (G.984.3 clause 12.4): the next
+	 * Key_Switching_Time is written whatever its value.
+	 */
+	if (slot == ODI_GPON_DSK_SLOT_NEXT)
+		odi_gpon_hw.key_switch_armed = 0;
+}
+
+/* A fresh AES key per Request_Key (G.984.3 clause 12.3, "cryptographically
+ * unpredictable"), from the kernel RNG, which this interrupt-context caller
+ * can use as it is. A request before the pool is initialised still gets a
+ * key, logged once: the alternative, no key, would make the OLT ask again
+ * and then deactivate the ONU.
+ */
+static void hw_new_key(void *ctx, uint8_t key[16])
+{
+	(void)ctx;
+#ifdef __KERNEL__
+	if (!rng_is_initialized())
+		pr_warn_once("odi_gpon_hw: AES key drawn before the kernel RNG is initialised\n");
+	get_random_bytes(key, ODI_GPON_AES_KEY_BYTES);
+#else
+	if (odi_gpon_hw_test_key_fn) {
+		odi_gpon_hw_test_key_fn(key);
+	} else {
+		static uint32_t x = 0x2545f491U;
+		unsigned int i;
+
+		for (i = 0; i < ODI_GPON_AES_KEY_BYTES; i++) {
+			x ^= x << 13;
+			x ^= x >> 17;
+			x ^= x << 5;
+			key[i] = (uint8_t)x;
+		}
+	}
+#endif
 }
 
 /* Key_switching_time -- one plain write, the frame-count value straight
@@ -638,6 +705,7 @@ static const struct odi_gpon_fsm_ops odi_gpon_hw_ops_table = {
 	.start_to2 = hw_start_to2,
 	.stop_to2 = hw_stop_to2,
 	.laser_enable = hw_laser_enable,
+	.new_key = hw_new_key,
 	.load_key = hw_load_key,
 	.switch_key = hw_switch_key,
 	.link_force_up = hw_link_force_up,
