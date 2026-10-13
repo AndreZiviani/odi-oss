@@ -12,7 +12,8 @@
 # is 1. Busybox only.
 #
 # What goes in, under odi-diag/ in the archive: the previous boot ramlog
-# (/proc/odi_ramlog_prev), /var/log/*, dmesg, /etc/odi-build, /etc/version,
+# (/proc/odi_ramlog_prev), /var/log/*, dmesg, the syslog ring (logread:
+# the event= lines omcid sends only to syslog), /etc/odi-build, /etc/version,
 # the readable /proc/odi_wdt files, uptime, /proc/meminfo, /proc/mounts,
 # /proc/cmdline, ps, the U-Boot slot variables from both environment copies
 # (nv getenv and nv fallback), a scrape of the exporter, the config store
@@ -164,6 +165,7 @@ grab() {
 
 grab ramlog_prev.txt /proc/odi_ramlog_prev
 step dmesg.txt dmesg
+step syslog.txt logread
 grab odi-build.txt /etc/odi-build
 grab version.txt /etc/version
 for f in watchdog_flag userland_ok clients; do

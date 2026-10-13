@@ -440,6 +440,20 @@ DIAG_SHORT_LINE="harness: short=$DIAG_SHORT userland_ok=1 hex=$DIAG_SHORT_HEX ph
 sshx "sed -i 's|</Config>|\t<Value Name=\"USER_PASSWORD\" Value=\"$DIAG_SHORT\"/>\n</Config>|' /etc/config/lastgood.xml"
 sshx "grep -c 'Value=\"$DIAG_SHORT\"' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant USER_PASSWORD in lastgood.xml"
 sshx "echo '$DIAG_SHORT_LINE' > /var/log/qemu-short.log"
+# The same values sent to syslog (through /dev/kmsg and klogd: the image has
+# no logger), which the bundle copies from logread. klogd loses the first
+# kernel line after syslogd restarts (its socket send fails once, then it
+# reconnects; seen on a stick too), and the SYSLOG_SERVER scenario above
+# restarted syslogd, so a throwaway line goes first.
+sshx "echo 'harness: klogd reconnect' > /dev/kmsg"
+sshx "echo 'harness: syslog: ploam=$DIAG_PLOAM loid=$DIAG_LOIDPW hex=$DIAG_LOIDPW_HEX web=$DIAG_WEBPW sn=$DIAG_SN snhex=$DIAG_SN_HEX ph=$DIAG_SN_PH mac=$DIAG_MAC_COLON id=$DIAG_LOID' > /dev/kmsg"
+n=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+	n=$(sshx "logread | grep -c 'harness: syslog:'" 2>/dev/null) || n=0
+	[ "$n" -gt 0 ] && break
+	sleep 1
+done
+[ "$n" -gt 0 ] || fail "could not plant the values in syslog: $(sshx 'logread | tail -n 3' 2>&1)"
 # token_in VALUE CLASS DIR: the files under DIR where VALUE stands as a
 # whole token, no character of CLASS touching it on either side.
 token_in() { grep -r -l -E "(^|[^$2])$1([^$2]|\$)" "$3"; }
@@ -450,7 +464,7 @@ sshx 'cat /tmp/odi-diag.tar.gz' > "$WORK/diag.tar.gz"
 mkdir "$WORK/diag"
 tar -xzf "$WORK/diag.tar.gz" -C "$WORK/diag" || fail "the bundle is not a readable tar.gz"
 D=$WORK/diag/odi-diag
-for f in MANIFEST.txt dmesg.txt meminfo.txt mounts.txt uptime.txt ps.txt nv.txt metrics.txt \
+for f in MANIFEST.txt dmesg.txt syslog.txt meminfo.txt mounts.txt uptime.txt ps.txt nv.txt metrics.txt \
 	config/lastgood.xml config/lastgood_hs.xml log/qemu-secrets.log log/qemu-ident.log \
 	log/services.log pon/diag.txt pon/omcli_state.txt; do
 	[ -s "$D/$f" ] || fail "the bundle has no $f (MANIFEST: $(cat "$D/MANIFEST.txt" 2>/dev/null))"
@@ -479,6 +493,7 @@ for ident in "$DIAG_SN" "$DIAG_SN_MIXED" "$DIAG_SN_HEX" "$DIAG_SN_PH" "$DIAG_MAC
 done
 grep -q 'Name="GPON_SN" Value="MASKED-ABCD"' "$D/config/lastgood_hs.xml" || fail "GPON_SN is not masked to its last four in the config copy"
 grep -q 'mac=MASKED-D4E5 ' "$D/log/qemu-ident.log" || fail "the colon MAC is not masked in the log: $(cat "$D/log/qemu-ident.log")"
+grep -q 'harness: syslog: ploam=REDACTED .* mac=MASKED-D4E5 ' "$D/syslog.txt" || fail "the syslog copy is not scrubbed: $(grep 'harness: syslog' "$D/syslog.txt")"
 grep -q '^identity: masked' "$D/MANIFEST.txt" || fail "MANIFEST does not say the identity is masked"
 if token_in "$DIAG_SHORT" A-Za-z0-9 "$D" || token_in "$DIAG_SHORT_HEX" 0-9A-Fa-f "$D" ||
 	token_in "$DIAG_SHORT_PH" 0-9A-Fa-f "$D"; then

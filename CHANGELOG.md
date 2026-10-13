@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- The diagnostics bundle includes the syslog ring (`syslog.txt`, from
+  `logread`). omcid sends its `event=` lines (ONU state changes, OMCI
+  provisioning, re-registrations) only to syslog, so a bundle had no record
+  of them. The file gets the same redaction as every other file in the
+  bundle; the qemu harness now plants the secrets and identifiers in syslog
+  too and checks `syslog.txt` is scrubbed.
+
 - `services stop omcid` now keeps omcid down. `svc-omcid.sh` checked only
   `modules.off`, so init restarted omcid at once; it now honours
   `omcid.off` like the other six daemons. Stopping omcid also releases its
