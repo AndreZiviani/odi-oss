@@ -251,9 +251,15 @@ static void hw_set_onu_id(void *ctx, uint8_t onu_id)
 	reg = ODI_GPON_USF_ONU_ID_TX_ONU_ID_SET(reg, onu_id);
 	odi_reg_write(ODI_GPON_USF_ONU_ID_OFF, reg);
 
+	/* A row whose write did not complete is not recorded as written:
+	 * the release would then delete a row this layer never placed.
+	 */
 	if (onu_id != ODI_GPON_ONU_ID_BROADCAST) {
-		odi_switch_gpon_alloc_write(ODI_GPON_HW_ALLOC_ROW_DEFAULT, onu_id);
-		odi_gpon_hw.alloc_used |= (1UL << ODI_GPON_HW_ALLOC_ROW_DEFAULT);
+		if (odi_switch_gpon_alloc_write(ODI_GPON_HW_ALLOC_ROW_DEFAULT, onu_id))
+			ODI_GPON_HW_WARN("Alloc-ID row %u (ONU-ID %u): CAM write not done\n",
+					 ODI_GPON_HW_ALLOC_ROW_DEFAULT, (unsigned int)onu_id);
+		else
+			odi_gpon_hw.alloc_used |= (1UL << ODI_GPON_HW_ALLOC_ROW_DEFAULT);
 	}
 }
 
@@ -772,10 +778,16 @@ void odi_gpon_hw_gem_port_configure(uint16_t gem_port_id, int activate)
 
 	/* The port-table CAM add/TRAFFIC_CFG write repeats identically on
 	 * all three reads of the SAME Configure_Port-ID (react.txt
-	 * confirms it) -- unconditional, every call.
+	 * confirms it) -- unconditional, every call. A write that did not
+	 * complete leaves everything else as it was: the OLT sends the
+	 * message three times, and the next copy writes again.
 	 */
-	odi_switch_gpon_ds_port_write(ODI_GPON_HW_GEM_ROW_PRIMARY, gem_port_id,
-				       activate ? ODI_GPON_HW_TRAFFIC_CFG_PRIMARY : 0U);
+	if (odi_switch_gpon_ds_port_write(ODI_GPON_HW_GEM_ROW_PRIMARY, gem_port_id,
+					  activate ? ODI_GPON_HW_TRAFFIC_CFG_PRIMARY : 0U)) {
+		ODI_GPON_HW_WARN("GEM port 0x%03x row %u: CAM write not done\n",
+				 (unsigned int)gem_port_id, ODI_GPON_HW_GEM_ROW_PRIMARY);
+		return;
+	}
 
 	/* GEM_US_PORT_MAP and the switch-core stream-valid gate do NOT
 	 * repeat, though -- react.txt shows each written exactly once, on
@@ -823,6 +835,7 @@ int odi_gpon_hw_gem_port_encrypted(uint16_t gem_port_id, int encrypted)
 {
 	unsigned long flags;
 	uint32_t ind = 0;
+	int rc;
 
 	if (!odi_gpon_hw.gem_port_active || gem_port_id != odi_gpon_hw.gem_port_id)
 		return odi_switch_gpon_encrypt_port(gem_port_id, encrypted);
@@ -844,10 +857,23 @@ int odi_gpon_hw_gem_port_encrypted(uint16_t gem_port_id, int encrypted)
 	ind = ODI_SW_DSF_GEM_CAM_CTL_REQ_SET(ind, 1);
 	odi_reg_write(ODI_SW_DSF_GEM_CAM_CTL_OFF, ind);
 
+	/* The search is a CAM request like the write after it, on the same
+	 * control word: the write waits for its DONE, with the bound of every
+	 * CAM poll, and is not issued over a search still running.
+	 */
+	rc = odi_poll_reg(ODI_SW_DSF_GEM_CAM_CTL_OFF, ODI_SW_DSF_GEM_CAM_CTL_DONE,
+			  ODI_SW_DSF_GEM_CAM_CTL_DONE, ODI_SW_TABLE_POLL_DELAY_US,
+			  ODI_SW_TABLE_POLL_US, NULL);
 	(void)encrypted;	/* the one capture available never sets it -- nothing to OR in yet */
-	__odi_switch_gpon_ds_port_write(ODI_GPON_HW_GEM_ROW_PRIMARY, gem_port_id,
-					ODI_GPON_HW_TRAFFIC_CFG_PRIMARY);
+	if (!rc)
+		rc = __odi_switch_gpon_ds_port_write(ODI_GPON_HW_GEM_ROW_PRIMARY, gem_port_id,
+						     ODI_GPON_HW_TRAFFIC_CFG_PRIMARY);
 	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
+	if (rc) {
+		ODI_GPON_HW_WARN("GEM port 0x%03x row %u: CAM search or write not done\n",
+				 (unsigned int)gem_port_id, ODI_GPON_HW_GEM_ROW_PRIMARY);
+		return -1;
+	}
 	return 1;
 }
 
@@ -886,7 +912,15 @@ int odi_gpon_hw_alloc_id_assign(uint16_t alloc_id)
 	if (row == ODI_GPON_HW_ALLOC_ROWS)
 		return -1;
 
-	odi_switch_gpon_alloc_write(row, alloc_id);
+	/* Not recorded unless the write completed: the next of the three
+	 * copies the OLT sends then finds no row for this Alloc-ID and writes
+	 * again, and /proc/odi_gpon lists only Alloc-IDs in the CAM.
+	 */
+	if (odi_switch_gpon_alloc_write(row, alloc_id)) {
+		ODI_GPON_HW_WARN("Alloc-ID %u row %u: CAM write not done\n",
+				 (unsigned int)alloc_id, row);
+		return -1;
+	}
 	odi_gpon_hw.alloc_used |= (1UL << row);
 	odi_gpon_hw.alloc_id_values[row] = alloc_id;
 	return (int)row;
@@ -970,7 +1004,7 @@ void odi_gpon_verb_activate(struct odi_gpon_fsm *fsm)
  * ever exercised for the write side up to now), so this is its own
  * small leaf rather than a misuse of odi_switch_gpon_alloc_write().
  */
-static void hw_alloc_id_delete(unsigned int row)
+static int hw_alloc_id_delete(unsigned int row)
 {
 	uint32_t ind = 0;
 
@@ -979,6 +1013,15 @@ static void hw_alloc_id_delete(unsigned int row)
 	odi_reg_write(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, ind);
 	ind = ODI_SW_DSF_ALLOC_CAM_CTL_REQ_SET(ind, 1);
 	odi_reg_write(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, ind);
+
+	/* DONE, as for every CAM request: a delete still running when the
+	 * next request is written can be lost, and a row left valid keeps
+	 * this ONU answering grants for an Alloc-ID the OLT may give another
+	 * ONU. 0, or -ETIMEDOUT.
+	 */
+	return odi_poll_reg(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, ODI_SW_DSF_ALLOC_CAM_CTL_DONE,
+			    ODI_SW_DSF_ALLOC_CAM_CTL_DONE, ODI_SW_TABLE_POLL_DELAY_US,
+			    ODI_SW_TABLE_POLL_US, NULL);
 }
 
 /* Assign_Alloc-ID with type 255 (G.984.3 9.2.3.9, "deallocate"): the OLT
@@ -993,6 +1036,7 @@ int odi_gpon_hw_alloc_id_release(uint16_t alloc_id)
 {
 	unsigned long flags;
 	unsigned int row;
+	int rc;
 
 	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++) {
 		if (row == ODI_GPON_HW_ALLOC_ROW_DEFAULT)
@@ -1005,8 +1049,16 @@ int odi_gpon_hw_alloc_id_release(uint16_t alloc_id)
 		return -1;
 
 	spin_lock_irqsave(&odi_switch_dsf_lock, flags);
-	hw_alloc_id_delete(row);
+	rc = hw_alloc_id_delete(row);
 	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
+	if (rc) {
+		/* Still held: the OLT repeats the deallocation, and the
+		 * next copy deletes again.
+		 */
+		ODI_GPON_HW_WARN("Alloc-ID %u row %u: CAM delete not done\n",
+				 (unsigned int)alloc_id, row);
+		return -1;
+	}
 	odi_gpon_hw.alloc_used &= ~(1UL << row);
 	odi_gpon_hw.alloc_id_values[row] = 0;
 	return (int)row;
@@ -1016,7 +1068,7 @@ int odi_gpon_hw_alloc_id_release(uint16_t alloc_id)
  * Alloc-ID delete above (react.txt L28-29: IND 0x340/0x8340, no PORT_WR
  * write), against DSF_GEM_CAM_CTL instead.
  */
-static void hw_gem_port_delete(unsigned int row)
+static int hw_gem_port_delete(unsigned int row)
 {
 	uint32_t ind = 0;
 
@@ -1025,6 +1077,10 @@ static void hw_gem_port_delete(unsigned int row)
 	odi_reg_write(ODI_SW_DSF_GEM_CAM_CTL_OFF, ind);
 	ind = ODI_SW_DSF_GEM_CAM_CTL_REQ_SET(ind, 1);
 	odi_reg_write(ODI_SW_DSF_GEM_CAM_CTL_OFF, ind);
+
+	return odi_poll_reg(ODI_SW_DSF_GEM_CAM_CTL_OFF, ODI_SW_DSF_GEM_CAM_CTL_DONE,
+			    ODI_SW_DSF_GEM_CAM_CTL_DONE, ODI_SW_TABLE_POLL_DELAY_US,
+			    ODI_SW_TABLE_POLL_US, NULL);
 }
 
 /* Every Alloc-ID CAM row this layer wrote (the default/OMCC row included)
@@ -1039,25 +1095,48 @@ static void hw_release_rows(void)
 {
 	unsigned long flags;
 	unsigned int row;
+	int rc = 0, failed_row = -1;
 
 	spin_lock_irqsave(&odi_switch_dsf_lock, flags);
+	/* Each delete waits for DONE. The first that does not complete ends
+	 * the deletes: the block is not answering, and every further row
+	 * would cost a whole poll bound with interrupts off. The rows not
+	 * deleted stay recorded, so the next release (the next
+	 * Deactivate_ONU-ID, gpondeact, LOS or TO in O4) deletes them again,
+	 * and an Assign_Alloc-ID for one of them finds it still in place.
+	 */
 	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++) {
-		if (odi_gpon_hw.alloc_used & (1UL << row))
-			hw_alloc_id_delete(row);
+		if (!(odi_gpon_hw.alloc_used & (1UL << row)))
+			continue;
+		rc = hw_alloc_id_delete(row);
+		if (rc) {
+			failed_row = (int)row;
+			break;
+		}
+		odi_gpon_hw.alloc_used &= ~(1UL << row);
+		odi_gpon_hw.alloc_id_values[row] = 0;
 	}
-	odi_gpon_hw.alloc_used = 0U;
 
 	if (odi_gpon_hw.gem_port_active) {
-		hw_gem_port_delete(ODI_GPON_HW_GEM_ROW_PRIMARY);
+		if (!rc)
+			rc = hw_gem_port_delete(ODI_GPON_HW_GEM_ROW_PRIMARY);
+		if (rc && failed_row < 0)
+			failed_row = (int)ODI_GPON_HW_GEM_ROW_PRIMARY;
 		odi_reg_write(ODI_SW_DSF_GEM_FLOW_TYPE(ODI_GPON_HW_GEM_ROW_PRIMARY),
 			       ODI_SW_DSF_GEM_FLOW_TYPE_FLAGS_SET(0, 0));
 		odi_reg_write(ODI_SW_US_GEM_PORT_MAP(ODI_GPON_HW_GEM_ROW_PRIMARY),
 			       ODI_SW_US_GEM_PORT_MAP_GEM_PORT_SET(0, 0));
 		odi_reg_write(ODI_SW_PONQ_STREAM_VALID(ODI_GPON_HW_PON_SID_INDEX),
 			       ODI_SW_PONQ_STREAM_VALID_STREAM_ON_SET(0, 0));
-		odi_gpon_hw.gem_port_active = 0;
+		if (!rc)
+			odi_gpon_hw.gem_port_active = 0;
 	}
 	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
+
+	if (rc)
+		ODI_GPON_HW_WARN("release: CAM delete not done at row %d, rows left: alloc 0x%08x gem %d\n",
+				 failed_row, (unsigned int)odi_gpon_hw.alloc_used,
+				 odi_gpon_hw.gem_port_active);
 
 	/* The Encrypted_Port-ID flags kept for flows not yet created belong to
 	 * this activation too.

@@ -5,6 +5,26 @@ listed here.
 
 ## Unreleased
 
+- kernel: the GPON CAM deletes are waited for, and a CAM write that did
+  not complete no longer counts as done. The Alloc-ID and GEM port
+  deletes (on Deactivate_ONU-ID, gpondeact, LOS or TO1 in O4, TO2, and
+  an Alloc-ID deallocation) were issued back to back without waiting for
+  the CAM to finish, so a lost delete could leave an Alloc-ID row valid
+  into the next activation: the ONU then answers grants meant for an
+  Alloc-ID the OLT has given another ONU, the #42 failure, at run time.
+  The search before the OMCC port rewrite was not waited for either.
+  Each delete and that search now waits for DONE with the bound of every
+  CAM poll; the first delete that does not complete ends the release,
+  and the rows not deleted stay recorded, so the next release deletes
+  them again. A write that does not complete records nothing: no
+  Alloc-ID row (the next copy of the OLT's message writes again, and
+  `alloc_ids` lists only what is in the CAM), no OMCC port, and for cmd
+  25 no DS slot and no flow, with the error returned to omcid, which then
+  does not claim the flow. Each case is logged, rate-limited. On a
+  working CAM nothing changes: the writes are the same, the waits are
+  reads. Host-tested with a CAM that never answers
+  (`test/odi_gpon_cam_test.c`).
+
 - kernel: the GPON interrupt now drains every queued downstream PLOAM
   message, not one. The PLOAM_RX event is one bit for however many
   messages arrived, so two queued during one interrupt (an activation
