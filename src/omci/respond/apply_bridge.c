@@ -707,13 +707,25 @@ void bdgconn_rebuild(void)
 			if (!r || r->classId != OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 				continue;
 			tpType = row_u32(r, c47, 3);
-			if ((pass < 2 && tpType != 3) || (pass == 2 && tpType != 6))
+			if ((pass < 2 && tpType != 3 && tpType != MBPCD_TP_GEM_IWTP) ||
+			    (pass == 2 && tpType != 6))
 				continue;
 			/* TPType 3 ("802.1p mapper", G.988): ISP1 points TPPointer at
 			 * the GEM IW TP (mapper via ServProPtr), ISP2 at the mapper. One
 			 * connection per distinct IW TP, with its p-bit when exactly
 			 * one lands on it, VID-only when several do. */
-			if (tpType == 3) {
+			/* TPType 5 ("GEM interworking TP", G.988): the port names the
+			 * GEM IW TP itself, with no mapper, so one connection with no
+			 * p-bit. Seen on a line in 2026-10: skipping it left the stick
+			 * with no service at all (provision_end services=0). An IW TP
+			 * with interworking option 6 is the downstream broadcast GEM,
+			 * which apply_qos.c programs as the broadcast flow instead. */
+			if (tpType == MBPCD_TP_GEM_IWTP) {
+				iw = mib_find(OMCI_ME_GEM_IW_TP, (uint16_t)row_u32(r, c47, 4));
+				if (iw && row_u32(iw, c266, 2) != 6) {
+					tgt_iw[0] = iw; tgt_pbit[0] = -1; ntgt = 1;
+				}
+			} else if (tpType == 3) {
 				uint16_t ptr = (uint16_t)row_u32(r, c47, 4);
 
 				iw = mib_find(OMCI_ME_GEM_IW_TP, ptr);
@@ -769,13 +781,13 @@ void bdgconn_rebuild(void)
 			int nrules, manual;
 
 			iw = tgt_iw[t];
-			ctp = mib_find(OMCI_ME_GEM_PORT_CTP, (uint16_t)row_u32(iw, tpType == 3 ? c266 : c281, 1));
+			ctp = mib_find(OMCI_ME_GEM_PORT_CTP, (uint16_t)row_u32(iw, tpType == 6 ? c281 : c266, 1));
 			if (!ctp)
 				continue;
 			port = row_u32(ctp, c268, 1);
 			dir = row_u32(ctp, c268, 3);
 			nrules = bp_rules(r->inst, tgt_pbit[t], mvid, dir, rules, &manual);
-			if (tpType == 3 && ((pass == 0 && !manual) ||
+			if (tpType != 6 && ((pass == 0 && !manual) ||
 					    (pass == 1 && manual)))
 				continue;
 			for (int k = 0; k < nrules; k++) {

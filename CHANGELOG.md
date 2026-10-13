@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- omcid builds the service for a bridge port of TP type 5 (the GEM
+  interworking TP named directly, no 802.1p mapper). The connection builder
+  walked only type 3 (mapper) and 6 (multicast), so an OLT that provisions
+  this shape left the stick in O5 with no service at all
+  (`provision_end ... services=0`). A type-5 port on the downstream
+  broadcast GEM (interworking option 6) stays the broadcast flow, as before.
+- omcid: `VLAN_MANU_TAG_PRI` 255, or anything above 7, is no manual tag, as
+  on the stock firmware, where 255 is the no-tag value. It used to switch the
+  manual tag on with that priority.
+
 - The diagnostics bundle no longer scrubs a secret made of one repeated
   character from its other files. The factory PLOAM password is twenty
   zeros, and scrubbing it replaced every run of zeros in the MIB dumps
