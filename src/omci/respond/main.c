@@ -73,7 +73,7 @@ static void catch_signals(int fd, uint32_t tid)
 static void usage(void)
 {
 	out("usage: omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state]\n"
-	    "             [-g file]\n"
+	    "             [-g file] [-i file] [-j seconds] [-h]\n"
 	    "\n"
 	    "The OMCI responder: registers for redirect type 1 and answers the\n"
 	    "OLT, and serves the omcli and omcicli queues.\n"

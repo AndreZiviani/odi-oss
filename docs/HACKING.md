@@ -988,7 +988,7 @@ read at boot unless stated. rcS paths are
 
 | file | read at | effect | default | class |
 |---|---|---|---|---|
-| `syslogd.off`, `klogd.off`, `ntpd.off`, `metricsd.off`, `confd.off`, `dropbear.off` | the first line of each `etc/scripts/svc-<name>.sh`; written by `services stop <name>` | that daemon's respawn entry runs a placeholder (`respawn-off.sh`) instead | absent: all run | prod |
+| `syslogd.off`, `klogd.off`, `ntpd.off`, `metricsd.off`, `confd.off`, `dropbear.off`, `omcid.off` | the first lines of each `etc/scripts/svc-<name>.sh` (`omcid.off` also gates the watchdog registration in rcS); written by `services stop <name>` | that daemon's respawn entry runs a placeholder (`respawn-off.sh`) instead | absent: all run | prod |
 | `lan-ip` | `etc/scripts/network.sh` (`OVERRIDE`, line 48) | management address, one line; overrides `LAN_IP_ADDR`, netmask then 255.255.255.0; live with `apply.sh network` | absent: `LAN_IP_ADDR`, else 192.168.1.1/24 | prod |
 | `sds.off` | `network.sh:252` | skip the host SerDes check and fix | absent | prod (escape hatch) |
 | `optics.off` | `pon_step_laser()`, `etc/scripts/rcs-lib.sh` | skip the `laser` verb, so the laser TX enable (GPIO 13) is never driven: **laser off, `gponact` refused, no service**. The `optics` verb (`PIN_GPIO_SELECT`) still runs | absent | prod (escape hatch) |

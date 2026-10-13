@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- `services stop omcid` now keeps omcid down. `svc-omcid.sh` checked only
+  `modules.off`, so init restarted omcid at once; it now honours
+  `omcid.off` like the other six daemons. Stopping omcid also releases its
+  watchdog deadline (re-registered with 0, which frees the client), or the
+  stick would reset a minute later; `start omcid` registers it again, and
+  rcS does not register it while `omcid.off` exists. New
+  `test/services_off_test.sh` checks every daemon `services` accepts honours
+  its flag; `test/odi_wdt_test.c` covers releasing a client.
+- Comments and help corrected: `odi_wdt.h` (registering arms a client's
+  deadline, not its first ping), `flash` (the image defaults hold nine
+  keys), `odi_init.c` (rcS runs 23 switch steps), `omcid -h` (lists `-i`,
+  `-j`, `-h` in the synopsis), `ci.yml` and `kernel/README.md` (the kernel
+  version is the one pinned in `kernel/618/fetch.sh`), and the CPU-port RX
+  watchdog row in `docs/SETTINGS.md` (the PAUSE it counts is the CPU MAC's,
+  not the host port's).
+
 ### Changed
 
 - Docs: refreshed for v1.4.0. README: kernel version, the host-PAUSE row

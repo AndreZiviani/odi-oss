@@ -226,7 +226,7 @@ set)
 default)
 	# Merge the image defaults into the CS file: every key the defaults
 	# file names gets its default value, and every other key is left as it
-	# is. /etc/config_default.xml is ours (rootfs/skeleton), ten keys:
+	# is. /etc/config_default.xml is ours (rootfs/skeleton), nine keys:
 	# DEVICE_TYPE, DUAL_MGMT_MODE, the three OMCI_CUSTOM masks and the four
 	# LOID keys. So this is a reset of those, not of the whole store -- the
 	# management address, the VLAN and the PLOAM password are not in the

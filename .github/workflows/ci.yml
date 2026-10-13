@@ -111,7 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Fetches linux-6.18.53 fresh (kernel/618/fetch.sh) and re-checks its
+      # Fetches the pinned linux-6.18.x fresh (VERSION in kernel/618/fetch.sh) and re-checks its
       # pinned SHA-256 and the upstream GPG signature; packs it into
       # build/kernel-618/tree.tar. Does not compile it -- that is the ~hour
       # this job is not paying.

@@ -10,7 +10,7 @@
  *     the laser on, odi_board.h);
  *   - the seven GPON verbs (gpondrv gpondev gponsn gponpw gponact
  *     gpondeact gponstat): odi_gpon_verb();
- *   - every other verb (the 21 switch steps and the PON steps i2c, i2cen,
+ *   - every other verb (the 23 switch steps rcS runs and the PON steps i2c, i2cen,
  *     gpon, rxsd): odi_switch_sdkinit_verb(), the replay of sdkinit.bin.
  *
  * A verb with no data returns -ENOSYS and logs, so a capture gap shows in

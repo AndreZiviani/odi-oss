@@ -10,6 +10,7 @@
 # place; the old failure to respawn on hardware was supervise.sh losing
 # track of the child, not omcid double-forking).
 [ -f /etc/config/modules.off ] && exec /etc/scripts/respawn-off.sh
+[ -f /etc/config/omcid.off ] && exec /etc/scripts/respawn-off.sh
 [ -x /bin/omcid ] || exec /etc/scripts/respawn-off.sh
 
 # Respawn re-provisioning (docs/BOOT.md): a marker under /var/run, tmpfs

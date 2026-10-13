@@ -243,7 +243,7 @@ static int odi_switch_cpu_rx_sample(u32 *offered, u32 *taken)
 		8,	/* ifOutMulticastPkts */
 		9,	/* ifOutBroadcastPkts */
 		6,	/* ifOutDiscards */
-		13,	/* dot3InPauseFrames: our own PAUSE holding it back */
+		13,	/* dot3InPauseFrames: PAUSE from the CPU MAC (odi_nic) holding it back */
 	};
 	u32 sum = 0;
 	unsigned int i;
