@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.4.1 - 2026-10-13
+
 - Pins: confd v1.3.0 (odi-ui: the Commit button commits both U-Boot
   environment copies and refreshes the slot state; Config shows no control
   or value for a key the current mode ignores), metricsd v1.4.0 (a port
