@@ -26,11 +26,13 @@
 #include <linux/types.h>
 #include <linux/printk.h>
 #define ODI_SW_LOG(fmt, ...) pr_info("odi_switch: " fmt, ##__VA_ARGS__)
+#define ODI_SW_ERR(fmt, ...) pr_err("odi_switch: " fmt, ##__VA_ARGS__)
 #else
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #define ODI_SW_LOG(fmt, ...) printf("odi_switch: " fmt, ##__VA_ARGS__)
+#define ODI_SW_ERR(fmt, ...) printf("odi_switch: " fmt, ##__VA_ARGS__)
 #endif
 
 #include "odi_switch_hw.h"
@@ -117,18 +119,25 @@ void odi_sw_qos_sched_set(uint32_t n, uint32_t value);
 
 /* --- odi_switch_ds_gem.c -------------------------------------------------- */
 
-/* The DS slots, the index range of DSF_GEM_FLOW_TYPE. */
-#define ODI_SWITCH_DS_SLOT_COUNT 32U
+/* The DS slots: every downstream flow cmd 25 can create, rows 0..63 of
+ * the GEM CAM and DSF_GEM_FLOW_TYPE (ODI_SW_CMD_GEM_DS_MAX). The CAM has
+ * 128 rows; the GPON core keeps row 64 for the OMCC port.
+ */
+#define ODI_SWITCH_DS_SLOT_COUNT 64U
 
 /* cmd 25, downstream side (despite the name): the DS GEM port CAM row and
- * TRAFFIC_CFG of slot idx (odi_switch_gpon_ds_port_write()), and the slot
- * record. traffic_cfg: FLAGS, 3 for the OMCI/broadcast GEM port, 2 for data.
+ * TRAFFIC_CFG of slot idx (odi_switch_gpon_ds_port_write()), the slot
+ * record, and the AES bit when an Encrypted_Port-ID for the port came
+ * before it. traffic_cfg: FLAGS, 3 for the OMCI/broadcast GEM port, 2 for
+ * data. A slot past ODI_SWITCH_DS_SLOT_COUNT is written but not recorded,
+ * and logged as an error: AES could never be set on it.
  */
 void odi_sw_gpon_usflow_set(uint32_t idx, uint32_t gem_port_id, uint32_t traffic_cfg);
 
 /* Which DS slot holds which GEM port: recorded when cmd 25 creates the
- * port, looked up when an Encrypted_Port-ID PLOAM names it. _reset is for
- * the host tests, which run several scenarios in one process.
+ * port, looked up when an Encrypted_Port-ID PLOAM names it. _reset, which
+ * also forgets every Encrypted_Port-ID, is for the host tests, which run
+ * several scenarios in one process.
  */
 void odi_switch_ds_slot_record(uint32_t idx, uint32_t gem_port_id);
 int odi_switch_ds_slot_find(uint32_t gem_port_id, uint32_t *idx_out);
@@ -136,9 +145,18 @@ void odi_switch_ds_slot_reset(void);
 
 /* Sets (enable 1) or clears the AES bit of the DS GEM port an
  * Encrypted_Port-ID PLOAM names; called by the GPON core (odi_gpon_hw.c).
- * Returns 0, or -1 when no DS slot is recorded for gem_port_id yet.
+ * The flag is kept per GEM port either way, and cmd 25 applies it to a
+ * slot it creates for that port later. Returns 0, or -1 when no DS slot is
+ * recorded for gem_port_id yet.
  */
 int odi_switch_gpon_encrypt_port(uint16_t gem_port_id, int enable);
+
+/* Forgets every flag Encrypted_Port-ID left: called by the GPON core when
+ * it discards the ONU-ID (odi_gpon_hw.c), since the OLT configures the
+ * ports again for the next activation. The AES bits already set on
+ * existing slots stay.
+ */
+void odi_switch_ds_aes_forget(void);
 
 /* --- odi_switch_cf.c ------------------------------------------------------ */
 

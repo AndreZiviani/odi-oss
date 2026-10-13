@@ -746,7 +746,8 @@ void odi_gpon_hw_gem_port_configure(uint16_t gem_port_id, int activate)
  * 0), so this path is forward-looking against the spec, not a
  * reproduction of a captured sequence. Returns
  * odi_switch_gpon_encrypt_port()'s own convention (0 =
- * applied, -1 = no DS slot recorded yet for this Port-ID) for that path,
+ * applied, -1 = no DS slot recorded yet for this Port-ID, the flag kept
+ * for when cmd 25 creates it) for that path,
  * or the OMCC-row convention below (1 = applied, 0 = not the OMCC row --
  * impossible now that the OMCC row falls through to the branch above).
  */
@@ -989,6 +990,11 @@ static void hw_release_rows(void)
 		odi_gpon_hw.gem_port_active = 0;
 	}
 	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
+
+	/* The Encrypted_Port-ID flags kept for flows not yet created belong to
+	 * this activation too.
+	 */
+	odi_switch_ds_aes_forget();
 }
 
 void odi_gpon_verb_deactivate(struct odi_gpon_fsm *fsm)

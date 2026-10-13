@@ -461,8 +461,13 @@ outside any OMCI command. The other FLAGS bits are multicast (0), Ethernet
 The GPON core decodes that PLOAM and calls
 `odi_switch_gpon_encrypt_port()`, which turns the GEM port id into its DS
 slot (recorded by cmd 25 when it creates the port) and sets or clears the
-one bit with a read-modify-write. A PLOAM for a port cmd 25 has not
-created yet is logged and ignored. Not reproduced from the capture: the CAM
+one bit with a read-modify-write. It also keeps the flag per GEM port, and
+cmd 25 applies it when it writes the slot: one OLT sends Encrypted_Port-ID
+right after O5, before any OMCI has created the port, and a flow cmd 25
+writes again (an OMCI MIB reset) gets FLAGS without the bit and no new
+PLOAM. The kept flags are forgotten when the ONU-ID is discarded; the next
+activation configures the ports again. The table covers DS slots 0..63,
+every flow cmd 25 accepts. Not reproduced from the capture: the CAM
 rewrite around the bit (it writes the same GEM id back), and the interrupt
 mask save and restore the stock handler makes around it.
 
