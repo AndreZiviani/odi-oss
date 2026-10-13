@@ -51,19 +51,19 @@ int odi_gpon_parse_pw(const char *arg, uint8_t pw[ODI_GPON_PW_LEN])
 	len = strlen(arg);
 	if (len == 0U)
 		return 0;
-	if (len > 2U && arg[0] == '0' && (arg[1] == 'x' || arg[1] == 'X')) {
-		if (pw_hex(arg + 2, len - 2U, pw))
-			return 0;
-		memset(pw, 0, ODI_GPON_PW_LEN);
-		/* "0x" and then something else is still text if it fits. */
-	}
-	if (pw_hex(arg, len, pw))
+	/* Short hex only with the explicit prefix. */
+	if (len > 2U && arg[0] == '0' && (arg[1] == 'x' || arg[1] == 'X') &&
+	    pw_hex(arg + 2, len - 2U, pw))
 		return 0;
+	memset(pw, 0, ODI_GPON_PW_LEN);
+	/* Exactly 20 characters: hex, as before. */
+	if (len == 2U * ODI_GPON_PW_LEN)
+		return pw_hex(arg, len, pw) ? 0 : -EINVAL;
+	/* 1..10 characters: the text itself, as before, even when every
+	 * character happens to be a hex digit. */
 	if (len <= ODI_GPON_PW_LEN) {
-		memset(pw, 0, ODI_GPON_PW_LEN);
 		memcpy(pw, arg, len);
 		return 0;
 	}
-	memset(pw, 0, ODI_GPON_PW_LEN);
 	return -EINVAL;
 }

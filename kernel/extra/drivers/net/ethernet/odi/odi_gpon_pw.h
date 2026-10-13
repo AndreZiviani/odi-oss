@@ -16,24 +16,21 @@
 #define ODI_GPON_PW_LEN 10U
 
 /*
- * The config store keeps GPON_PLOAM_PASSWD as the hex of the password (the
- * web UI shows the decoded text beside it and asks for the hex back), and
- * the vendor tools also hand over plain text, so the argument is read in
- * this order, first match wins:
+ * What every value that registers today keeps meaning, so nothing that works
+ * changes; the one addition is an explicit short-hex form. First match wins:
  *
  *   - empty or NULL: no password, ten zero bytes;
  *   - "0x" or "0X" and then an even number (2..20) of hex digits: those
- *     bytes, the vendor omci_app convention;
- *   - an even number (2..20) of hex digits: those bytes;
- *   - anything else of 1..10 characters: the characters themselves.
+ *     bytes (new; the vendor omci_app convention);
+ *   - exactly 20 characters: 20 hex digits, 10 bytes; -EINVAL if one is not
+ *     a hex digit (as before);
+ *   - 1..10 characters: the characters themselves, EVEN WHEN all are hex
+ *     digits ("123456" is six ASCII bytes, as before).
  *
- * Every form is zero-padded on the right to ten bytes. Anything longer, or an
- * odd run of 11..19 characters, or an unusable "0x" form, is -EINVAL and pw
- * is left all zero.
- *
- * The one ambiguity is a plain-text password of 2..10 characters that is
- * also valid hex ("1234", "deadbeef"): it is read as hex, as the store
- * holds it. A text password that is not all hex digits is always read as text.
+ * Every form is zero-padded on the right to ten bytes. Anything else
+ * (11..19 or more than 20 characters, 20 with a non-hex digit) is -EINVAL
+ * and pw is left all zero. Short hex without the prefix is deliberately not
+ * guessed at: it cannot be told from text.
  */
 int odi_gpon_parse_pw(const char *arg, uint8_t pw[ODI_GPON_PW_LEN]);
 
