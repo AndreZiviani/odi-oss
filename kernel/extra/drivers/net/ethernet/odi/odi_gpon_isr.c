@@ -63,6 +63,23 @@ static void odi_gpon_isr_dispatch(struct odi_gpon_fsm *fsm, const struct odi_gpo
 	odi_gpon_hw_note_ploam_rx(msg);
 	odi_gpon_fsm_handle_event(fsm, odi_gpon_hw_ops(), NULL, ODI_GPON_EVENT_PLOAM_RX, msg);
 
+	/* The directed messages below act, and are acknowledged, only when
+	 * they carry our ONU-ID (odi_gpon_fsm_directed_to_us()): a broadcast
+	 * copy is not ours to apply. BER_Interval and Key_Switching_Time may
+	 * be broadcast and are handled either way.
+	 */
+	switch (msg->type) {
+	case ODI_GPON_DS_RANGING_TIME:
+	case ODI_GPON_DS_CONFIGURE_PORT_ID:
+	case ODI_GPON_DS_ENCRYPTED_PORT_ID:
+	case ODI_GPON_DS_ASSIGN_ALLOC_ID:
+		if (!odi_gpon_fsm_directed_to_us(fsm, msg))
+			return;
+		break;
+	default:
+		break;
+	}
+
 	switch (msg->type) {
 	case ODI_GPON_DS_RANGING_TIME:
 		/* The FSM's own ops->set_eqd() already ran, once, on the

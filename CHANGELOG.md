@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- GPON: a broadcast copy of a message G.984.3 directs to one ONU
+  (Ranging_Time, Request_Password, Request_Key, Encrypted_Port-ID,
+  Assign_Alloc-ID, Configure_Port-ID) is no longer acted on or
+  acknowledged. The MAC already drops other ONUs' messages but lets the
+  broadcast ID through, and the driver took such a copy as its own: a
+  broadcast Ranging_Time would have ranged the stick with another ONU's
+  delay. The stock driver checks the ONU-ID the same way. No OLT here has
+  sent one.
+
+- omcid answers OMCI Get current data (message type 28) the way it answers
+  a Get: G.988 gives both the same layout, and omcid keeps one set of
+  values per entity. An OLT that polls the GEM port PM counters with it
+  every minute got "not supported" each time, and the log an unknown
+  message type (#29).
+
 - GPON: a broadcast POPUP (O6 back to O4, after a loss the whole PON
   shared) now ranges the stick again from the pre-ranged burst and the
   pre-assigned delay of the last Upstream_Overhead, as in its first O4

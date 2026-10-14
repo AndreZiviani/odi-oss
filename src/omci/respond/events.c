@@ -511,7 +511,7 @@ int ev_msg_known(uint8_t mt)
 	       mt == OMCI_MT_MIB_UPLOAD || mt == OMCI_MT_MIB_UPLOAD_NEXT ||
 	       mt == OMCI_MT_MIB_RESET || mt == OMCI_MT_TEST ||
 	       (mt >= OMCI_MT_START_SW_DOWNLOAD && mt <= OMCI_MT_REBOOT) ||
-	       mt == OMCI_MT_GET_NEXT;
+	       mt == OMCI_MT_GET_NEXT || mt == OMCI_MT_GET_CURRENT_DATA;
 }
 
 static const char *unk_op(uint8_t mt)
@@ -522,6 +522,7 @@ static const char *unk_op(uint8_t mt)
 	case OMCI_MT_SET:      return "set";
 	case OMCI_MT_GET:      return "get";
 	case OMCI_MT_GET_NEXT: return "get_next";
+	case OMCI_MT_GET_CURRENT_DATA: return "get_current_data";
 	case OMCI_MT_TEST:     return "test";
 	default:               return 0;
 	}

@@ -221,6 +221,15 @@ void odi_gpon_fsm_set_password(struct odi_gpon_fsm *fsm, const uint8_t password[
  */
 int odi_gpon_fsm_line_event(const struct odi_gpon_fsm *fsm, int alarm, enum odi_gpon_event *event);
 
+/* Whether a directed downstream message (Ranging_Time, Request_Password,
+ * Request_Key, Encrypted_Port-ID, Assign_Alloc-ID, Configure_Port-ID: G.984.3
+ * clause 9.2.3, "Directed message to one ONU") is addressed to this ONU:
+ * its ONU-ID is the one this FSM holds, and not the broadcast ID. The MAC
+ * already drops other ONUs' unicast messages; a broadcast copy is what
+ * reaches the dispatch and is not acted on. Returns 1 if addressed to us.
+ */
+int odi_gpon_fsm_directed_to_us(const struct odi_gpon_fsm *fsm, const struct odi_gpon_ploam *msg);
+
 /* The pure transition function. msg is only read for
  * ODI_GPON_EVENT_PLOAM_RX (must be non-NULL then); ignored (may be NULL)
  * for every other event.
