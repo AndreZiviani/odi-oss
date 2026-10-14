@@ -469,6 +469,10 @@ static void gen_pri_filter_rule(struct omci_vlan_oper *vr, unsigned pri)
  * one the OLT's class 171 names (olt_tag()). Set by bdgconn_rebuild(). */
 static int tag_pri;
 
+/* Whether that tag came from the OLT's class 171 rather than the manual
+ * settings. Set by bdgconn_rebuild(). */
+static int tag_from_olt;
+
 /* The tag the OLT's class 171 provisions on the UNI, when the stick is not in
  * manual mode (VLAN_CFG_TYPE other than 1, as the stock firmware gates it):
  * the one shape evtocd_olt_tag() accepts, in the instance associated with the
@@ -608,18 +612,25 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		int pri = tbl[2 * e] >> 5;
 		int had = n;
 
-		if (f.tagged != FWD_TAG_PRI && vid == mvid) {
+		if (f.tagged != FWD_TAG_PRI && vid == mvid && !*manual) {
 			/* The service VID is the untagged handoff. OEM still has
 			 * a class-84 row for it, but builds the manual add-tag
 			 * rule. */
-			if (*manual)
-				continue;
 			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
 			if (n > had) {
 				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
 				*manual = 1;
 			}
-		} else if (f.tagged == FWD_TAG_VID) {
+			had = n;
+		}
+		/* A manual tag replaces the entry. A tag from class 171 does not:
+		 * that table adds a tag to untagged frames only, and G.988 leaves
+		 * frames that arrive tagged on its default rule (forward as they
+		 * are), so the entry still passes them. The add-tag rule is
+		 * installed first and so still takes the downstream frames. */
+		if (f.tagged != FWD_TAG_PRI && vid == mvid && !tag_from_olt)
+			continue;
+		if (f.tagged == FWD_TAG_VID) {
 			n = bp_put(rules, n, "vid-filter", vid, pbit);
 			if (n > had)
 				gen_vid_filter_rule(&rules[had].vr, (unsigned)vid, pbit);
@@ -691,8 +702,11 @@ void bdgconn_rebuild(void)
 	 * stock stack gates it (cfgstore.c); -1 builds no manual tag. */
 	mvid = cfg_manual_vid();
 	tag_pri = vlanCfg.pri;
-	if (mvid < 0)
+	tag_from_olt = 0;
+	if (mvid < 0) {
 		mvid = olt_tag(&tag_pri);
+		tag_from_olt = mvid >= 0;
+	}
 	/* Service ids are classifier priority. OEM installs the configured
 	 * untagged service first, the other unicast services in reverse MIB order,
 	 * and the broad downstream multicast rule last. */

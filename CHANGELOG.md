@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- OMCI: when the tag comes from the OLT (class 171 adds a VLAN to untagged
+  frames, `VLAN_CFG_TYPE` other than 1) and the class 84 list on the GEM
+  side names that same VLAN, frames that arrive already tagged with it pass
+  again, as G.988 leaves them on the table's default rule. Since
+  v1.4.2-beta.2 that entry built only the add-tag rule, so a router that
+  tags the service VLAN itself was dropped at the LAN port. Manual mode is
+  unchanged.
+
 - Pin: confd v1.3.1 (odi-ui): the Config subtab "OLT identity" is now
   "ONU identity", and it carries `OMCI_FIXED_ME`.
 
