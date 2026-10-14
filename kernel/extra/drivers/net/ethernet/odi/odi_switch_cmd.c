@@ -115,6 +115,13 @@ static const int odi_sw_cmd23_use_213[] = { 0, 0, 0, 1, 1 };
 #define ODI_SW_CMD62_AGE_TICKS		3000U	/* cmd 62 when omcid sends 0 */
 #define ODI_SW_CMD62_AGE_ON_LINK_DOWN	1U
 
+static const struct odi_switch_flow_ops *odi_sw_flow_ops;
+
+void odi_switch_cmd_set_flow_ops(const struct odi_switch_flow_ops *ops)
+{
+	odi_sw_flow_ops = ops;
+}
+
 void odi_switch_cmd_reset_state(void)
 {
 	unsigned int i;
@@ -135,6 +142,8 @@ void odi_switch_cmd_reset_state(void)
 		odi_sw_gem_ds_cfg[i] = 0;
 		odi_sw_gem_us_gem[i] = 0;
 	}
+	if (odi_sw_flow_ops && odi_sw_flow_ops->clear)
+		odi_sw_flow_ops->clear();
 }
 
 /* cmd 62: the ageing time. The argument is a raw 4-byte value; omcid
@@ -326,6 +335,8 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 			odi_sw_gem_ds_cfg[idx] = traffic_cfg;
 		}
 		flow_mark(odi_sw_gem_ds_used, idx);
+		if (odi_sw_flow_ops && odi_sw_flow_ops->set)
+			odi_sw_flow_ops->set(0, idx, g->gem_port);
 		return 0;
 	}
 
@@ -373,6 +384,8 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 		}
 		if (slot < OMCI_FLOWS_MAX)
 			odi_sw_gem_us_gem[slot] = g->gem_port;
+		if (odi_sw_flow_ops && odi_sw_flow_ops->set)
+			odi_sw_flow_ops->set(1, slot, g->gem_port);
 		return 0;
 	}
 

@@ -186,6 +186,19 @@ static int cmd_gpon_flows(void)
 	return 0;
 }
 
+/* The lines of /proc/odi_gpon/flows, as the driver prints them: one per
+ * active flow, the GEM port, and the totals it has accumulated since the flow
+ * was created. Never read from the registers here: they clear on read, and
+ * the driver is their one reader. */
+static int cmd_gpon_flow_counters(void)
+{
+	if (hw_gpon_flow_counters_get(out_n) != 0) {
+		out("% no /proc/odi_gpon/flows: this kernel has no per-flow counters\n");
+		return 1;
+	}
+	return 0;
+}
+
 /* ---------------------------------------------------------------- MIB */
 
 /* A heading per port, then one "%-35s: %25llu" line per counter the driver
@@ -327,6 +340,8 @@ int cmd_run(const struct parsed *p)
 		return cmd_transceiver_alarms();
 	case CMD_GPON_FLOWS:
 		return cmd_gpon_flows();
+	case CMD_GPON_FLOW_COUNTERS:
+		return cmd_gpon_flow_counters();
 	case CMD_MIB_DUMP:
 		return cmd_mib_dump(&p->ports);
 	case CMD_REG_GET:

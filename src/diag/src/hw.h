@@ -6,6 +6,9 @@
  *   /proc/odi_gpon/status
  *                    the GPON state machine state and the last LOS sample
  *                    (odi_gpon.c)
+ *   /proc/odi_gpon/flows
+ *                    the per-flow GEM counters the driver accumulates
+ *                    (odi_gpon.c)
  *   netlink          the GEM flows odi_switch recorded (odi_omci.c,
  *                    OMCI_FLOWS_CMD)
  *
@@ -98,5 +101,12 @@ int hw_l2_mode(uint32_t *rows, uint32_t *ipmc_on_group);
  * flow readback (EOPNOTSUPP). */
 struct omci_flows;
 int hw_gpon_flows_get(struct omci_flows *f);
+
+/* The per-flow GEM counters, as /proc/odi_gpon/flows has them, handed to
+ * emit() in pieces as they are read. The hardware registers behind them clear
+ * when read, so the driver is their only reader and this is the only path:
+ * never read them through hw_addr_get(). Returns 0 when the file was read,
+ * 1 when it cannot be opened (a kernel without per-flow counters). */
+int hw_gpon_flow_counters_get(void (*emit)(const char *s, int n));
 
 #endif
