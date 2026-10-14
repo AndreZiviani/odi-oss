@@ -561,6 +561,25 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		out_fmt(", %d bytes\n", (long)(n - 3));
 		return;
 	}
+	/* A class OMCI_FIXED_ME names, when omcid has no model of its own for
+	 * it: the configured bytes under the mask the OLT asked for. The bytes
+	 * are not logged; they are the owner's (cfgstore.c). */
+	if ((mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA) && !c) {
+		const struct fixed_me *fx = fixed_me_find(cls);
+
+		if (fx) {
+			uint16_t mask = nl_get16(f + 8);
+
+			body[0] = OMCI_OK;
+			nl_put16(body + 1, mask);
+			for (int i = 0; i < fx->len; i++)
+				body[3 + i] = fx->data[i];
+			send_resp(fd, tid, f, body, (uint16_t)(3 + fx->len));
+			out_fmt("-> ok, mask %04x, %d bytes (OMCI_FIXED_ME)\n",
+				(long)mask, (long)fx->len);
+			return;
+		}
+	}
 	/* Accept what the OLT provisions without acting on it. Nothing here
 	 * configures hardware or keeps a MIB: the point is to see the whole
 	 * script the line runs, which only appears if each step is

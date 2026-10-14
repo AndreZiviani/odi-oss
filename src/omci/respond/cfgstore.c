@@ -776,6 +776,89 @@ void cfg_load_unknown_me(void)
 				    v, sizeof v) == 1 && v[0] == '1';
 }
 
+/* ------------------------------------------------ OMCI_FIXED_ME
+ *
+ * Classes omcid has no model for, each answered to a Get (and a Get current
+ * data) with bytes the owner chooses: an OLT that reads vendor-specific
+ * entities of its own ONUs gets the values it expects, which the owner
+ * copies from a native ONU. The key holds up to FIXED_ME_ENTRIES entries
+ * separated by spaces or commas, each CLASS:HEX -- the class in decimal
+ * (1..65535), the attribute bytes in hex (an optional 0x, 1 to 25 bytes,
+ * what fits a baseline Get response) in the order of the attributes the OLT
+ * asks for:
+ *
+ *     OMCI_FIXED_ME=200:0x0011aa,201:01020304
+ *
+ * In odi.conf, so the values live on the stick only. Anything malformed --
+ * a bad entry, a class twice, too many entries -- turns the whole key off,
+ * so a typo cannot answer half of what the owner meant. */
+struct fixed_me_set fixed_me;
+
+static int fixed_me_entry(const char *v, int n, struct fixed_me *e)
+{
+	int i = 0, cls = 0;
+
+	while (i < n && v[i] >= '0' && v[i] <= '9' && i < 5)
+		cls = cls * 10 + (v[i++] - '0');
+	if (i == 0 || i >= n || v[i] != ':' || cls < 1 || cls > 65535)
+		return -1;
+	i++;
+	if (n - i >= 2 && v[i] == '0' && (v[i + 1] == 'x' || v[i + 1] == 'X'))
+		i += 2;
+	if (n <= i || (n - i) % 2 || (n - i) / 2 > FIXED_ME_MAX)
+		return -1;
+	e->cls = (uint16_t)cls;
+	e->len = 0;
+	for (; i < n; i += 2) {
+		int hi = hex_nib(v[i]), lo = hex_nib(v[i + 1]);
+
+		if (hi < 0 || lo < 0)
+			return -1;
+		e->data[e->len++] = (uint8_t)(hi << 4 | lo);
+	}
+	return 0;
+}
+
+void cfg_load_fixed_me(void)
+{
+	static char v[FIXED_ME_ENTRIES * 64];
+	struct fixed_me_set s;
+	int n, i = 0;
+
+	fixed_me.n = 0;
+	s.n = 0;
+	n = cfg_odi_get(CFG_ODI_PATH, "OMCI_FIXED_ME", v, sizeof v);
+	if (n <= 0 || n >= (int)sizeof v - 1)
+		return;
+	while (i < n) {
+		int start, k;
+
+		while (i < n && (v[i] == ' ' || v[i] == ','))
+			i++;
+		if (i >= n)
+			break;
+		start = i;
+		while (i < n && v[i] != ' ' && v[i] != ',')
+			i++;
+		if (s.n >= FIXED_ME_ENTRIES ||
+		    fixed_me_entry(v + start, i - start, &s.e[s.n]) < 0)
+			return;
+		for (k = 0; k < s.n; k++)
+			if (s.e[k].cls == s.e[s.n].cls)
+				return;
+		s.n++;
+	}
+	fixed_me = s;
+}
+
+const struct fixed_me *fixed_me_find(uint16_t cls)
+{
+	for (int i = 0; i < fixed_me.n; i++)
+		if (fixed_me.e[i].cls == cls)
+			return &fixed_me.e[i];
+	return 0;
+}
+
 /* ------------------------------------------------------- config reload
  *
  * Every key omcid holds, read again, and the comparison that decides what a
@@ -790,6 +873,7 @@ void cfg_load_all(void)
 	cfg_load_vlan();
 	cfg_load_report();
 	cfg_load_unknown_me();
+	cfg_load_fixed_me();
 }
 
 void cfg_snap_take(struct cfg_snap *s)
@@ -798,6 +882,7 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->vlan = vlanCfg;
 	s->report = report;
 	s->unknown_me_ok = unknown_me_ok;
+	s->fixed = fixed_me;
 }
 
 void cfg_snap_restore(const struct cfg_snap *s)
@@ -806,6 +891,7 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	vlanCfg = s->vlan;
 	report = s->report;
 	unknown_me_ok = s->unknown_me_ok;
+	fixed_me = s->fixed;
 }
 
 /* Two optional strings are the same when both are unset or empty, or both
@@ -854,6 +940,18 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 	}
 	if (o->unknown_me_ok != n->unknown_me_ok)
 		m |= CFGD_UNKNOWN_ME;
+	if (o->fixed.n != n->fixed.n)
+		m |= CFGD_FIXED_ME;
+	else
+		for (int i = 0; i < n->fixed.n && !(m & CFGD_FIXED_ME); i++) {
+			const struct fixed_me *a = &o->fixed.e[i], *b = &n->fixed.e[i];
+
+			if (a->cls != b->cls || a->len != b->len)
+				m |= CFGD_FIXED_ME;
+			for (int k = 0; k < b->len && !(m & CFGD_FIXED_ME); k++)
+				if (a->data[k] != b->data[k])
+					m |= CFGD_FIXED_ME;
+		}
 	if (o->vlan.type != n->vlan.type)
 		m |= CFGD_VLAN_TYPE;
 	if (o->vlan.mode != n->vlan.mode)
@@ -883,6 +981,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_HW_VER, "ONU_HW_VERSION" },
 		{ CFGD_SWITCH, "omci-identity.on" },
 		{ CFGD_UNKNOWN_ME, "OMCI_UNKNOWN_ME_OK" },
+		{ CFGD_FIXED_ME, "OMCI_FIXED_ME" },
 		{ CFGD_VLAN_TYPE, "VLAN_CFG_TYPE" },
 		{ CFGD_VLAN_MODE, "VLAN_MANU_MODE" },
 		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },

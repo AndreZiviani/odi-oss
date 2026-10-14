@@ -14,6 +14,15 @@ listed here.
   delay. The stock driver checks the ONU-ID the same way. No OLT here has
   sent one.
 
+- `OMCI_FIXED_ME` (odi.conf, `flash set`): omcid answers a Get or Get
+  current data of classes it has no model for with configured bytes, under
+  the mask the OLT asked for. Up to 8 entries `CLASS:HEX`, for example
+  `200:0x0011aa,201:01020304`. For an OLT that reads vendor-specific
+  entities of its own ONUs: the owner copies the bytes from a native ONU,
+  and they stay on the stick, out of the image and the logs; the diagnostics
+  bundle redacts the key. A class omcid implements is never overridden.
+  Changing the key re-registers the ONU, as the other identity keys do.
+
 - omcid answers OMCI Get current data (message type 28) the way it answers
   a Get: G.988 gives both the same layout, and omcid keeps one set of
   values per entity. An OLT that polls the GEM port PM counters with it
