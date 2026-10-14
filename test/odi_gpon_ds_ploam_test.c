@@ -271,6 +271,117 @@ static void test_hook_per_message(void)
 	      "then with the state Assign_ONU-ID found (O3)");
 }
 
+/* G.984.3 gives Ranging_Time, Request_Password, Request_Key,
+ * Encrypted_Port-ID, Assign_Alloc-ID and Configure_Port-ID as directed
+ * messages (clauses 9.2.3.4, 9.2.3.8-9.2.3.10, 9.2.3.13, 9.2.3.14), and
+ * the ONU acts on one when its ONU-ID matches (clause 10.2.5.1 d) for
+ * Ranging_Time). The MAC filters other ONUs' unicast messages
+ * (DS_PLOAM_CFG 0x70b, the boot replay) but passes the broadcast ID, so a
+ * broadcast copy of one of these reaches the dispatch: it must change
+ * nothing and draw no Acknowledge. The same message with our ONU-ID still
+ * works.
+ */
+static unsigned int us_sent(void)
+{
+	unsigned int rx, tx;
+
+	odi_gpon_get_ploam_counts(&rx, &tx);
+	return tx;
+}
+
+static unsigned int writes_to(uint32_t addr)
+{
+	unsigned int i, n = 0;
+
+	for (i = 0; i < odi_mock.log_n; i++)
+		if (odi_mock.log[i].kind == 'W' && odi_mock.log[i].addr == addr)
+			n++;
+	return n;
+}
+
+static void test_broadcast_copy_of_directed_message(void)
+{
+	static const uint8_t directed[] = {
+		ODI_GPON_DS_REQUEST_PASSWORD, ODI_GPON_DS_REQUEST_KEY,
+		ODI_GPON_DS_ENCRYPTED_PORT_ID, ODI_GPON_DS_ASSIGN_ALLOC_ID,
+		ODI_GPON_DS_CONFIGURE_PORT_ID,
+	};
+	struct odi_gpon_fsm fsm;
+	struct odi_gpon_ploam m;
+	unsigned int i, tx0;
+
+	/* O4: a broadcast Ranging_Time neither ranges nor writes the EqD. */
+	setup(&fsm);
+	fsm.state = ODI_GPON_STATE_O4;
+	fsm.onu_id = TEST_ONU_ID;
+	m = ds(ODI_GPON_ONU_ID_BROADCAST, ODI_GPON_DS_RANGING_TIME);
+	m.content[3] = 0x77U;
+	m.content[4] = 0x64U;
+	queue(&m);
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(fsm.state == ODI_GPON_STATE_O4, "O4: a broadcast Ranging_Time does not range");
+	CHECK(writes_to(ODI_GPON_USF_EQ_DELAY_OFF) == 0U, "O4: a broadcast Ranging_Time writes no EqD");
+	m.onu_id = TEST_ONU_ID;
+	queue(&m);
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(fsm.state == ODI_GPON_STATE_O5, "O4: our own Ranging_Time still ranges");
+
+	/* O5: a broadcast Ranging_Time does not move the EqD either. */
+	setup(&fsm);
+	fsm.state = ODI_GPON_STATE_O5;
+	fsm.onu_id = TEST_ONU_ID;
+	m = ds(ODI_GPON_ONU_ID_BROADCAST, ODI_GPON_DS_RANGING_TIME);
+	m.content[4] = 0x10U;
+	queue(&m);
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(writes_to(ODI_GPON_USF_EQ_DELAY_OFF) == 0U, "O5: a broadcast Ranging_Time writes no EqD");
+
+	/* O5: the others, broadcast, draw no upstream message and no CAM work. */
+	for (i = 0; i < sizeof(directed); i++) {
+		char what[96];
+
+		setup(&fsm);
+		fsm.state = ODI_GPON_STATE_O5;
+		fsm.onu_id = TEST_ONU_ID;
+		m = ds(ODI_GPON_ONU_ID_BROADCAST, directed[i]);
+		m.content[0] = 0x03U;	/* Encrypted_Port-ID a = b = 1; Configure_Port-ID activate */
+		m.content[1] = 0x29U;	/* Port-ID / Alloc-ID 0x291 */
+		m.content[2] = 0x10U;
+		queue(&m);
+		tx0 = us_sent();
+		odi_gpon_isr_poll(&fsm, NULL);
+		snprintf(what, sizeof what, "O5: broadcast type 0x%02x draws no upstream message", directed[i]);
+		CHECK(us_sent() == tx0, what);
+		snprintf(what, sizeof what, "O5: broadcast type 0x%02x touches no CAM", directed[i]);
+		CHECK(writes_to(ODI_SW_DSF_GEM_CAM_CTL_OFF) == 0U &&
+		      writes_to(ODI_SW_DSF_ALLOC_CAM_CTL_OFF) == 0U, what);
+	}
+
+	/* Our own Assign_Alloc-ID is still applied and acknowledged. */
+	setup(&fsm);
+	fsm.state = ODI_GPON_STATE_O5;
+	fsm.onu_id = TEST_ONU_ID;
+	m = ds(TEST_ONU_ID, ODI_GPON_DS_ASSIGN_ALLOC_ID);
+	m.content[0] = 0x29U;
+	m.content[1] = 0x10U;
+	queue(&m);
+	tx0 = us_sent();
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(us_sent() == tx0 + 1U, "O5: our own Assign_Alloc-ID is acknowledged");
+	CHECK(writes_to(ODI_SW_DSF_ALLOC_CAM_CTL_OFF) > 0U, "O5: our own Assign_Alloc-ID writes the Alloc-ID CAM");
+
+	/* BER_Interval may be broadcast (stock acts on either): still acknowledged. */
+	setup(&fsm);
+	fsm.state = ODI_GPON_STATE_O5;
+	fsm.onu_id = TEST_ONU_ID;
+	m = ds(ODI_GPON_ONU_ID_BROADCAST, ODI_GPON_DS_BER_INTERVAL);
+	m.content[3] = 0x01U;
+	queue(&m);
+	tx0 = us_sent();
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(us_sent() == tx0 + 1U, "O5: a broadcast BER_Interval is still acknowledged");
+}
+
 int main(void)
 {
 	test_three_queued_one_interrupt();
@@ -279,6 +390,7 @@ int main(void)
 	test_stuck_fifo_bounded();
 	test_empty_lags_pop();
 	test_hook_per_message();
+	test_broadcast_copy_of_directed_message();
 	CHECK(odi_mock_locks_idle(), "no lock left held");
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

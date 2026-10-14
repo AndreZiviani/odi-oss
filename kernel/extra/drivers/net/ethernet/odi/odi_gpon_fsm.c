@@ -68,6 +68,11 @@ static int odi_gpon_onu_id_matches(const struct odi_gpon_fsm *fsm, uint8_t onu_i
 	return onu_id == fsm->onu_id || onu_id == ODI_GPON_ONU_ID_BROADCAST;
 }
 
+int odi_gpon_fsm_directed_to_us(const struct odi_gpon_fsm *fsm, const struct odi_gpon_ploam *msg)
+{
+	return msg->onu_id != ODI_GPON_ONU_ID_BROADCAST && msg->onu_id == fsm->onu_id;
+}
+
 /* Stops whatever timer is running for the state being left, if any. Safe
  * to call from any state.
  */
@@ -393,8 +398,12 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 
 	case ODI_GPON_STATE_O4:
 		/* No case for ODI_GPON_SN_REQUEST_GRANT here either, same
-		 * reason as O3 above.
+		 * reason as O3 above. Ranging_Time and Request_Password are
+		 * directed messages: the EqD is taken only from ours (clause
+		 * 10.2.5.1 d)).
 		 */
+		if (!odi_gpon_fsm_directed_to_us(fsm, msg))
+			break;
 		if (msg->type == ODI_GPON_DS_RANGING_TIME) {
 			odi_gpon_decode_ranging_time(msg, &ranging);
 			/* G.984.3 9.2.3.4: with the protection path bit set the
@@ -422,7 +431,7 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 		break;
 
 	case ODI_GPON_STATE_O5:
-		if (msg->type == ODI_GPON_DS_REQUEST_KEY) {
+		if (msg->type == ODI_GPON_DS_REQUEST_KEY && odi_gpon_fsm_directed_to_us(fsm, msg)) {
 			/* G.984.3 clause 12.3: a new key for every request, with
 			 * a new Key_Index, and a new request before the switch
 			 * replaces the key still waiting in the shadow slot
@@ -446,7 +455,8 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 		} else if (msg->type == ODI_GPON_DS_KEY_SWITCHING_TIME) {
 			odi_gpon_decode_key_switching_time(msg, &kst);
 			ops->switch_key(ctx, kst.switch_superframe);
-		} else if (msg->type == ODI_GPON_DS_REQUEST_PASSWORD) {
+		} else if (msg->type == ODI_GPON_DS_REQUEST_PASSWORD &&
+			   odi_gpon_fsm_directed_to_us(fsm, msg)) {
 			odi_gpon_fsm_send_password(fsm, ops, ctx);
 		}
 		/* Encrypted_Port-ID, Configure_Port-ID, Assign_Alloc-ID,
