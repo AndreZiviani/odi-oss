@@ -45,6 +45,7 @@
 #define OMCI_MT_SYNC_TIME           24
 #define OMCI_MT_TEST_RESULT         27
 #define OMCI_MT_GET_NEXT        26
+#define OMCI_MT_GET_CURRENT_DATA 28
 
 /* Result codes, G.988 table 11.2.2-2. */
 #define OMCI_OK                 0

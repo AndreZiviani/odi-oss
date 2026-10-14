@@ -132,35 +132,41 @@ check "a software download start, accepted by default (swdl-test.sh has the rest
       "event=sw_image op=download_start inst=1 size=0 window=1 result=ok"
 
 # What omcid does not model, once per boot. The same unknown create again,
-# a Get of it, and a message type omcid does not handle (28, Get current
-# data), twice: one event line each for the new ones, a count for all.
+# a Get of it, and a message type omcid does not handle (29, Set table),
+# twice: one event line each for the new ones, a count for all.
 $Q cli/build/omcli --inject "$(frame 0e03 44 015f 0001)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(frame 0e04 49 015f 0001)" > /dev/null 2>&1
-$Q cli/build/omcli --inject "$(frame 0e05 5c 0100 0000)" > /dev/null 2>&1
-$Q cli/build/omcli --inject "$(frame 0e06 5c 0100 0000)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e05 5d 0100 0000)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e06 5d 0100 0000)" > /dev/null 2>&1
+# Get current data (28) is answered like a Get, not logged as unknown.
+$Q cli/build/omcli --inject "$(frame 0e0a 5c 0100 0000)" > /dev/null 2>&1
 sleep 2
 got=$(grep -c '^event=unknown_me class=351 op=create ' "$log")
 check "an unknown class and operation is logged once, however often" "$got" "1"
 got=$(grep '^event=unknown_me class=351 op=get ' "$log")
 check "another operation on it is a line of its own" "$got" \
       "event=unknown_me class=351 op=get mt=9"
-got=$(grep -c '^event=unknown_msg type=28 ' "$log")
+got=$(grep -c '^event=unknown_msg type=29 ' "$log")
 check "an unknown message type is logged once" "$got" "1"
+got=$(grep -c '^event=unknown_msg type=28 ' "$log")
+check "Get current data is not an unknown message type" "$got" "0"
+got=$(grep -o -- '-> 0e0a3c0a0100000000' "$log" | head -1)
+check "Get current data is answered like a Get" "$got" "-> 0e0a3c0a0100000000"
 got=$(grep -v '^#' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
 check "the summary counts every one of them" "$got" \
       "unknown_me class=351 op=create mt=4 count=2
 unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6
 unknown_me class=351 op=get mt=9 count=1
-unknown_msg type=28 class=256 count=2"
+unknown_msg type=29 class=256 count=2"
 # Without OMCI_UNKNOWN_ME_OK the answer is "unknown entity" (4), and an
 # unknown type is "not supported" (1).
 got=$(grep -o -- '-> 0e03240a015f000104' "$log" | head -1)
 check "an unknown create is refused as an unknown entity" "$got" "-> 0e03240a015f000104"
 got=$(grep -o -- '-> 0e04290a015f000104' "$log" | head -1)
 check "and so is a Get of it" "$got" "-> 0e04290a015f000104"
-got=$(grep -o -- '-> 0e053c0a0100000001' "$log" | head -1)
-check "an unknown message type is not supported" "$got" "-> 0e053c0a0100000001"
+got=$(grep -o -- '-> 0e053d0a0100000001' "$log" | head -1)
+check "an unknown message type is not supported" "$got" "-> 0e053d0a0100000001"
 got=$(grep '^unknown entities: ' "$log")
 check "the key is off unless set" "$got" "unknown entities: answered unknown entity"
 
@@ -212,7 +218,7 @@ check "and the counts carry on across the respawn" "$got" \
 unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6
 unknown_me class=351 op=get mt=9 count=2
-unknown_msg type=28 class=256 count=2
+unknown_msg type=29 class=256 count=2
 unknown_me class=351 op=set mt=8 count=1
 unknown_me class=65021 op=create mt=4 count=1"
 got=$(grep -o -- '-> 0e07240a015f0002000000' "$log2" | head -1)

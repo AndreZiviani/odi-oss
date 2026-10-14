@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- omcid answers OMCI Get current data (message type 28) the way it answers
+  a Get: G.988 gives both the same layout, and omcid keeps one set of
+  values per entity. An OLT that polls the GEM port PM counters with it
+  every minute got "not supported" each time, and the log an unknown
+  message type (#29).
+
 - omcid applies the OLT's class 171 rule "untagged frames get VLAN X" when
   the added tag names the Output TPID attribute with DEI 0 (treatment TPID
   code 6, or 2 and 3, which copy a DEI an untagged frame does not have) and
