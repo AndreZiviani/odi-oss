@@ -40,6 +40,8 @@ struct mips_sigaction {
 	unsigned long sa_mask[4];      /* sigset_t: _NSIG 128, 32 bits a word */
 };
 #define __NR_getpid 4020
+#define __NR_alarm  4027
+#define __NR_kill   4037
 /* System V IPC goes through the `ipc` multiplexer here. The direct
  * msgget/msgsnd/msgrcv numbers a modern toolchain header offers (4399..4402)
  * return -ENOSYS on this kernel: o32 only grew them in Linux 5.x. */
@@ -185,6 +187,17 @@ static inline long sys_signal(int sig, void (*handler)(int))
 		sa.sa_mask[i] = 0;
 	return __syscall6(__NR_rt_sigaction, sig, (long)&sa, 0, sizeof sa.sa_mask,
 			  0, 0);
+}
+
+/* One-shot timer: SIGALRM after `sec` seconds, replacing any pending one. */
+static inline long sys_alarm(unsigned sec)
+{
+	return syscall3(__NR_alarm, (long)sec, 0, 0);
+}
+
+static inline long sys_kill(long pid, int sig)
+{
+	return syscall3(__NR_kill, pid, sig, 0);
 }
 
 static inline long sys_setsockopt(int fd, int level, int opt, const void *val, unsigned len)

@@ -340,6 +340,67 @@ static int fake_unknown(int fd, uint32_t tid, const uint8_t *f, uint8_t mt)
 	return 1;
 }
 
+long reboot_pid = 1;
+
+/* A Reboot of the ONU-G, when the owner allowed it. The stick answers first
+ * and reboots a second later: SIGTERM to init is exactly what busybox reboot
+ * sends, so the shutdown entries of inittab run as for any reboot, and an
+ * alarm defers it without a child process or a blocked main loop. The
+ * handler makes one system call and nothing else. */
+static void reboot_on_alarm(int sig)
+{
+	(void)sig;
+	/* Never 0 or below: those address a whole process group. */
+	if (reboot_pid > 0)
+		sys_kill(reboot_pid, 15);
+}
+
+static int accept_reboot(void)
+{
+	char v[4];
+
+	return cfg_odi_get(CFG_ODI_PATH, "OMCI_ACCEPT_REBOOT", v, sizeof v) == 1 &&
+	       v[0] == '1';
+}
+
+/* Reboot (message type 25) of the ONU-G: the only entity G.988 defines it
+ * for. Returns 0 for any other class or instance, which keeps the answer it
+ * always had.
+ *
+ * Refused, the result is 2, command not supported (G.988 11.2.2): the
+ * message is well formed and addressed to an entity that exists, so 3,
+ * parameter error, would send the OLT hunting for a wrong field, and 1,
+ * processing error, reads as a transient failure worth retrying. 2 says the
+ * ONU never does this, which is the policy.
+ *
+ * The request carries a one-byte reboot condition: 0 unconditional, 1 and 2
+ * only if no voice call or no emergency call is up. The stick has no voice
+ * service, so no call can be up and every condition is unconditional. */
+static int handle_reboot(int fd, uint32_t tid, const uint8_t *f, uint16_t cls,
+			 uint16_t inst)
+{
+	uint8_t body[1];
+	int ok;
+
+	if (cls != OMCI_ME_ONU_G || inst != 0)
+		return 0;
+	ok = accept_reboot();
+	ev_olt_command(OMCI_MT_REBOOT, cls, inst, ok ? "accepted" : "refused");
+	if (f[2] & OMCI_AR) {
+		body[0] = ok ? OMCI_OK : OMCI_ERR_NOT_SUPPORTED;
+		send_resp(fd, tid, f, body, 1);
+	}
+	if (ok) {
+		out("reboot from the OLT accepted\n");
+		out_flush();
+		sys_signal(14, reboot_on_alarm);
+		sys_alarm(1);
+	} else {
+		out("reboot from the OLT refused (OMCI_ACCEPT_REBOOT=0)\n");
+	}
+	return 1;
+}
+
 void handle(int fd, uint32_t tid, const uint8_t *f)
 {
 	uint8_t mt = OMCI_MT(f[2]);
@@ -418,8 +479,11 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		sw_handle(fd, tid, f, c);
 		return;
 	}
-	if (mt == OMCI_MT_REBOOT)
-		ev_olt_command(mt, cls, inst);
+	if (mt == OMCI_MT_REBOOT) {
+		if (handle_reboot(fd, tid, f, cls, inst))
+			return;
+		ev_olt_command(mt, cls, inst, "not_supported");
+	}
 
 	if (!(f[2] & OMCI_AR)) {                 /* nothing to answer */
 		out("   (no ack requested)\n");

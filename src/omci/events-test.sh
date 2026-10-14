@@ -126,7 +126,12 @@ $Q cli/build/omcli --inject "$(frame 0e02 53 0007 0001)" > /dev/null 2>&1
 sleep 1
 got=$(grep '^event=olt_reboot ' "$log")
 check "an OLT reboot request" "$got" \
-      "event=olt_reboot class=256 inst=0 result=not_supported"
+      "event=olt_reboot class=256 inst=0 result=refused"
+# Command not supported (2), the answer to a refused Reboot of the ONU-G.
+got=$(grep -o -- '-> 0e01390a0100000002' "$log" | head -1)
+check "a refused OLT reboot answers command not supported" "$got" "-> 0e01390a0100000002"
+got=$(grep -c '^reboot from the OLT refused (OMCI_ACCEPT_REBOOT=0)$' "$log")
+check "and says so once" "$got" "1"
 got=$(grep '^event=sw_image ' "$log")
 check "a software download start, accepted by default (swdl-test.sh has the rest)" "$got" \
       "event=sw_image op=download_start inst=1 size=0 window=1 result=ok"
@@ -280,6 +285,44 @@ fixed_run /tmp/omcid-fixed4.log '200:486'
 wait "$pid3" 2>/dev/null
 got=$(grep -c '^fixed entities: ' /tmp/omcid-fixed4.log)
 check "an odd number of hex digits turns the key off" "$got" "0"
+rm -f /var/config/odi.conf
+
+# OMCI_ACCEPT_REBOOT: a Reboot of the ONU-G is answered success, then init
+# gets SIGTERM about a second later (what busybox reboot sends). The harness
+# has no init to reboot, so -k names a sleeping stand-in and the test checks
+# that it was signalled. Refused (the default), it must stay alive.
+sleep 60 &
+victim=$!
+rm -f /var/config/odi.conf
+$Q respond/build/omcid -w 3 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot0.log 2>&1 &
+pid4=$!
+sleep 2
+$Q cli/build/omcli --inject "$(frame 0e20 59 0100 0000)" > /dev/null 2>&1
+sleep 2
+kill -0 "$victim" 2>/dev/null; got=$?
+check "reboot refused: nothing is signalled" "$got" "0"
+kill "$pid4" 2>/dev/null
+wait "$pid4" 2>/dev/null
+printf 'OMCI_ACCEPT_REBOOT=1\n' > /var/config/odi.conf
+$Q respond/build/omcid -w 3 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot1.log 2>&1 &
+pid4=$!
+sleep 2
+$Q cli/build/omcli --inject "$(frame 0e21 59 0100 0000)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e22 59 0007 0000)" > /dev/null 2>&1
+sleep 3
+got=$(grep -o -- '-> 0e21390a0100000000' /tmp/omcid-reboot1.log | head -1)
+check "reboot accepted: the answer is success" "$got" "-> 0e21390a0100000000"
+got=$(grep -c '^reboot from the OLT accepted$' /tmp/omcid-reboot1.log)
+check "and logged once" "$got" "1"
+got=$(grep '^event=olt_reboot ' /tmp/omcid-reboot1.log | tr '\n' ';')
+check "the event records both requests" "$got" \
+      "event=olt_reboot class=256 inst=0 result=accepted;event=olt_reboot class=7 inst=0 result=not_supported;"
+got=$(grep -o -- '-> 0e22390a0007000001' /tmp/omcid-reboot1.log | head -1)
+check "a Reboot of another class keeps its answer" "$got" "-> 0e22390a0007000001"
+wait "$victim" 2>/dev/null; got=$?
+check "the stand-in for init got SIGTERM" "$got" "143"
+kill "$pid4" 2>/dev/null
+wait "$pid4" 2>/dev/null
 rm -f /var/config/odi.conf
 
 if [ "$fail" -eq 0 ]; then echo "events-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi

@@ -414,10 +414,11 @@ void ev_mib_upload_next(uint16_t seq)
 	ev_emit(&e, EV_SEV_INFO);
 }
 
-/* A reboot the OLT asked for. omcid does not do it (the OLT gets "not
- * supported"), so each request is worth a line: an OLT that follows a refused
- * reboot with a deactivation is an outage the ISP started. */
-void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst)
+/* A reboot the OLT asked for, and what omcid did with it: "accepted" (the
+ * stick reboots), "refused" (OMCI_ACCEPT_REBOOT is off) or "not_supported"
+ * (any class but ONU-G). Each request is worth a line: an OLT that follows a
+ * refused reboot with a deactivation is an outage the ISP started. */
+void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst, const char *result)
 {
 	struct evline e;
 
@@ -426,7 +427,7 @@ void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst)
 	ev_begin(&e, "olt_reboot");
 	ev_num(&e, "class", cls);
 	ev_num(&e, "inst", inst);
-	ev_str(&e, "result", "not_supported");
+	ev_str(&e, "result", result);
 	ev_emit(&e, EV_SEV_NOTICE);
 }
 

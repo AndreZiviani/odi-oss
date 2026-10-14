@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- `OMCI_ACCEPT_REBOOT` (odi.conf, `flash set`, default off): lets the OLT
+  reboot the stick over OMCI. A Reboot of the ONU-G is answered with success
+  and, a second later, omcid sends SIGTERM to init, the same path as
+  `reboot`. Off, the Reboot is refused with result 2, "command not
+  supported" (it was 1, "processing error"), so an OLT can tell a policy from
+  a fault. The reboot condition byte is ignored: the stick has no voice, so
+  every request is unconditional. Read when the Reboot arrives: no reload, no
+  re-registration. Logged as `reboot from the OLT accepted` or `refused`, and
+  `event=olt_reboot result=accepted|refused`.
+
 - Pin: confd v1.3.1 (odi-ui): the Config subtab "OLT identity" is now
   "ONU identity", and it carries `OMCI_FIXED_ME`.
 
