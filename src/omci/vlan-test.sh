@@ -221,6 +221,14 @@ check "no class 171 at all: transparent" "$got" "$TRANSPARENT"
 got=$(grep -c 'ext vlan' /tmp/omcid-171-none.log)
 check "and nothing to log" "$got" "0"
 
+# 4b. The added tag named by the Output TPID attribute (treatment TPID code
+# 6, DEI 0) with Output TPID 0x8100: the same tag, applied.
+store 0 0
+session "f8000000f8000000000f000300000966" "$DEF1" "$DEF2" > /tmp/s171-t6.txt
+run171 t6 /tmp/s171-t6.txt
+got=$(rebuild /tmp/omcid-171-t6.log 0 | sed -n 2p)
+check "output TPID 0x8100, DEI 0: VLAN 300 added" "$got" "47/1002 gem 657 rule manual-add vid 300 pri 0"
+
 # 5. The table changes under a running omcid: Set, then Delete, each rebuilds.
 session "$ADD100" "$DEF1" "$DEF2" > /tmp/s171-a.txt
 set171 0001 "$ADD200" > /tmp/s171-b.txt

@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- omcid applies the OLT's class 171 rule "untagged frames get VLAN X" when
+  the added tag names the Output TPID attribute with DEI 0 (treatment TPID
+  code 6, or 2 and 3, which copy a DEI an untagged frame does not have) and
+  that attribute is 0x8100. That is the same tag as code 4, which was the
+  only output-TPID form accepted. An OLT that writes 6 got "the added tag's
+  TPID is not 0x8100" and a transparent stick, so a router sending
+  untagged frames reached nothing.
+
 - omcid builds the service for a bridge port of TP type 5 (the GEM
   interworking TP named directly, no 802.1p mapper). The connection builder
   walked only type 3 (mapper) and 6 (multicast), so an OLT that provisions
