@@ -23,6 +23,13 @@ listed here.
   bundle redacts the key. A class omcid implements is never overridden.
   Changing the key re-registers the ONU, as the other identity keys do.
 
+- omcid: an OLT Set of the ANI-G GEM block length (class 263 attribute 3)
+  is what omcid passes to the driver. It read attribute 12, the upper
+  optical threshold, in its place: a Set of the block length was dropped,
+  and a Set of that threshold was passed on as the block length. No
+  hardware effect yet: the kernel does not implement that driver command
+  (it answers "not implemented"), and neither ISP here sets ANI-G.
+
 - omcid answers OMCI Get current data (message type 28) the way it answers
   a Get: G.988 gives both the same layout, and omcid keeps one set of
   values per entity. An OLT that polls the GEM port PM counters with it

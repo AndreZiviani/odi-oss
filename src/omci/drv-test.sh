@@ -246,5 +246,34 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	fi
 fi
 
+# ------------------------------------------------ ANI-G GEM block length
+#
+# Class 263 attribute 3 is the GEM block length (G.988 9.2.1), the one
+# ANI-G attribute omcid hands to the driver (setGemBlkLen, command 18). A
+# Set of attribute 3 reaches it; a Set of attribute 12, the upper optical
+# threshold, does not. Neither ISP session sets ANI-G, so both are
+# appended to the ISP1 one: 96 bytes, then a threshold of 0xf0.
+if [ "${UPDATE:-0}" != 1 ]; then
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-anig.log
+	$Q respond/build/omcid-drvtrace -a -w 1 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	sleep 2
+	{
+		cat "$FIX/omci-session-isp1.txt"
+		printf '0e50480a01078001%s%056d00000028%08d\n' 20000060 0 0
+		printf '0e51480a01078001%s%058d00000028%08d\n' 0010f0 0 0
+	} > /tmp/session-anig.txt
+	$Q cli/build/omcli --inject-file /tmp/session-anig.txt > /dev/null 2>&1
+	wait "$pid"
+	calls=$(grep '^drv 18 ' "$log" | tr '\n' ' ')
+	if [ "$calls" = "drv 18 2 0060 " ]; then
+		echo "ok    ANI-G: attribute 3 sets the GEM block length, attribute 12 does not"
+	else
+		echo "FAIL  ANI-G: setGemBlkLen calls were '$calls', want 'drv 18 2 0060 '"
+		fail=$((fail + 1))
+	fi
+fi
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 exit "$fail"
