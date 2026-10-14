@@ -108,7 +108,8 @@ static void apply_olt_g(const struct omci_class *c, const struct mib_row *r,
 	out_fmt("   [hw] %s -> %d\n", "tod info", (long)rc);
 }
 
-/* Class 263, ANI-G: the GEM block length. */
+/* Class 263, ANI-G: the GEM block length, attribute 3 (G.988 9.2.1; index
+ * 3 of attr_Anig, after EntityID, SRInd and NumOfTcont). */
 static void apply_ani_g(const struct omci_class *c, const struct mib_row *r,
 			uint16_t mask)
 {
@@ -117,7 +118,7 @@ static void apply_ani_g(const struct omci_class *c, const struct mib_row *r,
 
 	if (!apply_hw)
 		return;
-	k = 12;                          /* GEM block length */
+	k = 3;                           /* GEM block length */
 	if (!(mask & (1u << (16 - k))))
 		return;
 	rc = omci_setGemBlkLen(row_u32(r, c, k));
