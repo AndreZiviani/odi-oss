@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- `OMCI_FIXED_ME_CLASS` and `OMCI_FIXED_ME_CONTENT` (odi.conf, `flash
+  set`): omcid answers a Get or Get current data of one class it has no
+  model for with the configured bytes, under the mask the OLT asked for.
+  For an OLT that reads a vendor-specific entity of its own ONUs: the owner
+  copies the bytes from a native ONU, and they stay on the stick, out of
+  the image and the logs; the diagnostics bundle redacts them. A class
+  omcid implements is never overridden. Changing either key re-registers
+  the ONU, as the other identity keys do.
+
 - omcid answers OMCI Get current data (message type 28) the way it answers
   a Get: G.988 gives both the same layout, and omcid keeps one set of
   values per entity. An OLT that polls the GEM port PM counters with it

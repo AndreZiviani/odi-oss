@@ -776,6 +776,54 @@ void cfg_load_unknown_me(void)
 				    v, sizeof v) == 1 && v[0] == '1';
 }
 
+/* ------------------------------------------------ OMCI_FIXED_ME_*
+ *
+ * One managed entity class omcid has no model for, answered to a Get (and a
+ * Get current data) with bytes the owner chooses: an OLT that reads a
+ * vendor-specific entity of its own ONUs gets the values it expects, which
+ * the owner copies from a native ONU. OMCI_FIXED_ME_CLASS is the class in
+ * decimal (1..65535), OMCI_FIXED_ME_CONTENT the attribute bytes in hex
+ * (an optional 0x, 1 to 25 bytes, what fits a baseline Get response), in
+ * the order of the attributes the OLT asks for. Both in odi.conf, so the
+ * values live on the stick only. Anything malformed turns it off. */
+struct custom_me custom_me;
+
+void cfg_load_custom_me(void)
+{
+	char v[64];
+	int n, i = 0, cls = 0;
+
+	custom_me.cls = 0;
+	custom_me.len = 0;
+	n = cfg_odi_get(CFG_ODI_PATH, "OMCI_FIXED_ME_CLASS", v, sizeof v);
+	if (n <= 0 || n > 5)
+		return;
+	for (i = 0; i < n; i++) {
+		if (v[i] < '0' || v[i] > '9')
+			return;
+		cls = cls * 10 + (v[i] - '0');
+	}
+	if (cls < 1 || cls > 65535)
+		return;
+	n = cfg_odi_get(CFG_ODI_PATH, "OMCI_FIXED_ME_CONTENT", v, sizeof v);
+	i = 0;
+	if (n >= 2 && v[0] == '0' && (v[1] == 'x' || v[1] == 'X'))
+		i = 2;
+	if (n <= i || (n - i) % 2 || (n - i) / 2 > CUSTOM_ME_MAX)
+		return;
+	for (int b = 0; i < n; i += 2, b++) {
+		int hi = hex_nib(v[i]), lo = hex_nib(v[i + 1]);
+
+		if (hi < 0 || lo < 0) {
+			custom_me.len = 0;
+			return;
+		}
+		custom_me.data[b] = (uint8_t)(hi << 4 | lo);
+		custom_me.len = (uint8_t)(b + 1);
+	}
+	custom_me.cls = (uint16_t)cls;
+}
+
 /* ------------------------------------------------------- config reload
  *
  * Every key omcid holds, read again, and the comparison that decides what a
@@ -790,6 +838,7 @@ void cfg_load_all(void)
 	cfg_load_vlan();
 	cfg_load_report();
 	cfg_load_unknown_me();
+	cfg_load_custom_me();
 }
 
 void cfg_snap_take(struct cfg_snap *s)
@@ -798,6 +847,7 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->vlan = vlanCfg;
 	s->report = report;
 	s->unknown_me_ok = unknown_me_ok;
+	s->custom = custom_me;
 }
 
 void cfg_snap_restore(const struct cfg_snap *s)
@@ -806,6 +856,7 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	vlanCfg = s->vlan;
 	report = s->report;
 	unknown_me_ok = s->unknown_me_ok;
+	custom_me = s->custom;
 }
 
 /* Two optional strings are the same when both are unset or empty, or both
@@ -854,6 +905,14 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 	}
 	if (o->unknown_me_ok != n->unknown_me_ok)
 		m |= CFGD_UNKNOWN_ME;
+	if (o->custom.cls != n->custom.cls || o->custom.len != n->custom.len)
+		m |= CFGD_CUSTOM_ME;
+	else
+		for (int i = 0; i < n->custom.len; i++)
+			if (o->custom.data[i] != n->custom.data[i]) {
+				m |= CFGD_CUSTOM_ME;
+				break;
+			}
 	if (o->vlan.type != n->vlan.type)
 		m |= CFGD_VLAN_TYPE;
 	if (o->vlan.mode != n->vlan.mode)
@@ -883,6 +942,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_HW_VER, "ONU_HW_VERSION" },
 		{ CFGD_SWITCH, "omci-identity.on" },
 		{ CFGD_UNKNOWN_ME, "OMCI_UNKNOWN_ME_OK" },
+		{ CFGD_CUSTOM_ME, "OMCI_FIXED_ME" },
 		{ CFGD_VLAN_TYPE, "VLAN_CFG_TYPE" },
 		{ CFGD_VLAN_MODE, "VLAN_MANU_MODE" },
 		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },

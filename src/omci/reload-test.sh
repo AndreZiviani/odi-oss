@@ -437,7 +437,9 @@ printf 'ONU_HW_VERSION=HW-2\n' > "$ODI"
 reload_is "ONU_HW_VERSION"                     identity ONU_HW_VERSION    reregister
 printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\n' > "$ODI"
 reload_is "OMCI_UNKNOWN_ME_OK"                 identity OMCI_UNKNOWN_ME_OK reregister
-printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOLT_SW_DOWNLOAD=reject\nSYSLOG_SERVER=10.0.0.1\n' > "$ODI"
+printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME_CLASS=200\nOMCI_FIXED_ME_CONTENT=0102\n' > "$ODI"
+reload_is "OMCI_FIXED_ME_*"                   identity OMCI_FIXED_ME reregister
+printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME_CLASS=200\nOMCI_FIXED_ME_CONTENT=0102\nOLT_SW_DOWNLOAD=reject\nSYSLOG_SERVER=10.0.0.1\n' > "$ODI"
 reload_is "OLT_SW_DOWNLOAD and other odi keys are not a reload" none ""   none
 store 1 12 5 "$X$(val GPON_PLOAM_PASSWD 3132333435)
 "
