@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- GPON: a Disable_Serial_Number with the "enable all" code (0x0F) now
+  brings a stick out of Emergency Stop (O7) to O2, as G.984.3 clause 9.2.3.6
+  and Table 10-1 say, and as docs/TOOLS.md already claimed. It was decoded
+  and ignored, so a stick an OLT had disabled stayed in O7, laser off,
+  after the operator re-enabled every ONU at once, until it was power
+  cycled.
+
 - omcid applies the OLT's class 171 rule "untagged frames get VLAN X" when
   the added tag names the Output TPID attribute with DEI 0 (treatment TPID
   code 6, or 2 and 3, which copy a DEI an untagged frame does not have) and

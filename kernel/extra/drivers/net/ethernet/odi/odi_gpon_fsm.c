@@ -283,9 +283,10 @@ static void odi_gpon_fsm_do_los_clear(struct odi_gpon_fsm *fsm, const struct odi
  * moving to Emergency Stop (O7) and shutting the laser off. "enable"
  * applies only from Emergency Stop (O7), moving to Standby (O2, "All
  * parameters ... are re-examined", clause 10.2.2 g)) and turning the
- * laser back on. ODI_GPON_DISABLE_SN_ENABLE_ALL (broadcast re-enable,
- * ignoring the serial number bytes) is decoded but not acted on by this
- * pass -- out of scope for now.
+ * laser back on. ODI_GPON_DISABLE_SN_ENABLE_ALL (0x0F) re-enables every
+ * ONU that was denied upstream access, whatever the serial number bytes
+ * say (clause 9.2.3.6: "The content of bytes 4-11 is irrelevant"), so from
+ * O7 it is the same enable, with no serial number to match.
  * Returns 1 if this message was recognized (caller should not fall
  * through to per-state dispatch), 0 otherwise.
  */
@@ -319,17 +320,18 @@ static int odi_gpon_fsm_handle_disable_sn(struct odi_gpon_fsm *fsm,
 			odi_gpon_fsm_discard_onu_id(fsm, ops, ctx);
 		fsm->state = ODI_GPON_STATE_O7;
 		ops->set_state(ctx, ODI_GPON_STATE_O7);
-	} else if (dsn.code == ODI_GPON_DISABLE_SN_ENABLE) {
+	} else if (dsn.code == ODI_GPON_DISABLE_SN_ENABLE ||
+		   dsn.code == ODI_GPON_DISABLE_SN_ENABLE_ALL) {
 		if (fsm->state != ODI_GPON_STATE_O7)
 			return 1;	/* "enable" is only defined from Emergency Stop */
-		if (!odi_gpon_serial_number_eq(fsm, dsn.serial_number))
+		if (dsn.code == ODI_GPON_DISABLE_SN_ENABLE &&
+		    !odi_gpon_serial_number_eq(fsm, dsn.serial_number))
 			return 1;
 
 		ops->laser_enable(ctx, 1);
 		fsm->state = ODI_GPON_STATE_O2;
 		ops->set_state(ctx, ODI_GPON_STATE_O2);
 	}
-	/* ODI_GPON_DISABLE_SN_ENABLE_ALL: decoded, not acted on. */
 	return 1;
 }
 
