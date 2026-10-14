@@ -431,13 +431,13 @@ first and hands over the blocks counted in O5 since its last REI, so the
 REI and the totals share the one read. A `diag register get` or `memprobe`
 read of any of these registers by hand takes its count away from both.
 
-`/proc/odi_gpon` prints the totals (`docs/TOOLS.md`, "/proc/odi_gpon")
+`/proc/odi_gpon/counters` prints the totals (`docs/TOOLS.md`, "/proc/odi_gpon/")
 from a copy taken under the lock; `metricsd` exports them.
 `test/odi_gpon_ctr_test.c` runs the sampler against a register model that
 clears on read: one read per register per sample, the field split,
 accumulation past 2^32, saturation, the REI hand-over, the alarm and state
 times across a wrapping clock, and the `/proc` lines against
-`test/fixtures/odi_gpon_ctr.txt`.
+`test/fixtures/odi_gpon_ctr_counters.txt` and `odi_gpon_ctr_status.txt`.
 
 ### The NIC
 

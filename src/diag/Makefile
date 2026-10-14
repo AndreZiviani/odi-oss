@@ -1,8 +1,8 @@
 # diag -- the switch, GPON and optics CLI for our own kernel.
 #
 # A small hand-written command table (src/table.c) over /dev/odi_sw,
-# /proc/odi_gpon and the odi_omci netlink command path. README.md has the
-# command list and the exporter contract.
+# /proc/odi_gpon/status and the odi_omci netlink command path. README.md has
+# the command list and the exporter contract.
 #
 # Host targets shell out to the toolchain container; the C build re-enters this
 # Makefile there with IN_CONTAINER=1.

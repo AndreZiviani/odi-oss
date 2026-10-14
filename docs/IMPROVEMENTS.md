@@ -116,7 +116,7 @@ the GEM port is kept and applied (`docs/SWITCH.md`, "Downstream AES").
 
 **The line counters have one reader.** The GPON MAC counters clear on read,
 so the driver samples them once a second into 64-bit totals in
-`/proc/odi_gpon` (`docs/TOOLS.md`, "/proc/odi_gpon: the link counters").
+`/proc/odi_gpon/` (`docs/TOOLS.md`, "/proc/odi_gpon/: the link counters").
 
 **The laser is not lit blind.** It goes on only for the laser driver chip
 this image is tested with, and GPON activation is refused otherwise

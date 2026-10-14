@@ -704,7 +704,7 @@ uint32_t cli_cfgset(void)
  * All numbers decimal. A VLAN is listed once per (vid, source), whichever
  * entities name it: an ISP plan change moves a VID, not an entity count.
  * The T-CONT lines are the ones omcid programmed into the switch; the
- * Alloc-IDs the OLT assigned by PLOAM are the kernel's (/proc/odi_gpon,
+ * Alloc-IDs the OLT assigned by PLOAM are the kernel's (/proc/odi_gpon/status,
  * alloc_ids), which is the list to trust where the two differ. */
 #define PROV_VLANS 32
 

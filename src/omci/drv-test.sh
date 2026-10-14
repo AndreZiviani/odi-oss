@@ -12,7 +12,7 @@
 # the run does not depend on how fast the host is.
 #
 # The Alloc-IDs each OLT assigned by PLOAM come in through omcid -g, a file
-# in the /proc/odi_gpon shape; the scenarios after the goldens swap them for
+# in the /proc/odi_gpon/status shape; the scenarios after the goldens swap them for
 # other ones, none at all, and a list that changes while omcid runs.
 #
 # Any change to what omcid sends the driver shows up here, which is the point:
@@ -38,7 +38,7 @@ CAPS=020000ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00f
 mkdir -p /var/config
 rm -f /var/config/lastgood_hs.xml
 
-# The Alloc-IDs each OLT assigned by PLOAM, in the shape /proc/odi_gpon
+# The Alloc-IDs each OLT assigned by PLOAM, in the shape /proc/odi_gpon/status
 # prints them (omcid -g reads this in its place). ISP1 assigns five and
 # never sets a T-CONT over OMCI, so omcid binds 0x8000..0x8004 to them in
 # assignment order; ISP2 sets T-CONT 0x8000 to 348 itself.

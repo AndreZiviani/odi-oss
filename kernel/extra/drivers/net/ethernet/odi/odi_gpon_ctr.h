@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * odi_gpon_ctr.h -- the GPON MAC link counters, accumulated, and the link
- * state accounting kept beside them, for /proc/odi_gpon.
+ * state accounting kept beside them, for /proc/odi_gpon/status and
+ * /proc/odi_gpon/counters.
  *
  * Every hardware counter here clears when it is read and stays at all ones
  * once full. So there is one reader, odi_gpon_ctr_sample(), run by
@@ -30,7 +31,7 @@
 #include <stdint.h>
 #endif
 
-/* The counters, in /proc/odi_gpon order. odi_gpon_ctr.c has the register
+/* The counters, in /proc/odi_gpon/counters order. odi_gpon_ctr.c has the register
  * and field each one comes from.
  */
 enum odi_gpon_ctr_id {
@@ -107,7 +108,7 @@ struct odi_gpon_ctr {
 	uint32_t transitions[ODI_GPON_CTR_STATES][ODI_GPON_CTR_STATES];	/* [from][to] */
 };
 
-/* The /proc/odi_gpon name of each counter, "ds_bip_err_blocks" and so on. */
+/* The /proc/odi_gpon/counters name of each counter, "ds_bip_err_blocks" and so on. */
 extern const char *const odi_gpon_ctr_names[ODI_GPON_CTR_COUNT];
 
 void odi_gpon_ctr_reset(struct odi_gpon_ctr *c);
@@ -134,10 +135,14 @@ uint32_t odi_gpon_ctr_rei_take(struct odi_gpon_ctr *c);
 /* One ONU state transition, from the driver transition note. */
 void odi_gpon_ctr_note_transition(struct odi_gpon_ctr *c, unsigned int from, unsigned int to);
 
-/* The /proc/odi_gpon lines, each passed to put() whole, newline included.
- * docs/TOOLS.md, "/proc/odi_gpon", has the format.
+/* The lines of /proc/odi_gpon/status and /proc/odi_gpon/counters that come
+ * from the sampler, each passed to put() whole, newline included. The status
+ * ones are the live alarm and FEC bits, the alarm and ONU state times and the
+ * state transitions; the counters ones are the sample count and the 64-bit
+ * totals. docs/TOOLS.md, "/proc/odi_gpon/", has the format.
  */
 typedef void (*odi_gpon_ctr_put_fn)(void *ctx, const char *line);
-void odi_gpon_ctr_show(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_fn put, void *ctx);
+void odi_gpon_ctr_show_status(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_fn put, void *ctx);
+void odi_gpon_ctr_show_counters(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_fn put, void *ctx);
 
 #endif /* ODI_GPON_CTR_H */

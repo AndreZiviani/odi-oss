@@ -6,10 +6,11 @@
  *                    who holds each packet-redirect type
  *                    (kernel/extra/drivers/net/ethernet/odi/odi_omci.c,
  *                    odi_omci_proc_show).
- *   /proc/odi_gpon   a "sn <16 hex digits>" line -- the serial number the
+ *   /proc/odi_gpon/status
+ *                    a "sn <16 hex digits>" line -- the serial number the
  *                    GPON block ranges with -- and "alloc_ids <n> <id>...",
  *                    the Alloc-IDs the OLT assigned by PLOAM (odi_gpon.c,
- *                    odi_gpon_proc_show).
+ *                    odi_gpon_proc_status_show).
  */
 #ifndef ODI_OMCI_PROCPARSE_H
 #define ODI_OMCI_PROCPARSE_H
@@ -89,8 +90,8 @@ static inline int pp_redirect_holder(const char *buf, unsigned len, unsigned typ
 	return 0;
 }
 
-/* The eight serial-number bytes from /proc/odi_gpon's "sn" line: four ASCII
- * vendor bytes and four binary ones, printed as sixteen hex digits. Returns 0
+/* The eight serial-number bytes from the "sn" line of /proc/odi_gpon/status:
+ * four ASCII vendor bytes and four binary ones, printed as sixteen hex digits. Returns 0
  * and fills sn[] on a well-formed line; -1 otherwise. An all-zero serial is
  * returned as read -- deciding that it means "not set yet" is the caller's
  * business (pp_sn_is_zero). */
@@ -119,7 +120,8 @@ static inline int pp_gpon_sn(const char *buf, unsigned len, uint8_t sn[8])
 	return 0;
 }
 
-/* The ONU state number from /proc/odi_gpon's first line, "state 5 (O5)":
+/* The ONU state number from the first line of /proc/odi_gpon/status,
+ * "state 5 (O5)":
  * 1 to 7 for O1 to O7, or -1 when there is no such line or the number is
  * not a digit. "cannot tell" is -1, never a state. */
 static inline int pp_gpon_state(const char *buf, unsigned len)
@@ -137,7 +139,7 @@ static inline int pp_gpon_state(const char *buf, unsigned len)
 	return buf[i] - '0';
 }
 
-/* The Alloc-IDs from /proc/odi_gpon's "alloc_ids" line: a count, then
+/* The Alloc-IDs from the "alloc_ids" line of /proc/odi_gpon/status: a count, then
  * that many decimal ids, in CAM row order (the order the OLT assigned
  * them, a released row reused first). Returns the number stored in out[]
  * (at most max), or -1 when there is no such line or it is malformed:

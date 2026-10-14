@@ -1,4 +1,4 @@
-/* Checks gpon_proc_parse_state against the actual /proc/odi_gpon first-line
+/* Checks gpon_proc_parse_state against the actual /proc/odi_gpon/status first-line
  * shape (kernel/extra/drivers/net/ethernet/odi/odi_gpon.c: "state %d\n").
  * Host-side: gpon_status.c touches no syscalls, so it builds natively. */
 #include <stdio.h>
@@ -32,9 +32,9 @@ static void check_fail(const char *buf, unsigned len, const char *label)
 
 int main(void)
 {
-	puts("/proc/odi_gpon first-line parsing:");
+	puts("/proc/odi_gpon/status first-line parsing:");
 
-	/* The real shapes odi_gpon_proc_show() prints, O1..O7 as 1..7 and
+	/* The real shapes odi_gpon_proc_status_show() prints, O1..O7 as 1..7 and
 	 * unknown as 0, always followed by the rest of the file. */
 	check_ok("state 0\nonu_id 0\n", strlen("state 0\nonu_id 0\n"), 0, "unknown (0)");
 	check_ok("state 5\nonu_id 3\n", strlen("state 5\nonu_id 3\n"), 5, "O5 (5)");
@@ -51,15 +51,14 @@ int main(void)
 	check_fail("state 8\n", 8, "out of range (8)");
 	check_fail("state 99\n", 9, "out of range (99)");
 
-	puts("/proc/odi_gpon last_los_ms line:");
+	puts("/proc/odi_gpon/status last_los_ms line:");
 	{
-		/* The shape odi_gpon_proc_show() prints, embedded as it is in
+		/* The shape odi_gpon_proc_status_show() prints, embedded as it is in
 		 * the rest of the file. */
 		static const char file[] =
 			"state 5 (O5)\nonu_id 26\nsn 0011223344556677\n"
 			"irq_attached 1 isr_rc 0 imr_rc 0\n"
-			"last_los_ms 0 state 0\nploam_ring 1 entries\n"
-			"  4294897600 ds type 0x01\n";
+			"last_los_ms 0 state 0\nalarm_events los 0\n";
 		static const char set[] = "x 1\nlast_los_ms 123456 state 1\n";
 		const char *bad[] = {
 			"last_los_ms state 0\n", "last_los_ms 5 state 2\n",
