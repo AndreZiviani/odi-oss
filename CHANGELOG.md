@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- Pin: confd v1.3.1 (odi-ui): the Config subtab "OLT identity" is now
+  "ONU identity", and it carries `OMCI_FIXED_ME`.
+
 - GPON: a broadcast copy of a message G.984.3 directs to one ONU
   (Ranging_Time, Request_Password, Request_Key, Encrypted_Port-ID,
   Assign_Alloc-ID, Configure_Port-ID) is no longer acted on or
