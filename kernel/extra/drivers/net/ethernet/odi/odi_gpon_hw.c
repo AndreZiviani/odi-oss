@@ -62,6 +62,11 @@ struct odi_gpon_hw_state {
 	 * count once the OLT sent one, else the default below.
 	 */
 	uint16_t boh_ranged_len;
+	/* USF_BURST_HDR_SETUP.LENGTH for the pre-ranged (O3/O4) burst: the
+	 * default below until an Extended_Burst_Length gives its pre-ranged
+	 * count. Kept so a broadcast POPUP (O6 -> O4) can go back to it.
+	 */
+	uint16_t boh_preranged_len;
 	int eqd_applied;	/* set_eqd() ran: bursts use the ranged length */
 
 	/* Alloc-ID (T-CONT) CAM row bookkeeping (odi_gpon_hw.c's own
@@ -368,10 +373,11 @@ static void hw_set_ext_burst_length(uint8_t pre_ranged_bytes, uint8_t ranged_byt
 	if (!odi_gpon_hw.boh_valid)
 		return;	/* no Upstream_Overhead yet: nothing to extend */
 	odi_gpon_hw.boh_ranged_len = (uint16_t)(odi_gpon_hw.boh_fixed_bytes + ranged_bytes);
+	odi_gpon_hw.boh_preranged_len = (uint16_t)(odi_gpon_hw.boh_fixed_bytes + pre_ranged_bytes);
 	if (odi_gpon_hw.eqd_applied)
 		hw_write_boh(odi_gpon_hw.boh_ranged_len);
 	else
-		hw_write_boh((uint32_t)odi_gpon_hw.boh_fixed_bytes + pre_ranged_bytes);
+		hw_write_boh(odi_gpon_hw.boh_preranged_len);
 }
 
 /* hw_apply_eqd() for an EqD that came from a Ranging_Time message, keeping
@@ -421,9 +427,10 @@ static void hw_set_upstream_overhead(void *ctx, uint8_t guard_bits, uint8_t type
 	odi_gpon_hw.boh_fixed_bytes = (uint8_t)((guard_bits + type1_preamble_bits +
 						 type2_preamble_bits + 7U) / 8U + 3U);
 	odi_gpon_hw.boh_ranged_len = ODI_GPON_HW_BOH_LEN_RANGED;
+	odi_gpon_hw.boh_preranged_len = ODI_GPON_HW_BOH_LEN_WIDE;
 	odi_gpon_hw.eqd_applied = 0;
 
-	hw_write_boh(ODI_GPON_HW_BOH_LEN_WIDE);
+	hw_write_boh(odi_gpon_hw.boh_preranged_len);
 
 	odi_reg_write(ODI_GPON_DSF_SETUP_OFF, odi_reg_read(ODI_GPON_DSF_SETUP_OFF));
 
@@ -700,6 +707,24 @@ static void hw_flush_us_ploam_buf(void *ctx)
 	odi_reg_write(ODI_GPON_USF_PLOAM_TX_SETUP_OFF, ODI_GPON_USF_PLOAM_TX_SETUP_FLUSH_SET(reg, 1));
 }
 
+/* A broadcast POPUP (O6 -> O4): the ONU is ranged again, so the burst
+ * goes back to what hw_set_upstream_overhead() and the last
+ * Extended_Burst_Length set for O3/O4, and USF_EQ_DELAY back to the
+ * pre-assigned delay alone. A later Extended_Burst_Length then sets the
+ * pre-ranged length, and the next Ranging_Time the ranged one, as in the
+ * first activation. Nothing to restore before any Upstream_Overhead.
+ */
+static void hw_set_preranged(void *ctx, uint16_t preassigned_delay)
+{
+	(void)ctx;
+
+	if (!odi_gpon_hw.boh_valid)
+		return;
+	odi_gpon_hw.eqd_applied = 0;
+	hw_write_boh(odi_gpon_hw.boh_preranged_len);
+	hw_apply_eqd((uint32_t)preassigned_delay * 32U * 8U);
+}
+
 static const struct odi_gpon_fsm_ops odi_gpon_hw_ops_table = {
 	.set_state = hw_set_state,
 	.set_onu_id = hw_set_onu_id,
@@ -716,6 +741,7 @@ static const struct odi_gpon_fsm_ops odi_gpon_hw_ops_table = {
 	.switch_key = hw_switch_key,
 	.link_force_up = hw_link_force_up,
 	.flush_us_ploam_buf = hw_flush_us_ploam_buf,
+	.set_preranged = hw_set_preranged,
 };
 
 const struct odi_gpon_fsm_ops *odi_gpon_hw_ops(void)

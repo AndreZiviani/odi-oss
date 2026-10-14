@@ -160,6 +160,17 @@ struct odi_gpon_fsm_ops {
 	 * before ranging completed (this driver's own O4->O5 sequence).
 	 */
 	void (*flush_us_ploam_buf)(void *ctx);
+
+	/* Back to the pre-ranged burst, as in the first O3/O4: the pre-ranged
+	 * burst overhead length and the pre-assigned delay the last
+	 * Upstream_Overhead gave (0 when its e flag was clear, as for
+	 * set_upstream_overhead()) as the equalization delay. Called on a
+	 * broadcast POPUP (O6 -> O4): the ONU is ranged again, and in O4 it
+	 * answers a ranging request after its minimum response time plus the
+	 * pre-assigned delay (G.984.3 Table 10-1, the ranging request row;
+	 * clause 10.2.5.2 b)), not with the EqD of the old ranging.
+	 */
+	void (*set_preranged)(void *ctx, uint16_t preassigned_delay);
 };
 
 /* FSM context: everything the pure function needs across calls, owned by
@@ -171,6 +182,10 @@ struct odi_gpon_fsm {
 	enum odi_gpon_state state;
 	uint8_t onu_id;			/* 0 until Assign_ONU-ID (O3->O4) */
 	uint8_t serial_number[8];	/* set once, before activation starts */
+	/* The pre-assigned delay of the last Upstream_Overhead, 0 when its e
+	 * flag was clear: what set_preranged() restores on a broadcast POPUP.
+	 */
+	uint16_t preassigned_delay;
 	uint8_t password[10];		/* set once, before activation starts */
 	/* The key last generated for a Request_Key and reported upstream in
 	 * the Encryption_Key fragments (G.984.3 clause 9.2.4.5); zero until
@@ -205,6 +220,15 @@ void odi_gpon_fsm_set_password(struct odi_gpon_fsm *fsm, const uint8_t password[
  * window, where no edge is left to see.
  */
 int odi_gpon_fsm_line_event(const struct odi_gpon_fsm *fsm, int alarm, enum odi_gpon_event *event);
+
+/* Whether a directed downstream message (Ranging_Time, Request_Password,
+ * Request_Key, Encrypted_Port-ID, Assign_Alloc-ID, Configure_Port-ID: G.984.3
+ * clause 9.2.3, "Directed message to one ONU") is addressed to this ONU:
+ * its ONU-ID is the one this FSM holds, and not the broadcast ID. The MAC
+ * already drops other ONUs' unicast messages; a broadcast copy is what
+ * reaches the dispatch and is not acted on. Returns 1 if addressed to us.
+ */
+int odi_gpon_fsm_directed_to_us(const struct odi_gpon_fsm *fsm, const struct odi_gpon_ploam *msg);
 
 /* The pure transition function. msg is only read for
  * ODI_GPON_EVENT_PLOAM_RX (must be non-NULL then); ignored (may be NULL)

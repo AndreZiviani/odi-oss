@@ -978,7 +978,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `deactivate_onu_id` | olt | the OLT deactivated this ONU (Deactivate_ONU-ID): back to O2, its ONU-ID, Alloc-IDs and OMCC port given up until the OLT ranges it again |
 | `disable_serial_number` | olt | the OLT disabled this serial number (rogue ONU handling, or by hand at the OLT): O7, laser off |
 | `enable_serial_number`, `enable_all_serial_numbers` | olt | re-enabled: O7 to O2 |
-| `popup` | olt | POPUP: O6 back to O4 or O5 |
+| `popup` | olt | POPUP: O6 back to O5 (directed), or to O4 (broadcast) to be ranged again from the pre-assigned delay |
 | `to1_expired` | timer | O3 or O4 to O2: the OLT did not finish ranging within TO1 (10 s from entering O3) |
 | `to2_expired` | timer | O6 to O1: no POPUP within TO2 (100 ms); the ONU-ID and every Alloc-ID and OMCC row go, and it ranges again once the light is back |
 | `los`, `lof` | line | loss of signal, or of framing alone (G.984.3 Table 10-1, "ONU detects LOS or LOF"): O5 to O6 (TO2 starts), O2, O3 or O4 to O1 |
