@@ -264,6 +264,9 @@ wait "$pid"
 # broadcast), which stays the broadcast flow and gets no connection.
 tp5() {
 	session none
+	tp5_frames
+}
+tp5_frames() {
 	frame 44 010c 0050 "03e8800003800700000008"   # GEM CTP: port 1000, T-CONT 0x8000
 	frame 44 010a 0050 "0050010010"                 # GEM IW TP -> CTP 0x50, MAC bridged LAN
 	frame 44 002f 0060 "0010020500500014"           # bridge port, TPType 5 -> IW TP 0x50
@@ -280,6 +283,30 @@ store 1 1
 run171 tp5-man /tmp/s-tp5.txt
 got=$(rebuild /tmp/omcid-171-tp5-man.log 0 | grep -e '47/0060' -e '47/0061')
 check "TPType 5, manual tag: the GEM behind it carries VID 10" "$got" "47/0060 gem 1000 rule manual-add vid 10 pri 0"
+
+# The same port with a class 84 list of VID 300 (FwdOp 0x10: tagged frames
+# by VID, untagged forwarded) and the OLT's class 171 adding VID 300 to
+# untagged frames. That table leaves tagged frames on the G.988 default rule
+# (forward as they are), so a router that already tags VID 300 still passes:
+# both rules, the add-tag one first. The manual tag still replaces the entry.
+{
+	session "f8000000f8000000000f000300000966" "$DEF1" "$DEF2"
+	tp5_frames
+	frame 44 0054 0060 "012c$(printf '%044d' 0)1001"   # class 84: VID 300, FwdOp 0x10
+} > /tmp/s-tp5-84.txt
+store 0 0
+run171 tp5-olt /tmp/s-tp5-84.txt
+got=$(rebuild /tmp/omcid-171-tp5-olt.log 0 | grep '47/0060')
+check "TPType 5, OLT tag VID 300 and class 84 VID 300: untagged gets the tag, tagged passes" "$got" \
+"47/0060 gem 1000 rule manual-add vid 300 pri 0
+47/0060 gem 1000 rule vid-filter vid 300 pri -1"
+store 1 1
+sed 's/"VLAN_MANU_TAG_VID" Value="[0-9]*"/"VLAN_MANU_TAG_VID" Value="300"/' /var/config/lastgood.xml > /tmp/lg300.xml
+cp /tmp/lg300.xml /var/config/lastgood.xml
+run171 tp5-man84 /tmp/s-tp5-84.txt
+got=$(rebuild /tmp/omcid-171-tp5-man84.log 0 | grep '47/0060')
+check "TPType 5, manual tag VID 300 and class 84 VID 300: the add-tag rule only" "$got" \
+"47/0060 gem 1000 rule manual-add vid 300 pri 0"
 
 # ---- VLAN_MANU_TAG_PRI 255 is the stock no-tag sentinel ----------------------
 sed 's/"VLAN_MANU_TAG_PRI" Value="[0-9]*"/"VLAN_MANU_TAG_PRI" Value="255"/' \
