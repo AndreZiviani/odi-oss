@@ -364,10 +364,10 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 			 * when the e flag is set; otherwise the field is not
 			 * meaningful and the ONU starts from a zero delay.
 			 */
+			fsm->preassigned_delay = boh.preassigned_delay_en ? boh.preassigned_delay : 0U;
 			ops->set_upstream_overhead(ctx, boh.guard_bits, boh.type1_preamble_bits,
 						    boh.type2_preamble_bits, boh.type3_pattern,
-						    boh.delimiter,
-						    boh.preassigned_delay_en ? boh.preassigned_delay : 0U,
+						    boh.delimiter, fsm->preassigned_delay,
 						    boh.power_level_mode);
 			ops->start_to1(ctx);
 			fsm->state = ODI_GPON_STATE_O3;
@@ -461,7 +461,13 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 	case ODI_GPON_STATE_O6:
 		if (msg->type == ODI_GPON_DS_POPUP) {
 			if (msg->onu_id == ODI_GPON_ONU_ID_BROADCAST) {
+				/* Ranged again from O4, so with the pre-ranged
+				 * burst and the pre-assigned delay, not the EqD
+				 * of the old ranging (set_preranged()). The
+				 * ONU-ID stays: the OLT ranges the ONU it knows.
+				 */
 				ops->stop_to2(ctx);
+				ops->set_preranged(ctx, fsm->preassigned_delay);
 				ops->start_to1(ctx);
 				fsm->state = ODI_GPON_STATE_O4;
 				ops->set_state(ctx, ODI_GPON_STATE_O4);

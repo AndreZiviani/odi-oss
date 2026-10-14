@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- GPON: a broadcast POPUP (O6 back to O4, after a loss the whole PON
+  shared) now ranges the stick again from the pre-ranged burst and the
+  pre-assigned delay of the last Upstream_Overhead, as in its first O4
+  (G.984.3 Table 10-1, the ranging request row). It kept the equalization
+  delay and the ranged burst length of the old ranging, so its ranging
+  reply arrived late by that delay, and the OLT could fail to range it
+  until TO1 sent it back to O2. A directed POPUP keeps both, as before.
+  Not seen on a stick yet: no OLT here has sent a broadcast POPUP.
+
 - omcid applies the OLT's class 171 rule "untagged frames get VLAN X" when
   the added tag names the Output TPID attribute with DEI 0 (treatment TPID
   code 6, or 2 and 3, which copy a DEI an untagged frame does not have) and
