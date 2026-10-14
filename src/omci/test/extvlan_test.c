@@ -311,28 +311,34 @@ int main(void)
 		/* single- and double-tagged defaults: discard */
 		build(tbl + 16, 15, 4096, 0,  14, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
 		build(tbl + 32, 14, 4096, 0,  14, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
-		why = evtocd_olt_tag(tbl, 3, &vid, &pri);
+		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri);
 		ok(!why && vid == 100 && pri == 0, "#29: untagged adds VLAN 100 pri 0");
 
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  5, 1, 4);
-		why = evtocd_olt_tag(tbl, 3, &vid, &pri);
+		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri);
 		ok(!why && vid == 1 && pri == 5, "claro: untagged adds VLAN 1, priority kept");
 
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  8, 100, 4);
-		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "copy-inner priority on untagged is not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "copy-inner priority on untagged is not applied");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 4096, 4);
-		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "VID 4096 is not a concrete VID");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "VID 4096 is not a concrete VID");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 4095, 4);
-		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "VID 4095 is reserved");
-		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 100, 6);
-		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "an output-TPID tag is not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "VID 4095 is reserved");
+		/* Output TPID with DEI 0 (6), Output TPID 0x8100: the same tag
+		 * as 4 (f8000000f8000000000f000300000966). */
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 300, 6);
+		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri);
+		ok(!why && vid == 300 && pri == 0, "output TPID 0x8100, DEI 0: untagged adds VLAN 300");
+		ok(evtocd_olt_tag(tbl, 3, 0x88a8, &vid, &pri) != 0, "output TPID 0x88a8 is not applied");
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 300, 7);
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "a drop-eligible tag (DEI 1) is not applied");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  1, 15, 4096, 0,  0, 100, 4);
-		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "removing a tag as well is not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "removing a tag as well is not applied");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 0, 200, 4,  0, 100, 4);
-		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "two added tags are not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "two added tags are not applied");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
-		ok(evtocd_olt_tag(tbl, 3, &vid, &pri) != 0, "untagged frames discarded is not applied");
-		ok(evtocd_olt_tag(tbl, 0, &vid, &pri) != 0, "an empty table is not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "untagged frames discarded is not applied");
+		ok(evtocd_olt_tag(tbl, 0, 0x8100, &vid, &pri) != 0, "an empty table is not applied");
 	}
 
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");

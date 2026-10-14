@@ -171,6 +171,7 @@ int evtocd_describe(const struct evtocd_entry *e, uint16_t input_tpid,
  * (1..4094) and priority (0..7) at TPID 0x8100, and nothing else but default
  * rules that drop or pass. Returns NULL and the tag in *vid / *pri, or a
  * static reason naming what was not supported -- what an operator reports. */
-const char *evtocd_olt_tag(const uint8_t *tbl, int n, int *vid, int *pri);
+const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
+			   int *vid, int *pri);
 
 #endif

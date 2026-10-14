@@ -208,7 +208,8 @@ static int default_is_plain(const struct evtocd_entry *e)
 	return a.discard || a.transparent;
 }
 
-const char *evtocd_olt_tag(const uint8_t *tbl, int n, int *vid, int *pri)
+const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
+			   int *vid, int *pri)
 {
 	struct evtocd_entry e, add;
 	struct evtocd_action a;
@@ -249,10 +250,24 @@ const char *evtocd_olt_tag(const uint8_t *tbl, int n, int *vid, int *pri)
 		return "the added priority is not a concrete 0..7";
 	/* 4 is 0x8100 outright; 0 copies the filter's TPID, which an untagged
 	 * rule does not have, and the manual rule leaves it at 0x8100 too. The
-	 * output-TPID variants could name 0x88a8. */
-	if (add.t_in_tpid != EVTOCD_T_TPID_8100 &&
-	    add.t_in_tpid != EVTOCD_T_TPID_COPY_INNER)
-		return "the added tag's TPID is not 0x8100";
+	 * output-TPID variants (2, 3, 6) take the class 171 Output TPID, which
+	 * is 0x8100 on every line seen, and a DEI of 0: 6 sets it to 0, and 2
+	 * and 3 copy it from a tag an untagged frame does not have. Some OLTs
+	 * write 6 with Output TPID 0x8100, the same tag as 4. 7 marks the tag drop-eligible, which the manual
+	 * rule never does, and an Output TPID of 0x88a8 is an S-tag. */
+	switch (add.t_in_tpid) {
+	case EVTOCD_T_TPID_8100:
+	case EVTOCD_T_TPID_COPY_INNER:
+		break;
+	case EVTOCD_T_TPID_DEI_CP_INNER:
+	case EVTOCD_T_TPID_DEI_CP_OUTER:
+	case EVTOCD_T_TPID_OUTPUT_DEI_0:
+		if (output_tpid != 0x8100)
+			return "the added tag's TPID is not 0x8100";
+		break;
+	default:
+		return "the added tag's TPID is not 0x8100 with DEI 0";
+	}
 	*vid = a.add[0].vid;
 	*pri = a.add[0].pri;
 	return 0;

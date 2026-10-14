@@ -503,7 +503,7 @@ static int olt_tag(int *pri)
 		     n < EXTVLAN_ENTRIES_MAX; t = tblpool[t].next, n++)
 			for (int b = 0; b < EVTOCD_ENTRY_LEN; b++)
 				tbl[n * EVTOCD_ENTRY_LEN + b] = tblpool[t].data[b];
-		why = evtocd_olt_tag(tbl, n, &v, &p);
+		why = evtocd_olt_tag(tbl, n, (uint16_t)row_u32(r, c171, 4), &v, &p);
 		if (!why) {
 			vid = v;
 			*pri = p;
