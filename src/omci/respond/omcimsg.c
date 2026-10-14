@@ -313,7 +313,8 @@ static int addresses_entity(uint8_t mt)
 {
 	return mt == OMCI_MT_CREATE || mt == OMCI_MT_DELETE ||
 	       mt == OMCI_MT_SET || mt == OMCI_MT_GET ||
-	       mt == OMCI_MT_GET_NEXT || mt == OMCI_MT_TEST;
+	       mt == OMCI_MT_GET_NEXT || mt == OMCI_MT_TEST ||
+	       mt == OMCI_MT_GET_CURRENT_DATA;
 }
 
 /* OMCI_UNKNOWN_ME_OK: success for a Create, Set or Get of a class omcid has
@@ -327,12 +328,13 @@ static int fake_unknown(int fd, uint32_t tid, const uint8_t *f, uint8_t mt)
 	uint8_t body[3] = { OMCI_OK, 0, 0 };
 
 	if (!unknown_me_ok ||
-	    (mt != OMCI_MT_CREATE && mt != OMCI_MT_SET && mt != OMCI_MT_GET))
+	    (mt != OMCI_MT_CREATE && mt != OMCI_MT_SET && mt != OMCI_MT_GET &&
+	     mt != OMCI_MT_GET_CURRENT_DATA))
 		return 0;
 	/* Create: result and attribute execution mask. Get: result and the
 	 * answered mask, none. Set: the result alone. */
 	send_resp(fd, tid, f, body, mt == OMCI_MT_SET ? 1 : 3);
-	if (mt != OMCI_MT_GET)
+	if (mt != OMCI_MT_GET && mt != OMCI_MT_GET_CURRENT_DATA)
 		mib_data_sync++;
 	out("-> ok (unknown entity, answered by OMCI_UNKNOWN_ME_OK)\n");
 	return 1;
@@ -367,6 +369,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		mt == OMCI_MT_DELETE ? "delete" :
 		mt == OMCI_MT_SET ? "set" :
 		mt == OMCI_MT_GET_NEXT ? "get-next" :
+		mt == OMCI_MT_GET_CURRENT_DATA ? "get-current-data" :
 		mt == OMCI_MT_GET_ALL_ALARMS ? "get-all-alarms" :
 		mt == OMCI_MT_GET_ALL_ALARMS_NEXT ? "get-all-alarms-next" :
 		mt == OMCI_MT_SYNC_TIME ? "sync-time" :
@@ -385,7 +388,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	 * anywhere the log is pasted. The shape is what matters here, not the
 	 * value. */
 	if (mt != OMCI_MT_GET && mt != OMCI_MT_GET_NEXT &&
-	    mt != OMCI_MT_MIB_RESET && mt != OMCI_MT_MIB_UPLOAD &&
+	    mt != OMCI_MT_GET_CURRENT_DATA && mt != OMCI_MT_MIB_RESET && mt != OMCI_MT_MIB_UPLOAD &&
 	    mt != OMCI_MT_MIB_UPLOAD_NEXT && mt != OMCI_MT_GET_ALL_ALARMS &&
 	    mt != OMCI_MT_GET_ALL_ALARMS_NEXT && mt != OMCI_MT_SYNC_TIME) {
 		if (cls == OMCI_ME_AUTH_SECURITY_METHOD ||
@@ -499,7 +502,12 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		handle_get_next(fd, tid, f, c, cls, inst);
 		return;
 	}
-	if (mt == OMCI_MT_GET && c) {
+	/* Get current data (G.988, message type 28) has Get's layout both ways
+	 * and asks a PM entity for the counters of the interval in progress
+	 * rather than of the last one completed. omcid keeps one set of values
+	 * per entity, so both answer from it. An OLT that polls with it got
+	 * "not supported" once a minute (a reporter's bundle, 2026-10). */
+	if ((mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA) && c) {
 		uint16_t mask = nl_get16(f + 8);
 		uint16_t got = 0;
 		uint16_t n = 0;

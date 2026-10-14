@@ -53,6 +53,7 @@ enum action_kind {
 	ACT_SWITCH_KEY,
 	ACT_LINK_FORCE_UP,
 	ACT_FLUSH_US_PLOAM_BUF,
+	ACT_SET_PRERANGED,
 };
 
 struct action {
@@ -174,6 +175,11 @@ static void cb_flush_us_ploam_buf(void *ctx)
 	rec_push((struct recorder *)ctx, ACT_FLUSH_US_PLOAM_BUF, 0, 0, NULL, NULL);
 }
 
+static void cb_set_preranged(void *ctx, uint16_t preassigned_delay)
+{
+	rec_push((struct recorder *)ctx, ACT_SET_PRERANGED, preassigned_delay, 0, NULL, NULL);
+}
+
 static const struct odi_gpon_fsm_ops test_ops = {
 	.set_state = cb_set_state,
 	.set_onu_id = cb_set_onu_id,
@@ -190,6 +196,7 @@ static const struct odi_gpon_fsm_ops test_ops = {
 	.switch_key = cb_switch_key,
 	.link_force_up = cb_link_force_up,
 	.flush_us_ploam_buf = cb_flush_us_ploam_buf,
+	.set_preranged = cb_set_preranged,
 };
 
 /* Finds the index of the first action of the given kind at or after
@@ -713,6 +720,7 @@ static void test_popup_to_o6_and_back(void)
 	i_o5 = find_action(&rec, 0, ACT_SET_STATE);
 	CHECK(i_to2_stop >= 0, "leaving O6 via a directed POPUP stops TO2");
 	CHECK(i_o5 >= 0 && rec.log[i_o5].a == ODI_GPON_STATE_O5, "leaving O6 writes state O5");
+	CHECK(find_action(&rec, 0, ACT_SET_PRERANGED) < 0, "a directed POPUP keeps the ranged burst and EqD");
 
 	/* A broadcast POPUP (onu_id = 0xFF) instead sends O6 to O4 (Ranging),
 	 * starting TO1.
@@ -726,6 +734,17 @@ static void test_popup_to_o6_and_back(void)
 	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
 	CHECK(fsm.state == ODI_GPON_STATE_O4, "a broadcast POPUP from O6 moves to O4 (Ranging)");
 	CHECK(find_action(&rec, 0, ACT_START_TO1) >= 0, "the O6->O4 broadcast-POPUP path starts TO1");
+	/* Ranged again from O4: the pre-ranged burst and the pre-assigned
+	 * delay of the Upstream_Overhead (e = 1, 0x0010 in
+	 * ds_upstream_overhead()), before the O4 state write. The ONU-ID
+	 * stays.
+	 */
+	i_to2_stop = find_action(&rec, 0, ACT_SET_PRERANGED);
+	i_o5 = find_action(&rec, 0, ACT_SET_STATE);
+	CHECK(i_to2_stop >= 0 && rec.log[i_to2_stop].a == 0x10U,
+	      "a broadcast POPUP restores the pre-ranged burst with the pre-assigned delay");
+	CHECK(i_to2_stop >= 0 && i_o5 > i_to2_stop, "the pre-ranged burst is set before the O4 state write");
+	CHECK(fsm.onu_id == TEST_ASSIGNED_ONU_ID, "a broadcast POPUP keeps the ONU-ID");
 
 	/* TO2 expiry (failed to reacquire sync in time) falls all the way
 	 * back to O1, not O5 (clause 10.2.2 f)).
@@ -1280,6 +1299,7 @@ static void test_preassigned_delay_flag(void)
 	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
 	i = find_action(&rec, 0, ACT_SET_UPSTREAM_OVERHEAD);
 	CHECK(i >= 0 && (rec.log[i].b >> 8) == 0U, "e flag clear: the leaf gets a zero pre-assigned delay");
+	CHECK(fsm.preassigned_delay == 0U, "e flag clear: a broadcast POPUP would restore a zero delay");
 }
 
 int main(void)

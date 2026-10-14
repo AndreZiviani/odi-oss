@@ -5,6 +5,30 @@ listed here.
 
 ## Unreleased
 
+- GPON: a broadcast copy of a message G.984.3 directs to one ONU
+  (Ranging_Time, Request_Password, Request_Key, Encrypted_Port-ID,
+  Assign_Alloc-ID, Configure_Port-ID) is no longer acted on or
+  acknowledged. The MAC already drops other ONUs' messages but lets the
+  broadcast ID through, and the driver took such a copy as its own: a
+  broadcast Ranging_Time would have ranged the stick with another ONU's
+  delay. The stock driver checks the ONU-ID the same way. No OLT here has
+  sent one.
+
+- omcid answers OMCI Get current data (message type 28) the way it answers
+  a Get: G.988 gives both the same layout, and omcid keeps one set of
+  values per entity. An OLT that polls the GEM port PM counters with it
+  every minute got "not supported" each time, and the log an unknown
+  message type (#29).
+
+- GPON: a broadcast POPUP (O6 back to O4, after a loss the whole PON
+  shared) now ranges the stick again from the pre-ranged burst and the
+  pre-assigned delay of the last Upstream_Overhead, as in its first O4
+  (G.984.3 Table 10-1, the ranging request row). It kept the equalization
+  delay and the ranged burst length of the old ranging, so its ranging
+  reply arrived late by that delay, and the OLT could fail to range it
+  until TO1 sent it back to O2. A directed POPUP keeps both, as before.
+  Not seen on a stick yet: no OLT here has sent a broadcast POPUP.
+
 - GPON: a Disable_Serial_Number with the "enable all" code (0x0F) now
   brings a stick out of Emergency Stop (O7) to O2, as G.984.3 clause 9.2.3.6
   and Table 10-1 say, and as docs/TOOLS.md already claimed. It was decoded
