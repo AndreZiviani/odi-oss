@@ -68,6 +68,11 @@ static int odi_gpon_onu_id_matches(const struct odi_gpon_fsm *fsm, uint8_t onu_i
 	return onu_id == fsm->onu_id || onu_id == ODI_GPON_ONU_ID_BROADCAST;
 }
 
+int odi_gpon_fsm_directed_to_us(const struct odi_gpon_fsm *fsm, const struct odi_gpon_ploam *msg)
+{
+	return msg->onu_id != ODI_GPON_ONU_ID_BROADCAST && msg->onu_id == fsm->onu_id;
+}
+
 /* Stops whatever timer is running for the state being left, if any. Safe
  * to call from any state.
  */
@@ -283,9 +288,10 @@ static void odi_gpon_fsm_do_los_clear(struct odi_gpon_fsm *fsm, const struct odi
  * moving to Emergency Stop (O7) and shutting the laser off. "enable"
  * applies only from Emergency Stop (O7), moving to Standby (O2, "All
  * parameters ... are re-examined", clause 10.2.2 g)) and turning the
- * laser back on. ODI_GPON_DISABLE_SN_ENABLE_ALL (broadcast re-enable,
- * ignoring the serial number bytes) is decoded but not acted on by this
- * pass -- out of scope for now.
+ * laser back on. ODI_GPON_DISABLE_SN_ENABLE_ALL (0x0F) re-enables every
+ * ONU that was denied upstream access, whatever the serial number bytes
+ * say (clause 9.2.3.6: "The content of bytes 4-11 is irrelevant"), so from
+ * O7 it is the same enable, with no serial number to match.
  * Returns 1 if this message was recognized (caller should not fall
  * through to per-state dispatch), 0 otherwise.
  */
@@ -319,17 +325,18 @@ static int odi_gpon_fsm_handle_disable_sn(struct odi_gpon_fsm *fsm,
 			odi_gpon_fsm_discard_onu_id(fsm, ops, ctx);
 		fsm->state = ODI_GPON_STATE_O7;
 		ops->set_state(ctx, ODI_GPON_STATE_O7);
-	} else if (dsn.code == ODI_GPON_DISABLE_SN_ENABLE) {
+	} else if (dsn.code == ODI_GPON_DISABLE_SN_ENABLE ||
+		   dsn.code == ODI_GPON_DISABLE_SN_ENABLE_ALL) {
 		if (fsm->state != ODI_GPON_STATE_O7)
 			return 1;	/* "enable" is only defined from Emergency Stop */
-		if (!odi_gpon_serial_number_eq(fsm, dsn.serial_number))
+		if (dsn.code == ODI_GPON_DISABLE_SN_ENABLE &&
+		    !odi_gpon_serial_number_eq(fsm, dsn.serial_number))
 			return 1;
 
 		ops->laser_enable(ctx, 1);
 		fsm->state = ODI_GPON_STATE_O2;
 		ops->set_state(ctx, ODI_GPON_STATE_O2);
 	}
-	/* ODI_GPON_DISABLE_SN_ENABLE_ALL: decoded, not acted on. */
 	return 1;
 }
 
@@ -364,10 +371,10 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 			 * when the e flag is set; otherwise the field is not
 			 * meaningful and the ONU starts from a zero delay.
 			 */
+			fsm->preassigned_delay = boh.preassigned_delay_en ? boh.preassigned_delay : 0U;
 			ops->set_upstream_overhead(ctx, boh.guard_bits, boh.type1_preamble_bits,
 						    boh.type2_preamble_bits, boh.type3_pattern,
-						    boh.delimiter,
-						    boh.preassigned_delay_en ? boh.preassigned_delay : 0U,
+						    boh.delimiter, fsm->preassigned_delay,
 						    boh.power_level_mode);
 			ops->start_to1(ctx);
 			fsm->state = ODI_GPON_STATE_O3;
@@ -393,8 +400,12 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 
 	case ODI_GPON_STATE_O4:
 		/* No case for ODI_GPON_SN_REQUEST_GRANT here either, same
-		 * reason as O3 above.
+		 * reason as O3 above. Ranging_Time and Request_Password are
+		 * directed messages: the EqD is taken only from ours (clause
+		 * 10.2.5.1 d)).
 		 */
+		if (!odi_gpon_fsm_directed_to_us(fsm, msg))
+			break;
 		if (msg->type == ODI_GPON_DS_RANGING_TIME) {
 			odi_gpon_decode_ranging_time(msg, &ranging);
 			/* G.984.3 9.2.3.4: with the protection path bit set the
@@ -422,7 +433,7 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 		break;
 
 	case ODI_GPON_STATE_O5:
-		if (msg->type == ODI_GPON_DS_REQUEST_KEY) {
+		if (msg->type == ODI_GPON_DS_REQUEST_KEY && odi_gpon_fsm_directed_to_us(fsm, msg)) {
 			/* G.984.3 clause 12.3: a new key for every request, with
 			 * a new Key_Index, and a new request before the switch
 			 * replaces the key still waiting in the shadow slot
@@ -446,7 +457,8 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 		} else if (msg->type == ODI_GPON_DS_KEY_SWITCHING_TIME) {
 			odi_gpon_decode_key_switching_time(msg, &kst);
 			ops->switch_key(ctx, kst.switch_superframe);
-		} else if (msg->type == ODI_GPON_DS_REQUEST_PASSWORD) {
+		} else if (msg->type == ODI_GPON_DS_REQUEST_PASSWORD &&
+			   odi_gpon_fsm_directed_to_us(fsm, msg)) {
 			odi_gpon_fsm_send_password(fsm, ops, ctx);
 		}
 		/* Encrypted_Port-ID, Configure_Port-ID, Assign_Alloc-ID,
@@ -461,7 +473,13 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 	case ODI_GPON_STATE_O6:
 		if (msg->type == ODI_GPON_DS_POPUP) {
 			if (msg->onu_id == ODI_GPON_ONU_ID_BROADCAST) {
+				/* Ranged again from O4, so with the pre-ranged
+				 * burst and the pre-assigned delay, not the EqD
+				 * of the old ranging (set_preranged()). The
+				 * ONU-ID stays: the OLT ranges the ONU it knows.
+				 */
 				ops->stop_to2(ctx);
+				ops->set_preranged(ctx, fsm->preassigned_delay);
 				ops->start_to1(ctx);
 				fsm->state = ODI_GPON_STATE_O4;
 				ops->set_state(ctx, ODI_GPON_STATE_O4);

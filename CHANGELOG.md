@@ -5,6 +5,24 @@ listed here.
 
 ## Unreleased
 
+- GPON: a broadcast copy of a message G.984.3 directs to one ONU
+  (Ranging_Time, Request_Password, Request_Key, Encrypted_Port-ID,
+  Assign_Alloc-ID, Configure_Port-ID) is no longer acted on or
+  acknowledged. The MAC already drops other ONUs' messages but lets the
+  broadcast ID through, and the driver took such a copy as its own: a
+  broadcast Ranging_Time would have ranged the stick with another ONU's
+  delay. The stock driver checks the ONU-ID the same way. No OLT here has
+  sent one.
+
+- `OMCI_FIXED_ME` (odi.conf, `flash set`): omcid answers a Get or Get
+  current data of classes it has no model for with configured bytes, under
+  the mask the OLT asked for. Up to 8 entries `CLASS:HEX`, for example
+  `200:0x0011aa,201:01020304`. For an OLT that reads vendor-specific
+  entities of its own ONUs: the owner copies the bytes from a native ONU,
+  and they stay on the stick, out of the image and the logs; the diagnostics
+  bundle redacts the key. A class omcid implements is never overridden.
+  Changing the key re-registers the ONU, as the other identity keys do.
+
 - omcid: an OLT Set of the ANI-G GEM block length (class 263 attribute 3)
   is what omcid passes to the driver. It read attribute 12, the upper
   optical threshold, in its place: a Set of the block length was dropped,
@@ -17,6 +35,22 @@ listed here.
   values per entity. An OLT that polls the GEM port PM counters with it
   every minute got "not supported" each time, and the log an unknown
   message type (#29).
+
+- GPON: a broadcast POPUP (O6 back to O4, after a loss the whole PON
+  shared) now ranges the stick again from the pre-ranged burst and the
+  pre-assigned delay of the last Upstream_Overhead, as in its first O4
+  (G.984.3 Table 10-1, the ranging request row). It kept the equalization
+  delay and the ranged burst length of the old ranging, so its ranging
+  reply arrived late by that delay, and the OLT could fail to range it
+  until TO1 sent it back to O2. A directed POPUP keeps both, as before.
+  Not seen on a stick yet: no OLT here has sent a broadcast POPUP.
+
+- GPON: a Disable_Serial_Number with the "enable all" code (0x0F) now
+  brings a stick out of Emergency Stop (O7) to O2, as G.984.3 clause 9.2.3.6
+  and Table 10-1 say, and as docs/TOOLS.md already claimed. It was decoded
+  and ignored, so a stick an OLT had disabled stayed in O7, laser off,
+  after the operator re-enabled every ONU at once, until it was power
+  cycled.
 
 - omcid applies the OLT's class 171 rule "untagged frames get VLAN X" when
   the added tag names the Output TPID attribute with DEI 0 (treatment TPID

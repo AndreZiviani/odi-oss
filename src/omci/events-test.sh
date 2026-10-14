@@ -236,5 +236,51 @@ kill "$pid2" 2>/dev/null
 wait "$pid2" 2>/dev/null
 rm -f /var/config/odi.conf
 
+# OMCI_FIXED_ME: a Get of a listed class, which omcid does not model,
+# answers its bytes under the mask asked for, and the bytes are not logged.
+# A class omcid does model is not overridden; a malformed list is off.
+getmask() {   # getmask <tci> <class4> <mask4>: a Get with an attribute mask
+	printf '%s490a%s0000%s%060d0000002800000000\n' "$1" "$2" "$3" 0
+}
+fixed_run() {   # fixed_run <log> <value>: an omcid with OMCI_FIXED_ME set
+	printf 'OMCI_FIXED_ME=%s\n' "$2" > /var/config/odi.conf
+	$Q respond/build/omcid -w 2 -c "$CAPS" > "$1" 2>&1 &
+	pid3=$!
+	sleep 2
+}
+fixed_run /tmp/omcid-fixed.log '200:0x48656c6c6f, 201:0102'
+$Q cli/build/omcli --inject "$(getmask 0e10 00c8 8000)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(getmask 0e11 00c9 c000)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(getmask 0e12 00ca 8000)" > /dev/null 2>&1
+wait "$pid3" 2>/dev/null
+got=$(grep '^fixed entities: ' /tmp/omcid-fixed.log)
+check "OMCI_FIXED_ME is read from odi.conf" "$got" \
+      "fixed entities: 2 class(es) answered from OMCI_FIXED_ME"
+got=$(grep -o -F -- '-> 0e10290a00c8000000800048656c6c6f' /tmp/omcid-fixed.log | head -1)
+check "a Get of the first class answers its bytes under the mask asked for" "$got" \
+      "-> 0e10290a00c8000000800048656c6c6f"
+got=$(grep -o -F -- '-> 0e11290a00c9000000c0000102' /tmp/omcid-fixed.log | head -1)
+check "and the second class its own" "$got" "-> 0e11290a00c9000000c0000102"
+got=$(grep -o -- '-> 0e12290a00ca000004' /tmp/omcid-fixed.log | head -1)
+check "a class not listed is still an unknown entity" "$got" "-> 0e12290a00ca000004"
+got=$(grep -v '^-> ' /tmp/omcid-fixed.log | grep -c -i '48656c6c6f')
+check "and the bytes are not logged" "$got" "0"
+fixed_run /tmp/omcid-fixed2.log '256:48656c6c6f'
+$Q cli/build/omcli --inject "$(getmask 0e13 0100 8000)" > /dev/null 2>&1
+wait "$pid3" 2>/dev/null
+got=$(grep -c -i -- '-> 0e13290a01000000008000.*48656c6c6f' /tmp/omcid-fixed2.log)
+check "a class omcid models (ONU-G) is not overridden" "$got" "0"
+got=$(grep -c -- '-> 0e13290a0100000000' /tmp/omcid-fixed2.log)
+check "and still answers from its own model" "$got" "1"
+fixed_run /tmp/omcid-fixed3.log '200:48656c6c6f,200:0102'
+wait "$pid3" 2>/dev/null
+got=$(grep -c '^fixed entities: ' /tmp/omcid-fixed3.log)
+check "a class listed twice turns the key off" "$got" "0"
+fixed_run /tmp/omcid-fixed4.log '200:486'
+wait "$pid3" 2>/dev/null
+got=$(grep -c '^fixed entities: ' /tmp/omcid-fixed4.log)
+check "an odd number of hex digits turns the key off" "$got" "0"
+rm -f /var/config/odi.conf
+
 if [ "$fail" -eq 0 ]; then echo "events-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
 exit "$fail"

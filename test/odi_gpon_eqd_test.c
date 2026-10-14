@@ -209,12 +209,108 @@ static void test_protection_path_ignored(void)
 	CHECK(eqd_writes == 0, "O5: a protection path Ranging_Time writes no USF_EQ_DELAY at all");
 }
 
+/* A broadcast POPUP takes an ONU from O6 back to O4 to be ranged again
+ * (G.984.3 clause 10.2.2 f), Table 10-1). In O4 the ONU answers a ranging
+ * request after its minimum response time plus the pre-assigned delay
+ * (Table 10-1, the ranging request row; clause 10.2.5.2 b)), with the
+ * pre-ranged burst overhead, as in its first O4: the equalization delay of
+ * the old ranging and the ranged burst length must go, or the ranging
+ * burst lands where the OLT does not look for it. Driven through the FSM
+ * with the register leaves, so what is checked is the registers.
+ */
+static void feed_fsm(struct odi_gpon_fsm *fsm, struct odi_gpon_ploam *msg)
+{
+	odi_gpon_fsm_handle_event(fsm, odi_gpon_hw_ops(), NULL, ODI_GPON_EVENT_PLOAM_RX, msg);
+}
+
+static void test_broadcast_popup_restores_preranged(void)
+{
+	static const uint8_t sn[8] = { 'O', 'D', 'I', 'S', 1, 2, 3, 4 };
+	struct odi_gpon_fsm fsm;
+	struct odi_gpon_ploam msg;
+
+	setup();
+	odi_gpon_fsm_init(&fsm);
+	odi_gpon_fsm_set_serial_number(&fsm, sn);
+	fsm.state = ODI_GPON_STATE_O2;
+
+	/* Upstream_Overhead: guard 32 bits, no type 1/2 preamble (7 fixed
+	 * bytes), pre-assigned delay enabled, 16 units of 32 bytes.
+	 */
+	memset(&msg, 0, sizeof msg);
+	msg.onu_id = ODI_GPON_ONU_ID_BROADCAST;
+	msg.type = ODI_GPON_DS_UPSTREAM_OVERHEAD;
+	msg.content[0] = 32U;
+	msg.content[3] = 0xaaU;
+	msg.content[4] = 0xabU;
+	msg.content[5] = 0x59U;
+	msg.content[6] = 0x83U;
+	msg.content[7] = 0x20U;	/* e = 1 */
+	msg.content[9] = 16U;
+	feed_fsm(&fsm, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O3, "Upstream_Overhead: O3");
+	odi_gpon_hw_ext_burst_length(50U, 18U);
+	CHECK(boh_length() == 0x39U, "pre-ranged burst: 7 + 50");
+	CHECK(eq_delay_reg() == 4096U + DELAY_HI_BITS, "pre-ranged EqD: 4096 bits pre-assigned");
+
+	/* Assigned and ranged (the ONU-ID write is not under test here). */
+	fsm.state = ODI_GPON_STATE_O4;
+	fsm.onu_id = 0x1aU;
+	memset(&msg, 0, sizeof msg);
+	msg.onu_id = 0x1aU;
+	msg.type = ODI_GPON_DS_RANGING_TIME;
+	msg.content[2] = 0x03U;	/* 227172 bits = 0x00037764 */
+	msg.content[3] = 0x77U;
+	msg.content[4] = 0x64U;
+	feed_fsm(&fsm, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O5, "Ranging_Time: O5");
+	CHECK(boh_length() == 25U, "ranged burst: 7 + 18");
+	CHECK(eq_delay_reg() == ((1U << 24) | 108772U), "ranged EqD");
+
+	/* Loss in O5, then the OLT's broadcast POPUP. */
+	odi_gpon_fsm_handle_event(&fsm, odi_gpon_hw_ops(), NULL, ODI_GPON_EVENT_LOS, NULL);
+	CHECK(fsm.state == ODI_GPON_STATE_O6, "LOS: O6");
+	memset(&msg, 0, sizeof msg);
+	msg.onu_id = ODI_GPON_ONU_ID_BROADCAST;
+	msg.type = ODI_GPON_DS_POPUP;
+	feed_fsm(&fsm, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O4, "broadcast POPUP: O4");
+	CHECK(boh_length() == 0x39U, "broadcast POPUP: the pre-ranged burst length again");
+	CHECK(eq_delay_reg() == 4096U + DELAY_HI_BITS, "broadcast POPUP: the pre-assigned EqD again");
+
+	/* An Extended_Burst_Length in this O4 sets the pre-ranged length. */
+	odi_gpon_hw_ext_burst_length(41U, 18U);
+	CHECK(boh_length() == 48U, "O4 after POPUP: Extended_Burst_Length sets the pre-ranged length");
+
+	/* Ranged again: the ranged length and the new EqD. */
+	msg.onu_id = 0x1aU;
+	msg.type = ODI_GPON_DS_RANGING_TIME;
+	msg.content[2] = 0x03U;
+	msg.content[3] = 0x77U;
+	msg.content[4] = 0x64U;
+	feed_fsm(&fsm, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O5, "Ranging_Time after POPUP: O5");
+	CHECK(boh_length() == 25U, "ranged again: 7 + 18");
+	CHECK(eq_delay_reg() == ((1U << 24) | 108772U), "ranged again: the new EqD");
+
+	/* A directed POPUP keeps everything O5 had. */
+	odi_gpon_fsm_handle_event(&fsm, odi_gpon_hw_ops(), NULL, ODI_GPON_EVENT_LOS, NULL);
+	memset(&msg, 0, sizeof msg);
+	msg.onu_id = 0x1aU;
+	msg.type = ODI_GPON_DS_POPUP;
+	feed_fsm(&fsm, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O5, "directed POPUP: O5");
+	CHECK(boh_length() == 25U, "directed POPUP: the ranged burst stays");
+	CHECK(eq_delay_reg() == ((1U << 24) | 108772U), "directed POPUP: the EqD stays");
+}
+
 int main(void)
 {
 	test_split();
 	test_preassigned_delay();
 	test_protection_path_ignored();
 	test_burst_overhead_length();
+	test_broadcast_popup_restores_preranged();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
