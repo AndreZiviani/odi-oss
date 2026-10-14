@@ -255,10 +255,10 @@ int main(int argc, char **argv)
 	out_fmt("unknown entities: %s\n", unknown_me_ok
 		? "answered ok (OMCI_UNKNOWN_ME_OK=1)"
 		: "answered unknown entity");
-	cfg_load_custom_me();
-	if (custom_me.cls)
-		out_fmt("custom entity: class %d answered with %d bytes (OMCI_FIXED_ME_*)\n",
-			(long)custom_me.cls, (long)custom_me.len);
+	cfg_load_fixed_me();
+	if (fixed_me.n)
+		out_fmt("fixed entities: %d class(es) answered from OMCI_FIXED_ME\n",
+			(long)fixed_me.n);
 	reload_init();
 
 	/* Resume without re-registration (docs/BOOT.md): a respawned omcid

@@ -500,16 +500,22 @@ struct onu_report {
 extern struct onu_identity ident;
 extern struct onu_vlan_cfg vlanCfg;
 extern struct onu_report report;
-/* OMCI_FIXED_ME_CLASS / OMCI_FIXED_ME_CONTENT (odi.conf): one class omcid
- * has no model for, answered to a Get with fixed bytes. cls 0 is off. */
-#define CUSTOM_ME_MAX 25
-struct custom_me {
+/* OMCI_FIXED_ME (odi.conf): classes omcid has no model for, each answered
+ * to a Get with fixed bytes. n 0 is off. */
+#define FIXED_ME_MAX     25
+#define FIXED_ME_ENTRIES 8
+struct fixed_me {
 	uint16_t cls;
 	uint8_t len;
-	uint8_t data[CUSTOM_ME_MAX];
+	uint8_t data[FIXED_ME_MAX];
 };
-extern struct custom_me custom_me;
-void cfg_load_custom_me(void);
+struct fixed_me_set {
+	uint8_t n;
+	struct fixed_me e[FIXED_ME_ENTRIES];
+};
+extern struct fixed_me_set fixed_me;
+void cfg_load_fixed_me(void);
+const struct fixed_me *fixed_me_find(uint16_t cls);
 
 /* ------------------------------------------------------ config reload
  *
@@ -523,7 +529,7 @@ struct cfg_snap {
 	struct onu_vlan_cfg vlan;
 	struct onu_report report;
 	int unknown_me_ok;
-	struct custom_me custom;
+	struct fixed_me_set fixed;
 };
 /* Identity class: one bit per key the OLT reads. */
 #define CFGD_SN         (1u << 0)
@@ -538,8 +544,8 @@ struct cfg_snap {
 #define CFGD_HW_VER     (1u << 9)
 #define CFGD_SWITCH     (1u << 10)
 #define CFGD_UNKNOWN_ME (1u << 11)
-#define CFGD_CUSTOM_ME  (1u << 16)
-#define CFGD_IDENTITY   (0x0fffu | CFGD_CUSTOM_ME)
+#define CFGD_FIXED_ME   (1u << 16)
+#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
