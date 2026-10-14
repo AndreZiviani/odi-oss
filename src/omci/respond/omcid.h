@@ -386,7 +386,7 @@ void ev_mib_reset(const char *side);
 void ev_mib_upload(uint16_t total);
 void ev_mib_upload_next(uint16_t seq);
 void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
-void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst);
+void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst, const char *result);
 void ev_alloc_ids(const uint16_t *ids, unsigned n);
 /* A config reload (reload.c): the decision, a step that failed, and the
  * outcome. `keys` is store key names only, never values. */
@@ -414,6 +414,12 @@ void ev_unknown_msg(uint8_t mt, uint16_t cls);
 /* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
  * class omcid does not model with success instead of "unknown entity". */
 extern int unknown_me_ok;
+/* OMCI_ACCEPT_REBOOT=1 in CFG_ODI_PATH: an ONU-G Reboot from the OLT is
+ * answered with success and followed by a reboot. Read when the Reboot
+ * arrives (omcimsg.c), not held, so a change needs no reload. reboot_pid is
+ * the process that gets the shutdown signal: init, unless -k says otherwise
+ * (a test harness has no init to reboot). */
+extern long reboot_pid;
 
 /* ------------------------------------------------ reload on SIGHUP (reload.c)
  *

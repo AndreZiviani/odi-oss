@@ -50,6 +50,7 @@
 /* Result codes, G.988 table 11.2.2-2. */
 #define OMCI_OK                 0
 #define OMCI_ERR_CMD            1
+#define OMCI_ERR_NOT_SUPPORTED  2
 #define OMCI_ERR_BAD_PARAM          3
 #define OMCI_ERR_UNKNOWN_ME     4
 #define OMCI_ERR_UNKNOWN_INST   5

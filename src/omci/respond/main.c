@@ -73,7 +73,7 @@ static void catch_signals(int fd, uint32_t tid)
 static void usage(void)
 {
 	out("usage: omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state]\n"
-	    "             [-g file] [-i file] [-j seconds] [-h]\n"
+	    "             [-g file] [-i file] [-j seconds] [-k pid] [-h]\n"
 	    "\n"
 	    "The OMCI responder: registers for redirect type 1 and answers the\n"
 	    "OLT, and serves the omcli and omcicli queues.\n"
@@ -91,6 +91,8 @@ static void usage(void)
 	    "  -i file     append the driver verbs of a reload to this file\n"
 	    "              instead of /proc/odi_init (test only)\n"
 	    "  -j seconds  how long a reload waits for O5 (test only)\n"
+	    "  -k pid      the process an accepted OLT Reboot signals instead of\n"
+	    "              init (test only)\n"
 	    "  -f          start even if a live process holds redirect type 1\n"
 	    "  -h          this text; starts nothing\n");
 }
@@ -180,6 +182,13 @@ int main(int argc, char **argv)
 		/* -i file: where the reload writes the driver verbs instead of
 		 * /proc/odi_init, and -j seconds: how long it waits for O5 and
 		 * services; both test only. */
+		/* -k: the process an accepted OLT Reboot signals, init (1)
+		 * unless a test harness names a stand-in. */
+		else if (str_eq(argv[i], "-k") && i + 1 < argc) {
+			reboot_pid = 0;
+			for (const char *s = argv[++i]; *s >= '0' && *s <= '9'; s++)
+				reboot_pid = reboot_pid * 10 + (*s - '0');
+		}
 		else if (str_eq(argv[i], "-i") && i + 1 < argc) {
 			odi_init_path = argv[++i];
 		} else if (str_eq(argv[i], "-j") && i + 1 < argc) {
