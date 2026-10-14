@@ -648,6 +648,43 @@ static void test_disable_serial_number_to_o7_and_reenable(void)
 	      "re-enable writes state O2");
 }
 
+/* G.984.3 clause 9.2.3.6: code 0x0F re-enables every ONU that was denied
+ * upstream access, whatever serial number bytes 4-11 carry; Table 10-1, the
+ * enable row: Emergency Stop (O7) => O2. In any other state it does
+ * nothing.
+ */
+static void test_enable_all_serial_numbers(void)
+{
+	static const uint8_t other_sn[8] = {0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0};
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	struct odi_gpon_ploam msg;
+	int i_laser_on, i_state_o2;
+
+	fsm_setup(&fsm, &rec);
+	drive_to_o5(&fsm, &rec);
+	msg = ds_disable_serial_number(ODI_GPON_DISABLE_SN_DISABLE, test_sn);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O7, "setup: disabled into O7");
+
+	rec_reset(&rec);
+	msg = ds_disable_serial_number(ODI_GPON_DISABLE_SN_ENABLE_ALL, other_sn);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O2, "enable-all (0x0F) from O7 re-enables to O2, whatever the SN bytes");
+	i_laser_on = find_action(&rec, 0, ACT_LASER_ENABLE);
+	i_state_o2 = find_action(&rec, 0, ACT_SET_STATE);
+	CHECK(i_laser_on >= 0 && rec.log[i_laser_on].a == 1U, "enable-all turns the laser back on");
+	CHECK(i_state_o2 >= 0 && rec.log[i_state_o2].a == ODI_GPON_STATE_O2, "enable-all writes state O2");
+
+	/* Outside O7 it is a dash in Table 10-1. */
+	fsm_setup(&fsm, &rec);
+	drive_to_o5(&fsm, &rec);
+	rec_reset(&rec);
+	msg = ds_disable_serial_number(ODI_GPON_DISABLE_SN_ENABLE_ALL, other_sn);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O5 && rec.n == 0U, "enable-all in O5 does nothing");
+}
+
 static void test_popup_to_o6_and_back(void)
 {
 	struct odi_gpon_fsm fsm;
@@ -1276,6 +1313,7 @@ int main(void)
 	test_preassigned_delay_flag();
 	test_deactivate();
 	test_disable_serial_number_to_o7_and_reenable();
+	test_enable_all_serial_numbers();
 	test_popup_to_o6_and_back();
 	test_los_before_o5_falls_to_o1();
 	test_to1_in_o4_discards_onu_id();
