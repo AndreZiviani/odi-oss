@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- Pin: confd v1.3.2 (odi-ui): `OMCI_ACCEPT_REBOOT` on the ONU identity
+  subtab, and a select whose key is unset shows the value the image uses
+  instead of an empty box.
+
 - `OMCI_ACCEPT_REBOOT` (odi.conf, `flash set`, default off): lets the OLT
   reboot the stick over OMCI. A Reboot of the ONU-G is answered with success
   and, a second later, omcid sends SIGTERM to init, the same path as
