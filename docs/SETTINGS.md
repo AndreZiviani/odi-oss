@@ -798,8 +798,9 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
   back to O5 with its six services, but the time it takes was not measured,
   and a new `GPON_SN` reaching the line through the rewritten PLOAM slot has
   not been run (host tested as a register sequence only). The in-place VLAN
-  rebuild is host tested against the driver-call trace of both ISP sessions
-  and never run against the real switch. The earlier apply, which restarted
+  rebuild ran on ISP1's stick: a changed `VLAN_CFG_TYPE` and class 171 rule
+  followed by SIGHUP rebuilt the rules, and tagged and untagged frames
+  reached the GEM port afterwards. The earlier apply, which restarted
   omcid, was run end to end once, on ISP1.
 - `apply.sh network` moving the primary address on a stick. Adding and
   removing the second address live was checked on ISP1 (`br0:2` came and
