@@ -257,14 +257,20 @@ static void hw_set_onu_id(void *ctx, uint8_t onu_id)
 	odi_reg_write(ODI_GPON_USF_ONU_ID_OFF, reg);
 
 	/* A row whose write did not complete is not recorded as written:
-	 * the release would then delete a row this layer never placed.
+	 * the release would then delete a row this layer never placed. The
+	 * ONU-ID is also recorded as the row's Alloc-ID, so an
+	 * Assign_Alloc-ID for the ONU-ID itself (some OLTs send one) dedups
+	 * onto this row instead of taking a pool row, which would shift every
+	 * later Alloc-ID off the row its T-CONT index uses.
 	 */
 	if (onu_id != ODI_GPON_ONU_ID_BROADCAST) {
 		if (odi_switch_gpon_alloc_write(ODI_GPON_HW_ALLOC_ROW_DEFAULT, onu_id))
 			ODI_GPON_HW_WARN("Alloc-ID row %u (ONU-ID %u): CAM write not done\n",
 					 ODI_GPON_HW_ALLOC_ROW_DEFAULT, (unsigned int)onu_id);
-		else
+		else {
 			odi_gpon_hw.alloc_used |= (1UL << ODI_GPON_HW_ALLOC_ROW_DEFAULT);
+			odi_gpon_hw.alloc_id_values[ODI_GPON_HW_ALLOC_ROW_DEFAULT] = onu_id;
+		}
 	}
 }
 
@@ -903,8 +909,9 @@ int odi_gpon_hw_gem_port_encrypted(uint16_t gem_port_id, int encrypted)
 	return 1;
 }
 
-/* Assign_Alloc-ID: sequential pool from row 0,
- * confirmed exactly against the five rows react.txt shows (0..4, in
+/* Assign_Alloc-ID: sequential pool from row 0 (the ONU-ID's own default
+ * Alloc-ID dedups onto ODI_GPON_HW_ALLOC_ROW_DEFAULT, which holds it, and
+ * takes no pool row), confirmed exactly against the five rows react.txt shows (0..4, in
  * arrival order) -- skips ODI_GPON_HW_ALLOC_ROW_DEFAULT (the ONU-ID's own
  * fixed row, hw_set_onu_id() above). Idempotent per Alloc-ID -- confirmed
  * by a direct read of the capture: each Assign_Alloc-ID message is
