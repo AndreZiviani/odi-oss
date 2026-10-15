@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- GPON: with an OLT that also sends an Assign_Alloc-ID for the ONU-ID's own
+  default Alloc-ID (Eltex does), upstream user traffic never left the stick.
+  That Alloc-ID was not recognised as the default row already in the CAM, so
+  it took the first pool row and the data T-CONT's Alloc-ID landed one row
+  later, off the row its queue is tied to; the OLT's grants found nothing
+  queued. The ONU-ID is now recorded in the default row, so that message
+  changes nothing. Not yet validated on a stick with such an OLT.
+
 - Pin: confd v1.3.2 (odi-ui): `OMCI_ACCEPT_REBOOT` on the ONU identity
   subtab, and a select whose key is unset shows the value the image uses
   instead of an empty box.
