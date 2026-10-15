@@ -93,6 +93,13 @@ reset: a trial that never answered still says how far it got
    here, and a switch file that cannot be read is a switch that silently
    turns itself off. `rcS`'s watchdog confirmation (stage 11) refuses to
    confirm at all without this.
+   Right after it, the boot counter (`/etc/scripts/safe-mode.sh count`,
+   `docs/SETTINGS.md`, "Recovery: the safe mode"): as early as the counter
+   can be written, so a short power-up still counts. It logs the uptime
+   of the count, and after enough short boots in a row it makes this boot
+   a safe-mode boot (`/var/run/safe-mode`): the PON steps then leave the
+   laser off and skip `gponact`, the host port runs auto-negotiation, and
+   the web UI and root accept the default password, for this boot only.
 3. **Entropy.** Nothing on this board feeds the pool early, so without a
    seed every daemon starts on a nearly empty one (dropbear once logged 27
    bits available). `seedrng` credits the seed the previous boot saved
@@ -112,7 +119,12 @@ reset: a trial that never answered still says how far it got
 6. **The management address** (`/etc/scripts/network.sh`), after the
    config partition, which holds the address, and before the services:
    dropbear bound on a box with no routable interface looks exactly like a
-   panic from outside.
+   panic from outside. Then the host-port auto-negotiation
+   (`/etc/scripts/host-autoneg.sh boot`), after `network.sh` has set the
+   SerDes mode it changes one bit of: with `HOST_AUTONEG` unset it reads
+   the key and returns; with it off it forces 1000BASE-X and leaves the boot watch running in the background
+   (`docs/SETTINGS.md`, "Host port auto-negotiation"). It returns at once
+   either way.
 7. **ptys.** devpts is already mounted on `/dev/pts` by stage 1's
    `mount -a`, for the `/dev/ptmx` dropbear opens for an interactive
    session; the BSD pairs (`/dev/ptypN`/`/dev/ttypN`) made here are a

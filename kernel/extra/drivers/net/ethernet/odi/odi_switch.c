@@ -18,6 +18,7 @@
 #include <linux/io.h>
 #include <linux/ratelimit.h>
 #include <linux/iopoll.h>
+#include <linux/sysfs.h>
 
 #include "odi_switch_hw.h"
 #include "odi_switch_reg.h"
@@ -193,6 +194,63 @@ static const struct kernel_param_ops odi_switch_host_pause_param_ops = {
 };
 module_param_cb(host_pause, &odi_switch_host_pause_param_ops, &odi_sw_host_pause, 0644);
 MODULE_PARM_DESC(host_pause, "send PAUSE frames to the host when the switch is congested (default: no, the switch drops)");
+
+/* odi_switch.host_autoneg: the 1000BASE-X auto-negotiation of the host
+ * port, on (the default) or off (forced 1000BASE-X full duplex). Written to
+ * /sys/module/odi_switch/parameters/host_autoneg it applies at once, one
+ * register write, whenever the switch window is mapped (the board init maps
+ * it before userland starts); on the command line it is stored and the
+ * platform settings apply it. Not persistent: HOST_AUTONEG and
+ * host-autoneg.sh decide what each boot runs.
+ */
+static int odi_switch_host_autoneg_param_set(const char *val, const struct kernel_param *kp)
+{
+	bool on;
+	int rc;
+
+	rc = kstrtobool(val, &on);
+	if (rc)
+		return rc;
+	mutex_lock(&odi_switch_lock);
+	odi_sw_host_autoneg = on;
+	if (odi_switch_base)
+		odi_sw_host_autoneg_apply();
+	mutex_unlock(&odi_switch_lock);
+	return 0;
+}
+
+static const struct kernel_param_ops odi_switch_host_autoneg_param_ops = {
+	.set = odi_switch_host_autoneg_param_set,
+	.get = param_get_bool,
+};
+module_param_cb(host_autoneg, &odi_switch_host_autoneg_param_ops, &odi_sw_host_autoneg, 0644);
+MODULE_PARM_DESC(host_autoneg, "1000BASE-X auto-negotiation on the host port (default: yes; no forces 1000BASE-X full duplex)");
+
+/* odi_switch.host_link, read-only: 1 while the host port has a link
+ * (PORT_ABILITY(0).LINK_UP, read when asked), 0 without one. What
+ * host-autoneg.sh and the web UI read to decide whether a mode works.
+ */
+static int odi_switch_host_link_param_get(char *buf, const struct kernel_param *kp)
+{
+	if (!odi_switch_base)
+		return -ENODEV;
+	return sysfs_emit(buf, "%u\n", (unsigned int)odi_sw_host_link_up());
+}
+
+/* A built-in parameter is also parsed from the command line, where a
+ * missing set would be called anyway; refuse it there.
+ */
+static int odi_switch_host_link_param_set(const char *val, const struct kernel_param *kp)
+{
+	return -EPERM;
+}
+
+static const struct kernel_param_ops odi_switch_host_link_param_ops = {
+	.set = odi_switch_host_link_param_set,
+	.get = odi_switch_host_link_param_get,
+};
+module_param_cb(host_link, &odi_switch_host_link_param_ops, NULL, 0444);
+MODULE_PARM_DESC(host_link, "1 while the host port has a link (read-only)");
 
 int odi_poll_reg(uint32_t off, uint32_t mask, uint32_t want,
 		 unsigned int delay_us, unsigned int timeout_us, uint32_t *last)

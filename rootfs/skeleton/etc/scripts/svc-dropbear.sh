@@ -34,8 +34,10 @@ KEY=/etc/config/dropbear.d/ed25519
 # /etc/odi-keys-only is written by image/build.sh only for ROOT_PW=locked
 # (docs/BUILDING.md): -s there also refuses password auth at the protocol
 # level, so a public release image never offers a password prompt to try
-# against.
-if [ -f /etc/odi-keys-only ]; then
+# against. A safe-mode boot (safe-mode.sh, /var/run/safe-mode) offers
+# passwords anyway: root has the default one for that boot, which is the
+# way back into a stick whose keys are lost.
+if [ -f /etc/odi-keys-only ] && [ ! -f /var/run/safe-mode ]; then
 	exec /etc/scripts/respawn.sh -1000 /var/log/services.log /sbin/dropbear -s -F -r "$KEY" -D /etc/config/dropbear.d -p 22
 else
 	exec /etc/scripts/respawn.sh -1000 /var/log/services.log /sbin/dropbear -F -r "$KEY" -D /etc/config/dropbear.d -p 22

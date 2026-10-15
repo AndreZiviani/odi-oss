@@ -629,3 +629,76 @@ the host's `ethtool -S` `rx_flow_control_xoff` stays flat. The meaning of
 bit 6 as the sending side (bit 5 receiving) is the one thing here not yet
 seen on hardware: that is what these three readings check.
 
+
+## Host port auto-negotiation
+
+The host port's SerDes runs in Fiber 1G (1000BASE-X), and its PCS runs the
+clause-37 auto-negotiation with the host: `HOST_FIBER_CTRL` (0x021c00) reads
+`0x1140` on every stick seen, stock or ours, and nothing in this image
+writes its `AUTONEG` bit unless asked. Most hosts negotiate. A host whose SFP
+port has auto-negotiation off (some routers offer it per port) sees no link
+from a negotiating stick, so `HOST_AUTONEG=off` forces the PCS to 1000BASE-X
+full duplex instead (`docs/SETTINGS.md`, "Host port auto-negotiation").
+OMCI does not reach this word: the PPTP auto-detection an OLT sets (class 11)
+is a UNI PHY ability for cmd 30, and the host SerDes has no such PHY.
+
+`HOST_FIBER_CTRL` is laid out like a clause-22 control register:
+
+| bit | field | 0x1140 |
+|---|---|---|
+| 15 | `RESET` | 0 |
+| 14 | `LOOPBACK` | 0 |
+| 13 | `SPEED_LSB` | 0 |
+| 12 | `AUTONEG` | 1 |
+| 11 | `POWER_DOWN` (the one bit `network.sh` writes, to 0) | 0 |
+| 10 | `ISOLATE` | 0 |
+| 9 | `AUTONEG_RESTART` (self-clearing) | 0 |
+| 8 | `FULL_DUPLEX` | 1 |
+| 6 | `SPEED_MSB` (with bit 13: 10 = 1000 Mb/s) | 1 |
+
+The bit layout is the one of the stock register table for this block. The
+same table has a second candidate, a two-bit "force auto-negotiation" field
+(bits 9:8) of another host SerDes word at 0x021808, never read on a stick.
+Which of the two gives a working forced link against a host with
+auto-negotiation off has not been seen on hardware; this image uses bit 12
+of the PCS control word, whose meaning is the standard clause-22 one, and
+touches 0x021808 in no path. The stick trial plan reads it, once, to
+compare.
+
+`odi_sw_host_autoneg_apply()` (`odi_switch_port.c`) is one read-modify-write
+of bit 12: cleared for off (`0x1140` becomes `0x0140`: no negotiation, 1000
+Mb/s full duplex, the speed and duplex bits as the mode set left them);
+set, with `AUTONEG_RESTART`, for on (`0x0140` is written `0x1340` and reads
+back `0x1140`), so the PCS negotiates at once. Nothing is written when the
+bit already holds the wanted value, since a restart flaps a working link. It
+logs the word before and after:
+
+    odi_switch: host port auto-negotiation off (forced 1000BASE-X full duplex): control 0x1140 -> 0x0140, ability 0x0fe
+
+The port side (`PORT_FORCE_SELECT(0)`, [Host port PAUSE](#host-port-pause))
+is left as it is: the port keeps taking its link, speed and duplex from the
+PCS. Whether `PORT_ABILITY(0)` reports the link of a forced PCS the way it
+reports a negotiated one is the first thing a stick trial checks; if it does
+not, the port side needs forcing too (link, 1000, full duplex in
+`PORT_FORCE_ABILITY(0)` and their select bits, as the stock image forces the
+CPU port).
+
+Two kernel parameters, under `/sys/module/odi_switch/parameters/`:
+
+- `host_autoneg` (bool, default `Y`, 0644): written, it applies at once, one
+  register write, under `odi_switch_lock`. On the command line it is stored
+  and the platform settings apply it (a step that reads and writes nothing
+  while it is `Y`, so the boot of a stick that never sets it is unchanged:
+  the boot goldens do not move). Not persistent: userland decides what each
+  boot runs, from `HOST_AUTONEG` (`host-autoneg.sh`, `docs/TOOLS.md`).
+- `host_link` (read-only): `1` while `PORT_ABILITY(0).LINK_UP` is set, `0`
+  otherwise, read when asked. What `host-autoneg.sh` and the web UI read to
+  decide whether a mode works.
+
+`test/odi_host_autoneg_test.c` checks the writes in both directions, that a
+second apply writes nothing, that the other bits survive, that the default
+platform settings neither read nor write the word, and the link read.
+
+To see it on a stick: `register get 0x21c00 1` in `diag` (bit 12), `cat
+/sys/module/odi_switch/parameters/host_link`, and on the host `ethtool
+<if>` (`Auto-negotiation: on|off`, `Link detected`).

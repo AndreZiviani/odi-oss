@@ -744,6 +744,91 @@ nothing to the driver: init owns the process, and a second omcid started here
 used to make the ONU cycle through O1 to O3 while init's respawn entry
 re-provisioned around it.
 
+### `host-autoneg.sh` -- the host-port auto-negotiation
+
+    /etc/scripts/host-autoneg.sh try on|off [SECONDS]   a trial, 120 s by default (10 to 600)
+    /etc/scripts/host-autoneg.sh confirm                keep it: stores HOST_AUTONEG
+    /etc/scripts/host-autoneg.sh revert                 end the trial now
+    /etc/scripts/host-autoneg.sh status                 the state, key=value
+    /etc/scripts/host-autoneg.sh boot                   rcS only
+
+Applies `HOST_AUTONEG` (`docs/SETTINGS.md`, "Host port auto-negotiation")
+through the kernel parameter `odi_switch.host_autoneg`, and reads the host
+link from `odi_switch.host_link` (`docs/SWITCH.md`). `try` answers at once
+and writes the mode one second later, detached, so the answer leaves before
+the link changes; the trial reverts by itself at the end of its window
+unless `confirm` (over ssh or the web UI, so over the link being tried)
+stores the key first. `confirm` reads the key back and fails, leaving the
+trial to revert, when it did not stick. `try` refuses while a trial or the
+boot watch runs, and says so when the mode asked for is already the one
+running and stored. Exit 1 on every refusal; the reason is on stderr. Every
+state change takes a lock (`/var/run/host-autoneg.lock`, a directory; a
+holder that died is found by its pid) and replaces the state file in one
+rename.
+
+The state file, `/var/run/host-autoneg`, and `status` (the same fields,
+plus the live link, the uptime and whether this is a safe-mode boot), one `key=value`
+per line; the web UI reads the file, and `status` is in the diagnostics
+bundle (`host-link.txt`):
+
+| key | value |
+|---|---|
+| `setting` | `on` or `off`: `HOST_AUTONEG` as this boot read it, or as a confirm stored it |
+| `running` | `on` or `off`: what the host port runs now |
+| `phase` | `steady`, `watch` (the boot watch is deciding) or `trial` |
+| `fallback` | `1` while the port runs auto-negotiation with the key off because the forced link did not come up this boot |
+| `trial_mode`, `trial_deadline` | the mode on trial and the uptime, in seconds, at which it reverts |
+| `watch_until` | the uptime by which the boot watch ends at the latest |
+| `event`, `event_uptime`, `message` | the last event, below |
+| `link` (`status` only) | `1`, `0`, or `unknown` without the kernel parameter |
+| `safe_mode_boot` (`status` only) | `1` on a safe-mode boot (`safe-mode.sh`) |
+
+Every event is one line to the kernel log (`host-autoneg: event=<name>
+setting=... running=... <text>`, so dmesg, the ramlog and syslog through
+klogd), at notice:
+
+| event | when |
+|---|---|
+| `applied` | a boot with the key off forced the mode and started the boot watch |
+| `forced_link` | the boot watch saw the host link come up forced; no fallback |
+| `watch_switch` | no link for 30 s; the watch switches mode |
+| `fallback` | the link came up only with auto-negotiation; the key stays off |
+| `fallback_nolink` | no link in either mode for 10 minutes; stays on auto-negotiation |
+| `safe_mode_boot` | a safe-mode boot: nothing applied, auto-negotiation on, trials refused |
+| `trial_started`, `trial_expired`, `trial_reverted`, `trial_confirmed`, `trial_failed` | a trial and how it ended |
+| `bad_value`, `no_kernel`, `apply_failed` | a key that is neither on nor off, a kernel without the parameter, a write that failed: the port runs auto-negotiation |
+
+A boot with the key unset logs nothing and writes nothing.
+
+### `safe-mode.sh` -- the boot counter and the recovery boot
+
+    /etc/scripts/safe-mode.sh status     this boot and the record, key=value
+    /etc/scripts/safe-mode.sh ack        acknowledge a safe-mode boot: removes its record
+    /etc/scripts/safe-mode.sh active     exit 0 on a safe-mode boot
+    /etc/scripts/safe-mode.sh count      rcS only, right after the config partition is mounted
+
+`count` adds one to `/etc/config/boot-count` and spawns `boot-ok`, which
+removes it once the uptime reaches 60 s. Uptime starts with the kernel,
+about 54 s after a cold power-on on the sticks measured (the count lands at
+about 5 s of uptime), so a power-up counts as short when it is cut roughly
+60 to 110 s after power-on: "plug in, wait about 80 s, pull" (docs/SETTINGS.md). A boot that finds five short boots
+before it (three with `HOST_AUTONEG=off`) is a safe-mode boot: it writes
+`/var/run/safe-mode` and the record `/etc/config/safe-mode`, removes
+`HOST_AUTONEG` when that was off, and bind-mounts a RAM copy of
+`/etc/passwd` with root's password `admin` over the read-only one
+(`docs/SETTINGS.md`, "Recovery: the safe mode"). The flag in `/var/run` is
+what the rest reads: `host-autoneg.sh` applies nothing, the PON steps
+leave the laser off and skip `gponact` (`rcs-lib.sh`), `svc-dropbear.sh`
+offers passwords, and confd accepts `admin:admin`. `status` prints
+`active=0|1` with the flag's fields as `now_*`, `record=0|1` with the
+record's as `record_*`, and `boot_count` while there is one.
+
+Its events, to the kernel log at notice: `safe-mode: event=boot_count
+boot=N short_before=N limit=5|3 uptime=S` on every boot (the uptime is
+how early the count lands on a given stick), `event=safe_mode short_boots=N
+cleared=HOST_AUTONEG|none|failed root_password=default|failed`, and
+`event=safe_mode_ack`.
+
 ### `diag-bundle.sh` -- the diagnostics bundle
 
     /etc/scripts/diag-bundle.sh [--full] [OUT]   default OUT: /tmp/odi-diag.tar.gz
@@ -844,6 +929,8 @@ that `--full` keeps the identifiers but still no secret; and that the
 | script | what | safe to re-run |
 |---|---|---|
 | `/etc/scripts/network.sh` | host SerDes check (and fix), MAC, `br0` over `eth0.2`, the addresses | yes: it checks before it writes, and re-running it is how a management-path problem is debugged |
+| `/etc/scripts/host-autoneg.sh status` | the host-port auto-negotiation state (above) | yes: read-only |
+| `/etc/scripts/safe-mode.sh status` | the safe mode: this boot, the record, the boot count | yes: read-only |
 | `/etc/scripts/network.sh addr [-n]` | only the addresses: the primary and the second one (`br0:2`), live; `-n` says what it would change | yes; this is `apply.sh network` |
 | `/etc/scripts/mount-config.sh [name] [dir]` | find mtd `config` by name, mount it jffs2 | only if it is not mounted |
 | `/etc/scripts/respawn.sh <oom> <log> <cmd...>` | not run directly: exec-ed by each `svc-*.sh` inittab entry, sets `oom_score_adj` then execs the daemon in place | n/a |
@@ -868,6 +955,8 @@ drivers behind them.
 | `/proc/odi_wdt/register` | -- | `"<name> <deadline_s>"`, e.g. `omcid 60`: register (or update) a watchdog client; idempotent, arms the deadline from that moment and resets its clock (`docs/SETTINGS.md`, "Watchdog rules") |
 | `/proc/odi_wdt/ping` | -- | `"<name>"`: a registered client's own ping, which restarts its deadline; refused (`-EINVAL`) for an unregistered name |
 | `/proc/odi_wdt/clients` | one line per registered client: name, deadline, armed, last-ping age | -- |
+| `/sys/module/odi_switch/parameters/host_autoneg` | `Y` or `N`: the host port negotiates, or runs forced 1000BASE-X | `1`/`0`: applied at once (`host-autoneg.sh` does this; by hand it lasts until the next boot) |
+| `/sys/module/odi_switch/parameters/host_link` | `1` while the host port has a link | -- |
 | `/proc/odi_ramlog_prev` | the previous boot's DRAM ramlog, decoded: this boot's counter and slot, the previous boot's counter, slot, build id, last early crumb and reset reason (`reason=`, `docs/HACKING.md`), then its first 3984 bytes and its last 4080 (root only) | -- |
 | `/proc/odi_ramlog_prev_raw` | the same two pages as 8192 raw bytes, page A then page B, for `ramlog-read.sh`-style decoding off the stick (root only) | -- |
 
@@ -1022,6 +1111,8 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=reload changed=vlan action=rebuild keys=VLAN_MANU_TAG_VID` | notice | omcid took a SIGHUP (`apply.sh omci`) and reread the store: `changed` is `none`, `vlan` (bridge connections rebuilt in place, the ONU stays in O5) or `identity` (`action=reregister`: the ONU is deactivated and ranged again); `keys` names the store keys that differ, never their values. Never rate limited |
 | `omcid: event=reload_step verb=gponsn rc=0` | info, notice when `rc` is not 0 | one driver verb of a re-registration (`gpondeact`, `gponsn`, `gponpw`, `gponact`) and its errno (0 is success) |
 | `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services |
+| `host-autoneg: event=fallback setting=off running=on ...` | notice | the host-port auto-negotiation (`HOST_AUTONEG`): the boot watch, the fallback and every trial; the events are listed under `host-autoneg.sh` above |
+| `safe-mode: event=boot_count boot=1 short_before=0 limit=5 uptime=11` | notice | every boot's count, and a safe-mode boot (`event=safe_mode`); listed under `safe-mode.sh` above |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 
 `cause` and `side` on `event=onu_state`:

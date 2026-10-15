@@ -120,6 +120,24 @@ static inline uint32_t ODI_SW_PORT_FORCE_SELECT_TX_PAUSE_SET(uint32_t reg, uint3
 	return (reg & ~(0x1U << 6)) | ((val & 0x1U) << 6);
 }
 
+/* HOST_FIBER_CTRL: 0x021c00 -- the 1000BASE-X PCS control word of the host
+ * port, laid out like a clause-22 control register; 0x1140 on a running
+ * stick (AUTONEG, FULL_DUPLEX, SPEED_MSB: 1000 Mbit/s)
+ */
+#define ODI_SW_HOST_FIBER_CTRL_OFF	0x21c00U
+static inline uint32_t ODI_SW_HOST_FIBER_CTRL_AUTONEG_GET(uint32_t reg)
+{
+	return (reg >> 12) & 0x1U;
+}
+static inline uint32_t ODI_SW_HOST_FIBER_CTRL_AUTONEG_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x1U << 12)) | ((val & 0x1U) << 12);
+}
+static inline uint32_t ODI_SW_HOST_FIBER_CTRL_AUTONEG_RESTART_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x1U << 9)) | ((val & 0x1U) << 9);
+}
+
 /* ---- Frame length, DSCP remark */
 
 /* PORT_MAX_FRAME_SEL: 0x011008, one word per port -- which max-length
