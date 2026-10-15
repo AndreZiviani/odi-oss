@@ -1019,6 +1019,8 @@ added to `CONFIG_CMDLINE` takes effect after a kernel rebuild; U-Boot's
 |---|---|---|---|---|---|
 | `odi_nic.debug` | `odi_nic.c:53` (bool, 0644) | trace the first interrupts and RX descriptors to the console; at the first open (so only when set on the command line) also the ring register read-backs and a NIC state dump 15 s and 45 s later | off | boot, or live for the traces | dev |
 | `odi_switch.host_pause` | `odi_switch.c:194` (bool, 0644) | let the host port send PAUSE frames to the host, as the stock image does (`docs/SWITCH.md`, "Host port PAUSE"); off, the switch drops at its own buffers instead | off | boot, or live: applied at once | prod (escape hatch) |
+| `odi_switch.host_autoneg` | `odi_switch.c` (bool, 0644) | the 1000BASE-X auto-negotiation of the host port; `N` forces 1000BASE-X full duplex (`docs/SWITCH.md`, "Host port auto-negotiation"). `host-autoneg.sh` drives it from `HOST_AUTONEG`; set by hand it lasts until the next boot | on | boot (with the platform settings), or live: applied at once | prod (through `HOST_AUTONEG`) |
+| `odi_switch.host_link` | `odi_switch.c` (read-only) | `1` while the host port has a link | -- | read at any time | prod |
 | `print-fatal-signals=1` | `kernel/618/config:61` (mainline) | register dump of any process killed by SIGSEGV/SIGBUS/SIGILL, into the ramlog | on | boot | prod (debug aid) |
 
 ### Kconfig

@@ -2,7 +2,8 @@
 /*
  * odi_switch_port.c -- port and L2 leaves: L2 ageing (cmd 62), the UNI PHY
  * auto-negotiation (cmd 30), the port force select (cmd 32), the flood
- * mask (cmd 64) and the PAUSE policy of the host port.
+ * mask (cmd 64), and the PAUSE policy and the 1000BASE-X auto-negotiation
+ * of the host port.
  * odi_switch_dal.h has the contract, docs/SWITCH.md#command-leaves the
  * capture each sequence reproduces.
  */
@@ -128,6 +129,41 @@ void odi_sw_host_pause_apply(void)
 		   (unsigned int)ODI_SW_PORT_ABILITY_LINK_UP_GET(reg),
 		   (unsigned int)ODI_SW_PORT_ABILITY_TX_PAUSE_GET(reg),
 		   (unsigned int)ODI_SW_PORT_ABILITY_RX_PAUSE_GET(reg));
+}
+
+bool odi_sw_host_autoneg = true;
+
+/* Only the AUTONEG bit of the PCS control word moves; speed (1000) and
+ * duplex (full) stay as the Fiber 1G mode set left them, so clearing it
+ * leaves the PCS forced to 1000BASE-X full duplex. Turning it back on
+ * also sets AUTONEG_RESTART (self-clearing), so the PCS negotiates again
+ * at once rather than at the next loss of sync. Nothing is written when
+ * the bit already holds the wanted value: a write that restarts the
+ * negotiation would flap a working link.
+ */
+void odi_sw_host_autoneg_apply(void)
+{
+	uint32_t before, reg;
+
+	before = odi_reg_read(ODI_SW_HOST_FIBER_CTRL_OFF);
+	if (ODI_SW_HOST_FIBER_CTRL_AUTONEG_GET(before) == (odi_sw_host_autoneg ? 1U : 0U)) {
+		ODI_SW_LOG("host port auto-negotiation already %s: control 0x%04x\n",
+			   odi_sw_host_autoneg ? "on" : "off (forced 1000BASE-X full duplex)",
+			   (unsigned int)before);
+		return;
+	}
+	reg = ODI_SW_HOST_FIBER_CTRL_AUTONEG_SET(before, odi_sw_host_autoneg ? 1U : 0U);
+	reg = ODI_SW_HOST_FIBER_CTRL_AUTONEG_RESTART_SET(reg, odi_sw_host_autoneg ? 1U : 0U);
+	odi_reg_write(ODI_SW_HOST_FIBER_CTRL_OFF, reg);
+	ODI_SW_LOG("host port auto-negotiation %s: control 0x%04x -> 0x%04x, ability 0x%03x\n",
+		   odi_sw_host_autoneg ? "on" : "off (forced 1000BASE-X full duplex)",
+		   (unsigned int)before, (unsigned int)reg,
+		   (unsigned int)odi_reg_read(ODI_SW_PORT_ABILITY(ODI_SW_HOST_PORT)));
+}
+
+uint32_t odi_sw_host_link_up(void)
+{
+	return ODI_SW_PORT_ABILITY_LINK_UP_GET(odi_reg_read(ODI_SW_PORT_ABILITY(ODI_SW_HOST_PORT)));
 }
 
 uint32_t odi_sw_l2_flood_mask_get(void)

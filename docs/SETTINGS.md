@@ -118,10 +118,12 @@ The UI's reboot confirmation says which slot it comes back on.
 | `ODI_LASER_UNVERIFIED` | Laser on an unverified laser driver | `1` switches the laser on even when the laser driver chip is not the Semtech GN25L95 this image was validated with (the boot runs the `laser unverified` form of the `laser` PON verb); anything else, or absent, keeps the laser off on such a stick and refuses GPON activation: the `gponact` verb fails (`-EPERM`, so `apply.sh omci` reports a re-registration as `failed`), `/proc/odi_gpon` shows `laser on 0 ldd_id <id byte, or -1> unverified 0`, and the reason is in `dmesg` (`odi_board: laser:`). A forced laser shows `laser on 1 ldd_id <id> unverified 1`. Other boards may need laser set-up this image does not do; a laser that lights outside its timeslots takes down every other ONU on the OLT port. Set it only on an OLT port with no other ONU. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `laser` PON step at boot | REBOOT |
 | `OLT_SW_DOWNLOAD` | OLT software download | what omcid answers when the OLT pushes a software image: `accept` (the default, also when the key is absent, empty or any other value) answers every step with success and discards the image; `reject` answers "not supported", as omcid did before. Nothing is ever written to flash or the U-Boot environment and the stick never reboots, in either mode ("Software download from the OLT" below). Odi-only key, kept in `/etc/config/odi.conf` | omcid, at every Start software download, Activate and Commit | LIVE (the next download) |
 | `OMCI_ACCEPT_REBOOT` | Accept a reboot from the OLT | `1` lets the OLT reboot the stick: a Reboot (OMCI message type 25) of the ONU-G is answered with success and, about a second later, omcid sends SIGTERM to init, which is what `reboot` does, so the shutdown entries of `inittab` run. Anything else, or absent, refuses it with result 2, "command not supported". Default off. The reboot condition byte of the request (unconditional, or only without a voice or emergency call) is ignored: the stick has no voice service, so every request is unconditional. A Reboot of any other class keeps the old answer. Every request is logged (`reboot from the OLT accepted` or `refused`, and `event=olt_reboot`, docs/TOOLS.md). A reboot with no committed trial returns to the stock slot, as any reboot does. Odi-only key, kept in `/etc/config/odi.conf`; read when the Reboot arrives, so a change needs neither a reload nor a re-registration | omcid, at every Reboot from the OLT | LIVE (the next Reboot) |
+| `HOST_AUTONEG` | Host port auto-negotiation | `off` runs the host port (the SFP edge, toward the router) as forced 1000BASE-X full duplex with no auto-negotiation, for a host whose SFP port has auto-negotiation off; `on`, empty or absent negotiates (clause 37), as the stock image and every host seen so far do; any other value runs `on` and logs `event=bad_value`. Never stored directly: a change is a trial, applied in RAM and reverted after 120 s unless confirmed over the link it changed; a boot with `off` falls back to auto-negotiation while the host link stays down; three short boots in a row clear it ("Host port auto-negotiation" below). Odi-only key, kept in `/etc/config/odi.conf` | `host-autoneg.sh`, at boot and for a trial | LIVE (a trial: kept only when confirmed) |
 
 Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
 `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`,
-`OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT` and `ODI_LASER_UNVERIFIED` are the only
+`OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `ODI_LASER_UNVERIFIED` and
+`HOST_AUTONEG` are the only
 keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
 in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
@@ -340,6 +342,87 @@ boot. Every step is one `event=sw_image` line (`docs/TOOLS.md`, "Link and
 provisioning events"), so the log shows it if it does; `reject` goes back to
 the old answers.
 
+### Host port auto-negotiation
+
+The host port, the SFP edge the router plugs into, runs 1000BASE-X with the
+clause-37 auto-negotiation, as the stock image does. A router whose SFP port
+has auto-negotiation off sees no link from it; `HOST_AUTONEG=off` turns the
+negotiation off on the stick too, forced 1000 Mb/s full duplex
+(`docs/SWITCH.md`, "Host port auto-negotiation"). Leave it unset unless the
+router needs it: a mode the two ends disagree on takes the only way into
+the stick down with the internet, so everything below exists to get it
+back.
+
+**A change is a trial.** The web UI (Config, Network, "Host port") or
+`host-autoneg.sh try off` (`docs/TOOLS.md`) applies the mode one second
+later, in RAM only, and starts a 120 s timer. Within that window, confirm
+it from the same page, or with `host-autoneg.sh confirm` over ssh: only
+then is `HOST_AUTONEG` stored. The confirm can only arrive over the host
+link, so a mode that breaks the link cannot be confirmed, and at the end of
+the window the stick goes back to the mode it ran before, by itself, and
+logs `event=trial_expired`. A reboot during the trial also undoes it: the
+key was never stored. Going back to auto-negotiation is a trial the same
+way (confirming it removes the key). A trial is refused while another runs
+and while the boot watch (below) is still deciding.
+
+**The boot watch, and the fallback.** A boot with `HOST_AUTONEG=off` forces
+the mode right after `network.sh` and watches the host link for 30 s. With
+no link it switches to auto-negotiation for 30 s, then back to forced, and
+so on, until a link comes up in either mode or 10 minutes have passed (then
+it stays on auto-negotiation, the default, for the rest of the boot: a
+forced router that comes up later than that finds no link until the stick
+reboots). The alternation is for a router
+that boots slower than the stick after a power cut: a forced router that
+comes up late still finds the stick forced within 30 s. The key is never
+changed by the watch. When the link comes up only with auto-negotiation,
+that is the **fallback**: `event=fallback`, the state file says
+`fallback=1`, and the web UI shows a banner saying the stick runs
+auto-negotiation although `HOST_AUTONEG` is off. Check the router port
+(auto-negotiation off, 1000 Mb/s full duplex) and try off again, or set the
+key back to on. The fallback clears by itself: it is the state of one boot,
+in `/var/run`, and the next boot that brings the forced link up has none.
+30 s is long against a forced link (it comes up within a second or two of
+both ends being up) and short against the 75 to 80 s a reboot already costs;
+each phase is the time a wrong mode keeps the stick unreachable.
+
+**The safe mode: three short boots.** If the stick is unreachable and the
+key is off, power it for about 30 seconds (at least 20, less than 60) and
+pull the power, three times in a row; the fourth boot runs
+auto-negotiation. Each boot with `HOST_AUTONEG=off` adds one to a counter
+on the config partition early in the boot, and a boot that reaches 60 s of
+uptime clears it; a boot that finds three short boots before it clears
+`HOST_AUTONEG`, runs auto-negotiation, logs `event=safe_mode`, and writes
+`/etc/config/host-autoneg.safemode`. That record stays until someone
+acknowledges it (the web UI banner's button, or `host-autoneg.sh ack`), so
+the banner is still there after later reboots: a setting changed behind
+the user's back should be noticed. A watchdog reset or a crash that reboots
+the stick early counts as a short boot too, which is the point: a boot that
+cannot stay up 60 s is not one to keep forcing. With the key on or unset
+nothing is counted and nothing is written, so a power cut, or three, never
+touches a stick that does not use this.
+
+The safe mode resets only `HOST_AUTONEG`. The management address is not
+reset: a wrong address is already recoverable without it (the second
+address, `LAN_ENABLE_IP2`, and `/etc/config/lan-ip`), and a reset of the
+address triggered by a pattern of power cuts would move the address of a
+stick whose only fault was the power. The U-Boot environment is never
+written: U-Boot here has no boot counter, and an environment written on
+every boot wears the flash and risks the boot itself.
+
+The files, on the config partition, each written by temporary file and
+rename: `host-autoneg.boots` (the counter, one number; present only during
+a run of short boots with the key off) and `host-autoneg.safemode`
+(`short_boots=`, `uptime=`, `previous=off`, `build=`; present until
+acknowledged). The state of the running boot is `/var/run/host-autoneg`,
+`key=value` lines replaced by a rename (`docs/TOOLS.md`, "host-autoneg.sh");
+the web UI and the diagnostics bundle (`host-link.txt`) read them.
+
+Not testable on every host: an Intel 82599 (`ixgbe`) refuses
+auto-negotiation off on a 1G SFP port (`ethtool -s <if> autoneg off` fails
+with "Invalid argument"), so with such a host only the default side can be
+checked. A host that lets its SFP port run without auto-negotiation is
+needed for the forced side ("Not verified yet").
+
 ## Web UI controls
 
 | control (tab) | on this image | apply |
@@ -347,6 +430,8 @@ the old answers.
 | Save (Config) | writes the keys, reads each back, then applies LIVE ones and offers the rest | per key, above |
 | Apply now (save bar, OLT identity) | `apply.sh omci`, after a confirmation: omcid re-registers the ONU | INTERRUPTS INTERNET |
 | Reboot now (save bar, Firmware) | reboots, after a confirmation naming the slot it comes back on | REBOOT |
+| Host port (Config, Network) | `host-autoneg.sh try on\|off`, then a dialog counting down the 120 s: Keep runs `confirm` (stores `HOST_AUTONEG`), Revert runs `revert`; no answer reverts by itself | LIVE (a trial) |
+| Host link banner (every view) | shown while the boot fallback runs auto-negotiation with `HOST_AUTONEG=off`, or while a safe-mode record waits; its button acknowledges the safe mode (`host-autoneg.sh ack`) | -- |
 | OLT identity switch (Config) | creates or removes `/etc/config/omci-identity.on` | INTERRUPTS INTERNET (with Apply now) |
 | Stock keys (tab) | the 163 keys only the stock firmware reads, read-only | -- |
 | Config UI credentials (Admin) | `/etc/config/confd.auth` | LIVE (sign in again) |
@@ -492,6 +577,7 @@ applies to every later image.
 | `lan-ip` | the management address, one line; overrides `LAN_IP_ADDR` | LIVE (`apply.sh network`) |
 | `pon-steps` | development: a PON step list that replaces the built-in one (`docs/BOOT.md`); a wrong list means no PON | REBOOT |
 | `sds.off` | skip the host SerDes check and fix in `network.sh` | REBOOT |
+| `host-autoneg.boots`, `host-autoneg.safemode` | not switches: the short-boot counter and the safe-mode record of `HOST_AUTONEG` ("Host port auto-negotiation" above), written by `host-autoneg.sh`; removing the record is the acknowledgement | -- |
 | `optics.off` | skip the `laser` PON step (the I2C steps still run): **the laser stays off, no service** | REBOOT |
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |
 | `breadcrumbs.on` | development: boot crumbs, `trial-diag.txt` and a heartbeat, on flash | REBOOT |
@@ -632,6 +718,8 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
   (`gpon_omci_up`) rather than going silent.
 
 ## Not verified yet
+
+- `HOST_AUTONEG` on a stick: the register write (host-tested against the register model), whether the port reports the link of a forced PCS, the forced link against a host with auto-negotiation off, the trial, the boot watch and the safe mode on hardware. The default (key unset) writes nothing and reads nothing new at boot.
 
 - `nv commit` on a stick: the commit sequence is host-tested against a fake
   flash, but writing both real env partitions has not been run on hardware

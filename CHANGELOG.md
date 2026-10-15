@@ -5,6 +5,26 @@ listed here.
 
 ## Unreleased
 
+- `HOST_AUTONEG` (odi.conf, default on): `off` runs the host port (the SFP
+  edge) as forced 1000BASE-X full duplex, with no auto-negotiation, for a
+  host router whose SFP port has auto-negotiation off; on, as before and as
+  the stock image does, it negotiates. The kernel clears or sets the AUTONEG
+  bit of the host PCS control word (0x021c00, 0x1140 on every stick so
+  far), through the new parameter `odi_switch.host_autoneg` (live through
+  sysfs); `odi_switch.host_link` reads the host link. A change is never
+  stored directly: `host-autoneg.sh try off` (or the web UI) applies it in
+  RAM and reverts after 120 s unless `confirm` arrives over the link it
+  changed. A boot with the key off watches the host link and falls back to
+  auto-negotiation while the forced link does not come up, alternating 30 s
+  each way for up to 10 minutes (`event=fallback`). Three boots in a row
+  shorter than 60 s with the key off clear it (the safe mode,
+  `event=safe_mode`, a record on the config partition until acknowledged).
+  A stick with the key unset writes and reads nothing new at boot. State in
+  `/var/run/host-autoneg` and `host-autoneg.sh status`, and in the
+  diagnostics bundle (`host-link.txt`). Host-tested; not yet trialled on a
+  stick, and the forced side needs a host that can run without
+  auto-negotiation.
+
 - GPON: with an OLT that also sends an Assign_Alloc-ID for the ONU-ID's own
   default Alloc-ID (some do), upstream user traffic never left the stick.
   That Alloc-ID was not recognised as the default row already in the CAM, so

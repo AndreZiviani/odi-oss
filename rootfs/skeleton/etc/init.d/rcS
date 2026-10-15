@@ -137,6 +137,15 @@ fi
 crumb "network: $(ifconfig br0 2>/dev/null | sed -n "s/.*inet addr:\([0-9.]*\).*/\1/p") on br0, eth0 $(cat /sys/class/net/eth0/operstate 2>/dev/null)"
 dev_hook network
 
+# ---- the host-port auto-negotiation (HOST_AUTONEG, docs/SETTINGS.md), after
+# network.sh has set the SerDes mode it changes one bit of. With the key
+# absent or on it reads the key and returns: nothing written, nothing
+# counted. With it off it counts the boot for the safe mode (three short
+# boots in a row clear the key), forces 1000BASE-X, and starts the boot
+# watch in the background, which falls back to auto-negotiation when the
+# host link does not come up. Bounded; it returns at once either way.
+/etc/scripts/host-autoneg.sh boot || echo "rcS: host-autoneg.sh boot failed" >&2
+
 # ---- ptys. devpts is mounted on /dev/pts already (the /etc/fstab mounts,
 # above), for the /dev/ptmx that dropbear opens for an interactive session;
 # the BSD pairs made here are the fallback it can also scan. devtmpfs

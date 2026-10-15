@@ -187,7 +187,7 @@ fi
 #   HOST_SERDES_MODE 0x214   PCIE_SELECT bit15, HOLD_CLK_GLITCH bit13,
 #                            PHY_SIDE_SEL bit8 all clear; LINK_MODE [4:0] = 4
 #   PHY_PATCH_STATUS 0x110   PATCH_DONE bit0 = 1   ("switch ready")
-#   HOST_FIBER_POWER 0x21c00 POWER_DOWN bit11 = 0
+#   HOST_FIBER_CTRL  0x21c00 POWER_DOWN bit11 = 0 (AUTONEG, bit12, belongs to host-autoneg.sh)
 #   HOST_FIBER_TX    0x22e4c TX_MODE [15:14] = 0
 #   SerDes analog    0x21680 speed select = 0         0x2168c PLL divider N = 0x30
 #                    0x21698 CMU pre-divider = 0      0x215b8 TX common-mode resistor on

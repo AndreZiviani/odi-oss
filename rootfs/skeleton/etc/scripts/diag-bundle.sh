@@ -14,8 +14,8 @@
 # What goes in, under odi-diag/ in the archive: the previous boot ramlog
 # (/proc/odi_ramlog_prev), /var/log/*, dmesg, the syslog ring (logread:
 # the event= lines omcid sends only to syslog), /etc/odi-build, /etc/version,
-# the readable /proc/odi_wdt files, uptime, /proc/meminfo, /proc/mounts,
-# /proc/cmdline, ps, the U-Boot slot variables from both environment copies
+# the readable /proc/odi_wdt files, the host-link state (host-link.txt),
+# uptime, /proc/meminfo, /proc/mounts, /proc/cmdline, ps, the U-Boot slot variables from both environment copies
 # (nv getenv and nv fallback), a scrape of the exporter, the config store
 # (lastgood.xml, lastgood_hs.xml, odi.conf) with every secret value
 # replaced by REDACTED, and under pon/ the GPON and OMCI state: diag (ONU
@@ -70,6 +70,7 @@
 # ends them and goes to the restore.
 
 STEP_TIMEOUT_S=${STEP_TIMEOUT_S:-5}
+HOST_AUTONEG_SH=${HOST_AUTONEG_SH:-/etc/scripts/host-autoneg.sh}
 METRICS_TIMEOUT_S=${METRICS_TIMEOUT_S:-10}
 LOG_FILE_MAX=${LOG_FILE_MAX:-262144}
 LOG_TOTAL_MAX=${LOG_TOTAL_MAX:-1048576}
@@ -189,6 +190,20 @@ manifest - "$(size_of "$b/nv.txt")" nv.txt
 
 timeout "$METRICS_TIMEOUT_S" wget -q -O - "$METRICS_URL" > "$b/metrics.txt" 2>&1
 manifest "$?" "$(size_of "$b/metrics.txt")" metrics.txt
+
+# host-link.txt: the host-port auto-negotiation (HOST_AUTONEG): the state
+# host-autoneg.sh keeps (a trial, the boot fallback, the safe-mode record,
+# the short-boot count), then the words that decide the host link: the PCS
+# control word (HOST_FIBER_CTRL), the port ability the link runs with, and
+# the forced-ability pair of port 0. All read before on a running stick.
+{
+	echo "# host-autoneg.sh status"
+	timeout "$STEP_TIMEOUT_S" sh "$HOST_AUTONEG_SH" status 2>&1
+	echo "# HOST_FIBER_CTRL 0x21c00, PORT_ABILITY(0) 0x198, PORT_FORCE_SELECT(0) 0x1b4, PORT_FORCE_ABILITY(0) 0x180"
+	printf '%s\n' "register get 0x21c00 1" "register get 0x198 1" "register get 0x1b4 1" "register get 0x180 1" |
+		timeout "$STEP_TIMEOUT_S" diag 2>&1
+} > "$b/host-link.txt"
+manifest - "$(size_of "$b/host-link.txt")" host-link.txt
 
 # pon/: the GPON and OMCI state. One diag run reads it all, batched on
 # stdin; omcli asks omcid one question per run.

@@ -110,6 +110,7 @@ test-host:
 	bash test/fwu_starter_test.sh
 	bash test/network_addr_test.sh
 	bash test/apply_test.sh
+	bash test/host_autoneg_test.sh
 	bash test/omci_respawn_test.sh
 	bash test/services_off_test.sh
 	bash test/regtrace_decode_test.sh
@@ -129,6 +130,7 @@ test-host:
 	bash test/odi_switch_init_platform_test.sh
 	bash test/odi_switch_acl_clean_test.sh
 	bash test/odi_host_pause_test.sh
+	bash test/odi_host_autoneg_test.sh
 	bash test/odi_omci_test.sh
 	bash test/regdump_test.sh
 	bash test/mkmodload_test.sh

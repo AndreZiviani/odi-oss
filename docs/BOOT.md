@@ -112,7 +112,13 @@ reset: a trial that never answered still says how far it got
 6. **The management address** (`/etc/scripts/network.sh`), after the
    config partition, which holds the address, and before the services:
    dropbear bound on a box with no routable interface looks exactly like a
-   panic from outside.
+   panic from outside. Then the host-port auto-negotiation
+   (`/etc/scripts/host-autoneg.sh boot`), after `network.sh` has set the
+   SerDes mode it changes one bit of: with `HOST_AUTONEG` unset it reads
+   the key and returns; with it off it counts the boot for the safe mode,
+   forces 1000BASE-X and leaves the boot watch running in the background
+   (`docs/SETTINGS.md`, "Host port auto-negotiation"). It returns at once
+   either way.
 7. **ptys.** devpts is already mounted on `/dev/pts` by stage 1's
    `mount -a`, for the `/dev/ptmx` dropbear opens for an interactive
    session; the BSD pairs (`/dev/ptypN`/`/dev/ttypN`) made here are a
