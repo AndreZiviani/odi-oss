@@ -659,11 +659,12 @@ is a UNI PHY ability for cmd 30, and the host SerDes has no such PHY.
 The bit layout is the one of the stock register table for this block. The
 same table has a second candidate, a two-bit "force auto-negotiation" field
 (bits 9:8) of another host SerDes word at 0x021808, never read on a stick.
-Which of the two gives a working forced link against a host with
-auto-negotiation off has not been seen on hardware; this image uses bit 12
-of the PCS control word, whose meaning is the standard clause-22 one, and
-touches 0x021808 in no path. The stick trial plan reads it, once, to
-compare.
+This image uses bit 12 of the PCS control word, whose meaning is the
+standard clause-22 one, and touches 0x021808 in no path. On a stick it
+gives a working forced link: with the bit cleared (0x1140 becomes 0x0140)
+the port keeps reporting the link of a forced PCS, and against a host whose
+SFP port has auto-negotiation off a forced stick carries traffic where a
+negotiating one gets a link and none. The other candidate was never needed.
 
 `odi_sw_host_autoneg_apply()` (`odi_switch_port.c`) is one read-modify-write
 of bit 12: cleared for off (`0x1140` becomes `0x0140`: no negotiation, 1000
