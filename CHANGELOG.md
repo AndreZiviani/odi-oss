@@ -19,6 +19,48 @@ listed here.
   OLT that expects a native ONU's vendor-specific entities. The bytes stay
   out of the logs and the diagnostics bundle redacts the key, as before.
 
+- `OMCI_ACCEPT_REBOOT=2` (odi.conf): acknowledge only. The OLT Reboot of the
+  ONU-G is answered with success and the stick does not reboot, for an OLT
+  that insists on a successful answer. `1` still reboots and `0`, unset or
+  any other value still refuses. Logged as `reboot from the OLT
+  acknowledged, not rebooting (OMCI_ACCEPT_REBOOT=2)` and
+  `event=olt_reboot result=acknowledged`.
+
+- Per-flow GEM counters (Refs #92): `/proc/odi_gpon/flows`, one line per GEM
+  flow OMCI created: `ds <flow> gem <port> gem_frames <n> bytes <n> eth_rx
+  <n> eth_fwd <n>` and `us <flow> gem <port> gem_frames <n> eth_frames <n>
+  bytes <n>`, 64-bit totals since the flow was created, so a silent GEM port
+  on a multi-service line shows. The registers clear on read, so the driver
+  samples them in the same second and under the same lock as the link
+  counters, for the flows it has configured only, and nothing else may read
+  them: not `diag register get`, not the stock `gpon show counter flow`. A
+  flow created again, and a reset of the flow state, start its totals over.
+  `diag gpon get flow-counters` prints the file, and `diag-bundle.sh`
+  collects it as `pon/odi_gpon-flows.txt`. metricsd needs the odi-sfp-exporter
+  release that exports it (`gpon_gem_*`); an older one ignores the file. The
+  stock image has none of this. `diag gpon g f` is now ambiguous between
+  `flows` and `flow-counters`; `gpon get flows` is unchanged.
+
+- BREAKING: `/proc/odi_gpon` is now a directory of three files, one per
+  topic, like `/proc/odi_wdt/`; there is no `/proc/odi_gpon` file any more
+  and no compatibility copy. `status` has the ONU state, ONU id, serial,
+  EqD, Alloc-IDs, REI count, TO1/TO2 expiries, interrupt bookkeeping, laser,
+  last LOS, Upstream_Overhead and Ranging_Time, and the sampler's alarm,
+  FEC and ONU state lines (`alarm_now`, `fec_now`, `ds_superframe`,
+  `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions`);
+  `counters` has `ctr_samples`, `ctr` and `ctr_saturated`; `ploam` has
+  `ploam ds_rx us_tx`, `ploam_us_dropped`, `ploam_type` and `ploam_ring`.
+  The line formats are unchanged. Anything that read `/proc/odi_gpon` must
+  open the file it needs: `diag`, `omcid` and `diag-bundle.sh` are updated
+  here (the bundle now collects `pon/odi_gpon-status.txt`,
+  `odi_gpon-counters.txt` and `odi_gpon-ploam.txt`), and metricsd needs the
+  odi-sfp-exporter release that reads the three files: an older one finds no
+  `/proc/odi_gpon` file and drops the GPON link and `gpon_provision_tcont*`
+  metrics, nothing else. On the stock image, which has no `/proc/odi_gpon`
+  at all, nothing changes. Groundwork for per-flow counters (Refs #92).
+
+## v1.4.2 - 2026-10-15
+
 - GPON: with an OLT that also sends an Assign_Alloc-ID for the ONU-ID's own
   default Alloc-ID (some do), upstream user traffic never left the stick.
   That Alloc-ID was not recognised as the default row already in the CAM, so

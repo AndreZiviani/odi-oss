@@ -1,4 +1,4 @@
-/* Parses the first line of /proc/odi_gpon (kernel/extra/drivers/net/ethernet/
+/* Parses the first line of /proc/odi_gpon/status (kernel/extra/drivers/net/ethernet/
  * odi/odi_gpon.c: "state %d\n", odi_gpon_onu_state()), the ONU FSM state.
  *
  * Split out of hw.c so the parsing itself builds and is tested natively: it
@@ -33,7 +33,7 @@ static inline uint32_t gpon_alarms_from_sts(uint32_t sts)
 	return sts & GPON_ALARM_KNOWN;
 }
 
-/* The "last_los_ms <ms> state <0|1>" line of /proc/odi_gpon: the DS LOS bit
+/* The "last_los_ms <ms> state <0|1>" line of /proc/odi_gpon/status: the DS LOS bit
  * as the driver last sampled it, at its most recent interrupt. The live
  * register is better (it needs no interrupt to have happened); this is the
  * fallback for when /dev/odi_sw cannot be read. Returns 0 and *los (0 or

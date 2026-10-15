@@ -20,9 +20,9 @@
 # (lastgood.xml, lastgood_hs.xml, odi.conf) with every secret value
 # replaced by REDACTED, and under pon/ the GPON and OMCI state: diag (ONU
 # state, alarms, GEM flows, port counters, the PON queue registers that
-# cmd 23 and 25 write), /proc/odi_gpon, /proc/odi_omci, and omcli (state,
-# provision, flows, tcont, conn, and the MIB classes in OMCI_CLASSES), and
-# under module/ the optics module on /dev/i2c-0: A0h whole (a0.txt), A2h
+# cmd 23 and 25 write), /proc/odi_gpon/ (status, counters, flows, ploam),
+# /proc/odi_omci, and omcli (state, provision, flows, tcont, conn, and the MIB
+# classes in OMCI_CLASSES), and under module/ the optics module on /dev/i2c-0: A0h whole (a0.txt), A2h
 # with the page select as found (a2.txt), and in chip.txt the page select,
 # the laser driver identity (A2h page 2 byte 0xa0, 0x6a for a GN25L95;
 # bytes 0x80 and 0xdc, the UX3320 variant markers) and the UX3320
@@ -43,14 +43,14 @@
 # confd.auth, the dropbear keys and /etc/passwd are never collected at all.
 #
 # What is masked: the serial number, the MACs, the LOID and the module
-# serial (IDENT_KEYS, the serial in /proc/odi_gpon, the interface MACs, A0h
+# serial (IDENT_KEYS, the serial in /proc/odi_gpon/status, the interface MACs, A0h
 # bytes 68-83, which are also blanked in module/a0.txt). Many OLTs authenticate by
 # serial number alone, so a bundle posted in a public issue would otherwise
 # hand out what it takes to clone the line. Each is replaced, in every file
 # and in every spelling (text, hex, MAC with and without separators), by
 # MASKED- and its last four characters, which still tells two sticks apart.
 # --full keeps them, for a bundle shared privately; the web UI never passes
-# it. The PLOAM ring in /proc/odi_gpon prints message bodies, so the bodies
+# it. The PLOAM ring in /proc/odi_gpon/ploam prints message bodies, so the bodies
 # that carry the password or a key fragment are always withheld, and those
 # that carry the serial number unless --full: what is left of a value cut
 # by the ten-byte window would escape the scrub.
@@ -99,7 +99,7 @@ SHORT_LEN=8
 # descriptor, multicast GEM interworking TP, multicast operations profile
 # and subscriber config, VEIP, extended VLAN tagging operation.
 OMCI_CLASSES="256 257 11 45 47 84 130 262 263 266 268 277 278 280 281 309 310 329 171"
-GPON_PROC=${GPON_PROC:-/proc/odi_gpon}
+GPON_PROC_DIR=${GPON_PROC_DIR:-/proc/odi_gpon}
 PONQ_BASE=0xf020a8	# PONQ_COUNT_MASK +0, through +239 (docs/SWITCH.md)
 PONQ_WORDS=240
 # The A2h pages whose upper half module/ dumps, in this order: 2 and 3 first,
@@ -204,23 +204,29 @@ grab pon/odi_omci.txt /proc/odi_omci
 # for the serial number in them: Serial_Number_ONU (us 0x01), Acknowledge
 # (us 0x09, it echoes a downstream message), Serial_Number_Mask (ds 0x02),
 # Assign_ONU-ID (ds 0x03) and Disable_Serial_Number (ds 0x06, 0x81).
-if [ -e "$GPON_PROC" ]; then
-	timeout "$STEP_TIMEOUT_S" cat "$GPON_PROC" > "$work/gpon.raw" 2>&1
-	rc=$?
-	awk -v full="$full" '
-	$2 ~ /^(us|ds)$/ && $3 == "onu_id" && $5 == "type" && $7 == "content" {
-		t = $2 " " $6
-		if (t == "us 0x02" || t == "us 0x05" ||
-		    (!full && (t == "us 0x01" || t == "us 0x09" || t == "ds 0x02" ||
-			       t == "ds 0x03" || t == "ds 0x06" || t == "ds 0x81"))) {
-			sub(/content .*/, "content (withheld)")
-		}
-	}
-	{ print }' "$work/gpon.raw" > "$b/pon/odi_gpon.txt"
-	manifest "$rc" "$(size_of "$b/pon/odi_gpon.txt")" pon/odi_gpon.txt
-else
-	manifest - - "pon/odi_gpon.txt (absent: $GPON_PROC)"
-fi
+for f in status counters flows ploam; do
+	if [ -e "$GPON_PROC_DIR/$f" ]; then
+		timeout "$STEP_TIMEOUT_S" cat "$GPON_PROC_DIR/$f" > "$work/gpon-$f.raw" 2>&1
+		rc=$?
+		if [ "$f" = ploam ]; then
+			awk -v full="$full" '
+			$2 ~ /^(us|ds)$/ && $3 == "onu_id" && $5 == "type" && $7 == "content" {
+				t = $2 " " $6
+				if (t == "us 0x02" || t == "us 0x05" ||
+				    (!full && (t == "us 0x01" || t == "us 0x09" || t == "ds 0x02" ||
+					       t == "ds 0x03" || t == "ds 0x06" || t == "ds 0x81"))) {
+					sub(/content .*/, "content (withheld)")
+				}
+			}
+			{ print }' "$work/gpon-$f.raw" > "$b/pon/odi_gpon-$f.txt"
+		else
+			cp "$work/gpon-$f.raw" "$b/pon/odi_gpon-$f.txt"
+		fi
+		manifest "$rc" "$(size_of "$b/pon/odi_gpon-$f.txt")" "pon/odi_gpon-$f.txt"
+	else
+		manifest - - "pon/odi_gpon-$f.txt (absent: $GPON_PROC_DIR/$f)"
+	fi
+done
 
 if step pon/omcli_state.txt omcli state; then
 	for c in provision flows tcont conn; do
@@ -408,8 +414,8 @@ if [ -f /etc/config/confd.auth ]; then
 fi
 
 # The identity: the IDENT_KEYS values from the config store, the serial in
-# /proc/odi_gpon (16 hex digits; its first four bytes are the vendor id, so
-# it is also turned into the text spelling the config uses), the MAC of
+# /proc/odi_gpon/status (16 hex digits; its first four bytes are the vendor
+# id, so it is also turned into the text spelling the config uses), the MAC of
 # every interface, and the module serial from A0h. Collected even with
 # --full, which only skips the rules.
 idents=$work/idents
@@ -430,8 +436,8 @@ for f in lastgood.xml lastgood_hs.xml odi.conf; do
 			print substr($0, eq + 1)
 	}' "$CONFIG_DIR/$f" >> "$idents"
 done
-if [ -f "$work/gpon.raw" ]; then
-	sed -n 's/^sn \([0-9a-f]\{16\}\)$/\1/p' "$work/gpon.raw" | awk '
+if [ -f "$work/gpon-status.raw" ]; then
+	sed -n 's/^sn \([0-9a-f]\{16\}\)$/\1/p' "$work/gpon-status.raw" | awk '
 	function h(c) { return index("0123456789abcdef", c) - 1 }
 	{
 		print
@@ -520,7 +526,7 @@ if [ "$full" = 0 ]; then
 		# A serial in its text spelling, vendor id and eight hex digits,
 		# which tools print with the two halves in different cases (omcli
 		# state: vendor id as set, digits lowercase); and the hex spelling
-		# of the PLOAM messages and /proc/odi_gpon.
+		# of the PLOAM messages and /proc/odi_gpon/status.
 		if printf '%s' "$v" | grep -q -x '[A-Za-z0-9]\{4\}[0-9A-Fa-f]\{8\}'; then
 			vid=$(printf '%s' "$v" | cut -c1-4)
 			for x in "$vid" "$(upper "$vid")" "$(lower "$vid")"; do
@@ -558,7 +564,7 @@ if [ -s "$script" ]; then
 		sed -i -f "$script" "$f"
 	done
 fi
-rm -f "$secrets" "$idents" "$rules" "$script" "$work/gpon.raw" "$work/module.serial" "$work/i2c.out"
+rm -f "$secrets" "$idents" "$rules" "$script" "$work"/gpon-*.raw "$work/module.serial" "$work/i2c.out"
 
 tar -czf "$out.part" -C "$work" odi-diag || { rm -f "$out.part"; fail "tar failed"; }
 n=$(size_of "$out.part")

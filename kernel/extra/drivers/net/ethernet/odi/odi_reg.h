@@ -7,7 +7,7 @@
  * REGISTER, RTK_OPT_ADDRESS_GET/SET, RTK_OPT_STAT_PORT),
  * plus RTK_OPT_TRANSCEIVER (DDM, ODI_SW_IOC_DDM_GET -- odi_ddm.c/odi_i2c.c
  * read it directly over the SoC I2C controller, no vendor call at all).
- * RTK_OPT_GPON_STATUS already moved to /proc/odi_gpon, so that one has no
+ * RTK_OPT_GPON_STATUS already moved to /proc/odi_gpon/status, so that one has no
  * ioctl here.
  *
  * Shared verbatim between the kernel driver (odi_reg.c) and src/diag

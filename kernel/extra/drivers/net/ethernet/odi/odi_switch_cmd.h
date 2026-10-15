@@ -62,6 +62,21 @@
 
 void odi_switch_cmd_reset_state(void);
 
+/* Who is told about the GEM flows cmd 25 creates: the GPON core, which
+ * samples the per-flow counters of the flows that exist (odi_gpon_flow.h).
+ * set runs after a flow is programmed, once per cmd 25 that succeeded
+ * (us 0: downstream, 1: upstream; idx the flow id omcid sent), and clear
+ * when odi_switch_cmd_reset_state() empties the flow tables. Both run in
+ * process context with no switch spinlock held. NULL (the default, and in
+ * the host tests) tells nobody.
+ */
+struct odi_switch_flow_ops {
+	void (*set)(int us, uint32_t idx, uint32_t gem_port);
+	void (*clear)(void);
+};
+void odi_switch_cmd_set_flow_ops(const struct odi_switch_flow_ops *ops);
+
+
 /* cmd 51 and cmd 50 (odi_switch_bdgconn.c): the bridge rule, or the
  * 4-byte service id, as omcid sends it. _reset clears the service list
  * and the CF table; odi_switch_cmd_reset_state() calls it.

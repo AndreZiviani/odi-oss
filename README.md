@@ -81,7 +81,7 @@ the same hardware.
 | clock | none: no RTC, no NTP client | opt-in `ntpd` (`NTP_SERVER`) |
 | web UI | closed, minimal | `confd` (a separate project): same port; offers only the 21 settings this image reads, each marked LIVE, SERVICE RESTART, INTERRUPTS INTERNET or REBOOT, and applies them without a reboot where it can; the switch MAC table; firmware upload and write to the inactive slot; SSH-key management; build/version info |
 | metrics | none | a Prometheus exporter, `metricsd` (a separate project), including whether the OLT actually provisioned service, not just link state |
-| GPON line quality | 43 GPON MAC counters behind `diag gpon show counter`, each cleared by the read, so every reader takes counts from every other | the driver is their one reader: sampled every second into 64-bit totals in `/proc/odi_gpon` (BIP errors, FEC corrected and uncorrectable, PLend, BWmap and GEM errors, the BWmap allocations the OLT grants this ONU, upstream bursts, PLOAMu and GEM bytes), with LOS, LOF and LOM events and seconds, time in each ONU state and every state transition; host-tested against a clear-on-read register model (`test/odi_gpon_ctr_test.c`) |
+| GPON line quality | 43 GPON MAC counters behind `diag gpon show counter`, each cleared by the read, so every reader takes counts from every other | the driver is their one reader: sampled every second into 64-bit totals in `/proc/odi_gpon/counters` (BIP errors, FEC corrected and uncorrectable, PLend, BWmap and GEM errors, the BWmap allocations the OLT grants this ONU, upstream bursts, PLOAMu and GEM bytes), with LOS, LOF and LOM events and seconds, time in each ONU state and every state transition, and per GEM flow (`/proc/odi_gpon/flows`) the GEM frames, bytes and Ethernet frames each way, which show a silent GPON port on a multi-service line; host-tested against a clear-on-read register model (`test/odi_gpon_ctr_test.c`) |
 | SSH | an old dropbear needing legacy algorithms re-enabled on the client | a current dropbear, ed25519 host key, `scp` in both directions |
 | login security | telnet enabled by default, and a fixed, well-known default login (`admin`/`admin`) | no telnet; ssh only. A release image ships with root locked (keys only, no password); a source build defaults to a password generated per build and stored as a SHA-512 crypt hash. Either way, the web UI's own `admin`/`admin` default must still be changed by the operator |
 | memory | about 1.1 MB free after a cache drop, with the stock services running | about 15 MB available: our drivers load the switch and GPON register tables from firmware files, apply them and free them |
@@ -141,7 +141,7 @@ can see on the line:
   stick with another laser driver, or none that answers, the image does not
   switch the laser on and refuses GPON activation, so the ONU stays dark
   and never registers. `dmesg | grep 'odi_board: laser'` says why, and
-  `/proc/odi_gpon` shows `laser on 0 ldd_id <id> unverified 0`. If you know
+  `/proc/odi_gpon/status` shows `laser on 0 ldd_id <id> unverified 0`. If you know
   your stick's laser is fine (it ran an earlier release without trouble),
   `flash set ODI_LASER_UNVERIFIED 1` and a reboot switch it on anyway
   ([`docs/SETTINGS.md`](docs/SETTINGS.md), which says what a laser lit

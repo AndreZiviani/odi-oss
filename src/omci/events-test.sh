@@ -50,7 +50,7 @@ rm -f /var/config/lastgood_hs.xml
 rm -f /var/run/omcid-resume-decision
 
 log=/tmp/omcid-events.log
-# The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon lists them.
+# The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon/status lists them.
 printf 'alloc_ids 5 282 794 1050 1306 538\n' > /tmp/events-gpon
 $Q respond/build/omcid -w 8 -c "$CAPS" -g /tmp/events-gpon > "$log" 2>&1 &
 pid=$!
@@ -402,6 +402,31 @@ got=$(grep -o -- '-> 0e22390a0007000001' /tmp/omcid-reboot1.log | head -1)
 check "a Reboot of another class keeps its answer" "$got" "-> 0e22390a0007000001"
 wait "$victim" 2>/dev/null; got=$?
 check "the stand-in for init got SIGTERM" "$got" "143"
+kill "$pid4" 2>/dev/null
+wait "$pid4" 2>/dev/null
+rm -f /var/config/odi.conf
+
+# OMCI_ACCEPT_REBOOT=2: answered success, logged, and the stand-in for init is
+# left alone. A fresh stand-in, since the one above was signalled.
+sleep 60 &
+victim=$!
+printf 'OMCI_ACCEPT_REBOOT=2\n' > /var/config/odi.conf
+$Q respond/build/omcid -w 3 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot2.log 2>&1 &
+pid4=$!
+sleep 2
+$Q cli/build/omcli --inject "$(frame 0e23 59 0100 0000)" > /dev/null 2>&1
+sleep 3
+got=$(grep -o -- '-> 0e23390a0100000000' /tmp/omcid-reboot2.log | head -1)
+check "reboot acknowledged: the answer is success" "$got" "-> 0e23390a0100000000"
+got=$(grep -c '^reboot from the OLT acknowledged, not rebooting (OMCI_ACCEPT_REBOOT=2)$' /tmp/omcid-reboot2.log)
+check "and logged once" "$got" "1"
+got=$(grep '^event=olt_reboot ' /tmp/omcid-reboot2.log | tr '\n' ';')
+check "the event says acknowledged" "$got" \
+      "event=olt_reboot class=256 inst=0 result=acknowledged;"
+kill -0 "$victim" 2>/dev/null; got=$?
+check "the stand-in for init is not signalled" "$got" "0"
+kill "$victim" 2>/dev/null
+wait "$victim" 2>/dev/null
 kill "$pid4" 2>/dev/null
 wait "$pid4" 2>/dev/null
 rm -f /var/config/odi.conf

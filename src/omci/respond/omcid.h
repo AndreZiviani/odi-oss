@@ -415,7 +415,8 @@ void ev_unknown_msg(uint8_t mt, uint16_t cls);
  * class omcid does not model with success instead of "unknown entity". */
 extern int unknown_me_ok;
 /* OMCI_ACCEPT_REBOOT=1 in CFG_ODI_PATH: an ONU-G Reboot from the OLT is
- * answered with success and followed by a reboot. Read when the Reboot
+ * answered with success and followed by a reboot; 2 answers success and does
+ * not reboot. Read when the Reboot
  * arrives (omcimsg.c), not held, so a change needs no reload. reboot_pid is
  * the process that gets the shutdown signal: init, unless -k says otherwise
  * (a test harness has no init to reboot). */

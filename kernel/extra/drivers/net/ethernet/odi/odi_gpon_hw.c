@@ -101,7 +101,7 @@ struct odi_gpon_hw_state {
 
 	/* USF_MIN_RESP_DELAY as read by the last USF_EQ_DELAY write, and the
 	 * snapshot of the last write a Ranging_Time caused (debug only,
-	 * /proc/odi_gpon): the delay bits it carried, that register value and
+	 * /proc/odi_gpon/status): the delay bits it carried, that register value and
 	 * the MULTFRAME/INFRAME written.
 	 */
 	uint32_t eqd_min_resp;
@@ -120,7 +120,7 @@ struct odi_gpon_hw_state {
 	 */
 	uint32_t ber_interval_frames;
 
-	/* Optional PLOAM observability hook, odi_gpon.c's own /proc/odi_gpon
+	/* Optional PLOAM observability hook, odi_gpon.c's own /proc/odi_gpon/ploam
 	 * ring buffer (odi_gpon_hw_set_ploam_log()). NULL by default and after
 	 * odi_gpon_hw_reset() -- a plain call-if-set, no locking of its own
 	 * (the caller, odi_gpon.c, already holds its own lock around every
@@ -387,7 +387,7 @@ static void hw_set_ext_burst_length(uint8_t pre_ranged_bytes, uint8_t ranged_byt
 }
 
 /* hw_apply_eqd() for an EqD that came from a Ranging_Time message, keeping
- * what it wrote for /proc/odi_gpon.
+ * what it wrote for /proc/odi_gpon/status.
  */
 static void hw_apply_ranging_eqd(uint32_t eqd_bits)
 {
@@ -487,7 +487,7 @@ static void hw_send_us_ploam(void *ctx, const struct odi_gpon_ploam *msg)
 	 * reply there, us_ploam_cpu_urgent), so URGENT_FULL is the bit that
 	 * says whether a push would land. A push into a full queue is lost
 	 * without a trace; one that cannot be queued in the bound is counted
-	 * instead (/proc/odi_gpon, ploam_us_dropped). The OLT repeats what it
+	 * instead (/proc/odi_gpon/ploam, ploam_us_dropped). The OLT repeats what it
 	 * does not see answered, and deactivates an ONU that stays silent.
 	 */
 	if (odi_poll_reg(ODI_GPON_USF_PLOAM_TX_CTL_OFF, ODI_GPON_USF_PLOAM_TX_CTL_URGENT_FULL, 0U,
@@ -947,7 +947,7 @@ int odi_gpon_hw_alloc_id_assign(uint16_t alloc_id)
 
 	/* Not recorded unless the write completed: the next of the three
 	 * copies the OLT sends then finds no row for this Alloc-ID and writes
-	 * again, and /proc/odi_gpon lists only Alloc-IDs in the CAM.
+	 * again, and /proc/odi_gpon/status lists only Alloc-IDs in the CAM.
 	 */
 	if (odi_switch_gpon_alloc_write(row, alloc_id)) {
 		ODI_GPON_HW_WARN("Alloc-ID %u row %u: CAM write not done\n",

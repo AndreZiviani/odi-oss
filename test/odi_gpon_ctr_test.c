@@ -12,8 +12,9 @@
  * the 16-bit and 8-bit field split; saturation; the REI count, gathered in
  * O5 only and clamped; the alarm events and times, including a wrapping
  * millisecond clock; the time per ONU state and the transition counts; and
- * the /proc/odi_gpon lines, against test/fixtures/odi_gpon_ctr.txt
- * (UPDATE=1 rewrites it; metricsd's own tests read the same lines).
+ * the /proc/odi_gpon/status and /proc/odi_gpon/counters lines, against
+ * test/fixtures/odi_gpon_ctr_status.txt and odi_gpon_ctr_counters.txt
+ * (UPDATE=1 rewrites them; metricsd's own tests read the same lines).
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -420,23 +421,57 @@ static void test_show_before_first_sample(void)
 	odi_gpon_ctr_reset(&c);
 	outn = 0;
 	out[0] = 0;
-	odi_gpon_ctr_show(&c, put, NULL);
-	CHECK(strncmp(out, "ctr_samples 0\n", 14) == 0, "the sample count leads");
-	CHECK(!strstr(out, "\nalarm_now ") && !strstr(out, "\nfec_now ") &&
-	      !strstr(out, "\nds_superframe "),
+	odi_gpon_ctr_show_status(&c, put, NULL);
+	CHECK(!strstr(out, "alarm_now ") && !strstr(out, "fec_now ") &&
+	      !strstr(out, "ds_superframe "),
 	      "no live bits before the first sample");
+	CHECK(strstr(out, "alarm_events los 0\n") != NULL, "the alarm events are there, at 0");
+	outn = 0;
+	out[0] = 0;
+	odi_gpon_ctr_show_counters(&c, put, NULL);
+	CHECK(strncmp(out, "ctr_samples 0\n", 14) == 0, "the sample count leads");
 	CHECK(strstr(out, "ctr ds_bip_err_blocks 0\n") != NULL, "the totals are there, at 0");
 }
 
-/* A scenario with a value in every kind of line, compared with the golden
- * file metricsd's own test takes as its input.
- */
-static void test_show_golden(const char *path)
+/* Compares out with the golden file at path (UPDATE=1 rewrites it). */
+static void compare_golden(const char *path)
 {
-	unsigned int i;
 	FILE *f;
 	char want[8192];
 	size_t n;
+
+	if (getenv("UPDATE")) {
+		f = fopen(path, "w");
+		if (!f || fwrite(out, 1, outn, f) != outn) {
+			fprintf(stderr, "FAIL: cannot write %s\n", path);
+			failures++;
+		}
+		if (f)
+			fclose(f);
+		return;
+	}
+	f = fopen(path, "r");
+	if (!f) {
+		fprintf(stderr, "FAIL: cannot read %s\n", path);
+		failures++;
+		return;
+	}
+	n = fread(want, 1, sizeof(want) - 1, f);
+	fclose(f);
+	want[n] = 0;
+	if (n != outn || memcmp(want, out, n) != 0) {
+		fprintf(stderr, "FAIL: /proc lines differ from %s; got:\n%s", path, out);
+		failures++;
+	}
+}
+
+/* A scenario with a value in every kind of line, compared with the golden
+ * files metricsd's own test takes as its input. dir holds both.
+ */
+static void test_show_golden(const char *dir)
+{
+	unsigned int i;
+	char path[512];
 
 	start();
 	for (i = 0; i < 10; i++) {
@@ -475,31 +510,15 @@ static void test_show_golden(const char *path)
 
 	outn = 0;
 	out[0] = 0;
-	odi_gpon_ctr_show(&c, put, NULL);
+	odi_gpon_ctr_show_status(&c, put, NULL);
+	snprintf(path, sizeof(path), "%s/odi_gpon_ctr_status.txt", dir);
+	compare_golden(path);
 
-	if (getenv("UPDATE")) {
-		f = fopen(path, "w");
-		if (!f || fwrite(out, 1, outn, f) != outn) {
-			fprintf(stderr, "FAIL: cannot write %s\n", path);
-			failures++;
-		}
-		if (f)
-			fclose(f);
-		return;
-	}
-	f = fopen(path, "r");
-	if (!f) {
-		fprintf(stderr, "FAIL: cannot read %s\n", path);
-		failures++;
-		return;
-	}
-	n = fread(want, 1, sizeof(want) - 1, f);
-	fclose(f);
-	want[n] = 0;
-	if (n != outn || memcmp(want, out, n) != 0) {
-		fprintf(stderr, "FAIL: /proc lines differ from %s; got:\n%s", path, out);
-		failures++;
-	}
+	outn = 0;
+	out[0] = 0;
+	odi_gpon_ctr_show_counters(&c, put, NULL);
+	snprintf(path, sizeof(path), "%s/odi_gpon_ctr_counters.txt", dir);
+	compare_golden(path);
 }
 
 int main(int argc, char **argv)
@@ -516,7 +535,7 @@ int main(int argc, char **argv)
 	test_alarms_from_the_line_poll();
 	test_states();
 	test_show_before_first_sample();
-	test_show_golden(argc > 1 ? argv[1] : "test/fixtures/odi_gpon_ctr.txt");
+	test_show_golden(argc > 1 ? argv[1] : "test/fixtures");
 
 	if (failures) {
 		fprintf(stderr, "odi_gpon_ctr_test: %d failure(s)\n", failures);
