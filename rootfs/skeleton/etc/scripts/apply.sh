@@ -72,6 +72,11 @@
 #
 set -u
 
+# confd starts its children with no environment; export a PATH so that
+# commands started through busybox timeout find /sbin and /usr/sbin too.
+PATH=${PATH:+$PATH:}/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
 RELOAD_STATUS=${RELOAD_STATUS:-/var/run/omcid-reload}
 NETWORK=${NETWORK:-/etc/scripts/network.sh}
 MODULES_OFF=${MODULES_OFF:-/etc/config/modules.off}

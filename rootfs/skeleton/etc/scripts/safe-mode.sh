@@ -47,6 +47,11 @@
 # Every wait is bounded and every file is written by temp file and rename.
 set -u
 
+# confd starts its children with no environment; export a PATH so that
+# commands started through busybox timeout find /sbin and /usr/sbin too.
+PATH=${PATH:+$PATH:}/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
 FLASH=${FLASH:-/etc/scripts/flash}
 SELF=${SELF:-/etc/scripts/safe-mode.sh}
 COUNTER=${COUNTER:-/etc/config/boot-count}

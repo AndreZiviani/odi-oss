@@ -69,6 +69,12 @@
 # has its own STEP_TIMEOUT_S, and the first failure among the page selects
 # ends them and goes to the restore.
 
+# confd starts its children with no environment at all, and busybox timeout
+# then looks only in /bin and /usr/bin: logread (/sbin) was "not found" in a
+# bundle taken from the web UI. Appended, so a PATH the caller set wins.
+PATH=${PATH:+$PATH:}/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
 STEP_TIMEOUT_S=${STEP_TIMEOUT_S:-5}
 HOST_AUTONEG_SH=${HOST_AUTONEG_SH:-/etc/scripts/host-autoneg.sh}
 SAFE_MODE_SH=${SAFE_MODE_SH:-/etc/scripts/safe-mode.sh}
