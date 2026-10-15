@@ -863,7 +863,7 @@ static int render_shows_key(const char *out, const uint8_t key[16], unsigned int
 	return 0;
 }
 
-/* /proc/odi_gpon is world-readable: its PLOAM ring must never print the
+/* /proc/odi_gpon/ploam is world-readable: its PLOAM ring must never print the
  * key an Encryption_Key carries. Every message one Request_Key sends is
  * rendered as the ring renders it.
  */

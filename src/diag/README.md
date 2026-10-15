@@ -7,7 +7,8 @@ and the switch through the interfaces our kernel provides, and nothing else:
 | interface | driver | used for |
 |---|---|---|
 | `/dev/odi_sw` ioctls | `odi_reg.c`, `odi_ddm.c`, `odi_switch_l2.c` | register get/set, MIB counters, DDM, the L2 table |
-| `/proc/odi_gpon` | `odi_gpon.c` | ONU state, the LOS sample |
+| `/proc/odi_gpon/status` | `odi_gpon.c` | ONU state, the LOS sample |
+| `/proc/odi_gpon/flows` | `odi_gpon.c` | the per-flow GEM counters |
 | odi_omci netlink, `OMCI_FLOWS_CMD` | `odi_omci.c`, `odi_switch_cmd.c` | GEM flows |
 
 It started as a reimplementation of the stock `/bin/diag`, with its 1,973
@@ -20,7 +21,7 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
 |  | before | now |
 |---|---|---|
 | size | 373,280 bytes | 21,208 bytes |
-| commands | 1,973 parsed, 929 wired, a handful working on 6.18 | 19, all working on 6.18 |
+| commands | 1,973 parsed, 929 wired, a handful working on 6.18 | 20, all working on 6.18 |
 | links | nothing | nothing |
 
 ## Commands
@@ -39,6 +40,7 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
     gpon get onu-state                GPON state machine state, O1-O7
     gpon get alarm-status             LOS, LOF and LOM, live from the GPON block
     gpon get flows                    GEM flows omcid programmed, as odi_switch recorded them
+    gpon get flow-counters            per-flow GEM counters the driver accumulates (/proc/odi_gpon/flows)
     mib dump counter port <ports>     switch port MIB counters; all = every port that answers
     l2-table get all                  every valid L2 table row: learned MACs, multicast groups
     l2-table get entry address valid  the same, in the stock spelling (odi-ui sends it)
@@ -54,12 +56,20 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
   aligned and below `0x2000000`. The driver may refuse a narrower range.
 - `gpon get alarm-status` reads the live condition register
   (`GPON_GTC_DS_INTR_STS`, 0x701008) for LOS, LOF and LOM. It falls back to
-  the LOS sample in `/proc/odi_gpon` when `/dev/odi_sw` cannot be read. The
-  other four stock alarms (SF, SD, TX Too Long, TX Mismatch) are not tracked
-  by `odi_gpon`, so they are named on a note line and never printed as clear.
+  the LOS sample in `/proc/odi_gpon/status` when `/dev/odi_sw` cannot be
+  read. The other four stock alarms (SF, SD, TX Too Long, TX Mismatch) are
+  not tracked by `odi_gpon`, so they are named on a note line and never printed as clear.
 - `gpon get flows` shows what `odi_switch` recorded when omcid programmed each
   flow, not a hardware table read. It never registers for a redirect type,
   so omcid keeps the OMCI channel while it runs.
+- `gpon get flow-counters` prints `/proc/odi_gpon/flows` as the driver
+  writes it (`docs/TOOLS.md`, "/proc/odi_gpon/"): one line per flow with the
+  GEM port and the totals since the flow was created. It never reads the
+  registers itself: they clear on read, so the driver is their one reader,
+  and `register get` on them would take counts away from it. A kernel
+  without the file gets a `%` line and a failure status. It shares its first
+  words with `gpon get flows`, so `gpon get flow` and `gpon g f` are
+  ambiguous; spell out `flows` or `flow-c`.
 - `mib dump counter port all` prints every port whose counter 0 answers
   (0 to 3 on this board). A counter the driver has no register for is left
   out, not printed as zero.
@@ -88,7 +98,7 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
   `00:00:00:00:00:1B ... valid no  raw 0x00002000 0x00000000 0x0000001b`.
   `docs/KERNEL.md` ("The L2 table") has the readout behind this.
 
-Everything else in `/proc/odi_gpon`, `/proc/odi_omci` and
+Everything else in `/proc/odi_gpon/`, `/proc/odi_omci` and
 `/proc/odi_init` is plain text; read those with `cat`.
 
 ### Matching
@@ -238,10 +248,10 @@ register gets a mechanical name (`SW_0x023038`, `F_15_8`).
     src/commands.[ch]       the handlers, and the help listing
     src/shell.[ch]          one line: help, parse errors, dispatch
     src/main.c              argv and stdin entry paths
-    src/hw.[ch]             /dev/odi_sw, /proc/odi_gpon, netlink
+    src/hw.[ch]             /dev/odi_sw, /proc/odi_gpon/status, netlink
     src/odi_sw_ioctl.h      restated copy of the kernel's odi_reg.h ABI
     src/ddm.[ch]            SFF-8472 conversions, fixed point
-    src/gpon_status.[ch]    /proc/odi_gpon parsing and alarm bits
+    src/gpon_status.[ch]    /proc/odi_gpon/status parsing and alarm bits
     src/mib.h               MIB counter names, in ioctl index order
     src/io.[ch]             buffered output, line input, string primitives
     src/sys.h, src/start.S  o32 syscalls and the freestanding entry point

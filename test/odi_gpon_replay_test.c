@@ -231,7 +231,7 @@ int main(int argc, char **argv)
 		fclose(f);
 	}
 
-	/* The /proc/odi_gpon debug snapshot of the last Ranging_Time write:
+	/* The /proc/odi_gpon/status debug snapshot of the last Ranging_Time write:
 	 * the captured delay, the register value read at that moment, and
 	 * the MULTFRAME/INFRAME written (the formula's own comment in
 	 * odi_gpon_hw.c works the same numbers).
@@ -251,7 +251,7 @@ int main(int argc, char **argv)
 	/* After the captured sequence, so none of this is in the compared
 	 * write log: Assign_Alloc-ID type 255 releases an Alloc-ID (G.984.3
 	 * 9.2.3.9), read three times like every downstream message, and the
-	 * next assignment takes the freed row. /proc/odi_gpon (alloc_ids) is
+	 * next assignment takes the freed row. /proc/odi_gpon/status (alloc_ids) is
 	 * odi_gpon_get_alloc_ids(), which omcid binds its T-CONTs to.
 	 */
 	{

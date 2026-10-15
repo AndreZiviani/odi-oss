@@ -5,7 +5,7 @@
  * in-progress cut on its own branch) and the kernel-integration glue this
  * directory also owns: the /proc/odi_init boot verbs, the proprietary
  * GPON module's compile-out, the ISR
- * registration, the /proc/odi_gpon status file (odi_gpon.c) and the
+ * registration, the /proc/odi_gpon/ status files (odi_gpon.c) and the
  * odi_switch/odi_omci call sites that used to reach into that GPON
  * module directly (odi_switch_cmd.c cmd 13/15, odi_switch_ds_gem.c, the
  * encrypt-port path).
@@ -83,12 +83,12 @@ int odi_gpon_onu_id_get(void);
  */
 void odi_gpon_sn_get(u8 sn[8]);
 
-/* ---- /proc/odi_gpon status --------------------------------------------
+/* ---- /proc/odi_gpon/ status ------------------------------------------
  *
  * odi_gpon.c's own read-only procfile calls these getters; every one is a
  * plain snapshot read (no locking contract beyond what the implementation
  * itself needs internally), safe to call from process context only, the
- * same as an open+read of /proc/odi_gpon requires.
+ * same as an open+read of /proc/odi_gpon/status requires.
  */
 
 /* Equalization delay the OLT last granted (register USF_EQ_DELAY), in

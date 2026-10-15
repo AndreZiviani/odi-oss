@@ -431,13 +431,44 @@ first and hands over the blocks counted in O5 since its last REI, so the
 REI and the totals share the one read. A `diag register get` or `memprobe`
 read of any of these registers by hand takes its count away from both.
 
-`/proc/odi_gpon` prints the totals (`docs/TOOLS.md`, "/proc/odi_gpon")
+`/proc/odi_gpon/counters` prints the totals (`docs/TOOLS.md`, "/proc/odi_gpon/")
 from a copy taken under the lock; `metricsd` exports them.
 `test/odi_gpon_ctr_test.c` runs the sampler against a register model that
 clears on read: one read per register per sample, the field split,
 accumulation past 2^32, saturation, the REI hand-over, the alarm and state
 times across a wrapping clock, and the `/proc` lines against
-`test/fixtures/odi_gpon_ctr.txt`.
+`test/fixtures/odi_gpon_ctr_counters.txt` and `odi_gpon_ctr_status.txt`.
+
+#### The per-flow GEM counters
+
+`odi_gpon_flow.c` does the same for each GEM flow, as an extra in the same
+second and under the same lock (`odi_gpon_ctr_sample_locked()` runs both).
+The RTL9602C counts per flow, behind four indirect register pairs (write
+the flow index, with the byte or Ethernet selector bit where there is one,
+wait for the ACK bit, read the count): downstream GEM frames and bytes,
+Ethernet frames received, Ethernet frames forwarded; upstream GEM frames and
+Ethernet frames, and the upstream bytes in a 64-bit array. All of them
+clear on read, measured on a stick, so the one reader rule holds for them
+too, the vendor `gpon show counter flow` included.
+
+Only flows that exist are read, never the 128 rows. `odi_switch_cmd.c` tells
+`odi_gpon.c` (`struct odi_switch_flow_ops`) when cmd 25 creates a flow and
+when the flow tables are emptied; creating a flow zeroes its totals and
+clears its registers with a read nobody keeps, so counts from before it
+existed never get in. The index is the driver flow id, not the GEM port id,
+and the flow remembers the port it was created with. The ACK wait is a
+fixed number of register reads, not a clock (this kernel has no clocksource
+to bound one by): a count whose ACK never came is skipped, left in the
+register for the next second, and tallied in `flow_ack_timeouts`. The
+upstream byte count is read low word first; a second at line rate stays
+far below 2^32 bytes, so its high word is normally 0. `/proc/odi_gpon/flows`
+prints the totals (`docs/TOOLS.md`, "/proc/odi_gpon/"), and
+`test/odi_gpon_flow_test.c` runs the sampler against a register model that
+clears on read, withholds ACK on request and aborts on a register outside
+the flow counters: a new flow starting from zero, accumulation past 2^32,
+only active flows read, a flow created again, the selector bits, the 64-bit
+byte count, the bounded ACK, saturation, and the `/proc` lines against
+`test/fixtures/odi_gpon_flows.txt`.
 
 ### The NIC
 

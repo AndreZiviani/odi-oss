@@ -416,7 +416,7 @@ sshx "grep -c '$DIAG_LOIDPW' /etc/config/lastgood.xml" | grep -qx 1 || fail "cou
 sshx "printf 'admin:%s\n' '$DIAG_WEBPW' > /etc/config/confd.auth"
 sshx "echo 'harness: ploam=$DIAG_PLOAM loid=$DIAG_LOIDPW hex=$DIAG_LOIDPW_HEX web=$DIAG_WEBPW' > /var/log/qemu-secrets.log"
 # The identity, masked unless --full: the serial (text, the hex spelling of
-# /proc/odi_gpon, and the space-separated %ph spelling), the MAC with and
+# /proc/odi_gpon/status, and the space-separated %ph spelling), the MAC with and
 # without colons, and the LOID, in the config and quoted in a log.
 DIAG_SN=QEMU1234ABCD
 DIAG_SN_MIXED=QEMU1234abcd

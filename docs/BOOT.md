@@ -209,7 +209,7 @@ steps, running concurrently with the respawn entries just started.
     the verb). `gponsn` and `gponpw` still run. `ODI_LASER_UNVERIFIED=1`
     (odi.conf) makes `pon_step_laser` write `laser unverified`, which
     lights the laser whatever the id says; `optics.off` skips the verb and
-    leaves it off. `/proc/odi_gpon` shows the result as
+    leaves it off. `/proc/odi_gpon/status` shows the result as
     `laser on X ldd_id Y unverified Z` (`ldd_id` -1: no answer). The order
     is fixed by the hardware.
     The switch init deactivates the ONU, so the activation steps come

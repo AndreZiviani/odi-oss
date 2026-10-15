@@ -122,7 +122,7 @@ static void odi_gpon_isr_dispatch(struct odi_gpon_fsm *fsm, const struct odi_gpo
 	case ODI_GPON_DS_ASSIGN_ALLOC_ID:
 		/* Type 255 takes the Alloc-ID back (G.984.3 9.2.3.9); any
 		 * other type assigns it. omcid binds the T-CONTs the OLT did
-		 * not set over OMCI to what is left, from /proc/odi_gpon.
+		 * not set over OMCI to what is left, from /proc/odi_gpon/status.
 		 */
 		odi_gpon_decode_assign_alloc_id(msg, &alloc);
 		if (alloc.alloc_id_type == ODI_GPON_ALLOC_ID_TYPE_DEALLOCATE)

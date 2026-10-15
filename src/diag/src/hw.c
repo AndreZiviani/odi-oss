@@ -6,7 +6,8 @@
 #include "omci_flows.h"
 
 #define ODI_SW_DEV_PATH   "/dev/odi_sw"
-#define ODI_GPON_PROC     "/proc/odi_gpon"
+#define ODI_GPON_PROC     "/proc/odi_gpon/status"
+#define ODI_GPON_FLOWS_PROC "/proc/odi_gpon/flows"
 #define ODI_EOPNOTSUPP    (-95)
 
 /* Netlink reply wait: the kernel answers in well under a millisecond, so
@@ -154,7 +155,7 @@ int hw_l2_mode(uint32_t *rows, uint32_t *ipmc_on_group)
 	return 0;
 }
 
-/* Reads the whole of /proc/odi_gpon into buf. Returns the byte count, or a
+/* Reads the whole of /proc/odi_gpon/status into buf. Returns the byte count, or a
  * negative value when the file cannot be opened or is empty. */
 static long gpon_proc_read(char *buf, unsigned long max)
 {
@@ -167,6 +168,19 @@ static long gpon_proc_read(char *buf, unsigned long max)
 		got += n;
 	sys_close((int)fd);
 	return got > 0 ? got : -1;
+}
+
+int hw_gpon_flow_counters_get(void (*emit)(const char *s, int n))
+{
+	char buf[512];
+	long fd = sys_open(ODI_GPON_FLOWS_PROC, O_RDONLY), n;
+
+	if (fd < 0)
+		return 1;
+	while ((n = sys_read((int)fd, buf, sizeof buf)) > 0)
+		emit(buf, (int)n);
+	sys_close((int)fd);
+	return 0;
 }
 
 int hw_gpon_status_get(uint32_t *state)
