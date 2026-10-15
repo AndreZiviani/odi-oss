@@ -20,7 +20,7 @@
 # (lastgood.xml, lastgood_hs.xml, odi.conf) with every secret value
 # replaced by REDACTED, and under pon/ the GPON and OMCI state: diag (ONU
 # state, alarms, GEM flows, port counters, the PON queue registers that
-# cmd 23 and 25 write), /proc/odi_gpon/ (status, counters, ploam),
+# cmd 23 and 25 write), /proc/odi_gpon/ (status, counters, flows, ploam),
 # /proc/odi_omci, and omcli (state, provision, flows, tcont, conn, and the MIB
 # classes in OMCI_CLASSES), and under module/ the optics module on /dev/i2c-0: A0h whole (a0.txt), A2h
 # with the page select as found (a2.txt), and in chip.txt the page select,
@@ -204,7 +204,7 @@ grab pon/odi_omci.txt /proc/odi_omci
 # for the serial number in them: Serial_Number_ONU (us 0x01), Acknowledge
 # (us 0x09, it echoes a downstream message), Serial_Number_Mask (ds 0x02),
 # Assign_ONU-ID (ds 0x03) and Disable_Serial_Number (ds 0x06, 0x81).
-for f in status counters ploam; do
+for f in status counters flows ploam; do
 	if [ -e "$GPON_PROC_DIR/$f" ]; then
 		timeout "$STEP_TIMEOUT_S" cat "$GPON_PROC_DIR/$f" > "$work/gpon-$f.raw" 2>&1
 		rc=$?

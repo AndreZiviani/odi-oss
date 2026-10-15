@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- Per-flow GEM counters (Refs #92): `/proc/odi_gpon/flows`, one line per GEM
+  flow OMCI created: `ds <flow> gem <port> gem_frames <n> bytes <n> eth_rx
+  <n> eth_fwd <n>` and `us <flow> gem <port> gem_frames <n> eth_frames <n>
+  bytes <n>`, 64-bit totals since the flow was created, so a silent GEM port
+  on a multi-service line shows. The registers clear on read, so the driver
+  samples them in the same second and under the same lock as the link
+  counters, for the flows it has configured only, and nothing else may read
+  them: not `diag register get`, not the stock `gpon show counter flow`. A
+  flow created again, and a reset of the flow state, start its totals over.
+  `diag gpon get flow-counters` prints the file, and `diag-bundle.sh`
+  collects it as `pon/odi_gpon-flows.txt`. metricsd needs the odi-sfp-exporter
+  release that exports it (`gpon_gem_*`); an older one ignores the file. The
+  stock image has none of this. `diag gpon g f` is now ambiguous between
+  `flows` and `flow-counters`; `gpon get flows` is unchanged.
+
 - BREAKING: `/proc/odi_gpon` is now a directory of three files, one per
   topic, like `/proc/odi_wdt/`; there is no `/proc/odi_gpon` file any more
   and no compatibility copy. `status` has the ONU state, ONU id, serial,

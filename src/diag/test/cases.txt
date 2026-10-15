@@ -21,6 +21,10 @@ pon get nonsense
 pon get transceiver rx-power extra
 gpon get flows
 gpon g f
+gpon g flow-c
+gpon get flow-counters
+gpon get flow
+gpon get flows extra
 gpon get o
 mib dump counter port 2
 mib dump counter port 0,2-3

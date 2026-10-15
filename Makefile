@@ -151,6 +151,7 @@ test-host:
 	bash test/odi_gpon_los_test.sh
 	bash test/odi_gpon_eqd_test.sh
 	bash test/odi_gpon_ctr_test.sh
+	bash test/odi_gpon_flow_test.sh
 	bash test/odi_board_test.sh
 	bash test/odi_i2c_test.sh
 	bash test/odi_ddm_test.sh

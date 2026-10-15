@@ -72,10 +72,12 @@
 #include "odi_gpon.h"
 #include "odi_gpon_ctr.h"
 #include "odi_gpon_drv.h"
+#include "odi_gpon_flow.h"
 #include "odi_gpon_hw.h"
 #include "odi_gpon_init.h"
 #include "odi_gpon_pw.h"
 #include "odi_replay_blob.h"
+#include "odi_switch_cmd.h"
 #include "odi_switch_reg.h"
 
 #ifdef __KERNEL__
@@ -169,6 +171,12 @@ static uint8_t odi_gpon_rei_seq;
 static struct odi_gpon_ctr odi_gpon_ctr_inst;
 static struct timer_list odi_gpon_ctr_timer;
 #define ODI_GPON_CTR_PERIOD_MS	1000U
+
+/* The per-flow GEM counters (odi_gpon_flow.h): read in the same cycle and
+ * under the same lock as the link counters, for the flows OMCI created.
+ * odi_switch_cmd.c says when one is created or the flow state emptied.
+ */
+static struct odi_gpon_flows odi_gpon_flows_inst;
 
 /* ---- Counters and the PLOAM ring for /proc/odi_gpon/ -------------------
  *
@@ -520,7 +528,33 @@ static void odi_gpon_ctr_sample_locked(void)
 {
 	odi_gpon_ctr_sample(&odi_gpon_ctr_inst, jiffies_to_msecs(jiffies - INITIAL_JIFFIES),
 			    odi_gpon_fsm_inst.state);
+	odi_gpon_flows_sample(&odi_gpon_flows_inst);
 }
+
+/* The flow tables of odi_switch_cmd.c, as they change. */
+static void odi_gpon_flow_set(int us, uint32_t idx, uint32_t gem_port)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	odi_gpon_flows_set(&odi_gpon_flows_inst, us ? ODI_GPON_FLOW_DIR_US : ODI_GPON_FLOW_DIR_DS,
+			   idx, gem_port);
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+}
+
+static void odi_gpon_flow_clear(void)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	odi_gpon_flows_clear(&odi_gpon_flows_inst);
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+}
+
+static const struct odi_switch_flow_ops odi_gpon_flow_ops = {
+	.set = odi_gpon_flow_set,
+	.clear = odi_gpon_flow_clear,
+};
 
 static void odi_gpon_ctr_fn(struct timer_list *odi_timer_arg)
 {
@@ -707,6 +741,8 @@ int odi_gpon_init(void)
 	odi_gpon_ber_period_ms = 0U;
 	odi_gpon_state_since = jiffies;
 	odi_gpon_ctr_reset(&odi_gpon_ctr_inst);
+	odi_gpon_flows_reset(&odi_gpon_flows_inst);
+	odi_switch_cmd_set_flow_ops(&odi_gpon_flow_ops);
 	timer_setup(&odi_gpon_ctr_timer, odi_gpon_ctr_fn, 0);
 
 	timer_setup(&odi_gpon_to1_timer, odi_gpon_to1_fn, 0);
@@ -967,7 +1003,8 @@ void odi_gpon_ploam_ring_get(struct odi_gpon_ploam_entry *ring, unsigned int *co
  *
  * One read-only file per topic, like /proc/odi_wdt/: status (the ONU state
  * and everything that describes the link now), counters (the sampled
- * totals) and ploam (the PLOAM traffic and its ring).
+ * totals), flows (the per-flow GEM totals) and ploam (the PLOAM traffic and
+ * its ring).
  */
 
 static void odi_gpon_proc_put(void *ctx, const char *line)
@@ -1122,6 +1159,25 @@ static int odi_gpon_proc_counters_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
+/* /proc/odi_gpon/flows: the per-flow GEM counters, from a copy taken under
+ * the lock.
+ */
+static int odi_gpon_proc_flows_show(struct seq_file *seq, void *v)
+{
+	struct odi_gpon_flows *snap = kmalloc(sizeof(*snap), GFP_KERNEL);
+	unsigned long flags;
+
+	(void)v;
+	if (!snap)
+		return 0;
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	*snap = odi_gpon_flows_inst;
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+	odi_gpon_flows_show(snap, odi_gpon_proc_put, seq);
+	kfree(snap);
+	return 0;
+}
+
 /* /proc/odi_gpon/ploam: the PLOAM message totals, the per-type counts and
  * the ring of the last messages.
  */
@@ -1179,6 +1235,11 @@ static int odi_gpon_proc_counters_open(struct inode *inode, struct file *file)
 	return single_open(file, odi_gpon_proc_counters_show, NULL);
 }
 
+static int odi_gpon_proc_flows_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, odi_gpon_proc_flows_show, NULL);
+}
+
 static int odi_gpon_proc_ploam_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, odi_gpon_proc_ploam_show, NULL);
@@ -1191,6 +1252,11 @@ static const struct proc_ops odi_gpon_proc_status_fops = {
 
 static const struct proc_ops odi_gpon_proc_counters_fops = {
 	.proc_open = odi_gpon_proc_counters_open, .proc_read = seq_read,
+	.proc_lseek = seq_lseek, .proc_release = single_release,
+};
+
+static const struct proc_ops odi_gpon_proc_flows_fops = {
+	.proc_open = odi_gpon_proc_flows_open, .proc_read = seq_read,
 	.proc_lseek = seq_lseek, .proc_release = single_release,
 };
 
@@ -1216,6 +1282,8 @@ static int __init odi_gpon_module_init(void)
 		pr_info("odi_gpon: /proc/odi_gpon/status not created\n");
 	if (!proc_create("counters", 0444, odi_gpon_proc_dir, &odi_gpon_proc_counters_fops))
 		pr_info("odi_gpon: /proc/odi_gpon/counters not created\n");
+	if (!proc_create("flows", 0444, odi_gpon_proc_dir, &odi_gpon_proc_flows_fops))
+		pr_info("odi_gpon: /proc/odi_gpon/flows not created\n");
 	if (!proc_create("ploam", 0444, odi_gpon_proc_dir, &odi_gpon_proc_ploam_fops))
 		pr_info("odi_gpon: /proc/odi_gpon/ploam not created\n");
 	return 0; /* never fail module_init over odi_gpon_init()'s own result */

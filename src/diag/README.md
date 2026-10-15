@@ -8,6 +8,7 @@ and the switch through the interfaces our kernel provides, and nothing else:
 |---|---|---|
 | `/dev/odi_sw` ioctls | `odi_reg.c`, `odi_ddm.c`, `odi_switch_l2.c` | register get/set, MIB counters, DDM, the L2 table |
 | `/proc/odi_gpon/status` | `odi_gpon.c` | ONU state, the LOS sample |
+| `/proc/odi_gpon/flows` | `odi_gpon.c` | the per-flow GEM counters |
 | odi_omci netlink, `OMCI_FLOWS_CMD` | `odi_omci.c`, `odi_switch_cmd.c` | GEM flows |
 
 It started as a reimplementation of the stock `/bin/diag`, with its 1,973
@@ -20,7 +21,7 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
 |  | before | now |
 |---|---|---|
 | size | 373,280 bytes | 21,208 bytes |
-| commands | 1,973 parsed, 929 wired, a handful working on 6.18 | 19, all working on 6.18 |
+| commands | 1,973 parsed, 929 wired, a handful working on 6.18 | 20, all working on 6.18 |
 | links | nothing | nothing |
 
 ## Commands
@@ -39,6 +40,7 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
     gpon get onu-state                GPON state machine state, O1-O7
     gpon get alarm-status             LOS, LOF and LOM, live from the GPON block
     gpon get flows                    GEM flows omcid programmed, as odi_switch recorded them
+    gpon get flow-counters            per-flow GEM counters the driver accumulates (/proc/odi_gpon/flows)
     mib dump counter port <ports>     switch port MIB counters; all = every port that answers
     l2-table get all                  every valid L2 table row: learned MACs, multicast groups
     l2-table get entry address valid  the same, in the stock spelling (odi-ui sends it)
@@ -60,6 +62,14 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
 - `gpon get flows` shows what `odi_switch` recorded when omcid programmed each
   flow, not a hardware table read. It never registers for a redirect type,
   so omcid keeps the OMCI channel while it runs.
+- `gpon get flow-counters` prints `/proc/odi_gpon/flows` as the driver
+  writes it (`docs/TOOLS.md`, "/proc/odi_gpon/"): one line per flow with the
+  GEM port and the totals since the flow was created. It never reads the
+  registers itself: they clear on read, so the driver is their one reader,
+  and `register get` on them would take counts away from it. A kernel
+  without the file gets a `%` line and a failure status. It shares its first
+  words with `gpon get flows`, so `gpon get flow` and `gpon g f` are
+  ambiguous; spell out `flows` or `flow-c`.
 - `mib dump counter port all` prints every port whose counter 0 answers
   (0 to 3 on this board). A counter the driver has no register for is left
   out, not printed as zero.
