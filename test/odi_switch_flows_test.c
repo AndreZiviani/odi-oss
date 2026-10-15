@@ -53,6 +53,28 @@ static void gem(uint32_t dir, uint32_t flow, uint32_t port)
 	(void)odi_switch_cmd(OMCI_GEMFLOW_CMD, &g, sizeof g);
 }
 
+/* The flow hook (odi_switch_cmd.h): what the GPON core is told. */
+static int hook_set_n, hook_clear_n;
+static int hook_us[16];
+static uint32_t hook_idx[16], hook_gem[16];
+
+static void hook_set(int us_dir, uint32_t idx, uint32_t gem_port)
+{
+	if (hook_set_n < 16) {
+		hook_us[hook_set_n] = us_dir;
+		hook_idx[hook_set_n] = idx;
+		hook_gem[hook_set_n] = gem_port;
+	}
+	hook_set_n++;
+}
+
+static void hook_clear(void)
+{
+	hook_clear_n++;
+}
+
+static const struct odi_switch_flow_ops hook_ops = { .set = hook_set, .clear = hook_clear };
+
 int main(void)
 {
 	struct omci_flows f;
@@ -157,6 +179,30 @@ int main(void)
 		ok(us(4, 304, ODI_SW_CMD23_US_TCONTS) != 0 && odi_mock.log_n == n,
 		   "a flow on a T-CONT past 15 is refused, nothing written");
 	}
+
+	/* The GPON core hears of each flow cmd 25 creates, and of the reset;
+	 * a refused flow and the OMCI channel upstream (no slot) say nothing.
+	 */
+	puts("flow hook:");
+	odi_mock_reset();
+	odi_switch_cmd_reset_state();
+	odi_switch_cmd_set_flow_ops(&hook_ops);
+	gem(OMCI_GEMFLOW_DS, 0, 0xfff);
+	gem(OMCI_GEMFLOW_US, 0, 0xfff);
+	gem(OMCI_GEMFLOW_DS, 1, 1434);
+	ok(us(4, 1562, 2) == 0, "an upstream flow is created");
+	ok(us(5, 1563, ODI_SW_CMD23_US_TCONTS) != 0, "and one on a bad T-CONT is refused");
+	gem(OMCI_GEMFLOW_DS, ODI_SW_CMD_GEM_DS_MAX, 1);
+	ok(hook_set_n == 3, "three flows reported");
+	ok(hook_us[0] == 0 && hook_idx[0] == 0 && hook_gem[0] == 0xfff, "DS 0, the OMCI channel");
+	ok(hook_us[1] == 0 && hook_idx[1] == 1 && hook_gem[1] == 1434, "DS 1 on its GEM port");
+	ok(hook_us[2] == 1 && hook_idx[2] == 4 && hook_gem[2] == 1562, "US 4 on its GEM port");
+	ok(hook_clear_n == 0, "nothing cleared yet");
+	odi_switch_cmd_reset_state();
+	ok(hook_clear_n == 1, "the reset is reported");
+	odi_switch_cmd_set_flow_ops(NULL);
+	gem(OMCI_GEMFLOW_DS, 1, 1434);
+	ok(hook_set_n == 3, "no hook, nobody told");
 
 	printf("%s (%d failures)\n", failures ? "FAILED" : "all ok", failures);
 	return failures != 0;

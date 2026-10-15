@@ -428,6 +428,7 @@ reference; the commands:
     gpon get onu-state                GPON state machine state, O1-O7
     gpon get alarm-status             LOS, LOF and LOM, live
     gpon get flows                    GEM flows omcid programmed
+    gpon get flow-counters            per-flow GEM counters (/proc/odi_gpon/flows)
     mib dump counter port <ports>     port MIB counters; all, 2, 0-3, 0,2-3
     l2-table get all                  the MAC table: every valid L2 table row
     l2-table get entry address valid  the same, in the stock spelling
@@ -765,7 +766,7 @@ Under `pon/`, the GPON and OMCI state a PON problem needs:
 | file | from |
 |---|---|
 | `diag.txt` | one `diag` run: `gpon get onu-state`, `gpon get alarm-status`, `gpon get flows`, `mib dump counter port all`, and `register get 0xf020a8 240`, the PON queue window that cmd 23 and 25 write (`docs/SWITCH.md`) |
-| `odi_gpon-status.txt`, `odi_gpon-counters.txt`, `odi_gpon-ploam.txt` | `/proc/odi_gpon/status`: ONU state, Alloc-IDs, alarm and state times; `counters`: the link counters; `ploam`: PLOAM totals and the ring (bodies withheld, below) |
+| `odi_gpon-status.txt`, `odi_gpon-counters.txt`, `odi_gpon-flows.txt`, `odi_gpon-ploam.txt` | `/proc/odi_gpon/status`: ONU state, Alloc-IDs, alarm and state times; `counters`: the link counters; `flows`: the per-flow GEM counters; `ploam`: PLOAM totals and the ring (bodies withheld, below) |
 | `odi_omci.txt` | `/proc/odi_omci`: the OMCI channel counters |
 | `omcli_{state,provision,flows,tcont,conn}.txt` | `omcli`: what omcid holds and programmed |
 | `omcli_mib_<class>.txt` | `omcli mib <class>` for ONU-G, ONU2-G, PPTP Ethernet UNI, VEIP, the bridge and mapper classes, VLAN filtering and extended VLAN tagging, T-CONT, ANI-G, GEM ports and interworking points, priority queues, traffic schedulers and descriptors, multicast |
@@ -858,6 +859,7 @@ drivers behind them.
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
 | `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the REI count, the TO1/TO2 expiries, the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
+| `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
@@ -874,7 +876,7 @@ PON MAC under a running omcid; do it on a trial stick only.
 
 ### /proc/odi_gpon/: the link counters
 
-`/proc/odi_gpon` is a directory of three read-only files, one per topic, the
+`/proc/odi_gpon` is a directory of four read-only files, one per topic, the
 way `/proc/odi_wdt/` is. There is no `/proc/odi_gpon` file: a reader opens
 the file it needs, and on a stock image, which has none of them, treats a
 missing one as nothing to report.
@@ -883,6 +885,7 @@ missing one as nothing to report.
 |---|---|
 | `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `last_los_ms`, `upstream_overhead`, `ranging_time`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
 | `counters` | `ctr_samples`, `ctr`, `ctr_saturated` |
+| `flows` | `flow_ack_timeouts`, `flow_saturated`, `ds`, `us` |
 | `ploam` | `ploam ds_rx us_tx`, `ploam_us_dropped`, `ploam_type`, `ploam_ring` |
 
 Every line is one fact, a key and then words, all numbers decimal. The GPON MAC counters clear when they are
@@ -934,9 +937,40 @@ on ISP2 it runs about 2,070 a second when served, stops when the OLT has
 deregistered the ONU that still says O5, and runs about nine times faster
 when the Alloc-ID table holds rows the OLT never assigned.
 
+In `flows`, one line per flow, in index order, downstream then upstream:
+
+    flow_ack_timeouts 0               counts skipped because the register
+                                      never answered within its bound
+    flow_saturated 0                  counts read as all ones: lost counts
+    ds 1 gem 1434 gem_frames 20000 bytes 28000000 eth_rx 20000 eth_fwd 20000
+    us 4 gem 1566 gem_frames 330 eth_frames 50 bytes 4294994796
+
+`ds <flow>` and `us <flow>` are the driver flow index, the id omcid sent
+with the flow (a row of the downstream GEM port CAM, a slot of the upstream
+flow table), not the GEM port id: `gem <port>` is the port the flow was
+created with. The OMCI channel is a downstream flow (`gem 4095`) and has no
+upstream one. Downstream, `gem_frames` and `bytes` are what the GEM layer
+received on the flow, `eth_rx` the Ethernet frames it carried and `eth_fwd`
+the ones passed on to the switch; the three frame counts were equal per
+flow on a stick. Upstream, `gem_frames` ran about 6.6 times `eth_frames` on
+that stick, and `bytes` is a 64-bit count. A flow appears when OMCI creates it
+and its totals start from zero then, and again whenever it is created again;
+a reset of the flow state empties the file. A line has no flow that was not
+created, so an image that never provisions a service has none. The file
+exists only on this image: the stock image has no `/proc/odi_gpon` at all,
+and a reader treats a missing file as no flows.
+`kernel/extra/drivers/net/ethernet/odi/odi_gpon_flow.c` has the registers,
+and `test/fixtures/odi_gpon_flows.txt` a whole file. `diag gpon get
+flow-counters` prints it.
+
 New lines go in as new keys; a parser skips a key or a counter name it
 does not know. Reading one of these registers by hand (`diag register
 get`, `memprobe`) takes its count away from the totals and from the REI.
+The per-flow registers (`0x701140`-`0x701144`, `0x704040`-`0x704050`,
+`0x706048`-`0x70604c` and the byte array at `0x706800`) clear on read as
+well and have the driver as their one reader, so nothing else may read
+them: not `diag register get`, not `memprobe`, and not the stock firmware
+`gpon show counter flow`, which would take its counts away from the totals.
 
 ## Logs
 
