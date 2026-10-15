@@ -489,7 +489,7 @@ static uint32_t tcont_index(uint16_t meId)
  * binding the PLOAM Alloc-IDs to its T-CONT entities itself, in the order
  * they were assigned (its MIB on ISP1: 0x8000..0x8004 hold the five in
  * PLOAM order, the other eleven 0x00FF). This does the same, from the list
- * the kernel keeps (/proc/odi_gpon, alloc_ids), so the Alloc-IDs are this
+ * the kernel keeps (/proc/odi_gpon/status, alloc_ids), so the Alloc-IDs are this
  * OLT's own rather than ones read off another line:
  *
  *   - a T-CONT the OLT set keeps what it set, 0x00FF included;
@@ -502,7 +502,7 @@ static uint32_t tcont_index(uint16_t meId)
  * (odi_switch_cmd.c, cmd 23 and 25). */
 #define ALLOC_ID_UNASSIGNED 0x00ffu
 
-const char *gpon_proc_path = "/proc/odi_gpon";
+const char *gpon_proc_path = "/proc/odi_gpon/status";
 static uint16_t ploam_alloc[TCONT_MAX];
 static int ploam_alloc_n = -1;           /* -1: not read yet, or unreadable */
 

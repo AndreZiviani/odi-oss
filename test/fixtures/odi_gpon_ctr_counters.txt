@@ -1,27 +1,4 @@
 ctr_samples 11
-alarm_now los 0
-alarm_now lof 0
-alarm_now lom 0
-fec_now ds 1
-fec_now us 1
-ds_superframe 305491896
-alarm_events los 1
-alarm_events lof 0
-alarm_events lom 0
-alarm_ms los 2000
-alarm_ms lof 0
-alarm_ms lom 0
-onu_state_ms O1 0
-onu_state_ms O2 0
-onu_state_ms O3 0
-onu_state_ms O4 2000
-onu_state_ms O5 8000
-onu_state_ms O6 0
-onu_state_ms O7 0
-onu_transitions O1 O2 1
-onu_transitions O2 O3 1
-onu_transitions O3 O4 1
-onu_transitions O4 O5 1
 ctr ds_bip_err_blocks 4
 ctr ds_bip_err_bits 9
 ctr ds_fec_corrected_bits 2560000

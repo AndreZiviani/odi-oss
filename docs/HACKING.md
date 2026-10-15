@@ -605,7 +605,7 @@ driver call and connection dump for connection dump, with a fresh omcid that
 had the new settings from its first frame (both ISPs, a new tag and
 transparent mode); an identity change is followed through the verbs
 (`omcid -i file` collects them in rcS order), the MIB clear, the hold, O5
-and services (`-g file` stands for `/proc/odi_gpon`), the failure results and
+and services (`-g file` stands for `/proc/odi_gpon/status`), the failure results and
 a burst of SIGHUPs; and a dry-run daemon walks every key through its class.
 `test/apply_test.sh` covers `apply.sh omci` against a stub omcid that only
 traps SIGHUP, and `make test-qemu` runs it under the real inittab: one omcid
@@ -846,7 +846,7 @@ Each of these has cost real time. The pointer says where the evidence is.
   board the laser may need set-up this image does not do, and a laser lit
   outside its timeslots takes down every ONU on the OLT port.
   `ODI_LASER_UNVERIFIED=1` in `odi.conf` (`laser unverified`) overrides it,
-  for an OLT port with no other ONU. `/proc/odi_gpon` shows `laser on X
+  for an OLT port with no other ONU. `/proc/odi_gpon/status` shows `laser on X
   ldd_id Y unverified Z`. `odi_board.c` (`odi_board_laser()`), `odi_gpon.c`
   (`odi_gpon_verb()`), `docs/BOOT.md` stage 13.
 - **The kernel partition is 1,359,872 bytes** (the LZMA uImage), and
@@ -917,7 +917,7 @@ Each of these has cost real time. The pointer says where the evidence is.
   row and the `docs/SETTINGS.md` row, together.
 - **The exporter contract.** The `diag` commands `metricsd` sends keep the
   stock CLI's syntax and output byte for byte; `make test-diag` pins them.
-  `/proc/odi_gpon` and anything else the exporter or confd parses are
+  `/proc/odi_gpon/` and anything else the exporter or confd parses are
   interfaces too.
 - **`diag` waits forever on a stdin that never closes.** Give it a pipe or a
   file, and `timeout` in anything that must not stall (rcS, network.sh).
@@ -1081,7 +1081,7 @@ read side.
 | `/proc/odi_wdt/register` | `odi_wdt.c:792` | `"<name> <deadline_s>"`: register or update a watchdog client (rcS does this once per client at boot) | -- | prod |
 | `/proc/odi_wdt/ping` | `odi_wdt.c:794` | `"<name>"`: a registered client's own ping; arms its deadline on the first call | -- | prod (omcid, every 15 s: `src/omci/respond/main.c`, `wdt_ping()`) |
 | `/proc/odi_wdt/clients` | `odi_wdt.c:796` | none | one line per client: `name=... deadline=... armed=... last_ping_age=...` | dev (debugging) |
-| `/proc/odi_gpon` | `odi_gpon.c:1144` | none | ONU state, ONU id, PLOAM counters (`ploam_us_dropped`: upstream replies that found no room), serial, the laser line (`laser on X ldd_id Y unverified Z`), the GPON link counters and alarm and state times (`docs/TOOLS.md`) | prod (`diag`, `omcid` and `metricsd` read it; its format is an interface) |
+| `/proc/odi_gpon/status`, `counters`, `ploam` | `odi_gpon.c` | none | `status`: ONU state, ONU id, serial, Alloc-IDs, the laser line (`laser on X ldd_id Y unverified Z`), alarm and state times; `counters`: the GPON link counters; `ploam`: PLOAM counters (`ploam_us_dropped`: upstream replies that found no room) and the ring (`docs/TOOLS.md`) | prod (`diag`, `omcid` and `metricsd` read it; its format is an interface) |
 | `/proc/odi_ramlog_prev`, `_raw` | `odi_ramlog.c:645` | none | the previous boot's ramlog (root only) | prod (debug aid) |
 | `/dev/odi_sw` | `odi_reg.c:191` | ioctls `REG_SET`, `L2_MC_ADD`/`DEL` | ioctls `REG_GET`, `MIB_GET`, `DDM_GET`, `L2_GET`/`NEXT`, `L2_MODE` (`odi_reg.h:118`) | prod |
 

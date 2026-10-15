@@ -50,7 +50,7 @@ rm -f /var/config/lastgood_hs.xml
 rm -f /var/run/omcid-resume-decision
 
 log=/tmp/omcid-events.log
-# The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon lists them.
+# The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon/status lists them.
 printf 'alloc_ids 5 282 794 1050 1306 538\n' > /tmp/events-gpon
 $Q respond/build/omcid -w 8 -c "$CAPS" -g /tmp/events-gpon > "$log" 2>&1 &
 pid=$!

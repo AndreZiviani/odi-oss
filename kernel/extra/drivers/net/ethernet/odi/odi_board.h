@@ -61,7 +61,7 @@ int odi_board_optics(void);
 #define ODI_BOARD_LDD_ID_GN25L95	0x6aU
 int odi_board_laser(const char *arg);
 
-/* What the last laser verb found and did, for /proc/odi_gpon and the
+/* What the last laser verb found and did, for /proc/odi_gpon/status and the
  * GPON activation gate: laser_on is 1 only after the verb drove the
  * TX-disable line low; ldd_id is the id byte read, or -1 when the probe
  * failed or never ran.

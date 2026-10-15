@@ -3,7 +3,8 @@
  *   /dev/odi_sw      switch-core register get/set, per-port MIB counters,
  *                    the transceiver DDM block and the L2 lookup table
  *                    (odi_reg.c, odi_ddm.c, odi_switch_l2.c)
- *   /proc/odi_gpon   the GPON state machine state and the last LOS sample
+ *   /proc/odi_gpon/status
+ *                    the GPON state machine state and the last LOS sample
  *                    (odi_gpon.c)
  *   netlink          the GEM flows odi_switch recorded (odi_omci.c,
  *                    OMCI_FLOWS_CMD)

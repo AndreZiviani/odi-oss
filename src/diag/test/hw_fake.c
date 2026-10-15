@@ -3,7 +3,7 @@
  *
  * Linked into build/diag_fake with -Wl,--wrap for each accessor the
  * exporter's commands reach, so every call from the command handlers lands
- * here instead of on /dev/odi_sw or /proc/odi_gpon, which qemu-user does not
+ * here instead of on /dev/odi_sw or /proc/odi_gpon/status, which qemu-user does not
  * have. The real parser, handlers, formatting, prompt and echo all run
  * unchanged; only the values are fixed, so the output can be compared byte
  * for byte against test/exporter.golden.

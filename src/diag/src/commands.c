@@ -97,7 +97,7 @@ static int cmd_alarm_status(void)
 	uint32_t alarms = 0, known = 0;
 
 	if (hw_gpon_alarms_get(&alarms, &known) != 0) {
-		out("% alarm status read failed (/proc/odi_gpon and /dev/odi_sw)\n");
+		out("% alarm status read failed (/proc/odi_gpon/status and /dev/odi_sw)\n");
 		return 1;
 	}
 	for (unsigned i = 0; i < sizeof alarm / sizeof alarm[0]; i++)

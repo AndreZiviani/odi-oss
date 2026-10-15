@@ -35,7 +35,7 @@ void odi_gpon_verb_activate(struct odi_gpon_fsm *fsm);
  */
 void odi_gpon_verb_deactivate(struct odi_gpon_fsm *fsm);
 
-/* The status words odi_gpon_isr_poll() read, for the /proc/odi_gpon
+/* The status words odi_gpon_isr_poll() read, for the /proc/odi_gpon/status
  * interrupt counters. ds_dlt/us_sts are 0 when top_sts did not flag that
  * sub-block, which is then not read.
  */
@@ -110,7 +110,7 @@ uint32_t odi_gpon_chip_irq_demux(void (*gpon)(void));
 void odi_gpon_get_eqd(uint32_t *multframe, uint32_t *inframe);
 
 /* What the last Ranging_Time-driven USF_EQ_DELAY write used and wrote, for
- * /proc/odi_gpon (debug only): the delay bits the message carried, the
+ * /proc/odi_gpon/status (debug only): the delay bits the message carried, the
  * USF_MIN_RESP_DELAY value read at that moment, and the MULTFRAME/INFRAME
  * written. valid is 0 until the first one.
  */
@@ -136,7 +136,8 @@ unsigned int odi_gpon_get_ploam_us_dropped(void);
  * (OMCC) row, which carries the ONU-ID, is left out. Row order is the
  * assignment order, except that a row a deallocation freed is reused first.
  * Returns the count.
- * For /proc/odi_gpon's alloc_ids line: the T-CONTs the ISP gave this ONU.
+ * For the alloc_ids line of /proc/odi_gpon/status: the T-CONTs the ISP gave
+ * this ONU.
  */
 unsigned int odi_gpon_get_alloc_ids(uint16_t *out, unsigned int max);
 
@@ -181,7 +182,7 @@ void odi_gpon_hw_ext_burst_length(uint8_t pre_ranged_preamble_bytes,
 				   uint8_t post_o5_preamble_bytes);
 
 /* Observer for every PLOAM message received (dir 0) or sent (dir 1),
- * called with the caller's lock held; feeds the /proc/odi_gpon ring. NULL
+ * called with the caller's lock held; feeds the /proc/odi_gpon/ploam ring. NULL
  * after odi_gpon_hw_reset().
  */
 typedef void (*odi_gpon_ploam_log_fn)(unsigned int dir, const struct odi_gpon_ploam *msg);
