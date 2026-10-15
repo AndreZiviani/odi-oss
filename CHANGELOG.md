@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- `OMCI_ACCEPT_REBOOT=2` (odi.conf): acknowledge only. The OLT Reboot of the
+  ONU-G is answered with success and the stick does not reboot, for an OLT
+  that insists on a successful answer. `1` still reboots and `0`, unset or
+  any other value still refuses. Logged as `reboot from the OLT
+  acknowledged, not rebooting (OMCI_ACCEPT_REBOOT=2)` and
+  `event=olt_reboot result=acknowledged`.
+
 - Per-flow GEM counters (Refs #92): `/proc/odi_gpon/flows`, one line per GEM
   flow OMCI created: `ds <flow> gem <port> gem_frames <n> bytes <n> eth_rx
   <n> eth_fwd <n>` and `us <flow> gem <port> gem_frames <n> eth_frames <n>
