@@ -1,0 +1,8 @@
+flow_ack_timeouts 0
+flow_saturated 1
+ds 0 gem 4095 gem_frames 10 bytes 800 eth_rx 10 eth_fwd 10
+ds 1 gem 1434 gem_frames 20000 bytes 28000000 eth_rx 20000 eth_fwd 20000
+ds 2 gem 1435 gem_frames 12 bytes 900 eth_rx 12 eth_fwd 11
+ds 5 gem 1440 gem_frames 4294967295 bytes 1500000000 eth_rx 0 eth_fwd 0
+us 0 gem 1562 gem_frames 13000 eth_frames 2000 bytes 37000000
+us 4 gem 1566 gem_frames 330 eth_frames 50 bytes 4294994796

@@ -255,13 +255,12 @@ void odi_gpon_ctr_note_transition(struct odi_gpon_ctr *c, unsigned int from, uns
 		c->transitions[from][to]++;
 }
 
-void odi_gpon_ctr_show(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_fn put, void *ctx)
+/* /proc/odi_gpon/status: the live bits, the alarm and state times. */
+void odi_gpon_ctr_show_status(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_fn put, void *ctx)
 {
 	char line[96];
 	unsigned int i, k;
 
-	snprintf(line, sizeof(line), "ctr_samples %u\n", c->samples);
-	put(ctx, line);
 	/* The live bits only once there is a reading: 0 before it would claim
 	 * a clear line nobody looked at.
 	 */
@@ -304,6 +303,16 @@ void odi_gpon_ctr_show(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_fn put, vo
 			put(ctx, line);
 		}
 	}
+}
+
+/* /proc/odi_gpon/counters: the sample count and the 64-bit totals. */
+void odi_gpon_ctr_show_counters(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_fn put, void *ctx)
+{
+	char line[96];
+	unsigned int i;
+
+	snprintf(line, sizeof(line), "ctr_samples %u\n", c->samples);
+	put(ctx, line);
 	for (i = 0; i < ODI_GPON_CTR_COUNT; i++) {
 		snprintf(line, sizeof(line), "ctr %s %llu\n", odi_gpon_ctr_names[i],
 			 (unsigned long long)c->total[i]);

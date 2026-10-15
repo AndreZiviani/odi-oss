@@ -1,6 +1,6 @@
 /* procparse_test.c -- src/omci/procparse.h against the shapes our drivers
- * print: /proc/odi_omci "registered:" (odi_omci.c) and the /proc/odi_gpon
- * "sn" and "alloc_ids" lines (odi_gpon.c), plus the config store label
+ * print: /proc/odi_omci "registered:" (odi_omci.c) and the
+ * /proc/odi_gpon/status "sn" and "alloc_ids" lines (odi_gpon.c), plus the config store label
  * form of GPON_SN.
  * Host-side: the header touches no syscalls. Part of `make test-host`. */
 #include <stdio.h>
@@ -43,7 +43,7 @@ int main(void)
 	   "malformed entry skipped");
 	ok(holder("registered: type=1 pid=", 1, &pid) == 0, "truncated pid: not a hit");
 
-	puts("/proc/odi_gpon state line");
+	puts("/proc/odi_gpon/status state line");
 	{
 		static const char f[] = "state 5 (O5)\nonu_id 26\n";
 		static const char g[] = "onu_id 26\nstate 1 (O1)\nsn 00\n";
@@ -56,7 +56,7 @@ int main(void)
 		ok(pp_gpon_state("", 0) == -1, "empty read: cannot tell");
 	}
 
-	puts("/proc/odi_gpon sn line");
+	puts("/proc/odi_gpon/status sn line");
 	{
 		static const char f[] = "state 5 (O5)\nonu_id 26\nsn 414243440011aaff00\n";
 		static const char g[] = "state 5 (O5)\nonu_id 26\nsn 414243440011AAFF\neqd x\n";
@@ -73,7 +73,7 @@ int main(void)
 		ok(pp_gpon_sn("sn 0011223344556677", 19, sn) == 0, "no trailing newline");
 	}
 
-	puts("/proc/odi_gpon alloc_ids line");
+	puts("/proc/odi_gpon/status alloc_ids line");
 	{
 		static const char f[] = "state 5 (O5)\nsn 414243440011aaff\n"
 			"ploam ds_rx 9 us_tx 9\nalloc_ids 5 282 794 1050 1306 538\n"

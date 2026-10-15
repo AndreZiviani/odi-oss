@@ -50,7 +50,7 @@ rm -f /var/config/lastgood_hs.xml
 rm -f /var/run/omcid-resume-decision
 
 log=/tmp/omcid-events.log
-# The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon lists them.
+# The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon/status lists them.
 printf 'alloc_ids 5 282 794 1050 1306 538\n' > /tmp/events-gpon
 $Q respond/build/omcid -w 8 -c "$CAPS" -g /tmp/events-gpon > "$log" 2>&1 &
 pid=$!
@@ -247,9 +247,9 @@ rm -f /var/config/odi.conf
 getmask() {   # getmask <tci> <class4> <mask4>: a Get with an attribute mask
 	printf '%s490a%s0000%s%060d0000002800000000\n' "$1" "$2" "$3" 0
 }
-fixed_run() {   # fixed_run <log> <value>: an omcid with OMCI_FIXED_ME set
+fixed_run() {   # fixed_run <log> <value> [seconds]: an omcid with OMCI_FIXED_ME set
 	printf 'OMCI_FIXED_ME=%s\n' "$2" > /var/config/odi.conf
-	$Q respond/build/omcid -w 2 -c "$CAPS" > "$1" 2>&1 &
+	$Q respond/build/omcid -w "${3:-2}" -c "$CAPS" > "$1" 2>&1 &
 	pid3=$!
 	sleep 2
 }
@@ -260,7 +260,7 @@ $Q cli/build/omcli --inject "$(getmask 0e12 00ca 8000)" > /dev/null 2>&1
 wait "$pid3" 2>/dev/null
 got=$(grep '^fixed entities: ' /tmp/omcid-fixed.log)
 check "OMCI_FIXED_ME is read from odi.conf" "$got" \
-      "fixed entities: 2 class(es) answered from OMCI_FIXED_ME"
+      "fixed entities: 2 entr(ies) answered from OMCI_FIXED_ME"
 got=$(grep -o -F -- '-> 0e10290a00c8000000800048656c6c6f' /tmp/omcid-fixed.log | head -1)
 check "a Get of the first class answers its bytes under the mask asked for" "$got" \
       "-> 0e10290a00c8000000800048656c6c6f"
@@ -285,6 +285,87 @@ fixed_run /tmp/omcid-fixed4.log '200:486'
 wait "$pid3" 2>/dev/null
 got=$(grep -c '^fixed entities: ' /tmp/omcid-fixed4.log)
 check "an odd number of hex digits turns the key off" "$got" "0"
+# Per-instance entities, CLASS:INSTANCE:ATTR:HEX. Class 188 instance 0x8001
+# has attributes 1 to 3; class 360 instance 5 has a one-byte attribute and
+# two of 25 bytes, which take two upload records; 200 is the old form.
+getmaski() {   # getmaski <tci> <class4> <inst4> <mask4> <mt2>: a Get of one instance
+	printf '%s%s0a%s%s%s%060d0000002800000000\n' "$1" "$5" "$2" "$3" "$4" 0
+}
+nextframe() {  # nextframe <tci> <seq4>: a MIB upload next
+	printf '%s4e0a00020000%s%060d0000002800000000\n' "$1" "$2" 0
+}
+fixed_run /tmp/omcid-fixed5.log '188:0x8001:1:0x0011aa 188:0x8001:3:ff 188:0x8001:2:2233 360:5:1:01 360:5:2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 360:5:3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 200:48' 15
+$Q cli/build/omcli --inject "$(frame 0e40 4d 0002 0000)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(getmaski 0e41 00bc 8001 e000 49)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(getmaski 0e42 00bc 8001 4000 49)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(getmaski 0e43 00bc 8001 9000 49)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(getmaski 0e44 00bc 0000 e000 49)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(getmaski 0e45 00bc 8001 e000 5c)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(getmaski 0e46 00c8 0007 8000 49)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(getmaski 0e47 0168 0005 ffff 49)" > /dev/null 2>&1
+for q in "0e48 012d" "0e49 012e" "0e4a 012f" "0e4b 0130"; do
+	$Q cli/build/omcli --inject "$(nextframe $q)" > /dev/null 2>&1
+done
+wait "$pid3" 2>/dev/null
+L=/tmp/omcid-fixed5.log
+A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+got=$(grep '^fixed entities: ' $L)
+check "both forms together are read, one entry per attribute" "$got" \
+      "fixed entities: 7 entr(ies) answered from OMCI_FIXED_ME"
+got=$(grep 'managed entities to upload' $L | sed 's/.*(\(.*\))/\1/')
+check "the MIB upload counts the entities, two records for the big one" "$got" \
+      "301 autonomous, 0 held, 3 fixed"
+got=$(grep -o -F -- '-> 0e482e0a0002000000bc8001e0000011aa2233ff' $L | head -1)
+check "an upload record carries the attributes in order, with the mask" "$got" \
+      "-> 0e482e0a0002000000bc8001e0000011aa2233ff"
+got=$(grep -o -F -- "-> 0e492e0a0002000001680005c00001$A" $L | head -1)
+check "a full record ends where the next attribute would not fit" "$got" \
+      "-> 0e492e0a0002000001680005c00001$A"
+got=$(grep -o -F -- "-> 0e4a2e0a00020000016800052000$B" $L | head -1)
+check "and the next record continues with the rest, under its own mask" "$got" \
+      "-> 0e4a2e0a00020000016800052000$B"
+got=$(grep -o -- '-> 0e4b2e0a0002000003' $L | head -1)
+check "past the last record is a parameter error" "$got" "-> 0e4b2e0a0002000003"
+got=$(grep -o -F -- '-> 0e41290a00bc800100e0000011aa2233ff' $L | head -1)
+check "a Get of the configured instance answers its attributes in mask order" "$got" \
+      "-> 0e41290a00bc800100e0000011aa2233ff"
+got=$(grep -o -F -- '-> 0e42290a00bc80010040002233' $L | head -1)
+check "one attribute of them" "$got" "-> 0e42290a00bc80010040002233"
+got=$(grep -o -F -- '-> 0e43290a00bc8001008000' $L | head -1)
+check "an attribute it does not have drops out of the answered mask" "$got" \
+      "-> 0e43290a00bc8001008000"
+got=$(grep -o -F -- '-> 0e43290a00bc80010080000011aa' $L | head -1)
+check "and the rest keeps its bytes" "$got" "-> 0e43290a00bc80010080000011aa"
+got=$(grep -o -- '-> 0e44290a00bc000005' $L | head -1)
+check "a Get of another instance of the class is unknown instance" "$got" \
+      "-> 0e44290a00bc000005"
+got=$(grep -o -F -- '-> 0e453c0a00bc800100e0000011aa2233ff' $L | head -1)
+check "Get current data answers the same" "$got" \
+      "-> 0e453c0a00bc800100e0000011aa2233ff"
+got=$(grep -o -- '-> 0e46290a00c80007008000' $L | head -1)
+check "the old form still answers any instance" "$got" "-> 0e46290a00c80007008000"
+got=$(grep -v -e '^-> ' -e '^<- ' $L | grep -c -i -e 0011aa -e 2233)
+check "and the bytes are not logged" "$got" "0"
+rm -f /tmp/omcid-fixed5.log
+# Malformed anything turns the whole key off.
+for bad in '188:0x8001:1:00,188:0x8001:1:01' '188:00 188:0x8001:1:01' \
+	'188:0x8001:1:01 188:00' '188:0x8001:0:00' '188:0x8001:17:00' \
+	'188:0x10000:1:00' '188:65536:1:00' '188:1:2:3:00' '188:1:1' '188::1:00' \
+	'188:1::00' '0xbc:1:1:00' '188:0x:1:00' '188:1:1:0' '188:1:1:0x' \
+	'188:1:1:00112233445566778899aabbccddeeff00112233445566778899' \
+	'188:1:0x1:00' '188:1:001:00' '188:1:1:00,200:00 188:1:2:00 188:1:3:00 188:1:4:00 188:1:5:00 188:1:6:00 188:1:7:00 188:1:8:00 188:1:9:00 188:1:10:00 188:1:11:00 188:1:12:00 188:1:13:00 188:1:14:00 188:1:15:00 188:1:16:00'; do
+	fixed_run /tmp/omcid-fixed6.log "$bad"
+	wait "$pid3" 2>/dev/null
+	got=$(grep -c '^fixed entities: ' /tmp/omcid-fixed6.log)
+	check "malformed, the key is off: $bad" "$got" "0"
+done
+# 16 entries and the decimal instance are fine.
+fixed_run /tmp/omcid-fixed6.log '188:32769:1:00 188:32769:2:00 188:1:1:00 188:1:2:00 188:1:3:00 188:1:4:00 188:1:5:00 188:1:6:00 188:1:7:00 188:1:8:00 188:1:9:00 188:1:10:00 188:1:11:00 188:1:12:00 188:1:13:00 188:1:14:00'
+wait "$pid3" 2>/dev/null
+got=$(grep '^fixed entities: ' /tmp/omcid-fixed6.log)
+check "16 entries are accepted, with a decimal instance" "$got" \
+      "fixed entities: 16 entr(ies) answered from OMCI_FIXED_ME"
 rm -f /var/config/odi.conf
 
 # OMCI_ACCEPT_REBOOT: a Reboot of the ONU-G is answered success, then init
@@ -321,6 +402,31 @@ got=$(grep -o -- '-> 0e22390a0007000001' /tmp/omcid-reboot1.log | head -1)
 check "a Reboot of another class keeps its answer" "$got" "-> 0e22390a0007000001"
 wait "$victim" 2>/dev/null; got=$?
 check "the stand-in for init got SIGTERM" "$got" "143"
+kill "$pid4" 2>/dev/null
+wait "$pid4" 2>/dev/null
+rm -f /var/config/odi.conf
+
+# OMCI_ACCEPT_REBOOT=2: answered success, logged, and the stand-in for init is
+# left alone. A fresh stand-in, since the one above was signalled.
+sleep 60 &
+victim=$!
+printf 'OMCI_ACCEPT_REBOOT=2\n' > /var/config/odi.conf
+$Q respond/build/omcid -w 3 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot2.log 2>&1 &
+pid4=$!
+sleep 2
+$Q cli/build/omcli --inject "$(frame 0e23 59 0100 0000)" > /dev/null 2>&1
+sleep 3
+got=$(grep -o -- '-> 0e23390a0100000000' /tmp/omcid-reboot2.log | head -1)
+check "reboot acknowledged: the answer is success" "$got" "-> 0e23390a0100000000"
+got=$(grep -c '^reboot from the OLT acknowledged, not rebooting (OMCI_ACCEPT_REBOOT=2)$' /tmp/omcid-reboot2.log)
+check "and logged once" "$got" "1"
+got=$(grep '^event=olt_reboot ' /tmp/omcid-reboot2.log | tr '\n' ';')
+check "the event says acknowledged" "$got" \
+      "event=olt_reboot class=256 inst=0 result=acknowledged;"
+kill -0 "$victim" 2>/dev/null; got=$?
+check "the stand-in for init is not signalled" "$got" "0"
+kill "$victim" 2>/dev/null
+wait "$victim" 2>/dev/null
 kill "$pid4" 2>/dev/null
 wait "$pid4" 2>/dev/null
 rm -f /var/config/odi.conf

@@ -87,7 +87,7 @@ static void usage(void)
 	    "  -s state    use this ONU state for the resume decision instead\n"
 	    "              of asking the driver (test only, see docs/BOOT.md)\n"
 	    "  -g file     read the Alloc-IDs and the serial from this file\n"
-	    "              instead of /proc/odi_gpon (test only)\n"
+	    "              instead of /proc/odi_gpon/status (test only)\n"
 	    "  -i file     append the driver verbs of a reload to this file\n"
 	    "              instead of /proc/odi_init (test only)\n"
 	    "  -j seconds  how long a reload waits for O5 (test only)\n"
@@ -174,7 +174,7 @@ int main(int argc, char **argv)
 				state_arg = state_arg * 10 + (uint32_t)(*s - '0');
 			state_from_arg = 1;
 		}
-		/* -g file: the /proc/odi_gpon shape (alloc_ids, sn) from a
+		/* -g file: the /proc/odi_gpon/status shape (alloc_ids, sn) from a
 		 * file, the same reason as -s: qemu has no kernel of ours. */
 		else if (str_eq(argv[i], "-g") && i + 1 < argc) {
 			gpon_proc_path = argv[++i];
@@ -266,7 +266,7 @@ int main(int argc, char **argv)
 		: "answered unknown entity");
 	cfg_load_fixed_me();
 	if (fixed_me.n)
-		out_fmt("fixed entities: %d class(es) answered from OMCI_FIXED_ME\n",
+		out_fmt("fixed entities: %d entr(ies) answered from OMCI_FIXED_ME\n",
 			(long)fixed_me.n);
 	reload_init();
 

@@ -24,7 +24,7 @@ static int serial_src;
  *
  *   1. the driver, over the same command the OMCI stack uses for everything
  *      else (DRV_GET_SN, answered by odi_switch from the GPON block);
- *   2. /proc/odi_gpon, whose "sn" line is the same GPON block value, for when
+ *   2. /proc/odi_gpon/status, whose "sn" line is the same GPON block value, for when
  *      the command path is not answering;
  *   3. GPON_SN in the config store, which is what the gponsn step programs --
  *      used only until the kernel has one, and never over it.

@@ -134,7 +134,7 @@ static void alloc_msg(struct odi_gpon_fsm *fsm, uint16_t alloc_id, uint8_t type)
 	ploam(fsm, ONU_ID, ODI_GPON_DS_ASSIGN_ALLOC_ID, c);
 }
 
-/* The five Alloc-IDs ISP1 assigns, in its order (/proc/odi_gpon on ISP1). */
+/* The five Alloc-IDs ISP1 assigns, in its order (/proc/odi_gpon/status on ISP1). */
 static const uint16_t isp1_alloc[5] = { 282, 794, 1050, 1306, 538 };
 
 static void register_onu(struct odi_gpon_fsm *fsm, int cycle)

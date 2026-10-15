@@ -147,6 +147,22 @@ reg 0x7011c0 DSF_GEM_ERRS      31:16=PORT_MISMATCH 15:0=LEN_MISMATCH
 reg 0x7011c4 DSF_GEM_NON_IDLE  31:0=COUNT
 reg 0x7011c8 DSF_PLEND_CORR    31:24=BLEN_TOO_LONG 23:16=UNCORRECTABLE 15:0=CORRECTED
 
+# Per-flow GEM counters (odi_gpon_flow.c), each an index register and the
+# count it selects: write the flow index, wait for ACK, read the count. All
+# clear on read, so the driver is their one reader. DSF_FLOW_CNTR_IND picks
+# GEM frames or bytes with RSEL. The upstream pair takes the flow index in
+# bits 6:0 and ETH in bit 7 to count Ethernet frames; US_FLOW_BYTES is one
+# 64-bit entry per upstream flow, low word first.
+reg 0x701140 DSF_FLOW_CNTR_IND 15:15=ACK 8:8=RSEL 6:0=IDX
+reg 0x701144 DSF_FLOW_CNTR_VAL 31:0=COUNT
+reg 0x704040 DS_GEM_RX_IND     15:15=ACK 6:0=IDX
+reg 0x704044 DS_GEM_RX_VAL     31:0=COUNT
+reg 0x70404c DS_GEM_FWD_IND    15:15=ACK 6:0=IDX
+reg 0x704050 DS_GEM_FWD_VAL    31:0=COUNT
+reg 0x706048 US_FLOW_CNTR_IND  15:15=ACK 7:0=IDX
+reg 0x70604c US_FLOW_CNTR_VAL  31:0=COUNT
+reg 0x706800 US_FLOW_BYTES
+
 # Downstream GEM: the Ethernet and OMCI counters, one at a time through a
 # selector (odi_gpon_ctr.c has which index is which); clear on read
 reg 0x704064 DS_GEM_MISC_SEL   3:0=INDEX

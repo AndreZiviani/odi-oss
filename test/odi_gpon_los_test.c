@@ -55,7 +55,7 @@ static int failures;
 static const uint8_t dummy_sn[8] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77 };
 static const uint8_t no_pw[10];
 
-/* The five Alloc-IDs ISP1 assigns, in its order (/proc/odi_gpon on ISP1). */
+/* The five Alloc-IDs ISP1 assigns, in its order (/proc/odi_gpon/status on ISP1). */
 static const uint16_t isp1_alloc[5] = { 282, 794, 1050, 1306, 538 };
 
 /* ---- The Alloc-ID CAM, modelled from its handshake (odi_reregister_test.c) */
@@ -213,7 +213,7 @@ static void check_active(const struct odi_gpon_fsm *fsm, uint8_t onu_id, unsigne
 	}
 	snprintf(what, sizeof(what), "%s: %u valid Alloc-ID CAM rows, nothing else", when, n_alloc + 1U);
 	CHECK(cam_valid_rows() == n_alloc + 1U, what);
-	snprintf(what, sizeof(what), "%s: /proc/odi_gpon lists %u Alloc-IDs", when, n_alloc);
+	snprintf(what, sizeof(what), "%s: /proc/odi_gpon/status lists %u Alloc-IDs", when, n_alloc);
 	CHECK(odi_gpon_get_alloc_ids(ids, 32U) == n_alloc, what);
 	snprintf(what, sizeof(what), "%s: the OMCC GEM port is up (US map, stream valid)", when);
 	CHECK(peek(ODI_SW_US_GEM_PORT_MAP(OMCC_GEM_ROW)) == onu_id &&
@@ -235,7 +235,7 @@ static void check_released(const struct odi_gpon_fsm *fsm, const char *when)
 	      hw_us_onu_id() == ODI_GPON_ONU_ID_BROADCAST, what);
 	snprintf(what, sizeof(what), "%s: every Alloc-ID CAM row released, the default one included", when);
 	CHECK(cam_valid_rows() == 0U, what);
-	snprintf(what, sizeof(what), "%s: /proc/odi_gpon lists no Alloc-ID", when);
+	snprintf(what, sizeof(what), "%s: /proc/odi_gpon/status lists no Alloc-ID", when);
 	CHECK(odi_gpon_get_alloc_ids(ids, 32U) == 0U, what);
 	snprintf(what, sizeof(what), "%s: the OMCC GEM port is down (flow type, US map, stream valid)", when);
 	CHECK(peek(ODI_SW_DSF_GEM_FLOW_TYPE(OMCC_GEM_ROW)) == 0U &&

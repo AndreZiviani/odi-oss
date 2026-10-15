@@ -181,6 +181,20 @@ static inline uint32_t ODI_GPON_DSF_SUPERFRAME_COUNT_GET(uint32_t reg)
 	return (reg >> 0) & 0x3fffffffU;
 }
 
+/* The per-flow downstream GEM counters, behind two indirect pairs, are
+ * 32 bits each, clear on read like the link counters above, and read only
+ * by the flow sampler (odi_gpon_flow.c): nothing else may read them, the
+ * stock firmware command that prints a flow counter included.
+ *
+ * DSF_FLOW_CNTR_IND: 0x701140 -- write the downstream flow index (the
+ * row of the GEM port CAM) in IDX and RSEL (0 counts GEM frames, 1 counts
+ * bytes), wait for ACK, then read the count from DSF_FLOW_CNTR_VAL.
+ */
+#define ODI_GPON_DSF_FLOW_CNTR_IND_OFF	0x701140U
+#define ODI_GPON_DSF_FLOW_CNTR_IND_RSEL	(1U << 8)
+#define ODI_GPON_DSF_FLOW_CNTR_IND_ACK	(1U << 15)
+#define ODI_GPON_DSF_FLOW_CNTR_VAL_OFF	0x701144U
+
 /* The downstream link counters, 0x701180-0x7011c8: each clears when it is
  * read and stays at all ones once full, so the one reader is the counter
  * sampler (odi_gpon_ctr.c, which has the field layout of the shared
@@ -247,6 +261,19 @@ static inline uint32_t ODI_GPON_DSF_PLOAM_RX_WORD_MSG_WORD_GET(uint32_t reg)
  */
 #define ODI_GPON_DS_GEM_MISC_SEL_OFF	0x704064U
 #define ODI_GPON_DS_GEM_MISC_COUNT_OFF	0x704068U
+
+/* The per-flow downstream Ethernet counters: two more indirect pairs of
+ * the same shape (write the flow index, wait for ACK in bit 15, read the
+ * 32-bit count; clear on read, sampled only by odi_gpon_flow.c).
+ * DS_GEM_RX_IND/VAL count the Ethernet frames the GEM layer received on
+ * the flow, DS_GEM_FWD_IND/VAL those it forwarded on to the switch.
+ */
+#define ODI_GPON_DS_GEM_RX_IND_OFF	0x704040U
+#define ODI_GPON_DS_GEM_RX_VAL_OFF	0x704044U
+#define ODI_GPON_DS_GEM_FWD_IND_OFF	0x70404cU
+#define ODI_GPON_DS_GEM_FWD_VAL_OFF	0x704050U
+#define ODI_GPON_DS_GEM_RX_IND_ACK	(1U << 15)
+#define ODI_GPON_DS_GEM_FWD_IND_ACK	(1U << 15)
 
 /* DS_MC_FILTER_CTL: 0x704084 -- the downstream multicast MAC filter, 256
  * rows, one request at a time, with the layout and handshake of the DSF
@@ -591,5 +618,26 @@ static inline uint32_t ODI_GPON_DSK_KEY_WORD_KEY_BITS_SET(uint32_t reg, uint32_t
 {
 	return (reg & ~(0xffffU << 0)) | ((val & 0xffffU) << 0);
 }
+
+/* ---- Upstream GEM counters, 0x706000-0x706fff */
+
+/* US_FLOW_CNTR_IND: 0x706048 -- the per-flow upstream counters, 32 bits
+ * each and clear on read (sampled only by odi_gpon_flow.c): write the
+ * upstream flow index, with bit 7 (ETH) set to count Ethernet frames
+ * instead of GEM frames, wait for ACK, and read the count from
+ * US_FLOW_CNTR_VAL.
+ */
+#define ODI_GPON_US_FLOW_CNTR_IND_OFF	0x706048U
+#define ODI_GPON_US_FLOW_CNTR_IND_IDX_ETH	(1U << 7)
+#define ODI_GPON_US_FLOW_CNTR_IND_ACK	(1U << 15)
+#define ODI_GPON_US_FLOW_CNTR_VAL_OFF	0x70604cU
+
+/* US_FLOW_BYTES: 0x706800, array 0..127 of 64 bits, two words each --
+ * the bytes sent on upstream flow n, clear on read. The low word is at
+ * +0 of the entry and the high word at +4; the sampler reads the low one
+ * first.
+ */
+#define ODI_GPON_US_FLOW_BYTES_BASE	0x706800U
+#define ODI_GPON_US_FLOW_BYTES(n)	(ODI_GPON_US_FLOW_BYTES_BASE + 8U * (uint32_t)(n))
 
 #endif /* ODI_GPON_HW_H */
