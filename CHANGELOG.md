@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- `OMCI_ACCEPT_REBOOT=2` (odi.conf): acknowledge only. The OLT Reboot of the
+  ONU-G is answered with success and the stick does not reboot, for an OLT
+  that insists on a successful answer. `1` still reboots and `0`, unset or
+  any other value still refuses. Logged as `reboot from the OLT
+  acknowledged, not rebooting (OMCI_ACCEPT_REBOOT=2)` and
+  `event=olt_reboot result=acknowledged`.
+
 - Pin: confd v1.3.2 (odi-ui): `OMCI_ACCEPT_REBOOT` on the ONU identity
   subtab, and a select whose key is unset shows the value the image uses
   instead of an empty box.
