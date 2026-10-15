@@ -748,7 +748,6 @@ re-provisioned around it.
     /etc/scripts/host-autoneg.sh try on|off [SECONDS]   a trial, 120 s by default (10 to 600)
     /etc/scripts/host-autoneg.sh confirm                keep it: stores HOST_AUTONEG
     /etc/scripts/host-autoneg.sh revert                 end the trial now
-    /etc/scripts/host-autoneg.sh ack                    acknowledge a safe mode
     /etc/scripts/host-autoneg.sh status                 the state, key=value
     /etc/scripts/host-autoneg.sh boot                   rcS only
 
@@ -767,7 +766,7 @@ holder that died is found by its pid) and replaces the state file in one
 rename.
 
 The state file, `/var/run/host-autoneg`, and `status` (the same fields,
-plus the live link, the uptime and the safe-mode record), one `key=value`
+plus the live link, the uptime and whether this is a safe-mode boot), one `key=value`
 per line; the web UI reads the file, and `status` is in the diagnostics
 bundle (`host-link.txt`):
 
@@ -781,8 +780,7 @@ bundle (`host-link.txt`):
 | `watch_until` | the uptime by which the boot watch ends at the latest |
 | `event`, `event_uptime`, `message` | the last event, below |
 | `link` (`status` only) | `1`, `0`, or `unknown` without the kernel parameter |
-| `safe_mode` | `1` while the safe-mode record exists; `status` adds its fields as `safe_mode_short_boots`, `safe_mode_uptime`, `safe_mode_previous`, `safe_mode_build` |
-| `short_boots` (`status` only) | the short-boot counter, while there is one |
+| `safe_mode_boot` (`status` only) | `1` on a safe-mode boot (`safe-mode.sh`) |
 
 Every event is one line to the kernel log (`host-autoneg: event=<name>
 setting=... running=... <text>`, so dmesg, the ramlog and syslog through
@@ -795,12 +793,37 @@ klogd), at notice:
 | `watch_switch` | no link for 30 s; the watch switches mode |
 | `fallback` | the link came up only with auto-negotiation; the key stays off |
 | `fallback_nolink` | no link in either mode for 10 minutes; stays on auto-negotiation |
-| `safe_mode`, `safe_mode_failed` | three short boots: the key cleared (or could not be) |
-| `safe_mode_ack` | the safe-mode record acknowledged |
+| `safe_mode_boot` | a safe-mode boot: nothing applied, auto-negotiation on, trials refused |
 | `trial_started`, `trial_expired`, `trial_reverted`, `trial_confirmed`, `trial_failed` | a trial and how it ended |
 | `bad_value`, `no_kernel`, `apply_failed` | a key that is neither on nor off, a kernel without the parameter, a write that failed: the port runs auto-negotiation |
 
 A boot with the key unset logs nothing and writes nothing.
+
+### `safe-mode.sh` -- the boot counter and the recovery boot
+
+    /etc/scripts/safe-mode.sh status     this boot and the record, key=value
+    /etc/scripts/safe-mode.sh ack        acknowledge a safe-mode boot: removes its record
+    /etc/scripts/safe-mode.sh active     exit 0 on a safe-mode boot
+    /etc/scripts/safe-mode.sh count      rcS only, right after the config partition is mounted
+
+`count` adds one to `/etc/config/boot-count` and spawns `boot-ok`, which
+removes it once the uptime reaches 60 s. A boot that finds five short boots
+before it (three with `HOST_AUTONEG=off`) is a safe-mode boot: it writes
+`/var/run/safe-mode` and the record `/etc/config/safe-mode`, removes
+`HOST_AUTONEG` when that was off, and bind-mounts a RAM copy of
+`/etc/passwd` with root's password `admin` over the read-only one
+(`docs/SETTINGS.md`, "Recovery: the safe mode"). The flag in `/var/run` is
+what the rest reads: `host-autoneg.sh` applies nothing, the PON steps
+leave the laser off and skip `gponact` (`rcs-lib.sh`), `svc-dropbear.sh`
+offers passwords, and confd accepts `admin:admin`. `status` prints
+`active=0|1` with the flag's fields as `now_*`, `record=0|1` with the
+record's as `record_*`, and `boot_count` while there is one.
+
+Its events, to the kernel log at notice: `safe-mode: event=boot_count
+boot=N short_before=N limit=5|3 uptime=S` on every boot (the uptime is
+how early the count lands on a given stick), `event=safe_mode short_boots=N
+cleared=HOST_AUTONEG|none|failed root_password=default|failed`, and
+`event=safe_mode_ack`.
 
 ### `diag-bundle.sh` -- the diagnostics bundle
 
@@ -903,6 +926,7 @@ that `--full` keeps the identifiers but still no secret; and that the
 |---|---|---|
 | `/etc/scripts/network.sh` | host SerDes check (and fix), MAC, `br0` over `eth0.2`, the addresses | yes: it checks before it writes, and re-running it is how a management-path problem is debugged |
 | `/etc/scripts/host-autoneg.sh status` | the host-port auto-negotiation state (above) | yes: read-only |
+| `/etc/scripts/safe-mode.sh status` | the safe mode: this boot, the record, the boot count | yes: read-only |
 | `/etc/scripts/network.sh addr [-n]` | only the addresses: the primary and the second one (`br0:2`), live; `-n` says what it would change | yes; this is `apply.sh network` |
 | `/etc/scripts/mount-config.sh [name] [dir]` | find mtd `config` by name, mount it jffs2 | only if it is not mounted |
 | `/etc/scripts/respawn.sh <oom> <log> <cmd...>` | not run directly: exec-ed by each `svc-*.sh` inittab entry, sets `oom_score_adj` then execs the daemon in place | n/a |
@@ -1033,7 +1057,8 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=reload changed=vlan action=rebuild keys=VLAN_MANU_TAG_VID` | notice | omcid took a SIGHUP (`apply.sh omci`) and reread the store: `changed` is `none`, `vlan` (bridge connections rebuilt in place, the ONU stays in O5) or `identity` (`action=reregister`: the ONU is deactivated and ranged again); `keys` names the store keys that differ, never their values. Never rate limited |
 | `omcid: event=reload_step verb=gponsn rc=0` | info, notice when `rc` is not 0 | one driver verb of a re-registration (`gpondeact`, `gponsn`, `gponpw`, `gponact`) and its errno (0 is success) |
 | `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services |
-| `host-autoneg: event=fallback setting=off running=on ...` | notice | the host-port auto-negotiation (`HOST_AUTONEG`): the boot watch, the fallback, the safe mode and every trial; the events are listed under `host-autoneg.sh` above |
+| `host-autoneg: event=fallback setting=off running=on ...` | notice | the host-port auto-negotiation (`HOST_AUTONEG`): the boot watch, the fallback and every trial; the events are listed under `host-autoneg.sh` above |
+| `safe-mode: event=boot_count boot=1 short_before=0 limit=5 uptime=11` | notice | every boot's count, and a safe-mode boot (`event=safe_mode`); listed under `safe-mode.sh` above |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 
 `cause` and `side` on `event=onu_state`:

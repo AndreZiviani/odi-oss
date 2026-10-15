@@ -16,14 +16,30 @@ listed here.
   RAM and reverts after 120 s unless `confirm` arrives over the link it
   changed. A boot with the key off watches the host link and falls back to
   auto-negotiation while the forced link does not come up, alternating 30 s
-  each way for up to 10 minutes (`event=fallback`). Three boots in a row
-  shorter than 60 s with the key off clear it (the safe mode,
-  `event=safe_mode`, a record on the config partition until acknowledged).
-  A stick with the key unset writes and reads nothing new at boot. State in
-  `/var/run/host-autoneg` and `host-autoneg.sh status`, and in the
-  diagnostics bundle (`host-link.txt`). Host-tested; not yet trialled on a
-  stick, and the forced side needs a host that can run without
-  auto-negotiation.
+  each way for up to 10 minutes (`event=fallback`). The safe mode (below)
+  clears it. A stick with the key unset writes and reads nothing new at
+  boot. State in `/var/run/host-autoneg` and `host-autoneg.sh status`, and
+  in the diagnostics bundle (`host-link.txt`). Host-tested; not yet
+  trialled on a stick, and the forced side needs a host that can run
+  without auto-negotiation.
+
+- Safe mode, a recovery boot from the power alone, for a stick that cannot
+  be reached or logged into (a host port mode the router does not speak, a
+  forgotten web UI password, lost ssh keys). Every boot counts itself on the
+  config partition right after it is mounted (`event=boot_count`, with the
+  uptime) and a boot that reaches 60 s clears the count; after five short
+  boots in a row (three with `HOST_AUTONEG=off`) the next boot is a
+  safe-mode boot, for that boot only: the PON off (laser left off, no
+  activation), the host port on auto-negotiation, the web UI on
+  `admin:admin` and root on `admin` over ssh, passwords offered even on a
+  keys-only image. Nothing in the saved configuration changes but the
+  removal of `HOST_AUTONEG` when that was off; the credentials are reset in
+  memory only (a flag in `/var/run`, a RAM copy of `/etc/passwd`
+  bind-mounted over the read-only one). A record on the config partition
+  keeps the web UI banner up until acknowledged (`safe-mode.sh ack`). The
+  trade-off, documented in docs/SETTINGS.md: anyone who can power-cycle the
+  stick can log into it for one boot. Host-tested; not yet trialled on a
+  stick.
 
 - GPON: with an OLT that also sends an Assign_Alloc-ID for the ONU-ID's own
   default Alloc-ID (some do), upstream user traffic never left the stick.

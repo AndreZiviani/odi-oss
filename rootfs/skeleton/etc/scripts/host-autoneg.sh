@@ -14,8 +14,7 @@
 # when the choice is wrong. A wrong mode costs the only way in, so nothing
 # here persists a mode that has not been seen to work:
 #
-#     host-autoneg.sh boot          rcS, once, after network.sh: count the
-#                                   boot, fire the safe mode, or apply off
+#     host-autoneg.sh boot          rcS, once, after network.sh: apply off
 #                                   and start the boot watch (below)
 #     host-autoneg.sh try on|off [SECONDS]
 #                                   a trial: one second later the mode is
@@ -27,7 +26,6 @@
 #                                   Only reaches the stick if the link works
 #                                   in that mode, which is the point
 #     host-autoneg.sh revert        end the trial now, back to the mode before
-#     host-autoneg.sh ack           acknowledge a safe mode (removes its record)
 #     host-autoneg.sh status        the state as key=value lines
 #
 # The boot watch. With HOST_AUTONEG=off the boot writes off and watches the
@@ -41,15 +39,10 @@
 # comes up late would otherwise find the stick on auto-negotiation for the
 # rest of the boot.
 #
-# The safe mode. HOST_AUTONEG=off and SAFE_BOOTS (3) boots in a row that each
-# ended before BOOT_OK_S (60) seconds of uptime: the boot after them clears
-# the key, runs auto-negotiation, and leaves a record on the config
-# partition until someone acknowledges it (the web UI banner, or `ack`).
-# Power the stick for about 20 to 40 seconds and pull it, three times, and
-# the fourth boot runs auto-negotiation. U-Boot here has no boot counter, and its environment
-# must not be written on every boot, so the counter is a file on the config
-# partition, written by temp file and rename, only while HOST_AUTONEG=off:
-# a stick that never sets the key never writes it.
+# The safe mode (safe-mode.sh): three short boots in a row with
+# HOST_AUTONEG=off (five otherwise) make the next boot a recovery boot,
+# which clears HOST_AUTONEG and runs auto-negotiation; on that boot this
+# script writes nothing and refuses a trial.
 #
 # Every wait is bounded (sysfs writes and reads, flash) and every state
 # change is one rename of the state file, under a mkdir lock.
@@ -60,11 +53,9 @@ SELF=${SELF:-/etc/scripts/host-autoneg.sh}
 PARAM_DIR=${PARAM_DIR:-/sys/module/odi_switch/parameters}
 STATE=${STATE:-/var/run/host-autoneg}
 LOCKDIR=${LOCKDIR:-/var/run/host-autoneg.lock}
-BOOTS=${BOOTS:-/etc/config/host-autoneg.boots}
-SAFEMODE=${SAFEMODE:-/etc/config/host-autoneg.safemode}
+SAFE_FLAG=${SAFE_FLAG:-/var/run/safe-mode}
 UPTIME=${UPTIME:-/proc/uptime}
 KMSG=${KMSG:-/dev/kmsg}
-BUILD=${BUILD:-/etc/odi-build}
 LOG=${LOG:-/var/log/services.log}
 SLEEP=${SLEEP:-sleep}
 TIMEOUT=${TIMEOUT:-timeout}
@@ -73,8 +64,6 @@ TRIAL_S=${TRIAL_S:-120}         # a trial reverts after this long unconfirmed
 TRIAL_MAX_S=${TRIAL_MAX_S:-600} # the longest trial a caller may ask for
 WATCH_S=${WATCH_S:-30}          # each phase of the boot watch
 WATCH_MAX_S=${WATCH_MAX_S:-600} # the whole boot watch
-BOOT_OK_S=${BOOT_OK_S:-60}      # uptime that makes a boot not short
-SAFE_BOOTS=${SAFE_BOOTS:-3}     # short boots in a row before the one that fires the safe mode
 IO_S=${IO_S:-5}                 # one sysfs or flash call
 LOCK_S=${LOCK_S:-10}            # waiting for the lock
 
@@ -136,7 +125,7 @@ put_in_place() {
 clear_trial() { trial_mode='' trial_prev='' trial_id='' trial_deadline=''; }
 
 load() {
-	setting=on running=on phase=steady fallback=0 safe_mode=0
+	setting=on running=on phase=steady fallback=0
 	clear_trial
 	watch_until='' ev='' ev_up='' ev_msg=''
 	[ -f "$STATE" ] || return 0
@@ -146,7 +135,6 @@ load() {
 		running) running=$v ;;
 		phase) phase=$v ;;
 		fallback) fallback=$v ;;
-		safe_mode) safe_mode=$v ;;
 		trial_mode) trial_mode=$v ;;
 		trial_prev) trial_prev=$v ;;
 		trial_id) trial_id=$v ;;
@@ -165,7 +153,6 @@ save() {
 		echo "running=$running"
 		echo "phase=$phase"
 		echo "fallback=$fallback"
-		echo "safe_mode=$safe_mode"
 		echo "trial_mode=$trial_mode"
 		echo "trial_prev=$trial_prev"
 		echo "trial_id=$trial_id"
@@ -212,34 +199,6 @@ spawn() {
 
 # ---- boot
 
-# The short-boot counter: the boots in a row, this one included, that have
-# not (yet) reached BOOT_OK_S of uptime; so the boots before this one that
-# were short are the counter minus one. Anything unreadable counts as 0.
-count_boot() {
-	n=$(sed -n '1s/^\([0-9][0-9]*\)$/\1/p' "$BOOTS" 2>/dev/null)
-	n=$(( ${n:-0} + 1 ))
-	echo "$n" > "$BOOTS.new.$$" && put_in_place "$BOOTS" || return 1
-	echo "$n"
-}
-
-safe_mode_fire() {
-	n=$1
-	"$TIMEOUT" "$IO_S" "$FLASH" set HOST_AUTONEG "" > /dev/null 2>&1
-	setting=on running=on safe_mode=1 phase=steady
-	if [ -n "$(key_raw)" ]; then
-		event safe_mode_failed "short_boots=$(( n - 1 )) could not clear HOST_AUTONEG; running auto-negotiation this boot"
-	else
-		event safe_mode "short_boots=$(( n - 1 )) $(( n - 1 )) short boots in a row: HOST_AUTONEG cleared, auto-negotiation on"
-	fi
-	{
-		echo "short_boots=$(( n - 1 ))"
-		echo "uptime=$(uptime_s)"
-		echo "previous=off"
-		echo "build=$(sed -n 's/^image=//p' "$BUILD" 2>/dev/null | head -n 1)"
-	} > "$SAFEMODE.new.$$" && put_in_place "$SAFEMODE"
-	rm -f "$BOOTS"
-}
-
 boot() {
 	lock
 	load
@@ -248,12 +207,16 @@ boot() {
 	running=on phase=steady fallback=0
 	clear_trial
 	watch_until=''
-	[ -f "$SAFEMODE" ] && safe_mode=1 || safe_mode=0
 	if [ -n "$raw" ] && [ "$raw" != on ] && [ "$raw" != off ]; then
 		event bad_value "HOST_AUTONEG=$raw is neither on nor off; running auto-negotiation"
 	fi
+	if [ -f "$SAFE_FLAG" ]; then
+		event safe_mode_boot "a safe-mode boot: auto-negotiation on, nothing applied (HOST_AUTONEG=${raw:-unset})"
+		save
+		unlock
+		return 0
+	fi
 	if [ "$setting" = on ]; then
-		rm -f "$BOOTS"
 		# The default is not an event: nothing is written, nothing logged.
 		ev=boot ev_up=$(uptime_s) ev_msg="auto-negotiation on"
 		save
@@ -265,17 +228,6 @@ boot() {
 		save
 		unlock
 		return 0
-	fi
-	if n=$(count_boot); then
-		if [ "$n" -gt "$SAFE_BOOTS" ]; then
-			safe_mode_fire "$n"
-			save
-			unlock
-			return 0
-		fi
-		spawn boot-ok
-	else
-		say "could not write $BOOTS: this boot is not counted" >&2
 	fi
 	if hw_write off; then
 		running=off phase=watch
@@ -290,17 +242,6 @@ boot() {
 		unlock
 	fi
 	return 0
-}
-
-# boot-ok: once the uptime reaches BOOT_OK_S this boot was not short, and
-# the counter goes. Sleeps until then.
-boot_ok() {
-	up=$(uptime_s)
-	[ "${up:-0}" -ge "$BOOT_OK_S" ] || "$SLEEP" $(( BOOT_OK_S - ${up:-0} ))
-	if [ -f "$BOOTS" ]; then
-		rm -f "$BOOTS"
-		say "up ${BOOT_OK_S} s: the short-boot counter is cleared"
-	fi
 }
 
 # watch: the boot watch (above). Each phase polls the link once a second.
@@ -362,6 +303,7 @@ try() {
 	case $secs in ''|*[!0-9]*) die "SECONDS must be a number" ;; esac
 	[ "$secs" -ge 10 ] && [ "$secs" -le "$TRIAL_MAX_S" ] || die "SECONDS must be 10 to $TRIAL_MAX_S"
 	param_ok || die "this kernel has no odi_switch.host_autoneg"
+	[ ! -f "$SAFE_FLAG" ] || die "this is a safe-mode boot: reboot to the saved configuration first"
 	lock
 	load
 	case $phase in
@@ -453,7 +395,6 @@ confirm() {
 	clear_trial
 	save
 	unlock
-	[ "$setting" = on ] && rm -f "$BOOTS"
 	return 0
 }
 
@@ -465,18 +406,6 @@ revert() {
 		die "no trial is running"
 	fi
 	back_to_prev trial_reverted "reverted on request"
-	unlock
-}
-
-ack() {
-	lock
-	load
-	rm -f "$SAFEMODE"
-	if [ "$safe_mode" = 1 ]; then
-		safe_mode=0
-		event safe_mode_ack "the safe mode was acknowledged"
-		save
-	fi
 	unlock
 }
 
@@ -499,27 +428,19 @@ status() {
 	echo "event=$ev"
 	echo "event_uptime=$ev_up"
 	echo "message=$ev_msg"
-	if [ -f "$SAFEMODE" ]; then
-		echo "safe_mode=1"
-		sed -n 's/^\([a-z_]*\)=/safe_mode_\1=/p' "$SAFEMODE"
-	else
-		echo "safe_mode=0"
-	fi
-	[ -f "$BOOTS" ] && echo "short_boots=$(cat "$BOOTS")"
+	[ -f "$SAFE_FLAG" ] && echo "safe_mode_boot=1" || echo "safe_mode_boot=0"
 	return 0
 }
 
 case "${1:-}" in
 boot)       boot ;;
-boot-ok)    boot_ok ;;
 watch)      watch ;;
 try)        shift; try "$@" ;;
 trial-run)  shift; trial_run "$@" ;;
 expire)     shift; expire "$@" ;;
 confirm)    confirm ;;
 revert)     revert ;;
-ack)        ack ;;
 status)     status ;;
 parse)      parse "${2:-}" ;;
-*)          echo "usage: $0 boot|try on|off [SECONDS]|confirm|revert|ack|status" >&2; exit 1 ;;
+*)          echo "usage: $0 boot|try on|off [SECONDS]|confirm|revert|status" >&2; exit 1 ;;
 esac

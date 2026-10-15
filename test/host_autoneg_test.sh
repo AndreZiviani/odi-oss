@@ -11,10 +11,11 @@
 # only records what would be spawned; each test runs the spawned verb
 # itself, so the order of events is the test's, not the scheduler's.
 #
-# What is checked: the key parsing, the boot (default, off, the counter,
-# the safe mode and its acknowledgement), the boot watch (forced link,
-# fallback, a host that comes up late, no host at all), the trial (expiry,
-# confirm, revert, every refusal), status, and the stale lock.
+# What is checked: the key parsing, the boot (default, off, a safe-mode
+# boot), the boot watch (forced link, fallback, a host that comes up late,
+# no host at all), the trial (expiry, confirm, revert, every refusal),
+# status, and the stale lock. The boot counter and the safe mode itself are
+# test/safe_mode_test.sh.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 S=$PWD/rootfs/skeleton/etc/scripts/host-autoneg.sh
@@ -76,7 +77,7 @@ chmod +x "$T/bin/"*
 
 export PATH="$T/bin:$PATH"
 export FLASH=$F SELF=$S PARAM_DIR=$T/param STATE=$T/run/state LOCKDIR=$T/run/lock
-export BOOTS=$T/config/host-autoneg.boots SAFEMODE=$T/config/host-autoneg.safemode
+export SAFE_FLAG=$T/run/safe-mode
 export UPTIME=$T/uptime KMSG=$T/kmsg LOG=$T/services.log SLEEP=$T/bin/sleep TIMEOUT=$T/bin/timeout
 export BUILD=$T/odi-build
 export ODI_CONF=$T/config/odi.conf CS=$T/config/lastgood.xml HS=$T/config/lastgood_hs.xml TMPDIR_=$T
@@ -108,15 +109,13 @@ for v in on off "" OFF yes 0; do
 	[ "$got" = "$want" ] && ok "parse '$v' -> $want" || no "parse '$v' -> $want" "got $got"
 done
 
-# ---- boot, key absent: nothing written, nothing counted, nothing spawned
+# ---- boot, key absent: nothing written, nothing spawned
 newboot 1
-: > "$BOOTS"; echo 2 > "$BOOTS"
 out=$(sh "$S" boot)
 t "default boot: setting on, running on" "^on on$" "$(st setting) $(st running)"
 t "default boot: the kernel parameter untouched" "^Y$" "$(cat "$T/param/host_autoneg")"
 t "default boot: nothing spawned" "^$" "$(spawned)"
 t "default boot: nothing logged to the kernel" "^$" "$(cat "$T/kmsg")"
-[ ! -f "$BOOTS" ] && ok "default boot: a stale short-boot counter is removed" || no "default boot: a stale short-boot counter is removed"
 n "default boot: no output" "." "$out"
 
 # ---- boot, HOST_AUTONEG=off, a forced host
@@ -126,8 +125,7 @@ echo forced > "$T/model"
 sh "$S" boot > /dev/null
 t "off boot: the kernel parameter is written 0" "^0$" "$(cat "$T/param/host_autoneg")"
 t "off boot: running off, phase watch" "^off watch$" "$(st running) $(st phase)"
-t "off boot: the counter is 1" "^1$" "$(cat "$BOOTS")"
-t "off boot: boot-ok and watch spawned" "boot-ok.*watch|watch.*boot-ok" "$(spawned | tr '\n' ' ')"
+t "off boot: the watch spawned" "^watch$" "$(spawned)"
 t "off boot: event=applied in the kernel log" "event=applied setting=off running=off" "$(cat "$T/kmsg")"
 out=$(sh "$S" try on 2>&1); rc=$?
 t "a trial is refused during the boot watch" "boot watch" "$out"
@@ -136,9 +134,6 @@ sh "$S" watch > /dev/null
 t "watch, forced host: forced_link, no fallback" "^forced_link 0 off steady$" "$(st event) $(st fallback) $(st running) $(st phase)"
 t "watch, forced host: the parameter stays 0" "^0$" "$(cat "$T/param/host_autoneg")"
 t "watch, forced host: the key stays off" "^off$" "$(key)"
-sh "$S" boot-ok > /dev/null
-[ ! -f "$BOOTS" ] && ok "boot-ok: the counter is cleared at 60 s of uptime" || no "boot-ok: the counter is cleared at 60 s of uptime"
-t "boot-ok: it waited until uptime 60" "^60$" "$(cut -d. -f1 "$T/uptime")"
 
 # ---- the boot fallback: the host negotiates
 newboot 0
@@ -155,7 +150,6 @@ newboot 0
 echo forced > "$T/model"
 sh "$S" boot > /dev/null; sh "$S" watch > /dev/null
 t "the next boot with a forced host: the fallback is gone" "^forced_link 0$" "$(st event) $(st fallback)"
-rm -f "$BOOTS"
 
 # ---- a forced host that comes up late: alternate, then off again
 newboot 0
@@ -163,7 +157,6 @@ echo late:30:forced > "$T/model"
 sh "$S" boot > /dev/null; sh "$S" watch > /dev/null
 t "late forced host: back to off, link, no fallback" "^forced_link 0 off$" "$(st event) $(st fallback) $(st running)"
 t "late forced host: it went on, then off again" "trying auto-negotiation on.*trying auto-negotiation off" "$(tr '\n' ' ' < "$T/kmsg")"
-rm -f "$BOOTS"
 
 # ---- no host at all: bounded, ends on auto-negotiation
 newboot 0
@@ -172,50 +165,7 @@ sh "$S" boot > /dev/null; sh "$S" watch > /dev/null
 t "no host: fallback_nolink, running on" "^fallback_nolink 1 on steady$" "$(st event) $(st fallback) $(st running) $(st phase)"
 up=$(cut -d. -f1 "$T/uptime")
 [ "$up" -le $((15 + 40 + 5 + 1)) ] && ok "no host: the watch ended within WATCH_MAX_S (uptime $up)" || no "no host: bounded" "uptime $up"
-rm -f "$BOOTS"
 
-# ---- the short-boot counter and the safe mode
-newboot 0
-echo none > "$T/model"
-sh "$S" boot > /dev/null
-t "short boots: 1" "^1$" "$(cat "$BOOTS")"
-newboot 0
-sh "$S" boot > /dev/null
-t "short boots: 2" "^2$" "$(cat "$BOOTS")"
-newboot 0
-sh "$S" boot > /dev/null
-t "short boots: 3, still forced" "^3 0$" "$(cat "$BOOTS") $(cat "$T/param/host_autoneg")"
-newboot 0
-: > "$T/spawned"
-out=$(sh "$S" boot)
-t "the boot after three short boots: safe_mode event" "event=safe_mode setting=on running=on short_boots=3" "$(cat "$T/kmsg")"
-t "safe mode: HOST_AUTONEG removed" "^$" "$(key)"
-t "safe mode: the parameter untouched (auto-negotiation)" "^Y$" "$(cat "$T/param/host_autoneg")"
-[ ! -f "$BOOTS" ] && ok "safe mode: the counter is removed" || no "safe mode: the counter is removed"
-t "safe mode: the record" "short_boots=3.*previous=off.*build=test-image" "$(tr '\n' ' ' < "$SAFEMODE")"
-t "safe mode: nothing spawned" "^$" "$(spawned)"
-t "safe mode: state" "^1 on on steady$" "$(st safe_mode) $(st setting) $(st running) $(st phase)"
-# The record outlives the boot, until acknowledged.
-newboot 1
-sh "$S" boot > /dev/null
-t "the next boot still shows the safe mode" "^1$" "$(st safe_mode)"
-t "status: the safe-mode record" "safe_mode=1.*safe_mode_short_boots=3" "$(sh "$S" status | tr '\n' ' ')"
-sh "$S" ack > /dev/null
-[ ! -f "$SAFEMODE" ] && ok "ack removes the record" || no "ack removes the record"
-t "ack: state and event" "^0 safe_mode_ack$" "$(st safe_mode) $(st event)"
-t "status after ack" "safe_mode=0" "$(sh "$S" status)"
-
-# A long boot in between resets the count.
-setkey off
-newboot 0; sh "$S" boot > /dev/null
-newboot 0; sh "$S" boot > /dev/null; sh "$S" boot-ok > /dev/null
-newboot 0; sh "$S" boot > /dev/null
-t "a boot that reached 60 s resets the count" "^1$" "$(cat "$BOOTS")"
-echo garbage > "$BOOTS"
-newboot 0; sh "$S" boot > /dev/null
-t "an unreadable counter counts as 0" "^1$" "$(cat "$BOOTS")"
-rm -f "$BOOTS"
-setkey ""
 
 # ---- a value that is neither: on, logged
 setkey sideways 2>/dev/null
@@ -223,6 +173,19 @@ newboot 1
 sh "$S" boot > /dev/null
 t "HOST_AUTONEG=sideways runs on" "^on on$" "$(st setting) $(st running)"
 t "  ... and says so" "event=bad_value" "$(cat "$T/kmsg")"
+setkey ""
+
+# ---- a safe-mode boot (safe-mode.sh set the flag): nothing applied, no trial
+setkey off
+newboot 1
+echo "short_boots=3" > "$SAFE_FLAG"
+sh "$S" boot > /dev/null
+t "safe-mode boot: auto-negotiation, nothing written" "^on Y steady safe_mode_boot$" "$(st running) $(cat "$T/param/host_autoneg") $(st phase) $(st event)"
+t "safe-mode boot: no watch" "^$" "$(spawned)"
+out=$(sh "$S" try off 2>&1)
+t "safe-mode boot: a trial is refused" "safe-mode boot" "$out"
+t "status says so" "safe_mode_boot=1" "$(sh "$S" status)"
+rm -f "$SAFE_FLAG"
 setkey ""
 
 # ---- the trial
@@ -291,7 +254,7 @@ sh "$S" revert > /dev/null
 
 # ---- status
 out=$(sh "$S" status)
-t "status: the fields" "setting=on.*running=on.*phase=steady.*uptime=[0-9]+.*link=[01].*safe_mode=0" "$(printf '%s' "$out" | tr '\n' ' ')"
+t "status: the fields" "setting=on.*running=on.*phase=steady.*uptime=[0-9]+.*link=[01].*safe_mode_boot=0" "$(printf '%s' "$out" | tr '\n' ' ')"
 rm -f "$T/param/host_link"
 t "status: link unknown without the parameter" "link=unknown" "$(sh "$S" status)"
 echo 1 > "$T/param/host_link"
@@ -310,13 +273,12 @@ out=$(sh "$S" try off 2>&1)
 t "a lock held by a live process makes the caller give up, bounded" "busy" "$out"
 rm -rf "$LOCKDIR"
 
-# ---- no kernel support: off is not applied, nothing counted
+# ---- no kernel support: off is not applied
 rm -f "$T/param/host_autoneg"
 setkey off
 newboot 0 2>/dev/null; rm -f "$T/param/host_autoneg"
 sh "$S" boot > /dev/null
 t "no kernel parameter: running on, logged" "^no_kernel on$" "$(st event) $(st running)"
-[ ! -f "$BOOTS" ] && ok "no kernel parameter: nothing counted" || no "no kernel parameter: nothing counted"
 
 echo
 echo "host_autoneg_test: $pass passed, $fail failed"

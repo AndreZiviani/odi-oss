@@ -152,6 +152,10 @@ pon_step_gponpw() {
 # a stuck or missing omcid still lets activation happen rather than hang
 # the boot.
 pon_step_gponact() {
+	if [ -f "$SAFE_FLAG" ]; then
+		crumb "pon step gponact: safe-mode boot, not activated"
+		return 0
+	fi
 	i=0
 	while [ "$i" -lt 10 ]; do
 		grep -q "type=1 " /proc/odi_omci 2>/dev/null && break
@@ -230,8 +234,14 @@ confirm_watchdog() {
 # only for the laser driver this image was validated with, otherwise left
 # off and gponact refused (odi_board.h). ODI_LASER_UNVERIFIED=1 in odi.conf
 # forces it on (docs/SETTINGS.md); /etc/config/optics.off leaves it off.
+# A safe-mode boot (safe-mode.sh) leaves the laser off and does not
+# activate, so a recovery boot cannot disturb the OLT; the kernel refuses
+# gponact with the laser off as well.
+SAFE_FLAG=${SAFE_FLAG:-/var/run/safe-mode}
 pon_step_laser() {
-	if [ -f /etc/config/optics.off ]; then
+	if [ -f "$SAFE_FLAG" ]; then
+		crumb "pon step laser: safe-mode boot, laser left off"
+	elif [ -f /etc/config/optics.off ]; then
 		crumb "pon step laser: optics.off, laser left off"
 	elif grep -q '^ODI_LASER_UNVERIFIED=1$' /etc/config/odi.conf 2>/dev/null; then
 		pon_step "laser unverified"

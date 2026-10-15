@@ -71,6 +71,7 @@
 
 STEP_TIMEOUT_S=${STEP_TIMEOUT_S:-5}
 HOST_AUTONEG_SH=${HOST_AUTONEG_SH:-/etc/scripts/host-autoneg.sh}
+SAFE_MODE_SH=${SAFE_MODE_SH:-/etc/scripts/safe-mode.sh}
 METRICS_TIMEOUT_S=${METRICS_TIMEOUT_S:-10}
 LOG_FILE_MAX=${LOG_FILE_MAX:-262144}
 LOG_TOTAL_MAX=${LOG_TOTAL_MAX:-1048576}
@@ -192,13 +193,15 @@ timeout "$METRICS_TIMEOUT_S" wget -q -O - "$METRICS_URL" > "$b/metrics.txt" 2>&1
 manifest "$?" "$(size_of "$b/metrics.txt")" metrics.txt
 
 # host-link.txt: the host-port auto-negotiation (HOST_AUTONEG): the state
-# host-autoneg.sh keeps (a trial, the boot fallback, the safe-mode record,
-# the short-boot count), then the words that decide the host link: the PCS
+# host-autoneg.sh keeps (a trial, the boot fallback), the safe mode (this
+# boot, the record, the boot count), then the words that decide the host link: the PCS
 # control word (HOST_FIBER_CTRL), the port ability the link runs with, and
 # the forced-ability pair of port 0. All read before on a running stick.
 {
 	echo "# host-autoneg.sh status"
 	timeout "$STEP_TIMEOUT_S" sh "$HOST_AUTONEG_SH" status 2>&1
+	echo "# safe-mode.sh status"
+	timeout "$STEP_TIMEOUT_S" sh "$SAFE_MODE_SH" status 2>&1
 	echo "# HOST_FIBER_CTRL 0x21c00, PORT_ABILITY(0) 0x198, PORT_FORCE_SELECT(0) 0x1b4, PORT_FORCE_ABILITY(0) 0x180"
 	printf '%s\n' "register get 0x21c00 1" "register get 0x198 1" "register get 0x1b4 1" "register get 0x180 1" |
 		timeout "$STEP_TIMEOUT_S" diag 2>&1

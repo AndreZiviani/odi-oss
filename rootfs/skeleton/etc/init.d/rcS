@@ -89,6 +89,14 @@ fi
 dev_hook config
 crumb "config mounted; kernel $(uname -r); $(grep -c "^mtd" /proc/mtd) mtd partitions; $(cat /etc/version 2>/dev/null)"
 
+# ---- the boot counter and the safe mode (docs/SETTINGS.md, "Recovery: the
+# safe mode"), as early as the config partition allows, so a short power-up
+# still counts: every boot adds one, a boot that reaches 60 s of uptime
+# clears it, and after enough short boots in a row this boot becomes the
+# safe one (the PON off, the host port on auto-negotiation, the default
+# password, for this boot only). Logs the uptime of the count. Bounded.
+/etc/scripts/safe-mode.sh count || echo "rcS: safe-mode.sh count failed" >&2
+
 # ---- entropy. Nothing on this board feeds the pool early, so without a
 # seed every daemon starts on a nearly empty one. seedrng credits the seed
 # the previous boot saved and writes a fresh one. This early the pool is
