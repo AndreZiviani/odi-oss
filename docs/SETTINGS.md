@@ -74,7 +74,8 @@ password is read by the driver at every Request_Password, so it needs only
 the verb. Measured on ISP1 with the 6.18 kernel, for the earlier apply that
 restarted omcid: the ONU back at O5 with its six services about 13 s after
 the command. The in-daemon re-registration writes the same kernel verbs and
-has not been timed on a stick yet (below, "Not verified yet").
+was run on a stick and came back to O5 with its six services; its time was
+not measured (below, "Not verified yet").
 The earlier apply started a second omcid beside the one init respawns, and
 each respawn found the first still running and forced the line down and up
 again: 44 forced re-activations in two minutes, the ONU cycling O1 to O3 and
@@ -171,8 +172,8 @@ Why `ELAN_MAC_ADDR` cannot be applied live, and what changed for `GPON_SN`:
   `gponsn` verb after boot used to update only the driver's own copy, not what
   goes upstream. It now rewrites the PLOAM slot that replay armed, while the
   ONU is deactivated (`-EBUSY` in any other state), which is what a
-  re-registration by omcid does. Not run on a stick yet ("Not verified yet");
-  a reboot applies it as before.
+  re-registration by omcid does. A new serial reaching the line has not been
+  run on a stick ("Not verified yet"); a reboot applies it as before.
 
 Details that bite:
 
@@ -386,17 +387,27 @@ both ends being up) and short against the 75 to 80 s a reboot already costs;
 each phase is the time a wrong mode keeps the stick unreachable.
 
 **The safe mode.** Three short power cycles in a row with `HOST_AUTONEG=off`
-make the next boot a safe-mode boot, which clears the key and runs
+(each: plug in, wait about 80 s, pull) make the next boot a safe-mode boot, which clears the key and runs
 auto-negotiation ("Recovery: the safe mode" below). The state of the
 running boot is `/var/run/host-autoneg`, `key=value` lines replaced by a
 rename (`docs/TOOLS.md`, "host-autoneg.sh"); the web UI and the diagnostics
 bundle (`host-link.txt`) read it.
 
-Not testable on every host: an Intel 82599 (`ixgbe`) refuses
-auto-negotiation off on a 1G SFP port (`ethtool -s <if> autoneg off` fails
-with "Invalid argument"), so with such a host only the default side can be
-checked. A host that lets its SFP port run without auto-negotiation is
-needed for the forced side ("Not verified yet").
+Verified on ISP1's stick: the register write (the PCS control word
+0x1140 becomes 0x0140, and the port keeps reporting the link of a forced
+PCS); a host with auto-negotiation on (an Intel 82599 and a router SFP+
+port) links with the stick forced off and carries traffic, as those hosts
+accept a forced partner; a host forced off (`ethtool -s <if> autoneg off
+speed 1000 duplex full` on the router SFP+ port) gets a link but no traffic
+from a stick with auto-negotiation on, and traffic once the stick is forced
+off too, which is the case the setting is for. The trial behaved as
+described above: `try off` with no answer reverted by itself
+(`event=trial_expired`, key unchanged), `try off` and `confirm` over the
+same link stored the key, `try on` and `confirm` removed it, and a boot with
+the key off against a forced host logged `event=forced_link` at about 10 s of
+uptime. What no stick has shown is the boot fallback: both hosts accept a
+forced partner, so the forced side never lacked a link ("Not verified
+yet").
 
 ### Recovery: the safe mode
 
@@ -771,23 +782,25 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
 
 ## Not verified yet
 
-- `HOST_AUTONEG` on a stick: the register write (host-tested against the register model), whether the port reports the link of a forced PCS, the forced link against a host with auto-negotiation off, the trial and the boot watch on hardware. The default (key unset) writes nothing and reads nothing new at boot.
-- The safe mode was trialled on ISP1's stick with three real power cycles and `HOST_AUTONEG=off` (laser off, the ONU in O1, the key cleared, the web UI on `admin:admin`, root's ssh password `admin`, the state on `/api/hostlink`, then acknowledge and a normal boot back on the saved keys); the five-cycle path with the key unset has not been run.
-- The boot fallback has not been seen on hardware: both hosts tried accept a forced partner, so the forced side never lacked a link; and with auto-negotiation on, this stick does not carry traffic to a forced partner (link up, no traffic).
-
-- `nv commit` on a stick: the commit sequence is host-tested against a fake
-  flash, but writing both real env partitions has not been run on hardware
-  yet; nor has `slot-state.sh` read a real environment (it is tested against
-  a stub nv, on the host and under qemu).
-
-- The SIGHUP reload on a stick, both halves: the in-place VLAN rebuild (host
-  tested against the driver-call trace of both ISP sessions, never run against
-  the real switch) and the re-registration (the verbs, their order, the
-  timing, and above all a new `GPON_SN` reaching the line through the
-  rewritten PLOAM slot, which is host tested as a register sequence only). The
-  earlier apply, which restarted omcid, was run end to end once, on ISP1. The
-  signal handler returns to the kernel signal return (`omcid` has no libc), so
-  it is also the first omcid handler that does not exit.
+- The `HOST_AUTONEG` boot fallback on a stick: the write, the trial, its
+  expiry and the forced link against a host forced off were all seen
+  ("Host port auto-negotiation"), but both hosts tried accept a forced
+  partner, so the forced side never lacked a link and the alternation of
+  30 s phases is host-tested only.
+- The safe mode with the key unset: the five-cycle path was exercised by
+  setting the counter and rebooting, and the safe-mode boot happened as
+  designed, but not by five real power cycles. The three-cycle path with
+  `HOST_AUTONEG=off` was run with real power cycles (laser off, the ONU in
+  O1, the key cleared, `admin:admin` on the web UI, `admin` for root over
+  ssh, the state on `/api/hostlink` and the exporter, then acknowledge and a
+  normal reboot back on the saved password and keys).
+- The SIGHUP reload on a stick: the re-registration ran and the ONU came
+  back to O5 with its six services, but the time it takes was not measured,
+  and a new `GPON_SN` reaching the line through the rewritten PLOAM slot has
+  not been run (host tested as a register sequence only). The in-place VLAN
+  rebuild is host tested against the driver-call trace of both ISP sessions
+  and never run against the real switch. The earlier apply, which restarted
+  omcid, was run end to end once, on ISP1.
 - `apply.sh network` moving the primary address on a stick. Adding and
   removing the second address live was checked on ISP1 (`br0:2` came and
   went, the primary address and O5 untouched); the host test drives a stub

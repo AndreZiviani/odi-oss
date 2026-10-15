@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Docs: brought in line with what v1.5.0 does and what was then checked on
+  sticks: README comparison rows for host port auto-negotiation, the safe
+  mode, per-flow counters and committing a trial say what was run on
+  hardware (and that the boot fallback was not); new rows for
+  `OMCI_ACCEPT_REBOOT` and `OMCI_FIXED_ME`; docs/SETTINGS.md "Host port
+  auto-negotiation" and "Not verified yet" rewritten the same way;
+  docs/SWITCH.md no longer calls the PCS control bit untested.
+
 ## v1.5.0 - 2026-10-15
 
 - Pin: metricsd v1.5.0 (odi-sfp-exporter): reads the `/proc/odi_gpon/` files,
