@@ -111,6 +111,29 @@ static void test_default_row_write_not_done(void)
 	      "no delete for a default row whose write never completed");
 }
 
+/* An Assign_Alloc-ID for the ONU-ID itself (some OLTs send one) names the
+ * default row: no CAM write, no pool row taken, not listed, and the next
+ * Alloc-ID still gets row 0, the row its T-CONT index uses.
+ */
+static void test_default_alloc_id_dedups(void)
+{
+	const struct odi_gpon_fsm_ops *ops = odi_gpon_hw_ops();
+
+	setup();
+	ops->set_onu_id(NULL, ONU_ID);
+	odi_mock.log_n = 0;
+	CHECK(odi_gpon_hw_alloc_id_assign(ONU_ID) == (int)ODI_GPON_HW_ALLOC_ROW_DEFAULT,
+	      "the ONU-ID as an Alloc-ID is the default row");
+	CHECK(requests(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, 1U, -1) == 0U, "with no CAM write");
+	CHECK(alloc_ids() == 0U, "and it is not listed as a held Alloc-ID");
+	CHECK(odi_gpon_hw_alloc_id_assign(0x123) == 0, "the next Alloc-ID gets row 0");
+	CHECK(odi_gpon_hw_alloc_id_release(ONU_ID) < 0, "a deallocation of the default one is ignored");
+	CHECK(requests(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, 3U, -1) == 0U, "no delete of row 16");
+	ops->set_onu_id(NULL, ODI_GPON_ONU_ID_BROADCAST);
+	odi_mock.log_n = 0;
+	CHECK(odi_gpon_hw_alloc_id_assign(ONU_ID) == 0, "after the release the value is forgotten");
+}
+
 /* A release whose deletes do not complete: the first timeout ends the
  * deletes, the rows stay held, and the next release deletes them.
  */
@@ -221,6 +244,7 @@ int main(void)
 {
 	test_alloc_write_not_done();
 	test_default_row_write_not_done();
+	test_default_alloc_id_dedups();
 	test_release_delete_not_done();
 	test_dealloc_not_done();
 	test_gem_configure_not_done();
