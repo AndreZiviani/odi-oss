@@ -18,8 +18,7 @@ listed here.
   collects it as `pon/odi_gpon-flows.txt`. metricsd needs the odi-sfp-exporter
   release that exports it (`gpon_gem_*`); an older one ignores the file. The
   stock image has none of this. `diag gpon g f` is now ambiguous between
-  `flows` and `flow-counters`; `gpon get flows` is unchanged. Stacked on the
-  `/proc/odi_gpon` split, so it has to be rebased onto main after that merges.
+  `flows` and `flow-counters`; `gpon get flows` is unchanged.
 
 - BREAKING: `/proc/odi_gpon` is now a directory of three files, one per
   topic, like `/proc/odi_wdt/`; there is no `/proc/odi_gpon` file any more
