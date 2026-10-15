@@ -355,12 +355,23 @@ static void reboot_on_alarm(int sig)
 		sys_kill(reboot_pid, 15);
 }
 
+/* OMCI_ACCEPT_REBOOT: 1 answers success and reboots, 2 answers success and
+ * does not reboot, anything else, or absent, refuses. */
+#define REBOOT_REFUSE 0
+#define REBOOT_ACCEPT 1
+#define REBOOT_ACK    2
+
 static int accept_reboot(void)
 {
 	char v[4];
 
-	return cfg_odi_get(CFG_ODI_PATH, "OMCI_ACCEPT_REBOOT", v, sizeof v) == 1 &&
-	       v[0] == '1';
+	if (cfg_odi_get(CFG_ODI_PATH, "OMCI_ACCEPT_REBOOT", v, sizeof v) != 1)
+		return REBOOT_REFUSE;
+	if (v[0] == '1')
+		return REBOOT_ACCEPT;
+	if (v[0] == '2')
+		return REBOOT_ACK;
+	return REBOOT_REFUSE;
 }
 
 /* Reboot (message type 25) of the ONU-G: the only entity G.988 defines it
@@ -375,22 +386,29 @@ static int accept_reboot(void)
  *
  * The request carries a one-byte reboot condition: 0 unconditional, 1 and 2
  * only if no voice call or no emergency call is up. The stick has no voice
- * service, so no call can be up and every condition is unconditional. */
+ * service, so no call can be up and every condition is unconditional.
+ *
+ * Mode 2 is for an OLT that insists on a successful answer: the Reboot is
+ * answered success and nothing else happens. */
 static int handle_reboot(int fd, uint32_t tid, const uint8_t *f, uint16_t cls,
 			 uint16_t inst)
 {
 	uint8_t body[1];
-	int ok;
+	int mode;
 
 	if (cls != OMCI_ME_ONU_G || inst != 0)
 		return 0;
-	ok = accept_reboot();
-	ev_olt_command(OMCI_MT_REBOOT, cls, inst, ok ? "accepted" : "refused");
+	mode = accept_reboot();
+	ev_olt_command(OMCI_MT_REBOOT, cls, inst,
+		       mode == REBOOT_ACCEPT ? "accepted" :
+		       mode == REBOOT_ACK ? "acknowledged" : "refused");
 	if (f[2] & OMCI_AR) {
-		body[0] = ok ? OMCI_OK : OMCI_ERR_NOT_SUPPORTED;
+		body[0] = mode != REBOOT_REFUSE ? OMCI_OK : OMCI_ERR_NOT_SUPPORTED;
 		send_resp(fd, tid, f, body, 1);
 	}
-	if (ok) {
+	if (mode == REBOOT_ACK) {
+		out("reboot from the OLT acknowledged, not rebooting (OMCI_ACCEPT_REBOOT=2)\n");
+	} else if (mode == REBOOT_ACCEPT) {
 		out("reboot from the OLT accepted\n");
 		out_flush();
 		sys_signal(14, reboot_on_alarm);

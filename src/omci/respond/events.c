@@ -415,7 +415,8 @@ void ev_mib_upload_next(uint16_t seq)
 }
 
 /* A reboot the OLT asked for, and what omcid did with it: "accepted" (the
- * stick reboots), "refused" (OMCI_ACCEPT_REBOOT is off) or "not_supported"
+ * stick reboots), "acknowledged" (answered success, no reboot), "refused"
+ * (OMCI_ACCEPT_REBOOT is off) or "not_supported"
  * (any class but ONU-G). Each request is worth a line: an OLT that follows a
  * refused reboot with a deactivation is an outage the ISP started. */
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst, const char *result)

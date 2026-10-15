@@ -184,8 +184,8 @@ Start software download, Activate and Commit from the OLT it reads
 download and discards the image, reject refuses it; it never flashes and never
 reboots (docs/SETTINGS.md, "Software download from the OLT"). On a Reboot
 of the ONU-G it reads `OMCI_ACCEPT_REBOOT` the same way: off (the default) is
-answered "command not supported", on is answered success and followed by a
-SIGTERM to init a second later. Each key is
+answered "command not supported", `1` is answered success and followed by a
+SIGTERM to init a second later, `2` is answered success and nothing follows. Each key is
 looked up in both store files, the one xmlconfig assigns it to first. Its
 start-up line in the log says what it found (`store: loid ..., manual vlan
 ..., identity report ...`). A change takes effect with `apply.sh omci`, which
@@ -1014,7 +1014,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=provision_begin op=set class=256 inst=0 after_mib_reset=1` | info | the first Create, Set or Delete of a burst; `after_mib_reset=1` is a full re-provisioning |
 | `omcid: event=provision_end creates=82 sets=102 deletes=0 duration_s=0.827 rows=161 services=6 after_mib_reset=1` | info | 10 s after the burst's last write: what it added up to (Gets and Tests do not count) |
 | `omcid: event=alloc_ids count=5 ids=282,794,1050,1306,538` | info | the Alloc-IDs the OLT assigned by PLOAM (`/proc/odi_gpon/status`), when omcid first reads them and whenever they change: ranging, a deallocation, a re-ranging (`ids=none`); the T-CONTs the OLT does not set are bound to them |
-| `omcid: event=olt_reboot class=256 inst=0 result=refused` | notice | the OLT asked for a reboot: `result=refused` (`OMCI_ACCEPT_REBOOT` off, answered "command not supported"), `accepted` (answered success, the stick reboots a second later) or, for any class but ONU-G, `not_supported` (docs/SETTINGS.md) |
+| `omcid: event=olt_reboot class=256 inst=0 result=refused` | notice | the OLT asked for a reboot: `result=refused` (`OMCI_ACCEPT_REBOOT` off, answered "command not supported"), `accepted` (answered success, the stick reboots a second later), `acknowledged` (`OMCI_ACCEPT_REBOOT=2`, answered success, no reboot) or, for any class but ONU-G, `not_supported` (docs/SETTINGS.md) |
 | `omcid: event=sw_image op=download_start inst=1 size=2621440 window=32 result=ok` | notice | a software download step from the OLT: `op=download_start` (the image size and sections per window), `download_end` (`sections=N`, the sections accepted, and `crc=ok` or `bad`), `activate`, `commit`. `result` is `ok`; `not_supported` with `OLT_SW_DOWNLOAD=reject`; `refused_active` (a download to the image that is active or committed), `refused_invalid` (activate or commit of an image that is not valid), `crc_error`, `size_mismatch`, `short` or `no_download` otherwise. Accepted or not, the image is discarded and nothing is flashed (docs/SETTINGS.md, "Software download from the OLT") |
 | `omcid: event=unknown_me class=351 op=create mt=4` | notice | the first request this boot for a managed entity class omcid has no model for, per class and operation (`op` is `create`, `set`, `get`, `delete`, `get_next` or `test`; `mt` the message type); answered "unknown entity" unless `OMCI_UNKNOWN_ME_OK=1` (docs/SETTINGS.md) |
 | `omcid: event=unknown_msg type=17 class=256` | notice | the first frame this boot of a message type omcid does not handle, per type, with the class of that first frame; answered "not supported" |
