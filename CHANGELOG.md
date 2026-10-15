@@ -6,7 +6,7 @@ listed here.
 ## Unreleased
 
 - GPON: with an OLT that also sends an Assign_Alloc-ID for the ONU-ID's own
-  default Alloc-ID (Eltex does), upstream user traffic never left the stick.
+  default Alloc-ID (some do), upstream user traffic never left the stick.
   That Alloc-ID was not recognised as the default row already in the CAM, so
   it took the first pool row and the data T-CONT's Alloc-ID landed one row
   later, off the row its queue is tied to; the OLT's grants found nothing
