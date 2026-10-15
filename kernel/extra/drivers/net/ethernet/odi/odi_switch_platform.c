@@ -249,6 +249,18 @@ static void odi_switch_platform_host_pause(void)
 	odi_sw_host_pause_apply();
 }
 
+/* The host-port auto-negotiation, only when odi_switch.host_autoneg was
+ * turned off on the kernel command line: the default writes and reads
+ * nothing, so a stick that never sets it runs the stock 0x1140. Userland
+ * normally sets it through sysfs earlier in the boot (host-autoneg.sh),
+ * and then this finds the bit already clear and writes nothing.
+ */
+static void odi_switch_platform_host_autoneg(void)
+{
+	if (!odi_sw_host_autoneg)
+		odi_sw_host_autoneg_apply();
+}
+
 static const struct {
 	void (*fn)(void);
 	const char *name;
@@ -261,6 +273,7 @@ static const struct {
 	{ odi_switch_platform_cf_sweep, "cf sweep" },
 	{ odi_switch_platform_reserved_vid, "reserved vid" },
 	{ odi_switch_platform_host_pause, "host pause" },
+	{ odi_switch_platform_host_autoneg, "host autoneg" },
 };
 
 /* The log names the step before it touches hardware, so a log cut short

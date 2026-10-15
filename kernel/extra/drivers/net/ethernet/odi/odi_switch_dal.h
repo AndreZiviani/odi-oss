@@ -82,6 +82,27 @@ extern bool odi_sw_host_pause;
  */
 void odi_sw_host_pause_apply(void);
 
+/* Whether the host port runs the 1000BASE-X auto-negotiation (clause 37)
+ * with the host: true (the default, what the stock image and every host
+ * seen so far run) or false, the PCS forced to 1000BASE-X full duplex for a
+ * host whose port has auto-negotiation off. The kernel parameter
+ * odi_switch.host_autoneg (odi_switch.c) sets it; userland drives it from
+ * HOST_AUTONEG (docs/SWITCH.md#host-port-auto-negotiation).
+ */
+extern bool odi_sw_host_autoneg;
+
+/* Applies odi_sw_host_autoneg to HOST_FIBER_CTRL: one read-modify-write of
+ * the AUTONEG bit (with AUTONEG_RESTART when it turns on), none when the
+ * bit already matches. Logs the word before and after. The caller holds
+ * odi_switch_lock.
+ */
+void odi_sw_host_autoneg_apply(void);
+
+/* LINK_UP of PORT_ABILITY(0): 1 while the host port has a link. A plain
+ * read, safe without the lock.
+ */
+uint32_t odi_sw_host_link_up(void);
+
 /* cmd 64: FLOOD_UNKN_UCAST_PORTS, one bit per port. */
 uint32_t odi_sw_l2_flood_mask_get(void);
 void odi_sw_l2_flood_mask_set(uint32_t mask);

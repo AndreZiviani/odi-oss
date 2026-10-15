@@ -1,0 +1,60 @@
+# What the odi-oss image does with each config key. Hand-written, per image,
+# and the reason the UI shows 21 keys instead of 184: a key with no row here is
+# read by nothing on this image. It stays in the store, and in backups and
+# restores, because the config partition is shared with the stock firmware in
+# the other slot, which does read it -- but it is not offered for editing.
+#
+# apply    what applying costs, shown beside the key:
+#            live      takes effect at once, no interruption (a VLAN key: omcid
+#                      rebuilds the connections in place, the ONU stays in O5)
+#            restart   a daemon restarts; the fibre service stays up
+#            internet  applied without a reboot, but the fibre service drops
+#                      while it is (omcid deactivates the ONU, clears its MIB
+#                      and the ONU ranges and is provisioned again)
+#            reboot    only at the next boot, which also drops the service
+# action   what the page runs to apply it: network (apply.sh network), omci
+#          (apply.sh omci), syslog, ntp, reboot, or none (the daemon reads the key
+#          each time it uses it, nothing to run). confd reports the actions a
+#          save needs. omci sends SIGHUP to omcid, which rereads the store: for
+#          a live key it rebuilds in place, for an internet key it re-registers
+#          the ONU.
+# pair     shown read-only and written together with the named key
+# reader   what on the image reads it
+# note     why it costs what it does
+# unset    the value the image uses while the key is absent, one of its
+#          options; the page shows that option selected. Required for every
+#          key with an option list: the image always does something, so the
+#          page never offers or shows "not set" for one.
+#
+# Source of truth for the classes: odi-oss docs/SETTINGS.md. scripts/check-schema.py
+# checks every name against keys.tsv and every class and action against the lists
+# above.
+name	apply	action	pair	reader	note	unset
+LAN_IP_ADDR	live	network		network.sh	/etc/config/lan-ip, when it exists, wins over this key.	
+LAN_SUBNET	live	network		network.sh	Applied at once, with the address.	
+LAN_ENABLE_IP2	live	network		network.sh	1 adds the second address beside the first, 0 removes it. Applied at once; the first address is not touched.	0
+LAN_IP_ADDR2	live	network		network.sh	A fixed rescue address, as br0:2. Applied at once.	
+LAN_SUBNET2	live	network		network.sh	Applied at once, with the second address.	
+VLAN_CFG_TYPE	live	omci		omcid, on SIGHUP	omcid tags only with type 1 and manual mode 1, as the stock firmware does. Applying makes omcid rebuild the bridge connections in place from the MIB it holds: the ONU stays in O5 and the fibre service is not dropped.	0
+VLAN_MANU_MODE	live	omci		omcid, on SIGHUP	See VLAN config mode. Switching between stick tags and router tags (transparent) is rebuilt in place, without re-ranging the ONU.	0
+VLAN_MANU_TAG_VID	live	omci		omcid, on SIGHUP	Applying rebuilds the connections in place with the new tag; the ONU is not re-ranged.	
+VLAN_MANU_TAG_PRI	live	omci		omcid, on SIGHUP	Applied with the VLAN ID.	
+GPON_PLOAM_PASSWD	internet	omci		rcS gponpw, omcid on SIGHUP	Sent to the kernel before the ONU is activated again; applying deactivates the ONU and ranges it with the new one.	
+LOID	internet	omci		omcid, on SIGHUP	Answered to CTC-profile OLTs in the LOID authentication entity. Written with LOID_OLD, because the OLD value wins whenever the two differ.	
+LOID_PASSWD	internet	omci		omcid, on SIGHUP	Written with LOID_PASSWD_OLD, for the same reason.	
+LOID_OLD	internet	omci	LOID	omcid, on SIGHUP	Follows LOID.	
+LOID_PASSWD_OLD	internet	omci	LOID_PASSWD	omcid, on SIGHUP	Follows LOID_PASSWD.	
+OMCI_SW_VER1	internet	omci		omcid, on SIGHUP, with omci-identity.on	Reported only while the ONU identity switch is on; otherwise 0.0.0. The stock firmware may rewrite this key when it boots.	
+OMCI_SW_VER2	internet	omci		omcid, on SIGHUP, with omci-identity.on	Reported only while the ONU identity switch is on; otherwise 0.0.0. The stock firmware may rewrite this key when it boots.	
+GPON_ONU_MODEL	internet	omci		omcid, on SIGHUP, with omci-identity.on	Reported only while the ONU identity switch is on; otherwise the device id.	
+OMCC_VER	internet	omci		omcid, on SIGHUP, with omci-identity.on	Reported only while the ONU identity switch is on; otherwise 128 (0x80).	
+OMCI_VENDOR_PRODUCT_CODE	internet	omci		omcid, on SIGHUP, with omci-identity.on	Reported only while the ONU identity switch is on; otherwise 15, the captured default.	
+ONU_HW_VERSION	internet	omci		omcid, on SIGHUP, with omci-identity.on	Reported only while the ONU identity switch is on; otherwise the device id. An odi-only key, kept in odi.conf: empty removes it. Applying deactivates the ONU so the OLT reads the new version.	
+OLT_SW_DOWNLOAD	live	none		omcid, at each software download step	Read each time the OLT starts, activates or commits a software download, so a change is in effect at once and nothing is applied. An odi-only key, kept in odi.conf.	accept
+OMCI_ACCEPT_REBOOT	live	none		omcid, at each Reboot from the OLT	Read each time the OLT sends a Reboot, so a change is in effect at once and nothing is applied. An odi-only key, kept in odi.conf.	0
+OMCI_UNKNOWN_ME_OK	internet	omci		omcid, on SIGHUP	An odi-only key, kept in odi.conf. Changes what omcid answers the OLT for classes it does not model, so applying re-registers the ONU and the OLT provisions it again with the new answers.	0
+OMCI_FIXED_ME	internet	omci		omcid, at start and on SIGHUP	An odi-only key, kept in odi.conf: empty removes it. Applying re-registers the ONU so the OLT reads the entities again.	
+ELAN_MAC_ADDR	reboot	reboot		network.sh	Needs a reboot: the MAC is set on eth0 and its host port with the links down, before br0 exists, and doing that live would cut every way in mid-change.	
+GPON_SN	internet	omci		rcS gponsn, omcid on SIGHUP	Applying deactivates the ONU, writes the new serial into the PON MAC (the driver accepts it only while the ONU is deactivated) and ranges it again; the OLT sees a new ONU. A reboot applies it too.	
+SYSLOG_SERVER	restart	syslog		svc-syslogd.sh, apply.sh	Applying restarts syslogd (init respawns it with the new address); the fibre service is not touched.	
+NTP_SERVER	restart	ntp		svc-ntpd.sh, apply.sh	Applying restarts ntpd (init respawns it with the new server); the fibre service is not touched.	
