@@ -506,12 +506,16 @@ struct onu_report {
 extern struct onu_identity ident;
 extern struct onu_vlan_cfg vlanCfg;
 extern struct onu_report report;
-/* OMCI_FIXED_ME (odi.conf): classes omcid has no model for, each answered
- * to a Get with fixed bytes. n 0 is off. */
+/* OMCI_FIXED_ME (odi.conf): classes omcid has no model for, answered with
+ * fixed bytes. attr 0 is the any-instance form (CLASS:HEX); otherwise the
+ * entry is attribute attr of the entity at inst. n 0 is off. */
 #define FIXED_ME_MAX     25
-#define FIXED_ME_ENTRIES 8
+#define FIXED_ME_ENTRIES 16
+#define FIXED_ME_UPLOAD  32     /* contents of one upload record: class, instance, mask, values */
 struct fixed_me {
 	uint16_t cls;
+	uint16_t inst;
+	uint8_t attr;
 	uint8_t len;
 	uint8_t data[FIXED_ME_MAX];
 };
@@ -522,6 +526,10 @@ struct fixed_me_set {
 extern struct fixed_me_set fixed_me;
 void cfg_load_fixed_me(void);
 const struct fixed_me *fixed_me_find(uint16_t cls);
+int fixed_me_per_inst(uint16_t cls);
+int fixed_me_has_inst(uint16_t cls, uint16_t inst);
+const struct fixed_me *fixed_me_attr(uint16_t cls, uint16_t inst, unsigned attr);
+int fixed_me_upload(int want, uint8_t *body, uint16_t *len);
 
 /* ------------------------------------------------------ config reload
  *

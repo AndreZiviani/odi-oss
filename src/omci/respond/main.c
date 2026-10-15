@@ -266,7 +266,7 @@ int main(int argc, char **argv)
 		: "answered unknown entity");
 	cfg_load_fixed_me();
 	if (fixed_me.n)
-		out_fmt("fixed entities: %d class(es) answered from OMCI_FIXED_ME\n",
+		out_fmt("fixed entities: %d entr(ies) answered from OMCI_FIXED_ME\n",
 			(long)fixed_me.n);
 	reload_init();
 

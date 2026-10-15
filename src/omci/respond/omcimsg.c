@@ -178,6 +178,15 @@ static void handle_upload_next(int fd, uint32_t tid, const uint8_t *f)
 		}
 	}
 	if ((unsigned)seq >= omci_autonomous_count) {
+		/* After the held rows: the OMCI_FIXED_ME entities. */
+		int idx = seq - (int)omci_autonomous_count - mib_count();
+		uint16_t len = 0;
+
+		if (idx >= 0 && idx < fixed_me_upload(-1, 0, 0)) {
+			fixed_me_upload(idx, body, &len);
+			send_resp(fd, tid, f, body, len);
+			return;
+		}
 		body[0] = OMCI_ERR_BAD_PARAM;
 		send_resp(fd, tid, f, body, 1);
 		out_fmt("-> sequence %d is past the end\n", (long)seq);
@@ -550,12 +559,15 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * built for itself, and that is how the OLT learns what
 		 * hardware it has. Reporting zero left the OLT with nothing to
 		 * work with, and it simply started the cycle again. */
-		nl_put16(body, (uint16_t)(omci_autonomous_count + mib_count()));
+		int total = (int)omci_autonomous_count + mib_count() +
+			    fixed_me_upload(-1, 0, 0);
+
+		nl_put16(body, (uint16_t)total);
 		send_resp(fd, tid, f, body, 2);
-		ev_mib_upload((uint16_t)(omci_autonomous_count + mib_count()));
-		out_fmt("-> %d managed entities to upload (%d autonomous, %d held)\n",
-			(long)(omci_autonomous_count + mib_count()),
-			(long)omci_autonomous_count, (long)mib_count());
+		ev_mib_upload((uint16_t)total);
+		out_fmt("-> %d managed entities to upload (%d autonomous, %d held, %d fixed)\n",
+			(long)total, (long)omci_autonomous_count,
+			(long)mib_count(), (long)fixed_me_upload(-1, 0, 0));
 		return;
 	}
 	if (mt == OMCI_MT_MIB_UPLOAD_NEXT) {
@@ -628,6 +640,42 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	/* A class OMCI_FIXED_ME names, when omcid has no model of its own for
 	 * it: the configured bytes under the mask the OLT asked for. The bytes
 	 * are not logged; they are the owner's (cfgstore.c). */
+	if ((mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA) && !c &&
+	    fixed_me_per_inst(cls)) {
+		/* A per-instance entity: the attributes asked for that it has,
+		 * in mask order, under the mask actually answered, as for a
+		 * modelled entity above. Another instance of the class does
+		 * not exist. */
+		uint16_t mask = nl_get16(f + 8), got = 0, n = 3;
+
+		if (!fixed_me_has_inst(cls, inst)) {
+			body[0] = OMCI_ERR_UNKNOWN_INST;
+			send_resp(fd, tid, f, body, 1);
+			out("-> unknown instance (OMCI_FIXED_ME)\n");
+			return;
+		}
+		body[0] = OMCI_OK;
+		for (unsigned k = 1; k <= 16; k++) {
+			const struct fixed_me *x;
+
+			if (!(mask & (1u << (16 - k))))
+				continue;
+			x = fixed_me_attr(cls, inst, k);
+			if (!x || n + x->len > (uint16_t)sizeof body)
+				continue;
+			for (int i = 0; i < x->len; i++)
+				body[n + i] = x->data[i];
+			got |= (uint16_t)(1u << (16 - k));
+			n = (uint16_t)(n + x->len);
+		}
+		nl_put16(body + 1, got);
+		send_resp(fd, tid, f, body, n);
+		out_fmt("-> ok, mask %04x", (long)mask);
+		if (got != mask)
+			out_fmt(" (answered %04x)", (long)got);
+		out_fmt(", %d bytes (OMCI_FIXED_ME)\n", (long)(n - 3));
+		return;
+	}
 	if ((mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA) && !c) {
 		const struct fixed_me *fx = fixed_me_find(cls);
 

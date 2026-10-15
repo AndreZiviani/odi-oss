@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- `OMCI_FIXED_ME` (odi.conf): a second entry form, `CLASS:INSTANCE:ATTR:HEX`,
+  makes a vendor-specific entity that exists only at the configured
+  instance. Entries with the same class and instance are one entity with
+  several attributes. omcid lists it in the MIB upload (the attributes in
+  order, over several upload responses when they do not fit in one), answers
+  a Get or Get current data of it with the attributes asked for that it has
+  (the answered mask drops the others, as for its own entities), and answers
+  a Get of any other instance of the class with result 5, unknown managed
+  entity instance. The `CLASS:HEX` form is unchanged (any instance, not in
+  the upload); a class in both forms, or the same class, instance and
+  attribute twice, turns the key off. The limit is now 16 entries. For an
+  OLT that expects a native ONU's vendor-specific entities. The bytes stay
+  out of the logs and the diagnostics bundle redacts the key, as before.
+
 - GPON: with an OLT that also sends an Assign_Alloc-ID for the ONU-ID's own
   default Alloc-ID (some do), upstream user traffic never left the stick.
   That Alloc-ID was not recognised as the default row already in the CAM, so
