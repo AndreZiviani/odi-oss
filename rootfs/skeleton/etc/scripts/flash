@@ -42,6 +42,11 @@
 # a tmpfs: an mv from there is a copy, which removes the target first.
 set -u
 
+# confd starts its children with no environment; export a PATH so that
+# commands started through busybox timeout find /sbin and /usr/sbin too.
+PATH=${PATH:+$PATH:}/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
 CS=${CS:-/var/config/lastgood.xml}
 HS=${HS:-/var/config/lastgood_hs.xml}
 DEFAULTS=${DEFAULTS:-/etc/config_default.xml}

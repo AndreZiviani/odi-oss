@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Diagnostics bundle: `syslog.txt` was empty in a bundle taken from the web
+  UI ("timeout: can't execute 'logread'"). confd starts its scripts with no
+  environment, so programs started through `timeout` looked only in `/bin`
+  and `/usr/bin`. `diag-bundle.sh`, `apply.sh`, `flash`, `host-autoneg.sh`
+  and `safe-mode.sh` now export a PATH that includes `/sbin` and
+  `/usr/sbin`, as `slot-state.sh` already did.
+
 ## v1.5.0 - 2026-10-15
 
 - Pin: metricsd v1.5.0 (odi-sfp-exporter): reads the `/proc/odi_gpon/` files,
