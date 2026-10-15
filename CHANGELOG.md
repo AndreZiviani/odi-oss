@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.4.2 - 2026-10-15
+
 - GPON: with an OLT that also sends an Assign_Alloc-ID for the ONU-ID's own
   default Alloc-ID (some do), upstream user traffic never left the stick.
   That Alloc-ID was not recognised as the default row already in the CAM, so
