@@ -107,7 +107,7 @@ the laser driver chip reads back as the Semtech GN25L95 (id 0x6a) it is
 tested with. On a stick with another laser driver it stays off and GPON
 activation is refused, so the ONU never leaves O1 and the trial looks like a
 dead line: `dmesg | grep 'odi_board: laser'` says which, and
-`grep '^laser' /proc/odi_gpon` shows `laser on 0 ldd_id <id> unverified 0`.
+`grep '^laser' /proc/odi_gpon/status` shows `laser on 0 ldd_id <id> unverified 0`.
 `flash set ODI_LASER_UNVERIFIED 1` and a reboot override it (`docs/SETTINGS.md`);
 do that only on a stick you know. Check this before you commit.
 
