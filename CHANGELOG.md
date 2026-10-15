@@ -27,10 +27,13 @@ listed here.
   be reached or logged into (a host port mode the router does not speak, a
   forgotten web UI password, lost ssh keys). Every boot counts itself on the
   config partition right after it is mounted (`event=boot_count`, with the
-  uptime) and a boot that reaches 60 s clears the count; after five short
-  boots in a row (three with `HOST_AUTONEG=off`) the next boot is a
-  safe-mode boot, for that boot only: the PON off (laser left off, no
-  activation), the host port on auto-negotiation, the web UI on
+  uptime) and a boot that reaches 60 s of uptime clears the count; after five
+  short boots in a row (three with `HOST_AUTONEG=off`) the next boot is a
+  safe-mode boot. To enter it: plug the stick in, wait about 80 s, pull it,
+  wait a few seconds; repeat; then leave it in. A cold power-on spends about
+  54 s before the kernel starts (measured on ISP1's stick; it can vary by
+  board), so the window is roughly 60 to 110 s after power-on. For that boot
+  only: the PON off (laser left off, no activation), the host port on auto-negotiation, the web UI on
   `admin:admin` and root on `admin` over ssh, passwords offered even on a
   keys-only image. Nothing in the saved configuration changes but the
   removal of `HOST_AUTONEG` when that was off; the credentials are reset in

@@ -17,10 +17,12 @@
 # early as the partition allows, and a boot that reaches BOOT_OK_S of uptime
 # clears it. When the boots before this one were all short -- SAFE_BOOTS_AN_OFF
 # (3) of them with HOST_AUTONEG=off, SAFE_BOOTS (5) otherwise -- this boot is
-# a safe-mode boot. So: plug the stick in, count to 30, unplug; repeat; the
-# fourth (or sixth) boot is the safe one. Each count logs its uptime, which
-# is what bounds the window on hardware: power has to stay on past the
-# count, and go off before 60 s.
+# a safe-mode boot. So: plug the stick in, wait about 80 s, pull it; repeat;
+# then leave it in: the fourth (or sixth) boot is the safe one. Uptime
+# starts at the kernel, about 54 s after a cold power-on on the sticks
+# measured, so a power-up counts between about 60 and 110 s after
+# power-on. Each count logs its uptime, which with the board boot time
+# gives that window.
 #
 # The safe mode lasts this one boot, and writes nothing to the config
 # partition but its record (and, when HOST_AUTONEG=off made it fire, the

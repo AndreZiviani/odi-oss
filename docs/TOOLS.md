@@ -807,7 +807,10 @@ A boot with the key unset logs nothing and writes nothing.
     /etc/scripts/safe-mode.sh count      rcS only, right after the config partition is mounted
 
 `count` adds one to `/etc/config/boot-count` and spawns `boot-ok`, which
-removes it once the uptime reaches 60 s. A boot that finds five short boots
+removes it once the uptime reaches 60 s. Uptime starts with the kernel,
+about 54 s after a cold power-on on the sticks measured (the count lands at
+about 5 s of uptime), so a power-up counts as short when it is cut roughly
+60 to 110 s after power-on: "plug in, wait about 80 s, pull" (docs/SETTINGS.md). A boot that finds five short boots
 before it (three with `HOST_AUTONEG=off`) is a safe-mode boot: it writes
 `/var/run/safe-mode` and the record `/etc/config/safe-mode`, removes
 `HOST_AUTONEG` when that was off, and bind-mounts a RAM copy of

@@ -385,7 +385,7 @@ in `/var/run`, and the next boot that brings the forced link up has none.
 both ends being up) and short against the 75 to 80 s a reboot already costs;
 each phase is the time a wrong mode keeps the stick unreachable.
 
-**The safe mode.** Three short power-ups in a row with `HOST_AUTONEG=off`
+**The safe mode.** Three short power cycles in a row with `HOST_AUTONEG=off`
 make the next boot a safe-mode boot, which clears the key and runs
 auto-negotiation ("Recovery: the safe mode" below). The state of the
 running boot is `/var/run/host-autoneg`, `key=value` lines replaced by a
@@ -404,19 +404,26 @@ A way back into a stick that cannot be reached or logged into -- a host
 port mode the router does not speak, a forgotten web UI password, lost ssh
 keys -- with nothing but its power:
 
-**Plug the stick in, count to 30, unplug it. Do that five times in a row
-(three times when `HOST_AUTONEG` is off). Then plug it in and leave it:
-that boot is the safe one.**
+**Plug the stick in, wait about 80 seconds, pull it, wait a few seconds.
+Do that five times in a row (three times when `HOST_AUTONEG` is off). Then
+plug it in and leave it in: that boot is the safe-mode boot. Do not pull it
+again.**
 
-Every boot adds one to a counter on the config partition right after the
-partition is mounted, before the network comes up, and logs the uptime of
-that moment (`event=boot_count ... uptime=`); a boot that reaches 60 s of
-uptime clears it. A boot that finds five short boots before it (three with
-`HOST_AUTONEG=off`) is a safe-mode boot. So each power-up has to last past
-the count (seconds after power-on; the logged uptime says how long on a
-given stick) and end before 60 s. A watchdog reset or a crash that reboots
-the stick early counts as a short boot too: a stick that cannot stay up a
-minute ends in the safe mode by itself, which is the point.
+The window is roughly 60 to 110 seconds after power-on, and 80 s sits in
+the middle of it. Every boot adds one to a counter on the config partition
+right after the partition is mounted, before the network comes up, and
+logs the uptime of that moment (`event=boot_count ... uptime=`); a boot
+that reaches 60 s of uptime clears it. A boot that finds five short boots
+before it (three with `HOST_AUTONEG=off`) is a safe-mode boot. Uptime
+starts when the kernel does, not at power-on: measured on ISP1's stick, a
+cold power-on spends about 54 s in U-Boot and loading the image, the count
+lands at about 5 s of uptime (about 59 s after power-on) and the clear at
+60 s of uptime (about 114 s). So a power-up counts only if it lasts past
+about 60 s and ends before about 110 s. The time before the kernel can
+vary by board and image; the logged uptime of the count, plus that board's
+own boot time, gives its window. A watchdog reset or a crash that reboots
+the stick before 60 s of uptime counts as a short boot too: a stick that
+cannot stay up ends in the safe mode by itself, which is the point.
 
 A safe-mode boot lasts that one boot. It:
 
@@ -765,7 +772,8 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
 ## Not verified yet
 
 - `HOST_AUTONEG` on a stick: the register write (host-tested against the register model), whether the port reports the link of a forced PCS, the forced link against a host with auto-negotiation off, the trial and the boot watch on hardware. The default (key unset) writes nothing and reads nothing new at boot.
-- The safe mode on a stick: the uptime of the count (which bounds the power-up window), the PON left off, the default web UI and root passwords and dropbear offering passwords on a keys-only image, and the next boot back on the saved ones.
+- The safe mode was trialled on ISP1's stick with three real power cycles and `HOST_AUTONEG=off` (laser off, the ONU in O1, the key cleared, the web UI on `admin:admin`, root's ssh password `admin`, the state on `/api/hostlink`, then acknowledge and a normal boot back on the saved keys); the five-cycle path with the key unset has not been run.
+- The boot fallback has not been seen on hardware: both hosts tried accept a forced partner, so the forced side never lacked a link; and with auto-negotiation on, this stick does not carry traffic to a forced partner (link up, no traffic).
 
 - `nv commit` on a stick: the commit sequence is host-tested against a fake
   flash, but writing both real env partitions has not been run on hardware
