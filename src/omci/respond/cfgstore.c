@@ -778,36 +778,41 @@ void cfg_load_unknown_me(void)
 
 /* ------------------------------------------------ OMCI_FIXED_ME
  *
- * Classes omcid has no model for, each answered to a Get (and a Get current
- * data) with bytes the owner chooses: an OLT that reads vendor-specific
- * entities of its own ONUs gets the values it expects, which the owner
- * copies from a native ONU. The key holds up to FIXED_ME_ENTRIES entries
- * separated by spaces or commas, each CLASS:HEX -- the class in decimal
- * (1..65535), the attribute bytes in hex (an optional 0x, 1 to 25 bytes,
- * what fits a baseline Get response) in the order of the attributes the OLT
- * asks for:
+ * Classes omcid has no model for, answered with bytes the owner chooses: an
+ * OLT that reads vendor-specific entities of its own ONUs gets the values it
+ * expects, which the owner copies from a native ONU. The key holds up to
+ * FIXED_ME_ENTRIES entries separated by spaces or commas, in two forms.
  *
- *     OMCI_FIXED_ME=200:0x0011aa,201:01020304
+ * CLASS:HEX answers a Get (and a Get current data) of ANY instance of the
+ * class with the bytes, under the mask the OLT asked for. The entity is not
+ * in the MIB upload. The class is decimal (1..65535), the bytes hex (an
+ * optional 0x, 1 to 25 bytes, what fits a baseline Get response).
+ *
+ * CLASS:INSTANCE:ATTR:HEX is one attribute of one entity: the instance is
+ * decimal or 0x hex (0..65535), the attribute 1..16, the value hex as above.
+ * Entries that share CLASS:INSTANCE make one entity with several attributes.
+ * That entity is listed in the MIB upload, a Get of it answers the
+ * attributes asked for that it has, and a Get of any other instance of the
+ * class answers unknown instance:
+ *
+ *     OMCI_FIXED_ME=200:0x0011aa,201:0x8001:1:01020304
  *
  * In odi.conf, so the values live on the stick only. Anything malformed --
- * a bad entry, a class twice, too many entries -- turns the whole key off,
- * so a typo cannot answer half of what the owner meant. */
+ * a bad entry, the same class twice in the first form, the same
+ * class/instance/attribute twice, a class in both forms, too many entries --
+ * turns the whole key off, so a typo cannot answer half of what the owner
+ * meant. */
 struct fixed_me_set fixed_me;
 
-static int fixed_me_entry(const char *v, int n, struct fixed_me *e)
+/* Hex bytes in v[0..n), an optional 0x first: 1 to FIXED_ME_MAX of them. */
+static int fixed_me_hex(const char *v, int n, struct fixed_me *e)
 {
-	int i = 0, cls = 0;
+	int i = 0;
 
-	while (i < n && v[i] >= '0' && v[i] <= '9' && i < 5)
-		cls = cls * 10 + (v[i++] - '0');
-	if (i == 0 || i >= n || v[i] != ':' || cls < 1 || cls > 65535)
-		return -1;
-	i++;
-	if (n - i >= 2 && v[i] == '0' && (v[i + 1] == 'x' || v[i + 1] == 'X'))
-		i += 2;
+	if (n >= 2 && v[0] == '0' && (v[1] == 'x' || v[1] == 'X'))
+		i = 2;
 	if (n <= i || (n - i) % 2 || (n - i) / 2 > FIXED_ME_MAX)
 		return -1;
-	e->cls = (uint16_t)cls;
 	e->len = 0;
 	for (; i < n; i += 2) {
 		int hi = hex_nib(v[i]), lo = hex_nib(v[i + 1]);
@@ -819,9 +824,68 @@ static int fixed_me_entry(const char *v, int n, struct fixed_me *e)
 	return 0;
 }
 
+/* A number in v[0..n): decimal of up to maxdig digits, or, when hex_ok, 0x
+ * and up to 4 hex digits. -1 when it is neither or above 65535. */
+static int fixed_me_num(const char *v, int n, int maxdig, int hex_ok)
+{
+	int x = 0, i = 0;
+
+	if (hex_ok && n >= 2 && v[0] == '0' && (v[1] == 'x' || v[1] == 'X')) {
+		if (n < 3 || n > 6)
+			return -1;
+		for (i = 2; i < n; i++) {
+			int d = hex_nib(v[i]);
+
+			if (d < 0)
+				return -1;
+			x = x * 16 + d;
+		}
+		return x;
+	}
+	if (n < 1 || n > maxdig)
+		return -1;
+	for (; i < n; i++) {
+		if (v[i] < '0' || v[i] > '9')
+			return -1;
+		x = x * 10 + (v[i] - '0');
+	}
+	return x > 65535 ? -1 : x;
+}
+
+static int fixed_me_entry(const char *v, int n, struct fixed_me *e)
+{
+	int colon[3], nc = 0, cls, inst = 0, attr = 0, hexat;
+
+	for (int i = 0; i < n; i++)
+		if (v[i] == ':') {
+			if (nc == 3)
+				return -1;
+			colon[nc++] = i;
+		}
+	if (nc != 1 && nc != 3)
+		return -1;
+	/* Class and attribute are decimal; 0x is for the instance and the bytes. */
+	cls = fixed_me_num(v, colon[0], 5, 0);
+	if (cls < 1)
+		return -1;
+	if (nc == 3) {
+		inst = fixed_me_num(v + colon[0] + 1, colon[1] - colon[0] - 1, 5, 1);
+		attr = fixed_me_num(v + colon[1] + 1, colon[2] - colon[1] - 1, 2, 0);
+		if (inst < 0 || attr < 1 || attr > 16)
+			return -1;
+	}
+	hexat = colon[nc - 1] + 1;
+	if (fixed_me_hex(v + hexat, n - hexat, e) < 0)
+		return -1;
+	e->cls = (uint16_t)cls;
+	e->inst = (uint16_t)inst;
+	e->attr = (uint8_t)attr;
+	return 0;
+}
+
 void cfg_load_fixed_me(void)
 {
-	static char v[FIXED_ME_ENTRIES * 64];
+	static char v[FIXED_ME_ENTRIES * 80];
 	struct fixed_me_set s;
 	int n, i = 0;
 
@@ -832,6 +896,7 @@ void cfg_load_fixed_me(void)
 		return;
 	while (i < n) {
 		int start, k;
+		const struct fixed_me *x;
 
 		while (i < n && (v[i] == ' ' || v[i] == ','))
 			i++;
@@ -843,20 +908,123 @@ void cfg_load_fixed_me(void)
 		if (s.n >= FIXED_ME_ENTRIES ||
 		    fixed_me_entry(v + start, i - start, &s.e[s.n]) < 0)
 			return;
-		for (k = 0; k < s.n; k++)
-			if (s.e[k].cls == s.e[s.n].cls)
+		x = &s.e[s.n];
+		for (k = 0; k < s.n; k++) {
+			const struct fixed_me *y = &s.e[k];
+
+			if (y->cls != x->cls)
+				continue;
+			/* Both forms of one class, or one slot twice. */
+			if (!y->attr || !x->attr ||
+			    (y->inst == x->inst && y->attr == x->attr))
 				return;
+		}
 		s.n++;
 	}
 	fixed_me = s;
 }
 
+/* The any-instance entry of a class, if the class is in the first form. */
 const struct fixed_me *fixed_me_find(uint16_t cls)
 {
 	for (int i = 0; i < fixed_me.n; i++)
-		if (fixed_me.e[i].cls == cls)
+		if (fixed_me.e[i].cls == cls && !fixed_me.e[i].attr)
 			return &fixed_me.e[i];
 	return 0;
+}
+
+/* Whether the class is configured per instance. */
+int fixed_me_per_inst(uint16_t cls)
+{
+	for (int i = 0; i < fixed_me.n; i++)
+		if (fixed_me.e[i].cls == cls && fixed_me.e[i].attr)
+			return 1;
+	return 0;
+}
+
+/* Whether the entity at this instance of the class is configured. */
+int fixed_me_has_inst(uint16_t cls, uint16_t inst)
+{
+	for (int i = 0; i < fixed_me.n; i++)
+		if (fixed_me.e[i].cls == cls && fixed_me.e[i].attr &&
+		    fixed_me.e[i].inst == inst)
+			return 1;
+	return 0;
+}
+
+/* One attribute of one per-instance entity, if configured. */
+const struct fixed_me *fixed_me_attr(uint16_t cls, uint16_t inst, unsigned attr)
+{
+	for (int i = 0; i < fixed_me.n; i++)
+		if (fixed_me.e[i].cls == cls && fixed_me.e[i].attr == attr &&
+		    fixed_me.e[i].inst == inst)
+			return &fixed_me.e[i];
+	return 0;
+}
+
+/* The upload records of the per-instance entities, one entity after another
+ * in the order its first attribute appears in the key. A record holds the
+ * attributes of one entity in attribute order, as many as fit in the 26
+ * bytes after the class, instance and mask; the next record continues with
+ * the rest, each with its own mask. Returns how many records there are
+ * (want -1 only counts); a want below that fills body with the record's
+ * class, instance, mask and values, and *len with their length. */
+int fixed_me_upload(int want, uint8_t *body, uint16_t *len)
+{
+	int rec = 0;
+
+	for (int i = 0; i < fixed_me.n; i++) {
+		const struct fixed_me *g = &fixed_me.e[i];
+		uint16_t n = 6, mask = 0;
+		int seen = 0, open = 0;
+
+		if (!g->attr)
+			continue;
+		for (int k = 0; k < i; k++)
+			if (fixed_me.e[k].attr && fixed_me.e[k].cls == g->cls &&
+			    fixed_me.e[k].inst == g->inst)
+				seen = 1;
+		if (seen)
+			continue;
+		for (unsigned a = 1; a <= 16; a++) {
+			const struct fixed_me *x = fixed_me_attr(g->cls, g->inst, a);
+
+			if (!x)
+				continue;
+			if (open && n + x->len > FIXED_ME_UPLOAD) {
+				if (rec == want) {
+					nl_put16(body + 4, mask);
+					*len = n;
+					return rec + 1;
+				}
+				rec++;
+				open = 0;
+			}
+			if (!open) {
+				n = 6;
+				mask = 0;
+				open = 1;
+				if (rec == want) {
+					nl_put16(body + 0, g->cls);
+					nl_put16(body + 2, g->inst);
+				}
+			}
+			if (rec == want)
+				for (int b = 0; b < x->len; b++)
+					body[n + b] = x->data[b];
+			n = (uint16_t)(n + x->len);
+			mask |= (uint16_t)(1u << (16 - a));
+		}
+		if (open) {
+			if (rec == want) {
+				nl_put16(body + 4, mask);
+				*len = n;
+				return rec + 1;
+			}
+			rec++;
+		}
+	}
+	return rec;
 }
 
 /* ------------------------------------------------------- config reload
@@ -946,7 +1114,8 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		for (int i = 0; i < n->fixed.n && !(m & CFGD_FIXED_ME); i++) {
 			const struct fixed_me *a = &o->fixed.e[i], *b = &n->fixed.e[i];
 
-			if (a->cls != b->cls || a->len != b->len)
+			if (a->cls != b->cls || a->len != b->len ||
+			    a->inst != b->inst || a->attr != b->attr)
 				m |= CFGD_FIXED_ME;
 			for (int k = 0; k < b->len && !(m & CFGD_FIXED_ME); k++)
 				if (a->data[k] != b->data[k])

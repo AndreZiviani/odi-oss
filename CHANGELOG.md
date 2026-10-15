@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- `OMCI_FIXED_ME` (odi.conf): a second entry form, `CLASS:INSTANCE:ATTR:HEX`,
+  makes a vendor-specific entity that exists only at the configured
+  instance. Entries with the same class and instance are one entity with
+  several attributes. omcid lists it in the MIB upload (the attributes in
+  order, over several upload responses when they do not fit in one), answers
+  a Get or Get current data of it with the attributes asked for that it has
+  (the answered mask drops the others, as for its own entities), and answers
+  a Get of any other instance of the class with result 5, unknown managed
+  entity instance. The `CLASS:HEX` form is unchanged (any instance, not in
+  the upload); a class in both forms, or the same class, instance and
+  attribute twice, turns the key off. The limit is now 16 entries. For an
+  OLT that expects a native ONU's vendor-specific entities. The bytes stay
+  out of the logs and the diagnostics bundle redacts the key, as before.
+
 - `OMCI_ACCEPT_REBOOT=2` (odi.conf): acknowledge only. The OLT Reboot of the
   ONU-G is answered with success and the stick does not reboot, for an OLT
   that insists on a successful answer. `1` still reboots and `0`, unset or
