@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.5.0 - 2026-10-15
+
 - Pin: metricsd v1.5.0 (odi-sfp-exporter): reads the `/proc/odi_gpon/` files,
   `gpon_gem_*` per-flow metrics, host-port and safe-mode metrics with alerts,
   and the 20-digit link-total fix from v1.4.1.

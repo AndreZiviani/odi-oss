@@ -135,8 +135,12 @@ Identifiers in the screenshots are placeholders. More pages in the
 it with `nv commit <slot>` only once you have checked it yourself. Full procedure, including how to read a boot you
 could not otherwise see: [`docs/FLASHING.md`](docs/FLASHING.md).
 
-**Updating from an older release?** Two things changed in v1.4.0 that you
-can see on the line:
+**Updating from an older release?** In v1.5.0 `/proc/odi_gpon` became a
+directory (`status`, `counters`, `ploam`, `flows`): a script that reads
+`/proc/odi_gpon` directly must open the file it needs. The exporter and
+the web UI in the image already do.
+
+Two things changed in v1.4.0 that you can see on the line:
 
 - **The laser stays off unless the laser driver chip is the one this image
   is tested with** (the Semtech GN25L95, id 0x6a, of the DFP-34X-2C2). On a
@@ -174,7 +178,7 @@ every port and how to move files on and off the stick:
 
 ## Status and limitations
 
-**Tested on real sticks.** The current release is v1.4.0
+**Tested on real sticks.** The current release is v1.5.0
 ([`CHANGELOG.md`](CHANGELOG.md)). The firmware runs on two DFP-34X-2C2
 sticks on two different ISPs' GPON networks, and both now run it as their
 committed image, with the stock firmware kept in the other slot. The
