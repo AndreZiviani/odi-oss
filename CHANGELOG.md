@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Pin: metricsd v1.5.0 (odi-sfp-exporter): reads the `/proc/odi_gpon/` files,
+  `gpon_gem_*` per-flow metrics, host-port and safe-mode metrics with alerts,
+  and the 20-digit link-total fix from v1.4.1.
+
+- Pin: confd v1.4.0 (odi-ui): Expert settings with the fixed-ME table, the
+  `OMCI_ACCEPT_REBOOT=2` option, the Host port control and the safe-mode and
+  fallback bars.
+
+- Removed `local-ui/`, a copy of the odi-ui sources (including a built
+  `confd`) that was committed by mistake with the host port change; the image
+  takes confd from the pinned odi-ui release.
+
 - `HOST_AUTONEG` (odi.conf, default on): `off` runs the host port (the SFP
   edge) as forced 1000BASE-X full duplex, with no auto-negotiation, for a
   host router whose SFP port has auto-negotiation off; on, as before and as
