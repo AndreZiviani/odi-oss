@@ -439,8 +439,18 @@ printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\n' > "$ODI"
 reload_is "OMCI_UNKNOWN_ME_OK"                 identity OMCI_UNKNOWN_ME_OK reregister
 printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\n' > "$ODI"
 reload_is "OMCI_FIXED_ME"                     identity OMCI_FIXED_ME reregister
-printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\nOLT_SW_DOWNLOAD=reject\nOMCI_ACCEPT_REBOOT=1\nSYSLOG_SERVER=10.0.0.1\n' > "$ODI"
+printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\nOMCI_PRIVATE_ME=0\n' > "$ODI"
+reload_is "OMCI_PRIVATE_ME"                   identity OMCI_PRIVATE_ME reregister
+printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\nOMCI_PRIVATE_ME=0\nOLT_SW_DOWNLOAD=reject\nOMCI_ACCEPT_REBOOT=1\nSYSLOG_SERVER=10.0.0.1\n' > "$ODI"
 reload_is "OLT_SW_DOWNLOAD, OMCI_ACCEPT_REBOOT and other odi keys are not a reload" none ""   none
+X="$X$(val OMCI_VEIP_SLOT_ID 14)
+"
+store 1 12 5 "$X"
+reload_is "OMCI_VEIP_SLOT_ID"                  identity OMCI_VEIP_SLOT_ID reregister
+X="$X$(val OMCI_CUSTOM_ME 65792)
+"
+store 1 12 5 "$X"
+reload_is "OMCI_CUSTOM_ME bit 256 puts the VEIP in the slot" identity OMCI_VEIP_SLOT_ID reregister
 store 1 12 5 "$X$(val GPON_PLOAM_PASSWD 3132333435)
 "
 reload_is "GPON_PLOAM_PASSWD"                  identity GPON_PLOAM_PASSWD reregister
@@ -474,7 +484,9 @@ $(val LOID_PASSWD p1)
 $(val LOID_PASSWD_OLD p1)
 "
 reload_is "the identity switch turned off"     identity "omci-identity.on" reregister
-store 1 13 5 "$(val OMCI_SW_VER1 V9)
+store 1 13 5 "$(val OMCI_VEIP_SLOT_ID 14)
+$(val OMCI_CUSTOM_ME 65792)
+$(val OMCI_SW_VER1 V9)
 $(val GPON_PLOAM_PASSWD 3132333436)
 $(val LOID_OLD u1)
 $(val LOID u1)

@@ -104,6 +104,55 @@ uint8_t devid[40];      /* "RTL9602C", then the revision */
 
 uint8_t mib_data_sync;
 
+struct omci_instance aut[AUT_MAX];
+unsigned aut_count;
+
+/* The entities that live in the VEIP slot: the cardholder and circuit pack
+ * (entity id 0x0100 | slot) and the VEIP, its UNI-G and the TR-069 server
+ * (slot << 8 | 1). The generated tables hold them for slot 6. */
+#define SLOT6_CARD   0x0106
+#define SLOT6_PORT   0x0601
+
+static int slot_card_class(uint16_t cls) { return cls == 5 || cls == 6; }
+static int slot_port_class(uint16_t cls)
+{
+	return cls == 264 || cls == OMCI_ME_VEIP || cls == OMCI_ME_TR069_MGMT_SERVER;
+}
+static int private_class(uint16_t cls) { return cls == 350 || cls == 370 || cls == 373; }
+
+void aut_rebuild(void)
+{
+	unsigned n = 0;
+
+	for (unsigned i = 0; i < omci_autonomous_count && n < AUT_MAX; i++) {
+		uint16_t cls = omci_autonomous[i].classId;
+		uint16_t inst = omci_autonomous[i].inst;
+
+		if (!private_me && private_class(cls))
+			continue;
+		if (!veip_on && ((slot_card_class(cls) && inst == SLOT6_CARD) ||
+				 (slot_port_class(cls) && inst == SLOT6_PORT)))
+			continue;
+		if (slot_card_class(cls) && inst == SLOT6_CARD)
+			inst = (uint16_t)(0x0100 | veip_slot);
+		else if (slot_port_class(cls) && inst == SLOT6_PORT)
+			inst = (uint16_t)((veip_slot << 8) | 1);
+		aut[n].classId = cls;
+		aut[n].inst = inst;
+		n++;
+	}
+	aut_count = n;
+}
+
+uint16_t canon_inst(uint16_t cls, uint16_t inst)
+{
+	if (slot_card_class(cls) && inst == (uint16_t)(0x0100 | veip_slot))
+		return SLOT6_CARD;
+	if (slot_port_class(cls) && inst == (uint16_t)((veip_slot << 8) | 1))
+		return SLOT6_PORT;
+	return inst;
+}
+
 const struct omci_class *find_class(uint16_t id)
 {
 	for (unsigned i = 0; i < omci_class_count; i++)
@@ -401,8 +450,8 @@ int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
 {
 	int n = 0;
 
-	for (unsigned i = 0; i < omci_autonomous_count; i++) {
-		const struct omci_instance *e = &omci_autonomous[i];
+	for (unsigned i = 0; i < aut_count; i++) {
+		const struct omci_instance *e = &aut[i];
 
 		if ((cls && e->classId != cls) || (want_inst && e->inst != inst))
 			continue;
@@ -550,7 +599,8 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 	 * override. */
 	for (unsigned d = 0; d < omci_defaults_count; d++) {
 		const struct omci_default *df = &omci_defaults[d];
-		if (df->cls == c->classId && df->inst == inst && df->attr == k) {
+		if (df->cls == c->classId && df->inst == canon_inst(c->classId, inst) &&
+		    df->attr == k) {
 			for (uint16_t i = 0; i < n && i < df->width; i++)
 				out[i] = df->data[i];
 			break;
@@ -580,6 +630,10 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 			out[0] = (uint8_t)(report.productCode >> 8);
 			out[1] = (uint8_t)report.productCode;
 		}
+	} else if (c->classId == OMCI_ME_VEIP && k == 6 && veip_slot_key >= 0) {
+		/* CustomizedSlotId: the slot the key names, as the stock
+		 * stack reports it, even when the slot itself is unchanged. */
+		out[0] = (uint8_t)veip_slot_key;
 	} else if (c->classId == OMCI_ME_SOFTWARE_IMAGE) { /* software image */
 		if (k == 1) put_str(out, n, report_sw_ver(inst));
 		/* is committed, is active, is valid: image 0 all three and

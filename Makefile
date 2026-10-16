@@ -188,7 +188,7 @@ test-diag:
 # jobs; test-omci runs them all, in this order, and stops at the first failure.
 # Each suite needs only omcli and omcid (plus its drvtrace build), which
 # test-omci-build makes: the rest of src/ is built by `make src`.
-OMCI_SUITES := qemu drv resume events swdl vlan reload
+OMCI_SUITES := qemu drv resume events swdl vlan reload keys
 
 test-omci: test-omci-build
 	@for s in $(OMCI_SUITES); do $(MAKE) --no-print-directory test-omci-$$s || exit 1; done

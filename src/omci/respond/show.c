@@ -487,8 +487,8 @@ uint32_t cli_tcont(void)
 			out_fmt(" %d", (long)ids[i]);
 		out("\nt-cont alloc-ids (olt: set over omci; ploam: bound in "
 		    "assignment order):\n");
-		for (unsigned i = 0; i < omci_autonomous_count; i++) {
-			const struct omci_instance *e = &omci_autonomous[i];
+		for (unsigned i = 0; i < aut_count; i++) {
+			const struct omci_instance *e = &aut[i];
 			int src;
 			uint16_t a;
 

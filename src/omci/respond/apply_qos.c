@@ -49,10 +49,10 @@ static uint16_t nth_uni_entity(unsigned k)
 	for (unsigned cls = 0; cls < 2; cls++) {
 		uint16_t want = cls ? 329 : 11;
 
-		for (unsigned i = 0; i < omci_autonomous_count; i++)
-			if (omci_autonomous[i].classId == want) {
+		for (unsigned i = 0; i < aut_count; i++)
+			if (aut[i].classId == want) {
 				if (!k)
-					return omci_autonomous[i].inst;
+					return aut[i].inst;
 				k--;
 			}
 		for (int i = 0; i < MIB_ROWS; i++)
@@ -575,9 +575,9 @@ uint16_t tcont_alloc_id(uint16_t meId, int *src)
 	 * order), sixteen here: what each was set to, gathered once, since a
 	 * MIB upload asks this for every one of them. An id that is not
 	 * among them is no T-CONT of this ONU. */
-	for (unsigned i = 0; i < omci_autonomous_count && nt < TCONT_MAX; i++)
-		if (omci_autonomous[i].classId == OMCI_ME_TCONT) {
-			inst[nt] = omci_autonomous[i].inst;
+	for (unsigned i = 0; i < aut_count && nt < TCONT_MAX; i++)
+		if (aut[i].classId == OMCI_ME_TCONT) {
+			inst[nt] = aut[i].inst;
 			set[nt] = tcont_olt_alloc(inst[nt]);
 			nt++;
 		}

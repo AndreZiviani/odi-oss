@@ -302,6 +302,18 @@ void snapshot_write_decision(int resumed);
 void apply_entity(const struct omci_class *c, uint16_t inst, const struct mib_row *r, uint16_t mask, int creating);
 void apply_delete(const struct omci_class *c, uint16_t inst);
 int instance_is_autonomous(uint16_t cls, uint16_t inst);
+/* The instances the ONU creates for itself, as this configuration has them:
+ * generated/omci_autonomous.c with the VEIP slot applied to the ids of the
+ * slot's entities and the vendor-private classes left out when OMCI_PRIVATE_ME
+ * is 0. Everything that walks the ONU-created entities reads this, not the
+ * generated array. aut_rebuild() after any change of the two keys. */
+#define AUT_MAX 512
+extern struct omci_instance aut[AUT_MAX];
+extern unsigned aut_count;
+void aut_rebuild(void);
+/* The id an entity has in the generated tables (slot 6) for an id of the
+ * configured slot, for looking up generated default values. */
+uint16_t canon_inst(uint16_t cls, uint16_t inst);
 /* drv.c: the switch port of a UNI entity from the capability slots, or -1. */
 int uni_switch_port(uint16_t meId, uint8_t slot_type);
 /* apply_qos.c */
@@ -545,6 +557,10 @@ struct cfg_snap {
 	struct onu_report report;
 	int unknown_me_ok;
 	struct fixed_me_set fixed;
+	int veip_slot_key;
+	int veip_slot;
+	int private_me;
+	int veip_on;
 };
 /* Identity class: one bit per key the OLT reads. */
 #define CFGD_SN         (1u << 0)
@@ -560,7 +576,10 @@ struct cfg_snap {
 #define CFGD_SWITCH     (1u << 10)
 #define CFGD_UNKNOWN_ME (1u << 11)
 #define CFGD_FIXED_ME   (1u << 16)
-#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME)
+#define CFGD_VEIP_SLOT  (1u << 17)
+#define CFGD_PRIVATE_ME (1u << 18)
+#define CFGD_VEIP_ON    (1u << 19)
+#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
@@ -572,6 +591,24 @@ void cfg_snap_restore(const struct cfg_snap *s);
 /* Reread every key the daemon holds, the way startup reads them. */
 void cfg_load_all(void);
 void cfg_load_unknown_me(void);
+/* OMCI_VEIP_SLOT_ID and OMCI_PRIVATE_ME: which instances the ONU creates for
+ * itself. The VEIP key follows the stock firmware: a decimal slot number in
+ * the config store, in effect only with bit 0x100 of OMCI_CUSTOM_ME. */
+#define VEIP_SLOT_DEFAULT  6
+#define CUSTOM_ME_VEIP_SLOT_ID 0x100
+void cfg_load_veip_slot(void);
+void cfg_load_private_me(void);
+/* The slot key as stored (0..255), -1 when absent or not a valid slot; the
+ * slot omcid builds the VEIP at, 6 unless the key is valid and enabled; and
+ * whether the vendor-private entities 350, 370 and 373 are created. */
+extern int veip_slot_key;
+extern int veip_slot;
+extern int private_me;
+/* OMCI_VEIP (odi.conf): 0 creates no VEIP at all, so the ONU presents only
+ * its PPTP Ethernet UNI; the VEIP, its UNI-G, the TR-069 server and the slot's
+ * cardholder and circuit pack are then left out. */
+extern int veip_on;
+void cfg_load_veip_on(void);
 unsigned cfg_snap_diff(const struct cfg_snap *old, const struct cfg_snap *cur);
 /* The store key names of a diff mask, comma separated, into out. */
 void cfg_diff_names(unsigned mask, char *out, int max);
