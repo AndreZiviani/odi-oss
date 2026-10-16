@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- OMCI: new keys for the entities the ONU creates for itself.
+  `OMCI_VEIP_SLOT_ID`, the stock key, moves the virtual Ethernet interface
+  point (and its UNI-G, the TR-069 server, the cardholder and the circuit
+  pack) to another slot, as on the stock firmware only while bit 256 of
+  `OMCI_CUSTOM_ME` is set; unset, the slot is 6 as before. `OMCI_VEIP=0`
+  (odi.conf) creates no VEIP at all (nor its UNI-G, TR-069 server, cardholder
+  and circuit pack), so the ONU presents only its PPTP Ethernet UNI.
+  `OMCI_PRIVATE_ME=0` (odi.conf) leaves out the vendor-private entities 350,
+  370 and 373, the last of which carries a third-party product string; they
+  stay created by default, as on the stock firmware. A change of either re-registers the ONU.
+  New `keys` omcid test suite; docs/SETTINGS.md and docs/TOOLS.md updated
+  (the VEIP slot key was listed as having no counterpart in omcid).
+
 - OMCI: values that were captured from one stick and shipped to every stick
   are now answered from the stick itself or from its configuration. The
   circuit pack (ME 6) reports the configured serial number and its vendor id

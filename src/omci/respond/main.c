@@ -270,6 +270,17 @@ int main(int argc, char **argv)
 	out_fmt("unknown entities: %s\n", unknown_me_ok
 		? "answered ok (OMCI_UNKNOWN_ME_OK=1)"
 		: "answered unknown entity");
+	cfg_load_veip_slot();
+	cfg_load_private_me();
+	cfg_load_veip_on();
+	aut_rebuild();
+	if (!veip_on)
+		out("VEIP: none (OMCI_VEIP=0), the ONU presents its PPTP Ethernet UNI only\n");
+	else
+	out_fmt("VEIP in slot %d%s, vendor-private entities %s\n", (long)veip_slot,
+		veip_slot_key >= 0 && veip_slot == VEIP_SLOT_DEFAULT && veip_slot_key != veip_slot
+		? " (OMCI_VEIP_SLOT_ID is set but OMCI_CUSTOM_ME bit 256 is not)" : "",
+		private_me ? "created" : "left out (OMCI_PRIVATE_ME=0)");
 	cfg_load_fixed_me();
 	if (fixed_me.n)
 		out_fmt("fixed entities: %d entr(ies) answered from OMCI_FIXED_ME\n",

@@ -174,8 +174,8 @@ static void handle_upload_next(int fd, uint32_t tid, const uint8_t *f)
 	const struct omci_class *ec;
 	uint16_t mask = 0, n = 6;
 
-	if ((unsigned)seq >= omci_autonomous_count) {
-		int k = seq - (int)omci_autonomous_count, n = 0;
+	if ((unsigned)seq >= aut_count) {
+		int k = seq - (int)aut_count, n = 0;
 
 		for (int i = 0; i < MIB_ROWS; i++) {
 			if (!mib[i].used)
@@ -205,9 +205,9 @@ static void handle_upload_next(int fd, uint32_t tid, const uint8_t *f)
 			}
 		}
 	}
-	if ((unsigned)seq >= omci_autonomous_count) {
+	if ((unsigned)seq >= aut_count) {
 		/* After the held rows: the OMCI_FIXED_ME entities. */
-		int idx = seq - (int)omci_autonomous_count - mib_count();
+		int idx = seq - (int)aut_count - mib_count();
 		uint16_t len = 0;
 
 		if (idx >= 0 && idx < fixed_me_upload(-1, 0, 0)) {
@@ -220,7 +220,7 @@ static void handle_upload_next(int fd, uint32_t tid, const uint8_t *f)
 		out_fmt("-> sequence %d is past the end\n", (long)seq);
 		return;
 	}
-	e = &omci_autonomous[seq];
+	e = &aut[seq];
 	ec = find_class(e->classId);
 	nl_put16(body + 0, e->classId);
 	nl_put16(body + 2, e->inst);
@@ -238,7 +238,7 @@ static void handle_upload_next(int fd, uint32_t tid, const uint8_t *f)
 	}
 	nl_put16(body + 4, mask);
 	send_resp(fd, tid, f, body, n);
-	if (seq < 3 || (unsigned)seq + 1 == omci_autonomous_count)
+	if (seq < 3 || (unsigned)seq + 1 == aut_count)
 		out_fmt("-> [%d] class %d %s inst %04x mask %04x\n",
 		(long)seq, (long)e->classId,
 		ec ? ec->name : "?", (long)e->inst, (long)mask);
@@ -467,7 +467,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	if (mt == OMCI_MT_MIB_UPLOAD_NEXT)
 		ev_mib_upload_next(nl_get16(f + 8));
 	if (mt == OMCI_MT_MIB_UPLOAD_NEXT && nl_get16(f + 8) > 2 &&
-	    (unsigned)nl_get16(f + 8) + 1 < omci_autonomous_count) {
+	    (unsigned)nl_get16(f + 8) + 1 < aut_count) {
 		handle_upload_next(fd, tid, f);   /* 301 of these; do not log */
 		return;
 	}
@@ -605,14 +605,14 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * built for itself, and that is how the OLT learns what
 		 * hardware it has. Reporting zero left the OLT with nothing to
 		 * work with, and it simply started the cycle again. */
-		int total = (int)omci_autonomous_count + mib_count() +
+		int total = (int)aut_count + mib_count() +
 			    fixed_me_upload(-1, 0, 0);
 
 		nl_put16(body, (uint16_t)total);
 		send_resp(fd, tid, f, body, 2);
 		ev_mib_upload((uint16_t)total);
 		out_fmt("-> %d managed entities to upload (%d autonomous, %d held, %d fixed)\n",
-			(long)total, (long)omci_autonomous_count,
+			(long)total, (long)aut_count,
 			(long)mib_count(), (long)fixed_me_upload(-1, 0, 0));
 		return;
 	}

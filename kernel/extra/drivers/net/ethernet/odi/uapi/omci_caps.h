@@ -68,6 +68,9 @@
  * Ethernet UNI, and gInfo+328 -- set at startup, 6 on isp1, whose VEIP is
  * 0x0601 -- for a VEIP. gInfo is omci_app's own bss and not readable from
  * here, so the caller passes the slot type it wants instead; it always knows,
- * because it dispatched on the managed entity's class. */
+ * because it dispatched on the managed entity's class. omcid builds the VEIP
+ * at slot 6 unless OMCI_VEIP_SLOT_ID moves it (docs/SETTINGS.md); the slot
+ * type matched here is the type, not the slot number, so the move does not
+ * change this table. */
 
 #endif

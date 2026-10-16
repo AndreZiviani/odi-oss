@@ -15,9 +15,8 @@ int apply_hw;           /* -a: actually program the switch */
  * OLT set something on one. */
 int instance_is_autonomous(uint16_t cls, uint16_t inst)
 {
-	for (unsigned i = 0; i < omci_autonomous_count; i++)
-		if (omci_autonomous[i].classId == cls
-		    && omci_autonomous[i].inst == inst)
+	for (unsigned i = 0; i < aut_count; i++)
+		if (aut[i].classId == cls && aut[i].inst == inst)
 			return 1;
 	return 0;
 }
