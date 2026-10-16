@@ -199,7 +199,7 @@ static long odi_verb(const char *verb, const char *arg)
 
 /* Read the ONU state number from the driver's /proc file: 5 is O5, -1 when
  * it cannot be read. */
-static int onu_state_now(void)
+int onu_state_now(void)
 {
 	char buf[128];
 	long fd = sys_open(gpon_proc_path, O_RDONLY);
