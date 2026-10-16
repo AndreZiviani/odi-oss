@@ -88,6 +88,8 @@ static void usage(void)
 	    "              of asking the driver (test only, see docs/BOOT.md)\n"
 	    "  -g file     read the Alloc-IDs and the serial from this file\n"
 	    "              instead of /proc/odi_gpon/status (test only)\n"
+	    "  -l file     read the UNI link bit from this file instead of\n"
+	    "              the odi_switch host_link parameter (test only)\n"
 	    "  -i file     append the driver verbs of a reload to this file\n"
 	    "              instead of /proc/odi_init (test only)\n"
 	    "  -j seconds  how long a reload waits for O5 (test only)\n"
@@ -178,6 +180,10 @@ int main(int argc, char **argv)
 		 * file, the same reason as -s: qemu has no kernel of ours. */
 		else if (str_eq(argv[i], "-g") && i + 1 < argc) {
 			gpon_proc_path = argv[++i];
+		}
+		/* -l file: the UNI link bit (0 or 1), for the same reason. */
+		else if (str_eq(argv[i], "-l") && i + 1 < argc) {
+			uni_link_path = argv[++i];
 		}
 		/* -i file: where the reload writes the driver verbs instead of
 		 * /proc/odi_init, and -j seconds: how long it waits for O5 and

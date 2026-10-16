@@ -512,7 +512,8 @@ uint32_t cli_state(void)
 	uint32_t st = 0;
 
 	/* Four ASCII characters of vendor id then four binary bytes, which is
-	 * why printing it as a string stops after "TMBB". */
+	 * why printing it as a string stops after the vendor id (for a serial
+	 * such as ABCD0000002A, after "ABCD"). */
 	serial_refresh(0);
 	out("serial     : ");
 	out_n((const char *)serial, 4);

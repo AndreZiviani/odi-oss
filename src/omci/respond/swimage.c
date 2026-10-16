@@ -55,6 +55,58 @@ struct sw_flags { uint8_t committed, active, valid; };
 static struct sw_flags swf[2] = { { 1, 1, 1 }, { 0, 0, 1 } };
 static int swf_loaded;
 
+/* The slot state the boot recorded (rootfs/skeleton/etc/scripts/slot-state.sh):
+ * `running=N` is the slot the kernel booted from, and `uncommitted=1` says
+ * the slot U-Boot boots by default is the other one. Image N is the flash
+ * slot N, so the active image is the running slot and the committed one is
+ * the committed slot, the way the stock firmware reports them. Read-only;
+ * absent or unreadable keeps the built-in flags above. */
+#define SLOT_STATE_PATH "/var/run/odi-slot"
+
+static int slot_value(const char *buf, long n, const char *key)
+{
+	unsigned kl = 0;
+
+	while (key[kl])
+		kl++;
+	for (long i = 0; i + (long)kl + 1 < n; i++) {
+		unsigned j = 0;
+
+		while (j < kl && buf[i + (long)j] == key[j])
+			j++;
+		if ((i == 0 || buf[i - 1] == '\n') && j == kl && buf[i + kl] == '=')
+			return buf[i + kl + 1] == '0' ? 0 :
+			       buf[i + kl + 1] == '1' ? 1 : -1;
+	}
+	return -1;
+}
+
+static void sw_slots_load(void)
+{
+	char buf[256];
+	long fd = sys_open(SLOT_STATE_PATH, O_RDONLY), n;
+	int run, com;
+
+	if (fd < 0)
+		return;
+	n = sys_read((int)fd, buf, sizeof buf);
+	sys_close((int)fd);
+	if (n <= 0)
+		return;
+	run = slot_value(buf, n, "running");
+	com = slot_value(buf, n, "uncommitted");
+	if (run < 0)
+		return;
+	/* uncommitted=1: the other slot is the committed one; 0 or unknown:
+	 * the running slot. */
+	com = com == 1 ? 1 - run : run;
+	for (int i = 0; i < 2; i++) {
+		swf[i].active = i == run;
+		swf[i].committed = i == com;
+		swf[i].valid = 1;
+	}
+}
+
 static void sw_flags_load(void)
 {
 	uint8_t b[10];
@@ -63,6 +115,7 @@ static void sw_flags_load(void)
 	if (swf_loaded)
 		return;
 	swf_loaded = 1;
+	sw_slots_load();
 	fd = sys_open(SWIMAGE_PATH, O_RDONLY);
 	if (fd < 0)
 		return;
@@ -101,6 +154,12 @@ uint8_t sw_flag(uint16_t inst, unsigned attr)
 	return attr == 2 ? swf[inst].committed :
 	       attr == 3 ? swf[inst].active :
 	       attr == 4 ? swf[inst].valid : 0;
+}
+
+uint16_t sw_active_inst(void)
+{
+	sw_flags_load();
+	return swf[1].active && !swf[0].active ? 1 : 0;
 }
 
 /* ------------------------------------------------------------ the mode */
