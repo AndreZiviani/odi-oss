@@ -7285,8 +7285,8 @@
  {
   "plugin": "mib_Me243.so",
   "table": {
-   "name": "ZTE ME243",
-   "shortName": "ME243",
+   "name": "PrivateQueueMap",
+   "shortName": "PRIVQUEUEMAP",
    "classId": 243,
    "initType": 1,
    "stdType": 4,
@@ -7369,8 +7369,8 @@
  {
   "plugin": "mib_Me350.so",
   "table": {
-   "name": "HW ME350",
-   "shortName": "HW350",
+   "name": "Me350",
+   "shortName": "ME350",
    "classId": 350,
    "initType": 0,
    "stdType": 4,
@@ -7389,12 +7389,12 @@
   "oper": {
    "0": [
     "fn",
-    "HwMe350DrvCfg"
+    "Me350DrvCfg"
    ],
    "12": 0,
    "36": [
     "fn",
-    "omci_mib_me_350_oper_reset"
+    "Me350OperReset"
    ]
   },
   "attrs": [
@@ -7641,8 +7641,8 @@
  {
   "plugin": "mib_Me370.so",
   "table": {
-   "name": "HW ME370",
-   "shortName": "HW370",
+   "name": "Me370",
+   "shortName": "ME370",
    "classId": 370,
    "initType": 0,
    "stdType": 4,
@@ -7662,11 +7662,11 @@
    "12": 0,
    "36": [
     "fn",
-    "omci_mib_me_370_oper_reset"
+    "Me370OperReset"
    ],
    "40": [
     "fn",
-    "omci_mib_me_370_oper_update"
+    "Me370OperUpdate"
    ]
   },
   "attrs": [
@@ -7731,8 +7731,8 @@
  {
   "plugin": "mib_Me373.so",
   "table": {
-   "name": "HW ME373",
-   "shortName": "HW373",
+   "name": "Me373",
+   "shortName": "ME373",
    "classId": 373,
    "initType": 0,
    "stdType": 4,
@@ -7752,7 +7752,7 @@
    "12": 0,
    "36": [
     "fn",
-    "omci_mib_me_373_oper_reset"
+    "Me373OperReset"
    ]
   },
   "attrs": [
@@ -7997,10 +7997,10 @@
   ]
  },
  {
-  "plugin": "mib_MeZteMcastTag.so",
+  "plugin": "mib_PrivateMcastTag.so",
   "table": {
-   "name": "ZteMcastTag",
-   "shortName": "ZTEMCASTTAG",
+   "name": "PrivateMcastTag",
+   "shortName": "PRIVMCASTTAG",
    "classId": 65282,
    "initType": 1,
    "stdType": 4,
@@ -8021,7 +8021,7 @@
   "oper": {
    "0": [
     "fn",
-    "zte_mcast_tag_drv_cfg_handler"
+    "PrivateMcastTagDrvCfg"
    ],
    "4": 0,
    "8": 0,
@@ -8059,10 +8059,10 @@
   ]
  },
  {
-  "plugin": "mib_MeZteSntp.so",
+  "plugin": "mib_PrivateSntp.so",
   "table": {
-   "name": "ZteSntp",
-   "shortName": "ZTESNTP",
+   "name": "PrivateSntp",
+   "shortName": "PRIVSNTP",
    "classId": 65294,
    "initType": 0,
    "stdType": 4,
@@ -8081,12 +8081,12 @@
   "oper": {
    "0": [
     "fn",
-    "ZteSntpDrvCfg"
+    "PrivateSntpDrvCfg"
    ],
    "12": 0,
    "36": [
     "fn",
-    "omci_zte_sntp_oper_reset"
+    "PrivateSntpOperReset"
    ]
   },
   "attrs": [

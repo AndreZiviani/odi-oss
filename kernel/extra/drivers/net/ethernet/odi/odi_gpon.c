@@ -214,8 +214,8 @@ static int odi_gpon_irq_isr_rc;
 static int odi_gpon_irq_imr_rc;
 
 /* Per-message-type counters, both directions -- one array wide enough for
- * every documented DS/US type byte (odi_gpon_ploam.h) plus the 0x81 ZTE-
- * interop variant, indexed directly by the raw type byte.
+ * every documented DS/US type byte (odi_gpon_ploam.h) plus the 0x81 vendor-
+ * specific Disable_Serial_Number variant, indexed directly by the raw type byte.
  */
 static unsigned int odi_gpon_ds_type_count[256];
 static unsigned int odi_gpon_us_type_count[256];
@@ -243,7 +243,7 @@ static bool odi_gpon_ds_type_known(uint8_t type)
 	case ODI_GPON_DS_BER_INTERVAL:
 	case ODI_GPON_DS_KEY_SWITCHING_TIME:
 	case ODI_GPON_DS_EXT_BURST_LENGTH:
-	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER_ZTE:
+	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS:
 		return true;
 	default:
 		return false;

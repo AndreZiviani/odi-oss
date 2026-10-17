@@ -819,11 +819,11 @@ static const struct omci_attr attr_Me373[] = {
 	{ "Part14", OMCI_STRING, 26, 3, 0, 0, 0x001 },
 	{ "Part15", OMCI_STRING, 26, 3, 0, 0, 0x001 },
 };
-static const struct omci_attr attr_MeZteMcastTag[] = {
+static const struct omci_attr attr_PrivateMcastTag[] = {
 	{ "EntityID", OMCI_U16, 2, 1, 1, 0, 0x001 },
 	{ "TagStrip", OMCI_U8, 1, 7, 0, 0, 0x001 },
 };
-static const struct omci_attr attr_MeZteSntp[] = {
+static const struct omci_attr attr_PrivateSntp[] = {
 	{ "EntityID", OMCI_U16, 2, 1, 1, 0, 0x001 },
 	{ "TZ", OMCI_U16, 2, 3, 0, 0, 0x001 },
 	{ "MasterServer", OMCI_U32, 4, 3, 0, 0, 0x001 },
@@ -933,7 +933,7 @@ const struct omci_class omci_classes[] = {
 	{   171, "ExtVlanTagOperCfgData", 64, attr_ExtVlanTagOperCfgData, 9, 0x04000350u, 0x001, 1 },
 	{   240, "OntSystemMgmt", 16, attr_OntSystemMgmt, 7, 0x00000300u, 0x104, 0 },
 	{   242, "Me242", 8, attr_Me242, 3, 0x00000300u, 0x004, 0 },
-	{   243, "ZTE ME243", 24, attr_Me243, 4, 0x00000350u, 0x004, 1 },
+	{   243, "PrivateQueueMap", 24, attr_Me243, 4, 0x00000350u, 0x004, 1 },
 	{   244, "OntSelfLoopDetect", 16, attr_OntSelfLoopDetect, 9, 0x00000300u, 0x104, 0 },
 	{   245, "HSQDefault", 5, attr_hsq_default, 4, 0x00000350u, 0x004, 1 },
 	{   248, "WANConfigCata", 16, attr_hsq_wan, 9, 0x00000350u, 0x004, 1 },
@@ -973,11 +973,11 @@ const struct omci_class omci_classes[] = {
 	{   334, "EthExtPmData", 80, attr_EthExtPmData, 18, 0x10000350u, 0x002, 1 },
 	{   340, "TR069ManageServer", 8, attr_TR069ManageServer, 4, 0x00000300u, 0x001, 0 },
 	{   341, "GpncPmhd", 40, attr_GemPortNetworkCtpPMHD, 8, 0x10000350u, 0x002, 1 },
-	{   350, "HW ME350", 48, attr_Me350, 17, 0x00000300u, 0x004, 0 },
-	{   370, "HW ME370", 16, attr_Me370, 4, 0x00000300u, 0x004, 0 },
-	{   373, "HW ME373", 400, attr_Me373, 17, 0x00000300u, 0x004, 0 },
-	{ 65282, "ZteMcastTag", 8, attr_MeZteMcastTag, 2, 0x00000350u, 0x004, 1 },
-	{ 65294, "ZteSntp", 24, attr_MeZteSntp, 7, 0x00000300u, 0x004, 0 },
+	{   350, "Me350", 48, attr_Me350, 17, 0x00000300u, 0x004, 0 },
+	{   370, "Me370", 16, attr_Me370, 4, 0x00000300u, 0x004, 0 },
+	{   373, "Me373", 400, attr_Me373, 17, 0x00000300u, 0x004, 0 },
+	{ 65282, "PrivateMcastTag", 8, attr_PrivateMcastTag, 2, 0x00000350u, 0x004, 1 },
+	{ 65294, "PrivateSntp", 24, attr_PrivateSntp, 7, 0x00000300u, 0x004, 0 },
 	{ 65408, "ExtendedOnuG", 8, attr_ExtendedOnuG, 2, 0x00000100u, 0x004, 0 },
 	{ 65527, "OLTLocationConfigData", 40, attr_OltLocationCfgData, 9, 0x00000300u, 0x104, 0 },
 	{ 65528, "CTCOnuOnuLoopDetection", 32, attr_OnuLoopDetection, 7, 0x00000300u, 0x004, 0 },

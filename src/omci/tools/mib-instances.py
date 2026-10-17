@@ -14,11 +14,13 @@ Input is `omcicli mib get all` from a device. That output is device-specific and
 is not kept; only the class and instance ids are, which are topology rather than
 identity.
 
-    mib-instances.py <dump> [--c DIR]
+    mib-instances.py <dump> [--c DIR] [--stock-names FILE]
 """
 import json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import mibnames
 
 # initType 0, but not created by the MIB reset: the stock firmware builds the
 # MAC bridge port filter table (49), bridge table (50) and filter preassign
@@ -58,6 +60,11 @@ def main():
         print(__doc__)
         return 2
     model, inst = load_model(), parse(sys.argv[1])
+    # A stock dump labels a few tables with the stock plugin's name; the model
+    # carries a neutral one (mibnames.py), so translate through the sidecar
+    # mib-tables.py --stock-names wrote.
+    aliases = mibnames.load_aliases(sys.argv)
+    inst = {mibnames.canonical(k, aliases): v for k, v in inst.items()}
     auto, olt, unknown = [], [], []
     for name, ids in sorted(inst.items()):
         t = model.get(name)
