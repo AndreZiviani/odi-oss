@@ -700,11 +700,25 @@ static int cmd_stat_reset_noop(void *buf, uint32_t len)
 	return 0;
 }
 
+/* Logged once per command number, not once in all: ODI_SW_CMD_LOG is
+ * once per call site, so the first unsupported command of a boot hid every
+ * other one, and a field log could not say which commands a new OLT needs.
+ */
+#define ODI_SW_CMD_NUMBERS	128U
+static uint32_t odi_sw_unsupported_seen[ODI_SW_CMD_NUMBERS / 32U];
+
 static int cmd_unsupported(uint32_t cmd, void *buf, uint32_t len)
 {
 	(void)buf; (void)len;
-	ODI_SW_CMD_LOG("cmd %u not implemented (not exercised on isp1/isp2)\n",
-		       cmd);
+	if (cmd >= ODI_SW_CMD_NUMBERS) {
+		ODI_SW_WARN("cmd %u: no such command\n", (unsigned int)cmd);
+		return ODI_SW_EOPNOTSUPP;
+	}
+	if (!(odi_sw_unsupported_seen[cmd / 32U] & (1U << (cmd % 32U)))) {
+		odi_sw_unsupported_seen[cmd / 32U] |= 1U << (cmd % 32U);
+		ODI_SW_LOG("cmd %u not implemented (not exercised on isp1/isp2)\n",
+			   (unsigned int)cmd);
+	}
 	return ODI_SW_EOPNOTSUPP;
 }
 
