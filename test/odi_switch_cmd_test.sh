@@ -2,13 +2,10 @@
 # odi_switch_cmd_test.sh -- compiles odi_switch_cmd_test.c, replays the 91
 # command brackets of isp1-260922-boot5.txt through odi_switch_cmd(), and
 # runs tools/regtrace/compare.py against the reference trace directly.
-# Every bracket must PASS. cmd 23 instances
-# #10-13 used to be an exemption here (a write-order swap between
-# PONQ_COUNT_MASK+208 and +212/+213 that odi_sw_ponmac_queue_add_ext() wrote
-# in one fixed order) -- boot5's five full-shape instances gave an exact
-# rule for the swap (it tracks whether this is the first queue, n==0, or
-# a later one), fixed in odi_switch_qos.c (the cmd 23 #208/#212-213 write
-# order); the exemption is gone, all 91 brackets PASS.
+# Every bracket must PASS. The cmd 23 and 25 upstream brackets are computed
+# from the arguments omcid sends (the weights among them), not replayed:
+# that they still match the capture word for word is the check that the
+# decoding of the PON queue registers is right (docs/SWITCH.md).
 # odi_sw_cf_add_table cmd 51 table payload landed during
 # this task (the switch-core leaves) and all 12 cmd 51 instances PASS too.
 #

@@ -84,9 +84,11 @@ struct omci_gemflow {
 	uint32_t pir;
 	uint32_t omcc;
 	uint32_t mcast_filter;
-	/* 1 asks for a create, and is what every path here uses; the wrapper
-	 * treats any other value as an update of the flow the port already
-	 * holds, and fails if it holds none. */
+	/* 1 asks for a create, and is what every create path here uses; the
+	 * vendor wrapper treats any other value as an update of the flow the
+	 * port already holds, and fails if it holds none. At the driver, 0 is
+	 * a delete of the flow (the stock driver's reading, and ours
+	 * upstream; odi_switch_cmd.c refuses a downstream delete). */
 	uint32_t ena;
 	/* Direction: US=1, DS=2. updateUsGemFlow forces 1 and
 	 * updateGemFlow forces 2, which is how this was found. */
@@ -137,8 +139,10 @@ typedef char omci_priq_size_check[
 	(sizeof(struct omci_priq) == OMCI_PRIQ_LEN) ? 1 : -1];
 
 /* Command 21, 8 bytes: the allocation id goes in, the T-CONT index comes back.
- * Note that word 0 is never initialised on the way in -- the vendor sends
- * whatever was on its stack -- so treat it as output only. */
+ * The vendor never initialises word 0 on the way in (it sends whatever was on
+ * its stack); omcid sends the number of queues it will put on the T-CONT, and
+ * odi_switch_cmd.c reserves that many (1 for 0 or anything past 32). The
+ * index that comes back is the Alloc-ID's row in the Alloc-ID CAM. */
 struct omci_tcont {
 	uint32_t index;         /* out: the driver's T-CONT index */
 	uint32_t alloc_id;       /* in:  from the T-CONT ME's Alloc-ID */
