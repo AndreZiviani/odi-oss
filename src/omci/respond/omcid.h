@@ -555,6 +555,20 @@ int fixed_me_has_inst(uint16_t cls, uint16_t inst);
 const struct fixed_me *fixed_me_attr(uint16_t cls, uint16_t inst, unsigned attr);
 int fixed_me_upload(int want, uint8_t *body, uint16_t *len);
 
+/* The MIB upload, built as the stock omci_app builds it (mibstore.c). A MIB
+ * upload takes a snapshot -- every entity the ONU holds, each split over as
+ * many records as its attributes need -- and the Next commands read records
+ * out of it by sequence number. mib_upload_build() returns the record count
+ * the upload response announces, mib_upload_record() fills one record's
+ * contents (class, instance, mask, values) and returns 0, or -1 past the
+ * end. */
+#define UPL_REC_MAX   1024              /* 399 on the stock ONU, plus the OLT's */
+#define UPL_REC_BYTES 26                /* attribute bytes in one baseline record */
+unsigned mib_upload_build(void);
+int mib_upload_record(unsigned seq, uint8_t *body, uint16_t *len);
+/* Records announced by the last MIB upload, 0 before the first. */
+extern unsigned upl_total;
+
 /* ------------------------------------------------------ config reload
  *
  * SIGHUP rereads the store and acts on what changed (reload.c). The keys
