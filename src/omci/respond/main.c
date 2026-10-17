@@ -273,6 +273,7 @@ int main(int argc, char **argv)
 	cfg_load_veip_slot();
 	cfg_load_private_me();
 	cfg_load_veip_on();
+	cfg_load_custom_me();
 	aut_rebuild();
 	if (!veip_on)
 		out("VEIP: none (OMCI_VEIP=0), the ONU presents its PPTP Ethernet UNI only\n");
