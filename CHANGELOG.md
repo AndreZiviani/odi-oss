@@ -16,7 +16,10 @@ listed here.
   ageing time of N seconds used to age entries out after N/10.
   `OMCI_VEIP_SLOT_ID=255`, the factory value, is read as unset, as the stock
   firmware reads it, instead of being logged as an unusable slot at every
-  start and reload. Refs #103.
+  start and reload. A MIB reset now tears down the bridge connections
+  built from the MIB it discards (one quiet second later, as any rebuild):
+  they used to stay in the switch until the OLT provisioned again, and an
+  OLT that provisioned fewer services left the others forwarding. Refs #103.
 
 - Docs and tests: the key counts are corrected (the image acts on 22 of the 184
   stock keys, plus bit 256 of `OMCI_CUSTOM_ME`, not "reads 21"; 161 are
