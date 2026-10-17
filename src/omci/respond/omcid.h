@@ -327,6 +327,9 @@ uint16_t canon_inst(uint16_t cls, uint16_t inst);
 int uni_switch_port(uint16_t meId, uint8_t slot_type);
 /* apply_qos.c */
 int us_queue_referenced(uint16_t pqMe);
+/* Does an upstream GEM port CTP name this traffic descriptor (class 280)
+ * as its upstream one? Its rates are then the rates of that CTP's queue. */
+int us_td_referenced(uint16_t td);
 int flow_find(int ds, uint16_t port);
 void bc_gem_update(void);
 void bc_gem_withdraw(uint16_t going);

@@ -39,7 +39,26 @@ static int us(uint32_t flow, uint32_t port, uint32_t tcont)
 	g.flow_id = flow;
 	g.gem_port = port;
 	g.tcont = tcont;
+	g.ena = 1;
 	return odi_switch_cmd(OMCI_GEMFLOW_CMD, &g, sizeof g);
+}
+
+/* T-CONTs 0..n-1 (Alloc-IDs 0x100.., rows in first-seen order on the
+ * host), each with one queue, as omcid provisions them: cmd 21 asking
+ * for one queue, then cmd 23 for ordinal 0. */
+static void tconts(uint32_t n)
+{
+	for (uint32_t i = 0; i < n; i++) {
+		struct omci_tcont t = { .index = 1, .alloc_id = 0x100 + i };
+		struct omci_priq q;
+
+		(void)odi_switch_cmd(OMCI_TCONT_CMD, &t, sizeof t);
+		memset(&q, 0, sizeof q);
+		q.owner = (uint16_t)t.index;
+		q.weight = 1;
+		q.dir = OMCI_GEMFLOW_US;
+		(void)odi_switch_cmd(OMCI_PRIQ_CMD, &q, sizeof q);
+	}
 }
 
 static void gem(uint32_t dir, uint32_t flow, uint32_t port)
@@ -50,6 +69,7 @@ static void gem(uint32_t dir, uint32_t flow, uint32_t port)
 	g.dir = dir;
 	g.flow_id = flow;
 	g.gem_port = port;
+	g.ena = 1;
 	(void)odi_switch_cmd(OMCI_GEMFLOW_CMD, &g, sizeof g);
 }
 
@@ -84,12 +104,14 @@ int main(void)
 	odi_mock_reset();
 	odi_switch_cmd_reset_state();
 	puts("OMCI_FLOWS_CMD readback:");
+	odi_mock_ponq_boot_state();
 
 	memset(&f, 0xa5, sizeof f);
 	ok(odi_switch_cmd(OMCI_FLOWS_CMD, &f, sizeof f) == 0 &&
 	   f.ds_count == 0 && f.us_count == 0 && f.ds_gem[0] == 0 && f.us_gem[0] == 0,
 	   "empty after reset, unused rows zeroed");
 
+	tconts(1);
 	gem(OMCI_GEMFLOW_DS, 0, 0xfff);
 	gem(OMCI_GEMFLOW_US, 0, 0xfff);          /* OMCI channel: no US slot */
 	gem(OMCI_GEMFLOW_DS, 1, 1100);
@@ -118,6 +140,7 @@ int main(void)
 	 * own row, not the next free one, and a gap reads GEM 0. */
 	odi_mock_reset();
 	odi_switch_cmd_reset_state();
+	tconts(1);
 	gem(OMCI_GEMFLOW_DS, 3, 657);
 	gem(OMCI_GEMFLOW_DS, 0, 0xfff);
 	gem(OMCI_GEMFLOW_US, 2, 657);
@@ -142,6 +165,8 @@ int main(void)
 	puts("cmd 25 upstream queue map:");
 	odi_mock_reset();
 	odi_switch_cmd_reset_state();
+	odi_mock_ponq_boot_state();
+	tconts(6);
 	for (uint32_t i = 0; i < 6; i++)
 		rc = us(i, 269 + 128 * i, i);
 	ok(rc == 0, "six flows on six T-CONTs accepted");
@@ -150,12 +175,15 @@ int main(void)
 	ok(reg(ODI_SW_PONQ_COUNT_MASK(21)) == (4U | 5U << 7 | 0x3fU << 14 | 0x3fU << 21),
 	   "flow 4 -> queue 4, flow 5 -> queue 5, 6-7 unmapped");
 	ok(reg(ODI_SW_PONQ_COUNT_MASK(37)) == 0x3fU, "PON_SIDVALID: six flows");
-	ok(reg(ODI_SW_PONQ_COUNT_MASK(235)) == 0x1c881be8U,
-	   "global thresholds: the fifth pair past five flows");
+	/* 7904 - 5 * 150, 7744 - 5 * 150: the formula goes on past five. */
+	ok(reg(ODI_SW_PONQ_COUNT_MASK(235)) == ((7154U << 16) | 6994U),
+	   "global thresholds for six flows");
 
 	/* The queue is the T-CONT's, not the flow id's. */
 	odi_mock_reset();
 	odi_switch_cmd_reset_state();
+	odi_mock_ponq_boot_state();
+	tconts(2);
 	us(0, 300, 1);
 	us(1, 301, 1);
 	us(2, 302, 0);
@@ -164,7 +192,7 @@ int main(void)
 	ok(reg(ODI_SW_PONQ_COUNT_MASK(235)) == 0x1db41d14U,
 	   "global thresholds by flows in use (three)");
 
-	/* Only queue 0 of a T-CONT exists (cmd 23 refuses others). */
+	/* A flow on a queue its T-CONT does not have is refused. */
 	{
 		struct omci_gemflow g;
 		unsigned int n = odi_mock.log_n;
@@ -174,9 +202,10 @@ int main(void)
 		g.flow_id = 3;
 		g.gem_port = 303;
 		g.queue = 1;
+		g.ena = 1;
 		ok(odi_switch_cmd(OMCI_GEMFLOW_CMD, &g, sizeof g) != 0 && odi_mock.log_n == n,
-		   "a flow on queue 1 is refused, nothing written");
-		ok(us(4, 304, ODI_SW_CMD23_US_TCONTS) != 0 && odi_mock.log_n == n,
+		   "a flow on queue 1 of a one-queue T-CONT is refused, nothing written");
+		ok(us(4, 304, ODI_SW_PONQ_TCONTS) != 0 && odi_mock.log_n == n,
 		   "a flow on a T-CONT past 15 is refused, nothing written");
 	}
 
@@ -187,11 +216,12 @@ int main(void)
 	odi_mock_reset();
 	odi_switch_cmd_reset_state();
 	odi_switch_cmd_set_flow_ops(&hook_ops);
+	tconts(3);
 	gem(OMCI_GEMFLOW_DS, 0, 0xfff);
 	gem(OMCI_GEMFLOW_US, 0, 0xfff);
 	gem(OMCI_GEMFLOW_DS, 1, 1434);
 	ok(us(4, 1562, 2) == 0, "an upstream flow is created");
-	ok(us(5, 1563, ODI_SW_CMD23_US_TCONTS) != 0, "and one on a bad T-CONT is refused");
+	ok(us(5, 1563, ODI_SW_PONQ_TCONTS) != 0, "and one on a bad T-CONT is refused");
 	gem(OMCI_GEMFLOW_DS, ODI_SW_CMD_GEM_DS_MAX, 1);
 	ok(hook_set_n == 3, "three flows reported");
 	ok(hook_us[0] == 0 && hook_idx[0] == 0 && hook_gem[0] == 0xfff, "DS 0, the OMCI channel");

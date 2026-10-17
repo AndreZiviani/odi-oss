@@ -7,8 +7,10 @@
  * offset appears here.
  *
  * Values marked "replayed" are what the ISP1 provisioning capture shows
- * per instance (test/fixtures/isp1-260922-boot5.txt), written by instance
- * ordinal because their fields are not decoded.
+ * (test/fixtures/isp1-260922-boot5.txt) for a command whose argument
+ * fields are not decoded. The upstream PON queues (cmd 21, 23, 24, 25) are
+ * not replayed: every word comes from the argument, as the stock driver
+ * computes it (docs/SWITCH.md#upstream-pon-queues).
  */
 #include "odi_switch_cmd.h"
 #include "odi_switch_dal.h"
@@ -21,21 +23,53 @@
 #include "uapi/omci_caps.h"
 #include "uapi/omci_flows.h"
 
-/* cmd 21: the T-CONT list, Alloc-ID to index, appended in creation order.
- * No capture deletes a T-CONT, and cmd 21 writes no register.
+/* cmd 21: the T-CONTs, by index. The index is the Alloc-ID's row in the
+ * GPON MAC's Alloc-ID CAM, because the hardware ties the two: the upstream
+ * scheduler of T-CONT n (its queue mask, PON_SCH_QMAP[n]) serves the bursts
+ * the OLT grants to the Alloc-ID in CAM row n, and row 16 is the OMCC's
+ * default Alloc-ID with its T-CONT 16. The stock driver works the same way
+ * (its T-CONT id is the row it wrote the Alloc-ID to). Rows 0-15 are data
+ * T-CONTs. Each holds a block of consecutive logical queues in its group
+ * of 32 (odi_switch_dal.h), reserved by cmd 21 for the number of queues
+ * omcid asks for, and the ordinals of the block cmd 23 has programmed.
  */
 struct odi_sw_tcont_slot {
 	uint32_t alloc_id;
-	int used;
+	uint32_t live;		/* ordinals with a queue programmed, one bit each */
+	uint8_t used;
+	uint8_t qbase;		/* first logical queue of the block */
+	uint8_t qn;		/* queues in the block, 0: none reserved */
 };
-static struct odi_sw_tcont_slot odi_sw_tcont[ODI_SW_CMD_TCONT_MAX];
-static unsigned int odi_sw_tcont_n;
+static struct odi_sw_tcont_slot odi_sw_tcont[ODI_SW_PONQ_TCONTS];
 
-/* cmd 23, upstream: the T-CONTs that have their queue, one bit per T-CONT
- * index (the scheduler the queue belongs to). PONQ_COUNT_MASK +207 is this
- * set plus the OMCC T-CONT (below), rewritten by every upstream queue.
+#ifndef __KERNEL__
+/* The host build has no GPON core: unless a test links one in and points
+ * this at it, Alloc-IDs take rows from 0 in first-seen order, the order
+ * PLOAM Assign_Alloc-ID fills the CAM in (odi_gpon_hw.c).
  */
-static uint32_t odi_sw_us_sched_used;
+int (*odi_sw_host_alloc_row)(uint16_t alloc_id);
+static uint32_t odi_sw_host_rows[ODI_SW_PONQ_TCONTS];
+static unsigned int odi_sw_host_rows_n;
+#endif
+
+static int tcont_alloc_row(uint32_t alloc_id)
+{
+#ifdef __KERNEL__
+	return odi_gpon_alloc_row((uint16_t)alloc_id);
+#else
+	unsigned int i;
+
+	if (odi_sw_host_alloc_row)
+		return odi_sw_host_alloc_row((uint16_t)alloc_id);
+	for (i = 0; i < odi_sw_host_rows_n; i++)
+		if (odi_sw_host_rows[i] == alloc_id)
+			return (int)i;
+	if (odi_sw_host_rows_n >= ODI_SW_PONQ_TCONTS)
+		return -1;
+	odi_sw_host_rows[odi_sw_host_rows_n] = alloc_id;
+	return (int)odi_sw_host_rows_n++;
+#endif
+}
 
 /* cmd 25: omcid chooses the flow id (the one the port already holds in
  * that direction, else the lowest free one: uapi/omci_gemflow.h), and the
@@ -51,61 +85,66 @@ static uint32_t odi_sw_gem_ds_gem[OMCI_FLOWS_MAX];
 static uint32_t odi_sw_gem_ds_cfg[OMCI_FLOWS_MAX];
 static uint32_t odi_sw_gem_us_gem[OMCI_FLOWS_MAX];
 
-/* cmd 25 upstream, PON_SID_GLB_TH: the global ON/OFF thresholds, two
- * writes (ON, then OFF) per flow, by the number of upstream flows in use.
- * The capture has one to five; each flow lowers ON by 150, OFF trails it
- * by 160. Past five the fifth pair is kept: a sixth value would be a
- * guess, and the fifth pair is what a six-flow ISP ran with (issue #42).
+/* cmd 25 upstream: the physical queue each flow is mapped to
+ * (PON_SID2QID), or ODI_SW_SID_UNMAPPED. Kept so that a queue add makes
+ * its flows valid again and a queue delete takes them out, as the stock
+ * driver does from the register.
  */
-static const uint32_t odi_sw_cmd25_glb_th_on[] = {
-	0x1ee01b08U, 0x1e4a1e40U, 0x1db41daaU, 0x1d1e1d14U, 0x1c881c7eU,
-};
-static const uint32_t odi_sw_cmd25_glb_th_off[] = {
-	0x1ee01e40U, 0x1e4a1daaU, 0x1db41d14U, 0x1d1e1c7eU, 0x1c881be8U,
-};
-
-/* cmd 25 upstream, PON_SID2QID: the upstream queue of each flow, 7 bits a
- * flow, four flows a word. Kept here and written a whole word at a time;
- * a flow nothing has mapped reads 63, the value the capture shows for
- * every flow not yet programmed.
- */
-#define ODI_SW_SID2QID_BITS	7U
-#define ODI_SW_SID2QID_PER_WORD	4U
-#define ODI_SW_SID2QID_UNMAPPED	0x3fU
+#define ODI_SW_SID_UNMAPPED	0xffU
 static uint8_t odi_sw_sid2qid[ODI_SW_CMD_GEM_US_MAX];
 
-static uint32_t sid2qid_word(uint32_t w)
+static uint32_t ponq_physical(uint32_t t, uint32_t lq)
 {
-	uint32_t i, v = 0;
-
-	for (i = 0; i < ODI_SW_SID2QID_PER_WORD; i++)
-		v |= (uint32_t)odi_sw_sid2qid[w * ODI_SW_SID2QID_PER_WORD + i]
-		     << (i * ODI_SW_SID2QID_BITS);
-	return v;
+	return ODI_SW_PONQ_GROUP_QUEUES * (t / ODI_SW_PONQ_GROUP_TCONTS) + lq;
 }
 
-/* cmd 23, upstream, replayed: the PONQ_COUNT_MASK words of the five
- * captured queues whose fields are not decoded, by T-CONT index (one queue
- * per T-CONT in the capture, T-CONT n holding queue n).
- */
-static const uint32_t odi_sw_cmd23_base_15[] = { 0x6U, 0xeU, 0x16U, 0x1eU, 0x26U };
-static const uint32_t odi_sw_cmd23_val_208[] = { 0x0U, 0x2U, 0x6U, 0xeU, 0x1eU };
-static const uint32_t odi_sw_cmd23_bitmask_212_213[] = {
-	0x100401U, 0x107801U, 0x1807801U, 0x100404U, 0x101004U,
-};
-static const int odi_sw_cmd23_use_213[] = { 0, 0, 0, 1, 1 };
+static uint32_t qmask(uint32_t base, uint32_t n)
+{
+	if (n >= 32U)
+		return 0xffffffffU;
+	return ((1U << n) - 1U) << base;
+}
 
-/* The T-CONT schedulers of PONQ_COUNT_MASK: +190+n is the word of T-CONT
- * n, +207 the set of T-CONTs in use, one bit each. T-CONT 16 is the OMCC,
- * on the default Alloc-ID (the ONU-ID, Alloc-ID CAM row 16): the module-load
- * replay writes its word, +206 = 1, and +207 = 0x10000 before any OMCI, and
- * the ISP1 capture adds one bit per T-CONT to that 0x10000 (0x10001 ..
- * 0x1001f). So an upstream queue may use T-CONTs 0-15 only: n = 16 would
- * overwrite the OMCC word and n = 17 would be +207 itself. That is also the
- * 16 T-CONTs cmd 3 reports.
+/* The logical queues the other T-CONTs of t's group have reserved. */
+static uint32_t group_taken(uint32_t t)
+{
+	uint32_t g = t / ODI_SW_PONQ_GROUP_TCONTS, u, m = 0;
+
+	for (u = g * ODI_SW_PONQ_GROUP_TCONTS; u < (g + 1U) * ODI_SW_PONQ_GROUP_TCONTS; u++)
+		if (u != t && odi_sw_tcont[u].qn)
+			m |= qmask(odi_sw_tcont[u].qbase, odi_sw_tcont[u].qn);
+	return m;
+}
+
+/* A block of n queues for T-CONT t: the one it has if big enough, grown
+ * in place if the queues after it are free, else (no queue of it live)
+ * the first free run of the group. The stock driver reserves the same
+ * way (first fit in the group); it would also move the T-CONT to the
+ * other group when its own is full, which this refuses instead.
  */
-#define ODI_SW_CMD23_US_TCONTS		16U
-#define ODI_SW_CMD23_OMCC_TCONT_BIT	(1U << 16)
+static int tcont_reserve(uint32_t t, uint32_t n)
+{
+	struct odi_sw_tcont_slot *s = &odi_sw_tcont[t];
+	uint32_t taken = group_taken(t), b;
+
+	if (s->qn >= n)
+		return 0;
+	if (s->qn && s->qbase + n <= ODI_SW_PONQ_GROUP_QUEUES &&
+	    !(taken & qmask(s->qbase + s->qn, n - s->qn))) {
+		s->qn = (uint8_t)n;
+		return 0;
+	}
+	if (s->live)
+		return -1;
+	for (b = 0; b + n <= ODI_SW_PONQ_GROUP_QUEUES; b++)
+		if (!(taken & qmask(b, n))) {
+			s->qbase = (uint8_t)b;
+			s->qn = (uint8_t)n;
+			return 0;
+		}
+	return -1;
+}
+
 
 /* Replayed scalars. */
 #define ODI_SW_CMD23_PORT_QUEUE_MAP	0xd4U	/* cmd 23, a downstream queue */
@@ -126,17 +165,23 @@ void odi_switch_cmd_reset_state(void)
 {
 	unsigned int i;
 
-	odi_sw_tcont_n = 0;
-	odi_sw_us_sched_used = 0;
-	for (i = 0; i < ODI_SW_CMD_TCONT_MAX; i++)
+	for (i = 0; i < ODI_SW_PONQ_TCONTS; i++) {
+		odi_sw_tcont[i].alloc_id = 0;
+		odi_sw_tcont[i].live = 0;
 		odi_sw_tcont[i].used = 0;
+		odi_sw_tcont[i].qbase = 0;
+		odi_sw_tcont[i].qn = 0;
+	}
+#ifndef __KERNEL__
+	odi_sw_host_rows_n = 0;
+#endif
 	odi_switch_bdgconn_reset();
 	for (i = 0; i < sizeof(odi_sw_gem_ds_used) / sizeof(odi_sw_gem_ds_used[0]); i++)
 		odi_sw_gem_ds_used[i] = 0;
 	for (i = 0; i < sizeof(odi_sw_gem_us_used) / sizeof(odi_sw_gem_us_used[0]); i++)
 		odi_sw_gem_us_used[i] = 0;
 	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
-		odi_sw_sid2qid[i] = ODI_SW_SID2QID_UNMAPPED;
+		odi_sw_sid2qid[i] = ODI_SW_SID_UNMAPPED;
 	for (i = 0; i < OMCI_FLOWS_MAX; i++) {
 		odi_sw_gem_ds_gem[i] = 0;
 		odi_sw_gem_ds_cfg[i] = 0;
@@ -208,21 +253,35 @@ static int cmd_flooding_port_mask(void *buf, uint32_t len)
 	return 0;
 }
 
+/* Bitmap helpers for the two flow tables. */
+static int flow_used(const uint32_t *map, uint32_t id)
+{
+	return (map[id / 32U] >> (id % 32U)) & 1U;
+}
+
+static void flow_mark(uint32_t *map, uint32_t id)
+{
+	map[id / 32U] |= 1U << (id % 32U);
+}
+
 /* cmd 23: a priority queue (uapi/omci_gemflow.h, struct omci_priq), in one
  * of two register shapes, and the argument says which. A downstream queue
  * writes PORT_QUEUE_MAP; the ISP1 capture sends its eight before any T-CONT
- * exists, all with the same word. An upstream queue writes the scheduler
- * words of the T-CONT it names (owner, the index cmd 21 handed back): its
- * slot is that T-CONT, not a count of calls, so provisioning the same MIB
- * again -- a MIB reset, a respawned omcid, a re-registration -- writes the
- * same words to the same places. Only the captured shape is programmed,
- * one queue per T-CONT on T-CONTs 0-15; anything else is refused rather
- * than written into the words of another T-CONT, the OMCC among them.
+ * exists, all with the same word. An upstream queue is queue `index` (its
+ * ordinal) of the T-CONT `owner` (the index cmd 21 handed back), and lands
+ * on that T-CONT's block: logical queue block start + ordinal. Its type
+ * and weight come from wrr and weight, its rates from cir and pir, as the
+ * stock driver sets them (a PIR of 0 with a CIR of 0 is no limit).
+ * Provisioning the same MIB again writes the same words to the same
+ * places. A queue outside the block, or on a T-CONT cmd 21 did not
+ * create, is refused: written anyway, it would land in another T-CONT's
+ * queues.
  */
 static int cmd_pri_queue(void *buf, uint32_t len)
 {
 	const struct omci_priq *q = (const struct omci_priq *)buf;
-	unsigned int t, ref;
+	struct odi_sw_tcont_slot *s;
+	uint32_t t, ord, lq, pq, weight, pir, i;
 
 	if (!q || len < sizeof(*q))
 		return -1;
@@ -235,60 +294,96 @@ static int cmd_pri_queue(void *buf, uint32_t len)
 		return -1;
 
 	t = q->owner;
-	if (t >= ODI_SW_CMD23_US_TCONTS || q->index != 0) {
-		ODI_SW_CMD_LOG("cmd 23: upstream queue %u of T-CONT %u not supported "
-			       "(one queue per T-CONT, T-CONTs 0-%u)\n", (unsigned int)q->index,
-			       t, ODI_SW_CMD23_US_TCONTS - 1U);
+	ord = q->index;
+	if (t >= ODI_SW_PONQ_TCONTS || !odi_sw_tcont[t].used || ord >= odi_sw_tcont[t].qn) {
+		ODI_SW_WARN("cmd 23: queue %u of T-CONT %u has no queue reserved for it\n",
+			    (unsigned int)ord, (unsigned int)t);
 		return ODI_SW_EOPNOTSUPP;
 	}
-	/* Past the five captured T-CONTs, the undecoded words of the last. */
-	ref = t < 5U ? t : 4U;
-	odi_sw_us_sched_used |= 1U << t;
-	odi_sw_ponmac_queue_add_ext(t, ODI_SW_CMD23_OMCC_TCONT_BIT | odi_sw_us_sched_used,
-				     odi_sw_cmd23_base_15[ref], 1U << t,
-				     odi_sw_cmd23_val_208[ref], odi_sw_cmd23_bitmask_212_213[ref],
-				     odi_sw_cmd23_use_213[ref]);
+	s = &odi_sw_tcont[t];
+	lq = s->qbase + ord;
+	pq = ponq_physical(t, lq);
+	weight = q->weight;
+	if (weight == 0U)
+		weight = 1U;
+	if (weight > ODI_SW_PONQ_WEIGHT_MAX)
+		weight = ODI_SW_PONQ_WEIGHT_MAX;
+	pir = (q->cir == 0U && q->pir == 0U) ? ODI_SW_PONQ_RATE_MAX : q->pir;
+	odi_sw_ponq_queue_add(t, lq, pq, q->wrr != 0U, weight, q->cir, pir);
+	s->live |= 1U << ord;
+	/* The flows already mapped to this queue are valid again. */
+	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
+		if (flow_used(odi_sw_gem_us_used, i) && odi_sw_sid2qid[i] == pq)
+			odi_sw_ponq_sidvalid_set(i, 1);
 	return 0;
 }
 
-/* cmd 21: no register write in any capture. The index goes back to
- * omcid in the argument (omci_tcont.index).
+/* cmd 24: the upstream queue cmd 23 programmed, taken out: its flows
+ * first (PON_SIDVALID), then the queue (odi_sw_ponq_queue_del()). A queue
+ * not programmed, or a downstream one (no register), is no error. The
+ * T-CONT's block is released with its last queue, for cmd 21 to reserve
+ * again.
+ */
+static int cmd_pri_queue_del(void *buf, uint32_t len)
+{
+	const struct omci_priq *q = (const struct omci_priq *)buf;
+	struct odi_sw_tcont_slot *s;
+	uint32_t t, ord, lq, pq, i;
+
+	if (!q || len < sizeof(*q))
+		return -1;
+	if (q->dir != OMCI_GEMFLOW_US)
+		return 0;
+	t = q->owner;
+	ord = q->index;
+	if (t >= ODI_SW_PONQ_TCONTS || ord >= 32U || !(odi_sw_tcont[t].live & (1U << ord)))
+		return 0;
+	s = &odi_sw_tcont[t];
+	lq = s->qbase + ord;
+	pq = ponq_physical(t, lq);
+	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
+		if (flow_used(odi_sw_gem_us_used, i) && odi_sw_sid2qid[i] == pq)
+			odi_sw_ponq_sidvalid_set(i, 0);
+	odi_sw_ponq_queue_del(t, lq, pq);
+	s->live &= ~(1U << ord);
+	if (!s->live)
+		s->qn = 0;
+	return 0;
+}
+
+/* cmd 21: the T-CONT of an Alloc-ID. Word 0 goes in as the number of
+ * queues omcid will put on it (1 if 0 or out of range: the stock caller
+ * leaves it uninitialised) and comes back as the T-CONT index, the
+ * Alloc-ID's CAM row. An Alloc-ID the OLT has not assigned by PLOAM gets a
+ * row here, as the stock driver gives it one. A row past the data
+ * T-CONTs (the OMCC's, or one of rows 17-31, which have no scheduler) or
+ * a block that does not fit in the group is refused.
  */
 static int cmd_tcont(void *buf, uint32_t len)
 {
 	struct omci_tcont *t = (struct omci_tcont *)buf;
-	uint32_t alloc_id = 0;
-	unsigned int i;
+	uint32_t n;
+	int row;
 
-	if (t && len >= sizeof(*t))
-		alloc_id = t->alloc_id;
-
-	for (i = 0; i < odi_sw_tcont_n; i++) {
-		if (odi_sw_tcont[i].used && odi_sw_tcont[i].alloc_id == alloc_id) {
-			if (t && len >= sizeof(*t))
-				t->index = i;
-			return 0;
-		}
-	}
-	if (odi_sw_tcont_n >= ODI_SW_CMD_TCONT_MAX)
+	if (!t || len < sizeof(*t))
+		return -1;
+	n = t->index;
+	if (n == 0U || n > ODI_SW_PONQ_GROUP_QUEUES)
+		n = 1U;
+	row = tcont_alloc_row(t->alloc_id);
+	if (row < 0 || row >= (int)ODI_SW_PONQ_TCONTS) {
+		ODI_SW_WARN("cmd 21: Alloc-ID %u has no data T-CONT (CAM row %d)\n",
+			    (unsigned int)t->alloc_id, row);
 		return ODI_SW_EOPNOTSUPP;
-	odi_sw_tcont[odi_sw_tcont_n].alloc_id = alloc_id;
-	odi_sw_tcont[odi_sw_tcont_n].used = 1;
-	if (t && len >= sizeof(*t))
-		t->index = odi_sw_tcont_n;
-	odi_sw_tcont_n++;
+	}
+	if (tcont_reserve((uint32_t)row, n)) {
+		ODI_SW_WARN("cmd 21: no %u free queues for T-CONT %d\n", (unsigned int)n, row);
+		return ODI_SW_EOPNOTSUPP;
+	}
+	odi_sw_tcont[row].alloc_id = t->alloc_id;
+	odi_sw_tcont[row].used = 1;
+	t->index = (uint32_t)row;
 	return 0;
-}
-
-/* Bitmap helpers for the two flow tables. */
-static int flow_used(const uint32_t *map, uint32_t id)
-{
-	return (map[id / 32U] >> (id % 32U)) & 1U;
-}
-
-static void flow_mark(uint32_t *map, uint32_t id)
-{
-	map[id / 32U] |= 1U << (id % 32U);
 }
 
 /* 1 + the highest flow id in use: what the readback reports as a count,
@@ -305,9 +400,42 @@ static uint32_t flow_extent(const uint32_t *map, uint32_t max)
 	return n;
 }
 
+static uint32_t us_flows_in_use(void)
+{
+	uint32_t i, n = 0;
+
+	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
+		if (flow_used(odi_sw_gem_us_used, i))
+			n++;
+	return n;
+}
+
+/* cmd 25 upstream with ena 0: the flow taken out, as the stock driver's
+ * flow delete does it: GEM port 0 in its slot, its valid bit cleared, and
+ * the PBO thresholds recomputed for one data flow fewer. A slot not in
+ * use is no error.
+ */
+static int us_flow_delete(uint32_t slot)
+{
+	if (slot >= ODI_SW_CMD_GEM_US_MAX)
+		return ODI_SW_EOPNOTSUPP;
+	if (!flow_used(odi_sw_gem_us_used, slot))
+		return 0;
+	odi_sw_ponq_us_gem_set(slot, 0);
+	odi_sw_ponq_sidvalid_set(slot, 0);
+	odi_sw_gem_us_used[slot / 32U] &= ~(1U << (slot % 32U));
+	odi_sw_ponq_glb_th_set(us_flows_in_use());
+	odi_sw_sid2qid[slot] = ODI_SW_SID_UNMAPPED;
+	if (slot < OMCI_FLOWS_MAX)
+		odi_sw_gem_us_gem[slot] = 0;
+	return 0;
+}
+
 /* cmd 25: dir picks the table, the flow id the row (see the state
- * above). The OMCI/broadcast GEM port (0xfff) is downstream only, which
- * gives the 6 downstream and 5 upstream instances of the capture.
+ * above), ena 1 creates or updates the flow and ena 0 deletes it (the
+ * stock driver's reading of the field). The OMCI/broadcast GEM port
+ * (0xfff) is downstream only, which gives the 6 downstream and 5 upstream
+ * instances of the capture.
  */
 static int cmd_gem_flow(void *buf, uint32_t len)
 {
@@ -323,6 +451,15 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 
 		if (idx >= ODI_SW_CMD_GEM_DS_MAX)
 			return ODI_SW_EOPNOTSUPP;
+		/* omcid never deletes a downstream flow, and this driver has
+		 * no downstream delete: refused rather than taken for a
+		 * create.
+		 */
+		if (!g->ena) {
+			ODI_SW_WARN("cmd 25: downstream flow %u delete not implemented\n",
+				    (unsigned int)idx);
+			return ODI_SW_EOPNOTSUPP;
+		}
 		/* A CAM write that did not complete is no flow: omcid does
 		 * not claim it on a nonzero return, and neither does this
 		 * table.
@@ -341,47 +478,41 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 	}
 
 	if (g->dir == OMCI_GEMFLOW_US) {
-		uint32_t slot = g->flow_id, sidvalid = 0, n = 0, i;
+		uint32_t slot = g->flow_id, t = g->tcont, ord = g->queue, pq;
+		int creating;
 
 		if (g->gem_port == 0xfffU) {
 			/* OMCI channel: downstream-only, no US table entry. */
 			return 0;
 		}
+		if (!g->ena)
+			return us_flow_delete(slot);
 		if (slot >= ODI_SW_CMD_GEM_US_MAX)
 			return ODI_SW_EOPNOTSUPP;
-		/* The flow queues on its T-CONT's queue. cmd 23 gives T-CONT
-		 * t one queue, physical queue t (its PON_SCH_QMAP word is
-		 * 1 << t), and refuses any other, so a flow on queue 0 of
-		 * T-CONT t maps to queue t.
+		/* The flow queues on queue `queue` (the ordinal) of T-CONT
+		 * `tcont`: the queue cmd 23 placed at that ordinal of the
+		 * T-CONT's block. A queue the T-CONT has no room for has no
+		 * physical queue to map to.
 		 */
-		if (g->tcont >= ODI_SW_CMD23_US_TCONTS || g->queue != 0) {
-			ODI_SW_CMD_LOG("cmd 25: upstream flow %u on queue %u of T-CONT %u "
-				       "not supported (one queue per T-CONT, T-CONTs 0-%u)\n",
-				       (unsigned int)slot, (unsigned int)g->queue,
-				       (unsigned int)g->tcont, ODI_SW_CMD23_US_TCONTS - 1U);
+		if (t >= ODI_SW_PONQ_TCONTS || !odi_sw_tcont[t].used || ord >= odi_sw_tcont[t].qn) {
+			ODI_SW_WARN("cmd 25: upstream flow %u on queue %u of T-CONT %u, "
+				    "which has no such queue\n", (unsigned int)slot,
+				    (unsigned int)ord, (unsigned int)t);
 			return ODI_SW_EOPNOTSUPP;
 		}
-		flow_mark(odi_sw_gem_us_used, slot);
-		odi_sw_sid2qid[slot] = (uint8_t)g->tcont;
-
-		/* PON_SIDVALID: one bit per upstream flow in use, the word
-		 * this flow is in (1, 3, 7, 0xf, 0x1f on ISP1).
+		pq = ponq_physical(t, odi_sw_tcont[t].qbase + ord);
+		creating = !flow_used(odi_sw_gem_us_used, slot);
+		/* The stock order: GEM port, valid bit, the thresholds (on a
+		 * create only), the queue.
 		 */
-		for (i = 0; i < 32U; i++)
-			if (flow_used(odi_sw_gem_us_used, (slot & ~31U) + i))
-				sidvalid |= 1U << i;
-		for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
-			if (flow_used(odi_sw_gem_us_used, i))
-				n++;
-		{
-			unsigned int ref = n < 5U ? n - 1U : 4U;
-			uint32_t w = slot / ODI_SW_SID2QID_PER_WORD;
-
-			odi_sw_ponmac_flow_queue_set(slot, g->gem_port, slot / 32U, sidvalid,
-						      odi_sw_cmd25_glb_th_on[ref],
-						      odi_sw_cmd25_glb_th_off[ref],
-						      w, sid2qid_word(w));
+		odi_sw_ponq_us_gem_set(slot, g->gem_port);
+		odi_sw_ponq_sidvalid_set(slot, 1);
+		if (creating) {
+			flow_mark(odi_sw_gem_us_used, slot);
+			odi_sw_ponq_glb_th_set(us_flows_in_use());
 		}
+		odi_sw_ponq_sid2qid_set(slot, pq);
+		odi_sw_sid2qid[slot] = (uint8_t)pq;
 		if (slot < OMCI_FLOWS_MAX)
 			odi_sw_gem_us_gem[slot] = g->gem_port;
 		if (odi_sw_flow_ops && odi_sw_flow_ops->set)
@@ -624,6 +755,9 @@ int odi_switch_cmd(uint32_t cmd, void *buf, uint32_t len)
 
 	case OMCI_PRIQ_CMD:	/* 23, setPriQueue (also createPriQByTcontId) */
 		return cmd_pri_queue(buf, len);
+
+	case OMCI_PRIQ_DEL_CMD:	/* 24, clearPriQueue */
+		return cmd_pri_queue_del(buf, len);
 
 	case OMCI_TCONT_CMD:	/* 21, createTcont/updateTcont */
 		return cmd_tcont(buf, len);
