@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Kernel: an OLT that disables the ONU (Disable_Serial_Number, the rogue-ONU
+  "emergency stop", state O7) now gets the laser switched off, as G.984.3
+  requires and the stock firmware does: the module's TX-disable line is
+  driven high in O7 and low again when the OLT re-enables the ONU (or
+  gpondeact, gponact or a reboot leaves O7). The state changed but nothing
+  stopped the transmitter, although the docs said it did. A laser the
+  `laser` verb refused is never switched on by this. `/proc/odi_gpon/status`
+  shows it as `laser_emergency_stop`.
+
 - Kernel: the GPON MAC follows G.984.3 in two cases neither of our OLTs
   hits. The ONU answers Request_Password with three identical Password
   messages (it sent one; the OLT accepts a password only after three).
