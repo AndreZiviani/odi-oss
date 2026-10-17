@@ -50,7 +50,7 @@ XML
 }
 run() {
 	env IFSTATE="$T/if" IFCONFIG="$T/ifconfig" SYSNET="$T/sys" CONF="$T/cs.xml" \
-	    HSCONF="$T/hs.xml" OVERRIDE="$T/lan-ip" sh "$N" "$@" 2>&1
+	    HSCONF="$T/hs.xml" OVERRIDE="$T/lan-ip" SAFE_FLAG="$T/safe-mode" sh "$N" "$@" 2>&1
 }
 calls() { cat "$T/if/calls" 2>/dev/null | wc -l | tr -d ' '; }
 
@@ -95,6 +95,55 @@ echo "192.168.0.1 255.255.255.0" > "$T/if/eth0"
 store 192.168.0.1 1 192.168.100.1
 run addr > /dev/null
 t "with no bridge the addresses go on eth0" "192.168.100.1 255.255.255.0" "$(cat "$T/if/eth0:2")"
+
+# A value the kernel refuses is not applied, and never moves a running stick:
+# the address stays, `addr` says so and fails. (The boot falls back to the
+# stock default for the same values, as when the key is absent.)
+mkdir -p "$T/sys/br0"
+echo "192.168.0.1 255.255.255.0" > "$T/if/br0"
+rm -f "$T/if/calls" "$T/if/br0:2"
+for bad in 0.0.0.0 127.0.0.1 224.0.0.1 255.255.255.255 192.168.010.1 192.168.1 1.2.3.4.5 abc; do
+	store "$bad" 0 192.168.100.1
+	out=$(run addr); rc=$?
+	t "an unusable address is refused: $bad" "1 0" "$rc $(calls)"
+done
+t "and the primary is where it was" "192.168.0.1 255.255.255.0" "$(cat "$T/if/br0")"
+for bad in 255.0.255.0 0.0.0.0 255.255.255.255 255.255.255.254 254.0.0.0 255.255.255.1 255.255.255.00 255.255.0.128; do
+	store 192.168.0.1 0 192.168.100.1
+	sed "s|Name=\"LAN_SUBNET\" Value=\"[^\"]*\"|Name=\"LAN_SUBNET\" Value=\"$bad\"|" "$T/cs.xml" > "$T/cs2.xml"; cp "$T/cs2.xml" "$T/cs.xml"
+	out=$(run addr); rc=$?
+	t "an unusable netmask is refused: $bad" "1 0" "$rc $(calls)"
+done
+for good in 255.255.255.252 255.0.0.0 255.255.128.0 255.255.255.128; do
+	store 192.168.0.1 0 192.168.100.1
+	sed "s|Name=\"LAN_SUBNET\" Value=\"[^\"]*\"|Name=\"LAN_SUBNET\" Value=\"$good\"|" "$T/cs.xml" > "$T/cs2.xml"; cp "$T/cs2.xml" "$T/cs.xml"
+	run addr > /dev/null
+	t "a usable netmask is applied: $good" "192.168.0.1 $good" "$(cat "$T/if/br0")"
+done
+echo "192.168.0.1 255.255.255.0" > "$T/if/br0"
+store 192.168.0.1 1 not-an-address
+out=$(run addr)
+t "an unusable second address is not added, and says so" "0 1" "$([ -f "$T/if/br0:2" ] && echo 1 || echo 0) $(echo "$out" | grep -c 'not usable')"
+
+# A safe-mode boot carries the rescue address whatever LAN_ENABLE_IP2 says:
+# the stored second address, else the stock default 192.168.100.1.
+: > "$T/safe-mode"
+store 192.168.0.1 0 10.9.9.1
+run addr > /dev/null
+t "safe mode: the rescue address is the stored second address" "10.9.9.1 255.255.255.0" "$(cat "$T/if/br0:2")"
+rm -f "$T/if/br0:2"
+store 192.168.0.1 0 ""
+run addr > /dev/null
+t "safe mode: and the stock default when none is stored" "192.168.100.1 255.255.255.0" "$(cat "$T/if/br0:2")"
+rm -f "$T/safe-mode" "$T/if/br0:2"
+store 192.168.0.1 0 192.168.100.1
+run addr > /dev/null
+t "outside safe mode LAN_ENABLE_IP2=0 adds nothing" "absent" "$([ -f "$T/if/br0:2" ] && echo present || echo absent)"
+
+echo "10.0.0.5" > "$T/lan-ip"
+store 192.168.0.1 0 192.168.100.1
+t "network.sh configured fails on an unusable /etc/config/lan-ip" "1" "$(echo 0.0.0.0 > "$T/lan-ip"; run configured > /dev/null; echo $?)"
+rm -f "$T/lan-ip"
 
 t "an unknown mode is refused" "1" "$(run bogus > /dev/null; echo $?)"
 
