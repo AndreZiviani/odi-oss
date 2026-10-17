@@ -10,21 +10,7 @@
  * every per-instance argument-struct field -- was built from a direct
  * decode.py run over the boot5 capture (the reference this test compares
  * against): `python3 tools/regtrace/decode.py <regmap>
- * boot5.txt` (no --summary), read bracket by bracket. That direct read is
- * also what corrected two fields an earlier boot3-based pass got only
- * approximately right for boot5:
- *
- *   - cmd 23 per-queue scheduling-queue value (odi_sw_qos_sched_
- *     set `value` parameter, PONQ_COUNT_MASK+190..194): boot5 writes 1<<n
- *     (1, 2, 4, 8, 0x10 for instances 9-13), not the constant 0 the
- *     odi_switch_dal.h leaf comment records for boot3 -- the two captures
- *     genuinely differ here, boot5 is what this test replays against, and
- *     the leaf itself is unchanged (it already takes the value as a
- *     parameter).
- *   - cmd 25 US PONQ_COUNT_MASK+235/+20/+21 words: undecoded fields
- *     (odi_switch_dal.h own leaf comment), replayed here from boot5 by
- *     GEM slot ordinal rather than computed, same posture as odi_switch_
- *     cmd.c internal lookup tables.
+ * boot5.txt` (no --summary), read bracket by bracket.
  *
  * cmd 51 (activeBdgConn): the CF and VLAN rows are DERIVED from the
  * omci_bdgconn argument (odi_switch_cmd.c, cmd_active_bdg_conn), so this
@@ -36,9 +22,11 @@
  * flow ids omcid allocated (0..5 downstream, 0..4 upstream, same log):
  * the tables are indexed by them now.
  *
- * cmd 23 instances #10-13 used to be an expected DIFF (a write-order swap
- * between PONQ_COUNT_MASK+208 and +212/+213); odi_sw_ponmac_queue_add_ext()
- * now tracks it, see odi_switch_cmd_test.sh.
+ * cmd 21, 23 and 25 upstream carry what omcid sends (the queue count, the
+ * ordinal, the weight), and every word of their brackets is computed from
+ * it (docs/SWITCH.md#upstream-pon-queues), on the PON queue block as the
+ * boot replays leave it (odi_mock_ponq_boot_state()). Nothing is replayed
+ * by T-CONT or flow ordinal any more.
  *
  * Usage: odi_switch_cmd_test <out-file>. Writes the whole 91-bracket replay
  * as one ring dump.
@@ -79,6 +67,10 @@ int main(int argc, char **argv)
 
 	odi_mock_reset();
 	odi_switch_cmd_reset_state();
+	/* The PON queue block as the boot replays leave it: cmd 23 and 25
+	 * change one field of it at a time.
+	 */
+	odi_mock_ponq_boot_state();
 
 	/* The brackets are the stock image, which leaves PAUSE toward the
 	 * host to the auto-negotiation: its cmd 32 writes PORT_FORCE_SELECT 0.

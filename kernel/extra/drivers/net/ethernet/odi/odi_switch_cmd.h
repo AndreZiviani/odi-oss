@@ -7,9 +7,10 @@
  * in uapi/.
  *
  * The commands an ISP1 or ISP2 provisioning run sends are implemented,
- * with the state they need: a T-CONT list, the downstream and upstream
- * GEM flow tables indexed by the flow id omcid sends, the T-CONTs with
- * an upstream queue (cmd 23), and for cmd 51/50 the service list and the
+ * with the state they need: the T-CONTs by Alloc-ID CAM row with their
+ * block of upstream queues (cmd 21, 23, 24), the downstream and upstream
+ * GEM flow tables indexed by the flow id omcid sends, and for cmd 51/50
+ * the service list and the
  * CF table derived from the bridge rules (odi_switch_bdgconn.c). Every
  * other command is a no-op success where the stock driver writes nothing,
  * a value from that state, or -EOPNOTSUPP, logged once.
@@ -26,12 +27,11 @@
 #include <stdint.h>
 #endif
 
-/* Well above one ISP1 provisioning run (5 T-CONTs, 6 DS and 5 US GEM
- * flows, 12 bridge connections), so a second provisioning pass does not
- * wrap into another service slot. Priority queues need no table: cmd 23
- * addresses one by the T-CONT it names.
+/* Well above one ISP1 provisioning run (6 DS and 5 US GEM flows, 12
+ * bridge connections), so a second provisioning pass does not wrap into
+ * another service slot. The T-CONTs are the hardware's 16 data T-CONTs
+ * (ODI_SW_PONQ_TCONTS, odi_switch_dal.h).
  */
-#define ODI_SW_CMD_TCONT_MAX	32
 #define ODI_SW_CMD_GEM_DS_MAX	64
 #define ODI_SW_CMD_GEM_US_MAX	64
 #define ODI_SW_CMD_BDGCONN_MAX	128
