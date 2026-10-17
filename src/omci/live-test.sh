@@ -72,6 +72,10 @@ cat > /var/config/lastgood.xml <<XML
 		<Value Name="VLAN_MANU_MODE" Value="1"/>
 		<Value Name="VLAN_MANU_TAG_VID" Value="25"/>
 		<Value Name="VLAN_MANU_TAG_PRI" Value="3"/>
+		<Value Name="LOID" Value="ODITESTLOID"/>
+		<Value Name="LOID_OLD" Value="ODITESTLOID"/>
+		<Value Name="LOID_PASSWD" Value="ODIPW"/>
+		<Value Name="LOID_PASSWD_OLD" Value="ODIPW"/>
 	</Dir>
 </Config>
 XML
@@ -144,6 +148,32 @@ for tc in 32768 32769 32775 32776 32783; do
 	check "T-CONT $tc: Policy is 1 (reported by the ONU)" "$(attr 262 $tc 3)" "01"
 done
 check "TR-069 server: locked until the OLT unlocks it" "$(attr 340 1537 1)" "01"
+check "TR-069 server: no ACS address yet (0xffff, the stock default row)" "$(attr 340 1537 2)" "ffff"
+check "TR-069 server: no associated tag yet (0xffff)" "$(attr 340 1537 3)" "ffff"
+# The LOID as the stock MIB reset fills it, in ONU-G and in the CTC entity.
+check "ONU-G logical ONU ID is the configured LOID" "$(attr 256 0 10 | cut -c1-24)" \
+      "4f4449544553544c4f494400"
+check "ONU-G logical password is the configured one" "$(attr 256 0 11)" \
+      "4f4449505700000000000000"
+check "CTC LOID authentication: OperationId is \"CTC \"" "$(attr 65530 0 1)" "43544320"
+check "CTC LOID authentication: the same LOID" "$(attr 65530 0 2 | cut -c1-24)" \
+      "4f4449544553544c4f494400"
+# An OLT-set MAC ageing time is seconds; cmd 62 takes tenths (100 s -> 1000).
+$Q cli/build/omcli --inject "0c03480a002d00010040$(printf '00000064%052d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+wait_count /tmp/live-a.log "ageing time 1000" 1 10
+check "MAC bridge ageing time 100 s is sent as 1000 tenths" \
+      "$(grep -c 'ageing time 1000' /tmp/live-a.log)" "1"
+# The register field holds 21 bits of tenths: 209715 s still fits (2097150),
+# one second more, and anything larger, is clamped to 2097151 instead of
+# being masked into a short ageing time.
+$Q cli/build/omcli --inject "0c04480a002d00010040$(printf '00033333%052d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+wait_count /tmp/live-a.log "ageing time 2097150" 1 10
+check "MAC bridge ageing time 209715 s still fits the register" \
+      "$(grep -c 'ageing time 2097150' /tmp/live-a.log)" "1"
+$Q cli/build/omcli --inject "0c05480a002d00010040$(printf '000493e0%052d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+wait_count /tmp/live-a.log "ageing time 2097151" 1 10
+check "MAC bridge ageing time 300000 s is clamped to the 21-bit field" \
+      "$(grep -c 'ageing time 2097151' /tmp/live-a.log)" "1"
 check "VEIP: locked until the OLT unlocks it" "$(attr 329 1537 1)" "01"
 check "VEIP: and disabled while locked" "$(attr 329 1537 2)" "01"
 # Set VEIP 0x0601 AdminState to 0 (unlocked), as an OLT does.

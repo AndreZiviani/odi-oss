@@ -200,8 +200,10 @@ Details that bite:
   handling" below.
 - **The OLD LOID wins.** When `LOID` and `LOID_OLD` differ, the OLD value is
   answered -- including an empty OLD beside a set LOID, which answers
-  nothing; the same for the passwords. That is the stock rule, kept so both
-  slots agree. The UI writes `LOID_OLD` together with `LOID` (and the
+  nothing. The password follows the LOID, as in the stock `runomci.sh`: with
+  the same LOID in both keys the current `LOID_PASSWD` is answered (a changed
+  password takes effect), with different LOIDs `LOID_PASSWD_OLD` is answered.
+  That is the stock rule, kept so both slots agree. The UI writes `LOID_OLD` together with `LOID` (and the
   password pair), and shows the `_OLD` keys read-only. Untested: neither
   ISP1 nor ISP2 uses a LOID, and neither runs against a CTC OLT.
 - **omcid looks for each key in both files**, the one xmlconfig assigns it
