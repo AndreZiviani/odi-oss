@@ -114,6 +114,7 @@ class Plugin:
         # has been processed. Killing at the call instead silently zeroes an
         # attribute's avc flag and blanks one attribute's name.
         pending_clobber = None
+        pending_call = None
         for i in range(n):
             a = va + i * 4
             w = img.word(a)
@@ -125,8 +126,19 @@ class Plugin:
                 gp = hi + s16(w) + a - 4
             elif op == 0x0f:                                  # lui
                 reg[rt] = (w & 0xffff) << 16
-            elif op == 0x0d and rs in reg:                    # ori
-                reg[rt] = reg[rs] | (w & 0xffff)
+            elif op == 0x0d:                                  # ori
+                # `ori rt,$zero,imm` is how the compiler loads a constant of
+                # 0x8000 or more (addiu would sign-extend it), which is every
+                # class id above 32767. $zero is never in `reg`, so this arm
+                # used to be skipped for exactly that form and rt kept
+                # whatever it held before -- nine plugins got the offset of
+                # their description string as a class id.
+                if rs == 0:
+                    reg[rt] = w & 0xffff
+                elif isinstance(reg.get(rs), int):
+                    reg[rt] = reg[rs] | (w & 0xffff)
+                else:
+                    reg.pop(rt, None)
             elif op == 9:                                     # addiu / li
                 if rs == 0:
                     reg[rt] = s16(w)
@@ -160,6 +172,7 @@ class Plugin:
                 reg.pop((w >> 11) & 31, None)
                 if (w & 0x3f) == 9:                           # jalr
                     pending_clobber = CALL_CLOBBER
+                    pending_call = reg.get(rs)
             elif op == 3:                                     # jal
                 pending_clobber = CALL_CLOBBER
             elif op == 0x1c:                                  # SPECIAL2: mul
@@ -170,9 +183,42 @@ class Plugin:
                 reg.pop(rt, None)
 
             if pending_clobber is not None and not was_call:
+                # The arguments are final only after the delay slot, which
+                # often loads the length: `jalr t9; li a2,0x28`.
+                if pending_call == ('fn', 'memcpy'):
+                    self._memcpy(reg.get(4), reg.get(5), reg.get(6))
+                pending_call = None
                 for d in pending_clobber:
                     reg.pop(d, None)
                 pending_clobber = None
+
+    def _obj_of(self, va):
+        """(base, tag) of the table object `va` points into, or None. The
+        objects are the four bss structures of this plugin; none is larger
+        than a few kilobytes."""
+        if not isinstance(va, int):
+            return None
+        best = None
+        for base in self.objs:
+            if base <= va < base + 0x4000 and (best is None or base > best):
+                best = base
+        return (best, self.objs[best]) if best is not None else None
+
+    def _memcpy(self, dst, src, n):
+        """memcpy(dst, src, n) between two places of the table objects.
+        Several plugins build a run of identical attribute descriptors by
+        copying one and then storing only the new name over the copy --
+        mib_OnuPwrShedding.so copies its DataShedIntvl descriptor eight times,
+        mib_LargeString.so its Part1 fourteen -- so without this the copies
+        have a name and nothing else, a width of zero."""
+        d, s_ = self._obj_of(dst), self._obj_of(src)
+        if not d or not s_ or not isinstance(n, int) or d[1] != s_[1]:
+            return
+        st = self.store[d[1]]
+        so, do = src - s_[0], dst - d[0]
+        for off, val in list(st.items()):
+            if so <= off < so + n:
+                st[do + off - so] = val
 
     def _s(self, v):
         return self.img.cstr(v) if isinstance(v, int) else None
@@ -228,13 +274,6 @@ def main():
             bad += 1
             continue
         t, a = p.table(), p.attrs()
-        # The plugin's TableInfo carries 10440 for LoidAuth, but the entity
-        # the OLT addresses -- and the vendor daemon answers -- is the China
-        # Telecom LOID authentication ME, 65530 (the class id the China
-        # Telecom OMCI extension assigns it; ISP1's OLT reads it three times and sets AuthStatus on it before
-        # deciding whether to provision services).
-        if base == 'mib_LoidAuth.so':
-            t['classId'] = 65530
         # entrySize is stored independently of the descriptors, so comparing
         # the two checks the decode of both. It is a lower bound, not an
         # equality: the row aligns each attribute naturally, and a table-valued
@@ -312,7 +351,28 @@ struct omci_attr {
 \tuint8_t oltAcc;     /* what the OLT may do with it */
 \tuint8_t isIndex;
 \tuint8_t avc;        /* raises an attribute value change */
+\tuint16_t opt;       /* option type: OMCI_OPT_* below */
 };
+
+/* The attribute option type, a mask (vendor omci_me_attr_type_mask_t, read
+ * by MIB_GetAttrOptionType). The MIB upload leaves out every attribute with
+ * one of OMCI_OPT_NOT_UPLOADED: FUN_0040ff70 and the upload walk of omci_app
+ * test `(opt & 0x31a) == 0`. */
+#define OMCI_OPT_MANDATORY      0x001
+#define OMCI_OPT_M_NOT_SUPPORT  0x002
+#define OMCI_OPT_OPTIONAL       0x004
+#define OMCI_OPT_O_NOT_SUPPORT  0x008
+#define OMCI_OPT_PRIVATE        0x010
+#define OMCI_OPT_PM             0x100
+#define OMCI_OPT_TABLE          0x200
+#define OMCI_OPT_NOT_UPLOADED   0x31a
+
+/* The entity type (vendor omci_me_type_t, MIB_GetTableStdType). The upload
+ * skips a whole class with either bit of OMCI_STD_NOT_UPLOADED set
+ * (`(std & 0x110) == 0` in omci_app). */
+#define OMCI_STD_PRIVATE        0x010
+#define OMCI_STD_NO_UPLOAD      0x100
+#define OMCI_STD_NOT_UPLOADED   0x110
 
 struct omci_class {
 \tuint16_t classId;
@@ -321,6 +381,8 @@ struct omci_class {
 \tconst struct omci_attr *attrs;
 \tuint8_t nattr;
 \tuint32_t actions;   /* 1 << msgType, for every message type the ME accepts */
+\tuint16_t std;       /* entity type: OMCI_STD_* */
+\tuint8_t init;       /* 0 the ONU creates it, 1 the OLT does */
 };
 
 extern const struct omci_class omci_classes[];
@@ -345,13 +407,14 @@ def emit_c(model, outdir):
             continue
         lines.append('static const struct omci_attr attr_%s[] = {' % nm)
         for a in e['attrs']:
-            lines.append('\t{ "%s", %s, %s, %s, %s, %s },' % (
+            lines.append('\t{ "%s", %s, %s, %s, %s, %s, 0x%03x },' % (
                 a['name'], C_TYPE.get(a['type'], 'OMCI_U8'), a['size'] or 0,
-                a['oltAcc'] or 0, a['isIndex'] or 0, a['avcFlag'] or 0))
+                a['oltAcc'] or 0, a['isIndex'] or 0, a['avcFlag'] or 0,
+                a['optionType'] or 0))
         lines.append('};')
-        rows.append('\t{ %5d, "%s", %s, attr_%s, %s, 0x%08xu },' % (
+        rows.append('\t{ %5d, "%s", %s, attr_%s, %s, 0x%08xu, 0x%03x, %d },' % (
             t['classId'], t['name'], t['entrySize'], nm, len(e['attrs']),
-            t['actionType'] or 0))
+            t['actionType'] or 0, t['stdType'] or 0, t['initType'] or 0))
     lines += ['', 'const struct omci_class omci_classes[] = {'] + rows + ['};', '',
               'const unsigned omci_class_count = %d;' % len(rows)]
     with open(os.path.join(outdir, 'omci_mib.c'), 'w') as fh:

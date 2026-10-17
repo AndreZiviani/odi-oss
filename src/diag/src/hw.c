@@ -80,6 +80,24 @@ int hw_transceiver_get(int sel, uint8_t out[DDM_RAW_LEN])
 	return 0;
 }
 
+int hw_transceiver_block_get(int sel, uint8_t out[DDM_RAW_LEN])
+{
+	struct odi_sw_ddm d;
+	int i, rc;
+
+	if (sel < DDM_SEL_MONITOR_TYPE || sel > DDM_SEL_LIMITS_B)
+		return -1;
+	d.type = (uint32_t)sel;
+	for (i = 0; i < DDM_RAW_LEN; i++)
+		d.raw[i] = 0;
+	rc = sw_ioctl(ODI_SW_IOC_DDM_GET, &d);
+	if (rc != 0)
+		return rc;
+	for (i = 0; i < DDM_RAW_LEN; i++)
+		out[i] = d.raw[i];
+	return 0;
+}
+
 /* raw[0] = A2h byte 110 (status/control, bit 1 = RX_LOS), raw[2]/raw[3] =
  * bytes 112/113 (alarm flags), raw[6]/raw[7] = bytes 116/117 (warning
  * flags) -- see odi_ddm.c's own comment for the full 8-byte layout this

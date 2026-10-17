@@ -158,6 +158,71 @@ static int cmd_transceiver_alarms(void)
 	return 0;
 }
 
+/* ---------------------------------------------------- module self-description */
+
+/* SFF-8472 A0h byte 92, the diagnostic monitoring type. The conversions in
+ * ddm.c are the internally calibrated ones; this is where that assumption
+ * can be read back from the module. Bit 6: digital diagnostics implemented,
+ * 5: internally calibrated, 4: externally calibrated, 3: the received power
+ * is an average (else OMA). */
+static int cmd_transceiver_monitor(void)
+{
+	uint8_t raw[DDM_RAW_LEN];
+	unsigned int b;
+
+	if (hw_transceiver_block_get(DDM_SEL_MONITOR_TYPE, raw) != 0) {
+		out("% transceiver monitoring type read failed\n");
+		return 1;
+	}
+	b = raw[0];
+	out_fmt("Monitoring type: 0x%x\n", (unsigned long)b);
+	out_fmt("Digital diagnostics: %s\n", (b & 0x40) ? "implemented" : "not implemented");
+	out_fmt("Calibration: %s\n", (b & 0x20) ? ((b & 0x10) ? "internal and external" : "internal")
+					       : ((b & 0x10) ? "external" : "none"));
+	out_fmt("Rx power type: %s\n", (b & 0x08) ? "average" : "OMA");
+	return 0;
+}
+
+/* The alarm and warning limits, A2h 0-39, in the order SFF-8472 lays them
+ * out: per measurement, high alarm, low alarm, high warning, low warning,
+ * each a 16-bit word in the same scale as the reading itself, so ddm_format()
+ * prints them with the unit of the reading. */
+static int cmd_transceiver_limits(void)
+{
+	static const struct {
+		const char *name;
+		int sel;		/* the reading whose scale the limits use */
+	} meas[] = {
+		{ "Temperature",  DDM_TEMPERATURE },
+		{ "Voltage",      DDM_VOLTAGE },
+		{ "Bias Current", DDM_BIAS_CURRENT },
+		{ "Tx Power",     DDM_TX_POWER },
+		{ "Rx Power",     DDM_RX_POWER },
+	};
+	static const char *const level[4] = { "alarm high", "alarm low", "warning high", "warning low" };
+	uint8_t a[DDM_RAW_LEN], b[DDM_RAW_LEN];
+
+	if (hw_transceiver_block_get(DDM_SEL_LIMITS_A, a) != 0 ||
+	    hw_transceiver_block_get(DDM_SEL_LIMITS_B, b) != 0) {
+		out("% transceiver limits read failed\n");
+		return 1;
+	}
+	for (unsigned m = 0; m < 5; m++) {
+		/* Temperature, voltage and bias are bytes 0-23 of A2h, the two
+		 * powers 24-39: block B starts at byte 24. */
+		const uint8_t *base = m < 3 ? a + 8 * m : b + 8 * (m - 3);
+
+		for (unsigned l = 0; l < 4; l++) {
+			uint8_t word[DDM_RAW_LEN] = { base[2 * l], base[2 * l + 1] };
+			char value[64];
+
+			ddm_format(meas[m].sel, word, value, sizeof value);
+			out_fmt("%s %s: %s\n", meas[m].name, level[l], value);
+		}
+	}
+	return 0;
+}
+
 /* What odi_switch recorded when omcid programmed each flow (cmd 25): the
  * software record, not a read of the hardware tables. The traffic type is
  * the byte written at creation, so a later AES enable does not show, and a
@@ -343,6 +408,10 @@ int cmd_run(const struct parsed *p)
 		return cmd_alarm_status();
 	case CMD_TRANSCEIVER_ALARMS:
 		return cmd_transceiver_alarms();
+	case CMD_TRANSCEIVER_MONITOR:
+		return cmd_transceiver_monitor();
+	case CMD_TRANSCEIVER_LIMITS:
+		return cmd_transceiver_limits();
 	case CMD_GPON_FLOWS:
 		return cmd_gpon_flows();
 	case CMD_GPON_FLOW_COUNTERS:

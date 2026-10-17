@@ -258,6 +258,114 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	fi
 fi
 
+# ------------------------------------------------ an Alloc-ID PLOAM has not assigned
+#
+# The kernel binds a T-CONT only to an Alloc-ID the OLT assigned by PLOAM in
+# this activation (G.984.3 5.5.4; odi_switch_cmd.c cmd 21, which drvtrace
+# answers the same way against the -g list). An OLT that sets T-CONT 0x8000
+# to 348 over OMCI before its Assign_Alloc-ID: cmd 21 is refused and no
+# upstream flow is created; the assignment then reaches the driver a quiet
+# second after the kernel list shows it. Then the OLT takes 348 back (a
+# deallocation, or the ONU-ID lost): the flow is deleted, cmd 21 is refused
+# again, and nothing re-creates the flow or keeps the old T-CONT index.
+if [ "${UPDATE:-0}" != 1 ]; then
+	cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+	gpon /tmp/gpon-late "0"
+	log=/tmp/omcid-drv-late.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-late > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	$Q cli/build/omcli --inject-file "$FIX/omci-session-isp2.txt" > /dev/null 2>&1
+	settled "$log"
+	us_create='^drv 25 68 0000000000000291.*00000001$'
+	if grep -q 'drvtrace: cmd 21 refused, alloc 348 not assigned' "$log" &&
+	   ! grep -q "$us_create" "$log"; then
+		echo "ok    an Alloc-ID set over OMCI only: cmd 21 refused, no upstream flow"
+	else
+		echo "FAIL  an Alloc-ID set over OMCI only reached the hardware"
+		grep '^drv 2[15] \|drvtrace:' "$log"
+		fail=$((fail + 1))
+	fi
+	gpon /tmp/gpon-late "1 348"
+	if need "$log" "$us_create" 30; then
+		echo "ok    the Assign_Alloc-ID that follows binds the T-CONT and creates the flow"
+	fi
+	gpon /tmp/gpon-late "0"
+	if need "$log" 'drvtrace: cmd 21 refused, alloc 348 not assigned' 30 2; then
+		map=$($Q cli/build/omcli tcont 2>&1 | grep -c '^  me [0-9a-f]* -> index')
+		creates=$(grep -c "$us_create" "$log")
+		deletes=$(grep -c '^drv 25 68 0000000000000000.*00000001$' "$log")
+		if [ "$map" = 0 ] && [ "$creates" = 1 ] && [ "$deletes" -ge 1 ]; then
+			echo "ok    a deallocated Alloc-ID: flow deleted, T-CONT unbound, nothing re-created"
+		else
+			echo "FAIL  after the deallocation: $map T-CONTs mapped, $creates creates, $deletes deletes"
+			grep '^drv 2[15] \|drvtrace:' "$log"
+			fail=$((fail + 1))
+		fi
+	fi
+	omcid_stop "$pid"
+fi
+
+# ------------------------------------------------ the OLT locks the UNI
+#
+# Class 11 attribute 5 (AdministrativeState) = 1 forces the host link down
+# (driver command 32, state 0). The lock must not outlive the MIB it came
+# from: omcid unlocks when it starts with an empty MIB and on every MIB reset,
+# because the reset puts the attribute back to 0 and the OLT then sends no
+# unlock of its own. OMCI_UNI_LOCK=0 in odi.conf ignores the lock.
+if [ "${UPDATE:-0}" != 1 ]; then
+	uni_set() {   # uni_set <tci> <admin state>: Set of ME 11 0x0101, attribute 5
+		printf '%s480a000b01010800%02d%058d00000028%08d\n' "$1" "$2" 0 0
+	}
+	mib_reset() {   # mib_reset <tci>
+		printf '%s4f0a00020000%064d00000028%08d\n' "$1" 0 0
+	}
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-lock.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	{
+		uni_set 0e60 01
+		get_frame 0e61 0106 8000 8000
+		mib_reset 0e62
+		get_frame 0e63 0106 8000 8000
+	} > /tmp/session-lock.txt
+	$Q cli/build/omcli --inject-file /tmp/session-lock.txt > /dev/null 2>&1
+	need "$log" '^drv 32 ' 20 3
+	finish "$log"
+	calls=$(grep '^drv 32 ' "$log" | sed 's/^drv 32 8 0*//; s/^$/0/' | tr '\n' ' ')
+	if [ "$calls" = "1 0 1 " ]; then
+		echo "ok    UNI lock: unlock at start, the OLT lock honoured, unlock again on the MIB reset"
+	else
+		echo "FAIL  UNI lock: cmd 32 states were '$calls', want '1 0 1 '"
+		grep '^drv 32 ' "$log"
+		fail=$((fail + 1))
+	fi
+
+	printf 'OMCI_UNI_LOCK=0\n' > /var/config/odi.conf
+	log=/tmp/omcid-drv-lock0.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	uni_set 0e64 01 > /tmp/session-lock0.txt
+	$Q cli/build/omcli --inject-file /tmp/session-lock0.txt > /dev/null 2>&1
+	need "$log" 'lock ignored (OMCI_UNI_LOCK=0)' 20
+	# No bridge rebuild follows (nothing here touches a connection), so
+	# settled would wait for one that never comes: the Get answered is the
+	# sync point.
+	sync_send "$log"
+	omcid_stop "$pid"
+	rm -f /var/config/odi.conf
+	calls=$(grep '^drv 32 ' "$log" | sed 's/^drv 32 8 0*//; s/^$/0/' | tr '\n' ' ')
+	if [ "$calls" = "1 1 " ]; then
+		echo "ok    OMCI_UNI_LOCK=0: the OLT lock is answered but the port stays up"
+	else
+		echo "FAIL  OMCI_UNI_LOCK=0: cmd 32 states were '$calls', want '1 1 '"
+		fail=$((fail + 1))
+	fi
+fi
+
 # ------------------------------------------------ ANI-G GEM block length
 #
 # Class 263 attribute 3 is the GEM block length (G.988 9.2.1), the one
@@ -329,5 +437,98 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	esac
 fi
 
+# ------------------------------------------------ the upstream rebuild changes only what changed
+#
+# After the ISP1 provisioning, three Sets an OLT may send on a live line:
+#   A. a referenced queue (class 277) Set to the Weight it already has: the
+#      rebuild runs and sends nothing;
+#   B. the same queue Set to another Weight: one cmd 23 for that queue, in
+#      place, and no T-CONT, queue delete or flow call;
+#   C. a traffic scheduler (class 278) no queue names (ISP1 points its
+#      queues at 0x8000-0x8007; 0x800f is one of its unused ones): no
+#      rebuild at all.
+# Before, every rebuild deleted and re-created every upstream queue and
+# flow, which on the stick drains the queues and stops all upstream.
+if [ "${UPDATE:-0}" != 1 ]; then
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-incr.log
+	$Q respond/build/omcid-drvtrace -a -w 8 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	$Q cli/build/omcli --inject-file "$FIX/omci-session-isp1.txt" > /dev/null 2>&1
+	settled "$log"
+	me=$(sed -n 's/.*us priq \([0-9]*\) ordinal 0 tcont [0-9]* weight 24 wrr 1 .*/\1/p' "$log" | head -1)
+	hex=$(printf '%04x' "${me:-0}")
+	nq=$(grep -c 'us qos' "$log")
+	calls=$(grep -c '^drv 2[1345] ' "$log")
+
+	printf '0e70480a0115%s0100%s%058d00000028%08d\n' "$hex" 18 0 0 > /tmp/incr-a.txt
+	$Q cli/build/omcli --inject-file /tmp/incr-a.txt > /dev/null 2>&1
+	if wait_for "$log" 'us qos' 30 $((nq + 1)); then
+		if [ "$(grep -c '^drv 2[1345] ' "$log")" = "$calls" ] &&
+		   grep 'us qos' "$log" | tail -1 | grep -q '5 T-CONTs kept, 0 built, 5 flows unchanged'; then
+			echo "ok    a queue Set that changes nothing sends no driver call"
+		else
+			echo "FAIL  a queue Set that changes nothing reprogrammed the upstream"
+			grep 'us qos' "$log" | tail -1
+			fail=$((fail + 1))
+		fi
+	fi
+
+	printf '0e71480a0115%s0100%s%058d00000028%08d\n' "$hex" 19 0 0 > /tmp/incr-b.txt
+	$Q cli/build/omcli --inject-file /tmp/incr-b.txt > /dev/null 2>&1
+	if wait_for "$log" 'us qos' 30 $((nq + 2)); then
+		new=$(grep '^drv 2[1345] ' "$log" | tail -n +$((calls + 1)))
+		if [ "$(printf '%s\n' "$new" | grep -c .)" = 1 ] &&
+		   printf '%s\n' "$new" | grep -q '^drv 23 28 .*00190000000000010000000000000001$'; then
+			echo "ok    a Weight change re-sends that one queue in place, nothing else"
+		else
+			echo "FAIL  a Weight change: driver calls were"
+			printf '%s\n' "$new"
+			fail=$((fail + 1))
+		fi
+	fi
+
+	# C has no event to wait for: it must cause none. A Get after it is
+	# answered first, then twice the one quiet second a rebuild waits for.
+	printf '0e72480a0116800f%s%s%058d00000028%08d\n' 2000 01 0 0 > /tmp/incr-c.txt
+	get_frame 0e73 0116 800f 2000 >> /tmp/incr-c.txt
+	$Q cli/build/omcli --inject-file /tmp/incr-c.txt > /dev/null 2>&1
+	wait_for "$log" '0e73290a0116' 30
+	sleep 2.5
+	if [ "$(grep -c 'us qos' "$log")" = $((nq + 2)) ]; then
+		echo "ok    a Set of a traffic scheduler no queue names causes no rebuild"
+	else
+		echo "FAIL  a Set of an unreferenced traffic scheduler rebuilt the upstream"
+		fail=$((fail + 1))
+	fi
+	omcid_stop "$pid"
+fi
+
+# A MIB reset from the OLT throws the MIB away, and the stock firmware's
+# reset clears the datapath with it. The bridge connections built from the
+# old MIB have to go: the rebuild after the reset deactivates every one of
+# them, and builds none from the empty MIB.
+if [ "${UPDATE:-0}" != 1 ]; then
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-reset.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	$Q cli/build/omcli --inject-file "$FIX/omci-session-isp1.txt" > /dev/null 2>&1
+	settled "$log"
+	n=$(rebuilt "$log")
+	inject_wait "$log" "$(printf '0e604f0a00020000%064d00000028%08d' 0 0)"
+	wait_for "$log" 'bridge connections rebuilt' 30 $((n + 1))
+	omcid_stop "$pid"
+	after=$(awk '/<- mib-reset/{d=0; a=0} /^drv 50 /{d++} /^drv 51 /{a++} END{print d" "a}' "$log")
+	if [ "${after#* }" = 0 ] && [ "${after% *}" -ge 6 ]; then
+		echo "ok    MIB reset: the rebuild deactivates the old bridge connections (${after% *}) and builds none"
+	else
+		echo "FAIL  MIB reset: after it, deactivated/activated were '$after', want >= 6 and 0"
+		fail=$((fail + 1))
+	fi
+fi
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit

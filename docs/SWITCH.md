@@ -283,7 +283,7 @@ commands, from the command table of the shipped binary:
 | 25 | cfgGemFlow | `odi_sw_gpon_usflow_set` (downstream), `odi_sw_ponq_us_gem_set`, `_sidvalid_set`, `_glb_th_set`, `_sid2qid_set` (upstream) | `odi_switch_ds_gem.c`, `odi_switch_qos.c` |
 | 11 | setSignalParameter | `odi_gpon_signal_threshold_set` (the SF/SD thresholds) | `odi_gpon.c`, `odi_gpon_ctr.c` |
 | 30 | setPortAutoNegoAbility | `odi_sw_port_autoneg_get`, `_set` | `odi_switch_port.c` |
-| 32 | setPortState | `odi_sw_port_force_get`, `_set` | `odi_switch_port.c` |
+| 32 | setPortState | `odi_sw_port_admin_set` | `odi_switch_port.c` |
 | 51 | activeBdgConn | `odi_sw_cf_add` | `odi_switch_cf.c` |
 | 62 | setAgeingTime | `odi_sw_l2_aging_set` | `odi_switch_port.c` |
 | 64 | setFloodingPortMask | `odi_sw_l2_flood_mask_set` | `odi_switch_port.c` |
@@ -298,19 +298,33 @@ commands, from the command table of the shipped binary:
   commands, each address twice, then the three values written back, with
   one more read command on 0xa400 before its write. The fields are not
   decoded, so the parameters are named by address.
-- **cmd 32**: `PORT_FORCE_SELECT(0) = 0`, every FORCE bit clear, so speed
-  and duplex come from the PHY. The admin state the command carries has no
-  register write in any capture; the leaf that took it did nothing and is
-  gone. Ours keeps one bit: `TX_PAUSE` stays forced on port 0 (the word is
-  0x40) unless `odi_switch.host_pause` is set, since a 0 would hand PAUSE
-  back to the auto-negotiation at every provisioning
-  ([Host port PAUSE](#host-port-pause)). The host tests compare this
-  bracket with the capture under the stock policy.
-- **cmd 64**: the capture writes `FLOOD_UNKN_UCAST_PORTS` (0x01c028, not
-  `FLOOD_BCAST_PORTS` at 0x01c020, which no capture writes) four times with
-  the same word, 0x7. The word holds the bit of every port, so the four
-  writes are one value repeated, not one per port; the repeat is kept
-  because the host replay compares brackets write for write.
+- **cmd 32**: the admin state of an Ethernet UNI, `{port, state}` (ME 11
+  AdministrativeState; omcid sends state 0 for a lock). It is the stock
+  SDK's admin enable: a lock writes LINK (bit 4) of `PORT_FORCE_ABILITY` to
+  0 and then sets LINK of `PORT_FORCE_SELECT`, so the port's link is forced
+  down; an unlock clears that select bit. Bit 4 only, both ways, so the
+  `TX_PAUSE` force on port 0 (the word is 0x40 unless
+  `odi_switch.host_pause` is set, [Host port PAUSE](#host-port-pause)) is
+  kept. The capture only ever shows the unlock, a read and a write of 0 to
+  `PORT_FORCE_SELECT(0)`: both ISPs leave the UNI unlocked. On this SFP the
+  UNI is the host port, so a lock takes the host link down, the stick's own
+  management path included, until the OLT unlocks; OMCI does not cross that
+  port. A lock of the PON or CPU port is refused (it would cut OMCI itself).
+  The host tests compare the unlock bracket with the capture under the
+  stock policy (`test/odi_host_pause_test.c` covers the lock).
+- **cmd 64**: `{sel, enable, portMask}`, a lookup-miss flood mask, as the
+  stock OMCI layer does it: `sel` picks unknown unicast
+  (`FLOOD_UNKN_UCAST_PORTS`, 0x01c028), broadcast (0x01c020) or unknown
+  multicast (0x01c024); `enable` 1 adds portMask's ports, 0 removes them,
+  every other port keeps its bit; 2 (trap) is refused. omcid names one
+  port per class 47 create or delete, so a delete or ME 45
+  `DiscardUnknown` = 1 takes that port out, not every port. One exception
+  is kept from the old fixed write: cmd 64 on the unknown-unicast mask
+  clears the CPU bit, which the module-load replay sets (0xf, above) and
+  the stock image never has; both ISPs run with it clear after the first
+  provisioning. The capture's call (the PON port added) gives 0x7, written
+  four times: the SDK writes the word once per port, and the host replay
+  compares brackets write for write.
 - **cmd 23** has two shapes, and the direction in its argument picks one.
   A downstream queue writes `PORT_QUEUE_MAP` (0x01c0c0; the word at
   0x01c0a0 is never written) with 0xd4, identical in the eight instances
@@ -383,8 +397,15 @@ on queue 64) before any OMCI.
 - **cmd 21** answers with the T-CONT index of the Alloc-ID it is given,
   which is the row of the Alloc-ID CAM that holds it: the hardware's T-CONT
   n is the scheduler that serves the grants of the Alloc-ID in CAM row n.
-  An Alloc-ID no Assign_Alloc-ID placed gets a row, as the stock driver
-  gives it one. Rows 0-15 are data T-CONTs; the OMCC's row 16 and rows
+  The row is looked up, never written: an Alloc-ID that no Assign_Alloc-ID
+  (type 1) of the current activation placed is refused, and omcid binds the
+  T-CONT once the assignment shows in /proc/odi_gpon/status. Only PLOAM
+  arms the CAM, because a row decides which grants the ONU answers (G.984.3
+  5.5.4: a T-CONT maps to an Alloc-ID "previously assigned to the given ONU
+  via the PLOAM messaging channel"). The stock driver writes a row here,
+  but only on a T-CONT Set; omcid also sends cmd 21 after every change of
+  the PLOAM list, where a write would bring back an Alloc-ID the OLT had
+  just taken away. Rows 0-15 are data T-CONTs; the OMCC's row 16 and rows
   17-31 (no scheduler) are refused. Word 0 goes in as the number of queues
   omcid will put on the T-CONT, and the driver reserves a block of that
   many consecutive logical queues in the T-CONT's group, first fit (the
@@ -416,6 +437,23 @@ on queue 64) before any OMCI.
   and OFF = 7744 - (n - 1) * s, with s the ON threshold of flow 0
   (`PON_SID_RPV_TH[0]`, 150 after the sdkinit replay) and ON no lower than
   2000 (OFF 1840). The five ISP1 pairs are its first five values.
+- **cmd 0** (the stock resetMib, the first of the stock command enum)
+  empties the upstream state: every upstream flow deleted as cmd 25 `ena`
+  0 does, every queue of a data T-CONT deleted as cmd 24 does, every
+  T-CONT block freed. The Alloc-ID CAM (PLOAM's), the OMCC (T-CONT 16,
+  flow 64), the downstream GEM rows and the bridge connections are left.
+  omcid sends it on a MIB reset (the OLT's, the CLI's, a re-registration)
+  and when it starts again in the same boot without resuming, so the next
+  provisioning never meets the last one's queue blocks or flows.
+
+omcid changes only what differs from what it programmed: a T-CONT whose
+Alloc-ID and queue at every ordinal are unchanged keeps its index and its
+queues, and a queue whose weight, type, marking or rates moved is sent again
+in place (cmd 23 on a queue already in the mask writes no drain); a flow is
+sent only when its GEM port, T-CONT or queue changed. A T-CONT that changed
+is torn down (its flows, then its queues) and built again alone. Only a
+change of the PLOAM Alloc-ID list tears everything down, since the CAM
+rows, and so the T-CONT indexes, may have moved.
 
 The driver used to replay ISP1's words for these registers by T-CONT and
 flow ordinal, which gave every other OLT ISP1's weights, drained T-CONT
@@ -580,8 +618,10 @@ slot (recorded by cmd 25 when it creates the port) and sets or clears the
 one bit with a read-modify-write. It also keeps the flag per GEM port, and
 cmd 25 applies it when it writes the slot: one OLT sends Encrypted_Port-ID
 right after O5, before any OMCI has created the port, and a flow cmd 25
-writes again (an OMCI MIB reset) gets FLAGS without the bit and no new
-PLOAM. The kept flags are forgotten when the ONU-ID is discarded; the next
+writes again (every QoS or bridge rebuild, an OMCI MIB reset) gets no new
+PLOAM. cmd 25 writes FLAGS once with the bit already in it, as the stock
+flow add does; written bare and set after, the row would decrypt nothing in
+between. The kept flags are forgotten when the ONU-ID is discarded; the next
 activation configures the ports again. The table covers DS slots 0..63,
 every flow cmd 25 accepts. Not reproduced from the capture: the CAM
 rewrite around the bit (it writes the same GEM id back), and the interrupt
@@ -593,6 +633,14 @@ from the kernel RNG (`hw_new_key()` in `odi_gpon_hw.c`), as G.984.3 clause
 the RNG is initialised still gets a key, with a one-time warning, because
 no key would make the OLT ask again and then deactivate the ONU.
 `test/odi_gpon_aes_key_test.sh` runs it against the register model.
+
+The OMCC port may be encrypted too (G.984.3 9.2.3.8 names any Port-ID): an
+Encrypted_Port-ID for the OMCI port sets the bit on its row (FLAGS `0x14`,
+`odi_gpon_hw_gem_port_encrypted()`), as the stock GPON module does, and a
+Configure_Port-ID writes the row back unencrypted (`0x04`). Without it, an
+OLT that encrypts the OMCC would leave every downstream OMCI frame
+unreadable. No OLT seen so far encrypts it, so this path is host-tested
+only. Like the stock module, the message's `b` bit is not read.
 
 Setting the bit on every data port at creation was rejected: a port the
 OLT does not encrypt would then be decrypted into garbage, and nothing here
@@ -643,7 +691,7 @@ line below is the one expected on a stick, not yet seen):
 
     odi_switch: host port PAUSE toward the host off: ability 0x0be (link 1, tx pause 0, rx pause 1)
 
-cmd 32 rewrites `PORT_FORCE_SELECT(0)` at every provisioning; its leaf keeps the bit
+cmd 32 writes `PORT_FORCE_SELECT(0)` at every provisioning; its leaf changes only the LINK bit
 ([Command leaves](#command-leaves)). `test/odi_host_pause_test.c` checks
 both words after the platform settings, after the whole ISP1 provisioning
 twice over, and through the parameter below.
