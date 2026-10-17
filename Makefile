@@ -110,7 +110,7 @@ image-all:
 # any did. TEST_JOBS is the number of legs at once (default: the CPUs);
 # `make test TEST_JOBS=1` runs them one by one. `make test-<leg>` runs one leg
 # on its own, its output streaming.
-OMCI_SUITES := qemu drv resume events swdl vlan reload live keys
+OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables alarms
 TEST_LEGS := lint test-host test-diag test-omci-respond test-igmp $(OMCI_SUITES:%=test-omci-%)
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
@@ -127,6 +127,7 @@ test-host:
 	$(MAKE) -C src/nv test
 	bash test/fwu_guard_test.sh
 	bash test/fwu_minimal_path_test.sh
+	bash test/fwu_write_order_test.sh
 	bash test/fwu_starter_test.sh
 	bash test/network_addr_test.sh
 	bash test/apply_test.sh
@@ -146,6 +147,7 @@ test-host:
 	bash test/odi_switch_dal_test.sh
 	bash test/odi_reg_test.sh
 	bash test/odi_switch_cmd_test.sh
+	bash test/odi_switch_flood_test.sh
 	bash test/odi_switch_cmd10_test.sh
 	bash test/odi_switch_isp2_test.sh
 	bash test/odi_switch_bdgconn_vlan_test.sh
@@ -173,6 +175,7 @@ test-host:
 	bash test/odi_gpon_us_ploam_test.sh
 	bash test/odi_gpon_ds_ploam_test.sh
 	bash test/odi_gpon_cam_test.sh
+	bash test/odi_gpon_o7_test.sh
 	bash test/odi_gpon_los_test.sh
 	bash test/odi_gpon_eqd_test.sh
 	bash test/odi_gpon_ctr_test.sh

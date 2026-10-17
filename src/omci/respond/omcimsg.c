@@ -61,7 +61,7 @@ void send_resp(int fd, uint32_t tid, const uint8_t *req,
 /* 10*log10(x) in units of 0.002 dB, integer only (this program has no libm):
  * log2 from the top bit plus a 33-point table for the mantissa, then the
  * 3.0103 dB per octave. Good to about 0.05 dB, far below what an OLT shows. */
-static int32_t db_x500_of(uint32_t x)
+int32_t db_x500_of(uint32_t x)
 {
 	static const uint16_t frac[33] = {   /* 500*10*log10(1 + k/32) */
 		0, 67, 133, 197, 260, 320, 380, 438, 494, 549, 603, 656, 707,
@@ -188,11 +188,9 @@ static void handle_upload_next(int fd, uint32_t tid, const uint8_t *f)
 
 struct getnext_ctx getnext;
 
-/* How many alarm records the last Get All Alarms promised. Always zero today --
- * nothing here raises an alarm -- but it is what Get All Alarms Next is
- * measured against, so the two cannot drift apart. 13 of the vendor's classes
- * raise alarms. Not static: snapshot.c persists and restores it across a
- * respawn, alongside the MIB data sync counter. */
+/* How many alarm records the last Get All Alarms promised (alarm.c). Not
+ * static: snapshot.c persists it across a respawn, alongside the MIB data
+ * sync counter. */
 uint16_t alarm_snapshot;
 
 /* A Get of a big attribute: report the byte length and remember the value.
@@ -293,6 +291,23 @@ static int addresses_entity(uint8_t mt)
 	       mt == OMCI_MT_SET || mt == OMCI_MT_GET ||
 	       mt == OMCI_MT_GET_NEXT || mt == OMCI_MT_TEST ||
 	       mt == OMCI_MT_GET_CURRENT_DATA;
+}
+
+/* An instance omcid does not hold.
+ *
+ * G.988 and the stock stack answer a Get, Set or Delete of an instance that
+ * does not exist with result 5, unknown instance (AUDIT B8). omcid answers
+ * them as if the instance were there: the built-in values for a Get, a new
+ * row for a Set, success for a Delete. Making that strict could break an OLT
+ * that addresses an instance omcid fails to create on its own (the
+ * companions of a MAC bridge port, say), so first the data: each (class,
+ * instance) such a request names is logged once per boot (ev_no_instance),
+ * and nothing about the answer changes. A Create is not one of these: it
+ * makes the instance. */
+static int targets_held_instance(uint8_t mt)
+{
+	return mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA ||
+	       mt == OMCI_MT_SET || mt == OMCI_MT_DELETE;
 }
 
 /* OMCI_UNKNOWN_ME_OK: success for a Create, Set or Get of a class omcid has
@@ -469,6 +484,9 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		ev_unknown_msg(mt, cls);
 	else if (!c && addresses_entity(mt))
 		ev_unknown_me(cls, mt);
+	else if (c && targets_held_instance(mt) && !mib_find(cls, inst) &&
+		 !instance_is_autonomous(cls, inst))
+		ev_no_instance(cls, inst, mt);
 
 	/* The software download steps answer for themselves (swimage.c). */
 	if (mt >= OMCI_MT_START_SW_DOWNLOAD && mt <= OMCI_MT_COMMIT_SW) {
@@ -495,38 +513,28 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	}
 	if (mt == OMCI_MT_GET_ALL_ALARMS) {
 		/* Same shape as MIB upload: a count of the Next commands to
-		 * follow, no result byte. Saying zero stops the OLT walking all
-		 * 256 alarm entries, which is what it did when this answered
-		 * "not supported".
-		 *
-		 * The vendor takes a snapshot here and hangs a 60-second timer
-		 * off it (OMCI_OnGetAllAlarms, 0x412eac), deleting the timer
-		 * immediately when the count is zero. Nothing in this daemon
-		 * raises an alarm yet, so the count is always zero and the
-		 * snapshot is always empty -- but the sequence counter is reset
-		 * for the same reason the vendor resets it, so a walk that the
-		 * OLT starts anyway is answered consistently. */
-		alarm_snapshot = 0;
-		body[0] = 0;
-		body[1] = 0;
+		 * follow, no result byte. The snapshot and the sequence number
+		 * reset are alarm.c's (OMCI_OnGetAllAlarms, 0x412eac). */
+		uint16_t n = alarm_get_all();
+
+		nl_put16(body, n);
 		send_resp(fd, tid, f, body, 2);
-		out("-> no alarms\n");
+		out_fmt("-> %d entities with alarms\n", (long)n);
 		return;
 	}
 	if (mt == OMCI_MT_GET_ALL_ALARMS_NEXT) {
-		/* Unreachable in a conforming exchange while the count above is
-		 * zero, which is why this was allowed to fall through to "not
-		 * supported" for so long. It is still the wrong answer: the OLT
-		 * asked a question this ME understands and got "I do not know
-		 * that command".
-		 *
-		 * The response is class id, instance id and a 28-byte alarm
-		 * bitmap -- 32 bytes, the whole contents field (0x412e14). With
-		 * an empty snapshot every sequence number is past the end, and
-		 * the vendor's own out-of-range answer is a failure result, not
-		 * a zero-filled record. */
+		/* Class id, instance id and the 28-byte alarm bitmap -- the
+		 * whole 32-byte contents field (0x412c58). Past the end of the
+		 * snapshot the stock answer is a failure result, not a
+		 * zero-filled record. */
 		uint16_t seq = nl_get16(f + 8);
 
+		if (alarm_get_next(seq, body) == 0) {
+			send_resp(fd, tid, f, body, 32);
+			out_fmt("-> get-all-alarms-next %d: class %d inst %04x\n",
+				(long)seq, (long)nl_get16(body), (long)nl_get16(body + 2));
+			return;
+		}
 		body[0] = OMCI_ERR_BAD_PARAM;
 		send_resp(fd, tid, f, body, 1);
 		out_fmt("-> get-all-alarms-next %d, but the snapshot holds %d\n",

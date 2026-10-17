@@ -214,8 +214,8 @@ static int odi_gpon_irq_isr_rc;
 static int odi_gpon_irq_imr_rc;
 
 /* Per-message-type counters, both directions -- one array wide enough for
- * every documented DS/US type byte (odi_gpon_ploam.h) plus the 0x81 ZTE-
- * interop variant, indexed directly by the raw type byte.
+ * every documented DS/US type byte (odi_gpon_ploam.h) plus the 0x81 vendor-
+ * specific Disable_Serial_Number variant, indexed directly by the raw type byte.
  */
 static unsigned int odi_gpon_ds_type_count[256];
 static unsigned int odi_gpon_us_type_count[256];
@@ -243,7 +243,7 @@ static bool odi_gpon_ds_type_known(uint8_t type)
 	case ODI_GPON_DS_BER_INTERVAL:
 	case ODI_GPON_DS_KEY_SWITCHING_TIME:
 	case ODI_GPON_DS_EXT_BURST_LENGTH:
-	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER_ZTE:
+	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS:
 		return true;
 	default:
 		return false;
@@ -736,6 +736,7 @@ int odi_gpon_init(void)
 	odi_gpon_hw_reset();
 	odi_gpon_fsm_init(&odi_gpon_fsm_inst);
 	odi_gpon_hw_set_ploam_log(odi_gpon_ploam_log);
+	odi_gpon_hw_set_tx_disable(odi_board_tx_disable);
 	odi_gpon_isr_set_msg_hook(odi_gpon_isr_msg);
 	odi_gpon_booted = false;
 	odi_gpon_ber_period_ms = 0U;
@@ -978,6 +979,17 @@ int odi_gpon_alloc_row(uint16_t alloc_id)
 	return row;
 }
 
+int odi_gpon_signal_threshold_set(unsigned int signal, unsigned int exp)
+{
+	unsigned long flags;
+	int rc;
+
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	rc = odi_gpon_ctr_signal_threshold_set(&odi_gpon_ctr_inst, signal, exp);
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+	return rc;
+}
+
 void odi_gpon_eqd_get(struct odi_gpon_eqd *eqd)
 {
 	uint32_t mf, inf;
@@ -1125,6 +1137,7 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 		odi_board_laser_get(&laser);
 		seq_printf(seq, "laser on %d ldd_id %d unverified %d\n",
 			   laser.laser_on, laser.ldd_id, laser.unverified);
+		seq_printf(seq, "laser_emergency_stop %d\n", laser.emergency_stop);
 	}
 	seq_printf(seq, "last_los_ms %lu state %d\n", last_los, last_los_state);
 

@@ -306,6 +306,66 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	omcid_stop "$pid"
 fi
 
+# ------------------------------------------------ the OLT locks the UNI
+#
+# Class 11 attribute 5 (AdministrativeState) = 1 forces the host link down
+# (driver command 32, state 0). The lock must not outlive the MIB it came
+# from: omcid unlocks when it starts with an empty MIB and on every MIB reset,
+# because the reset puts the attribute back to 0 and the OLT then sends no
+# unlock of its own. OMCI_UNI_LOCK=0 in odi.conf ignores the lock.
+if [ "${UPDATE:-0}" != 1 ]; then
+	uni_set() {   # uni_set <tci> <admin state>: Set of ME 11 0x0101, attribute 5
+		printf '%s480a000b01010800%02d%058d00000028%08d\n' "$1" "$2" 0 0
+	}
+	mib_reset() {   # mib_reset <tci>
+		printf '%s4f0a00020000%064d00000028%08d\n' "$1" 0 0
+	}
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-lock.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	{
+		uni_set 0e60 01
+		get_frame 0e61 0106 8000 8000
+		mib_reset 0e62
+		get_frame 0e63 0106 8000 8000
+	} > /tmp/session-lock.txt
+	$Q cli/build/omcli --inject-file /tmp/session-lock.txt > /dev/null 2>&1
+	need "$log" '^drv 32 ' 20 3
+	finish "$log"
+	calls=$(grep '^drv 32 ' "$log" | sed 's/^drv 32 8 0*//; s/^$/0/' | tr '\n' ' ')
+	if [ "$calls" = "1 0 1 " ]; then
+		echo "ok    UNI lock: unlock at start, the OLT lock honoured, unlock again on the MIB reset"
+	else
+		echo "FAIL  UNI lock: cmd 32 states were '$calls', want '1 0 1 '"
+		grep '^drv 32 ' "$log"
+		fail=$((fail + 1))
+	fi
+
+	printf 'OMCI_UNI_LOCK=0\n' > /var/config/odi.conf
+	log=/tmp/omcid-drv-lock0.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	uni_set 0e64 01 > /tmp/session-lock0.txt
+	$Q cli/build/omcli --inject-file /tmp/session-lock0.txt > /dev/null 2>&1
+	need "$log" 'lock ignored (OMCI_UNI_LOCK=0)' 20
+	# No bridge rebuild follows (nothing here touches a connection), so
+	# settled would wait for one that never comes: the Get answered is the
+	# sync point.
+	sync_send "$log"
+	omcid_stop "$pid"
+	rm -f /var/config/odi.conf
+	calls=$(grep '^drv 32 ' "$log" | sed 's/^drv 32 8 0*//; s/^$/0/' | tr '\n' ' ')
+	if [ "$calls" = "1 1 " ]; then
+		echo "ok    OMCI_UNI_LOCK=0: the OLT lock is answered but the port stays up"
+	else
+		echo "FAIL  OMCI_UNI_LOCK=0: cmd 32 states were '$calls', want '1 1 '"
+		fail=$((fail + 1))
+	fi
+fi
+
 # ------------------------------------------------ ANI-G GEM block length
 #
 # Class 263 attribute 3 is the GEM block length (G.988 9.2.1), the one
@@ -443,6 +503,31 @@ if [ "${UPDATE:-0}" != 1 ]; then
 		fail=$((fail + 1))
 	fi
 	omcid_stop "$pid"
+fi
+
+# A MIB reset from the OLT throws the MIB away, and the stock firmware's
+# reset clears the datapath with it. The bridge connections built from the
+# old MIB have to go: the rebuild after the reset deactivates every one of
+# them, and builds none from the empty MIB.
+if [ "${UPDATE:-0}" != 1 ]; then
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-reset.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	$Q cli/build/omcli --inject-file "$FIX/omci-session-isp1.txt" > /dev/null 2>&1
+	settled "$log"
+	n=$(rebuilt "$log")
+	inject_wait "$log" "$(printf '0e604f0a00020000%064d00000028%08d' 0 0)"
+	wait_for "$log" 'bridge connections rebuilt' 30 $((n + 1))
+	omcid_stop "$pid"
+	after=$(awk '/<- mib-reset/{d=0; a=0} /^drv 50 /{d++} /^drv 51 /{a++} END{print d" "a}' "$log")
+	if [ "${after#* }" = 0 ] && [ "${after% *}" -ge 6 ]; then
+		echo "ok    MIB reset: the rebuild deactivates the old bridge connections (${after% *}) and builds none"
+	else
+		echo "FAIL  MIB reset: after it, deactivated/activated were '$after', want >= 6 and 0"
+		fail=$((fail + 1))
+	fi
 fi
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi

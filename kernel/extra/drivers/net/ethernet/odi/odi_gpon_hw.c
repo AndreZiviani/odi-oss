@@ -127,6 +127,12 @@ struct odi_gpon_hw_state {
 	 * odi_gpon_isr()/odi_gpon_verb_*() call this fires from).
 	 */
 	odi_gpon_ploam_log_fn ploam_log;
+
+	/* The TX-disable hook (odi_gpon_hw_set_tx_disable()) and whether the
+	 * line is held asserted by it, for O7.
+	 */
+	odi_gpon_tx_disable_fn tx_disable;
+	int tx_disabled;
 };
 
 static struct odi_gpon_hw_state odi_gpon_hw;
@@ -208,6 +214,30 @@ void odi_gpon_hw_test_set_key_source(void (*fn)(uint8_t key[16]))
 
 /* ---- struct odi_gpon_fsm_ops leaves ---- */
 
+/* Emergency Stop (O7) turns the transmitter off: G.984.3 10.2.2 g) ("moves
+ * to the emergency stop state (O7) and shuts its laser off"), and the stock
+ * GPON module raises its TX-disable GPIO on every transition into O7 and
+ * lowers it on the enable that leaves O7, nowhere else (the 2.6.30 GPL
+ * drop, gpon_fsm.c, gpon_dev_rogueOntDisTx_set(); read, not copied). The
+ * MAC alone does not show that it stops bursting in O7. So the line
+ * follows the state written: asserted when it is O7, released when any
+ * other state is written after it, whichever path leaves O7 (the enable,
+ * the activate verb, gpondeact). Not tied to the FSM's laser_enable(),
+ * which also fires on Deactivate_ONU-ID and LOS, where stock leaves the
+ * laser alone and nothing would turn it back on before O3.
+ */
+static void hw_tx_gate(enum odi_gpon_state state)
+{
+	int want = state == ODI_GPON_STATE_O7;
+
+	if (want == odi_gpon_hw.tx_disabled || !odi_gpon_hw.tx_disable)
+		return;
+	if (odi_gpon_hw.tx_disable(want) == 0)
+		odi_gpon_hw.tx_disabled = want;
+	else
+		ODI_GPON_HW_WARN("TX-disable %s failed\n", want ? "assert (O7)" : "release");
+}
+
 static void hw_set_state(void *ctx, enum odi_gpon_state state)
 {
 	uint32_t reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
@@ -215,6 +245,7 @@ static void hw_set_state(void *ctx, enum odi_gpon_state state)
 	(void)ctx;
 	reg = ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)state);
 	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF, reg);
+	hw_tx_gate(state);
 }
 
 static void hw_release_rows(void);
@@ -537,7 +568,7 @@ static void hw_stop_to2(void *ctx) { (void)ctx; }
  * hardware default; not reproduced, a deliberate no-op, not a
  * silently-forgotten leaf.
  */
-static void hw_laser_enable(void *ctx, int enable) { (void)ctx; (void)enable; }
+static void hw_laser_enable(void *ctx, int enable) { (void)ctx; (void)enable; }	/* O7: hw_tx_gate() */
 
 /* link_force_up: named for odi_gpon_fsm.c's own design (its header comment:
  * "forcing the PON port MAC link up entering O5, down leaving it"), but the
@@ -852,9 +883,8 @@ void odi_gpon_hw_gem_port_configure(uint16_t gem_port_id, int activate)
 }
 
 /* Encrypted_Port-ID for the SAME Port-ID Configure_Port-ID already placed
- * at the primary row (the OMCC port, whose aes_en bit is left clear --
- * message says not-encrypted) is a plain re-write of TRAFFIC_CFG
- * at that row, handled below. Every OTHER GEM Port-ID -- the six ports
+ * at the primary row (the OMCC port) is a re-write of TRAFFIC_CFG at that
+ * row with the AES bit the message carries, handled below. Every OTHER GEM Port-ID -- the six ports
  * the OLT brings up right after O5 (react.txt
  * L1395-1812, one Encrypted_Port-ID each) -- is odi_switch's own DS slot,
  * populated at Configure_Port-ID time through
@@ -868,8 +898,9 @@ void odi_gpon_hw_gem_port_configure(uint16_t gem_port_id, int activate)
  * directly here instead of through that now-gone stock callback. No
  * captured evidence exists for `encrypted=1` on any port on this box
  * (every Encrypted_Port-ID this driver has ever seen sets the a-flag to
- * 0), so this path is forward-looking against the spec, not a
- * reproduction of a captured sequence. Returns
+ * 0), so the AES bit on either path is forward-looking against the spec
+ * and the stock module's handler (the 2.6.30 GPL drop's gpon_ploam.c),
+ * not a reproduction of a captured sequence. Returns
  * odi_switch_gpon_encrypt_port()'s own convention (0 =
  * applied, -1 = no DS slot recorded yet for this Port-ID, the flag kept
  * for when cmd 25 creates it) for that path,
@@ -909,10 +940,19 @@ int odi_gpon_hw_gem_port_encrypted(uint16_t gem_port_id, int encrypted)
 	rc = odi_poll_reg(ODI_SW_DSF_GEM_CAM_CTL_OFF, ODI_SW_DSF_GEM_CAM_CTL_DONE,
 			  ODI_SW_DSF_GEM_CAM_CTL_DONE, ODI_SW_TABLE_POLL_DELAY_US,
 			  ODI_SW_TABLE_POLL_US, NULL);
-	(void)encrypted;	/* the one capture available never sets it -- nothing to OR in yet */
+	/* An OLT may encrypt the OMCC as any other port (G.984.3 9.2.3.8,
+	 * clause 12): the row then has to decrypt, or every downstream OMCI
+	 * frame reaches omcid ciphered. The stock module's Encrypted_Port-ID
+	 * handler searches all its downstream flows, the OMCC one included,
+	 * and rewrites the matching one with the message's 'a' bit (the 'b'
+	 * bit unread); Configure_Port-ID writes it back without it. The same
+	 * here: the OMCI type with FLAGS bit 4 when 'a' is set.
+	 */
 	if (!rc)
 		rc = __odi_switch_gpon_ds_port_write(ODI_GPON_HW_GEM_ROW_PRIMARY, gem_port_id,
-						     ODI_GPON_HW_TRAFFIC_CFG_PRIMARY);
+						     ODI_SW_DSF_GEM_FLOW_TYPE_FLAGS_DECRYPT_SET(
+							     ODI_GPON_HW_TRAFFIC_CFG_PRIMARY,
+							     encrypted ? 1U : 0U));
 	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
 	if (rc) {
 		ODI_GPON_HW_WARN("GEM port 0x%03x row %u: CAM search or write not done\n",
@@ -1265,6 +1305,8 @@ void odi_gpon_verb_deactivate(struct odi_gpon_fsm *fsm)
 	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF,
 		       ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)ODI_GPON_STATE_O1));
 
+	hw_tx_gate(ODI_GPON_STATE_O1);
+
 	/* The row teardown (hw_release_rows()), then the ONU-ID registers. */
 	hw_set_onu_id(NULL, ODI_GPON_ONU_ID_BROADCAST);
 
@@ -1327,6 +1369,16 @@ uint32_t odi_gpon_hw_get_ber_interval_frames(void)
 void odi_gpon_hw_send_us_ploam(const struct odi_gpon_ploam *msg)
 {
 	hw_send_us_ploam(NULL, msg);
+}
+
+void odi_gpon_hw_set_tx_disable(odi_gpon_tx_disable_fn fn)
+{
+	odi_gpon_hw.tx_disable = fn;
+}
+
+int odi_gpon_hw_tx_disabled(void)
+{
+	return odi_gpon_hw.tx_disabled;
 }
 
 void odi_gpon_hw_set_ploam_log(odi_gpon_ploam_log_fn fn)

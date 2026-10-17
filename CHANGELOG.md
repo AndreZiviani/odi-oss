@@ -25,6 +25,183 @@ listed here.
   acknowledgement seconds against its wait, so it cannot outlast the 25 s the
   web UI gives it.
 
+- safe mode: it now also catches a reset loop and a dead config partition,
+  the two ways a stick could stay out of reach with no power-cycle pattern
+  able to help. A boot whose userland never confirms (odi_wdt resets it at
+  123 s) or whose client stops pinging clears the short-boot counter at 60 s,
+  so five short boots never happened and the stick reset every two to three
+  minutes for ever. `safe-mode.sh count` now reads why the previous boot ended
+  (`reason=` in `/proc/odi_ramlog_prev`) and keeps `/etc/config/boot-wdt`: +1
+  for `wdt_*`, `panic` and `oops`, unchanged after a power cycle, removed by
+  anything else and after 600 s of uptime. Three such boots in a row make
+  the next one a safe-mode boot (`cause=watchdog`); one or two, or resets
+  hours apart, never do. With the config partition not mounted or not
+  writable rcS calls `safe-mode.sh no-config`: a safe-mode boot at once
+  (`cause=config`, no record, the flag in `/var/run` says it), where before
+  the boot was silently not counted. A safe-mode boot now confirms the
+  watchdog without the mount, address and confirm-arp checks (the switch
+  init must still have worked), so it stays up to be reached; the boot after
+  it is a normal one, so the state machine cannot loop. The record and the
+  `safe_mode` and `boot_count` events gain `cause=`, `wdt_resets=` and
+  `wdt_before=`. The qemu harness declares its plain-directory config store
+  mounted. docs/SETTINGS.md, docs/BOOT.md and docs/TOOLS.md have the state
+  machine; the test is test/safe_mode_test.sh. The rcS trace goldens gain
+  the exec lines of the new reads (written by hand: the trace harness did
+  not run on htpc, its strace package install fails there).
+  Refs #106
+
+- Comments and this changelog no longer cite files of a private workspace.
+
+- omcid: alarms and attribute value changes. omcid never sent either; the
+  stock stack sends both, and an OLT shows the UNI state and the optical
+  alarms from them. Once a second, in O5 only: ANI-G low and high received
+  and transmit power (alarms 0, 1, 4, 5) from the DDM against the ANI-G
+  thresholds or the ONU defaults, as the stock threshold monitor does, with
+  a 0.5 dB band before an alarm clears; ANI-G signal fail and degrade (2, 3)
+  from the kernel's `signal` lines in `/proc/odi_gpon/status` (#130); PPTP
+  Ethernet UNI LAN-LOS from the host link, whose operational state now
+  follows the link too. Notifications carry the alarm sequence number (1 to
+  255, reset by Get All Alarms and MIB reset); suppressed, as stock, while
+  the ONU-G or the circuit pack is locked, the entity's ARC is on, or the
+  port is locked. ARC ends after its interval (255: never) with an AVC.
+  Get All Alarms and Get All Alarms Next answer from the same alarm table.
+  AVCs: an attribute flagged for one, of an entity the ONU creates, whose
+  value changes without the OLT writing it (the port's and the VEIP's and
+  circuit pack's operational state, the software image flags, ...); not the
+  per-attribute flood the stock stack sends after a MIB reset. At most 8
+  messages a second. The ANI-G signal fail and degrade thresholds go to the
+  kernel (driver command 11) when the OLT sets them and, with the defaults
+  5 and 9, at a MIB reset (`omci-drv-golden-isp*.txt` gain those two calls).
+  New suite `alarms-test.sh`.
+
+- omcid: table attributes keep every row the OLT sets, not only the last.
+  The multicast operations profile's dynamic and static ACLs (class 309, and
+  65531 once its class id is fixed), the subscriber config's service package
+  and preview group tables (310), the multicast GEM interworking TP's IPv4
+  and IPv6 address tables (281) and the MAC bridge port filter table (49) are
+  row lists now, like class 171's tagging table already was: a Set adds,
+  replaces or deletes a row by the table's own key and set control (G.988,
+  checked against the stock plugins), and a Get / Get-Next answers the whole
+  table. The rows survive a respawn (the resume snapshot format is version 2,
+  so an older snapshot falls back to re-registration once).
+- omcid: the multicast flag of a downstream GEM flow (cmd 25 `mcast_filter`)
+  follows the stock rule: set while a class 281 on that CTP has address-table
+  rows, the flow sent again when the table goes from empty to not empty and
+  back, or the 281 is deleted. It was set for every downstream-only CTP. On
+  ISP1 and ISP2 the flow is now first sent without the flag and again with it
+  when the OLT writes the 224/4 row, as the stock stack does
+  (`test/fixtures/omci-drv-golden-isp*.txt` gain that one line each).
+
+- Docs: ONU2-G's vendor product code 15, which omcid reports while the
+  identity switch is off, is the stock firmware's built-in default for
+  `OMCI_VENDOR_PRODUCT_CODE` (the MIB table compiled into its `configd`),
+  not a value captured from one stick: every stick of that firmware reports
+  15 unless the key was set. The comments and `docs/SETTINGS.md` said
+  "captured". No change to the image.
+
+- omcid: a Get, Get current data, Set or Delete that names an instance of a
+  modelled class which omcid holds no row for (it neither creates the
+  instance itself nor was given it by the OLT) is logged once per class and
+  instance per boot, as `event=no_instance` and a `no_instance` line with a
+  count in `/var/log/omcid-unknown.txt` (now up to 64 entries). The answer
+  does not change: omcid still answers such a request as if the instance
+  existed, where G.988 and the stock stack answer "unknown instance". The
+  lines are the data for deciding whether that can be made strict; the ISP1
+  and ISP2 sessions on file name no such instance (`events-test.sh`).
+
+- No OLT or ONT make is named in the tree any more: names are generic and
+  describe the function. The kernel's PLOAM type 0x81 constant is
+  `ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS` (a vendor-specific variant of
+  Disable_Serial_Number, handled as before). In the generated OMCI model the
+  six entities whose stock plugins carry a make in their names are now
+  `PrivateQueueMap` (243), `Me350`, `Me370`, `Me373`, `PrivateMcastTag`
+  (65282) and `PrivateSntp` (65294); the generator applies the renaming by
+  class id (`src/omci/tools/mibnames.py`) and the tables are otherwise
+  byte-for-byte what they were (names only: `omcicli get tables` and the
+  autonomous list show the new names). The stock names are written only to a
+  local sidecar (`mib-tables.py --stock-names`) that `mib-instances.py` and
+  `mib-defaults.py` read to match a stock dump. Comments, docs and test notes
+  that named a make say "an OLT" or "another stock image". Refs #114
+
+- Kernel: unknown multicast (with IGMP snooping off, every IPTV channel) is
+  no longer copied to the stick's own CPU. It was flooded to the CPU port as
+  well as to the host, a stream's worth of frames a second that the CPU
+  drops, against the guards that reset a stick whose CPU stops taking
+  frames. The CPU needs none of it; broadcast still reaches it.
+
+- Kernel and diag: signal fail and signal degrade (G.984.3 11.1.2) are
+  detected. The downstream bit error rate is measured from the BIP errors
+  over every 10 s of operation and compared with the thresholds the OLT
+  sets in the ANI-G (driver command 11, which was refused; defaults 10^-5
+  and 10^-9), with the standard's hysteresis. `/proc/odi_gpon/status` shows
+  them (`signal sf|sd`), and `diag gpon get alarm-status` prints them as
+  `Alarm SF` / `Alarm SD`, which the exporter turns into
+  `gpon_alarm{alarm="sf"}` / `"sd"`. omcid does not yet report them to the
+  OLT as ANI-G alarms.
+
+- Kernel: an OLT that disables the ONU (Disable_Serial_Number, the rogue-ONU
+  "emergency stop", state O7) now gets the laser switched off, as G.984.3
+  requires and the stock firmware does: the module's TX-disable line is
+  driven high in O7 and low again when the OLT re-enables the ONU (or
+  gpondeact, gponact or a reboot leaves O7). The state changed but nothing
+  stopped the transmitter, although the docs said it did. A laser the
+  `laser` verb refused is never switched on by this. `/proc/odi_gpon/status`
+  shows it as `laser_emergency_stop`.
+
+- Kernel: removing one bridge port from unknown-unicast flooding (a bridge
+  port deleted by the OLT, or ME 45 "discard unknown") no longer stops the
+  flooding of every port. The driver wrote all ports on or all ports off,
+  whatever port the command named; it now adds or removes that port only,
+  in the mask the command names (unknown unicast, broadcast or unknown
+  multicast), as the stock firmware does. The provisioning of every OLT
+  seen so far gives the same mask as before.
+
+- Kernel: an OLT that locks the Ethernet UNI (ME 11 administrative state,
+  for example to suspend a service) now stops it, as the stock firmware
+  does: the host port's link is forced down until the OLT unlocks it. The
+  lock used to be acknowledged and ignored. On this SFP the UNI is the host
+  port, so while locked the stick cannot be reached from the host either;
+  OMCI still reaches it over the fibre, and a lock of the PON or CPU port
+  is refused.
+  A lock no longer outlives the MIB it came from: omcid unlocks every
+  Ethernet UNI on a MIB reset and when it starts with an empty MIB (not on
+  a resume), so a stale lock cannot leave the stick unreachable until a
+  reboot. New odi.conf key `OMCI_UNI_LOCK=0` ignores OLT locks of the UNI
+  altogether (docs/SETTINGS.md); the default honours them.
+
+- Kernel: an OLT that encrypts the OMCI channel is served. The
+  Encrypted_Port-ID message for the OMCI port used to be applied without its
+  encryption bit, so every downstream OMCI frame would have stayed
+  unreadable and the stick would never have been provisioned; the port's
+  row now decrypts, as on the stock firmware. And a data port the OLT
+  encrypts keeps decrypting while omcid rewrites its flow (every QoS or
+  bridge change): the flow was written without the AES bit and the bit set
+  again right after, a window in which encrypted frames were lost.
+
+- nv: `setenv` and `commit` take a lock (flock(2) on the environment partition
+  device, 10 s bounded, held until the process exits), so two writers (an ssh
+  session and the web UI, say) no longer erase and write the same copy at
+  once; unserialised, that left a half-written copy or lost an update, such
+  as a `sw_commit` the UI had reported as committed. A plain `setenv` also
+  reads its copy back after the write and exits non-zero when it does not
+  match, as `commit` always did. If flock itself is unavailable the write goes
+  ahead without the lock, as before, and says so. The syscall number and the
+  EAGAIN refusal are run for real under qemu-user (`src/nv/test/flock_probe.c`,
+  part of `make -C src/nv test`). On a stick, two writers running in parallel
+  ended with no failed write and both environment copies consistent. Found in
+  an audit of the update path.
+
+- fwu.sh: an interrupted flash can no longer leave a valid new kernel over a
+  missing or old rootfs. It used to erase and write the kernel, then the
+  rootfs; a power cut or a failed write in between left a kernel U-Boot
+  accepts, and the web UI offered to trial the slot. It now erases the kernel
+  and rootfs partitions first, writes the rootfs, and writes the kernel last,
+  so any interruption leaves a kernel U-Boot refuses (bad magic or data CRC).
+  The guard comment about the watchdog on a committed boot is corrected too:
+  odi_wdt arms the watchdog itself once it initialises. New host test
+  `test/fwu_write_order_test.sh`. Found in an audit of the update path; a
+  trial flash with this order ran on a stick.
+
 - OMCI: the LOID password omcid reports (ONU-G, CTC LOID entity) follows the
   LOID, as the stock `runomci.sh` does: with the same `LOID` and `LOID_OLD`
   the current `LOID_PASSWD` is reported, so a changed password takes effect
@@ -159,7 +336,7 @@ listed here.
   the union of their ports, so the last member of one no longer deletes the
   row the other still needs. Not reachable on a running stick today (igmpd is
   not started and receives no frame); it is the daemon's own unit tests that
-  cover it. Refs the multicast audit, AUDIT-night-multicast.md.
+  cover it.
 
 - Tests: the `make test-rcs` goldens (`test/fixtures/rcs-trace-*.txt`) are
   regenerated: they predated the `safe-mode.sh count` and `boot-ok` and the

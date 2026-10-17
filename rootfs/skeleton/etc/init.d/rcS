@@ -94,8 +94,14 @@ crumb "config mounted; kernel $(uname -r); $(grep -c "^mtd" /proc/mtd) mtd parti
 # still counts: every boot adds one, a boot that reaches 60 s of uptime
 # clears it, and after enough short boots in a row this boot becomes the
 # safe one (the PON off, the host port on auto-negotiation, the default
-# password, for this boot only). Logs the uptime of the count. Bounded.
-/etc/scripts/safe-mode.sh count || echo "rcS: safe-mode.sh count failed" >&2
+# password, for this boot only). Boots that ended in a watchdog reset count
+# too, and a config partition that is not mounted makes this boot the safe
+# one at once. Logs the uptime of the count. Bounded.
+if config_mounted; then
+	/etc/scripts/safe-mode.sh count || echo "rcS: safe-mode.sh count failed" >&2
+else
+	/etc/scripts/safe-mode.sh no-config || echo "rcS: safe-mode.sh no-config failed" >&2
+fi
 
 # ---- entropy. Nothing on this board feeds the pool early, so without a
 # seed every daemon starts on a nearly empty one. seedrng credits the seed

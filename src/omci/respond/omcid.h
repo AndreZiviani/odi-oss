@@ -33,9 +33,6 @@
 #define DRV_GET_DEVID  4
 #define MIB_ROWS      256
 #define MIB_ROW_MAX   64
-#define MIB_TBL_ENTRY 16
-#define MIB_TBL_NODES 64
-#define MIB_TBL_NONE  0xff
 #define OLT_ACC_CREATE 4
 #define PRIQ_DEFAULT_WEIGHT 1
 #define FLOW_MAX 64                      /* what this device reports, and the
@@ -69,40 +66,36 @@
 #define MIB_ROWS      256
 #define MIB_ROW_MAX   64
 
-/* ------------------------------------------------- table attributes (171)
+/* ------------------------------------------------------- table attributes
  *
- * One attribute in the model is not a value but a table: class 171's
- * ReceivedFrameVlanTaggingOperTable. The OLT sets it one 16-byte entry at a
- * time and the entries accumulate, so the flat row above -- which keeps
- * whatever was written last -- is exactly half of it.
+ * Some attributes are not a value but a table of rows, which the OLT sets one
+ * row per Set and which accumulate: class 171's VLAN tagging operations, the
+ * multicast operations profile's ACLs (309, and 65531, its extended form),
+ * the subscriber config's service packages and preview groups (310), the
+ * multicast GEM IW TP's address tables (281), the MAC bridge port filter
+ * table (49). A flat copy -- whatever was written last -- is one row of it.
  *
- * The vendor keeps both halves too. `mib_SetGetAttribute` in libomci_mib.so
- * memcpys the entry to its natural offset in the ME struct like any other
- * attribute, and `ExtVlanTagOperCfgDataDrvCfg` maintains a separate linked
- * list beside it. We do the same, for the same reason: the flat copy answers a
- * get, the list is what the dump prints.
+ * Each table keeps its rows in a list off the entity's row, every node tagged
+ * with its attribute. How a Set adds, replaces or deletes a row is the
+ * table's own rule (G.988, and what the stock plugin does; mibstore.c,
+ * tbl_defs[]). The flat copy is still written, as the vendor's generic store
+ * does; a Get of the attribute answers the whole list (tbl_serialise).
  *
- * The three rules below are read out of that function, not out of G.988:
- *
- *   - an entry is KEYED by its filter half, bytes 0..7;
- *   - setting an entry whose key already exists REPLACES the rest of it;
- *   - an entry whose treatment half is all-ones, bytes 8..15 every bit set,
- *     DELETES the matching entry instead of storing it.
- *
- * The vendor pushes new entries at the head of its list, so its INDEX 0 is the
- * most recently set entry. This keeps that order, because the dump has to
- * match.
+ * New rows go at the head of their list, as every stock plugin does, so row
+ * 0 of a Get-Next walk -- and INDEX 0 of class 171's vendor dump -- is the
+ * most recently added.
  *
  * Nothing here allocates: a fixed pool, shared by every row, with rows linked
- * through indices. ISP1's two instances hold three and two entries.
+ * through indices. ISP1's two class 171 instances hold three and two rows.
  */
-#define MIB_TBL_ENTRY 16
-#define MIB_TBL_NODES 64
+#define MIB_TBL_ENTRY 32                 /* the widest row: 65531's ACL, 30 */
+#define MIB_TBL_NODES 128
 #define MIB_TBL_NONE  0xff
 
 struct mib_tblent {
 	uint8_t next;                        /* MIB_TBL_NONE ends the list */
 	uint8_t used;
+	uint8_t attr;                        /* the table attribute, 1-based */
 	uint8_t data[MIB_TBL_ENTRY];
 };
 
@@ -151,7 +144,7 @@ struct mib_row {
  * is not a soft failure -- every flow sent with id 0 lands on top of the last
  * one, which is why a second downstream flow came back refused.
  */
-struct flow_slot { uint16_t port; uint8_t used; };
+struct flow_slot { uint16_t port; uint8_t used; uint8_t mcast; };
 
 /* createTcont hands back the driver's own T-CONT index, which is not the ME id
  * the OLT uses. A GEM flow names its T-CONT by that index -- sending the ME id
@@ -207,6 +200,10 @@ void tbl_free(struct mib_row *r);
 int attr_is_big(const struct omci_class *c, unsigned k);
 uint16_t tbl_serialise(const struct omci_class *c, uint16_t inst, unsigned k,
 		       uint8_t *out, uint16_t max);
+/* Whether attribute k of the class is a table of rows (tbl_defs[]), and how
+ * many rows attribute k of a row holds. */
+int tbl_is_rows(const struct omci_class *c, unsigned k);
+unsigned tbl_rows(const struct mib_row *r, unsigned k);
 
 /* The Get / Get-Next staging area.
  *
@@ -346,6 +343,9 @@ void bc_gem_update(void);
 void bc_gem_withdraw(uint16_t going);
 void apply_priq(uint16_t inst);
 void apply_gem_ctp(const struct omci_class *c, const struct mib_row *r);
+/* A class 281 changed (`skip`: the instance being deleted, else -1): resend
+ * the downstream flows whose multicast flag no longer matches. */
+void mcast_flag_refresh(int skip);
 void qos_reset(void);
 /* apply_uni.c */
 uint32_t bridge_uni_port_mask(uint16_t bridge_id);
@@ -364,6 +364,7 @@ void apply_mbsp(const struct omci_class *c, uint16_t inst,
 		const struct mib_row *r, uint16_t mask, int creating);
 void delete_mbsp(uint16_t inst);
 void uni_reset(void);
+void uni_start(void);
 /* apply_bridge.c */
 uint32_t veip_uni_port_mask(uint16_t veipId);
 uint32_t all_eth_uni_mask(void);
@@ -437,6 +438,24 @@ void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
  * `used` instead: logged once per code for the life of the process. */
 void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used);
 void ev_tick(void);
+
+/* ------------------------------------------- alarms and AVCs (alarm.c)
+ *
+ * The autonomous messages: alarm notifications and attribute value changes,
+ * evaluated once a second in O5 (alarm_tick), and the Get All Alarms
+ * snapshot. See alarm.c. */
+void alarm_init(void);
+void alarm_tick(void);
+void alarm_mib_reset(void);
+uint16_t alarm_get_all(void);
+int alarm_get_next(uint16_t seq, uint8_t *body);
+void anig_signal_thresholds(int sf, int sd);
+extern unsigned long notify_sent;
+/* 10 log10(x) in 0.002 dB (omcimsg.c). */
+int32_t db_x500_of(uint32_t x);
+/* omci_drv_call, except that the driver-call trace does not log it: for the
+ * once-a-second polls, whose count depends on the clock (drv.c). */
+int omci_drv_call_quiet(uint32_t cmd, void *buf, uint32_t len);
 /* What the OLT sent that omcid does not model: one event line and one
  * summary line per unknown class and operation, or unknown message type,
  * per boot (events.c, UNKNOWN_PATH). ev_msg_known() is whether omcid knows
@@ -446,6 +465,11 @@ void ev_tick(void);
 int ev_msg_known(uint8_t mt);
 void ev_unknown_me(uint16_t cls, uint8_t mt);
 void ev_unknown_msg(uint8_t mt, uint16_t cls);
+/* A Get, Get current data, Set or Delete of a modelled class, addressed to
+ * an instance omcid holds no row for and does not create itself: one event
+ * line and one summary line per (class, instance) per boot. Diagnostic only;
+ * the answer is unchanged (omcimsg.c, "an instance omcid does not hold"). */
+void ev_no_instance(uint16_t cls, uint16_t inst, uint8_t mt);
 /* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
  * class omcid does not model with success instead of "unknown entity". */
 extern int unknown_me_ok;

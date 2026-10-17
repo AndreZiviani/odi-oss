@@ -24,7 +24,7 @@
 #define SNAP_MAGIC1 'M'
 #define SNAP_MAGIC2 'S'
 #define SNAP_MAGIC3 '1'
-#define SNAP_VERSION 2   /* 2: the upstream state the driver holds (qos_prog_state()) */
+#define SNAP_VERSION 3   /* 2 (#140): the upstream state the driver holds (qos_prog_state()); 2 (#137): table attribute storage; 3: both */
 
 /* Header (26 bytes: magic 4, version 2, devid 8, serial 9, sync 1, alarm 2)
  * + one row's worst case (2+2+2+1+1+1+64 = 73) times every row, + the fixed

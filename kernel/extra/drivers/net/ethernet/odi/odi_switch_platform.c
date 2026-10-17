@@ -290,11 +290,30 @@ void odi_switch_init_platform(void)
 	ODI_SW_LOG("platform: done\n");
 }
 
+/* After the replay, unknown multicast is not flooded to the CPU port. The
+ * replay writes the three flood masks 0xf, every port with the CPU, where
+ * the stock capture has 0x7 (docs/SWITCH.md, module-load replay: without
+ * the CPU in the broadcast mask, LAN broadcast stopped reaching it). The
+ * CPU needs broadcast (ARP); it has no use for unknown multicast: the
+ * kernel has no IPv6, so no neighbour discovery, nothing on the stick
+ * joins a group, and the reserved 01:80:C2 groups have their own actions
+ * (LINK_MCAST_*). With IGMP snooping off every group is unknown, so a
+ * downstream IPTV stream would be copied to the CPU at stream rate,
+ * thousands of frames a second, against the CPU-RX guards. So the
+ * unknown-multicast mask takes the capture's value back: CPU bit off,
+ * the other ports as the replay left them.
+ */
+#define ODI_SW_MODLOAD_CPU_PORT_BIT	(1U << 3)
+
 void odi_switch_init_modload(const struct odi_replay_blob *table)
 {
 	const struct odi_replay_opts opts = { .rmw = 1, .verb = ODI_REPLAY_ALL_VERBS };
+	uint32_t reg;
 
 	ODI_SW_LOG("init_modload: %u records\n", table->count);
 	(void)odi_replay_run(table, &opts);
-	ODI_SW_LOG("init_modload: done\n");
+	reg = odi_reg_read(ODI_SW_FLOOD_UNKN_MCAST_PORTS_BASE);
+	odi_reg_write(ODI_SW_FLOOD_UNKN_MCAST_PORTS_BASE, reg & ~ODI_SW_MODLOAD_CPU_PORT_BIT);
+	ODI_SW_LOG("init_modload: done, unknown multicast flood mask 0x%x\n",
+		   (unsigned int)(reg & ~ODI_SW_MODLOAD_CPU_PORT_BIT));
 }

@@ -321,6 +321,8 @@ int main(int argc, char **argv)
 			st = 0;
 		resumed = snapshot_try_resume(st, &why);
 		snapshot_write_decision(resumed);
+		if (!resumed)
+			uni_start();
 		out_fmt("resume: onu state %d, %s\n", (long)st,
 			resumed ? "snapshot loaded, resuming without re-registration"
 				: "no valid snapshot for this state -- falling back to re-registration");
@@ -435,6 +437,7 @@ int main(int argc, char **argv)
 						qos_full = 1;
 					}
 					ev_tick();
+					alarm_tick();
 				}
 				/* Every 15 s: a quarter of the 60 s deadline
 				 * odi_wdt.h/rcS register omcid with, so an

@@ -46,6 +46,7 @@
 #define OMCI_AGEING_TIME_CMD		62	/* setAgeingTime */
 #define OMCI_PORT_AUTO_NEGO_CMD		30	/* setPortAutoNegoAbility */
 #define OMCI_PORT_STATE_CMD		32	/* setPortState */
+#define OMCI_SIGNAL_PARAMETER_CMD	11	/* setSignalParameter */
 #define OMCI_PHY_PWRDOWN_CMD		38	/* setPhyPwrDown */
 #define OMCI_TRANSCEIVER_STATUS_CMD	10	/* getTransceiverStatus */
 #define OMCI_DS_BC_GEMFLOW_CMD		26	/* setDsBcGemFlow */

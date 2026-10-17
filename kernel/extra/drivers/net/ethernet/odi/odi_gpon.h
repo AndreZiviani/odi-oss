@@ -95,6 +95,13 @@ void odi_gpon_sn_get(u8 sn[8]);
  */
 int odi_gpon_alloc_row(uint16_t alloc_id);
 
+/* odi_gpon_signal_threshold_set() -- odi_switch_cmd.c cmd 11: the BER
+ * threshold exponent of signal fail (signal 0) or signal degrade (1), as
+ * the OLT set it in the ANI-G (odi_gpon_ctr.h has the ranges). 0, or -1
+ * for a value out of range. Process context; takes odi_gpon_lock.
+ */
+int odi_gpon_signal_threshold_set(unsigned int signal, unsigned int exp);
+
 /* ---- /proc/odi_gpon/ status ------------------------------------------
  *
  * odi_gpon.c's own read-only procfile calls these getters; every one is a

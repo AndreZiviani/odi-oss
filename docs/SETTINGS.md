@@ -125,11 +125,12 @@ The UI's reboot confirmation says which slot it comes back on.
 | `ODI_LASER_UNVERIFIED` | Laser on an unverified laser driver | `1` switches the laser on even when the laser driver chip is not the Semtech GN25L95 this image was validated with (the boot runs the `laser unverified` form of the `laser` PON verb); anything else, or absent, keeps the laser off on such a stick and refuses GPON activation: the `gponact` verb fails (`-EPERM`, so `apply.sh omci` reports a re-registration as `failed`), `/proc/odi_gpon/status` shows `laser on 0 ldd_id <id byte, or -1> unverified 0`, and the reason is in `dmesg` (`odi_board: laser:`). A forced laser shows `laser on 1 ldd_id <id> unverified 1`. Other boards may need laser set-up this image does not do; a laser that lights outside its timeslots takes down every other ONU on the OLT port. Set it only on an OLT port with no other ONU. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `laser` PON step at boot | REBOOT |
 | `OLT_SW_DOWNLOAD` | OLT software download | what omcid answers when the OLT pushes a software image: `accept` (the default, also when the key is absent, empty or any other value) answers every step with success and discards the image; `reject` answers "not supported", as omcid did before. Nothing is ever written to flash or the U-Boot environment and the stick never reboots, in either mode ("Software download from the OLT" below). Odi-only key, kept in `/etc/config/odi.conf` | omcid, at every Start software download, Activate and Commit | LIVE (the next download) |
 | `OMCI_ACCEPT_REBOOT` | Accept a reboot from the OLT | `1` lets the OLT reboot the stick: a Reboot (OMCI message type 25) of the ONU-G is answered with success and, about a second later, omcid sends SIGTERM to init, which is what `reboot` does, so the shutdown entries of `inittab` run. `2` acknowledges only: the Reboot is answered with success and nothing else happens, for an OLT that insists on a successful answer. Anything else, or absent, refuses it with result 2, "command not supported". Default off. The reboot condition byte of the request (unconditional, or only without a voice or emergency call) is ignored: the stick has no voice service, so every request is unconditional. A Reboot of any other class keeps the old answer. Every request is logged (`reboot from the OLT accepted`, `acknowledged, not rebooting` or `refused`, and `event=olt_reboot`, docs/TOOLS.md). A reboot with no committed trial returns to the stock slot, as any reboot does. Odi-only key, kept in `/etc/config/odi.conf`; read when the Reboot arrives, so a change needs neither a reload nor a re-registration | omcid, at every Reboot from the OLT | LIVE (the next Reboot) |
+| `OMCI_UNI_LOCK` | Honour an OLT lock of the Ethernet UNI | `0` ignores it: the OLT's Set of the PPTP Ethernet UNI administrative state to locked (ME 11 attribute 5) is answered and stored as always, and the port stays up. Anything else, or absent, honours it as the stock firmware does: the host port's link is forced down until the OLT unlocks it. **On this SFP the UNI is the host port, the stick's only management path, so a lock cuts the web UI and ssh too** (OMCI still arrives over the fibre). Whatever the setting, omcid unlocks every Ethernet UNI when a MIB reset arrives (the reset puts the attribute back to unlocked, and the OLT then sends no unlock of its own) and when it starts with an empty MIB; it does not on a resume from a snapshot, whose MIB and switch state are still the old ones. The default honours the lock because it is the OLT's documented way to suspend a service (G.988 9.5.1) and some OLTs lock and unlock a UNI during provisioning; it is undone on a reset or restart so a stale lock can never strand the stick. Set `0` when the stick is managed from the host and the OLT must never take that link away. Odi-only key, kept in `/etc/config/odi.conf`; read at every Set of the attribute, so a change needs neither a reload nor a re-registration | omcid, at every ME 11 Set, MIB reset and start | LIVE (the next Set) |
 | `HOST_AUTONEG` | Host port auto-negotiation | `off` runs the host port (the SFP edge, toward the router) as forced 1000BASE-X full duplex with no auto-negotiation, for a host whose SFP port has auto-negotiation off; `on`, empty or absent negotiates (clause 37), as the stock image and every host seen so far do; any other value runs `on` and logs `event=bad_value`. Never stored directly: a change is a trial, applied in RAM and reverted after 120 s unless confirmed over the link it changed; a boot with `off` falls back to auto-negotiation while the host link stays down; three short boots in a row make the next a safe-mode boot, which clears it ("Host port auto-negotiation" and "Recovery: the safe mode" below). Odi-only key, kept in `/etc/config/odi.conf` | `host-autoneg.sh`, at boot and for a trial | LIVE (a trial: kept only when confirmed) |
 
 Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
 `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`,
-`OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `ODI_LASER_UNVERIFIED` and
+`OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `ODI_LASER_UNVERIFIED` and
 `HOST_AUTONEG` are the only
 keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
@@ -210,8 +211,10 @@ Details that bite:
   handling" below.
 - **The OLD LOID wins.** When `LOID` and `LOID_OLD` differ, the OLD value is
   answered -- including an empty OLD beside a set LOID, which answers
-  nothing; the same for the passwords. That is the stock rule, kept so both
-  slots agree. The UI writes `LOID_OLD` together with `LOID` (and the
+  nothing. The password follows the LOID, as in the stock `runomci.sh`: with
+  the same LOID in both keys the current `LOID_PASSWD` is answered (a changed
+  password takes effect), with different LOIDs `LOID_PASSWD_OLD` is answered.
+  That is the stock rule, kept so both slots agree. The UI writes `LOID_OLD` together with `LOID` (and the
   password pair), and shows the `_OLD` keys read-only. Untested: neither
   ISP1 nor ISP2 uses a LOID, and neither runs against a CTC OLT.
 - **omcid looks for each key in both files**, the one xmlconfig assigns it
@@ -297,7 +300,7 @@ has:
 | software image 0 and 1, Version | `0.0.0` | `OMCI_SW_VER1`, `OMCI_SW_VER2` |
 | ONU2-G, Equipment id | the device id (`RTL9602C`) | `GPON_ONU_MODEL` |
 | ONU2-G, OMCC version | 0x80 | `OMCC_VER` |
-| ONU2-G, Vendor product code | 15, the captured stock value | `OMCI_VENDOR_PRODUCT_CODE` |
+| ONU2-G, Vendor product code | 15, the stock firmware's default for the key | `OMCI_VENDOR_PRODUCT_CODE` |
 | ONU-G, Version (hardware version) | the device id (`RTL9602C`) | `ONU_HW_VERSION` |
 
 `ONU_HW_VERSION` is odi-only (`/etc/config/odi.conf`, set with `flash set
@@ -452,6 +455,10 @@ own boot time, gives its window. A watchdog reset or a crash that reboots
 the stick before 60 s of uptime counts as a short boot too: a stick that
 cannot stay up ends in the safe mode by itself, which is the point.
 
+Two more things make a boot the safe one without anyone touching the power
+(the state machine is below): three boots in a row that each ended in a
+watchdog reset, and a config partition that is not mounted.
+
 A safe-mode boot lasts that one boot. It:
 
 - runs the host port on auto-negotiation, whatever `HOST_AUTONEG` says;
@@ -467,7 +474,11 @@ A safe-mode boot lasts that one boot. It:
   and every other setting are left as they are, and the next boot uses
   them again. The default passwords are in memory only: the web UI reads a
   flag in `/var/run`, and root's account file is a copy in RAM bind-mounted
-  over the read-only one.
+  over the read-only one;
+- confirms the boot to the kernel watchdog without the checks that a dead
+  config partition or a missing address fail (`confirm_watchdog` in
+  `rcs-lib.sh`; the switch init must still have worked), so a safe-mode boot
+  stays up for someone to reach instead of being reset at 123 s again.
 
 The web UI says so on every view while it lasts: that this is the safe
 mode, that the PON is off, that the password is the default for this boot
@@ -484,8 +495,59 @@ goes a long way (the flash can be read with a programmer), and this is what
 makes a lost password recoverable at all; but it is a real change for a stick
 whose host port is reachable by people who should not log into it. The PON
 is off for that boot, so the stick does not carry anyone's traffic
-meanwhile. The counter costs two small writes to the config partition per
-boot (the count, and its removal at 60 s), on every stick.
+meanwhile. The counters cost two small writes to the config partition per
+boot (the count, and its removal at 60 s), on every stick; the watchdog one
+is written only when it changes, which is after a watchdog reset.
+
+**The state machine.** Three counters decide, all read in `safe-mode.sh
+count`, once per boot, right after the config partition is mounted:
+
+| signal | where it lives | how it moves |
+|---|---|---|
+| short boots | `/etc/config/boot-count` | +1 at every boot (about 5 s of uptime), removed at 60 s |
+| watchdog resets | `/etc/config/boot-wdt` | +1 when the previous boot's `reason=` (`/proc/odi_ramlog_prev`, `docs/KERNEL.md`) is `wdt_*` (a watchdog rule fired: boot never confirmed, a client missed its ping, memory floor, CPU port), `panic` or `oops`; unchanged on `power` (DRAM lost: a power cycle) or when the file is absent (an older kernel); removed on anything else (`reboot`, `halt`, `poweroff`, `unknown`); removed at 600 s of uptime |
+| config partition | the mount table (`config_mounted`), and `/etc/config` writable | checked first, by rcS and again by `count` |
+
+and one of them ends in the safe mode:
+
+1. config partition not mounted or not writable: safe mode at once
+   (`safe-mode.sh no-config`, `cause=config`), with no record, since there
+   is nowhere to write it. The flag in `/var/run` still says it, and the
+   web UI reads the flag.
+2. `boot-count` reached 5 short boots before this one (3 with
+   `HOST_AUTONEG=off`): `cause=short_boots`.
+3. `boot-wdt` reached 3 boots before this one: `cause=watchdog`. The
+   safe-mode record says `wdt_resets=3`.
+
+Entering the safe mode removes both counters. The boot after a safe-mode
+boot is a normal one and finds a `reason=` of `reboot` (or `power`), so it
+starts from zero: the safe mode is never two boots in a row, it takes the
+whole count again, and so it cannot loop. What a safe-mode boot does is stay
+up: it confirms the watchdog (above), so a stick whose fault is a dead
+config partition or a userland that cannot configure itself is reachable
+until someone reboots it, with the PON off. If the fault persists and the
+person reboots anyway, the cycle is three more resets (about ten minutes:
+54 s of U-Boot and 123 s of unconfirmed userland each), then another
+safe-mode boot that stays up. A safe-mode boot that the watchdog resets
+anyway (the switch init failed, so nothing is reachable) is not a safe mode
+that helped; it counts as the first of the next three.
+
+Why three watchdog resets. One legitimate reset (an omcid that hung and was
+caught, a memory floor) must not take the PON down, and two close together
+are not unheard of; a loop that strands a stick repeats every two to three
+minutes, so three fire in about ten. A boot that lives 10 minutes ends the
+count, so a reset every few hours (a slow leak, a flaky OLT) never adds up
+and never turns the PON off. `unknown` clears the count rather than adding
+to it: it is also what the first boot after the stock image reports, and an
+unexplained reason is a poor ground for turning the PON off.
+
+The dead-config rule has a price: with the partition unreadable, the
+default password is in force for that boot without anyone touching the
+power, for as long as the stick stays up. The partition being gone is also
+the case where the stored credential and the ssh keys cannot be read, so the
+alternative is a stick nobody can log into or reach reliably; but a stick
+on a shared host port is exposed to whoever can reach it meanwhile. It lasts
+until the next reboot, which tries the partition again.
 
 The management address is not moved: moving it on a pattern of power cuts
 would move the address of a stick whose only fault was the power. A
@@ -505,10 +567,12 @@ wears the flash and risks the boot itself.
 
 The files: `/etc/config/boot-count` (one number; present from a boot's
 count until it reaches 60 s, or through a run of short boots),
-`/etc/config/safe-mode` (`short_boots=`, `uptime=`, `cleared=`
-(`HOST_AUTONEG`, `none` or `failed`), `build=`; until acknowledged), and
-`/var/run/safe-mode` (the same, plus `root_password=default` or `failed`;
-this boot only). `safe-mode.sh status` prints them (`docs/TOOLS.md`), and
+`/etc/config/boot-wdt` (one number; present from a watchdog reset until
+the next boot that lives 600 s or ends in a reboot), `/etc/config/safe-mode`
+(`cause=` `short_boots`, `watchdog` or `config`, `short_boots=`,
+`wdt_resets=`, `uptime=`, `cleared=` (`HOST_AUTONEG`, `none` or `failed`),
+`build=`; until acknowledged), and `/var/run/safe-mode` (the same, plus
+`root_password=default` or `failed`; this boot only). `safe-mode.sh status` prints them (`docs/TOOLS.md`), and
 the diagnostics bundle carries it (`host-link.txt`).
 
 ## Web UI controls
@@ -665,7 +729,7 @@ applies to every later image.
 | `lan-ip` | the management address, one line; overrides `LAN_IP_ADDR` | LIVE (`apply.sh network`) |
 | `pon-steps` | development: a PON step list that replaces the built-in one (`docs/BOOT.md`); a wrong list means no PON | REBOOT |
 | `sds.off` | skip the host SerDes check and fix in `network.sh` | REBOOT |
-| `boot-count`, `safe-mode` | not switches: the boot counter and the safe-mode record ("Recovery: the safe mode" above), written by `safe-mode.sh`; removing the record is the acknowledgement | -- |
+| `boot-count`, `boot-wdt`, `safe-mode` | not switches: the boot counters and the safe-mode record ("Recovery: the safe mode" above), written by `safe-mode.sh`; removing the record is the acknowledgement | -- |
 | `optics.off` | skip the `laser` PON step (the I2C steps still run): **the laser stays off, no service** | REBOOT |
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |
 | `breadcrumbs.on` | development: boot crumbs, `trial-diag.txt` and a heartbeat, on flash | REBOOT |
