@@ -201,9 +201,10 @@ T-CONT claims, in assignment order, from the kernel's list (`alloc_ids` in
 `/proc/odi_gpon/status`, read once a second); with none left it reads 0x00FF,
 unassigned, and is not programmed. That is what a MIB upload and a Get of the
 AllocID answer, and what goes to the driver. When the kernel list changes (an
-assignment, a deallocation, a re-ranging) the T-CONTs bound to it are
-reprogrammed a quiet second later; `omcli tcont` shows each binding and where
-it came from.
+assignment, a deallocation, a re-ranging) the whole upstream is
+reprogrammed a quiet second later; any other change reprograms only the
+T-CONTs, queues and flows it changed (docs/SWITCH.md, upstream PON queues).
+`omcli tcont` shows each binding and where it came from.
 
 It logs every OMCI frame in and out (`<-` / `->` lines) and every driver
 call to `/var/log/omcid.log`, about 1.7 MB a day on a busy OLT before the

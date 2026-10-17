@@ -352,6 +352,47 @@ static int cmd_pri_queue_del(void *buf, uint32_t len)
 	return 0;
 }
 
+/* cmd 0: a MIB reset, the upstream half (uapi/omci_gemflow.h). Every
+ * upstream flow is deleted as cmd 25 ena 0 deletes one (GEM 0, not valid,
+ * the PBO thresholds for one flow fewer), then every queue cmd 23 put on a
+ * data T-CONT as cmd 24 deletes one (drained, out of the T-CONT's mask, the
+ * T-CONT disabled with its last queue), and every T-CONT block is freed.
+ * After it, cmd 21 reserves on an empty group again. The stock driver's
+ * MIB reset (pf_rtl96xx_ResetMib) does this and more: it resets every flow
+ * and destroys the logical T-CONTs, and omci_app sends it on an OLT MIB
+ * reset. Without it a new provisioning met the old one's queue blocks, and
+ * its flows stayed valid. Left alone: the Alloc-ID CAM (PLOAM's, G.984.3
+ * 5.5.4), the OMCC (T-CONT 16, flow 64), the downstream GEM rows (no
+ * downstream delete here; the bridge connections that forward them are
+ * omcid's to take down) and the bridge connections themselves.
+ */
+static int us_flow_delete(uint32_t slot);
+
+static int cmd_mib_reset(void *buf, uint32_t len)
+{
+	uint32_t i, t, ord;
+
+	(void)buf; (void)len;
+	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
+		(void)us_flow_delete(i);
+	for (t = 0; t < ODI_SW_PONQ_TCONTS; t++) {
+		struct odi_sw_tcont_slot *s = &odi_sw_tcont[t];
+
+		for (ord = 0; ord < 32U; ord++)
+			if (s->live & (1U << ord)) {
+				uint32_t lq = s->qbase + ord;
+
+				odi_sw_ponq_queue_del(t, lq, ponq_physical(t, lq));
+			}
+		s->alloc_id = 0;
+		s->live = 0;
+		s->used = 0;
+		s->qbase = 0;
+		s->qn = 0;
+	}
+	return 0;
+}
+
 /* cmd 21: the T-CONT of an Alloc-ID. Word 0 goes in as the number of
  * queues omcid will put on it (1 if 0 or out of range: the stock caller
  * leaves it uninitialised) and comes back as the T-CONT index, the
@@ -773,6 +814,9 @@ int odi_switch_cmd(uint32_t cmd, void *buf, uint32_t len)
 
 	case OMCI_TCONT_CMD:	/* 21, createTcont/updateTcont */
 		return cmd_tcont(buf, len);
+
+	case OMCI_MIB_RESET_CMD:	/* 0, resetMib */
+		return cmd_mib_reset(buf, len);
 
 	case OMCI_GEMFLOW_CMD:	/* 25, cfgGemFlow/updateGemFlow/updateUsGemFlow */
 		return cmd_gem_flow(buf, len);

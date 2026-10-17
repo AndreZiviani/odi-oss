@@ -5,6 +5,25 @@ listed here.
 
 ## Unreleased
 
+- omcid, kernel: an OLT Set no longer interrupts all upstream traffic, and a
+  MIB reset or an omcid restart leaves no upstream state behind. Since #116 a
+  rebuild of the upstream QoS really deleted and re-created every queue and
+  flow (the queues are drained), and it ran after any Set of a referenced
+  queue, T-CONT, GEM port or traffic descriptor, and after any traffic
+  scheduler Set at all. Now the rebuild compares the MIB with what it
+  programmed and changes only that: a T-CONT whose Alloc-ID and queues are
+  the same keeps them, a queue whose weight, type or rates moved is sent
+  again in place, and a flow is sent only when its GEM port, T-CONT or queue
+  changed; a T-CONT that changed is rebuilt alone. Only a change of the PLOAM
+  Alloc-ID list still rebuilds everything. A traffic scheduler Set counts
+  only when a queue in use names it and the Set carries its policy. Driver
+  command 0 (the stock resetMib) now empties every upstream flow, queue and
+  T-CONT block; omcid sends it on every MIB reset and when it restarts
+  without resuming, which it did not before: a new provisioning could be
+  refused queues the old one still held, and old flows stayed valid. The
+  resume snapshot keeps what was programmed (format 2: an older snapshot is
+  not resumed). Refs #116, #115.
+
 - gpon, omcid (safety): only the OLT, by PLOAM, can put an Alloc-ID in the
   Alloc-ID CAM, the table that decides which upstream grants the stick
   answers. Since #116, driver command 21 wrote any Alloc-ID it was given into
