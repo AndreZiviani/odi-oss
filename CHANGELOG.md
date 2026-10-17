@@ -17,6 +17,12 @@ listed here.
   supported, private, PM or tables, and the 64 reserved priority queues
   0xff00-0xff3f; and the MAC bridge port tables (49, 50, 79) of one OLT's
   bridge ports are no longer listed as entities the ONU creates for itself.
+  They are created the way the stock firmware creates them, when the OLT
+  creates a MAC bridge port config data (class 47): one of each at the
+  port's own entity id, empty or all zero, and an upload after provisioning
+  lists them. They are removed with the port (the stock firmware leaves the
+  preassign table behind). omcid keeps 256 MIB rows instead of 192, so the
+  three extra rows per port do not crowd out the OLT's own entities.
   An entity the OLT has set is listed once. With the factory configuration
   the upload is 205 entities in 399 records, the same as a decoded upload of
   the stock image. Refs #103.

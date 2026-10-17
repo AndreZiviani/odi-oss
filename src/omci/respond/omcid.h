@@ -31,7 +31,7 @@
 #define DRV_OPT        0x310au
 #define DRV_GET_SN     15
 #define DRV_GET_DEVID  4
-#define MIB_ROWS      192
+#define MIB_ROWS      256
 #define MIB_ROW_MAX   64
 #define MIB_TBL_ENTRY 16
 #define MIB_TBL_NODES 64
@@ -66,7 +66,7 @@
  * LargeString at 400 -- hold the ACS URL and credentials, which this has no
  * reason to keep. A truncated row is marked rather than silently short.
  */
-#define MIB_ROWS      192
+#define MIB_ROWS      256
 #define MIB_ROW_MAX   64
 
 /* ------------------------------------------------- table attributes (171)
@@ -240,7 +240,7 @@ struct mib_row *mib_row_at(int i);
  * values: see mibstore.c. The CLI dumps go through these, never the rows
  * alone. */
 struct mib_ent { uint16_t cls, inst; };
-#define MIB_ENTS_MAX 512                 /* 301 autonomous + MIB_ROWS */
+#define MIB_ENTS_MAX 640                 /* 277 autonomous + MIB_ROWS */
 int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
 		 const struct mib_ent **out);
 const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
@@ -566,6 +566,12 @@ int fixed_me_upload(int want, uint8_t *body, uint16_t *len);
 #define UPL_REC_BYTES 26                /* attribute bytes in one baseline record */
 unsigned mib_upload_build(void);
 int mib_upload_record(unsigned seq, uint8_t *body, uint16_t *len);
+/* The tables the ONU keeps for each MAC bridge port the OLT creates (class
+ * 47): the filter table data (49), the bridge table data (50) and the filter
+ * preassign table (79), each at the port's own entity id, empty or all
+ * zeros. Added on a Create of 47, removed on its Delete. */
+void mbpcd_tables_add(uint16_t inst);
+void mbpcd_tables_del(uint16_t inst);
 /* Records announced by the last MIB upload, 0 before the first. */
 extern unsigned upl_total;
 

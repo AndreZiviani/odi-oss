@@ -177,6 +177,33 @@ for v in 1 ""; do
 	stop
 done
 
+# The tables the ONU keeps for each MAC bridge port (classes 49, 50 and 79)
+# are created when the OLT creates the port, each at the port's entity id,
+# and go with it; a decoded stock MIB after provisioning has them under every
+# port, and the stock upload after a reset has none. 0e70 creates class 47
+# instance 7 (bridge 1, port 7, type 3, pointer 1), 0e71 deletes it.
+store "" ""
+rm -f /var/config/odi.conf
+run /tmp/keys-9.log
+check "no bridge port yet: no class 49, 50 or 79" "$(inst 49)$(inst 50)$(inst 79)" ""
+base=$(upload /tmp/keys-9.log)
+printf '0e70440a002f0007%s%052d00000028%08d\n' 000107030001 0 0 > /tmp/keys-bp-create.txt
+$Q cli/build/omcli --inject-file /tmp/keys-bp-create.txt > /dev/null 2>&1
+wait_count /tmp/keys-9.log "created" 1 10
+check "a Create of class 47 creates its filter table (49)" "$(inst 49)" "7,"
+check "and its bridge table (50)" "$(inst 50)" "7,"
+check "and its filter preassign table (79)" "$(inst 79)" "7,"
+# One record for the port, one each for the three tables: 49 and 50 hold
+# only a table attribute (no upload attribute, an empty mask), 79 ten bytes.
+check "the next MIB upload lists the port and its three tables (4 records)" \
+      "$(upload /tmp/keys-9.log)" "$((base + 4))"
+printf '0e71460a002f0007%064d00000028%08d\n' 0 0 > /tmp/keys-bp-delete.txt
+$Q cli/build/omcli --inject-file /tmp/keys-bp-delete.txt > /dev/null 2>&1
+wait_count /tmp/keys-9.log "deleted" 1 10
+check "a Delete of the port takes the three tables with it" \
+      "$(inst 47)$(inst 49)$(inst 50)$(inst 79)" ""
+stop
+
 # A PPTP-only ONU still builds its bridge. ISP1 session (a PPTP Ethernet UNI
 # port and a VEIP port) against the traced daemon, once whole with the VEIP
 # and once without the Create of the VEIP port (the OLT of a PPTP-only ONU

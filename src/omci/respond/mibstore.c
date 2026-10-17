@@ -939,6 +939,37 @@ int mib_upload_record(unsigned seq, uint8_t *body, uint16_t *len)
 	return 0;
 }
 
+/* What the stock omci_app does when the OLT creates a MAC bridge port config
+ * data (class 47), read in mib_MacBriPortCfgData.so of V1.0-220923
+ * (MacBriPortCfgDataDrvCfg, the add arm): it creates, in this order, a MAC
+ * bridge port filter table data (49), a filter preassign table (79) and a
+ * bridge table data (50), each with the entity id of the new port and all
+ * attributes zero or an empty table. Both stock dumps agree: every class 47
+ * instance of ISP1 and ISP2 has a 49, a 50 and a 79 under its own id. The
+ * stock MIB reset creates none of them, so they are not autonomous, and a
+ * decoded stock upload taken after a reset has none. The stock does it only
+ * when the port's UNI-G is not "non-OMCI only", which omcid never reports.
+ *
+ * G.988 has the ONU create and delete them with the port. The stock delete arm
+ * (MacBriPortCfgDataConnCfg) removes 49 and 50 but never 79, which stays in
+ * its MIB: a leftover this does not copy. */
+void mbpcd_tables_add(uint16_t inst)
+{
+	static const uint16_t cls[3] = { 49, 79, 50 };
+
+	for (int i = 0; i < 3; i++)
+		if (find_class(cls[i]) && !mib_add(cls[i], inst))
+			out_fmt("   no room in the MIB for class %d of port %04x\n",
+				(long)cls[i], (long)inst);
+}
+
+void mbpcd_tables_del(uint16_t inst)
+{
+	mib_del(49, inst);
+	mib_del(79, inst);
+	mib_del(50, inst);
+}
+
 /* `contents` is everything from byte 8 on -- for a get that is the result code,
  * the attribute mask and the values, but a MIB upload response carries a count
  * and no result code at all, so this does not impose one. */

@@ -85,9 +85,12 @@ check "and its end, at the Next that answers the last entity" "$got" \
       "event=mib_upload_end entities=400"
 # 83 creates in the session, one of them for class 351, which the model
 # does not have: refused, so not counted.
+# 184 rows: the OLT's 161 and the tables (classes 49, 50, 79) omcid creates
+# with each of the eight MAC bridge ports -- 24, one of them a row the OLT
+# also sets (class 79 of port 1).
 got=$(grep '^event=provision_end ' "$log" | sed 's/ duration_s=[0-9.]*//')
 check "and closes with the session's own counts" "$got" \
-      "event=provision_end creates=82 sets=102 deletes=0 rows=161 services=6 after_mib_reset=1"
+      "event=provision_end creates=82 sets=102 deletes=0 rows=184 services=6 after_mib_reset=1"
 got=$(grep '^event=alloc_ids ' "$log")
 check "the PLOAM Alloc-IDs, once, when first read" "$got" \
       "event=alloc_ids count=5 ids=282,794,1050,1306,538"
@@ -113,7 +116,7 @@ check "a whole provisioning session is ten event lines" "$got" "10"
 out=$($Q cli/build/omcli provision 2>&1)
 got=$(echo "$out" | grep '^summary ')
 check "provision: the summary" "$got" \
-      "summary rows=161 tconts=5 gem_ports=6 vlans=6 traffic_descriptors=0 services=6 mib_data_sync=184"
+      "summary rows=184 tconts=5 gem_ports=6 vlans=6 traffic_descriptors=0 services=6 mib_data_sync=184"
 got=$(echo "$out" | grep -c '^gem me=[0-9]* port=[0-9]* direction=[123] tcont_me=')
 check "provision: one line per GEM port" "$got" "6"
 got=$(echo "$out" | grep '^vlan ' | tr '\n' ';')
@@ -123,7 +126,7 @@ check "provision: the VLANs, once per source" "$got" \
 # A MIB reset from the CLI is this side's, not the OLT's.
 $Q cli/build/omcli -f mib reset > /dev/null 2>&1
 need "$log" '^event=mib_reset side=local ' 10
-got=$(grep -c '^event=mib_reset side=local rows=161 ' "$log")
+got=$(grep -c '^event=mib_reset side=local rows=184 ' "$log")
 check "a CLI MIB reset is logged as local" "$got" "1"
 
 # What the OLT may act on: a reboot, which omcid refuses, and a software

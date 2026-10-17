@@ -720,6 +720,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		send_resp(fd, tid, f, body, 3);
 		ev_config_write(mt, cls, inst);
 		mib_data_sync++;
+		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
+			mbpcd_tables_add(inst);
 		apply_entity(c, inst, r, mask, 1);
 		snapshot_save();
 		out_fmt("-> created (%d rows held)\n", (long)mib_count());
@@ -755,6 +757,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * the driver at all. */
 		apply_delete(c, inst);
 		mib_del(cls, inst);
+		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
+			mbpcd_tables_del(inst);
 		body[0] = OMCI_OK;
 		send_resp(fd, tid, f, body, 1);
 		ev_config_write(mt, cls, inst);
