@@ -787,6 +787,11 @@ void cfg_load_veip_slot(void)
 		return;
 	for (; v[i] >= '0' && v[i] <= '9' && slot < 1000; i++)
 		slot = slot * 10 + (v[i] - '0');
+	/* 255 is the stock "not set": the factory value of the key on both our
+	 * lines, and the value omci_app's main() starts the slot at before it
+	 * reads -slot_veip. Unset, so nothing to say about it. */
+	if (i > 0 && !v[i] && slot == 255)
+		return;
 	if (i == 0 || v[i] || slot < 2 || slot > 254 || slot == 128) {
 		out("OMCI_VEIP_SLOT_ID ignored: not a usable slot (2 to 254, not 128)\n");
 		return;

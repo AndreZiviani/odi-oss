@@ -13,7 +13,10 @@ listed here.
   not 0x0000, which points at network address 0. The CTC LOID entity's
   operation id reads "CTC ". A MAC bridge ageing time set by the OLT is
   now sent to the switch in tenths of a second like the default: an
-  ageing time of N seconds used to age entries out after N/10. Refs #103.
+  ageing time of N seconds used to age entries out after N/10.
+  `OMCI_VEIP_SLOT_ID=255`, the factory value, is read as unset, as the stock
+  firmware reads it, instead of being logged as an unusable slot at every
+  start and reload. Refs #103.
 
 - Docs and tests: the key counts are corrected (the image acts on 22 of the 184
   stock keys, plus bit 256 of `OMCI_CUSTOM_ME`, not "reads 21"; 161 are

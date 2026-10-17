@@ -114,6 +114,14 @@ for bad in 128 1 255 0 abc 300; do
 	run /tmp/keys-bad.log
 	check "slot key $bad is ignored: the VEIP stays at 0x0601" "$(inst 329)" "1537,"
 	stop
+	# 255 is the stock "not set" (the factory value): no warning for it.
+	if [ "$bad" = 255 ]; then
+		check "slot key 255 is unset, not reported as unusable" \
+		      "$(grep -c 'OMCI_VEIP_SLOT_ID ignored' /tmp/keys-bad.log)" "0"
+	else
+		check "slot key $bad is reported as unusable" \
+		      "$(grep -q 'OMCI_VEIP_SLOT_ID ignored' /tmp/keys-bad.log && echo yes)" "yes"
+	fi
 done
 
 # ---------------------------------------------------------- the private MEs
