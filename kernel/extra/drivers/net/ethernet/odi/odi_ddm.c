@@ -56,6 +56,16 @@
 #define ODI_DDM_SFF8472_A2_ALARM_WARN_OFF	110U
 #define ODI_DDM_SFF8472_A2_ALARM_WARN_LEN	8U
 
+/* A0h 92-94: diagnostic monitoring type, enhanced options, SFF-8472
+ * compliance. A2h 0-39: the alarm and warning thresholds, 24 bytes for the
+ * first three measurements and 16 for the two optical powers. */
+#define ODI_DDM_SFF8472_A0_MONITOR_TYPE_OFF	92U
+#define ODI_DDM_SFF8472_A0_MONITOR_TYPE_LEN	3U
+#define ODI_DDM_SFF8472_A2_LIMITS_A_OFF		0U
+#define ODI_DDM_SFF8472_A2_LIMITS_A_LEN		24U
+#define ODI_DDM_SFF8472_A2_LIMITS_B_OFF		24U
+#define ODI_DDM_SFF8472_A2_LIMITS_B_LEN		16U
+
 int odi_ddm_get(int type, uint8_t out[ODI_DDM_BUF_LEN])
 {
 	uint32_t sel, addr;
@@ -93,6 +103,18 @@ int odi_ddm_get(int type, uint8_t out[ODI_DDM_BUF_LEN])
 	case ODI_DDM_ALARM_STATUS:
 		sel = ODI_I2C_SEL_A2; addr = ODI_DDM_SFF8472_A2_ALARM_WARN_OFF;
 		n = ODI_DDM_SFF8472_A2_ALARM_WARN_LEN;
+		break;
+	case ODI_DDM_MONITOR_TYPE:
+		sel = ODI_I2C_SEL_A0; addr = ODI_DDM_SFF8472_A0_MONITOR_TYPE_OFF;
+		n = ODI_DDM_SFF8472_A0_MONITOR_TYPE_LEN;
+		break;
+	case ODI_DDM_LIMITS_A:
+		sel = ODI_I2C_SEL_A2; addr = ODI_DDM_SFF8472_A2_LIMITS_A_OFF;
+		n = ODI_DDM_SFF8472_A2_LIMITS_A_LEN;
+		break;
+	case ODI_DDM_LIMITS_B:
+		sel = ODI_I2C_SEL_A2; addr = ODI_DDM_SFF8472_A2_LIMITS_B_OFF;
+		n = ODI_DDM_SFF8472_A2_LIMITS_B_LEN;
 		break;
 	default:
 #ifdef __KERNEL__
