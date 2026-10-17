@@ -108,6 +108,10 @@ unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6'
 got=$(grep -v '^#' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
 check "and summarised in /var/log/omcid-unknown.txt" "$got" "$UNK_ISP1"
+# Every Get, Set and Delete of the ISP1 session names an instance omcid holds
+# (one it created itself, or one the OLT created first): no event=no_instance.
+got=$(grep -c '^event=no_instance ' "$log")
+check "the ISP1 session addresses no instance omcid lacks" "$got" "0"
 # Nothing per message: the whole session is a handful of lines.
 got=$(grep -c '^event=' "$log")
 check "a whole provisioning session is ten event lines" "$got" "10"
@@ -177,6 +181,26 @@ unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6
 unknown_me class=351 op=get mt=9 count=1
 unknown_msg type=29 class=256 count=2"
+# A modelled class at an instance omcid holds no row for (MAC bridge service
+# profile 0x0999): one line per (class, instance) whatever the operation,
+# the answer unchanged. Two Gets and the Set that creates the row are counted;
+# the Get after it names a held instance. A Get of an instance omcid creates
+# itself (ONU-G 0) is not one of these.
+$Q cli/build/omcli --inject "$(frame 0e30 49 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e31 49 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e32 48 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e33 49 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e34 49 0100 0000)" > /dev/null 2>&1
+sync_send "$log"
+got=$(grep '^event=no_instance ' "$log")
+check "a Get of an instance omcid does not hold is logged once" "$got" \
+      "event=no_instance class=45 inst=2457 op=get mt=9"
+got=$(grep -o -- '-> 0e30290a002d0999' "$log" | head -1)
+check "and still answered as before (success)" "$got" "-> 0e30290a002d0999"
+need /var/log/omcid-unknown.txt '^no_instance class=45 inst=2457 op=get mt=9 count=3' 10
+got=$(grep '^no_instance ' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
+check "the summary counts the requests until the instance exists" "$got" \
+      "no_instance class=45 inst=2457 op=get mt=9 count=3"
 # Without OMCI_UNKNOWN_ME_OK the answer is "unknown entity" (4), and an
 # unknown type is "not supported" (1).
 got=$(grep -o -- '-> 0e03240a015f000104' "$log" | head -1)
@@ -191,7 +215,7 @@ check "the key is off unless set" "$got" "unknown entities: answered unknown ent
 # Rate limited: 30 more reboot requests, back to back, and the window of 20
 # lines a minute already holds 15 (start, Alloc-IDs, OLT reset, upload begin
 # and end, provision begin and end, the three session unknowns, CLI reset,
-# reboot, sw_image, and the two unknowns above).
+# reboot, sw_image, the two unknowns and the no_instance line above).
 : > /tmp/reboots.txt
 i=0
 while [ "$i" -lt 30 ]; do
@@ -238,6 +262,7 @@ unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6
 unknown_me class=351 op=get mt=9 count=2
 unknown_msg type=29 class=256 count=2
+no_instance class=45 inst=2457 op=get mt=9 count=3
 unknown_me class=351 op=set mt=8 count=1
 unknown_me class=65021 op=create mt=4 count=1"
 got=$(grep -o -- '-> 0e07240a015f0002000000' "$log2" | head -1)
@@ -449,6 +474,20 @@ kill "$victim" 2>/dev/null
 wait "$victim" 2>/dev/null
 omcid_stop "$pid4"
 rm -f /var/config/odi.conf
+
+# The ISP2 session, replayed into a fresh omcid of a fresh boot, addresses no
+# instance omcid lacks either: the two OLTs on file never answer the question
+# result 5 would raise (AUDIT B8 E3). A third OLT's session belongs here.
+rm -f /var/log/omcid-unknown.txt
+cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+$Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid-events-isp2.log 2>&1 &
+pid5=$!
+omcid_up /tmp/omcid-events-isp2.log
+$Q cli/build/omcli --inject-file "$FIX/omci-session-isp2.txt" > /dev/null 2>&1
+sync_send /tmp/omcid-events-isp2.log
+got=$(grep '^event=no_instance ' /tmp/omcid-events-isp2.log)
+check "the ISP2 session addresses no instance omcid lacks" "$got" ""
+omcid_stop "$pid5"
 
 if [ "$fail" -eq 0 ]; then echo "events-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
 suite_exit
