@@ -134,6 +134,10 @@ the fields it owns. Board ports: UNI 0, PON 2, CPU 3; port 1 is unused.
   `PORT_FORCE_SELECT(0).TX_PAUSE = 1`: the host port never sends PAUSE
   frames to the host. Ours, not the stock image's; see
   [Host port PAUSE](#host-port-pause).
+- **pon isolate**: the CPU port and the extension ports cleared from the
+  PON port's isolation mask (`PORT_ISOLATION`, port 2), so a frame from
+  the fibre is never forwarded to the CPU. Ours, not the stock image's;
+  see [PON port isolation](#pon-port-isolation).
 
 Left out altogether:
 
@@ -809,3 +813,124 @@ platform settings neither read nor write the word, and the link read.
 To see it on a stick: `register get 0x21c00 1` in `diag` (bit 12), `cat
 /sys/module/odi_switch/parameters/host_link`, and on the host `ethtool
 <if>` (`Auto-negotiation: on|off`, `Link detected`).
+
+## PON port isolation
+
+Nothing that arrives from the fibre reaches the stick's own IP stack: not
+the web UI, ssh, the exporter, nor an ARP or ping answer. Two independent
+layers hold this, each enough on its own, and neither depends on what an
+OLT provisions, on VLANs or on tags: both key on the port a frame entered
+by. OMCI is the one exception, and it is not Ethernet forwarding: the OLT's
+management channel arrives as a trapped frame (reason 246, the OMCC stream)
+that `odi_omci.c` hands to omcid, never to a network interface.
+
+### Why two layers
+
+What stood between the fibre and the CPU before: the switch forwards a
+frame for the stick's MAC (learned on the CPU port) to the CPU, and floods
+broadcast to the CPU (`FLOOD_BCAST_PORTS` 0xf, see
+[Module-load replay](#module-load-replay)); the port isolation masks were
+all open, as on the stock image; and the kernel handed any frame from the
+PON port to `eth0`, up but outside `br0`, where the IP stack still answered
+for `br0`'s address (a Linux host accepts a frame for any of its addresses
+on any interface, and answers ARP for it). What remained was the
+classifier: every downstream service row of
+[Bridge connections](#bridge-connections) filters the egress by a port
+mask that never holds the CPU, and row 255 forwards whatever no service row
+matches to the port mask its action carries, which is empty. That this
+removes the CPU from a lookup result is read from the field layout, not
+measured, and it is one layer only.
+
+### The switch: the PON port's isolation mask
+
+`PORT_ISOLATION` holds, per ingress port, the ports a frame from it may be
+forwarded to (bits 3:0, bit n = switch port n) and the CPU-side extension
+ports (bits 10:4). Two 11-bit items share a word: port n is in the word at
+0x027000 + 4 * (n / 2), at bit 11 * (n % 2). The register table of the
+stock binary gives the width and the port range (11 bits, ports 0-3), and
+puts the extension-port table at 0x027008; a word per port would put ports
+2 and 3 on it. A stick reads `0x003fffff` in both words (two fields of
+0x7ff, every port open) and `0x000007ff` in the last word of the extension
+table (one field alone), on the stock modules and on this image before the
+step below.
+
+The platform step "pon isolate" (`odi_sw_pon_isolate_apply()`,
+`odi_switch_port.c`) clears the CPU bit and bits 10:4 of port 2's field, a
+read-modify-write that keeps port 3's half of the word: `0x003fffff`
+becomes `0x003ff807`, and logs
+
+    odi_switch: PON port isolation on: the PON port forwards to 0x007 (never the CPU)
+
+It runs before omcid starts, so before any service exists. Only the PON
+port's own field changes: the host still reaches the CPU, the CPU still
+reaches the host and the PON (the OMCI replies are CPU-to-PON frames), and
+a frame from the fibre still reaches the UNI. Isolation filters the
+egress whatever chose it, a flood or an L2 hit; that it filters a trap to
+the CPU as well is suggested, not measured, by the chip's per-protocol
+isolation "leaky" controls (reserved multicast, IP multicast), which
+exist to let trapped control frames through it.
+
+Open: OMCI is itself a frame from the PON port trapped to the CPU. Whether
+isolation applies to that trap is not known; if it did, OMCI would stop
+with the step on. The trial checks it first (below), and
+`odi_switch.pon_isolate` is the way back:
+
+- `pon_isolate` (bool, default `Y`, 0644): `N` on the command line leaves
+  the mask open; written to `/sys/module/odi_switch/parameters/pon_isolate`
+  after the platform settings it is applied at once, one register write,
+  in either direction. The NIC layer below holds either way.
+
+### The kernel: frames from the PON port are dropped
+
+The CPU tag of every received frame carries the port it entered the switch
+by (`odi_nic_hw.h`, the source port of RX word 3). That the field is right
+is shown by function, on both ISPs: OMCI replies are sent to the source
+port of the request and reach the OLT, and host frames are delivered to
+`eth0.2` by source port 0.
+
+`odi_poll()` (`odi_nic.c`) hands a frame to the RX hooks first, as before;
+`odi_omci.c` takes the OMCI frames. A frame from the PON port that no hook
+took is dropped there, before any net_device sees it, whatever its type.
+`/proc/odi_nic` counts both, one line each (`rx_pon <n>`,
+`rx_pon_dropped <n>`).
+`rx_pon` is every frame from the PON port (OMCI included), `rx_pon_dropped`
+the ones dropped; with the switch layer in place it stays 0, and `rx_pon`
+equals the OMCI frames of `/proc/odi_omci` (`frames_delivered` +
+`dropped_unregistered` + `unicast_fail`). A frame dropped here also counts
+as `rx_dropped` of `eth0`. There is no switch to turn it off: nothing on
+the stick wants a frame from the PON other than OMCI, and a future RX hook
+(an IGMP daemon trapping the OLT's queries, say) still sees its frames
+first. There is no netfilter in this kernel, and only the driver knows the
+ingress port.
+
+### Not covered
+
+- Frames the stick itself sends: an ordinary transmit carries no port
+  select, so the switch forwards it by its destination, and a broadcast
+  from the stick (an ARP request) is flooded toward the PON as well as the
+  host. No answer can come back (above), but the stick does announce
+  itself upstream. Forcing the port select on management transmits, or
+  isolating the CPU from the PON, would also touch the OMCI replies, which
+  are CPU-to-PON frames with the port select; neither is done without a
+  measurement.
+- A frame from the fibre carrying the stick's MAC as its source would
+  move the stick's L2 entry to the PON port, so frames from the host to
+  the stick would be switched toward the fibre until the entry moves back.
+  A static L2 entry for the stick's MAC on the CPU port would prevent it;
+  not done yet.
+
+### Checking it on a stick
+
+- `register get 0x27000 2` in `diag`: `0x003fffff 0x003ff807`.
+- `/proc/odi_nic`: `rx_pon_dropped` 0 over a day, and `rx_pon` equal to the
+  OMCI frame count; `diag mib dump counter port 2` shows the OLT's
+  broadcasts arriving (`ifInBroadcastPkts` growing) all the while.
+- OMCI: the ONU in O5 with its services, and `/proc/odi_omci`
+  `frames_delivered` and `replies_sent_to_pon` growing together.
+- The host still reaches the web UI, ssh and the exporter.
+
+`test/odi_pon_isolation_test.c` starts from the words a stick reads,
+checks the words the platform step leaves, asks a forwarding model where
+each kind of frame from the fibre can go (unicast to the stick, broadcast,
+unknown unicast and multicast, a trap), and runs the NIC's PON test on RX
+descriptor words logged on a stick: an OMCI frame and host frames.

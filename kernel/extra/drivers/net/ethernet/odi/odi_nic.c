@@ -164,6 +164,14 @@ struct odi_nic {
 	 * a reader only ever looks at the difference.
 	 */
 	u32 rx_taken;
+
+	/* Frames from the PON port (/proc/odi_nic): every one handed to the
+	 * RX hooks, OMCI included, and the ones no hook took, dropped before
+	 * a net_device. rx_pon_dropped stays 0 while the switch keeps the
+	 * fibre away from the CPU port.
+	 */
+	u32 rx_pon;
+	u32 rx_pon_dropped;
 };
 
 static struct odi_nic odi;
@@ -954,10 +962,22 @@ static int odi_poll(struct napi_struct *napi, int budget)
 			/* Hooks see the frame at the MAC header, as the stock
 			 * callers expect it; eth_type_trans pulls the header and is
 			 * only right for the net device path.
+			 *
+			 * A frame from the PON port that no hook took (OMCI is
+			 * taken) is dropped here: nothing from the fibre reaches
+			 * the IP stack, whatever the switch let through.
 			 */
+			if (odi_nic_rx_from_pon(d))
+				odi.rx_pon++;
 			if (!odi_dispatch_rxhooks(d, src_port, skb)) {
-				skb->protocol = eth_type_trans(skb, dev);
-				netif_receive_skb(skb);
+				if (odi_nic_rx_from_pon(d)) {
+					odi.rx_pon_dropped++;
+					dev->stats.rx_dropped++;
+					dev_kfree_skb(skb);
+				} else {
+					skb->protocol = eth_type_trans(skb, dev);
+					netif_receive_skb(skb);
+				}
 			}
 		} else {
 			dev_kfree_skb(skb);
@@ -1214,7 +1234,9 @@ void odi_nic_report(void)
 		 odi.tok_irqs, odi.tok_work, odi.backstop_reclaims, odi.irq_storm_tripped);
 }
 
-/* /proc/odi_nic: the interrupt and reclaim counters, one per line. tok_irqs
+/* /proc/odi_nic: the interrupt and reclaim counters, one per line, then
+ * the frames from the PON port (rx_pon, OMCI included) and those dropped
+ * because no RX hook took them (rx_pon_dropped). tok_irqs
  * is the number of interrupt entries that carried the TX-completion bit:
  * zero under TX traffic means the interrupt does not fire on this unit and
  * every reclaim came from the poll, the xmit path or the backstop.
@@ -1223,9 +1245,10 @@ void odi_nic_report(void)
  */
 static int odi_nic_proc_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "irq_entries %u\nnapi_polls %u\ntok_irqs %u\ntok_work %u\ntok_idle %u\nbackstop_reclaims %u\nrx_taken %u\nstorm_tripped %d\n",
+	seq_printf(m, "irq_entries %u\nnapi_polls %u\ntok_irqs %u\ntok_work %u\ntok_idle %u\nbackstop_reclaims %u\nrx_taken %u\nstorm_tripped %d\nrx_pon %u\nrx_pon_dropped %u\n",
 		   odi.irq_entries, odi.napi_polls, odi.tok_irqs, odi.tok_work,
-		   odi.tok_idle, odi.backstop_reclaims, odi.rx_taken, odi.irq_storm_tripped);
+		   odi.tok_idle, odi.backstop_reclaims, odi.rx_taken, odi.irq_storm_tripped,
+		   odi.rx_pon, odi.rx_pon_dropped);
 	return 0;
 }
 

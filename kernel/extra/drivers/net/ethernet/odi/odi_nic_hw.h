@@ -430,6 +430,19 @@ static inline unsigned int odi_nic_rx_src_port(const struct odi_rx_desc *d)
 	return (d->opts3 >> ODI_RXD_SRC_PORT_SHIFT) & ODI_RXD_SRC_PORT_MASK;
 }
 
+/* The switch port frames from the fibre enter by. The only frames from it
+ * the CPU wants are OMCI, which odi_omci.c takes as an RX hook (reason
+ * 246); odi_poll() drops every other one before any net_device sees it,
+ * so nothing from the fibre reaches the IP stack
+ * (docs/SWITCH.md#pon-port-isolation).
+ */
+#define ODI_NIC_PON_PORT	2U
+
+static inline int odi_nic_rx_from_pon(const struct odi_rx_desc *d)
+{
+	return odi_nic_rx_src_port(d) == ODI_NIC_PON_PORT;
+}
+
 static inline unsigned int odi_nic_rx_reason(const struct odi_rx_desc *d)
 {
 	return (d->opts3 >> ODI_RXD_REASON_SHIFT) & ODI_RXD_REASON_MASK;

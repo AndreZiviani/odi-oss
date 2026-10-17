@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- Kernel: nothing that arrives from the fibre reaches the stick's own IP
+  stack: not the web UI, ssh or the exporter, and no ARP or ping answer,
+  whatever the OLT provisions. Two independent layers, keyed on the port a
+  frame entered by: the switch's isolation mask of the PON port no longer
+  holds the CPU (it was all open, as on the stock image), and the NIC driver
+  drops every frame from the PON port that is not OMCI before any network
+  interface sees it (before, any that got through went to `eth0`, and the
+  IP stack answered there for the management address). `/proc/odi_nic`
+  counts the frames from the PON port (`rx_pon`) and those dropped
+  (`rx_pon_dropped`). OMCI is exempt in the driver;
+  `odi_switch.pon_isolate=N` leaves the switch mask open, should an OLT's
+  OMCI ever need it.
+
 ## v1.6.0 - 2026-10-17
 
 - The image ships confd v1.5.0 (odi-ui: every input validated by the daemon

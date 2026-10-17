@@ -93,6 +93,11 @@ Error paths:
   shows `tok_irqs` (entries carrying the TX-completion bit) and
   `backstop_reclaims` (work runs that freed descriptors nothing else had),
   so a run shows whether the interrupt fires.
+- A frame from the PON port (the source port of the CPU tag) that no RX
+  hook took is dropped before any net_device: OMCI, taken by `odi_omci.c`,
+  is the only traffic from the fibre the CPU accepts. `/proc/odi_nic`
+  counts `rx_pon` (every frame from the PON port) and `rx_pon_dropped`
+  (`docs/SWITCH.md`, "PON port isolation").
 - Every `dma_map_single()` is checked with `dma_mapping_error()`, and the
   init path unwinds in reverse order.
 
