@@ -1,8 +1,7 @@
 /* Alarms and attribute value changes: what the ONU tells the OLT on its own.
  *
- * The stock stack sends two kinds of autonomous message (investigations
- * AUDIT-night-omcid.md, "Area B2", B2-1, read out of bin/omci_app and
- * lib/libomci_mib.so of our image):
+ * The stock stack sends two kinds of autonomous message (read out of
+ * bin/omci_app and lib/libomci_mib.so of our image):
  *
  *   - an alarm notification (message type 16): the entity's whole 28-byte
  *     alarm bitmap, and an alarm sequence number in the last contents byte,

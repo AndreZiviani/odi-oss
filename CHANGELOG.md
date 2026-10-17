@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+- Comments and this changelog no longer cite files of a private workspace.
+
 - omcid: alarms and attribute value changes. omcid never sent either; the
   stock stack sends both, and an OLT shows the UNI state and the optical
   alarms from them. Once a second, in O5 only: ANI-G low and high received
@@ -289,7 +291,7 @@ listed here.
   the union of their ports, so the last member of one no longer deletes the
   row the other still needs. Not reachable on a running stick today (igmpd is
   not started and receives no frame); it is the daemon's own unit tests that
-  cover it. Refs the multicast audit, AUDIT-night-multicast.md.
+  cover it.
 
 - Tests: the `make test-rcs` goldens (`test/fixtures/rcs-trace-*.txt`) are
   regenerated: they predated the `safe-mode.sh count` and `boot-ok` and the
