@@ -134,8 +134,8 @@ static long now_s(void)
 }
 
 /* One autonomous message: transaction id 0, no AR, the baseline device id.
- * With no line side (a test, qemu) it is printed as "=> <frame>", the way a
- * reply is printed as "-> ". */
+ * Printed to the log as "=> <frame>" too, the way a reply without a line
+ * side is printed as "-> ". */
 static void notify_send(uint8_t mt, uint16_t cls, uint16_t inst,
 			const uint8_t *contents)
 {
@@ -151,14 +151,14 @@ static void notify_send(uint8_t mt, uint16_t cls, uint16_t inst,
 	nl_put32(nframe + 44, omci_crc(nframe, 44));
 	sent_this_s++;
 	notify_sent++;
-	if (nl_fd < 0) {
-		out("=> ");
-		for (unsigned i = 0; i < OMCI_FRAME_LEN; i++)
-			out_hex(nframe[i], 2);
-		out_char('\n');
-		return;
-	}
-	nl_send_frame(nl_fd, nl_tid, ntxbuf, nframe, OMCI_FRAME_LEN);
+	/* Logged either way: these are rare, and omcid.log is where anyone
+	 * checks what the OLT was told. */
+	out("=> ");
+	for (unsigned i = 0; i < OMCI_FRAME_LEN; i++)
+		out_hex(nframe[i], 2);
+	out_char('\n');
+	if (nl_fd >= 0)
+		nl_send_frame(nl_fd, nl_tid, ntxbuf, nframe, OMCI_FRAME_LEN);
 }
 
 static uint8_t attr_u8(uint16_t cls, uint16_t inst, unsigned k)
