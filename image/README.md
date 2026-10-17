@@ -73,7 +73,9 @@ What it does differently from the stock one:
    bad or oversized tarball never gets as far as erasing a partition.
 5. It streams each member out of the tarball with `tar -O`, so `/tmp` needs
    only the tarball, `fwu.sh` and `md5.txt`.
-6. It names the partition left unbootable if a write fails part-way.
+6. It names the partition left unbootable if a write fails part-way, and
+   writes the kernel last (both partitions are erased first, then the rootfs,
+   then the kernel), so a flash cut short leaves a kernel U-Boot rejects.
 7. It does not record `sw_version<slot>` unless `FWU_RECORD_VERSION=1`:
    that is an erase-and-rewrite of the environment for a cosmetic string.
 

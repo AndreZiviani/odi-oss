@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- fwu.sh: an interrupted flash can no longer leave a valid new kernel over a
+  missing or old rootfs. It used to erase and write the kernel, then the
+  rootfs; a power cut or a failed write in between left a kernel U-Boot
+  accepts, and the web UI offered to trial the slot. It now erases the kernel
+  and rootfs partitions first, writes the rootfs, and writes the kernel last,
+  so any interruption leaves a kernel U-Boot refuses (bad magic or data CRC).
+  The guard comment about the watchdog on a committed boot is corrected too:
+  odi_wdt arms the watchdog itself once it initialises. New host test
+  `test/fwu_write_order_test.sh`. Found in the night audit of the update path
+  (investigations/odi-sfp-re/AUDIT-night-flash.md).
+
 - OMCI: the LOID password omcid reports (ONU-G, CTC LOID entity) follows the
   LOID, as the stock `runomci.sh` does: with the same `LOID` and `LOID_OLD`
   the current `LOID_PASSWD` is reported, so a changed password takes effect
