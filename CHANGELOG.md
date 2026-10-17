@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Kernel: the downstream multicast GEM port is flagged as multicast on any
+  OLT, as omcid asks, not only when it is GEM port 4095. That port number
+  is ISP1's multicast GEM; ISP2's (4094) and any other OLT's were set up as
+  a plain data port, unlike the stock firmware. A GEM port 4095 that an OLT
+  uses for two-way data now also gets its upstream flow.
+
 - DDM: the module can now say how its readings are to be read. Two new `diag`
   commands, from the module itself over I2C: `pon get transceiver
   monitoring-type` (A0h byte 92: whether diagnostics are implemented,

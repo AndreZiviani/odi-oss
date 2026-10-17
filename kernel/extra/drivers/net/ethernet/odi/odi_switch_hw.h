@@ -525,7 +525,7 @@ static inline uint32_t ODI_SW_DSF_GEM_FLOW_TYPE_FLAGS_SET(uint32_t reg, uint32_t
 
 /* FLAGS: bit 0 multicast, 1 Ethernet (data), 2 OMCI, 3 unused, 4 decrypt
  * downstream (AES). cmd 25 writes the whole field (2 data, 3
- * OMCI/broadcast); the AES path flips bit 4 alone.
+ * multicast, when omcid flags the flow); the AES path flips bit 4 alone.
  */
 static inline uint32_t ODI_SW_DSF_GEM_FLOW_TYPE_FLAGS_DECRYPT_GET(uint32_t reg)
 {

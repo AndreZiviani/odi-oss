@@ -16,8 +16,8 @@
  */
 static const uint32_t ds_port_id[6] = { 0xfff, 0x59a, 0x69a, 0x71a, 0x79a, 0x61a };
 
-/* cmd 25, US side: the four data GEM ports, same order minus the reserved
- * 0xfff OMCI port (US is downstream-mirror-only for data GEMs).
+/* cmd 25, US side: the five data GEM ports, same order minus the
+ * downstream-only multicast GEM 0xfff.
  */
 static const uint32_t us_port_id[5] = { 0x59a, 0x69a, 0x71a, 0x79a, 0x61a };
 
@@ -51,13 +51,16 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 		call(64, &fl, sizeof fl);
 	}
 
-	/* 7: cmd 25, DS instance 1 -- the OMCI/broadcast GEM (idx 0, 0xfff). */
+	/* 7: cmd 25, DS instance 1 -- ISP1's multicast GEM (idx 0, 0xfff). */
 	{
 		struct omci_gemflow g;
 
 		memset(&g, 0, sizeof g);
 		g.flow_id = 0;
 		g.gem_port = ds_port_id[0];
+		/* ISP1's multicast GEM: omcid flags its downstream-only CTP
+		 * (apply_qos.c), and the kernel writes the multicast type. */
+		g.mcast_filter = 1;
 		g.ena = 1;
 		g.dir = OMCI_GEMFLOW_DS;
 		call(25, &g, sizeof g);
