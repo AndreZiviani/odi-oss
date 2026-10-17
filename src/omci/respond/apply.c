@@ -38,6 +38,13 @@ void mib_reset_all(void)
 	uni_reset();
 	mib_data_sync = 0;
 	upl_total = 0;
+	/* The bridge connections were built from the MIB just thrown away.
+	 * The stock reset clears the datapath with the MIB; here the rebuild
+	 * that follows (one quiet second, respond/main.c) deactivates every
+	 * one of them and builds none from the empty MIB, so an OLT that
+	 * provisions fewer services after the reset, or none, does not leave
+	 * the old ones forwarding. */
+	conn_dirty = 1;
 	/* A reset MIB and a snapshot of the one before it must never both be
 	 * on disk: a respawn right after this reset, before the OLT sends
 	 * anything to snapshot again, must fall back to re-registration, not
