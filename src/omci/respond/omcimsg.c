@@ -725,11 +725,15 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		body[0] = OMCI_OK;
 		body[1] = 0;                     /* attribute execution mask */
 		body[2] = 0;
-		send_resp(fd, tid, f, body, 3);
-		ev_config_write(mt, cls, inst);
 		mib_data_sync++;
 		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 			mbpcd_tables_add(inst);
+		/* Saved before the answer: once the OLT is told the entity
+		 * exists, a respawn must find it. Saved again after the apply,
+		 * which may add what it programmed. */
+		snapshot_save();
+		send_resp(fd, tid, f, body, 3);
+		ev_config_write(mt, cls, inst);
 		apply_entity(c, inst, r, mask, 1);
 		snapshot_save();
 		out_fmt("-> created (%d rows held)\n", (long)mib_count());
@@ -744,13 +748,16 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		if (r)
 			mib_write(r, c, mask, f + 10, 30);
 		body[0] = r ? OMCI_OK : OMCI_ERR_UNKNOWN_ME;
+		/* Only a Set that succeeded: the OLT counts the ones it was
+		 * told succeeded, and a refused one is not among them. Saved
+		 * before the answer, as for a Create. */
+		if (r) {
+			mib_data_sync++;
+			snapshot_save();
+		}
 		send_resp(fd, tid, f, body, 1);
 		if (r)
 			ev_config_write(mt, cls, inst);
-		/* Only a Set that succeeded: the OLT counts the ones it was
-		 * told succeeded, and a refused one is not among them. */
-		if (r)
-			mib_data_sync++;
 		if (r) {
 			apply_entity(c, inst, r, mask, 0);
 			snapshot_save();
@@ -768,10 +775,10 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 			mbpcd_tables_del(inst);
 		body[0] = OMCI_OK;
+		mib_data_sync++;
+		snapshot_save();               /* before the answer, as above */
 		send_resp(fd, tid, f, body, 1);
 		ev_config_write(mt, cls, inst);
-		mib_data_sync++;
-		snapshot_save();
 		out("-> deleted\n");
 		return;
 	}
