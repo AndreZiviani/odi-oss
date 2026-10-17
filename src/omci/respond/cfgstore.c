@@ -685,7 +685,9 @@ void cfg_show_identity(void)
  *     OMCI_VENDOR_PRODUCT_CODE     ONU2-G attribute 3, two bytes
  *
  * An empty or absent key keeps what omcid has always answered: "0.0.0", the
- * device id (both for ONU2-G and ONU-G), 0x80 and the captured product code.
+ * device id (both for ONU2-G and ONU-G), 0x80 and product code 15 -- the
+ * stock firmware's own default for OMCI_VENDOR_PRODUCT_CODE (the built-in
+ * MIB table of bin/configd), so every stick of that firmware reports it.
  * So does an ONU_HW_VERSION that does not fit the attribute: more than 14
  * characters, or anything outside printable ASCII, is ignored whole rather
  * than cut, since a truncated version is a different version to a whitelist.
