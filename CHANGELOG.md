@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- The image ships confd v1.5.0 (odi-ui: every input validated by the daemon
+  and the page alike, Host and cross-site checks, request deadlines, safer
+  writes of the credential and ssh keys, the expert VEIP and private-entity
+  controls) and metricsd v1.6.0 (the module's own alarm flags, limits and
+  calibration, and a metric for an unreadable module).
+
 - Kernel: the downstream multicast GEM port is flagged as multicast on any
   OLT, as omcid asks, not only when it is GEM port 4095. That port number
   is ISP1's multicast GEM; ISP2's (4094) and any other OLT's were set up as
