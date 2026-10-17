@@ -442,6 +442,10 @@ own boot time, gives its window. A watchdog reset or a crash that reboots
 the stick before 60 s of uptime counts as a short boot too: a stick that
 cannot stay up ends in the safe mode by itself, which is the point.
 
+Two more things make a boot the safe one without anyone touching the power
+(the state machine is below): three boots in a row that each ended in a
+watchdog reset, and a config partition that is not mounted.
+
 A safe-mode boot lasts that one boot. It:
 
 - runs the host port on auto-negotiation, whatever `HOST_AUTONEG` says;
@@ -457,7 +461,11 @@ A safe-mode boot lasts that one boot. It:
   and every other setting are left as they are, and the next boot uses
   them again. The default passwords are in memory only: the web UI reads a
   flag in `/var/run`, and root's account file is a copy in RAM bind-mounted
-  over the read-only one.
+  over the read-only one;
+- confirms the boot to the kernel watchdog without the checks that a dead
+  config partition or a missing address fail (`confirm_watchdog` in
+  `rcs-lib.sh`; the switch init must still have worked), so a safe-mode boot
+  stays up for someone to reach instead of being reset at 123 s again.
 
 The web UI says so on every view while it lasts: that this is the safe
 mode, that the PON is off, that the password is the default for this boot
@@ -474,8 +482,59 @@ goes a long way (the flash can be read with a programmer), and this is what
 makes a lost password recoverable at all; but it is a real change for a stick
 whose host port is reachable by people who should not log into it. The PON
 is off for that boot, so the stick does not carry anyone's traffic
-meanwhile. The counter costs two small writes to the config partition per
-boot (the count, and its removal at 60 s), on every stick.
+meanwhile. The counters cost two small writes to the config partition per
+boot (the count, and its removal at 60 s), on every stick; the watchdog one
+is written only when it changes, which is after a watchdog reset.
+
+**The state machine.** Three counters decide, all read in `safe-mode.sh
+count`, once per boot, right after the config partition is mounted:
+
+| signal | where it lives | how it moves |
+|---|---|---|
+| short boots | `/etc/config/boot-count` | +1 at every boot (about 5 s of uptime), removed at 60 s |
+| watchdog resets | `/etc/config/boot-wdt` | +1 when the previous boot's `reason=` (`/proc/odi_ramlog_prev`, `docs/KERNEL.md`) is `wdt_*` (a watchdog rule fired: boot never confirmed, a client missed its ping, memory floor, CPU port), `panic` or `oops`; unchanged on `power` (DRAM lost: a power cycle) or when the file is absent (an older kernel); removed on anything else (`reboot`, `halt`, `poweroff`, `unknown`); removed at 600 s of uptime |
+| config partition | the mount table (`config_mounted`), and `/etc/config` writable | checked first, by rcS and again by `count` |
+
+and one of them ends in the safe mode:
+
+1. config partition not mounted or not writable: safe mode at once
+   (`safe-mode.sh no-config`, `cause=config`), with no record, since there
+   is nowhere to write it. The flag in `/var/run` still says it, and the
+   web UI reads the flag.
+2. `boot-count` reached 5 short boots before this one (3 with
+   `HOST_AUTONEG=off`): `cause=short_boots`.
+3. `boot-wdt` reached 3 boots before this one: `cause=watchdog`. The
+   safe-mode record says `wdt_resets=3`.
+
+Entering the safe mode removes both counters. The boot after a safe-mode
+boot is a normal one and finds a `reason=` of `reboot` (or `power`), so it
+starts from zero: the safe mode is never two boots in a row, it takes the
+whole count again, and so it cannot loop. What a safe-mode boot does is stay
+up: it confirms the watchdog (above), so a stick whose fault is a dead
+config partition or a userland that cannot configure itself is reachable
+until someone reboots it, with the PON off. If the fault persists and the
+person reboots anyway, the cycle is three more resets (about ten minutes:
+54 s of U-Boot and 123 s of unconfirmed userland each), then another
+safe-mode boot that stays up. A safe-mode boot that the watchdog resets
+anyway (the switch init failed, so nothing is reachable) is not a safe mode
+that helped; it counts as the first of the next three.
+
+Why three watchdog resets. One legitimate reset (an omcid that hung and was
+caught, a memory floor) must not take the PON down, and two close together
+are not unheard of; a loop that strands a stick repeats every two to three
+minutes, so three fire in about ten. A boot that lives 10 minutes ends the
+count, so a reset every few hours (a slow leak, a flaky OLT) never adds up
+and never turns the PON off. `unknown` clears the count rather than adding
+to it: it is also what the first boot after the stock image reports, and an
+unexplained reason is a poor ground for turning the PON off.
+
+The dead-config rule has a price: with the partition unreadable, the
+default password is in force for that boot without anyone touching the
+power, for as long as the stick stays up. The partition being gone is also
+the case where the stored credential and the ssh keys cannot be read, so the
+alternative is a stick nobody can log into or reach reliably; but a stick
+on a shared host port is exposed to whoever can reach it meanwhile. It lasts
+until the next reboot, which tries the partition again.
 
 The management address is not reset: a wrong address is already
 recoverable (the second address, `LAN_ENABLE_IP2`, and `/etc/config/lan-ip`),
@@ -486,10 +545,12 @@ wears the flash and risks the boot itself.
 
 The files: `/etc/config/boot-count` (one number; present from a boot's
 count until it reaches 60 s, or through a run of short boots),
-`/etc/config/safe-mode` (`short_boots=`, `uptime=`, `cleared=`
-(`HOST_AUTONEG`, `none` or `failed`), `build=`; until acknowledged), and
-`/var/run/safe-mode` (the same, plus `root_password=default` or `failed`;
-this boot only). `safe-mode.sh status` prints them (`docs/TOOLS.md`), and
+`/etc/config/boot-wdt` (one number; present from a watchdog reset until
+the next boot that lives 600 s or ends in a reboot), `/etc/config/safe-mode`
+(`cause=` `short_boots`, `watchdog` or `config`, `short_boots=`,
+`wdt_resets=`, `uptime=`, `cleared=` (`HOST_AUTONEG`, `none` or `failed`),
+`build=`; until acknowledged), and `/var/run/safe-mode` (the same, plus
+`root_password=default` or `failed`; this boot only). `safe-mode.sh status` prints them (`docs/TOOLS.md`), and
 the diagnostics bundle carries it (`host-link.txt`).
 
 ## Web UI controls
@@ -646,7 +707,7 @@ applies to every later image.
 | `lan-ip` | the management address, one line; overrides `LAN_IP_ADDR` | LIVE (`apply.sh network`) |
 | `pon-steps` | development: a PON step list that replaces the built-in one (`docs/BOOT.md`); a wrong list means no PON | REBOOT |
 | `sds.off` | skip the host SerDes check and fix in `network.sh` | REBOOT |
-| `boot-count`, `safe-mode` | not switches: the boot counter and the safe-mode record ("Recovery: the safe mode" above), written by `safe-mode.sh`; removing the record is the acknowledgement | -- |
+| `boot-count`, `boot-wdt`, `safe-mode` | not switches: the boot counters and the safe-mode record ("Recovery: the safe mode" above), written by `safe-mode.sh`; removing the record is the acknowledgement | -- |
 | `optics.off` | skip the `laser` PON step (the I2C steps still run): **the laser stays off, no service** | REBOOT |
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |
 | `breadcrumbs.on` | development: boot crumbs, `trial-diag.txt` and a heartbeat, on flash | REBOOT |
