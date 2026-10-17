@@ -161,6 +161,12 @@ jobs:
       - name: Boot the real rootfs under qemu-system-mips and check it
         run: make test-qemu
 
+      # rcS's action trace against its goldens (test/fixtures/rcs-trace-*):
+      # needs the busybox built above and docker with ptrace, both here. It
+      # was in no job, and the goldens had gone stale without anything saying so.
+      - name: rcS action trace against its goldens
+        run: make test-rcs
+
   full:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: [lint, host, diag, omci]
