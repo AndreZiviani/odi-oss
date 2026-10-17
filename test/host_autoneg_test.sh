@@ -99,8 +99,16 @@ newboot() {
 	echo "${1:-0}" > "$T/param/host_link"
 	: > "$T/kmsg"
 }
-# spawn runs setsid in the background: let the stub finish first.
-spawned() { /bin/sleep 0.3; cat "$T/spawned" 2>/dev/null; }
+# spawn runs setsid in the background, so the stub can record it a moment
+# after the script returned. A spawn that is expected is polled for (bounded,
+# 5 s) as safe_mode_test.sh does; one that is not has nothing to poll for and
+# waits a short fixed time on purpose (spawned_none).
+spawned() {
+	_i=0
+	while [ ! -s "$T/spawned" ] && [ "$_i" -lt 100 ]; do /bin/sleep 0.05; _i=$((_i + 1)); done
+	cat "$T/spawned" 2>/dev/null
+}
+spawned_none() { /bin/sleep 0.3; cat "$T/spawned" 2>/dev/null; }
 
 # ---- the key
 for v in on off "" OFF yes 0; do
@@ -114,7 +122,7 @@ newboot 1
 out=$(sh "$S" boot)
 t "default boot: setting on, running on" "^on on$" "$(st setting) $(st running)"
 t "default boot: the kernel parameter untouched" "^Y$" "$(cat "$T/param/host_autoneg")"
-t "default boot: nothing spawned" "^$" "$(spawned)"
+t "default boot: nothing spawned" "^$" "$(spawned_none)"
 t "default boot: nothing logged to the kernel" "^$" "$(cat "$T/kmsg")"
 n "default boot: no output" "." "$out"
 
@@ -181,7 +189,7 @@ newboot 1
 echo "short_boots=3" > "$SAFE_FLAG"
 sh "$S" boot > /dev/null
 t "safe-mode boot: auto-negotiation, nothing written" "^on Y steady safe_mode_boot$" "$(st running) $(cat "$T/param/host_autoneg") $(st phase) $(st event)"
-t "safe-mode boot: no watch" "^$" "$(spawned)"
+t "safe-mode boot: no watch" "^$" "$(spawned_none)"
 out=$(sh "$S" try off 2>&1)
 t "safe-mode boot: a trial is refused" "safe-mode boot" "$out"
 t "status says so" "safe_mode_boot=1" "$(sh "$S" status)"

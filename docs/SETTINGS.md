@@ -617,7 +617,7 @@ restore.
 | keys | why |
 |---|---|
 | `DEVICE_TYPE` | this image is a bridge (SFU) only |
-| `OMCI_CUSTOM_BDP`, `OMCI_CUSTOM_RDP`, `OMCI_CUSTOM_MCAST`, `OMCI_CUSTOM_ME`, `DUAL_MGMT_MODE` | select stock OMCI plugins; omcid only displays them (`omcicli get cflag`, `get dmmode`) |
+| `OMCI_CUSTOM_BDP`, `OMCI_CUSTOM_RDP`, `OMCI_CUSTOM_MCAST`, `OMCI_CUSTOM_ME`, `DUAL_MGMT_MODE` | select stock OMCI plugins; omcid displays them (`omcicli get cflag`, `get dmmode`) and acts on two bits of `OMCI_CUSTOM_ME`: 256 (with `OMCI_VEIP_SLOT_ID`, above) and 64, which creates the CTC ONU capability entity (class 65529) as the stock firmware does |
 | `OMCI_FAKE_OK` | the stock OMCI stack option; this image reads its own odi-only `OMCI_UNKNOWN_ME_OK` instead (above), so the stock slot keeps its own setting |
 | `OMCI_OLT_MODE`, `OMCI_PORT_TYPE`, `OMCI_TM_OPT`, `OMCI_WAN_QOS_QUEUE_NUM` | stock OMCI stack options with no counterpart in omcid |
 | `OMCI_LOGFILE`, `OMCI_LOGFILE_MASK`, `OMCI_DBGLVL` | omcid always logs every frame to `/var/log/omcid.log` |

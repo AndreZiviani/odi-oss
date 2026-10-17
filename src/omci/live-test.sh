@@ -184,11 +184,37 @@ check "VEIP: and enabled" "$(attr 329 1537 2)" "00"
 check "TR-069 server: the VEIP write did not touch it" "$(attr 340 1537 1)" "01"
 
 # The private VLAN configuration is the stored manual VLAN.
-check "private VLAN config: type from VLAN_CFG_TYPE" "$(attr 10212 0 1)" "01"
-check "private VLAN config: mode from VLAN_MANU_MODE" "$(attr 10212 0 2)" "01"
-check "private VLAN config: VID from VLAN_MANU_TAG_VID" "$(attr 10212 0 3)" "0019"
-check "private VLAN config: priority from VLAN_MANU_TAG_PRI" "$(attr 10212 0 4)" "03"
+check "private VLAN config: type from VLAN_CFG_TYPE" "$(attr 65535 0 1)" "01"
+check "private VLAN config: mode from VLAN_MANU_MODE" "$(attr 65535 0 2)" "01"
+check "private VLAN config: VID from VLAN_MANU_TAG_VID" "$(attr 65535 0 3)" "0019"
+check "private VLAN config: priority from VLAN_MANU_TAG_PRI" "$(attr 65535 0 4)" "03"
+
+# The CTC ONU capability entity (65529) exists only with OMCI_CUSTOM_ME bit
+# 0x40, which this store does not set.
+check "no OMCI_CUSTOM_ME: no ONU capability entity (65529)" \
+      "$($Q cli/build/omcli mib 65529 2>&1 | grep -c '^65529 ')" "0"
+
+# ONU power shedding attribute 3 is a 2-byte interval: the plugin copies the
+# descriptor of attribute 2 onto it, which the model used to miss (width 0,
+# so a Set of it was dropped).
+$Q cli/build/omcli --inject "0c02480a008500002000$(printf '1234%056d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+sleep 1
+check "power shedding: a Set of the voice interval is kept" "$(attr 133 0 3)" "1234"
 stop
+
+# Any VLAN_CFG_TYPE but 1 reaches the stock omci_app as type 0 with the unset
+# sentinels (/etc/runomci.sh); bit 0x40 of OMCI_CUSTOM_ME creates 65529.
+sed -i 's/"VLAN_CFG_TYPE" Value="1"/"VLAN_CFG_TYPE" Value="2"/; s#</Dir>#\t<Value Name="OMCI_CUSTOM_ME" Value="64"/>\n\t</Dir>#' \
+	/var/config/lastgood.xml
+start respond/build/omcid /tmp/live-v.log -g /tmp/live-gpon -l /tmp/live-link
+check "VLAN_CFG_TYPE 2: reported as type 0" "$(attr 65535 0 1)" "00"
+check "VLAN_CFG_TYPE 2: the mode is passed through" "$(attr 65535 0 2)" "01"
+check "VLAN_CFG_TYPE 2: VID unset (65535)" "$(attr 65535 0 3)" "ffff"
+check "VLAN_CFG_TYPE 2: priority unset (255)" "$(attr 65535 0 4)" "ff"
+check "OMCI_CUSTOM_ME 64: the ONU capability entity exists" \
+      "$($Q cli/build/omcli mib 65529 2>&1 | grep -c '^65529 ')" "1"
+stop
+sed -i 's/"VLAN_CFG_TYPE" Value="2"/"VLAN_CFG_TYPE" Value="1"/; /OMCI_CUSTOM_ME/d' /var/config/lastgood.xml
 
 # The software image flags are the flash slots the boot recorded.
 rm -f /var/run/omcid-swimage
