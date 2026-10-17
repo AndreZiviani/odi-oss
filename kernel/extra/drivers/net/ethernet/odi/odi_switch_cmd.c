@@ -230,6 +230,53 @@ static int cmd_port_state(void *buf, uint32_t len)
 	return 0;
 }
 
+/* cmd 11: {type, threshold}, the ANI-G signal fail or signal degrade
+ * threshold the OLT set, as the exponent x of a 10^-x BER (the stock
+ * OMCI_SIGNAL_PARA_ts: type 4 SF, 5 SD; the stock driver hands it to its
+ * GPON module, which raises the SF/SD alarms against it). The GPON core
+ * evaluates them (odi_gpon_ctr.c); out-of-range values are refused and the
+ * previous threshold kept.
+ */
+#define ODI_SW_CMD11_SIG_SF	4U
+#define ODI_SW_CMD11_SIG_SD	5U
+
+struct odi_sw_cmd11_arg {
+	uint32_t type;
+	uint32_t threshold;
+};
+
+#ifndef __KERNEL__
+/* The host build has no GPON core: a test points this at one. */
+int (*odi_sw_host_signal_threshold_set)(unsigned int signal, unsigned int exp);
+#endif
+
+static int cmd_signal_parameter(void *buf, uint32_t len)
+{
+	const struct odi_sw_cmd11_arg *a = (const struct odi_sw_cmd11_arg *)buf;
+	unsigned int signal;
+	int rc;
+
+	if (!buf || len < sizeof(*a))
+		return -1;
+	if (a->type == ODI_SW_CMD11_SIG_SF)
+		signal = 0U;
+	else if (a->type == ODI_SW_CMD11_SIG_SD)
+		signal = 1U;
+	else
+		return ODI_SW_EOPNOTSUPP;	/* LOS/LOF/LOM thresholds: not settable */
+#ifdef __KERNEL__
+	rc = odi_gpon_signal_threshold_set(signal, a->threshold);
+#else
+	rc = odi_sw_host_signal_threshold_set ? odi_sw_host_signal_threshold_set(signal, a->threshold) : 0;
+#endif
+	if (rc) {
+		ODI_SW_WARN("cmd 11: %s threshold 10^-%u refused (out of range)\n",
+			    signal ? "SD" : "SF", (unsigned int)a->threshold);
+		return -1;
+	}
+	return 0;
+}
+
 /* cmd 38: no register write in any capture. */
 static int cmd_port_phy_pwrdown(void *buf, uint32_t len)
 {
@@ -746,6 +793,9 @@ int odi_switch_cmd(uint32_t cmd, void *buf, uint32_t len)
 
 	case OMCI_PORT_STATE_CMD:	/* 32, setPortState */
 		return cmd_port_state(buf, len);
+
+	case OMCI_SIGNAL_PARAMETER_CMD:	/* 11, setSignalParameter */
+		return cmd_signal_parameter(buf, len);
 
 	case OMCI_PHY_PWRDOWN_CMD:	/* 38, setPhyPwrDown */
 		return cmd_port_phy_pwrdown(buf, len);

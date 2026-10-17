@@ -57,8 +57,11 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
 - `gpon get alarm-status` reads the live condition register
   (`GPON_GTC_DS_INTR_STS`, 0x701008) for LOS, LOF and LOM. It falls back to
   the LOS sample in `/proc/odi_gpon/status` when `/dev/odi_sw` cannot be
-  read. The other four stock alarms (SF, SD, TX Too Long, TX Mismatch) are
-  not tracked by `odi_gpon`, so they are named on a note line and never printed as clear.
+  read. SF and SD come from the `signal sf|sd` lines of
+  `/proc/odi_gpon/status` (the driver's BER evaluation). TX Too Long and TX
+  Mismatch are not tracked by `odi_gpon`, so they are named on a note line
+  and never printed as clear (SF and SD join them when the file has no
+  `signal` lines, an older kernel).
 - `gpon get flows` shows what `odi_switch` recorded when omcid programmed each
   flow, not a hardware table read. It never registers for a redirect type,
   so omcid keeps the OMCI channel while it runs.

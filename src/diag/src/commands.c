@@ -93,6 +93,8 @@ static int cmd_alarm_status(void)
 		{ "LOS", GPON_ALARM_LOS },
 		{ "LOF", GPON_ALARM_LOF },
 		{ "LOM", GPON_ALARM_LOM },
+		{ "SF", GPON_ALARM_SF },
+		{ "SD", GPON_ALARM_SD },
 	};
 	uint32_t alarms = 0, known = 0;
 
@@ -104,7 +106,10 @@ static int cmd_alarm_status(void)
 		if (known & alarm[i].bit)
 			out_fmt("Alarm %s, status: %s\n", alarm[i].name,
 				(alarms & alarm[i].bit) ? "occur" : "clear");
-	out("% SF, SD, TX Too Long, TX Mismatch: not tracked by odi_gpon\n");
+	if ((known & (GPON_ALARM_SF | GPON_ALARM_SD)) == (GPON_ALARM_SF | GPON_ALARM_SD))
+		out("% TX Too Long, TX Mismatch: not tracked by odi_gpon\n");
+	else
+		out("% SF, SD, TX Too Long, TX Mismatch: not tracked by odi_gpon\n");
 	return 0;
 }
 
