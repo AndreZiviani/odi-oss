@@ -13,13 +13,22 @@
 #ifdef __KERNEL__
 #include <linux/errno.h>
 #include <linux/printk.h>
+#include <linux/spinlock.h>
 #include <linux/string.h>
 #define ODI_BOARD_LOG(fmt, ...) pr_info("odi_board: " fmt, ##__VA_ARGS__)
+/* The GPIO data word is shared by every pin: the laser verb (process
+ * context) and the O7 gate (GPON interrupt and timers) read-modify-write it.
+ */
+static DEFINE_SPINLOCK(odi_board_gpio_lock);
+#define ODI_BOARD_GPIO_LOCK(f)		spin_lock_irqsave(&odi_board_gpio_lock, f)
+#define ODI_BOARD_GPIO_UNLOCK(f)	spin_unlock_irqrestore(&odi_board_gpio_lock, f)
 #else
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #define ODI_BOARD_LOG(fmt, ...) printf("odi_board: " fmt, ##__VA_ARGS__)
+#define ODI_BOARD_GPIO_LOCK(f)		((void)(f))
+#define ODI_BOARD_GPIO_UNLOCK(f)	((void)(f))
 #endif
 
 void odi_board_init(void)
@@ -80,6 +89,7 @@ int odi_board_laser(const char *arg)
 {
 	const uint32_t bit = 1U << ODI_BOARD_GPIO_TX_DISABLE;
 	int unverified = arg && !strcmp(arg, "unverified");
+	unsigned long flags = 0;
 	int rc, id;
 
 	id = odi_board_ldd_id();
@@ -96,15 +106,44 @@ int odi_board_laser(const char *arg)
 	}
 
 	/* The level first, then the direction, so the pin never drives high. */
+	ODI_BOARD_GPIO_LOCK(flags);
 	rc = odi_soc_write(SOC_GPIO_DATA, odi_soc_read(SOC_GPIO_DATA) & ~bit);
 	if (!rc)
 		rc = odi_soc_write(SOC_GPIO_DIR, odi_soc_read(SOC_GPIO_DIR) | bit);
 	odi_board_laser_state.laser_on = !rc;
+	odi_board_laser_state.emergency_stop = 0;
+	ODI_BOARD_GPIO_UNLOCK(flags);
 	ODI_BOARD_LOG("laser: laser driver id 0x%02x%s, GPIO %u low: dir 0x%08x dat 0x%08x, rc %d\n",
 		      (unsigned int)(id < 0 ? 0xff : id),
 		      id == (int)ODI_BOARD_LDD_ID_GN25L95 ? " (GN25L95)" : " (UNVERIFIED, forced on)",
 		      ODI_BOARD_GPIO_TX_DISABLE,
 		      (unsigned int)odi_soc_read(SOC_GPIO_DIR),
 		      (unsigned int)odi_soc_read(SOC_GPIO_DATA), rc);
+	return rc;
+}
+
+int odi_board_tx_disable(int disable)
+{
+	const uint32_t bit = 1U << ODI_BOARD_GPIO_TX_DISABLE;
+	unsigned long flags = 0;
+	int rc = 0;
+
+	ODI_BOARD_GPIO_LOCK(flags);
+	if (!odi_board_laser_state.laser_on) {
+		/* The laser verb never drove the line (an unknown laser driver,
+		 * or the verb not run): it stays an input, the laser off. Not
+		 * an error: there is nothing to assert, and nothing to release.
+		 */
+		ODI_BOARD_GPIO_UNLOCK(flags);
+		return 0;
+	}
+	rc = odi_soc_write(SOC_GPIO_DATA, disable ? (odi_soc_read(SOC_GPIO_DATA) | bit)
+						  : (odi_soc_read(SOC_GPIO_DATA) & ~bit));
+	if (!rc)
+		odi_board_laser_state.emergency_stop = disable ? 1 : 0;
+	ODI_BOARD_GPIO_UNLOCK(flags);
+	ODI_BOARD_LOG("laser: %s (GPIO %u %s), rc %d\n",
+		      disable ? "OFF, emergency stop (O7)" : "on again, emergency stop left",
+		      ODI_BOARD_GPIO_TX_DISABLE, disable ? "high" : "low", rc);
 	return rc;
 }

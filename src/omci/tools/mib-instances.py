@@ -14,11 +14,21 @@ Input is `omcicli mib get all` from a device. That output is device-specific and
 is not kept; only the class and instance ids are, which are topology rather than
 identity.
 
-    mib-instances.py <dump> [--c DIR]
+    mib-instances.py <dump> [--c DIR] [--stock-names FILE]
 """
 import json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import mibnames
+
+# initType 0, but not created by the MIB reset: the stock firmware builds the
+# MAC bridge port filter table (49), bridge table (50) and filter preassign
+# table (79) of a MAC bridge port when the OLT creates the port, with the
+# port's own entity id. A dump of a provisioned stick lists them under the
+# ports that OLT created; they are not in the stock MIB upload after a reset
+# (a decoded stock session has none), so they are not autonomous.
+RELATED = {49, 50, 79}
 
 
 def load_model():
@@ -50,11 +60,18 @@ def main():
         print(__doc__)
         return 2
     model, inst = load_model(), parse(sys.argv[1])
+    # A stock dump labels a few tables with the stock plugin's name; the model
+    # carries a neutral one (mibnames.py), so translate through the sidecar
+    # mib-tables.py --stock-names wrote.
+    aliases = mibnames.load_aliases(sys.argv)
+    inst = {mibnames.canonical(k, aliases): v for k, v in inst.items()}
     auto, olt, unknown = [], [], []
     for name, ids in sorted(inst.items()):
         t = model.get(name)
         if t is None:
             unknown.append(name)
+        elif t['classId'] in RELATED:
+            olt.append((t['classId'], name, ids))
         elif t['initType'] == 0:
             auto.append((t['classId'], name, ids))
         else:

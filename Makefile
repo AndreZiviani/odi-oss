@@ -127,6 +127,7 @@ test-host:
 	$(MAKE) -C src/nv test
 	bash test/fwu_guard_test.sh
 	bash test/fwu_minimal_path_test.sh
+	bash test/fwu_write_order_test.sh
 	bash test/fwu_starter_test.sh
 	bash test/network_addr_test.sh
 	bash test/apply_test.sh
@@ -146,6 +147,7 @@ test-host:
 	bash test/odi_switch_dal_test.sh
 	bash test/odi_reg_test.sh
 	bash test/odi_switch_cmd_test.sh
+	bash test/odi_switch_flood_test.sh
 	bash test/odi_switch_cmd10_test.sh
 	bash test/odi_switch_isp2_test.sh
 	bash test/odi_switch_bdgconn_vlan_test.sh
@@ -168,10 +170,12 @@ test-host:
 	bash test/odi_gpon_aes_key_test.sh
 	bash test/odi_gpon_replay_test.sh
 	bash test/odi_reregister_test.sh
+	bash test/odi_alloc_cam_safety_test.sh
 	bash test/odi_gpon_irq_test.sh
 	bash test/odi_gpon_us_ploam_test.sh
 	bash test/odi_gpon_ds_ploam_test.sh
 	bash test/odi_gpon_cam_test.sh
+	bash test/odi_gpon_o7_test.sh
 	bash test/odi_gpon_los_test.sh
 	bash test/odi_gpon_eqd_test.sh
 	bash test/odi_gpon_ctr_test.sh

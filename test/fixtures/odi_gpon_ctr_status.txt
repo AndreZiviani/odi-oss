@@ -4,6 +4,11 @@ alarm_now lom 0
 fec_now ds 1
 fec_now us 1
 ds_superframe 305491896
+signal sf 0 threshold 5
+signal sd 0 threshold 9
+signal_events sf 0
+signal_events sd 0
+signal_window ms 0 bip_err_bits 0
 alarm_events los 1
 alarm_events lof 0
 alarm_events lom 0

@@ -221,20 +221,23 @@ int hw_gpon_status_get(uint32_t *state)
  * /dev/odi_sw cannot be read. */
 int hw_gpon_alarms_get(uint32_t *alarms, uint32_t *known)
 {
-	static char buf[2048];
+	static char buf[8192];
 	uint32_t sts = 0, los = 0;
 	long got;
 
+	got = gpon_proc_read(buf, sizeof buf);
 	if (hw_addr_get(GPON_DS_INTR_STS, &sts) == 0) {
 		*alarms = gpon_alarms_from_sts(sts);
 		*known = GPON_ALARM_KNOWN;
+		if (got > 0)
+			(void)gpon_proc_parse_signals(buf, (unsigned)got, alarms, known);
 		return 0;
 	}
-	got = gpon_proc_read(buf, sizeof buf);
 	if (got <= 0 || gpon_proc_parse_los(buf, (unsigned)got, &los) != 0)
 		return -1;
 	*alarms = los ? GPON_ALARM_LOS : 0;
 	*known = GPON_ALARM_LOS;
+	(void)gpon_proc_parse_signals(buf, (unsigned)got, alarms, known);
 	return 0;
 }
 

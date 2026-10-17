@@ -425,22 +425,23 @@ struct onu_vlan_cfg vlanCfg;
  *
  * which is to say the OLD value wins whenever the two disagree -- including
  * when LOID_OLD is empty and LOID is not, in which case the vendor passes no
- * -l at all and the new value is silently ignored. The same for the password,
- * whose OLD half lives in the hs file while its current half is in cs, so a
- * `flash default cs` leaves them disagreeing and the old password in force.
+ * -l at all and the new value is silently ignored. A key that is absent
+ * counts as empty, as an unset shell variable does.
+ *
+ * The password follows the LOID, not itself: runomci.sh tests
+ * LOID_OLD == LOID again for -w, so with the same LOID the current password
+ * is sent, changed or not, and with a different LOID the old one is. Its OLD
+ * half lives in the hs file while its current half is in cs, so a
+ * `flash default cs` that changes the LOID leaves the old password in force.
  *
  * Reproduced exactly. It is surprising enough that doing the sensible thing
  * instead would make us behave differently from the stick beside us. */
-static void pick_old_wins(const char *cur, int curLen,
-			  const char *old, int oldLen, char *out, int max)
+static void pick_loid_value(int same, const char *cur, int curLen,
+			    const char *old, int oldLen, char *out, int max)
 {
-	const char *src = cur;
-	int len = curLen;
+	const char *src = same ? cur : old;
+	int len = same ? curLen : oldLen;
 
-	if (oldLen < 0 || curLen < 0 || !str_eq(cur, old)) {
-		src = old;
-		len = oldLen;
-	}
 	if (len < 0) {
 		out[0] = 0;
 		return;
@@ -471,17 +472,23 @@ static int cfg_get_either(const char *first, const char *second,
 void cfg_load_identity_from(const char *cs, const char *hs)
 {
 	char loid[64], loidOld[64], pwd[64], pwdOld[64];
-	int a, b;
+	int a, b, same;
 
 	ident.snLen   = cfg_get_either(hs, cs, "GPON_SN", ident.sn, sizeof ident.sn);
 	ident.ploamLen = cfg_get_either(hs, cs, "GPON_PLOAM_PASSWD",
 					ident.ploam, sizeof ident.ploam);
 	a = cfg_get_either(cs, hs, "LOID", loid, sizeof loid);
 	b = cfg_get_either(cs, hs, "LOID_OLD", loidOld, sizeof loidOld);
-	pick_old_wins(loid, a, loidOld, b, ident.loid, sizeof ident.loid);
+	if (a < 0)
+		loid[0] = 0;
+	if (b < 0)
+		loidOld[0] = 0;
+	same = str_eq(loid, loidOld);
+	pick_loid_value(same, loid, a, loidOld, b, ident.loid, sizeof ident.loid);
 	a = cfg_get_either(cs, hs, "LOID_PASSWD", pwd, sizeof pwd);
 	b = cfg_get_either(hs, cs, "LOID_PASSWD_OLD", pwdOld, sizeof pwdOld);
-	pick_old_wins(pwd, a, pwdOld, b, ident.loidPwd, sizeof ident.loidPwd);
+	pick_loid_value(same, pwd, a, pwdOld, b, ident.loidPwd,
+			sizeof ident.loidPwd);
 	ident.loaded = 1;
 }
 
@@ -620,7 +627,15 @@ void cfg_show_identity(void)
 		out(ident.ploamLen == 0 ? "empty" : "(not in the store)");
 	out_char('\n');
 	out_fmt("loid        %s\n", ident.loid[0] ? ident.loid : "(none -- nothing would be sent)");
-	out_fmt("loid pw     %s\n", ident.loidPwd[0] ? "set (withheld)" : "(none)");
+	if (ident.loidPwd[0]) {
+		int n = 0;
+
+		while (ident.loidPwd[n])
+			n++;
+		out_fmt("loid pw     set, %d bytes (withheld)\n", (long)n);
+	} else {
+		out("loid pw     (none)\n");
+	}
 	if (!report.loaded)
 		cfg_load_report();
 	out_fmt("report      %s (" CFG_REPORT_SWITCH ")\n",
@@ -781,7 +796,7 @@ void cfg_load_veip_slot(void)
 {
 	char v[16];
 	int n = cfg_get(CFG_CS_PATH, "OMCI_VEIP_SLOT_ID", v, sizeof v);
-	int slot = 0, i = 0, me = 0;
+	int slot = 0, i = 0;
 
 	veip_slot_key = -1;
 	veip_slot = VEIP_SLOT_DEFAULT;
@@ -789,15 +804,18 @@ void cfg_load_veip_slot(void)
 		return;
 	for (; v[i] >= '0' && v[i] <= '9' && slot < 1000; i++)
 		slot = slot * 10 + (v[i] - '0');
+	/* 255 is the stock "not set": the factory value of the key on both our
+	 * lines, and the value omci_app's main() starts the slot at before it
+	 * reads -slot_veip. Unset, so nothing to say about it. */
+	if (i > 0 && !v[i] && slot == 255)
+		return;
 	if (i == 0 || v[i] || slot < 2 || slot > 254 || slot == 128) {
 		out("OMCI_VEIP_SLOT_ID ignored: not a usable slot (2 to 254, not 128)\n");
 		return;
 	}
 	veip_slot_key = slot;
-	n = cfg_get(CFG_CS_PATH, "OMCI_CUSTOM_ME", v, sizeof v);
-	for (i = 0; n > 0 && v[i] >= '0' && v[i] <= '9' && me < 100000000; i++)
-		me = me * 10 + (v[i] - '0');
-	if (me & CUSTOM_ME_VEIP_SLOT_ID)
+	cfg_load_custom_me();
+	if (custom_me & CUSTOM_ME_VEIP_SLOT_ID)
 		veip_slot = slot;
 }
 
@@ -816,6 +834,19 @@ int private_me = 1;
  * number only (0 would be slot 0 there), and the stick must stay valid when it
  * falls back to the stock slot. */
 int veip_on = 1;
+
+/* The stock key, decimal, as runomci.sh passes it to omci_app (-cme). */
+int custom_me;
+
+void cfg_load_custom_me(void)
+{
+	char v[16];
+	int n = cfg_get(CFG_CS_PATH, "OMCI_CUSTOM_ME", v, sizeof v), me = 0;
+
+	for (int i = 0; n > 0 && v[i] >= '0' && v[i] <= '9' && me < 100000000; i++)
+		me = me * 10 + (v[i] - '0');
+	custom_me = me;
+}
 
 void cfg_load_veip_on(void)
 {
@@ -1114,6 +1145,7 @@ void cfg_load_all(void)
 	cfg_load_veip_slot();
 	cfg_load_private_me();
 	cfg_load_veip_on();
+	cfg_load_custom_me();
 	aut_rebuild();
 }
 
@@ -1128,6 +1160,7 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->veip_slot = veip_slot;
 	s->private_me = private_me;
 	s->veip_on = veip_on;
+	s->custom_me = custom_me;
 }
 
 void cfg_snap_restore(const struct cfg_snap *s)
@@ -1141,6 +1174,7 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	veip_slot = s->veip_slot;
 	private_me = s->private_me;
 	veip_on = s->veip_on;
+	custom_me = s->custom_me;
 	aut_rebuild();
 }
 
@@ -1196,6 +1230,8 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		m |= CFGD_PRIVATE_ME;
 	if (o->veip_on != n->veip_on)
 		m |= CFGD_VEIP_ON;
+	if ((o->custom_me ^ n->custom_me) & CUSTOM_ME_ONU_CAPABILITY)
+		m |= CFGD_CUSTOM_ME;
 	if (o->fixed.n != n->fixed.n)
 		m |= CFGD_FIXED_ME;
 	else
@@ -1242,6 +1278,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_VEIP_SLOT, "OMCI_VEIP_SLOT_ID" },
 		{ CFGD_PRIVATE_ME, "OMCI_PRIVATE_ME" },
 		{ CFGD_VEIP_ON, "OMCI_VEIP" },
+		{ CFGD_CUSTOM_ME, "OMCI_CUSTOM_ME" },
 		{ CFGD_VLAN_TYPE, "VLAN_CFG_TYPE" },
 		{ CFGD_VLAN_MODE, "VLAN_MANU_MODE" },
 		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },

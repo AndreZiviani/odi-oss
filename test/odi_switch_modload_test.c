@@ -93,7 +93,12 @@ static void test_every_record_replayed(void)
 		w++;
 	}
 	CHECK(regs == 2587 && rows == 1032, "2587 register and 1032 table records");
-	CHECK(count_kind('W') == regs, "one write per register record");
+	/* Plus one: the unknown-multicast flood mask without the CPU, after the replay. */
+	CHECK(count_kind('W') == regs + 1U, "one write per register record, then the multicast mask");
+	CHECK(odi_mock.log_n && odi_mock.log[odi_mock.log_n - 1U].kind == 'W' &&
+	      odi_mock.log[odi_mock.log_n - 1U].addr == 0x0001c024U &&
+	      odi_mock.log[odi_mock.log_n - 1U].val == 0x7U,
+	      "the last write: unknown multicast 0xf -> 0x7, the CPU out");
 	CHECK(count_kind('T') == rows, "one table op per table record (no two rows fold)");
 	CHECK(in_order, "the writes follow the file, value for value");
 }
