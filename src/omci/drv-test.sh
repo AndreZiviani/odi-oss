@@ -329,5 +329,30 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	esac
 fi
 
+# A MIB reset from the OLT throws the MIB away, and the stock firmware's
+# reset clears the datapath with it. The bridge connections built from the
+# old MIB have to go: the rebuild after the reset deactivates every one of
+# them, and builds none from the empty MIB.
+if [ "${UPDATE:-0}" != 1 ]; then
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-reset.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	$Q cli/build/omcli --inject-file "$FIX/omci-session-isp1.txt" > /dev/null 2>&1
+	settled "$log"
+	n=$(rebuilt "$log")
+	inject_wait "$log" "$(printf '0e604f0a00020000%064d00000028%08d' 0 0)"
+	wait_for "$log" 'bridge connections rebuilt' 30 $((n + 1))
+	omcid_stop "$pid"
+	after=$(awk '/<- mib-reset/{d=0; a=0} /^drv 50 /{d++} /^drv 51 /{a++} END{print d" "a}' "$log")
+	if [ "${after#* }" = 0 ] && [ "${after% *}" -ge 6 ]; then
+		echo "ok    MIB reset: the rebuild deactivates the old bridge connections (${after% *}) and builds none"
+	else
+		echo "FAIL  MIB reset: after it, deactivated/activated were '$after', want >= 6 and 0"
+		fail=$((fail + 1))
+	fi
+fi
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 exit "$fail"

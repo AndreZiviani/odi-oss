@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- OMCI: values the ONU reports on its own now match what the stock MIB
+  reset puts there. ONU-G reports the configured LOID and LOID password
+  (attributes 10 and 11), as the CTC LOID entity already did: an OLT that
+  authenticates by the ONU-G LOID read an empty one. The TR-069 server's ACS
+  address and associated tag read 0xffff (unset) until the OLT writes them,
+  not 0x0000, which points at network address 0. The CTC LOID entity's
+  operation id reads "CTC ". A MAC bridge ageing time set by the OLT is
+  now sent to the switch in tenths of a second like the default: an
+  ageing time of N seconds used to age entries out after N/10.
+  `OMCI_VEIP_SLOT_ID=255`, the factory value, is read as unset, as the stock
+  firmware reads it, instead of being logged as an unusable slot at every
+  start and reload. A MIB reset now tears down the bridge connections
+  built from the MIB it discards (one quiet second later, as any rebuild):
+  they used to stay in the switch until the OLT provisioned again, and an
+  OLT that provisioned fewer services left the others forwarding. Refs #103.
 - OMCI: the managed entity model had wrong class ids for nine entities, all
   of them above 32767: the generator (`src/omci/tools/mib-tables.py`) did not
   follow how the compiler loads such a constant, so it recorded an unrelated
