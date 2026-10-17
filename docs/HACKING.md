@@ -660,8 +660,8 @@ dropbear/confd/metricsd/omcid for real, and
 the resilience scenarios from `docs/SETTINGS.md` ("Resilience") -- filling
 `/tmp` to `ENOSPC`, an OOM (a busybox-only memory hog, no compiled tool
 needed), and `kill -9` on each critical daemon, checked over real ssh
-(a test-only key, `test/qemu/id_test`, baked into the harness's initramfs
-only) and real HTTP to confd and metricsd. `svc-syslogd.sh`/`svc-klogd.sh`
+(a test-only key pair that `build-initramfs.sh` generates on every run, its
+public half baked into the harness's initramfs only) and real HTTP to confd and metricsd. `svc-syslogd.sh`/`svc-klogd.sh`
 run here too (unconditionally); `svc-ntpd.sh` is exercised against
 `NTP_SERVER`, seeded with the real `flash set` into
 `/var/config/odi.conf` (a plain writable directory, there is no real config

@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Tests: `make test-qemu` generates its throwaway ssh key pair (`ssh-keygen`,
+  ed25519) on every run, in `build/qemu-initramfs/qemu-test-key/`, instead of
+  using a private key committed as `test/qemu/id_test`; the committed pair is
+  removed. Only the public half goes into the harness initramfs. No change to
+  the image.
+
 - Docs: the README rows for the OMCI values read from the stick and the VEIP
   and vendor-private keys say what was checked on sticks: the values on two
   sticks on two OLTs against the stock dumps, the new keys only at their
