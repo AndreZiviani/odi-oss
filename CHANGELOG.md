@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Docs: the README rows for the OMCI values read from the stick and the VEIP
+  and vendor-private keys say what was checked on sticks: the values on two
+  sticks on two OLTs against the stock dumps, the new keys only at their
+  defaults.
+
 - Tests: `make test` takes about a minute on a native x86_64 host, down from
   about twenty minutes, with the same checks. The
   OMCI suites waited out `omcid -w`, an idle exit in 5 second units, and
