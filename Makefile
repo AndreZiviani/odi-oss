@@ -4,7 +4,7 @@
 
 .PHONY: help kernel-tree toolchain toolchain-audit kernel packages busybox \
 	src releases image image-all clean distclean lint test test-host test-omci \
-	test-diag test-rcs test-qemu
+	test-diag test-rcs test-qemu test-omci-respond test-igmp
 
 help:
 	@echo "targets:"
@@ -19,6 +19,7 @@ help:
 	@echo "  image           assemble a flashable tarball into out/image/"
 	@echo "  image-all       everything above from a clean clone, in order (about 25 min native)"
 	@echo "  test            lint + the host-side tests + diag + the OMCI daemon under qemu, side by side (a few minutes)"
+	@echo "  test-omci-respond  omcid unit tests (class 171 decode), test-igmp  igmpd unit tests"
 	@echo "  lint            shellcheck every script here"
 	@echo "  test-rcs        the rcS action trace against its goldens (needs out/busybox, docker)"
 	@echo "  test-qemu       boot the real rootfs under qemu-system-mips, ssh/web/exporter + resilience scenarios"
@@ -110,7 +111,7 @@ image-all:
 # `make test TEST_JOBS=1` runs them one by one. `make test-<leg>` runs one leg
 # on its own, its output streaming.
 OMCI_SUITES := qemu drv resume events swdl vlan reload live keys
-TEST_LEGS := lint test-host test-diag $(OMCI_SUITES:%=test-omci-%)
+TEST_LEGS := lint test-host test-diag test-omci-respond test-igmp $(OMCI_SUITES:%=test-omci-%)
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
 test:
@@ -214,6 +215,17 @@ test-diag:
 test-omci:
 	@MAKE='$(MAKE)' tools/test-legs.sh 1 test-omci-build
 	@MAKE='$(MAKE)' tools/test-legs.sh $(TEST_JOBS) $(OMCI_SUITES:%=test-omci-%)
+
+# The unit tests of two freestanding binaries, built and run under qemu-user in
+# the same container as the suites: omcid's class 171 decode and OLT-tag rule
+# (src/omci/respond/../test/extvlan_test.c) and igmpd's frame parse, group
+# table and switch-entry tests (src/igmp/test). Each is its own leg, with its
+# own build directory, so they run beside the suites.
+test-omci-respond:
+	$(MAKE) -C src/omci/respond test
+
+test-igmp:
+	$(MAKE) -C src/igmp test
 
 test-omci-build:
 	$(MAKE) -C src/omci/cli

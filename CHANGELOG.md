@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Tests: two suites that no `make test` leg and no CI job ran are wired in.
+  `make test-omci-respond` runs omcid's class 171 decode and OLT-tag rule
+  test (`src/omci/test/extvlan_test.c`), `make test-igmp` runs igmpd's frame,
+  group and entry tests (`src/igmp/test`); both are legs of `make test` and
+  jobs of ci.yml (`mips-units`, which the `full` job now needs).
+  `test/fwu_stock_flash_test.sh` exits 77 instead of 0 when it skips, so a
+  skipped first-flash check no longer reads as a pass. No change to the
+  image.
+
 - Tests: `make test-qemu` generates its throwaway ssh key pair (`ssh-keygen`,
   ed25519) on every run, in `build/qemu-initramfs/qemu-test-key/`, instead of
   using a private key committed as `test/qemu/id_test`; the committed pair is
