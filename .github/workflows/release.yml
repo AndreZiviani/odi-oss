@@ -14,6 +14,9 @@ name: release
 # is published as a GitHub pre-release, never marked latest, with the
 # `## Unreleased` changelog section as its notes (tools/release-notes.sh).
 #
+# The tests run first (the `tests` job; the release job needs it), so a tag
+# on a tree whose `make test` fails publishes nothing.
+#
 # This is the one workflow here that actually builds the kernel and the
 # image (ci.yml deliberately does not: about an hour of compiling a runner
 # would spend on every push). Expect this job to take several minutes.
@@ -40,7 +43,28 @@ permissions:
   attestations: write
 
 jobs:
+  # The release is gated on the same tests as a pull request (`make test`:
+  # lint, the host-side tests, diag and every OMCI suite). A tag push also
+  # starts ci.yml, but a separate workflow cannot be waited for from here, and
+  # until now nothing stopped the image from being published while the tests
+  # failed or were still running. The full-system qemu job, the clean-build
+  # check and the reproducibility check stay in ci.yml; this is the cheap part
+  # that must pass before a build is published.
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tests
+        run: |
+          command -v shellcheck >/dev/null || {
+            sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          }
+          make test
+
   release:
+    needs: tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

@@ -36,6 +36,12 @@
 
 #define OMCI_GEMFLOW_CMD   25
 #define OMCI_TCONT_CMD     21
+/* resetMib: the upstream state of every T-CONT, queue and flow back to
+ * what the module left at load. No argument (omcid sends 4 zero bytes).
+ * The number is the stock one: OMCI_IOCTL_MIB_RESET is the first of the
+ * stock command enum, whose fourth, 3, is getDevCapabilities, and the
+ * stock omci_wrapper_resetMib sends it with no data. */
+#define OMCI_MIB_RESET_CMD 0
 #define OMCI_GEMFLOW_LEN   68
 
 #define OMCI_GEMFLOW_US    1        /* what updateUsGemFlow forces */

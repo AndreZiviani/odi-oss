@@ -99,6 +99,22 @@ static int omci_drv_trace(uint32_t cmd, void *buf, uint32_t len)
 	for (uint32_t i = 0; i < len; i++)
 		out_hex(b[i], 2);
 	out_char('\n');
+	/* Command 21 as the kernel answers it (odi_switch_cmd.c cmd_tcont()):
+	 * an Alloc-ID that is not in the PLOAM list (-g) is refused. With no
+	 * list at all (no -g file) every one is taken, as before. */
+	if (cmd == OMCI_TCONT_CMD && len >= 8 && alloc_ids_known()) {
+		const uint16_t *ids;
+		unsigned n = alloc_ids_assigned(&ids);
+		uint32_t a = nl_get32(b + 4);
+		int found = 0;
+
+		for (unsigned i = 0; i < n; i++)
+			found |= ids[i] == a;
+		if (!found) {
+			out_fmt("drvtrace: cmd 21 refused, alloc %d not assigned\n", (long)a);
+			return -1;
+		}
+	}
 	/* The DDM stub: command 10 answers a fixed SFF-8472 word per type,
 	 * after the call is logged (so the log keeps the request as sent).
 	 * Rx power 1000 (100 uW, -10 dBm), Tx power 5000 (500 uW, about
