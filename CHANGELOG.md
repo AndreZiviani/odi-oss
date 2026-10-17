@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- nv: `setenv` and `commit` take a lock (flock(2) on the environment partition
+  device, 10 s bounded, held until the process exits), so two writers (an ssh
+  session and the web UI, say) no longer erase and write the same copy at
+  once; unserialised, that left a half-written copy or lost an update, such
+  as a `sw_commit` the UI had reported as committed. A plain `setenv` also
+  reads its copy back after the write and exits non-zero when it does not
+  match, as `commit` always did. If flock itself is unavailable the write goes
+  ahead without the lock, as before, and says so. The syscall number and the
+  EAGAIN refusal are run for real under qemu-user (`src/nv/test/flock_probe.c`,
+  part of `make -C src/nv test`); not yet run on a stick (audit experiment E3).
+  Found in the night audit of the update path
+  (investigations/odi-sfp-re/AUDIT-night-flash.md, finding 3).
 - fwu.sh: an interrupted flash can no longer leave a valid new kernel over a
   missing or old rootfs. It used to erase and write the kernel, then the
   rootfs; a power cut or a failed write in between left a kernel U-Boot
