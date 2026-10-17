@@ -133,7 +133,7 @@ static uint32_t boh_length(void)
 
 /* USF_BURST_HDR_SETUP.LENGTH = the fixed guard/delimiter bytes plus the
  * Extended_Burst_Length count. Guard 32 bits, no type 1/2 preamble: 7
- * fixed bytes. Vero's pre-ranged count 50 gives the captured 0x39; counts
+ * fixed bytes. ISP2's pre-ranged count 50 gives the captured 0x39; counts
  * past the old 63-byte clamp must reach the 8-bit field, up to 252.
  */
 static void test_burst_overhead_length(void)
@@ -304,6 +304,43 @@ static void test_broadcast_popup_restores_preranged(void)
 	CHECK(eq_delay_reg() == ((1U << 24) | 108772U), "directed POPUP: the EqD stays");
 }
 
+/* An OLT that sends no Extended_Burst_Length: the burst overhead is the
+ * 12-byte default before and after ranging (G.984.3 9.2.3.20, the stock
+ * GPON module), not another OLT's ranged count.
+ */
+static void test_no_extended_burst_length(void)
+{
+	static const uint8_t sn[8] = { 'O', 'D', 'I', 'S', 1, 2, 3, 4 };
+	struct odi_gpon_fsm fsm;
+	struct odi_gpon_ploam msg;
+
+	setup();
+	odi_gpon_fsm_init(&fsm);
+	odi_gpon_fsm_set_serial_number(&fsm, sn);
+	fsm.state = ODI_GPON_STATE_O2;
+	memset(&msg, 0, sizeof msg);
+	msg.onu_id = ODI_GPON_ONU_ID_BROADCAST;
+	msg.type = ODI_GPON_DS_UPSTREAM_OVERHEAD;
+	msg.content[0] = 32U;
+	msg.content[3] = 0xaaU;
+	msg.content[4] = 0xabU;
+	msg.content[5] = 0x59U;
+	msg.content[6] = 0x83U;
+	feed_fsm(&fsm, &msg);
+	CHECK(boh_length() == 0x0cU, "no Extended_Burst_Length, pre-ranged: 12");
+	fsm.state = ODI_GPON_STATE_O4;
+	fsm.onu_id = 0x1aU;
+	memset(&msg, 0, sizeof msg);
+	msg.onu_id = 0x1aU;
+	msg.type = ODI_GPON_DS_RANGING_TIME;
+	msg.content[2] = 0x03U;
+	msg.content[3] = 0x77U;
+	msg.content[4] = 0x64U;
+	feed_fsm(&fsm, &msg);
+	CHECK(fsm.state == ODI_GPON_STATE_O5, "Ranging_Time: O5");
+	CHECK(boh_length() == 0x0cU, "no Extended_Burst_Length, ranged: still 12");
+}
+
 int main(void)
 {
 	test_split();
@@ -311,6 +348,7 @@ int main(void)
 	test_protection_path_ignored();
 	test_burst_overhead_length();
 	test_broadcast_popup_restores_preranged();
+	test_no_extended_burst_length();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

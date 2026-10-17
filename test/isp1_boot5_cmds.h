@@ -58,6 +58,7 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 		memset(&g, 0, sizeof g);
 		g.flow_id = 0;
 		g.gem_port = ds_port_id[0];
+		g.ena = 1;
 		g.dir = OMCI_GEMFLOW_DS;
 		call(25, &g, sizeof g);
 	}
@@ -72,6 +73,7 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 		memset(&g, 0, sizeof g);
 		g.flow_id = (uint32_t)i;
 		g.gem_port = ds_port_id[i];
+		g.ena = 1;
 		g.dir = OMCI_GEMFLOW_DS;
 		call(25, &g, sizeof g);
 	}
@@ -128,6 +130,7 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 		struct omci_priq pq;
 
 		memset(&t, 0, sizeof t);
+		t.index = 1;	/* in: the queues omcid puts on it */
 		t.alloc_id = (uint32_t)(0x100 + i); /* isp1 real alloc-IDs are not
 						     * visible in this register-only
 						     * capture (cmd 21 writes zero
@@ -154,6 +157,7 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 		g.flow_id = (uint32_t)i;
 		g.gem_port = us_port_id[i];
 		g.tcont = (uint32_t)i;	/* boot5 omcid: flow i on T-CONT index i */
+		g.ena = 1;
 		g.dir = OMCI_GEMFLOW_US;
 		call(25, &g, sizeof g);
 	}
