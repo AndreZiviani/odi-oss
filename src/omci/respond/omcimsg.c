@@ -79,8 +79,9 @@ static int32_t db_x500_of(uint32_t x)
 }
 
 /* The SFF-8472 word the driver holds for a DDM type (omcidrv command 10,
- * {type, data[32]}, big-endian word at data[0]), 0 when it cannot be read. */
-static uint32_t ddm_word(unsigned type)
+ * {type, data[32]}, big-endian word at data[0]). Returns -1 when it cannot
+ * be read. */
+static int ddm_read(unsigned type, uint32_t *word)
 {
 	uint8_t buf[36];
 
@@ -88,8 +89,35 @@ static uint32_t ddm_word(unsigned type)
 		buf[i] = 0;
 	buf[3] = (uint8_t)type;
 	if (omci_getTransceiverStatus(buf) != 0)
-		return 0;
-	return ((uint32_t)buf[4] << 8) | buf[5];
+		return -1;
+	*word = ((uint32_t)buf[4] << 8) | buf[5];
+	return 0;
+}
+
+/* The same word, 0 when it cannot be read (the Test result reports 0). */
+static uint32_t ddm_word(unsigned type)
+{
+	uint32_t w;
+
+	return ddm_read(type, &w) == 0 ? w : 0;
+}
+
+/* ANI-G attributes 10 (optical signal level) and 14 (transmit optical
+ * level): the DDM power word of `type` (5 Tx, 6 Rx) as dBm in 0.002 dB
+ * steps, a signed 16-bit value with a 0 dBm reference. The word is in 0.1 uW
+ * units, so dBm is 10 log10(word) minus 40 dB. No light reads as -65.5 dBm
+ * (the lowest value the field holds). Returns -1 when the driver cannot be
+ * read; the caller then answers 0. */
+int ddm_dbm_x500(unsigned type, int16_t *out)
+{
+	uint32_t w;
+	int32_t v;
+
+	if (ddm_read(type, &w) != 0)
+		return -1;
+	v = db_x500_of(w) - 20000;
+	*out = (int16_t)(v < -32768 ? -32768 : v);
+	return 0;
 }
 
 /* Test (18) on ANI-G: the OLT asks for the optical measurements and shows

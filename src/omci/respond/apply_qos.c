@@ -20,16 +20,17 @@ static uint32_t caps_uni_queues(void)
 {
 	uint32_t n = caps_u32(OMCI_CAPS_OFF_UNIQ);
 
-	return n ? n : 8;                /* ISP1 reports 8 */
+	return n ? n : 8;                /* the driver block says 8 per UNI */
 }
 
 /* How many T-CONT slots the device has; a driver index at or above this is
- * not a T-CONT. */
+ * not a T-CONT. The driver block reports 16 (uapi/omci_caps.h); 8 is only
+ * the answer when no capability block is available at all. */
 static uint32_t tcont_capacity(void)
 {
 	uint32_t n = caps_u32(OMCI_CAPS_OFF_TCONTS);
 
-	return n ? n : 8;                /* ISP1 reports 8 */
+	return n ? n : 8;                /* no block: the conservative count */
 }
 
 /* The class 277 row a pointer names, or 0. Returns the row and the class

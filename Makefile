@@ -113,6 +113,7 @@ test-host:
 	bash test/host_autoneg_test.sh
 	bash test/safe_mode_test.sh
 	bash test/omci_respawn_test.sh
+	bash test/omci_defaults_test.sh
 	bash test/services_off_test.sh
 	bash test/regtrace_decode_test.sh
 	bash test/regtrace_compare_test.sh
@@ -188,7 +189,7 @@ test-diag:
 # jobs; test-omci runs them all, in this order, and stops at the first failure.
 # Each suite needs only omcli and omcid (plus its drvtrace build), which
 # test-omci-build makes: the rest of src/ is built by `make src`.
-OMCI_SUITES := qemu drv resume events swdl vlan reload keys
+OMCI_SUITES := qemu drv resume events swdl vlan reload live keys
 
 test-omci: test-omci-build
 	@for s in $(OMCI_SUITES); do $(MAKE) --no-print-directory test-omci-$$s || exit 1; done
