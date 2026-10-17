@@ -171,6 +171,15 @@ struct tcont_slot { uint16_t meId; uint16_t index; uint8_t used; };
 /* The file the kernel lists the PLOAM Alloc-IDs in (and the serial);
  * omcid -g points it elsewhere for a test. */
 extern const char *gpon_proc_path;
+/* The file the UNI link bit is read from (-l, test only), and its state. */
+extern const char *uni_link_path;
+int uni_link_state(void);
+/* The PON state number from gpon_proc_path, -1 when unreadable. */
+int onu_state_now(void);
+uint32_t uptime_cs(void);
+/* ANI-G attribute 10/14 value of the DDM power word `type` (5 Tx, 6 Rx),
+ * dBm in 0.002 dB steps; -1 when the driver cannot be read. */
+int ddm_dbm_x500(unsigned type, int16_t *out);
 int alloc_ids_refresh(void);
 unsigned alloc_ids_assigned(const uint16_t **ids);
 uint16_t tcont_alloc_id(uint16_t meId, int *src);
@@ -450,6 +459,8 @@ void sw_handle(int fd, uint32_t tid, const uint8_t *f, const struct omci_class *
 /* The class 7 flags a Get reports: attribute 2 is_committed, 3 is_active,
  * 4 is_valid. */
 uint8_t sw_flag(uint16_t inst, unsigned attr);
+/* The class 7 instance (0 or 1) whose is_active flag is set. */
+uint16_t sw_active_inst(void);
 #define SWIMAGE_PATH     "/var/run/omcid-swimage"
 #define SWIMAGE_TMP_PATH "/var/run/omcid-swimage.tmp"
 int atomic_write(const char *path, const char *tmp, const uint8_t *buf,

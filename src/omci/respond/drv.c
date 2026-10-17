@@ -99,6 +99,19 @@ static int omci_drv_trace(uint32_t cmd, void *buf, uint32_t len)
 	for (uint32_t i = 0; i < len; i++)
 		out_hex(b[i], 2);
 	out_char('\n');
+	/* The DDM stub: command 10 answers a fixed SFF-8472 word per type,
+	 * after the call is logged (so the log keeps the request as sent).
+	 * Rx power 1000 (100 uW, -10 dBm), Tx power 5000 (500 uW, about
+	 * -3 dBm), supply 3300 mV, bias, temperature. */
+	if (cmd == 10 && len >= 6) {
+		static const uint16_t ddm[7] = { 0, 0, 0x1900, 33000, 5000, 5000, 1000 };
+		unsigned t = b[3];
+
+		if (t < 2 || t > 6)
+			return -1;
+		b[4] = (uint8_t)(ddm[t] >> 8);
+		b[5] = (uint8_t)ddm[t];
+	}
 	return 0;
 }
 #endif

@@ -65,7 +65,8 @@ for isp in isp1 isp2; do
 	fi
 	sleep 2                                  # let the 1 s rebuilds settle
 
-	mib_before=$($Q cli/build/omcli mib get all 2>&1)
+	# SysUpTime is live: it is the one line two instances cannot share.
+	mib_before=$($Q cli/build/omcli mib get all 2>&1 | grep -v '^    SysUpTime ')
 	conn_before=$($Q cli/build/omcli conn 2>&1)
 	flows_before=$($Q cli/build/omcli flows 2>&1)
 
@@ -89,7 +90,7 @@ for isp in isp1 isp2; do
 		continue
 	fi
 
-	mib_after=$($Q cli/build/omcli mib get all 2>&1)
+	mib_after=$($Q cli/build/omcli mib get all 2>&1 | grep -v '^    SysUpTime ')
 	conn_after=$($Q cli/build/omcli conn 2>&1)
 	flows_after=$($Q cli/build/omcli flows 2>&1)
 	wait "$pid" 2>/dev/null
