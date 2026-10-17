@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Tests and docs: the real MAC addresses in the L2 table examples (a stick ELAN
+  address and LAN devices read back from one table, and one address from a
+  stock listing) are replaced by locally administered documentation
+  addresses (`02:00:00:00:00:NN`) in `test/odi_switch_l2_test.c`,
+  `src/diag/` (header, fake table, `l2.golden`, `l2_format_test.c`),
+  `docs/KERNEL.md` and `docs/TOOLS.md`, with the encoded table words changed
+  to match. The tests check the same decode as before. No change to the
+  image.
+
 - DDM: the module can now say how its readings are to be read. Two new `diag`
   commands, from the module itself over I2C: `pon get transceiver
   monitoring-type` (A0h byte 92: whether diagnostics are implemented,

@@ -497,13 +497,14 @@ TABLE_STATUS (0x012004) has HIT (bit 12) set when the row holds an entry and
 clear when it is empty; its low ten bits echo the row read either way. Bit
 77, the valid flag a write sends, reads back set on every row. Checked on
 ISP1 (image 618p2) with four learned addresses, reading all 1,024 rows and
-TABLE_STATUS after each:
+TABLE_STATUS after each (the MAC addresses are invented documentation
+addresses; the row numbers, ports and VIDs are as read):
 
     row    status      raw (bits 95..64 63..32 31..0)     decodes as
-    0x06c  0x0000106c  0x00002038 0x0000bc24 0x1105b324   BC:24:11:05:B3:24 port 0 age 7
-    0x270  0x00001270  0x0000203d 0x000e00e4 0x064cc6f4   00:E4:06:4C:C6:F4 port 2 VID 14 C-tag
-    0x364  0x00001364  0x00002038 0x0000049f 0xca787282   04:9F:CA:78:72:82 port 0 age 7
-    0x390  0x00001390  0x0000203e 0x0000383a 0x212827c8   38:3A:21:28:27:C8 port 3 age 7
+    0x06c  0x0000106c  0x00002038 0x00000200 0x00000001   02:00:00:00:00:01 port 0 age 7
+    0x270  0x00001270  0x0000203d 0x000e0200 0x00000002   02:00:00:00:00:02 port 2 VID 14 C-tag
+    0x364  0x00001364  0x00002038 0x00000200 0x00000003   02:00:00:00:00:03 port 0 age 7
+    0x390  0x00001390  0x0000203e 0x00000200 0x00000004   02:00:00:00:00:04 port 3 age 7
     other  the row     0x00002000 0x00000000 row / 4      nothing: 1,020 rows, HIT clear
 
 HIT was set after exactly those four reads, and on none of the 64 CAM rows

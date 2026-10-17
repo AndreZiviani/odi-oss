@@ -461,11 +461,11 @@ per valid row:
 
     L2 table: 1088 rows, IPv4 multicast looked up on MAC + VID/FID
     MACAddress        Spa Fid Age Vid  State  Ext Hash Type Ports Index
-    BC:24:11:05:B3:24 0   0   7   0    Auto   0   SVL  uc   -     0x06c
+    02:00:00:00:00:01 0   0   7   0    Auto   0   SVL  uc   -     0x06c
     01:00:5E:01:02:03 -   -   -   0    Static -   SVL  mc   0x1   0x17c
-    00:E4:06:4C:C6:F4 2   0   7   14   Auto   0   SVL  uc   -     0x270 ctag
-    04:9F:CA:78:72:82 0   0   7   0    Auto   0   SVL  uc   -     0x364
-    38:3A:21:28:27:C8 3   0   7   0    Auto   0   SVL  uc   -     0x390
+    02:00:00:00:00:02 2   0   7   14   Auto   0   SVL  uc   -     0x270 ctag
+    02:00:00:00:00:03 0   0   7   0    Auto   0   SVL  uc   -     0x364
+    02:00:00:00:00:04 3   0   7   0    Auto   0   SVL  uc   -     0x390
     5 entries
 
 (a trial stick, with `igmpd -w -j 239.1.2.3 -p 0x1` in place: the host

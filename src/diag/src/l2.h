@@ -6,7 +6,7 @@
  * odi-ui MAC table does -- reads either listing:
  *
  *   MACAddress        Spa Fid Age Vid  State  Ext Hash Type Ports Index
- *   78:54:2E:07:64:63 2   0   6   1    Auto   0   SVL  uc   -     0x008
+ *   02:00:00:00:00:05 2   0   6   1    Auto   0   SVL  uc   -     0x008
  *   01:00:5E:01:02:03 -   -   -   10   Static -   IVL  mc   0x1   0x0a1
  *
  * A multicast row has no source port or age, and lists its member ports
