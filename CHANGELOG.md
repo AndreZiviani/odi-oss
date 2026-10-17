@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Kernel: an OLT that encrypts the OMCI channel is served. The
+  Encrypted_Port-ID message for the OMCI port used to be applied without its
+  encryption bit, so every downstream OMCI frame would have stayed
+  unreadable and the stick would never have been provisioned; the port's
+  row now decrypts, as on the stock firmware. And a data port the OLT
+  encrypts keeps decrypting while omcid rewrites its flow (every QoS or
+  bridge change): the flow was written without the AES bit and the bit set
+  again right after, a window in which encrypted frames were lost.
+
 - nv: `setenv` and `commit` take a lock (flock(2) on the environment partition
   device, 10 s bounded, held until the process exits), so two writers (an ssh
   session and the web UI, say) no longer erase and write the same copy at
