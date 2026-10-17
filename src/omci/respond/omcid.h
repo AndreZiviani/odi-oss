@@ -586,6 +586,7 @@ struct cfg_snap {
 	int veip_slot;
 	int private_me;
 	int veip_on;
+	int custom_me;
 };
 /* Identity class: one bit per key the OLT reads. */
 #define CFGD_SN         (1u << 0)
@@ -604,7 +605,8 @@ struct cfg_snap {
 #define CFGD_VEIP_SLOT  (1u << 17)
 #define CFGD_PRIVATE_ME (1u << 18)
 #define CFGD_VEIP_ON    (1u << 19)
-#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON)
+#define CFGD_CUSTOM_ME  (1u << 20)
+#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON | CFGD_CUSTOM_ME)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
@@ -621,6 +623,15 @@ void cfg_load_unknown_me(void);
  * the config store, in effect only with bit 0x100 of OMCI_CUSTOM_ME. */
 #define VEIP_SLOT_DEFAULT  6
 #define CUSTOM_ME_VEIP_SLOT_ID 0x100
+/* OMCI_CUSTOM_ME bit 0x40 loads me_00000040.so on the stock firmware, whose
+ * cf_me_65529_is_supported is what makes the MIB reset create the CTC ONU
+ * capability entity (class 65529, FUN_0040dc44 calls feature 0x23). Without
+ * the bit the entity does not exist -- the factory config (0x10000) and the
+ * ISP2 stick have no class 65529 instance, the ISP1 stick (0x9040) has one. */
+#define CUSTOM_ME_ONU_CAPABILITY 0x40
+/* OMCI_CUSTOM_ME as stored, 0 when absent or not a number. */
+extern int custom_me;
+void cfg_load_custom_me(void);
 void cfg_load_veip_slot(void);
 void cfg_load_private_me(void);
 /* The slot key as stored (0..255), -1 when absent or not a valid slot; the
