@@ -11,6 +11,80 @@ listed here.
   removed. Only the public half goes into the harness initramfs. No change to
   the image.
 
+- Tests and docs: the real MAC addresses in the L2 table examples (a stick ELAN
+  address and LAN devices read back from one table, and one address from a
+  stock listing) are replaced by locally administered documentation
+  addresses (`02:00:00:00:00:NN`) in `test/odi_switch_l2_test.c`,
+  `src/diag/` (header, fake table, `l2.golden`, `l2_format_test.c`),
+  `docs/KERNEL.md` and `docs/TOOLS.md`, with the encoded table words changed
+  to match. The tests check the same decode as before. No change to the
+  image.
+
+- DDM: the module can now say how its readings are to be read. Two new `diag`
+  commands, from the module itself over I2C: `pon get transceiver
+  monitoring-type` (A0h byte 92: whether diagnostics are implemented,
+  internal or external calibration, average or OMA received power) and `pon
+  get transceiver limits` (A2h 0-39: the alarm and warning limits the module
+  raises its own flags against; they differ from one module to the next),
+  through three new `odi_ddm.h` selectors (`ODI_DDM_MONITOR_TYPE`,
+  `ODI_DDM_LIMITS_A`, `ODI_DDM_LIMITS_B`). The conversions are unchanged and
+  still assume internal calibration (the one module read for this had it, with
+  identity external constants); the first command is where that assumption can
+  now be checked on any stick. The existing readings keep their register
+  trace (a consistent re-read of the 16-bit pairs was tried and dropped: the
+  DAL golden of command 10 is the stock command's own trace). Tests:
+  `test/odi_ddm_limits_test.c`, `make transceiver-test`. The exporter's
+  `gpon_transceiver_*` series read `pon get transceiver alarm-status`, which
+  was already here.
+
+- Kernel: the OMCI driver logs each command it does not implement once per
+  command number. It logged only the first one of a boot, so a diagnostic
+  bundle from a new OLT showed one of the missing commands at most.
+
+- Kernel: the GPON MAC follows G.984.3 in two cases neither of our OLTs
+  hits. The ONU answers Request_Password with three identical Password
+  messages (it sent one; the OLT accepts a password only after three).
+  And with no Extended_Burst_Length from the OLT, the ranged burst
+  overhead is the 12-byte default, as before ranging, instead of the
+  25 bytes one ISP's OLT asks for in its own Extended_Burst_Length.
+
+- omcid: the upstream traffic descriptor of a GEM port (class 280, named by
+  the GEM port network CTP) sets the CIR and PIR of its upstream queue, as
+  the stock stack does (byte/s divided by 1024; for an RFC 4115 meter the
+  PIR less the CIR). Our ONU-G reports traffic management option 2
+  (priority and rate controlled), which lets an OLT provision these; they
+  used to be dropped, and every queue went out unlimited. A Set or delete
+  of such a descriptor, and of a traffic scheduler (class 278, whose
+  policy decides strict or weighted queues), now rebuilds the upstream
+  queues. Neither of the OLTs this was tested against provisions one; the
+  rates reach the hardware with the kernel that programs cmd 23 from its
+  arguments.
+
+- Kernel: the upstream PON queues are programmed from what omcid sends,
+  not replayed from one ISP's capture. The words cmd 23 wrote per T-CONT
+  were ISP1's queue weights and types by T-CONT number; they are now
+  decoded (docs/SWITCH.md, "Upstream PON queues") and computed: the queue
+  weight and strict/WFQ type from the priority queue the OLT set, its CIR
+  and PIR, several queues per T-CONT (a block of queues reserved by cmd 21,
+  ordinal by ordinal; a second queue used to be refused and its GEM ports
+  got no upstream flow), T-CONTs 5-15 (5 and up used to drain T-CONT 4's
+  queue, 8-15 sat on queues their scheduler does not serve), a queue delete
+  (cmd 24, was unsupported) and an upstream flow delete (cmd 25 with ena 0,
+  which was taken for a create of GEM port 0 on every QoS rebuild). The
+  T-CONT index cmd 21 hands back is the row of its Alloc-ID in the Alloc-ID
+  CAM, which is how the hardware pairs a T-CONT with its grants, instead of
+  the order of the calls. The global PBO thresholds follow the stock
+  formula past five upstream flows. On ISP1's provisioning every register
+  write is the same as before, which is what the stock driver writes.
+
+- Docs and tests: the key counts are corrected (the image acts on 22 of the 184
+  stock keys, plus bit 256 of `OMCI_CUSTOM_ME`, not "reads 21"; 161 are
+  read-only), HACKING.md lists every key of `odi.conf`, SETTINGS.md says that
+  192.168.100.1 is the stock default second address and that `OMCI_FAKE_OK` is
+  not read, the two lines are called ISP1 and ISP2 in the docs and test
+  comments, and no OLT vendor name is left in docs, tests or the 1.1.x notes
+  (an OLT is described generically). Released sections are otherwise unchanged.
+
 - Docs: the README rows for the OMCI values read from the stick and the VEIP
   and vendor-private keys say what was checked on sticks: the values on two
   sticks on two OLTs against the stock dumps, the new keys only at their
@@ -390,7 +464,7 @@ Read before updating:
   the tagging when the stick is not in manual mode (`VLAN_CFG_TYPE` other
   than 1), as the stock firmware does. Until now omcid decoded and stored
   the table but built only the manual rule or a transparent one, so an OLT
-  that provisions the service VLAN through class 171 (a Huawei one: "untagged
+  that provisions the service VLAN through class 171 (one of some OLTs: "untagged
   frames: add VLAN 100") reached the router tagged. The supported shape is the
   Ethernet-UNI instance with one untagged-frames rule that adds a single tag
   with a concrete VID (1..4094) and priority (0..7), plus default

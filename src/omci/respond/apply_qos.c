@@ -183,6 +183,8 @@ struct us_queue {
 	uint16_t weight;
 	uint8_t wrr;
 	uint8_t dp_mark;
+	uint32_t cir;                    /* driver units (8 kbit/s), 0: none */
+	uint32_t pir;
 };
 
 struct us_flow_plan {
@@ -199,7 +201,8 @@ int qos_dirty;
 
 /* `omcicli dump qmap`, in the column shape of the stock dump: one row per
  * upstream queue programmed. QID is the dense ordinal, TCID the driver
- * T-CONT index; CIR/PIR are not modelled and print 0, as they do on ISP2. */
+ * T-CONT index; CIR/PIR are the rates of its GEM ports' upstream traffic
+ * descriptor (us_queue_rates()), 0 without one, as on ISP2. */
 void qmap_dump(void)
 {
 	out("\n\n============= PQ ===============\n"
@@ -214,7 +217,7 @@ void qmap_dump(void)
 			(long)q->meId, (long)q->ordinal, q->wrr ? "WRR" : "SP",
 			(long)(q->wrr ? q->weight : q->priority),
 			(long)q->tcontIndex, (long)q->dp_mark, (long)q->tcontMe,
-			0L, 0L, 1L);
+			(long)q->cir, (long)q->pir, 1L);
 		out("-------\t------\t------\t------\t------\t------\t------\t"
 		    "-------\t-------\t-------\n");
 	}
@@ -258,7 +261,41 @@ static int us_queue_decode(uint16_t meId, struct us_queue *q)
 	q->dp_mark = (uint8_t)effective_u32(277, meId, 16);
 	q->tcontIndex = 0xffff;
 	q->ordinal = 0xffff;
+	q->cir = 0;
+	q->pir = 0;
 	return q->tcontMe >= 0x8000;
+}
+
+/* The upstream rates of a queue: the traffic descriptor (class 280) its GEM
+ * port CTPs name as their upstream one (class 268 attribute 5, G.988
+ * 9.2.3), applied as the stock stack applies it: CIR and PIR in byte/s,
+ * PIR less CIR for a meter of type 1 (RFC 4115, where the second rate is
+ * the excess), each divided by 1024 into the driver's 8 kbit/s units. Our
+ * ONU-G reports traffic management option 2 (priority and rate
+ * controlled), which tells the OLT it may provision these. A queue
+ * without one keeps 0 and 0, which the driver takes as no limit; when
+ * several CTPs on one queue name different descriptors, the last CTP of
+ * the store wins, as the last flow set does in the stock stack. */
+static void us_queue_rates(struct us_queue *q, unsigned nq,
+			   const struct us_flow_plan *flows, unsigned nf)
+{
+	for (unsigned i = 0; i < nf; i++) {
+		uint16_t td = (uint16_t)effective_u32(OMCI_ME_GEM_PORT_CTP,
+						      flows[i].ctp, 5);
+		uint32_t cir, pir;
+
+		if (!td || !mib_find(OMCI_ME_TRAFFIC_DESCRIPTOR, td))
+			continue;
+		cir = effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 1);
+		pir = effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 2);
+		if (effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 8) == 1)
+			pir = pir > cir ? pir - cir : 0;
+		for (unsigned j = 0; j < nq; j++)
+			if (q[j].meId == flows[i].pqMe) {
+				q[j].cir = cir / 1024u;
+				q[j].pir = pir / 1024u;
+			}
+	}
 }
 
 /* Does an upstream GEM port CTP name this class-277 queue? Only such a
@@ -278,6 +315,25 @@ int us_queue_referenced(uint16_t pqMe)
 			continue;
 		dir = row_u32(r, ctp, 3);
 		if ((dir == 1 || dir == 3) && row_u32(r, ctp, 4) == pqMe)
+			return 1;
+	}
+	return 0;
+}
+
+int us_td_referenced(uint16_t td)
+{
+	const struct omci_class *ctp = find_class(OMCI_ME_GEM_PORT_CTP);
+
+	if (!ctp || !td)
+		return 0;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		struct mib_row *r = mib_row_at(i);
+		uint32_t dir;
+
+		if (!r || r->classId != OMCI_ME_GEM_PORT_CTP)
+			continue;
+		dir = row_u32(r, ctp, 3);
+		if ((dir == 1 || dir == 3) && row_u32(r, ctp, 5) == td)
 			return 1;
 	}
 	return 0;
@@ -498,9 +554,9 @@ static uint32_t tcont_index(uint16_t meId)
  *     Alloc-ID that no set T-CONT claims, in assignment order;
  *   - the rest read 0x00FF, and tcont_apply() refuses them.
  *
- * Binding by position also keeps T-CONT k on the kernel's Alloc-ID CAM row
- * k, which is the order its upstream queue and flow words are laid out in
- * (odi_switch_cmd.c, cmd 23 and 25). */
+ * The driver index of a T-CONT is the CAM row of its Alloc-ID, whatever the
+ * order (odi_switch_cmd.c, cmd 21), so nothing here depends on positions
+ * lining up. */
 #define ALLOC_ID_UNASSIGNED 0x00ffu
 
 const char *gpon_proc_path = "/proc/odi_gpon/status";
@@ -749,6 +805,7 @@ void us_qos_rebuild(void)
 	 * T-CONT to the out-of-range index 8. */
 	for (unsigned i = 0; i < nf; i++)
 		us_queue_add(queues, &nq, flows[i].pqMe);
+	us_queue_rates(queues, nq, flows, nf);
 	for (unsigned i = 1; i < nq; i++) {
 		struct us_queue q = queues[i];
 		unsigned j = i;
@@ -794,14 +851,17 @@ void us_qos_rebuild(void)
 				? queues[i].weight : 1;
 			pq.wrr = queues[i].wrr;
 			pq.dp_mark = queues[i].dp_mark;
+			pq.cir = queues[i].cir;
+			pq.pir = queues[i].pir;
 			pq.dir = OMCI_GEMFLOW_US;
 			rc = apply_hw
 			   ? omci_drv_call(OMCI_PRIQ_CMD, &pq, sizeof pq) : 0;
 			out_fmt("   [%s] us priq %d ordinal %d tcont %d weight %d "
-				"wrr %d dp %d -> %d\n", apply_hw ? "hw" : "dry",
+				"wrr %d dp %d cir %d pir %d -> %d\n",
+				apply_hw ? "hw" : "dry",
 				(long)queues[i].meId, (long)pq.index, (long)pq.owner,
 				(long)pq.weight, (long)pq.wrr,
-				(long)pq.dp_mark, rc);
+				(long)pq.dp_mark, (long)pq.cir, (long)pq.pir, rc);
 			if (rc == 0 && usq_hw_n < USQ_MAX)
 				usq_hw[usq_hw_n++] = queues[i];
 		}
