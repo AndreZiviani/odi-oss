@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- CI: `release.yml` runs `make test` before it builds and publishes (the
+  release job `needs` it). A tag used to publish an image whether or not the
+  tests passed, or had even finished: ci.yml starts on the same tag as a
+  separate workflow that release.yml did not wait for. No change to the image.
 - safe mode: it now also catches a reset loop and a dead config partition,
   the two ways a stick could stay out of reach with no power-cycle pattern
   able to help. A boot whose userland never confirms (odi_wdt resets it at
