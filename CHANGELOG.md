@@ -17,6 +17,23 @@ listed here.
   rates reach the hardware with the kernel that programs cmd 23 from its
   arguments.
 
+- Kernel: the upstream PON queues are programmed from what omcid sends,
+  not replayed from one ISP's capture. The words cmd 23 wrote per T-CONT
+  were ISP1's queue weights and types by T-CONT number; they are now
+  decoded (docs/SWITCH.md, "Upstream PON queues") and computed: the queue
+  weight and strict/WFQ type from the priority queue the OLT set, its CIR
+  and PIR, several queues per T-CONT (a block of queues reserved by cmd 21,
+  ordinal by ordinal; a second queue used to be refused and its GEM ports
+  got no upstream flow), T-CONTs 5-15 (5 and up used to drain T-CONT 4's
+  queue, 8-15 sat on queues their scheduler does not serve), a queue delete
+  (cmd 24, was unsupported) and an upstream flow delete (cmd 25 with ena 0,
+  which was taken for a create of GEM port 0 on every QoS rebuild). The
+  T-CONT index cmd 21 hands back is the row of its Alloc-ID in the Alloc-ID
+  CAM, which is how the hardware pairs a T-CONT with its grants, instead of
+  the order of the calls. The global PBO thresholds follow the stock
+  formula past five upstream flows. On ISP1's provisioning every register
+  write is the same as before, which is what the stock driver writes.
+
 - Docs and tests: the key counts are corrected (the image acts on 22 of the 184
   stock keys, plus bit 256 of `OMCI_CUSTOM_ME`, not "reads 21"; 161 are
   read-only), HACKING.md lists every key of `odi.conf`, SETTINGS.md says that
