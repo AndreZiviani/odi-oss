@@ -979,6 +979,17 @@ int odi_gpon_alloc_row(uint16_t alloc_id)
 	return row;
 }
 
+int odi_gpon_signal_threshold_set(unsigned int signal, unsigned int exp)
+{
+	unsigned long flags;
+	int rc;
+
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	rc = odi_gpon_ctr_signal_threshold_set(&odi_gpon_ctr_inst, signal, exp);
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+	return rc;
+}
+
 void odi_gpon_eqd_get(struct odi_gpon_eqd *eqd)
 {
 	uint32_t mf, inf;

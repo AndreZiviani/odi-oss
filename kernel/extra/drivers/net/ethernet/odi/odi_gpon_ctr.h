@@ -86,6 +86,18 @@ enum odi_gpon_ctr_id {
 
 /* The three downstream alarms DSF_ALARM_STATE reports, in this order. */
 #define ODI_GPON_CTR_ALARMS	3U
+/* Signal fail and signal degrade, in this order. */
+#define ODI_GPON_SIGNAL_SF	0U
+#define ODI_GPON_SIGNAL_SD	1U
+#define ODI_GPON_SIGNALS	2U
+#define ODI_GPON_SIGNAL_SF_DEFAULT	5U	/* G.988 ANI-G SF threshold default */
+#define ODI_GPON_SIGNAL_SD_DEFAULT	9U	/* and SD */
+/* One evaluation per 10 s of O5: the interval the stock driver evaluates
+ * at on ISP1 (its BER_Interval, 80000 frames), long enough to count a
+ * 10^-9 BER (25 bit errors at 2.48832 Gbit/s).
+ */
+#define ODI_GPON_SIGNAL_WINDOW_MS	10000U
+
 /* Indexed by enum odi_gpon_state (1-7); 0 is "not started". */
 #define ODI_GPON_CTR_STATES	8U
 
@@ -102,6 +114,21 @@ struct odi_gpon_ctr {
 	uint32_t superframe;	/* DSF_SUPERFRAME count at the last sample */
 	/* DSF_BIP_ERR_BLOCKS counted in O5 and not yet sent in an REI */
 	uint64_t rei_pending;
+
+	/* Signal fail and signal degrade (G.984.3 11.1.2, ONU side): the
+	 * downstream BER over windows of ODI_GPON_SIGNAL_WINDOW_MS of O5,
+	 * from DSF_BIP_ERR_BITS. Set when the BER is >= 10^-exp, cleared when
+	 * it is < 10^-(exp+1), kept in between; both cleared outside O5,
+	 * where nothing is measured. exp is the ANI-G threshold the OLT set
+	 * (cmd 11), defaults 5 (SF) and 9 (SD).
+	 */
+	uint64_t signal_bits;		/* BIP bit errors in O5, this window */
+	uint32_t signal_ms;		/* O5 time in this window */
+	uint64_t signal_last_bits;	/* the last whole window */
+	uint32_t signal_last_ms;
+	uint8_t signal_exp[ODI_GPON_SIGNALS];
+	uint8_t signal_on[ODI_GPON_SIGNALS];
+	uint32_t signal_events[ODI_GPON_SIGNALS];	/* clear -> set */
 	uint32_t alarm_events[ODI_GPON_CTR_ALARMS];	/* clear -> set, as read */
 	uint64_t alarm_ms[ODI_GPON_CTR_ALARMS];	/* time seen set */
 	uint64_t state_ms[ODI_GPON_CTR_STATES];	/* time in each ONU state */
@@ -131,6 +158,13 @@ void odi_gpon_ctr_note_alarms(struct odi_gpon_ctr *c, uint32_t alarms, uint32_t 
  * REI error count (clamped to 32 bits), and starts the next interval.
  */
 uint32_t odi_gpon_ctr_rei_take(struct odi_gpon_ctr *c);
+
+/* The threshold exponent of signal (ODI_GPON_SIGNAL_SF or _SD): the BER
+ * 10^-exp at which it is set. The ranges G.988 gives the ANI-G attributes:
+ * SF 3-8, SD 4-10. -1 outside them, nothing changed. Lock held.
+ */
+int odi_gpon_ctr_signal_threshold_set(struct odi_gpon_ctr *c, unsigned int signal,
+				      unsigned int exp);
 
 /* One ONU state transition, from the driver transition note. */
 void odi_gpon_ctr_note_transition(struct odi_gpon_ctr *c, unsigned int from, unsigned int to);
