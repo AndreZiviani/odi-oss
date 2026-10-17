@@ -165,7 +165,12 @@ production selection is now applied to the file itself, with
   `FLOOD_UNKN_UCAST_PORTS`), which carry `0xf`, the CPU port included,
   where the capture has `0x7` (three ports, CPU excluded). Replayed with the
   captured value, broadcast from the LAN stopped reaching the CPU while
-  unicast still passed.
+  unicast still passed. Right after the replay `odi_switch_init_modload()`
+  puts the unknown-multicast mask back to `0x7`: the CPU needs broadcast
+  (ARP) but no unknown multicast (no IPv6 in the kernel, no group joined on
+  the stick, the reserved 01:80:C2 groups have their own actions), and with
+  IGMP snooping off every IPTV group is unknown, so a stream would be copied
+  to the CPU at stream rate. The unknown-unicast mask is cmd 64's.
 
 The families stay in the records for review; nothing selects by them.
 

@@ -341,6 +341,7 @@ static inline uint32_t ODI_SW_L2_LOOKUP_SETUP_AGE_TICKS_SET(uint32_t reg, uint32
  * unknown-multicast (0x01c024) masks sit just before it
  */
 #define ODI_SW_FLOOD_UNKN_UCAST_PORTS_BASE	0x1c028U	/* 4 items packed, 1 bits each */
+#define ODI_SW_FLOOD_UNKN_MCAST_PORTS_BASE	0x1c024U
 
 /* IPMC_VLAN_LEAK: 0x01c030, 4 ports packed 1 bit each */
 #define ODI_SW_IPMC_VLAN_LEAK_BASE	0x1c030U	/* 4 items packed, 1 bits each */

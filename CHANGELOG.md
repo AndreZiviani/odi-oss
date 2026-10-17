@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Kernel: unknown multicast (with IGMP snooping off, every IPTV channel) is
+  no longer copied to the stick's own CPU. It was flooded to the CPU port as
+  well as to the host, a stream's worth of frames a second that the CPU
+  drops, against the guards that reset a stick whose CPU stops taking
+  frames. The CPU needs none of it; broadcast still reaches it.
+
 - DDM: the module can now say how its readings are to be read. Two new `diag`
   commands, from the module itself over I2C: `pon get transceiver
   monitoring-type` (A0h byte 92: whether diagnostics are implemented,
