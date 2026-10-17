@@ -31,11 +31,8 @@
 #define DRV_OPT        0x310au
 #define DRV_GET_SN     15
 #define DRV_GET_DEVID  4
-#define MIB_ROWS      192
+#define MIB_ROWS      256
 #define MIB_ROW_MAX   64
-#define MIB_TBL_ENTRY 16
-#define MIB_TBL_NODES 64
-#define MIB_TBL_NONE  0xff
 #define OLT_ACC_CREATE 4
 #define PRIQ_DEFAULT_WEIGHT 1
 #define FLOW_MAX 64                      /* what this device reports, and the
@@ -66,43 +63,39 @@
  * LargeString at 400 -- hold the ACS URL and credentials, which this has no
  * reason to keep. A truncated row is marked rather than silently short.
  */
-#define MIB_ROWS      192
+#define MIB_ROWS      256
 #define MIB_ROW_MAX   64
 
-/* ------------------------------------------------- table attributes (171)
+/* ------------------------------------------------------- table attributes
  *
- * One attribute in the model is not a value but a table: class 171's
- * ReceivedFrameVlanTaggingOperTable. The OLT sets it one 16-byte entry at a
- * time and the entries accumulate, so the flat row above -- which keeps
- * whatever was written last -- is exactly half of it.
+ * Some attributes are not a value but a table of rows, which the OLT sets one
+ * row per Set and which accumulate: class 171's VLAN tagging operations, the
+ * multicast operations profile's ACLs (309, and 65531, its extended form),
+ * the subscriber config's service packages and preview groups (310), the
+ * multicast GEM IW TP's address tables (281), the MAC bridge port filter
+ * table (49). A flat copy -- whatever was written last -- is one row of it.
  *
- * The vendor keeps both halves too. `mib_SetGetAttribute` in libomci_mib.so
- * memcpys the entry to its natural offset in the ME struct like any other
- * attribute, and `ExtVlanTagOperCfgDataDrvCfg` maintains a separate linked
- * list beside it. We do the same, for the same reason: the flat copy answers a
- * get, the list is what the dump prints.
+ * Each table keeps its rows in a list off the entity's row, every node tagged
+ * with its attribute. How a Set adds, replaces or deletes a row is the
+ * table's own rule (G.988, and what the stock plugin does; mibstore.c,
+ * tbl_defs[]). The flat copy is still written, as the vendor's generic store
+ * does; a Get of the attribute answers the whole list (tbl_serialise).
  *
- * The three rules below are read out of that function, not out of G.988:
- *
- *   - an entry is KEYED by its filter half, bytes 0..7;
- *   - setting an entry whose key already exists REPLACES the rest of it;
- *   - an entry whose treatment half is all-ones, bytes 8..15 every bit set,
- *     DELETES the matching entry instead of storing it.
- *
- * The vendor pushes new entries at the head of its list, so its INDEX 0 is the
- * most recently set entry. This keeps that order, because the dump has to
- * match.
+ * New rows go at the head of their list, as every stock plugin does, so row
+ * 0 of a Get-Next walk -- and INDEX 0 of class 171's vendor dump -- is the
+ * most recently added.
  *
  * Nothing here allocates: a fixed pool, shared by every row, with rows linked
- * through indices. ISP1's two instances hold three and two entries.
+ * through indices. ISP1's two class 171 instances hold three and two rows.
  */
-#define MIB_TBL_ENTRY 16
-#define MIB_TBL_NODES 64
+#define MIB_TBL_ENTRY 32                 /* the widest row: 65531's ACL, 30 */
+#define MIB_TBL_NODES 128
 #define MIB_TBL_NONE  0xff
 
 struct mib_tblent {
 	uint8_t next;                        /* MIB_TBL_NONE ends the list */
 	uint8_t used;
+	uint8_t attr;                        /* the table attribute, 1-based */
 	uint8_t data[MIB_TBL_ENTRY];
 };
 
@@ -151,7 +144,7 @@ struct mib_row {
  * is not a soft failure -- every flow sent with id 0 lands on top of the last
  * one, which is why a second downstream flow came back refused.
  */
-struct flow_slot { uint16_t port; uint8_t used; };
+struct flow_slot { uint16_t port; uint8_t used; uint8_t mcast; };
 
 /* createTcont hands back the driver's own T-CONT index, which is not the ME id
  * the OLT uses. A GEM flow names its T-CONT by that index -- sending the ME id
@@ -181,6 +174,7 @@ uint32_t uptime_cs(void);
  * dBm in 0.002 dB steps; -1 when the driver cannot be read. */
 int ddm_dbm_x500(unsigned type, int16_t *out);
 int alloc_ids_refresh(void);
+int alloc_ids_known(void);
 unsigned alloc_ids_assigned(const uint16_t **ids);
 uint16_t tcont_alloc_id(uint16_t meId, int *src);
 
@@ -206,6 +200,10 @@ void tbl_free(struct mib_row *r);
 int attr_is_big(const struct omci_class *c, unsigned k);
 uint16_t tbl_serialise(const struct omci_class *c, uint16_t inst, unsigned k,
 		       uint8_t *out, uint16_t max);
+/* Whether attribute k of the class is a table of rows (tbl_defs[]), and how
+ * many rows attribute k of a row holds. */
+int tbl_is_rows(const struct omci_class *c, unsigned k);
+unsigned tbl_rows(const struct mib_row *r, unsigned k);
 
 /* The Get / Get-Next staging area.
  *
@@ -240,7 +238,7 @@ struct mib_row *mib_row_at(int i);
  * values: see mibstore.c. The CLI dumps go through these, never the rows
  * alone. */
 struct mib_ent { uint16_t cls, inst; };
-#define MIB_ENTS_MAX 512                 /* 301 autonomous + MIB_ROWS */
+#define MIB_ENTS_MAX 640                 /* 277 autonomous + MIB_ROWS */
 int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
 		 const struct mib_ent **out);
 const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
@@ -249,8 +247,15 @@ const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
 int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor);
 extern int conn_dirty;
 extern int qos_dirty;
+/* The next us_qos_rebuild() tears everything down first: set when the
+ * PLOAM Alloc-ID list changed, since the T-CONT indexes (the CAM rows) may
+ * have moved. */
+extern int qos_full;
 void bdgconn_rebuild(void);
 void us_qos_rebuild(void);
+/* The upstream state the driver holds as omcid programmed it, one block,
+ * for the resume snapshot. */
+void *qos_prog_state(uint32_t *len);
 uint16_t mib_write(struct mib_row *r, const struct omci_class *c, uint16_t mask, const uint8_t *src, uint16_t srclen);
 /* Whether attribute k differs from what the row held before this Set. */
 int mib_changed(const struct mib_row *r, const struct omci_class *c, unsigned k);
@@ -330,11 +335,17 @@ int us_queue_referenced(uint16_t pqMe);
 /* Does an upstream GEM port CTP name this traffic descriptor (class 280)
  * as its upstream one? Its rates are then the rates of that CTP's queue. */
 int us_td_referenced(uint16_t td);
+/* Does an upstream queue in the plan name this traffic scheduler (class
+ * 278)? Only then can its Policy change what is programmed. */
+int us_scheduler_referenced(uint16_t ts);
 int flow_find(int ds, uint16_t port);
 void bc_gem_update(void);
 void bc_gem_withdraw(uint16_t going);
 void apply_priq(uint16_t inst);
 void apply_gem_ctp(const struct omci_class *c, const struct mib_row *r);
+/* A class 281 changed (`skip`: the instance being deleted, else -1): resend
+ * the downstream flows whose multicast flag no longer matches. */
+void mcast_flag_refresh(int skip);
 void qos_reset(void);
 /* apply_uni.c */
 uint32_t bridge_uni_port_mask(uint16_t bridge_id);
@@ -353,6 +364,7 @@ void apply_mbsp(const struct omci_class *c, uint16_t inst,
 		const struct mib_row *r, uint16_t mask, int creating);
 void delete_mbsp(uint16_t inst);
 void uni_reset(void);
+void uni_start(void);
 /* apply_bridge.c */
 uint32_t veip_uni_port_mask(uint16_t veipId);
 uint32_t all_eth_uni_mask(void);
@@ -453,6 +465,11 @@ int omci_drv_call_quiet(uint32_t cmd, void *buf, uint32_t len);
 int ev_msg_known(uint8_t mt);
 void ev_unknown_me(uint16_t cls, uint8_t mt);
 void ev_unknown_msg(uint8_t mt, uint16_t cls);
+/* A Get, Get current data, Set or Delete of a modelled class, addressed to
+ * an instance omcid holds no row for and does not create itself: one event
+ * line and one summary line per (class, instance) per boot. Diagnostic only;
+ * the answer is unchanged (omcimsg.c, "an instance omcid does not hold"). */
+void ev_no_instance(uint16_t cls, uint16_t inst, uint8_t mt);
 /* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
  * class omcid does not model with success instead of "unknown entity". */
 extern int unknown_me_ok;
@@ -576,6 +593,26 @@ int fixed_me_has_inst(uint16_t cls, uint16_t inst);
 const struct fixed_me *fixed_me_attr(uint16_t cls, uint16_t inst, unsigned attr);
 int fixed_me_upload(int want, uint8_t *body, uint16_t *len);
 
+/* The MIB upload, built as the stock omci_app builds it (mibstore.c). A MIB
+ * upload takes a snapshot -- every entity the ONU holds, each split over as
+ * many records as its attributes need -- and the Next commands read records
+ * out of it by sequence number. mib_upload_build() returns the record count
+ * the upload response announces, mib_upload_record() fills one record's
+ * contents (class, instance, mask, values) and returns 0, or -1 past the
+ * end. */
+#define UPL_REC_MAX   1024              /* 399 on the stock ONU, plus the OLT's */
+#define UPL_REC_BYTES 26                /* attribute bytes in one baseline record */
+unsigned mib_upload_build(void);
+int mib_upload_record(unsigned seq, uint8_t *body, uint16_t *len);
+/* The tables the ONU keeps for each MAC bridge port the OLT creates (class
+ * 47): the filter table data (49), the bridge table data (50) and the filter
+ * preassign table (79), each at the port's own entity id, empty or all
+ * zeros. Added on a Create of 47, removed on its Delete. */
+void mbpcd_tables_add(uint16_t inst);
+void mbpcd_tables_del(uint16_t inst);
+/* Records announced by the last MIB upload, 0 before the first. */
+extern unsigned upl_total;
+
 /* ------------------------------------------------------ config reload
  *
  * SIGHUP rereads the store and acts on what changed (reload.c). The keys
@@ -593,6 +630,7 @@ struct cfg_snap {
 	int veip_slot;
 	int private_me;
 	int veip_on;
+	int custom_me;
 };
 /* Identity class: one bit per key the OLT reads. */
 #define CFGD_SN         (1u << 0)
@@ -611,7 +649,8 @@ struct cfg_snap {
 #define CFGD_VEIP_SLOT  (1u << 17)
 #define CFGD_PRIVATE_ME (1u << 18)
 #define CFGD_VEIP_ON    (1u << 19)
-#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON)
+#define CFGD_CUSTOM_ME  (1u << 20)
+#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON | CFGD_CUSTOM_ME)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
@@ -628,6 +667,15 @@ void cfg_load_unknown_me(void);
  * the config store, in effect only with bit 0x100 of OMCI_CUSTOM_ME. */
 #define VEIP_SLOT_DEFAULT  6
 #define CUSTOM_ME_VEIP_SLOT_ID 0x100
+/* OMCI_CUSTOM_ME bit 0x40 loads me_00000040.so on the stock firmware, whose
+ * cf_me_65529_is_supported is what makes the MIB reset create the CTC ONU
+ * capability entity (class 65529, FUN_0040dc44 calls feature 0x23). Without
+ * the bit the entity does not exist -- the factory config (0x10000) and the
+ * ISP2 stick have no class 65529 instance, the ISP1 stick (0x9040) has one. */
+#define CUSTOM_ME_ONU_CAPABILITY 0x40
+/* OMCI_CUSTOM_ME as stored, 0 when absent or not a number. */
+extern int custom_me;
+void cfg_load_custom_me(void);
 void cfg_load_veip_slot(void);
 void cfg_load_private_me(void);
 /* The slot key as stored (0..255), -1 when absent or not a valid slot; the

@@ -201,9 +201,10 @@ T-CONT claims, in assignment order, from the kernel's list (`alloc_ids` in
 `/proc/odi_gpon/status`, read once a second); with none left it reads 0x00FF,
 unassigned, and is not programmed. That is what a MIB upload and a Get of the
 AllocID answer, and what goes to the driver. When the kernel list changes (an
-assignment, a deallocation, a re-ranging) the T-CONTs bound to it are
-reprogrammed a quiet second later; `omcli tcont` shows each binding and where
-it came from.
+assignment, a deallocation, a re-ranging) the whole upstream is
+reprogrammed a quiet second later; any other change reprograms only the
+T-CONTs, queues and flows it changed (docs/SWITCH.md, upstream PON queues).
+`omcli tcont` shows each binding and where it came from.
 
 It logs every OMCI frame in and out (`<-` / `->` lines) and every driver
 call to `/var/log/omcid.log`, about 1.7 MB a day on a busy OLT before the
@@ -227,7 +228,7 @@ switch off the report keys do not count) and does the least that applies:
 |---|---|---|
 | nothing | logs `event=reload changed=none` | untouched |
 | only `VLAN_CFG_TYPE`, `VLAN_MANU_MODE`, `VLAN_MANU_TAG_VID`, `VLAN_MANU_TAG_PRI` | tears the bridge connections down and builds them again from the MIB it holds, by the same `bdgconn_rebuild()` the first build uses | stays in O5, nothing re-ranged |
-| `GPON_SN`, `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity switch, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_VEIP_SLOT_ID` (with `OMCI_CUSTOM_ME`) (with or without VLAN keys) | writes `gpondeact` to `/proc/odi_init`, clears its MIB as a MIB reset does (`event=mib_reset side=local`), holds three seconds, hands the driver the serial number (`gponsn`, only if it changed) and the password (`gponpw`), writes `gponact`, and waits for O5 and the services | deactivated and ranged again; the process is never restarted |
+| `GPON_SN`, `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity switch, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_VEIP_SLOT_ID` (with `OMCI_CUSTOM_ME`), bit 64 of `OMCI_CUSTOM_ME` (with or without VLAN keys) | writes `gpondeact` to `/proc/odi_init`, clears its MIB as a MIB reset does (`event=mib_reset side=local`), holds three seconds, hands the driver the serial number (`gponsn`, only if it changed) and the password (`gponpw`), writes `gponact`, and waits for O5 and the services | deactivated and ranged again; the process is never restarted |
 
 The re-registration is a state machine advanced by the main loop, so no step
 sleeps: the CLI, the queues and the watchdog ping are served while the ONU is
@@ -388,6 +389,11 @@ layout. The writes go
 through `/dev/odi_sw` (`ODI_SW_IOC_L2_MC_ADD`/`_DEL`, `odi_switch_l2.c`);
 `diag l2-table get all` shows the result.
 
+The table keeps what a snooper may keep: no state for an address outside
+224.0.0.0/4, for a link-local group (224.0.0.x) or for a group that shares a
+link-local MAC (RFC 4541 2.1.2: those are flooded), and one switch row per
+MAC, holding the union of the ports of every group that maps to it.
+
 `-j` and `-l` drive that same switch path by hand, without registering
 anything, so an entry can be put in and checked without an IGMP frame:
 
@@ -429,7 +435,7 @@ reference; the commands:
     pon get transceiver vendor-name|part-number|temperature|voltage|
                         bias-current|tx-power|rx-power|all|alarm-status
     gpon get onu-state                GPON state machine state, O1-O7
-    gpon get alarm-status             LOS, LOF and LOM, live
+    gpon get alarm-status             LOS, LOF and LOM, live; SF and SD
     gpon get flows                    GEM flows omcid programmed
     gpon get flow-counters            per-flow GEM counters (/proc/odi_gpon/flows)
     mib dump counter port <ports>     port MIB counters; all, 2, 0-3, 0,2-3
@@ -947,10 +953,11 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
-| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the REI count, the TO1/TO2 expiries, the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
+| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the REI count, the TO1/TO2 expiries, the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
+| `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
@@ -975,7 +982,7 @@ missing one as nothing to report.
 
 | file | lines |
 |---|---|
-| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `last_los_ms`, `upstream_overhead`, `ranging_time`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
+| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `laser_emergency_stop`, `last_los_ms`, `upstream_overhead`, `ranging_time`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
 | `counters` | `ctr_samples`, `ctr`, `ctr_saturated` |
 | `flows` | `flow_ack_timeouts`, `flow_saturated`, `ds`, `us` |
 | `ploam` | `ploam ds_rx us_tx`, `ploam_us_dropped`, `ploam_type`, `ploam_ring` |
@@ -995,6 +1002,15 @@ In `status` (the live bits are absent before the first sample):
     fec_now ds 1                      FEC in use: downstream (the OLT sends
     fec_now us 1                      it), upstream (the ONU sends it)
     ds_superframe 305491896           the downstream superframe count
+    signal sf 0 threshold 5           signal fail and signal degrade (G.984.3
+    signal sd 0 threshold 9           11.1.2): the downstream BER over each
+                                      10 s of O5, from DSF_BIP_ERR_BITS, set
+                                      at >= 10^-threshold, cleared below
+                                      10^-(threshold+1), both 0 outside O5;
+                                      threshold from the OLT's ANI-G (cmd 11),
+                                      defaults 5 and 9
+    signal_events sf 0                clear -> set, per signal
+    signal_window ms 10000 bip_err_bits 0   the last whole window evaluated
     alarm_events los 1                clear -> set, as read; one per alarm
     alarm_ms los 2000                 time seen set; one per alarm
     onu_state_ms O5 8000              time in each state, O1 to O7
@@ -1102,7 +1118,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `odi_gpon: event=lof state=on onu_state=O5` / `event=lof state=off lasted_s=...` | notice / info | the same for LOF, loss of downstream framing: light without a GPON frame the framer can lock to |
 | `omcid: event=start run=boot mode=reregister reason=not_o5 onu_state=O2 rows=0` | notice on `run=restart`, else info | omcid starting: the first start of the boot or a later one (a respawn), and whether it resumed from its snapshot (`mode=resume`) or starts empty for the OLT to re-provision; `reason` is `not_o5`, `no_snapshot`, `bad_snapshot` or `other_device` |
 | `omcid: event=mib_reset side=olt rows=161 mib_data_sync=184 services=6` | notice | a MIB reset: `side=olt` from the OLT, `side=local` from `omcicli mib reset`; what it threw away |
-| `omcid: event=mib_upload_begin entities=301` / `event=mib_upload_end entities=301 duration_s=0.009` | info | the OLT reading the MIB back; an upload it abandons has no end line |
+| `omcid: event=mib_upload_begin entities=399` / `event=mib_upload_end entities=399 duration_s=0.009` | info | the OLT reading the MIB back; `entities` is the number of upload records announced (an entity takes one record per 26 bytes of its attributes, as on the stock ONU); an upload it abandons has no end line |
 | `omcid: event=provision_begin op=set class=256 inst=0 after_mib_reset=1` | info | the first Create, Set or Delete of a burst; `after_mib_reset=1` is a full re-provisioning |
 | `omcid: event=provision_end creates=82 sets=102 deletes=0 duration_s=0.827 rows=161 services=6 after_mib_reset=1` | info | 10 s after the burst's last write: what it added up to (Gets and Tests do not count) |
 | `omcid: event=alloc_ids count=5 ids=282,794,1050,1306,538` | info | the Alloc-IDs the OLT assigned by PLOAM (`/proc/odi_gpon/status`), when omcid first reads them and whenever they change: ranging, a deallocation, a re-ranging (`ids=none`); the T-CONTs the OLT does not set are bound to them |
@@ -1110,6 +1126,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=sw_image op=download_start inst=1 size=2621440 window=32 result=ok` | notice | a software download step from the OLT: `op=download_start` (the image size and sections per window), `download_end` (`sections=N`, the sections accepted, and `crc=ok` or `bad`), `activate`, `commit`. `result` is `ok`; `not_supported` with `OLT_SW_DOWNLOAD=reject`; `refused_active` (a download to the image that is active or committed), `refused_invalid` (activate or commit of an image that is not valid), `crc_error`, `size_mismatch`, `short` or `no_download` otherwise. Accepted or not, the image is discarded and nothing is flashed (docs/SETTINGS.md, "Software download from the OLT") |
 | `omcid: event=unknown_me class=351 op=create mt=4` | notice | the first request this boot for a managed entity class omcid has no model for, per class and operation (`op` is `create`, `set`, `get`, `delete`, `get_next` or `test`; `mt` the message type); answered "unknown entity" unless `OMCI_UNKNOWN_ME_OK=1` (docs/SETTINGS.md) |
 | `omcid: event=unknown_msg type=17 class=256` | notice | the first frame this boot of a message type omcid does not handle, per type, with the class of that first frame; answered "not supported" |
+| `omcid: event=no_instance class=45 inst=2457 op=get mt=9` | notice | the first Get, Get current data, Set or Delete this boot that names an instance of a modelled class which omcid neither created itself nor was given by the OLT, per class and instance (`op` and `mt` are those of the first such request). Diagnostic only: omcid answers it as before (built-in values, a new row for a Set, success for a Delete), where G.988 and the stock stack answer "unknown instance"; the lines say whether an OLT relies on that |
 | `omcid: event=vlan_fwdop code=0x06 inst=18 result=unsupported built_as=0x10` | notice | a class 84 forward operation no bridge rule can express (negative filtering, filtering by TCI and MAC address, a code past G.988 table 9.3.11-1): built as 0x10 instead, once per code per omcid run |
 | `omcid: event=reload changed=vlan action=rebuild keys=VLAN_MANU_TAG_VID` | notice | omcid took a SIGHUP (`apply.sh omci`) and reread the store: `changed` is `none`, `vlan` (bridge connections rebuilt in place, the ONU stays in O5) or `identity` (`action=reregister`: the ONU is deactivated and ranged again); `keys` names the store keys that differ, never their values. Never rate limited |
 | `omcid: event=reload_step verb=gponsn rc=0` | info, notice when `rc` is not 0 | one driver verb of a re-registration (`gpondeact`, `gponsn`, `gponpw`, `gponact`) and its errno (0 is success) |
@@ -1124,8 +1141,8 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 |---|---|---|
 | `upstream_overhead`, `assign_onu_id`, `ranging_time` | olt | the OLT ranging this ONU: O2 to O3, O3 to O4, O4 to O5 |
 | `deactivate_onu_id` | olt | the OLT deactivated this ONU (Deactivate_ONU-ID): back to O2, its ONU-ID, Alloc-IDs and OMCC port given up until the OLT ranges it again |
-| `disable_serial_number` | olt | the OLT disabled this serial number (rogue ONU handling, or by hand at the OLT): O7, laser off |
-| `enable_serial_number`, `enable_all_serial_numbers` | olt | re-enabled: O7 to O2 |
+| `disable_serial_number` | olt | the OLT disabled this serial number (rogue ONU handling, or by hand at the OLT): O7, laser off (the module's TX-disable line, GPIO 13, driven high; `laser_emergency_stop 1` in `/proc/odi_gpon/status`) |
+| `enable_serial_number`, `enable_all_serial_numbers` | olt | re-enabled: O7 to O2, laser on again |
 | `popup` | olt | POPUP: O6 back to O5 (directed), or to O4 (broadcast) to be ranged again from the pre-assigned delay |
 | `to1_expired` | timer | O3 or O4 to O2: the OLT did not finish ranging within TO1 (10 s from entering O3) |
 | `to2_expired` | timer | O6 to O1: no POPUP within TO2 (100 ms); the ONU-ID and every Alloc-ID and OMCC row go, and it ranges again once the light is back |
@@ -1171,9 +1188,10 @@ the first, even the ones the rate limit dropped:
 
     unknown_me class=351 op=create mt=4 count=1 first_uptime_s=38
     unknown_msg type=17 class=256 count=9 first_uptime_s=39
+    no_instance class=45 inst=2457 op=get mt=9 count=3 first_uptime_s=52
 
 A respawned omcid reads the file back first, so "once" holds across a
-restart; `/var/log` is RAM, so a reboot starts it empty. It holds 32 distinct
+restart; `/var/log` is RAM, so a reboot starts it empty. It holds 64 distinct
 entries and counts the rest on an `overflow` line. `diag-bundle.sh` collects
 it with the rest of `/var/log`, as `odi-diag/log/omcid-unknown.txt`. On ISP1
 the OLT sends class 351 once and message types 17 and 1 to ONU-G three times

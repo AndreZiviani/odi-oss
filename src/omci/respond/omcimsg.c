@@ -168,81 +168,22 @@ static void handle_test(int fd, uint32_t tid, const uint8_t *f, uint16_t cls)
 static void handle_upload_next(int fd, uint32_t tid, const uint8_t *f)
 {
 	uint8_t body[32];
+	uint16_t seq = nl_get16(f + 8), len = 0;
 
-	uint16_t seq = nl_get16(f + 8);
-	const struct omci_instance *e;
-	const struct omci_class *ec;
-	uint16_t mask = 0, n = 6;
-
-	if ((unsigned)seq >= aut_count) {
-		int k = seq - (int)aut_count, n = 0;
-
-		for (int i = 0; i < MIB_ROWS; i++) {
-			if (!mib[i].used)
-				continue;
-			if (n++ != k)
-				continue;
-			{
-				const struct omci_class *rc = find_class(mib[i].classId);
-				uint16_t mask = 0, len = 6;
-
-				nl_put16(body + 0, mib[i].classId);
-				nl_put16(body + 2, mib[i].inst);
-				for (unsigned a = 1; rc && a < rc->nattr && a <= 16; a++) {
-					uint16_t w = attr_width(rc, a);
-					int off = attr_offset(rc, a);
-
-					if (!w || off < 0 || len + w > (uint16_t)sizeof body)
-						break;
-					for (uint16_t b = 0; b < w; b++)
-						body[len + b] = mib[i].data[off + b];
-					len = (uint16_t)(len + w);
-					mask |= (uint16_t)(1u << (16 - a));
-				}
-				nl_put16(body + 4, mask);
-				send_resp(fd, tid, f, body, len);
-				return;
-			}
-		}
-	}
-	if ((unsigned)seq >= aut_count) {
-		/* After the held rows: the OMCI_FIXED_ME entities. */
-		int idx = seq - (int)aut_count - mib_count();
-		uint16_t len = 0;
-
-		if (idx >= 0 && idx < fixed_me_upload(-1, 0, 0)) {
-			fixed_me_upload(idx, body, &len);
-			send_resp(fd, tid, f, body, len);
-			return;
-		}
+	/* A Next with no upload before it reads the MIB as it is now. */
+	if (!upl_total)
+		mib_upload_build();
+	if (mib_upload_record(seq, body, &len) != 0) {
 		body[0] = OMCI_ERR_BAD_PARAM;
 		send_resp(fd, tid, f, body, 1);
 		out_fmt("-> sequence %d is past the end\n", (long)seq);
 		return;
 	}
-	e = &aut[seq];
-	ec = find_class(e->classId);
-	nl_put16(body + 0, e->classId);
-	nl_put16(body + 2, e->inst);
-	/* As many attributes as fit; the rest would need another
-	 * response with a different mask, which no entity here has
-	 * needed yet. */
-	for (unsigned k = 1; ec && k < ec->nattr && k <= 16; k++) {
-		uint16_t w = attr_width(ec, k);
-
-		if (n + w > (uint16_t)sizeof body)
-		break;
-		attr_value(ec, e->inst, k, body + n);
-		n = (uint16_t)(n + w);
-		mask |= (uint16_t)(1u << (16 - k));
-	}
-	nl_put16(body + 4, mask);
-	send_resp(fd, tid, f, body, n);
-	if (seq < 3 || (unsigned)seq + 1 == aut_count)
-		out_fmt("-> [%d] class %d %s inst %04x mask %04x\n",
-		(long)seq, (long)e->classId,
-		ec ? ec->name : "?", (long)e->inst, (long)mask);
-	return;
+	send_resp(fd, tid, f, body, len);
+	if (seq < 3 || (unsigned)seq + 1 == upl_total)
+		out_fmt("-> [%d] class %d inst %04x mask %04x\n", (long)seq,
+			(long)nl_get16(body), (long)nl_get16(body + 2),
+			(long)nl_get16(body + 4));
 }
 
 struct getnext_ctx getnext;
@@ -350,6 +291,23 @@ static int addresses_entity(uint8_t mt)
 	       mt == OMCI_MT_SET || mt == OMCI_MT_GET ||
 	       mt == OMCI_MT_GET_NEXT || mt == OMCI_MT_TEST ||
 	       mt == OMCI_MT_GET_CURRENT_DATA;
+}
+
+/* An instance omcid does not hold.
+ *
+ * G.988 and the stock stack answer a Get, Set or Delete of an instance that
+ * does not exist with result 5, unknown instance (AUDIT B8). omcid answers
+ * them as if the instance were there: the built-in values for a Get, a new
+ * row for a Set, success for a Delete. Making that strict could break an OLT
+ * that addresses an instance omcid fails to create on its own (the
+ * companions of a MAC bridge port, say), so first the data: each (class,
+ * instance) such a request names is logged once per boot (ev_no_instance),
+ * and nothing about the answer changes. A Create is not one of these: it
+ * makes the instance. */
+static int targets_held_instance(uint8_t mt)
+{
+	return mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA ||
+	       mt == OMCI_MT_SET || mt == OMCI_MT_DELETE;
 }
 
 /* OMCI_UNKNOWN_ME_OK: success for a Create, Set or Get of a class omcid has
@@ -465,8 +423,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	if (mt == OMCI_MT_MIB_UPLOAD_NEXT)
 		ev_mib_upload_next(nl_get16(f + 8));
 	if (mt == OMCI_MT_MIB_UPLOAD_NEXT && nl_get16(f + 8) > 2 &&
-	    (unsigned)nl_get16(f + 8) + 1 < aut_count) {
-		handle_upload_next(fd, tid, f);   /* 301 of these; do not log */
+	    (unsigned)nl_get16(f + 8) + 1 < upl_total) {
+		handle_upload_next(fd, tid, f);   /* ~400 of these; do not log */
 		return;
 	}
 	/* A software image is thousands of these: counted, not logged. */
@@ -526,6 +484,9 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		ev_unknown_msg(mt, cls);
 	else if (!c && addresses_entity(mt))
 		ev_unknown_me(cls, mt);
+	else if (c && targets_held_instance(mt) && !mib_find(cls, inst) &&
+		 !instance_is_autonomous(cls, inst))
+		ev_no_instance(cls, inst, mt);
 
 	/* The software download steps answer for themselves (swimage.c). */
 	if (mt >= OMCI_MT_START_SW_DOWNLOAD && mt <= OMCI_MT_COMMIT_SW) {
@@ -593,13 +554,12 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * built for itself, and that is how the OLT learns what
 		 * hardware it has. Reporting zero left the OLT with nothing to
 		 * work with, and it simply started the cycle again. */
-		int total = (int)aut_count + mib_count() +
-			    fixed_me_upload(-1, 0, 0);
+		unsigned total = mib_upload_build();
 
 		nl_put16(body, (uint16_t)total);
 		send_resp(fd, tid, f, body, 2);
 		ev_mib_upload((uint16_t)total);
-		out_fmt("-> %d managed entities to upload (%d autonomous, %d held, %d fixed)\n",
+		out_fmt("-> %d upload records (%d autonomous, %d held, %d fixed)\n",
 			(long)total, (long)aut_count,
 			(long)mib_count(), (long)fixed_me_upload(-1, 0, 0));
 		return;
@@ -768,6 +728,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		send_resp(fd, tid, f, body, 3);
 		ev_config_write(mt, cls, inst);
 		mib_data_sync++;
+		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
+			mbpcd_tables_add(inst);
 		apply_entity(c, inst, r, mask, 1);
 		snapshot_save();
 		out_fmt("-> created (%d rows held)\n", (long)mib_count());
@@ -803,6 +765,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * the driver at all. */
 		apply_delete(c, inst);
 		mib_del(cls, inst);
+		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
+			mbpcd_tables_del(inst);
 		body[0] = OMCI_OK;
 		send_resp(fd, tid, f, body, 1);
 		ev_config_write(mt, cls, inst);

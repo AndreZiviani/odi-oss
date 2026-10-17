@@ -4,7 +4,7 @@
  * keeping the classes whose initType is 0 -- the ones the OLT may only get
  * and set. This is what a MIB upload reports after a MIB reset.
  *
- * 35 classes, 301 instances. Measured on an ODI DFP-34X-2C2; another
+ * 32 classes, 277 instances. Measured on an ODI DFP-34X-2C2; another
  * device of the same model should match, a different model will not.
  */
 #include "omci_autonomous.h"
@@ -25,33 +25,6 @@ const struct omci_instance omci_autonomous[] = {
 	{     7, 0x0001 },
 	/* EthUni */
 	{    11, 0x0101 },
-	/* MacBridgePortFilterTable */
-	{    49, 0x0001 },
-	{    49, 0x0002 },
-	{    49, 0x0003 },
-	{    49, 0x0004 },
-	{    49, 0x0005 },
-	{    49, 0x0006 },
-	{    49, 0x0007 },
-	{    49, 0xffff },
-	/* MacBriPortBriTblData */
-	{    50, 0x0001 },
-	{    50, 0x0002 },
-	{    50, 0x0003 },
-	{    50, 0x0004 },
-	{    50, 0x0005 },
-	{    50, 0x0006 },
-	{    50, 0x0007 },
-	{    50, 0xffff },
-	/* MacBridgePortFilterPreassign */
-	{    79, 0x0001 },
-	{    79, 0x0002 },
-	{    79, 0x0003 },
-	{    79, 0x0004 },
-	{    79, 0x0005 },
-	{    79, 0x0006 },
-	{    79, 0x0007 },
-	{    79, 0xffff },
 	/* LctUni */
 	{    83, 0x0000 },
 	/* OltG */
@@ -328,24 +301,24 @@ const struct omci_instance omci_autonomous[] = {
 	{   329, 0x0601 },
 	/* TR069ManageServer */
 	{   340, 0x0601 },
-	/* HW ME350 */
+	/* Me350 */
 	{   350, 0x0000 },
-	/* HW ME370 */
+	/* Me370 */
 	{   370, 0x0101 },
-	/* HW ME373 */
+	/* Me373 */
 	{   373, 0x0000 },
-	/* OnuCapability */
-	{  9368, 0x0000 },
-	/* PrivateTqCfg */
-	{  9572, 0x0000 },
+	/* PrivateSntp */
+	{ 65294, 0x0000 },
 	/* OLTLocationConfigData */
-	{  9796, 0x0000 },
-	/* PrivateVlanCfg */
-	{ 10212, 0x0000 },
+	{ 65527, 0x0000 },
+	/* OnuCapability */
+	{ 65529, 0x0000 },
 	/* LoIdAuth */
 	{ 65530, 0x0000 },
-	/* ZteSntp */
-	{ 13248, 0x0000 },
+	/* PrivateTqCfg */
+	{ 65534, 0x0000 },
+	/* PrivateVlanCfg */
+	{ 65535, 0x0000 },
 };
 
-const unsigned omci_autonomous_count = 301;
+const unsigned omci_autonomous_count = 277;

@@ -23,15 +23,18 @@
 #
 # It needs the stock rootfs, which is disposable scratch, and a privileged
 # container for losetup and binfmt_misc. When either
-# is missing this SKIPS -- loudly, and with a non-zero note in the summary, so
-# a skip can never be read as a pass.
+# is missing this SKIPS -- loudly, and with exit status 77 (the automake
+# convention for a skipped test), so a skip is never an exit 0 that reads as a
+# pass. A caller that treats any non-zero status as a failure therefore fails
+# a run that did not verify the first flash; one that wants to tolerate a skip
+# tests for 77.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
 STICK=${STICK_ROOTFS:-${STOCK_ROOTFS:-stock-rootfs}}
 TARDIR=$PWD/out/image
 
-skip() { printf 'SKIP  %s\n' "$1"; printf '\nskipped -- this path was NOT verified\n'; exit 0; }
+skip() { printf 'SKIP  %s\n' "$1"; printf '\nskipped -- this path was NOT verified\n'; exit 77; }
 
 [ -x "$STICK/bin/busybox" ] ||
 	skip "no stock rootfs at $STICK (set STICK_ROOTFS); the first-flash path is unverified"

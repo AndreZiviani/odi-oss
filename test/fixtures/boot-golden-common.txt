@@ -20537,6 +20537,8 @@ r f02138 40
 W f02138 40
 r 1400c 8
 W 1400c 9
+r 1c024 f
+W 1c024 7
 # phase: gponsn, gponact
 # odi_init gponsn TEST00000001: rc 0
 W f020f8 7efdfbf

@@ -130,6 +130,9 @@ void aut_rebuild(void)
 
 		if (!private_me && private_class(cls))
 			continue;
+		if (cls == OMCI_ME_ONU_CAPABILITY &&
+		    !(custom_me & CUSTOM_ME_ONU_CAPABILITY))
+			continue;
 		if (!veip_on && ((slot_card_class(cls) && inst == SLOT6_CARD) ||
 				 (slot_port_class(cls) && inst == SLOT6_PORT)))
 			continue;
@@ -166,7 +169,7 @@ const struct omci_class *find_class(uint16_t id)
 /* Power-on values the vendor stack initialises these entities to, which an
  * OLT that never writes them leaves in place: the TR-069 management server
  * and the virtual Ethernet interface point start locked (1), and the
- * interface point is then disabled (1). Class 10212 (private VLAN
+ * interface point is then disabled (1). Class 65535 (private VLAN
  * configuration) starts as auto detection with the unset sentinels. */
 #define ADMIN_LOCKED     1
 #define OPER_DISABLED    1
@@ -253,13 +256,89 @@ uint16_t create_mask(const struct omci_class *c)
 	return m;
 }
 
-/* Which attribute of this class is a table, or 0 if none. Only class 171 is
- * known to be one, and the model records it as OMCI_OCTETS of 16 like any
- * other fixed-width attribute -- the type does not say "table". Rather than
- * guess from the width, name the one we have evidence for. */
-static unsigned table_attr(const struct omci_class *c)
+/* The table attributes, and the rule each one's rows follow.
+ *
+ * The model cannot say which attributes are tables: it records them as
+ * OMCI_OCTETS of one row's width, like any fixed-width octet string (class
+ * 84's 24-byte VLAN list is one of those and is NOT a table). So they are
+ * named here, each with the rule a Set follows. The rules are G.988's,
+ * checked against the stock plugin of the class (investigations
+ * AUDIT-night-omcid.md, "Area B2", B2-2):
+ *
+ *   TBL_EVTOCD   171/6, 16 bytes. Keyed by the filter half, bytes 0..7; a row
+ *                whose treatment half (8..15) is all ones deletes the row
+ *                with that key, anything else adds or replaces it.
+ *                (ExtVlanTagOperCfgDataDrvCfg.)
+ *   TBL_CTRL     a two-byte table control first: bits 15-14 the set control
+ *                (01 write, 10 delete, 11 clear the table, 00 ignored), bits
+ *                9-0 the row key. 310/6. (MopEntryOper.)
+ *   TBL_CTRL_PART the same, plus a row part in bits 13-11: a row is the pair
+ *                (part, key); a write replaces that pair, a delete removes
+ *                every part of the key. 309/7 and /8, 65531/7 and /8, 310/7.
+ *                Like the stock stack (omci_adjust_tbl_ctrl_by_omcc_ver), the
+ *                part bits count only when the reported OMCC version is 0xA1
+ *                or later: before that G.988 had one-part rows and the bits
+ *                were reserved. (AclTableEntryOper.)
+ *   TBL_MCADDR   281/9 (12 bytes) and /10 (24): keyed by the GEM port and the
+ *                secondary key, bytes 0..3; a row whose address bytes (the
+ *                rest) are all zero deletes, anything else adds or replaces.
+ *                (MultiGemIwTpDrvCfg; stock tests only the 12 high bytes of
+ *                an IPv6 row, this tests them all.)
+ *   TBL_MACFILT  49/1, 8 bytes: byte 0 the index, which is the key; byte 1
+ *                bits 7-6 10 add or replace, 00 remove, 01 clear the table.
+ *                (MacFilterTableOper removes by MAC address instead; G.988
+ *                keys the table by the index.)
+ *
+ * The control bits of a stored row read back as 00, as the stock stack
+ * stores them.
+ */
+#define TBL_EVTOCD    1
+#define TBL_CTRL      2
+#define TBL_CTRL_PART 3
+#define TBL_MCADDR    4
+#define TBL_MACFILT   5
+
+/* The extended multicast operations profile, 65531 once the model has its
+ * true class id. */
+#define OMCI_ME_EXT_MCAST_OPER_PROFILE 65531
+
+static const struct { uint16_t cls; uint8_t attr, kind; } tbl_defs[] = {
+	{ OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA, 6, TBL_EVTOCD },
+	{ 309, 7, TBL_CTRL_PART },               /* dynamic access control list */
+	{ 309, 8, TBL_CTRL_PART },               /* static access control list */
+	{ OMCI_ME_EXT_MCAST_OPER_PROFILE, 7, TBL_CTRL_PART },
+	{ OMCI_ME_EXT_MCAST_OPER_PROFILE, 8, TBL_CTRL_PART },
+	{ 310, 6, TBL_CTRL },                    /* multicast service package */
+	{ 310, 7, TBL_CTRL_PART },               /* allowed preview groups */
+	{ OMCI_ME_MCAST_GEM_IW_TP, 9, TBL_MCADDR },  /* IPv4 address table */
+	{ OMCI_ME_MCAST_GEM_IW_TP, 10, TBL_MCADDR }, /* IPv6 address table */
+	{ 49, 1, TBL_MACFILT },                  /* MAC filter table */
+};
+
+static unsigned tbl_kind(const struct omci_class *c, unsigned k)
 {
-	return (c && c->classId == OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA) ? 6 : 0;
+	if (!c)
+		return 0;
+	for (unsigned i = 0; i < sizeof tbl_defs / sizeof tbl_defs[0]; i++)
+		if (tbl_defs[i].cls == c->classId && tbl_defs[i].attr == k)
+			return attr_width(c, k) <= MIB_TBL_ENTRY ? tbl_defs[i].kind : 0;
+	return 0;
+}
+
+int tbl_is_rows(const struct omci_class *c, unsigned k)
+{
+	return tbl_kind(c, k) != 0;
+}
+
+unsigned tbl_rows(const struct mib_row *r, unsigned k)
+{
+	unsigned n = 0;
+
+	if (!r)
+		return 0;
+	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next)
+		n += tblpool[i].attr == k;
+	return n;
 }
 
 /* Whether a Get of this attribute must go through Get-Next instead of being
@@ -274,11 +353,11 @@ static unsigned table_attr(const struct omci_class *c)
  * 26 rather than 29 because a baseline Get response body is one result byte,
  * two mask bytes and 25 attribute bytes.
  *
- * Deliberately NOT the same question as table_attr() above. That one asks which
- * attribute accumulates entries as a keyed list, which is a behaviour of class
- * 171's plugin specifically; this one asks which attribute is too big to send
- * inline, which is every OCTETS attribute in the model. Class 84's 24-byte VLAN
- * filter list is big by this test and is not a keyed list by that one. */
+ * Deliberately NOT the same question as tbl_is_rows(). That one asks which
+ * attribute accumulates rows; this one asks which attribute is too big to
+ * send inline, which is every OCTETS attribute in the model. Class 84's
+ * 24-byte VLAN filter list is big by this test and is not a table by that
+ * one. */
 int attr_is_big(const struct omci_class *c, unsigned k)
 {
 	if (!c || k >= c->nattr)
@@ -288,8 +367,8 @@ int attr_is_big(const struct omci_class *c, unsigned k)
 
 /* The whole of a big attribute, laid out as the OLT will read it back.
  *
- * For a keyed-list attribute that is every entry, head to tail, so the order
- * matches what the vendor's dump prints -- newest first. For any other big
+ * For a table that is every row of it, head to tail -- newest first, which is
+ * also the order the vendor's class 171 dump prints. For any other big
  * attribute the row holds the value flat and there is exactly one "entry".
  *
  * Returns the byte length, which is what the Get response reports and what the
@@ -303,9 +382,11 @@ uint16_t tbl_serialise(const struct omci_class *c, uint16_t inst, unsigned k,
 
 	if (!r || !w)
 		return 0;
-	if (k == table_attr(c) && w == MIB_TBL_ENTRY) {
+	if (tbl_kind(c, k)) {
 		for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE;
 		     i = tblpool[i].next) {
+			if (tblpool[i].attr != k)
+				continue;
 			if (n + w > max)
 				break;
 			for (uint16_t b = 0; b < w; b++)
@@ -347,50 +428,167 @@ static int tbl_bytes_eq(const uint8_t *a, const uint8_t *b, int n)
 	return 1;
 }
 
-/* One OLT set of the table attribute. See the rules above the pool. */
-static void tbl_set(struct mib_row *r, const uint8_t *e)
+/* Unlink every row of attribute k that `match` selects (all of them when it
+ * is 0), returning their nodes to the pool. */
+static void tbl_remove(struct mib_row *r, unsigned k,
+		       int (*match)(const uint8_t *row, const uint8_t *e, uint16_t w),
+		       const uint8_t *e, uint16_t w)
 {
 	uint8_t *link = &r->tbl_head;
-	int del = 1;
 
-	for (int i = 8; i < MIB_TBL_ENTRY; i++)
-		if (e[i] != 0xff) {
-			del = 0;
-			break;
-		}
-	for (uint8_t n = r->tbl_head; n != MIB_TBL_NONE; n = tblpool[n].next) {
-		struct mib_tblent *t = &tblpool[n];
+	while (*link != MIB_TBL_NONE) {
+		struct mib_tblent *t = &tblpool[*link];
 
-		if (!tbl_bytes_eq(t->data, e, 8)) {
-			link = &t->next;
-			continue;
-		}
-		if (del) {
+		if (t->attr == k && (!match || match(t->data, e, w))) {
 			*link = t->next;
 			t->used = 0;
 			r->tbl_count--;
-		} else {
-			/* The vendor reassigns words 1..3; word 0 is part of
-			 * the key and already equal. */
-			for (int i = 4; i < MIB_TBL_ENTRY; i++)
-				t->data[i] = e[i];
+			continue;
 		}
-		return;
+		link = &t->next;
 	}
-	if (del)
-		return;                      /* deleting what is not there */
+}
+
+/* Rows that share a key, per rule. */
+static int key_evtocd(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return tbl_bytes_eq(row, e, 8);
+}
+
+static int key_ctrl(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return ((row[0] << 8 | row[1]) & 0x3ff) == ((e[0] << 8 | e[1]) & 0x3ff);
+}
+
+static int key_ctrl_part(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return ((row[0] << 8 | row[1]) & 0x3bff) == ((e[0] << 8 | e[1]) & 0x3bff);
+}
+
+static int key_mcaddr(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return tbl_bytes_eq(row, e, 4);
+}
+
+static int key_index(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return row[0] == e[0];
+}
+
+/* The OMCC version this ONU reports (ONU2-G attribute 2). */
+static uint8_t omcc_version(void)
+{
+	const struct omci_class *c = find_class(OMCI_ME_ONU2_G);
+	uint8_t v[4] = { 0 };
+
+	if (!c || attr_width(c, 2) != 1)
+		return 0;
+	attr_value(c, 0, 2, v);
+	return v[0];
+}
+
+/* Add `e` as a new head row of attribute k, after removing the row with the
+ * same `key` (none to remove when `key` is 0). */
+static void tbl_put(struct mib_row *r, unsigned k, const uint8_t *e, uint16_t w,
+		    int (*key)(const uint8_t *, const uint8_t *, uint16_t))
+{
+	if (key)
+		tbl_remove(r, k, key, e, w);
 	for (uint8_t n = 0; n < MIB_TBL_NODES; n++) {
 		if (tblpool[n].used)
 			continue;
 		tblpool[n].used = 1;
+		tblpool[n].attr = (uint8_t)k;
 		for (int i = 0; i < MIB_TBL_ENTRY; i++)
-			tblpool[n].data[i] = e[i];
+			tblpool[n].data[i] = i < w ? e[i] : 0;
 		tblpool[n].next = r->tbl_head;
 		r->tbl_head = n;
 		r->tbl_count++;
 		return;
 	}
 	r->truncated = 1;                    /* pool exhausted; say so */
+}
+
+/* One OLT Set of table attribute k: the row in `src`, applied by the rule of
+ * tbl_defs[]. */
+static void tbl_set(struct mib_row *r, const struct omci_class *c, unsigned k,
+		    const uint8_t *src)
+{
+	uint16_t w = attr_width(c, k);
+	uint8_t e[MIB_TBL_ENTRY];
+	unsigned kind = tbl_kind(c, k);
+	int zero = 1;
+
+	for (uint16_t i = 0; i < MIB_TBL_ENTRY; i++)
+		e[i] = i < w ? src[i] : 0;
+	switch (kind) {
+	case TBL_EVTOCD: {
+		int del = 1;
+
+		for (int i = 8; i < 16; i++)
+			if (e[i] != 0xff)
+				del = 0;
+		if (del) {
+			tbl_remove(r, k, key_evtocd, e, w);
+			return;
+		}
+		/* Replaced in place, not moved to the head: the vendor
+		 * reassigns words 1..3 of the node it found. */
+		for (uint8_t n = r->tbl_head; n != MIB_TBL_NONE; n = tblpool[n].next)
+			if (tblpool[n].attr == k && key_evtocd(tblpool[n].data, e, w)) {
+				for (int i = 8; i < 16; i++)
+					tblpool[n].data[i] = e[i];
+				return;
+			}
+		tbl_put(r, k, e, w, 0);
+		return;
+	}
+	case TBL_CTRL:
+	case TBL_CTRL_PART: {
+		unsigned set = e[0] >> 6;
+
+		e[0] &= 0x3f;                    /* stored rows read back 00 */
+		if (kind == TBL_CTRL || omcc_version() < 0xa1)
+			e[0] &= (uint8_t)~0x38;  /* no row part */
+		if (set == 1)
+			tbl_put(r, k, e, w, kind == TBL_CTRL ? key_ctrl : key_ctrl_part);
+		else if (set == 2)
+			tbl_remove(r, k, key_ctrl, e, w);
+		else if (set == 3)
+			tbl_remove(r, k, 0, e, w);
+		return;
+	}
+	case TBL_MCADDR:
+		for (uint16_t i = 4; i < w; i++)
+			if (e[i])
+				zero = 0;
+		if (zero)
+			tbl_remove(r, k, key_mcaddr, e, w);
+		else
+			tbl_put(r, k, e, w, key_mcaddr);
+		return;
+	case TBL_MACFILT:
+		switch (e[1] >> 6) {
+		case 2:
+			tbl_put(r, k, e, w, key_index);
+			return;
+		case 0:
+			tbl_remove(r, k, key_index, e, w);
+			return;
+		case 1:
+			tbl_remove(r, k, 0, e, w);
+			return;
+		default:
+			return;
+		}
+	default:
+		return;
+	}
 }
 
 struct mib_row *mib_find(uint16_t cls, uint16_t inst)
@@ -571,10 +769,10 @@ uint16_t mib_write(struct mib_row *r, const struct omci_class *c,
 			r->written |= (uint16_t)(1u << (16 - k));
 		}
 		/* A table attribute also accumulates. The flat copy above is
-		 * still made -- it is what a get of this attribute answers, and
-		 * it is what the vendor's own store keeps beside its list. */
-		if (k == table_attr(c) && w == MIB_TBL_ENTRY)
-			tbl_set(r, src + used);
+		 * still made, as the vendor's generic store keeps it beside
+		 * the plugin's list; a Get answers the list. */
+		if (tbl_kind(c, k))
+			tbl_set(r, c, k, src + used);
 		used = (uint16_t)(used + w);
 	}
 	return used;
@@ -702,12 +900,21 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 3) for (int i = 0; i < 8; i++) out[i] = serial[i];
 		/* Attribute 14, the ONT PON state: the O-state number. */
 		else if (k == 14) out[0] = pon_state_now();
+		/* Logical ONU ID and password (10, 11): the LOID the stock MIB
+		 * reset copies in from its -l/-w arguments, which are the
+		 * config store's LOID keys -- the same values the CTC LOID
+		 * entity (65530) reports. An OLT that authenticates by the
+		 * G.988 ONU-G LOID read an empty one here. Credentials status
+		 * (12) stays 0 until the OLT writes it, as on the stock ONU. */
+		else if (k == 10) put_str(out, n, ident.loid);
+		else if (k == 11) put_str(out, n, ident.loidPwd);
 	} else if (c->classId == OMCI_ME_ONU2_G) { /* ONU2-G */
 		/* Attribute 2 is the OMCC version, per the vendor's own table
 		 * and G.988 -- not attribute 3, which is the vendor product
 		 * code. The three identity keys override only when reported
 		 * (cfgstore.c: report); otherwise the answer is what it always
-		 * was, the device id, 0x80 and the captured product code. */
+		 * was, the device id, 0x80 and product code 15, the stock
+		 * firmware's built-in default for that key (cfgstore.c). */
 		if (!report.loaded)
 			cfg_load_report();
 		if (k == 1)
@@ -742,20 +949,31 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 1) out[0] = veip_admin(inst);
 		else if (k == 2) out[0] = veip_admin(inst) ? OPER_DISABLED : 0;
 	} else if (c->classId == OMCI_ME_TR069_MGMT_SERVER) { /* TR-069 server */
+		/* The default row of mib_TR069ManageServer.so, which the stock
+		 * MIB reset leaves as it is: locked, and both pointers
+		 * (ACS network address, associated tag) unset, 0xffff. Both
+		 * stock lines report 0xffff until their OLT writes one. */
 		if (k == 1) out[0] = ADMIN_LOCKED;
+		else if ((k == 2 || k == 3) && n >= 2) out[0] = out[1] = 0xff;
 	} else if (c->classId == OMCI_ME_PRIVATE_VLAN_CFG) { /* private VLAN config */
-		/* The manual VLAN of the configuration store, which is what the
-		 * vendor stack reports: type, mode, VID and priority; the
-		 * unset sentinels when no VID is stored. */
+		/* What the stock firmware stores here is what /etc/runomci.sh
+		 * passes omci_app (-iot_vt/-iot_vm/-iot_vid/-iot_pri), not the
+		 * keys as stored: type 1 and mode 1 with a VID and a priority
+		 * give all four; type 1 with another mode gives that mode and
+		 * the unset sentinels 65535 / 255; any other type is reported
+		 * as type 0, the mode, and the sentinels. */
+		int tag;
+
 		if (!vlanCfg.loaded)
 			cfg_load_vlan();
-		if (k == 1) out[0] = (uint8_t)vlanCfg.type;
+		tag = vlanCfg.type == 1 && vlanCfg.mode == 1 && vlanCfg.vid >= 0;
+		if (k == 1) out[0] = vlanCfg.type == 1 ? 1 : 0;
 		else if (k == 2) out[0] = (uint8_t)vlanCfg.mode;
 		else if (k == 3 && n >= 2) {
-			uint16_t v = vlanCfg.vid < 0 ? 0xffff : (uint16_t)vlanCfg.vid;
+			uint16_t v = tag ? (uint16_t)vlanCfg.vid : 0xffff;
 
 			out[0] = (uint8_t)(v >> 8); out[1] = (uint8_t)v;
-		} else if (k == 4) out[0] = (uint8_t)vlanCfg.pri;
+		} else if (k == 4) out[0] = tag ? (uint8_t)vlanCfg.pri : 0xff;
 	} else if (c->classId == OMCI_ME_PPTP_ETH_UNI) { /* PPTP Ethernet UNI */
 		/* Sensed type is the slot card type, which the ONU never
 		 * changes; the configuration indication follows the link:
@@ -777,11 +995,14 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		 * the slots themselves never change. */
 		else if (k >= 2 && k <= 4) out[0] = sw_flag(inst, k);
 	} else if (c->classId == OMCI_ME_CTC_LOID_AUTH) { /* CTC LOID authentication */
-		/* The LOID and its password from the config store (LOID and
-		 * LOID_PASSWD in lastgood.xml, both empty on isp1), AuthStatus 0
-		 * until the OLT sets it; OperationId is left zero, nothing on
-		 * this device says what the vendor puts there. */
-		if (k == 2) put_str(out, n, ident.loid);
+		/* As the stock MIB reset (FUN_0040dc44 of omci_app) fills it:
+		 * OperationId "CTC " (with the space, four bytes), the LOID and
+		 * its password from the config store (LOID and LOID_PASSWD,
+		 * the LOID_OLD rule of cfgstore.c), AuthStatus 0 until the OLT
+		 * sets it. */
+		if (k == 1 && n >= 4) {
+			out[0] = 'C'; out[1] = 'T'; out[2] = 'C'; out[3] = ' ';
+		} else if (k == 2) put_str(out, n, ident.loid);
 		else if (k == 3) put_str(out, n, ident.loidPwd);
 	} else if (c->classId == OMCI_ME_ONT_DATA) { /* ONT data */
 		if (k == 1) out[0] = mib_data_sync;
@@ -790,9 +1011,11 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		 * has always reported them -- with every attribute zero, which
 		 * tells an OLT that this ONU has 208 identical queues. The
 		 * values are known: RelatedPort is derivable from the entity
-		 * id (checked against all 208 of isp1's rows) and the rest is
-		 * mib_PriQ.so's own default row, plus the two sizes isp1
-		 * reports. */
+		 * id (checked against all 208 of isp1's rows; FUN_0040c28c of
+		 * omci_app computes it the same way) and the rest is
+		 * mib_PriQ.so's own default row, plus the two queue sizes,
+		 * 3276 (0x0ccc), which that same reset function sets on every
+		 * queue. */
 		uint32_t rp = priq_related_port(inst);
 
 		if (k == 1) out[0] = 1;                /* QCfgOpt */
@@ -819,6 +1042,159 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 3) out[0] = 2;           /* Policy */
 	}
 	return n;
+}
+
+/* ------------------------------------------------------------ MIB upload
+ *
+ * What the stock omci_app uploads, read off the binary (the record count in
+ * FUN_0040ff70, the walk of the snapshot at 0x415e24 and OMCI_OnMibUploadMsg):
+ *
+ *  - every entity of the MIB, the ONU's own and the OLT's, but no entity of a
+ *    class whose type is private or "not uploaded" (`(std & 0x110) == 0`) and
+ *    no instance added with the no-upload flag (the `!` rows of
+ *    /etc/omci_mib.cfg: priority queues 0xff00 to 0xff3f);
+ *  - of each entity, the attributes whose option type has none of
+ *    OMCI_OPT_NOT_UPLOADED (not supported, private, PM, table) and that are
+ *    at most 26 bytes, in attribute order;
+ *  - 26 bytes of them per record: an attribute that would overflow starts the
+ *    next record, under its own mask. An entity with no such attribute is one
+ *    record with an empty mask.
+ *
+ * The stock firmware's own upload on ISP2 (a decoded session of the stock
+ * image) is exactly this: 205 entities in 399 records, ONU2-G in two, ONU-G
+ * in four, each priority queue in two. omcid used to send one record per
+ * entity and drop whatever did not fit in it -- the ONU2-G queue, scheduler
+ * and GEM port counts among them. */
+struct upl_rec { uint16_t cls, inst, mask; };
+static struct upl_rec upl[UPL_REC_MAX];
+static unsigned upl_n;
+unsigned upl_total;
+
+/* The reserved queues of /etc/omci_mib.cfg, which the stock firmware creates
+ * with the no-upload flag. */
+#define PRIQ_NO_UPLOAD_FIRST 0xff00
+
+static int upl_skipped(const struct omci_class *c, uint16_t inst)
+{
+	return !c || (c->std & OMCI_STD_NOT_UPLOADED) ||
+	       (c->classId == OMCI_ME_PRIORITY_QUEUE && inst >= PRIQ_NO_UPLOAD_FIRST);
+}
+
+static void upl_push(uint16_t cls, uint16_t inst, uint16_t mask)
+{
+	if (upl_n < UPL_REC_MAX) {
+		upl[upl_n].cls = cls;
+		upl[upl_n].inst = inst;
+		upl[upl_n].mask = mask;
+		upl_n++;
+	}
+}
+
+static void upl_entity(const struct omci_class *c, uint16_t inst)
+{
+	uint16_t used = 0, mask = 0;
+	int recs = 0;
+
+	if (upl_skipped(c, inst))
+		return;
+	for (unsigned k = 1; k < c->nattr && k <= 16; k++) {
+		uint16_t w = attr_width(c, k);
+
+		if ((c->attrs[k].opt & OMCI_OPT_NOT_UPLOADED) || !w ||
+		    w > UPL_REC_BYTES)
+			continue;
+		if (used + w > UPL_REC_BYTES) {
+			upl_push(c->classId, inst, mask);
+			recs++;
+			used = 0;
+			mask = 0;
+		}
+		used = (uint16_t)(used + w);
+		mask |= (uint16_t)(1u << (16 - k));
+	}
+	if (mask || !recs)
+		upl_push(c->classId, inst, mask);
+}
+
+static int is_autonomous(uint16_t cls, uint16_t inst)
+{
+	for (unsigned i = 0; i < aut_count; i++)
+		if (aut[i].classId == cls && aut[i].inst == inst)
+			return 1;
+	return 0;
+}
+
+unsigned mib_upload_build(void)
+{
+	upl_n = 0;
+	for (unsigned i = 0; i < aut_count; i++)
+		upl_entity(find_class(aut[i].classId), aut[i].inst);
+	/* The OLT's entities, and an autonomous one only once: a Set gives it
+	 * a row, which is not a second entity. */
+	for (int i = 0; i < MIB_ROWS; i++)
+		if (mib[i].used && !is_autonomous(mib[i].classId, mib[i].inst))
+			upl_entity(find_class(mib[i].classId), mib[i].inst);
+	upl_total = upl_n + (unsigned)fixed_me_upload(-1, 0, 0);
+	return upl_total;
+}
+
+int mib_upload_record(unsigned seq, uint8_t *body, uint16_t *len)
+{
+	const struct omci_class *c;
+	uint16_t n = 6;
+
+	if (seq >= upl_n) {
+		int idx = (int)(seq - upl_n);
+
+		if (idx < fixed_me_upload(-1, 0, 0)) {
+			fixed_me_upload(idx, body, len);
+			return 0;
+		}
+		return -1;
+	}
+	c = find_class(upl[seq].cls);
+	nl_put16(body + 0, upl[seq].cls);
+	nl_put16(body + 2, upl[seq].inst);
+	nl_put16(body + 4, upl[seq].mask);
+	for (unsigned k = 1; c && k <= 16; k++) {
+		if (!(upl[seq].mask & (1u << (16 - k))))
+			continue;
+		attr_value(c, upl[seq].inst, k, body + n);
+		n = (uint16_t)(n + attr_width(c, k));
+	}
+	*len = n;
+	return 0;
+}
+
+/* What the stock omci_app does when the OLT creates a MAC bridge port config
+ * data (class 47), read in mib_MacBriPortCfgData.so of V1.0-220923
+ * (MacBriPortCfgDataDrvCfg, the add arm): it creates, in this order, a MAC
+ * bridge port filter table data (49), a filter preassign table (79) and a
+ * bridge table data (50), each with the entity id of the new port and all
+ * attributes zero or an empty table. Both stock dumps agree: every class 47
+ * instance of ISP1 and ISP2 has a 49, a 50 and a 79 under its own id. The
+ * stock MIB reset creates none of them, so they are not autonomous, and a
+ * decoded stock upload taken after a reset has none. The stock does it only
+ * when the port's UNI-G is not "non-OMCI only", which omcid never reports.
+ *
+ * G.988 has the ONU create and delete them with the port. The stock delete arm
+ * (MacBriPortCfgDataConnCfg) removes 49 and 50 but never 79, which stays in
+ * its MIB: a leftover this does not copy. */
+void mbpcd_tables_add(uint16_t inst)
+{
+	static const uint16_t cls[3] = { 49, 79, 50 };
+
+	for (int i = 0; i < 3; i++)
+		if (find_class(cls[i]) && !mib_add(cls[i], inst))
+			out_fmt("   no room in the MIB for class %d of port %04x\n",
+				(long)cls[i], (long)inst);
+}
+
+void mbpcd_tables_del(uint16_t inst)
+{
+	mib_del(49, inst);
+	mib_del(79, inst);
+	mib_del(50, inst);
 }
 
 /* `contents` is everything from byte 8 on -- for a get that is the result code,

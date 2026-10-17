@@ -10,7 +10,7 @@
 # symlink with the rootfs merely unpacked on a host escapes the tree and finds
 # the HOST's binaries, which is how dd was first misread as present.
 #
-# `cut` is on V1.0-220923 but absent on the HSGQ M110 stock, so it is left off
+# `cut` is on V1.0-220923 but absent on another stock image, so it is left off
 # this list on purpose: fwu.sh must run on the poorer image (test/fwu_minimal_path_test.sh).
 #
 # Notably ABSENT: head wc dd tail tr sort which basename dirname seq xargs

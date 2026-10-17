@@ -92,6 +92,14 @@ int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
 int igmp_db_tick(struct igmp_db *db, uint32_t now,
 		 struct igmp_change *out, int max);
 
+/* Whether the snooper may hold state for this group at all: a multicast group
+ * that is not link-local and does not alias a link-local MAC. See group.c. */
+int igmp_group_snoopable(uint32_t group);
+
+/* The union of the member ports of every live group sharing this group's L2
+ * MAC (low 23 bits), whatever the VID. What the switch entry must hold. */
+uint32_t igmp_db_mac_ports(const struct igmp_db *db, uint32_t group);
+
 /* How many groups are live. For the status line, and for the tests. */
 int igmp_db_count(const struct igmp_db *db);
 

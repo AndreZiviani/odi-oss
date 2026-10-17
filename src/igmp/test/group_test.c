@@ -224,11 +224,81 @@ int main(void)
 	 * learning looks exactly like one that is working. */
 	igmp_db_init(&db);
 	for (int i = 0; i < IGMP_MAX_GROUPS + 4; i++) {
-		rx = mk(IGMP_V2_REPORT, 1, 10, 0xe5000000 + (uint32_t)i);
+		rx = mk(IGMP_V2_REPORT, 1, 10, 0xe5010000 + (uint32_t)i);
 		igmp_db_rx(&db, &rx, 9000, ch, 8);
 	}
 	ok(igmp_db_count(&db) == IGMP_MAX_GROUPS, "the table fills to its limit");
 	ok(db.dropped == 4, "and counts the four it turned away");
+
+
+	/* v3 record types that carry no membership. ALLOW_NEW_SOURCES with no
+	 * sources adds nothing, BLOCK_OLD_SOURCES only trims a list, and an
+	 * unknown type is not readable: none may create or refresh a port. */
+	igmp_db_init(&db);
+	rx = mk(IGMP_V3_REPORT, 6, 30, 0);
+	rx.body = body;
+	rx.nrec = 1;
+	rx.body_len = mk_v3(body, 5, 0xe3030303, 0);   /* ALLOW_NEW_SOURCES {} */
+	n = igmp_db_rx(&db, &rx, 7100, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 0, "a v3 ALLOW with no sources joins nothing");
+	rx.body_len = mk_v3(body, 6, 0xe3030303, 2);   /* BLOCK_OLD_SOURCES */
+	n = igmp_db_rx(&db, &rx, 7100, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 0, "a v3 BLOCK joins nothing");
+	rx.body_len = mk_v3(body, 9, 0xe3030303, 1);   /* not a record type */
+	n = igmp_db_rx(&db, &rx, 7100, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 0, "an unknown v3 record type joins nothing");
+	rx.body_len = mk_v3(body, 5, 0xe3030303, 1);   /* ALLOW {one source} */
+	n = igmp_db_rx(&db, &rx, 7100, ch, 8);
+	ok(n == 1 && ch[0].ports == IGMP_PORTBIT(6), "a v3 ALLOW naming a source is a join");
+	rx.body_len = mk_v3(body, 6, 0xe3030303, 1);   /* BLOCK on a live group */
+	n = igmp_db_rx(&db, &rx, 7101, ch, 8);
+	ok(n == 0, "a BLOCK neither refreshes nor leaves a live group");
+	n = igmp_db_tick(&db, 7100 + IGMP_MEMBERSHIP_TTL - 1, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 1, "so the ALLOW deadline still stands");
+
+	/* Groups the snooper must not hold state for. */
+	igmp_db_init(&db);
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0x0a000001);       /* not multicast */
+	n = igmp_db_rx(&db, &rx, 7200, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 0, "a report for a unicast address is ignored");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe00000fb);       /* 224.0.0.251, mDNS */
+	n = igmp_db_rx(&db, &rx, 7200, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 0, "a link-local group is never restricted");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xef0000fb);       /* 239.0.0.251: same MAC */
+	n = igmp_db_rx(&db, &rx, 7200, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 0, "a group on a link-local MAC is not restricted either");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe0000100);       /* 224.0.1.0, first outside */
+	n = igmp_db_rx(&db, &rx, 7200, ch, 8);
+	ok(n == 1, "the first group past the link-local MACs is snooped");
+	ok(igmp_group_snoopable(0xeffffffa), "239.255.255.250 (SSDP) is an ordinary group");
+	ok(!igmp_group_snoopable(0xdfffffff) && !igmp_group_snoopable(0xf0000000),
+	   "the edges of 224.0.0.0/4 are exact");
+
+	/* One hardware row per MAC. 225.1.1.1 and 226.1.1.1 share
+	 * 01:00:5e:01:01:01, so the row holds the union and goes only when
+	 * both are gone. The same group on two VLANs is the same row too. */
+	igmp_db_init(&db);
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
+	igmp_db_rx(&db, &rx, 7300, ch, 8);
+	rx = mk(IGMP_V2_REPORT, 3, 10, 0xe2010101);
+	igmp_db_rx(&db, &rx, 7300, ch, 8);
+	ok(igmp_db_mac_ports(&db, 0xe1010101) == (IGMP_PORTBIT(1) | IGMP_PORTBIT(3)),
+	   "aliased groups share one MAC row: the union of their ports");
+	ok(igmp_db_mac_ports(&db, 0xe2010101) == igmp_db_mac_ports(&db, 0xe1010101),
+	   "and either one names it");
+	ok(igmp_db_mac_ports(&db, 0xe1010102) == 0, "another MAC is untouched");
+	rx = mk(IGMP_V2_REPORT, 1, 20, 0xe1010101);
+	igmp_db_rx(&db, &rx, 7310, ch, 8);
+	/* 225.1.1.1 on vlan 10 and 226.1.1.1 lapse together (never refreshed);
+	 * the vlan 20 copy keeps the row alive, which writing the lapsing
+	 * group's own empty mask would not. */
+	n = igmp_db_tick(&db, 7300 + IGMP_MEMBERSHIP_TTL, ch, 8);
+	ok(n >= 1 && ch[0].kind == IGMP_CHANGE_DEL, "the vlan 10 entry of 225.1.1.1 lapses");
+	ok(igmp_db_mac_ports(&db, 0xe1010101) == IGMP_PORTBIT(1),
+	   "the row still carries the vlan 20 member after that DEL");
+	n = igmp_db_tick(&db, 7310 + IGMP_MEMBERSHIP_TTL, ch, 8);
+	ok(n >= 1 && igmp_db_mac_ports(&db, 0xe1010101) == 0,
+	   "and is empty only when the last group on the MAC is gone");
 
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();
