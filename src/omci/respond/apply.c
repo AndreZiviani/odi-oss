@@ -36,6 +36,7 @@ void mib_reset_all(void)
 	}
 	qos_reset();
 	uni_reset();
+	alarm_mib_reset();
 	mib_data_sync = 0;
 	upl_total = 0;
 	/* The bridge connections were built from the MIB just thrown away.
@@ -129,6 +130,11 @@ static void apply_ani_g(const struct omci_class *c, const struct mib_row *r,
 	unsigned k;
 	int rc;
 
+	/* Signal fail and signal degrade thresholds (6 and 7) go to the
+	 * kernel, which raises the alarms against them: driver command 11,
+	 * as the stock AnigDrvCfg sends it on a Set of either. */
+	anig_signal_thresholds((mask & (1u << (16 - 6))) ? (int)row_u32(r, c, 6) : -1,
+			       (mask & (1u << (16 - 7))) ? (int)row_u32(r, c, 7) : -1);
 	if (!apply_hw)
 		return;
 	k = 3;                           /* GEM block length */

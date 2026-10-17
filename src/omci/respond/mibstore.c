@@ -145,6 +145,8 @@ void aut_rebuild(void)
 		n++;
 	}
 	aut_count = n;
+	/* The entities that raise alarms and AVCs are these. */
+	alarm_init();
 }
 
 uint16_t canon_inst(uint16_t cls, uint16_t inst)
@@ -880,8 +882,13 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 	if (c->classId == OMCI_ME_CIRCUIT_PACK) { /* circuit pack */
 		/* The ONU identity and software, not a capture: the serial and
 		 * its vendor id are the configured serial, the version is the
-		 * active software image's. */
+		 * active software image's. The operational state (7) is the
+		 * administrative state (6) the OLT set, as the stock
+		 * circuit_pack_check_cb copies it; the AVC follows (alarm.c). */
 		serial_refresh(0);
+		if (k == 7 && r && (r->written & (1u << (16 - 6))) &&
+		    attr_offset(c, 6) >= 0)
+			out[0] = r->data[attr_offset(c, 6)];
 		if (k == 3) for (int i = 0; i < 8 && i < n; i++) out[i] = serial[i];
 		else if (k == 4) put_str(out, n, report_sw_ver(sw_active_inst()));
 		else if (k == 5) for (int i = 0; i < 4 && i < n; i++) out[i] = serial[i];
@@ -974,6 +981,12 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		 * the port, which is 1000BASE-X full duplex here. */
 		if (k == 2) out[0] = UNI_SENSED_TYPE;
 		else if (k == 7) out[0] = uni_link_state() == 1 ? UNI_CFG_IND_1G_FULL : 0;
+		/* The operational state follows the link too: the stock LAN-LOS
+		 * handler (pptp_eth_uni_alarm_handler) writes 1 (disabled) when
+		 * the link goes and 0 when it comes back, and the AVC of it
+		 * follows (alarm.c). An unreadable link keeps the default. */
+		else if (k == 6 && uni_link_state() >= 0)
+			out[0] = uni_link_state() == 1 ? 0 : OPER_DISABLED;
 	} else if (c->classId == OMCI_ME_SOFTWARE_IMAGE) { /* software image */
 		if (k == 1) put_str(out, n, report_sw_ver(inst));
 		/* is committed, is active, is valid: image 0 all three and
