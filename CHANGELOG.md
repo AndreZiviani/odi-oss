@@ -15,6 +15,271 @@ listed here.
   lines are the data for deciding whether that can be made strict; the ISP1
   and ISP2 sessions on file name no such instance (`events-test.sh`).
 
+- No OLT or ONT make is named in the tree any more: names are generic and
+  describe the function. The kernel's PLOAM type 0x81 constant is
+  `ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS` (a vendor-specific variant of
+  Disable_Serial_Number, handled as before). In the generated OMCI model the
+  six entities whose stock plugins carry a make in their names are now
+  `PrivateQueueMap` (243), `Me350`, `Me370`, `Me373`, `PrivateMcastTag`
+  (65282) and `PrivateSntp` (65294); the generator applies the renaming by
+  class id (`src/omci/tools/mibnames.py`) and the tables are otherwise
+  byte-for-byte what they were (names only: `omcicli get tables` and the
+  autonomous list show the new names). The stock names are written only to a
+  local sidecar (`mib-tables.py --stock-names`) that `mib-instances.py` and
+  `mib-defaults.py` read to match a stock dump. Comments, docs and test notes
+  that named a make say "an OLT" or "another stock image". Refs #114
+
+- Kernel: unknown multicast (with IGMP snooping off, every IPTV channel) is
+  no longer copied to the stick's own CPU. It was flooded to the CPU port as
+  well as to the host, a stream's worth of frames a second that the CPU
+  drops, against the guards that reset a stick whose CPU stops taking
+  frames. The CPU needs none of it; broadcast still reaches it.
+
+- Kernel and diag: signal fail and signal degrade (G.984.3 11.1.2) are
+  detected. The downstream bit error rate is measured from the BIP errors
+  over every 10 s of operation and compared with the thresholds the OLT
+  sets in the ANI-G (driver command 11, which was refused; defaults 10^-5
+  and 10^-9), with the standard's hysteresis. `/proc/odi_gpon/status` shows
+  them (`signal sf|sd`), and `diag gpon get alarm-status` prints them as
+  `Alarm SF` / `Alarm SD`, which the exporter turns into
+  `gpon_alarm{alarm="sf"}` / `"sd"`. omcid does not yet report them to the
+  OLT as ANI-G alarms.
+
+- Kernel: an OLT that disables the ONU (Disable_Serial_Number, the rogue-ONU
+  "emergency stop", state O7) now gets the laser switched off, as G.984.3
+  requires and the stock firmware does: the module's TX-disable line is
+  driven high in O7 and low again when the OLT re-enables the ONU (or
+  gpondeact, gponact or a reboot leaves O7). The state changed but nothing
+  stopped the transmitter, although the docs said it did. A laser the
+  `laser` verb refused is never switched on by this. `/proc/odi_gpon/status`
+  shows it as `laser_emergency_stop`.
+
+- Kernel: removing one bridge port from unknown-unicast flooding (a bridge
+  port deleted by the OLT, or ME 45 "discard unknown") no longer stops the
+  flooding of every port. The driver wrote all ports on or all ports off,
+  whatever port the command named; it now adds or removes that port only,
+  in the mask the command names (unknown unicast, broadcast or unknown
+  multicast), as the stock firmware does. The provisioning of every OLT
+  seen so far gives the same mask as before.
+
+- Kernel: an OLT that locks the Ethernet UNI (ME 11 administrative state,
+  for example to suspend a service) now stops it, as the stock firmware
+  does: the host port's link is forced down until the OLT unlocks it. The
+  lock used to be acknowledged and ignored. On this SFP the UNI is the host
+  port, so while locked the stick cannot be reached from the host either;
+  OMCI still reaches it over the fibre, and a lock of the PON or CPU port
+  is refused.
+  A lock no longer outlives the MIB it came from: omcid unlocks every
+  Ethernet UNI on a MIB reset and when it starts with an empty MIB (not on
+  a resume), so a stale lock cannot leave the stick unreachable until a
+  reboot. New odi.conf key `OMCI_UNI_LOCK=0` ignores OLT locks of the UNI
+  altogether (docs/SETTINGS.md); the default honours them.
+
+- Kernel: an OLT that encrypts the OMCI channel is served. The
+  Encrypted_Port-ID message for the OMCI port used to be applied without its
+  encryption bit, so every downstream OMCI frame would have stayed
+  unreadable and the stick would never have been provisioned; the port's
+  row now decrypts, as on the stock firmware. And a data port the OLT
+  encrypts keeps decrypting while omcid rewrites its flow (every QoS or
+  bridge change): the flow was written without the AES bit and the bit set
+  again right after, a window in which encrypted frames were lost.
+
+- nv: `setenv` and `commit` take a lock (flock(2) on the environment partition
+  device, 10 s bounded, held until the process exits), so two writers (an ssh
+  session and the web UI, say) no longer erase and write the same copy at
+  once; unserialised, that left a half-written copy or lost an update, such
+  as a `sw_commit` the UI had reported as committed. A plain `setenv` also
+  reads its copy back after the write and exits non-zero when it does not
+  match, as `commit` always did. If flock itself is unavailable the write goes
+  ahead without the lock, as before, and says so. The syscall number and the
+  EAGAIN refusal are run for real under qemu-user (`src/nv/test/flock_probe.c`,
+  part of `make -C src/nv test`). On a stick, two writers running in parallel
+  ended with no failed write and both environment copies consistent. Found in
+  an audit of the update path.
+
+- fwu.sh: an interrupted flash can no longer leave a valid new kernel over a
+  missing or old rootfs. It used to erase and write the kernel, then the
+  rootfs; a power cut or a failed write in between left a kernel U-Boot
+  accepts, and the web UI offered to trial the slot. It now erases the kernel
+  and rootfs partitions first, writes the rootfs, and writes the kernel last,
+  so any interruption leaves a kernel U-Boot refuses (bad magic or data CRC).
+  The guard comment about the watchdog on a committed boot is corrected too:
+  odi_wdt arms the watchdog itself once it initialises. New host test
+  `test/fwu_write_order_test.sh`. Found in an audit of the update path; a
+  trial flash with this order ran on a stick.
+
+- OMCI: the LOID password omcid reports (ONU-G, CTC LOID entity) follows the
+  LOID, as the stock `runomci.sh` does: with the same `LOID` and `LOID_OLD`
+  the current `LOID_PASSWD` is reported, so a changed password takes effect
+  (it used to report `LOID_PASSWD_OLD` whenever the two passwords differed);
+  with different LOIDs the old password stays. A MAC bridge ageing time above
+  209715 s is clamped to the 21-bit register field instead of being masked
+  into a short one. `omcli ident` shows the password length, never the
+  password.
+
+- OMCI: values the ONU reports on its own now match what the stock MIB
+  reset puts there. ONU-G reports the configured LOID and LOID password
+  (attributes 10 and 11), as the CTC LOID entity already did: an OLT that
+  authenticates by the ONU-G LOID read an empty one. The TR-069 server's ACS
+  address and associated tag read 0xffff (unset) until the OLT writes them,
+  not 0x0000, which points at network address 0. The CTC LOID entity's
+  operation id reads "CTC ". A MAC bridge ageing time set by the OLT is
+  now sent to the switch in tenths of a second like the default: an
+  ageing time of N seconds used to age entries out after N/10.
+  `OMCI_VEIP_SLOT_ID=255`, the factory value, is read as unset, as the stock
+  firmware reads it, instead of being logged as an unusable slot at every
+  start and reload. A MIB reset now tears down the bridge connections
+  built from the MIB it discards (one quiet second later, as any rebuild):
+  they used to stay in the switch until the OLT provisioned again, and an
+  OLT that provisioned fewer services left the others forwarding. Refs #103.
+
+- OMCI: the MIB upload is built as the stock firmware builds it. An entity
+  whose attributes do not fit in one upload record (26 bytes) now continues
+  in as many records as it needs; omcid used to send only the first record
+  and drop the rest, so an OLT reading the upload never saw ONU2-G's queue,
+  scheduler and GEM port counts, connectivity and QoS flexibility, ONU-G's
+  traffic management option and state, the circuit packs' queue and T-CONT
+  counts, or the priority queues' drop settings. The upload also leaves out
+  what the stock firmware never uploads: private and not-uploaded classes
+  (158, 255, 287, 65527, 65530, 65534, 65535), attributes that are not
+  supported, private, PM or tables, and the 64 reserved priority queues
+  0xff00-0xff3f; and the MAC bridge port tables (49, 50, 79) of one OLT's
+  bridge ports are no longer listed as entities the ONU creates for itself.
+  They are created the way the stock firmware creates them, when the OLT
+  creates a MAC bridge port config data (class 47): one of each at the
+  port's own entity id, empty or all zero, and an upload after provisioning
+  lists them. They are removed with the port (the stock firmware leaves the
+  preassign table behind). omcid keeps 256 MIB rows instead of 192, so the
+  three extra rows per port do not crowd out the OLT's own entities.
+  An entity the OLT has set is listed once. With the factory configuration
+  the upload is 205 entities in 399 records, the same as a decoded upload of
+  the stock image. Refs #103.
+
+- OMCI: the managed entity model had wrong class ids for nine entities, all
+  of them above 32767: the generator (`src/omci/tools/mib-tables.py`) did not
+  follow how the compiler loads such a constant, so it recorded an unrelated
+  number instead. omcid now answers and reports them under their real ids:
+  65529 (CTC ONU capability, was 9368), 65294 (SNTP, was 13248), 65534 and
+  65535 (private T-CONT queue and VLAN configuration, were 9572 and 10212),
+  65527 (OLT location, was 9796), 65528 (CTC loop detection), 65408
+  (extended ONU-G), 65531 (CTC extended multicast profile, an OLT can now
+  create it) and 65282. The MIB upload no longer lists ids no OLT knows.
+  The ONU capability entity (65529) is created only when bit 64 of
+  `OMCI_CUSTOM_ME` is set, as the stock firmware does; the factory value of
+  that key does not set it. The private VLAN configuration (65535) reports
+  what the stock firmware is started with: any `VLAN_CFG_TYPE` other than 1
+  reads as type 0, and without a manual tag the VID and priority read as
+  65535 and 255. The model also had no width for attributes 3 to 15 of ONU
+  power shedding (133) and parts 2 to 15 of the large string (157) and
+  octet string (307) entities, so an OLT Set of them was dropped and a Get
+  of them answered nothing; they now have the stock widths. An
+  `OMCI_FIXED_ME` entry for one of the corrected classes no longer applies:
+  omcid answers those classes itself. Refs #103.
+
+- Tests: the global PBO thresholds for six and more upstream flows are
+  checked against the stock formula, read this time from the stock kernel of
+  the image itself (the function at 0x80131f50 of its vmlinux), not only from
+  the vendor SDK: six flows give 7154/6994, forty-one reach the 2000/1840
+  floor, and the per-flow step is read from the register. This confirms what
+  #116 writes; the fifth pair the driver kept before #116 for six flows was
+  our own earlier value, not a stock one. No change to the image. Refs #116,
+  #42.
+
+- omcid, kernel: an OLT Set no longer interrupts all upstream traffic, and a
+  MIB reset or an omcid restart leaves no upstream state behind. Since #116 a
+  rebuild of the upstream QoS really deleted and re-created every queue and
+  flow (the queues are drained), and it ran after any Set of a referenced
+  queue, T-CONT, GEM port or traffic descriptor, and after any traffic
+  scheduler Set at all. Now the rebuild compares the MIB with what it
+  programmed and changes only that: a T-CONT whose Alloc-ID and queues are
+  the same keeps them, a queue whose weight, type or rates moved is sent
+  again in place, and a flow is sent only when its GEM port, T-CONT or queue
+  changed; a T-CONT that changed is rebuilt alone. Only a change of the PLOAM
+  Alloc-ID list still rebuilds everything. A traffic scheduler Set counts
+  only when a queue in use names it and the Set carries its policy. Driver
+  command 0 (the stock resetMib) now empties every upstream flow, queue and
+  T-CONT block; omcid sends it on every MIB reset and when it restarts
+  without resuming, which it did not before: a new provisioning could be
+  refused queues the old one still held, and old flows stayed valid. The
+  resume snapshot keeps what was programmed (format 2: an older snapshot is
+  not resumed). Refs #116, #115.
+
+- gpon, omcid (safety): only the OLT, by PLOAM, can put an Alloc-ID in the
+  Alloc-ID CAM, the table that decides which upstream grants the stick
+  answers. Since #116, driver command 21 wrote any Alloc-ID it was given into
+  the CAM, and omcid sends it after every change of the PLOAM list: after a
+  loss of signal, a Deactivate_ONU-ID, an Emergency Stop or a deallocation,
+  the Alloc-IDs the OLT had set over OMCI came back within about 2 s, the
+  deallocated one included, and the stick could answer grants of another
+  subscriber's ONU. Command 21 now only looks the Alloc-ID up and refuses
+  one the OLT has not assigned in this activation; omcid leaves that T-CONT
+  unbound and binds it when the Assign_Alloc-ID arrives (any change of the
+  list now rebuilds, not only one under a bound T-CONT). Two more ways in are
+  closed: a directed PLOAM is acted on only while the stick holds an ONU-ID
+  (O4 to O6), since the "no ONU-ID" value matched messages for ONU 0, another
+  ONU; and only Assign_Alloc-ID type 1 assigns (type 2 is not acknowledged,
+  the other reserved types are ignored), as G.984.3 9.2.3.10 says. Our own
+  Assign_ONU-ID also starts from an empty CAM. Nothing changes on a line
+  whose OLT assigns its Alloc-IDs by PLOAM before using them, which all three
+  OLTs we have seen do. `/proc/odi_gpon/cam` (new) reads the CAM back from
+  the hardware, next to what the driver recorded, to check this on a stick.
+  Refs #116.
+
+- CI: `release.yml` runs `make test` before it builds and publishes (the
+  release job `needs` it). A tag used to publish an image whether or not the
+  tests passed, or had even finished: ci.yml starts on the same tag as a
+  separate workflow that release.yml did not wait for. No change to the image.
+
+- igmpd: the group table no longer takes what a snooper must not hold. A
+  report for an address outside 224.0.0.0/4, for a link-local group
+  (224.0.0.x) or for any group whose 23-bit MAC is a link-local one
+  (239.0.0.251 shares 01:00:5e:00:00:fb with mDNS) is ignored, because a
+  static entry for it would restrict that traffic to the ports that asked
+  (RFC 4541 2.1.2). A v3 record of type ALLOW_NEW_SOURCES with no sources,
+  BLOCK_OLD_SOURCES or an unknown type no longer counts as a join. And the
+  switch row is written per MAC, not per group: two groups that share a MAC
+  (224.1.1.1 and 225.1.1.1), or one group on two VLANs, are one row that holds
+  the union of their ports, so the last member of one no longer deletes the
+  row the other still needs. Not reachable on a running stick today (igmpd is
+  not started and receives no frame); it is the daemon's own unit tests that
+  cover it. Refs the multicast audit, AUDIT-night-multicast.md.
+
+- Tests: the `make test-rcs` goldens (`test/fixtures/rcs-trace-*.txt`) are
+  regenerated: they predated the `safe-mode.sh count` and `boot-ok` and the
+  `host-autoneg.sh boot` steps of rcS (#67, #76, #98) and so failed. The trace
+  canonicaliser writes `name.new.<pid>` temporaries as `.new.PID`, which would
+  otherwise have changed the golden on every run. `make test-rcs` now also
+  runs in the CI `test-qemu` job, which has the busybox it needs. No change
+  to the image.
+
+- Tests: the fixed sleeps that waited for an event in `test/host_autoneg_test.sh`
+  (the 0.3 s before reading what the stub `setsid` recorded),
+  `test/apply_test.sh` (2 s for the delayed network apply) and
+  `test/omci_respawn_test.sh` (eight 1 s sleeps around the stub omcid and the
+  FIFO reader) are bounded polls for the event itself, as `safe_mode_test.sh`
+  has been since #105, so a loaded host (the parallel `make test` legs) no
+  longer fails them. Checks that expect nothing to happen keep a short fixed
+  wait, since there is nothing to poll for. No change to the image.
+
+- Tests: the OMCI suites no longer pass negative checks against a dead
+  daemon. `src/omci/testlib.sh`: a `wait_for` that times out (which `inject_wait`,
+  `settled`, `sync_send` and `omcid_up` all go through) now fails the suite
+  itself and says so, `inject_wait` fails at once when `omcli --inject` cannot
+  send the frame, and the suites end with `suite_exit` (0 or 1) instead of
+  `exit "$fail"`, which reported success at 256 failures. The 49 call sites
+  that ignored these results needed no change and check what they checked.
+  `src/omci/testlib-test.sh` (in `make test-host`) tests the helpers' failure
+  paths. No change to omcid or the image.
+
+- Tests: two suites that no `make test` leg and no CI job ran are wired in.
+  `make test-omci-respond` runs omcid's class 171 decode and OLT-tag rule
+  test (`src/omci/test/extvlan_test.c`), `make test-igmp` runs igmpd's frame,
+  group and entry tests (`src/igmp/test`); both are legs of `make test` and
+  jobs of ci.yml (`mips-units`, which the `full` job now needs).
+  `test/fwu_stock_flash_test.sh` exits 77 instead of 0 when it skips, so a
+  skipped first-flash check no longer reads as a pass. No change to the
+  image.
+
 - Tests: `make test-qemu` generates its throwaway ssh key pair (`ssh-keygen`,
   ed25519) on every run, in `build/qemu-initramfs/qemu-test-key/`, instead of
   using a private key committed as `test/qemu/id_test`; the committed pair is

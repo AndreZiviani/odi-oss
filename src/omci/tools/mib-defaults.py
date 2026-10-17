@@ -2,7 +2,7 @@
 """Default attribute values for the entities the ONU itself creates, from a
 live `omcicli mib get all` of the vendor stack on the same device.
 
-    mib-defaults.py <dump> [--c DIR]
+    mib-defaults.py <dump> [--c DIR] [--stock-names FILE]
 
 Until this existed omcid answered ZEROS for every attribute of its 301
 autonomous instances that the OLT had not written -- so an ONT2-G with 0
@@ -18,7 +18,7 @@ classes 2 (OntData), 148, 157, 340, 134 (OLT-written credentials), 65530
 ONT-G attributes 1-3 and 14 (the live identity and PON state, mibstore
 answers them), the circuit pack serial number, version and vendor id (6/3-5,
 the configured serial and the active image), the private VLAN config's manual
-VID (10212/3, one ISP's VLAN), the T-CONT Alloc-IDs (262/1: what one OLT
+VID (65535/3, one ISP's VLAN), the T-CONT Alloc-IDs (262/1: what one OLT
 assigned that line by PLOAM, which omcid binds from the kernel at run time,
 respond/apply_qos.c), and every attribute omcid answers from live state
 (ONU2-G uptime, ANI-G optical levels, UNI link) or always overrides
@@ -27,6 +27,8 @@ provisioning, only capability values. The dump itself is private."""
 import json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import mibnames
 GEN = os.path.join(HERE, '..', 'generated')
 # 7: software image, every attribute is answered from the image flags.
 SKIP_CLASSES = {2, 7, 131, 148, 157, 340, 134, 65530}
@@ -38,7 +40,7 @@ SKIP_ATTRS = {
     (257, 10),                      # ONU2-G SysUpTime, live
     (263, 10), (263, 14),           # ANI-G optical levels, live from the DDM
     (11, 2), (11, 7),               # PPTP Ethernet UNI sensed type, duplex: link state
-    (10212, 3),                     # one ISP's VLAN
+    (65535, 3),                     # one ISP's VLAN
     (262, 1),                       # T-CONT Alloc-ID, bound at run time
     (277, 1), (277, 2), (277, 3), (277, 6), (277, 8),   # always overridden
     (277, 13),                      # reserved queues hold ASCII noise, see below
@@ -128,6 +130,9 @@ def main():
     model = json.load(open(os.path.join(GEN, 'omci_mib.json')))
     byname = {e['table']['name'].lower(): e for e in model if e['table']['classId'] is not None}
     auto = autonomous(); tables = parse(sys.argv[1])
+    # Dump labels use the stock plugin names; see mibnames.py.
+    aliases = mibnames.load_aliases(sys.argv)
+    tables = {mibnames.canonical(k, aliases): v for k, v in tables.items()}
     out = []; skipped_tables = []
     for tname, insts in tables.items():
         e = byname.get(tname.lower())

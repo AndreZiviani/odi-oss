@@ -132,17 +132,74 @@ static void test_provisioning_keeps_it(void)
 	      "after a second provisioning: PORT_FORCE_SELECT(0) = 0x40");
 }
 
-/* cmd 32 on a port other than the host port keeps the stock 0. */
+struct cmd32_arg {
+	uint32_t port;
+	uint32_t state;
+};
+
+static int cmd32(uint32_t port, uint32_t state)
+{
+	struct cmd32_arg a = { port, state };
+
+	return odi_switch_cmd(OMCI_PORT_STATE_CMD, &a, sizeof a);
+}
+
+/* cmd 32 unlock on a port other than the host port keeps the stock 0. */
 static void test_cmd32_other_ports(void)
 {
 	seed_live_stick();
 	odi_sw_host_pause = false;
-	odi_sw_port_force_set(1);
+	odi_switch_init_platform();
+	CHECK(cmd32(1, 1) == 0, "cmd 32 unlock of port 1 accepted");
 	CHECK(reg(ODI_SW_PORT_FORCE_SELECT(1)) == 0,
-	      "cmd 32 leaf on port 1: PORT_FORCE_SELECT(1) = 0");
-	odi_sw_port_force_set(0);
+	      "cmd 32 unlock on port 1: PORT_FORCE_SELECT(1) = 0");
+	CHECK(cmd32(0, 1) == 0, "cmd 32 unlock of port 0 accepted");
 	CHECK(reg(ODI_SW_PORT_FORCE_SELECT(0)) == TX_PAUSE_BIT,
-	      "cmd 32 leaf on port 0: PORT_FORCE_SELECT(0) = 0x40");
+	      "cmd 32 unlock on port 0: PORT_FORCE_SELECT(0) = 0x40");
+}
+
+/* ME 11 admin lock and unlock (stock: the SDK admin enable): the lock
+ * forces LINK down, the value before the select; the unlock clears only
+ * the select bit; the TX_PAUSE force survives both.
+ */
+static void test_cmd32_lock(void)
+{
+	unsigned int i, val_at = 0, sel_at = 0;
+
+	seed_live_stick();
+	odi_sw_host_pause = false;
+	odi_switch_init_platform();
+	odi_mock.log_n = 0;
+	CHECK(cmd32(0, 0) == 0, "lock accepted");
+	CHECK((reg(ODI_SW_PORT_FORCE_ABILITY(0)) & 0x10U) == 0, "lock: forced LINK value 0");
+	CHECK(reg(ODI_SW_PORT_FORCE_SELECT(0)) == (TX_PAUSE_BIT | 0x10U),
+	      "lock: LINK forced (0x50), TX_PAUSE still forced");
+	for (i = 0; i < odi_mock.log_n; i++) {
+		if (odi_mock.log[i].kind != 'W')
+			continue;
+		if (odi_mock.log[i].addr == ODI_SW_PORT_FORCE_ABILITY(0) && !val_at)
+			val_at = i + 1;
+		if (odi_mock.log[i].addr == ODI_SW_PORT_FORCE_SELECT(0) && !sel_at)
+			sel_at = i + 1;
+	}
+	CHECK(val_at && sel_at && val_at < sel_at, "lock: value written before the select");
+	CHECK(reg(ODI_SW_PORT_FORCE_ABILITY(0)) == (0x7fU & ~TX_PAUSE_BIT & ~0x10U),
+	      "lock: the other forced values kept");
+
+	CHECK(cmd32(0, 1) == 0, "unlock accepted");
+	CHECK(reg(ODI_SW_PORT_FORCE_SELECT(0)) == TX_PAUSE_BIT, "unlock: back to 0x40");
+	check_other_ports_untouched("lock and unlock");
+
+	/* The PON and CPU ports carry OMCI: never forced down. */
+	odi_mock.log_n = 0;
+	CHECK(cmd32(2, 0) != 0, "a lock of the PON port is refused");
+	CHECK(cmd32(3, 0) != 0, "a lock of the CPU port is refused");
+	CHECK(cmd32(4, 0) != 0, "a port past the switch is refused");
+	for (i = 0, val_at = 0; i < odi_mock.log_n; i++)
+		if (odi_mock.log[i].kind == 'W')
+			val_at++;
+	CHECK(val_at == 0, "and nothing is written for them");
+	check_other_ports_untouched("refused locks");
 }
 
 /* odi_switch.host_pause=1: the stock behaviour, PAUSE left to the
@@ -209,6 +266,7 @@ int main(void)
 	test_platform_default();
 	test_provisioning_keeps_it();
 	test_cmd32_other_ports();
+	test_cmd32_lock();
 	test_policy_on();
 	test_toggle();
 	test_select_rmw();

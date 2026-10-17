@@ -45,8 +45,11 @@ $(BUILD)/env.o: env.c env.h | $(BUILD)
 $(BUILD)/commit.o: commit.c commit.h env.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c env.h commit.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/main.o: main.c env.h commit.h lock.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/flock_probe: test/flock_probe.c lock.h $(BUILD)/start.o $(BUILD)/io.o | $(BUILD)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(BUILD)/start.o $(BUILD)/io.o $<
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -73,12 +76,17 @@ size: nv
 # `nv commit` against a fake pair of partitions that can fail a write or a
 # read-back at any step (test/test_commit.c). The partition I/O itself
 # (MEMERASE, write(2) on /dev/mtdN) is not covered -- see the header of main.c.
+# The one syscall the writer lock adds, flock(2), is run for real under
+# qemu-user (test/flock_probe.c): two descriptions of one file conflict, and the
+# second gets EAGAIN, which is what nv waits on.
 test:
 	@mkdir -p $(BUILD)
 	@cc -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_env test/test_env.c env.c && \
 	 $(BUILD)/test_env
 	@cc -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_commit test/test_commit.c commit.c env.c && \
 	 $(BUILD)/test_commit
+	@$(RUN) make IN_CONTAINER=1 $(BUILD)/flock_probe >/dev/null
+	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/flock_probe'
 
 clean:
 	rm -rf $(BUILD)

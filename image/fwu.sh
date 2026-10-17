@@ -51,6 +51,7 @@ set -u
 # stick these are always the real files. See test/fwu_guard_test.sh.
 PROC_MTD=${PROC_MTD:-/proc/mtd}
 PROC_CMDLINE=${PROC_CMDLINE:-/proc/cmdline}
+DEV_DIR=${DEV_DIR:-/dev}
 
 slot=${1:-}
 tarball=${2:-}
@@ -91,7 +92,7 @@ have_cmd() {
 # The tools this script cannot do without, checked BEFORE anything else. A
 # missing applet does not fail loudly -- the pipeline goes empty -- so name it
 # here, while nothing has been touched. The list is deliberately short: the
-# stock images differ (the HSGQ M110 has no `cut`, which this script used to
+# stock images differ (another stock image has no `cut`, which this script used to
 # call), so everything else is done with the shell itself (parameter expansion,
 # `read`, `case`). tar, sed, cksum, md5sum and cmp are what is left, and there
 # is no shell-only way to unpack a tar or hash a stream.
@@ -162,8 +163,10 @@ fi
 # reason to check is isp2: its two env copies disagree -- env2 is the active
 # one and says sw_commit=1, env is stale and says 0 -- so a fallback to the
 # stale copy sends boot_by_commit to slot 0, the slot being flashed here, and
-# that path never runs en_wdt, so a hung image hangs forever instead of being
-# reset.
+# that path never runs en_wdt. On this project's kernel the odi_wdt driver arms
+# the watchdog itself once it initialises, so an image that boots far enough
+# is still reset when it does not confirm; one that hangs BEFORE that point,
+# or the stock slot, hangs forever instead of being reset.
 commit=$(nv getenv sw_commit 2>/dev/null | sed -n "s/^sw_commit=//p")
 case "$commit" in
 0|1)
@@ -233,7 +236,7 @@ part_size() {
 fits() {
 	# cksum prints "<crc> <bytes>". Split it with parameter expansion: `cut`
 	# is on the V1.0-220923 stock image but NOT on every vendor stock (the
-	# HSGQ M110 has none), and a missing applet here made the size empty.
+	# other has none), and a missing applet here made the size empty.
 	ck=$(tar -xf "$tarball" "$1" -O | cksum)
 	have=${ck#* }
 	have=${have%% *}
@@ -275,13 +278,28 @@ check uImage || exit 1
 check rootfs || exit 1
 
 # From here a failure leaves a partition unbootable, so say which.
-write() {
-	dev=/dev/$2
+#
+# THE ORDER IS THE SAFETY. U-Boot's bootm checks the uImage magic, header CRC
+# and data CRC before it boots anything ("Bad Magic Number", "Bad Header
+# Checksum", "Bad Data CRC" are in its binary), so a kernel that is erased or
+# short is refused by the bootloader itself. This uses that as the marker for
+# "the write finished": the kernel is invalidated FIRST (both partitions are
+# erased before anything is written), the rootfs is written, and the kernel is
+# written LAST. A power cut or a failed write anywhere in between leaves the
+# kernel erased or incomplete, which U-Boot refuses, and never the state the
+# old order (kernel, then rootfs) could leave: a valid new kernel over an
+# erased or half-written rootfs, or over the previous image's rootfs.
+erase() {
+	dev=$DEV_DIR/$2
 	echo "fwu: erasing $dev"
 	flash_eraseall "$dev" || {
 		echo "fwu: ERASE FAILED on $dev -- slot $slot is now UNBOOTABLE" >&2
 		exit 1
 	}
+}
+
+write() {
+	dev=$DEV_DIR/$2
 	echo "fwu: writing $1 to $dev"
 	tar -xf "$tarball" "$1" -O > "$dev" || {
 		echo "fwu: WRITE FAILED on $dev -- slot $slot is now UNBOOTABLE" >&2
@@ -319,8 +337,10 @@ write() {
 	echo "fwu: $1 verified on $dev"
 }
 
-write uImage "$k_mtd"
+erase uImage "$k_mtd"
+erase rootfs "$r_mtd"
 write rootfs "$r_mtd"
+write uImage "$k_mtd"
 
 # Record the version, if this image carries a tool that can. Failing here does
 # not undo a successful flash, so it is a warning.

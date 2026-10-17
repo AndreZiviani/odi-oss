@@ -72,6 +72,10 @@ cat > /var/config/lastgood.xml <<XML
 		<Value Name="VLAN_MANU_MODE" Value="1"/>
 		<Value Name="VLAN_MANU_TAG_VID" Value="25"/>
 		<Value Name="VLAN_MANU_TAG_PRI" Value="3"/>
+		<Value Name="LOID" Value="ODITESTLOID"/>
+		<Value Name="LOID_OLD" Value="ODITESTLOID"/>
+		<Value Name="LOID_PASSWD" Value="ODIPW"/>
+		<Value Name="LOID_PASSWD_OLD" Value="ODIPW"/>
 	</Dir>
 </Config>
 XML
@@ -144,6 +148,32 @@ for tc in 32768 32769 32775 32776 32783; do
 	check "T-CONT $tc: Policy is 1 (reported by the ONU)" "$(attr 262 $tc 3)" "01"
 done
 check "TR-069 server: locked until the OLT unlocks it" "$(attr 340 1537 1)" "01"
+check "TR-069 server: no ACS address yet (0xffff, the stock default row)" "$(attr 340 1537 2)" "ffff"
+check "TR-069 server: no associated tag yet (0xffff)" "$(attr 340 1537 3)" "ffff"
+# The LOID as the stock MIB reset fills it, in ONU-G and in the CTC entity.
+check "ONU-G logical ONU ID is the configured LOID" "$(attr 256 0 10 | cut -c1-24)" \
+      "4f4449544553544c4f494400"
+check "ONU-G logical password is the configured one" "$(attr 256 0 11)" \
+      "4f4449505700000000000000"
+check "CTC LOID authentication: OperationId is \"CTC \"" "$(attr 65530 0 1)" "43544320"
+check "CTC LOID authentication: the same LOID" "$(attr 65530 0 2 | cut -c1-24)" \
+      "4f4449544553544c4f494400"
+# An OLT-set MAC ageing time is seconds; cmd 62 takes tenths (100 s -> 1000).
+$Q cli/build/omcli --inject "0c03480a002d00010040$(printf '00000064%052d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+wait_count /tmp/live-a.log "ageing time 1000" 1 10
+check "MAC bridge ageing time 100 s is sent as 1000 tenths" \
+      "$(grep -c 'ageing time 1000' /tmp/live-a.log)" "1"
+# The register field holds 21 bits of tenths: 209715 s still fits (2097150),
+# one second more, and anything larger, is clamped to 2097151 instead of
+# being masked into a short ageing time.
+$Q cli/build/omcli --inject "0c04480a002d00010040$(printf '00033333%052d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+wait_count /tmp/live-a.log "ageing time 2097150" 1 10
+check "MAC bridge ageing time 209715 s still fits the register" \
+      "$(grep -c 'ageing time 2097150' /tmp/live-a.log)" "1"
+$Q cli/build/omcli --inject "0c05480a002d00010040$(printf '000493e0%052d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+wait_count /tmp/live-a.log "ageing time 2097151" 1 10
+check "MAC bridge ageing time 300000 s is clamped to the 21-bit field" \
+      "$(grep -c 'ageing time 2097151' /tmp/live-a.log)" "1"
 check "VEIP: locked until the OLT unlocks it" "$(attr 329 1537 1)" "01"
 check "VEIP: and disabled while locked" "$(attr 329 1537 2)" "01"
 # Set VEIP 0x0601 AdminState to 0 (unlocked), as an OLT does.
@@ -154,11 +184,37 @@ check "VEIP: and enabled" "$(attr 329 1537 2)" "00"
 check "TR-069 server: the VEIP write did not touch it" "$(attr 340 1537 1)" "01"
 
 # The private VLAN configuration is the stored manual VLAN.
-check "private VLAN config: type from VLAN_CFG_TYPE" "$(attr 10212 0 1)" "01"
-check "private VLAN config: mode from VLAN_MANU_MODE" "$(attr 10212 0 2)" "01"
-check "private VLAN config: VID from VLAN_MANU_TAG_VID" "$(attr 10212 0 3)" "0019"
-check "private VLAN config: priority from VLAN_MANU_TAG_PRI" "$(attr 10212 0 4)" "03"
+check "private VLAN config: type from VLAN_CFG_TYPE" "$(attr 65535 0 1)" "01"
+check "private VLAN config: mode from VLAN_MANU_MODE" "$(attr 65535 0 2)" "01"
+check "private VLAN config: VID from VLAN_MANU_TAG_VID" "$(attr 65535 0 3)" "0019"
+check "private VLAN config: priority from VLAN_MANU_TAG_PRI" "$(attr 65535 0 4)" "03"
+
+# The CTC ONU capability entity (65529) exists only with OMCI_CUSTOM_ME bit
+# 0x40, which this store does not set.
+check "no OMCI_CUSTOM_ME: no ONU capability entity (65529)" \
+      "$($Q cli/build/omcli mib 65529 2>&1 | grep -c '^65529 ')" "0"
+
+# ONU power shedding attribute 3 is a 2-byte interval: the plugin copies the
+# descriptor of attribute 2 onto it, which the model used to miss (width 0,
+# so a Set of it was dropped).
+$Q cli/build/omcli --inject "0c02480a008500002000$(printf '1234%056d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+sleep 1
+check "power shedding: a Set of the voice interval is kept" "$(attr 133 0 3)" "1234"
 stop
+
+# Any VLAN_CFG_TYPE but 1 reaches the stock omci_app as type 0 with the unset
+# sentinels (/etc/runomci.sh); bit 0x40 of OMCI_CUSTOM_ME creates 65529.
+sed -i 's/"VLAN_CFG_TYPE" Value="1"/"VLAN_CFG_TYPE" Value="2"/; s#</Dir>#\t<Value Name="OMCI_CUSTOM_ME" Value="64"/>\n\t</Dir>#' \
+	/var/config/lastgood.xml
+start respond/build/omcid /tmp/live-v.log -g /tmp/live-gpon -l /tmp/live-link
+check "VLAN_CFG_TYPE 2: reported as type 0" "$(attr 65535 0 1)" "00"
+check "VLAN_CFG_TYPE 2: the mode is passed through" "$(attr 65535 0 2)" "01"
+check "VLAN_CFG_TYPE 2: VID unset (65535)" "$(attr 65535 0 3)" "ffff"
+check "VLAN_CFG_TYPE 2: priority unset (255)" "$(attr 65535 0 4)" "ff"
+check "OMCI_CUSTOM_ME 64: the ONU capability entity exists" \
+      "$($Q cli/build/omcli mib 65529 2>&1 | grep -c '^65529 ')" "1"
+stop
+sed -i 's/"VLAN_CFG_TYPE" Value="2"/"VLAN_CFG_TYPE" Value="1"/; /OMCI_CUSTOM_ME/d' /var/config/lastgood.xml
 
 # The software image flags are the flash slots the boot recorded.
 rm -f /var/run/omcid-swimage

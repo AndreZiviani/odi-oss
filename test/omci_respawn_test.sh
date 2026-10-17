@@ -60,27 +60,39 @@ run() {
 
 # The omcid init already respawned before this script ever runs -- start it
 # ourselves to model that, exactly as apply_test.sh's stub registers.
-start_omcid() { "$T/omcid" > /dev/null 2>&1 & }
+start_omcid() { "$T/omcid" > /dev/null 2>&1 & wait_pid; }
+# Bounded polls (5 s) for the observable, not fixed sleeps: the stub omcid
+# has written its pid, the old one has removed its pid file after SIGTERM, the
+# FIFO reader has logged the verbs a case expects. A negative expectation
+# ("no verb") has nothing to poll for and keeps a short fixed wait.
+poll() { # <condition>
+	_i=0
+	while ! eval "$1" && [ "$_i" -lt 100 ]; do sleep 0.05; _i=$((_i + 1)); done
+}
+wait_pid() { poll '[ -s "$T/omcid.pid" ]'; }
+stop_omcid() {
+	[ -f "$T/omcid.pid" ] && kill "$(cat "$T/omcid.pid")" 2>/dev/null
+	poll '[ ! -f "$T/omcid.pid" ]'
+}
+wait_verbs() { poll '[ "$(wc -w < "$T/verbs" | tr -d " ")" -ge '"$1"' ]'; }
 
 : > "$T/verbs"
 start_omcid
-sleep 1
 run > /dev/null; rc=$?
-sleep 1
+wait_verbs 4
 t "reprovision succeeds" "^0$" "$rc"
 verbs=$(tr '\n' ' ' < "$T/verbs")
 t "deactivate, password, activate -- in that order, omcid untouched" \
   "^gpondeact gponpw 3132333435 gponact $" "$verbs"
-[ -f "$T/omcid.pid" ] && kill "$(cat "$T/omcid.pid")" 2>/dev/null
+stop_omcid
 
 : > "$T/verbs"
 sed -i.bak 's/Value="3132333435"/Value=""/' "$T/cs.xml"
 start_omcid
-sleep 1
 run > /dev/null
-sleep 1
+wait_verbs 2
 t "an empty PLOAM password is not sent, as at boot" "^gpondeact gponact $" "$(tr '\n' ' ' < "$T/verbs")"
-[ -f "$T/omcid.pid" ] && kill "$(cat "$T/omcid.pid")" 2>/dev/null
+stop_omcid
 
 : > "$T/verbs"
 env ODI_INIT="$T/no-such-proc-file" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
@@ -94,31 +106,29 @@ t "and touches nothing" "^0$" "$(wc -c < "$T/verbs" | tr -d ' ')"
 : > "$T/verbs"
 printf 'resumed\n' > "$T/resume-decision"
 start_omcid
-sleep 1
 env PATH="$T/bin:$PATH" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
     ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" UPTIME="$T/uptime" \
     RESUME_DECISION="$T/resume-decision" DECISION_WAIT=3 \
     DEACT_HOLD=0 REGISTER_WAIT=3 sh "$R" > /dev/null 2>&1; rc=$?
-sleep 1
+sleep 0.5     # nothing to wait for: no verb is expected
 t "a resumed decision succeeds" "^0$" "$rc"
 t "and issues no PON verb at all" "^0$" "$(wc -c < "$T/verbs" | tr -d ' ')"
-[ -f "$T/omcid.pid" ] && kill "$(cat "$T/omcid.pid")" 2>/dev/null
+stop_omcid
 rm -f "$T/resume-decision"
 
 # No decision file at all within DECISION_WAIT: the safe fallback, not a hang.
 : > "$T/verbs"
 start_omcid
-sleep 1
 env PATH="$T/bin:$PATH" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
     ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" UPTIME="$T/uptime" \
     RESUME_DECISION="$T/no-such-decision-file" DECISION_WAIT=1 \
     DEACT_HOLD=0 REGISTER_WAIT=3 sh "$R" > /dev/null; rc=$?
-sleep 1
+wait_verbs 2
 t "no decision within the wait falls back to reprovision" "^0$" "$rc"
 # cs.xml's PLOAM password was cleared by the block above (as at boot), so
 # this reprovision sends no gponpw either -- same shape as that test.
 t "and still reprovisions" "^gpondeact gponact $" "$(tr '\n' ' ' < "$T/verbs")"
-[ -f "$T/omcid.pid" ] && kill "$(cat "$T/omcid.pid")" 2>/dev/null
+stop_omcid
 
 # svc-omcid.sh: static guard that the marker gate still wires the two
 # branches the way docs/BOOT.md describes -- the reprovision script is

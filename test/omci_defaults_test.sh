@@ -25,7 +25,7 @@ gen = sys.argv[1]
 model = {e['table']['classId']: e for e in json.load(open(gen + '/omci_mib.json'))
          if e['table']['classId'] is not None}
 live = {(6, 3), (6, 4), (6, 5), (256, 14), (257, 10), (263, 10), (263, 14),
-        (11, 2), (11, 7), (10212, 1), (10212, 2), (10212, 3), (10212, 4),
+        (11, 2), (11, 7), (65535, 1), (65535, 2), (65535, 3), (65535, 4),
         (277, 7), (256, 6)}
 bad = []
 for l in open(gen + '/omci_defaults.c'):
