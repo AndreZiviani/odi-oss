@@ -49,6 +49,14 @@ clean_state() {
 	: > "$INITLOG"
 }
 
+# The whole MIB, without what is live or follows the stored VLAN keys and so
+# differs between two dumps by design: SysUpTime, and the private VLAN
+# configuration (class 10212), which shows the stored manual VLAN.
+mibdump() {
+	$Q cli/build/omcli mib get all 2>&1 | grep -v '^    SysUpTime ' |
+		awk '/^10212 /{skip=1; next} /^[0-9]+ /{skip=0} !skip'
+}
+
 ok()  { echo "ok    $*"; }
 bad() { echo "FAIL  $*"; fail=$((fail + 1)); }
 check() {   # check <label> <want> <got>
@@ -169,7 +177,7 @@ for isp in isp1 isp2; do
 		inject "$isp"
 		settle "$log" 1
 		rules_last "$log" > /tmp/rl-rules-before.txt
-		mib_before=$($Q cli/build/omcli mib get all 2>&1)
+		mib_before=$(mibdump)
 		conn_before=$($Q cli/build/omcli conn 2>&1)
 		store "$mode" "$vid" "$pri"
 		old_id=$(st id)
@@ -178,7 +186,7 @@ for isp in isp1 isp2; do
 			bad "$label: the reload did not finish"
 			cat "$STATUS" 2>/dev/null
 		fi
-		mib_after=$($Q cli/build/omcli mib get all 2>&1)
+		mib_after=$(mibdump)
 		conn_after=$($Q cli/build/omcli conn 2>&1)
 		rules_in_place "$log" > /tmp/rl-rules-inplace.txt
 		alive=$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)
@@ -251,7 +259,7 @@ log=/tmp/rl-ident.log
 start_omcid "$log" -g /tmp/rl-gpon-isp1
 inject isp1
 settle "$log" 1
-mib_before=$($Q cli/build/omcli mib get all 2>&1)
+mib_before=$(mibdump)
 conn_before=$($Q cli/build/omcli conn 2>&1)
 : > "$INITLOG"
 old_id=$(st id)
@@ -292,7 +300,7 @@ kill -0 "$pid" 2>/dev/null && ok "identity: the process is still the same one" |
 check "identity: the serial number was read from the kernel again" "2" \
 	"$(grep -c 'serial number: from the kernel' "$log")"
 sync_send "$log"
-check "identity: the MIB is what the session builds" "$mib_before" "$($Q cli/build/omcli mib get all 2>&1)"
+check "identity: the MIB is what the session builds" "$mib_before" "$(mibdump)"
 check "identity: the connections are what the session builds" "$conn_before" "$($Q cli/build/omcli conn 2>&1)"
 stop_omcid
 
@@ -350,7 +358,7 @@ log=/tmp/rl-verbfail.log
 start_omcid "$log" -g /tmp/rl-gpon-isp1 -i /nonexistent/odi_init
 inject isp1
 settle "$log" 1
-mib_before=$($Q cli/build/omcli mib get all 2>&1)
+mib_before=$(mibdump)
 old_id=$(st id)
 store 1 11 0 "$(val LOID_OLD user2)
 $(val LOID user2)
@@ -359,7 +367,7 @@ kill -HUP "$pid"
 wait_done "$old_id" 10 || bad "verb failure: no outcome"
 check "verb failure: result failed" "done failed" "$(st state) $(st result)"
 check_grep "verb failure: the step is logged" "event=reload_step verb=gpondeact rc=2" "$log"
-check "verb failure: the MIB was not touched" "$mib_before" "$($Q cli/build/omcli mib get all 2>&1)"
+check "verb failure: the MIB was not touched" "$mib_before" "$(mibdump)"
 old_id=$(st id)
 kill -HUP "$pid"
 wait_done "$old_id" 10 || bad "verb failure: no outcome on the retry"
@@ -443,8 +451,18 @@ printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\n' > "$ODI"
 reload_is "OMCI_UNKNOWN_ME_OK"                 identity OMCI_UNKNOWN_ME_OK reregister
 printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\n' > "$ODI"
 reload_is "OMCI_FIXED_ME"                     identity OMCI_FIXED_ME reregister
-printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\nOLT_SW_DOWNLOAD=reject\nOMCI_ACCEPT_REBOOT=1\nSYSLOG_SERVER=10.0.0.1\n' > "$ODI"
+printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\nOMCI_PRIVATE_ME=0\n' > "$ODI"
+reload_is "OMCI_PRIVATE_ME"                   identity OMCI_PRIVATE_ME reregister
+printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\nOMCI_PRIVATE_ME=0\nOLT_SW_DOWNLOAD=reject\nOMCI_ACCEPT_REBOOT=1\nSYSLOG_SERVER=10.0.0.1\n' > "$ODI"
 reload_is "OLT_SW_DOWNLOAD, OMCI_ACCEPT_REBOOT and other odi keys are not a reload" none ""   none
+X="$X$(val OMCI_VEIP_SLOT_ID 14)
+"
+store 1 12 5 "$X"
+reload_is "OMCI_VEIP_SLOT_ID"                  identity OMCI_VEIP_SLOT_ID reregister
+X="$X$(val OMCI_CUSTOM_ME 65792)
+"
+store 1 12 5 "$X"
+reload_is "OMCI_CUSTOM_ME bit 256 puts the VEIP in the slot" identity OMCI_VEIP_SLOT_ID reregister
 store 1 12 5 "$X$(val GPON_PLOAM_PASSWD 3132333435)
 "
 reload_is "GPON_PLOAM_PASSWD"                  identity GPON_PLOAM_PASSWD reregister
@@ -478,7 +496,9 @@ $(val LOID_PASSWD p1)
 $(val LOID_PASSWD_OLD p1)
 "
 reload_is "the identity switch turned off"     identity "omci-identity.on" reregister
-store 1 13 5 "$(val OMCI_SW_VER1 V9)
+store 1 13 5 "$(val OMCI_VEIP_SLOT_ID 14)
+$(val OMCI_CUSTOM_ME 65792)
+$(val OMCI_SW_VER1 V9)
 $(val GPON_PLOAM_PASSWD 3132333436)
 $(val LOID_OLD u1)
 $(val LOID u1)

@@ -15,18 +15,62 @@ carries, so matching is by name; values are decimal, 0x-hex, or text.
 Only autonomous instances (generated/omci_autonomous.c) are taken, and never
 classes 2 (OntData), 148, 157, 340, 134 (OLT-written credentials), 65530
 (LOID: from the config store), 131 (OLT-G: what the OLT wrote about itself),
-ONT-G attributes 1-3 (the live identity, mibstore special-cases them), the
-circuit pack serial number (6/3, part of one stick's own serial), the
-private VLAN config's manual VID (10212/3, one ISP's VLAN) or the T-CONT
-Alloc-IDs (262/1: what one OLT assigned that line by PLOAM, which omcid
-binds from the kernel at run time, respond/apply_qos.c). The dump itself
-is private; only device capability values reach the generated file."""
+ONT-G attributes 1-3 and 14 (the live identity and PON state, mibstore
+answers them), the circuit pack serial number, version and vendor id (6/3-5,
+the configured serial and the active image), the private VLAN config's manual
+VID (10212/3, one ISP's VLAN), the T-CONT Alloc-IDs (262/1: what one OLT
+assigned that line by PLOAM, which omcid binds from the kernel at run time,
+respond/apply_qos.c), and every attribute omcid answers from live state
+(ONU2-G uptime, ANI-G optical levels, UNI link) or always overrides
+(SKIP_ATTRS below), so the table carries no identity, no measurement and no
+provisioning, only capability values. The dump itself is private."""
 import json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEN = os.path.join(HERE, '..', 'generated')
-SKIP_CLASSES = {2, 131, 148, 157, 340, 134, 65530}
-SKIP_ATTRS = {(256, 1), (256, 2), (256, 3), (6, 3), (10212, 3), (262, 1)}
+# 7: software image, every attribute is answered from the image flags.
+SKIP_CLASSES = {2, 7, 131, 148, 157, 340, 134, 65530}
+SKIP_ATTRS = {
+    (256, 1), (256, 2), (256, 3),   # ONU-G identity, from the serial
+    (256, 14),                      # ONU-G OntState, the live PON state
+    (6, 3), (6, 4), (6, 5),         # circuit pack serial, version, vendor id
+    (257, 1), (257, 2),             # ONU2-G EqtID and OMCC version, always overridden
+    (257, 10),                      # ONU2-G SysUpTime, live
+    (263, 10), (263, 14),           # ANI-G optical levels, live from the DDM
+    (11, 2), (11, 7),               # PPTP Ethernet UNI sensed type, duplex: link state
+    (10212, 3),                     # one ISP's VLAN
+    (262, 1),                       # T-CONT Alloc-ID, bound at run time
+    (277, 1), (277, 2), (277, 3), (277, 6), (277, 8),   # always overridden
+    (277, 13),                      # reserved queues hold ASCII noise, see below
+    (277, 14), (277, 15),           # always overridden
+    (278, 1), (278, 3),             # traffic scheduler, always overridden
+}
+# An attribute the OLT can write (OltAcc write or set-by-create) holds, in a
+# dump taken from a provisioned stick, whatever that stick's OLT wrote. So no
+# writable attribute is taken from the dump, except the ones listed here: the
+# values the ONU initialises itself, each checked against the vendor stack's
+# own initialiser (reference reading) or the G.988 default. Everything else
+# writable is served from its power-on default by omcid (zero unless
+# mibstore.c says otherwise).
+INIT_VERIFIED = {
+    (5, 2), (5, 3),                 # cardholder: expected type and ports, from the slot
+    (6, 1),                         # circuit pack type, from the slot
+    (11, 1), (11, 8), (11, 10), (11, 11),   # UNI: expected type, frame size, pause time, bridged
+    (242, 1), (242, 2),             # default policy, 0xff pointer
+    (256, 4),                       # traffic management option
+    (257, 5), (257, 14),            # security mode (G.988 default 1), queue scale factor
+    (263, 3), (263, 6), (263, 7), (263, 11), (263, 12), (263, 15), (263, 16),
+}
+# Reported values that are not taken from the dump at all. T-CONT (ME 262)
+# Policy is OLT-writable, yet it is pinned to 1 on every T-CONT: some OLTs
+# provision the upstream queue scheduling only when the T-CONT reports a
+# non-null policy, the stock firmware reports 1, and nothing on the ONU
+# writes it (the OLT's own T-CONT Sets carry the Alloc-ID only). The value
+# is a constant of the ONU, not what a provisioned stick's OLT wrote.
+FORCED = {(262, 3): '1'}
+# Vendor-private entities the ONU creates itself, taken whole: omcid gates
+# and answers them by key (see docs/SETTINGS.md).
+INIT_CLASSES = {350, 370, 373}
 MAX_W = 32
 
 def autonomous():
@@ -60,6 +104,10 @@ def parse(path):
 def encode(v, typ, width):
     if not width or width > MAX_W or not typ: return None
     if typ.startswith('u'):
+        # A 0x value is hex digits and nothing else; anything else is not a
+        # number and is refused rather than guessed at.
+        if v.lower().startswith('0x') and not re.fullmatch(r'0[xX][0-9a-fA-F]+', v):
+            return None
         try: n = int(v, 0) if v else 0
         except ValueError: return None
         if n < 0 or n >= (1 << (8 * width)): return None
@@ -92,7 +140,12 @@ def main():
             for a in attrs:
                 k = a['index']
                 if k == 0 or (cls, k) in SKIP_ATTRS: continue
-                v = vals.get(a['name'].lower())
+                if (cls, k) in FORCED:
+                    v = FORCED[(cls, k)]
+                elif ((a['oltAcc'] or 0) & 6) and (cls, k) not in INIT_VERIFIED and cls not in INIT_CLASSES:
+                    continue
+                else:
+                    v = vals.get(a['name'].lower())
                 if v is None: continue
                 b = encode(v, a['type'], a['len'])
                 if b is None or not any(b): continue

@@ -104,6 +104,55 @@ uint8_t devid[40];      /* "RTL9602C", then the revision */
 
 uint8_t mib_data_sync;
 
+struct omci_instance aut[AUT_MAX];
+unsigned aut_count;
+
+/* The entities that live in the VEIP slot: the cardholder and circuit pack
+ * (entity id 0x0100 | slot) and the VEIP, its UNI-G and the TR-069 server
+ * (slot << 8 | 1). The generated tables hold them for slot 6. */
+#define SLOT6_CARD   0x0106
+#define SLOT6_PORT   0x0601
+
+static int slot_card_class(uint16_t cls) { return cls == 5 || cls == 6; }
+static int slot_port_class(uint16_t cls)
+{
+	return cls == 264 || cls == OMCI_ME_VEIP || cls == OMCI_ME_TR069_MGMT_SERVER;
+}
+static int private_class(uint16_t cls) { return cls == 350 || cls == 370 || cls == 373; }
+
+void aut_rebuild(void)
+{
+	unsigned n = 0;
+
+	for (unsigned i = 0; i < omci_autonomous_count && n < AUT_MAX; i++) {
+		uint16_t cls = omci_autonomous[i].classId;
+		uint16_t inst = omci_autonomous[i].inst;
+
+		if (!private_me && private_class(cls))
+			continue;
+		if (!veip_on && ((slot_card_class(cls) && inst == SLOT6_CARD) ||
+				 (slot_port_class(cls) && inst == SLOT6_PORT)))
+			continue;
+		if (slot_card_class(cls) && inst == SLOT6_CARD)
+			inst = (uint16_t)(0x0100 | veip_slot);
+		else if (slot_port_class(cls) && inst == SLOT6_PORT)
+			inst = (uint16_t)((veip_slot << 8) | 1);
+		aut[n].classId = cls;
+		aut[n].inst = inst;
+		n++;
+	}
+	aut_count = n;
+}
+
+uint16_t canon_inst(uint16_t cls, uint16_t inst)
+{
+	if (slot_card_class(cls) && inst == (uint16_t)(0x0100 | veip_slot))
+		return SLOT6_CARD;
+	if (slot_port_class(cls) && inst == (uint16_t)((veip_slot << 8) | 1))
+		return SLOT6_PORT;
+	return inst;
+}
+
 const struct omci_class *find_class(uint16_t id)
 {
 	for (unsigned i = 0; i < omci_class_count; i++)
@@ -111,6 +160,32 @@ const struct omci_class *find_class(uint16_t id)
 			return &omci_classes[i];
 	return 0;
 }
+
+/* Power-on values the vendor stack initialises these entities to, which an
+ * OLT that never writes them leaves in place: the TR-069 management server
+ * and the virtual Ethernet interface point start locked (1), and the
+ * interface point is then disabled (1). Class 10212 (private VLAN
+ * configuration) starts as auto detection with the unset sentinels. */
+#define ADMIN_LOCKED     1
+#define OPER_DISABLED    1
+
+/* The administrative state of VEIP instance `inst`: what the OLT wrote, else
+ * locked. The operational state follows it: an unlocked interface point is
+ * enabled (0), a locked one disabled (1). */
+static uint8_t veip_admin(uint16_t inst)
+{
+	const struct omci_class *c = find_class(OMCI_ME_VEIP);
+	const struct mib_row *r = mib_find(OMCI_ME_VEIP, inst);
+
+	if (c && r && (r->written & (1u << (16 - 1))))
+		return r->data[attr_offset(c, 1)];
+	return ADMIN_LOCKED;
+}
+
+/* PPTP Ethernet UNI: the card type of the 10/100/1000 BASE-T slot, and the
+ * configuration indication for 1000 Mbit/s full duplex. */
+#define UNI_SENSED_TYPE   0x2f
+#define UNI_CFG_IND_1G_FULL 0x03
 
 /* ONU2-G attribute 2: baseline OMCC only, what omcid has always answered. */
 #define OMCC_VER_BASELINE 0x80
@@ -401,8 +476,8 @@ int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
 {
 	int n = 0;
 
-	for (unsigned i = 0; i < omci_autonomous_count; i++) {
-		const struct omci_instance *e = &omci_autonomous[i];
+	for (unsigned i = 0; i < aut_count; i++) {
+		const struct omci_instance *e = &aut[i];
 
 		if ((cls && e->classId != cls) || (want_inst && e->inst != inst))
 			continue;
@@ -516,6 +591,53 @@ int mib_changed(const struct mib_row *r, const struct omci_class *c, unsigned k)
 	return 0;
 }
 
+/* ONU2-G SysUpTime (attribute 10): the time since boot in 10 ms units, as
+ * G.988 defines it, from the monotonic clock. The 32-bit counter wraps after
+ * about 497 days, which is the rollover the entity describes. */
+uint32_t uptime_cs(void)
+{
+	long s = 0, ns = 0;
+
+	if (sys_clock_gettime(CLOCK_MONOTONIC, &s, &ns) != 0)
+		return 0;
+	return (uint32_t)s * 100u + (uint32_t)(ns / 10000000L);
+}
+
+/* Where the UNI link state comes from: the read-only odi_switch parameter
+ * that holds the link bit of the SFP edge port (-l file replaces it in a
+ * test). */
+const char *uni_link_path = "/sys/module/odi_switch/parameters/host_link";
+
+/* 1 link up, 0 link down, -1 not readable. */
+int uni_link_state(void)
+{
+	char b[8];
+	long fd = sys_open(uni_link_path, O_RDONLY), n;
+
+	if (fd < 0)
+		return -1;
+	n = sys_read((int)fd, b, sizeof b);
+	sys_close((int)fd);
+	if (n < 1 || (b[0] != '0' && b[0] != '1'))
+		return -1;
+	return b[0] == '1';
+}
+
+/* The PON state O1..O7 as a number: the driver status file first (the same
+ * one the Alloc-IDs come from), then the driver command, and O1 when neither
+ * answers -- the state the ONU starts in. */
+static uint8_t pon_state_now(void)
+{
+	uint32_t st = 0;
+	int n = onu_state_now();
+
+	if (n >= 1 && n <= 7)
+		return (uint8_t)n;
+	if (omci_getOnuState(&st) == 0 && st >= 1 && st <= 7)
+		return (uint8_t)st;
+	return 1;
+}
+
 /* The Weight mib_PriQ.so's own default row carries. See the longer note beside
  * ds_queue_words: isp1's live weights are not all 1, and which queues get a
  * non-default one is provisioning rather than derivation. */
@@ -550,18 +672,29 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 	 * override. */
 	for (unsigned d = 0; d < omci_defaults_count; d++) {
 		const struct omci_default *df = &omci_defaults[d];
-		if (df->cls == c->classId && df->inst == inst && df->attr == k) {
+		if (df->cls == c->classId && df->inst == canon_inst(c->classId, inst) &&
+		    df->attr == k) {
 			for (uint16_t i = 0; i < n && i < df->width; i++)
 				out[i] = df->data[i];
 			break;
 		}
 	}
-	if (c->classId == OMCI_ME_ONU_G) { /* ONU-G */
+	if (c->classId == OMCI_ME_CIRCUIT_PACK) { /* circuit pack */
+		/* The ONU identity and software, not a capture: the serial and
+		 * its vendor id are the configured serial, the version is the
+		 * active software image's. */
+		serial_refresh(0);
+		if (k == 3) for (int i = 0; i < 8 && i < n; i++) out[i] = serial[i];
+		else if (k == 4) put_str(out, n, report_sw_ver(sw_active_inst()));
+		else if (k == 5) for (int i = 0; i < 4 && i < n; i++) out[i] = serial[i];
+	} else if (c->classId == OMCI_ME_ONU_G) { /* ONU-G */
 		serial_refresh(0);
 		if (k == 1) { out[0] = serial[0]; out[1] = serial[1];
 			      out[2] = serial[2]; out[3] = serial[3]; }
 		else if (k == 2) put_str(out, n, report_hw_ver());
 		else if (k == 3) for (int i = 0; i < 8; i++) out[i] = serial[i];
+		/* Attribute 14, the ONT PON state: the O-state number. */
+		else if (k == 14) out[0] = pon_state_now();
 	} else if (c->classId == OMCI_ME_ONU2_G) { /* ONU2-G */
 		/* Attribute 2 is the OMCC version, per the vendor's own table
 		 * and G.988 -- not attribute 3, which is the vendor product
@@ -579,7 +712,50 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 3 && report.on && report.productCode >= 0 && n >= 2) {
 			out[0] = (uint8_t)(report.productCode >> 8);
 			out[1] = (uint8_t)report.productCode;
+		} else if (k == 10 && n >= 4) {         /* SysUpTime, 10 ms */
+			uint32_t t = uptime_cs();
+
+			out[0] = (uint8_t)(t >> 24); out[1] = (uint8_t)(t >> 16);
+			out[2] = (uint8_t)(t >> 8);  out[3] = (uint8_t)t;
 		}
+	} else if (c->classId == OMCI_ME_ANI_G && (k == 10 || k == 14) && n >= 2) {
+		/* Optical signal level (10, Rx) and transmit optical level
+		 * (14, Tx), live from the transceiver; zeros when it cannot
+		 * be read. */
+		int16_t v;
+
+		if (ddm_dbm_x500(k == 10 ? 6 : 5, &v) == 0) {
+			out[0] = (uint8_t)((uint16_t)v >> 8);
+			out[1] = (uint8_t)v;
+		}
+	} else if (c->classId == OMCI_ME_VEIP) { /* virtual Ethernet interface point */
+		/* CustomizedSlotId: the slot the key names, as the stock
+		 * stack reports it, even when the slot itself is unchanged. */
+		if (k == 6 && veip_slot_key >= 0) out[0] = (uint8_t)veip_slot_key;
+		else if (k == 1) out[0] = veip_admin(inst);
+		else if (k == 2) out[0] = veip_admin(inst) ? OPER_DISABLED : 0;
+	} else if (c->classId == OMCI_ME_TR069_MGMT_SERVER) { /* TR-069 server */
+		if (k == 1) out[0] = ADMIN_LOCKED;
+	} else if (c->classId == OMCI_ME_PRIVATE_VLAN_CFG) { /* private VLAN config */
+		/* The manual VLAN of the configuration store, which is what the
+		 * vendor stack reports: type, mode, VID and priority; the
+		 * unset sentinels when no VID is stored. */
+		if (!vlanCfg.loaded)
+			cfg_load_vlan();
+		if (k == 1) out[0] = (uint8_t)vlanCfg.type;
+		else if (k == 2) out[0] = (uint8_t)vlanCfg.mode;
+		else if (k == 3 && n >= 2) {
+			uint16_t v = vlanCfg.vid < 0 ? 0xffff : (uint16_t)vlanCfg.vid;
+
+			out[0] = (uint8_t)(v >> 8); out[1] = (uint8_t)v;
+		} else if (k == 4) out[0] = (uint8_t)vlanCfg.pri;
+	} else if (c->classId == OMCI_ME_PPTP_ETH_UNI) { /* PPTP Ethernet UNI */
+		/* Sensed type is the slot card type, which the ONU never
+		 * changes; the configuration indication follows the link:
+		 * unknown (0) with no link, otherwise the speed and duplex of
+		 * the port, which is 1000BASE-X full duplex here. */
+		if (k == 2) out[0] = UNI_SENSED_TYPE;
+		else if (k == 7) out[0] = uni_link_state() == 1 ? UNI_CFG_IND_1G_FULL : 0;
 	} else if (c->classId == OMCI_ME_SOFTWARE_IMAGE) { /* software image */
 		if (k == 1) put_str(out, n, report_sw_ver(inst));
 		/* is committed, is active, is valid: image 0 all three and

@@ -25,6 +25,40 @@ listed here.
   the check for the spawned boot-ok polls for the file instead of sleeping a
   fixed 0.3 s, which lost the race on a loaded host.
 
+- OMCI: new keys for the entities the ONU creates for itself.
+  `OMCI_VEIP_SLOT_ID`, the stock key, moves the virtual Ethernet interface
+  point (and its UNI-G, the TR-069 server, the cardholder and the circuit
+  pack) to another slot, as on the stock firmware only while bit 256 of
+  `OMCI_CUSTOM_ME` is set; unset, the slot is 6 as before. `OMCI_VEIP=0`
+  (odi.conf) creates no VEIP at all (nor its UNI-G, TR-069 server, cardholder
+  and circuit pack), so the ONU presents only its PPTP Ethernet UNI.
+  `OMCI_PRIVATE_ME=0` (odi.conf) leaves out the vendor-private entities 350,
+  370 and 373, the last of which carries a third-party product string; they
+  stay created by default, as on the stock firmware. A change of either re-registers the ONU.
+  New `keys` omcid test suite; docs/SETTINGS.md and docs/TOOLS.md updated
+  (the VEIP slot key was listed as having no counterpart in omcid).
+- OMCI: values that were captured from one stick and shipped to every stick
+  are now answered from the stick itself or from its configuration. The
+  circuit pack (ME 6) reports the configured serial number and its vendor id
+  (it reported the capture stick's vendor id and an empty serial) and the
+  version of the active software image; the ONU2-G SysUpTime counts the time
+  since boot in 10 ms units (it was frozen); the ANI-G optical signal and
+  transmit levels follow the transceiver readings in 0.002 dBm steps (they
+  were frozen); the PPTP Ethernet UNI duplex indication follows the link; the
+  ONU-G state attribute follows the PON state; the private VLAN configuration
+  (ME 10212) shows the stored VLAN type, mode, VID and priority; the software
+  image flags (ME 7) follow the running and committed flash slots; and the
+  attributes an OLT writes (priority queue scheduler pointer, TR-069 server
+  and VEIP administrative state, the VEIP operational state) read as their
+  power-on values until the OLT writes them, instead of the values the
+  capture stick's OLT had written. The T-CONT policy stays 1 on all 16
+  T-CONTs, as on the stock firmware: some OLTs provision the upstream queues
+  only when it is not null, and nothing on the ONU writes it. The 64 reserved priority queues
+  no longer carry the text `0x0` in their drop threshold. `mib-defaults.py`
+  now refuses OLT-writable attributes, so a regenerated table cannot carry
+  provisioning, and a test checks the table. omcid takes `-l file` (test
+  only). New `live` omcid test suite.
+
 - Docs: brought in line with what v1.5.0 does and what was then checked on
   sticks: README comparison rows for host port auto-negotiation, the safe
   mode, per-flow counters and committing a trial say what was run on

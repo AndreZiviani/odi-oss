@@ -764,6 +764,73 @@ const char *report_hw_ver(void)
 	return (const char *)devid;
 }
 
+/* ------------------------------------------------ OMCI_VEIP_SLOT_ID
+ *
+ * The stock key, read from the config store as the stock firmware reads it:
+ * a decimal slot number, one byte, which the stock OMCI stack applies only
+ * when bit 0x100 of OMCI_CUSTOM_ME (apply customized VEIP slot id) is set.
+ * Unset, the VEIP lives in slot 6, which is the stock default. A slot that
+ * would collide with another slot of this ONU (1, the PPTP Ethernet UNI, and
+ * 128, the ANI) or is not a slot number (0, 255) is not used. */
+int veip_slot_key = -1;
+int veip_slot = VEIP_SLOT_DEFAULT;
+
+void cfg_load_veip_slot(void)
+{
+	char v[16];
+	int n = cfg_get(CFG_CS_PATH, "OMCI_VEIP_SLOT_ID", v, sizeof v);
+	int slot = 0, i = 0, me = 0;
+
+	veip_slot_key = -1;
+	veip_slot = VEIP_SLOT_DEFAULT;
+	if (n <= 0)
+		return;
+	for (; v[i] >= '0' && v[i] <= '9' && slot < 1000; i++)
+		slot = slot * 10 + (v[i] - '0');
+	if (i == 0 || v[i] || slot < 2 || slot > 254 || slot == 128) {
+		out("OMCI_VEIP_SLOT_ID ignored: not a usable slot (2 to 254, not 128)\n");
+		return;
+	}
+	veip_slot_key = slot;
+	n = cfg_get(CFG_CS_PATH, "OMCI_CUSTOM_ME", v, sizeof v);
+	for (i = 0; n > 0 && v[i] >= '0' && v[i] <= '9' && me < 100000000; i++)
+		me = me * 10 + (v[i] - '0');
+	if (me & CUSTOM_ME_VEIP_SLOT_ID)
+		veip_slot = slot;
+}
+
+/* ------------------------------------------------ OMCI_PRIVATE_ME
+ *
+ * odi.conf, odi-only: 0 leaves out the three vendor-private entities the ONU
+ * creates for itself (350, 370 and 373, which the stock firmware creates
+ * too); anything else, an absent key included, keeps them. */
+int private_me = 1;
+
+/* ------------------------------------------------ OMCI_VEIP
+ *
+ * odi.conf, odi-only: 0 creates no VEIP (and nothing of its slot); anything
+ * else, an absent key included, creates it. A separate key, not a value of
+ * the stock OMCI_VEIP_SLOT_ID: the stock firmware reads that key as a slot
+ * number only (0 would be slot 0 there), and the stick must stay valid when it
+ * falls back to the stock slot. */
+int veip_on = 1;
+
+void cfg_load_veip_on(void)
+{
+	char v[4];
+
+	veip_on = !(cfg_odi_get(CFG_ODI_PATH, "OMCI_VEIP", v, sizeof v) == 1
+		    && v[0] == '0');
+}
+
+void cfg_load_private_me(void)
+{
+	char v[4];
+
+	private_me = !(cfg_odi_get(CFG_ODI_PATH, "OMCI_PRIVATE_ME", v, sizeof v) == 1
+		       && v[0] == '0');
+}
+
 /* ------------------------------------------------ OMCI_UNKNOWN_ME_OK
  *
  * Only the value 1 turns it on: anything else, an absent key included, keeps
@@ -1042,6 +1109,10 @@ void cfg_load_all(void)
 	cfg_load_report();
 	cfg_load_unknown_me();
 	cfg_load_fixed_me();
+	cfg_load_veip_slot();
+	cfg_load_private_me();
+	cfg_load_veip_on();
+	aut_rebuild();
 }
 
 void cfg_snap_take(struct cfg_snap *s)
@@ -1051,6 +1122,10 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->report = report;
 	s->unknown_me_ok = unknown_me_ok;
 	s->fixed = fixed_me;
+	s->veip_slot_key = veip_slot_key;
+	s->veip_slot = veip_slot;
+	s->private_me = private_me;
+	s->veip_on = veip_on;
 }
 
 void cfg_snap_restore(const struct cfg_snap *s)
@@ -1060,6 +1135,11 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	report = s->report;
 	unknown_me_ok = s->unknown_me_ok;
 	fixed_me = s->fixed;
+	veip_slot_key = s->veip_slot_key;
+	veip_slot = s->veip_slot;
+	private_me = s->private_me;
+	veip_on = s->veip_on;
+	aut_rebuild();
 }
 
 /* Two optional strings are the same when both are unset or empty, or both
@@ -1108,6 +1188,12 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 	}
 	if (o->unknown_me_ok != n->unknown_me_ok)
 		m |= CFGD_UNKNOWN_ME;
+	if (o->veip_slot_key != n->veip_slot_key || o->veip_slot != n->veip_slot)
+		m |= CFGD_VEIP_SLOT;
+	if (o->private_me != n->private_me)
+		m |= CFGD_PRIVATE_ME;
+	if (o->veip_on != n->veip_on)
+		m |= CFGD_VEIP_ON;
 	if (o->fixed.n != n->fixed.n)
 		m |= CFGD_FIXED_ME;
 	else
@@ -1151,6 +1237,9 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_SWITCH, "omci-identity.on" },
 		{ CFGD_UNKNOWN_ME, "OMCI_UNKNOWN_ME_OK" },
 		{ CFGD_FIXED_ME, "OMCI_FIXED_ME" },
+		{ CFGD_VEIP_SLOT, "OMCI_VEIP_SLOT_ID" },
+		{ CFGD_PRIVATE_ME, "OMCI_PRIVATE_ME" },
+		{ CFGD_VEIP_ON, "OMCI_VEIP" },
 		{ CFGD_VLAN_TYPE, "VLAN_CFG_TYPE" },
 		{ CFGD_VLAN_MODE, "VLAN_MANU_MODE" },
 		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },
