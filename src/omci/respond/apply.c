@@ -87,6 +87,8 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 	}
 	if (c->classId == OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE)
 		delete_mbsp(inst);
+	if (c->classId == OMCI_ME_MCAST_GEM_IW_TP)
+		mcast_flag_refresh(inst);
 }
 
 /* Class 131, OLT-G: a Set that carries ToDInfo sends its fourteen bytes
@@ -179,8 +181,13 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 	case OMCI_ME_PPTP_ETH_UNI:
 		apply_pptp_uni(c, inst, r, mask, creating);
 		return;
-	case OMCI_ME_GEM_IW_TP:
 	case OMCI_ME_MCAST_GEM_IW_TP:
+		/* Its address tables decide the multicast flag of the CTP's
+		 * downstream flow (apply_qos.c, ctp_mcast_rows). */
+		mcast_flag_refresh(-1);
+		bc_gem_update();
+		return;
+	case OMCI_ME_GEM_IW_TP:
 		/* A step on the way to the broadcast flow; the OLT creates
 		 * these and class 47 in no fixed order. */
 		bc_gem_update();

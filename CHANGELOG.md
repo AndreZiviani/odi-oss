@@ -5,6 +5,24 @@ listed here.
 
 ## Unreleased
 
+- omcid: table attributes keep every row the OLT sets, not only the last.
+  The multicast operations profile's dynamic and static ACLs (class 309, and
+  65531 once its class id is fixed), the subscriber config's service package
+  and preview group tables (310), the multicast GEM interworking TP's IPv4
+  and IPv6 address tables (281) and the MAC bridge port filter table (49) are
+  row lists now, like class 171's tagging table already was: a Set adds,
+  replaces or deletes a row by the table's own key and set control (G.988,
+  checked against the stock plugins), and a Get / Get-Next answers the whole
+  table. The rows survive a respawn (the resume snapshot format is version 2,
+  so an older snapshot falls back to re-registration once).
+- omcid: the multicast flag of a downstream GEM flow (cmd 25 `mcast_filter`)
+  follows the stock rule: set while a class 281 on that CTP has address-table
+  rows, the flow sent again when the table goes from empty to not empty and
+  back, or the 281 is deleted. It was set for every downstream-only CTP. On
+  ISP1 and ISP2 the flow is now first sent without the flag and again with it
+  when the OLT writes the 224/4 row, as the stock stack does
+  (`test/fixtures/omci-drv-golden-isp*.txt` gain that one line each).
+
 - Docs: ONU2-G's vendor product code 15, which omcid reports while the
   identity switch is off, is the stock firmware's built-in default for
   `OMCI_VENDOR_PRODUCT_CODE` (the MIB table compiled into its `configd`),
