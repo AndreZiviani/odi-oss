@@ -340,8 +340,9 @@ commands, from the command table of the shipped binary:
   and cmd 21, 24 and the upstream side of cmd 25, are the upstream PON
   queues, below.
 - **cmd 25** downstream is the DS GEM port CAM row and its
-  `DSF_GEM_FLOW_TYPE` word (FLAGS 3 for the OMCI/broadcast port, 2 for
-  data), plus the slot record the AES path reads (below). `ena` 0 (a
+  `DSF_GEM_FLOW_TYPE` word (FLAGS 2, Ethernet, plus bit 0, multicast, when
+  omcid sets `mcast_filter`: the GEM port of a multicast GEM interworking TP,
+  as the stock OMCI layer flags it; ISP1's is 0xfff, ISP2's 0xffe), plus the slot record the AES path reads (below). `ena` 0 (a
   delete) is refused downstream: omcid never sends one and the driver has
   no downstream delete. The upstream side is below.
 

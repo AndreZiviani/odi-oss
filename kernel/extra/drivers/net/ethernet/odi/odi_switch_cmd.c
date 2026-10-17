@@ -589,9 +589,17 @@ static int us_flow_delete(uint32_t slot)
 
 /* cmd 25: dir picks the table, the flow id the row (see the state
  * above), ena 1 creates or updates the flow and ena 0 deletes it (the
- * stock driver's reading of the field). The OMCI/broadcast GEM port
- * (0xfff) is downstream only, which gives the 6 downstream and 5 upstream
- * instances of the capture.
+ * stock driver's reading of the field). A downstream flow is Ethernet
+ * (FLAGS 2), plus the multicast bit (3) when omcid sets mcast_filter: the
+ * stock OMCI layer sets its isFilterMcast for the GEM port of a multicast
+ * GEM interworking TP (ME 281) with an address table row
+ * (mib_MultiGemIwTp.c, read, not copied), and its flow add writes the bit
+ * from it. Both used to be keyed on GEM port 0xfff, which is only ISP1's
+ * multicast GEM (downstream only, hence the capture's 6 downstream and 5
+ * upstream instances): ISP2's multicast GEM (0xffe) and any other OLT's got
+ * 2, and an OLT whose 0xfff is a two-way data port would have had its
+ * upstream flow dropped. omcid sends an upstream flow only for a CTP that
+ * has one, so nothing is keyed on the port number any more.
  */
 static int cmd_gem_flow(void *buf, uint32_t len)
 {
@@ -603,7 +611,7 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 
 	if (g->dir == OMCI_GEMFLOW_DS) {
 		uint32_t idx = g->flow_id;
-		uint32_t traffic_cfg = (g->gem_port == 0xfffU) ? 3U : 2U;
+		uint32_t traffic_cfg = g->mcast_filter ? 3U : 2U;
 
 		if (idx >= ODI_SW_CMD_GEM_DS_MAX)
 			return ODI_SW_EOPNOTSUPP;
@@ -637,10 +645,6 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 		uint32_t slot = g->flow_id, t = g->tcont, ord = g->queue, pq;
 		int creating;
 
-		if (g->gem_port == 0xfffU) {
-			/* OMCI channel: downstream-only, no US table entry. */
-			return 0;
-		}
 		if (!g->ena)
 			return us_flow_delete(slot);
 		if (slot >= ODI_SW_CMD_GEM_US_MAX)

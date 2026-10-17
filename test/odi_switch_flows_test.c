@@ -1,7 +1,8 @@
 /* odi_switch_flows_test.c -- OMCI_FLOWS_CMD (src/omci/omci_flows.h), the
  * read-only readback of what cmd 25 programmed. Checks that it returns the
- * rows and slots cmd 25 was given, at their flow ids, that the OMCI channel (GEM
- * 0xfff) is a DS row with the OMCI traffic type and no US slot, that the
+ * rows and slots cmd 25 was given, at their flow ids, that a multicast GEM
+ * (mcast_filter set, ISP1's 0xfff) is a DS row of type 3 and any other
+ * type 2 whatever its port number, that the
  * counters stay exact past OMCI_FLOWS_MAX, that a short buffer is refused,
  * and that the readback itself writes no register. Then the upstream queue
  * map cmd 25 writes (PON_SID2QID): each flow on its own T-CONT's queue,
@@ -61,7 +62,7 @@ static void tconts(uint32_t n)
 	}
 }
 
-static void gem(uint32_t dir, uint32_t flow, uint32_t port)
+static void gem_mc(uint32_t dir, uint32_t flow, uint32_t port, uint32_t mcast)
 {
 	struct omci_gemflow g;
 
@@ -69,8 +70,15 @@ static void gem(uint32_t dir, uint32_t flow, uint32_t port)
 	g.dir = dir;
 	g.flow_id = flow;
 	g.gem_port = port;
+	g.mcast_filter = mcast;
 	g.ena = 1;
 	(void)odi_switch_cmd(OMCI_GEMFLOW_CMD, &g, sizeof g);
+}
+
+static void gem(uint32_t dir, uint32_t flow, uint32_t port)
+{
+	/* ISP1's multicast GEM, flagged as omcid flags it. */
+	gem_mc(dir, flow, port, port == 0xfffU);
 }
 
 /* The flow hook (odi_switch_cmd.h): what the GPON core is told. */
@@ -112,8 +120,7 @@ int main(void)
 	   "empty after reset, unused rows zeroed");
 
 	tconts(1);
-	gem(OMCI_GEMFLOW_DS, 0, 0xfff);
-	gem(OMCI_GEMFLOW_US, 0, 0xfff);          /* OMCI channel: no US slot */
+	gem(OMCI_GEMFLOW_DS, 0, 0xfff);          /* downstream only: no US slot */
 	gem(OMCI_GEMFLOW_DS, 1, 1100);
 	gem(OMCI_GEMFLOW_US, 0, 1100);
 	gem(OMCI_GEMFLOW_DS, 2, 1101);
@@ -124,11 +131,20 @@ int main(void)
 	ok(rc == 0, "answers 0");
 	ok(odi_mock.log_n == before, "writes no register");
 	ok(f.ds_count == 3 && f.us_count == 2, "3 DS rows, 2 US slots");
-	ok(f.ds_gem[0] == 0xfff && f.ds_cfg[0] == 3, "row 0: OMCI channel, type 3");
+	ok(f.ds_gem[0] == 0xfff && f.ds_cfg[0] == 3, "row 0: the multicast GEM, type 3");
 	ok(f.ds_gem[1] == 1100 && f.ds_cfg[1] == 2 && f.ds_gem[2] == 1101,
 	   "rows 1-2: in creation order, type 2");
 	ok(f.us_gem[0] == 1100 && f.us_gem[1] == 1101 && f.us_gem[2] == 0,
 	   "US slots in creation order");
+
+	/* The flag follows omcid, not the port number: ISP2's multicast GEM
+	 * (0xffe) flagged is 3; 0xfff not flagged is 2. */
+	gem_mc(OMCI_GEMFLOW_DS, 5, 0xffe, 1);
+	gem_mc(OMCI_GEMFLOW_DS, 0, 0xfff, 0);
+	rc = odi_switch_cmd(OMCI_FLOWS_CMD, &f, sizeof f);
+	ok(rc == 0 && f.ds_gem[5] == 0xffe && f.ds_cfg[5] == 3, "0xffe with mcast_filter: type 3");
+	ok(f.ds_gem[0] == 0xfff && f.ds_cfg[0] == 2, "0xfff without it: type 2");
+	gem_mc(OMCI_GEMFLOW_DS, 0, 0xfff, 1);
 
 	for (int i = 0; i < 20; i++)
 		gem(OMCI_GEMFLOW_DS, 3 + (uint32_t)i, 2000 + (uint32_t)i);
@@ -210,7 +226,7 @@ int main(void)
 	}
 
 	/* The GPON core hears of each flow cmd 25 creates, and of the reset;
-	 * a refused flow and the OMCI channel upstream (no slot) say nothing.
+	 * a refused flow says nothing.
 	 */
 	puts("flow hook:");
 	odi_mock_reset();
@@ -218,13 +234,12 @@ int main(void)
 	odi_switch_cmd_set_flow_ops(&hook_ops);
 	tconts(3);
 	gem(OMCI_GEMFLOW_DS, 0, 0xfff);
-	gem(OMCI_GEMFLOW_US, 0, 0xfff);
 	gem(OMCI_GEMFLOW_DS, 1, 1434);
 	ok(us(4, 1562, 2) == 0, "an upstream flow is created");
 	ok(us(5, 1563, ODI_SW_PONQ_TCONTS) != 0, "and one on a bad T-CONT is refused");
 	gem(OMCI_GEMFLOW_DS, ODI_SW_CMD_GEM_DS_MAX, 1);
 	ok(hook_set_n == 3, "three flows reported");
-	ok(hook_us[0] == 0 && hook_idx[0] == 0 && hook_gem[0] == 0xfff, "DS 0, the OMCI channel");
+	ok(hook_us[0] == 0 && hook_idx[0] == 0 && hook_gem[0] == 0xfff, "DS 0, the multicast GEM");
 	ok(hook_us[1] == 0 && hook_idx[1] == 1 && hook_gem[1] == 1434, "DS 1 on its GEM port");
 	ok(hook_us[2] == 1 && hook_idx[2] == 4 && hook_gem[2] == 1562, "US 4 on its GEM port");
 	ok(hook_clear_n == 0, "nothing cleared yet");

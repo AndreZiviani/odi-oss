@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Kernel: the downstream multicast GEM port is flagged as multicast on any
+  OLT, as omcid asks, not only when it is GEM port 4095. That port number
+  is ISP1's multicast GEM; ISP2's (4094) and any other OLT's were set up as
+  a plain data port, unlike the stock firmware. A GEM port 4095 that an OLT
+  uses for two-way data now also gets its upstream flow.
+
 - Network: `network.sh` checks the management address and netmask it reads
   (`LAN_IP_ADDR`, `LAN_SUBNET`, `/etc/config/lan-ip`, and the second pair).
   One the kernel refuses (0.0.0.0, loopback, multicast, broadcast, a netmask
