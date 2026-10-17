@@ -112,28 +112,43 @@ void odi_sw_l2_flood_mask_set(uint32_t mask);
 /* cmd 23, a downstream queue: one write of PORT_QUEUE_MAP. */
 void odi_sw_ponmac_queue_add(uint32_t th);
 
-/* cmd 23, an upstream queue on T-CONT n: seven PONQ_COUNT_MASK writes,
- * the scheduler word of T-CONT n among them (odi_sw_qos_sched_set()) and
- * +207, the set of T-CONTs in use (bitmask_207). The order of +208 and
- * +212/+213 depends on n (T-CONT 0 writes +208 first); use_213 picks +213
- * over +212.
+/* The upstream PON queues. The chip has 65: T-CONTs (PON schedulers) 0-7
+ * share queues 0-31, T-CONTs 8-15 share 32-63, and the OMCC T-CONT 16 has
+ * queue 64. A T-CONT's queue mask (PON_SCH_QMAP) holds logical queues, the
+ * queue's number within its group of 32, so physical = 32 * (t / 8) +
+ * logical.
  */
-void odi_sw_ponmac_queue_add_ext(uint32_t n, uint32_t bitmask_207, uint32_t base_15,
-				  uint32_t sched_value, uint32_t val_208,
-				  uint32_t bitmask_212_213, int use_213);
+#define ODI_SW_PONQ_TCONTS		16U	/* data T-CONTs, 0-15 */
+#define ODI_SW_PONQ_GROUP_TCONTS	8U
+#define ODI_SW_PONQ_GROUP_QUEUES	32U
+#define ODI_SW_PONQ_QUEUE_MASK		0x7fU	/* a queue number, 7 bits */
+#define ODI_SW_PONQ_WEIGHT_MAX		0x3ffU	/* PON_WFQ_WEIGHT, 10 bits */
+#define ODI_SW_PONQ_RATE_MAX		0x3ffffU	/* PON_QID_CIR/PIR_RATE, 18 bits */
 
-/* cmd 25, upstream side: US_GEM_PORT_MAP(slot), then word sidvalid_word of
- * PON_SIDVALID (+37), PON_SID_GLB_TH (+235) twice (the ON then the OFF
- * threshold, each written as the whole word), and word sid2qid_word of
- * PON_SID2QID (+20). The caller computes every word.
+/* cmd 23, an upstream queue: logical queue lq (physical pq) joins T-CONT
+ * t. The T-CONT is enabled with its first queue; a queue not yet in the
+ * mask is drained, then added; then its type (wfq: weighted fair, else
+ * strict) and weight (1..ODI_SW_PONQ_WEIGHT_MAX; 1 for a strict queue),
+ * and its CIR and PIR (ODI_SW_PONQ_RATE_MAX: no limit).
  */
-void odi_sw_ponmac_flow_queue_set(uint32_t slot, uint32_t gem_port_id,
-				   uint32_t sidvalid_word, uint32_t sidvalid,
-				   uint32_t glb_th_on, uint32_t glb_th_off,
-				   uint32_t sid2qid_word, uint32_t sid2qid);
+void odi_sw_ponq_queue_add(uint32_t t, uint32_t lq, uint32_t pq, int wfq,
+			   uint32_t weight, uint32_t cir, uint32_t pir);
 
-/* The scheduler word of T-CONT n, PONQ_COUNT_MASK +190+n. */
-void odi_sw_qos_sched_set(uint32_t n, uint32_t value);
+/* cmd 24: the reverse. Nothing when the queue is not in the mask; the
+ * T-CONT is disabled with its last queue. The caller takes the flows of
+ * the queue out of PON_SIDVALID first.
+ */
+void odi_sw_ponq_queue_del(uint32_t t, uint32_t lq, uint32_t pq);
+
+/* cmd 25, upstream side: the flow's GEM port (US_GEM_PORT_MAP), its valid
+ * bit (PON_SIDVALID), its queue (PON_SID2QID), and the global PBO
+ * thresholds for nflows upstream data flows (PON_SID_GLB_TH, the ON then
+ * the OFF field).
+ */
+void odi_sw_ponq_us_gem_set(uint32_t slot, uint32_t gem_port_id);
+void odi_sw_ponq_sidvalid_set(uint32_t sid, int valid);
+void odi_sw_ponq_sid2qid_set(uint32_t sid, uint32_t pq);
+void odi_sw_ponq_glb_th_set(uint32_t nflows);
 
 /* --- odi_switch_ds_gem.c -------------------------------------------------- */
 
