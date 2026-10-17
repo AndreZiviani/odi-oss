@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Docs: ONU2-G's vendor product code 15, which omcid reports while the
+  identity switch is off, is the stock firmware's built-in default for
+  `OMCI_VENDOR_PRODUCT_CODE` (the MIB table compiled into its `configd`),
+  not a value captured from one stick: every stick of that firmware reports
+  15 unless the key was set. The comments and `docs/SETTINGS.md` said
+  "captured". No change to the image.
+
 - omcid: a Get, Get current data, Set or Delete that names an instance of a
   modelled class which omcid holds no row for (it neither creates the
   instance itself nor was given it by the OLT) is logged once per class and

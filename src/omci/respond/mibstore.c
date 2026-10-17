@@ -711,7 +711,8 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		 * and G.988 -- not attribute 3, which is the vendor product
 		 * code. The three identity keys override only when reported
 		 * (cfgstore.c: report); otherwise the answer is what it always
-		 * was, the device id, 0x80 and the captured product code. */
+		 * was, the device id, 0x80 and product code 15, the stock
+		 * firmware's built-in default for that key (cfgstore.c). */
 		if (!report.loaded)
 			cfg_load_report();
 		if (k == 1)
