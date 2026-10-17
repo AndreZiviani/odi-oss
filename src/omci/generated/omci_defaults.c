@@ -42,21 +42,37 @@ const struct omci_default omci_defaults[] = {
 	{ 257, 0x0000, 13, 2, { 0x00, 0x3b } },	/* QosConfigurationFlexibility */
 	{ 257, 0x0000, 14, 2, { 0x00, 0x01 } },	/* PriorityQueueScaleFactor */
 	{ 262, 0x8000, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8000, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x8001, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8001, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x8002, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8002, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x8003, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8003, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x8004, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8004, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x8005, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8005, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x8006, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8006, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x8007, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8007, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x8008, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8008, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x8009, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x8009, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x800a, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x800a, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x800b, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x800b, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x800c, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x800c, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x800d, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x800d, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x800e, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x800e, 3, 1, { 0x01 } },	/* Policy */
 	{ 262, 0x800f, 2, 1, { 0x01 } },	/* ModeInd */
+	{ 262, 0x800f, 3, 1, { 0x01 } },	/* Policy */
 	{ 263, 0x8001, 1, 1, { 0x01 } },	/* SRInd */
 	{ 263, 0x8001, 2, 2, { 0x00, 0x10 } },	/* NumOfTcont */
 	{ 263, 0x8001, 3, 2, { 0x00, 0x30 } },	/* GemBlkLen */
@@ -83,4 +99,4 @@ const struct omci_default omci_defaults[] = {
 	{ 9368, 0x0000, 4, 1, { 0x02 } },	/* TxPwrSupplyCtrl */
 	{ 9368, 0x0000, 5, 1, { 0x01 } },	/* CustomizedOnuType */
 };
-const unsigned omci_defaults_count = 78;
+const unsigned omci_defaults_count = 94;

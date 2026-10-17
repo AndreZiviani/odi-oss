@@ -61,6 +61,13 @@ INIT_VERIFIED = {
     (257, 5), (257, 14),            # security mode (G.988 default 1), queue scale factor
     (263, 3), (263, 6), (263, 7), (263, 11), (263, 12), (263, 15), (263, 16),
 }
+# Reported values that are not taken from the dump at all. T-CONT (ME 262)
+# Policy is OLT-writable, yet it is pinned to 1 on every T-CONT: some OLTs
+# provision the upstream queue scheduling only when the T-CONT reports a
+# non-null policy, the stock firmware reports 1, and nothing on the ONU
+# writes it (the OLT's own T-CONT Sets carry the Alloc-ID only). The value
+# is a constant of the ONU, not what a provisioned stick's OLT wrote.
+FORCED = {(262, 3): '1'}
 # Vendor-private entities the ONU creates itself, taken whole: omcid gates
 # and answers them by key (see docs/SETTINGS.md).
 INIT_CLASSES = {350, 370, 373}
@@ -133,9 +140,12 @@ def main():
             for a in attrs:
                 k = a['index']
                 if k == 0 or (cls, k) in SKIP_ATTRS: continue
-                if ((a['oltAcc'] or 0) & 6) and (cls, k) not in INIT_VERIFIED and cls not in INIT_CLASSES:
+                if (cls, k) in FORCED:
+                    v = FORCED[(cls, k)]
+                elif ((a['oltAcc'] or 0) & 6) and (cls, k) not in INIT_VERIFIED and cls not in INIT_CLASSES:
                     continue
-                v = vals.get(a['name'].lower())
+                else:
+                    v = vals.get(a['name'].lower())
                 if v is None: continue
                 b = encode(v, a['type'], a['len'])
                 if b is None or not any(b): continue
