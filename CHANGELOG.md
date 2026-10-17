@@ -12,6 +12,11 @@ listed here.
   port, so while locked the stick cannot be reached from the host either;
   OMCI still reaches it over the fibre, and a lock of the PON or CPU port
   is refused.
+  A lock no longer outlives the MIB it came from: omcid unlocks every
+  Ethernet UNI on a MIB reset and when it starts with an empty MIB (not on
+  a resume), so a stale lock cannot leave the stick unreachable until a
+  reboot. New odi.conf key `OMCI_UNI_LOCK=0` ignores OLT locks of the UNI
+  altogether (docs/SETTINGS.md); the default honours them.
 
 - Kernel: the upstream PON queues are programmed from what omcid sends,
   not replayed from one ISP's capture. The words cmd 23 wrote per T-CONT

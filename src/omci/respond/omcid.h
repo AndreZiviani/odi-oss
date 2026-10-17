@@ -350,6 +350,7 @@ void apply_mbsp(const struct omci_class *c, uint16_t inst,
 		const struct mib_row *r, uint16_t mask, int creating);
 void delete_mbsp(uint16_t inst);
 void uni_reset(void);
+void uni_start(void);
 /* apply_bridge.c */
 uint32_t veip_uni_port_mask(uint16_t veipId);
 uint32_t all_eth_uni_mask(void);
