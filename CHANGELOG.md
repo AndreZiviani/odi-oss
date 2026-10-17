@@ -22,7 +22,9 @@ listed here.
   the other reserved types are ignored), as G.984.3 9.2.3.10 says. Our own
   Assign_ONU-ID also starts from an empty CAM. Nothing changes on a line
   whose OLT assigns its Alloc-IDs by PLOAM before using them, which all three
-  OLTs we have seen do. Refs #116.
+  OLTs we have seen do. `/proc/odi_gpon/cam` (new) reads the CAM back from
+  the hardware, next to what the driver recorded, to check this on a stick.
+  Refs #116.
 
 - igmpd: the group table no longer takes what a snooper must not hold. A
   report for an address outside 224.0.0.0/4, for a link-local group

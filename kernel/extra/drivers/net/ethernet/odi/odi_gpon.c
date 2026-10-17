@@ -1236,6 +1236,51 @@ static int odi_gpon_proc_ploam_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
+/* /proc/odi_gpon/cam: the Alloc-ID CAM read back from the hardware, one
+ * line per row that is valid in the hardware or recorded by the driver:
+ * "alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->". Row 16 is the
+ * default Alloc-ID, the ONU-ID. Only these rows decide which upstream
+ * grants the ONU answers; status's alloc_ids is the driver's record.
+ */
+static int odi_gpon_proc_cam_show(struct seq_file *seq, void *v)
+{
+	int hw[32], rec[32];
+	unsigned long flags;
+	unsigned int row, valid = 0;
+
+	(void)v;
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	odi_gpon_hw_alloc_cam_read(hw, rec);
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+	for (row = 0; row < 32U; row++) {
+		if (hw[row] == -1 && rec[row] < 0)
+			continue;
+		if (hw[row] >= 0)
+			valid++;
+		seq_printf(seq, "alloc_cam %u hw ", row);
+		if (hw[row] >= 0)
+			seq_printf(seq, "%d", hw[row]);
+		else
+			seq_puts(seq, hw[row] == -2 ? "timeout" : "-");
+		if (rec[row] >= 0)
+			seq_printf(seq, " recorded %d\n", rec[row]);
+		else
+			seq_puts(seq, " recorded -\n");
+	}
+	seq_printf(seq, "alloc_cam_valid %u\n", valid);
+	return 0;
+}
+
+static int odi_gpon_proc_cam_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, odi_gpon_proc_cam_show, NULL);
+}
+
+static const struct proc_ops odi_gpon_proc_cam_fops = {
+	.proc_open = odi_gpon_proc_cam_open, .proc_read = seq_read,
+	.proc_lseek = seq_lseek, .proc_release = single_release,
+};
+
 static int odi_gpon_proc_status_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, odi_gpon_proc_status_show, NULL);
@@ -1297,6 +1342,8 @@ static int __init odi_gpon_module_init(void)
 		pr_info("odi_gpon: /proc/odi_gpon/flows not created\n");
 	if (!proc_create("ploam", 0444, odi_gpon_proc_dir, &odi_gpon_proc_ploam_fops))
 		pr_info("odi_gpon: /proc/odi_gpon/ploam not created\n");
+	if (!proc_create("cam", 0444, odi_gpon_proc_dir, &odi_gpon_proc_cam_fops))
+		pr_info("odi_gpon: /proc/odi_gpon/cam not created\n");
 	return 0; /* never fail module_init over odi_gpon_init()'s own result */
 }
 module_init(odi_gpon_module_init);

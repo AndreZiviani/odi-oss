@@ -80,7 +80,33 @@ static void cam_hook(uint32_t off, uint32_t val)
 	} else if (op == 3U) {
 		cam[row].valid = 0;
 		cam[row].alloc_id = 0;
+	} else if (op == 2U) {
+		/* A read: ROW_VALID in the control word, the entry in RDATA. */
+		if (cam[row].valid)
+			odi_mock.regs[odi_mock_slot(ODI_SW_DSF_ALLOC_CAM_CTL_OFF)] |=
+				ODI_SW_DSF_ALLOC_CAM_CTL_ROW_VALID;
+		odi_mock.regs[odi_mock_slot(ODI_SW_DSF_ALLOC_CAM_RDATA_OFF)] = cam[row].alloc_id;
 	}
+}
+
+/* /proc/odi_gpon/cam's readback agrees with the CAM, row for row, and the
+ * driver's record agrees with both.
+ */
+static int readback_agrees(void)
+{
+	int hw[32], rec[32];
+	unsigned int r;
+
+	odi_gpon_hw_alloc_cam_read(hw, rec);
+	for (r = 0; r < 32U; r++) {
+		int want = cam[r].valid ? (int)cam[r].alloc_id : -1;
+
+		if (hw[r] != want || rec[r] != want) {
+			printf("      row %u: CAM %d, readback %d, recorded %d\n", r, want, hw[r], rec[r]);
+			return 0;
+		}
+	}
+	return 1;
 }
 
 /* The CAM holds exactly these Alloc-IDs (any rows), and nothing else. */
@@ -104,7 +130,7 @@ static int cam_is(const uint16_t *ids, unsigned int n)
 	}
 	if (valid != n)
 		printf("      %u rows valid, %u expected\n", valid, n);
-	return valid == n;
+	return valid == n && readback_agrees();
 }
 
 /* ---- Downstream PLOAM, three copies, one interrupt pass each ------------ */
