@@ -26,6 +26,11 @@ listed here.
   the hardware, next to what the driver recorded, to check this on a stick.
   Refs #116.
 
+- CI: `release.yml` runs `make test` before it builds and publishes (the
+  release job `needs` it). A tag used to publish an image whether or not the
+  tests passed, or had even finished: ci.yml starts on the same tag as a
+  separate workflow that release.yml did not wait for. No change to the image.
+
 - igmpd: the group table no longer takes what a snooper must not hold. A
   report for an address outside 224.0.0.0/4, for a link-local group
   (224.0.0.x) or for any group whose 23-bit MAC is a link-local one
