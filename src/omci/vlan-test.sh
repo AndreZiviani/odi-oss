@@ -94,14 +94,14 @@ check "ISP2, transparent: forward-all, every tag passes both ways" "$got" \
 # With VLAN_CFG_TYPE other than 1 the stock firmware applies the OLT's own
 # extended-VLAN rule. The ISP2-shaped session (one unicast GEM behind a VEIP,
 # a multicast GEM, no class 84) with its class 171 frames replaced by what a
-# Huawei OLT provisions: instance 1 on the Ethernet UNI (association type 2,
+# OLT of issue #29 provisions: instance 1 on the Ethernet UNI (association type 2,
 # point 0x0101) whose table adds a VLAN to untagged frames and drops the
 # single- and double-tagged default, and instance 2 on the multicast side
 # (type 0x0a, point 0x0601) with the default drops only.
 #
 # The entries, as the table attribute carries them (docs, class 171):
 #   untagged -> add VLAN 100 pri 0 tpid 0x8100   f8000000f8000000000f800000000324
-#   claro's  -> add VLAN 1 pri 0                 f8000000f8000000000f80000000000c
+#   ISP1's  -> add VLAN 1 pri 0                 f8000000f8000000000f80000000000c
 DEF1=f8000000e8000000c00f8000000f8000
 DEF2=e8000000e8000000c00f8000000f8000
 ADD100=f8000000f8000000000f800000000324
@@ -184,7 +184,7 @@ run171 p5 /tmp/s171-p5.txt
 got=$(rebuild /tmp/omcid-171-p5.log 0 | sed -n 2p)
 check "the OLT's priority 5 is kept" "$got" "47/1002 gem 657 rule manual-add vid 100 pri 5"
 
-# 3. Manual mode wins: claro's table (VLAN 1, not its service VID) and the
+# 3. Manual mode wins: ISP1's table (VLAN 1, not its service VID) and the
 #    #29 table both leave the stick's own VID 10.
 for t in "$ADD1" "$ADD100"; do
 	store 1 1
@@ -319,4 +319,4 @@ got=$(rebuild /tmp/omcid-171-pri255.log 0 | grep -c 'manual-add')
 check "VLAN_MANU_TAG_PRI 255: no manual tag" "$got" "0"
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit
