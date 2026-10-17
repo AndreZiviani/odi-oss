@@ -275,6 +275,22 @@ static void test_sequence(void)
 		CHECK(!nth_w_val(ODI_SW_SVLAN_SETUP_OFF, 2, &v), "no third SVLAN_SETUP write");
 	}
 
+	/* Step "pon isolate": one read-modify-write of the word that holds the
+	 * PON port (port 2: 0x027004, bits 10:0), which clears its CPU and
+	 * extension-port bits. The mock word reads 0, so the value written is
+	 * 0; the values on a stick's reset word are odi_pon_isolation_test.c's.
+	 * No other isolation word is written.
+	 */
+	{
+		uint32_t v;
+
+		CHECK(nth_w_val(ODI_SW_PORT_ISOLATION(2), 0, &v) && v == 0,
+		      "pon isolate: one write of the PON port's isolation word");
+		CHECK(ODI_SW_PORT_ISOLATION(2) == 0x27004U, "pon isolate: port 2 is in the second word");
+		CHECK(!nth_w_val(ODI_SW_PORT_ISOLATION(2), 1, &v), "pon isolate: no second write");
+		CHECK(!nth_w_val(ODI_SW_PORT_ISOLATION(0), 0, &v), "pon isolate: ports 0 and 1 not written");
+	}
+
 	/* No write after reserved vid's two calls -- pos should now point past the
 	 * last plain-register write this function makes (the sweep's T/D
 	 * entries are not 'W' kind, so pos, which only advances past W

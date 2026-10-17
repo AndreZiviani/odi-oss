@@ -155,6 +155,7 @@ test-host:
 	bash test/odi_switch_acl_clean_test.sh
 	bash test/odi_host_pause_test.sh
 	bash test/odi_host_autoneg_test.sh
+	bash test/odi_pon_isolation_test.sh
 	bash test/odi_omci_test.sh
 	bash test/regdump_test.sh
 	bash test/mkmodload_test.sh

@@ -126,6 +126,40 @@ void odi_sw_host_pause_apply(void)
 		   (unsigned int)ODI_SW_PORT_ABILITY_RX_PAUSE_GET(reg));
 }
 
+bool odi_sw_pon_isolate = true;
+
+/* The PON port's isolation mask: with odi_sw_pon_isolate, the CPU port and
+ * every extension port (the CPU side) are cleared from it, so a frame that
+ * enters from the PON may be forwarded to the UNIs only, whatever the L2
+ * lookup, a flood mask or a classifier row decides. Without it they are
+ * set again, the all-open reset value. One read-modify-write of the PON
+ * port's 11 bits; the other port in the word is kept. Ingress from every
+ * other port is untouched: the host reaches the CPU, and the CPU reaches
+ * the PON (OMCI replies).
+ */
+#define ODI_SW_PON_PORT			2U
+#define ODI_SW_ISOLATION_CPU_SIDE	(0x7f0U | (1U << 3))	/* extension ports, CPU port */
+
+void odi_sw_pon_isolate_apply(void)
+{
+	uint32_t off = ODI_SW_PORT_ISOLATION(ODI_SW_PON_PORT);
+	uint32_t item = ODI_SW_PON_PORT % 2U;
+	uint32_t reg, mask;
+
+	reg = odi_reg_read(off);
+	mask = ODI_SW_PORT_ISOLATION_EGRESS_GET(reg, item);
+	if (odi_sw_pon_isolate)
+		mask &= ~ODI_SW_ISOLATION_CPU_SIDE;
+	else
+		mask |= ODI_SW_ISOLATION_CPU_SIDE;
+	odi_reg_write(off, ODI_SW_PORT_ISOLATION_EGRESS_SET(reg, item, mask));
+
+	mask = ODI_SW_PORT_ISOLATION_EGRESS_GET(odi_reg_read(off), item);
+	ODI_SW_LOG("PON port isolation %s: the PON port forwards to 0x%03x%s\n",
+		   odi_sw_pon_isolate ? "on" : "off", (unsigned int)mask,
+		   (mask & ODI_SW_ISOLATION_CPU_SIDE) ? " (the CPU included)" : " (never the CPU)");
+}
+
 bool odi_sw_host_autoneg = true;
 
 /* Only the AUTONEG bit of the PCS control word moves; speed (1000) and

@@ -27,6 +27,17 @@ image does not act on -- is still what the stock firmware reads when the stick
 falls back to it. Do not delete keys this image does not use, and keep
 backups whole: the UI's backup and restore carry every key.
 
+**The management is reachable from the host side only.** The web UI
+(port 80), ssh and the exporter (port 9100) listen on every address of the
+stick, and no setting changes that: nothing that arrives from the fibre
+reaches the stick's IP stack, whatever the OLT provisions or the VLAN
+settings below say. The switch never forwards a frame from the PON port to
+the CPU, and the NIC driver drops any non-OMCI frame from the PON port that
+gets there anyway (`docs/SWITCH.md`, "PON port isolation"). The kernel
+parameter `odi_switch.pon_isolate=N` turns the switch half off, should an
+OLT's OMCI ever need it; the driver half has no switch. Everyone on the
+host side can reach the management, so change the web UI's default login.
+
 **Apply classes.** Every setting and control is marked with one of four
 classes, in this document and beside it in the UI:
 

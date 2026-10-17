@@ -146,7 +146,8 @@ void odi_reg_write(uint32_t off, uint32_t val)
  * Returns 0, or the loader error (already logged).
  */
 /* Set once the platform settings have run, under odi_switch_lock: from
- * then on a change of odi_switch.host_pause applies at once.
+ * then on a change of odi_switch.host_pause or odi_switch.pon_isolate
+ * applies at once.
  */
 static bool odi_switch_platform_done;
 
@@ -194,6 +195,37 @@ static const struct kernel_param_ops odi_switch_host_pause_param_ops = {
 };
 module_param_cb(host_pause, &odi_switch_host_pause_param_ops, &odi_sw_host_pause, 0644);
 MODULE_PARM_DESC(host_pause, "send PAUSE frames to the host when the switch is congested (default: no, the switch drops)");
+
+/* odi_switch.pon_isolate: the PON port isolated from the CPU side (the
+ * default), or left open as the reset value and the stock image leave it.
+ * On the command line it takes effect with the platform settings; written
+ * to /sys/module/odi_switch/parameters/pon_isolate after them it is
+ * applied at once, one register write. The escape hatch should an OLT's
+ * OMCI ever need the open mask; the NIC drops every non-OMCI frame from
+ * the PON either way (odi_nic.c).
+ */
+static int odi_switch_pon_isolate_param_set(const char *val, const struct kernel_param *kp)
+{
+	bool on;
+	int rc;
+
+	rc = kstrtobool(val, &on);
+	if (rc)
+		return rc;
+	mutex_lock(&odi_switch_lock);
+	odi_sw_pon_isolate = on;
+	if (odi_switch_platform_done)
+		odi_sw_pon_isolate_apply();
+	mutex_unlock(&odi_switch_lock);
+	return 0;
+}
+
+static const struct kernel_param_ops odi_switch_pon_isolate_param_ops = {
+	.set = odi_switch_pon_isolate_param_set,
+	.get = param_get_bool,
+};
+module_param_cb(pon_isolate, &odi_switch_pon_isolate_param_ops, &odi_sw_pon_isolate, 0644);
+MODULE_PARM_DESC(pon_isolate, "never forward a frame from the PON port to the CPU (default: yes; no leaves the port isolation open, as stock)");
 
 /* odi_switch.host_autoneg: the 1000BASE-X auto-negotiation of the host
  * port, on (the default) or off (forced 1000BASE-X full duplex). Written to

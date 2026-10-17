@@ -82,6 +82,20 @@ extern bool odi_sw_host_pause;
  */
 void odi_sw_host_pause_apply(void);
 
+/* Whether the PON port is isolated from the CPU: true (the default) clears
+ * the CPU side from the PON port's isolation mask, so no frame from the
+ * PON is ever forwarded to the CPU; false leaves the mask all open, as the
+ * reset value and the stock image do. The kernel
+ * parameter odi_switch.pon_isolate (odi_switch.c) sets it.
+ * docs/SWITCH.md#pon-port-isolation has why.
+ */
+extern bool odi_sw_pon_isolate;
+
+/* Applies odi_sw_pon_isolate to the PON port's isolation mask and logs the
+ * mask it then reads. Idempotent; the caller holds odi_switch_lock.
+ */
+void odi_sw_pon_isolate_apply(void);
+
 /* Whether the host port runs the 1000BASE-X auto-negotiation (clause 37)
  * with the host: true (the default, what the stock image and every host
  * seen so far run) or false, the PCS forced to 1000BASE-X full duplex for a

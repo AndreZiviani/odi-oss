@@ -11746,6 +11746,9 @@ W 180 0
 r 1b4 0
 W 1b4 40
 r 198 0
+r 27004 3fffff
+W 27004 3ff807
+r 27004 3ff807
 # phase: init_modload
 T 140000 0
 D 14 0

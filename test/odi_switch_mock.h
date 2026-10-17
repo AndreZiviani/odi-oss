@@ -214,6 +214,22 @@ static inline void odi_mock_flood_boot_state(void)
 	odi_mock.regs[odi_mock_slot(0x1c028U)] = 0xfU;
 }
 
+/* The port isolation words as a stick reads them before anything writes
+ * them (a register dump of a running stick, on the stock modules and on
+ * ours alike): every port and extension port open to every port, two
+ * 11-bit items a word, the fourth extension word half used. Nothing in
+ * the board, sdkinit or module-load replays writes them. Not logged.
+ */
+static inline void odi_mock_port_isolation_reset_state(void)
+{
+	odi_mock.regs[odi_mock_slot(0x27000U)] = 0x003fffffU;	/* ports 0, 1 */
+	odi_mock.regs[odi_mock_slot(0x27004U)] = 0x003fffffU;	/* ports 2, 3 */
+	odi_mock.regs[odi_mock_slot(0x27008U)] = 0x003fffffU;	/* extension ports 0, 1 */
+	odi_mock.regs[odi_mock_slot(0x2700cU)] = 0x003fffffU;	/* 2, 3 */
+	odi_mock.regs[odi_mock_slot(0x27010U)] = 0x003fffffU;	/* 4, 5 */
+	odi_mock.regs[odi_mock_slot(0x27014U)] = 0x000007ffU;	/* 6 */
+}
+
 /* TABLE_CMD/STS/WR_DATA/RD_DATA, 0x012000-0x01202c -- the real
  * regtrace skip list drops every write in this range, which is exactly why
  * boot5's captured brackets carry no W entries for the table-access

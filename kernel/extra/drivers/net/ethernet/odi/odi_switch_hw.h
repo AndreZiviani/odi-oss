@@ -352,6 +352,28 @@ static inline uint32_t ODI_SW_L2_LOOKUP_SETUP_AGE_TICKS_SET(uint32_t reg, uint32
 #define ODI_SW_FLOOD_BCAST_PORTS_BASE		0x1c020U
 #define ODI_SW_FLOOD_UNKN_MCAST_PORTS_BASE	0x1c024U
 
+/* PORT_ISOLATION: 0x027000, 4 ports of 11 bits, two a word -- a third
+ * shape: neither one word for every item nor a word per item. Port n is
+ * at bit 11 * (n % 2) of the word at BASE + 4 * (n / 2); BASE + 4n would
+ * put ports 2 and 3 on PORT_ISOLATION_EXT, the next register, at
+ * 0x027008. The reset value, read on a stick, is 0x003fffff in both
+ * words: every port may forward to every port. Per ingress port, bits 3:0
+ * are the switch ports it may forward to and bits 10:4 the CPU-side
+ * extension ports. _EGRESS_GET/_SET take the item within its word, n % 2.
+ */
+#define ODI_SW_PORT_ISOLATION_BASE	0x27000U	/* 4 items, 11 bits each, two a word */
+#define ODI_SW_PORT_ISOLATION(n)	(ODI_SW_PORT_ISOLATION_BASE + 4U * ((uint32_t)(n) / 2U))
+static inline uint32_t ODI_SW_PORT_ISOLATION_EGRESS_GET(uint32_t reg, uint32_t item)
+{
+	uint32_t sh = 0 + item * 11U;
+	return (reg >> sh) & 0x7ffU;
+}
+static inline uint32_t ODI_SW_PORT_ISOLATION_EGRESS_SET(uint32_t reg, uint32_t item, uint32_t val)
+{
+	uint32_t sh = 0 + item * 11U;
+	return (reg & ~(0x7ffU << sh)) | ((val & 0x7ffU) << sh);
+}
+
 /* IPMC_VLAN_LEAK: 0x01c030, 4 ports packed 1 bit each */
 #define ODI_SW_IPMC_VLAN_LEAK_BASE	0x1c030U	/* 4 items packed, 1 bits each */
 #define ODI_SW_IPMC_VLAN_LEAK(n)	((void)(uint32_t)(n), ODI_SW_IPMC_VLAN_LEAK_BASE)	/* compat: same word for every item, 0..3 */

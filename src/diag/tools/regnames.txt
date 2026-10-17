@@ -260,6 +260,14 @@ reg 0x015040 ACL_PORT_ENABLE
 reg 0x01600c CLASSIFY_SETUP    12:5=PATTERN1_COUNT 3:3=PON_SELECT 2:2=DS_NO_MATCH_ACTION 1:0=US_NO_MATCH_ACTION
 reg 0x016010 CLASSIFY_PATTERN_SEL 0:0=PATTERN
 
+# Port isolation: per ingress port, the ports it may forward to (bits 3:0,
+# bit n = switch port n) and the CPU-side extension ports (bits 10:4). Two
+# 11-bit items a word: port n at 0x027000 + 4 * (n / 2), bit 11 * (n % 2).
+# The PON port's mask is narrowed by odi_switch (docs/SWITCH.md, "PON port
+# isolation"); the extension-port table follows at 0x027008.
+reg 0x027000 PORT_ISOLATION    10:0=EGRESS
+reg 0x027008 PORT_ISOLATION_EXT 10:0=EGRESS
+
 # Flooding and reserved link-local multicast (01:80:C2:00:00:xx)
 reg 0x01c020 FLOOD_BCAST_PORTS
 reg 0x01c024 FLOOD_UNKN_MCAST_PORTS

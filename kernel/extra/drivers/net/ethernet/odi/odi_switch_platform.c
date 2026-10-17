@@ -261,6 +261,17 @@ static void odi_switch_platform_host_autoneg(void)
 		odi_sw_host_autoneg_apply();
 }
 
+/* The PON port isolated from the CPU side per odi_sw_pon_isolate (on by
+ * default): nothing that enters from the fibre is ever forwarded to the
+ * CPU, whatever an OLT provisions (docs/SWITCH.md#pon-port-isolation).
+ * Ours: the stock image leaves every port open to every port. Before
+ * omcid starts, so before any service exists.
+ */
+static void odi_switch_platform_pon_isolate(void)
+{
+	odi_sw_pon_isolate_apply();
+}
+
 static const struct {
 	void (*fn)(void);
 	const char *name;
@@ -274,6 +285,7 @@ static const struct {
 	{ odi_switch_platform_reserved_vid, "reserved vid" },
 	{ odi_switch_platform_host_pause, "host pause" },
 	{ odi_switch_platform_host_autoneg, "host autoneg" },
+	{ odi_switch_platform_pon_isolate, "pon isolate" },
 };
 
 /* The log names the step before it touches hardware, so a log cut short
