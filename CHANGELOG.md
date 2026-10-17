@@ -13,8 +13,8 @@ listed here.
   so any interruption leaves a kernel U-Boot refuses (bad magic or data CRC).
   The guard comment about the watchdog on a committed boot is corrected too:
   odi_wdt arms the watchdog itself once it initialises. New host test
-  `test/fwu_write_order_test.sh`. Found in the night audit of the update path
-  (investigations/odi-sfp-re/AUDIT-night-flash.md).
+  `test/fwu_write_order_test.sh`. Found in an audit of the update path; a
+  trial flash with this order ran on a stick.
 
 - OMCI: the LOID password omcid reports (ONU-G, CTC LOID entity) follows the
   LOID, as the stock `runomci.sh` does: with the same `LOID` and `LOID_OLD`
