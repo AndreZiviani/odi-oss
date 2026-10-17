@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Tests: the global PBO thresholds for six and more upstream flows are
+  checked against the stock formula, read this time from the stock kernel of
+  the image itself (the function at 0x80131f50 of its vmlinux), not only from
+  the vendor SDK: six flows give 7154/6994, forty-one reach the 2000/1840
+  floor, and the per-flow step is read from the register. This confirms what
+  #116 writes; the fifth pair the driver kept before #116 for six flows was
+  our own earlier value, not a stock one. No change to the image. Refs #116,
+  #42.
+
 - omcid, kernel: an OLT Set no longer interrupts all upstream traffic, and a
   MIB reset or an omcid restart leaves no upstream state behind. Since #116 a
   rebuild of the upstream QoS really deleted and re-created every queue and

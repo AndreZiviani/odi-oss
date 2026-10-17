@@ -231,6 +231,30 @@ int main(void)
 	   "the new provisioning gets three queues at the start of the group");
 	ok(flow(0, 72, 0, 2, 1) == 0 && reg(SIDVALID) == 0x1U && sid2qid(0) == 2U,
 	   "and its flow, the only one valid");
+	/* The stock kernel of our image computes the global PBO thresholds
+	 * in dal_rtl9602c_gpon_flowctrl_adjust_byFlowNum (0x80131f50 in
+	 * stock-vmlinux, read from its instructions, not from our code): ON =
+	 * 7904 - (n-1)*step, OFF = 7744 - (n-1)*step, step = PON_SID_RPV_TH[0]
+	 * ON (0x96 = 150 after the sdkinit replay), and ON < 2000 gives
+	 * 2000/1840. No cap at five flows. The values below are that formula
+	 * worked by hand.
+	 */
+	puts("global PBO thresholds past five flows (stock formula):");
+	fresh();
+	tcont(0x600, 1);
+	queue(0, 0, 0, 1, 0, 0);
+	for (uint32_t i = 0; i < 6; i++)
+		flow(i, 600 + i, 0, 0, 1);
+	ok(reg(GLB_TH) == ((7154U << 16) | 6994U), "six flows: 7154/6994, not the fifth pair");
+	for (uint32_t i = 6; i < 40; i++)
+		flow(i, 600 + i, 0, 0, 1);
+	ok(reg(GLB_TH) == ((2054U << 16) | 1894U), "forty flows: 2054/1894, still above the floor");
+	flow(40, 640, 0, 0, 1);
+	ok(reg(GLB_TH) == ((2000U << 16) | 1840U), "forty-one flows: the floor, 2000/1840");
+	flow(40, 0, 0, 0, 0);
+	odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(236U))] = (100U << 16) | 0x82U;
+	flow(40, 640, 0, 0, 1);
+	ok(reg(GLB_TH) == ((3904U << 16) | 3744U), "the step is read from PON_SID_RPV_TH[0]: 100");
 
 	puts("T-CONT index is the Alloc-ID's CAM row:");
 	fresh();
