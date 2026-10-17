@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- igmpd: the group table no longer takes what a snooper must not hold. A
+  report for an address outside 224.0.0.0/4, for a link-local group
+  (224.0.0.x) or for any group whose 23-bit MAC is a link-local one
+  (239.0.0.251 shares 01:00:5e:00:00:fb with mDNS) is ignored, because a
+  static entry for it would restrict that traffic to the ports that asked
+  (RFC 4541 2.1.2). A v3 record of type ALLOW_NEW_SOURCES with no sources,
+  BLOCK_OLD_SOURCES or an unknown type no longer counts as a join. And the
+  switch row is written per MAC, not per group: two groups that share a MAC
+  (224.1.1.1 and 225.1.1.1), or one group on two VLANs, are one row that holds
+  the union of their ports, so the last member of one no longer deletes the
+  row the other still needs. Not reachable on a running stick today (igmpd is
+  not started and receives no frame); it is the daemon's own unit tests that
+  cover it. Refs the multicast audit, AUDIT-night-multicast.md.
+
 - Tests: the `make test-rcs` goldens (`test/fixtures/rcs-trace-*.txt`) are
   regenerated: they predated the `safe-mode.sh count` and `boot-ok` and the
   `host-autoneg.sh boot` steps of rcS (#67, #76, #98) and so failed. The trace
