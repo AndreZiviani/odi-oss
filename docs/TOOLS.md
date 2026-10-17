@@ -388,6 +388,11 @@ layout. The writes go
 through `/dev/odi_sw` (`ODI_SW_IOC_L2_MC_ADD`/`_DEL`, `odi_switch_l2.c`);
 `diag l2-table get all` shows the result.
 
+The table keeps what a snooper may keep: no state for an address outside
+224.0.0.0/4, for a link-local group (224.0.0.x) or for a group that shares a
+link-local MAC (RFC 4541 2.1.2: those are flooded), and one switch row per
+MAC, holding the union of the ports of every group that maps to it.
+
 `-j` and `-l` drive that same switch path by hand, without registering
 anything, so an entry can be put in and checked without an IGMP frame:
 
