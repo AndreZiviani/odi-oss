@@ -1,0 +1,28 @@
+RTK.0> pon get transceiver monitoring-type
+Monitoring type: 0x68
+Digital diagnostics: implemented
+Calibration: internal
+Rx power type: average
+RTK.0> pon get transceiver limits
+Temperature alarm high: 100.000000 C
+Temperature alarm low: -40.000000 C
+Temperature warning high: 90.000000 C
+Temperature warning low: -20.000000 C
+Voltage alarm high: 3.600000 V
+Voltage alarm low: 3.000000 V
+Voltage warning high: 3.500000 V
+Voltage warning low: 3.100000 V
+Bias Current alarm high: 100.000000 mA
+Bias Current alarm low: 1.000000 mA
+Bias Current warning high: 90.000000 mA
+Bias Current warning low: 1.000000 mA
+Tx Power alarm high: 5.999922  dBm
+Tx Power alarm low: -0.500248  dBm
+Tx Power warning high: 5.499959  dBm
+Tx Power warning low: 0.000000  dBm
+Rx Power alarm high: -7.000571  dBm
+Rx Power alarm low: -30.000000  dBm
+Rx Power warning high: -7.999707  dBm
+Rx Power warning low: -28.860566  dBm
+RTK.0> exit
+

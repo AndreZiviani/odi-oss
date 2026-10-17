@@ -106,6 +106,21 @@ jobs:
       - name: "OMCI daemon under qemu: ${{ matrix.suite }}"
         run: make test-omci-${{ matrix.suite }}
 
+  # The unit tests of omcid's class 171 decode (src/omci/respond) and of igmpd
+  # (src/igmp/test), under qemu-user in the diag toolchain container. They
+  # were in no job before; `make test` runs them as legs too.
+  mips-units:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [test-omci-respond, test-igmp]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: "Unit tests: ${{ matrix.target }}"
+        run: make ${{ matrix.target }}
+
   clean-build:
     runs-on: ubuntu-latest
     steps:
@@ -169,7 +184,7 @@ jobs:
 
   full:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    needs: [lint, host, diag, omci]
+    needs: [lint, host, diag, omci, mips-units]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

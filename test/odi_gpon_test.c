@@ -845,6 +845,37 @@ static void test_request_key_two_fragments(void)
 	CHECK(second == first + 1U, "the next Request_Key reports its key under the next Key_Index");
 }
 
+/* G.984.3 9.2.3 (Request_Password: "Send the password message 3 times")
+ * and 9.2.4 (Password: the OLT wants three identical copies): one
+ * Request_Password in O5 gets three Password messages, all the same.
+ */
+static void test_request_password_three_copies(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct recorder rec;
+	struct odi_gpon_ploam msg;
+	unsigned int i, n = 0, same = 1;
+	const struct odi_gpon_ploam *first = NULL;
+
+	fsm_setup(&fsm, &rec);
+	drive_to_o5(&fsm, &rec);
+	rec_reset(&rec);
+	msg = make_ds(TEST_ASSIGNED_ONU_ID, ODI_GPON_DS_REQUEST_PASSWORD);
+	odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
+	for (i = 0; i < rec.n; i++) {
+		if (rec.log[i].kind != ACT_SEND_US_PLOAM ||
+		    rec.log[i].ploam.type != ODI_GPON_US_PASSWORD)
+			continue;
+		if (!first)
+			first = &rec.log[i].ploam;
+		else if (memcmp(first, &rec.log[i].ploam, sizeof(*first)))
+			same = 0;
+		n++;
+	}
+	CHECK(n == 3U, "Request_Password answered with three Password messages");
+	CHECK(same, "the three copies are identical");
+}
+
 /* True when the rendered ring content holds any key byte at its place as
  * two hex digits, or the key's hex anywhere in it.
  */
@@ -1321,6 +1352,7 @@ int main(void)
 	test_to2_expiry_falls_to_o1_and_reranges();
 	test_line_event_levels();
 	test_request_key_two_fragments();
+	test_request_password_three_copies();
 	test_ring_masks_key();
 	test_key_switching_time();
 	test_transition_causes();

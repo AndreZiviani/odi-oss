@@ -154,7 +154,7 @@ static void model_write(uint32_t off, uint32_t val)
 	}
 }
 
-/* What vero read back after a power cut: GEM-port rows 0..119 valid with
+/* What ISP2 read back after a power cut: GEM-port rows 0..119 valid with
  * mostly-ones port ids, rows 120..127 clear, every Alloc-ID row valid,
  * flow type words 1..119 not zero. Nobody has read the multicast filter
  * after a power cut: here every third row holds a random word, and its
@@ -355,7 +355,7 @@ static void test_reset_wait(void)
 }
 
 /* The shipped boot table on a cold stick: the block stays in reset for
- * about as long as vero showed (its cleans of GEM-port rows 0..119 were
+ * about as long as ISP2 showed (its cleans of GEM-port rows 0..119 were
  * lost, about 460 records of the replay), after the release.
  */
 #define COLD_RESET_ACCESSES	460U
