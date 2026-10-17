@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Tests: the global PBO thresholds for six and more upstream flows are
+  checked against the stock formula, read this time from the stock kernel of
+  the image itself (the function at 0x80131f50 of its vmlinux), not only from
+  the vendor SDK: six flows give 7154/6994, forty-one reach the 2000/1840
+  floor, and the per-flow step is read from the register. This confirms what
+  #116 writes; the fifth pair the driver kept before #116 for six flows was
+  our own earlier value, not a stock one. No change to the image. Refs #116,
+  #42.
+
 - igmpd: the group table no longer takes what a snooper must not hold. A
   report for an address outside 224.0.0.0/4, for a link-local group
   (224.0.0.x) or for any group whose 23-bit MAC is a link-local one
