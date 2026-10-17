@@ -28,4 +28,11 @@
  */
 int odi_switch_boot_init(void);
 
+/* odi_switch_pin.c: brings the static L2 rows that pin the stick's own
+ * MACs to the CPU port in step with the addresses of the odi_nic devices
+ * that are up (and their bridge). Run by the netdevice notifier and once
+ * more by odi_switch_boot_init(). Caller holds odi_switch_lock.
+ */
+void odi_switch_pin_sync(void);
+
 #endif /* ODI_SWITCH_API_H */

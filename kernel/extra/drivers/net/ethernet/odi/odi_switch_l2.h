@@ -223,4 +223,66 @@ int odi_switch_l2_next(uint32_t *index, struct odi_sw_l2_row *row);
 int odi_switch_l2_mcast_add(const struct odi_sw_l2_mcast_req *req, uint32_t *index);
 int odi_switch_l2_mcast_del(const struct odi_sw_l2_mcast_req *req, int *found);
 
+/* ---- Static unicast rows: the stick's own MACs on the CPU port ----------
+ *
+ * A learned row moves to whatever port last sent a frame with its MAC as
+ * the source, the PON port included: one frame from the fibre carrying the
+ * stick's MAC would divert host-to-stick traffic upstream. A static row
+ * (bit 62, the vendor's "no SA learning") is not learned over: a frame
+ * whose source hits it from another port is an "illegal port move",
+ * handled by LUT_UNMATCHED_SA_CTRL (0x01c000; the boot replay sets
+ * "forward the frame", and the row stays). Age is written non-zero, as the
+ * vendor SDK does for a static unicast row. The key is the one the
+ * hardware gives the stick's MAC when it learns it from the CPU port (SVL,
+ * filtering id 0, VID 0: docs/KERNEL.md), so the write lands on the
+ * learned row and replaces it. docs/SWITCH.md#the-sticks-mac has why.
+ */
+
+/* A MAC this driver will pin: unicast and not all zero. */
+int odi_switch_l2_ucast_mac_ok(const uint8_t mac[6]);
+
+/* The row of a static unicast entry for mac on port, valid set; with
+ * valid 0 the key alone (MAC, key 0, SVL), for a delete. -22 for a MAC
+ * odi_switch_l2_ucast_mac_ok() refuses or a port past 3.
+ */
+int odi_switch_l2_ucast_static_encode(const uint8_t mac[6], uint32_t port, int valid,
+				      uint32_t raw[ODI_SW_L2_WORDS]);
+
+/* Write the static row through the hash (replacing a learned row with the
+ * same key), or remove the row with mac's key, learned or static. The
+ * return codes are odi_switch_l2_mcast_add()'s and _del()'s.
+ */
+int odi_switch_l2_ucast_static_add(const uint8_t mac[6], uint32_t port, uint32_t *index);
+int odi_switch_l2_ucast_del(const uint8_t mac[6], int *found);
+
+/* The set of pinned MACs, and the reconcile that keeps the table in step
+ * with the MACs the stick uses (odi_switch_pin.c collects them). A sync
+ * removes every pinned MAC no longer wanted and (re)writes every wanted
+ * one, so a second sync with the same set rewrites the same rows and
+ * changes nothing. Only MACs whose write succeeded stay in *pinned; a
+ * failed one is tried again by the next sync. Caller holds
+ * odi_switch_lock.
+ */
+#define ODI_SW_L2_PINS_MAX	4U
+
+struct odi_sw_l2_pins {
+	uint32_t n;
+	uint8_t mac[ODI_SW_L2_PINS_MAX][6];
+};
+
+struct odi_sw_l2_pin_report {
+	uint32_t added;				/* bit i: want->mac[i] newly pinned */
+	uint32_t failed;			/* bit i: want->mac[i] could not be written */
+	int rc[ODI_SW_L2_PINS_MAX];		/* per wanted MAC: 0 or the add error */
+	uint32_t row[ODI_SW_L2_PINS_MAX];	/* per wanted MAC: the row on success */
+	uint32_t removed_n;
+	uint8_t removed[ODI_SW_L2_PINS_MAX][6];
+};
+
+/* Adds mac to *set unless it is there already or refused; 1 when added. */
+int odi_switch_l2_pins_add(struct odi_sw_l2_pins *set, const uint8_t mac[6]);
+
+void odi_switch_l2_pins_sync(struct odi_sw_l2_pins *pinned, const struct odi_sw_l2_pins *want,
+			     uint32_t port, struct odi_sw_l2_pin_report *rep);
+
 #endif /* ODI_SWITCH_L2_H */

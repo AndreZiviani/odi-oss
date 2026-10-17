@@ -263,7 +263,8 @@ static void odi_switch_platform_host_autoneg(void)
 
 /* The PON port isolated from the CPU side per odi_sw_pon_isolate (on by
  * default): nothing that enters from the fibre is ever forwarded to the
- * CPU, whatever an OLT provisions (docs/SWITCH.md#pon-port-isolation).
+ * CPU, and nothing the CPU sends reaches the fibre by lookup, whatever an
+ * OLT provisions (docs/SWITCH.md#pon-port-isolation).
  * Ours: the stock image leaves every port open to every port. Before
  * omcid starts, so before any service exists.
  */

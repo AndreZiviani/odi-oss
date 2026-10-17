@@ -16,6 +16,7 @@
 #include <linux/types.h>
 
 struct sk_buff;
+struct net_device;
 
 /* The RX descriptor words: a hook reads reason, source port, stream id
  * and VLAN fields out of them (the OMCI hook keys on reason 246 on this
@@ -65,5 +66,11 @@ int odi_nic_tx_words(const void *frame, unsigned short len, const struct odi_tx_
  */
 bool odi_nic_rx_taken(u32 *taken);
 void odi_nic_report(void);
+
+/* Whether dev is one of this driver's net devices that sends frames to a
+ * switch port (eth0, eth0.2, eth0.3; not nas0 or pon0): the devices whose
+ * address the switch pins to the CPU port (odi_switch_pin.c).
+ */
+bool odi_nic_dev_transmits(const struct net_device *dev);
 
 #endif /* ODI_NIC_H */

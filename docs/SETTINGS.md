@@ -33,7 +33,8 @@ stick, and no setting changes that: nothing that arrives from the fibre
 reaches the stick's IP stack, whatever the OLT provisions or the VLAN
 settings below say. The switch never forwards a frame from the PON port to
 the CPU, and the NIC driver drops any non-OMCI frame from the PON port that
-gets there anyway (`docs/SWITCH.md`, "PON port isolation"). The kernel
+gets there anyway (`docs/SWITCH.md`, "PON port isolation"). The other
+way, the stick sends nothing toward the fibre but its OMCI replies. The kernel
 parameter `odi_switch.pon_isolate=N` turns the switch half off, should an
 OLT's OMCI ever need it; the driver half has no switch. Everyone on the
 host side can reach the management, so change the web UI's default login.

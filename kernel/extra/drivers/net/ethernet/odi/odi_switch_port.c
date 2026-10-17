@@ -128,36 +128,60 @@ void odi_sw_host_pause_apply(void)
 
 bool odi_sw_pon_isolate = true;
 
-/* The PON port's isolation mask: with odi_sw_pon_isolate, the CPU port and
- * every extension port (the CPU side) are cleared from it, so a frame that
- * enters from the PON may be forwarded to the UNIs only, whatever the L2
- * lookup, a flood mask or a classifier row decides. Without it they are
- * set again, the all-open reset value. One read-modify-write of the PON
- * port's 11 bits; the other port in the word is kept. Ingress from every
- * other port is untouched: the host reaches the CPU, and the CPU reaches
- * the PON (OMCI replies).
+/* The PON port isolated from the CPU side, both ways, with
+ * odi_sw_pon_isolate:
+ * - the PON port's mask loses the CPU port and every extension port (the
+ *   CPU side): a frame that enters from the PON may be forwarded to the
+ *   UNIs only, whatever the L2 lookup, a flood mask or a classifier row
+ *   decides;
+ * - the CPU port's mask loses the PON port: a frame the CPU sends that the
+ *   switch forwards by lookup (a broadcast, an unknown unicast) never
+ *   leaves by the PON. The OMCI replies are not forwarded by lookup: they
+ *   carry PORT_SEL and the PON port mask (odi_omci.c), a directed TX, which
+ *   the vendor forwarding engine filters by isolation in software because
+ *   the hardware does not (docs/SWITCH.md#pon-port-isolation). The frames
+ *   of the IP stack carry a host-port mask (odi_nic_stack_tx_mask()), so
+ *   this half only matters should the switch forward those by lookup.
+ * Without it the bits are set again, the all-open reset value. Ports 2
+ * and 3 share the word: one read-modify-write. Ingress from the UNIs is
+ * untouched: the host reaches the CPU and the fibre.
  */
 #define ODI_SW_PON_PORT			2U
-#define ODI_SW_ISOLATION_CPU_SIDE	(0x7f0U | (1U << 3))	/* extension ports, CPU port */
+#define ODI_SW_CPU_PORT			3U
+#define ODI_SW_ISOLATION_CPU_SIDE	(0x7f0U | (1U << ODI_SW_CPU_PORT))	/* extension ports, CPU port */
+#define ODI_SW_ISOLATION_PON		(1U << ODI_SW_PON_PORT)
+/* The two ports share one word, so the apply is one write. */
+typedef char odi_sw_pon_cpu_share_a_word[(ODI_SW_PORT_ISOLATION(ODI_SW_PON_PORT) ==
+					 ODI_SW_PORT_ISOLATION(ODI_SW_CPU_PORT)) ? 1 : -1];
 
 void odi_sw_pon_isolate_apply(void)
 {
 	uint32_t off = ODI_SW_PORT_ISOLATION(ODI_SW_PON_PORT);
-	uint32_t item = ODI_SW_PON_PORT % 2U;
-	uint32_t reg, mask;
+	uint32_t pon_item = ODI_SW_PON_PORT % 2U, cpu_item = ODI_SW_CPU_PORT % 2U;
+	uint32_t reg, pon, cpu;
 
 	reg = odi_reg_read(off);
-	mask = ODI_SW_PORT_ISOLATION_EGRESS_GET(reg, item);
-	if (odi_sw_pon_isolate)
-		mask &= ~ODI_SW_ISOLATION_CPU_SIDE;
-	else
-		mask |= ODI_SW_ISOLATION_CPU_SIDE;
-	odi_reg_write(off, ODI_SW_PORT_ISOLATION_EGRESS_SET(reg, item, mask));
+	pon = ODI_SW_PORT_ISOLATION_EGRESS_GET(reg, pon_item);
+	cpu = ODI_SW_PORT_ISOLATION_EGRESS_GET(reg, cpu_item);
+	if (odi_sw_pon_isolate) {
+		pon &= ~ODI_SW_ISOLATION_CPU_SIDE;
+		cpu &= ~ODI_SW_ISOLATION_PON;
+	} else {
+		pon |= ODI_SW_ISOLATION_CPU_SIDE;
+		cpu |= ODI_SW_ISOLATION_PON;
+	}
+	reg = ODI_SW_PORT_ISOLATION_EGRESS_SET(reg, pon_item, pon);
+	reg = ODI_SW_PORT_ISOLATION_EGRESS_SET(reg, cpu_item, cpu);
+	odi_reg_write(off, reg);
 
-	mask = ODI_SW_PORT_ISOLATION_EGRESS_GET(odi_reg_read(off), item);
-	ODI_SW_LOG("PON port isolation %s: the PON port forwards to 0x%03x%s\n",
-		   odi_sw_pon_isolate ? "on" : "off", (unsigned int)mask,
-		   (mask & ODI_SW_ISOLATION_CPU_SIDE) ? " (the CPU included)" : " (never the CPU)");
+	reg = odi_reg_read(off);
+	pon = ODI_SW_PORT_ISOLATION_EGRESS_GET(reg, pon_item);
+	cpu = ODI_SW_PORT_ISOLATION_EGRESS_GET(reg, cpu_item);
+	ODI_SW_LOG("PON port isolation %s: the PON port forwards to 0x%03x%s, the CPU port to 0x%03x%s\n",
+		   odi_sw_pon_isolate ? "on" : "off", (unsigned int)pon,
+		   (pon & ODI_SW_ISOLATION_CPU_SIDE) ? " (the CPU included)" : " (never the CPU)",
+		   (unsigned int)cpu,
+		   (cpu & ODI_SW_ISOLATION_PON) ? " (the PON included)" : " (never the PON by lookup)");
 }
 
 bool odi_sw_host_autoneg = true;

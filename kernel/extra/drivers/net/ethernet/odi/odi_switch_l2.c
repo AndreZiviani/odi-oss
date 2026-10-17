@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * The L2 lookup table: row readback, the valid-row walk behind the MAC
- * table, and L2 multicast add/delete for igmpd. odi_switch_l2.h has the
+ * table, L2 multicast add/delete for igmpd, and the static unicast rows
+ * that pin the stick's own MACs to the CPU port. odi_switch_l2.h has the
  * row layout and the register fields.
  *
  * The read side is checked against the hardware: a stick with four
@@ -11,6 +12,12 @@
  * the host test pins there is the arithmetic (every field at its bit, the
  * handshake register values).
  */
+#ifdef __KERNEL__
+#include <linux/string.h>
+#else
+#include <string.h>
+#endif
+
 #include "odi_switch_l2.h"
 #include "odi_switch_hw.h"
 #include "odi_switch_reg.h"
@@ -202,6 +209,105 @@ int odi_switch_l2_mcast_encode(const struct odi_sw_l2_mcast_req *req, int valid,
 	return 0;
 }
 
+int odi_switch_l2_ucast_mac_ok(const uint8_t mac[6])
+{
+	unsigned int i;
+
+	if (mac[0] & 1U)
+		return 0;
+	for (i = 0; i < 6; i++)
+		if (mac[i])
+			return 1;
+	return 0;
+}
+
+/* A static unicast row, odi_switch_l2.h has the layout: the MAC, key 0,
+ * FID 0, SVL, not an L3 route, static, the source port, age 7 (the value
+ * a freshly learned row reads back with; any non-zero one is not aged
+ * out), no C-tag, no block or ARP flags, extension port 0, valid. A
+ * delete sends the key alone with valid clear, as for multicast.
+ */
+#define L2_AGE_STATIC	7U
+#define L2_SPA_MAX	((1U << L2_SPA_LEN) - 1U)
+
+int odi_switch_l2_ucast_static_encode(const uint8_t mac[6], uint32_t port, int valid,
+				      uint32_t raw[ODI_SW_L2_WORDS])
+{
+	uint32_t lo, hi;
+	unsigned int i;
+
+	if (!odi_switch_l2_ucast_mac_ok(mac) || port > L2_SPA_MAX)
+		return ODI_SW_L2_EINVAL;
+	for (i = 0; i < ODI_SW_L2_WORDS; i++)
+		raw[i] = 0;
+	lo = ((uint32_t)mac[2] << 24) | ((uint32_t)mac[3] << 16) |
+	     ((uint32_t)mac[4] << 8) | mac[5];
+	hi = ((uint32_t)mac[0] << 8) | mac[1];
+	l2_set_bits(raw, L2_MAC_LSB, 32, lo);
+	l2_set_bits(raw, L2_MAC_LSB + 32U, 16, hi);
+	if (valid) {
+		l2_set_bits(raw, L2_STATIC_BIT, 1, 1);
+		l2_set_bits(raw, L2_SPA_LSB, L2_SPA_LEN, port);
+		l2_set_bits(raw, L2_AGE_LSB, L2_AGE_LEN, L2_AGE_STATIC);
+		l2_set_bits(raw, L2_VALID_BIT, 1, 1);
+	}
+	return 0;
+}
+
+int odi_switch_l2_pins_add(struct odi_sw_l2_pins *set, const uint8_t mac[6])
+{
+	uint32_t i;
+
+	if (!odi_switch_l2_ucast_mac_ok(mac) || set->n >= ODI_SW_L2_PINS_MAX)
+		return 0;
+	for (i = 0; i < set->n; i++)
+		if (!memcmp(set->mac[i], mac, 6))
+			return 0;
+	memcpy(set->mac[set->n++], mac, 6);
+	return 1;
+}
+
+static int l2_pins_has(const struct odi_sw_l2_pins *set, const uint8_t mac[6])
+{
+	uint32_t i;
+
+	for (i = 0; i < set->n; i++)
+		if (!memcmp(set->mac[i], mac, 6))
+			return 1;
+	return 0;
+}
+
+void odi_switch_l2_pins_sync(struct odi_sw_l2_pins *pinned, const struct odi_sw_l2_pins *want,
+			     uint32_t port, struct odi_sw_l2_pin_report *rep)
+{
+	struct odi_sw_l2_pins now = { 0 };
+	uint32_t i;
+
+	memset(rep, 0, sizeof(*rep));
+
+	/* Gone first: a MAC that changed frees its row before the new one is
+	 * written, which matters when both hash to a full bucket.
+	 */
+	for (i = 0; i < pinned->n; i++) {
+		if (l2_pins_has(want, pinned->mac[i]))
+			continue;
+		(void)odi_switch_l2_ucast_del(pinned->mac[i], NULL);
+		memcpy(rep->removed[rep->removed_n++], pinned->mac[i], 6);
+	}
+
+	for (i = 0; i < want->n && i < ODI_SW_L2_PINS_MAX; i++) {
+		rep->rc[i] = odi_switch_l2_ucast_static_add(want->mac[i], port, &rep->row[i]);
+		if (rep->rc[i]) {
+			rep->failed |= 1U << i;
+			continue;
+		}
+		if (!l2_pins_has(pinned, want->mac[i]))
+			rep->added |= 1U << i;
+		odi_switch_l2_pins_add(&now, want->mac[i]);
+	}
+	*pinned = now;
+}
+
 /* ---- The engine ----------------------------------------------------- */
 
 uint32_t odi_switch_l2_rows(void)
@@ -341,6 +447,40 @@ int odi_switch_l2_mcast_del(const struct odi_sw_l2_mcast_req *req, int *found)
 	 * has HIT clear for an absent key and set, with the row, for a
 	 * present one.
 	 */
+	rc = l2_access(ODI_SW_L2_METHOD_HASH, 0, 0, raw, &sts);
+	if (rc)
+		return rc;
+	if (found)
+		*found = (sts & ODI_SW_TABLE_STATUS_HIT) ? 1 : 0;
+	if (!(sts & ODI_SW_TABLE_STATUS_HIT))
+		return 0;
+	return l2_access(ODI_SW_L2_METHOD_HASH, 0, 1, raw, &sts);
+}
+
+int odi_switch_l2_ucast_static_add(const uint8_t mac[6], uint32_t port, uint32_t *index)
+{
+	uint32_t raw[ODI_SW_L2_WORDS], sts;
+	int rc = odi_switch_l2_ucast_static_encode(mac, port, 1, raw);
+
+	if (rc)
+		return rc;
+	rc = l2_access(ODI_SW_L2_METHOD_HASH, 0, 1, raw, &sts);
+	if (rc)
+		return rc;
+	if (!(sts & ODI_SW_TABLE_STATUS_HIT))
+		return ODI_SW_L2_ENOSPC;
+	*index = l2_sts_index(sts);
+	return 0;
+}
+
+/* As odi_switch_l2_mcast_del(): look the key up, write only when found. */
+int odi_switch_l2_ucast_del(const uint8_t mac[6], int *found)
+{
+	uint32_t raw[ODI_SW_L2_WORDS], sts;
+	int rc = odi_switch_l2_ucast_static_encode(mac, 0, 0, raw);
+
+	if (rc)
+		return rc;
 	rc = l2_access(ODI_SW_L2_METHOD_HASH, 0, 0, raw, &sts);
 	if (rc)
 		return rc;

@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * odi_pon_isolation_test.c -- nothing from the fibre reaches the CPU:
- * the PON port's isolation mask (odi_switch_platform.c, odi_switch_port.c)
- * and the NIC's drop of PON frames no RX hook took (odi_nic.c,
- * odi_nic_hw.h). docs/SWITCH.md, "PON port isolation".
+ * odi_pon_isolation_test.c -- nothing from the fibre reaches the CPU, and
+ * nothing the CPU sends by lookup reaches the fibre: the PON and CPU
+ * ports' isolation masks (odi_switch_platform.c, odi_switch_port.c), the
+ * NIC's drop of PON frames no RX hook took (odi_nic.c, odi_nic_hw.h), and
+ * the port masks the NIC gives the IP stack's frames (odi_nic_hw.h).
+ * docs/SWITCH.md, "PON port isolation".
  *
  * Not circular: the inputs are what the hardware gave, not what our code
  * produced.
@@ -88,8 +90,8 @@ static void test_platform_words(void)
 	boot();
 
 	CHECK(word_at(0x27000U) == 0x003fffffU, "ports 0 and 1 keep the open mask");
-	CHECK(word_at(0x27004U) == 0x003ff807U,
-	      "port 2 (PON) forwards to ports 0, 1 and itself only; port 3 (CPU) keeps the open mask");
+	CHECK(word_at(0x27004U) == 0x003fd807U,
+	      "port 2 (PON) forwards to ports 0, 1 and itself only; port 3 (CPU) to everything but port 2");
 	CHECK(word_at(0x27008U) == 0x003fffffU && word_at(0x2700cU) == 0x003fffffU &&
 	      word_at(0x27010U) == 0x003fffffU && word_at(0x27014U) == 0x000007ffU,
 	      "the extension-port table is not touched");
@@ -98,6 +100,8 @@ static void test_platform_words(void)
 	      writes_to(0x27010U) == 0 && writes_to(0x27014U) == 0,
 	      "no write to any other isolation word");
 	CHECK(iso_mask(PON) == 0x007U, "the PON port's decoded mask: ports 0-2, no CPU, no extension port");
+	CHECK(iso_mask(CPU) == 0x7fbU, "the CPU port's decoded mask: all but the PON port, extension ports kept");
+	CHECK(iso_mask(UNI) == 0x7ffU && iso_mask(PORT1) == 0x7ffU, "ports 0 and 1 decode all open");
 }
 
 /* Every kind of frame the fibre can send, against the stick's own paths. */
@@ -117,12 +121,28 @@ static void test_forwarding_model(void)
 	CHECK(egress(PON, 1U << CPU) == 0, "PON: a frame trapped to the CPU reaches nothing");
 	CHECK(egress(PON, 1U << UNI) == (1U << UNI), "PON: a frame for a host behind the UNI still gets there");
 
-	/* The stick's management and the OMCI replies are untouched. */
+	/* The host's traffic is untouched, toward the stick and the fibre. */
 	CHECK(egress(UNI, 1U << CPU) == (1U << CPU), "UNI: the host still reaches the CPU");
 	CHECK(egress(UNI, 0xfU) == ((1U << PORT1) | (1U << PON) | (1U << CPU)),
-	      "UNI: host broadcast (ARP) still reaches the CPU");
+	      "UNI: host broadcast (ARP) still reaches the CPU and the fibre");
+	CHECK(egress(UNI, 1U << PON) == (1U << PON), "UNI: the host's unicast to the fibre still gets there");
+
+	/* What the CPU sends, should the switch forward it by lookup: the
+	 * host only, never the fibre.
+	 */
 	CHECK(egress(CPU, 1U << UNI) == (1U << UNI), "CPU: replies to the host leave by the UNI");
-	CHECK(egress(CPU, 1U << PON) == (1U << PON), "CPU: OMCI replies still reach the PON port");
+	CHECK(egress(CPU, 0xfU) == ((1U << UNI) | (1U << PORT1)),
+	      "CPU: the stick's broadcast (flood mask 0xf) reaches the UNIs, not the fibre");
+	CHECK(egress(CPU, 0x7U) == ((1U << UNI) | (1U << PORT1)),
+	      "CPU: the stick's unknown unicast (mask 0x7 after cmd 64) reaches the UNIs, not the fibre");
+	CHECK(egress(CPU, 1U << PON) == 0,
+	      "CPU: a lookup hit on the PON port (a MAC learned there) does not get there");
+	/* The OMCI replies are a directed TX (PORT_SEL, the PON port mask):
+	 * not a lookup, and not filtered by isolation per the vendor
+	 * forwarding engine (it re-applies isolation to directed TX in
+	 * software). That is a reading, not a measurement: the first trial
+	 * shows it (docs/SWITCH.md, "PON port isolation"). Not modelled here.
+	 */
 }
 
 /* The parameter: off restores the open mask, on narrows it again; each
@@ -134,19 +154,57 @@ static void test_parameter(void)
 
 	odi_sw_pon_isolate = false;
 	odi_sw_pon_isolate_apply();
-	CHECK(word_at(0x27004U) == 0x003fffffU, "off: the PON port's mask back to all open");
+	CHECK(word_at(0x27004U) == 0x003fffffU, "off: the PON and CPU ports' masks back to all open");
 	CHECK(word_at(0x27000U) == 0x003fffffU, "off: ports 0 and 1 untouched");
 
 	odi_sw_pon_isolate = true;
 	odi_sw_pon_isolate_apply();
-	CHECK(word_at(0x27004U) == 0x003ff807U, "on again: narrowed");
+	CHECK(word_at(0x27004U) == 0x003fd807U, "on again: narrowed");
 	odi_sw_pon_isolate_apply();
-	CHECK(word_at(0x27004U) == 0x003ff807U, "a second apply changes nothing");
+	CHECK(word_at(0x27004U) == 0x003fd807U, "a second apply changes nothing");
 
-	/* Port 3's half of the word survives a different value there. */
-	odi_mock.regs[odi_mock_slot(0x27004U)] = 0x00155fffU;	/* port 3: 0x2ab, port 2: 0x7ff */
+	/* Only the PON bit of the CPU port's half moves; the rest is kept. */
+	odi_mock.regs[odi_mock_slot(0x27004U)] = 0x00157fffU;	/* port 3: 0x2af, port 2: 0x7ff */
 	odi_sw_pon_isolate_apply();
-	CHECK(word_at(0x27004U) == 0x00155807U, "the CPU port's half of the word is kept");
+	CHECK(word_at(0x27004U) == 0x00155807U, "the CPU port's other bits are kept, bit 2 cleared");
+	odi_sw_pon_isolate = false;
+	odi_sw_pon_isolate_apply();
+	CHECK(word_at(0x27004U) == 0x00157fffU, "off restores exactly the bits on cleared");
+	odi_sw_pon_isolate = true;
+}
+
+/* The frames of the IP stack: the destination mask each device gives them,
+ * as the TX descriptor carries it (opts3 bits 28:23), and the bits of opts1
+ * (the TX descriptor layout: PORT_SEL is bit 18, the bit the OMCI replies
+ * set to go onto a PON stream).
+ */
+static void test_nic_stack_tx(void)
+{
+	static const struct { unsigned int dev_port; unsigned int mask; const char *what; } dev[] = {
+		{ 0xFFU, 0x3U, "eth0 (the catch-all): ports 0 and 1" },
+		{ 0U, 0x1U, "eth0.2: the host port alone" },
+		{ 1U, 0x2U, "eth0.3: port 1 alone" },
+		{ 0xFEU, 0x0U, "nas0, pon0: nothing" },
+		{ 2U, 0x0U, "a device claiming the PON port: nothing" },
+		{ 3U, 0x0U, "a device claiming the CPU port: nothing" },
+	};
+	unsigned int i;
+
+	CHECK(ODI_TXD_PORT_SEL == (1U << 18), "PORT_SEL is opts1 bit 18");
+	CHECK(ODI_TXD_PORTS_SHIFT == 23U && ODI_TXD_PORTS_MASK == 0x3fU, "the port mask is opts3 bits 28:23");
+	for (i = 0; i < sizeof(dev) / sizeof(dev[0]); i++) {
+		unsigned int m = odi_nic_stack_tx_mask(dev[i].dev_port);
+		struct odi_tx_desc t;
+
+		CHECK(m == dev[i].mask, dev[i].what);
+		CHECK(!(m & ((1U << PON) | (1U << CPU))), "never the PON port, never the CPU port");
+		memset(&t, 0, sizeof(t));
+		odi_nic_tx_pack(&t, m, 0, 0, 0);
+		CHECK(((t.opts3 >> 23) & 0x3fU) == m, "the descriptor carries that mask");
+		CHECK(!(t.opts1 & (1U << 18)), "and no PORT_SEL");
+	}
+	CHECK(odi_nic_stack_tx_mask(0xFFU) != 0 && odi_nic_stack_tx_mask(0U) != 0,
+	      "a device that transmits never gets mask 0, the hardware lookup");
 }
 
 /* RX descriptor words logged on a stick (odi_nic.debug), with the meaning
@@ -181,6 +239,7 @@ int main(void)
 	test_forwarding_model();
 	test_parameter();
 	test_nic_descriptors();
+	test_nic_stack_tx();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
