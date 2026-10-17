@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Kernel: unknown multicast (with IGMP snooping off, every IPTV channel) is
+  no longer copied to the stick's own CPU. It was flooded to the CPU port as
+  well as to the host, a stream's worth of frames a second that the CPU
+  drops, against the guards that reset a stick whose CPU stops taking
+  frames. The CPU needs none of it; broadcast still reaches it.
+
 - Kernel and diag: signal fail and signal degrade (G.984.3 11.1.2) are
   detected. The downstream bit error rate is measured from the BIP errors
   over every 10 s of operation and compared with the thresholds the OLT
