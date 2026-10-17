@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Tests: the OMCI suites no longer pass negative checks against a dead
+  daemon. `src/omci/testlib.sh`: a `wait_for` that times out (which `inject_wait`,
+  `settled`, `sync_send` and `omcid_up` all go through) now fails the suite
+  itself and says so, `inject_wait` fails at once when `omcli --inject` cannot
+  send the frame, and the suites end with `suite_exit` (0 or 1) instead of
+  `exit "$fail"`, which reported success at 256 failures. The 49 call sites
+  that ignored these results needed no change and check what they checked.
+  `src/omci/testlib-test.sh` (in `make test-host`) tests the helpers' failure
+  paths. No change to omcid or the image.
+
 - Docs: the README rows for the OMCI values read from the stick and the VEIP
   and vendor-private keys say what was checked on sticks: the values on two
   sticks on two OLTs against the stock dumps, the new keys only at their
