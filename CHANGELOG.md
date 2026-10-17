@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- DDM: the module can now say how its readings are to be read. Two new `diag`
+  commands, from the module itself over I2C: `pon get transceiver
+  monitoring-type` (A0h byte 92: whether diagnostics are implemented,
+  internal or external calibration, average or OMA received power) and `pon
+  get transceiver limits` (A2h 0-39: the alarm and warning limits the module
+  raises its own flags against; they differ from one module to the next),
+  through three new `odi_ddm.h` selectors (`ODI_DDM_MONITOR_TYPE`,
+  `ODI_DDM_LIMITS_A`, `ODI_DDM_LIMITS_B`). The conversions are unchanged and
+  still assume internal calibration (the one module read for this had it, with
+  identity external constants); the first command is where that assumption can
+  now be checked on any stick. The existing readings keep their register
+  trace (a consistent re-read of the 16-bit pairs was tried and dropped: the
+  DAL golden of command 10 is the stock command's own trace). Tests:
+  `test/odi_ddm_limits_test.c`, `make transceiver-test`. The exporter's
+  `gpon_transceiver_*` series read `pon get transceiver alarm-status`, which
+  was already here.
+
 - Kernel: the OMCI driver logs each command it does not implement once per
   command number. It logged only the first one of a boot, so a diagnostic
   bundle from a new OLT showed one of the missing commands at most.
