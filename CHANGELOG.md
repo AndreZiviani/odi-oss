@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Kernel: removing one bridge port from unknown-unicast flooding (a bridge
+  port deleted by the OLT, or ME 45 "discard unknown") no longer stops the
+  flooding of every port. The driver wrote all ports on or all ports off,
+  whatever port the command named; it now adds or removes that port only,
+  in the mask the command names (unknown unicast, broadcast or unknown
+  multicast), as the stock firmware does. The provisioning of every OLT
+  seen so far gives the same mask as before.
+
 - Kernel: an OLT that locks the Ethernet UNI (ME 11 administrative state,
   for example to suspend a service) now stops it, as the stock firmware
   does: the host port's link is forced down until the OLT unlocks it. The
