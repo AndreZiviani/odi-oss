@@ -90,6 +90,10 @@ static inline uint32_t ODI_SW_PORT_FORCE_ABILITY_TX_PAUSE_SET(uint32_t reg, uint
 {
 	return (reg & ~(0x1U << 6)) | ((val & 0x1U) << 6);
 }
+static inline uint32_t ODI_SW_PORT_FORCE_ABILITY_LINK_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x1U << 4)) | ((val & 0x1U) << 4);
+}
 
 /* PORT_ABILITY: 0x000198, one word per port, read-only -- the ability a
  * port runs with, negotiated or forced field by field
@@ -118,6 +122,10 @@ static inline uint32_t ODI_SW_PORT_ABILITY_LINK_UP_GET(uint32_t reg)
 static inline uint32_t ODI_SW_PORT_FORCE_SELECT_TX_PAUSE_SET(uint32_t reg, uint32_t val)
 {
 	return (reg & ~(0x1U << 6)) | ((val & 0x1U) << 6);
+}
+static inline uint32_t ODI_SW_PORT_FORCE_SELECT_LINK_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x1U << 4)) | ((val & 0x1U) << 4);
 }
 
 /* HOST_FIBER_CTRL: 0x021c00 -- the 1000BASE-X PCS control word of the host
@@ -341,6 +349,7 @@ static inline uint32_t ODI_SW_L2_LOOKUP_SETUP_AGE_TICKS_SET(uint32_t reg, uint32
  * unknown-multicast (0x01c024) masks sit just before it
  */
 #define ODI_SW_FLOOD_UNKN_UCAST_PORTS_BASE	0x1c028U	/* 4 items packed, 1 bits each */
+#define ODI_SW_FLOOD_BCAST_PORTS_BASE		0x1c020U
 #define ODI_SW_FLOOD_UNKN_MCAST_PORTS_BASE	0x1c024U
 
 /* IPMC_VLAN_LEAK: 0x01c030, 4 ports packed 1 bit each */

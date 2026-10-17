@@ -660,8 +660,8 @@ dropbear/confd/metricsd/omcid for real, and
 the resilience scenarios from `docs/SETTINGS.md` ("Resilience") -- filling
 `/tmp` to `ENOSPC`, an OOM (a busybox-only memory hog, no compiled tool
 needed), and `kill -9` on each critical daemon, checked over real ssh
-(a test-only key, `test/qemu/id_test`, baked into the harness's initramfs
-only) and real HTTP to confd and metricsd. `svc-syslogd.sh`/`svc-klogd.sh`
+(a test-only key pair that `build-initramfs.sh` generates on every run, its
+public half baked into the harness's initramfs only) and real HTTP to confd and metricsd. `svc-syslogd.sh`/`svc-klogd.sh`
 run here too (unconditionally); `svc-ntpd.sh` is exercised against
 `NTP_SERVER`, seeded with the real `flash set` into
 `/var/config/odi.conf` (a plain writable directory, there is no real config
@@ -776,6 +776,13 @@ flash for real), `image_tar_format_test.sh` (can that busybox's `tar` read
 our tarball), `rootfs_chroot_test.sh` (the boot scripts in a qemu-user
 chroot of the staged rootfs), `uimage_header_test.sh` (the header U-Boot
 reads). Run them when you touch `fwu.sh`, the tarball, or rcS.
+`fwu_stock_flash_test.sh` exits 77, not 0, when it skips (no stock rootfs, no
+docker, no tarball): a skip is not a pass, and a wrapper that wants to
+tolerate it tests for 77.
+
+The unit tests of omcid's class 171 decode (`src/omci/respond`, `make
+test-omci-respond`) and of igmpd (`src/igmp/test`, `make test-igmp`) are legs
+of `make test` and a CI job (`mips-units`).
 
 ### Pure refactors: prove the machine code did not change
 
@@ -1031,7 +1038,7 @@ read at boot unless stated. rcS paths are
 | `omci-identity.on` | `src/omci/respond/omcid.h:478` (`CFG_REPORT_SWITCH`), `cfgstore.c:882` | omcid reports the OLT identity keys (`OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, ...); `apply.sh omci` | absent: built-in values | prod |
 | `breadcrumbs.on` | `rcS.dev:27`, `:53`, `:62`, `:76`, `:87`, `:106` | boot crumbs to `breadcrumbs`, `trial-diag.txt`, a 30 s heartbeat to the kernel log, soft-lockup 20 s and hung-task 30 s | absent | dev |
 | `confirm-arp` | `rcS.dev:169` | confirm the watchdog only after an ARP reply from `.2` of `br0`; **resets every 120 s if the host is elsewhere** | absent: confirm unconditionally | dev |
-| `odi.conf` | `etc/scripts/flash` (`ODI_KEYS`), written by `flash set`; `ODI_LASER_UNVERIFIED` is read by `pon_step_laser()` | odi-only keys: `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `HOST_AUTONEG`, `ODI_LASER_UNVERIFIED` (`docs/SETTINGS.md`); `ODI_LASER_UNVERIFIED=1` lights the laser on an unvalidated laser driver | absent: none set | prod |
+| `odi.conf` | `etc/scripts/flash` (`ODI_KEYS`), written by `flash set`; `ODI_LASER_UNVERIFIED` is read by `pon_step_laser()` | odi-only keys: `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `HOST_AUTONEG`, `ODI_LASER_UNVERIFIED` (`docs/SETTINGS.md`); `ODI_LASER_UNVERIFIED=1` lights the laser on an unvalidated laser driver | absent: none set | prod |
 | `confd.auth`, `confd/`, `dropbear.d/authorized_keys` | confd (odi-ui); dropbear via `svc-dropbear.sh` (`-D`) | UI credential, UI overrides, root SSH keys | admin/admin; image assets; none | prod |
 
 State files, not switches: `seedrng/` (entropy seed, rcS `:97`),

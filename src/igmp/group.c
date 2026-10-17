@@ -62,6 +62,23 @@ static struct igmp_entry *find_or_add(struct igmp_db *db, uint16_t vid,
 	return 0;
 }
 
+/* A group the snooper may keep state for. Outside 224.0.0.0/4 it is not a
+ * multicast group at all (a host bug or a crafted frame), and an entry for it
+ * would be programmed under whatever MAC its low bits give. RFC 4541 section
+ * 2.1.2: groups in 224.0.0.0/24 are link-local control traffic and have to be
+ * flooded, never restricted to the ports that asked. The L2 key keeps only 23
+ * bits, so every group whose low 23 bits are below 256 (225.0.0.251,
+ * 239.0.0.5, ...) lands on the same 01:00:5e:00:00:xx MAC as a link-local
+ * one, and a static entry for it would restrict that traffic too. */
+int igmp_group_snoopable(uint32_t group)
+{
+	if ((group >> 28) != 0xe)
+		return 0;
+	if ((group & 0x007fffffu) < 0x100u)
+		return 0;
+	return 1;
+}
+
 static int emit(struct igmp_change *out, int max, int n, uint8_t kind,
 		uint16_t vid, uint32_t group, uint32_t ports)
 {
@@ -81,7 +98,7 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 	struct igmp_entry *e;
 	uint32_t bit, before;
 
-	if (port == 0 || port > IGMP_MAX_PORTS)
+	if (port == 0 || port > IGMP_MAX_PORTS || !igmp_group_snoopable(group))
 		return n;
 	e = find_or_add(db, vid, group);
 	if (!e)
@@ -196,15 +213,21 @@ int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
 			grp = rd32(p + 4);
 
 			/* RFC 4541 section 2.1.1: a snooper may reduce v3 to
-			 * joins and leaves. INCLUDE with no sources is the
-			 * only shape that means "stop"; everything else is
-			 * somebody asking for traffic, and treating an
-			 * EXCLUDE-with-sources as a plain join over-forwards
-			 * rather than cutting a listener off. */
+			 * joins and leaves. Record types (RFC 3376 4.2.12):
+			 * 1 IS_INCLUDE, 2 IS_EXCLUDE, 3 TO_INCLUDE, 4
+			 * TO_EXCLUDE, 5 ALLOW_NEW_SOURCES, 6 BLOCK_OLD_SOURCES.
+			 * INCLUDE with no sources is the only shape that means
+			 * "stop". An EXCLUDE, or an INCLUDE / ALLOW naming
+			 * sources, is somebody asking for traffic; treating it
+			 * as a plain join over-forwards rather than cutting a
+			 * listener off. ALLOW with no sources adds nothing, and
+			 * BLOCK only trims a source list: neither creates a
+			 * membership, and an unknown type is not ours to read. */
 			if ((t == 1 || t == 3) && nsrc == 0)
 				n = leave(db, rx->vid, grp, rx->port, now,
 					  out, max, n);
-			else
+			else if (t == 2 || t == 4 ||
+				 ((t == 1 || t == 3 || t == 5) && nsrc > 0))
 				n = join(db, rx->vid, grp, rx->port, now,
 					 out, max, n);
 			p += len;
@@ -265,4 +288,20 @@ int igmp_db_tick(struct igmp_db *db, uint32_t now,
 				 db->router_ports);
 	}
 	return n;
+}
+
+/* The members of every live group that shares this group's MAC, over all VIDs:
+ * what the one hardware entry for that MAC has to carry. The L2 key is the MAC
+ * on filtering id 0, so two groups aliased 32 to 1, or one group on two VLANs,
+ * are a single row, and writing either one's own mask would overwrite the
+ * other's. */
+uint32_t igmp_db_mac_ports(const struct igmp_db *db, uint32_t group)
+{
+	uint32_t ports = 0;
+
+	for (int i = 0; i < IGMP_MAX_GROUPS; i++)
+		if (db->g[i].in_use &&
+		    (db->g[i].group & 0x007fffffu) == (group & 0x007fffffu))
+			ports |= db->g[i].ports;
+	return ports;
 }
