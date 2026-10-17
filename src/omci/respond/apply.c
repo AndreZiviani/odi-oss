@@ -50,8 +50,11 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 {
 	if (c && (c->classId == OMCI_ME_TCONT ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
+		  c->classId == OMCI_ME_TRAFFIC_SCHEDULER ||
 		  (c->classId == OMCI_ME_PRIORITY_QUEUE &&
-		   us_queue_referenced(inst))))
+		   us_queue_referenced(inst)) ||
+		  (c->classId == OMCI_ME_TRAFFIC_DESCRIPTOR &&
+		   us_td_referenced(inst))))
 		qos_dirty = 1;
 	if (c && (c->classId == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA ||
 		  c->classId == OMCI_ME_VLAN_TAGGING_FILTER_DATA ||
@@ -141,8 +144,11 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 		conn_dirty = 1;
 	if (c && (c->classId == OMCI_ME_TCONT ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
+		  c->classId == OMCI_ME_TRAFFIC_SCHEDULER ||
 		  (c->classId == OMCI_ME_PRIORITY_QUEUE &&
-		   us_queue_referenced(inst))))
+		   us_queue_referenced(inst)) ||
+		  (c->classId == OMCI_ME_TRAFFIC_DESCRIPTOR &&
+		   us_td_referenced(inst))))
 		qos_dirty = 1;
 
 	switch (c->classId) {
