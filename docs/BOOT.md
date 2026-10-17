@@ -253,7 +253,7 @@ steps, running concurrently with the respawn entries just started.
 ## Respawn re-provisioning
 
 What happens when omcid dies mid-boot, not at boot. Hardware finding (rc5,
-claro, 2026-09-28): `kill -9 omcid` -- init respawns it within a few seconds
+ISP1, 2026-09-28): `kill -9 omcid` -- init respawns it within a few seconds
 (`svc-omcid.sh`, `/etc/scripts/respawn.sh`), it pings the watchdog and
 serves `omcicli` again, but `gpon_omci_services` stays 0 indefinitely. The
 OLT has already provisioned this ONU from the first boot's MIB and does
@@ -301,7 +301,7 @@ than waiting out its own timeouts for nothing.
 
 Re-provisioning above works, but costs a re-range: the ONU visibly drops
 to O1 and climbs back to O5, an outage of ten to eighteen seconds measured
-on claro. Since v1.0.5 `omcid` keeps enough of its own state on tmpfs
+on ISP1. Since v1.0.5 `omcid` keeps enough of its own state on tmpfs
 that most respawns need none of that: it resumes answering the OLT from
 exactly where the killed process left off, with no outage at all, because
 the switch datapath was never touched to begin with (see

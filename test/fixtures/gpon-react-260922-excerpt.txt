@@ -10,9 +10,9 @@
 #
 # Documented exclusion: the Ext_Burst_Length (message type 0x14) bracket at
 # uptime 219.71s (GPON_GTC_US_BOH_CFG=0x830 + its own 12 BOH_DATA writes,
-# x3 repeats) is dropped -- this driver does not implement that
-# extension message this pass (odi_gpon_hw.c hw_set_upstream_overhead() own
-# comment has the reason); 39 writes excluded here for that one reason.
+# x3 repeats) is dropped (39 writes); the test applies that message with its
+# writes left out of the log (test/odi_gpon_replay_test.c), so its effect on
+# the ranged burst length still shows at Ranging_Time.
 # Format: <ns> W <addr> <val>, one line per write, in capture order.
 215670000 W 0x00700040 0x00000000
 215670000 W 0x00701004 0x00000000
