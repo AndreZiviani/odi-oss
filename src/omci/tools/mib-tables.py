@@ -22,6 +22,8 @@ from rtkelf import Image
 # and diag's own tracer had the same shape of mistake. mipscfg.py carries both
 # with the reasoning attached.
 from mipscfg import CALL_CLOBBER
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mibnames
 
 ATTR_STRIDE = 40
 
@@ -261,10 +263,12 @@ def main():
     ap.add_argument('--detail', help='print one table in full, by name fragment')
     ap.add_argument('--json', help='write the whole model here')
     ap.add_argument('--c', help='emit omci_mib.[ch] into this directory')
+    ap.add_argument('--stock-names', help='write the stock table names that mibnames.py replaced '
+                    '(stock name -> model name) here; keep the file out of the repo')
     args = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(args.root, 'mib_*.so')))
-    model, ok, bad = [], 0, 0
+    model, ok, bad, aliases = [], 0, 0, {}
     for f in files:
         base = os.path.basename(f)
         try:
@@ -284,8 +288,14 @@ def main():
                 and t['entrySize'] is not None and total <= t['entrySize'])
         ok += good
         bad += not good
-        model.append({'plugin': base, 'table': t, 'oper': p.oper(),
-                      'attrs': [dict(index=i, **at) for i, at in a]})
+        entry = {'plugin': base, 'table': t, 'oper': p.oper(),
+                 'attrs': [dict(index=i, **at) for i, at in a]}
+        # Neutral names for the entities the stock plugins name after a make
+        # (mibnames.py); only the model that is written carries them.
+        renamed = mibnames.rename_entry(entry)
+        if renamed and renamed[0] != renamed[1]:
+            aliases[renamed[0]] = renamed[1]
+        model.append(entry)
         if args.detail and args.detail not in base:
             continue
         why = ''
@@ -323,6 +333,8 @@ def main():
         print('wrote %s' % args.json)
     if args.c:
         emit_c(model, args.c)
+    if args.stock_names:
+        mibnames.write_stock_names(aliases, args.stock_names)
 
 
 C_TYPE = {'u8': 'OMCI_U8', 'u16': 'OMCI_U16', 'u32': 'OMCI_U32', 'u64': 'OMCI_U64',

@@ -92,7 +92,7 @@ have_cmd() {
 # The tools this script cannot do without, checked BEFORE anything else. A
 # missing applet does not fail loudly -- the pipeline goes empty -- so name it
 # here, while nothing has been touched. The list is deliberately short: the
-# stock images differ (the HSGQ M110 has no `cut`, which this script used to
+# stock images differ (another stock image has no `cut`, which this script used to
 # call), so everything else is done with the shell itself (parameter expansion,
 # `read`, `case`). tar, sed, cksum, md5sum and cmp are what is left, and there
 # is no shell-only way to unpack a tar or hash a stream.
@@ -236,7 +236,7 @@ part_size() {
 fits() {
 	# cksum prints "<crc> <bytes>". Split it with parameter expansion: `cut`
 	# is on the V1.0-220923 stock image but NOT on every vendor stock (the
-	# HSGQ M110 has none), and a missing applet here made the size empty.
+	# other has none), and a missing applet here made the size empty.
 	ck=$(tar -xf "$tarball" "$1" -O | cksum)
 	have=${ck#* }
 	have=${have%% *}

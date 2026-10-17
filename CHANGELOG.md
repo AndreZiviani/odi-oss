@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- No OLT or ONT make is named in the tree any more: names are generic and
+  describe the function. The kernel's PLOAM type 0x81 constant is
+  `ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS` (a vendor-specific variant of
+  Disable_Serial_Number, handled as before). In the generated OMCI model the
+  six entities whose stock plugins carry a make in their names are now
+  `PrivateQueueMap` (243), `Me350`, `Me370`, `Me373`, `PrivateMcastTag`
+  (65282) and `PrivateSntp` (65294); the generator applies the renaming by
+  class id (`src/omci/tools/mibnames.py`) and the tables are otherwise
+  byte-for-byte what they were (names only: `omcicli get tables` and the
+  autonomous list show the new names). The stock names are written only to a
+  local sidecar (`mib-tables.py --stock-names`) that `mib-instances.py` and
+  `mib-defaults.py` read to match a stock dump. Comments, docs and test notes
+  that named a make say "an OLT" or "another stock image". Refs #114
+
 - Kernel: unknown multicast (with IGMP snooping off, every IPTV channel) is
   no longer copied to the stick's own CPU. It was flooded to the CPU port as
   well as to the host, a stream's worth of frames a second that the CPU

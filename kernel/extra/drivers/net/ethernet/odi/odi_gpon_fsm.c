@@ -322,7 +322,7 @@ static int odi_gpon_fsm_handle_disable_sn(struct odi_gpon_fsm *fsm,
 	struct odi_gpon_ds_disable_serial_number dsn;
 
 	if (msg->type != ODI_GPON_DS_DISABLE_SERIAL_NUMBER &&
-	    msg->type != ODI_GPON_DS_DISABLE_SERIAL_NUMBER_ZTE)
+	    msg->type != ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS)
 		return 0;
 
 	odi_gpon_decode_disable_serial_number(msg, &dsn);
@@ -540,7 +540,7 @@ static const char *odi_gpon_fsm_ploam_cause(const struct odi_gpon_ploam *msg)
 	case ODI_GPON_DS_POPUP:
 		return "popup";
 	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER:
-	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER_ZTE:
+	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS:
 		odi_gpon_decode_disable_serial_number(msg, &dsn);
 		if (dsn.code == ODI_GPON_DISABLE_SN_DISABLE)
 			return "disable_serial_number";
