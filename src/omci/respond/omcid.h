@@ -435,6 +435,11 @@ void ev_tick(void);
 int ev_msg_known(uint8_t mt);
 void ev_unknown_me(uint16_t cls, uint8_t mt);
 void ev_unknown_msg(uint8_t mt, uint16_t cls);
+/* A Get, Get current data, Set or Delete of a modelled class, addressed to
+ * an instance omcid holds no row for and does not create itself: one event
+ * line and one summary line per (class, instance) per boot. Diagnostic only;
+ * the answer is unchanged (omcimsg.c, "an instance omcid does not hold"). */
+void ev_no_instance(uint16_t cls, uint16_t inst, uint8_t mt);
 /* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
  * class omcid does not model with success instead of "unknown entity". */
 extern int unknown_me_ok;

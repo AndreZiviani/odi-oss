@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- omcid: a Get, Get current data, Set or Delete that names an instance of a
+  modelled class which omcid holds no row for (it neither creates the
+  instance itself nor was given it by the OLT) is logged once per class and
+  instance per boot, as `event=no_instance` and a `no_instance` line with a
+  count in `/var/log/omcid-unknown.txt` (now up to 64 entries). The answer
+  does not change: omcid still answers such a request as if the instance
+  existed, where G.988 and the stock stack answer "unknown instance". The
+  lines are the data for deciding whether that can be made strict; the ISP1
+  and ISP2 sessions on file name no such instance (`events-test.sh`).
+
 - Tests: `make test-qemu` generates its throwaway ssh key pair (`ssh-keygen`,
   ed25519) on every run, in `build/qemu-initramfs/qemu-test-key/`, instead of
   using a private key committed as `test/qemu/id_test`; the committed pair is

@@ -354,6 +354,23 @@ static int addresses_entity(uint8_t mt)
 	       mt == OMCI_MT_GET_CURRENT_DATA;
 }
 
+/* An instance omcid does not hold.
+ *
+ * G.988 and the stock stack answer a Get, Set or Delete of an instance that
+ * does not exist with result 5, unknown instance (AUDIT B8). omcid answers
+ * them as if the instance were there: the built-in values for a Get, a new
+ * row for a Set, success for a Delete. Making that strict could break an OLT
+ * that addresses an instance omcid fails to create on its own (the
+ * companions of a MAC bridge port, say), so first the data: each (class,
+ * instance) such a request names is logged once per boot (ev_no_instance),
+ * and nothing about the answer changes. A Create is not one of these: it
+ * makes the instance. */
+static int targets_held_instance(uint8_t mt)
+{
+	return mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA ||
+	       mt == OMCI_MT_SET || mt == OMCI_MT_DELETE;
+}
+
 /* OMCI_UNKNOWN_ME_OK: success for a Create, Set or Get of a class omcid has
  * no model for, the answer the stock stack gives with OMCI_FAKE_OK. Nothing
  * is stored, so a Get answers an empty attribute mask and a MIB upload never
@@ -528,6 +545,9 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		ev_unknown_msg(mt, cls);
 	else if (!c && addresses_entity(mt))
 		ev_unknown_me(cls, mt);
+	else if (c && targets_held_instance(mt) && !mib_find(cls, inst) &&
+		 !instance_is_autonomous(cls, inst))
+		ev_no_instance(cls, inst, mt);
 
 	/* The software download steps answer for themselves (swimage.c). */
 	if (mt >= OMCI_MT_START_SW_DOWNLOAD && mt <= OMCI_MT_COMMIT_SW) {
