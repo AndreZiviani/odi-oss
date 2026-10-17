@@ -695,6 +695,14 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 3) for (int i = 0; i < 8; i++) out[i] = serial[i];
 		/* Attribute 14, the ONT PON state: the O-state number. */
 		else if (k == 14) out[0] = pon_state_now();
+		/* Logical ONU ID and password (10, 11): the LOID the stock MIB
+		 * reset copies in from its -l/-w arguments, which are the
+		 * config store's LOID keys -- the same values the CTC LOID
+		 * entity (65530) reports. An OLT that authenticates by the
+		 * G.988 ONU-G LOID read an empty one here. Credentials status
+		 * (12) stays 0 until the OLT writes it, as on the stock ONU. */
+		else if (k == 10) put_str(out, n, ident.loid);
+		else if (k == 11) put_str(out, n, ident.loidPwd);
 	} else if (c->classId == OMCI_ME_ONU2_G) { /* ONU2-G */
 		/* Attribute 2 is the OMCC version, per the vendor's own table
 		 * and G.988 -- not attribute 3, which is the vendor product
@@ -735,7 +743,12 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 1) out[0] = veip_admin(inst);
 		else if (k == 2) out[0] = veip_admin(inst) ? OPER_DISABLED : 0;
 	} else if (c->classId == OMCI_ME_TR069_MGMT_SERVER) { /* TR-069 server */
+		/* The default row of mib_TR069ManageServer.so, which the stock
+		 * MIB reset leaves as it is: locked, and both pointers
+		 * (ACS network address, associated tag) unset, 0xffff. Both
+		 * stock lines report 0xffff until their OLT writes one. */
 		if (k == 1) out[0] = ADMIN_LOCKED;
+		else if ((k == 2 || k == 3) && n >= 2) out[0] = out[1] = 0xff;
 	} else if (c->classId == OMCI_ME_PRIVATE_VLAN_CFG) { /* private VLAN config */
 		/* The manual VLAN of the configuration store, which is what the
 		 * vendor stack reports: type, mode, VID and priority; the
@@ -764,11 +777,14 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		 * the slots themselves never change. */
 		else if (k >= 2 && k <= 4) out[0] = sw_flag(inst, k);
 	} else if (c->classId == OMCI_ME_CTC_LOID_AUTH) { /* CTC LOID authentication */
-		/* The LOID and its password from the config store (LOID and
-		 * LOID_PASSWD in lastgood.xml, both empty on isp1), AuthStatus 0
-		 * until the OLT sets it; OperationId is left zero, nothing on
-		 * this device says what the vendor puts there. */
-		if (k == 2) put_str(out, n, ident.loid);
+		/* As the stock MIB reset (FUN_0040dc44 of omci_app) fills it:
+		 * OperationId "CTC " (with the space, four bytes), the LOID and
+		 * its password from the config store (LOID and LOID_PASSWD,
+		 * the LOID_OLD rule of cfgstore.c), AuthStatus 0 until the OLT
+		 * sets it. */
+		if (k == 1 && n >= 4) {
+			out[0] = 'C'; out[1] = 'T'; out[2] = 'C'; out[3] = ' ';
+		} else if (k == 2) put_str(out, n, ident.loid);
 		else if (k == 3) put_str(out, n, ident.loidPwd);
 	} else if (c->classId == OMCI_ME_ONT_DATA) { /* ONT data */
 		if (k == 1) out[0] = mib_data_sync;
@@ -777,9 +793,11 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		 * has always reported them -- with every attribute zero, which
 		 * tells an OLT that this ONU has 208 identical queues. The
 		 * values are known: RelatedPort is derivable from the entity
-		 * id (checked against all 208 of isp1's rows) and the rest is
-		 * mib_PriQ.so's own default row, plus the two sizes isp1
-		 * reports. */
+		 * id (checked against all 208 of isp1's rows; FUN_0040c28c of
+		 * omci_app computes it the same way) and the rest is
+		 * mib_PriQ.so's own default row, plus the two queue sizes,
+		 * 3276 (0x0ccc), which that same reset function sets on every
+		 * queue. */
 		uint32_t rp = priq_related_port(inst);
 
 		if (k == 1) out[0] = 1;                /* QCfgOpt */

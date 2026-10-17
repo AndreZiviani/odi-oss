@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- OMCI: values the ONU reports on its own now match what the stock MIB
+  reset puts there. ONU-G reports the configured LOID and LOID password
+  (attributes 10 and 11), as the CTC LOID entity already did: an OLT that
+  authenticates by the ONU-G LOID read an empty one. The TR-069 server's ACS
+  address and associated tag read 0xffff (unset) until the OLT writes them,
+  not 0x0000, which points at network address 0. The CTC LOID entity's
+  operation id reads "CTC ". A MAC bridge ageing time set by the OLT is
+  now sent to the switch in tenths of a second like the default: an
+  ageing time of N seconds used to age entries out after N/10. Refs #103.
+
 - Docs and tests: the key counts are corrected (the image acts on 22 of the 184
   stock keys, plus bit 256 of `OMCI_CUSTOM_ME`, not "reads 21"; 161 are
   read-only), HACKING.md lists every key of `odi.conf`, SETTINGS.md says that
