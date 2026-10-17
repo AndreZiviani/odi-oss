@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Kernel: an OLT that encrypts the OMCI channel is served. The
+  Encrypted_Port-ID message for the OMCI port used to be applied without its
+  encryption bit, so every downstream OMCI frame would have stayed
+  unreadable and the stick would never have been provisioned; the port's
+  row now decrypts, as on the stock firmware. And a data port the OLT
+  encrypts keeps decrypting while omcid rewrites its flow (every QoS or
+  bridge change): the flow was written without the AES bit and the bit set
+  again right after, a window in which encrypted frames were lost.
+
 - Kernel: the upstream PON queues are programmed from what omcid sends,
   not replayed from one ISP's capture. The words cmd 23 wrote per T-CONT
   were ISP1's queue weights and types by T-CONT number; they are now
