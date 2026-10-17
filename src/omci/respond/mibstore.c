@@ -251,13 +251,89 @@ uint16_t create_mask(const struct omci_class *c)
 	return m;
 }
 
-/* Which attribute of this class is a table, or 0 if none. Only class 171 is
- * known to be one, and the model records it as OMCI_OCTETS of 16 like any
- * other fixed-width attribute -- the type does not say "table". Rather than
- * guess from the width, name the one we have evidence for. */
-static unsigned table_attr(const struct omci_class *c)
+/* The table attributes, and the rule each one's rows follow.
+ *
+ * The model cannot say which attributes are tables: it records them as
+ * OMCI_OCTETS of one row's width, like any fixed-width octet string (class
+ * 84's 24-byte VLAN list is one of those and is NOT a table). So they are
+ * named here, each with the rule a Set follows. The rules are G.988's,
+ * checked against the stock plugin of the class (investigations
+ * AUDIT-night-omcid.md, "Area B2", B2-2):
+ *
+ *   TBL_EVTOCD   171/6, 16 bytes. Keyed by the filter half, bytes 0..7; a row
+ *                whose treatment half (8..15) is all ones deletes the row
+ *                with that key, anything else adds or replaces it.
+ *                (ExtVlanTagOperCfgDataDrvCfg.)
+ *   TBL_CTRL     a two-byte table control first: bits 15-14 the set control
+ *                (01 write, 10 delete, 11 clear the table, 00 ignored), bits
+ *                9-0 the row key. 310/6. (MopEntryOper.)
+ *   TBL_CTRL_PART the same, plus a row part in bits 13-11: a row is the pair
+ *                (part, key); a write replaces that pair, a delete removes
+ *                every part of the key. 309/7 and /8, 65531/7 and /8, 310/7.
+ *                Like the stock stack (omci_adjust_tbl_ctrl_by_omcc_ver), the
+ *                part bits count only when the reported OMCC version is 0xA1
+ *                or later: before that G.988 had one-part rows and the bits
+ *                were reserved. (AclTableEntryOper.)
+ *   TBL_MCADDR   281/9 (12 bytes) and /10 (24): keyed by the GEM port and the
+ *                secondary key, bytes 0..3; a row whose address bytes (the
+ *                rest) are all zero deletes, anything else adds or replaces.
+ *                (MultiGemIwTpDrvCfg; stock tests only the 12 high bytes of
+ *                an IPv6 row, this tests them all.)
+ *   TBL_MACFILT  49/1, 8 bytes: byte 0 the index, which is the key; byte 1
+ *                bits 7-6 10 add or replace, 00 remove, 01 clear the table.
+ *                (MacFilterTableOper removes by MAC address instead; G.988
+ *                keys the table by the index.)
+ *
+ * The control bits of a stored row read back as 00, as the stock stack
+ * stores them.
+ */
+#define TBL_EVTOCD    1
+#define TBL_CTRL      2
+#define TBL_CTRL_PART 3
+#define TBL_MCADDR    4
+#define TBL_MACFILT   5
+
+/* The extended multicast operations profile, 65531 once the model has its
+ * true class id. */
+#define OMCI_ME_EXT_MCAST_OPER_PROFILE 65531
+
+static const struct { uint16_t cls; uint8_t attr, kind; } tbl_defs[] = {
+	{ OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA, 6, TBL_EVTOCD },
+	{ 309, 7, TBL_CTRL_PART },               /* dynamic access control list */
+	{ 309, 8, TBL_CTRL_PART },               /* static access control list */
+	{ OMCI_ME_EXT_MCAST_OPER_PROFILE, 7, TBL_CTRL_PART },
+	{ OMCI_ME_EXT_MCAST_OPER_PROFILE, 8, TBL_CTRL_PART },
+	{ 310, 6, TBL_CTRL },                    /* multicast service package */
+	{ 310, 7, TBL_CTRL_PART },               /* allowed preview groups */
+	{ OMCI_ME_MCAST_GEM_IW_TP, 9, TBL_MCADDR },  /* IPv4 address table */
+	{ OMCI_ME_MCAST_GEM_IW_TP, 10, TBL_MCADDR }, /* IPv6 address table */
+	{ 49, 1, TBL_MACFILT },                  /* MAC filter table */
+};
+
+static unsigned tbl_kind(const struct omci_class *c, unsigned k)
 {
-	return (c && c->classId == OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA) ? 6 : 0;
+	if (!c)
+		return 0;
+	for (unsigned i = 0; i < sizeof tbl_defs / sizeof tbl_defs[0]; i++)
+		if (tbl_defs[i].cls == c->classId && tbl_defs[i].attr == k)
+			return attr_width(c, k) <= MIB_TBL_ENTRY ? tbl_defs[i].kind : 0;
+	return 0;
+}
+
+int tbl_is_rows(const struct omci_class *c, unsigned k)
+{
+	return tbl_kind(c, k) != 0;
+}
+
+unsigned tbl_rows(const struct mib_row *r, unsigned k)
+{
+	unsigned n = 0;
+
+	if (!r)
+		return 0;
+	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next)
+		n += tblpool[i].attr == k;
+	return n;
 }
 
 /* Whether a Get of this attribute must go through Get-Next instead of being
@@ -272,11 +348,11 @@ static unsigned table_attr(const struct omci_class *c)
  * 26 rather than 29 because a baseline Get response body is one result byte,
  * two mask bytes and 25 attribute bytes.
  *
- * Deliberately NOT the same question as table_attr() above. That one asks which
- * attribute accumulates entries as a keyed list, which is a behaviour of class
- * 171's plugin specifically; this one asks which attribute is too big to send
- * inline, which is every OCTETS attribute in the model. Class 84's 24-byte VLAN
- * filter list is big by this test and is not a keyed list by that one. */
+ * Deliberately NOT the same question as tbl_is_rows(). That one asks which
+ * attribute accumulates rows; this one asks which attribute is too big to
+ * send inline, which is every OCTETS attribute in the model. Class 84's
+ * 24-byte VLAN filter list is big by this test and is not a table by that
+ * one. */
 int attr_is_big(const struct omci_class *c, unsigned k)
 {
 	if (!c || k >= c->nattr)
@@ -286,8 +362,8 @@ int attr_is_big(const struct omci_class *c, unsigned k)
 
 /* The whole of a big attribute, laid out as the OLT will read it back.
  *
- * For a keyed-list attribute that is every entry, head to tail, so the order
- * matches what the vendor's dump prints -- newest first. For any other big
+ * For a table that is every row of it, head to tail -- newest first, which is
+ * also the order the vendor's class 171 dump prints. For any other big
  * attribute the row holds the value flat and there is exactly one "entry".
  *
  * Returns the byte length, which is what the Get response reports and what the
@@ -301,9 +377,11 @@ uint16_t tbl_serialise(const struct omci_class *c, uint16_t inst, unsigned k,
 
 	if (!r || !w)
 		return 0;
-	if (k == table_attr(c) && w == MIB_TBL_ENTRY) {
+	if (tbl_kind(c, k)) {
 		for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE;
 		     i = tblpool[i].next) {
+			if (tblpool[i].attr != k)
+				continue;
 			if (n + w > max)
 				break;
 			for (uint16_t b = 0; b < w; b++)
@@ -345,50 +423,167 @@ static int tbl_bytes_eq(const uint8_t *a, const uint8_t *b, int n)
 	return 1;
 }
 
-/* One OLT set of the table attribute. See the rules above the pool. */
-static void tbl_set(struct mib_row *r, const uint8_t *e)
+/* Unlink every row of attribute k that `match` selects (all of them when it
+ * is 0), returning their nodes to the pool. */
+static void tbl_remove(struct mib_row *r, unsigned k,
+		       int (*match)(const uint8_t *row, const uint8_t *e, uint16_t w),
+		       const uint8_t *e, uint16_t w)
 {
 	uint8_t *link = &r->tbl_head;
-	int del = 1;
 
-	for (int i = 8; i < MIB_TBL_ENTRY; i++)
-		if (e[i] != 0xff) {
-			del = 0;
-			break;
-		}
-	for (uint8_t n = r->tbl_head; n != MIB_TBL_NONE; n = tblpool[n].next) {
-		struct mib_tblent *t = &tblpool[n];
+	while (*link != MIB_TBL_NONE) {
+		struct mib_tblent *t = &tblpool[*link];
 
-		if (!tbl_bytes_eq(t->data, e, 8)) {
-			link = &t->next;
-			continue;
-		}
-		if (del) {
+		if (t->attr == k && (!match || match(t->data, e, w))) {
 			*link = t->next;
 			t->used = 0;
 			r->tbl_count--;
-		} else {
-			/* The vendor reassigns words 1..3; word 0 is part of
-			 * the key and already equal. */
-			for (int i = 4; i < MIB_TBL_ENTRY; i++)
-				t->data[i] = e[i];
+			continue;
 		}
-		return;
+		link = &t->next;
 	}
-	if (del)
-		return;                      /* deleting what is not there */
+}
+
+/* Rows that share a key, per rule. */
+static int key_evtocd(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return tbl_bytes_eq(row, e, 8);
+}
+
+static int key_ctrl(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return ((row[0] << 8 | row[1]) & 0x3ff) == ((e[0] << 8 | e[1]) & 0x3ff);
+}
+
+static int key_ctrl_part(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return ((row[0] << 8 | row[1]) & 0x3bff) == ((e[0] << 8 | e[1]) & 0x3bff);
+}
+
+static int key_mcaddr(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return tbl_bytes_eq(row, e, 4);
+}
+
+static int key_index(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return row[0] == e[0];
+}
+
+/* The OMCC version this ONU reports (ONU2-G attribute 2). */
+static uint8_t omcc_version(void)
+{
+	const struct omci_class *c = find_class(OMCI_ME_ONU2_G);
+	uint8_t v[4] = { 0 };
+
+	if (!c || attr_width(c, 2) != 1)
+		return 0;
+	attr_value(c, 0, 2, v);
+	return v[0];
+}
+
+/* Add `e` as a new head row of attribute k, after removing the row with the
+ * same `key` (none to remove when `key` is 0). */
+static void tbl_put(struct mib_row *r, unsigned k, const uint8_t *e, uint16_t w,
+		    int (*key)(const uint8_t *, const uint8_t *, uint16_t))
+{
+	if (key)
+		tbl_remove(r, k, key, e, w);
 	for (uint8_t n = 0; n < MIB_TBL_NODES; n++) {
 		if (tblpool[n].used)
 			continue;
 		tblpool[n].used = 1;
+		tblpool[n].attr = (uint8_t)k;
 		for (int i = 0; i < MIB_TBL_ENTRY; i++)
-			tblpool[n].data[i] = e[i];
+			tblpool[n].data[i] = i < w ? e[i] : 0;
 		tblpool[n].next = r->tbl_head;
 		r->tbl_head = n;
 		r->tbl_count++;
 		return;
 	}
 	r->truncated = 1;                    /* pool exhausted; say so */
+}
+
+/* One OLT Set of table attribute k: the row in `src`, applied by the rule of
+ * tbl_defs[]. */
+static void tbl_set(struct mib_row *r, const struct omci_class *c, unsigned k,
+		    const uint8_t *src)
+{
+	uint16_t w = attr_width(c, k);
+	uint8_t e[MIB_TBL_ENTRY];
+	unsigned kind = tbl_kind(c, k);
+	int zero = 1;
+
+	for (uint16_t i = 0; i < MIB_TBL_ENTRY; i++)
+		e[i] = i < w ? src[i] : 0;
+	switch (kind) {
+	case TBL_EVTOCD: {
+		int del = 1;
+
+		for (int i = 8; i < 16; i++)
+			if (e[i] != 0xff)
+				del = 0;
+		if (del) {
+			tbl_remove(r, k, key_evtocd, e, w);
+			return;
+		}
+		/* Replaced in place, not moved to the head: the vendor
+		 * reassigns words 1..3 of the node it found. */
+		for (uint8_t n = r->tbl_head; n != MIB_TBL_NONE; n = tblpool[n].next)
+			if (tblpool[n].attr == k && key_evtocd(tblpool[n].data, e, w)) {
+				for (int i = 8; i < 16; i++)
+					tblpool[n].data[i] = e[i];
+				return;
+			}
+		tbl_put(r, k, e, w, 0);
+		return;
+	}
+	case TBL_CTRL:
+	case TBL_CTRL_PART: {
+		unsigned set = e[0] >> 6;
+
+		e[0] &= 0x3f;                    /* stored rows read back 00 */
+		if (kind == TBL_CTRL || omcc_version() < 0xa1)
+			e[0] &= (uint8_t)~0x38;  /* no row part */
+		if (set == 1)
+			tbl_put(r, k, e, w, kind == TBL_CTRL ? key_ctrl : key_ctrl_part);
+		else if (set == 2)
+			tbl_remove(r, k, key_ctrl, e, w);
+		else if (set == 3)
+			tbl_remove(r, k, 0, e, w);
+		return;
+	}
+	case TBL_MCADDR:
+		for (uint16_t i = 4; i < w; i++)
+			if (e[i])
+				zero = 0;
+		if (zero)
+			tbl_remove(r, k, key_mcaddr, e, w);
+		else
+			tbl_put(r, k, e, w, key_mcaddr);
+		return;
+	case TBL_MACFILT:
+		switch (e[1] >> 6) {
+		case 2:
+			tbl_put(r, k, e, w, key_index);
+			return;
+		case 0:
+			tbl_remove(r, k, key_index, e, w);
+			return;
+		case 1:
+			tbl_remove(r, k, 0, e, w);
+			return;
+		default:
+			return;
+		}
+	default:
+		return;
+	}
 }
 
 struct mib_row *mib_find(uint16_t cls, uint16_t inst)
@@ -569,10 +764,10 @@ uint16_t mib_write(struct mib_row *r, const struct omci_class *c,
 			r->written |= (uint16_t)(1u << (16 - k));
 		}
 		/* A table attribute also accumulates. The flat copy above is
-		 * still made -- it is what a get of this attribute answers, and
-		 * it is what the vendor's own store keeps beside its list. */
-		if (k == table_attr(c) && w == MIB_TBL_ENTRY)
-			tbl_set(r, src + used);
+		 * still made, as the vendor's generic store keeps it beside
+		 * the plugin's list; a Get answers the list. */
+		if (tbl_kind(c, k))
+			tbl_set(r, c, k, src + used);
 		used = (uint16_t)(used + w);
 	}
 	return used;

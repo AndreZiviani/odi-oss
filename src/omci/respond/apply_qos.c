@@ -938,53 +938,105 @@ void apply_priq(uint16_t inst)
 	return;
 }
 
-/* Class 268, a GEM port network CTP: the downstream flow now, the upstream
- * one through the reconciler, and the broadcast flow lookup. */
-void apply_gem_ctp(const struct omci_class *c, const struct mib_row *r)
+/* The multicast flag of a downstream GEM flow (mcast_filter of cmd 25).
+ *
+ * The stock stack sets it for a GEM port when a multicast GEM interworking
+ * TP (class 281) that points at its CTP holds rows in its IPv4 or IPv6
+ * multicast address table, and sends the flow again when that changes:
+ * MultiGemIwTpDrvCfg re-sends cfgGemFlow with isFilterMcast set when a table
+ * reaches one row, and clear when both are empty; a plain CTP create sends it
+ * clear (mib_GemPortCtp). Keyed on the address table, not on the direction
+ * or the port number: ISP1's multicast GEM 4095 and ISP2's 4094 both get it
+ * once their OLT writes the 224/4 row. `skip` is a class 281 instance to
+ * leave out, the one being deleted. */
+static int ctp_mcast_rows(uint16_t ctp, int skip)
 {
-	int rc;
+	const struct omci_class *c = find_class(OMCI_ME_MCAST_GEM_IW_TP);
+
+	if (!c)
+		return 0;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		const struct mib_row *r = mib_row_at(i);
+
+		if (!r || r->classId != OMCI_ME_MCAST_GEM_IW_TP ||
+		    (int)r->inst == skip || row_u32(r, c, 1) != ctp)
+			continue;
+		if (tbl_rows(r, 9) || tbl_rows(r, 10))
+			return 1;
+	}
+	return 0;
+}
+
+/* Send (or send again) the downstream flow of a CTP. */
+static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
+			 int skip281)
+{
+	int rc, id;
 	struct omci_gemflow f;
-	uint32_t dir;
 
 	for (unsigned i = 0; i < sizeof f / 4; i++)
 		((uint32_t *)&f)[i] = 0;
 	f.gem_port      = row_u32(r, c, 1);
-	/* Upstream T-CONT and queue words are filled by us_qos_rebuild(),
-	 * after the complete queue graph is available. */
-	f.tcont     = 0;
-	f.queue     = 0;
 	/* From the class 277 row the CTP points at, or priq_related_port().
 	 * A DsPriQPtr of 0 is priority queue ME 0, a real queue, not a null
 	 * pointer: every GEM CTP of ISP1 carries 0. */
 	ds_queue_words(&f, (uint16_t)row_u32(r, c, 7));
 	f.ena         = 1;               /* create, not update */
-	dir = row_u32(r, c, 3);
-	if (dir == 2)
-		f.mcast_filter = 1;
-	if (dir == 2 || dir == 3) {
-		int id = flow_alloc(1, (uint16_t)f.gem_port);
-		if (id < 0) {
-			out("   [hw] no downstream flow left\n");
-			return;
-		}
-		f.flow_id = (uint32_t)id;
-		f.dir = OMCI_GEMFLOW_DS;
-		rc = apply_hw
-		   ? omci_drv_call(OMCI_GEMFLOW_CMD, &f, sizeof f) : 0;
-		if (rc == 0)
-			flow_claim(1, id, (uint16_t)f.gem_port);
-		out_fmt("   [%s] gem %d ds flow %d priq %d pri %d "
-			"wrr %d weight %d port %d -> %d\n",
-			apply_hw ? "hw" : "dry",
-			(long)f.gem_port, (long)id, (long)f.ds_pq_pri,
-			(long)f.ds_prio, (long)f.ds_wrr,
-			(long)f.ds_weight, (long)f.ds_port,
-			(long)rc);
+	f.mcast_filter = (uint32_t)ctp_mcast_rows(r->inst, skip281);
+	id = flow_alloc(1, (uint16_t)f.gem_port);
+	if (id < 0) {
+		out("   [hw] no downstream flow left\n");
+		return;
 	}
+	f.flow_id = (uint32_t)id;
+	f.dir = OMCI_GEMFLOW_DS;
+	rc = apply_hw ? omci_drv_call(OMCI_GEMFLOW_CMD, &f, sizeof f) : 0;
+	if (rc == 0) {
+		flow_claim(1, id, (uint16_t)f.gem_port);
+		flow_ds[id].mcast = (uint8_t)f.mcast_filter;
+	}
+	out_fmt("   [%s] gem %d ds flow %d priq %d pri %d "
+		"wrr %d weight %d port %d mcast %d -> %d\n",
+		apply_hw ? "hw" : "dry",
+		(long)f.gem_port, (long)id, (long)f.ds_pq_pri,
+		(long)f.ds_prio, (long)f.ds_wrr,
+		(long)f.ds_weight, (long)f.ds_port,
+		(long)f.mcast_filter, (long)rc);
+}
+
+/* After a class 281 Create, Set or Delete (`skip` is the instance being
+ * deleted, else -1): every downstream flow whose multicast flag no longer
+ * matches its CTP's address tables is sent again. */
+void mcast_flag_refresh(int skip)
+{
+	const struct omci_class *c = find_class(OMCI_ME_GEM_PORT_CTP);
+
+	if (!c)
+		return;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		const struct mib_row *r = mib_row_at(i);
+		int id;
+
+		if (!r || r->classId != OMCI_ME_GEM_PORT_CTP)
+			continue;
+		id = flow_find(1, (uint16_t)row_u32(r, c, 1));
+		if (id < 0 || flow_ds[id].mcast == ctp_mcast_rows(r->inst, skip))
+			continue;
+		ds_flow_send(c, r, skip);
+	}
+}
+
+/* Class 268, a GEM port network CTP: the downstream flow now, the upstream
+ * one through the reconciler, and the broadcast flow lookup. */
+void apply_gem_ctp(const struct omci_class *c, const struct mib_row *r)
+{
+	uint32_t dir = row_u32(r, c, 3);
+
+	if (dir == 2 || dir == 3)
+		ds_flow_send(c, r, -1);
 	if (dir == 1 || dir == 3)
 		qos_dirty = 1;   /* rebuilt OLT_QUIET_MS after the last frame */
 	bc_gem_update();
-	return;
 }
 
 /* The QoS state a MIB reset throws away (mib_reset_all()). */
