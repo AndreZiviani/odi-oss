@@ -5,12 +5,12 @@ listed here.
 
 ## Unreleased
 
+## v1.6.1 - 2026-10-17
+
 - OMCI: omcid saves its resume snapshot before it answers a Create, Set or
   Delete, not after. A crash in between could leave the OLT told "done" while
   the respawned omcid had lost the change (the MIB data sync counter agreed
   with the OLT, the entity did not). The tables test caught it as a race.
-
-## v1.6.1 - 2026-10-17
 
 - The image ships confd v1.5.1 (odi-ui: the page uses the full window width,
   and the Status, Forwarding and Backup tabs lay out in two columns when
