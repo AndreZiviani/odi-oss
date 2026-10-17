@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Kernel: the GPON MAC follows G.984.3 in two cases neither of our OLTs
+  hits. The ONU answers Request_Password with three identical Password
+  messages (it sent one; the OLT accepts a password only after three).
+  And with no Extended_Burst_Length from the OLT, the ranged burst
+  overhead is the 12-byte default, as before ranging, instead of the
+  25 bytes one ISP's OLT asks for in its own Extended_Burst_Length.
+
 - omcid: the upstream traffic descriptor of a GEM port (class 280, named by
   the GEM port network CTP) sets the CIR and PIR of its upstream queue, as
   the stock stack does (byte/s divided by 1024; for an RFC 4115 meter the
@@ -951,7 +958,6 @@ Read before updating:
 
 **Automated dependency bump.**
 - linux 6.18.54 -> 6.18.55
-
 
 - docs: repair text merged into CHANGELOG.md by union-resolved rebases: the
   v1.1.0 section had lost the entries of five changes merged the same
