@@ -188,7 +188,7 @@ every port and how to move files on and off the stick:
 
 ## Status and limitations
 
-**Tested on real sticks.** The current release is v1.6.0
+**Tested on real sticks.** The current release is v1.6.1
 ([`CHANGELOG.md`](CHANGELOG.md)). The firmware runs on two DFP-34X-2C2
 sticks on two different ISPs' GPON networks, and both now run it as their
 committed image, with the stock firmware kept in the other slot. The

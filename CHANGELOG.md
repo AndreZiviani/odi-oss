@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.6.1 - 2026-10-17
+
 - The image ships confd v1.5.1 (odi-ui: the page uses the full window width,
   and the Status, Forwarding and Backup tabs lay out in two columns when
   there is room).
