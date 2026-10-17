@@ -529,6 +529,16 @@ static void tcont_remember(uint16_t meId, uint16_t index)
 		}
 }
 
+/* A T-CONT the driver refused (its Alloc-ID not assigned by PLOAM any
+ * more, or not yet) has no index: kept, omcli tcont and the snapshot
+ * would still claim the old one. */
+static void tcont_forget(uint16_t meId)
+{
+	for (int i = 0; i < TCONT_MAX; i++)
+		if (tcont_map[i].used && tcont_map[i].meId == meId)
+			tcont_map[i].used = 0;
+}
+
 static uint32_t tcont_index(uint16_t meId)
 {
 	for (int i = 0; i < TCONT_MAX; i++)
@@ -562,6 +572,7 @@ static uint32_t tcont_index(uint16_t meId)
 const char *gpon_proc_path = "/proc/odi_gpon/status";
 static uint16_t ploam_alloc[TCONT_MAX];
 static int ploam_alloc_n = -1;           /* -1: not read yet, or unreadable */
+static int ploam_alloc_readable;         /* the last read found the line */
 
 /* Read the kernel's list again. Returns 1 when it changed since the last
  * read, 0 otherwise; the first read is no change, since whatever was
@@ -585,6 +596,7 @@ int alloc_ids_refresh(void)
 			got = pp_gpon_alloc_ids(buf, (unsigned)n, ids, TCONT_MAX);
 	}
 	readable = got >= 0;
+	ploam_alloc_readable = readable;
 	if (got < 0)
 		got = 0;
 	changed = ploam_alloc_n != got;
@@ -598,6 +610,15 @@ int alloc_ids_refresh(void)
 	if (changed && readable)
 		ev_alloc_ids(ploam_alloc, (unsigned)got);
 	return changed && !first;
+}
+
+/* Whether alloc_ids_assigned() is a list the kernel printed (1), or no
+ * list at all (0: no kernel of ours, as under qemu). */
+int alloc_ids_known(void)
+{
+	if (ploam_alloc_n < 0)
+		alloc_ids_refresh();
+	return ploam_alloc_readable;
 }
 
 unsigned alloc_ids_assigned(const uint16_t **ids)
@@ -671,7 +692,11 @@ uint16_t tcont_alloc_id(uint16_t meId, int *src)
 
 /* Program one T-CONT: from a Set of its Alloc-ID, or on demand when a GEM
  * port CTP names it and the OLT never set it (the row already carries the
- * value). The driver hands back the index; the dry run uses allocation order. */
+ * value). The driver hands back the index, the CAM row of the Alloc-ID, and
+ * refuses an Alloc-ID PLOAM has not assigned in this activation, whatever
+ * the OLT set over OMCI (odi_switch_cmd.c cmd 21); the T-CONT is then left
+ * unbound until the kernel list changes. The dry run uses allocation
+ * order. */
 static uint16_t tcont_apply(uint16_t inst, uint32_t alloc_id, uint16_t nqueues)
 {
 	struct omci_tcont t;
@@ -694,6 +719,7 @@ static uint16_t tcont_apply(uint16_t inst, uint32_t alloc_id, uint16_t nqueues)
 					"index %d out of range (max %d)\n",
 					(long)inst, (long)t.alloc_id, (long)nqueues,
 					(long)t.index, (long)tcont_capacity());
+				tcont_forget(inst);
 				return 0xffff;
 			}
 			if (rc == 0)
@@ -701,8 +727,10 @@ static uint16_t tcont_apply(uint16_t inst, uint32_t alloc_id, uint16_t nqueues)
 			out_fmt("   [hw] tcont me %04x alloc %d queues %d -> "
 				"index %d rc %d\n", (long)inst, (long)t.alloc_id,
 				(long)nqueues, (long)t.index, (long)rc);
-			if (rc != 0)
+			if (rc != 0) {
+				tcont_forget(inst);
 				return 0xffff;
+			}
 		} else {
 			/* Allocation order, which is what the driver produces for
 			 * a fresh table. An ME already mapped keeps its index: a

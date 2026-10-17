@@ -181,6 +181,7 @@ uint32_t uptime_cs(void);
  * dBm in 0.002 dB steps; -1 when the driver cannot be read. */
 int ddm_dbm_x500(unsigned type, int16_t *out);
 int alloc_ids_refresh(void);
+int alloc_ids_known(void);
 unsigned alloc_ids_assigned(const uint16_t **ids);
 uint16_t tcont_alloc_id(uint16_t meId, int *src);
 
