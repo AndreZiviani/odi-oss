@@ -212,7 +212,7 @@ This is new, actively developed firmware. Before relying on it:
   it either (the OMCI transport passes only OMCI frames up). The stick does
   not prune multicast.
 - The config store is shared with the stock firmware: of its 184 keys this
-  image reads 21, and the UI shows the other 163 read-only.
+  image acts on 23, and the UI shows the other 161 read-only.
   [`docs/SETTINGS.md`](docs/SETTINGS.md) has each one and what applying it
   costs.
 - The watchdog is armed on every boot: if the kernel hangs or the boot
