@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- Kernel: the OMCI driver logs each command it does not implement once per
+  command number. It logged only the first one of a boot, so a diagnostic
+  bundle from a new OLT showed one of the missing commands at most.
+
 - Docs and tests: the key counts are corrected (the image acts on 22 of the 184
   stock keys, plus bit 256 of `OMCI_CUSTOM_ME`, not "reads 21"; 161 are
   read-only), HACKING.md lists every key of `odi.conf`, SETTINGS.md says that
