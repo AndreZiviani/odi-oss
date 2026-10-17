@@ -63,6 +63,11 @@ check "start: first of the boot, back to re-registration, and why" "$got" \
       "event=start run=boot mode=reregister reason=not_o5 onu_state=unknown rows=0"
 
 $Q cli/build/omcli --inject-file "$FIX/omci-session-isp1.txt" > /dev/null 2>&1
+# The fixture was recorded when omcid announced 301 upload records, and its
+# log keeps only the first three Nexts and the last (sequence 300). The
+# upload is 400 records now (one per 26 bytes of each entity, as the stock
+# ONU sends them), so the Next of the last one is sent here.
+$Q cli/build/omcli --inject "$(printf '0f004e0a00020000018f%060d00000028%08d' 0 0)" > /dev/null 2>&1
 # The burst closes EV_PROV_QUIET_S (10 s) after its last write; the check
 # runs once a second. This is the one wait on a real timer, and the only run
 # that sees the production value of it.
@@ -72,17 +77,20 @@ got=$(grep -c '^event=mib_reset side=olt ' "$log")
 check "the OLT MIB reset, as the OLT's" "$got" "1"
 got=$(grep '^event=mib_upload_begin ' "$log")
 check "the MIB upload, with the count the OLT was told" "$got" \
-      "event=mib_upload_begin entities=301"
+      "event=mib_upload_begin entities=400"
 got=$(grep -c '^event=provision_begin .*after_mib_reset=1$' "$log")
 check "one burst opens, after the reset" "$got" "1"
 got=$(grep '^event=mib_upload_end ' "$log" | sed 's/ duration_s=[0-9.]*//')
 check "and its end, at the Next that answers the last entity" "$got" \
-      "event=mib_upload_end entities=301"
+      "event=mib_upload_end entities=400"
 # 83 creates in the session, one of them for class 351, which the model
 # does not have: refused, so not counted.
+# 184 rows: the OLT's 161 and the tables (classes 49, 50, 79) omcid creates
+# with each of the eight MAC bridge ports -- 24, one of them a row the OLT
+# also sets (class 79 of port 1).
 got=$(grep '^event=provision_end ' "$log" | sed 's/ duration_s=[0-9.]*//')
 check "and closes with the session's own counts" "$got" \
-      "event=provision_end creates=82 sets=102 deletes=0 rows=161 services=6 after_mib_reset=1"
+      "event=provision_end creates=82 sets=102 deletes=0 rows=184 services=6 after_mib_reset=1"
 got=$(grep '^event=alloc_ids ' "$log")
 check "the PLOAM Alloc-IDs, once, when first read" "$got" \
       "event=alloc_ids count=5 ids=282,794,1050,1306,538"
@@ -108,7 +116,7 @@ check "a whole provisioning session is ten event lines" "$got" "10"
 out=$($Q cli/build/omcli provision 2>&1)
 got=$(echo "$out" | grep '^summary ')
 check "provision: the summary" "$got" \
-      "summary rows=161 tconts=5 gem_ports=6 vlans=6 traffic_descriptors=0 services=6 mib_data_sync=184"
+      "summary rows=184 tconts=5 gem_ports=6 vlans=6 traffic_descriptors=0 services=6 mib_data_sync=184"
 got=$(echo "$out" | grep -c '^gem me=[0-9]* port=[0-9]* direction=[123] tcont_me=')
 check "provision: one line per GEM port" "$got" "6"
 got=$(echo "$out" | grep '^vlan ' | tr '\n' ';')
@@ -118,7 +126,7 @@ check "provision: the VLANs, once per source" "$got" \
 # A MIB reset from the CLI is this side's, not the OLT's.
 $Q cli/build/omcli -f mib reset > /dev/null 2>&1
 need "$log" '^event=mib_reset side=local ' 10
-got=$(grep -c '^event=mib_reset side=local rows=161 ' "$log")
+got=$(grep -c '^event=mib_reset side=local rows=184 ' "$log")
 check "a CLI MIB reset is logged as local" "$got" "1"
 
 # What the OLT may act on: a reboot, which omcid refuses, and a software
@@ -312,7 +320,7 @@ $Q cli/build/omcli --inject "$(getmaski 0e44 00bc 0000 e000 49)" > /dev/null 2>&
 $Q cli/build/omcli --inject "$(getmaski 0e45 00bc 8001 e000 5c)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(getmaski 0e46 00c8 0007 8000 49)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(getmaski 0e47 0168 0005 ffff 49)" > /dev/null 2>&1
-for q in "0e48 012d" "0e49 012e" "0e4a 012f" "0e4b 0130"; do
+for q in "0e48 0190" "0e49 0191" "0e4a 0192" "0e4b 0193"; do
 	$Q cli/build/omcli --inject "$(nextframe $q)" > /dev/null 2>&1
 done
 fixed_end /tmp/omcid-fixed5.log
@@ -322,9 +330,9 @@ B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 got=$(grep '^fixed entities: ' $L)
 check "both forms together are read, one entry per attribute" "$got" \
       "fixed entities: 7 entr(ies) answered from OMCI_FIXED_ME"
-got=$(grep 'managed entities to upload' $L | sed 's/.*(\(.*\))/\1/')
+got=$(grep 'upload records' $L | sed 's/.*(\(.*\))/\1/')
 check "the MIB upload counts the entities, two records for the big one" "$got" \
-      "301 autonomous, 0 held, 3 fixed"
+      "277 autonomous, 0 held, 3 fixed"
 got=$(grep -o -F -- '-> 0e482e0a0002000000bc8001e0000011aa2233ff' $L | head -1)
 check "an upload record carries the attributes in order, with the mask" "$got" \
       "-> 0e482e0a0002000000bc8001e0000011aa2233ff"
@@ -443,4 +451,4 @@ omcid_stop "$pid4"
 rm -f /var/config/odi.conf
 
 if [ "$fail" -eq 0 ]; then echo "events-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit

@@ -319,4 +319,4 @@ got=$(rebuild /tmp/omcid-171-pri255.log 0 | grep -c 'manual-add')
 check "VLAN_MANU_TAG_PRI 255: no manual tag" "$got" "0"
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit

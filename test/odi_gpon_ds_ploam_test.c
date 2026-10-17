@@ -364,6 +364,7 @@ static void test_broadcast_copy_of_directed_message(void)
 	m = ds(TEST_ONU_ID, ODI_GPON_DS_ASSIGN_ALLOC_ID);
 	m.content[0] = 0x29U;
 	m.content[1] = 0x10U;
+	m.content[2] = ODI_GPON_ALLOC_ID_TYPE_GEM;	/* type 1: G.984.3 9.2.3.10, the only assigning type */
 	queue(&m);
 	tx0 = us_sent();
 	odi_gpon_isr_poll(&fsm, NULL);
