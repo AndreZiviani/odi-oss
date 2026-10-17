@@ -2,7 +2,8 @@
 # Shared helpers of the OMCI suites (src/omci/*-test.sh). POSIX sh, so it
 # runs under dash and busybox ash in the toolchain container.
 #
-# Source it after the suite has set Q (the qemu-user binary) and fail=0:
+# Source it after the suite has set Q (the qemu-user binary) and fail=0, and
+# end the suite with suite_exit:
 #
 #   . ./testlib.sh
 #
@@ -17,9 +18,11 @@
 
 # wait_for <file> <pattern> <seconds> [count]: the pattern (a basic regular
 # expression, as grep reads it) shows at least <count> times (default 1) in
-# the file within the time, polled every 0.1 s. Returns 1 on timeout, saying
-# what it waited for; the check that follows then fails on its own, or the
-# caller counts it (need).
+# the file within the time, polled every 0.1 s. A timeout is a FAILED CHECK of
+# the suite (it counts in $fail, and says what it waited for): a daemon that
+# died or hung must not let the negative checks after it ("no driver call",
+# "nothing sent") pass against an empty log, and no call site has to remember
+# to look at the return value, which is 1 as well.
 wait_for() {
 	_wf_n=$(( $3 * 10 ))
 	_wf_i=0
@@ -28,14 +31,22 @@ wait_for() {
 		sleep 0.1
 		_wf_i=$((_wf_i + 1))
 	done
-	echo "TIMEOUT after $3 s waiting for ${4:-1} x /$2/ in $1"
+	echo "FAIL  TIMEOUT after $3 s waiting for ${4:-1} x /$2/ in $1 (daemon dead or hung?)"
+	fail=$((fail + 1))
 	return 1
 }
 
-# need <file> <pattern> <seconds> [count]: wait_for, and a failed check when it
-# times out, for a wait that no check after it would notice.
+# need <file> <pattern> <seconds> [count]: wait_for under the name a suite uses
+# for a wait whose only purpose is the check (wait_for itself fails the suite).
 need() {
-	wait_for "$@" || fail=$((fail + 1))
+	wait_for "$@"
+}
+
+# suite_exit: end the suite, exit status 0 when no check failed and 1 when any
+# did. `exit "$fail"` would wrap at 256 failures and report success.
+suite_exit() {
+	[ "${fail:-0}" -eq 0 ] || exit 1
+	exit 0
 }
 
 # wait_bounded <pid> <seconds>: wait for a child of this shell, which must end
@@ -82,6 +93,9 @@ tci_of() {
 	printf '%s' "${1%"$_t"}"
 }
 
+# WAIT_S is the bound, in seconds, of the waits inject_wait and settled make
+# (default 30); testlib-test.sh shortens it to test the failure paths.
+#
 # inject_wait <log> <frame>: inject one frame and wait for omcid's answer to
 # it. The queue is first in, first out and omcid answers in order, so when the
 # answer is in the log every frame before it has been handled too. Every frame
@@ -89,8 +103,12 @@ tci_of() {
 inject_wait() {
 	_iw_tci=$(tci_of "$2")
 	_iw_n=$(grep -c -- "^-> $_iw_tci" "$1" 2>/dev/null || true)
-	$Q cli/build/omcli --inject "$2" > /dev/null 2>&1
-	wait_for "$1" "^-> $_iw_tci" 30 $((${_iw_n:-0} + 1))
+	if ! $Q cli/build/omcli --inject "$2" > /dev/null 2>&1; then
+		echo "FAIL  omcli --inject did not send the frame $2 (no daemon queue?)"
+		fail=$((fail + 1))
+		return 1
+	fi
+	wait_for "$1" "^-> $_iw_tci" "${WAIT_S:-30}" $((${_iw_n:-0} + 1))
 }
 
 # sync_send <log>: inject an inert Get of ONU-G (class 256, attribute 1) and
@@ -120,7 +138,7 @@ rebuilt() {
 settled() {
 	sync_send "$1"
 	_st_n=$(rebuilt "$1")
-	wait_for "$1" 'bridge connections rebuilt' 30 $((_st_n + 1))
+	wait_for "$1" 'bridge connections rebuilt' "${WAIT_S:-30}" $((_st_n + 1))
 }
 
 # keep_log <file> <name>: a daemon log kept past the container, in out/test-logs

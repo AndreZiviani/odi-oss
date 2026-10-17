@@ -138,4 +138,4 @@ done
 
 echo
 [ "$fail" -eq 0 ] && echo "resume-test.sh: all checks passed" || echo "resume-test.sh: $fail check(s) failed"
-exit "$fail"
+suite_exit

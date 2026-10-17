@@ -183,6 +183,8 @@ struct us_queue {
 	uint16_t weight;
 	uint8_t wrr;
 	uint8_t dp_mark;
+	uint32_t cir;                    /* driver units (8 kbit/s), 0: none */
+	uint32_t pir;
 };
 
 struct us_flow_plan {
@@ -193,13 +195,50 @@ struct us_flow_plan {
 	uint16_t flow_id;
 };
 
-static struct us_queue usq_hw[USQ_MAX];
-static unsigned usq_hw_n;
+/* What the driver holds upstream, as the last rebuild left it: the queues
+ * cmd 23 programmed, the T-CONTs cmd 21 answered for, and per flow slot the
+ * GEM port and the T-CONT index and ordinal cmd 25 created it on. The next
+ * rebuild changes only what differs from this (us_qos_rebuild()), and a
+ * resume snapshot keeps it (snapshot.c), so a respawn does not forget what
+ * is in the hardware. */
+struct us_tcont_prog {
+	uint16_t meId;
+	uint16_t alloc;
+	uint16_t index;
+	uint8_t nq;
+	uint8_t used;
+};
+
+struct us_flow_prog {
+	uint16_t gem;
+	uint16_t tcontMe;
+	uint16_t tcont;
+	uint16_t queue;
+	uint8_t live;
+};
+
+static struct {
+	struct us_queue q[USQ_MAX];
+	uint32_t n;
+	struct us_tcont_prog t[TCONT_MAX];
+	struct us_flow_prog f[FLOW_MAX];
+} prog;
+#define usq_hw   prog.q
+#define usq_hw_n prog.n
+
 int qos_dirty;
+int qos_full;
+
+void *qos_prog_state(uint32_t *len)
+{
+	*len = (uint32_t)sizeof prog;
+	return &prog;
+}
 
 /* `omcicli dump qmap`, in the column shape of the stock dump: one row per
  * upstream queue programmed. QID is the dense ordinal, TCID the driver
- * T-CONT index; CIR/PIR are not modelled and print 0, as they do on ISP2. */
+ * T-CONT index; CIR/PIR are the rates of its GEM ports' upstream traffic
+ * descriptor (us_queue_rates()), 0 without one, as on ISP2. */
 void qmap_dump(void)
 {
 	out("\n\n============= PQ ===============\n"
@@ -214,7 +253,7 @@ void qmap_dump(void)
 			(long)q->meId, (long)q->ordinal, q->wrr ? "WRR" : "SP",
 			(long)(q->wrr ? q->weight : q->priority),
 			(long)q->tcontIndex, (long)q->dp_mark, (long)q->tcontMe,
-			0L, 0L, 1L);
+			(long)q->cir, (long)q->pir, 1L);
 		out("-------\t------\t------\t------\t------\t------\t------\t"
 		    "-------\t-------\t-------\n");
 	}
@@ -258,7 +297,41 @@ static int us_queue_decode(uint16_t meId, struct us_queue *q)
 	q->dp_mark = (uint8_t)effective_u32(277, meId, 16);
 	q->tcontIndex = 0xffff;
 	q->ordinal = 0xffff;
+	q->cir = 0;
+	q->pir = 0;
 	return q->tcontMe >= 0x8000;
+}
+
+/* The upstream rates of a queue: the traffic descriptor (class 280) its GEM
+ * port CTPs name as their upstream one (class 268 attribute 5, G.988
+ * 9.2.3), applied as the stock stack applies it: CIR and PIR in byte/s,
+ * PIR less CIR for a meter of type 1 (RFC 4115, where the second rate is
+ * the excess), each divided by 1024 into the driver's 8 kbit/s units. Our
+ * ONU-G reports traffic management option 2 (priority and rate
+ * controlled), which tells the OLT it may provision these. A queue
+ * without one keeps 0 and 0, which the driver takes as no limit; when
+ * several CTPs on one queue name different descriptors, the last CTP of
+ * the store wins, as the last flow set does in the stock stack. */
+static void us_queue_rates(struct us_queue *q, unsigned nq,
+			   const struct us_flow_plan *flows, unsigned nf)
+{
+	for (unsigned i = 0; i < nf; i++) {
+		uint16_t td = (uint16_t)effective_u32(OMCI_ME_GEM_PORT_CTP,
+						      flows[i].ctp, 5);
+		uint32_t cir, pir;
+
+		if (!td || !mib_find(OMCI_ME_TRAFFIC_DESCRIPTOR, td))
+			continue;
+		cir = effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 1);
+		pir = effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 2);
+		if (effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 8) == 1)
+			pir = pir > cir ? pir - cir : 0;
+		for (unsigned j = 0; j < nq; j++)
+			if (q[j].meId == flows[i].pqMe) {
+				q[j].cir = cir / 1024u;
+				q[j].pir = pir / 1024u;
+			}
+	}
 }
 
 /* Does an upstream GEM port CTP name this class-277 queue? Only such a
@@ -278,6 +351,39 @@ int us_queue_referenced(uint16_t pqMe)
 			continue;
 		dir = row_u32(r, ctp, 3);
 		if ((dir == 1 || dir == 3) && row_u32(r, ctp, 4) == pqMe)
+			return 1;
+	}
+	return 0;
+}
+
+int us_scheduler_referenced(uint16_t ts)
+{
+	for (int i = 0; i < MIB_ROWS; i++) {
+		struct mib_row *r = mib_row_at(i);
+
+		if (!r || r->classId != OMCI_ME_PRIORITY_QUEUE)
+			continue;
+		if (effective_u32(OMCI_ME_PRIORITY_QUEUE, r->inst, 7) == ts &&
+		    us_queue_referenced(r->inst))
+			return 1;
+	}
+	return 0;
+}
+
+int us_td_referenced(uint16_t td)
+{
+	const struct omci_class *ctp = find_class(OMCI_ME_GEM_PORT_CTP);
+
+	if (!ctp || !td)
+		return 0;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		struct mib_row *r = mib_row_at(i);
+		uint32_t dir;
+
+		if (!r || r->classId != OMCI_ME_GEM_PORT_CTP)
+			continue;
+		dir = row_u32(r, ctp, 3);
+		if ((dir == 1 || dir == 3) && row_u32(r, ctp, 5) == td)
 			return 1;
 	}
 	return 0;
@@ -473,6 +579,16 @@ static void tcont_remember(uint16_t meId, uint16_t index)
 		}
 }
 
+/* A T-CONT the driver refused (its Alloc-ID not assigned by PLOAM any
+ * more, or not yet) has no index: kept, omcli tcont and the snapshot
+ * would still claim the old one. */
+static void tcont_forget(uint16_t meId)
+{
+	for (int i = 0; i < TCONT_MAX; i++)
+		if (tcont_map[i].used && tcont_map[i].meId == meId)
+			tcont_map[i].used = 0;
+}
+
 static uint32_t tcont_index(uint16_t meId)
 {
 	for (int i = 0; i < TCONT_MAX; i++)
@@ -498,14 +614,15 @@ static uint32_t tcont_index(uint16_t meId)
  *     Alloc-ID that no set T-CONT claims, in assignment order;
  *   - the rest read 0x00FF, and tcont_apply() refuses them.
  *
- * Binding by position also keeps T-CONT k on the kernel's Alloc-ID CAM row
- * k, which is the order its upstream queue and flow words are laid out in
- * (odi_switch_cmd.c, cmd 23 and 25). */
+ * The driver index of a T-CONT is the CAM row of its Alloc-ID, whatever the
+ * order (odi_switch_cmd.c, cmd 21), so nothing here depends on positions
+ * lining up. */
 #define ALLOC_ID_UNASSIGNED 0x00ffu
 
 const char *gpon_proc_path = "/proc/odi_gpon/status";
 static uint16_t ploam_alloc[TCONT_MAX];
 static int ploam_alloc_n = -1;           /* -1: not read yet, or unreadable */
+static int ploam_alloc_readable;         /* the last read found the line */
 
 /* Read the kernel's list again. Returns 1 when it changed since the last
  * read, 0 otherwise; the first read is no change, since whatever was
@@ -529,6 +646,7 @@ int alloc_ids_refresh(void)
 			got = pp_gpon_alloc_ids(buf, (unsigned)n, ids, TCONT_MAX);
 	}
 	readable = got >= 0;
+	ploam_alloc_readable = readable;
 	if (got < 0)
 		got = 0;
 	changed = ploam_alloc_n != got;
@@ -542,6 +660,15 @@ int alloc_ids_refresh(void)
 	if (changed && readable)
 		ev_alloc_ids(ploam_alloc, (unsigned)got);
 	return changed && !first;
+}
+
+/* Whether alloc_ids_assigned() is a list the kernel printed (1), or no
+ * list at all (0: no kernel of ours, as under qemu). */
+int alloc_ids_known(void)
+{
+	if (ploam_alloc_n < 0)
+		alloc_ids_refresh();
+	return ploam_alloc_readable;
 }
 
 unsigned alloc_ids_assigned(const uint16_t **ids)
@@ -615,7 +742,11 @@ uint16_t tcont_alloc_id(uint16_t meId, int *src)
 
 /* Program one T-CONT: from a Set of its Alloc-ID, or on demand when a GEM
  * port CTP names it and the OLT never set it (the row already carries the
- * value). The driver hands back the index; the dry run uses allocation order. */
+ * value). The driver hands back the index, the CAM row of the Alloc-ID, and
+ * refuses an Alloc-ID PLOAM has not assigned in this activation, whatever
+ * the OLT set over OMCI (odi_switch_cmd.c cmd 21); the T-CONT is then left
+ * unbound until the kernel list changes. The dry run uses allocation
+ * order. */
 static uint16_t tcont_apply(uint16_t inst, uint32_t alloc_id, uint16_t nqueues)
 {
 	struct omci_tcont t;
@@ -638,6 +769,7 @@ static uint16_t tcont_apply(uint16_t inst, uint32_t alloc_id, uint16_t nqueues)
 					"index %d out of range (max %d)\n",
 					(long)inst, (long)t.alloc_id, (long)nqueues,
 					(long)t.index, (long)tcont_capacity());
+				tcont_forget(inst);
 				return 0xffff;
 			}
 			if (rc == 0)
@@ -645,8 +777,10 @@ static uint16_t tcont_apply(uint16_t inst, uint32_t alloc_id, uint16_t nqueues)
 			out_fmt("   [hw] tcont me %04x alloc %d queues %d -> "
 				"index %d rc %d\n", (long)inst, (long)t.alloc_id,
 				(long)nqueues, (long)t.index, (long)rc);
-			if (rc != 0)
+			if (rc != 0) {
+				tcont_forget(inst);
 				return 0xffff;
+			}
 		} else {
 			/* Allocation order, which is what the driver produces for
 			 * a fresh table. An ME already mapped keeps its index: a
@@ -665,16 +799,118 @@ static uint16_t tcont_apply(uint16_t inst, uint32_t alloc_id, uint16_t nqueues)
 	return (uint16_t)tcont_index(inst);
 }
 
+/* The programmed T-CONT of ME `meId`, or 0. */
+static struct us_tcont_prog *tc_prog_find(uint16_t meId)
+{
+	for (int i = 0; i < TCONT_MAX; i++)
+		if (prog.t[i].used && prog.t[i].meId == meId)
+			return &prog.t[i];
+	return 0;
+}
+
+static int tc_prog_dropped(uint16_t meId, const uint8_t *drop)
+{
+	for (int i = 0; i < TCONT_MAX; i++)
+		if (prog.t[i].used && prog.t[i].meId == meId)
+			return drop[i];
+	return 1;                        /* no such T-CONT programmed: gone */
+}
+
+/* The queue programmed at ordinal `ord` of T-CONT ME `meId`, or 0. */
+static struct us_queue *prog_queue(uint16_t meId, uint16_t ord)
+{
+	for (unsigned i = 0; i < usq_hw_n; i++)
+		if (usq_hw[i].tcontMe == meId && usq_hw[i].ordinal == ord)
+			return &usq_hw[i];
+	return 0;
+}
+
+/* The weight cmd 23 carries for a queue. */
+static uint16_t us_queue_weight(const struct us_queue *q)
+{
+	return q->wrr && q->weight > 1 ? q->weight : 1;
+}
+
+static long us_priq_send(const struct us_queue *q, uint16_t tcontIndex, uint16_t ord,
+			 const char *what)
+{
+	struct omci_priq pq;
+	long rc;
+
+	for (unsigned w = 0; w < sizeof pq / 4; w++)
+		((uint32_t *)&pq)[w] = 0;
+	pq.index = ord;
+	pq.owner = tcontIndex;
+	pq.weight = us_queue_weight(q);
+	pq.wrr = q->wrr;
+	pq.dp_mark = q->dp_mark;
+	pq.cir = q->cir;
+	pq.pir = q->pir;
+	pq.dir = OMCI_GEMFLOW_US;
+	rc = apply_hw ? omci_drv_call(OMCI_PRIQ_CMD, &pq, sizeof pq) : 0;
+	out_fmt("   [%s] us priq %d ordinal %d tcont %d weight %d "
+		"wrr %d dp %d cir %d pir %d%s -> %d\n",
+		apply_hw ? "hw" : "dry",
+		(long)q->meId, (long)pq.index, (long)pq.owner,
+		(long)pq.weight, (long)pq.wrr,
+		(long)pq.dp_mark, (long)pq.cir, (long)pq.pir, what, rc);
+	return rc;
+}
+
+static void us_flow_send_delete(unsigned slot)
+{
+	struct omci_gemflow f;
+
+	for (unsigned w = 0; w < sizeof f / 4; w++)
+		((uint32_t *)&f)[w] = 0;
+	f.flow_id = slot;
+	f.dir = OMCI_GEMFLOW_US;
+	if (apply_hw)
+		omci_drv_call(OMCI_GEMFLOW_CMD, &f, sizeof f);
+	out_fmt("   [%s] us flow %d delete\n", apply_hw ? "hw" : "dry", (long)slot);
+	prog.f[slot].live = 0;
+}
+
+/* The upstream graph from the MIB, as a change to what the driver holds.
+ *
+ * The plan: every upstream GEM CTP, the class 277 queues they name, sorted
+ * into each T-CONT's ordinals (us_queue_before()), and each T-CONT's
+ * Alloc-ID. Against what the last rebuild programmed (prog):
+ *
+ *   - a T-CONT with the same Alloc-ID and the same queue at every ordinal
+ *     is kept: its index and queue block stay, and a queue whose weight,
+ *     type, marking or rates moved is sent again in place (cmd 23 on a
+ *     queue already in the T-CONT's mask writes no drain);
+ *   - any other programmed T-CONT is torn down (its flows, then its queues)
+ *     and, if the plan still has it, built again (cmd 21, cmd 23);
+ *   - a flow is sent only when its GEM port, T-CONT or queue changed (cmd
+ *     25 on a slot in use updates it in place), and deleted only when its
+ *     CTP is gone or its T-CONT was torn down.
+ *
+ * So a Set that changes nothing upstream sends nothing, and one that
+ * changes one T-CONT interrupts that T-CONT only, where the old rebuild
+ * deleted and re-created every queue and flow on every rebuild. The stock
+ * stack re-applies per entity too. Everything is torn down only after a
+ * change of the PLOAM Alloc-ID list (qos_full): the CAM rows, hence the
+ * T-CONT indexes, may then have moved. */
 void us_qos_rebuild(void)
 {
 	static struct us_flow_plan flows[FLOW_MAX];
 	static struct us_queue queues[USQ_MAX];
+	static struct {
+		uint16_t tcontMe;
+		uint16_t first, end;
+		uint16_t alloc;
+		uint8_t keep;
+	} grp[USQ_MAX];
 	const struct omci_class *ctp = find_class(OMCI_ME_GEM_PORT_CTP);
-	uint8_t keep[FLOW_MAX];
-	unsigned nf = 0, nq = 0;
+	uint8_t keep[FLOW_MAX], drop[TCONT_MAX];
+	unsigned nf = 0, nq = 0, ng = 0, kept = 0, built = 0, same = 0;
+	int full = qos_full;
 
 	if (!ctp)
 		return;
+	qos_full = 0;
 	for (unsigned i = 0; i < sizeof keep; i++)
 		keep[i] = 0;
 
@@ -701,36 +937,112 @@ void us_qos_rebuild(void)
 		nf++;
 	}
 
-	/* Queue deletion needs the old ordinals and T-CONT indices, so tear down
-	 * hardware before replacing the runtime plan. */
-	for (unsigned i = 0; i < caps_flows(); i++)
-		if (flow_us[i].used) {
-			struct omci_gemflow f;
+	/* Only queues an upstream GEM CTP references: the unreferenced ones
+	 * ISP1 Sets would fill the shared pool of 32 queues and push the fifth
+	 * T-CONT to the out-of-range index 8. */
+	for (unsigned i = 0; i < nf; i++)
+		us_queue_add(queues, &nq, flows[i].pqMe);
+	us_queue_rates(queues, nq, flows, nf);
+	for (unsigned i = 1; i < nq; i++) {
+		struct us_queue q = queues[i];
+		unsigned j = i;
 
-			for (unsigned w = 0; w < sizeof f / 4; w++)
-				((uint32_t *)&f)[w] = 0;
-			f.flow_id = i;
-			f.dir = OMCI_GEMFLOW_US;
-			if (apply_hw)
-				omci_drv_call(OMCI_GEMFLOW_CMD, &f, sizeof f);
-			out_fmt("   [%s] us flow %d delete\n",
-				apply_hw ? "hw" : "dry", (long)i);
+		while (j && us_queue_before(&q, &queues[j - 1])) {
+			queues[j] = queues[j - 1];
+			j--;
 		}
-	for (unsigned i = 0; i < usq_hw_n; i++) {
-		struct omci_priq pq;
-
-		for (unsigned w = 0; w < sizeof pq / 4; w++)
-			((uint32_t *)&pq)[w] = 0;
-		pq.index = usq_hw[i].ordinal;
-		pq.owner = usq_hw[i].tcontIndex;
-		pq.dir = OMCI_GEMFLOW_US;
-		if (apply_hw)
-			omci_drv_call(OMCI_PRIQ_DEL_CMD, &pq, sizeof pq);
-		out_fmt("   [%s] us priq %d ordinal %d tcont %d delete\n",
-			apply_hw ? "hw" : "dry", (long)usq_hw[i].meId,
-			(long)pq.index, (long)pq.owner);
+		queues[j] = q;
 	}
-	usq_hw_n = 0;
+	for (unsigned first = 0; first < nq;) {
+		unsigned end = first + 1;
+
+		while (end < nq && queues[end].tcontMe == queues[first].tcontMe)
+			end++;
+		for (unsigned i = first; i < end; i++)
+			queues[i].ordinal = (uint16_t)(i - first);
+		if (end - first > 8) {
+			out_fmt("   [hw] tcont me %04x needs %d queues; max is 8\n",
+				(long)queues[first].tcontMe, (long)(end - first));
+		} else {
+			grp[ng].tcontMe = queues[first].tcontMe;
+			grp[ng].first = (uint16_t)first;
+			grp[ng].end = (uint16_t)end;
+			grp[ng].alloc = (uint16_t)effective_u32(262, queues[first].tcontMe, 1);
+			grp[ng].keep = 0;
+			ng++;
+		}
+		first = end;
+	}
+
+	/* Which programmed T-CONTs stay as they are. */
+	for (int t = 0; t < TCONT_MAX; t++) {
+		const struct us_tcont_prog *tp = &prog.t[t];
+
+		drop[t] = 0;
+		if (!tp->used)
+			continue;
+		drop[t] = 1;
+		if (full)
+			continue;
+		for (unsigned g = 0; g < ng; g++) {
+			int same_q = 1;
+
+			if (grp[g].tcontMe != tp->meId)
+				continue;
+			if (grp[g].alloc != tp->alloc || grp[g].end - grp[g].first != tp->nq)
+				break;
+			for (unsigned i = grp[g].first; i < grp[g].end && same_q; i++) {
+				const struct us_queue *h = prog_queue(tp->meId, queues[i].ordinal);
+
+				same_q = h && h->meId == queues[i].meId;
+			}
+			if (same_q) {
+				grp[g].keep = 1;
+				drop[t] = 0;
+			}
+			break;
+		}
+	}
+
+	/* Teardown, flows first: a flow whose CTP is gone, or whose T-CONT
+	 * goes. Then the queues of the T-CONTs that go (the deletes need the
+	 * old ordinals and indexes). */
+	for (unsigned i = 0; i < caps_flows() && i < FLOW_MAX; i++)
+		if (prog.f[i].live &&
+		    (!keep[i] || tc_prog_dropped(prog.f[i].tcontMe, drop)))
+			us_flow_send_delete(i);
+	for (unsigned i = 0; i < usq_hw_n;) {
+		const struct us_tcont_prog *tp = tc_prog_find(usq_hw[i].tcontMe);
+
+		if (tp && !drop[tp - prog.t]) {
+			i++;
+			continue;
+		}
+		{
+			struct omci_priq pq;
+
+			for (unsigned w = 0; w < sizeof pq / 4; w++)
+				((uint32_t *)&pq)[w] = 0;
+			pq.index = usq_hw[i].ordinal;
+			pq.owner = usq_hw[i].tcontIndex;
+			pq.dir = OMCI_GEMFLOW_US;
+			if (apply_hw)
+				omci_drv_call(OMCI_PRIQ_DEL_CMD, &pq, sizeof pq);
+			out_fmt("   [%s] us priq %d ordinal %d tcont %d delete\n",
+				apply_hw ? "hw" : "dry", (long)usq_hw[i].meId,
+				(long)pq.index, (long)pq.owner);
+		}
+		usq_hw[i] = usq_hw[--usq_hw_n];
+	}
+	for (int t = 0; t < TCONT_MAX; t++)
+		if (prog.t[t].used && drop[t]) {
+			/* The driver answers again for one rebuilt; the dry
+			 * run keeps its allocation-order index (tcont_apply()). */
+			if (apply_hw)
+				tcont_forget(prog.t[t].meId);
+			prog.t[t].used = 0;
+		}
+
 	for (unsigned i = 0; i < caps_flows(); i++)
 		if (!keep[i])
 			flow_us[i].used = 0;
@@ -744,78 +1056,69 @@ void us_qos_rebuild(void)
 			flow_claim(0, id, flows[i].port);
 		}
 
-	/* Only queues an upstream GEM CTP references: the unreferenced ones
-	 * ISP1 Sets would fill the shared pool of 32 queues and push the fifth
-	 * T-CONT to the out-of-range index 8. */
-	for (unsigned i = 0; i < nf; i++)
-		us_queue_add(queues, &nq, flows[i].pqMe);
-	for (unsigned i = 1; i < nq; i++) {
-		struct us_queue q = queues[i];
-		unsigned j = i;
-
-		while (j && us_queue_before(&q, &queues[j - 1])) {
-			queues[j] = queues[j - 1];
-			j--;
-		}
-		queues[j] = q;
-	}
-
-	for (unsigned first = 0; first < nq;) {
-		uint16_t tcontMe = queues[first].tcontMe;
-		unsigned end = first + 1;
+	/* The T-CONTs: kept ones get only their changed queues again; the
+	 * others are built. */
+	for (unsigned g = 0; g < ng; g++) {
 		uint16_t tcontIndex;
+		int slot = -1;
 
-		while (end < nq && queues[end].tcontMe == tcontMe)
-			end++;
-		if (end - first > 8) {
-			out_fmt("   [hw] tcont me %04x needs %d queues; max is 8\n",
-				(long)tcontMe, (long)(end - first));
-			first = end;
+		if (grp[g].keep) {
+			const struct us_tcont_prog *tp = tc_prog_find(grp[g].tcontMe);
+
+			kept++;
+			for (unsigned i = grp[g].first; i < grp[g].end; i++) {
+				struct us_queue *h = prog_queue(grp[g].tcontMe, queues[i].ordinal);
+
+				if (!h || !tp)
+					continue;
+				if (h->wrr == queues[i].wrr &&
+				    us_queue_weight(h) == us_queue_weight(&queues[i]) &&
+				    h->dp_mark == queues[i].dp_mark &&
+				    h->cir == queues[i].cir && h->pir == queues[i].pir) {
+					h->priority = queues[i].priority;
+					h->weight = queues[i].weight;
+					continue;
+				}
+				queues[i].tcontIndex = tp->index;
+				if (us_priq_send(&queues[i], tp->index, queues[i].ordinal,
+						 " (in place)") == 0)
+					*h = queues[i];
+			}
 			continue;
 		}
-		tcontIndex = tcont_apply(tcontMe,
-			(uint16_t)effective_u32(262, tcontMe, 1),
-			(uint16_t)(end - first));
-		if (tcontIndex == 0xffff) {
-			first = end;
+		tcontIndex = tcont_apply(grp[g].tcontMe, grp[g].alloc,
+					 (uint16_t)(grp[g].end - grp[g].first));
+		if (tcontIndex == 0xffff)
 			continue;
+		built++;
+		for (int t = 0; t < TCONT_MAX && slot < 0; t++)
+			if (!prog.t[t].used)
+				slot = t;
+		if (slot >= 0) {
+			prog.t[slot].meId = grp[g].tcontMe;
+			prog.t[slot].alloc = grp[g].alloc;
+			prog.t[slot].index = tcontIndex;
+			prog.t[slot].nq = (uint8_t)(grp[g].end - grp[g].first);
+			prog.t[slot].used = 1;
 		}
-		for (unsigned i = first; i < end; i++) {
-			struct omci_priq pq;
-			long rc;
-
-			queues[i].ordinal = (uint16_t)(i - first);
+		for (unsigned i = grp[g].first; i < grp[g].end; i++) {
 			queues[i].tcontIndex = tcontIndex;
-			for (unsigned w = 0; w < sizeof pq / 4; w++)
-				((uint32_t *)&pq)[w] = 0;
-			pq.index = queues[i].ordinal;
-			pq.owner = tcontIndex;
-			pq.weight = queues[i].wrr && queues[i].weight > 1
-				? queues[i].weight : 1;
-			pq.wrr = queues[i].wrr;
-			pq.dp_mark = queues[i].dp_mark;
-			pq.dir = OMCI_GEMFLOW_US;
-			rc = apply_hw
-			   ? omci_drv_call(OMCI_PRIQ_CMD, &pq, sizeof pq) : 0;
-			out_fmt("   [%s] us priq %d ordinal %d tcont %d weight %d "
-				"wrr %d dp %d -> %d\n", apply_hw ? "hw" : "dry",
-				(long)queues[i].meId, (long)pq.index, (long)pq.owner,
-				(long)pq.weight, (long)pq.wrr,
-				(long)pq.dp_mark, rc);
-			if (rc == 0 && usq_hw_n < USQ_MAX)
+			if (us_priq_send(&queues[i], tcontIndex, queues[i].ordinal, "") == 0 &&
+			    usq_hw_n < USQ_MAX)
 				usq_hw[usq_hw_n++] = queues[i];
 		}
-		first = end;
 	}
 
 	for (unsigned i = 0; i < nf; i++) {
 		struct omci_gemflow f;
 		struct us_queue requested;
 		struct us_queue *bound = 0;
+		struct us_flow_prog *fp;
 		long rc;
 
-		if (flows[i].flow_id == 0xffff)
+		if (flows[i].flow_id == 0xffff || flows[i].flow_id >= FLOW_MAX)
 			continue;
+		fp = &prog.f[flows[i].flow_id];
 		for (unsigned q = 0; q < usq_hw_n; q++)
 			if (usq_hw[q].meId == flows[i].pqMe &&
 			    usq_hw[q].tcontMe == flows[i].tcontMe)
@@ -834,6 +1137,13 @@ void us_qos_rebuild(void)
 			out_fmt("   [hw] gem %d has no queue %04x on tcont %04x\n",
 				(long)flows[i].port, (long)flows[i].pqMe,
 				(long)flows[i].tcontMe);
+			if (fp->live)
+				us_flow_send_delete(flows[i].flow_id);
+			continue;
+		}
+		if (fp->live && fp->gem == flows[i].port && fp->tcontMe == bound->tcontMe &&
+		    fp->tcont == bound->tcontIndex && fp->queue == bound->ordinal) {
+			same++;
 			continue;
 		}
 		for (unsigned w = 0; w < sizeof f / 4; w++)
@@ -849,7 +1159,19 @@ void us_qos_rebuild(void)
 			"queue %d -> %d\n", apply_hw ? "hw" : "dry",
 			(long)f.gem_port, (long)f.flow_id, (long)flows[i].tcontMe,
 			(long)f.tcont, (long)f.queue, rc);
+		if (rc == 0) {
+			fp->gem = flows[i].port;
+			fp->tcontMe = bound->tcontMe;
+			fp->tcont = bound->tcontIndex;
+			fp->queue = bound->ordinal;
+			fp->live = 1;
+		} else {
+			fp->live = 0;
+		}
 	}
+	out_fmt("   [%s] us qos%s: %d T-CONTs kept, %d built, %d flows unchanged\n",
+		apply_hw ? "hw" : "dry", full ? " (full, the Alloc-IDs changed)" : "",
+		(long)kept, (long)built, (long)same);
 }
 
 /* Class 277, a priority queue: driver command 23, sent when the queue is
@@ -936,7 +1258,24 @@ void qos_reset(void)
 	}
 	for (int i = 0; i < TCONT_MAX; i++)
 		tcont_map[i].used = 0;
+	/* What the MIB had programmed upstream goes with it, in the driver
+	 * too: command 0, the stock resetMib, empties every upstream flow,
+	 * queue and T-CONT block (odi_switch_cmd.c), so the next provisioning
+	 * starts from what the module load left, as omcid's tables do. */
+	if (apply_hw) {
+		uint8_t none[4] = { 0, 0, 0, 0 };
+		long rc = omci_drv_call(OMCI_MIB_RESET_CMD, none, sizeof none);
+
+		out_fmt("   [hw] upstream reset (mib reset) -> %d\n", rc);
+	}
+	for (int i = 0; i < USQ_MAX; i++)
+		usq_hw[i].meId = 0;
 	usq_hw_n = 0;
+	for (int i = 0; i < TCONT_MAX; i++)
+		prog.t[i].used = 0;
+	for (int i = 0; i < FLOW_MAX; i++)
+		prog.f[i].live = 0;
 	qos_dirty = 0;
+	qos_full = 0;
 	bc_flow = -1;
 }

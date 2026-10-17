@@ -164,9 +164,9 @@ shapes as `omcli`.
 
 **Settings that say what they cost.** Of the 184 keys in the config store
 the stock firmware shares with this image, the UI offers for editing only
-the 21 this image actually reads, each marked with what applying it costs:
+the 22 stock keys this image acts on (and its own), each marked with what applying it costs:
 LIVE, SERVICE RESTART, INTERRUPTS INTERNET or REBOOT, the last two behind a
-confirmation. The other 163 are shown read-only and still round-trip
+confirmation. The other 161 are shown read-only and still round-trip
 through backup and restore. `apply.sh` applies the management addresses
 live and the OMCI settings without a reboot (it re-ranges the ONU), the
 firmware page writes an uploaded image to the inactive slot

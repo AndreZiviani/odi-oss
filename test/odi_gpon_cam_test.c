@@ -229,6 +229,7 @@ static void test_cmd25_ds_not_done(void)
 	g.dir = OMCI_GEMFLOW_DS;
 	g.flow_id = 3;
 	g.gem_port = 0x59a;
+	g.ena = 1;
 	odi_mock.poll_stuck = 1;
 	CHECK(odi_switch_cmd(OMCI_GEMFLOW_CMD, &g, sizeof g) != 0, "cmd 25 reports the CAM write that failed");
 	odi_mock.poll_stuck = 0;

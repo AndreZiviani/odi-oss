@@ -547,10 +547,10 @@ static inline uint32_t ODI_SW_US_GEM_PORT_MAP_GEM_PORT_SET(uint32_t reg, uint32_
 /* ---- PON queue block, 0xf00000 */
 
 /* PONQ_COUNT_MASK: 0xf020a8, one word per slot. The table declares a
- * 1-bit field, but other registers of the PON queue block share the window
- * (PON_SID2QID at 0xf020f8, PON_SIDVALID at 0xf0213c, PON_SID_GLB_TH at
- * 0xf02454, the WFQ words at 0xf023e8-0xf023fc: odi_switch_qos.c), so the
- * word is written raw, never a field.
+ * 1-bit field, but the window is the whole upstream PON queue block:
+ * odi_switch_qos.c addresses its registers (DRN_CMD, PON_SID2QID,
+ * PON_SIDVALID, the queue rates, PON_SCH_QMAP, PON_TCONT_EN, the WFQ
+ * words, the PBO thresholds) by index into it, with their own fields.
  */
 #define ODI_SW_PONQ_COUNT_MASK_BASE	0xf020a8U
 #define ODI_SW_PONQ_COUNT_MASK(n)	(ODI_SW_PONQ_COUNT_MASK_BASE + 4U * (uint32_t)(n))	/* slots: 0..259, the ones used are in odi_switch_qos.c */

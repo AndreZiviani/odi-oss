@@ -2,9 +2,12 @@
 
 What you can configure on a stick running this image, what each setting
 actually does here, and what applying it costs. The config store this image
-shares with the stock firmware holds 184 keys; this image reads 21 of them,
-and the web UI (`confd`) offers only those for editing. This page says which
-is which, and why each one costs what it does.
+shares with the stock firmware holds 184 keys; this image acts on 23 of them
+(22 the web UI (`confd`) offers for editing, and one bit of `OMCI_CUSTOM_ME`),
+besides keys of its own that the stock firmware never had. `omcicli` also
+prints the four `OMCI_CUSTOM_*` masks and `DUAL_MGMT_MODE`, as the stock one
+does; apart from that bit, they change nothing here. This page says
+which is which, and why each one costs what it does.
 
 The programs named below are described in [`docs/TOOLS.md`](TOOLS.md).
 
@@ -19,8 +22,8 @@ A few more settings are plain files on the same partition ("Switch files").
 
 **The partition is shared with the other slot.** Reflashing never touches
 it, and whichever slot boots reads it. On a stick that keeps the stock
-firmware as its committed slot, every key here -- including the 163 this
-image ignores -- is still what the stock firmware reads when the stick
+firmware as its committed slot, every key here -- including the 161 this
+image does not act on -- is still what the stock firmware reads when the stick
 falls back to it. Do not delete keys this image does not use, and keep
 backups whole: the UI's backup and restore carry every key.
 
@@ -96,7 +99,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `LAN_IP_ADDR` | Management IP | the `br0` address ssh, the UI and the exporter answer on | `network.sh` | LIVE |
 | `LAN_SUBNET` | Management netmask | its netmask | `network.sh` | LIVE |
 | `LAN_ENABLE_IP2` | Second management address | 1 adds a second address on `br0:2`, 0 removes it | `network.sh` | LIVE |
-| `LAN_IP_ADDR2` | Second management IP | that address (both sticks store 192.168.100.1) | `network.sh` | LIVE |
+| `LAN_IP_ADDR2` | Second management IP | that address (192.168.100.1 is the stock default, and what both sticks store) | `network.sh` | LIVE |
 | `LAN_SUBNET2` | Second management netmask | its netmask | `network.sh` | LIVE |
 | `VLAN_CFG_TYPE` | VLAN config mode | 1 lets the manual tag through; anything else is no manual tag, and the OLT's class 171 rule drives the tagging when it has the supported shape ("VLAN handling" below) | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
@@ -113,7 +116,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `ELAN_MAC_ADDR` | UNI MAC address (identity) | the MAC of `eth0`, `eth0.2` and `br0` | `network.sh` at boot | REBOOT |
 | `GPON_SN` | ONU serial number (identity) | the serial the OLT authenticates; a wrong value means no service | the `gponsn` PON step in rcS (`rcs-lib.sh`, `pon_step_gponsn`); omcid on SIGHUP | INTERRUPTS INTERNET |
 | `SYSLOG_SERVER` | Remote syslog server | `host[:port]` syslogd forwards a copy of every message to, with `-R` -- kernel messages and the link and provisioning `event=` lines included (docs/TOOLS.md, "Link and provisioning events"); empty means local only (the circular buffer, `logread`). Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). Set from the web UI (Config, other), which saves it and runs `apply.sh syslog`; an empty value clears it (clearing from the UI needs odi-ui v1.0.8) | `svc-syslogd.sh` | SERVICE RESTART |
-| `OMCI_UNKNOWN_ME_OK` | Answer unknown entities with success | `1` answers a Create, Set or Get of a managed entity class omcid has no model for with success instead of "unknown entity" (result 4), the counterpart of the stock `OMCI_FAKE_OK`; anything else, or absent, keeps the error. Default off. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). For an OLT that stalls its provisioning at an "unknown entity" answer; the risk is below | omcid, at start and on SIGHUP | INTERRUPTS INTERNET |
+| `OMCI_UNKNOWN_ME_OK` | Answer unknown entities with success | `1` answers a Create, Set or Get of a managed entity class omcid has no model for with success instead of "unknown entity" (result 4), the counterpart of the stock `OMCI_FAKE_OK`, which this image does not read; anything else, or absent, keeps the error. Default off. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below). For an OLT that stalls its provisioning at an "unknown entity" answer; the risk is below | omcid, at start and on SIGHUP | INTERRUPTS INTERNET |
 | `OMCI_FIXED_ME` | Answer unknown classes with fixed bytes | Up to 16 entries, separated by spaces or commas, in two forms. `CLASS:HEX`: the class in decimal (1 to 65535) and the attribute bytes in hex (optional `0x`, 1 to 25 bytes), e.g. `200:0x0011aa`; omcid answers a Get or Get current data of ANY instance of the class with the bytes, under the attribute mask the OLT asked for, and the entity is not in the MIB upload. `CLASS:INSTANCE:ATTR:HEX`: one attribute of one entity, the instance 0 to 65535 in decimal or `0x` hex and the attribute 1 to 16, e.g. `200:0x8001:1:0x0011aa`; entries with the same `CLASS:INSTANCE` make one entity with several attributes. That entity is listed in the MIB upload (its attributes in attribute order, split over more than one upload response when they do not fit in one), a Get of it answers the attributes asked for that it has (an attribute it does not have is left out of the answered mask, as omcid does for its own entities), and a Get of any other instance of the class answers "unknown managed entity instance" (result 5). Only for classes omcid has no model of its own for: a class it implements is never overridden. For an OLT that expects a native ONU's vendor-specific entities; copy the bytes from a native ONU. Empty or absent is off; anything malformed (a bad entry, a class twice in the first form, the same class, instance and attribute twice, a class in both forms, more than 16 entries) turns the whole key off. Odi-only key, kept in `/etc/config/odi.conf`; the bytes are not logged, and the diagnostics bundle redacts the key. A Create or Set of such a class is answered as for any unknown class (`OMCI_UNKNOWN_ME_OK`) | omcid, at start and on SIGHUP | INTERRUPTS INTERNET |
 | `OMCI_VEIP_SLOT_ID` | VEIP slot | The slot number the virtual Ethernet interface point (VEIP) is created in, decimal, 2 to 254 and not 128. Unset, the VEIP is in slot 6, as on the stock firmware: the VEIP, its UNI-G and the TR-069 server are entity `0x0601`, the cardholder and circuit pack `0x0106`. With a slot, those are `slot << 8 \| 1` and `0x0100 \| slot` (slot 14: `0x0e01` and `0x010e`). As on the stock firmware the slot is used only while bit 256 (`0x100`) of `OMCI_CUSTOM_ME` is set; without that bit the VEIP stays in slot 6 and only the VEIP attribute "customized slot id" (329 attribute 6) reports the key. The stock key, kept in `lastgood.xml` (not `odi.conf`); a value that is not a number or not in range is ignored, with a line in the omcid log. For an OLT that provisions the VEIP at a slot other than 6; the ids the OLT addresses must match | omcid, at start and on SIGHUP (re-registers) | INTERRUPTS INTERNET |
 | `OMCI_VEIP` | Create a VEIP | `0` creates no VEIP at all, so the ONU presents only its PPTP Ethernet UNI (cardholder and circuit pack `0x0101` and `0x0180`, PPTP Ethernet UNI `0x0101`): the VEIP, its UNI-G, the TR-069 server and the VEIP slot's cardholder and circuit pack (five entities) are not created, the MIB upload announces five fewer, and a Get of them is refused as an unknown instance. Anything else, or absent, creates the VEIP (in the slot `OMCI_VEIP_SLOT_ID` names). A separate odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below), and not a value of `OMCI_VEIP_SLOT_ID`: the stock firmware reads that key as a slot number only, so a `0` there would put its VEIP in slot 0 if the stick fell back to it. For an OLT that provisions a PPTP-only ONU; the OLT must not create bridge ports on a VEIP | omcid, at start and on SIGHUP (re-registers) | INTERRUPTS INTERNET |
@@ -141,7 +144,7 @@ An empty value removes the key. `flash all cs` appends the odi keys that hold a
 value as `<Value/>` lines so confd sees them. A line that is not `KEY=value` for
 a listed key is ignored and kept. A factory reset (`flash default cs`) does not
 clear this file. They must never be written into `lastgood*.xml`: measured on a
-claro stick (2026-09-28), the OEM image boots with an unknown key added to that
+ISP1 stick (2026-09-28), the OEM image boots with an unknown key added to that
 file and ignores it on load, but its first save rewrites the file from its
 in-memory table and silently drops the key.
 
@@ -232,7 +235,7 @@ upstream, the tag is removed downstream and from multicast, and the router
 sees untagged frames. Frames the router already tags with that VID still
 pass upstream unchanged when the OLT's VLAN filter (class 84) on the GEM side
 lists the VID, since the table leaves tagged frames on its default rule
-(G.988); the manual tag, by contrast, takes the place of that entry. A Huawei OLT's "untagged frames: add VLAN 100 pri 0"
+(G.988); the manual tag, by contrast, takes the place of that entry. An OLT's "untagged frames: add VLAN 100 pri 0"
 is this shape (`omcli mib 171` prints the rule). omcid logs
 `untagged frames get VLAN <vid> pri <p> from the OLT` when it applies one.
 Any other shape (a rule for tagged frames, VID or priority copied from a tag,
@@ -499,7 +502,7 @@ the diagnostics bundle carries it (`host-link.txt`).
 | Host port (Config, Network) | `host-autoneg.sh try on\|off`, then a dialog counting down the 120 s: Keep runs `confirm` (stores `HOST_AUTONEG`), Revert runs `revert`; no answer reverts by itself | LIVE (a trial) |
 | Host link and safe-mode banner (every view) | shown while the boot fallback runs auto-negotiation with `HOST_AUTONEG=off`, during a safe-mode boot, and while a safe-mode record waits; its button acknowledges the safe mode (`safe-mode.sh ack`) | -- |
 | OLT identity switch (Config) | creates or removes `/etc/config/omci-identity.on` | INTERRUPTS INTERNET (with Apply now) |
-| Stock keys (tab) | the 163 keys only the stock firmware reads, read-only | -- |
+| Stock keys (tab) | the stock keys this image does not act on (161), read-only | -- |
 | Config UI credentials (Admin) | `/etc/config/confd.auth` | LIVE (sign in again) |
 | SSH keys (Admin) | `/etc/config/dropbear.d/authorized_keys`, read at every login | LIVE |
 | Download a full config backup (Admin) | both stores, every key, identity included; `tools/config-backup.sh` takes the same file from a host (below) | -- |
@@ -675,7 +678,7 @@ stops kicking -- so the board resets -- when any one of three independent
 rules fails. There is no separate userland process guessing at any of this
 from `/proc`: v1.0.2 shipped one (a "health kicker") and withdrew it the
 same day (`CHANGELOG.md`, v1.0.2) after it withheld its kick correctly on
-claro but the kernel had no enforcement of its own, so the board never
+ISP1 but the kernel had no enforcement of its own, so the board never
 reset and the trial hung for 15 minutes until someone power-cycled it. In
 this design every rule is judged, and every reset is forced, by the
 kernel itself.
@@ -738,7 +741,7 @@ not the stock kernel the harness boots; those are host-tested instead
 
 Every command a script here runs, and every wait one process does on
 another, is bounded unless there is a stated reason not to -- found
-necessary the hard way (rc3, claro, 2026-09-28): a stuck omcid left both
+necessary the hard way (rc3, ISP1, 2026-09-28): a stuck omcid left both
 `metricsd`'s own child wait and `vq_ensure()`'s queue-reclaim logic
 waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
 

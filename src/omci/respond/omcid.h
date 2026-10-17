@@ -181,6 +181,7 @@ uint32_t uptime_cs(void);
  * dBm in 0.002 dB steps; -1 when the driver cannot be read. */
 int ddm_dbm_x500(unsigned type, int16_t *out);
 int alloc_ids_refresh(void);
+int alloc_ids_known(void);
 unsigned alloc_ids_assigned(const uint16_t **ids);
 uint16_t tcont_alloc_id(uint16_t meId, int *src);
 
@@ -249,8 +250,15 @@ const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
 int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor);
 extern int conn_dirty;
 extern int qos_dirty;
+/* The next us_qos_rebuild() tears everything down first: set when the
+ * PLOAM Alloc-ID list changed, since the T-CONT indexes (the CAM rows) may
+ * have moved. */
+extern int qos_full;
 void bdgconn_rebuild(void);
 void us_qos_rebuild(void);
+/* The upstream state the driver holds as omcid programmed it, one block,
+ * for the resume snapshot. */
+void *qos_prog_state(uint32_t *len);
 uint16_t mib_write(struct mib_row *r, const struct omci_class *c, uint16_t mask, const uint8_t *src, uint16_t srclen);
 /* Whether attribute k differs from what the row held before this Set. */
 int mib_changed(const struct mib_row *r, const struct omci_class *c, unsigned k);
@@ -327,6 +335,12 @@ uint16_t canon_inst(uint16_t cls, uint16_t inst);
 int uni_switch_port(uint16_t meId, uint8_t slot_type);
 /* apply_qos.c */
 int us_queue_referenced(uint16_t pqMe);
+/* Does an upstream GEM port CTP name this traffic descriptor (class 280)
+ * as its upstream one? Its rates are then the rates of that CTP's queue. */
+int us_td_referenced(uint16_t td);
+/* Does an upstream queue in the plan name this traffic scheduler (class
+ * 278)? Only then can its Policy change what is programmed. */
+int us_scheduler_referenced(uint16_t ts);
 int flow_find(int ds, uint16_t port);
 void bc_gem_update(void);
 void bc_gem_withdraw(uint16_t going);

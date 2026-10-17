@@ -50,8 +50,12 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 {
 	if (c && (c->classId == OMCI_ME_TCONT ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
+		  (c->classId == OMCI_ME_TRAFFIC_SCHEDULER &&
+		   us_scheduler_referenced(inst)) ||
 		  (c->classId == OMCI_ME_PRIORITY_QUEUE &&
-		   us_queue_referenced(inst))))
+		   us_queue_referenced(inst)) ||
+		  (c->classId == OMCI_ME_TRAFFIC_DESCRIPTOR &&
+		   us_td_referenced(inst))))
 		qos_dirty = 1;
 	if (c && (c->classId == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA ||
 		  c->classId == OMCI_ME_VLAN_TAGGING_FILTER_DATA ||
@@ -139,10 +143,19 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
 		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
 		conn_dirty = 1;
+	/* A traffic scheduler (class 278) matters only when a planned
+	 * upstream queue names it, and then only its Policy (attribute 3:
+	 * strict or WRR, us_queue_decode()), on a create or a Set that
+	 * carries it. Any Set used to rebuild the whole upstream. */
 	if (c && (c->classId == OMCI_ME_TCONT ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
+		  (c->classId == OMCI_ME_TRAFFIC_SCHEDULER &&
+		   (creating || (mask & (1u << (16 - 3)))) &&
+		   us_scheduler_referenced(inst)) ||
 		  (c->classId == OMCI_ME_PRIORITY_QUEUE &&
-		   us_queue_referenced(inst))))
+		   us_queue_referenced(inst)) ||
+		  (c->classId == OMCI_ME_TRAFFIC_DESCRIPTOR &&
+		   us_td_referenced(inst))))
 		qos_dirty = 1;
 
 	switch (c->classId) {

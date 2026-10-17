@@ -278,8 +278,9 @@ commands, from the command table of the shipped binary:
 | cmd | stock name | leaf | file |
 |---|---|---|---|
 | 10 | getTransceiverStatus | `odi_ddm_get` | `odi_ddm.c` |
-| 23 | setPriQueue | `odi_sw_ponmac_queue_add`, `_add_ext` | `odi_switch_qos.c` |
-| 25 | cfgGemFlow | `odi_sw_gpon_usflow_set` (downstream), `odi_sw_ponmac_flow_queue_set` (upstream) | `odi_switch_ds_gem.c`, `odi_switch_qos.c` |
+| 23 | setPriQueue | `odi_sw_ponmac_queue_add` (downstream), `odi_sw_ponq_queue_add` (upstream) | `odi_switch_qos.c` |
+| 24 | clearPriQueue | `odi_sw_ponq_queue_del` | `odi_switch_qos.c` |
+| 25 | cfgGemFlow | `odi_sw_gpon_usflow_set` (downstream), `odi_sw_ponq_us_gem_set`, `_sidvalid_set`, `_glb_th_set`, `_sid2qid_set` (upstream) | `odi_switch_ds_gem.c`, `odi_switch_qos.c` |
 | 30 | setPortAutoNegoAbility | `odi_sw_port_autoneg_get`, `_set` | `odi_switch_port.c` |
 | 32 | setPortState | `odi_sw_port_force_get`, `_set` | `odi_switch_port.c` |
 | 51 | activeBdgConn | `odi_sw_cf_add` | `odi_switch_cf.c` |
@@ -313,50 +314,17 @@ commands, from the command table of the shipped binary:
   A downstream queue writes `PORT_QUEUE_MAP` (0x01c0c0; the word at
   0x01c0a0 is never written) with 0xd4, identical in the eight instances
   ISP1 sends, all before any T-CONT exists. The register holds a 2-bit
-  index per port, which 0xd4 does not fit, so it is written raw. An
-  upstream queue (instances 9 to 13, interleaved with cmd 21) writes seven
-  `PONQ_COUNT_MASK` words for the T-CONT it names, n: +207 (one bit per
-  T-CONT in use), +15 (8 more per T-CONT), +190+n (the scheduler word of
-  T-CONT n, 1 << n), +208 and +212 or +213, +60+n (0) and +125+n
-  (0x3ffff). The order of +208 and +212/+213 depends on n: T-CONT 0 (the
-  only instance where +208 is 0) writes +208 first, every later one writes
-  it second, in all five instances. +212 is used for instances 9 to 11 and
-  +213 for 12 and 13.
+  group index per port, four ports: 0xd4 is the UNI on group 0, the other
+  ports as the init left them, the result of the stock read-modify-write of
+  port 0 for a queue with no drop precedence marking. An upstream queue,
+  and cmd 21, 24 and the upstream side of cmd 25, are the upstream PON
+  queues, below.
+- **cmd 25** downstream is the DS GEM port CAM row and its
+  `DSF_GEM_FLOW_TYPE` word (FLAGS 3 for the OMCI/broadcast port, 2 for
+  data), plus the slot record the AES path reads (below). `ena` 0 (a
+  delete) is refused downstream: omcid never sends one and the driver has
+  no downstream delete. The upstream side is below.
 
-  T-CONT 16 is the OMCC, on the default Alloc-ID (the ONU-ID, Alloc-ID CAM
-  row 16). The module-load replay writes its scheduler word, +206 = 1, and
-  +207 = 0x10000 before any OMCI, and every upstream queue keeps bit 16 in
-  +207. So an upstream queue is programmed on T-CONTs 0-15 only, and only
-  as the one queue of its T-CONT, the shape captured; anything else is
-  refused. The slot is the T-CONT, not a count of calls, so provisioning
-  the same MIB again in one boot (a MIB reset, a respawned omcid, a
-  re-registration) writes the same words; counting calls reaches T-CONTs
-  16 and 17 on the second ISP1 provisioning, which clears the OMCC from
-  +207 and stops upstream OMCI. `test/odi_reregister_test.sh` provisions
-  three times in one boot and requires the same words after each.
-- **cmd 25** programs both directions. The downstream side is the DS GEM
-  port CAM row and its `DSF_GEM_FLOW_TYPE` word (FLAGS 3 for the
-  OMCI/broadcast port, 2 for data), plus the slot record the AES path
-  reads (below). The upstream side writes `US_GEM_PORT_MAP(slot)`, then
-  three registers of the PON queue block that share `PONQ_COUNT_MASK`'s
-  window, named as the chip's register map names them:
-  - +37 `PON_SIDVALID`, one bit per upstream flow in use (the word the
-    flow is in);
-  - +235 `PON_SID_GLB_TH`, the global ON (bits 28:16) and OFF (12:0)
-    thresholds, written twice, ON then OFF. They depend on the number of
-    flows in use: from one to five, ON drops by 150 per flow and OFF
-    trails it by 160. Past five the fifth pair is kept;
-  - +20 + slot/4 `PON_SID2QID`, the upstream queue of each flow, 7 bits a
-    flow and four flows a word, 63 for a flow not mapped. The flow's queue
-    is its T-CONT's: cmd 23 gives T-CONT t the one queue t (its scheduler
-    map word is 1 << t), so a flow on T-CONT t maps to queue t. The driver
-    keeps the table and writes the flow's whole word.
-
-  The driver used to replay the five captured words by flow id modulo 5,
-  where flow n sits on T-CONT n. A sixth flow then replayed flow 0's
-  `PON_SID2QID` word, which unmapped flows 1-3: on an ISP with six
-  upstream flows, the service on flow 2 had no upstream queue and DHCP
-  never left (issue #42).
 - **cmd 10**: one SFF-8472 DDM word, for the ANI-G Test result. omcid
   sends `{type, data[32]}` with the type (2 temperature, 3 supply voltage,
   4 bias current, 5 Tx power, 6 Rx power, the `odi_ddm.h` selectors) as a
@@ -373,6 +341,113 @@ commands, from the command table of the shipped binary:
   command returned 0 with nothing in `data`, so every ANI-G Test result
   reported 0 V, no light, 0 mA and 0 C, and the transaction it started
   was still running when it released `odi_i2c_lock`.
+
+### Upstream PON queues
+
+cmd 21, 23 (upstream), 24 and 25 (upstream) program the upstream scheduler
+from their arguments. Nothing in them is replayed. The register meanings
+come from the stock driver's queue add, queue delete and upstream flow add
+and delete (the RTL9602C SDK: `dal_rtl9602c_ponmac.c`,
+`dal_rtl9602c_gpon.c`, the GPON module's `gpon_res.c`, and the OMCI
+platform layer's `pf_rtl96xx_SetPriQueue`, read as a reference), with the
+register addresses and fields of the chip's register map. The proof that
+the reading is right: given the arguments omcid sends on ISP1 (five
+T-CONTs, one queue each, weights 1, 30, 24, 4, 4), the code writes every
+word of the 16 cmd 23 and cmd 25 brackets of the stock capture
+(`test/odi_switch_cmd_test.sh`), which were replayed word for word before.
+
+The window `PONQ_COUNT_MASK` (0xf020a8 + 4 n) holds these registers:
+
+| n | register | what |
+|---|---|---|
+| 15 | `DRN_CMD` | drain one queue: queue << 3, QUEUE_MODE (bit 2), start (bit 1); bit 0 reads 1 while it runs |
+| 20.. | `PON_SID2QID` | the queue of each upstream flow, 7 bits, 4 flows a word |
+| 37.. | `PON_SIDVALID` | one bit per upstream flow |
+| 60+q | `PON_QID_CIR_RATE` | CIR of queue q, 18 bits |
+| 125+q | `PON_QID_PIR_RATE` | PIR of queue q, 18 bits, 0x3ffff no limit |
+| 190+t | `PON_SCH_QMAP` | the queue mask of T-CONT t |
+| 207 | `PON_TCONT_EN` | one bit per T-CONT |
+| 208.. | `PON_WFQ_TYPE` | one bit per queue: 0 strict, 1 WFQ |
+| 212.. | `PON_WFQ_WEIGHT` | 10 bits per queue, 3 a word |
+| 235 | `PON_SID_GLB_TH` | global PBO thresholds, ON 28:16, OFF 12:0 |
+| 236.. | `PON_SID_RPV_TH` | per-flow PBO thresholds, same fields |
+
+There are 65 queues. T-CONTs 0-7 share queues 0-31 and T-CONTs 8-15
+share 32-63; the queue mask holds the queue's number within its group of
+32 (logical), so physical = 32 * (t / 8) + logical. T-CONT 16 is the OMCC,
+on the default Alloc-ID, with queue 64: the module-load replay sets its
+mask (+206 = 1), its enable bit (+207 = 0x10000) and its flow (64, valid,
+on queue 64) before any OMCI.
+
+- **cmd 21** answers with the T-CONT index of the Alloc-ID it is given,
+  which is the row of the Alloc-ID CAM that holds it: the hardware's T-CONT
+  n is the scheduler that serves the grants of the Alloc-ID in CAM row n.
+  The row is looked up, never written: an Alloc-ID that no Assign_Alloc-ID
+  (type 1) of the current activation placed is refused, and omcid binds the
+  T-CONT once the assignment shows in /proc/odi_gpon/status. Only PLOAM
+  arms the CAM, because a row decides which grants the ONU answers (G.984.3
+  5.5.4: a T-CONT maps to an Alloc-ID "previously assigned to the given ONU
+  via the PLOAM messaging channel"). The stock driver writes a row here,
+  but only on a T-CONT Set; omcid also sends cmd 21 after every change of
+  the PLOAM list, where a write would bring back an Alloc-ID the OLT had
+  just taken away. Rows 0-15 are data T-CONTs; the OMCC's row 16 and rows
+  17-31 (no scheduler) are refused. Word 0 goes in as the number of queues
+  omcid will put on the T-CONT, and the driver reserves a block of that
+  many consecutive logical queues in the T-CONT's group, first fit (the
+  stock driver also first-fits; it would move the T-CONT to the other
+  group when its own is full, where this refuses). Asking again for the
+  same or fewer keeps the block, so the same MIB provisioned again lands
+  on the same queues.
+- **cmd 23**, an upstream queue, is ordinal `index` of T-CONT `owner`:
+  logical queue = block start + ordinal. The first queue of a T-CONT sets
+  its `PON_TCONT_EN` bit; a queue not yet in the mask is drained (a bounded
+  poll of `DRN_CMD` bit 0; the driver warns and goes on if it never
+  clears) and added to `PON_SCH_QMAP`. A strict queue gets type 0, then
+  weight 1; a WFQ queue (`wrr`) its weight, then type 1. That order is the
+  "+208 before or after +212" order the replay used to track. Then
+  `PON_QID_CIR_RATE` and `PON_QID_PIR_RATE` from `cir` and `pir`, written
+  one less except 0, 1 and the maximum, and a PIR of 0 with a CIR of 0 as
+  no limit. Each write is a read-modify-write of the queue's field. The
+  flows already mapped to the queue are made valid again.
+- **cmd 24** deletes the queue: its flows out of `PON_SIDVALID`, a drain,
+  its bit out of the mask, and the T-CONT disabled with its last queue,
+  whose block is then free for cmd 21 to reserve again.
+- **cmd 25** upstream with `ena` 1 maps flow `flow_id` to its GEM port
+  (`US_GEM_PORT_MAP`), sets its `PON_SIDVALID` bit, recomputes the global
+  PBO thresholds when the flow is new, and puts it on its queue
+  (`PON_SID2QID`): ordinal `queue` of T-CONT `tcont`, refused when that
+  T-CONT has no such queue. With `ena` 0 it is the stock delete: GEM port
+  0 in the slot, the valid bit cleared, the thresholds recomputed.
+  The thresholds for n upstream data flows are ON = 7904 - (n - 1) * s
+  and OFF = 7744 - (n - 1) * s, with s the ON threshold of flow 0
+  (`PON_SID_RPV_TH[0]`, 150 after the sdkinit replay) and ON no lower than
+  2000 (OFF 1840). The five ISP1 pairs are its first five values.
+- **cmd 0** (the stock resetMib, the first of the stock command enum)
+  empties the upstream state: every upstream flow deleted as cmd 25 `ena`
+  0 does, every queue of a data T-CONT deleted as cmd 24 does, every
+  T-CONT block freed. The Alloc-ID CAM (PLOAM's), the OMCC (T-CONT 16,
+  flow 64), the downstream GEM rows and the bridge connections are left.
+  omcid sends it on a MIB reset (the OLT's, the CLI's, a re-registration)
+  and when it starts again in the same boot without resuming, so the next
+  provisioning never meets the last one's queue blocks or flows.
+
+omcid changes only what differs from what it programmed: a T-CONT whose
+Alloc-ID and queue at every ordinal are unchanged keeps its index and its
+queues, and a queue whose weight, type, marking or rates moved is sent again
+in place (cmd 23 on a queue already in the mask writes no drain); a flow is
+sent only when its GEM port, T-CONT or queue changed. A T-CONT that changed
+is torn down (its flows, then its queues) and built again alone. Only a
+change of the PLOAM Alloc-ID list tears everything down, since the CAM
+rows, and so the T-CONT indexes, may have moved.
+
+The driver used to replay ISP1's words for these registers by T-CONT and
+flow ordinal, which gave every other OLT ISP1's weights, drained T-CONT
+4's queue when it set up T-CONTs 5 and up, put T-CONTs 8-15 on queues
+their scheduler does not serve, refused a second queue on a T-CONT, took
+omcid's flow delete for a create of GEM port 0, and numbered T-CONTs in
+call order rather than by CAM row. Before that, the flow word was replayed
+by flow id modulo 5, which unmapped flows 1-3 on an ISP with six upstream
+flows (issue #42).
 
 ### Bridge connections
 

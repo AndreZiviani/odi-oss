@@ -224,7 +224,8 @@ int odi_gpon_fsm_line_event(const struct odi_gpon_fsm *fsm, int alarm, enum odi_
 /* Whether a directed downstream message (Ranging_Time, Request_Password,
  * Request_Key, Encrypted_Port-ID, Assign_Alloc-ID, Configure_Port-ID: G.984.3
  * clause 9.2.3, "Directed message to one ONU") is addressed to this ONU:
- * its ONU-ID is the one this FSM holds, and not the broadcast ID. The MAC
+ * its ONU-ID is the one this FSM holds, and not the broadcast ID, and this
+ * FSM holds one (O4, O5 or O6: fsm->onu_id reads 0 for none). The MAC
  * already drops other ONUs' unicast messages; a broadcast copy is what
  * reaches the dispatch and is not acted on. Returns 1 if addressed to us.
  */
