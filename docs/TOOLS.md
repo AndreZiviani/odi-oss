@@ -953,7 +953,7 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
-| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the REI count, the TO1/TO2 expiries, the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
+| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the REI count, the TO1/TO2 expiries, the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
@@ -982,7 +982,7 @@ missing one as nothing to report.
 
 | file | lines |
 |---|---|
-| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `last_los_ms`, `upstream_overhead`, `ranging_time`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
+| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `laser_emergency_stop`, `last_los_ms`, `upstream_overhead`, `ranging_time`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
 | `counters` | `ctr_samples`, `ctr`, `ctr_saturated` |
 | `flows` | `flow_ack_timeouts`, `flow_saturated`, `ds`, `us` |
 | `ploam` | `ploam ds_rx us_tx`, `ploam_us_dropped`, `ploam_type`, `ploam_ring` |
@@ -1131,8 +1131,8 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 |---|---|---|
 | `upstream_overhead`, `assign_onu_id`, `ranging_time` | olt | the OLT ranging this ONU: O2 to O3, O3 to O4, O4 to O5 |
 | `deactivate_onu_id` | olt | the OLT deactivated this ONU (Deactivate_ONU-ID): back to O2, its ONU-ID, Alloc-IDs and OMCC port given up until the OLT ranges it again |
-| `disable_serial_number` | olt | the OLT disabled this serial number (rogue ONU handling, or by hand at the OLT): O7, laser off |
-| `enable_serial_number`, `enable_all_serial_numbers` | olt | re-enabled: O7 to O2 |
+| `disable_serial_number` | olt | the OLT disabled this serial number (rogue ONU handling, or by hand at the OLT): O7, laser off (the module's TX-disable line, GPIO 13, driven high; `laser_emergency_stop 1` in `/proc/odi_gpon/status`) |
+| `enable_serial_number`, `enable_all_serial_numbers` | olt | re-enabled: O7 to O2, laser on again |
 | `popup` | olt | POPUP: O6 back to O5 (directed), or to O4 (broadcast) to be ranged again from the pre-assigned delay |
 | `to1_expired` | timer | O3 or O4 to O2: the OLT did not finish ranging within TO1 (10 s from entering O3) |
 | `to2_expired` | timer | O6 to O1: no POPUP within TO2 (100 ms); the ONU-ID and every Alloc-ID and OMCC row go, and it ranges again once the light is back |
