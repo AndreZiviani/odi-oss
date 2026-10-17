@@ -262,8 +262,7 @@ uint16_t create_mask(const struct omci_class *c)
  * OMCI_OCTETS of one row's width, like any fixed-width octet string (class
  * 84's 24-byte VLAN list is one of those and is NOT a table). So they are
  * named here, each with the rule a Set follows. The rules are G.988's,
- * checked against the stock plugin of the class (investigations
- * AUDIT-night-omcid.md, "Area B2", B2-2):
+ * checked against the stock plugin of the class:
  *
  *   TBL_EVTOCD   171/6, 16 bytes. Keyed by the filter half, bytes 0..7; a row
  *                whose treatment half (8..15) is all ones deletes the row
