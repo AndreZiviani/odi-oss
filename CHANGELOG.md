@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Kernel: an OLT that locks the Ethernet UNI (ME 11 administrative state,
+  for example to suspend a service) now stops it, as the stock firmware
+  does: the host port's link is forced down until the OLT unlocks it. The
+  lock used to be acknowledged and ignored. On this SFP the UNI is the host
+  port, so while locked the stick cannot be reached from the host either;
+  OMCI still reaches it over the fibre, and a lock of the PON or CPU port
+  is refused.
+
 - Kernel: the upstream PON queues are programmed from what omcid sends,
   not replayed from one ISP's capture. The words cmd 23 wrote per T-CONT
   were ISP1's queue weights and types by T-CONT number; they are now

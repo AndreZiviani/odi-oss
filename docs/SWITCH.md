@@ -282,7 +282,7 @@ commands, from the command table of the shipped binary:
 | 24 | clearPriQueue | `odi_sw_ponq_queue_del` | `odi_switch_qos.c` |
 | 25 | cfgGemFlow | `odi_sw_gpon_usflow_set` (downstream), `odi_sw_ponq_us_gem_set`, `_sidvalid_set`, `_glb_th_set`, `_sid2qid_set` (upstream) | `odi_switch_ds_gem.c`, `odi_switch_qos.c` |
 | 30 | setPortAutoNegoAbility | `odi_sw_port_autoneg_get`, `_set` | `odi_switch_port.c` |
-| 32 | setPortState | `odi_sw_port_force_get`, `_set` | `odi_switch_port.c` |
+| 32 | setPortState | `odi_sw_port_admin_set` | `odi_switch_port.c` |
 | 51 | activeBdgConn | `odi_sw_cf_add` | `odi_switch_cf.c` |
 | 62 | setAgeingTime | `odi_sw_l2_aging_set` | `odi_switch_port.c` |
 | 64 | setFloodingPortMask | `odi_sw_l2_flood_mask_set` | `odi_switch_port.c` |
@@ -297,14 +297,20 @@ commands, from the command table of the shipped binary:
   commands, each address twice, then the three values written back, with
   one more read command on 0xa400 before its write. The fields are not
   decoded, so the parameters are named by address.
-- **cmd 32**: `PORT_FORCE_SELECT(0) = 0`, every FORCE bit clear, so speed
-  and duplex come from the PHY. The admin state the command carries has no
-  register write in any capture; the leaf that took it did nothing and is
-  gone. Ours keeps one bit: `TX_PAUSE` stays forced on port 0 (the word is
-  0x40) unless `odi_switch.host_pause` is set, since a 0 would hand PAUSE
-  back to the auto-negotiation at every provisioning
-  ([Host port PAUSE](#host-port-pause)). The host tests compare this
-  bracket with the capture under the stock policy.
+- **cmd 32**: the admin state of an Ethernet UNI, `{port, state}` (ME 11
+  AdministrativeState; omcid sends state 0 for a lock). It is the stock
+  SDK's admin enable: a lock writes LINK (bit 4) of `PORT_FORCE_ABILITY` to
+  0 and then sets LINK of `PORT_FORCE_SELECT`, so the port's link is forced
+  down; an unlock clears that select bit. Bit 4 only, both ways, so the
+  `TX_PAUSE` force on port 0 (the word is 0x40 unless
+  `odi_switch.host_pause` is set, [Host port PAUSE](#host-port-pause)) is
+  kept. The capture only ever shows the unlock, a read and a write of 0 to
+  `PORT_FORCE_SELECT(0)`: both ISPs leave the UNI unlocked. On this SFP the
+  UNI is the host port, so a lock takes the host link down, the stick's own
+  management path included, until the OLT unlocks; OMCI does not cross that
+  port. A lock of the PON or CPU port is refused (it would cut OMCI itself).
+  The host tests compare the unlock bracket with the capture under the
+  stock policy (`test/odi_host_pause_test.c` covers the lock).
 - **cmd 64**: the capture writes `FLOOD_UNKN_UCAST_PORTS` (0x01c028, not
   `FLOOD_BCAST_PORTS` at 0x01c020, which no capture writes) four times with
   the same word, 0x7. The word holds the bit of every port, so the four
@@ -642,7 +648,7 @@ line below is the one expected on a stick, not yet seen):
 
     odi_switch: host port PAUSE toward the host off: ability 0x0be (link 1, tx pause 0, rx pause 1)
 
-cmd 32 rewrites `PORT_FORCE_SELECT(0)` at every provisioning; its leaf keeps the bit
+cmd 32 writes `PORT_FORCE_SELECT(0)` at every provisioning; its leaf changes only the LINK bit
 ([Command leaves](#command-leaves)). `test/odi_host_pause_test.c` checks
 both words after the platform settings, after the whole ISP1 provisioning
 twice over, and through the parameter below.
