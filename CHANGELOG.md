@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Kernel: an OLT that encrypts the OMCI channel is served. The
+  Encrypted_Port-ID message for the OMCI port used to be applied without its
+  encryption bit, so every downstream OMCI frame would have stayed
+  unreadable and the stick would never have been provisioned; the port's
+  row now decrypts, as on the stock firmware. And a data port the OLT
+  encrypts keeps decrypting while omcid rewrites its flow (every QoS or
+  bridge change): the flow was written without the AES bit and the bit set
+  again right after, a window in which encrypted frames were lost.
 - Network: `network.sh` checks the management address and netmask it reads
   (`LAN_IP_ADDR`, `LAN_SUBNET`, `/etc/config/lan-ip`, and the second pair).
   One the kernel refuses (0.0.0.0, loopback, multicast, broadcast, a netmask
