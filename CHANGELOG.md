@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Tests: the fixed sleeps that waited for an event in `test/host_autoneg_test.sh`
+  (the 0.3 s before reading what the stub `setsid` recorded),
+  `test/apply_test.sh` (2 s for the delayed network apply) and
+  `test/omci_respawn_test.sh` (eight 1 s sleeps around the stub omcid and the
+  FIFO reader) are bounded polls for the event itself, as `safe_mode_test.sh`
+  has been since #105, so a loaded host (the parallel `make test` legs) no
+  longer fails them. Checks that expect nothing to happen keep a short fixed
+  wait, since there is nothing to poll for. No change to the image.
+
 - Tests: the OMCI suites no longer pass negative checks against a dead
   daemon. `src/omci/testlib.sh`: a `wait_for` that times out (which `inject_wait`,
   `settled`, `sync_send` and `omcid_up` all go through) now fails the suite
