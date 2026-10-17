@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- fwu.sh: an interrupted flash can no longer leave a valid new kernel over a
+  missing or old rootfs. It used to erase and write the kernel, then the
+  rootfs; a power cut or a failed write in between left a kernel U-Boot
+  accepts, and the web UI offered to trial the slot. It now erases the kernel
+  and rootfs partitions first, writes the rootfs, and writes the kernel last,
+  so any interruption leaves a kernel U-Boot refuses (bad magic or data CRC).
+  The guard comment about the watchdog on a committed boot is corrected too:
+  odi_wdt arms the watchdog itself once it initialises. New host test
+  `test/fwu_write_order_test.sh`. Found in the night audit of the update path
+  (investigations/odi-sfp-re/AUDIT-night-flash.md).
+
 - omcid: the upstream traffic descriptor of a GEM port (class 280, named by
   the GEM port network CTP) sets the CIR and PIR of its upstream queue, as
   the stock stack does (byte/s divided by 1024; for an RFC 4115 meter the
