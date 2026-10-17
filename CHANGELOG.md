@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the MIB upload is built as the stock firmware builds it. An entity
+  whose attributes do not fit in one upload record (26 bytes) now continues
+  in as many records as it needs; omcid used to send only the first record
+  and drop the rest, so an OLT reading the upload never saw ONU2-G's queue,
+  scheduler and GEM port counts, connectivity and QoS flexibility, ONU-G's
+  traffic management option and state, the circuit packs' queue and T-CONT
+  counts, or the priority queues' drop settings. The upload also leaves out
+  what the stock firmware never uploads: private and not-uploaded classes
+  (158, 255, 287, 65527, 65530, 65534, 65535), attributes that are not
+  supported, private, PM or tables, and the 64 reserved priority queues
+  0xff00-0xff3f; and the MAC bridge port tables (49, 50, 79) of one OLT's
+  bridge ports are no longer listed as entities the ONU creates for itself.
+  An entity the OLT has set is listed once. With the factory configuration
+  the upload is 205 entities in 399 records, the same as a decoded upload of
+  the stock image. Refs #103.
 - OMCI: values the ONU reports on its own now match what the stock MIB
   reset puts there. ONU-G reports the configured LOID and LOID password
   (attributes 10 and 11), as the CTC LOID entity already did: an OLT that

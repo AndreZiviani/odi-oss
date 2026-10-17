@@ -70,8 +70,8 @@ inst() {
 printf '0d014d0a00020000%064d00000028%08d\n' 0 0 > /tmp/keys-upload.txt
 upload() {
 	$Q cli/build/omcli --inject-file /tmp/keys-upload.txt > /dev/null 2>&1
-	wait_count "$1" "managed entities to upload" 1 10
-	sed -n 's/^-> \([0-9]*\) managed entities to upload.*/\1/p' "$1" | tail -1
+	wait_count "$1" "upload records" 1 10
+	sed -n 's/^-> \([0-9]*\) upload records.*/\1/p' "$1" | tail -1
 }
 
 # 0x0601 = 1537, 0x0106 = 262, 0x0e01 = 3585, 0x010e = 270.
@@ -86,9 +86,21 @@ check "no key: the circuit pack is at 0x0106" "$(inst 6)" "257,262,384,"
 check "no key: and the cardholder" "$(inst 5)" "257,262,384,"
 check "no key: ME 373 is created" "$(inst 373)" "0,"
 base=$(upload /tmp/keys-1.log)
-# 300: without bit 64 of OMCI_CUSTOM_ME there is no CTC ONU capability
-# entity (class 65529), as on the stock firmware.
-check "no key: the MIB upload announces 300 autonomous entities" "$base" "300"
+# 399 records, as the stock firmware's own upload of this configuration
+# (a decoded ISP2 session of the stock image: 205 entities, 399 records).
+# Without bit 64 of OMCI_CUSTOM_ME there is no CTC ONU capability entity
+# (class 65529), as on the stock firmware.
+check "no key: the MIB upload announces 399 records, as the stock ONU" "$base" "399"
+# ONU2-G (class 257) is records 51 and 52; the second carries what the
+# first has no room for -- queue, scheduler and GEM port counts, uptime,
+# connectivity and QoS flexibility -- under its own mask, as the stock
+# upload does. omcid used to drop all of it.
+printf '0f054e0a000200000034%060d00000028%08d\n' 0 0 > /tmp/keys-next.txt
+$Q cli/build/omcli --inject-file /tmp/keys-next.txt > /dev/null 2>&1
+wait_count /tmp/keys-1.log "-> 0f052e0a" 1 10
+check "ONU2-G's second upload record: priority queues 128, schedulers 16, mode 1, GEM ports 64" \
+      "$(grep -o -- '-> 0f052e0a000200000101000007fc008010010040' /tmp/keys-1.log | head -1)" \
+      "-> 0f052e0a000200000101000007fc008010010040"
 stop
 
 store 14 ""
@@ -133,8 +145,9 @@ run /tmp/keys-4.log
 check "OMCI_PRIVATE_ME=0: no ME 373" "$(inst 373)" ""
 check "OMCI_PRIVATE_ME=0: no ME 350" "$(inst 350)" ""
 check "OMCI_PRIVATE_ME=0: no ME 370" "$(inst 370)" ""
-check "OMCI_PRIVATE_ME=0: the MIB upload announces three entities fewer" \
-      "$(upload /tmp/keys-4.log)" "$((base - 3))"
+# 350 takes two records, 370 one, 373 fifteen (its fifteen 25-byte parts).
+check "OMCI_PRIVATE_ME=0: the MIB upload announces their 18 records fewer" \
+      "$(upload /tmp/keys-4.log)" "$((base - 18))"
 check "OMCI_PRIVATE_ME=0: the VEIP is untouched" "$(inst 329)" "1537,"
 stop
 
@@ -156,8 +169,9 @@ check "OMCI_VEIP=0: the UNI-G of the PPTP Ethernet UNI stays" "$(inst 264)" "257
 check "OMCI_VEIP=0: the cardholder and circuit pack of the VEIP slot are gone" \
       "$(inst 5)$(inst 6)" "257,384,257,384,"
 check "OMCI_VEIP=0: the PPTP Ethernet UNI stays" "$(inst 11)" "257,"
-check "OMCI_VEIP=0: the MIB upload announces five entities fewer" \
-      "$(upload /tmp/keys-6.log)" "$((base - 5))"
+# Cardholder 2 records, circuit pack 4, VEIP 3, UNI-G 1, TR-069 server 1.
+check "OMCI_VEIP=0: the MIB upload announces the 11 records of five entities fewer" \
+      "$(upload /tmp/keys-6.log)" "$((base - 11))"
 stop
 store 14 65792
 run /tmp/keys-7.log

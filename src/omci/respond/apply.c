@@ -44,6 +44,7 @@ void mib_reset_all(void)
 	 * provisions fewer services after the reset, or none, does not leave
 	 * the old ones forwarding. */
 	conn_dirty = 1;
+	upl_total = 0;
 	/* A reset MIB and a snapshot of the one before it must never both be
 	 * on disk: a respawn right after this reset, before the OLT sends
 	 * anything to snapshot again, must fall back to re-registration, not
