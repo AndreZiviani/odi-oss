@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- CI: `release.yml` runs `make test` before it builds and publishes (the
+  release job `needs` it). A tag used to publish an image whether or not the
+  tests passed, or had even finished: ci.yml starts on the same tag as a
+  separate workflow that release.yml did not wait for. No change to the image.
+
 - Docs: the README rows for the OMCI values read from the stick and the VEIP
   and vendor-private keys say what was checked on sticks: the values on two
   sticks on two OLTs against the stock dumps, the new keys only at their
