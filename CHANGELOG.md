@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- The image ships confd v1.5.1 (odi-ui: the page uses the full window width,
+  and the Status, Forwarding and Backup tabs lay out in two columns when
+  there is room).
+
 - Kernel: nothing that arrives from the fibre reaches the stick's own IP
   stack: not the web UI, ssh or the exporter, and no ARP or ping answer,
   whatever the OLT provisions. Two independent layers, keyed on the port a
