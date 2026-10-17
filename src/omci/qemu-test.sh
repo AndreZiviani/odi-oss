@@ -19,6 +19,7 @@
 set -u
 Q=qemu-mips-static
 fail=0
+. ./testlib.sh
 
 check() {
 	if [ "$2" = "$3" ]; then
@@ -31,30 +32,16 @@ check() {
 	fi
 }
 
-# wait_count <file> <fixed string> <count> <seconds>: the string shows at
-# least <count> times within the time (a bounded poll in place of a fixed
-# sleep). Returns 1 on timeout, and the check that follows then fails.
-wait_count() {
-	i=0
-	while [ "$i" -lt $(( $4 * 10 )) ]; do
-		[ "$(grep -c -F -- "$2" "$1")" -ge "$3" ] && return 0
-		sleep 0.1
-		i=$((i + 1))
-	done
-	return 1
-}
-
-$Q respond/build/omcid -w 3 > /tmp/omcid.log 2>&1 &
+$Q respond/build/omcid -w 12 > /tmp/omcid.log 2>&1 &
 pid=$!
-wait_count /tmp/omcid.log "answering as" 1 10
+omcid_up /tmp/omcid.log
 
 # A Create for VlanTagFilterData instance 3, carrying one filter entry for
 # VID 10 -- the same VID the captured stick had at that instance, so the
 # rendered output can be compared literally.
 FRAME=0001440a00540003000a00000000000000000000000000000000000000000000100100000000000000000028c007c78a
 
-$Q cli/build/omcli --inject "$FRAME" > /dev/null 2>&1
-sleep 1
+inject_wait /tmp/omcid.log "$FRAME"
 
 got=$(grep -c 'injected frame, 48 bytes' /tmp/omcid.log)
 check "the injected frame arrives" "$got" "1"
@@ -135,15 +122,13 @@ check "a name that is no class is refused, not read as every class" "$got" \
 
 # The rest needs the capability blob (port map, flow and T-CONT counts), so
 # restart with one captured from a real stick.
-kill "$pid" 2>/dev/null
-wait "$pid" 2>/dev/null
-sleep 1
+omcid_stop "$pid"
 
 CAPS=020000ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000000000000010000000300000002ffffffff000000000000001000000040000000800000000800000000000000100000000f00000440
 
-$Q respond/build/omcid -w 9 -c "$CAPS" > /tmp/omcid2.log 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid2.log 2>&1 &
 pid=$!
-wait_count /tmp/omcid2.log "answering as" 1 10
+omcid_up /tmp/omcid2.log
 
 got=$($Q cli/build/omcli caps 2>&1 | sed -n '4p')
 check "the capability blob decodes as the stick's does" \
@@ -159,12 +144,11 @@ check "a short reply is not dropped" "$got" "omcid commands"
 for f in 0001440a010680000000000000000000000000000000000000000000000000000000000000000000000000283056d14e \
          0002480a010680008000040000000000000000000000000000000000000000000000000000000000000000288068e530 \
          0003440a010c0002061a80000380060000000000000000000000000000000000000000000000000000000028063a1fc9; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 # The upstream flow is programmed by the deferred rebuild, OLT_QUIET_MS after
 # the last frame.
-sleep 2
+settled /tmp/omcid2.log
 
 got=$($Q cli/build/omcli flows 2>&1 | sed -n '3p')
 check "both flow directions are allocated" "$got" "     0  gem 1562  gem 1562 "
@@ -278,10 +262,9 @@ for f in 009e440a010a00020002000000000000000000000000000000000000000000000000000
          00a1440a01190001000500000000000000000000000000000000000000000000000000000000000000000028e389a109 \
          00a2440a002f0001000101010101000000000000000000000000000000000000000000000000000000000028c9b690de \
          00a3440a002fffff0001ff06000100000000000101000000000000000000000000000000000000000000002849e60ded; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
-sleep 2
+settled /tmp/omcid2.log
 got=$($Q cli/build/omcli flows 2>&1 | grep 'gem 4095')
 check "class 281 designates the downstream-only broadcast flow" \
       "$got" "     1  -         gem 4095 "
@@ -310,7 +293,7 @@ for f in 00c0440a002d00100001010000280008001e00000000000000000000000000000000000
          00c7440a010a100100220510020000000200000000000000000000000000000000000000000000000000000000000000; do
 	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
 done
-sleep 3
+settled /tmp/omcid2.log
 got=$(grep -c 'serv [0-9]* ingress 0601 gem 657 dir 3' /tmp/omcid2.log)
 check "a mapper-typed bridge port reaches its GEM through the mapper" "$got" "1"
 # Bridge 0x1 (the earlier fixtures) has a UNI of its own; it must NOT be wired to
@@ -324,8 +307,7 @@ for f in 00a4460a002fffff0000000000000000000000000000000000000000000000000000000
          00a6460a01190001000000000000000000000000000000000000000000000000000000000000000000000028cc6203d2 \
          00a7460a010c000500000000000000000000000000000000000000000000000000000000000000000000002816526ae7 \
          00a8460a010a000200000000000000000000000000000000000000000000000000000000000000000000002873249473; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 
 # The four config-store keys, read from a fixture.
@@ -365,8 +347,7 @@ check "back on 1/1 the same connection carries the tag again" \
 # CTP pointing at it.
 for f in 000c480a01150001050101010003050200000000000000000000000000000000000000000000000000000028ae8b933b \
          000d440a010c00040640000002000000000001000000000000000000000000000000000000000000000000281d152d55; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 
 # The queue is programmed before the flow that uses it, and dp/weight/wrr all
@@ -396,7 +377,7 @@ $Q cli/build/omcli --inject "0025480a011580070501800000000100$(printf '%064d' 0)
     > /dev/null 2>&1
 $Q cli/build/omcli --inject "0026440a010c0003059a80000380070000$(printf '%062d' 0)" \
     > /dev/null 2>&1
-sleep 3
+settled /tmp/omcid2.log
 got=$(grep 'tcont me 8000.*queues 2' /tmp/omcid2.log | tail -1 | \
       sed 's/.*tcont me/tcont me/; s/ ->.*//')
 check "the T-CONT reserves the complete active queue set" \
@@ -416,7 +397,10 @@ check "a second GEM binds to its normalized queue" \
 # the reservation.
 $Q cli/build/omcli --inject "0027480a011580080501800000000100$(printf '%064d' 0)" \
     > /dev/null 2>&1
-sleep 3
+sync_send /tmp/omcid2.log
+# Elapsed time on purpose: the check is that no rebuild follows, and one
+# would come a quiet second after the Set.
+sleep 2
 got=$(grep 'tcont me 8000.*queues' /tmp/omcid2.log | tail -1 | \
       sed 's/.*tcont me/tcont me/; s/ ->.*//')
 check "an unreferenced Set queue does not join the reservation" \
@@ -433,8 +417,7 @@ check "and it is never programmed as an upstream queue" "$got" "0"
 # carries RelatedPort 0x80000001, scheduler 0x8003 TcontPtr 0x8003, Policy 2.
 for f in 0020490a0115800604000000000000000000000000000000000000000000000000000000000000000000002800f8706a \
          0021490a01168003a00000000000000000000000000000000000000000000000000000000000000000000028ac80e49a; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 
 got=$(grep -o -- '-> 0020290a0115800600040080000001' /tmp/omcid2.log | head -1)
@@ -447,9 +430,7 @@ check "a Get of scheduler 0x8003 answers its T-CONT and policy" \
 # ------------------------------------------------------- Ethernet UNI controls
 # Auto full-duplex abilities (0x04), downstream PHY loopback (3), and raw pause
 # time 0x1234 in one Set. The capability fixture maps EthUni 0x0101 to port 0.
-$Q cli/build/omcli --inject "0030480a000b0101304004031234$(printf '%068d' 0)" \
-    > /dev/null 2>&1
-sleep 1
+inject_wait /tmp/omcid2.log "0030480a000b0101304004031234$(printf '%068d' 0)"
 got=$(grep -o 'uni 0101 port 0 auto 4 ability 54000000' /tmp/omcid2.log | tail -1)
 check "auto-negotiation uses the deployed plugin's ability encoding" \
       "$got" "uni 0101 port 0 auto 4 ability 54000000"
@@ -475,8 +456,7 @@ for f in 0004440a00ab00010201010000000000000000000000000000000000000000000000000
          0006480a00ab00010400f8000000e8000000c00f0000000f00000000000000000000000000000000000000288e40fcf7 \
          0007480a00ab00010400e8000000e8000000c00f0000000f0000000000000000000000000000000000000028eff20302 \
          0008480a00ab00010400f8000000f8000000000f80000000000c000000000000000000000000000000000028eb2af4d6; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 
 # Byte for byte against the stock `omcicli mib get 171` dump of ISP1, instance 0x01.
@@ -527,9 +507,7 @@ check "class 171 explains itself in our own dump" "$got" "$want"
 
 # Setting the same key again replaces rather than appending: the entry count
 # stays at three and the treatment of INDEX 1 changes.
-$Q cli/build/omcli --inject 000a480a00ab00010400e8000000e8000000800f0008000f00000000000000000000000000000000000000281d137c84 \
-   > /dev/null 2>&1
-sleep 1
+inject_wait /tmp/omcid2.log 000a480a00ab00010400e8000000e8000000800f0008000f00000000000000000000000000000000000000281d137c84
 got=$($Q cli/build/omcli mib get 171 --vendor 2>&1 | grep -c '^INDEX ')
 check "a repeated key replaces, it does not append" "$got" "3"
 got=$($Q cli/build/omcli mib get 171 --vendor 2>&1 | grep 'RemoveTags 2')
@@ -538,9 +516,7 @@ check "the replaced entry carries the new treatment" \
 
 # An all-ones treatment half is the delete sentinel. RemoveTags 3 alone is not:
 # INDEX 2 has it and must survive.
-$Q cli/build/omcli --inject 000b480a00ab00010400e8000000e8000000ffffffffffffffff0000000000000000000000000000000000281a80122e \
-   > /dev/null 2>&1
-sleep 1
+inject_wait /tmp/omcid2.log 000b480a00ab00010400e8000000e8000000ffffffffffffffff0000000000000000000000000000000000281a80122e
 got=$($Q cli/build/omcli mib get 171 --vendor 2>&1 | grep -c '^INDEX ')
 check "an all-ones treatment deletes the keyed entry" "$got" "2"
 got=$($Q cli/build/omcli mib get 171 --vendor 2>&1 | grep -c 'RemoveTags 3')
@@ -557,8 +533,7 @@ for f in 0020490a00ab00010400000000000000000000000000000000000000000000000000000
          00225a0a00ab0001040000010000000000000000000000000000000000000000000000000000000000000028e5c37636 \
          00235a0a00ab0001040000020000000000000000000000000000000000000000000000000000000000000028f2808ba9 \
          00245a0a00ab0002040000000000000000000000000000000000000000000000000000000000000000000028d9326d55; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 
 # The table is the two entries that survived the delete, newest first -- the
@@ -590,8 +565,7 @@ check "a Get-Next the Get did not prime is refused, not answered" \
 # The map is pbit = dscp & 7, a pattern that is obviously wrong if reversed.
 for f in 0030480a00ab00010100053977053977053977053977053977053977053977053977000000000000000000284e01d043 \
          0031480a00ab00020100000000000000000000000000000000000000000000000000000000000000000000281399d8d8; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 got=$(grep -o 'dscp remap 0 1 2 3 ... 7' /tmp/omcid2.log | head -1)
 check "the DSCP map unpacks three bits per code point, MSB first" \
@@ -607,8 +581,7 @@ check "an all-zero map is not programmed at all" "$got" "1"
 # not a zero-filled record (OMCI_OnGetAllAlarmsNext, 0x412c58).
 for f in 00404b0a0100000000000000000000000000000000000000000000000000000000000000000000000000002886f0fc16 \
          00414c0a01000000000000000000000000000000000000000000000000000000000000000000000000000028408fa5d3; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 got=$(grep -o -- '-> 00402b0a010000000000' /tmp/omcid2.log | head -1)
 check "get-all-alarms answers a two-byte count" "$got" "-> 00402b0a010000000000"
@@ -665,8 +638,7 @@ get_frame() {   # get_frame <tci> <class> <inst> <mask>
 	printf '%s490a%s%s%s%060d00000028%08d' "$1" "$2" "$3" "$4" 0 0
 }
 ask() {   # ask <tci> <class> <inst> <mask> -> the answer, as logged
-	$Q cli/build/omcli --inject "$(get_frame "$1" "$2" "$3" "$4")" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$(get_frame "$1" "$2" "$3" "$4")"
 	grep -o -- "-> $1290a$2$3" /tmp/omcid2.log > /dev/null &&
 		grep -- "-> $1290a$2$3" /tmp/omcid2.log | tail -1 | cut -c4-
 }
@@ -763,8 +735,7 @@ $Q cli/build/omcli ident test/cfg_agree.xml test/cfg_agree_hs.xml /tmp/odi-hw-em
 for f in 0060480a002d00010040000004d200000000000000000000000000000000000000000000000000000000002871e3b48f \
          0061480a002d000100400000000000000000000000000000000000000000000000000000000000000000002848f9300f \
          0062460a002d0001000000000000000000000000000000000000000000000000000000000000000000000028a511151a; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 got=$(grep -o 'ageing time 1234' /tmp/omcid2.log | head -1)
 check "class 45 sends the ageing time it was given" "$got" "ageing time 1234"
@@ -783,8 +754,7 @@ check "and a delete resets both, which nothing used to do" \
 # In the VENDOR row ToDInfo is at 44 (the NUL of each string attribute is kept:
 # EquipId 21, Version 15); in OURS at 40, as attr_offset packs at wire widths.
 # The first four bytes surviving the round trip catch a fence-post in either.
-$Q cli/build/omcli --inject 0050480a008300001000deadbeef111111111111111111110000000000000000000000000000000000000028bd607c90 > /dev/null 2>&1
-sleep 1
+inject_wait /tmp/omcid2.log 0050480a008300001000deadbeef111111111111111111110000000000000000000000000000000000000028bd607c90
 got=$(grep -o 'tod info deadbeef ...' /tmp/omcid2.log | head -1)
 check "class 131 ToDInfo reaches the driver path at the right row offset" \
       "$got" "tod info deadbeef ..."
@@ -842,8 +812,7 @@ for f in 0070480a002d00020180000500000000000000000000000000000000000000000000000
          0073440a002f0001000201010101000000000000000000000000000000000000000000000000000000000028206c2e82 \
          0074480a002f00010030800180020000000000000000000000000000000000000000000000000000000000286fd85c08 \
          0075460a002f0001000000000000000000000000000000000000000000000000000000000000000000000028e5daea9b; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 got=$(grep -o '\[dry 47/0001\] mac learn limit port 0 = 5 -> 0' /tmp/omcid2.log | head -1)
 check "the learning limit falls back to the bridge service profile" \
@@ -872,8 +841,7 @@ check "and puts both rate limiters back to no limit" "$got" "2"
 for f in 0076440a010a0002000206000000000000000000000000000000000000000000000000000000000000000028e3f012e3 \
          0077440a002f000200020205000200000000000000000000000000000000000000000000000000000000002810d35593 \
          0078460a002f00020000000000000000000000000000000000000000000000000000000000000000000000282831881a; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 got=$(grep -o 'broadcast gem 1562 is ds flow 0' /tmp/omcid2.log | head -1)
 check "a bridge port onto a broadcast GEM IW TP names the flow" \
@@ -896,8 +864,7 @@ for f in 0080440a002f00030002010101010000000000000000000000000000000000000000000
          0081440a01188003000003e800000000000007d000000000000000000000000000000000000000000000002870be87de \
          0082440a0118800400000bb80000000000000fa00000000000000000000000000000000000000000000000284c26e2e8 \
          0083440a012a0001000201800380040000000000000000000000000000000000000000000000000000000028a2c54adc; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 got=$(grep -o '\[dry 298/0001\] set slot 0 mask 1 kind 0 cir 1000 cbs 2000 -> 0' /tmp/omcid2.log | head -1)
 check "the unicast flood rate takes slot 0, with its own CIR and CBS" \
@@ -911,8 +878,7 @@ check "a pointer of zero programs nothing at all" "$got" "2"
 # A Set that fills the third pointer. The vendor sends only pointers that
 # CHANGED; omcid re-sends all three, more than the vendor and never less
 # (README.md, "Where this differs from the vendor daemon, and why").
-$Q cli/build/omcli --inject 0084480a012a0001080080030000000000000000000000000000000000000000000000000000000000000028bd97df34 > /dev/null 2>&1
-sleep 1
+inject_wait /tmp/omcid2.log 0084480a012a0001080080030000000000000000000000000000000000000000000000000000000000000028bd97df34
 got=$(grep -o 'set slot 2 mask 1 kind 2 cir 1000 cbs 2000 -> 0' /tmp/omcid2.log | head -1)
 check "a later Set allocates the third slot" \
       "$got" "set slot 2 mask 1 kind 2 cir 1000 cbs 2000 -> 0"
@@ -920,8 +886,7 @@ check "a later Set allocates the third slot" \
 # The two refusals the handler opens with, both logged and neither programmed.
 for f in 0085440a012a000200020280030000000000000000000000000000000000000000000000000000000000002835c88250 \
          0086440a012a0003009901800300000000000000000000000000000000000000000000000000000000000028f05d5327; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 got=$(grep -o '\[298/0002\] rate limiter for 802.1p mapper is not supported' /tmp/omcid2.log | head -1)
 check "TP type 2 is refused, as the vendor refuses it" \
@@ -931,8 +896,7 @@ check "a parent bridge with no UNI is refused too" \
       "$got" "[298/0003] no associated pptp eth uni is found"
 
 # And the delete arm: all three slots released, by the slot each set used.
-$Q cli/build/omcli --inject 0087460a012a000100000000000000000000000000000000000000000000000000000000000000000000002874274f35 > /dev/null 2>&1
-sleep 1
+inject_wait /tmp/omcid2.log 0087460a012a000100000000000000000000000000000000000000000000000000000000000000000000002874274f35
 got=$(grep -c 'del slot [012] mask 1 kind [012] cir 0 cbs 0 -> 0' /tmp/omcid2.log)
 check "a delete releases all three, naming the slots the sets used" "$got" "3"
 
@@ -946,8 +910,7 @@ check "a delete releases all three, naming the slots the sets used" "$got" "3"
 for f in 0090480a002d00020100020000000000000000000000000000000000000000000000000000000000000000281dff325d \
          0091480a002d0002010002000000000000000000000000000000000000000000000000000000000000000028f3bc0b57 \
          0092480a002d00020080090000000000000000000000000000000000000000000000000000000000000000289fad2249; do
-	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
-	sleep 1
+	inject_wait /tmp/omcid2.log "$f"
 done
 got=$(grep -o '\[dry 45/0002\] flooding mask 1 enable 1 -> 0' /tmp/omcid2.log | head -1)
 check "a changed DiscardUnknow floods the bridge's whole membership" \
@@ -971,9 +934,9 @@ check "a changed MacLearningDepth sets the single UNI's limit" \
 kill -9 "$pid" 2>/dev/null
 wait "$pid" 2>/dev/null
 
-$Q respond/build/omcid -w 9 -c "$CAPS" > /tmp/omcid3.log 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid3.log 2>&1 &
 pid=$!
-wait_count /tmp/omcid3.log "answering as" 1 10
+omcid_up /tmp/omcid3.log
 
 got=$(grep -c 'still omci_app' /tmp/omcid3.log)
 check "a respawned omcid does not treat the stale queue as a stranger's" \
@@ -1006,12 +969,11 @@ check "and it is the real vendor-format srvflow dump, not silence" "$got" "0 ser
 # A fresh daemon, no config store (no manual tag): bridge 1 with the UNI
 # 0x0101 and a GEM-side port 47/0012 onto GEM IW TP 3, GEM 1000, whose
 # class 84 row lists VID 100 priority 0 and VID 200 priority 5.
-kill "$pid" 2>/dev/null
-wait "$pid" 2>/dev/null
+omcid_stop "$pid"
 rm -f /var/config/lastgood.xml /var/config/lastgood_hs.xml
-$Q respond/build/omcid -w 30 -c "$CAPS" > /tmp/omcid4.log 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid4.log 2>&1 &
 pid=$!
-wait_count /tmp/omcid4.log "answering as" 1 10
+omcid_up /tmp/omcid4.log
 
 f84() {   # f84 <tci> <mt> <class> <inst> <contents hex>: one frame, zero padded
 	c=$5
@@ -1025,7 +987,7 @@ for f in "$(f84 0101 44 010c 0003 03e8800003800600)" \
          "$(f84 0105 44 0054 0012 0064a0c800000000000000000000000000000000000000001002)"; do
 	$Q cli/build/omcli --inject "$f" > /dev/null 2>&1
 done
-sleep 3
+settled /tmp/omcid4.log
 # rules_since <line>: the rule lines of 47/0012 logged after that line.
 # Only the last rebuild counts: each one prints its rules, then a summary.
 rules_since() {
@@ -1042,7 +1004,7 @@ vid-filter vid 200 pri -1"
 fwdop() {   # fwdop <code>: Set FwdOp, wait for the rebuild, print its rules
 	n=$(wc -l < /tmp/omcid4.log)
 	$Q cli/build/omcli --inject "$(f84 0110 48 0054 0012 "4000$1")" > /dev/null 2>&1
-	wait_count /tmp/omcid4.log "bridge connections rebuilt" "$(( $(grep -c -F 'bridge connections rebuilt' /tmp/omcid4.log) + 1 ))" 10
+	wait_for /tmp/omcid4.log 'bridge connections rebuilt' 30 "$(( $(rebuilt /tmp/omcid4.log) + 1 ))"
 	rules_since "$n"
 }
 check "0x04: the same, by its other number" "$(fwdop 04)" \
@@ -1112,15 +1074,24 @@ check "0x00 under the manual tag: add-tag for untagged, tagged unchanged" "$(fwd
       "tagged vid -1 pri -1
 manual-add vid 10 pri 0"
 $Q cli/build/omcli --inject "$(f84 01f0 48 0054 0012 80000064000a)" > /dev/null 2>&1
-sleep 2
+settled /tmp/omcid4.log
 check "0x10 with the manual VID in the list: that entry is the add-tag rule" "$(fwdop 10)" \
       "vid-filter vid 100 pri -1
 manual-add vid 10 pri 0"
 
 # The daemon log lives inside the container, so keep it when a check fails.
-[ "$fail" -eq 0 ] || cp /tmp/omcid4.log /src/src/omci/qemu-test.log 2>/dev/null || true
-kill "$pid" 2>/dev/null
-wait "$pid" 2>/dev/null
+[ "$fail" -eq 0 ] || keep_log /tmp/omcid4.log qemu-test.log
+omcid_stop "$pid"
+
+# omcid's own idle exit, which every run above is stopped before: -w counts 5 s
+# units with nothing arriving, then the daemon says so and exits 0.
+$Q respond/build/omcid -w 1 -c "$CAPS" > /tmp/omcid5.log 2>&1 &
+pid=$!
+omcid_up /tmp/omcid5.log
+wait_bounded "$pid" 30; got=$?
+check "-w 1 exits by itself after five idle seconds, with status 0" "$got" "0"
+got=$(grep -c '^done after 0 frames$' /tmp/omcid5.log)
+check "and says it is done" "$got" "1"
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 exit "$fail"

@@ -5,6 +5,26 @@ listed here.
 
 ## Unreleased
 
+- Tests: `make test` takes about a minute on a native x86_64 host, down from
+  about twenty minutes, with the same checks. The
+  OMCI suites waited out `omcid -w`, an idle exit in 5 second units, and
+  fixed sleeps, on a machine that was idle meanwhile. They now wait for the
+  log line a check needs (`src/omci/testlib.sh`: `wait_for`, `inject_wait`,
+  `settled`) and stop omcid with SIGTERM; one run in `qemu-test.sh` keeps the
+  idle exit itself under test, and the one real timer (the 10 s provisioning
+  quiet period) is still waited out once. `make test` runs lint, test-host,
+  test-diag and each OMCI suite side by side (`tools/test-legs.sh`,
+  `TEST_JOBS` legs at once, output of a passing leg reduced to one line, of
+  a failing one shown in full, kept in `out/test-logs/`); the per-suite `make test-omci-<suite>`
+  targets and the CI jobs are unchanged. A failed suite now leaves its daemon
+  log in `out/test-logs/` instead of the source tree. No change to omcid.
+
+- Tests: `test/safe_mode_test.sh` passes when run as root (htpc, CI
+  containers): the "no writable config" check used a read-only directory,
+  which root writes to anyway, and now uses a path that is not a directory;
+  the check for the spawned boot-ok polls for the file instead of sleeping a
+  fixed 0.3 s, which lost the race on a loaded host.
+
 - Docs: brought in line with what v1.5.0 does and what was then checked on
   sticks: README comparison rows for host port auto-negotiation, the safe
   mode, per-flow counters and committing a trial say what was run on

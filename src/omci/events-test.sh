@@ -11,14 +11,15 @@
 # busybox syslogd, needs a syslogd, so test/qemu/run-qemu.sh checks it on the
 # full-system image instead.
 #
-# Run from src/omci, inside the toolchain image, after qemu-test.sh (the
-# Makefile test-omci target runs all four):
+# Run from src/omci, inside the toolchain image (the Makefile test-omci-events
+# target):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
 #          sh events-test.sh
 set -u
 Q=qemu-mips-static
 FIX=../../test/fixtures
 fail=0
+. ./testlib.sh
 
 check() {
 	if [ "$2" = "$3" ]; then
@@ -52,9 +53,9 @@ rm -f /var/run/omcid-resume-decision
 log=/tmp/omcid-events.log
 # The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon/status lists them.
 printf 'alloc_ids 5 282 794 1050 1306 538\n' > /tmp/events-gpon
-$Q respond/build/omcid -w 8 -c "$CAPS" -g /tmp/events-gpon > "$log" 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" -g /tmp/events-gpon > "$log" 2>&1 &
 pid=$!
-sleep 2
+omcid_up "$log"
 
 # No netlink under qemu, so no ONU state: not O5, so no resume.
 got=$(grep '^event=start ' "$log")
@@ -63,8 +64,9 @@ check "start: first of the boot, back to re-registration, and why" "$got" \
 
 $Q cli/build/omcli --inject-file "$FIX/omci-session-isp1.txt" > /dev/null 2>&1
 # The burst closes EV_PROV_QUIET_S (10 s) after its last write; the check
-# runs once a second.
-sleep 13
+# runs once a second. This is the one wait on a real timer, and the only run
+# that sees the production value of it.
+need "$log" '^event=provision_end ' 40
 
 got=$(grep -c '^event=mib_reset side=olt ' "$log")
 check "the OLT MIB reset, as the OLT's" "$got" "1"
@@ -115,7 +117,7 @@ check "provision: the VLANs, once per source" "$got" \
 
 # A MIB reset from the CLI is this side's, not the OLT's.
 $Q cli/build/omcli -f mib reset > /dev/null 2>&1
-sleep 1
+need "$log" '^event=mib_reset side=local ' 10
 got=$(grep -c '^event=mib_reset side=local rows=161 ' "$log")
 check "a CLI MIB reset is logged as local" "$got" "1"
 
@@ -123,7 +125,7 @@ check "a CLI MIB reset is logged as local" "$got" "1"
 # download, which it accepts and discards (OLT_SW_DOWNLOAD, swdl-test.sh).
 $Q cli/build/omcli --inject "$(frame 0e01 59 0100 0000)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(frame 0e02 53 0007 0001)" > /dev/null 2>&1
-sleep 1
+sync_send "$log"
 got=$(grep '^event=olt_reboot ' "$log")
 check "an OLT reboot request" "$got" \
       "event=olt_reboot class=256 inst=0 result=refused"
@@ -145,7 +147,7 @@ $Q cli/build/omcli --inject "$(frame 0e05 5d 0100 0000)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(frame 0e06 5d 0100 0000)" > /dev/null 2>&1
 # Get current data (28) is answered like a Get, not logged as unknown.
 $Q cli/build/omcli --inject "$(frame 0e0a 5c 0100 0000)" > /dev/null 2>&1
-sleep 2
+sync_send "$log"
 got=$(grep -c '^event=unknown_me class=351 op=create ' "$log")
 check "an unknown class and operation is logged once, however often" "$got" "1"
 got=$(grep '^event=unknown_me class=351 op=get ' "$log")
@@ -157,6 +159,9 @@ got=$(grep -c '^event=unknown_msg type=28 ' "$log")
 check "Get current data is not an unknown message type" "$got" "0"
 got=$(grep -o -- '-> 0e0a3c0a0100000000' "$log" | head -1)
 check "Get current data is answered like a Get" "$got" "-> 0e0a3c0a0100000000"
+# A new entry is written at once, a count the next time the one-second tick
+# looks (respond/events.c).
+need /var/log/omcid-unknown.txt '^unknown_msg type=29 class=256 count=2' 10
 got=$(grep -v '^#' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
 check "the summary counts every one of them" "$got" \
       "unknown_me class=351 op=create mt=4 count=2
@@ -186,11 +191,11 @@ while [ "$i" -lt 30 ]; do
 	i=$((i + 1))
 done
 $Q cli/build/omcli --inject-file /tmp/reboots.txt > /dev/null 2>&1
-sleep 1
+sync_send "$log"
 got=$(grep -c '^event=' "$log")
 check "a flood is cut at 20 event lines a minute" "$got" "20"
 
-[ "$fail" -eq 0 ] || cp "$log" /src/src/omci/events-test.log 2>/dev/null || true
+[ "$fail" -eq 0 ] || keep_log "$log" events-test.log
 
 # A respawn in the same boot (kill -9, as a crash leaves it): the summary is
 # read back, so what the first process logged is not logged again. This one
@@ -200,9 +205,9 @@ kill -9 "$pid" 2>/dev/null
 wait "$pid" 2>/dev/null
 printf 'SYSLOG_SERVER=\nOMCI_UNKNOWN_ME_OK=1\n' > /var/config/odi.conf
 log2=/tmp/omcid-events2.log
-$Q respond/build/omcid -w 3 -c "$CAPS" > "$log2" 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" > "$log2" 2>&1 &
 pid2=$!
-sleep 2
+omcid_up "$log2"
 got=$(grep '^unknown entities: ' "$log2")
 check "OMCI_UNKNOWN_ME_OK=1 is read from odi.conf" "$got" \
       "unknown entities: answered ok (OMCI_UNKNOWN_ME_OK=1)"
@@ -211,12 +216,13 @@ $Q cli/build/omcli --inject "$(frame 0e07 44 015f 0002)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(frame 0e08 48 015f 0002)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(frame 0e09 49 015f 0002)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(frame 0e0a 44 fdfd 0001)" > /dev/null 2>&1
-sleep 2
+sync_send "$log2"
 got=$(grep -c '^event=unknown_me class=351 op=\(create\|get\) ' "$log2")
 check "a respawned omcid does not log what this boot already logged" "$got" "0"
 got=$(grep '^event=unknown_me ' "$log2")
 check "but a new unknown still is" "$got" "event=unknown_me class=351 op=set mt=8
 event=unknown_me class=65021 op=create mt=4"
+need /var/log/omcid-unknown.txt '^unknown_me class=351 op=create mt=4 count=3' 10
 got=$(grep -v '^#' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
 check "and the counts carry on across the respawn" "$got" \
       "unknown_me class=351 op=create mt=4 count=3
@@ -236,9 +242,8 @@ out=$($Q cli/build/omcli provision 2>&1 | grep '^summary ')
 check "nothing is stored, and MIB data sync counts the faked writes" \
       "$(echo "$out" | sed 's/.*rows=\([0-9]*\).*mib_data_sync=\([0-9]*\).*/rows=\1 mib_data_sync=\2/')" \
       "rows=0 mib_data_sync=3"
-[ "$fail" -eq 0 ] || cp "$log2" /src/src/omci/events-test2.log 2>/dev/null || true
-kill "$pid2" 2>/dev/null
-wait "$pid2" 2>/dev/null
+[ "$fail" -eq 0 ] || keep_log "$log2" events-test2.log
+omcid_stop "$pid2"
 rm -f /var/config/odi.conf
 
 # OMCI_FIXED_ME: a Get of a listed class, which omcid does not model,
@@ -247,17 +252,21 @@ rm -f /var/config/odi.conf
 getmask() {   # getmask <tci> <class4> <mask4>: a Get with an attribute mask
 	printf '%s490a%s0000%s%060d0000002800000000\n' "$1" "$2" "$3" 0
 }
-fixed_run() {   # fixed_run <log> <value> [seconds]: an omcid with OMCI_FIXED_ME set
+fixed_run() {   # fixed_run <log> <value>: an omcid with OMCI_FIXED_ME set
 	printf 'OMCI_FIXED_ME=%s\n' "$2" > /var/config/odi.conf
-	$Q respond/build/omcid -w "${3:-2}" -c "$CAPS" > "$1" 2>&1 &
+	$Q respond/build/omcid -w 12 -c "$CAPS" > "$1" 2>&1 &
 	pid3=$!
-	sleep 2
+	omcid_up "$1"
+}
+fixed_end() {   # fixed_end [<log>]: everything injected has been answered; stop it
+	[ -z "${1:-}" ] || sync_send "$1"
+	omcid_stop "$pid3"
 }
 fixed_run /tmp/omcid-fixed.log '200:0x48656c6c6f, 201:0102'
 $Q cli/build/omcli --inject "$(getmask 0e10 00c8 8000)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(getmask 0e11 00c9 c000)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(getmask 0e12 00ca 8000)" > /dev/null 2>&1
-wait "$pid3" 2>/dev/null
+fixed_end /tmp/omcid-fixed.log
 got=$(grep '^fixed entities: ' /tmp/omcid-fixed.log)
 check "OMCI_FIXED_ME is read from odi.conf" "$got" \
       "fixed entities: 2 entr(ies) answered from OMCI_FIXED_ME"
@@ -272,17 +281,17 @@ got=$(grep -v '^-> ' /tmp/omcid-fixed.log | grep -c -i '48656c6c6f')
 check "and the bytes are not logged" "$got" "0"
 fixed_run /tmp/omcid-fixed2.log '256:48656c6c6f'
 $Q cli/build/omcli --inject "$(getmask 0e13 0100 8000)" > /dev/null 2>&1
-wait "$pid3" 2>/dev/null
+fixed_end /tmp/omcid-fixed2.log
 got=$(grep -c -i -- '-> 0e13290a01000000008000.*48656c6c6f' /tmp/omcid-fixed2.log)
 check "a class omcid models (ONU-G) is not overridden" "$got" "0"
 got=$(grep -c -- '-> 0e13290a0100000000' /tmp/omcid-fixed2.log)
 check "and still answers from its own model" "$got" "1"
 fixed_run /tmp/omcid-fixed3.log '200:48656c6c6f,200:0102'
-wait "$pid3" 2>/dev/null
+fixed_end
 got=$(grep -c '^fixed entities: ' /tmp/omcid-fixed3.log)
 check "a class listed twice turns the key off" "$got" "0"
 fixed_run /tmp/omcid-fixed4.log '200:486'
-wait "$pid3" 2>/dev/null
+fixed_end
 got=$(grep -c '^fixed entities: ' /tmp/omcid-fixed4.log)
 check "an odd number of hex digits turns the key off" "$got" "0"
 # Per-instance entities, CLASS:INSTANCE:ATTR:HEX. Class 188 instance 0x8001
@@ -294,7 +303,7 @@ getmaski() {   # getmaski <tci> <class4> <inst4> <mask4> <mt2>: a Get of one ins
 nextframe() {  # nextframe <tci> <seq4>: a MIB upload next
 	printf '%s4e0a00020000%s%060d0000002800000000\n' "$1" "$2" 0
 }
-fixed_run /tmp/omcid-fixed5.log '188:0x8001:1:0x0011aa 188:0x8001:3:ff 188:0x8001:2:2233 360:5:1:01 360:5:2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 360:5:3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 200:48' 15
+fixed_run /tmp/omcid-fixed5.log '188:0x8001:1:0x0011aa 188:0x8001:3:ff 188:0x8001:2:2233 360:5:1:01 360:5:2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 360:5:3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 200:48'
 $Q cli/build/omcli --inject "$(frame 0e40 4d 0002 0000)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(getmaski 0e41 00bc 8001 e000 49)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(getmaski 0e42 00bc 8001 4000 49)" > /dev/null 2>&1
@@ -306,7 +315,7 @@ $Q cli/build/omcli --inject "$(getmaski 0e47 0168 0005 ffff 49)" > /dev/null 2>&
 for q in "0e48 012d" "0e49 012e" "0e4a 012f" "0e4b 0130"; do
 	$Q cli/build/omcli --inject "$(nextframe $q)" > /dev/null 2>&1
 done
-wait "$pid3" 2>/dev/null
+fixed_end /tmp/omcid-fixed5.log
 L=/tmp/omcid-fixed5.log
 A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -356,13 +365,13 @@ for bad in '188:0x8001:1:00,188:0x8001:1:01' '188:00 188:0x8001:1:01' \
 	'188:1:1:00112233445566778899aabbccddeeff00112233445566778899' \
 	'188:1:0x1:00' '188:1:001:00' '188:1:1:00,200:00 188:1:2:00 188:1:3:00 188:1:4:00 188:1:5:00 188:1:6:00 188:1:7:00 188:1:8:00 188:1:9:00 188:1:10:00 188:1:11:00 188:1:12:00 188:1:13:00 188:1:14:00 188:1:15:00 188:1:16:00'; do
 	fixed_run /tmp/omcid-fixed6.log "$bad"
-	wait "$pid3" 2>/dev/null
+	fixed_end
 	got=$(grep -c '^fixed entities: ' /tmp/omcid-fixed6.log)
 	check "malformed, the key is off: $bad" "$got" "0"
 done
 # 16 entries and the decimal instance are fine.
 fixed_run /tmp/omcid-fixed6.log '188:32769:1:00 188:32769:2:00 188:1:1:00 188:1:2:00 188:1:3:00 188:1:4:00 188:1:5:00 188:1:6:00 188:1:7:00 188:1:8:00 188:1:9:00 188:1:10:00 188:1:11:00 188:1:12:00 188:1:13:00 188:1:14:00'
-wait "$pid3" 2>/dev/null
+fixed_end
 got=$(grep '^fixed entities: ' /tmp/omcid-fixed6.log)
 check "16 entries are accepted, with a decimal instance" "$got" \
       "fixed entities: 16 entr(ies) answered from OMCI_FIXED_ME"
@@ -375,22 +384,24 @@ rm -f /var/config/odi.conf
 sleep 60 &
 victim=$!
 rm -f /var/config/odi.conf
-$Q respond/build/omcid -w 3 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot0.log 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot0.log 2>&1 &
 pid4=$!
-sleep 2
+omcid_up /tmp/omcid-reboot0.log
 $Q cli/build/omcli --inject "$(frame 0e20 59 0100 0000)" > /dev/null 2>&1
+sync_send /tmp/omcid-reboot0.log
+# Elapsed time on purpose: an accepted reboot signals init about a second
+# after the answer, so "nothing is signalled" is only a check after 2 s.
 sleep 2
 kill -0 "$victim" 2>/dev/null; got=$?
 check "reboot refused: nothing is signalled" "$got" "0"
-kill "$pid4" 2>/dev/null
-wait "$pid4" 2>/dev/null
+omcid_stop "$pid4"
 printf 'OMCI_ACCEPT_REBOOT=1\n' > /var/config/odi.conf
-$Q respond/build/omcid -w 3 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot1.log 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot1.log 2>&1 &
 pid4=$!
-sleep 2
+omcid_up /tmp/omcid-reboot1.log
 $Q cli/build/omcli --inject "$(frame 0e21 59 0100 0000)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(frame 0e22 59 0007 0000)" > /dev/null 2>&1
-sleep 3
+sync_send /tmp/omcid-reboot1.log
 got=$(grep -o -- '-> 0e21390a0100000000' /tmp/omcid-reboot1.log | head -1)
 check "reboot accepted: the answer is success" "$got" "-> 0e21390a0100000000"
 got=$(grep -c '^reboot from the OLT accepted$' /tmp/omcid-reboot1.log)
@@ -400,10 +411,9 @@ check "the event records both requests" "$got" \
       "event=olt_reboot class=256 inst=0 result=accepted;event=olt_reboot class=7 inst=0 result=not_supported;"
 got=$(grep -o -- '-> 0e22390a0007000001' /tmp/omcid-reboot1.log | head -1)
 check "a Reboot of another class keeps its answer" "$got" "-> 0e22390a0007000001"
-wait "$victim" 2>/dev/null; got=$?
+wait_bounded "$victim" 15; got=$?
 check "the stand-in for init got SIGTERM" "$got" "143"
-kill "$pid4" 2>/dev/null
-wait "$pid4" 2>/dev/null
+omcid_stop "$pid4"
 rm -f /var/config/odi.conf
 
 # OMCI_ACCEPT_REBOOT=2: answered success, logged, and the stand-in for init is
@@ -411,11 +421,13 @@ rm -f /var/config/odi.conf
 sleep 60 &
 victim=$!
 printf 'OMCI_ACCEPT_REBOOT=2\n' > /var/config/odi.conf
-$Q respond/build/omcid -w 3 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot2.log 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot2.log 2>&1 &
 pid4=$!
-sleep 2
+omcid_up /tmp/omcid-reboot2.log
 $Q cli/build/omcli --inject "$(frame 0e23 59 0100 0000)" > /dev/null 2>&1
-sleep 3
+sync_send /tmp/omcid-reboot2.log
+# Elapsed time on purpose, as for the refused reboot above.
+sleep 2
 got=$(grep -o -- '-> 0e23390a0100000000' /tmp/omcid-reboot2.log | head -1)
 check "reboot acknowledged: the answer is success" "$got" "-> 0e23390a0100000000"
 got=$(grep -c '^reboot from the OLT acknowledged, not rebooting (OMCI_ACCEPT_REBOOT=2)$' /tmp/omcid-reboot2.log)
@@ -427,8 +439,7 @@ kill -0 "$victim" 2>/dev/null; got=$?
 check "the stand-in for init is not signalled" "$got" "0"
 kill "$victim" 2>/dev/null
 wait "$victim" 2>/dev/null
-kill "$pid4" 2>/dev/null
-wait "$pid4" 2>/dev/null
+omcid_stop "$pid4"
 rm -f /var/config/odi.conf
 
 if [ "$fail" -eq 0 ]; then echo "events-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi

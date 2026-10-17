@@ -24,13 +24,14 @@
 #      second instance must hold not one `drv ` line -- the switch was
 #      never touched.
 #
-# Run from src/omci, inside the toolchain image, after drv-test.sh:
+# Run from src/omci, inside the toolchain image (make test-omci-resume):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
 #          sh resume-test.sh
 set -u
 Q=qemu-mips-static
 FIX=../../test/fixtures
 fail=0
+. ./testlib.sh
 
 CAPS=020000ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000000000000010000000300000002ffffffff000000000000001000000040000000800000000800000000000000100000000f00000440
 
@@ -53,7 +54,7 @@ for isp in isp1 isp2; do
 	# exit -- this one has to still be up when we kill it).
 	$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-$isp > "$before_log" 2>&1 &
 	pid=$!
-	sleep 2
+	omcid_up "$before_log"
 	$Q cli/build/omcli --inject-file "$FIX/omci-session-$isp.txt" > /tmp/resume-inject-$isp.txt 2>&1
 	frames=$(grep -c '^[0-9a-f]' "$FIX/omci-session-$isp.txt")
 	if ! grep -q "injected $frames frames" /tmp/resume-inject-$isp.txt; then
@@ -63,7 +64,7 @@ for isp in isp1 isp2; do
 		fail=$((fail + 1))
 		continue
 	fi
-	sleep 2                                  # let the 1 s rebuilds settle
+	settled "$before_log"                    # the 1 s rebuilds have run
 
 	mib_before=$($Q cli/build/omcli mib get all 2>&1)
 	conn_before=$($Q cli/build/omcli conn 2>&1)
@@ -75,24 +76,24 @@ for isp in isp1 isp2; do
 	wait "$pid" 2>/dev/null
 
 	# 4: a fresh instance, -s 5 standing in for "PON is O5" (qemu has no
-	# netlink to ask the driver over). -w 1: it may idle-exit once our
-	# three dumps are done, the same as a drv-test.sh run.
-	$Q respond/build/omcid-drvtrace -a -w 1 -c "$CAPS" -s 5 -g /tmp/resume-gpon-$isp > "$after_log" 2>&1 &
+	# netlink to ask the driver over). -w 6 is only a backstop: it is stopped
+	# once our three dumps are done.
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -s 5 -g /tmp/resume-gpon-$isp > "$after_log" 2>&1 &
 	pid=$!
-	sleep 2
+	omcid_up "$after_log"
 
 	if ! grep -q 'resume: onu state 5, snapshot loaded' "$after_log"; then
 		echo "FAIL  $isp: the respawned instance did not take the resume path"
 		sed -n '1,20p' "$after_log"
 		fail=$((fail + 1))
-		wait "$pid" 2>/dev/null
+		omcid_stop "$pid"
 		continue
 	fi
 
 	mib_after=$($Q cli/build/omcli mib get all 2>&1)
 	conn_after=$($Q cli/build/omcli conn 2>&1)
 	flows_after=$($Q cli/build/omcli flows 2>&1)
-	wait "$pid" 2>/dev/null
+	omcid_stop "$pid"
 
 	# Plain temp files, not <(...): this runs under dash inside the
 	# toolchain image, which has no process substitution.

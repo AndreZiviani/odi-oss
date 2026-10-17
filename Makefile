@@ -18,7 +18,7 @@ help:
 	@echo "  releases        metricsd and confd from their own releases"
 	@echo "  image           assemble a flashable tarball into out/image/"
 	@echo "  image-all       everything above from a clean clone, in order (about 25 min native)"
-	@echo "  test            lint + the host-side tests + diag + the OMCI daemon under qemu (~2 min)"
+	@echo "  test            lint + the host-side tests + diag + the OMCI daemon under qemu, side by side (a few minutes)"
 	@echo "  lint            shellcheck every script here"
 	@echo "  test-rcs        the rcS action trace against its goldens (needs out/busybox, docker)"
 	@echo "  test-qemu       boot the real rootfs under qemu-system-mips, ssh/web/exporter + resilience scenarios"
@@ -97,7 +97,25 @@ image-all:
 # diag toolchain container (src/omci/qemu-test.sh, about 130 checks). The
 # QEMU system harnesses under test/ that need a staged rootfs or a built kernel
 # stay manual; each says so in its header.
-test: lint test-host test-diag test-omci
+#
+# The legs of `make test` -- lint, test-host, test-diag and one per OMCI suite
+# -- run side by side (tools/test-legs.sh, which says why that is not `make
+# -j`): each is its own docker container or its own host process and writes
+# nothing in common (the OMCI suites keep /tmp, /var/config and the SysV queues
+# inside their container; a failed one leaves its daemon log in out/test-logs/).
+# A leg prints one line when it ends, and its whole output only when it
+# failed, so parallel output is never interleaved. All legs finish when one
+# fails, so a run reports every failure, and `make test` exits non-zero when
+# any did. TEST_JOBS is the number of legs at once (default: the CPUs);
+# `make test TEST_JOBS=1` runs them one by one. `make test-<leg>` runs one leg
+# on its own, its output streaming.
+OMCI_SUITES := qemu drv resume events swdl vlan reload
+TEST_LEGS := lint test-host test-diag $(OMCI_SUITES:%=test-omci-%)
+TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+
+test:
+	@MAKE='$(MAKE)' tools/test-legs.sh 1 test-omci-build
+	@MAKE='$(MAKE)' tools/test-legs.sh $(TEST_JOBS) $(TEST_LEGS)
 	@echo "ok"
 
 test-host:
@@ -185,13 +203,14 @@ test-diag:
 # vlan-test.sh builds both ISP sessions with the manual tag on and off
 # (transparent) and checks the bridge rules.
 # One target per suite (test-omci-<suite>) so CI can run them as parallel
-# jobs; test-omci runs them all, in this order, and stops at the first failure.
+# jobs; test-omci runs them all side by side, as `make test` does (see there).
 # Each suite needs only omcli and omcid (plus its drvtrace build), which
-# test-omci-build makes: the rest of src/ is built by `make src`.
-OMCI_SUITES := qemu drv resume events swdl vlan reload
-
-test-omci: test-omci-build
-	@for s in $(OMCI_SUITES); do $(MAKE) --no-print-directory test-omci-$$s || exit 1; done
+# test-omci-build makes: the rest of src/ is built by `make src`. The suites
+# share src/omci/testlib.sh: bounded waits for the line a check needs, and a
+# SIGTERM to stop the daemon instead of waiting out its idle exit.
+test-omci:
+	@MAKE='$(MAKE)' tools/test-legs.sh 1 test-omci-build
+	@MAKE='$(MAKE)' tools/test-legs.sh $(TEST_JOBS) $(OMCI_SUITES:%=test-omci-%)
 
 test-omci-build:
 	$(MAKE) -C src/omci/cli
