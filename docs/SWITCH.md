@@ -603,8 +603,10 @@ slot (recorded by cmd 25 when it creates the port) and sets or clears the
 one bit with a read-modify-write. It also keeps the flag per GEM port, and
 cmd 25 applies it when it writes the slot: one OLT sends Encrypted_Port-ID
 right after O5, before any OMCI has created the port, and a flow cmd 25
-writes again (an OMCI MIB reset) gets FLAGS without the bit and no new
-PLOAM. The kept flags are forgotten when the ONU-ID is discarded; the next
+writes again (every QoS or bridge rebuild, an OMCI MIB reset) gets no new
+PLOAM. cmd 25 writes FLAGS once with the bit already in it, as the stock
+flow add does; written bare and set after, the row would decrypt nothing in
+between. The kept flags are forgotten when the ONU-ID is discarded; the next
 activation configures the ports again. The table covers DS slots 0..63,
 every flow cmd 25 accepts. Not reproduced from the capture: the CAM
 rewrite around the bit (it writes the same GEM id back), and the interrupt
@@ -616,6 +618,14 @@ from the kernel RNG (`hw_new_key()` in `odi_gpon_hw.c`), as G.984.3 clause
 the RNG is initialised still gets a key, with a one-time warning, because
 no key would make the OLT ask again and then deactivate the ONU.
 `test/odi_gpon_aes_key_test.sh` runs it against the register model.
+
+The OMCC port may be encrypted too (G.984.3 9.2.3.8 names any Port-ID): an
+Encrypted_Port-ID for the OMCI port sets the bit on its row (FLAGS `0x14`,
+`odi_gpon_hw_gem_port_encrypted()`), as the stock GPON module does, and a
+Configure_Port-ID writes the row back unencrypted (`0x04`). Without it, an
+OLT that encrypts the OMCC would leave every downstream OMCI frame
+unreadable. No OLT seen so far encrypts it, so this path is host-tested
+only. Like the stock module, the message's `b` bit is not read.
 
 Setting the bit on every data port at creation was rejected: a port the
 OLT does not encrypt would then be decrypted into garbage, and nothing here
