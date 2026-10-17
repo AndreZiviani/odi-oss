@@ -779,7 +779,7 @@ void cfg_load_veip_slot(void)
 {
 	char v[16];
 	int n = cfg_get(CFG_CS_PATH, "OMCI_VEIP_SLOT_ID", v, sizeof v);
-	int slot = 0, i = 0, me = 0;
+	int slot = 0, i = 0;
 
 	veip_slot_key = -1;
 	veip_slot = VEIP_SLOT_DEFAULT;
@@ -792,10 +792,8 @@ void cfg_load_veip_slot(void)
 		return;
 	}
 	veip_slot_key = slot;
-	n = cfg_get(CFG_CS_PATH, "OMCI_CUSTOM_ME", v, sizeof v);
-	for (i = 0; n > 0 && v[i] >= '0' && v[i] <= '9' && me < 100000000; i++)
-		me = me * 10 + (v[i] - '0');
-	if (me & CUSTOM_ME_VEIP_SLOT_ID)
+	cfg_load_custom_me();
+	if (custom_me & CUSTOM_ME_VEIP_SLOT_ID)
 		veip_slot = slot;
 }
 
@@ -814,6 +812,19 @@ int private_me = 1;
  * number only (0 would be slot 0 there), and the stick must stay valid when it
  * falls back to the stock slot. */
 int veip_on = 1;
+
+/* The stock key, decimal, as runomci.sh passes it to omci_app (-cme). */
+int custom_me;
+
+void cfg_load_custom_me(void)
+{
+	char v[16];
+	int n = cfg_get(CFG_CS_PATH, "OMCI_CUSTOM_ME", v, sizeof v), me = 0;
+
+	for (int i = 0; n > 0 && v[i] >= '0' && v[i] <= '9' && me < 100000000; i++)
+		me = me * 10 + (v[i] - '0');
+	custom_me = me;
+}
 
 void cfg_load_veip_on(void)
 {
@@ -1112,6 +1123,7 @@ void cfg_load_all(void)
 	cfg_load_veip_slot();
 	cfg_load_private_me();
 	cfg_load_veip_on();
+	cfg_load_custom_me();
 	aut_rebuild();
 }
 
@@ -1126,6 +1138,7 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->veip_slot = veip_slot;
 	s->private_me = private_me;
 	s->veip_on = veip_on;
+	s->custom_me = custom_me;
 }
 
 void cfg_snap_restore(const struct cfg_snap *s)
@@ -1139,6 +1152,7 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	veip_slot = s->veip_slot;
 	private_me = s->private_me;
 	veip_on = s->veip_on;
+	custom_me = s->custom_me;
 	aut_rebuild();
 }
 
@@ -1194,6 +1208,8 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		m |= CFGD_PRIVATE_ME;
 	if (o->veip_on != n->veip_on)
 		m |= CFGD_VEIP_ON;
+	if ((o->custom_me ^ n->custom_me) & CUSTOM_ME_ONU_CAPABILITY)
+		m |= CFGD_CUSTOM_ME;
 	if (o->fixed.n != n->fixed.n)
 		m |= CFGD_FIXED_ME;
 	else
@@ -1240,6 +1256,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_VEIP_SLOT, "OMCI_VEIP_SLOT_ID" },
 		{ CFGD_PRIVATE_ME, "OMCI_PRIVATE_ME" },
 		{ CFGD_VEIP_ON, "OMCI_VEIP" },
+		{ CFGD_CUSTOM_ME, "OMCI_CUSTOM_ME" },
 		{ CFGD_VLAN_TYPE, "VLAN_CFG_TYPE" },
 		{ CFGD_VLAN_MODE, "VLAN_MANU_MODE" },
 		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },

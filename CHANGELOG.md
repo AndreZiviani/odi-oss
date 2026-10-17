@@ -5,6 +5,26 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the managed entity model had wrong class ids for nine entities, all
+  of them above 32767: the generator (`src/omci/tools/mib-tables.py`) did not
+  follow how the compiler loads such a constant, so it recorded an unrelated
+  number instead. omcid now answers and reports them under their real ids:
+  65529 (CTC ONU capability, was 9368), 65294 (SNTP, was 13248), 65534 and
+  65535 (private T-CONT queue and VLAN configuration, were 9572 and 10212),
+  65527 (OLT location, was 9796), 65528 (CTC loop detection), 65408
+  (extended ONU-G), 65531 (CTC extended multicast profile, an OLT can now
+  create it) and 65282. The MIB upload no longer lists ids no OLT knows.
+  The ONU capability entity (65529) is created only when bit 64 of
+  `OMCI_CUSTOM_ME` is set, as the stock firmware does; the factory value of
+  that key does not set it. The private VLAN configuration (65535) reports
+  what the stock firmware is started with: any `VLAN_CFG_TYPE` other than 1
+  reads as type 0, and without a manual tag the VID and priority read as
+  65535 and 255. The model also had no width for attributes 3 to 15 of ONU
+  power shedding (133) and parts 2 to 15 of the large string (157) and
+  octet string (307) entities, so an OLT Set of them was dropped and a Get
+  of them answered nothing; they now have the stock widths. An
+  `OMCI_FIXED_ME` entry for one of the corrected classes no longer applies:
+  omcid answers those classes itself. Refs #103.
 - Tests and docs: the real MAC addresses in the L2 table examples (a stick ELAN
   address and LAN devices read back from one table, and one address from a
   stock listing) are replaced by locally administered documentation

@@ -86,7 +86,9 @@ check "no key: the circuit pack is at 0x0106" "$(inst 6)" "257,262,384,"
 check "no key: and the cardholder" "$(inst 5)" "257,262,384,"
 check "no key: ME 373 is created" "$(inst 373)" "0,"
 base=$(upload /tmp/keys-1.log)
-check "no key: the MIB upload announces 301 autonomous entities" "$base" "301"
+# 300: without bit 64 of OMCI_CUSTOM_ME there is no CTC ONU capability
+# entity (class 65529), as on the stock firmware.
+check "no key: the MIB upload announces 300 autonomous entities" "$base" "300"
 stop
 
 store 14 ""
