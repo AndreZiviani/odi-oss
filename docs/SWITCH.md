@@ -281,6 +281,7 @@ commands, from the command table of the shipped binary:
 | 23 | setPriQueue | `odi_sw_ponmac_queue_add` (downstream), `odi_sw_ponq_queue_add` (upstream) | `odi_switch_qos.c` |
 | 24 | clearPriQueue | `odi_sw_ponq_queue_del` | `odi_switch_qos.c` |
 | 25 | cfgGemFlow | `odi_sw_gpon_usflow_set` (downstream), `odi_sw_ponq_us_gem_set`, `_sidvalid_set`, `_glb_th_set`, `_sid2qid_set` (upstream) | `odi_switch_ds_gem.c`, `odi_switch_qos.c` |
+| 11 | setSignalParameter | `odi_gpon_signal_threshold_set` (the SF/SD thresholds) | `odi_gpon.c`, `odi_gpon_ctr.c` |
 | 30 | setPortAutoNegoAbility | `odi_sw_port_autoneg_get`, `_set` | `odi_switch_port.c` |
 | 32 | setPortState | `odi_sw_port_admin_set` | `odi_switch_port.c` |
 | 51 | activeBdgConn | `odi_sw_cf_add` | `odi_switch_cf.c` |

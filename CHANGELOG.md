@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Kernel and diag: signal fail and signal degrade (G.984.3 11.1.2) are
+  detected. The downstream bit error rate is measured from the BIP errors
+  over every 10 s of operation and compared with the thresholds the OLT
+  sets in the ANI-G (driver command 11, which was refused; defaults 10^-5
+  and 10^-9), with the standard's hysteresis. `/proc/odi_gpon/status` shows
+  them (`signal sf|sd`), and `diag gpon get alarm-status` prints them as
+  `Alarm SF` / `Alarm SD`, which the exporter turns into
+  `gpon_alarm{alarm="sf"}` / `"sd"`. omcid does not yet report them to the
+  OLT as ANI-G alarms.
+
 - Kernel: an OLT that disables the ONU (Disable_Serial_Number, the rogue-ONU
   "emergency stop", state O7) now gets the laser switched off, as G.984.3
   requires and the stock firmware does: the module's TX-disable line is

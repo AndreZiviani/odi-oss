@@ -435,7 +435,7 @@ reference; the commands:
     pon get transceiver vendor-name|part-number|temperature|voltage|
                         bias-current|tx-power|rx-power|all|alarm-status
     gpon get onu-state                GPON state machine state, O1-O7
-    gpon get alarm-status             LOS, LOF and LOM, live
+    gpon get alarm-status             LOS, LOF and LOM, live; SF and SD
     gpon get flows                    GEM flows omcid programmed
     gpon get flow-counters            per-flow GEM counters (/proc/odi_gpon/flows)
     mib dump counter port <ports>     port MIB counters; all, 2, 0-3, 0,2-3
@@ -1002,6 +1002,15 @@ In `status` (the live bits are absent before the first sample):
     fec_now ds 1                      FEC in use: downstream (the OLT sends
     fec_now us 1                      it), upstream (the ONU sends it)
     ds_superframe 305491896           the downstream superframe count
+    signal sf 0 threshold 5           signal fail and signal degrade (G.984.3
+    signal sd 0 threshold 9           11.1.2): the downstream BER over each
+                                      10 s of O5, from DSF_BIP_ERR_BITS, set
+                                      at >= 10^-threshold, cleared below
+                                      10^-(threshold+1), both 0 outside O5;
+                                      threshold from the OLT's ANI-G (cmd 11),
+                                      defaults 5 and 9
+    signal_events sf 0                clear -> set, per signal
+    signal_window ms 10000 bip_err_bits 0   the last whole window evaluated
     alarm_events los 1                clear -> set, as read; one per alarm
     alarm_ms los 2000                 time seen set; one per alarm
     onu_state_ms O5 8000              time in each state, O1 to O7
