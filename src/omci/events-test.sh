@@ -443,4 +443,4 @@ omcid_stop "$pid4"
 rm -f /var/config/odi.conf
 
 if [ "$fail" -eq 0 ]; then echo "events-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit

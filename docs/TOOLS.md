@@ -388,6 +388,11 @@ layout. The writes go
 through `/dev/odi_sw` (`ODI_SW_IOC_L2_MC_ADD`/`_DEL`, `odi_switch_l2.c`);
 `diag l2-table get all` shows the result.
 
+The table keeps what a snooper may keep: no state for an address outside
+224.0.0.0/4, for a link-local group (224.0.0.x) or for a group that shares a
+link-local MAC (RFC 4541 2.1.2: those are flooded), and one switch row per
+MAC, holding the union of the ports of every group that maps to it.
+
 `-j` and `-l` drive that same switch path by hand, without registering
 anything, so an entry can be put in and checked without an IGMP frame:
 
@@ -461,11 +466,11 @@ per valid row:
 
     L2 table: 1088 rows, IPv4 multicast looked up on MAC + VID/FID
     MACAddress        Spa Fid Age Vid  State  Ext Hash Type Ports Index
-    BC:24:11:05:B3:24 0   0   7   0    Auto   0   SVL  uc   -     0x06c
+    02:00:00:00:00:01 0   0   7   0    Auto   0   SVL  uc   -     0x06c
     01:00:5E:01:02:03 -   -   -   0    Static -   SVL  mc   0x1   0x17c
-    00:E4:06:4C:C6:F4 2   0   7   14   Auto   0   SVL  uc   -     0x270 ctag
-    04:9F:CA:78:72:82 0   0   7   0    Auto   0   SVL  uc   -     0x364
-    38:3A:21:28:27:C8 3   0   7   0    Auto   0   SVL  uc   -     0x390
+    02:00:00:00:00:02 2   0   7   14   Auto   0   SVL  uc   -     0x270 ctag
+    02:00:00:00:00:03 0   0   7   0    Auto   0   SVL  uc   -     0x364
+    02:00:00:00:00:04 3   0   7   0    Auto   0   SVL  uc   -     0x390
     5 entries
 
 (a trial stick, with `igmpd -w -j 239.1.2.3 -p 0x1` in place: the host

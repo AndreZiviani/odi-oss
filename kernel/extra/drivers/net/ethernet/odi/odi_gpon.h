@@ -83,6 +83,15 @@ int odi_gpon_onu_id_get(void);
  */
 void odi_gpon_sn_get(u8 sn[8]);
 
+/* odi_gpon_alloc_row() -- odi_switch_cmd.c cmd 21: the row of the
+ * Alloc-ID CAM that holds alloc_id, which is the index of its T-CONT
+ * (PON scheduler). An Alloc-ID no Assign_Alloc-ID has placed gets the
+ * row an assignment would give it (odi_gpon_hw_alloc_id_assign()). -1
+ * when the CAM is full or the write did not complete. Process context;
+ * takes odi_gpon_lock (lock order: odi_switch_lock, then odi_gpon_lock).
+ */
+int odi_gpon_alloc_row(uint16_t alloc_id);
+
 /* ---- /proc/odi_gpon/ status ------------------------------------------
  *
  * odi_gpon.c's own read-only procfile calls these getters; every one is a

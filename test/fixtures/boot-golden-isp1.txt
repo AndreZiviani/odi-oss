@@ -203,12 +203,18 @@ M 15 0
 M 80000015 0
 # cmd 21: rc 0
 M 17 0
+r f023a0 0
+r f023e4 10000
 W f023e4 10001
 W f020e4 6
 W f023a0 1
+r f023e8 0
 W f023e8 0
+r f023f8 100401
 W f023f8 100401
+r f02198 0
 W f02198 0
+r f0229c 3ffff
 W f0229c 3ffff
 M 80000017 0
 # cmd 23: rc 0
@@ -216,12 +222,18 @@ M 15 0
 M 80000015 0
 # cmd 21: rc 0
 M 17 0
+r f023a4 0
+r f023e4 10001
 W f023e4 10003
 W f020e4 e
 W f023a4 2
+r f023f8 100401
 W f023f8 107801
+r f023e8 0
 W f023e8 2
+r f0219c 0
 W f0219c 0
+r f022a0 3ffff
 W f022a0 3ffff
 M 80000017 0
 # cmd 23: rc 0
@@ -229,12 +241,18 @@ M 15 0
 M 80000015 0
 # cmd 21: rc 0
 M 17 0
+r f023a8 0
+r f023e4 10003
 W f023e4 10007
 W f020e4 16
 W f023a8 4
+r f023f8 107801
 W f023f8 1807801
+r f023e8 2
 W f023e8 6
+r f021a0 0
 W f021a0 0
+r f022a4 3ffff
 W f022a4 3ffff
 M 80000017 0
 # cmd 23: rc 0
@@ -242,12 +260,18 @@ M 15 0
 M 80000015 0
 # cmd 21: rc 0
 M 17 0
+r f023ac 0
+r f023e4 10007
 W f023e4 1000f
 W f020e4 1e
 W f023ac 8
+r f023fc 100401
 W f023fc 100404
+r f023e8 6
 W f023e8 e
+r f021a4 0
 W f021a4 0
+r f022a8 3ffff
 W f022a8 3ffff
 M 80000017 0
 # cmd 23: rc 0
@@ -255,52 +279,83 @@ M 15 0
 M 80000015 0
 # cmd 21: rc 0
 M 17 0
+r f023b0 0
+r f023e4 1000f
 W f023e4 1001f
 W f020e4 26
 W f023b0 10
+r f023fc 100404
 W f023fc 101004
+r f023e8 e
 W f023e8 1e
+r f021a8 0
 W f021a8 0
+r f022ac 3ffff
 W f022ac 3ffff
 M 80000017 0
 # cmd 23: rc 0
 M 19 0
 W 706400 59a
+r f0213c 0
 W f0213c 1
+r f02458 960082
+r f02454 1ba81b08
 W f02454 1ee01b08
+r f02454 1ee01b08
 W f02454 1ee01e40
+r f020f8 7efdfbf
 W f020f8 7efdf80
 M 80000019 0
 # cmd 25: rc 0
 M 19 0
 W 706404 69a
+r f0213c 1
 W f0213c 3
+r f02458 960082
+r f02454 1ee01e40
 W f02454 1e4a1e40
+r f02454 1e4a1e40
 W f02454 1e4a1daa
+r f020f8 7efdf80
 W f020f8 7efc080
 M 80000019 0
 # cmd 25: rc 0
 M 19 0
 W 706408 71a
+r f0213c 3
 W f0213c 7
+r f02458 960082
+r f02454 1e4a1daa
 W f02454 1db41daa
+r f02454 1db41daa
 W f02454 1db41d14
+r f020f8 7efc080
 W f020f8 7e08080
 M 80000019 0
 # cmd 25: rc 0
 M 19 0
 W 70640c 79a
+r f0213c 7
 W f0213c f
+r f02458 960082
+r f02454 1db41d14
 W f02454 1d1e1d14
+r f02454 1d1e1d14
 W f02454 1d1e1c7e
+r f020f8 7e08080
 W f020f8 608080
 M 80000019 0
 # cmd 25: rc 0
 M 19 0
 W 706410 61a
+r f0213c f
 W f0213c 1f
+r f02458 960082
+r f02454 1d1e1c7e
 W f02454 1c881c7e
+r f02454 1c881c7e
 W f02454 1c881be8
+r f020fc 7efdfbf
 W f020fc 7efdf84
 M 80000019 0
 # cmd 25: rc 0

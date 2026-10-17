@@ -57,6 +57,25 @@
  */
 #define ODI_DDM_ALARM_STATUS 7
 
+/* The module's own description of what its readings mean, two more selectors
+ * of our own (the stock sockopt has neither). ODI_DDM_MONITOR_TYPE: A0h bytes
+ * 92-94 into out[0..2] -- the diagnostic monitoring type (bit 6 digital
+ * diagnostics implemented, bit 5 internally calibrated, bit 4 externally
+ * calibrated, bit 3 average rather than OMA received power), the enhanced
+ * options byte and the SFF-8472 compliance byte. The conversions in
+ * src/diag/src/ddm.c assume internal calibration; this is where that
+ * assumption can be read back. ODI_DDM_LIMITS_A / _B: the alarm and warning
+ * thresholds, A2h bytes 0-23 (temperature, voltage and bias current: high
+ * alarm, low alarm, high warning, low warning, two bytes each, big-endian
+ * in the same scale as the readings) and bytes 24-39 (Tx power, then Rx
+ * power, same order) into out[0..23] and out[0..15]. They are the limits
+ * the module raises its own alarm and warning flags (ODI_DDM_ALARM_STATUS)
+ * against, and they differ from one module to the next.
+ */
+#define ODI_DDM_MONITOR_TYPE 8
+#define ODI_DDM_LIMITS_A     9
+#define ODI_DDM_LIMITS_B     10
+
 /* The output buffer size, same value everywhere it is repeated in this
  * driver set (odi_reg.h's struct odi_sw_ddm, odi_omci.c's "ddm" /proc
  * command) -- fixed by the RTK_OPT_TRANSCEIVER +0x28 ABI this replaces
