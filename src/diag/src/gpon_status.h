@@ -28,6 +28,17 @@ int gpon_proc_parse_state(const char *buf, unsigned len, uint32_t *state);
 #define GPON_ALARM_LOM  (1u << 3)
 #define GPON_ALARM_KNOWN (GPON_ALARM_LOS | GPON_ALARM_LOF | GPON_ALARM_LOM)
 
+/* Signal fail and signal degrade: not register bits but the driver's own
+ * BER evaluation, the "signal sf|sd <0|1> threshold <x>" lines of
+ * /proc/odi_gpon/status (odi_gpon_ctr.c). */
+#define GPON_ALARM_SF   (1u << 4)
+#define GPON_ALARM_SD   (1u << 5)
+
+/* Finds those two lines anywhere in buf and ORs what they say into *alarms
+ * and *known (a bit is known only when its line is there and well formed).
+ * Returns the number of lines found. */
+int gpon_proc_parse_signals(const char *buf, unsigned len, uint32_t *alarms, uint32_t *known);
+
 static inline uint32_t gpon_alarms_from_sts(uint32_t sts)
 {
 	return sts & GPON_ALARM_KNOWN;

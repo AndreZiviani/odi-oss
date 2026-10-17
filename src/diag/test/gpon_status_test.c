@@ -96,6 +96,38 @@ int main(void)
 		failures += !ok;
 	}
 
+	puts("/proc/odi_gpon/status signal lines:");
+	{
+		static const char st[] =
+			"state 5\nalarm_now los 0\nsignal sf 0 threshold 5\n"
+			"signal sd 1 threshold 9\nsignal_events sf 0\nsignal_window ms 10000 bip_err_bits 31\n";
+		uint32_t a = GPON_ALARM_LOF, k = GPON_ALARM_KNOWN;
+		int n = gpon_proc_parse_signals(st, (unsigned)strlen(st), &a, &k);
+		int ok = n == 2 && a == (GPON_ALARM_LOF | GPON_ALARM_SD) &&
+			k == (GPON_ALARM_KNOWN | GPON_ALARM_SF | GPON_ALARM_SD);
+
+		printf("  %-28s %s\n", "SF clear, SD set, others kept", ok ? "ok" : "FAIL");
+		failures += !ok;
+
+		a = 0;
+		k = 0;
+		{
+			static const char bad[] = "state 5\nsignal_events sf 3\nsignal sx 1\nsignal sf 2\n";
+
+			n = gpon_proc_parse_signals(bad, (unsigned)strlen(bad), &a, &k);
+		}
+		ok = n == 0 && a == 0 && k == 0;
+		printf("  %-28s %s\n", "no line, a bad name or value", ok ? "ok" : "FAIL");
+		failures += !ok;
+
+		a = 0;
+		k = 0;
+		n = gpon_proc_parse_signals("signal sf 1", 11, &a, &k);
+		ok = n == 1 && a == GPON_ALARM_SF && k == GPON_ALARM_SF;
+		printf("  %-28s %s\n", "a line cut at the value", ok ? "ok" : "FAIL");
+		failures += !ok;
+	}
+
 	printf("%s (%d failures)\n", failures ? "FAILED" : "all ok", failures);
 	return failures != 0;
 }
