@@ -64,7 +64,17 @@ newboot() {
 	echo "${1:-12}.00 1.00" > "$T/uptime"
 	: > "$T/kmsg"
 }
-spawned() { /bin/sleep 0.3; cat "$T/spawned" 2>/dev/null; }
+# The stub setsid records the spawn from a background job, so it can land a
+# moment after safe-mode.sh returned: poll for it (bounded) instead of a fixed
+# sleep, which lost the race on a loaded host. spawned_none is the other
+# case, where nothing is expected: there is nothing to poll for, so it waits a
+# short fixed time on purpose.
+spawned() {
+	i=0
+	while [ ! -s "$T/spawned" ] && [ "$i" -lt 100 ]; do /bin/sleep 0.05; i=$((i + 1)); done
+	cat "$T/spawned" 2>/dev/null
+}
+spawned_none() { /bin/sleep 0.3; cat "$T/spawned" 2>/dev/null; }
 count() { cat "$COUNTER" 2>/dev/null; }
 config_files() { (cd "$T/config" && ls -A | sort | tr '\n' ' '); }
 
@@ -88,7 +98,7 @@ t "  the only config change is the record (and the counter removed)" "^safe-mode
 t "  root: the RAM copy is bind-mounted over the account file" "^mount -o bind $PASSWD_RUN $PASSWD$" "$(cat "$T/mounts")"
 t "  root: the RAM copy carries the default password hash" '^root:\$6\$odisafemode\$[^:]+:0:0:root:/root:/bin/sh$' "$(cat "$PASSWD_RUN")"
 t "  the account file on flash is untouched" '^root:!:0:0' "$(cat "$PASSWD")"
-t "  nothing spawned" "^$" "$(spawned)"
+t "  nothing spawned" "^$" "$(spawned_none)"
 sh "$S" active && ok "  active says so" || no "  active says so"
 t "  status: this boot and the record" "active=1.*now_short_boots=5.*record=1.*record_short_boots=5" "$(sh "$S" status | tr '\n' ' ')"
 
@@ -128,11 +138,23 @@ t "an unreadable counter counts as 0" "^1$" "$(count)"
 rm -f "$COUNTER"
 
 # ---- no writable config partition: not counted, no safe mode
-chmod 500 "$T/config"
+# Root writes anywhere, so a read-only directory is no obstacle to it (this
+# runs as root in a container, on htpc and in CI). A config directory that is
+# not a directory at all fails for every user; the read-only one is checked
+# too when the test is not root.
 newboot 12
-out=$(sh "$S" count 2>&1)
-t "no writable config: not counted" "not counted" "$out"
-chmod 700 "$T/config"
+: > "$T/not-a-dir"
+out=$(CONFIG_DIR=$T/not-a-dir COUNTER=$T/not-a-dir/boot-count sh "$S" count 2>&1)
+t "no writable config (not a directory): not counted" "not counted" "$out"
+if [ "$(id -u)" != 0 ]; then
+	chmod 500 "$T/config"
+	newboot 12
+	out=$(sh "$S" count 2>&1)
+	t "no writable config (read-only): not counted" "not counted" "$out"
+	chmod 700 "$T/config"
+else
+	echo "skip  no writable config (read-only): root can write to it"
+fi
 
 # ---- a failed bind mount is said, not hidden
 for i in 1 2 3 4 5 6; do newboot 12; MOUNT=false sh "$S" count > /dev/null; done

@@ -27,7 +27,7 @@ behind every rule here.
 
     make image-all           # everything, from a clean clone
     make image                # just the tarball, once the pieces exist
-    make test                  # lint + test-host + test-diag + test-omci (~2 min)
+    make test                  # lint + test-host + test-diag + test-omci, side by side (about a minute on a native x86_64 host)
     make test-host              # host-side unit tests, no Docker/stick needed
     make test-diag              # diag, including the exporter contract (byte-for-byte goldens)
     make test-rcs               # what rcS executes and writes to /proc, three flag sets, against goldens (needs out/busybox)

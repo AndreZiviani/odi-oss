@@ -14,14 +14,15 @@
 # (respond/apply_bridge.c, bp_rules()); the last rebuild of the run is
 # compared.
 #
-# Run from src/omci, inside the toolchain image, after qemu-test.sh (the
-# Makefile test-omci target runs it):
+# Run from src/omci, inside the toolchain image (the Makefile test-omci-vlan
+# target):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
 #          sh vlan-test.sh
 set -u
 Q=qemu-mips-static
 FIX=../../test/fixtures
 fail=0
+. ./testlib.sh
 
 check() {
 	if [ "$2" = "$3" ]; then
@@ -49,11 +50,12 @@ rules() {
 		cp "$FIX/omci-store-$1.xml" /var/config/lastgood.xml
 	fi
 	log=/tmp/omcid-vlan-$1-$2.log
-	$Q respond/build/omcid -w 1 -c "$CAPS" > "$log" 2>&1 &
+	$Q respond/build/omcid -w 6 -c "$CAPS" > "$log" 2>&1 &
 	pid=$!
-	sleep 2
+	omcid_up "$log"
 	$Q cli/build/omcli --inject-file "$FIX/omci-session-$1.txt" > /dev/null 2>&1
-	wait "$pid"
+	settled "$log"
+	omcid_stop "$pid"
 	awk '/\] 47\/[0-9a-f]+ gem [0-9]+ rule / { sub(/.*\] /, ""); cur = cur $0 "\n" }
 	     /bridge connections rebuilt/ { last = cur; cur = "" }
 	     END { printf "%s", last }' "$log" | sort
@@ -141,18 +143,18 @@ store() {
 }
 
 # run171 <name> <phase-file>...: omcid with the store in place, each phase file
-# injected after the previous one settled (a quiet second rebuilds).
+# injected after the previous one settled (the quiet second has rebuilt).
 run171() {
 	name=$1; shift
 	log=/tmp/omcid-171-$name.log
-	$Q respond/build/omcid -w 2 -c "$CAPS" > "$log" 2>&1 &
+	$Q respond/build/omcid -w 6 -c "$CAPS" > "$log" 2>&1 &
 	pid=$!
-	sleep 2
+	omcid_up "$log"
 	for f in "$@"; do
 		$Q cli/build/omcli --inject-file "$f" > /dev/null 2>&1
-		sleep 2
+		settled "$log"
 	done
-	wait "$pid"
+	omcid_stop "$pid"
 }
 
 # rebuild <log> <n>: the rules of the n-th rebuild (0 = the last), sorted.
@@ -243,16 +245,16 @@ check "Delete of the instance: back to transparent" "$got" "47/1002 gem 657 rule
 
 sed 's/"VLAN_MANU_MODE" Value="1"/"VLAN_MANU_MODE" Value="0"/' \
 	"$FIX/omci-store-isp2.xml" > /tmp/store-transparent.xml
-$Q respond/build/omcid -w 2 > /tmp/omcid-vlan-cli.log 2>&1 &
+$Q respond/build/omcid -w 6 > /tmp/omcid-vlan-cli.log 2>&1 &
 pid=$!
-sleep 2
+omcid_up /tmp/omcid-vlan-cli.log
 got=$($Q cli/build/omcli vlan "$FIX/omci-store-isp2.xml" 2>&1 | sed -n '6p')
 check "omcli vlan: the manual tag is stick tags" "$got" \
       "handling    stick tags: vid 10 added to untagged frames"
 got=$($Q cli/build/omcli vlan /tmp/store-transparent.xml 2>&1 | sed -n '6p')
 check "omcli vlan: mode 0 is transparent" "$got" \
       "handling    transparent: no tag added or removed, the router tags"
-wait "$pid"
+omcid_stop "$pid"
 
 # ---- a bridge port of TP type 5 (GEM IW TP, no mapper) ----------------------
 #

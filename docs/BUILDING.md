@@ -99,11 +99,11 @@ implement, adding a `build.sh` there is a small, self-contained change.
 
 ## Verifying a build
 
-    make test          # lint + test-host + test-diag + test-omci, about two minutes
+    make test          # lint + test-host + test-diag + test-omci, run side by side: about a minute on a native x86_64 host, longer under emulation
     make lint           # shellcheck every script, plus a couple of repo-specific checks
     make test-host      # host-side unit tests for driver logic that has no kernel dependency
     make test-diag      # diag parser and conversions, and the exporter contract under qemu
-    make test-omci      # omcid under qemu-user, about 130 checks, no stick needed
+    make test-omci      # omcid under qemu-user, about 130 checks, no stick needed; the suites run side by side
     make test-rcs       # the rcS action trace against its goldens; needs out/busybox, not in `make test`
     make test-qemu      # boots the real rootfs under qemu-system-mips; needs the built pieces, not in `make test`
 

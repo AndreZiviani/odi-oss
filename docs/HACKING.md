@@ -494,10 +494,10 @@ In order:
 | `make lint` | shellcheck over every script (on-device ones as POSIX `sh`, since busybox ash runs them), the inline-quote check, and the greps for private-workspace references, machine-local paths, trial history in comments, internal plan ids and vendor source citations | `shellcheck`, git |
 | `make test-host` | about 60 host tests: driver logic, the on-device scripts, the replay tables and their generators | cc, bash, Python 3 |
 | `make test-diag` | diag's parser and conversions natively, then under qemu: the conversion vectors, the L2 listing golden, **the exporter contract** | Docker |
-| `make test-omci` | builds `src/`, runs `omcid` under qemu-user (about 130 checks) | Docker |
+| `make test-omci` | builds `src/`, runs `omcid` under qemu-user (about 130 checks), its seven suites side by side | Docker |
 | `make test-qemu` | boots the real rootfs (busybox, inittab, services, dropbear, confd, metricsd) full-system under `qemu-system-mips -M malta`; checks ssh/web UI/exporter and the resilience scenarios (see below) | Docker, `qemu-system-mips`, `busybox`/`packages`/`src`/`releases` already built |
 | `make test-rcs` | the rcS action trace (what rcS executes and writes under `/proc`, for three flag sets) against its goldens; not part of `make test` | Docker with ptrace, `out/busybox` |
-| `make test` | `lint`, `test-host`, `test-diag`, `test-omci` (not `test-qemu`, which needs a built rootfs and is not part of the ~2-minute default set), about two minutes | |
+| `make test` | `lint`, `test-host`, `test-diag`, `test-omci` (not `test-qemu`, which needs a built rootfs), run side by side: about a minute on a native x86_64 host | |
 | kernel build | `BUILD OK: <n> warnings`: 22 today, all GCC 16 "retain attribute ignored" in mainline networking files; any other warning is ours and a regression | toolchain |
 | kernel ISA and footprint | `packages/isa-audit.sh build/kernel-618/vmlinux` finds nothing; `objdump -d vmlinux` has no `eret` and no `tne`; `tools/kernel-footprint.sh` does not grow without a stated reason | kernel build |
 | image build | every ELF in the rootfs passes `isa-audit.sh` and `isa-allowlist.sh`; uImage and rootfs fit their partitions | full build |
@@ -599,7 +599,7 @@ in `test/odi_switch_isp2_test.c` and on hardware.
 
 The driver-call goldens (`drv-test.sh`, the two ISP sessions through
 `omcid-drvtrace`), `resume-test.sh`, `events-test.sh`, `swdl-test.sh`,
-`vlan-test.sh` and `reload-test.sh` run after it. `reload-test.sh` is the
+`vlan-test.sh` and `reload-test.sh` are suites of their own. `reload-test.sh` is the
 SIGHUP reload: a VLAN change rebuilt in place is compared, driver call for
 driver call and connection dump for connection dump, with a fresh omcid that
 had the new settings from its first frame (both ISPs, a new tag and
@@ -610,6 +610,40 @@ a burst of SIGHUPs; and a dry-run daemon walks every key through its class.
 `test/apply_test.sh` covers `apply.sh omci` against a stub omcid that only
 traps SIGHUP, and `make test-qemu` runs it under the real inittab: one omcid
 pid across every apply, a child of init, no second `event=start`.
+
+#### Running the suites, and writing one
+
+`make test` builds omcli and omcid, then runs its legs (`lint`, `test-host`,
+`test-diag` and one per OMCI suite) side by side with `tools/test-legs.sh`,
+`TEST_JOBS` of them at once (default: the CPUs; `TEST_JOBS=1` is one by one).
+It is `xargs -P` and not `make -j` because the make 3.81 macOS ships hangs at
+the end of a `-j` run while a process a test left in the background is alive.
+Each leg is its own container or host process and keeps `/tmp`, `/var/config`
+and its SysV queues to itself. A leg's output goes to
+`out/test-logs/<target>.log` and is printed only when it fails, so parallel
+output is never interleaved; the other legs finish when one fails, and
+`make test` exits non-zero. `make test-<leg>` runs one leg with
+its output streaming. A suite that fails also leaves the daemon log it was
+checking in `out/test-logs/`.
+
+The OMCI suites share `src/omci/testlib.sh`, and a new check should not sleep
+for a fixed time or wait out `omcid -w` (an idle exit in **5 second units**:
+`-w 2` is ten seconds). omcid answers every injected frame in order, flushes
+its log after each one and exits cleanly on SIGTERM, so a suite waits for the
+line it is about to check and then stops the daemon itself:
+
+- `wait_for <file> <pattern> <seconds> [count]` polls every 0.1 s and says
+  what it was waiting for on timeout (`need` also fails the suite);
+- `omcid_up <log>` waits for the start line, `inject_wait <log> <frame>`
+  injects one frame and waits for its answer, `sync_send <log>` waits for
+  everything injected so far to be handled, and `settled <log>` also for the
+  one-second quiet rebuild after a session;
+- `omcid_stop <pid>` is SIGTERM and a bounded wait; `-w` on the command line
+  stays as a backstop for a suite that dies, and one run in `qemu-test.sh`
+  keeps the idle exit itself under test.
+
+Keep a `sleep` only where the check is about elapsed time (a hold, a rate
+window, "nothing follows within a second"), and say so next to it.
 
 ### test-qemu: the real rootfs, full system, on a stock kernel
 

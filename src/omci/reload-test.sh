@@ -31,6 +31,7 @@ set -u
 Q=qemu-mips-static
 FIX=../../test/fixtures
 fail=0
+. ./testlib.sh
 
 CAPS=020000ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000000000000010000000300000002ffffffff000000000000001000000040000000800000000800000000000000100000000f00000440
 
@@ -143,7 +144,7 @@ inject() {   # inject <isp>
 # and the bridge connections have been rebuilt <rebuilds> times in all.
 settle() {
 	wait_count "$1" 'bridge connections rebuilt' "$2" 15 || bad "$1: no bridge rebuild after the session"
-	sleep 0.5
+	sync_send "$1"     # whatever the rebuild queued behind it has been served
 }
 rules_in_place() {   # the bridge rules of the rebuild a reload made
 	awk '/event=reload changed=vlan/{on=1} on&&/^drv 51 /{print} on&&/bridge connections rebuilt/{exit}' "$1"
@@ -268,6 +269,8 @@ hs_sn ODIT00000002
 gpon /tmp/rl-gpon-isp1 1 "0"
 kill -HUP "$pid"
 wait_count "$INITLOG" gpondeact 1 5 || bad "identity: no gpondeact"
+# Elapsed time on purpose: the daemon holds the ONU down for a second after
+# gpondeact, and nothing else may be written meanwhile.
 sleep 1
 check "identity: still held down a second in (only gpondeact so far)" "gpondeact" \
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
@@ -296,7 +299,7 @@ check "identity: the process was never restarted" "1" "$(grep -c 'event=start ' 
 kill -0 "$pid" 2>/dev/null && ok "identity: the process is still the same one" || bad "identity: the process died"
 check "identity: the serial number was read from the kernel again" "2" \
 	"$(grep -c 'serial number: from the kernel' "$log")"
-sleep 1
+sync_send "$log"
 check "identity: the MIB is what the session builds" "$mib_before" "$(mibdump)"
 check "identity: the connections are what the session builds" "$conn_before" "$($Q cli/build/omcli conn 2>&1)"
 stop_omcid
@@ -339,6 +342,7 @@ wait_count "$log" 'event=reload_done .*result=no_services' 1 20 || bad "O5 witho
 check_grep "O5 without services: result no_services" \
 	"event=reload_done changed=identity action=reregister result=no_services" "$log"
 wait_count "$log" 'event=reload changed=none' 1 10 || bad "the coalesced SIGHUPs led to no reload"
+# Elapsed time on purpose: the check is that no further reload follows.
 sleep 1
 after=$(grep -c 'event=reload ' "$log")
 check "three SIGHUPs during a reload: one reload on top of the running one" "2" "$((after - before))"

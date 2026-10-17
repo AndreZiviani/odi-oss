@@ -21,13 +21,13 @@
 # open of omcid own tmpfs state file, so a log that captured nothing cannot
 # pass. The binary itself is checked for the names too.
 #
-# Run from src/omci, inside the toolchain image, after qemu-test.sh (the
-# Makefile test-omci target runs them all):
+# Run from src/omci, inside the toolchain image (make test-omci-swdl):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
 #          sh swdl-test.sh
 set -u
 Q=qemu-mips-static
 fail=0
+. ./testlib.sh
 
 check() {
 	if [ "$2" = "$3" ]; then
@@ -120,11 +120,12 @@ S=/tmp/swdl-accept.txt
 	getflags 0a34 0000
 } > "$S"
 
-$Q -strace respond/build/omcid -w 3 -c "$CAPS" > "$log" 2> "$trace" &
+$Q -strace respond/build/omcid -w 12 -c "$CAPS" > "$log" 2> "$trace" &
 pid=$!
-sleep 3
+omcid_up "$log"
 $Q cli/build/omcli --inject-file "$S" > /tmp/swdl-inject.txt 2>&1
-wait "$pid"
+sync_send "$log"
+omcid_stop "$pid"
 
 got=$(grep -c "injected $(grep -c . "$S") frames" /tmp/swdl-inject.txt)
 check "every frame of the accept session is injected" "$got" "1"
@@ -192,11 +193,11 @@ got=$(grep -c -E '(^|[^a-z_])(execve|fork|vfork|clone|reboot)\(' "$trace")
 check "no execve, fork, clone or reboot syscall" "$got" "0"
 
 # The flags hold across a respawn, for the rest of the boot.
-$Q respond/build/omcid -w 2 -c "$CAPS" > /tmp/omcid-swdl2.log 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid-swdl2.log 2>&1 &
 pid=$!
-sleep 2
-$Q cli/build/omcli --inject "$(getflags 0a40 0001)" > /dev/null 2>&1
-wait "$pid"
+omcid_up /tmp/omcid-swdl2.log
+inject_wait /tmp/omcid-swdl2.log "$(getflags 0a40 0001)"
+omcid_stop "$pid"
 check "a respawned omcid reports the flags of this boot" \
       "$(answer /tmp/omcid-swdl2.log 0a40 | cut -c1-28)" "0a40290a00070001007000010101"
 
@@ -215,11 +216,12 @@ R=/tmp/swdl-reject.txt
 	getflags 0b26 0000
 	getflags 0b27 0001
 } > "$R"
-$Q respond/build/omcid -w 2 -c "$CAPS" > "$log" 2>&1 &
+$Q respond/build/omcid -w 12 -c "$CAPS" > "$log" 2>&1 &
 pid=$!
-sleep 2
+omcid_up "$log"
 $Q cli/build/omcli --inject-file "$R" > /dev/null 2>&1
-wait "$pid"
+sync_send "$log"
+omcid_stop "$pid"
 check "reject: start is not supported" "$(answer "$log" 0b01 | cut -c1-18)" "0b01330a0007000101"
 check "reject: a window close is not supported" "$(answer "$log" 0b11 | cut -c1-18)" "0b11340a0007000101"
 check "reject: end is not supported" "$(answer "$log" 0b20 | cut -c1-18)" "0b20350a0007000101"
@@ -234,6 +236,6 @@ check "reject: image 1 still only valid" \
       "$(answer "$log" 0b27 | cut -c1-28)" "0b27290a00070001007000000001"
 rm -f /var/config/odi.conf /var/run/omcid-swimage
 
-[ "$fail" -eq 0 ] || cp /tmp/omcid-swdl*.log /src/src/omci/ 2>/dev/null || true
+if [ "$fail" -ne 0 ]; then for f in /tmp/omcid-swdl*.log; do keep_log "$f" "swdl-test-${f##*/}"; done; fi
 if [ "$fail" -eq 0 ]; then echo "swdl-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
 exit "$fail"
