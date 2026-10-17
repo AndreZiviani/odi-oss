@@ -44,7 +44,7 @@ int __wrap_hw_stat_port_get(uint32_t port, uint32_t counter, uint64_t *value)
 
 static void fake_l2_row(uint32_t index, struct odi_sw_l2_row *r)
 {
-	static const uint8_t pon_host[6] = { 0x78, 0x54, 0x2e, 0x07, 0x64, 0x63 };
+	static const uint8_t pon_host[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x05 };
 	static const uint8_t uni_host[6] = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 };
 	static const uint8_t group[6] = { 0x01, 0x00, 0x5e, 0x01, 0x02, 0x03 };
 	const uint8_t *mac = 0;
@@ -59,8 +59,8 @@ static void fake_l2_row(uint32_t index, struct odi_sw_l2_row *r)
 		r->age = 6;
 		r->key = 1;
 		r->flags = ODI_SW_L2_F_VALID;
-		r->raw[0] = 0x2e076463u;
-		r->raw[1] = 0x00017854u;
+		r->raw[0] = 0x00000005u;
+		r->raw[1] = 0x00010200u;
 		r->raw[2] = 0x00002034u;
 	} else if (index == 9) {
 		mac = uni_host;
