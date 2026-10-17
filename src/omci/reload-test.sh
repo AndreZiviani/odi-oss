@@ -513,4 +513,4 @@ stop_omcid
 
 echo
 [ "$fail" -eq 0 ] && echo "reload-test.sh: all checks passed" || echo "reload-test.sh: $fail check(s) failed"
-exit "$fail"
+suite_exit

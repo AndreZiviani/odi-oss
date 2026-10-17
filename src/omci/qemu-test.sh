@@ -1094,4 +1094,4 @@ got=$(grep -c '^done after 0 frames$' /tmp/omcid5.log)
 check "and says it is done" "$got" "1"
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit

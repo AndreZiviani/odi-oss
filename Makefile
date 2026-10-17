@@ -120,6 +120,7 @@ test:
 	@echo "ok"
 
 test-host:
+	sh src/omci/testlib-test.sh
 	bash test/root_pw_test.sh
 	bash test/flash_test.sh
 	bash test/slot_state_test.sh
