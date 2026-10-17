@@ -80,6 +80,24 @@ int hw_transceiver_get(int sel, uint8_t out[DDM_RAW_LEN])
 	return 0;
 }
 
+int hw_transceiver_block_get(int sel, uint8_t out[DDM_RAW_LEN])
+{
+	struct odi_sw_ddm d;
+	int i, rc;
+
+	if (sel < DDM_SEL_MONITOR_TYPE || sel > DDM_SEL_LIMITS_B)
+		return -1;
+	d.type = (uint32_t)sel;
+	for (i = 0; i < DDM_RAW_LEN; i++)
+		d.raw[i] = 0;
+	rc = sw_ioctl(ODI_SW_IOC_DDM_GET, &d);
+	if (rc != 0)
+		return rc;
+	for (i = 0; i < DDM_RAW_LEN; i++)
+		out[i] = d.raw[i];
+	return 0;
+}
+
 /* raw[0] = A2h byte 110 (status/control, bit 1 = RX_LOS), raw[2]/raw[3] =
  * bytes 112/113 (alarm flags), raw[6]/raw[7] = bytes 116/117 (warning
  * flags) -- see odi_ddm.c's own comment for the full 8-byte layout this
@@ -203,20 +221,23 @@ int hw_gpon_status_get(uint32_t *state)
  * /dev/odi_sw cannot be read. */
 int hw_gpon_alarms_get(uint32_t *alarms, uint32_t *known)
 {
-	static char buf[2048];
+	static char buf[8192];
 	uint32_t sts = 0, los = 0;
 	long got;
 
+	got = gpon_proc_read(buf, sizeof buf);
 	if (hw_addr_get(GPON_DS_INTR_STS, &sts) == 0) {
 		*alarms = gpon_alarms_from_sts(sts);
 		*known = GPON_ALARM_KNOWN;
+		if (got > 0)
+			(void)gpon_proc_parse_signals(buf, (unsigned)got, alarms, known);
 		return 0;
 	}
-	got = gpon_proc_read(buf, sizeof buf);
 	if (got <= 0 || gpon_proc_parse_los(buf, (unsigned)got, &los) != 0)
 		return -1;
 	*alarms = los ? GPON_ALARM_LOS : 0;
 	*known = GPON_ALARM_LOS;
+	(void)gpon_proc_parse_signals(buf, (unsigned)got, alarms, known);
 	return 0;
 }
 

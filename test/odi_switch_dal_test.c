@@ -228,8 +228,7 @@ int main(int argc, char **argv)
 	odi_mock_reset();
 	odi_sw_host_pause = true;
 	odi_mock_mark(32);
-	(void)odi_sw_port_force_get(0);
-	odi_sw_port_force_set(0);
+	odi_sw_port_admin_set(0, 1);	/* the unlock, all the capture shows */
 	odi_mock_mark(0x80000000U | 32U);
 	odi_sw_host_pause = false;
 	dump_bracket(out_dir, "dal-cmd32.txt", 32);
@@ -237,8 +236,8 @@ int main(int argc, char **argv)
 	/* cmd 64 -- setFloodingPortMask, boot5 lines 29-34. */
 	odi_mock_reset();
 	odi_mock_mark(64);
-	(void)odi_sw_l2_flood_mask_get();
-	odi_sw_l2_flood_mask_set(7);
+	(void)odi_sw_l2_flood_mask_get(ODI_SW_FLOOD_UNKN_UCAST);
+	odi_sw_l2_flood_mask_set(ODI_SW_FLOOD_UNKN_UCAST, 7);
 	odi_mock_mark(0x80000000U | 64U);
 	dump_bracket(out_dir, "dal-cmd64.txt", 64);
 
@@ -249,12 +248,13 @@ int main(int argc, char **argv)
 	odi_mock_mark(0x80000000U | 23U);
 	dump_bracket(out_dir, "dal-cmd23-base.txt", 23);
 
-	/* cmd 23, instance 9 -- setPriQueue counter-mask shape,
+	/* cmd 23, instance 9 -- setPriQueue, an upstream queue: T-CONT 0, queue 0, strict,
 	 * boot5 lines 143-151.
 	 */
 	odi_mock_reset();
+	odi_mock_ponq_boot_state();
 	odi_mock_mark(23);
-	odi_sw_ponmac_queue_add_ext(0, 0x10001, 0x6, 0x1, 0, 0x100401, 0);
+	odi_sw_ponq_queue_add(0, 0, 0, 0, 1, 0, 0x3ffff);
 	odi_mock_mark(0x80000000U | 23U);
 	dump_bracket(out_dir, "dal-cmd23-ext.txt", 23);
 
@@ -287,8 +287,12 @@ int main(int argc, char **argv)
 
 	/* cmd 25, US instance 7 -- cfgGemFlow US side, boot5 lines 196-202. */
 	odi_mock_reset();
+	odi_mock_ponq_boot_state();
 	odi_mock_mark(25);
-	odi_sw_ponmac_flow_queue_set(0, 0x59a, 0, 1, 0x1ee01b08, 0x1ee01e40, 0, 0x07efdf80);
+	odi_sw_ponq_us_gem_set(0, 0x59a);
+	odi_sw_ponq_sidvalid_set(0, 1);
+	odi_sw_ponq_glb_th_set(1);
+	odi_sw_ponq_sid2qid_set(0, 0);
 	odi_mock_mark(0x80000000U | 25U);
 	dump_bracket(out_dir, "dal-cmd25-us.txt", 25);
 

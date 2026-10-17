@@ -10,6 +10,10 @@ kept in a separate private repository, not in this one, which is public.
 - `cfg_differ*` -- `LOID_OLD` is empty and `LOID` is not, which is the case
   /etc/runomci.sh resolves in favour of the OLD one. The result is that nothing
   is sent at all.
+- `cfg_pwnew*` -- the LOID agrees and the password changed: the new password is
+  answered, because the password follows the LOID comparison.
+- `cfg_loidnew*` -- the LOID changed: the old LOID and the old password stay in
+  force.
 
 Note where each key sits: `LOID`, `LOID_OLD` and `LOID_PASSWD` are in the cs
 file, `GPON_SN`, `GPON_PLOAM_PASSWD` and `LOID_PASSWD_OLD` in the hs one. That

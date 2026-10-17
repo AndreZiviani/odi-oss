@@ -31,7 +31,7 @@
 #define DRV_OPT        0x310au
 #define DRV_GET_SN     15
 #define DRV_GET_DEVID  4
-#define MIB_ROWS      192
+#define MIB_ROWS      256
 #define MIB_ROW_MAX   64
 #define MIB_TBL_ENTRY 16
 #define MIB_TBL_NODES 64
@@ -66,7 +66,7 @@
  * LargeString at 400 -- hold the ACS URL and credentials, which this has no
  * reason to keep. A truncated row is marked rather than silently short.
  */
-#define MIB_ROWS      192
+#define MIB_ROWS      256
 #define MIB_ROW_MAX   64
 
 /* ------------------------------------------------- table attributes (171)
@@ -181,6 +181,7 @@ uint32_t uptime_cs(void);
  * dBm in 0.002 dB steps; -1 when the driver cannot be read. */
 int ddm_dbm_x500(unsigned type, int16_t *out);
 int alloc_ids_refresh(void);
+int alloc_ids_known(void);
 unsigned alloc_ids_assigned(const uint16_t **ids);
 uint16_t tcont_alloc_id(uint16_t meId, int *src);
 
@@ -240,7 +241,7 @@ struct mib_row *mib_row_at(int i);
  * values: see mibstore.c. The CLI dumps go through these, never the rows
  * alone. */
 struct mib_ent { uint16_t cls, inst; };
-#define MIB_ENTS_MAX 512                 /* 301 autonomous + MIB_ROWS */
+#define MIB_ENTS_MAX 640                 /* 277 autonomous + MIB_ROWS */
 int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
 		 const struct mib_ent **out);
 const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
@@ -249,8 +250,15 @@ const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
 int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor);
 extern int conn_dirty;
 extern int qos_dirty;
+/* The next us_qos_rebuild() tears everything down first: set when the
+ * PLOAM Alloc-ID list changed, since the T-CONT indexes (the CAM rows) may
+ * have moved. */
+extern int qos_full;
 void bdgconn_rebuild(void);
 void us_qos_rebuild(void);
+/* The upstream state the driver holds as omcid programmed it, one block,
+ * for the resume snapshot. */
+void *qos_prog_state(uint32_t *len);
 uint16_t mib_write(struct mib_row *r, const struct omci_class *c, uint16_t mask, const uint8_t *src, uint16_t srclen);
 /* Whether attribute k differs from what the row held before this Set. */
 int mib_changed(const struct mib_row *r, const struct omci_class *c, unsigned k);
@@ -327,6 +335,12 @@ uint16_t canon_inst(uint16_t cls, uint16_t inst);
 int uni_switch_port(uint16_t meId, uint8_t slot_type);
 /* apply_qos.c */
 int us_queue_referenced(uint16_t pqMe);
+/* Does an upstream GEM port CTP name this traffic descriptor (class 280)
+ * as its upstream one? Its rates are then the rates of that CTP's queue. */
+int us_td_referenced(uint16_t td);
+/* Does an upstream queue in the plan name this traffic scheduler (class
+ * 278)? Only then can its Policy change what is programmed. */
+int us_scheduler_referenced(uint16_t ts);
 int flow_find(int ds, uint16_t port);
 void bc_gem_update(void);
 void bc_gem_withdraw(uint16_t going);
@@ -350,6 +364,7 @@ void apply_mbsp(const struct omci_class *c, uint16_t inst,
 		const struct mib_row *r, uint16_t mask, int creating);
 void delete_mbsp(uint16_t inst);
 void uni_reset(void);
+void uni_start(void);
 /* apply_bridge.c */
 uint32_t veip_uni_port_mask(uint16_t veipId);
 uint32_t all_eth_uni_mask(void);
@@ -554,6 +569,26 @@ int fixed_me_per_inst(uint16_t cls);
 int fixed_me_has_inst(uint16_t cls, uint16_t inst);
 const struct fixed_me *fixed_me_attr(uint16_t cls, uint16_t inst, unsigned attr);
 int fixed_me_upload(int want, uint8_t *body, uint16_t *len);
+
+/* The MIB upload, built as the stock omci_app builds it (mibstore.c). A MIB
+ * upload takes a snapshot -- every entity the ONU holds, each split over as
+ * many records as its attributes need -- and the Next commands read records
+ * out of it by sequence number. mib_upload_build() returns the record count
+ * the upload response announces, mib_upload_record() fills one record's
+ * contents (class, instance, mask, values) and returns 0, or -1 past the
+ * end. */
+#define UPL_REC_MAX   1024              /* 399 on the stock ONU, plus the OLT's */
+#define UPL_REC_BYTES 26                /* attribute bytes in one baseline record */
+unsigned mib_upload_build(void);
+int mib_upload_record(unsigned seq, uint8_t *body, uint16_t *len);
+/* The tables the ONU keeps for each MAC bridge port the OLT creates (class
+ * 47): the filter table data (49), the bridge table data (50) and the filter
+ * preassign table (79), each at the port's own entity id, empty or all
+ * zeros. Added on a Create of 47, removed on its Delete. */
+void mbpcd_tables_add(uint16_t inst);
+void mbpcd_tables_del(uint16_t inst);
+/* Records announced by the last MIB upload, 0 before the first. */
+extern unsigned upl_total;
 
 /* ------------------------------------------------------ config reload
  *

@@ -51,3 +51,37 @@ int gpon_proc_parse_los(const char *buf, unsigned len, uint32_t *los)
 	}
 	return -1;
 }
+
+/* "signal sf 1 threshold 5": the name, then a 0 or 1 followed by a space or
+ * the end of the line. */
+int gpon_proc_parse_signals(const char *buf, unsigned len, uint32_t *alarms, uint32_t *known)
+{
+	static const char key[] = "signal ";
+	unsigned i = 0;
+	int found = 0;
+
+	while (i < len) {
+		unsigned k = 0, j;
+
+		while (key[k] && i + k < len && buf[i + k] == key[k])
+			k++;
+		j = i + k;
+		if (!key[k] && j + 4 <= len && buf[j] == 's' && buf[j + 2] == ' ' &&
+		    (buf[j + 1] == 'f' || buf[j + 1] == 'd') &&
+		    (buf[j + 3] == '0' || buf[j + 3] == '1') &&
+		    (j + 4 == len || buf[j + 4] == ' ' || buf[j + 4] == '\n')) {
+			uint32_t bit = buf[j + 1] == 'f' ? GPON_ALARM_SF : GPON_ALARM_SD;
+
+			*known |= bit;
+			if (buf[j + 3] == '1')
+				*alarms |= bit;
+			else
+				*alarms &= ~bit;
+			found++;
+		}
+		while (i < len && buf[i] != '\n')
+			i++;
+		i++;
+	}
+	return found;
+}

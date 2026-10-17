@@ -611,7 +611,18 @@ got=$($Q cli/build/omcli ident test/cfg_differ.xml test/cfg_differ_hs.xml 2>&1 |
 check "and the same rule empties the password" "$got" "loid pw     (none)"
 got=$($Q cli/build/omcli ident test/cfg_agree.xml test/cfg_agree_hs.xml 2>&1 | sed -n '4p')
 check "a password that agrees across the two files survives" \
-      "$got" "loid pw     set (withheld)"
+      "$got" "loid pw     set, 10 bytes (withheld)"
+
+# The password follows the LOID comparison, not its own (runomci.sh tests
+# LOID_OLD == LOID for -w as well). Same LOID, a changed password: the new
+# one (pw-new-12, 9 bytes), not the old (pw-old, 6). A changed LOID: the old
+# LOID and the old password.
+got=$($Q cli/build/omcli ident test/cfg_pwnew.xml test/cfg_pwnew_hs.xml 2>&1 | sed -n '3,4p' | tr '\n' '|')
+check "same LOID, new password: the new one is sent" \
+      "$got" "loid        user-one|loid pw     set, 9 bytes (withheld)|"
+got=$($Q cli/build/omcli ident test/cfg_loidnew.xml test/cfg_loidnew_hs.xml 2>&1 | sed -n '3,4p' | tr '\n' '|')
+check "a changed LOID: the old LOID and the old password stay in force" \
+      "$got" "loid        user-old|loid pw     set, 6 bytes (withheld)|"
 
 # ISP1 keeps GPON_PLOAM_PASSWD and LOID_PASSWD_OLD in the cs file, not where
 # the xmlconfig split puts them, so each key is read from whichever file
@@ -619,7 +630,7 @@ check "a password that agrees across the two files survives" \
 got=$($Q cli/build/omcli ident test/cfg_csonly.xml test/cfg_csonly_hs.xml 2>&1 | sed -n '2p')
 check "a ploam password kept in cs is found" "$got" "ploam       set, 10 bytes (withheld)"
 got=$($Q cli/build/omcli ident test/cfg_csonly.xml test/cfg_csonly_hs.xml 2>&1 | sed -n '4p')
-check "and so is a LOID_PASSWD_OLD kept in cs" "$got" "loid pw     set (withheld)"
+check "and so is a LOID_PASSWD_OLD kept in cs" "$got" "loid pw     set, 6 bytes (withheld)"
 got=$($Q cli/build/omcli ident test/cfg_csonly.xml test/cfg_csonly_hs.xml 2>&1 | sed -n '1p')
 check "the serial still comes out of hs" "$got" "serial      ODIX00000002"
 
@@ -1094,4 +1105,4 @@ got=$(grep -c '^done after 0 frames$' /tmp/omcid5.log)
 check "and says it is done" "$got" "1"
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit

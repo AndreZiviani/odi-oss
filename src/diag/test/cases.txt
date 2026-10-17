@@ -58,3 +58,7 @@ l2-table get index
 l2-table get
 ? l2-table
 ? l2-table get e
+pon get transceiver mon
+pon get transceiver limits
+pon get transceiver l
+pon get transceiver m

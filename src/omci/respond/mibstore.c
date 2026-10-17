@@ -698,6 +698,14 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 3) for (int i = 0; i < 8; i++) out[i] = serial[i];
 		/* Attribute 14, the ONT PON state: the O-state number. */
 		else if (k == 14) out[0] = pon_state_now();
+		/* Logical ONU ID and password (10, 11): the LOID the stock MIB
+		 * reset copies in from its -l/-w arguments, which are the
+		 * config store's LOID keys -- the same values the CTC LOID
+		 * entity (65530) reports. An OLT that authenticates by the
+		 * G.988 ONU-G LOID read an empty one here. Credentials status
+		 * (12) stays 0 until the OLT writes it, as on the stock ONU. */
+		else if (k == 10) put_str(out, n, ident.loid);
+		else if (k == 11) put_str(out, n, ident.loidPwd);
 	} else if (c->classId == OMCI_ME_ONU2_G) { /* ONU2-G */
 		/* Attribute 2 is the OMCC version, per the vendor's own table
 		 * and G.988 -- not attribute 3, which is the vendor product
@@ -738,7 +746,12 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 1) out[0] = veip_admin(inst);
 		else if (k == 2) out[0] = veip_admin(inst) ? OPER_DISABLED : 0;
 	} else if (c->classId == OMCI_ME_TR069_MGMT_SERVER) { /* TR-069 server */
+		/* The default row of mib_TR069ManageServer.so, which the stock
+		 * MIB reset leaves as it is: locked, and both pointers
+		 * (ACS network address, associated tag) unset, 0xffff. Both
+		 * stock lines report 0xffff until their OLT writes one. */
 		if (k == 1) out[0] = ADMIN_LOCKED;
+		else if ((k == 2 || k == 3) && n >= 2) out[0] = out[1] = 0xff;
 	} else if (c->classId == OMCI_ME_PRIVATE_VLAN_CFG) { /* private VLAN config */
 		/* What the stock firmware stores here is what /etc/runomci.sh
 		 * passes omci_app (-iot_vt/-iot_vm/-iot_vid/-iot_pri), not the
@@ -773,11 +786,14 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		 * the slots themselves never change. */
 		else if (k >= 2 && k <= 4) out[0] = sw_flag(inst, k);
 	} else if (c->classId == OMCI_ME_CTC_LOID_AUTH) { /* CTC LOID authentication */
-		/* The LOID and its password from the config store (LOID and
-		 * LOID_PASSWD in lastgood.xml, both empty on isp1), AuthStatus 0
-		 * until the OLT sets it; OperationId is left zero, nothing on
-		 * this device says what the vendor puts there. */
-		if (k == 2) put_str(out, n, ident.loid);
+		/* As the stock MIB reset (FUN_0040dc44 of omci_app) fills it:
+		 * OperationId "CTC " (with the space, four bytes), the LOID and
+		 * its password from the config store (LOID and LOID_PASSWD,
+		 * the LOID_OLD rule of cfgstore.c), AuthStatus 0 until the OLT
+		 * sets it. */
+		if (k == 1 && n >= 4) {
+			out[0] = 'C'; out[1] = 'T'; out[2] = 'C'; out[3] = ' ';
+		} else if (k == 2) put_str(out, n, ident.loid);
 		else if (k == 3) put_str(out, n, ident.loidPwd);
 	} else if (c->classId == OMCI_ME_ONT_DATA) { /* ONT data */
 		if (k == 1) out[0] = mib_data_sync;
@@ -786,9 +802,11 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		 * has always reported them -- with every attribute zero, which
 		 * tells an OLT that this ONU has 208 identical queues. The
 		 * values are known: RelatedPort is derivable from the entity
-		 * id (checked against all 208 of isp1's rows) and the rest is
-		 * mib_PriQ.so's own default row, plus the two sizes isp1
-		 * reports. */
+		 * id (checked against all 208 of isp1's rows; FUN_0040c28c of
+		 * omci_app computes it the same way) and the rest is
+		 * mib_PriQ.so's own default row, plus the two queue sizes,
+		 * 3276 (0x0ccc), which that same reset function sets on every
+		 * queue. */
 		uint32_t rp = priq_related_port(inst);
 
 		if (k == 1) out[0] = 1;                /* QCfgOpt */
@@ -815,6 +833,159 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 3) out[0] = 2;           /* Policy */
 	}
 	return n;
+}
+
+/* ------------------------------------------------------------ MIB upload
+ *
+ * What the stock omci_app uploads, read off the binary (the record count in
+ * FUN_0040ff70, the walk of the snapshot at 0x415e24 and OMCI_OnMibUploadMsg):
+ *
+ *  - every entity of the MIB, the ONU's own and the OLT's, but no entity of a
+ *    class whose type is private or "not uploaded" (`(std & 0x110) == 0`) and
+ *    no instance added with the no-upload flag (the `!` rows of
+ *    /etc/omci_mib.cfg: priority queues 0xff00 to 0xff3f);
+ *  - of each entity, the attributes whose option type has none of
+ *    OMCI_OPT_NOT_UPLOADED (not supported, private, PM, table) and that are
+ *    at most 26 bytes, in attribute order;
+ *  - 26 bytes of them per record: an attribute that would overflow starts the
+ *    next record, under its own mask. An entity with no such attribute is one
+ *    record with an empty mask.
+ *
+ * The stock firmware's own upload on ISP2 (a decoded session of the stock
+ * image) is exactly this: 205 entities in 399 records, ONU2-G in two, ONU-G
+ * in four, each priority queue in two. omcid used to send one record per
+ * entity and drop whatever did not fit in it -- the ONU2-G queue, scheduler
+ * and GEM port counts among them. */
+struct upl_rec { uint16_t cls, inst, mask; };
+static struct upl_rec upl[UPL_REC_MAX];
+static unsigned upl_n;
+unsigned upl_total;
+
+/* The reserved queues of /etc/omci_mib.cfg, which the stock firmware creates
+ * with the no-upload flag. */
+#define PRIQ_NO_UPLOAD_FIRST 0xff00
+
+static int upl_skipped(const struct omci_class *c, uint16_t inst)
+{
+	return !c || (c->std & OMCI_STD_NOT_UPLOADED) ||
+	       (c->classId == OMCI_ME_PRIORITY_QUEUE && inst >= PRIQ_NO_UPLOAD_FIRST);
+}
+
+static void upl_push(uint16_t cls, uint16_t inst, uint16_t mask)
+{
+	if (upl_n < UPL_REC_MAX) {
+		upl[upl_n].cls = cls;
+		upl[upl_n].inst = inst;
+		upl[upl_n].mask = mask;
+		upl_n++;
+	}
+}
+
+static void upl_entity(const struct omci_class *c, uint16_t inst)
+{
+	uint16_t used = 0, mask = 0;
+	int recs = 0;
+
+	if (upl_skipped(c, inst))
+		return;
+	for (unsigned k = 1; k < c->nattr && k <= 16; k++) {
+		uint16_t w = attr_width(c, k);
+
+		if ((c->attrs[k].opt & OMCI_OPT_NOT_UPLOADED) || !w ||
+		    w > UPL_REC_BYTES)
+			continue;
+		if (used + w > UPL_REC_BYTES) {
+			upl_push(c->classId, inst, mask);
+			recs++;
+			used = 0;
+			mask = 0;
+		}
+		used = (uint16_t)(used + w);
+		mask |= (uint16_t)(1u << (16 - k));
+	}
+	if (mask || !recs)
+		upl_push(c->classId, inst, mask);
+}
+
+static int is_autonomous(uint16_t cls, uint16_t inst)
+{
+	for (unsigned i = 0; i < aut_count; i++)
+		if (aut[i].classId == cls && aut[i].inst == inst)
+			return 1;
+	return 0;
+}
+
+unsigned mib_upload_build(void)
+{
+	upl_n = 0;
+	for (unsigned i = 0; i < aut_count; i++)
+		upl_entity(find_class(aut[i].classId), aut[i].inst);
+	/* The OLT's entities, and an autonomous one only once: a Set gives it
+	 * a row, which is not a second entity. */
+	for (int i = 0; i < MIB_ROWS; i++)
+		if (mib[i].used && !is_autonomous(mib[i].classId, mib[i].inst))
+			upl_entity(find_class(mib[i].classId), mib[i].inst);
+	upl_total = upl_n + (unsigned)fixed_me_upload(-1, 0, 0);
+	return upl_total;
+}
+
+int mib_upload_record(unsigned seq, uint8_t *body, uint16_t *len)
+{
+	const struct omci_class *c;
+	uint16_t n = 6;
+
+	if (seq >= upl_n) {
+		int idx = (int)(seq - upl_n);
+
+		if (idx < fixed_me_upload(-1, 0, 0)) {
+			fixed_me_upload(idx, body, len);
+			return 0;
+		}
+		return -1;
+	}
+	c = find_class(upl[seq].cls);
+	nl_put16(body + 0, upl[seq].cls);
+	nl_put16(body + 2, upl[seq].inst);
+	nl_put16(body + 4, upl[seq].mask);
+	for (unsigned k = 1; c && k <= 16; k++) {
+		if (!(upl[seq].mask & (1u << (16 - k))))
+			continue;
+		attr_value(c, upl[seq].inst, k, body + n);
+		n = (uint16_t)(n + attr_width(c, k));
+	}
+	*len = n;
+	return 0;
+}
+
+/* What the stock omci_app does when the OLT creates a MAC bridge port config
+ * data (class 47), read in mib_MacBriPortCfgData.so of V1.0-220923
+ * (MacBriPortCfgDataDrvCfg, the add arm): it creates, in this order, a MAC
+ * bridge port filter table data (49), a filter preassign table (79) and a
+ * bridge table data (50), each with the entity id of the new port and all
+ * attributes zero or an empty table. Both stock dumps agree: every class 47
+ * instance of ISP1 and ISP2 has a 49, a 50 and a 79 under its own id. The
+ * stock MIB reset creates none of them, so they are not autonomous, and a
+ * decoded stock upload taken after a reset has none. The stock does it only
+ * when the port's UNI-G is not "non-OMCI only", which omcid never reports.
+ *
+ * G.988 has the ONU create and delete them with the port. The stock delete arm
+ * (MacBriPortCfgDataConnCfg) removes 49 and 50 but never 79, which stays in
+ * its MIB: a leftover this does not copy. */
+void mbpcd_tables_add(uint16_t inst)
+{
+	static const uint16_t cls[3] = { 49, 79, 50 };
+
+	for (int i = 0; i < 3; i++)
+		if (find_class(cls[i]) && !mib_add(cls[i], inst))
+			out_fmt("   no room in the MIB for class %d of port %04x\n",
+				(long)cls[i], (long)inst);
+}
+
+void mbpcd_tables_del(uint16_t inst)
+{
+	mib_del(49, inst);
+	mib_del(79, inst);
+	mib_del(50, inst);
 }
 
 /* `contents` is everything from byte 8 on -- for a get that is the result code,

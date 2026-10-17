@@ -37,6 +37,8 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
     pon get transceiver rx-power      optical receive power, dBm
     pon get transceiver all           all seven transceiver readings above
     pon get transceiver alarm-status  alarm/warning flags and optical LOS (SFF-8472 A2h 110-117)
+    pon get transceiver monitoring-type  how the module says its readings are calibrated (SFF-8472 A0h 92)
+    pon get transceiver limits        the module's own alarm and warning limits (SFF-8472 A2h 0-39)
     gpon get onu-state                GPON state machine state, O1-O7
     gpon get alarm-status             LOS, LOF and LOM, live from the GPON block
     gpon get flows                    GEM flows omcid programmed, as odi_switch recorded them
@@ -57,8 +59,11 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
 - `gpon get alarm-status` reads the live condition register
   (`GPON_GTC_DS_INTR_STS`, 0x701008) for LOS, LOF and LOM. It falls back to
   the LOS sample in `/proc/odi_gpon/status` when `/dev/odi_sw` cannot be
-  read. The other four stock alarms (SF, SD, TX Too Long, TX Mismatch) are
-  not tracked by `odi_gpon`, so they are named on a note line and never printed as clear.
+  read. SF and SD come from the `signal sf|sd` lines of
+  `/proc/odi_gpon/status` (the driver's BER evaluation). TX Too Long and TX
+  Mismatch are not tracked by `odi_gpon`, so they are named on a note line
+  and never printed as clear (SF and SD join them when the file has no
+  `signal` lines, an older kernel).
 - `gpon get flows` shows what `odi_switch` recorded when omcid programmed each
   flow, not a hardware table read. It never registers for a redirect type,
   so omcid keeps the OMCI channel while it runs.
@@ -131,6 +136,7 @@ one diag per scrape and pipes this batch into it (its `diag_secs` table):
     pon get transceiver tx-power
     pon get transceiver temperature
     pon get transceiver voltage
+    pon get transceiver alarm-status
     gpon get onu-state
     gpon get alarm-status
     mib dump counter port all
@@ -160,6 +166,22 @@ That means: the prompt and the echo; the labels; six decimals and the units,
 including the two spaces before `dBm`; the `(On)` state names and the
 trailing `" \n\r"` (in that order) of `onu-state`; `clear`/`occur`; the
 `%-35s: %25llu` counter lines and the blank line after each port.
+
+`pon get transceiver alarm-status` is ours (the stock CLI has no such
+command; metricsd emits nothing for it there). It prints one
+`Alarm|Warning <name>, status: clear|occur` line for each of the ten
+SFF-8472 flags and `Optical LOS, status: clear|occur`, or `% transceiver
+alarm status read failed`; the exporter turns them into
+`gpon_transceiver_alarm`, `gpon_transceiver_rx_los` and `gpon_transceiver_up`.
+
+Two more commands of ours describe the module itself, read from it:
+`pon get transceiver monitoring-type` (A0h byte 92: whether diagnostics are
+implemented, internal or external calibration, average or OMA received
+power; the conversions here assume internal calibration) and
+`pon get transceiver limits` (A2h 0-39: the alarm and warning limits the
+module raises its own flags against, one `<measurement> <alarm|warning>
+<high|low>: <value with unit>` line each). `make transceiver-test` pins
+them.
 
 Two differences from the stock CLI are deliberate and were already there
 before this rework: `mib dump counter port all` lists every port that

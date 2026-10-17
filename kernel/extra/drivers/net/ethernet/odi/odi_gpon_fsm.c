@@ -68,8 +68,19 @@ static int odi_gpon_onu_id_matches(const struct odi_gpon_fsm *fsm, uint8_t onu_i
 	return onu_id == fsm->onu_id || onu_id == ODI_GPON_ONU_ID_BROADCAST;
 }
 
+/* A directed message is ours only while this ONU holds an ONU-ID, which is
+ * from Assign_ONU-ID (O3 -> O4) until it is discarded (every way out to
+ * O1, O2 or O7): O4, O5 and O6. fsm->onu_id reads 0 both for ONU-ID 0 and
+ * for none, so outside those states a message to ONU 0, another ONU, would
+ * otherwise match, and its Assign_Alloc-ID would arm this ONU's CAM. The
+ * stock module keeps 255, the unassigned ID (G.984.3 Table 5-1), when it
+ * holds none, which no directed message carries.
+ */
 int odi_gpon_fsm_directed_to_us(const struct odi_gpon_fsm *fsm, const struct odi_gpon_ploam *msg)
 {
+	if (fsm->state != ODI_GPON_STATE_O4 && fsm->state != ODI_GPON_STATE_O5 &&
+	    fsm->state != ODI_GPON_STATE_O6)
+		return 0;
 	return msg->onu_id != ODI_GPON_ONU_ID_BROADCAST && msg->onu_id == fsm->onu_id;
 }
 
@@ -85,13 +96,22 @@ static void odi_gpon_fsm_stop_timers_for_state(const struct odi_gpon_fsm *fsm,
 		ops->stop_to2(ctx);
 }
 
+/* Three copies: G.984.3 has the ONU answer Request_Password with the
+ * Password message three times (9.2.3, Request_Password), and the OLT
+ * takes the password as valid only when it gets three identical ones
+ * (9.2.4, Password). The stock GPON module sends three as well.
+ */
+#define ODI_GPON_PASSWORD_COPIES	3U
+
 static void odi_gpon_fsm_send_password(const struct odi_gpon_fsm *fsm,
 					const struct odi_gpon_fsm_ops *ops, void *ctx)
 {
 	struct odi_gpon_ploam reply;
+	unsigned int i;
 
 	odi_gpon_encode_password(fsm->onu_id, fsm->password, &reply);
-	ops->send_us_ploam(ctx, &reply);
+	for (i = 0; i < ODI_GPON_PASSWORD_COPIES; i++)
+		ops->send_us_ploam(ctx, &reply);
 }
 
 /* The ONU-ID this FSM holds (from O4 on) discarded: what Deactivate_ONU-ID

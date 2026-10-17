@@ -121,6 +121,7 @@ enum odi_gpon_us_ploam_type {
 
 /* Assign_Alloc-ID content[2] Alloc-ID type codes (clause 9.2.3.10). */
 #define ODI_GPON_ALLOC_ID_TYPE_GEM		0x01U
+#define ODI_GPON_ALLOC_ID_TYPE_DBA		0x02U	/* deprecated, G.984.3 9.2.3.10 */
 #define ODI_GPON_ALLOC_ID_TYPE_DEALLOCATE	0xffU
 
 /* ---- FIFO word pack/unpack (register-map fact) ---- */

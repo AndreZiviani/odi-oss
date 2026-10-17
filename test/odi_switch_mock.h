@@ -174,6 +174,46 @@ static inline void odi_mock_reset(void)
 	odi_mock_table_pending_reset();
 }
 
+/* The upstream PON queue registers as the sdkinit and module-load replays
+ * leave them before any OMCI (their captures:
+ * test/fixtures/isp1-260923-g4-sdkinit-filtered.txt and
+ * isp1-260922-v7-modload-filtered.txt): every flow unmapped (queue 63)
+ * except the OMCC flow 64 on queue 64, which alone is valid; T-CONT 16
+ * enabled with queue 64; every queue strict with weight 1 and no rate
+ * limit; flow 0's PBO threshold 150/130 and the global ON/OFF 0x1ba8/
+ * 0x1b08. For a test that drives the OMCI commands without running those
+ * replays first. Not logged.
+ */
+static inline void odi_mock_ponq_boot_state(void)
+{
+	unsigned int i;
+
+	for (i = 0; i < 16U; i++)
+		odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(20U + i))] = 0x07efdfbfU;
+	odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(36U))] = 0x40U;
+	odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(39U))] = 0x1U;
+	for (i = 0; i < 65U; i++)
+		odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(125U + i))] = 0x3ffffU;
+	odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(206U))] = 0x1U;
+	odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(207U))] = 0x10000U;
+	for (i = 0; i < 22U; i++)
+		odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(212U + i))] = 0x100401U;
+	odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(235U))] = 0x1ba81b08U;
+	odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(236U))] = 0x960082U;
+}
+
+/* The three lookup-miss flood masks as the module-load replay leaves them:
+ * 0xf, every port with the CPU (docs/SWITCH.md, the replay's one
+ * deliberate departure from the capture). cmd 64 changes them bit by bit.
+ * Not logged.
+ */
+static inline void odi_mock_flood_boot_state(void)
+{
+	odi_mock.regs[odi_mock_slot(0x1c020U)] = 0xfU;
+	odi_mock.regs[odi_mock_slot(0x1c024U)] = 0xfU;
+	odi_mock.regs[odi_mock_slot(0x1c028U)] = 0xfU;
+}
+
 /* TABLE_CMD/STS/WR_DATA/RD_DATA, 0x012000-0x01202c -- the real
  * regtrace skip list drops every write in this range, which is exactly why
  * boot5's captured brackets carry no W entries for the table-access

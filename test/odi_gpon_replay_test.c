@@ -208,6 +208,18 @@ int main(int argc, char **argv)
 		}
 		for (r = 0; r < m->repeats; r++)
 			feed_one(&fsm, m);
+		/* The capture's Extended_Burst_Length (pre-ranged 0x29, ranged
+		 * 0x12) came right after the Upstream_Overhead. Its writes are
+		 * cut from the fixture (its header says so), so it is applied
+		 * here with its writes dropped from the log; what it leaves,
+		 * the ranged burst length, shows in the Ranging_Time writes.
+		 */
+		if (m->type == ODI_GPON_DS_UPSTREAM_OVERHEAD) {
+			unsigned int n = odi_mock.log_n;
+
+			odi_gpon_hw_ext_burst_length(0x29U, 0x12U);
+			odi_mock.log_n = n;
+		}
 	}
 
 	/* The replay went through every GPON CAM sequence that takes
