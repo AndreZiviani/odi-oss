@@ -17,8 +17,10 @@
 #   - /bin/diag is replaced with test/qemu/diag-stub.sh: the real diag
 #     talks to hardware qemu does not emulate.
 #   - /etc/qemu-test/exporter.golden is added, for the stub to serve.
-#   - A test-only ssh key (test/qemu/id_test.pub) is authorized for root,
-#     baked into this initramfs only -- never into rootfs/skeleton.
+#   - A test-only ssh key, generated fresh on every run into
+#     $OUT/qemu-test-key/ (ssh-keygen; the private half stays there for
+#     run-qemu.sh and is never packed), has its public half authorized for
+#     root, baked into this initramfs only -- never into rootfs/skeleton.
 # Nothing else in the rootfs is modified: busybox init, inittab, services,
 # rcS, sysctls and every daemon are the real ones, unpatched.
 set -euo pipefail
@@ -139,7 +141,15 @@ install -m 755 "$ROOT/test/qemu/memhog.sh" "$STAGE/etc/qemu-test/memhog.sh"
 # this WRAPS dev_hook rather than replacing it: rename the shipped function
 # to dev_hook_stock, then define a new dev_hook that calls it first and
 # adds the test key install on the "config" case.
-TESTKEY_PUB=$ROOT/test/qemu/id_test.pub
+#
+# The key pair is made here, per run, so no private key is committed. It lives
+# beside the initramfs, not inside $STAGE, so only the public half is packed.
+TESTKEY_DIR=$OUT/qemu-test-key
+rm -rf "$TESTKEY_DIR"
+mkdir -p "$TESTKEY_DIR"
+chmod 700 "$TESTKEY_DIR"
+ssh-keygen -q -t ed25519 -N '' -C odi-qemu-test -f "$TESTKEY_DIR/id_test"
+TESTKEY_PUB=$TESTKEY_DIR/id_test.pub
 if [ -f "$TESTKEY_PUB" ]; then
 	cp "$TESTKEY_PUB" "$STAGE/etc/qemu-test/authorized_keys"
 	sed -i.bak 's/^dev_hook() {/dev_hook_stock() {/' "$STAGE/etc/init.d/rcS.dev"
@@ -147,6 +157,12 @@ if [ -f "$TESTKEY_PUB" ]; then
 	cat >> "$STAGE/etc/init.d/rcS.dev" <<'DEVHOOK'
 
 # ---- qemu test harness addition (test/qemu/build-initramfs.sh) --------
+# The config store here is a plain directory under /var (no MTD, below).
+# rcS makes a boot with no mounted config partition a safe-mode boot
+# (safe-mode.sh no-config: default password, PON off), which is right on a
+# stick and not what these scenarios test, so this harness says its
+# directory is the partition.
+config_mounted() { [ -d /etc/config ]; }
 dev_hook() {
 	dev_hook_stock "$@"
 	case "$1" in

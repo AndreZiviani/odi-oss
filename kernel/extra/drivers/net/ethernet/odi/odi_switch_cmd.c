@@ -44,8 +44,9 @@ static struct odi_sw_tcont_slot odi_sw_tcont[ODI_SW_PONQ_TCONTS];
 
 #ifndef __KERNEL__
 /* The host build has no GPON core: unless a test links one in and points
- * this at it, Alloc-IDs take rows from 0 in first-seen order, the order
- * PLOAM Assign_Alloc-ID fills the CAM in (odi_gpon_hw.c).
+ * this at its lookup (odi_gpon_hw_alloc_id_find()), the tests stand in for
+ * an OLT that assigned every Alloc-ID they name, rows from 0 in first-seen
+ * order, the order PLOAM Assign_Alloc-ID fills the CAM in (odi_gpon_hw.c).
  */
 int (*odi_sw_host_alloc_row)(uint16_t alloc_id);
 static uint32_t odi_sw_host_rows[ODI_SW_PONQ_TCONTS];
@@ -219,14 +220,88 @@ static int cmd_port_auto_nego(void *buf, uint32_t len)
 	return 0;
 }
 
-/* cmd 32: port 0, the UNI (the flood mask of cmd 64 is a different
- * register).
+/* cmd 32: {port, state}, the admin state of an Ethernet UNI (ME 11
+ * AdministrativeState, omcid's apply_uni.c sends !lock). state 0 forces
+ * the port's link down, anything else releases it, as the stock OMCI
+ * layer does through the SDK's admin enable (pf_rtl96xx_SetPortState).
+ * On this SFP the UNI is the host port: a lock takes the host link down,
+ * and the stick's own management path with it, until the OLT unlocks;
+ * OMCI itself does not cross that port. The PON and CPU ports are refused:
+ * forced down, either would cut the OMCI channel, and with it the unlock.
+ * No argument (the replay harness) is an unlock of port 0, the captured
+ * bracket.
  */
+#define ODI_SW_CMD32_PON_PORT	2U
+#define ODI_SW_CMD32_CPU_PORT	3U
+
+struct odi_sw_cmd32_arg {
+	uint32_t port;
+	uint32_t state;
+};
+
 static int cmd_port_state(void *buf, uint32_t len)
 {
-	(void)buf; (void)len;
-	(void)odi_sw_port_force_get(0);
-	odi_sw_port_force_set(0);
+	struct odi_sw_cmd32_arg a = { .port = ODI_SW_HOST_PORT, .state = 1U };
+
+	if (buf && len >= sizeof(a))
+		a = *(const struct odi_sw_cmd32_arg *)buf;
+	if (a.port >= ODI_SW_PORT_COUNT || a.port == ODI_SW_CMD32_PON_PORT ||
+	    a.port == ODI_SW_CMD32_CPU_PORT) {
+		ODI_SW_WARN("cmd 32: port %u state %u refused (not a UNI port)\n",
+			    (unsigned int)a.port, (unsigned int)a.state);
+		return ODI_SW_EOPNOTSUPP;
+	}
+	odi_sw_port_admin_set(a.port, a.state != 0U);
+	if (!a.state)
+		ODI_SW_LOG("cmd 32: port %u admin locked by the OLT: link forced down\n",
+			   (unsigned int)a.port);
+	return 0;
+}
+
+/* cmd 11: {type, threshold}, the ANI-G signal fail or signal degrade
+ * threshold the OLT set, as the exponent x of a 10^-x BER (the stock
+ * OMCI_SIGNAL_PARA_ts: type 4 SF, 5 SD; the stock driver hands it to its
+ * GPON module, which raises the SF/SD alarms against it). The GPON core
+ * evaluates them (odi_gpon_ctr.c); out-of-range values are refused and the
+ * previous threshold kept.
+ */
+#define ODI_SW_CMD11_SIG_SF	4U
+#define ODI_SW_CMD11_SIG_SD	5U
+
+struct odi_sw_cmd11_arg {
+	uint32_t type;
+	uint32_t threshold;
+};
+
+#ifndef __KERNEL__
+/* The host build has no GPON core: a test points this at one. */
+int (*odi_sw_host_signal_threshold_set)(unsigned int signal, unsigned int exp);
+#endif
+
+static int cmd_signal_parameter(void *buf, uint32_t len)
+{
+	const struct odi_sw_cmd11_arg *a = (const struct odi_sw_cmd11_arg *)buf;
+	unsigned int signal;
+	int rc;
+
+	if (!buf || len < sizeof(*a))
+		return -1;
+	if (a->type == ODI_SW_CMD11_SIG_SF)
+		signal = 0U;
+	else if (a->type == ODI_SW_CMD11_SIG_SD)
+		signal = 1U;
+	else
+		return ODI_SW_EOPNOTSUPP;	/* LOS/LOF/LOM thresholds: not settable */
+#ifdef __KERNEL__
+	rc = odi_gpon_signal_threshold_set(signal, a->threshold);
+#else
+	rc = odi_sw_host_signal_threshold_set ? odi_sw_host_signal_threshold_set(signal, a->threshold) : 0;
+#endif
+	if (rc) {
+		ODI_SW_WARN("cmd 11: %s threshold 10^-%u refused (out of range)\n",
+			    signal ? "SD" : "SF", (unsigned int)a->threshold);
+		return -1;
+	}
 	return 0;
 }
 
@@ -237,19 +312,48 @@ static int cmd_port_phy_pwrdown(void *buf, uint32_t len)
 	return 0;
 }
 
-/* cmd 64: the unknown-unicast flood mask, 0x7 (UNI, port 1, PON) when
- * enabled. The leaf repeats the write as the capture does.
+/* cmd 64: {sel, enable, portMask} (uapi/omci_bridgeport.h), a lookup-miss
+ * flood mask. As the stock OMCI layer does (pf_rtl96xx_SetFloodingPortMask):
+ * sel picks the mask (0 unknown unicast, 1 broadcast, 2 unknown
+ * multicast), enable 1 adds portMask's ports, 0 removes them, and every
+ * other port keeps its bit; enable 2 (trap) is refused, as stock refuses it.
+ * omcid sends one port per class 47 create or delete, so a delete, or ME
+ * 45 DiscardUnknown = 1, takes one port out instead of every port.
+ *
+ * One exception, kept from before: the module-load replay leaves every
+ * mask at 0xf, the CPU port included (docs/SWITCH.md), where the stock
+ * image has 0x7, and cmd 64 used to write 0x7 to the unknown-unicast
+ * mask. So the first provisioning took the CPU out of unknown-unicast
+ * flooding, and both ISPs run that way. Keeping the CPU in has not been
+ * tried on a stick, so cmd 64 still clears the CPU bit of that mask.
+ * No argument (the replay harness) is the captured call: sel 0, enable 1,
+ * the PON port.
  */
+#define ODI_SW_CMD64_CPU_BIT	(1U << 3)
+#define ODI_SW_CMD64_PORTS	((1U << ODI_SW_PORT_COUNT) - 1U)
+#define ODI_SW_CMD64_PON_BIT	(1U << 2)
+
 static int cmd_flooding_port_mask(void *buf, uint32_t len)
 {
-	struct omci_flood *f = (struct omci_flood *)buf;
-	uint32_t mask = 7;
+	struct omci_flood f = { .sel = ODI_SW_FLOOD_UNKN_UCAST, .enable = 1U,
+				.portMask = ODI_SW_CMD64_PON_BIT };
+	uint32_t mask;
 
-	if (f && len >= sizeof(*f)) {
-		mask = f->enable ? 7 : 0;
+	if (buf && len >= sizeof(f))
+		f = *(const struct omci_flood *)buf;
+	if (f.sel > ODI_SW_FLOOD_UNKN_MCAST || f.enable > 1U) {
+		ODI_SW_WARN("cmd 64: sel %u enable %u refused\n", (unsigned int)f.sel,
+			    (unsigned int)f.enable);
+		return ODI_SW_EOPNOTSUPP;
 	}
-	(void)odi_sw_l2_flood_mask_get();
-	odi_sw_l2_flood_mask_set(mask);
+	mask = odi_sw_l2_flood_mask_get(f.sel);
+	if (f.enable)
+		mask |= f.portMask & ODI_SW_CMD64_PORTS;
+	else
+		mask &= ~(f.portMask & ODI_SW_CMD64_PORTS);
+	if (f.sel == ODI_SW_FLOOD_UNKN_UCAST)
+		mask &= ~ODI_SW_CMD64_CPU_BIT;
+	odi_sw_l2_flood_mask_set(f.sel, mask);
 	return 0;
 }
 
@@ -351,13 +455,60 @@ static int cmd_pri_queue_del(void *buf, uint32_t len)
 	return 0;
 }
 
+/* cmd 0: a MIB reset, the upstream half (uapi/omci_gemflow.h). Every
+ * upstream flow is deleted as cmd 25 ena 0 deletes one (GEM 0, not valid,
+ * the PBO thresholds for one flow fewer), then every queue cmd 23 put on a
+ * data T-CONT as cmd 24 deletes one (drained, out of the T-CONT's mask, the
+ * T-CONT disabled with its last queue), and every T-CONT block is freed.
+ * After it, cmd 21 reserves on an empty group again. The stock driver's
+ * MIB reset (pf_rtl96xx_ResetMib) does this and more: it resets every flow
+ * and destroys the logical T-CONTs, and omci_app sends it on an OLT MIB
+ * reset. Without it a new provisioning met the old one's queue blocks, and
+ * its flows stayed valid. Left alone: the Alloc-ID CAM (PLOAM's, G.984.3
+ * 5.5.4), the OMCC (T-CONT 16, flow 64), the downstream GEM rows (no
+ * downstream delete here; the bridge connections that forward them are
+ * omcid's to take down) and the bridge connections themselves.
+ */
+static int us_flow_delete(uint32_t slot);
+
+static int cmd_mib_reset(void *buf, uint32_t len)
+{
+	uint32_t i, t, ord;
+
+	(void)buf; (void)len;
+	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
+		(void)us_flow_delete(i);
+	for (t = 0; t < ODI_SW_PONQ_TCONTS; t++) {
+		struct odi_sw_tcont_slot *s = &odi_sw_tcont[t];
+
+		for (ord = 0; ord < 32U; ord++)
+			if (s->live & (1U << ord)) {
+				uint32_t lq = s->qbase + ord;
+
+				odi_sw_ponq_queue_del(t, lq, ponq_physical(t, lq));
+			}
+		s->alloc_id = 0;
+		s->live = 0;
+		s->used = 0;
+		s->qbase = 0;
+		s->qn = 0;
+	}
+	return 0;
+}
+
 /* cmd 21: the T-CONT of an Alloc-ID. Word 0 goes in as the number of
  * queues omcid will put on it (1 if 0 or out of range: the stock caller
  * leaves it uninitialised) and comes back as the T-CONT index, the
- * Alloc-ID's CAM row. An Alloc-ID the OLT has not assigned by PLOAM gets a
- * row here, as the stock driver gives it one. A row past the data
- * T-CONTs (the OMCC's, or one of rows 17-31, which have no scheduler) or
- * a block that does not fit in the group is refused.
+ * Alloc-ID's CAM row. The row is looked up, never written: an Alloc-ID
+ * the OLT has not assigned by PLOAM in this activation is refused, and
+ * omcid binds the T-CONT when the Assign_Alloc-ID arrives. The stock
+ * driver writes a row here, but its caller sends this only on a T-CONT
+ * Set; omcid also sends it when the PLOAM list changes, so a row written
+ * here would bring back an Alloc-ID the OLT had just taken away, or one
+ * that went with the ONU-ID, and the ONU would answer grants that are not
+ * its own (G.984.3 5.5.3, 5.5.4). A row past the data T-CONTs (the
+ * OMCC's, or one of rows 17-31, which have no scheduler) or a block that
+ * does not fit in the group is refused.
  */
 static int cmd_tcont(void *buf, uint32_t len)
 {
@@ -371,7 +522,12 @@ static int cmd_tcont(void *buf, uint32_t len)
 	if (n == 0U || n > ODI_SW_PONQ_GROUP_QUEUES)
 		n = 1U;
 	row = tcont_alloc_row(t->alloc_id);
-	if (row < 0 || row >= (int)ODI_SW_PONQ_TCONTS) {
+	if (row < 0) {
+		ODI_SW_WARN("cmd 21: Alloc-ID %u is not assigned to this ONU by PLOAM\n",
+			    (unsigned int)t->alloc_id);
+		return ODI_SW_EOPNOTSUPP;
+	}
+	if (row >= (int)ODI_SW_PONQ_TCONTS) {
 		ODI_SW_WARN("cmd 21: Alloc-ID %u has no data T-CONT (CAM row %d)\n",
 			    (unsigned int)t->alloc_id, row);
 		return ODI_SW_EOPNOTSUPP;
@@ -751,6 +907,9 @@ int odi_switch_cmd(uint32_t cmd, void *buf, uint32_t len)
 	case OMCI_PORT_STATE_CMD:	/* 32, setPortState */
 		return cmd_port_state(buf, len);
 
+	case OMCI_SIGNAL_PARAMETER_CMD:	/* 11, setSignalParameter */
+		return cmd_signal_parameter(buf, len);
+
 	case OMCI_PHY_PWRDOWN_CMD:	/* 38, setPhyPwrDown */
 		return cmd_port_phy_pwrdown(buf, len);
 
@@ -765,6 +924,9 @@ int odi_switch_cmd(uint32_t cmd, void *buf, uint32_t len)
 
 	case OMCI_TCONT_CMD:	/* 21, createTcont/updateTcont */
 		return cmd_tcont(buf, len);
+
+	case OMCI_MIB_RESET_CMD:	/* 0, resetMib */
+		return cmd_mib_reset(buf, len);
 
 	case OMCI_GEMFLOW_CMD:	/* 25, cfgGemFlow/updateGemFlow/updateUsGemFlow */
 		return cmd_gem_flow(buf, len);

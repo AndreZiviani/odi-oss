@@ -57,7 +57,11 @@
  * (n - 1) * step for n upstream data flows, where step is the per-flow ON
  * threshold of flow 0 (PON_SID_RPV_TH[0]); ON never goes below 2000, and
  * OFF is then 1840. The stock driver recomputes them on every upstream
- * data flow add and delete.
+ * data flow add and delete. Read from the stock kernel of our image
+ * (dal_rtl9602c_gpon_flowctrl_adjust_byFlowNum, at 0x80131f50 of the
+ * V1.0-220923 vmlinux: the four constants, the sid 0 step and the floor
+ * test are its instructions), which has no cap at five flows; the 5.10 GPL
+ * SDK's dal_rtl9602c_gpon.c has the same function.
  */
 #define ODI_SW_PONQ_GLB_ON_BASE		7904U
 #define ODI_SW_PONQ_GLB_OFF_BASE	7744U

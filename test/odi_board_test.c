@@ -184,12 +184,41 @@ static void test_optics(void)
 	      odi_mock.log[2].val == 0x00002004U, "then GPIO 13 an output, the other direction bits kept");
 }
 
+/* Emergency Stop: GPIO 13 high (laser off) and low again, the other data
+ * bits kept; nothing at all for a laser the verb refused.
+ */
+static void test_tx_disable(void)
+{
+	struct odi_board_laser l;
+
+	optics_setup(0x6a, 2U);
+	(void)odi_board_optics();
+	(void)odi_board_laser(NULL);
+	CHECK(odi_board_tx_disable(1) == 0, "O7: tx_disable(1) returns 0");
+	CHECK(odi_soc_mock.regs[SOC_GPIO_DATA / 4] == 0x00002001U, "O7: GPIO 13 high, bit 0 kept");
+	odi_board_laser_get(&l);
+	CHECK(l.emergency_stop && l.laser_on, "O7: recorded, laser verb state kept");
+	CHECK(odi_board_tx_disable(0) == 0, "leaving O7: tx_disable(0) returns 0");
+	CHECK(odi_soc_mock.regs[SOC_GPIO_DATA / 4] == 0x00000001U, "leaving O7: GPIO 13 low again");
+	odi_board_laser_get(&l);
+	CHECK(!l.emergency_stop, "leaving O7: recorded");
+
+	optics_setup(0x55, 0U);
+	(void)odi_board_laser(NULL);
+	odi_mock.log_n = 0;
+	CHECK(odi_board_tx_disable(1) == 0 && odi_board_tx_disable(0) == 0,
+	      "refused laser: both calls return 0");
+	CHECK(odi_mock.log_n == 0 && odi_soc_mock.regs[SOC_GPIO_DIR / 4] == 0x00000004U,
+	      "refused laser: GPIO 13 never driven, still an input");
+}
+
 static int run_unit_checks(void)
 {
 	test_replay_order_and_kinds();
 	test_soc_addresses_allowlisted();
 	test_optics();
 	test_optics_unknown_laser_driver();
+	test_tx_disable();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

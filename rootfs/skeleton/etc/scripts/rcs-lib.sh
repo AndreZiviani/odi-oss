@@ -203,6 +203,20 @@ WDOK=/proc/odi_wdt/userland_ok
 SWITCH_INIT_OK=1
 confirm_watchdog() {
 	[ -w "$WDOK" ] || return 0
+	# A safe-mode boot (safe-mode.sh) exists to be reached, and it is entered
+	# because boots were not confirming or the config partition is dead, so
+	# the checks that fail then (a mount, the configured address, the
+	# confirm-arp aid) would reset it again. Only the switch init stays: with
+	# it failed nothing is reachable and a reset is a fresh try.
+	if [ -f "$SAFE_FLAG" ]; then
+		if [ "$SWITCH_INIT_OK" != 1 ]; then
+			crumb "watchdog NOT confirmed: switch_init failed"
+			return 0
+		fi
+		echo 1 > "$WDOK"
+		crumb "safe-mode boot: userland up, watchdog confirmed without the mount and address checks"
+		return 0
+	fi
 	if ! required_mounts_ok; then
 		crumb "watchdog NOT confirmed: a required mount is missing"
 		return 0

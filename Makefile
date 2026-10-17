@@ -4,7 +4,7 @@
 
 .PHONY: help kernel-tree toolchain toolchain-audit kernel packages busybox \
 	src releases image image-all clean distclean lint test test-host test-omci \
-	test-diag test-rcs test-qemu
+	test-diag test-rcs test-qemu test-omci-respond test-igmp
 
 help:
 	@echo "targets:"
@@ -19,6 +19,7 @@ help:
 	@echo "  image           assemble a flashable tarball into out/image/"
 	@echo "  image-all       everything above from a clean clone, in order (about 25 min native)"
 	@echo "  test            lint + the host-side tests + diag + the OMCI daemon under qemu, side by side (a few minutes)"
+	@echo "  test-omci-respond  omcid unit tests (class 171 decode), test-igmp  igmpd unit tests"
 	@echo "  lint            shellcheck every script here"
 	@echo "  test-rcs        the rcS action trace against its goldens (needs out/busybox, docker)"
 	@echo "  test-qemu       boot the real rootfs under qemu-system-mips, ssh/web/exporter + resilience scenarios"
@@ -109,8 +110,8 @@ image-all:
 # any did. TEST_JOBS is the number of legs at once (default: the CPUs);
 # `make test TEST_JOBS=1` runs them one by one. `make test-<leg>` runs one leg
 # on its own, its output streaming.
-OMCI_SUITES := qemu drv resume events swdl vlan reload live keys
-TEST_LEGS := lint test-host test-diag $(OMCI_SUITES:%=test-omci-%)
+OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables alarms
+TEST_LEGS := lint test-host test-diag test-omci-respond test-igmp $(OMCI_SUITES:%=test-omci-%)
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
 test:
@@ -119,12 +120,14 @@ test:
 	@echo "ok"
 
 test-host:
+	sh src/omci/testlib-test.sh
 	bash test/root_pw_test.sh
 	bash test/flash_test.sh
 	bash test/slot_state_test.sh
 	$(MAKE) -C src/nv test
 	bash test/fwu_guard_test.sh
 	bash test/fwu_minimal_path_test.sh
+	bash test/fwu_write_order_test.sh
 	bash test/fwu_starter_test.sh
 	bash test/network_addr_test.sh
 	bash test/apply_test.sh
@@ -144,6 +147,7 @@ test-host:
 	bash test/odi_switch_dal_test.sh
 	bash test/odi_reg_test.sh
 	bash test/odi_switch_cmd_test.sh
+	bash test/odi_switch_flood_test.sh
 	bash test/odi_switch_cmd10_test.sh
 	bash test/odi_switch_isp2_test.sh
 	bash test/odi_switch_bdgconn_vlan_test.sh
@@ -166,10 +170,12 @@ test-host:
 	bash test/odi_gpon_aes_key_test.sh
 	bash test/odi_gpon_replay_test.sh
 	bash test/odi_reregister_test.sh
+	bash test/odi_alloc_cam_safety_test.sh
 	bash test/odi_gpon_irq_test.sh
 	bash test/odi_gpon_us_ploam_test.sh
 	bash test/odi_gpon_ds_ploam_test.sh
 	bash test/odi_gpon_cam_test.sh
+	bash test/odi_gpon_o7_test.sh
 	bash test/odi_gpon_los_test.sh
 	bash test/odi_gpon_eqd_test.sh
 	bash test/odi_gpon_ctr_test.sh
@@ -214,6 +220,17 @@ test-diag:
 test-omci:
 	@MAKE='$(MAKE)' tools/test-legs.sh 1 test-omci-build
 	@MAKE='$(MAKE)' tools/test-legs.sh $(TEST_JOBS) $(OMCI_SUITES:%=test-omci-%)
+
+# The unit tests of two freestanding binaries, built and run under qemu-user in
+# the same container as the suites: omcid's class 171 decode and OLT-tag rule
+# (src/omci/respond/../test/extvlan_test.c) and igmpd's frame parse, group
+# table and switch-entry tests (src/igmp/test). Each is its own leg, with its
+# own build directory, so they run beside the suites.
+test-omci-respond:
+	$(MAKE) -C src/omci/respond test
+
+test-igmp:
+	$(MAKE) -C src/igmp test
 
 test-omci-build:
 	$(MAKE) -C src/omci/cli
