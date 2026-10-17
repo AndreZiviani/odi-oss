@@ -258,6 +258,54 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	fi
 fi
 
+# ------------------------------------------------ an Alloc-ID PLOAM has not assigned
+#
+# The kernel binds a T-CONT only to an Alloc-ID the OLT assigned by PLOAM in
+# this activation (G.984.3 5.5.4; odi_switch_cmd.c cmd 21, which drvtrace
+# answers the same way against the -g list). An OLT that sets T-CONT 0x8000
+# to 348 over OMCI before its Assign_Alloc-ID: cmd 21 is refused and no
+# upstream flow is created; the assignment then reaches the driver a quiet
+# second after the kernel list shows it. Then the OLT takes 348 back (a
+# deallocation, or the ONU-ID lost): the flow is deleted, cmd 21 is refused
+# again, and nothing re-creates the flow or keeps the old T-CONT index.
+if [ "${UPDATE:-0}" != 1 ]; then
+	cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+	gpon /tmp/gpon-late "0"
+	log=/tmp/omcid-drv-late.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-late > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	$Q cli/build/omcli --inject-file "$FIX/omci-session-isp2.txt" > /dev/null 2>&1
+	settled "$log"
+	us_create='^drv 25 68 0000000000000291.*00000001$'
+	if grep -q 'drvtrace: cmd 21 refused, alloc 348 not assigned' "$log" &&
+	   ! grep -q "$us_create" "$log"; then
+		echo "ok    an Alloc-ID set over OMCI only: cmd 21 refused, no upstream flow"
+	else
+		echo "FAIL  an Alloc-ID set over OMCI only reached the hardware"
+		grep '^drv 2[15] \|drvtrace:' "$log"
+		fail=$((fail + 1))
+	fi
+	gpon /tmp/gpon-late "1 348"
+	if need "$log" "$us_create" 30; then
+		echo "ok    the Assign_Alloc-ID that follows binds the T-CONT and creates the flow"
+	fi
+	gpon /tmp/gpon-late "0"
+	if need "$log" 'drvtrace: cmd 21 refused, alloc 348 not assigned' 30 2; then
+		map=$($Q cli/build/omcli tcont 2>&1 | grep -c '^  me [0-9a-f]* -> index')
+		creates=$(grep -c "$us_create" "$log")
+		deletes=$(grep -c '^drv 25 68 0000000000000000.*00000001$' "$log")
+		if [ "$map" = 0 ] && [ "$creates" = 1 ] && [ "$deletes" -ge 1 ]; then
+			echo "ok    a deallocated Alloc-ID: flow deleted, T-CONT unbound, nothing re-created"
+		else
+			echo "FAIL  after the deallocation: $map T-CONTs mapped, $creates creates, $deletes deletes"
+			grep '^drv 2[15] \|drvtrace:' "$log"
+			fail=$((fail + 1))
+		fi
+	fi
+	omcid_stop "$pid"
+fi
+
 # ------------------------------------------------ ANI-G GEM block length
 #
 # Class 263 attribute 3 is the GEM block length (G.988 9.2.1), the one

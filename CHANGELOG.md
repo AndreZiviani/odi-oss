@@ -5,6 +5,25 @@ listed here.
 
 ## Unreleased
 
+- gpon, omcid (safety): only the OLT, by PLOAM, can put an Alloc-ID in the
+  Alloc-ID CAM, the table that decides which upstream grants the stick
+  answers. Since #116, driver command 21 wrote any Alloc-ID it was given into
+  the CAM, and omcid sends it after every change of the PLOAM list: after a
+  loss of signal, a Deactivate_ONU-ID, an Emergency Stop or a deallocation,
+  the Alloc-IDs the OLT had set over OMCI came back within about 2 s, the
+  deallocated one included, and the stick could answer grants of another
+  subscriber's ONU. Command 21 now only looks the Alloc-ID up and refuses
+  one the OLT has not assigned in this activation; omcid leaves that T-CONT
+  unbound and binds it when the Assign_Alloc-ID arrives (any change of the
+  list now rebuilds, not only one under a bound T-CONT). Two more ways in are
+  closed: a directed PLOAM is acted on only while the stick holds an ONU-ID
+  (O4 to O6), since the "no ONU-ID" value matched messages for ONU 0, another
+  ONU; and only Assign_Alloc-ID type 1 assigns (type 2 is not acknowledged,
+  the other reserved types are ignored), as G.984.3 9.2.3.10 says. Our own
+  Assign_ONU-ID also starts from an empty CAM. Nothing changes on a line
+  whose OLT assigns its Alloc-IDs by PLOAM before using them, which all three
+  OLTs we have seen do. Refs #116.
+
 - igmpd: the group table no longer takes what a snooper must not hold. A
   report for an address outside 224.0.0.0/4, for a link-local group
   (224.0.0.x) or for any group whose 23-bit MAC is a link-local one

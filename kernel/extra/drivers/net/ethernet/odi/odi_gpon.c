@@ -973,7 +973,7 @@ int odi_gpon_alloc_row(uint16_t alloc_id)
 	int row;
 
 	spin_lock_irqsave(&odi_gpon_lock, flags);
-	row = odi_gpon_hw_alloc_id_assign(alloc_id);
+	row = odi_gpon_hw_alloc_id_find(alloc_id);
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 	return row;
 }

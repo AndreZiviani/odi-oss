@@ -245,8 +245,15 @@ static void hw_set_onu_id(void *ctx, uint8_t onu_id)
 
 	(void)ctx;
 
-	if (onu_id == ODI_GPON_ONU_ID_BROADCAST)
-		hw_release_rows();
+	/* Released on a discard (broadcast), and also before our own
+	 * Assign_ONU-ID writes its row: an activation starts from an empty
+	 * table, whatever an earlier state left recorded. A row placed
+	 * before this ONU held an ONU-ID cannot be ours (G.984.3 5.5.3: every
+	 * assignment is lost with the ONU-ID), and kept it would answer
+	 * grants for another ONU. Normally there is nothing to release here,
+	 * and the release then writes nothing.
+	 */
+	hw_release_rows();
 
 	reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
 	reg = ODI_GPON_DSF_ONU_STATE_ASSIGNED_ONU_ID_SET(reg, onu_id);
@@ -933,14 +940,27 @@ int odi_gpon_hw_gem_port_encrypted(uint16_t gem_port_id, int encrypted)
  * (existing or newly allocated), or -1 if the 32-row table (minus the one
  * reserved row) is exhausted.
  */
+/* The CAM row holding alloc_id, or -1. A lookup: it never writes the CAM.
+ * The default row (16, the ONU-ID) is found like any other.
+ */
+int odi_gpon_hw_alloc_id_find(uint16_t alloc_id)
+{
+	unsigned int row;
+
+	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++)
+		if ((odi_gpon_hw.alloc_used & (1UL << row)) && odi_gpon_hw.alloc_id_values[row] == alloc_id)
+			return (int)row;
+	return -1;
+}
+
 int odi_gpon_hw_alloc_id_assign(uint16_t alloc_id)
 {
 	unsigned int row;
 
-	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++) {
-		if ((odi_gpon_hw.alloc_used & (1UL << row)) && odi_gpon_hw.alloc_id_values[row] == alloc_id)
-			return (int)row;	/* already assigned -- no repeat CAM write */
-	}
+	int found = odi_gpon_hw_alloc_id_find(alloc_id);
+
+	if (found >= 0)
+		return found;	/* already assigned -- no repeat CAM write */
 
 	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++) {
 		if (row == ODI_GPON_HW_ALLOC_ROW_DEFAULT)

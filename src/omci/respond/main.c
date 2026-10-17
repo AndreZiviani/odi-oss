@@ -411,15 +411,16 @@ int main(int argc, char **argv)
 					last_sample_s = now_s;
 					onu_state_sample();
 					serial_refresh(1);
-					/* A T-CONT bound to a PLOAM Alloc-ID
-					 * follows the kernel list: a new
-					 * assignment or a release reprograms
-					 * the upstream graph a quiet second
-					 * later, like any Set. */
+					/* The T-CONTs follow the kernel
+					 * list: a new assignment or a release
+					 * reprograms the upstream graph a
+					 * quiet second later, like any Set.
+					 * Every change, not only one under a
+					 * bound T-CONT: a T-CONT the driver
+					 * refused because its Alloc-ID was not
+					 * assigned yet is bound by this. */
 					if (alloc_ids_refresh())
-						for (int t = 0; t < TCONT_MAX; t++)
-							if (tcont_map[t].used)
-								qos_dirty = 1;
+						qos_dirty = 1;
 					ev_tick();
 				}
 				/* Every 15 s: a quarter of the 60 s deadline

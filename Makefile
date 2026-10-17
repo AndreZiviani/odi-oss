@@ -168,6 +168,7 @@ test-host:
 	bash test/odi_gpon_aes_key_test.sh
 	bash test/odi_gpon_replay_test.sh
 	bash test/odi_reregister_test.sh
+	bash test/odi_alloc_cam_safety_test.sh
 	bash test/odi_gpon_irq_test.sh
 	bash test/odi_gpon_us_ploam_test.sh
 	bash test/odi_gpon_ds_ploam_test.sh
