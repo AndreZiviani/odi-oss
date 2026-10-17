@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Docs: ONU2-G's vendor product code 15, which omcid reports while the
+  identity switch is off, is the stock firmware's built-in default for
+  `OMCI_VENDOR_PRODUCT_CODE` (the MIB table compiled into its `configd`),
+  not a value captured from one stick: every stick of that firmware reports
+  15 unless the key was set. The comments and `docs/SETTINGS.md` said
+  "captured". No change to the image.
+
 - Tests: the `make test-rcs` goldens (`test/fixtures/rcs-trace-*.txt`) are
   regenerated: they predated the `safe-mode.sh count` and `boot-ok` and the
   `host-autoneg.sh boot` steps of rcS (#67, #76, #98) and so failed. The trace

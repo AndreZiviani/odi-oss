@@ -287,7 +287,7 @@ has:
 | software image 0 and 1, Version | `0.0.0` | `OMCI_SW_VER1`, `OMCI_SW_VER2` |
 | ONU2-G, Equipment id | the device id (`RTL9602C`) | `GPON_ONU_MODEL` |
 | ONU2-G, OMCC version | 0x80 | `OMCC_VER` |
-| ONU2-G, Vendor product code | 15, the captured stock value | `OMCI_VENDOR_PRODUCT_CODE` |
+| ONU2-G, Vendor product code | 15, the stock firmware's default for the key | `OMCI_VENDOR_PRODUCT_CODE` |
 | ONU-G, Version (hardware version) | the device id (`RTL9602C`) | `ONU_HW_VERSION` |
 
 `ONU_HW_VERSION` is odi-only (`/etc/config/odi.conf`, set with `flash set
