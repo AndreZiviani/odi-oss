@@ -220,14 +220,41 @@ static int cmd_port_auto_nego(void *buf, uint32_t len)
 	return 0;
 }
 
-/* cmd 32: port 0, the UNI (the flood mask of cmd 64 is a different
- * register).
+/* cmd 32: {port, state}, the admin state of an Ethernet UNI (ME 11
+ * AdministrativeState, omcid's apply_uni.c sends !lock). state 0 forces
+ * the port's link down, anything else releases it, as the stock OMCI
+ * layer does through the SDK's admin enable (pf_rtl96xx_SetPortState).
+ * On this SFP the UNI is the host port: a lock takes the host link down,
+ * and the stick's own management path with it, until the OLT unlocks;
+ * OMCI itself does not cross that port. The PON and CPU ports are refused:
+ * forced down, either would cut the OMCI channel, and with it the unlock.
+ * No argument (the replay harness) is an unlock of port 0, the captured
+ * bracket.
  */
+#define ODI_SW_CMD32_PON_PORT	2U
+#define ODI_SW_CMD32_CPU_PORT	3U
+
+struct odi_sw_cmd32_arg {
+	uint32_t port;
+	uint32_t state;
+};
+
 static int cmd_port_state(void *buf, uint32_t len)
 {
-	(void)buf; (void)len;
-	(void)odi_sw_port_force_get(0);
-	odi_sw_port_force_set(0);
+	struct odi_sw_cmd32_arg a = { .port = ODI_SW_HOST_PORT, .state = 1U };
+
+	if (buf && len >= sizeof(a))
+		a = *(const struct odi_sw_cmd32_arg *)buf;
+	if (a.port >= ODI_SW_PORT_COUNT || a.port == ODI_SW_CMD32_PON_PORT ||
+	    a.port == ODI_SW_CMD32_CPU_PORT) {
+		ODI_SW_WARN("cmd 32: port %u state %u refused (not a UNI port)\n",
+			    (unsigned int)a.port, (unsigned int)a.state);
+		return ODI_SW_EOPNOTSUPP;
+	}
+	odi_sw_port_admin_set(a.port, a.state != 0U);
+	if (!a.state)
+		ODI_SW_LOG("cmd 32: port %u admin locked by the OLT: link forced down\n",
+			   (unsigned int)a.port);
 	return 0;
 }
 

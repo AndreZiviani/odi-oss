@@ -323,6 +323,40 @@ void dot1rl_apply(const struct omci_class *c, uint16_t inst,
 	}
 }
 
+/* OMCI_UNI_LOCK in CFG_ODI_PATH: 0 ignores an OLT lock of the Ethernet UNI
+ * (the port stays up, the lock is still stored and read back), anything
+ * else, or absent, honours it as the stock firmware does. Read at every Set
+ * that carries AdministrativeState, so a change is live. */
+static int uni_lock_honoured(void)
+{
+	char v[4];
+
+	return !(cfg_odi_get(CFG_ODI_PATH, "OMCI_UNI_LOCK", v, sizeof v) == 1 &&
+		 v[0] == '0');
+}
+
+/* Unlock every Ethernet UNI switch port. A lock is a link forced down in
+ * the switch, and on this SFP the UNI is the host port, the only way in:
+ * the state the lock left behind must not outlive the MIB it came from.
+ * Sent on a MIB reset (uni_reset()) and when omcid starts with an empty MIB
+ * (main()); the unlock is a no-op on a port that is not locked. */
+static void uni_unlock_all(void)
+{
+	uint32_t m = all_eth_uni_mask();
+
+	if (!apply_hw)
+		return;
+	for (int port = 0; port < 32; port++) {
+		int rc;
+
+		if (!(m & (1u << port)))
+			continue;
+		rc = omci_setPortState(pair((uint32_t)port, 1));
+		out_fmt("   [hw] uni port %d unlocked (MIB reset or start) -> %d\n",
+			(long)port, (long)rc);
+	}
+}
+
 /* Class 11, a PPTP Ethernet UNI. mask is what the OLT just wrote, and only
  * those attributes are applied: an attribute never set is an absence, and
  * sending its default (a max frame size of 0) stops the port forwarding.
@@ -373,6 +407,11 @@ void apply_pptp_uni(const struct omci_class *c, uint16_t inst,
 	if (mask & (1u << (16 - 5))) {           /* AdminState */
 		uint32_t lock = row_u32(r, c, 5) == 1;
 
+		if (lock && !uni_lock_honoured()) {
+			out_fmt("   uni %04x port %d lock ignored (OMCI_UNI_LOCK=0)\n",
+				(long)inst, (long)port);
+			lock = 0;
+		}
 		rc = apply_hw
 		   ? omci_setPortState(pair((uint32_t)port, !lock)) : 0;
 		out_fmt("   [%s] uni %04x port %d state %d -> %d\n",
@@ -645,9 +684,21 @@ void delete_mbsp(uint16_t inst)
 	omci_setPortBridging(1);
 }
 
-/* The UNI state a MIB reset throws away (mib_reset_all()). */
+/* The UNI state a MIB reset throws away (mib_reset_all()): the rate
+ * limiter slots, and an OLT lock of the Ethernet UNI, since the reset sets
+ * AdministrativeState back to unlocked and the OLT then has no reason to
+ * send an unlock of its own. */
 void uni_reset(void)
 {
+	uni_unlock_all();
 	for (int i = 0; i < OMCI_DOT1RL_SLOTS; i++)
 		dot1rl[i].used = 0;
+}
+
+/* omcid starting with an empty MIB: the kernel may still hold the lock of
+ * the omcid before it. Not called on a resume, whose MIB is the old one and
+ * whose kernel state is still what it describes. */
+void uni_start(void)
+{
+	uni_unlock_all();
 }

@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- Kernel: an OLT that locks the Ethernet UNI (ME 11 administrative state,
+  for example to suspend a service) now stops it, as the stock firmware
+  does: the host port's link is forced down until the OLT unlocks it. The
+  lock used to be acknowledged and ignored. On this SFP the UNI is the host
+  port, so while locked the stick cannot be reached from the host either;
+  OMCI still reaches it over the fibre, and a lock of the PON or CPU port
+  is refused.
+  A lock no longer outlives the MIB it came from: omcid unlocks every
+  Ethernet UNI on a MIB reset and when it starts with an empty MIB (not on
+  a resume), so a stale lock cannot leave the stick unreachable until a
+  reboot. New odi.conf key `OMCI_UNI_LOCK=0` ignores OLT locks of the UNI
+  altogether (docs/SETTINGS.md); the default honours them.
+
 - Kernel: an OLT that encrypts the OMCI channel is served. The
   Encrypted_Port-ID message for the OMCI port used to be applied without its
   encryption bit, so every downstream OMCI frame would have stayed

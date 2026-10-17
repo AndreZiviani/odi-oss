@@ -81,31 +81,26 @@ void odi_sw_port_autoneg_set(uint32_t reg_a408, uint32_t reg_a412, uint32_t reg_
 	odi_reg_write(ODI_SW_PHY_ACCESS_CMD_OFF, cmd);
 }
 
-uint32_t odi_sw_port_force_get(uint32_t port)
-{
-	return odi_reg_read(ODI_SW_PORT_FORCE_SELECT(port));
-}
-
 bool odi_sw_host_pause;
 
-/* The FORCE_SELECT bits a port keeps through cmd 32: TX_PAUSE on the host
- * port while PAUSE toward the host is off, nothing otherwise.
+/* The stock admin enable of the RTL9602C SDK, as its OMCI layer reaches it
+ * for a port with no forced ability (dal_rtl9602c_port_adminEnable_set(),
+ * read, not copied): a lock forces the LINK ability to down, the value
+ * first and then its select bit; an unlock clears the select bit and the
+ * port follows its PHY or SerDes again. Field writes of bit 4 only, so
+ * the host-port TX_PAUSE force (below) and anything else forced is kept.
+ * The capture's unlock is this read and write on a word that held 0.
  */
-static uint32_t odi_sw_port_force_kept(uint32_t port)
+void odi_sw_port_admin_set(uint32_t port, int enable)
 {
-	if (port != ODI_SW_HOST_PORT || odi_sw_host_pause)
-		return 0;
-	return ODI_SW_PORT_FORCE_SELECT_TX_PAUSE_SET(0, 1);
-}
+	uint32_t reg;
 
-/* Every other FORCE_* bit clear: speed, duplex and link come from the
- * PHY or the SerDes auto-negotiation. The stock cmd 32 writes 0; on the
- * host port this keeps the TX_PAUSE force of odi_sw_host_pause_apply(),
- * which a 0 would undo at every provisioning.
- */
-void odi_sw_port_force_set(uint32_t port)
-{
-	odi_reg_write(ODI_SW_PORT_FORCE_SELECT(port), odi_sw_port_force_kept(port));
+	if (!enable) {
+		reg = odi_reg_read(ODI_SW_PORT_FORCE_ABILITY(port));
+		odi_reg_write(ODI_SW_PORT_FORCE_ABILITY(port), ODI_SW_PORT_FORCE_ABILITY_LINK_SET(reg, 0));
+	}
+	reg = odi_reg_read(ODI_SW_PORT_FORCE_SELECT(port));
+	odi_reg_write(ODI_SW_PORT_FORCE_SELECT(port), ODI_SW_PORT_FORCE_SELECT_LINK_SET(reg, enable ? 0U : 1U));
 }
 
 void odi_sw_host_pause_apply(void)
