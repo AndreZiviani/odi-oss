@@ -63,10 +63,16 @@ HOSTIFS=${HOSTIFS:-eth0.2}
 # No address at all is silence, which is the one outcome worth engineering out.
 DEF_IP=192.168.1.1
 DEF_MASK=255.255.255.0
-# The stock firmware compiles in 192.168.1.1/24 and 192.168.100.1/24 as its
-# defaults (strings in the stock /bin/mib and configd). The second one is the
-# rescue address of a safe-mode boot.
-DEF_IP2=192.168.100.1
+# The rescue address of a safe-mode boot: link-local, on its own alias (br0:3),
+# whatever LAN_ENABLE_IP2 and LAN_IP_ADDR2 say. Not the stock second default
+# 192.168.100.1: that is a management address cable and fibre modems use, and
+# a duplicate on the LAN breaks both devices. 169.254.0.0/16 is not routed or
+# handed out by any router or DHCP server, and a host with no lease picks its
+# own address in it, so a computer plugged in with no configuration reaches
+# 169.254.1.1 as it is.
+RESCUE_IP=${RESCUE_IP:-169.254.1.1}
+RESCUE_MASK=${RESCUE_MASK:-255.255.0.0}
+RESCUE_ALIAS=${RESCUE_ALIAS:-3}
 SAFE_FLAG=${SAFE_FLAG:-/var/run/safe-mode}
 
 lower() {
@@ -125,6 +131,25 @@ valid_ip() {
 	valid_quad "$1" || return 1
 	[ "$Q1" -ge 1 ] && [ "$Q1" -le 223 ] && [ "$Q1" -ne 127 ]
 }
+# valid_host IP MASK: valid_ip, and neither the network address nor the
+# broadcast address of MASK (192.168.1.0 and 192.168.1.255 on /24): the kernel
+# takes them, but nothing routes to them. MASK is valid_mask-clean. The odi-ui
+# type ipv4host applies the same rule, so the web UI and this script accept
+# and refuse the same values.
+valid_host() {
+	valid_ip "$1" || return 1
+	_a=$Q1 _b=$Q2 _c=$Q3 _d=$Q4
+	valid_quad "$2" || return 1
+	_net=1 _bc=1
+	for _p in "$_a $Q1" "$_b $Q2" "$_c $Q3" "$_d $Q4"; do
+		# shellcheck disable=SC2086 # two numbers, on purpose
+		set -- $_p
+		_host=$(( $1 & (255 - $2) ))
+		[ "$_host" -eq 0 ] || _net=0
+		[ "$_host" -eq $(( 255 - $2 )) ] || _bc=0
+	done
+	[ "$_net" = 0 ] && [ "$_bc" = 0 ]
+}
 valid_mask() {
 	valid_quad "$1" || return 1
 	[ "$Q1" = 255 ] || return 1
@@ -154,6 +179,8 @@ if [ -n "$IP" ] && ! valid_ip "$IP"; then
 	BAD="$IP is not an address the kernel accepts"
 elif [ -n "$IP" ] && [ -n "$MASK" ] && ! valid_mask "$MASK"; then
 	BAD="$MASK is not a netmask the kernel accepts"
+elif [ -n "$IP" ] && ! valid_host "$IP" "${MASK:-$DEF_MASK}"; then
+	BAD="$IP is the network or broadcast address of ${MASK:-$DEF_MASK}"
 fi
 if [ -n "$BAD" ]; then
 	echo "network: $BAD (LAN_IP_ADDR/LAN_SUBNET or $OVERRIDE), using the stock default $DEF_IP" >&2
@@ -167,8 +194,16 @@ fi
 
 if [ -z "$IP" ]; then
 	IP=$DEF_IP
-	NET_CONFIGURED=0
-	[ -n "$BAD" ] || echo "network: no address in $CONF, falling back to $IP" >&2
+	# No address stored at all is a guess nobody configured, and a stick whose
+	# partition did not read: rcS does not confirm the watchdog on it. A stored
+	# value that was refused is different: the partition read fine, the stick
+	# holds the documented fallback and is reachable on it, and not confirming
+	# would reset it every two minutes instead, which only hides the address
+	# it is trying to show. That one stays configured.
+	if [ -z "$BAD" ]; then
+		NET_CONFIGURED=0
+		echo "network: no address in $CONF, falling back to $IP" >&2
+	fi
 fi
 [ -n "$MASK" ] || MASK=$DEF_MASK
 
@@ -188,18 +223,7 @@ secondary() {   # secondary <dev>
 	ip2=$(xmlval LAN_IP_ADDR2 || true)
 	mask2=$(xmlval LAN_SUBNET2 || true)
 	[ -n "$mask2" ] || mask2=$DEF_MASK
-	# A safe-mode boot (safe-mode.sh) always carries the rescue address,
-	# whatever LAN_ENABLE_IP2 says: the stored one, else the stock default.
-	# Nothing is moved and nothing stored; it is the way back into a stick
-	# whose primary address is wrong, when the second address was never
-	# switched on.
-	if [ -f "$SAFE_FLAG" ]; then
-		en=1
-		valid_ip "$ip2" || ip2=$DEF_IP2
-		valid_mask "$mask2" || mask2=$DEF_MASK
-		echo "network: safe-mode boot, rescue address $ip2 on $1:$IP2_ALIAS"
-	fi
-	if [ "$en" = 1 ] && { ! valid_ip "$ip2" || ! valid_mask "$mask2"; }; then
+	if [ "$en" = 1 ] && { ! valid_mask "$mask2" || ! valid_host "$ip2" "$mask2"; }; then
 		echo "network: LAN_IP_ADDR2/LAN_SUBNET2 are not usable (${ip2:-empty} ${mask2}), no second address" >&2
 		en=0
 	fi
@@ -232,6 +256,20 @@ secondary() {   # secondary <dev>
 	fi
 }
 
+# A safe-mode boot (safe-mode.sh) carries the rescue address on its own alias,
+# whatever LAN_ENABLE_IP2 says and whatever the primary is. Nothing is moved
+# and nothing stored; it is the way back into a stick whose primary address is
+# wrong, when the second address was never switched on.
+rescue() {   # rescue <dev>
+	[ -f "$SAFE_FLAG" ] || return 0
+	[ "$RESCUE_IP" != "$IP" ] || return 0
+	[ "$(addr_of "$1:$RESCUE_ALIAS")" != "$RESCUE_IP $RESCUE_MASK" ] || return 0
+	[ "$DRY" = 0 ] || { echo "network: would add the rescue address $RESCUE_IP on $1:$RESCUE_ALIAS"; return 0; }
+	echo "network: safe-mode boot, rescue address $RESCUE_IP on $1:$RESCUE_ALIAS"
+	$IFCONFIG "$1:$RESCUE_ALIAS" "$RESCUE_IP" netmask "$RESCUE_MASK" up 2>/dev/null ||
+		echo "network: could not add the rescue address $RESCUE_IP" >&2
+}
+
 if [ "$MODE" = addr ]; then
 	# Whichever device carries the primary: br0 when the boot bridged,
 	# eth0 when it fell back to addressing it directly.
@@ -250,6 +288,7 @@ if [ "$MODE" = addr ]; then
 		}
 	fi
 	secondary "$dev"
+	rescue "$dev"
 	exit 0
 fi
 
@@ -461,8 +500,10 @@ if [ "$bridged" = 0 ]; then
 		exit 1
 	}
 	secondary "$IF"
+	rescue "$IF"
 else
 	secondary "$BR"
+	rescue "$BR"
 fi
 
 # Reaching here means an address applied -- either from config/lan-ip

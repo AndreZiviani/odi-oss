@@ -83,6 +83,18 @@ int odi_gpon_onu_id_get(void);
  */
 void odi_gpon_sn_get(u8 sn[8]);
 
+/* odi_gpon_alloc_row() -- odi_switch_cmd.c cmd 21: the row of the
+ * Alloc-ID CAM that holds alloc_id, which is the index of its T-CONT
+ * (PON scheduler), or -1 when no Assign_Alloc-ID of this activation placed
+ * it. A lookup only: it never writes the CAM. Only PLOAM arms a row
+ * (odi_gpon_isr.c), because the Alloc-ID decides which upstream grants
+ * this ONU answers, and only the OLT, by PLOAM, makes one this ONU's
+ * (G.984.3 5.5.4: a T-CONT is mapped to an Alloc-ID "previously assigned
+ * to the given ONU via the PLOAM messaging channel"). Process context;
+ * takes odi_gpon_lock (lock order: odi_switch_lock, then odi_gpon_lock).
+ */
+int odi_gpon_alloc_row(uint16_t alloc_id);
+
 /* ---- /proc/odi_gpon/ status ------------------------------------------
  *
  * odi_gpon.c's own read-only procfile calls these getters; every one is a

@@ -78,11 +78,11 @@ check "a leading flag is not read as the group" "$got" "EntityID: 0x03"
 # omcid is listening, so it goes through without -f.
 got=$($Q cli/build/omcli get tables --vendor 2>&1 | sed -n '1p')
 check "get tables goes through when omcid is the one listening" \
-      "$got" "TableId [0] Name: ExtendedMcastOperProf!"
+      "$got" "TableId [0] Name: OntData!"
 got=$($Q cli/build/omcli -f get tables --vendor 2>&1 | grep -c '^TableId \[')
 check "with -f it lists every registered table" "$got" "81"
 got=$($Q cli/build/omcli -f get tables --vendor 2>&1 | sed -n '2p')
-check "in the vendor's own format" "$got" "TableId [1] Name: OntData!"
+check "in the vendor's own format" "$got" "TableId [1] Name: Cardholder!"
 # And the daemon is still alive afterwards.
 got=$($Q cli/build/omcli mib get 84 --vendor 2>&1 | sed -n '5p')
 check "and the daemon still answers after it" "$got" "EntityID: 0x03"
@@ -279,7 +279,7 @@ check "ordinary services are installed before the broad multicast rule" \
       "$got" "SERVID N: Used: 1, (DIR=3, USFID=0, DSFID=0, SERVID=N, UNIMASK=1)
 SERVID N: Used: 1, (DIR=2, USFID=0, DSFID=1, SERVID=N, UNIMASK=1)"
 
-# ISP2 (FHTT OLT): bridge 0x10 with the VEIP as port 1 and, as port 2, TPType 3
+# ISP2: bridge 0x10 with the VEIP as port 1 and, as port 2, TPType 3
 # pointing at an 802.1p MAPPER (0x1002) whose eight p-bits all name GEM IW TP
 # 0x1001 -> CTP 2 / GEM 657. ISP1 points TPType 3 at the IW TP itself; both
 # shapes must yield the unicast service. The frames are those the ISP2 OLT sent.
@@ -1094,4 +1094,4 @@ got=$(grep -c '^done after 0 frames$' /tmp/omcid5.log)
 check "and says it is done" "$got" "1"
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit

@@ -238,4 +238,4 @@ rm -f /var/config/odi.conf /var/run/omcid-swimage
 
 if [ "$fail" -ne 0 ]; then for f in /tmp/omcid-swdl*.log; do keep_log "$f" "swdl-test-${f##*/}"; done; fi
 if [ "$fail" -eq 0 ]; then echo "swdl-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit
