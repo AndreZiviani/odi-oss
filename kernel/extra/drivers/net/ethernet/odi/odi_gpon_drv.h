@@ -154,6 +154,8 @@ void odi_gpon_hw_note_ploam_rx(const struct odi_gpon_ploam *msg);
 void odi_gpon_hw_ack_send(uint8_t onu_id, const struct odi_gpon_ploam *acked);
 void odi_gpon_hw_gem_port_configure(uint16_t gem_port_id, int activate);
 int odi_gpon_hw_gem_port_encrypted(uint16_t gem_port_id, int encrypted);
+int odi_gpon_hw_alloc_id_find(uint16_t alloc_id);
+void odi_gpon_hw_alloc_cam_read(int hw[32], int recorded[32]);
 int odi_gpon_hw_alloc_id_assign(uint16_t alloc_id);
 int odi_gpon_hw_alloc_id_release(uint16_t alloc_id);
 void odi_gpon_hw_eqd_rewrite(uint32_t eqd_bits);

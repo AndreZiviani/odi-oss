@@ -228,8 +228,7 @@ int main(int argc, char **argv)
 	odi_mock_reset();
 	odi_sw_host_pause = true;
 	odi_mock_mark(32);
-	(void)odi_sw_port_force_get(0);
-	odi_sw_port_force_set(0);
+	odi_sw_port_admin_set(0, 1);	/* the unlock, all the capture shows */
 	odi_mock_mark(0x80000000U | 32U);
 	odi_sw_host_pause = false;
 	dump_bracket(out_dir, "dal-cmd32.txt", 32);
@@ -237,8 +236,8 @@ int main(int argc, char **argv)
 	/* cmd 64 -- setFloodingPortMask, boot5 lines 29-34. */
 	odi_mock_reset();
 	odi_mock_mark(64);
-	(void)odi_sw_l2_flood_mask_get();
-	odi_sw_l2_flood_mask_set(7);
+	(void)odi_sw_l2_flood_mask_get(ODI_SW_FLOOD_UNKN_UCAST);
+	odi_sw_l2_flood_mask_set(ODI_SW_FLOOD_UNKN_UCAST, 7);
 	odi_mock_mark(0x80000000U | 64U);
 	dump_bracket(out_dir, "dal-cmd64.txt", 64);
 

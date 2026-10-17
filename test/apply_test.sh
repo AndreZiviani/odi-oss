@@ -137,7 +137,10 @@ NET
 chmod +x "$T/network.sh"
 export STUBLOG="$T/netcalls"
 out=$(run network); rc=$?
-sleep 2
+# The apply is detached and delayed by one second: poll (bounded, 10 s) for
+# its second call instead of sleeping a fixed time.
+_i=0
+while [ "$(wc -l < "$T/netcalls" 2>/dev/null | tr -d ' ')" -lt 2 ] && [ "$_i" -lt 100 ]; do sleep 0.1; _i=$((_i + 1)); done
 t "apply network prints the plan first" "^network.sh addr -n" "$(sed -n 1p "$T/netcalls")"
 t "then applies it, detached" "^network.sh addr$" "$(sed -n 2p "$T/netcalls")"
 t "and returns at once" "applying in one second" "$out"

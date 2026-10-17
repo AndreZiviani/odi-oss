@@ -58,12 +58,12 @@ void odi_sw_l2_aging_set(uint32_t age_spd, uint32_t linkdown_ageout);
 void odi_sw_port_autoneg_get(void);
 void odi_sw_port_autoneg_set(uint32_t reg_a408, uint32_t reg_a412, uint32_t reg_a400);
 
-/* cmd 32: PORT_FORCE_SELECT of a port. The admin state the command also
- * carries has no register write in any capture. _set clears every FORCE
- * bit but the ones the host-port PAUSE policy keeps (below).
+/* cmd 32: the admin state of a port. enable 0 forces its link down
+ * (PORT_FORCE_ABILITY LINK 0, then PORT_FORCE_SELECT LINK 1), enable 1
+ * clears that select bit. Bit 4 of each word only: the host-port PAUSE
+ * force (below) is kept.
  */
-uint32_t odi_sw_port_force_get(uint32_t port);
-void odi_sw_port_force_set(uint32_t port);
+void odi_sw_port_admin_set(uint32_t port, int enable);
 
 /* The host port: the UNI, switch port 0, the SerDes link to the host. */
 #define ODI_SW_HOST_PORT		0U
@@ -103,9 +103,15 @@ void odi_sw_host_autoneg_apply(void);
  */
 uint32_t odi_sw_host_link_up(void);
 
-/* cmd 64: FLOOD_UNKN_UCAST_PORTS, one bit per port. */
-uint32_t odi_sw_l2_flood_mask_get(void);
-void odi_sw_l2_flood_mask_set(uint32_t mask);
+/* cmd 64: the lookup-miss flood masks, one bit per port, by type (the
+ * stock omci_flood_type_t order): unknown unicast, broadcast, unknown
+ * multicast.
+ */
+#define ODI_SW_FLOOD_UNKN_UCAST	0U
+#define ODI_SW_FLOOD_BCAST	1U
+#define ODI_SW_FLOOD_UNKN_MCAST	2U
+uint32_t odi_sw_l2_flood_mask_get(uint32_t type);
+void odi_sw_l2_flood_mask_set(uint32_t type, uint32_t mask);
 
 /* --- odi_switch_qos.c ----------------------------------------------------- */
 
