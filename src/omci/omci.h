@@ -88,7 +88,8 @@ enum omci_me_class {
 	OMCI_ME_DOT1_RATE_LIMITER             = 298, /* dot1 rate limiter */
 	OMCI_ME_VEIP                          = 329, /* virtual Ethernet interface point */
 	OMCI_ME_TR069_MGMT_SERVER             = 340, /* TR-069 management server params */
-	OMCI_ME_PRIVATE_VLAN_CFG              = 10212, /* private VLAN configuration */
+	OMCI_ME_ONU_CAPABILITY                = 65529, /* CTC ONU capability */
+	OMCI_ME_PRIVATE_VLAN_CFG              = 65535, /* private VLAN configuration */
 	/* Vendor-private range (G.988 11.2.4: 65280-65535), not a G.988 class:
 	 * CTC (China Telecom) LOID authentication, as generated/omci_mib.c
 	 * names it ("LoIdAuth"). */

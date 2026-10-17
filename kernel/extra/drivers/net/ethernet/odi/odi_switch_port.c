@@ -81,31 +81,26 @@ void odi_sw_port_autoneg_set(uint32_t reg_a408, uint32_t reg_a412, uint32_t reg_
 	odi_reg_write(ODI_SW_PHY_ACCESS_CMD_OFF, cmd);
 }
 
-uint32_t odi_sw_port_force_get(uint32_t port)
-{
-	return odi_reg_read(ODI_SW_PORT_FORCE_SELECT(port));
-}
-
 bool odi_sw_host_pause;
 
-/* The FORCE_SELECT bits a port keeps through cmd 32: TX_PAUSE on the host
- * port while PAUSE toward the host is off, nothing otherwise.
+/* The stock admin enable of the RTL9602C SDK, as its OMCI layer reaches it
+ * for a port with no forced ability (dal_rtl9602c_port_adminEnable_set(),
+ * read, not copied): a lock forces the LINK ability to down, the value
+ * first and then its select bit; an unlock clears the select bit and the
+ * port follows its PHY or SerDes again. Field writes of bit 4 only, so
+ * the host-port TX_PAUSE force (below) and anything else forced is kept.
+ * The capture's unlock is this read and write on a word that held 0.
  */
-static uint32_t odi_sw_port_force_kept(uint32_t port)
+void odi_sw_port_admin_set(uint32_t port, int enable)
 {
-	if (port != ODI_SW_HOST_PORT || odi_sw_host_pause)
-		return 0;
-	return ODI_SW_PORT_FORCE_SELECT_TX_PAUSE_SET(0, 1);
-}
+	uint32_t reg;
 
-/* Every other FORCE_* bit clear: speed, duplex and link come from the
- * PHY or the SerDes auto-negotiation. The stock cmd 32 writes 0; on the
- * host port this keeps the TX_PAUSE force of odi_sw_host_pause_apply(),
- * which a 0 would undo at every provisioning.
- */
-void odi_sw_port_force_set(uint32_t port)
-{
-	odi_reg_write(ODI_SW_PORT_FORCE_SELECT(port), odi_sw_port_force_kept(port));
+	if (!enable) {
+		reg = odi_reg_read(ODI_SW_PORT_FORCE_ABILITY(port));
+		odi_reg_write(ODI_SW_PORT_FORCE_ABILITY(port), ODI_SW_PORT_FORCE_ABILITY_LINK_SET(reg, 0));
+	}
+	reg = odi_reg_read(ODI_SW_PORT_FORCE_SELECT(port));
+	odi_reg_write(ODI_SW_PORT_FORCE_SELECT(port), ODI_SW_PORT_FORCE_SELECT_LINK_SET(reg, enable ? 0U : 1U));
 }
 
 void odi_sw_host_pause_apply(void)
@@ -166,18 +161,31 @@ uint32_t odi_sw_host_link_up(void)
 	return ODI_SW_PORT_ABILITY_LINK_UP_GET(odi_reg_read(ODI_SW_PORT_ABILITY(ODI_SW_HOST_PORT)));
 }
 
-uint32_t odi_sw_l2_flood_mask_get(void)
+static uint32_t odi_sw_l2_flood_reg(uint32_t type)
 {
-	return odi_reg_read(ODI_SW_FLOOD_UNKN_UCAST_PORTS_BASE);
+	switch (type) {
+	case ODI_SW_FLOOD_BCAST:
+		return ODI_SW_FLOOD_BCAST_PORTS_BASE;
+	case ODI_SW_FLOOD_UNKN_MCAST:
+		return ODI_SW_FLOOD_UNKN_MCAST_PORTS_BASE;
+	default:
+		return ODI_SW_FLOOD_UNKN_UCAST_PORTS_BASE;
+	}
 }
 
-/* One word holds the bit of every port; the capture writes that same word
- * four times, and the host replay compares the repeat count too.
+uint32_t odi_sw_l2_flood_mask_get(uint32_t type)
+{
+	return odi_reg_read(odi_sw_l2_flood_reg(type));
+}
+
+/* One word holds the bit of every port. The stock SDK writes it once per
+ * port, each a field write of that port's bit, so the capture shows the
+ * same word four times; the host replay compares the repeat count too.
  */
-void odi_sw_l2_flood_mask_set(uint32_t mask)
+void odi_sw_l2_flood_mask_set(uint32_t type, uint32_t mask)
 {
 	unsigned int i;
 
 	for (i = 0; i < ODI_SW_PORT_COUNT; i++)
-		odi_reg_write(ODI_SW_FLOOD_UNKN_UCAST_PORTS_BASE, mask);
+		odi_reg_write(odi_sw_l2_flood_reg(type), mask);
 }

@@ -4,7 +4,7 @@
 # check and the md5 check of both members.
 #
 # fwu.sh is flashed from whichever stock firmware the stick came with, and
-# those differ: the V1.0-220923 image has `cut`, the HSGQ M110 has none, and a
+# those differ: the V1.0-220923 image has `cut`, another stock image has none, and a
 # user had to patch the script to get a first flash done. test/fwu_guard_test.sh
 # runs the script with the host's full PATH, and the allowlist in
 # fwu_stock_commands_test.sh describes ONE stock image, so neither could see

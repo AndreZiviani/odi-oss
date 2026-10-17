@@ -70,7 +70,17 @@ struct odi_board_laser {
 	int laser_on;
 	int ldd_id;
 	int unverified;
+	int emergency_stop;	/* 1 while odi_board_tx_disable(1) holds the line high */
 };
 void odi_board_laser_get(struct odi_board_laser *out);
+
+/* Emergency Stop (O7): disable 1 drives GPIO 13, the module's TX-disable
+ * input, high (laser off); 0 drives it low again. Only once the laser verb
+ * turned the laser on: otherwise the line is left alone, an input, the
+ * laser off, and 0 is returned, so leaving O7 can never light a laser the
+ * verb refused. The GPON leaf calls it, with odi_gpon_lock held, from the
+ * state it writes (odi_gpon_hw_set_tx_disable()). 0 or the SoC write error.
+ */
+int odi_board_tx_disable(int disable);
 
 #endif /* ODI_BOARD_H */

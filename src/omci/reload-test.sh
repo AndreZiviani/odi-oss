@@ -51,10 +51,10 @@ clean_state() {
 
 # The whole MIB, without what is live or follows the stored VLAN keys and so
 # differs between two dumps by design: SysUpTime, and the private VLAN
-# configuration (class 10212), which shows the stored manual VLAN.
+# configuration (class 65535), which shows the stored manual VLAN.
 mibdump() {
 	$Q cli/build/omcli mib get all 2>&1 | grep -v '^    SysUpTime ' |
-		awk '/^10212 /{skip=1; next} /^[0-9]+ /{skip=0} !skip'
+		awk '/^65535 /{skip=1; next} /^[0-9]+ /{skip=0} !skip'
 }
 
 ok()  { echo "ok    $*"; }
@@ -513,4 +513,4 @@ stop_omcid
 
 echo
 [ "$fail" -eq 0 ] && echo "reload-test.sh: all checks passed" || echo "reload-test.sh: $fail check(s) failed"
-exit "$fail"
+suite_exit

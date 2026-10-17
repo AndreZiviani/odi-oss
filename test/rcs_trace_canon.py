@@ -12,7 +12,8 @@ give the same trace on every run.
 Two kinds of action are kept:
   exec  <path> <argv>        every successful execve, argv as strace prints it
   write <path> <bytes>       every write to a file under /proc
-The execve of chroot and of qemu itself (the harness) are dropped.
+The execve of chroot and of qemu itself (the harness) are dropped, and a
+`.new.<pid>` temporary name is written `.new.PID`.
 """
 import os
 import re
@@ -47,7 +48,12 @@ for name in os.listdir(tdir):
                     root_pid = pid
                 if path.endswith('/chroot') or path == '/qemu-mips-static':
                     continue
-                ev.append(('exec', '%s %s' % (path, m.group(2))))
+                # `mv name.new.<pid> name` (a file written beside its target and
+                # renamed over it, safe-mode.sh and host-autoneg.sh): the pid
+                # is the shell's and differs on every run, so it is not part
+                # of the trace.
+                argv = re.sub(r'\.new\.\d+"', '.new.PID"', m.group(2))
+                ev.append(('exec', '%s %s' % (path, argv)))
                 continue
             m = WRITE.match(line)
             if m:

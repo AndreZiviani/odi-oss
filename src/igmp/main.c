@@ -92,7 +92,8 @@ static void describe(const struct igmp_rx *rx, enum igmp_parse_rc rc)
 /* Apply what changed. The count can exceed MAX_CHANGES -- igmp_db_rx returns
  * how many there were, not how many fitted -- and anything past the array was
  * never written, so it must not be read. Saying so beats applying garbage. */
-static void apply(const struct igmp_change *ch, int n)
+static void apply(const struct igmp_db *db, const struct igmp_change *ch,
+		  int n)
 {
 	if (n > MAX_CHANGES) {
 		out_fmt("  %d changes, only %d recorded\n", n, MAX_CHANGES);
@@ -109,12 +110,21 @@ static void apply(const struct igmp_change *ch, int n)
 			 * port on a guess. */
 			out_fmt("  router ports -> 0x%x\n", ch[i].ports);
 			break;
-		case IGMP_CHANGE_DEL:
-			igmp_hw_group_del(ch[i].vid, ch[i].group);
+		default: {
+			/* One hardware row per MAC, not per group: groups that
+			 * alias, or the same group on two VLANs, share it. The
+			 * row carries the union of their members, and goes only
+			 * when nothing is left on it. The db is already in its
+			 * final state for this batch, so the union is the same
+			 * whichever change of the batch is applied first. */
+			uint32_t u = igmp_db_mac_ports(db, ch[i].group);
+
+			if (u)
+				igmp_hw_group_set(ch[i].vid, ch[i].group, u);
+			else
+				igmp_hw_group_del(ch[i].vid, ch[i].group);
 			break;
-		default:
-			igmp_hw_group_set(ch[i].vid, ch[i].group, ch[i].ports);
-			break;
+		}
 		}
 	}
 }
@@ -288,7 +298,7 @@ int main(int argc, char **argv)
 		 * before it. */
 		if (now != last_tick) {
 			last_tick = now;
-			apply(ch, igmp_db_tick(&db, now, ch, MAX_CHANGES));
+			apply(&db, ch, igmp_db_tick(&db, now, ch, MAX_CHANGES));
 		}
 		if (rc <= 0 || len == 0) {    /* the receive timeout, mostly */
 			out_flush();
@@ -300,8 +310,8 @@ int main(int argc, char **argv)
 
 			describe(&rx, prc);
 			if (prc == IGMP_OK)
-				apply(ch, igmp_db_rx(&db, &rx, now, ch,
-						     MAX_CHANGES));
+				apply(&db, ch, igmp_db_rx(&db, &rx, now, ch,
+							  MAX_CHANGES));
 		}
 		out_flush();
 		if (want && ++seen >= want)

@@ -25,6 +25,7 @@
 
 #ifdef __KERNEL__
 #include <linux/kernel.h>
+#include <linux/math64.h>
 #include <linux/string.h>
 #else
 #include <stdio.h>
@@ -181,6 +182,86 @@ static uint32_t ctr_read(const struct ctr_reg *r)
 void odi_gpon_ctr_reset(struct odi_gpon_ctr *c)
 {
 	memset(c, 0, sizeof(*c));
+	c->signal_exp[ODI_GPON_SIGNAL_SF] = ODI_GPON_SIGNAL_SF_DEFAULT;
+	c->signal_exp[ODI_GPON_SIGNAL_SD] = ODI_GPON_SIGNAL_SD_DEFAULT;
+}
+
+/* The downstream line rate, bits per millisecond (2.48832 Gbit/s). */
+#define ODI_GPON_DS_BITS_PER_MS	2488320ULL
+
+static const char *const ctr_signal_name[ODI_GPON_SIGNALS] = { "sf", "sd" };
+
+/* bits / 10^exp. A 64-bit divide is a library call on a 32-bit kernel:
+ * div_u64() there, by ten at a time.
+ */
+static uint64_t ctr_div_pow10(uint64_t bits, unsigned int exp)
+{
+	while (exp--)
+#ifdef __KERNEL__
+		bits = div_u64(bits, 10U);
+#else
+		bits /= 10U;
+#endif
+	return bits;
+}
+
+/* One whole window: the BIP bit errors against the bits received in it. */
+static void ctr_signal_evaluate(struct odi_gpon_ctr *c)
+{
+	uint64_t bits = ODI_GPON_DS_BITS_PER_MS * c->signal_ms;
+	unsigned int k;
+
+	for (k = 0; k < ODI_GPON_SIGNALS; k++) {
+		/* BER >= 10^-x: errors >= bits / 10^x, at least one error. */
+		uint64_t set = ctr_div_pow10(bits, c->signal_exp[k]);
+		uint64_t clear = ctr_div_pow10(bits, c->signal_exp[k] + 1U);
+
+		if (!set)
+			set = 1U;
+		if (c->signal_bits >= set) {
+			if (!c->signal_on[k])
+				c->signal_events[k]++;
+			c->signal_on[k] = 1U;
+		} else if (c->signal_bits < clear || !clear) {
+			c->signal_on[k] = 0U;
+		}
+	}
+	c->signal_last_bits = c->signal_bits;
+	c->signal_last_ms = c->signal_ms;
+	c->signal_bits = 0U;
+	c->signal_ms = 0U;
+}
+
+static void ctr_signal_account(struct odi_gpon_ctr *c, unsigned int state, uint32_t dt)
+{
+	unsigned int k;
+
+	if (state != ODI_GPON_STATE_O5 || c->last_state != ODI_GPON_STATE_O5) {
+		/* Not measured outside O5: no alarm, and the window restarts
+		 * at the next O5. Errors counted on the way in are dropped.
+		 */
+		for (k = 0; k < ODI_GPON_SIGNALS; k++)
+			c->signal_on[k] = 0U;
+		c->signal_bits = 0U;
+		c->signal_ms = 0U;
+		return;
+	}
+	c->signal_ms += dt;
+	if (c->signal_ms >= ODI_GPON_SIGNAL_WINDOW_MS)
+		ctr_signal_evaluate(c);
+}
+
+int odi_gpon_ctr_signal_threshold_set(struct odi_gpon_ctr *c, unsigned int signal,
+				      unsigned int exp)
+{
+	if (signal == ODI_GPON_SIGNAL_SF && (exp < 3U || exp > 8U))
+		return -1;
+	if (signal == ODI_GPON_SIGNAL_SD && (exp < 4U || exp > 10U))
+		return -1;
+	if (signal >= ODI_GPON_SIGNALS)
+		return -1;
+	c->signal_exp[signal] = (uint8_t)exp;
+	return 0;
 }
 
 void odi_gpon_ctr_sample(struct odi_gpon_ctr *c, uint32_t now_ms, unsigned int state)
@@ -206,12 +287,16 @@ void odi_gpon_ctr_sample(struct odi_gpon_ctr *c, uint32_t now_ms, unsigned int s
 				c->saturated[f->id]++;
 			if (f->id == ODI_GPON_CTR_DS_BIP_ERR_BLOCKS && state == ODI_GPON_STATE_O5)
 				c->rei_pending += n;
+			if (f->id == ODI_GPON_CTR_DS_BIP_ERR_BITS && state == ODI_GPON_STATE_O5)
+				c->signal_bits += n;
 		}
 	}
 
 	odi_gpon_ctr_note_alarms(c, alarms, now_ms);
 	if (c->last_state < ODI_GPON_CTR_STATES)
 		c->state_ms[c->last_state] += dt;
+	if (started)
+		ctr_signal_account(c, state, dt);
 
 	c->superframe = ODI_GPON_DSF_SUPERFRAME_COUNT_GET(odi_reg_read(ODI_GPON_DSF_SUPERFRAME_OFF));
 	c->us_state = odi_reg_read(ODI_GPON_USF_STATE_OFF);
@@ -279,6 +364,19 @@ void odi_gpon_ctr_show_status(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_fn 
 		snprintf(line, sizeof(line), "ds_superframe %u\n", c->superframe);
 		put(ctx, line);
 	}
+	for (k = 0; k < ODI_GPON_SIGNALS; k++) {
+		snprintf(line, sizeof(line), "signal %s %u threshold %u\n", ctr_signal_name[k],
+			 (unsigned int)c->signal_on[k], (unsigned int)c->signal_exp[k]);
+		put(ctx, line);
+	}
+	for (k = 0; k < ODI_GPON_SIGNALS; k++) {
+		snprintf(line, sizeof(line), "signal_events %s %u\n", ctr_signal_name[k],
+			 c->signal_events[k]);
+		put(ctx, line);
+	}
+	snprintf(line, sizeof(line), "signal_window ms %u bip_err_bits %llu\n",
+		 c->signal_last_ms, (unsigned long long)c->signal_last_bits);
+	put(ctx, line);
 	for (k = 0; k < ODI_GPON_CTR_ALARMS; k++) {
 		snprintf(line, sizeof(line), "alarm_events %s %u\n", ctr_alarm_name[k],
 			 c->alarm_events[k]);

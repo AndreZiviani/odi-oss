@@ -36,6 +36,19 @@ static unsigned int count_writes(uint32_t addr)
 	return n;
 }
 
+/* The value of the n-th write to addr since the log was cleared, or
+ * 0xffffffff when there is none.
+ */
+static uint32_t write_value(uint32_t addr, unsigned int nth)
+{
+	unsigned int i;
+
+	for (i = 0; i < odi_mock.log_n; i++)
+		if (odi_mock.log[i].kind == 'W' && odi_mock.log[i].addr == addr && nth-- == 0)
+			return odi_mock.log[i].val;
+	return 0xffffffffU;
+}
+
 /* The ISP1 data GEM ports, slots 1-5: FLAGS 0x02 (Ethernet) on ours before
  * the PLOAM, 0x12 (plus AES) on the stock image after it.
  */
@@ -125,9 +138,16 @@ static void test_flow_recreated(void)
 	odi_switch_ds_slot_reset();
 	odi_sw_gpon_usflow_set(4, 0x79a, 2);
 	CHECK(odi_switch_gpon_encrypt_port(0x79a, 1) == 0, "the PLOAM finds the slot");
+	odi_mock.log_n = 0;
 	odi_sw_gpon_usflow_set(4, 0x79a, 2);
 	CHECK(odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(4)) == 0x00000012U,
 	      "the flow written again keeps AES on");
+	/* One write, the bit already in it: written bare and set after, the
+	 * row would decrypt nothing in between, at every QoS rebuild.
+	 */
+	CHECK(count_writes(ODI_SW_DSF_GEM_FLOW_TYPE(4)) == 1, "FLAGS written once");
+	CHECK(write_value(ODI_SW_DSF_GEM_FLOW_TYPE(4), 0) == 0x00000012U,
+	      "and never 0x02 on the way");
 }
 
 /* The flags belong to one activation: forgotten with the ONU-ID. */
