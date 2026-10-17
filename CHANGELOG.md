@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- Network: `network.sh` checks the management address and netmask it reads
+  (`LAN_IP_ADDR`, `LAN_SUBNET`, `/etc/config/lan-ip`, and the second pair).
+  One the kernel refuses (0.0.0.0, loopback, multicast, broadcast, a netmask
+  with a gap, a leading zero) used to leave the stick with no address at every
+  boot, in both slots, with nothing on the network able to repair it; the boot
+  now logs it and uses the stock default 192.168.1.1/24 as when the key is
+  absent, and `apply.sh network` changes nothing and fails. A safe-mode boot
+  adds the rescue address (`LAN_IP_ADDR2`, else the stock 192.168.100.1/24) on
+  `br0:2` even when `LAN_ENABLE_IP2` is 0; SETTINGS.md said a wrong address was
+  already recoverable through the second address, which is off on both sticks
+  the firmware has run on. The web UI refuses the same values (odi-ui types
+  `ipv4host` and `netmask`). `apply.sh omci` counts the acknowledgement
+  seconds against its wait, so it cannot outlast the 25 s the web UI gives it.
 - nv: `setenv` and `commit` take a lock (flock(2) on the environment partition
   device, 10 s bounded, held until the process exits), so two writers (an ssh
   session and the web UI, say) no longer erase and write the same copy at
