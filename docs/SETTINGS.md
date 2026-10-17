@@ -64,7 +64,7 @@ process. omcid rereads the store and compares it with what it is running:
 
 The script reports which of the three happened and, for a re-registration,
 how long until the ONU was back in O5 with services; it waits 20 s by
-default (`APPLY_WAIT`), inside the 25 s the web UI gives it, and a
+default (`APPLY_WAIT`, counted from the signal), inside the 25 s the web UI gives it, and a
 re-registration still running then is reported as running, not as failed.
 Exit 1: no omcid running, no answer to the signal, or a `failed`, `timeout`,
 `no_services` or `sn_not_applied` result (`docs/TOOLS.md`, "omcid"). Every
@@ -186,8 +186,18 @@ Details that bite:
 
 - **`/etc/config/lan-ip`, when it exists, overrides `LAN_IP_ADDR`**, and the
   netmask then falls back to 255.255.255.0 whatever `LAN_SUBNET` says. With
-  neither, the address is 192.168.1.1/24. The UI says the key is ignored
-  while the file exists. `apply.sh network` follows the same precedence.
+  neither, the address is 192.168.1.1/24 (the stock default). The UI says the
+  key is ignored while the file exists. `apply.sh network` follows the same
+  precedence. An address or netmask the kernel would refuse (0.0.0.0, loopback,
+  multicast, a mask with a gap, a leading zero, which `ifconfig` reads as octal)
+  is treated as no address at boot: `network.sh` logs it and uses 192.168.1.1/24,
+  and `apply.sh network` changes nothing and fails. So is the network or
+  broadcast address of the mask (192.168.1.0 and 192.168.1.255 on a /24),
+  which the kernel accepts and nothing can reach. The web UI refuses the same
+  values (odi-ui types `ipv4host` and `netmask`). A stick on this fallback
+  confirms the watchdog like any other, so it stays up on 192.168.1.1 for you
+  to correct the address (a stick with no address stored at all does not, and
+  resets every two minutes).
 - **Changing `LAN_IP_ADDR` moves every way in, at once.** The UI asks first,
   then links to the new address. Turning on the second address beforehand
   gives a way back that does not move.
@@ -539,10 +549,19 @@ alternative is a stick nobody can log into or reach reliably; but a stick
 on a shared host port is exposed to whoever can reach it meanwhile. It lasts
 until the next reboot, which tries the partition again.
 
-The management address is not reset: a wrong address is already
-recoverable (the second address, `LAN_ENABLE_IP2`, and `/etc/config/lan-ip`),
-and moving it on a pattern of power cuts would move the address of a stick
-whose only fault was the power. The U-Boot environment is never written:
+The management address is not moved: moving it on a pattern of power cuts
+would move the address of a stick whose only fault was the power. A
+safe-mode boot adds one, though: the rescue address **169.254.1.1/16**, on
+`br0:3`, whatever `LAN_ENABLE_IP2` and `LAN_IP_ADDR2` say and whatever the
+primary address is. It is link-local on purpose. The stock second address,
+192.168.100.1, is the management address of many cable and fibre modems, and
+a second device with the same address on the LAN breaks both; 169.254.0.0/16
+is not used by routers or DHCP servers, and a computer with no lease picks its
+own address in it, so one plugged straight into the stick reaches 169.254.1.1
+with no setup (a computer with a lease needs a 169.254.x.y/16 address added by
+hand). It is not added when the primary address is already 169.254.1.1. The
+other ways in are the second address when it was on (its own alias,
+`br0:2`), and `/etc/config/lan-ip` from a shell. The U-Boot environment is never written:
 U-Boot here has no boot counter, and an environment written on every boot
 wears the flash and risks the boot itself.
 

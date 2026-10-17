@@ -5,6 +5,26 @@ listed here.
 
 ## Unreleased
 
+- Network: `network.sh` checks the management address and netmask it reads
+  (`LAN_IP_ADDR`, `LAN_SUBNET`, `/etc/config/lan-ip`, and the second pair).
+  One the kernel refuses (0.0.0.0, loopback, multicast, broadcast, a netmask
+  with a gap, a leading zero) used to leave the stick with no address at every
+  boot, in both slots, with nothing on the network able to repair it; the boot
+  now logs it and uses the stock default 192.168.1.1/24 as when the key is
+  absent, and `apply.sh network` changes nothing and fails. The network and
+  broadcast address of the mask (192.168.1.0 and 192.168.1.255 on a /24) are
+  refused the same way, for both addresses; the web UI refuses the same values.
+  A stick on that fallback now confirms the watchdog, so it stays up on
+  192.168.1.1 for the address to be corrected; it used to be reset about every
+  two minutes. A safe-mode boot adds the rescue address 169.254.1.1/16 on
+  `br0:3`, whatever `LAN_ENABLE_IP2` says: link-local, because the stock second
+  address 192.168.100.1 is the management address of many cable and fibre
+  modems and a duplicate on the LAN breaks both. SETTINGS.md said a wrong
+  address was already recoverable through the second address, which is off on
+  both sticks the firmware has run on. `apply.sh omci` counts the
+  acknowledgement seconds against its wait, so it cannot outlast the 25 s the
+  web UI gives it.
+
 - Comments and this changelog no longer cite files of a private workspace.
 
 - omcid: alarms and attribute value changes. omcid never sent either; the
