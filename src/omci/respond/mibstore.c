@@ -130,6 +130,9 @@ void aut_rebuild(void)
 
 		if (!private_me && private_class(cls))
 			continue;
+		if (cls == OMCI_ME_ONU_CAPABILITY &&
+		    !(custom_me & CUSTOM_ME_ONU_CAPABILITY))
+			continue;
 		if (!veip_on && ((slot_card_class(cls) && inst == SLOT6_CARD) ||
 				 (slot_port_class(cls) && inst == SLOT6_PORT)))
 			continue;
@@ -164,7 +167,7 @@ const struct omci_class *find_class(uint16_t id)
 /* Power-on values the vendor stack initialises these entities to, which an
  * OLT that never writes them leaves in place: the TR-069 management server
  * and the virtual Ethernet interface point start locked (1), and the
- * interface point is then disabled (1). Class 10212 (private VLAN
+ * interface point is then disabled (1). Class 65535 (private VLAN
  * configuration) starts as auto detection with the unset sentinels. */
 #define ADMIN_LOCKED     1
 #define OPER_DISABLED    1
@@ -737,18 +740,24 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 	} else if (c->classId == OMCI_ME_TR069_MGMT_SERVER) { /* TR-069 server */
 		if (k == 1) out[0] = ADMIN_LOCKED;
 	} else if (c->classId == OMCI_ME_PRIVATE_VLAN_CFG) { /* private VLAN config */
-		/* The manual VLAN of the configuration store, which is what the
-		 * vendor stack reports: type, mode, VID and priority; the
-		 * unset sentinels when no VID is stored. */
+		/* What the stock firmware stores here is what /etc/runomci.sh
+		 * passes omci_app (-iot_vt/-iot_vm/-iot_vid/-iot_pri), not the
+		 * keys as stored: type 1 and mode 1 with a VID and a priority
+		 * give all four; type 1 with another mode gives that mode and
+		 * the unset sentinels 65535 / 255; any other type is reported
+		 * as type 0, the mode, and the sentinels. */
+		int tag;
+
 		if (!vlanCfg.loaded)
 			cfg_load_vlan();
-		if (k == 1) out[0] = (uint8_t)vlanCfg.type;
+		tag = vlanCfg.type == 1 && vlanCfg.mode == 1 && vlanCfg.vid >= 0;
+		if (k == 1) out[0] = vlanCfg.type == 1 ? 1 : 0;
 		else if (k == 2) out[0] = (uint8_t)vlanCfg.mode;
 		else if (k == 3 && n >= 2) {
-			uint16_t v = vlanCfg.vid < 0 ? 0xffff : (uint16_t)vlanCfg.vid;
+			uint16_t v = tag ? (uint16_t)vlanCfg.vid : 0xffff;
 
 			out[0] = (uint8_t)(v >> 8); out[1] = (uint8_t)v;
-		} else if (k == 4) out[0] = (uint8_t)vlanCfg.pri;
+		} else if (k == 4) out[0] = tag ? (uint8_t)vlanCfg.pri : 0xff;
 	} else if (c->classId == OMCI_ME_PPTP_ETH_UNI) { /* PPTP Ethernet UNI */
 		/* Sensed type is the slot card type, which the ONU never
 		 * changes; the configuration indication follows the link:

@@ -334,18 +334,18 @@ const struct omci_instance omci_autonomous[] = {
 	{   370, 0x0101 },
 	/* HW ME373 */
 	{   373, 0x0000 },
-	/* OnuCapability */
-	{  9368, 0x0000 },
-	/* PrivateTqCfg */
-	{  9572, 0x0000 },
+	/* ZteSntp */
+	{ 65294, 0x0000 },
 	/* OLTLocationConfigData */
-	{  9796, 0x0000 },
-	/* PrivateVlanCfg */
-	{ 10212, 0x0000 },
+	{ 65527, 0x0000 },
+	/* OnuCapability */
+	{ 65529, 0x0000 },
 	/* LoIdAuth */
 	{ 65530, 0x0000 },
-	/* ZteSntp */
-	{ 13248, 0x0000 },
+	/* PrivateTqCfg */
+	{ 65534, 0x0000 },
+	/* PrivateVlanCfg */
+	{ 65535, 0x0000 },
 };
 
 const unsigned omci_autonomous_count = 301;
