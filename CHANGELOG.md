@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Tests: two suites that no `make test` leg and no CI job ran are wired in.
+  `make test-omci-respond` runs omcid's class 171 decode and OLT-tag rule
+  test (`src/omci/test/extvlan_test.c`), `make test-igmp` runs igmpd's frame,
+  group and entry tests (`src/igmp/test`); both are legs of `make test` and
+  jobs of ci.yml (`mips-units`, which the `full` job now needs).
+  `test/fwu_stock_flash_test.sh` exits 77 instead of 0 when it skips, so a
+  skipped first-flash check no longer reads as a pass. No change to the
+  image.
+
 - Docs: the README rows for the OMCI values read from the stick and the VEIP
   and vendor-private keys say what was checked on sticks: the values on two
   sticks on two OLTs against the stock dumps, the new keys only at their

@@ -776,6 +776,13 @@ flash for real), `image_tar_format_test.sh` (can that busybox's `tar` read
 our tarball), `rootfs_chroot_test.sh` (the boot scripts in a qemu-user
 chroot of the staged rootfs), `uimage_header_test.sh` (the header U-Boot
 reads). Run them when you touch `fwu.sh`, the tarball, or rcS.
+`fwu_stock_flash_test.sh` exits 77, not 0, when it skips (no stock rootfs, no
+docker, no tarball): a skip is not a pass, and a wrapper that wants to
+tolerate it tests for 77.
+
+The unit tests of omcid's class 171 decode (`src/omci/respond`, `make
+test-omci-respond`) and of igmpd (`src/igmp/test`, `make test-igmp`) are legs
+of `make test` and a CI job (`mips-units`).
 
 ### Pure refactors: prove the machine code did not change
 
