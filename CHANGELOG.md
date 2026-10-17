@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Tests: the `make test-rcs` goldens (`test/fixtures/rcs-trace-*.txt`) are
+  regenerated: they predated the `safe-mode.sh count` and `boot-ok` and the
+  `host-autoneg.sh boot` steps of rcS (#67, #76, #98) and so failed. The trace
+  canonicaliser writes `name.new.<pid>` temporaries as `.new.PID`, which would
+  otherwise have changed the golden on every run. `make test-rcs` now also
+  runs in the CI `test-qemu` job, which has the busybox it needs. No change
+  to the image.
+
 - Tests: the fixed sleeps that waited for an event in `test/host_autoneg_test.sh`
   (the 0.3 s before reading what the stub `setsid` recorded),
   `test/apply_test.sh` (2 s for the delayed network apply) and
