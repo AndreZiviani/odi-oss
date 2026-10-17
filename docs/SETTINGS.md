@@ -232,7 +232,7 @@ upstream, the tag is removed downstream and from multicast, and the router
 sees untagged frames. Frames the router already tags with that VID still
 pass upstream unchanged when the OLT's VLAN filter (class 84) on the GEM side
 lists the VID, since the table leaves tagged frames on its default rule
-(G.988); the manual tag, by contrast, takes the place of that entry. A Huawei OLT's "untagged frames: add VLAN 100 pri 0"
+(G.988); the manual tag, by contrast, takes the place of that entry. An OLT's "untagged frames: add VLAN 100 pri 0"
 is this shape (`omcli mib 171` prints the rule). omcid logs
 `untagged frames get VLAN <vid> pri <p> from the OLT` when it applies one.
 Any other shape (a rule for tagged frames, VID or priority copied from a tag,

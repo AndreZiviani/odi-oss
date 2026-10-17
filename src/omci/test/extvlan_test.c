@@ -300,7 +300,7 @@ int main(void)
 	}
 
 	/* The one shape the datapath applies (evtocd_olt_tag). The tables are
-	 * what the OLTs provision: issue #29's Huawei, and claro's. */
+	 * what the OLTs provision: issue #29's OLT, and ISP1's. */
 	{
 		uint8_t tbl[3 * EVTOCD_ENTRY_LEN];
 		int vid = 0, pri = 0;

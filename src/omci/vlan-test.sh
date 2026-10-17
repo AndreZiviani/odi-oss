@@ -94,7 +94,7 @@ check "ISP2, transparent: forward-all, every tag passes both ways" "$got" \
 # With VLAN_CFG_TYPE other than 1 the stock firmware applies the OLT's own
 # extended-VLAN rule. The ISP2-shaped session (one unicast GEM behind a VEIP,
 # a multicast GEM, no class 84) with its class 171 frames replaced by what a
-# Huawei OLT provisions: instance 1 on the Ethernet UNI (association type 2,
+# an OLT provisions: instance 1 on the Ethernet UNI (association type 2,
 # point 0x0101) whose table adds a VLAN to untagged frames and drops the
 # single- and double-tagged default, and instance 2 on the multicast side
 # (type 0x0a, point 0x0601) with the default drops only.

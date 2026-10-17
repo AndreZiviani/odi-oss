@@ -328,13 +328,13 @@ const struct omci_instance omci_autonomous[] = {
 	{   329, 0x0601 },
 	/* TR069ManageServer */
 	{   340, 0x0601 },
-	/* HW ME350 */
+	/* Me350 */
 	{   350, 0x0000 },
-	/* HW ME370 */
+	/* Me370 */
 	{   370, 0x0101 },
-	/* HW ME373 */
+	/* Me373 */
 	{   373, 0x0000 },
-	/* ZteSntp */
+	/* PrivateSntp */
 	{ 65294, 0x0000 },
 	/* OLTLocationConfigData */
 	{ 65527, 0x0000 },

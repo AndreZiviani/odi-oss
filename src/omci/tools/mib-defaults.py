@@ -2,7 +2,7 @@
 """Default attribute values for the entities the ONU itself creates, from a
 live `omcicli mib get all` of the vendor stack on the same device.
 
-    mib-defaults.py <dump> [--c DIR]
+    mib-defaults.py <dump> [--c DIR] [--stock-names FILE]
 
 Until this existed omcid answered ZEROS for every attribute of its 301
 autonomous instances that the OLT had not written -- so an ONT2-G with 0
@@ -27,6 +27,8 @@ provisioning, only capability values. The dump itself is private."""
 import json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import mibnames
 GEN = os.path.join(HERE, '..', 'generated')
 # 7: software image, every attribute is answered from the image flags.
 SKIP_CLASSES = {2, 7, 131, 148, 157, 340, 134, 65530}
@@ -128,6 +130,9 @@ def main():
     model = json.load(open(os.path.join(GEN, 'omci_mib.json')))
     byname = {e['table']['name'].lower(): e for e in model if e['table']['classId'] is not None}
     auto = autonomous(); tables = parse(sys.argv[1])
+    # Dump labels use the stock plugin names; see mibnames.py.
+    aliases = mibnames.load_aliases(sys.argv)
+    tables = {mibnames.canonical(k, aliases): v for k, v in tables.items()}
     out = []; skipped_tables = []
     for tname, insts in tables.items():
         e = byname.get(tname.lower())

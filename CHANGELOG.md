@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- No OLT or ONT make is named in the tree any more: names are generic and
+  describe the function. The kernel's PLOAM type 0x81 constant is
+  `ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS` (a vendor-specific variant of
+  Disable_Serial_Number, handled as before). In the generated OMCI model the
+  six entities whose stock plugins carry a make in their names are now
+  `PrivateQueueMap` (243), `Me350`, `Me370`, `Me373`, `PrivateMcastTag`
+  (65282) and `PrivateSntp` (65294); the generator applies the renaming by
+  class id (`src/omci/tools/mibnames.py`) and the tables are otherwise
+  byte-for-byte what they were (names only: `omcicli get tables` and the
+  autonomous list show the new names). The stock names are written only to a
+  local sidecar (`mib-tables.py --stock-names`) that `mib-instances.py` and
+  `mib-defaults.py` read to match a stock dump. Comments, docs and test notes
+  that named a make say "an OLT" or "another stock image". Refs #114
+
 - OMCI: the managed entity model had wrong class ids for nine entities, all
   of them above 32767: the generator (`src/omci/tools/mib-tables.py`) did not
   follow how the compiler loads such a constant, so it recorded an unrelated
