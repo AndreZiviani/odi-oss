@@ -127,6 +127,7 @@ test-host:
 	$(MAKE) -C src/nv test
 	bash test/fwu_guard_test.sh
 	bash test/fwu_minimal_path_test.sh
+	bash test/fwu_write_order_test.sh
 	bash test/fwu_starter_test.sh
 	bash test/network_addr_test.sh
 	bash test/apply_test.sh
