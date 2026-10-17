@@ -5,6 +5,28 @@ listed here.
 
 ## Unreleased
 
+- omcid: alarms and attribute value changes. omcid never sent either; the
+  stock stack sends both, and an OLT shows the UNI state and the optical
+  alarms from them. Once a second, in O5 only: ANI-G low and high received
+  and transmit power (alarms 0, 1, 4, 5) from the DDM against the ANI-G
+  thresholds or the ONU defaults, as the stock threshold monitor does, with
+  a 0.5 dB band before an alarm clears; ANI-G signal fail and degrade (2, 3)
+  from the kernel's `signal` lines in `/proc/odi_gpon/status` (#130); PPTP
+  Ethernet UNI LAN-LOS from the host link, whose operational state now
+  follows the link too. Notifications carry the alarm sequence number (1 to
+  255, reset by Get All Alarms and MIB reset); suppressed, as stock, while
+  the ONU-G or the circuit pack is locked, the entity's ARC is on, or the
+  port is locked. ARC ends after its interval (255: never) with an AVC.
+  Get All Alarms and Get All Alarms Next answer from the same alarm table.
+  AVCs: an attribute flagged for one, of an entity the ONU creates, whose
+  value changes without the OLT writing it (the port's and the VEIP's and
+  circuit pack's operational state, the software image flags, ...); not the
+  per-attribute flood the stock stack sends after a MIB reset. At most 8
+  messages a second. The ANI-G signal fail and degrade thresholds go to the
+  kernel (driver command 11) when the OLT sets them and, with the defaults
+  5 and 9, at a MIB reset (`omci-drv-golden-isp*.txt` gain those two calls).
+  New suite `alarms-test.sh`.
+
 - Tests: `make test-qemu` generates its throwaway ssh key pair (`ssh-keygen`,
   ed25519) on every run, in `build/qemu-initramfs/qemu-test-key/`, instead of
   using a private key committed as `test/qemu/id_test`; the committed pair is

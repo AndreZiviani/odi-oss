@@ -421,6 +421,7 @@ int main(int argc, char **argv)
 							if (tcont_map[t].used)
 								qos_dirty = 1;
 					ev_tick();
+					alarm_tick();
 				}
 				/* Every 15 s: a quarter of the 60 s deadline
 				 * odi_wdt.h/rcS register omcid with, so an

@@ -426,6 +426,24 @@ void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
  * `used` instead: logged once per code for the life of the process. */
 void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used);
 void ev_tick(void);
+
+/* ------------------------------------------- alarms and AVCs (alarm.c)
+ *
+ * The autonomous messages: alarm notifications and attribute value changes,
+ * evaluated once a second in O5 (alarm_tick), and the Get All Alarms
+ * snapshot. See alarm.c. */
+void alarm_init(void);
+void alarm_tick(void);
+void alarm_mib_reset(void);
+uint16_t alarm_get_all(void);
+int alarm_get_next(uint16_t seq, uint8_t *body);
+void anig_signal_thresholds(int sf, int sd);
+extern unsigned long notify_sent;
+/* 10 log10(x) in 0.002 dB (omcimsg.c). */
+int32_t db_x500_of(uint32_t x);
+/* omci_drv_call, except that the driver-call trace does not log it: for the
+ * once-a-second polls, whose count depends on the clock (drv.c). */
+int omci_drv_call_quiet(uint32_t cmd, void *buf, uint32_t len);
 /* What the OLT sent that omcid does not model: one event line and one
  * summary line per unknown class and operation, or unknown message type,
  * per boot (events.c, UNKNOWN_PATH). ev_msg_known() is whether omcid knows

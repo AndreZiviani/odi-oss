@@ -76,6 +76,8 @@ static int omci_drv_call_netlink(uint32_t cmd, void *buf, uint32_t len)
 }
 
 #ifdef OMCI_DRV_TRACE
+static int ddm_stub_word(unsigned t, uint16_t *w);
+
 /* The driver-call golden (src/omci/drv-test.sh): every call is logged as
  * "drv <cmd> <len> <args hex>" and succeeds, with no netlink. The two
  * identity reads get fixed answers, so the serial poll stops at once; the
@@ -109,12 +111,66 @@ static int omci_drv_trace(uint32_t cmd, void *buf, uint32_t len)
 
 		if (t < 2 || t > 6)
 			return -1;
-		b[4] = (uint8_t)(ddm[t] >> 8);
-		b[5] = (uint8_t)ddm[t];
+		uint16_t w = ddm[t];
+
+		ddm_stub_word(t, &w);
+		b[4] = (uint8_t)(w >> 8);
+		b[5] = (uint8_t)w;
 	}
 	return 0;
 }
 #endif
+
+#ifdef OMCI_DRV_TRACE
+/* The DDM stub, unlogged, for the polls. The words can be set by a test:
+ * "<rx> <tx>" (decimal, 0.1 uW) in ODI_DDM_STUB_PATH replaces the fixed
+ * Rx 1000 and Tx 5000 for this call and the logged one alike. */
+#define ODI_DDM_STUB_PATH "/tmp/omcid-ddm"
+
+static int ddm_stub_word(unsigned t, uint16_t *w)
+{
+	char b[32];
+	long fd = sys_open(ODI_DDM_STUB_PATH, O_RDONLY), n;
+	unsigned v[2] = { 0, 0 }, k = 0;
+
+	if (fd < 0)
+		return -1;
+	n = sys_read((int)fd, b, sizeof b - 1);
+	sys_close((int)fd);
+	for (long i = 0; i < n && k < 2; i++) {
+		if (b[i] >= '0' && b[i] <= '9')
+			v[k] = v[k] * 10 + (unsigned)(b[i] - '0');
+		else if (b[i] == ' ')
+			k++;
+	}
+	if (t == 6)
+		*w = (uint16_t)v[0];
+	else if (t == 5)
+		*w = (uint16_t)v[1];
+	else
+		return -1;
+	return 0;
+}
+#endif
+
+int omci_drv_call_quiet(uint32_t cmd, void *buf, uint32_t len)
+{
+#ifdef OMCI_DRV_TRACE
+	static const uint16_t ddm[7] = { 0, 0, 0x1900, 33000, 5000, 5000, 1000 };
+	uint8_t *b = buf;
+	uint16_t w;
+
+	if (cmd != 10 || len < 6 || b[3] < 2 || b[3] > 6)
+		return cmd == 10 ? -1 : 0;
+	w = ddm[b[3]];
+	ddm_stub_word(b[3], &w);
+	b[4] = (uint8_t)(w >> 8);
+	b[5] = (uint8_t)w;
+	return 0;
+#else
+	return omci_drv_call(cmd, buf, len);
+#endif
+}
 
 int omci_drv_call(uint32_t cmd, void *buf, uint32_t len)
 {
