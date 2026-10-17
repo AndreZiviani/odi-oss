@@ -1,0 +1,3 @@
+pon get transceiver monitoring-type
+pon get transceiver limits
+exit
