@@ -179,12 +179,14 @@ test-host:
 	bash test/odi_i2c_test.sh
 	bash test/odi_ddm_test.sh
 	bash test/odi_optics_model_test.sh
+	bash test/odi_ddm_limits_test.sh
 	bash test/odi_init_test.sh
 	bash test/odi_wdt_test.sh
 	bash test/rtl8686_time_test.sh
 	bash test/odi_ramlog_test.sh
 	bash test/procparse_test.sh
 	bash test/odi_switch_flows_test.sh
+	bash test/odi_switch_ponq_test.sh
 	bash test/boot_golden_test.sh
 	python3 test/regnames_kernel_test.py
 

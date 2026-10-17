@@ -350,9 +350,15 @@ static void hw_apply_eqd(uint32_t eqd_bits)
  * USF_BURST_HDR_SETUP.LENGTH 0x30 (pre-ranged) and 0x19 (ranged) = count + 4 + 3; the other
  * OLT pre-ranged count gave 0x39. Before any Extended_Burst_Length the
  * length is 0x0c on both.
+ *
+ * Without an Extended_Burst_Length the length is 12 bytes before and after
+ * ranging: the 96-bit total overhead G.984.3 9.2.3.20 refers to (G.984.2
+ * Appendix I at 1244 Mbit/s), which is also what the stock GPON module
+ * uses when no such message came. Both our OLTs send one, so the ranged
+ * value used to be ISP1's count (0x19) and nobody saw it.
  */
-#define ODI_GPON_HW_BOH_LEN_WIDE	0x0cU	/* pre-ranging, no Extended_Burst_Length yet */
-#define ODI_GPON_HW_BOH_LEN_RANGED	0x19U	/* ranged, no Extended_Burst_Length seen */
+#define ODI_GPON_HW_BOH_LEN_WIDE	0x0cU	/* no Extended_Burst_Length yet */
+#define ODI_GPON_HW_BOH_LEN_RANGED	0x0cU	/* ranged, no Extended_Burst_Length seen */
 /* LENGTH is an 8-bit field. 252 is the largest burst overhead the stock
  * driver accepts; a longer request is cut there rather than wrapped.
  */

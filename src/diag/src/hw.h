@@ -44,6 +44,14 @@ enum ddm_sel {
  */
 #define DDM_SEL_ALARM_STATUS 7
 
+/* The module's description of its own readings: A0h 92-94 (monitoring type)
+ * and the alarm/warning limits, A2h 0-23 and 24-39 (odi_ddm.h's
+ * ODI_DDM_MONITOR_TYPE, ODI_DDM_LIMITS_A, ODI_DDM_LIMITS_B, which these
+ * mirror). Read raw through hw_transceiver_block_get(). */
+#define DDM_SEL_MONITOR_TYPE 8
+#define DDM_SEL_LIMITS_A     9
+#define DDM_SEL_LIMITS_B     10
+
 /* The raw DDMI block one selector returns. */
 #define DDM_RAW_LEN 24
 
@@ -65,6 +73,10 @@ int hw_addr_set(uint32_t addr, uint32_t value);
 
 /* Fills DDM_RAW_LEN bytes of raw DDMI for `sel`. */
 int hw_transceiver_get(int sel, uint8_t out[DDM_RAW_LEN]);
+
+/* The raw block of DDM_SEL_MONITOR_TYPE, DDM_SEL_LIMITS_A or DDM_SEL_LIMITS_B
+ * (anything else is refused). */
+int hw_transceiver_block_get(int sel, uint8_t out[DDM_RAW_LEN]);
 
 /* Alarm and warning flags for temperature, voltage, bias current, tx power
  * and rx power (SFF-8472 A2h bytes 112-113/116-117: bit 15 down to bit 6,
