@@ -300,7 +300,7 @@ int main(void)
 	}
 
 	/* The one shape the datapath applies (evtocd_olt_tag). The tables are
-	 * what the OLTs provision: issue #29's Huawei, and claro's. */
+	 * what the OLTs provision: the OLT of issue #29, and ISP1's. */
 	{
 		uint8_t tbl[3 * EVTOCD_ENTRY_LEN];
 		int vid = 0, pri = 0;
@@ -316,7 +316,7 @@ int main(void)
 
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  5, 1, 4);
 		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri);
-		ok(!why && vid == 1 && pri == 5, "claro: untagged adds VLAN 1, priority kept");
+		ok(!why && vid == 1 && pri == 5, "ISP1: untagged adds VLAN 1, priority kept");
 
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  8, 100, 4);
 		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "copy-inner priority on untagged is not applied");
