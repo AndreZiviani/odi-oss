@@ -14,6 +14,51 @@ listed here.
   our own earlier value, not a stock one. No change to the image. Refs #116,
   #42.
 
+- omcid, kernel: an OLT Set no longer interrupts all upstream traffic, and a
+  MIB reset or an omcid restart leaves no upstream state behind. Since #116 a
+  rebuild of the upstream QoS really deleted and re-created every queue and
+  flow (the queues are drained), and it ran after any Set of a referenced
+  queue, T-CONT, GEM port or traffic descriptor, and after any traffic
+  scheduler Set at all. Now the rebuild compares the MIB with what it
+  programmed and changes only that: a T-CONT whose Alloc-ID and queues are
+  the same keeps them, a queue whose weight, type or rates moved is sent
+  again in place, and a flow is sent only when its GEM port, T-CONT or queue
+  changed; a T-CONT that changed is rebuilt alone. Only a change of the PLOAM
+  Alloc-ID list still rebuilds everything. A traffic scheduler Set counts
+  only when a queue in use names it and the Set carries its policy. Driver
+  command 0 (the stock resetMib) now empties every upstream flow, queue and
+  T-CONT block; omcid sends it on every MIB reset and when it restarts
+  without resuming, which it did not before: a new provisioning could be
+  refused queues the old one still held, and old flows stayed valid. The
+  resume snapshot keeps what was programmed (format 2: an older snapshot is
+  not resumed). Refs #116, #115.
+
+- gpon, omcid (safety): only the OLT, by PLOAM, can put an Alloc-ID in the
+  Alloc-ID CAM, the table that decides which upstream grants the stick
+  answers. Since #116, driver command 21 wrote any Alloc-ID it was given into
+  the CAM, and omcid sends it after every change of the PLOAM list: after a
+  loss of signal, a Deactivate_ONU-ID, an Emergency Stop or a deallocation,
+  the Alloc-IDs the OLT had set over OMCI came back within about 2 s, the
+  deallocated one included, and the stick could answer grants of another
+  subscriber's ONU. Command 21 now only looks the Alloc-ID up and refuses
+  one the OLT has not assigned in this activation; omcid leaves that T-CONT
+  unbound and binds it when the Assign_Alloc-ID arrives (any change of the
+  list now rebuilds, not only one under a bound T-CONT). Two more ways in are
+  closed: a directed PLOAM is acted on only while the stick holds an ONU-ID
+  (O4 to O6), since the "no ONU-ID" value matched messages for ONU 0, another
+  ONU; and only Assign_Alloc-ID type 1 assigns (type 2 is not acknowledged,
+  the other reserved types are ignored), as G.984.3 9.2.3.10 says. Our own
+  Assign_ONU-ID also starts from an empty CAM. Nothing changes on a line
+  whose OLT assigns its Alloc-IDs by PLOAM before using them, which all three
+  OLTs we have seen do. `/proc/odi_gpon/cam` (new) reads the CAM back from
+  the hardware, next to what the driver recorded, to check this on a stick.
+  Refs #116.
+
+- CI: `release.yml` runs `make test` before it builds and publishes (the
+  release job `needs` it). A tag used to publish an image whether or not the
+  tests passed, or had even finished: ci.yml starts on the same tag as a
+  separate workflow that release.yml did not wait for. No change to the image.
+
 - igmpd: the group table no longer takes what a snooper must not hold. A
   report for an address outside 224.0.0.0/4, for a link-local group
   (224.0.0.x) or for any group whose 23-bit MAC is a link-local one

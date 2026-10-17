@@ -201,6 +201,37 @@ int main(void)
 	ok(tcont(0x500, 2) == 0 && queue(0, 0, 0, 1, 0, 0) == 0 && reg(QMAP + 0) == (1U << 4),
 	   "cmd 21 again: a new block, after T-CONT 1's");
 
+	/* A MIB reset (cmd 0, the stock resetMib): omcid forgets its queues and
+	 * flows, so the driver must too. Without it the new provisioning meets
+	 * the old one's queue blocks (a T-CONT with live queues cannot move,
+	 * and the group is full) and the old flows stay valid.
+	 */
+	puts("MIB reset (cmd 0) empties the upstream state:");
+	fresh();
+	ok(tcont(0x700, 2) == 0 && tcont(0x701, 30) == 1, "two T-CONTs fill group 0 (2 + 30 queues)");
+	queue(0, 0, 0, 1, 0, 0);
+	queue(0, 1, 0, 1, 0, 0);
+	for (uint32_t i = 0; i < 30; i++)
+		queue(1, i, 0, 1, 0, 0);
+	flow(0, 70, 0, 0, 1);
+	flow(1, 71, 1, 5, 1);
+	ok(tcont(0x700, 3) == -1, "without a reset, three queues for T-CONT 0 are refused");
+	{
+		uint32_t none = 0;
+
+		ok(odi_switch_cmd(OMCI_MIB_RESET_CMD, &none, sizeof none) == 0, "cmd 0 accepted");
+	}
+	ok(reg(SIDVALID) == 0 && odi_mock.regs[odi_mock_slot(ODI_SW_US_GEM_PORT_MAP(1))] == 0,
+	   "no flow left valid, GEM 0 in the slots");
+	ok(reg(QMAP + 0) == 0 && reg(QMAP + 1) == 0, "no queue left in either mask");
+	ok(reg(TCONT_EN) == 0x10000U, "only the OMCC T-CONT stays enabled");
+	ok(reg(GLB_TH) == ((7904U << 16) | 7744U), "thresholds back to one flow");
+	ok(tcont(0x700, 3) == 0 && queue(0, 0, 0, 1, 0, 0) == 0 && queue(0, 1, 0, 1, 0, 0) == 0 &&
+	   queue(0, 2, 0, 1, 0, 0) == 0 && reg(QMAP + 0) == 0x7U,
+	   "the new provisioning gets three queues at the start of the group");
+	ok(flow(0, 72, 0, 2, 1) == 0 && reg(SIDVALID) == 0x1U && sid2qid(0) == 2U,
+	   "and its flow, the only one valid");
+
 	/* The stock kernel of our image computes the global PBO thresholds
 	 * in dal_rtl9602c_gpon_flowctrl_adjust_byFlowNum (0x80131f50 in
 	 * stock-vmlinux, read from its instructions, not from our code): ON =

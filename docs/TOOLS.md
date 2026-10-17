@@ -201,9 +201,10 @@ T-CONT claims, in assignment order, from the kernel's list (`alloc_ids` in
 `/proc/odi_gpon/status`, read once a second); with none left it reads 0x00FF,
 unassigned, and is not programmed. That is what a MIB upload and a Get of the
 AllocID answer, and what goes to the driver. When the kernel list changes (an
-assignment, a deallocation, a re-ranging) the T-CONTs bound to it are
-reprogrammed a quiet second later; `omcli tcont` shows each binding and where
-it came from.
+assignment, a deallocation, a re-ranging) the whole upstream is
+reprogrammed a quiet second later; any other change reprograms only the
+T-CONTs, queues and flows it changed (docs/SWITCH.md, upstream PON queues).
+`omcli tcont` shows each binding and where it came from.
 
 It logs every OMCI frame in and out (`<-` / `->` lines) and every driver
 call to `/var/log/omcid.log`, about 1.7 MB a day on a busy OLT before the
@@ -956,6 +957,7 @@ drivers behind them.
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
+| `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
