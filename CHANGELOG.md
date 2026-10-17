@@ -19,6 +19,78 @@ listed here.
   not started and receives no frame); it is the daemon's own unit tests that
   cover it. Refs the multicast audit, AUDIT-night-multicast.md.
 
+- Tests: the `make test-rcs` goldens (`test/fixtures/rcs-trace-*.txt`) are
+  regenerated: they predated the `safe-mode.sh count` and `boot-ok` and the
+  `host-autoneg.sh boot` steps of rcS (#67, #76, #98) and so failed. The trace
+  canonicaliser writes `name.new.<pid>` temporaries as `.new.PID`, which would
+  otherwise have changed the golden on every run. `make test-rcs` now also
+  runs in the CI `test-qemu` job, which has the busybox it needs. No change
+  to the image.
+
+- Tests: the fixed sleeps that waited for an event in `test/host_autoneg_test.sh`
+  (the 0.3 s before reading what the stub `setsid` recorded),
+  `test/apply_test.sh` (2 s for the delayed network apply) and
+  `test/omci_respawn_test.sh` (eight 1 s sleeps around the stub omcid and the
+  FIFO reader) are bounded polls for the event itself, as `safe_mode_test.sh`
+  has been since #105, so a loaded host (the parallel `make test` legs) no
+  longer fails them. Checks that expect nothing to happen keep a short fixed
+  wait, since there is nothing to poll for. No change to the image.
+
+- Tests: the OMCI suites no longer pass negative checks against a dead
+  daemon. `src/omci/testlib.sh`: a `wait_for` that times out (which `inject_wait`,
+  `settled`, `sync_send` and `omcid_up` all go through) now fails the suite
+  itself and says so, `inject_wait` fails at once when `omcli --inject` cannot
+  send the frame, and the suites end with `suite_exit` (0 or 1) instead of
+  `exit "$fail"`, which reported success at 256 failures. The 49 call sites
+  that ignored these results needed no change and check what they checked.
+  `src/omci/testlib-test.sh` (in `make test-host`) tests the helpers' failure
+  paths. No change to omcid or the image.
+
+- Tests: two suites that no `make test` leg and no CI job ran are wired in.
+  `make test-omci-respond` runs omcid's class 171 decode and OLT-tag rule
+  test (`src/omci/test/extvlan_test.c`), `make test-igmp` runs igmpd's frame,
+  group and entry tests (`src/igmp/test`); both are legs of `make test` and
+  jobs of ci.yml (`mips-units`, which the `full` job now needs).
+  `test/fwu_stock_flash_test.sh` exits 77 instead of 0 when it skips, so a
+  skipped first-flash check no longer reads as a pass. No change to the
+  image.
+
+- Tests: `make test-qemu` generates its throwaway ssh key pair (`ssh-keygen`,
+  ed25519) on every run, in `build/qemu-initramfs/qemu-test-key/`, instead of
+  using a private key committed as `test/qemu/id_test`; the committed pair is
+  removed. Only the public half goes into the harness initramfs. No change to
+  the image.
+
+- Tests and docs: the real MAC addresses in the L2 table examples (a stick ELAN
+  address and LAN devices read back from one table, and one address from a
+  stock listing) are replaced by locally administered documentation
+  addresses (`02:00:00:00:00:NN`) in `test/odi_switch_l2_test.c`,
+  `src/diag/` (header, fake table, `l2.golden`, `l2_format_test.c`),
+  `docs/KERNEL.md` and `docs/TOOLS.md`, with the encoded table words changed
+  to match. The tests check the same decode as before. No change to the
+  image.
+
+- DDM: the module can now say how its readings are to be read. Two new `diag`
+  commands, from the module itself over I2C: `pon get transceiver
+  monitoring-type` (A0h byte 92: whether diagnostics are implemented,
+  internal or external calibration, average or OMA received power) and `pon
+  get transceiver limits` (A2h 0-39: the alarm and warning limits the module
+  raises its own flags against; they differ from one module to the next),
+  through three new `odi_ddm.h` selectors (`ODI_DDM_MONITOR_TYPE`,
+  `ODI_DDM_LIMITS_A`, `ODI_DDM_LIMITS_B`). The conversions are unchanged and
+  still assume internal calibration (the one module read for this had it, with
+  identity external constants); the first command is where that assumption can
+  now be checked on any stick. The existing readings keep their register
+  trace (a consistent re-read of the 16-bit pairs was tried and dropped: the
+  DAL golden of command 10 is the stock command's own trace). Tests:
+  `test/odi_ddm_limits_test.c`, `make transceiver-test`. The exporter's
+  `gpon_transceiver_*` series read `pon get transceiver alarm-status`, which
+  was already here.
+
+- Kernel: the OMCI driver logs each command it does not implement once per
+  command number. It logged only the first one of a boot, so a diagnostic
+  bundle from a new OLT showed one of the missing commands at most.
+
 - Kernel: the GPON MAC follows G.984.3 in two cases neither of our OLTs
   hits. The ONU answers Request_Password with three identical Password
   messages (it sent one; the OLT accepts a password only after three).

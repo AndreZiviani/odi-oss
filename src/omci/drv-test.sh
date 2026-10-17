@@ -330,4 +330,4 @@ if [ "${UPDATE:-0}" != 1 ]; then
 fi
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
-exit "$fail"
+suite_exit

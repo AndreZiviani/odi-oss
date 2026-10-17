@@ -1,7 +1,7 @@
 /* The L2 listing line, natively: every row type, the column alignment
  * against the header, and the fields a reader zips by header word.
  *
- * The unicast row is the one a public stock listing shows (78:54:2E:07:64:63,
+ * The unicast row has the shape of one row of a stock listing (invented MAC 02:00:00:00:00:05,
  * Spa 2, Fid 0, Age 6, Vid 1, Auto, SVL): our line must carry the same values
  * under the same header words, since odi-ui reads either listing that way. */
 #include <stdio.h>
@@ -54,14 +54,14 @@ int main(void)
 	memset(&r, 0, sizeof r);
 	r.index = 8;
 	r.type = ODI_SW_L2_UCAST;
-	memcpy(r.mac, "\x78\x54\x2e\x07\x64\x63", 6);
+	memcpy(r.mac, "\x02\x00\x00\x00\x00\x05", 6);
 	r.key = 1;
 	r.port = 2;
 	r.age = 6;
 	r.flags = ODI_SW_L2_F_VALID;
 	l2_format_row(&r, line);
 	printf("    %s\n", line);
-	check(strcmp(line, "78:54:2E:07:64:63 2   0   6   1    Auto   0   SVL  uc   -     0x008") == 0,
+	check(strcmp(line, "02:00:00:00:00:05 2   0   6   1    Auto   0   SVL  uc   -     0x008") == 0,
 	      "unicast line, byte for byte");
 	check(has(line, "Spa", "2") && has(line, "Fid", "0") && has(line, "Age", "6") &&
 	      has(line, "Vid", "1") && has(line, "State", "Auto") && has(line, "Hash", "SVL"),
