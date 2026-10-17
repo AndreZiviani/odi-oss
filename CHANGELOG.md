@@ -5,6 +5,28 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the MIB upload is built as the stock firmware builds it. An entity
+  whose attributes do not fit in one upload record (26 bytes) now continues
+  in as many records as it needs; omcid used to send only the first record
+  and drop the rest, so an OLT reading the upload never saw ONU2-G's queue,
+  scheduler and GEM port counts, connectivity and QoS flexibility, ONU-G's
+  traffic management option and state, the circuit packs' queue and T-CONT
+  counts, or the priority queues' drop settings. The upload also leaves out
+  what the stock firmware never uploads: private and not-uploaded classes
+  (158, 255, 287, 65527, 65530, 65534, 65535), attributes that are not
+  supported, private, PM or tables, and the 64 reserved priority queues
+  0xff00-0xff3f; and the MAC bridge port tables (49, 50, 79) of one OLT's
+  bridge ports are no longer listed as entities the ONU creates for itself.
+  They are created the way the stock firmware creates them, when the OLT
+  creates a MAC bridge port config data (class 47): one of each at the
+  port's own entity id, empty or all zero, and an upload after provisioning
+  lists them. They are removed with the port (the stock firmware leaves the
+  preassign table behind). omcid keeps 256 MIB rows instead of 192, so the
+  three extra rows per port do not crowd out the OLT's own entities.
+  An entity the OLT has set is listed once. With the factory configuration
+  the upload is 205 entities in 399 records, the same as a decoded upload of
+  the stock image. Refs #103.
+
 - OMCI: the managed entity model had wrong class ids for nine entities, all
   of them above 32767: the generator (`src/omci/tools/mib-tables.py`) did not
   follow how the compiler loads such a constant, so it recorded an unrelated
