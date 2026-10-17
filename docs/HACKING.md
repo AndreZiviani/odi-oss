@@ -660,8 +660,8 @@ dropbear/confd/metricsd/omcid for real, and
 the resilience scenarios from `docs/SETTINGS.md` ("Resilience") -- filling
 `/tmp` to `ENOSPC`, an OOM (a busybox-only memory hog, no compiled tool
 needed), and `kill -9` on each critical daemon, checked over real ssh
-(a test-only key, `test/qemu/id_test`, baked into the harness's initramfs
-only) and real HTTP to confd and metricsd. `svc-syslogd.sh`/`svc-klogd.sh`
+(a test-only key pair that `build-initramfs.sh` generates on every run, its
+public half baked into the harness's initramfs only) and real HTTP to confd and metricsd. `svc-syslogd.sh`/`svc-klogd.sh`
 run here too (unconditionally); `svc-ntpd.sh` is exercised against
 `NTP_SERVER`, seeded with the real `flash set` into
 `/var/config/odi.conf` (a plain writable directory, there is no real config
@@ -776,6 +776,13 @@ flash for real), `image_tar_format_test.sh` (can that busybox's `tar` read
 our tarball), `rootfs_chroot_test.sh` (the boot scripts in a qemu-user
 chroot of the staged rootfs), `uimage_header_test.sh` (the header U-Boot
 reads). Run them when you touch `fwu.sh`, the tarball, or rcS.
+`fwu_stock_flash_test.sh` exits 77, not 0, when it skips (no stock rootfs, no
+docker, no tarball): a skip is not a pass, and a wrapper that wants to
+tolerate it tests for 77.
+
+The unit tests of omcid's class 171 decode (`src/omci/respond`, `make
+test-omci-respond`) and of igmpd (`src/igmp/test`, `make test-igmp`) are legs
+of `make test` and a CI job (`mips-units`).
 
 ### Pure refactors: prove the machine code did not change
 

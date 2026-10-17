@@ -37,6 +37,14 @@ void mib_reset_all(void)
 	qos_reset();
 	uni_reset();
 	mib_data_sync = 0;
+	upl_total = 0;
+	/* The bridge connections were built from the MIB just thrown away.
+	 * The stock reset clears the datapath with the MIB; here the rebuild
+	 * that follows (one quiet second, respond/main.c) deactivates every
+	 * one of them and builds none from the empty MIB, so an OLT that
+	 * provisions fewer services after the reset, or none, does not leave
+	 * the old ones forwarding. */
+	conn_dirty = 1;
 	/* A reset MIB and a snapshot of the one before it must never both be
 	 * on disk: a respawn right after this reset, before the OLT sends
 	 * anything to snapshot again, must fall back to re-registration, not
@@ -50,8 +58,12 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 {
 	if (c && (c->classId == OMCI_ME_TCONT ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
+		  (c->classId == OMCI_ME_TRAFFIC_SCHEDULER &&
+		   us_scheduler_referenced(inst)) ||
 		  (c->classId == OMCI_ME_PRIORITY_QUEUE &&
-		   us_queue_referenced(inst))))
+		   us_queue_referenced(inst)) ||
+		  (c->classId == OMCI_ME_TRAFFIC_DESCRIPTOR &&
+		   us_td_referenced(inst))))
 		qos_dirty = 1;
 	if (c && (c->classId == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA ||
 		  c->classId == OMCI_ME_VLAN_TAGGING_FILTER_DATA ||
@@ -139,10 +151,19 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
 		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
 		conn_dirty = 1;
+	/* A traffic scheduler (class 278) matters only when a planned
+	 * upstream queue names it, and then only its Policy (attribute 3:
+	 * strict or WRR, us_queue_decode()), on a create or a Set that
+	 * carries it. Any Set used to rebuild the whole upstream. */
 	if (c && (c->classId == OMCI_ME_TCONT ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
+		  (c->classId == OMCI_ME_TRAFFIC_SCHEDULER &&
+		   (creating || (mask & (1u << (16 - 3)))) &&
+		   us_scheduler_referenced(inst)) ||
 		  (c->classId == OMCI_ME_PRIORITY_QUEUE &&
-		   us_queue_referenced(inst))))
+		   us_queue_referenced(inst)) ||
+		  (c->classId == OMCI_ME_TRAFFIC_DESCRIPTOR &&
+		   us_td_referenced(inst))))
 		qos_dirty = 1;
 
 	switch (c->classId) {

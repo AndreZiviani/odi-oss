@@ -45,6 +45,10 @@
  * picks, only what the loser says.
 
  *
+ * Writers (`setenv`, `commit`) are serialised with flock(2) on the env
+ * partition's device node, and a plain setenv reads its copy back after the
+ * write, as commit always did; see env_lock and env_store below.
+ *
  * `commit slot` is the one operation that writes both: sw_commit=<slot> into
  * the primary, read back, then into the fallback, read back, then both read
  * again -- refusing any slot that is not the running one (root= in
@@ -56,6 +60,7 @@
 #include "io.h"
 #include "env.h"
 #include "commit.h"
+#include "lock.h"
 
 /* MEMERASE = _IOW('M', 2, struct erase_info_user).
  *
@@ -297,9 +302,71 @@ static int env_store_buf(const struct mtd_part *m, const uint8_t *src)
 	return 1;
 }
 
+/* What the partition holds now, against what was meant to land. env_store_buf
+ * reports success when the write(2) calls returned, which says nothing about
+ * the bits the flash kept; `nv commit` has always read each copy back, a plain
+ * setenv did not. */
 static int env_store(const struct mtd_part *m)
 {
-	return env_store_buf(m, blk);
+	static uint8_t back[ENV_MAX];
+	struct mtd_part r;
+
+	if (!env_store_buf(m, blk))
+		return 0;
+	if (read_raw(m->copy == 2 ? "env2" : "env", &r, back) != m->size) {
+		out("nv: the copy written could not be read back\n");
+		return 0;
+	}
+	for (unsigned int i = 0; i < m->size; i++) {
+		if (back[i] != blk[i]) {
+			out("nv: the copy written did not read back as written\n");
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* One writer at a time. Two nv processes (an ssh session and the web UI, say)
+ * each read the block, erase the partition and write it back: unserialised,
+ * one erases while the other writes and a copy is left half-written, or one
+ * update is lost (a sw_commit the UI reported as committed). flock(2) on the
+ * env partition's device node, held until this process exits, is the kernel's
+ * own mechanism for that and needs no lock file; the node is the same inode
+ * for every caller, and both copies are covered by locking the one named
+ * "env". Readers do not take it: an erase in flight shows them an invalid
+ * copy, and they already fall back to the other.
+ *
+ * Bounded: 10 s of 100 ms polls, then it gives up rather than wait for ever.
+ * If flock itself fails for any reason other than "held" (a kernel without
+ * it) the write goes ahead unlocked, as it always did, and says so.
+ *
+ * The syscall number and constants are in lock.h, held to a real kernel by
+ * test/flock_probe.c under qemu-user; the call has not run on a stick yet. */
+static int env_lock(void)
+{
+	struct mtd_part m;
+	char path[16];
+	long fd, rc;
+	int i;
+
+	if (!mtd_find("env", &m))
+		return 1;
+	mtd_path(m.index, path);
+	fd = sys_open(path, O_RDONLY);
+	if (fd < 0)
+		return 1;
+	for (i = 0; i < 100; i++) {
+		rc = syscall3(NV_NR_FLOCK, fd, NV_LOCK_EX | NV_LOCK_NB, 0);
+		if (rc == 0)
+			return 1;                /* held until exit */
+		if (rc != -NV_EAGAIN) {
+			out("nv: flock is not available; writing without the lock\n");
+			return 1;
+		}
+		sys_nanosleep(0, 100 * 1000 * 1000);
+	}
+	out("nv: another nv has held the environment for 10 s; not writing\n");
+	return 0;
 }
 
 /* The partition I/O `nv commit` runs on (commit.h). Each call looks the
@@ -405,8 +472,14 @@ int main(int argc, char **argv)
 			usage();
 			return 1;
 		}
+		if (!env_lock())
+			return 1;
 		return commit(argv[2]);
 	}
+	/* Before the read, not before the write: the block is read-modified-
+	 * written, so the read has to be inside the lock too. */
+	if (str_eq(argv[1], "setenv") && !env_lock())
+		return 1;
 	len = env_load(&part);
 	if (!len) {
 		out("nv: no valid environment in env or env2\n");

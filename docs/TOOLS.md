@@ -201,9 +201,10 @@ T-CONT claims, in assignment order, from the kernel's list (`alloc_ids` in
 `/proc/odi_gpon/status`, read once a second); with none left it reads 0x00FF,
 unassigned, and is not programmed. That is what a MIB upload and a Get of the
 AllocID answer, and what goes to the driver. When the kernel list changes (an
-assignment, a deallocation, a re-ranging) the T-CONTs bound to it are
-reprogrammed a quiet second later; `omcli tcont` shows each binding and where
-it came from.
+assignment, a deallocation, a re-ranging) the whole upstream is
+reprogrammed a quiet second later; any other change reprograms only the
+T-CONTs, queues and flows it changed (docs/SWITCH.md, upstream PON queues).
+`omcli tcont` shows each binding and where it came from.
 
 It logs every OMCI frame in and out (`<-` / `->` lines) and every driver
 call to `/var/log/omcid.log`, about 1.7 MB a day on a busy OLT before the
@@ -227,7 +228,7 @@ switch off the report keys do not count) and does the least that applies:
 |---|---|---|
 | nothing | logs `event=reload changed=none` | untouched |
 | only `VLAN_CFG_TYPE`, `VLAN_MANU_MODE`, `VLAN_MANU_TAG_VID`, `VLAN_MANU_TAG_PRI` | tears the bridge connections down and builds them again from the MIB it holds, by the same `bdgconn_rebuild()` the first build uses | stays in O5, nothing re-ranged |
-| `GPON_SN`, `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity switch, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_VEIP_SLOT_ID` (with `OMCI_CUSTOM_ME`) (with or without VLAN keys) | writes `gpondeact` to `/proc/odi_init`, clears its MIB as a MIB reset does (`event=mib_reset side=local`), holds three seconds, hands the driver the serial number (`gponsn`, only if it changed) and the password (`gponpw`), writes `gponact`, and waits for O5 and the services | deactivated and ranged again; the process is never restarted |
+| `GPON_SN`, `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity switch, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_VEIP_SLOT_ID` (with `OMCI_CUSTOM_ME`), bit 64 of `OMCI_CUSTOM_ME` (with or without VLAN keys) | writes `gpondeact` to `/proc/odi_init`, clears its MIB as a MIB reset does (`event=mib_reset side=local`), holds three seconds, hands the driver the serial number (`gponsn`, only if it changed) and the password (`gponpw`), writes `gponact`, and waits for O5 and the services | deactivated and ranged again; the process is never restarted |
 
 The re-registration is a state machine advanced by the main loop, so no step
 sleeps: the CLI, the queues and the watchdog ping are served while the ONU is
@@ -388,6 +389,11 @@ layout. The writes go
 through `/dev/odi_sw` (`ODI_SW_IOC_L2_MC_ADD`/`_DEL`, `odi_switch_l2.c`);
 `diag l2-table get all` shows the result.
 
+The table keeps what a snooper may keep: no state for an address outside
+224.0.0.0/4, for a link-local group (224.0.0.x) or for a group that shares a
+link-local MAC (RFC 4541 2.1.2: those are flooded), and one switch row per
+MAC, holding the union of the ports of every group that maps to it.
+
 `-j` and `-l` drive that same switch path by hand, without registering
 anything, so an entry can be put in and checked without an IGMP frame:
 
@@ -461,11 +467,11 @@ per valid row:
 
     L2 table: 1088 rows, IPv4 multicast looked up on MAC + VID/FID
     MACAddress        Spa Fid Age Vid  State  Ext Hash Type Ports Index
-    BC:24:11:05:B3:24 0   0   7   0    Auto   0   SVL  uc   -     0x06c
+    02:00:00:00:00:01 0   0   7   0    Auto   0   SVL  uc   -     0x06c
     01:00:5E:01:02:03 -   -   -   0    Static -   SVL  mc   0x1   0x17c
-    00:E4:06:4C:C6:F4 2   0   7   14   Auto   0   SVL  uc   -     0x270 ctag
-    04:9F:CA:78:72:82 0   0   7   0    Auto   0   SVL  uc   -     0x364
-    38:3A:21:28:27:C8 3   0   7   0    Auto   0   SVL  uc   -     0x390
+    02:00:00:00:00:02 2   0   7   14   Auto   0   SVL  uc   -     0x270 ctag
+    02:00:00:00:00:03 0   0   7   0    Auto   0   SVL  uc   -     0x364
+    02:00:00:00:00:04 3   0   7   0    Auto   0   SVL  uc   -     0x390
     5 entries
 
 (a trial stick, with `igmpd -w -j 239.1.2.3 -p 0x1` in place: the host
@@ -951,6 +957,7 @@ drivers behind them.
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
+| `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
@@ -1102,7 +1109,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `odi_gpon: event=lof state=on onu_state=O5` / `event=lof state=off lasted_s=...` | notice / info | the same for LOF, loss of downstream framing: light without a GPON frame the framer can lock to |
 | `omcid: event=start run=boot mode=reregister reason=not_o5 onu_state=O2 rows=0` | notice on `run=restart`, else info | omcid starting: the first start of the boot or a later one (a respawn), and whether it resumed from its snapshot (`mode=resume`) or starts empty for the OLT to re-provision; `reason` is `not_o5`, `no_snapshot`, `bad_snapshot` or `other_device` |
 | `omcid: event=mib_reset side=olt rows=161 mib_data_sync=184 services=6` | notice | a MIB reset: `side=olt` from the OLT, `side=local` from `omcicli mib reset`; what it threw away |
-| `omcid: event=mib_upload_begin entities=301` / `event=mib_upload_end entities=301 duration_s=0.009` | info | the OLT reading the MIB back; an upload it abandons has no end line |
+| `omcid: event=mib_upload_begin entities=399` / `event=mib_upload_end entities=399 duration_s=0.009` | info | the OLT reading the MIB back; `entities` is the number of upload records announced (an entity takes one record per 26 bytes of its attributes, as on the stock ONU); an upload it abandons has no end line |
 | `omcid: event=provision_begin op=set class=256 inst=0 after_mib_reset=1` | info | the first Create, Set or Delete of a burst; `after_mib_reset=1` is a full re-provisioning |
 | `omcid: event=provision_end creates=82 sets=102 deletes=0 duration_s=0.827 rows=161 services=6 after_mib_reset=1` | info | 10 s after the burst's last write: what it added up to (Gets and Tests do not count) |
 | `omcid: event=alloc_ids count=5 ids=282,794,1050,1306,538` | info | the Alloc-IDs the OLT assigned by PLOAM (`/proc/odi_gpon/status`), when omcid first reads them and whenever they change: ranging, a deallocation, a re-ranging (`ids=none`); the T-CONTs the OLT does not set are bound to them |

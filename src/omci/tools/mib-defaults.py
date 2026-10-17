@@ -18,7 +18,7 @@ classes 2 (OntData), 148, 157, 340, 134 (OLT-written credentials), 65530
 ONT-G attributes 1-3 and 14 (the live identity and PON state, mibstore
 answers them), the circuit pack serial number, version and vendor id (6/3-5,
 the configured serial and the active image), the private VLAN config's manual
-VID (10212/3, one ISP's VLAN), the T-CONT Alloc-IDs (262/1: what one OLT
+VID (65535/3, one ISP's VLAN), the T-CONT Alloc-IDs (262/1: what one OLT
 assigned that line by PLOAM, which omcid binds from the kernel at run time,
 respond/apply_qos.c), and every attribute omcid answers from live state
 (ONU2-G uptime, ANI-G optical levels, UNI link) or always overrides
@@ -38,7 +38,7 @@ SKIP_ATTRS = {
     (257, 10),                      # ONU2-G SysUpTime, live
     (263, 10), (263, 14),           # ANI-G optical levels, live from the DDM
     (11, 2), (11, 7),               # PPTP Ethernet UNI sensed type, duplex: link state
-    (10212, 3),                     # one ISP's VLAN
+    (65535, 3),                     # one ISP's VLAN
     (262, 1),                       # T-CONT Alloc-ID, bound at run time
     (277, 1), (277, 2), (277, 3), (277, 6), (277, 8),   # always overridden
     (277, 13),                      # reserved queues hold ASCII noise, see below
