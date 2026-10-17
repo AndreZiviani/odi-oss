@@ -200,8 +200,10 @@ Details that bite:
   handling" below.
 - **The OLD LOID wins.** When `LOID` and `LOID_OLD` differ, the OLD value is
   answered -- including an empty OLD beside a set LOID, which answers
-  nothing; the same for the passwords. That is the stock rule, kept so both
-  slots agree. The UI writes `LOID_OLD` together with `LOID` (and the
+  nothing. The password follows the LOID, as in the stock `runomci.sh`: with
+  the same LOID in both keys the current `LOID_PASSWD` is answered (a changed
+  password takes effect), with different LOIDs `LOID_PASSWD_OLD` is answered.
+  That is the stock rule, kept so both slots agree. The UI writes `LOID_OLD` together with `LOID` (and the
   password pair), and shows the `_OLD` keys read-only. Untested: neither
   ISP1 nor ISP2 uses a LOID, and neither runs against a CTC OLT.
 - **omcid looks for each key in both files**, the one xmlconfig assigns it
@@ -615,7 +617,7 @@ restore.
 | keys | why |
 |---|---|
 | `DEVICE_TYPE` | this image is a bridge (SFU) only |
-| `OMCI_CUSTOM_BDP`, `OMCI_CUSTOM_RDP`, `OMCI_CUSTOM_MCAST`, `OMCI_CUSTOM_ME`, `DUAL_MGMT_MODE` | select stock OMCI plugins; omcid only displays them (`omcicli get cflag`, `get dmmode`) |
+| `OMCI_CUSTOM_BDP`, `OMCI_CUSTOM_RDP`, `OMCI_CUSTOM_MCAST`, `OMCI_CUSTOM_ME`, `DUAL_MGMT_MODE` | select stock OMCI plugins; omcid displays them (`omcicli get cflag`, `get dmmode`) and acts on two bits of `OMCI_CUSTOM_ME`: 256 (with `OMCI_VEIP_SLOT_ID`, above) and 64, which creates the CTC ONU capability entity (class 65529) as the stock firmware does |
 | `OMCI_FAKE_OK` | the stock OMCI stack option; this image reads its own odi-only `OMCI_UNKNOWN_ME_OK` instead (above), so the stock slot keeps its own setting |
 | `OMCI_OLT_MODE`, `OMCI_PORT_TYPE`, `OMCI_TM_OPT`, `OMCI_WAN_QOS_QUEUE_NUM` | stock OMCI stack options with no counterpart in omcid |
 | `OMCI_LOGFILE`, `OMCI_LOGFILE_MASK`, `OMCI_DBGLVL` | omcid always logs every frame to `/var/log/omcid.log` |

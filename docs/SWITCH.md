@@ -382,8 +382,15 @@ on queue 64) before any OMCI.
 - **cmd 21** answers with the T-CONT index of the Alloc-ID it is given,
   which is the row of the Alloc-ID CAM that holds it: the hardware's T-CONT
   n is the scheduler that serves the grants of the Alloc-ID in CAM row n.
-  An Alloc-ID no Assign_Alloc-ID placed gets a row, as the stock driver
-  gives it one. Rows 0-15 are data T-CONTs; the OMCC's row 16 and rows
+  The row is looked up, never written: an Alloc-ID that no Assign_Alloc-ID
+  (type 1) of the current activation placed is refused, and omcid binds the
+  T-CONT once the assignment shows in /proc/odi_gpon/status. Only PLOAM
+  arms the CAM, because a row decides which grants the ONU answers (G.984.3
+  5.5.4: a T-CONT maps to an Alloc-ID "previously assigned to the given ONU
+  via the PLOAM messaging channel"). The stock driver writes a row here,
+  but only on a T-CONT Set; omcid also sends cmd 21 after every change of
+  the PLOAM list, where a write would bring back an Alloc-ID the OLT had
+  just taken away. Rows 0-15 are data T-CONTs; the OMCC's row 16 and rows
   17-31 (no scheduler) are refused. Word 0 goes in as the number of queues
   omcid will put on the T-CONT, and the driver reserves a block of that
   many consecutive logical queues in the T-CONT's group, first fit (the
@@ -415,6 +422,23 @@ on queue 64) before any OMCI.
   and OFF = 7744 - (n - 1) * s, with s the ON threshold of flow 0
   (`PON_SID_RPV_TH[0]`, 150 after the sdkinit replay) and ON no lower than
   2000 (OFF 1840). The five ISP1 pairs are its first five values.
+- **cmd 0** (the stock resetMib, the first of the stock command enum)
+  empties the upstream state: every upstream flow deleted as cmd 25 `ena`
+  0 does, every queue of a data T-CONT deleted as cmd 24 does, every
+  T-CONT block freed. The Alloc-ID CAM (PLOAM's), the OMCC (T-CONT 16,
+  flow 64), the downstream GEM rows and the bridge connections are left.
+  omcid sends it on a MIB reset (the OLT's, the CLI's, a re-registration)
+  and when it starts again in the same boot without resuming, so the next
+  provisioning never meets the last one's queue blocks or flows.
+
+omcid changes only what differs from what it programmed: a T-CONT whose
+Alloc-ID and queue at every ordinal are unchanged keeps its index and its
+queues, and a queue whose weight, type, marking or rates moved is sent again
+in place (cmd 23 on a queue already in the mask writes no drain); a flow is
+sent only when its GEM port, T-CONT or queue changed. A T-CONT that changed
+is torn down (its flows, then its queues) and built again alone. Only a
+change of the PLOAM Alloc-ID list tears everything down, since the CAM
+rows, and so the T-CONT indexes, may have moved.
 
 The driver used to replay ISP1's words for these registers by T-CONT and
 flow ordinal, which gave every other OLT ISP1's weights, drained T-CONT

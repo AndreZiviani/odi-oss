@@ -58,7 +58,7 @@ $(BIN): $(CORE) $(BUILD)/hw.o
 
 # The exporter contract test: the real binary, with the accessors the
 # exporter's commands reach answered by test/hw_fake.c instead.
-FAKE_WRAP := hw_transceiver_get hw_transceiver_alarms_get hw_gpon_status_get \
+FAKE_WRAP := hw_transceiver_get hw_transceiver_alarms_get hw_transceiver_block_get hw_gpon_status_get \
              hw_gpon_alarms_get hw_stat_port_get hw_l2_mode hw_l2_get hw_l2_next
 
 $(BUILD)/diag_fake: $(CORE) $(BUILD)/hw.o test/hw_fake.c test/hw_fake_common.inc | $(BUILD)
@@ -116,7 +116,7 @@ else
 # the netlink transport from ../omci.
 RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../..:/src -w /src/src/diag $(IMAGE)
 
-.PHONY: all image diag test selftest exporter-test exporter-optics-test l2-test run verify size clean help
+.PHONY: all image diag test selftest exporter-test exporter-optics-test l2-test transceiver-test run verify size clean help
 
 all: diag
 
@@ -184,6 +184,17 @@ exporter-optics-test: image
 	  || { diff -u test/exporter_absent.golden $(BUILD)/exporter_absent.out; exit 1; }
 	@echo "exporter contract, optics scenarios: rx drift, LOS, absent all match"
 
+# The module's monitoring type and limits: test/transceiver.txt through the
+# same fake-hardware binary, diffed against test/transceiver.golden. The
+# values are those of one real module (test/hw_fake_common.inc).
+transceiver-test: image
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/diag_fake
+	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/diag_fake < test/transceiver.txt' \
+	    > $(BUILD)/transceiver.out
+	@cmp $(BUILD)/transceiver.out test/transceiver.golden \
+	  || { diff -u test/transceiver.golden $(BUILD)/transceiver.out; exit 1; }
+	@echo "transceiver limits: output byte-identical to test/transceiver.golden"
+
 # The L2 table listing: test/l2.txt through the same fake-hardware binary,
 # the table answered by test/hw_fake.c, diffed against test/l2.golden. The
 # first two listings must be identical: one is our spelling, the other the
@@ -202,7 +213,7 @@ l2-test: image
 # `make selftest SEED=$$RANDOM` explores instead.
 SEED ?= 1
 
-selftest: image exporter-test exporter-optics-test l2-test
+selftest: image exporter-test exporter-optics-test l2-test transceiver-test
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/ddm_selftest
 	@$(RUN) qemu-mips-static $(BUILD)/ddm_selftest
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/fmt_selftest
@@ -241,6 +252,7 @@ help:
 	@echo "  make exporter-test  the exporter contract, under qemu"
 	@echo "  make exporter-optics-test  the same batch, three scripted optics scenarios"
 	@echo "  make l2-test        the l2-table listing against its golden file, under qemu"
+	@echo "  make transceiver-test  the module monitoring type and limits against their golden file"
 	@echo "  make selftest       exporter-test plus the conversion vectors, under qemu"
 	@echo "  make run ARGS='pon get transceiver rx-power'"
 	@echo "  make verify         confirm ELF32 / big-endian / MIPS / static"

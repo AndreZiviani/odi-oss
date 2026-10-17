@@ -24,7 +24,7 @@
 #define SNAP_MAGIC1 'M'
 #define SNAP_MAGIC2 'S'
 #define SNAP_MAGIC3 '1'
-#define SNAP_VERSION 1
+#define SNAP_VERSION 2   /* 2: the upstream state the driver holds (qos_prog_state()) */
 
 /* Header (26 bytes: magic 4, version 2, devid 8, serial 9, sync 1, alarm 2)
  * + one row's worst case (2+2+2+1+1+1+64 = 73) times every row, + the fixed
@@ -156,13 +156,15 @@ void snapshot_save(void)
 	uint8_t *p = snapbuf;
 	uint8_t *rows_at, *servs_at, *crc_at;
 	uint16_t rows = 0, servs = 0;
+	uint32_t qlen;
+	void *qstate = qos_prog_state(&qlen);
 	/* Leave room for the fixed pools and the crc after the last row or
 	 * service entry is appended; a save that would not fit is skipped
 	 * rather than truncated silently -- the next MIB-changing message
 	 * tries again, and until then the last good snapshot on disk stands. */
 	const uint32_t fixed_tail = (uint32_t)sizeof(tblpool) +
 		(uint32_t)sizeof(flow_us) + (uint32_t)sizeof(flow_ds) +
-		4 /* bc_flow */ + (uint32_t)sizeof(tcont_map) +
+		4 /* bc_flow */ + (uint32_t)sizeof(tcont_map) + qlen +
 		2 /* serv_count */ + 4 /* crc */;
 
 	put_u8(&p, SNAP_MAGIC0);
@@ -200,6 +202,7 @@ void snapshot_save(void)
 	put_raw(&p, flow_ds, sizeof flow_ds);
 	put_u32(&p, (uint32_t)bc_flow);
 	put_raw(&p, tcont_map, sizeof tcont_map);
+	put_raw(&p, qstate, qlen);
 
 	servs_at = p;
 	put_u16(&p, 0);
@@ -242,6 +245,8 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 	const uint8_t *p;
 	long fd, n;
 	uint16_t rows, servs;
+	uint32_t qlen;
+	void *qstate = qos_prog_state(&qlen);
 
 	if (onu_state != 5)
 		return refuse(why, "not_o5");
@@ -253,7 +258,7 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 	/* Header plus at least the fixed tail and its own crc; anything
 	 * shorter is not a snapshot this code wrote. */
 	if (n < 26 + 2 + (long)sizeof(tblpool) + (long)sizeof(flow_us) +
-		(long)sizeof(flow_ds) + 4 + (long)sizeof(tcont_map) + 2 + 4)
+		(long)sizeof(flow_ds) + 4 + (long)sizeof(tcont_map) + (long)qlen + 2 + 4)
 		return refuse(why, "bad_snapshot");
 
 	p = buf;
@@ -323,6 +328,7 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 		get_raw(&p, flow_ds, sizeof flow_ds);
 		bc_flow = (int)get_u32(&p);
 		get_raw(&p, tcont_map, sizeof tcont_map);
+		get_raw(&p, qstate, qlen);
 
 		servs = get_u16(&p);
 		if (servs > SERV_MAX)

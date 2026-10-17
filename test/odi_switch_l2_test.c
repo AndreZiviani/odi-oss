@@ -5,8 +5,8 @@
  * TABLE_CMD words each access sends, the software walk over valid rows,
  * and multicast add/delete through a small model of the hashed table.
  *
- * The first unicast case restates one row of a public stock `l2-table
- * get entry` listing (MAC 78:54:2E:07:64:63, source port 2, FID 0, age 6,
+ * The first unicast case restates one row in the shape of a stock `l2-table
+ * get entry` listing (invented MAC 02:00:00:00:00:05, source port 2, FID 0, age 6,
  * VID 1, dynamic, SVL): the decode has to give that row back field for
  * field. test_stick_readout() replays a whole table as a stick read it
  * back row by row (four learned MACs, 1020 empty rows).
@@ -171,9 +171,9 @@ static void model_reset(int cam_disabled)
 
 /* ---- Layout --------------------------------------------------------- */
 
-/* 78:54:2E:07:64:63, key (VID) 1, FID 0, SVL, dynamic, port 2, age 6:
- *   raw[0] = MAC bits 0..31              = 0x2e076463
- *   raw[1] = MAC 32..47 0x7854 | key 1 << 16      = 0x00017854
+/* 02:00:00:00:00:05, key (VID) 1, FID 0, SVL, dynamic, port 2, age 6:
+ *   raw[0] = MAC bits 0..31              = 0x00000005
+ *   raw[1] = MAC 32..47 0x0200 | key 1 << 16      = 0x00010200
  *   raw[2] = port 2 at 65 -> bit 1: 2 << 1 = 0x4, age 6 at 67 -> bit 3:
  *            6 << 3 = 0x30, bit 77 -> bit 13: 0x2000     = 0x00002034
  * Bit 77 is set, as it is on every row read back, and the decode must not
@@ -182,11 +182,11 @@ static void model_reset(int cam_disabled)
 static void test_decode_unicast(void)
 {
 	struct odi_sw_l2_row r;
-	static const uint8_t mac[6] = { 0x78, 0x54, 0x2e, 0x07, 0x64, 0x63 };
+	static const uint8_t mac[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x05 };
 
 	memset(&r, 0xa5, sizeof(r));
-	r.raw[0] = 0x2e076463U;
-	r.raw[1] = 0x00017854U;
+	r.raw[0] = 0x00000005U;
+	r.raw[1] = 0x00010200U;
 	r.raw[2] = 0x00002034U;
 	odi_switch_l2_decode(&r);
 	CHECK(r.type == ODI_SW_L2_UCAST, "unicast row decodes as unicast");
@@ -324,8 +324,8 @@ static void test_read(void)
 	int rc;
 
 	model_reset(1);
-	model_rows[5][0] = 0x2e076463U;
-	model_rows[5][1] = 0x00017854U;
+	model_rows[5][0] = 0x00000005U;
+	model_rows[5][1] = 0x00010200U;
 	model_rows[5][2] = 0x00002034U;
 	model_used[5] = 1;
 	/* Stale SPA bits in TABLE_CMD from an earlier user must be cleared. */
@@ -335,7 +335,7 @@ static void test_read(void)
 	mutex_unlock(&odi_switch_lock);
 	CHECK(rc == 0, "row read succeeds");
 	CHECK(model_last_cmd == 0x80000a10U, "row read TABLE_CMD == 0x80000a10");
-	CHECK(r.index == 5 && r.raw[0] == 0x2e076463U && r.raw[1] == 0x00017854U &&
+	CHECK(r.index == 5 && r.raw[0] == 0x00000005U && r.raw[1] == 0x00010200U &&
 	      r.raw[2] == 0x00002034U, "raw words come back in TABLE_READ_WORD order");
 	CHECK(r.type == ODI_SW_L2_UCAST && r.port == 2 && r.age == 6, "and decoded");
 	CHECK(r.flags == ODI_SW_L2_F_VALID, "a row with HIT set reads as valid");
@@ -404,10 +404,10 @@ static void test_walk(void)
 /* The table as ISP1 read it back, row by row, with four learned MACs
  * (image 618p2, diag l2-table get index 0..1023 and TABLE_STATUS after
  * each):
- *   row 0x06c  0x00002038 0x0000bc24 0x1105b324  BC:24:11:05:B3:24 port 0 age 7
- *   row 0x270  0x0000203d 0x000e00e4 0x064cc6f4  00:E4:06:4C:C6:F4 port 2 VID 14 ctag
- *   row 0x364  0x00002038 0x0000049f 0xca787282  04:9F:CA:78:72:82 port 0
- *   row 0x390  0x0000203e 0x0000383a 0x212827c8  38:3A:21:28:27:C8 port 3
+ *   row 0x06c  0x00002038 0x00000200 0x00000001  02:00:00:00:00:01 port 0 age 7
+ *   row 0x270  0x0000203d 0x000e0200 0x00000002  02:00:00:00:00:02 port 2 VID 14 ctag
+ *   row 0x364  0x00002038 0x00000200 0x00000003  02:00:00:00:00:03 port 0
+ *   row 0x390  0x0000203e 0x00000200 0x00000004  02:00:00:00:00:04 port 3
  * (words 2, 1, 0), HIT set after each of those four reads and after no
  * other; every other row read 0x00002000 0x00000000 and its bucket. The
  * walk must give exactly the four back.
@@ -420,14 +420,14 @@ static void test_stick_readout(void)
 		uint16_t key;
 		uint32_t flags;
 	} e[] = {
-		{ 0x06c, { 0x1105b324U, 0x0000bc24U, 0x00002038U },
-		  { 0xbc, 0x24, 0x11, 0x05, 0xb3, 0x24 }, 0, 0, 0 },
-		{ 0x270, { 0x064cc6f4U, 0x000e00e4U, 0x0000203dU },
-		  { 0x00, 0xe4, 0x06, 0x4c, 0xc6, 0xf4 }, 2, 14, ODI_SW_L2_F_CTAG },
-		{ 0x364, { 0xca787282U, 0x0000049fU, 0x00002038U },
-		  { 0x04, 0x9f, 0xca, 0x78, 0x72, 0x82 }, 0, 0, 0 },
-		{ 0x390, { 0x212827c8U, 0x0000383aU, 0x0000203eU },
-		  { 0x38, 0x3a, 0x21, 0x28, 0x27, 0xc8 }, 3, 0, 0 },
+		{ 0x06c, { 0x00000001U, 0x00000200U, 0x00002038U },
+		  { 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 }, 0, 0, 0 },
+		{ 0x270, { 0x00000002U, 0x000e0200U, 0x0000203dU },
+		  { 0x02, 0x00, 0x00, 0x00, 0x00, 0x02 }, 2, 14, ODI_SW_L2_F_CTAG },
+		{ 0x364, { 0x00000003U, 0x00000200U, 0x00002038U },
+		  { 0x02, 0x00, 0x00, 0x00, 0x00, 0x03 }, 0, 0, 0 },
+		{ 0x390, { 0x00000004U, 0x00000200U, 0x0000203eU },
+		  { 0x02, 0x00, 0x00, 0x00, 0x00, 0x04 }, 3, 0, 0 },
 	};
 	struct odi_sw_l2_row r;
 	uint32_t idx = 0;
