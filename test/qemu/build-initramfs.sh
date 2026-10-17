@@ -157,6 +157,12 @@ if [ -f "$TESTKEY_PUB" ]; then
 	cat >> "$STAGE/etc/init.d/rcS.dev" <<'DEVHOOK'
 
 # ---- qemu test harness addition (test/qemu/build-initramfs.sh) --------
+# The config store here is a plain directory under /var (no MTD, below).
+# rcS makes a boot with no mounted config partition a safe-mode boot
+# (safe-mode.sh no-config: default password, PON off), which is right on a
+# stick and not what these scenarios test, so this harness says its
+# directory is the partition.
+config_mounted() { [ -d /etc/config ]; }
 dev_hook() {
 	dev_hook_stock "$@"
 	case "$1" in

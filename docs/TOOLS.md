@@ -815,9 +815,15 @@ A boot with the key unset logs nothing and writes nothing.
     /etc/scripts/safe-mode.sh ack        acknowledge a safe-mode boot: removes its record
     /etc/scripts/safe-mode.sh active     exit 0 on a safe-mode boot
     /etc/scripts/safe-mode.sh count      rcS only, right after the config partition is mounted
+    /etc/scripts/safe-mode.sh no-config  rcS only, instead of count, when it is not: a safe-mode boot with no record
 
 `count` adds one to `/etc/config/boot-count` and spawns `boot-ok`, which
-removes it once the uptime reaches 60 s. Uptime starts with the kernel,
+removes it once the uptime reaches 60 s. It also reads why the previous boot
+ended (`reason=` in `/proc/odi_ramlog_prev`) and keeps `/etc/config/boot-wdt`:
++1 for `wdt_*`, `panic` and `oops`, unchanged for `power`, removed for
+anything else; `boot-ok` removes it at 600 s of uptime. Three boots in a
+row that ended that way make this boot a safe-mode boot as well
+(`cause=watchdog`). Uptime starts with the kernel,
 about 54 s after a cold power-on on the sticks measured (the count lands at
 about 5 s of uptime), so a power-up counts as short when it is cut roughly
 60 to 110 s after power-on: "plug in, wait about 80 s, pull" (docs/SETTINGS.md). A boot that finds five short boots
@@ -829,13 +835,16 @@ before it (three with `HOST_AUTONEG=off`) is a safe-mode boot: it writes
 what the rest reads: `host-autoneg.sh` applies nothing, the PON steps
 leave the laser off and skip `gponact` (`rcs-lib.sh`), `svc-dropbear.sh`
 offers passwords, and confd accepts `admin:admin`. `status` prints
-`active=0|1` with the flag's fields as `now_*`, `record=0|1` with the
-record's as `record_*`, and `boot_count` while there is one.
+`active=0|1` with the flag's fields as `now_*` (`now_cause=` is
+`short_boots`, `watchdog` or `config`), `record=0|1` with the record's as
+`record_*`, `boot_count` while there is one and `wdt_count` likewise.
 
 Its events, to the kernel log at notice: `safe-mode: event=boot_count
-boot=N short_before=N limit=5|3 uptime=S` on every boot (the uptime is
-how early the count lands on a given stick), `event=safe_mode short_boots=N
-cleared=HOST_AUTONEG|none|failed root_password=default|failed`, and
+boot=N short_before=N limit=5|3 wdt_before=N wdt_limit=3 prev=REASON
+uptime=S` on every boot (the uptime is how early the count lands on a given
+stick; `prev` is the previous boot's `reason=`, `none` without a ramlog),
+`event=safe_mode cause=short_boots|watchdog|config short_boots=N
+wdt_resets=N cleared=HOST_AUTONEG|none|failed root_password=default|failed`, and
 `event=safe_mode_ack`.
 
 ### `diag-bundle.sh` -- the diagnostics bundle
@@ -1132,7 +1141,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=reload_step verb=gponsn rc=0` | info, notice when `rc` is not 0 | one driver verb of a re-registration (`gpondeact`, `gponsn`, `gponpw`, `gponact`) and its errno (0 is success) |
 | `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services |
 | `host-autoneg: event=fallback setting=off running=on ...` | notice | the host-port auto-negotiation (`HOST_AUTONEG`): the boot watch, the fallback and every trial; the events are listed under `host-autoneg.sh` above |
-| `safe-mode: event=boot_count boot=1 short_before=0 limit=5 uptime=11` | notice | every boot's count, and a safe-mode boot (`event=safe_mode`); listed under `safe-mode.sh` above |
+| `safe-mode: event=boot_count boot=1 short_before=0 limit=5 wdt_before=0 wdt_limit=3 prev=reboot uptime=11` | notice | every boot's count, and a safe-mode boot (`event=safe_mode`); listed under `safe-mode.sh` above |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 
 `cause` and `side` on `event=onu_state`:

@@ -92,14 +92,22 @@ reset: a trial that never answered still says how far it got
    the kernel log at once: everything that follows reads its switches from
    here, and a switch file that cannot be read is a switch that silently
    turns itself off. `rcS`'s watchdog confirmation (stage 11) refuses to
-   confirm at all without this.
-   Right after it, the boot counter (`/etc/scripts/safe-mode.sh count`,
+   confirm at all without this, except on a safe-mode boot.
+   Right after it, the boot counters (`/etc/scripts/safe-mode.sh count`,
    `docs/SETTINGS.md`, "Recovery: the safe mode"): as early as the counter
    can be written, so a short power-up still counts. It logs the uptime
-   of the count, and after enough short boots in a row it makes this boot
-   a safe-mode boot (`/var/run/safe-mode`): the PON steps then leave the
-   laser off and skip `gponact`, the host port runs auto-negotiation, and
-   the web UI and root accept the default password, for this boot only.
+   of the count, and after enough short boots in a row, or three boots in a
+   row that ended in a watchdog reset (the previous boot's `reason=` from
+   `/proc/odi_ramlog_prev`), it makes this boot a safe-mode boot
+   (`/var/run/safe-mode`): the PON steps then leave the laser off and skip
+   `gponact`, the host port runs auto-negotiation, and the web UI and root
+   accept the default password, for this boot only. With the config
+   partition not mounted rcS calls `safe-mode.sh no-config` instead, which
+   makes this boot a safe-mode boot at once (no record: nowhere to write
+   it). The safe-mode boot confirms the watchdog in stage 11 without the
+   mount and address checks, so it stays up; it is followed by a normal
+   boot, never another safe one, so the state machine cannot loop
+   (`docs/SETTINGS.md` has it whole).
 3. **Entropy.** Nothing on this board feeds the pool early, so without a
    seed every daemon starts on a nearly empty one (dropbear once logged 27
    bits available). `seedrng` credits the seed the previous boot saved

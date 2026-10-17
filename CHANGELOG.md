@@ -5,6 +5,31 @@ listed here.
 
 ## Unreleased
 
+- safe mode: it now also catches a reset loop and a dead config partition,
+  the two ways a stick could stay out of reach with no power-cycle pattern
+  able to help. A boot whose userland never confirms (odi_wdt resets it at
+  123 s) or whose client stops pinging clears the short-boot counter at 60 s,
+  so five short boots never happened and the stick reset every two to three
+  minutes for ever. `safe-mode.sh count` now reads why the previous boot ended
+  (`reason=` in `/proc/odi_ramlog_prev`) and keeps `/etc/config/boot-wdt`: +1
+  for `wdt_*`, `panic` and `oops`, unchanged after a power cycle, removed by
+  anything else and after 600 s of uptime. Three such boots in a row make
+  the next one a safe-mode boot (`cause=watchdog`); one or two, or resets
+  hours apart, never do. With the config partition not mounted or not
+  writable rcS calls `safe-mode.sh no-config`: a safe-mode boot at once
+  (`cause=config`, no record, the flag in `/var/run` says it), where before
+  the boot was silently not counted. A safe-mode boot now confirms the
+  watchdog without the mount, address and confirm-arp checks (the switch
+  init must still have worked), so it stays up to be reached; the boot after
+  it is a normal one, so the state machine cannot loop. The record and the
+  `safe_mode` and `boot_count` events gain `cause=`, `wdt_resets=` and
+  `wdt_before=`. The qemu harness declares its plain-directory config store
+  mounted. docs/SETTINGS.md, docs/BOOT.md and docs/TOOLS.md have the state
+  machine; the test is test/safe_mode_test.sh. The rcS trace goldens gain
+  the exec lines of the new reads (written by hand: the trace harness did
+  not run on htpc, its strace package install fails there).
+  Refs #106
+
 - Comments and this changelog no longer cite files of a private workspace.
 
 - omcid: alarms and attribute value changes. omcid never sent either; the
