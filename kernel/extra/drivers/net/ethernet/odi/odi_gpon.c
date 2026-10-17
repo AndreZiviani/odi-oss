@@ -967,6 +967,17 @@ void odi_gpon_sn_get(u8 sn[8])
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 }
 
+int odi_gpon_alloc_row(uint16_t alloc_id)
+{
+	unsigned long flags;
+	int row;
+
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	row = odi_gpon_hw_alloc_id_assign(alloc_id);
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+	return row;
+}
+
 void odi_gpon_eqd_get(struct odi_gpon_eqd *eqd)
 {
 	uint32_t mf, inf;

@@ -498,9 +498,9 @@ static uint32_t tcont_index(uint16_t meId)
  *     Alloc-ID that no set T-CONT claims, in assignment order;
  *   - the rest read 0x00FF, and tcont_apply() refuses them.
  *
- * Binding by position also keeps T-CONT k on the kernel's Alloc-ID CAM row
- * k, which is the order its upstream queue and flow words are laid out in
- * (odi_switch_cmd.c, cmd 23 and 25). */
+ * The driver index of a T-CONT is the CAM row of its Alloc-ID, whatever the
+ * order (odi_switch_cmd.c, cmd 21), so nothing here depends on positions
+ * lining up. */
 #define ALLOC_ID_UNASSIGNED 0x00ffu
 
 const char *gpon_proc_path = "/proc/odi_gpon/status";
