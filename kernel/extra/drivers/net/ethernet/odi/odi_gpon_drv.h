@@ -188,4 +188,16 @@ void odi_gpon_hw_ext_burst_length(uint8_t pre_ranged_preamble_bytes,
 typedef void (*odi_gpon_ploam_log_fn)(unsigned int dir, const struct odi_gpon_ploam *msg);
 void odi_gpon_hw_set_ploam_log(odi_gpon_ploam_log_fn fn);
 
+/* The module's TX-disable line, driven by the leaf from the state it
+ * writes: fn(1) on entering Emergency Stop (O7), fn(0) on any other state
+ * written while it was asserted (G.984.3 10.2.2 g: the ONU in O7 shuts its
+ * laser off; the stock GPON module drives its TX-disable GPIO exactly
+ * there). Returns 0 when the line moved. NULL (the default, and after
+ * odi_gpon_hw_reset()) drives nothing. Called with odi_gpon_lock held.
+ */
+typedef int (*odi_gpon_tx_disable_fn)(int disable);
+void odi_gpon_hw_set_tx_disable(odi_gpon_tx_disable_fn fn);
+/* 1 while the leaf holds the TX-disable line asserted (O7). */
+int odi_gpon_hw_tx_disabled(void);
+
 #endif /* ODI_GPON_DRV_H */

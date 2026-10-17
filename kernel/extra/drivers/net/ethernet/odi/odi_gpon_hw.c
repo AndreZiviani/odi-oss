@@ -127,6 +127,12 @@ struct odi_gpon_hw_state {
 	 * odi_gpon_isr()/odi_gpon_verb_*() call this fires from).
 	 */
 	odi_gpon_ploam_log_fn ploam_log;
+
+	/* The TX-disable hook (odi_gpon_hw_set_tx_disable()) and whether the
+	 * line is held asserted by it, for O7.
+	 */
+	odi_gpon_tx_disable_fn tx_disable;
+	int tx_disabled;
 };
 
 static struct odi_gpon_hw_state odi_gpon_hw;
@@ -208,6 +214,30 @@ void odi_gpon_hw_test_set_key_source(void (*fn)(uint8_t key[16]))
 
 /* ---- struct odi_gpon_fsm_ops leaves ---- */
 
+/* Emergency Stop (O7) turns the transmitter off: G.984.3 10.2.2 g) ("moves
+ * to the emergency stop state (O7) and shuts its laser off"), and the stock
+ * GPON module raises its TX-disable GPIO on every transition into O7 and
+ * lowers it on the enable that leaves O7, nowhere else (the 2.6.30 GPL
+ * drop, gpon_fsm.c, gpon_dev_rogueOntDisTx_set(); read, not copied). The
+ * MAC alone does not show that it stops bursting in O7. So the line
+ * follows the state written: asserted when it is O7, released when any
+ * other state is written after it, whichever path leaves O7 (the enable,
+ * the activate verb, gpondeact). Not tied to the FSM's laser_enable(),
+ * which also fires on Deactivate_ONU-ID and LOS, where stock leaves the
+ * laser alone and nothing would turn it back on before O3.
+ */
+static void hw_tx_gate(enum odi_gpon_state state)
+{
+	int want = state == ODI_GPON_STATE_O7;
+
+	if (want == odi_gpon_hw.tx_disabled || !odi_gpon_hw.tx_disable)
+		return;
+	if (odi_gpon_hw.tx_disable(want) == 0)
+		odi_gpon_hw.tx_disabled = want;
+	else
+		ODI_GPON_HW_WARN("TX-disable %s failed\n", want ? "assert (O7)" : "release");
+}
+
 static void hw_set_state(void *ctx, enum odi_gpon_state state)
 {
 	uint32_t reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
@@ -215,6 +245,7 @@ static void hw_set_state(void *ctx, enum odi_gpon_state state)
 	(void)ctx;
 	reg = ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)state);
 	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF, reg);
+	hw_tx_gate(state);
 }
 
 static void hw_release_rows(void);
@@ -530,7 +561,7 @@ static void hw_stop_to2(void *ctx) { (void)ctx; }
  * hardware default; not reproduced, a deliberate no-op, not a
  * silently-forgotten leaf.
  */
-static void hw_laser_enable(void *ctx, int enable) { (void)ctx; (void)enable; }
+static void hw_laser_enable(void *ctx, int enable) { (void)ctx; (void)enable; }	/* O7: hw_tx_gate() */
 
 /* link_force_up: named for odi_gpon_fsm.c's own design (its header comment:
  * "forcing the PON port MAC link up entering O5, down leaving it"), but the
@@ -1213,6 +1244,8 @@ void odi_gpon_verb_deactivate(struct odi_gpon_fsm *fsm)
 	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF,
 		       ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)ODI_GPON_STATE_O1));
 
+	hw_tx_gate(ODI_GPON_STATE_O1);
+
 	/* The row teardown (hw_release_rows()), then the ONU-ID registers. */
 	hw_set_onu_id(NULL, ODI_GPON_ONU_ID_BROADCAST);
 
@@ -1275,6 +1308,16 @@ uint32_t odi_gpon_hw_get_ber_interval_frames(void)
 void odi_gpon_hw_send_us_ploam(const struct odi_gpon_ploam *msg)
 {
 	hw_send_us_ploam(NULL, msg);
+}
+
+void odi_gpon_hw_set_tx_disable(odi_gpon_tx_disable_fn fn)
+{
+	odi_gpon_hw.tx_disable = fn;
+}
+
+int odi_gpon_hw_tx_disabled(void)
+{
+	return odi_gpon_hw.tx_disabled;
 }
 
 void odi_gpon_hw_set_ploam_log(odi_gpon_ploam_log_fn fn)

@@ -736,6 +736,7 @@ int odi_gpon_init(void)
 	odi_gpon_hw_reset();
 	odi_gpon_fsm_init(&odi_gpon_fsm_inst);
 	odi_gpon_hw_set_ploam_log(odi_gpon_ploam_log);
+	odi_gpon_hw_set_tx_disable(odi_board_tx_disable);
 	odi_gpon_isr_set_msg_hook(odi_gpon_isr_msg);
 	odi_gpon_booted = false;
 	odi_gpon_ber_period_ms = 0U;
@@ -1125,6 +1126,7 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 		odi_board_laser_get(&laser);
 		seq_printf(seq, "laser on %d ldd_id %d unverified %d\n",
 			   laser.laser_on, laser.ldd_id, laser.unverified);
+		seq_printf(seq, "laser_emergency_stop %d\n", laser.emergency_stop);
 	}
 	seq_printf(seq, "last_los_ms %lu state %d\n", last_los, last_los_state);
 
