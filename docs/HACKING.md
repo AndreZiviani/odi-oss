@@ -936,8 +936,8 @@ Each of these has cost real time. The pointer says where the evidence is.
 
 - **The config store is shared with the stock firmware.** The jffs2
   `config` partition is not part of a slot: both images read it, and a
-  reflash never touches it. Of its 184 keys this image reads 21; the UI
-  shows the rest read-only. **Never delete a key** this image does not use
+  reflash never touches it. Of its 184 keys this image acts on 23 (22 the UI
+  edits, and bit 256 of `OMCI_CUSTOM_ME`); the UI shows the rest read-only. **Never delete a key** this image does not use
   (the stock slot still reads it), never erase the partition (it holds the
   serial number and MAC the line authenticates on), and keep backups whole.
   `flash set` and `flash default` install the new file by rename on the
@@ -1031,7 +1031,7 @@ read at boot unless stated. rcS paths are
 | `omci-identity.on` | `src/omci/respond/omcid.h:478` (`CFG_REPORT_SWITCH`), `cfgstore.c:882` | omcid reports the OLT identity keys (`OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, ...); `apply.sh omci` | absent: built-in values | prod |
 | `breadcrumbs.on` | `rcS.dev:27`, `:53`, `:62`, `:76`, `:87`, `:106` | boot crumbs to `breadcrumbs`, `trial-diag.txt`, a 30 s heartbeat to the kernel log, soft-lockup 20 s and hung-task 30 s | absent | dev |
 | `confirm-arp` | `rcS.dev:169` | confirm the watchdog only after an ARP reply from `.2` of `br0`; **resets every 120 s if the host is elsewhere** | absent: confirm unconditionally | dev |
-| `odi.conf` | `etc/scripts/flash` (`ODI_KEYS`), written by `flash set`; `ODI_LASER_UNVERIFIED` is read by `pon_step_laser()` | odi-only keys: `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`, `OMCI_UNKNOWN_ME_OK`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `ODI_LASER_UNVERIFIED` (`docs/SETTINGS.md`); `ODI_LASER_UNVERIFIED=1` lights the laser on an unvalidated laser driver | absent: none set | prod |
+| `odi.conf` | `etc/scripts/flash` (`ODI_KEYS`), written by `flash set`; `ODI_LASER_UNVERIFIED` is read by `pon_step_laser()` | odi-only keys: `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `HOST_AUTONEG`, `ODI_LASER_UNVERIFIED` (`docs/SETTINGS.md`); `ODI_LASER_UNVERIFIED=1` lights the laser on an unvalidated laser driver | absent: none set | prod |
 | `confd.auth`, `confd/`, `dropbear.d/authorized_keys` | confd (odi-ui); dropbear via `svc-dropbear.sh` (`-D`) | UI credential, UI overrides, root SSH keys | admin/admin; image assets; none | prod |
 
 State files, not switches: `seedrng/` (entropy seed, rcS `:97`),

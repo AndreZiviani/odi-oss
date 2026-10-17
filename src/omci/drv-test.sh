@@ -287,5 +287,47 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	fi
 fi
 
+# ------------------------------------------------ upstream traffic descriptor
+#
+# A GEM port CTP's upstream traffic descriptor (class 280, named by class
+# 268 attribute 5) gives the rates of its upstream queue, as in the stock
+# stack: byte/s divided by 1024. Neither ISP provisions one, so they are
+# appended to the ISP2 session: descriptor 1 created with CIR 125000 and
+# PIR 250000 (meter type 2), the data CTP 0x0002 pointed at it, then the
+# descriptor's CIR raised to 250000, which alone must re-send the queue.
+if [ "${UPDATE:-0}" != 1 ]; then
+	cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-td.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp2 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	{
+		cat "$FIX/omci-session-isp2.txt"
+		printf '0e60440a01180001%s%024d00000028%08d\n' 0001e8480003d090000000000000000000000002 0 0
+		printf '0e61480a010c0002%s%056d00000028%08d\n' 08000001 0 0
+	} > /tmp/session-td.txt
+	$Q cli/build/omcli --inject-file /tmp/session-td.txt > /dev/null 2>&1
+	settled "$log"
+	first=$(grep '^drv 23 ' "$log" | tail -1)
+	n=$(grep -c '^drv 23 ' "$log")
+	printf '0e62480a01180001%s%052d00000028%08d\n' 80000003d090 0 0 > /tmp/session-td2.txt
+	$Q cli/build/omcli --inject-file /tmp/session-td2.txt > /dev/null 2>&1
+	# No bridge rebuild follows a descriptor Set, only the QoS one: wait
+	# for its queue call.
+	wait_for "$log" '^drv 23 ' 30 $((n + 1))
+	omcid_stop "$pid"
+	second=$(grep '^drv 23 ' "$log" | tail -1)
+	case "$first" in
+	*0000007a000000f4*) echo "ok    traffic descriptor: CIR 122 and PIR 244 (x 8 kbit/s) on the queue" ;;
+	*) echo "FAIL  traffic descriptor: last queue call '$first', want CIR 0x7a PIR 0xf4"
+	   fail=$((fail + 1)) ;;
+	esac
+	case "$second" in
+	*000000f4000000f4*) echo "ok    traffic descriptor: a Set of its CIR re-sends the queue" ;;
+	*) echo "FAIL  traffic descriptor: after the CIR Set '$second', want CIR 0xf4 PIR 0xf4"
+	   fail=$((fail + 1)) ;;
+	esac
+fi
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 exit "$fail"

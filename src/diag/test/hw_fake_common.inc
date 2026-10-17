@@ -138,3 +138,39 @@ int __wrap_hw_gpon_alarms_get(uint32_t *alarms, uint32_t *known)
 	*known = GPON_ALARM_KNOWN;
 	return 0;
 }
+
+/* The module's monitoring type and alarm/warning limits (A0h 92-94, A2h
+ * 0-39), the bytes of one working module read over I2C (a reporter's
+ * diagnostics bundle): internally calibrated, its Rx low alarm at -30 dBm.
+ * Shared by every scenario: none of them is about these. */
+static const uint8_t fake_monitor[3] = { 0x68, 0xb0, 0x03 };
+static const uint8_t fake_limits[40] = {
+	0x64, 0x00, 0xd8, 0x00, 0x5a, 0x00, 0xec, 0x00,
+	0x8c, 0xa0, 0x75, 0x30, 0x88, 0xb8, 0x79, 0x18,
+	0xc3, 0x50, 0x01, 0xf4, 0xaf, 0xc8, 0x01, 0xf4,
+	0x9b, 0x82, 0x22, 0xd0, 0x8a, 0x99, 0x27, 0x10,
+	0x07, 0xcb, 0x00, 0x0a, 0x06, 0x31, 0x00, 0x0d,
+};
+
+int __wrap_hw_transceiver_block_get(int sel, uint8_t out[DDM_RAW_LEN]);
+int __wrap_hw_transceiver_block_get(int sel, uint8_t out[DDM_RAW_LEN])
+{
+	for (int i = 0; i < DDM_RAW_LEN; i++)
+		out[i] = 0;
+	if (sel == DDM_SEL_MONITOR_TYPE) {
+		for (int i = 0; i < 3; i++)
+			out[i] = fake_monitor[i];
+		return 0;
+	}
+	if (sel == DDM_SEL_LIMITS_A) {
+		for (int i = 0; i < 24; i++)
+			out[i] = fake_limits[i];
+		return 0;
+	}
+	if (sel == DDM_SEL_LIMITS_B) {
+		for (int i = 0; i < 16; i++)
+			out[i] = fake_limits[24 + i];
+		return 0;
+	}
+	return -1;
+}

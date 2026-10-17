@@ -38,9 +38,9 @@ refused, and the upstream GEM ports on them are never programmed. omcid binds
 from the kernel's list instead (`src/omci/respond/apply_qos.c`, "the T-CONT
 Alloc-IDs") and keeps any value the OLT sets.
 
-Binding by position also keeps T-CONT k on Alloc-ID CAM row k, the order the
-kernel's upstream queue and flow words were captured in
-(`kernel/extra/drivers/net/ethernet/odi/odi_switch_cmd.c`, commands 23 and 25).
+The kernel does not rely on that order: command 21 answers with the CAM row
+that holds the Alloc-ID, which is the T-CONT's upstream scheduler in the
+hardware (`kernel/extra/drivers/net/ethernet/odi/odi_switch_cmd.c`).
 
 ## Evidence
 
