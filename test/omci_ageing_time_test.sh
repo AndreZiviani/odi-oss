@@ -40,8 +40,12 @@ if ! grep -q 'omci_setAgeingTime(300 \* 10);' "$apply_c"; then
 	echo "FAIL: apply.c class-45 delete arm no longer scales ageing time (expected omci_setAgeingTime(300 * 10))" >&2
 	exit 1
 fi
-if ! grep -q 'age \*= 10;' "$apply_c"; then
-	echo "FAIL: apply_uni.c class-45 Set/Create no longer scales the ageing time to tenths (expected age *= 10)" >&2
+if ! grep -q 'age = age > AGE_TICKS_MAX / 10 ? AGE_TICKS_MAX : age \* 10;' "$apply_c"; then
+	echo "FAIL: apply_uni.c class-45 Set/Create no longer scales the ageing time to tenths, clamped to AGE_TICKS_MAX (expected age = age > AGE_TICKS_MAX / 10 ? AGE_TICKS_MAX : age * 10;)" >&2
+	exit 1
+fi
+if ! grep -q 'define AGE_TICKS_MAX 0x1fffffu' "$apply_c"; then
+	echo "FAIL: apply_uni.c AGE_TICKS_MAX is not the 21-bit field 0x1fffff (the AGE_TICKS mask checked above)" >&2
 	exit 1
 fi
 

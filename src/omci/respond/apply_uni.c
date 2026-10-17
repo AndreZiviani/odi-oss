@@ -5,6 +5,9 @@
  */
 #include "omcid.h"
 
+/* The AGE_TICKS field of L2_LOOKUP_SETUP (odi_switch_hw.h), bits [20:0]. */
+#define AGE_TICKS_MAX 0x1fffffu
+
 /* AutoDetectCfg (class 11 attribute 3) to the ability word of the
  * auto-negotiation command. */
 static int ethuni_auto_ability(uint32_t cfg, uint32_t *ability)
@@ -618,7 +621,10 @@ void apply_mbsp(const struct omci_class *c, uint16_t inst,
 		 * aged out in N/10. */
 		if (age == 0)
 			age = 300;
-		age *= 10;
+		/* AGE_TICKS is 21 bits wide (0x1fffff, about 58 hours): a
+		 * larger value would be masked into a short ageing time. Clamp
+		 * to the longest the register holds. */
+		age = age > AGE_TICKS_MAX / 10 ? AGE_TICKS_MAX : age * 10;
 		out_fmt("   ageing time %d\n", (long)age);
 		if (!apply_hw)
 			return;

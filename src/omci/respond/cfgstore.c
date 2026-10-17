@@ -425,22 +425,23 @@ struct onu_vlan_cfg vlanCfg;
  *
  * which is to say the OLD value wins whenever the two disagree -- including
  * when LOID_OLD is empty and LOID is not, in which case the vendor passes no
- * -l at all and the new value is silently ignored. The same for the password,
- * whose OLD half lives in the hs file while its current half is in cs, so a
- * `flash default cs` leaves them disagreeing and the old password in force.
+ * -l at all and the new value is silently ignored. A key that is absent
+ * counts as empty, as an unset shell variable does.
+ *
+ * The password follows the LOID, not itself: runomci.sh tests
+ * LOID_OLD == LOID again for -w, so with the same LOID the current password
+ * is sent, changed or not, and with a different LOID the old one is. Its OLD
+ * half lives in the hs file while its current half is in cs, so a
+ * `flash default cs` that changes the LOID leaves the old password in force.
  *
  * Reproduced exactly. It is surprising enough that doing the sensible thing
  * instead would make us behave differently from the stick beside us. */
-static void pick_old_wins(const char *cur, int curLen,
-			  const char *old, int oldLen, char *out, int max)
+static void pick_loid_value(int same, const char *cur, int curLen,
+			    const char *old, int oldLen, char *out, int max)
 {
-	const char *src = cur;
-	int len = curLen;
+	const char *src = same ? cur : old;
+	int len = same ? curLen : oldLen;
 
-	if (oldLen < 0 || curLen < 0 || !str_eq(cur, old)) {
-		src = old;
-		len = oldLen;
-	}
 	if (len < 0) {
 		out[0] = 0;
 		return;
@@ -471,17 +472,23 @@ static int cfg_get_either(const char *first, const char *second,
 void cfg_load_identity_from(const char *cs, const char *hs)
 {
 	char loid[64], loidOld[64], pwd[64], pwdOld[64];
-	int a, b;
+	int a, b, same;
 
 	ident.snLen   = cfg_get_either(hs, cs, "GPON_SN", ident.sn, sizeof ident.sn);
 	ident.ploamLen = cfg_get_either(hs, cs, "GPON_PLOAM_PASSWD",
 					ident.ploam, sizeof ident.ploam);
 	a = cfg_get_either(cs, hs, "LOID", loid, sizeof loid);
 	b = cfg_get_either(cs, hs, "LOID_OLD", loidOld, sizeof loidOld);
-	pick_old_wins(loid, a, loidOld, b, ident.loid, sizeof ident.loid);
+	if (a < 0)
+		loid[0] = 0;
+	if (b < 0)
+		loidOld[0] = 0;
+	same = str_eq(loid, loidOld);
+	pick_loid_value(same, loid, a, loidOld, b, ident.loid, sizeof ident.loid);
 	a = cfg_get_either(cs, hs, "LOID_PASSWD", pwd, sizeof pwd);
 	b = cfg_get_either(hs, cs, "LOID_PASSWD_OLD", pwdOld, sizeof pwdOld);
-	pick_old_wins(pwd, a, pwdOld, b, ident.loidPwd, sizeof ident.loidPwd);
+	pick_loid_value(same, pwd, a, pwdOld, b, ident.loidPwd,
+			sizeof ident.loidPwd);
 	ident.loaded = 1;
 }
 
@@ -620,7 +627,15 @@ void cfg_show_identity(void)
 		out(ident.ploamLen == 0 ? "empty" : "(not in the store)");
 	out_char('\n');
 	out_fmt("loid        %s\n", ident.loid[0] ? ident.loid : "(none -- nothing would be sent)");
-	out_fmt("loid pw     %s\n", ident.loidPwd[0] ? "set (withheld)" : "(none)");
+	if (ident.loidPwd[0]) {
+		int n = 0;
+
+		while (ident.loidPwd[n])
+			n++;
+		out_fmt("loid pw     set, %d bytes (withheld)\n", (long)n);
+	} else {
+		out("loid pw     (none)\n");
+	}
 	if (!report.loaded)
 		cfg_load_report();
 	out_fmt("report      %s (" CFG_REPORT_SWITCH ")\n",

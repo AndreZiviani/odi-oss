@@ -163,6 +163,17 @@ $Q cli/build/omcli --inject "0c03480a002d00010040$(printf '00000064%052d' 0)0000
 wait_count /tmp/live-a.log "ageing time 1000" 1 10
 check "MAC bridge ageing time 100 s is sent as 1000 tenths" \
       "$(grep -c 'ageing time 1000' /tmp/live-a.log)" "1"
+# The register field holds 21 bits of tenths: 209715 s still fits (2097150),
+# one second more, and anything larger, is clamped to 2097151 instead of
+# being masked into a short ageing time.
+$Q cli/build/omcli --inject "0c04480a002d00010040$(printf '00033333%052d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+wait_count /tmp/live-a.log "ageing time 2097150" 1 10
+check "MAC bridge ageing time 209715 s still fits the register" \
+      "$(grep -c 'ageing time 2097150' /tmp/live-a.log)" "1"
+$Q cli/build/omcli --inject "0c05480a002d00010040$(printf '000493e0%052d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
+wait_count /tmp/live-a.log "ageing time 2097151" 1 10
+check "MAC bridge ageing time 300000 s is clamped to the 21-bit field" \
+      "$(grep -c 'ageing time 2097151' /tmp/live-a.log)" "1"
 check "VEIP: locked until the OLT unlocks it" "$(attr 329 1537 1)" "01"
 check "VEIP: and disabled while locked" "$(attr 329 1537 2)" "01"
 # Set VEIP 0x0601 AdminState to 0 (unlocked), as an OLT does.

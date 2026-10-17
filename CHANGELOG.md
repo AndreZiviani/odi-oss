@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the LOID password omcid reports (ONU-G, CTC LOID entity) follows the
+  LOID, as the stock `runomci.sh` does: with the same `LOID` and `LOID_OLD`
+  the current `LOID_PASSWD` is reported, so a changed password takes effect
+  (it used to report `LOID_PASSWD_OLD` whenever the two passwords differed);
+  with different LOIDs the old password stays. A MAC bridge ageing time above
+  209715 s is clamped to the 21-bit register field instead of being masked
+  into a short one. `omcli ident` shows the password length, never the
+  password.
+
 - OMCI: values the ONU reports on its own now match what the stock MIB
   reset puts there. ONU-G reports the configured LOID and LOID password
   (attributes 10 and 11), as the CTC LOID entity already did: an OLT that
