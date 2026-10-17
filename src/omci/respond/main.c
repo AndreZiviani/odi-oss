@@ -332,6 +332,16 @@ int main(int argc, char **argv)
 		for (int id = 0; id < SERV_MAX; id++)
 			omci_deactiveBdgConn((uint32_t)id);
 		out_fmt("restart: %d bridge connection ids cleared\n", (long)SERV_MAX);
+		/* And the upstream T-CONTs, queues and flows the last omcid
+		 * programmed: this one starts with none of them in its tables,
+		 * and would otherwise meet their queue blocks and keep their
+		 * flows valid (odi_switch_cmd.c, command 0). */
+		{
+			uint8_t none[4] = { 0, 0, 0, 0 };
+
+			out_fmt("restart: upstream reset -> %d\n",
+				(long)omci_drv_call(OMCI_MIB_RESET_CMD, none, sizeof none));
+		}
 	}
 
 	/* The netlink poll is NL_POLL_US (2 ms): the queues are served between
@@ -419,8 +429,10 @@ int main(int argc, char **argv)
 					 * bound T-CONT: a T-CONT the driver
 					 * refused because its Alloc-ID was not
 					 * assigned yet is bound by this. */
-					if (alloc_ids_refresh())
+					if (alloc_ids_refresh()) {
 						qos_dirty = 1;
+						qos_full = 1;
+					}
 					ev_tick();
 				}
 				/* Every 15 s: a quarter of the 60 s deadline
