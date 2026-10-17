@@ -34,7 +34,7 @@
 #                            seconds plus the OLT provisioning time. The
 #                            process is never restarted.
 #                        It waits SECONDS (default 20, APPLY_WAIT; the web UI
-#                        gives this script 25) for the outcome: reload done,
+#                        gives this script 25), counted from the signal, for the outcome: reload done,
 #                        or for a re-registration back in O5 with services,
 #                        and reports how long that took. A re-registration
 #                        still running at the bound is reported as running and
@@ -129,7 +129,9 @@ omci() {
 
 	# The outcome, bounded. Counted in iterations of one second: this is
 	# also what runs under the test fixture, where uptime is a constant.
-	i=0
+	# The seconds the acknowledgement took count against the same bound, so
+	# a slow acknowledgement plus a full wait cannot outlast the 25 s the
+	# web UI gives this script (ACK_WAIT 5 + APPLY_WAIT 20 did, by a hair).
 	while [ "$(status_get state)" != "done" ] && [ "$i" -lt "$wait_s" ]; do
 		sleep 1
 		i=$((i + 1))
