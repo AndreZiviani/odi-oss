@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Kernel: the GPON MAC follows G.984.3 in two cases neither of our OLTs
+  hits. The ONU answers Request_Password with three identical Password
+  messages (it sent one; the OLT accepts a password only after three).
+  And with no Extended_Burst_Length from the OLT, the ranged burst
+  overhead is the 12-byte default, as before ranging, instead of the
+  25 bytes one ISP's OLT asks for in its own Extended_Burst_Length.
+
 - Docs and tests: the key counts are corrected (the image acts on 22 of the 184
   stock keys, plus bit 256 of `OMCI_CUSTOM_ME`, not "reads 21"; 161 are
   read-only), HACKING.md lists every key of `odi.conf`, SETTINGS.md says that
