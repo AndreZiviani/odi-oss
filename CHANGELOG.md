@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Tests: the fixed sleeps that waited for an event in `test/host_autoneg_test.sh`
+  (the 0.3 s before reading what the stub `setsid` recorded),
+  `test/apply_test.sh` (2 s for the delayed network apply) and
+  `test/omci_respawn_test.sh` (eight 1 s sleeps around the stub omcid and the
+  FIFO reader) are bounded polls for the event itself, as `safe_mode_test.sh`
+  has been since #105, so a loaded host (the parallel `make test` legs) no
+  longer fails them. Checks that expect nothing to happen keep a short fixed
+  wait, since there is nothing to poll for. No change to the image.
+
 - Docs: the README rows for the OMCI values read from the stick and the VEIP
   and vendor-private keys say what was checked on sticks: the values on two
   sticks on two OLTs against the stock dumps, the new keys only at their
