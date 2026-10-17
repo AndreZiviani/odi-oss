@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- omcid: the upstream traffic descriptor of a GEM port (class 280, named by
+  the GEM port network CTP) sets the CIR and PIR of its upstream queue, as
+  the stock stack does (byte/s divided by 1024; for an RFC 4115 meter the
+  PIR less the CIR). Our ONU-G reports traffic management option 2
+  (priority and rate controlled), which lets an OLT provision these; they
+  used to be dropped, and every queue went out unlimited. A Set or delete
+  of such a descriptor, and of a traffic scheduler (class 278, whose
+  policy decides strict or weighted queues), now rebuilds the upstream
+  queues. Neither of the OLTs this was tested against provisions one; the
+  rates reach the hardware with the kernel that programs cmd 23 from its
+  arguments.
+
 - Docs: the README rows for the OMCI values read from the stick and the VEIP
   and vendor-private keys say what was checked on sticks: the values on two
   sticks on two OLTs against the stock dumps, the new keys only at their
