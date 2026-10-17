@@ -351,7 +351,11 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	uni_set 0e64 01 > /tmp/session-lock0.txt
 	$Q cli/build/omcli --inject-file /tmp/session-lock0.txt > /dev/null 2>&1
 	need "$log" 'lock ignored (OMCI_UNI_LOCK=0)' 20
-	finish "$log"
+	# No bridge rebuild follows (nothing here touches a connection), so
+	# settled would wait for one that never comes: the Get answered is the
+	# sync point.
+	sync_send "$log"
+	omcid_stop "$pid"
 	rm -f /var/config/odi.conf
 	calls=$(grep '^drv 32 ' "$log" | sed 's/^drv 32 8 0*//; s/^$/0/' | tr '\n' ' ')
 	if [ "$calls" = "1 1 " ]; then
