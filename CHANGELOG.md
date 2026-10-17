@@ -16,10 +16,12 @@ listed here.
   ONU-G state attribute follows the PON state; the private VLAN configuration
   (ME 10212) shows the stored VLAN type, mode, VID and priority; the software
   image flags (ME 7) follow the running and committed flash slots; and the
-  attributes an OLT writes (priority queue scheduler pointer, T-CONT policy,
-  TR-069 server and VEIP administrative state, the VEIP operational state)
-  read as their power-on values until the OLT writes them, instead of the
-  values the capture stick's OLT had written. The 64 reserved priority queues
+  attributes an OLT writes (priority queue scheduler pointer, TR-069 server
+  and VEIP administrative state, the VEIP operational state) read as their
+  power-on values until the OLT writes them, instead of the values the
+  capture stick's OLT had written. The T-CONT policy stays 1 on all 16
+  T-CONTs, as on the stock firmware: some OLTs provision the upstream queues
+  only when it is not null, and nothing on the ONU writes it. The 64 reserved priority queues
   no longer carry the text `0x0` in their drop threshold. `mib-defaults.py`
   now refuses OLT-writable attributes, so a regenerated table cannot carry
   provisioning, and a test checks the table. omcid takes `-l file` (test

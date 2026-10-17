@@ -11,6 +11,7 @@
 #   ANI-G (263): optical signal and transmit levels follow the DDM reads
 #   PPTP Ethernet UNI (11): the configuration indication follows the link
 #   priority queue (277): PktDropQThold on the reserved queues reads zero
+#   T-CONT (262): Policy reads 1 on every T-CONT before the OLT writes anything
 #
 # The serial, the PON state and the link come in through omcid -g and -l (a
 # file in the shape of /proc/odi_gpon/status and the host_link parameter); the
@@ -137,7 +138,11 @@ check "reserved queue 0xff3f: PktDropQThold is zero" \
 # another stick's OLT wrote.
 check "priority queue 0x8000: SchedulerPtr is unset (0)" "$(attr 277 32768 7)" "0000"
 check "priority queue 0x8008: SchedulerPtr is unset (0)" "$(attr 277 32776 7)" "0000"
-check "T-CONT 0x8000: Policy is the power-on null policy (0)" "$(attr 262 32768 3)" "00"
+# T-CONT Policy is the one OLT-writable value the ONU reports on its own: some
+# OLTs provision the upstream queues only against a non-null policy.
+for tc in 32768 32769 32775 32776 32783; do
+	check "T-CONT $tc: Policy is 1 (reported by the ONU)" "$(attr 262 $tc 3)" "01"
+done
 check "TR-069 server: locked until the OLT unlocks it" "$(attr 340 1537 1)" "01"
 check "VEIP: locked until the OLT unlocks it" "$(attr 329 1537 1)" "01"
 check "VEIP: and disabled while locked" "$(attr 329 1537 2)" "01"

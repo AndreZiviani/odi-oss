@@ -13,6 +13,7 @@
 #      OLT can write, outside the verified list;
 #   3. the generator, run on a small synthetic dump: a 0x value is read as a
 #      number, 0x garbage is refused, a skipped attribute does not come out.
+#   4. T-CONT Policy (262/3) is 1 on all 16 T-CONTs, whatever the dump says.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 GEN="$ROOT/src/omci/generated"
@@ -25,7 +26,7 @@ model = {e['table']['classId']: e for e in json.load(open(gen + '/omci_mib.json'
          if e['table']['classId'] is not None}
 live = {(6, 3), (6, 4), (6, 5), (256, 14), (257, 10), (263, 10), (263, 14),
         (11, 2), (11, 7), (10212, 1), (10212, 2), (10212, 3), (10212, 4),
-        (277, 7), (262, 3), (256, 6)}
+        (277, 7), (256, 6)}
 bad = []
 for l in open(gen + '/omci_defaults.c'):
     m = re.match(r'\s*\{ (\d+), 0x[0-9a-f]+, (\d+), (\d+), \{ ([^}]*) \} \}', l)
@@ -39,6 +40,12 @@ for l in open(gen + '/omci_defaults.c'):
         bad.append('numeric attribute with ASCII 0x: ' + l.strip())
     if (cls, k) in live:
         bad.append('live or configured attribute in the table: ' + l.strip())
+# T-CONT Policy is the reviewed exception to "no OLT-writable attribute": 1 on
+# every one of the 16 T-CONTs, 0x8000..0x800f.
+pol = [l for l in open(gen + '/omci_defaults.c')
+       if re.match(r'\s*\{ 262, 0x80[0-9a-f]{2}, 3, 1, \{ 0x01 \} \}', l)]
+if len(pol) != 16:
+    bad.append('T-CONT Policy rows: %d, expected 16 at value 1' % len(pol))
 if bad:
     print('\n'.join(bad)); sys.exit(1)
 print('ok    defaults table: no ASCII 0x in a numeric attribute, no live attribute')
@@ -58,15 +65,21 @@ GemBlkLen: 0x0030
 SFThreshold: 0x0z
 SDThreshold: 0x09
 OpticalSignalLevel: 0xd2e3
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+Tcont
+EntityID: 0x8000
+AllocID: 0x0123
+Policy: 0
 DUMP
 mkdir -p "$tmp/out"
 python3 -I "$TOOL" "$tmp/dump.txt" --c "$tmp/out" 2> "$tmp/err" || { cat "$tmp/err"; exit 1; }
 rows=$(grep -E '^[[:space:]]*\{ [0-9]+, 0x' "$tmp/out/omci_defaults.c" | sed 's/[[:space:]]*\/\*.*//; s/^[[:space:]]*//')
-want='{ 263, 0x8001, 3, 2, { 0x00, 0x30 } },
+want='{ 262, 0x8000, 3, 1, { 0x01 } },
+{ 263, 0x8001, 3, 2, { 0x00, 0x30 } },
 { 263, 0x8001, 7, 1, { 0x09 } },'
 if [ "$rows" != "$want" ]; then
 	echo "FAIL: generator output on the synthetic dump" >&2
 	printf 'expected:\n%s\ngot:\n%s\n' "$want" "$rows" >&2
 	exit 1
 fi
-echo "ok    generator: a 0x value is a number, 0x garbage is refused, a live attribute is skipped"
+echo "ok    generator: a 0x value is a number, 0x garbage is refused, a live attribute is skipped, T-CONT Policy is forced to 1"
