@@ -264,19 +264,48 @@ static int cmd_port_phy_pwrdown(void *buf, uint32_t len)
 	return 0;
 }
 
-/* cmd 64: the unknown-unicast flood mask, 0x7 (UNI, port 1, PON) when
- * enabled. The leaf repeats the write as the capture does.
+/* cmd 64: {sel, enable, portMask} (uapi/omci_bridgeport.h), a lookup-miss
+ * flood mask. As the stock OMCI layer does (pf_rtl96xx_SetFloodingPortMask):
+ * sel picks the mask (0 unknown unicast, 1 broadcast, 2 unknown
+ * multicast), enable 1 adds portMask's ports, 0 removes them, and every
+ * other port keeps its bit; enable 2 (trap) is refused, as stock refuses it.
+ * omcid sends one port per class 47 create or delete, so a delete, or ME
+ * 45 DiscardUnknown = 1, takes one port out instead of every port.
+ *
+ * One exception, kept from before: the module-load replay leaves every
+ * mask at 0xf, the CPU port included (docs/SWITCH.md), where the stock
+ * image has 0x7, and cmd 64 used to write 0x7 to the unknown-unicast
+ * mask. So the first provisioning took the CPU out of unknown-unicast
+ * flooding, and both ISPs run that way. Keeping the CPU in has not been
+ * tried on a stick, so cmd 64 still clears the CPU bit of that mask.
+ * No argument (the replay harness) is the captured call: sel 0, enable 1,
+ * the PON port.
  */
+#define ODI_SW_CMD64_CPU_BIT	(1U << 3)
+#define ODI_SW_CMD64_PORTS	((1U << ODI_SW_PORT_COUNT) - 1U)
+#define ODI_SW_CMD64_PON_BIT	(1U << 2)
+
 static int cmd_flooding_port_mask(void *buf, uint32_t len)
 {
-	struct omci_flood *f = (struct omci_flood *)buf;
-	uint32_t mask = 7;
+	struct omci_flood f = { .sel = ODI_SW_FLOOD_UNKN_UCAST, .enable = 1U,
+				.portMask = ODI_SW_CMD64_PON_BIT };
+	uint32_t mask;
 
-	if (f && len >= sizeof(*f)) {
-		mask = f->enable ? 7 : 0;
+	if (buf && len >= sizeof(f))
+		f = *(const struct omci_flood *)buf;
+	if (f.sel > ODI_SW_FLOOD_UNKN_MCAST || f.enable > 1U) {
+		ODI_SW_WARN("cmd 64: sel %u enable %u refused\n", (unsigned int)f.sel,
+			    (unsigned int)f.enable);
+		return ODI_SW_EOPNOTSUPP;
 	}
-	(void)odi_sw_l2_flood_mask_get();
-	odi_sw_l2_flood_mask_set(mask);
+	mask = odi_sw_l2_flood_mask_get(f.sel);
+	if (f.enable)
+		mask |= f.portMask & ODI_SW_CMD64_PORTS;
+	else
+		mask &= ~(f.portMask & ODI_SW_CMD64_PORTS);
+	if (f.sel == ODI_SW_FLOOD_UNKN_UCAST)
+		mask &= ~ODI_SW_CMD64_CPU_BIT;
+	odi_sw_l2_flood_mask_set(f.sel, mask);
 	return 0;
 }
 

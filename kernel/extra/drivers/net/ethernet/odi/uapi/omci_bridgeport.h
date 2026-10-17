@@ -24,13 +24,14 @@
 /* Command 64, 12 bytes. The vendor sends it from two places, a bridge port
  * create and the matching delete, and they differ in one word. */
 struct omci_flood {
-	/* Zero at both call sites. Its meaning is unread -- do not invent one;
-	 * sending anything else here has never been observed. */
+	/* Which lookup-miss mask: 0 unknown unicast, 1 broadcast, 2 unknown
+	 * multicast (the stock omci_flood_type_t). Zero at both call sites. */
 	uint32_t sel;
 	/* Create sends (class 45's DiscardUnknow != 1), which is NOT the same
 	 * as !DiscardUnknow: the vendor writes `xori v0,v0,1; sltu v0,zero,v0`
 	 * on that byte, so a value of 2 enables flooding just as 0 does.
-	 * Delete sends 0. */
+	 * Delete sends 0. The kernel takes 1 as add portMask's ports, 0 as
+	 * remove them (the stock omci_flood_act_t; its 2, trap, is refused). */
 	uint32_t enable;
 	/* 1 << switchPort -- the port being added or removed, alone, not the
 	 * bridge's whole membership. */
