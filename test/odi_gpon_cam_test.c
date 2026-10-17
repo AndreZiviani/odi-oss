@@ -214,6 +214,25 @@ static void test_encrypted_search_not_done(void)
 	CHECK(requests(ODI_SW_DSF_GEM_CAM_CTL_OFF, 1U, 64) == 1U, "by the write");
 }
 
+/* Encrypted_Port-ID with 'a' set on the OMCC port: the row decrypts
+ * (FLAGS 0x14, OMCI plus AES), as the stock module sets it on its OMCC
+ * flow; 'a' clear and a new Configure_Port-ID put back the bare 0x04.
+ */
+static void test_encrypted_omcc(void)
+{
+	setup();
+	odi_gpon_hw_gem_port_configure(OMCC_GEM, 1);
+	CHECK(odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(64U)) == 0x04U, "configured: OMCI, no AES");
+	CHECK(odi_gpon_hw_gem_port_encrypted(OMCC_GEM, 1) == 1, "the OMCC row is rewritten");
+	CHECK(odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(64U)) == 0x14U, "with the AES bit: 0x14");
+	CHECK(odi_gpon_hw_gem_port_encrypted(OMCC_GEM, 0) == 1, "a clear is applied too");
+	CHECK(odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(64U)) == 0x04U, "back to 0x04");
+	(void)odi_gpon_hw_gem_port_encrypted(OMCC_GEM, 1);
+	odi_gpon_hw_gem_port_configure(OMCC_GEM, 1);
+	CHECK(odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(64U)) == 0x04U,
+	      "Configure_Port-ID writes the port unencrypted, as stock");
+}
+
 /* cmd 25 downstream whose CAM write does not complete: an error to omcid,
  * no DS slot (an Encrypted_Port-ID for the port finds none) and no flow in
  * the readback.
@@ -250,6 +269,7 @@ int main(void)
 	test_dealloc_not_done();
 	test_gem_configure_not_done();
 	test_encrypted_search_not_done();
+	test_encrypted_omcc();
 	test_cmd25_ds_not_done();
 	CHECK(odi_mock_locks_idle(), "every switch lock released on return");
 	if (failures) {

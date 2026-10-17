@@ -488,14 +488,22 @@ void ev_alloc_ids(const uint16_t *ids, unsigned n)
  * record of this boot, and a respawned omcid reads it back before it logs
  * anything, rather than logging every unknown again. Counts are rewritten
  * at most once a second (ev_tick()); a new entry is written at once. */
-#define UNK_MAX      32
-#define UNK_BUF      4096
+#define UNK_MAX      64
+#define UNK_BUF      8192
+
+/* What an entry records: a class omcid has no model for, a message type it
+ * does not handle, or an instance of a modelled class that it holds no row
+ * for (see ev_no_instance()). */
+#define UNK_ME       0
+#define UNK_MSG      1
+#define UNK_NO_INST  2
 
 struct unk_entry {
 	uint16_t cls;            /* unknown_me: the class; unknown_msg: the
 				  * class of the first frame of that type */
-	uint8_t mt;
-	uint8_t msg;             /* 1: an unknown message type */
+	uint16_t inst;           /* no_instance: the instance */
+	uint8_t mt;              /* no_instance: of the first request */
+	uint8_t msg;             /* UNK_ME, UNK_MSG or UNK_NO_INST */
 	unsigned long count;
 	unsigned long first_s;   /* monotonic seconds, i.e. uptime */
 };
@@ -584,7 +592,7 @@ static void unk_load(void)
 	for (int i = 0; i < n && unk_n < UNK_MAX; ) {
 		int e = i;
 		const char *l = unkbuf + i;
-		long cls, mt, cnt, first;
+		long cls, mt, cnt, first, inst = 0;
 		int msg = -1;
 
 		while (e < n && unkbuf[e] != '\n')
@@ -593,15 +601,20 @@ static void unk_load(void)
 			msg = 0;
 		else if (unk_prefix(l, e - i, "unknown_msg "))
 			msg = 1;
+		else if (unk_prefix(l, e - i, "no_instance "))
+			msg = 2;
 		cls = unk_field(l, e - i, "class=");
-		mt = unk_field(l, e - i, msg ? "type=" : "mt=");
+		mt = unk_field(l, e - i, msg == UNK_MSG ? "type=" : "mt=");
+		if (msg == UNK_NO_INST)
+			inst = unk_field(l, e - i, "inst=");
 		cnt = unk_field(l, e - i, "count=");
 		first = unk_field(l, e - i, "first_uptime_s=");
 		if (msg >= 0 && cls >= 0 && cls <= 0xffff && mt >= 0 && mt <= 0xff &&
-		    cnt >= 0 && first >= 0) {
+		    cnt >= 0 && first >= 0 && inst >= 0 && inst <= 0xffff) {
 			struct unk_entry *u = &unk[unk_n++];
 
 			u->cls = (uint16_t)cls;
+			u->inst = (uint16_t)inst;
 			u->mt = (uint8_t)mt;
 			u->msg = (uint8_t)msg;
 			u->count = (unsigned long)cnt;
@@ -619,10 +632,19 @@ static void unk_line(struct evline *e, const struct unk_entry *u)
 	const char *op = unk_op(u->mt);
 
 	e->n = 0;
-	if (u->msg) {
+	if (u->msg == UNK_MSG) {
 		ev_put(e, "unknown_msg");
 		ev_num(e, "type", u->mt);
 		ev_num(e, "class", u->cls);
+	} else if (u->msg == UNK_NO_INST) {
+		ev_put(e, "no_instance");
+		ev_num(e, "class", u->cls);
+		ev_num(e, "inst", u->inst);
+		if (op)
+			ev_str(e, "op", op);
+		else
+			ev_num(e, "op", u->mt);
+		ev_num(e, "mt", u->mt);
 	} else {
 		ev_put(e, "unknown_me");
 		ev_num(e, "class", u->cls);
@@ -638,8 +660,9 @@ static void unk_save(void)
 {
 	static const char head[] =
 		"# omcid: what the OLT sent that omcid does not model, this boot.\n"
-		"# One line per class and operation (unknown_me) or message type\n"
-		"# (unknown_msg); docs/TOOLS.md, \"Link and provisioning events\".\n";
+		"# One line per class and operation (unknown_me), message type\n"
+		"# (unknown_msg) or instance omcid holds no row for (no_instance);\n"
+		"# docs/TOOLS.md, \"Link and provisioning events\".\n";
 	int n = 0;
 
 	for (int i = 0; head[i] && n < UNK_BUF - 1; i++)
@@ -672,16 +695,23 @@ static void unk_save(void)
 	unk_dirty = 0;
 }
 
-static void unk_note(uint8_t msg, uint16_t cls, uint8_t mt)
+static void unk_note(uint8_t msg, uint16_t cls, uint16_t inst, uint8_t mt)
 {
 	struct evline e;
 	struct unk_entry *u;
+	const char *name = msg == UNK_MSG ? "unknown_msg" :
+			   msg == UNK_NO_INST ? "no_instance" : "unknown_me";
 
 	if (!unk_loaded)
 		unk_load();
 	for (int i = 0; i < unk_n; i++) {
 		u = &unk[i];
-		if (u->msg == msg && u->mt == mt && (msg || u->cls == cls)) {
+		/* no_instance is one entry per (class, instance), whatever
+		 * the operation: the question it answers is whether the OLT
+		 * addresses that instance at all. */
+		if (u->msg == msg &&
+		    (msg == UNK_NO_INST ? u->cls == cls && u->inst == inst
+					: u->mt == mt && (msg == UNK_MSG || u->cls == cls))) {
 			u->count++;
 			unk_dirty = 1;
 			return;
@@ -695,6 +725,7 @@ static void unk_note(uint8_t msg, uint16_t cls, uint8_t mt)
 	u = &unk[unk_n++];
 	u->msg = msg;
 	u->cls = cls;
+	u->inst = inst;
 	u->mt = mt;
 	u->count = 1;
 	u->first_s = (unsigned long)ev_now().s;
@@ -705,8 +736,8 @@ static void unk_note(uint8_t msg, uint16_t cls, uint8_t mt)
 	{
 		struct evline ev;
 
-		ev_begin(&ev, msg ? "unknown_msg" : "unknown_me");
-		for (int k = msg ? 11 : 10; k < e.n && ev.n < EV_LINE_MAX - 1; k++)
+		ev_begin(&ev, name);
+		for (int k = str_len(name); k < e.n && ev.n < EV_LINE_MAX - 1; k++)
 			ev.b[ev.n++] = e.b[k];
 		ev_emit(&ev, EV_SEV_NOTICE);
 	}
@@ -714,12 +745,17 @@ static void unk_note(uint8_t msg, uint16_t cls, uint8_t mt)
 
 void ev_unknown_me(uint16_t cls, uint8_t mt)
 {
-	unk_note(0, cls, mt);
+	unk_note(UNK_ME, cls, 0, mt);
 }
 
 void ev_unknown_msg(uint8_t mt, uint16_t cls)
 {
-	unk_note(1, cls, mt);
+	unk_note(UNK_MSG, cls, 0, mt);
+}
+
+void ev_no_instance(uint16_t cls, uint16_t inst, uint8_t mt)
+{
+	unk_note(UNK_NO_INST, cls, inst, mt);
 }
 
 /* A VLAN filter forward operation (class 84 FwdOp) omcid cannot build and

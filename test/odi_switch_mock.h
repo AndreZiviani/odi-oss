@@ -202,6 +202,18 @@ static inline void odi_mock_ponq_boot_state(void)
 	odi_mock.regs[odi_mock_slot(ODI_SW_PONQ_COUNT_MASK(236U))] = 0x960082U;
 }
 
+/* The three lookup-miss flood masks as the module-load replay leaves them:
+ * 0xf, every port with the CPU (docs/SWITCH.md, the replay's one
+ * deliberate departure from the capture). cmd 64 changes them bit by bit.
+ * Not logged.
+ */
+static inline void odi_mock_flood_boot_state(void)
+{
+	odi_mock.regs[odi_mock_slot(0x1c020U)] = 0xfU;
+	odi_mock.regs[odi_mock_slot(0x1c024U)] = 0xfU;
+	odi_mock.regs[odi_mock_slot(0x1c028U)] = 0xfU;
+}
+
 /* TABLE_CMD/STS/WR_DATA/RD_DATA, 0x012000-0x01202c -- the real
  * regtrace skip list drops every write in this range, which is exactly why
  * boot5's captured brackets carry no W entries for the table-access

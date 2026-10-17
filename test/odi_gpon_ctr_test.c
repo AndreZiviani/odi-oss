@@ -305,6 +305,67 @@ static void test_rei(void)
 	CHECK(odi_gpon_ctr_rei_take(&c) == 0xffffffffU, "the REI count is clamped to 32 bits");
 }
 
+/* n samples one second apart from t, in state st, with bits BIP bit
+ * errors in each.
+ */
+static uint32_t run_secs(uint32_t t, unsigned int n, unsigned int st, uint32_t bits)
+{
+	while (n--) {
+		DSF(ODI_GPON_DSF_BIP_ERR_BITS_OFF) = bits;
+		t += 1000U;
+		odi_gpon_ctr_sample(&c, t, st);
+	}
+	return t;
+}
+
+/* SF and SD (G.984.3 11.1.2): over 10 s of O5, set at BER >= 10^-x,
+ * cleared below 10^-(x+1), kept in between. 10 s at 2.48832 Gbit/s is
+ * 24883200000 bits: 10^-9 is 24 errors, 10^-10 is 2; 10^-5 is 248832,
+ * 10^-6 is 24883.
+ */
+static void test_signal(void)
+{
+	uint32_t t;
+
+	start();					/* t=1000, O5 */
+	CHECK(c.signal_exp[0] == 5U && c.signal_exp[1] == 9U, "defaults SF 5, SD 9");
+	t = run_secs(1000U, 9, O5, 3U);
+	CHECK(!c.signal_on[1], "nothing decided before 10 s");
+	t = run_secs(t, 1, O5, 3U);			/* 30 errors in 10 s */
+	CHECK(c.signal_on[1] && !c.signal_on[0], "30 errors in 10 s: SD (>= 24), not SF");
+	CHECK(c.signal_events[1] == 1U, "one SD event");
+	CHECK(c.signal_last_bits == 30U && c.signal_last_ms == 10000U, "the window is recorded");
+
+	t = run_secs(t, 10, O5, 1U);			/* 10: between 2 and 24 */
+	CHECK(c.signal_on[1], "10 errors: kept (hysteresis)");
+	t = run_secs(t, 10, O5, 0U);
+	CHECK(!c.signal_on[1], "0 errors (< 2): SD cleared");
+
+	t = run_secs(t, 10, O5, 30000U);		/* 300000 >= 248832 */
+	CHECK(c.signal_on[0] && c.signal_on[1], "300000 errors: SF and SD");
+	t = run_secs(t, 10, O5, 3000U);			/* 30000: >= 24883, < 248832 */
+	CHECK(c.signal_on[0] && c.signal_on[1], "30000: SF kept, SD kept");
+	t = run_secs(t, 10, O5, 2000U);			/* 20000 < 24883 */
+	CHECK(!c.signal_on[0] && c.signal_on[1], "20000: SF cleared, SD kept");
+	CHECK(c.signal_events[0] == 1U && c.signal_events[1] == 2U, "events counted per set");
+
+	/* Leaving O5: both clear, and the window restarts. */
+	t = run_secs(t, 1, ODI_GPON_STATE_O6, 5000U);
+	CHECK(!c.signal_on[0] && !c.signal_on[1] && c.signal_ms == 0U, "outside O5: cleared");
+	t = run_secs(t, 1, O5, 5000U);			/* entering O5: not counted */
+	t = run_secs(t, 9, O5, 0U);
+	CHECK(!c.signal_on[1] && c.signal_ms == 9000U, "the sample entering O5 starts the window");
+
+	/* The OLT's thresholds (cmd 11), G.988 ranges. */
+	CHECK(odi_gpon_ctr_signal_threshold_set(&c, 0, 3) == 0 && c.signal_exp[0] == 3U, "SF 3 accepted");
+	CHECK(odi_gpon_ctr_signal_threshold_set(&c, 0, 9) != 0 && c.signal_exp[0] == 3U, "SF 9 refused, kept");
+	CHECK(odi_gpon_ctr_signal_threshold_set(&c, 1, 10) == 0, "SD 10 accepted");
+	CHECK(odi_gpon_ctr_signal_threshold_set(&c, 1, 3) != 0, "SD 3 refused");
+	CHECK(odi_gpon_ctr_signal_threshold_set(&c, 2, 5) != 0, "an unknown signal refused");
+	(void)run_secs(t, 1, O5, 3U);			/* 3 errors >= 2 (10^-10) */
+	CHECK(c.signal_on[1], "SD at 10^-10: 3 errors in 10 s raise it");
+}
+
 static void test_alarms(void)
 {
 	start();					/* t=1000, line clear */
@@ -531,6 +592,7 @@ int main(int argc, char **argv)
 	test_packed_fields();
 	test_saturation();
 	test_rei();
+	test_signal();
 	test_alarms();
 	test_alarms_from_the_line_poll();
 	test_states();

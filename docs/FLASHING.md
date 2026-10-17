@@ -83,6 +83,12 @@ also covered by `gh attestation verify sbom.cdx.json -R AndreZiviani/odi-oss`.
 - verifies both members (kernel and rootfs) and checks they fit their
   partitions **before** erasing anything, so a bad tarball never leaves you
   with an erased partition and nothing to put in it;
+- writes in an order that makes an interrupted flash unbootable instead of
+  half-valid: it erases the kernel and rootfs partitions first, writes the
+  rootfs, and writes the kernel **last**. U-Boot refuses a kernel that is
+  erased or short (bad magic or data CRC), so a power cut at any point leaves
+  a slot the bootloader will not start, never a valid new kernel over a
+  missing or old rootfs;
 - reports by name which partition is left unbootable if a write does fail
   partway, because that is exactly the information that decides whether the
   stick still boots at all;

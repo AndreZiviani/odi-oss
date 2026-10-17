@@ -63,6 +63,11 @@ check "start: first of the boot, back to re-registration, and why" "$got" \
       "event=start run=boot mode=reregister reason=not_o5 onu_state=unknown rows=0"
 
 $Q cli/build/omcli --inject-file "$FIX/omci-session-isp1.txt" > /dev/null 2>&1
+# The fixture was recorded when omcid announced 301 upload records, and its
+# log keeps only the first three Nexts and the last (sequence 300). The
+# upload is 400 records now (one per 26 bytes of each entity, as the stock
+# ONU sends them), so the Next of the last one is sent here.
+$Q cli/build/omcli --inject "$(printf '0f004e0a00020000018f%060d00000028%08d' 0 0)" > /dev/null 2>&1
 # The burst closes EV_PROV_QUIET_S (10 s) after its last write; the check
 # runs once a second. This is the one wait on a real timer, and the only run
 # that sees the production value of it.
@@ -72,17 +77,20 @@ got=$(grep -c '^event=mib_reset side=olt ' "$log")
 check "the OLT MIB reset, as the OLT's" "$got" "1"
 got=$(grep '^event=mib_upload_begin ' "$log")
 check "the MIB upload, with the count the OLT was told" "$got" \
-      "event=mib_upload_begin entities=301"
+      "event=mib_upload_begin entities=400"
 got=$(grep -c '^event=provision_begin .*after_mib_reset=1$' "$log")
 check "one burst opens, after the reset" "$got" "1"
 got=$(grep '^event=mib_upload_end ' "$log" | sed 's/ duration_s=[0-9.]*//')
 check "and its end, at the Next that answers the last entity" "$got" \
-      "event=mib_upload_end entities=301"
+      "event=mib_upload_end entities=400"
 # 83 creates in the session, one of them for class 351, which the model
 # does not have: refused, so not counted.
+# 184 rows: the OLT's 161 and the tables (classes 49, 50, 79) omcid creates
+# with each of the eight MAC bridge ports -- 24, one of them a row the OLT
+# also sets (class 79 of port 1).
 got=$(grep '^event=provision_end ' "$log" | sed 's/ duration_s=[0-9.]*//')
 check "and closes with the session's own counts" "$got" \
-      "event=provision_end creates=82 sets=102 deletes=0 rows=161 services=6 after_mib_reset=1"
+      "event=provision_end creates=82 sets=102 deletes=0 rows=184 services=6 after_mib_reset=1"
 got=$(grep '^event=alloc_ids ' "$log")
 check "the PLOAM Alloc-IDs, once, when first read" "$got" \
       "event=alloc_ids count=5 ids=282,794,1050,1306,538"
@@ -100,6 +108,10 @@ unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6'
 got=$(grep -v '^#' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
 check "and summarised in /var/log/omcid-unknown.txt" "$got" "$UNK_ISP1"
+# Every Get, Set and Delete of the ISP1 session names an instance omcid holds
+# (one it created itself, or one the OLT created first): no event=no_instance.
+got=$(grep -c '^event=no_instance ' "$log")
+check "the ISP1 session addresses no instance omcid lacks" "$got" "0"
 # Nothing per message: the whole session is a handful of lines.
 got=$(grep -c '^event=' "$log")
 check "a whole provisioning session is ten event lines" "$got" "10"
@@ -108,7 +120,7 @@ check "a whole provisioning session is ten event lines" "$got" "10"
 out=$($Q cli/build/omcli provision 2>&1)
 got=$(echo "$out" | grep '^summary ')
 check "provision: the summary" "$got" \
-      "summary rows=161 tconts=5 gem_ports=6 vlans=6 traffic_descriptors=0 services=6 mib_data_sync=184"
+      "summary rows=184 tconts=5 gem_ports=6 vlans=6 traffic_descriptors=0 services=6 mib_data_sync=184"
 got=$(echo "$out" | grep -c '^gem me=[0-9]* port=[0-9]* direction=[123] tcont_me=')
 check "provision: one line per GEM port" "$got" "6"
 got=$(echo "$out" | grep '^vlan ' | tr '\n' ';')
@@ -118,7 +130,7 @@ check "provision: the VLANs, once per source" "$got" \
 # A MIB reset from the CLI is this side's, not the OLT's.
 $Q cli/build/omcli -f mib reset > /dev/null 2>&1
 need "$log" '^event=mib_reset side=local ' 10
-got=$(grep -c '^event=mib_reset side=local rows=161 ' "$log")
+got=$(grep -c '^event=mib_reset side=local rows=184 ' "$log")
 check "a CLI MIB reset is logged as local" "$got" "1"
 
 # What the OLT may act on: a reboot, which omcid refuses, and a software
@@ -169,6 +181,26 @@ unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6
 unknown_me class=351 op=get mt=9 count=1
 unknown_msg type=29 class=256 count=2"
+# A modelled class at an instance omcid holds no row for (MAC bridge service
+# profile 0x0999): one line per (class, instance) whatever the operation,
+# the answer unchanged. Two Gets and the Set that creates the row are counted;
+# the Get after it names a held instance. A Get of an instance omcid creates
+# itself (ONU-G 0) is not one of these.
+$Q cli/build/omcli --inject "$(frame 0e30 49 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e31 49 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e32 48 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e33 49 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e34 49 0100 0000)" > /dev/null 2>&1
+sync_send "$log"
+got=$(grep '^event=no_instance ' "$log")
+check "a Get of an instance omcid does not hold is logged once" "$got" \
+      "event=no_instance class=45 inst=2457 op=get mt=9"
+got=$(grep -o -- '-> 0e30290a002d0999' "$log" | head -1)
+check "and still answered as before (success)" "$got" "-> 0e30290a002d0999"
+need /var/log/omcid-unknown.txt '^no_instance class=45 inst=2457 op=get mt=9 count=3' 10
+got=$(grep '^no_instance ' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
+check "the summary counts the requests until the instance exists" "$got" \
+      "no_instance class=45 inst=2457 op=get mt=9 count=3"
 # Without OMCI_UNKNOWN_ME_OK the answer is "unknown entity" (4), and an
 # unknown type is "not supported" (1).
 got=$(grep -o -- '-> 0e03240a015f000104' "$log" | head -1)
@@ -183,7 +215,7 @@ check "the key is off unless set" "$got" "unknown entities: answered unknown ent
 # Rate limited: 30 more reboot requests, back to back, and the window of 20
 # lines a minute already holds 15 (start, Alloc-IDs, OLT reset, upload begin
 # and end, provision begin and end, the three session unknowns, CLI reset,
-# reboot, sw_image, and the two unknowns above).
+# reboot, sw_image, the two unknowns and the no_instance line above).
 : > /tmp/reboots.txt
 i=0
 while [ "$i" -lt 30 ]; do
@@ -230,6 +262,7 @@ unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6
 unknown_me class=351 op=get mt=9 count=2
 unknown_msg type=29 class=256 count=2
+no_instance class=45 inst=2457 op=get mt=9 count=3
 unknown_me class=351 op=set mt=8 count=1
 unknown_me class=65021 op=create mt=4 count=1"
 got=$(grep -o -- '-> 0e07240a015f0002000000' "$log2" | head -1)
@@ -312,7 +345,7 @@ $Q cli/build/omcli --inject "$(getmaski 0e44 00bc 0000 e000 49)" > /dev/null 2>&
 $Q cli/build/omcli --inject "$(getmaski 0e45 00bc 8001 e000 5c)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(getmaski 0e46 00c8 0007 8000 49)" > /dev/null 2>&1
 $Q cli/build/omcli --inject "$(getmaski 0e47 0168 0005 ffff 49)" > /dev/null 2>&1
-for q in "0e48 012d" "0e49 012e" "0e4a 012f" "0e4b 0130"; do
+for q in "0e48 0190" "0e49 0191" "0e4a 0192" "0e4b 0193"; do
 	$Q cli/build/omcli --inject "$(nextframe $q)" > /dev/null 2>&1
 done
 fixed_end /tmp/omcid-fixed5.log
@@ -322,9 +355,9 @@ B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 got=$(grep '^fixed entities: ' $L)
 check "both forms together are read, one entry per attribute" "$got" \
       "fixed entities: 7 entr(ies) answered from OMCI_FIXED_ME"
-got=$(grep 'managed entities to upload' $L | sed 's/.*(\(.*\))/\1/')
+got=$(grep 'upload records' $L | sed 's/.*(\(.*\))/\1/')
 check "the MIB upload counts the entities, two records for the big one" "$got" \
-      "301 autonomous, 0 held, 3 fixed"
+      "277 autonomous, 0 held, 3 fixed"
 got=$(grep -o -F -- '-> 0e482e0a0002000000bc8001e0000011aa2233ff' $L | head -1)
 check "an upload record carries the attributes in order, with the mask" "$got" \
       "-> 0e482e0a0002000000bc8001e0000011aa2233ff"
@@ -441,6 +474,20 @@ kill "$victim" 2>/dev/null
 wait "$victim" 2>/dev/null
 omcid_stop "$pid4"
 rm -f /var/config/odi.conf
+
+# The ISP2 session, replayed into a fresh omcid of a fresh boot, addresses no
+# instance omcid lacks either: the two OLTs on file never answer the question
+# result 5 would raise (AUDIT B8 E3). A third OLT's session belongs here.
+rm -f /var/log/omcid-unknown.txt
+cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+$Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid-events-isp2.log 2>&1 &
+pid5=$!
+omcid_up /tmp/omcid-events-isp2.log
+$Q cli/build/omcli --inject-file "$FIX/omci-session-isp2.txt" > /dev/null 2>&1
+sync_send /tmp/omcid-events-isp2.log
+got=$(grep '^event=no_instance ' /tmp/omcid-events-isp2.log)
+check "the ISP2 session addresses no instance omcid lacks" "$got" ""
+omcid_stop "$pid5"
 
 if [ "$fail" -eq 0 ]; then echo "events-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
 suite_exit

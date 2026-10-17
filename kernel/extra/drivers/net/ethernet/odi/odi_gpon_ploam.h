@@ -95,10 +95,10 @@ enum odi_gpon_ds_ploam_type {
 	ODI_GPON_DS_BER_INTERVAL		= 0x12,	/* clause 9.2.3.18 */
 	ODI_GPON_DS_KEY_SWITCHING_TIME		= 0x13,	/* clause 9.2.3.19 */
 	ODI_GPON_DS_EXT_BURST_LENGTH		= 0x14,	/* clause 9.2.3.20 */
-	/* Vendor/ZTE-interop variant of Disable_Serial_Number; not a
-	 * G.984.3 message ID.
+	/* Vendor-specific variant of Disable_Serial_Number, sent by some
+	 * OLTs; not a G.984.3 message ID.
 	 */
-	ODI_GPON_DS_DISABLE_SERIAL_NUMBER_ZTE	= 0x81,
+	ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS	= 0x81,
 };
 
 /* ---- Upstream message IDs (G.984.3 clause 9.2.2/9.2.4) ---- */
@@ -121,6 +121,7 @@ enum odi_gpon_us_ploam_type {
 
 /* Assign_Alloc-ID content[2] Alloc-ID type codes (clause 9.2.3.10). */
 #define ODI_GPON_ALLOC_ID_TYPE_GEM		0x01U
+#define ODI_GPON_ALLOC_ID_TYPE_DBA		0x02U	/* deprecated, G.984.3 9.2.3.10 */
 #define ODI_GPON_ALLOC_ID_TYPE_DEALLOCATE	0xffU
 
 /* ---- FIFO word pack/unpack (register-map fact) ---- */

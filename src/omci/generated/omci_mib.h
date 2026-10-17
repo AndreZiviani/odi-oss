@@ -21,7 +21,28 @@ struct omci_attr {
 	uint8_t oltAcc;     /* what the OLT may do with it */
 	uint8_t isIndex;
 	uint8_t avc;        /* raises an attribute value change */
+	uint16_t opt;       /* option type: OMCI_OPT_* below */
 };
+
+/* The attribute option type, a mask (vendor omci_me_attr_type_mask_t, read
+ * by MIB_GetAttrOptionType). The MIB upload leaves out every attribute with
+ * one of OMCI_OPT_NOT_UPLOADED: FUN_0040ff70 and the upload walk of omci_app
+ * test `(opt & 0x31a) == 0`. */
+#define OMCI_OPT_MANDATORY      0x001
+#define OMCI_OPT_M_NOT_SUPPORT  0x002
+#define OMCI_OPT_OPTIONAL       0x004
+#define OMCI_OPT_O_NOT_SUPPORT  0x008
+#define OMCI_OPT_PRIVATE        0x010
+#define OMCI_OPT_PM             0x100
+#define OMCI_OPT_TABLE          0x200
+#define OMCI_OPT_NOT_UPLOADED   0x31a
+
+/* The entity type (vendor omci_me_type_t, MIB_GetTableStdType). The upload
+ * skips a whole class with either bit of OMCI_STD_NOT_UPLOADED set
+ * (`(std & 0x110) == 0` in omci_app). */
+#define OMCI_STD_PRIVATE        0x010
+#define OMCI_STD_NO_UPLOAD      0x100
+#define OMCI_STD_NOT_UPLOADED   0x110
 
 struct omci_class {
 	uint16_t classId;
@@ -30,6 +51,8 @@ struct omci_class {
 	const struct omci_attr *attrs;
 	uint8_t nattr;
 	uint32_t actions;   /* 1 << msgType, for every message type the ME accepts */
+	uint16_t std;       /* entity type: OMCI_STD_* */
+	uint8_t init;       /* 0 the ONU creates it, 1 the OLT does */
 };
 
 extern const struct omci_class omci_classes[];

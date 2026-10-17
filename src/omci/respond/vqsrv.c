@@ -213,7 +213,7 @@ static void vq_dispatch(void)
 	switch (id) {
 	case 1: {
 		/* The vendor prints the four binary bytes as UPPERCASE hex
-		 * (e.g. SerialNumber: FHTT01020304), and the UI and the
+		 * (e.g. SerialNumber: ABCD01020304), and the UI and the
 		 * exporter read that line. */
 		static const char hexu[] = "0123456789ABCDEF";
 

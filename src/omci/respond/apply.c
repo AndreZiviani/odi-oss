@@ -36,7 +36,16 @@ void mib_reset_all(void)
 	}
 	qos_reset();
 	uni_reset();
+	alarm_mib_reset();
 	mib_data_sync = 0;
+	upl_total = 0;
+	/* The bridge connections were built from the MIB just thrown away.
+	 * The stock reset clears the datapath with the MIB; here the rebuild
+	 * that follows (one quiet second, respond/main.c) deactivates every
+	 * one of them and builds none from the empty MIB, so an OLT that
+	 * provisions fewer services after the reset, or none, does not leave
+	 * the old ones forwarding. */
+	conn_dirty = 1;
 	/* A reset MIB and a snapshot of the one before it must never both be
 	 * on disk: a respawn right after this reset, before the OLT sends
 	 * anything to snapshot again, must fall back to re-registration, not
@@ -50,7 +59,8 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 {
 	if (c && (c->classId == OMCI_ME_TCONT ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
-		  c->classId == OMCI_ME_TRAFFIC_SCHEDULER ||
+		  (c->classId == OMCI_ME_TRAFFIC_SCHEDULER &&
+		   us_scheduler_referenced(inst)) ||
 		  (c->classId == OMCI_ME_PRIORITY_QUEUE &&
 		   us_queue_referenced(inst)) ||
 		  (c->classId == OMCI_ME_TRAFFIC_DESCRIPTOR &&
@@ -78,6 +88,8 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 	}
 	if (c->classId == OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE)
 		delete_mbsp(inst);
+	if (c->classId == OMCI_ME_MCAST_GEM_IW_TP)
+		mcast_flag_refresh(inst);
 }
 
 /* Class 131, OLT-G: a Set that carries ToDInfo sends its fourteen bytes
@@ -118,6 +130,11 @@ static void apply_ani_g(const struct omci_class *c, const struct mib_row *r,
 	unsigned k;
 	int rc;
 
+	/* Signal fail and signal degrade thresholds (6 and 7) go to the
+	 * kernel, which raises the alarms against them: driver command 11,
+	 * as the stock AnigDrvCfg sends it on a Set of either. */
+	anig_signal_thresholds((mask & (1u << (16 - 6))) ? (int)row_u32(r, c, 6) : -1,
+			       (mask & (1u << (16 - 7))) ? (int)row_u32(r, c, 7) : -1);
 	if (!apply_hw)
 		return;
 	k = 3;                           /* GEM block length */
@@ -142,9 +159,15 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
 		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
 		conn_dirty = 1;
+	/* A traffic scheduler (class 278) matters only when a planned
+	 * upstream queue names it, and then only its Policy (attribute 3:
+	 * strict or WRR, us_queue_decode()), on a create or a Set that
+	 * carries it. Any Set used to rebuild the whole upstream. */
 	if (c && (c->classId == OMCI_ME_TCONT ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
-		  c->classId == OMCI_ME_TRAFFIC_SCHEDULER ||
+		  (c->classId == OMCI_ME_TRAFFIC_SCHEDULER &&
+		   (creating || (mask & (1u << (16 - 3)))) &&
+		   us_scheduler_referenced(inst)) ||
 		  (c->classId == OMCI_ME_PRIORITY_QUEUE &&
 		   us_queue_referenced(inst)) ||
 		  (c->classId == OMCI_ME_TRAFFIC_DESCRIPTOR &&
@@ -164,8 +187,13 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 	case OMCI_ME_PPTP_ETH_UNI:
 		apply_pptp_uni(c, inst, r, mask, creating);
 		return;
-	case OMCI_ME_GEM_IW_TP:
 	case OMCI_ME_MCAST_GEM_IW_TP:
+		/* Its address tables decide the multicast flag of the CTP's
+		 * downstream flow (apply_qos.c, ctp_mcast_rows). */
+		mcast_flag_refresh(-1);
+		bc_gem_update();
+		return;
+	case OMCI_ME_GEM_IW_TP:
 		/* A step on the way to the broadcast flow; the OLT creates
 		 * these and class 47 in no fixed order. */
 		bc_gem_update();
