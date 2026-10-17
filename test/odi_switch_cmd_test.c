@@ -71,6 +71,8 @@ int main(int argc, char **argv)
 	 * change one field of it at a time.
 	 */
 	odi_mock_ponq_boot_state();
+	/* And the flood masks: cmd 64 adds one port to what is there. */
+	odi_mock_flood_boot_state();
 
 	/* The brackets are the stock image, which leaves PAUSE toward the
 	 * host to the auto-negotiation: its cmd 32 writes PORT_FORCE_SELECT 0.

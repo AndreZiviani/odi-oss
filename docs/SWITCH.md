@@ -305,11 +305,19 @@ commands, from the command table of the shipped binary:
   back to the auto-negotiation at every provisioning
   ([Host port PAUSE](#host-port-pause)). The host tests compare this
   bracket with the capture under the stock policy.
-- **cmd 64**: the capture writes `FLOOD_UNKN_UCAST_PORTS` (0x01c028, not
-  `FLOOD_BCAST_PORTS` at 0x01c020, which no capture writes) four times with
-  the same word, 0x7. The word holds the bit of every port, so the four
-  writes are one value repeated, not one per port; the repeat is kept
-  because the host replay compares brackets write for write.
+- **cmd 64**: `{sel, enable, portMask}`, a lookup-miss flood mask, as the
+  stock OMCI layer does it: `sel` picks unknown unicast
+  (`FLOOD_UNKN_UCAST_PORTS`, 0x01c028), broadcast (0x01c020) or unknown
+  multicast (0x01c024); `enable` 1 adds portMask's ports, 0 removes them,
+  every other port keeps its bit; 2 (trap) is refused. omcid names one
+  port per class 47 create or delete, so a delete or ME 45
+  `DiscardUnknown` = 1 takes that port out, not every port. One exception
+  is kept from the old fixed write: cmd 64 on the unknown-unicast mask
+  clears the CPU bit, which the module-load replay sets (0xf, above) and
+  the stock image never has; both ISPs run with it clear after the first
+  provisioning. The capture's call (the PON port added) gives 0x7, written
+  four times: the SDK writes the word once per port, and the host replay
+  compares brackets write for write.
 - **cmd 23** has two shapes, and the direction in its argument picks one.
   A downstream queue writes `PORT_QUEUE_MAP` (0x01c0c0; the word at
   0x01c0a0 is never written) with 0xd4, identical in the eight instances

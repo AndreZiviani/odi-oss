@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Kernel: removing one bridge port from unknown-unicast flooding (a bridge
+  port deleted by the OLT, or ME 45 "discard unknown") no longer stops the
+  flooding of every port. The driver wrote all ports on or all ports off,
+  whatever port the command named; it now adds or removes that port only,
+  in the mask the command names (unknown unicast, broadcast or unknown
+  multicast), as the stock firmware does. The provisioning of every OLT
+  seen so far gives the same mask as before.
+
 - omcid: the upstream traffic descriptor of a GEM port (class 280, named by
   the GEM port network CTP) sets the CIR and PIR of its upstream queue, as
   the stock stack does (byte/s divided by 1024; for an RFC 4115 meter the

@@ -103,9 +103,15 @@ void odi_sw_host_autoneg_apply(void);
  */
 uint32_t odi_sw_host_link_up(void);
 
-/* cmd 64: FLOOD_UNKN_UCAST_PORTS, one bit per port. */
-uint32_t odi_sw_l2_flood_mask_get(void);
-void odi_sw_l2_flood_mask_set(uint32_t mask);
+/* cmd 64: the lookup-miss flood masks, one bit per port, by type (the
+ * stock omci_flood_type_t order): unknown unicast, broadcast, unknown
+ * multicast.
+ */
+#define ODI_SW_FLOOD_UNKN_UCAST	0U
+#define ODI_SW_FLOOD_BCAST	1U
+#define ODI_SW_FLOOD_UNKN_MCAST	2U
+uint32_t odi_sw_l2_flood_mask_get(uint32_t type);
+void odi_sw_l2_flood_mask_set(uint32_t type, uint32_t mask);
 
 /* --- odi_switch_qos.c ----------------------------------------------------- */
 

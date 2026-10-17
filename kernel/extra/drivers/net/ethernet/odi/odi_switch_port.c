@@ -166,18 +166,31 @@ uint32_t odi_sw_host_link_up(void)
 	return ODI_SW_PORT_ABILITY_LINK_UP_GET(odi_reg_read(ODI_SW_PORT_ABILITY(ODI_SW_HOST_PORT)));
 }
 
-uint32_t odi_sw_l2_flood_mask_get(void)
+static uint32_t odi_sw_l2_flood_reg(uint32_t type)
 {
-	return odi_reg_read(ODI_SW_FLOOD_UNKN_UCAST_PORTS_BASE);
+	switch (type) {
+	case ODI_SW_FLOOD_BCAST:
+		return ODI_SW_FLOOD_BCAST_PORTS_BASE;
+	case ODI_SW_FLOOD_UNKN_MCAST:
+		return ODI_SW_FLOOD_UNKN_MCAST_PORTS_BASE;
+	default:
+		return ODI_SW_FLOOD_UNKN_UCAST_PORTS_BASE;
+	}
 }
 
-/* One word holds the bit of every port; the capture writes that same word
- * four times, and the host replay compares the repeat count too.
+uint32_t odi_sw_l2_flood_mask_get(uint32_t type)
+{
+	return odi_reg_read(odi_sw_l2_flood_reg(type));
+}
+
+/* One word holds the bit of every port. The stock SDK writes it once per
+ * port, each a field write of that port's bit, so the capture shows the
+ * same word four times; the host replay compares the repeat count too.
  */
-void odi_sw_l2_flood_mask_set(uint32_t mask)
+void odi_sw_l2_flood_mask_set(uint32_t type, uint32_t mask)
 {
 	unsigned int i;
 
 	for (i = 0; i < ODI_SW_PORT_COUNT; i++)
-		odi_reg_write(ODI_SW_FLOOD_UNKN_UCAST_PORTS_BASE, mask);
+		odi_reg_write(odi_sw_l2_flood_reg(type), mask);
 }
