@@ -61,7 +61,7 @@ process. omcid rereads the store and compares it with what it is running:
 
 The script reports which of the three happened and, for a re-registration,
 how long until the ONU was back in O5 with services; it waits 20 s by
-default (`APPLY_WAIT`), inside the 25 s the web UI gives it, and a
+default (`APPLY_WAIT`, counted from the signal), inside the 25 s the web UI gives it, and a
 re-registration still running then is reported as running, not as failed.
 Exit 1: no omcid running, no answer to the signal, or a `failed`, `timeout`,
 `no_services` or `sn_not_applied` result (`docs/TOOLS.md`, "omcid"). Every
@@ -182,8 +182,13 @@ Details that bite:
 
 - **`/etc/config/lan-ip`, when it exists, overrides `LAN_IP_ADDR`**, and the
   netmask then falls back to 255.255.255.0 whatever `LAN_SUBNET` says. With
-  neither, the address is 192.168.1.1/24. The UI says the key is ignored
-  while the file exists. `apply.sh network` follows the same precedence.
+  neither, the address is 192.168.1.1/24 (the stock default). The UI says the
+  key is ignored while the file exists. `apply.sh network` follows the same
+  precedence. An address or netmask the kernel would refuse (0.0.0.0, loopback,
+  multicast, a mask with a gap, a leading zero, which `ifconfig` reads as octal)
+  is treated as no address at boot: `network.sh` logs it and uses 192.168.1.1/24,
+  and `apply.sh network` changes nothing and fails. The web UI refuses such
+  values too.
 - **Changing `LAN_IP_ADDR` moves every way in, at once.** The UI asks first,
   then links to the new address. Turning on the second address beforehand
   gives a way back that does not move.
@@ -474,10 +479,14 @@ is off for that boot, so the stick does not carry anyone's traffic
 meanwhile. The counter costs two small writes to the config partition per
 boot (the count, and its removal at 60 s), on every stick.
 
-The management address is not reset: a wrong address is already
-recoverable (the second address, `LAN_ENABLE_IP2`, and `/etc/config/lan-ip`),
-and moving it on a pattern of power cuts would move the address of a stick
-whose only fault was the power. The U-Boot environment is never written:
+The management address is not moved: moving it on a pattern of power cuts
+would move the address of a stick whose only fault was the power. A
+safe-mode boot adds one, though: the rescue address, on `br0:2`, whatever
+`LAN_ENABLE_IP2` says: `LAN_IP_ADDR2` when it is a usable address, else the
+stock default 192.168.100.1/24. A wrong primary address is recoverable that
+way even when the second address was never switched on (it is off on both
+lines the firmware has run on); the other ways in are the second address
+when it was on, and `/etc/config/lan-ip` from a shell. The U-Boot environment is never written:
 U-Boot here has no boot counter, and an environment written on every boot
 wears the flash and risks the boot itself.
 

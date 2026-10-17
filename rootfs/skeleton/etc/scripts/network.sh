@@ -9,8 +9,8 @@
 # eth0: being reachable beats matching the stock layout.
 #
 # The address is READ, not baked in. /var/config is the jffs2 partition that
-# fwu.sh never writes, so each stick keeps its value across a reflash (isp2
-# answers on 192.168.1.1, isp1 on 192.168.0.1). /etc/config/lan-ip overrides.
+# fwu.sh never writes, so each stick keeps its value across a reflash (one
+# line answers on 192.168.1.1, another on 192.168.0.1). /etc/config/lan-ip overrides.
 #
 # No `set -e`: this runs from rcS as sysinit, which completes BEFORE init
 # starts any shell, so a failed step must not abort the boot.
@@ -55,12 +55,19 @@ IP2_ALIAS=${IP2_ALIAS:-2}
 # Per-port devices the multi-LAN driver creates; eth0.2 is the host port.
 HOSTIFS=${HOSTIFS:-eth0.2}
 
-# Last resort only. Reaching this on isp1 gives the wrong address, but a
-# stick whose config partition will not read is already a bigger problem, and
-# a wrong address is a symptom you can see with arping from the other end.
+# Last resort only: the stock firmware default. Reaching this on a stick that
+# keeps another address gives the wrong one, but a stick whose config
+# partition will not read, or holds an address the kernel refuses, is already a
+# bigger problem, and a wrong address is a symptom you can see with arping
+# from the other end.
 # No address at all is silence, which is the one outcome worth engineering out.
 DEF_IP=192.168.1.1
 DEF_MASK=255.255.255.0
+# The stock firmware compiles in 192.168.1.1/24 and 192.168.100.1/24 as its
+# defaults (strings in the stock /bin/mib and configd). The second one is the
+# rescue address of a safe-mode boot.
+DEF_IP2=192.168.100.1
+SAFE_FLAG=${SAFE_FLAG:-/var/run/safe-mode}
 
 lower() {
 	echo "$1" | tr "[:upper:]" "[:lower:]"
@@ -90,10 +97,78 @@ if [ -z "$IP" ]; then
 	MASK=$(xmlval LAN_SUBNET || true)
 fi
 
+# A usable host address: four numbers without leading zeros (busybox ifconfig
+# reads 010 as octal), first one 1 to 223 and not 127. And a netmask: ones then
+# zeros, /8 to /30. Both are what the kernel accepts on an interface, no more:
+# a value it refuses used to leave the stick with no address at all, at every
+# boot, from a partition a reflash does not touch. The web UI refuses them too
+# (odi-ui types ipv4host and netmask); this is for a value written by hand.
+valid_quad() {   # valid_quad A.B.C.D: sets Q1..Q4
+	case $1 in
+	"" | *[!0-9.]* | .* | *. | *..*) return 1 ;;
+	esac
+	_ifs=$IFS
+	IFS=.
+	# shellcheck disable=SC2086 # split on the dots, on purpose
+	set -- $1
+	IFS=$_ifs
+	[ $# -eq 4 ] || return 1
+	for _o in "$1" "$2" "$3" "$4"; do
+		case $_o in
+		0 | [1-9] | [1-9][0-9] | 1[0-9][0-9] | 2[0-4][0-9] | 25[0-5]) ;;
+		*) return 1 ;;
+		esac
+	done
+	Q1=$1 Q2=$2 Q3=$3 Q4=$4
+}
+valid_ip() {
+	valid_quad "$1" || return 1
+	[ "$Q1" -ge 1 ] && [ "$Q1" -le 223 ] && [ "$Q1" -ne 127 ]
+}
+valid_mask() {
+	valid_quad "$1" || return 1
+	[ "$Q1" = 255 ] || return 1
+	_zeros=0
+	for _o in "$Q2" "$Q3" "$Q4"; do
+		if [ "$_zeros" = 1 ]; then
+			[ "$_o" = 0 ] || return 1
+			continue
+		fi
+		case $_o in
+		255) ;;
+		0 | 128 | 192 | 224 | 240 | 248 | 252 | 254) _zeros=1 ;;
+		*) return 1 ;;
+		esac
+	done
+	# Not /31 or /32: no host would be left.
+	case $Q4 in
+	254 | 255) return 1 ;;
+	esac
+	return 0
+}
+
+# BAD says why what the store holds cannot be used. The boot falls back to the
+# stock default exactly as when the key is absent; `addr` changes nothing.
+BAD=""
+if [ -n "$IP" ] && ! valid_ip "$IP"; then
+	BAD="$IP is not an address the kernel accepts"
+elif [ -n "$IP" ] && [ -n "$MASK" ] && ! valid_mask "$MASK"; then
+	BAD="$MASK is not a netmask the kernel accepts"
+fi
+if [ -n "$BAD" ]; then
+	echo "network: $BAD (LAN_IP_ADDR/LAN_SUBNET or $OVERRIDE), using the stock default $DEF_IP" >&2
+	if [ "$MODE" = addr ]; then
+		echo "network: nothing changed" >&2
+		exit 1
+	fi
+	IP=""
+	MASK=""
+fi
+
 if [ -z "$IP" ]; then
 	IP=$DEF_IP
 	NET_CONFIGURED=0
-	echo "network: no address in $CONF, falling back to $IP" >&2
+	[ -n "$BAD" ] || echo "network: no address in $CONF, falling back to $IP" >&2
 fi
 [ -n "$MASK" ] || MASK=$DEF_MASK
 
@@ -113,6 +188,21 @@ secondary() {   # secondary <dev>
 	ip2=$(xmlval LAN_IP_ADDR2 || true)
 	mask2=$(xmlval LAN_SUBNET2 || true)
 	[ -n "$mask2" ] || mask2=$DEF_MASK
+	# A safe-mode boot (safe-mode.sh) always carries the rescue address,
+	# whatever LAN_ENABLE_IP2 says: the stored one, else the stock default.
+	# Nothing is moved and nothing stored; it is the way back into a stick
+	# whose primary address is wrong, when the second address was never
+	# switched on.
+	if [ -f "$SAFE_FLAG" ]; then
+		en=1
+		valid_ip "$ip2" || ip2=$DEF_IP2
+		valid_mask "$mask2" || mask2=$DEF_MASK
+		echo "network: safe-mode boot, rescue address $ip2 on $1:$IP2_ALIAS"
+	fi
+	if [ "$en" = 1 ] && { ! valid_ip "$ip2" || ! valid_mask "$mask2"; }; then
+		echo "network: LAN_IP_ADDR2/LAN_SUBNET2 are not usable (${ip2:-empty} ${mask2}), no second address" >&2
+		en=0
+	fi
 	alias=$1:$IP2_ALIAS
 	cur2=$(addr_of "$alias")
 	if [ "$en" = 1 ] && [ -n "$ip2" ] && [ "$ip2" != "$IP" ]; then
