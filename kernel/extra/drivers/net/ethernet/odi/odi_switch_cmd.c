@@ -44,8 +44,9 @@ static struct odi_sw_tcont_slot odi_sw_tcont[ODI_SW_PONQ_TCONTS];
 
 #ifndef __KERNEL__
 /* The host build has no GPON core: unless a test links one in and points
- * this at it, Alloc-IDs take rows from 0 in first-seen order, the order
- * PLOAM Assign_Alloc-ID fills the CAM in (odi_gpon_hw.c).
+ * this at its lookup (odi_gpon_hw_alloc_id_find()), the tests stand in for
+ * an OLT that assigned every Alloc-ID they name, rows from 0 in first-seen
+ * order, the order PLOAM Assign_Alloc-ID fills the CAM in (odi_gpon_hw.c).
  */
 int (*odi_sw_host_alloc_row)(uint16_t alloc_id);
 static uint32_t odi_sw_host_rows[ODI_SW_PONQ_TCONTS];
@@ -354,10 +355,16 @@ static int cmd_pri_queue_del(void *buf, uint32_t len)
 /* cmd 21: the T-CONT of an Alloc-ID. Word 0 goes in as the number of
  * queues omcid will put on it (1 if 0 or out of range: the stock caller
  * leaves it uninitialised) and comes back as the T-CONT index, the
- * Alloc-ID's CAM row. An Alloc-ID the OLT has not assigned by PLOAM gets a
- * row here, as the stock driver gives it one. A row past the data
- * T-CONTs (the OMCC's, or one of rows 17-31, which have no scheduler) or
- * a block that does not fit in the group is refused.
+ * Alloc-ID's CAM row. The row is looked up, never written: an Alloc-ID
+ * the OLT has not assigned by PLOAM in this activation is refused, and
+ * omcid binds the T-CONT when the Assign_Alloc-ID arrives. The stock
+ * driver writes a row here, but its caller sends this only on a T-CONT
+ * Set; omcid also sends it when the PLOAM list changes, so a row written
+ * here would bring back an Alloc-ID the OLT had just taken away, or one
+ * that went with the ONU-ID, and the ONU would answer grants that are not
+ * its own (G.984.3 5.5.3, 5.5.4). A row past the data T-CONTs (the
+ * OMCC's, or one of rows 17-31, which have no scheduler) or a block that
+ * does not fit in the group is refused.
  */
 static int cmd_tcont(void *buf, uint32_t len)
 {
@@ -371,7 +378,12 @@ static int cmd_tcont(void *buf, uint32_t len)
 	if (n == 0U || n > ODI_SW_PONQ_GROUP_QUEUES)
 		n = 1U;
 	row = tcont_alloc_row(t->alloc_id);
-	if (row < 0 || row >= (int)ODI_SW_PONQ_TCONTS) {
+	if (row < 0) {
+		ODI_SW_WARN("cmd 21: Alloc-ID %u is not assigned to this ONU by PLOAM\n",
+			    (unsigned int)t->alloc_id);
+		return ODI_SW_EOPNOTSUPP;
+	}
+	if (row >= (int)ODI_SW_PONQ_TCONTS) {
 		ODI_SW_WARN("cmd 21: Alloc-ID %u has no data T-CONT (CAM row %d)\n",
 			    (unsigned int)t->alloc_id, row);
 		return ODI_SW_EOPNOTSUPP;

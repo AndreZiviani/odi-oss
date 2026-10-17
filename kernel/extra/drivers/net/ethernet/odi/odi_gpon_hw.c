@@ -245,8 +245,15 @@ static void hw_set_onu_id(void *ctx, uint8_t onu_id)
 
 	(void)ctx;
 
-	if (onu_id == ODI_GPON_ONU_ID_BROADCAST)
-		hw_release_rows();
+	/* Released on a discard (broadcast), and also before our own
+	 * Assign_ONU-ID writes its row: an activation starts from an empty
+	 * table, whatever an earlier state left recorded. A row placed
+	 * before this ONU held an ONU-ID cannot be ours (G.984.3 5.5.3: every
+	 * assignment is lost with the ONU-ID), and kept it would answer
+	 * grants for another ONU. Normally there is nothing to release here,
+	 * and the release then writes nothing.
+	 */
+	hw_release_rows();
 
 	reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
 	reg = ODI_GPON_DSF_ONU_STATE_ASSIGNED_ONU_ID_SET(reg, onu_id);
@@ -933,14 +940,27 @@ int odi_gpon_hw_gem_port_encrypted(uint16_t gem_port_id, int encrypted)
  * (existing or newly allocated), or -1 if the 32-row table (minus the one
  * reserved row) is exhausted.
  */
+/* The CAM row holding alloc_id, or -1. A lookup: it never writes the CAM.
+ * The default row (16, the ONU-ID) is found like any other.
+ */
+int odi_gpon_hw_alloc_id_find(uint16_t alloc_id)
+{
+	unsigned int row;
+
+	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++)
+		if ((odi_gpon_hw.alloc_used & (1UL << row)) && odi_gpon_hw.alloc_id_values[row] == alloc_id)
+			return (int)row;
+	return -1;
+}
+
 int odi_gpon_hw_alloc_id_assign(uint16_t alloc_id)
 {
 	unsigned int row;
 
-	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++) {
-		if ((odi_gpon_hw.alloc_used & (1UL << row)) && odi_gpon_hw.alloc_id_values[row] == alloc_id)
-			return (int)row;	/* already assigned -- no repeat CAM write */
-	}
+	int found = odi_gpon_hw_alloc_id_find(alloc_id);
+
+	if (found >= 0)
+		return found;	/* already assigned -- no repeat CAM write */
 
 	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++) {
 		if (row == ODI_GPON_HW_ALLOC_ROW_DEFAULT)
@@ -1061,6 +1081,47 @@ static int hw_alloc_id_delete(unsigned int row)
 	return odi_poll_reg(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, ODI_SW_DSF_ALLOC_CAM_CTL_DONE,
 			    ODI_SW_DSF_ALLOC_CAM_CTL_DONE, ODI_SW_TABLE_POLL_DELAY_US,
 			    ODI_SW_TABLE_POLL_US, NULL);
+}
+
+/* /proc/odi_gpon/cam: every row of the Alloc-ID CAM as the hardware holds
+ * it (a MODE 2 read: ROW_VALID, then RDATA), next to what this layer
+ * recorded writing there, so a readback can show a row the bookkeeping
+ * does not know of. Under odi_switch_dsf_lock, the lock every CAM request
+ * of the PLOAM path takes, so the reads never interleave with a write; the
+ * caller holds odi_gpon_lock (the order of odi_switch.c). A request that
+ * never completes ends the walk: that row and the rest read -2.
+ */
+void odi_gpon_hw_alloc_cam_read(int hw[32], int recorded[32])
+{
+	unsigned long flags;
+	unsigned int row;
+	uint32_t ind, ctl = 0;
+	int stuck = 0;
+
+	spin_lock_irqsave(&odi_switch_dsf_lock, flags);
+	for (row = 0; row < ODI_GPON_HW_ALLOC_ROWS; row++) {
+		recorded[row] = (odi_gpon_hw.alloc_used & (1UL << row)) ?
+				(int)odi_gpon_hw.alloc_id_values[row] : -1;
+		if (stuck) {
+			hw[row] = -2;
+			continue;
+		}
+		ind = ODI_SW_DSF_ALLOC_CAM_CTL_OP_SET(0, 2);
+		ind = ODI_SW_DSF_ALLOC_CAM_CTL_CAM_ROW_SET(ind, row);
+		odi_reg_write(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, ind);
+		odi_reg_write(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, ODI_SW_DSF_ALLOC_CAM_CTL_REQ_SET(ind, 1));
+		if (odi_poll_reg(ODI_SW_DSF_ALLOC_CAM_CTL_OFF, ODI_SW_DSF_ALLOC_CAM_CTL_DONE,
+				 ODI_SW_DSF_ALLOC_CAM_CTL_DONE, ODI_SW_TABLE_POLL_DELAY_US,
+				 ODI_SW_TABLE_POLL_US, &ctl)) {
+			stuck = 1;
+			hw[row] = -2;
+			continue;
+		}
+		hw[row] = (ctl & ODI_SW_DSF_ALLOC_CAM_CTL_ROW_VALID) ?
+			  (int)ODI_SW_DSF_ALLOC_CAM_RDATA_ALLOC_ID_GET(odi_reg_read(ODI_SW_DSF_ALLOC_CAM_RDATA_OFF)) :
+			  -1;
+	}
+	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
 }
 
 /* Assign_Alloc-ID with type 255 (G.984.3 9.2.3.9, "deallocate"): the OLT

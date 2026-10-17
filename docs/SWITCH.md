@@ -382,8 +382,15 @@ on queue 64) before any OMCI.
 - **cmd 21** answers with the T-CONT index of the Alloc-ID it is given,
   which is the row of the Alloc-ID CAM that holds it: the hardware's T-CONT
   n is the scheduler that serves the grants of the Alloc-ID in CAM row n.
-  An Alloc-ID no Assign_Alloc-ID placed gets a row, as the stock driver
-  gives it one. Rows 0-15 are data T-CONTs; the OMCC's row 16 and rows
+  The row is looked up, never written: an Alloc-ID that no Assign_Alloc-ID
+  (type 1) of the current activation placed is refused, and omcid binds the
+  T-CONT once the assignment shows in /proc/odi_gpon/status. Only PLOAM
+  arms the CAM, because a row decides which grants the ONU answers (G.984.3
+  5.5.4: a T-CONT maps to an Alloc-ID "previously assigned to the given ONU
+  via the PLOAM messaging channel"). The stock driver writes a row here,
+  but only on a T-CONT Set; omcid also sends cmd 21 after every change of
+  the PLOAM list, where a write would bring back an Alloc-ID the OLT had
+  just taken away. Rows 0-15 are data T-CONTs; the OMCC's row 16 and rows
   17-31 (no scheduler) are refused. Word 0 goes in as the number of queues
   omcid will put on the T-CONT, and the driver reserves a block of that
   many consecutive logical queues in the T-CONT's group, first fit (the
