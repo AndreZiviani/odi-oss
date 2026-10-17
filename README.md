@@ -139,7 +139,12 @@ Identifiers in the screenshots are placeholders. More pages in the
 it with `nv commit <slot>` only once you have checked it yourself. Full procedure, including how to read a boot you
 could not otherwise see: [`docs/FLASHING.md`](docs/FLASHING.md).
 
-**Updating from an older release?** In v1.5.0 `/proc/odi_gpon` became a
+**Updating from an older release?** v1.6.0 changes what the stick tells the
+OLT about itself (a complete MIB upload, as the stock firmware sends it) and
+programs the upstream queues from what the OLT configures: expect the OLT to
+provision a little differently the first time. The first omcid restart after
+the update re-registers once (the resume snapshot format changed). In v1.5.0
+`/proc/odi_gpon` became a
 directory (`status`, `counters`, `ploam`, `flows`): a script that reads
 `/proc/odi_gpon` directly must open the file it needs. The exporter and
 the web UI in the image already do.
@@ -182,7 +187,7 @@ every port and how to move files on and off the stick:
 
 ## Status and limitations
 
-**Tested on real sticks.** The current release is v1.5.0
+**Tested on real sticks.** The current release is v1.6.0
 ([`CHANGELOG.md`](CHANGELOG.md)). The firmware runs on two DFP-34X-2C2
 sticks on two different ISPs' GPON networks, and both now run it as their
 committed image, with the stock firmware kept in the other slot. The

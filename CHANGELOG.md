@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.6.0 - 2026-10-17
+
 - The image ships confd v1.5.0 (odi-ui: every input validated by the daemon
   and the page alike, Host and cross-site checks, request deadlines, safer
   writes of the credential and ssh keys, the expert VEIP and private-entity
