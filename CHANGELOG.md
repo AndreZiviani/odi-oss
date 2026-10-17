@@ -22,6 +22,14 @@ listed here.
   formula past five upstream flows. On ISP1's provisioning every register
   write is the same as before, which is what the stock driver writes.
 
+- Docs and tests: the key counts are corrected (the image acts on 22 of the 184
+  stock keys, plus bit 256 of `OMCI_CUSTOM_ME`, not "reads 21"; 161 are
+  read-only), HACKING.md lists every key of `odi.conf`, SETTINGS.md says that
+  192.168.100.1 is the stock default second address and that `OMCI_FAKE_OK` is
+  not read, the two lines are called ISP1 and ISP2 in the docs and test
+  comments, and no OLT vendor name is left in docs, tests or the 1.1.x notes
+  (an OLT is described generically). Released sections are otherwise unchanged.
+
 - Docs: the README rows for the OMCI values read from the stick and the VEIP
   and vendor-private keys say what was checked on sticks: the values on two
   sticks on two OLTs against the stock dumps, the new keys only at their
@@ -401,7 +409,7 @@ Read before updating:
   the tagging when the stick is not in manual mode (`VLAN_CFG_TYPE` other
   than 1), as the stock firmware does. Until now omcid decoded and stored
   the table but built only the manual rule or a transparent one, so an OLT
-  that provisions the service VLAN through class 171 (a Huawei one: "untagged
+  that provisions the service VLAN through class 171 (one of some OLTs: "untagged
   frames: add VLAN 100") reached the router tagged. The supported shape is the
   Ethernet-UNI instance with one untagged-frames rule that adds a single tag
   with a concrete VID (1..4094) and priority (0..7), plus default

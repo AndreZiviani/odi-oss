@@ -133,7 +133,7 @@ static uint32_t boh_length(void)
 
 /* USF_BURST_HDR_SETUP.LENGTH = the fixed guard/delimiter bytes plus the
  * Extended_Burst_Length count. Guard 32 bits, no type 1/2 preamble: 7
- * fixed bytes. Vero's pre-ranged count 50 gives the captured 0x39; counts
+ * fixed bytes. ISP2's pre-ranged count 50 gives the captured 0x39; counts
  * past the old 63-byte clamp must reach the 8-bit field, up to 252.
  */
 static void test_burst_overhead_length(void)
