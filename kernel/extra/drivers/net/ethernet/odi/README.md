@@ -98,6 +98,15 @@ Error paths:
   is the only traffic from the fibre the CPU accepts. `/proc/odi_nic`
   counts `rx_pon` (every frame from the PON port) and `rx_pon_dropped`
   (`docs/SWITCH.md`, "PON port isolation").
+- A frame from the IP stack is sent with the port mask of its device
+  (`odi_nic_stack_tx_mask()`): the host-side ports only, never the PON or
+  the CPU port, never 0 (the hardware lookup), and never with `PORT_SEL`,
+  which only the OMCI replies carry (`docs/SWITCH.md`, "Frames the stick
+  sends").
+- `odi_switch_pin.c` keeps the stick's MACs (the addresses of the devices
+  above that are up, and of their bridge) as static L2 rows on the CPU
+  port, through a netdevice notifier (`docs/SWITCH.md`, "The stick's
+  MAC").
 - Every `dma_map_single()` is checked with `dma_mapping_error()`, and the
   init path unwinds in reverse order.
 

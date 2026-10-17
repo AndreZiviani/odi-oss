@@ -82,10 +82,10 @@ static inline void odi_w8(u32 off, u8 val) { writeb(val, odi_mmio + off); }
  * catch-all for anything else. nas0 and pon0 exist because the rootfs
  * scripts name them; no traffic reaches them through this driver.
  */
-#define ODI_PORT_CATCHALL	0xFFU	/* eth0: never matched by src_port_num */
-#define ODI_PORT_LAN0		0U	/* eth0.2 */
-#define ODI_PORT_LAN1		1U	/* eth0.3 */
-#define ODI_PORT_NONE		0xFEU	/* nas0, pon0: no traffic reaches these here */
+#define ODI_PORT_CATCHALL	ODI_NIC_DEV_PORT_CATCHALL	/* eth0: never matched by src_port_num */
+#define ODI_PORT_LAN0		ODI_NIC_DEV_PORT_LAN0		/* eth0.2 */
+#define ODI_PORT_LAN1		ODI_NIC_DEV_PORT_LAN1		/* eth0.3 */
+#define ODI_PORT_NONE		ODI_NIC_DEV_PORT_NONE		/* nas0, pon0: no traffic reaches these here */
 
 #define ODI_NUM_DEVS 5
 
@@ -811,15 +811,13 @@ static void odi_tx_backstop_work(struct work_struct *work)
 static netdev_tx_t odi_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct odi_port *p = netdev_priv(dev);
-	unsigned int mask = 1U << p->port;
+	/* Host-side ports only, never the fibre; 0 for nas0/pon0, which are
+	 * not wired to a switch port here (odi_nic_hw.h).
+	 */
+	unsigned int mask = odi_nic_stack_tx_mask(p->port);
 	unsigned long flags;
 	bool full;
 	int ret;
-
-	if (p->port == ODI_PORT_CATCHALL)
-		mask = (1U << ODI_PORT_LAN0) | (1U << ODI_PORT_LAN1);
-	else if (p->port == ODI_PORT_NONE)
-		mask = 0;	/* nas0/pon0: not wired to a switch port here, see the note above */
 
 	if (!mask) {
 		dev_kfree_skb_any(skb);
@@ -1277,6 +1275,18 @@ static void odi_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info
 static const struct ethtool_ops odi_ethtool_ops = {
 	.get_drvinfo = odi_get_drvinfo,
 };
+
+static const struct net_device_ops odi_netdev_ops;
+
+bool odi_nic_dev_transmits(const struct net_device *dev)
+{
+	const struct odi_port *p;
+
+	if (dev->netdev_ops != &odi_netdev_ops)
+		return false;
+	p = netdev_priv(dev);
+	return odi_nic_stack_tx_mask(p->port) != 0;
+}
 
 static const struct net_device_ops odi_netdev_ops = {
 	.ndo_open = odi_ndo_open,

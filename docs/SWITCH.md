@@ -855,16 +855,17 @@ table (one field alone), on the stock modules and on this image before the
 step below.
 
 The platform step "pon isolate" (`odi_sw_pon_isolate_apply()`,
-`odi_switch_port.c`) clears the CPU bit and bits 10:4 of port 2's field, a
-read-modify-write that keeps port 3's half of the word: `0x003fffff`
-becomes `0x003ff807`, and logs
+`odi_switch_port.c`) clears the CPU bit and bits 10:4 of port 2's field,
+and the PON bit (2) of port 3's field ([Frames the stick
+sends](#frames-the-stick-sends)), in one read-modify-write of the word the
+two ports share: `0x003fffff` becomes `0x003fd807` (port 2 0x007, port 3
+0x7fb), and logs
 
-    odi_switch: PON port isolation on: the PON port forwards to 0x007 (never the CPU)
+    odi_switch: PON port isolation on: the PON port forwards to 0x007 (never the CPU), the CPU port to 0x7fb (never the PON by lookup)
 
-It runs before omcid starts, so before any service exists. Only the PON
-port's own field changes: the host still reaches the CPU, the CPU still
-reaches the host and the PON (the OMCI replies are CPU-to-PON frames), and
-a frame from the fibre still reaches the UNI. Isolation filters the
+It runs before omcid starts, so before any service exists. The host still
+reaches the CPU and the fibre, the CPU still reaches the host, and a frame
+from the fibre still reaches the UNI. Isolation filters the
 egress whatever chose it, a flood or an L2 hit; that it filters a trap to
 the CPU as well is suggested, not measured, by the chip's per-protocol
 isolation "leaky" controls (reserved multicast, IP multicast), which
@@ -876,7 +877,7 @@ with the step on. The trial checks it first (below), and
 `odi_switch.pon_isolate` is the way back:
 
 - `pon_isolate` (bool, default `Y`, 0644): `N` on the command line leaves
-  the mask open; written to `/sys/module/odi_switch/parameters/pon_isolate`
+  both masks open; written to `/sys/module/odi_switch/parameters/pon_isolate`
   after the platform settings it is applied at once, one register write,
   in either direction. The NIC layer below holds either way.
 
@@ -903,25 +904,88 @@ the stick wants a frame from the PON other than OMCI, and a future RX hook
 first. There is no netfilter in this kernel, and only the driver knows the
 ingress port.
 
-### Not covered
+### Frames the stick sends
 
-- Frames the stick itself sends: an ordinary transmit carries no port
-  select, so the switch forwards it by its destination, and a broadcast
-  from the stick (an ARP request) is flooded toward the PON as well as the
-  host. No answer can come back (above), but the stick does announce
-  itself upstream. Forcing the port select on management transmits, or
-  isolating the CPU from the PON, would also touch the OMCI replies, which
-  are CPU-to-PON frames with the port select; neither is done without a
-  measurement.
-- A frame from the fibre carrying the stick's MAC as its source would
-  move the stick's L2 entry to the PON port, so frames from the host to
-  the stick would be switched toward the fibre until the entry moves back.
-  A static L2 entry for the stick's MAC on the CPU port would prevent it;
-  not done yet.
+The rule is that the only frames the CPU may send toward the fibre are the
+OMCI replies. The NIC transmits two kinds of descriptor:
+
+- the OMCI replies (`odi_omci.c`, through `odi_nic_tx_words()`, its only
+  caller): `PORT_SEL`, `NO_LEARN` and bit 25 in word 0, the PON port's bit
+  and the OMCC stream in word 3. `PORT_SEL` is what puts a frame onto a
+  PON stream (the vendor SDK's debug CLI calls it "force pon forward" and
+  takes the stream id with it); a reply without it never reached the OLT;
+- everything from the IP stack (`odi_start_xmit()`): no `PORT_SEL`, and the
+  port mask of the device it leaves on, `odi_nic_stack_tx_mask()`
+  (`odi_nic_hw.h`): 0x1 for `eth0.2`, 0x2 for `eth0.3`, 0x3 for `eth0`,
+  nothing for `nas0` and `pon0`. Never the PON port, never the CPU port,
+  and never 0, which would be a hardware lookup.
+
+Whether the switch honours a port mask without `PORT_SEL` is not measured.
+The vendor's own NIC driver sends every protocol-stack frame that way and
+calls a non-zero mask a direct transmit (a zero mask is the lookup); read
+so, the stick's ARP, broadcasts and replies already leave by the host port
+alone. Read the other way (the mask ignored, the frame forwarded by
+lookup), a broadcast from the stick (`FLOOD_BCAST_PORTS` 0xf) or an unknown
+unicast would also reach the PON port. Setting `PORT_SEL` on those frames
+is not the cure: it is the "onto the PON" bit.
+
+So the switch layer covers the second reading: the CPU port's isolation
+mask loses the PON port (above), and a frame the CPU sends that the switch
+forwards by lookup can reach the host only. The OMCI replies are a
+directed transmit, not a lookup, and the vendor forwarding engine applies
+the isolation masks to directed transmits in software, which says the
+hardware does not; that is a reading too, so the first trial checks that
+OMCI keeps working with the mask in place. It is a property of the chip,
+not of the OLT: if OMCI works with it on one OLT, it does on any.
+`pon_isolate=N` is the way back here as well. The OMCI transmit path
+itself (`odi_omci.c`, `odi_nic_tx_words()`, `odi_nic_xmit_raw()`) is not
+changed by any of this.
+
+### The stick's MAC
+
+The switch learns a frame's source MAC on the port it entered by, whatever
+the isolation masks let it reach afterwards. A frame from the fibre
+carrying the stick's MAC as its source would move the stick's learned row
+from the CPU port to the PON port, and frames from the host to the stick
+would then be switched toward the fibre until the stick sent again.
+
+The stick's MACs are therefore static rows on the CPU port
+(`odi_switch_pin.c`, `odi_switch_l2.c`): bit 62 of an L2 row, the SDK's
+"no SA learning", is never learned over. A frame whose source hits a static
+row from another port is an "illegal port move", whose action is
+`LUT_UNMATCHED_SA_CTRL` (0x01c000, two bits a port): the boot replay sets
+"forward", and the row stays where it is. The row is the one the hardware
+writes when it learns the stick's MAC from the CPU port (SVL, filtering id
+0, port 3, see [the L2 table readout](KERNEL.md)) plus the static bit, with
+the age non-zero as the SDK writes a static unicast row; written through
+the hash, it lands on the learned row and replaces it.
+
+Which MACs: the address of every `odi_nic` device that is up and
+transmits (`eth0`, `eth0.2`, `eth0.3`), and of the bridge it is a port of
+(`br0`, which takes `eth0.2`'s). A netdevice notifier (up, down, a new
+address, a new bridge) recomputes the set and brings the table in step, so
+`network.sh` setting `ELAN_MAC_ADDR` (link down, address, link up) moves
+the pin with it; `switch_init` syncs once more before omcid starts. Each
+change is logged:
+
+    odi_switch: 02:00:00:00:00:04 pinned to the CPU port (static row 912)
+
+Nothing removes a static row afterwards: no replay writes the L2 table,
+`L2_TBL_FLUSH_CTRL` (0x017024) is set to flush dynamic rows only and the
+flush itself (0x017028) is never started, the bridge connections of cmd 51
+do not touch the table, and ageing (cmd 62) and the learning limits (the
+MAC bridge port MEs) apply to learned rows. Learning on the PON port stays
+on: in a bridge, the OLT side's MACs are learned there.
+
+What cannot be checked without the OLT side: a frame from the fibre with
+the stick's MAC as its source. The static semantics rest on the field and
+the port-move register, not on a measurement.
 
 ### Checking it on a stick
 
-- `register get 0x27000 2` in `diag`: `0x003fffff 0x003ff807`.
+- `register get 0x27000 2` in `diag`: `0x003fffff 0x003fd807`.
+- `l2-table get all` in `diag`: the stick's MAC `Static`, port 3, after
+  the boot, after the OLT's provisioning and after an `apply.sh`.
 - `/proc/odi_nic`: `rx_pon_dropped` 0 over a day, and `rx_pon` equal to the
   OMCI frame count; `diag mib dump counter port 2` shows the OLT's
   broadcasts arriving (`ifInBroadcastPkts` growing) all the while.
@@ -931,6 +995,10 @@ ingress port.
 
 `test/odi_pon_isolation_test.c` starts from the words a stick reads,
 checks the words the platform step leaves, asks a forwarding model where
-each kind of frame from the fibre can go (unicast to the stick, broadcast,
-unknown unicast and multicast, a trap), and runs the NIC's PON test on RX
-descriptor words logged on a stick: an OMCI frame and host frames.
+each kind of frame from the fibre, and each frame the CPU sends by
+lookup, can go, runs the NIC's PON test on RX descriptor words logged on a
+stick (an OMCI frame and host frames), and checks the port mask and
+`PORT_SEL` of every device's transmit descriptor.
+`test/odi_switch_l2_test.c` checks the static row against the row the
+stick learned for its own MAC and against the static bit as igmpd's row
+showed it, and pins, moves and unpins MACs through its model of the table.

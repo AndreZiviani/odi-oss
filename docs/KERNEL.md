@@ -302,7 +302,8 @@ and GPON hardware are driven.
 |---|---|
 | `odi_nic.c` | the CPU-port Ethernet DMA engine (rings, NAPI, TX/RX) |
 | `odi_switch.c`, `odi_switch_{tbl,dal,cmd}.c` | the switch fabric: MMIO map, indirect table access, the OMCI command dispatch `omcid` drives it through |
-| `odi_switch_l2.c` | the L2 lookup table: row readback and the valid-row walk (the MAC table), L2 multicast add/delete (igmpd) |
+| `odi_switch_l2.c` | the L2 lookup table: row readback and the valid-row walk (the MAC table), L2 multicast add/delete (igmpd), static unicast rows (the stick's MACs) |
+| `odi_switch_pin.c` | the stick's MACs pinned to the CPU port as static L2 rows, kept in step by a netdevice notifier (`docs/SWITCH.md`, "The stick's MAC") |
 | `odi_gpon*.c` | the GPON MAC block: the O1–O7 activation state machine and PLOAM codec (ITU-T G.984.3), register leaves, the interrupt handler, the switch interrupt line, whose one consumer it is, and the link counters (`odi_gpon_ctr.c`, below) |
 | `odi_omci.c` | the netlink transport that carries OMCI frames between the kernel and `omcid` |
 | `odi_board.c`, `odi_board_data.c` | board-init: LED and I2C core bring-up, an ordered 88-write replay built into the kernel (it runs before any filesystem), and the `laser` verb: the laser is switched on only when the laser driver id is the GN25L95 (0x6a), or after `laser unverified` (see `docs/BOOT.md`) |

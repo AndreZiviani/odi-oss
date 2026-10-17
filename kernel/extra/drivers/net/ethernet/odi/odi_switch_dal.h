@@ -82,17 +82,19 @@ extern bool odi_sw_host_pause;
  */
 void odi_sw_host_pause_apply(void);
 
-/* Whether the PON port is isolated from the CPU: true (the default) clears
- * the CPU side from the PON port's isolation mask, so no frame from the
- * PON is ever forwarded to the CPU; false leaves the mask all open, as the
- * reset value and the stock image do. The kernel
+/* Whether the PON port is isolated from the CPU, both ways: true (the
+ * default) clears the CPU side from the PON port's isolation mask, so no
+ * frame from the PON is ever forwarded to the CPU, and the PON port from
+ * the CPU port's, so no frame the CPU sends is forwarded to the PON by
+ * lookup; false leaves both masks all open, as the reset value and the
+ * stock image do. The kernel
  * parameter odi_switch.pon_isolate (odi_switch.c) sets it.
  * docs/SWITCH.md#pon-port-isolation has why.
  */
 extern bool odi_sw_pon_isolate;
 
-/* Applies odi_sw_pon_isolate to the PON port's isolation mask and logs the
- * mask it then reads. Idempotent; the caller holds odi_switch_lock.
+/* Applies odi_sw_pon_isolate to the PON and CPU ports' isolation masks
+ * (one word) and logs the masks it then reads. Idempotent; the caller holds odi_switch_lock.
  */
 void odi_sw_pon_isolate_apply(void);
 

@@ -56,6 +56,7 @@ void __iomem *odi_switch_base;
  *   - odi_sw_ioctl(), every /dev/odi_sw command except DDM_GET;
  *   - odi_init_proc_write(), every verb, the GPON ones included;
  *   - odi_switch_init(), for the state reset.
+ *   - the netdevice notifier of odi_switch_pin.c, under RTNL.
  * It may sleep inside (request_firmware() in the replays), and it is
  * never taken from IRQ, softirq or timer context or under a spinlock.
  *
@@ -87,6 +88,8 @@ void __iomem *odi_switch_base;
  *   i2c core bus lock (i2c-0) -> odi_i2c_lock
  *   odi_switch_lock -> odi_gpon_lock -> odi_switch_dsf_lock
  *   odi_gpon_lock -> odi_switch_dsf_lock  (the switch interrupt handler)
+ *   RTNL -> odi_switch_lock  (the netdevice notifier of odi_switch_pin.c;
+ *   nothing under odi_switch_lock takes RTNL)
  * No inversion is possible: the two mutexes are only taken in process
  * context holding no spinlock, so no atomic holder ever waits on them;
  * odi_switch_dsf_lock is a leaf; and odi_i2c_lock never nests with
@@ -164,6 +167,10 @@ int odi_switch_boot_init(void)
 		return rc;
 	odi_switch_init_modload(&fw.blob);
 	odi_replay_fw_release(&fw);
+	/* Again before omcid starts, should the write at network.sh time have
+	 * failed: the stick's MACs static on the CPU port (odi_switch_pin.c).
+	 */
+	odi_switch_pin_sync();
 	return 0;
 }
 
@@ -196,8 +203,9 @@ static const struct kernel_param_ops odi_switch_host_pause_param_ops = {
 module_param_cb(host_pause, &odi_switch_host_pause_param_ops, &odi_sw_host_pause, 0644);
 MODULE_PARM_DESC(host_pause, "send PAUSE frames to the host when the switch is congested (default: no, the switch drops)");
 
-/* odi_switch.pon_isolate: the PON port isolated from the CPU side (the
- * default), or left open as the reset value and the stock image leave it.
+/* odi_switch.pon_isolate: the PON port isolated from the CPU side, both
+ * ways (the default), or left open as the reset value and the stock image
+ * leave it.
  * On the command line it takes effect with the platform settings; written
  * to /sys/module/odi_switch/parameters/pon_isolate after them it is
  * applied at once, one register write. The escape hatch should an OLT's
@@ -225,7 +233,7 @@ static const struct kernel_param_ops odi_switch_pon_isolate_param_ops = {
 	.get = param_get_bool,
 };
 module_param_cb(pon_isolate, &odi_switch_pon_isolate_param_ops, &odi_sw_pon_isolate, 0644);
-MODULE_PARM_DESC(pon_isolate, "never forward a frame from the PON port to the CPU (default: yes; no leaves the port isolation open, as stock)");
+MODULE_PARM_DESC(pon_isolate, "never forward a frame from the PON port to the CPU, nor one from the CPU to the PON by lookup (default: yes; no leaves the port isolation open, as stock)");
 
 /* odi_switch.host_autoneg: the 1000BASE-X auto-negotiation of the host
  * port, on (the default) or off (forced 1000BASE-X full duplex). Written to

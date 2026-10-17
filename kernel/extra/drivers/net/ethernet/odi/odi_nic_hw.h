@@ -443,6 +443,45 @@ static inline int odi_nic_rx_from_pon(const struct odi_rx_desc *d)
 	return odi_nic_rx_src_port(d) == ODI_NIC_PON_PORT;
 }
 
+/* ---- TX from the IP stack ----------------------------------------------
+ *
+ * Which switch port a net_device stands for (its RX demux and its TX). The
+ * catch-all is eth0, which receives what no other device claims; NONE is
+ * nas0 and pon0, which the rootfs scripts name and nothing here wires to
+ * a port.
+ */
+#define ODI_NIC_DEV_PORT_LAN0		0U	/* eth0.2: the host port */
+#define ODI_NIC_DEV_PORT_LAN1		1U	/* eth0.3: port 1, not wired on this board */
+#define ODI_NIC_DEV_PORT_NONE		0xFEU	/* nas0, pon0 */
+#define ODI_NIC_DEV_PORT_CATCHALL	0xFFU	/* eth0 */
+
+#define ODI_NIC_CPU_PORT		3U
+
+/* The destination port mask of a frame from the IP stack, by the device it
+ * leaves on: the host-side ports only, so the stick's own ARP, broadcasts
+ * and replies are never addressed to the fibre
+ * (docs/SWITCH.md#pon-port-isolation). Never the PON port and never the
+ * CPU port; never 0 for a device that transmits, because a zero mask is
+ * the hardware lookup, which floods a broadcast to every port, the PON
+ * included. 0 means "do not send" (nas0, pon0, anything unknown).
+ * PORT_SEL is never set on these frames: it is what puts a frame onto a
+ * PON stream (the OMCI replies, odi_omci.c), not what makes the mask
+ * binding.
+ */
+static inline unsigned int odi_nic_stack_tx_mask(unsigned int dev_port)
+{
+	switch (dev_port) {
+	case ODI_NIC_DEV_PORT_LAN0:
+		return 1U << ODI_NIC_DEV_PORT_LAN0;
+	case ODI_NIC_DEV_PORT_LAN1:
+		return 1U << ODI_NIC_DEV_PORT_LAN1;
+	case ODI_NIC_DEV_PORT_CATCHALL:
+		return (1U << ODI_NIC_DEV_PORT_LAN0) | (1U << ODI_NIC_DEV_PORT_LAN1);
+	default:
+		return 0;
+	}
+}
+
 static inline unsigned int odi_nic_rx_reason(const struct odi_rx_desc *d)
 {
 	return (d->opts3 >> ODI_RXD_REASON_SHIFT) & ODI_RXD_REASON_MASK;

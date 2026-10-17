@@ -18,6 +18,20 @@ listed here.
   `odi_switch.pon_isolate=N` leaves the switch mask open, should an OLT's
   OMCI ever need it.
 
+- Kernel: the only frames the stick sends toward the fibre are the OMCI
+  replies. The switch never forwards a frame from the CPU to the PON port by
+  lookup (the CPU port's isolation mask loses the PON port, under the same
+  `odi_switch.pon_isolate`), and the frames of the stick's own IP stack (its
+  ARP, broadcasts and replies) are addressed to the host port alone, as they
+  were. The OMCI transmit path is unchanged.
+
+- Kernel: the stick's MAC is a static row on the CPU port of the switch's L2
+  table, so a frame from the fibre carrying it as its source can no longer
+  move it to the PON port and divert the host's traffic to the stick
+  upstream. It follows the address (`ELAN_MAC_ADDR`, set at boot) through a
+  netdevice notifier, and survives the OLT's provisioning. Learning of the
+  OLT side's MACs on the PON port is unchanged.
+
 ## v1.6.0 - 2026-10-17
 
 - The image ships confd v1.5.0 (odi-ui: every input validated by the daemon

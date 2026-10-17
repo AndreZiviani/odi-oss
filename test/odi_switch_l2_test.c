@@ -537,6 +537,127 @@ static void test_mcast_add_del(void)
 	CHECK(odi_mock_locks_idle(), "locks idle after add and delete");
 }
 
+/* The static row for the stick's MAC, against two rows a stick read back:
+ * - the stick's own MAC as the hardware learned it from the CPU port
+ *   (docs/KERNEL.md readout, row 0x390: 0x0000203e 0x00000200 0x00000004,
+ *   port 3, age 7, SVL, FID 0, VID 0). The static row must be that row
+ *   word for word plus bit 62, so its key (and hash) is the learned one's;
+ * - the static multicast row igmpd placed on ISP1 (0x00002004 0x40000100
+ *   0x5e010203), which shows where bit 62 sits in word 1 on the hardware.
+ */
+static void test_ucast_static_encode(void)
+{
+	static const uint8_t stick[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x04 };
+	static const uint8_t bad_mc[6] = { 0x01, 0x00, 0x5e, 0x00, 0x00, 0x01 };
+	static const uint8_t zero[6] = { 0 };
+	uint32_t raw[3];
+
+	CHECK(odi_switch_l2_ucast_static_encode(stick, 3, 1, raw) == 0, "encode the stick MAC on port 3");
+	CHECK(raw[0] == 0x00000004U && raw[1] == (0x00000200U | 0x40000000U) && raw[2] == 0x0000203eU,
+	      "the learned port-3 row plus bit 62 (static), bit 77 (valid) as written");
+	CHECK((raw[1] & 0x40000000U) == (0x40000100U & 0x40000000U),
+	      "bit 62 is where the stick showed it on igmpd's static row");
+	{
+		struct odi_sw_l2_row r;
+
+		memcpy(r.raw, raw, sizeof(raw));
+		odi_switch_l2_decode(&r);
+		CHECK(r.type == ODI_SW_L2_UCAST && r.port == 3 && r.age != 0 &&
+		      (r.flags & ODI_SW_L2_F_STATIC) && !(r.flags & ODI_SW_L2_F_IVL) &&
+		      r.fid == 0 && r.key == 0 && memcmp(r.mac, stick, 6) == 0,
+		      "decodes as static unicast, port 3, age non-zero, SVL, FID 0");
+	}
+	CHECK(odi_switch_l2_ucast_static_encode(stick, 3, 0, raw) == 0 &&
+	      raw[0] == 0x00000004U && raw[1] == 0x00000200U && raw[2] == 0,
+	      "a delete sends the key alone, valid clear");
+	CHECK(odi_switch_l2_ucast_static_encode(bad_mc, 3, 1, raw) == -22, "a multicast MAC is refused");
+	CHECK(odi_switch_l2_ucast_static_encode(zero, 3, 1, raw) == -22, "the zero MAC is refused");
+	CHECK(odi_switch_l2_ucast_static_encode(stick, 4, 1, raw) == -22, "a port past 3 is refused");
+}
+
+/* Pinning through the model: the learned row of the stick's MAC (as the
+ * stick showed it, port 3) is replaced in place by the static one; a MAC
+ * change moves the pin; an unchanged set rewrites the same rows; a failed
+ * write is retried by the next sync.
+ */
+static void test_pins_sync(void)
+{
+	static const uint8_t mac_a[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x04 };
+	static const uint8_t mac_b[6] = { 0x02, 0x00, 0x00, 0x00, 0x11, 0x04 };
+	static const uint32_t learned[3] = { 0x00000004U, 0x00000200U, 0x0000203eU };
+	struct odi_sw_l2_pins pinned = { 0 }, want = { 0 };
+	struct odi_sw_l2_pin_report rep;
+	struct odi_sw_l2_row r;
+	uint32_t row_a, i, before;
+	int n, found = -1;
+
+	model_reset(1);
+	/* The learned row where the model hashes it: put it there by adding
+	 * then overwriting the words with the stick's.
+	 */
+	mutex_lock(&odi_switch_lock);
+	CHECK(odi_switch_l2_ucast_static_add(mac_a, 3, &row_a) == 0, "model: place the key");
+	memcpy(model_rows[row_a], learned, sizeof(learned));
+	CHECK(odi_switch_l2_read(row_a, &r) == 0 && !(r.flags & ODI_SW_L2_F_STATIC) && r.port == 3,
+	      "the stick MAC starts as a learned row on port 3");
+
+	CHECK(odi_switch_l2_pins_add(&want, mac_a) == 1, "want: the stick MAC");
+	CHECK(odi_switch_l2_pins_add(&want, mac_a) == 0, "a duplicate is not added twice (eth0, eth0.2, br0)");
+	odi_switch_l2_pins_sync(&pinned, &want, 3, &rep);
+	CHECK(rep.failed == 0 && rep.added == 1U && rep.row[0] == row_a,
+	      "pinned on the learned row's own row");
+	CHECK(odi_switch_l2_read(row_a, &r) == 0 && (r.flags & ODI_SW_L2_F_STATIC) && r.port == 3,
+	      "now static on port 3");
+	for (n = 0, i = 0; i < MODEL_ROWS; i++)
+		n += model_used[i];
+	CHECK(n == 1, "one row for the MAC, not two");
+
+	/* The same set again: rewritten in place, nothing reported as new. */
+	before = model_cmds;
+	odi_switch_l2_pins_sync(&pinned, &want, 3, &rep);
+	CHECK(rep.added == 0 && rep.failed == 0 && rep.removed_n == 0 && rep.row[0] == row_a,
+	      "an unchanged set: same row, no news");
+	CHECK(model_cmds == before + 1, "one hash write");
+
+	/* ELAN_MAC_ADDR changed: the old row goes, the new MAC is pinned. */
+	memset(&want, 0, sizeof(want));
+	odi_switch_l2_pins_add(&want, mac_b);
+	odi_switch_l2_pins_sync(&pinned, &want, 3, &rep);
+	CHECK(rep.removed_n == 1 && memcmp(rep.removed[0], mac_a, 6) == 0, "the old MAC reported removed");
+	CHECK(odi_switch_l2_ucast_del(mac_a, &found) == 0 && found == 0, "and its key is no longer in the table");
+	CHECK(rep.added == 1U && pinned.n == 1 && memcmp(pinned.mac[0], mac_b, 6) == 0, "the new MAC pinned");
+	CHECK(odi_switch_l2_read(rep.row[0], &r) == 0 && (r.flags & ODI_SW_L2_F_STATIC) &&
+	      memcmp(r.mac, mac_b, 6) == 0, "static, with the new MAC");
+
+	/* Every device down: nothing wanted, the pin is removed. */
+	memset(&want, 0, sizeof(want));
+	odi_switch_l2_pins_sync(&pinned, &want, 3, &rep);
+	CHECK(rep.removed_n == 1 && pinned.n == 0, "no device up: unpinned");
+	CHECK(odi_switch_l2_ucast_del(mac_b, &found) == 0 && found == 0, "and absent from the table");
+
+	/* A full bucket: the write fails, the MAC is not counted as pinned,
+	 * and the next sync, with room again, pins it.
+	 */
+	model_reset(1);
+	odi_switch_l2_pins_add(&want, mac_a);
+	{
+		uint32_t b = (mac_a[5] ^ 0U) & 0xffU, w;
+
+		for (w = 0; w < 4; w++) {
+			model_rows[b * 4U + w][0] = 0x000000a0U + w;	/* other keys, same bucket */
+			model_used[b * 4U + w] = 1;
+		}
+		odi_switch_l2_pins_sync(&pinned, &want, 3, &rep);
+		CHECK(rep.failed == 1U && rep.rc[0] == -28 && pinned.n == 0,
+		      "a full bucket: reported failed, not pinned");
+		model_used[b * 4U + 3U] = 0;
+		odi_switch_l2_pins_sync(&pinned, &want, 3, &rep);
+		CHECK(rep.failed == 0 && rep.added == 1U && pinned.n == 1, "retried by the next sync");
+	}
+	mutex_unlock(&odi_switch_lock);
+	CHECK(odi_mock_locks_idle(), "locks idle after the pin syncs");
+}
+
 static void test_busy(void)
 {
 	struct odi_sw_l2_row r;
@@ -600,6 +721,8 @@ int main(void)
 	test_stick_readout();
 	test_mode();
 	test_mcast_add_del();
+	test_ucast_static_encode();
+	test_pins_sync();
 	test_busy();
 
 	if (failures) {
