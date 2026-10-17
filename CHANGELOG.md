@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- Kernel: the OMCI driver logs each command it does not implement once per
+  command number. It logged only the first one of a boot, so a diagnostic
+  bundle from a new OLT showed one of the missing commands at most.
+
 - Kernel: the GPON MAC follows G.984.3 in two cases neither of our OLTs
   hits. The ONU answers Request_Password with three identical Password
   messages (it sent one; the OLT accepts a password only after three).
