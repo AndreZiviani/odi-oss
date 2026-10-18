@@ -9,6 +9,14 @@
 #
 # Both are freestanding MIPS binaries like ours, so they are dropped in as-is.
 set -euo pipefail
+# CONFD_BIN, CONFD_ASSETS and METRICSD_BIN are paths as the caller wrote them,
+# relative to the caller's directory; this script then moves to src/, where a
+# relative path would point somewhere else and the binary be "not found".
+CALLER=$PWD
+abs() { case $1 in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$CALLER" "$1" ;; esac; }
+[ -z "${CONFD_BIN:-}" ] || CONFD_BIN=$(abs "$CONFD_BIN")
+[ -z "${CONFD_ASSETS:-}" ] || CONFD_ASSETS=$(abs "$CONFD_ASSETS")
+[ -z "${METRICSD_BIN:-}" ] || METRICSD_BIN=$(abs "$METRICSD_BIN")
 cd "$(dirname "$0")"
 ROOT=$(cd .. && pwd)
 OUT=$ROOT/out/bin
@@ -141,14 +149,24 @@ if [ -n "$CONFD_TAG" ]; then
 	mkdir -p "$ASSETS"
 	tar -xzf "$tgz" -C "$ASSETS"
 	echo "  verified, $(wc -c < "$bin" | tr -d ' ') bytes + $(find "$ASSETS" -type f | wc -l | tr -d ' ') asset files"
-elif [ -n "${CONFD_BIN:-}" ] && [ -f "${CONFD_BIN}" ]; then
+elif [ -n "${CONFD_BIN:-}" ]; then
 	# A local odi-ui build. Its assets live in the checkout, not beside the
-	# binary, so point CONFD_ASSETS at that tree as well or the image gets a
-	# daemon with nothing to serve.
+	# binary, so point CONFD_ASSETS at that tree (or at the
+	# confd-assets.tar.gz its `make assets` builds) as well.
+	#
+	# Every way this can go wrong stops the build. It used to warn and carry
+	# on, and the image then shipped whatever confd and assets an earlier
+	# build had left in out/ -- a trial of the wrong web UI that looks right.
+	[ -f "$CONFD_BIN" ] || { echo "  CONFD_BIN=$CONFD_BIN is not a file" >&2; exit 1; }
 	install -m 755 "$CONFD_BIN" "$OUT/confd"
 	echo "  from CONFD_BIN=$CONFD_BIN"
 	src=${CONFD_ASSETS:-$(cd "$(dirname "$CONFD_BIN")/.." 2>/dev/null && pwd)}
-	if [ -n "$src" ] && [ -d "$src/web" ] && [ -d "$src/schema" ]; then
+	if [ -f "$src" ]; then
+		rm -rf "$ASSETS"
+		mkdir -p "$ASSETS"
+		tar -xzf "$src" -C "$ASSETS"
+		echo "  assets from $src"
+	elif [ -n "$src" ] && [ -d "$src/web" ] && [ -d "$src/schema" ]; then
 		rm -rf "$ASSETS"
 		mkdir -p "$ASSETS"
 		cp "$src"/web/*.html "$src"/web/*.css "$src"/web/*.js "$ASSETS/"
@@ -159,9 +177,12 @@ elif [ -n "${CONFD_BIN:-}" ] && [ -f "${CONFD_BIN}" ]; then
 		done
 		echo "  assets from $src"
 	else
-		echo "  WARNING: no assets found; set CONFD_ASSETS=<odi-ui checkout>." >&2
-		echo "  The daemon would serve nothing." >&2
+		echo "  no assets at ${src:-(none)}: set CONFD_ASSETS to the odi-ui" >&2
+		echo "  checkout or its build/confd-assets.tar.gz; a confd without" >&2
+		echo "  them serves nothing." >&2
+		exit 1
 	fi
 else
-	echo "  SKIPPED: no CONFD_TAG set and no CONFD_BIN given." >&2
+	echo "  no confd: CONFD_TAG is empty and CONFD_BIN is not set." >&2
+	exit 1
 fi

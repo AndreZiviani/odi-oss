@@ -226,7 +226,11 @@ each asset against the release's `SHA256SUMS`, caches them in
 To ship a **local confd build**, set `CONFD_TAG` to the empty string and
 point `CONFD_BIN` at the binary; its web assets are taken from `web/` and
 `schema/` in the parent of the binary's directory (`odi-ui/build/confd`
-means `odi-ui/`), or from the checkout `CONFD_ASSETS=` names:
+means `odi-ui/`), or from what `CONFD_ASSETS=` names: an odi-ui checkout, or
+the `build/confd-assets.tar.gz` its `make assets` builds. Relative paths are
+taken from where you run `make`. If the binary or its assets cannot be found,
+`make releases` stops rather than build an image around an older confd left
+in `out/`:
 
     CONFD_TAG= CONFD_BIN=../odi-ui/build/confd make releases image
 
@@ -1107,7 +1111,7 @@ prints the `CONFIG_ODI_*` it got).
 | `GITHUB_TOKEN`, `USE_CURL=1` | `src/fetch-releases.sh`, `tools/remote-build.sh` | optional token, raises the anonymous rate limit for the curl download; skip `gh` even when present | none; 0 |
 | `METRICSD_TAG`, `CONFD_TAG`, `*_REPO` | `src/fetch-releases.sh` | releases to fetch; `CONFD_TAG=` (empty) with `CONFD_BIN` for a local confd | pinned in the script |
 | `METRICSD_BIN` | `src/fetch-releases.sh:27` | local metricsd binary instead of the release | none |
-| `CONFD_BIN`, `CONFD_ASSETS` | `src/fetch-releases.sh:144`, `:150` | local confd binary and its odi-ui checkout | none; `$(dirname $CONFD_BIN)/..` |
+| `CONFD_BIN`, `CONFD_ASSETS` | `src/fetch-releases.sh:`, `:` | local confd binary and its odi-ui checkout or assets tarball | none; `$(dirname $CONFD_BIN)/..` |
 | `ODI_REMOTE`, `ODI_REMOTE_DIR` | `tools/remote-build.sh:46`, `:47` | remote build host and directory | required; `/root/odi/odi-oss` |
 
 ### /proc and /dev control files
