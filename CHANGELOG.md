@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- ntpd records its state in `/tmp/ntp-status`, for the web UI to read: the
+  last event (`unsync`, `step`, `stratum` or `periodic`), when it happened,
+  the offset and stratum ntpd reported, and when the clock was last synced
+  (empty if never). busybox ntpd runs `ntp-event.sh` for this through its
+  own `-S` hook. The file is replaced whole, so a reader never sees half of
+  it, and it is removed whenever ntpd is (re)started or NTP is off, so it
+  never claims a sync that no longer holds. Refs #151.
+
 ## v1.7.0 - 2026-10-17
 
 - The image ships confd v1.6.1 (odi-ui: field help behind a `?` beside each

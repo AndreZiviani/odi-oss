@@ -7,6 +7,11 @@
 # every svc-*.sh here uses, checked fresh on every restart, not just at
 # boot: setting NTP_SERVER and running `apply.sh ntp` starts it with no
 # reboot, and clearing it stops it the same way.
+#
+# Every way out of here that is not ntpd removes the sync status first
+# (ntp-event.sh writes it): with NTP off, or a new server not yet heard,
+# a file left from an earlier run would claim a sync that no longer holds.
+rm -f /tmp/ntp-status
 [ -f /etc/config/ntpd.off ] && exec /etc/scripts/respawn-off.sh
 [ -x /bin/ntpd ] || exec /etc/scripts/respawn-off.sh
 
@@ -27,5 +32,6 @@ SERVER=$(config_get NTP_SERVER || true)
 # -n: foreground. -p: the one server this device is configured with; no -q,
 # so ntpd keeps disciplining the clock for as long as it runs, rather than
 # setting it once and exiting (which would just have init respawn it,
-# stepping the clock repeatedly instead of slewing it).
-exec /etc/scripts/respawn.sh 0 /var/log/services.log /bin/ntpd -n -p "$SERVER"
+# stepping the clock repeatedly instead of slewing it). -S: ntpd runs
+# ntp-event.sh on each sync event, which records the state for the web UI.
+exec /etc/scripts/respawn.sh 0 /var/log/services.log /bin/ntpd -n -p "$SERVER" -S /etc/scripts/ntp-event.sh

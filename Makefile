@@ -133,6 +133,7 @@ test-host:
 	bash test/apply_test.sh
 	bash test/host_autoneg_test.sh
 	bash test/safe_mode_test.sh
+	bash test/ntp_event_test.sh
 	bash test/omci_respawn_test.sh
 	bash test/omci_defaults_test.sh
 	bash test/services_off_test.sh
