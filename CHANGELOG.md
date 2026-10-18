@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+## v1.7.1 - 2026-10-18
+
+- The image ships confd v1.6.2 (odi-ui: a line under the NTP server setting
+  shows the stick's clock against the browser's and when NTP last synced;
+  the OMCI tab reads table names up to 39 characters, so
+  MacBridgePortPmMonitorHistoryData works).
+
 - ntpd records its state in `/tmp/ntp-status`, for the web UI to read: the
   last event (`unsync`, `step`, `stratum` or `periodic`), when it happened,
   the offset and stratum ntpd reported, and when the clock was last synced
