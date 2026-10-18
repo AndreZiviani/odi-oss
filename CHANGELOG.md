@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+## v1.7.0 - 2026-10-17
+
+- The image ships confd v1.6.1 (odi-ui: field help behind a `?` beside each
+  setting, tags beside the field with the cost shown as bars, a table for the
+  differences on Restore, and the OMCI_CUSTOM_ME help names bit 64).
+
 - OMCI: omcid has the MAC bridge configuration data (ME 46) that G.988 has
   the ONU create with each MAC bridge service profile (ME 45). An OLT that
   reads it, and expects it in the MIB upload, got "unknown entity" before.
@@ -17,6 +23,7 @@ listed here.
   cost and root port of 0, and the number of ME 47 ports that point at the
   bridge, counted when read. `omcid -m FILE` reads the address from FILE
   (tests only).
+
 - OMCI: the vendor-format dump (`omcicli mib get`) printed every string
   attribute one character short, so ONU-G's four-character vendor id read as
   three. The value sent to the OLT was always whole; only the dump was wrong.
