@@ -362,6 +362,14 @@ service uses, and does nothing. Also new versus stock, which has no RTC
 and no NTP client at all. `apply.sh ntp` starts or stops it, live, when
 the setting changes.
 
+ntpd runs `/etc/scripts/ntp-event.sh` (`-S`) on each of its sync events
+(`unsync`, `step`, `stratum`, `periodic`), which writes `/tmp/ntp-status`
+(`event`, `time`, `offset`, `stratum`, `last_sync`, one `key=value` per
+line; `last_sync` is the epoch time of the last event that was not
+`unsync`, empty if never) by renaming a temp file over the old one.
+`svc-ntpd.sh` removes the file on every start, so a new server or a
+disabled NTP never shows an old sync.
+
 ### `igmpd` -- IGMP snooping (shipped, not started)
 
     igmpd [-w] [-f] [-n COUNT]
