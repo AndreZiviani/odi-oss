@@ -7,10 +7,11 @@ listed here.
 
 - Build: the generated OMCI model (`omci_mib.json`) now carries each
   entity's name (`desc`), such as "GEM port network CTP" or "MAC bridge
-  configuration data", read from the stock plugins (hand-written for the
-  class that has no plugin). Nothing in the image changes; odi-ui uses the
-  names for its MIB browser. A few names that spelled a make, or the ONT
-  for ONU, are replaced with neutral or standard ones in `mibnames.py`.
+  configuration data". Every class G.988 defines carries the standard's
+  own name, word for word; the vendor-specific ones (G.988 leaves 240-255,
+  350-399 and 65280-65535 to vendors, so they have no official name) keep
+  the stock plugin's, tidied, or a neutral one where it named a make.
+  Nothing in the image changes; odi-ui uses the names for its MIB browser.
 
 - Build: `make releases` stops when a local confd is asked for and cannot
   be used (`CONFD_BIN` not a file, no web assets, or `CONFD_TAG=` with no

@@ -627,7 +627,7 @@
   "table": {
    "name": "CircuitPack",
    "shortName": "CP",
-   "desc": "Circuit Pack",
+   "desc": "Circuit pack",
    "classId": 6,
    "initType": 0,
    "stdType": 1,
@@ -1289,7 +1289,7 @@
   "table": {
    "name": "EthPmData2",
    "shortName": "ETHPMHD2",
-   "desc": "Ethernet PM History Data 2",
+   "desc": "Ethernet performance monitoring history data 2",
    "classId": 89,
    "initType": 1,
    "stdType": 2,
@@ -1386,7 +1386,7 @@
   "table": {
    "name": "EthPmData3",
    "shortName": "ETHPMHD3",
-   "desc": "Ethernet PM History Data 3",
+   "desc": "Ethernet performance monitoring history data 3",
    "classId": 296,
    "initType": 1,
    "stdType": 2,
@@ -2502,7 +2502,7 @@
   "table": {
    "name": "EthUni",
    "shortName": "PPTP",
-   "desc": "PPTP Ethernet UNI",
+   "desc": "Physical path termination point Ethernet UNI",
    "classId": 11,
    "initType": 0,
    "stdType": 1,
@@ -2785,7 +2785,7 @@
   "table": {
    "name": "ExtVlanTagOperCfgData",
    "shortName": "ETVTOCD",
-   "desc": "Extended VLAN tagging operation configure data",
+   "desc": "Extended VLAN tagging operation configuration data",
    "classId": 171,
    "initType": 1,
    "stdType": 1,
@@ -2956,7 +2956,7 @@
   "table": {
    "name": "ExtIpHostCfgData",
    "shortName": "EXTIPHCD",
-   "desc": "Pppoe interface",
+   "desc": "PPPoE interface",
    "classId": 250,
    "initType": 1,
    "stdType": 4,
@@ -3116,7 +3116,7 @@
   "table": {
    "name": "ExtendedMcastOperProf",
    "shortName": "EXTMOP",
-   "desc": "Extended Multicast Operation Profiles",
+   "desc": "Extended multicast operations profile",
    "classId": 65531,
    "initType": 1,
    "stdType": 4,
@@ -3668,7 +3668,7 @@
   "table": {
    "name": "GemIwTp",
    "shortName": "GEMIWTP",
-   "desc": "GEM Interworking TP",
+   "desc": "GEM interworking termination point",
    "classId": 266,
    "initType": 1,
    "stdType": 1,
@@ -4379,7 +4379,7 @@
   "table": {
    "name": "TrafficDescriptor",
    "shortName": "TD",
-   "desc": "Traffic Descriptor",
+   "desc": "Traffic descriptor",
    "classId": 280,
    "initType": 1,
    "stdType": 1,
@@ -5272,7 +5272,7 @@
   "table": {
    "name": "LctUni",
    "shortName": "LCT",
-   "desc": "PPTP LCT UNI",
+   "desc": "Physical path termination point LCT UNI",
    "classId": 83,
    "initType": 0,
    "stdType": 1,
@@ -5434,7 +5434,7 @@
   "table": {
    "name": "LoopDetect",
    "shortName": "LD",
-   "desc": "Loop Detect",
+   "desc": "Loop detect",
    "classId": 253,
    "initType": 0,
    "stdType": 4,
@@ -5538,7 +5538,7 @@
   "table": {
    "name": "MacBriPortBriTblData",
    "shortName": "MBPBTD",
-   "desc": "MAC Bridge Port Bridge Table Data",
+   "desc": "MAC bridge port bridge table data",
    "classId": 50,
    "initType": 0,
    "stdType": 1,
@@ -5603,7 +5603,7 @@
   "table": {
    "name": "MacBriPortCfgData",
    "shortName": "MBPCD",
-   "desc": "MAC Bridge Port Configuration Data",
+   "desc": "MAC bridge port configuration data",
    "classId": 47,
    "initType": 1,
    "stdType": 1,
@@ -5841,7 +5841,7 @@
   "table": {
    "name": "MacBriServProf",
    "shortName": "MBSP",
-   "desc": "MAC Bridge Service Profile",
+   "desc": "MAC bridge service profile",
    "classId": 45,
    "initType": 1,
    "stdType": 1,
@@ -6033,7 +6033,7 @@
   "table": {
    "name": "MacBridgePortFilterPreassign",
    "shortName": "MBPFP",
-   "desc": "MAC bridge port filter pre-assign table",
+   "desc": "MAC bridge port filter preassign table",
    "classId": 79,
    "initType": 0,
    "stdType": 1,
@@ -6439,7 +6439,7 @@
   "table": {
    "name": "Map8021pServProf",
    "shortName": "MAP1P",
-   "desc": "802.1p Mapper Service Profile",
+   "desc": "IEEE 802.1p mapper service profile",
    "classId": 130,
    "initType": 1,
    "stdType": 1,
@@ -6687,7 +6687,7 @@
   "table": {
    "name": "McastOperProf",
    "shortName": "MOP",
-   "desc": "Multicast Operation Profile",
+   "desc": "Multicast operations profile",
    "classId": 309,
    "initType": 1,
    "stdType": 1,
@@ -6964,7 +6964,7 @@
   "table": {
    "name": "McastSubConfInfo",
    "shortName": "MCSCI",
-   "desc": "Multicast subscriber configure inforation",
+   "desc": "Multicast subscriber config info",
    "classId": 310,
    "initType": 1,
    "stdType": 1,
@@ -7251,7 +7251,7 @@
   "table": {
    "name": "Me242",
    "shortName": "ME242",
-   "desc": "ME242",
+   "desc": "ME 242",
    "classId": 242,
    "initType": 0,
    "stdType": 4,
@@ -8242,7 +8242,7 @@
   "table": {
    "name": "MultiGemIwTp",
    "shortName": "MCGEMIWTP",
-   "desc": "Multicast GEM Interworking TP",
+   "desc": "Multicast GEM interworking termination point",
    "classId": 281,
    "initType": 1,
    "stdType": 1,
@@ -8525,7 +8525,7 @@
   "table": {
    "name": "LargeString",
    "shortName": "LS",
-   "desc": "Large string",
+   "desc": "Octet string",
    "classId": 307,
    "initType": 1,
    "stdType": 1,
@@ -8907,7 +8907,7 @@
   "table": {
    "name": "OLTLocationConfigData",
    "shortName": "OLTLOCATION",
-   "desc": "OLT Location Config Data",
+   "desc": "OLT location config data",
    "classId": 65527,
    "initType": 0,
    "stdType": 260,
@@ -9456,7 +9456,7 @@
   "table": {
    "name": "OntSelfLoopDetect",
    "shortName": "SLD",
-   "desc": "Ont Self Loop Detect",
+   "desc": "ONU self loop detect",
    "classId": 244,
    "initType": 0,
    "stdType": 260,
@@ -9614,7 +9614,7 @@
   "table": {
    "name": "OntSystemMgmt",
    "shortName": "OntSysMgmt",
-   "desc": "ONT system management",
+   "desc": "ONU system management",
    "classId": 240,
    "initType": 0,
    "stdType": 260,
@@ -10106,7 +10106,7 @@
   "table": {
    "name": "CTCOnuOnuLoopDetection",
    "shortName": "CTCLD",
-   "desc": "CTC Loop Detection",
+   "desc": "CTC loop detection",
    "classId": 65528,
    "initType": 0,
    "stdType": 4,
@@ -10588,7 +10588,7 @@
   "table": {
    "name": "PriQ",
    "shortName": "PQ",
-   "desc": "Priority Queue-G",
+   "desc": "Priority queue",
    "classId": 277,
    "initType": 0,
    "stdType": 1,
@@ -11115,7 +11115,7 @@
   "table": {
    "name": "PrivateTqCfg",
    "shortName": "PTC",
-   "desc": "Private Tcont Queue Configuration",
+   "desc": "Private T-CONT queue configuration",
    "classId": 65534,
    "initType": 0,
    "stdType": 16,
@@ -11208,7 +11208,7 @@
   "table": {
    "name": "PrivateVlanCfg",
    "shortName": "PVC",
-   "desc": "Private Vlan Configuration",
+   "desc": "Private VLAN configuration",
    "classId": 65535,
    "initType": 0,
    "stdType": 16,
@@ -11590,7 +11590,7 @@
   "table": {
    "name": "SWImage",
    "shortName": "SWIMG",
-   "desc": "Software Image",
+   "desc": "Software image",
    "classId": 7,
    "initType": 0,
    "stdType": 1,
@@ -11728,7 +11728,7 @@
   "table": {
    "name": "Scheduler",
    "shortName": "TSG",
-   "desc": "Traffic Scheduler-G",
+   "desc": "Traffic scheduler",
    "classId": 278,
    "initType": 0,
    "stdType": 1,
@@ -11831,7 +11831,7 @@
   "table": {
    "name": "TR069ManageServer",
    "shortName": "TR069MS",
-   "desc": "TR-069 management server",
+   "desc": "BBF TR-069 management server",
    "classId": 340,
    "initType": 0,
    "stdType": 1,
@@ -12669,7 +12669,7 @@
   "table": {
    "name": "VlanTagFilterData",
    "shortName": "VTFD",
-   "desc": "VLAN Tag Filter Data",
+   "desc": "VLAN tagging filter data",
    "classId": 84,
    "initType": 1,
    "stdType": 1,
@@ -12769,7 +12769,7 @@
   "table": {
    "name": "VlanTagOpCfgData",
    "shortName": "VTOCD",
-   "desc": "VLAN Tag Operate Configuration Data",
+   "desc": "VLAN tagging operation configuration data",
    "classId": 78,
    "initType": 1,
    "stdType": 1,
@@ -12985,7 +12985,7 @@
   "table": {
    "name": "WANConfigCata",
    "shortName": "WANCon",
-   "desc": "config wan interface",
+   "desc": "WAN interface config",
    "classId": 248,
    "initType": 1,
    "stdType": 4,
@@ -13146,7 +13146,7 @@
   "table": {
    "name": "WANConfigCataDeti",
    "shortName": "WANConDeti",
-   "desc": "config wan interface Deti",
+   "desc": "WAN interface config Deti",
    "classId": 249,
    "initType": 1,
    "stdType": 4,
