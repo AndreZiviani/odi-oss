@@ -321,4 +321,7 @@ const struct omci_instance omci_autonomous[] = {
 	{ 65535, 0x0000 },
 };
 
-const unsigned omci_autonomous_count = 277;
+/* Counted from the array, not written as a number: a hand-edited table
+ * with a stale count is read short, or past its end. */
+const unsigned omci_autonomous_count =
+	sizeof omci_autonomous / sizeof omci_autonomous[0];

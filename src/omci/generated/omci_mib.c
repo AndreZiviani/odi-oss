@@ -1000,4 +1000,6 @@ const struct omci_class omci_classes[] = {
 	{ 65535, "PrivateVlanCfg", 8, attr_PrivateVlanCfg, 5, 0x00000100u, 0x010, 0 },
 };
 
-const unsigned omci_class_count = 82;
+/* Counted from the array, not written as a number: a hand-edited table
+ * with a stale count is read short, or past its end. */
+const unsigned omci_class_count = sizeof omci_classes / sizeof omci_classes[0];

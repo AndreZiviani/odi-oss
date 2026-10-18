@@ -469,7 +469,8 @@ def emit_c(model, outdir):
             t['classId'], t['name'], t['entrySize'], nm, len(e['attrs']),
             t['actionType'] or 0, t['stdType'] or 0, t['initType'] or 0))
     lines += ['', 'const struct omci_class omci_classes[] = {'] + rows + ['};', '',
-              'const unsigned omci_class_count = %d;' % len(rows)]
+              '/* Counted from the array, not written as a number: a hand-edited table\n * with a stale count is read short, or past its end. */',
+              'const unsigned omci_class_count = sizeof omci_classes / sizeof omci_classes[0];']
     with open(os.path.join(outdir, 'omci_mib.c'), 'w') as fh:
         fh.write('\n'.join(lines) + '\n')
     print('wrote %s/omci_mib.[ch]: %d classes' % (outdir, len(rows)))
