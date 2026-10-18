@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Build: the generated OMCI model (`omci_mib.json`) now carries each
+  entity's name (`desc`), such as "GEM port network CTP" or "MAC bridge
+  configuration data", read from the stock plugins (hand-written for the
+  class that has no plugin). Nothing in the image changes; odi-ui uses the
+  names for its MIB browser. A few names that spelled a make, or the ONT
+  for ONU, are replaced with neutral or standard ones in `mibnames.py`.
+
 - Build: `make releases` stops when a local confd is asked for and cannot
   be used (`CONFD_BIN` not a file, no web assets, or `CONFD_TAG=` with no
   `CONFD_BIN`). It used to warn and go on, and the image then shipped

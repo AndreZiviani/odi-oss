@@ -26,6 +26,25 @@ GENERIC = {
     65294: ('PrivateSntp',     'PRIVSNTP',      'PrivateSntp'),      # SNTP time zone and servers
 }
 
+# class id -> description shown for the entity. The plugin's own description
+# is kept, except where it names a make (the classes above) or spells a G.988
+# entity in a way the standard does not (ONT for ONU, "Ani-g"). Only
+# descriptions are replaced here; names, ids and layout are untouched.
+DESC = {
+    2:     'ONU data',
+    256:   'ONU-G',
+    257:   'ONU2-G',
+    263:   'ANI-G',
+    264:   'UNI-G',
+    243:   'Private queue map',
+    255:   'Private ONU statistics',
+    350:   'Private ME 350',
+    370:   'Private ME 370',
+    373:   'Private ME 373',
+    65282: 'Private multicast tag',
+    65294: 'Private SNTP',
+}
+
 # Offsets of the handler slots of the per-ME vtable that carry a function
 # name in the recovered model. The stock symbol names of a renamed entity
 # are replaced by <TableName><Slot>: nothing reads them.
@@ -36,6 +55,8 @@ def rename_entry(entry):
     """Apply GENERIC to one model entry in place. Returns (stock table name,
     new table name) when something was renamed, else None."""
     t = entry['table']
+    if t['classId'] in DESC:
+        t['desc'] = DESC[t['classId']]
     gen = GENERIC.get(t['classId'])
     if gen is None:
         return None
