@@ -111,7 +111,9 @@ def main():
             lines.append('\t/* %s */' % name)
             for i in ids:
                 lines.append('\t{ %5d, 0x%04x },' % (c, i))
-        lines += ['};', '', 'const unsigned omci_autonomous_count = %d;' % n]
+        lines += ['};', '', '/* Counted from the array, not written as a number: a hand-edited table\n * with a stale count is read short, or past its end. */',
+                  'const unsigned omci_autonomous_count =',
+                  '\tsizeof omci_autonomous / sizeof omci_autonomous[0];']
         with open(os.path.join(out, 'omci_autonomous.c'), 'w') as fh:
             fh.write('\n'.join(lines) + '\n')
         with open(os.path.join(out, 'omci_autonomous.h'), 'w') as fh:

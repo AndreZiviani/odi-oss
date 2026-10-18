@@ -99,4 +99,7 @@ const struct omci_default omci_defaults[] = {
 	{ 65529, 0x0000, 4, 1, { 0x02 } },	/* TxPwrSupplyCtrl */
 	{ 65529, 0x0000, 5, 1, { 0x01 } },	/* CustomizedOnuType */
 };
-const unsigned omci_defaults_count = 94;
+/* Counted from the array, not written as a number: a hand-edited table
+ * with a stale count is read short, or past its end. */
+const unsigned omci_defaults_count =
+	sizeof omci_defaults / sizeof omci_defaults[0];

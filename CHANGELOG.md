@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- OMCI build: the generated tables (`omci_autonomous.c`, `omci_defaults.c`,
+  `omci_mib.c`) take their entry counts from the arrays themselves instead
+  of a number the generator wrote. A table edited by hand with the old count
+  left in was read short (its last entries ignored) or past its end.
+
 ## v1.8.0 - 2026-10-18
 
 - The image ships confd v1.7.0 (odi-ui: the MIB browser on the OMCI tab is
