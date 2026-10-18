@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the vendor-format dump (`omcicli mib get`) printed every string
+  attribute one character short, so ONU-G's four-character vendor id read as
+  three. The value sent to the OLT was always whole; only the dump was wrong.
+
 ## v1.6.1 - 2026-10-17
 
 - OMCI: omcid saves its resume snapshot before it answers a Create, Set or
