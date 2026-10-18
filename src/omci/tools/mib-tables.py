@@ -256,6 +256,43 @@ class Plugin:
         return {off: val[1] for off, val in sorted(self.store['Oper'].items())}
 
 
+def g988_attr(index, name, typ, size):
+    # Read-only, mandatory, no AVC: what every attribute of class 46 is.
+    return dict(index=index, name=name, dataType=None, len=size, isIndex=int(index == 0),
+                mibSave=0, outStyle=None, oltAcc=1, avcFlag=0, optionType=1,
+                type=typ, size=size)
+
+
+# Classes G.988 defines that no stock plugin carries, so the walk of the
+# plugins below cannot find them. Each is a model entry in the shape of a
+# plugin's, with "plugin" None: it has no vendor table to read, and nothing
+# in it is a vendor value.
+#
+# 46, MAC bridge configuration data: the ONU creates it with each MAC bridge
+# service profile (45), at the same entity id, and the OLT can only Get it.
+# The stock image has no plugin for it (checked in the 81 of base-a4k-260909),
+# so there is no stock behaviour to copy; the layout is G.988 9.3.2. The MAC
+# address is u8 with a size of 6 (and the bridge id a u64), not "octets": the
+# vendor sends every OCTETS attribute through Get-Next (mibstore.c,
+# attr_is_big), and a six-byte address has to come back in the Get itself.
+G988_ONLY = [{
+    'plugin': None,
+    'table': {'name': 'MacBriCfgData', 'shortName': 'MBCD', 'classId': 46,
+              'initType': 0, 'stdType': 1, 'actionType': 1 << 9, 'attrNum': 9,
+              'entrySize': 40, 'actions': ['get'], 'extra': {}},
+    'oper': {},
+    'attrs': [g988_attr(0, 'EntityID', 'u16', 2),
+              g988_attr(1, 'BridgeMacAddr', 'u8', 6),
+              g988_attr(2, 'BridgePriority', 'u16', 2),
+              g988_attr(3, 'DesignatedRoot', 'u64', 8),
+              g988_attr(4, 'RootPathCost', 'u32', 4),
+              g988_attr(5, 'BridgePortCount', 'u8', 1),
+              g988_attr(6, 'RootPortNum', 'u16', 2),
+              g988_attr(7, 'HelloTime', 'u16', 2),
+              g988_attr(8, 'ForwardDelay', 'u16', 2)],
+}]
+
+
 def main():
     import argparse, json
     ap = argparse.ArgumentParser(description=__doc__)
@@ -317,6 +354,7 @@ def main():
                     print('        %r' % at['desc'])
             print('   oper:', {hex(k): v for k, v in p.oper().items()})
 
+    model += G988_ONLY
     print('\n%d plugins, %d consistent, %d not; %d attributes total'
           % (len(files), ok, bad, sum(len(m['attrs']) for m in model)))
     if args.json:
@@ -414,7 +452,8 @@ def emit_c(model, outdir):
              '#include "omci_mib.h"', '']
     rows = []
     for e in sorted(model, key=lambda x: x['table']['classId'] or 0):
-        t, nm = e['table'], e['plugin'][4:-3]
+        t = e['table']
+        nm = e['plugin'][4:-3] if e['plugin'] else t['name']
         if t['classId'] is None:
             continue
         lines.append('static const struct omci_attr attr_%s[] = {' % nm)

@@ -13290,5 +13290,151 @@
     "size": 1
    }
   ]
+ },
+ {
+  "plugin": null,
+  "table": {
+   "name": "MacBriCfgData",
+   "shortName": "MBCD",
+   "classId": 46,
+   "initType": 0,
+   "stdType": 1,
+   "actionType": 512,
+   "attrNum": 9,
+   "entrySize": 40,
+   "actions": [
+    "get"
+   ],
+   "extra": {}
+  },
+  "oper": {},
+  "attrs": [
+   {
+    "index": 0,
+    "name": "EntityID",
+    "dataType": null,
+    "len": 2,
+    "isIndex": 1,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u16",
+    "size": 2
+   },
+   {
+    "index": 1,
+    "name": "BridgeMacAddr",
+    "dataType": null,
+    "len": 6,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u8",
+    "size": 6
+   },
+   {
+    "index": 2,
+    "name": "BridgePriority",
+    "dataType": null,
+    "len": 2,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u16",
+    "size": 2
+   },
+   {
+    "index": 3,
+    "name": "DesignatedRoot",
+    "dataType": null,
+    "len": 8,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u64",
+    "size": 8
+   },
+   {
+    "index": 4,
+    "name": "RootPathCost",
+    "dataType": null,
+    "len": 4,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u32",
+    "size": 4
+   },
+   {
+    "index": 5,
+    "name": "BridgePortCount",
+    "dataType": null,
+    "len": 1,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u8",
+    "size": 1
+   },
+   {
+    "index": 6,
+    "name": "RootPortNum",
+    "dataType": null,
+    "len": 2,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u16",
+    "size": 2
+   },
+   {
+    "index": 7,
+    "name": "HelloTime",
+    "dataType": null,
+    "len": 2,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u16",
+    "size": 2
+   },
+   {
+    "index": 8,
+    "name": "ForwardDelay",
+    "dataType": null,
+    "len": 2,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u16",
+    "size": 2
+   }
+  ]
  }
 ]

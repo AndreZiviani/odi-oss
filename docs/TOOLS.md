@@ -135,7 +135,7 @@ their VLAN rules, over the odi_omci netlink command path into the
 daemon that decides whether the OLT sees a working ONU.
 
     omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state] [-g file]
-          [-l file] [-i file] [-j seconds]
+          [-l file] [-m file] [-i file] [-j seconds]
 
     -a          program the switch (apply mode); without it, dry run
     -r          restart: first remove every bridge connection a previous
@@ -150,6 +150,8 @@ daemon that decides whether the OLT sees a working ONU.
                 of /proc/odi_gpon/status (test only)
     -l file     read the UNI link bit (0 or 1) from this file instead of
                 the odi_switch host_link parameter (test only)
+    -m file     read the bridge MAC address of class 46 from this file
+                instead of /sys/class/net/eth0/address (test only)
     -i file     append the driver verbs of a reload to this file instead of
                 writing /proc/odi_init (test only)
     -j seconds  how long a reload waits for O5 (default 150; test only)

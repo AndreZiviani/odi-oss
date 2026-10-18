@@ -167,6 +167,9 @@ extern const char *gpon_proc_path;
 /* The file the UNI link bit is read from (-l, test only), and its state. */
 extern const char *uni_link_path;
 int uni_link_state(void);
+/* The file the bridge MAC address of class 46 is read from: the sysfs
+ * address of eth0, the stick's own MAC (-m, test only). */
+extern const char *bridge_mac_path;
 /* The PON state number from gpon_proc_path, -1 when unreadable. */
 int onu_state_now(void);
 uint32_t uptime_cs(void);
@@ -610,6 +613,12 @@ int mib_upload_record(unsigned seq, uint8_t *body, uint16_t *len);
  * zeros. Added on a Create of 47, removed on its Delete. */
 void mbpcd_tables_add(uint16_t inst);
 void mbpcd_tables_del(uint16_t inst);
+/* The MAC bridge configuration data (class 46) the ONU keeps for each MAC
+ * bridge service profile (45) the OLT creates, at the profile's own entity
+ * id. Added on a Create of 45, removed on its Delete; the values are
+ * derived, see attr_value(). */
+void mbcd_add(uint16_t inst);
+void mbcd_del(uint16_t inst);
 /* Records announced by the last MIB upload, 0 before the first. */
 extern unsigned upl_total;
 

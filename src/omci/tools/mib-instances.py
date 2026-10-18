@@ -28,7 +28,9 @@ import mibnames
 # port's own entity id. A dump of a provisioned stick lists them under the
 # ports that OLT created; they are not in the stock MIB upload after a reset
 # (a decoded stock session has none), so they are not autonomous.
-RELATED = {49, 50, 79}
+# 46 is the same for a MAC bridge service profile (45): omcid creates it with
+# the profile, the stock has none.
+RELATED = {46, 49, 50, 79}
 
 
 def load_model():
