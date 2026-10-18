@@ -4,6 +4,7 @@
   "table": {
    "name": "Anig",
    "shortName": "ANIG",
+   "desc": "ANI-G",
    "classId": 263,
    "initType": 0,
    "stdType": 1,
@@ -333,6 +334,7 @@
   "table": {
    "name": "AuthSecMethod",
    "shortName": "ASM",
+   "desc": "Authentication security method",
    "classId": 148,
    "initType": 1,
    "stdType": 1,
@@ -451,6 +453,7 @@
   "table": {
    "name": "Cardholder",
    "shortName": "CH",
+   "desc": "Cardholder",
    "classId": 5,
    "initType": 0,
    "stdType": 1,
@@ -624,6 +627,7 @@
   "table": {
    "name": "CircuitPack",
    "shortName": "CP",
+   "desc": "Circuit pack",
    "classId": 6,
    "initType": 0,
    "stdType": 1,
@@ -870,6 +874,7 @@
   "table": {
    "name": "Dot1RateLimiter",
    "shortName": "DRL",
+   "desc": "Dot1 rate limiter",
    "classId": 298,
    "initType": 1,
    "stdType": 1,
@@ -988,6 +993,7 @@
   "table": {
    "name": "EthExtPmData",
    "shortName": "ETHFRAMEEXTPM",
+   "desc": "Ethernet frame extended PM",
    "classId": 334,
    "initType": 1,
    "stdType": 2,
@@ -1283,6 +1289,7 @@
   "table": {
    "name": "EthPmData2",
    "shortName": "ETHPMHD2",
+   "desc": "Ethernet performance monitoring history data 2",
    "classId": 89,
    "initType": 1,
    "stdType": 2,
@@ -1379,6 +1386,7 @@
   "table": {
    "name": "EthPmData3",
    "shortName": "ETHPMHD3",
+   "desc": "Ethernet performance monitoring history data 3",
    "classId": 296,
    "initType": 1,
    "stdType": 2,
@@ -1657,6 +1665,7 @@
   "table": {
    "name": "EthPmDataDs",
    "shortName": "ETHFRAMEPMHDDS",
+   "desc": "Ethernet frame performance monitoring history data downstream",
    "classId": 321,
    "initType": 1,
    "stdType": 2,
@@ -1935,6 +1944,7 @@
   "table": {
    "name": "EthPmDataUs",
    "shortName": "ETHFRAMEPMHDUS",
+   "desc": "Ethernet frame performance monitoring history data upstream",
    "classId": 322,
    "initType": 1,
    "stdType": 2,
@@ -2213,6 +2223,7 @@
   "table": {
    "name": "EthPmHistoryData",
    "shortName": "ETHPMHD",
+   "desc": "Ethernet performance monitoring history data",
    "classId": 24,
    "initType": 1,
    "stdType": 2,
@@ -2491,6 +2502,7 @@
   "table": {
    "name": "EthUni",
    "shortName": "PPTP",
+   "desc": "Physical path termination point Ethernet UNI",
    "classId": 11,
    "initType": 0,
    "stdType": 1,
@@ -2773,6 +2785,7 @@
   "table": {
    "name": "ExtVlanTagOperCfgData",
    "shortName": "ETVTOCD",
+   "desc": "Extended VLAN tagging operation configuration data",
    "classId": 171,
    "initType": 1,
    "stdType": 1,
@@ -2943,6 +2956,7 @@
   "table": {
    "name": "ExtIpHostCfgData",
    "shortName": "EXTIPHCD",
+   "desc": "PPPoE interface",
    "classId": 250,
    "initType": 1,
    "stdType": 4,
@@ -3102,6 +3116,7 @@
   "table": {
    "name": "ExtendedMcastOperProf",
    "shortName": "EXTMOP",
+   "desc": "Extended multicast operations profile",
    "classId": 65531,
    "initType": 1,
    "stdType": 4,
@@ -3378,6 +3393,7 @@
   "table": {
    "name": "ExtendedOnuG",
    "shortName": "EXTONUG",
+   "desc": "Extended ONU-G",
    "classId": 65408,
    "initType": 0,
    "stdType": 4,
@@ -3437,6 +3453,7 @@
   "table": {
    "name": "FecPmhd",
    "shortName": "FECPMHD",
+   "desc": "FEC performance monitoring history data",
    "classId": 312,
    "initType": 1,
    "stdType": 2,
@@ -3588,6 +3605,7 @@
   "table": {
    "name": "GalEthProf",
    "shortName": "GALETHP",
+   "desc": "GAL Ethernet profile",
    "classId": 272,
    "initType": 1,
    "stdType": 1,
@@ -3650,6 +3668,7 @@
   "table": {
    "name": "GemIwTp",
    "shortName": "GEMIWTP",
+   "desc": "GEM interworking termination point",
    "classId": 266,
    "initType": 1,
    "stdType": 1,
@@ -3824,6 +3843,7 @@
   "table": {
    "name": "GemPortCtp",
    "shortName": "GEMPNCTP",
+   "desc": "GEM port network CTP",
    "classId": 268,
    "initType": 1,
    "stdType": 1,
@@ -4027,6 +4047,7 @@
   "table": {
    "name": "GpncPmhd",
    "shortName": "GEMPNCTPPMHD",
+   "desc": "GEM port network CTP performance monitoring history data",
    "classId": 341,
    "initType": 1,
    "stdType": 2,
@@ -4178,6 +4199,7 @@
   "table": {
    "name": "GemPortPmhd",
    "shortName": "GEMPPMHD",
+   "desc": "GEM port performance monitoring history data",
    "classId": 267,
    "initType": 1,
    "stdType": 2,
@@ -4357,6 +4379,7 @@
   "table": {
    "name": "TrafficDescriptor",
    "shortName": "TD",
+   "desc": "Traffic descriptor",
    "classId": 280,
    "initType": 1,
    "stdType": 1,
@@ -4517,6 +4540,7 @@
   "table": {
    "name": "GeneralPurposeBuffer",
    "shortName": "GPB",
+   "desc": "General purpose buffer",
    "classId": 308,
    "initType": 1,
    "stdType": 257,
@@ -4596,6 +4620,7 @@
   "table": {
    "name": "GenericStatusPortal",
    "shortName": "GSP",
+   "desc": "Generic status portal",
    "classId": 330,
    "initType": 1,
    "stdType": 1,
@@ -4690,6 +4715,7 @@
   "table": {
    "name": "IpHostCfgData",
    "shortName": "IPHCD",
+   "desc": "IP host config data",
    "classId": 134,
    "initType": 0,
    "stdType": 1,
@@ -4973,6 +4999,7 @@
   "table": {
    "name": "LargeString",
    "shortName": "LS",
+   "desc": "Large string",
    "classId": 157,
    "initType": 1,
    "stdType": 1,
@@ -5245,6 +5272,7 @@
   "table": {
    "name": "LctUni",
    "shortName": "LCT",
+   "desc": "Physical path termination point LCT UNI",
    "classId": 83,
    "initType": 0,
    "stdType": 1,
@@ -5303,6 +5331,7 @@
   "table": {
    "name": "LoIdAuth",
    "shortName": "LOIDAUTH",
+   "desc": "LOID authentication",
    "classId": 65530,
    "initType": 0,
    "stdType": 260,
@@ -5405,6 +5434,7 @@
   "table": {
    "name": "LoopDetect",
    "shortName": "LD",
+   "desc": "Loop detect",
    "classId": 253,
    "initType": 0,
    "stdType": 4,
@@ -5508,6 +5538,7 @@
   "table": {
    "name": "MacBriPortBriTblData",
    "shortName": "MBPBTD",
+   "desc": "MAC bridge port bridge table data",
    "classId": 50,
    "initType": 0,
    "stdType": 1,
@@ -5572,6 +5603,7 @@
   "table": {
    "name": "MacBriPortCfgData",
    "shortName": "MBPCD",
+   "desc": "MAC bridge port configuration data",
    "classId": 47,
    "initType": 1,
    "stdType": 1,
@@ -5809,6 +5841,7 @@
   "table": {
    "name": "MacBriServProf",
    "shortName": "MBSP",
+   "desc": "MAC bridge service profile",
    "classId": 45,
    "initType": 1,
    "stdType": 1,
@@ -6000,6 +6033,7 @@
   "table": {
    "name": "MacBridgePortFilterPreassign",
    "shortName": "MBPFP",
+   "desc": "MAC bridge port filter preassign table",
    "classId": 79,
    "initType": 0,
    "stdType": 1,
@@ -6187,6 +6221,7 @@
   "table": {
    "name": "MacBridgePortFilterTable",
    "shortName": "MBPFTBL",
+   "desc": "MAC bridge port filter table data",
    "classId": 49,
    "initType": 0,
    "stdType": 1,
@@ -6252,6 +6287,7 @@
   "table": {
    "name": "MacBridgePortPmMonitorHistoryData",
    "shortName": "MBPPMHD",
+   "desc": "MAC bridge port performance monitoring history data",
    "classId": 52,
    "initType": 1,
    "stdType": 2,
@@ -6403,6 +6439,7 @@
   "table": {
    "name": "Map8021pServProf",
    "shortName": "MAP1P",
+   "desc": "IEEE 802.1p mapper service profile",
    "classId": 130,
    "initType": 1,
    "stdType": 1,
@@ -6650,6 +6687,7 @@
   "table": {
    "name": "McastOperProf",
    "shortName": "MOP",
+   "desc": "Multicast operations profile",
    "classId": 309,
    "initType": 1,
    "stdType": 1,
@@ -6926,6 +6964,7 @@
   "table": {
    "name": "McastSubConfInfo",
    "shortName": "MCSCI",
+   "desc": "Multicast subscriber config info",
    "classId": 310,
    "initType": 1,
    "stdType": 1,
@@ -7075,6 +7114,7 @@
   "table": {
    "name": "McastSubMonitor",
    "shortName": "MSM",
+   "desc": "Multicast subscriber monitor",
    "classId": 311,
    "initType": 1,
    "stdType": 1,
@@ -7211,6 +7251,7 @@
   "table": {
    "name": "Me242",
    "shortName": "ME242",
+   "desc": "ME 242",
    "classId": 242,
    "initType": 0,
    "stdType": 4,
@@ -7287,6 +7328,7 @@
   "table": {
    "name": "PrivateQueueMap",
    "shortName": "PRIVQUEUEMAP",
+   "desc": "Private queue map",
    "classId": 243,
    "initType": 1,
    "stdType": 4,
@@ -7371,6 +7413,7 @@
   "table": {
    "name": "Me350",
    "shortName": "ME350",
+   "desc": "Private ME 350",
    "classId": 350,
    "initType": 0,
    "stdType": 4,
@@ -7643,6 +7686,7 @@
   "table": {
    "name": "Me370",
    "shortName": "ME370",
+   "desc": "Private ME 370",
    "classId": 370,
    "initType": 0,
    "stdType": 4,
@@ -7733,6 +7777,7 @@
   "table": {
    "name": "Me373",
    "shortName": "ME373",
+   "desc": "Private ME 373",
    "classId": 373,
    "initType": 0,
    "stdType": 4,
@@ -8001,6 +8046,7 @@
   "table": {
    "name": "PrivateMcastTag",
    "shortName": "PRIVMCASTTAG",
+   "desc": "Private multicast tag",
    "classId": 65282,
    "initType": 1,
    "stdType": 4,
@@ -8063,6 +8109,7 @@
   "table": {
    "name": "PrivateSntp",
    "shortName": "PRIVSNTP",
+   "desc": "Private SNTP",
    "classId": 65294,
    "initType": 0,
    "stdType": 4,
@@ -8195,6 +8242,7 @@
   "table": {
    "name": "MultiGemIwTp",
    "shortName": "MCGEMIWTP",
+   "desc": "Multicast GEM interworking termination point",
    "classId": 281,
    "initType": 1,
    "stdType": 1,
@@ -8400,6 +8448,7 @@
   "table": {
    "name": "NetworkAddress",
    "shortName": "NWADDR",
+   "desc": "Network address",
    "classId": 137,
    "initType": 1,
    "stdType": 1,
@@ -8476,6 +8525,7 @@
   "table": {
    "name": "LargeString",
    "shortName": "LS",
+   "desc": "Octet string",
    "classId": 307,
    "initType": 1,
    "stdType": 1,
@@ -8751,6 +8801,7 @@
   "table": {
    "name": "OltG",
    "shortName": "OLTG",
+   "desc": "OLT-G",
    "classId": 131,
    "initType": 0,
    "stdType": 1,
@@ -8856,6 +8907,7 @@
   "table": {
    "name": "OLTLocationConfigData",
    "shortName": "OLTLOCATION",
+   "desc": "OLT location config data",
    "classId": 65527,
    "initType": 0,
    "stdType": 260,
@@ -9014,6 +9066,7 @@
   "table": {
    "name": "Omci",
    "shortName": "OMCI",
+   "desc": "OMCI",
    "classId": 287,
    "initType": 0,
    "stdType": 257,
@@ -9094,6 +9147,7 @@
   "table": {
    "name": "Ont2g",
    "shortName": "ONT2G",
+   "desc": "ONU2-G",
    "classId": 257,
    "initType": 0,
    "stdType": 1,
@@ -9336,6 +9390,7 @@
   "table": {
    "name": "OntData",
    "shortName": "ONTDATA",
+   "desc": "ONU data",
    "classId": 2,
    "initType": 0,
    "stdType": 1,
@@ -9401,6 +9456,7 @@
   "table": {
    "name": "OntSelfLoopDetect",
    "shortName": "SLD",
+   "desc": "ONU self loop detect",
    "classId": 244,
    "initType": 0,
    "stdType": 260,
@@ -9558,6 +9614,7 @@
   "table": {
    "name": "OntSystemMgmt",
    "shortName": "OntSysMgmt",
+   "desc": "ONU system management",
    "classId": 240,
    "initType": 0,
    "stdType": 260,
@@ -9687,6 +9744,7 @@
   "table": {
    "name": "Ontg",
    "shortName": "ONTG",
+   "desc": "ONU-G",
    "classId": 256,
    "initType": 0,
    "stdType": 1,
@@ -9935,6 +9993,7 @@
   "table": {
    "name": "OnuCapability",
    "shortName": "ONUCAP",
+   "desc": "ONU capability",
    "classId": 65529,
    "initType": 0,
    "stdType": 4,
@@ -10047,6 +10106,7 @@
   "table": {
    "name": "CTCOnuOnuLoopDetection",
    "shortName": "CTCLD",
+   "desc": "CTC loop detection",
    "classId": 65528,
    "initType": 0,
    "stdType": 4,
@@ -10178,6 +10238,7 @@
   "table": {
    "name": "OnuPwrShedding",
    "shortName": "OPS",
+   "desc": "ONU power shedding",
    "classId": 133,
    "initType": 0,
    "stdType": 1,
@@ -10434,6 +10495,7 @@
   "table": {
    "name": "OnuRemoteDebug",
    "shortName": "ORD",
+   "desc": "ONU remote debug",
    "classId": 158,
    "initType": 0,
    "stdType": 257,
@@ -10526,6 +10588,7 @@
   "table": {
    "name": "PriQ",
    "shortName": "PQ",
+   "desc": "Priority queue",
    "classId": 277,
    "initType": 0,
    "stdType": 1,
@@ -10797,6 +10860,7 @@
   "table": {
    "name": "PrivateTellionOntStatistics",
    "shortName": "ONTSTATISTICS",
+   "desc": "Private ONU statistics",
    "classId": 255,
    "initType": 0,
    "stdType": 260,
@@ -11051,6 +11115,7 @@
   "table": {
    "name": "PrivateTqCfg",
    "shortName": "PTC",
+   "desc": "Private T-CONT queue configuration",
    "classId": 65534,
    "initType": 0,
    "stdType": 16,
@@ -11143,6 +11208,7 @@
   "table": {
    "name": "PrivateVlanCfg",
    "shortName": "PVC",
+   "desc": "Private VLAN configuration",
    "classId": 65535,
    "initType": 0,
    "stdType": 16,
@@ -11248,6 +11314,7 @@
   "table": {
    "name": "PseudowireMaintenanceProfile",
    "shortName": "PMP",
+   "desc": "Pseudowire maintenance profile",
    "classId": 284,
    "initType": 1,
    "stdType": 1,
@@ -11523,6 +11590,7 @@
   "table": {
    "name": "SWImage",
    "shortName": "SWIMG",
+   "desc": "Software image",
    "classId": 7,
    "initType": 0,
    "stdType": 1,
@@ -11660,6 +11728,7 @@
   "table": {
    "name": "Scheduler",
    "shortName": "TSG",
+   "desc": "Traffic scheduler",
    "classId": 278,
    "initType": 0,
    "stdType": 1,
@@ -11762,6 +11831,7 @@
   "table": {
    "name": "TR069ManageServer",
    "shortName": "TR069MS",
+   "desc": "BBF TR-069 management server",
    "classId": 340,
    "initType": 0,
    "stdType": 1,
@@ -11850,6 +11920,7 @@
   "table": {
    "name": "Tcont",
    "shortName": "TCONT",
+   "desc": "T-CONT",
    "classId": 262,
    "initType": 0,
    "stdType": 1,
@@ -11938,6 +12009,7 @@
   "table": {
    "name": "TcpUdpCfgData",
    "shortName": "TCPUDP",
+   "desc": "TCP/UDP config data",
    "classId": 136,
    "initType": 1,
    "stdType": 1,
@@ -12043,6 +12115,7 @@
   "table": {
    "name": "ThresholdData1",
    "shortName": "TH1",
+   "desc": "Threshold data 1",
    "classId": 273,
    "initType": 1,
    "stdType": 1,
@@ -12189,6 +12262,7 @@
   "table": {
    "name": "ThresholdData2",
    "shortName": "TH2",
+   "desc": "Threshold data 2",
    "classId": 274,
    "initType": 1,
    "stdType": 1,
@@ -12335,6 +12409,7 @@
   "table": {
    "name": "Unig",
    "shortName": "UNIG",
+   "desc": "UNI-G",
    "classId": 264,
    "initType": 0,
    "stdType": 1,
@@ -12451,6 +12526,7 @@
   "table": {
    "name": "VEIP",
    "shortName": "VEIP",
+   "desc": "Virtual Ethernet interface point",
    "classId": 329,
    "initType": 0,
    "stdType": 1,
@@ -12593,6 +12669,7 @@
   "table": {
    "name": "VlanTagFilterData",
    "shortName": "VTFD",
+   "desc": "VLAN tagging filter data",
    "classId": 84,
    "initType": 1,
    "stdType": 1,
@@ -12692,6 +12769,7 @@
   "table": {
    "name": "VlanTagOpCfgData",
    "shortName": "VTOCD",
+   "desc": "VLAN tagging operation configuration data",
    "classId": 78,
    "initType": 1,
    "stdType": 1,
@@ -12816,6 +12894,7 @@
   "table": {
    "name": "HSQDefault",
    "shortName": "HSQDef",
+   "desc": "Default to factory",
    "classId": 245,
    "initType": 1,
    "stdType": 4,
@@ -12906,6 +12985,7 @@
   "table": {
    "name": "WANConfigCata",
    "shortName": "WANCon",
+   "desc": "WAN interface config",
    "classId": 248,
    "initType": 1,
    "stdType": 4,
@@ -13066,6 +13146,7 @@
   "table": {
    "name": "WANConfigCataDeti",
    "shortName": "WANConDeti",
+   "desc": "WAN interface config Deti",
    "classId": 249,
    "initType": 1,
    "stdType": 4,
@@ -13297,6 +13378,7 @@
    "name": "MacBriCfgData",
    "shortName": "MBCD",
    "classId": 46,
+   "desc": "MAC bridge configuration data",
    "initType": 0,
    "stdType": 1,
    "actionType": 512,

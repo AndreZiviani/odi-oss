@@ -278,6 +278,7 @@ def g988_attr(index, name, typ, size):
 G988_ONLY = [{
     'plugin': None,
     'table': {'name': 'MacBriCfgData', 'shortName': 'MBCD', 'classId': 46,
+              'desc': 'MAC bridge configuration data',
               'initType': 0, 'stdType': 1, 'actionType': 1 << 9, 'attrNum': 9,
               'entrySize': 40, 'actions': ['get'], 'extra': {}},
     'oper': {},
@@ -358,16 +359,17 @@ def main():
     print('\n%d plugins, %d consistent, %d not; %d attributes total'
           % (len(files), ok, bad, sum(len(m['attrs']) for m in model)))
     if args.json:
-        # The desc strings are the plugins' own prose, and nothing here
-        # reads them: the committed model carries names and layout only.
-        def nodesc(o):
-            if isinstance(o, dict):
-                return {k: nodesc(v) for k, v in o.items() if k != 'desc'}
-            if isinstance(o, list):
-                return [nodesc(v) for v in o]
-            return o
+        # The table desc is the entity's name (the MIB browser lists it). The
+        # per-attribute prose is the plugins' own and nothing reads it, so
+        # the committed model carries names and layout only.
+        def nodesc(e):
+            e = dict(e)
+            e['attrs'] = [{k: v for k, v in at.items() if k != 'desc'}
+                          for at in e['attrs']]
+            return e
+        model_out = [nodesc(e) for e in model]
         with open(args.json, 'w') as fh:
-            json.dump(nodesc(model), fh, indent=1, default=str)
+            json.dump(model_out, fh, indent=1, default=str)
         print('wrote %s' % args.json)
     if args.c:
         emit_c(model, args.c)
