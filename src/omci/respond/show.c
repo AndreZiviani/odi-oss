@@ -104,7 +104,10 @@ static void v_str(const char *name, const struct mib_row *r,
 	out(name);
 	out(": ");
 	if (off >= 0 && w) {
-		for (uint16_t i = 0; i + 1 < w && off + i < MIB_ROW_MAX; i++) {
+		/* w is already the width on the wire, without the vendor's
+		 * NUL (attr_width), so every byte of it is printable: a
+		 * four-character vendor id printed as three before. */
+		for (uint16_t i = 0; i < w && off + i < MIB_ROW_MAX; i++) {
 			uint8_t ch = r->data[off + i];
 
 			if (!ch)
