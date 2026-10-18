@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+## v1.8.0 - 2026-10-18
+
+- The image ships confd v1.7.0 (odi-ui: the MIB browser on the OMCI tab is
+  three linked panes, tables, their entities and each entity's attributes,
+  and lists every class the image knows with its id and official name).
+
 - Build: the generated OMCI model (`omci_mib.json`) now carries each
   entity's name (`desc`), such as "GEM port network CTP" or "MAC bridge
   configuration data". Every class G.988 defines carries the standard's
