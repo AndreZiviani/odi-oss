@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Build: `make releases` stops when a local confd is asked for and cannot
+  be used (`CONFD_BIN` not a file, no web assets, or `CONFD_TAG=` with no
+  `CONFD_BIN`). It used to warn and go on, and the image then shipped
+  whatever confd and web pages an earlier build had left in `out/`.
+  `CONFD_BIN`, `CONFD_ASSETS` and `METRICSD_BIN` are now relative to where
+  the build is run from, as the docs' example assumed (they were taken from
+  `src/`), and `CONFD_ASSETS` may also be odi-ui's
+  `build/confd-assets.tar.gz`.
+
 ## v1.7.1 - 2026-10-18
 
 - The image ships confd v1.6.2 (odi-ui: a line under the NTP server setting
