@@ -690,6 +690,20 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	 * configures hardware or keeps a MIB: the point is to see the whole
 	 * script the line runs, which only appears if each step is
 	 * acknowledged. A refusal stops the conversation at that step. */
+	/* Class 46 is the ONU's own, created and deleted with its profile and
+	 * read-only: G.988 gives the OLT only a Get. Its model lists Get as the
+	 * one message it takes, so that is what is checked, and a Create, Set
+	 * or Delete is refused before it can add a row, write one or remove
+	 * the entity from under the profile. Every other class keeps the
+	 * answer-everything behaviour below. */
+	if (c && cls == OMCI_ME_MAC_BRIDGE_CFG_DATA &&
+	    (mt == OMCI_MT_CREATE || mt == OMCI_MT_SET || mt == OMCI_MT_DELETE) &&
+	    !(c->actions & (1u << mt))) {
+		body[0] = OMCI_ERR_NOT_SUPPORTED;
+		send_resp(fd, tid, f, body, 1);
+		out("-> not supported (the ONU creates it, the OLT can only get it)\n");
+		return;
+	}
 	if (mt == OMCI_MT_CREATE) {
 		struct mib_row *r = c ? mib_add(cls, inst) : 0;
 		uint16_t mask;
@@ -728,6 +742,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		mib_data_sync++;
 		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 			mbpcd_tables_add(inst);
+		if (cls == OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE)
+			mbcd_add(inst);
 		/* Saved before the answer: once the OLT is told the entity
 		 * exists, a respawn must find it. Saved again after the apply,
 		 * which may add what it programmed. */
@@ -774,6 +790,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		mib_del(cls, inst);
 		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 			mbpcd_tables_del(inst);
+		if (cls == OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE)
+			mbcd_del(inst);
 		body[0] = OMCI_OK;
 		mib_data_sync++;
 		snapshot_save();               /* before the answer, as above */

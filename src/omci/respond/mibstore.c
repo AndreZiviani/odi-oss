@@ -822,6 +822,47 @@ int uni_link_state(void)
 	return b[0] == '1';
 }
 
+/* The stick's own MAC address, for the bridge MAC of class 46: eth0 carries
+ * it (ELAN_MAC_ADDR sets eth0, eth0.2 and br0 to the same one). Zeros when
+ * the file cannot be read or does not hold "aa:bb:cc:dd:ee:ff". */
+const char *bridge_mac_path = "/sys/class/net/eth0/address";
+
+static int hexdig(char ch)
+{
+	if (ch >= '0' && ch <= '9')
+		return ch - '0';
+	if (ch >= 'a' && ch <= 'f')
+		return ch - 'a' + 10;
+	if (ch >= 'A' && ch <= 'F')
+		return ch - 'A' + 10;
+	return -1;
+}
+
+static void bridge_mac(uint8_t mac[6])
+{
+	char b[24];
+	long fd = sys_open(bridge_mac_path, O_RDONLY), n;
+
+	for (int i = 0; i < 6; i++)
+		mac[i] = 0;
+	if (fd < 0)
+		return;
+	n = sys_read((int)fd, b, sizeof b);
+	sys_close((int)fd);
+	if (n < 17)
+		return;
+	for (int i = 0; i < 6; i++) {
+		int hi = hexdig(b[i * 3]), lo = hexdig(b[i * 3 + 1]);
+
+		if (hi < 0 || lo < 0 || (i < 5 && b[i * 3 + 2] != ':')) {
+			for (int j = 0; j < 6; j++)
+				mac[j] = 0;
+			return;
+		}
+		mac[i] = (uint8_t)(hi << 4 | lo);
+	}
+}
+
 /* The PON state O1..O7 as a number: the driver status file first (the same
  * one the Alloc-IDs come from), then the driver command, and O1 when neither
  * answers -- the state the ONU starts in. */
@@ -1003,6 +1044,43 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 			out[0] = 'C'; out[1] = 'T'; out[2] = 'C'; out[3] = ' ';
 		} else if (k == 2) put_str(out, n, ident.loid);
 		else if (k == 3) put_str(out, n, ident.loidPwd);
+	} else if (c->classId == OMCI_ME_MAC_BRIDGE_CFG_DATA) { /* MAC bridge configuration */
+		/* G.988 9.3.2. omcid runs no spanning tree, so the ONU is the
+		 * root of every bridge: the designated root is its own bridge
+		 * id (the priority of the service profile, then the bridge MAC
+		 * address), the path cost and the root port are 0, and the
+		 * timers are the profile's. The bridge MAC is the stick's own;
+		 * the port count is the class 47 ports that point at this
+		 * bridge, counted now. */
+		const struct omci_class *sp = find_class(OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE);
+		const struct omci_class *bp = find_class(OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA);
+		uint8_t mac[6], pri[2], t[2];
+		unsigned ports = 0;
+
+		bridge_mac(mac);
+		if (sp)
+			attr_value(sp, inst, 4, pri);       /* Priority */
+		else
+			pri[0] = pri[1] = 0;
+		if (k == 1) {
+			for (int i = 0; i < 6; i++)
+				out[i] = mac[i];
+		} else if (k == 2) {
+			out[0] = pri[0]; out[1] = pri[1];
+		} else if (k == 3) {
+			out[0] = pri[0]; out[1] = pri[1];
+			for (int i = 0; i < 6; i++)
+				out[2 + i] = mac[i];
+		} else if (k == 5 && bp) {
+			for (int i = 0; i < MIB_ROWS; i++)
+				ports += mib[i].used &&
+					 mib[i].classId == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA &&
+					 row_u32(&mib[i], bp, 1) == inst;
+			out[0] = (uint8_t)ports;
+		} else if ((k == 7 || k == 8) && sp) {
+			attr_value(sp, inst, k - 1, t);     /* HelloTime, ForwardDelay */
+			out[0] = t[0]; out[1] = t[1];
+		}
 	} else if (c->classId == OMCI_ME_ONT_DATA) { /* ONT data */
 		if (k == 1) out[0] = mib_data_sync;
 	} else if (c->classId == OMCI_ME_PRIORITY_QUEUE) { /* priority queue */
@@ -1194,6 +1272,26 @@ void mbpcd_tables_del(uint16_t inst)
 	mib_del(49, inst);
 	mib_del(79, inst);
 	mib_del(50, inst);
+}
+
+/* The class 46 the ONU creates with each MAC bridge service profile (45), at
+ * the profile's entity id. G.988 has the ONU create and delete it; the stock
+ * firmware has no such entity at all (no plugin for class 46), so this is
+ * from the standard alone. The row holds nothing: every attribute is derived
+ * when read (attr_value), so a Set of the profile is seen at once, and the
+ * row exists to put the entity in the MIB upload and the resume snapshot,
+ * as for the port tables above. */
+void mbcd_add(uint16_t inst)
+{
+	if (find_class(OMCI_ME_MAC_BRIDGE_CFG_DATA) &&
+	    !mib_add(OMCI_ME_MAC_BRIDGE_CFG_DATA, inst))
+		out_fmt("   no room in the MIB for class 46 of bridge %04x\n",
+			(long)inst);
+}
+
+void mbcd_del(uint16_t inst)
+{
+	mib_del(OMCI_ME_MAC_BRIDGE_CFG_DATA, inst);
 }
 
 /* `contents` is everything from byte 8 on -- for a get that is the result code,

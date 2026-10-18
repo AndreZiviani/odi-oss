@@ -53,10 +53,13 @@ store() {
 	} > /var/config/lastgood.xml
 }
 
-# run <log>: omcid in the background on the current store and odi.conf
+# run <log>: omcid in the background on the current store and odi.conf, with
+# the extra arguments in RUN_ARGS (words, no spaces inside one)
+RUN_ARGS=
 run() {
 	rm -f "$1"
-	$Q respond/build/omcid -d > "$1" 2>&1 &
+	# shellcheck disable=SC2086  # RUN_ARGS is a word list on purpose
+	$Q respond/build/omcid -d $RUN_ARGS > "$1" 2>&1 &
 	pid=$!
 	wait_count "$1" "answering as" 1 20
 }
@@ -211,6 +214,95 @@ wait_count /tmp/keys-9.log "deleted" 1 10
 check "a Delete of the port takes the three tables with it" \
       "$(inst 47)$(inst 49)$(inst 50)$(inst 79)" ""
 stop
+
+# The MAC bridge configuration data (class 46) is the ONU's own: created with
+# each MAC bridge service profile (45) at the same entity id, deleted with it,
+# read-only for the OLT, every value derived. The stock image has no such
+# entity, so the expectations are G.988's (9.3.2) and the derivation in
+# attr_value. 0e80 creates class 45 instance 1 (spanning tree 0, learning 1,
+# ATM 0, priority 0x8000, max age 0x1400, hello 0x0200, forward delay 0x0f00,
+# discard 0), 0e72 and 0e73 create ports 8 and 9 of bridge 1, 0e74 a port of
+# bridge 2.
+store "" ""
+rm -f /var/config/odi.conf /var/run/omcid-mib.snap
+printf '02:11:22:33:44:55\n' > /tmp/keys-mac
+# The same -g for both runs: a snapshot of another serial is not resumed.
+printf 'state 5 (O5)\nonu_id 26\nsn 4f44495400000001\neqd multiframe 0 inframe 0\nploam ds_rx 0 us_tx 0\nalloc_ids 5 282 794 1050 1306 538\n' > /tmp/keys-gpon
+RUN_ARGS="-m /tmp/keys-mac -g /tmp/keys-gpon"
+run /tmp/keys-10.log
+check "no bridge profile yet: no class 46" "$(inst 46)" ""
+base=$(upload /tmp/keys-10.log)
+printf '0e80440a002d0001%s%030d00000028%08d\n' 0001008000140002000f00000000000000 0 0 > /tmp/keys-bs-create.txt
+$Q cli/build/omcli --inject-file /tmp/keys-bs-create.txt > /dev/null 2>&1
+wait_count /tmp/keys-10.log "created" 1 10
+check "a Create of class 45 creates class 46 at the same id" "$(inst 46)" "1,"
+ga() { $Q cli/build/omcli mib getattr 46 1 "$1"; }
+check "bridge MAC address is the stick's" "$(ga 1)" "class 46 entity 1 attr 1 = 021122334455"
+check "bridge priority is the profile's" "$(ga 2)" "class 46 entity 1 attr 2 = 8000"
+check "designated root is the priority and the bridge MAC (we are root)" "$(ga 3)" \
+      "class 46 entity 1 attr 3 = 8000021122334455"
+check "root path cost is 0" "$(ga 4)" "class 46 entity 1 attr 4 = 00000000"
+check "no ports yet" "$(ga 5)" "class 46 entity 1 attr 5 = 00"
+check "root port number is 0" "$(ga 6)" "class 46 entity 1 attr 6 = 0000"
+check "hello time is the profile's" "$(ga 7)" "class 46 entity 1 attr 7 = 0200"
+check "forward delay is the profile's" "$(ga 8)" "class 46 entity 1 attr 8 = 0f00"
+# One record for the profile and two for class 46: its upload attributes are
+# 27 bytes, one more than a record holds.
+check "the next MIB upload lists the profile and the class 46 (3 records)" \
+      "$(upload /tmp/keys-10.log)" "$((base + 3))"
+# A Get from the OLT answers the six-byte address in the Get itself, not
+# through Get-Next as a vendor OCTETS attribute would.
+printf '1001490a002e0001%s%060d00000028%08d\n' 8000 0 0 > /tmp/keys-bs-get.txt
+$Q cli/build/omcli --inject-file /tmp/keys-bs-get.txt > /dev/null 2>&1
+wait_count /tmp/keys-10.log "ok, mask 8000, 6 bytes" 1 10
+check "an OLT Get of the bridge MAC address is answered whole" \
+      "$(grep -c 'ok, mask 8000, 6 bytes' /tmp/keys-10.log)" "1"
+# Ports of bridge 1 are counted live; a port of another bridge is not.
+for p in 0e72440a002f0008:000108030001 0e73440a002f0009:000109030001 0e74440a002f000a:00020a030001; do
+	printf '%s%052d00000028%08d\n' "${p%%:*}${p##*:}" 0 0 > /tmp/keys-bp.txt
+	$Q cli/build/omcli --inject-file /tmp/keys-bp.txt > /dev/null 2>&1
+done
+wait_count /tmp/keys-10.log "created" 4 10
+check "the port count follows the class 47 ports of the bridge" "$(ga 5)" "class 46 entity 1 attr 5 = 02"
+printf '0e75460a002f0008%064d00000028%08d\n' 0 0 > /tmp/keys-bp-delete.txt
+$Q cli/build/omcli --inject-file /tmp/keys-bp-delete.txt > /dev/null 2>&1
+wait_count /tmp/keys-10.log "deleted" 1 10
+check "and a Delete of a port lowers it" "$(ga 5)" "class 46 entity 1 attr 5 = 01"
+# Set the profile's priority (attribute 4, mask 0x1000) to 0x4000: the derived
+# values follow without any Set of class 46.
+printf '0e76480a002d0001%s%056d00000028%08d\n' 10004000 0 0 > /tmp/keys-bs-set.txt
+$Q cli/build/omcli --inject-file /tmp/keys-bs-set.txt > /dev/null 2>&1
+wait_count /tmp/keys-10.log "set mask 1000" 1 10
+check "a Set of the profile priority moves the bridge priority" "$(ga 2)" "class 46 entity 1 attr 2 = 4000"
+check "and the designated root" "$(ga 3)" "class 46 entity 1 attr 3 = 4000021122334455"
+# The OLT cannot change it: Set, Create and Delete of class 46 are refused,
+# the entity is untouched and no row is added.
+printf '0e77480a002e0001%s%060d00000028%08d\n' 4000 0 0 > /tmp/keys-me46-set.txt
+printf '0e78440a002e0005%064d00000028%08d\n' 0 0 > /tmp/keys-me46-create.txt
+printf '0e79460a002e0001%064d00000028%08d\n' 0 0 > /tmp/keys-me46-delete.txt
+for f in set create delete; do
+	$Q cli/build/omcli --inject-file /tmp/keys-me46-$f.txt > /dev/null 2>&1
+done
+wait_count /tmp/keys-10.log "-> not supported (the ONU creates it" 3 10
+check "an OLT Set, Create and Delete of class 46 are refused" \
+      "$(grep -c -- '-> not supported (the ONU creates it' /tmp/keys-10.log)" "3"
+check "no class 46 added by the Create, none lost to the Delete" "$(inst 46)" "1,"
+check "the refused Set did not write" "$(ga 2)" "class 46 entity 1 attr 2 = 4000"
+# A respawned omcid resumes with it: the row is in the snapshot. Killed, not
+# stopped, as a crash is (a clean exit is not what a respawn follows).
+kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+RUN_ARGS="-m /tmp/keys-mac -g /tmp/keys-gpon -s 5"
+run /tmp/keys-10b.log
+check "the respawn resumed" "$(grep -c 'snapshot loaded' /tmp/keys-10b.log)" "1"
+check "class 46 is there after the resume" "$(inst 46)" "1,"
+check "with the derived values (port 9 is the one left on bridge 1)" "$(ga 5)" "class 46 entity 1 attr 5 = 01"
+# Deleting the profile removes it.
+printf '0e7a460a002d0001%064d00000028%08d\n' 0 0 > /tmp/keys-bs-delete.txt
+$Q cli/build/omcli --inject-file /tmp/keys-bs-delete.txt > /dev/null 2>&1
+wait_count /tmp/keys-10b.log "deleted" 1 10
+check "a Delete of class 45 takes class 46 with it" "$(inst 45)$(inst 46)" ""
+stop
+RUN_ARGS=
 
 # A PPTP-only ONU still builds its bridge. ISP1 session (a PPTP Ethernet UNI
 # port and a VEIP port) against the traced daemon, once whole with the VEIP

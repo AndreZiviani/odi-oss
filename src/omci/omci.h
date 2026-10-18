@@ -67,6 +67,7 @@ enum omci_me_class {
 	OMCI_ME_SOFTWARE_IMAGE                = 7,   /* software image */
 	OMCI_ME_PPTP_ETH_UNI                  = 11,  /* PPTP Ethernet UNI */
 	OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE    = 45,  /* MAC bridge service profile */
+	OMCI_ME_MAC_BRIDGE_CFG_DATA           = 46,  /* MAC bridge configuration data */
 	OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA      = 47,  /* MAC bridge port config data */
 	OMCI_ME_VLAN_TAGGING_FILTER_DATA      = 84,  /* VLAN tagging filter data */
 	OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE  = 130, /* 802.1p mapper service profile */

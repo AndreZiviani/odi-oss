@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- OMCI: omcid has the MAC bridge configuration data (ME 46) that G.988 has
+  the ONU create with each MAC bridge service profile (ME 45). An OLT that
+  reads it, and expects it in the MIB upload, got "unknown entity" before.
+  It appears with each ME 45 the OLT creates (same entity id), goes with it,
+  and the OLT can only read it: a Create, Set or Delete of it is refused.
+  The stock image has no such entity, so the values are G.988's, for an ONU
+  that runs no spanning tree and is the root of its bridge: the stick's own
+  MAC address, the priority, hello time and forward delay of the ME 45, a
+  designated root made of that priority and that MAC address, a root path
+  cost and root port of 0, and the number of ME 47 ports that point at the
+  bridge, counted when read. `omcid -m FILE` reads the address from FILE
+  (tests only).
 - OMCI: the vendor-format dump (`omcicli mib get`) printed every string
   attribute one character short, so ONU-G's four-character vendor id read as
   three. The value sent to the OLT was always whole; only the dump was wrong.

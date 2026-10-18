@@ -73,7 +73,7 @@ static void catch_signals(int fd, uint32_t tid)
 static void usage(void)
 {
 	out("usage: omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state]\n"
-	    "             [-g file] [-i file] [-j seconds] [-k pid] [-h]\n"
+	    "             [-g file] [-m file] [-i file] [-j seconds] [-k pid] [-h]\n"
 	    "\n"
 	    "The OMCI responder: registers for redirect type 1 and answers the\n"
 	    "OLT, and serves the omcli and omcicli queues.\n"
@@ -90,6 +90,8 @@ static void usage(void)
 	    "              instead of /proc/odi_gpon/status (test only)\n"
 	    "  -l file     read the UNI link bit from this file instead of\n"
 	    "              the odi_switch host_link parameter (test only)\n"
+	    "  -m file     read the bridge MAC address of class 46 from this\n"
+	    "              file instead of the sysfs one of eth0 (test only)\n"
 	    "  -i file     append the driver verbs of a reload to this file\n"
 	    "              instead of /proc/odi_init (test only)\n"
 	    "  -j seconds  how long a reload waits for O5 (test only)\n"
@@ -184,6 +186,12 @@ int main(int argc, char **argv)
 		/* -l file: the UNI link bit (0 or 1), for the same reason. */
 		else if (str_eq(argv[i], "-l") && i + 1 < argc) {
 			uni_link_path = argv[++i];
+		}
+		/* -m file: the stick MAC address, "aa:bb:cc:dd:ee:ff", for class
+		 * 46 instead of /sys/class/net/eth0/address; under qemu the
+		 * sysfs file would be the test host's. */
+		else if (str_eq(argv[i], "-m") && i + 1 < argc) {
+			bridge_mac_path = argv[++i];
 		}
 		/* -i file: where the reload writes the driver verbs instead of
 		 * /proc/odi_init, and -j seconds: how long it waits for O5 and
