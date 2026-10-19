@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+**Automated dependency bump.**
+- linux 6.18.56 -> 6.18.57
+
+
 - OMCI build: the generated tables (`omci_autonomous.c`, `omci_defaults.c`,
   `omci_mib.c`) take their entry counts from the arrays themselves instead
   of a number the generator wrote. A table edited by hand with the old count
