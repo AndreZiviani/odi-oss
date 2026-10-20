@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the ANI-G laser bias current alarm (alarm 6) is now raised, from the
+  module's own bias alarm flags (A2h byte 112, high or low). G.988 gives the
+  ANI-G no bias threshold to set, so the module's limits decide, and it
+  clears its flag itself. Driver command 10 now also answers the DDM alarm
+  selector (A2h bytes 110-117 at data[0..7]); an older driver refuses it and
+  omcid then leaves the bit alone.
+
 - Optics: a 16-bit DDM reading (temperature, supply voltage, bias current,
   Tx power, Rx power) can no longer come back torn. The controller reads one
   byte at a time and the module refreshes its readings on its own clock, so a

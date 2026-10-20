@@ -77,6 +77,7 @@ static int omci_drv_call_netlink(uint32_t cmd, void *buf, uint32_t len)
 
 #ifdef OMCI_DRV_TRACE
 static int ddm_stub_word(unsigned t, uint16_t *w);
+static void ddm_stub_alarms(uint8_t *b);
 
 /* The driver-call golden (src/omci/drv-test.sh): every call is logged as
  * "drv <cmd> <len> <args hex>" and succeeds, with no netlink. The two
@@ -125,6 +126,10 @@ static int omci_drv_trace(uint32_t cmd, void *buf, uint32_t len)
 		static const uint16_t ddm[7] = { 0, 0, 0x1900, 33000, 5000, 5000, 1000 };
 		unsigned t = b[3];
 
+		if (t == 7 && len >= 12) {
+			ddm_stub_alarms(b);
+			return 0;
+		}
 		if (t < 2 || t > 6)
 			return -1;
 		uint16_t w = ddm[t];
@@ -139,21 +144,22 @@ static int omci_drv_trace(uint32_t cmd, void *buf, uint32_t len)
 
 #ifdef OMCI_DRV_TRACE
 /* The DDM stub, unlogged, for the polls. The words can be set by a test:
- * "<rx> <tx>" (decimal, 0.1 uW) in ODI_DDM_STUB_PATH replaces the fixed
- * Rx 1000 and Tx 5000 for this call and the logged one alike. */
+ * "<rx> <tx> <flags>" (decimal; the powers in 0.1 uW, flags the module's
+ * alarm byte, A2h 112) in ODI_DDM_STUB_PATH replaces the fixed Rx 1000,
+ * Tx 5000 and no flags for this call and the logged one alike. */
 #define ODI_DDM_STUB_PATH "/tmp/omcid-ddm"
 
 static int ddm_stub_word(unsigned t, uint16_t *w)
 {
 	char b[32];
 	long fd = sys_open(ODI_DDM_STUB_PATH, O_RDONLY), n;
-	unsigned v[2] = { 0, 0 }, k = 0;
+	unsigned v[3] = { 0, 0, 0 }, k = 0;
 
 	if (fd < 0)
 		return -1;
 	n = sys_read((int)fd, b, sizeof b - 1);
 	sys_close((int)fd);
-	for (long i = 0; i < n && k < 2; i++) {
+	for (long i = 0; i < n && k < 3; i++) {
 		if (b[i] >= '0' && b[i] <= '9')
 			v[k] = v[k] * 10 + (unsigned)(b[i] - '0');
 		else if (b[i] == ' ')
@@ -163,9 +169,23 @@ static int ddm_stub_word(unsigned t, uint16_t *w)
 		*w = (uint16_t)v[0];
 	else if (t == 5)
 		*w = (uint16_t)v[1];
+	else if (t == 7)
+		*w = (uint16_t)v[2];
 	else
 		return -1;
 	return 0;
+}
+
+/* Selector 7, the module's alarm and warning flags: data[0..7] is A2h
+ * 110-117, so the alarm byte 112 is data[2], buffer byte 6. */
+static void ddm_stub_alarms(uint8_t *b)
+{
+	uint16_t w = 0;
+
+	for (unsigned i = 4; i < 12; i++)
+		b[i] = 0;
+	if (ddm_stub_word(7, &w) == 0)
+		b[6] = (uint8_t)w;
 }
 #endif
 
@@ -176,6 +196,10 @@ int omci_drv_call_quiet(uint32_t cmd, void *buf, uint32_t len)
 	uint8_t *b = buf;
 	uint16_t w;
 
+	if (cmd == 10 && len >= 12 && b[3] == 7) {
+		ddm_stub_alarms(b);
+		return 0;
+	}
 	if (cmd != 10 || len < 6 || b[3] < 2 || b[3] > 6)
 		return cmd == 10 ? -1 : 0;
 	w = ddm[b[3]];

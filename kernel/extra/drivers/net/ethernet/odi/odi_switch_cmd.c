@@ -724,28 +724,42 @@ static int cmd_ds_bc_gem_flow(void *buf, uint32_t len)
  * they cannot take the extra high-byte read odi_ddm_get() adds against a
  * torn word. Any other type, a short buffer or
  * a failed read is an error, and omcid then reports 0 for that field.
+ *
+ * ODI_DDM_ALARM_STATUS is the one other type: the module's own alarm and
+ * warning flags, A2h bytes 110-117 (odi_ddm.h has the layout), at
+ * data[0..7]. omcid takes the laser bias alarm (ANI-G alarm 6) from them;
+ * the module raises them against its own thresholds, which G.988 has no
+ * attribute for. It needs room for all eight bytes.
  */
 #define ODI_SW_CMD10_DATA_OFF	4U
 #define ODI_SW_CMD10_MIN_LEN	(ODI_SW_CMD10_DATA_OFF + 2U)
+#define ODI_SW_CMD10_ALARM_LEN	8U
 
 static int cmd_transceiver_status(void *buf, uint32_t len)
 {
 	uint8_t *b = (uint8_t *)buf;
 	uint8_t raw[ODI_DDM_BUF_LEN];
-	uint32_t type, i;
+	uint32_t type, i, n;
 
 	if (!b || len < ODI_SW_CMD10_MIN_LEN)
 		return -1;
 	type = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) |
 	       ((uint32_t)b[2] << 8) | b[3];
-	if (type < ODI_DDM_TEMPERATURE || type > ODI_DDM_RX_POWER)
+	if (type == ODI_DDM_ALARM_STATUS) {
+		if (len < ODI_SW_CMD10_DATA_OFF + ODI_SW_CMD10_ALARM_LEN)
+			return -1;
+		n = ODI_SW_CMD10_ALARM_LEN;
+	} else if (type >= ODI_DDM_TEMPERATURE && type <= ODI_DDM_RX_POWER) {
+		n = 2U;
+	} else {
 		return -1;
+	}
 	if (odi_ddm_get_stock((int)type, raw) != 0)
 		return -1;
 	for (i = ODI_SW_CMD10_DATA_OFF; i < len; i++)
 		b[i] = 0;
-	b[ODI_SW_CMD10_DATA_OFF] = raw[0];
-	b[ODI_SW_CMD10_DATA_OFF + 1U] = raw[1];
+	for (i = 0; i < n; i++)
+		b[ODI_SW_CMD10_DATA_OFF + i] = raw[i];
 	return 0;
 }
 

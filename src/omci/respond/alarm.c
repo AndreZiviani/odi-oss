@@ -27,8 +27,14 @@
  *                second, which also gives the right answer after a MIB reset
  *                (the stock one stays silent until the link moves again).
  *
- * Not raised: ANI-G 6 (laser bias; the stock constant is not decoded) and
- * ONU-G 7 (dying gasp; nothing in our kernel raises one).
+ *   ANI-G 6      laser bias current: the module's own alarm flags for the bias
+ *                current, high or low (A2h byte 112 bits 3 and 2, read with
+ *                the DDM selector 7), against the limits it carries itself.
+ *                G.988 gives the ANI-G no bias threshold to set, and the
+ *                stock constant for this alarm is not decoded, so the module
+ *                is the judge; it clears its flag with its own margin.
+ *
+ * Not raised: ONU-G 7 (dying gasp; nothing in our kernel raises one).
  *
  * Every alarm is a level, evaluated each second against what the entity's
  * bitmap holds, so the bitmap the OLT reads with Get All Alarms is exactly
@@ -71,6 +77,7 @@
 #define ALM_ANIG_SD       3
 #define ALM_ANIG_LOW_TX   4
 #define ALM_ANIG_HIGH_TX  5
+#define ALM_ANIG_BIAS     6
 #define ALM_UNI_LAN_LOS   0
 
 #define ANIG_ARC          8
@@ -235,6 +242,28 @@ static int ddm_poll_dbm(unsigned type, int32_t *out)
 	return 0;
 }
 
+/* The module's laser bias alarm: 1 when A2h byte 112 says the bias current
+ * is above its high alarm limit (bit 3) or under its low one (bit 2), 0 when
+ * neither, -1 when the flags cannot be read (nothing then changes). The
+ * answer of DDM selector 7 holds A2h 110-117 from buffer byte 4, so byte
+ * 112 is byte 6. */
+#define DDM_ALARM_STATUS      7
+#define A2_ALARM_BYTE         6
+#define A2_ALARM_BIAS_HIGH    0x08
+#define A2_ALARM_BIAS_LOW     0x04
+
+static int ddm_poll_bias_alarm(void)
+{
+	uint8_t buf[36];
+
+	for (unsigned i = 0; i < sizeof buf; i++)
+		buf[i] = 0;
+	buf[3] = DDM_ALARM_STATUS;
+	if (omci_drv_call_quiet(10, buf, sizeof buf) != 0)
+		return -1;
+	return (buf[A2_ALARM_BYTE] & (A2_ALARM_BIAS_HIGH | A2_ALARM_BIAS_LOW)) != 0;
+}
+
 /* "signal sf <0|1> threshold <x>" in /proc/odi_gpon/status: 1 set, 0
  * clear, -1 no such line (a kernel without the evaluation). */
 static int signal_state(const char *buf, int n, char which)
@@ -291,6 +320,7 @@ static void eval_anig(struct alm *a, const char *proc, int pn)
 		bit_put(a, ALM_ANIG_HIGH_TX, tx > h ? 1 :
 			tx <= h - OPT_HYST ? 0 : -1);
 	}
+	bit_put(a, ALM_ANIG_BIAS, ddm_poll_bias_alarm());
 	bit_put(a, ALM_ANIG_SF, signal_state(proc, pn, 'f'));
 	bit_put(a, ALM_ANIG_SD, signal_state(proc, pn, 'd'));
 }
