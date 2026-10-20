@@ -317,7 +317,9 @@ commands, from the command table of the shipped binary:
 | 30 | setPortAutoNegoAbility | `odi_sw_port_autoneg_get`, `_set` | `odi_switch_port.c` |
 | 32 | setPortState | `odi_sw_port_admin_set` | `odi_switch_port.c` |
 | 51 | activeBdgConn | `odi_sw_cf_add` | `odi_switch_cf.c` |
+| 53 | setMacLearnLimit | `odi_sw_l2_learn_limit_set` | `odi_switch_port.c` |
 | 62 | setAgeingTime | `odi_sw_l2_aging_set` | `odi_switch_port.c` |
+| 67 | setUniPortRate | `odi_sw_uni_police_set`, `odi_sw_uni_shape_set` | `odi_switch_port.c` |
 | 64 | setFloodingPortMask | `odi_sw_l2_flood_mask_set` | `odi_switch_port.c` |
 
 - **cmd 62**: one write of `L2_LOOKUP_SETUP`, AGE_TICKS 3000 and
@@ -389,6 +391,78 @@ commands, from the command table of the shipped binary:
   command returned 0 with nothing in `data`, so every ANI-G Test result
   reported 0 V, no light, 0 mA and 0 C, and the transaction it started
   was still running when it released `odi_i2c_lock`.
+
+### UNI limits
+
+Commands 53 and 67, and what became of the rest of the commands that used
+to be refused. omcid sends them only when the OLT provisions the matching
+attribute, so a port nobody set keeps the boot replay's state (every port
+may learn 1088 addresses, no rate). Registers read on a stick and
+checked against another open implementation's measurements of the same
+chip:
+
+| what | register | boot state read |
+|---|---|---|
+| learning limit of port p | `0x017008 + 4 * (p / 2)`, 11 bits at `11 * (p % 2)` | `0x00220440`: 1088 for ports 0 and 1 |
+| addresses port p has learned | `0x017010 + 4 * (p / 2)`, the same packing | `0x2` and `0x1` with two on the UNI, one on the PON port |
+| action past the limit | `0x01c00c`, 2 bits a port | 0, forward the frame without learning it |
+| ingress meter of port p | `0x020010 + 0x400 * p`, bits 20..2, 8 kbit/s units | `0x001ffffe`: 0x7ffff, none; bit 1 is flow control |
+| egress shaper of port p | `0x02d804 + 4 * p`, bits 19..1, 8 kbit/s units | `0x000ffffe`: 0x7ffff, none |
+| second shaper register, port 0 only | `0x02d8b8`, bits 18..0 half the rate in 16 kbit/s units, bit 19 the 2.5G override | `0x0003ffff` |
+
+- **cmd 53**, `{port, limit}`: the limit field of the port, a
+  read-modify-write (the other port of the word is kept). A limit at or past
+  the table size is "none". 0 is refused, not taken as "learn nothing": it
+  is learning off, which nobody asked for. The action register is never
+  written, so a frame from an address past the limit is still forwarded,
+  only not learned; a drop there would make the limit an outage. The PON and
+  CPU ports are refused: a limit on either would cut OMCI or the stick's
+  management.
+- **cmd 67**, `{port, dir, kbit/s}`: direction 1 (the ME 47 inbound
+  descriptor, traffic entering the bridge from the UNI) is the ingress
+  meter, direction 2 the egress shaper. The shaper of port 0 only enforces
+  its rate when `0x02d8b8` holds half of it (six rates from 8 kbit/s to
+  20 Mbit/s all ran at line rate with the first register alone, on the other
+  implementation's board), so both are written, the override bit left as it
+  is. "No limit" is exactly the reset words. A rate below 1 Mbit/s is
+  refused and the port keeps its previous one: such a descriptor is not a
+  service plan, and a limit that low would cut the host and the stick's own
+  management off, so a refusal fails open. The rate unit of the driver
+  (8 kbit/s) is the register's, so the kbit/s are divided by 8 and a rate
+  that is not a multiple is rounded down.
+- A MIB reset (cmd 0) puts back, on the ports whose limits were set, the boot
+  state; the stock stack puts the learning limit back to a global default on
+  a bridge port delete, which omcid does not recover, so the reset is where
+  the limits end.
+- **cmd 61 and ME 50.** `getBridgeTableByPort` returns the number of unicast
+  rows the L2 table holds for a port. The stock driver hands the rows
+  themselves through a mapped buffer of its character device, which a
+  netlink command cannot do, so they come through a command of ours,
+  `OMCI_BRIDGE_TBL_CMD` (0x101, `uapi/omci_bridgeport.h`): a page of 30
+  entries at a time, each the 8 bytes ME 50 carries (an information word of
+  age in seconds, learned or static, blocking; then the MAC). The age is the
+  row's 3-bit counter times the ageing time over 7, as the stock driver
+  scales it. omcid reads it on every Get of ME 50's table attribute, so the
+  OLT sees what is learned then; which port is asked follows the bridge
+  port's TP: the UNI, the CPU port for an IP host, the PON port for anything
+  else. The OLT thereby learns the MAC addresses behind the stick, which is
+  what ME 50 is for.
+- **cmd 63** is the stock driver's "the UNIs bridge to one another": it
+  rewrites the isolation masks of the UNIs, the very masks
+  [PON port isolation](#pon-port-isolation) owns. 1, which is what is
+  already true, succeeds without a write; 0 is refused.
+- **cmd 40** with a pause time of 0 (flow control off) succeeds, the host
+  port already never sends PAUSE; anything else is refused, that is the
+  operator's switch (`odi_switch.host_pause`), not the OLT's.
+- **Still refused**, each with its reason in the log line of the command:
+  34 (max frame size: the switch has two frame-length profiles, profile 1
+  is the PON port's at 2031 bytes and the host, UNI 1 and the CPU port
+  share profile 0 at 16368, so a per-UNI limit would move the CPU's), 52
+  (DSCP remap; the path from the priority to the P-bit of an upstream frame
+  is not understood), 54 and 55 (MAC filters, ACL rules; omcid does not send
+  them), 56 (S-VLAN TPID, not sent), 59 and 60 (the dot1 rate limiters, an
+  ACL rule and a meter per GEM port, not built; omcid sends them for class
+  298) and 71 (UNI QoS, not sent).
 
 ### Upstream PON queues
 

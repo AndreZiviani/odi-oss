@@ -135,6 +135,41 @@ uint32_t odi_sw_host_link_up(void);
 uint32_t odi_sw_l2_flood_mask_get(uint32_t type);
 void odi_sw_l2_flood_mask_set(uint32_t type, uint32_t mask);
 
+/* The ageing time as L2_LOOKUP_SETUP holds it, in tenths of a second (what
+ * cmd 62 wrote). A plain read, for the bridge table of ME 50.
+ */
+uint32_t odi_sw_l2_aging_ticks_get(void);
+
+/* cmd 53: how many addresses a UNI port may learn. The hardware counts per
+ * port in 11 bits, two ports a word; ODI_SW_L2_LEARN_LIMIT_NONE is what the
+ * boot replay leaves in every port (the table size, 1088), so it is also
+ * "no limit". What happens to a frame from a new address past the limit is
+ * LEARN_LIMIT_ACT (0x01c00c), 0 at reset: forward it without learning. That
+ * register is never written: a drop there would turn a limit into an
+ * outage. A read-modify-write, the other port of the word is kept. The
+ * caller holds odi_switch_lock.
+ */
+#define ODI_SW_L2_LEARN_LIMIT_NONE	1088U
+uint32_t odi_sw_l2_learn_limit_get(uint32_t port);
+void odi_sw_l2_learn_limit_set(uint32_t port, uint32_t limit);
+
+/* cmd 67: the rate of a UNI port, in units of 8 kbit/s (the unit of both
+ * registers). _police is the ingress meter of the port (frames entering
+ * from the host), _shape the egress shaper (frames leaving to the host).
+ * ODI_SW_UNI_RATE_NONE is the reset value of both, the 19-bit maximum, "no
+ * limit". The shaper of port 0 only holds if a second register carries
+ * half the value in units of 16 kbit/s (SHAPE_2G5_CFG, bits 18..0, its bit
+ * 19 the 2.5G line-rate override, left alone); _shape writes both. Both are
+ * read-modify-writes that keep the neighbouring bits (the meter's flow
+ * control bit among them). The caller holds odi_switch_lock.
+ */
+#define ODI_SW_UNI_RATE_NONE		0x7ffffU
+#define ODI_SW_UNI_RATE_UNIT_KBPS	8U
+uint32_t odi_sw_uni_police_get(uint32_t port);
+void odi_sw_uni_police_set(uint32_t port, uint32_t units);
+uint32_t odi_sw_uni_shape_get(uint32_t port);
+void odi_sw_uni_shape_set(uint32_t port, uint32_t units);
+
 /* --- odi_switch_qos.c ----------------------------------------------------- */
 
 /* cmd 23, a downstream queue: one write of PORT_QUEUE_MAP. */

@@ -14,6 +14,7 @@
  */
 #include "odi_switch_cmd.h"
 #include "odi_switch_dal.h"
+#include "odi_switch_l2.h"
 #include "odi_gpon.h"
 #include "odi_ddm.h"
 
@@ -22,6 +23,12 @@
 #include "uapi/omci_bridgeport.h"
 #include "uapi/omci_caps.h"
 #include "uapi/omci_flows.h"
+
+#ifdef __KERNEL__
+#include <linux/string.h>
+#else
+#include <string.h>
+#endif
 
 /* cmd 21: the T-CONTs, by index. The index is the Alloc-ID's row in the
  * GPON MAC's Alloc-ID CAM, because the hardware ties the two: the upstream
@@ -157,6 +164,10 @@ static int tcont_reserve(uint32_t t, uint32_t n)
 
 static const struct odi_switch_flow_ops *odi_sw_flow_ops;
 
+/* Which UNI limits (cmd 53, 67) a port carries that the boot replay did not
+ * put there, so a MIB reset puts back only those: ODI_SW_CMD_UNI_LIMIT_*. */
+static uint8_t odi_sw_uni_limit_set[ODI_SW_PORT_COUNT];
+
 void odi_switch_cmd_set_flow_ops(const struct odi_switch_flow_ops *ops)
 {
 	odi_sw_flow_ops = ops;
@@ -176,6 +187,8 @@ void odi_switch_cmd_reset_state(void)
 #ifndef __KERNEL__
 	odi_sw_host_rows_n = 0;
 #endif
+	for (i = 0; i < ODI_SW_PORT_COUNT; i++)
+		odi_sw_uni_limit_set[i] = 0;
 	odi_switch_bdgconn_reset();
 	for (i = 0; i < sizeof(odi_sw_gem_ds_used) / sizeof(odi_sw_gem_ds_used[0]); i++)
 		odi_sw_gem_ds_used[i] = 0;
@@ -357,6 +370,250 @@ static int cmd_flooding_port_mask(void *buf, uint32_t len)
 	return 0;
 }
 
+/* ---- The UNI limits OMCI provisions: learning depth, rates ---------------
+ *
+ * cmd 53 (ME 45 / ME 47 learning depth) and cmd 67 (ME 47 traffic
+ * descriptors) used to be refused, so an OLT that set them got a bridge
+ * with neither. They are applied now, and every one is a limit the OLT
+ * asked for, never a default we invent: a port nobody provisioned keeps
+ * what the boot replay left (1088 addresses, no rate). What a limit can
+ * break, and what stops it:
+ *
+ *   - only UNI ports take one. The PON port carries OMCI and the CPU port
+ *     the stick's own management, and a limit there would cut either;
+ *   - a learning limit of 0 is refused (it is learning off, not "forward
+ *     nothing") and the over-limit action is never written, so a frame from
+ *     an address past the limit is still forwarded, unlearned;
+ *   - a rate below ODI_SW_CMD67_KBPS_MIN is refused and the port keeps its
+ *     previous rate: a descriptor that small is malformed, not a service
+ *     plan, and it would cut the host (and the management path behind it)
+ *     off. Refusing fails open;
+ *   - a MIB reset puts the ports we changed back to the boot state.
+ */
+#define ODI_SW_CMD_UNI_LIMIT_LEARN	(1U << 0)
+#define ODI_SW_CMD_UNI_LIMIT_POLICE	(1U << 1)
+#define ODI_SW_CMD_UNI_LIMIT_SHAPE	(1U << 2)
+#define ODI_SW_CMD67_KBPS_MIN		1024U	/* 1 Mbit/s */
+
+static int uni_port_ok(uint32_t port)
+{
+	return port < ODI_SW_PORT_COUNT && port != ODI_SW_CMD32_PON_PORT &&
+	       port != ODI_SW_CMD32_CPU_PORT;
+}
+
+/* The boot state back on every port a limit was set on, nothing written on
+ * the rest. */
+static void uni_limits_restore(void)
+{
+	uint32_t p;
+
+	for (p = 0; p < ODI_SW_PORT_COUNT; p++) {
+		uint8_t f = odi_sw_uni_limit_set[p];
+
+		if (f & ODI_SW_CMD_UNI_LIMIT_LEARN)
+			odi_sw_l2_learn_limit_set(p, ODI_SW_L2_LEARN_LIMIT_NONE);
+		if (f & ODI_SW_CMD_UNI_LIMIT_POLICE)
+			odi_sw_uni_police_set(p, ODI_SW_UNI_RATE_NONE);
+		if (f & ODI_SW_CMD_UNI_LIMIT_SHAPE)
+			odi_sw_uni_shape_set(p, ODI_SW_UNI_RATE_NONE);
+		if (f)
+			ODI_SW_LOG("port %u: UNI limits back to the boot state\n",
+				   (unsigned int)p);
+		odi_sw_uni_limit_set[p] = 0;
+	}
+}
+
+/* cmd 53: {port, limit}, the most addresses the port may learn. */
+static int cmd_mac_learn_limit(void *buf, uint32_t len)
+{
+	struct omci_learn_limit a;
+	uint32_t limit;
+
+	if (!buf || len < sizeof(a))
+		return -1;
+	a = *(const struct omci_learn_limit *)buf;
+	if (!uni_port_ok(a.port)) {
+		ODI_SW_WARN("cmd 53: port %u refused (not a UNI port)\n",
+			    (unsigned int)a.port);
+		return ODI_SW_EOPNOTSUPP;
+	}
+	if (a.limit == 0U) {
+		ODI_SW_WARN("cmd 53: port %u limit 0 refused (it would stop learning)\n",
+			    (unsigned int)a.port);
+		return -22;
+	}
+	limit = a.limit >= OMCI_LEARN_LIMIT_TABLE ? ODI_SW_L2_LEARN_LIMIT_NONE : a.limit;
+	odi_sw_l2_learn_limit_set(a.port, limit);
+	odi_sw_uni_limit_set[a.port] |= ODI_SW_CMD_UNI_LIMIT_LEARN;
+	ODI_SW_LOG("cmd 53: port %u learns at most %u addresses\n",
+		   (unsigned int)a.port, (unsigned int)limit);
+	return 0;
+}
+
+/* cmd 67: {port, dir, kbit/s}. dir 1 is the inbound descriptor of the UNI,
+ * traffic entering the bridge from the port: the ingress meter. dir 2 is the
+ * outbound one, traffic leaving to the port: the egress shaper. */
+static int cmd_uni_rate(void *buf, uint32_t len)
+{
+	struct omci_unirate a;
+	uint32_t units;
+
+	if (!buf || len < sizeof(a))
+		return -1;
+	a = *(const struct omci_unirate *)buf;
+	if (!uni_port_ok(a.port) ||
+	    (a.dir != OMCI_UNIRATE_DIR_IN && a.dir != OMCI_UNIRATE_DIR_OUT)) {
+		ODI_SW_WARN("cmd 67: port %u dir %u refused\n",
+			    (unsigned int)a.port, (unsigned int)a.dir);
+		return ODI_SW_EOPNOTSUPP;
+	}
+	if (a.kbps >= OMCI_UNIRATE_NOLIMIT) {
+		units = ODI_SW_UNI_RATE_NONE;
+	} else if (a.kbps < ODI_SW_CMD67_KBPS_MIN) {
+		ODI_SW_WARN("cmd 67: port %u dir %u rate %u kbit/s refused (below %u)\n",
+			    (unsigned int)a.port, (unsigned int)a.dir,
+			    (unsigned int)a.kbps, ODI_SW_CMD67_KBPS_MIN);
+		return -22;
+	} else {
+		units = a.kbps / ODI_SW_UNI_RATE_UNIT_KBPS;
+	}
+	if (a.dir == OMCI_UNIRATE_DIR_IN) {
+		odi_sw_uni_police_set(a.port, units);
+		odi_sw_uni_limit_set[a.port] |= ODI_SW_CMD_UNI_LIMIT_POLICE;
+	} else {
+		odi_sw_uni_shape_set(a.port, units);
+		odi_sw_uni_limit_set[a.port] |= ODI_SW_CMD_UNI_LIMIT_SHAPE;
+	}
+	ODI_SW_LOG("cmd 67: port %u %s %s\n", (unsigned int)a.port,
+		   a.dir == OMCI_UNIRATE_DIR_IN ? "ingress" : "egress",
+		   units == ODI_SW_UNI_RATE_NONE ? "unlimited" : "limited");
+	return 0;
+}
+
+/* cmd 63: setPortBridging. The stock driver answers 1 by rewriting the
+ * isolation mask of every UNI to "the UNIs and the PON" and 0 to "the PON
+ * and the CPU". Both would replace the masks odi_sw_pon_isolate_apply()
+ * owns (PORT_ISOLATION, the CPU kept out of the PON side), so neither is
+ * written. 1 is what is already true here (the UNI and the PON forward to
+ * one another) and succeeds; 0 is refused. omcid sends 1 when a bridge
+ * service profile is deleted.
+ */
+static int cmd_port_bridging(void *buf, uint32_t len)
+{
+	if (!buf || len < sizeof(uint32_t))
+		return -1;
+	if (*(const uint32_t *)buf == 1U)
+		return 0;
+	ODI_SW_WARN("cmd 63: port bridging %u refused (the isolation masks are not OMCI's)\n",
+		    (unsigned int)*(const uint32_t *)buf);
+	return ODI_SW_EOPNOTSUPP;
+}
+
+/* cmd 40: setPauseControl {port, pause time}. A pause time of 0 turns flow
+ * control off, which is the state of the host port already (it never sends
+ * PAUSE unless odi_switch.host_pause says so, odi_sw_host_pause_apply());
+ * anything else would switch it on, and that is the operator's decision
+ * and not the OLT's: a stalled PON with it on stops the host's NIC, the
+ * reason the default is off.
+ */
+static int cmd_pause_control(void *buf, uint32_t len)
+{
+	const uint32_t *a = (const uint32_t *)buf;
+
+	if (!buf || len < 2U * sizeof(uint32_t))
+		return -1;
+	if (a[1] == 0U)
+		return 0;
+	ODI_SW_WARN("cmd 40: port %u pause time %u refused (host PAUSE is the host_pause parameter)\n",
+		    (unsigned int)a[0], (unsigned int)a[1]);
+	return ODI_SW_EOPNOTSUPP;
+}
+
+/* ---- ME 50, the bridge table: cmd 61 and OMCI_BRIDGE_TBL_CMD -------------
+ *
+ * The unicast addresses the L2 table holds for one port, in table order,
+ * walked row by row with odi_switch_l2_next() (a bounded engine handshake
+ * per row; the whole table is 1088 rows). Multicast rows belong to no port.
+ */
+#define ODI_SW_CMD61_AGE_DIV	7U	/* the age counter runs 7 .. 0 */
+
+static int bridge_tbl_walk(uint32_t port, uint32_t first, struct omci_bridge_tbl *t,
+			   uint32_t *total)
+{
+	struct odi_sw_l2_row row;
+	uint32_t idx = 0, n = 0;
+	/* Seconds an age step stands for, as the stock driver scales it:
+	 * the ageing time (tenths of a second) over the counter's 7 steps. */
+	uint32_t step = (odi_sw_l2_aging_ticks_get() / 10U) / ODI_SW_CMD61_AGE_DIV;
+
+	for (;;) {
+		int rc = odi_switch_l2_next(&idx, &row);
+
+		if (rc == ODI_SW_L2_NEXT_NONE)
+			break;
+		if (rc)
+			return rc;
+		idx++;
+		if (row.type != ODI_SW_L2_UCAST || row.port != port)
+			continue;
+		if (t && n >= first && n - first < OMCI_BRIDGE_TBL_PAGE) {
+			uint8_t *e = t->entry + (n - first) * OMCI_BRIDGE_TBL_ENTRY_LEN;
+			uint32_t age = (uint32_t)row.age * step;
+			uint16_t info = (uint16_t)(((age & 0xfffU) << 4) |
+				((row.flags & ODI_SW_L2_F_STATIC) ? 0U : (1U << 2)) |
+				((row.flags & ODI_SW_L2_F_DA_BLOCK) ? 1U : 0U));
+
+			e[0] = (uint8_t)(info >> 8);
+			e[1] = (uint8_t)info;
+			memcpy(e + 2, row.mac, 6);
+			t->count = n - first + 1U;
+		}
+		n++;
+	}
+	*total = n;
+	return 0;
+}
+
+/* cmd 61: {port, count}, the stock wrapper's shape. */
+static int cmd_bridge_tbl_port(void *buf, uint32_t len)
+{
+	struct omci_bridge_tbl_per_port *a = buf;
+	uint32_t total;
+	int rc;
+
+	if (!buf || len < sizeof(*a))
+		return -1;
+	if (a->portId >= ODI_SW_PORT_COUNT)
+		return -22;
+	rc = bridge_tbl_walk(a->portId, 0, NULL, &total);
+	if (rc)
+		return rc;
+	a->cnt = (uint16_t)(total > 0xffffU ? 0xffffU : total);
+	return 0;
+}
+
+/* OMCI_BRIDGE_TBL_CMD: one page of the entries, see uapi/omci_bridgeport.h. */
+static int cmd_bridge_tbl(void *buf, uint32_t len)
+{
+	struct omci_bridge_tbl *t = buf;
+	uint32_t port, first, total = 0;
+	int rc;
+
+	if (!buf || len < sizeof(*t))
+		return -1;
+	port = t->port;
+	first = t->first;
+	if (port >= ODI_SW_PORT_COUNT)
+		return -22;
+	memset(t->entry, 0, sizeof(t->entry));
+	t->count = 0;
+	rc = bridge_tbl_walk(port, first, t, &total);
+	if (rc)
+		return rc;
+	t->total = total;
+	return 0;
+}
+
 /* Bitmap helpers for the two flow tables. */
 static int flow_used(const uint32_t *map, uint32_t id)
 {
@@ -476,6 +733,7 @@ static int cmd_mib_reset(void *buf, uint32_t len)
 	uint32_t i, t, ord;
 
 	(void)buf; (void)len;
+	uni_limits_restore();
 	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
 		(void)us_flow_delete(i);
 	for (t = 0; t < ODI_SW_PONQ_TCONTS; t++) {
@@ -876,6 +1134,33 @@ static int cmd_stat_reset_noop(void *buf, uint32_t len)
 	return 0;
 }
 
+/* Why a command is refused, for the commands whose absence is a decision or
+ * a gap with a known cause rather than "no capture exercises it". It is the
+ * line a field log shows, so it names the command's effect. NULL: nothing
+ * more is known than that no provisioning run has sent it.
+ */
+static const char *unsupported_why(uint32_t cmd)
+{
+	switch (cmd) {
+	case 34:
+		return "max frame size: the switch has two frame-length profiles, the PON port uses one and the host and CPU ports share the other, so a per-UNI limit cannot be set without moving the CPU's";
+	case 52:
+		return "DSCP remap: not built, the path from the priority it sets to the P-bit of an upstream frame is not understood";
+	case 54:
+	case 55:
+		return "MAC filters: need ACL rules; omcid does not send them";
+	case 56:
+		return "S-VLAN TPID: omcid does not send it";
+	case 59:
+	case 60:
+		return "dot1 rate limiter: needs an ACL rule and a meter per GEM port, not built";
+	case 71:
+		return "UNI QoS: omcid does not send it";
+	default:
+		return NULL;
+	}
+}
+
 /* Logged once per command number, not once in all: ODI_SW_CMD_LOG is
  * once per call site, so the first unsupported command of a boot hid every
  * other one, and a field log could not say which commands a new OLT needs.
@@ -885,6 +1170,8 @@ static uint32_t odi_sw_unsupported_seen[ODI_SW_CMD_NUMBERS / 32U];
 
 static int cmd_unsupported(uint32_t cmd, void *buf, uint32_t len)
 {
+	const char *why;
+
 	(void)buf; (void)len;
 	if (cmd >= ODI_SW_CMD_NUMBERS) {
 		ODI_SW_WARN("cmd %u: no such command\n", (unsigned int)cmd);
@@ -892,8 +1179,12 @@ static int cmd_unsupported(uint32_t cmd, void *buf, uint32_t len)
 	}
 	if (!(odi_sw_unsupported_seen[cmd / 32U] & (1U << (cmd % 32U)))) {
 		odi_sw_unsupported_seen[cmd / 32U] |= 1U << (cmd % 32U);
-		ODI_SW_LOG("cmd %u not implemented (not exercised on isp1/isp2)\n",
-			   (unsigned int)cmd);
+		why = unsupported_why(cmd);
+		if (why)
+			ODI_SW_LOG("cmd %u not implemented (%s)\n", (unsigned int)cmd, why);
+		else
+			ODI_SW_LOG("cmd %u not implemented (not exercised on isp1/isp2)\n",
+				   (unsigned int)cmd);
 	}
 	return ODI_SW_EOPNOTSUPP;
 }
@@ -961,6 +1252,24 @@ int odi_switch_cmd(uint32_t cmd, void *buf, uint32_t len)
 
 	case OMCI_FLOWS_CMD:	/* ours: read back the cmd 25 record */
 		return cmd_flows_get(buf, len);
+
+	case OMCI_LEARN_LIMIT_CMD:	/* 53, setMacLearnLimit */
+		return cmd_mac_learn_limit(buf, len);
+
+	case OMCI_UNIRATE_CMD:	/* 67, setUniPortRate */
+		return cmd_uni_rate(buf, len);
+
+	case OMCI_PORT_BRIDGING_CMD:	/* 63, setPortBridging */
+		return cmd_port_bridging(buf, len);
+
+	case OMCI_PAUSE_CONTROL_CMD:	/* 40, setPauseControl */
+		return cmd_pause_control(buf, len);
+
+	case OMCI_BRIDGE_TBL_PORT_CMD:	/* 61, getBridgeTableByPort */
+		return cmd_bridge_tbl_port(buf, len);
+
+	case OMCI_BRIDGE_TBL_CMD:	/* ours: the addresses behind cmd 61 */
+		return cmd_bridge_tbl(buf, len);
 
 	case OMCI_RESET_US_FLOW_STAT_CMD:	/* 45, resetUsFlowStat */
 	case OMCI_RESET_DS_FLOW_STAT_CMD:	/* 47, resetDsFlowStat */

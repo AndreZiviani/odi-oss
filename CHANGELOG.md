@@ -5,6 +5,37 @@ listed here.
 
 ## Unreleased
 
+- OMCI: ME 50 (MAC bridge port bridge table data) lists the addresses the
+  switch has learned for the bridge port, read from the L2 table at every
+  Get: the host's behind a UNI port, the fibre side's behind the others,
+  each with its age, whether it was learned or is static, and whether it
+  blocks. It always answered an empty table. This is what the OLT asks ME 50
+  for, so it now sees the MAC addresses behind the stick. The table is read
+  a page at a time through a new driver command (the stock one only counts).
+
+- Switch: the MAC learning limit the OLT sets (ME 47 allowed MACs, else the
+  bridge profile's learning depth) is applied to the UNI port; the command
+  was refused, so a host could fill the 1088-row table whatever the OLT
+  asked. A frame from an address past the limit is still forwarded, only not
+  learned. A limit of 0, and any limit on the PON or CPU port, is refused.
+  The limit goes back to its boot value when the OLT resets the MIB.
+
+- Switch: the UNI rates of the OLT's traffic descriptors on a bridge port
+  (ME 47 inbound and outbound) are applied, an ingress policer and an
+  egress shaper on the UNI port, which the driver used to ignore. A rate
+  below 1 Mbit/s is refused and the port keeps the rate it had, so a
+  malformed descriptor cannot cut the host off; "no limit" is the boot
+  state. They go back to it on a MIB reset. omcid now converts a PIR of 512
+  Mbyte/s or more correctly: the conversion overflowed and gave a small
+  rate, which would now have been applied.
+
+- Switch: the driver commands that are still refused say why in their one
+  log line (max frame size, DSCP remap, MAC filters, S-VLAN TPID, the dot1
+  rate limiters, UNI QoS). Port bridging (63) set to 1 and pause control
+  (40) set to 0 succeed without a write, as both are already the state of
+  the stick; the other values are refused, because the stock effects would
+  rewrite the PON isolation masks and switch on PAUSE toward the host.
+
 - Switch: a frame that enters from the PON port with the source MAC of a
   host learned on another port is dropped and the host's row stays, where
   before it moved the host to the PON port (SA_MOVED of the PON port set to

@@ -74,8 +74,13 @@ static void mbpcd_uni_rate(uint16_t inst, int port, uint32_t dir, uint32_t tdPtr
 	u.kbps = OMCI_UNIRATE_NOLIMIT;
 	if (tdr) {
 		uint32_t pir = row_u32(tdr, td, 2);
+		/* In 64 bits: a PIR from 2^29 bytes/s up overflowed the shift
+		 * and came out as a small, wrong rate, which the driver now
+		 * applies. Anything past the vendor's "off" is no limit. */
+		uint64_t kbps = ((uint64_t)pir << 3) >> 10;
 
-		u.kbps = (pir << 3) >> 10;
+		u.kbps = kbps >= OMCI_UNIRATE_NOLIMIT ? OMCI_UNIRATE_NOLIMIT
+						      : (uint32_t)kbps;
 		if (u.kbps == 0)
 			u.kbps = OMCI_UNIRATE_NOLIMIT;
 	}
@@ -494,6 +499,84 @@ void apply_mbpcd(const struct omci_class *c, uint16_t inst,
 		mbpcd_uni_rate(inst, port, OMCI_UNIRATE_DIR_OUT,
 			       row_u32(r, c, 11));
 	return;
+}
+
+/* ------------------------------------------------ class 50, the bridge table
+ *
+ * The MAC addresses the switch holds for the port of a class 47 row, as the
+ * 8-byte entries of ME 50's table attribute. Nothing is kept here: a Get
+ * reads the switch's L2 table through the driver, one page of entries per
+ * call (omci_bridgeport.h), so the OLT sees what is learned now. The ME 50
+ * instance has the id of its port, as the stock stack creates it.
+ *
+ * Which switch port a bridge port stands for follows the stock choice: the
+ * UNI of a PPTP Ethernet UNI, the CPU port for an IP host, and the PON port
+ * for everything else (a VEIP, a mapper, a GEM IWTP). No per-VLAN split, as
+ * in the stock stack.
+ */
+#define BRIDGE_TBL_PAGES_MAX 64       /* 64 pages of 30: past any real table */
+
+static int bridge_port_of(const struct mib_row *r, const struct omci_class *c)
+{
+	switch (row_u32(r, c, 3)) {
+	case MBPCD_TP_PPTP_ETH_UNI:
+		return uni_switch_port((uint16_t)row_u32(r, c, 4), OMCI_UNI_SLOT_PPTP);
+	case MBPCD_TP_IP_HOST:
+		return (int)caps_u32(OMCI_CAPS_OFF_CPUPORT);
+	default:
+		return (int)caps_u32(OMCI_CAPS_OFF_PONPORT);
+	}
+}
+
+/* The entries of a port, appended to out; returns the bytes added. A read
+ * that fails stops with what it has: an empty or short table is a table. */
+static uint16_t bridge_port_entries(uint32_t port, uint8_t *out, uint16_t max)
+{
+	struct omci_bridge_tbl t;
+	uint16_t n = 0;
+
+	for (unsigned page = 0; page < BRIDGE_TBL_PAGES_MAX; page++) {
+		uint32_t have = n / OMCI_BRIDGE_TBL_ENTRY_LEN;
+		uint32_t take;
+
+		/* Zeroed by a volatile loop: the freestanding build has no
+		 * memset to call, and a plain loop may be turned into one. The
+		 * driver ignores the entries of a request, but the driver
+		 * trace logs the request as sent. */
+		for (volatile uint8_t *z = (volatile uint8_t *)&t;
+		     z < (volatile uint8_t *)&t + sizeof t; z++)
+			*z = 0;
+		t.port = port;
+		t.first = have;
+		if (omci_drv_call(OMCI_BRIDGE_TBL_CMD, &t, sizeof t) != 0)
+			break;
+		take = t.count;
+		if (take > OMCI_BRIDGE_TBL_PAGE)
+			take = OMCI_BRIDGE_TBL_PAGE;
+		if ((uint32_t)n + take * OMCI_BRIDGE_TBL_ENTRY_LEN > max)
+			take = (uint32_t)(max - n) / OMCI_BRIDGE_TBL_ENTRY_LEN;
+		for (uint32_t i = 0; i < take * OMCI_BRIDGE_TBL_ENTRY_LEN; i++)
+			out[n + i] = t.entry[i];
+		n = (uint16_t)(n + take * OMCI_BRIDGE_TBL_ENTRY_LEN);
+		if (take == 0 || have + take >= t.total ||
+		    n + OMCI_BRIDGE_TBL_ENTRY_LEN > max)
+			break;
+	}
+	return n;
+}
+
+uint16_t bridge_table_read(uint16_t inst, uint8_t *out, uint16_t max)
+{
+	const struct omci_class *c = find_class(OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA);
+	const struct mib_row *r = c ? mib_find(OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA, inst) : 0;
+	int port;
+
+	if (!apply_hw || !r || !caps_ok)
+		return 0;
+	port = bridge_port_of(r, c);
+	if (port < 0)
+		return 0;
+	return bridge_port_entries((uint32_t)port, out, max);
 }
 
 /* Class 47 deleted, in the order of the stock stack; the row is still in

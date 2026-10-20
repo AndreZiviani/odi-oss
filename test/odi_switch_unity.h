@@ -18,6 +18,7 @@
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_hw.h"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_tbl.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_port.c"
+#include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_l2.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_qos.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_ds_gem.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_cf.c"

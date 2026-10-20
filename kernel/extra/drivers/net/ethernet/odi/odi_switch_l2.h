@@ -211,6 +211,7 @@ int odi_switch_l2_read(uint32_t index, struct odi_sw_l2_row *row);
  * one is found, -2 (-ENOENT) when there is none left, -1 on a busy engine.
  */
 int odi_switch_l2_next(uint32_t *index, struct odi_sw_l2_row *row);
+#define ODI_SW_L2_NEXT_NONE	(-2)	/* odi_switch_l2_next(): no row left */
 
 /* Place a multicast entry through the hardware hash, or remove the entry
  * with the same key. add: 0 and *index = the row it landed on; -28

@@ -118,6 +118,26 @@ static int omci_drv_trace(uint32_t cmd, void *buf, uint32_t len)
 			return -1;
 		}
 	}
+	/* The bridge table as the kernel pages it (odi_switch_cmd.c): the UNI
+	 * holds 2 addresses, the PON port 35 (a second page), the CPU port 1,
+	 * each 02:00:00:00:<port>:<40 + index>, learned, 294 s old. */
+	if (cmd == OMCI_BRIDGE_TBL_CMD && len >= OMCI_BRIDGE_TBL_LEN) {
+		struct omci_bridge_tbl *t = (struct omci_bridge_tbl *)buf;
+		uint32_t port = t->port, first = t->first;
+		uint32_t total = port == 0 ? 2 : port == 2 ? 35 : port == 3 ? 1 : 0;
+
+		t->total = total;
+		t->count = 0;
+		for (uint32_t i = first; i < total && t->count < OMCI_BRIDGE_TBL_PAGE; i++) {
+			uint8_t *e = t->entry + t->count * OMCI_BRIDGE_TBL_ENTRY_LEN;
+
+			e[0] = 0x12; e[1] = 0x64;
+			e[2] = 0x02; e[3] = e[4] = e[5] = 0;
+			e[6] = (uint8_t)port; e[7] = (uint8_t)(0x40 + i);
+			t->count++;
+		}
+		return 0;
+	}
 	/* The DDM stub: command 10 answers a fixed SFF-8472 word per type,
 	 * after the call is logged (so the log keeps the request as sent).
 	 * Rx power 1000 (100 uW, -10 dBm), Tx power 5000 (500 uW, about
