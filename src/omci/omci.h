@@ -54,6 +54,7 @@
 #define OMCI_ERR_BAD_PARAM          3
 #define OMCI_ERR_UNKNOWN_ME     4
 #define OMCI_ERR_UNKNOWN_INST   5
+#define OMCI_ERR_INST_EXISTS    7
 #define OMCI_ERR_ATTR_FAILED    9
 
 /* Managed-entity class ids this userland names and handles, G.988 table

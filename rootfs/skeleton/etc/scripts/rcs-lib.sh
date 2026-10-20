@@ -40,6 +40,17 @@ read_proc_bounded() {
 UPTIME=${UPTIME:-/proc/uptime}
 uptime_s() { cut -d. -f1 "$UPTIME"; }
 
+# cs_value <file> <key>: the value of <key> in a config store XML file, as the
+# omcid config reader (cfgstore.c) sees it. xmlconfig writes the five XML
+# entities into every value, so a PLOAM password such as a&b is stored as
+# a&amp;b and has to be turned back before it is sent to the driver. &amp;
+# goes last, so that &amp;lt; comes out as the text &lt; and not as <.
+# Prints nothing when the key or the file is missing.
+cs_value() {
+	sed -n "s/.*Name=\"$2\" Value=\"\([^\"]*\)\".*/\1/p" "$1" 2>/dev/null | head -n 1 |
+		sed -e 's/&quot;/"/g' -e "s/&apos;/'/g" -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g'
+}
+
 # omci_reactivate <t0> <register_wait> <deact_hold>
 #
 # The tail of the hardware-proven re-provisioning sequence: wait for
@@ -77,7 +88,7 @@ omci_reactivate() {
 
 	# The PLOAM password is read here the way rcS reads it at boot (the
 	# gponpw auto step): from the CS file, hex, skipped when empty.
-	pw=$(sed -n "s/.*Name=\"GPON_PLOAM_PASSWD\" Value=\"\([^\"]*\)\".*/\1/p" "$cs" 2>/dev/null | head -n 1)
+	pw=$(cs_value "$cs" GPON_PLOAM_PASSWD)
 	[ -n "$pw" ] && { write_proc_bounded "$odi_init" "gponpw $pw" 2>/dev/null || true; }
 
 	while [ $(( $(uptime_s) - t0 )) -lt "$deact_hold" ]; do
@@ -132,7 +143,7 @@ pon_step_gponsn() {
 	pon_step "gponsn $(sed -n "s/.*Name=\"GPON_SN\" Value=\"\([^\"]*\)\".*/\1/p" /etc/config/lastgood_hs.xml 2>/dev/null | head -n 1)"
 }
 pon_step_gponpw() {
-	pw=$(sed -n "s/.*Name=\"GPON_PLOAM_PASSWD\" Value=\"\([^\"]*\)\".*/\1/p" /etc/config/lastgood.xml 2>/dev/null | head -n 1)
+	pw=$(cs_value "${CS:-/etc/config/lastgood.xml}" GPON_PLOAM_PASSWD)
 	if [ -n "$pw" ]; then
 		pon_step "gponpw $pw"
 	else

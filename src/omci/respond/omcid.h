@@ -34,6 +34,7 @@
 #define MIB_ROWS      256
 #define MIB_ROW_MAX   64
 #define OLT_ACC_CREATE 4
+#define OLT_ACC_WRITE  2
 #define PRIQ_DEFAULT_WEIGHT 1
 #define FLOW_MAX 64                      /* what this device reports, and the
 					  * ceiling on what is honoured */
@@ -199,6 +200,8 @@ extern struct mib_tblent tblpool[MIB_TBL_NODES];
 extern struct mib_row mib[MIB_ROWS];
 int attr_offset(const struct omci_class *c, unsigned k);
 uint16_t create_mask(const struct omci_class *c);
+uint16_t set_reject_mask(const struct omci_class *c, uint16_t mask);
+void retx_clear(void);
 void tbl_free(struct mib_row *r);
 int attr_is_big(const struct omci_class *c, unsigned k);
 uint16_t tbl_serialise(const struct omci_class *c, uint16_t inst, unsigned k,
@@ -259,7 +262,7 @@ void us_qos_rebuild(void);
 /* The upstream state the driver holds as omcid programmed it, one block,
  * for the resume snapshot. */
 void *qos_prog_state(uint32_t *len);
-uint16_t mib_write(struct mib_row *r, const struct omci_class *c, uint16_t mask, const uint8_t *src, uint16_t srclen);
+uint16_t mib_write(struct mib_row *r, const struct omci_class *c, uint16_t mask, uint16_t skip, const uint8_t *src, uint16_t srclen);
 /* Whether attribute k differs from what the row held before this Set. */
 int mib_changed(const struct mib_row *r, const struct omci_class *c, unsigned k);
 uint16_t attr_value(const struct omci_class *c, uint16_t inst, unsigned k, uint8_t *out);

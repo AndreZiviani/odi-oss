@@ -817,6 +817,12 @@ check "a Dir the file does not have is refused" "$got" "write failed"
 #
 # PIRs land on round numbers: (PIR << 3) >> 10, so 131072 B/s is 1024 kbit/s
 # and 65536 is 512; a reversed or missing shift gives no plausible rate.
+# Port 1 of bridge 2 was created above, and a Create of an instance that
+# exists is refused (result 7): delete it first, so the Create below is one.
+# The delete puts the rate limiters back, which the counts below start after.
+inject_wait /tmp/omcid2.log 0068460a002f0001000000000000000000000000000000000000000000000000000000000000000000000028e5daea9b
+rate0=$(grep -c 'uni port 0 dir . rate' /tmp/omcid2.log)
+nolimit0=$(grep -c 'uni port 0 dir . rate 1048568 kbit/s (td ffff)' /tmp/omcid2.log)
 for f in 0070480a002d000201800005000000000000000000000000000000000000000000000000000000000000002835d250bf \
          0072440a0118800100000000000200000000000000000000000000000000000000000000000000000000002886306c0b \
          0071440a01188002000000000001000000000000000000000000000000000000000000000000000000000028291f2f05 \
@@ -838,12 +844,12 @@ got=$(grep -o 'uni port 0 dir 2 rate 1024 kbit/s (td 8001)' /tmp/omcid2.log | he
 check "direction 2 takes the outbound one, at its own PIR" \
       "$got" "uni port 0 dir 2 rate 1024 kbit/s (td 8001)"
 got=$(grep -c 'uni port 0 dir . rate' /tmp/omcid2.log)
-check "a create sends no rate at all, only a set does" "$got" "4"
+check "a create sends no rate at all, only a set does" "$((got - rate0))" "4"
 got=$(grep -o '\[dry 47/0001\] flooding mask 1 enable 0 -> 0' /tmp/omcid2.log | head -1)
 check "the delete arm clears the flooding bit" \
       "$got" "[dry 47/0001] flooding mask 1 enable 0 -> 0"
 got=$(grep -c 'uni port 0 dir . rate 1048568 kbit/s (td ffff)' /tmp/omcid2.log)
-check "and puts both rate limiters back to no limit" "$got" "2"
+check "and puts both rate limiters back to no limit" "$((got - nolimit0))" "2"
 
 # The broadcast GEM flow, both halves. A class 266 with interworking option 6
 # names the downstream broadcast port; a class 47 whose TP points at it makes
@@ -1012,9 +1018,16 @@ check "FwdOp 0x10 (the mandatory code): one VID filter per list entry" "$got" \
       "vid-filter vid 100 pri -1
 vid-filter vid 200 pri -1"
 
+# Every Set gets a transaction id of its own, kept in a file because fwdop
+# runs in a subshell. A repeat of a frame with the same id is the OLT
+# retransmitting and is answered from the cache without running again, and
+# this suite sets the same code more than once on purpose.
+echo 0 > /tmp/fwdop-n
 fwdop() {   # fwdop <code>: Set FwdOp, wait for the rebuild, print its rules
 	n=$(wc -l < /tmp/omcid4.log)
-	$Q cli/build/omcli --inject "$(f84 0110 48 0054 0012 "4000$1")" > /dev/null 2>&1
+	i=$(( $(cat /tmp/fwdop-n) + 1 ))
+	echo "$i" > /tmp/fwdop-n
+	$Q cli/build/omcli --inject "$(f84 "$(printf '02%02x' "$i")" 48 0054 0012 "4000$1")" > /dev/null 2>&1
 	wait_for /tmp/omcid4.log 'bridge connections rebuilt' 30 "$(( $(rebuilt /tmp/omcid4.log) + 1 ))"
 	rules_since "$n"
 }

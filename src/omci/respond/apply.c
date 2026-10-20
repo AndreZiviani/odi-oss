@@ -38,6 +38,7 @@ void mib_reset_all(void)
 	uni_reset();
 	alarm_mib_reset();
 	mib_data_sync = 0;
+	retx_clear();
 	upl_total = 0;
 	/* The bridge connections were built from the MIB just thrown away.
 	 * The stock reset clears the datapath with the MIB; here the rebuild

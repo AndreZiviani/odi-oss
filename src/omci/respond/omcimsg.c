@@ -25,6 +25,91 @@ volatile int nl_fd = -1;
 
 volatile uint32_t nl_tid;
 
+/* A retransmission cache for the messages that change the MIB.
+ *
+ * The OLT repeats a request, with the same transaction id, when it has not
+ * seen the answer in time. Run again, a Set would count a second MIB data
+ * sync and a Create would answer "instance exists" to the very request that
+ * made the instance, so a repeat of a request already answered is answered
+ * with the same frame and does nothing else. The last few answers are kept,
+ * each for RETX_AGE_S seconds, which is longer than an OLT keeps retrying;
+ * a MIB reset empties it, as the OLT restarts its transaction ids there.
+ * Only an identical frame counts as a repeat: the same id carrying other
+ * contents is a new request. */
+#define RETX_SLOTS 4
+#define RETX_AGE_S 10
+
+static struct {
+	uint8_t used;
+	long at;                       /* CLOCK_MONOTONIC seconds when answered */
+	uint8_t req[40];               /* the request, header and contents */
+	uint8_t rsp[OMCI_FRAME_LEN];
+} retx[RETX_SLOTS];
+
+static unsigned retx_next;
+
+static long now_s(void)
+{
+	long s = 0, ns = 0;
+
+	if (sys_clock_gettime(CLOCK_MONOTONIC, &s, &ns) != 0)
+		return 0;
+	return s;
+}
+
+static int retx_kind(uint8_t mt)
+{
+	return mt == OMCI_MT_CREATE || mt == OMCI_MT_SET || mt == OMCI_MT_DELETE;
+}
+
+void retx_clear(void)
+{
+	for (unsigned i = 0; i < RETX_SLOTS; i++)
+		retx[i].used = 0;
+}
+
+static void emit_frame(int fd, uint32_t tid)
+{
+	uint16_t i;
+
+	if (fd < 0) {
+		/* No line side -- an injected frame on a bench, or qemu. The
+		 * answer is the thing being tested, so print it rather than
+		 * writing it to a socket that does not exist. */
+		out("-> ");
+		for (i = 0; i < OMCI_FRAME_LEN; i++)
+			out_hex(frame[i], 2);
+		out_char('\n');
+		return;
+	}
+	nl_send_frame(fd, tid, txbuf, frame, OMCI_FRAME_LEN);
+}
+
+/* Answer a repeated request with the stored answer. Returns 1 when it did. */
+static int retx_replay(int fd, uint32_t tid, const uint8_t *f)
+{
+	long t = now_s();
+
+	if (!retx_kind(OMCI_MT(f[2])))
+		return 0;
+	for (unsigned i = 0; i < RETX_SLOTS; i++) {
+		unsigned j;
+
+		if (!retx[i].used || t - retx[i].at > RETX_AGE_S)
+			continue;
+		for (j = 0; j < sizeof retx[i].req; j++)
+			if (retx[i].req[j] != f[j])
+				break;
+		if (j < sizeof retx[i].req)
+			continue;
+		for (j = 0; j < OMCI_FRAME_LEN; j++)
+			frame[j] = retx[i].rsp[j];
+		emit_frame(fd, tid);
+		return 1;
+	}
+	return 0;
+}
+
 void send_resp(int fd, uint32_t tid, const uint8_t *req,
 	       const uint8_t *contents, uint16_t clen)
 {
@@ -44,17 +129,19 @@ void send_resp(int fd, uint32_t tid, const uint8_t *req,
 		frame[8 + i] = contents[i];
 	nl_put32(frame + 40, OMCI_TRAILER);
 	nl_put32(frame + 44, omci_crc(frame, 44));
-	if (fd < 0) {
-		/* No line side -- an injected frame on a bench, or qemu. The
-		 * answer is the thing being tested, so print it rather than
-		 * writing it to a socket that does not exist. */
-		out("-> ");
+	if (retx_kind(OMCI_MT(req[2]))) {
+		/* Kept before sending, so the stored answer is the one the
+		 * OLT was given. */
+		unsigned s = retx_next++ % RETX_SLOTS;
+
+		retx[s].used = 1;
+		retx[s].at = now_s();
+		for (i = 0; i < sizeof retx[s].req; i++)
+			retx[s].req[i] = req[i];
 		for (i = 0; i < OMCI_FRAME_LEN; i++)
-			out_hex(frame[i], 2);
-		out_char('\n');
-		return;
+			retx[s].rsp[i] = frame[i];
 	}
-	nl_send_frame(fd, tid, txbuf, frame, OMCI_FRAME_LEN);
+	emit_frame(fd, tid);
 }
 
 
@@ -478,6 +565,12 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		}
 	}
 
+	/* A repeat of a request already answered gets the same answer and
+	 * changes nothing (see the cache above). */
+	if ((f[2] & OMCI_AR) && retx_replay(fd, tid, f)) {
+		out("-> retransmission, answer repeated\n");
+		return;
+	}
 	/* Before the AR check, so a request that asks for no answer is
 	 * recorded too. */
 	if (!ev_msg_known(mt))
@@ -705,11 +798,22 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		return;
 	}
 	if (mt == OMCI_MT_CREATE) {
-		struct mib_row *r = c ? mib_add(cls, inst) : 0;
+		struct mib_row *r;
 		uint16_t mask;
 
 		if (!c && fake_unknown(fd, tid, f, mt))
 			return;
+		/* G.988: a Create of an instance that exists is refused with
+		 * result 7 and changes nothing, MIB data sync included. A
+		 * repeat of one request is answered before this point, from
+		 * the retransmission cache. */
+		if (c && mib_find(cls, inst)) {
+			body[0] = OMCI_ERR_INST_EXISTS;
+			send_resp(fd, tid, f, body, 1);
+			out("-> instance exists\n");
+			return;
+		}
+		r = c ? mib_add(cls, inst) : 0;
 		if (!r) {
 			body[0] = c ? OMCI_ERR_CMD : OMCI_ERR_UNKNOWN_ME;
 			send_resp(fd, tid, f, body, 1);
@@ -723,7 +827,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * order shifts everything after it: the port id came out as
 		 * 4095 before this. */
 		mask = create_mask(c);
-		mib_write(r, c, mask, f + 8, 32);
+		mib_write(r, c, mask, 0, f + 8, 32);
 		if (cls == OMCI_ME_GEM_PORT_CTP || cls == OMCI_ME_TCONT) {
 			out_fmt("   create mask %04x raw", (long)mask);
 			for (int i = 8; i < 28; i++) {
@@ -758,28 +862,47 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	if (mt == OMCI_MT_SET) {
 		struct mib_row *r = c ? mib_add(cls, inst) : 0;
 		uint16_t mask = nl_get16(f + 8);
+		uint16_t failed = r ? set_reject_mask(c, mask) : 0;
+		int done;
 
 		if (!c && fake_unknown(fd, tid, f, mt))
 			return;
+		/* The attributes the OLT may not write (read-only, or settable
+		 * only at Create) are skipped, not stored, and named in the
+		 * answer; the rest of the Set goes through. */
 		if (r)
-			mib_write(r, c, mask, f + 10, 30);
-		body[0] = r ? OMCI_OK : OMCI_ERR_UNKNOWN_ME;
-		/* Only a Set that succeeded: the OLT counts the ones it was
-		 * told succeeded, and a refused one is not among them. Saved
-		 * before the answer, as for a Create. */
-		if (r) {
+			mib_write(r, c, mask, failed, f + 10, 30);
+		mask &= (uint16_t)~failed;
+		/* Everything but a Set that stored nothing because every
+		 * attribute it named was refused. */
+		done = r && (!failed || mask);
+		body[0] = !r ? OMCI_ERR_UNKNOWN_ME :
+			  failed ? OMCI_ERR_ATTR_FAILED : OMCI_OK;
+		/* Result 9 carries the unsupported-optional mask (none: the
+		 * model has no verified notion of it) and the failed mask. */
+		nl_put16(body + 1, 0);
+		nl_put16(body + 3, failed);
+		/* The MIB changed when any attribute was stored. The OLT
+		 * counts the Sets it was told succeeded, so a partly failed
+		 * one can leave the counts apart, which its audit finds and
+		 * resolves; a refused one changed nothing and is not counted.
+		 * Saved before the answer, as for a Create. */
+		if (done) {
 			mib_data_sync++;
 			snapshot_save();
 		}
-		send_resp(fd, tid, f, body, 1);
-		if (r)
+		send_resp(fd, tid, f, body, failed ? 5 : 1);
+		if (done)
 			ev_config_write(mt, cls, inst);
-		if (r) {
+		if (done) {
 			apply_entity(c, inst, r, mask, 0);
 			snapshot_save();
 		}
-		out_fmt("-> set mask %04x%s\n", (long)mask,
+		out_fmt("-> set mask %04x%s", (long)mask,
 			r && r->truncated ? " (row truncated)" : "");
+		if (failed)
+			out_fmt(", refused %04x (read-only or unknown)", (long)failed);
+		out_char('\n');
 		return;
 	}
 	if (mt == OMCI_MT_DELETE) {
