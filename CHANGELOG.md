@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Switch: the L2 table is emptied at every boot, after the CAM is turned on
+  and before the stick's own MACs are pinned. The table survives a warm
+  restart, so rows left by the stock firmware or an earlier image (static
+  multicast groups, the pin of a MAC that has since changed, a row in the
+  CAM) stayed until the power was cut. The unicast delete now writes the
+  row's own words instead of the key alone and checks that the row is gone,
+  because a key-only delete was measured, on the same switch, to leave a row
+  behind the CPU port; a pin that cannot be removed is logged.
+
 - `nv commit` also sets the bootloader variable `mupgrade_en` to 0, in both
   environment copies and in the same writes that set `sw_commit` (a copy
   without the variable gets it, one that already says 0 is left alone). The

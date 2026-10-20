@@ -48,6 +48,13 @@ static int model_used[MODEL_ROWS];
 static uint32_t model_last_cmd;
 static unsigned int model_cmds;
 static uint32_t model_last_wr[3];
+/* Model switches. strict: a delete removes a row only when every word but
+ * VALID agrees, as the other implementation measured on hardware (a
+ * key-only delete left a row behind the CPU port). refuse: a delete never
+ * removes anything (an engine that keeps the row).
+ */
+static int model_strict;
+static int model_refuse;
 
 static uint32_t reg(uint32_t off)
 {
@@ -122,6 +129,19 @@ static void lut_hook(uint32_t off, uint32_t val)
 			hit_row = r;
 		}
 	}
+	/* The CAM rows are searched too (CAM on: the tests that fill it). */
+	for (i = ODI_SW_L2_HASH_ROWS; i < MODEL_ROWS && !hit; i++)
+		if (model_used[i] && model_same_key(model_rows[i], wr)) {
+			hit = 1;
+			hit_row = i;
+		}
+	/* A delete word has to agree with the row it removes, VALID aside. */
+	if (hit && !(wr[2] & (1U << 13)) && is_write &&
+	    (model_refuse || (model_strict && (wr[1] != model_rows[hit_row][1] ||
+					       wr[2] != (model_rows[hit_row][2] & ~(1U << 13)))))) {
+		set_reg(ODI_SW_TABLE_STATUS_OFF, ODI_SW_TABLE_STATUS_HIT | hit_row);
+		return;
+	}
 	/* A hash lookup read, keyed from TABLE_WRITE_WORD: HIT and the row
 	 * for a present key, HIT clear for an absent one, as on the stick.
 	 */
@@ -165,6 +185,8 @@ static void model_reset(int cam_disabled)
 	memset(model_used, 0, sizeof(model_used));
 	model_cmds = 0;
 	model_last_cmd = 0;
+	model_strict = 0;
+	model_refuse = 0;
 	odi_mock_write_hook = lut_hook;
 	set_reg(ODI_SW_L2_LOOKUP_SETUP_OFF, cam_disabled ? 0x00600bb8U : 0x00400bb8U);
 }
@@ -658,6 +680,118 @@ static void test_pins_sync(void)
 	CHECK(odi_mock_locks_idle(), "locks idle after the pin syncs");
 }
 
+/* The stick's pin is a static row on the CPU port. With a model that, like
+ * the hardware another implementation measured, removes a row only when
+ * the whole delete word agrees, the old key-only word leaves it behind and
+ * the own-words delete removes it.
+ */
+static void test_ucast_del_own_words(void)
+{
+	static const uint8_t mac[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x04 };
+	uint32_t raw[3], row;
+	int found = -1;
+
+	model_reset(1);
+	model_strict = 1;
+	mutex_lock(&odi_switch_lock);
+	CHECK(odi_switch_l2_ucast_static_add(mac, 3, &row) == 0 && model_used[row], "pin placed");
+
+	/* What the driver sent before: the key alone, valid clear. */
+	CHECK(odi_switch_l2_ucast_static_encode(mac, 0, 0, raw) == 0, "key-only word");
+	{
+		unsigned int i;
+
+		for (i = 0; i < 3; i++)
+			odi_reg_write(ODI_SW_TABLE_WRITE_WORD(i), raw[i]);
+		odi_reg_write(ODI_SW_TABLE_CMD_OFF, (1U << 31) | (ODI_SW_L2_METHOD_HASH << 4) | (1U << 3));
+	}
+	CHECK(model_used[row], "model: a key-only delete leaves the row behind the CPU port");
+
+	CHECK(odi_switch_l2_ucast_del(mac, &found) == 0 && found == 1, "own-words delete reports the row found");
+	CHECK(!model_used[row], "and the row is gone");
+	CHECK(odi_switch_l2_ucast_del(mac, &found) == 0 && found == 0, "a second delete finds nothing and writes nothing");
+
+	/* An engine that keeps the row: -5, never a quiet success. */
+	CHECK(odi_switch_l2_ucast_static_add(mac, 3, &row) == 0, "pin placed again");
+	model_refuse = 1;
+	CHECK(odi_switch_l2_ucast_del(mac, &found) == -5 && model_used[row],
+	      "a row that stays is reported, not assumed gone");
+	{
+		struct odi_sw_l2_pins pinned = { 0 }, want = { 0 };
+		struct odi_sw_l2_pin_report rep;
+
+		odi_switch_l2_pins_add(&pinned, mac);
+		odi_switch_l2_pins_sync(&pinned, &want, 3, &rep);
+		CHECK(rep.removed_n == 0 && rep.stuck_n == 1 && memcmp(rep.stuck[0], mac, 6) == 0,
+		      "a pin sync names the MAC whose row did not go");
+	}
+	mutex_unlock(&odi_switch_lock);
+}
+
+/* Bring-up: whatever a previous run left, every kind of row, in the hash
+ * and in the CAM, is gone, and the report counts it.
+ */
+static void test_clean(void)
+{
+	static const uint8_t pin_a[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x04 };
+	static const uint8_t pin_b[6] = { 0x02, 0x00, 0x00, 0x00, 0x11, 0x05 };
+	static const uint8_t grp[6] = { 0x01, 0x00, 0x5e, 0x01, 0x02, 0x03 };
+	struct odi_sw_l2_mcast_req q = { .ports = 0x5, .ivl = 1, .key = 10 };
+	struct odi_sw_l2_clean_report rep;
+	uint32_t row, cam = ODI_SW_L2_HASH_ROWS + 3U, i;
+	int found = -1;
+
+	memcpy(q.mac, grp, 6);
+	model_reset(0);		/* CAM on */
+	model_strict = 1;
+	mutex_lock(&odi_switch_lock);
+	CHECK(odi_switch_l2_clean(&rep) == 0 && rep.found == 0 && rep.left == 0 && rep.passes == 1,
+	      "an empty table: nothing found, one pass");
+
+	CHECK(odi_switch_l2_ucast_static_add(pin_a, 3, &row) == 0, "static pin a");
+	CHECK(odi_switch_l2_ucast_static_add(pin_b, 3, &row) == 0, "static pin b");
+	CHECK(odi_switch_l2_mcast_add(&q, &row) == 0, "static multicast group");
+	/* A learned row (dynamic, port 0) and one in the CAM. */
+	{
+		static const uint32_t learned[3] = { 0x00000032U, 0x00000200U, 0x00002008U };
+		static const uint32_t incam[3] = { 0x0000000cU, 0x00000200U, 0x0000203eU };
+
+		memcpy(model_rows[200], learned, sizeof(learned));
+		model_used[200] = 1;
+		memcpy(model_rows[cam], incam, sizeof(incam));
+		model_used[cam] = 1;
+	}
+	CHECK(odi_switch_l2_clean(&rep) == 0, "clean runs");
+	CHECK(rep.found == 5 && rep.found_static == 3, "five rows found, three of them static");
+	CHECK(rep.left == 0 && rep.passes == 2, "none left; a second pass confirmed it");
+	for (i = 0; i < MODEL_ROWS; i++)
+		if (model_used[i])
+			break;
+	CHECK(i == MODEL_ROWS, "no row in use, the CAM included");
+	CHECK(odi_switch_l2_ucast_del(pin_a, &found) == 0 && found == 0, "the pin is gone");
+
+	/* A row the engine will not delete is counted, and the boot goes on. */
+	CHECK(odi_switch_l2_ucast_static_add(pin_a, 3, &row) == 0, "pin again");
+	model_refuse = 1;
+	CHECK(odi_switch_l2_clean(&rep) == 0 && rep.found == 1 && rep.left == 1 && rep.passes == 2,
+	      "a stubborn row: reported left after two passes");
+	mutex_unlock(&odi_switch_lock);
+	CHECK(odi_mock_locks_idle(), "locks idle after the clean");
+}
+
+static void test_clean_busy(void)
+{
+	struct odi_sw_l2_clean_report rep;
+
+	odi_mock_reset();
+	odi_mock_write_hook = NULL;
+	odi_mock.poll_stuck = 1;
+	set_reg(ODI_SW_TABLE_STATUS_OFF, ODI_SW_TABLE_STATUS_IN_PROGRESS);
+	mutex_lock(&odi_switch_lock);
+	CHECK(odi_switch_l2_clean(&rep) == -1, "a busy engine stops the clean with -1");
+	mutex_unlock(&odi_switch_lock);
+}
+
 static void test_busy(void)
 {
 	struct odi_sw_l2_row r;
@@ -723,6 +857,9 @@ int main(void)
 	test_mcast_add_del();
 	test_ucast_static_encode();
 	test_pins_sync();
+	test_ucast_del_own_words();
+	test_clean();
+	test_clean_busy();
 	test_busy();
 
 	if (failures) {
