@@ -471,6 +471,10 @@ int main(int argc, char **argv)
 			 * bookkeeping has not caught up with it yet. */
 			snapshot_save();
 		}
+		if (mcast_dirty && quiet >= 1000000 / NL_POLL_US) {
+			mcast_dirty = 0;
+			mcast_policy_export();
+		}
 		if (conn_dirty && quiet >= 1000000 / NL_POLL_US) {
 			conn_dirty = 0;
 			bdgconn_rebuild();

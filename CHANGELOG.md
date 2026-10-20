@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the multicast operations profile (ME 309) keeps all of its
+  attributes. Its row was cut at 64 bytes, so robustness, querier address,
+  query interval, maximum response time, last member query interval,
+  unauthorized join behaviour and the downstream multicast tag control were
+  never stored and every Get of them answered zero. Rows are now 96 bytes.
+  omcid also writes what the OLT provisioned for multicast (ME 281, 309,
+  310: IGMP function, timers, group limit, access control lists) to
+  `/var/run/odi-mcast.conf`, a quiet second after the last OMCI frame, for
+  the IGMP snooper to read.
+
 - OMCI: ME 50 (MAC bridge port bridge table data) lists the addresses the
   switch has learned for the bridge port, read from the L2 table at every
   Get: the host's behind a UNI port, the fibre side's behind the others,
