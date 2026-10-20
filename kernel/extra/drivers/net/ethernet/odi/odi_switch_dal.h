@@ -98,6 +98,12 @@ extern bool odi_sw_pon_isolate;
  */
 void odi_sw_pon_isolate_apply(void);
 
+/* SA_MOVED of the PON port set to "drop the frame, keep the row" (the
+ * other ports unchanged). Written after the module-load replay, which
+ * writes the register back to 0. Caller holds odi_switch_lock.
+ */
+void odi_sw_sa_moved_apply(void);
+
 /* Whether the host port runs the 1000BASE-X auto-negotiation (clause 37)
  * with the host: true (the default, what the stock image and every host
  * seen so far run) or false, the PCS forced to 1000BASE-X full duplex for a

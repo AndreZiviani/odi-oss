@@ -94,4 +94,12 @@
  */
 int odi_ddm_get(int type, uint8_t out[ODI_DDM_BUF_LEN]);
 
+/* The same, but each word is read once, byte after byte, exactly as the
+ * stock command did and as its capture is replayed in the host tests (cmd
+ * 10, odi_switch_cmd.c): odi_ddm_get() re-reads the high byte of a 16-bit
+ * word to catch a value refreshed between its two bytes, one more byte
+ * read the captured sequence does not have.
+ */
+int odi_ddm_get_stock(int type, uint8_t out[ODI_DDM_BUF_LEN]);
+
 #endif /* ODI_SW_DDM_H */

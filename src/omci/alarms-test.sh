@@ -167,6 +167,24 @@ need "$log" "^$(alarm 0107 8001 30 01)" 10
 check "the kernel's SF and SD lines: ANI-G alarms 2 and 3" \
       "$(count "$(alarm 0107 8001 30 01)")" "1"
 
+# Laser bias (ANI-G alarm 6, bit 0x02 of the first bitmap byte): the module's
+# own flags, A2h byte 112, the third field of the stub file. A temperature
+# flag (0x80) is not a bias flag and raises nothing; the bias low flag (0x04)
+# raises alarm 6, the high flag (0x08) keeps it, no flag clears it.
+n=$(count '=> ')
+printf '1000 5000 128\n' > /tmp/omcid-ddm
+sleep 3
+check "a module flag that is not about the bias raises nothing" "$(count '=> ')" "$n"
+printf '1000 5000 4\n' > /tmp/omcid-ddm
+need "$log" "^$(alarm 0107 8001 32 02)" 10
+check "the module's bias low flag: ANI-G alarm 6 joins the standing ones"       "$(count "$(alarm 0107 8001 32 02)")" "1"
+printf '1000 5000 8\n' > /tmp/omcid-ddm
+sleep 3
+check "the bias high flag instead: still raised, nothing new sent" "$(count '=> ')" "$((n + 1))"
+printf '1000 5000 0\n' > /tmp/omcid-ddm
+need "$log" "^$(alarm 0107 8001 30 03)" 10
+check "no flag: alarm 6 cleared" "$(count "$(alarm 0107 8001 30 03)")" "1"
+
 # Not O5: nothing is sent, the link goes unreported. Back in O5 the standing
 # LAN-LOS is declared; the operational state that moved meanwhile is taken
 # as it is, not sent.
@@ -177,9 +195,9 @@ printf '0\n' > /tmp/alarms-link
 sleep 3
 check "outside O5 nothing is sent" "$(count '=> ')" "$n"
 gpon 5
-need "$log" "^$(alarm 000b 0101 80 02)" 10
+need "$log" "^$(alarm 000b 0101 80 04)" 10
 check "back in O5: the standing LAN-LOS is declared" \
-      "$(count "$(alarm 000b 0101 80 02)")" "1"
+      "$(count "$(alarm 000b 0101 80 04)")" "1"
 check "and the operational state that moved outside O5 is not an AVC" \
       "$(count "$(avc 000b 0101 0400 01)")" "1"
 

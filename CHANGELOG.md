@@ -5,6 +5,59 @@ listed here.
 
 ## Unreleased
 
+- Switch: a frame that enters from the PON port with the source MAC of a
+  host learned on another port is dropped and the host's row stays, where
+  before it moved the host to the PON port (SA_MOVED of the PON port set to
+  1; it was 0 after the module-load replay). A reflected or forged frame
+  from the fibre can no longer divert traffic for a host toward the fibre.
+  The other ports keep moving a row. The L3 engine, which survives a warm
+  restart in whatever state the previous firmware left it, is turned off at
+  boot when it is on (it was already off on the sticks checked). The comment
+  at the unknown-multicast flood mask now records why the CPU is out of it
+  and what that costs if the stick ever runs IPv6 or joins a group.
+
+- Switch: the L2 table is emptied at every boot, after the CAM is turned on
+  and before the stick's own MACs are pinned. The table survives a warm
+  restart, so rows left by the stock firmware or an earlier image (static
+  multicast groups, the pin of a MAC that has since changed, a row in the
+  CAM) stayed until the power was cut. The unicast delete now writes the
+  row's own words instead of the key alone and checks that the row is gone,
+  because a key-only delete was measured, on the same switch, to leave a row
+  behind the CPU port; a pin that cannot be removed is logged.
+
+- OMCI: the ANI-G laser bias current alarm (alarm 6) is now raised, from the
+  module's own bias alarm flags (A2h byte 112, high or low). G.988 gives the
+  ANI-G no bias threshold to set, so the module's limits decide, and it
+  clears its flag itself. Driver command 10 now also answers the DDM alarm
+  selector (A2h bytes 110-117 at data[0..7]); an older driver refuses it and
+  omcid then leaves the bit alone.
+
+- Optics: a 16-bit DDM reading (temperature, supply voltage, bias current,
+  Tx power, Rx power) can no longer come back torn. The controller reads one
+  byte at a time and the module refreshes its readings on its own clock, so a
+  refresh between the two bytes gave the old high byte with the new low one:
+  a value 256 counts off (1 C of temperature, 0.5 mA of bias, 25.6 uW of Rx
+  power) for one sample. The high byte is now read once more after the word,
+  and the word is read again when it moved (three tries at most). The cost is
+  one extra byte read per DDM word, on the DDM ioctl that `diag` and the
+  exporter use; the OMCI driver command 10 keeps the stock command's exact
+  register sequence (it is replayed against a capture of it). A single multi-byte controller
+  transaction, as SFF-8472 describes, was not tried: nothing here shows how
+  the controller returns a wider read.
+
+- Documentation of a decision, no behaviour change: why TX-disable is asserted
+  in O7 only (comment at `hw_tx_gate()`), checked against G.984.3 10.2.2 and
+  Table 10-1: only O7 and O6 ask for no light, and gating O6 would cost more
+  than it protects until the MAC's own O6 behaviour is decoded.
+
+- Optics: the laser driver check at boot no longer writes the A2h page
+  select (byte 127) when it already reads the wanted page, as it does on a
+  stick at rest (page 2): the write changed nothing, cost a non-volatile
+  write and, on a part that stops answering for a while after one, risked
+  the id read that follows. When a write is needed it is now waited out by
+  reading the byte back, at most 20 times 10 ms, and a part that does not
+  answer in that time is treated as "no answer" (laser left off), as before.
+
 - GPON: BER_Interval and Key_Switching_Time are acted on and acknowledged
   only when they are addressed to this ONU or to every ONU (the standard
   allows both), and only while the ONU holds an ONU-ID. A copy addressed to
@@ -1531,7 +1584,6 @@ Read before updating:
 
 **Automated dependency bump.**
 - linux 6.18.54 -> 6.18.55
-
 
 - docs: repair text merged into CHANGELOG.md by union-resolved rebases: the
   v1.1.0 section had lost the entries of five changes merged the same

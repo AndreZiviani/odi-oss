@@ -98,12 +98,29 @@ the fields it owns. Board ports: UNI 0, PON 2, CPU 3; port 1 is unused.
   goes on. The module-load replay then writes rule 1 (pattern, mask and
   action), the only ACL row this image uses.
 
-  The L2 table is not cleared here. Whether an L2 row is in use is the
-  engine's HIT answer to a read, not a bit of the row, so nothing shows
-  that writing a row all-zero by number removes its entry; removing one
-  is a delete by key through the hash, and this driver deletes only
-  multicast keys. Learned rows age out; what an earlier image left there
-  is listed by `diag l2-table get all`.
+  The L2 table is emptied after the platform steps, from
+  `odi_switch_boot_init()` (`odi_switch_l2_clean()`): the table, the CAM
+  included, survives a warm restart, so the static groups of the stock
+  firmware, an earlier pin of a MAC that changed or a row in the CAM would
+  still be there. The CAM is turned on first (the **l2** step below),
+  because a row in the CAM is out of reach with it off. Every row the
+  engine reports in use is deleted by its own words (below), learned and
+  static, in up to two passes, and the log says what was found:
+
+      odi_switch: L2 table clean: 3 row(s) (1 static) left by the previous run removed
+
+  Learned rows come back as traffic flows, and the stick's own pins are
+  written again at the end of the boot (`odi_switch_pin_sync()`). The flush
+  (`L2_TBL_FLUSH_CTRL`, `0x017024`) is not used: it keeps static rows.
+  A row left after the second pass is logged as a warning and the boot goes
+  on.
+
+  A delete is written with the words the row itself reads back, VALID
+  cleared, not with the key alone. Another open implementation measured
+  that a hashed delete removes a row only when the rest of the word agrees,
+  and that a key-only delete left a row behind the CPU port in place; the
+  stick's pin is such a row. Multicast deletes (igmpd) still send the key
+  alone, which was checked on a stick.
 - **acl**: `ACL_PORT_ENABLE`, one bit per port. The `switch` verb clears
   every port; the stock stick reads `0x5` (UNI and PON). Two writes, one per
   port, as the stock module load makes them.
@@ -120,6 +137,12 @@ the fields it owns. Board ports: UNI 0, PON 2, CPU 3; port 1 is unused.
   `PORT_VLAN_INDEX` of ports 2 and 3 (base + 4n lands port 2 on the
   separate register at `0x013014`) and the per-port SVID (base + 4n lands
   port 2 of `PORT_SVLAN_INDEX` on `SVLAN_SETUP`).
+- **l3 off**: `L3_GLOBAL_CTRL` (0x01106c) bit 0, the L3 engine's enable,
+  cleared when set. It reads `0x4` (off) after a power-up and on a stick
+  running this image; it survives a warm restart, so a firmware that
+  enabled the engine would leave it routing. Nothing is written when the
+  bit is clear. The L3 tables are not touched: with the engine off they are
+  not read.
 - **l2**: `L2_LOOKUP_SETUP.CAM_OFF = 0` (a disable bit). The ageing fields
   of the same register belong to cmd 62. No stock reading exists.
 - **cf sweep**: every `CLS_RULE_B`, `CLS_DS_ACTION` and `CLS_US_ACTION` row
@@ -953,8 +976,14 @@ The stick's MACs are therefore static rows on the CPU port
 (`odi_switch_pin.c`, `odi_switch_l2.c`): bit 62 of an L2 row, the SDK's
 "no SA learning", is never learned over. A frame whose source hits a static
 row from another port is an "illegal port move", whose action is
-`LUT_UNMATCHED_SA_CTRL` (0x01c000, two bits a port): the boot replay sets
-"forward", and the row stays where it is. The row is the one the hardware
+`SA_MOVED` (0x01c000, two bits a port: 0 moves a learned row to the port
+the frame came in by, 1 drops the frame and leaves the row). The boot replay
+writes 0 on every port, and `odi_sw_sa_moved_apply()` sets the PON port to 1
+afterwards (`0x00000010`), leaving the others: a frame from the fibre whose
+source is a host's learned row, such as one an OLT reflects, is dropped
+instead of moving the host to the PON port, which would switch traffic for
+that host toward the fibre. A static row, as the stick's pin, is not moved
+either way (another open implementation's reading). The row is the one the hardware
 writes when it learns the stick's MAC from the CPU port (SVL, filtering id
 0, port 3, see [the L2 table readout](KERNEL.md)) plus the static bit, with
 the age non-zero as the SDK writes a static unicast row; written through
@@ -970,9 +999,13 @@ change is logged:
 
     odi_switch: 02:00:00:00:00:04 pinned to the CPU port (static row 912)
 
-Nothing removes a static row afterwards: no replay writes the L2 table,
-`L2_TBL_FLUSH_CTRL` (0x017024) is set to flush dynamic rows only and the
-flush itself (0x017028) is never started, the bridge connections of cmd 51
+The table is emptied once at the platform step, before the pins are
+written. Nothing removes a static row after that except a MAC that is no
+longer the stick's (the delete is by the row's own words, looked up again
+afterwards, and logs a warning when the row stayed): no replay writes the
+L2 table, `L2_TBL_FLUSH_CTRL` (0x017024) is set to flush dynamic rows only
+and is never started (0x017028 is read as the flush port mask, not "the
+flush itself"; claro reads 0 there), the bridge connections of cmd 51
 do not touch the table, and ageing (cmd 62) and the learning limits (the
 MAC bridge port MEs) apply to learned rows. Learning on the PON port stays
 on: in a bridge, the OLT side's MACs are learned there.

@@ -184,6 +184,38 @@ void odi_sw_pon_isolate_apply(void)
 		   (cpu & ODI_SW_ISOLATION_PON) ? " (the PON included)" : " (never the PON by lookup)");
 }
 
+/* SA_MOVED (0x01c000), two bits a port: what the switch does with a frame
+ * whose source MAC is a learned row on another port. 0 (the reset value
+ * and the stock image's) moves the row to the port the frame came in by;
+ * 1 drops the frame and leaves the row where it is. Set to 1 on the PON
+ * port only: the fibre is the far side, no host moves from the UNI to it,
+ * but a frame the OLT reflects, or one forged there, carrying a host's
+ * source MAC would otherwise move that host's row to the PON port, and
+ * traffic to the host would then be switched toward the fibre. Another open
+ * implementation measured that on a reflecting OLT (pings failed both ways
+ * until the PON port was set to 1). A static row, the stick's own pin on
+ * the CPU port, is not moved either way in that implementation's reading;
+ * this setting is a second guard, and keeps the frame itself from moving
+ * anything. The UNI and CPU ports stay at
+ * move: a host really can change port there. One read-modify-write, only
+ * when the field differs.
+ */
+#define ODI_SW_SA_MOVED_OFF		0x1c000U
+#define ODI_SW_SA_MOVED_DROP		1U
+
+void odi_sw_sa_moved_apply(void)
+{
+	uint32_t shift = 2U * ODI_SW_PON_PORT;
+	uint32_t reg = odi_reg_read(ODI_SW_SA_MOVED_OFF);
+
+	if (((reg >> shift) & 3U) != ODI_SW_SA_MOVED_DROP) {
+		reg = (reg & ~(3U << shift)) | (ODI_SW_SA_MOVED_DROP << shift);
+		odi_reg_write(ODI_SW_SA_MOVED_OFF, reg);
+	}
+	ODI_SW_LOG("SA_MOVED 0x%08x: a frame from the PON port with a source MAC learned elsewhere is dropped, the row stays\n",
+		   (unsigned int)odi_reg_read(ODI_SW_SA_MOVED_OFF));
+}
+
 bool odi_sw_host_autoneg = true;
 
 /* Only the AUTONEG bit of the PCS control word moves; speed (1000) and

@@ -66,7 +66,44 @@
 #define ODI_DDM_SFF8472_A2_LIMITS_B_OFF		24U
 #define ODI_DDM_SFF8472_A2_LIMITS_B_LEN		16U
 
-int odi_ddm_get(int type, uint8_t out[ODI_DDM_BUF_LEN])
+/* A 16-bit reading is two byte transactions on this controller, and the
+ * module refreshes it on its own clock: a carry between the two reads
+ * gives the old high byte with the new low one, off by 256 counts (1 C of
+ * temperature, 0.5 mA of bias, 25.6 uW of received power). SFF-8472 wants
+ * the word read in one sequential access, which the controller does not do
+ * (the adapter's one-byte transaction, odi_i2c_adapter.c), so the high byte
+ * is read once more after the word: if it moved, a refresh happened in the
+ * middle and the word is read again. Bounded; a high byte that still moves
+ * after the last try is returned as read, the value being a sample anyway.
+ */
+#define ODI_DDM_WORD_TRIES	3
+
+static int odi_ddm_read(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n,
+			int checked)
+{
+	unsigned int tries;
+	uint8_t msb;
+	int rc;
+
+	if (!checked || n != ODI_DDM_SFF8472_A2_FIELD_LEN || sel != ODI_I2C_SEL_A2 ||
+	    addr < ODI_DDM_SFF8472_A2_TEMPERATURE_OFF ||
+	    addr > ODI_DDM_SFF8472_A2_RX_POWER_OFF)
+		return odi_i2c_read_bytes(sel, addr, out, n);
+
+	for (tries = 0; tries < ODI_DDM_WORD_TRIES; tries++) {
+		rc = odi_i2c_read_bytes(sel, addr, out, n);
+		if (rc)
+			return rc;
+		rc = odi_i2c_read_bytes(sel, addr, &msb, 1);
+		if (rc)
+			return rc;
+		if (msb == out[0])
+			return 0;
+	}
+	return 0;
+}
+
+static int odi_ddm_get_x(int type, uint8_t out[ODI_DDM_BUF_LEN], int checked)
 {
 	uint32_t sel, addr;
 	unsigned int n, i;
@@ -127,7 +164,7 @@ int odi_ddm_get(int type, uint8_t out[ODI_DDM_BUF_LEN])
 		out[i] = 0;
 
 	{
-		int i2c_rc = odi_i2c_read_bytes(sel, addr, out, n);
+		int i2c_rc = odi_ddm_read(sel, addr, out, n, checked);
 
 		if (i2c_rc != 0) {
 #ifdef __KERNEL__
@@ -138,4 +175,14 @@ int odi_ddm_get(int type, uint8_t out[ODI_DDM_BUF_LEN])
 		}
 	}
 	return 0;
+}
+
+int odi_ddm_get(int type, uint8_t out[ODI_DDM_BUF_LEN])
+{
+	return odi_ddm_get_x(type, out, 1);
+}
+
+int odi_ddm_get_stock(int type, uint8_t out[ODI_DDM_BUF_LEN])
+{
+	return odi_ddm_get_x(type, out, 0);
 }

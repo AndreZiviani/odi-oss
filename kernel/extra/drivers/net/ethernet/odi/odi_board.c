@@ -11,11 +11,13 @@
 #include "odi_i2c.h"
 
 #ifdef __KERNEL__
+#include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/printk.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #define ODI_BOARD_LOG(fmt, ...) pr_info("odi_board: " fmt, ##__VA_ARGS__)
+#define ODI_BOARD_SLEEP_MS(ms)	msleep(ms)
 /* The GPIO data word is shared by every pin: the laser verb (process
  * context) and the O7 gate (GPON interrupt and timers) read-modify-write it.
  */
@@ -27,6 +29,7 @@ static DEFINE_SPINLOCK(odi_board_gpio_lock);
 #include <stdio.h>
 #include <string.h>
 #define ODI_BOARD_LOG(fmt, ...) printf("odi_board: " fmt, ##__VA_ARGS__)
+#define ODI_BOARD_SLEEP_MS(ms)	((void)(ms))
 #define ODI_BOARD_GPIO_LOCK(f)		((void)(f))
 #define ODI_BOARD_GPIO_UNLOCK(f)	((void)(f))
 #endif
@@ -60,8 +63,41 @@ void odi_board_laser_get(struct odi_board_laser *out)
 	*out = odi_board_laser_state;
 }
 
-/* The id byte of the laser driver behind A2h: select page 2, read byte
- * 0xa0, put the page select back. -1 when any step fails.
+/* A write to A2h byte 127 makes some laser drivers stop acknowledging for
+ * a while (another open implementation measured this on the same part),
+ * and the byte is backed by the driver's non-volatile memory, so a write
+ * that changes nothing is wear and a stall for no gain. Writes the page
+ * select only when `cur` (what it reads now) differs from `want`, then
+ * waits for it to read back as written: the read-back is also the "answers
+ * again" test. Bounded: ODI_BOARD_PAGE_TRIES reads ODI_BOARD_PAGE_WAIT_MS
+ * apart, 200 ms in all. 0, or the last error.
+ */
+#define ODI_BOARD_PAGE_TRIES		20
+#define ODI_BOARD_PAGE_WAIT_MS		10
+
+static int odi_board_select_page(uint8_t want, uint8_t cur)
+{
+	int i, rc;
+
+	if (cur == want)
+		return 0;
+	rc = odi_i2c_write_byte(ODI_I2C_SEL_A2, ODI_I2C_A2_PAGE_SELECT, want);
+	if (rc)
+		return rc;
+	for (i = 0; i < ODI_BOARD_PAGE_TRIES; i++) {
+		rc = odi_i2c_read_bytes(ODI_I2C_SEL_A2, ODI_I2C_A2_PAGE_SELECT, &cur, 1);
+		if (!rc && cur == want)
+			return 0;
+		if (!rc)
+			rc = -EIO;
+		ODI_BOARD_SLEEP_MS(ODI_BOARD_PAGE_WAIT_MS);
+	}
+	return rc;
+}
+
+/* The id byte of the laser driver behind A2h: select page 2 (when it is
+ * not already), read byte 0xa0, put the page select back. -1 when any step
+ * fails.
  */
 static int odi_board_ldd_id(void)
 {
@@ -70,11 +106,10 @@ static int odi_board_ldd_id(void)
 
 	if (odi_i2c_read_bytes(ODI_I2C_SEL_A2, ODI_I2C_A2_PAGE_SELECT, &page, 1))
 		return -1;
-	if (odi_i2c_write_byte(ODI_I2C_SEL_A2, ODI_I2C_A2_PAGE_SELECT, ODI_BOARD_LDD_ID_PAGE))
+	if (odi_board_select_page(ODI_BOARD_LDD_ID_PAGE, page))
 		return -1;
 	rc = odi_i2c_read_bytes(ODI_I2C_SEL_A2, ODI_BOARD_LDD_ID_OFF, &id, 1);
-	if (page != ODI_BOARD_LDD_ID_PAGE)
-		(void)odi_i2c_write_byte(ODI_I2C_SEL_A2, ODI_I2C_A2_PAGE_SELECT, page);
+	(void)odi_board_select_page(page, ODI_BOARD_LDD_ID_PAGE);
 	return rc ? -1 : (int)id;
 }
 
