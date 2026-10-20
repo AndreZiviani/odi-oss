@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- Switch: the downstream queues of the UNI (ME 277, the ones the OLT
+  gives a Weight) are now scheduled: a queue with Weight 2 or more is
+  weighted, at that weight, and one with 0 or 1 is strict, in the queue
+  number the OLT names in RelatedPort (a higher number is served first).
+  The stock driver ignored the weights and left all eight queues strict, so
+  what the OLT provisioned for traffic toward the host had no effect. An OLT
+  that sets nothing leaves the queues as the boot had them, the OLT's
+  MIB reset puts them back, and `odi_switch.ds_sched=N` turns it off. Which
+  queue a frame takes is not changed: downstream frames still all take queue
+  0 (every OLT seen points every GEM port at the first queue), so nothing
+  changes on the wire yet. omcid also sent every downstream queue as
+  priority 0 once the OLT had set the queue's Weight, because the row it
+  built had no RelatedPort; each now carries its own.
+
 - OMCI: ME 50 (MAC bridge port bridge table data) lists the addresses the
   switch has learned for the bridge port, read from the L2 table at every
   Get: the host's behind a UNI port, the fibre side's behind the others,

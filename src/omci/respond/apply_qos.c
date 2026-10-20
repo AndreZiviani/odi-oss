@@ -12,9 +12,18 @@
  * come from three attributes of one class 277 row: RelatedPort, Weight and
  * DropPrecedenceColourMarking. RelatedPort is two values in one word: the
  * high half names the managed entity the queue hangs off, the low half the
- * priority within it. Only the bottom three bits of the priority reach the
- * driver, reversed against the per-UNI queue count, so OMCI priority 0 is
- * driver priority 7. Word 8 is a boolean: weighted round robin.
+ * priority within it. Word 8 of the flow descriptor is a boolean: weighted
+ * round robin.
+ *
+ * Two priorities leave here, and they are not the same number. The flow
+ * descriptor's ds_prio is the stock one, the bottom three bits reversed
+ * against the per-UNI queue count (OMCI priority 0 is 7); the switch driver
+ * does not read it. Driver command 23 carries the priority as the OLT sees
+ * it, RelatedPort & 0xffff, and the driver takes that as the number of the
+ * UNI's hardware queue, the one served first being the highest: the queues
+ * an OLT gives weight 0 (strict) are the ones it names with the high
+ * priority numbers (ISP1 and claro: entities 0 and 1, priorities 7 and 6),
+ * which only makes sense if a larger number is served first.
  */
 static uint32_t caps_uni_queues(void)
 {
@@ -31,14 +40,6 @@ static uint32_t tcont_capacity(void)
 	uint32_t n = caps_u32(OMCI_CAPS_OFF_TCONTS);
 
 	return n ? n : 8;                /* no block: the conservative count */
-}
-
-/* The class 277 row a pointer names, or 0. Returns the row and the class
- * together because every caller needs both to read an attribute. */
-static struct mib_row *priq_row(uint16_t meId, const struct omci_class **cp)
-{
-	*cp = find_class(OMCI_ME_PRIORITY_QUEUE);
-	return *cp ? mib_find(OMCI_ME_PRIORITY_QUEUE, meId) : 0;
 }
 
 /* The k-th UNI managed entity: PPTP Ethernet UNIs first, then VEIPs, an
@@ -99,23 +100,48 @@ uint32_t priq_related_port(uint16_t meId)
  * weights run 4, 9, 14, 19, 24, 30, 0, 0 (PPTP downstream the mirror; VEIP
  * and reserved queues 1): that is provisioning, so it is not guessed here. */
 
+/* RelatedPort, Weight and DropPrecedenceColourMarking of a downstream
+ * queue as the OLT left them. attr_value() answers what the OLT wrote and,
+ * for an attribute it did not, the stock default: RelatedPort derived from
+ * the entity id, Weight 1, no marking. A row the OLT touched only to set
+ * the weight therefore still has its RelatedPort; reading the row raw gave
+ * 0 there, and every one of ISP1's eight queues went to the driver as
+ * priority 0. Returns 0 when the entity id is in no queue range and the OLT
+ * set no RelatedPort: nothing to send. */
+static int priq_attrs(uint16_t meId, uint32_t *rp, uint32_t *weight,
+		      uint32_t *dp)
+{
+	const struct omci_class *qc = find_class(OMCI_ME_PRIORITY_QUEUE);
+	uint8_t b[4];
+	uint16_t n;
+
+	if (!qc)
+		return 0;
+	*rp = 0;
+	n = attr_value(qc, meId, 6, b);      /* RelatedPort */
+	for (uint16_t i = 0; i < n && i < 4; i++)
+		*rp = (*rp << 8) | b[i];
+	if (!*rp)
+		return 0;
+	*weight = 0;
+	n = attr_value(qc, meId, 8, b);      /* Weight */
+	for (uint16_t i = 0; i < n && i < 4; i++)
+		*weight = (*weight << 8) | b[i];
+	*dp = 0;
+	n = attr_value(qc, meId, 16, b);     /* DropPrecedenceColourMarking */
+	for (uint16_t i = 0; i < n && i < 4; i++)
+		*dp = (*dp << 8) | b[i];
+	return 1;
+}
+
 static void ds_queue_words(struct omci_gemflow *f, uint16_t priqMeId)
 {
-	const struct omci_class *qc;
-	struct mib_row *q = priq_row(priqMeId, &qc);
-	uint32_t rp, weight;
+	uint32_t rp, weight, dp;
 	int port;
 
-	if (q) {
-		rp     = row_u32(q, qc, 6);      /* RelatedPort */
-		weight = row_u32(q, qc, 8);      /* Weight */
-		f->ds_dp_mark = row_u32(q, qc, 16);
-	} else {
-		rp     = priq_related_port(priqMeId);
-		weight = PRIQ_DEFAULT_WEIGHT;
-		if (!rp)
-			return;
-	}
+	if (!priq_attrs(priqMeId, &rp, &weight, &dp))
+		return;
+	f->ds_dp_mark = dp;
 	port   = uni_switch_port((uint16_t)(rp >> 16), OMCI_UNI_SLOT_PPTP);
 
 	f->ds_pq_pri   = rp & 0xffff;
@@ -143,31 +169,27 @@ static void ds_queue_words(struct omci_gemflow *f, uint16_t priqMeId)
  * provisioned" from "the driver refused". */
 static int priq_program(uint16_t priqMeId, struct omci_priq *out)
 {
-	const struct omci_class *qc;
-	struct mib_row *q = priq_row(priqMeId, &qc);
-	uint32_t rp, weight;
+	uint32_t rp, weight, dp;
 	int port;
 
 	if (priqMeId & 0x8000)
 		return 0;
-	if (q) {
-		rp     = row_u32(q, qc, 6);
-		weight = row_u32(q, qc, 8);
-	} else {
-		rp     = priq_related_port(priqMeId);
-		weight = PRIQ_DEFAULT_WEIGHT;
-		if (!rp)
-			return 0;
-	}
+	if (!priq_attrs(priqMeId, &rp, &weight, &dp))
+		return 0;
 	for (unsigned i = 0; i < sizeof *out / 4; i++)
 		((uint32_t *)out)[i] = 0;
 	port   = uni_switch_port((uint16_t)(rp >> 16), OMCI_UNI_SLOT_PPTP);
 
 	out->index     = (uint16_t)(rp & 0xffff);
-	out->owner     = (uint16_t)(port >= 0 ? port : 0);
+	/* A queue of a VEIP, or of anything that is not a PPTP Ethernet UNI,
+	 * names the PON port, as its flow does: the driver schedules the
+	 * UNI's queues only, and a VEIP queue left on port 0 would overwrite
+	 * the PPTP queue of the same priority. */
+	out->owner     = (uint16_t)(port >= 0 ? (uint32_t)port
+					       : caps_u32(OMCI_CAPS_OFF_PONPORT));
 	out->weight    = (uint16_t)(weight < 1 ? 1 : weight);
 	out->wrr     = (weight >= 2);
-	out->dp_mark = (uint8_t)(q ? row_u32(q, qc, 16) : 0);
+	out->dp_mark = (uint8_t)dp;
 	out->dir       = OMCI_GEMFLOW_DS;
 	return 1;
 }

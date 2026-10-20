@@ -245,6 +245,7 @@ int main(int argc, char **argv)
 
 	odi_mock_reset();
 	odi_mock_port_isolation_reset_state();
+	odi_mock_dsq_reset_state();
 	odi_switch_cmd_reset_state();
 	odi_mock_log_reads = 1;
 	odi_mock_write_hook = golden_write_hook;

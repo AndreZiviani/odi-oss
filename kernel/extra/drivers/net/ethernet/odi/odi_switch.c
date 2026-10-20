@@ -263,6 +263,16 @@ static const struct kernel_param_ops odi_switch_pon_isolate_param_ops = {
 module_param_cb(pon_isolate, &odi_switch_pon_isolate_param_ops, &odi_sw_pon_isolate, 0644);
 MODULE_PARM_DESC(pon_isolate, "never forward a frame from the PON port to the CPU, nor one from the CPU to the PON by lookup (default: yes; no leaves the port isolation open, as stock)");
 
+/* odi_switch.ds_sched: whether cmd 23 schedules the UNI's downstream queues
+ * (docs/SWITCH.md#downstream-queues): strict or weighted, and the weight,
+ * from the OLT's class 277 rows. On by default; N leaves the queues as the
+ * boot left them (all strict, weight 1), the stock driver's behaviour. Read
+ * at each cmd 23, so on the command line it covers the first provisioning,
+ * and a write to /sys/module/odi_switch/parameters/ds_sched covers the
+ * ones after it without undoing what is already programmed. */
+module_param_named(ds_sched, odi_sw_ds_sched, bool, 0644);
+MODULE_PARM_DESC(ds_sched, "schedule the UNI downstream queues (strict or weighted, the weight) from the OLT's priority queue rows (default: yes; no leaves them all strict, as stock)");
+
 /* odi_switch.host_autoneg: the 1000BASE-X auto-negotiation of the host
  * port, on (the default) or off (forced 1000BASE-X full duplex). Written to
  * /sys/module/odi_switch/parameters/host_autoneg it applies at once, one

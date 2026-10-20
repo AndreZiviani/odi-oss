@@ -365,7 +365,10 @@ commands, from the command table of the shipped binary:
   ISP1 sends, all before any T-CONT exists. The register holds a 2-bit
   group index per port, four ports: 0xd4 is the UNI on group 0, the other
   ports as the init left them, the result of the stock read-modify-write of
-  port 0 for a queue with no drop precedence marking. An upstream queue,
+  port 0 for a queue with no drop precedence marking. That word is all the
+  stock driver writes for a downstream queue; the schedule of the queue
+  (strict or weighted, the weight) is ours, on top of it:
+  [Downstream queues](#downstream-queues). An upstream queue,
   and cmd 21, 24 and the upstream side of cmd 25, are the upstream PON
   queues, below.
 - **cmd 25** downstream is the DS GEM port CAM row and its
@@ -463,6 +466,84 @@ chip:
   them), 56 (S-VLAN TPID, not sent), 59 and 60 (the dot1 rate limiters, an
   ACL rule and a meter per GEM port, not built; omcid sends them for class
   298) and 71 (UNI QoS, not sent).
+
+### Downstream queues
+
+The queues of the UNI port, toward the host: ME 277 rows whose RelatedPort
+names the UNI (entities 0..7 on a stick, priority 7 down to 0; the next
+eight, the VEIP's, are not scheduled). The OLT provisions them with Weight,
+and omcid sends each row as cmd 23, direction DS, when the OLT sets it.
+The stock driver writes `PORT_QUEUE_MAP` for it and nothing else (the same
+word for ISP1's eight rows, whatever their weights), so before this the UNI
+had all eight queues strict, weight 1, whatever the OLT asked. Registers,
+read on a stick and checked against another open implementation's
+measurements of the same chip, for port p and queue q:
+
+| what | register | boot state read |
+|---|---|---|
+| priority to queue | `0x01c0b0 + 4p`, eight 3-bit entries, priority i at bits 3i+2..3i | port 0 `0x00fac688`, the identity (the stock init writes it; the chip's reset is 0, every priority to queue 0) |
+| queue type | `0x02d85c + 4p`, bit q set = weighted | 0, all strict |
+| weight of queue 0 | `0x02d824 + 4(p/2)`, 16 bits, an odd port in bits 31..16 | 1 |
+| weight of queues 1..7 | `0x02d82c + 12p + 4((q-1)/3)`, 10 bits, three to a word | 1 |
+| weight unit | `0x02d800` bit 17 clear: bytes (set: packets) | `0x00003fff`, bytes |
+
+The scheduler serves every strict queue before any weighted one, the
+highest queue number first among the strict ones, and shares what is left
+among the weighted queues in the ratio of their weights. Two weighted queues
+split the bytes as their weights, with a granularity (fields 1 and 3 gave
+29/71 %, 4 and 12 gave 25/75 %), which is why the driver writes four times
+the OMCI weight: 255, the largest, is 1020, inside the 10 bits.
+
+What cmd 23 does with a downstream queue, after the stock write:
+
+- the queue is number `index`, the low 16 bits of RelatedPort, of the UNI
+  port `owner`. `index` of 8 or more, an owner that is the PON or CPU port
+  (omcid names the PON port for a VEIP queue, as its flow does, so that it
+  cannot overwrite a PPTP queue of the same priority) or a port that does
+  not exist: nothing is scheduled, and the call succeeds as before.
+- Weight 2 or more is weighted, at four times the weight; Weight 0 or 1 is
+  strict at the reset weight. That is the stock driver's own reading
+  (`wrr = Weight >= 2` in the descriptor it builds) and the only one the
+  hardware can express: it has no weighted queue above a strict one.
+- a register is written only when it changes, so rows at the default write
+  nothing and an OLT that provisions nothing leaves the boot state alone.
+- the port's priority map is made the identity if it is not, once, so that
+  a queue's number is the priority of the frames that reach it.
+- a MIB reset (cmd 0) puts every queue it scheduled back to strict at weight
+  1. The priority map stays as it is.
+
+Which number is served first is read from the OLT, not from a spec: the
+OLT of ISP1 (and the one on the stick this was read on) gives Weight 0 to entities 0 and 1 (priorities 7 and 6) and
+30, 24, 19, 14, 9, 4 to entities 2 to 7 (priorities 5 down to 0). Read with
+the queue number as the priority, that is two strict queues on top and then
+weighted queues whose share falls with the number, which is what such a
+template is for. The other reading (OMCI priority 0 first, so queue 7 - p)
+puts the two strict queues below the weighted ones, and the hardware serves
+strict first, so it would starve the queues the OLT gave the weights. The
+flow descriptor's `ds_prio` (cmd 25) is that other reading, the stock
+number, and the switch driver does not use it.
+
+**What this does not do: choose the queue of a frame.** The queue a frame
+takes is the one its internal priority maps to, and the switch gives a frame
+from the PON port its priority from its source weights (`0x01c0f4`): on a
+stick the port default (`0x01c0f0`, 0) is the only source with a weight for
+that port, so every downstream frame has priority 0 and takes queue 0. The
+queue pointer of a GEM port (ME 268, DsPriQPtr) is not looked at by
+anything between the GEM port and the queue; a read of the per-queue page
+counters (`0x02d038 + 4(8p + q)`, peak in bits 25..16) on a stick after
+traffic shows port 0's queue 0 and no other queue of that port used. Every
+OLT seen points all its GEM ports at entity 0, so no frame is meant for any
+other queue yet, and the schedule is in place for when one is. Steering
+(a downstream CF row per GEM port assigning the priority, or the PCP as
+a source) is not built: it changes what a frame's priority is on the path of
+all service traffic, and the weights of the sources that decide it are
+shared with the upstream direction.
+
+`odi_switch.ds_sched=N` turns the schedule off (the stock driver's
+behaviour); it is read at each cmd 23, so a write to
+`/sys/module/odi_switch/parameters/ds_sched` covers the next provisioning
+and does not undo what is programmed. `test/odi_switch_dsq_test.c` covers
+the registers and the boot golden shows the stream.
 
 ### Upstream PON queues
 

@@ -214,6 +214,26 @@ static inline void odi_mock_flood_boot_state(void)
 	odi_mock.regs[odi_mock_slot(0x1c028U)] = 0xfU;
 }
 
+/* The egress scheduler of every port as a stick reads it: every queue
+ * strict, every weight 1 (queue 0 a 16-bit field, 0x00010001 for two ports;
+ * queues 1..7 ten bits each, three to a word), the type words 0. Read on
+ * a stick running the module-load and SDK-init replays, which write none
+ * of the weights. Not logged.
+ */
+static inline void odi_mock_dsq_reset_state(void)
+{
+	uint32_t p;
+
+	odi_mock.regs[odi_mock_slot(0x2d824U)] = 0x00010001U;
+	odi_mock.regs[odi_mock_slot(0x2d828U)] = 0x00010001U;
+	for (p = 0; p < 4U; p++) {
+		odi_mock.regs[odi_mock_slot(0x2d82cU + 12U * p)] = 0x00100401U;
+		odi_mock.regs[odi_mock_slot(0x2d830U + 12U * p)] = 0x00100401U;
+		odi_mock.regs[odi_mock_slot(0x2d834U + 12U * p)] = 0x00000001U;
+		odi_mock.regs[odi_mock_slot(0x2d85cU + 4U * p)] = 0U;
+	}
+}
+
 /* The port isolation words as a stick reads them before anything writes
  * them (a register dump of a running stick, on the stock modules and on
  * ours alike): every port and extension port open to every port, two

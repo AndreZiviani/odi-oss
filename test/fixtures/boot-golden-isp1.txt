@@ -88,34 +88,70 @@ M 80000019 0
 # cmd 25: rc 0
 M 17 0
 W 1c0c0 d4
+r 1c0b0 fac688
+r 2d85c 0
+r 2d834 1
 M 80000017 0
 # cmd 23: rc 0
 M 17 0
 W 1c0c0 d4
+r 1c0b0 fac688
+r 2d85c 0
+r 2d830 100401
 M 80000017 0
 # cmd 23: rc 0
 M 17 0
 W 1c0c0 d4
+r 1c0b0 fac688
+r 2d830 100401
+W 2d830 11e001
+r 2d85c 0
+W 2d85c 20
 M 80000017 0
 # cmd 23: rc 0
 M 17 0
 W 1c0c0 d4
+r 1c0b0 fac688
+r 2d830 11e001
+W 2d830 11e060
+r 2d85c 20
+W 2d85c 30
 M 80000017 0
 # cmd 23: rc 0
 M 17 0
 W 1c0c0 d4
+r 1c0b0 fac688
+r 2d82c 100401
+W 2d82c 4c00401
+r 2d85c 30
+W 2d85c 38
 M 80000017 0
 # cmd 23: rc 0
 M 17 0
 W 1c0c0 d4
+r 1c0b0 fac688
+r 2d82c 4c00401
+W 2d82c 4c0e001
+r 2d85c 38
+W 2d85c 3c
 M 80000017 0
 # cmd 23: rc 0
 M 17 0
 W 1c0c0 d4
+r 1c0b0 fac688
+r 2d82c 4c0e001
+W 2d82c 4c0e024
+r 2d85c 3c
+W 2d85c 3e
 M 80000017 0
 # cmd 23: rc 0
 M 17 0
 W 1c0c0 d4
+r 1c0b0 fac688
+r 2d824 10001
+W 2d824 10010
+r 2d85c 3e
+W 2d85c 3f
 M 80000017 0
 # cmd 23: rc 0
 M d 0
