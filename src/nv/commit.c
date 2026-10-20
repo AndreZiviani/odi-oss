@@ -41,6 +41,26 @@ static int put(const struct env_io *io, int copy, const uint8_t *want,
 	return NVC_DONE;
 }
 
+/* What a copy must say once committed: sw_commit=<slot> and mupgrade_en=0.
+ * 1 when it already does. */
+static int done(const uint8_t *buf, uint32_t len, const char *want)
+{
+	return has(buf, len, "sw_commit", want) && has(buf, len, "mupgrade_en", "0");
+}
+
+/* Set whichever of the two is missing or different, in one rebuild, so the
+ * copy is still written (and erased) once. 0 when it does not fit. */
+static int apply(uint8_t *buf, uint32_t len, const char *want)
+{
+	if (!has(buf, len, "sw_commit", want) &&
+	    !env_set(buf, len, "sw_commit", want))
+		return 0;
+	if (!has(buf, len, "mupgrade_en", "0") &&
+	    !env_set(buf, len, "mupgrade_en", "0"))
+		return 0;
+	return 1;
+}
+
 int env_commit(const struct env_io *io, int slot, int running,
 	       struct env_commit_report *r)
 {
@@ -75,16 +95,16 @@ int env_commit(const struct env_io *io, int slot, int running,
 	if (!has(p, pn, "sw_active", want))
 		return NVC_NOT_ACTIVE;
 
-	if (!has(p, pn, "sw_commit", want)) {
-		if (!env_set(p, pn, "sw_commit", want))
+	if (!done(p, pn, want)) {
+		if (!apply(p, pn, want))
 			return NVC_NO_ROOM;
 		rc = put(io, r->primary, p, pn, NVC_WRITE_PRIMARY, NVC_VERIFY_PRIMARY);
 		if (rc != NVC_DONE)
 			return rc;
 		r->wrote_primary = 1;
 	}
-	if (!has(f, fn, "sw_commit", want)) {
-		if (!env_set(f, fn, "sw_commit", want))
+	if (!done(f, fn, want)) {
+		if (!apply(f, fn, want))
 			return NVC_NO_ROOM;
 		rc = put(io, r->fallback, f, fn, NVC_WRITE_FALLBACK, NVC_VERIFY_FALLBACK);
 		if (rc != NVC_DONE)
@@ -94,7 +114,7 @@ int env_commit(const struct env_io *io, int slot, int running,
 
 	/* Both again, from the partitions, as a reader will see them: still
 	 * both valid, the same copy still winning (env_set keeps the flags
-	 * byte), sw_commit in both, sw_active untouched. */
+	 * byte), sw_commit and mupgrade_en=0 in both, sw_active untouched. */
 	n1 = io->read(io->ctx, 1, c1);
 	n2 = io->read(io->ctx, 2, c2);
 	if (!n1 || !n2 || !env_valid(c1, n1) || !env_valid(c2, n2))
@@ -103,7 +123,7 @@ int env_commit(const struct env_io *io, int slot, int running,
 		return NVC_FINAL;
 	p  = r->primary == 1 ? c1 : c2;
 	pn = r->primary == 1 ? n1 : n2;
-	if (!has(c1, n1, "sw_commit", want) || !has(c2, n2, "sw_commit", want) ||
+	if (!done(c1, n1, want) || !done(c2, n2, want) ||
 	    !has(p, pn, "sw_active", want))
 		return NVC_FINAL;
 	return r->wrote_primary || r->wrote_fallback ? NVC_DONE : NVC_ALREADY;
@@ -118,7 +138,7 @@ const char *env_commit_msg(int rc)
 	case NVC_NOT_RUNNING:     return "that is not the slot this kernel was booted from (root= in /proc/cmdline), nothing written";
 	case NVC_NO_PAIR:         return "both environment copies must be readable and valid, nothing written";
 	case NVC_NOT_ACTIVE:      return "sw_active in the primary copy does not name that slot, nothing written";
-	case NVC_NO_ROOM:         return "sw_commit does not fit in the environment block";
+	case NVC_NO_ROOM:         return "sw_commit and mupgrade_en do not fit in the environment block";
 	case NVC_WRITE_PRIMARY:   return "the write of the primary copy failed; the fallback copy was not touched";
 	case NVC_VERIFY_PRIMARY:  return "the primary copy did not read back as written; the fallback copy was not touched";
 	case NVC_WRITE_FALLBACK:  return "the primary copy is committed and verified, the write of the fallback copy failed";

@@ -17,6 +17,19 @@
  *   - once the primary is verified, it holds the new commit and wins, so a
  *     power cut while the fallback is written loses nothing.
  *
+ * The same writes also set mupgrade_en=0. The stock bootloader ships it as 1,
+ * which makes U-Boot listen on the host link after the boot countdown for a
+ * firmware image sent by multicast and flash it, unauthenticated; anyone on
+ * the LAN side during a reboot could replace the image. Our kernel resets
+ * the chip through the watchdog and quiesces the NIC itself, so nothing
+ * relies on that listener. It rides in the copies' existing sw_commit
+ * writes: a copy that lacks the variable gets it appended, one that already
+ * says 0 is left as it is, and no extra erase cycle is spent. A copy needs
+ * a write when either variable is off, so a stick committed before this
+ * existed is fixed by running `nv commit` again. The crash argument above
+ * is unchanged: each copy is still replaced whole, and a half-applied
+ * state is only ever "old, valid copy" or "new, verified copy".
+ *
  * What it refuses, before anything is written:
  *
  *   - a slot other than 0 or 1;
@@ -47,7 +60,7 @@ struct env_io {
 
 enum env_commit_rc {
 	NVC_DONE = 0,          /* written and verified in both copies */
-	NVC_ALREADY,           /* both copies already said so; nothing written */
+	NVC_ALREADY,           /* both copies already said so (sw_commit, mupgrade_en=0); nothing written */
 	NVC_BAD_SLOT,
 	NVC_NOT_RUNNING,
 	NVC_NO_PAIR,

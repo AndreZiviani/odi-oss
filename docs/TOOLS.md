@@ -629,7 +629,7 @@ in service.
     nv getenv [name]              print one variable, or all of them
     nv setenv [-c 1|2] name value set one (in the copy that was read, or copy 1|2)
     nv fallback [name]            read the OTHER copy, the one U-Boot falls back to
-    nv commit slot                sw_commit=slot in BOTH copies, verified
+    nv commit slot                sw_commit=slot and mupgrade_en=0 in BOTH copies, verified
 
 Reads and writes the redundant environment (mtd `env` and `env2`) with a
 CRC check and no vendor library. It is what arms and commits a trial boot:
@@ -638,6 +638,11 @@ CRC check and no vendor library. It is what arms and commits a trial boot:
 needs; a power cut in that window leaves that copy invalid and U-Boot on
 the other, stale one. **Never write `sw_commit` before you have booted and
 verified a trial from the running image.**
+
+`nv commit` also sets `mupgrade_en=0`, in the same two writes. The stock
+bootloader ships it as 1, which makes it listen on the host link after the
+boot countdown for a firmware image sent by multicast and flash it with no
+authentication; 0 turns that listener off.
 
 `commit` is the commit, as one operation: `sw_commit=<slot>` into the
 primary copy (the one U-Boot boots from), read back and compared byte for

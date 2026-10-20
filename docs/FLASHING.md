@@ -171,6 +171,12 @@ primary copy; nv then prints that the fallback copy still names the old
 slot, and `nv setenv -c <copy> sw_commit <slot>` makes it agree. `nv
 commit` does both, in the safe order, and checks them.
 
+The same two writes set `mupgrade_en=0`. The stock bootloader ships it as 1
+and, after the boot countdown, listens on the host link for a firmware image
+sent by multicast and writes it to flash without any authentication, so
+anyone on the LAN side during a reboot could replace the firmware. Every
+install of this image ends in `nv commit`, so every stick gets it turned off.
+
 **Know what committing costs.** Once committed, every reset boots this
 image. An image that later crashes, hangs or fails to confirm -- next
 boot, or next month -- resets into itself again, forever: nothing on the
