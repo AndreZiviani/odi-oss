@@ -148,13 +148,13 @@ static void test_burst_overhead_length(void)
 	odi_gpon_hw_ext_burst_length(100U, 18U);
 	CHECK(boh_length() == 107U, "pre-ranged 100: 107, no longer cut to 63");
 	odi_gpon_hw_ext_burst_length(250U, 18U);
-	CHECK(boh_length() == 252U, "pre-ranged 250: cut at 252");
+	CHECK(boh_length() == 128U, "pre-ranged 250: cut at 128 in all (G.984.3 9.2.3.20)");
 
 	/* Ranged: the ranged count, kept for after O5, must not wrap past 255. */
 	odi_gpon_hw_eqd_rewrite(227172U);
 	odi_gpon_hw.eqd_applied = 1;
 	odi_gpon_hw_ext_burst_length(250U, 250U);
-	CHECK(boh_length() == 252U, "ranged 250: cut at 252, not wrapped to 1");
+	CHECK(boh_length() == 128U, "ranged 250: cut at 128, not wrapped to 1");
 	odi_gpon_hw_ext_burst_length(41U, 18U);
 	CHECK(boh_length() == 25U, "ranged 18: 25 = 0x19, as captured");
 }

@@ -177,6 +177,7 @@ test-host:
 	bash test/odi_gpon_irq_test.sh
 	bash test/odi_gpon_us_ploam_test.sh
 	bash test/odi_gpon_ds_ploam_test.sh
+	bash test/odi_gpon_dlog_test.sh
 	bash test/odi_gpon_cam_test.sh
 	bash test/odi_gpon_o7_test.sh
 	bash test/odi_gpon_los_test.sh

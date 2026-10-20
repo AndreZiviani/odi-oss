@@ -383,6 +383,159 @@ static void test_broadcast_copy_of_directed_message(void)
 	CHECK(us_sent() == tx0 + 1U, "O5: a broadcast BER_Interval is still acknowledged");
 }
 
+/* Key_Switching_Time and BER_Interval (G.984.3 9.2.3.19, 9.2.3.18: "Directed
+ * message to one ONU or all ONUs"): taken from our own ONU-ID or the
+ * broadcast, never from another ONU's copy, and only while this ONU holds
+ * an ONU-ID. ONU-ID 0 is a real ID once assigned.
+ */
+static uint32_t switch_frame_reg(void)
+{
+	return odi_mock.regs[odi_mock_slot(ODI_GPON_DSK_SWITCH_FRAME_OFF)];
+}
+
+static struct odi_gpon_ploam kst_msg(uint8_t onu_id, uint32_t superframe)
+{
+	struct odi_gpon_ploam m = ds(onu_id, ODI_GPON_DS_KEY_SWITCHING_TIME);
+
+	m.content[0] = (uint8_t)((superframe >> 24) & 0x3fU);
+	m.content[1] = (uint8_t)(superframe >> 16);
+	m.content[2] = (uint8_t)(superframe >> 8);
+	m.content[3] = (uint8_t)superframe;
+	return m;
+}
+
+static struct odi_gpon_ploam ber_msg(uint8_t onu_id, uint32_t frames)
+{
+	struct odi_gpon_ploam m = ds(onu_id, ODI_GPON_DS_BER_INTERVAL);
+
+	m.content[0] = (uint8_t)(frames >> 24);
+	m.content[1] = (uint8_t)(frames >> 16);
+	m.content[2] = (uint8_t)(frames >> 8);
+	m.content[3] = (uint8_t)frames;
+	return m;
+}
+
+static void test_kst_and_ber_addressing(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct odi_gpon_ploam m;
+	unsigned int tx0;
+
+	/* Another ONU's copy: no switch time, no REI interval, no Acknowledge. */
+	setup(&fsm);
+	fsm.state = ODI_GPON_STATE_O5;
+	fsm.onu_id = TEST_ONU_ID;
+	m = kst_msg(TEST_ONU_ID + 1U, 0x00123456U);
+	queue(&m);
+	tx0 = us_sent();
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(writes_to(ODI_GPON_DSK_SWITCH_FRAME_OFF) == 0U, "another ONU's Key_Switching_Time arms nothing");
+	CHECK(us_sent() == tx0, "another ONU's Key_Switching_Time is not acknowledged");
+
+	odi_gpon_hw_note_ber_interval(0U);
+	m = ber_msg(TEST_ONU_ID + 1U, 0x00001000U);
+	queue(&m);
+	tx0 = us_sent();
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(odi_gpon_hw_get_ber_interval_frames() == 0U, "another ONU's BER_Interval sets no interval");
+	CHECK(us_sent() == tx0, "another ONU's BER_Interval is not acknowledged");
+
+	/* Ours, then a broadcast one: both applied and acknowledged. */
+	m = kst_msg(TEST_ONU_ID, 0x00123456U);
+	queue(&m);
+	tx0 = us_sent();
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(switch_frame_reg() == 0x00123456U, "our Key_Switching_Time arms the switch");
+	CHECK(us_sent() == tx0 + 1U, "our Key_Switching_Time is acknowledged");
+	m = kst_msg(ODI_GPON_ONU_ID_BROADCAST, 0x00654321U);
+	queue(&m);
+	tx0 = us_sent();
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(switch_frame_reg() == 0x00654321U, "a broadcast Key_Switching_Time arms the switch");
+	CHECK(us_sent() == tx0 + 1U, "a broadcast Key_Switching_Time is acknowledged");
+	m = ber_msg(TEST_ONU_ID, 0x00001000U);
+	queue(&m);
+	tx0 = us_sent();
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(odi_gpon_hw_get_ber_interval_frames() == 0x1000U, "our BER_Interval sets the interval");
+	CHECK(us_sent() == tx0 + 1U, "our BER_Interval is acknowledged");
+
+	/* ONU-ID 0 assigned: its own messages count. Without an ONU-ID (O3) the
+	 * zero in fsm.onu_id is "none" and a message to ONU 0 is another ONU's.
+	 */
+	setup(&fsm);
+	fsm.state = ODI_GPON_STATE_O5;
+	fsm.onu_id = 0U;
+	m = kst_msg(0U, 0x00111111U);
+	queue(&m);
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(switch_frame_reg() == 0x00111111U, "ONU-ID 0, assigned: its Key_Switching_Time is applied");
+	setup(&fsm);
+	fsm.state = ODI_GPON_STATE_O3;
+	fsm.onu_id = 0U;
+	m = ber_msg(0U, 0x00002000U);
+	queue(&m);
+	tx0 = us_sent();
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(us_sent() == tx0, "O3, no ONU-ID: a BER_Interval to ONU 0 is not ours");
+	m = ber_msg(ODI_GPON_ONU_ID_BROADCAST, 0x00002000U);
+	queue(&m);
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(us_sent() == tx0, "O3, no ONU-ID: a broadcast BER_Interval is not acted on either");
+}
+
+static uint32_t boh_length(void)
+{
+	return ODI_GPON_USF_BURST_HDR_SETUP_LENGTH_GET(
+		odi_mock.regs[odi_mock_slot(ODI_GPON_USF_BURST_HDR_SETUP_OFF)]);
+}
+
+/* Extended_Burst_Length (G.984.3 Table 10-1, 10.2.2 b)): taken in O3 only;
+ * what O3 set is not rewritten by a copy that arrives in O4 or O5. */
+static void test_ext_burst_length_state(void)
+{
+	static const uint8_t delim[3] = { 0xab, 0x59, 0x83 };
+	struct odi_gpon_fsm fsm;
+	struct odi_gpon_ploam m;
+	uint32_t len;
+
+	setup(&fsm);
+	odi_gpon_hw_ops()->set_upstream_overhead(NULL, 32U, 0U, 0U, 0xaaU, delim, 0U, 0U);
+	fsm.state = ODI_GPON_STATE_O3;
+	m = ds(ODI_GPON_ONU_ID_BROADCAST, ODI_GPON_DS_EXT_BURST_LENGTH);
+	m.content[0] = 41U;
+	m.content[1] = 18U;
+	queue(&m);
+	odi_gpon_isr_poll(&fsm, NULL);
+	len = boh_length();
+	CHECK(len == 48U, "O3: Extended_Burst_Length sets the pre-ranged overhead (41 + 7)");
+
+	fsm.state = ODI_GPON_STATE_O5;
+	fsm.onu_id = TEST_ONU_ID;
+	poke(ODI_GPON_DSF_IRQ_EVENT_OFF, ODI_GPON_DSF_IRQ_EVENT_PLOAM_RX);
+	m.content[0] = 90U;
+	m.content[1] = 90U;
+	queue(&m);
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(boh_length() == len, "O5: a repeated Extended_Burst_Length changes nothing");
+
+	fsm.state = ODI_GPON_STATE_O4;
+	poke(ODI_GPON_DSF_IRQ_EVENT_OFF, ODI_GPON_DSF_IRQ_EVENT_PLOAM_RX);
+	queue(&m);
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(boh_length() == len, "O4: Extended_Burst_Length changes nothing");
+
+	/* The whole overhead is 128 bytes at most (9.2.3.20 note 2). */
+	setup(&fsm);
+	odi_gpon_hw_ops()->set_upstream_overhead(NULL, 32U, 0U, 0U, 0xaaU, delim, 0U, 0U);
+	fsm.state = ODI_GPON_STATE_O3;
+	m.content[0] = 200U;
+	m.content[1] = 18U;
+	queue(&m);
+	odi_gpon_isr_poll(&fsm, NULL);
+	CHECK(boh_length() == 128U, "O3: an Extended_Burst_Length past 128 bytes in all is cut at 128");
+}
+
 int main(void)
 {
 	test_three_queued_one_interrupt();
@@ -392,6 +545,8 @@ int main(void)
 	test_empty_lags_pop();
 	test_hook_per_message();
 	test_broadcast_copy_of_directed_message();
+	test_kst_and_ber_addressing();
+	test_ext_burst_length_state();
 	CHECK(odi_mock_locks_idle(), "no lock left held");
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

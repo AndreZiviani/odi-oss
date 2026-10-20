@@ -158,10 +158,63 @@ static void test_load_not_done_is_bounded(void)
 	CHECK(odi_mock_locks_idle(), "no lock left held");
 }
 
+/* A new Request_Key discards the switch time the OLT gave for the key before
+ * it (G.984.3 clause 12.4): DSK_SWITCH_FRAME is left at a superframe that
+ * has just passed, not at the old time, and the next Key_Switching_Time is
+ * written even when it repeats that old value.
+ */
+static void test_request_key_discards_switch_time(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct odi_gpon_ploam kst;
+	uint8_t key[16];
+
+	odi_mock_reset();
+	odi_gpon_hw_reset();
+	odi_gpon_fsm_init(&fsm);
+	fsm.state = ODI_GPON_STATE_O5;
+	fsm.onu_id = TEST_ONU_ID;
+	odi_mock_write_hook = capture_hook;
+
+	/* A first key, nothing waiting: the switch time register is not touched. */
+	odi_mock.regs[odi_mock_slot(ODI_GPON_DSF_SUPERFRAME_OFF)] = 0x4000U;
+	(void)request_key(&fsm, key);
+	CHECK(odi_mock.regs[odi_mock_slot(ODI_GPON_DSK_SWITCH_FRAME_OFF)] == 0U,
+	      "a first Request_Key, no switch time waiting, writes no switch time");
+
+	memset(&kst, 0, sizeof(kst));
+	kst.onu_id = TEST_ONU_ID;
+	kst.type = ODI_GPON_DS_KEY_SWITCHING_TIME;
+	kst.content[2] = 0x12U;
+	kst.content[3] = 0x34U;
+	odi_gpon_fsm_handle_event(&fsm, odi_gpon_hw_ops(), NULL, ODI_GPON_EVENT_PLOAM_RX, &kst);
+	CHECK(odi_mock.regs[odi_mock_slot(ODI_GPON_DSK_SWITCH_FRAME_OFF)] == 0x1234U,
+	      "Key_Switching_Time arms the switch");
+
+	odi_mock.regs[odi_mock_slot(ODI_GPON_DSF_SUPERFRAME_OFF)] = 0x5000U;
+	(void)request_key(&fsm, key);
+	CHECK(odi_mock.regs[odi_mock_slot(ODI_GPON_DSK_SWITCH_FRAME_OFF)] == 0x4fffU,
+	      "a new Request_Key leaves the switch time at the superframe just passed");
+
+	odi_gpon_fsm_handle_event(&fsm, odi_gpon_hw_ops(), NULL, ODI_GPON_EVENT_PLOAM_RX, &kst);
+	CHECK(odi_mock.regs[odi_mock_slot(ODI_GPON_DSK_SWITCH_FRAME_OFF)] == 0x1234U,
+	      "the next Key_Switching_Time is written, though it repeats the discarded value");
+
+	/* Counter at 0: the superframe before it is the top of the 30-bit range. */
+	odi_gpon_fsm_handle_event(&fsm, odi_gpon_hw_ops(), NULL, ODI_GPON_EVENT_PLOAM_RX, &kst);
+	odi_mock.regs[odi_mock_slot(ODI_GPON_DSF_SUPERFRAME_OFF)] = 0U;
+	(void)request_key(&fsm, key);
+	CHECK(odi_mock.regs[odi_mock_slot(ODI_GPON_DSK_SWITCH_FRAME_OFF)] == 0x3fffffffU,
+	      "just passed wraps within 30 bits");
+
+	odi_mock_write_hook = NULL;
+}
+
 int main(void)
 {
 	test_two_request_key_cycles();
 	test_load_not_done_is_bounded();
+	test_request_key_discards_switch_time();
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
 		return 1;

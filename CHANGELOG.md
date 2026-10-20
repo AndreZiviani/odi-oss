@@ -5,6 +5,30 @@ listed here.
 
 ## Unreleased
 
+- GPON: BER_Interval and Key_Switching_Time are acted on and acknowledged
+  only when they are addressed to this ONU or to every ONU (the standard
+  allows both), and only while the ONU holds an ONU-ID. A copy addressed to
+  another ONU on the same PON used to set this ONU's REI interval and its key
+  switch time, and was acknowledged under its own ID.
+
+- GPON: Extended_Burst_Length is taken only in the Serial_Number state, as
+  the standard has it. Some OLTs repeat it every few seconds for as long as
+  the ONU is up, and each copy rewrote the burst header of a running link; a
+  later copy now changes nothing. The whole burst overhead it asks for is
+  cut at 128 bytes, the standard's maximum, instead of 252.
+
+- GPON: the console lines logged for PLOAM messages (ONU state changes,
+  ranging, LOS and LOF, the first Extended_Burst_Length, an unknown message
+  type) are printed after the interrupt has finished with the PLOAM queue,
+  not between two messages. A console line takes about 10 ms, and a message
+  queued behind it used to wait that long with interrupts off. The lines and
+  their rate limit are unchanged.
+
+- GPON: a new Request_Key now moves a key switch time that was still waiting
+  to a superframe that has already passed, as the standard asks (the earlier
+  time belongs to the key being replaced). Before, the new key could be put in
+  use at the old time, before the OLT had sent a time for it.
+
 - `nv commit` also sets the bootloader variable `mupgrade_en` to 0, in both
   environment copies and in the same writes that set `sw_commit` (a copy
   without the variable gets it, one that already says 0 is left alone). The
