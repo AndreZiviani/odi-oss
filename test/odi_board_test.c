@@ -42,11 +42,21 @@
 static int fake_ldd_id = 0x6a;
 static uint8_t fake_a2_page;
 static int fake_page_writes;
+/* A part that stops acknowledging after a page-select write: this many
+ * reads fail (-ENXIO) before it answers again; fake_stall_left counts them
+ * down, fake_stall_reads is how many reads the stall has swallowed.
+ */
+static int fake_stall_after_write, fake_stall_left, fake_stall_reads;
 static int fake_i2c_read_bytes(uint32_t sel, uint32_t addr, uint8_t *out, unsigned int n)
 {
 	(void)sel;
 	if (n != 1 || fake_ldd_id < 0)
 		return -ENXIO;
+	if (fake_stall_left > 0) {
+		fake_stall_left--;
+		fake_stall_reads++;
+		return -ENXIO;
+	}
 	*out = addr == 0x7fU ? fake_a2_page :
 	       (fake_a2_page == 2U && addr == 0xa0U ? (uint8_t)fake_ldd_id : 0U);
 	return 0;
@@ -58,6 +68,7 @@ static int fake_i2c_write_byte(uint32_t sel, uint32_t addr, uint8_t val)
 		return -EPERM;
 	fake_a2_page = val;
 	fake_page_writes++;
+	fake_stall_left = fake_stall_after_write;
 	return 0;
 }
 
@@ -135,6 +146,7 @@ static void optics_setup(int ldd_id, uint8_t page)
 	fake_ldd_id = ldd_id;
 	fake_a2_page = page;
 	fake_page_writes = 0;
+	fake_stall_after_write = fake_stall_left = fake_stall_reads = 0;
 }
 
 /* Any laser driver but the GN25L95, or none answering: the I2C pins are
@@ -166,6 +178,32 @@ static void test_optics_unknown_laser_driver(void)
 	CHECK(odi_soc_mock.regs[SOC_GPIO_DIR / 4] == 0x00002004U, "unverified: GPIO 13 an output");
 }
 
+/* Page select 0 at rest: selected for the id read, put back after. A part
+ * that stalls after each write is waited for, bounded.
+ */
+static void test_optics_page_select(void)
+{
+	struct odi_board_laser l;
+
+	optics_setup(0x6a, 0U);
+	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == 0, "page 0 at rest: laser verb ok");
+	CHECK(fake_a2_page == 0U && fake_page_writes == 2, "page 0 at rest: selected 2, put back to 0");
+
+	optics_setup(0x6a, 0U);
+	fake_stall_after_write = 3;
+	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == 0, "stall after the write: waited out");
+	odi_board_laser_get(&l);
+	CHECK(l.laser_on && l.ldd_id == 0x6a && fake_a2_page == 0U, "stall after the write: id read, page restored");
+	CHECK(fake_stall_reads == 6, "stall after the write: three failed reads each way, then it answers");
+
+	optics_setup(0x6a, 0U);
+	fake_stall_after_write = 1000;
+	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == -ENODEV, "a part that never answers: refused");
+	CHECK(fake_stall_reads == 20, "a part that never answers: the wait is bounded (20 reads)");
+	odi_board_laser_get(&l);
+	CHECK(!l.laser_on && l.ldd_id == -1, "a part that never answers: laser off");
+}
+
 static void test_optics(void)
 {
 	struct odi_board_laser l;
@@ -174,7 +212,7 @@ static void test_optics(void)
 	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == 0, "optics and laser return 0");
 	odi_board_laser_get(&l);
 	CHECK(l.laser_on && l.ldd_id == 0x6a, "GN25L95: laser on");
-	CHECK(fake_a2_page == 2U && fake_page_writes == 1, "page 2 already selected: left as found, no restore write");
+	CHECK(fake_a2_page == 2U && fake_page_writes == 0, "page 2 already selected: no page-select write at all");
 	CHECK(odi_mock.log_n == 3, "optics makes three writes");
 	CHECK(odi_mock.log[0].kind == 'W' && odi_mock.log[0].addr == 0x48U &&
 	      odi_mock.log[0].val == 0x08082001U, "first PIN_GPIO_SELECT = 0x08082001");
@@ -217,6 +255,7 @@ static int run_unit_checks(void)
 	test_replay_order_and_kinds();
 	test_soc_addresses_allowlisted();
 	test_optics();
+	test_optics_page_select();
 	test_optics_unknown_laser_driver();
 	test_tx_disable();
 

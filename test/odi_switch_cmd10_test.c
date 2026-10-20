@@ -82,7 +82,7 @@ int main(void)
 		{ ODI_DDM_RX_POWER,     104, 0x0032, "rx power" },
 	};
 	static const uint32_t refused[] = {
-		ODI_DDM_VENDOR_NAME, ODI_DDM_PART_NUMBER, ODI_DDM_ALARM_STATUS, 99,
+		ODI_DDM_VENDOR_NAME, ODI_DDM_PART_NUMBER, ODI_DDM_MONITOR_TYPE, 99,
 		0x0100U | ODI_DDM_VOLTAGE,	/* the type is all four bytes, not byte 3 alone */
 	};
 	uint8_t b[CMD10_LEN];
@@ -112,6 +112,22 @@ int main(void)
 		snprintf(label, sizeof label, "%s: odi_i2c_lock released", f[i].name);
 		ok(odi_mock_locks_idle(), label);
 	}
+
+	/* The alarm and warning flags: A2h 110-117 whole, at data[0..7]. */
+	printf("cmd 10, the module alarm flags:\n");
+	for (i = 0; i < 8; i++)
+		odi_unity_sfp_a2[110 + i] = (uint8_t)(0x10 + i);
+	odi_mock_reset();
+	rc = cmd10(ODI_DDM_ALARM_STATUS, b, sizeof b);
+	for (rest_zero = 1, j = 0; j < 8; j++)
+		rest_zero &= b[4 + j] == 0x10 + j;
+	ok(rc == 0 && rest_zero, "alarm status: A2h bytes 110-117 at data[0..7]");
+	for (rest_zero = 1, j = 12; j < sizeof b; j++)
+		rest_zero &= b[j] == 0;
+	ok(rest_zero && odi_mock_locks_idle(), "alarm status: the rest of data zeroed, lock released");
+	odi_mock_reset();
+	rc = cmd10(ODI_DDM_ALARM_STATUS, b, 11);
+	ok(rc != 0 && odi_mock.log_n == 0, "alarm status: a buffer short of eight bytes: error, no write");
 
 	printf("cmd 10, refused without touching the controller:\n");
 	for (i = 0; i < sizeof refused / sizeof refused[0]; i++) {

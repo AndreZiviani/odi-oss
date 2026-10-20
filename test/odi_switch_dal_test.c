@@ -270,7 +270,7 @@ int main(int argc, char **argv)
 		odi_unity_sfp_a2[98] = 0x7c;
 		odi_unity_sfp_a2[99] = 0x25;
 		odi_mock_mark(10);
-		if (odi_ddm_get(ODI_DDM_VOLTAGE, raw) != 0 || raw[0] != 0x7c || raw[1] != 0x25) {
+		if (odi_ddm_get_stock(ODI_DDM_VOLTAGE, raw) != 0 || raw[0] != 0x7c || raw[1] != 0x25) {
 			fprintf(stderr, "odi_switch_dal_test: cmd 10 voltage read did not return A2h 98-99\n");
 			return 1;
 		}

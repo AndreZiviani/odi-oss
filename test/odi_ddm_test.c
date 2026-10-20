@@ -85,9 +85,25 @@ static const struct mock_entry m_rx_power[] = {
 static const struct mock_entry *mock_table;
 static unsigned int mock_table_n;
 
+/* A scripted run (the tear test): while script_n is not zero every read
+ * answers the next byte of the script whatever its address, and script_reads
+ * counts them. A read past the end of the script fails the test loudly.
+ */
+static const uint8_t *script;
+static unsigned int script_n, script_i, script_reads;
+
 uint8_t odi_i2c_mock_byte(uint32_t sel, uint32_t addr)
 {
 	unsigned int i;
+
+	if (script_n) {
+		script_reads++;
+		if (script_i >= script_n) {
+			fprintf(stderr, "odi_ddm_test: read past the script, addr=%u\n", addr);
+			abort();
+		}
+		return script[script_i++];
+	}
 
 	for (i = 0; i < mock_table_n; i++) {
 		if (mock_table[i].sel == sel && mock_table[i].addr == addr)
@@ -151,6 +167,62 @@ static void check_numeric(int type, const struct mock_entry *table, unsigned int
 		failures++;
 }
 
+/* A 16-bit word whose low byte carries into the high one between the two
+ * byte reads: 0x26ff then 0x2700 gives 0x26 (old) and 0x00 (new), 0x2600,
+ * 256 counts low. The high byte read once more afterwards shows the carry
+ * and the word is read again. */
+static void check_word_tear(void)
+{
+	static const uint8_t torn[] = { 0x26, 0x00, 0x27,  0x27, 0x00, 0x27 };
+	static const uint8_t stable[] = { 0x26, 0xff, 0x26 };
+	static const uint8_t churn[] = { 1, 0, 2,  3, 0, 4,  5, 0, 6 };
+	uint8_t raw[24];
+	int ok;
+
+	odi_mock_reset();
+	script = torn; script_n = sizeof torn; script_i = script_reads = 0;
+	ok = odi_ddm_get(ODI_DDM_TEMPERATURE, raw) == 0 && raw[0] == 0x27 && raw[1] == 0x00 &&
+	     script_reads == 6;
+	printf("  %-14s torn word re-read: 0x%02x%02x after %u reads  %s\n", "tear", raw[0], raw[1],
+	       script_reads, ok ? "ok" : "FAIL");
+	failures += !ok;
+
+	odi_mock_reset();
+	script = stable; script_n = sizeof stable; script_i = script_reads = 0;
+	ok = odi_ddm_get(ODI_DDM_RX_POWER, raw) == 0 && raw[0] == 0x26 && raw[1] == 0xff &&
+	     script_reads == 3;
+	printf("  %-14s steady word: one extra byte read only (%u reads)  %s\n", "no tear", script_reads,
+	       ok ? "ok" : "FAIL");
+	failures += !ok;
+
+	/* A high byte that never settles ends after three tries, not never. */
+	odi_mock_reset();
+	script = churn; script_n = sizeof churn; script_i = script_reads = 0;
+	ok = odi_ddm_get(ODI_DDM_BIAS_CURRENT, raw) == 0 && script_reads == 9;
+	printf("  %-14s unsettled word: bounded at %u reads  %s\n", "churn", script_reads, ok ? "ok" : "FAIL");
+	failures += !ok;
+
+	/* The stock variant (cmd 10) reads each word once, as captured. */
+	odi_mock_reset();
+	script = torn; script_n = sizeof torn; script_i = script_reads = 0;
+	ok = odi_ddm_get_stock(ODI_DDM_TEMPERATURE, raw) == 0 && script_reads == 2 &&
+	     raw[0] == 0x26 && raw[1] == 0x00;
+	printf("  %-14s stock read: two reads, no recheck  %s\n", "stock", ok ? "ok" : "FAIL");
+	failures += !ok;
+
+	/* Strings and the multi-byte tables are not words: no extra read. */
+	odi_mock_reset();
+	{
+		static uint8_t zeros[24];
+
+		script = zeros; script_n = sizeof zeros; script_i = script_reads = 0;
+		ok = odi_ddm_get(ODI_DDM_LIMITS_A, raw) == 0 && script_reads == 24;
+		printf("  %-14s limits table read once (%u reads)  %s\n", "not a word", script_reads, ok ? "ok" : "FAIL");
+		failures += !ok;
+	}
+	script_n = 0;
+}
+
 int main(void)
 {
 	puts("odi_ddm_get() -> ddm_format(), against the isp1 g4 DDM capture:");
@@ -195,6 +267,8 @@ int main(void)
 			printf("  %-14s refused, as expected  ok\n", "sn (99)");
 		}
 	}
+
+	check_word_tear();
 
 	printf("%s (%d failures)\n", failures ? "FAILED" : "all ok", failures);
 	return failures != 0;
