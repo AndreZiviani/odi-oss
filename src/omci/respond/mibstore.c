@@ -256,6 +256,24 @@ uint16_t create_mask(const struct omci_class *c)
 	return m;
 }
 
+/* The attributes of `mask` a Set must refuse: the ones the OLT may not write
+ * (oltAcc bit 1 clear -- read-only, or set-by-create, which only a Create
+ * carries) and the ones the class does not have at all. G.988 answers a Set
+ * that names any of them with result 9 and these bits in the failed-
+ * attributes mask. */
+uint16_t set_reject_mask(const struct omci_class *c, uint16_t mask)
+{
+	uint16_t m = 0;
+
+	for (unsigned k = 1; k <= 16; k++) {
+		if (!(mask & (1u << (16 - k))))
+			continue;
+		if (k >= c->nattr || !(c->attrs[k].oltAcc & OLT_ACC_WRITE))
+			m |= (uint16_t)(1u << (16 - k));
+	}
+	return m;
+}
+
 /* The table attributes, and the rule each one's rows follow.
  *
  * The model cannot say which attributes are tables: it records them as
@@ -736,11 +754,14 @@ int mib_count(void)
 	return n;
 }
 
-/* Write the attributes named by `mask` from `src` into the row. Returns the
- * number of bytes consumed, so a caller can tell a short frame from a full
- * one. */
+/* Write the attributes named by `mask` from `src` into the row, except the
+ * ones also in `skip`: those still take their bytes from the frame (the
+ * values of the attributes after them sit behind), but are not stored.
+ * Returns the number of bytes consumed, so a caller can tell a short frame
+ * from a full one. */
 uint16_t mib_write(struct mib_row *r, const struct omci_class *c,
-			  uint16_t mask, const uint8_t *src, uint16_t srclen)
+			  uint16_t mask, uint16_t skip, const uint8_t *src,
+			  uint16_t srclen)
 {
 	uint16_t used = 0;
 
@@ -759,6 +780,10 @@ uint16_t mib_write(struct mib_row *r, const struct omci_class *c,
 		w = attr_width(c, k);
 		if (!w || used + w > srclen)
 			break;
+		if (skip & (1u << (16 - k))) {
+			used = (uint16_t)(used + w);
+			continue;
+		}
 		off = attr_offset(c, k);
 		if (off < 0 || off + w > MIB_ROW_MAX) {
 			r->truncated = 1;

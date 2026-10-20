@@ -72,8 +72,11 @@ inst() {
 # upload <log>: the entity count a MIB upload announces
 printf '0d014d0a00020000%064d00000028%08d\n' 0 0 > /tmp/keys-upload.txt
 upload() {
+	# Wait for one more answer than the log had, or a second upload reads
+	# the first one's line before its own is written.
+	_n=$(grep -c "upload records" "$1")
 	$Q cli/build/omcli --inject-file /tmp/keys-upload.txt > /dev/null 2>&1
-	wait_count "$1" "upload records" 1 10
+	wait_count "$1" "upload records" $((_n + 1)) 10
 	sed -n 's/^-> \([0-9]*\) upload records.*/\1/p' "$1" | tail -1
 }
 
