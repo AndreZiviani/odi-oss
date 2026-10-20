@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Boot: the PLOAM password is read from the config store with its XML
+  entities undone (`a&amp;b` is sent to the driver as `a&b`), as omcid already
+  did. A password with `&`, `<`, `>`, `"` or `'` in it was sent with the
+  entity text in it and could not range.
+
+
 - OMCI build: the generated tables (`omci_autonomous.c`, `omci_defaults.c`,
   `omci_mib.c`) take their entry counts from the arrays themselves instead
   of a number the generator wrote. A table edited by hand with the old count
