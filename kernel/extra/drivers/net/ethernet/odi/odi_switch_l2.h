@@ -230,9 +230,10 @@ int odi_switch_l2_mcast_del(const struct odi_sw_l2_mcast_req *req, int *found);
  * stick's MAC would divert host-to-stick traffic upstream. A static row
  * (bit 62, the vendor's "no SA learning") is not learned over: a frame
  * whose source hits it from another port is an "illegal port move",
- * handled by LUT_UNMATCHED_SA_CTRL (0x01c000; the boot replay sets
- * "forward the frame", and the row stays). Age is written non-zero, as the
- * vendor SDK does for a static unicast row. The key is the one the
+ * handled by SA_MOVED (0x01c000, two bits a port: 0 moves a learned row to
+ * the new port, 1 drops the frame and leaves the row; see
+ * odi_switch_init_modload() for the PON port, where it is 1). Age is
+ * written non-zero, as the vendor SDK does for a static unicast row. The key is the one the
  * hardware gives the stick's MAC when it learns it from the CPU port (SVL,
  * filtering id 0, VID 0: docs/KERNEL.md), so the write lands on the
  * learned row and replaces it. docs/SWITCH.md#the-sticks-mac has why.
@@ -250,10 +251,31 @@ int odi_switch_l2_ucast_static_encode(const uint8_t mac[6], uint32_t port, int v
 
 /* Write the static row through the hash (replacing a learned row with the
  * same key), or remove the row with mac's key, learned or static. The
- * return codes are odi_switch_l2_mcast_add()'s and _del()'s.
+ * return codes are odi_switch_l2_mcast_add()'s and _del()'s; the delete
+ * writes the row's own words and looks the key up again, and answers -5
+ * when the row is still there.
  */
 int odi_switch_l2_ucast_static_add(const uint8_t mac[6], uint32_t port, uint32_t *index);
 int odi_switch_l2_ucast_del(const uint8_t mac[6], int *found);
+
+/* Every row in use deleted, the CAM included, by the row's own words.
+ * Run once at bring-up, after the CAM is on, before anything writes a row:
+ * the table survives a warm restart, so what an earlier image or the
+ * stock firmware left (static pins, multicast groups, CAM residue) is
+ * still there. *rep: rows found and how many static, passes made, rows
+ * still in use afterwards. Returns 0, or the engine error that stopped it.
+ * Caller holds odi_switch_lock.
+ */
+#define ODI_SW_L2_CLEAN_PASSES	2U
+
+struct odi_sw_l2_clean_report {
+	uint32_t found;		/* rows in use before the first deletion */
+	uint32_t found_static;	/* of those, static ones */
+	uint32_t passes;
+	uint32_t left;		/* rows in use after the last pass */
+};
+
+int odi_switch_l2_clean(struct odi_sw_l2_clean_report *rep);
 
 /* The set of pinned MACs, and the reconcile that keeps the table in step
  * with the MACs the stick uses (odi_switch_pin.c collects them). A sync
@@ -277,6 +299,8 @@ struct odi_sw_l2_pin_report {
 	uint32_t row[ODI_SW_L2_PINS_MAX];	/* per wanted MAC: the row on success */
 	uint32_t removed_n;
 	uint8_t removed[ODI_SW_L2_PINS_MAX][6];
+	uint32_t stuck_n;			/* MACs no longer wanted whose row did not go */
+	uint8_t stuck[ODI_SW_L2_PINS_MAX][6];
 };
 
 /* Adds mac to *set unless it is there already or refused; 1 when added. */

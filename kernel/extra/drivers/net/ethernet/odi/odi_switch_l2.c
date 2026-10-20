@@ -32,6 +32,7 @@
 #define ODI_SW_L2_EINVAL	(-22)
 #define ODI_SW_L2_ENOSPC	(-28)
 #define ODI_SW_L2_EBUSY		(-1)
+#define ODI_SW_L2_EIO		(-5)
 
 /* ---- Bit access over a three-word row ------------------------------- */
 
@@ -291,7 +292,13 @@ void odi_switch_l2_pins_sync(struct odi_sw_l2_pins *pinned, const struct odi_sw_
 	for (i = 0; i < pinned->n; i++) {
 		if (l2_pins_has(want, pinned->mac[i]))
 			continue;
-		(void)odi_switch_l2_ucast_del(pinned->mac[i], NULL);
+		if (odi_switch_l2_ucast_del(pinned->mac[i], NULL)) {
+			/* Still in the table, or the engine did not answer:
+			 * say so instead of reporting a removal.
+			 */
+			memcpy(rep->stuck[rep->stuck_n++], pinned->mac[i], 6);
+			continue;
+		}
 		memcpy(rep->removed[rep->removed_n++], pinned->mac[i], 6);
 	}
 
@@ -417,6 +424,26 @@ int odi_switch_l2_next(uint32_t *index, struct odi_sw_l2_row *row)
 	return ODI_SW_L2_ENOENT;
 }
 
+/* Remove the row a hash lookup just found, by its own words: read them
+ * back, clear VALID, write them through the hash. A hashed delete takes
+ * out a row only when the rest of the word agrees with it, so a key-only
+ * word (MAC, key, valid clear) can leave a row behind that differs in
+ * its port or flags, the stick's own pin on the CPU port among them
+ * (another open implementation measured exactly that for a row behind
+ * the CPU port). The words read back are the row's, so they agree.
+ * VALID (bit 77) is cleared explicitly: a row read back carries it set.
+ */
+static int l2_del_found(void)
+{
+	uint32_t own[ODI_SW_L2_WORDS], sts;
+	unsigned int i;
+
+	for (i = 0; i < ODI_SW_L2_WORDS; i++)
+		own[i] = odi_reg_read(ODI_SW_TABLE_READ_WORD(i));
+	l2_set_bits(own, L2_VALID_BIT, 1, 0);
+	return l2_access(ODI_SW_L2_METHOD_HASH, 0, 1, own, &sts);
+}
+
 int odi_switch_l2_mcast_add(const struct odi_sw_l2_mcast_req *req, uint32_t *index)
 {
 	uint32_t raw[ODI_SW_L2_WORDS], sts;
@@ -473,7 +500,12 @@ int odi_switch_l2_ucast_static_add(const uint8_t mac[6], uint32_t port, uint32_t
 	return 0;
 }
 
-/* As odi_switch_l2_mcast_del(): look the key up, write only when found. */
+
+/* As odi_switch_l2_mcast_del(): look the key up, write only when found --
+ * but the delete carries the row's own words (l2_del_found()), and the
+ * key is looked up again afterwards: a row still there is -5 (EIO), so
+ * the caller knows a stale pin is left instead of assuming it went.
+ */
 int odi_switch_l2_ucast_del(const uint8_t mac[6], int *found)
 {
 	uint32_t raw[ODI_SW_L2_WORDS], sts;
@@ -488,5 +520,62 @@ int odi_switch_l2_ucast_del(const uint8_t mac[6], int *found)
 		*found = (sts & ODI_SW_TABLE_STATUS_HIT) ? 1 : 0;
 	if (!(sts & ODI_SW_TABLE_STATUS_HIT))
 		return 0;
-	return l2_access(ODI_SW_L2_METHOD_HASH, 0, 1, raw, &sts);
+	rc = l2_del_found();
+	if (rc)
+		return rc;
+	rc = l2_access(ODI_SW_L2_METHOD_HASH, 0, 0, raw, &sts);
+	if (rc)
+		return rc;
+	return (sts & ODI_SW_TABLE_STATUS_HIT) ? ODI_SW_L2_EIO : 0;
+}
+
+/* Empty the table: every row the engine reports in use, hash rows and
+ * CAM, is deleted by its own words, learned and static, unicast and
+ * multicast. The CAM must be on first (odi_switch_platform.c): with it
+ * off a row that sits in the CAM cannot be reached and survives. A
+ * second pass picks up what the first left, then a read-only count says
+ * what is still there. Stops at the first engine error.
+ */
+int odi_switch_l2_clean(struct odi_sw_l2_clean_report *rep)
+{
+	struct odi_sw_l2_row row;
+	uint32_t i, rows = odi_switch_l2_rows();
+	unsigned int pass;
+	int rc;
+
+	memset(rep, 0, sizeof(*rep));
+	for (pass = 0; pass < ODI_SW_L2_CLEAN_PASSES; pass++) {
+		uint32_t deleted = 0;
+
+		for (i = 0; i < rows; i++) {
+			uint32_t sts;
+
+			rc = odi_switch_l2_read(i, &row);
+			if (rc)
+				return rc;
+			if (!(row.flags & ODI_SW_L2_F_VALID))
+				continue;
+			if (pass == 0) {
+				rep->found++;
+				if (row.flags & ODI_SW_L2_F_STATIC)
+					rep->found_static++;
+			}
+			l2_set_bits(row.raw, L2_VALID_BIT, 1, 0);
+			rc = l2_access(ODI_SW_L2_METHOD_HASH, 0, 1, row.raw, &sts);
+			if (rc)
+				return rc;
+			deleted++;
+		}
+		rep->passes = pass + 1U;
+		if (!deleted)
+			break;
+	}
+	for (i = 0; i < rows; i++) {
+		rc = odi_switch_l2_read(i, &row);
+		if (rc)
+			return rc;
+		if (row.flags & ODI_SW_L2_F_VALID)
+			rep->left++;
+	}
+	return 0;
 }

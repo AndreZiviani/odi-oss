@@ -13,9 +13,10 @@
  * event recomputes the whole set and odi_switch_l2_pins_sync() brings the
  * table in step (odi_switch_l2.c, host-tested). switch_init syncs once
  * more, before omcid starts, in case the first write found the engine
- * busy. Nothing we run removes a static row afterwards: no replay writes
- * the L2 table, the flush is set to dynamic rows only, and cmd 51 does not
- * touch it (docs/SWITCH.md).
+ * busy. The table is emptied once before that (odi_switch_l2_clean(), from
+ * odi_switch_boot_init()); nothing we run removes a static row afterwards:
+ * no replay writes the L2 table, the flush is set to dynamic rows only,
+ * and cmd 51 does not touch it (docs/SWITCH.md).
  *
  * Locking: the notifier runs under RTNL and takes odi_switch_lock, so the
  * order is RTNL -> odi_switch_lock; nothing under odi_switch_lock takes
@@ -70,6 +71,8 @@ void odi_switch_pin_sync(void)
 
 	for (i = 0; i < rep.removed_n; i++)
 		pr_info(DRV_NAME ": %pM no longer the stick's: static row removed\n", rep.removed[i]);
+	for (i = 0; i < rep.stuck_n; i++)
+		pr_warn(DRV_NAME ": %pM no longer the stick's, but its static row did not go\n", rep.stuck[i]);
 	for (i = 0; i < want.n; i++) {
 		if (rep.failed & (1U << i))
 			pr_warn(DRV_NAME ": could not pin %pM to the CPU port (%d); tried again at the next address change and at switch_init\n",

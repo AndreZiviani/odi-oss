@@ -199,6 +199,27 @@ static void odi_switch_platform_vlan(void)
 	odi_reg_write(ODI_SW_SVLAN_SETUP_OFF, reg);
 }
 
+/* The L3 engine off. L3_GLOBAL_CTRL (0x01106c) reads 0x4 after a power-up,
+ * bit 0 clear: the engine does not route. Its state survives a warm
+ * restart like the L2 table does, so a firmware that enabled it leaves it
+ * enabled, and with bit 0 set the switch would send frames addressed to its
+ * own L3 interface MACs through tables that hold arbitrary words after
+ * power-up. This image is a bridge and never programs them. Only bit 0 is
+ * touched, and nothing is written when it is already clear.
+ */
+#define ODI_SW_L3_GLOBAL_CTRL_OFF	0x1106cU
+#define ODI_SW_L3_GLOBAL_CTRL_ENABLE	1U
+
+static void odi_switch_platform_l3_off(void)
+{
+	uint32_t reg = odi_reg_read(ODI_SW_L3_GLOBAL_CTRL_OFF);
+
+	if (!(reg & ODI_SW_L3_GLOBAL_CTRL_ENABLE))
+		return;
+	ODI_SW_LOG("L3 engine was enabled (L3_GLOBAL_CTRL 0x%08x), turned off\n", (unsigned int)reg);
+	odi_reg_write(ODI_SW_L3_GLOBAL_CTRL_OFF, reg & ~ODI_SW_L3_GLOBAL_CTRL_ENABLE);
+}
+
 /* The L2 CAM on (CAM_OFF is a disable bit). */
 static void odi_switch_platform_l2(void)
 {
@@ -281,6 +302,7 @@ static const struct {
 	{ odi_switch_platform_acl_clean, "acl clean" },
 	{ odi_switch_platform_acl, "acl" },
 	{ odi_switch_platform_vlan, "vlan" },
+	{ odi_switch_platform_l3_off, "l3 off" },
 	{ odi_switch_platform_l2, "l2" },
 	{ odi_switch_platform_cf_sweep, "cf sweep" },
 	{ odi_switch_platform_reserved_vid, "reserved vid" },
@@ -315,6 +337,15 @@ void odi_switch_init_platform(void)
  * thousands of frames a second, against the CPU-RX guards. So the
  * unknown-multicast mask takes the capture's value back: CPU bit off,
  * the other ports as the replay left them.
+ *
+ * The trade-off, kept on purpose: with the CPU out of this mask the stick
+ * is blind to IPv6 link-local traffic (neighbour discovery, router
+ * adverts) and to any multicast group a listener on it would join, and it
+ * has neither. Another open implementation reverted the same change
+ * because its CPU runs IPv6 and joins groups. Should this image ever answer
+ * on IPv6 or run a multicast listener on the CPU port, this mask is the
+ * first place to look when the stick stays deaf to it. Broadcast, which
+ * ARP needs, has its own flood mask and keeps the CPU.
  */
 #define ODI_SW_MODLOAD_CPU_PORT_BIT	(1U << 3)
 
