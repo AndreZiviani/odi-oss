@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- Optics: a 16-bit DDM reading (temperature, supply voltage, bias current,
+  Tx power, Rx power) can no longer come back torn. The controller reads one
+  byte at a time and the module refreshes its readings on its own clock, so a
+  refresh between the two bytes gave the old high byte with the new low one:
+  a value 256 counts off (1 C of temperature, 0.5 mA of bias, 25.6 uW of Rx
+  power) for one sample. The high byte is now read once more after the word,
+  and the word is read again when it moved (three tries at most). The cost is
+  one extra byte read per DDM word, on the DDM ioctl that `diag` and the
+  exporter use; the OMCI driver command 10 keeps the stock command's exact
+  register sequence (it is replayed against a capture of it). A single multi-byte controller
+  transaction, as SFF-8472 describes, was not tried: nothing here shows how
+  the controller returns a wider read.
+
 - Documentation of a decision, no behaviour change: why TX-disable is asserted
   in O7 only (comment at `hw_tx_gate()`), checked against G.984.3 10.2.2 and
   Table 10-1: only O7 and O6 ask for no light, and gating O6 would cost more

@@ -718,9 +718,11 @@ static int cmd_ds_bc_gem_flow(void *buf, uint32_t len)
  * odi_ddm.h numeric selectors (2 temperature, 3 supply voltage, 4 bias
  * current, 5 Tx power, 6 Rx power); the answer is the raw A2h word,
  * big-endian, at data[0..1], the rest of data zeroed. The read is the
- * one DDM_GET makes (odi_ddm_get(), odi_i2c_lock held for both bytes),
- * whose writes are the same as the stock command's: device select A2h,
- * byte address, start, once per byte. Any other type, a short buffer or
+ * one DDM_GET makes, but through odi_ddm_get_stock(): the writes are the
+ * stock command's, device select A2h, byte address, start, once per byte,
+ * and are replayed against its capture (test/odi_switch_cmd_test.sh), so
+ * they cannot take the extra high-byte read odi_ddm_get() adds against a
+ * torn word. Any other type, a short buffer or
  * a failed read is an error, and omcid then reports 0 for that field.
  */
 #define ODI_SW_CMD10_DATA_OFF	4U
@@ -738,7 +740,7 @@ static int cmd_transceiver_status(void *buf, uint32_t len)
 	       ((uint32_t)b[2] << 8) | b[3];
 	if (type < ODI_DDM_TEMPERATURE || type > ODI_DDM_RX_POWER)
 		return -1;
-	if (odi_ddm_get((int)type, raw) != 0)
+	if (odi_ddm_get_stock((int)type, raw) != 0)
 		return -1;
 	for (i = ODI_SW_CMD10_DATA_OFF; i < len; i++)
 		b[i] = 0;
