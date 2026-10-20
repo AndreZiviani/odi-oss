@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- OMCI: a downstream priority queue (ME 277) whose Weight the OLT had set
+  went to the switch driver as priority 0, whatever its entity: the row built
+  for it had no RelatedPort, so all eight of the UNI's queues carried the
+  same priority. Each now carries the priority its entity id gives, and its
+  marking, read the way the MIB upload reads them (what the OLT wrote, else
+  the stock default). A queue of a VEIP, or of anything that is not a PPTP
+  Ethernet UNI, now names the PON port, as its flow already did, instead of
+  port 0. The driver does not use either value yet, so nothing changes on the
+  wire.
+
 - OMCI: ME 50 (MAC bridge port bridge table data) lists the addresses the
   switch has learned for the bridge port, read from the L2 table at every
   Get: the host's behind a UNI port, the fibre side's behind the others,
