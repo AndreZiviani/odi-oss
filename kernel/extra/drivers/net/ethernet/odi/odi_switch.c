@@ -26,6 +26,7 @@
 #include "odi_replay_blob.h"
 #include "odi_switch_cmd.h"
 #include "odi_switch_api.h"
+#include "odi_switch_l2.h"
 #include "odi_nic.h"
 #include "odi_wdt.h"
 
@@ -154,6 +155,30 @@ void odi_reg_write(uint32_t off, uint32_t val)
  */
 static bool odi_switch_platform_done;
 
+/* The L2 table survives a warm restart, the CAM included (the SoC reset is
+ * not a power cycle), so the rows of whatever ran before this image (the
+ * stock firmware's static groups, an earlier pin of a MAC that changed)
+ * are still there. Emptied once here, after the platform step turned the
+ * CAM on and before anything writes a row; the pins are written again by
+ * odi_switch_pin_sync() at the end of the boot. A failure only logs: a
+ * stale row is what the stick lived with before this step existed.
+ */
+static void odi_switch_boot_l2_clean(void)
+{
+	struct odi_sw_l2_clean_report rep;
+	int rc = odi_switch_l2_clean(&rep);
+
+	if (rc)
+		pr_warn("odi_switch: L2 table clean stopped at an engine error (%d): %u row(s) found so far\n",
+			rc, rep.found);
+	else if (rep.left)
+		pr_warn("odi_switch: L2 table clean: %u row(s) (%u static) found, %u still in use after %u pass(es)\n",
+			rep.found, rep.found_static, rep.left, rep.passes);
+	else
+		pr_info("odi_switch: L2 table clean: %u row(s) (%u static) left by the previous run removed\n",
+			rep.found, rep.found_static);
+}
+
 int odi_switch_boot_init(void)
 {
 	struct odi_replay_fw fw;
@@ -162,11 +187,14 @@ int odi_switch_boot_init(void)
 	lockdep_assert_held(&odi_switch_lock);
 	odi_switch_init_platform();
 	odi_switch_platform_done = true;
+	odi_switch_boot_l2_clean();
 	rc = odi_replay_fw_load(ODI_REPLAY_TABLE_MODLOAD, &fw);
 	if (rc)
 		return rc;
 	odi_switch_init_modload(&fw.blob);
 	odi_replay_fw_release(&fw);
+	/* After the replay, which writes SA_MOVED back to 0 (move). */
+	odi_sw_sa_moved_apply();
 	/* Again before omcid starts, should the write at network.sh time have
 	 * failed: the stick's MACs static on the CPU port (odi_switch_pin.c).
 	 */
