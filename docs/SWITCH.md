@@ -137,6 +137,12 @@ the fields it owns. Board ports: UNI 0, PON 2, CPU 3; port 1 is unused.
   `PORT_VLAN_INDEX` of ports 2 and 3 (base + 4n lands port 2 on the
   separate register at `0x013014`) and the per-port SVID (base + 4n lands
   port 2 of `PORT_SVLAN_INDEX` on `SVLAN_SETUP`).
+- **l3 off**: `L3_GLOBAL_CTRL` (0x01106c) bit 0, the L3 engine's enable,
+  cleared when set. It reads `0x4` (off) after a power-up and on a stick
+  running this image; it survives a warm restart, so a firmware that
+  enabled the engine would leave it routing. Nothing is written when the
+  bit is clear. The L3 tables are not touched: with the engine off they are
+  not read.
 - **l2**: `L2_LOOKUP_SETUP.CAM_OFF = 0` (a disable bit). The ageing fields
   of the same register belong to cmd 62. No stock reading exists.
 - **cf sweep**: every `CLS_RULE_B`, `CLS_DS_ACTION` and `CLS_US_ACTION` row
@@ -970,8 +976,14 @@ The stick's MACs are therefore static rows on the CPU port
 (`odi_switch_pin.c`, `odi_switch_l2.c`): bit 62 of an L2 row, the SDK's
 "no SA learning", is never learned over. A frame whose source hits a static
 row from another port is an "illegal port move", whose action is
-`LUT_UNMATCHED_SA_CTRL` (0x01c000, two bits a port): the boot replay sets
-"forward", and the row stays where it is. The row is the one the hardware
+`SA_MOVED` (0x01c000, two bits a port: 0 moves a learned row to the port
+the frame came in by, 1 drops the frame and leaves the row). The boot replay
+writes 0 on every port, and `odi_sw_sa_moved_apply()` sets the PON port to 1
+afterwards (`0x00000010`), leaving the others: a frame from the fibre whose
+source is a host's learned row, such as one an OLT reflects, is dropped
+instead of moving the host to the PON port, which would switch traffic for
+that host toward the fibre. A static row, as the stick's pin, is not moved
+either way (another open implementation's reading). The row is the one the hardware
 writes when it learns the stick's MAC from the CPU port (SVL, filtering id
 0, port 3, see [the L2 table readout](KERNEL.md)) plus the static bit, with
 the age non-zero as the SDK writes a static unicast row; written through

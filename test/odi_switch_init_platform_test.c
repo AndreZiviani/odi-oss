@@ -325,10 +325,66 @@ static void test_cf_cfg_preserves_other_fields(void)
 	      "classify preserves PATTERN1_COUNT/PON_SELECT, only sets US_NO_MATCH_ACTION");
 }
 
+/* L3_GLOBAL_CTRL (0x01106c): reset 0x4, engine bit 0 clear. A firmware that
+ * left it enabled is turned off, touching nothing but bit 0; an engine
+ * already off costs no write.
+ */
+static void test_l3_off(void)
+{
+	uint32_t v;
+	unsigned int i, n = 0;
+
+	odi_mock_reset();
+	odi_reg_write(0x1106cU, 0x00000005U);
+	odi_switch_init_platform();
+	CHECK(odi_reg_read(0x1106cU) == 0x00000004U, "an enabled L3 engine is turned off, bit 2 kept");
+	CHECK(nth_w_val(0x1106cU, 1, &v) && v == 0x00000004U, "by one write of the register");
+
+	odi_mock_reset();
+	odi_reg_write(0x1106cU, 0x00000004U);
+	odi_switch_init_platform();
+	for (i = 0; i < odi_mock.log_n; i++)
+		if (odi_mock.log[i].kind == 'W' && odi_mock.log[i].addr == 0x1106cU)
+			n++;
+	CHECK(n == 1, "an engine already off is not written (only the seed write is in the log)");
+}
+
+/* SA_MOVED (0x01c000): the PON port (bits 5:4) drops, the other ports keep
+ * what they had; a second call writes nothing.
+ */
+static void test_sa_moved(void)
+{
+	unsigned int i, n = 0;
+
+	odi_mock_reset();
+	odi_sw_sa_moved_apply();
+	CHECK(odi_reg_read(0x1c000U) == 0x00000010U, "from the reset value 0: the PON port field 1");
+
+	odi_mock_reset();
+	odi_reg_write(0x1c000U, 0x000000c3U);
+	odi_sw_sa_moved_apply();
+	CHECK(odi_reg_read(0x1c000U) == 0x000000d3U, "the other ports' fields are kept, a stale PON value replaced");
+
+	odi_mock_reset();
+	odi_reg_write(0x1c000U, 0x00000030U);
+	odi_sw_sa_moved_apply();
+	CHECK(odi_reg_read(0x1c000U) == 0x00000010U, "a PON field of 3 becomes 1");
+
+	odi_mock_reset();
+	odi_reg_write(0x1c000U, 0x00000010U);
+	odi_sw_sa_moved_apply();
+	for (i = 0; i < odi_mock.log_n; i++)
+		if (odi_mock.log[i].kind == 'W' && odi_mock.log[i].addr == 0x1c000U)
+			n++;
+	CHECK(n == 1 && odi_reg_read(0x1c000U) == 0x00000010U, "already set: no further write");
+}
+
 int main(void)
 {
 	test_sequence();
 	test_cf_cfg_preserves_other_fields();
+	test_l3_off();
+	test_sa_moved();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

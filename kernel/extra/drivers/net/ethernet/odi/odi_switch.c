@@ -193,6 +193,8 @@ int odi_switch_boot_init(void)
 		return rc;
 	odi_switch_init_modload(&fw.blob);
 	odi_replay_fw_release(&fw);
+	/* After the replay, which writes SA_MOVED back to 0 (move). */
+	odi_sw_sa_moved_apply();
 	/* Again before omcid starts, should the write at network.sh time have
 	 * failed: the stick's MACs static on the CPU port (odi_switch_pin.c).
 	 */
