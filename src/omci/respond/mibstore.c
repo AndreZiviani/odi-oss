@@ -399,6 +399,9 @@ uint16_t tbl_serialise(const struct omci_class *c, uint16_t inst, unsigned k,
 
 	if (!r || !w)
 		return 0;
+	/* The bridge table of a port is the switch's, not the store's. */
+	if (c->classId == 50 && k == 1)
+		return bridge_table_read(inst, out, (uint16_t)(max - max % w));
 	if (tbl_kind(c, k)) {
 		for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE;
 		     i = tblpool[i].next) {

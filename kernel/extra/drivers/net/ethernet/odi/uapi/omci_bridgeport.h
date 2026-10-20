@@ -97,6 +97,81 @@ struct omci_dot1rl {
 #define OMCI_DOT1RL_BC       1
 #define OMCI_DOT1RL_MC       2
 
+/* The learning limit of ME 45 / ME 47 (command 53, setMacLearnLimit): two
+ * words, {port, limit}. Its accessor is generated (omci_drv.c), so there is
+ * no struct for omcid, only this one for the kernel.
+ *
+ * The limit is a count of learned addresses; a count at or past the table
+ * size (OMCI_LEARN_LIMIT_TABLE) is the same as none. Zero is refused, not
+ * taken as "learn nothing": omcid never sends it, and a limit of zero turns
+ * address learning off on the port, which is a forwarding change nobody has
+ * asked for.
+ */
+#define OMCI_LEARN_LIMIT_CMD    53
+#define OMCI_LEARN_LIMIT_LEN    8
+#define OMCI_LEARN_LIMIT_TABLE  1088u
+
+struct omci_learn_limit {
+	uint32_t port;
+	uint32_t limit;
+};
+
+/* The bridge table of one switch port, ME 50 (MAC bridge port bridge table
+ * data).
+ *
+ * Command 61, getBridgeTableByPort, is the stock wrapper's: four bytes, the
+ * port in and the number of unicast addresses the switch holds for that port
+ * out. The stock driver hands the addresses themselves back through a
+ * memory-mapped buffer of its character device, which does not exist behind
+ * a netlink socket, so the addresses come through command OMCI_BRIDGE_TBL_CMD
+ * instead, ours and outside the stock numbering like OMCI_FLOWS_CMD.
+ *
+ * OMCI_BRIDGE_TBL_CMD reads one page: `first` is the index, among the port's
+ * addresses in table order, of the first one wanted. It answers `total`, the
+ * addresses the port has, and `count`, how many of them are in entry[].
+ * Each entry is the 8 bytes ME 50 carries on the wire, as the stock driver
+ * wrote them: a big-endian 16-bit information word
+ *     bits 15..4  age, in seconds (the row's 3-bit age counter scaled by the
+ *                 configured ageing time)
+ *     bit 2       1 for a learned row, 0 for a static one
+ *     bit 0       1 when the row blocks frames to the address
+ * then the six MAC octets. The table is read row by row while learning goes
+ * on, so two pages are not one atomic snapshot; a reader that needs one
+ * stops asking for more once it holds `total` entries.
+ */
+#define OMCI_BRIDGE_TBL_PORT_CMD   61
+#define OMCI_BRIDGE_TBL_PORT_LEN   4
+
+struct omci_bridge_tbl_per_port {
+	uint16_t portId;
+	uint16_t cnt;
+};
+
+#define OMCI_BRIDGE_TBL_CMD        0x101u
+#define OMCI_BRIDGE_TBL_ENTRY_LEN  8u
+#define OMCI_BRIDGE_TBL_PAGE       30u
+#define OMCI_BRIDGE_TBL_LEN        256u
+
+struct omci_bridge_tbl {
+	uint32_t port;                  /* in: the switch port */
+	uint32_t first;                 /* in: first entry wanted */
+	uint32_t total;                 /* out: entries the port has */
+	uint32_t count;                 /* out: entries in entry[] */
+	uint8_t  entry[OMCI_BRIDGE_TBL_PAGE * OMCI_BRIDGE_TBL_ENTRY_LEN];
+};
+
+typedef char omci_bridge_tbl_size_check[
+	(sizeof(struct omci_bridge_tbl) == OMCI_BRIDGE_TBL_LEN) ? 1 : -1];
+typedef char omci_bridge_tbl_port_size_check[
+	(sizeof(struct omci_bridge_tbl_per_port) == OMCI_BRIDGE_TBL_PORT_LEN) ? 1 : -1];
+typedef char omci_learn_limit_size_check[
+	(sizeof(struct omci_learn_limit) == OMCI_LEARN_LIMIT_LEN) ? 1 : -1];
+
+/* Command 63 (setPortBridging) takes one word, 1 for "the UNIs bridge to one
+ * another and to the PON". Command 40 (setPauseControl), {port, pause time}. */
+#define OMCI_PORT_BRIDGING_CMD  63
+#define OMCI_PAUSE_CONTROL_CMD  40
+
 typedef char omci_dot1rl_size_check[
 	(sizeof(struct omci_dot1rl) == OMCI_DOT1RL_LEN) ? 1 : -1];
 typedef char omci_flood_size_check[

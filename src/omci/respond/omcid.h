@@ -355,6 +355,9 @@ void mcast_flag_refresh(int skip);
 void qos_reset(void);
 /* apply_uni.c */
 uint32_t bridge_uni_port_mask(uint16_t bridge_id);
+/* Class 50: the table of a bridge port read from the switch (apply_uni.c);
+ * the bytes written to out, never more than max, 0 without a driver. */
+uint16_t bridge_table_read(uint16_t inst, uint8_t *out, uint16_t max);
 void dot1rl_apply(const struct omci_class *c, uint16_t inst,
 		  const struct mib_row *r, int drop, int all);
 void apply_pptp_uni(const struct omci_class *c, uint16_t inst,

@@ -530,5 +530,65 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	fi
 fi
 
+# ------------------------------------------------ UNI limits and ME 50
+#
+# What omcid hands the switch for the limits an OLT provisions on the UNI, in
+# the words the kernel takes (uapi/omci_bridgeport.h), and the bridge table
+# of a port, which is read from the switch on every Get (command 0x101, a
+# page of 30 entries) and served through Get and Get-Next. The driver trace
+# plays the switch: 2 addresses on the UNI, 35 on the PON port.
+if [ "${UPDATE:-0}" != 1 ]; then
+	bt_get() {   # bt_get <tci> <inst>: Get of ME 50, attribute 1
+		printf '%s490a0032%s8000%060d00000028%08d\n' "$1" "$2" 0 0
+	}
+	bt_next() {  # bt_next <tci> <inst> <seq>: Get-Next of ME 50, attribute 1
+		printf '%s5a0a0032%s8000%04x%056d00000028%08d\n' "$1" "$2" "$3" 0 0
+	}
+	bt_body() {  # bt_body <log> <tci>: the answer after its header
+		grep -- "^-> $2" "$1" | tail -1 | cut -c20-
+	}
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-limits.log
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	{
+		cat "$FIX/omci-session-isp1.txt"
+		# Two traffic descriptors: PIR 131072 B/s (1024 kbit/s) and
+		# 524288 B/s (4096 kbit/s); then port 47/0001's outbound and
+		# inbound pointers, and NumOfAllowedMac 64.
+		printf '0f20440a01188001%s%048d00000028%08d\n' 0000000000020000 0 0
+		printf '0f21440a01188002%s%048d00000028%08d\n' 0000000000080000 0 0
+		printf '0f22480a002f00010030%s%052d00000028%08d\n' 80018002 0 0
+		printf '0f23480a002f00010008%s%058d00000028%08d\n' 40 0 0
+		bt_get 0f30 0001
+		bt_next 0f31 0001 0
+		bt_get 0f32 0002
+		for q in 0 1 2 3 4 5 6 7 8 9; do bt_next "0f4$q" 0002 $q; done
+	} > /tmp/session-limits.txt
+	$Q cli/build/omcli --inject-file /tmp/session-limits.txt > /dev/null 2>&1
+	need "$log" '^-> 0f49' 30
+	sync_send "$log"
+	omcid_stop "$pid"
+	got=$(grep -c '^drv 53 8 0000000000000040$' "$log")
+	check_n() { if [ "$2" = "$3" ]; then echo "ok    $1"; else echo "FAIL  $1: $2, want $3"; fail=$((fail + 1)); fi; }
+	check_n "NumOfAllowedMac 64 reaches the driver as {port 0, limit 64} (cmd 53)" "$got" 1
+	got=$(grep -c '^drv 67 12 000000000000000100001000$' "$log")
+	check_n "the inbound descriptor is {port 0, dir 1, 4096 kbit/s} (cmd 67)" "$got" 1
+	got=$(grep -c '^drv 67 12 000000000000000200000400$' "$log")
+	check_n "the outbound descriptor is {port 0, dir 2, 1024 kbit/s} (cmd 67)" "$got" 1
+	check_n "ME 50 of the UNI port: 2 entries, 16 bytes" "$(bt_body "$log" 0f30 | cut -c1-14)" 00800000000010
+	check_n "and they are the switch's, in table order" "$(bt_body "$log" 0f31 | cut -c7-38)" 12640200000000401264020000000041
+	check_n "ME 50 of the VEIP port, the PON port's: 35 entries, 280 bytes" \
+	        "$(bt_body "$log" 0f32 | cut -c1-14)" 00800000000118
+	check_n "its first entry" "$(bt_body "$log" 0f40 | cut -c7-22)" 1264020000000240
+	check_n "its last entry, in the last chunk (the second page of the driver)" \
+	        "$(bt_body "$log" 0f49 | cut -c29-44)" 1264020000000262
+	check_n "the table cost 3 driver reads, 1 for the UNI and 2 pages for the PON port" \
+	        "$(grep -c '^drv 257 256 ' "$log")" 3
+	check_n "the second page asked for the 31st address of port 2" \
+	        "$(grep -c '^drv 257 256 000000020000001e' "$log")" 1
+fi
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 suite_exit

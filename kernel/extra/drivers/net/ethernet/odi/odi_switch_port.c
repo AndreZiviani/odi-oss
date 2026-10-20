@@ -279,3 +279,95 @@ void odi_sw_l2_flood_mask_set(uint32_t type, uint32_t mask)
 	for (i = 0; i < ODI_SW_PORT_COUNT; i++)
 		odi_reg_write(odi_sw_l2_flood_reg(type), mask);
 }
+
+/* ---- UNI limits: learning depth (cmd 53) and rates (cmd 67) --------------
+ *
+ * Addresses read on a stick and checked against another open implementation's
+ * measurements of the same chip (docs/SWITCH.md#uni-limits). They are local
+ * to this file, like the PHY addresses above: the names in odi_switch_hw.h
+ * are held to the diag register table, and these are not in it.
+ *
+ *   0x017008 + 4 * (p / 2)  learn limit, 11 bits at 11 * (p % 2); reads
+ *                           0x00220440 on a stick (1088 for ports 0 and 1)
+ *   0x020010 + 0x400 * p    ingress meter: bits 20..2 rate in 8 kbit/s,
+ *                           bit 1 flow control, which stays as it is
+ *   0x02d804 + 4 * p        egress shaper: bits 19..1 rate in 8 kbit/s
+ *   0x02d8b8                port 0 shaper, second register: bits 18..0 the
+ *                           same rate in 16 kbit/s, bit 19 the 2.5G override
+ */
+#define ODI_SW_L2_LEARN_LIMIT_BASE	0x17008U
+#define ODI_SW_L2_LEARN_LIMIT_MASK	0x7ffU
+#define ODI_SW_UNI_POLICE_BASE		0x20010U
+#define ODI_SW_UNI_POLICE_PORT_STRIDE	0x400U
+#define ODI_SW_UNI_SHAPE_BASE		0x2d804U
+#define ODI_SW_UNI_SHAPE_PORT0_2ND	0x2d8b8U
+#define ODI_SW_UNI_SHAPE_2ND_MASK	0x3ffffU
+
+uint32_t odi_sw_l2_aging_ticks_get(void)
+{
+	return ODI_SW_L2_LOOKUP_SETUP_AGE_TICKS_GET(odi_reg_read(ODI_SW_L2_LOOKUP_SETUP_OFF));
+}
+
+static uint32_t learn_limit_reg(uint32_t port)
+{
+	return ODI_SW_L2_LEARN_LIMIT_BASE + 4U * (port / 2U);
+}
+
+uint32_t odi_sw_l2_learn_limit_get(uint32_t port)
+{
+	unsigned int sh = 11U * (port % 2U);
+
+	return (odi_reg_read(learn_limit_reg(port)) >> sh) & ODI_SW_L2_LEARN_LIMIT_MASK;
+}
+
+void odi_sw_l2_learn_limit_set(uint32_t port, uint32_t limit)
+{
+	unsigned int sh = 11U * (port % 2U);
+	uint32_t reg = odi_reg_read(learn_limit_reg(port));
+
+	reg = (reg & ~(ODI_SW_L2_LEARN_LIMIT_MASK << sh)) |
+	      ((limit & ODI_SW_L2_LEARN_LIMIT_MASK) << sh);
+	odi_reg_write(learn_limit_reg(port), reg);
+}
+
+static uint32_t uni_police_reg(uint32_t port)
+{
+	return ODI_SW_UNI_POLICE_BASE + ODI_SW_UNI_POLICE_PORT_STRIDE * port;
+}
+
+uint32_t odi_sw_uni_police_get(uint32_t port)
+{
+	return (odi_reg_read(uni_police_reg(port)) >> 2) & ODI_SW_UNI_RATE_NONE;
+}
+
+void odi_sw_uni_police_set(uint32_t port, uint32_t units)
+{
+	uint32_t reg = odi_reg_read(uni_police_reg(port));
+
+	reg = (reg & ~(ODI_SW_UNI_RATE_NONE << 2)) | ((units & ODI_SW_UNI_RATE_NONE) << 2);
+	odi_reg_write(uni_police_reg(port), reg);
+}
+
+uint32_t odi_sw_uni_shape_get(uint32_t port)
+{
+	return (odi_reg_read(ODI_SW_UNI_SHAPE_BASE + 4U * port) >> 1) & ODI_SW_UNI_RATE_NONE;
+}
+
+void odi_sw_uni_shape_set(uint32_t port, uint32_t units)
+{
+	uint32_t reg = odi_reg_read(ODI_SW_UNI_SHAPE_BASE + 4U * port);
+
+	reg = (reg & ~(ODI_SW_UNI_RATE_NONE << 1)) | ((units & ODI_SW_UNI_RATE_NONE) << 1);
+	odi_reg_write(ODI_SW_UNI_SHAPE_BASE + 4U * port, reg);
+	if (port == ODI_SW_HOST_PORT) {
+		/* Rounded up, so the smallest rate is not 0, and capped at the
+		 * reset value of the field so "none" stays exactly that. */
+		uint32_t half = (units + 1U) / 2U;
+		uint32_t second = odi_reg_read(ODI_SW_UNI_SHAPE_PORT0_2ND);
+
+		if (half > ODI_SW_UNI_SHAPE_2ND_MASK)
+			half = ODI_SW_UNI_SHAPE_2ND_MASK;
+		second = (second & ~ODI_SW_UNI_SHAPE_2ND_MASK) | half;
+		odi_reg_write(ODI_SW_UNI_SHAPE_PORT0_2ND, second);
+	}
+}
