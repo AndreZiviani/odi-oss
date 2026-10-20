@@ -720,11 +720,19 @@ static void odi_gpon_isr_msg(enum odi_gpon_state prev, const struct odi_gpon_plo
 	odi_gpon_timers_sync();
 }
 
+/* The lines taken out of odi_gpon_dlog_inst to be printed without the lock.
+ * Static, not on the stack: the buffer is 1.5 KB and this runs in interrupt
+ * context on a small kernel stack. Only odi_gpon_isr_entry() touches it, and
+ * the kernel does not run one interrupt handler concurrently with itself,
+ * so it needs no lock of its own.
+ */
+static struct odi_gpon_dlog odi_gpon_dlog_out;
+
 static void odi_gpon_isr_entry(void)
 {
 	unsigned long flags;
 	struct odi_gpon_isr_poll_status poll_status;
-	struct odi_gpon_dlog held;
+	struct odi_gpon_dlog *held = &odi_gpon_dlog_out;
 	unsigned int i;
 
 	spin_lock_irqsave(&odi_gpon_lock, flags);
@@ -756,13 +764,13 @@ static void odi_gpon_isr_entry(void)
 		odi_gpon_last_us_sts_nonzero = poll_status.us_sts;
 
 	odi_gpon_dlog_inst.active = 0;
-	odi_gpon_dlog_take(&odi_gpon_dlog_inst, &held);
+	odi_gpon_dlog_take(&odi_gpon_dlog_inst, held);
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 
-	for (i = 0; i < held.n; i++)
-		odi_gpon_dlog_print(held.line[i].level, held.line[i].text);
-	if (held.lost)
-		pr_info("odi_gpon: %u log line(s) of one interrupt not kept\n", held.lost);
+	for (i = 0; i < held->n; i++)
+		odi_gpon_dlog_print(held->line[i].level, held->line[i].text);
+	if (held->lost)
+		pr_info("odi_gpon: %u log line(s) of one interrupt not kept\n", held->lost);
 }
 
 static int odi_gpon_irq_dev_id; /* request_irq() needs a unique non-NULL token */
