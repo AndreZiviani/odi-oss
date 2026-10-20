@@ -15,6 +15,22 @@ listed here.
   listener off; a stick committed earlier gets it by running `nv commit`
   again.
 
+- OMCI: a request the OLT repeats (same transaction id, same frame, after it
+  did not see the answer) is answered again with the same answer, and no
+  longer runs twice: a repeated Create, Set or Delete used to count a second
+  MIB data sync. A Create of an instance that already exists is now refused
+  with result 7 and does not count.
+
+- OMCI: a Set that names a read-only attribute, or one that can only be given
+  at Create, no longer writes it. It answers result 9 with the refused
+  attributes in the failed mask, and the other attributes of the Set are
+  still written. A Set that stores nothing no longer counts in MIB data sync.
+
+- Boot: the PLOAM password is read from the config store with its XML
+  entities undone (`a&amp;b` is sent to the driver as `a&b`), as omcid already
+  did. A password with `&`, `<`, `>`, `"` or `'` in it was sent with the
+  entity text in it and could not range.
+
 - OMCI build: the generated tables (`omci_autonomous.c`, `omci_defaults.c`,
   `omci_mib.c`) take their entry counts from the arrays themselves instead
   of a number the generator wrote. A table edited by hand with the old count
