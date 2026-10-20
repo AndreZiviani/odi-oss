@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Optics: the laser driver check at boot no longer writes the A2h page
+  select (byte 127) when it already reads the wanted page, as it does on a
+  stick at rest (page 2): the write changed nothing, cost a non-volatile
+  write and, on a part that stops answering for a while after one, risked
+  the id read that follows. When a write is needed it is now waited out by
+  reading the byte back, at most 20 times 10 ms, and a part that does not
+  answer in that time is treated as "no answer" (laser left off), as before.
+
 - `nv commit` also sets the bootloader variable `mupgrade_en` to 0, in both
   environment copies and in the same writes that set `sw_commit` (a copy
   without the variable gets it, one that already says 0 is left alone). The
