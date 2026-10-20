@@ -225,6 +225,22 @@ void odi_gpon_hw_test_set_key_source(void (*fn)(uint8_t key[16]))
  * the activate verb, gpondeact). Not tied to the FSM's laser_enable(),
  * which also fires on Deactivate_ONU-ID and LOS, where stock leaves the
  * laser alone and nothing would turn it back on before O3.
+ *
+ * Why not O1, O2 and O6 as well (another open implementation asserts the
+ * line there too). G.984.3 10.2.2 asks for no light in two places only: O7
+ * ("shuts its laser off") and O6 ("immediately stops upstream
+ * transmission"); for O1 and O2 it says the ONU waits for downstream
+ * traffic and parameters, it does not say the laser is off, and the ONU
+ * answers nothing there unless it is granted a slot. O6 is entered on LOS
+ * or LOF, where the OLT's map is gone, and TO2 (100 ms) ends it. Gating the
+ * line there would turn a momentary LOS into a laser that needs its bias
+ * ramp (the other implementation measured under a second) before the
+ * directed POPUP can be answered in O5, past TO2: every blip would become a
+ * deactivation, and the same ramp would eat the first serial number
+ * requests after O2 -> O3. What the MAC itself does with a grant in O6 is
+ * not decoded (odi_gpon_fsm.c, odi_gpon_fsm_do_los()) and cannot be tested
+ * without a second ONU on the fibre, so the line follows O7 alone until it
+ * is.
  */
 static void hw_tx_gate(enum odi_gpon_state state)
 {

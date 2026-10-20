@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Documentation of a decision, no behaviour change: why TX-disable is asserted
+  in O7 only (comment at `hw_tx_gate()`), checked against G.984.3 10.2.2 and
+  Table 10-1: only O7 and O6 ask for no light, and gating O6 would cost more
+  than it protects until the MAC's own O6 behaviour is decoded.
+
 - Optics: the laser driver check at boot no longer writes the A2h page
   select (byte 127) when it already reads the wanted page, as it does on a
   stick at rest (page 2): the write changed nothing, cost a non-volatile
