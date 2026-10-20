@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- `nv commit` also sets the bootloader variable `mupgrade_en` to 0, in both
+  environment copies and in the same writes that set `sw_commit` (a copy
+  without the variable gets it, one that already says 0 is left alone). The
+  stock bootloader ships it as 1: after the boot countdown it listens on the
+  host link for a firmware image sent by multicast and writes it to flash
+  with no authentication, so anyone on the LAN side of the stick during a
+  reboot could replace the firmware. Committing an image now turns that
+  listener off; a stick committed earlier gets it by running `nv commit`
+  again.
+
 - OMCI: a request the OLT repeats (same transaction id, same frame, after it
   did not see the answer) is answered again with the same answer, and no
   longer runs twice: a repeated Create, Set or Delete used to count a second

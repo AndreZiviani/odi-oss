@@ -86,13 +86,15 @@ static void build(uint8_t *b, uint8_t flags, const char *const *pairs, int n)
 static void trial(struct fake *f)
 {
 	const char *fb[] = { "bootdelay=1", "sw_active=0", "sw_commit=0",
-			     "sw_tryactive=1", "sw_version0=V1", "sw_version1=V2" };
+			     "sw_tryactive=1", "sw_version0=V1", "sw_version1=V2",
+			     "mupgrade_en=1" };
 	const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=0",
-			     "sw_tryactive=2", "sw_version0=V1", "sw_version1=V2" };
+			     "sw_tryactive=2", "sw_version0=V1", "sw_version1=V2",
+			     "mupgrade_en=1" };
 
 	memset(f, 0, sizeof *f);
-	build(f->part[1], 0x00, fb, 6);
-	build(f->part[2], 0x01, pr, 6);
+	build(f->part[1], 0x00, fb, 7);
+	build(f->part[2], 0x01, pr, 7);
 }
 
 static int val(struct fake *f, int copy, const char *key, const char *want)
@@ -102,7 +104,7 @@ static int val(struct fake *f, int copy, const char *key, const char *want)
 	return env_get(f->part[copy], PART, key, v, sizeof v) && !strcmp(v, want);
 }
 
-/* Every pair other than sw_commit is byte-identical before and after. */
+/* Every pair other than sw_commit and mupgrade_en is byte-identical before and after. */
 static int others_same(const uint8_t *a, const uint8_t *b)
 {
 	uint32_t pa = 0;
@@ -118,7 +120,7 @@ static int others_same(const uint8_t *a, const uint8_t *b)
 			return 0;
 		memcpy(k, x, (size_t)(eq - x));
 		k[eq - x] = 0;
-		if (!strcmp(k, "sw_commit"))
+		if (!strcmp(k, "sw_commit") || !strcmp(k, "mupgrade_en"))
 			continue;
 		if (!env_get(b, PART, k, v, sizeof v) || strcmp(v, eq + 1))
 			return 0;
@@ -166,7 +168,9 @@ int main(void)
 	ck(env_valid(f.part[1], PART) && env_valid(f.part[2], PART),
 	   "both copies verify");
 	ck(others_same(before1, f.part[1]) && others_same(before2, f.part[2]),
-	   "no pair other than sw_commit changed in either copy");
+	   "no pair other than sw_commit and mupgrade_en changed in either copy");
+	ck(val(&f, 1, "mupgrade_en", "0") && val(&f, 2, "mupgrade_en", "0"),
+	   "both copies read mupgrade_en=0 (it was 1)");
 
 	/* Again: nothing to do, nothing written. */
 	f.nwrites = 0;
@@ -177,13 +181,62 @@ int main(void)
 	trial(&f);
 	{
 		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=1",
-				     "sw_tryactive=2" };
-		build(f.part[2], 0x01, pr, 4);
+				     "sw_tryactive=2", "mupgrade_en=0" };
+		build(f.part[2], 0x01, pr, 5);
 	}
 	rc = env_commit(&io, 1, 1, &r);
 	ck(rc == NVC_DONE && f.nwrites == 1 && f.writes[0] == 1 && r.wrote_fallback &&
 	   !r.wrote_primary && val(&f, 1, "sw_commit", "1"),
 	   "primary already committed: only the fallback is written");
+
+	/* A copy with no mupgrade_en gets it; one already 0 is not rewritten
+	 * for it; sw_commit already right but mupgrade_en=1 still writes. */
+	trial(&f);
+	{
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=0" };
+		const char *fb[] = { "bootdelay=1", "sw_active=0", "sw_commit=1",
+				     "mupgrade_en=0" };
+
+		build(f.part[2], 0x01, pr, 3);
+		build(f.part[1], 0x00, fb, 4);
+		memcpy(before1, f.part[1], PART);
+	}
+	rc = env_commit(&io, 1, 1, &r);
+	ck(rc == NVC_DONE && f.nwrites == 1 && f.writes[0] == 2 && !r.wrote_fallback &&
+	   !memcmp(before1, f.part[1], PART) && val(&f, 2, "mupgrade_en", "0") &&
+	   val(&f, 2, "sw_commit", "1"),
+	   "variable absent in the primary: added with sw_commit; a fallback already right is untouched");
+	trial(&f);
+	{
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=1",
+				     "mupgrade_en=1" };
+
+		build(f.part[2], 0x01, pr, 4);
+		build(f.part[1], 0x00, pr, 4);
+	}
+	rc = env_commit(&io, 1, 1, &r);
+	ck(rc == NVC_DONE && f.nwrites == 2 && val(&f, 1, "mupgrade_en", "0") &&
+	   val(&f, 2, "mupgrade_en", "0"),
+	   "sw_commit already right but mupgrade_en=1: both copies still written once each");
+	{
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=1",
+				     "mupgrade_en=0" };
+
+		build(f.part[2], 0x01, pr, 4);
+		build(f.part[1], 0x00, pr, 4);
+	}
+	f.nwrites = 0;
+	rc = env_commit(&io, 1, 1, &r);
+	ck(rc == NVC_ALREADY && f.nwrites == 0, "both already committed with mupgrade_en=0: nothing written");
+
+	/* Interrupted between the two copies: the primary carries both
+	 * changes, the fallback is still the old valid copy. */
+	trial(&f);
+	f.write_dies[1] = 1;
+	rc = env_commit(&io, 1, 1, &r);
+	ck(rc == NVC_WRITE_FALLBACK && val(&f, 2, "sw_commit", "1") &&
+	   val(&f, 2, "mupgrade_en", "0") && env_valid(f.part[2], PART),
+	   "interrupted before the fallback: the primary is valid and has both changes");
 
 	/* Refusals: nothing written in any of them. */
 	trial(&f);
