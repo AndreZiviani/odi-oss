@@ -71,6 +71,7 @@
 #include "odi_board.h"
 #include "odi_gpon.h"
 #include "odi_gpon_ctr.h"
+#include "odi_gpon_dlog.h"
 #include "odi_gpon_drv.h"
 #include "odi_gpon_flow.h"
 #include "odi_gpon_hw.h"
@@ -81,8 +82,6 @@
 #include "odi_switch_reg.h"
 
 #ifdef __KERNEL__
-
-#define ODI_GPON_LOG(fmt, ...) pr_info_ratelimited("odi_gpon: " fmt, ##__VA_ARGS__)
 
 /* The link event lines (docs/TOOLS.md, "Link and provisioning events"): one
  * "odi_gpon: event=..." line of key=value pairs per ONU state transition and
@@ -95,6 +94,44 @@
  * ___ratelimit() itself prints how many it dropped.
  */
 static DEFINE_RATELIMIT_STATE(odi_gpon_event_rs, 60 * HZ, 30);
+
+/* Log lines of the interrupt path. odi_gpon_isr_entry() takes the lock with
+ * interrupts off and every PLOAM message of an interrupt is dispatched
+ * under it; a console line at 115200 baud costs about 10 ms, and a message
+ * queued behind it would be acted on that much later (the O3 -> O4 answer
+ * to Assign_ONU-ID is the one with a window). So while the interrupt holds
+ * the lock the lines are formatted into odi_gpon_dlog_inst (microseconds)
+ * and printed once the lock is released. Outside the interrupt (verbs,
+ * timers) there is no such pressure and a line is printed where it is
+ * logged. Called with odi_gpon_lock held.
+ */
+static struct odi_gpon_dlog odi_gpon_dlog_inst;
+
+static void odi_gpon_dlog_print(enum odi_gpon_dlog_level level, const char *text)
+{
+	if (level == ODI_GPON_DLOG_NOTICE)
+		pr_notice("%s", text);
+	else
+		pr_info("%s", text);
+}
+
+static __printf(2, 3) void odi_gpon_logf(enum odi_gpon_dlog_level level, const char *fmt, ...)
+{
+	va_list ap;
+
+	if (odi_gpon_dlog_inst.active) {
+		va_start(ap, fmt);
+		odi_gpon_dlog_vadd(&odi_gpon_dlog_inst, level, fmt, ap);
+		va_end(ap);
+	} else {
+		char text[ODI_GPON_DLOG_LEN];
+
+		va_start(ap, fmt);
+		vscnprintf(text, sizeof(text), fmt, ap);
+		va_end(ap);
+		odi_gpon_dlog_print(level, text);
+	}
+}
 static unsigned long odi_gpon_state_since;	/* jiffies of the last transition */
 static unsigned long odi_gpon_los_since;	/* jiffies of the last LOS rising edge */
 static unsigned long odi_gpon_lof_since;	/* jiffies of the last LOF rising edge */
@@ -298,8 +335,9 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
 		}
 		if (!odi_gpon_ds_type_known(msg->type) &&
 		    !__test_and_set_bit(msg->type, odi_gpon_ds_unknown_logged))
-			ODI_GPON_LOG("unexpected downstream PLOAM type 0x%02x (logged once; ploam_type ds counts it)\n",
-				     msg->type);
+			odi_gpon_logf(ODI_GPON_DLOG_INFO,
+				      "odi_gpon: unexpected downstream PLOAM type 0x%02x (logged once; ploam_type ds counts it)\n",
+				      msg->type);
 	} else {
 		odi_gpon_us_type_count[msg->type]++;
 		if (msg->type == ODI_GPON_US_REI)
@@ -420,11 +458,12 @@ static void odi_gpon_note_ranging(enum odi_gpon_state prev, enum odi_gpon_state 
 	if (!__ratelimit(&odi_gpon_event_rs))
 		return;
 	odi_gpon_get_ranging_dbg(&dbg);
-	pr_info("odi_gpon: event=ranging eqd_bits=%u protection=%u preassigned=%u preassigned_delay=%u multframe=%u inframe=%u onu_id=%u\n",
-		odi_gpon_last_rng.eqd, odi_gpon_last_rng.protection_path,
-		odi_gpon_last_uo.preassigned_delay_en,
-		(unsigned int)odi_gpon_last_uo.preassigned_delay,
-		dbg.multframe, dbg.inframe, (unsigned int)odi_gpon_fsm_inst.onu_id);
+	odi_gpon_logf(ODI_GPON_DLOG_INFO,
+		      "odi_gpon: event=ranging eqd_bits=%u protection=%u preassigned=%u preassigned_delay=%u multframe=%u inframe=%u onu_id=%u\n",
+		      odi_gpon_last_rng.eqd, odi_gpon_last_rng.protection_path,
+		      odi_gpon_last_uo.preassigned_delay_en,
+		      (unsigned int)odi_gpon_last_uo.preassigned_delay,
+		      dbg.multframe, dbg.inframe, (unsigned int)odi_gpon_fsm_inst.onu_id);
 }
 
 /* The event=onu_state line, for every entry point below that can move the
@@ -447,13 +486,15 @@ static void odi_gpon_note_transition(enum odi_gpon_state prev,
 	if (!__ratelimit(&odi_gpon_event_rs))
 		return;
 	if (prev == ODI_GPON_STATE_O5 || now == ODI_GPON_STATE_O7)
-		pr_notice("odi_gpon: event=onu_state from=%s to=%s in_state_s=%lu.%03u cause=%s side=%s onu_id=%u\n",
-			  odi_gpon_state_name(prev), odi_gpon_state_name(now), secs, ms,
-			  cause->name, cause->side, (unsigned int)odi_gpon_fsm_inst.onu_id);
+		odi_gpon_logf(ODI_GPON_DLOG_NOTICE,
+			      "odi_gpon: event=onu_state from=%s to=%s in_state_s=%lu.%03u cause=%s side=%s onu_id=%u\n",
+			      odi_gpon_state_name(prev), odi_gpon_state_name(now), secs, ms,
+			      cause->name, cause->side, (unsigned int)odi_gpon_fsm_inst.onu_id);
 	else
-		pr_info("odi_gpon: event=onu_state from=%s to=%s in_state_s=%lu.%03u cause=%s side=%s onu_id=%u\n",
-			odi_gpon_state_name(prev), odi_gpon_state_name(now), secs, ms,
-			cause->name, cause->side, (unsigned int)odi_gpon_fsm_inst.onu_id);
+		odi_gpon_logf(ODI_GPON_DLOG_INFO,
+			      "odi_gpon: event=onu_state from=%s to=%s in_state_s=%lu.%03u cause=%s side=%s onu_id=%u\n",
+			      odi_gpon_state_name(prev), odi_gpon_state_name(now), secs, ms,
+			      cause->name, cause->side, (unsigned int)odi_gpon_fsm_inst.onu_id);
 }
 
 static void odi_gpon_note_event(enum odi_gpon_state prev, enum odi_gpon_event event,
@@ -478,13 +519,15 @@ static void odi_gpon_alarm_edge(const char *name, int now, int *last, unsigned l
 	if (now && !*last) {
 		*since = jiffies;
 		if (__ratelimit(&odi_gpon_event_rs))
-			pr_notice("odi_gpon: event=%s state=on onu_state=%s\n",
-				  name, odi_gpon_state_name(st));
+			odi_gpon_logf(ODI_GPON_DLOG_NOTICE,
+				      "odi_gpon: event=%s state=on onu_state=%s\n",
+				      name, odi_gpon_state_name(st));
 	} else if (!now && *last) {
 		odi_gpon_elapsed(*since, &secs, &ms);
 		if (__ratelimit(&odi_gpon_event_rs))
-			pr_info("odi_gpon: event=%s state=off lasted_s=%lu.%03u onu_state=%s\n",
-				name, secs, ms, odi_gpon_state_name(st));
+			odi_gpon_logf(ODI_GPON_DLOG_INFO,
+				      "odi_gpon: event=%s state=off lasted_s=%lu.%03u onu_state=%s\n",
+				      name, secs, ms, odi_gpon_state_name(st));
 	}
 	*last = now;
 }
@@ -661,17 +704,40 @@ static void odi_gpon_line_fn(struct timer_list *odi_timer_arg)
  */
 static void odi_gpon_isr_msg(enum odi_gpon_state prev, const struct odi_gpon_ploam *msg)
 {
+	static bool ebl_logged;
+
+	/* The burst overhead the first Extended_Burst_Length set, one line
+	 * per boot; one that arrives outside O3 is not applied
+	 * (odi_gpon_isr.c) and not logged.
+	 */
+	if (msg->type == ODI_GPON_DS_EXT_BURST_LENGTH && prev == ODI_GPON_STATE_O3 && !ebl_logged) {
+		ebl_logged = true;
+		odi_gpon_logf(ODI_GPON_DLOG_INFO,
+			      "odi_gpon_hw: Ext_Burst_Length: pre-ranged %u, ranged %u type 3 preamble bytes\n",
+			      (unsigned int)msg->content[0], (unsigned int)msg->content[1]);
+	}
 	odi_gpon_note_event(prev, ODI_GPON_EVENT_PLOAM_RX, msg);
 	odi_gpon_timers_sync();
 }
+
+/* The lines taken out of odi_gpon_dlog_inst to be printed without the lock.
+ * Static, not on the stack: the buffer is 1.5 KB and this runs in interrupt
+ * context on a small kernel stack. Only odi_gpon_isr_entry() touches it, and
+ * the kernel does not run one interrupt handler concurrently with itself,
+ * so it needs no lock of its own.
+ */
+static struct odi_gpon_dlog odi_gpon_dlog_out;
 
 static void odi_gpon_isr_entry(void)
 {
 	unsigned long flags;
 	struct odi_gpon_isr_poll_status poll_status;
+	struct odi_gpon_dlog *held = &odi_gpon_dlog_out;
+	unsigned int i;
 
 	spin_lock_irqsave(&odi_gpon_lock, flags);
 	odi_gpon_irq_count++;
+	odi_gpon_dlog_inst.active = 1;	/* lines are held until the lock is released, below */
 
 	/* The line first, then the PLOAM: a loss found here moves the FSM
 	 * before the message is dispatched, so the message meets the state
@@ -697,7 +763,14 @@ static void odi_gpon_isr_entry(void)
 	if (poll_status.us_sts)
 		odi_gpon_last_us_sts_nonzero = poll_status.us_sts;
 
+	odi_gpon_dlog_inst.active = 0;
+	odi_gpon_dlog_take(&odi_gpon_dlog_inst, held);
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+
+	for (i = 0; i < held->n; i++)
+		odi_gpon_dlog_print(held->line[i].level, held->line[i].text);
+	if (held->lost)
+		pr_info("odi_gpon: %u log line(s) of one interrupt not kept\n", held->lost);
 }
 
 static int odi_gpon_irq_dev_id; /* request_irq() needs a unique non-NULL token */

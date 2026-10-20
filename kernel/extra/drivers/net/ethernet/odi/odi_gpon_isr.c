@@ -66,8 +66,20 @@ static void odi_gpon_isr_dispatch(struct odi_gpon_fsm *fsm, const struct odi_gpo
 	/* The directed messages below act, and are acknowledged, only when
 	 * they carry our ONU-ID (odi_gpon_fsm_directed_to_us()): a broadcast
 	 * copy is not ours to apply. BER_Interval and Key_Switching_Time may
-	 * be broadcast and are handled either way.
+	 * be broadcast (G.984.3 9.2.3.18, 9.2.3.19) and are taken from a
+	 * broadcast or our own copy, never from one addressed to another ONU
+	 * (odi_gpon_fsm_addressed_to_us()).
 	 */
+	switch (msg->type) {
+	case ODI_GPON_DS_BER_INTERVAL:
+	case ODI_GPON_DS_KEY_SWITCHING_TIME:
+		if (!odi_gpon_fsm_addressed_to_us(fsm, msg))
+			return;
+		break;
+	default:
+		break;
+	}
+
 	switch (msg->type) {
 	case ODI_GPON_DS_RANGING_TIME:
 	case ODI_GPON_DS_CONFIGURE_PORT_ID:
@@ -161,8 +173,19 @@ static void odi_gpon_isr_dispatch(struct odi_gpon_fsm *fsm, const struct odi_gpo
 	case ODI_GPON_DS_EXT_BURST_LENGTH:
 		/* Broadcast, no Acknowledge (same as Upstream_Overhead). Sets
 		 * the burst preamble length; some OLTs never detect a burst
-		 * that ignores it.
+		 * that ignores it. G.984.3 Table 10-1 and 10.2.2 b): taken in
+		 * Serial_Number (O3) only. The message does not move the FSM,
+		 * so prev_state is the state it arrived in. An OLT that
+		 * repeats it for as long as the ONU is up (some do, every few
+		 * seconds, as it does Upstream_Overhead) would otherwise
+		 * rewrite the burst header of a running ONU each time. What
+		 * the first one set holds until the ONU is deactivated
+		 * (clause 9.2.3.20 note 2). Whether a serial number request
+		 * already came in O3 is not visible here: hardware answers it
+		 * on its own.
 		 */
+		if (prev_state != ODI_GPON_STATE_O3)
+			break;
 		odi_gpon_hw_ext_burst_length(msg->content[0], msg->content[1]);
 		break;
 

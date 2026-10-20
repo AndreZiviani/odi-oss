@@ -29,12 +29,10 @@
 #include <linux/string.h>
 #include <linux/printk.h>
 #include <linux/random.h>
-#define ODI_GPON_HW_LOG(fmt, ...) pr_info_once("odi_gpon_hw: " fmt, ##__VA_ARGS__)
 #define ODI_GPON_HW_WARN(fmt, ...) pr_warn_ratelimited("odi_gpon_hw: " fmt, ##__VA_ARGS__)
 #else
 #include <string.h>
 #include <stdio.h>
-#define ODI_GPON_HW_LOG(fmt, ...) printf("odi_gpon_hw: " fmt, ##__VA_ARGS__)
 #define ODI_GPON_HW_WARN(fmt, ...) printf("odi_gpon_hw: " fmt, ##__VA_ARGS__)
 #endif
 
@@ -434,12 +432,28 @@ static void hw_write_boh(uint32_t len)
 		odi_reg_write(ODI_GPON_USF_BURST_HDR_BYTE(9U + i), odi_gpon_hw.boh_delimiter[i]);
 }
 
+/* The burst overhead an Extended_Burst_Length count makes: the fixed bytes
+ * plus the type 3 preamble, at most 128 bytes in all (G.984.3 9.2.3.20 note
+ * 2, "the maximum length of the entire burst mode overhead is 128 bytes").
+ * No lower bound is applied: the count is the OLT's to choose and the
+ * standard sets none, only that the OLT makes the total a whole number of
+ * bytes; the 12 bytes of the no-message default are not a floor on it.
+ */
+#define ODI_GPON_HW_BOH_LEN_EXT_MAX	128U
+
+static uint16_t hw_ext_total(uint8_t type3_bytes)
+{
+	unsigned int total = odi_gpon_hw.boh_fixed_bytes + (unsigned int)type3_bytes;
+
+	return (uint16_t)(total > ODI_GPON_HW_BOH_LEN_EXT_MAX ? ODI_GPON_HW_BOH_LEN_EXT_MAX : total);
+}
+
 static void hw_set_ext_burst_length(uint8_t pre_ranged_bytes, uint8_t ranged_bytes)
 {
 	if (!odi_gpon_hw.boh_valid)
 		return;	/* no Upstream_Overhead yet: nothing to extend */
-	odi_gpon_hw.boh_ranged_len = (uint16_t)(odi_gpon_hw.boh_fixed_bytes + ranged_bytes);
-	odi_gpon_hw.boh_preranged_len = (uint16_t)(odi_gpon_hw.boh_fixed_bytes + pre_ranged_bytes);
+	odi_gpon_hw.boh_ranged_len = hw_ext_total(ranged_bytes);
+	odi_gpon_hw.boh_preranged_len = hw_ext_total(pre_ranged_bytes);
 	if (odi_gpon_hw.eqd_applied)
 		hw_write_boh(odi_gpon_hw.boh_ranged_len);
 	else
@@ -659,6 +673,26 @@ static void hw_load_key(void *ctx, unsigned int slot, const uint8_t key[16])
 	unsigned int i;
 
 	(void)ctx;
+
+	/* A key for the next switch makes the switch time the OLT gave for
+	 * the one before it meaningless (G.984.3 clause 12.4: the previous
+	 * superframe number is discarded, a new Key_Switching_Time follows).
+	 * The MAC flips when the downstream superframe counter equals
+	 * DSK_SWITCH_FRAME, so a time still waiting there would put the new
+	 * key in use at a superframe the OLT does not mean for it. Moved to a
+	 * superframe that has just gone by, which the counter does not reach
+	 * again for about 37 h (30 bits of 125 us) and which the next
+	 * Key_Switching_Time replaces. Only when one is waiting: a first key
+	 * writes nothing here, as in the stock trace. Before the key words, so
+	 * nothing is armed while they are being loaded.
+	 */
+	if (slot == ODI_GPON_DSK_SLOT_NEXT && odi_gpon_hw.key_switch_armed) {
+		uint32_t now = ODI_GPON_DSF_SUPERFRAME_COUNT_GET(odi_reg_read(ODI_GPON_DSF_SUPERFRAME_OFF));
+
+		odi_reg_write(ODI_GPON_DSK_SWITCH_FRAME_OFF,
+			      ODI_GPON_DSK_SWITCH_FRAME_SUPERFRAME_SET(0, now - 1U));
+		odi_gpon_hw.key_switch_armed = 0;
+	}
 
 	reg = 0;
 	if (slot == ODI_GPON_DSK_SLOT_CURRENT)
@@ -1409,7 +1443,5 @@ void odi_gpon_hw_set_ploam_log(odi_gpon_ploam_log_fn fn)
  */
 void odi_gpon_hw_ext_burst_length(uint8_t pre_ranged_preamble_bytes, uint8_t post_o5_preamble_bytes)
 {
-	ODI_GPON_HW_LOG("Ext_Burst_Length: pre-ranged %u, ranged %u type 3 preamble bytes\n",
-			(unsigned int)pre_ranged_preamble_bytes, (unsigned int)post_o5_preamble_bytes);
 	hw_set_ext_burst_length(pre_ranged_preamble_bytes, post_o5_preamble_bytes);
 }

@@ -230,6 +230,11 @@ int odi_gpon_fsm_line_event(const struct odi_gpon_fsm *fsm, int alarm, enum odi_
  * reaches the dispatch and is not acted on. Returns 1 if addressed to us.
  */
 int odi_gpon_fsm_directed_to_us(const struct odi_gpon_fsm *fsm, const struct odi_gpon_ploam *msg);
+/* The same for BER_Interval and Key_Switching_Time (G.984.3 9.2.3.18,
+ * 9.2.3.19: "Directed message to one ONU or all ONUs"): addressed to this
+ * ONU or broadcast, in O4, O5 or O6; a message to another ONU is not ours.
+ */
+int odi_gpon_fsm_addressed_to_us(const struct odi_gpon_fsm *fsm, const struct odi_gpon_ploam *msg);
 
 /* The pure transition function. msg is only read for
  * ODI_GPON_EVENT_PLOAM_RX (must be non-NULL then); ignored (may be NULL)

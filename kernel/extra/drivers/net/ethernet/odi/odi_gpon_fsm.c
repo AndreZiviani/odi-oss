@@ -68,6 +68,12 @@ static int odi_gpon_onu_id_matches(const struct odi_gpon_fsm *fsm, uint8_t onu_i
 	return onu_id == fsm->onu_id || onu_id == ODI_GPON_ONU_ID_BROADCAST;
 }
 
+static int odi_gpon_fsm_holds_onu_id(const struct odi_gpon_fsm *fsm)
+{
+	return fsm->state == ODI_GPON_STATE_O4 || fsm->state == ODI_GPON_STATE_O5 ||
+	       fsm->state == ODI_GPON_STATE_O6;
+}
+
 /* A directed message is ours only while this ONU holds an ONU-ID, which is
  * from Assign_ONU-ID (O3 -> O4) until it is discarded (every way out to
  * O1, O2 or O7): O4, O5 and O6. fsm->onu_id reads 0 both for ONU-ID 0 and
@@ -78,10 +84,22 @@ static int odi_gpon_onu_id_matches(const struct odi_gpon_fsm *fsm, uint8_t onu_i
  */
 int odi_gpon_fsm_directed_to_us(const struct odi_gpon_fsm *fsm, const struct odi_gpon_ploam *msg)
 {
-	if (fsm->state != ODI_GPON_STATE_O4 && fsm->state != ODI_GPON_STATE_O5 &&
-	    fsm->state != ODI_GPON_STATE_O6)
+	if (!odi_gpon_fsm_holds_onu_id(fsm))
 		return 0;
 	return msg->onu_id != ODI_GPON_ONU_ID_BROADCAST && msg->onu_id == fsm->onu_id;
+}
+
+/* For the messages G.984.3 lets the OLT send to one ONU or to all
+ * (BER_Interval 9.2.3.18, Key_Switching_Time 9.2.3.19, octet 1 "ONU-ID or
+ * 11111111"): ours, or the broadcast copy, and never another ONU's, which
+ * a shared PON also carries to this receiver. Same state gate and same
+ * treatment of ONU-ID 0 as odi_gpon_fsm_directed_to_us().
+ */
+int odi_gpon_fsm_addressed_to_us(const struct odi_gpon_fsm *fsm, const struct odi_gpon_ploam *msg)
+{
+	if (!odi_gpon_fsm_holds_onu_id(fsm))
+		return 0;
+	return msg->onu_id == ODI_GPON_ONU_ID_BROADCAST || msg->onu_id == fsm->onu_id;
 }
 
 /* Stops whatever timer is running for the state being left, if any. Safe
@@ -474,7 +492,8 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 				}
 			}
 			ops->load_key(ctx, ODI_GPON_DSK_SLOT_NEXT, fsm->aes_key);
-		} else if (msg->type == ODI_GPON_DS_KEY_SWITCHING_TIME) {
+		} else if (msg->type == ODI_GPON_DS_KEY_SWITCHING_TIME &&
+			   odi_gpon_fsm_addressed_to_us(fsm, msg)) {
 			odi_gpon_decode_key_switching_time(msg, &kst);
 			ops->switch_key(ctx, kst.switch_superframe);
 		} else if (msg->type == ODI_GPON_DS_REQUEST_PASSWORD &&
