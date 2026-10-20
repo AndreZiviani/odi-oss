@@ -17,8 +17,13 @@
  *
  * Two priorities leave here, and they are not the same number. The flow
  * descriptor's ds_prio is the stock one, the bottom three bits reversed
- * against the per-UNI queue count (OMCI priority 0 is 7). Driver command 23
- * carries the priority as the OLT sees it, RelatedPort & 0xffff, unreversed.
+ * against the per-UNI queue count (OMCI priority 0 is 7); the switch driver
+ * does not read it. Driver command 23 carries the priority as the OLT sees
+ * it, RelatedPort & 0xffff, and the driver takes that as the number of the
+ * UNI's hardware queue, the one served first being the highest: the queues
+ * an OLT gives weight 0 (strict) are the ones it names with the high
+ * priority numbers (ISP1 and claro: entities 0 and 1, priorities 7 and 6),
+ * which only makes sense if a larger number is served first.
  */
 static uint32_t caps_uni_queues(void)
 {

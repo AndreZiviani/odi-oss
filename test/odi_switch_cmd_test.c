@@ -80,6 +80,10 @@ int main(int argc, char **argv)
 	 * odi_host_pause_test.c checks that.
 	 */
 	odi_sw_host_pause = true;
+	/* The capture is the stock driver's, which writes the one word of a
+	 * downstream queue and no schedule; the schedule is compared in
+	 * odi_switch_dsq_test.c and in the boot golden. */
+	odi_sw_ds_sched = false;
 
 	/* ODI_SWITCH_CMD_TEST_INIT_PLATFORM=1 runs the platform init first,
 	 * as a boot does: odi_switch_init_platform_test.sh uses it to check

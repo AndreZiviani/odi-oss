@@ -168,6 +168,10 @@ static const struct odi_switch_flow_ops *odi_sw_flow_ops;
  * put there, so a MIB reset puts back only those: ODI_SW_CMD_UNI_LIMIT_*. */
 static uint8_t odi_sw_uni_limit_set[ODI_SW_PORT_COUNT];
 
+/* The queues of each port cmd 23 gave a downstream schedule (bit q), so a
+ * MIB reset puts back those and writes nothing on the rest. */
+static uint8_t odi_sw_dsq_set[ODI_SW_PORT_COUNT];
+
 void odi_switch_cmd_set_flow_ops(const struct odi_switch_flow_ops *ops)
 {
 	odi_sw_flow_ops = ops;
@@ -187,8 +191,10 @@ void odi_switch_cmd_reset_state(void)
 #ifndef __KERNEL__
 	odi_sw_host_rows_n = 0;
 #endif
-	for (i = 0; i < ODI_SW_PORT_COUNT; i++)
+	for (i = 0; i < ODI_SW_PORT_COUNT; i++) {
 		odi_sw_uni_limit_set[i] = 0;
+		odi_sw_dsq_set[i] = 0;
+	}
 	odi_switch_bdgconn_reset();
 	for (i = 0; i < sizeof(odi_sw_gem_ds_used) / sizeof(odi_sw_gem_ds_used[0]); i++)
 		odi_sw_gem_ds_used[i] = 0;
@@ -423,6 +429,48 @@ static void uni_limits_restore(void)
 	}
 }
 
+/* Every downstream queue cmd 23 scheduled, strict at weight 1 again: the
+ * reset state, which is what a queue the OLT has not provisioned has. The
+ * priority to queue map is left identity, as the stock init has it. */
+static void dsq_restore(void)
+{
+	uint32_t p, q;
+
+	for (p = 0; p < ODI_SW_PORT_COUNT; p++) {
+		if (!odi_sw_dsq_set[p])
+			continue;
+		for (q = 0; q < ODI_SW_DSQ_QUEUES; q++)
+			if (odi_sw_dsq_set[p] & (1U << q))
+				odi_sw_ds_queue_sched(p, q, 0, 1);
+		ODI_SW_LOG("port %u: downstream queues back to the boot state\n",
+			   (unsigned int)p);
+		odi_sw_dsq_set[p] = 0;
+	}
+}
+
+/* cmd 23, direction DS, the scheduler half: the queue is number `index`
+ * (the OLT's RelatedPort priority; a larger number is served first) of the
+ * UNI port `owner`, weighted when omcid says so (Weight 2 or more, as the
+ * stock stack decides it) and strict otherwise. PORT_QUEUE_MAP is the
+ * stock write and goes first, whatever follows. A queue that is not a UNI's
+ * (owner is the PON port for a VEIP queue, or a port that is no UNI) or
+ * has a priority past the eight queues gets no schedule: the call still
+ * succeeds, as it always did. */
+static void ds_queue_sched(const struct omci_priq *q)
+{
+	if (!odi_sw_ds_sched)
+		return;
+	if (!uni_port_ok(q->owner) || q->index >= ODI_SW_DSQ_QUEUES) {
+		ODI_SW_LOG("cmd 23: downstream queue %u of port %u not scheduled\n",
+			   (unsigned int)q->index, (unsigned int)q->owner);
+		return;
+	}
+	odi_sw_ds_prio_map_identity(q->owner);
+	odi_sw_ds_queue_sched(q->owner, q->index, q->wrr != 0U && q->weight >= 2U,
+			      q->weight);
+	odi_sw_dsq_set[q->owner] |= (uint8_t)(1U << q->index);
+}
+
 /* cmd 53: {port, limit}, the most addresses the port may learn. */
 static int cmd_mac_learn_limit(void *buf, uint32_t len)
 {
@@ -627,8 +675,10 @@ static void flow_mark(uint32_t *map, uint32_t id)
 
 /* cmd 23: a priority queue (uapi/omci_gemflow.h, struct omci_priq), in one
  * of two register shapes, and the argument says which. A downstream queue
- * writes PORT_QUEUE_MAP; the ISP1 capture sends its eight before any T-CONT
- * exists, all with the same word. An upstream queue is queue `index` (its
+ * writes PORT_QUEUE_MAP, the one word the stock driver writes (the ISP1
+ * capture sends its eight before any T-CONT exists, all with the same
+ * word), and then gives the UNI's queue its schedule (ds_queue_sched()),
+ * which the stock driver does not. An upstream queue is queue `index` (its
  * ordinal) of the T-CONT `owner` (the index cmd 21 handed back), and lands
  * on that T-CONT's block: logical queue block start + ordinal. Its type
  * and weight come from wrr and weight, its rates from cir and pir, as the
@@ -649,6 +699,7 @@ static int cmd_pri_queue(void *buf, uint32_t len)
 
 	if (q->dir == OMCI_GEMFLOW_DS) {
 		odi_sw_ponmac_queue_add(ODI_SW_CMD23_PORT_QUEUE_MAP);
+		ds_queue_sched(q);
 		return 0;
 	}
 	if (q->dir != OMCI_GEMFLOW_US)
@@ -734,6 +785,7 @@ static int cmd_mib_reset(void *buf, uint32_t len)
 
 	(void)buf; (void)len;
 	uni_limits_restore();
+	dsq_restore();
 	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
 		(void)us_flow_delete(i);
 	for (t = 0; t < ODI_SW_PONQ_TCONTS; t++) {

@@ -175,6 +175,15 @@ void odi_sw_uni_shape_set(uint32_t port, uint32_t units);
 /* cmd 23, a downstream queue: one write of PORT_QUEUE_MAP. */
 void odi_sw_ponmac_queue_add(uint32_t th);
 
+/* cmd 23, a downstream queue, the scheduler half: queue q of a UNI port is
+ * weighted at weight (OMCI units) or strict; the port's priority to queue
+ * map is identity. odi_sw_ds_sched (module parameter ds_sched, default on)
+ * is the switch for it. */
+extern bool odi_sw_ds_sched;
+void odi_sw_ds_queue_sched(uint32_t port, uint32_t q, int wfq, uint32_t weight);
+void odi_sw_ds_prio_map_identity(uint32_t port);
+#define ODI_SW_DSQ_QUEUES		8U
+
 /* The upstream PON queues. The chip has 65: T-CONTs (PON schedulers) 0-7
  * share queues 0-31, T-CONTs 8-15 share 32-63, and the OMCC T-CONT 16 has
  * queue 64. A T-CONT's queue mask (PON_SCH_QMAP) holds logical queues, the

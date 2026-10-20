@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Switch: the downstream queues of the UNI (ME 277, the ones the OLT
+  gives a Weight) are now scheduled: a queue with Weight 2 or more is
+  weighted, at that weight, and one with 0 or 1 is strict, in the queue
+  number the OLT names in RelatedPort (a higher number is served first).
+  The stock driver ignored the weights and left all eight queues strict, so
+  what the OLT provisioned for traffic toward the host had no effect. An OLT
+  that sets nothing leaves the queues as the boot had them, the OLT's
+  MIB reset puts them back, and `odi_switch.ds_sched=N` turns it off. Which
+  queue a frame takes is not changed: downstream frames still all take queue
+  0 (every OLT seen points every GEM port at the first queue), so nothing
+  changes on the wire yet.
+
 ## v1.9.0 - 2026-10-21
 
 - The image ships confd v1.7.1 (odi-ui: sign-in falls back to the built-in
