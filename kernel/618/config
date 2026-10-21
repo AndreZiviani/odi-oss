@@ -272,3 +272,99 @@ CONFIG_SOFTLOCKUP_DETECTOR=y
 # on, read back from the stock firmware after a failed trial boot. On by
 # default while the rare boot stall is open.
 CONFIG_ODI_EARLY_CRUMBS=y
+
+# Config diet, second pass (the first, above, was about syscalls). The uImage
+# was 1310849 bytes, 96% of the 1359872-byte kernel partition, and the loader
+# unpacks it before the kernel runs. Every symbol turned off below builds code
+# for hardware this board does not have, or for an interface nothing in the
+# image reaches. Evidence is the same as above: every ELF in the rootfs scanned
+# for the syscalls (objdump, o32 numbers), the scripts and our own sources
+# grepped for the /proc, /sys and /dev paths and sockets they use. The
+# per-option sizes are in docs/KERNEL.md ("The config").
+
+# No VT, no keyboard, no mouse, no HID: the board has a UART and no input
+# device of any kind. The console is the 8250 on ttyS0, which needs none of
+# these (VT_CONSOLE is the screen console). Nothing opens /dev/tty0..63; the
+# only tty nodes the image makes are /dev/console, /dev/tty and ttyS0/1.
+# CONFIG_INPUT also covers the PS/2 mouse and AT keyboard drivers that default
+# to on, and I2C_HID (I2C itself stays: the optics port is i2c-0).
+# CONFIG_VT is not set
+# CONFIG_INPUT is not set
+# CONFIG_SERIO is not set
+# CONFIG_HID_SUPPORT is not set
+
+# TIOCSTI (inject input into a tty) and tty line disciplines loaded on demand:
+# no tool here uses TIOCSTI, and N_TTY, the only discipline in use, is built
+# in. The legacy BSD ptys stay on: rcS makes their nodes (tested).
+# CONFIG_LEGACY_TIOCSTI is not set
+# CONFIG_LDISC_AUTOLOAD is not set
+
+# Hardware random generators, hwmon, PTP clocks, PPS and NVMEM providers: no
+# driver in this tree registers with any of them, so the cores only add
+# /sys/class entries. The kernel pool is fed by the CPU and by the timer; the
+# image reads /dev/urandom and getrandom().
+# CONFIG_HW_RANDOM is not set
+# CONFIG_HWMON is not set
+# CONFIG_PTP_1588_CLOCK is not set
+# CONFIG_PPS is not set
+# CONFIG_NVMEM is not set
+
+# Block layer: the only block device is mtdblock, which backs the squashfs
+# root and has nothing to reorder (no elevator is the "none" scheduler, which
+# still merges). No partition table is ever read off an mtdblock device, and the
+# autoload only loads modules, of which there are none.
+# CONFIG_MQ_IOSCHED_DEADLINE is not set
+# CONFIG_MQ_IOSCHED_KYBER is not set
+CONFIG_PARTITION_ADVANCED=y
+# CONFIG_MSDOS_PARTITION is not set
+# CONFIG_EFI_PARTITION is not set
+# CONFIG_BLOCK_LEGACY_AUTOLOAD is not set
+
+# Suspend and power management: nothing suspends (no wake source, no
+# /sys/power user, the board never sleeps beyond the idle instruction), and
+# the drivers here have no power-management callbacks. Reboot, restart and
+# power-off live in kernel/reboot.c and are not affected.
+# CONFIG_SUSPEND is not set
+# CONFIG_PM is not set
+
+# seccomp: no ELF loads the seccomp syscall number (4352) and none carries the
+# string "seccomp" (busybox and dropbear call prctl, but never to install a
+# filter), so nothing in the image can set one.
+# CONFIG_SECCOMP is not set
+
+# epoll: no ELF loads an epoll syscall number (4248-4250, 4313, 4326, 4441)
+# or carries an epoll_ symbol. sgetmask/ssetmask and cachestat (4068, 4069,
+# 4451) are unreachable too. dnotify is fcntl F_NOTIFY, which nothing issues
+# (inotify is already off above).
+# CONFIG_DNOTIFY is not set
+# CONFIG_EPOLL is not set
+# CONFIG_SGETMASK_SYSCALL is not set
+# CONFIG_CACHESTAT_SYSCALL is not set
+
+# The floating point emulator. The RLX5281 has no FPU, and every ELF in the
+# rootfs is soft-float (readelf -A: "Soft float") with no coprocessor-1
+# instruction in its code (objdump, all 13 ELFs), so the emulator was dead
+# weight. A cop1 instruction now raises SIGILL instead of being emulated;
+# isa-audit (packages/isa-audit.sh, run on every ELF the build ships) already
+# fails on floating point, and our gcc defaults to -msoft-float.
+# CONFIG_MIPS_FP_SUPPORT is not set
+
+# Network tuning nothing reads: byte queue limits (the /sys/class/net/*/queues
+# knobs) and busy polling (SO_BUSY_POLL, net.core.busy_poll).
+# CONFIG_BQL is not set
+# CONFIG_NET_RX_BUSY_POLL is not set
+
+# The rootfs is squashfs with xz and no BCJ filter (image/build.sh: -comp xz,
+# no -Xbcj), and no zlib squashfs block either. zlib itself stays for jffs2.
+# CONFIG_SQUASHFS_ZLIB is not set
+# CONFIG_XZ_DEC_X86 is not set
+# CONFIG_XZ_DEC_POWERPC is not set
+# CONFIG_XZ_DEC_ARM is not set
+# CONFIG_XZ_DEC_ARMTHUMB is not set
+# CONFIG_XZ_DEC_ARM64 is not set
+# CONFIG_XZ_DEC_SPARC is not set
+# CONFIG_XZ_DEC_RISCV is not set
+
+# No wireless: the vendor menus were on by default and select nothing.
+# CONFIG_WLAN is not set
+# CONFIG_WIRELESS is not set

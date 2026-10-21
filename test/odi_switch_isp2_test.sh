@@ -21,7 +21,7 @@ BIN=$(mktemp -t odi_switch_isp2_test.XXXXXX)
 OUT=$(mktemp -t odi_switch_isp2_test_out.XXXXXX)
 trap 'rm -f "$BIN" "$OUT"' EXIT
 
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_switch_isp2_test.c"
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_switch_isp2_test.c"
 "$BIN" "$OUT"
 
 python3 - "$OUT" "$FIXTURE" <<'PY'

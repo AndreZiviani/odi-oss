@@ -7,5 +7,5 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=$(mktemp -t odi_host_autoneg_test.XXXXXX)
 trap 'rm -f "$BIN"' EXIT
 
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_host_autoneg_test.c"
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_host_autoneg_test.c"
 "$BIN"

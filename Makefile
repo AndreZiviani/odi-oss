@@ -3,7 +3,7 @@
 # Read README.md and docs/FLASHING.md before expecting a working image.
 
 .PHONY: help kernel-tree toolchain toolchain-audit kernel packages busybox \
-	src releases image image-all clean distclean lint test test-host test-omci \
+	src releases image image-all clean distclean lint test test-host test-host-asan test-omci \
 	test-diag test-rcs test-qemu test-omci-respond test-igmp
 
 help:
@@ -118,6 +118,34 @@ test:
 	@MAKE='$(MAKE)' tools/test-legs.sh 1 test-omci-build
 	@MAKE='$(MAKE)' tools/test-legs.sh $(TEST_JOBS) $(TEST_LEGS)
 	@echo "ok"
+
+# The C unit tests of test-host again, built with AddressSanitizer and
+# UndefinedBehaviorSanitizer (CI job host-asan). Every test/*.sh that compiles
+# a C program does so through cc ${ODI_SAN_CFLAGS-}, empty in test-host, so
+# this runs those same scripts, plus the host-built tests of src/nv and src/diag
+# (the parser, conversions and formatters; the target builds stay in test-diag
+# under qemu), with the flags
+# set: no second copy of any build line. The shell-only tests have nothing to
+# instrument and are not run here. -fno-sanitize-recover makes a UB report
+# fatal (the default is to print and carry on, exit 0); ASAN_OPTIONS keeps
+# leak detection on, which is what turns a missing free() into a failure.
+# Every leg runs, so one report does not hide the rest.
+# ASAN_EXCLUDE names the scripts left out, each with the reason; none so far.
+ASAN_EXCLUDE :=
+test-host-asan:
+	@command -v cc >/dev/null || { echo "test-host-asan: no host cc" >&2; exit 1; }
+	@fail=0; \
+	export ODI_SAN_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined -g'; \
+	export ASAN_OPTIONS=detect_leaks=1:abort_on_error=0; \
+	export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1; \
+	for t in $$(grep -l ODI_SAN_CFLAGS test/*.sh); do \
+		case " $(ASAN_EXCLUDE) " in *" $$t "*) continue;; esac; \
+		echo "== $$t"; bash $$t || { echo "FAIL $$t"; fail=1; }; \
+	done; \
+	echo "== src/nv"; $(MAKE) -C src/nv test || { echo "FAIL src/nv"; fail=1; }; \
+	echo "== src/diag (host part of test)"; $(MAKE) -C src/diag test || { echo "FAIL src/diag"; fail=1; }; \
+	[ $$fail = 0 ] || { echo "test-host-asan: failures above" >&2; exit 1; }; \
+	echo "test-host-asan: ok"
 
 test-host:
 	sh src/omci/testlib-test.sh
