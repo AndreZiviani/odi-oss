@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.11.0 - 2026-10-21
+
 - Releases: confd v1.8.0 (the web UI's management-address change goes
   through the `mgmt-addr.sh` trial and opens the new address by itself) and
   metricsd v1.7.0 (`gpon_soc_temperature_celsius`, from the new SoC
