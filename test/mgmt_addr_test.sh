@@ -25,6 +25,11 @@ N=$PWD/rootfs/skeleton/etc/scripts/network.sh
 F=$PWD/rootfs/skeleton/etc/scripts/flash
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
+# The test may itself run over ssh (a remote build): an inherited
+# SSH_CONNECTION would answer the confirm that the cases below expect to
+# carry no address, so only the cases that set it see one.
+unset SSH_CONNECTION
+
 pass=0 fail=0
 ok() { echo "ok    $1"; pass=$((pass + 1)); }
 no() { echo "FAIL  $1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/        /'; fail=$((fail + 1)); }
@@ -122,7 +127,7 @@ spawned() {
 }
 spawned_none() { /bin/sleep 0.3; cat "$T/spawned" 2>/dev/null; }
 # run_trial: the spawned trial-run, itself, with the hook in its window.
-run_trial() { sh "$S" trial-run "$(st trial_id)" "${1:-30}" > /dev/null 2>&1; }
+run_trial() { sh "$S" trial-run "$(st trial_id)" 30 > /dev/null 2>&1; }
 
 OLD="192.168.0.1 255.255.255.0"
 NEW="10.1.1.1 255.255.255.0"
