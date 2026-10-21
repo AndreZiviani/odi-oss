@@ -266,9 +266,12 @@ static inline uint32_t ODI_SW_VLAN_INGRESS_CHECK_ON_SET(uint32_t reg, uint32_t i
 	return (reg & ~(0x1U << sh)) | ((val & 0x1U) << sh);
 }
 
-/* PORT_VLAN_INDEX: 0x01300c, one word per port */
+/* PORT_VLAN_INDEX: 0x01300c, two ports per word, 12 bits each (a fresh boot
+ * reads 0x1001): words 0 and 1 (0x01300c, 0x013010) hold ports 0-1 and 2-3.
+ * A write replaces the whole word, so it sets both ports it holds.
+ */
 #define ODI_SW_PORT_VLAN_INDEX_BASE	0x1300cU
-#define ODI_SW_PORT_VLAN_INDEX(n)	(ODI_SW_PORT_VLAN_INDEX_BASE + 4U * (uint32_t)(n))	/* slots used: 0,1 of 0..3 */
+#define ODI_SW_PORT_VLAN_INDEX(n)	(ODI_SW_PORT_VLAN_INDEX_BASE + 4U * (uint32_t)(n))	/* word n = ports 2n, 2n+1; words used: 0,1 */
 
 /* PROTO_VLAN_GROUP: 0x013020, array 0..3 */
 #define ODI_SW_PROTO_VLAN_GROUP_BASE	0x13020U
