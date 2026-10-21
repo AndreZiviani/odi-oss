@@ -80,6 +80,7 @@
 #include "odi_gpon_pw.h"
 #include "odi_replay_blob.h"
 #include "odi_switch_cmd.h"
+#include "odi_switch_dal.h"
 #include "odi_switch_hw.h"
 #include "odi_switch_reg.h"
 
@@ -1157,8 +1158,12 @@ static struct odi_gpon_ctr *odi_gpon_proc_ctr_snap(void)
 	return snap;
 }
 
+/* The most ports the status file lists as decrypted: the 64 DS slots cmd 25
+ * accepts, so every one of them fits. */
+#define ENC_PORTS_MAX	64U
+
 /* /proc/odi_gpon/status: the ONU state, ONU-ID, serial number, EqD, the
- * Alloc-IDs, the REI count and the TO1/TO2 expiries, the interrupt
+ * Alloc-IDs, the decrypted GEM ports, the REI count and the TO1/TO2 expiries, the interrupt
  * bookkeeping, the laser, the last LOS edge, the last Upstream_Overhead and
  * Ranging_Time, then the sampler's live bits, alarm and ONU state times and
  * state transitions.
@@ -1227,6 +1232,19 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	for (i = 0; i < n_alloc; i++)
 		seq_printf(seq, " %u", (unsigned int)alloc_ids[i]);
 	seq_putc(seq, '\n');
+	/* The GEM ports the downstream path decrypts, the same shape: what
+	 * the OLT's Encrypted_Port-IDs left on (odi_switch_gpon_aes_ports()).
+	 * omcid answers the GEM port network CTP's Encryption state from it.
+	 */
+	{
+		uint16_t enc[ENC_PORTS_MAX];
+		unsigned int n_enc = odi_switch_gpon_aes_ports(enc, ARRAY_SIZE(enc));
+
+		seq_printf(seq, "enc_ports %u", n_enc);
+		for (i = 0; i < n_enc; i++)
+			seq_printf(seq, " %u", (unsigned int)enc[i]);
+		seq_putc(seq, '\n');
+	}
 
 	seq_printf(seq, "rei_count %u\n", rei_count);
 	seq_printf(seq, "to1_expiries %u\n", to1_exp);

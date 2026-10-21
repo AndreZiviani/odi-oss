@@ -55,11 +55,13 @@ tci() {
 	printf '%04x' "$_n"
 }
 
-# ctrs <cor bytes> <cor cw> <uncor cw>: the driver totals. Written by rename,
-# so omcid never reads half a file.
+# ctrs <cor bytes> <cor cw> <uncor cw> [total cw]: the driver totals. Written
+# by rename, so omcid never reads half a file. The total code words line is
+# only there when given, as with a driver that does not publish it.
 ctrs() {
 	printf 'ctr_samples 9\nctr ds_fec_corrected_bits 0\nctr ds_fec_corrected_bytes %s\nctr ds_fec_corrected_cw %s\nctr ds_fec_uncorrectable_cw %s\nctr ds_superframe_loss 0\n' \
 		"$1" "$2" "$3" > /tmp/pm-ctr.new
+	[ -z "${4:-}" ] || printf 'ctr ds_fec_total_cw %s\n' "$4" >> /tmp/pm-ctr.new
 	mv /tmp/pm-ctr.new /tmp/pm-ctr
 }
 clock() { printf '%s\n' "$1" > /tmp/pm-clk.new; mv /tmp/pm-clk.new /tmp/pm-clk; }
@@ -178,6 +180,21 @@ ctrs 9000000010 141 9
 clock 5202
 check "after the reset the baseline is the Create's" \
       "$(get $I1 cur)" "00$(printf '%08x%08x' 10 1)${Z}${Z}0000"
+
+# Total code words: the driver's ds_fec_total_cw, counted per interval like
+# the rest. One second of frames with FEC on is 8000 x 153 = 1224000 (0x12a8c0).
+ctrs 9000000010 141 9 5000000
+clock 5203
+send "$(tci)" 4f 0002 0000 ""
+send "$(tci)" 44 $CLS $I1 000a
+ctrs 9000000010 141 9 6224000
+clock 5204
+check "total code words: the count since Create, one second of frames" \
+      "$(get $I1 cur)" "00${Z}${Z}${Z}0012a8c00000"
+ctrs 9000000010 141 9 99000000000
+clock 5205
+check "total code words: a count past 32 bits stops at 4294967295" \
+      "$(get $I1 cur)" "00${Z}${Z}${Z}ffffffff0000"
 
 # An entity that does not exist answers nothing it was not given.
 check "a Get of an instance that was never created: zeros" \

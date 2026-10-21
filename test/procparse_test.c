@@ -102,6 +102,22 @@ int main(void)
 		   "cut inside an id rejected");
 	}
 
+	puts("/proc/odi_gpon/status enc_ports line");
+	{
+		static const char f[] = "alloc_ids 1 348\nenc_ports 3 1434 1690 1818\nrei_count 0\n";
+		uint16_t ids[8];
+		int n = pp_gpon_enc_ports(f, (unsigned)strlen(f), ids, 8);
+
+		ok(n == 3 && ids[0] == 1434 && ids[1] == 1690 && ids[2] == 1818,
+		   "three encrypted ports, in order");
+		ok(pp_gpon_enc_ports("enc_ports 0\n", 13, ids, 8) == 0, "none encrypted: 0");
+		ok(pp_gpon_enc_ports("alloc_ids 1 348\n", 16, ids, 8) == -1,
+		   "no line (an older kernel): cannot tell");
+		ok(pp_gpon_enc_ports("enc_ports 1 4096\n", 17, ids, 8) == -1, "past 12 bits rejected");
+		ok(pp_gpon_alloc_ids(f, (unsigned)strlen(f), ids, 8) == 1 && ids[0] == 348,
+		   "the alloc_ids line beside it is unchanged");
+	}
+
 	puts("/proc/odi_gpon/counters totals");
 	{
 		static const char f[] = "ctr_samples 9\nctr ds_fec_corrected_cw 12\n"
