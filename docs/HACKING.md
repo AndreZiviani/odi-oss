@@ -918,7 +918,8 @@ Each of these has cost real time. The pointer says where the evidence is.
 
 - **The CPU traps on instructions a normal MIPS toolchain emits**: `mul`,
   `clz` (all of SPECIAL2), `teq`/`tne`/`tge`/`tlt` and their forms, and the
-  branch-likely `beql`/`bnel`. Every build uses `-march=mips2
+  branch-likely `beql`/`bnel` (and `bltzl`, which does not trap but
+  misexecutes: its delay slot always runs). Every build uses `-march=mips2
   -mno-branch-likely -mdivide-breaks`, including the toolchain's own target
   libraries, and every ELF in the image passes `packages/isa-audit.sh` (a
   deny list) and `packages/isa-allowlist.sh` (only mnemonics confirmed on

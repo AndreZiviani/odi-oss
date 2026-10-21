@@ -102,6 +102,26 @@ int main(void)
 		   "cut inside an id rejected");
 	}
 
+	puts("/proc/odi_gpon/counters totals");
+	{
+		static const char f[] = "ctr_samples 9\nctr ds_fec_corrected_cw 12\n"
+			"ctr ds_fec_corrected_bytes 34\nctr big 18446744073709551615\n"
+			"ctr over 18446744073709551616\nctr bad 1x\nctr cut 5";
+		uint64_t v = 7;
+
+		ok(pp_ctr(f, (unsigned)strlen(f), "ds_fec_corrected_cw", &v) == 0 && v == 12,
+		   "a total");
+		ok(pp_ctr(f, (unsigned)strlen(f), "ds_fec_corrected_bytes", &v) == 0 && v == 34,
+		   "a name that shares a prefix is its own line");
+		ok(pp_ctr(f, (unsigned)strlen(f), "big", &v) == 0 && v == UINT64_MAX, "2^64 - 1");
+		ok(pp_ctr(f, (unsigned)strlen(f), "over", &v) == -1, "2^64 rejected");
+		ok(pp_ctr(f, (unsigned)strlen(f), "bad", &v) == -1, "trailing junk rejected");
+		ok(pp_ctr(f, (unsigned)strlen(f), "cut", &v) == 0 && v == 5, "no trailing newline");
+		ok(pp_ctr(f, (unsigned)strlen(f), "ds_fec", &v) == -1, "a prefix is not a name");
+		ok(pp_ctr(f, (unsigned)strlen(f), "samples", &v) == -1, "only ctr lines");
+		ok(pp_ctr("", 0, "x", &v) == -1, "empty read: cannot tell");
+	}
+
 	puts("GPON_SN label form");
 	memset(sn, 0, sizeof sn);
 	ok(pp_label_sn("ABCD0011aaFF", 12, sn) == 0 && !memcmp(sn, want, 8), "vendor + 8 hex");

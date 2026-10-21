@@ -635,6 +635,10 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		return;
 	}
 	if (mt == OMCI_MT_SYNC_TIME) {
+		/* Year (2 bytes), month, day, hour, minute, second: only the
+		 * time of day matters, it places the 15-minute PM boundaries
+		 * (pm.c). An OLT that sends no date still sends the time. */
+		pm_sync_time(f[12], f[13], f[14]);
 		body[0] = OMCI_OK;
 		body[1] = 0;                     /* success, no offset */
 		send_resp(fd, tid, f, body, 2);
@@ -688,6 +692,9 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 
 		body[0] = OMCI_OK;
 		n = 3;
+		/* A PM entity answers its completed interval to a Get and the
+		 * one in progress to Get current data (pm.c). */
+		pm_view(mt == OMCI_MT_GET_CURRENT_DATA);
 		for (unsigned k = 1; k <= 16; k++) {
 			uint16_t w;
 
@@ -709,6 +716,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * then parses every attribute after the gap at the wrong
 		 * offset. handle_upload_next has always built its mask this
 		 * way; this is the same discipline on the get path. */
+		pm_view(0);
 		nl_put16(body + 1, got);
 		/* NOT OMCI_ERR_ATTR_FAILED, tempting as it is. G.988 result 9
 		 * requires an unsupported-attributes mask and a failed-
@@ -814,6 +822,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 			return;
 		}
 		r = c ? mib_add(cls, inst) : 0;
+		if (r)
+			pm_create(cls, inst);
 		if (!r) {
 			body[0] = c ? OMCI_ERR_CMD : OMCI_ERR_UNKNOWN_ME;
 			send_resp(fd, tid, f, body, 1);
@@ -911,6 +921,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * the driver at all. */
 		apply_delete(c, inst);
 		mib_del(cls, inst);
+		pm_delete(cls, inst);
 		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 			mbpcd_tables_del(inst);
 		if (cls == OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE)

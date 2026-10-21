@@ -41,6 +41,45 @@ listed here.
   keeps everything from the fibre away from the IP stack. Normal frames carry both bits.
   Not yet checked on a stick: if `rx_split_dropped` counts on ordinary traffic the check is wrong.
 
+- OMCI: the FEC performance monitoring history data entity (class 312, which
+  an OLT creates and then reads) reports real values instead of zeros, on a
+  15-minute interval framework that other history entities can reuse. A Get
+  returns the last completed interval and Get current data the one in
+  progress; Interval end time counts completed intervals from 0 at Create;
+  Synchronize time puts the boundaries on the OLT's quarter hour and starts
+  every count again. Corrected bytes, corrected code words and uncorrectable
+  code words are the differences of the GPON driver's running totals
+  (`/proc/odi_gpon/counters`) over the interval, so nothing in the hardware is
+  cleared and the metrics counters are untouched; FEC seconds is the number
+  of seconds in which an uncorrectable code word arrived. Total code words
+  stays 0: the MAC does not count received code words and a derived figure
+  would be a guess. Threshold crossing alerts are not raised. After an omcid
+  restart an entity starts a new history, from interval 0. New omcid options
+  `-n` and `-t` (counter file, interval clock) are for tests, which run as the
+  new `pm` OMCI suite and cover the counter parser on the host.
+
+- Docs: `bltzl` is corrected from "confirmed to work" to "decodes but
+  misexecutes". It was listed as working from a probe that could only see
+  SIGILL; a probe that checks the delay slot, run on a stick, shows the slot
+  always running and control always falling through, for a taken and a
+  not-taken operand alike (another open implementation measured the same). Nothing
+  in the image contains it (`-mno-branch-likely`, mips1 freestanding, and
+  every shipped ELF and the kernel scanned for the encoding), so no binary changes;
+  `docs/CROSS-COMPILING.md`, `docs/HACKING.md`, `toolchain/README.md` and the
+  ISA field note say so. The ISA gate itself lives in the toolchain image
+  (odi-toolchain): its allow list drops `bltzl` and its deny list gains it in
+  that repository, and the gate refuses it from the toolchain image release
+  that carries the change, after the pin in `toolchain/images.env` moves.
+- Docs: `docs/KERNEL.md` says why `0x80000000` is a safe link address (the
+  first KiB of the image is the reserved exception-vector area, `head.S`
+  `.fill 0x400`; `_stext` is `0x80000400`), that the core runs `ll`/`sc`/`sync`
+  and how that is known, and that there is no thread pointer (`rdhwr $3,$29`
+  faults on the stick), so no TLS.
+- Docs: `docs/FLASHING.md` has a whole-flash backup, check and restore recipe
+  (the MTD layout, a ten second streamed read, per-partition checksums, what
+  each partition's restore needs), with the warning that the config partition
+  holds the identity that cannot be regenerated.
+
 - OMCI, switch: the OLT's extended VLAN tagging operation (class 171) is applied
   entry by entry, not only the one shape "untagged frames get one VLAN". On a
   line with `VLAN_CFG_TYPE` other than 1 (the manual tag never reads the
