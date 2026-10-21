@@ -201,15 +201,19 @@ manifest "$?" "$(size_of "$b/metrics.txt")" metrics.txt
 # host-link.txt: the host-port auto-negotiation (HOST_AUTONEG): the state
 # host-autoneg.sh keeps (a trial, the boot fallback), the safe mode (this
 # boot, the record, the boot count), then the words that decide the host link: the PCS
-# control word (HOST_FIBER_CTRL), the port ability the link runs with, and
-# the forced-ability pair of port 0. All read before on a running stick.
+# control word (HOST_FIBER_CTRL), the port ability the link runs with, the
+# forced-ability pair of port 0, and the host SerDes lane's control and
+# in-band negotiation words. All read before on a running stick.
 {
 	echo "# host-autoneg.sh status"
 	timeout "$STEP_TIMEOUT_S" sh "$HOST_AUTONEG_SH" status 2>&1
 	echo "# safe-mode.sh status"
 	timeout "$STEP_TIMEOUT_S" sh "$SAFE_MODE_SH" status 2>&1
-	echo "# HOST_FIBER_CTRL 0x21c00, PORT_ABILITY(0) 0x198, PORT_FORCE_SELECT(0) 0x1b4, PORT_FORCE_ABILITY(0) 0x180"
-	printf '%s\n' "register get 0x21c00 1" "register get 0x198 1" "register get 0x1b4 1" "register get 0x180 1" |
+	echo "# HOST_FIBER_CTRL 0x21c00, PORT_ABILITY(0) 0x198, PORT_FORCE_SELECT(0) 0x1b4, PORT_FORCE_ABILITY(0) 0x180,"
+	echo "# SDS_CTRL 0x214 (bit 17: the host lane receiver is in sync; bits 4:0 the lane mode, 4 = 1000BASE-X),"
+	echo "# SDS_AN_CTRL 0x21808 (bits 9:8 force in-band negotiation off, one bit per lane; bit 8 = the host lane)"
+	printf '%s\n' "register get 0x21c00 1" "register get 0x198 1" "register get 0x1b4 1" "register get 0x180 1" \
+		"register get 0x214 1" "register get 0x21808 1" |
 		timeout "$STEP_TIMEOUT_S" diag 2>&1
 } > "$b/host-link.txt"
 manifest - "$(size_of "$b/host-link.txt")" host-link.txt
@@ -319,6 +323,40 @@ fi
 # select is the only write the kernel accepts on this bus (docs/TOOLS.md),
 # and a flock keeps two bundles from interleaving their selects.
 i2c() { timeout "$STEP_TIMEOUT_S" "$@" 2>&1; }
+# gn25l95_table2: with page 2 selected on a GN25L95, the words of its
+# configuration table that set the modulation, decoded: ER_CTRL (0xa5; bit 0
+# is the automatic extinction-ratio loop, which lowers the modulation while
+# the power-control loop raises the bias to compensate), MOD_DAC (0xab-0xac,
+# most significant byte first), MOD_LIMIT (0xaf, 0xff = none) and PERSIST
+# (0xc7; 0x03 keeps register changes out of the module EEPROM). Meanings from
+# another open implementation's measurements on this module. Reads only.
+gn25l95_table2() {
+	er=$(i2c i2cget -y 0 0x51 0xa5) || er=
+	hi=$(i2c i2cget -y 0 0x51 0xab) || hi=
+	lo=$(i2c i2cget -y 0 0x51 0xac) || lo=
+	lim=$(i2c i2cget -y 0 0x51 0xaf) || lim=
+	per=$(i2c i2cget -y 0 0x51 0xc7) || per=
+	case $er in
+	0x??) [ $((er & 1)) = 1 ] && loop=on || loop=off
+		echo "  ER_CTRL (0xa5): $er, automatic extinction-ratio loop $loop" ;;
+	*) echo "  ER_CTRL (0xa5): unread" ;;
+	esac
+	case $hi$lo in
+	0x??0x??) printf '  MOD_DAC (0xab-0xac): 0x%02x%02x\n' "$hi" "$lo" ;;
+	*) echo "  MOD_DAC (0xab-0xac): unread" ;;
+	esac
+	case $lim in
+	0xff) echo "  MOD_LIMIT (0xaf): 0xff, no limit" ;;
+	0x??) echo "  MOD_LIMIT (0xaf): $lim" ;;
+	*) echo "  MOD_LIMIT (0xaf): unread" ;;
+	esac
+	case $per in
+	0x03) echo "  PERSIST (0xc7): 0x03, register changes stay out of the EEPROM" ;;
+	0x??) echo "  PERSIST (0xc7): $per, register changes are copied to the EEPROM" ;;
+	*) echo "  PERSIST (0xc7): unread" ;;
+	esac
+}
+
 module_pages() {
 	flock -n 9 || { echo "page work skipped: no page lock (another bundle is selecting pages, or flock failed)"; return 1; }
 	p0=$(i2c i2cget -y 0 0x51 0x7f) || { echo "page select (A2h byte 127): unreadable: $p0"; return 1; }
@@ -344,7 +382,10 @@ module_pages() {
 				[ "$r" = 0xa0 ] && id=$v
 			done
 			case $id in
-			0x6a) echo "  laser driver: Semtech GN25L95 (page 2 byte 0xa0 = 0x6a)" ;;
+			0x6a)
+				echo "  laser driver: Semtech GN25L95 (page 2 byte 0xa0 = 0x6a)"
+				gn25l95_table2
+				;;
 			0x??) echo "  laser driver: not a GN25L95 (page 2 byte 0xa0 is not 0x6a)" ;;
 			*) echo "  laser driver: unknown (page 2 byte 0xa0 unread)" ;;
 			esac
