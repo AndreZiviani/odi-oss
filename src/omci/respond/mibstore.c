@@ -402,6 +402,9 @@ uint16_t tbl_serialise(const struct omci_class *c, uint16_t inst, unsigned k,
 	/* The bridge table of a port is the switch's, not the store's. */
 	if (c->classId == 50 && k == 1)
 		return bridge_table_read(inst, out, (uint16_t)(max - max % w));
+	/* The active group list is the snooper's. */
+	if (c->classId == CLS_MCAST_MONITOR && k == 5)
+		return mcast_active_groups(out, (uint16_t)(max - max % w));
 	if (tbl_kind(c, k)) {
 		for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE;
 		     i = tblpool[i].next) {
@@ -1042,6 +1045,16 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 
 			out[0] = (uint8_t)(v >> 8); out[1] = (uint8_t)v;
 		} else if (k == 4) out[0] = tag ? (uint8_t)vlanCfg.pri : 0xff;
+	} else if (c->classId == CLS_MCAST_MONITOR) { /* multicast subscriber monitor */
+		/* The snooper's counters (mcast.c): joins the subscriber sent
+		 * (3). The bandwidth attributes stay zero, the ONU does not
+		 * meter streams. */
+		if (k == 3 && n >= 4) {
+			uint32_t v = mcast_state_get("joins");
+
+			out[0] = (uint8_t)(v >> 24); out[1] = (uint8_t)(v >> 16);
+			out[2] = (uint8_t)(v >> 8);  out[3] = (uint8_t)v;
+		}
 	} else if (c->classId == OMCI_ME_PPTP_ETH_UNI) { /* PPTP Ethernet UNI */
 		/* Sensed type is the slot card type, which the ONU never
 		 * changes; the configuration indication follows the link:

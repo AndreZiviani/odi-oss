@@ -42,6 +42,7 @@
 #include "odi_switch_reg.h" /* odi_switch_lock */
 #include "odi_ddm.h"
 #include "odi_switch_l2.h"
+#include "odi_switch_mcast.h"
 
 #define DRV_NAME "odi_reg"
 
@@ -53,7 +54,12 @@ static long odi_sw_l2_errno(int rc)
 	return rc == -1 ? -EBUSY : rc;
 }
 
-static long odi_sw_ioctl_cmd(unsigned int cmd, void __user *argp);
+static long odi_sw_ioctl_cmd(struct file *f, unsigned int cmd, void __user *argp);
+
+/* The open file that holds the snooping lease (odi_switch_mcast.h), if any.
+ * Read and written only under odi_switch_lock.
+ */
+static struct file *odi_sw_snoop_owner;
 
 /* Every command but DDM_GET runs under odi_switch_lock (odi_switch.c), so
  * a register or MIB read never lands in the middle of a table sequence
@@ -67,18 +73,34 @@ static long odi_sw_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	void __user *argp = (void __user *)arg;
 	long rc;
 
-	(void)f;
 	if (cmd == ODI_SW_IOC_DDM_GET)
-		return odi_sw_ioctl_cmd(cmd, argp);
+		return odi_sw_ioctl_cmd(f, cmd, argp);
 
 	mutex_lock(&odi_switch_lock);
-	rc = odi_sw_ioctl_cmd(cmd, argp);
+	rc = odi_sw_ioctl_cmd(f, cmd, argp);
 	mutex_unlock(&odi_switch_lock);
 	return rc;
 }
 
+/* The close of the file that holds the lease, however it comes: the
+ * snooper exiting, being killed, or never calling back. The switch goes
+ * back to flooding and the rows it wrote are deleted.
+ */
+static int odi_sw_release(struct inode *inode, struct file *f)
+{
+	(void)inode;
+	mutex_lock(&odi_switch_lock);
+	if (odi_sw_snoop_owner == f) {
+		odi_switch_mcast_release();
+		odi_sw_snoop_owner = NULL;
+		pr_info(DRV_NAME ": snooping lease released\n");
+	}
+	mutex_unlock(&odi_switch_lock);
+	return 0;
+}
+
 /* The commands themselves; odi_sw_ioctl() above decides the locking. */
-static long odi_sw_ioctl_cmd(unsigned int cmd, void __user *argp)
+static long odi_sw_ioctl_cmd(struct file *f, unsigned int cmd, void __user *argp)
 {
 	switch (cmd) {
 	case ODI_SW_IOC_REG_GET: {
@@ -154,11 +176,17 @@ static long odi_sw_ioctl_cmd(unsigned int cmd, void __user *argp)
 		if (copy_from_user(&m, argp, sizeof(m)))
 			return -EFAULT;
 		m.index = 0;
+		/* The lease holder's rows are tracked, so its close deletes
+		 * them; anyone else's (igmpd -j) are the caller's to remove. */
 		if (cmd == ODI_SW_IOC_L2_MC_ADD) {
-			rc = odi_switch_l2_mcast_add(&m.req, &m.index);
+			rc = f == odi_sw_snoop_owner ?
+			     odi_switch_mcast_row_add(&m.req, &m.index) :
+			     odi_switch_l2_mcast_add(&m.req, &m.index);
 			found = 1;
 		} else {
-			rc = odi_switch_l2_mcast_del(&m.req, &found);
+			rc = f == odi_sw_snoop_owner ?
+			     odi_switch_mcast_row_del(&m.req, &found) :
+			     odi_switch_l2_mcast_del(&m.req, &found);
 		}
 		if (rc)
 			return odi_sw_l2_errno(rc);
@@ -176,6 +204,29 @@ static long odi_sw_ioctl_cmd(unsigned int cmd, void __user *argp)
 			return -EFAULT;
 		return 0;
 	}
+	case ODI_SW_IOC_MC_SNOOP: {
+		struct odi_sw_mc_snoop sn;
+		int rc;
+
+		if (copy_from_user(&sn, argp, sizeof(sn)))
+			return -EFAULT;
+		/* One holder at a time: a second snooper must not take the
+		 * first one's lease, and a one-shot tool must not release it. */
+		if (odi_sw_snoop_owner && odi_sw_snoop_owner != f)
+			return -EBUSY;
+		if (!sn.flags) {
+			if (odi_sw_snoop_owner == f) {
+				odi_switch_mcast_release();
+				odi_sw_snoop_owner = NULL;
+			}
+			return 0;
+		}
+		rc = odi_switch_mcast_snoop_set(sn.flags);
+		if (rc)
+			return rc;
+		odi_sw_snoop_owner = f;
+		return 0;
+	}
 	default:
 		return -ENOTTY;
 	}
@@ -184,6 +235,7 @@ static long odi_sw_ioctl_cmd(unsigned int cmd, void __user *argp)
 static const struct file_operations odi_sw_fops = {
 	.owner          = THIS_MODULE,
 	.unlocked_ioctl = odi_sw_ioctl,
+	.release        = odi_sw_release,
 };
 
 static struct miscdevice odi_sw_miscdev = {

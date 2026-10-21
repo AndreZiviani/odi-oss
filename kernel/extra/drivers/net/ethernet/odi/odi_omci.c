@@ -32,6 +32,8 @@
 #include "odi_nic_hw.h"
 #include "odi_nic.h"
 #include "odi_omci_wire.h"
+#include "odi_igmp_rx.h"
+#include "odi_switch_mcast.h"
 
 #include "odi_switch_cmd.h"
 #include "odi_switch_reg.h" /* odi_switch_lock */
@@ -212,6 +214,76 @@ static int odi_omci_rxhook(struct sk_buff *skb, const struct odi_rx_words *info)
 	return ODI_RXHOOK_STOP;
 }
 
+/* ---- RX: host port -> igmpd ------------------------------------------- */
+
+/* Below the OMCI hook, and only for the UNI port: the copy of an IGMP frame
+ * the switch's ACL rule makes (odi_switch_mcast.c) is the one thing the
+ * CPU wants from that port beyond what the net devices take. A frame from
+ * the PON port never reaches this hook, and the NIC still drops every PON
+ * frame no hook took, so nothing here widens what the fibre can reach.
+ */
+#define ODI_IGMP_RXHOOK_PRIO	(INT_MAX - 2)
+#define ODI_IGMP_RXHOOK_PORTMASK (1U << 0)
+
+static u32 odi_igmp_cnt_delivered;
+static u32 odi_igmp_cnt_dropped;
+static DEFINE_RATELIMIT_STATE(odi_igmp_rx_drop_rl, 5 * HZ, 3);
+
+static int odi_igmp_rxhook(struct sk_buff *skb, const struct odi_rx_words *info)
+{
+	unsigned int src_port = (info->opts3 >> ODI_RXD_SRC_PORT_SHIFT) & ODI_RXD_SRC_PORT_MASK;
+	struct sk_buff *nskb;
+	u32 dst_pid, total;
+
+	if (!READ_ONCE(odi_sw_mcast_copy_on))
+		return ODI_RXHOOK_CONTINUE;
+	if (src_port != 0 || !odi_igmp_frame_wanted(skb->data, skb->len))
+		return ODI_RXHOOK_CONTINUE;
+
+	/* The frame is a copy, the original went on by the switch: a copy
+	 * nobody wants is dropped, not handed to the IP stack. */
+	if (odi_omci_reg_get(ODI_IGMP_REDIRECT_TYPE, &dst_pid)) {
+		odi_igmp_cnt_dropped++;
+		return ODI_RXHOOK_STOP;
+	}
+	total = odi_igmp_rx_total(skb->len);
+	nskb = alloc_skb(total, GFP_ATOMIC);
+	if (!nskb) {
+		odi_igmp_cnt_dropped++;
+		return ODI_RXHOOK_STOP;
+	}
+	/* The VLAN id in the prefix is 0: no row is keyed on it (every VLAN here
+	 * is shared, docs/KERNEL.md) and a tag still on the frame is read from
+	 * the frame itself by igmpd. */
+	odi_igmp_build_rx(skb_put(nskb, total), src_port, 0, skb->data, skb->len);
+	if (netlink_unicast(odi_omci_nlsk, nskb, dst_pid, MSG_DONTWAIT) < 0) {
+		odi_igmp_cnt_dropped++;
+		if (__ratelimit(&odi_igmp_rx_drop_rl))
+			pr_info(DRV_NAME ": IGMP frame, netlink_unicast to pid %u failed (igmpd gone?)\n",
+				dst_pid);
+	} else {
+		odi_igmp_cnt_delivered++;
+	}
+	return ODI_RXHOOK_STOP;
+}
+
+/* Registers the hook the first time igmpd takes its lease. Called under
+ * odi_switch_lock, before the ACL rule that makes the copies is written, so
+ * no copy arrives unhooked. The hook table has no unregister: after the
+ * first lease the hook stays, and returns at once while the copy is off. */
+static void odi_igmp_rx_enable(void)
+{
+	static bool registered;
+
+	if (registered)
+		return;
+	if (odi_nic_rxhook_register(ODI_IGMP_RXHOOK_PORTMASK, ODI_IGMP_RXHOOK_PRIO,
+				    odi_igmp_rxhook))
+		pr_warn(DRV_NAME ": IGMP rxhook not registered\n");
+	else
+		registered = true;
+}
+
 /* ---- TX: omcid -> PON ----------------------------------------------------- */
 
 /* The words a stock OMCI reply carries: opts1 bit 25, NO_LEARN and
@@ -383,6 +455,8 @@ static int odi_omci_proc_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "tx_fail %u\n", (u32)atomic_read(&odi_omci_cnt_tx_fail));
 	seq_printf(seq, "cmd_requests %u\n", (u32)atomic_read(&odi_omci_cnt_cmd_reqs));
 	seq_printf(seq, "cmd_replies %u\n", (u32)atomic_read(&odi_omci_cnt_cmd_replies));
+	seq_printf(seq, "igmp_delivered %u\n", odi_igmp_cnt_delivered);
+	seq_printf(seq, "igmp_dropped %u\n", odi_igmp_cnt_dropped);
 	return 0;
 }
 
@@ -448,6 +522,10 @@ static int __init odi_omci_init(void)
 		odi_omci_nlsk = NULL;
 		return -ENODEV;
 	}
+
+	/* The IGMP hook is registered when the copy is first installed, not
+	 * here: until then no frame needs it. */
+	odi_sw_mcast_rx_enable = odi_igmp_rx_enable;
 
 	if (!proc_create("odi_omci", 0644, NULL, &odi_omci_proc_fops))
 		pr_warn(DRV_NAME ": /proc/odi_omci create failed (non-fatal)\n");

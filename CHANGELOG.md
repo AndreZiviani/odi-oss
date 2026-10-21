@@ -5,6 +5,26 @@ listed here.
 
 ## Unreleased
 
+- Multicast: IGMP snooping that follows what the OLT provisions, off unless
+  `IGMP_SNOOPING=1` is set (`apply.sh igmp` applies it). While the OLT asks
+  for it (a multicast GEM interworking TP with an address row and a
+  multicast operations profile with IGMP function 0), `igmpd` keeps one
+  static row a group with the host and the PON as members, honours the
+  profile's group limit, dynamic and static access control lists, query
+  timers and immediate leave, and, once every group the host already watches
+  has had one membership interval to report again, drops IPv4 multicast
+  from the PON that no row names, so a group nobody on the host side joined
+  stays off the host link. The snooper sees only a copy of the host's IGMP,
+  made by one ACL rule on the host port, so the OLT still sees every report
+  and leave, and nothing from the fibre reaches the CPU: the rule matches no
+  frame of the PON port, the OLT's queries are not copied, and the daemon
+  transmits nothing. The daemon holds its switch state as a lease on its
+  `/dev/odi_sw` descriptor: if it dies, the switch floods again and its rows
+  are deleted. ME 311 now reports the join count and the active group list.
+  Without the key nothing changes. Not yet run against a real multicast
+  stream, which neither of our lines carries; IPv6 (MLD) is not snooped and
+  the multicast tag controls of ME 309 are stored, not acted on.
+
 - OMCI: the multicast operations profile (ME 309) keeps all of its
   attributes. Its row was cut at 64 bytes, so robustness, querier address,
   query interval, maximum response time, last member query interval,

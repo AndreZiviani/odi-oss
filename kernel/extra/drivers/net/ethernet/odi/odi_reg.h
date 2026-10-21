@@ -115,6 +115,17 @@ struct odi_sw_l2_mode {
 	uint32_t rows;
 };
 
+/* IGMP snooping lease (odi_switch_mcast.h): flags ODI_SW_MC_SNOOP_*. The
+ * file that sets them holds them: closing it, or the holder dying, puts the
+ * switch back and deletes the L2 multicast rows that file added. 0 releases.
+ * EBUSY while another file holds the lease; EINVAL for an unknown flag or the
+ * drop without the copy.
+ */
+struct odi_sw_mc_snoop {
+	uint32_t flags;
+	uint32_t reserved;
+};
+
 #define ODI_SW_IOC_REG_GET	0xC0085301U	/* _IOWR('S', 1, struct odi_sw_reg) */
 #define ODI_SW_IOC_REG_SET	0x80085302U	/* _IOW ('S', 2, struct odi_sw_reg) */
 /* Request 3 was a SoC-window get that no userland used; not reused. */
@@ -125,5 +136,6 @@ struct odi_sw_l2_mode {
 #define ODI_SW_IOC_L2_MC_ADD	0xC01C5308U	/* _IOWR('S', 8, struct odi_sw_l2_mcast) */
 #define ODI_SW_IOC_L2_MC_DEL	0xC01C5309U	/* _IOWR('S', 9, struct odi_sw_l2_mcast) */
 #define ODI_SW_IOC_L2_MODE	0x4008530AU	/* _IOR ('S', 10, struct odi_sw_l2_mode) */
+#define ODI_SW_IOC_MC_SNOOP	0x8008530BU	/* _IOW ('S', 11, struct odi_sw_mc_snoop) */
 
 #endif /* ODI_REG_H */

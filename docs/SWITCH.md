@@ -911,6 +911,95 @@ To see it on a stick: `register get 0x21c00 1` in `diag` (bit 12), `cat
 /sys/module/odi_switch/parameters/host_link`, and on the host `ethtool
 <if>` (`Auto-negotiation: on|off`, `Link detected`).
 
+## Multicast
+
+How a group the OLT sends on the multicast GEM port reaches the host, and
+what IGMP snooping adds. The data path needs no programming: a frame on the
+multicast GEM port is flagged by the downstream flow's type (below), the
+GPON MAC passes it, and the switch floods it to the host unless a row or a
+drop says otherwise. Snooping is opt-in (`IGMP_SNOOPING`, `docs/TOOLS.md`,
+`igmpd`) and only prunes.
+
+What was read on a stick (ISP1, read-only) and what is taken from another
+open implementation's measurements on the same chip. Nothing below was
+exercised with a multicast stream: neither of our lines carries IPTV.
+
+- **The downstream flow's multicast flag.** omcid sets bit 0 of the flow's
+  `DSF_GEM_FLOW_TYPE` word when a multicast GEM interworking TP (ME 281)
+  that points at its CTP holds an address row, whatever the port number. ISP1
+  reads `0x3` (multicast and Ethernet) on its flow for GEM port 4095. The
+  GPON MAC applies its multicast filter only to flows with that bit.
+- **The GPON multicast filter passes everything while its table is empty.**
+  `GPON_GEM_DS_MC_CFG` (0x704080) reads `0x59` on ISP1 (the boot table writes the same word on both lines): bit 0 set, the
+  table lists the multicast to drop, and it is empty; bits 3, 4 and 6 are
+  FCS check, unicast pass and broadcast pass; no IPv4 or IPv6 override.
+  Another implementation measured exactly this configuration passing 224.0.0.1,
+  239.2.2.1 and ff02::1 on a multicast-flagged flow, and the opposite
+  configuration (an including filter with an empty table) dropping all of
+  them. So the stock stack's rows (ME 281 range to the filter table) are
+  not needed for the stream to arrive, and nothing writes the 256-row table
+  (it is emptied at boot).
+- **Flooding.** A group no row names is a lookup miss and goes by
+  `FLOOD_UNKN_MCAST_PORTS`: `0x7` on ISP1 (the module-load replay
+  writes `0xf` and `odi_switch_init_modload()` takes the CPU bit out on
+  purpose; see above). So the stream reaches the UNI and port 1, never the
+  CPU, which is what the CPU-RX guards want from a stream of thousands of
+  frames a second. The PON port's isolation mask (`0x7`, never the CPU)
+  decides where it may go from there.
+- **IGMP is data to the switch.** `IGMP_PORT_ACTION` (0x01105c, a word a
+  port) reads `0x400` on ports 0 to 2: every IGMP and MLD type is forwarded.
+  Reports and queries cross the stick as plain multicast, so with no
+  snooping the OLT sees every report and the host every query.
+
+### Snooping
+
+With the lease held (`odi_switch_mcast.c`, `ODI_SW_IOC_MC_SNOOP`):
+
+- **The copy.** ACL entry 8, template 6 (EtherType in slot 0, IPv4 protocol
+  in slot 1; the platform step empties the tables and the replayed rule is
+  entry 1 on template 3, so both are free), ingress port 0 only, EtherType
+  0x0800 and protocol 2, action "mirror to the CPU port", action class
+  enable `0x10` (the forwarding decision alone). A rule acts on the frames of
+  its own port and on no other (another implementation measured a drop on
+  each of the two ports leaving the other's frames alone), so a frame from
+  the PON never matches it. The copy arrives on the CPU port with source port
+  0; `odi_omci.c` (an RX hook registered for the UNI port when the lease is
+  first taken) recognises it by that and by IPv4 protocol 2 and hands it
+  to igmpd, and drops it if nobody is registered. It does not reach the IP
+  stack. The original frame is forwarded as if there were no rule.
+- **Rows.** One static L2 multicast row a group (SVL, filtering id 0, the
+  keys `docs/KERNEL.md` describes), the UNI and the PON as members. The PON
+  has to be one: a report to a group is forwarded to the row's members, and
+  another implementation measured that without the PON in the row the report
+  "goes nowhere but back" and the OLT never sees it. The CPU is never one.
+- **The drop.** `MC_UNKNOWN_IP4` (0x01c014), two bits a port, set to drop
+  (1) for port 2: IPv4 multicast from the PON that no row names is dropped
+  instead of flooded. `MC_UNKNOWN_CFG` (0x01c01c) bits 4:3 are set to 1 with
+  it, which exempts 224.0.0.0/24: ISP1 reads `0x20` there (the reset value
+  is `0x28`), without which the OLT's general queries to 224.0.0.1 would be
+  dropped as unregistered, the host would never report, and the stream would
+  lapse. Both are put back as found when the drop is released. IPv6 is not
+  touched. igmpd turns the drop on only after one membership interval, so
+  every group the host already watches has reported again.
+
+The lease is held by the open file that takes it: closing it, or the daemon
+dying, releases the copy and the drop and deletes the rows that file wrote
+(up to 128). A second holder is refused with EBUSY. `odi_switch_init_modload()`
+and the isolation masks are not touched, and `test/odi_switch_mcast_test.c`
+checks the rule by what it matches (the UNI port and IGMP, nothing else, the
+PON least of all).
+
+What is not known. The copy rule follows another implementation's decoded
+layout and the one rule the stock replay writes; it has not been run here,
+and neither has a frame been matched against a static multicast row (the row
+layout was checked by reading it back, `docs/KERNEL.md`). Whether the
+lookup is keyed on the MAC or on the group address follows
+`L2_LOOKUP_SETUP` bit 23, which reads 0 here (MAC); another implementation
+measured the MAC-keyed row steering the frames. Those are what a first run
+with a real stream has to check, with `diag l2-table get all`, the port
+counters (`diag mib dump counter port all`, ports 0 and 2) and
+`/proc/odi_omci` (`igmp_delivered`, `igmp_dropped`).
+
 ## PON port isolation
 
 Nothing that arrives from the fibre reaches the stick's own IP stack: not
@@ -996,10 +1085,13 @@ the ones dropped; with the switch layer in place it stays 0, and `rx_pon`
 equals the OMCI frames of `/proc/odi_omci` (`frames_delivered` +
 `dropped_unregistered` + `unicast_fail`). A frame dropped here also counts
 as `rx_dropped` of `eth0`. There is no switch to turn it off: nothing on
-the stick wants a frame from the PON other than OMCI, and a future RX hook
-(an IGMP daemon trapping the OLT's queries, say) still sees its frames
-first. There is no netfilter in this kernel, and only the driver knows the
-ingress port.
+the stick wants a frame from the PON other than OMCI. The one other RX hook,
+the copy of the host's IGMP to igmpd (`odi_omci.c`), is registered for the
+UNI port alone, and only once igmpd first takes its lease, so it never sees a
+frame from the PON and costs nothing on an image that never snoops; an IGMP daemon that
+wanted the OLT's queries would need a hook for the PON port, which is a
+decision about this rule and not a detail of a daemon. There is no
+netfilter in this kernel, and only the driver knows the ingress port.
 
 ### Frames the stick sends
 

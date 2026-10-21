@@ -58,6 +58,31 @@ written() {
 	need "$1" 'multicast policy written' 10 "$2"
 }
 
+# table <log> <tci base> <class> <inst> <mask>: Get the table attribute, then
+# walk it with Get-Next; the table bytes as hex, empty when it is empty.
+table() {
+	_l=$1; _b=$2; _cl=$3; _in=$4; _m=$5
+	send "$_l" "${_b}0" 49 "$_cl" "$_in" "$_m"
+	_a=$(answer "$_l" "${_b}0")
+	_len=$((0x$(echo "$_a" | cut -c7-14)))
+	_out=""
+	_seq=0
+	while [ $((_seq * 29)) -lt "$_len" ]; do
+		send "$_l" "${_b}$((_seq + 1))" 5a "$_cl" "$_in" "$_m$(printf '%04x' "$_seq")"
+		_n=$((_len - _seq * 29))
+		[ "$_n" -gt 29 ] && _n=29
+		_out="$_out$(answer "$_l" "${_b}$((_seq + 1))" | cut -c7-$((6 + _n * 2)))"
+		_seq=$((_seq + 1))
+	done
+	printf '%s' "$_out"
+}
+
+pad() {
+	_p=$1
+	while [ "${#_p}" -lt $(($2 * 2)) ]; do _p="${_p}0"; done
+	printf '%s' "$_p"
+}
+
 mkdir -p /var/config /var/run /var/log
 rm -f /var/config/odi.conf /var/config/lastgood.xml /var/config/lastgood_hs.xml \
       /var/config/omci-identity.on /var/run/omcid-mib.snap /var/run/omcid-resume-decision \
@@ -78,6 +103,13 @@ send "$log" 0001 4f 0002 0000 ""                         # MIB reset
 # timers unset. Class 310 (0x0136) instance 1 names it, a limit of 8 groups.
 # CTP 5 on GEM 4095, downstream only, and class 281 (0x0119) on it with one
 # address row.
+# A decoy first: a subscriber 310 (instance 2, no bridge port) that names a
+# profile which does not exist and a limit of 99. The subscriber of the UNI is
+# the 310 whose instance is a bridge port of the PPTP Ethernet UNI (class 47,
+# instance 1, TP type 1), created after it, so taking the first 310 in the MIB
+# would pick the wrong one.
+send "$log" 0008 44 0136 0002 "00000200630000000000"
+send "$log" 0009 44 002f 0001 "00010101010100000001000101"
 send "$log" 0010 44 0135 0001 "020001"
 send "$log" 0011 44 0136 0001 "00000100080000000000"
 send "$log" 0012 44 010c 0005 "0fff00000200000000"
@@ -157,6 +189,23 @@ done
 written "$log" $((n + 4))
 check "34 ranges: the first 32 are listed" "$(policy | grep -c '^allow=')" "32"
 check "34 ranges: the overflow is flagged" "$(policy | grep -c '^allow_overflow=1')" "1"
+
+# ------------------------------------- ME 311, from what igmpd writes
+# Class 311 (0x0137) instance 1. The state file is igmpd's; written here the
+# way it writes it.
+send "$log" 0070 44 0137 0001 ""
+check "311 with no state file: no joins, no groups" \
+      "$(send "$log" 0071 49 0137 0001 "2000" && answer "$log" 0071 | cut -c7-14)" "00000000"
+check "311 with no state file: the group table is empty" \
+      "$(table "$log" b10 0137 0001 0800)" ""
+printf 'joins=42\ndenied=3\ngroups=2\ngroup=239.1.2.3\ngroup=225.200.7.9\n' > /var/run/odi-mcast.state
+check "311 JoinMsgCounter is igmpd's join count" \
+      "$(send "$log" 0072 49 0137 0001 "2000" && answer "$log" 0072 | cut -c7-14)" "0000002a"
+G1=$(pad 000000000000ef010203 24)
+G2=$(pad 000000000000e1c80709 24)
+check "311 active group list: one 24-byte row a group, the group in the destination field" \
+      "$(table "$log" b11 0137 0001 0800)" "$G1$G2"
+rm -f /var/run/odi-mcast.state
 
 # --------------------------------------------------------------- MIB reset
 send "$log" 0070 4f 0002 0000 ""

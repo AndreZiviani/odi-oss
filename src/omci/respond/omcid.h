@@ -260,6 +260,13 @@ extern int qos_dirty;
 extern int mcast_dirty;
 void mcast_policy_export(void);
 int mcast_policy_class(uint16_t cls);
+/* ME 311, the multicast subscriber monitor: what igmpd keeps in
+ * /var/run/odi-mcast.state. A counter, 0 when there is no file; and the IPv4
+ * active group list as 24-byte table rows (G.988 9.3.28), returning the
+ * byte length written. */
+#define CLS_MCAST_MONITOR 311
+uint32_t mcast_state_get(const char *key);
+uint16_t mcast_active_groups(uint8_t *out, uint16_t max);
 /* The next us_qos_rebuild() tears everything down first: set when the
  * PLOAM Alloc-ID list changed, since the T-CONT indexes (the CAM rows) may
  * have moved. */

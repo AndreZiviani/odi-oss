@@ -41,3 +41,12 @@ int igmp_sw_mcast_del(struct odi_sw_l2_mcast *m)
 {
 	return sw_ioctl(ODI_SW_IOC_L2_MC_DEL, m);
 }
+
+int igmp_sw_snoop(uint32_t flags)
+{
+	struct odi_sw_mc_snoop sn;
+
+	sn.flags = flags;
+	sn.reserved = 0;
+	return sw_ioctl(ODI_SW_IOC_MC_SNOOP, &sn);
+}

@@ -34,6 +34,7 @@
 #define MCAST_POLICY_PATH     "/var/run/odi-mcast.conf"
 #define MCAST_POLICY_TMP_PATH "/var/run/odi-mcast.conf.tmp"
 
+#define MCAST_STATE_PATH      "/var/run/odi-mcast.state"
 #define CLS_MCAST_OPER_PROFILE 309
 #define CLS_MCAST_SUBSCRIBER   310
 #define CLS_BRIDGE_PORT        47
@@ -261,4 +262,100 @@ void mcast_policy_export(void)
 	last_len = plen;
 	last_valid = 1;
 	out_fmt("   multicast policy written (%d bytes)\n", (long)plen);
+}
+
+/* ---- ME 311: what igmpd reports ----------------------------------------- */
+
+/* The state file, whole, into buf; its length, 0 when there is none. igmpd
+ * writes it by rename, so what is read is one complete version. */
+static uint32_t state_read(char *buf, uint32_t max)
+{
+	long fd = sys_open(MCAST_STATE_PATH, O_RDONLY), n;
+
+	if (fd < 0)
+		return 0;
+	n = sys_read((int)fd, buf, max);
+	sys_close((int)fd);
+	return n > 0 ? (uint32_t)n : 0;
+}
+
+/* A number at the start of s, up to a non-digit; the digits' count in *used. */
+static uint32_t dec(const char *s, uint32_t n, uint32_t *used)
+{
+	uint32_t v = 0, i = 0;
+
+	while (i < n && s[i] >= '0' && s[i] <= '9' && i < 10)
+		v = v * 10 + (uint32_t)(s[i++] - '0');
+	*used = i;
+	return v;
+}
+
+uint32_t mcast_state_get(const char *key)
+{
+	static char buf[4096];
+	uint32_t n = state_read(buf, sizeof buf), at = 0;
+
+	while (at < n) {
+		const char *l = buf + at;
+		uint32_t len = 0, k = 0;
+
+		while (at + len < n && l[len] != '\n')
+			len++;
+		/* A line without its newline is the cut-off end of a file longer
+		 * than the buffer: not one to trust. */
+		if (at + len >= n)
+			break;
+		while (key[k] && k < len && l[k] == key[k])
+			k++;
+		if (!key[k] && k < len && l[k] == '=') {
+			uint32_t used;
+			uint32_t v = dec(l + k + 1, len - k - 1, &used);
+
+			return used ? v : 0;
+		}
+		at += len + 1;
+	}
+	return 0;
+}
+
+/* G.988 9.3.28, attribute 6: VLAN id 2, source 4, destination 4, best
+ * efforts bandwidth 4, client 4, time since the last join 4, reserved 2.
+ * What igmpd knows is the group; the rest is not measured and reads zero. */
+uint16_t mcast_active_groups(uint8_t *out, uint16_t max)
+{
+	static char buf[4096];
+	uint32_t n = state_read(buf, sizeof buf), at = 0;
+	uint16_t w = 0;
+
+	while (at < n) {
+		const char *l = buf + at;
+		uint32_t len = 0;
+
+		while (at + len < n && l[len] != '\n')
+			len++;
+		if (at + len >= n)
+			break;                  /* no newline: cut off, not trusted */
+		at += len + 1;
+		if (len > 6 && l[0] == 'g' && l[1] == 'r' && l[2] == 'o' && l[3] == 'u' &&
+		    l[4] == 'p' && l[5] == '=') {
+			uint32_t pos = 6, used, a[4];
+			int good = 1;
+
+			if (w + 24 > max)
+				break;
+			for (int i = 0; i < 4 && good; i++) {
+				a[i] = pos < len ? dec(l + pos, len - pos, &used) : (used = 0);
+				pos += used + 1;
+				good = used && a[i] <= 255;
+			}
+			if (!good)
+				continue;
+			for (int i = 0; i < 24; i++)
+				out[w + i] = 0;
+			for (int i = 0; i < 4; i++)
+				out[w + 6 + i] = (uint8_t)a[i];
+			w = (uint16_t)(w + 24);
+		}
+	}
+	return w;
 }
