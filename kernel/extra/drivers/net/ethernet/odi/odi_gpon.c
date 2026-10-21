@@ -79,6 +79,7 @@
 #include "odi_gpon_pw.h"
 #include "odi_replay_blob.h"
 #include "odi_switch_cmd.h"
+#include "odi_switch_hw.h"
 #include "odi_switch_reg.h"
 
 #ifdef __KERNEL__
