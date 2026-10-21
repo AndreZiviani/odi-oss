@@ -8,8 +8,10 @@
  * length masks), CPU-tag pack for a frame to a given port and unpack of a
  * received tag (src port, reason, VLAN fields), ring index arithmetic
  * (wrap, full, empty), the RX flow-control CPU index against a model
- * of the hardware comparator, idle and under a flood, and the
- * interrupt-storm guard.
+ * of the hardware comparator, idle and under a flood, the
+ * interrupt-storm guard, and the OMCI ring: the route words, where the ring
+ * starts, the missed-frame counter, and a model of a host flood with one
+ * ring and with two.
  */
 #include <stdio.h>
 #include <string.h>
@@ -380,6 +382,123 @@ static void test_tok_idle_tx_progress(void)
 	CHECK(mixed_trip, "once TX stops, the re-firing TOK trips it");
 }
 
+/* The route words: only the two values measured on this chip, 0 (ring 1)
+ * and 2 (the OMCI ring), ever appear in a field, and with the OMCI ring
+ * on, priority 7 alone names it.
+ */
+static void test_rx_ring_map(void)
+{
+	uint32_t on = odi_nic_rx_ring_map(1), off = odi_nic_rx_ring_map(0);
+	unsigned int p;
+
+	CHECK(on == 0x20000000U, "omci ring on: the word another implementation measured");
+	CHECK(off == 0, "omci ring off: every priority on ring 1");
+	for (p = 0; p < 8; p++) {
+		unsigned int f = (on >> (4 * p)) & 0xFU;
+
+		CHECK(f == ODI_NIC_RX_MAP_RING1 || f == ODI_NIC_RX_MAP_OMCI_RING,
+		      "no field names a ring that is not programmed");
+		CHECK((f == ODI_NIC_RX_MAP_OMCI_RING) == (p == ODI_NIC_OMCI_PRIO),
+		      "only the OMCI trap priority goes to the OMCI ring");
+	}
+	CHECK(ODI_NIC_RX_RING_MAP_WORDS == 6, "six route words, 0x1370 to 0x1384");
+	CHECK(ODI_NIC_RUN1_VAL == 0x32010001U, "RUN1: the old word plus bit 25, multi-ring RX");
+	CHECK((ODI_NIC_RUN1_VAL & ~ODI_NIC_RUN1_MULTI_RX) == 0x30010001U,
+	      "RUN1: nothing else changes");
+	CHECK(ODI_NIC_RX_REASON_OMCI == 246, "the OMCI trap reason");
+}
+
+/* The OMCI ring starts where its engine index is, and hands back every
+ * descriptor before it; an index beyond the ring is refused.
+ */
+static void test_rx2_start(void)
+{
+	unsigned int depth = ODI_RX2_RING_DEPTH, head = 99;
+
+	CHECK(odi_nic_rx2_start(0, depth, &head) && head == 0, "index 0 (after a board reset): start at 0");
+	CHECK(odi_nic_rx_cpu_idx(head, depth) == depth - 1, "... and every descriptor is the engine's");
+	CHECK(odi_nic_rx2_start(8, depth, &head) && head == 8, "index 8 (after an interface restart): start at 8");
+	CHECK(odi_nic_rx_cpu_idx(head, depth) == 7, "... and the CPU index is the one before it");
+	CHECK(odi_nic_rx2_start(depth - 1, depth, &head) && head == depth - 1, "the last descriptor is inside");
+	head = 5;
+	CHECK(!odi_nic_rx2_start(depth, depth, &head) && head == 5, "an index at the depth is beyond the ring");
+	CHECK(!odi_nic_rx2_start(0xFFFF, depth, &head) && head == 5, "a stale index of a longer ring is refused");
+
+	CHECK(ODI_NIC_RX2_FC_ON < ODI_NIC_RX2_FC_OFF && ODI_NIC_RX2_FC_OFF < depth,
+	      "OMCI ring PAUSE thresholds inside the ring");
+	CHECK(ODI_NIC_RX2_FC_ON * ODI_RX_RING_DEPTH == ODI_NIC_FC_ON * depth &&
+	      ODI_NIC_RX2_FC_OFF * ODI_RX_RING_DEPTH == ODI_NIC_FC_OFF * depth,
+	      "the same share of the ring as ring 1");
+	CHECK(ODI_NIC_RX2_FC_VAL(8, 24) == 0x00080018U, "ON in bits 23:16, OFF in bits 7:0");
+	CHECK(ODI_NIC_RX2_FC_VAL(0x1FF, 0x1FF) == 0x00FF00FFU, "each threshold kept to its byte");
+}
+
+static void test_missed_delta(void)
+{
+	CHECK(odi_nic_u16_delta(10, 3) == 7, "missed-frame counter: plain difference");
+	CHECK(odi_nic_u16_delta(5, 65530) == 11, "missed-frame counter: across the 16-bit wrap");
+	CHECK(odi_nic_u16_delta(7, 7) == 0, "missed-frame counter: no change");
+}
+
+/* A host flood against OMCI, frame by frame: an engine with the two rings,
+ * routing each frame by its priority through the route word, dropping one
+ * that finds its ring with no free descriptor (no PAUSE: the worst case,
+ * a switch that does not hold frames for the CPU), and a CPU that takes
+ * `cpu` frames per tick, the OMCI ring first as odi_poll() does. Each tick
+ * brings `flood` host frames (priority 0) and, every `every` ticks, one
+ * OMCI frame (priority 7). Returns the OMCI frames lost.
+ */
+static unsigned int omci_lost_under_flood(int omci_ring, unsigned int flood,
+					  unsigned int cpu, unsigned int every)
+{
+	enum { TICKS = 2000 };
+	uint32_t map = odi_nic_rx_ring_map(omci_ring);
+	unsigned int depth[2] = { ODI_RX_RING_DEPTH, ODI_RX2_RING_DEPTH };
+	unsigned int used[2] = { 0, 0 };
+	unsigned int t, i, lost = 0;
+
+	for (t = 0; t < TICKS; t++) {
+		unsigned int budget = cpu;
+
+		for (i = 0; i <= flood; i++) {
+			int is_omci = (i == flood);
+			unsigned int prio = is_omci ? ODI_NIC_OMCI_PRIO : 0;
+			unsigned int ring = ((map >> (4 * prio)) & 0xFU) == ODI_NIC_RX_MAP_OMCI_RING;
+
+			if (is_omci && t % every)
+				continue;
+			/* one descriptor always kept back, as on hardware */
+			if (used[ring] + 1 >= depth[ring]) {
+				if (is_omci)
+					lost++;
+				continue;
+			}
+			used[ring]++;
+		}
+		/* the poll: the OMCI ring first, then ring 1 */
+		while (budget && used[1]) {
+			used[1]--;
+			budget--;
+		}
+		while (budget && used[0]) {
+			used[0]--;
+			budget--;
+		}
+	}
+	return lost;
+}
+
+static void test_omci_ring_under_flood(void)
+{
+	/* A flood ten times what the CPU takes, OMCI every 5 ticks. */
+	CHECK(omci_lost_under_flood(0, 640, 64, 5) > 0, "one ring: a host flood costs OMCI frames");
+	CHECK(omci_lost_under_flood(1, 640, 64, 5) == 0, "OMCI ring: none lost under the same flood");
+	/* A registration burst: an OMCI frame every tick. */
+	CHECK(omci_lost_under_flood(1, 640, 64, 1) == 0, "OMCI ring: a registration burst under a flood loses none");
+	/* No flood: neither layout loses anything. */
+	CHECK(omci_lost_under_flood(0, 10, 64, 1) == 0, "one ring, no flood: nothing lost");
+}
+
 int main(void)
 {
 	test_rx_own_bit();
@@ -394,6 +513,10 @@ int main(void)
 	test_irq_storm_guard();
 	test_tok_work();
 	test_tok_idle_tx_progress();
+	test_rx_ring_map();
+	test_rx2_start();
+	test_missed_delta();
+	test_omci_ring_under_flood();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

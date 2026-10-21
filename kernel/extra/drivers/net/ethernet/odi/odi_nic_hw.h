@@ -145,23 +145,102 @@ typedef char odi_nic_msr_fc_on_is_0xe0[(ODI_NIC_MSR_FC_ON == 0xE0U) ? 1 : -1];
 #define ODI_NIC_RING_IRQ_MASK		0xD0	/* multi-ring RX mask, 32-bit */
 #define ODI_NIC_RING_IRQ_STATUS		0xD8	/* multi-ring, write-1-clear */
 
-/* Ring-control registers. Our build uses TX ring 1 and RX ring 1 only --
- * no dual-band, no multi-WAN.
+/* Ring-control registers. Our build uses TX ring 1, RX ring 1 and the
+ * OMCI ring (RX ring 2) -- no dual-band, no multi-WAN.
  */
 #define ODI_NIC_TX1_RING		0x1300
 #define ODI_NIC_TX1_INDEX		0x1304
 
 /* The priority-to-ring route register at 0x1370: one field per internal
  * priority, eight of them, each a ring number (0..6) in its own 4-bit slot,
- * priority n at bits 4n+2:4n. Not one word per ring. The value below sends
- * priorities 0 and 1 to ring 0, then 2..7 to rings 1..6. The words that
- * follow it, up to 0x1384, are written with the same value as the stock
- * firmware does; what they are is not decoded. Cross-checked against an
- * independent driver for a later chip of the same family (the register and
- * its purpose; the slot layout is read off the constant); values unchanged.
+ * priority n at bits 4n+3:4n. Not one word per ring. The words that follow
+ * it, up to 0x1384, are written with the same value, as the stock firmware
+ * writes all six alike; what they are is not decoded, and writing them the
+ * same keeps every field of every word naming a programmed ring.
+ * Cross-checked against an independent driver for a later chip of the same
+ * family (the register and its purpose).
  */
 #define ODI_NIC_RX_RING_MAP	0x1370	/* the route register; six words are written, step 4 */
-#define ODI_NIC_RX_RING_MAP_1TO1 0x65432100U
+#define ODI_NIC_RX_RING_MAP_WORDS	6U
+
+/* Which ring a field names. 0 is ring 1 (RX1_RING) and 2 the OMCI ring
+ * (RX2_RING); another open implementation's measurements on this chip:
+ * with priority 7 set to 2 and every other field 0, each of the 421 OMCI
+ * messages of a registration arrived on the ring at 0x1390 and every other
+ * frame on the one at 0x13F0, and with every field 0 all of them on the
+ * one ring. What the other values name is not established, so no field is
+ * ever written with one: a field naming a ring that is not programmed
+ * would have the engine write wherever that ring's base points.
+ */
+#define ODI_NIC_RX_MAP_RING1		0U
+#define ODI_NIC_RX_MAP_OMCI_RING	2U
+#define ODI_NIC_RX_MAP_FIELD(prio, ring)	((uint32_t)(ring) << (4U * (prio)))
+
+/* The internal priority the switch gives the OMCI frames it traps to the
+ * CPU: the sdkinit replay writes 7 to the OMCI trap configuration
+ * (0x0111f8, bits 2:0), as the stock firmware does, and nothing else
+ * changes it.
+ */
+#define ODI_NIC_OMCI_PRIO		7U
+
+/* The route words: OMCI to its own ring, or every priority to ring 1. */
+static inline uint32_t odi_nic_rx_ring_map(int omci_ring)
+{
+	return omci_ring ? ODI_NIC_RX_MAP_FIELD(ODI_NIC_OMCI_PRIO, ODI_NIC_RX_MAP_OMCI_RING) :
+			   ODI_NIC_RX_MAP_FIELD(0, ODI_NIC_RX_MAP_RING1);
+}
+
+/* The OMCI ring (RX ring 2) has a register block of its own. Facts from
+ * another open implementation's measurements on this chip: the base takes
+ * the bus address of descriptor 0; LAST (16-bit) the depth minus one;
+ * CPU_IDX the index of the last descriptor handed back, written as a whole
+ * word (the ring-1 counterpart is one byte); and the engine index (16-bit)
+ * cannot be written: it keeps the value it had when the engine stopped,
+ * across a restart of the interface, and reads 0 after a board reset. The
+ * driver therefore starts the ring where the engine is
+ * (odi_nic_rx2_start()). A frame on this ring raises the same IRQ_RX_OK
+ * as one on ring 1 while FIFO_CFG RING_IRQS is clear.
+ *
+ * FC holds the ring's own PAUSE thresholds, taken to be ON in bits 23:16
+ * and OFF in bits 7:0 (not established); they are written at the share of
+ * the ring that ring 1's 16/48 are of 64, so the ring asserts PAUSE only
+ * with three quarters of it waiting for the CPU.
+ */
+#define ODI_NIC_RX2_RING		0x1390
+#define ODI_NIC_RX2_INDEX		0x1394	/* 16-bit, the engine index, read-only in effect */
+#define ODI_NIC_RX2_LAST		0x1396	/* 16-bit, depth - 1 */
+#define ODI_NIC_RX2_CPU_IDX		0x1398	/* 32-bit, last descriptor handed back */
+#define ODI_NIC_RX2_FC			0x139C
+#define ODI_NIC_RX2_FC_VAL(on, off)	((((uint32_t)(on) & 0xFFU) << 16) | ((uint32_t)(off) & 0xFFU))
+
+/* Where the OMCI ring starts. The engine index cannot be moved, so the
+ * driver's next descriptor to inspect is the engine's own; returns 0 when
+ * the index is beyond the ring (only a longer ring left by earlier software
+ * can leave one), and the OMCI ring must then not be routed to, since the
+ * engine would write past it.
+ */
+static inline int odi_nic_rx2_start(unsigned int hw_idx, unsigned int depth,
+				    unsigned int *head)
+{
+	if (hw_idx >= depth)
+		return 0;
+	*head = hw_idx;
+	return 1;
+}
+
+/* RX_NO_DESC_CNT (16-bit, free running at 0x2A): frames the engine dropped
+ * for want of a free descriptor, on any ring. Another open implementation's
+ * measurements on this chip: it advanced by the frames the switch handed
+ * the CPU port minus the frames the driver took, modulo 65536, and wraps in
+ * under a second under a flood, so the driver folds the 16-bit difference
+ * in at every poll.
+ */
+#define ODI_NIC_RX_NO_DESC_CNT		0x2A
+
+static inline uint32_t odi_nic_u16_delta(uint16_t now, uint16_t last)
+{
+	return (uint16_t)(now - last);
+}
 
 #define ODI_NIC_RX1_RING		0x13F0
 #define ODI_NIC_RX1_INDEX		0x13F4
@@ -222,14 +301,18 @@ static inline unsigned int odi_nic_rx_cpu_idx(unsigned int next_to_inspect, unsi
 #define ODI_NIC_RUN_VAL	0xC059F130U
 
 #define ODI_NIC_RUN1		0x1438
-/* The stock firmware reads 0x32000001 here and ours 0x30000001: the
- * same descriptor format (bits 29:28) and TX ring 1 on the high queue
- * (bit 0). Bit 25 is set only when more than one RX ring runs, which the
- * stock driver does (three) and we do not (ring 1 only), so it stays
- * clear. Bit 16 selects RX ring 1 in the ring bitmap; it reads back 0 on
- * both. Bit meanings beyond these fields are not decoded here.
+/* The stock firmware reads 0x32000001 here: descriptor format (bits
+ * 29:28), TX ring 1 on the high queue (bit 0), and bit 25, which the stock
+ * driver sets with more than one RX ring running (it runs three), and so
+ * does this one (ring 1 and the OMCI ring); another open implementation
+ * runs the same two rings with it set. With it clear, and a route word
+ * that named rings 1 to 6 for priorities 2 to 7 with none of them
+ * programmed, every frame still landed in ring 1. Bit 16 selects RX
+ * ring 1 in the ring bitmap; it reads back 0 on both. Bit meanings beyond
+ * these fields are not decoded here.
  */
-#define ODI_NIC_RUN1_VAL	0x30010001U
+#define ODI_NIC_RUN1_MULTI_RX	(1U << 25)
+#define ODI_NIC_RUN1_VAL	(0x30010001U | ODI_NIC_RUN1_MULTI_RX)
 
 /* ---- Interrupt-storm guard -------------------------------------------
  *
@@ -283,6 +366,14 @@ static inline int odi_nic_tx_progress(uint32_t *seen, uint32_t queued_now)
 
 #define ODI_DESC_ALIGN		256U	/* ring base must be 256-byte aligned */
 #define ODI_RX_RING_DEPTH	64U	/* memory-budget default */
+/* The OMCI ring. A registration brings some 420 OMCI messages in a few
+ * seconds and the OLT then sends one every few seconds; a ring of 32,
+ * served first by every poll, took 442 of 442 during a registration under
+ * a host flood in another open implementation's measurements on this chip.
+ */
+#define ODI_RX2_RING_DEPTH	32U
+#define ODI_NIC_RX2_FC_ON	(ODI_RX2_RING_DEPTH / 4U)
+#define ODI_NIC_RX2_FC_OFF	(ODI_RX2_RING_DEPTH * 3U / 4U)
 #define ODI_TX_RING_DEPTH	32U
 #define ODI_NIC_RX_BUF_SIZE	1600U	/* memory-budget default */
 /* The DMA engine starts every frame at buffer + 2 (4N+2, seen in trial
@@ -494,6 +585,11 @@ static inline unsigned int odi_nic_stack_tx_mask(unsigned int dev_port)
 		return 0;
 	}
 }
+
+/* The RX reason of an OMCI frame trapped to the CPU (odi_omci.c keys its
+ * hook on it).
+ */
+#define ODI_NIC_RX_REASON_OMCI		246U
 
 static inline unsigned int odi_nic_rx_reason(const struct odi_rx_desc *d)
 {

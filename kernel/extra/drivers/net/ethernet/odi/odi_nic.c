@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * odi_nic.c -- the RTL9602C CPU-port Ethernet NIC: one RX ring and one TX
- * ring behind five net_devices, plus two entry points for odi_omci.c
+ * odi_nic.c -- the RTL9602C CPU-port Ethernet NIC: two RX rings (ring 1
+ * for everything, and one the switch routes OMCI to) and one TX ring
+ * behind five net_devices, plus two entry points for odi_omci.c
  * (odi_nic.h): an RX hook, so OMCI frames reach omcid without a
  * net_device of their own, and a TX call with caller-filled descriptor
  * words.
@@ -32,6 +33,7 @@
 #include <linux/unaligned.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/rtnetlink.h>
 #include <asm/mach-rtl8686/irq.h>
 #include <asm/mach-rtl8686/rtl8686regs.h>
 
@@ -52,6 +54,14 @@
 static bool odi_nic_debug;
 module_param_named(debug, odi_nic_debug, bool, 0644);
 MODULE_PARM_DESC(debug, "trace the first interrupts and RX descriptors, dump the NIC state after open (default off)");
+
+/* odi_nic.omci_ring: route the OMCI frames to the OMCI ring (the default)
+ * or, off, every frame to ring 1 as before that ring existed. Both rings
+ * are set up and served either way; the parameter only rewrites the route
+ * register, at once when a device is open (odi_nic_omci_ring_set()).
+ */
+static bool odi_nic_omci_ring = true;
+static void odi_rx_route_apply(void);
 
 /* ---- MMIO access -------------------------------------------------------
  *
@@ -94,12 +104,37 @@ struct odi_port {
 	unsigned int port;		/* ODI_PORT_* -- which src_port_num this device claims */
 };
 
-/* ---- Shared NIC state: one ring set behind all five net_devices ------- */
+/* ---- Shared NIC state: one ring set behind all five net_devices -------
+ *
+ * Two RX rings. ODI_RXR_DATA is ring 1, which takes every frame of
+ * internal priority 0 to 6: the host side, the management traffic, ARP.
+ * ODI_RXR_OMCI is the ring the switch routes priority 7 to, the priority
+ * of the OMCI frames it traps (odi_nic_hw.h, ODI_NIC_OMCI_PRIO), so a
+ * flood from the host side that keeps ring 1 full cannot take the
+ * descriptors OMCI needs: with one ring, another open implementation's
+ * measurements on this chip lost 8 of 440 OMCI messages of a registration
+ * under a host flood, and none of 442 with the second ring. Every poll
+ * serves the OMCI ring first. Both rings go through the same frame path
+ * (odi_rx_ring()), so the PON-port drop and the RX hooks apply alike.
+ */
+enum { ODI_RXR_DATA, ODI_RXR_OMCI, ODI_RXR_NUM };
+
+struct odi_rxr {
+	struct odi_rx_desc *desc;
+	dma_addr_t dma;
+	struct sk_buff **skb;
+	unsigned int depth;
+	unsigned int head;	/* next descriptor to inspect */
+	u32 taken;		/* descriptors taken back from this ring */
+};
+
+static const unsigned int odi_rxr_depth[ODI_RXR_NUM] = {
+	[ODI_RXR_DATA] = ODI_RX_RING_DEPTH,
+	[ODI_RXR_OMCI] = ODI_RX2_RING_DEPTH,
+};
 
 struct odi_nic {
-	struct odi_rx_desc *rx_ring;
-	dma_addr_t rx_ring_dma;
-	struct sk_buff **rx_skb;
+	struct odi_rxr rx[ODI_RXR_NUM];
 
 	struct odi_tx_desc *tx_ring;
 	dma_addr_t tx_ring_dma;
@@ -110,7 +145,6 @@ struct odi_nic {
 	dma_addr_t *tx_dma;
 	unsigned int *tx_len;
 
-	unsigned int rx_head;	/* next descriptor to inspect */
 	unsigned int tx_tail;	/* next descriptor to fill */
 	unsigned int tx_reclaim;	/* next descriptor to reclaim */
 
@@ -173,6 +207,22 @@ struct odi_nic {
 	u32 rx_pon;
 	u32 rx_pon_dropped;
 	u32 rx_split_dropped;
+
+	/* The OMCI ring: usable once its engine index was found inside it
+	 * at open (odi_nic_rx2_start()), and routed to while the route
+	 * register sends priority 7 there (odi_nic.omci_ring).
+	 * rx2_other counts frames on it that are not OMCI (a host frame
+	 * that arrived with priority 7), which take its descriptors too.
+	 */
+	int rx2_usable;
+	int rx2_routed;
+	u32 rx2_other;
+
+	/* RX_NO_DESC_CNT folded in at every poll: frames the engine dropped
+	 * with no free descriptor, on either ring.
+	 */
+	u32 rx_missed;
+	u16 rx_missed_last;
 };
 
 static struct odi_nic odi;
@@ -302,36 +352,27 @@ int odi_nic_tx_words(const void *frame, unsigned short len, const struct odi_tx_
  * dma_alloc_coherent gets the uncached mapping and the physical address
  * atomically, with no manual KSEG1 aliasing or cache writeback.
  */
-static int odi_rings_alloc(struct device *dev)
+/* One RX ring, every descriptor handed to the hardware with a mapped
+ * buffer. The base must be ODI_DESC_ALIGN-aligned, or the engine and the
+ * driver disagree about the ring without any error.
+ */
+static int odi_rxr_alloc(struct device *dev, struct odi_rxr *r, unsigned int depth)
 {
-	size_t rx_sz = sizeof(struct odi_rx_desc) * ODI_RX_RING_DEPTH;
-	size_t tx_sz = sizeof(struct odi_tx_desc) * ODI_TX_RING_DEPTH;
 	unsigned int i;
 
-	odi.rx_ring = dma_alloc_coherent(dev, rx_sz, &odi.rx_ring_dma, GFP_KERNEL);
-	odi.tx_ring = dma_alloc_coherent(dev, tx_sz, &odi.tx_ring_dma, GFP_KERNEL);
-	if (!odi.rx_ring || !odi.tx_ring)
+	r->depth = depth;
+	r->head = 0;
+	r->desc = dma_alloc_coherent(dev, sizeof(*r->desc) * depth, &r->dma, GFP_KERNEL);
+	r->skb = kcalloc(depth, sizeof(*r->skb), GFP_KERNEL);
+	if (!r->desc || !r->skb)
 		return -ENOMEM;
-
-	odi.rx_skb = kcalloc(ODI_RX_RING_DEPTH, sizeof(*odi.rx_skb), GFP_KERNEL);
-	odi.tx_buf = kcalloc(ODI_TX_RING_DEPTH, sizeof(*odi.tx_buf), GFP_KERNEL);
-	odi.tx_dma = kcalloc(ODI_TX_RING_DEPTH, sizeof(*odi.tx_dma), GFP_KERNEL);
-	odi.tx_len = kcalloc(ODI_TX_RING_DEPTH, sizeof(*odi.tx_len), GFP_KERNEL);
-	if (!odi.rx_skb || !odi.tx_buf || !odi.tx_dma || !odi.tx_len)
-		return -ENOMEM;
-
-	/* Both ring bases must be ODI_DESC_ALIGN-aligned, or the engine and
-	 * the driver disagree about the ring without any error.
-	 */
-	if (!odi_desc_aligned(odi.rx_ring, (u32)odi.rx_ring_dma) ||
-	    !odi_desc_aligned(odi.tx_ring, (u32)odi.tx_ring_dma)) {
-		pr_err(DRV_NAME ": ring base not %u-byte aligned (rx virt %p dma 0x%08x, tx virt %p dma 0x%08x)\n",
-		       ODI_DESC_ALIGN, odi.rx_ring, (u32)odi.rx_ring_dma,
-		       odi.tx_ring, (u32)odi.tx_ring_dma);
+	if (!odi_desc_aligned(r->desc, (u32)r->dma)) {
+		pr_err(DRV_NAME ": rx ring base not %u-byte aligned (virt %p dma 0x%08x)\n",
+		       ODI_DESC_ALIGN, r->desc, (u32)r->dma);
 		return -EFAULT;
 	}
 
-	for (i = 0; i < ODI_RX_RING_DEPTH; i++) {
+	for (i = 0; i < depth; i++) {
 		struct sk_buff *skb = dev_alloc_skb(ODI_NIC_RX_ALLOC);
 		dma_addr_t dma;
 
@@ -342,48 +383,86 @@ static int odi_rings_alloc(struct device *dev)
 			dev_kfree_skb(skb);
 			return -ENOMEM;
 		}
-		odi.rx_skb[i] = skb;
-		odi.rx_ring[i].addr = (u32)dma;
-		odi.rx_ring[i].opts1 = ODI_RXD_HANDOFF((i == ODI_RX_RING_DEPTH - 1) ? ODI_RXD_WRAP : 0);
-		odi.rx_ring[i].opts2 = 0;
-		odi.rx_ring[i].opts3 = 0;
+		r->skb[i] = skb;
+		r->desc[i].addr = (u32)dma;
+		r->desc[i].opts1 = ODI_RXD_HANDOFF((i == depth - 1) ? ODI_RXD_WRAP : 0);
+		r->desc[i].opts2 = 0;
+		r->desc[i].opts3 = 0;
+	}
+	return 0;
+}
+
+static int odi_rings_alloc(struct device *dev)
+{
+	size_t tx_sz = sizeof(struct odi_tx_desc) * ODI_TX_RING_DEPTH;
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < ODI_RXR_NUM; i++) {
+		ret = odi_rxr_alloc(dev, &odi.rx[i], odi_rxr_depth[i]);
+		if (ret)
+			return ret;
+	}
+
+	odi.tx_ring = dma_alloc_coherent(dev, tx_sz, &odi.tx_ring_dma, GFP_KERNEL);
+	odi.tx_buf = kcalloc(ODI_TX_RING_DEPTH, sizeof(*odi.tx_buf), GFP_KERNEL);
+	odi.tx_dma = kcalloc(ODI_TX_RING_DEPTH, sizeof(*odi.tx_dma), GFP_KERNEL);
+	odi.tx_len = kcalloc(ODI_TX_RING_DEPTH, sizeof(*odi.tx_len), GFP_KERNEL);
+	if (!odi.tx_ring || !odi.tx_buf || !odi.tx_dma || !odi.tx_len)
+		return -ENOMEM;
+
+	if (!odi_desc_aligned(odi.tx_ring, (u32)odi.tx_ring_dma)) {
+		pr_err(DRV_NAME ": tx ring base not %u-byte aligned (virt %p dma 0x%08x)\n",
+		       ODI_DESC_ALIGN, odi.tx_ring, (u32)odi.tx_ring_dma);
+		return -EFAULT;
 	}
 
 	for (i = 0; i < ODI_TX_RING_DEPTH; i++) {
 		odi.tx_ring[i].opts1 = (i == ODI_TX_RING_DEPTH - 1) ? ODI_TXD_WRAP : 0;
 	}
 
-	/* The hardware starts both rings at index 0 after odi_reset_hw(), so
-	 * a reopen after the last close starts ours there too.
+	/* The hardware starts ring 1 and the TX ring at index 0 after
+	 * odi_reset_hw(), so a reopen after the last close starts ours there
+	 * too. The OMCI ring starts where its engine index is
+	 * (odi_init_hw_rings()).
 	 */
-	odi.rx_head = 0;
 	odi.tx_tail = 0;
 	odi.tx_reclaim = 0;
 
 	return 0;
 }
 
+/* Every non-NULL skb slot is a buffer the ring owns and that is still
+ * mapped at desc[i].addr: odi_rxr_alloc() fills a slot only once its
+ * mapping succeeded, and odi_rx_ring() swaps a slot only for a replacement
+ * that is already mapped. A slot is filled only when desc was allocated.
+ */
+static void odi_rxr_free(struct device *dev, struct odi_rxr *r)
+{
+	unsigned int i;
+
+	if (r->skb) {
+		for (i = 0; i < r->depth; i++) {
+			if (!r->skb[i])
+				continue;
+			dma_unmap_single(dev, r->desc[i].addr,
+					 ODI_NIC_RX_ALLOC, DMA_FROM_DEVICE);
+			dev_kfree_skb(r->skb[i]);
+		}
+		kfree(r->skb);
+		r->skb = NULL;
+	}
+	if (r->desc)
+		dma_free_coherent(dev, sizeof(*r->desc) * r->depth, r->desc, r->dma);
+	r->desc = NULL;
+}
+
 static void odi_rings_free(struct device *dev)
 {
 	unsigned int i;
 
-	/* Every non-NULL rx_skb slot is a buffer the ring owns and that is
-	 * still mapped at rx_ring[i].addr: odi_rings_alloc() fills a slot only
-	 * once its mapping succeeded, and odi_poll() swaps a slot only for a
-	 * replacement that is already mapped. rx_skb is allocated after
-	 * rx_ring, so rx_ring is valid here whenever rx_skb is.
-	 */
-	if (odi.rx_skb) {
-		for (i = 0; i < ODI_RX_RING_DEPTH; i++) {
-			if (!odi.rx_skb[i])
-				continue;
-			dma_unmap_single(dev, odi.rx_ring[i].addr,
-					 ODI_NIC_RX_ALLOC, DMA_FROM_DEVICE);
-			dev_kfree_skb(odi.rx_skb[i]);
-		}
-		kfree(odi.rx_skb);
-		odi.rx_skb = NULL;
-	}
+	for (i = 0; i < ODI_RXR_NUM; i++)
+		odi_rxr_free(dev, &odi.rx[i]);
 	if (odi.tx_buf) {
 		for (i = 0; i < ODI_TX_RING_DEPTH; i++) {
 			if (!odi.tx_buf[i])
@@ -398,13 +477,9 @@ static void odi_rings_free(struct device *dev)
 	odi.tx_dma = NULL;
 	kfree(odi.tx_len);
 	odi.tx_len = NULL;
-	if (odi.rx_ring)
-		dma_free_coherent(dev, sizeof(struct odi_rx_desc) * ODI_RX_RING_DEPTH,
-				   odi.rx_ring, odi.rx_ring_dma);
 	if (odi.tx_ring)
 		dma_free_coherent(dev, sizeof(struct odi_tx_desc) * ODI_TX_RING_DEPTH,
 				   odi.tx_ring, odi.tx_ring_dma);
-	odi.rx_ring = NULL;
 	odi.tx_ring = NULL;
 }
 
@@ -440,10 +515,11 @@ static void odi_init_hw_mac(void)
 	odi_w16(ODI_NIC_IRQ_STATUS, ODI_NIC_IRQ_ALL);
 	odi_w32(ODI_NIC_RING_IRQ_STATUS, 0xFFFFFFFFU);
 
-	/* RING_IRQ_MASK/RING_IRQ_STATUS are the sources of RX rings 2-6 only;
-	 * ring 1, the one ring in use, interrupts through IRQ_MASK/IRQ_STATUS,
-	 * which is all odi_irq() reads and acks. Unmasking here (or setting
-	 * FIFO_CFG RING_IRQS) could route ring 1 through a status odi_irq()
+	/* RING_IRQ_MASK/RING_IRQ_STATUS are the separate sources of RX rings
+	 * 2-6, used only with FIFO_CFG RING_IRQS set. With it clear, ring 1
+	 * and the OMCI ring both interrupt through IRQ_MASK/IRQ_STATUS
+	 * (IRQ_RX_OK), which is all odi_irq() reads and acks. Unmasking here
+	 * (or setting RING_IRQS) could route a ring through a status odi_irq()
 	 * never acks: an interrupt that re-asserts forever.
 	 */
 	odi_w32(ODI_NIC_RING_IRQ_MASK, 0x0U);
@@ -465,8 +541,12 @@ static void odi_init_hw_mac(void)
 /* The ring bases, the RX ring depth and count, flow control and pause. */
 static void odi_init_hw_rings(void)
 {
-	pr_info(DRV_NAME ": tx ring phys 0x%08x (%u entries), rx ring phys 0x%08x (%u entries)\n",
-		(u32)odi.tx_ring_dma, ODI_TX_RING_DEPTH, (u32)odi.rx_ring_dma, ODI_RX_RING_DEPTH);
+	struct odi_rxr *r1 = &odi.rx[ODI_RXR_DATA], *r2 = &odi.rx[ODI_RXR_OMCI];
+	unsigned int hw_idx;
+
+	pr_info(DRV_NAME ": tx ring phys 0x%08x (%u entries), rx ring phys 0x%08x (%u entries), omci ring phys 0x%08x (%u entries)\n",
+		(u32)odi.tx_ring_dma, ODI_TX_RING_DEPTH, (u32)r1->dma, r1->depth,
+		(u32)r2->dma, r2->depth);
 
 	odi_w32(ODI_NIC_TX1_RING, (u32)odi.tx_ring_dma);
 	odi_w32(ODI_NIC_TX1_INDEX, 0);
@@ -474,7 +554,8 @@ static void odi_init_hw_rings(void)
 		pr_info(DRV_NAME ": tx1_ring wrote 0x%08x read back 0x%08x, tx1_index read back 0x%08x\n",
 			(u32)odi.tx_ring_dma, odi_r32(ODI_NIC_TX1_RING), odi_r32(ODI_NIC_TX1_INDEX));
 
-	odi_w32(ODI_NIC_RX1_RING, (u32)odi.rx_ring_dma);
+	odi_w32(ODI_NIC_RX1_RING, (u32)r1->dma);
+	r1->head = 0;
 
 	/* RX1_LAST is the depth minus one, 12 bits split low byte / high
 	 * nibble; RX1_CPU_IDX and the two thresholds are single bytes of one
@@ -494,8 +575,29 @@ static void odi_init_hw_rings(void)
 
 	if (odi_nic_debug)
 		pr_info(DRV_NAME ": rx1_ring wrote 0x%08x read back 0x%08x, rx1_last read back %u/%u, fc word read back 0x%08x\n",
-			(u32)odi.rx_ring_dma, odi_r32(ODI_NIC_RX1_RING),
+			(u32)r1->dma, odi_r32(ODI_NIC_RX1_RING),
 			odi_r8(ODI_NIC_RX1_LAST), odi_r8(ODI_NIC_RX1_LAST_HI), odi_r32(ODI_NIC_RX1_CPU_IDX));
+
+	/* The OMCI ring: its engine index cannot be written, so the driver
+	 * starts where the engine is and hands back every descriptor before
+	 * it. An index beyond the ring leaves the ring unused (nothing is
+	 * routed to it, odi_rx_route_apply()).
+	 */
+	odi_w32(ODI_NIC_RX2_RING, (u32)r2->dma);
+	odi_w16(ODI_NIC_RX2_LAST, (u16)(r2->depth - 1));
+	hw_idx = odi_r16(ODI_NIC_RX2_INDEX);
+	odi.rx2_usable = odi_nic_rx2_start(hw_idx, r2->depth, &r2->head);
+	if (!odi.rx2_usable) {
+		pr_warn(DRV_NAME ": omci ring engine index %u is beyond the ring (%u); OMCI stays on ring 1\n",
+			hw_idx, r2->depth);
+		r2->head = 0;
+	}
+	odi_w32(ODI_NIC_RX2_CPU_IDX, odi_nic_rx_cpu_idx(r2->head, r2->depth));
+	odi_w32(ODI_NIC_RX2_FC, ODI_NIC_RX2_FC_VAL(ODI_NIC_RX2_FC_ON, ODI_NIC_RX2_FC_OFF));
+	if (odi_nic_debug)
+		pr_info(DRV_NAME ": rx2_ring wrote 0x%08x read back 0x%08x, engine index %u, rx2_cpu_idx read back 0x%08x, rx2_fc read back 0x%08x\n",
+			(u32)r2->dma, odi_r32(ODI_NIC_RX2_RING), hw_idx,
+			odi_r32(ODI_NIC_RX2_CPU_IDX), odi_r32(ODI_NIC_RX2_FC));
 
 	odi_w32(ODI_NIC_R13FC, 0);
 
@@ -517,12 +619,7 @@ static void odi_init_hw_rx(void)
 	/* FIFO_CFG RING_IRQS stays clear: see odi_init_hw_mac(). */
 	odi_w32(ODI_NIC_FIFO_CFG, ODI_NIC_FIFO_RX_2K);
 
-	odi_w32(ODI_NIC_RX_RING_MAP + 0 * 4, ODI_NIC_RX_RING_MAP_1TO1);
-	odi_w32(ODI_NIC_RX_RING_MAP + 1 * 4, ODI_NIC_RX_RING_MAP_1TO1);
-	odi_w32(ODI_NIC_RX_RING_MAP + 2 * 4, ODI_NIC_RX_RING_MAP_1TO1);
-	odi_w32(ODI_NIC_RX_RING_MAP + 3 * 4, ODI_NIC_RX_RING_MAP_1TO1);
-	odi_w32(ODI_NIC_RX_RING_MAP + 4 * 4, ODI_NIC_RX_RING_MAP_1TO1);
-	odi_w32(ODI_NIC_RX_RING_MAP + 5 * 4, ODI_NIC_RX_RING_MAP_1TO1);
+	odi_rx_route_apply();
 
 	/* Promiscuous: broadcast, multicast, own and any unicast, the hash
 	 * filter wide open. At reset the MAC accepts nothing. The switch
@@ -564,7 +661,7 @@ static void odi_start_hw(void)
  */
 static void odi_quiesce_hw(void)
 {
-	unsigned int i;
+	unsigned int i, r;
 
 	if (!odi_mmio)
 		return;
@@ -574,9 +671,10 @@ static void odi_quiesce_hw(void)
 	odi_w32(ODI_NIC_RING_IRQ_MASK, 0);
 	odi_w16(ODI_NIC_IRQ_STATUS, ODI_NIC_IRQ_ALL);
 	odi_w32(ODI_NIC_RING_IRQ_STATUS, 0xFFFFFFFFU);
-	if (odi.rx_ring)
-		for (i = 0; i < ODI_RX_RING_DEPTH; i++)
-			odi.rx_ring[i].opts1 &= ~ODI_RXD_HW;
+	for (r = 0; r < ODI_RXR_NUM; r++)
+		if (odi.rx[r].desc)
+			for (i = 0; i < odi.rx[r].depth; i++)
+				odi.rx[r].desc[i].opts1 &= ~ODI_RXD_HW;
 	odi_dma_wmb();
 }
 
@@ -871,25 +969,37 @@ static struct net_device *odi_dev_for_port(unsigned int src_port)
 
 static unsigned int odi_rx_log_count;
 
-/* Tell the flow-control logic how far the CPU has handed descriptors back
- * (odi_nic_hw.h, RX1_CPU_IDX), after the own bit: the index must never
- * count a descriptor the engine cannot see as its own yet. Once per
- * descriptor, as the stock driver does, so the index only ever moves by
+/* Tell the engine how far the CPU has handed descriptors back
+ * (odi_nic_hw.h, RX1_CPU_IDX and RX2_CPU_IDX), after the own bit: the index
+ * must never count a descriptor the engine cannot see as its own yet. Once
+ * per descriptor, as the stock driver does, so the index only ever moves by
  * one: once per poll it could move by the whole NAPI budget, which is the
- * ring depth, and a full poll then wrote the same byte as the one before.
+ * ring-1 depth, and a full poll then wrote the same byte as the one before.
+ * Ring 1 takes one byte, the OMCI ring a whole word.
  */
-static void odi_rx_cpu_idx_update(void)
+static void odi_rx_cpu_idx_update(unsigned int ring)
 {
+	const struct odi_rxr *r = &odi.rx[ring];
+	unsigned int idx = odi_nic_rx_cpu_idx(r->head, r->depth);
+
 	odi_dma_wmb();
-	odi_w8(ODI_NIC_RX1_CPU_IDX, (u8)odi_nic_rx_cpu_idx(odi.rx_head, ODI_RX_RING_DEPTH));
+	if (ring == ODI_RXR_DATA)
+		odi_w8(ODI_NIC_RX1_CPU_IDX, (u8)idx);
+	else
+		odi_w32(ODI_NIC_RX2_CPU_IDX, idx);
 }
 
-static int odi_poll(struct napi_struct *napi, int budget)
+/* Take up to budget frames from one ring. Both rings share everything
+ * below: the RX hooks (OMCI, IGMP), the drop of a frame from the PON port
+ * that no hook took, and the hand-off to the net devices.
+ */
+static int odi_rx_ring(unsigned int ring, int budget)
 {
+	struct odi_rxr *r = &odi.rx[ring];
 	int done = 0;
 
 	while (done < budget) {
-		struct odi_rx_desc *d = &odi.rx_ring[odi.rx_head];
+		struct odi_rx_desc *d = &r->desc[r->head];
 		struct sk_buff *skb, *fresh;
 		dma_addr_t fresh_dma;
 		unsigned int len, src_port;
@@ -900,17 +1010,20 @@ static int odi_poll(struct napi_struct *napi, int budget)
 
 		len = odi_nic_rx_len(d);
 		src_port = odi_nic_rx_src_port(d);
-		skb = odi.rx_skb[odi.rx_head];
+		skb = r->skb[r->head];
 
 		/* odi_nic.debug: the first descriptors, raw. */
 		if (odi_nic_debug && odi_rx_log_count < 6) {
-			pr_info(DRV_NAME ": rx desc[%u] opts1=0x%08x opts2=0x%08x opts3=0x%08x len=%u src_port=%u first bytes %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
-				odi.rx_head, d->opts1, d->opts2, d->opts3, len, src_port,
+			pr_info(DRV_NAME ": rx ring %u desc[%u] opts1=0x%08x opts2=0x%08x opts3=0x%08x len=%u src_port=%u first bytes %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
+				ring, r->head, d->opts1, d->opts2, d->opts3, len, src_port,
 				skb->data[0], skb->data[1], skb->data[2], skb->data[3],
 				skb->data[4], skb->data[5], skb->data[6], skb->data[7],
 				skb->data[8], skb->data[9], skb->data[10], skb->data[11]);
 			odi_rx_log_count++;
 		}
+
+		if (ring == ODI_RXR_OMCI && odi_nic_rx_reason(d) != ODI_NIC_RX_REASON_OMCI)
+			odi.rx2_other++;
 
 		if (!odi_nic_rx_whole(d)) {
 			/* One piece of a frame longer than the buffer. Only the
@@ -965,7 +1078,7 @@ static int odi_poll(struct napi_struct *napi, int budget)
 
 		dma_unmap_single(&odi_pdev->dev, d->addr,
 				  ODI_NIC_RX_ALLOC, DMA_FROM_DEVICE);
-		odi.rx_skb[odi.rx_head] = fresh;
+		r->skb[r->head] = fresh;
 		skb_reserve(skb, ODI_NIC_RX_OFFSET);
 		skb_put(skb, len - ETH_FCS_LEN);
 
@@ -1005,13 +1118,33 @@ requeue:
 		d->opts2 = 0;
 		d->opts3 = 0;
 		odi_dma_wmb();
-		d->opts1 = ODI_RXD_HANDOFF(odi.rx_head == ODI_RX_RING_DEPTH - 1 ? ODI_RXD_WRAP : 0);
+		d->opts1 = ODI_RXD_HANDOFF(r->head == r->depth - 1 ? ODI_RXD_WRAP : 0);
 
-		odi.rx_head = odi_ring_next(odi.rx_head, ODI_RX_RING_DEPTH);
-		odi_rx_cpu_idx_update();
+		r->head = odi_ring_next(r->head, r->depth);
+		odi_rx_cpu_idx_update(ring);
+		r->taken++;
 		odi.rx_taken++;
 		done++;
 	}
+	return done;
+}
+
+/* The OMCI ring first, so a full budget of ring-1 frames cannot hold an
+ * OMCI frame back; it is served even while nothing is routed to it, so a
+ * frame that arrived before a route change is never left behind. Then the
+ * frames the engine dropped for want of a descriptor, read once a poll.
+ */
+static int odi_poll(struct napi_struct *napi, int budget)
+{
+	u16 missed_now;
+	int done;
+
+	done = odi_rx_ring(ODI_RXR_OMCI, budget);
+	done += odi_rx_ring(ODI_RXR_DATA, budget - done);
+
+	missed_now = odi_r16(ODI_NIC_RX_NO_DESC_CNT);
+	odi.rx_missed += odi_nic_u16_delta(missed_now, odi.rx_missed_last);
+	odi.rx_missed_last = missed_now;
 
 	odi.napi_polls++;
 	odi_tx_reclaim();
@@ -1114,16 +1247,18 @@ static void odi_state_dump_work(struct work_struct *work)
 	for (i = 0; i < ODI_TX_RING_DEPTH; i++)
 		if (odi.tx_ring[i].opts1 & ODI_TXD_HW)
 			tx_own++;
-	for (i = 0; i < ODI_RX_RING_DEPTH; i++)
-		if (!(odi.rx_ring[i].opts1 & ODI_RXD_HW))
+	for (i = 0; i < odi.rx[ODI_RXR_DATA].depth; i++)
+		if (!(odi.rx[ODI_RXR_DATA].desc[i].opts1 & ODI_RXD_HW))
 			rx_owned_clear++;
 
-	pr_info(DRV_NAME ": dump%d ring: tx1_ring=0x%08x tx1_index=0x%08x rx1_ring=0x%08x rx1_index=0x%08x rx1_fc=0x%08x rx_head=%u tx_tail=%u tx_reclaim=%u tx_own=%u rx_clear=%u rxd0_opts1=0x%08x\n",
+	pr_info(DRV_NAME ": dump%d ring: tx1_ring=0x%08x tx1_index=0x%08x rx1_ring=0x%08x rx1_index=0x%08x rx1_fc=0x%08x rx_head=%u tx_tail=%u tx_reclaim=%u tx_own=%u rx_clear=%u rxd0_opts1=0x%08x rx2_index=0x%08x rx2_cpu_idx=0x%08x rx2_head=%u rx_map=0x%08x\n",
 		odi.state_dump_fire,
 		odi_r32(ODI_NIC_TX1_RING), odi_r32(ODI_NIC_TX1_INDEX),
 		odi_r32(ODI_NIC_RX1_RING), odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_CPU_IDX),
-		odi.rx_head, odi.tx_tail, odi.tx_reclaim, tx_own, rx_owned_clear,
-		odi.rx_ring[0].opts1);
+		odi.rx[ODI_RXR_DATA].head, odi.tx_tail, odi.tx_reclaim, tx_own, rx_owned_clear,
+		odi.rx[ODI_RXR_DATA].desc[0].opts1,
+		odi_r32(ODI_NIC_RX2_INDEX), odi_r32(ODI_NIC_RX2_CPU_IDX), odi.rx[ODI_RXR_OMCI].head,
+		odi_r32(ODI_NIC_RX_RING_MAP));
 
 	pr_info(DRV_NAME ": dump%d counters: irq_entries=%u napi_polls=%u tok_irqs=%u tok_work=%u tok_idle=%u backstop_reclaims=%u eth0 tx=%lu rx=%lu drop=%lu eth0.2 tx=%lu rx=%lu drop=%lu\n",
 		odi.state_dump_fire, odi.irq_entries, odi.napi_polls,
@@ -1145,6 +1280,49 @@ static void odi_state_dump_work(struct work_struct *work)
  */
 
 static atomic_t odi_open_count = ATOMIC_INIT(0);
+
+/* The route words for odi_nic.omci_ring, all six alike (odi_nic_hw.h).
+ * Called from the first ndo_open and from the parameter, both under the
+ * RTNL, so the two never interleave.
+ */
+static void odi_rx_route_apply(void)
+{
+	u32 map;
+	unsigned int i;
+
+	ASSERT_RTNL();
+	WRITE_ONCE(odi.rx2_routed, odi_nic_omci_ring && odi.rx2_usable);
+	map = odi_nic_rx_ring_map(odi.rx2_routed);
+	for (i = 0; i < ODI_NIC_RX_RING_MAP_WORDS; i++)
+		odi_w32(ODI_NIC_RX_RING_MAP + 4 * i, map);
+}
+
+/* Written on the command line it is read before any device is open and
+ * takes effect at the first ndo_open; written to
+ * /sys/module/odi_nic/parameters/omci_ring while one is, at once.
+ */
+static int odi_nic_omci_ring_set(const char *val, const struct kernel_param *kp)
+{
+	bool on;
+	int rc;
+
+	rc = kstrtobool(val, &on);
+	if (rc)
+		return rc;
+	rtnl_lock();
+	odi_nic_omci_ring = on;
+	if (atomic_read(&odi_open_count) > 0)
+		odi_rx_route_apply();
+	rtnl_unlock();
+	return 0;
+}
+
+static const struct kernel_param_ops odi_nic_omci_ring_ops = {
+	.set = odi_nic_omci_ring_set,
+	.get = param_get_bool,
+};
+module_param_cb(omci_ring, &odi_nic_omci_ring_ops, &odi_nic_omci_ring, 0644);
+MODULE_PARM_DESC(omci_ring, "route the OMCI frames to a receive ring of their own (default: yes)");
 
 static int odi_ndo_open(struct net_device *dev)
 {
@@ -1186,6 +1364,7 @@ static int odi_ndo_open(struct net_device *dev)
 		odi.tok_idle = 0;
 		odi.tok_seen_queued = READ_ONCE(odi.tx_queued);
 		odi.backstop_reclaims = 0;
+		odi.rx_missed_last = odi_r16(ODI_NIC_RX_NO_DESC_CNT);
 		odi.state_dump_fire = 0;
 		if (odi_nic_debug)
 			schedule_delayed_work(&odi.state_dump_work,
@@ -1241,17 +1420,25 @@ bool odi_nic_rx_taken(u32 *taken)
  */
 void odi_nic_report(void)
 {
-	pr_emerg(DRV_NAME ": irq_status=0x%04x irq_mask=0x%04x rx1_index=0x%08x rx1_fc=0x%08x pause=0x%02x rx_head=%u rx_taken=%u irq_entries=%u napi_polls=%u tok_irqs=%u tok_work=%u backstop_reclaims=%u storm=%d\n",
+	pr_emerg(DRV_NAME ": irq_status=0x%04x irq_mask=0x%04x rx1_index=0x%08x rx1_fc=0x%08x rx2_index=0x%08x rx2_cpu_idx=0x%08x pause=0x%02x rx_head=%u rx2_head=%u rx_taken=%u rx_missed=%u irq_entries=%u napi_polls=%u tok_irqs=%u tok_work=%u backstop_reclaims=%u storm=%d\n",
 		 odi_r16(ODI_NIC_IRQ_STATUS), odi_r16(ODI_NIC_IRQ_MASK),
-		 odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_CPU_IDX), odi_r8(ODI_NIC_MSR),
-		 odi.rx_head, odi.rx_taken, odi.irq_entries, odi.napi_polls,
+		 odi_r32(ODI_NIC_RX1_INDEX), odi_r32(ODI_NIC_RX1_CPU_IDX),
+		 odi_r32(ODI_NIC_RX2_INDEX), odi_r32(ODI_NIC_RX2_CPU_IDX), odi_r8(ODI_NIC_MSR),
+		 odi.rx[ODI_RXR_DATA].head, odi.rx[ODI_RXR_OMCI].head, odi.rx_taken, odi.rx_missed,
+		 odi.irq_entries, odi.napi_polls,
 		 odi.tok_irqs, odi.tok_work, odi.backstop_reclaims, odi.irq_storm_tripped);
 }
 
 /* /proc/odi_nic: the interrupt and reclaim counters, one per line, then
  * the frames from the PON port (rx_pon, OMCI included) and those dropped
  * because no RX hook took them (rx_pon_dropped), then the descriptors
- * dropped for not being a whole frame (rx_split_dropped). tok_irqs
+ * dropped for not being a whole frame (rx_split_dropped). Then the OMCI
+ * ring: omci_ring 1 while priority 7 is routed to it (0 when
+ * odi_nic.omci_ring is off or its engine index was beyond it at open),
+ * rx1_taken and rx2_taken the descriptors taken from each ring (their sum
+ * is rx_taken while the counters have not wrapped), rx2_other the frames on
+ * the OMCI ring that were not OMCI, and rx_missed the frames the engine
+ * dropped with no free descriptor on either ring. tok_irqs
  * is the number of interrupt entries that carried the TX-completion bit:
  * zero under TX traffic means the interrupt does not fire on this unit and
  * every reclaim came from the poll, the xmit path or the backstop.
@@ -1264,6 +1451,9 @@ static int odi_nic_proc_show(struct seq_file *m, void *v)
 		   odi.irq_entries, odi.napi_polls, odi.tok_irqs, odi.tok_work,
 		   odi.tok_idle, odi.backstop_reclaims, odi.rx_taken, odi.irq_storm_tripped,
 		   odi.rx_pon, odi.rx_pon_dropped, odi.rx_split_dropped);
+	seq_printf(m, "omci_ring %d\nrx1_taken %u\nrx2_taken %u\nrx2_other %u\nrx_missed %u\n",
+		   READ_ONCE(odi.rx2_routed), odi.rx[ODI_RXR_DATA].taken,
+		   odi.rx[ODI_RXR_OMCI].taken, odi.rx2_other, odi.rx_missed);
 	return 0;
 }
 
@@ -1413,6 +1603,10 @@ static int __init odi_nic_init(void)
 	BUILD_BUG_ON(ODI_RX_RING_DEPTH > 256);
 	BUILD_BUG_ON(ODI_NIC_FC_OFF > 255 || ODI_NIC_FC_OFF >= ODI_RX_RING_DEPTH);
 	BUILD_BUG_ON(ODI_NIC_FC_ON >= ODI_NIC_FC_OFF);
+	/* The OMCI ring thresholds are one byte each, the depth a 16-bit field. */
+	BUILD_BUG_ON(ODI_NIC_RX2_FC_OFF > 255 || ODI_NIC_RX2_FC_OFF >= ODI_RX2_RING_DEPTH);
+	BUILD_BUG_ON(ODI_NIC_RX2_FC_ON >= ODI_NIC_RX2_FC_OFF);
+	BUILD_BUG_ON(ODI_RX2_RING_DEPTH > 0x10000);
 
 	odi_mmio = ioremap(CPHYSADDR(ODI_NIC_MMIO_BASE), ODI_NIC_MMIO_SIZE);
 	if (!odi_mmio) {

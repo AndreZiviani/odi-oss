@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- OMCI under a host-side flood: the NIC now runs a second receive ring, and
+  the switch routes the OMCI frames it traps to the CPU (internal priority
+  7) there; every other frame stays on the main ring. Every poll serves the
+  OMCI ring first, so a flood toward the stick from the host side that keeps
+  the main ring full no longer costs OMCI frames, which the OLT does not
+  always repeat. Both rings share the same frame path, so the PON-port drop
+  that keeps everything but OMCI from the fibre out of the IP stack is
+  unchanged. `/proc/odi_nic` gains `omci_ring`, `rx1_taken`, `rx2_taken`,
+  `rx2_other` (non-OMCI frames on the OMCI ring) and `rx_missed` (frames
+  the NIC dropped with no free descriptor), and the kernel parameter
+  `odi_nic.omci_ring=0` routes everything to the one ring again, live.
+  Host-tested against a model of the flood; not yet trialled on hardware.
+
 - Toolchain: built with odi-toolchain uclibc-v4 and freestanding-v3, which
   deny the `bltzl` instruction in the ISA audit (it decodes but
   misexecutes on the RLX5281). The compilers and libraries are unchanged:
