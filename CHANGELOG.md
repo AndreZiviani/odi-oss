@@ -12,6 +12,14 @@ listed here.
   `Dying_Gasp sent <n> of 3 times before the restart`. What the OLT does with
   it cannot be confirmed from here, hence off by default.
 
+- Diagnostic bundle: `module/chip.txt` decodes the GN25L95 laser driver
+  words that set the modulation (ER_CTRL with its automatic
+  extinction-ratio loop bit, MOD_DAC, MOD_LIMIT, PERSIST), and
+  `host-link.txt` adds the host SerDes lane control word (0x214: receiver
+  in sync, lane mode) and its in-band negotiation word (0x21808). Reads
+  only; nothing read or exported these before. On a stick under test the
+  loop is on and MOD_DAC moves by itself.
+
 - Kernel: the DMA invalidate no longer drops a cache line that is only
   partly inside the buffer. The first and last line of an unaligned range
   are written back and invalidated, the lines in between are invalidated
