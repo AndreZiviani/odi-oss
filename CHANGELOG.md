@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Diagnostic bundle: `module/chip.txt` decodes the GN25L95 laser driver
+  words that set the modulation (ER_CTRL with its automatic
+  extinction-ratio loop bit, MOD_DAC, MOD_LIMIT, PERSIST), and
+  `host-link.txt` adds the host SerDes lane control word (0x214: receiver
+  in sync, lane mode) and its in-band negotiation word (0x21808). Reads
+  only; nothing read or exported these before. On a stick under test the
+  loop is on and MOD_DAC moves by itself.
+
 ## v1.10.0 - 2026-10-21
 
 - Switch: the downstream queues of the UNI (ME 277, the ones the OLT
