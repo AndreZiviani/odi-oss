@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.8.0 (the web UI's management-address change goes
+  through the `mgmt-addr.sh` trial and opens the new address by itself) and
+  metricsd v1.7.0 (`gpon_soc_temperature_celsius`, from the new SoC
+  temperature sensor).
+
 - Classifier layout boundary read the right way round: `CLASSIFY_SETUP` bits
   12:5 count the rows at the top of the table that follow the second rule
   layout, so the first such row is 256 minus the count. The code and
