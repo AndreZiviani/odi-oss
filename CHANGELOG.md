@@ -15,7 +15,7 @@ listed here.
   port 0. The driver does not use either value yet, so nothing changes on the
   wire.
 
-- Multicast: IGMP snooping that follows what the OLT provisions, off unless
+- Multicast (experimental): IGMP snooping that follows what the OLT provisions, off unless
   `IGMP_SNOOPING=1` is set (`apply.sh igmp` applies it). While the OLT asks
   for it (a multicast GEM interworking TP with an address row and a
   multicast operations profile with IGMP function 0), `igmpd` keeps one
