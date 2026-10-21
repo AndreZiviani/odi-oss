@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+## v1.9.0 - 2026-10-21
+
+- The image ships confd v1.7.1 (odi-ui: sign-in falls back to the built-in
+  credential only when the credential file is missing or empty, never on a
+  read error; every API route documented).
+
 - Kernel, GPON: a GPON MAC that is not clocked answers its registers with
   `0xca0eca0f`, which has LOS, LOF, FEC and LOM all set. The line sample and
   the counter sample now treat that word as no reading: it is not fed to the
