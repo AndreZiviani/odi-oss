@@ -216,4 +216,42 @@ static inline int pp_sn_is_zero(const uint8_t sn[8])
 	return 1;
 }
 
+/* One total from /proc/odi_gpon/counters ("ctr <name> <decimal>", the
+ * driver's 64-bit running totals). Returns 0 and sets *out, or -1 when the
+ * name has no line or the value is not a decimal that fits 64 bits: a
+ * caller must treat -1 as "cannot tell", never as 0. */
+static inline int pp_ctr(const char *buf, unsigned len, const char *name, uint64_t *out)
+{
+	char key[48] = "ctr ";
+	unsigned k = 4, i;
+	uint64_t v = 0;
+	int at;
+
+	for (unsigned j = 0; name[j]; j++) {
+		if (k + 1 >= sizeof key)
+			return -1;
+		key[k++] = name[j];
+	}
+	key[k] = 0;
+	at = pp_find_line(buf, len, key);
+	if (at < 0)
+		return -1;
+	i = (unsigned)at + k + 1;
+	if (i >= len || buf[i] < '0' || buf[i] > '9')
+		return -1;
+	for (; i < len && buf[i] >= '0' && buf[i] <= '9'; i++) {
+		unsigned d = (unsigned)(buf[i] - '0');
+
+		/* 2^64 / 10 spelled out: a 64-bit division would call libgcc,
+		 * which the freestanding omcid does not link. */
+		if (v > 1844674407370955161ULL || (v == 1844674407370955161ULL && d > 5))
+			return -1;
+		v = v * 10 + d;
+	}
+	if (i < len && buf[i] != '\n')
+		return -1;
+	*out = v;
+	return 0;
+}
+
 #endif

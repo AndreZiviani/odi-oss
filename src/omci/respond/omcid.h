@@ -469,6 +469,20 @@ void ev_tick(void);
  * snapshot. See alarm.c. */
 void alarm_init(void);
 void alarm_tick(void);
+/* Performance monitoring history data (pm.c): the 15-minute intervals and
+ * ME 312 on them. pm_attr answers a PM attribute from them, 1 when it is
+ * one; pm_view(1) makes the calls that follow answer the interval in
+ * progress (Get current data), pm_view(0) the completed one. */
+extern const char *pm_counters_path;
+extern const char *pm_clock_path;
+int pm_class(uint16_t cls);
+void pm_create(uint16_t cls, uint16_t inst);
+void pm_delete(uint16_t cls, uint16_t inst);
+void pm_mib_reset(void);
+void pm_sync_time(unsigned hh, unsigned mm, unsigned ss);
+void pm_tick(void);
+void pm_view(int current);
+int pm_attr(uint16_t cls, uint16_t inst, unsigned k, uint8_t *out, uint16_t n);
 void alarm_mib_reset(void);
 uint16_t alarm_get_all(void);
 int alarm_get_next(uint16_t seq, uint8_t *body);

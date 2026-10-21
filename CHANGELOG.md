@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the FEC performance monitoring history data entity (class 312, which
+  an OLT creates and then reads) reports real values instead of zeros, on a
+  15-minute interval framework that other history entities can reuse. A Get
+  returns the last completed interval and Get current data the one in
+  progress; Interval end time counts completed intervals from 0 at Create;
+  Synchronize time puts the boundaries on the OLT's quarter hour and starts
+  every count again. Corrected bytes, corrected code words and uncorrectable
+  code words are the differences of the GPON driver's running totals
+  (`/proc/odi_gpon/counters`) over the interval, so nothing in the hardware is
+  cleared and the metrics counters are untouched; FEC seconds is the number
+  of seconds in which an uncorrectable code word arrived. Total code words
+  stays 0: the MAC does not count received code words and a derived figure
+  would be a guess. Threshold crossing alerts are not raised. After an omcid
+  restart an entity starts a new history, from interval 0. New omcid options
+  `-n` and `-t` (counter file, interval clock) are for tests, which run as the
+  new `pm` OMCI suite and cover the counter parser on the host.
+
 - Docs: `bltzl` is corrected from "confirmed to work" to "decodes but
   misexecutes". It was listed as working from a probe that could only see
   SIGILL; a probe that checks the delay slot, run on a stick, shows the slot

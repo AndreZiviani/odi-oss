@@ -96,7 +96,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [qemu, drv, resume, events, swdl, vlan, reload, live, keys, mcast]
+        suite: [qemu, drv, resume, events, swdl, vlan, reload, live, keys, mcast, pm]
     steps:
       - uses: actions/checkout@v7
 

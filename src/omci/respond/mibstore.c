@@ -923,6 +923,10 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 
 	for (uint16_t i = 0; i < n; i++)
 		out[i] = 0;
+	/* A PM entity's counts are never the OLT's to write: they are the
+	 * intervals of pm.c. */
+	if (pm_class(c->classId) && pm_attr(c->classId, inst, k, out, n))
+		return n;
 	/* An attribute the OLT has written wins: a get after a set has to return
 	 * what was set. `written`, not merely `r`, because a row exists as soon
 	 * as any one attribute is set and the rest of it is still zero -- the
