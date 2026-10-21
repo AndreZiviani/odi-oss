@@ -12,6 +12,19 @@ listed here.
   correlation id crossing 0x7fff to 0x8000 (the priority bit) in a MIB
   upload and in the retransmission cache, which keys on the whole frame.
 
+- Docs: the by-hand slot restore in `docs/FLASHING.md` now says to write
+  the kernel last, lists the checks to make before pointing a boot at the
+  restored slot (running and committed slot, the uImage magic, the partition
+  against the dump or the tarball) and says plainly that the header and data
+  CRC cannot be checked on the stick, then sends the boot through
+  `sw_tryactive` and `nv commit`, never `sw_active`.
+
+- Docs and comments: `PORT_VLAN_INDEX` holds two ports per word (12 bits
+  each), so the platform step's two plain writes to words 0 and 1 already
+  set the PVID of all four ports. The comments in the switch driver and
+  `docs/SWITCH.md` said ports 2 and 3 were not written. No behaviour
+  change.
+
 ## v1.10.0 - 2026-10-21
 
 - Switch: the downstream queues of the UNI (ME 277, the ones the OLT
