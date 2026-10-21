@@ -447,6 +447,39 @@ int main(void)
 		ok(n < 1 || row_index(ids[n - 1], 0) == 127, "the last one is row 127");
 	}
 
+	puts("the layout boundary is a count of rows from the top (CLASSIFY_SETUP 12:5):");
+	{
+		struct evtocd_plan u;
+		struct evtocd_entry t;
+		int i, id, accepted = 0;
+
+		odi_mock_reset();
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x1009U;
+		ok(odi_sw_cf_layout1_row() == 128, "count 128 (what we program): pattern 1 from row 128");
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x1c09U;
+		ok(odi_sw_cf_layout1_row() == 32, "count 224 (the stock value): pattern 1 from row 32, not 224");
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x0009U;
+		ok(odi_sw_cf_layout1_row() == 256, "count 0: no row is pattern 1");
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x1fe9U;
+		ok(odi_sw_cf_layout1_row() == 1, "count 255: pattern 1 from row 1");
+
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+		/* At 224 rows 32 and up are pattern 1, and the S-tag rows start at
+		 * 64, so none may be placed. Read from the bottom (224) the first
+		 * 160 of them would have been accepted. */
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x1c09U;
+		build(e, 8, 200, 0,  8, 4096, 0, 0,   1, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		(void)evtocd_plan(&t, 0x88a8, 0x8100, &u);
+		for (i = 0; i < 4; i++) {
+			u.s.f_vid = (int16_t)(200 + i);
+			if (send_leg(&u, OMCI_DIR_US, &id) == 0)
+				accepted++;
+		}
+		ok(accepted == 0, "count 224: no S-tag rule is placed on a pattern 1 row");
+	}
+
 	puts("registers a line with no rule of this kind sees:");
 	{
 		unsigned int i, w = 0;

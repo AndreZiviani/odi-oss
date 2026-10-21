@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- Classifier layout boundary read the right way round: `CLASSIFY_SETUP` bits
+  12:5 count the rows at the top of the table that follow the second rule
+  layout, so the first such row is 256 minus the count. The code and
+  `docs/SWITCH.md` read the field as the first row itself. The two agree at
+  128, the only value this image programs, so nothing changes on a running
+  stick; at the stock value 0x1c09 (224) the S-tag rows would have been
+  placed in rows the hardware treats as the second layout, where the S-tag
+  template is not known to work. The module-load capture of the stock
+  firmware agrees: with 224 in place it sweeps rows 0-31 in the first rule
+  and mask tables and rows 32-255 in the second. Another open implementation
+  measured the same direction. Host test pins the mapping at 128, 224, 0 and
+  255.
+  On a stick (count 128) the classifier rows land where they did before.
+
 - OMCI: the FEC performance history (ME 312) reports Total code words, and
   the GEM port network CTP (ME 268) reports its Encryption state. Total code
   words was always 0 ("not reported"); the driver now derives it exactly: 153

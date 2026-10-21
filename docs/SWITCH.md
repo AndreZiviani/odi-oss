@@ -75,9 +75,17 @@ the fields it owns. Board ports: UNI 0, PON 2, CPU 3; port 1 is unused.
   match required, 2 drop). A running stock stick reads `0x1c09`: the field
   is already 1 there, `PON_SELECT` is 1 and `PATTERN1_COUNT` is `0xe0`. A
   fresh boot of ours reads `PATTERN1_COUNT = 0x80`, the value the `switch`
-  verb writes. `PATTERN1_COUNT` is the boundary between the two CF pattern
-  partitions and grows with the services the stock stack has provisioned,
-  so it is allocator state, not a boot constant, and is not written.
+  verb writes. `PATTERN1_COUNT` is how many rows at the top of the 256-row
+  table follow the second CF rule layout (pattern 1): row `i` is pattern 1
+  when `i >= 256 - PATTERN1_COUNT`, the rows below follow pattern 0. It is
+  counted from the top, so 128 is the one value where it is also the first
+  row of the second layout; at the stock 224 pattern 1 starts at row 32. The
+  stock module-load capture supports this: with `0x1c09` in place it sweeps
+  rows 0-31 of the first rule and mask tables and rows 32-255 of the second.
+  What is not settled: whether the stock value is a boot constant or moves with
+  provisioning (the module-load capture writes `0x1c09` three times and never
+  another value, and the replay overwrites it with 0x1009), and what pattern 1
+  does to the S-tag template (above). It is not written here.
 - **acl clean**: every row of the three ACL tables (96 each: the rule
   pattern, kind 2 rows 128-223; the rule mask, kind 2 rows 0-95; the
   action, kind 3) is read back, written all-zero and read back again,
@@ -858,7 +866,7 @@ stock register table where the table says anything.
 | the classifier acts on the lowest-numbered matching row | other (an operator OLT's pass-through at a lower index shadowed a translation) |
 | a frame forwarded to the PON port with no stream is dropped silently in the PON MAC, so a rule up the PON names its stream (`us_flow`) like every other upstream row, and a frame no row matches has no stream | other |
 | `PON_EN` (`CLASSIFY_SETUP` bit 3) must be set for the C-tag actions to apply to frames crossing the PON port. Reads set (0x1009) | other; read |
-| rows from the boundary in `CLASSIFY_SETUP` 12:5 (`PATTERN1_COUNT`, reads 128) up are matched with a second rule layout; the fields our rows use sit in the same place in both, the S-tag template bit is not known to work there, so such a row is not placed at or past the boundary (`cf_insert()` refuses with "classification table full") | other; read; the placement is ours |
+| the last `CLASSIFY_SETUP` 12:5 (`PATTERN1_COUNT`, reads 128) rows of the table, counted from the top, are matched with a second rule layout (row `i` when `i >= 256 - count`); the fields our rows use sit in the same place in both, the S-tag template bit is not known to work there, so such a row is not placed at or past the first of them (`cf_insert()` refuses with "classification table full"). The direction is the stock sweep's split at 32 with count 224; the layout difference itself is not measured here | other; read; the placement is ours |
 | `CLASSIFY_SETUP` bits 1:0 apply to downstream frames too (value 2 drops those no row matches). We write 1 | other |
 
 A frame with two C-tags cannot be told from one with a single C-tag, so a rule
