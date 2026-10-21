@@ -328,9 +328,9 @@ struct odi_sw_vlan_override {
 #define ODI_SW_CF_W0_VALID		(1U << 16)
 /* Rule and mask word 0, bits 15:0, in a row of the second layout (rows from
  * ODI_SW_CLASSIFY_SETUP_PATTERN1_FIRST_ROW() up, template 0): the frame's
- * EtherType, as
- * the bits that must be 1 (rule) and 0 (mask). The first layout holds other
- * keys there, so a row never writes them unless it names an EtherType. */
+ * EtherType, as the bits that must be 1 (rule) and 0 (mask). The first layout
+ * holds other keys there, so a row never writes them unless it names an
+ * EtherType. */
 #define ODI_SW_CF_W0_ET_MASK		0xffffU
 #define ODI_SW_CF_W1_DS			(1U << 31)
 #define ODI_SW_CF_W1_VID_SHIFT		11
