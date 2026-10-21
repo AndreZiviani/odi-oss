@@ -25,6 +25,103 @@ serving a false positive. The SBOM itself is human-readable JSON --
 `jq . sbom.cdx.json`, or open it in anything that reads CycloneDX -- and is
 also covered by `gh attestation verify sbom.cdx.json -R AndreZiviani/odi-oss`.
 
+## Backing up the whole flash
+
+Do this once before the first flash of a stick, and again before anything that
+rewrites the environment or the config store. It takes about ten seconds and
+the result is the only way back from a mistake the two firmware slots cannot
+absorb: they protect against a bad image, not against a lost config store, a
+damaged bootloader environment or a wrong `flash_eraseall`.
+
+**What is on the flash.** 8 MiB of SPI NOR, which the kernel exposes as one MTD
+partition per region, in this order and with no gaps (read the names and sizes
+from your own stick: `cat /proc/mtd`, and never trust the numbers, only the
+names):
+
+| partition | offset | size | what it holds |
+|---|---|---|---|
+| `boot` (mtd0) | 0 | 256 KiB | the bootloader |
+| `env` (mtd1) | 256 KiB | 8 KiB | bootloader environment, first copy |
+| `env2` (mtd2) | 264 KiB | 8 KiB | bootloader environment, second copy |
+| `config` (mtd3) | 272 KiB | 240 KiB | the jffs2 config store: identity and every setting |
+| `k0` (mtd4) / `r0` (mtd5) | 512 KiB / 1840 KiB | 1328 KiB / 2512 KiB | slot 0 kernel and root filesystem |
+| `k1` (mtd6) / `r1` (mtd7) | 4352 KiB / 5680 KiB | 1328 KiB / 2512 KiB | slot 1 kernel and root filesystem |
+
+The other MTD nodes (`Partition_008`... and `linux`/`rootfs`) are 4 KiB
+placeholders and aliases of the slot that is running: not separate flash, and
+not part of a backup.
+
+**The config partition is the one that cannot be rebuilt.** It holds
+`GPON_SN`, the PLOAM password, `ELAN_MAC_ADDR` and `MAC_KEY` (`docs/SETTINGS.md`),
+the identity the OLT authenticates the line on, plus the host keys and the web
+UI credentials. A new image does not recreate them, `flash_eraseall` on
+`config` removes them for good, and a copy of it is as sensitive as the
+stick: it is in clear text. Keep the dump out of any repository, mode 600,
+in a directory only you can read.
+
+**Read it.** Read the partitions in order and stream them to the host; do not
+stage them on the stick, whose `/tmp` is RAM and cannot hold 8 MiB
+(`docs/ACCESS.md`, "Copying files: scp"). Reading the `...ro` nodes cannot
+change the flash:
+
+    umask 077
+    ssh root@<stick> 'for n in 0 1 2 3 4 5 6 7; do
+        dd if=/dev/mtd${n}ro bs=4096 2>/dev/null; done' > flash-<stick>-$(date +%Y%m%d).bin
+    ls -l flash-<stick>-*.bin        # must be 8388608 bytes
+
+On our 6.18 kernel `dd` without a `count` stops at the end of the partition by
+itself; it was checked with a bounded read (`timeout`), and the whole read
+above takes about ten seconds. (The node numbers above are the order of
+`/proc/mtd` on the images this tree builds. If yours differs, list the names
+and read the eight regions in the order of the table.)
+
+**Check it.** Compare each partition on the stick against the same bytes of
+the file, so a short or corrupt transfer is found now rather than during a
+restore:
+
+    ssh root@<stick> 'for n in 0 1 2 3 4 5 6 7; do
+        printf "mtd$n "; dd if=/dev/mtd${n}ro bs=4096 2>/dev/null | md5sum; done'
+    # on the host, one partition of the file (offset and size in KiB from the table):
+    dd if=flash-<stick>-<date>.bin bs=1024 skip=272 count=240 2>/dev/null | md5sum   # config
+
+The config partition is mounted and live: if a setting is saved between the
+two reads the sums differ for that partition alone. Read it again.
+
+A stick that is reachable only over telnet (the stock image) cannot do the
+`ssh` form: have it listen and pull, `nc -l -p 12346 < /dev/mtd3ro` on the
+stick and `nc -d -w 5 <stick> 12346 > config.bin` on the host. The `-d` is
+mandatory, because without it the transfer is silently cut short. Check the size
+and the md5 on both ends.
+
+**Restore.** The write path is the one `fwu.sh` uses: erase the partition, write
+the bytes to its `/dev/mtdN` node, read it back and compare. Nothing here has
+been exercised as a whole-flash restore, only the read, so do it one partition
+at a time and verify each before the next:
+
+- **A firmware slot (`k0`+`r0` or `k1`+`r1`)**: never restore the slot you are
+  running from (the kernel marks it read-only, and `fwu.sh` refuses it).
+  Boot the other slot, then either flash a release tarball with `fwu.sh` (the
+  normal way) or write the saved partitions back:
+
+      ssh root@<stick> 'flash_eraseall /dev/mtd5 && cat > /dev/mtd5' < r0.bin
+      ssh root@<stick> 'cmp - /dev/mtd5' < r0.bin    # "EOF on -" is the match
+
+  with `r0.bin` cut out of the dump by offset and size, as above.
+- **The bootloader environment (`env`, `env2`)**: prefer `nv setenv`
+  (`docs/TOOLS.md`), which rewrites one copy at a time. A raw restore is for a
+  damaged environment: write `env2` first, check it, then `env`, so one copy is
+  valid at every moment of the restore.
+- **The bootloader (`boot`)**: do not restore it unless it is damaged. A
+  power cut or a bad write during the erase leaves a stick that does not
+  boot at all, and this tree has no way to bring one back (see "If it does not
+  come up": recovery needs the board's UART header).
+- **The config partition (`config`)**: it is mounted, and a raw write under a
+  mounted jffs2 is not safe. Restore settings with the web UI's Restore (or
+  the copy `tools/config-backup.sh` keeps, `docs/SETTINGS.md`), which carries
+  every key. Keep the raw `config` copy as the last-resort record of the
+  identity: with it, `GPON_SN`, `ELAN_MAC_ADDR` and `MAC_KEY` can be read back
+  out and typed in again if the partition is ever lost.
+
 ## Before anything
 
 1. **Find out which slot is running**, and flash the *other* one:
