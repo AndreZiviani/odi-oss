@@ -10,6 +10,10 @@
 #                        second later, in the background -- moving the
 #                        primary drops the connection that asked for it, so
 #                        the answer has to leave first.
+#                        This applies what the store holds, with no way back;
+#                        the web UI changes these keys through mgmt-addr.sh,
+#                        a trial that reverts by itself, and runs this only in
+#                        a safe-mode boot.
 #
 #     apply.sh omci [SECONDS]
 #                        Tells the running omcid to reread the config store

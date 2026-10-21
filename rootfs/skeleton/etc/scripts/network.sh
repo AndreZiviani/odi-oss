@@ -21,6 +21,8 @@
 #                           the second one (LAN_ENABLE_IP2, LAN_IP_ADDR2,
 #                           LAN_SUBNET2). No link, MAC or SerDes is touched.
 #     network.sh addr -n    say what `addr` would change, change nothing
+#     network.sh primary    print "ADDR MASK" of the address the primary device
+#                           holds now, for mgmt-addr.sh; exit 1 when it has none
 #     network.sh configured live check: exit 0 only if the address rcS's
 #                           confirm_watchdog needs is BOTH a configured one
 #                           (not the DEF_IP guess) AND actually applied right
@@ -32,6 +34,14 @@
 # `addr` is what /etc/scripts/apply runs after the web UI saves one of those
 # keys, so they take effect without a reboot. Moving the primary moves every
 # way in; the second address is the one to reach the stick on meanwhile.
+#
+# An address trial (mgmt-addr.sh, docs/TOOLS.md) changes those addresses
+# without storing them: while its file, /var/run/mgmt-addr.trial, exists,
+# `addr` reads the five keys LAN_IP_ADDR, LAN_SUBNET, LAN_ENABLE_IP2,
+# LAN_IP_ADDR2 and LAN_SUBNET2 from it instead of the store, and keeps the
+# address the primary had before on its own alias (br0:4), so the way in that
+# worked stays up until the trial ends. The file is in /var/run, so a reboot
+# ends the trial and the boot, which never reads it, comes up on the store.
 set -u
 
 MODE=${1:-boot}
@@ -40,7 +50,8 @@ case "$MODE" in
 boot) ;;
 addr) [ "${2:-}" = -n ] && DRY=1 ;;
 configured) ;;
-*)    echo "usage: $0 [addr [-n]|configured]" >&2; exit 1 ;;
+primary) ;;
+*)    echo "usage: $0 [addr [-n]|configured|primary]" >&2; exit 1 ;;
 esac
 
 CONF=${CONF:-/var/config/lastgood.xml}
@@ -52,6 +63,10 @@ IFCONFIG=${IFCONFIG:-/sbin/ifconfig}
 SYSNET=${SYSNET:-/sys/class/net}
 # The second address is an alias of the device carrying the first, br0:2.
 IP2_ALIAS=${IP2_ALIAS:-2}
+# The previous primary address, kept while an address trial runs, as br0:4.
+TRIAL_ALIAS=${TRIAL_ALIAS:-4}
+TRIAL=${TRIAL:-/var/run/mgmt-addr.trial}
+TRIAL_KEYS=" LAN_IP_ADDR LAN_SUBNET LAN_ENABLE_IP2 LAN_IP_ADDR2 LAN_SUBNET2 "
 # Per-port devices the multi-LAN driver creates; eth0.2 is the host port.
 HOSTIFS=${HOSTIFS:-eth0.2}
 
@@ -79,7 +94,15 @@ lower() {
 	echo "$1" | tr "[:upper:]" "[:lower:]"
 }
 
+# The five address keys come from the trial file while a trial runs (`addr`
+# only: the boot and `configured` always read the store). The file lists all
+# five, so an empty value there is a value, not an absent key.
 xmlval() {
+	if [ "$MODE" = addr ] && [ -s "$TRIAL" ]; then
+		case $TRIAL_KEYS in
+		*" $1 "*) sed -n "s/^$1=//p" "$TRIAL" 2>/dev/null | head -n 1; return 0 ;;
+		esac
+	fi
 	[ -f "$CONF" ] || return 1
 	sed -n "s/.*Name=\"$1\" Value=\"\([^\"]*\)\".*/\1/p" "$CONF" 2>/dev/null | head -n 1
 }
@@ -270,6 +293,54 @@ rescue() {   # rescue <dev>
 		echo "network: could not add the rescue address $RESCUE_IP" >&2
 }
 
+# While an address trial runs, the primary the stick had before it stays up on
+# its own alias, so the way in that worked is still there if the new address
+# turns out to be wrong. It is the address the trial file records as KEEP_IP
+# (mgmt-addr.sh read it off the device before the first move). Not added when
+# it is the new primary or the second address, which already answer on it;
+# taken down when the trial file is gone, which is how a trial ends.
+trial_keep() {   # trial_keep <dev>
+	alias=$1:$TRIAL_ALIAS
+	kip='' kmask=''
+	if [ -s "$TRIAL" ]; then
+		kip=$(sed -n 's/^KEEP_IP=//p' "$TRIAL" 2>/dev/null | head -n 1)
+		kmask=$(sed -n 's/^KEEP_MASK=//p' "$TRIAL" 2>/dev/null | head -n 1)
+		[ -n "$kmask" ] || kmask=$DEF_MASK
+		if [ -z "$kip" ] || [ "$kip" = "$IP" ] || { [ "${en:-0}" = 1 ] && [ "$kip" = "${ip2:-}" ]; }; then
+			kip=''
+		fi
+	fi
+	cur4=$(addr_of "$alias")
+	if [ -n "$kip" ]; then
+		if [ "$cur4" = "$kip $kmask" ]; then
+			echo "network: $alias keeps the previous address $kip netmask $kmask (trial)"
+		elif [ "$DRY" = 1 ]; then
+			echo "network: would keep the previous address $kip netmask $kmask on $alias (trial)"
+		else
+			echo "network: $alias $kip netmask $kmask (the previous address, while the trial runs)"
+			$IFCONFIG "$alias" "$kip" netmask "$kmask" up 2>/dev/null ||
+				echo "network: could not keep the previous address $kip" >&2
+		fi
+	elif [ -n "$cur4" ]; then
+		if [ "$DRY" = 1 ]; then
+			echo "network: would remove $alias ${cur4% *} (the trial is over)"
+		else
+			echo "network: $alias ${cur4% *} removed (the trial is over)"
+			$IFCONFIG "$alias" down 2>/dev/null ||
+				echo "network: could not remove the previous address" >&2
+		fi
+	fi
+}
+
+if [ "$MODE" = primary ]; then
+	dev=$IF
+	[ -d "$SYSNET/$BR" ] && dev=$BR
+	cur=$(addr_of "$dev")
+	[ -n "$cur" ] || exit 1
+	echo "$cur"
+	exit 0
+fi
+
 if [ "$MODE" = addr ]; then
 	# Whichever device carries the primary: br0 when the boot bridged,
 	# eth0 when it fell back to addressing it directly.
@@ -289,6 +360,7 @@ if [ "$MODE" = addr ]; then
 	fi
 	secondary "$dev"
 	rescue "$dev"
+	trial_keep "$dev"
 	exit 0
 fi
 

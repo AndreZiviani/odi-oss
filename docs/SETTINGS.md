@@ -108,11 +108,11 @@ The UI's reboot confirmation says which slot it comes back on.
 
 | key | UI label | what it does here | read by | apply |
 |---|---|---|---|---|
-| `LAN_IP_ADDR` | Management IP | the `br0` address ssh, the UI and the exporter answer on | `network.sh` | LIVE |
-| `LAN_SUBNET` | Management netmask | its netmask | `network.sh` | LIVE |
-| `LAN_ENABLE_IP2` | Second management address | 1 adds a second address on `br0:2`, 0 removes it | `network.sh` | LIVE |
-| `LAN_IP_ADDR2` | Second management IP | that address (192.168.100.1 is the stock default, and what both sticks store) | `network.sh` | LIVE |
-| `LAN_SUBNET2` | Second management netmask | its netmask | `network.sh` | LIVE |
+| `LAN_IP_ADDR` | Management IP | the `br0` address ssh, the UI and the exporter answer on | `network.sh` | LIVE (a trial) |
+| `LAN_SUBNET` | Management netmask | its netmask | `network.sh` | LIVE (a trial) |
+| `LAN_ENABLE_IP2` | Second management address | 1 adds a second address on `br0:2`, 0 removes it | `network.sh` | LIVE (a trial) |
+| `LAN_IP_ADDR2` | Second management IP | that address (192.168.100.1 is the stock default, and what both sticks store) | `network.sh` | LIVE (a trial) |
+| `LAN_SUBNET2` | Second management netmask | its netmask | `network.sh` | LIVE (a trial) |
 | `VLAN_CFG_TYPE` | VLAN config mode | 1 lets the manual tag through; anything else is no manual tag, and the OLT's class 171 rule drives the tagging when it has the supported shape ("VLAN handling" below) | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
@@ -211,9 +211,11 @@ Details that bite:
   confirms the watchdog like any other, so it stays up on 192.168.1.1 for you
   to correct the address (a stick with no address stored at all does not, and
   resets every two minutes).
-- **Changing `LAN_IP_ADDR` moves every way in, at once.** The UI asks first,
-  then links to the new address. Turning on the second address beforehand
-  gives a way back that does not move.
+- **Changing the management addresses is a trial** ("Management address
+  trial" below): the new address is applied in RAM and the stick goes back to
+  the old one after 90 s unless the change is confirmed over the new address,
+  so a typo cannot lock you out. Only a confirmed trial reaches the store.
+  The old address stays up meanwhile.
 - **The manual VLAN tag is gated the way the stock firmware gates it**
   (`/etc/runomci.sh`): applied only with `VLAN_CFG_TYPE` 1, `VLAN_MANU_MODE` 1,
   and both a VID and a priority present. With it absent or gated off,
@@ -590,7 +592,10 @@ own address in it, so one plugged straight into the stick reaches 169.254.1.1
 with no setup (a computer with a lease needs a 169.254.x.y/16 address added by
 hand). It is not added when the primary address is already 169.254.1.1. The
 other ways in are the second address when it was on (its own alias,
-`br0:2`), and `/etc/config/lan-ip` from a shell. The U-Boot environment is never written:
+`br0:2`), and `/etc/config/lan-ip` from a shell. A change of the management
+address from this boot is stored directly, with no trial ("Management address
+trial" above): the trial needs a confirm over the new address, which a
+computer on the rescue link cannot make. The U-Boot environment is never written:
 U-Boot here has no boot counter, and an environment written on every boot
 wears the flash and risks the boot itself.
 
@@ -604,6 +609,59 @@ the next boot that lives 600 s or ends in a reboot), `/etc/config/safe-mode`
 `root_password=default` or `failed`; this boot only). `safe-mode.sh status` prints them (`docs/TOOLS.md`), and
 the diagnostics bundle carries it (`host-link.txt`).
 
+## Management address trial
+
+A wrong management address is the one mistake that takes every way in with
+it, so a change of `LAN_IP_ADDR`, `LAN_SUBNET`, `LAN_ENABLE_IP2`,
+`LAN_IP_ADDR2` or `LAN_SUBNET2` is a trial, the way the host port is
+("Host port auto-negotiation" above). The web UI (Config, Network, Save) or
+`mgmt-addr.sh try LAN_IP_ADDR=10.1.1.1` (`docs/TOOLS.md`) does not store the
+keys. One second later (so the answer leaves first) `network.sh addr` applies
+them in RAM, and a 90 s timer starts. Within it the change is confirmed from
+a client that reached the stick **on the new address**, from the page opened
+there or with `mgmt-addr.sh confirm` over ssh to it: only then are the keys
+stored. At the end of the window, or on Revert, the stick goes back to the
+addresses it had, and logs `event=trial_expired`.
+
+- **The old address stays up during the trial.** The new primary goes on
+  `br0` and the primary the stick ran before moves to its own alias, `br0:4`
+  (the second address, `br0:2`, follows the trial). So the page opened on the
+  old address still answers, shows the countdown and can revert; it cannot
+  confirm. The old address is dropped when the trial ends either way.
+- **The confirm must arrive over a new address.** confd hands the script the
+  address the request came in on (over ssh it is `SSH_CONNECTION`), and a
+  confirm on an address the stick already had is refused, naming the one to
+  use: it would prove nothing about the new one. When no address is new (only
+  the netmask changed, or the second address went away) the client must be on
+  the link of the new netmask. A confirm that cannot say where it arrived is
+  refused.
+- **A reboot during the trial comes up on the old address.** The keys are
+  written only by the confirm, and the trial state and file are in `/var/run`,
+  which the boot starts empty; `network.sh` at the boot (and the watchdog
+  check) never reads the trial. Cutting the power in the milliseconds between
+  the confirm writing two keys of a changed address and netmask leaves the
+  stored pair half changed, which `network.sh` refuses like any invalid pair
+  (stock default 192.168.1.1/24 and a boot you can reach).
+- **A change the stick would refuse is refused up front**: `try` runs
+  `network.sh addr -n` first, so a loopback address, a netmask with a gap or
+  the broadcast address of its mask fails at once with the reason, and nothing
+  starts.
+- **Not while `/etc/config/lan-ip` exists** (it wins over `LAN_IP_ADDR`, so a
+  trial would change nothing), and not in a safe-mode boot.
+- **The safe mode is the way out, with no trial.** A safe-mode boot is reached
+  on the rescue address 169.254.1.1 ("Recovery: the safe mode"), usually from a
+  computer that is not on the network the stored address belongs to, so a
+  confirm over the new address could not be made. There the web UI stores the
+  keys directly and applies them with `apply.sh network`, as before the trial
+  existed; `mgmt-addr.sh try` refuses.
+- An image whose `confd` is older than the script (or the reverse) keeps the
+  old behaviour: the page stores the keys directly when `/etc/scripts/mgmt-addr.sh`
+  is absent, and the daemon refuses them in `POST /api/config` only when it
+  is present.
+
+The state of the running boot is `/var/run/mgmt-addr` (`docs/TOOLS.md`,
+"mgmt-addr.sh"); the web UI reads it.
+
 ## Web UI controls
 
 | control (tab) | on this image | apply |
@@ -611,6 +669,7 @@ the diagnostics bundle carries it (`host-link.txt`).
 | Save (Config) | writes the keys, reads each back, then applies LIVE ones and offers the rest | per key, above |
 | Apply now (save bar, OLT identity) | `apply.sh omci`, after a confirmation: omcid re-registers the ONU | INTERRUPTS INTERNET |
 | Reboot now (save bar, Firmware) | reboots, after a confirmation naming the slot it comes back on | REBOOT |
+| Save of a management address key (Config, Network) | `mgmt-addr.sh try KEY=VALUE...`, then a dialog counting down the 90 s with the new address to open: Keep (on the new address) runs `confirm` and stores the keys, Revert runs `revert`; no confirm reverts by itself. Not used in a safe-mode boot | LIVE (a trial) |
 | Host port (Config, Network) | `host-autoneg.sh try on\|off`, then a dialog counting down the 120 s: Keep runs `confirm` (stores `HOST_AUTONEG`), Revert runs `revert`; no answer reverts by itself | LIVE (a trial) |
 | Host link and safe-mode banner (every view) | shown while the boot fallback runs auto-negotiation with `HOST_AUTONEG=off`, during a safe-mode boot, and while a safe-mode record waits; its button acknowledges the safe mode (`safe-mode.sh ack`) | -- |
 | OLT identity switch (Config) | creates or removes `/etc/config/omci-identity.on` | INTERRUPTS INTERNET (with Apply now) |
