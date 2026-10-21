@@ -146,6 +146,94 @@ static int wrote(uint32_t off)
 	return last_write(off) != 0xdeadbeefU;
 }
 
+
+/* The last row words written to `table` at `index` (a table-engine write,
+ * word 0 first), or 0 when there is none. */
+static int tw_last(uint32_t table, uint32_t index, uint32_t *w, unsigned int n)
+{
+	unsigned int i, j;
+	int found = 0;
+
+	for (i = 0; i < odi_mock.log_n; i++) {
+		if (odi_mock.log[i].kind != 'T' || odi_mock.log[i].addr != ((table << 16) | index))
+			continue;
+		for (j = 0; j < n; j++)
+			w[j] = 0;
+		for (j = i + 1; j < odi_mock.log_n && odi_mock.log[j].kind == 'D'; j++)
+			if ((odi_mock.log[j].addr & 0xffffffU) == table && (odi_mock.log[j].addr >> 24) < n)
+				w[odi_mock.log[j].addr >> 24] = odi_mock.log[j].val;
+		found = 1;
+	}
+	return found;
+}
+
+/* One untagged-frame upstream rule that names an EtherType, as omcid sends
+ * it: the plan of the entry, with the value in the descriptor. */
+static int send_et(const uint8_t *e, uint16_t et, uint16_t out_tpid, int *id_out)
+{
+	struct evtocd_entry t;
+	struct evtocd_plan u;
+	struct omci_vlan_oper vr;
+	struct omci_bdgconn b;
+
+	evtocd_decode(e, &t);
+	if (evtocd_plan(&t, 0x8100, out_tpid, &u))
+		return -2;
+	evtocd_plan_oper(&u, &vr);
+	if (et == 0)
+		evtocd_oper_rest(&vr);
+	else
+		evtocd_oper_ethertype(&vr, et);
+	bdg_conn(&b, next_id, OMCI_DIR_US, 5, 4, 5, &vr);
+	*id_out = next_id++;
+	return odi_switch_cmd(51, &b, sizeof b);
+}
+
+/* The ACL entry of a discard, by the service that made it. */
+static int acl_entry_of(int id)
+{
+	unsigned int i;
+
+	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++)
+		if (odi_sw_bdgconn[i].used && odi_sw_bdgconn[i].serv_id == id)
+			return odi_sw_bdgconn[i].acl_row < 0 ? -1 :
+			       (int)ODI_SW_ACL_DROP_BASE + odi_sw_bdgconn[i].acl_row;
+	return -1;
+}
+
+static int send_drop(const struct evtocd_drop *d, int pri, uint32_t uni_mask, int *id_out)
+{
+	struct omci_vlan_oper vr;
+	struct omci_bdgconn b;
+
+	evtocd_drop_oper(d, pri, &vr);
+	bdg_conn(&b, next_id, OMCI_DIR_US, uni_mask, 4, 5, &vr);
+	*id_out = next_id++;
+	return odi_switch_cmd(51, &b, sizeof b);
+}
+
+/* Whether a frame with `slot` as its C-tag field, entering by `port`, matches
+ * the rule of ACL entry `entry`: the 160-bit key as the layout of
+ * odi_switch_mcast.c defines it, template at 2:0, port at 10 + port, slot 0
+ * in bits 31:16 of the last word, the ones plane and the zeros plane. */
+static int acl_hit(int entry, unsigned int tmpl, unsigned int port, uint16_t slot)
+{
+	uint32_t ones[5], zeros[5], key[5] = { 0, 0, 0, 0, 0 };
+	unsigned int i;
+
+	if (!tw_last(ODI_SW_TBL_ACL_PATTERN, (uint32_t)entry, ones, 5) ||
+	    !tw_last(ODI_SW_TBL_ACL_PATTERN_MASK, (uint32_t)entry, zeros, 5))
+		return 0;
+	key[4] = tmpl | (1U << (10 + port)) | ((uint32_t)slot << 16);
+	key[0] = 1U << 16;
+	if (!(ones[0] & (1U << 16)))
+		return 0;               /* not valid */
+	for (i = 0; i < 5; i++)
+		if ((ones[i] & ~key[i]) || (zeros[i] & key[i]))
+			return 0;
+	return 1;
+}
+
 /* Care words for the shapes: the direction bit, the VID and priority fields
  * it names, both tag flags, and the source port of an upstream rule. */
 #define UNI0	0U			/* source port 0, from uni_mask 5 */
@@ -377,6 +465,311 @@ int main(void)
 	       RULE(d), MASK(care, d), (3U << 1),
 	       US_FLOW | (1U << 21) | (1U << 18) | (2U << 15) | (300U << 3) | ODI_SW_CF_CSACT_ADD, r);
 	drop_entry();
+
+
+
+	puts("the rows another implementation measured through an OLT:");
+	{
+		struct evtocd_entry t;
+		struct evtocd_plan u;
+		int id;
+
+		/* One entry writes two tags on an untagged frame: C-VID 410
+		 * priority 5 inside, S-VID 2002 priority 3 outside. */
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 3, 2002, 6,  5, 410, 4);
+		ok(add_entry(e, 0x8100, 0x88a8, 0, &why) == 0, "untagged -> S-VID 2002 pri 3 outside C-VID 410 pri 5");
+		r = row_of(upstream_id, 0);
+		care = CARE_US_BASE;
+		ok_row("upstream: both planes of one row, as measured",
+		       RULE(UNI0), MASK(care, UNI0),
+		       (1U << 21) | (1U << 18) | (5U << 15) | (410U << 3) | (1U << 1),
+		       US_FLOW | (1U << 21) | (1U << 18) | (3U << 15) | (2002U << 3) | ODI_SW_CF_CSACT_ADD, r);
+		ok(r && !r->tmpl && row_index(upstream_id, 0) < 128, "in the first layout, on template 0");
+		drop_entry();
+		/* The same entry in a row of the second layout, where it was measured. */
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x1009U;
+		evtocd_decode(e, &t);
+		(void)evtocd_plan(&t, 0x8100, 0x88a8, &u);
+		{
+			struct omci_vlan_oper vr;
+			struct omci_bdgconn b;
+
+			evtocd_plan_oper(&u, &vr);
+			evtocd_oper_ethertype(&vr, 0x88b5);
+			bdg_conn(&b, next_id, OMCI_DIR_US, 5, 4, 5, &vr);
+			id = next_id++;
+			ok(odi_switch_cmd(51, &b, sizeof b) == 0, "on EtherType 0x88b5 it is a row of the second layout");
+		}
+		r = row_of(id, 0);
+		ok_row("the same action words there",
+		       RULE(UNI0), MASK(CARE_US_BASE, UNI0),
+		       (1U << 21) | (1U << 18) | (5U << 15) | (410U << 3) | (1U << 1),
+		       US_FLOW | (1U << 21) | (1U << 18) | (3U << 15) | (2002U << 3) | ODI_SW_CF_CSACT_ADD, r);
+		ok(row_index(id, 0) == 128, "at row 128");
+		release(id);
+
+		/* Two pops on an S-VID over any C-tag: the S-tag first, template 1. */
+		build(e, 8, 200, 0,  8, 4096, 0, 0,   2, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x88a8, 0x8100, &u) == 0, "S-VID 200 over any C-tag: both tags removed");
+		ok(send_leg(&u, OMCI_DIR_DS, &id) == 0, "as a downstream rule");
+		r = row_of(id, 1);
+		d = W1_DS | W1_ST | W1_CT | W1_VID(200);
+		ok_row("downstream: S-VID 200 and a C-tag; C-tag action 2, S-tag action 3, to the UNI",
+		       RULE(d), MASK(CARE_DS_BASE | VIDM, d), (2U << 1) | DS_FWD_A1, DS_FWD_A2 | ODI_SW_CF_CSACT_DEL, r);
+		ok(r && r->tmpl && row_index(id, 1) < 128, "on template 1, in the first layout");
+		release(id);
+		ok(send_leg(&u, OMCI_DIR_US, &id) == 0, "and as an upstream one");
+		r = row_of(id, 0);
+		d = W1_ST | W1_CT | W1_VID(200) | UNI0;
+		ok_row("upstream: the same action words, with the stream",
+		       RULE(d), MASK(CARE_US_BASE | VIDM, d), (2U << 1), US_FLOW | ODI_SW_CF_CSACT_DEL, r);
+		release(id);
+
+		/* A pop and a push of the same protocol is one row that rewrites
+		 * the tag; priority 0 is a priority, assigned. */
+		build(e, 15, 4096, 0,  5, 410, 0, 0,   1, 15, 4096, 0,  0, 2002, 4);
+		ok(add_entry(e, 0x8100, 0x8100, 0, &why) == 0, "C-VID 410 pri 5 -> C-VID 2002 pri 0");
+		r = row_of(upstream_id, 0);
+		d = W1_CT | W1_VID(410) | W1_PRI(5) | UNI0;
+		ok_row("upstream: one row, the priority assigned, 0 included",
+		       RULE(d), MASK(CARE_US_BASE | VIDM | PRIM, d),
+		       (1U << 21) | (1U << 18) | (0U << 15) | (2002U << 3) | (1U << 1), US_FLOW | S_TRANSP, r);
+		r = row_of(downstream_id, 1);
+		d = W1_DS | W1_CT | W1_VID(2002) | W1_PRI(0);
+		ok_row("downstream: 2002 with priority 0 -> 410 with priority 5",
+		       RULE(d), MASK(CARE_DS_BASE | VIDM | PRIM, d),
+		       (1U << 21) | (1U << 18) | (5U << 15) | (410U << 3) | (1U << 1) | DS_FWD_A1,
+		       DS_FWD_A2 | S_TRANSP, r);
+		drop_entry();
+	}
+
+	puts("an EtherType on untagged frames, rows of the second layout:");
+	{
+		static const struct { uint8_t code; uint16_t et[2]; } kinds[] = {
+			{ EVTOCD_F_ET_IPOE_0800, { 0x0800, 0 } },
+			{ EVTOCD_F_ET_PPPOE, { 0x8863, 0x8864 } },
+			{ EVTOCD_F_ET_ARP_0806, { 0x0806, 0 } },
+			{ EVTOCD_F_ET_IPV6_86DD, { 0x86dd, 0 } },
+			{ EVTOCD_F_ET_EAPOL_888E, { 0x888e, 0 } },
+		};
+		int ids[8], n = 0, rest_id;
+		unsigned int k, j;
+		uint32_t w[2];
+
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+		/* The boundary as the stick reads it. */
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x1009U;
+		for (k = 0; k < sizeof kinds / sizeof kinds[0]; k++) {
+			build(e, 15, 4096, 0,  15, 4096, 0, kinds[k].code,   0, 15, 4096, 0,  3, (uint16_t)(100 + k), 4);
+			for (j = 0; j < (kinds[k].code == EVTOCD_F_ET_PPPOE ? 2U : 1U); j++)
+				ok(send_et(e, kinds[k].et[j], 0x8100, &ids[n++]) == 0, "one rule for the EtherType");
+		}
+		ok(n == 6, "PPPoE is two rules, 0x8863 and 0x8864, the others one");
+		for (k = 0; k < (unsigned)n; k++) {
+			static const uint16_t want[6] = { 0x0800, 0x8863, 0x8864, 0x0806, 0x86dd, 0x888e };
+
+			r = row_of(ids[k], 0);
+			ok(r && r->rule_w0 == want[k] && r->mask_w0 == (~want[k] & 0xffffU),
+			   "the row holds the value in the ones plane and its complement in the zeros plane");
+			ok(row_index(ids[k], 0) >= 128, "and sits in the second layout (row 128 up)");
+			ok(r && r->rule_w1 == RULE(UNI0) && r->mask_w1 == MASK(CARE_US_BASE, UNI0),
+			   "no S-tag, no C-tag, from port 0: it names an untagged frame");
+			ok(r && !r->tmpl, "on template 0");
+		}
+		/* The words another implementation read back from the chip for
+		 * 0x88b5: 0x000188b5 in the ones plane, 0x0000774a in the zeros. */
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  3, 777, 4);
+		ok(send_et(e, 0x88b5, 0x8100, &ids[n]) == 0, "a literal 0x88b5 (not a G.988 code; pins the words)");
+		ok(tw_last(ODI_SW_TBL_CLS_RULE_B, (uint32_t)row_index(ids[n], 0), w, 2) && w[0] == 0x000188b5U,
+		   "rule word 0 is 0x000188b5");
+		ok(tw_last(ODI_SW_TBL_CLS_MASK_B, (uint32_t)row_index(ids[n], 0), w, 2) && w[0] == 0x0000774aU,
+		   "mask word 0 is 0x0000774a on the first write of the row");
+		release(ids[n]);
+		ok(row_of(ids[n], 0) == NULL, "released");
+
+		/* The rest of the untagged frames: after every one of them. */
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  3, 200, 4);
+		ok(send_et(e, 0, 0x8100, &rest_id) == 0, "the rule for the rest of the untagged frames");
+		ok(row_index(rest_id, 0) > row_index(ids[0], 0) && row_index(rest_id, 0) > row_index(ids[n - 1], 0) &&
+		   row_index(rest_id, 0) == 254, "sits in the bottom region, after every EtherType row");
+		r = row_of(rest_id, 0);
+		ok(r && r->rule_w0 == 0 && r->mask_w0 == 0, "and names no EtherType");
+
+		/* A row placed by order afterwards does not disturb them: it goes
+		 * where it would with none, and they stay where they are. */
+		{
+			int before[6];
+
+			for (k = 0; k < 6; k++)
+				before[k] = row_index(ids[k], 0);
+			build(e, 15, 4096, 0,  8, 410, 0, 0,   1, 15, 4096, 0,  8, 1410, 4);
+			ok(add_entry(e, 0x8100, 0x8100, 0, &why) == 0, "a translation after them");
+			ok(row_index(upstream_id, 0) == 64, "is row 64, the first of the ordered region");
+			for (k = 0; k < 6; k++)
+				ok(row_index(ids[k], 0) == before[k], "and the EtherType row did not move");
+			drop_entry();
+		}
+		for (k = 0; k < (unsigned)n; k++)
+			release(ids[k]);
+		release(rest_id);
+
+		/* What the driver refuses. */
+		{
+			struct omci_vlan_oper vr;
+			struct omci_bdgconn b;
+			struct evtocd_plan p;
+			int id;
+
+			build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  3, 300, 4);
+			{
+				struct evtocd_entry t;
+
+				evtocd_decode(e, &t);
+				(void)evtocd_plan(&t, 0x8100, 0x8100, &p);
+			}
+			evtocd_plan_oper(&p, &vr);
+			evtocd_oper_ethertype(&vr, 0x0800);
+			bdg_conn(&b, 95, OMCI_DIR_DS, 5, 4, 5, &vr);
+			ok(odi_switch_cmd(51, &b, sizeof b) != 0 && row_of(95, 1) == NULL,
+			   "an EtherType downstream: refused");
+			evtocd_plan_oper(&p, &vr);
+			vr.filter.ethertype = OMCI_ETHTYPE_IP;
+			bdg_conn(&b, 96, OMCI_DIR_US, 5, 4, 5, &vr);
+			ok(odi_switch_cmd(51, &b, sizeof b) != 0, "a G.988 EtherType code instead of the value: refused");
+			evtocd_plan_oper(&p, &vr);
+			evtocd_oper_ethertype(&vr, 0x0800);
+			vr.filter.inner_mode = OMCI_TAGF_TAGGED | OMCI_TAGF_VID;
+			vr.filter.inner.vid = 100;
+			bdg_conn(&b, 97, OMCI_DIR_US, 5, 4, 5, &vr);
+			ok(odi_switch_cmd(51, &b, sizeof b) != 0 && row_of(97, 0) == NULL,
+			   "an EtherType on a tagged frame: refused");
+			(void)id;
+		}
+
+		/* No second layout (the field reads 0): none to put the row in. */
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x0009U;
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  3, 100, 4);
+		{
+			int id;
+
+			ok(send_et(e, 0x0800, 0x8100, &id) != 0 && row_of(id, 0) == NULL,
+			   "with no second layout on the chip an EtherType rule is refused, not placed in the first");
+		}
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+	}
+
+	puts("an entry that discards the C-tagged frames of one VID, an ACL row:");
+	{
+		struct evtocd_drop d;
+		int id, id2, entry;
+		uint32_t w[5], tmplw0;
+
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+		/* A stick as it boots: ACL lookup and permit on for the UNI and the PON. */
+		odi_mock.regs[odi_mock_slot(0x15040U)] = 0x5U;
+		odi_mock.regs[odi_mock_slot(0x15044U)] = 0x5U;
+		d.vid = 20;
+		d.pri = -1;
+		ok(send_drop(&d, -1, 5, &id) == 0, "VID 20, any priority: accepted");
+		entry = acl_entry_of(id);
+		ok(entry == (int)ODI_SW_ACL_DROP_BASE, "in the first ACL entry of the block");
+		ok(row_of(id, 0) == NULL && row_index(id, 1) < 0, "and no classifier row");
+		ok(tw_last(ODI_SW_TBL_ACL_PATTERN, (uint32_t)entry, w, 5) && w[0] == 0x00010000U &&
+		   w[4] == 0x00140405U, "ones plane: valid; VID 20 in slot 0, port 0, template 5");
+		ok(tw_last(ODI_SW_TBL_ACL_PATTERN_MASK, (uint32_t)entry, w, 5) && w[0] == 0 &&
+		   w[4] == 0x0febf802U, "zeros plane: the clear bits of VID 20, ports 1..5, template bit 1");
+		ok(tw_last(ODI_SW_TBL_ACL_ACTIONS, (uint32_t)entry, w, 3) && w[0] == 0 && w[1] == 0x200U && w[2] == 0,
+		   "action: forwarding decision 1 (redirect) with no port: a drop");
+		ok(last_write(0x15048U + 4U * (uint32_t)entry) == 0x10U, "the entry applies the forwarding class only");
+		tmplw0 = last_write(0x15008U + 4U * 10U);
+		ok(tmplw0 != 0xdeadbeefU && (tmplw0 & 0x7fU) == 0x09U, "template 5 slot 0 reads the C-tag");
+		ok(odi_mock.regs[odi_mock_slot(0x15040U)] == 0x5U && odi_mock.regs[odi_mock_slot(0x15044U)] == 0x5U,
+		   "ACL lookup and permit were on already and stay");
+		ok(acl_hit(entry, 5, 0, 20), "VID 20 from the UNI matches");
+		ok(acl_hit(entry, 5, 0, (uint16_t)(20 | (5 << 13))), "so does VID 20 with priority 5");
+		ok(!acl_hit(entry, 5, 0, 21), "VID 21 does not");
+		ok(!acl_hit(entry, 5, 0, 0), "an untagged frame (field 0) does not");
+		ok(!acl_hit(entry, 5, 2, 20), "VID 20 from the PON does not: nothing the fibre sends is acted on here");
+		ok(!acl_hit(entry, 5, 3, 20), "nor from the CPU port");
+		ok(!acl_hit(entry, 3, 0, 20), "nor on another template");
+		ok(last_write(ODI_SW_CLASSIFY_PATTERN_SEL(0)) == 0xdeadbeefU, "no classifier register is written");
+
+		d.vid = 20;
+		d.pri = 5;
+		ok(send_drop(&d, 5, 5, &id2) == 0, "VID 20 priority 5: accepted");
+		entry = acl_entry_of(id2);
+		ok(entry == (int)ODI_SW_ACL_DROP_BASE + 1, "the next entry");
+		ok(tw_last(ODI_SW_TBL_ACL_PATTERN, (uint32_t)entry, w, 5) && w[4] == 0xa0140405U,
+		   "ones: priority 5 in bits 15:13 of the slot");
+		ok(tw_last(ODI_SW_TBL_ACL_PATTERN_MASK, (uint32_t)entry, w, 5) && w[4] == 0x4febf802U,
+		   "zeros: and its clear bits");
+		ok(acl_hit(entry, 5, 0, (uint16_t)(20 | (5 << 13))), "VID 20 priority 5 matches");
+		ok(!acl_hit(entry, 5, 0, (uint16_t)(20 | (2 << 13))), "VID 20 priority 2 does not");
+		ok(!acl_hit(entry, 5, 0, 20), "nor VID 20 priority 0");
+
+		release(id2);
+		ok(!acl_hit(entry, 5, 0, (uint16_t)(20 | (5 << 13))), "released: the rule no longer matches");
+		ok(last_write(0x15048U + 4U * (uint32_t)entry) == 0x7fU, "and its class word is back at the reset value");
+		release(id);
+		ok(acl_entry_of(id) < 0, "the first is gone too");
+
+		/* What the driver refuses. */
+		d.vid = 0;
+		ok(send_drop(&d, -1, 5, &id) != 0, "VID 0: refused (an untagged frame reads the same)");
+		d.vid = 4095;
+		ok(send_drop(&d, -1, 5, &id) != 0, "VID 4095: refused");
+		d.vid = 20;
+		ok(send_drop(&d, -1, 4, &id) != 0, "a uni_mask with no UNI in it: refused");
+		{
+			struct omci_vlan_oper vr;
+			struct omci_bdgconn b;
+
+			evtocd_drop_oper(&d, -1, &vr);
+			bdg_conn(&b, 98, OMCI_DIR_DS, 5, 4, 5, &vr);
+			ok(odi_switch_cmd(51, &b, sizeof b) != 0, "downstream: refused");
+		}
+		/* The ACL lookup is turned on, never off: a stick that reads it off. */
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+		d.vid = 30;
+		ok(send_drop(&d, -1, 5, &id) == 0, "on a stick with the lookup off");
+		ok(odi_mock.regs[odi_mock_slot(0x15040U)] == 0x1U && odi_mock.regs[odi_mock_slot(0x15044U)] == 0x1U,
+		   "the permit and the lookup are turned on for port 0, and only for it");
+		{
+			unsigned int pw = 0, ew = 0, i;
+
+			for (i = 0; i < odi_mock.log_n; i++) {
+				if (odi_mock.log[i].kind == 'W' && odi_mock.log[i].addr == 0x15044U && !pw)
+					pw = i + 1;
+				if (odi_mock.log[i].kind == 'W' && odi_mock.log[i].addr == 0x15040U && !ew)
+					ew = i + 1;
+			}
+			ok(pw && ew && pw < ew, "the permit first, so no frame meets the lookup without it");
+		}
+		release(id);
+
+		/* 32 rows, then none. */
+		{
+			int n = 0, i, ids[40];
+
+			for (i = 0; i < 34; i++) {
+				d.vid = (int16_t)(100 + i);
+				if (send_drop(&d, -1, 5, &ids[n]) == 0)
+					n++;
+			}
+			ok(n == (int)ODI_SW_ACL_DROP_MAX, "the block holds 32 discards, the next is refused with no room");
+			for (i = 0; i < n; i++)
+				release(ids[i]);
+		}
+	}
 
 	puts("what the driver refuses:");
 	{

@@ -21,6 +21,7 @@ struct odi_sw_bdgconn_slot {
 	int used;
 	uint32_t dir;
 	int us_row, ds_row;	/* CF row index, -1 when the leg is absent */
+	int acl_row;		/* ACL drop entry (odi_sw_acl[] index), -1 none */
 	int ds_flow;		/* the downstream flow its GEM port holds, -1 none */
 	uint32_t vlan_vid;	/* 0: no VLAN row of its own */
 	uint32_t vlan_val;
@@ -34,11 +35,21 @@ struct odi_sw_cf_row {
 	int is_us;
 	int tmpl;		/* compares the S-tag (CLASSIFY_TEMPLATE 1) */
 	unsigned int key;	/* ordering class, see cf_key() */
+	int et;			/* compares an EtherType: only in the second layout */
+	uint32_t rule_w0, mask_w0;	/* the EtherType, bits 15:0, else 0 */
 	uint32_t rule_w1, mask_w1;
 	uint32_t act[3];
 };
 #define ODI_SW_CF_ROWS		256U
 static struct odi_sw_cf_row odi_sw_cf[ODI_SW_CF_ROWS];
+
+/* The ACL rows of the extended VLAN discards, as programmed. */
+struct odi_sw_acl_row {
+	int used;
+	uint32_t ports;		/* the UNI ports it acts on */
+	int vid, pri;
+};
+static struct odi_sw_acl_row odi_sw_acl[ODI_SW_ACL_DROP_MAX];
 
 /* The priority each downstream flow's frames take, plus one (0: none, the
  * zeroed state): cmd 25 sets it from the queue the flow's GEM port points
@@ -55,6 +66,11 @@ void odi_switch_bdgconn_reset(void)
 		odi_sw_bdgconn[i].used = 0;
 	for (i = 0; i < ODI_SW_CF_ROWS; i++)
 		odi_sw_cf[i].used = 0;
+	for (i = 0; i < ODI_SW_ACL_DROP_MAX; i++) {
+		if (odi_sw_acl[i].used)
+			odi_sw_acl_drop_del(ODI_SW_ACL_DROP_BASE + i);
+		odi_sw_acl[i].used = 0;
+	}
 	odi_sw_cf_reset();
 }
 
@@ -89,6 +105,8 @@ struct odi_sw_cf_leg {
 	int is_us;
 	int tmpl;
 	unsigned int key;
+	int et;			/* names an EtherType (rule_w0, mask_w0) */
+	uint32_t rule_w0, mask_w0;
 	uint32_t rule_w1, mask_w1;
 	uint32_t act[3];
 };
@@ -148,6 +166,8 @@ static void cf_match(struct odi_sw_cf_leg *l, int ds, int vid, int pri,
 	l->mask_w1 = care & ~data;
 	l->key = cf_key(vid, pri, stag, ctag);
 	l->tmpl = 0;
+	l->et = 0;
+	l->rule_w0 = l->mask_w0 = 0;
 	l->present = 1;
 	l->is_us = !ds;
 }
@@ -531,6 +551,28 @@ static int bdgconn_derive_gen(const struct omci_bdgconn *b, struct odi_sw_cf_leg
 	cf_match(l, is_ds, vid, pri, stag, ctag, is_ds ? -1 : one_uni);
 	l->tmpl = tmpl;
 	l->key = cf_key_gen(vid, pri);
+	if (r->filter.ethertype != OMCI_ETHTYPE_NO_CARE) {
+		/* An EtherType is compared on an untagged frame going up and
+		 * nowhere else: the value behind a tag is not known to be in
+		 * the same place. A rule that names none while the table
+		 * has EtherType rules (REST) goes to the bottom region, after
+		 * every one of them. */
+		if (is_ds || stag != 0 || ctag != 0 || vid >= 0 || pri >= 0)
+			return -1;
+		if (r->filter.ethertype == OMCI_ETHTYPE_REST) {
+			l->key = ODI_SW_CF_KEY_BOTTOM;
+		} else if (r->filter.ethertype & OMCI_ETHTYPE_LITERAL) {
+			uint32_t et = r->filter.ethertype & ODI_SW_CF_W0_ET_MASK;
+
+			if (r->filter.ethertype & ~(OMCI_ETHTYPE_LITERAL | ODI_SW_CF_W0_ET_MASK))
+				return -1;
+			l->et = 1;
+			l->rule_w0 = et;
+			l->mask_w0 = ~et & ODI_SW_CF_W0_ET_MASK;
+		} else {
+			return -1;
+		}
+	}
 	l->act[0] = 0;
 	l->act[1] = cw;
 	l->act[2] = sw;
@@ -567,12 +609,12 @@ static void cf_emit(uint32_t idx, int first)
 	e->idx = idx;
 	e->is_us = row->is_us;
 	e->tmpl = row->tmpl;
-	e->rule_w0 = ODI_SW_CF_W0_VALID;
+	e->rule_w0 = ODI_SW_CF_W0_VALID | row->rule_w0;
 	e->rule_w1 = row->rule_w1;
 	/* bit 48 of the mask row: 0 on the first write of an insert, set on
 	 * every other write (docs/SWITCH.md#cf-rows).
 	 */
-	e->mask_w0 = first ? 0 : ODI_SW_CF_W0_VALID;
+	e->mask_w0 = (first ? 0 : ODI_SW_CF_W0_VALID) | row->mask_w0;
 	e->mask_w1 = row->mask_w1;
 	e->action_w0 = row->act[0];
 	e->action_w1 = row->act[1];
@@ -588,6 +630,9 @@ static void cf_set(uint32_t idx, const struct odi_sw_cf_leg *l)
 	row->is_us = l->is_us;
 	row->tmpl = l->tmpl;
 	row->key = l->key;
+	row->et = l->et;
+	row->rule_w0 = l->rule_w0;
+	row->mask_w0 = l->mask_w0;
 	row->rule_w1 = l->rule_w1;
 	row->mask_w1 = l->mask_w1;
 	for (i = 0; i < 3; i++)
@@ -639,8 +684,27 @@ static int cf_insert(const struct odi_sw_cf_leg *l)
 		else if (odi_sw_cf[r].used)
 			break;
 	}
+	/* A row that compares an EtherType is matched with the second rule
+	 * layout, which is where the EtherType sits: it takes the first free
+	 * row from the boundary up. It names a frame no other row of the
+	 * ordered region matches (an untagged frame of that one EtherType; the
+	 * rule for the rest of them is in the bottom region), so its place
+	 * among them does not matter, and the rows that are placed by order
+	 * leave it where it is. */
+	if (l->et) {
+		uint32_t from = odi_sw_cf_layout1_row();
+
+		for (r = from > ODI_SW_CF_SORTED_BASE ? from : ODI_SW_CF_SORTED_BASE; r < limit; r++) {
+			if (!odi_sw_cf[r].used) {
+				cf_set(r, l);
+				cf_emit(r, 1);
+				return (int)r;
+			}
+		}
+		return -1;
+	}
 	for (r = ODI_SW_CF_SORTED_BASE; r < limit; r++)
-		if (odi_sw_cf[r].used && odi_sw_cf[r].key <= l->key)
+		if (odi_sw_cf[r].used && odi_sw_cf[r].key <= l->key && !odi_sw_cf[r].et)
 			last = (int)r;
 	p = last < 0 ? ODI_SW_CF_SORTED_BASE : (uint32_t)last + 1U;
 	for (h = p; h < limit && odi_sw_cf[h].used; h++)
@@ -693,6 +757,7 @@ static int cf_same_match(int idx, const struct odi_sw_cf_leg *l)
 	if (idx < 0)
 		return 0;
 	return odi_sw_cf[idx].rule_w1 == l->rule_w1 && odi_sw_cf[idx].mask_w1 == l->mask_w1 &&
+	       odi_sw_cf[idx].rule_w0 == l->rule_w0 && odi_sw_cf[idx].mask_w0 == l->mask_w0 &&
 	       odi_sw_cf[idx].tmpl == l->tmpl;
 }
 
@@ -816,6 +881,12 @@ static void bdgconn_release(struct odi_sw_bdgconn_slot *sl)
 
 	cf_remove(sl->us_row);
 	cf_remove(sl->ds_row);
+	if (sl->acl_row >= 0 && (unsigned int)sl->acl_row < ODI_SW_ACL_DROP_MAX &&
+	    odi_sw_acl[sl->acl_row].used) {
+		odi_sw_acl_drop_del(ODI_SW_ACL_DROP_BASE + (unsigned int)sl->acl_row);
+		odi_sw_acl[sl->acl_row].used = 0;
+	}
+	sl->acl_row = -1;
 	sl->used = 0;
 	if (sl->vlan_any) {
 		/* Its members were on every row: take them off all of them. */
@@ -825,6 +896,90 @@ static void bdgconn_release(struct odi_sw_bdgconn_slot *sl)
 	}
 	if (vid)
 		odi_sw_vlan_row_set(vid, vlan_row_of(vid));
+}
+
+/* ---- rule_gen OMCI_VLAN_OPER_EXTVLAN_DROP ---------------------------------
+ *
+ * An entry of the class 171 table that discards the C-tagged frames it names
+ * (uapi/omci_bdgconn.h): one ACL row on the UNI ports of the descriptor, no
+ * classifier row, no VLAN row. The ACL decides before the classifier, which
+ * is why omcid leaves out of a discard the priorities another entry of the
+ * same VID names. What the row compares and how it drops is in
+ * odi_sw_acl_drop_set().
+ */
+static int bdgconn_derive_drop(const struct omci_bdgconn *b, uint32_t *ports, int *vid, int *pri)
+{
+	const struct omci_vlan_filter *f = &b->vlan_op.filter;
+
+	if (b->dir != OMCI_DIR_US)
+		return -1;
+	*ports = uni_ports(b->uni_mask);
+	if (!*ports)
+		return -1;
+	if (!(f->inner_mode & OMCI_TAGF_TAGGED) || !(f->inner_mode & OMCI_TAGF_VID) ||
+	    f->inner.vid < 1U || f->inner.vid > 4094U)
+		return -1;
+	*vid = (int)f->inner.vid;
+	*pri = ((f->inner_mode & OMCI_TAGF_PRI) && f->inner.pri < 8U) ? (int)f->inner.pri : -1;
+	return 0;
+}
+
+static int bdgconn_activate_drop(const struct omci_bdgconn *b)
+{
+	struct odi_sw_bdgconn_slot *sl = NULL;
+	uint32_t ports;
+	int vid, pri, row = -1, rc;
+	unsigned int i;
+
+	if (bdgconn_derive_drop(b, &ports, &vid, &pri)) {
+		ODI_SW_CMD_LOG("bdgconn: extended VLAN discard not expressible, refused\n");
+		return ODI_SW_EOPNOTSUPP;
+	}
+	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++)
+		if (odi_sw_bdgconn[i].used && odi_sw_bdgconn[i].serv_id == b->service_id) {
+			sl = &odi_sw_bdgconn[i];
+			break;
+		}
+	if (sl) {
+		const struct odi_sw_acl_row *a = sl->acl_row >= 0 ? &odi_sw_acl[sl->acl_row] : NULL;
+
+		if (a && a->ports == ports && a->vid == vid && a->pri == pri)
+			return 0;
+		bdgconn_release(sl);
+	}
+	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++)
+		if (!odi_sw_bdgconn[i].used) {
+			sl = &odi_sw_bdgconn[i];
+			break;
+		}
+	if (!sl)
+		return ODI_SW_EOPNOTSUPP;
+	for (i = 0; i < ODI_SW_ACL_DROP_MAX; i++)
+		if (!odi_sw_acl[i].used) {
+			row = (int)i;
+			break;
+		}
+	if (row < 0) {
+		ODI_SW_CMD_LOG("bdgconn: no ACL row left for a discard\n");
+		return ODI_SW_ENOSPC;
+	}
+	rc = odi_sw_acl_drop_set(ODI_SW_ACL_DROP_BASE + (unsigned int)row, ports, vid, pri);
+	if (rc) {
+		ODI_SW_CMD_LOG("bdgconn: the ACL row of a discard did not write\n");
+		return rc;
+	}
+	odi_sw_acl[row].used = 1;
+	odi_sw_acl[row].ports = ports;
+	odi_sw_acl[row].vid = vid;
+	odi_sw_acl[row].pri = pri;
+	sl->serv_id = b->service_id;
+	sl->dir = b->dir;
+	sl->us_row = sl->ds_row = -1;
+	sl->acl_row = row;
+	sl->ds_flow = -1;
+	sl->vlan_vid = sl->vlan_val = sl->vlan_any = 0;
+	sl->used = 1;
+	return 0;
 }
 
 int odi_switch_bdgconn_activate(void *buf, uint32_t len)
@@ -839,6 +994,8 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 	if (!b || len < sizeof(*b))
 		return -1;
 
+	if (b->vlan_op.rule_gen == OMCI_VLAN_OPER_EXTVLAN_DROP)
+		return bdgconn_activate_drop(b);
 	if (b->vlan_op.rule_gen == OMCI_VLAN_OPER_EXTVLAN_GEN) {
 		if (bdgconn_derive_gen(b, &us, &ds, &vlan_vid, &vlan_val, &vlan_any)) {
 			ODI_SW_CMD_LOG("bdgconn: extended VLAN rule not expressible, refused\n");
@@ -861,7 +1018,7 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 		}
 	}
 
-	if (sl && (sl->dir != b->dir || !cf_same_match(sl->us_row, &us) ||
+	if (sl && (sl->dir != b->dir || sl->acl_row >= 0 || !cf_same_match(sl->us_row, &us) ||
 		   !cf_same_match(sl->ds_row, &ds))) {
 		/* The id now names a different rule: replace it. */
 		bdgconn_release(sl);
@@ -895,6 +1052,7 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 		sl->dir = b->dir;
 		sl->us_row = -1;
 		sl->ds_row = -1;
+		sl->acl_row = -1;
 		sl->ds_flow = -1;
 		sl->vlan_vid = 0;
 		sl->vlan_val = 0;
@@ -905,7 +1063,10 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 		if (ds.present)
 			sl->ds_row = cf_insert(&ds);
 		if ((us.present && sl->us_row < 0) || (ds.present && sl->ds_row < 0)) {
-			ODI_SW_CMD_LOG("bdgconn: classification table full\n");
+			if (us.present && us.et)
+				ODI_SW_CMD_LOG("bdgconn: no free row of the second layout for an EtherType rule\n");
+			else
+				ODI_SW_CMD_LOG("bdgconn: classification table full\n");
 			bdgconn_release(sl);
 			return ODI_SW_ENOSPC;
 		}

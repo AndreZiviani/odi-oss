@@ -387,6 +387,8 @@ const char *evtocd_plan(const struct evtocd_entry *e, uint16_t input_tpid,
 	p->out_vid = -1;
 	p->out_pri = -1;
 	p->ds_wider = 0;
+	p->et_n = 0;
+	p->et[0] = p->et[1] = 0;
 	p->cmp = EVTOCD_CMP_C;
 	plane_zero(&p->s);
 	plane_zero(&p->c);
@@ -397,8 +399,6 @@ const char *evtocd_plan(const struct evtocd_entry *e, uint16_t input_tpid,
 
 	if (evtocd_default_rule_tags(e) >= 0)
 		return "a default rule";
-	if (e->f_ethertype != EVTOCD_F_ET_DO_NOT_FILTER)
-		return "an EtherType filter";
 	if (e->remove_tags == EVTOCD_T_DISCARD_FRAME)
 		return "a rule that discards the frames it matches";
 
@@ -424,6 +424,31 @@ const char *evtocd_plan(const struct evtocd_entry *e, uint16_t input_tpid,
 	}
 	if (e->remove_tags > n)
 		return "a rule that removes more tags than the frame has";
+	if (e->f_ethertype != EVTOCD_F_ET_DO_NOT_FILTER) {
+		/* The EtherType slot of a row compares the frame's own: behind
+		 * a tag it is not known to hold the same value. */
+		if (n)
+			return "an EtherType filter on tagged frames";
+		switch (e->f_ethertype) {
+		case EVTOCD_F_ET_IPOE_0800:
+			p->et_n = 1; p->et[0] = 0x0800;
+			break;
+		case EVTOCD_F_ET_PPPOE:
+			p->et_n = 2; p->et[0] = 0x8863; p->et[1] = 0x8864;
+			break;
+		case EVTOCD_F_ET_ARP_0806:
+			p->et_n = 1; p->et[0] = 0x0806;
+			break;
+		case EVTOCD_F_ET_IPV6_86DD:
+			p->et_n = 1; p->et[0] = 0x86dd;
+			break;
+		case EVTOCD_F_ET_EAPOL_888E:
+			p->et_n = 1; p->et[0] = 0x888e;
+			break;
+		default:
+			return "an undefined EtherType filter";
+		}
+	}
 
 	/* ---- the tags the treatment adds, outermost first */
 	evtocd_action(e, input_tpid, output_tpid, &a);
@@ -570,6 +595,98 @@ const char *evtocd_plan(const struct evtocd_entry *e, uint16_t input_tpid,
 	return 0;
 }
 
+/* ---- an entry that discards what it matches ----------------------------- */
+
+const char *evtocd_drop(const struct evtocd_entry *e, uint16_t input_tpid,
+			struct evtocd_drop *d)
+{
+	struct evtag t;
+	const char *why;
+
+	if (e->remove_tags != EVTOCD_T_DISCARD_FRAME)
+		return "not a discard";
+	if (evtocd_default_rule_tags(e) >= 0)
+		return "a default rule";
+	if (e->f_ethertype != EVTOCD_F_ET_DO_NOT_FILTER)
+		return "a discard that filters on the EtherType";
+	if (e->f_out_pri != EVTOCD_F_PRI_IGNORE_OTHER)
+		return "a discard of two-tagged frames";
+	if (e->f_in_pri == EVTOCD_F_PRI_IGNORE_OTHER)
+		return "a discard of untagged frames, which the ACL cannot tell from VID 0";
+	t.kind = 0;
+	if ((why = filter_tag(e->f_in_pri, e->f_in_vid, &t)) ||
+	    (why = filter_kind(e->f_in_tpid, input_tpid, tpid_kind(input_tpid), &t.kind)))
+		return why;
+	if (t.kind != KIND_C)
+		return "a discard of S-tagged frames";
+	if (t.vid < 1)
+		return "a discard of every VID or of VID 0, which the ACL cannot name";
+	d->vid = t.vid;
+	d->pri = t.pri;
+	return 0;
+}
+
+const char *evtocd_drop_shadow(const struct evtocd_drop *d, const struct evtocd_plan *r,
+			       unsigned *pmask)
+{
+	/* The ACL field is the C-tag of a frame that has only one; what it
+	 * holds behind an S-tag is not known, so a table that acts on an
+	 * S-tag is not one a discard can sit in. */
+	if (r->s.in)
+		return "a discard in a table that acts on S-tagged frames";
+	if (!r->c.in)
+		return 0;               /* untagged: no C-tag to match */
+	if (r->c.f_vid >= 0 && r->c.f_vid != d->vid)
+		return 0;
+	if (r->c.f_vid < 0) {
+		/* Any VID: the discard names one, so it is the more specific,
+		 * unless the rule names a priority the discard does not. */
+		if (r->c.f_pri >= 0 && d->pri < 0)
+			return "a discard and a priority-only rule that overlap";
+		return 0;
+	}
+	/* The same VID. */
+	if (r->c.f_pri < 0) {
+		if (d->pri < 0)
+			return "a discard and a rule with the same filter";
+		return 0;               /* the discard names a priority: more specific */
+	}
+	if (d->pri < 0)
+		*pmask &= ~(1u << r->c.f_pri);
+	else if (d->pri == r->c.f_pri)
+		return "a discard and a rule with the same filter";
+	return 0;
+}
+
+void evtocd_drop_oper(const struct evtocd_drop *d, int pri, struct omci_vlan_oper *vr)
+{
+	for (unsigned i = 0; i < sizeof *vr / 4; i++)
+		((uint32_t *)vr)[i] = 0;
+	vr->rule_gen = OMCI_VLAN_OPER_EXTVLAN_DROP;
+	vr->filter.outer.pri = OMCI_PRI_ANY;
+	vr->filter.outer.vid = OMCI_VID_ANY;
+	vr->filter.outer_mode = OMCI_TAGF_ANY;
+	vr->filter.inner.pri = pri >= 0 ? (uint32_t)pri : OMCI_PRI_ANY;
+	vr->filter.inner.vid = (uint32_t)d->vid;
+	vr->filter.inner.tpid = OMCI_FILTER_TPID_DO_NOT;
+	vr->filter.inner_mode = OMCI_TAGF_TAGGED | OMCI_TAGF_VID | (pri >= 0 ? OMCI_TAGF_PRI : 0);
+	vr->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	vr->outer_act.tag_op = OMCI_TAGOP_PASS;
+	vr->inner_act.tag_op = OMCI_TAGOP_PASS;
+	vr->out.out_tag.pri = OMCI_PRI_ANY;
+	vr->out.out_tag.vid = OMCI_VID_ANY;
+}
+
+void evtocd_oper_ethertype(struct omci_vlan_oper *vr, uint16_t et)
+{
+	vr->filter.ethertype = OMCI_ETHTYPE_LITERAL | et;
+}
+
+void evtocd_oper_rest(struct omci_vlan_oper *vr)
+{
+	vr->filter.ethertype = OMCI_ETHTYPE_REST;
+}
+
 /* The downstream plane of an upstream one. `ok` goes 0 when the way back
  * cannot be said: a tag the filter did not name is a tag nobody can put
  * back. */
@@ -642,6 +759,8 @@ int evtocd_plan_ds(const struct evtocd_plan *u, uint8_t ds_mode,
 	d->out_vid = -1;
 	d->out_pri = -1;
 	d->ds_wider = 0;
+	d->et_n = 0;
+	d->et[0] = d->et[1] = 0;
 	plane_ds(&u->c, &d->c, 0, &ok);
 	plane_ds(&u->s, &d->s, 1, &ok);
 	if (!ok) {

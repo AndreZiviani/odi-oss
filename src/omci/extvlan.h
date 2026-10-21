@@ -24,6 +24,8 @@
 
 #include <stdint.h>
 
+struct omci_vlan_oper;
+
 /* Filter side. */
 #define EVTOCD_F_PRI_IGNORE_OTHER   15   /* this whole tag is not examined */
 #define EVTOCD_F_PRI_DEFAULT_RULE   14   /* the default rule for this tag count */
@@ -40,6 +42,7 @@
 #define EVTOCD_F_ET_PPPOE            2
 #define EVTOCD_F_ET_ARP_0806         3
 #define EVTOCD_F_ET_IPV6_86DD        4
+#define EVTOCD_F_ET_EAPOL_888E       5
 
 /* Treatment side. RemoveTags is two bits: 0, 1 or 2 tags removed, and 3 is not
  * a count at all -- it discards the frame. */
@@ -226,6 +229,9 @@ struct evtocd_plan {
 	uint8_t ds_wider;       /* downstream: matches more than the OLT said (the
 				 * discard half of modes 5 to 7 is not done, or only
 				 * one of two tags is compared) */
+	uint8_t et_n;           /* upstream, untagged frames only: the EtherTypes the
+				 * entry names, 0 (any), 1, or 2 (PPPoE) */
+	uint16_t et[2];
 };
 
 /* Downstream behaviour, class 171 attribute 5 ("DsMode"), G.988 table 9.3.13-1. */
@@ -245,6 +251,48 @@ struct evtocd_plan {
  * evtocd_default_rule_tags() and evtocd_action(). */
 const char *evtocd_plan(const struct evtocd_entry *e, uint16_t input_tpid,
 			uint16_t output_tpid, struct evtocd_plan *p);
+
+/* What an entry that discards the frames it matches comes to: the classifier
+ * has no drop action, the ACL has one, and it compares the C-tag's VID and
+ * priority of a frame on its way in. So the entries that can be done are the
+ * ones that name a C-tagged frame by VID, with a priority or without. */
+struct evtocd_drop {
+	int16_t vid;            /* 1..4094 */
+	int8_t  pri;            /* 0..7, -1 any */
+};
+
+/* Reads an entry whose treatment discards (and that is not a default rule)
+ * as a drop. Returns NULL with *d filled, or a static reason. */
+const char *evtocd_drop(const struct evtocd_entry *e, uint16_t input_tpid,
+			struct evtocd_drop *d);
+
+/* Which priorities of the drop's VID the ACL may discard, given the plans of
+ * the other entries of the table. The ACL decides before the classifier, so a
+ * priority another entry of the same VID names must not be discarded: that
+ * entry is the more specific one and would never see its frames. Start *pmask
+ * at evtocd_drop_all(d) and call this with the upstream plan of every other
+ * entry; bit n is left set for priority n still to discard (0xff: every
+ * priority, one rule, no split). Returns NULL or a static reason: an overlap
+ * the table does not order, or an entry on an S-tag, whose C-tag the ACL
+ * field is not known to hide. */
+const char *evtocd_drop_shadow(const struct evtocd_drop *d, const struct evtocd_plan *r,
+			       unsigned *pmask);
+static inline unsigned evtocd_drop_all(const struct evtocd_drop *d)
+{
+	return d->pri >= 0 ? 1u << d->pri : 0xffu;
+}
+
+/* The bridge rule of cmd 51, rule_gen OMCI_VLAN_OPER_EXTVLAN_DROP, for one
+ * priority of the drop (pri -1 for any). */
+void evtocd_drop_oper(const struct evtocd_drop *d, int pri, struct omci_vlan_oper *vr);
+
+/* An upstream rule of a plan with an EtherType: the same descriptor with the
+ * EtherType `et` named outright, a literal 16-bit value. */
+void evtocd_oper_ethertype(struct omci_vlan_oper *vr, uint16_t et);
+
+/* The rule of an untagged frame whose EtherType no entry names: in a table
+ * that has EtherType entries it must sit after them. */
+void evtocd_oper_rest(struct omci_vlan_oper *vr);
 
 /* The downstream plan of an upstream one under `ds_mode`. Returns 1 with *d
  * filled, or 0 with no downstream rule and *why saying so: mode 1 and 8 want

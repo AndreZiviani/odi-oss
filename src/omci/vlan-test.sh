@@ -111,6 +111,8 @@ ADD200=f8000000f8000000000f800000000644
 ADD200ET=f8000000f8000001000f800000000644
 COPYVID=f8000000f8000000000f800000008004
 TAGGED=d8000000a8000000000f800000000324
+# An EtherType on a tagged frame: C-VID 100 and PPPoE, translated to 1410.
+TAGGEDET=f800000080320002400f800000082c14
 
 tid=0
 frame() {   # frame <cmd-byte> <class4> <inst4> <contents-hex>: one 48-byte frame
@@ -204,7 +206,7 @@ check "transparent (type 1, mode 0): the OLT rule is not applied either" "$got" 
 store 0 0
 for shape in "copy-vid:$COPYVID:the added VID is not a concrete" \
             "tagged:$TAGGED,$DEF1:a rule for tagged frames" \
-            "etype:$ADD200ET:the untagged rule filters on the EtherType" \
+            "tagged-etype:$TAGGEDET:a rule for tagged frames" \
             "noadd:$DEF1,$DEF2:no rule for untagged"; do
 	sn=${shape%%:*}; rest=${shape#*:}; ents=${rest%%:*}; why=${rest#*:}
 	# shellcheck disable=SC2046
@@ -350,12 +352,67 @@ check "every single tag removed: applied upstream (no rule comes back down), mat
 
 # One entry the classifier cannot carry out stops the whole table, and the log
 # says which one and why.
-sessionx 8100 8100 "$TRANS410" "$ADD200ET" "$DEF1" > /tmp/s171-bad.txt
+sessionx 8100 8100 "$TRANS410" "$TAGGEDET" "$DEF1" > /tmp/s171-bad.txt
 run171 ev-bad /tmp/s171-bad.txt
 got=$(rebuild /tmp/omcid-171-ev-bad.log 0)
-check "an entry with an EtherType filter: the table is not applied" "$got" "$TRANSPARENT"
-got=$(grep -c 'ext vlan 171/0001 entry 1: OLT rule not applied (an EtherType filter), transparent' /tmp/omcid-171-ev-bad.log)
+check "an entry with an EtherType filter on tagged frames: the table is not applied" "$got" "$TRANSPARENT"
+got=$(grep -c 'ext vlan 171/0001 entry 1: OLT rule not applied (an EtherType filter on tagged frames), transparent' /tmp/omcid-171-ev-bad.log)
 check "and the log names entry and reason, once" "$got" "1"
+
+# ---- the EtherType of untagged frames ---------------------------------------
+#
+# IPoE, PPPoE (two EtherTypes, so two rules) and ARP each to its own VLAN, and
+# the untagged frames of any other EtherType to VID 1: the rules that name one
+# are sent first and the last one is "the rest", which the switch places
+# after them. The way back is by VID, sent once for an entry.
+PPPOE201=f8000000f8000002000f80000000064c
+ARP202=f8000000f8000003000f800000000654
+sessionx 8100 8100 "$ADD200ET" "$PPPOE201" "$ARP202" "$ADD1" "$DEF1" "$DEF2" > /tmp/s171-et.txt
+run171 ev-et /tmp/s171-et.txt
+got=$(rebuild /tmp/omcid-171-ev-et.log 0)
+check "IPoE, PPPoE and ARP of untagged frames each to a VLAN, and the rest to VID 1" "$got" \
+"47/0ffe gem 4094 rule forward-all vid -1 pri -1
+47/1002 gem 657 rule ext-vlan ethertype vid -1 pri -1
+47/1002 gem 657 rule ext-vlan ethertype vid -1 pri -1
+47/1002 gem 657 rule ext-vlan ethertype vid -1 pri -1
+47/1002 gem 657 rule ext-vlan ethertype vid -1 pri -1
+47/1002 gem 657 rule ext-vlan vid -1 pri -1"
+got=$(grep -c 'OLT rule not applied' /tmp/omcid-171-ev-et.log)
+check "and nothing is said about a rule not applied" "$got" "0"
+
+# ---- an entry that discards ---------------------------------------------------
+#
+# A discard of VID 20 and a translation of VID 20 priority 5: the ACL decides
+# before the classifier, so the discard leaves priority 5 out and is one rule
+# per priority left.
+DROP20=f8000000800a0000c00f8000000f8000
+TRANS20P5=f8000000500a0000400f800000082c14
+PRIONLY3=f800000038000000400f800000082c14
+DROP30P2=f8000000200f0000c00f8000000f8000
+sessionx 8100 8100 "$TRANS20P5" "$DROP20" "$DEF1" "$DEF2" > /tmp/s171-dr.txt
+run171 ev-drop /tmp/s171-dr.txt
+got=$(rebuild /tmp/omcid-171-ev-drop.log 0 | grep ext-vlan)
+check "a discard of VID 20 beside a translation of priority 5: the discard names the other seven priorities" "$got" \
+"47/1002 gem 657 rule ext-vlan discard vid 20 pri 0
+47/1002 gem 657 rule ext-vlan discard vid 20 pri 1
+47/1002 gem 657 rule ext-vlan discard vid 20 pri 2
+47/1002 gem 657 rule ext-vlan discard vid 20 pri 3
+47/1002 gem 657 rule ext-vlan discard vid 20 pri 4
+47/1002 gem 657 rule ext-vlan discard vid 20 pri 6
+47/1002 gem 657 rule ext-vlan discard vid 20 pri 7
+47/1002 gem 657 rule ext-vlan vid 20 pri 5"
+sessionx 8100 8100 "$DROP20" "$DROP30P2" "$DEF1" "$DEF2" > /tmp/s171-dr2.txt
+run171 ev-drop2 /tmp/s171-dr2.txt
+got=$(rebuild /tmp/omcid-171-ev-drop2.log 0 | grep ext-vlan)
+check "discards alone: VID 20 of any priority is one rule, VID 30 priority 2 another" "$got" \
+"47/1002 gem 657 rule ext-vlan discard vid 20 pri -1
+47/1002 gem 657 rule ext-vlan discard vid 30 pri 2"
+sessionx 8100 8100 "$PRIONLY3" "$DROP20" "$DEF1" "$DEF2" > /tmp/s171-dr3.txt
+run171 ev-drop3 /tmp/s171-dr3.txt
+got=$(rebuild /tmp/omcid-171-ev-drop3.log 0)
+check "a discard of a VID beside a rule on one priority of any VID: nothing orders them, the table is not applied" "$got" "$TRANSPARENT"
+got=$(grep -c 'OLT rule not applied (a discard and a priority-only rule that overlap), transparent' /tmp/omcid-171-ev-drop3.log)
+check "and the log says why, once" "$got" "1"
 
 # A line on the manual tag never reads the table: the rules are the same with
 # a translation in it.

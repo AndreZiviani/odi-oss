@@ -13,6 +13,7 @@
  */
 #include "odi_switch_dal.h"
 #include "odi_switch_reg.h"
+#include "odi_switch_mcast.h"
 
 /* The VLAN table: 4096 rows by VID. */
 #define ODI_SW_VLAN_ID_COUNT		4096U
@@ -277,4 +278,107 @@ void odi_sw_cf_act_write(uint32_t idx, int is_us, const uint32_t act[3])
 void odi_sw_vlan_row_set(uint32_t vid, uint32_t val)
 {
 	(void)odi_switch_table_write(ODI_SW_TBL_VLAN_MEMBERS, vid, &val, 1);
+}
+
+/* ---- the ACL rows of the extended VLAN discards ---------------------------
+ *
+ * The classifier has no drop action; the ACL has one, and it decides before
+ * the classifier. The layout is the one odi_switch_mcast.c writes (a rule is
+ * two entries of one table, the bits that must be 1 and the bits that must
+ * be 0, the valid bit in the first and written last; the action a third
+ * entry with its own class word), and the field and the action are another
+ * open implementation's measurements: the C-tag field, VID 11:0 and
+ * priority 15:13, reads 0 for a frame without a C-tag, so VIDs 1..4094 never
+ * match one; a forwarding decision of 1 (redirect) with an empty port mask
+ * drops. Its rule acts on the frames of its own ports only.
+ */
+#define ACL_ACT_FWD_REDIRECT		1U
+#define ACL_FIELD_CTAG			0x09U
+#define ACL_PORT_SHIFT			10U
+#define ACL_PORTS_ALL			0x3fU
+#define ACL_TMPL_BITS			7U
+#define ACL_CTAG_VID			0x0fffU
+#define ACL_CTAG_PRI			0xe000U
+#define ACL_CTAG_PRI_SHIFT		13U
+
+/* Slot 0 of the template reads the C-tag, slots 1..7 compare nothing. The
+ * unused top bits of each template word are left as they are. */
+static void acl_template_set(void)
+{
+	uint32_t first = 8U * ODI_SW_ACL_DROP_TEMPLATE;
+	uint32_t w0 = ODI_SW_ACL_TMPL_FIELD_OFF + 4U * (first / 4U);
+	uint32_t w1 = w0 + 4U;
+	uint32_t v0 = (odi_reg_read(w0) & ~0x0fffffffU) |
+		      (ACL_FIELD_CTAG << (7U * (first % 4U)));
+	uint32_t v1 = odi_reg_read(w1) & ~0x0fffffffU;
+
+	if (odi_reg_read(w0) != v0)
+		odi_reg_write(w0, v0);
+	if (odi_reg_read(w1) != v1)
+		odi_reg_write(w1, v1);
+}
+
+int odi_sw_acl_drop_set(uint32_t entry, uint32_t ports, int vid, int pri)
+{
+	static const uint32_t zero[ODI_SW_MC_RULE_WORDS] = { 0 };
+	uint32_t ones[ODI_SW_MC_RULE_WORDS] = { 0 }, zeros[ODI_SW_MC_RULE_WORDS] = { 0 };
+	uint32_t act[ODI_SW_MC_ACTION_WORDS] = { 0, 0, 0 };
+	uint32_t slot = (uint32_t)vid & ACL_CTAG_VID, care = ACL_CTAG_VID;
+	uint32_t permit, en;
+	int rc;
+
+	if (vid < 1 || vid > 4094 || pri > 7 || !(ports & 0xfU) || (ports & ~0xfU))
+		return -22;
+	if (pri >= 0) {
+		slot |= (uint32_t)pri << ACL_CTAG_PRI_SHIFT;
+		care |= ACL_CTAG_PRI;
+	}
+	ones[0] = ODI_SW_MC_RULE_VALID;
+	ones[4] = ((slot & care) << 16) | (ports << ACL_PORT_SHIFT) | ODI_SW_ACL_DROP_TEMPLATE;
+	zeros[4] = ((~slot & care & 0xffffU) << 16) |
+		   ((ACL_PORTS_ALL & ~ports) << ACL_PORT_SHIFT) |
+		   (ACL_TMPL_BITS & ~ODI_SW_ACL_DROP_TEMPLATE);
+	act[1] = ACL_ACT_FWD_REDIRECT << 9;
+
+	/* The permit for a frame no rule matches before the lookup, or a port
+	 * with the lookup on drops everything; neither is ever taken away. */
+	permit = odi_reg_read(ODI_SW_ACL_DEFAULT_PERMIT_OFF);
+	if ((permit & ports) != ports)
+		odi_reg_write(ODI_SW_ACL_DEFAULT_PERMIT_OFF, permit | ports);
+	en = odi_reg_read(ODI_SW_MC_ACL_PORT_EN_OFF);
+	if ((en & ports) != ports)
+		odi_reg_write(ODI_SW_MC_ACL_PORT_EN_OFF, en | ports);
+
+	acl_template_set();
+	/* The rule cannot match until its valid bit, in the ones plane, is
+	 * written last. */
+	rc = odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN, entry, zero, ODI_SW_MC_RULE_WORDS);
+	if (!rc)
+		rc = odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN_MASK, entry, zeros,
+					    ODI_SW_MC_RULE_WORDS);
+	if (!rc)
+		rc = odi_switch_table_write(ODI_SW_TBL_ACL_ACTIONS, entry, act,
+					    ODI_SW_MC_ACTION_WORDS);
+	if (rc)
+		return rc;
+	odi_reg_write(ODI_SW_ACL_ACT_EN_OFF + 4U * entry, ODI_SW_ACL_ACT_EN_FWD);
+	rc = odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN, entry, ones, ODI_SW_MC_RULE_WORDS);
+	if (rc)
+		odi_reg_write(ODI_SW_ACL_ACT_EN_OFF + 4U * entry, ODI_SW_ACL_ACT_EN_RESET);
+	return rc;
+}
+
+void odi_sw_acl_drop_del(uint32_t entry)
+{
+	static const uint32_t zero[ODI_SW_MC_RULE_WORDS] = { 0 };
+	static const uint32_t zact[ODI_SW_MC_ACTION_WORDS] = { 0, 0, 0 };
+
+	/* The valid bit first, so the rule stops matching before anything
+	 * under it changes. */
+	(void)odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN, entry, zero, ODI_SW_MC_RULE_WORDS);
+	(void)odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN_MASK, entry, zero, ODI_SW_MC_RULE_WORDS);
+	(void)odi_switch_table_write(ODI_SW_TBL_ACL_ACTIONS, entry, zact, ODI_SW_MC_ACTION_WORDS);
+	/* A released entry gets the reset class word back, never zero: zero
+	 * chains an entry to the one before it. */
+	odi_reg_write(ODI_SW_ACL_ACT_EN_OFF + 4U * entry, ODI_SW_ACL_ACT_EN_RESET);
 }

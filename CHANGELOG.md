@@ -5,6 +5,34 @@ listed here.
 
 ## Unreleased
 
+- OMCI, switch: two more shapes of the OLT's extended VLAN table (class 171)
+  are applied instead of leaving the whole table transparent. Only on a line
+  with `VLAN_CFG_TYPE` other than 1; the manual tag never reads the table, so
+  neither of our lines changes. **An EtherType filter on untagged frames**
+  (IPoE 0x0800, PPPoE 0x8863 and 0x8864, ARP 0x0806, IPv6 0x86dd, EAPOL 0x888e)
+  is a classifier row of the second layout that compares the frame's own
+  EtherType, one row a value (PPPoE is two), each with its tag and the way
+  back by VID; the untagged frames of every other EtherType, when the table has
+  an entry for them, are one row after those. The register facts (the EtherType
+  in the low half of rule word 0, in the rows from the layout boundary up) are
+  another open implementation's measurements, and the host test pins its words
+  (0x000188b5 and 0x0000774a for 0x88b5). An EtherType filter on tagged frames
+  is still refused: the value behind a tag is not known. **An entry that
+  discards** the C-tagged frames of one VID (a priority named or not) is an ACL
+  rule on the UNI ports, which has a drop action the classifier lacks; the ACL
+  decides before the classifier, so the priorities of that VID that another
+  entry of the table names are left out of the discard (one rule each for the
+  rest), and an overlap nothing orders, a discard in a table that acts on
+  S-tags, or a discard of untagged, every-VID or double-tagged frames, is
+  still a refusal that leaves the table transparent and names the entry and
+  the reason. The ACL lookup is turned on for the UNI port and never off;
+  entries 16 to 47 on template 5 are the block, the snooping copy keeps entry
+  8. The rows the previous change left "unproven" for two tags at once are
+  now pinned to the other implementation's measured words (one entry writing
+  both tags on an untagged frame, two pops on an S-VID, a pop and a push with
+  priority 0), and `docs/SWITCH.md` says which shapes are measured. Host-tested
+  (`test/odi_switch_bdgconn_extvlan_test.c`, `src/omci/test/extvlan_test.c`,
+  `src/omci/vlan-test.sh`); not run through an OLT that provisions them.
 - OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
   parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
   the NIC runs a second receive ring, and the switch routes the OMCI frames

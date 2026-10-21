@@ -75,6 +75,14 @@
  * each are in docs/SWITCH.md, "Extended VLAN rules". */
 #define OMCI_VLAN_OPER_EXTVLAN_GEN        7
 
+/* An extended VLAN entry that discards the C-tagged frames it matches (the
+ * ACL has a drop action, the classifier has none). Upstream only
+ * (OMCI_DIR_US), the frame named by filter.inner alone: the VID, and the
+ * priority when inner_mode has OMCI_TAGF_PRI. Nothing else of the descriptor
+ * is read, and it writes no classifier row and no VLAN row. The rule drops
+ * the frames of the UNI ports of uni_mask. */
+#define OMCI_VLAN_OPER_EXTVLAN_DROP       8
+
 /* Filter mode bits, for outer_mode / inner_mode. */
 #define OMCI_TAGF_ANY  (1 << 0)
 #define OMCI_TAGF_TAGGED     (1 << 1)
@@ -115,6 +123,15 @@
 #define OMCI_ETHTYPE_ARP         3
 #define OMCI_ETHTYPE_IPV6        4
 #define OMCI_ETHTYPE_PPPOE_S     5
+
+/* In a rule_gen 7 descriptor (upstream, untagged frames only) the field is
+ * one of these instead: OMCI_ETHTYPE_NO_CARE; OMCI_ETHTYPE_LITERAL with the
+ * 16-bit EtherType to compare in the low half (omcid sends one descriptor a
+ * value, so PPPoE is two); or OMCI_ETHTYPE_REST, an untagged frame whose
+ * EtherType no other rule of the table names, which sits after those that
+ * do. */
+#define OMCI_ETHTYPE_LITERAL     (1U << 16)
+#define OMCI_ETHTYPE_REST        (1U << 17)
 
 /* Tag action -- tag_op, and also out.ds_tag_op. */
 #define OMCI_TAGOP_NONE             0
