@@ -17,6 +17,7 @@ listed here.
   and mask tables and rows 32-255 in the second. Another open implementation
   measured the same direction. Host test pins the mapping at 128, 224, 0 and
   255.
+  On a stick (count 128) the classifier rows land where they did before.
 
 - OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
   parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
