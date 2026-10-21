@@ -35,6 +35,21 @@ static void test_rx_own_bit(void)
 	CHECK((d.opts1 & ODI_RXD_HW) == 0, "own bit clear is readable back");
 }
 
+static void test_rx_whole(void)
+{
+	struct odi_rx_desc d = {0};
+
+	/* The first descriptor seen on a stick: FIRST|LAST, 72 bytes. */
+	d.opts1 = 0x36000048U;
+	CHECK(odi_nic_rx_whole(&d), "a normal single-descriptor frame is whole");
+	d.opts1 = ODI_RXD_FIRST | 0x640;
+	CHECK(!odi_nic_rx_whole(&d), "first piece alone is not whole");
+	d.opts1 = 0x600;
+	CHECK(!odi_nic_rx_whole(&d), "middle piece is not whole");
+	d.opts1 = ODI_RXD_LAST | 0x100;
+	CHECK(!odi_nic_rx_whole(&d), "last piece alone is not whole");
+}
+
 static void test_rx_len_mask(void)
 {
 	struct odi_rx_desc d = {0};
@@ -368,6 +383,7 @@ static void test_tok_idle_tx_progress(void)
 int main(void)
 {
 	test_rx_own_bit();
+	test_rx_whole();
 	test_rx_len_mask();
 	test_tx_own_bit_and_eor();
 	test_cpu_tag_pack_for_port();

@@ -1069,6 +1069,7 @@ added to `CONFIG_CMDLINE` takes effect after a kernel rebuild; U-Boot's
 | `odi_switch.host_autoneg` | `odi_switch.c` (bool, 0644) | the 1000BASE-X auto-negotiation of the host port; `N` forces 1000BASE-X full duplex (`docs/SWITCH.md`, "Host port auto-negotiation"). `host-autoneg.sh` drives it from `HOST_AUTONEG`; set by hand it lasts until the next boot | on | boot (with the platform settings), or live: applied at once | prod (through `HOST_AUTONEG`) |
 | `odi_switch.host_link` | `odi_switch.c` (read-only) | `1` while the host port has a link | -- | read at any time | prod |
 | `print-fatal-signals=1` | `kernel/618/config:61` (mainline) | register dump of any process killed by SIGSEGV/SIGBUS/SIGILL, into the ramlog | on | boot | prod (debug aid) |
+| `panic=10` | `kernel/618/config` (mainline) | restart 10 s after a panic, through the watchdog restart handler, instead of waiting for the userland watchdog deadline (about 44 s) | on | boot | prod (availability) |
 
 ### Kconfig
 

@@ -113,7 +113,7 @@ Dropped whole, never partially:
 | --- | --- |
 | offset >= `0x700000` | GPON block -- different subsystem, 202 of 1530 registers |
 | offset >= `0xF00000` | counter/MIB block -- clear-on-read is common here |
-| base address in `EXCLUDED_REGISTERS` (66 registers) | not idempotent to read: indirect-access read-data latches, FIFOs, status and interrupt-status words, counters and counter controls, acknowledge/clear handshakes -- by address, because most carry only a default name |
+| base address in `EXCLUDED_REGISTERS` (69 registers) | not idempotent to read: indirect-access read-data latches, FIFOs, status and interrupt-status words, counters and counter controls, acknowledge/clear handshakes, and three words a read of which has stalled a board -- by address, because most carry only a default name |
 
 The module docstring in `mklist.py` has the full reasoning and the packing
 model (narrow vs wide vs wide-multi-word) that decides how many words a

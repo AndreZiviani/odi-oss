@@ -199,9 +199,35 @@ static void test_optics_page_select(void)
 	optics_setup(0x6a, 0U);
 	fake_stall_after_write = 1000;
 	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == -ENODEV, "a part that never answers: refused");
-	CHECK(fake_stall_reads == 20, "a part that never answers: the wait is bounded (20 reads)");
+	CHECK(fake_stall_reads == 23, "a part that never answers: the wait is bounded (20 reads, then one per retry and one to put the page back)");
 	odi_board_laser_get(&l);
 	CHECK(!l.laser_on && l.ldd_id == -1, "a part that never answers: laser off");
+}
+
+/* The first reads of the id fail and the part answers on a later try. */
+static void test_optics_id_retry(void)
+{
+	struct odi_board_laser l;
+
+	optics_setup(0x6a, 0U);
+	fake_stall_left = 2;
+	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == 0, "two failed id reads, third answers: laser on");
+	odi_board_laser_get(&l);
+	CHECK(l.laser_on && l.ldd_id == 0x6a && fake_a2_page == 0U, "retry: id read, page at rest restored");
+
+	/* A try that fails after the page 2 write leaves page 2 selected; the
+	 * retry must still put back page 0, not take 2 for the page at rest.
+	 */
+	optics_setup(0x6a, 0U);
+	fake_stall_after_write = 21;
+	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == 0, "stall outlasting the first try: later try answers");
+	odi_board_laser_get(&l);
+	CHECK(l.laser_on && l.ldd_id == 0x6a && fake_a2_page == 0U, "stall outlasting the first try: page restored to 0");
+
+	/* A read that succeeds with another id is an answer, not retried. */
+	optics_setup(0x55, 0U);
+	CHECK(odi_board_optics() == 0 && odi_board_laser(NULL) == -ENODEV, "other id: refused at once");
+	CHECK(fake_page_writes == 2, "other id: read once (select 2, put back)");
 }
 
 static void test_optics(void)
@@ -256,6 +282,7 @@ static int run_unit_checks(void)
 	test_soc_addresses_allowlisted();
 	test_optics();
 	test_optics_page_select();
+	test_optics_id_retry();
 	test_optics_unknown_laser_driver();
 	test_tx_disable();
 

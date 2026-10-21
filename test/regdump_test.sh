@@ -48,6 +48,15 @@ cat > "$T/map.txt" <<'EOF'
 
   10  0x000050  width   1  array 0..0    port 0..0   SW_0x000050
          0  F_0                          lsp   0  len   1
+
+  11  0x026008  width  32  array 0..0    port 0..0   SW_0x026008
+         0  F_31_0                       lsp   0  len  32
+
+  12  0x02600c  width  32  array 0..0    port 0..0   SW_0x02600c
+         0  F_31_0                       lsp   0  len  32
+
+  13  0x026010  width  32  array 0..0    port 0..0   SW_0x026010
+         0  F_31_0                       lsp   0  len  32
 EOF
 
 # --- packing model, exclusions, collisions ---------------------------------
@@ -90,12 +99,15 @@ echo "$out" | grep -q "PONQ_0xf00000" && { echo "counter block register leaked: 
 echo "$out" | grep -q "SW_0x000014" && { echo "listed status register leaked: $out"; exit 1; }
 echo "$out" | grep -q "SW_0x000008" && { echo "listed read-data latch leaked: $out"; exit 1; }
 
+# The three words whose read has stalled a board are excluded by address.
+echo "$out" | grep -qE "SW_0x026(008|00c|010)" && { echo "read-hazard register leaked: $out"; exit 1; }
+
 # Total distinct addresses: 0x0(1) + 0x4(1, collided) + 0x200(41) +
 # 0x28(2) + VLAN_SETUP(1) + 0x50(1) = 47.
 addr_count=$(echo "$out" | grep -vc "^#")
 [ "$addr_count" -eq 47 ] || { echo "expected 47 addresses, got $addr_count: $out"; exit 1; }
 echo "$out" | grep -q "^# 47 addresses" || { echo "address-count header wrong: $out"; exit 1; }
-echo "$out" | grep -q "^# .*excluded (gpon 1, counter/mib 1, listed 2)" \
+echo "$out" | grep -q "^# .*excluded (gpon 1, counter/mib 1, listed 5)" \
 	|| { echo "exclusion-count header wrong: $out"; exit 1; }
 
 # --- >MAX_ADDRESSES cap, curated names first -------------------------------

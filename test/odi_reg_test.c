@@ -79,6 +79,16 @@ int main(void)
 	      "reg_get refuses an offset the real ioremap does not cover");
 	CHECK(odi_sw_reg_set(ODI_SWITCH_MMIO_SIZE, 1U) != 0,
 	      "reg_set refuses the same out-of-bounds offset");
+	{
+		uint32_t a;
+
+		for (a = 0x026008U; a <= 0x026010U; a += 4)
+			CHECK(odi_sw_reg_get(a, &v) == -EPERM,
+			      "reg_get refuses the three words whose read can stall the board");
+		CHECK(odi_sw_reg_get(0x026004U, &v) != -EPERM &&
+		      odi_sw_reg_get(0x026014U, &v) != -EPERM,
+		      "reg_get leaves the neighbours of the hazard words alone");
+	}
 	CHECK(odi_sw_reg_get(0x1c021U, &v) != 0, "reg_get refuses an unaligned offset");
 	CHECK(odi_sw_reg_set(0x1c021U, 1U) != 0, "reg_set refuses an unaligned offset");
 

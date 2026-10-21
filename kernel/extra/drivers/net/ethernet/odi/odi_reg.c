@@ -105,11 +105,13 @@ static long odi_sw_ioctl_cmd(struct file *f, unsigned int cmd, void __user *argp
 	switch (cmd) {
 	case ODI_SW_IOC_REG_GET: {
 		struct odi_sw_reg r;
+		int rc;
 
 		if (copy_from_user(&r, argp, sizeof r))
 			return -EFAULT;
-		if (odi_sw_reg_get(r.addr, &r.value) != 0)
-			return -EINVAL;
+		rc = odi_sw_reg_get(r.addr, &r.value);
+		if (rc)
+			return rc == -EPERM ? -EPERM : -EINVAL;
 		if (copy_to_user(argp, &r, sizeof r))
 			return -EFAULT;
 		return 0;

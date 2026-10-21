@@ -5,6 +5,42 @@ listed here.
 
 ## Unreleased
 
+- Kernel, GPON: a GPON MAC that is not clocked answers its registers with
+  `0xca0eca0f`, which has LOS, LOF, FEC and LOM all set. The line sample and
+  the counter sample now treat that word as no reading: it is not fed to the
+  state machine as a loss, not counted as an alarm and not added to the
+  counters (one log line says so). The boot log also names the chip id, the
+  GPON MAC revision and the MAC memory self-test result once
+  (`odi_gpon: chip id ..., GPON MAC rev ..., memory self-test ...`).
+
+- Kernel: `panic=10` on the built-in command line. A panic used to wait for
+  the userland watchdog deadline (about 44 s) before the board restarted; it
+  now restarts 10 s after the panic, through the watchdog restart handler,
+  which leaves the trace time to reach the ramlog.
+
+- Kernel, optics: the laser driver id read at boot (the `laser` PON step) is
+  tried up to three times, 200 ms apart, before the step gives up. One failed
+  read used to leave the laser off and GPON refused for the whole boot with
+  the stick otherwise healthy; the module can stop answering for a while
+  around an EEPROM copy. A read that succeeds with another id is still
+  refused at once, and the page select is put back where it was found even
+  when a try failed in the middle.
+
+- Kernel, tools: the three switch registers 0x026008, 0x02600c and 0x026010
+  are no longer read. Another open implementation's measurements show a read of
+  them stalling the board until the watchdog reset it; ours read 0 in earlier
+  dumps, so it depends on the state of the block, and nothing of ours needs
+  them. `/dev/odi_sw` register get returns `EPERM` for them (one log line), and
+  the register dump list leaves them out. Writes are untouched.
+
+- Kernel, NIC: a receive descriptor that is not both the first and the last
+  piece of a frame is dropped and counted (`rx_split_dropped` in
+  `/proc/odi_nic`, `rx_length_errors` on the interface, one log line). A frame
+  longer than the 1600 byte buffer arrives in pieces and only the first has the
+  CPU tag, so the later pieces read as source port 0 and skipped the test that
+  keeps everything from the fibre away from the IP stack. Normal frames carry both bits.
+  Not yet checked on a stick: if `rx_split_dropped` counts on ordinary traffic the check is wrong.
+
 - OMCI: the FEC performance monitoring history data entity (class 312, which
   an OLT creates and then reads) reports real values instead of zeros, on a
   15-minute interval framework that other history entities can reuse. A Get

@@ -97,6 +97,22 @@ static inline uint32_t ODI_GPON_PONMAC_DECRYPT_BYPASS_BYPASS_SET(uint32_t reg, u
 /* DSF_IRQ_ENABLE: 0x701004, same bit positions as DSF_IRQ_EVENT */
 #define ODI_GPON_DSF_IRQ_ENABLE_OFF	0x701004U
 
+/* What the bus answers for a register of the GPON MAC that nothing
+ * decodes: the block not clocked or not out of reset. It is not register
+ * content, and as an alarm word it would read LOS|LOF|FEC|LOM. The top
+ * region (0x700000-0x700280) answers at any time; from 0x701000 up this
+ * is the reply until the MAC is brought up (another open implementation's
+ * measurements).
+ */
+#define ODI_GPON_NO_RESPONSE	0xca0eca0fU
+
+/* Chip identity, read once at init for the log (the switch chip word is
+ * ODI_SW_CHIP_ID_WORD_OFF): the GPON MAC revision and the MAC memory
+ * self-test result. Both answer at any time.
+ */
+#define ODI_GPON_PONMAC_REVISION_OFF	0x700010U
+#define ODI_GPON_GPON_0x700280_OFF	0x700280U
+
 /* DSF_ALARM_STATE: 0x701008 -- the four live alarm bits */
 #define ODI_GPON_DSF_ALARM_STATE_OFF	0x701008U
 #define ODI_GPON_DSF_ALARM_STATE_LOS_NOW	(1U << 0)

@@ -271,6 +271,13 @@ void odi_gpon_ctr_sample(struct odi_gpon_ctr *c, uint32_t now_ms, unsigned int s
 	uint32_t alarms = odi_reg_read(ODI_GPON_DSF_ALARM_STATE_OFF);
 	unsigned int i, k;
 
+	/* A MAC that is not clocked answers every register with the bus's
+	 * no-decode word: counted, it would add that word to every total.
+	 * Nothing is read or changed, so the baseline stays as it was.
+	 */
+	if (alarms == ODI_GPON_NO_RESPONSE)
+		return;
+
 	for (i = 0; i < CTR_NREGS; i++) {
 		const struct ctr_reg *r = &ctr_regs[i];
 		uint32_t v = ctr_read(r);

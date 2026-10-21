@@ -172,6 +172,7 @@ struct odi_nic {
 	 */
 	u32 rx_pon;
 	u32 rx_pon_dropped;
+	u32 rx_split_dropped;
 };
 
 static struct odi_nic odi;
@@ -911,6 +912,21 @@ static int odi_poll(struct napi_struct *napi, int budget)
 			odi_rx_log_count++;
 		}
 
+		if (!odi_nic_rx_whole(d)) {
+			/* One piece of a frame longer than the buffer. Only the
+			 * first piece has the CPU tag, so the rest would read as
+			 * source port 0 and skip the PON test below: drop every
+			 * piece, which also covers a first one.
+			 */
+			odi.rx_split_dropped++;
+			pr_warn_once(DRV_NAME ": RX descriptor without FIRST and LAST (opts1=0x%08x), dropped; counted in rx_split_dropped\n",
+				     d->opts1);
+			dev = odi_dev_for_port(ODI_PORT_CATCHALL);
+			if (dev)
+				dev->stats.rx_length_errors++;
+			goto requeue;
+		}
+
 		if ((d->opts1 & (ODI_RXD_BAD_CRC | ODI_RXD_TOO_LONG)) ||
 		    len <= ETH_FCS_LEN || len > ODI_NIC_RX_BUF_SIZE) {
 			/* Drop, and give the same buffer back: it is still mapped
@@ -1234,7 +1250,8 @@ void odi_nic_report(void)
 
 /* /proc/odi_nic: the interrupt and reclaim counters, one per line, then
  * the frames from the PON port (rx_pon, OMCI included) and those dropped
- * because no RX hook took them (rx_pon_dropped). tok_irqs
+ * because no RX hook took them (rx_pon_dropped), then the descriptors
+ * dropped for not being a whole frame (rx_split_dropped). tok_irqs
  * is the number of interrupt entries that carried the TX-completion bit:
  * zero under TX traffic means the interrupt does not fire on this unit and
  * every reclaim came from the poll, the xmit path or the backstop.
@@ -1243,10 +1260,10 @@ void odi_nic_report(void)
  */
 static int odi_nic_proc_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "irq_entries %u\nnapi_polls %u\ntok_irqs %u\ntok_work %u\ntok_idle %u\nbackstop_reclaims %u\nrx_taken %u\nstorm_tripped %d\nrx_pon %u\nrx_pon_dropped %u\n",
+	seq_printf(m, "irq_entries %u\nnapi_polls %u\ntok_irqs %u\ntok_work %u\ntok_idle %u\nbackstop_reclaims %u\nrx_taken %u\nstorm_tripped %d\nrx_pon %u\nrx_pon_dropped %u\nrx_split_dropped %u\n",
 		   odi.irq_entries, odi.napi_polls, odi.tok_irqs, odi.tok_work,
 		   odi.tok_idle, odi.backstop_reclaims, odi.rx_taken, odi.irq_storm_tripped,
-		   odi.rx_pon, odi.rx_pon_dropped);
+		   odi.rx_pon, odi.rx_pon_dropped, odi.rx_split_dropped);
 	return 0;
 }
 

@@ -56,9 +56,13 @@ CONFIG_SYSVIPC=y
 # core-dump signal (SIGSEGV, SIGBUS, SIGILL, ...) prints its registers
 # (epc, ra, Status, Cause, BadVA) to the console and so to the ramlog.
 # Without it a dying init leaves only "Attempted to kill init!".
+# panic=10 (mainline): after a panic, restart 10 s later through the
+# watchdog restart handler (odi_wdt.c) instead of waiting for the
+# userland watchdog deadline, about 44 s. 10 s leaves the panic trace time
+# to reach the ramlog. Without it the default is to wait.
 CONFIG_MIPS_CMDLINE_BUILTIN_EXTEND=y
 CONFIG_CMDLINE_BOOL=y
-CONFIG_CMDLINE="console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:256K(boot),8K(env),8K(env2),240K(config),1328K(k0)ro,2512K(r0)ro,1328K(k1),2512K(r1),4K@0ro,4K@0ro,4K@0ro,4K@0ro,1328K@512K(linux),2512K@1840K(rootfs) print-fatal-signals=1"
+CONFIG_CMDLINE="console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:256K(boot),8K(env),8K(env2),240K(config),1328K(k0)ro,2512K(r0)ro,1328K(k1),2512K(r1),4K@0ro,4K@0ro,4K@0ro,4K@0ro,1328K@512K(linux),2512K@1840K(rootfs) print-fatal-signals=1 panic=10"
 CONFIG_DEVTMPFS=y
 CONFIG_DEVTMPFS_MOUNT=y
 
