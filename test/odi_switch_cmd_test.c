@@ -81,9 +81,12 @@ int main(int argc, char **argv)
 	 */
 	odi_sw_host_pause = true;
 	/* The capture is the stock driver's, which writes the one word of a
-	 * downstream queue and no schedule; the schedule is compared in
-	 * odi_switch_dsq_test.c and in the boot golden. */
+	 * downstream queue and no schedule, and gives every downstream row the
+	 * port default priority; the schedule is compared in
+	 * odi_switch_dsq_test.c and in the boot golden, the priority of the
+	 * rows in odi_switch_dssteer_test.c. */
 	odi_sw_ds_sched = false;
+	odi_sw_ds_steer = false;
 
 	/* ODI_SWITCH_CMD_TEST_INIT_PLATFORM=1 runs the platform init first,
 	 * as a boot does: odi_switch_init_platform_test.sh uses it to check

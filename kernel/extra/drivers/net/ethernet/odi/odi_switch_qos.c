@@ -129,6 +129,7 @@ void odi_sw_ponmac_queue_add(uint32_t th)
 #define ODI_SW_DSQ_PRIO_MAP_IDENTITY	0x00fac688U
 
 bool odi_sw_ds_sched = true;
+bool odi_sw_ds_steer = true;
 
 /* A word is written only when it changes: a queue the OLT leaves at the
  * default adds nothing to the boot's register stream. */

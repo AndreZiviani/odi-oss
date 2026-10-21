@@ -786,6 +786,7 @@ static int cmd_mib_reset(void *buf, uint32_t len)
 	(void)buf; (void)len;
 	uni_limits_restore();
 	dsq_restore();
+	odi_switch_bdgconn_ds_pri_clear();
 	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
 		(void)us_flow_delete(i);
 	for (t = 0; t < ODI_SW_PONQ_TCONTS; t++) {
@@ -897,6 +898,27 @@ static int us_flow_delete(uint32_t slot)
 	return 0;
 }
 
+/* The queue a downstream flow's frames go to: G.988 has the GEM port name
+ * its downstream priority queue (ME 268 attribute 7), and the queue's
+ * RelatedPort gives the UNI and the priority, which omcid sends as ds_port
+ * and ds_pq_pri. The frame's internal priority picks the egress queue
+ * through the port's priority map (identity), so the downstream rows of the
+ * bridge connections on this flow assign that priority. A flow whose queue
+ * is not a UNI's (a VEIP queue names the PON port) or is past the eight
+ * queues has none, and its frames keep the port default priority, queue 0.
+ * With ds_steer off nothing is assigned and a flow already steered is taken
+ * back off its rows. */
+static void ds_flow_steer(uint32_t idx, const struct omci_gemflow *g)
+{
+	int pri = -1;
+
+	if (odi_sw_ds_steer && uni_port_ok(g->ds_port) && g->ds_pq_pri < ODI_SW_DSQ_QUEUES) {
+		pri = (int)g->ds_pq_pri;
+		odi_sw_ds_prio_map_identity(g->ds_port);
+	}
+	odi_switch_bdgconn_ds_pri_set(idx, pri);
+}
+
 /* cmd 25: dir picks the table, the flow id the row (see the state
  * above), ena 1 creates or updates the flow and ena 0 deletes it (the
  * stock driver's reading of the field). A downstream flow is Ethernet
@@ -946,6 +968,7 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 			odi_sw_gem_ds_cfg[idx] = traffic_cfg;
 		}
 		flow_mark(odi_sw_gem_ds_used, idx);
+		ds_flow_steer(idx, g);
 		if (odi_sw_flow_ops && odi_sw_flow_ops->set)
 			odi_sw_flow_ops->set(0, idx, g->gem_port);
 		return 0;

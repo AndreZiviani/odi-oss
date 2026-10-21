@@ -180,6 +180,11 @@ void odi_sw_ponmac_queue_add(uint32_t th);
  * map is identity. odi_sw_ds_sched (module parameter ds_sched, default on)
  * is the switch for it. */
 extern bool odi_sw_ds_sched;
+/* Which downstream queue a frame takes: its internal priority, which a
+ * downstream CF row can assign. odi_sw_ds_steer (module parameter
+ * ds_steer, default on) lets the rows of a bridge connection carry the
+ * priority of the queue its GEM port's flow was given (cmd 25, ds_pq_pri). */
+extern bool odi_sw_ds_steer;
 void odi_sw_ds_queue_sched(uint32_t port, uint32_t q, int wfq, uint32_t weight);
 void odi_sw_ds_prio_map_identity(uint32_t port);
 #define ODI_SW_DSQ_QUEUES		8U
@@ -332,6 +337,13 @@ struct odi_sw_vlan_override {
 #define ODI_SW_CF_A1_C_PRI_SHIFT	15
 #define ODI_SW_CF_A1_C_VID_SHIFT	3
 #define ODI_SW_CF_A1_CACT_SHIFT		1
+/* Downstream rows: the frame's internal priority, which picks its egress
+ * queue on the UNI port. Bits 59..57 hold it and bit 56 makes the row
+ * assign it; with bit 56 clear the frame keeps the port default (0). The
+ * per-row action class that gates it (CLS_ACT_EN bits 4:0) reads 0x3f. */
+#define ODI_SW_CF_A1_PRI_EN		(1U << 24)
+#define ODI_SW_CF_A1_PRI_SHIFT		25
+#define ODI_SW_CF_A1_PRI_MASK		(0x7U << ODI_SW_CF_A1_PRI_SHIFT)
 #define ODI_SW_CF_A2_US_FLOW_SHIFT	24	/* 7 bits */
 #define ODI_SW_CF_A2_US_SID_ACT		(1U << 23)
 #define ODI_SW_CF_A2_DS_PMSK_SHIFT	27	/* 4 bits */
@@ -375,6 +387,9 @@ void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
  * shows a delete; this is the encoding the layout implies.
  */
 void odi_sw_cf_del(uint32_t idx, int is_us);
+/* The three action words of one CF row written alone, the rule and the mask
+ * left as they are (a downstream row's priority changed under it). */
+void odi_sw_cf_act_write(uint32_t idx, int is_us, const uint32_t act[3]);
 
 /* Forget which rows were last written on the S-tag template: the rows
  * are gone, and so are the pattern bits that said so. */

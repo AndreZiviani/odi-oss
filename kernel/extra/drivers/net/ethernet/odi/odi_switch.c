@@ -273,6 +273,16 @@ MODULE_PARM_DESC(pon_isolate, "never forward a frame from the PON port to the CP
 module_param_named(ds_sched, odi_sw_ds_sched, bool, 0644);
 MODULE_PARM_DESC(ds_sched, "schedule the UNI downstream queues (strict or weighted, the weight) from the OLT's priority queue rows (default: yes; no leaves them all strict, as stock)");
 
+/* odi_switch.ds_steer: whether the downstream CF rows of a bridge connection
+ * assign the internal priority of the queue its GEM port points at
+ * (docs/SWITCH.md#downstream-queues), so that the frames land in that queue.
+ * On by default; N leaves every downstream frame at the port default
+ * priority, in queue 0, the stock driver's behaviour. Read at each cmd 25
+ * (downstream), so a write to /sys/module/odi_switch/parameters/ds_steer
+ * covers the flows provisioned after it and does not undo what is set. */
+module_param_named(ds_steer, odi_sw_ds_steer, bool, 0644);
+MODULE_PARM_DESC(ds_steer, "send each downstream flow to the UNI queue its GEM port points at, by the priority of its CF rows (default: yes; no leaves all downstream traffic in queue 0, as stock)");
+
 /* odi_switch.host_autoneg: the 1000BASE-X auto-negotiation of the host
  * port, on (the default) or off (forced 1000BASE-X full duplex). Written to
  * /sys/module/odi_switch/parameters/host_autoneg it applies at once, one

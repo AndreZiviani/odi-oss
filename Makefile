@@ -155,6 +155,7 @@ test-host:
 	bash test/odi_switch_flood_test.sh
 	bash test/odi_switch_uni_limits_test.sh
 	bash test/odi_switch_dsq_test.sh
+	bash test/odi_switch_dssteer_test.sh
 	bash test/odi_switch_cmd10_test.sh
 	bash test/odi_switch_isp2_test.sh
 	bash test/odi_switch_bdgconn_vlan_test.sh

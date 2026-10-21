@@ -12,10 +12,22 @@ listed here.
   The stock driver ignored the weights and left all eight queues strict, so
   what the OLT provisioned for traffic toward the host had no effect. An OLT
   that sets nothing leaves the queues as the boot had them, the OLT's
-  MIB reset puts them back, and `odi_switch.ds_sched=N` turns it off. Which
-  queue a frame takes is not changed: downstream frames still all take queue
-  0 (every OLT seen points every GEM port at the first queue), so nothing
-  changes on the wire yet.
+  MIB reset puts them back, and `odi_switch.ds_sched=N` turns it off.
+
+- Switch: downstream frames now take the queue the OLT provisions. Every
+  frame from the PON had internal priority 0 and went to queue 0 whatever GEM
+  port it came on, so the queue schedule above had no effect. The downstream
+  classifier row of a bridge connection now assigns the priority of the queue
+  its GEM port points at (ME 268 DsPriQPtr, then that ME 277's RelatedPort),
+  so the frames land in that queue; the OLT's weights apply to them. A queue
+  that is not the UNI's (a VEIP's) or has a priority past the eight queues
+  leaves its flow at queue 0, a MIB reset takes it off, and
+  `odi_switch.ds_steer=N` turns it off. omcid sends a flow again when the OLT
+  writes the queue's RelatedPort after the flow was created. On a stick the
+  rows' priority moved the frames to the queue (per-queue page counters), a
+  download at about 300 Mbit/s ran at the same speed, and a row cannot be told
+  apart by GEM port (the rule field read as the flow index does not hold it),
+  so the steering follows the GEM port of the bridge connection.
 
 ## v1.9.0 - 2026-10-21
 
