@@ -867,6 +867,10 @@ stock register table where the table says anything.
 | a frame forwarded to the PON port with no stream is dropped silently in the PON MAC, so a rule up the PON names its stream (`us_flow`) like every other upstream row, and a frame no row matches has no stream | other |
 | `PON_EN` (`CLASSIFY_SETUP` bit 3) must be set for the C-tag actions to apply to frames crossing the PON port. Reads set (0x1009) | other; read |
 | the last `CLASSIFY_SETUP` 12:5 (`PATTERN1_COUNT`, reads 128) rows of the table, counted from the top, are matched with a second rule layout (row `i` when `i >= 256 - count`); the fields our rows use sit in the same place in both, the S-tag template bit is not known to work there, so such a row is not placed at or past the first of them (`cf_insert()` refuses with "classification table full"). The direction is the stock sweep's split at 32 with count 224; the layout difference itself is not measured here | other; read; the placement is ours |
+| in a row of the second layout on template 0, rule and mask word 0 (our `rule_w0`, `mask_w0`, "bits 47..32" with the valid bit at 48) bits 15:0 are the frame's EtherType: the bits that must be 1 in the rule row, the bits that must be 0 in the mask row, the valid bit beside them. For 0x88b5 the words are 0x000188b5 and 0x0000774a. The first layout holds other keys there, so a row writes them only when it names an EtherType. Measured on untagged frames only: 100 of 100 untagged frames of 0x88b5 pushed a tag downstream and 0x88b6 untouched, and pushes on 0x8863 and on 0x8864 upstream each took their own frames; the EtherType behind a tag is not known | other |
+| a row that names an EtherType must sit in the second layout (row `256 - count` up, row 128 as programmed, from the register), and the lowest matching row still wins across both layouts | other; the placement is ours |
+| ACL (96 ternary rules, by ingress port): a rule compares up to eight 16-bit slots of a template, and the C-tag field (code 0x09) holds the VID in bits 11:0 and the priority in bits 15:13, 0 for a frame with no C-tag, so VIDs 1..4094 never match an untagged one; a forwarding decision of 1 (redirect) with an empty port mask drops the frame, with the class word at 0x10; a rule acts on the frames of its own ingress ports only; with the lookup on for a port the permit for unmatched frames must be on first; the lowest matching entry decides, and a zero class word chains an entry to the one before it | other (count-only rules on the field matched 50 of 50 frames of VLAN 410, also with priority 0 named, none with priority 5, none untagged; drops on a C-tag kept the target frames and passed the controls; the same field behind an S-tag is not known) |
+| the ACL decides for a frame before the classifier applies its tag operation | other, inferred: no measurement set a drop and a translation of one VID against each other. Nothing here depends on it: omcid leaves out of a discard every priority another entry of the VID names, so the two rows never match the same frame |
 | `CLASSIFY_SETUP` bits 1:0 apply to downstream frames too (value 2 drops those no row matches). We write 1 | other |
 
 A frame with two C-tags cannot be told from one with a single C-tag, so a rule
@@ -883,23 +887,27 @@ read has measured.
 |---|---|---|
 | untagged in, add one C-tag, VID and priority assigned, TPID 0x8100 | done, as before (the manual-VLAN rule; a table of only this and plain defaults keeps the old path byte for byte) | |
 | untagged in, add one S-tag (Output TPID 0x88a8), VID and priority assigned | done | S-tag action 1 |
-| untagged in, add an S-tag outside a C-tag | done, **unproven**: both planes in one row | |
+| untagged in, add an S-tag outside a C-tag | done, one row for both planes: measured by another implementation (an entry writing C-VID 410 priority 5 and S-VID 2002 priority 3: 100 of 100 untagged frames left with S 2002/3 outside C 410/5) | the host test pins the action words |
 | single C-tag in, VID named (priority named or not), replace the VID (or priority) with an assigned one, priority kept or assigned | done | C-tag action 1 |
 | the same with the priority named in the filter and copied: one VID, several priorities, one rule each (the operator vector) | done | each rule is a row, the more specific lower |
 | single C-tag in, VID named, remove it | done; the way back tags untagged frames with that VID | C-tag action 2 |
 | single C-tag in, push an S-tag in front | done | S-tag action 1 |
-| single C-tag in, replace it with an S-tag, or an S-tag and a C-tag | done, **unproven** (two planes in one row) | |
+| single C-tag in, replace it with an S-tag, or an S-tag and a C-tag | done, **unproven**: the planes are written together as above, but this mix of actions (C-tag removed, S-tag added) nobody has measured | |
 | single S-tagged in (Input TPID 0x88a8), replace, pop, or replace with a C-tag | replace and pop done; S-to-C (action 2) **not done**, the register is known | |
 | S-tag over a C-tag in, filter on either tag (not both), pop, replace or push | done | |
-| both tags removed, either one replaced, one or both pushed | done, **unproven** when both planes change | |
+| both tags removed | done, measured by another implementation (S-VID 200 in front of C-VID 410, two pops on the S-VID, template 1: 100 of 100 frames arrived untagged); C-tag action 2 and S-tag action 3 in one row | |
+| one tag replaced, or one or both pushed | done; both pushed on an untagged frame is the measured row above, a replace together with a push of the other tag in the same row is **unproven** | |
+| pop and push of the same tag (a replace with the priority assigned, 0 included) | done, one row that rewrites the tag with the assigned priority (C-VID 410 priority 5 to 2002 priority 0: 100 of 100 left as 2002 priority 0); the row writes priority 0 as an assignment | measured by another implementation |
 | filter on the S-VID and the C-VID of one frame | refused: the classifier compares one tag per row | needs a second compare nobody has measured |
 | double C-tag (both 0x8100) | refused: a frame with two C-tags cannot be told from one with one | |
 | filter or treatment TPID 0x9100, 0x9200 | refused | the second S-VLAN TPID register (0x0230c8) reads disabled; nothing says it can be used |
 | filter on the DEI bit, or an added tag with DEI 1 | refused | no DEI field in the classifier is known |
-| EtherType filter (IPoE, PPPoE, ARP, IPv6) | refused | the EtherType field of a rule (bits 47..32) is not known |
+| EtherType filter on untagged frames (IPoE 0x0800, PPPoE 0x8863 and 0x8864, ARP 0x0806, IPv6 0x86dd, EAPOL 0x888e) | done upstream: one row a value (PPPoE two) in the second layout, on template 0, no tag named; the way back is the inverse by VID. The untagged frames of every other EtherType (an entry with no EtherType, in a table that has some) are one row in the bottom region, after them | the measured EtherType slot, above |
+| EtherType filter on tagged frames | refused | the EtherType behind a tag is not known |
 | VID copied from a tag whose VID the filter does not name (any-VID priority remap) | refused | whether C-tag action 1 with no VID source keeps the VID is not known |
 | priority copied between the two tags, or from the DSCP | refused unless the source is named in the filter, then done with its value | the source codes other than keep and assign are not known; DSCP needs a DSCP match |
-| entry that discards what it matches (RemoveTags 3, not a default rule) | refused | the classifier drop action is not known |
+| entry that discards the C-tagged frames of one VID (RemoveTags 3, not a default rule), the priority named or not | done, one ACL row on the UNI ports (a row for each priority when the table has an entry of that VID naming some: those priorities are left out, since the ACL decides first); nothing downstream | the ACL drop above |
+| discard of untagged frames, of every VID, of S-tagged or double-tagged frames, one that names an EtherType, or in a table that acts on S-tags, or with a rule of the same filter or of a priority only beside it | refused | VID 0 reads like no tag; the C-tag field behind an S-tag is not known; nothing orders two rules of one filter |
 | default rules: single-tag discard | done: tagged frames the table does not name are not passed | no row matches them, so they have no stream and are dropped |
 | default rules: double-tag discard, or a default that adds or removes a tag | discard ignored (not enforced); the other refused | |
 | downstream, DsMode 0 | done, the inverse: a tag the rule added is removed, one it removed is put back with the filter VID and priority, one it replaced is replaced back; a rule that merged frames (a filter that did not name the VID) has no downstream rule | |
@@ -911,12 +919,22 @@ read has measured.
 A table is applied whole: one entry in the refused rows leaves every frame as
 it comes and the log names the entry and the reason once.
 
+The discards and the EtherType rows have their own descriptors (rule_gen
+`OMCI_VLAN_OPER_EXTVLAN_DROP`, and `ethertype` of a rule_gen 7 descriptor
+holding `OMCI_ETHTYPE_LITERAL` with the value, or `OMCI_ETHTYPE_REST`, in
+`uapi/omci_bdgconn.h`). The ACL rows are entries 16 to 47 on template 5, whose
+slot 0 reads the C-tag; the snooping copy keeps entry 8 and template 6. The
+rule is written with the lookup and the permit turned on for its ports first
+(never off), the valid bit last, and released valid bit first. A discard
+programmed from the OLT's table, and one split by priority, has not been run
+through an OLT by anyone yet; only the drop on a C-tag has.
+
 #### What is not known
 
-- the classifier's drop action (so no entry that discards what it matches, and
-  no downstream discard of DsMode 5 to 8, is carried out);
-- the EtherType field of a rule, bits 47..32, which no capture or measurement
-  has cared about;
+- a classifier drop action (the discards go through the ACL, on the UNI ports
+  and upstream only; a downstream discard of DsMode 5 to 8 is not carried out);
+- the EtherType of a frame behind a tag, and what the ACL's C-tag field holds
+  for the C-tag behind an S-tag;
 - the VID and priority source codes other than "keep" and "assign" (so no
   priority copied between tags, and none from the DSCP);
 - whether a C-tag action 1 with no VID source keeps the VID (so a priority
