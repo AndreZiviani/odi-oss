@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- OMCI: a downstream priority queue (ME 277) whose Weight the OLT had set
+  went to the switch driver as priority 0, whatever its entity: the row built
+  for it had no RelatedPort, so all eight of the UNI's queues carried the
+  same priority. Each now carries the priority its entity id gives, and its
+  marking, read the way the MIB upload reads them (what the OLT wrote, else
+  the stock default). A queue of a VEIP, or of anything that is not a PPTP
+  Ethernet UNI, now names the PON port, as its flow already did, instead of
+  port 0. The driver does not use either value yet, so nothing changes on the
+  wire.
+
 - Multicast: IGMP snooping that follows what the OLT provisions, off unless
   `IGMP_SNOOPING=1` is set (`apply.sh igmp` applies it). While the OLT asks
   for it (a multicast GEM interworking TP with an address row and a
