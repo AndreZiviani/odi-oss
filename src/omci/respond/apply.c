@@ -37,6 +37,7 @@ void mib_reset_all(void)
 	qos_reset();
 	uni_reset();
 	alarm_mib_reset();
+	pm_mib_reset();
 	mib_data_sync = 0;
 	retx_clear();
 	upl_total = 0;

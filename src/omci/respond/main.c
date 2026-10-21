@@ -73,7 +73,7 @@ static void catch_signals(int fd, uint32_t tid)
 static void usage(void)
 {
 	out("usage: omcid [-a] [-r] [-d] [-f] [-w units] [-c caps-hex] [-s state]\n"
-	    "             [-g file] [-m file] [-i file] [-j seconds] [-k pid] [-h]\n"
+	    "             [-g file] [-m file] [-n file] [-t file] [-i file] [-j seconds] [-k pid] [-h]\n"
 	    "\n"
 	    "The OMCI responder: registers for redirect type 1 and answers the\n"
 	    "OLT, and serves the omcli and omcicli queues.\n"
@@ -92,6 +92,10 @@ static void usage(void)
 	    "              the odi_switch host_link parameter (test only)\n"
 	    "  -m file     read the bridge MAC address of class 46 from this\n"
 	    "              file instead of the sysfs one of eth0 (test only)\n"
+	    "  -n file     read the FEC counters from this file instead of\n"
+	    "              /proc/odi_gpon/counters (test only)\n"
+	    "  -t file     take the PM interval clock, in seconds, from this\n"
+	    "              file instead of the monotonic clock (test only)\n"
 	    "  -i file     append the driver verbs of a reload to this file\n"
 	    "              instead of /proc/odi_init (test only)\n"
 	    "  -j seconds  how long a reload waits for O5 (test only)\n"
@@ -190,6 +194,15 @@ int main(int argc, char **argv)
 		/* -m file: the stick MAC address, "aa:bb:cc:dd:ee:ff", for class
 		 * 46 instead of /sys/class/net/eth0/address; under qemu the
 		 * sysfs file would be the test host's. */
+		/* -n file / -t file: the FEC counters (the /proc/odi_gpon/counters
+		 * shape) and the clock of the PM intervals, in seconds, from files:
+		 * a test moves 15 minutes by writing a number. */
+		else if (str_eq(argv[i], "-n") && i + 1 < argc) {
+			pm_counters_path = argv[++i];
+		}
+		else if (str_eq(argv[i], "-t") && i + 1 < argc) {
+			pm_clock_path = argv[++i];
+		}
 		else if (str_eq(argv[i], "-m") && i + 1 < argc) {
 			bridge_mac_path = argv[++i];
 		}
@@ -446,6 +459,7 @@ int main(int argc, char **argv)
 					}
 					ev_tick();
 					alarm_tick();
+					pm_tick();
 				}
 				/* Every 15 s: a quarter of the 60 s deadline
 				 * odi_wdt.h/rcS register omcid with, so an
