@@ -398,6 +398,25 @@ sshx 'logread | grep -q "slot-state: TRIAL BOOT: running slot 1"' || fail "the T
 sshx 'rm -rf /tmp/ss'
 echo "  odi-slot records uncommitted=1, the login banner and syslog carry the TRIAL BOOT notice"
 
+say "scenario: trial-guard.sh on that trial (real busybox, real /proc/net/tcp)"
+# The odi-slot just written says trial. The register is a file here (the
+# qemu kernel has no odi_wdt). Proven: the ssh session running the guard is
+# itself a TCP connection from the slirp host, past the handshake. Unproven:
+# no TCP table, no neighbours, a 3 s deadline: armed and never released.
+sshx 'sh -s' <<'GUEST' || { sshx 'cat /tmp/tg/kmsg /tmp/tg/register' >&2 || true; fail "trial-guard.sh did not release on the ssh session, or released with no evidence"; }
+set -e
+A=/tmp/tg; rm -rf $A; mkdir -p $A; : > $A/register; : > $A/empty
+REGISTER=$A/register KMSG=$A/kmsg DEADLINE_S=20 POLL_S=1 /etc/scripts/trial-guard.sh
+grep -qx "trial 0" $A/register
+grep -q "released: management path proven, tcp peer" $A/kmsg
+: > $A/register; : > $A/kmsg
+REGISTER=$A/register KMSG=$A/kmsg PROC_TCP=$A/empty IP=false DEADLINE_S=3 POLL_S=1 /etc/scripts/trial-guard.sh
+grep -qx "trial 3" $A/register
+grep -q "the watchdog reverts this trial to slot 0" $A/kmsg
+GUEST
+sshx 'rm -rf /tmp/tg'
+echo "  armed on the trial, released by the ssh session; with no evidence, left to the watchdog"
+
 say "scenario: the diagnostics bundle is produced, and no secret is in it"
 # Known secret values, planted where a real stick keeps them: the PLOAM and
 # LOID passwords in lastgood.xml, the web UI password in confd.auth, and all

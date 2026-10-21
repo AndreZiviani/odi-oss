@@ -54,7 +54,7 @@
  */
 #define ODI_OMCI_RXHOOK_PORTMASK 0xFFU
 
-#define ODI_OMCI_REASON		246U
+#define ODI_OMCI_REASON		ODI_NIC_RX_REASON_OMCI	/* 246, odi_nic_hw.h */
 
 /* ---- Registration table: redirect type -> the pid that registered it.
  * Only type 1 (omcid) is used on this image; the table is per type because

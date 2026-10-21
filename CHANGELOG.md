@@ -22,6 +22,48 @@ listed here.
   clear` took it back to O5 with its services in 30 s. Not yet seen with a
   real disable from an OLT.
 
+- OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
+  parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
+  the NIC runs a second receive ring, and the switch routes the OMCI frames
+  it traps to the CPU (internal priority 7) there; every other frame stays
+  on the main ring. Every poll serves the OMCI ring first, so a flood toward
+  the stick from the host side that keeps the main ring full cannot take
+  the OMCI frames' descriptors. Both rings share
+  the same frame path, so the PON-port drop that keeps everything but OMCI
+  from the fibre out of the IP stack is unchanged. **Off by default**: off,
+  the NIC is programmed exactly as before. A first build that always ran
+  the second ring left a stick unreachable after boot. The likeliest
+  cause, not yet confirmed on hardware: with multi-ring receive on, the
+  engine also checks the flow control of the four rings this driver does
+  not use, and at their reset values they hold PAUSE. Turning the ring on
+  now first parks those four on a ring of their own that cannot ask for
+  PAUSE. `/proc/odi_nic` gains `omci_ring`,
+  `rx1_taken`, `rx2_taken`, `rx2_other` (non-OMCI frames on the OMCI ring)
+  and `rx_missed` (frames the NIC dropped with no free descriptor).
+  Host-tested against a model of the flood and of the six rings' flow
+  control. On a stick, turned on live: the host side stayed reachable, no
+  PAUSE and no drops at rest, and the OMCI of each re-registration arrived
+  on the second ring (19 of 19, 98 of 98; once, on the first re-registration
+  after the first enable, 19 of 20, not explained). Under a 30 s host flood
+  with a re-registration in it, every OMCI frame arrived with the ring off
+  as well as on: with flow control on, the switch holds the flood back and
+  the single ring did not lose OMCI there, so the ring stays off by default
+  until a case that needs it is seen. With it on the NIC drops the surplus
+  host frames itself (`rx_missed`) instead.
+- The watchdog CPU-port rule counts the frames taken from the main receive
+  ring only, so OMCI arriving on the second ring cannot hide a main ring
+  that takes nothing.
+- A trial boot that nothing reaches goes back by itself: on a trial only
+  (not committed, the next boot goes to another slot), `trial-guard.sh`
+  registers an `odi_wdt` client that resets the board 300 s later unless
+  the management path is seen working both ways first (a TCP session from
+  the host, or a neighbour that answered the stick). The reset lands on
+  the committed slot, with `reason=wdt_client:trial` in the ramlog; until
+  now such a trial stayed up until someone power-cycled it.
+  `/etc/config/trial-guard.off` turns it off. Host-tested
+  (`test/trial_guard_test.sh`) and in the qemu harness; on a stick it armed
+  at boot and released on the first ssh session.
+
 - Toolchain: built with odi-toolchain uclibc-v4 and freestanding-v3, which
   deny the `bltzl` instruction in the ISA audit (it decodes but
   misexecutes on the RLX5281). The compilers and libraries are unchanged:

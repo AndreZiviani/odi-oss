@@ -22,6 +22,14 @@
 # logins. Reads only; bounded; exits (docs/FLASHING.md, "Committing").
 ::once:/etc/scripts/slot-state.sh
 
+# once: trial-guard.sh. On a trial boot only (not committed, the next boot
+# goes to another slot), registers an odi_wdt client that resets the board
+# 300 s later unless the management path is seen working both ways first,
+# so a trial that boots but cannot be reached goes back to the committed
+# slot by itself. Reads the state slot-state.sh writes; bounded; exits
+# (docs/FLASHING.md, "The trial guard").
+::once:/etc/scripts/trial-guard.sh
+
 # No telnet: ssh (dropbear) is the only network login. The trial boot and
 # its self-revert are the way back if ssh ever fails to come up.
 # askfirst, not respawn: login gives up after 60 s at its prompt, so a
