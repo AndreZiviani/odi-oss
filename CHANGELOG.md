@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- OMCI: a MIB reset now drops the Get-Next walk a table Get had primed. A
+  Get-Next after the reset answered the bytes of the row the reset had just
+  discarded; it is now refused with a parameter error, as a Get-Next with no
+  Get before it. The OMCI test suite also gains vectors for the transaction
+  correlation id crossing 0x7fff to 0x8000 (the priority bit) in a MIB
+  upload and in the retransmission cache, which keys on the whole frame.
+
 ## v1.10.0 - 2026-10-21
 
 - Switch: the downstream queues of the UNI (ME 277, the ones the OLT
