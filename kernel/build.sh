@@ -158,7 +158,17 @@ make ARCH=mips CROSS_COMPILE=$XC -j4 V=2 vmlinux > /out/build.log 2>&1 || {
 echo "BUILD OK: $(grep -c "warning:" /out/build.log) warnings"
 [ "$COMPILE_ONLY" = 1 ] && { cp vmlinux /out/vmlinux; cp System.map /out/System.map; cp .config /out/config; exit 0; }
 ${XC}objcopy -O binary -R .note -R .comment -S vmlinux linux.bin
-lzma -z -c -9 --format=lzma linux.bin > linux.bin.lzma 2>/dev/null || lzma -z -c -9 linux.bin > linux.bin.lzma
+# The loader unpacks this in place and the unpack is most of the ~40 s the stick
+# spends before the kernel starts. The stream of the stock kernel has a 16 MiB
+# dictionary and the uncompressed size in its header; xz writes a 64 MiB
+# dictionary and "size unknown" (all ones) with an end marker. The decoder of
+# the loader is not known to care, so this copies the stock header to rule it
+# out: same stream otherwise, size patched into bytes 5..12 (little endian).
+lzma -z -c -9 --format=lzma --lzma1=preset=9,dict=16MiB linux.bin > linux.bin.lzma
+RAW=$(stat -c %s linux.bin)
+SZ=$(for i in 0 1 2 3 4 5 6 7; do printf "\\\\%03o" $(( (RAW >> (8 * i)) & 255 )); done)
+printf "$SZ" | dd of=linux.bin.lzma bs=1 seek=5 count=8 conv=notrunc 2>/dev/null
+lzma -dc linux.bin.lzma | cmp - linux.bin || { echo "BUILD FAILED: lzma header patch broke the stream"; exit 1; }
 # The entry point is kernel_entry, not the load address: on 6.18 it sits
 # far into the image (0x8031ce08 in the first build), and an entry of
 # 0x80000000 jumps U-Boot into other code (isp1 trial 618d hung before

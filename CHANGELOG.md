@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Kernel image: the LZMA stream now carries the stock kernel's header, a 16 MiB
+  dictionary and the real uncompressed size, instead of a 64 MiB dictionary and
+  "size unknown". The stream is otherwise the same. The boot loader unpacks the
+  kernel and that is most of the ~40 s between reset and the kernel; this tests
+  whether the header form matters to its decoder. Not yet measured on a stick.
+
 - OMCI: a downstream priority queue (ME 277) whose Weight the OLT had set
   went to the switch driver as priority 0, whatever its entity: the row built
   for it had no RelatedPort, so all eight of the UNI's queues carried the
