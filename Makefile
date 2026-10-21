@@ -163,6 +163,7 @@ test-host:
 	bash test/mgmt_addr_test.sh
 	bash test/safe_mode_test.sh
 	bash test/ntp_event_test.sh
+	bash test/gpon_hold_test.sh
 	bash test/svc_igmpd_test.sh
 	bash test/omci_respawn_test.sh
 	bash test/omci_defaults_test.sh
@@ -216,6 +217,7 @@ test-host:
 	bash test/odi_gpon_dlog_test.sh
 	bash test/odi_gpon_cam_test.sh
 	bash test/odi_gpon_o7_test.sh
+	bash test/odi_gpon_hold_test.sh
 	bash test/odi_gpon_los_test.sh
 	bash test/odi_gpon_eqd_test.sh
 	bash test/odi_gpon_ctr_test.sh
