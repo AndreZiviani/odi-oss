@@ -131,6 +131,15 @@ struct odi_gpon_hw_state {
 	 */
 	odi_gpon_tx_disable_fn tx_disable;
 	int tx_disabled;
+
+	/* GPON_KEEP_DISABLE: Emergency Stop (O7) is held. While set, our own
+	 * deactivation and activation end in O7 with the line asserted
+	 * instead of O1 and O2 (odi_gpon_verb_deactivate(),
+	 * odi_gpon_verb_activate()); only the OLT enable, or the explicit
+	 * release, clears it (odi_gpon.c).
+	 */
+	int hold;
+	int hold_keep;	/* the feature is on (the gponkeep verb) */
 };
 
 static struct odi_gpon_hw_state odi_gpon_hw;
@@ -1122,8 +1131,16 @@ void odi_gpon_verb_activate(struct odi_gpon_fsm *fsm)
 	unsigned int i;
 	uint32_t reg;
 
-	odi_gpon_fsm_handle_event(fsm, &odi_gpon_hw_ops_table, NULL, ODI_GPON_EVENT_ACTIVATE, NULL);
-	odi_gpon_fsm_handle_event(fsm, &odi_gpon_hw_ops_table, NULL, ODI_GPON_EVENT_LOS_CLEAR, NULL);
+	if (odi_gpon_hw.hold) {
+		/* A held Emergency Stop (GPON_KEEP_DISABLE): neither event, the
+		 * first would release the line for the length of the call.
+		 * The masks below still go on, so the OLT enable is heard.
+		 */
+		odi_gpon_hw_hold_enter(fsm);
+	} else {
+		odi_gpon_fsm_handle_event(fsm, &odi_gpon_hw_ops_table, NULL, ODI_GPON_EVENT_ACTIVATE, NULL);
+		odi_gpon_fsm_handle_event(fsm, &odi_gpon_hw_ops_table, NULL, ODI_GPON_EVENT_LOS_CLEAR, NULL);
+	}
 
 	{
 		uint8_t zero_key[16];
@@ -1345,6 +1362,10 @@ static void hw_release_rows(void)
 
 void odi_gpon_verb_deactivate(struct odi_gpon_fsm *fsm)
 {
+	/* A held Emergency Stop (GPON_KEEP_DISABLE) stays O7: the teardown is
+	 * the same, the state written last and the line are not.
+	 */
+	const enum odi_gpon_state rest = odi_gpon_hw.hold ? ODI_GPON_STATE_O7 : ODI_GPON_STATE_O1;
 	uint32_t reg;
 
 	odi_reg_write(ODI_GPON_PONMAC_IRQ_ENABLE_OFF, 0U);
@@ -1362,14 +1383,14 @@ void odi_gpon_verb_deactivate(struct odi_gpon_fsm *fsm)
 		       ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)fsm->state + 1U));
 	reg = odi_reg_read(ODI_GPON_DSF_ONU_STATE_OFF);
 	odi_reg_write(ODI_GPON_DSF_ONU_STATE_OFF,
-		       ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)ODI_GPON_STATE_O1));
+		       ODI_GPON_DSF_ONU_STATE_ACTIVATION_STATE_SET(reg, (uint32_t)rest));
 
-	hw_tx_gate(ODI_GPON_STATE_O1);
+	hw_tx_gate(rest);
 
 	/* The row teardown (hw_release_rows()), then the ONU-ID registers. */
 	hw_set_onu_id(NULL, ODI_GPON_ONU_ID_BROADCAST);
 
-	fsm->state = ODI_GPON_STATE_O1;
+	fsm->state = rest;
 	fsm->onu_id = 0U;
 }
 
@@ -1455,6 +1476,84 @@ void odi_gpon_hw_set_tx_disable(odi_gpon_tx_disable_fn fn)
 int odi_gpon_hw_tx_disabled(void)
 {
 	return odi_gpon_hw.tx_disabled;
+}
+
+int odi_gpon_hw_hold_get(void)
+{
+	return odi_gpon_hw.hold;
+}
+
+/* The flag, and the line with it: asserted at once when set, so a boot that
+ * restores the hold keeps the laser dark from before the MAC is brought up,
+ * and released when cleared (a release by hand; the OLT enable releases it
+ * through the state it writes).
+ */
+void odi_gpon_hw_hold_set(int hold)
+{
+	odi_gpon_hw.hold = hold ? 1 : 0;
+	hw_tx_gate(odi_gpon_hw.hold ? ODI_GPON_STATE_O7 : ODI_GPON_STATE_O1);
+}
+
+void odi_gpon_hw_hold_enable(int keep)
+{
+	odi_gpon_hw.hold_keep = keep ? 1 : 0;
+}
+
+int odi_gpon_hw_hold_enabled(void)
+{
+	return odi_gpon_hw.hold_keep;
+}
+
+/* Called after every entry point that can move the FSM, with the state
+ * before and after. With the feature on, an entry into O7 that nothing here
+ * asked for is the OLT disabling this ONU: hold starts. A leave from O7
+ * while held is the OLT enable (this side releases through
+ * odi_gpon_hw_hold_set(0) first, so it never gets here): hold ends. With
+ * the feature off nothing is read or written.
+ */
+enum odi_gpon_hold_change odi_gpon_hw_hold_track(enum odi_gpon_state prev, enum odi_gpon_state now)
+{
+	if (!odi_gpon_hw.hold_keep || prev == now)
+		return ODI_GPON_HOLD_UNCHANGED;
+	if (now == ODI_GPON_STATE_O7 && !odi_gpon_hw.hold) {
+		odi_gpon_hw.hold = 1;
+		return ODI_GPON_HOLD_RECORDED;
+	}
+	if (prev == ODI_GPON_STATE_O7 && odi_gpon_hw.hold) {
+		odi_gpon_hw.hold = 0;
+		return ODI_GPON_HOLD_RELEASED;
+	}
+	return ODI_GPON_HOLD_UNCHANGED;
+}
+
+/* TEST HOOK (the gponhold sim verb): this ONU acts as if the OLT had sent
+ * Disable_Serial_Number for its own serial number, by handing the FSM that
+ * message. Nothing is sent upstream, and the OLT knows nothing of it: the
+ * state, the laser line and the hold follow, which is what a stick with no
+ * OLT to disable it can show. Only O2 to O6 move, as for the real message.
+ */
+void odi_gpon_hw_hold_simulate_disable(struct odi_gpon_fsm *fsm)
+{
+	struct odi_gpon_ploam msg;
+
+	memset(&msg, 0, sizeof(msg));
+	msg.onu_id = ODI_GPON_ONU_ID_BROADCAST;
+	msg.type = ODI_GPON_DS_DISABLE_SERIAL_NUMBER;
+	msg.content[0] = ODI_GPON_DISABLE_SN_DISABLE;
+	memcpy(&msg.content[1], fsm->serial_number, 8U);
+	odi_gpon_fsm_handle_event(fsm, &odi_gpon_hw_ops_table, NULL, ODI_GPON_EVENT_PLOAM_RX, &msg);
+}
+
+/* Into Emergency Stop on this side's own account: the state register and
+ * the line, with nothing sent and nothing awaited. What the OLT enable
+ * (O7 to O2) does is unchanged. The ONU-ID goes as it does on a
+ * Disable_Serial_Number from O4 to O6 (clause 10.2.2 g).
+ */
+void odi_gpon_hw_hold_enter(struct odi_gpon_fsm *fsm)
+{
+	hw_set_state(NULL, ODI_GPON_STATE_O7);
+	fsm->state = ODI_GPON_STATE_O7;
+	fsm->onu_id = 0U;
 }
 
 void odi_gpon_hw_set_ploam_log(odi_gpon_ploam_log_fn fn)

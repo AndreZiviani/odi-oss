@@ -284,6 +284,28 @@ pon_step_dyinggasp() {
 	fi
 }
 
+# Keep the OLT Disable_Serial_Number across restarts and reboots
+# (GPON_KEEP_DISABLE=1 in odi.conf, docs/SETTINGS.md). gponkeep turns the
+# driver feature on; with the marker file present (gpon-hold.sh: the OLT
+# disabled this ONU, and has not enabled it since) gponhold 1 makes the
+# activation that follows end in O7 with the laser line high, and nothing
+# answers on the fibre until the OLT enables the ONU. A safe-mode boot does
+# neither: it does not activate the PON, and it must not depend on a marker.
+# Nothing is read, written or logged while the key is not 1.
+GPON_HOLD_MARKER=${GPON_HOLD_MARKER:-/etc/config/gpon-hold}
+pon_step_keepdisable() {
+	grep -q '^GPON_KEEP_DISABLE=1$' "${ODI_CONF:-/etc/config/odi.conf}" 2>/dev/null || return 0
+	if [ -f "$SAFE_FLAG" ]; then
+		crumb "pon step gponkeep: safe-mode boot, GPON_KEEP_DISABLE and its marker ignored"
+		return 0
+	fi
+	pon_step "gponkeep 1"
+	if [ -f "$GPON_HOLD_MARKER" ]; then
+		crumb "pon step gponhold: marker present, the OLT disabled this ONU, starting in O7"
+		pon_step "gponhold 1"
+	fi
+}
+
 pon_steps_default() {
 	pon_step "i2c 1"
 	pon_step "i2cen 1"
@@ -297,5 +319,6 @@ pon_steps_default() {
 	pon_step_gponsn
 	pon_step_gponpw
 	pon_step_dyinggasp
+	pon_step_keepdisable
 	pon_step_gponact
 }

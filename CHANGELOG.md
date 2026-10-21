@@ -10,6 +10,23 @@ listed here.
   leave on a stick under test, and in another open implementation's later
   measurements. Still off by default.
 
+- GPON: new key `GPON_KEEP_DISABLE` (default `0`, today's behaviour unchanged
+  and nothing written or read). With `1`, a stick the OLT disabled with
+  Disable_Serial_Number stays in Emergency Stop (O7) as G.984.3 asks: this
+  stick's own PON restarts (`gpondeact`/`gponact`, the omcid respawn,
+  `apply.sh` identity changes) end in O7 with the laser line high, and so
+  does every reboot and power-off, until the OLT enables it. The disable is
+  recorded in the marker file `/etc/config/gpon-hold`, written by the kernel
+  calling `/etc/scripts/gpon-hold.sh sync`. `gpon-hold.sh clear` releases it by
+  hand, and a safe-mode boot ignores it. `/proc/odi_gpon/status` gains
+  `o7_hold keep <0|1> held <0|1>`; the kernel logs `event=o7_hold`. New
+  `/proc/odi_init` verbs `gponkeep` and `gponhold`; `gponhold sim` is a test
+  hook that acts as if the OLT had disabled this ONU and sends nothing.
+  On a stick, with the hook: O7 with the laser off (bias 0 mA), held through
+  a PON restart and a reboot (the boot never ranged), and `gpon-hold.sh
+  clear` took it back to O5 with its services in 30 s. Not yet seen with a
+  real disable from an OLT.
+
 - OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
   parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
   the NIC runs a second receive ring, and the switch routes the OMCI frames
