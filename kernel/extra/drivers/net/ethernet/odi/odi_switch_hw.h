@@ -53,6 +53,17 @@ static inline int odi_switch_mmio_offset_in_bounds(uint32_t off)
 	return off < ODI_SWITCH_MMIO_SIZE;
 }
 
+/* Words whose read stalled the CPU of another open implementation's board
+ * until the watchdog reset it (the DoS flood-threshold block; writes are
+ * fine). Not every read does: ours returned 0 in earlier dumps, so it
+ * depends on the block's state, and nothing here needs them. Refused for a
+ * read from user space, never read here.
+ */
+static inline int odi_switch_mmio_read_hazard(uint32_t off)
+{
+	return off >= 0x026008U && off <= 0x026010U;
+}
+
 /* ---- Chip-level: PHY access, pin mux, forced port ability */
 
 /* PHY_ACCESS_DATA: 0x000000 -- data word for an indirect PHY write */

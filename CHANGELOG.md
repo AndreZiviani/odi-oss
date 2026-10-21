@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Kernel, tools: the three switch registers 0x026008, 0x02600c and 0x026010
+  are no longer read. Another open implementation's measurements show a read of
+  them stalling the board until the watchdog reset it; ours read 0 in earlier
+  dumps, so it depends on the state of the block, and nothing of ours needs
+  them. `/dev/odi_sw` register get returns `EPERM` for them (one log line), and
+  the register dump list leaves them out. Writes are untouched.
+
 - Kernel, NIC: a receive descriptor that is not both the first and the last
   piece of a frame is dropped and counted (`rx_split_dropped` in
   `/proc/odi_nic`, `rx_length_errors` on the interface, one log line). A frame

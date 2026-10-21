@@ -17,6 +17,15 @@ int odi_sw_reg_get(uint32_t addr, uint32_t *value)
 {
 	if (!odi_switch_mmio_offset_in_bounds(addr) || (addr & 3U))
 		return -EINVAL;
+	if (odi_switch_mmio_read_hazard(addr)) {
+		static bool warned;
+
+		if (!warned) {
+			warned = true;
+			ODI_SW_WARN("register read of 0x%06x refused: it can stall the board\n", addr);
+		}
+		return -EPERM;
+	}
 	*value = odi_reg_read(addr);
 	return 0;
 }

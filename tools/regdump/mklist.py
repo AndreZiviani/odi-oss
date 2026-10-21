@@ -98,7 +98,7 @@ REG_RE = re.compile(
 #                      want undisturbed is the one silent failure mode this
 #                      list must not have.
 #
-#   EXCLUDED_REGISTERS  66 switch-core registers, by base address, that are
+#   EXCLUDED_REGISTERS  69 switch-core registers, by base address, that are
 #                      not idempotent to read, or not worth the risk:
 #                        LATCH    indirect-access read-data latches, only
 #                                 meaningful right after their own
@@ -112,6 +112,10 @@ REG_RE = re.compile(
 #                        CLEAR    acknowledge/clear handshakes (and three
 #                                 neighbours kept out with them by the first
 #                                 cut of this list, conservatively)
+#                        HAZARD   0x026008-0x026010, a read of which stalled
+#                                 another open implementation's board until
+#                                 its watchdog reset it; /dev/odi_sw refuses
+#                                 them too (odi_switch_mmio_read_hazard)
 #                      By address because names are no guide: most of these
 #                      carry only the default SW_0x<address> name. The list
 #                      is the one the first version of this tool applied;
@@ -121,13 +125,16 @@ REG_RE = re.compile(
 GPON_BLOCK_BASE = 0x700000
 COUNTER_BLOCK_BASE = 0xF00000
 
-LATCH, QUEUE, STATUS, COUNTER, CLEAR = (
-    "read-data latch", "queue", "status", "counter", "clear handshake")
+LATCH, QUEUE, STATUS, COUNTER, CLEAR, HAZARD = (
+    "read-data latch", "queue", "status", "counter", "clear handshake",
+    "read can stall the board")
 
 EXCLUDED_REGISTERS = {
     # LATCH (6)
     0x000008: LATCH, 0x000020: LATCH, 0x000044: LATCH, 0x0000c8: LATCH,
     0x01201c: LATCH, 0x03610c: LATCH,
+    # HAZARD (3): a read stalled another board until its watchdog reset it
+    0x026008: HAZARD, 0x02600c: HAZARD, 0x026010: HAZARD,
     # QUEUE (2)
     0x0001cc: QUEUE, 0x0001dc: QUEUE,
     # STATUS (27)
