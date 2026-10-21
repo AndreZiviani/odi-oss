@@ -28,4 +28,11 @@ int igmp_sw_mode(uint32_t *ipmc_on_group);
 int igmp_sw_mcast_add(struct odi_sw_l2_mcast *m);
 int igmp_sw_mcast_del(struct odi_sw_l2_mcast *m);
 
+/* Take the snooping lease with these ODI_SW_MC_SNOOP_* flags, or change what
+ * is held; 0 releases it. The lease belongs to the descriptor this module
+ * keeps open, so the daemon dying takes it back and deletes the rows it
+ * wrote. -16 when another process holds it, -22 for flags the kernel
+ * refuses, -25 for a kernel without the ioctl. */
+int igmp_sw_snoop(uint32_t flags);
+
 #endif

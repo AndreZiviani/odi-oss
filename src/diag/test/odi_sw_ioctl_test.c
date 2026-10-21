@@ -52,6 +52,8 @@ int main(void)
 	      == ODI_SW_IOC_L2_MC_DEL, "ODI_SW_IOC_L2_MC_DEL");
 	check(mips_ioc(2 /* READ */, 'S', 10, sizeof(struct odi_sw_l2_mode))
 	      == ODI_SW_IOC_L2_MODE, "ODI_SW_IOC_L2_MODE");
+	check(mips_ioc(4 /* WRITE */, 'S', 11, sizeof(struct odi_sw_mc_snoop))
+	      == ODI_SW_IOC_MC_SNOOP, "ODI_SW_IOC_MC_SNOOP");
 
 	/* Struct sizes the marshalling actually depends on -- a size that
 	 * silently grew (padding, a wider field) would still compile and

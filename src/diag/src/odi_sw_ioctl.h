@@ -80,6 +80,15 @@ struct odi_sw_l2_mode {
 	uint32_t rows;          /* 1024, or 1088 with the CAM rows on */
 };
 
+/* IGMP snooping lease: flags below. Held by the open file that sets them;
+ * its close puts the switch back and deletes the rows it added. 0 releases. */
+struct odi_sw_mc_snoop {
+	uint32_t flags;
+	uint32_t reserved;
+};
+#define ODI_SW_MC_SNOOP_COPY      1u   /* copy the host port's IGMP to the CPU */
+#define ODI_SW_MC_SNOOP_PON_DROP  2u   /* drop unregistered IPv4 multicast from the PON */
+
 #define ODI_SW_IOC_REG_GET	0xC0085301U
 #define ODI_SW_IOC_REG_SET	0x80085302U
 #define ODI_SW_IOC_MIB_GET	0xC0105304U
@@ -89,5 +98,6 @@ struct odi_sw_l2_mode {
 #define ODI_SW_IOC_L2_MC_ADD	0xC01C5308U
 #define ODI_SW_IOC_L2_MC_DEL	0xC01C5309U
 #define ODI_SW_IOC_L2_MODE	0x4008530AU
+#define ODI_SW_IOC_MC_SNOOP	0x8008530BU
 
 #endif

@@ -40,6 +40,9 @@ ttyS0::askfirst:/bin/login -p
 # (rootfs/skeleton/etc/scripts/respawn.sh), so the pid init tracks is always
 # the daemon itself, never a parent that already exited.
 #
+# igmpd is opt-in (IGMP_SNOOPING=1, scripts/svc-igmpd.sh): off, the entry
+# parks in respawn-off.sh and the switch floods multicast as before.
+#
 # syslogd/klogd/ntpd are new vs. the stock image, which has neither a
 # syslog daemon nor an NTP client. ntpd's own script gates on NTP_SERVER being set in the config
 # store (docs/SETTINGS.md); this entry is always here, static like every
@@ -51,6 +54,7 @@ ttyS0::askfirst:/bin/login -p
 ::respawn:/etc/scripts/svc-confd.sh
 ::respawn:/etc/scripts/svc-dropbear.sh
 ::respawn:/etc/scripts/svc-omcid.sh
+::respawn:/etc/scripts/svc-igmpd.sh
 
 ::restart:/sbin/init
 ::ctrlaltdel:/sbin/reboot

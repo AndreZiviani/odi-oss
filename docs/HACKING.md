@@ -1123,7 +1123,7 @@ read side.
 | file | defined | write | read | class |
 |---|---|---|---|---|
 | `/proc/odi_init` | `odi_init.c` | one verb, optional argument: the SDK-init verbs (`intr` ... `ponmac`, `i2c`, `i2cen`, `gpon`, `rxsd`), `optics`, `laser` (or `laser unverified`: light the laser whatever the laser driver id says), and the GPON verbs (`gpondrv`, `gpondev`, `gponsn <sn>`, `gponpw <pw>`, `gponact` (refused with `-EPERM` while the laser is off), `gpondeact`, `gponstat`); `<pw>` is 20 hex digits, `0x` plus up to 20 hex digits, or up to 10 characters of text | the last verb's return code | prod (`rtk_init` under the stock firmware) |
-| `/proc/odi_omci` | `odi_omci.c:452` | `switch_init` (`:415`): the platform settings and the module-load replay | redirect registrations and pids, frame and command counters | prod |
+| `/proc/odi_omci` | `odi_omci.c:452` | `switch_init` (`:415`): the platform settings and the module-load replay | redirect registrations and pids, frame and command counters (`igmp_delivered`, `igmp_dropped`: the host's IGMP copies to igmpd) | prod |
 | `/proc/odi_wdt/userland_ok` | `odi_wdt.c:790` | `1`: userland is up, cancel the 120 s reset | `userland_ok=N deadline=120 uptime=N` | prod (`luna_watchdog` under the stock firmware) |
 | `/proc/odi_wdt/watchdog_flag` | `odi_wdt.c:788` | `1` arm and kick; `0` disable the watchdog and stop the kicker | `watchdog_flag=N` | dev |
 | `/proc/odi_wdt/register` | `odi_wdt.c:792` | `"<name> <deadline_s>"`: register or update a watchdog client (rcS does this once per client at boot) | -- | prod |
@@ -1131,7 +1131,7 @@ read side.
 | `/proc/odi_wdt/clients` | `odi_wdt.c:796` | none | one line per client: `name=... deadline=... armed=... last_ping_age=...` | dev (debugging) |
 | `/proc/odi_gpon/status`, `counters`, `ploam` | `odi_gpon.c` | none | `status`: ONU state, ONU id, serial, Alloc-IDs, the laser line (`laser on X ldd_id Y unverified Z`), alarm and state times; `counters`: the GPON link counters; `ploam`: PLOAM counters (`ploam_us_dropped`: upstream replies that found no room) and the ring (`docs/TOOLS.md`) | prod (`diag`, `omcid` and `metricsd` read it; its format is an interface) |
 | `/proc/odi_ramlog_prev`, `_raw` | `odi_ramlog.c:645` | none | the previous boot's ramlog (root only) | prod (debug aid) |
-| `/dev/odi_sw` | `odi_reg.c:191` | ioctls `REG_SET`, `L2_MC_ADD`/`DEL` | ioctls `REG_GET`, `MIB_GET`, `DDM_GET`, `L2_GET`/`NEXT`, `L2_MODE` (`odi_reg.h:118`) | prod |
+| `/dev/odi_sw` | `odi_reg.c:191` | ioctls `REG_SET`, `L2_MC_ADD`/`DEL`, `MC_SNOOP` (the snooping lease, held by the open file) | ioctls `REG_GET`, `MIB_GET`, `DDM_GET`, `L2_GET`/`NEXT`, `L2_MODE` (`odi_reg.h:118`) | prod |
 
 The `odi_omci` netlink transport rides on its own private protocol number
 (`NETLINK_ODI`; the stock firmware used `NETLINK_USERSOCK`) and refuses

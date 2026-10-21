@@ -32,7 +32,7 @@
 #define DRV_GET_SN     15
 #define DRV_GET_DEVID  4
 #define MIB_ROWS      256
-#define MIB_ROW_MAX   64
+#define MIB_ROW_MAX   96
 #define OLT_ACC_CREATE 4
 #define OLT_ACC_WRITE  2
 #define PRIQ_DEFAULT_WEIGHT 1
@@ -59,13 +59,14 @@
  * nothing outside reads it; matching the vendor's row padding would buy
  * nothing.
  *
- * Rows are capped: the entities the line provisions are all 64 bytes or less
- * (ExtVlanTagOperCfgData is the largest at 64), and the ones that are not --
- * LargeString at 400 -- hold the ACS URL and credentials, which this has no
- * reason to keep. A truncated row is marked rather than silently short.
+ * Rows are capped: the entities the line provisions are all 96 bytes or less
+ * (the multicast operations profile is the largest at 90, ExtVlanTagOperCfgData
+ * the next at 64), and the ones that are not -- LargeString at 400 -- hold
+ * the ACS URL and credentials, which this has no reason to keep. A truncated
+ * row is marked rather than silently short.
  */
 #define MIB_ROWS      256
-#define MIB_ROW_MAX   64
+#define MIB_ROW_MAX   96
 
 /* ------------------------------------------------------- table attributes
  *
@@ -253,6 +254,19 @@ const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
 int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor);
 extern int conn_dirty;
 extern int qos_dirty;
+/* mcast.c: the multicast policy file igmpd reads. mcast_dirty is set by
+ * whatever changes a class that feeds it, and the file is rewritten a quiet
+ * second later (main.c), like the bridge connections. */
+extern int mcast_dirty;
+void mcast_policy_export(void);
+int mcast_policy_class(uint16_t cls);
+/* ME 311, the multicast subscriber monitor: what igmpd keeps in
+ * /var/run/odi-mcast.state. A counter, 0 when there is no file; and the IPv4
+ * active group list as 24-byte table rows (G.988 9.3.28), returning the
+ * byte length written. */
+#define CLS_MCAST_MONITOR 311
+uint32_t mcast_state_get(const char *key);
+uint16_t mcast_active_groups(uint8_t *out, uint16_t max);
 /* The next us_qos_rebuild() tears everything down first: set when the
  * PLOAM Alloc-ID list changed, since the T-CONT indexes (the CAM rows) may
  * have moved. */

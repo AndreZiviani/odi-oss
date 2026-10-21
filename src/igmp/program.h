@@ -12,6 +12,10 @@ int  igmp_hw_enabled(void);
  * on filtering id 0 (SVL) either way; program.c says why. */
 int igmp_hw_probe(void);
 
+/* Take or change the snooping lease (see switch_opt.h). Returns 0 or the
+ * negative errno; in a dry run it only says what it would do. */
+int igmp_hw_snoop(uint32_t flags);
+
 int igmp_hw_group_set(uint16_t vid, uint32_t group, uint32_t ports);
 int igmp_hw_group_del(uint16_t vid, uint32_t group);
 

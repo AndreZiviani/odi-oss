@@ -24,7 +24,7 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `syslogd` | daemon, the system log | inittab `respawn` (`/etc/scripts/svc-syslogd.sh`) | UDP 514, if `SYSLOG_SERVER` is set | its own circular buffer (`logread`) | respawned |
 | `klogd` | daemon, kernel log to syslog | inittab `respawn` (`/etc/scripts/svc-klogd.sh`) | -- | syslogd | respawned |
 | `ntpd` | daemon, NTP client (opt-in) | inittab `respawn` (`/etc/scripts/svc-ntpd.sh`), only while `NTP_SERVER` is set | UDP 123 to `NTP_SERVER` | syslog | respawned |
-| `igmpd` | daemon, IGMP snooping | nothing (shipped, not started; see its section) | odi_omci netlink (redirect type 4), `/dev/odi_sw` | stdout | -- |
+| `igmpd` | daemon, IGMP snooping (opt-in) | inittab `respawn` (`/etc/scripts/svc-igmpd.sh`), only while `IGMP_SNOOPING=1` | odi_omci netlink (redirect type 4), `/dev/odi_sw`, `/var/run/odi-mcast.conf` | `/var/log/services.log` | respawned |
 | `login` | serial console login | inittab `askfirst` (press Enter on the console) | ttyS0 | -- | respawned |
 | `diag` | CLI: optics, GPON state, counters, registers | you, rcS, network.sh, metricsd, confd | `/dev/odi_sw`, `/proc/odi_gpon/status`, netlink | stdout | -- |
 | `i2cget` / `i2cdump` / `i2cset` | CLI: the optics module I2C devices (busybox) | you | `/dev/i2c-0` | stdout | -- |
@@ -370,13 +370,14 @@ line; `last_sync` is the epoch time of the last event that was not
 `svc-ntpd.sh` removes the file on every start, so a new server or a
 disabled NTP never shows an old sync.
 
-### `igmpd` -- IGMP snooping (shipped, not started)
+### `igmpd` -- IGMP snooping (opt-in)
 
     igmpd [-w] [-f] [-n COUNT]
     igmpd [-w] -j GROUP -p PORTS [-v VID]
     igmpd [-w] -l GROUP [-v VID]
 
-    -w         WRITE the entries to the switch. Off by default.
+    -w         WRITE to the switch. Off by default: the daemon then prints
+               what it would do and holds no lease
     -n COUNT   stop after COUNT frames (0, the default, is forever)
     -f         start even if a live process holds uid 4
     -j GROUP   one-shot: program GROUP with member PORTS (hardware port
@@ -386,54 +387,78 @@ disabled NTP never shows an old sync.
                entry is keyed on filtering id 0 (SVL)
     -h         this text; registers nothing
 
-As a daemon it registers for packet-redirect type 4, describes every IGMP
-frame the switch traps to the CPU, keeps the group and router-port state,
-and with `-w` programs each change into the switch as a static L2
-multicast entry: the group MAC (01:00:5e and the low 23 bits), keyed on
-filtering id 0 (SVL), with the joined ports as members. Not on the VID the
-report came in on: every VLAN on this image is shared, which the stick shows
-in its own table (every learned address is an SVL row on filtering id 0,
-the VID-14-tagged one from the PON included), so an entry keyed on a VID
-would never match a frame. `docs/KERNEL.md` ("The L2 table") has the row
-layout. The writes go
-through `/dev/odi_sw` (`ODI_SW_IOC_L2_MC_ADD`/`_DEL`, `odi_switch_l2.c`);
-`diag l2-table get all` shows the result.
+**Off unless asked for.** `svc-igmpd.sh` runs `igmpd -w` only while
+`IGMP_SNOOPING=1` is in the config store (`apply.sh igmp` applies a change);
+otherwise the respawn entry parks and the switch floods multicast as it
+always did. With the key set the daemon is still idle until the OLT
+provisions what it needs (below), so setting it on a line that carries no
+multicast does nothing.
 
-The table keeps what a snooper may keep: no state for an address outside
-224.0.0.0/4, for a link-local group (224.0.0.x) or for a group that shares a
-link-local MAC (RFC 4541 2.1.2: those are flooded), and one switch row per
-MAC, holding the union of the ports of every group that maps to it.
+**What the OLT decides.** omcid writes what it was provisioned to
+`/var/run/odi-mcast.conf` (a quiet second after the last OMCI frame, only
+when it changed; the format is in `src/omci/respond/mcast.c`): snooping is
+on when a multicast GEM interworking TP (ME 281) holds an address row and
+the multicast operations profile (ME 309) of the UNI's subscriber (ME 310)
+says IGMP function 0. The profile also supplies
 
-`-j` and `-l` drive that same switch path by hand, without registering
-anything, so an entry can be put in and checked without an IGMP frame:
+- the timers: robustness, query interval and maximum response time give the
+  membership interval (260 s at the defaults), robustness times the last
+  member query interval the time a member that left is kept;
+- immediate leave: the port is removed on the leave itself;
+- the group limit of ME 310 and the dynamic and static access control lists
+  of ME 309: a join outside the lists, or past the limit, gets no row, so
+  with the PON's drop on the stream never reaches the host. An empty list
+  restricts nothing (the OLT is the authority; a table nobody provisioned
+  must not block a stream), and so does a list longer than 32 ranges. A
+  static range of up to 16 groups becomes a row a group with the UNI as
+  member and never expires; a wider one cannot be named in the switch, and
+  igmpd then leaves the PON's drop off so the range still flows.
 
-    igmpd -w -j 239.1.2.3 -p 0x1        # member: the UNI
-    diag l2-table get all               # 01:00:5E:01:02:03 ... SVL mc 0x1
+An IGMP function other than 0 (snooping with proxy reporting, proxy) is not
+done: the OLT then expects the ONU to answer its queries, which this one
+does not, so the multicast stays transparent.
+
+**What it does with the switch.** While snooping is on the daemon holds a
+lease on the switch (an ioctl on its open `/dev/odi_sw`, `docs/KERNEL.md`):
+
+1. an ACL rule copies IGMP entering the UNI port to the CPU. The frame is
+   forwarded exactly as before (the OLT sees every report and leave) and a
+   copy goes to igmpd on redirect type 4;
+2. for one membership interval the switch keeps flooding, so every group the
+   host already watches can report again; then
+3. IPv4 multicast from the PON that no row names is dropped, except
+   224.0.0.0/24 (the OLT's general queries go to 224.0.0.1).
+
+Every row has the host and the PON as members: the PON because the OLT side
+is where the querier is, and a report to a group is forwarded to the row's
+members; without it the report would go nowhere. The CPU is never a member.
+If the daemon dies or is stopped, its descriptor closes, the lease goes with
+it, the rows it wrote are deleted and the PON floods again.
+
+**Nothing from the fibre reaches the CPU.** The ACL rule has the UNI port as
+its only ingress, so a frame from the PON never matches it, the OLT's
+queries are not copied (the host answers them itself and the answers are the
+reports the daemon sees), and the NIC still drops every PON frame that is
+not OMCI. The daemon has no transmit path.
+
+**What it reports.** `/var/run/odi-mcast.state` holds the join count and the
+groups the subscriber holds; omcid answers the multicast subscriber monitor
+(ME 311) from it: the join message counter and the IPv4 active group list.
+The bandwidth attributes read zero.
+
+IPv6 (MLD) is not snooped: IPv6 multicast is flooded as before. Upstream
+IGMP tag control (ME 309 attributes 4 to 6) and the downstream tag control
+(attribute 16) are stored and not acted on.
+
+`-j` and `-l` drive the row path by hand, without registering anything, so
+an entry can be put in and checked without an IGMP frame:
+
+    igmpd -w -j 239.1.2.3 -p 0x5        # members: the UNI and the PON
+    diag l2-table get all               # 01:00:5E:01:02:03 ... SVL mc 0x5
     igmpd -w -l 239.1.2.3               # a second -l: no such entry in the switch
 
-Without `-w` both print the entry they would write and touch nothing.
-
-**Nothing starts it, on purpose.** On this kernel the daemon never sees a
-frame, for three reasons that each rule out starting it at boot:
-
-- the switch forwards IGMP rather than trapping it: the stock init (which
-  rcS replays) leaves every IGMP and MLD action in `IGMP_PORT_ACTION`
-  (0x01105c + 4 * port) at forward, so no IGMP frame reaches the CPU;
-- odi_omci delivers only OMCI frames (RX reason 246) on its redirect
-  channel; nothing hands a trapped IGMP frame to type 4;
-- and igmpd has no transmit path. Turning the trap on would take every
-  host report away from the OLT, and every OLT query away from the host,
-  until igmpd sent each one on itself. The OLT would then let the
-  membership lapse and stop sending the stream.
-
-What snooping would buy here is small. The stick has one UNI, so there is
-no second LAN port to prune multicast from; the OLT already sends a
-multicast GEM only for groups someone joined. The one saving left is the
-CPU: the image floods unknown multicast to all four ports, the CPU port
-included, and a static entry per joined group would keep that traffic off
-the CPU. That is worth a trap and a transmit path only once there is a
-multicast source to test against. Until then `SNOOPING_ENABLED` stays out
-of the UI (`docs/SETTINGS.md`).
+Without `-w` both print the entry they would write and touch nothing. Rows
+written this way are not under a lease: they stay until `-l`.
 
 ## CLIs
 
@@ -976,7 +1001,7 @@ drivers behind them.
 
 | file | read | write |
 |---|---|---|
-| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes (igmpd -w) |
+| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes and the snooping lease (igmpd -w) |
 | `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the REI count, the TO1/TO2 expiries, the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |

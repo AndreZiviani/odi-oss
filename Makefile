@@ -110,7 +110,7 @@ image-all:
 # any did. TEST_JOBS is the number of legs at once (default: the CPUs);
 # `make test TEST_JOBS=1` runs them one by one. `make test-<leg>` runs one leg
 # on its own, its output streaming.
-OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables alarms writes
+OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables alarms writes mcast
 TEST_LEGS := lint test-host test-diag test-omci-respond test-igmp $(OMCI_SUITES:%=test-omci-%)
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
@@ -134,6 +134,7 @@ test-host:
 	bash test/host_autoneg_test.sh
 	bash test/safe_mode_test.sh
 	bash test/ntp_event_test.sh
+	bash test/svc_igmpd_test.sh
 	bash test/omci_respawn_test.sh
 	bash test/omci_defaults_test.sh
 	bash test/rcs_cs_value_test.sh
@@ -143,6 +144,8 @@ test-host:
 	bash test/regtrace_compare_stream_test.sh
 	bash test/odi_nic_hw_test.sh
 	bash test/odi_switch_test.sh
+	bash test/odi_switch_mcast_test.sh
+	bash test/odi_igmp_rx_test.sh
 	bash test/odi_switch_mmio_bounds_test.sh
 	bash test/odi_switch_tbl_desc_test.sh
 	bash test/odi_switch_l2_test.sh

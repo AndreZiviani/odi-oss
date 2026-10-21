@@ -51,6 +51,12 @@
 #                        every start the same way every other svc-*.sh does,
 #                        so killing the running one is the whole apply.
 #
+#     apply.sh igmp      SERVICE RESTART. Restarts igmpd so it re-reads
+#                        IGMP_SNOOPING (the gate on the key in svc-igmpd.sh), the
+#                        same way as ntp below. The switch goes back to
+#                        flooding for the moment the daemon is gone: its
+#                        lease on the switch is its open /dev/odi_sw.
+#
 #     apply.sh ntp       SERVICE RESTART. Restarts ntpd so it re-reads
 #                        NTP_SERVER -- starting it for the first time if the
 #                        key was just set, or stopping it if just cleared
@@ -197,11 +203,16 @@ ntp() {
 	restart_respawn ntpd
 }
 
+igmp() {
+	restart_respawn igmpd
+}
+
 case "${1:-}" in
 network) network ;;
 omci)    shift; omci "$@" || exit 1 ;;
 syslog)  syslog ;;
 ntp)     ntp ;;
-*)       echo "usage: $0 network|omci [seconds]|syslog|ntp" >&2; exit 1 ;;
+igmp)    igmp ;;
+*)       echo "usage: $0 network|omci [seconds]|syslog|ntp|igmp" >&2; exit 1 ;;
 esac
 exit 0

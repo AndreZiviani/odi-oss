@@ -47,6 +47,7 @@ void mib_reset_all(void)
 	 * provisions fewer services after the reset, or none, does not leave
 	 * the old ones forwarding. */
 	conn_dirty = 1;
+	mcast_dirty = 1;
 	/* A reset MIB and a snapshot of the one before it must never both be
 	 * on disk: a respawn right after this reset, before the OLT sends
 	 * anything to snapshot again, must fall back to re-registration, not
@@ -76,6 +77,8 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 		conn_dirty = 1;
 	if (!c)
 		return;
+	if (mcast_policy_class(c->classId))
+		mcast_dirty = 1;
 	if (c->classId == OMCI_ME_DOT1_RATE_LIMITER) {
 		const struct mib_row *r = mib_find(OMCI_ME_DOT1_RATE_LIMITER, inst);
 
@@ -160,6 +163,8 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
 		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
 		conn_dirty = 1;
+	if (c && mcast_policy_class(c->classId))
+		mcast_dirty = 1;
 	/* A traffic scheduler (class 278) matters only when a planned
 	 * upstream queue names it, and then only its Policy (attribute 3:
 	 * strict or WRR, us_queue_decode()), on a create or a Set that

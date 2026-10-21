@@ -21,13 +21,16 @@
 
 #include <stdint.h>
 #include "igmpd.h"
+#include "policy.h"
 
 #define IGMP_MAX_GROUPS   128
 #define IGMP_MAX_PORTS    16
 
 #define IGMP_PORTBIT(p)   ((uint32_t)1 << ((p) - 1))
 
-/* RFC 2236 defaults, in seconds. Robustness 2, query interval 125, query
+/* RFC 2236 defaults, in seconds. A policy from the OLT (policy.h) replaces
+ * them: the table runs on the policy it was given, and these are what an
+ * empty one says. Robustness 2, query interval 125, query
  * response interval 10.
  *
  * The membership interval is the one that matters: a member that stops
@@ -43,12 +46,20 @@
  * expire. RV * QI + QRI / 2. */
 #define IGMP_ROUTER_TTL        (IGMP_ROBUSTNESS * IGMP_QUERY_INTERVAL + \
 				IGMP_QUERY_RESPONSE / 2)
-/* A leave does not remove the port. It shortens that port membership to the
- * last-member interval, so a second listener on the same port still holding
- * the group can answer the group-specific query and keep it. Removing on the
- * leave itself is the "fast leave" behaviour, and it cuts off everyone else on
- * the port. */
+/* A leave does not remove the port, unless the profile asks for an
+ * immediate leave. It shortens that port membership to the last-member time,
+ * so a second listener behind the same port still holding the group can
+ * answer the OLT's group-specific query, which reaches it as any multicast
+ * to a registered group does, and keep it: its answer is a report like any
+ * other. Removing on the leave itself is the "fast leave" behaviour, and it
+ * cuts off everyone else on the port. */
 #define IGMP_LAST_MEMBER_TTL   (IGMP_ROBUSTNESS * 1)
+
+/* The widest static range igmpd turns into one row a group (the hardware
+ * cannot say "this range", only name groups). A wider one stays unenforced
+ * and keeps the PON's drop of unregistered multicast off, so the stream the
+ * range promises still gets through. */
+#define IGMP_STATIC_RANGE_MAX  16
 
 enum igmp_change_kind {
 	IGMP_CHANGE_SET = 0,    /* this group now has exactly this port mask */
@@ -65,6 +76,7 @@ struct igmp_change {
 
 struct igmp_entry {
 	uint8_t  in_use;
+	uint8_t  fixed;                         /* a static group: held without a join */
 	uint16_t vid;
 	uint32_t group;
 	uint32_t ports;                         /* members, as a mask */
@@ -76,6 +88,10 @@ struct igmp_db {
 	uint32_t router_ports;
 	uint32_t router_expires[IGMP_MAX_PORTS];
 	uint32_t dropped;                       /* joins refused, table full */
+	struct igmp_policy pol;                 /* what the OLT provisioned */
+	uint32_t joins;                         /* join messages seen */
+	uint32_t denied;                        /* joins the profile refused */
+	int      static_overflow;               /* a static range too wide to name */
 };
 
 void igmp_db_init(struct igmp_db *db);
@@ -102,5 +118,16 @@ uint32_t igmp_db_mac_ports(const struct igmp_db *db, uint32_t group);
 
 /* How many groups are live. For the status line, and for the tests. */
 int igmp_db_count(const struct igmp_db *db);
+
+/* How many of them a subscriber joined: the static groups are not counted
+ * against the profile's limit. */
+int igmp_db_dynamic_count(const struct igmp_db *db);
+
+/* Run the table on a new policy. The static groups become fixed entries
+ * (the UNI port a member, never expiring); a group the access control lists
+ * no longer allow is removed. Returns how many changes were written to out;
+ * the caller needs room for IGMP_MAX_GROUPS of them. */
+int igmp_db_set_policy(struct igmp_db *db, const struct igmp_policy *pol,
+		       struct igmp_change *out, int max);
 
 #endif

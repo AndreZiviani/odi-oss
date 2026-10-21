@@ -841,6 +841,7 @@ static void test_abi(void)
 	CHECK(ODI_SW_IOC_L2_MC_ADD == ((6U << 29) | (28U << 16) | (0x53U << 8) | 8U), "L2_MC_ADD number");
 	CHECK(ODI_SW_IOC_L2_MC_DEL == ((6U << 29) | (28U << 16) | (0x53U << 8) | 9U), "L2_MC_DEL number");
 	CHECK(ODI_SW_IOC_L2_MODE == ((2U << 29) | (8U << 16) | (0x53U << 8) | 10U), "L2_MODE number");
+	CHECK(ODI_SW_IOC_MC_SNOOP == ((4U << 29) | (8U << 16) | (0x53U << 8) | 11U), "MC_SNOOP number");
 }
 
 int main(void)

@@ -86,12 +86,28 @@ static const char *sw_err(int rc)
 {
 	switch (rc) {
 	case -2:  return "no /dev/odi_sw";
-	case -16: return "table engine busy";
+	case -16: return "busy: the table engine, or another snooper holds the lease";
 	case -22: return "refused by the driver";
 	case -25: return "no L2 multicast ioctl in this kernel";
 	case -28: return "hash bucket full";
 	}
 	return "failed";
+}
+
+int igmp_hw_snoop(uint32_t flags)
+{
+	int rc;
+
+	out_fmt("snooping lease: %s%s%s\n",
+		flags & ODI_SW_MC_SNOOP_COPY ? "copy host IGMP to the CPU" : "released",
+		flags & ODI_SW_MC_SNOOP_PON_DROP ? ", drop unregistered IPv4 multicast from the PON" : "",
+		hw_enabled ? "" : "  (not written)");
+	if (!hw_enabled)
+		return 0;
+	rc = igmp_sw_snoop(flags);
+	if (rc)
+		out_fmt("  snoop ioctl: %d (%s)\n", rc, sw_err(rc));
+	return rc;
 }
 
 int igmp_hw_group_set(uint16_t vid, uint32_t group, uint32_t ports)
