@@ -772,7 +772,10 @@ output in `/tmp/fwu.log` and its outcome in `/tmp/fwu.state` (`running`,
 
 `network` runs `network.sh addr -n` to print the plan, then `network.sh addr`
 one second later, detached -- moving the primary address drops the
-connection that asked for it, so the answer leaves first. `omci [seconds]`
+connection that asked for it, so the answer leaves first. It applies what the
+store holds, at once and with no way back; the web UI changes the management
+addresses through `mgmt-addr.sh` instead (below), and uses this only in a
+safe-mode boot. `omci [seconds]`
 sends SIGHUP to the running omcid (`pidof omcid`) and waits for its answer in
 `/var/run/omcid-reload`: first that omcid took the signal (5 s), then the
 outcome (20 s, `APPLY_WAIT` or the argument; the web UI gives the script 25).
@@ -848,6 +851,56 @@ klogd), at notice:
 | `bad_value`, `no_kernel`, `apply_failed` | a key that is neither on nor off, a kernel without the parameter, a write that failed: the port runs auto-negotiation |
 
 A boot with the key unset logs nothing and writes nothing.
+
+### `mgmt-addr.sh` -- the management addresses, as a trial
+
+    /etc/scripts/mgmt-addr.sh try [-s SECONDS] KEY=VALUE...   a trial, 90 s by default (10 to 600)
+    /etc/scripts/mgmt-addr.sh confirm [LOCAL [PEER]]          keep it: stores the keys
+    /etc/scripts/mgmt-addr.sh revert                          end the trial now
+    /etc/scripts/mgmt-addr.sh status                          the state, key=value
+
+Applies a change of `LAN_IP_ADDR`, `LAN_SUBNET`, `LAN_ENABLE_IP2`,
+`LAN_IP_ADDR2` and `LAN_SUBNET2` (`docs/SETTINGS.md`, "Management address
+trial") without storing it. `try` takes the keys it changes as `KEY=VALUE`
+words, reads the rest from the store, has `network.sh addr -n` judge the
+whole set (a value the kernel would refuse fails there, with the reason, and
+nothing starts), writes the trial file `/var/run/mgmt-addr.trial` and answers
+at once; one second later, detached, `network.sh addr` reads that file instead
+of the store, moves the primary to the new address and keeps the previous one
+on `br0:4` for the length of the trial. The trial reverts by itself at the end
+of its window: the file goes and `network.sh addr` puts the stored addresses
+back.
+
+`confirm` stores the keys that changed, reading each back (a key that does not
+stick puts the others back and leaves the trial running), then ends the trial.
+`LOCAL` and `PEER` are the address the request arrived on and the client's;
+confd passes them from the socket, and over ssh they come from
+`SSH_CONNECTION`. The confirm is refused unless `LOCAL` is an address the
+trial added, the proof that the new address answers; with none added (the
+netmask moved, or the second address went away) `PEER` must be on the link of
+the new netmask. `revert` ends the trial at once and moves back one second
+later, so an answer sent over the address being left still arrives. `try`
+refuses while a trial runs, in a safe-mode boot, while `/etc/config/lan-ip`
+exists and the primary or its netmask is asked for, and for any key but those
+five. Exit 1 on every refusal; the reason is on stderr. State changes take a
+lock (`/var/run/mgmt-addr.lock`) and replace the state file in one rename, as
+`host-autoneg.sh` does.
+
+The state file, `/var/run/mgmt-addr`, and `status`, one `key=value` per line;
+the web UI reads the file:
+
+| key | value |
+|---|---|
+| `phase` | `steady` or `trial` |
+| `applied` | `1` once the trial addresses are on the interface (a second after `try`) |
+| `trial_deadline` | the uptime, in seconds, at which the trial reverts |
+| `prev_ip`, `prev_mask` | the primary the stick ran before the trial, kept on `br0:4` |
+| `old_<KEY>`, `new_<KEY>` | the five keys as the store holds them and as the trial asks for them |
+| `event`, `event_uptime`, `message` | the last event: `trial_started`, `trial_confirmed`, `trial_expired`, `trial_reverted` or `trial_failed` (also one line to the kernel log, `mgmt-addr: event=...`) |
+| `safe_mode_boot` (`status` only) | `1` on a safe-mode boot |
+
+Nothing persists across a reboot: the state and the trial file are in
+`/var/run`, and the keys are written only by `confirm`.
 
 ### `safe-mode.sh` -- the boot counter and the recovery boot
 

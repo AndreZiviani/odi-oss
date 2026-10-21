@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- Management address: a change of `LAN_IP_ADDR`, `LAN_SUBNET`,
+  `LAN_ENABLE_IP2`, `LAN_IP_ADDR2` or `LAN_SUBNET2` is now a trial, like the
+  host port. `mgmt-addr.sh try KEY=VALUE...` applies the new address in RAM
+  (`network.sh addr` reads `/var/run/mgmt-addr.trial` instead of the store
+  while it exists), keeps the previous primary on `br0:4` so the old address
+  still answers, and goes back by itself after 90 s unless
+  `mgmt-addr.sh confirm` arrives over a new address, which is the proof that
+  the new address is reachable; a confirm over the old one is refused. Only
+  a confirmed trial writes the keys, so a reboot in the middle of one comes
+  up on the old address. No trial in a safe-mode boot, which stores the keys
+  directly as before. `network.sh primary` prints the address the primary
+  device holds. Host-tested (`test/mgmt_addr_test.sh`); on a stick, an
+  unconfirmed trial reverted at its deadline with nothing stored, a confirm
+  over the new address stored it, and a reboot mid-trial came up on the old
+  address. The web UI side is odi-ui, which stores these keys through the
+  trial when this script is present.
+
 - GPON: new experimental, off-by-default key `GPON_DYING_GASP=1`: the stick
   sends the Dying_Gasp PLOAM message (up to three copies) before an orderly
   reboot, halt or power-off, only from O4 or O5 and never when the PON drops,
