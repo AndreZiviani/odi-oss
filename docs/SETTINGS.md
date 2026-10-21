@@ -272,8 +272,14 @@ omcid. Two ways, tried in this order:
 2. Any other table: each entry becomes its own rule, with the rule that
    undoes it downstream as DsMode says. A single VID translated to another
    (C-VID 410 to 1410), one VID split into rows by priority, an S-tag pushed
-   or popped, a tag removed or added: `docs/SWITCH.md`, "Extended VLAN rules",
-   has every shape, what is done and what is refused. The GEM port of a rule
+   or popped, a tag removed or added, untagged frames of one EtherType (IPoE,
+   PPPoE, ARP, IPv6, EAPOL) given their own tag, the C-tagged frames of one
+   VID discarded: `docs/SWITCH.md`, "Extended VLAN rules", has every shape,
+   what is done and what is refused. A discard is an ACL rule on the UNI
+   ports; the priorities of its VID that another entry names are left out of
+   it, and `omcli bridge` shows it as `rule ext-vlan discard vid <v> pri
+   <p>`; an EtherType entry shows as `rule ext-vlan ethertype`, one a value
+   (PPPoE two). The GEM port of a rule
    is the priority its result leaves with, through the 802.1p mapper (a rule
    that keeps the frame's priority on a mapper that splits them becomes one
    rule per priority); the class 84 list of the GEM-side port still decides

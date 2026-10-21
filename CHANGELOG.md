@@ -10,6 +10,53 @@ listed here.
   metricsd v1.7.0 (`gpon_soc_temperature_celsius`, from the new SoC
   temperature sensor).
 
+- OMCI, switch: two more shapes of the OLT's extended VLAN table (class 171)
+  are applied instead of leaving the whole table transparent. Only on a line
+  with `VLAN_CFG_TYPE` other than 1; the manual tag never reads the table, so
+  neither of our lines changes. **An EtherType filter on untagged frames**
+  (IPoE 0x0800, PPPoE 0x8863 and 0x8864, ARP 0x0806, IPv6 0x86dd, EAPOL 0x888e)
+  is a classifier row of the second layout that compares the frame's own
+  EtherType, one row a value (PPPoE is two), each with its tag and the way
+  back by VID; the untagged frames of every other EtherType, when the table has
+  an entry for them, are one row after those. The register facts (the EtherType
+  in the low half of rule word 0, in the rows from the layout boundary up) are
+  another open implementation's measurements, and the host test pins its words
+  (0x000188b5 and 0x0000774a for 0x88b5). An EtherType filter on tagged frames
+  is still refused: the value behind a tag is not known. **An entry that
+  discards** the C-tagged frames of one VID (a priority named or not) is an ACL
+  rule on the UNI ports, which has a drop action the classifier lacks; the ACL
+  decides before the classifier, so the priorities of that VID that another
+  entry of the table names are left out of the discard (one rule each for the
+  rest), and an overlap nothing orders, a discard in a table that acts on
+  S-tags, or a discard of untagged, every-VID or double-tagged frames, is
+  still a refusal that leaves the table transparent and names the entry and
+  the reason. The ACL lookup is turned on for the UNI port and never off;
+  entries 16 to 47 on template 5 are the block, the snooping copy keeps entry
+  8. The rows the previous change left "unproven" for two tags at once are
+  now pinned to the other implementation's measured words (one entry writing
+  both tags on an untagged frame, two pops on an S-VID, a pop and a push with
+  priority 0), and `docs/SWITCH.md` says which shapes are measured. Host-tested
+  (`test/odi_switch_bdgconn_extvlan_test.c`, `src/omci/test/extvlan_test.c`,
+  `src/omci/vlan-test.sh`); not run through an OLT that provisions them.
+
+- The SoC die temperature as a standard hwmon sensor: `/sys/class/hwmon/hwmonN`
+  with name `rtl9602c_soc`, `temp1_input` in millidegrees C (`CONFIG_ODI_HWMON`,
+  `odi_hwmon.c`, which selects `CONFIG_HWMON`; it was off). Read-only: it reads
+  two switch-core words (0x138, the sensor control with its enable bit, which
+  the boot already leaves set, and 0x13c, whose bits 22:16 are the reading in
+  degrees C) and writes neither; with the sensor not enabled the file reads
+  `-ENODATA`. The scale and offset are inferred, not calibrated: one stick read
+  62 C while its optics module read 46 C, and the stock firmware reads 63 to
+  65 C in the same state, so it is a trend, good to a few degrees. The decode
+  is host-tested (`test/odi_hwmon_test.c`). Kernel size: the uImage grows by
+  2,746 bytes (1,151,597 to 1,154,343 of 1,359,872, 205,529 spare), the
+  uncompressed kernel by 8,488. Not yet run on a stick. The exporter serves
+  it as `gpon_soc_temperature_celsius` in the odi-sfp-exporter release that
+  carries it; this repo pins that exporter only after it is released, so the
+  image reports nothing on `/metrics` until then.
+  On a stick: hwmon0 rtl9602c_soc read 61 C, and the reading moves between
+  reads.
+
 - Classifier layout boundary read the right way round: `CLASSIFY_SETUP` bits
   12:5 count the rows at the top of the table that follow the second rule
   layout, so the first such row is 256 minus the count. The code and
@@ -111,6 +158,8 @@ listed here.
   `/etc/config/trial-guard.off` turns it off. Host-tested
   (`test/trial_guard_test.sh`) and in the qemu harness; on a stick it armed
   at boot and released on the first ssh session.
+  Run on a stick whose OLT sends none of these entries, with its service
+  unchanged; the new shapes themselves are host- and qemu-tested only.
 
 - Toolchain: built with odi-toolchain uclibc-v4 and freestanding-v3, which
   deny the `bltzl` instruction in the ISA audit (it decodes but

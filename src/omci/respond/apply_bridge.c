@@ -731,7 +731,10 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
  * ports, becomes one rule per priority. Frames left untagged go to the port
  * of priority 0. */
 #define EV_RULES_MAX   24
-#define EV_OUT_MAX     (EV_RULES_MAX * 8)
+#define EV_DROPS_MAX   8
+/* Each rule is a bridge rule per EtherType (PPPoE has two) and per GEM port
+ * its priorities spread over; a discard is one rule a priority it covers. */
+#define EV_OUT_MAX     (EV_RULES_MAX * 8 + EV_DROPS_MAX * 8)
 
 struct ev_rule {
 	struct evtocd_plan u, d;
@@ -740,10 +743,20 @@ struct ev_rule {
 	uint16_t inst;
 };
 
+/* An entry that discards what it names, and the priorities of its VID the
+ * ACL may discard (the rest belong to entries that name them). */
+struct ev_drop {
+	struct evtocd_drop d;
+	unsigned pmask;
+	uint8_t entry;
+	uint16_t inst;
+};
+
 struct ev_ing {
-	int active, nrules;
+	int active, nrules, ndrops;
 	struct ev_ctl ctl;
 	struct ev_rule rules[EV_RULES_MAX];
+	struct ev_drop drops[EV_DROPS_MAX];
 };
 
 static struct ev_ing ev_tab[8];
@@ -798,6 +811,25 @@ static int ev_read(const struct omci_class *c171, struct mib_row *r, struct ev_i
 			} else if (!a.transparent) {
 				ev_bad("a default rule adds or removes tags", i, r->inst);
 			}
+			continue;
+		}
+		if (e.remove_tags == EVTOCD_T_DISCARD_FRAME) {
+			struct ev_drop *dr = &ev->drops[ev->ndrops];
+
+			if (ev->ndrops >= EV_DROPS_MAX) {
+				ev_bad("more discards than omcid keeps", i, r->inst);
+				continue;
+			}
+			why = evtocd_drop(&e, in_tpid, &dr->d);
+			if (why) {
+				ev_bad(why, i, r->inst);
+				continue;
+			}
+			dr->pmask = evtocd_drop_all(&dr->d);
+			dr->entry = (uint8_t)i;
+			dr->inst = r->inst;
+			ev->ndrops++;
+			added++;
 			continue;
 		}
 		if (ev->nrules >= EV_RULES_MAX) {
@@ -861,10 +893,10 @@ static int ev_build(const int *ingress, const int *bport, int ning)
 		struct ev_ing *ev = &ev_tab[g];
 		int got = 0;
 
-		ev->nrules = 0;
+		ev->nrules = ev->ndrops = 0;
 		ev->ctl.skip_untagged = ev->ctl.skip_tagged = 0;
 		for (int pass = 0; pass < 2 && !got; pass++) {
-			ev->nrules = 0;
+			ev->nrules = ev->ndrops = 0;
 			ev->ctl.skip_untagged = ev->ctl.skip_tagged = 0;
 			for (int i = 0; i < MIB_ROWS; i++) {
 				struct mib_row *r = mib_row_at(i);
@@ -873,6 +905,22 @@ static int ev_build(const int *ingress, const int *bport, int ning)
 				    !ev_match(c171, r, (uint16_t)ingress[g], (uint16_t)bport[g], pass))
 					continue;
 				got += ev_read(c171, r, ev);
+			}
+		}
+		/* A discard is an ACL rule, which decides before the classifier:
+		 * the priorities of its VID that another entry names are left
+		 * out of it, and an overlap nothing orders is not a table to
+		 * apply. */
+		for (int k = 0; k < ev->ndrops; k++) {
+			struct ev_drop *dr = &ev->drops[k];
+
+			for (int i = 0; i < ev->nrules; i++) {
+				const char *why = evtocd_drop_shadow(&dr->d, &ev->rules[i].u, &dr->pmask);
+
+				if (why) {
+					ev_bad(why, dr->entry, dr->inst);
+					break;
+				}
 			}
 		}
 		ev->active = got > 0;
@@ -987,23 +1035,53 @@ static void ev_match_of(const struct evtocd_plan *u, int *vid, int *pri)
 	*pri = q->f_pri;
 }
 
-static int ev_add_out(int n, const struct ev_rule *er, const struct evtocd_plan *u)
+/* `rest`: the rule is for untagged frames and the table has rules that name
+ * an EtherType, which must come first. An entry that names one is a rule for
+ * each EtherType (PPPoE is two); the downstream rule undoes the tag by its
+ * VID, so it is sent once, with the first. */
+static int ev_add_out(int n, const struct ev_rule *er, const struct evtocd_plan *u, int rest)
 {
 	struct evtocd_plan d;
 	const char *dwhy = 0;
+	int nrules = u->et_n ? u->et_n : 1;
+
+	for (int k = 0; k < nrules; k++) {
+		struct ev_out *o;
+
+		if (n >= EV_OUT_MAX)
+			return n;
+		o = &ev_outs[n];
+		evtocd_plan_oper(u, &o->us);
+		if (u->et_n)
+			evtocd_oper_ethertype(&o->us, u->et[k]);
+		else if (rest)
+			evtocd_oper_rest(&o->us);
+		o->has_ds = k == 0 && evtocd_plan_ds(u, er->dsmode, &d, &dwhy);
+		if (o->has_ds)
+			evtocd_plan_oper(&d, &o->ds);
+		ev_match_of(u, &o->vid, &o->pri);
+		o->inst = er->inst;
+		o->entry = er->entry;
+		o->kind = u->et_n ? "ext-vlan ethertype" : "ext-vlan";
+		n++;
+	}
+	return n;
+}
+
+static int ev_add_drop(int n, const struct ev_drop *dr, int pri)
+{
 	struct ev_out *o;
 
 	if (n >= EV_OUT_MAX)
 		return n;
 	o = &ev_outs[n];
-	evtocd_plan_oper(u, &o->us);
-	o->has_ds = evtocd_plan_ds(u, er->dsmode, &d, &dwhy);
-	if (o->has_ds)
-		evtocd_plan_oper(&d, &o->ds);
-	ev_match_of(u, &o->vid, &o->pri);
-	o->inst = er->inst;
-	o->entry = er->entry;
-	o->kind = "ext-vlan";
+	evtocd_drop_oper(&dr->d, pri, &o->us);
+	o->has_ds = 0;
+	o->vid = dr->d.vid;
+	o->pri = pri;
+	o->inst = dr->inst;
+	o->entry = dr->entry;
+	o->kind = "ext-vlan discard";
 	return n + 1;
 }
 
@@ -1011,23 +1089,26 @@ static int ev_add_out(int n, const struct ev_rule *er, const struct evtocd_plan 
  * the priorities in `pmask` (bit n: priority n) to this GEM port. */
 static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask)
 {
-	int n = 0;
+	int n = 0, has_et = 0;
 
+	for (int i = 0; i < ev->nrules; i++)
+		has_et |= ev->rules[i].u.et_n != 0;
 	for (int i = 0; i < ev->nrules; i++) {
 		const struct ev_rule *er = &ev->rules[i];
 		struct evtocd_plan u = er->u;
 		struct evtocd_plane *q = ev_outer(&u);
+		int rest = has_et && !u.et_n && !u.s.in && !u.c.in;
 
 		if (!u.out_tags) {
 			/* Left untagged: it goes where the default priority 0
 			 * goes, and is admitted by the untagged half of FwdOp. */
 			if ((pmask & 1u) && ev_admits(bp, 0, -1, -1))
-				n = ev_add_out(n, er, &u);
+				n = ev_add_out(n, er, &u, rest);
 			continue;
 		}
 		if (u.out_pri >= 0) {
 			if ((pmask >> u.out_pri & 1u) && ev_admits(bp, u.out_tags, u.out_vid, u.out_pri))
-				n = ev_add_out(n, er, &u);
+				n = ev_add_out(n, er, &u, rest);
 			continue;
 		}
 		/* Its priority is the frame's own. One GEM port for every
@@ -1036,7 +1117,7 @@ static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask)
 		 * it. */
 		if (pmask == 0xffu) {
 			if (ev_admits(bp, u.out_tags, u.out_vid, -1))
-				n = ev_add_out(n, er, &u);
+				n = ev_add_out(n, er, &u, rest);
 			continue;
 		}
 		{
@@ -1058,9 +1139,24 @@ static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask)
 			w->f_pri = (int8_t)pr;
 			v.out_pri = (int8_t)pr;
 			v.cmp = w == &v.s ? EVTOCD_CMP_S : EVTOCD_CMP_C;
-			n = ev_add_out(n, er, &v);
+			n = ev_add_out(n, er, &v, 0);
 		}
 	}
+	/* The discards are no GEM port's: they are sent once, with the port
+	 * that carries priority 0. */
+	if (pmask & 1u)
+		for (int k = 0; k < ev->ndrops; k++) {
+			const struct ev_drop *dr = &ev->drops[k];
+			unsigned all = evtocd_drop_all(&dr->d);
+
+			if (dr->pmask == all && dr->d.pri < 0) {
+				n = ev_add_drop(n, dr, -1);
+				continue;
+			}
+			for (int pr = 0; pr < 8; pr++)
+				if (dr->pmask >> pr & 1u)
+					n = ev_add_drop(n, dr, pr);
+		}
 	return n;
 }
 

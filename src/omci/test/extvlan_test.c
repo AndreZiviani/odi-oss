@@ -13,6 +13,7 @@
  * capture rather than against itself.
  */
 #include "extvlan.h"
+#include "omci_bdgconn.h"
 #include "io.h"
 
 static int failures;
@@ -538,7 +539,7 @@ int main(void)
 		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "a default rule is not a plan");
 		build(e, 15, 4096, 0,  8, 100, 0, EVTOCD_F_ET_PPPOE,   1, 15, 4096, 0,  8, 200, 4);
 		evtocd_decode(e, &t);
-		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "an EtherType filter is not");
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "an EtherType filter on tagged frames is not (the value behind a tag is not known)");
 		build(e, 15, 4096, 0,  8, 100, EVTOCD_F_TPID_INPUT_DEI_0, 0,   1, 15, 4096, 0,  8, 200, 4);
 		evtocd_decode(e, &t);
 		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "nor a DEI filter");
@@ -561,6 +562,113 @@ int main(void)
 		evtocd_decode(e, &t);
 		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0,
 		   "nor a C-tag added in front of a C-tag (the classifier cannot tell two from one)");
+	}
+
+	/* ------------------------------------ the EtherType of untagged frames --- */
+	{
+		struct evtocd_plan u, d;
+		struct omci_vlan_oper vr;
+		static const struct { uint8_t code; uint8_t n; uint16_t a, b; } ets[] = {
+			{ EVTOCD_F_ET_IPOE_0800, 1, 0x0800, 0 },
+			{ EVTOCD_F_ET_PPPOE, 2, 0x8863, 0x8864 },
+			{ EVTOCD_F_ET_ARP_0806, 1, 0x0806, 0 },
+			{ EVTOCD_F_ET_IPV6_86DD, 1, 0x86dd, 0 },
+			{ EVTOCD_F_ET_EAPOL_888E, 1, 0x888e, 0 },
+		};
+
+		for (unsigned i = 0; i < sizeof ets / sizeof ets[0]; i++) {
+			build(e, 15, 4096, 0,  15, 4096, 0, ets[i].code,   0, 15, 4096, 0,  3, 100, 4);
+			evtocd_decode(e, &t);
+			ok(evtocd_plan(&t, 0x8100, 0x8100, &u) == 0 && u.et_n == ets[i].n &&
+			   u.et[0] == ets[i].a && (ets[i].n < 2 || u.et[1] == ets[i].b),
+			   "untagged frames of one EtherType code: the values G.988 gives it");
+			ok(evtocd_plan_ds(&u, 0, &d, 0) && d.et_n == 0,
+			   "and the way back names no EtherType: it is told by its VID");
+		}
+		build(e, 15, 4096, 0,  15, 4096, 0, 6,   0, 15, 4096, 0,  3, 100, 4);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "an EtherType code G.988 does not define is not a plan");
+		build(e, 15, 4096, 0,  15, 4096, 0, EVTOCD_F_ET_PPPOE,   0, 15, 4096, 0,  3, 100, 4);
+		evtocd_decode(e, &t);
+		(void)evtocd_plan(&t, 0x8100, 0x8100, &u);
+		evtocd_plan_oper(&u, &vr);
+		ok(vr.filter.ethertype == OMCI_ETHTYPE_NO_CARE, "the plan alone names no EtherType");
+		evtocd_oper_ethertype(&vr, u.et[1]);
+		ok(vr.filter.ethertype == (OMCI_ETHTYPE_LITERAL | 0x8864), "the descriptor carries one literal value");
+		evtocd_oper_rest(&vr);
+		ok(vr.filter.ethertype == OMCI_ETHTYPE_REST, "or says it is for the rest of the untagged frames");
+	}
+
+	/* ----------------------------------------- an entry that discards --- */
+	{
+		struct evtocd_drop dr;
+		struct evtocd_plan u;
+		struct omci_vlan_oper vr;
+		unsigned m;
+
+		/* C-tag VID 20, any priority: discard. */
+		build(e, 15, 4096, 0,  8, 20, 0, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_drop(&t, 0x8100, &dr) == 0 && dr.vid == 20 && dr.pri == -1, "a discard of VID 20, any priority");
+		m = evtocd_drop_all(&dr);
+		ok(m == 0xff, "every priority to start with");
+		build(e, 15, 4096, 0,  5, 20, 0, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_drop(&t, 0x8100, &dr) == 0 && dr.vid == 20 && dr.pri == 5, "a discard of VID 20 priority 5");
+		ok(evtocd_drop_all(&dr) == 0x20, "which is one priority");
+		evtocd_drop_oper(&dr, 5, &vr);
+		ok(vr.rule_gen == OMCI_VLAN_OPER_EXTVLAN_DROP && vr.filter.inner.vid == 20 &&
+		   vr.filter.inner.pri == 5 && (vr.filter.inner_mode & OMCI_TAGF_PRI), "its descriptor");
+
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_drop(&t, 0x8100, &dr) != 0, "a discard of untagged frames is not one (VID 0 reads the same)");
+		build(e, 15, 4096, 0,  8, 4096, 0, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_drop(&t, 0x8100, &dr) != 0, "nor a discard of every VID");
+		build(e, 8, 20, 0,  8, 4096, 0, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_drop(&t, 0x88a8, &dr) != 0, "nor a discard of two-tagged frames");
+		build(e, 15, 4096, 0,  8, 20, 0, 1,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_drop(&t, 0x8100, &dr) != 0, "nor one that also filters on an EtherType");
+		build(e, 15, 4096, 0,  8, 20, 5, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_drop(&t, 0x88a8, &dr) != 0, "nor a discard of S-tagged frames");
+		build(e, 14, 4096, 0,  14, 4096, 0, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_drop(&t, 0x8100, &dr) != 0, "a default rule is not a discard to build");
+
+		/* Against the other entries of the table: VID 20, any priority, and
+		 * an entry that names VID 20 priority 5 (a translation). */
+		build(e, 15, 4096, 0,  8, 20, 0, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		(void)evtocd_drop(&t, 0x8100, &dr);
+		m = evtocd_drop_all(&dr);
+		build(e, 15, 4096, 0,  5, 20, 0, 0,   1, 15, 4096, 0,  8, 1020, 4);
+		evtocd_decode(e, &t);
+		(void)evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!evtocd_drop_shadow(&dr, &u, &m) && m == 0xdf, "the priority the other entry names is left out of the discard");
+		build(e, 15, 4096, 0,  8, 21, 0, 0,   1, 15, 4096, 0,  8, 1021, 4);
+		evtocd_decode(e, &t);
+		(void)evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!evtocd_drop_shadow(&dr, &u, &m) && m == 0xdf, "an entry of another VID changes nothing");
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  0, 20, 4);
+		evtocd_decode(e, &t);
+		(void)evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!evtocd_drop_shadow(&dr, &u, &m) && m == 0xdf, "nor does one for untagged frames");
+		build(e, 15, 4096, 0,  8, 20, 0, 0,   1, 15, 4096, 0,  8, 1020, 4);
+		evtocd_decode(e, &t);
+		(void)evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(evtocd_drop_shadow(&dr, &u, &m) != 0, "an entry with the same filter as the discard: refused, nothing orders them");
+		build(e, 15, 4096, 0,  3, 4096, 0, 0,   1, 15, 4096, 0,  8, 1020, 4);
+		evtocd_decode(e, &t);
+		(void)evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(evtocd_drop_shadow(&dr, &u, &m) != 0, "so is a priority-only entry beside a discard of the whole VID");
+		build(e, 8, 200, 0,  8, 4096, 0, 0,   1, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		(void)evtocd_plan(&t, 0x88a8, 0x8100, &u);
+		ok(evtocd_drop_shadow(&dr, &u, &m) != 0, "and an entry on an S-tag: the C-tag field behind it is not known");
 	}
 
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");

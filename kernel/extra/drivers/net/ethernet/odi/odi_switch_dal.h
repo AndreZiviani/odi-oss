@@ -326,6 +326,12 @@ struct odi_sw_vlan_override {
 
 /* CF match fields, positions in rule/mask word 1 (w0 holds bits 63..32). */
 #define ODI_SW_CF_W0_VALID		(1U << 16)
+/* Rule and mask word 0, bits 15:0, in a row of the second layout (rows from
+ * ODI_SW_CLASSIFY_SETUP_PATTERN1_FIRST_ROW() up, template 0): the frame's
+ * EtherType, as the bits that must be 1 (rule) and 0 (mask). The first layout
+ * holds other keys there, so a row never writes them unless it names an
+ * EtherType. */
+#define ODI_SW_CF_W0_ET_MASK		0xffffU
 #define ODI_SW_CF_W1_DS			(1U << 31)
 #define ODI_SW_CF_W1_VID_SHIFT		11
 #define ODI_SW_CF_W1_VID_MASK		(0xfffU << ODI_SW_CF_W1_VID_SHIFT)
@@ -393,6 +399,23 @@ void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
  * shows a delete; this is the encoding the layout implies.
  */
 void odi_sw_cf_del(uint32_t idx, int is_us);
+
+/* The ACL rows of the extended VLAN discards (cmd 51, rule_gen
+ * OMCI_VLAN_OPER_EXTVLAN_DROP): entries ODI_SW_ACL_DROP_BASE up, template
+ * ODI_SW_ACL_DROP_TEMPLATE (slot 0 the C-tag: VID in bits 11:0, priority in
+ * 15:13, 0 for a frame without one). The snooping copy owns entry 8 and
+ * template 6, the module-load replay entry 1 and template 3. */
+#define ODI_SW_ACL_DROP_BASE		16U
+#define ODI_SW_ACL_DROP_MAX		32U
+#define ODI_SW_ACL_DROP_TEMPLATE	5U
+
+/* Discard the C-tagged frames of VID `vid` (and priority `pri`, -1 for any)
+ * that enter by a port of `ports` (a bit a port). Turns the ACL lookup and
+ * the default permit on for those ports first, never off. Returns 0 or the
+ * table engine's error, with the entry left invalid. */
+int odi_sw_acl_drop_set(uint32_t entry, uint32_t ports, int vid, int pri);
+/* The rule stops matching, then goes. */
+void odi_sw_acl_drop_del(uint32_t entry);
 /* The three action words of one CF row written alone, the rule and the mask
  * left as they are (a downstream row's priority changed under it). */
 void odi_sw_cf_act_write(uint32_t idx, int is_us, const uint32_t act[3]);
