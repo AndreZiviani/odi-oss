@@ -20,6 +20,8 @@ listed here.
   it as `gpon_soc_temperature_celsius` in the odi-sfp-exporter release that
   carries it; this repo pins that exporter only after it is released, so the
   image reports nothing on `/metrics` until then.
+  On a stick: hwmon0 rtl9602c_soc read 61 C, and the reading moves between
+  reads.
 
 - OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
   parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
