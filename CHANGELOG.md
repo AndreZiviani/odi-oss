@@ -17,6 +17,10 @@ listed here.
   `o7_hold keep <0|1> held <0|1>`; the kernel logs `event=o7_hold`. New
   `/proc/odi_init` verbs `gponkeep` and `gponhold`; `gponhold sim` is a test
   hook that acts as if the OLT had disabled this ONU and sends nothing.
+  On a stick, with the hook: O7 with the laser off (bias 0 mA), held through
+  a PON restart and a reboot (the boot never ranged), and `gpon-hold.sh
+  clear` took it back to O5 with its services in 30 s. Not yet seen with a
+  real disable from an OLT.
 
 - Toolchain: built with odi-toolchain uclibc-v4 and freestanding-v3, which
   deny the `bltzl` instruction in the ISA audit (it decodes but
