@@ -130,20 +130,20 @@ diag: image
 # and run natively. Only sys.h and start.S are MIPS-only.
 test:
 	@mkdir -p $(BUILD)
-	cc -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/parse_test \
+	cc $(ODI_SAN_CFLAGS) -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/parse_test \
 	   test/parse_test.c src/parse.c src/table.c
 	@$(BUILD)/parse_test < test/cases.txt > $(BUILD)/parse_test.out
 	@diff -u test/cases.expected $(BUILD)/parse_test.out \
 	  && echo "parser: $$(wc -l < test/cases.txt | tr -d ' ') cases match"
-	cc -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/ddm_test test/ddm_test.c src/ddm.c -lm
+	cc $(ODI_SAN_CFLAGS) -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/ddm_test test/ddm_test.c src/ddm.c -lm
 	@$(BUILD)/ddm_test
-	cc -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/gpon_status_test \
+	cc $(ODI_SAN_CFLAGS) -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/gpon_status_test \
 	   test/gpon_status_test.c src/gpon_status.c
 	@$(BUILD)/gpon_status_test
-	cc -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/odi_sw_ioctl_test \
+	cc $(ODI_SAN_CFLAGS) -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/odi_sw_ioctl_test \
 	   test/odi_sw_ioctl_test.c
 	@$(BUILD)/odi_sw_ioctl_test
-	cc -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/l2_format_test \
+	cc $(ODI_SAN_CFLAGS) -std=c11 -Wall -Wextra -Isrc -o $(BUILD)/l2_format_test \
 	   test/l2_format_test.c src/l2_fmt.c
 	@$(BUILD)/l2_format_test
 	@python3 test/regnames_test.py

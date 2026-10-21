@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=$(mktemp -t odi_switch_bdgconn_extvlan_test.XXXXXX)
 trap 'rm -f "$BIN"' EXIT
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -I "$ROOT/src/omci" \
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -I "$ROOT/src/omci" \
 	-I "$ROOT/kernel/extra/drivers/net/ethernet/odi/uapi" \
 	-o "$BIN" "$ROOT/test/odi_switch_bdgconn_extvlan_test.c"
 "$BIN"

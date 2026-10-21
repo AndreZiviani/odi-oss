@@ -11,7 +11,7 @@ BIN=$(mktemp -t odi_switch_dal_test.XXXXXX)
 OUT_DIR=$(mktemp -d -t odi_switch_dal_test_out.XXXXXX)
 trap 'rm -f "$BIN"; rm -rf "$OUT_DIR"' EXIT
 
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_switch_dal_test.c"
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_switch_dal_test.c"
 "$BIN" "$OUT_DIR"
 
 fail=0

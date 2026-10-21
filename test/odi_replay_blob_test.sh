@@ -10,7 +10,7 @@ FW="$ROOT/rootfs/skeleton/lib/firmware/odi"
 BIN=$(mktemp -t odi_replay_blob_test.XXXXXX)
 trap 'rm -f "$BIN"' EXIT
 
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_replay_blob_test.c"
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_replay_blob_test.c"
 "$BIN"
 
 for spec in sdkinit:7429 modload:3619 gpon_init:2528; do

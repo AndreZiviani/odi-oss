@@ -7,6 +7,6 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=$(mktemp -t odi_ddm_limits_test.XXXXXX)
 trap 'rm -f "$BIN"' EXIT
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -I "$ROOT/src/diag/src" \
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -I "$ROOT/src/diag/src" \
 	-o "$BIN" "$ROOT/test/odi_ddm_limits_test.c" -lm
 "$BIN"

@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=$(mktemp -t odi_init_test.XXXXXX)
 trap 'rm -f "$BIN"' EXIT
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" \
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" \
    -I "$ROOT/kernel/extra/drivers/net/ethernet/odi" \
    -o "$BIN" "$ROOT/test/odi_init_test.c"
 "$BIN"
