@@ -9,7 +9,7 @@ BIN=$(mktemp -t odi_gpon_replay_test.XXXXXX)
 OUT=$(mktemp -t odi_gpon_replay_test_out.XXXXXX)
 trap 'rm -f "$BIN" "$OUT"' EXIT
 
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_gpon_replay_test.c"
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_gpon_replay_test.c"
 "$BIN" "$OUT"
 
 python3 "$ROOT/tools/regtrace/gpon_replay_compare.py" \

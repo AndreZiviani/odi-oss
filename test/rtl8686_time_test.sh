@@ -13,7 +13,7 @@ for h in linux/clockchips.h linux/clocksource.h linux/init.h linux/interrupt.h \
 	linux/io.h linux/math64.h linux/sched_clock.h linux/linkage.h asm/time.h; do
 	printf '#include "kstub.h"\n' > "$TMP/$h"
 done
-cc -std=gnu99 -Wall -Wextra -Werror -Wno-unused-parameter \
+cc ${ODI_SAN_CFLAGS-} -std=gnu99 -Wall -Wextra -Werror -Wno-unused-parameter \
 	-I "$TMP" -I "$ROOT/test" -I "$ROOT/kernel/extra/arch/mips/include" \
 	-I "$ROOT/kernel/extra/arch/mips/rtl8686" \
 	-o "$TMP/t" "$ROOT/test/rtl8686_time_test.c"

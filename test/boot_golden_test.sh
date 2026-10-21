@@ -13,7 +13,7 @@ FIX=$ROOT/test/fixtures
 DIR=$(mktemp -d -t boot_golden_test.XXXXXX)
 trap 'rm -rf "$DIR"' EXIT
 
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" \
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" \
 	-o "$DIR/bin" "$ROOT/test/boot_golden_test.c"
 
 fail=0

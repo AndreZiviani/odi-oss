@@ -1,7 +1,7 @@
 name: ci
 
 # Pull requests and pushes to main run the tests, as parallel jobs: lint, the host-side
-# tests, diag with the exporter contract, and the OMCI daemon under qemu
+# tests (plain, and again under ASan/UBSan), diag with the exporter contract, and the OMCI daemon under qemu
 # (which builds the binaries it runs), a clean-build check (fetch and
 # verify the pinned kernel tree, build src, then confirm `make image` fails
 # closed and names what it is missing -- nothing here is flashed or booted),
@@ -79,6 +79,18 @@ jobs:
 
       - name: Host-side tests
         run: make test-host
+
+  # The C unit tests of the host leg again, built with AddressSanitizer and
+  # UndefinedBehaviorSanitizer (make test-host-asan). A separate job so the
+  # plain leg stays the plain build. The runner has the sanitizer runtimes with
+  # its gcc; no container, no cache needed: nothing is downloaded.
+  host-asan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Host C tests under ASan and UBSan
+        run: make test-host-asan
 
   diag:
     runs-on: ubuntu-latest
@@ -208,7 +220,7 @@ jobs:
 
   full:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    needs: [lint, host, diag, omci, mips-units]
+    needs: [lint, host, host-asan, diag, omci, mips-units]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
