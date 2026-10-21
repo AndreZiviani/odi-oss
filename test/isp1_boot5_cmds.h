@@ -83,9 +83,9 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 
 	/* 14-21: cmd 23, instances 1-8 -- the eight downstream priority
 	 * queues, with the arguments omcid sends for them
-	 * (test/fixtures/omci-drv-golden-isp1.txt): dir DS, switch port and
-	 * priority 0, and the Weight of each class 277 row (WRR when it is 2
-	 * or more).
+	 * (test/fixtures/omci-drv-golden-isp1.txt): dir DS, switch port 0,
+	 * the priority the entity id gives (entity 0 is 7, down to 0), and the
+	 * Weight of each class 277 row (WRR when it is 2 or more).
 	 */
 	{
 		static const uint16_t ds_weight[8] = { 1, 1, 0x1e, 0x18, 0x13, 0x0e, 0x09, 0x04 };
@@ -94,6 +94,7 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 			struct omci_priq pq;
 
 			memset(&pq, 0, sizeof pq);
+			pq.index = (uint16_t)(7 - i);
 			pq.weight = ds_weight[i];
 			pq.wrr = ds_weight[i] >= 2;
 			pq.dir = OMCI_GEMFLOW_DS;
