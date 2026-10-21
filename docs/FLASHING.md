@@ -106,7 +106,50 @@ at a time and verify each before the next:
       ssh root@<stick> 'flash_eraseall /dev/mtd5 && cat > /dev/mtd5' < r0.bin
       ssh root@<stick> 'cmp - /dev/mtd5' < r0.bin    # "EOF on -" is the match
 
-  with `r0.bin` cut out of the dump by offset and size, as above.
+  with `r0.bin` cut out of the dump by offset and size, as above. The
+  write above takes the slot's rootfs only; do the kernel (`k0`/`k1`) the
+  same way, and write it **last**, as `fwu.sh` does, so that an interrupted
+  restore leaves a kernel U-Boot refuses rather than a valid one over a
+  half-written rootfs.
+
+  **Before you point the next boot at a slot you wrote or restored by
+  hand**, check it from the running slot. Nothing below is a CRC check: the
+  stick has no CRC32 tool (`cksum` is the POSIX CRC, not the uImage one), so
+  the header and data CRC that U-Boot verifies cannot be recomputed there.
+  What can be checked, with the applets `fwu.sh` itself relies on:
+
+  1. Which slot is running and what the environment says, so you do not
+     touch the running slot or the committed one:
+
+         cat /proc/cmdline; nv getenv sw_active; nv getenv sw_commit; nv fallback sw_commit
+
+     The slot you are about to restore must be neither the running one nor
+     the one `sw_commit` names, in both copies.
+  2. The kernel partition holds a uImage, not erased flash: the first four
+     bytes are the magic `27 05 19 56` (an erased partition reads `ff`):
+
+         dd if=/dev/mtd6ro bs=4 count=1 2>/dev/null | md5sum
+         printf '\047\005\031\126' | md5sum      # the two sums must be equal
+
+     (`mtd6` is `k1`, `mtd4` is `k0`; take the number from `cat /proc/mtd`.)
+  3. Both partitions of the slot are byte-for-byte what you meant to write,
+     by md5 against the dump or the release you took them from. For a
+     release tarball, compare the member against the partition, which is
+     larger than the member: `tar -xf odi-oss-<version>.tar uImage -O | cmp - /dev/mtd6ro`
+     says `EOF on -` when every byte of the member matches (as in the write
+     check above). A dump taken with "Backing up the whole flash" compares
+     whole partitions by md5.
+  4. What is **not** checked: the uImage header CRC and data CRC, and that
+     the kernel matches the rootfs next to it. Both are left to U-Boot at
+     boot, which refuses a bad kernel and boots the committed slot
+     instead, so the check that settles it is the trial below.
+
+  Then take the safe path, never `sw_active`: `nv setenv sw_tryactive <slot>`
+  and `reboot` boots that slot once under the watchdog and returns to the
+  committed one on any failure ("Trial-booting it"); only after you have
+  logged in and checked it, `nv commit <slot>` from that slot
+  ("Committing"). Do not write `sw_active`, and do not write `sw_commit`
+  before the trial.
 - **The bootloader environment (`env`, `env2`)**: prefer `nv setenv`
   (`docs/TOOLS.md`), which rewrites one copy at a time. A raw restore is for a
   damaged environment: write `env2` first, check it, then `env`, so one copy is
