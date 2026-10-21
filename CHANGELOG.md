@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.11.1 - 2026-10-21
+
 - OMCI: new odi-only key `OMCI_TCONT_ALLOC_UNSET` (`/etc/config/odi.conf`,
   default `ploam`, which changes nothing). `unassigned` makes a T-CONT the
   OLT never Set report Alloc-ID 0x00FF, the initial value of G.988 9.2.2,
