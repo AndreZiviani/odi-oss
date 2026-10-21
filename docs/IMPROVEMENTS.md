@@ -46,8 +46,10 @@ them. `docs/KERNEL.md` has each one.
 nothing in the rootfs can reach turned off (the config says why, option by
 option, and which ones are kept on purpose), and the register replay tables
 loaded from `/lib/firmware/odi/` only while they are applied rather than
-compiled in: about 60 KB of spare room in the 1328 KB kernel partition,
-and about 484 KB of RAM that the tables no longer hold.
+compiled in, and the subsystems for hardware the board does not have (VT,
+input, HID, the FPU emulator, power management) off: the kernel is 15% under
+its 1328 KB partition (210 KB spare), and about 484 KB of RAM is not held by
+the tables.
 
 **A hung kernel resets itself, and so does a stuck boot script.** The
 watchdog kicker (`odi_wdt.c`) tracks a userland-confirmation deadline in
