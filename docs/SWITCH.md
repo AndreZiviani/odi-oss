@@ -124,8 +124,10 @@ the fields it owns. Board ports: UNI 0, PON 2, CPU 3; port 1 is unused.
 - **acl**: `ACL_PORT_ENABLE`, one bit per port. The `switch` verb clears
   every port; the stock stick reads `0x5` (UNI and PON). Two writes, one per
   port, as the stock module load makes them.
-- **vlan**: `VLAN_SETUP.FILTER_ON = 0`, `PORT_VLAN_INDEX` 0 for ports 0 and
-  1, the port-1 bit of `VLAN_INGRESS_CHECK` off, every port an SVLAN uplink,
+- **vlan**: `VLAN_SETUP.FILTER_ON = 0`, `PORT_VLAN_INDEX` words 0 and 1
+  written 0 (a plain write of the whole word, no read-modify-write; each
+  word holds two ports, 12 bits each, so this is the PVID of all four
+  ports), the port-1 bit of `VLAN_INGRESS_CHECK` off, every port an SVLAN uplink,
   `SVLAN_SETUP.FILTER_ON = 0` and `UNTAGGED_ACTION = 2` (port-based SVID).
   Before this step a fresh boot reads `VLAN_SETUP 0x1`, `SVLAN_SETUP 0`,
   `PORT_VLAN_INDEX 0x1001`; after it `0x18`, `0x09` and `0`, the values of
@@ -133,10 +135,14 @@ the fields it owns. Board ports: UNI 0, PON 2, CPU 3; port 1 is unused.
   `0x0d` on the stock stick; no capture shows the write, but port 1 carries
   no traffic on this board, so turning its check off cannot change
   forwarding and matches the stock state.
-  Not written, because the register strides are not decoded:
-  `PORT_VLAN_INDEX` of ports 2 and 3 (base + 4n lands port 2 on the
-  separate register at `0x013014`) and the per-port SVID (base + 4n lands
-  port 2 of `PORT_SVLAN_INDEX` on `SVLAN_SETUP`).
+  `PORT_VLAN_INDEX` is two ports per word, not one: word 0 (`0x01300c`)
+  holds ports 0 and 1, word 1 (`0x013010`) ports 2 and 3, and the
+  `0x1001` of a fresh boot is two 12-bit fields. Indexing it as base + 4 *
+  port would put port 2 on `0x013014`, which is why the platform step
+  writes words 0 and 1, not ports 0 to 3. The cmd 51 sequence writes the
+  same two words whole, so it also sets the PVID of ports 2 and 3.
+  Not written, because its stride is not decoded: the per-port SVID
+  (base + 4n lands port 2 of `PORT_SVLAN_INDEX` on `SVLAN_SETUP`).
 - **l3 off**: `L3_GLOBAL_CTRL` (0x01106c) bit 0, the L3 engine's enable,
   cleared when set. It reads `0x4` (off) after a power-up and on a stick
   running this image; it survives a warm restart, so a firmware that
