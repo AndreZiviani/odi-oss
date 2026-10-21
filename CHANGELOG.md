@@ -15,7 +15,9 @@ listed here.
   still bound to the PLOAM Alloc-ID, so upstream keeps working on an OLT
   that never Sets it (omcid logs a warning for each such T-CONT). Read at
   every Get, so a change is live. `docs/SETTINGS.md`.
-
+  On a stick whose OLT sets the T-CONT Alloc-IDs itself, a re-registration
+  with the key at unassigned kept its service (O5, all services, traffic) and
+  its T-CONT values.
 ## v1.11.0 - 2026-10-21
 
 - Releases: confd v1.8.0 (the web UI's management-address change goes
