@@ -485,14 +485,33 @@ static int tag_from_olt;
 #define EXTVLAN_ASSOC_ETH_UNI 2
 #define EXTVLAN_ENTRIES_MAX   12
 
-static int olt_tag(int *pri)
+static const char *olt_logged;
+static int olt_logged_vid = -1, olt_logged_pri = -1;
+
+/* Say once, and again only when it changes, why the OLT's class 171 was not
+ * applied. NULL forgets what was said, so a reason that comes back after the
+ * table was applied is said again. */
+static void olt_note(const char *why)
 {
-	static const char *logged;
-	static int logged_vid = -1, logged_pri = -1;
+	if (!why) {
+		olt_logged = 0;
+		return;
+	}
+	if (why != olt_logged) {
+		out_fmt("   ext vlan: OLT rule not applied (%s), transparent\n", why);
+		olt_logged = why;
+		olt_logged_vid = -1;
+		olt_logged_pri = -1;
+	}
+}
+
+static int olt_tag(int *pri, const char **why_out)
+{
 	const struct omci_class *c171 = find_class(OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA);
 	const char *why = 0;
 	int vid = -1;
 
+	*why_out = 0;
 	if (!c171 || !cfg_olt_tagging())
 		return -1;
 	for (int i = 0; i < MIB_ROWS; i++) {
@@ -511,22 +530,17 @@ static int olt_tag(int *pri)
 		if (!why) {
 			vid = v;
 			*pri = p;
-			if (logged || logged_vid != v || logged_pri != p)
+			if (olt_logged || olt_logged_vid != v || olt_logged_pri != p)
 				out_fmt("   ext vlan 171/%04x: untagged frames get VLAN %d pri %d from the OLT\n",
 					(long)r->inst, (long)v, (long)p);
-			logged = 0;
-			logged_vid = v;
-			logged_pri = p;
+			olt_logged = 0;
+			olt_logged_vid = v;
+			olt_logged_pri = p;
 			return vid;
 		}
 		break;
 	}
-	if (why && why != logged) {
-		out_fmt("   ext vlan: OLT rule not applied (%s), transparent\n", why);
-		logged = why;
-		logged_vid = -1;
-		logged_pri = -1;
-	}
+	*why_out = why;
 	return -1;
 }
 
@@ -538,6 +552,14 @@ struct bp_rule {
 	struct omci_vlan_oper vr;
 	const char *kind;
 	int vid, pri;                    /* for the log line; -1 none */
+};
+
+/* What an ingress whose class 171 table is applied (ev_build()) leaves of the
+ * class 84 rules. The table's own entries stand in for the frames they handle;
+ * what is left is whatever its default rules do not discard. */
+struct ev_ctl {
+	int skip_untagged;       /* an entry handles untagged frames */
+	int skip_tagged;         /* the single-tag default rule discards */
 };
 
 static int bp_put(struct bp_rule *rules, int n, const char *kind, int vid, int pri)
@@ -553,6 +575,17 @@ static int bp_put(struct bp_rule *rules, int n, const char *kind, int vid, int p
 	return n + 1;
 }
 
+/* Untagged frames passed unchanged and nothing else: all that is left of a
+ * "forward everything" port once the class 171 default rule discards tagged
+ * frames. None at all when an entry of the table handles the untagged ones. */
+static void ev_untagged_only(struct bp_rule *rules, int *n, const struct ev_ctl *ev)
+{
+	if (ev->skip_untagged)
+		return;
+	*n = bp_put(rules, *n, "untagged", -1, -1);
+	gen_untagged_rule(&rules[*n - 1].vr);
+}
+
 /* The manual tag, when on, is the untagged handoff (kb and SETTINGS.md,
  * "manual VLAN"): VLAN_MANU_TAG_VID added to what comes in untagged. The
  * stock stack builds it for the class 84 entry that carries that VID, and
@@ -561,7 +594,7 @@ static int bp_put(struct bp_rule *rules, int n, const char *kind, int vid, int p
 /* *manual says whether the list itself names the manual VID: such a port
  * is installed first (the caller orders by it, as the stock stack does). */
 static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
-		    struct bp_rule *rules, int *manual)
+		    struct bp_rule *rules, int *manual, const struct ev_ctl *ev)
 {
 	const struct omci_class *c84 = find_class(OMCI_ME_VLAN_TAGGING_FILTER_DATA);
 	struct mib_row *vt = c84 ? mib_find(OMCI_ME_VLAN_TAGGING_FILTER_DATA, bp) : 0;
@@ -585,6 +618,8 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		if (mvid >= 0) {
 			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
 			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0);
+		} else if (ev && ev->skip_tagged) {
+			ev_untagged_only(rules, &n, ev);
 		} else {
 			n = bp_put(rules, n, "forward-all", -1, -1);
 			gen_no_vlan_filter_rule(&rules[0].vr);
@@ -603,10 +638,16 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	attr_value(c84, bp, 1, tbl);
 
 	if (f.tagged == FWD_TAG_ALL && f.untagged_fwd && mvid < 0) {
-		n = bp_put(rules, n, "forward-all", -1, -1);
-		gen_no_vlan_filter_rule(&rules[0].vr);
+		if (ev && ev->skip_tagged) {
+			ev_untagged_only(rules, &n, ev);
+		} else {
+			n = bp_put(rules, n, "forward-all", -1, -1);
+			gen_no_vlan_filter_rule(&rules[0].vr);
+		}
 		return n;
 	}
+	if (ev && ev->skip_tagged)
+		f.tagged = FWD_TAG_NONE;
 	for (unsigned e = 0; e < nent && f.tagged >= FWD_TAG_VID; e++) {
 		int vid = (int)(((unsigned)tbl[2 * e] << 8 | tbl[2 * e + 1]) & 0xfff);
 		int pri = tbl[2 * e] >> 5;
@@ -651,7 +692,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		if (n > had)
 			gen_tagged_rule(&rules[had].vr);
 	}
-	if (f.untagged_fwd && !*manual) {
+	if (f.untagged_fwd && !*manual && !(ev && ev->skip_untagged)) {
 		int had = n;
 
 		if (mvid >= 0) {
@@ -667,6 +708,362 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	return n;
 }
 
+/* ------------------------------------------------------ class 171, in full
+ *
+ * With the manual tag off and the one shape olt_tag() accepts not present,
+ * the OLT's extended VLAN tagging operation is applied entry by entry
+ * (extvlan.c, evtocd_plan()): one bridge rule upstream per entry, and the
+ * downstream rule that undoes it when the entry's DsMode has one. The table
+ * is applied whole or not at all -- one entry the classifier cannot carry out
+ * leaves every frame as it comes, and says which entry and why, once. A line
+ * on the manual tag never gets here, so none of this touches the shapes our
+ * two lines run.
+ *
+ * What the class 84 filter of the GEM-side port still says is kept: an entry
+ * whose result is a VID the list does not admit is not installed on that port
+ * (the ONU would discard it), and the pass-through rules the list gives for
+ * the VIDs it names stand after the entries, unless the table's single-tag
+ * default rule discards, in which case they are not made.
+ *
+ * Which GEM port an entry goes up is the priority of the tag it leaves the
+ * frame with, through the 802.1p mapper; an entry that leaves it following
+ * the frame's own, on a mapper that splits the priorities over several GEM
+ * ports, becomes one rule per priority. Frames left untagged go to the port
+ * of priority 0. */
+#define EV_RULES_MAX   24
+#define EV_OUT_MAX     (EV_RULES_MAX * 8)
+
+struct ev_rule {
+	struct evtocd_plan u, d;
+	uint8_t dsmode;
+	uint8_t entry;           /* index in the table, for the log */
+	uint16_t inst;
+};
+
+struct ev_ing {
+	int active, nrules;
+	struct ev_ctl ctl;
+	struct ev_rule rules[EV_RULES_MAX];
+};
+
+static struct ev_ing ev_tab[8];
+
+/* The first entry that was not a plan, of the table being read. */
+static const char *ev_bad_why;
+static int ev_bad_entry;
+static uint16_t ev_bad_inst;
+
+static void ev_bad(const char *why, int entry, uint16_t inst)
+{
+	if (ev_bad_why)
+		return;
+	ev_bad_why = why;
+	ev_bad_entry = entry;
+	ev_bad_inst = inst;
+}
+
+/* One class 171 instance's entries into `ev`. Returns the rules it added. */
+static int ev_read(const struct omci_class *c171, struct mib_row *r, struct ev_ing *ev)
+{
+	uint16_t in_tpid = (uint16_t)row_u32(r, c171, 3), out_tpid = (uint16_t)row_u32(r, c171, 4);
+	uint8_t dsmode = (uint8_t)row_u32(r, c171, 5);
+	int n = 0, added = 0;
+	uint8_t tbl[EXTVLAN_ENTRIES_MAX * EVTOCD_ENTRY_LEN];
+
+	if (!in_tpid)
+		in_tpid = EVTOCD_TPID_C;
+	if (!out_tpid)
+		out_tpid = EVTOCD_TPID_C;
+	for (uint8_t t = r->tbl_head; t != MIB_TBL_NONE && n < EXTVLAN_ENTRIES_MAX;
+	     t = tblpool[t].next, n++)
+		for (int b = 0; b < EVTOCD_ENTRY_LEN; b++)
+			tbl[n * EVTOCD_ENTRY_LEN + b] = tblpool[t].data[b];
+
+	for (int i = 0; i < n; i++) {
+		struct evtocd_entry e;
+		struct evtocd_action a;
+		const char *why;
+		struct ev_rule *er;
+		int dt;
+
+		evtocd_decode(tbl + i * EVTOCD_ENTRY_LEN, &e);
+		dt = evtocd_default_rule_tags(&e);
+		if (dt >= 0) {
+			/* A default rule discards or passes; one that adds or
+			 * removes a tag is not a shape the classifier has. */
+			evtocd_action(&e, in_tpid, out_tpid, &a);
+			if (a.discard) {
+				if (dt == 1)
+					ev->ctl.skip_tagged = 1;
+			} else if (!a.transparent) {
+				ev_bad("a default rule adds or removes tags", i, r->inst);
+			}
+			continue;
+		}
+		if (ev->nrules >= EV_RULES_MAX) {
+			ev_bad("more rules than omcid keeps", i, r->inst);
+			continue;
+		}
+		er = &ev->rules[ev->nrules];
+		why = evtocd_plan(&e, in_tpid, out_tpid, &er->u);
+		if (why) {
+			ev_bad(why, i, r->inst);
+			continue;
+		}
+		er->dsmode = dsmode;
+		er->entry = (uint8_t)i;
+		er->inst = r->inst;
+		/* DsMode 5 to 8 say what else the OLT wants discarded; the
+		 * classifier has no drop action here, so it is forwarded. */
+		if (dsmode >= EVTOCD_DSMODE_VID_PRI_DROP && dsmode <= EVTOCD_DSMODE_DROP_ALL)
+			out_fmt("   ext vlan 171/%04x entry %d: downstream mode %d discards frames, which is not done\n",
+				(long)r->inst, (long)i, (long)dsmode);
+		if (!er->u.s.in && !er->u.c.in)
+			ev->ctl.skip_untagged = 1;
+		ev->nrules++;
+		added++;
+	}
+	return added;
+}
+
+/* Whether a class 171 instance is the one for this ingress: its pointer
+ * names the UNI or VEIP (association type 2 or 10) or the UNI-side bridge
+ * port (0). `legacy` is the fallback of olt_tag(): any instance on a PPTP
+ * Ethernet UNI, whatever it points at. */
+static int ev_match(const struct omci_class *c171, const struct mib_row *r,
+		    uint16_t ingress, uint16_t bport, int legacy)
+{
+	uint32_t type = row_u32(r, c171, 1), point = row_u32(r, c171, 7);
+
+	if (legacy)
+		return type == EXTVLAN_ASSOC_ETH_UNI;
+	if (type == EXTVLAN_ASSOC_ETH_UNI || type == 10)
+		return point == ingress;
+	if (type == 0)
+		return point == bport;
+	return 0;
+}
+
+/* Read the table for every ingress into ev_tab. Returns how many ingresses
+ * have one that is applied; 0, with ev_bad_why set, when an entry was not
+ * a plan. */
+static int ev_build(const int *ingress, const int *bport, int ning)
+{
+	const struct omci_class *c171 = find_class(OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA);
+	int active = 0, anygood = 0;
+
+	ev_bad_why = 0;
+	for (int g = 0; g < 8; g++)
+		ev_tab[g].active = 0;
+	if (!c171 || !cfg_olt_tagging())
+		return 0;
+	for (int g = 0; g < ning; g++) {
+		struct ev_ing *ev = &ev_tab[g];
+		int got = 0;
+
+		ev->nrules = 0;
+		ev->ctl.skip_untagged = ev->ctl.skip_tagged = 0;
+		for (int pass = 0; pass < 2 && !got; pass++) {
+			ev->nrules = 0;
+			ev->ctl.skip_untagged = ev->ctl.skip_tagged = 0;
+			for (int i = 0; i < MIB_ROWS; i++) {
+				struct mib_row *r = mib_row_at(i);
+
+				if (!r || r->classId != OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA ||
+				    !ev_match(c171, r, (uint16_t)ingress[g], (uint16_t)bport[g], pass))
+					continue;
+				got += ev_read(c171, r, ev);
+			}
+		}
+		ev->active = got > 0;
+		active += ev->active;
+		anygood += got;
+	}
+	/* Not one entry was a plan: that is not a table to apply, and the
+	 * reason olt_tag() found is the one to give. */
+	if (ev_bad_why && !anygood)
+		ev_bad_why = 0;
+	if (ev_bad_why) {
+		for (int g = 0; g < 8; g++)
+			ev_tab[g].active = 0;
+		return 0;
+	}
+	return active;
+}
+
+/* Say what is wrong with the table, once per reason. */
+static const char *ev_said_why;
+static int ev_said_entry = -1;
+static uint16_t ev_said_inst;
+
+static void ev_note_bad(void)
+{
+	if (ev_bad_why == ev_said_why && ev_bad_entry == ev_said_entry &&
+	    ev_bad_inst == ev_said_inst)
+		return;
+	out_fmt("   ext vlan 171/%04x entry %d: OLT rule not applied (%s), transparent\n",
+		(long)ev_bad_inst, (long)ev_bad_entry, ev_bad_why);
+	ev_said_why = ev_bad_why;
+	ev_said_entry = ev_bad_entry;
+	ev_said_inst = ev_bad_inst;
+}
+
+/* ---- what one GEM-side bridge port gets of it */
+
+struct ev_out {
+	struct omci_vlan_oper us, ds;
+	int has_ds;
+	int vid, pri;            /* the match, for the log */
+	uint16_t inst;
+	uint8_t entry;
+	const char *kind;
+};
+static struct ev_out ev_outs[EV_OUT_MAX];
+
+/* Whether the class 84 filter of GEM-side port `bp` lets a frame whose
+ * outermost tag is (vid, pri), or which has none (vid < 0 and tags 0)
+ * through. No filter, an empty list, or a code that bridges everything:
+ * everything. */
+static int ev_admits(uint16_t bp, int tags, int vid, int pri)
+{
+	const struct omci_class *c84 = find_class(OMCI_ME_VLAN_TAGGING_FILTER_DATA);
+	struct mib_row *vt = c84 ? mib_find(OMCI_ME_VLAN_TAGGING_FILTER_DATA, bp) : 0;
+	uint32_t nent, code;
+	struct fwdop f;
+	uint8_t tbl[24];
+
+	if (!vt)
+		return 1;
+	nent = row_u32(vt, c84, 3);
+	code = row_u32(vt, c84, 2);
+	if (!nent)
+		return 1;
+	f = fwdop_decode(code);
+	if (!f.supported)
+		f = fwdop_decode(FWDOP_MANDATORY);
+	if (!tags)
+		return f.untagged_fwd;
+	if (f.tagged == FWD_TAG_ALL)
+		return 1;
+	if (f.tagged == FWD_TAG_NONE)
+		return 0;
+	if (vid < 0 && pri < 0)
+		return 1;             /* the frame's own VID is not known here */
+	if (nent > 12)
+		nent = 12;
+	for (unsigned b = 0; b < sizeof tbl; b++)
+		tbl[b] = 0;
+	attr_value(c84, bp, 1, tbl);
+	for (unsigned e = 0; e < nent; e++) {
+		int lv = (int)(((unsigned)tbl[2 * e] << 8 | tbl[2 * e + 1]) & 0xfff);
+		int lp = tbl[2 * e] >> 5;
+
+		if (f.tagged == FWD_TAG_VID && (vid < 0 || lv == vid))
+			return 1;
+		if (f.tagged == FWD_TAG_PRI && (pri < 0 || lp == pri))
+			return 1;
+		if (f.tagged == FWD_TAG_TCI && (vid < 0 || lv == vid) && (pri < 0 || lp == pri))
+			return 1;
+	}
+	return 0;
+}
+
+/* The plane of the outermost tag the frame leaves with, or NULL. */
+static struct evtocd_plane *ev_outer(struct evtocd_plan *u)
+{
+	if (u->s.out)
+		return &u->s;
+	if (u->c.out)
+		return &u->c;
+	return 0;
+}
+
+/* The match a plan names, for the log. */
+static void ev_match_of(const struct evtocd_plan *u, int *vid, int *pri)
+{
+	const struct evtocd_plane *q = u->cmp == EVTOCD_CMP_S ? &u->s : &u->c;
+
+	*vid = q->f_vid;
+	*pri = q->f_pri;
+}
+
+static int ev_add_out(int n, const struct ev_rule *er, const struct evtocd_plan *u)
+{
+	struct evtocd_plan d;
+	const char *dwhy = 0;
+	struct ev_out *o;
+
+	if (n >= EV_OUT_MAX)
+		return n;
+	o = &ev_outs[n];
+	evtocd_plan_oper(u, &o->us);
+	o->has_ds = evtocd_plan_ds(u, er->dsmode, &d, &dwhy);
+	if (o->has_ds)
+		evtocd_plan_oper(&d, &o->ds);
+	ev_match_of(u, &o->vid, &o->pri);
+	o->inst = er->inst;
+	o->entry = er->entry;
+	o->kind = "ext-vlan";
+	return n + 1;
+}
+
+/* The rules of ingress `g` for one GEM-side port, whose 802.1p mapper sends
+ * the priorities in `pmask` (bit n: priority n) to this GEM port. */
+static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask)
+{
+	int n = 0;
+
+	for (int i = 0; i < ev->nrules; i++) {
+		const struct ev_rule *er = &ev->rules[i];
+		struct evtocd_plan u = er->u;
+		struct evtocd_plane *q = ev_outer(&u);
+
+		if (!u.out_tags) {
+			/* Left untagged: it goes where the default priority 0
+			 * goes, and is admitted by the untagged half of FwdOp. */
+			if ((pmask & 1u) && ev_admits(bp, 0, -1, -1))
+				n = ev_add_out(n, er, &u);
+			continue;
+		}
+		if (u.out_pri >= 0) {
+			if ((pmask >> u.out_pri & 1u) && ev_admits(bp, u.out_tags, u.out_vid, u.out_pri))
+				n = ev_add_out(n, er, &u);
+			continue;
+		}
+		/* Its priority is the frame's own. One GEM port for every
+		 * priority needs no split; otherwise a rule for each priority
+		 * this port carries, which needs the filter to be able to name
+		 * it. */
+		if (pmask == 0xffu) {
+			if (ev_admits(bp, u.out_tags, u.out_vid, -1))
+				n = ev_add_out(n, er, &u);
+			continue;
+		}
+		{
+			const struct evtocd_plane *oth = q == &u.s ? &u.c : &u.s;
+
+			if (!q || (oth->in && (oth->f_vid >= 0 || oth->f_pri >= 0))) {
+				if (pmask & 1u)
+					out_fmt("   ext vlan 171/%04x entry %d: not applied, its priorities are split over GEM ports and the rule names another tag\n",
+						(long)er->inst, (long)er->entry);
+				continue;
+			}
+		}
+		for (int pr = 0; pr < 8; pr++) {
+			struct evtocd_plan v = er->u;
+			struct evtocd_plane *w = ev_outer(&v);
+
+			if (!(pmask >> pr & 1u) || !ev_admits(bp, v.out_tags, v.out_vid, pr))
+				continue;
+			w->f_pri = (int8_t)pr;
+			v.out_pri = (int8_t)pr;
+			v.cmp = w == &v.s ? EVTOCD_CMP_S : EVTOCD_CMP_C;
+			n = ev_add_out(n, er, &v);
+		}
+	}
+	return n;
+}
+
 void bdgconn_rebuild(void)
 {
 	const struct omci_class *c47 = find_class(OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA);
@@ -675,7 +1072,8 @@ void bdgconn_rebuild(void)
 	const struct omci_class *c281 = find_class(OMCI_ME_MCAST_GEM_IW_TP);
 	const struct omci_class *c84 = find_class(OMCI_ME_VLAN_TAGGING_FILTER_DATA);
 	const struct omci_class *c130 = find_class(OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE);
-	int ingress[8], ingress_bridge[8], ning = 0, added = 0, mvid;
+	int ingress[8], ingress_bridge[8], ingress_bport[8], ning = 0, added = 0, mvid;
+	int nev = 0;
 
 	for (int i = 0; i < conn_nservs; i++) {
 		if (apply_hw)
@@ -695,6 +1093,7 @@ void bdgconn_rebuild(void)
 		tp = row_u32(r, c47, 3);
 		if ((tp == 1 || tp == 11) && ning < 8) { /* Ethernet UNI, VEIP */
 			ingress_bridge[ning] = (int)row_u32(r, c47, 1);
+			ingress_bport[ning] = r->inst;
 			ingress[ning++] = (int)row_u32(r, c47, 4);
 		}
 	}
@@ -703,9 +1102,24 @@ void bdgconn_rebuild(void)
 	mvid = cfg_manual_vid();
 	tag_pri = vlanCfg.pri;
 	tag_from_olt = 0;
+	for (int g = 0; g < 8; g++)
+		ev_tab[g].active = 0;
 	if (mvid < 0) {
-		mvid = olt_tag(&tag_pri);
+		const char *why;
+
+		mvid = olt_tag(&tag_pri, &why);
 		tag_from_olt = mvid >= 0;
+		if (mvid < 0) {
+			/* The one shape was not there; the whole table, entry by
+			 * entry, may still be. */
+			nev = ev_build(ingress, ingress_bport, ning);
+			if (nev)
+				olt_note(0);
+			else if (ev_bad_why)
+				ev_note_bad();
+			else if (why)
+				olt_note(why);
+		}
 	}
 	/* Service ids are classifier priority. OEM installs the configured
 	 * untagged service first, the other unicast services in reverse MIB order,
@@ -716,6 +1130,7 @@ void bdgconn_rebuild(void)
 			struct mib_row *r = mib_row_at(row), *iw, *ctp, *mapper;
 			struct mib_row *tgt_iw[8];
 			int tgt_pbit[8], ntgt = 0;
+			unsigned tgt_pmask[8];   /* the priorities each target carries */
 			uint32_t tpType;
 
 			if (!r || r->classId != OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
@@ -737,7 +1152,7 @@ void bdgconn_rebuild(void)
 			if (tpType == MBPCD_TP_GEM_IWTP) {
 				iw = mib_find(OMCI_ME_GEM_IW_TP, (uint16_t)row_u32(r, c47, 4));
 				if (iw && row_u32(iw, c266, 2) != 6) {
-					tgt_iw[0] = iw; tgt_pbit[0] = -1; ntgt = 1;
+					tgt_iw[0] = iw; tgt_pbit[0] = -1; tgt_pmask[0] = 0xffu; ntgt = 1;
 				}
 			} else if (tpType == 3) {
 				uint16_t ptr = (uint16_t)row_u32(r, c47, 4);
@@ -745,20 +1160,23 @@ void bdgconn_rebuild(void)
 				iw = mib_find(OMCI_ME_GEM_IW_TP, ptr);
 				if (iw) {
 					int pbit = -1;
+					unsigned pmask = 0xffu;
 
 					mapper = mib_find(OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE, (uint16_t)row_u32(iw, c266, 3));
 					if (mapper) {
 						int matches = 0;
 
+						pmask = 0;
 						for (int pri = 0; pri < 8; pri++)
 							if (row_u32(mapper, c130, 2 + pri) == iw->inst) {
 								pbit = pri;
 								matches++;
+								pmask |= 1u << pri;
 							}
 						if (matches != 1)
 							pbit = -1;
 					}
-					tgt_iw[0] = iw; tgt_pbit[0] = pbit; ntgt = 1;
+					tgt_iw[0] = iw; tgt_pbit[0] = pbit; tgt_pmask[0] = pmask; ntgt = 1;
 				} else if ((mapper = mib_find(OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE, ptr)) != 0) {
 					for (int pri = 0; pri < 8; pri++) {
 						uint32_t id = row_u32(mapper, c130, 2 + pri);
@@ -771,28 +1189,31 @@ void bdgconn_rebuild(void)
 								break;
 						if (k < ntgt) {
 							tgt_pbit[k] = -1;    /* several p-bits: VID only */
+							tgt_pmask[k] |= 1u << pri;
 							continue;
 						}
 						iw = mib_find(OMCI_ME_GEM_IW_TP, (uint16_t)id);
 						if (!iw || ntgt >= 8)
 							continue;
-						tgt_iw[ntgt] = iw; tgt_pbit[ntgt] = pri; ntgt++;
+						tgt_iw[ntgt] = iw; tgt_pbit[ntgt] = pri; tgt_pmask[ntgt] = 1u << pri; ntgt++;
 					}
 					/* All eight on one IW TP is the plain service, not a
 					 * p-bit 0 service. */
-					if (ntgt == 1)
+					if (ntgt == 1) {
 						tgt_pbit[0] = -1;
+						tgt_pmask[0] = 0xffu;
+					}
 				}
 			} else {
 				iw = mib_find(OMCI_ME_MCAST_GEM_IW_TP, (uint16_t)row_u32(r, c47, 4));
 				if (iw) {
-					tgt_iw[0] = iw; tgt_pbit[0] = -1; ntgt = 1;
+					tgt_iw[0] = iw; tgt_pbit[0] = -1; tgt_pmask[0] = 0xffu; ntgt = 1;
 				}
 			}
 			for (int t = 0; t < ntgt; t++) {
 			struct bp_rule rules[BP_RULES_MAX];
 			uint32_t port, dir;
-			int nrules, manual;
+			int nrules, manual, use_ev, plain = 0;
 
 			iw = tgt_iw[t];
 			ctp = mib_find(OMCI_ME_GEM_PORT_CTP, (uint16_t)row_u32(iw, tpType == 6 ? c281 : c266, 1));
@@ -800,11 +1221,24 @@ void bdgconn_rebuild(void)
 				continue;
 			port = row_u32(ctp, c268, 1);
 			dir = row_u32(ctp, c268, 3);
-			nrules = bp_rules(r->inst, tgt_pbit[t], mvid, dir, rules, &manual);
+			nrules = bp_rules(r->inst, tgt_pbit[t], mvid, dir, rules, &manual, 0);
 			if (tpType != 6 && ((pass == 0 && !manual) ||
 					    (pass == 1 && manual)))
 				continue;
-			for (int k = 0; k < nrules; k++) {
+			/* An ingress with its class 171 table applied gets the
+			 * table's rules and what is left of the class 84 ones
+			 * (ev_for_port()); the others the rules above. */
+			use_ev = 0;
+			if (tpType != 6 && (dir & OMCI_DIR_US))
+				for (int g = 0; g < ning; g++)
+					if (ev_tab[g].active &&
+					    ingress_bridge[g] == (int)row_u32(r, c47, 1))
+						use_ev++;
+			for (int g = 0; g < ning; g++)
+				if (ingress_bridge[g] == (int)row_u32(r, c47, 1) &&
+				    !(use_ev && ev_tab[g].active))
+					plain++;
+			for (int k = 0; k < nrules && (!use_ev || plain); k++) {
 			out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
 				apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
 				rules[k].kind, (long)rules[k].vid, (long)rules[k].pri);
@@ -816,6 +1250,8 @@ void bdgconn_rebuild(void)
 				 * seen has one. */
 				if (ingress_bridge[g] != (int)row_u32(r, c47, 1))
 					continue;
+				if (use_ev && ev_tab[g].active)
+					continue;
 				id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rules[k].vr);
 				if (id >= 0 && conn_nservs < SERV_MAX) {
 					conn_servs[conn_nservs++] = id;
@@ -823,6 +1259,48 @@ void bdgconn_rebuild(void)
 				}
 			}
 			}                        /* rules of this target */
+			for (int g = 0; use_ev && g < ning; g++) {
+				struct ev_ing *ev = &ev_tab[g];
+				struct bp_rule rest[BP_RULES_MAX];
+				int nout, nrest, mf;
+
+				if (!ev->active || ingress_bridge[g] != (int)row_u32(r, c47, 1))
+					continue;
+				nout = ev_for_port(ev, r->inst, tgt_pmask[t]);
+				for (int k = 0; k < nout; k++) {
+					const struct ev_out *o = &ev_outs[k];
+					int id;
+
+					out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
+						apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
+						o->kind, (long)o->vid, (long)o->pri);
+					id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_US, &o->us);
+					if (id >= 0 && conn_nservs < SERV_MAX) {
+						conn_servs[conn_nservs++] = id;
+						added++;
+					}
+					if (o->has_ds && (dir & OMCI_DIR_DS)) {
+						id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_DS, &o->ds);
+						if (id >= 0 && conn_nservs < SERV_MAX) {
+							conn_servs[conn_nservs++] = id;
+							added++;
+						}
+					}
+				}
+				nrest = bp_rules(r->inst, tgt_pbit[t], mvid, dir, rest, &mf, &ev->ctl);
+				for (int k = 0; k < nrest; k++) {
+					int id;
+
+					out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
+						apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
+						rest[k].kind, (long)rest[k].vid, (long)rest[k].pri);
+					id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rest[k].vr);
+					if (id >= 0 && conn_nservs < SERV_MAX) {
+						conn_servs[conn_nservs++] = id;
+						added++;
+					}
+				}
+			}
 			}                        /* targets of this bridge port */
 		}
 	}

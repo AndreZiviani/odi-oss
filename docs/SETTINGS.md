@@ -252,23 +252,39 @@ which:
 **Not in manual mode: the OLT's own rule.** With `VLAN_CFG_TYPE` other than
 1 (0 is what a stock stick with no key reads), the stock firmware applies the
 extended VLAN tagging operation (class 171) the OLT provisions, and so does
-omcid, for one shape only: the instance associated with the Ethernet UNI
-(association type 2) has a rule for untagged frames that adds a single tag
-with a concrete VID (1 to 4094) and priority (0 to 7) at TPID 0x8100, and
-nothing else but default rules that drop or pass. It builds the same rule as
-the manual tag with that VID and priority: untagged frames get the tag
-upstream, the tag is removed downstream and from multicast, and the router
-sees untagged frames. Frames the router already tags with that VID still
-pass upstream unchanged when the OLT's VLAN filter (class 84) on the GEM side
-lists the VID, since the table leaves tagged frames on its default rule
-(G.988); the manual tag, by contrast, takes the place of that entry. An OLT's "untagged frames: add VLAN 100 pri 0"
-is this shape (`omcli mib 171` prints the rule). omcid logs
-`untagged frames get VLAN <vid> pri <p> from the OLT` when it applies one.
-Any other shape (a rule for tagged frames, VID or priority copied from a tag,
-two tags, an EtherType filter, a discard of untagged frames, no class 171 at
-all) stays transparent, and omcid logs once
-`OLT rule not applied (<reason>), transparent`; that line is what to report.
-The rule follows class 171 as the OLT changes it (Set, Create, Delete).
+omcid. Two ways, tried in this order:
+
+1. The shape that was there first: the instance associated with the Ethernet
+   UNI (association type 2) has a rule for untagged frames that adds a single
+   tag with a concrete VID (1 to 4094) and priority (0 to 7) at TPID 0x8100,
+   and nothing else but default rules that drop or pass. It builds the same
+   rule as the manual tag with that VID and priority: untagged frames get the
+   tag upstream, the tag is removed downstream and from multicast, and the
+   router sees untagged frames. Frames the router already tags with that VID
+   still pass upstream unchanged when the OLT's VLAN filter (class 84) on the
+   GEM side lists the VID, since the table leaves tagged frames on its default
+   rule (G.988); the manual tag, by contrast, takes the place of that entry.
+   omcid logs `untagged frames get VLAN <vid> pri <p> from the OLT`.
+2. Any other table: each entry becomes its own rule, with the rule that
+   undoes it downstream as DsMode says. A single VID translated to another
+   (C-VID 410 to 1410), one VID split into rows by priority, an S-tag pushed
+   or popped, a tag removed or added: `docs/SWITCH.md`, "Extended VLAN rules",
+   has every shape, what is done and what is refused. The GEM port of a rule
+   is the priority its result leaves with, through the 802.1p mapper (a rule
+   that keeps the frame's priority on a mapper that splits them becomes one
+   rule per priority); the class 84 list of the GEM-side port still decides
+   which result VIDs are admitted. The single-tag default rule decides whether
+   tagged frames the table does not name pass: a discard there means they do
+   not. The table is applied whole or not at all: one entry the classifier
+   cannot carry out leaves every frame as it comes, and omcid logs once
+   `ext vlan 171/<instance> entry <n>: OLT rule not applied (<reason>),
+   transparent`; that line is what to report.
+
+A table with no entry of either kind (no class 171 at all, or only default
+rules) stays transparent and omcid logs once `OLT rule not applied
+(<reason>), transparent`. The rules follow class 171 as the OLT changes it
+(Set, Create, Delete). `omcli bridge` lists them (`rule ext-vlan vid <v> pri
+<p>`, the VID and priority the rule matches).
 
 The manual tag is checked first and never yields: with `VLAN_CFG_TYPE` 1 the
 table is not read, whatever `VLAN_MANU_MODE` says. That matters on ISP1,

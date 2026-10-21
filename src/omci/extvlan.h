@@ -174,4 +174,92 @@ int evtocd_describe(const struct evtocd_entry *e, uint16_t input_tpid,
 const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
 			   int *vid, int *pri);
 
+
+/* ------------------------------------------ what the classifier can do -----
+ *
+ * One entry of the table, reduced to what the switch's classifier can carry
+ * out. The classifier compares one tag's VID and priority per row, tells an
+ * S-tag (TPID 0x88a8, the primary S-VLAN TPID) from a C-tag (0x8100), and
+ * acts on the two tags as two independent planes: the C-tag can be added,
+ * replaced (its priority kept, or assigned) or removed, the S-tag added,
+ * replaced or removed. An entry is a "plan" when it is expressible that way;
+ * otherwise evtocd_plan() says in words what it is not.
+ *
+ * The same structure describes either direction. evtocd_plan() builds the
+ * upstream one from an entry; evtocd_plan_ds() turns it into the downstream
+ * one, G.988 "inverse" operation included, so a downstream row is just
+ * another plan and nothing downstream-specific has to be taught to the code
+ * that turns plans into rules.
+ */
+#define EVTOCD_TPID_C                0x8100
+#define EVTOCD_TPID_S                0x88a8
+
+enum evtocd_op {
+	EVTOCD_OP_PASS = 0,     /* the tag, if the frame has one, is left alone */
+	EVTOCD_OP_PUSH,         /* the frame had no such tag; it gets one */
+	EVTOCD_OP_REWRITE,      /* the frame had one; it gets other values */
+	EVTOCD_OP_POP,          /* the frame had one; it goes */
+};
+
+/* One tag position: the C-tag, or the S-tag. */
+struct evtocd_plane {
+	uint8_t in;             /* the matched frame carries this tag */
+	uint8_t out;            /* and leaves carrying it */
+	uint8_t op;             /* enum evtocd_op */
+	int16_t f_vid;          /* match on the tag's VID, -1 not examined */
+	int8_t  f_pri;          /* match on its priority, -1 not examined */
+	int16_t vid;            /* PUSH, REWRITE: the VID written */
+	int8_t  pri;            /* PUSH, REWRITE: the priority written, -1 keep
+				 * the one the tag has (a REWRITE of a C-tag) */
+};
+
+/* Which tag the classifier compares. Only one, so a plan whose frame has both
+ * tags and examines both is refused, and a downstream one narrows to one. */
+enum evtocd_cmp { EVTOCD_CMP_C = 0, EVTOCD_CMP_S };
+
+struct evtocd_plan {
+	struct evtocd_plane s, c;
+	uint8_t cmp;            /* enum evtocd_cmp: the tag f_vid / f_pri belong to */
+	uint8_t out_tags;       /* tags the frame leaves with: 0, 1 or 2 */
+	int16_t out_vid;        /* the outermost of them, -1 when it follows the frame */
+	int8_t  out_pri;        /* likewise; what picks the GEM port on a mapper */
+	uint8_t ds_wider;       /* downstream: matches more than the OLT said (the
+				 * discard half of modes 5 to 7 is not done, or only
+				 * one of two tags is compared) */
+};
+
+/* Downstream behaviour, class 171 attribute 5 ("DsMode"), G.988 table 9.3.13-1. */
+#define EVTOCD_DSMODE_INVERSE        0   /* undo the upstream operation */
+#define EVTOCD_DSMODE_FORWARD        1   /* forward everything unchanged */
+#define EVTOCD_DSMODE_VID_PRI        2   /* undo on VID and priority, else forward */
+#define EVTOCD_DSMODE_VID            3   /* undo on VID, else forward */
+#define EVTOCD_DSMODE_PRI            4   /* undo on priority, else forward */
+#define EVTOCD_DSMODE_VID_PRI_DROP   5   /* as 2, but discard the rest */
+#define EVTOCD_DSMODE_VID_DROP       6
+#define EVTOCD_DSMODE_PRI_DROP       7
+#define EVTOCD_DSMODE_DROP_ALL       8
+
+/* Turn one entry into its upstream plan. Returns NULL, or a static reason
+ * naming what the classifier cannot do (what an operator reports). Default
+ * rules and discard entries are not plans: the caller reads them with
+ * evtocd_default_rule_tags() and evtocd_action(). */
+const char *evtocd_plan(const struct evtocd_entry *e, uint16_t input_tpid,
+			uint16_t output_tpid, struct evtocd_plan *p);
+
+/* The downstream plan of an upstream one under `ds_mode`. Returns 1 with *d
+ * filled, or 0 with no downstream rule and *why saying so: mode 1 and 8 want
+ * none, and a rule that merged several frames into one (a filter that did not
+ * name the VID it replaced) cannot be undone. */
+int evtocd_plan_ds(const struct evtocd_plan *u, uint8_t ds_mode,
+		   struct evtocd_plan *d, const char **why);
+
+/* The plan as the bridge rule of cmd 51, rule_gen OMCI_VLAN_OPER_EXTVLAN_GEN
+ * (omci_bdgconn.h). Either direction's plan; the caller sets the descriptor's
+ * direction. */
+struct omci_vlan_oper;
+void evtocd_plan_oper(const struct evtocd_plan *p, struct omci_vlan_oper *vr);
+
+/* One line for the log: "C-VID 410 pri 5 -> C-VID 1410 pri kept", say. */
+int evtocd_plan_describe(const struct evtocd_plan *p, char *buf, int max);
+
 #endif

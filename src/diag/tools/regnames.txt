@@ -259,6 +259,10 @@ reg 0x02a000 PORT_EGRESS_TAG_MODE
 reg 0x015040 ACL_PORT_ENABLE
 reg 0x01600c CLASSIFY_SETUP    12:5=PATTERN1_COUNT 3:3=PON_SELECT 2:2=DS_NO_MATCH_ACTION 1:0=US_NO_MATCH_ACTION
 reg 0x016010 CLASSIFY_PATTERN_SEL 0:0=PATTERN
+# Which tag a classifier rule compares VID and priority on, per template (two
+# of them, array 0..1; a rule picks one through CLASSIFY_PATTERN_SEL), per
+# direction: 0 the C-tag, 1 the S-tag. Both words read 0 out of reset.
+reg 0x016030 CLASSIFY_TEMPLATE 7:6=DS_PRI 5:4=DS_VID 3:2=US_PRI 1:0=US_VID
 
 # Port isolation: per ingress port, the ports it may forward to (bits 3:0,
 # bit n = switch port n) and the CPU-side extension ports (bits 10:4). Two

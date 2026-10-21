@@ -204,7 +204,6 @@ check "transparent (type 1, mode 0): the OLT rule is not applied either" "$got" 
 store 0 0
 for shape in "copy-vid:$COPYVID:the added VID is not a concrete" \
             "tagged:$TAGGED,$DEF1:a rule for tagged frames" \
-            "two:$ADD100,$ADD200ET:more than one rule for untagged" \
             "etype:$ADD200ET:the untagged rule filters on the EtherType" \
             "noadd:$DEF1,$DEF2:no rule for untagged"; do
 	sn=${shape%%:*}; rest=${shape#*:}; ents=${rest%%:*}; why=${rest#*:}
@@ -255,6 +254,153 @@ got=$($Q cli/build/omcli vlan /tmp/store-transparent.xml 2>&1 | sed -n '6p')
 check "omcli vlan: mode 0 is transparent" "$got" \
       "handling    transparent: no tag added or removed, the router tags"
 omcid_stop "$pid"
+
+# ---- the whole table: one rule per entry, whatever the shape ----------------
+#
+# Where the single untagged-add shape above is not what the OLT provisions,
+# each entry of class 171 becomes its own bridge rule (respond/apply_bridge.c,
+# ev_build()); the table is applied whole or not at all. "ext-vlan" lines are
+# the rules of the entries, vid and pri what the rule matches (-1: not examined);
+# "untagged" and "forward-all" are what the class 84 side leaves: no tagged
+# pass-through once the single-tag default rule of the table discards, untagged frames
+# passed unless an entry handles them.
+#
+# The entries, worked out with the layout of class 171 (src/omci/extvlan.h):
+TRANS410=f800000080cd0000400f800000082c14   # C-VID 410 -> 1410, priority kept
+SPLIT0=f800000000cd0000400f800000082c14     # the same for priority 0 only
+SPLIT5=f800000050cd0000400f800000082c14
+SPLIT6=f800000060cd0000400f800000082c14
+PRIREMAP=f800000030320000400f800000058004   # (VID 100, pri 3) -> priority 5, VID kept
+SPUSH=f800000080320000000f800000030646      # C-VID 100: S-VID 200 pri 3 pushed (Output TPID 0x88a8)
+SPOP=8064000088000000400f8000000f8000       # S-VID 200 over a C-tag: S-tag popped (Input TPID 0x88a8)
+UNTAG_S=f8000000f8000000000f800000030966    # untagged: S-VID 300 pri 3 added
+POPANY=f800000088000000400f8000000f8000     # any single tag removed: no way back
+
+# sessionx <input tpid> <output tpid> <entry>...: as session(), with the TPIDs
+# of instance 1 and DsMode 0.
+sessionx() {
+	in=$1; out=$2; shift 2
+	grep -v '^#' "$FIX/omci-session-isp2.txt" |
+		awk 'substr($0, 7, 6) == "0a00ab" { next } { print }'
+	frame 44 00ab 0001 "020101"
+	frame 48 00ab 0001 "3800${in}${out}00"
+	for e in "$@"; do set171 0001 "$e"; done
+	frame 44 00ab 0002 "0a0601"
+	frame 48 00ab 0002 "3800810081000000"
+	set171 0002 "$DEF1"
+	set171 0002 "$DEF2"
+}
+
+store 0 0
+sessionx 8100 8100 "$TRANS410" "$DEF1" "$DEF2" > /tmp/s171-t.txt
+run171 ev-trans /tmp/s171-t.txt
+got=$(rebuild /tmp/omcid-171-ev-trans.log 0)
+check "class 171, translation 410 -> 1410 and the default discards: its own rule, untagged passes, tagged does not" "$got" \
+"47/0ffe gem 4094 rule forward-all vid -1 pri -1
+47/1002 gem 657 rule ext-vlan vid 410 pri -1
+47/1002 gem 657 rule untagged vid -1 pri -1"
+got=$(grep -c 'OLT rule not applied' /tmp/omcid-171-ev-trans.log)
+check "and nothing is said about a rule not applied" "$got" "0"
+
+sessionx 8100 8100 "$TRANS410" > /tmp/s171-t2.txt
+run171 ev-trans-pass /tmp/s171-t2.txt
+got=$(rebuild /tmp/omcid-171-ev-trans-pass.log 0)
+check "no default rule: the translation, and everything else forwarded" "$got" \
+"47/0ffe gem 4094 rule forward-all vid -1 pri -1
+47/1002 gem 657 rule ext-vlan vid 410 pri -1
+47/1002 gem 657 rule forward-all vid -1 pri -1"
+
+sessionx 8100 8100 "$SPLIT0" "$SPLIT5" "$SPLIT6" "$DEF1" "$DEF2" > /tmp/s171-v.txt
+run171 ev-vec /tmp/s171-v.txt
+got=$(rebuild /tmp/omcid-171-ev-vec.log 0)
+check "the operator vector: one VID, priorities 0, 5 and 6, three rules" "$got" \
+"47/0ffe gem 4094 rule forward-all vid -1 pri -1
+47/1002 gem 657 rule ext-vlan vid 410 pri 0
+47/1002 gem 657 rule ext-vlan vid 410 pri 5
+47/1002 gem 657 rule ext-vlan vid 410 pri 6
+47/1002 gem 657 rule untagged vid -1 pri -1"
+
+sessionx 8100 8100 "$PRIREMAP" "$DEF1" "$DEF2" > /tmp/s171-p.txt
+run171 ev-pri /tmp/s171-p.txt
+got=$(rebuild /tmp/omcid-171-ev-pri.log 0 | grep ext-vlan)
+check "a priority remap on a VID: the filter names both" "$got" "47/1002 gem 657 rule ext-vlan vid 100 pri 3"
+
+sessionx 8100 88a8 "$SPUSH" "$DEF1" "$DEF2" > /tmp/s171-s.txt
+run171 ev-spush /tmp/s171-s.txt
+got=$(rebuild /tmp/omcid-171-ev-spush.log 0 | grep ext-vlan)
+check "an S-tag pushed in front of C-VID 100 (Output TPID 0x88a8)" "$got" "47/1002 gem 657 rule ext-vlan vid 100 pri -1"
+
+sessionx 88a8 8100 "$SPOP" "$DEF1" "$DEF2" > /tmp/s171-o.txt
+run171 ev-spop /tmp/s171-o.txt
+got=$(rebuild /tmp/omcid-171-ev-spop.log 0 | grep ext-vlan)
+check "an S-tag popped (Input TPID 0x88a8): the match is the S-VID" "$got" "47/1002 gem 657 rule ext-vlan vid 200 pri -1"
+
+sessionx 8100 88a8 "$UNTAG_S" "$DEF1" "$DEF2" > /tmp/s171-u.txt
+run171 ev-untag-s /tmp/s171-u.txt
+got=$(rebuild /tmp/omcid-171-ev-untag-s.log 0)
+check "untagged frames get an S-tag: the entry is the untagged rule, the pass-through is gone" "$got" \
+"47/0ffe gem 4094 rule forward-all vid -1 pri -1
+47/1002 gem 657 rule ext-vlan vid -1 pri -1"
+
+sessionx 8100 8100 "$POPANY" "$DEF1" "$DEF2" > /tmp/s171-pa.txt
+run171 ev-popany /tmp/s171-pa.txt
+got=$(rebuild /tmp/omcid-171-ev-popany.log 0 | grep ext-vlan)
+check "every single tag removed: applied upstream (no rule comes back down), matching any VID" "$got" \
+"47/1002 gem 657 rule ext-vlan vid -1 pri -1"
+
+# One entry the classifier cannot carry out stops the whole table, and the log
+# says which one and why.
+sessionx 8100 8100 "$TRANS410" "$ADD200ET" "$DEF1" > /tmp/s171-bad.txt
+run171 ev-bad /tmp/s171-bad.txt
+got=$(rebuild /tmp/omcid-171-ev-bad.log 0)
+check "an entry with an EtherType filter: the table is not applied" "$got" "$TRANSPARENT"
+got=$(grep -c 'ext vlan 171/0001 entry 1: OLT rule not applied (an EtherType filter), transparent' /tmp/omcid-171-ev-bad.log)
+check "and the log names entry and reason, once" "$got" "1"
+
+# A line on the manual tag never reads the table: the rules are the same with
+# a translation in it.
+store 1 1
+sessionx 8100 8100 "$TRANS410" "$DEF1" "$DEF2" > /tmp/s171-m.txt
+run171 ev-man /tmp/s171-m.txt
+got=$(rebuild /tmp/omcid-171-ev-man.log 0)
+check "manual tag on (type 1, mode 1): the table is not read" "$got" \
+"47/0ffe gem 4094 rule manual-remove vid 10 pri 0
+47/1002 gem 657 rule manual-add vid 10 pri 0"
+store 0 0
+
+# ---- priorities split over two GEM ports -------------------------------------
+#
+# A mapper (class 130) that sends priorities 0-3 to one GEM port and 4-7 to
+# another, on a bridge port of TPType 3. An entry that keeps the
+# priority of the frame has to become a rule per priority, each on the port that carries it.
+split_frames() {
+	frame 44 010c 0003 "03e8800003800700000008"     # GEM CTP: port 1000
+	frame 44 010a 1003 "00030510020000000200"       # GEM IW TP -> CTP 3, the mapper 0x1002
+	frame 48 0082 1002 "07801003100310031003"       # priorities 4-7 to IW TP 0x1003
+}
+{
+	sessionx 8100 8100 "$TRANS410" "$DEF1" "$DEF2"
+	split_frames
+} > /tmp/s171-split.txt
+run171 ev-split /tmp/s171-split.txt
+got=$(rebuild /tmp/omcid-171-ev-split.log 0 | grep ext-vlan)
+check "a priority-keeping rule on a split mapper: one rule per priority, on its GEM port" "$got" \
+"47/1002 gem 1000 rule ext-vlan vid 410 pri 4
+47/1002 gem 1000 rule ext-vlan vid 410 pri 5
+47/1002 gem 1000 rule ext-vlan vid 410 pri 6
+47/1002 gem 1000 rule ext-vlan vid 410 pri 7
+47/1002 gem 657 rule ext-vlan vid 410 pri 0
+47/1002 gem 657 rule ext-vlan vid 410 pri 1
+47/1002 gem 657 rule ext-vlan vid 410 pri 2
+47/1002 gem 657 rule ext-vlan vid 410 pri 3"
+{
+	sessionx 8100 8100 "$SPLIT5" "$DEF1" "$DEF2"
+	split_frames
+} > /tmp/s171-split5.txt
+run171 ev-split5 /tmp/s171-split5.txt
+got=$(rebuild /tmp/omcid-171-ev-split5.log 0 | grep ext-vlan)
+check "a rule that names priority 5 goes up the GEM port that carries 5, and only that" "$got" \
+"47/1002 gem 1000 rule ext-vlan vid 410 pri 5"
 
 # ---- a bridge port of TP type 5 (GEM IW TP, no mapper) ----------------------
 #

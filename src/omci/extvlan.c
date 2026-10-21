@@ -1,4 +1,5 @@
 #include "extvlan.h"
+#include "omci_bdgconn.h"
 
 static uint32_t word(const uint8_t *e, int w)
 {
@@ -273,6 +274,475 @@ const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
 	return 0;
 }
 
+/* ------------------------------------- what the classifier can carry out ----- */
+
+/* A tag of the received frame, as the filter names it. */
+struct evtag {
+	uint8_t kind;           /* 0 none, EVTOCD_CMP_C + 1, EVTOCD_CMP_S + 1 */
+	int16_t vid;            /* -1 not examined */
+	int8_t  pri;            /* -1 not examined */
+};
+#define KIND_C   (EVTOCD_CMP_C + 1)
+#define KIND_S   (EVTOCD_CMP_S + 1)
+
+/* The classifier knows two TPIDs: 0x8100 for a C-tag and the primary S-VLAN
+ * TPID, 0x88a8. Anything else (0x9100, 0x9200) is a tag it cannot tell from
+ * payload. */
+static uint8_t tpid_kind(uint16_t tpid)
+{
+	if (tpid == EVTOCD_TPID_C)
+		return KIND_C;
+	if (tpid == EVTOCD_TPID_S)
+		return KIND_S;
+	return 0;
+}
+
+/* The kind a filter's TPID field names. `dflt` is what a tag that does not
+ * name its TPID is taken to be: the input TPID for the tag a frame has
+ * first, since that is what InputTPID is for. */
+static const char *filter_kind(uint8_t code, uint16_t input_tpid, uint8_t dflt,
+			       uint8_t *kind)
+{
+	switch (code) {
+	case EVTOCD_F_TPID_DO_NOT_FILTER:
+		if (!dflt)
+			return "the input TPID is not 0x8100 or 0x88a8";
+		*kind = dflt;
+		return 0;
+	case EVTOCD_F_TPID_8100:
+		*kind = KIND_C;
+		return 0;
+	case EVTOCD_F_TPID_INPUT:
+		*kind = tpid_kind(input_tpid);
+		return *kind ? 0 : "the input TPID is not 0x8100 or 0x88a8";
+	case EVTOCD_F_TPID_INPUT_DEI_0:
+	case EVTOCD_F_TPID_INPUT_DEI_1:
+		return "a filter on the DEI bit";
+	}
+	return "an undefined filter TPID";
+}
+
+static const char *filter_tag(uint8_t pri, uint16_t vid, struct evtag *t)
+{
+	if (pri == EVTOCD_F_PRI_DO_NOT_FILTER)
+		t->pri = -1;
+	else if (pri <= EVTOCD_PRI_MAX)
+		t->pri = (int8_t)pri;
+	else
+		return "an undefined filter priority";
+	if (vid == EVTOCD_F_VID_DO_NOT_FILTER)
+		t->vid = -1;
+	else if (vid <= EVTOCD_VID_MAX)
+		t->vid = (int16_t)vid;
+	else
+		return "an undefined filter VID";
+	return 0;
+}
+
+static void plane_zero(struct evtocd_plane *pl)
+{
+	pl->in = pl->out = pl->op = 0;
+	pl->f_vid = -1;
+	pl->f_pri = -1;
+	pl->vid = -1;
+	pl->pri = -1;
+}
+
+/* One tag the treatment adds, resolved. */
+struct evadd {
+	uint8_t kind;
+	int16_t vid;
+	int8_t  pri;
+	const struct evtag *src_vid;    /* where a copied VID comes from */
+	const struct evtag *src_pri;
+	uint8_t pri_copy;               /* the priority is a copy */
+	uint8_t pri_dscp;
+};
+
+/* The tag a "copy" names. A single-tagged frame's one tag is both the inner
+ * and the outer one -- the vendor falls back to the outer for a copy from the
+ * inner, and G.988 has no other tag to mean -- while a double-tagged frame
+ * has the two. */
+static const struct evtag *copy_src(const struct evtag *tags, int n, int inner)
+{
+	if (n == 0)
+		return 0;
+	if (n == 1)
+		return &tags[0];
+	return inner ? &tags[1] : &tags[0];
+}
+
+const char *evtocd_plan(const struct evtocd_entry *e, uint16_t input_tpid,
+			uint16_t output_tpid, struct evtocd_plan *p)
+{
+	struct evtag in[2], res[2];
+	struct evadd add[2];
+	struct evtocd_action a;
+	uint8_t in_dflt = tpid_kind(input_tpid);
+	int n, nadd, nres = 0;
+	const char *why;
+	struct evtocd_plane *pl[2];
+
+	p->out_tags = 0;
+	p->out_vid = -1;
+	p->out_pri = -1;
+	p->ds_wider = 0;
+	p->cmp = EVTOCD_CMP_C;
+	plane_zero(&p->s);
+	plane_zero(&p->c);
+	for (int i = 0; i < 2; i++)
+		in[i].kind = res[i].kind = 0;
+	pl[0] = &p->c;          /* indexed by kind - 1 */
+	pl[1] = &p->s;
+
+	if (evtocd_default_rule_tags(e) >= 0)
+		return "a default rule";
+	if (e->f_ethertype != EVTOCD_F_ET_DO_NOT_FILTER)
+		return "an EtherType filter";
+	if (e->remove_tags == EVTOCD_T_DISCARD_FRAME)
+		return "a rule that discards the frames it matches";
+
+	/* ---- the frame the filter describes */
+	if (e->f_out_pri != EVTOCD_F_PRI_IGNORE_OTHER) {
+		n = 2;
+		if ((why = filter_tag(e->f_out_pri, e->f_out_vid, &in[0])) ||
+		    (why = filter_tag(e->f_in_pri, e->f_in_vid, &in[1])) ||
+		    (why = filter_kind(e->f_out_tpid, input_tpid, in_dflt, &in[0].kind)) ||
+		    (why = filter_kind(e->f_in_tpid, input_tpid, KIND_C, &in[1].kind)))
+			return why;
+		if (in[0].kind != KIND_S || in[1].kind != KIND_C)
+			return "a double-tag rule on two tags of one kind";
+		if ((in[0].vid >= 0 || in[0].pri >= 0) && (in[1].vid >= 0 || in[1].pri >= 0))
+			return "a filter on both the S-tag and the C-tag behind it";
+	} else if (e->f_in_pri != EVTOCD_F_PRI_IGNORE_OTHER) {
+		n = 1;
+		if ((why = filter_tag(e->f_in_pri, e->f_in_vid, &in[0])) ||
+		    (why = filter_kind(e->f_in_tpid, input_tpid, in_dflt, &in[0].kind)))
+			return why;
+	} else {
+		n = 0;
+	}
+	if (e->remove_tags > n)
+		return "a rule that removes more tags than the frame has";
+
+	/* ---- the tags the treatment adds, outermost first */
+	evtocd_action(e, input_tpid, output_tpid, &a);
+	nadd = a.tags_added;
+	for (int j = 0; j < nadd; j++) {
+		const struct evtocd_tagout *t = &a.add[j];
+		uint8_t code = (nadd == 1 || j == 1) ? e->t_in_tpid : e->t_out_tpid;
+		uint16_t tpid;
+
+		add[j].src_vid = add[j].src_pri = 0;
+		add[j].pri_copy = add[j].pri_dscp = 0;
+		switch (code) {
+		case EVTOCD_T_TPID_COPY_INNER:
+		case EVTOCD_T_TPID_COPY_OUTER: {
+			const struct evtag *s = copy_src(in, n, code == EVTOCD_T_TPID_COPY_INNER);
+
+			if (!s)
+				return "an added TPID copied from a tag the frame has not got";
+			tpid = s->kind == KIND_S ? EVTOCD_TPID_S : EVTOCD_TPID_C;
+			break;
+		}
+		case EVTOCD_T_TPID_8100:
+			tpid = EVTOCD_TPID_C;
+			break;
+		case EVTOCD_T_TPID_DEI_CP_INNER:
+		case EVTOCD_T_TPID_DEI_CP_OUTER:
+		case EVTOCD_T_TPID_OUTPUT_DEI_0:
+			tpid = output_tpid;
+			break;
+		default:
+			return "an added tag with the DEI bit set";
+		}
+		add[j].kind = tpid_kind(tpid);
+		if (!add[j].kind)
+			return "an added tag whose TPID is not 0x8100 or 0x88a8";
+
+		switch (t->vid_src) {
+		case EVTOCD_VID_ASSIGN:
+			if (t->vid > EVTOCD_VID_MAX)
+				return "an added VID past 4094";
+			add[j].vid = (int16_t)t->vid;
+			break;
+		default: {
+			const struct evtag *s = copy_src(in, n, t->vid_src == EVTOCD_VID_COPY_INNER);
+
+			if (!s)
+				return "a VID copied from a tag the frame has not got";
+			add[j].vid = s->vid;
+			if (s->vid < 0)
+				return "an added VID copied from a tag whose VID the filter does not name";
+			break;
+		}
+		}
+		switch (t->pri_src) {
+		case EVTOCD_PRI_ASSIGN:
+			if (t->pri > EVTOCD_PRI_MAX)
+				return "an added priority past 7";
+			add[j].pri = (int8_t)t->pri;
+			break;
+		case EVTOCD_PRI_DSCP:
+			return "a priority taken from the DSCP";
+		case EVTOCD_PRI_IMPOSSIBLE:
+			return "a priority copied from a tag the frame has not got";
+		default: {
+			const struct evtag *s = copy_src(in, n, t->pri_src == EVTOCD_PRI_COPY_INNER);
+
+			if (!s)
+				return "a priority copied from a tag the frame has not got";
+			add[j].pri = s->pri;    /* -1: only a REWRITE of that tag can keep it */
+			add[j].pri_copy = 1;
+			add[j].src_pri = s;
+			break;
+		}
+		}
+	}
+
+	/* ---- what the frame is after: the added tags, then those left */
+	for (int j = 0; j < nadd; j++)
+		res[nres++].kind = add[j].kind;
+	for (int i = e->remove_tags; i < n; i++) {
+		if (nres >= 2)
+			return "a rule that leaves three tags on the frame";
+		res[nres++] = in[i];
+	}
+	if (nres == 2 && !(res[0].kind == KIND_S && res[1].kind == KIND_C))
+		return "a rule that leaves two tags of one kind, or a C-tag outside an S-tag";
+
+	/* ---- the planes */
+	for (int i = 0; i < n; i++)
+		pl[in[i].kind - 1]->in = 1;
+	for (int i = 0; i < n; i++) {
+		struct evtocd_plane *q = pl[in[i].kind - 1];
+
+		q->f_vid = in[i].vid;
+		q->f_pri = in[i].pri;
+	}
+	for (int i = 0; i < nres; i++)
+		pl[res[i].kind - 1]->out = 1;
+	for (int k = 0; k < 2; k++) {
+		struct evtocd_plane *q = pl[k];
+		int added = -1;
+
+		for (int j = 0; j < nadd; j++)
+			if (add[j].kind == k + 1)
+				added = j;
+		if (q->in && !q->out) {
+			q->op = EVTOCD_OP_POP;
+		} else if (!q->in && q->out) {
+			q->op = EVTOCD_OP_PUSH;
+		} else if (q->in && q->out) {
+			q->op = added >= 0 ? EVTOCD_OP_REWRITE : EVTOCD_OP_PASS;
+		}
+		if (added >= 0 && q->out) {
+			/* Written values. The S-tag has no "keep" the classifier is
+			 * known to honour, and a keep of the C-tag priority only
+			 * means something when that very tag is being replaced. */
+			q->vid = add[added].vid;
+			q->pri = add[added].pri;
+			if (q->pri < 0) {
+				if (k == EVTOCD_CMP_S || q->op != EVTOCD_OP_REWRITE ||
+				    add[added].src_pri->kind != k + 1)
+					return "an added priority copied from a tag whose priority the filter does not name";
+			}
+		}
+	}
+	if (p->s.in && p->c.in &&
+	    (p->s.f_vid >= 0 || p->s.f_pri >= 0) && (p->c.f_vid >= 0 || p->c.f_pri >= 0))
+		return "a filter on both the S-tag and the C-tag behind it";
+	p->cmp = (p->s.in && (p->s.f_vid >= 0 || p->s.f_pri >= 0)) ? EVTOCD_CMP_S : EVTOCD_CMP_C;
+
+	/* ---- the outermost tag the frame leaves with */
+	p->out_tags = (uint8_t)nres;
+	if (nres) {
+		const struct evtocd_plane *q = pl[res[0].kind - 1];
+
+		if (q->op == EVTOCD_OP_PASS) {
+			p->out_vid = q->f_vid;
+			p->out_pri = q->f_pri;
+		} else {
+			p->out_vid = q->vid;
+			p->out_pri = q->pri >= 0 ? q->pri : q->f_pri;
+		}
+	}
+	return 0;
+}
+
+/* The downstream plane of an upstream one. `ok` goes 0 when the way back
+ * cannot be said: a tag the filter did not name is a tag nobody can put
+ * back. */
+static void plane_ds(const struct evtocd_plane *u, struct evtocd_plane *d,
+		     int is_s, int *ok)
+{
+	plane_zero(d);
+	d->in = u->out;
+	d->out = u->in;
+	/* What the downstream frame is matched on: the tag as the upstream
+	 * treatment leaves it. */
+	if (u->out) {
+		if (u->op == EVTOCD_OP_PASS) {
+			d->f_vid = u->f_vid;
+			d->f_pri = u->f_pri;
+		} else {
+			d->f_vid = u->vid;
+			d->f_pri = u->pri >= 0 ? u->pri : u->f_pri;
+		}
+	}
+	switch (u->op) {
+	case EVTOCD_OP_PASS:
+		d->op = EVTOCD_OP_PASS;
+		break;
+	case EVTOCD_OP_PUSH:
+		d->op = EVTOCD_OP_POP;
+		break;
+	case EVTOCD_OP_POP:
+		d->op = EVTOCD_OP_PUSH;
+		if (u->f_vid < 0)
+			*ok = 0;
+		d->vid = u->f_vid;
+		/* A priority the filter did not name is lost with the tag; it
+		 * goes back as 0, which is what a frame the ONU tags itself gets. */
+		d->pri = u->f_pri >= 0 ? u->f_pri : 0;
+		break;
+	case EVTOCD_OP_REWRITE:
+		d->op = EVTOCD_OP_REWRITE;
+		if (u->f_vid < 0)
+			*ok = 0;
+		d->vid = u->f_vid;
+		d->pri = u->f_pri;
+		/* Priority the filter did not name stays what the frame has;
+		 * for the S-tag that "keep" is not known to work. */
+		if (d->pri < 0 && is_s)
+			*ok = 0;
+		break;
+	}
+}
+
+int evtocd_plan_ds(const struct evtocd_plan *u, uint8_t ds_mode,
+		   struct evtocd_plan *d, const char **why)
+{
+	int ok = 1;
+	int wider = 0;
+
+	if (ds_mode == EVTOCD_DSMODE_FORWARD) {
+		*why = "downstream frames are forwarded unchanged";
+		return 0;
+	}
+	if (ds_mode == EVTOCD_DSMODE_DROP_ALL) {
+		*why = "downstream frames are discarded, which the classifier cannot be told to do here";
+		return 0;
+	}
+	if (ds_mode > EVTOCD_DSMODE_DROP_ALL) {
+		*why = "an undefined downstream mode";
+		return 0;
+	}
+	d->out_tags = 0;
+	d->out_vid = -1;
+	d->out_pri = -1;
+	d->ds_wider = 0;
+	plane_ds(&u->c, &d->c, 0, &ok);
+	plane_ds(&u->s, &d->s, 1, &ok);
+	if (!ok) {
+		*why = "the rule merges frames the filter did not tell apart, so it cannot be undone";
+		return 0;
+	}
+	/* Modes 5 to 7 want the frames that do not match discarded; without a
+	 * drop action the nearest thing is the matching rule alone. */
+	if (ds_mode >= EVTOCD_DSMODE_VID_PRI_DROP && ds_mode <= EVTOCD_DSMODE_PRI_DROP) {
+		wider = 1;
+		ds_mode = (uint8_t)(ds_mode - (EVTOCD_DSMODE_VID_PRI_DROP - EVTOCD_DSMODE_VID_PRI));
+	}
+	if (ds_mode == EVTOCD_DSMODE_VID || ds_mode == EVTOCD_DSMODE_PRI) {
+		struct evtocd_plane *q[2] = { &d->c, &d->s };
+
+		for (int k = 0; k < 2; k++) {
+			if (ds_mode == EVTOCD_DSMODE_VID)
+				q[k]->f_pri = -1;
+			else
+				q[k]->f_vid = -1;
+		}
+	}
+	/* One tag is compared. When both of the frame's tags carry something to
+	 * match, the S-tag does, and the C-tag behind it is not examined. */
+	d->cmp = (d->s.in && (d->s.f_vid >= 0 || d->s.f_pri >= 0)) ? EVTOCD_CMP_S : EVTOCD_CMP_C;
+	if (d->s.in && d->c.in && d->cmp == EVTOCD_CMP_S &&
+	    (d->c.f_vid >= 0 || d->c.f_pri >= 0)) {
+		d->c.f_vid = -1;
+		d->c.f_pri = -1;
+		wider = 1;
+	}
+	if ((ds_mode == EVTOCD_DSMODE_VID || ds_mode == EVTOCD_DSMODE_PRI) &&
+	    d->c.f_vid < 0 && d->c.f_pri < 0 && d->s.f_vid < 0 && d->s.f_pri < 0) {
+		*why = "downstream matches on a field the rule does not set";
+		return 0;
+	}
+	d->ds_wider = (uint8_t)wider;
+	d->out_tags = (uint8_t)(u->s.in + u->c.in);
+	return 1;
+}
+
+
+/* ---- a plan as the bridge rule the switch driver reads
+
+ * The rule_gen OMCI_VLAN_OPER_EXTVLAN_GEN encoding of omci_bdgconn.h: one
+ * direction, filter and treatment both stated outright, the S-tag as the
+ * "outer" half and the C-tag as the "inner" one. The driver does not derive
+ * a downstream rule from it; the downstream one is a plan of its own. */
+static uint32_t tag_op_of(uint8_t op)
+{
+	switch (op) {
+	case EVTOCD_OP_PUSH:    return OMCI_TAGOP_PUSH;
+	case EVTOCD_OP_REWRITE: return OMCI_TAGOP_REWRITE;
+	case EVTOCD_OP_POP:     return OMCI_TAGOP_POP;
+	}
+	return OMCI_TAGOP_PASS;
+}
+
+static void oper_plane(const struct evtocd_plane *q, struct omci_vlan *f,
+		       uint32_t *mode, struct omci_vlan_act *act)
+{
+	*mode = q->in ? OMCI_TAGF_TAGGED : OMCI_TAGF_UNTAGGED;
+	f->pri = OMCI_PRI_ANY;
+	f->vid = OMCI_VID_ANY;
+	f->tpid = OMCI_FILTER_TPID_DO_NOT;
+	if (q->in && q->f_vid >= 0) {
+		*mode |= OMCI_TAGF_VID;
+		f->vid = (uint32_t)q->f_vid;
+	}
+	if (q->in && q->f_pri >= 0) {
+		*mode |= OMCI_TAGF_PRI;
+		f->pri = (uint32_t)q->f_pri;
+	}
+	act->tag_op = tag_op_of(q->op);
+	act->vid_op = OMCI_VIDOP_SET;
+	act->pri_op = q->pri < 0 && (q->op == EVTOCD_OP_REWRITE) ?
+		      OMCI_PRIOP_PASS : OMCI_PRIOP_SET;
+	act->set_tag.pri = q->pri >= 0 ? (uint32_t)q->pri : 0;
+	act->set_tag.vid = q->vid >= 0 ? (uint32_t)q->vid : 0;
+	act->set_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
+}
+
+void evtocd_plan_oper(const struct evtocd_plan *p, struct omci_vlan_oper *vr)
+{
+	for (unsigned i = 0; i < sizeof *vr / 4; i++)
+		((uint32_t *)vr)[i] = 0;
+	vr->rule_gen = OMCI_VLAN_OPER_EXTVLAN_GEN;
+	oper_plane(&p->s, &vr->filter.outer, &vr->filter.outer_mode, &vr->outer_act);
+	oper_plane(&p->c, &vr->filter.inner, &vr->filter.inner_mode, &vr->inner_act);
+	vr->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	vr->out.is_default = 0;
+	vr->out.is_mcast = 0;
+	vr->out.tag_count = p->out_tags;
+	vr->out.tpid = OMCI_OUT_TPID_8100;
+	vr->out.ds_mode = 0;
+	vr->out.ds_tag_op = 0;
+	vr->out.out_tag.pri = p->out_pri >= 0 ? (uint32_t)p->out_pri : OMCI_PRI_ANY;
+	vr->out.out_tag.vid = p->out_vid >= 0 ? (uint32_t)p->out_vid : OMCI_VID_ANY;
+	vr->out.out_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
+}
+
 /* ------------------------------------------------ rendering one entry ----- */
 /*
  * Freestanding, so no snprintf: a cursor and explicit bounds. Every append
@@ -388,6 +858,66 @@ int evtocd_describe(const struct evtocd_entry *e, uint16_t input_tpid,
 		if (a.tags_added == 2) {
 			b_str(&b, " outside ");
 			b_tag(&b, &a.add[1]);
+		}
+	}
+	out[b.n] = 0;
+	return b.n;
+}
+
+static void b_plane(struct buf *b, const char *name, const struct evtocd_plane *q)
+{
+	b_str(b, name);
+	switch (q->op) {
+	case EVTOCD_OP_PUSH:    b_str(b, " add"); break;
+	case EVTOCD_OP_REWRITE: b_str(b, " replace"); break;
+	case EVTOCD_OP_POP:     b_str(b, " remove"); break;
+	default:                b_str(b, " keep"); break;
+	}
+	if (q->op == EVTOCD_OP_PUSH || q->op == EVTOCD_OP_REWRITE) {
+		b_str(b, " VID ");
+		b_dec(b, (unsigned)q->vid);
+		if (q->pri >= 0) {
+			b_str(b, " pri ");
+			b_dec(b, (unsigned)q->pri);
+		} else {
+			b_str(b, " pri kept");
+		}
+	}
+}
+
+int evtocd_plan_describe(const struct evtocd_plan *p, char *out, int max)
+{
+	struct buf b = { out, 0, max };
+	int any = 0;
+
+	if (max < 1)
+		return 0;
+	b_str(&b, "match ");
+	if (!p->s.in && !p->c.in)
+		b_str(&b, "untagged");
+	if (p->s.in) {
+		b_str(&b, "S-tag");
+		if (p->s.f_vid >= 0) { b_str(&b, " VID "); b_dec(&b, (unsigned)p->s.f_vid); }
+		if (p->s.f_pri >= 0) { b_str(&b, " pri "); b_dec(&b, (unsigned)p->s.f_pri); }
+		any = 1;
+	}
+	if (p->c.in) {
+		if (any)
+			b_str(&b, " + ");
+		b_str(&b, "C-tag");
+		if (p->c.f_vid >= 0) { b_str(&b, " VID "); b_dec(&b, (unsigned)p->c.f_vid); }
+		if (p->c.f_pri >= 0) { b_str(&b, " pri "); b_dec(&b, (unsigned)p->c.f_pri); }
+	}
+	b_str(&b, ": ");
+	if (p->s.op == EVTOCD_OP_PASS && p->c.op == EVTOCD_OP_PASS) {
+		b_str(&b, "pass through unchanged");
+	} else {
+		if (p->s.op != EVTOCD_OP_PASS)
+			b_plane(&b, "S-tag", &p->s);
+		if (p->c.op != EVTOCD_OP_PASS) {
+			if (p->s.op != EVTOCD_OP_PASS)
+				b_str(&b, ", ");
+			b_plane(&b, "C-tag", &p->c);
 		}
 	}
 	out[b.n] = 0;

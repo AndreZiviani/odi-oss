@@ -5,6 +5,41 @@ listed here.
 
 ## Unreleased
 
+- OMCI, switch: the OLT's extended VLAN tagging operation (class 171) is applied
+  entry by entry, not only the one shape "untagged frames get one VLAN". On a
+  line with `VLAN_CFG_TYPE` other than 1 (the manual tag never reads the
+  table, so neither of our lines changes), each entry becomes a bridge rule
+  with the rule that undoes it downstream: a C-VID translated to another
+  (the priority kept or assigned), one VID split into rows by priority
+  (each row its own rule, on the GEM port its priority maps to), a tag
+  removed or added, an S-tag pushed, replaced or popped, in front of a C-tag
+  or on its own. The class 84 list of the GEM-side port still decides which
+  result VIDs are admitted, and a single-tag default rule that discards stops
+  tagged frames the table does not name from passing. A table with one entry
+  the classifier cannot carry out (an EtherType or DEI filter, a discard, a
+  priority copied between tags, a filter on both an S-tag and a C-tag) is
+  still left transparent, and the log now names the entry and why. The
+  classifier facts behind the S-tag rows are in `docs/SWITCH.md`
+  ("Extended VLAN rules"); the S-tag template register is written only when
+  such a row is installed, so a line without one sees the same register
+  writes as before. Checked as classifier row words in the host tests and
+  under qemu; not yet on an OLT that provisions these shapes, and the
+  rows that need an S-tag and a C-tag action together are marked unproven
+  there.
+
+- Switch: the bridge-connection command accepts rules of the extended VLAN
+  operation, one direction each: a C-VID translated with the priority kept or
+  assigned, an S-tag added, replaced or removed, and a match on the S-VID. The
+  S-tag template register is written only when such a rule is installed, so
+  the lines that do not use one see the same register writes as before. The
+  facts behind it are in `docs/SWITCH.md`, "Extended VLAN rules". omcid does
+  not send these rules yet.
+
+- OMCI: omcid can now read an extended VLAN tagging entry (class 171) as what
+  the switch classifier can carry out: which tags it matches, what happens to
+  the C-tag and the S-tag, and the rule that undoes it downstream for each
+  downstream mode. Nothing uses it yet, so nothing changes on the wire.
+
 - CI: the third-party sources (busybox, dropbear, iproute2, the kernel tarball and the pinned confd and metricsd releases) are cached between runs, keyed by the files that pin their versions and checksums, so a run no longer fails when an upstream mirror does. A version bump misses the cache and fetches anew; every file is still checked against its pinned checksum.
 
 - omcid: a stored `VLAN_MANU_TAG_PRI` above 7 (255, the factory value) no

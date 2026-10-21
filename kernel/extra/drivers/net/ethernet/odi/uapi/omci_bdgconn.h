@@ -50,6 +50,31 @@
 #define OMCI_VLAN_OPER_EXTVLAN            5
 #define OMCI_VLAN_OPER_VLANTAG_OPER       6
 
+/* A rule of the extended VLAN tagging operation (class 171) stated outright,
+ * one direction at a time: omcid works out the downstream rule of an entry
+ * itself and sends it as a second descriptor, so the driver derives nothing
+ * from this one. The two halves are the two tag positions the classifier
+ * acts on, the S-tag (TPID 0x88a8) as the "outer" one and the C-tag (0x8100)
+ * as the "inner" one:
+ *
+ *   filter.outer_mode / inner_mode   UNTAGGED: the frame has no such tag;
+ *                                    TAGGED: it has one, plus VID and/or PRI
+ *                                    when the filter names them (the value in
+ *                                    filter.outer / filter.inner)
+ *   outer_act / inner_act            tag_op PASS, PUSH (the frame had none),
+ *                                    REWRITE (it had one) or POP; vid_op SET
+ *                                    and set_tag.vid for a PUSH or REWRITE;
+ *                                    pri_op SET with set_tag.pri, or PASS to
+ *                                    keep the tag own priority (a C-tag
+ *                                    REWRITE only)
+ *
+ * The classifier compares one tag's VID and priority, so a filter naming
+ * both the S and the C tag is refused (the command fails, nothing is
+ * written). The descriptor's direction is OMCI_DIR_US or OMCI_DIR_DS, not BI.
+ * The shapes this encoding was built for and the register behaviour behind
+ * each are in docs/SWITCH.md, "Extended VLAN rules". */
+#define OMCI_VLAN_OPER_EXTVLAN_GEN        7
+
 /* Filter mode bits, for outer_mode / inner_mode. */
 #define OMCI_TAGF_ANY  (1 << 0)
 #define OMCI_TAGF_TAGGED     (1 << 1)

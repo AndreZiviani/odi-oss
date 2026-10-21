@@ -76,6 +76,42 @@ static void classify_rma_ctrl_pass(void)
 	odi_reg_write(ODI_SW_LINK_MCAST_22_OFF, 0);
 }
 
+/* Template bit of each of the 256 rows, 32 to a CLASSIFY_PATTERN_SEL word,
+ * as last written: the register word holds the bits of 32 rows, so a row
+ * written alone has to carry its 31 neighbours with it.
+ */
+static uint32_t odi_sw_cf_tmpl_bits[256 / 32];
+
+void odi_sw_cf_reset(void)
+{
+	unsigned int i;
+
+	for (i = 0; i < 256 / 32; i++)
+		odi_sw_cf_tmpl_bits[i] = 0;
+}
+
+uint32_t odi_sw_cf_layout1_row(void)
+{
+	uint32_t n = ODI_SW_CLASSIFY_SETUP_PATTERN1_COUNT_GET(odi_reg_read(ODI_SW_CLASSIFY_SETUP_OFF));
+
+	return n ? n : 256U;
+}
+
+/* Template 1 compares the S-tag, both ways. Written when the first row on it
+ * goes in, never for a bridge that has none, so a line without S-tag rules
+ * sees the register writes it always saw.
+ */
+static void classify_template_s(void)
+{
+	uint32_t v = 0;
+
+	v = ODI_SW_CLASSIFY_TEMPLATE_US_VID_SET(v, 1);
+	v = ODI_SW_CLASSIFY_TEMPLATE_US_PRI_SET(v, 1);
+	v = ODI_SW_CLASSIFY_TEMPLATE_DS_VID_SET(v, 1);
+	v = ODI_SW_CLASSIFY_TEMPLATE_DS_PRI_SET(v, 1);
+	odi_reg_write(ODI_SW_CLASSIFY_TEMPLATE(1), v);
+}
+
 void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
 				   const struct odi_sw_vlan_override *vlan_over, unsigned int n_over,
 				   uint32_t vlan_default)
@@ -86,15 +122,28 @@ void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
 
 	/* The CF rows in the order handed over, each after the
 	 * CLASSIFY_PATTERN_SEL word holding its template bit (32 rows per
-	 * word; every row is on template 0, so the word is 0).
+	 * word; every row the stock stack builds is on template 0, so the word
+	 * is 0 there, and stays 0 for any bridge with no S-tag filter).
 	 */
+	int tmpl_cfg = 0;
+
 	for (i = 0; i < n_cf; i++) {
 		uint32_t rule[2] = { cf[i].rule_w0, cf[i].rule_w1 };
 		uint32_t mask[2] = { cf[i].mask_w0, cf[i].mask_w1 };
 		uint32_t action[3] = { cf[i].action_w0, cf[i].action_w1, cf[i].action_w2 };
+		uint32_t *bits = &odi_sw_cf_tmpl_bits[(cf[i].idx / 32U) % (256 / 32)];
+		uint32_t bit = 1U << (cf[i].idx % 32U);
 
-		odi_reg_write(ODI_SW_CLASSIFY_PATTERN_SEL(cf[i].idx / 32U),
-			      ODI_SW_CLASSIFY_PATTERN_SEL_PATTERN_SET(0, 0));
+		if (cf[i].tmpl) {
+			if (!tmpl_cfg) {
+				classify_template_s();
+				tmpl_cfg = 1;
+			}
+			*bits |= bit;
+		} else {
+			*bits &= ~bit;
+		}
+		odi_reg_write(ODI_SW_CLASSIFY_PATTERN_SEL(cf[i].idx / 32U), *bits);
 
 		(void)odi_switch_table_write(ODI_SW_TBL_CLS_RULE_B, cf[i].idx, rule, 2);
 		(void)odi_switch_table_write(ODI_SW_TBL_CLS_MASK_B, cf[i].idx, mask, 2);

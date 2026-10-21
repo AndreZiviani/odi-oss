@@ -684,6 +684,98 @@ A CF row delete (`odi_sw_cf_del()`) writes an all-zero rule row, VALID
 clear, and an all-zero action row. No capture shows a delete; this is the
 encoding the layout implies and the one the platform sweep uses.
 
+### Extended VLAN rules
+
+The extended VLAN tagging operation of class 171 reaches the switch as
+cmd 51 descriptors of `rule_gen` `OMCI_VLAN_OPER_EXTVLAN_GEN` (7,
+`uapi/omci_bdgconn.h`). Each carries **one direction**: omcid works out the
+downstream rule of an entry (the "inverse" of G.988, or what DsMode says)
+itself, from `src/omci/extvlan.c`, and sends it as a second descriptor, so the
+driver derives nothing here. The two halves of the rule are the two tag
+positions the classifier can act on: the "outer" half is the S-tag (TPID
+0x88a8) and the "inner" half the C-tag (0x8100). A descriptor that names a VID
+or priority on both, that is not one direction, or that asks an S-tag action
+without the S-tag priority, is refused (`-EOPNOTSUPP`, nothing written). Rows
+of these rules never use the bottom region: the ordering class is how much the
+row names (VID and priority 0, one of them 1, neither 2), so the more
+specific row has the lower index, which is the one that wins.
+
+What the rows rely on, and where each fact comes from. "Read" is a register
+read on a stick on the current image; "other" is another open implementation's
+measurement on the same chip, with its own lab OLT, which agrees with our
+stock register table where the table says anything.
+
+| fact | source |
+|---|---|
+| `CLASSIFY_TEMPLATE(t)`, 0x016030 + 4t, t 0..1: the tag a rule takes VID and priority from, per direction (US_VID 1:0, US_PRI 3:2, DS_VID 5:4, DS_PRI 7:6; 0 the C-tag, also the one behind an S-tag, 1 the S-tag). Both words read 0, so every rule compares the C-tag until template 1 is written | the stock register table (two words, four 2-bit fields); read; the meaning of the values: other |
+| `CLASSIFY_PATTERN_SEL`: the row's template bit, 32 rows to a word. Written for every row, and now carries the bits of the 31 rows beside it | table; other. All words read 0 |
+| template 1 is written 0x55 (S-tag, both directions) when the first row that compares the S-tag goes in, and never otherwise, so a line with no such rule sees the register writes it always saw | ours |
+| per-row action classes `CLS_ACT_EN(i)`, 0x016038 + 4i: bit 5 stream, bits 4:0 the rest. Read 0x3f on every row looked at (0..15, 64..87, 240..255) | table; read |
+| C-tag action 1 ("tag") adds a tag to an untagged frame and replaces the VID of one that has it; the VID is the assigned one when the VID source (bit 18) is set, the priority the assigned one when its source (bit 21) is, **else the one the frame had**; 2 removes the tag; 0 and 3 leave it. A translation of C-VID 410 to 1410 reads back as action word 1 0x00042c12 there and is written the same here | other |
+| S-tag action 1 puts an S-tag (TPID `SVLAN_TPID_CFG` primary, 0x88a8) on a frame without one and replaces the S-tag of one with one; 2 rewrites the S-tag into a 0x8100 tag; 3 removes it; 0, 4 leave it (5 acts as 1). VID and priority are assigned under their source bits (21, 18). Rows here use 1, 3 and 4 | other |
+| the S-tag is only recognised on a port in S-VLAN uplink mode: `SVLAN_UPLINK_PORTS` (0x0230c4) reads 0xf, every port | read |
+| `SVLAN_TPID_CFG`: primary 0x88a8, second 0x8100 disabled (0x0230c8 reads 0, 0x0230cc reads 0x810088a8). So an added or compared S-tag has TPID 0x88a8 and nothing else (0x9100 is refused) | read |
+| the classifier acts on the lowest-numbered matching row | other (an operator OLT's pass-through at a lower index shadowed a translation) |
+| a frame forwarded to the PON port with no stream is dropped silently in the PON MAC, so a rule up the PON names its stream (`us_flow`) like every other upstream row, and a frame no row matches has no stream | other |
+| `PON_EN` (`CLASSIFY_SETUP` bit 3) must be set for the C-tag actions to apply to frames crossing the PON port. Reads set (0x1009) | other; read |
+| rows from the boundary in `CLASSIFY_SETUP` 12:5 (`PATTERN1_COUNT`, reads 128) up are matched with a second rule layout; the fields our rows use sit in the same place in both, the S-tag template bit is not known to work there, so such a row is not placed at or past the boundary (`cf_insert()` refuses with "classification table full") | other; read; the placement is ours |
+| `CLASSIFY_SETUP` bits 1:0 apply to downstream frames too (value 2 drops those no row matches). We write 1 | other |
+
+A frame with two C-tags cannot be told from one with a single C-tag, so a rule
+on a double-C filter is refused by omcid before it gets here.
+
+#### Shapes
+
+Every shape of a class 171 entry (G.988 9.3.13), and what the switch does with
+it. "Now" is what this firmware does; the unproven ones use only registers
+and fields known from the table above, but in a combination nobody we have
+read has measured.
+
+| shape | now | why |
+|---|---|---|
+| untagged in, add one C-tag, VID and priority assigned, TPID 0x8100 | done, as before (the manual-VLAN rule; a table of only this and plain defaults keeps the old path byte for byte) | |
+| untagged in, add one S-tag (Output TPID 0x88a8), VID and priority assigned | done | S-tag action 1 |
+| untagged in, add an S-tag outside a C-tag | done, **unproven**: both planes in one row | |
+| single C-tag in, VID named (priority named or not), replace the VID (or priority) with an assigned one, priority kept or assigned | done | C-tag action 1 |
+| the same with the priority named in the filter and copied: one VID, several priorities, one rule each (the operator vector) | done | each rule is a row, the more specific lower |
+| single C-tag in, VID named, remove it | done; the way back tags untagged frames with that VID | C-tag action 2 |
+| single C-tag in, push an S-tag in front | done | S-tag action 1 |
+| single C-tag in, replace it with an S-tag, or an S-tag and a C-tag | done, **unproven** (two planes in one row) | |
+| single S-tagged in (Input TPID 0x88a8), replace, pop, or replace with a C-tag | replace and pop done; S-to-C (action 2) **not done**, the register is known | |
+| S-tag over a C-tag in, filter on either tag (not both), pop, replace or push | done | |
+| both tags removed, either one replaced, one or both pushed | done, **unproven** when both planes change | |
+| filter on the S-VID and the C-VID of one frame | refused: the classifier compares one tag per row | needs a second compare nobody has measured |
+| double C-tag (both 0x8100) | refused: a frame with two C-tags cannot be told from one with one | |
+| filter or treatment TPID 0x9100, 0x9200 | refused | the second S-VLAN TPID register (0x0230c8) reads disabled; nothing says it can be used |
+| filter on the DEI bit, or an added tag with DEI 1 | refused | no DEI field in the classifier is known |
+| EtherType filter (IPoE, PPPoE, ARP, IPv6) | refused | the EtherType field of a rule (bits 47..32) is not known |
+| VID copied from a tag whose VID the filter does not name (any-VID priority remap) | refused | whether C-tag action 1 with no VID source keeps the VID is not known |
+| priority copied between the two tags, or from the DSCP | refused unless the source is named in the filter, then done with its value | the source codes other than keep and assign are not known; DSCP needs a DSCP match |
+| entry that discards what it matches (RemoveTags 3, not a default rule) | refused | the classifier drop action is not known |
+| default rules: single-tag discard | done: tagged frames the table does not name are not passed | no row matches them, so they have no stream and are dropped |
+| default rules: double-tag discard, or a default that adds or removes a tag | discard ignored (not enforced); the other refused | |
+| downstream, DsMode 0 | done, the inverse: a tag the rule added is removed, one it removed is put back with the filter VID and priority, one it replaced is replaced back; a rule that merged frames (a filter that did not name the VID) has no downstream rule | |
+| DsMode 1 | no downstream rule (forwarded unchanged) | |
+| DsMode 2, 3, 4 | done: the inverse on VID and priority, VID, or priority only | |
+| DsMode 5, 6, 7 | as 2, 3, 4, and logged that what they discard is forwarded | no drop action |
+| DsMode 8 | no downstream rule, logged | no drop action |
+
+A table is applied whole: one entry in the refused rows leaves every frame as
+it comes and the log names the entry and the reason once.
+
+#### What is not known
+
+- the classifier's drop action (so no entry that discards what it matches, and
+  no downstream discard of DsMode 5 to 8, is carried out);
+- the EtherType field of a rule, bits 47..32, which no capture or measurement
+  has cared about;
+- the VID and priority source codes other than "keep" and "assign" (so no
+  priority copied between tags, and none from the DSCP);
+- whether a C-tag action 1 with no VID source keeps the VID (so a priority
+  remap whose filter does not name the VID is refused);
+- what `SVLAN_POLICY` does to an S-tagged frame whose S-VID has no VLAN row
+  (rows for the VIDs a rule matches are made, tagged on both ports).
+
 ### MIB counters
 
 `odi_sw_mib_get()` (`odi_switch_mib.c`) answers a port counter by the
