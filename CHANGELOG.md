@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- OMCI: a MIB reset now drops the Get-Next walk a table Get had primed. A
+  Get-Next after the reset answered the bytes of the row the reset had just
+  discarded; it is now refused with a parameter error, as a Get-Next with no
+  Get before it. The OMCI test suite also gains vectors for the transaction
+  correlation id crossing 0x7fff to 0x8000 (the priority bit) in a MIB
+  upload and in the retransmission cache, which keys on the whole frame.
+
 - Docs: the by-hand slot restore in `docs/FLASHING.md` now says to write
   the kernel last, lists the checks to make before pointing a boot at the
   restored slot (running and committed slot, the uImage magic, the partition
