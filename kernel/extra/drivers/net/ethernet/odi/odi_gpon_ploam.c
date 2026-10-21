@@ -150,6 +150,11 @@ void odi_gpon_encode_password(uint8_t onu_id, const uint8_t password[10],
 	memcpy(out->content, password, ODI_GPON_PLOAM_CONTENT_LEN);
 }
 
+void odi_gpon_encode_dying_gasp(uint8_t onu_id, struct odi_gpon_ploam *out)
+{
+	odi_gpon_ploam_clear(out, onu_id, ODI_GPON_US_DYING_GASP);
+}
+
 void odi_gpon_encode_encryption_key_fragment(uint8_t onu_id, uint8_t key_index,
 					      const uint8_t key[16], unsigned int fragment_index,
 					      struct odi_gpon_ploam *out)

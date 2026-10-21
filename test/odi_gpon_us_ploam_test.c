@@ -127,12 +127,41 @@ static void test_request_key_burst_full(void)
 	CHECK(odi_mock_locks_idle(), "no lock left held");
 }
 
+/* Dying_Gasp: octet 1 the ONU-ID, octet 2 the id 3, the content zero; and
+ * the wait variant: left (EMPTY set), queued but stuck, not queued.
+ */
+static void test_dying_gasp(void)
+{
+	struct odi_gpon_ploam m;
+	unsigned int i;
+	int rc;
+
+	odi_gpon_encode_dying_gasp(TEST_ONU_ID, &m);
+	CHECK(m.onu_id == TEST_ONU_ID && m.type == 3U, "Dying_Gasp is ONU-ID, then id 3");
+	for (i = 0; i < ODI_GPON_PLOAM_CONTENT_LEN; i++)
+		CHECK(m.content[i] == 0U, "Dying_Gasp content is zero");
+
+	setup(0, 0);
+	rc = odi_gpon_hw_send_us_ploam_wait(&m, 50000U);
+	CHECK(rc == 0 && pushes == 1U, "a copy that leaves the queue is reported left");
+
+	setup(0, 1);
+	odi_mock.regs[odi_mock_slot(ODI_GPON_USF_PLOAM_TX_CTL_OFF)] = 0;
+	rc = odi_gpon_hw_send_us_ploam_wait(&m, 50000U);
+	CHECK(rc == -ETIMEDOUT && pushes == 1U, "a copy that stays queued times out, bounded");
+
+	setup(1, 1);
+	rc = odi_gpon_hw_send_us_ploam_wait(&m, 50000U);
+	CHECK(rc == -EBUSY && pushes == 0U, "a full queue takes no copy");
+}
+
 int main(void)
 {
 	test_room_pushes();
 	test_room_within_wait();
 	test_full_drops();
 	test_request_key_burst_full();
+	test_dying_gasp();
 	odi_mock_write_hook = NULL;
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

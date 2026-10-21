@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- GPON: new experimental, off-by-default key `GPON_DYING_GASP=1`: the stick
+  sends the Dying_Gasp PLOAM message (up to three copies) before an orderly
+  reboot, halt or power-off, only from O4 or O5 and never when the PON drops,
+  so the OLT can tell a planned restart from a lost ONU. The kernel logs
+  `Dying_Gasp sent <n> of 3 times before the restart`. What the OLT does with
+  it cannot be confirmed from here, hence off by default.
+
 ## v1.10.0 - 2026-10-21
 
 - Switch: the downstream queues of the UNI (ME 277, the ones the OLT

@@ -280,9 +280,15 @@ void odi_gpon_decode_key_switching_time(const struct odi_gpon_ploam *msg,
 void odi_gpon_encode_password(uint8_t onu_id, const uint8_t password[10],
 			       struct odi_gpon_ploam *out);
 
-/* No unused encoders for Dying_Gasp (clause 9.2.4.3) or No_Message (clause
- * 9.2.4.4): this driver has never had a caller for either, and none is
- * planned; add one back with its own caller if that changes.
+/* Dying_Gasp (clause 9.2.4.3): octet 1 is the ONU-ID, octet 2 the message
+ * id (3), the content all zero. Sent by software only from the reboot
+ * notifier (odi_gpon.c, GPON_DYING_GASP); the hardware also has a copy
+ * pre-armed in its own template slot at init.
+ */
+void odi_gpon_encode_dying_gasp(uint8_t onu_id, struct odi_gpon_ploam *out);
+
+/* No unused encoder for No_Message (clause 9.2.4.4): this driver has never
+ * had a caller for it; add one back with its own caller if that changes.
  *
  * Encryption_Key (clause 9.2.4.5): content[0] = Key_Index (which key this
  * ONU is reporting -- one key generation per Request_Key cycle in this
