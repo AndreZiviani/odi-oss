@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- OMCI: new odi-only key `OMCI_TCONT_ALLOC_UNSET` (`/etc/config/odi.conf`,
+  default `ploam`, which changes nothing). `unassigned` makes a T-CONT the
+  OLT never Set report Alloc-ID 0x00FF, the initial value of G.988 9.2.2,
+  instead of the next Alloc-ID assigned by PLOAM, in a Get, in the MIB
+  upload and in `omcicli`. For an OLT that picks the first T-CONT that
+  reports empty and so skipped the first one. A T-CONT the OLT Set reports
+  its value in both modes, and the datapath is unchanged: the T-CONT is
+  still bound to the PLOAM Alloc-ID, so upstream keeps working on an OLT
+  that never Sets it (omcid logs a warning for each such T-CONT). Read at
+  every Get, so a change is live. `docs/SETTINGS.md`.
+  On a stick whose OLT sets the T-CONT Alloc-IDs itself, a re-registration
+  with the key at unassigned kept its service (O5, all services, traffic) and
+  its T-CONT values.
 ## v1.11.0 - 2026-10-21
 
 - Releases: confd v1.8.0 (the web UI's management-address change goes
