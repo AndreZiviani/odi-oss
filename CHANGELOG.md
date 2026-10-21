@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Toolchain: built with odi-toolchain uclibc-v4 and freestanding-v3, which
+  deny the `bltzl` instruction in the ISA audit (it decodes but
+  misexecutes on the RLX5281). The compilers and libraries are unchanged:
+  a rebuild against the previous images gives the same kernel and the same
+  rootfs, file for file, except busybox, whose only difference is the
+  build time in its banner.
+
 - Management address: a change of `LAN_IP_ADDR`, `LAN_SUBNET`,
   `LAN_ENABLE_IP2`, `LAN_IP_ADDR2` or `LAN_SUBNET2` is now a trial, like the
   host port. `mgmt-addr.sh try KEY=VALUE...` applies the new address in RAM
