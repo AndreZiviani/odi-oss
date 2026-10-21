@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.10.0 - 2026-10-21
+
 - Switch: the downstream queues of the UNI (ME 277, the ones the OLT
   gives a Weight) are now scheduled: a queue with Weight 2 or more is
   weighted, at that weight, and one with 0 or 1 is strict, in the queue
