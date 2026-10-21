@@ -173,12 +173,13 @@ at a time and verify each before the next:
 
    `root=31:5` is slot 0, `root=31:7` is slot 1.
 
-2. **Decide whether the trial should revert when it is unreachable.** This
-   image arms the watchdog on every boot, and rcS confirms userland to it
-   once its own steps have run, without looking at the network; with no
-   confirmation within 120 s of uptime the kernel resets the board. So a
-   trial that boots but never answers on the network stays up until you
-   power-cycle it. For development, `: > /etc/config/confirm-arp` makes rcS
+2. **Plan to reach the trial within five minutes.** A trial of this image
+   that nothing reaches over the management path in its first 300 s
+   reverts by itself ("The trial guard", below): log in over ssh (or open
+   the web UI) in that time, or let the metrics scraper do it. Separately,
+   rcS confirms userland to the watchdog once its own steps have run,
+   without looking at the network; with no confirmation within 120 s of
+   uptime the kernel resets the board. For development, `: > /etc/config/confirm-arp` makes rcS
    confirm only after an ARP reply from the `.2` address of the management
    subnet (`192.168.1.2` for the default `192.168.1.1`; see
    `docs/SETTINGS.md`), so an unreachable trial reverts by itself and keeps
@@ -268,11 +269,45 @@ development, `/etc/config/confirm-arp` makes rcS confirm only after an ARP
 reply from the `.2` address of the `br0` subnet, so an unreachable trial
 reverts by itself; never leave it on a stick whose host is not on `.2`. Because U-Boot cleared `sw_tryactive` before
 handing over, every one of those resets lands on the committed slot, with
-nothing lost and nothing to do by hand. What it cannot catch is an image
-that confirms and then misbehaves (unreachable, or answers ARP but not ssh): that
-stays up until you power-cycle it, which also brings the committed image
-back -- as long as the trial has not been committed ("Committing",
-below).
+nothing lost and nothing to do by hand. An image that confirms and then
+cannot be reached is the trial guard's (below). What neither catches is an
+image that is reachable and then misbehaves (answers ssh but not the
+fibre, say): that stays up until you reboot or power-cycle it, which also
+brings the committed image back -- as long as the trial has not been
+committed ("Committing", below).
+
+### The trial guard
+
+A trial that boots, confirms and then cannot be reached satisfies every
+watchdog rule, so on its own it would stay up until someone pulls the
+power: a NIC that receives but no longer transmits does exactly that, and
+the host only sees ARP go unanswered. `trial-guard.sh` (an `/etc/inittab`
+`once` entry) closes the gap on a trial only:
+
+- it arms when `/var/run/odi-slot` says the running slot is not committed
+  and the next boot goes to another slot, so a reset returns to the
+  committed one. Never on a committed slot, never when the slot state
+  cannot be read, never with `/etc/config/trial-guard.off`;
+- it registers the `odi_wdt` client `trial` with a 300 s deadline and
+  never pings it (`docs/SETTINGS.md`, "Watchdog rules"): unless it is
+  released, the kernel resets the board 300 s later and the next boot is
+  the committed slot, its ramlog saying `reason=wdt_client:trial`;
+- it releases the client as soon as the management path is seen working
+  in both directions: a TCP connection from a peer other than the stick
+  itself that got past the handshake (an ssh login, the web UI, a metrics
+  scrape), or a neighbour in `REACHABLE`, which only an answer to
+  something the stick sent puts there. It also releases once the slot is
+  committed (`nv commit` and `slot-state.sh` from the serial console).
+
+A frame arriving from the host does not count: it proves only that the
+stick receives, and a stick that cannot transmit still receives every ARP
+request. A host that never talks to the stick looks the same as a dead
+path from inside, so such a trial reverts: nobody can have checked it, and
+every way to commit it is a TCP session that disarms the guard first. 300 s
+is about a minute of boot plus five metrics-scrape intervals, and leaves a
+stranded trial back on the committed slot about six minutes after
+power-on. `logread | grep trial-guard` or `dmesg | grep trial-guard`
+shows what it decided.
 
 **Never write `sw_commit` before this.** Making the trial slot permanent
 before it has booted throws away the only free safety net there is.

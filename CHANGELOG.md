@@ -28,6 +28,15 @@ listed here.
 - The watchdog CPU-port rule counts the frames taken from the main receive
   ring only, so OMCI arriving on the second ring cannot hide a main ring
   that takes nothing.
+- A trial boot that nothing reaches goes back by itself: on a trial only
+  (not committed, the next boot goes to another slot), `trial-guard.sh`
+  registers an `odi_wdt` client that resets the board 300 s later unless
+  the management path is seen working both ways first (a TCP session from
+  the host, or a neighbour that answered the stick). The reset lands on
+  the committed slot, with `reason=wdt_client:trial` in the ramlog; until
+  now such a trial stayed up until someone power-cycled it.
+  `/etc/config/trial-guard.off` turns it off. Host-tested
+  (`test/trial_guard_test.sh`) and in the qemu harness.
 
 - Toolchain: built with odi-toolchain uclibc-v4 and freestanding-v3, which
   deny the `bltzl` instruction in the ISA audit (it decodes but

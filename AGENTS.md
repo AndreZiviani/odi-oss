@@ -160,7 +160,11 @@ it:
 - **Nothing commits a trial automatically, and nothing should.** A trial is
   committed only by a person, with `nv commit <slot>`. Until then the image
   says so (`slot-state.sh`: the ssh login banner, `/var/run/odi-slot`,
-  `gpon_uncommitted`); do not add code that acts on that state.
+  `gpon_uncommitted`). The one thing that acts on that state is the trial
+  guard (`trial-guard.sh`, `docs/FLASHING.md`): a trial nobody reaches both
+  ways within 300 s is reset back to the committed slot, the revert the
+  trial promises anyway. Add nothing else that acts on it, and never
+  anything that commits.
 
 ## Dangerous commands
 

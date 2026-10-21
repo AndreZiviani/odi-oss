@@ -406,6 +406,33 @@ static void test_cpu_rx_omci_ring_does_not_hide_a_dead_ring1(void)
 	CHECK(!(fired_both & ODI_WDT_ACTION_CPU_RX_STALL), "both rings counted: OMCI hides it (why ring 1 alone)");
 }
 
+/* The trial guard (rootfs trial-guard.sh): a client registered for the
+ * trial deadline and never pinged resets at that deadline; released with
+ * deadline 0, never.
+ */
+static void test_trial_guard_client(void)
+{
+	struct odi_wdt_deadline_state st;
+	unsigned int t, fired = 0;
+
+	cpu_rx_state(&st);
+	CHECK(odi_wdt_client_register(&st, "trial", 300, 40) >= 0, "trial client registers");
+	for (t = 40; t <= 340; t += 5)
+		fired |= odi_wdt_deadline_tick(&st, t, 100000);
+	CHECK(!(fired & ODI_WDT_ACTION_FORCE_RESET), "not before 300 s from registration");
+	fired = odi_wdt_deadline_tick(&st, 345, 100000);
+	CHECK((fired & ODI_WDT_ACTION_FORCE_RESET) && (fired & ODI_WDT_ACTION_CLIENT_MISS),
+	      "an unproven trial resets past its deadline");
+
+	cpu_rx_state(&st);
+	odi_wdt_client_register(&st, "trial", 300, 40);
+	odi_wdt_client_register(&st, "trial", 0, 100);
+	fired = 0;
+	for (t = 100; t <= 2000; t += 5)
+		fired |= odi_wdt_deadline_tick(&st, t, 100000);
+	CHECK(!(fired & ODI_WDT_ACTION_FORCE_RESET), "a released trial client never resets");
+}
+
 static void test_cpu_rx_counts_wrap_and_invalid_forgets(void)
 {
 	struct odi_wdt_deadline_state st;
@@ -562,6 +589,7 @@ int main(void)
 	test_cpu_rx_progress_clears_and_idle_ticks_do_not();
 	test_cpu_rx_counts_wrap_and_invalid_forgets();
 	test_cpu_rx_omci_ring_does_not_hide_a_dead_ring1();
+	test_trial_guard_client();
 
 	test_arm_writes_the_uboot_matching_value();
 	test_kick_is_real_read_modify_write_on_kick_reg();
