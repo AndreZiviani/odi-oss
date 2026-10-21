@@ -425,6 +425,19 @@ static inline void odi_nic_tx_pack(struct odi_tx_desc *d, unsigned int port_mask
 		d->opts1 |= ODI_TXD_NO_LEARN;
 }
 
+/* A frame that fits its buffer arrives in one descriptor with FIRST and
+ * LAST both set (opts1 0x36000048 on the first frame logged on a stick, and
+ * another open implementation's measurements agree); a frame longer than
+ * the buffer arrives as several, FIRST alone, then none, then LAST alone,
+ * and only the first carries the CPU tag. A piece without both has no source
+ * port, so it must never be taken for a frame of its own.
+ */
+static inline int odi_nic_rx_whole(const struct odi_rx_desc *d)
+{
+	return (d->opts1 & (ODI_RXD_FIRST | ODI_RXD_LAST)) ==
+	       (ODI_RXD_FIRST | ODI_RXD_LAST);
+}
+
 static inline unsigned int odi_nic_rx_src_port(const struct odi_rx_desc *d)
 {
 	return (d->opts3 >> ODI_RXD_SRC_PORT_SHIFT) & ODI_RXD_SRC_PORT_MASK;

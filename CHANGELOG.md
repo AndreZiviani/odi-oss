@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Kernel, NIC: a receive descriptor that is not both the first and the last
+  piece of a frame is dropped and counted (`rx_split_dropped` in
+  `/proc/odi_nic`, `rx_length_errors` on the interface, one log line). A frame
+  longer than the 1600 byte buffer arrives in pieces and only the first has the
+  CPU tag, so the later pieces read as source port 0 and skipped the test that
+  keeps everything from the fibre away from the IP stack. Normal frames carry both bits.
+  Not yet checked on a stick: if `rx_split_dropped` counts on ordinary traffic the check is wrong.
+
 - OMCI, switch: the OLT's extended VLAN tagging operation (class 171) is applied
   entry by entry, not only the one shape "untagged frames get one VLAN". On a
   line with `VLAN_CFG_TYPE` other than 1 (the manual tag never reads the
