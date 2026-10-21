@@ -536,9 +536,18 @@ static int cfg_num(const char *path, const char *key, int missing)
  * VID and the priority are present; every other combination hands omci_app the
  * 65535/255 sentinels, which is no manual tag at all. ISP1 and ISP2 both run
  * 1/1 with a VID and a priority, so the applied path never triggers on
- * either. A store that holds the sentinel itself (VLAN_MANU_TAG_PRI 255, or
- * anything past 7, which no 802.1p tag can carry) is no manual tag too, as
- * omci_app reads it; it used to switch the tag on with that priority. */
+ * either.
+ *
+ * A priority past 7 (255 is what a factory store holds) does NOT switch the
+ * tag off: the stock stack assigns the VID whenever it is handed one (the
+ * manual-tagging branch of its connection builder), and only the pair VID
+ * 65535 / priority 255, which runomci.sh builds for the other combinations,
+ * never matches a service. v1.4.2 to v1.8.0 read 255 as "no tag", and a line
+ * whose OLT wants untagged frames tagged with the manual VID (VLAN 30, six
+ * upstream flows) then had no way for the router's DHCP to reach the PON.
+ * No 802.1p tag carries a priority past 7 and the switch driver already takes
+ * one as 0, so it is 0 here, which is also what an OLT's own untagged-add
+ * rule asks for. */
 #define VLAN_CFG_TYPE_MANUAL  1
 #define VLAN_MANU_MODE_TAG    1
 
@@ -550,10 +559,10 @@ void cfg_load_vlan_from(const char *cs)
 	vlanCfg.type = cfg_num(cs, "VLAN_CFG_TYPE", 0);
 	vlanCfg.vid  = cfg_num(cs, "VLAN_MANU_TAG_VID", -1);
 	pri          = cfg_num(cs, "VLAN_MANU_TAG_PRI", -1);
-	vlanCfg.pri  = pri < 0 ? 0 : pri;
+	vlanCfg.pri  = pri < 0 || pri > 7 ? 0 : pri;
 	vlanCfg.manual = vlanCfg.type == VLAN_CFG_TYPE_MANUAL
 		&& vlanCfg.mode == VLAN_MANU_MODE_TAG
-		&& vlanCfg.vid >= 0 && pri >= 0 && pri <= 7;
+		&& vlanCfg.vid >= 0 && pri >= 0;
 	vlanCfg.loaded = 1;
 }
 
