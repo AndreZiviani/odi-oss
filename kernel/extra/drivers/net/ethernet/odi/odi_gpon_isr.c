@@ -306,10 +306,11 @@ void odi_gpon_line_sample(struct odi_gpon_fsm *fsm, int watch, struct odi_gpon_l
 	enum odi_gpon_event event;
 
 	out->alarms = alarms;
+	out->dark = alarms == ODI_GPON_NO_RESPONSE;
 	out->fed = 0;
 	out->event = ODI_GPON_EVENT_LOS;
 	out->cause = "";
-	if (!watch || !odi_gpon_fsm_line_event(fsm, down, &event))
+	if (out->dark || !watch || !odi_gpon_fsm_line_event(fsm, down, &event))
 		return;
 
 	odi_gpon_fsm_handle_event(fsm, odi_gpon_hw_ops(), NULL, event, NULL);

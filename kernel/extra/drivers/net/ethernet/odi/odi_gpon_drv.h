@@ -72,10 +72,13 @@ void odi_gpon_isr_set_msg_hook(odi_gpon_isr_msg_fn fn);
  * the event=los/lof lines); out->fed says whether an FSM event ran, and
  * then out->event is that event and out->cause its name for the
  * event=onu_state line: "los" (LOS set), "lof" (LOF alone) or
- * "los_cleared" (both clear).
+ * "los_cleared" (both clear). A MAC that is not clocked answers
+ * ODI_GPON_NO_RESPONSE, which has LOS and LOF set: that reading sets
+ * out->dark and feeds nothing.
  */
 struct odi_gpon_line_sample {
 	uint32_t alarms;
+	int dark;		/* the register read ODI_GPON_NO_RESPONSE: not a sample, never fed */
 	int fed;
 	enum odi_gpon_event event;
 	const char *cause;

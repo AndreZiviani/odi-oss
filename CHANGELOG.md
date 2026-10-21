@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Kernel, GPON: a GPON MAC that is not clocked answers its registers with
+  `0xca0eca0f`, which has LOS, LOF, FEC and LOM all set. The line sample and
+  the counter sample now treat that word as no reading: it is not fed to the
+  state machine as a loss, not counted as an alarm and not added to the
+  counters (one log line says so). The boot log also names the chip id, the
+  GPON MAC revision and the MAC memory self-test result once
+  (`odi_gpon: chip id ..., GPON MAC rev ..., memory self-test ...`).
+
 - Kernel: `panic=10` on the built-in command line. A panic used to wait for
   the userland watchdog deadline (about 44 s) before the board restarted; it
   now restarts 10 s after the panic, through the watchdog restart handler,

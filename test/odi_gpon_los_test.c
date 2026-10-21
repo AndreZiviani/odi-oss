@@ -320,6 +320,23 @@ static void test_lof_alone_and_lom(void)
 	      "LOF alone takes O5 to O6, cause lof");
 }
 
+/* A MAC that is not clocked answers 0xca0eca0f, which has LOS and LOF set:
+ * it is not a sample, in any state.
+ */
+static void test_dark_mac_is_not_a_loss(void)
+{
+	struct odi_gpon_fsm fsm;
+	struct odi_gpon_line_sample smp;
+
+	boot_to_o5(&fsm);
+	sample(&fsm, ODI_GPON_NO_RESPONSE, 1, &smp);
+	CHECK(smp.dark && !smp.fed && fsm.state == ODI_GPON_STATE_O5,
+	      "the no-decode reply is not fed as a loss: O5 stays O5");
+	sample(&fsm, LOS | LOF, 1, &smp);
+	CHECK(!smp.dark && smp.fed && fsm.state == ODI_GPON_STATE_O6,
+	      "a real LOS|LOF right after is still a loss");
+}
+
 /* The light back inside the TO2 window and no POPUP: TO2 still ends O6,
  * and with no LOS edge left to see, the very next sample takes O1 on to
  * O2 (odi_gpon.c samples right after the TO2 event for this).
@@ -398,6 +415,7 @@ int main(void)
 {
 	test_fibre_pull_and_return();
 	test_lof_alone_and_lom();
+	test_dark_mac_is_not_a_loss();
 	test_light_back_inside_to2();
 	test_popup_resumes();
 	test_deactivate_releases_the_same();

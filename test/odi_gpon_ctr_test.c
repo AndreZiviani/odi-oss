@@ -582,6 +582,23 @@ static void test_show_golden(const char *dir)
 	compare_golden(path);
 }
 
+/* A MAC that is not clocked answers every register with 0xca0eca0f:
+ * the sample reads nothing and adds nothing.
+ */
+static void test_dark_mac_adds_nothing(void)
+{
+	unsigned int i;
+
+	start();
+	alarm_state = ODI_GPON_NO_RESPONSE;
+	DSF(ODI_GPON_DSF_BIP_ERR_BLOCKS_OFF) = ODI_GPON_NO_RESPONSE;
+	odi_gpon_ctr_sample(&c, 2000U, O5);
+	for (i = 0; i < ODI_GPON_CTR_COUNT; i++)
+		CHECK(c.total[i] == 0, "a dark MAC adds nothing to any total");
+	CHECK(c.samples == 1, "a dark sample is not counted");
+	CHECK(c.alarm_events[0] == 0 && c.alarm_events[1] == 0, "a dark MAC is not a LOS or LOF event");
+}
+
 int main(int argc, char **argv)
 {
 	test_table();
@@ -596,6 +613,7 @@ int main(int argc, char **argv)
 	test_alarms();
 	test_alarms_from_the_line_poll();
 	test_states();
+	test_dark_mac_adds_nothing();
 	test_show_before_first_sample();
 	test_show_golden(argc > 1 ? argv[1] : "test/fixtures");
 

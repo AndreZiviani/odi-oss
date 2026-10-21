@@ -547,6 +547,14 @@ static void odi_gpon_line_check(void)
 	int los;
 
 	odi_gpon_line_sample(&odi_gpon_fsm_inst, odi_gpon_line_watch, &smp);
+	if (smp.dark) {
+		/* Not clocked: the alarm word is the bus's no-decode reply, so
+		 * there is no LOS or LOF to count or log. Nothing was fed.
+		 */
+		pr_warn_once("odi_gpon: the GPON MAC answers 0x%08x (not clocked); line alarms ignored while it does\n",
+			     smp.alarms);
+		return;
+	}
 	odi_gpon_ctr_note_alarms(&odi_gpon_ctr_inst, smp.alarms,
 				 jiffies_to_msecs(jiffies - INITIAL_JIFFIES));
 
@@ -804,8 +812,19 @@ static int odi_gpon_parse_sn(const char *arg, uint8_t sn[8])
 
 /* ---- odi_gpon_drv.h-facing entry points -------------------------------- */
 
+/* The chip words once, for a bug report: all three answer at any time. */
+static void odi_gpon_log_chip(void)
+{
+	uint32_t test = odi_reg_read(ODI_GPON_MAC_SELFTEST_OFF);
+
+	pr_info("odi_gpon: chip id 0x%08x, GPON MAC rev 0x%08x, memory self-test 0x%08x%s\n",
+		odi_reg_read(ODI_GPON_CHIP_ID_OFF), odi_reg_read(ODI_GPON_MAC_REVISION_OFF), test,
+		(test & 0x18U) ? " (FAIL bit set)" : "");
+}
+
 int odi_gpon_init(void)
 {
+	odi_gpon_log_chip();
 	odi_gpon_hw_reset();
 	odi_gpon_fsm_init(&odi_gpon_fsm_inst);
 	odi_gpon_hw_set_ploam_log(odi_gpon_ploam_log);
