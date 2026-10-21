@@ -169,6 +169,10 @@ void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
 	v = ODI_SW_VLAN_MEMBERS_IDX1_1ST;
 	(void)odi_switch_table_write(ODI_SW_TBL_VLAN_MEMBERS, 1, &v, 1);
 
+	/* PORT_VLAN_INDEX(n) is a word holding the PVID of ports 2n and 2n+1:
+	 * (0) is ports 0-1, (1) is ports 2-3, and each write below replaces
+	 * the whole word, as captured.
+	 */
 	odi_reg_write(ODI_SW_VLAN_ACCEPT_FRAMES(0), 0);
 	odi_reg_write(ODI_SW_VLAN_INGRESS_CHECK(0), 0xfU);
 	odi_reg_write(ODI_SW_PORT_VLAN_INDEX(0), 0x1U);

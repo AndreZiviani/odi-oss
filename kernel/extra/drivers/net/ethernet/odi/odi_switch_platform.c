@@ -166,10 +166,12 @@ static void odi_switch_platform_acl(void)
 	odi_reg_write(ODI_SW_ACL_PORT_ENABLE_OFF, reg);
 }
 
-/* VLAN filtering off, PVID 0 on ports 0-1, the port-1 ingress check off,
- * every port an SVLAN uplink, SVLAN filtering off and untagged frames on
- * the port SVID. PORT_VLAN_INDEX of ports 2-3 and the per-port SVID are
- * not written: their register strides are not decoded.
+/* VLAN filtering off, PVID 0 on all four ports, the port-1 ingress check
+ * off, every port an SVLAN uplink, SVLAN filtering off and untagged frames
+ * on the port SVID. PORT_VLAN_INDEX holds two ports per word (12 bits
+ * each), so the two plain writes below, to words 0 and 1, set ports 0-1 and
+ * ports 2-3 to PVID 0: whole-word writes, no read-modify-write. The
+ * per-port SVID is not written: its stride is not decoded.
  */
 static void odi_switch_platform_vlan(void)
 {

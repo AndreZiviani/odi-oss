@@ -41,6 +41,11 @@ void mib_reset_all(void)
 	mib_data_sync = 0;
 	retx_clear();
 	upl_total = 0;
+	/* The snapshot a Get of a table attribute left for its Get-Next walk
+	 * describes a row that is gone now: a Get-Next after the reset would
+	 * answer the old bytes. Unprimed, it is refused as a Get-Next with no
+	 * Get before it. */
+	getnext.primed = 0;
 	/* The bridge connections were built from the MIB just thrown away.
 	 * The stock reset clears the datapath with the MIB; here the rebuild
 	 * that follows (one quiet second, respond/main.c) deactivates every
