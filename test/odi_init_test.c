@@ -111,7 +111,7 @@ int main(void)
 	/* Every PON-step verb routes to odi_gpon_verb(), arg passed through. */
 	{
 		static const char *const gpon_verbs[] = {
-			"gpondrv", "gpondev", "gponsn", "gponpw", "gpondg",
+			"gpondrv", "gpondev", "gponsn", "gponpw", "gpondg", "gponkeep", "gponhold",
 			"gponact", "gpondeact", "gponstat",
 		};
 		unsigned int i;

@@ -66,6 +66,7 @@
 #include <linux/hex.h>
 #include <linux/slab.h>
 #include <linux/reboot.h>
+#include <linux/umh.h>
 
 #endif
 
@@ -476,6 +477,41 @@ static void odi_gpon_note_ranging(enum odi_gpon_state prev, enum odi_gpon_state 
 		      dbg.multframe, dbg.inframe, (unsigned int)odi_gpon_fsm_inst.onu_id);
 }
 
+/* GPON_KEEP_DISABLE: the kept Emergency Stop lives in the leaf
+ * (odi_gpon_hw_hold_*()); what is here is the way out to the config
+ * partition. The kernel cannot write the jffs2 files, so a change of the
+ * hold runs the helper once, which makes the marker file follow what
+ * /proc/odi_gpon/status says (rootfs/skeleton/etc/scripts/gpon-hold.sh).
+ * The helper reads the state itself instead of being told it, so two runs
+ * that overtake each other still end on the current state. Run from the
+ * unbound workqueue, no waiting: this is called under the lock, from the
+ * interrupt. A helper that cannot run (no rootfs, no script) leaves the
+ * hold in force for this boot and loses it at the next.
+ */
+static char *odi_gpon_hold_argv[] = { "/etc/scripts/gpon-hold.sh", "sync", NULL };
+static char *odi_gpon_hold_envp[] = {
+	"HOME=/", "PATH=/etc/scripts:/sbin:/usr/sbin:/bin:/usr/bin", NULL,
+};
+
+static void odi_gpon_hold_sync(void)
+{
+	struct subprocess_info *info;
+
+	info = call_usermodehelper_setup(odi_gpon_hold_argv[0], odi_gpon_hold_argv,
+					 odi_gpon_hold_envp, GFP_ATOMIC, NULL, NULL, NULL);
+	if (!info || call_usermodehelper_exec(info, UMH_NO_WAIT))
+		odi_gpon_logf(ODI_GPON_DLOG_NOTICE,
+			      "odi_gpon: event=o7_hold action=marker_not_synced cause=no_helper\n");
+}
+
+/* The event=o7_hold line: what happened to the kept Emergency Stop. Not
+ * ratelimited: it is rare, and it is what says why the stick is dark.
+ */
+static void odi_gpon_hold_event(const char *action, const char *cause)
+{
+	odi_gpon_logf(ODI_GPON_DLOG_NOTICE, "odi_gpon: event=o7_hold action=%s cause=%s\n", action, cause);
+}
+
 /* The event=onu_state line, for every entry point below that can move the
  * FSM: called under the lock, after the call, with the state before it and
  * why it ran (odi_gpon_fsm_cause(), or a verb's own name).
@@ -491,6 +527,18 @@ static void odi_gpon_note_transition(enum odi_gpon_state prev,
 		return;
 	odi_gpon_ctr_note_transition(&odi_gpon_ctr_inst, prev, now);
 	odi_gpon_note_ranging(prev, now);
+	switch (odi_gpon_hw_hold_track(prev, now)) {
+	case ODI_GPON_HOLD_RECORDED:
+		odi_gpon_hold_event("recorded", cause->name);
+		odi_gpon_hold_sync();
+		break;
+	case ODI_GPON_HOLD_RELEASED:
+		odi_gpon_hold_event("released", cause->name);
+		odi_gpon_hold_sync();
+		break;
+	case ODI_GPON_HOLD_UNCHANGED:
+		break;
+	}
 	odi_gpon_elapsed(odi_gpon_state_since, &secs, &ms);
 	odi_gpon_state_since = jiffies;
 	if (!__ratelimit(&odi_gpon_event_rs))
@@ -885,6 +933,55 @@ static void odi_gpon_irq_attach(void)
 	pr_info("odi_gpon: GPON interrupt source unmasked\n");
 }
 
+/* The gponhold verb, under the lock (GPON_KEEP_DISABLE, docs/SETTINGS.md):
+ *   1    restore a kept Emergency Stop: the boot with the marker present. The
+ *        line goes high now, and the boot gponact (or the next one) ends in
+ *        O7. Refused (-EPERM) with the feature off, and (-EBUSY) once the
+ *        ONU is past O1: it is for a PON that is not up.
+ *   0    release by hand: what the OLT enable does, without the OLT. The
+ *        hold ends, and an ONU in O7 is activated (to O2).
+ *   sim  TEST HOOK: act as if the OLT had disabled this ONU. Sends nothing.
+ *        Needs the feature on, and an ONU in O2 to O6 as the real message
+ *        does (-EBUSY otherwise).
+ * Called with odi_gpon_lock held; the event=o7_hold lines are here.
+ */
+static int odi_gpon_verb_hold(const char *arg)
+{
+	struct odi_gpon_fsm *fsm = &odi_gpon_fsm_inst;
+
+	if (!arg)
+		return -EINVAL;
+	if (!strcmp(arg, "1")) {
+		if (!odi_gpon_hw_hold_enabled())
+			return -EPERM;
+		if (fsm->state != ODI_GPON_STATE_O1 && fsm->state != ODI_GPON_STATE_O7)
+			return -EBUSY;
+		if (odi_gpon_hw_hold_get())
+			return 0;
+		odi_gpon_hw_hold_set(1);
+		if (odi_gpon_booted)
+			odi_gpon_hw_hold_enter(fsm);
+		odi_gpon_hold_event("kept", "boot");
+	} else if (!strcmp(arg, "0")) {
+		if (!odi_gpon_hw_hold_get())
+			return 0;
+		odi_gpon_hw_hold_set(0);
+		if (odi_gpon_booted && fsm->state == ODI_GPON_STATE_O7)
+			odi_gpon_verb_activate(fsm);
+		odi_gpon_hold_event("cleared", "local");
+		odi_gpon_hold_sync();
+	} else if (!strcmp(arg, "sim")) {
+		if (!odi_gpon_hw_hold_enabled())
+			return -EPERM;
+		if (fsm->state < ODI_GPON_STATE_O2 || fsm->state > ODI_GPON_STATE_O6)
+			return -EBUSY;
+		odi_gpon_hw_hold_simulate_disable(fsm);
+	} else {
+		return -EINVAL;
+	}
+	return 0;
+}
+
 int odi_gpon_verb(const char *verb, const char *arg)
 {
 	struct odi_replay_fw init_fw = { };
@@ -938,7 +1035,8 @@ int odi_gpon_verb(const char *verb, const char *arg)
 			 * it heard, and the driver compares the next
 			 * assignment with the one it holds.
 			 */
-			if (odi_gpon_fsm_inst.state != ODI_GPON_STATE_O1)
+			if (odi_gpon_fsm_inst.state != ODI_GPON_STATE_O1 &&
+			    !(odi_gpon_fsm_inst.state == ODI_GPON_STATE_O7 && odi_gpon_hw_hold_get()))
 				rc = -EBUSY;
 			else if (init_fw_rc)
 				rc = init_fw_rc;
@@ -986,8 +1084,16 @@ int odi_gpon_verb(const char *verb, const char *arg)
 			 * (the same direct fsm->state poke
 			 * odi_gpon_verb_deactivate() already uses).
 			 */
-			odi_gpon_fsm_inst.state = ODI_GPON_STATE_O2;
-			odi_gpon_fsm_inst.onu_id = 0U;
+			if (odi_gpon_hw_hold_get()) {
+				/* GPON_KEEP_DISABLE: the OLT disabled this ONU
+				 * and has not enabled it since; it starts in
+				 * O7, the line already high (gponhold 1).
+				 */
+				odi_gpon_hw_hold_enter(&odi_gpon_fsm_inst);
+			} else {
+				odi_gpon_fsm_inst.state = ODI_GPON_STATE_O2;
+				odi_gpon_fsm_inst.onu_id = 0U;
+			}
 			odi_gpon_booted = true;
 			/* The block is set up: the counter sampler starts, with
 			 * its baseline (the first sample only clears) taken
@@ -1007,6 +1113,14 @@ int odi_gpon_verb(const char *verb, const char *arg)
 			odi_gpon_dg_enabled = (arg[0] == '1');
 		else
 			rc = -EINVAL;
+	} else if (!strcmp(verb, "gponkeep")) {
+		/* GPON_KEEP_DISABLE=1, written at boot by rcs-lib.sh. */
+		if (arg && (!strcmp(arg, "0") || !strcmp(arg, "1")))
+			odi_gpon_hw_hold_enable(arg[0] == '1');
+		else
+			rc = -EINVAL;
+	} else if (!strcmp(verb, "gponhold")) {
+		rc = odi_gpon_verb_hold(arg);
 	} else if (!strcmp(verb, "gpondeact")) {
 		odi_gpon_verb_deactivate(&odi_gpon_fsm_inst);
 	} else if (!strcmp(verb, "gponstat")) {
@@ -1188,6 +1302,7 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	struct odi_gpon_ds_ranging_time rng;
 	struct odi_gpon_ranging_dbg rdbg;
 	bool uo_valid, rng_valid;
+	int hold_keep, hold_held;
 
 	(void)v;
 
@@ -1214,6 +1329,8 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	rng = odi_gpon_last_rng;
 	rng_valid = odi_gpon_last_rng_valid;
 	odi_gpon_get_ranging_dbg(&rdbg);
+	hold_keep = odi_gpon_hw_hold_enabled();
+	hold_held = odi_gpon_hw_hold_get();
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 
 	{
@@ -1221,6 +1338,10 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 
 		seq_printf(seq, "state %d (%s)\n", state, odi_gpon_state_name((enum odi_gpon_state)state));
 	}
+	/* GPON_KEEP_DISABLE: keep 1 = the feature is on; held 1 = Emergency
+	 * Stop is kept (the OLT disabled this ONU and has not enabled it).
+	 */
+	seq_printf(seq, "o7_hold keep %d held %d\n", hold_keep, hold_held);
 	seq_printf(seq, "onu_id %d\n", odi_gpon_onu_id_get());
 	seq_printf(seq, "sn %02x%02x%02x%02x%02x%02x%02x%02x\n",
 		   sn[0], sn[1], sn[2], sn[3], sn[4], sn[5], sn[6], sn[7]);
