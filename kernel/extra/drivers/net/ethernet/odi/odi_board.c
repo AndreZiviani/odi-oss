@@ -97,20 +97,57 @@ static int odi_board_select_page(uint8_t want, uint8_t cur)
 
 /* The id byte of the laser driver behind A2h: select page 2 (when it is
  * not already), read byte 0xa0, put the page select back. -1 when any step
- * fails.
+ * fails. *rest is the page to put back: taken from the first attempt that
+ * reads the select byte and kept for the next ones, because a failed
+ * attempt can leave page 2 selected and a retry would otherwise take that
+ * for the page at rest.
  */
-static int odi_board_ldd_id(void)
+static int odi_board_ldd_id_once(int *rest)
 {
 	uint8_t page, id;
 	int rc;
 
 	if (odi_i2c_read_bytes(ODI_I2C_SEL_A2, ODI_I2C_A2_PAGE_SELECT, &page, 1))
 		return -1;
+	if (*rest < 0)
+		*rest = page;
 	if (odi_board_select_page(ODI_BOARD_LDD_ID_PAGE, page))
 		return -1;
 	rc = odi_i2c_read_bytes(ODI_I2C_SEL_A2, ODI_BOARD_LDD_ID_OFF, &id, 1);
-	(void)odi_board_select_page(page, ODI_BOARD_LDD_ID_PAGE);
+	(void)odi_board_select_page((uint8_t)*rest, ODI_BOARD_LDD_ID_PAGE);
 	return rc ? -1 : (int)id;
+}
+
+/* The module can stop acknowledging for a while (around an EEPROM copy, or
+ * after a page-select write), and one failed read here leaves the laser off
+ * and GPON refused for the whole boot. So a failed read is tried again,
+ * bounded: ODI_BOARD_LDD_TRIES attempts ODI_BOARD_LDD_WAIT_MS apart. A read
+ * that succeeds with another id is not retried: that is an answer.
+ */
+#define ODI_BOARD_LDD_TRIES	3
+#define ODI_BOARD_LDD_WAIT_MS	200
+
+static int odi_board_ldd_id(void)
+{
+	int rest = -1, id = -1, i;
+
+	for (i = 0; i < ODI_BOARD_LDD_TRIES; i++) {
+		if (i)
+			ODI_BOARD_SLEEP_MS(ODI_BOARD_LDD_WAIT_MS);
+		id = odi_board_ldd_id_once(&rest);
+		if (id >= 0)
+			return id;
+		ODI_BOARD_LOG("laser: laser driver id read failed (try %d of %d)\n",
+			      i + 1, ODI_BOARD_LDD_TRIES);
+	}
+	/* Gave up: leave the page select where it was found. */
+	if (rest >= 0) {
+		uint8_t cur;
+
+		if (!odi_i2c_read_bytes(ODI_I2C_SEL_A2, ODI_I2C_A2_PAGE_SELECT, &cur, 1))
+			(void)odi_board_select_page((uint8_t)rest, cur);
+	}
+	return -1;
 }
 
 int odi_board_optics(void)

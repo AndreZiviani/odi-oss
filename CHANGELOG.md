@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Kernel, optics: the laser driver id read at boot (the `laser` PON step) is
+  tried up to three times, 200 ms apart, before the step gives up. One failed
+  read used to leave the laser off and GPON refused for the whole boot with
+  the stick otherwise healthy; the module can stop answering for a while
+  around an EEPROM copy. A read that succeeds with another id is still
+  refused at once, and the page select is put back where it was found even
+  when a try failed in the middle.
+
 - Kernel, tools: the three switch registers 0x026008, 0x02600c and 0x026010
   are no longer read. Another open implementation's measurements show a read of
   them stalling the board until the watchdog reset it; ours read 0 in earlier
