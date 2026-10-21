@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Kernel: the DMA invalidate no longer drops a cache line that is only
+  partly inside the buffer. The first and last line of an unaligned range
+  are written back and invalidated, the lines in between are invalidated
+  as before, so a neighbouring object sharing the line keeps its data. The
+  receive buffers are line aligned, so nothing changes for them today.
+
 - OMCI: a MIB reset now drops the Get-Next walk a table Get had primed. A
   Get-Next after the reset answered the bytes of the row the reset had just
   discarded; it is now refused with a parameter error, as a Get-Next with no
