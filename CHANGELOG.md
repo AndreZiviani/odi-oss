@@ -16,8 +16,10 @@ listed here.
   a confirmed trial writes the keys, so a reboot in the middle of one comes
   up on the old address. No trial in a safe-mode boot, which stores the keys
   directly as before. `network.sh primary` prints the address the primary
-  device holds. Host-tested (`test/mgmt_addr_test.sh`), not yet run on a
-  stick. The web UI side is odi-ui, which stores these keys through the
+  device holds. Host-tested (`test/mgmt_addr_test.sh`); on a stick, an
+  unconfirmed trial reverted at its deadline with nothing stored, a confirm
+  over the new address stored it, and a reboot mid-trial came up on the old
+  address. The web UI side is odi-ui, which stores these keys through the
   trial when this script is present.
 
 - GPON: new experimental, off-by-default key `GPON_DYING_GASP=1`: the stick
