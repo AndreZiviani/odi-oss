@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Kernel: the DMA invalidate no longer drops a cache line that is only
+  partly inside the buffer. The first and last line of an unaligned range
+  are written back and invalidated, the lines in between are invalidated
+  as before, so a neighbouring object sharing the line keeps its data. The
+  receive buffers are line aligned, so nothing changes for them today.
+
 ## v1.10.0 - 2026-10-21
 
 - Switch: the downstream queues of the UNI (ME 277, the ones the OLT
