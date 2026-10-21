@@ -384,6 +384,28 @@ static void test_cpu_rx_progress_clears_and_idle_ticks_do_not(void)
 	CHECK(fired, "an idle tick neither counts nor clears a stall");
 }
 
+/* odi_nic samples ring 1 alone (odi_nic_rx_taken()). With the OMCI ring
+ * on, OMCI frames keep arriving on ring 2 while a dead ring 1 takes
+ * nothing; counted together they would clear the stall on every tick.
+ */
+static void test_cpu_rx_omci_ring_does_not_hide_a_dead_ring1(void)
+{
+	struct odi_wdt_deadline_state ring1_only, both;
+	uint32_t offered = 1000, ring1 = 500, ring2 = 0;
+	unsigned int t, fired1 = 0, fired_both = 0;
+
+	cpu_rx_state(&ring1_only);
+	cpu_rx_state(&both);
+	for (t = 0; t <= ODI_WDT_CPU_RX_STALL_TICKS; t++) {
+		offered += 300;	/* the host keeps sending */
+		ring2 += 2;	/* an OMCI frame or two per tick */
+		fired1 |= odi_wdt_cpu_rx_tick(&ring1_only, 1, offered, ring1);
+		fired_both |= odi_wdt_cpu_rx_tick(&both, 1, offered, ring1 + ring2);
+	}
+	CHECK(fired1 & ODI_WDT_ACTION_CPU_RX_STALL, "ring 1 counted alone: a dead ring 1 resets");
+	CHECK(!(fired_both & ODI_WDT_ACTION_CPU_RX_STALL), "both rings counted: OMCI hides it (why ring 1 alone)");
+}
+
 static void test_cpu_rx_counts_wrap_and_invalid_forgets(void)
 {
 	struct odi_wdt_deadline_state st;
@@ -539,6 +561,7 @@ int main(void)
 	test_cpu_rx_idle_port_never_resets();
 	test_cpu_rx_progress_clears_and_idle_ticks_do_not();
 	test_cpu_rx_counts_wrap_and_invalid_forgets();
+	test_cpu_rx_omci_ring_does_not_hide_a_dead_ring1();
 
 	test_arm_writes_the_uboot_matching_value();
 	test_kick_is_real_read_modify_write_on_kick_reg();

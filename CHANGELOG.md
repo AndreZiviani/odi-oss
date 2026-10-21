@@ -5,18 +5,29 @@ listed here.
 
 ## Unreleased
 
-- OMCI under a host-side flood: the NIC now runs a second receive ring, and
-  the switch routes the OMCI frames it traps to the CPU (internal priority
-  7) there; every other frame stays on the main ring. Every poll serves the
-  OMCI ring first, so a flood toward the stick from the host side that keeps
-  the main ring full no longer costs OMCI frames, which the OLT does not
-  always repeat. Both rings share the same frame path, so the PON-port drop
-  that keeps everything but OMCI from the fibre out of the IP stack is
-  unchanged. `/proc/odi_nic` gains `omci_ring`, `rx1_taken`, `rx2_taken`,
-  `rx2_other` (non-OMCI frames on the OMCI ring) and `rx_missed` (frames
-  the NIC dropped with no free descriptor), and the kernel parameter
-  `odi_nic.omci_ring=0` routes everything to the one ring again, live.
-  Host-tested against a model of the flood; not yet trialled on hardware.
+- OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
+  parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
+  the NIC runs a second receive ring, and the switch routes the OMCI frames
+  it traps to the CPU (internal priority 7) there; every other frame stays
+  on the main ring. Every poll serves the OMCI ring first, so a flood toward
+  the stick from the host side that keeps the main ring full no longer
+  costs OMCI frames, which the OLT does not always repeat. Both rings share
+  the same frame path, so the PON-port drop that keeps everything but OMCI
+  from the fibre out of the IP stack is unchanged. **Off by default**: off,
+  the NIC is programmed exactly as before. A first build that always ran
+  the second ring left a stick unreachable after boot. The likeliest
+  cause, not yet confirmed on hardware: with multi-ring receive on, the
+  engine also checks the flow control of the four rings this driver does
+  not use, and at their reset values they hold PAUSE. Turning the ring on
+  now first parks those four on a ring of their own that cannot ask for
+  PAUSE. `/proc/odi_nic` gains `omci_ring`,
+  `rx1_taken`, `rx2_taken`, `rx2_other` (non-OMCI frames on the OMCI ring)
+  and `rx_missed` (frames the NIC dropped with no free descriptor).
+  Host-tested against a model of the flood and of the six rings' flow
+  control; not yet trialled on hardware.
+- The watchdog CPU-port rule counts the frames taken from the main receive
+  ring only, so OMCI arriving on the second ring cannot hide a main ring
+  that takes nothing.
 
 - Toolchain: built with odi-toolchain uclibc-v4 and freestanding-v3, which
   deny the `bltzl` instruction in the ISA audit (it decodes but
