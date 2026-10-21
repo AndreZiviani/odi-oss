@@ -182,7 +182,7 @@ check "after the reset the baseline is the Create's" \
       "$(get $I1 cur)" "00$(printf '%08x%08x' 10 1)${Z}${Z}0000"
 
 # Total code words: the driver's ds_fec_total_cw, counted per interval like
-# the rest. One second of frames with FEC on is 8000 x 153 = 1224000 (0x12a8c0).
+# the rest. One second of frames with FEC on is 8000 x 153 = 1224000 (0x12ad40).
 ctrs 9000000010 141 9 5000000
 clock 5203
 send "$(tci)" 4f 0002 0000 ""
@@ -190,7 +190,7 @@ send "$(tci)" 44 $CLS $I1 000a
 ctrs 9000000010 141 9 6224000
 clock 5204
 check "total code words: the count since Create, one second of frames" \
-      "$(get $I1 cur)" "00${Z}${Z}${Z}0012a8c00000"
+      "$(get $I1 cur)" "00${Z}${Z}${Z}0012ad400000"
 ctrs 9000000010 141 9 99000000000
 clock 5205
 check "total code words: a count past 32 bits stops at 4294967295" \
