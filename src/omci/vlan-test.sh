@@ -310,13 +310,33 @@ got=$(rebuild /tmp/omcid-171-tp5-man84.log 0 | grep '47/0060')
 check "TPType 5, manual tag VID 300 and class 84 VID 300: the add-tag rule only" "$got" \
 "47/0060 gem 1000 rule manual-add vid 300 pri 0"
 
-# ---- VLAN_MANU_TAG_PRI 255 is the stock no-tag sentinel ----------------------
+# ---- VLAN_MANU_TAG_PRI 255 is a priority no tag carries, not "no tag" ----------
+#
+# A factory store holds VID 30 / priority 255 and the stock stack tags with
+# that VID (the priority past 7 is taken as 0). Reading 255 as "no manual tag"
+# (v1.4.2 to v1.8.0) left a six-flow line whose OLT wants untagged frames
+# tagged with no service for them: DHCP never left the stick.
 sed 's/"VLAN_MANU_TAG_PRI" Value="[0-9]*"/"VLAN_MANU_TAG_PRI" Value="255"/' \
 	"$FIX/omci-store-isp2.xml" > /var/config/lastgood.xml
 grep -q '"VLAN_MANU_TAG_PRI" Value="255"' /var/config/lastgood.xml || { echo "FAIL  the isp2 store has no VLAN_MANU_TAG_PRI"; fail=$((fail + 1)); }
 run171 pri255 /tmp/s-tp5.txt
-got=$(rebuild /tmp/omcid-171-pri255.log 0 | grep -c 'manual-add')
-check "VLAN_MANU_TAG_PRI 255: no manual tag" "$got" "0"
+got=$(rebuild /tmp/omcid-171-pri255.log 0 | grep '47/0060')
+check "VLAN_MANU_TAG_PRI 255: the manual tag is applied, priority 0" "$got" \
+	"47/0060 gem 1000 rule manual-add vid 10 pri 0"
+
+# The same store on the whole six-flow session (isp3, priority 255 in its store):
+# the untagged add-tag rule lands on the GEM whose class 84 names the VID, the
+# others keep their VID filters.
+got=$(rules isp3 manual)
+check "ISP3 (six flows), VID 30 priority 255: VID 30 is the add-tag rule" "$got" \
+"47/0003 gem 269 rule vid-filter vid 10 pri -1
+47/0004 gem 397 rule vid-filter vid 20 pri -1
+47/0005 gem 525 rule manual-add vid 30 pri 0
+47/0005 gem 525 rule vid-filter vid 32 pri -1
+47/0006 gem 653 rule vid-filter vid 40 pri -1
+47/0007 gem 781 rule vid-filter vid 50 pri -1
+47/0008 gem 909 rule vid-filter vid 60 pri -1
+47/ffff gem 4095 rule manual-remove vid 30 pri 0"
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 suite_exit

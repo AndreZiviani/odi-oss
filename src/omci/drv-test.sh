@@ -52,6 +52,9 @@ get_frame() {   # get_frame <tci> <class> <inst> <mask>: one Get, as omcli --inj
 }
 gpon /tmp/gpon-isp1 "5 282 794 1050 1306 538"
 gpon /tmp/gpon-isp2 "1 348"
+# ISP3: six data GEMs on three T-CONTs, the Alloc-IDs by PLOAM, in the order
+# the OLT assigns them (0x8000..0x8002 bound to them in turn).
+gpon /tmp/gpon-isp3 "3 269 525 781"
 
 # finish <log>: settled (testlib.sh: the session is handled and the rebuild
 # after it has run, so every driver call is in the log), and the daemon, the
@@ -61,7 +64,7 @@ finish() {
 	omcid_stop "$pid"
 }
 
-for isp in isp1 isp2; do
+for isp in isp1 isp2 isp3; do
 	log=/tmp/omcid-drv-$isp.log
 	got=/tmp/omci-drv-$isp.txt
 	want=$FIX/omci-drv-golden-$isp.txt
