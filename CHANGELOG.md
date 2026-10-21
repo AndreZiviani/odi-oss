@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Switch: the bridge-connection command accepts rules of the extended VLAN
+  operation, one direction each: a C-VID translated with the priority kept or
+  assigned, an S-tag added, replaced or removed, and a match on the S-VID. The
+  S-tag template register is written only when such a rule is installed, so
+  the lines that do not use one see the same register writes as before. The
+  facts behind it are in `docs/SWITCH.md`, "Extended VLAN rules". omcid does
+  not send these rules yet.
+
 - OMCI: omcid can now read an extended VLAN tagging entry (class 171) as what
   the switch classifier can carry out: which tags it matches, what happens to
   the C-tag and the S-tag, and the rule that undoes it downstream for each

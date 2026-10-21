@@ -315,12 +315,41 @@ static inline uint32_t ODI_SW_CLASSIFY_SETUP_US_NO_MATCH_ACTION_SET(uint32_t reg
 	return (reg & ~(0x3U << 0)) | ((val & 0x3U) << 0);
 }
 
+static inline uint32_t ODI_SW_CLASSIFY_SETUP_PATTERN1_COUNT_GET(uint32_t reg)
+{
+	return (reg >> 5) & 0xffU;
+}
+
 /* CLASSIFY_PATTERN_SEL: 0x016010, one bit per classification rule */
 #define ODI_SW_CLASSIFY_PATTERN_SEL_BASE	0x16010U
 #define ODI_SW_CLASSIFY_PATTERN_SEL(n)	(ODI_SW_CLASSIFY_PATTERN_SEL_BASE + 4U * (uint32_t)(n))	/* word n: pattern bits of rules 32n..32n+31 */
 static inline uint32_t ODI_SW_CLASSIFY_PATTERN_SEL_PATTERN_SET(uint32_t reg, uint32_t val)
 {
 	return (reg & ~(0x1U << 0)) | ((val & 0x1U) << 0);
+}
+
+/* CLASSIFY_TEMPLATE: 0x016030 + 4t, t = 0 or 1. Which tag a rule on template
+ * t takes its VID and priority from, in each direction: 0 the C-tag (also the
+ * one behind an S-tag), 1 the S-tag. Both words read 0 out of reset, so every
+ * rule compares the C-tag until template 1 is written.
+ */
+#define ODI_SW_CLASSIFY_TEMPLATE_BASE	0x16030U
+#define ODI_SW_CLASSIFY_TEMPLATE(n)	(ODI_SW_CLASSIFY_TEMPLATE_BASE + 4U * (uint32_t)(n))
+static inline uint32_t ODI_SW_CLASSIFY_TEMPLATE_US_VID_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x3U << 0)) | ((val & 0x3U) << 0);
+}
+static inline uint32_t ODI_SW_CLASSIFY_TEMPLATE_US_PRI_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x3U << 2)) | ((val & 0x3U) << 2);
+}
+static inline uint32_t ODI_SW_CLASSIFY_TEMPLATE_DS_VID_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x3U << 4)) | ((val & 0x3U) << 4);
+}
+static inline uint32_t ODI_SW_CLASSIFY_TEMPLATE_DS_PRI_SET(uint32_t reg, uint32_t val)
+{
+	return (reg & ~(0x3U << 6)) | ((val & 0x3U) << 6);
 }
 
 /* ---- L2 lookup, flooding, reserved multicast */

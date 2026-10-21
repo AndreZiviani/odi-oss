@@ -31,6 +31,7 @@ static struct odi_sw_bdgconn_slot odi_sw_bdgconn[ODI_SW_CMD_BDGCONN_MAX];
 struct odi_sw_cf_row {
 	int used;
 	int is_us;
+	int tmpl;		/* compares the S-tag (CLASSIFY_TEMPLATE 1) */
 	unsigned int key;	/* ordering class, see cf_key() */
 	uint32_t rule_w1, mask_w1;
 	uint32_t act[3];
@@ -46,6 +47,7 @@ void odi_switch_bdgconn_reset(void)
 		odi_sw_bdgconn[i].used = 0;
 	for (i = 0; i < ODI_SW_CF_ROWS; i++)
 		odi_sw_cf[i].used = 0;
+	odi_sw_cf_reset();
 }
 
 /* cmd 51: the bridge rule (omci_bdgconn, 160 bytes) turned into CF rows
@@ -77,6 +79,7 @@ void odi_switch_bdgconn_reset(void)
 struct odi_sw_cf_leg {
 	int present;
 	int is_us;
+	int tmpl;
 	unsigned int key;
 	uint32_t rule_w1, mask_w1;
 	uint32_t act[3];
@@ -136,6 +139,7 @@ static void cf_match(struct odi_sw_cf_leg *l, int ds, int vid, int pri,
 	l->rule_w1 = data & care;
 	l->mask_w1 = care & ~data;
 	l->key = cf_key(vid, pri, stag, ctag);
+	l->tmpl = 0;
 	l->present = 1;
 	l->is_us = !ds;
 }
@@ -373,6 +377,173 @@ static void bdgconn_derive(const struct omci_bdgconn *b, struct odi_sw_cf_leg *u
 	}
 }
 
+/* ---- rule_gen OMCI_VLAN_OPER_EXTVLAN_GEN ---------------------------------
+ *
+ * The extended VLAN operation of class 171, one direction per descriptor and
+ * both halves stated outright (uapi/omci_bdgconn.h). Nothing is inferred
+ * here; the descriptor says which frames match and what happens to the tags,
+ * and the rest is how the classifier says it.
+ *
+ *  - The classifier compares one tag's VID and priority per row. Template 0
+ *    reads the C-tag (also the one behind an S-tag); template 1, written
+ *    when the first row needs it, reads the S-tag. Both tag flags are always
+ *    cared about, so a row names exactly which tags the frame has.
+ *  - The C-tag action TAG adds a tag to an untagged frame and replaces the
+ *    VID (and, when asked, the priority) of one that has it: no CPRI_SET
+ *    keeps the priority. DEL takes the tag off, TRANSPARENT leaves it.
+ *  - The S-tag action ADD puts an S-tag (TPID 0x88a8) in front of the frame
+ *    and replaces the S-tag of one that has it; DEL takes it off.
+ *  - A rule with no VID to put a VLAN row on contributes none, and a rule
+ *    of this kind never passes "any VID" (that is the class 84 rules' job).
+ */
+static int gen_cmp(const struct omci_vlan_filter *f, int *vid, int *pri, int *tmpl)
+{
+	int svid = -1, spri = -1, cvid = -1, cpri = -1;
+
+	if ((f->outer_mode & OMCI_TAGF_VID) && f->outer.vid < 4096U)
+		svid = (int)f->outer.vid;
+	if ((f->outer_mode & OMCI_TAGF_PRI) && f->outer.pri < 8U)
+		spri = (int)f->outer.pri;
+	if ((f->inner_mode & OMCI_TAGF_VID) && f->inner.vid < 4096U)
+		cvid = (int)f->inner.vid;
+	if ((f->inner_mode & OMCI_TAGF_PRI) && f->inner.pri < 8U)
+		cpri = (int)f->inner.pri;
+
+	/* One comparison per row: the S-tag's or the C-tag's, not both. */
+	if ((svid >= 0 || spri >= 0) && (cvid >= 0 || cpri >= 0))
+		return -1;
+	if (svid >= 0 || spri >= 0) {
+		if (!(f->outer_mode & OMCI_TAGF_TAGGED))
+			return -1;
+		*vid = svid;
+		*pri = spri;
+		*tmpl = 1;
+	} else {
+		if ((cvid >= 0 || cpri >= 0) && !(f->inner_mode & OMCI_TAGF_TAGGED))
+			return -1;
+		*vid = cvid;
+		*pri = cpri;
+		*tmpl = 0;
+	}
+	return 0;
+}
+
+/* One tag plane's action word fields. `s` selects the S-tag layout. */
+static int gen_plane(const struct omci_vlan_act *a, int s, uint32_t *w)
+{
+	uint32_t act, vid_act = 0, pri_act = 0;
+
+	switch (a->tag_op) {
+	case OMCI_TAGOP_PUSH:
+	case OMCI_TAGOP_REWRITE:
+		if (a->set_tag.vid > 4094U || a->set_tag.pri > 7U)
+			return -1;
+		act = s ? ODI_SW_CF_CSACT_ADD : ODI_SW_CF_CACT_ADD;
+		vid_act = ODI_SW_CF_TAG_SRC_ASSIGN;
+		/* The C-tag keeps its own priority when none is assigned. The
+		 * S-tag is not known to, so it is always given one. */
+		if (a->pri_op != OMCI_PRIOP_PASS)
+			pri_act = ODI_SW_CF_TAG_SRC_ASSIGN;
+		else if (s)
+			return -1;
+		break;
+	case OMCI_TAGOP_POP:
+		act = s ? ODI_SW_CF_CSACT_DEL : ODI_SW_CF_CACT_DEL;
+		break;
+	case OMCI_TAGOP_PASS:
+		act = s ? ODI_SW_CF_CSACT_TRANSPARENT : ODI_SW_CF_CACT_TRANSPARENT;
+		break;
+	default:
+		act = 0;
+		break;
+	}
+	if (s)
+		*w = (vid_act << ODI_SW_CF_A2_CSVID_ACT_SHIFT) |
+		     (pri_act << ODI_SW_CF_A2_CSPRI_ACT_SHIFT) |
+		     ((vid_act ? a->set_tag.pri & 7U : 0) << ODI_SW_CF_A2_CS_PRI_SHIFT) |
+		     ((vid_act ? a->set_tag.vid & 0xfffU : 0) << ODI_SW_CF_A2_CS_VID_SHIFT) |
+		     (act & 7U);
+	else
+		*w = (pri_act << ODI_SW_CF_A1_CPRI_ACT_SHIFT) |
+		     (vid_act << ODI_SW_CF_A1_CVID_ACT_SHIFT) |
+		     ((pri_act ? a->set_tag.pri & 7U : 0) << ODI_SW_CF_A1_C_PRI_SHIFT) |
+		     ((vid_act ? a->set_tag.vid & 0xfffU : 0) << ODI_SW_CF_A1_C_VID_SHIFT) |
+		     ((act & 3U) << ODI_SW_CF_A1_CACT_SHIFT);
+	return 0;
+}
+
+/* Ordering class of an extended VLAN row: the more it names, the lower its
+ * index, since the lowest matching row wins. They all sit in the ordered
+ * region, whatever they name: a row that names no VID and no priority (the
+ * untagged one, a bare "has an S-tag") is not a catch-all that belongs at the
+ * bottom, because it still names which tags the frame has.
+ */
+static unsigned int cf_key_gen(int vid, int pri)
+{
+	return 2U - (vid >= 0 ? 1U : 0U) - (pri >= 0 ? 1U : 0U);
+}
+
+static int bdgconn_derive_gen(const struct omci_bdgconn *b, struct odi_sw_cf_leg *us,
+			      struct odi_sw_cf_leg *ds, uint32_t *vlan_vid, uint32_t *vlan_val,
+			      uint32_t *vlan_any)
+{
+	const struct omci_vlan_oper *r = &b->vlan_op;
+	struct odi_sw_cf_leg *l;
+	uint32_t uni = uni_ports(b->uni_mask), cw, sw, mbr;
+	int is_ds, vid, pri, tmpl, stag, ctag, one_uni = -1;
+	unsigned int i;
+
+	us->present = 0;
+	ds->present = 0;
+	*vlan_vid = 0;
+	*vlan_val = 0;
+	*vlan_any = 0;
+
+	/* One direction per descriptor. */
+	if (b->dir != OMCI_DIR_US && b->dir != OMCI_DIR_DS)
+		return -1;
+	is_ds = b->dir == OMCI_DIR_DS;
+	l = is_ds ? ds : us;
+
+	if (gen_cmp(&r->filter, &vid, &pri, &tmpl))
+		return -1;
+	stag = (r->filter.outer_mode & OMCI_TAGF_TAGGED) ? 1 :
+	       (r->filter.outer_mode & OMCI_TAGF_UNTAGGED) ? 0 : -1;
+	ctag = (r->filter.inner_mode & OMCI_TAGF_TAGGED) ? 1 :
+	       (r->filter.inner_mode & OMCI_TAGF_UNTAGGED) ? 0 : -1;
+	if (gen_plane(&r->inner_act, 0, &cw) || gen_plane(&r->outer_act, 1, &sw))
+		return -1;
+
+	/* The upstream rule names its source port when uni_mask holds exactly
+	 * one UNI, as every other upstream rule does. */
+	for (i = 0; i < 4U; i++)
+		if (uni == (1U << i))
+			one_uni = (int)i;
+
+	cf_match(l, is_ds, vid, pri, stag, ctag, is_ds ? -1 : one_uni);
+	l->tmpl = tmpl;
+	l->key = cf_key_gen(vid, pri);
+	l->act[0] = 0;
+	l->act[1] = cw;
+	l->act[2] = sw;
+	if (!is_ds)
+		l->act[2] |= ((b->us_flow & 0x7fU) << ODI_SW_CF_A2_US_FLOW_SHIFT) |
+			     ODI_SW_CF_A2_US_SID_ACT;
+	else
+		cf_act_ds_fwd(l, uni ? uni : ODI_SW_CHIP_UNI_PORTS);
+
+	/* The VLAN row of the VID the row matches, tagged on both its ports; a
+	 * C-tag taken off on the way to the UNI is untagged there, as the
+	 * stock rows do it. */
+	if (vid >= 2 && vid <= 4094) {
+		mbr = uni ? uni : ODI_SW_BOARD_UNI_PORTS;
+		*vlan_vid = (uint32_t)vid;
+		*vlan_val = ODI_SW_VLAN_ROW(mbr | (1U << ODI_SW_PON_PORT),
+					    is_ds && r->inner_act.tag_op == OMCI_TAGOP_POP ? mbr : 0);
+	}
+	return 0;
+}
+
 /* The rows written by one call, in order, handed to the DAL leaf. */
 static struct odi_sw_cf_entry odi_sw_cf_out[2U * ODI_SW_CF_ROWS];
 static unsigned int odi_sw_cf_out_n;
@@ -387,6 +558,7 @@ static void cf_emit(uint32_t idx, int first)
 	e = &odi_sw_cf_out[odi_sw_cf_out_n++];
 	e->idx = idx;
 	e->is_us = row->is_us;
+	e->tmpl = row->tmpl;
 	e->rule_w0 = ODI_SW_CF_W0_VALID;
 	e->rule_w1 = row->rule_w1;
 	/* bit 48 of the mask row: 0 on the first write of an insert, set on
@@ -406,6 +578,7 @@ static void cf_set(uint32_t idx, const struct odi_sw_cf_leg *l)
 
 	row->used = 1;
 	row->is_us = l->is_us;
+	row->tmpl = l->tmpl;
 	row->key = l->key;
 	row->rule_w1 = l->rule_w1;
 	row->mask_w1 = l->mask_w1;
@@ -466,6 +639,27 @@ static int cf_insert(const struct odi_sw_cf_leg *l)
 		;
 	if (h >= limit)
 		return -1;
+	/* The S-tag template is not known to work on a row matched with the
+	 * second rule layout, so neither the new row nor one pushed up by it
+	 * may end on or past the boundary.
+	 */
+	{
+		int tmpl = l->tmpl;
+		uint32_t layout1;
+
+		for (r = p; r < h; r++)
+			tmpl |= odi_sw_cf[r].tmpl;
+		/* Read only when an S-tag row is involved: a line without one
+		 * makes no register read it did not make before. */
+		if (tmpl) {
+			layout1 = odi_sw_cf_layout1_row();
+			if (l->tmpl && p >= layout1)
+				return -1;
+			for (r = p; r < h; r++)
+				if (odi_sw_cf[r].tmpl && r + 1U >= layout1)
+					return -1;
+		}
+	}
 	for (r = h; r > p; r--) {
 		odi_sw_cf[r] = odi_sw_cf[r - 1U];
 		cf_moved(r - 1U, r);
@@ -490,7 +684,8 @@ static int cf_same_match(int idx, const struct odi_sw_cf_leg *l)
 		return idx < 0;
 	if (idx < 0)
 		return 0;
-	return odi_sw_cf[idx].rule_w1 == l->rule_w1 && odi_sw_cf[idx].mask_w1 == l->mask_w1;
+	return odi_sw_cf[idx].rule_w1 == l->rule_w1 && odi_sw_cf[idx].mask_w1 == l->mask_w1 &&
+	       odi_sw_cf[idx].tmpl == l->tmpl;
 }
 
 static int cf_same_row(int idx, const struct odi_sw_cf_leg *l)
@@ -577,7 +772,14 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 	if (!b || len < sizeof(*b))
 		return -1;
 
-	bdgconn_derive(b, &us, &ds, &vlan_vid, &vlan_val, &vlan_any);
+	if (b->vlan_op.rule_gen == OMCI_VLAN_OPER_EXTVLAN_GEN) {
+		if (bdgconn_derive_gen(b, &us, &ds, &vlan_vid, &vlan_val, &vlan_any)) {
+			ODI_SW_CMD_LOG("bdgconn: extended VLAN rule not expressible, refused\n");
+			return ODI_SW_EOPNOTSUPP;
+		}
+	} else {
+		bdgconn_derive(b, &us, &ds, &vlan_vid, &vlan_val, &vlan_any);
+	}
 	odi_sw_cf_out_n = 0;
 
 	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++) {

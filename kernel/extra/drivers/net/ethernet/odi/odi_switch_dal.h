@@ -294,6 +294,9 @@ struct odi_sw_cf_entry {
 	uint32_t rule_w0, rule_w1;
 	uint32_t mask_w0, mask_w1;
 	uint32_t action_w0, action_w1, action_w2;
+	int tmpl;		/* 1: the row compares the S-tag (template 1); last,
+				 * so a positional initializer of the old fields
+				 * still reads as it did */
 };
 
 struct odi_sw_vlan_override {
@@ -333,6 +336,7 @@ struct odi_sw_vlan_override {
 #define ODI_SW_CF_CACT_DEL		2U
 #define ODI_SW_CF_CACT_TRANSPARENT	3U
 #define ODI_SW_CF_CSACT_NONE		0U
+#define ODI_SW_CF_CSACT_ADD		1U	/* TPID 0x88a8; replaces the S-tag of a frame that has one */
 #define ODI_SW_CF_CSACT_DEL		3U
 #define ODI_SW_CF_CSACT_TRANSPARENT	4U
 #define ODI_SW_CF_DS_UNI_ACT_FWD	3U	/* forward to UNI_PMSK */
@@ -362,6 +366,15 @@ void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
  * shows a delete; this is the encoding the layout implies.
  */
 void odi_sw_cf_del(uint32_t idx, int is_us);
+
+/* Forget which rows were last written on the S-tag template: the rows
+ * are gone, and so are the pattern bits that said so. */
+void odi_sw_cf_reset(void);
+
+/* The first row that is matched with the second rule layout, from
+ * CLASSIFY_SETUP (256 when the register names none). A row past it is not
+ * one the S-tag template is known to work on. */
+uint32_t odi_sw_cf_layout1_row(void);
 
 /* One VLAN table row (a service leaving: its VID row back to 0). */
 void odi_sw_vlan_row_set(uint32_t vid, uint32_t val);
