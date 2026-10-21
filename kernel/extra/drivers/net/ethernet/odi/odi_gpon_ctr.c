@@ -270,6 +270,8 @@ void odi_gpon_ctr_sample(struct odi_gpon_ctr *c, uint32_t now_ms, unsigned int s
 	uint32_t dt = started ? now_ms - c->last_ms : 0U;
 	uint32_t alarms = odi_reg_read(ODI_GPON_DSF_ALARM_STATE_OFF);
 	unsigned int i, k;
+	uint32_t sf;
+	int locked;
 
 	/* A MAC that is not clocked answers every register with the bus's
 	 * no-decode word: counted, it would add that word to every total.
@@ -305,7 +307,23 @@ void odi_gpon_ctr_sample(struct odi_gpon_ctr *c, uint32_t now_ms, unsigned int s
 	if (started)
 		ctr_signal_account(c, state, dt);
 
-	c->superframe = ODI_GPON_DSF_SUPERFRAME_COUNT_GET(odi_reg_read(ODI_GPON_DSF_SUPERFRAME_OFF));
+	sf = ODI_GPON_DSF_SUPERFRAME_COUNT_GET(odi_reg_read(ODI_GPON_DSF_SUPERFRAME_OFF));
+	locked = (alarms & ODI_GPON_DSF_ALARM_STATE_FEC_NOW) &&
+		 !(alarms & (ODI_GPON_DSF_ALARM_STATE_LOS_NOW | ODI_GPON_DSF_ALARM_STATE_LOF_NOW));
+	if (started && locked && c->fec_locked) {
+		/* The frames since the last sample, in the counter's 30 bits.
+		 * More than the time between the samples allows (8 frames a
+		 * millisecond, a few spare for the rounding of the time) is a
+		 * re-lock or a counter that restarted, not frames received:
+		 * that step is skipped.
+		 */
+		uint32_t frames = (sf - c->superframe) & 0x3fffffffU;
+
+		if ((uint64_t)frames <= (uint64_t)dt * 8U + 16U)
+			c->ds_fec_total_cw += (uint64_t)frames * ODI_GPON_FEC_CW_PER_FRAME;
+	}
+	c->fec_locked = locked;
+	c->superframe = sf;
 	c->us_state = odi_reg_read(ODI_GPON_USF_STATE_OFF);
 	c->last_state = state;
 	c->last_ms = now_ms;
@@ -423,6 +441,9 @@ void odi_gpon_ctr_show_counters(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_f
 			 (unsigned long long)c->total[i]);
 		put(ctx, line);
 	}
+	snprintf(line, sizeof(line), "ctr ds_fec_total_cw %llu\n",
+		 (unsigned long long)c->ds_fec_total_cw);
+	put(ctx, line);
 	for (i = 0; i < ODI_GPON_CTR_COUNT; i++) {
 		if (!c->saturated[i])
 			continue;

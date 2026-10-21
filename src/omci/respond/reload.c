@@ -212,6 +212,33 @@ int onu_state_now(void)
 	return n > 0 ? pp_gpon_state(buf, (unsigned)n) : -1;
 }
 
+/* 1 when the downstream path decrypts GEM port `port`: it is on the status
+ * file's enc_ports line, which lists what the OLT asked to have decrypted
+ * (the Encrypted_Port-ID PLOAM) as the driver applied it. 0 for a port that
+ * is not on it, and for a file or line that is not there (no kernel of ours,
+ * or one that does not publish it): unencrypted is what was always reported.
+ * Read on every call, so a Get shows the state of that moment. */
+int gem_port_encrypted(uint16_t port)
+{
+	static char buf[2048];
+	uint16_t ids[64];
+	long fd, n;
+	int got;
+
+	fd = sys_open(gpon_proc_path, O_RDONLY);
+	if (fd < 0)
+		return 0;
+	n = sys_read((int)fd, buf, sizeof buf);
+	sys_close((int)fd);
+	if (n <= 0)
+		return 0;
+	got = pp_gpon_enc_ports(buf, (unsigned)n, ids, 64);
+	for (int i = 0; i < got; i++)
+		if (ids[i] == port)
+			return 1;
+	return 0;
+}
+
 /* ------------------------------------------------------------- the reload */
 
 static void finish(const char *result, long o5_ms)

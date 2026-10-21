@@ -5,6 +5,30 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the FEC performance history (ME 312) reports Total code words, and
+  the GEM port network CTP (ME 268) reports its Encryption state. Total code
+  words was always 0 ("not reported"); the driver now derives it exactly: 153
+  code words in each downstream frame with FEC on (152 of 255 bytes and one
+  shortened last code word, G.984.3 clause 13.2.1) for every 125 us frame the
+  downstream frame counter advanced, counted only between samples that saw FEC
+  on and LOS and LOF clear, and a step larger than the time between the
+  samples allows (a re-lock) is skipped. It is a new line in
+  `/proc/odi_gpon/counters` (`ctr ds_fec_total_cw`) and counts per 15-minute
+  interval like the other ME 312 counts, so an OLT computing an error ratio
+  has a denominator. Encryption state (attribute 8) was always 0, so an OLT
+  and the UI read "unencrypted" for ports the OLT encrypts; it now answers 1
+  for a GEM port the downstream path decrypts, from a new `enc_ports` line in
+  `/proc/odi_gpon/status` (read back from the AES bit of each downstream slot,
+  and from ports the OLT asked for before the slot exists). The comment in the
+  GPON driver that said no encrypted port had ever been seen was stale and
+  contradicted `docs/SWITCH.md`; it is corrected. Host-tested
+  (`test/odi_gpon_ctr_test.c`, `test/odi_switch_ds_encrypt_test.c`,
+  `test/procparse_test.c`, and the omcid suites `pm` and `enc`). On a stick
+  whose OLT encrypts its data ports: `enc_ports` lists the five, ME 268 reads
+  1 on their CTPs and 0 on the OMCC's; on that line downstream FEC is off, so
+  Total code words stays 0 as it should. The count with FEC on is host-tested
+  only.
+
 - Docs: `GPON_DYING_GASP` (SETTINGS.md and the driver comment) no longer says
   that only the first copy leaves on a reboot: all three have been seen to
   leave on a stick under test, and in another open implementation's later

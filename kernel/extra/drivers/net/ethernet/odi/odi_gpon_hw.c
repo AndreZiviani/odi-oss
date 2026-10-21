@@ -963,12 +963,14 @@ void odi_gpon_hw_gem_port_configure(uint16_t gem_port_id, int activate)
  * its AES-enable bit instead goes through odi_switch_gpon_encrypt_port()
  * (odi_switch_ds_gem.c), the same DS-slot-indexed aes_en rewrite the automatic-
  * AES-enable PLOAM hook already uses on a SWITCH=vendor image, called
- * directly here instead of through that now-gone stock callback. No
- * captured evidence exists for `encrypted=1` on any port on this box
- * (every Encrypted_Port-ID this driver has ever seen sets the a-flag to
- * 0), so the AES bit on either path is forward-looking against the spec
- * and the stock module's handler (the 2.6.30 GPL drop's gpon_ploam.c),
- * not a reproduction of a captured sequence. Returns
+ * directly here instead of through that now-gone stock callback. ISP1
+ * encrypts every one of its data ports: the stock capture shows FLAGS 0x12
+ * on all five after the OLT's Encrypted_Port-ID with the encrypt flag set
+ * (docs/SWITCH.md, "Downstream AES"). What no OLT seen so far does is
+ * encrypt the OMCC, so
+ * the OMCC-row branch below is host-tested only. What the OLT left on is
+ * read back by odi_switch_gpon_aes_ports() for /proc/odi_gpon/status,
+ * where omcid takes the GEM port CTP's Encryption state from. Returns
  * odi_switch_gpon_encrypt_port()'s own convention (0 =
  * applied, -1 = no DS slot recorded yet for this Port-ID, the flag kept
  * for when cmd 25 creates it) for that path,

@@ -173,6 +173,41 @@ void odi_switch_ds_aes_forget(void)
 	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
 }
 
+/* The GEM ports the downstream path decrypts, at most `max` of them: every
+ * DS slot whose FLAGS word has the AES bit set (read back from the hardware),
+ * then the ports the OLT asked to decrypt that have no slot yet (the flag is
+ * kept and applied when cmd 25 creates the slot). Returns the count. For the
+ * enc_ports line of /proc/odi_gpon/status, which omcid answers the GEM port
+ * network CTP's Encryption state from.
+ */
+unsigned int odi_switch_gpon_aes_ports(uint16_t *out, unsigned int max)
+{
+	unsigned long flags;
+	unsigned int n = 0;
+	uint32_t idx, id;
+
+	spin_lock_irqsave(&odi_switch_dsf_lock, flags);
+	for (idx = 0; idx < ODI_SWITCH_DS_SLOT_COUNT && n < max; idx++) {
+		if (!odi_sw_ds_slot_valid[idx])
+			continue;
+		if (ODI_SW_DSF_GEM_FLOW_TYPE_FLAGS_DECRYPT_GET(
+			    odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(idx))))
+			out[n++] = (uint16_t)odi_sw_ds_slot_gem_port_id[idx];
+	}
+	for (id = 0; id < ODI_SW_GEM_PORT_IDS && n < max; id++) {
+		if (!odi_sw_ds_aes_on[id / 32U]) {
+			id |= 31U;	/* an empty word: on to the next */
+			continue;
+		}
+		if (!(odi_sw_ds_aes_on[id / 32U] & (1U << (id % 32U))))
+			continue;
+		if (!__odi_switch_ds_slot_find(id, NULL))
+			out[n++] = (uint16_t)id;
+	}
+	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
+	return n;
+}
+
 /* Bit 4 (AES) of DSF_GEM_FLOW_TYPE(idx), read-modify-write, with FLAGS
  * before and after returned to the caller.
  */

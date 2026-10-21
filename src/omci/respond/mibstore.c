@@ -1156,6 +1156,11 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 
 		out[0] = (uint8_t)(a >> 8);
 		out[1] = (uint8_t)a;
+	} else if (c->classId == OMCI_ME_GEM_PORT_CTP && k == 8 && r) {
+		/* Encryption state (G.988 9.2.3, read only): whether the
+		 * downstream path decrypts this port, from the driver, which
+		 * applies the OLT's Encrypted_Port-ID. There is no AVC for it. */
+		out[0] = (uint8_t)gem_port_encrypted((uint16_t)row_u32(r, c, 1));
 	} else if (c->classId == OMCI_ME_TRAFFIC_SCHEDULER) { /* traffic scheduler */
 		/* ISP1's sixteen are identical apart from their identity:
 		 * TcontPtr is the entity id, SchedulerPtr 0, Policy 2,
