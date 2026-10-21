@@ -15,6 +15,7 @@ obj-$(CONFIG_ODI_SWITCH) += odi_switch_sdkinit.o
 obj-$(CONFIG_ODI_SWITCH) += odi_board.o odi_board_data.o
 obj-$(CONFIG_ODI_SWITCH) += odi_init.o
 obj-$(CONFIG_ODI_WDT) += odi_wdt.o
+obj-$(CONFIG_ODI_HWMON) += odi_hwmon.o
 # The SoC-window accessors, for the switch replays and the watchdog.
 ifneq ($(CONFIG_ODI_SWITCH)$(CONFIG_ODI_WDT),)
 obj-y += odi_soc.o

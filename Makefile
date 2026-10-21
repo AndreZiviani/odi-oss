@@ -228,6 +228,7 @@ test-host:
 	bash test/odi_ddm_limits_test.sh
 	bash test/odi_init_test.sh
 	bash test/odi_wdt_test.sh
+	bash test/odi_hwmon_test.sh
 	bash test/rtl8686_time_test.sh
 	bash test/odi_ramlog_test.sh
 	bash test/procparse_test.sh

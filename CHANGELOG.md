@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- The SoC die temperature as a standard hwmon sensor: `/sys/class/hwmon/hwmonN`
+  with name `rtl9602c_soc`, `temp1_input` in millidegrees C (`CONFIG_ODI_HWMON`,
+  `odi_hwmon.c`, which selects `CONFIG_HWMON`; it was off). Read-only: it reads
+  two switch-core words (0x138, the sensor control with its enable bit, which
+  the boot already leaves set, and 0x13c, whose bits 22:16 are the reading in
+  degrees C) and writes neither; with the sensor not enabled the file reads
+  `-ENODATA`. The scale and offset are inferred, not calibrated: one stick read
+  62 C while its optics module read 46 C, and the stock firmware reads 63 to
+  65 C in the same state, so it is a trend, good to a few degrees. The decode
+  is host-tested (`test/odi_hwmon_test.c`). Kernel size: the uImage grows by
+  2,746 bytes (1,151,597 to 1,154,343 of 1,359,872, 205,529 spare), the
+  uncompressed kernel by 8,488. Not yet run on a stick. The exporter serves
+  it as `gpon_soc_temperature_celsius` in the odi-sfp-exporter release that
+  carries it; this repo pins that exporter only after it is released, so the
+  image reports nothing on `/metrics` until then.
+
 - OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
   parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
   the NIC runs a second receive ring, and the switch routes the OMCI frames

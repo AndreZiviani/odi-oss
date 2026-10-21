@@ -356,6 +356,7 @@ and GPON hardware are driven.
 | `odi_i2c.c`, `odi_ddm.c` | the I2C bus to the optical module, and SFF-8472 DDM (temperature, voltage, bias, tx/rx power) readout |
 | `odi_i2c_adapter.c` | that bus as i2c adapter `i2c-0` (SMBus byte-data reads, I2C block reads, and the A2h page-select write only), for `i2cget`/`i2cdump` on `/dev/i2c-0` |
 | `odi_reg.c` | `/dev/odi_sw`: register/SoC/MIB/DDM/L2-table access for our own userland (`diag`, `metricsd`, `igmpd`) |
+| `odi_hwmon.c` | the SoC die temperature as a standard hwmon sensor, `/sys/class/hwmon/hwmonN` named `rtl9602c_soc`, `temp1_input` in millidegrees: switch-core words 0x138 (control, enable bit 16, left on by the boot) and 0x13c (status, bits 22:16 the reading in degrees C), both only read. The scale and offset are inferred, not calibrated (62 C on a stick whose optics module read 46 C; the stock firmware reads 63 to 65 C in the same state): a trend, good to a few degrees. Needs `CONFIG_HWMON`, which `ODI_HWMON` selects |
 | `odi_wdt.c` | the watchdog kicker — see below |
 | `odi_ramlog.c` | the DRAM ring-buffer console — see below |
 
@@ -612,8 +613,10 @@ completes it. It is sized for a 1328 KB kernel partition (1,359,872 bytes):
 `-Os`, dead code elimination, `SLUB_TINY`, no modules, no kallsyms, a 16 KB
 printk ring (`LOG_BUF_SHIFT=14`; the ramlog keeps the boot log anyway), IPv4,
 bridge and 802.1Q only. Every line carries its reason in a comment there.
-The LZMA uImage is 1,149,701 bytes, 210,171 spare (15%); the uncompressed
-kernel is 3,460,192 bytes.
+The LZMA uImage is 1,154,343 bytes, 205,529 spare (15%); the uncompressed
+kernel is 3,476,904 bytes. `ODI_HWMON` (the die temperature sensor, which
+turns `HWMON` back on) added 2,746 bytes to the uImage and 8,488 to the
+uncompressed kernel.
 
 **The syscall diet.** Options whose syscalls nothing in the rootfs can
 reach are off: `AIO`, `SIGNALFD`, `TIMERFD`, `EVENTFD`, `INOTIFY_USER`,
@@ -661,7 +664,7 @@ saving:
 | `PM`, `SUSPEND` | 56 KB | nothing suspends, no sysfs power user, no driver has power-management callbacks; reboot and restart are not part of it |
 | `SECCOMP` | 9 KB | no ELF loads the seccomp syscall or carries the string |
 | `PTP_1588_CLOCK`, `PPS` (and `NET_PTP_CLASSIFY` with them) | 23 KB | no driver registers a clock; nothing reads `/dev/ptp*` |
-| `NVMEM`, `HWMON`, `HW_RANDOM` | 25 KB | no provider, sensor or hardware generator registers with them |
+| `NVMEM`, `HW_RANDOM` | not remeasured (25 KB together with `HWMON`) | no provider or hardware generator registers with them; `HWMON` was in this row until `ODI_HWMON` began to select it ("Our drivers") |
 | `MQ_IOSCHED_DEADLINE`, `MQ_IOSCHED_KYBER`, `MSDOS_PARTITION`, `EFI_PARTITION`, `BLOCK_LEGACY_AUTOLOAD` | 21 KB | mtdblock backs the squashfs root, so there is nothing to reorder and no partition table to read |
 | `EPOLL`, `DNOTIFY` (and `FSNOTIFY` with it), `SGETMASK_SYSCALL`, `CACHESTAT_SYSCALL` | 32 KB | no ELF loads these syscall numbers, and none carries an `epoll_` symbol |
 | `LEGACY_TIOCSTI`, `LDISC_AUTOLOAD` | a few KB | no tool injects tty input; the only line discipline in use, N_TTY, is built in |
