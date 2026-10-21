@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+- CI: the third-party sources (busybox, dropbear, iproute2, the kernel tarball and the pinned confd and metricsd releases) are cached between runs, keyed by the files that pin their versions and checksums, so a run no longer fails when an upstream mirror does. A version bump misses the cache and fetches anew; every file is still checked against its pinned checksum.
+
 - omcid: a stored `VLAN_MANU_TAG_PRI` above 7 (255, the factory value) no
   longer switches the manual VLAN tag off. v1.4.2 to v1.8.0 read it as "no
   tag", so a line whose OLT wants the untagged frames of the router tagged
