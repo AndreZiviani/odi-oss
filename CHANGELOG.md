@@ -40,6 +40,24 @@ listed here.
   the C-tag and the S-tag, and the rule that undoes it downstream for each
   downstream mode. Nothing uses it yet, so nothing changes on the wire.
 
+- CI: the third-party sources (busybox, dropbear, iproute2, the kernel tarball and the pinned confd and metricsd releases) are cached between runs, keyed by the files that pin their versions and checksums, so a run no longer fails when an upstream mirror does. A version bump misses the cache and fetches anew; every file is still checked against its pinned checksum.
+
+- omcid: a stored `VLAN_MANU_TAG_PRI` above 7 (255, the factory value) no
+  longer switches the manual VLAN tag off. v1.4.2 to v1.8.0 read it as "no
+  tag", so a line whose OLT wants the untagged frames of the router tagged
+  with `VLAN_MANU_TAG_VID` (VLAN 30, six upstream flows) got every service
+  as a VID filter: the router's untagged DHCP requests were dropped in the
+  stick (O5, optical normal, no lease), while v1.3.0 worked. The stock stack
+  tags with the VID whatever the priority (only VID 65535 with priority 255,
+  which its start script builds for the other settings, never matches), and
+  no 802.1p tag carries a priority above 7, so the tag is added with
+  priority 0, as the switch driver already took it. A new six-flow session
+  and its driver-call golden (`omci-session-isp3`) replay the line.
+  Refs #42
+
+**Automated dependency bump.**
+- Kernel: Linux 6.18.57 (was 6.18.56), the upstream stable update.
+
 - OMCI: a downstream priority queue (ME 277) whose Weight the OLT had set
   went to the switch driver as priority 0, whatever its entity: the row built
   for it had no RelatedPort, so all eight of the UNI's queues carried the
