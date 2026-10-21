@@ -93,9 +93,7 @@ void odi_sw_cf_reset(void)
 
 uint32_t odi_sw_cf_layout1_row(void)
 {
-	uint32_t n = ODI_SW_CLASSIFY_SETUP_PATTERN1_COUNT_GET(odi_reg_read(ODI_SW_CLASSIFY_SETUP_OFF));
-
-	return n ? n : 256U;
+	return ODI_SW_CLASSIFY_SETUP_PATTERN1_FIRST_ROW(odi_reg_read(ODI_SW_CLASSIFY_SETUP_OFF));
 }
 
 /* Template 1 compares the S-tag, both ways. Written when the first row on it

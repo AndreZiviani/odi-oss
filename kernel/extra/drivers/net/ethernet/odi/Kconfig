@@ -34,6 +34,16 @@ config ODI_WDT
 	  (/proc/odi_wdt/userland_ok); reboot resets through the
 	  watchdog at once (odi_wdt.c).
 
+config ODI_HWMON
+	bool "SoC die temperature as a hwmon sensor (RTL9602C)"
+	depends on ODI_SWITCH
+	select HWMON
+	help
+	  /sys/class/hwmon/hwmonN, name rtl9602c_soc, temp1_input in
+	  millidegrees C, read from the thermal sensor words of the
+	  switch-core register file (odi_hwmon.c). Read-only; the scale is
+	  inferred, not calibrated.
+
 config ODI_RAMLOG
 	bool "DRAM console that survives a watchdog reset"
 	help

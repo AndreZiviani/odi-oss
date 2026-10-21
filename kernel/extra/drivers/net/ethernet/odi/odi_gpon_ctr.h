@@ -84,6 +84,12 @@ enum odi_gpon_ctr_id {
 	ODI_GPON_CTR_COUNT
 };
 
+/* Code words in one downstream frame with FEC on: 152 of 255 bytes and one
+ * shortened last code word (G.984.3 clause 13.2.1: 152 x 255 + 120 = 38880
+ * bytes, the 125 us frame at 2.48832 Gbit/s).
+ */
+#define ODI_GPON_FEC_CW_PER_FRAME	153U
+
 /* The three downstream alarms DSF_ALARM_STATE reports, in this order. */
 #define ODI_GPON_CTR_ALARMS	3U
 /* Signal fail and signal degrade, in this order. */
@@ -103,6 +109,14 @@ enum odi_gpon_ctr_id {
 
 struct odi_gpon_ctr {
 	uint64_t total[ODI_GPON_CTR_COUNT];
+	/* ds_fec_total_cw: downstream code words received with FEC on and the
+	 * line locked, derived (no register counts it): ODI_GPON_FEC_CW_PER_FRAME
+	 * for each 125 us frame the superframe counter advanced between two
+	 * samples that both saw FEC on and LOS/LOF clear. Shown beside the
+	 * totals, but not one of them (it has no register).
+	 */
+	uint64_t ds_fec_total_cw;
+	int fec_locked;		/* the last sample saw FEC on, LOS and LOF clear */
 	uint32_t saturated[ODI_GPON_CTR_COUNT];	/* samples that read all ones */
 	uint32_t samples;	/* runs of odi_gpon_ctr_sample(), the first included */
 	uint32_t last_ms;	/* time of the last sample, wrapping */

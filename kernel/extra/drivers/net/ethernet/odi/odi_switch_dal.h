@@ -270,6 +270,12 @@ int odi_switch_gpon_encrypt_port(uint16_t gem_port_id, int enable);
  */
 void odi_switch_ds_aes_forget(void);
 
+/* The GEM ports the downstream path decrypts (at most `max`): each DS slot
+ * with the AES bit set in hardware, and each port the OLT asked to decrypt
+ * that has no slot yet. Returns the count; for /proc/odi_gpon/status.
+ */
+unsigned int odi_switch_gpon_aes_ports(uint16_t *out, unsigned int max);
+
 /* --- odi_switch_cf.c ------------------------------------------------------ */
 
 /* A CF (classification) row is three tables at one index: CLS_RULE_B and
@@ -321,7 +327,8 @@ struct odi_sw_vlan_override {
 /* CF match fields, positions in rule/mask word 1 (w0 holds bits 63..32). */
 #define ODI_SW_CF_W0_VALID		(1U << 16)
 /* Rule and mask word 0, bits 15:0, in a row of the second layout (rows from
- * CLASSIFY_SETUP PATTERN1_COUNT up, template 0): the frame's EtherType, as
+ * ODI_SW_CLASSIFY_SETUP_PATTERN1_FIRST_ROW() up, template 0): the frame's
+ * EtherType, as
  * the bits that must be 1 (rule) and 0 (mask). The first layout holds other
  * keys there, so a row never writes them unless it names an EtherType. */
 #define ODI_SW_CF_W0_ET_MASK		0xffffU
@@ -418,7 +425,8 @@ void odi_sw_cf_act_write(uint32_t idx, int is_us, const uint32_t act[3]);
 void odi_sw_cf_reset(void);
 
 /* The first row that is matched with the second rule layout, from
- * CLASSIFY_SETUP (256 when the register names none). A row past it is not
+ * CLASSIFY_SETUP: 256 minus the count in bits 12:5, the count being rows
+ * from the top (256 when the register names none). A row past it is not
  * one the S-tag template is known to work on. */
 uint32_t odi_sw_cf_layout1_row(void);
 

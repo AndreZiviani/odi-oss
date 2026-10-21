@@ -133,6 +133,7 @@ CONFIG_ETHERNET=y
 CONFIG_ODI_NIC=y
 CONFIG_ODI_SWITCH=y
 CONFIG_ODI_WDT=y
+CONFIG_ODI_HWMON=y
 
 # The optics I2C port as i2c-0 (odi_i2c_adapter.c, selected by ODI_SWITCH),
 # and /dev/i2c-0 for busybox i2cget/i2cdump/i2cset. Nothing else: no
@@ -299,12 +300,12 @@ CONFIG_ODI_EARLY_CRUMBS=y
 # CONFIG_LEGACY_TIOCSTI is not set
 # CONFIG_LDISC_AUTOLOAD is not set
 
-# Hardware random generators, hwmon, PTP clocks, PPS and NVMEM providers: no
-# driver in this tree registers with any of them, so the cores only add
-# /sys/class entries. The kernel pool is fed by the CPU and by the timer; the
-# image reads /dev/urandom and getrandom().
+# Hardware random generators, PTP clocks, PPS and NVMEM providers: no driver
+# in this tree registers with any of them, so the cores only add /sys/class
+# entries. The kernel pool is fed by the CPU and by the timer; the image reads
+# /dev/urandom and getrandom(). hwmon is the exception: ODI_HWMON registers
+# the SoC die temperature with it (odi_hwmon.c) and selects it.
 # CONFIG_HW_RANDOM is not set
-# CONFIG_HWMON is not set
 # CONFIG_PTP_1588_CLOCK is not set
 # CONFIG_PPS is not set
 # CONFIG_NVMEM is not set

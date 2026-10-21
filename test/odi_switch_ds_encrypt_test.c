@@ -204,6 +204,59 @@ static void test_high_slots(void)
 	      odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(63)) == 0x00000012U, "so does slot 63, the last cmd 25 allows");
 }
 
+static int has_port(const uint16_t *l, unsigned int n, uint16_t p)
+{
+	unsigned int i;
+
+	for (i = 0; i < n; i++)
+		if (l[i] == p)
+			return 1;
+	return 0;
+}
+
+/* odi_switch_gpon_aes_ports(): what /proc/odi_gpon/status lists as decrypted
+ * and omcid answers the GEM port CTP Encryption state from. The slots are
+ * read back from the hardware word, and a port the OLT asked for that has no
+ * slot yet is listed too.
+ */
+static void test_aes_ports(void)
+{
+	uint16_t l[8];
+	unsigned int n;
+
+	odi_mock_reset();
+	odi_switch_ds_slot_reset();
+	CHECK(odi_switch_gpon_aes_ports(l, 8) == 0, "nothing encrypted before any PLOAM");
+
+	odi_sw_gpon_usflow_set(1, 0x59a, 2);
+	odi_sw_gpon_usflow_set(2, 0x69a, 2);
+	CHECK(odi_switch_gpon_aes_ports(l, 8) == 0, "two flows the OLT did not encrypt: none");
+
+	(void)odi_switch_gpon_encrypt_port(0x69a, 1);
+	n = odi_switch_gpon_aes_ports(l, 8);
+	CHECK(n == 1 && l[0] == 0x69a, "the port with AES set in its slot");
+
+	(void)odi_switch_gpon_encrypt_port(0x79a, 1);	/* no slot yet */
+	n = odi_switch_gpon_aes_ports(l, 8);
+	CHECK(n == 2 && has_port(l, n, 0x69a) && has_port(l, n, 0x79a),
+	      "a port asked for with no slot yet is listed too");
+	CHECK(odi_switch_gpon_aes_ports(l, 1) == 1, "capped at max");
+
+	odi_sw_gpon_usflow_set(3, 0x79a, 2);	/* the slot arrives: listed once */
+	n = odi_switch_gpon_aes_ports(l, 8);
+	CHECK(n == 2 && has_port(l, n, 0x79a), "once its slot exists it is listed once");
+
+	(void)odi_switch_gpon_encrypt_port(0x69a, 0);
+	n = odi_switch_gpon_aes_ports(l, 8);
+	CHECK(n == 1 && l[0] == 0x79a, "AES cleared: the port drops out");
+
+	/* The ONU-ID discarded forgets the flags; a slot keeps its bit in the
+	 * hardware, and the list follows the hardware. */
+	odi_switch_ds_aes_forget();
+	n = odi_switch_gpon_aes_ports(l, 8);
+	CHECK(n == 1 && l[0] == 0x79a, "a forgotten flag does not hide a slot that still decrypts");
+}
+
 int main(void)
 {
 	test_capture_transition();
@@ -215,6 +268,7 @@ int main(void)
 	test_forget();
 	test_high_slots();
 	test_gpon_release_forgets();
+	test_aes_ports();
 	CHECK(odi_mock_locks_idle(), "every switch lock released on return (odi_switch_mock.h)");
 
 	if (failures) {

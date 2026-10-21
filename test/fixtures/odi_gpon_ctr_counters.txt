@@ -42,4 +42,5 @@ ctr us_ploam_cpu_urgent 10
 ctr us_ploam_no_message 10
 ctr us_ploam_sn 0
 ctr us_gem_bytes 11000000
+ctr ds_fec_total_cw 7344000
 ctr_saturated ds_gem_idle 1

@@ -140,12 +140,13 @@ The UI's reboot confirmation says which slot it comes back on.
 | `OMCI_UNI_LOCK` | Honour an OLT lock of the Ethernet UNI | `0` ignores it: the OLT's Set of the PPTP Ethernet UNI administrative state to locked (ME 11 attribute 5) is answered and stored as always, and the port stays up. Anything else, or absent, honours it as the stock firmware does: the host port's link is forced down until the OLT unlocks it. **On this SFP the UNI is the host port, the stick's only management path, so a lock cuts the web UI and ssh too** (OMCI still arrives over the fibre). Whatever the setting, omcid unlocks every Ethernet UNI when a MIB reset arrives (the reset puts the attribute back to unlocked, and the OLT then sends no unlock of its own) and when it starts with an empty MIB; it does not on a resume from a snapshot, whose MIB and switch state are still the old ones. The default honours the lock because it is the OLT's documented way to suspend a service (G.988 9.5.1) and some OLTs lock and unlock a UNI during provisioning; it is undone on a reset or restart so a stale lock can never strand the stick. Set `0` when the stick is managed from the host and the OLT must never take that link away. Odi-only key, kept in `/etc/config/odi.conf`; read at every Set of the attribute, so a change needs neither a reload nor a re-registration | omcid, at every ME 11 Set, MIB reset and start | LIVE (the next Set) |
 | `HOST_AUTONEG` | Host port auto-negotiation | `off` runs the host port (the SFP edge, toward the router) as forced 1000BASE-X full duplex with no auto-negotiation, for a host whose SFP port has auto-negotiation off; `on`, empty or absent negotiates (clause 37), as the stock image and every host seen so far do; any other value runs `on` and logs `event=bad_value`. Never stored directly: a change is a trial, applied in RAM and reverted after 120 s unless confirmed over the link it changed; a boot with `off` falls back to auto-negotiation while the host link stays down; three short boots in a row make the next a safe-mode boot, which clears it ("Host port auto-negotiation" and "Recovery: the safe mode" below). Odi-only key, kept in `/etc/config/odi.conf` | `host-autoneg.sh`, at boot and for a trial | LIVE (a trial: kept only when confirmed) |
 | `IGMP_SNOOPING` | IGMP snooping | `1` runs `igmpd`, which then snoops the host's IGMP while the OLT provisions a multicast profile that asks for it (ME 281 with an address row, ME 309 IGMP function 0): one static row a group, the host and the PON as members, the group limit and access control lists of the profile enforced, and IPv4 multicast from the PON that no row names dropped. Empty, absent or anything else: no daemon, and multicast is flooded as it always was. Odi-only key, kept in `/etc/config/odi.conf`. Takes effect with `apply.sh igmp`, no reboot | `svc-igmpd.sh`; `docs/TOOLS.md`, `igmpd` | SERVICE RESTART |
-| `GPON_DYING_GASP` | Dying_Gasp on a reboot (experimental) | `1` makes the stick send the GPON Dying_Gasp PLOAM message (G.984.3 clause 9.2.4.3, up to three copies, each given 50 ms to leave) just before an orderly restart, halt or power-off, so the OLT can tell a planned reboot or firmware update from a lost ONU. Sent only when the ONU is ranging or operating (O4 or O5), only from the reboot path and once per reboot; never when the PON drops. The kernel logs `Dying_Gasp sent <n> of 3 times before the restart`, which survives the reboot in `/proc/odi_ramlog_prev`. Empty, absent or anything else: not sent. Default off, because this project cannot confirm what the OLT does with it: another open implementation's measurements on the same chip saw only the first copy leave on a reboot, and an OLT that gets a Dying_Gasp without a restart following may deactivate and re-activate the ONU. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `gpondg` PON step at boot; the driver's reboot notifier | REBOOT |
+| `GPON_DYING_GASP` | Dying_Gasp on a reboot (experimental) | `1` makes the stick send the GPON Dying_Gasp PLOAM message (G.984.3 clause 9.2.4.3, up to three copies, each given 50 ms to leave) just before an orderly restart, halt or power-off, so the OLT can tell a planned reboot or firmware update from a lost ONU. Sent only when the ONU is ranging or operating (O4 or O5), only from the reboot path and once per reboot; never when the PON drops. The kernel logs `Dying_Gasp sent <n> of 3 times before the restart`, which survives the reboot in `/proc/odi_ramlog_prev`. Empty, absent or anything else: not sent. Default off, because this project cannot see what the OLT does with it: on a reboot in O5 all three copies have been seen to leave (on a stick under test, and in another open implementation's measurements on the same chip), and G.984.3 tells the OLT not to stop allocations on a Dying_Gasp alone, but an OLT that gets one without a restart following may deactivate and re-activate the ONU. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `gpondg` PON step at boot; the driver's reboot notifier | REBOOT |
+| `GPON_KEEP_DISABLE` | Stay disabled when the OLT disables this ONU | `1` keeps the ONU in Emergency Stop (O7) once the OLT has disabled it with Disable_Serial_Number (G.984.3), across this stick's own PON restarts and across reboots and power-offs, until the OLT enables it again, as the standard asks ("Keeping the OLT's disable" below). The disable is recorded in the marker file `/etc/config/gpon-hold`; a boot that finds it starts in O7 with the laser off and waits for the enable. Empty, absent or anything else: today's behaviour, the stick leaves O7 on any restart, and no marker is written or read. Default off, because a stick that stays dark when the OLT disabled it cannot be brought back from the fibre side except by the OLT itself, and an OLT that disabled it by mistake is not asked. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `gponkeep` and `gponhold` PON steps at boot; the driver; `gpon-hold.sh` | REBOOT |
 
 Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
 `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`,
 `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `ODI_LASER_UNVERIFIED`,
-`HOST_AUTONEG`, `IGMP_SNOOPING` and `GPON_DYING_GASP` are the only
+`HOST_AUTONEG`, `IGMP_SNOOPING`, `GPON_DYING_GASP` and `GPON_KEEP_DISABLE` are the only
 keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
 in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
@@ -365,6 +366,70 @@ the equipment id from `RTL9602C` to `IGD`. With the switch off, nothing
 changes. The stock firmware may also rewrite `OMCI_SW_VER1/2` itself when it
 boots, so a value set here does not necessarily survive a fall-back to the
 stock slot. `omcli ident` shows what is stored and whether it is reported.
+
+### Keeping the OLT's disable (`GPON_KEEP_DISABLE`)
+
+An OLT disables an ONU with the Disable_Serial_Number PLOAM message: to stop
+a rogue ONU, or one an operator has barred. The ONU goes to Emergency Stop
+(O7), shuts its laser off and ignores everything but the OLT's enable.
+G.984.3 (Table 10-1 and the DIS alarm) says it stays there even after
+power-off, until the OLT enables it with Disable_Serial_Number and the enable
+code, or with the broadcast enable. Without this key the stick keeps O7 only
+until its own next PON restart or reboot, and then ranges again.
+
+With `GPON_KEEP_DISABLE=1`:
+
+- When the OLT disables the ONU, the driver notes it, and the kernel runs
+  `/etc/scripts/gpon-hold.sh sync` once, which writes the marker file
+  `/etc/config/gpon-hold` (a flag file next to `optics.off` and `modules.off`:
+  what the OLT did, not a setting, so it is not in `odi.conf`). The marker is
+  on the jffs2 config partition, which a reboot, a power-off and a firmware
+  update keep; the script flushes it at once, so only a power cut inside that
+  moment loses it.
+- While the disable is held, this stick's own restarts do not undo it:
+  `gpondeact` and `gponact` (the omcid respawn re-provisioning, `apply.sh`
+  changing the serial number or the password, a reload omcid makes on SIGHUP,
+  a write to `/proc/odi_init` by hand) end in O7, the laser line still high.
+  Changing the serial number does not clear it.
+- A boot with the key set and the marker present starts in O7: the `gponhold 1`
+  PON step raises the laser line before the MAC is brought up, the activation
+  ends in O7, and nothing answers on the fibre. The OLT's enable moves it to
+  O2 and ranging goes on as usual; the driver then asks `gpon-hold.sh` to
+  remove the marker.
+- In O7 the laser line is high, so nothing leaves the stick on the fibre; the
+  feature opens no service to the PON side, and OMCI stays the only way the
+  OLT talks to the stick.
+- A safe-mode boot ignores the key and the marker and leaves both as they are
+  (it does not activate the PON in any case), so a stick that was disabled
+  can always be reached from the host side.
+
+To undo it by hand, from the host side (ssh, the web UI's shell, or a
+safe-mode boot):
+
+    /etc/scripts/gpon-hold.sh status     key=, marker=, held= (what the driver says)
+    /etc/scripts/gpon-hold.sh clear      remove the marker and release the hold now
+
+`clear` is what the OLT's enable does without the OLT: a stick in O7 is
+activated and ranges again. Whether the OLT then lets it in is its decision;
+if it disabled the ONU on purpose it will disable it again. To turn the
+feature off, `flash set GPON_KEEP_DISABLE 0` (the next boot ignores the marker;
+the file stays until `clear`, and counts again if the key is set again).
+
+`/proc/odi_gpon/status` has the line `o7_hold keep <0|1> held <0|1>`: `keep 1`
+is the key as the driver was told at boot, `held 1` is a kept disable in force.
+`state 7 (O7)` alone does not say which: without the key, O7 is also reached
+by an OLT disable and left by any restart. The kernel log has
+`odi_gpon: event=o7_hold action=<recorded|kept|released|cleared> cause=<...>`
+and `gpon-hold: event=marker action=<written|removed|failed>`.
+
+**Testing it without an OLT.** On a stick with the key set,
+`echo "gponhold sim" > /proc/odi_init` acts as if the OLT had sent the stick
+Disable_Serial_Number for its own serial number: O7, laser line high, the
+hold recorded and the marker written. It is a test hook, answered only when
+the ONU is between O2 and O6, and it sends nothing upstream. Then
+`gpondeact` and `gponact` in `/proc/odi_init` still end in O7, a reboot starts
+in O7, and `gpon-hold.sh clear` ends it. It refuses (`-EPERM`) while the key
+is off.
 
 ### Software download from the OLT
 
