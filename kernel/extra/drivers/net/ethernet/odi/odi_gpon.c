@@ -815,10 +815,10 @@ static int odi_gpon_parse_sn(const char *arg, uint8_t sn[8])
 /* The chip words once, for a bug report: all three answer at any time. */
 static void odi_gpon_log_chip(void)
 {
-	uint32_t test = odi_reg_read(ODI_GPON_MAC_SELFTEST_OFF);
+	uint32_t test = odi_reg_read(ODI_GPON_GPON_0x700280_OFF);
 
 	pr_info("odi_gpon: chip id 0x%08x, GPON MAC rev 0x%08x, memory self-test 0x%08x%s\n",
-		odi_reg_read(ODI_GPON_CHIP_ID_OFF), odi_reg_read(ODI_GPON_MAC_REVISION_OFF), test,
+		odi_reg_read(ODI_SW_CHIP_ID_WORD_OFF), odi_reg_read(ODI_GPON_PONMAC_REVISION_OFF), test,
 		(test & 0x18U) ? " (FAIL bit set)" : "");
 }
 

@@ -106,13 +106,12 @@ static inline uint32_t ODI_GPON_PONMAC_DECRYPT_BYPASS_BYPASS_SET(uint32_t reg, u
  */
 #define ODI_GPON_NO_RESPONSE	0xca0eca0fU
 
-/* Chip identity, read once at init for the log: the switch chip word, the
- * GPON MAC revision and the MAC memory self-test result. All below
- * 0xf00000 and answering at any time.
+/* Chip identity, read once at init for the log (the switch chip word is
+ * ODI_SW_CHIP_ID_WORD_OFF): the GPON MAC revision and the MAC memory
+ * self-test result. Both answer at any time.
  */
-#define ODI_GPON_CHIP_ID_OFF		0x010000U
-#define ODI_GPON_MAC_REVISION_OFF	0x700010U
-#define ODI_GPON_MAC_SELFTEST_OFF	0x700280U
+#define ODI_GPON_PONMAC_REVISION_OFF	0x700010U
+#define ODI_GPON_GPON_0x700280_OFF	0x700280U
 
 /* DSF_ALARM_STATE: 0x701008 -- the four live alarm bits */
 #define ODI_GPON_DSF_ALARM_STATE_OFF	0x701008U

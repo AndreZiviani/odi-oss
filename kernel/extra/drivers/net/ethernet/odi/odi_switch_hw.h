@@ -64,6 +64,11 @@ static inline int odi_switch_mmio_read_hazard(uint32_t off)
 	return off >= 0x026008U && off <= 0x026010U;
 }
 
+/* CHIP_ID_WORD: 0x010000 -- the chip model and revision word, read once
+ * at init for the log.
+ */
+#define ODI_SW_CHIP_ID_WORD_OFF	0x010000U
+
 /* ---- Chip-level: PHY access, pin mux, forced port ability */
 
 /* PHY_ACCESS_DATA: 0x000000 -- data word for an indirect PHY write */
