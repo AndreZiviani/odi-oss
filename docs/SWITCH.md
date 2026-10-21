@@ -365,7 +365,10 @@ commands, from the command table of the shipped binary:
   ISP1 sends, all before any T-CONT exists. The register holds a 2-bit
   group index per port, four ports: 0xd4 is the UNI on group 0, the other
   ports as the init left them, the result of the stock read-modify-write of
-  port 0 for a queue with no drop precedence marking. An upstream queue,
+  port 0 for a queue with no drop precedence marking. That word is all the
+  stock driver writes for a downstream queue; the schedule of the queue
+  (strict or weighted, the weight) is ours, on top of it:
+  [Downstream queues](#downstream-queues). An upstream queue,
   and cmd 21, 24 and the upstream side of cmd 25, are the upstream PON
   queues, below.
 - **cmd 25** downstream is the DS GEM port CAM row and its
@@ -463,6 +466,137 @@ chip:
   them), 56 (S-VLAN TPID, not sent), 59 and 60 (the dot1 rate limiters, an
   ACL rule and a meter per GEM port, not built; omcid sends them for class
   298) and 71 (UNI QoS, not sent).
+
+### Downstream queues
+
+The queues of the UNI port, toward the host: ME 277 rows whose RelatedPort
+names the UNI (entities 0..7 on a stick, priority 7 down to 0; the next
+eight, the VEIP's, are not scheduled). The OLT provisions them with Weight,
+and omcid sends each row as cmd 23, direction DS, when the OLT sets it.
+The stock driver writes `PORT_QUEUE_MAP` for it and nothing else (the same
+word for ISP1's eight rows, whatever their weights), so before this the UNI
+had all eight queues strict, weight 1, whatever the OLT asked. Registers,
+read on a stick and checked against another open implementation's
+measurements of the same chip, for port p and queue q:
+
+| what | register | boot state read |
+|---|---|---|
+| priority to queue | `0x01c0b0 + 4p`, eight 3-bit entries, priority i at bits 3i+2..3i | port 0 `0x00fac688`, the identity (the stock init writes it; the chip's reset is 0, every priority to queue 0) |
+| queue type | `0x02d85c + 4p`, bit q set = weighted | 0, all strict |
+| weight of queue 0 | `0x02d824 + 4(p/2)`, 16 bits, an odd port in bits 31..16 | 1 |
+| weight of queues 1..7 | `0x02d82c + 12p + 4((q-1)/3)`, 10 bits, three to a word | 1 |
+| weight unit | `0x02d800` bit 17 clear: bytes (set: packets) | `0x00003fff`, bytes |
+
+The scheduler serves every strict queue before any weighted one, the
+highest queue number first among the strict ones, and shares what is left
+among the weighted queues in the ratio of their weights. Two weighted queues
+split the bytes as their weights, with a granularity (fields 1 and 3 gave
+29/71 %, 4 and 12 gave 25/75 %), which is why the driver writes four times
+the OMCI weight: 255, the largest, is 1020, inside the 10 bits.
+
+What cmd 23 does with a downstream queue, after the stock write:
+
+- the queue is number `index`, the low 16 bits of RelatedPort, of the UNI
+  port `owner`. `index` of 8 or more, an owner that is the PON or CPU port
+  (omcid names the PON port for a VEIP queue, as its flow does, so that it
+  cannot overwrite a PPTP queue of the same priority) or a port that does
+  not exist: nothing is scheduled, and the call succeeds as before.
+- Weight 2 or more is weighted, at four times the weight; Weight 0 or 1 is
+  strict at the reset weight. That is the stock driver's own reading
+  (`wrr = Weight >= 2` in the descriptor it builds) and the only one the
+  hardware can express: it has no weighted queue above a strict one.
+- a register is written only when it changes, so rows at the default write
+  nothing and an OLT that provisions nothing leaves the boot state alone.
+- the port's priority map is made the identity if it is not, once, so that
+  a queue's number is the priority of the frames that reach it.
+- a MIB reset (cmd 0) puts every queue it scheduled back to strict at weight
+  1. The priority map stays as it is.
+
+Which number is served first is read from the OLT, not from a spec: the
+OLT of ISP1 (and the one on the stick this was read on) gives Weight 0 to entities 0 and 1 (priorities 7 and 6) and
+30, 24, 19, 14, 9, 4 to entities 2 to 7 (priorities 5 down to 0). Read with
+the queue number as the priority, that is two strict queues on top and then
+weighted queues whose share falls with the number, which is what such a
+template is for. The other reading (OMCI priority 0 first, so queue 7 - p)
+puts the two strict queues below the weighted ones, and the hardware serves
+strict first, so it would starve the queues the OLT gave the weights. The
+flow descriptor's `ds_prio` (cmd 25) is that other reading, the stock
+number, and the switch driver does not use it.
+
+**Which queue a frame takes.** The queue is the one the frame's internal
+priority maps to (the identity above), and a frame from the PON port gets its
+priority from the sources the switch weighs (`0x01c0f4`, table 0 of the two
+that `0x01c0fc` bit 0 selects). On a stick table 0 reads `0x00000e03`: the
+port default (`0x01c0f0`, 0) has weight 3, the PCP and the DSCP weight 0 (not
+consulted) and the fourth source, the one a classifier or ACL action assigns,
+weight 7. So, with nothing assigning, every downstream frame has priority 0
+and takes queue 0 whatever GEM port or PCP it carries.
+
+G.988 names the queue by the GEM port, not by the frame's PCP: ME 268
+attribute 7 (DsPriQPtr) points at the ME 277 row, whose RelatedPort gives the
+UNI and the priority. A downstream CF row can assign the priority (action
+word bits 59..57, enabled by bit 56; the per-row action class that gates it,
+`CLS_ACT_EN` bits 4:0, reads `0x3f`), and that is how a frame is steered.
+Making the PCP a source instead (weight of source 1 above the port's) would
+queue by the frame's PCP, which is not what the OLT provisioned, and it would
+change the upstream and host-side priority of every frame as well: it is
+not done.
+
+- cmd 25 (downstream) carries the queue of the flow: `ds_pq_pri`, the low half
+  of RelatedPort, and `ds_port`, the UNI. A flow whose queue is a UNI's, with
+  a priority of 0..7, has that priority; one whose queue is the PON port's (a
+  VEIP's) or past the eight queues has none. The same call makes the UNI's
+  priority map the identity if it is not (as cmd 23 does), so priority n is
+  queue n.
+- cmd 51 (a bridge connection) names the flow of its GEM port (`ds_flow`).
+  The downstream CF row of the connection carries the priority of that flow's
+  queue in its action word, whichever of the two arrives first: a cmd 25 that
+  changes the priority of a flow rewrites the action word of the rows on it
+  (the action table only, nothing else of the row), and one that does not
+  change it writes nothing. A flow with no priority leaves its row as it was.
+- omcid sends a flow again when the OLT writes the RelatedPort of the queue
+  its CTP points at after the CTP was created, since the priority is in that
+  attribute.
+- a MIB reset (cmd 0) takes the priority off every row. The OLT's next
+  provisioning puts it back.
+- `odi_switch.ds_steer=N` leaves every row without a priority, the stock
+  behaviour (all downstream traffic in queue 0).
+
+What was measured on a stick (register reads and writes of CF rows on a
+running line, each restored by the script that wrote it):
+
+- a downstream row with the priority assigned moves its frames to that queue:
+  the per-queue page counters (`0x02d038 + 4(8p + q)`, peak in bits 25..16;
+  they only grow, a write does not clear them) of port 0 showed a queue the
+  line had never used take pages as soon as a row assigned it. All the
+  downstream rows given priority 3 took queue 3 (peak 2 pages, from 0); rows
+  given distinct priorities took 1 for the data row (peak 9 pages) and 6 and
+  7 for two other services' rows (1 page each), the rows of the priorities
+  nothing matched staying at 0.
+- a download of about 300 Mbit/s (what that line gives) ran
+  at the same speed with the data row on priority 7 as with nothing assigned,
+  and the queue-7 page peak matched the one queue 0 had reached before.
+- the field of the classifier rule that was read as "TOS / GEM index"
+  (rule bits 30..23) is not the GEM flow of a downstream frame: rows that
+  matched flow 5 (the data flow) or 2 on those bits matched nothing, and
+  single-bit rows showed the bits to read `0x7f` for the frames of that
+  flow. So a row cannot be told apart by GEM port, and a steered row follows
+  the GEM port of its bridge connection, not the one a frame arrived on. The
+  two are the same wherever the connection maps one GEM port to one VLAN
+  match, which is what the OLTs seen provision. Two GEM ports feeding one
+  match would need an ACL rule on the GEM flow index (field `0x0a`, which
+  another implementation measured to match one flow), with an action that is
+  not decoded.
+- a downstream row that forwards to an empty port mask drops the frame, which
+  is how those rows were probed.
+
+`odi_switch.ds_sched=N` turns the schedule off (the stock driver's
+behaviour); it is read at each cmd 23, so a write to
+`/sys/module/odi_switch/parameters/ds_sched` covers the next provisioning
+and does not undo what is programmed. `odi_switch.ds_steer` is read at each
+cmd 25 in the same way. `test/odi_switch_dsq_test.c` covers the schedule's
+registers, `test/odi_switch_dssteer_test.c` the priority of the rows, and the
+boot golden shows the stream.
 
 ### Upstream PON queues
 
@@ -622,7 +756,7 @@ as databit/carebit with care = RULE | MASK. Bits over the 64-bit pair:
 | 48 | VALID (RULE only) |
 | 47..32 | ethertype / inner-tag word (never cared in any capture) |
 | 31 | direction: 1 downstream (from the PON), 0 upstream |
-| 30..23 | TOS / GEM index (never cared: downstream rows match the tag only) |
+| 30..23 | TOS / GEM index (never cared). Not the GEM flow of a downstream frame, as the name had it: those bits read 0x7f for the frames of the data flow, and a row matching flow 5 on them matched nothing |
 | 22..11 | VID of the outer tag |
 | 10..8 | priority of the outer tag |
 | 7..5 | internal priority (never cared) |
@@ -643,7 +777,7 @@ The action, 67 bits over three words (word 0 is bits 95..64):
 | bits | field |
 |---|---|
 | 66..61, 60 | DSCP value, DSCP remark enable (0 so far) |
-| 59..57, 56 | CF priority, its enable (0 so far) |
+| 59..57, 56 | CF priority, its enable: the internal priority the frame takes, which picks its queue on the egress port. 0 in the captures; a downstream row takes the priority of its flow's queue ([Downstream queues](#downstream-queues)) |
 | 55..53, 52..50 | C-tag priority source, C-tag VID source (1: the values below, the only value used) |
 | 49..47, 46..35 | C-tag priority, C-tag VID |
 | 34..33 | C-tag action: 0 none, 1 add, 2 delete, 3 transparent |

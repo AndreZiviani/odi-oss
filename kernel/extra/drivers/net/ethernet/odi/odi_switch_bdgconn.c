@@ -21,6 +21,7 @@ struct odi_sw_bdgconn_slot {
 	int used;
 	uint32_t dir;
 	int us_row, ds_row;	/* CF row index, -1 when the leg is absent */
+	int ds_flow;		/* the downstream flow its GEM port holds, -1 none */
 	uint32_t vlan_vid;	/* 0: no VLAN row of its own */
 	uint32_t vlan_val;
 	uint32_t vlan_any;	/* 0, or its members in every row 2..4094 */
@@ -39,10 +40,17 @@ struct odi_sw_cf_row {
 #define ODI_SW_CF_ROWS		256U
 static struct odi_sw_cf_row odi_sw_cf[ODI_SW_CF_ROWS];
 
+/* The priority each downstream flow's frames take, plus one (0: none, the
+ * zeroed state): cmd 25 sets it from the queue the flow's GEM port points
+ * at, and the downstream rows of the connections on the flow carry it. */
+static uint8_t odi_sw_ds_flow_pri[ODI_SW_CMD_GEM_DS_MAX];
+
 void odi_switch_bdgconn_reset(void)
 {
 	unsigned int i;
 
+	for (i = 0; i < ODI_SW_CMD_GEM_DS_MAX; i++)
+		odi_sw_ds_flow_pri[i] = 0;
 	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++)
 		odi_sw_bdgconn[i].used = 0;
 	for (i = 0; i < ODI_SW_CF_ROWS; i++)
@@ -743,6 +751,64 @@ static unsigned int vlan_overrides(void)
 	return n;
 }
 
+/* Word 1 of a downstream row with the priority of its flow: assigned when
+ * the flow has one, else the row as it was, which leaves the frame at the
+ * port default. */
+static uint32_t ds_act1(uint32_t act1, int flow)
+{
+	act1 &= ~(ODI_SW_CF_A1_PRI_EN | ODI_SW_CF_A1_PRI_MASK);
+	if (flow >= 0 && flow < (int)ODI_SW_CMD_GEM_DS_MAX && odi_sw_ds_flow_pri[flow])
+		act1 |= ODI_SW_CF_A1_PRI_EN |
+			((uint32_t)(odi_sw_ds_flow_pri[flow] - 1U) << ODI_SW_CF_A1_PRI_SHIFT);
+	return act1;
+}
+
+/* Every downstream row on `flow` (every row when flow is -1) takes the
+ * priority the table now says, written only when its action word changed. */
+static void ds_rows_refresh(int flow)
+{
+	unsigned int i;
+
+	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++) {
+		struct odi_sw_bdgconn_slot *sl = &odi_sw_bdgconn[i];
+		struct odi_sw_cf_row *row;
+		uint32_t a1;
+
+		if (!sl->used || sl->ds_row < 0 || sl->ds_flow < 0 ||
+		    (flow >= 0 && sl->ds_flow != flow))
+			continue;
+		row = &odi_sw_cf[sl->ds_row];
+		a1 = ds_act1(row->act[1], sl->ds_flow);
+		if (a1 == row->act[1])
+			continue;
+		row->act[1] = a1;
+		odi_sw_cf_act_write((uint32_t)sl->ds_row, 0, row->act);
+	}
+}
+
+void odi_switch_bdgconn_ds_pri_set(uint32_t flow, int pri)
+{
+	uint8_t v = pri >= 0 ? (uint8_t)(pri + 1) : 0;
+
+	if (flow >= ODI_SW_CMD_GEM_DS_MAX || odi_sw_ds_flow_pri[flow] == v)
+		return;
+	odi_sw_ds_flow_pri[flow] = v;
+	ds_rows_refresh((int)flow);
+}
+
+void odi_switch_bdgconn_ds_pri_clear(void)
+{
+	unsigned int i;
+	int any = 0;
+
+	for (i = 0; i < ODI_SW_CMD_GEM_DS_MAX; i++) {
+		any |= odi_sw_ds_flow_pri[i] != 0;
+		odi_sw_ds_flow_pri[i] = 0;
+	}
+	if (any)
+		ds_rows_refresh(-1);
+}
+
 /* Free a slot: its rows invalidated, its VLAN row recomputed. */
 static void bdgconn_release(struct odi_sw_bdgconn_slot *sl)
 {
@@ -768,6 +834,7 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 	struct odi_sw_cf_leg us, ds;
 	uint32_t vlan_vid, vlan_val, vlan_any;
 	unsigned int i;
+	int ds_flow;
 
 	if (!b || len < sizeof(*b))
 		return -1;
@@ -781,6 +848,11 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 		bdgconn_derive(b, &us, &ds, &vlan_vid, &vlan_val, &vlan_any);
 	}
 	odi_sw_cf_out_n = 0;
+	/* The flow of the GEM port that carries the downstream leg: its queue
+	 * decides the priority the leg's frames take. */
+	ds_flow = (ds.present && b->ds_flow < ODI_SW_CMD_GEM_DS_MAX) ? (int)b->ds_flow : -1;
+	if (ds.present)
+		ds.act[1] = ds_act1(ds.act[1], ds_flow);
 
 	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++) {
 		if (odi_sw_bdgconn[i].used && odi_sw_bdgconn[i].serv_id == b->service_id) {
@@ -823,6 +895,7 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 		sl->dir = b->dir;
 		sl->us_row = -1;
 		sl->ds_row = -1;
+		sl->ds_flow = -1;
 		sl->vlan_vid = 0;
 		sl->vlan_val = 0;
 		sl->vlan_any = 0;
@@ -837,6 +910,7 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 			return ODI_SW_ENOSPC;
 		}
 	}
+	sl->ds_flow = ds_flow;
 	sl->vlan_vid = vlan_vid;
 	sl->vlan_val = vlan_val;
 	sl->vlan_any = vlan_any;

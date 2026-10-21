@@ -370,6 +370,27 @@ check "the flow's six downstream words come from the queue" \
 got=$(grep -c '\] priq ' /tmp/omcid2.log)
 check "setPriQueue is sent per queue, not per flow" "$got" "1"
 
+# The flows point at the queue by its entity id, and the OLT may write the
+# queue's RelatedPort after the CTP exists: the flow is sent again, with the
+# queue's new priority (3 to 5; ds_prio 8 - 1 - 5 = 2), so the driver can
+# steer its frames to the queue it ends up in. A Set that leaves the
+# priority alone sends nothing: a Weight Set after it adds no flow line.
+n0=$(grep -c 'ds flow [0-9]* priq ' /tmp/omcid2.log)
+$Q cli/build/omcli --inject "0f30480a01150001040001010005$(printf '%068d' 0)" \
+    > /dev/null 2>&1
+sync_send /tmp/omcid2.log
+got=$(grep -o 'ds flow [0-9]* priq 5 pri 2 wrr 1 weight 5 port 0' /tmp/omcid2.log | tail -1 | \
+      sed 's/ds flow [0-9]*/ds flow N/')
+check "a queue's new RelatedPort sends its flow again" \
+      "$got" "ds flow N priq 5 pri 2 wrr 1 weight 5 port 0"
+n1=$(grep -c 'ds flow [0-9]* priq ' /tmp/omcid2.log)
+check "and only that flow" "$((n1 - n0))" "1"
+$Q cli/build/omcli --inject "0f31480a01150001010007$(printf '%074d' 0)" \
+    > /dev/null 2>&1
+sync_send /tmp/omcid2.log
+n2=$(grep -c 'ds flow [0-9]* priq ' /tmp/omcid2.log)
+check "a Set that leaves the priority alone does not" "$((n2 - n1))" "0"
+
 # General upstream normalization: explicitly Set a second SP queue on the same
 # T-CONT, then create a second GEM CTP that references it. Both queues have
 # priority 0, so their ME IDs break the tie and produce ordinals 0 and 1.

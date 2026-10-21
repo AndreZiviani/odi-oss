@@ -85,6 +85,13 @@ void odi_switch_cmd_set_flow_ops(const struct odi_switch_flow_ops *ops);
 int odi_switch_bdgconn_activate(void *buf, uint32_t len);
 int odi_switch_bdgconn_deactivate(void *buf, uint32_t len);
 void odi_switch_bdgconn_reset(void);
+/* The priority the frames of downstream flow `flow` take (the number of
+ * the UNI queue its GEM port points at), or -1 for none: the downstream CF
+ * rows of the bridge connections on that flow carry it. _clear takes it off
+ * every flow (the MIB reset). Both write the action word of a row that
+ * changed, and nothing else. The caller holds odi_switch_lock. */
+void odi_switch_bdgconn_ds_pri_set(uint32_t flow, int pri);
+void odi_switch_bdgconn_ds_pri_clear(void);
 
 /* buf/len: the argument struct omcid built for command cmd, as
  * omci_drv_call() sent it. Returns 0, or a negative errno (-EOPNOTSUPP,

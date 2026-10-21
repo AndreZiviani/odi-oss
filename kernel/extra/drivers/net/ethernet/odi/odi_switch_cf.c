@@ -264,6 +264,12 @@ void odi_sw_cf_del(uint32_t idx, int is_us)
 				      idx, zero, 3);
 }
 
+void odi_sw_cf_act_write(uint32_t idx, int is_us, const uint32_t act[3])
+{
+	(void)odi_switch_table_write(is_us ? ODI_SW_TBL_CLS_US_ACTION : ODI_SW_TBL_CLS_DS_ACTION,
+				      idx, act, 3);
+}
+
 void odi_sw_vlan_row_set(uint32_t vid, uint32_t val)
 {
 	(void)odi_switch_table_write(ODI_SW_TBL_VLAN_MEMBERS, vid, &val, 1);

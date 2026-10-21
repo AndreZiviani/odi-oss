@@ -17,8 +17,13 @@
  *
  * Two priorities leave here, and they are not the same number. The flow
  * descriptor's ds_prio is the stock one, the bottom three bits reversed
- * against the per-UNI queue count (OMCI priority 0 is 7). Driver command 23
- * carries the priority as the OLT sees it, RelatedPort & 0xffff, unreversed.
+ * against the per-UNI queue count (OMCI priority 0 is 7); the switch driver
+ * does not read it. Driver command 23 carries the priority as the OLT sees
+ * it, RelatedPort & 0xffff, and the driver takes that as the number of the
+ * UNI's hardware queue, the one served first being the highest: the queues
+ * an OLT gives weight 0 (strict) are the ones it names with the high
+ * priority numbers (ISP1 and claro: entities 0 and 1, priorities 7 and 6),
+ * which only makes sense if a larger number is served first.
  */
 static uint32_t caps_uni_queues(void)
 {
@@ -1191,6 +1196,59 @@ void us_qos_rebuild(void)
 		(long)kept, (long)built, (long)same);
 }
 
+/* The queue each downstream flow was last sent with, as ds_queue_key():
+ * 0 for a flow not sent since omcid started (also after a resume, where the
+ * flow table came from the snapshot), so the first change of its queue is
+ * always sent. Not part of the snapshot: the snapshot layout is
+ * flow_slot's. */
+static uint32_t flow_ds_queue[FLOW_MAX];
+
+/* What the driver is told about the queue of a downstream flow that decides
+ * where its frames go: the UNI port and the priority, never 0. */
+static uint32_t ds_queue_key(const struct omci_gemflow *f)
+{
+	return ((f->ds_port & 0xffU) << 16 | (f->ds_pq_pri & 0xffffU)) + 1U;
+}
+
+static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
+			 int skip281);
+
+/* A downstream queue (class 277) changed: every downstream flow whose CTP
+ * points at it is sent again if the port or the priority it was sent with
+ * is not the queue's now. The driver sends each flow's frames to the queue
+ * of its priority, and the CTP may have been created before the OLT wrote
+ * the queue's RelatedPort. A flow that is not yet sent is left to the CTP's
+ * own create. */
+static void ds_flows_queue_refresh(uint16_t priq)
+{
+	const struct omci_class *c = find_class(OMCI_ME_GEM_PORT_CTP);
+
+	if (!c)
+		return;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		const struct mib_row *r = mib_row_at(i);
+		struct omci_gemflow f;
+		uint32_t dir;
+		int id;
+
+		if (!r || r->classId != OMCI_ME_GEM_PORT_CTP ||
+		    (uint16_t)row_u32(r, c, 7) != priq)
+			continue;
+		dir = row_u32(r, c, 3);
+		if (dir != 2 && dir != 3)
+			continue;
+		id = flow_find(1, (uint16_t)row_u32(r, c, 1));
+		if (id < 0 || id >= FLOW_MAX)
+			continue;
+		for (unsigned k = 0; k < sizeof f / 4; k++)
+			((uint32_t *)&f)[k] = 0;
+		ds_queue_words(&f, priq);
+		if (flow_ds_queue[id] == ds_queue_key(&f))
+			continue;
+		ds_flow_send(c, r, -1);
+	}
+}
+
 /* Class 277, a priority queue: driver command 23, sent when the queue is
  * Set (the stock stack does the same), not when a flow using it is
  * created, which would write the switch on every flow. An upstream queue
@@ -1200,6 +1258,8 @@ void apply_priq(uint16_t inst)
 	struct omci_priq pq;
 	int prc;
 
+	if (!(inst & 0x8000))
+		ds_flows_queue_refresh(inst);
 	if (!priq_program(inst, &pq)) {
 		/* An upstream queue named by a CTP dirties the plan; the
 		 * rebuild runs OLT_QUIET_MS after the last OMCI frame, so a
@@ -1273,6 +1333,8 @@ static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
 	if (rc == 0) {
 		flow_claim(1, id, (uint16_t)f.gem_port);
 		flow_ds[id].mcast = (uint8_t)f.mcast_filter;
+		if (id < FLOW_MAX)
+			flow_ds_queue[id] = ds_queue_key(&f);
 	}
 	out_fmt("   [%s] gem %d ds flow %d priq %d pri %d "
 		"wrr %d weight %d port %d mcast %d -> %d\n",
@@ -1324,6 +1386,7 @@ void qos_reset(void)
 	for (int i = 0; i < FLOW_MAX; i++) {
 		flow_us[i].used = 0;
 		flow_ds[i].used = 0;
+		flow_ds_queue[i] = 0;
 	}
 	for (int i = 0; i < TCONT_MAX; i++)
 		tcont_map[i].used = 0;

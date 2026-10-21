@@ -90,6 +90,114 @@ void odi_sw_ponmac_queue_add(uint32_t th)
 	odi_reg_write(ODI_SW_PORT_QUEUE_MAP_BASE, th);
 }
 
+/* ---- The UNI egress scheduler: downstream queues (cmd 23, direction DS) ---
+ *
+ * Registers read on a stick and checked against another open
+ * implementation's measurements of the same chip (docs/SWITCH.md#downstream-
+ * queues); local to this file, like the UNI limit registers in
+ * odi_switch_port.c, because they are not in the diag register table.
+ *
+ *   0x01c0b0 + 4p      priority to queue: eight 3-bit entries, priority i
+ *                      at bits 3i+2..3i
+ *   0x02d85c + 4p      queue type: bit q set = weighted, clear = strict
+ *   0x02d824 + 4(p/2)  weight of queue 0: 16 bits, port p odd in 31..16
+ *   0x02d82c + 12p + 4((q-1)/3)
+ *                      weights of queues 1..7: 10 bits, three to a word
+ *
+ * The scheduler serves the strict queues first, the highest queue number
+ * first, and the weighted queues after all of them, by weight. SCHED_CTRL
+ * (0x02d800) is left alone: its bit 17 clear counts the weights in bytes,
+ * which the reset state and the stock init both have. The shaper registers
+ * of cmd 67 (0x02d804, 0x02d8b8) are not touched.
+ */
+#define ODI_SW_DSQ_PRIO_MAP_BASE	0x1c0b0U
+#define ODI_SW_DSQ_WFQ_BASE		0x2d85cU
+#define ODI_SW_DSQ_W0_BASE		0x2d824U
+#define ODI_SW_DSQ_WN_BASE		0x2d82cU
+#define ODI_SW_DSQ_WN_PORT_STRIDE	12U
+#define ODI_SW_DSQ_W0_MAX		0xffffU
+#define ODI_SW_DSQ_WN_MAX		0x3ffU
+#define ODI_SW_DSQ_WN_BITS		10U
+/* The weight of the queue in the register's units, 4 for each OMCI unit.
+ * Two weighted queues share the bytes in the ratio of their weights, but
+ * with a granularity: fields 1 and 3 shared 29/71 %, 4 and 12 25/75 %
+ * (another open implementation's measurements), so a weight of 4 * w keeps
+ * the OLT's ratios within a percent where w alone is off by several. */
+#define ODI_SW_DSQ_WEIGHT_SCALE		4U
+/* Priority i to queue i: what the stock init writes for port 0 and
+ * the UNI's reset state does not (every priority to queue 0). */
+#define ODI_SW_DSQ_PRIO_MAP_IDENTITY	0x00fac688U
+
+bool odi_sw_ds_sched = true;
+bool odi_sw_ds_steer = true;
+
+/* A word is written only when it changes: a queue the OLT leaves at the
+ * default adds nothing to the boot's register stream. */
+static void dsq_weight_set(uint32_t port, uint32_t q, uint32_t weight)
+{
+	uint32_t reg, shift, mask, v, nv;
+
+	if (q == 0U) {
+		reg = ODI_SW_DSQ_W0_BASE + 4U * (port / 2U);
+		shift = 16U * (port % 2U);
+		mask = ODI_SW_DSQ_W0_MAX;
+		if (weight > mask)
+			weight = mask;
+	} else {
+		reg = ODI_SW_DSQ_WN_BASE + ODI_SW_DSQ_WN_PORT_STRIDE * port +
+		      4U * ((q - 1U) / 3U);
+		shift = ODI_SW_DSQ_WN_BITS * ((q - 1U) % 3U);
+		mask = ODI_SW_DSQ_WN_MAX;
+		if (weight > mask)
+			weight = mask;
+	}
+	v = odi_reg_read(reg);
+	nv = (v & ~(mask << shift)) | (weight << shift);
+	if (nv != v)
+		odi_reg_write(reg, nv);
+}
+
+static void dsq_type_set(uint32_t port, uint32_t q, int wfq)
+{
+	uint32_t reg = ODI_SW_DSQ_WFQ_BASE + 4U * port;
+	uint32_t v = odi_reg_read(reg), nv;
+
+	nv = wfq ? (v | (1U << q)) : (v & ~(1U << q));
+	if (nv != v)
+		odi_reg_write(reg, nv);
+}
+
+/* Queue q of a port: weighted with weight (OMCI units, 1 or more) or
+ * strict. A strict queue keeps the reset weight, 1, so that a later
+ * change to weighted starts from a known field. The weight goes in before
+ * the queue turns weighted and the type changes before the weight goes
+ * back, so no instant has a weighted queue at a stale weight. The caller
+ * holds odi_switch_lock. */
+void odi_sw_ds_queue_sched(uint32_t port, uint32_t q, int wfq, uint32_t weight)
+{
+	uint32_t w = wfq ? weight * ODI_SW_DSQ_WEIGHT_SCALE : 1U;
+
+	if (wfq) {
+		dsq_weight_set(port, q, w);
+		dsq_type_set(port, q, 1);
+	} else {
+		dsq_type_set(port, q, 0);
+		dsq_weight_set(port, q, w);
+	}
+}
+
+/* The port's priority to queue map as identity, written only when it is
+ * not already: a stick that went through the stock init has it, and the
+ * boot replay stays as it was. Without it a queue's number would not be
+ * the priority of the frames that reach it. */
+void odi_sw_ds_prio_map_identity(uint32_t port)
+{
+	uint32_t reg = ODI_SW_DSQ_PRIO_MAP_BASE + 4U * port;
+
+	if (odi_reg_read(reg) != ODI_SW_DSQ_PRIO_MAP_IDENTITY)
+		odi_reg_write(reg, ODI_SW_DSQ_PRIO_MAP_IDENTITY);
+}
+
 static void ponq_drain(uint32_t pq)
 {
 	uint32_t last = 0;
