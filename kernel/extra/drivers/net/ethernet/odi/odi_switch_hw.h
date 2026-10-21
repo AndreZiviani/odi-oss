@@ -339,6 +339,19 @@ static inline uint32_t ODI_SW_CLASSIFY_SETUP_PATTERN1_COUNT_GET(uint32_t reg)
 	return (reg >> 5) & 0xffU;
 }
 
+/* Bits 12:5 are how many rows at the TOP of the 256-row table follow the
+ * second rule layout (pattern 1): row i is pattern 1 when i >= 256 - count,
+ * and the rows below are pattern 0. The stock module-load sweeps CLS_RULE_A
+ * and CLS_MASK_A rows 0-31 and CLS_RULE_B and CLS_MASK_B rows 32-255 with
+ * 0x1c09 (count 224) in place, which is that split. This returns the first
+ * pattern 1 row (256 when the count is 0). At 128 it is 128, counted from
+ * either end; at 224 it is 32.
+ */
+static inline uint32_t ODI_SW_CLASSIFY_SETUP_PATTERN1_FIRST_ROW(uint32_t reg)
+{
+	return 256U - ODI_SW_CLASSIFY_SETUP_PATTERN1_COUNT_GET(reg);
+}
+
 /* CLASSIFY_PATTERN_SEL: 0x016010, one bit per classification rule */
 #define ODI_SW_CLASSIFY_PATTERN_SEL_BASE	0x16010U
 #define ODI_SW_CLASSIFY_PATTERN_SEL(n)	(ODI_SW_CLASSIFY_PATTERN_SEL_BASE + 4U * (uint32_t)(n))	/* word n: pattern bits of rules 32n..32n+31 */

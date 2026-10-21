@@ -396,7 +396,8 @@ void odi_sw_cf_act_write(uint32_t idx, int is_us, const uint32_t act[3]);
 void odi_sw_cf_reset(void);
 
 /* The first row that is matched with the second rule layout, from
- * CLASSIFY_SETUP (256 when the register names none). A row past it is not
+ * CLASSIFY_SETUP: 256 minus the count in bits 12:5, the count being rows
+ * from the top (256 when the register names none). A row past it is not
  * one the S-tag template is known to work on. */
 uint32_t odi_sw_cf_layout1_row(void);
 
