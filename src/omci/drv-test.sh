@@ -309,6 +309,105 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	omcid_stop "$pid"
 fi
 
+# ------------------------------------------------ OMCI_TCONT_ALLOC_UNSET
+#
+# What a T-CONT the OLT never Set reports as its Alloc-ID (ME 262 attribute
+# 1). "ploam" (the default) is the PLOAM-bound value; "unassigned" is 0x00FF
+# (G.988 9.2.2). An Alloc-ID the OLT Set is reported as set in both modes,
+# and the key never changes what the datapath is given (cmd 21) or the
+# pointers of the GEM port network CTP (ME 268). A MIB upload answers from
+# the same code as a Get; the upload record of T-CONT 0x8000 is read too.
+if [ "${UPDATE:-0}" != 1 ]; then
+	up_next() {   # up_next <tci> <seq>: MIB upload next
+		printf '%s4e0a00020000%04x%060d00000028%08d\n' "$1" "$2" 0 0
+	}
+	# unset_run <name> <store> <gpon> <session> <extra frames file>: omcid
+	# on the store with the key value of $KEYVAL, the session and the extras
+	unset_run() {
+		cp "$2" /var/config/lastgood.xml
+		if [ -n "$KEYVAL" ]; then
+			printf 'OMCI_TCONT_ALLOC_UNSET=%s\n' "$KEYVAL" > /var/config/odi.conf
+		else
+			rm -f /var/config/odi.conf
+		fi
+		log=/tmp/omcid-drv-$1.log
+		$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g "$3" > "$log" 2>&1 &
+		pid=$!
+		omcid_up "$log"
+		{
+			cat "$4"
+			get_frame 0e30 0106 8000 8000
+			get_frame 0e31 0106 8005 8000
+			get_frame 0e32 010c 0001 e000
+			get_frame 0e33 010c 0003 e000
+			printf '0d014d0a00020000%064d00000028%08d\n' 0 0
+			q=40
+			while [ "$q" -lt 100 ]; do up_next "$(printf '1%03x' "$q")" "$q"; q=$((q + 1)); done
+		} > /tmp/session-$1.txt
+		$Q cli/build/omcli --inject-file /tmp/session-$1.txt > /dev/null 2>&1
+		finish "$log"
+		rm -f /var/config/odi.conf
+	}
+	# the upload record of T-CONT 0x8000 and 0x8005: class 262 (0106),
+	# the entity id, then attribute 1 (the Alloc-ID, two bytes)
+	upload_val() {   # upload_val <log> <inst hex>
+		grep -h -- '^-> 1[0-9a-f]\{3\}2e0a00020000' "$1" | grep -o -- "0106${2}[0-9a-f]\{8\}" | head -1 | cut -c13-16
+	}
+	chk() { if [ "$2" = "$3" ]; then echo "ok    $1"; else echo "FAIL  $1: '$2', want '$3'"; fail=$((fail + 1)); fi; }
+
+	gpon /tmp/gpon-other "5 1000 1001 1002 1003 1004"
+
+	KEYVAL=ploam
+	unset_run unset-ploam "$FIX/omci-store-isp1.xml" /tmp/gpon-other "$FIX/omci-session-isp1.txt"
+	cp "$log" /tmp/omcid-drv-ploam.log
+	grep '^drv ' /tmp/omcid-drv-ploam.log > /tmp/drv-ploam.txt
+	chk "ploam: a Get of 0x8000 is the PLOAM binding" "$(grep -c -- '-> 0e30290a0106800000800003e8' /tmp/omcid-drv-ploam.log)" 1
+	chk "ploam: a Get of 0x8005 is 0x00ff" "$(grep -c -- '-> 0e31290a0106800500800000ff' /tmp/omcid-drv-ploam.log)" 1
+	chk "ploam: the MIB upload record of 0x8000" "$(upload_val /tmp/omcid-drv-ploam.log 8000)" 03e8
+	chk "ploam: the MIB upload record of 0x8005" "$(upload_val /tmp/omcid-drv-ploam.log 8005)" 00ff
+
+	KEYVAL=unassigned
+	unset_run unset-unassigned "$FIX/omci-store-isp1.xml" /tmp/gpon-other "$FIX/omci-session-isp1.txt"
+	cp "$log" /tmp/omcid-drv-unassigned.log
+	grep '^drv ' /tmp/omcid-drv-unassigned.log > /tmp/drv-unassigned.txt
+	chk "unassigned: a Get of 0x8000 is 0x00ff" "$(grep -c -- '-> 0e30290a0106800000800000ff' /tmp/omcid-drv-unassigned.log)" 1
+	chk "unassigned: a Get of 0x8005 is 0x00ff" "$(grep -c -- '-> 0e31290a0106800500800000ff' /tmp/omcid-drv-unassigned.log)" 1
+	chk "unassigned: the MIB upload record of 0x8000" "$(upload_val /tmp/omcid-drv-unassigned.log 8000)" 00ff
+	chk "unassigned: the MIB upload record of 0x8005" "$(upload_val /tmp/omcid-drv-unassigned.log 8005)" 00ff
+	if cmp -s /tmp/drv-ploam.txt /tmp/drv-unassigned.txt; then
+		echo "ok    unassigned: the driver calls (cmd 21 included) are the ploam ones, byte for byte"
+	else
+		echo "FAIL  unassigned: the driver calls differ from the ploam mode"
+		diff /tmp/drv-ploam.txt /tmp/drv-unassigned.txt | head -10
+		fail=$((fail + 1))
+	fi
+	chk "unassigned: the ME 268 pointers read the same in both modes" \
+	    "$(grep -- '-> 0e3[23]29' /tmp/omcid-drv-ploam.log | sort | cut -c1-200)" \
+	    "$(grep -- '-> 0e3[23]29' /tmp/omcid-drv-unassigned.log | sort | cut -c1-200)"
+	chk "unassigned: a warning for each T-CONT bound from PLOAM" \
+	    "$(grep -c 'OMCI_TCONT_ALLOC_UNSET=unassigned' /tmp/omcid-drv-unassigned.log)" 5
+	chk "ploam: no such warning" "$(grep -c 'OMCI_TCONT_ALLOC_UNSET=unassigned' /tmp/omcid-drv-ploam.log)" 0
+
+	# An OLT that Sets T-CONT 0x8000 (ISP2): the set value is reported and
+	# programmed in both modes, and the run is the ISP2 golden.
+	for KEYVAL in ploam unassigned; do
+		gpon /tmp/gpon-isp2b "2 400 348"
+		unset_run "unset-isp2-$KEYVAL" "$FIX/omci-store-isp2.xml" /tmp/gpon-isp2b "$FIX/omci-session-isp2.txt"
+		chk "$KEYVAL: an OLT Set of 0x8000 (348) then a Get answers 348" \
+		    "$(grep -c -- '-> 0e30290a01068000008000015c' "$log")" 1
+		chk "$KEYVAL: the Set T-CONT is in the MIB upload as 348" "$(upload_val "$log" 8000)" 015c
+		grep '^drv ' "$log" > "/tmp/drv-isp2-$KEYVAL.txt"
+	done
+	if cmp -s /tmp/drv-isp2-ploam.txt /tmp/drv-isp2-unassigned.txt &&
+	   grep -q '^drv 21 .*0000015c$' /tmp/drv-isp2-unassigned.txt; then
+		echo "ok    an OLT that Sets the Alloc-ID: the same driver calls in both modes, T-CONT 348 programmed"
+	else
+		echo "FAIL  an OLT that Sets the Alloc-ID: the driver calls differ between the modes"
+		diff /tmp/drv-isp2-ploam.txt /tmp/drv-isp2-unassigned.txt | head -10
+		fail=$((fail + 1))
+	fi
+fi
+
 # ------------------------------------------------ the OLT locks the UNI
 #
 # Class 11 attribute 5 (AdministrativeState) = 1 forces the host link down

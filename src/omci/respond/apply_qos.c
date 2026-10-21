@@ -712,7 +712,10 @@ static int tcont_olt_alloc(uint16_t meId)
 	return (int)row_u32(r, c, 1);
 }
 
-uint16_t tcont_alloc_id(uint16_t meId, int *src)
+/* The Alloc-ID T-CONT `meId` is bound to in the datapath: what the OLT set,
+ * else the PLOAM assignment in order, else 0x00FF. Whatever
+ * OMCI_TCONT_ALLOC_UNSET says: that key changes only what is reported. */
+uint16_t tcont_bound_alloc_id(uint16_t meId, int *src)
 {
 	const uint16_t *ids;
 	unsigned n = alloc_ids_assigned(&ids), nt = 0;
@@ -760,6 +763,40 @@ uint16_t tcont_alloc_id(uint16_t meId, int *src)
 		}
 	}
 	return ALLOC_ID_UNASSIGNED;
+}
+
+/* OMCI_TCONT_ALLOC_UNSET in CFG_ODI_PATH: "unassigned" makes a T-CONT the
+ * OLT never Set report 0x00FF; anything else, or absent, is "ploam", the
+ * PLOAM-bound value. Read at every call, so a change is live. */
+int tcont_alloc_unset_mode(void)
+{
+	static const char want[] = "unassigned";
+	char v[16];
+
+	if (cfg_odi_get(CFG_ODI_PATH, "OMCI_TCONT_ALLOC_UNSET", v, sizeof v) !=
+	    (int)sizeof want - 1)
+		return 0;
+	for (unsigned i = 0; i < sizeof want; i++)
+		if (v[i] != want[i])
+			return 0;
+	return 1;
+}
+
+/* The Alloc-ID T-CONT `meId` reports (Get, MIB upload, show): the bound one,
+ * except that in "unassigned" mode a T-CONT the OLT never Set reads 0x00FF
+ * (G.988 9.2.2 initial value) although the datapath keeps its PLOAM binding. */
+uint16_t tcont_alloc_id(uint16_t meId, int *src)
+{
+	int s;
+	uint16_t a = tcont_bound_alloc_id(meId, &s);
+
+	if (s == TCONT_ALLOC_PLOAM && tcont_alloc_unset_mode()) {
+		s = TCONT_ALLOC_NONE;
+		a = ALLOC_ID_UNASSIGNED;
+	}
+	if (src)
+		*src = s;
+	return a;
 }
 
 /* Program one T-CONT: from a Set of its Alloc-ID, or on demand when a GEM
@@ -989,7 +1026,7 @@ void us_qos_rebuild(void)
 			grp[ng].tcontMe = queues[first].tcontMe;
 			grp[ng].first = (uint16_t)first;
 			grp[ng].end = (uint16_t)end;
-			grp[ng].alloc = (uint16_t)effective_u32(262, queues[first].tcontMe, 1);
+			grp[ng].alloc = tcont_bound_alloc_id(queues[first].tcontMe, 0);
 			grp[ng].keep = 0;
 			ng++;
 		}
@@ -1108,6 +1145,11 @@ void us_qos_rebuild(void)
 			}
 			continue;
 		}
+		if (tcont_alloc_unset_mode() && tcont_olt_alloc(grp[g].tcontMe) < 0)
+			out_fmt("   warning: tcont me %04x carries GEM traffic but the OLT "
+				"never Set its Alloc-ID (OMCI_TCONT_ALLOC_UNSET=unassigned): "
+				"reported 0x00ff, bound to alloc %d from PLOAM\n",
+				(long)grp[g].tcontMe, (long)grp[g].alloc);
 		tcontIndex = tcont_apply(grp[g].tcontMe, grp[g].alloc,
 					 (uint16_t)(grp[g].end - grp[g].first));
 		if (tcontIndex == 0xffff)

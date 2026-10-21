@@ -183,6 +183,8 @@ int gem_port_encrypted(uint16_t port);
 int alloc_ids_known(void);
 unsigned alloc_ids_assigned(const uint16_t **ids);
 uint16_t tcont_alloc_id(uint16_t meId, int *src);
+uint16_t tcont_bound_alloc_id(uint16_t meId, int *src);
+int tcont_alloc_unset_mode(void);
 
 /* Everything that crosses a module boundary. */
 extern uint8_t serial[9];
