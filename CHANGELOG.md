@@ -6,7 +6,7 @@ listed here.
 ## Unreleased
 
 **Automated dependency bump.**
-- linux 6.18.56 -> 6.18.57
+- Kernel: Linux 6.18.57 (was 6.18.56), the upstream stable update.
 
 - OMCI: a downstream priority queue (ME 277) whose Weight the OLT had set
   went to the switch driver as priority 0, whatever its entity: the row built
