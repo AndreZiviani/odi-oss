@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Kernel: `panic=10` on the built-in command line. A panic used to wait for
+  the userland watchdog deadline (about 44 s) before the board restarted; it
+  now restarts 10 s after the panic, through the watchdog restart handler,
+  which leaves the trace time to reach the ramlog.
+
 - Kernel, optics: the laser driver id read at boot (the `laser` PON step) is
   tried up to three times, 200 ms apart, before the step gives up. One failed
   read used to leave the laser off and GPON refused for the whole boot with
