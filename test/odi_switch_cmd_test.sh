@@ -32,7 +32,7 @@ OUT=$(mktemp -t odi_switch_cmd_test_out.XXXXXX)
 RESULT=$(mktemp -t odi_switch_cmd_test_result.XXXXXX)
 trap 'rm -f "$BIN" "$OUT" "$RESULT"' EXIT
 
-cc -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_switch_cmd_test.c"
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_switch_cmd_test.c"
 "$BIN" "$OUT"
 
 set +e

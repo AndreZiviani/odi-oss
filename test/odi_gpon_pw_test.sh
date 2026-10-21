@@ -6,6 +6,6 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=$(mktemp -t odi_gpon_pw_test.XXXXXX)
 trap 'rm -f "$BIN"' EXIT
 D=$ROOT/kernel/extra/drivers/net/ethernet/odi
-cc -std=c99 -Wall -Wextra -Werror -I "$D" -o "$BIN" \
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$D" -o "$BIN" \
 	"$ROOT/test/odi_gpon_pw_test.c" "$D/odi_gpon_pw.c"
 "$BIN"

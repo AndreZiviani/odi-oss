@@ -81,9 +81,9 @@ size: nv
 # second gets EAGAIN, which is what nv waits on.
 test:
 	@mkdir -p $(BUILD)
-	@cc -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_env test/test_env.c env.c && \
+	@cc $(ODI_SAN_CFLAGS) -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_env test/test_env.c env.c && \
 	 $(BUILD)/test_env
-	@cc -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_commit test/test_commit.c commit.c env.c && \
+	@cc $(ODI_SAN_CFLAGS) -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_commit test/test_commit.c commit.c env.c && \
 	 $(BUILD)/test_commit
 	@$(RUN) make IN_CONTAINER=1 $(BUILD)/flock_probe >/dev/null
 	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/flock_probe'

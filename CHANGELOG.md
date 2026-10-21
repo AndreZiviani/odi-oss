@@ -15,6 +15,13 @@ listed here.
   floating-point instruction would now raise SIGILL instead of being
   emulated, and no program in the image has one.
 
+- CI and tests: `make test-host-asan` builds the C unit tests of `make
+  test-host` (and the host-built tests of `src/nv` and `src/diag`) with
+  AddressSanitizer, UndefinedBehaviorSanitizer and leak detection, and a
+  `host-asan` job runs it on every pull request. The first run reported
+  nothing. The test scripts compile through `cc ${ODI_SAN_CFLAGS-}`, empty in
+  the plain leg, so the two legs build the same way. No shipped code changed.
+
 ## v1.9.0 - 2026-10-21
 
 - The image ships confd v1.7.1 (odi-ui: sign-in falls back to the built-in
