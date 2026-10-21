@@ -14,11 +14,17 @@ Measured by executing instructions on the device itself, not read out of a
 datasheet:
 
     confirmed to work:   the full MIPS-I set, plus movz/movn, ll/sc, sync,
-                          bltzl, madd
+                          madd
     confirmed ILLEGAL:   mul, clz (and the rest of the SPECIAL2/mips32
                           encoding class), teq/tne/tge/tlt and their
                           immediate and unsigned forms, beql/bnel (and their
                           beqzl/bnezl assembler aliases)
+    decodes, WRONG:      bltzl. It does not trap, but the delay slot always
+                          runs and control always falls through, taken or
+                          not. It was once listed as working, from a probe
+                          that could only see SIGILL; do not use it, and
+                          treat the other branch-likely forms (bgezl, blezl,
+                          bgtzl, bltzall, bgezall) as unverified.
 
 A generic `mips32`-targeting toolchain emits several of the illegal ones by
 default, in its own runtime libraries as well as in your code. So every
@@ -29,8 +35,9 @@ build in this repo targets:
 - `-march=mips2` keeps codegen to MIPS-I plus the MIPS-II additions this
   core does have, and away from the SPECIAL2 encodings (`mul`, `clz`) that
   only exist from mips32 onward.
-- `-mno-branch-likely` removes `beql`/`bnel`, which mips2 and later use for
-  branch-delay-slot optimization by default.
+- `-mno-branch-likely` removes `beql`/`bnel` (and the other branch-likely
+  forms, `bltzl` included), which mips2 and later use for branch-delay-slot
+  optimization by default.
 - `-mdivide-breaks` emits a `break` instead of `teq` to trap divide-by-zero.
   `-march=mips2` alone already avoids the *branch* conditions that reach
   `teq`, but this flag stops the compiler reaching for it directly too.

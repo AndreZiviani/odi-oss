@@ -53,8 +53,9 @@ one that does not exist, the build stops and says how to make it.
 ## Why these toolchains, in short
 
 The CPU is a Lexra **RLX5281**, which implements the MIPS ISA in pieces
-(`mul`, `clz`, `teq`, `beql` and `bnel` trap; `ll`/`sc`, `movz`/`movn`,
-`madd` and `bltzl` run). The uClibc-ng toolchain targets
+(`mul`, `clz`, `teq`, `beql` and `bnel` trap; `bltzl` decodes but
+misexecutes, its delay slot always running; `ll`/`sc`, `movz`/`movn` and
+`madd` run). The uClibc-ng toolchain targets
 `-march=mips2 -mno-branch-likely -mdivide-breaks`, baked into gcc and its
 target libraries, and its image build fails on any trapping instruction in
 `libc.a` or `libgcc.a`. Our own tools are freestanding (`-nostdlib`, no libc
