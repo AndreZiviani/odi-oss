@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Kernel: the config drops the subsystems for hardware the board does not have
+  and the interfaces nothing in the image reaches (VT console, input and HID,
+  the FPU emulator, power management, seccomp, epoll, PTP and PPS, the block
+  I/O schedulers and partition parsers, and a few more; `docs/KERNEL.md` lists
+  each with its size and why it is safe). The uImage goes from 1,310,849 to
+  1,149,701 bytes, so the kernel partition has 210 KB spare instead of 49 KB,
+  and the loader has 12% less to unpack. Nothing the image runs changes; a
+  floating-point instruction would now raise SIGILL instead of being
+  emulated, and no program in the image has one.
+
 ## v1.9.0 - 2026-10-21
 
 - The image ships confd v1.7.1 (odi-ui: sign-in falls back to the built-in

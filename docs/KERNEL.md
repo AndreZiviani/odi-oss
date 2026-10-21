@@ -605,10 +605,12 @@ takes the same `odi-oss-<date>-<rev>` default `image/build.sh` uses.
 ## The config
 
 `kernel/618/config` is a fragment, not a full `.config`: `olddefconfig`
-completes it. It is sized for a 1328 KB kernel partition: `-Os`, dead code
-elimination, `SLUB_TINY`, no modules, no kallsyms, a 16 KB printk ring
-(`LOG_BUF_SHIFT=14`; the ramlog keeps the boot log anyway), IPv4, bridge
-and 802.1Q only. Every line carries its reason in a comment there.
+completes it. It is sized for a 1328 KB kernel partition (1,359,872 bytes):
+`-Os`, dead code elimination, `SLUB_TINY`, no modules, no kallsyms, a 16 KB
+printk ring (`LOG_BUF_SHIFT=14`; the ramlog keeps the boot log anyway), IPv4,
+bridge and 802.1Q only. Every line carries its reason in a comment there.
+The LZMA uImage is 1,149,701 bytes, 210,171 spare (15%); the uncompressed
+kernel is 3,460,192 bytes.
 
 **The syscall diet.** Options whose syscalls nothing in the rootfs can
 reach are off: `AIO`, `SIGNALFD`, `TIMERFD`, `EVENTFD`, `INOTIFY_USER`,
@@ -635,6 +637,59 @@ Deliberately kept on, and why:
 - `SYSVIPC`: omcid serves `omcli`/`omcicli` over a SysV message queue.
 - `MULTIUSER`: dropbear needs the uid/gid plumbing even for a root-only
   login.
+
+**The hardware and subsystem diet.** A second pass turned off whole
+subsystems for hardware the board does not have and interfaces nothing in the
+image reaches. It took the uImage from 1,310,849 bytes (96% of the partition,
+49,023 spare) to 1,149,701 (15% spare) and the uncompressed kernel from
+3,961,476 to 3,460,192 bytes. The loader unpacks the LZMA image before the
+kernel runs, so the smaller image is also fewer bytes for it to unpack; the
+effect on boot time is measured on a stick, not here. Sizes are the object
+code each option built, from `size` over the build's `built-in.a` files (before
+the linker drops unreferenced sections), so they add up to more than the
+saving:
+
+| Option(s) off | Object code removed | Why nothing needs it |
+|---|---|---|
+| `VT` (`VT_CONSOLE`, `CONSOLE_TRANSLATIONS`, `DUMMY_CONSOLE`) | 78 KB | the console is the 8250 UART on ttyS0; nothing opens `/dev/tty0..63` |
+| `INPUT`, `SERIO` (PS/2 keyboard and mouse) | 108 KB | no input device exists on the board |
+| `HID_SUPPORT` (`HID`, `I2C_HID`, `HID_GENERIC`) | 55 KB | no input device exists on the board; `I2C` itself stays for the optics port |
+| `MIPS_FP_SUPPORT` (FPU emulator) | 72 KB | the CPU has no FPU and every ELF in the image is soft-float with no coprocessor-1 instruction (readelf and objdump over all 13); `isa-audit` fails the build on floating point anyway |
+| `PM`, `SUSPEND` | 56 KB | nothing suspends, no sysfs power user, no driver has power-management callbacks; reboot and restart are not part of it |
+| `SECCOMP` | 9 KB | no ELF loads the seccomp syscall or carries the string |
+| `PTP_1588_CLOCK`, `PPS` (and `NET_PTP_CLASSIFY` with them) | 23 KB | no driver registers a clock; nothing reads `/dev/ptp*` |
+| `NVMEM`, `HWMON`, `HW_RANDOM` | 25 KB | no provider, sensor or hardware generator registers with them |
+| `MQ_IOSCHED_DEADLINE`, `MQ_IOSCHED_KYBER`, `MSDOS_PARTITION`, `EFI_PARTITION`, `BLOCK_LEGACY_AUTOLOAD` | 21 KB | mtdblock backs the squashfs root, so there is nothing to reorder and no partition table to read |
+| `EPOLL`, `DNOTIFY` (and `FSNOTIFY` with it), `SGETMASK_SYSCALL`, `CACHESTAT_SYSCALL` | 32 KB | no ELF loads these syscall numbers, and none carries an `epoll_` symbol |
+| `LEGACY_TIOCSTI`, `LDISC_AUTOLOAD` | a few KB | no tool injects tty input; the only line discipline in use, N_TTY, is built in |
+| `BQL`, `NET_RX_BUSY_POLL` | a few KB | nothing reads the byte-queue-limit knobs or sets `SO_BUSY_POLL` |
+| `SQUASHFS_ZLIB`, `XZ_DEC_*` BCJ filters, `WLAN`, `WIRELESS` | 1.5 KB of uImage | the rootfs is xz with no BCJ filter (the squashfs superblock has no compressor options); no wireless driver exists |
+
+Every claim in the table was checked against the rootfs of the image built
+from it: the ELF scan (soft-float, no coprocessor-1 instruction, none of the
+syscall numbers above) and `grep` over the scripts, `src/` and the sibling
+`confd` and `metricsd` sources for the `/proc`, `/sys` and `/dev` paths they
+open. `qemu` runs a different kernel, so `make test` cannot catch a config
+regression here; a stick has to.
+
+What was measured and deliberately left on, with the saving in uImage bytes
+had it been turned off (each on top of the trimmed config):
+
+- `STACKPROTECTOR_STRONG`: 25,043 bytes. It is a security hardening against a
+  stack overflow in network-reachable kernel code, so it stays until someone
+  decides the saving is worth giving it up.
+- `BRIDGE_IGMP_SNOOPING`, `COMPACTION` and `FUTEX_PI` together: 27,747 bytes.
+  Bridge snooping changes how the kernel bridge forwards multicast it sees on
+  the CPU port, and the sources do not show whether IGMP copied up for igmpd
+  ever passes through it; `COMPACTION` is what keeps larger allocations
+  possible after a long uptime on 32 MB (not measured either way); a PI
+  futex in a threaded daemon cannot be ruled out by a syscall scan (the
+  priority-inheritance command is an argument, not a syscall number).
+- `LEGACY_PTYS`: rcS makes the BSD pty nodes and a test checks the count, so
+  it stays; dropbear uses `/dev/ptmx`.
+- Not configurable in 6.18: `net/ipv4/nexthop.c` (28 KB of object code) and
+  the rest of the IPv4 core are built unconditionally with `INET`; dropping
+  them would need a patch to mainline files, which this tree avoids carrying.
 
 **Debug aids that stay on.** `print-fatal-signals=1` is on the built-in
 command line: a process killed by SIGSEGV, SIGBUS or SIGILL prints its
