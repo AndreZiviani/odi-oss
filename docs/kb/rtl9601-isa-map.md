@@ -3,7 +3,7 @@
 The core implements two MIPS ISA levels only in pieces; the safe way to know
 what runs is to execute it, never to infer from a family or ISA-level label.
 
-*Last verified: 2026-09-14*
+*Last verified: 2026-10-20 (the `bltzl` row corrected)*
 
 ---
 
@@ -16,7 +16,7 @@ Measured by executing each instruction on a real ODI DFP-34X-2C2:
 | `lwl` `lwr` `swl` `swr` | MIPS-I unaligned | ok |
 | `movz` `movn` | SPECIAL 0x0A/0x0B | ok |
 | `ll` `sc` `sync` | MIPS-II | ok |
-| `bltzl` | MIPS-II branch-likely, REGIMM | **ok** |
+| `bltzl` | MIPS-II branch-likely, REGIMM | **decodes but MISEXECUTES**: the delay slot always runs and control always falls through, taken or not |
 | `madd` | SPECIAL2 funct 0x00 | ok |
 | `mul` | SPECIAL2 funct 0x02 | **ILLEGAL** |
 | `clz` | SPECIAL2 funct 0x20 | **ILLEGAL** |
@@ -24,8 +24,20 @@ Measured by executing each instruction on a real ODI DFP-34X-2C2:
 | `beql` `bnel` | MIPS-II branch-likely, opcode | **ILLEGAL** |
 
 Two ISA levels, both implemented in pieces: SPECIAL2 per-instruction, and
-MIPS-II with the REGIMM-encoded branch-likely form present while the
-main-opcode branch-likely forms are not. **An ISA level is not a unit on
+MIPS-II, where the main-opcode branch-likely forms trap and the
+REGIMM-encoded one (`bltzl`) does not trap but does not behave as a
+branch-likely either.
+
+**`bltzl` was listed as "ok" until 2026-10-20, and that was wrong.** The probe
+behind it ran one instruction and recorded only whether a SIGILL came back, so
+an instruction that decodes and misexecutes passed. A probe that checks what a
+branch-likely must do (taken: the slot runs and control goes to the target;
+not taken: the slot is skipped and control falls through) on a stick printed,
+for a negative and a non-negative operand alike, `slot=1 fell=1`: the slot ran
+and control fell through, whichever way the branch should have gone. Another
+open implementation of this board had measured the same. Nothing we ship
+contains it (`-mno-branch-likely`, and the gate scan of every ELF in the
+image), but it is now refused by the ISA gate like the trapping ones. **An ISA level is not a unit on
 this core.** Predicting from the family is unreliable in both directions:
 "`madd` decodes, so SPECIAL2 exists" and "`ll`/`sc` work, so mips2 is safe"
 were both wrong predictions in practice.
@@ -68,7 +80,11 @@ toolchain that gets this right end to end.
 Each instruction was tested in isolation (one process per instruction, so a
 SIGILL only ends that one test), with a known-good instruction run first as
 a positive control so a broken test harness cannot masquerade as a missing
-instruction.
+instruction. That harness could only see a trap. "Does not raise SIGILL" is
+not "works": for anything that changes control flow, a probe also has to
+check the result (here, that the delay slot of a branch-likely was or was not
+nullified, for both operand outcomes). The `bltzl` row is the instruction
+that taught this.
 
 **The audit that missed `teq` is the durable lesson.** An early check listed
 the instructions *suspected* of being absent and counted only those, so a

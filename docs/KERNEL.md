@@ -205,6 +205,47 @@ caches, no FPU. It does not call `__cpu_has_fpu()`, which toggles CP0
 `Status` CU1 and reads it back, a sequence never tried on this core;
 `cpu_has_fpu` is 0 at compile time anyway.
 
+### Atomics, no thread pointer, and the empty first KiB
+
+Three facts about this core and this image that look like gaps and are not,
+or are gaps with a known cause.
+
+**The core runs `ll`, `sc` and `sync`, so atomics are real ones.**
+`cpu-feature-overrides.h` sets `cpu_has_llsc` to 1, and mainline then builds
+`atomic_*`, bitops, `cmpxchg` and the spinlocks on them; uClibc-ng's own
+atomics are the same instructions (`docs/CROSS-COMPILING.md`). We know it
+three ways: the three instructions were executed on the device in user mode
+(`docs/kb/rtl9601-isa-map.md`), a kernel and a userland built on them have
+run on the sticks, and another open implementation of this board measured
+the same independently (a million atomic increments exact, with `sync`
+executing rather than trapping). `/proc/cpuinfo` does not list `ll/sc` among the options:
+`show_cpuinfo()` just has no line for it, so its absence proves nothing.
+
+**There is no thread pointer, so no TLS.** On MIPS Linux the thread pointer
+is read with `rdhwr $3,$29` (hardware register 29, `ULR`). On our kernel it
+does not work: a user-mode `rdhwr $3,$29` on 6.18.57 dies with SIGSEGV at the
+instruction itself (`BadVA 00000000`, `epc` the `rdhwr`; measured on a stick,
+2026-10-20) instead of returning a thread pointer. Whether the core or our
+R3000-model kernel is to blame has not been investigated (the vendor's own
+kernel configuration for this core lists a TLS option). So nothing that
+needs `__thread`, C11 `thread_local` or NPTL can run here, since compiled TLS
+access starts with that instruction. The userland is single-threaded or uses
+processes, and the freestanding tools have no thread library at all.
+
+**The first KiB of the kernel image is an empty exception-vector area, which
+is why linking at `0x80000000` is safe.** Mainline's
+`arch/mips/kernel/head.S` starts with `.fill 0x400` unless the machine
+selects `NO_EXCEPT_FILL`, and `MACH_RTL8686` does not (the built `.config`
+has no such symbol). So `_text` is `0x80000000`, but the first code,
+`_stext` and `__kernel_entry`, is at `0x80000400`, the first function at
+`0x80000408`, and `trap_init()` copies the exception handlers over the reserved
+bytes at the start of KSEG0 rather than over any code. `kernel_entry`, the
+real entry point, is far into the image (`0x80321220` in a recent build),
+which is why `kernel/build.sh` reads it from `System.map` and never uses the
+load address as the entry (above). A kernel that does select
+`NO_EXCEPT_FILL` has to be linked higher, at `0x80100000` for example, to leave
+that space free; ours does not, so `0x80000000` is the right address by design.
+
 ## IRQ and timer
 
 The board's own interrupt controller (`arch/mips/rtl8686/irq.c`, called
