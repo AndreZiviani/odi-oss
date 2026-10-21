@@ -126,6 +126,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Upstream tarballs (busybox, dropbear, iproute2, the Linux tree and its
+      # signature) and the confd/metricsd release assets land in dl/. The key
+      # is the files that pin their versions and SHA-256s, so a bump misses the
+      # cache and fetches anew. A hit only skips the download: every fetch
+      # script still re-checks the pinned SHA-256 of the file it finds there.
+      - name: Cache pinned downloads (dl/)
+        uses: actions/cache@v5
+        with:
+          path: |
+            dl
+          key: dl-clean-build-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh') }}
+
       # Fetches the pinned linux-6.18.x fresh (VERSION in kernel/618/fetch.sh) and re-checks its
       # pinned SHA-256 and the upstream GPG signature; packs it into
       # build/kernel-618/tree.tar. Does not compile it -- that is the ~hour
@@ -159,6 +171,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+
+      # Upstream tarballs (busybox, dropbear, iproute2, the Linux tree and its
+      # signature) and the confd/metricsd release assets land in dl/. The key
+      # is the files that pin their versions and SHA-256s, so a bump misses the
+      # cache and fetches anew. A hit only skips the download: every fetch
+      # script still re-checks the pinned SHA-256 of the file it finds there.
+      - name: Cache pinned downloads (dl/)
+        uses: actions/cache@v5
+        with:
+          path: |
+            dl
+          key: dl-test-qemu-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh') }}
 
       - name: qemu-system-mips
         run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-mips
@@ -219,6 +243,19 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: build-b
+
+      # Upstream tarballs (busybox, dropbear, iproute2, the Linux tree and its
+      # signature) and the confd/metricsd release assets land in dl/. The key
+      # is the files that pin their versions and SHA-256s, so a bump misses the
+      # cache and fetches anew. A hit only skips the download: every fetch
+      # script still re-checks the pinned SHA-256 of the file it finds there.
+      - name: Cache pinned downloads (dl/)
+        uses: actions/cache@v5
+        with:
+          path: |
+            build-a/dl
+            build-b/dl
+          key: dl-reproducible-${{ runner.os }}-${{ hashFiles('build-a/packages/fetch.sh', 'build-a/packages/*/build.sh', 'build-a/kernel/618/fetch.sh', 'build-a/src/fetch-releases.sh') }}
 
       - name: Version for this comparison
         run: echo "VERSION=${GITHUB_REF_NAME:-repro-dispatch}" >> "$GITHUB_ENV"
