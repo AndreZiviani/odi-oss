@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.8.0 (the web UI's management-address change goes
+  through the `mgmt-addr.sh` trial and opens the new address by itself) and
+  metricsd v1.7.0 (`gpon_soc_temperature_celsius`, from the new SoC
+  temperature sensor).
+
 - OMCI, switch: two more shapes of the OLT's extended VLAN table (class 171)
   are applied instead of leaving the whole table transparent. Only on a line
   with `VLAN_CFG_TYPE` other than 1; the manual tag never reads the table, so
