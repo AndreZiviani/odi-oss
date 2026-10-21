@@ -23,7 +23,11 @@ listed here.
   GPON driver that said no encrypted port had ever been seen was stale and
   contradicted `docs/SWITCH.md`; it is corrected. Host-tested
   (`test/odi_gpon_ctr_test.c`, `test/odi_switch_ds_encrypt_test.c`,
-  `test/procparse_test.c`, and the omcid suites `pm` and `enc`).
+  `test/procparse_test.c`, and the omcid suites `pm` and `enc`). On a stick
+  whose OLT encrypts its data ports: `enc_ports` lists the five, ME 268 reads
+  1 on their CTPs and 0 on the OMCC's; on that line downstream FEC is off, so
+  Total code words stays 0 as it should. The count with FEC on is host-tested
+  only.
 - OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
   parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
   the NIC runs a second receive ring, and the switch routes the OMCI frames
