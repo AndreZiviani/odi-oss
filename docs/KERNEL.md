@@ -525,6 +525,9 @@ TX-completion interrupt, and two delayed works cover an interrupt that
 does not come: one every 10 ms while a queue is stopped, one every 100 ms
 while frames are in flight; the queue wakes at half ring); and no DMA mapping was checked (`dma_mapping_error()` now
 guards all three). The init error path now unwinds in reverse.
+With `odi_nic.omci_ring=1` (off by default) the OMCI frames the switch
+traps to the CPU have a receive ring of their own, served first, so a
+flood from the host side cannot starve them of descriptors.
 `kernel/extra/drivers/net/ethernet/odi/README.md` has the rest.
 
 ### The L2 table
