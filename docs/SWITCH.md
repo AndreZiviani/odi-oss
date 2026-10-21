@@ -989,6 +989,15 @@ OLT that encrypts the OMCC would leave every downstream OMCI frame
 unreadable. No OLT seen so far encrypts it, so this path is host-tested
 only. Like the stock module, the message's `b` bit is not read.
 
+What the OLT left on is readable: `odi_switch_gpon_aes_ports()` lists every
+DS slot whose FLAGS word has the AES bit set in the hardware, plus any port
+the OLT asked to decrypt that has no slot yet, and `/proc/odi_gpon/status`
+prints it as `enc_ports <n> <port>...`. omcid answers the GEM port network
+CTP's Encryption state (ME 268, attribute 8) from that line, 1 for a port on
+it and 0 for any other. G.988 has no AVC for the attribute, so it shows in a
+Get and in a MIB upload only. The OMCC row is not a GEM port network CTP and
+is not on the line.
+
 Setting the bit on every data port at creation was rejected: a port the
 OLT does not encrypt would then be decrypted into garbage, and nothing here
 could tell. Every OLT seen so far encrypts every data port.
