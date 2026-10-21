@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- OMCI: omcid can now read an extended VLAN tagging entry (class 171) as what
+  the switch classifier can carry out: which tags it matches, what happens to
+  the C-tag and the S-tag, and the rule that undoes it downstream for each
+  downstream mode. Nothing uses it yet, so nothing changes on the wire.
+
 - OMCI: a downstream priority queue (ME 277) whose Weight the OLT had set
   went to the switch driver as priority 0, whatever its entity: the row built
   for it had no RelatedPort, so all eight of the UNI's queues carried the

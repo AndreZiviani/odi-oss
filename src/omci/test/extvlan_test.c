@@ -341,6 +341,228 @@ int main(void)
 		ok(evtocd_olt_tag(tbl, 0, 0x8100, &vid, &pri) != 0, "an empty table is not applied");
 	}
 
+
+	/* ---------------------------------------- what the classifier can do --- */
+	{
+		struct evtocd_plan u, d;
+		const char *why;
+		const char *dwhy = 0;
+		char line[160];
+
+		/* G.988 9.3.13, the one-to-one VLAN translation: a single C-tag
+		 * of VID 410, any priority, becomes VID 1410 and keeps its
+		 * priority. Filter outer ignored, inner (pri 8 = any, VID 410);
+		 * treatment removes one tag and adds one from the inner word
+		 * with the priority copied (8) and the VID assigned. */
+		build(e, 15, 4096, 0,  8, 410, 0, 0,   1, 15, 4096, 0,  8, 1410, 4);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!why, "translation 410 -> 1410: a plan");
+		ok(u.c.in && u.c.out && u.c.op == EVTOCD_OP_REWRITE && !u.s.in && !u.s.out,
+		   "it replaces the C-tag and touches no S-tag");
+		ok(u.c.f_vid == 410 && u.c.f_pri == -1 && u.c.vid == 1410 && u.c.pri == -1,
+		   "from VID 410, any priority, to 1410, priority kept");
+		ok(u.out_tags == 1 && u.out_vid == 1410 && u.out_pri == -1,
+		   "it leaves one tag, VID 1410, priority following the frame");
+		evtocd_plan_describe(&u, line, sizeof line);
+		out_fmt("      %s\n", line);
+		ok(str_eq(line, "match C-tag VID 410: C-tag replace VID 1410 pri kept"),
+		   "and reads as a sentence");
+		ok(evtocd_plan_ds(&u, EVTOCD_DSMODE_INVERSE, &d, &dwhy) == 1,
+		   "downstream (mode 0) has a rule");
+		ok(d.c.in && d.c.out && d.c.op == EVTOCD_OP_REWRITE && d.c.f_vid == 1410 &&
+		   d.c.f_pri == -1 && d.c.vid == 410 && d.c.pri == -1,
+		   "which matches 1410 and puts back 410, priority kept");
+
+		/* The operator vector: one VID, three priorities, each its own
+		 * entry. The priority is named in the filter and copied, so it
+		 * is a literal on the way out and picks the GEM port. */
+		{
+			static const uint8_t pris[3] = { 0, 5, 6 };
+
+			for (int i = 0; i < 3; i++) {
+				build(e, 15, 4096, 0,  pris[i], 410, 0, 0,
+				      1, 15, 4096, 0,  8, 1410, 4);
+				evtocd_decode(e, &t);
+				why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+				ok(!why && u.c.f_vid == 410 && u.c.f_pri == pris[i] &&
+				   u.c.vid == 1410 && u.c.pri == pris[i] && u.out_pri == pris[i],
+				   "operator vector: VID 410 priority p -> 1410 priority p (pri 0, 5, 6)");
+				ok(evtocd_plan_ds(&u, 0, &d, &dwhy) == 1 && d.c.f_vid == 1410 &&
+				   d.c.f_pri == pris[i] && d.c.vid == 410 && d.c.pri == pris[i],
+				   "and downstream matches the same priority");
+			}
+		}
+
+		/* Priority remap that names the VID: (100, p3) -> priority 5, VID
+		 * copied from the inner tag. A copy of a VID the filter names is
+		 * a literal. */
+		build(e, 15, 4096, 0,  3, 100, 0, 0,   1, 15, 4096, 0,  5, EVTOCD_T_VID_COPY_INNER, 4);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!why && u.c.vid == 100 && u.c.pri == 5 && u.c.f_pri == 3,
+		   "priority remap 3 -> 5 on VID 100: VID copied from the filter");
+		ok(evtocd_plan_ds(&u, 0, &d, &dwhy) == 1 && d.c.f_pri == 5 && d.c.pri == 3 &&
+		   d.c.vid == 100, "and downstream puts priority 3 back");
+
+		/* The same remap with a filter that does not name the VID: the
+		 * classifier has nothing to put in the VID field. */
+		build(e, 15, 4096, 0,  3, 4096, 0, 0,   1, 15, 4096, 0,  5, EVTOCD_T_VID_COPY_INNER, 4);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(why != 0, "a VID copied from a filter that does not name it is refused");
+
+		/* Untagged: add a C-tag, and add an S-tag. */
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  2, 100, 4);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!why && !u.c.in && u.c.out && u.c.op == EVTOCD_OP_PUSH && u.c.vid == 100 &&
+		   u.c.pri == 2 && !u.s.in && !u.s.out, "untagged -> add C-tag VID 100 pri 2");
+		ok(evtocd_plan_ds(&u, 0, &d, &dwhy) == 1 && d.c.in && !d.c.out &&
+		   d.c.op == EVTOCD_OP_POP && d.c.f_vid == 100 && d.c.f_pri == 2,
+		   "downstream takes it off VID 100 pri 2");
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  2, 300, EVTOCD_T_TPID_OUTPUT_DEI_0);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x88a8, &u);
+		ok(!why && u.s.out && !u.s.in && u.s.op == EVTOCD_OP_PUSH && u.s.vid == 300 &&
+		   u.s.pri == 2 && !u.c.out, "untagged -> add S-tag VID 300 (Output TPID 0x88a8)");
+		ok(u.cmp == EVTOCD_CMP_C, "an untagged filter compares nothing");
+		ok(evtocd_plan_ds(&u, 0, &d, &dwhy) == 1 && d.s.in && !d.s.out &&
+		   d.s.op == EVTOCD_OP_POP && d.cmp == EVTOCD_CMP_S && d.s.f_vid == 300,
+		   "downstream matches the S-VID and pops it");
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!why && u.c.out && !u.s.out,
+		   "the same entry with Output TPID 0x8100 is a C-tag");
+		why = evtocd_plan(&t, 0x8100, 0x9100, &u);
+		ok(why != 0, "and with Output TPID 0x9100 is not a plan");
+
+		/* S-tag push in front of a C-tag (the double-tagging service): C
+		 * VID 100 in, S-VID 200 pri 3 pushed, nothing removed. */
+		build(e, 15, 4096, 0,  8, 100, 0, 0,   0, 15, 4096, 0,  3, 200, EVTOCD_T_TPID_OUTPUT_DEI_0);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x88a8, &u);
+		ok(!why && u.c.in && u.c.out && u.c.op == EVTOCD_OP_PASS && u.s.op == EVTOCD_OP_PUSH &&
+		   u.s.vid == 200 && u.s.pri == 3 && u.out_tags == 2 && u.out_vid == 200 &&
+		   u.out_pri == 3, "C-VID 100 -> S-VID 200 pri 3 in front of it");
+		ok(u.cmp == EVTOCD_CMP_C && u.c.f_vid == 100, "upstream compares the C-VID");
+		ok(evtocd_plan_ds(&u, 0, &d, &dwhy) == 1 && d.s.in && !d.s.out &&
+		   d.s.op == EVTOCD_OP_POP && d.cmp == EVTOCD_CMP_S && d.s.f_vid == 200 &&
+		   d.s.f_pri == 3 && d.c.f_vid == -1 && d.ds_wider,
+		   "downstream pops S-VID 200 pri 3 and, comparing one tag, not the C-VID");
+
+		/* S-tag pop: S-VID 200 in front of any C-tag, S-tag removed. The
+		 * input TPID is 0x88a8, which is what says the outer tag is an S-tag. */
+		build(e, 8, 200, 0,  8, 4096, 0, 0,   1, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x88a8, 0x8100, &u);
+		ok(!why && u.s.in && !u.s.out && u.s.op == EVTOCD_OP_POP && u.s.f_vid == 200 &&
+		   u.c.in && u.c.out && u.c.op == EVTOCD_OP_PASS && u.cmp == EVTOCD_CMP_S,
+		   "S-VID 200 over a C-tag: pop the S-tag");
+		ok(u.out_tags == 1 && u.out_vid == -1, "one tag left, its VID not known");
+		ok(evtocd_plan_ds(&u, 0, &d, &dwhy) == 1 && d.s.op == EVTOCD_OP_PUSH &&
+		   d.s.vid == 200 && d.s.pri == 0 && d.c.in && d.c.out,
+		   "downstream pushes S-VID 200 back, priority 0 (the filter named none)");
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(why != 0, "with input TPID 0x8100 the same entry is two C-tags, which is refused");
+
+		/* S-tag replace: S-VID 200 over a C-tag becomes S-VID 300. */
+		build(e, 8, 200, 0,  8, 4096, 0, 0,   1, 15, 4096, 0,  2, 300, EVTOCD_T_TPID_OUTPUT_DEI_0);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x88a8, 0x88a8, &u);
+		ok(!why && u.s.op == EVTOCD_OP_REWRITE && u.s.vid == 300 && u.s.pri == 2 &&
+		   u.c.op == EVTOCD_OP_PASS, "S-VID 200 -> 300: the S-tag is replaced, the C-tag passes");
+		ok(evtocd_plan_ds(&u, 0, &d, &dwhy) == 0 && dwhy,
+		   "but its priority is not undone: the filter named none, and an S-tag has no keep");
+
+		/* Both tags replaced, and two tags added to untagged frames. */
+		build(e, 8, 200, 0,  8, 100, 4, 0,   2, 1, 300, 0,  2, 400, 4);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x88a8, 0x88a8, &u);
+		ok(why != 0, "a filter on the S-VID and the C-VID together is refused");
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 1, 300, 6,  2, 400, 4);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x88a8, &u);
+		ok(!why && u.s.op == EVTOCD_OP_PUSH && u.s.vid == 300 && u.s.pri == 1 &&
+		   u.c.op == EVTOCD_OP_PUSH && u.c.vid == 400 && u.c.pri == 2 && u.out_tags == 2,
+		   "untagged -> S-VID 300 outside C-VID 400");
+		build(e, 15, 4096, 0,  8, 100, 0, 0,   1, 1, 300, 6,  2, 400, 4);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x88a8, &u);
+		ok(!why && u.s.op == EVTOCD_OP_PUSH && u.c.op == EVTOCD_OP_REWRITE && u.c.vid == 400,
+		   "C-VID 100 -> S-VID 300 outside C-VID 400: a push and a replace");
+
+		/* Removing: a single C-tag popped, and both tags of a double. */
+		build(e, 15, 4096, 0,  8, 100, 0, 0,   1, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!why && u.c.op == EVTOCD_OP_POP && u.out_tags == 0, "pop the tag of VID 100");
+		ok(evtocd_plan_ds(&u, 0, &d, &dwhy) == 1 && d.c.op == EVTOCD_OP_PUSH && d.c.vid == 100 &&
+		   !d.c.in && d.c.out, "downstream tags the untagged frame with VID 100");
+		build(e, 15, 4096, 0,  8, 4096, 0, 0,   1, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!why && evtocd_plan_ds(&u, 0, &d, &dwhy) == 0 && dwhy,
+		   "pop of any tag: there is no downstream rule to give it back");
+
+		/* Many to one: any single tag becomes VID 100. Upstream only. */
+		build(e, 15, 4096, 0,  8, 4096, 0, 0,   1, 15, 4096, 0,  8, 100, 4);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!why && u.c.f_vid == -1 && u.c.vid == 100, "any VID -> 100");
+		ok(evtocd_plan_ds(&u, 0, &d, &dwhy) == 0 && dwhy,
+		   "many-to-one has no way back");
+
+		/* Downstream modes. */
+		build(e, 15, 4096, 0,  4, 410, 0, 0,   1, 15, 4096, 0,  4, 1410, 4);
+		evtocd_decode(e, &t);
+		why = evtocd_plan(&t, 0x8100, 0x8100, &u);
+		ok(!why && u.c.f_pri == 4 && u.c.pri == 4, "priority 4, VID 410 -> 1410 (pri copied)");
+		ok(evtocd_plan_ds(&u, EVTOCD_DSMODE_FORWARD, &d, &dwhy) == 0,
+		   "mode 1: no downstream rule");
+		ok(evtocd_plan_ds(&u, EVTOCD_DSMODE_DROP_ALL, &d, &dwhy) == 0,
+		   "mode 8: none either");
+		ok(evtocd_plan_ds(&u, 9, &d, &dwhy) == 0, "mode 9 does not exist");
+		ok(evtocd_plan_ds(&u, EVTOCD_DSMODE_VID_PRI, &d, &dwhy) == 1 &&
+		   d.c.f_vid == 1410 && d.c.f_pri == 4 && !d.ds_wider, "mode 2: VID and priority");
+		ok(evtocd_plan_ds(&u, EVTOCD_DSMODE_VID, &d, &dwhy) == 1 &&
+		   d.c.f_vid == 1410 && d.c.f_pri == -1 && d.c.vid == 410, "mode 3: VID only");
+		ok(evtocd_plan_ds(&u, EVTOCD_DSMODE_PRI, &d, &dwhy) == 1 &&
+		   d.c.f_vid == -1 && d.c.f_pri == 4, "mode 4: priority only");
+		ok(evtocd_plan_ds(&u, EVTOCD_DSMODE_VID_DROP, &d, &dwhy) == 1 &&
+		   d.c.f_vid == 1410 && d.c.f_pri == -1 && d.ds_wider,
+		   "mode 6: as 3, and says the frames it would discard are forwarded");
+
+		/* What is not a plan. */
+		build(e, 14, 4096, 0,  14, 4096, 0, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "a default rule is not a plan");
+		build(e, 15, 4096, 0,  8, 100, 0, EVTOCD_F_ET_PPPOE,   1, 15, 4096, 0,  8, 200, 4);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "an EtherType filter is not");
+		build(e, 15, 4096, 0,  8, 100, EVTOCD_F_TPID_INPUT_DEI_0, 0,   1, 15, 4096, 0,  8, 200, 4);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "nor a DEI filter");
+		build(e, 15, 4096, 0,  8, 100, 0, 0,   3, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "nor a rule that discards what it matches");
+		build(e, 15, 4096, 0,  8, 100, 0, 0,   1, 15, 4096, 0,  EVTOCD_T_PRI_FROM_DSCP, 200, 4);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "nor a priority from the DSCP");
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  EVTOCD_T_PRI_COPY_INNER, 200, 4);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "nor a priority copied from an untagged frame");
+		build(e, 15, 4096, 0,  8, 100, 0, 0,   2, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "nor two tags removed from a single-tagged frame");
+		build(e, 15, 4096, 0,  8, 100, 0, 0,   0, 15, 4096, 0,  0, 200, 7);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0, "nor an added tag with the DEI bit set");
+		build(e, 15, 4096, 0,  8, 100, 0, 0,   0, 15, 4096, 0,  0, 200, 4);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) != 0,
+		   "nor a C-tag added in front of a C-tag (the classifier cannot tell two from one)");
+	}
+
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();
 	return failures ? 1 : 0;
