@@ -211,4 +211,33 @@ void odi_gpon_hw_set_tx_disable(odi_gpon_tx_disable_fn fn);
 /* 1 while the leaf holds the TX-disable line asserted (O7). */
 int odi_gpon_hw_tx_disabled(void);
 
+/* GPON_KEEP_DISABLE. 1 while Emergency Stop (O7) is held: odi_gpon_verb_
+ * deactivate() then leaves the ONU in O7 with the line asserted instead of
+ * O1, and odi_gpon_verb_activate() puts it in O7 instead of O2, so none of
+ * this side's own restarts undoes what the OLT did (G.984.3 Table 10-1:
+ * O7 is left only by the OLT enable). hold_set(1) asserts the line at
+ * once; hold_set(0) releases it with the flag. hold_enter() writes O7 now (state register, line, the FSM) and
+ * sends nothing. Called with odi_gpon_lock held.
+ */
+int odi_gpon_hw_hold_get(void);
+void odi_gpon_hw_hold_set(int hold);
+void odi_gpon_hw_hold_enter(struct odi_gpon_fsm *fsm);
+
+/* Whether the feature is on at all (hold_enable(), the gponkeep verb), and
+ * what a transition did to the hold. Off, nothing is tracked.
+ */
+enum odi_gpon_hold_change {
+	ODI_GPON_HOLD_UNCHANGED,
+	ODI_GPON_HOLD_RECORDED,	/* the OLT disabled this ONU: O7 is now held */
+	ODI_GPON_HOLD_RELEASED,	/* the OLT enabled it: the hold ended */
+};
+void odi_gpon_hw_hold_enable(int keep);
+int odi_gpon_hw_hold_enabled(void);
+enum odi_gpon_hold_change odi_gpon_hw_hold_track(enum odi_gpon_state prev, enum odi_gpon_state now);
+
+/* TEST HOOK, the gponhold sim verb: the FSM is handed a Disable_Serial_Number
+ * for its own serial number, as if the OLT had sent it. Sends nothing.
+ */
+void odi_gpon_hw_hold_simulate_disable(struct odi_gpon_fsm *fsm);
+
 #endif /* ODI_GPON_DRV_H */

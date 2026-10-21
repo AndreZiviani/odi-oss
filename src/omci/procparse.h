@@ -10,7 +10,8 @@
  *                    a "sn <16 hex digits>" line -- the serial number the
  *                    GPON block ranges with -- and "alloc_ids <n> <id>...",
  *                    the Alloc-IDs the OLT assigned by PLOAM (odi_gpon.c,
- *                    odi_gpon_proc_status_show).
+ *                    odi_gpon_proc_status_show), and "enc_ports <n> <id>...",
+ *                    the GEM ports the downstream path decrypts.
  */
 #ifndef ODI_OMCI_PROCPARSE_H
 #define ODI_OMCI_PROCPARSE_H
@@ -139,23 +140,17 @@ static inline int pp_gpon_state(const char *buf, unsigned len)
 	return buf[i] - '0';
 }
 
-/* The Alloc-IDs from the "alloc_ids" line of /proc/odi_gpon/status: a count, then
- * that many decimal ids, in CAM row order (the order the OLT assigned
- * them, a released row reused first). Returns the number stored in out[]
- * (at most max), or -1 when there is no such line or it is malformed:
- * short of its count, an id past 4095 (a 12-bit G.984.3 Alloc-ID), or
- * anything else on the line. "cannot tell" and "none assigned" differ,
- * and a caller treats -1 as the former. */
-static inline int pp_gpon_alloc_ids(const char *buf, unsigned len, uint16_t *out,
-				    unsigned max)
+/* The shared reader of an "<key> <n> <id>..." line, ids below 4096. */
+static inline int pp_id_list(const char *buf, unsigned len, const char *key,
+			     unsigned keylen, uint16_t *out, unsigned max)
 {
-	int at = pp_find_line(buf, len, "alloc_ids");
+	int at = pp_find_line(buf, len, key);
 	unsigned i, count = 0, got = 0;
 	int digits = 0;
 
 	if (at < 0)
 		return -1;
-	i = (unsigned)at + 9;                   /* past "alloc_ids" */
+	i = (unsigned)at + keylen;              /* past the key */
 	if (i >= len || buf[i] != ' ')
 		return -1;
 	for (i++; i < len && buf[i] >= '0' && buf[i] <= '9'; i++, digits++)
@@ -180,6 +175,29 @@ static inline int pp_gpon_alloc_ids(const char *buf, unsigned len, uint16_t *out
 	if (i < len && buf[i] != '\n')
 		return -1;
 	return (int)got;
+}
+
+/* The Alloc-IDs from the "alloc_ids" line of /proc/odi_gpon/status: a count, then
+ * that many decimal ids, in CAM row order (the order the OLT assigned
+ * them, a released row reused first). Returns the number stored in out[]
+ * (at most max), or -1 when there is no such line or it is malformed:
+ * short of its count, an id past 4095 (a 12-bit G.984.3 Alloc-ID), or
+ * anything else on the line. "cannot tell" and "none assigned" differ,
+ * and a caller treats -1 as the former. */
+static inline int pp_gpon_alloc_ids(const char *buf, unsigned len, uint16_t *out,
+				    unsigned max)
+{
+	return pp_id_list(buf, len, "alloc_ids", 9, out, max);
+}
+
+/* The GEM Port-IDs the downstream path decrypts, from the "enc_ports" line of
+ * /proc/odi_gpon/status: the same shape as alloc_ids (a count, then each id),
+ * each id below 4096. -1 when there is no such line (a kernel that does not
+ * publish it) or it is malformed, which a caller reads as "none". */
+static inline int pp_gpon_enc_ports(const char *buf, unsigned len, uint16_t *out,
+				    unsigned max)
+{
+	return pp_id_list(buf, len, "enc_ports", 9, out, max);
 }
 
 /* The config store keeps GPON_SN as it is printed on the label: four vendor

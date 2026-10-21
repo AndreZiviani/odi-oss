@@ -582,6 +582,67 @@ static void test_show_golden(const char *dir)
 	compare_golden(path);
 }
 
+/* ds_fec_total_cw: 153 code words for every frame the superframe counter
+ * advanced between two samples that both saw FEC on and the line locked
+ * (G.984.3 13.2.1). 1 s of frames is 8000, so 1 224 000 code words.
+ */
+static void test_fec_total_cw(void)
+{
+	const uint32_t fec = ODI_GPON_DSF_ALARM_STATE_FEC_NOW;
+
+	start();	/* the baseline sample: superframe 0, no alarms */
+	CHECK(c.ds_fec_total_cw == 0, "nothing before a second sample");
+
+	/* FEC off: the frames are not counted. */
+	alarm_state = 0;
+	superframe = 8000U;
+	odi_gpon_ctr_sample(&c, 2000U, O5);
+	CHECK(c.ds_fec_total_cw == 0, "FEC off: not counted");
+
+	/* FEC just came on: the step is not counted (it began with FEC off),
+	 * the next whole second is. */
+	alarm_state = fec;
+	superframe = 16000U;
+	odi_gpon_ctr_sample(&c, 3000U, O5);
+	CHECK(c.ds_fec_total_cw == 0, "first sample with FEC on: not counted");
+	superframe = 24000U;
+	odi_gpon_ctr_sample(&c, 4000U, O5);
+	CHECK(c.ds_fec_total_cw == 8000ULL * 153U, "one second of frames = 1224000 code words");
+
+	/* LOS or LOF in the sample: nothing, and the one after is not counted
+	 * either (its start was not locked). */
+	alarm_state = fec | ODI_GPON_DSF_ALARM_STATE_LOS_NOW;
+	superframe = 32000U;
+	odi_gpon_ctr_sample(&c, 5000U, O5);
+	alarm_state = fec;
+	superframe = 40000U;
+	odi_gpon_ctr_sample(&c, 6000U, O5);
+	alarm_state = fec | ODI_GPON_DSF_ALARM_STATE_LOF_NOW;
+	superframe = 48000U;
+	odi_gpon_ctr_sample(&c, 7000U, O5);
+	CHECK(c.ds_fec_total_cw == 8000ULL * 153U, "LOS/LOF: not counted");
+
+	/* A re-lock: the counter jumps by more than the time allows. */
+	alarm_state = fec;
+	superframe = 48000U + 1000000U;
+	odi_gpon_ctr_sample(&c, 8000U, O5);
+	superframe += 8000U;
+	odi_gpon_ctr_sample(&c, 9000U, O5);
+	CHECK(c.ds_fec_total_cw == 2ULL * 8000U * 153U, "a jump beyond the interval is skipped");
+
+	/* The 30-bit counter wrapping is a normal advance. */
+	superframe = 0x3fffffffU - 3999U;
+	odi_gpon_ctr_sample(&c, 10000U, O5);	/* a jump back: skipped */
+	superframe = (superframe + 8000U) & 0x3fffffffU;
+	odi_gpon_ctr_sample(&c, 11000U, O5);
+	CHECK(c.ds_fec_total_cw == 3ULL * 8000U * 153U, "wrap of the 30-bit counter");
+
+	/* A sample that is later than expected counts the frames it spans. */
+	superframe = (superframe + 16000U) & 0x3fffffffU;
+	odi_gpon_ctr_sample(&c, 13000U, O5);
+	CHECK(c.ds_fec_total_cw == 5ULL * 8000U * 153U, "a 2 s sample counts 16000 frames");
+}
+
 /* A MAC that is not clocked answers every register with 0xca0eca0f:
  * the sample reads nothing and adds nothing.
  */
@@ -613,6 +674,7 @@ int main(int argc, char **argv)
 	test_alarms();
 	test_alarms_from_the_line_poll();
 	test_states();
+	test_fec_total_cw();
 	test_dark_mac_adds_nothing();
 	test_show_before_first_sample();
 	test_show_golden(argc > 1 ? argv[1] : "test/fixtures");

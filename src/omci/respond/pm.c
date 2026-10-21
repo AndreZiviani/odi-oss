@@ -30,13 +30,14 @@
  *                          uncorrectable code word is the anomaly that
  *                          matters; a second that only had corrections is a
  *                          working FEC, not an anomaly.
- *   Total code words       NOT SOURCED, stays 0. The MAC has no count of the
- *                          code words it received, only of the bad ones, and
- *                          deriving it from the line rate would be a guess
- *                          (the shortened last code word of a frame, FEC
- *                          switched off, time spent outside O5). A wrong
- *                          total would turn the OLT's error ratio into a
- *                          wrong number; zero says "not reported".
+ *   Total code words       ds_fec_total_cw, which the driver derives: 153
+ *                          code words in each downstream frame with FEC on
+ *                          (152 of 255 bytes and a shortened last one,
+ *                          G.984.3 13.2.1) for every 125 us frame the
+ *                          downstream superframe counter advanced, counted
+ *                          only between samples that saw FEC on and
+ *                          LOS/LOF clear. A driver that does not publish
+ *                          it leaves this at 0, "not reported".
  *   Threshold data 1/2 id  the OLT's own pointer, kept by the MIB store. No
  *                          threshold crossing alert is raised: the
  *                          thresholds (ME 273/274) are held and never
@@ -60,10 +61,10 @@
 
 #define PM_MAX        8
 #define PM_INTERVAL_S 900
-#define PM_CTRS       4                  /* the order of pm_ctr_name below */
+#define PM_CTRS       5                  /* the order of pm_ctr_name below */
 #define PM_CLS_FEC    312
 
-enum { C_COR_BYTES, C_COR_CW, C_UNCOR_CW, C_FEC_SECS };
+enum { C_COR_BYTES, C_COR_CW, C_UNCOR_CW, C_FEC_SECS, C_TOTAL_CW };
 
 static const char *const pm_ctr_name[3] = {
 	"ds_fec_corrected_bytes", "ds_fec_corrected_cw", "ds_fec_uncorrectable_cw",
@@ -133,7 +134,7 @@ static void read_totals(void)
 	static char buf[6144];
 	long fd = sys_open(pm_counters_path, O_RDONLY);
 	unsigned len = 0;
-	uint64_t v[3];
+	uint64_t v[3], t;
 
 	if (fd < 0)
 		return;
@@ -153,6 +154,9 @@ static void read_totals(void)
 	tot[C_COR_BYTES] = v[0];
 	tot[C_COR_CW] = v[1];
 	tot[C_UNCOR_CW] = v[2];
+	/* Optional: only a driver that derives it publishes it. */
+	if (pp_ctr(buf, len, "ds_fec_total_cw", &t) == 0)
+		tot[C_TOTAL_CW] = t;
 	tot_ok = 1;
 }
 
@@ -345,7 +349,7 @@ int pm_attr(uint16_t cls, uint16_t inst, unsigned k, uint8_t *out, uint16_t n)
 	case 3: v = cur_view ? sat32(tot[C_COR_BYTES], e->base[C_COR_BYTES]) : e->prev[C_COR_BYTES]; break;
 	case 4: v = cur_view ? sat32(tot[C_COR_CW], e->base[C_COR_CW]) : e->prev[C_COR_CW]; break;
 	case 5: v = cur_view ? sat32(tot[C_UNCOR_CW], e->base[C_UNCOR_CW]) : e->prev[C_UNCOR_CW]; break;
-	case 6: v = 0; break;            /* total code words: not sourced, see above */
+	case 6: v = cur_view ? sat32(tot[C_TOTAL_CW], e->base[C_TOTAL_CW]) : e->prev[C_TOTAL_CW]; break;
 	default:
 		v = cur_view ? sat32(tot[C_FEC_SECS], e->base[C_FEC_SECS]) : e->prev[C_FEC_SECS];
 		if (v > 0xffff)

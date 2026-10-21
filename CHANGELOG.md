@@ -23,6 +23,66 @@ listed here.
   On a stick: hwmon0 rtl9602c_soc read 61 C, and the reading moves between
   reads.
 
+- Classifier layout boundary read the right way round: `CLASSIFY_SETUP` bits
+  12:5 count the rows at the top of the table that follow the second rule
+  layout, so the first such row is 256 minus the count. The code and
+  `docs/SWITCH.md` read the field as the first row itself. The two agree at
+  128, the only value this image programs, so nothing changes on a running
+  stick; at the stock value 0x1c09 (224) the S-tag rows would have been
+  placed in rows the hardware treats as the second layout, where the S-tag
+  template is not known to work. The module-load capture of the stock
+  firmware agrees: with 224 in place it sweeps rows 0-31 in the first rule
+  and mask tables and rows 32-255 in the second. Another open implementation
+  measured the same direction. Host test pins the mapping at 128, 224, 0 and
+  255.
+  On a stick (count 128) the classifier rows land where they did before.
+
+- OMCI: the FEC performance history (ME 312) reports Total code words, and
+  the GEM port network CTP (ME 268) reports its Encryption state. Total code
+  words was always 0 ("not reported"); the driver now derives it exactly: 153
+  code words in each downstream frame with FEC on (152 of 255 bytes and one
+  shortened last code word, G.984.3 clause 13.2.1) for every 125 us frame the
+  downstream frame counter advanced, counted only between samples that saw FEC
+  on and LOS and LOF clear, and a step larger than the time between the
+  samples allows (a re-lock) is skipped. It is a new line in
+  `/proc/odi_gpon/counters` (`ctr ds_fec_total_cw`) and counts per 15-minute
+  interval like the other ME 312 counts, so an OLT computing an error ratio
+  has a denominator. Encryption state (attribute 8) was always 0, so an OLT
+  and the UI read "unencrypted" for ports the OLT encrypts; it now answers 1
+  for a GEM port the downstream path decrypts, from a new `enc_ports` line in
+  `/proc/odi_gpon/status` (read back from the AES bit of each downstream slot,
+  and from ports the OLT asked for before the slot exists). The comment in the
+  GPON driver that said no encrypted port had ever been seen was stale and
+  contradicted `docs/SWITCH.md`; it is corrected. Host-tested
+  (`test/odi_gpon_ctr_test.c`, `test/odi_switch_ds_encrypt_test.c`,
+  `test/procparse_test.c`, and the omcid suites `pm` and `enc`). On a stick
+  whose OLT encrypts its data ports: `enc_ports` lists the five, ME 268 reads
+  1 on their CTPs and 0 on the OMCC's; on that line downstream FEC is off, so
+  Total code words stays 0 as it should. The count with FEC on is host-tested
+  only.
+
+- Docs: `GPON_DYING_GASP` (SETTINGS.md and the driver comment) no longer says
+  that only the first copy leaves on a reboot: all three have been seen to
+  leave on a stick under test, and in another open implementation's later
+  measurements. Still off by default.
+
+- GPON: new key `GPON_KEEP_DISABLE` (default `0`, today's behaviour unchanged
+  and nothing written or read). With `1`, a stick the OLT disabled with
+  Disable_Serial_Number stays in Emergency Stop (O7) as G.984.3 asks: this
+  stick's own PON restarts (`gpondeact`/`gponact`, the omcid respawn,
+  `apply.sh` identity changes) end in O7 with the laser line high, and so
+  does every reboot and power-off, until the OLT enables it. The disable is
+  recorded in the marker file `/etc/config/gpon-hold`, written by the kernel
+  calling `/etc/scripts/gpon-hold.sh sync`. `gpon-hold.sh clear` releases it by
+  hand, and a safe-mode boot ignores it. `/proc/odi_gpon/status` gains
+  `o7_hold keep <0|1> held <0|1>`; the kernel logs `event=o7_hold`. New
+  `/proc/odi_init` verbs `gponkeep` and `gponhold`; `gponhold sim` is a test
+  hook that acts as if the OLT had disabled this ONU and sends nothing.
+  On a stick, with the hook: O7 with the laser off (bias 0 mA), held through
+  a PON restart and a reboot (the boot never ranged), and `gpon-hold.sh
+  clear` took it back to O5 with its services in 30 s. Not yet seen with a
+  real disable from an OLT.
+
 - OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
   parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
   the NIC runs a second receive ring, and the switch routes the OMCI frames
