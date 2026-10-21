@@ -18,6 +18,9 @@ listed here.
   and its driver-call golden (`omci-session-isp3`) replay the line.
   Refs #42
 
+**Automated dependency bump.**
+- Kernel: Linux 6.18.57 (was 6.18.56), the upstream stable update.
+
 - OMCI: a downstream priority queue (ME 277) whose Weight the OLT had set
   went to the switch driver as priority 0, whatever its entity: the row built
   for it had no RelatedPort, so all eight of the UNI's queues carried the

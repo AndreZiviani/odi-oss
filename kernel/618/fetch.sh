@@ -17,12 +17,12 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 DL=${DL:-$ROOT/dl}
 OUT=${OUT:-$ROOT/kernel/618/mainline}
 
-VERSION=6.18.56
+VERSION=6.18.57
 BASE=https://cdn.kernel.org/pub/linux/kernel/v6.x
 TARBALL="linux-$VERSION.tar.xz"
 SIGFILE="linux-$VERSION.tar.sign"
 # Verified 2026-09-23 against the file this URL actually served.
-SHA256_XZ=4633bbda2ab95eaf2a7af4041236451d6759c72e6946265531af4b3aacefbf89
+SHA256_XZ=5bd9acdc82ec5efc3790ae840e5aaa40dfde7efff261cf6dde902dc570acf98c
 GPG_FPR=647F28654894E3BD457199BE38DBBDC86092693E
 KEYSERVERS="hkps://keyserver.ubuntu.com hkps://keys.openpgp.org"
 
