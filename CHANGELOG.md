@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Docs: `GPON_DYING_GASP` (SETTINGS.md and the driver comment) no longer says
+  that only the first copy leaves on a reboot: all three have been seen to
+  leave on a stick under test, and in another open implementation's later
+  measurements. Still off by default.
+
 - GPON: new key `GPON_KEEP_DISABLE` (default `0`, today's behaviour unchanged
   and nothing written or read). With `1`, a stick the OLT disabled with
   Disable_Serial_Number stays in Emergency Stop (O7) as G.984.3 asks: this
