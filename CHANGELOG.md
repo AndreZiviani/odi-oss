@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Docs: `GPON_DYING_GASP` (SETTINGS.md and the driver comment) no longer says
+  that only the first copy leaves on a reboot: all three have been seen to
+  leave on a stick under test, and in another open implementation's later
+  measurements. Still off by default.
+
 - OMCI under a host-side flood, opt-in: with `odi_nic.omci_ring` on (boot
   parameter, or live through `/sys/module/odi_nic/parameters/omci_ring`)
   the NIC runs a second receive ring, and the switch routes the OMCI frames

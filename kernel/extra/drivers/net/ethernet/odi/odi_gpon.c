@@ -1446,9 +1446,11 @@ static struct proc_dir_entry *odi_gpon_proc_dir;
  * power-off, only when GPON_DYING_GASP enabled it and the ONU is in O4 or
  * O5. Never from the PON-down path: another open implementation's
  * measurements on this chip found that a Dying_Gasp followed by no restart
- * made the OLT deactivate and re-activate the ONU about 4 s later, and
- * that on a reboot in O5 only the first copy left (the OLT grants no
- * further allocation after it). So up to three copies (the standard says at
+ * made the OLT deactivate and re-activate the ONU about 4 s later. On a
+ * reboot in O5 all three copies have been seen to leave, on our stick and
+ * in their later measurements (G.984.3 tells the OLT not to stop
+ * allocations on a Dying_Gasp alone), though their first test OLT granted
+ * nothing after the first. So up to three copies (the standard says at
  * least three), each given 50 ms to leave the queue, stopping at the first
  * that does not. Runs in process context; the register poll is bounded.
  */
