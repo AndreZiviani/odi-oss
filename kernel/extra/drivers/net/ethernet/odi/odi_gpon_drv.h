@@ -179,6 +179,12 @@ uint32_t odi_gpon_hw_get_ber_interval_frames(void);
  */
 void odi_gpon_hw_send_us_ploam(const struct odi_gpon_ploam *msg);
 
+/* The same push, then waits up to wait_us for the urgent queue to empty,
+ * which says the message left: 0 left, -EBUSY not queued, -ETIMEDOUT
+ * queued but still waiting. Used by the Dying_Gasp reboot notifier.
+ */
+int odi_gpon_hw_send_us_ploam_wait(const struct odi_gpon_ploam *msg, unsigned int wait_us);
+
 /* Extended_Burst_Length (G.984.3 clause 9.2.3.20): the type 3 preamble
  * byte counts before ranging and once ranged. Rewrites the burst overhead
  * with the pattern/delimiter bytes Upstream_Overhead cached.
