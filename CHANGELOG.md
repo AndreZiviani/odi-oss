@@ -74,6 +74,8 @@ listed here.
   `/etc/config/trial-guard.off` turns it off. Host-tested
   (`test/trial_guard_test.sh`) and in the qemu harness; on a stick it armed
   at boot and released on the first ssh session.
+  Run on a stick whose OLT sends none of these entries, with its service
+  unchanged; the new shapes themselves are host- and qemu-tested only.
 
 - Toolchain: built with odi-toolchain uclibc-v4 and freestanding-v3, which
   deny the `bltzl` instruction in the ISA audit (it decodes but
