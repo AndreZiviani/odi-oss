@@ -171,6 +171,56 @@ check "49 MAC filter: a remove takes the index out" \
 send "$log" 0064 48 0031 0099 "80000040"
 check "49 MAC filter: clear" "$(table "$log" b0d 0031 0099 8000)" ""
 
+# ------------------------------------- a MIB reset drops the Get-Next walk
+# Get of the table attribute primes the Get-Next snapshot. The reset discards
+# the row; a Get-Next after it must be refused (parameter error, as for a
+# Get-Next with no Get before it), not answer the bytes of the old row.
+send "$log" 0080 44 0135 0001 ""
+send "$log" 0081 48 0135 0001 "0200$(w 4001 "$R1")"
+send "$log" 0082 49 0135 0001 0200
+check "Get-Next after a Get: the walk is primed (the row is there)" \
+      "$(answer "$log" 0082 | cut -c1-14)" "00020000000018"
+send "$log" 0083 4f 0002 0000 ""                         # MIB reset
+send "$log" 0084 5a 0135 0001 "02000000"
+check "Get-Next after a MIB reset is refused, not answered from the old Get" \
+      "$(answer "$log" 0084 | cut -c1-2)" "03"
+
+# ---------------------------- the TCI wraps 0x7fff -> 0x8000 in a MIB upload
+# The high bit of the TCI is the priority bit, and a long upload crosses it.
+# Next 0 to 2 go out under 7ffe, 7fff and 8000 and must come back with the
+# same records as the same Next under small ids, each echoing its own TCI.
+send "$log" 0090 4d 0002 0000 ""
+for s in 0 1 2; do
+	send "$log" "00a$s" 4e 0002 0000 "$(printf '%04x' "$s")"
+done
+send "$log" 7ffd 4d 0002 0000 ""
+send "$log" 7ffe 4e 0002 0000 "0000"
+send "$log" 7fff 4e 0002 0000 "0001"
+send "$log" 8000 4e 0002 0000 "0002"
+send "$log" 8001 4e 0002 0000 "0003"
+for p in "7ffe 00a0" "7fff 00a1" "8000 00a2"; do
+	set -- $p
+	check "upload Next under TCI $1 is the record of TCI $2" \
+	      "$(answer "$log" "$1")" "$(answer "$log" "$2")"
+	check "upload Next under TCI $1 echoes its own TCI" \
+	      "$(grep -- "^-> $1" "$log" | tail -1 | cut -c4-7)" "$1"
+done
+check "upload Next 3, past the wrap, is a record and not an error" \
+      "$(answer "$log" 8001 | cut -c1-2 | grep -c '^03$')" "0"
+
+# The retransmission cache keys on the whole frame, TCI included: the same
+# Set under 8000 is not the answer stored for 7fff, while a true repeat of
+# 7fff is replayed. A false hit would log 7fff again, and the wait for an
+# 8000 answer in send would time out.
+send "$log" 7fff 48 0135 0001 "0200$(w 4001 "$R1B")"
+send "$log" 8000 48 0135 0001 "0200$(w 4001 "$R1B")"
+check "the same Set under TCI 8000 is answered under 8000, not replayed as 7fff" \
+      "$(grep -c -- '^-> 8000280a0135' "$log")" "1"
+send "$log" 7fff 48 0135 0001 "0200$(w 4001 "$R1B")"
+check "a true repeat of the Set under 7fff is the stored answer" \
+      "$(grep -c -- '^-> 7fff280a0135' "$log")" "2"
+send "$log" 00b0 48 0135 0001 "0200c000"                    # clear, as it was
+
 # ------------------------------------------------------ respawn and resume
 # A 309 row and a 281 row survive a respawn through the snapshot.
 send "$log" 0070 48 0135 0001 "0200$(w 4002 "$R2")"

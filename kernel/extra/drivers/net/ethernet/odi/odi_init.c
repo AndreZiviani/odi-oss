@@ -38,7 +38,7 @@
  * test.
  */
 static const char *const odi_init_gpon_verbs[] = {
-	"gpondrv", "gpondev", "gponsn", "gponpw", "gponact", "gpondeact", "gponstat",
+	"gpondrv", "gpondev", "gponsn", "gponpw", "gpondg", "gponact", "gpondeact", "gponstat",
 };
 
 static int odi_init_is_gpon_verb(const char *name)

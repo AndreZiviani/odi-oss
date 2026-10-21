@@ -537,13 +537,15 @@ static void hw_set_upstream_overhead(void *ctx, uint8_t guard_bits, uint8_t type
 #define ODI_GPON_HW_US_PLOAM_WAIT_US	1000U
 #define ODI_GPON_HW_US_PLOAM_STEP_US	5U
 
-static void hw_send_us_ploam(void *ctx, const struct odi_gpon_ploam *msg)
+/* Pushes msg into the urgent queue: 0 when it was queued, -EBUSY when the
+ * queue stayed full for the whole wait (the message is then counted in
+ * ploam_us_dropped and not sent).
+ */
+static int hw_push_us_ploam(const struct odi_gpon_ploam *msg)
 {
 	uint16_t words[6];
 	uint32_t ind;
 	unsigned int i;
-
-	(void)ctx;
 
 	odi_gpon_ploam_pack_words(msg, words);
 
@@ -569,7 +571,7 @@ static void hw_send_us_ploam(void *ctx, const struct odi_gpon_ploam *msg)
 		odi_gpon_hw.ploam_us_dropped++;
 		ODI_GPON_HW_WARN("upstream PLOAM type 0x%02x not sent: queue full for %u us\n",
 				 msg->type, ODI_GPON_HW_US_PLOAM_WAIT_US);
-		return;
+		return -EBUSY;
 	}
 
 	for (i = 0; i < ODI_GPON_US_PLOAM_WORDS; i++)
@@ -581,6 +583,13 @@ static void hw_send_us_ploam(void *ctx, const struct odi_gpon_ploam *msg)
 	odi_gpon_hw.ploam_tx_count++;
 	if (odi_gpon_hw.ploam_log)
 		odi_gpon_hw.ploam_log(1U, msg);
+	return 0;
+}
+
+static void hw_send_us_ploam(void *ctx, const struct odi_gpon_ploam *msg)
+{
+	(void)ctx;
+	(void)hw_push_us_ploam(msg);
 }
 
 /* TO1/TO2 are software timers, not GPON MAC block registers -- arming/
@@ -1419,6 +1428,23 @@ uint32_t odi_gpon_hw_get_ber_interval_frames(void)
 void odi_gpon_hw_send_us_ploam(const struct odi_gpon_ploam *msg)
 {
 	hw_send_us_ploam(NULL, msg);
+}
+
+/* Pushes msg like odi_gpon_hw_send_us_ploam(), then polls the urgent
+ * queue until its EMPTY bit says the message left (it drains one message
+ * per PLOAMu the OLT grants). 0 when it left within wait_us, -EBUSY when
+ * it could not be queued, -ETIMEDOUT when it was queued and stayed in the
+ * queue. The poll takes no lock and is a bounded atomic poll.
+ */
+int odi_gpon_hw_send_us_ploam_wait(const struct odi_gpon_ploam *msg, unsigned int wait_us)
+{
+	int rc = hw_push_us_ploam(msg);
+
+	if (rc)
+		return rc;
+	return odi_poll_reg(ODI_GPON_USF_PLOAM_TX_CTL_OFF, ODI_GPON_USF_PLOAM_TX_CTL_URGENT_EMPTY,
+			    ODI_GPON_USF_PLOAM_TX_CTL_URGENT_EMPTY, ODI_GPON_HW_US_PLOAM_STEP_US * 20U,
+			    wait_us, NULL) ? -ETIMEDOUT : 0;
 }
 
 void odi_gpon_hw_set_tx_disable(odi_gpon_tx_disable_fn fn)

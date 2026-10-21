@@ -127,7 +127,22 @@ static void rlx5281_invalidate_dcache_range(unsigned long start, unsigned long e
 		rlx5281_cctl(RLX5281_CCTL_DCACHE_WB_INV);
 		return;
 	}
-	rlx5281_dcache_line_op(RLX5281_CACHEOP_D_HIT_INV, start, end);
+
+	/*
+	 * A line only partly inside the range can hold a neighbour's dirty
+	 * data: write those edge lines back before dropping them, as the
+	 * mainline r4k/r3k cache code does, and plain-invalidate the rest.
+	 */
+	if (start & (rlx5281_dcache_lsize - 1)) {
+		rlx5281_cacheop(RLX5281_CACHEOP_D_HIT_WB_INV, start);
+		start = (start | (rlx5281_dcache_lsize - 1)) + 1;
+	}
+	if (start < end && (end & (rlx5281_dcache_lsize - 1))) {
+		end &= ~(rlx5281_dcache_lsize - 1);
+		rlx5281_cacheop(RLX5281_CACHEOP_D_HIT_WB_INV, end);
+	}
+	if (start < end)
+		rlx5281_dcache_line_op(RLX5281_CACHEOP_D_HIT_INV, start, end);
 }
 
 static void rlx5281_flush_dcache_range(unsigned long start, unsigned long end)

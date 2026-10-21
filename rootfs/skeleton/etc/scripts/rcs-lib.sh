@@ -275,6 +275,15 @@ pon_step_laser() {
 	fi
 }
 
+# Dying_Gasp on a reboot (GPON_DYING_GASP=1 in odi.conf, experimental,
+# docs/SETTINGS.md): tells the driver to send it from its reboot notifier.
+# Nothing is written, and nothing logged, while the key is not 1.
+pon_step_dyinggasp() {
+	if grep -q '^GPON_DYING_GASP=1$' /etc/config/odi.conf 2>/dev/null; then
+		pon_step "gpondg 1"
+	fi
+}
+
 pon_steps_default() {
 	pon_step "i2c 1"
 	pon_step "i2cen 1"
@@ -287,5 +296,6 @@ pon_steps_default() {
 	confirm_watchdog
 	pon_step_gponsn
 	pon_step_gponpw
+	pon_step_dyinggasp
 	pon_step_gponact
 }

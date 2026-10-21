@@ -20,6 +20,47 @@ listed here.
   stick. The web UI side is odi-ui, which stores these keys through the
   trial when this script is present.
 
+- GPON: new experimental, off-by-default key `GPON_DYING_GASP=1`: the stick
+  sends the Dying_Gasp PLOAM message (up to three copies) before an orderly
+  reboot, halt or power-off, only from O4 or O5 and never when the PON drops,
+  so the OLT can tell a planned restart from a lost ONU. The kernel logs
+  `Dying_Gasp sent <n> of 3 times before the restart`. What the OLT does with
+  it cannot be confirmed from here, hence off by default.
+
+- Diagnostic bundle: `module/chip.txt` decodes the GN25L95 laser driver
+  words that set the modulation (ER_CTRL with its automatic
+  extinction-ratio loop bit, MOD_DAC, MOD_LIMIT, PERSIST), and
+  `host-link.txt` adds the host SerDes lane control word (0x214: receiver
+  in sync, lane mode) and its in-band negotiation word (0x21808). Reads
+  only; nothing read or exported these before. On a stick under test the
+  loop is on and MOD_DAC moves by itself.
+
+- Kernel: the DMA invalidate no longer drops a cache line that is only
+  partly inside the buffer. The first and last line of an unaligned range
+  are written back and invalidated, the lines in between are invalidated
+  as before, so a neighbouring object sharing the line keeps its data. The
+  receive buffers are line aligned, so nothing changes for them today.
+
+- OMCI: a MIB reset now drops the Get-Next walk a table Get had primed. A
+  Get-Next after the reset answered the bytes of the row the reset had just
+  discarded; it is now refused with a parameter error, as a Get-Next with no
+  Get before it. The OMCI test suite also gains vectors for the transaction
+  correlation id crossing 0x7fff to 0x8000 (the priority bit) in a MIB
+  upload and in the retransmission cache, which keys on the whole frame.
+
+- Docs: the by-hand slot restore in `docs/FLASHING.md` now says to write
+  the kernel last, lists the checks to make before pointing a boot at the
+  restored slot (running and committed slot, the uImage magic, the partition
+  against the dump or the tarball) and says plainly that the header and data
+  CRC cannot be checked on the stick, then sends the boot through
+  `sw_tryactive` and `nv commit`, never `sw_active`.
+
+- Docs and comments: `PORT_VLAN_INDEX` holds two ports per word (12 bits
+  each), so the platform step's two plain writes to words 0 and 1 already
+  set the PVID of all four ports. The comments in the switch driver and
+  `docs/SWITCH.md` said ports 2 and 3 were not written. No behaviour
+  change.
+
 ## v1.10.0 - 2026-10-21
 
 - Switch: the downstream queues of the UNI (ME 277, the ones the OLT

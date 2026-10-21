@@ -65,6 +65,7 @@
 #include <linux/errno.h>
 #include <linux/hex.h>
 #include <linux/slab.h>
+#include <linux/reboot.h>
 
 #endif
 
@@ -161,6 +162,13 @@ static DEFINE_SPINLOCK(odi_gpon_lock);
  * tested re-activation scenario.
  */
 static bool odi_gpon_booted;
+
+/* Dying_Gasp on a reboot (GPON_DYING_GASP, off by default, experimental).
+ * odi_gpon_dg_enabled is set by the gpondg verb at boot; odi_gpon_dg_done
+ * makes the send happen once per reboot. Both under odi_gpon_lock.
+ */
+static bool odi_gpon_dg_enabled;
+static bool odi_gpon_dg_done;
 
 static struct timer_list odi_gpon_to1_timer;
 static struct timer_list odi_gpon_to2_timer;
@@ -993,6 +1001,11 @@ int odi_gpon_verb(const char *verb, const char *arg)
 		} else {
 			odi_gpon_verb_activate(&odi_gpon_fsm_inst);
 		}
+	} else if (!strcmp(verb, "gpondg")) {
+		if (arg && (!strcmp(arg, "0") || !strcmp(arg, "1")))
+			odi_gpon_dg_enabled = (arg[0] == '1');
+		else
+			rc = -EINVAL;
 	} else if (!strcmp(verb, "gpondeact")) {
 		odi_gpon_verb_deactivate(&odi_gpon_fsm_inst);
 	} else if (!strcmp(verb, "gponstat")) {
@@ -1429,8 +1442,62 @@ static const struct proc_ops odi_gpon_proc_ploam_fops = {
 
 static struct proc_dir_entry *odi_gpon_proc_dir;
 
+/* Dying_Gasp (G.984.3 clause 9.2.4.3) before an orderly restart, halt or
+ * power-off, only when GPON_DYING_GASP enabled it and the ONU is in O4 or
+ * O5. Never from the PON-down path: another open implementation's
+ * measurements on this chip found that a Dying_Gasp followed by no restart
+ * made the OLT deactivate and re-activate the ONU about 4 s later, and
+ * that on a reboot in O5 only the first copy left (the OLT grants no
+ * further allocation after it). So up to three copies (the standard says at
+ * least three), each given 50 ms to leave the queue, stopping at the first
+ * that does not. Runs in process context; the register poll is bounded.
+ */
+#define ODI_GPON_DG_COPIES	3U
+#define ODI_GPON_DG_LEAVE_US	50000U
+
+static int odi_gpon_reboot_notify(struct notifier_block *nb, unsigned long action, void *data)
+{
+	unsigned int sent = 0;
+	unsigned long flags;
+
+	(void)nb;
+	(void)action;
+	(void)data;
+
+	while (sent < ODI_GPON_DG_COPIES) {
+		struct odi_gpon_ploam dg;
+		bool go = false;
+
+		spin_lock_irqsave(&odi_gpon_lock, flags);
+		if (odi_gpon_dg_enabled && (sent || !odi_gpon_dg_done) &&
+		    (odi_gpon_fsm_inst.state == ODI_GPON_STATE_O4 ||
+		     odi_gpon_fsm_inst.state == ODI_GPON_STATE_O5) &&
+		    odi_gpon_fsm_inst.onu_id) {
+			odi_gpon_dg_done = true;
+			odi_gpon_encode_dying_gasp(odi_gpon_fsm_inst.onu_id, &dg);
+			go = true;
+		}
+		spin_unlock_irqrestore(&odi_gpon_lock, flags);
+		if (!go)
+			break;
+		if (odi_gpon_hw_send_us_ploam_wait(&dg, ODI_GPON_DG_LEAVE_US))
+			break;
+		sent++;
+	}
+	if (sent || odi_gpon_dg_done)
+		pr_info("odi_gpon: Dying_Gasp sent %u of %u times before the restart\n",
+			sent, ODI_GPON_DG_COPIES);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block odi_gpon_reboot_nb = {
+	.notifier_call = odi_gpon_reboot_notify,
+};
+
 static int __init odi_gpon_module_init(void)
 {
+	register_reboot_notifier(&odi_gpon_reboot_nb);
+
 	int rc = odi_gpon_init();
 
 	if (rc)
