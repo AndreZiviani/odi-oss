@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- CI: package installs on the runner are bounded (`tools/ci-apt.sh`): a read
+  timeout and retries per connection, a time limit per `apt-get` call, three
+  attempts, and no recommended packages. A stalled apt mirror connection used
+  to hold `test-qemu` for 11 minutes, or past its 20-minute timeout, in a
+  step that normally takes 25 s.
+
 - omcid: no `-Warray-bounds` warning in `ds_flow_send()` (`apply_qos.c`).
   The downstream flow's multicast flag is now written under the same
   `FLOW_MAX` check as its queue key. The index could not reach 64 at run time
