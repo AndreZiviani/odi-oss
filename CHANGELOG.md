@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- omcid: no `-Warray-bounds` warning in `ds_flow_send()` (`apply_qos.c`).
+  The downstream flow's multicast flag is now written under the same
+  `FLOW_MAX` check as its queue key. The index could not reach 64 at run time
+  (the flow table walks `caps_flows()`, which is capped at `FLOW_MAX`), but
+  the compiler cannot see that across files. No behaviour change.
+
 ## v1.11.1 - 2026-10-21
 
 - OMCI: new odi-only key `OMCI_TCONT_ALLOC_UNSET` (`/etc/config/odi.conf`,
