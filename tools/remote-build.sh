@@ -47,7 +47,7 @@
 #
 # ODI_REMOTE is required and has no default -- this script names no host of
 # its own. ODI_REMOTE_DIR defaults to /root/odi/odi-oss, ODI_REMOTE_DL to
-# dl/ beside it (/root/odi/dl).
+# a dl/ beside it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
