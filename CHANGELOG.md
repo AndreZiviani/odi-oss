@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Build: one download cache for several build trees. `DL` (an absolute path)
+  now moves it for the package tarballs and the confd/metricsd release assets
+  too, not only the kernel tarball, and `tools/remote-build.sh` points it at
+  `ODI_REMOTE_DL`, by default a `dl/` beside `ODI_REMOTE_DIR`. A build tree
+  copied for one remote build and deleted after it used to download the
+  kernel tarball again every time. Every cached file is still checked against
+  its pinned SHA-256 on use, and a download is written under a per-process
+  name first, so two builds sharing the cache do not write the same file.
+
 - omcid: no `-Warray-bounds` warning in `ds_flow_send()` (`apply_qos.c`).
   The downstream flow's multicast flag is now written under the same
   `FLOW_MAX` check as its queue key. The index could not reach 64 at run time

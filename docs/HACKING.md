@@ -187,7 +187,9 @@ build), runs the command there, and copies `out/image/*.tar`, the password
 files and build logs back. `ODI_REMOTE` has no default; `ODI_REMOTE_DIR`
 defaults to `/root/odi/odi-oss`. The kernel tree and `dl/` are excluded
 from the sync (the tree is gigabytes); the first build on the remote host
-fetches them. `make releases` needs no token there either; an optional
+fetches them. Downloads go to `ODI_REMOTE_DL` (default `dl/` beside
+`ODI_REMOTE_DIR`, exported there as `DL`), shared by every tree under that
+parent. `make releases` needs no token there either; an optional
 `GITHUB_TOKEN`, if you want the higher rate limit, is passed to the remote
 command on stdin. The command is any shell line, so
 `'VERSION=odi-oss-260925-mine make kernel image'` works too.
@@ -1103,7 +1105,8 @@ prints the `CONFIG_ODI_*` it got).
 | `KVER` | `kernel/build.sh:50` | accepted only as `6.18` | `6.18` |
 | `OSS_IMAGE`, `DIAG_IMAGE` | `toolchain/image.sh`, `toolchain/images.env`, `src/*/Makefile`, `Makefile` (`test-omci`) | the uclibc and freestanding toolchain images, e.g. a local build from odi-toolchain | the pinned digests in `toolchain/images.env` |
 | `TOOLS_IMAGE` | `image/build.sh` | squashfs and tar tooling image | `odi-oss-image` |
-| `DL`, `OUT` | `kernel/618/fetch.sh:17` | download cache, tree location | `dl/`, `kernel/618/mainline` |
+| `DL` | `kernel/618/fetch.sh`, `packages/fetch.sh`, `src/fetch-releases.sh` | download cache (an absolute path); several trees can share one | `dl/` |
+| `OUT` | `kernel/618/fetch.sh` | kernel tree location | `kernel/618/mainline` |
 | `ALT_URLS` | `packages/fetch.sh:34` | extra mirrors for package tarballs (a Software Heritage fallback is built in) | none |
 | `KERNEL`, `KCONFIG` | `image/build.sh:48`, `:39` | uImage to ship, and its `.config` (shipped as `/etc/kernel-config`) | `build/kernel-618/uImage` and the `config` beside it |
 | `BUSYBOX`, `BIN_DIR`, `PKG_DIR`, `ASSET_DIR` | `image/build.sh:37`, `:43`, `:46`, `:44` | where the pieces are | `out/busybox`, `out/bin`, `out`, `out/confd-assets` |
@@ -1115,7 +1118,7 @@ prints the `CONFIG_ODI_*` it got).
 | `METRICSD_TAG`, `CONFD_TAG`, `*_REPO` | `src/fetch-releases.sh` | releases to fetch; `CONFD_TAG=` (empty) with `CONFD_BIN` for a local confd | pinned in the script |
 | `METRICSD_BIN` | `src/fetch-releases.sh:27` | local metricsd binary instead of the release | none |
 | `CONFD_BIN`, `CONFD_ASSETS` | `src/fetch-releases.sh:`, `:` | local confd binary and its odi-ui checkout or assets tarball | none; `$(dirname $CONFD_BIN)/..` |
-| `ODI_REMOTE`, `ODI_REMOTE_DIR` | `tools/remote-build.sh:46`, `:47` | remote build host and directory | required; `/root/odi/odi-oss` |
+| `ODI_REMOTE`, `ODI_REMOTE_DIR`, `ODI_REMOTE_DL` | `tools/remote-build.sh` | remote build host, directory, and download cache (exported there as `DL`) | required; `/root/odi/odi-oss`; `dl/` beside it |
 
 ### /proc and /dev control files
 

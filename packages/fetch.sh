@@ -2,7 +2,7 @@
 #
 # Fetch and verify one upstream source tarball.
 #
-#     fetch.sh <url> <sha256> [outdir]
+#     fetch.sh <url> <sha256> [outdir]     # outdir default: $DL, else dl/
 #     ALT_URLS="<url> <url>" fetch.sh <url> <sha256>
 #
 # Every package this project builds is pinned by VERSION and verified by
@@ -24,7 +24,9 @@ set -eu
 
 url=${1:?usage: fetch.sh <url> <sha256> [outdir]}
 want=${2:?missing sha256}
-out=${3:-$(cd "$(dirname "$0")/.." && pwd)/dl}
+# DL (an absolute path) moves the cache out of the tree, as for
+# kernel/618/fetch.sh, so several trees on one host share one copy.
+out=${3:-${DL:-$(cd "$(dirname "$0")/.." && pwd)/dl}}
 
 mkdir -p "$out"
 file="$out/$(basename "$url")"
@@ -34,12 +36,12 @@ if [ ! -f "$file" ]; then
 	for u in "$url" ${ALT_URLS:-} "https://archive.softwareheritage.org/api/1/content/sha256:$want/raw/"; do
 		[ -n "$u" ] || continue
 		echo "==> fetching $(basename "$url") from ${u%%/*}//$(echo "$u" | cut -d/ -f3)" >&2
-		if curl -fsSL --retry 2 --max-time 900 -o "$file.part" "$u"; then
-			mv "$file.part" "$file"
+		if curl -fsSL --retry 2 --max-time 900 -o "$file.part.$$" "$u"; then
+			mv "$file.part.$$" "$file"
 			got_it=1
 			break
 		fi
-		rm -f "$file.part"
+		rm -f "$file.part.$$"
 		echo "    no answer, trying the next source" >&2
 	done
 	if [ "$got_it" = 0 ]; then

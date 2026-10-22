@@ -32,8 +32,8 @@ fetch_one() {
 	url=$1; dest=$2
 	[ -s "$dest" ] && return 0
 	echo "==> fetching $(basename "$dest")" >&2
-	curl -fsSL --retry 3 --max-time 1800 -o "$dest.part" "$url"
-	mv "$dest.part" "$dest"
+	curl -fsSL --retry 3 --max-time 1800 -o "$dest.part.$$" "$url"
+	mv "$dest.part.$$" "$dest"
 }
 
 fetch_one "$BASE/$TARBALL" "$DL/$TARBALL"

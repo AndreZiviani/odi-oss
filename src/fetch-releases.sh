@@ -20,7 +20,8 @@ abs() { case $1 in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$CALLER" "$1" ;; e
 cd "$(dirname "$0")"
 ROOT=$(cd .. && pwd)
 OUT=$ROOT/out/bin
-DL=$ROOT/dl/releases
+# DL (an absolute path) is the shared download cache, as for kernel/618/fetch.sh.
+DL=${DL:-$ROOT/dl}/releases
 mkdir -p "$OUT" "$DL"
 
 # Pin by tag for a reproducible image; override to move. CONFD_TAG set but
@@ -90,16 +91,16 @@ fetch_asset() {
 		echo "  fetching $asset from $repo $tag" >&2
 		if [ "$use_gh" = 1 ]; then
 			gh release download "$tag" --repo "$repo" --pattern "$asset" \
-				--output "$dest.part" --clobber
+				--output "$dest.part.$$" --clobber
 		else
-			curl_asset "$repo" "$tag" "$asset" "$dest.part" || {
-				rm -f "$dest.part"
+			curl_asset "$repo" "$tag" "$asset" "$dest.part.$$" || {
+				rm -f "$dest.part.$$"
 				echo "  could not download $asset from $repo $tag." >&2
 				echo "  Rate-limited? Set GITHUB_TOKEN (or use a logged-in gh)." >&2
 				exit 1
 			}
 		fi
-		mv "$dest.part" "$dest"
+		mv "$dest.part.$$" "$dest"
 	fi
 	echo "$dest"
 }
