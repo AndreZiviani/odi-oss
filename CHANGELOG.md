@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Build: `kernel/618/fetch.sh` stops the `gpg-agent` and `dirmngr` that the
+  signature check starts in its throwaway `GNUPGHOME`, and removes that
+  directory on exit. Each run used to leave one agent and its keyring in
+  `/tmp`; enough of them use up the build host's inotify instances for root,
+  and `systemctl` then fails with `Failed to allocate directory watch: Too
+  many open files`.
+
 ## v1.11.1 - 2026-10-21
 
 - OMCI: new odi-only key `OMCI_TCONT_ALLOC_UNSET` (`/etc/config/odi.conf`,
