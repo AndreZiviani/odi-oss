@@ -196,8 +196,11 @@ jobs:
             dl
           key: dl-test-qemu-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh') }}
 
+      # ipxe-qemu is only a recommendation of qemu-system-mips, which
+      # ci-apt.sh does not install, but it holds efi-pcnet.rom, the option ROM
+      # of the pcnet NIC the malta board boots with: without it qemu exits.
       - name: qemu-system-mips
-        run: tools/ci-apt.sh qemu-system-mips
+        run: tools/ci-apt.sh qemu-system-mips ipxe-qemu
 
       # Everything test-qemu boots except the kernel (a stock, prebuilt
       # image, toolchain/images.env): busybox, dropbear/ip/bridge, our own
