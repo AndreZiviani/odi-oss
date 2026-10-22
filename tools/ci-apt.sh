@@ -17,7 +17,7 @@ set -euo pipefail
 opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
 for try in 1 2 3; do
 	if timeout 180 sudo apt-get "${opts[@]}" update -qq &&
-	   timeout 300 sudo apt-get "${opts[@]}" install -y -qq --no-install-recommends "$@"; then
+	   timeout 300 sudo apt-get "${opts[@]}" install -y -q --no-install-recommends "$@"; then
 		exit 0
 	fi
 	echo "ci-apt: attempt $try for $* failed or timed out" >&2

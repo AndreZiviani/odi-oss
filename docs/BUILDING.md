@@ -164,7 +164,8 @@ your local `out/image/`. `ODI_REMOTE` is required and names no host of its
 own; `ODI_REMOTE_DIR` defaults to `/root/odi/odi-oss`. The remote host needs
 the prerequisites above. The kernel tree and the download cache are not
 synced (the tree is gigabytes): the first build there fetches them, later
-ones reuse them. `make releases` needs no token on the remote host either;
+ones reuse them. The downloads go to `ODI_REMOTE_DL` (default: `dl/` beside
+`ODI_REMOTE_DIR`), so several build trees on one host share them. `make releases` needs no token on the remote host either;
 an optional `GITHUB_TOKEN`, if you want the higher rate limit, is handed to
 the remote command on stdin, never on a command line:
 

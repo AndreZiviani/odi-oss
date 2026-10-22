@@ -32,8 +32,8 @@ fetch_one() {
 	url=$1; dest=$2
 	[ -s "$dest" ] && return 0
 	echo "==> fetching $(basename "$dest")" >&2
-	curl -fsSL --retry 3 --max-time 1800 -o "$dest.part" "$url"
-	mv "$dest.part" "$dest"
+	curl -fsSL --retry 3 --max-time 1800 -o "$dest.part.$$" "$url"
+	mv "$dest.part.$$" "$dest"
 }
 
 fetch_one "$BASE/$TARBALL" "$DL/$TARBALL"
@@ -59,6 +59,9 @@ cp "$DL/$SIGFILE" "$WORK/"
 
 GNUPGHOME=$(mktemp -d)
 export GNUPGHOME
+# gpg --recv-keys starts a gpg-agent daemon in GNUPGHOME that outlives the
+# script; kill it, or every run leaks one agent and its inotify instances.
+trap 'gpgconf --kill all 2>/dev/null; rm -rf "$WORK" "$GNUPGHOME"' EXIT
 gpg_ok=0
 for ks in $KEYSERVERS; do
 	echo "==> trying $ks for $GPG_FPR" >&2
