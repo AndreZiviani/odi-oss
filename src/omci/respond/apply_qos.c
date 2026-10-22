@@ -1374,9 +1374,12 @@ static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
 	rc = apply_hw ? omci_drv_call(OMCI_GEMFLOW_CMD, &f, sizeof f) : 0;
 	if (rc == 0) {
 		flow_claim(1, id, (uint16_t)f.gem_port);
-		flow_ds[id].mcast = (uint8_t)f.mcast_filter;
-		if (id < FLOW_MAX)
+		/* flow_alloc() stays below caps_flows(), which drv.c caps at
+		 * FLOW_MAX; the check says so where the compiler can see it. */
+		if (id < FLOW_MAX) {
+			flow_ds[id].mcast = (uint8_t)f.mcast_filter;
 			flow_ds_queue[id] = ds_queue_key(&f);
+		}
 	}
 	out_fmt("   [%s] gem %d ds flow %d priq %d pri %d "
 		"wrr %d weight %d port %d mcast %d -> %d\n",
