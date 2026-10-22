@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Build: one download cache for several build trees. `DL` (an absolute path)
+  now moves it for the package tarballs and the confd/metricsd release assets
+  too, not only the kernel tarball, and `tools/remote-build.sh` points it at
+  `ODI_REMOTE_DL`, by default a `dl/` beside `ODI_REMOTE_DIR`. A build tree
+  copied for one remote build and deleted after it used to download the
+  kernel tarball again every time. Every cached file is still checked against
+  its pinned SHA-256 on use, and a download is written under a per-process
+  name first, so two builds sharing the cache do not write the same file.
+
 - Build: `kernel/618/fetch.sh` stops the `gpg-agent` and `dirmngr` that the
   signature check starts in its throwaway `GNUPGHOME`, and removes that
   directory on exit. Each run used to leave one agent and its keyring in

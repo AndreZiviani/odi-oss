@@ -19,6 +19,14 @@
 # excludes it: the first build there fetches it (kernel/tree.sh), and later
 # ones reuse it.
 #
+# Downloads (the kernel tarball, the package tarballs, the confd/metricsd
+# release assets) go to ODI_REMOTE_DL, exported to the remote command as DL.
+# It defaults to a dl/ beside ODI_REMOTE_DIR, outside the tree, so every tree
+# under the same parent shares one cache: a copy of a tree made for one build
+# and deleted after it no longer downloads the kernel again each time. Every
+# file in it is checked against its pinned SHA-256 (or the release
+# SHA256SUMS) on use, so sharing it trusts nothing new.
+#
 # GITHUB_TOKEN is optional: everything it touches (make releases, the
 # toolchain image pull) is public and needs no login. Setting it only raises
 # the anonymous rate limit. When set here, it is handed to the remote
@@ -38,13 +46,15 @@
 #     'VERSION=odi-oss-yymmdd-x FRESH=1 kernel/build.sh && VERSION=odi-oss-yymmdd-x make image'
 #
 # ODI_REMOTE is required and has no default -- this script names no host of
-# its own. ODI_REMOTE_DIR defaults to /root/odi/odi-oss.
+# its own. ODI_REMOTE_DIR defaults to /root/odi/odi-oss, ODI_REMOTE_DL to
+# a dl/ beside it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 
 : "${ODI_REMOTE:?set ODI_REMOTE=user@host (or a Host alias from ~/.ssh/config)}"
 ODI_REMOTE_DIR=${ODI_REMOTE_DIR:-/root/odi/odi-oss}
+ODI_REMOTE_DL=${ODI_REMOTE_DL:-$(dirname "$ODI_REMOTE_DIR")/dl}
 
 [ $# -ge 1 ] || {
 	echo "usage: ODI_REMOTE=user@host $0 '<command to run remotely>'" >&2
@@ -86,6 +96,8 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 			fi
 			export GITHUB_TOKEN=\"\$TOKEN\"
 			cd $ODI_REMOTE_DIR
+			mkdir -p $ODI_REMOTE_DL
+			export DL=$ODI_REMOTE_DL
 			set +e
 			( $* )
 			RC=\$?
@@ -94,7 +106,7 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 			exit \$RC
 		"
 else
-	ssh "$ODI_REMOTE" "cd $ODI_REMOTE_DIR && $*"
+	ssh "$ODI_REMOTE" "cd $ODI_REMOTE_DIR && mkdir -p $ODI_REMOTE_DL && export DL=$ODI_REMOTE_DL && $*"
 fi
 
 say "syncing results back to $ROOT/out/image"
