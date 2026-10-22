@@ -11,6 +11,11 @@ listed here.
   `/tmp`; enough of them use up the build host's inotify instances for root,
   and `systemctl` then fails with `Failed to allocate directory watch: Too
   many open files`.
+- omcid: no `-Warray-bounds` warning in `ds_flow_send()` (`apply_qos.c`).
+  The downstream flow's multicast flag is now written under the same
+  `FLOW_MAX` check as its queue key. The index could not reach 64 at run time
+  (the flow table walks `caps_flows()`, which is capped at `FLOW_MAX`), but
+  the compiler cannot see that across files. No behaviour change.
 
 ## v1.11.1 - 2026-10-21
 
