@@ -14,6 +14,12 @@ listed here.
   its pinned SHA-256 on use, and a download is written under a per-process
   name first, so two builds sharing the cache do not write the same file.
 
+- Build: `kernel/618/fetch.sh` stops the `gpg-agent` and `dirmngr` that the
+  signature check starts in its throwaway `GNUPGHOME`, and removes that
+  directory on exit. Each run used to leave one agent and its keyring in
+  `/tmp`; enough of them use up the build host's inotify instances for root,
+  and `systemctl` then fails with `Failed to allocate directory watch: Too
+  many open files`.
 - omcid: no `-Warray-bounds` warning in `ds_flow_send()` (`apply_qos.c`).
   The downstream flow's multicast flag is now written under the same
   `FLOW_MAX` check as its queue key. The index could not reach 64 at run time
