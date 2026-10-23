@@ -59,7 +59,7 @@ jobs:
       - name: Tests
         run: |
           command -v shellcheck >/dev/null || {
-            sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+            tools/ci-apt.sh shellcheck
           }
           make test
 

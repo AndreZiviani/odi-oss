@@ -68,7 +68,7 @@ jobs:
       - name: Lint (shellcheck, inline-quote check)
         run: |
           command -v shellcheck >/dev/null || {
-            sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+            tools/ci-apt.sh shellcheck
           }
           make lint
 
@@ -197,7 +197,7 @@ jobs:
           key: dl-test-qemu-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh') }}
 
       - name: qemu-system-mips
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-mips
+        run: tools/ci-apt.sh qemu-system-mips
 
       # Everything test-qemu boots except the kernel (a stock, prebuilt
       # image, toolchain/images.env): busybox, dropbear/ip/bridge, our own
@@ -273,7 +273,7 @@ jobs:
         run: echo "VERSION=${GITHUB_REF_NAME:-repro-dispatch}" >> "$GITHUB_ENV"
 
       - name: squashfs-tools (unsquashfs, for the comparison step)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq squashfs-tools
+        run: build-a/tools/ci-apt.sh squashfs-tools
 
       # Distinct VOL names: the docker build cache kernel/build.sh uses is a
       # named volume (odi-kbuild-618 by default), and both steps share the

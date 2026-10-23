@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- CI: package installs on the runner are bounded (`tools/ci-apt.sh`): a read
+  timeout and retries per connection, a time limit per `apt-get` call, and
+  three attempts. A stalled apt mirror connection used
+  to hold `test-qemu` for 11 minutes, or past its 20-minute timeout, in a
+  step that normally takes 25 s.
+
 - Build: one download cache for several build trees. `DL` (an absolute path)
   now moves it for the package tarballs and the confd/metricsd release assets
   too, not only the kernel tarball, and `tools/remote-build.sh` points it at

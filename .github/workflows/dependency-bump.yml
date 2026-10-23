@@ -58,7 +58,7 @@ jobs:
       - name: Lint (shellcheck, inline-quote check)
         if: steps.diff.outputs.changed == '1'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          tools/ci-apt.sh shellcheck
           make lint
 
       - name: Host-side tests, diag, OMCI daemon
