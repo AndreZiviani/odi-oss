@@ -5,11 +5,13 @@ listed here.
 
 ## Unreleased
 
-- omcid: the LOID authentication entity (class 65530) is masked in MIB dumps
-  like the other credentials: its LOID and password show as `**`, the
-  operation id and the authentication status the OLT sets stay readable, and
-  `--secrets` shows them. Both come from the config store, and `omcicli mib
-  get 65530` printed them.
+- omcid: the LOID and its password are masked in MIB dumps like the other
+  credentials, where they appear twice: the LOID authentication entity (class
+  65530, its LOID and password) and ONU-G (class 256, its logical ONU id and
+  logical password). They show as `**`; the other attributes of both stay
+  readable, the OLT's Sets of ONU-G stay in the log, and `--secrets` shows
+  the values. Both come from the config store, and `omcicli mib get` printed
+  them.
 
 - igmpd: `igmpd -r FILE` replays a transcript of timestamped events (IGMP
   frames with their port and VLAN, clock ticks, policy file changes) through
