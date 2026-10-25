@@ -1319,6 +1319,30 @@ void apply_priq(uint16_t inst)
 	return;
 }
 
+/* Take a downstream flow back: cmd 25 with ena 0. The kernel has no
+ * downstream delete yet and refuses it; the slot then stays claimed (and
+ * flagged), so that nothing else is sent over a row the CAM still holds, and
+ * the next refresh tries again. */
+static void ds_flow_withdraw(int id)
+{
+	struct omci_gemflow f;
+	int rc;
+
+	for (unsigned i = 0; i < sizeof f / 4; i++)
+		((uint32_t *)&f)[i] = 0;
+	f.gem_port = flow_ds[id].port;
+	f.flow_id = (uint32_t)id;
+	f.dir = OMCI_GEMFLOW_DS;
+	rc = apply_hw ? omci_drv_call(OMCI_GEMFLOW_CMD, &f, sizeof f) : 0;
+	out_fmt("   [%s] gem %d ds flow %d withdrawn -> %d\n",
+		apply_hw ? "hw" : "dry", (long)f.gem_port, (long)id, (long)rc);
+	if (rc == 0) {
+		flow_ds[id].used = 0;
+		flow_ds[id].mcast = 0;
+		flow_ds_queue[id] = 0;
+	}
+}
+
 /* The multicast flag of a downstream GEM flow (mcast_filter of cmd 25).
  *
  * The stock stack sets it for a GEM port when a multicast GEM interworking
@@ -1348,22 +1372,28 @@ static int ctp_mcast_rows(uint16_t ctp, int skip)
 	return 0;
 }
 
-/* Send (or send again) the downstream flow of a CTP. */
-static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
-			 int skip281)
+/* Send (or send again) the downstream flow of `port`, with the queue the
+ * CTP row `r` points at. The CTP's own port takes its flag from the CTP's
+ * address tables (`mcast` < 0); an extra multicast GEM port, which has no
+ * CTP, is sent flagged (mcast_extra_refresh) with the queue of the CTP its
+ * class 281 points at. */
+static void ds_flow_send_port(const struct omci_class *c,
+			      const struct mib_row *r, uint16_t port,
+			      int mcast, int skip281)
 {
 	int rc, id;
 	struct omci_gemflow f;
 
 	for (unsigned i = 0; i < sizeof f / 4; i++)
 		((uint32_t *)&f)[i] = 0;
-	f.gem_port      = row_u32(r, c, 1);
+	f.gem_port      = port;
 	/* From the class 277 row the CTP points at, or priq_related_port().
 	 * A DsPriQPtr of 0 is priority queue ME 0, a real queue, not a null
 	 * pointer: every GEM CTP of ISP1 carries 0. */
 	ds_queue_words(&f, (uint16_t)row_u32(r, c, 7));
 	f.ena         = 1;               /* create, not update */
-	f.mcast_filter = (uint32_t)ctp_mcast_rows(r->inst, skip281);
+	f.mcast_filter = (uint32_t)(mcast >= 0 ? mcast
+				    : ctp_mcast_rows(r->inst, skip281));
 	id = flow_alloc(1, (uint16_t)f.gem_port);
 	if (id < 0) {
 		out("   [hw] no downstream flow left\n");
@@ -1390,6 +1420,146 @@ static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
 		(long)f.mcast_filter, (long)rc);
 }
 
+/* Send (or send again) the downstream flow of a CTP. */
+static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
+			 int skip281)
+{
+	ds_flow_send_port(c, r, (uint16_t)row_u32(r, c, 1), -1, skip281);
+}
+
+/* The extra multicast GEM ports. G.988 9.2.5 lets an OLT spread the channels
+ * over several multicast GEM ports by writing more rows, with other GEM port
+ * ids, into the address table of one class 281 (and its access control
+ * lists, class 309, name the port a channel arrives on); only the first
+ * port has a GEM port network CTP, "no additional GEM network CTPs need be
+ * created". The ports named only by rows have no CTP to give them a flow,
+ * so they get one here, flagged multicast and never upstream, and lose it
+ * when the last row naming them goes. Only while some class 281 points at a
+ * CTP the OLT created (class 268, downstream capable): a port that is in no
+ * multicast GEM IW TP's reach is not a multicast GEM port, and a port a CTP
+ * already owns keeps the CTP's flow. `skip281` and `skip309` are the
+ * instances being deleted. */
+#define MCAST_XPORTS 16
+#define CLS_MCAST_OPER_PROFILE 309
+
+static int is_ctp_port(uint16_t port)
+{
+	const struct omci_class *c = find_class(OMCI_ME_GEM_PORT_CTP);
+
+	for (int i = 0; c && i < MIB_ROWS; i++) {
+		const struct mib_row *r = mib_row_at(i);
+
+		if (r && r->classId == OMCI_ME_GEM_PORT_CTP &&
+		    (uint16_t)row_u32(r, c, 1) == port)
+			return 1;
+	}
+	return 0;
+}
+
+static void xport_add(uint16_t *ports, int *n, uint16_t port)
+{
+	/* 12-bit GEM port ids (4095 is the highest, and the CAM's width);
+	 * 0 and 0xffff are not ports. */
+	if (!port || port > 4095 || is_ctp_port(port))
+		return;
+	for (int i = 0; i < *n; i++)
+		if (ports[i] == port)
+			return;
+	if (*n < MCAST_XPORTS)
+		ports[(*n)++] = port;
+}
+
+/* The ports named by rows of the live class 281 and 309 instances, and the
+ * CTP row whose queue they use (null when there is no class 281 on a
+ * downstream CTP, and then no port). */
+static const struct mib_row *xports_wanted(uint16_t *ports, int *n,
+					   int skip281, int skip309)
+{
+	const struct omci_class *c281 = find_class(OMCI_ME_MCAST_GEM_IW_TP);
+	const struct omci_class *c268 = find_class(OMCI_ME_GEM_PORT_CTP);
+	const struct mib_row *ctp = 0;
+
+	*n = 0;
+	if (!c281 || !c268)
+		return 0;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		const struct mib_row *r = mib_row_at(i);
+		const struct mib_row *p;
+		uint32_t dir;
+
+		if (!r || r->classId != OMCI_ME_MCAST_GEM_IW_TP ||
+		    (int)r->inst == skip281)
+			continue;
+		p = mib_find(OMCI_ME_GEM_PORT_CTP, (uint16_t)row_u32(r, c281, 1));
+		dir = p ? row_u32(p, c268, 3) : 0;
+		if (!ctp && p && (dir == 2 || dir == 3))
+			ctp = p;
+		for (uint8_t t = r->tbl_head; t != MIB_TBL_NONE; t = tblpool[t].next)
+			if (tblpool[t].attr == 9 || tblpool[t].attr == 10)
+				xport_add(ports, n, (uint16_t)(tblpool[t].data[0] << 8 |
+							       tblpool[t].data[1]));
+	}
+	if (!ctp) {
+		*n = 0;
+		return 0;
+	}
+	for (int i = 0; i < MIB_ROWS; i++) {
+		const struct mib_row *r = mib_row_at(i);
+
+		if (!r || r->classId != CLS_MCAST_OPER_PROFILE ||
+		    (int)r->inst == skip309)
+			continue;
+		/* Part 0 of a row (bits 13-11 of the control word) is the one
+		 * with the GEM port; the other parts are prefixes. */
+		for (uint8_t t = r->tbl_head; t != MIB_TBL_NONE; t = tblpool[t].next)
+			if ((tblpool[t].attr == 7 || tblpool[t].attr == 8) &&
+			    !((tblpool[t].data[0] >> 3) & 7))
+				xport_add(ports, n, (uint16_t)(tblpool[t].data[2] << 8 |
+							       tblpool[t].data[3]));
+	}
+	return ctp;
+}
+
+void mcast_extra_refresh(int skip281, int skip309)
+{
+	const struct omci_class *c = find_class(OMCI_ME_GEM_PORT_CTP);
+	uint16_t ports[MCAST_XPORTS];
+	const struct mib_row *ctp;
+	int n;
+
+	if (!c)
+		return;
+	ctp = xports_wanted(ports, &n, skip281, skip309);
+	/* Withdraw first, so the slots are free for a new port. A flow that
+	 * is flagged multicast and has no CTP is one of these. */
+	for (int id = 0; id < FLOW_MAX && id < (int)caps_flows(); id++) {
+		int keep = 0;
+
+		if (!flow_ds[id].used || !flow_ds[id].mcast ||
+		    is_ctp_port(flow_ds[id].port))
+			continue;
+		for (int i = 0; i < n; i++)
+			keep |= ports[i] == flow_ds[id].port;
+		if (keep)
+			continue;
+		ds_flow_withdraw(id);
+	}
+	for (int i = 0; ctp && i < n; i++) {
+		int id = flow_find(1, ports[i]);
+		struct omci_gemflow q;
+
+		for (unsigned k = 0; k < sizeof q / 4; k++)
+			((uint32_t *)&q)[k] = 0;
+		ds_queue_words(&q, (uint16_t)row_u32(ctp, c, 7));
+		/* Send again only when the flow is new, not flagged, or its
+		 * queue moved. */
+		if (id >= 0 && flow_ds[id].mcast &&
+		    flow_ds_queue[id] == ds_queue_key(&q))
+			continue;
+		ds_flow_send_port(c, ctp, ports[i], 1, -1);
+	}
+}
+
 /* After a class 281 Create, Set or Delete (`skip` is the instance being
  * deleted, else -1): every downstream flow whose multicast flag no longer
  * matches its CTP's address tables is sent again. */
@@ -1410,6 +1580,7 @@ void mcast_flag_refresh(int skip)
 			continue;
 		ds_flow_send(c, r, skip);
 	}
+	mcast_extra_refresh(skip, -1);
 }
 
 /* Class 268, a GEM port network CTP: the downstream flow now, the upstream
@@ -1422,6 +1593,8 @@ void apply_gem_ctp(const struct omci_class *c, const struct mib_row *r)
 		ds_flow_send(c, r, -1);
 	if (dir == 1 || dir == 3)
 		qos_dirty = 1;   /* rebuilt OLT_QUIET_MS after the last frame */
+	/* A multicast GEM IW TP pointing here may already name more ports. */
+	mcast_extra_refresh(-1, -1);
 	bc_gem_update();
 }
 

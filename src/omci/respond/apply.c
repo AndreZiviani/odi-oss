@@ -100,6 +100,8 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 		delete_mbsp(inst);
 	if (c->classId == OMCI_ME_MCAST_GEM_IW_TP)
 		mcast_flag_refresh(inst);
+	if (c->classId == 309)
+		mcast_extra_refresh(-1, inst);
 }
 
 /* Class 131, OLT-G: a Set that carries ToDInfo sends its fourteen bytes
@@ -204,6 +206,11 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 		 * downstream flow (apply_qos.c, ctp_mcast_rows). */
 		mcast_flag_refresh(-1);
 		bc_gem_update();
+		return;
+	case 309:
+		/* Its access control rows name the multicast GEM ports too
+		 * (apply_qos.c, mcast_extra_refresh). */
+		mcast_extra_refresh(-1, -1);
 		return;
 	case OMCI_ME_GEM_IW_TP:
 		/* A step on the way to the broadcast flow; the OLT creates
