@@ -32,6 +32,7 @@ check() {
 	fi
 }
 
+: > /tmp/omcid.log
 $Q respond/build/omcid -w 12 > /tmp/omcid.log 2>&1 &
 pid=$!
 omcid_up /tmp/omcid.log
@@ -126,6 +127,7 @@ omcid_stop "$pid"
 
 CAPS=020000ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000000000000010000000300000002ffffffff000000000000001000000040000000800000000800000000000000100000000f00000440
 
+: > /tmp/omcid2.log
 $Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid2.log 2>&1 &
 pid=$!
 omcid_up /tmp/omcid2.log
@@ -972,6 +974,7 @@ check "a changed MacLearningDepth sets the single UNI's limit" \
 kill -9 "$pid" 2>/dev/null
 wait "$pid" 2>/dev/null
 
+: > /tmp/omcid3.log
 $Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid3.log 2>&1 &
 pid=$!
 omcid_up /tmp/omcid3.log
@@ -1017,6 +1020,7 @@ omcid_stop "$pid"
 mkdir -p /var/config
 cp test/cfg_agree.xml /var/config/lastgood.xml
 cp test/cfg_agree_hs.xml /var/config/lastgood_hs.xml
+: > /tmp/omcid-loid.log
 $Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid-loid.log 2>&1 &
 pid=$!
 omcid_up /tmp/omcid-loid.log
@@ -1032,6 +1036,7 @@ check "--secrets shows the LOID and the password" \
       "$(echo "$out" | grep -ci -e "$LOIDX" -e "$LPWX")" "2"
 omcid_stop "$pid"
 rm -f /var/config/lastgood.xml /var/config/lastgood_hs.xml
+: > /tmp/omcid4.log
 $Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid4.log 2>&1 &
 pid=$!
 omcid_up /tmp/omcid4.log
@@ -1153,6 +1158,7 @@ omcid_stop "$pid"
 
 # omcid's own idle exit, which every run above is stopped before: -w counts 5 s
 # units with nothing arriving, then the daemon says so and exits 0.
+: > /tmp/omcid5.log
 $Q respond/build/omcid -w 1 -c "$CAPS" > /tmp/omcid5.log 2>&1 &
 pid=$!
 omcid_up /tmp/omcid5.log
