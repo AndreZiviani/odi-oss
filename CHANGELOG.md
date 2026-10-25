@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- omcid: the multicast access control list a profile exports to igmpd now
+  honours the row parts of G.988. A part 1 or part 2 row (IPv6 source or
+  destination prefix, preview fields) was read as an IPv4 range of its own,
+  and a part 0 row of an IPv6 range was listed as a tiny IPv4 one. Only part 0
+  rows make a range now, a row an IPv6 prefix belongs to is left out, and a
+  list of IPv6 rows alone enforces nothing instead of refusing every IPv4
+  join. Also: the multicast service package table (ME 310, attribute 6),
+  which G.988 uses to pick the profile by VLAN, is not supported yet; it is
+  documented in docs/TOOLS.md and logged once when an OLT provisions it.
 - omcid: a Get whose attributes do not all fit the answer's 25 bytes of
   values now answers result 9 (attribute failed or unknown), with G.988's
   optional-attribute and attribute execution masks, instead of success with
