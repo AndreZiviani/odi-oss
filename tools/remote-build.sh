@@ -19,6 +19,20 @@
 # excludes it: the first build there fetches it (kernel/tree.sh), and later
 # ones reuse it.
 #
+# A git worktree has a .git FILE ("gitdir: /abs/path/.git/worktrees/X") that
+# points at a path which only exists on this machine. Copied as is, git on
+# the remote finds no repository, and every git grep rule of make lint used
+# to pass vacuously. So when .git is a file it is not synced; instead the
+# remote directory gets a throwaway repository (rm -rf .git, git init, git
+# add -A, under a timeout) whose index holds the synced files, which is all
+# git grep needs and is redone on every run because the directory is reused.
+# The sync does not carry the local uid over (--no-owner): git refuses a
+# repository owned by someone else, and the directory is chowned to the ssh
+# user first in case an earlier run left it owned by another one.
+# Nothing is committed and no config is written. A normal clone is unchanged:
+# its .git directory is synced like the rest. make lint also refuses to run
+# without a usable repository.
+#
 # Downloads (the kernel tarball, the package tarballs, the confd/metricsd
 # release assets) go to ODI_REMOTE_DL, exported to the remote command as DL.
 # It defaults to a dl/ beside ODI_REMOTE_DIR, outside the tree, so every tree
@@ -70,13 +84,23 @@ say() { printf '\n== %s\n' "$*"; }
 # No trailing slash on the mainline exclude: with one it matches only a
 # directory, and a remote tree that links kernel/618/mainline to a shared
 # copy loses the link to --delete.
+GITEXCL=()
+[ -f "$ROOT/.git" ] && GITEXCL=(--exclude='/.git')
+
 say "syncing the working tree to $ODI_REMOTE:$ODI_REMOTE_DIR"
-rsync -a --delete \
+rsync -a --no-owner --no-group --delete \
 	--exclude='/out/' --exclude='/build/' --exclude='/dl/' \
 	--exclude='/kernel/618/mainline' \
 	--exclude='__pycache__/' --exclude='/refs/' \
+	${GITEXCL[@]+"${GITEXCL[@]}"} \
 	-e ssh \
 	"$ROOT/" "$ODI_REMOTE:$ODI_REMOTE_DIR/"
+
+if [ ${#GITEXCL[@]} -gt 0 ]; then
+	say "worktree: building a throwaway repository on $ODI_REMOTE"
+	# shellcheck disable=SC2029
+	ssh "$ODI_REMOTE" "cd $ODI_REMOTE_DIR && chown \$(id -u):\$(id -g) . && rm -rf .git && timeout 120 sh -c 'git init -q && git add -A'"
+fi
 
 say "building on $ODI_REMOTE: $*"
 # SC2029: deliberate -- $ODI_REMOTE_DIR and the command both expand locally,

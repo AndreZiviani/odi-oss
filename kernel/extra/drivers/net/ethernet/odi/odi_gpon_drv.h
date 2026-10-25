@@ -159,6 +159,11 @@ void odi_gpon_hw_gem_port_configure(uint16_t gem_port_id, int activate);
 int odi_gpon_hw_gem_port_encrypted(uint16_t gem_port_id, int encrypted);
 int odi_gpon_hw_alloc_id_find(uint16_t alloc_id);
 void odi_gpon_hw_alloc_cam_read(int hw[32], int recorded[32]);
+/* GEM port CAM rows 0..64: the port each holds (-1 none, -2 the read did
+ * not complete) and its flow type FLAGS. */
+#define ODI_GPON_HW_GEM_CAM_ROWS	65U
+void odi_gpon_hw_gem_cam_read(int hw[ODI_GPON_HW_GEM_CAM_ROWS],
+			      uint32_t type[ODI_GPON_HW_GEM_CAM_ROWS]);
 int odi_gpon_hw_alloc_id_assign(uint16_t alloc_id);
 int odi_gpon_hw_alloc_id_release(uint16_t alloc_id);
 void odi_gpon_hw_eqd_rewrite(uint32_t eqd_bits);

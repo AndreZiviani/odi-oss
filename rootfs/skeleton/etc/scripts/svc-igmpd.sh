@@ -20,8 +20,16 @@
 VALUE=$(/etc/scripts/flash get IGMP_SNOOPING 2>/dev/null | sed 's/^[^=]*=//' | grep . || true)
 [ "$VALUE" = "1" ] || exec /etc/scripts/respawn-off.sh
 
+# IGMP_PON_DROP says whether the PON also drops IPv4 multicast no row names,
+# the one part that can cut a stream. Strictly opt-in: only 1 asks for it,
+# unset or anything else snoops without dropping.
+DROP=$(/etc/scripts/flash get IGMP_PON_DROP 2>/dev/null | sed 's/^[^=]*=//' | grep . || true)
+FLAGS=-w
+[ "$DROP" = "1" ] && FLAGS="-w -d"
+
 # -w: program the switch. The daemon takes its snooping lease on the switch
 # only while the OLT asks for snooping, and gives it back the moment that
 # stops or the daemon dies. oom_score_adj 0: it is no more important than the
 # other services, and less than omcid.
-exec /etc/scripts/respawn.sh 0 /var/log/services.log /bin/igmpd -w
+# shellcheck disable=SC2086 # FLAGS is two words on purpose
+exec /etc/scripts/respawn.sh 0 /var/log/services.log /bin/igmpd $FLAGS

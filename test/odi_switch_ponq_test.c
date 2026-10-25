@@ -272,18 +272,24 @@ int main(void)
 	ok(tcont(901, 1) == -1, "no row at all: refused");
 	odi_sw_host_alloc_row = NULL;
 
-	puts("downstream delete is refused, not taken for a create:");
+	puts("downstream delete is a delete, not taken for a create:");
 	fresh();
 	{
 		struct omci_gemflow g;
-		unsigned int n = odi_mock.log_n;
+		unsigned int i, n = odi_mock.log_n, wdata = 0, type = 0;
 
 		memset(&g, 0, sizeof g);
 		g.flow_id = 1;
 		g.gem_port = 300;
 		g.dir = OMCI_GEMFLOW_DS;
 		rc = odi_switch_cmd(OMCI_GEMFLOW_CMD, &g, sizeof g);
-		ok(rc != 0 && odi_mock.log_n == n, "refused, nothing written");
+		for (i = n; i < odi_mock.log_n; i++) {
+			wdata += odi_mock.log[i].addr == ODI_SW_DSF_GEM_CAM_WDATA_OFF;
+			if (odi_mock.log[i].addr == ODI_SW_DSF_GEM_FLOW_TYPE(1))
+				type = odi_mock.log[i].val + 1U;
+		}
+		ok(rc == 0 && !wdata, "accepted, no GEM port written to the CAM");
+		ok(type == 1U, "the flow type word written 0");
 	}
 
 	printf("%s (%d failures)\n", failures ? "FAILED" : "all ok", failures);

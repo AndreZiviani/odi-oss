@@ -651,6 +651,16 @@ static void odi_gpon_flow_set(int us, uint32_t idx, uint32_t gem_port)
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
 }
 
+static void odi_gpon_flow_del(int us, uint32_t idx)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	(void)odi_gpon_flows_del(&odi_gpon_flows_inst,
+				 us ? ODI_GPON_FLOW_DIR_US : ODI_GPON_FLOW_DIR_DS, idx);
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+}
+
 static void odi_gpon_flow_clear(void)
 {
 	unsigned long flags;
@@ -662,6 +672,7 @@ static void odi_gpon_flow_clear(void)
 
 static const struct odi_switch_flow_ops odi_gpon_flow_ops = {
 	.set = odi_gpon_flow_set,
+	.del = odi_gpon_flow_del,
 	.clear = odi_gpon_flow_clear,
 };
 
@@ -1499,10 +1510,16 @@ static int odi_gpon_proc_ploam_show(struct seq_file *seq, void *v)
  * "alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->". Row 16 is the
  * default Alloc-ID, the ONU-ID. Only these rows decide which upstream
  * grants the ONU answers; status's alloc_ids is the driver's record.
+ * Then the downstream GEM port CAM, rows 0..64, one line per row valid in
+ * the hardware or with a flow type word that is not zero:
+ * "gem_cam <row> hw <GEM port|-> type 0x<FLAGS>". Rows 0..63 are cmd 25's
+ * flows (row = flow id), 64 the OMCC's; a flow cmd 25 deleted leaves no
+ * line.
  */
 static int odi_gpon_proc_cam_show(struct seq_file *seq, void *v)
 {
-	int hw[32], rec[32];
+	int hw[32], rec[32], gem[ODI_GPON_HW_GEM_CAM_ROWS];
+	uint32_t type[ODI_GPON_HW_GEM_CAM_ROWS];
 	unsigned long flags;
 	unsigned int row, valid = 0;
 
@@ -1526,6 +1543,24 @@ static int odi_gpon_proc_cam_show(struct seq_file *seq, void *v)
 			seq_puts(seq, " recorded -\n");
 	}
 	seq_printf(seq, "alloc_cam_valid %u\n", valid);
+
+	spin_lock_irqsave(&odi_gpon_lock, flags);
+	odi_gpon_hw_gem_cam_read(gem, type);
+	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+	valid = 0;
+	for (row = 0; row < ODI_GPON_HW_GEM_CAM_ROWS; row++) {
+		if (gem[row] == -1 && !type[row])
+			continue;
+		if (gem[row] >= 0)
+			valid++;
+		seq_printf(seq, "gem_cam %u hw ", row);
+		if (gem[row] >= 0)
+			seq_printf(seq, "%d", gem[row]);
+		else
+			seq_puts(seq, gem[row] == -2 ? "timeout" : "-");
+		seq_printf(seq, " type 0x%02x\n", (unsigned int)type[row]);
+	}
+	seq_printf(seq, "gem_cam_valid %u\n", valid);
 	return 0;
 }
 

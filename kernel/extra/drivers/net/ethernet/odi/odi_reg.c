@@ -4,10 +4,12 @@
  * register and per-port MIB accessors of odi_switch_mib.c (which
  * has the counter mapping and what is left out), and the L2 lookup table of odi_switch_l2.c: row readback, the
  * valid-row walk behind `diag l2-table`, and the L2 multicast add/delete
- * igmpd programs groups with. Replaces the stock kernel's handling of RTK_OPT_REGISTER,
- * RTK_OPT_ADDRESS_GET/SET and RTK_OPT_STAT_PORT for our
- * own userland: src/diag reads this device directly. There is no vendor
- * sockopt fallback anywhere in this tree.
+ * igmpd programs groups with; and the ACL probes of `diag acl-probe`
+ * (odi_switch_acl_probe.h), off until a shell on the stick asks.
+ * Replaces the stock kernel's handling of RTK_OPT_REGISTER,
+ * RTK_OPT_ADDRESS_GET/SET and RTK_OPT_STAT_PORT for our own userland:
+ * src/diag reads this device directly. There is no vendor sockopt
+ * fallback anywhere in this tree.
  *
  * Built into CONFIG_ODI_SWITCH alongside odi_switch.c -- not a separate
  * Kconfig symbol, since every accessor here is switch-core-register work
@@ -30,6 +32,7 @@
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/errno.h>
+#include <linux/sched.h>
 /*
  * linux/ratelimit.h: pr_info_ratelimited() needs DEFINE_RATELIMIT_STATE,
  * which this kernel's linux/printk.h does not pull in on its own -- same
@@ -43,6 +46,7 @@
 #include "odi_ddm.h"
 #include "odi_switch_l2.h"
 #include "odi_switch_mcast.h"
+#include "odi_switch_acl_probe.h"
 
 #define DRV_NAME "odi_reg"
 
@@ -60,6 +64,10 @@ static long odi_sw_ioctl_cmd(struct file *f, unsigned int cmd, void __user *argp
  * Read and written only under odi_switch_lock.
  */
 static struct file *odi_sw_snoop_owner;
+
+/* The open file that holds the ACL probes (odi_switch_acl_probe.h), if
+ * any, under odi_switch_lock like the lease. */
+static struct file *odi_sw_probe_owner;
 
 /* Every command but DDM_GET runs under odi_switch_lock (odi_switch.c), so
  * a register or MIB read never lands in the middle of a table sequence
@@ -94,6 +102,11 @@ static int odi_sw_release(struct inode *inode, struct file *f)
 		odi_switch_mcast_release();
 		odi_sw_snoop_owner = NULL;
 		pr_info(DRV_NAME ": snooping lease released\n");
+	}
+	if (odi_sw_probe_owner == f) {
+		odi_sw_probe_release();
+		odi_sw_probe_owner = NULL;
+		pr_info(DRV_NAME ": ACL probes removed\n");
 	}
 	mutex_unlock(&odi_switch_lock);
 	return 0;
@@ -213,8 +226,12 @@ static long odi_sw_ioctl_cmd(struct file *f, unsigned int cmd, void __user *argp
 		if (copy_from_user(&sn, argp, sizeof(sn)))
 			return -EFAULT;
 		/* One holder at a time: a second snooper must not take the
-		 * first one's lease, and a one-shot tool must not release it. */
+		 * first one's lease, and a one-shot tool must not release it.
+		 * Nor while ACL probes are in: a probe of the host's IGMP and
+		 * the copy rule would decide for each other. */
 		if (odi_sw_snoop_owner && odi_sw_snoop_owner != f)
+			return -EBUSY;
+		if (sn.flags && odi_sw_probe_owner)
 			return -EBUSY;
 		if (!sn.flags) {
 			if (odi_sw_snoop_owner == f) {
@@ -227,6 +244,30 @@ static long odi_sw_ioctl_cmd(struct file *f, unsigned int cmd, void __user *argp
 		if (rc)
 			return rc;
 		odi_sw_snoop_owner = f;
+		return 0;
+	}
+	case ODI_SW_IOC_ACL_PROBE: {
+		struct odi_sw_acl_probe pr;
+		int rc;
+
+		if (copy_from_user(&pr, argp, sizeof(pr)))
+			return -EFAULT;
+		/* Reading is open to anyone; installing and removing belong
+		 * to the file that installed first, until it closes. */
+		if (pr.op != ODI_SW_PROBE_GET && odi_sw_probe_owner && odi_sw_probe_owner != f)
+			return -EBUSY;
+		rc = odi_sw_probe_request(&pr);
+		if (rc)
+			return rc;
+		if (pr.op == ODI_SW_PROBE_SET && !odi_sw_probe_owner) {
+			odi_sw_probe_owner = f;
+			pr_info(DRV_NAME ": ACL probe installed, held by pid %d\n",
+				task_pid_nr(current));
+		}
+		if (!odi_sw_probe_active())
+			odi_sw_probe_owner = NULL;
+		if (copy_to_user(argp, &pr, sizeof(pr)))
+			return -EFAULT;
 		return 0;
 	}
 	default:

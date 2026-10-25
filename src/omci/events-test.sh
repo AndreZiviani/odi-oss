@@ -53,6 +53,7 @@ rm -f /var/run/omcid-resume-decision
 log=/tmp/omcid-events.log
 # The five Alloc-IDs ISP1 assigns by PLOAM, as /proc/odi_gpon/status lists them.
 printf 'alloc_ids 5 282 794 1050 1306 538\n' > /tmp/events-gpon
+: > "$log"
 $Q respond/build/omcid -w 12 -c "$CAPS" -g /tmp/events-gpon > "$log" 2>&1 &
 pid=$!
 omcid_up "$log"
@@ -238,6 +239,7 @@ kill -9 "$pid" 2>/dev/null
 wait "$pid" 2>/dev/null
 printf 'SYSLOG_SERVER=\nOMCI_UNKNOWN_ME_OK=1\n' > /var/config/odi.conf
 log2=/tmp/omcid-events2.log
+: > "$log2"
 $Q respond/build/omcid -w 12 -c "$CAPS" > "$log2" 2>&1 &
 pid2=$!
 omcid_up "$log2"
@@ -288,6 +290,7 @@ getmask() {   # getmask <tci> <class4> <mask4>: a Get with an attribute mask
 }
 fixed_run() {   # fixed_run <log> <value>: an omcid with OMCI_FIXED_ME set
 	printf 'OMCI_FIXED_ME=%s\n' "$2" > /var/config/odi.conf
+	: > "$1"
 	$Q respond/build/omcid -w 12 -c "$CAPS" > "$1" 2>&1 &
 	pid3=$!
 	omcid_up "$1"
@@ -418,6 +421,7 @@ rm -f /var/config/odi.conf
 sleep 60 &
 victim=$!
 rm -f /var/config/odi.conf
+: > /tmp/omcid-reboot0.log
 $Q respond/build/omcid -w 12 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot0.log 2>&1 &
 pid4=$!
 omcid_up /tmp/omcid-reboot0.log
@@ -430,6 +434,7 @@ kill -0 "$victim" 2>/dev/null; got=$?
 check "reboot refused: nothing is signalled" "$got" "0"
 omcid_stop "$pid4"
 printf 'OMCI_ACCEPT_REBOOT=1\n' > /var/config/odi.conf
+: > /tmp/omcid-reboot1.log
 $Q respond/build/omcid -w 12 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot1.log 2>&1 &
 pid4=$!
 omcid_up /tmp/omcid-reboot1.log
@@ -455,6 +460,7 @@ rm -f /var/config/odi.conf
 sleep 60 &
 victim=$!
 printf 'OMCI_ACCEPT_REBOOT=2\n' > /var/config/odi.conf
+: > /tmp/omcid-reboot2.log
 $Q respond/build/omcid -w 12 -c "$CAPS" -k "$victim" > /tmp/omcid-reboot2.log 2>&1 &
 pid4=$!
 omcid_up /tmp/omcid-reboot2.log
@@ -481,6 +487,7 @@ rm -f /var/config/odi.conf
 # result 5 would raise (AUDIT B8 E3). A third OLT's session belongs here.
 rm -f /var/log/omcid-unknown.txt
 cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+: > /tmp/omcid-events-isp2.log
 $Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid-events-isp2.log 2>&1 &
 pid5=$!
 omcid_up /tmp/omcid-events-isp2.log

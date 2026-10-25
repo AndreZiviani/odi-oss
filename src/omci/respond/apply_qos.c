@@ -1319,10 +1319,10 @@ void apply_priq(uint16_t inst)
 	return;
 }
 
-/* Take a downstream flow back: cmd 25 with ena 0. The kernel has no
- * downstream delete yet and refuses it; the slot then stays claimed (and
- * flagged), so that nothing else is sent over a row the CAM still holds, and
- * the next refresh tries again. */
+/* Take a downstream flow back: cmd 25 with ena 0, which clears the CAM row
+ * and reads it back clear (odi_switch_cmd.c). A delete the kernel did not
+ * complete leaves the slot claimed (and flagged), so that nothing else is
+ * sent over a row the CAM still holds, and the next refresh tries again. */
 static void ds_flow_withdraw(int id)
 {
 	struct omci_gemflow f;
@@ -1437,8 +1437,10 @@ static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
  * when the last row naming them goes. Only while some class 281 points at a
  * CTP the OLT created (class 268, downstream capable): a port that is in no
  * multicast GEM IW TP's reach is not a multicast GEM port, and a port a CTP
- * already owns keeps the CTP's flow. `skip281` and `skip309` are the
- * instances being deleted. */
+ * already owns keeps the CTP's flow. `skip281`, `skip309` and `skip268`
+ * are the instances being deleted (-1 for none); a class 268 being deleted
+ * is no CTP to hang the ports on, though its own flow is not this code's
+ * to take back. */
 #define MCAST_XPORTS 16
 #define CLS_MCAST_OPER_PROFILE 309
 
@@ -1473,7 +1475,8 @@ static void xport_add(uint16_t *ports, int *n, uint16_t port)
  * CTP row whose queue they use (null when there is no class 281 on a
  * downstream CTP, and then no port). */
 static const struct mib_row *xports_wanted(uint16_t *ports, int *n,
-					   int skip281, int skip309)
+					   int skip281, int skip309,
+					   int skip268)
 {
 	const struct omci_class *c281 = find_class(OMCI_ME_MCAST_GEM_IW_TP);
 	const struct omci_class *c268 = find_class(OMCI_ME_GEM_PORT_CTP);
@@ -1491,6 +1494,8 @@ static const struct mib_row *xports_wanted(uint16_t *ports, int *n,
 		    (int)r->inst == skip281)
 			continue;
 		p = mib_find(OMCI_ME_GEM_PORT_CTP, (uint16_t)row_u32(r, c281, 1));
+		if (p && (int)p->inst == skip268)
+			p = 0;
 		dir = p ? row_u32(p, c268, 3) : 0;
 		if (!ctp && p && (dir == 2 || dir == 3))
 			ctp = p;
@@ -1520,7 +1525,7 @@ static const struct mib_row *xports_wanted(uint16_t *ports, int *n,
 	return ctp;
 }
 
-void mcast_extra_refresh(int skip281, int skip309)
+void mcast_extra_refresh(int skip281, int skip309, int skip268)
 {
 	const struct omci_class *c = find_class(OMCI_ME_GEM_PORT_CTP);
 	uint16_t ports[MCAST_XPORTS];
@@ -1529,7 +1534,7 @@ void mcast_extra_refresh(int skip281, int skip309)
 
 	if (!c)
 		return;
-	ctp = xports_wanted(ports, &n, skip281, skip309);
+	ctp = xports_wanted(ports, &n, skip281, skip309, skip268);
 	/* Withdraw first, so the slots are free for a new port. A flow that
 	 * is flagged multicast and has no CTP is one of these. */
 	for (int id = 0; id < FLOW_MAX && id < (int)caps_flows(); id++) {
@@ -1580,7 +1585,7 @@ void mcast_flag_refresh(int skip)
 			continue;
 		ds_flow_send(c, r, skip);
 	}
-	mcast_extra_refresh(skip, -1);
+	mcast_extra_refresh(skip, -1, -1);
 }
 
 /* Class 268, a GEM port network CTP: the downstream flow now, the upstream
@@ -1594,7 +1599,7 @@ void apply_gem_ctp(const struct omci_class *c, const struct mib_row *r)
 	if (dir == 1 || dir == 3)
 		qos_dirty = 1;   /* rebuilt OLT_QUIET_MS after the last frame */
 	/* A multicast GEM IW TP pointing here may already name more ports. */
-	mcast_extra_refresh(-1, -1);
+	mcast_extra_refresh(-1, -1, -1);
 	bc_gem_update();
 }
 
@@ -1608,15 +1613,17 @@ void qos_reset(void)
 	}
 	for (int i = 0; i < TCONT_MAX; i++)
 		tcont_map[i].used = 0;
-	/* What the MIB had programmed upstream goes with it, in the driver
-	 * too: command 0, the stock resetMib, empties every upstream flow,
-	 * queue and T-CONT block (odi_switch_cmd.c), so the next provisioning
-	 * starts from what the module load left, as omcid's tables do. */
+	/* What the MIB had programmed goes with it, in the driver too:
+	 * command 0, the stock resetMib, empties every upstream flow, queue
+	 * and T-CONT block and deletes every downstream flow, the extra
+	 * multicast ports' included (odi_switch_cmd.c), so the next
+	 * provisioning starts from what the module load left, as omcid's
+	 * tables do. */
 	if (apply_hw) {
 		uint8_t none[4] = { 0, 0, 0, 0 };
 		long rc = omci_drv_call(OMCI_MIB_RESET_CMD, none, sizeof none);
 
-		out_fmt("   [hw] upstream reset (mib reset) -> %d\n", rc);
+		out_fmt("   [hw] flow reset (mib reset) -> %d\n", rc);
 	}
 	for (int i = 0; i < USQ_MAX; i++)
 		usq_hw[i].meId = 0;

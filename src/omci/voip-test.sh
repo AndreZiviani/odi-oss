@@ -275,17 +275,17 @@ send "$log" 006b 48 0096 0001 "0010$S404"
 # Create: the table's maximum size, the critical and partial timeouts, the
 # format. Rows are 30 bytes: id, action (1 add, 0 remove), the token.
 send "$log" 0070 44 0091 0001 "00100fa03e8001"
-D1=$(pad "0101$(hexof 0T)" 30)
-D2=$(pad "0201$(hexof '*xx')" 30)
-D3=$(pad "0301$(hexof '[2-9]xxxxxxx')" 30)
-send "$log" 0071 48 0091 0001 "0400$D1"
-send "$log" 0072 48 0091 0001 "0400$D2"
-send "$log" 0073 48 0091 0001 "0400$D3"
+DIAL1=$(pad "0101$(hexof 0T)" 30)
+DIAL2=$(pad "0201$(hexof '*xx')" 30)
+DIAL3=$(pad "0301$(hexof '[2-9]xxxxxxx')" 30)
+send "$log" 0071 48 0091 0001 "0400$DIAL1"
+send "$log" 0072 48 0091 0001 "0400$DIAL2"
+send "$log" 0073 48 0091 0001 "0400$DIAL3"
 check "dial plan: three rows, newest first" \
-      "$(table "$log" b03 0091 0001 0400)" "$D3$D2$D1"
+      "$(table "$log" b03 0091 0001 0400)" "$DIAL3$DIAL2$DIAL1"
 send "$log" 0074 48 0091 0001 "0400$(pad 0100 30)"
 check "dial plan: action 0 removes that id" \
-      "$(table "$log" b04 0091 0001 0400)" "$D3$D2"
+      "$(table "$log" b04 0091 0001 0400)" "$DIAL3$DIAL2"
 send "$log" 0075 49 0091 0001 8000
 check "dial plan: the dial plan number is the rows held" \
       "$(answer "$log" 0075 | cut -c1-10)" "0080000002"
@@ -296,12 +296,12 @@ check "dial plan: the dial plan number is the rows held" \
 # network specific extensions pointer (18 bytes). Then the four tables.
 send "$log" 0080 44 003a 0001 "02000000000100008000000000000000ffff"
 check "the voice service profile is created" "$(answer "$log" 0080 | cut -c1-2)" "00"
-T1=$(pad 0101015e00 20); T2=$(pad 0201019000 20); T1B=$(pad 0101028000 20)
-send "$log" 0081 48 003a 0001 "0040$T1"
-send "$log" 0082 48 003a 0001 "0040$T2"
-send "$log" 0083 48 003a 0001 "0040$T1B"
+TONE1=$(pad 0101015e00 20); TONE2=$(pad 0201019000 20); TONE1B=$(pad 0101028000 20)
+send "$log" 0081 48 003a 0001 "0040$TONE1"
+send "$log" 0082 48 003a 0001 "0040$TONE2"
+send "$log" 0083 48 003a 0001 "0040$TONE1B"
 check "tone patterns: keyed by index, the second index 1 replaces the first" \
-      "$(table "$log" b05 003a 0001 0040)" "$T1B$T2"
+      "$(table "$log" b05 003a 0001 0040)" "$TONE1B$TONE2"
 send "$log" 0084 49 003a 0001 fffc
 check "a Get of the whole mask is one answer: the first table's size, 40 bytes" \
       "$(answer "$log" 0084 | cut -c1-14)" "00004000000028"
@@ -317,7 +317,7 @@ RE1=0101ffff00ffff
 send "$log" 0088 48 003a 0001 "0008$RE1"
 check "ringing events: one row" "$(table "$log" b09 003a 0001 0008)" "$RE1"
 check "tone patterns: untouched by the other three" \
-      "$(table "$log" b0a 003a 0001 0040)" "$T1B$T2"
+      "$(table "$log" b0a 003a 0001 0040)" "$TONE1B$TONE2"
 
 # ----------------------------------------- the profiles and the line
 # RTP profile: ports 50000-50100, DSCP EF, DTMF events. Its IP host
@@ -518,8 +518,8 @@ omcid_up "$log2"
 check "the respawn resumed from the snapshot" "$(grep -c 'snapshot loaded' "$log2")" "1"
 send "$log2" 00e0 49 0002 0000 8000
 check "with the same MIB data sync" "$(answer "$log2" 00e0 | cut -c7-8)" "$mds"
-check "the dial plan rows are back" "$(table "$log2" b11 0091 0001 0400)" "$D3$D2"
-check "the tone patterns are back" "$(table "$log2" b12 003a 0001 0040)" "$T1B$T2"
+check "the dial plan rows are back" "$(table "$log2" b11 0091 0001 0400)" "$DIAL3$DIAL2"
+check "the tone patterns are back" "$(table "$log2" b12 003a 0001 0040)" "$TONE1B$TONE2"
 check "the SIP response row is back" "$(table "$log2" b13 0096 0001 0010)" "$S404"
 send "$log2" 00e1 49 0096 0001 0e00
 check "the SIP agent's set TCP/UDP pointer is back" \
@@ -544,7 +544,7 @@ send "$log3" 00e4 49 0096 0001 0400
 check "with the Set made after the first resume" \
       "$(answer "$log3" 00e4 | cut -c1-14)" "00040000000708"
 check "and the rows the first resume brought back" \
-      "$(table "$log3" b14 0091 0001 0400)" "$D3$D2"
+      "$(table "$log3" b14 0091 0001 0400)" "$DIAL3$DIAL2"
 
 # A MIB reset drops every one of them, and the snapshot.
 send "$log3" 00f0 4f 0002 0000 ""

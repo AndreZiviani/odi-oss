@@ -1,0 +1,20 @@
+# Ten distinct refused groups: the ring keeps the last eight, newest first,
+# and the counter keeps all ten.
+0 policy
+snooping=1
+igmp_function=0
+allow=225.0.0.0-225.255.255.255
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+2 v2join 1 0 192.168.1.10 239.1.1.2
+3 v2join 1 0 192.168.1.10 239.1.1.3
+4 v2join 1 0 192.168.1.10 239.1.1.4
+5 v2join 1 0 192.168.1.10 239.1.1.5
+6 v2join 1 0 192.168.1.10 239.1.1.6
+7 v2join 1 0 192.168.1.10 239.1.1.7
+8 v2join 1 0 192.168.1.10 239.1.1.8
+9 v2join 1 0 192.168.1.10 239.1.1.9
+10 v2join 1 0 192.168.1.10 239.1.1.10
+11 state
+12 status

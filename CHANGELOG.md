@@ -26,6 +26,15 @@ listed here.
   the MIB upload is the stock one, record for record. Experimental: not yet
   run against an OLT that offers voice. Changing either key re-registers the
   ONU.
+
+- tools: `make lint` no longer passes silently when git is unusable. Its
+  git grep rules read a failing git grep as "no match", so a build from a
+  git worktree through `tools/remote-build.sh` (whose `.git` file points at
+  a path that does not exist on the build host) skipped them all. `make
+  lint` now stops with a message when the tree is not a usable git
+  checkout, and `tools/remote-build.sh` gives a worktree a throwaway
+  repository on the build host so the rules really run there.
+
 - omcid: the VoIP managed entities of G.988 (SIP over OMCI: the SIP agent and
   user, the voice service, media and RTP profiles, the dial plan, the
   application profile and feature codes, the voice CTP, the voice PM
@@ -42,6 +51,60 @@ listed here.
   entities (was 256), 32 entities wider than a row (was 16) and 255 table
   rows (was 128); its MIB snapshot reuses one buffer for saving and
   resuming, so its RAM still shrinks by about 37 KB overall.
+- kernel, omcid: a downstream GEM flow can now be deleted. A multicast GEM
+  port withdrawn by the OLT used to keep its flow, and the GEM port stayed
+  received, until the next reboot. Now its flow is taken out of the switch
+  when its last address row goes, when its multicast ME goes, and now also
+  when the GEM port network CTP that ME points at is deleted. A MIB reset
+  deletes every downstream flow too, as it already did the upstream ones,
+  so a GEM port the OLT does not provision again after the reset is no
+  longer received. The driver clears the row and reads it back before it
+  frees the flow id; a row that does not clear is logged and kept, and
+  omcid tries again. `/proc/odi_gpon/cam` now also lists the downstream GEM
+  port rows (`gem_cam`), as the hardware holds them.
+
+- igmpd: the PON-side drop of unjoined multicast is now its own opt-in key,
+  `IGMP_PON_DROP`, instead of coming with `IGMP_SNOOPING=1`. Snooping can run
+  (the copy of the host's IGMP, the group rows, the OLT's limits and lists)
+  with nothing dropped, which is the part that can cut a stream. Only
+  `1` drops; unset is off. A config with `IGMP_SNOOPING=1` that wants the
+  drop as before must now set `IGMP_PON_DROP=1` (and run `apply.sh igmp`);
+  without it, unjoined multicast is simply no longer dropped on the PON side.
+  Snooping is still experimental.
+  `igmpd` gets `-d` for it; without `-d` it never asks the switch to drop.
+
+- diag and the switch driver: `diag acl-probe` installs ACL rules by hand to
+  measure the multicast path before anything is built on it. A rule counts
+  the IPv4 frames of one protocol, or to one address prefix, entering the
+  UNI or the PON, in frames or in bytes, without changing where they go; or
+  it copies or takes the IGMP entering the UNI to the CPU, which counts what
+  arrives. Nothing else can be sent to the CPU, and nothing from the PON.
+  Nothing in the image installs a probe; they belong to the diag process that
+  installed them and go when it exits, and they and IGMP snooping exclude
+  each other. `tools/mcast-probe/mcast-probe.sh` runs the measurements on a
+  stick in one unattended run (about 15 minutes), puts everything back
+  however it ends, and prints a results block for `docs/SWITCH.md`, where
+  the questions it answers are listed, with what a first run on ISP1
+  settled: the trap and the copy of the host IGMP work, the counters count
+  frames and bytes (the FCS included), and nothing from the PON reached the
+  CPU. `diag help` now keeps a space between a long command and its
+  description.
+- tests: the OMCI suites no longer fail now and then on a busy machine. A
+  suite that restarts the daemon into the same log file waited for the
+  "answering as" line, and the shell had not always emptied the file yet, so it
+  read the previous daemon's line, went on before the new daemon was up, and
+  then lost its first frames or stopped it too early. Every start now empties
+  the log first. A failed `omcli --inject` in a suite also prints why.
+- igmpd: `igmpd -s` says why a channel does not play. It prints the multicast
+  policy in force (timers, group limit, the allowed ranges), the groups the
+  stick holds and the last eight joins it refused, newest first, with the
+  group, the VLAN, the reason (outside the OLT's access control lists, past
+  the group limit, or no free table entry) and how long ago; a set-top box
+  repeating the same refused report counts once with a repeat count. The data
+  comes from the state file igmpd already writes, which gains refusal counters
+  and the ring after the group lines; omcid reads it as before and an older
+  omcid skips what it does not know. Nothing an OLT sees changes. See
+  docs/TOOLS.md.
 - omcid: the extra multicast GEM ports an OLT names only in address rows now
   get a downstream flow. G.988 lets one multicast GEM interworking TP (ME 281)
   spread the channels over several GEM ports by writing more rows, with other
@@ -50,9 +113,7 @@ listed here.
   for them. Only the CTP's own port had a flow, so the others dropped their
   frames. Each such port now gets a multicast downstream flow like the CTP's,
   and loses it when its last row, or the ME, goes; a line whose OLT names one
-  port is unchanged. The kernel has no downstream flow delete yet, so a
-  withdrawn flow is refused there and stays in the switch until the next
-  change; this is logged.
+  port is unchanged.
 - omci: a Test on an entity omcid cannot test (anything but the ANI-G, the
   IP host included) is now refused with result 2, "not supported", instead of
   being acknowledged. Before, the OLT got a success and then waited for a Test

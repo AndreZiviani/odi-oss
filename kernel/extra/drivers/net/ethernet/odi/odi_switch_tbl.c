@@ -8,6 +8,7 @@
 #include "odi_switch_reg.h"
 
 #ifdef __KERNEL__
+#include <linux/errno.h>
 #include <linux/printk.h>
 #include <linux/ratelimit.h>
 #endif
@@ -52,6 +53,43 @@ int __odi_switch_gpon_ds_port_write(uint32_t idx, uint32_t gem_port_id, uint32_t
 		      ODI_SW_DSF_GEM_FLOW_TYPE_FLAGS_SET(0, traffic_cfg));
 
 	return rc;
+}
+
+/* One request on the GEM port CAM: the control word, the same with REQ
+ * set, then DONE polled; *ctl gets the control word the poll last read.
+ */
+static int ds_port_request(uint32_t idx, uint32_t op, uint32_t *ctl)
+{
+	uint32_t ind;
+
+	ind = ODI_SW_DSF_GEM_CAM_CTL_OP_SET(0, op);
+	ind = ODI_SW_DSF_GEM_CAM_CTL_CAM_ROW_SET(ind, idx);
+	odi_reg_write(ODI_SW_DSF_GEM_CAM_CTL_OFF, ind);
+	odi_reg_write(ODI_SW_DSF_GEM_CAM_CTL_OFF, ODI_SW_DSF_GEM_CAM_CTL_REQ_SET(ind, 1));
+	return odi_poll_reg(ODI_SW_DSF_GEM_CAM_CTL_OFF, ODI_SW_DSF_GEM_CAM_CTL_DONE,
+			    ODI_SW_DSF_GEM_CAM_CTL_DONE, ODI_SW_TABLE_POLL_DELAY_US,
+			    ODI_SW_TABLE_POLL_US, ctl);
+}
+
+int __odi_switch_gpon_ds_port_clear(uint32_t idx)
+{
+	uint32_t ctl = 0;
+	int rc;
+
+	lockdep_assert_held(&odi_switch_dsf_lock);
+
+	/* The flow type word first, as the boot clean does
+	 * (odi_gpon_init.c): a row whose clear never lands is then no longer
+	 * typed Ethernet, nor decrypting.
+	 */
+	odi_reg_write(ODI_SW_DSF_GEM_FLOW_TYPE(idx), ODI_SW_DSF_GEM_FLOW_TYPE_FLAGS_SET(0, 0));
+	rc = ds_port_request(idx, 3, NULL);	/* clear */
+	if (rc)
+		return rc;
+	rc = ds_port_request(idx, 2, &ctl);	/* read back */
+	if (rc)
+		return rc;
+	return (ctl & ODI_SW_DSF_GEM_CAM_CTL_ROW_VALID) ? -EIO : 0;
 }
 
 int odi_switch_gpon_ds_port_write(uint32_t idx, uint32_t gem_port_id, uint32_t traffic_cfg)

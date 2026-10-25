@@ -127,6 +127,7 @@ wait_done() {
 start_omcid() {
 	log=$1
 	shift
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -i "$INITLOG" "$@" > "$log" 2>&1 &
 	pid=$!
 	wait_count "$log" 'answering as' 1 30 || bad "$log: omcid did not come up"
@@ -381,6 +382,7 @@ stop_omcid
 clean_state
 store 1 11 0
 log=/tmp/rl-keys.log
+: > "$log"
 $Q respond/build/omcid -d -c "$CAPS" -g /tmp/rl-gpon-isp1 > "$log" 2>&1 &
 pid=$!
 wait_count "$log" 'answering as' 1 30 || bad "$log: omcid did not come up"
