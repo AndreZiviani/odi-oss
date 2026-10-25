@@ -13,10 +13,14 @@ port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1
 joins=1
 denied=2
 groups=1
+refused_acl=2
 group=225.2.2.2
+refused=acl 239.1.1.1 vid=0 at=3 n=2
 > end
 joins=1
 denied=2
 groups=1
+refused_acl=2
 group=225.2.2.2
+refused=acl 239.1.1.1 vid=0 at=3 n=2
 status 0

@@ -16,8 +16,10 @@ port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1
 joins=3
 denied=1
 groups=2
+refused_limit=1
 group=239.1.1.1
 group=239.1.1.2
+refused=limit 239.1.1.3 vid=0 at=3 n=1
 > 6 v2leave 1 0 192.168.1.10 239.1.1.2
 port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:02  leave  group 239.1.1.2  src 192.168.1.10
   del vid 0 01:00:5e:01:01:02 ports 0x0  (not written)
@@ -28,12 +30,16 @@ port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:03  v2 report  group 239.1
 joins=4
 denied=1
 groups=2
+refused_limit=1
 group=239.1.1.1
 group=239.1.1.3
+refused=limit 239.1.1.3 vid=0 at=3 n=1
 > end
 joins=4
 denied=1
 groups=2
+refused_limit=1
 group=239.1.1.1
 group=239.1.1.3
+refused=limit 239.1.1.3 vid=0 at=3 n=1
 status 0

@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- igmpd: `igmpd -s` says why a channel does not play. It prints the multicast
+  policy in force (timers, group limit, the allowed ranges), the groups the
+  stick holds and the last eight joins it refused, newest first, with the
+  group, the VLAN, the reason (outside the OLT's access control lists, past
+  the group limit, or no free table entry) and how long ago; a set-top box
+  repeating the same refused report counts once with a repeat count. The data
+  comes from the state file igmpd already writes, which gains refusal counters
+  and the ring after the group lines; omcid reads it as before and an older
+  omcid skips what it does not know. Nothing an OLT sees changes. See
+  docs/TOOLS.md.
 - omcid: the extra multicast GEM ports an OLT names only in address rows now
   get a downstream flow. G.988 lets one multicast GEM interworking TP (ME 281)
   spread the channels over several GEM ports by writing more rows, with other

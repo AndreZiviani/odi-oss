@@ -374,6 +374,7 @@ disabled NTP never shows an old sync.
 
     igmpd [-w] [-f] [-n COUNT]
     igmpd -r FILE
+    igmpd -s [STATE [POLICY]]
     igmpd [-w] -j GROUP -p PORTS [-v VID]
     igmpd [-w] -l GROUP [-v VID]
 
@@ -386,6 +387,8 @@ disabled NTP never shows an old sync.
     -l GROUP   one-shot: remove GROUP and exit
     -r FILE    replay a transcript of timestamped events (- is stdin) and
                print what the daemon decides; no device, no uid 4
+    -s         print the policy in force, the groups held and the last
+               refused joins, then exit (details below)
     -v VID     the VID a one-shot names (default 0); printed only, the
                entry is keyed on filtering id 0 (SVL)
     -h         this text; registers nothing
@@ -406,9 +409,39 @@ the result; it never opens `/dev/odi_sw` or the redirect device and refuses
     9 state                        # the state file it would write
 
 Other events: `v3join`, `v3leave`, `query PORT VID SRC`, `policy-file PATH`,
-`nopolicy`. A policy change is read at the next second the clock moves to.
+`nopolicy`, `status` (what `igmpd -s` prints). A policy change is read at the next second the clock moves to.
 Golden transcripts are in `src/igmp/test/replay`, run by `make test-igmp`;
 `src/omci/mcast-test.sh` replays the policy file omcid wrote.
+
+**Why a channel does not play.** `igmpd -s` answers it on the stick, without
+touching the switch or the redirect channel: the policy in force with its
+ranges, the counters, the groups held, and the last refused joins, newest
+first, each with its VLAN, the reason and how long ago:
+
+    policy: snooping, function 0, immediate leave, 2/125/1 s, limit 2, 1 allow + 0 static ranges
+      allow 225.0.0.0 - 225.255.255.255
+    joins 3, refused by the profile 2 (lists 1, group limit 1), table full 0
+    groups held: 2
+      225.1.1.1
+      225.1.1.2
+    recent refusals, newest first:
+      239.9.9.9  vid 0  outside the access control lists (acl)  12 s ago
+      225.1.1.3  vid 0  past the group limit (limit)  x3  40 s ago
+
+The three reasons are `acl` (outside the lists the OLT provisioned), `limit`
+(past the group limit of ME 310) and `full` (igmpd's own table of 128 entries
+has no free slot; not counted in ME 311's refused figure). A host that
+repeats the same refused report (an unsolicited report is sent twice) makes
+one entry with a count, and the ring keeps the last 8 distinct ones: it
+goes into the state file, which omcid reads in 4096 bytes next to up to 128
+group lines, so it is small and fixed, and a set-top box re-reports the
+group it wants every query interval, so a few entries show what is being
+asked for. The report is read from `/var/run/odi-mcast.state` (written by the
+daemon only under `-w`, which is how the service runs it) and
+`/var/run/odi-mcast.conf`; naming two files reads those instead, e.g. copies
+taken off a stick, and then times are the daemon's seconds, not ages.
+Nothing here is OMCI: the OLT sees the same ME 311 counters as before, and
+`denied` still holds the refusals by the lists and the limit.
 
 **Off unless asked for.** `svc-igmpd.sh` runs `igmpd -w` only while
 `IGMP_SNOOPING=1` is in the config store (`apply.sh igmp` applies a change);

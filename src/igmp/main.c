@@ -31,6 +31,7 @@
 #include "entry.h"
 #include "policy.h"
 #include "state.h"
+#include "status.h"
 #include "replay.h"
 #include "../omci/nl.h"
 #include "../omci/redirect_guard.h"
@@ -206,6 +207,7 @@ static void usage(void)
 {
 	out("usage: igmpd [-w] [-f] [-n COUNT]\n"
 	    "       igmpd -r FILE\n"
+	    "       igmpd -s [STATE [POLICY]]\n"
 	    "       igmpd [-w] -j GROUP -p PORTS [-v VID]\n"
 	    "       igmpd [-w] -l GROUP [-v VID]\n"
 	    "  Registers for packet-redirect uid 4, describes every IGMP control\n"
@@ -224,6 +226,9 @@ static void usage(void)
 	    "  -r FILE    replay a transcript of timestamped events (- is stdin) through\n"
 	    "             the same decision code and print what it decides; touches\n"
 	    "             neither /dev/odi_sw nor uid 4 (format: replay.c)\n"
+	    "  -s         print the policy in force, the groups held and the last\n"
+	    "             refused joins, from the daemon's files (or the two named),\n"
+	    "             and exit; touches neither the switch nor uid 4\n"
 	    "  -h         this text; registers nothing\n");
 }
 
@@ -325,9 +330,19 @@ static void settle_lease(struct igmp_db *db, uint32_t want, uint32_t now)
 	lease = want;
 }
 
-/* The join count the state file last carried: reports that change nothing
- * still count, and the file follows them once a second at most. */
-static uint32_t state_joins;
+/* The join and refusal counts the state file last carried: reports that
+ * change nothing still count, and the file follows them once a second at
+ * most. */
+static uint32_t state_joins, state_refusals;
+
+static uint32_t refusal_total(const struct igmp_db *db)
+{
+	uint32_t t = 0;
+
+	for (uint32_t r = 1; r < IGMP_REFUSE_REASONS; r++)
+		t += db->refused[r];
+	return t;
+}
 
 static void write_state(const struct igmp_db *db)
 {
@@ -336,6 +351,7 @@ static void write_state(const struct igmp_db *db)
 	long fd;
 
 	state_joins = db->joins;
+	state_refusals = refusal_total(db);
 	if (!n || !igmp_hw_enabled())
 		return;
 	fd = sys_create(IGMP_STATE_TMP_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -368,14 +384,7 @@ static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 		pol_len = n;
 		igmp_policy_parse(tmp, n, &np);
 		pol = np;
-		out_fmt("policy: %s, function %d, %s leave, %d/%d/%d s, limit %d, "
-			"%d allow + %d static ranges%s\n",
-			pol.snooping ? "snooping" : "not snooping",
-			(long)pol.function, pol.immediate_leave ? "immediate" : "timed",
-			(long)pol.robustness, (long)pol.query_interval,
-			(long)pol.last_member_query, (long)pol.max_groups,
-			(long)pol.nallow, (long)pol.nstatic,
-			pol.overflow ? " (too many: not enforced)" : "");
+		igmp_policy_describe(&pol);
 		if (!pol.snooping) {
 			/* Back to flooding. Releasing the lease deletes the rows,
 			 * so the table starts again from nothing. */
@@ -415,7 +424,7 @@ void igmpd_tick(struct igmp_db *db, uint32_t now, int first)
 		resync_at = now + 5;
 		resync(db);
 	}
-	if (changes || db->joins != state_joins)
+	if (changes || db->joins != state_joins || refusal_total(db) != state_refusals)
 		write_state(db);
 }
 
@@ -475,6 +484,14 @@ void igmpd_state_dump(const struct igmp_db *db)
 	out_n(buf, (int)n);
 }
 
+void igmpd_status_dump(const struct igmp_db *db)
+{
+	static char buf[IGMP_STATE_MAX];
+	uint32_t n = igmp_state_format(db, buf, sizeof buf);
+
+	igmp_status_print(&pol, 1, buf, n, 0);
+}
+
 int main(int argc, char **argv)
 {
 	static uint8_t buf[NLMSG_HDR + IGMP_MAX_PAYLOAD];
@@ -498,6 +515,11 @@ int main(int argc, char **argv)
 			force = 1;
 		} else if (str_eq(argv[i], "-w")) {
 			igmp_hw_set_enabled(1);
+		} else if (str_eq(argv[i], "-s")) {
+			const char *sp = i + 1 < argc ? argv[i + 1] : 0;
+			const char *pp = sp && i + 2 < argc ? argv[i + 2] : 0;
+
+			return igmp_status_run(sp, pp);
 		} else if (str_eq(argv[i], "-r") && i + 1 < argc) {
 			replay_file = argv[++i];
 		} else if (str_eq(argv[i], "-n") && i + 1 < argc) {
