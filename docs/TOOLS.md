@@ -426,8 +426,18 @@ says IGMP function 0. The profile also supplies
 
 - the timers: robustness, query interval and maximum response time give the
   membership interval (260 s at the defaults), robustness times the last
-  member query interval the time a member that left is kept;
-- immediate leave: the port is removed on the leave itself;
+  member query interval the time a member that left is kept. igmpd never
+  sees the OLT's queries, only the host answering them, so a group that the
+  host re-reports at a longer interval than the profile says is held for
+  robustness times that observed interval plus the response time instead
+  (never less than the profile's figure, at most 1800 s; the first
+  membership of a group still runs on the profile alone);
+- immediate leave: the port is removed on the leave itself. Without it
+  igmpd cannot send the group-specific query a router would send, so it keeps
+  the leaving port for the last-member time and relies on the OLT's own
+  query reaching any other set-top box behind that port: its report keeps
+  the port. An OLT that does not query leaves such a box without the stream
+  until its next report;
 - the group limit of ME 310 and the dynamic and static access control lists
   of ME 309: a join outside the lists, or past the limit, gets no row, so
   with the PON's drop on the stream never reaches the host. An empty list

@@ -10,12 +10,12 @@ port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:02:02:02  v2 report  group 225.2
 > 3 v2join 1 0 192.168.1.10 239.1.1.1
 port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
 > 4 state
-joins=3
+joins=1
 denied=2
 groups=1
 group=225.2.2.2
 > end
-joins=3
+joins=1
 denied=2
 groups=1
 group=225.2.2.2

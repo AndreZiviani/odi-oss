@@ -316,13 +316,13 @@ G1=$(pad 000000000000ef010203 24)
 G2=$(pad 000000000000e1c80709 24)
 check "311 active group list: one 24-byte row a group, the group in the destination field" \
       "$(table "$log" b11 0137 0001 0800)" "$G1$G2"
-# The same file as igmpd itself writes it (the replay's final state: three
-# joins, one refused, 225.2.2.2 held and 225.3.3.3 left): one test of the
+# The same file as igmpd itself writes it (the replay's final state: two
+# accepted joins, one refused and not counted, 225.2.2.2 held and 225.3.3.3 left): one test of the
 # format between the two processes, in place of two halves with a fixture
 # each.
 cp /tmp/mcast-state-from-igmpd /var/run/odi-mcast.state
 check "311 JoinMsgCounter from igmpd's own state file" \
-      "$(send "$log" 0073 49 0137 0001 "2000" && answer "$log" 0073 | cut -c7-14)" "00000003"
+      "$(send "$log" 0073 49 0137 0001 "2000" && answer "$log" 0073 | cut -c7-14)" "00000002"
 check "311 active group list from igmpd's own state file: the group still held" \
       "$(table "$log" b12 0137 0001 0800)" "$(pad 000000000000e1020202 24)"
 rm -f /var/run/odi-mcast.state

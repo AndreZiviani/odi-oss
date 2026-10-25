@@ -120,8 +120,11 @@ check "309 static ACL: untouched by the dynamic table's rows" \
       "$(table "$log" b06 0135 0001 0100)" ""
 
 # ----------------------------- class 281, IPv4 table and the multicast flag
-# CTP 5 / GEM 4095, downstream only; class 281 instance 1 on it.
+# CTP 5 / GEM 4095, downstream only; class 281 instance 1 on it. The flow
+# line is written when the change is applied, which can be a moment after the
+# frame is answered, so each positive count waits for its line first.
 send "$log" 0030 44 010c 0005 "0fff00000200000000"
+need "$log" 'gem 4095 ds flow 0 .* mcast 0 ' 10 1
 check "a CTP with no multicast address table is sent without the flag" \
       "$(grep -c 'gem 4095 ds flow 0 .* mcast 0 ' "$log")" "1"
 send "$log" 0031 44 0119 0001 "0005"
@@ -129,6 +132,7 @@ A1=0fff0000e0000000efffffff
 A2=0fff0001e8000000e8ffffff
 A1B=0fff0000e0000000e00000ff
 send "$log" 0032 48 0119 0001 "0080$A1"
+need "$log" 'gem 4095 ds flow 0 .* mcast 1 ' 10 1
 check "the first address row sends the flow again, flagged multicast" \
       "$(grep -c 'gem 4095 ds flow 0 .* mcast 1 ' "$log")" "1"
 send "$log" 0033 48 0119 0001 "0080$A2"
@@ -141,10 +145,12 @@ send "$log" 0035 48 0119 0001 "0080$(pad 0fff0000 12)"
 send "$log" 0036 48 0119 0001 "0080$(pad 0fff0001 12)"
 check "281 IPv4: zero addresses delete; the table is empty" \
       "$(table "$log" b08 0119 0001 0080)" ""
+need "$log" 'gem 4095 ds flow 0 .* mcast 0 ' 10 2
 check "the last row gone, the flow is sent again without the flag" \
       "$(grep -c 'gem 4095 ds flow 0 .* mcast 0 ' "$log")" "2"
 send "$log" 0037 48 0119 0001 "0080$A1"
 send "$log" 0038 46 0119 0001 ""                       # Delete 281/1
+need "$log" 'gem 4095 ds flow 0 .* mcast 0 ' 10 3
 check "deleting the class 281 clears the flag" \
       "$(grep -c 'gem 4095 ds flow 0 .* mcast 0 ' "$log")" "3"
 
