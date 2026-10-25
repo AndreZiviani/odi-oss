@@ -1193,7 +1193,7 @@ what IGMP snooping adds. The data path needs no programming: a frame on the
 multicast GEM port is flagged by the downstream flow's type (below), the
 GPON MAC passes it, and the switch floods it to the host unless a row or a
 drop says otherwise. Snooping is opt-in (`IGMP_SNOOPING`, `docs/TOOLS.md`,
-`igmpd`) and only prunes.
+`igmpd`), and its pruning of the PON side is a second opt-in (`IGMP_PON_DROP`).
 
 What was read on a stick (ISP1, read-only) and what is taken from another
 open implementation's measurements on the same chip. Nothing below was
@@ -1264,16 +1264,148 @@ and the isolation masks are not touched, and `test/odi_switch_mcast_test.c`
 checks the rule by what it matches (the UNI port and IGMP, nothing else, the
 PON least of all).
 
-What is not known. The copy rule follows another implementation's decoded
-layout and the one rule the stock replay writes; it has not been run here,
-and neither has a frame been matched against a static multicast row (the row
-layout was checked by reading it back, `docs/KERNEL.md`). Whether the
-lookup is keyed on the MAC or on the group address follows
-`L2_LOOKUP_SETUP` bit 23, which reads 0 here (MAC); another implementation
-measured the MAC-keyed row steering the frames. Those are what a first run
-with a real stream has to check, with `diag l2-table get all`, the port
-counters (`diag mib dump counter port all`, ports 0 and 2) and
+### ACL probes
+
+`diag acl-probe` (`odi_switch_acl_probe.c`, `ODI_SW_IOC_ACL_PROBE`) installs
+rules by hand to measure what this section otherwise takes from another
+implementation: eight slots, ACL entries 88 to 95 on template 4 (slot 0 the
+EtherType, 1 the IPv4 protocol, 2 and 3 the low and high halves of the IPv4
+destination; the snooping copy keeps entry 8 and template 6, the extended
+VLAN discards 16 to 47 and template 5). Slot n counts in log counter
+16 + 2n (`LOG_CNT`, 0x032600 + 4i), and its pair's bit of `LOG_TYPE`
+(0x034008) says frames or bytes. Those two layouts, the action fields (log
+class type at bits 36:35 and counter at 34:30 of the action entry, class
+enable bit 3; trap 3 and mirror 2 at bits 42:41) and the receive reason of a
+frame an ACL rule sends the CPU (128 plus the entry) are another
+implementation's measurements; the probes are how they get checked here.
+`LOG_TYPE` is written whole and never read (nothing else uses the log
+counters, and no read of it has been made on a stick), and is left at 0
+when the last probe goes; the counter itself is read, and a probe reports
+what it counted as the difference from the moment it went in.
+
+What a probe may do is narrow. A counting rule applies the log class alone
+(class word 0x08), which leaves the forwarding of the frames to the switch.
+A copy (`mirror`, to the CPU port) or a take (`trap`, no port) matches IGMP
+entering the UNI and nothing else; a rule on the PON port can only count. A
+frame a probe sends the CPU is counted by `odi_omci.c` (an RX hook below the
+IGMP one, registered when the first probe goes in, which counts by receive
+reason and takes nothing), and then goes where it would have gone: from the
+UNI to the net device, and the NIC still drops anything from the PON no hook
+took, so the PON isolation below is unchanged. The probes belong to the open
+file of `/dev/odi_sw` that installed the first one: its close removes them
+all, and another file is refused (EBUSY) until then. Probes and the snooping
+lease exclude each other, since the copy rule and a probe of the same frames
+would decide for each other. `test/odi_switch_acl_probe_test.c` checks each
+rule by what it matches and decodes its action by bit.
+
+`tools/mcast-probe/mcast-probe.sh` runs the measurements below on a stick as
+one nohup script: counting windows on both ports, the same in bytes, two
+identical rules, a copy and a take of the UNI IGMP, and a static row for a
+test group naming port 1 alone. The UNI half needs IGMP and multicast from
+the host; the script header has the loop to run on the host beside it. It
+writes no flash and nothing of the boot slots, and every way out (end, a
+signal, the holder of the probes ending) leaves the switch as found;
+`test/mcast_probe_test.sh` runs it against stubs and kills it both ways.
+
+#### What is not known
+
+The copy rule follows another implementation's decoded layout and the one
+rule the stock replay writes; it has not been run here, and neither has a
+frame been matched against a static multicast row (the row layout was
+checked by reading it back, `docs/KERNEL.md`). Whether the lookup is keyed
+on the MAC or on the group address follows `L2_LOOKUP_SETUP` bit 23, which
+reads 0 here (MAC); another implementation measured the MAC-keyed row
+steering the frames. The probe run answers these, window by window:
+
+- **Does the OLT's IGMP reach the ONU, and how often?** `count`, PON in,
+  IGMP: the general queries a receive-only path to the CPU would see.
+  (The VLAN they arrive in is not counted yet.)
+- **How much other IPv4 multicast enters by the PON?** `count`, PON in,
+  other IPv4 multicast; against `MIB port 2 in multicast`.
+- **Does a counting rule leave forwarding alone?** `count`: the UNI IGMP and
+  multicast are counted while `MIB port 2 out multicast` keeps moving, the
+  PON's while `MIB port 0 out multicast` does.
+- **Is a log counter free-running, not cleared by a read?** Every count is
+  read again a second after the window: a cleared counter would read low.
+- **Does `LOG_TYPE` switch a pair to bytes, and what does a byte count
+  include?** `bytes`, against the frame rates of `count`; and `trap`, whose
+  rule counts bytes while the CPU sums the length of each frame it gets
+  (the difference a frame says whether the switch counts the FCS, and a
+  tag the NIC takes off).
+- **When two rules match the same frame, does only the lower entry count?**
+  `overlap`: entry 88 should count, entry 89 not.
+- **Does a copy of the UNI IGMP reach the CPU once a frame, with reason 128
+  plus the entry and source port 0, and still reach the PON?** `mirror`:
+  `cpu` equal to the count, `cpu_ports` 0x1, nothing by another reason, and
+  `MIB port 2 out multicast` at the rate of `count`. This is the mechanism
+  of the snooping copy, without igmpd.
+- **Does a take reach the CPU and nothing else?** `trap`: `cpu` frames at
+  the IGMP rate, and `MIB port 2 out multicast` lower than in `count` by
+  that rate.
+- **Does a static row keyed on the group MAC (SVL, filtering id 0) steer an
+  untagged frame from the UNI?** `row`: with the row naming port 1 alone,
+  the frames to the group stop reaching the PON (`MIB port 2 out
+  multicast` lower than in `count` by their rate). A tagged frame is the
+  same run with the host loop on a VLAN interface.
+- **Does anything from the PON reach the CPU meanwhile?** `isolation`:
+  `rx_pon_dropped` stays 0.
+
+Not answered by a run on a line without IPTV: the OLT's stream on its
+multicast GEM port, the PON drop with a real stream, the tags on the fibre,
+and igmpd's own delivery path (the run does not start it). Those are what a
+first run with a real stream has to check, with `diag l2-table get all`, the
+port counters (`diag mib dump counter port all`, ports 0 and 2) and
 `/proc/odi_omci` (`igmp_delivered`, `igmp_dropped`).
+
+#### Measured on a stick
+
+ISP1, one run of `tools/mcast-probe/mcast-probe.sh` (848 s, windows as in
+the script), on an image with this tree's probes. The line carries no IPTV,
+and the OLT sent no IGMP during the run. The host sent its IGMP (80 reports
+in the 300 s count window); the multicast it was meant to send to the test
+group never left it, so no frame to the group entered the UNI. The run
+ended with every probe and the test row removed.
+
+What is now known:
+
+- **A counting rule counts and leaves forwarding alone.** The 80 reports
+  from the host were counted on the UNI, and the PON sent out 80
+  multicast frames in the same window (`MIB port 2 out multicast`).
+- **A log counter is free-running.** Every count read the same a second
+  later, with no traffic between.
+- **`LOG_TYPE` switches a pair to bytes, and a byte count includes the
+  FCS.** The same reports counted 2048 bytes for 32 frames, 64 bytes a
+  frame, while the CPU received them as 1920 bytes, 60 a frame: 4 bytes a
+  frame more on the switch, the FCS (untagged frames).
+- **A copy (`mirror`) of the UNI IGMP reaches the CPU once a frame and still
+  goes on.** 32 counted, 32 at the CPU, all with the receive reason 128 plus
+  the entry and source port 0, none by another reason, and 32 multicast
+  frames out of the PON. This is the mechanism the snooping copy uses.
+- **A trap takes the UNI IGMP to the CPU and nowhere else.** 32 frames at
+  the CPU by the rule's reason, and no multicast frame out of the PON in that
+  window. Upstream tag control by trap and re-send can rest on this.
+- **Nothing from the PON reached the CPU.** Over the run `rx_pon` (55)
+  equals the OMCI frames delivered (55), and `rx_pon_dropped` stayed 0.
+
+What is still not known, and why:
+
+- **Whether the OLT's IGMP reaches the ONU, and in which VLAN.** None
+  arrived: this OLT does not query a line without IPTV.
+- **Whether a counting rule counts on the PON ingress.** The two PON rules
+  counted 0 while the PON received 237 multicast frames
+  (`MIB port 2 in multicast`, all flooded to the UNI). With no IPv4
+  multicast counted on the UNI either, those were most likely IPv6 or
+  non-IP multicast, which the rules do not match; a PON rule that counts
+  nothing at all would read the same. A line with IPTV, or any IPv4
+  multicast from the OLT, settles it.
+- **Whether only the lower of two matching entries counts.** `overlap` ran
+  on the PON ingress and saw no frame.
+- **Whether a static row keyed on the group MAC steers a frame.** The row
+  went in (`01:00:5E:7F:4D:01`, SVL, port 1 alone, read back) but no frame
+  to the group came from the host. A second run with a sender that works,
+  untagged and then tagged, answers it.
+- Everything a real stream decides (the stream on its multicast GEM port,
+  the PON drop, tags on the fibre), and igmpd's own delivery path, as above.
 
 ## PON port isolation
 

@@ -1,0 +1,16 @@
+# A join outside the profile's lists is refused: no row, a count under "acl"
+# and one entry in the recent refusals. The same host repeating its report
+# (an unsolicited report is sent twice) is one entry with a count, not two.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+allow=225.0.0.0-225.255.255.255
+static=226.1.1.1-226.1.1.1
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+2 v2join 1 0 192.168.1.10 239.1.1.1
+3 v2join 1 100 192.168.1.10 239.1.1.1
+4 v2join 1 0 192.168.1.10 225.2.2.2
+5 status

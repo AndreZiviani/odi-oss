@@ -21,6 +21,15 @@ static void ok(int cond, const char *what)
 	}
 }
 
+/* A profile whose only range is 225/8: every other group is refused. */
+static void acl225(struct igmp_db *db)
+{
+	db->pol.snooping = 1;
+	db->pol.nallow = 1;
+	db->pol.allow[0].lo = 0xe1000000;
+	db->pol.allow[0].hi = 0xe1ffffff;
+}
+
 static struct igmp_rx mk(uint8_t type, uint8_t port, uint16_t vid,
 			 uint32_t group)
 {
@@ -228,7 +237,11 @@ int main(void)
 		igmp_db_rx(&db, &rx, 9000, ch, 8);
 	}
 	ok(igmp_db_count(&db) == IGMP_MAX_GROUPS, "the table fills to its limit");
-	ok(db.dropped == 4, "and counts the four it turned away");
+	ok(db.refused[IGMP_REFUSE_FULL] == 4 && db.denied == 0,
+	   "and counts the four it turned away, as table-full and not as profile refusals");
+	ok(db.ring[0].reason == IGMP_REFUSE_FULL && db.ring[0].group == 0xe5010000u + IGMP_MAX_GROUPS &&
+	   db.ring[3].group == 0xe5010000u + IGMP_MAX_GROUPS + 3 && db.refusals == 4,
+	   "each of the four is in the ring, in order");
 
 
 	/* v3 record types that carry no membership. ALLOW_NEW_SOURCES with no
@@ -422,5 +435,36 @@ int main(void)
 
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();
+
+	/* The refusal ring: group.h says why it is eight and why a repeat of
+	 * the newest entry is not a new one. */
+	igmp_db_init(&db);
+	acl225(&db);
+	for (int i = 0; i < 3; i++) {
+		rx = mk(IGMP_V2_REPORT, 1, 7, 0xef010101);
+		igmp_db_rx(&db, &rx, 100 + (uint32_t)i, ch, 8);
+	}
+	ok(db.refusals == 1 && db.ring[0].count == 3 && db.ring[0].at == 102 &&
+	   db.refused[IGMP_REFUSE_ACL] == 3,
+	   "the same refusal three times in a row is one entry with a count, three in the total");
+	rx = mk(IGMP_V2_REPORT, 1, 8, 0xef010101);
+	igmp_db_rx(&db, &rx, 103, ch, 8);
+	ok(db.refusals == 2 && db.ring[1].vid == 8,
+	   "the same group on another VLAN is its own entry");
+	rx = mk(IGMP_V2_REPORT, 1, 7, 0xef010101);
+	igmp_db_rx(&db, &rx, 104, ch, 8);
+	ok(db.refusals == 3, "an older entry coming back after another one is a new entry");
+	igmp_db_init(&db);
+	acl225(&db);
+	for (int i = 0; i < IGMP_REFUSAL_RING + 3; i++) {
+		rx = mk(IGMP_V2_REPORT, 1, 7, 0xef000100 + (uint32_t)i);
+		igmp_db_rx(&db, &rx, 200 + (uint32_t)i, ch, 8);
+	}
+	ok(db.refusals == IGMP_REFUSAL_RING + 3 &&
+	   db.refused[IGMP_REFUSE_ACL] == IGMP_REFUSAL_RING + 3,
+	   "past the ring size the total keeps counting");
+	ok(db.ring[(db.refusals - 1) % IGMP_REFUSAL_RING].group == 0xef000100 + IGMP_REFUSAL_RING + 2 &&
+	   db.ring[db.refusals % IGMP_REFUSAL_RING].group == 0xef000103,
+	   "the newest is the last written and the oldest kept is the one after it");
 	return failures ? 1 : 0;
 }

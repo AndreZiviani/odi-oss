@@ -6,6 +6,7 @@
 #include "mib.h"
 #include "omci_flows.h"
 #include "l2.h"
+#include "acl_probe.h"
 
 /* Width of the syntax column in the help listing: the longest syntax line
  * plus two spaces. */
@@ -372,6 +373,9 @@ void cmd_list(const struct cmd_def *const list[], int n)
 	for (int i = 0; i < n; i++) {
 		out("  ");
 		out_str_pad(list[i]->syntax, HELP_SYNTAX_WIDTH);
+		/* A syntax as wide as the column or wider still gets a space. */
+		if (str_len(list[i]->syntax) >= HELP_SYNTAX_WIDTH)
+			out_char(' ');
 		out(list[i]->help);
 		out_char('\n');
 	}
@@ -426,6 +430,14 @@ int cmd_run(const struct parsed *p)
 		return cmd_l2_all();
 	case CMD_L2_INDEX:
 		return cmd_l2_index(p->u[0]);
+	case CMD_PROBE_SET:
+		return cmd_probe_set(p->cmd->sel, p->u);
+	case CMD_PROBE_SHOW:
+		return cmd_probe_show(p->u[0]);
+	case CMD_PROBE_DELETE:
+		return cmd_probe_delete(p->u[0]);
+	case CMD_PROBE_DELETE_ALL:
+		return cmd_probe_delete(ODI_SW_PROBE_ALL);
 	}
 	return 1;
 }

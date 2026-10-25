@@ -56,7 +56,7 @@
 #                        so killing the running one is the whole apply.
 #
 #     apply.sh igmp      SERVICE RESTART. Restarts igmpd so it re-reads
-#                        IGMP_SNOOPING (the gate on the key in svc-igmpd.sh), the
+#                        IGMP_SNOOPING and IGMP_PON_DROP (read in svc-igmpd.sh), the
 #                        same way as ntp below. The switch goes back to
 #                        flooding for the moment the daemon is gone: its
 #                        lease on the switch is its open /dev/odi_sw.

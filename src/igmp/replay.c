@@ -27,6 +27,8 @@
  *   T policy-file PATH       the policy file is this file's content now
  *   T nopolicy               the policy file is gone
  *   T state                  print the state file igmpd would write
+ *   T status                 print what `igmpd -s` would, from that file and
+ *                            the policy in force
  *
  * T is whole seconds on the synthetic clock, never backwards. Before every
  * event except the three policy ones the daemon runs its once-a-second step if
@@ -339,6 +341,8 @@ int igmp_replay(const char *path)
 			/* the step above is the event */
 		} else if (str_eq(w[1], "state") && nw == 2) {
 			igmpd_state_dump(&db);
+		} else if (str_eq(w[1], "status") && nw == 2) {
+			igmpd_status_dump(&db);
 		} else if (str_eq(w[1], "rx") && nw == 3) {
 			int n = unhex(w[2], pay, (int)sizeof pay);
 

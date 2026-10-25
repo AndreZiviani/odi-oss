@@ -61,6 +61,7 @@ gpon 5
 printf '1\n' > /tmp/alarms-link
 
 log=/tmp/omcid-alarms.log
+: > "$log"
 $Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/alarms-gpon -l /tmp/alarms-link > "$log" 2>&1 &
 pid=$!
 omcid_up "$log"

@@ -148,10 +148,6 @@ static struct igmp_entry *find_or_add(struct igmp_db *db, uint16_t vid,
 			return e;
 		}
 	}
-	/* Full. Counted rather than silently ignored: a snooper that quietly
-	 * stops learning looks exactly like one that is working, and the table
-	 * being too small is a number somebody has to be able to read. */
-	db->dropped++;
 	return 0;
 }
 
@@ -184,6 +180,33 @@ static int emit(struct igmp_change *out, int max, int n, uint8_t kind,
 	return n + 1;
 }
 
+/* One refusal, into the counts and the ring (group.h says why the ring is
+ * small). */
+static void refuse(struct igmp_db *db, uint8_t reason, uint16_t vid,
+		   uint32_t group, uint32_t now)
+{
+	struct igmp_refusal *r = 0;
+
+	db->refused[reason]++;
+	if (db->refusals) {
+		r = &db->ring[(db->refusals - 1) % IGMP_REFUSAL_RING];
+		if (r->reason != reason || r->vid != vid || r->group != group)
+			r = 0;
+	}
+	if (r) {
+		r->count++;
+		r->at = now;
+		return;
+	}
+	r = &db->ring[db->refusals % IGMP_REFUSAL_RING];
+	r->reason = reason;
+	r->vid = vid;
+	r->group = group;
+	r->at = now;
+	r->count = 1;
+	db->refusals++;
+}
+
 /* A port joins, or refreshes what it already had. */
 static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 		uint32_t now, struct igmp_change *out, int max, int n)
@@ -201,6 +224,7 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 	 * ONU that leaves the OLT as the authority. */
 	if (!igmp_policy_allows(&db->pol, group)) {
 		db->denied++;
+		refuse(db, IGMP_REFUSE_ACL, vid, group, now);
 		return n;
 	}
 	e = find(db, vid, group);
@@ -209,12 +233,17 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 	if (!e && db->pol.max_groups && !group_known(db, group) &&
 	    (uint32_t)igmp_db_dynamic_count(db) >= db->pol.max_groups) {
 		db->denied++;
+		refuse(db, IGMP_REFUSE_LIMIT, vid, group, now);
 		return n;
 	}
 	if (!e)
 		e = find_or_add(db, vid, group);
-	if (!e)
+	if (!e) {
+		/* Not in denied: that is the profile's refusals, the ME 311
+		 * figure; a full table is igmpd's own limit. */
+		refuse(db, IGMP_REFUSE_FULL, vid, group, now);
 		return n;
+	}
 	/* Counted here, past every refusal: ME 311 attribute 3 is the joins
 	 * that were accepted (G.988 9.3.29), and a refused one is in denied. */
 	db->joins++;
