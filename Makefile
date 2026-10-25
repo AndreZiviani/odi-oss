@@ -374,6 +374,18 @@ lint:
 		exit 1; \
 	fi
 	@echo "no vendor source citations: clean"
+	@# CI runs each OMCI suite as a job of its own, from a matrix that is a
+	@# second list of them; three suites were left out of it and ran only
+	@# under make test. The two lists must name the same suites.
+	@m=$$(sed -n 's/^ *suite: \[\(.*\)\]$$/\1/p' .github/workflows/ci.yml | tr -d ' ' | tr ',' '\n' | sort); \
+	o=$$(printf '%s\n' $(OMCI_SUITES) | sort); \
+	if [ "$$m" != "$$o" ]; then \
+		echo "lint: the omci matrix in .github/workflows/ci.yml and OMCI_SUITES differ:" >&2; \
+		printf '%s\n' "$$m" > /tmp/odi-lint-m; printf '%s\n' "$$o" > /tmp/odi-lint-o; \
+		diff /tmp/odi-lint-m /tmp/odi-lint-o >&2; rm -f /tmp/odi-lint-m /tmp/odi-lint-o; \
+		exit 1; \
+	fi
+	@echo "CI omci matrix matches OMCI_SUITES: clean"
 
 clean:
 	rm -rf build out

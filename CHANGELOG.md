@@ -18,6 +18,13 @@ listed here.
   the last-member time, because igmpd cannot send a group-specific query yet;
   `docs/TOOLS.md` says what that relies on. The golden transcripts of the
   refused-join and group-limit cases change only in their joins line, and so does the ME 311 check fed from igmpd's own state file (the refused join is no longer counted).
+- CI: the OMCI suites `tables`, `alarms` and `writes` run in CI too; they were
+  left out of the job matrix and ran only under `make test`. `make lint` now
+  fails when that matrix and `OMCI_SUITES` in the Makefile name different
+  suites. The `tables` suite waits for the downstream flow line before it
+  counts the multicast flag, instead of reading the log the moment the frame
+  is answered, which failed now and then.
+
 - igmpd: `igmpd -r FILE` replays a transcript of timestamped events (IGMP
   frames with their port and VLAN, clock ticks, policy file changes) through
   the daemon's own decision code and prints what it would do: the rows it
