@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- tools: `make lint` no longer passes silently when git is unusable. Its
+  git grep rules read a failing git grep as "no match", so a build from a
+  git worktree through `tools/remote-build.sh` (whose `.git` file points at
+  a path that does not exist on the build host) skipped them all. `make
+  lint` now stops with a message when the tree is not a usable git
+  checkout, and `tools/remote-build.sh` gives a worktree a throwaway
+  repository on the build host so the rules really run there.
+
 - omcid: the VoIP managed entities of G.988 (SIP over OMCI: the SIP agent and
   user, the voice service, media and RTP profiles, the dial plan, the
   application profile and feature codes, the voice CTP, the voice PM
