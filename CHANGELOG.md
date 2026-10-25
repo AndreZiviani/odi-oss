@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- tools: `make lint` no longer passes silently when git is unusable. Its
+  git grep rules read a failing git grep as "no match", so a build from a
+  git worktree through `tools/remote-build.sh` (whose `.git` file points at
+  a path that does not exist on the build host) skipped them all. `make
+  lint` now stops with a message when the tree is not a usable git
+  checkout, and `tools/remote-build.sh` gives a worktree a throwaway
+  repository on the build host so the rules really run there.
+
 - kernel, omcid: a downstream GEM flow can now be deleted. A multicast GEM
   port withdrawn by the OLT used to keep its flow, and the GEM port stayed
   received, until the next reboot. Now its flow is taken out of the switch
