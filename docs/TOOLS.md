@@ -644,6 +644,9 @@ omcli uses omcid's own queue and commands:
                                          returns; ends with an `N rows` line.
                                          Credentials the OLT provisioned are
                                          masked, see below
+    omcli voip [--secrets | --secrets-list]
+                                         the phone lines the OLT provisioned,
+                                         one block per POTS port; see below
     omcli caps                           the device capability blob, decoded
     omcli tcont                          T-CONT entity id to driver index, the
                                          PLOAM Alloc-IDs, and each T-CONT's
@@ -679,6 +682,25 @@ fields; an attribute that was never set still shows its zeros. `--secrets`
 (anywhere on the command line, native or `--vendor`) prints the real bytes.
 omcid also keeps the contents of a Create or Set of those classes out of its
 log. The diag bundle never passes `--secrets`.
+
+`omcli voip` follows the pointers between the SIP entities an OLT provisions
+and prints, per phone port: the SIP user (number and display name), the login
+(username, realm), the SIP agent (proxy, outbound proxy, registrar, host part,
+port and protocol, DNS, registration expiry), the media profile (codecs and
+packet periods, DTMF mode, RTP ports and DSCP), the voice service profile, the
+voice VLAN and priority the OLT sets for the IP host the voice rides on, and
+the line status the stick reports to the OLT ("config done", never
+"registered": the stick does not register). Server URLs are printed without
+any `user:password@`. By default the number, the display name and the login
+name are masked the way the diag bundle masks the serial (`MASKED-` and the
+last four characters), and the password is only said to be set. `--secrets`
+prints all of them in clear, the one place a SIP password is printed.
+`--secrets-list` prints nothing but the secret strings, one per line (number,
+display name, usernames, passwords, and the user and password cut out of any
+URL), for a scrub list. An authentication method (class 148) counts as a SIP
+credential only when a SIP user or one of the agent's servers points at it:
+the same class holds the TR-069 login, which `voip` never shows. With no
+voice provisioned it prints `no voice provisioned`.
 
 Maintenance flags: `--rmq KEY` removes a message queue left by a killed
 client (there is no `ipcrm` in the busybox), `--inject HEX` feeds a 48-byte
