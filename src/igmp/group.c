@@ -29,14 +29,96 @@ int igmp_db_count(const struct igmp_db *db)
 	return n;
 }
 
+/* Whether an entry below index `below` already holds this group, on any VID. */
+static int group_before(const struct igmp_db *db, int below, uint32_t group,
+			int dynamic_only)
+{
+	for (int i = 0; i < below; i++)
+		if (db->g[i].in_use && db->g[i].group == group &&
+		    !(dynamic_only && db->g[i].fixed))
+			return 1;
+	return 0;
+}
+
+/* Distinct groups, not (vid, group) entries: ME 311 and the OLT's limit are
+ * per group, and the same group on two VLANs is one of them. */
 int igmp_db_dynamic_count(const struct igmp_db *db)
 {
 	int n = 0;
 
 	for (int i = 0; i < IGMP_MAX_GROUPS; i++)
-		if (db->g[i].in_use && !db->g[i].fixed)
+		if (db->g[i].in_use && !db->g[i].fixed &&
+		    !group_before(db, i, db->g[i].group, 1))
 			n++;
 	return n;
+}
+
+static int group_known(const struct igmp_db *db, uint32_t group)
+{
+	return group_before(db, IGMP_MAX_GROUPS, group, 0);
+}
+
+static struct igmp_hist *hist_find(struct igmp_db *db, uint16_t vid,
+				   uint32_t group, uint8_t port)
+{
+	for (int i = 0; i < IGMP_HIST_MAX; i++)
+		if (db->hist[i].used && db->hist[i].port == port &&
+		    db->hist[i].vid == vid && db->hist[i].group == group)
+			return &db->hist[i];
+	return 0;
+}
+
+/* Note a report and return the membership interval it earns. The oldest
+ * record makes room when the history is full. */
+static uint32_t hist_report(struct igmp_db *db, uint16_t vid, uint32_t group,
+			    uint8_t port, uint32_t now)
+{
+	struct igmp_hist *h = hist_find(db, vid, group, port);
+	uint32_t ttl = igmp_policy_membership_ttl(&db->pol), obs;
+
+	if (!h) {
+		int pick = 0;
+
+		for (int i = 0; i < IGMP_HIST_MAX; i++) {
+			if (!db->hist[i].used) {
+				pick = i;
+				break;
+			}
+			if ((int32_t)(db->hist[pick].last - db->hist[i].last) > 0)
+				pick = i;
+		}
+		h = &db->hist[pick];
+		h->used = 1;
+		h->port = port;
+		h->vid = vid;
+		h->group = group;
+		h->gap = 0;
+	} else {
+		uint32_t gap = now - h->last;
+
+		if (gap > IGMP_OBS_GAP_MAX)
+			h->gap = 0;
+		else if (gap > db->pol.query_max_response)
+			h->gap = gap;
+	}
+	h->last = now;
+	if (!h->gap)
+		return ttl;
+	obs = db->pol.robustness * h->gap + db->pol.query_max_response;
+	if (obs > IGMP_OBS_TTL_MAX)
+		obs = IGMP_OBS_TTL_MAX;
+	return obs > ttl ? obs : ttl;
+}
+
+/* The host said it is leaving: what it reported before says nothing about
+ * what it does next. */
+static void hist_forget(struct igmp_db *db, uint16_t vid, uint32_t group,
+			uint8_t port)
+{
+	struct igmp_hist *h = hist_find(db, vid, group, port);
+
+	if (h)
+		h->used = 0;
 }
 
 static struct igmp_entry *find(struct igmp_db *db, uint16_t vid, uint32_t group)
@@ -111,7 +193,6 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 
 	if (port == 0 || port > IGMP_MAX_PORTS || !igmp_group_snoopable(group))
 		return n;
-	db->joins++;
 	/* The profile decides. A join it does not allow gets no state, so the
 	 * group is unregistered and, with the PON's drop on, the stream never
 	 * reaches the host: the ONU-side enforcement the access control lists
@@ -123,7 +204,9 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 		return n;
 	}
 	e = find(db, vid, group);
-	if (!e && db->pol.max_groups &&
+	/* The limit is on groups: a group already held on another VLAN is not a
+	 * new one, and neither is a static one. */
+	if (!e && db->pol.max_groups && !group_known(db, group) &&
 	    (uint32_t)igmp_db_dynamic_count(db) >= db->pol.max_groups) {
 		db->denied++;
 		return n;
@@ -132,10 +215,13 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 		e = find_or_add(db, vid, group);
 	if (!e)
 		return n;
+	/* Counted here, past every refusal: ME 311 attribute 3 is the joins
+	 * that were accepted (G.988 9.3.29), and a refused one is in denied. */
+	db->joins++;
 	bit = IGMP_PORTBIT(port);
 	before = e->ports;
 	e->ports |= bit;
-	e->expires[port - 1] = now + igmp_policy_membership_ttl(&db->pol);
+	e->expires[port - 1] = now + hist_report(db, vid, group, port, now);
 	/* Only a change of membership is a change. A refresh moves an expiry
 	 * and nothing the switch can see, and reprogramming the same mask on
 	 * every report would be a write per report per group. */
@@ -144,7 +230,18 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 	return n;
 }
 
-/* A leave shortens the membership rather than ending it -- group.h says why. */
+/* A leave shortens the membership rather than ending it -- group.h says why.
+ *
+ * What a snooper owes a leave without immediate leave (RFC 4541 2.1.1, G.988
+ * 9.3.26 attribute 8) is a group-specific query out of the port and a wait for
+ * an answer. igmpd cannot transmit yet, so it does not query. What gives the
+ * same outcome here: the host's leave also goes upstream, the OLT sends its
+ * own group-specific query, and as the row stays programmed through the wait
+ * the query reaches every listener on the port; one that still wants the group
+ * answers, and its report (a join below) restores the full interval. If none
+ * answers within robustness x last-member interval the port goes. The cost is
+ * that this relies on the OLT querying: with an OLT that does not, a second
+ * set-top box behind the same port is cut off until its next report. */
 static int leave(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 		 uint32_t now, struct igmp_change *out, int max, int n)
 {
@@ -155,6 +252,7 @@ static int leave(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 		return n;
 	if (!(e->ports & IGMP_PORTBIT(port)))
 		return n;
+	hist_forget(db, vid, group, port);
 	if (db->pol.immediate_leave) {
 		e->ports &= ~IGMP_PORTBIT(port);
 		if (e->ports) {
@@ -282,6 +380,14 @@ int igmp_db_tick(struct igmp_db *db, uint32_t now,
 		 struct igmp_change *out, int max)
 {
 	int n = 0;
+
+	/* History is only worth keeping while the host could still come back
+	 * with a gap worth measuring. */
+	for (int i = 0; i < IGMP_HIST_MAX; i++)
+		if (db->hist[i].used &&
+		    (int32_t)(now - db->hist[i].last) >
+		    IGMP_OBS_TTL_MAX + IGMP_OBS_GAP_MAX)
+			db->hist[i].used = 0;
 
 	for (int i = 0; i < IGMP_MAX_GROUPS; i++) {
 		struct igmp_entry *e = &db->g[i];

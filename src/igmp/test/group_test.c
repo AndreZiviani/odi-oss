@@ -300,6 +300,126 @@ int main(void)
 	ok(n >= 1 && igmp_db_mac_ports(&db, 0xe1010101) == 0,
 	   "and is empty only when the last group on the MAC is gone");
 
+	/* B2: ME 311 attribute 3 counts the joins that were accepted. A join
+	 * the profile refuses, or the group limit refuses, is in `denied` and
+	 * not in `joins`; a refresh of a held group is an accepted join. */
+	igmp_db_init(&db);
+	db.pol.nallow = 1;
+	db.pol.allow[0].lo = 0xe1000000;
+	db.pol.allow[0].hi = 0xe1ffffff;
+	db.pol.max_groups = 1;
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xef010101);        /* not in the list */
+	igmp_db_rx(&db, &rx, 9000, ch, 8);
+	ok(db.joins == 0 && db.denied == 1, "B2: a join outside the list is denied, not counted");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
+	igmp_db_rx(&db, &rx, 9001, ch, 8);
+	igmp_db_rx(&db, &rx, 9011, ch, 8);
+	ok(db.joins == 2 && db.denied == 1, "B2: an accepted join and its refresh are both counted");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010102);        /* listed, over the limit */
+	igmp_db_rx(&db, &rx, 9012, ch, 8);
+	ok(db.joins == 2 && db.denied == 2, "B2: a join over the group limit is denied, not counted");
+
+	/* B3: the limit is on groups. One group on two VLANs is one of them. */
+	igmp_db_init(&db);
+	db.pol.max_groups = 2;
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
+	igmp_db_rx(&db, &rx, 9100, ch, 8);
+	rx = mk(IGMP_V2_REPORT, 1, 20, 0xe1010101);
+	n = igmp_db_rx(&db, &rx, 9101, ch, 8);
+	ok(n == 1 && igmp_db_count(&db) == 2 && igmp_db_dynamic_count(&db) == 1,
+	   "B3: a group on two VLANs is two entries and one group");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010102);
+	n = igmp_db_rx(&db, &rx, 9102, ch, 8);
+	ok(n == 1 && db.denied == 0, "B3: the second group fits a limit of two");
+	rx = mk(IGMP_V2_REPORT, 1, 30, 0xe1010101);
+	n = igmp_db_rx(&db, &rx, 9103, ch, 8);
+	ok(n == 1 && db.denied == 0, "B3: the first group on a third VLAN is not a new group");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010103);
+	n = igmp_db_rx(&db, &rx, 9104, ch, 8);
+	ok(n == 0 && db.denied == 1 && igmp_db_dynamic_count(&db) == 2,
+	   "B3: a third group is refused");
+
+	/* B4: expiry follows the host's own reporting interval. The profile
+	 * says 60 s (membership 2 x 60 + 10 = 130) but the OLT really queries
+	 * every 150 s, so the host reports every 150 s. */
+	igmp_db_init(&db);
+	db.pol.query_interval = 60;
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
+	igmp_db_rx(&db, &rx, 10000, ch, 8);
+	n = igmp_db_tick(&db, 10129, ch, 8);
+	ok(n == 0, "B4: the first membership holds the profile figure (nothing seen yet)");
+	n = igmp_db_tick(&db, 10130, ch, 8);
+	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL,
+	   "B4: and lapses at it, once: the first gap cannot be known");
+	igmp_db_rx(&db, &rx, 10150, ch, 8);              /* gap 150 measured */
+	n = igmp_db_tick(&db, 10150 + 130 + 10, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 1,
+	   "B4: after the second report the group outlives the profile's 130 s");
+	igmp_db_rx(&db, &rx, 10300, ch, 8);
+	n = igmp_db_tick(&db, 10300 + 2 * 150 + 10 - 1, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 1,
+	   "B4: it holds robustness x 150 + response, one second short");
+	n = igmp_db_tick(&db, 10300 + 2 * 150 + 10, ch, 8);
+	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL,
+	   "B4: and lapses on that deadline when the host stops");
+
+	/* ... never earlier than the profile, whatever the gap. */
+	igmp_db_init(&db);
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
+	igmp_db_rx(&db, &rx, 11000, ch, 8);
+	igmp_db_rx(&db, &rx, 11030, ch, 8);              /* gap 30, shorter */
+	n = igmp_db_tick(&db, 11030 + IGMP_MEMBERSHIP_TTL - 1, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 1, "B4: a short gap never shortens the profile interval");
+	/* a repeat inside the response interval is one answer, not a gap, and
+	 * does not overwrite the interval already measured */
+	igmp_db_init(&db);
+	db.pol.query_interval = 60;
+	igmp_db_rx(&db, &rx, 11100, ch, 8);
+	igmp_db_rx(&db, &rx, 11250, ch, 8);              /* gap 150 */
+	igmp_db_rx(&db, &rx, 11252, ch, 8);              /* a retransmission */
+	n = igmp_db_tick(&db, 11252 + 2 * 150 + 10 - 1, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 1, "B4: a retransmission is not taken for a gap");
+
+	/* bounded above: robustness 16 on a 600 s gap would be 9610 s */
+	igmp_db_init(&db);
+	db.pol.robustness = 16;
+	db.pol.query_interval = 10;
+	igmp_db_rx(&db, &rx, 12000, ch, 8);
+	igmp_db_rx(&db, &rx, 12600, ch, 8);
+	n = igmp_db_tick(&db, 12600 + IGMP_OBS_TTL_MAX - 1, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 1, "B4: the observed interval holds the cap, one second short");
+	n = igmp_db_tick(&db, 12600 + IGMP_OBS_TTL_MAX, ch, 8);
+	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL, "B4: and is capped there");
+	/* a host that comes back after an hour has not shown a query interval */
+	igmp_db_init(&db);
+	igmp_db_rx(&db, &rx, 13000, ch, 8);
+	igmp_db_rx(&db, &rx, 13000 + IGMP_OBS_GAP_MAX + 1, ch, 8);
+	n = igmp_db_tick(&db, 13000 + IGMP_OBS_GAP_MAX + 1 + IGMP_MEMBERSHIP_TTL, ch, 8);
+	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL, "B4: a gap beyond the bound is not learned");
+
+	/* B5: a leave without immediate leave, two set-top boxes on port 1 and
+	 * one on port 2. igmpd sends no group-specific query; the OLT's reaches
+	 * the other listener through the still programmed row and its report is
+	 * a join. Only the leaving port's membership is shortened. */
+	igmp_db_init(&db);
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
+	igmp_db_rx(&db, &rx, 14000, ch, 8);
+	rx = mk(IGMP_V2_REPORT, 2, 10, 0xe1010101);
+	igmp_db_rx(&db, &rx, 14000, ch, 8);
+	rx = mk(IGMP_V2_LEAVE, 1, 10, 0xe1010101);
+	igmp_db_rx(&db, &rx, 14100, ch, 8);
+	n = igmp_db_tick(&db, 14100 + IGMP_LAST_MEMBER_TTL - 1, ch, 8);
+	ok(n == 0, "B5: the leaving port keeps the row until its last-member time is up");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);      /* answer to the OLT query */
+	igmp_db_rx(&db, &rx, 14101, ch, 8);
+	n = igmp_db_tick(&db, 14100 + IGMP_LAST_MEMBER_TTL, ch, 8);
+	ok(n == 0, "B5: a report after the leave (another box answering) keeps the port");
+	rx = mk(IGMP_V2_LEAVE, 1, 10, 0xe1010101);
+	igmp_db_rx(&db, &rx, 14200, ch, 8);
+	n = igmp_db_tick(&db, 14200 + IGMP_LAST_MEMBER_TTL, ch, 8);
+	ok(n == 1 && ch[0].kind == IGMP_CHANGE_SET && ch[0].ports == IGMP_PORTBIT(2),
+	   "B5: with no answer the port goes at robustness x last-member time, port 2 stays");
+
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();
 	return failures ? 1 : 0;

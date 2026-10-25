@@ -1,0 +1,31 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, timed leave, 2/60/1 s, limit 0, 0 allow + 0 static ranges
+snooping lease: copy host IGMP to the CPU  (not written)
+> 1 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 131 tick
+snooping lease: copy host IGMP to the CPU, drop unregistered IPv4 multicast from the PON  (not written)
+  del vid 0 01:00:5e:01:01:01 ports 0x0  (not written)
+> 151 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 290 tick
+> 301 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+> 451 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+> 600 tick
+> 760 tick
+> 761 tick
+  del vid 0 01:00:5e:01:01:01 ports 0x0  (not written)
+> 762 state
+joins=4
+denied=0
+groups=0
+> end
+joins=4
+denied=0
+groups=0
+status 0

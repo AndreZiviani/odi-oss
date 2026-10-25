@@ -1,0 +1,21 @@
+# A leave without immediate leave, two set-top boxes behind port 1. One leaves;
+# igmpd sends no group-specific query, but the OLT does, the row is still
+# programmed so the query reaches the other box, and its report at 11 restores
+# the full interval: the row stays after the 2 s last-member time is up. At 100
+# the other box leaves too and nothing answers, so the row goes at 102.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=0
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+10 v2leave 1 0 192.168.1.10 239.1.1.1
+11 v2join 1 0 192.168.1.11 239.1.1.1
+12 tick
+13 tick
+14 state
+100 v2leave 1 0 192.168.1.11 239.1.1.1
+101 tick
+102 tick
+103 state
