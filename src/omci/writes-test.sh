@@ -338,6 +338,28 @@ send "$log" 0405 52 ff00 0000 ""
 check "a class the ONU does not hold keeps its old answer, ok" \
       "$(answer "$log" 0405 | cut -c1-2)" "00"
 
+# ------------------------------------------------ the MIB full
+# The store holds 320 rows. Past them a Create is answered result 1,
+# processing error, logged "no room in the MIB", and changes nothing; the
+# rows already held keep working. 330 Creates of TCP/UDP config data (no
+# driver side to them) in one batch after a MIB reset.
+send "$log" 0500 4f 0002 0000 ""
+i=1
+while [ "$i" -le 330 ]; do
+	frame "$(printf '%04x' $((0x1000 + i)))" 44 0088 "$(printf '%04x' "$i")" "13c411000000"
+	echo
+	i=$((i + 1))
+done > /tmp/writes-full.txt
+$Q cli/build/omcli --inject-file /tmp/writes-full.txt > /dev/null 2>&1
+sync_send "$log"
+check "320 Creates fill the MIB" "$(grep -c '^-> created (320 rows held)' "$log")" "1"
+check "the ten past it are refused, no room in the MIB" \
+      "$(grep -c '^-> no room in the MIB' "$log")" "10"
+check "with result 1, processing error" "$(answer "$log" 114a | cut -c1-2)" "01"
+send "$log" 0501 48 0088 0140 "100001"
+check "a row already held still takes a Set" "$(answer "$log" 0501 | cut -c1-2)" "00"
+send "$log" 0502 4f 0002 0000 ""
+
 omcid_stop "$pid"
 [ "$fail" -eq 0 ] || keep_log "$log" writes-test.log
 if [ "$fail" -eq 0 ]; then echo "writes-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
