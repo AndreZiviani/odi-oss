@@ -318,6 +318,25 @@ check "and keeps the attributes inside 96 bytes" \
 check "the pool running out is logged once" \
       "$(grep -c 'wide-row pool of 16 is full' "$log")" "1"
 
+# ------------------------------------------------ Test (18)
+# Only the ANI-G has a test here (the optical measurements, answered with a
+# Test result after the response). Any other class the ONU holds is refused
+# with result 2 and no result follows, so the OLT is not left waiting for a
+# measurement nobody takes. 0x52 is Test with AR set.
+send "$log" 0400 52 0107 8001 ""
+check "a Test on the ANI-G is answered ok" "$(answer "$log" 0400 | cut -c1-2)" "00"
+check "and its Test result follows" "$(grep -c '^-> test result' "$log")" "1"
+for t in "0401 0006 0101 circuit-pack" "0402 0086 0000 IP-host" "0403 0100 0000 ONU-G" "0404 002f 0001 MAC-bridge-port"; do
+	set -- $t
+	send "$log" "$1" 52 "$2" "$3" ""
+	check "a Test on the $4 is refused, result 2" \
+	      "$(answer "$log" "$1" | cut -c1-2)" "02"
+done
+check "none of them sent a Test result" "$(grep -c '^-> test result' "$log")" "1"
+send "$log" 0405 52 ff00 0000 ""
+check "a class the ONU does not hold keeps its old answer, ok" \
+      "$(answer "$log" 0405 | cut -c1-2)" "00"
+
 omcid_stop "$pid"
 [ "$fail" -eq 0 ] || keep_log "$log" writes-test.log
 if [ "$fail" -eq 0 ]; then echo "writes-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi

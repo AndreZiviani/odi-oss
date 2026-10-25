@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- omci: a Test on an entity omcid cannot test (anything but the ANI-G, the
+  IP host included) is now refused with result 2, "not supported", instead of
+  being acknowledged. Before, the OLT got a success and then waited for a Test
+  result that never came. The ANI-G test, the one OLTs actually send, is
+  unchanged.
 - igmpd: `igmpd -r FILE` replays a transcript of timestamped events (IGMP
   frames with their port and VLAN, clock ticks, policy file changes) through
   the daemon's own decision code and prints what it would do: the rows it

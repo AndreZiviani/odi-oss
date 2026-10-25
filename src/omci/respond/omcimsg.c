@@ -214,7 +214,8 @@ int ddm_dbm_x500(unsigned type, int16_t *out)
  * the ANI-G layout of G.988 I.1: type/value pairs, 1 power feed voltage in
  * 20 mV, 3 received optical power and 5 mean launch power in 0.002 dB(uW),
  * 9 laser bias in 2 uA, 12 temperature in 1/256 C. */
-static void handle_test(int fd, uint32_t tid, const uint8_t *f, uint16_t cls)
+static void handle_test(int fd, uint32_t tid, const uint8_t *f, uint16_t cls,
+			const struct omci_class *c)
 {
 	uint8_t body[16];
 	uint32_t volt = ddm_word(3), rx = ddm_word(6), tx = ddm_word(5);
@@ -222,6 +223,18 @@ static void handle_test(int fd, uint32_t tid, const uint8_t *f, uint16_t cls)
 	int32_t rxdb, txdb;
 	uint16_t i;
 
+	/* The ANI-G is the one class omcid measures anything for. The model
+	 * lists Test for the IP host too (a ping), but nothing here sends one,
+	 * so acknowledging it would leave the OLT waiting for a result that
+	 * never comes: result 2, and no Test Result, as for a class with no
+	 * Test at all. A class the model does not hold keeps the old answer
+	 * (see OMCI_UNKNOWN_ME_OK). */
+	if (c && !(cls == OMCI_ME_ANI_G && (c->actions & (1u << OMCI_MT_TEST)))) {
+		body[0] = OMCI_ERR_NOT_SUPPORTED;
+		send_resp(fd, tid, f, body, 1);
+		out("-> not supported (no test for this class)\n");
+		return;
+	}
 	body[0] = OMCI_OK;
 	send_resp(fd, tid, f, body, 1);
 	if (cls != OMCI_ME_ANI_G) {
@@ -955,7 +968,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		return;
 	}
 	if (mt == OMCI_MT_TEST) {
-		handle_test(fd, tid, f, cls);
+		handle_test(fd, tid, f, cls, c);
 		return;
 	}
 	if (!c && fake_unknown(fd, tid, f, mt))
