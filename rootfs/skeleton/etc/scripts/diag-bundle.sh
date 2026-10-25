@@ -58,6 +58,9 @@
 # The MIB classes are a list on purpose, not the whole MIB: an OLT can push
 # credentials through OMCI (SIP user data, authentication methods, large
 # strings, the TR-069 server), and none of that is in the classes below.
+# omcli mib masks those classes by default (only --secrets prints them) and
+# the bundle never passes it, so a class added here by mistake still would
+# not leak; src/omci/writes-test.sh pins both halves.
 #
 # Every step is bounded: a command through busybox timeout (STEP_TIMEOUT_S
 # each, METRICS_TIMEOUT_S for the exporter scrape, which runs diag and

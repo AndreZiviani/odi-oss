@@ -150,10 +150,48 @@ static int gem_carries_groups(void)
 	return 0;
 }
 
+/* G.988 table control word of a stored ACL row: the row part is bits 13-11
+ * and the row key bits 9-0. The part bits are kept only when the reported
+ * OMCC version is 0xA1 or later (mibstore.c), so with an older OMCC every
+ * row reads as part 0, which is what such an OLT sends. */
+#define ACL_PART(e) (((e)[0] >> 3) & 7)
+#define ACL_KEY(e)  (((e)[0] << 8 | (e)[1]) & 0x3ff)
+
+/* Whether the 12 leading bytes of a part 1 or part 2 row make the 4-byte
+ * address of the part 0 row an IPv4 address: ten zero bytes, then 0000 or
+ * ffff (the preferred form), as G.988 9.3.27 says. Anything else is an IPv6
+ * address, which igmpd does not take. */
+static int acl_v4_prefix(const uint8_t *p)
+{
+	for (int i = 0; i < 10; i++)
+		if (p[i])
+			return 0;
+	return p[10] == p[11] && (p[10] == 0x00 || p[10] == 0xff);
+}
+
+/* Whether the logical row of `key` has a part `part` that turns the part 0
+ * addresses into IPv6 ones. A row without that part is IPv4. */
+static int acl_part_is_v6(const struct mib_row *r, unsigned attr, unsigned key,
+			  unsigned part)
+{
+	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next) {
+		const uint8_t *e = tblpool[i].data;
+
+		if (tblpool[i].attr == attr && ACL_PART(e) == part &&
+		    ACL_KEY(e) == key)
+			return !acl_v4_prefix(e + 2);
+	}
+	return 0;
+}
+
 /* One access control list table of the profile, as `key=A-B` lines. A row
- * is the 24 bytes of G.988: control 2, GEM port 2, VLAN 2, source 4, start
- * 4, end 4, bandwidth 4, reserved 2. Returns how many rows it listed, or -1
- * when there were more than fit. */
+ * is the 24 bytes of G.988 part 0: control 2, GEM port 2, VLAN 2, source 4,
+ * start 4, end 4, bandwidth 4, reserved 2. Parts 1 and 2 (IPv6 source and
+ * destination prefixes, preview fields) are other rows of the same key and
+ * are not ranges: they are never read as one, and a part 0 row they make
+ * IPv6 is left out, since igmpd enforces the IPv4 list only. An IPv6-only
+ * table therefore lists nothing, and nothing is enforced. Returns how many
+ * rows it listed, or -1 when there were more than fit. */
 static int acl_lines(const struct mib_row *r, unsigned attr, const char *key)
 {
 	int n = 0;
@@ -162,7 +200,10 @@ static int acl_lines(const struct mib_row *r, unsigned attr, const char *key)
 		const uint8_t *e = tblpool[i].data;
 		uint32_t lo, hi;
 
-		if (tblpool[i].attr != attr)
+		if (tblpool[i].attr != attr || ACL_PART(e) != 0)
+			continue;
+		if (acl_part_is_v6(r, attr, ACL_KEY(e), 1) ||
+		    acl_part_is_v6(r, attr, ACL_KEY(e), 2))
 			continue;
 		lo = be32(e + 10);
 		hi = be32(e + 14);
@@ -200,6 +241,27 @@ static uint32_t tenths_to_s(uint32_t v, uint32_t d_tenths)
 	return s ? s : 1;
 }
 
+/* G.988 has the service package table (310 attribute 6) choose the profile
+ * by the join's VLAN, and the profile pointer (attribute 2) ignored while the
+ * table has rows. That is not done: the pointer's profile is always the one
+ * exported. Said once, when an OLT first provisions the table, and again
+ * only after the table was emptied. */
+static void svcpkg_note(const struct mib_row *sub)
+{
+	static int said;
+
+	if (!sub || !tbl_rows(sub, 6)) {
+		said = 0;
+		return;
+	}
+	if (said)
+		return;
+	said = 1;
+	out_fmt("   mcast: 310/%04x has a multicast service package table, which "
+		"does not select a profile by VID here (the pointer's profile is used)\n",
+		(long)sub->inst);
+}
+
 static void build(void)
 {
 	const struct omci_class *c309 = find_class(CLS_MCAST_OPER_PROFILE);
@@ -209,6 +271,7 @@ static void build(void)
 	uint32_t fun = 0;
 
 	plen = 0;
+	svcpkg_note(sub);
 	if (sub && c310 && c309)
 		prof = mib_find(CLS_MCAST_OPER_PROFILE, (uint16_t)row_u32(sub, c310, 2));
 	if (prof)

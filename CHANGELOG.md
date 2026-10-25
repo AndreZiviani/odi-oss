@@ -15,7 +15,37 @@ listed here.
   a policy change) and a contract test that feeds the policy file omcid wrote
   to igmpd, and igmpd's state file back to omcid's ME 311. The daemon itself
   behaves as before.
-
+- omcid: the multicast access control list a profile exports to igmpd now
+  honours the row parts of G.988. A part 1 or part 2 row (IPv6 source or
+  destination prefix, preview fields) was read as an IPv4 range of its own,
+  and a part 0 row of an IPv6 range was listed as a tiny IPv4 one. Only part 0
+  rows make a range now, a row an IPv6 prefix belongs to is left out, and a
+  list of IPv6 rows alone enforces nothing instead of refusing every IPv4
+  join. Also: the multicast service package table (ME 310, attribute 6),
+  which G.988 uses to pick the profile by VLAN, is not supported yet; it is
+  documented in docs/TOOLS.md and logged once when an OLT provisions it.
+- omcid: the entities wider than a 96-byte row are now stored whole. A large
+  string kept only its number of parts and the first three parts, so any
+  address over 75 characters (a SIP proxy, an ACS URL) came back cut, and the
+  authentication method dropped its second username. Rows of the classes
+  whose attributes add up to more than 96 bytes (large strings, the
+  authentication method, IP host config data, the extended multicast profile)
+  now take a slot of a small pool of 16 full-width rows, about 5 KB in all.
+  If the pool is ever full the row behaves as before (cut, and marked
+  truncated) and omcid logs it once. A Get, a MIB upload and `omcicli mib get`
+  show the whole row, and the resume snapshot carries it (format 5: a
+  snapshot written by an older omcid is not used, and the ONU registers
+  again as it does after any format change).
+- omcid: the credentials an OLT provisions are no longer printed by default.
+  `omcli mib` / `omcicli mib get` (and `mib getattr`) show the username,
+  password and realm of an authentication security method (class 148) and
+  the parts of a large string (157, which can hold a URL with a password in
+  it) or an octet string (307) as `**`, byte for byte the same width, so
+  scripts reading the dump keep working; `--secrets` prints the real bytes.
+  The log already withheld the contents of Creates and Sets of 148 and 157;
+  it now does the same for 307, from the same single list. The diag bundle
+  never asks for the real bytes. The web UI's OMCI browser passes this dump
+  through, so it shows the mask too.
 - omcid: a Get whose attributes do not all fit the answer's 25 bytes of
   values now answers result 9 (attribute failed or unknown), with G.988's
   optional-attribute and attribute execution masks, instead of success with

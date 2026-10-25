@@ -5,7 +5,25 @@
 #include "omcid.h"
 #include "../extvlan.h"
 
-void cli_row(const struct mib_row *r)
+/* A secret attribute shows as ** per byte, the same width as its hex, so a
+ * parser that splits the line sees the same fields; one that was never set
+ * (all zero) has nothing to hide and shows its zeros. */
+static void row_hex(const struct mib_row *r, int off, uint16_t w, int mask)
+{
+	if (mask) {
+		mask = 0;
+		for (uint16_t b = 0; b < w; b++)
+			mask |= row_get(r, (unsigned)off + b) != 0;
+	}
+	for (uint16_t b = 0; b < w; b++) {
+		if (mask)
+			out("**");
+		else
+			out_hex(row_get(r, (unsigned)off + b), 2);
+	}
+}
+
+void cli_row(const struct mib_row *r, int secrets)
 {
 	const struct omci_class *c = find_class(r->classId);
 
@@ -15,11 +33,10 @@ void cli_row(const struct mib_row *r)
 		uint16_t w = attr_width(c, k);
 		int off = attr_offset(c, k);
 
-		if (!w || off < 0 || off + w > MIB_ROW_MAX)
+		if (!w || off < 0 || off + w > row_cap(r))
 			continue;
 		out_fmt("    %-24s ", c->attrs[k].name);
-		for (uint16_t b = 0; b < w; b++)
-			out_hex(r->data[off + b], 2);
+		row_hex(r, off, w, !secrets && me_attr_secret(r->classId, k));
 		out_char('\n');
 	}
 	/* Class 171 in words. The vendor dump prints PRI 15, VID 4096 and
@@ -334,7 +351,7 @@ uint32_t cli_mib(void)
 {
 	const char *sel = cli_arg(1);
 	uint32_t cls = 0, inst = 0;
-	int want_inst = cli_num(2, &inst);
+	int want_inst = cli_num(2, &inst), secrets = 0;
 
 	/* A selector is a class id, a table name, or "all". Taking a name and
 	 * quietly ignoring it -- which is what this did first -- turns
@@ -351,7 +368,12 @@ uint32_t cli_mib(void)
 			return OMCLI_ENOCMD;
 		}
 	}
-	mib_dump((uint16_t)cls, want_inst, (uint16_t)inst, 0);
+	/* The client lifts --secrets out of its own command line and sends it
+	 * last, so it never shifts the selector or the entity id. */
+	for (unsigned i = 1; cli_arg(i); i++)
+		if (str_eq(cli_arg(i), "--secrets"))
+			secrets = 1;
+	mib_dump((uint16_t)cls, want_inst, (uint16_t)inst, 0, secrets);
 	return OMCLI_OK;
 }
 
@@ -366,7 +388,8 @@ uint32_t cli_mib(void)
  * rendered classes, which left an empty answer and a missing class looking
  * the same as a truncated one; the scripts that parse this output match on
  * the key at the start of a line, and "N rows" has no key. */
-int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor)
+int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor,
+	     int secrets)
 {
 	const struct mib_ent *e;
 	int count = mib_entities(cls, want_inst, inst, &e), n = 0;
@@ -382,7 +405,7 @@ int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor)
 			const struct mib_row *r = mib_find(e[i].cls, e[i].inst);
 
 			if (r) {
-				cli_row(r);
+				cli_row(r, secrets);
 				n++;
 			}
 			continue;
@@ -396,7 +419,7 @@ int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor)
 			}
 			vendor_row(v, c);
 		} else {
-			cli_row(v);
+			cli_row(v, secrets);
 		}
 		n++;
 	}

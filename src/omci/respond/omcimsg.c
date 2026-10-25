@@ -555,10 +555,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	    mt != OMCI_MT_GET_CURRENT_DATA && mt != OMCI_MT_MIB_RESET && mt != OMCI_MT_MIB_UPLOAD &&
 	    mt != OMCI_MT_MIB_UPLOAD_NEXT && mt != OMCI_MT_GET_ALL_ALARMS &&
 	    mt != OMCI_MT_GET_ALL_ALARMS_NEXT && mt != OMCI_MT_SYNC_TIME) {
-		if (cls == OMCI_ME_AUTH_SECURITY_METHOD ||
-		    cls == OMCI_ME_LARGE_STRING ||
-		    cls == OMCI_ME_TR069_MGMT_SERVER ||
-		    cls == OMCI_ME_IP_HOST_CONFIG_DATA) {
+		if (me_is_secret((uint16_t)cls)) {
 			out_fmt("   type %d contents withheld (credentials)\n", (long)mt);
 		} else {
 			out_fmt("   type %d contents", (long)mt);
