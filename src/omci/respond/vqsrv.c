@@ -185,11 +185,21 @@ static void vq_dispatch(void)
 				w = 0;
 			if (w)
 				attr_value(c, ent, (unsigned)arg, val);
+			/* A secret attribute that has a value reads ** per byte
+			 * unless the client passed --secrets (as in cli_row()). */
+			int mask = !vreq.p[OMCI_P_BYTE0] &&
+				   me_attr_secret((uint16_t)cls, (unsigned)arg);
+
+			if (mask) {
+				mask = 0;
+				for (uint16_t b = 0; b < w; b++)
+					mask |= val[b] != 0;
+			}
 			for (uint16_t b = 0; b < w && k < 40; b++) {
 				static const char hex[] = "0123456789abcdef";
 
-				v[k++] = hex[(val[b] >> 4) & 15];
-				v[k++] = hex[val[b] & 15];
+				v[k++] = mask ? '*' : hex[(val[b] >> 4) & 15];
+				v[k++] = mask ? '*' : hex[val[b] & 15];
 			}
 		}
 		v[k] = 0;
@@ -324,7 +334,8 @@ static void vq_dispatch(void)
 		 * (scripts on the stick parse those by key), our own dump for
 		 * the rest, over every entity -- autonomous ones included --
 		 * and always closed by the row count. See mib_dump(). */
-		mib_dump((uint16_t)want, arg != 0xffffffffu, (uint16_t)arg, 1);
+		mib_dump((uint16_t)want, arg != 0xffffffffu, (uint16_t)arg, 1,
+			 vreq.p[OMCI_P_BYTE0]);
 		break;
 	}
 	case 35:                                 /* dump qmap */

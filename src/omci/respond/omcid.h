@@ -287,7 +287,13 @@ int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
 const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
 /* show.c: the dump behind `omcli mib` (vendor 0) and `omcicli mib get`
  * (vendor 1). Always ends with an "N rows" line; returns N. */
-int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor);
+int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor, int secrets);
+/* mibstore.c: the one list of classes whose contents are an owner's secret.
+ * me_is_secret(): omcid keeps the contents of a Create/Set/Delete of this
+ * class out of its log. me_attr_secret(): attribute k of the class is masked
+ * in every dump unless the caller asked for secrets. */
+int me_is_secret(uint16_t cls);
+int me_attr_secret(uint16_t cls, unsigned k);
 extern int conn_dirty;
 extern int qos_dirty;
 /* mcast.c: the multicast policy file igmpd reads. mcast_dirty is set by
@@ -427,7 +433,7 @@ void uni_start(void);
 /* apply_bridge.c */
 uint32_t veip_uni_port_mask(uint16_t veipId);
 uint32_t all_eth_uni_mask(void);
-void cli_row(const struct mib_row *r);
+void cli_row(const struct mib_row *r, int secrets);
 void v_banner(const struct omci_class *c);
 int vendor_row_exists(const struct omci_class *c);
 int vendor_row(const struct mib_row *r, const struct omci_class *c);

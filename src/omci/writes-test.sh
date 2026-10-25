@@ -126,6 +126,96 @@ send "$log" 0050 4f 0002 0000 ""
 send "$log" 0010 44 010c 0005 "$GEM"
 check "after a MIB reset the same frame is a new request" "$(mds "$log" 0051)" "01"
 
+# ------------------------------------------- credentials: log and dumps
+# What an OLT provisions into an authentication security method (148), a
+# large string (157) and an octet string (307) is the line owner's secret. It
+# stays out of omcid.log, `omcli mib` masks it unless --secrets is given, and
+# the diag bundle never asks for it.
+hexof() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
+PW=hunter2xyz;           PWX=$(hexof "$PW")
+USR=alice-sip;           USRX=$(hexof "$USR")
+URL=http://bob:URLpw99@acs; URLX=$(hexof "$URL")
+OCT=octetsecret42;       OCTX=$(hexof "$OCT")
+
+send "$log" 0060 44 0094 0001 ""                         # 148 Create
+send "$log" 0061 48 0094 0001 "4000${USRX}"              # Username1
+send "$log" 0062 48 0094 0001 "2000${PWX}"               # Password
+send "$log" 0063 44 009d 0002 ""                         # 157 Create
+send "$log" 0064 48 009d 0002 "4000${URLX}"              # Part1
+send "$log" 0065 44 0133 0003 ""                         # 307 Create
+send "$log" 0066 48 0133 0003 "4000${OCTX}"              # Part1
+check "the Set of a password is answered ok" \
+      "$(answer "$log" 0062 | cut -c1-2)" "00"
+
+leaks() {	# <file> <value> <hex of it>: lines carrying it as text, hex or
+		# spaced hex (the log prints raw contents a byte at a time)
+	grep -c -i -e "$2" -e "$3" -e "$(printf '%s' "$3" | sed 's/../& /g;s/ $//')" "$1" || true
+}
+for v in "$PW $PWX" "$USR $USRX" "$URL $URLX" "$OCT $OCTX"; do
+	set -- $v
+	check "omcid.log never carries $1" "$(leaks "$log" "$1" "$2")" "0"
+done
+check "the contents of those Sets are logged as withheld" \
+      "$(grep -c 'contents withheld (credentials)' "$log")" "7"
+
+dump() {	# omcli mib arguments: one dump, to a file
+	$Q cli/build/omcli "$@" > /tmp/writes-dump 2>&1
+}
+for c in 148 157 307; do
+	dump mib "$c"
+	check "omcli mib $c masks the bytes" \
+	      "$([ "$(grep -c '\*\*' /tmp/writes-dump)" -gt 0 ] && echo masked)" masked
+done
+dump mib 148
+check "the default dump of 148 hides the password and the username" \
+      "$(leaks /tmp/writes-dump "$PW" "$PWX")$(leaks /tmp/writes-dump "$USR" "$USRX")" "00"
+pwlen() { grep Password /tmp/writes-dump | tr -s ' ' | cut -d' ' -f3 | tr -d '\n' | wc -c; }
+masked=$(pwlen)
+dump mib 148 --secrets
+check "a masked attribute keeps the width of the real one" "$masked" "$(pwlen)"
+dump mib 148
+dump mib 157
+check "the default dump of 157 hides the URL" "$(leaks /tmp/writes-dump "$URL" "$URLX")" "0"
+dump mib 307
+check "the default dump of 307 hides the octets" "$(leaks /tmp/writes-dump "$OCT" "$OCTX")" "0"
+dump mib 148 --secrets
+check "--secrets shows the password" "$(leaks /tmp/writes-dump "$PW" "$PWX")" "1"
+dump --secrets mib 148 1
+check "--secrets works in front too, with an entity id" \
+      "$(leaks /tmp/writes-dump "$USR" "$USRX")" "1"
+dump mib 157 --secrets
+check "--secrets shows the URL" "$(leaks /tmp/writes-dump "$URL" "$URLX")" "1"
+dump mib 307 --secrets
+check "--secrets shows the octets" "$(leaks /tmp/writes-dump "$OCT" "$OCTX")" "1"
+dump mib 148
+check "an attribute that is not a secret is not masked" \
+      "$(grep -c 'ValidSchem  *00' /tmp/writes-dump)" "1"
+
+# The vendor protocol (`omcicli mib get`, `mib getattr`) is a second way to
+# the same rows.
+dump --vendor mib get 148
+check "the vendor-protocol dump of 148 masks it" \
+      "$(leaks /tmp/writes-dump "$PW" "$PWX")" "0"
+dump --vendor mib get 148 --secrets
+check "and shows it with --secrets" "$(leaks /tmp/writes-dump "$PW" "$PWX")" "1"
+dump mib getattr 148 1 3
+check "mib getattr masks the password" "$(leaks /tmp/writes-dump "$PW" "$PWX")" "0"
+dump mib getattr 148 1 3 --secrets
+check "and shows it with --secrets" "$(leaks /tmp/writes-dump "$PW" "$PWX")" "1"
+dump mib getattr 148 1 1
+check "a getattr of a plain attribute is untouched" \
+      "$(cat /tmp/writes-dump)" "class 148 entity 1 attr 1 = 00"
+
+# The diag bundle runs `omcli mib <class>` for a fixed list and never passes
+# --secrets; a secret class in that list would still be masked, but it does
+# not belong there.
+for c in 148 157 307 340 134; do
+	check "diag-bundle.sh does not dump class $c" \
+	      "$(sed -n 's/^OMCI_CLASSES="\(.*\)"/\1/p' ../../rootfs/skeleton/etc/scripts/diag-bundle.sh | tr ' ' '\n' | grep -cx "$c")" "0"
+done
+check "diag-bundle.sh never passes --secrets" \
+      "$(grep -v '^[[:space:]]*#' ../../rootfs/skeleton/etc/scripts/diag-bundle.sh | grep -c -e '--secrets')" "0"
+
 # ------------------------------------- wide rows: large string, auth method
 # A row holds 96 bytes; LargeString (157) packs 376 and the authentication
 # method (148) 101, so their later attributes need the side pool. attribute k
@@ -177,9 +267,13 @@ for k in 2 3 4 5; do
 done
 check "username 1, password, realm and username 2 all read back" "$bad" "0"
 
-# The dump (omcicli mib get) shows the last part, not a row cut at part 3.
-check "the dump shows part 15 of the large string" \
-      "$($Q cli/build/omcli mib get 157 2>&1 | grep -ci "$(aval 16)")" "1"
+# The dump (omcicli mib get) shows the last part, not a row cut at part 3:
+# with --secrets, since a large string's parts are masked by default, and
+# masked across the whole width without it.
+check "the dump with --secrets shows part 15 of the large string" \
+      "$($Q cli/build/omcli mib get 157 --secrets 2>&1 | grep -ci "$(aval 16)")" "1"
+check "and the default dump masks part 15 too" \
+      "$($Q cli/build/omcli mib get 157 2>&1 | grep -ci "$(aval 16)")" "0"
 
 # MIB upload: the wide rows are the last two entities, 157 in 15 records (the
 # number of parts and part 1 share the first; every later part is a record of

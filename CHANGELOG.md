@@ -17,7 +17,16 @@ listed here.
   show the whole row, and the resume snapshot carries it (format 5: a
   snapshot written by an older omcid is not used, and the ONU registers
   again as it does after any format change).
-
+- omcid: the credentials an OLT provisions are no longer printed by default.
+  `omcli mib` / `omcicli mib get` (and `mib getattr`) show the username,
+  password and realm of an authentication security method (class 148) and
+  the parts of a large string (157, which can hold a URL with a password in
+  it) or an octet string (307) as `**`, byte for byte the same width, so
+  scripts reading the dump keep working; `--secrets` prints the real bytes.
+  The log already withheld the contents of Creates and Sets of 148 and 157;
+  it now does the same for 307, from the same single list. The diag bundle
+  never asks for the real bytes. The web UI's OMCI browser passes this dump
+  through, so it shows the mask too.
 - omcid: a Get whose attributes do not all fit the answer's 25 bytes of
   values now answers result 9 (attribute failed or unknown), with G.988's
   optional-attribute and attribute execution masks, instead of success with
