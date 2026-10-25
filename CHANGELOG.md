@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- kernel, omcid: a downstream GEM flow can now be deleted. A multicast GEM
+  port withdrawn by the OLT used to keep its flow, and the GEM port stayed
+  received, until the next reboot. Now its flow is taken out of the switch
+  when its last address row goes, when its multicast ME goes, and now also
+  when the GEM port network CTP that ME points at is deleted. A MIB reset
+  deletes every downstream flow too, as it already did the upstream ones,
+  so a GEM port the OLT does not provision again after the reset is no
+  longer received. The driver clears the row and reads it back before it
+  frees the flow id; a row that does not clear is logged and kept, and
+  omcid tries again. `/proc/odi_gpon/cam` now also lists the downstream GEM
+  port rows (`gem_cam`), as the hardware holds them.
 - omcid: the extra multicast GEM ports an OLT names only in address rows now
   get a downstream flow. G.988 lets one multicast GEM interworking TP (ME 281)
   spread the channels over several GEM ports by writing more rows, with other
@@ -13,9 +24,7 @@ listed here.
   for them. Only the CTP's own port had a flow, so the others dropped their
   frames. Each such port now gets a multicast downstream flow like the CTP's,
   and loses it when its last row, or the ME, goes; a line whose OLT names one
-  port is unchanged. The kernel has no downstream flow delete yet, so a
-  withdrawn flow is refused there and stays in the switch until the next
-  change; this is logged.
+  port is unchanged.
 - omci: a Test on an entity omcid cannot test (anything but the ANI-G, the
   IP host included) is now refused with result 2, "not supported", instead of
   being acknowledged. Before, the OLT got a success and then waited for a Test
