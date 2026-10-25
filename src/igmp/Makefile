@@ -36,7 +36,7 @@ LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
 # switch with; its header lists them.
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o $(BUILD)/group.o \
         $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/entry.o $(BUILD)/program.o $(BUILD)/switch_opt.o \
-        $(BUILD)/main.o
+        $(BUILD)/replay.o $(BUILD)/main.o
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
@@ -85,7 +85,10 @@ $(BUILD)/program.o: program.c program.h entry.h switch_opt.h $(DIAG)/src/odi_sw_
 $(BUILD)/switch_opt.o: switch_opt.c switch_opt.h $(DIAG)/src/odi_sw_ioctl.h $(DIAG)/src/sys.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/replay.o: replay.c replay.h igmpd.h group.h policy.h entry.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/main.o: main.c replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD):
@@ -109,11 +112,12 @@ igmpd: image
 # qemu with no device and no netlink. That is the point of keeping frame.c
 # free of syscalls.
 test: image
-	$(RUN) make IN_CONTAINER=1 $(TEST) $(GTEST) $(ETEST) $(PTEST)
+	$(RUN) make IN_CONTAINER=1 $(TEST) $(GTEST) $(ETEST) $(PTEST) $(BIN)
 	@$(RUN) qemu-mips-static $(TEST)
 	@$(RUN) qemu-mips-static $(GTEST)
 	@$(RUN) qemu-mips-static $(ETEST)
 	@$(RUN) qemu-mips-static $(PTEST)
+	@$(RUN) sh test/replay_test.sh
 
 size: igmpd
 	@$(RUN) sh -c 'ls -l $(BIN); $(CROSS)size $(BIN)'

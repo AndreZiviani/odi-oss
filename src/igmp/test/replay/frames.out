@@ -1,0 +1,26 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+snooping lease: copy host IGMP to the CPU  (not written)
+> 1 v3join 1 14 192.168.1.10 239.1.1.1
+port 1  vlan 14  02:00:00:00:00:01 -> 01:00:5e:00:00:16  v3 report (1 records)  src 192.168.1.10
+  set vid 14 01:00:5e:01:01:01 ports 0x5  (not written)
+> 2 query 1 0 192.168.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:01  query  group 0.0.0.0  src 192.168.1.1
+  router ports -> 0x1
+> 3 v3leave 1 14 192.168.1.10 239.1.1.1
+port 1  vlan 14  02:00:00:00:00:01 -> 01:00:5e:00:00:16  v3 report (1 records)  src 192.168.1.10
+  del vid 14 01:00:5e:01:01:01 ports 0x0  (not written)
+> 4 v2join 1 0 192.168.1.10 224.0.0.251
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:fb  v2 report  group 224.0.0.251  src 192.168.1.10
+> 5 rx 01000001005e0000010200000000010800460000200000000001020000c0a8010ae0000001940400001100ee9b00000000
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:01  DROP: IPv4 checksum
+> 6 state
+joins=1
+denied=0
+groups=0
+> end
+joins=1
+denied=0
+groups=0
+status 0

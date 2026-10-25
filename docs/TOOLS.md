@@ -373,6 +373,7 @@ disabled NTP never shows an old sync.
 ### `igmpd` -- IGMP snooping (opt-in)
 
     igmpd [-w] [-f] [-n COUNT]
+    igmpd -r FILE
     igmpd [-w] -j GROUP -p PORTS [-v VID]
     igmpd [-w] -l GROUP [-v VID]
 
@@ -383,9 +384,31 @@ disabled NTP never shows an old sync.
     -j GROUP   one-shot: program GROUP with member PORTS (hardware port
                bits, 0x1 the UNI) and exit
     -l GROUP   one-shot: remove GROUP and exit
+    -r FILE    replay a transcript of timestamped events (- is stdin) and
+               print what the daemon decides; no device, no uid 4
     -v VID     the VID a one-shot names (default 0); printed only, the
                entry is keyed on filtering id 0 (SVL)
     -h         this text; registers nothing
+
+**Replay.** `igmpd -r FILE` runs the daemon's own decision code (frame
+parse, group table, policy, the rows and the lease it would write) on a
+transcript instead of the switch, with a clock the transcript sets, and prints
+the result; it never opens `/dev/odi_sw` or the redirect device and refuses
+`-w`. One event a line, `#` comments:
+
+    0 policy                       # the lines up to "end" are the policy file
+    snooping=1
+    end
+    0 tick                         # the daemon's once-a-second step at T
+    1 v2join 1 0 192.168.1.10 239.1.1.1    # T VERB PORT VID SRC GROUP
+    5 v2leave 1 0 192.168.1.10 239.1.1.1
+    7 rx 010000...                 # a raw payload: port (one-based), VID, frame
+    9 state                        # the state file it would write
+
+Other events: `v3join`, `v3leave`, `query PORT VID SRC`, `policy-file PATH`,
+`nopolicy`. A policy change is read at the next second the clock moves to.
+Golden transcripts are in `src/igmp/test/replay`, run by `make test-igmp`;
+`src/omci/mcast-test.sh` replays the policy file omcid wrote.
 
 **Off unless asked for.** `svc-igmpd.sh` runs `igmpd -w` only while
 `IGMP_SNOOPING=1` is in the config store (`apply.sh igmp` applies a change);

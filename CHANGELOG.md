@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- igmpd: `igmpd -r FILE` replays a transcript of timestamped events (IGMP
+  frames with their port and VLAN, clock ticks, policy file changes) through
+  the daemon's own decision code and prints what it would do: the rows it
+  writes and removes, the lease, the router ports and the state file. It opens
+  neither the switch nor the redirect device, so IPTV behaviour can be tested
+  with no OLT and no stick. The tests gain golden transcripts (join and leave,
+  two ports on one group, a refused join, the group limit, expiry, frames,
+  a policy change) and a contract test that feeds the policy file omcid wrote
+  to igmpd, and igmpd's state file back to omcid's ME 311. The daemon itself
+  behaves as before.
 - omcid: the multicast access control list a profile exports to igmpd now
   honours the row parts of G.988. A part 1 or part 2 row (IPv6 source or
   destination prefix, preview fields) was read as an IPv4 range of its own,

@@ -175,6 +175,45 @@ max_groups=8
 allow=225.0.0.0-225.255.255.255
 static=226.1.2.3-226.1.2.3"
 
+# The contract with igmpd: the file just written, read by igmpd itself
+# (igmpd -r replays a transcript through the daemon's own decision code, with
+# the policy file this suite produced). The timers, the limit, both lists and
+# the immediate leave arrive as omcid wrote them, so a change of the format on
+# either side fails here and not on a stick. Build it first: make
+# test-omci-build.
+IGMPD=../igmp/build/igmpd
+cp /var/run/odi-mcast.conf /tmp/mcast-policy-snap
+cat > /tmp/mcast-replay.in <<'EOF2'
+0 policy-file /tmp/mcast-policy-snap
+0 tick
+1 v2join 1 0 192.168.1.10 225.2.2.2
+2 v2join 1 0 192.168.1.10 225.3.3.3
+3 v2join 1 0 192.168.1.10 239.1.1.1
+4 v2leave 1 0 192.168.1.10 225.3.3.3
+5 state
+EOF2
+if [ -x "$IGMPD" ]; then
+	$Q "$IGMPD" -r /tmp/mcast-replay.in > /tmp/mcast-replay.out 2>&1
+	rep() { grep -v '^>' /tmp/mcast-replay.out; }
+	check "igmpd reads the file: timers, limit, lists, immediate leave" \
+	      "$(rep | grep '^policy:')" \
+	      "policy: snooping, function 0, immediate leave, 3/60/2 s, limit 8, 1 allow + 1 static ranges"
+	check "igmpd holds the static group as a row, the UNI and the PON members" \
+	      "$(rep | grep -c 'set vid 0 01:00:5e:01:02:03 ports 0x5')" "1"
+	check "igmpd programs a group the dynamic list allows" \
+	      "$(rep | grep -c 'set vid 0 01:00:5e:02:02:02 ports 0x5')" "1"
+	check "igmpd refuses a group outside both lists: no row" \
+	      "$(rep | grep -c '01:00:5e:01:01:01 ports')" "0"
+	check "igmpd honours the immediate leave: the row goes on the leave" \
+	      "$(rep | grep -c 'del vid 0 01:00:5e:03:03:03')" "1"
+	# What igmpd tells omcid back: its state file, as it formats it, for the
+	# ME 311 checks further down.
+	sed '1,/^> end$/d' /tmp/mcast-replay.out > /tmp/mcast-state-from-igmpd
+else
+	check "igmpd is built for the contract test (make test-omci-build)" "missing" "built"
+	: > /tmp/mcast-state-from-igmpd
+fi
+
 # A Set that changes nothing the file holds writes nothing.
 n=$(grep -c 'multicast policy written' "$log")
 send "$log" 0040 48 0135 0001 "004003"
@@ -277,6 +316,15 @@ G1=$(pad 000000000000ef010203 24)
 G2=$(pad 000000000000e1c80709 24)
 check "311 active group list: one 24-byte row a group, the group in the destination field" \
       "$(table "$log" b11 0137 0001 0800)" "$G1$G2"
+# The same file as igmpd itself writes it (the replay's final state: three
+# joins, one refused, 225.2.2.2 held and 225.3.3.3 left): one test of the
+# format between the two processes, in place of two halves with a fixture
+# each.
+cp /tmp/mcast-state-from-igmpd /var/run/odi-mcast.state
+check "311 JoinMsgCounter from igmpd's own state file" \
+      "$(send "$log" 0073 49 0137 0001 "2000" && answer "$log" 0073 | cut -c7-14)" "00000003"
+check "311 active group list from igmpd's own state file: the group still held" \
+      "$(table "$log" b12 0137 0001 0800)" "$(pad 000000000000e1020202 24)"
 rm -f /var/run/odi-mcast.state
 
 # --------------------------------------------------------------- MIB reset

@@ -1,0 +1,27 @@
+# The policy changes under a running table: the OLT withdraws the multicast
+# GEM port (snooping=0), which releases the lease and forgets every group; a
+# frame that arrives then is described and not kept; the policy comes back
+# with a dynamic list and a static range (one fixed row, the UNI a member) and
+# a report is kept again.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+10 policy
+snooping=0
+end
+11 tick
+12 v2join 1 0 192.168.1.10 239.1.1.2
+20 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+allow=239.0.0.0-239.255.255.255
+static=226.1.2.3-226.1.2.3
+end
+21 tick
+22 v2join 1 0 192.168.1.10 239.1.1.2
+23 state

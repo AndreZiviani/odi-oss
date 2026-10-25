@@ -1,0 +1,18 @@
+# A limit of two groups. The third is refused (denied counts it), a report
+# for a group already held is a refresh and is not, and once one group is
+# left the third fits.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+max_groups=2
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+2 v2join 1 0 192.168.1.10 239.1.1.2
+3 v2join 1 0 192.168.1.10 239.1.1.3
+4 v2join 1 0 192.168.1.10 239.1.1.1
+5 state
+6 v2leave 1 0 192.168.1.10 239.1.1.2
+7 v2join 1 0 192.168.1.10 239.1.1.3
+8 state
