@@ -415,7 +415,11 @@ Golden transcripts are in `src/igmp/test/replay`, run by `make test-igmp`;
 otherwise the respawn entry parks and the switch floods multicast as it
 always did. With the key set the daemon is still idle until the OLT
 provisions what it needs (below), so setting it on a line that carries no
-multicast does nothing.
+multicast does nothing. The PON-side drop of IPv4 multicast no row names
+(`igmpd -d`) is a separate opt-in, `IGMP_PON_DROP`: `1` drops, `0` snoops
+only, and unset follows `IGMP_SNOOPING`, so an existing `IGMP_SNOOPING=1`
+config behaves as before. Without `-d` the PON keeps flooding and only the
+copy, the rows and the state run.
 
 **What the OLT decides.** omcid writes what it was provisioned to
 `/var/run/odi-mcast.conf` (a quiet second after the last OMCI frame, only
