@@ -308,6 +308,15 @@ test-qemu:
 	./test/qemu/run-qemu.sh
 
 lint:
+	@# Every rule below that starts with git grep passes when git grep cannot
+	@# run at all (exit 128, no repository): an if on its exit status reads
+	@# that as "no match". A tree whose .git is missing or dangling -- a
+	@# worktree copied without its gitdir -- would pass lint vacuously, so
+	@# refuse to run unless git has an index with this Makefile in it.
+	@git ls-files --error-unmatch Makefile >/dev/null 2>&1 || { \
+		echo "lint: not a usable git checkout (git cannot list the tracked files here); the git grep rules would pass without checking anything. tools/remote-build.sh builds a throwaway repository for a worktree." >&2; \
+		exit 1; \
+	}
 	shellcheck -S warning toolchain/*.sh kernel/*.sh packages/*.sh packages/*/*.sh \
 	          image/*.sh tools/*.sh src/*.sh test/*.sh test/qemu/*.sh
 	@# The scripts that actually run ON the device, checked as POSIX sh
