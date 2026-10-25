@@ -864,6 +864,8 @@ uint32_t cli_help(void)
 	    "  state                          serial, device, onu state\n"
 	    "  provision                      what the OLT provisioned: T-CONTs,\n"
 	    "                                 GEM ports, VLANs, traffic descriptors\n"
+	    "  voip [--secrets|--secrets-list]  the voice lines the OLT provisioned,\n"
+	    "                                 number and login masked, no password\n"
 	    "  ident [cs hs [odi]]            identity from the config store\n"
 	    "  cfgset <file> <dir> <key> <v>  write one key into a config store\n"
 	    "  help\n");
