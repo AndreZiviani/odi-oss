@@ -77,6 +77,7 @@ enum omci_me_class {
 	OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE  = 130, /* 802.1p mapper service profile */
 	OMCI_ME_OLT_G                         = 131, /* OLT-G */
 	OMCI_ME_IP_HOST_CONFIG_DATA           = 134, /* IP host config data */
+	OMCI_ME_TCP_UDP_CFG_DATA              = 136, /* TCP/UDP config data */
 	OMCI_ME_VOIP_CONFIG_DATA              = 138, /* VoIP config data */
 	OMCI_ME_VOIP_VOICE_CTP                = 139, /* VoIP voice CTP */
 	OMCI_ME_CALL_CONTROL_PMHD             = 140, /* call control PM history data */
