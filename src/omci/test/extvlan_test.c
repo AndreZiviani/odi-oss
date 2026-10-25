@@ -671,6 +671,60 @@ int main(void)
 		ok(evtocd_drop_shadow(&dr, &u, &m) != 0, "and an entry on an S-tag: the C-tag field behind it is not known");
 	}
 
+	/* ------------------------------ an IP host's entries on the host lane --- */
+	{
+		struct evtocd_plan u, d;
+		const char *dwhy = 0;
+		uint8_t dsm;
+
+		/* The voice shape: the IP host's untagged frames get C-VID 200
+		 * priority 5. On the lane the router sends them tagged 200. */
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  5, 200, 4);
+		evtocd_decode(e, &t);
+		dsm = EVTOCD_DSMODE_INVERSE;
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) == 0 && evtocd_plan_lane(&u, &dsm) == 0,
+		   "lane: untagged -> C-VID 200 pri 5 goes on the lane");
+		ok(u.c.in && u.c.out && u.c.f_vid == 200 && u.c.f_pri == -1 && !u.s.in && !u.s.out,
+		   "lane: matched on C-VID 200, any priority, never on an untagged frame");
+		ok(u.c.op == EVTOCD_OP_REWRITE && u.c.vid == 200 && u.c.pri == 5 &&
+		   u.out_tags == 1 && u.out_vid == 200 && u.out_pri == 5,
+		   "lane: keeps VID 200, takes priority 5 (which picks the GEM port)");
+		ok(dsm == EVTOCD_DSMODE_VID && evtocd_plan_ds(&u, dsm, &d, &dwhy) == 1 &&
+		   d.c.in && d.c.out && d.c.f_vid == 200 && d.c.f_pri == -1 &&
+		   d.c.vid == 200 && d.c.pri == -1,
+		   "lane: downstream C-VID 200 keeps its tag and priority, to the router");
+
+		/* IPoE then ARP of the same VLAN: one lane rule each, the same. */
+		build(e, 15, 4096, 0,  15, 4096, 0, EVTOCD_F_ET_ARP_0806,   0, 15, 4096, 0,  5, 200, 4);
+		evtocd_decode(e, &t);
+		dsm = 0;
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) == 0 && u.et_n == 1 &&
+		   evtocd_plan_lane(&u, &dsm) == 0 && u.et_n == 0 && u.c.f_vid == 200,
+		   "lane: an EtherType entry is matched on its tag, the EtherType not compared");
+
+		/* A translation the router can send as it is. */
+		build(e, 15, 4096, 0,  8, 300, 0, 0,   1, 15, 4096, 0,  8, 1300, 4);
+		evtocd_decode(e, &t);
+		dsm = EVTOCD_DSMODE_VID_PRI;
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) == 0 && evtocd_plan_lane(&u, &dsm) == 0 &&
+		   u.c.f_vid == 300 && u.c.vid == 1300 && dsm == EVTOCD_DSMODE_VID_PRI,
+		   "lane: C-VID 300 -> 1300 stays as the OLT set it, its downstream mode too");
+
+		/* What would take other services' frames. */
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  15, 4096, 0);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) == 0 && evtocd_plan_lane(&u, &dsm) != 0,
+		   "lane: untagged frames left untagged are refused");
+		build(e, 15, 4096, 0,  8, 4096, 0, 0,   1, 15, 4096, 0,  8, 100, 4);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x8100, &u) == 0 && evtocd_plan_lane(&u, &dsm) != 0,
+		   "lane: a tagged frame of any VID is refused");
+		build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  3, 300, EVTOCD_T_TPID_OUTPUT_DEI_0);
+		evtocd_decode(e, &t);
+		ok(evtocd_plan(&t, 0x8100, 0x88a8, &u) == 0 && evtocd_plan_lane(&u, &dsm) != 0,
+		   "lane: an S-tag added to untagged frames is refused");
+	}
+
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();
 	return failures ? 1 : 0;
