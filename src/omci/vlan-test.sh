@@ -544,5 +544,150 @@ check "ISP3 (six flows), VID 30 priority 255: VID 30 is the add-tag rule" "$got"
 47/0008 gem 909 rule vid-filter vid 60 pri -1
 47/ffff gem 4095 rule manual-remove vid 30 pri 0"
 
+# ---- class 309 attribute 16, the downstream multicast tag control -----------
+#
+# The profile's treatment goes on the VLANs its access control lists name
+# (respond/../mcastvlan.h), one rule each on the multicast bridge port and in
+# front of the port's own rules; with no VLAN named the rules are the ones
+# above. ISP1's OLT provisions 01 00 00 (strip), ISP2's 00 00 00 (pass); the
+# fixtures keep only the first 16 bytes of a Create, so the attribute comes
+# as a Set here. The subscriber's profile is 0001 on ISP1, 8005 on ISP2.
+#
+# tci_session <isp> <profile> <attribute 16> [VLAN...]: the session, the
+# attribute, then a dynamic ACL row (225.k.0.0/16) per VLAN.
+tci_session() {
+	_isp=$1; _prof=$2; _tci=$3; shift 3
+	grep -v '^#' "$FIX/omci-session-$_isp.txt"
+	frame 48 0135 "$_prof" "0001$_tci"
+	_k=1
+	for _v in "$@"; do
+		frame 48 0135 "$_prof" "0200$(printf '%04x0fff%04x00000000e1%02x0000e1%02xffff000000000000' \
+			$((0x4000 + _k)) "$_v" "$_k" "$_k")"
+		_k=$((_k + 1))
+	done
+}
+# tci_store <isp> <manual mode> [OMCI_CUSTOM_MCAST]
+tci_store() {
+	sed "s/\"VLAN_MANU_MODE\" Value=\"1\"/\"VLAN_MANU_MODE\" Value=\"$2\"/" \
+		"$FIX/omci-store-$1.xml" > /var/config/lastgood.xml
+	if [ -n "${3:-}" ]; then
+		sed -i "s|</Dir>|\t\t<Value Name=\"OMCI_CUSTOM_MCAST\" Value=\"$3\"/>\n\t</Dir>|" \
+			/var/config/lastgood.xml
+	fi
+}
+ISP1_MANUAL="47/0003 gem 1434 rule vid-filter vid 10 pri -1
+47/0004 gem 1690 rule vid-filter vid 12 pri 5
+47/0005 gem 1818 rule vid-filter vid 13 pri 4
+47/0006 gem 1946 rule vid-filter vid 14 pri -1
+47/0007 gem 1562 rule manual-add vid 11 pri 0
+47/ffff gem 4095 rule manual-remove vid 11 pri 0"
+ISP2_MANUAL="47/0ffe gem 4094 rule manual-remove vid 10 pri 0
+47/1002 gem 657 rule manual-add vid 10 pri 0"
+
+# 1. The two lines as they are: no VLAN named, the rules of above, and the
+#    whole dry-run output of the rebuild (every descriptor, byte for byte) the
+#    same as without the attribute.
+tci_store isp1 1
+grep -v '^#' "$FIX/omci-session-isp1.txt" > /tmp/s-tci-none.txt
+run171 tci-isp1-none /tmp/s-tci-none.txt
+tci_session isp1 0001 010000 > /tmp/s-tci.txt
+run171 tci-isp1 /tmp/s-tci.txt
+check "ISP1 01 00 00, no ACL row: the rules are the manual ones" \
+	"$(rebuild /tmp/omcid-171-tci-isp1.log 0)" "$ISP1_MANUAL"
+# dryblock <log>: the descriptors of the last rebuild, as the dry run prints them
+dryblock() {
+	awk '/\[dry\] (serv|47\/)|^   [0-9a-f]{3}  / { cur = cur $0 "\n" }
+	     /bridge connections rebuilt/ { last = cur; cur = "" }
+	     END { printf "%s", last }' "$1"
+}
+check "ISP1 01 00 00: every descriptor as without the attribute" \
+	"$(dryblock /tmp/omcid-171-tci-isp1.log)" "$(dryblock /tmp/omcid-171-tci-isp1-none.log)"
+check "and it says once why nothing was applied" \
+	"$(grep -c 'downstream tag control 1 (309 attribute 16) not applied: no access control list row' \
+		/tmp/omcid-171-tci-isp1.log)" "1"
+tci_store isp2 1
+grep -v '^#' "$FIX/omci-session-isp2.txt" > /tmp/s-tci-none.txt
+run171 tci-isp2-none /tmp/s-tci-none.txt
+tci_session isp2 8005 000000 4000 > /tmp/s-tci.txt
+run171 tci-isp2 /tmp/s-tci.txt
+check "ISP2 00 00 00, even with VLAN 4000 named: the rules are the manual ones" \
+	"$(rebuild /tmp/omcid-171-tci-isp2.log 0)" "$ISP2_MANUAL"
+check "ISP2 00 00 00: every descriptor as without the attribute" \
+	"$(dryblock /tmp/omcid-171-tci-isp2.log)" "$(dryblock /tmp/omcid-171-tci-isp2-none.log)"
+check "and nothing is said about it" "$(grep -c 'downstream tag control' /tmp/omcid-171-tci-isp2.log)" "0"
+
+# 2. ISP1's strip with VLANs named: 4000 gets the rule, 12 is a unicast VLAN of
+#    the line (a VID filter) and is left to it, said once.
+tci_store isp1 1
+tci_session isp1 0001 010000 4000 12 > /tmp/s-tci.txt
+run171 tci-isp1-acl /tmp/s-tci.txt
+check "ISP1 01 00 00, VLANs 4000 and 12: a strip rule on 4000, in front of the manual ones" \
+	"$(rebuild /tmp/omcid-171-tci-isp1-acl.log 0)" "$ISP1_MANUAL
+47/ffff gem 4095 rule mcast-strip vid 4000 pri -1"
+check "VLAN 12 is said to be left to the unicast rule" \
+	"$(grep -c 'downstream tag control 1, VLAN 12 left to the rules of the line: a unicast rule' \
+		/tmp/omcid-171-tci-isp1-acl.log)" "1"
+# The descriptor after the rule line: dir 2 (downstream) at +32, rule_gen 7 at
+# +36, then the filter: C-VID 4000 (0xfa0) with outer untagged (4) and inner
+# tagged + VID (0xa) at +64 and +68.
+got=$(awk '/ rule mcast-strip vid 4000 / { on = 1; next } on && / rule / { on = 0 }
+	   on && /^   0[2-4]0  / { print $2 }' /tmp/omcid-171-tci-isp1-acl.log | head -3)
+check "and its descriptor: downstream, rule_gen 7, C-VID 4000 tagged, no S-tag" "$got" \
+"00000002000000070000000800001000
+000000000000000800000fa000000000
+000000040000000a0000000000000004"
+
+# 3. ISP2, replace (03, TCI pri 5 VID 100) on VLAN 4000.
+tci_store isp2 1
+tci_session isp2 8005 03a064 4000 > /tmp/s-tci.txt
+run171 tci-isp2-rep /tmp/s-tci.txt
+check "ISP2 03 a0 64, VLAN 4000: a replace rule in front of the manual ones" \
+	"$(rebuild /tmp/omcid-171-tci-isp2-rep.log 0)" "47/0ffe gem 4094 rule manual-remove vid 10 pri 0
+47/0ffe gem 4094 rule mcast-replace vid 4000 pri -1
+47/1002 gem 657 rule manual-add vid 10 pri 0"
+
+# 4. OMCI_CUSTOM_MCAST bit 1 strips whatever the profile says.
+tci_store isp2 1 1
+tci_session isp2 8005 000000 4000 > /tmp/s-tci.txt
+run171 tci-isp2-force /tmp/s-tci.txt
+check "ISP2 00 00 00 under OMCI_CUSTOM_MCAST=1, VLAN 4000: stripped" \
+	"$(rebuild /tmp/omcid-171-tci-isp2-force.log 0)" "47/0ffe gem 4094 rule manual-remove vid 10 pri 0
+47/0ffe gem 4094 rule mcast-strip vid 4000 pri -1
+47/1002 gem 657 rule manual-add vid 10 pri 0"
+check "and omcid says the override is on" \
+	"$(grep -c 'downstream tag stripped whatever the OLT sets' /tmp/omcid-171-tci-isp2-force.log)" "1"
+tci_store isp2 1 2
+run171 tci-isp2-bit2 /tmp/s-tci.txt
+check "OMCI_CUSTOM_MCAST=2 (another plugin's bit): no override" \
+	"$(rebuild /tmp/omcid-171-tci-isp2-bit2.log 0)" "$ISP2_MANUAL"
+
+# 5. Transparent (no manual tag): the rule goes in front of forward-all.
+tci_store isp2 0
+tci_session isp2 8005 010000 4000 > /tmp/s-tci.txt
+run171 tci-isp2-tr /tmp/s-tci.txt
+check "ISP2 transparent, 01 00 00, VLAN 4000: a strip rule in front of forward-all" \
+	"$(rebuild /tmp/omcid-171-tci-isp2-tr.log 0)" "47/0ffe gem 4094 rule forward-all vid -1 pri -1
+47/0ffe gem 4094 rule mcast-strip vid 4000 pri -1
+47/1002 gem 657 rule forward-all vid -1 pri -1"
+
+# 6. A Set of the attribute alone rebuilds: back to 00 00 00, the rule goes.
+tci_store isp2 1
+tci_session isp2 8005 010000 4000 > /tmp/s-tci.txt
+frame 48 0135 8005 "0001000000" > /tmp/s-tci-back.txt
+run171 tci-back /tmp/s-tci.txt /tmp/s-tci-back.txt
+check "the strip rule while 01 00 00" "$(rebuild /tmp/omcid-171-tci-back.log 1 | grep -c mcast-strip)" "1"
+check "a Set of 00 00 00 alone rebuilds without it" \
+	"$(rebuild /tmp/omcid-171-tci-back.log 0)" "$ISP2_MANUAL"
+
+# 7. Types 5 to 7 are not done here, and say so.
+tci_store isp2 1
+tci_session isp2 8005 050064 4000 > /tmp/s-tci.txt
+run171 tci-isp2-pkg /tmp/s-tci.txt
+check "ISP2 05 00 64 (service package VID): no rule" \
+	"$(rebuild /tmp/omcid-171-tci-isp2-pkg.log 0)" "$ISP2_MANUAL"
+check "and it says why" \
+	"$(grep -c 'downstream tag control 5 (309 attribute 16) not applied: types 5 to 7' \
+		/tmp/omcid-171-tci-isp2-pkg.log)" "1"
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 suite_exit

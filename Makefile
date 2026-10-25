@@ -272,7 +272,8 @@ test-omci:
 
 # The unit tests of two freestanding binaries, built and run under qemu-user in
 # the same container as the suites: omcid's class 171 decode and OLT-tag rule
-# (src/omci/respond/../test/extvlan_test.c) and igmpd's frame parse, group
+# (src/omci/respond/../test/extvlan_test.c), its class 309 multicast tag rules
+# (mcastvlan_test.c beside it) and igmpd's frame parse, group
 # table and switch-entry tests (src/igmp/test). Each is its own leg, with its
 # own build directory, so they run beside the suites.
 test-omci-respond:
