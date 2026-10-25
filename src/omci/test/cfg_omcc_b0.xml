@@ -1,0 +1,5 @@
+<Config Name="ROOT">
+	<Dir Name="MIB_TABLE">
+		<Value Name="OMCC_VER" Value="176"/>
+	</Dir>
+</Config>

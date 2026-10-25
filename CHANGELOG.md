@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- omcid: the multicast access control list a profile exports to igmpd now
+  honours the row parts of G.988. A part 1 or part 2 row (IPv6 source or
+  destination prefix, preview fields) was read as an IPv4 range of its own,
+  and a part 0 row of an IPv6 range was listed as a tiny IPv4 one. Only part 0
+  rows make a range now, a row an IPv6 prefix belongs to is left out, and a
+  list of IPv6 rows alone enforces nothing instead of refusing every IPv4
+  join. Also: the multicast service package table (ME 310, attribute 6),
+  which G.988 uses to pick the profile by VLAN, is not supported yet; it is
+  documented in docs/TOOLS.md and logged once when an OLT provisions it.
 - omcid: the entities wider than a 96-byte row are now stored whole. A large
   string kept only its number of parts and the first three parts, so any
   address over 75 characters (a SIP proxy, an ACS URL) came back cut, and the

@@ -9,7 +9,11 @@
 # the profile's timers, the subscriber's group limit and both access control
 # lists; the units (tenths of a second to seconds, defaults for zero); a
 # function other than snooping turning it off; a delete of the address row
-# turning it off; a MIB reset; the file rewritten only when it changed.
+# turning it off; a MIB reset; the file rewritten only when it changed; the
+# access control list rows of OMCC 0xB0 (row parts 1 and 2, IPv6 ranges left
+# out, an IPv6-only list enforcing nothing); the width of attribute 16 of
+# class 309 (3 bytes, G.988); the service package table said not to select a
+# profile.
 #
 # Run from src/omci, inside the toolchain image (make test-omci-mcast):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
@@ -95,6 +99,10 @@ pid=$!
 omcid_up "$log"
 written "$log" 1
 check "an empty MIB: the file exists and says no snooping" "$(policy)" "snooping=0"
+# An OLT that reports OMCC 0xB0 (176) sends ACL rows in parts: the part bits
+# of the table control only count from 0xA1 on (mibstore.c).
+: > /var/config/omci-identity.on
+$Q cli/build/omcli ident test/cfg_omcc_b0.xml test/cfg_report_empty_hs.xml > /dev/null 2>&1
 send "$log" 0001 4f 0002 0000 ""                         # MIB reset
 
 # ---------------------------------------------------------- a full session
@@ -134,6 +142,18 @@ send "$log" 0020 48 0135 0001 "007e03000000000000003c000000320000001401"
 send "$log" 0021 49 0135 0001 "0010"
 check "a Get of the query interval, which did not fit the old row" \
       "$(answer "$log" 0021 | cut -c7-14)" "0000003c"
+
+# Attribute 16, the downstream IGMP and multicast TCI, is 3 bytes (control
+# type, TCI): G.988 9.3.27. With attributes 6, 10-15 the Get is 25 attribute
+# bytes, which is all a baseline Get carries; one byte more and the response
+# would be result 9 (attributes do not fit), so the width shows in the result,
+# and the three bytes read back last.
+send "$log" 0022 48 0135 0001 "000102abcd"
+send "$log" 0023 49 0135 0001 "047f"
+check "309 attribute 16: a Get with it as the 25th byte still fits" \
+      "$(answer "$log" 0023 | cut -c1-2)" "00"
+check "309 attribute 16 reads back the three bytes set" \
+      "$(answer "$log" 0023 | cut -c51-56)" "02abcd"
 
 # ACL rows, 24 bytes: control, GEM port, VLAN, source, start, end, bandwidth,
 # reserved. Dynamic: 225.0.0.0-225.255.255.255. Static: one address, end 0.
@@ -190,6 +210,58 @@ written "$log" $((n + 4))
 check "34 ranges: the first 32 are listed" "$(policy | grep -c '^allow=')" "32"
 check "34 ranges: the overflow is flagged" "$(policy | grep -c '^allow_overflow=1')" "1"
 
+# --------------------------- row parts, IPv6 rows, the ACL of OMCC 0xB0
+# The table is cleared (control 11), then logical rows are written as the
+# parts G.988 9.3.27 defines: part 0 (0x4000 | key) carries the IPv4 ranges,
+# part 1 (0x4800 | key) the leading 12 bytes of an IPv6 source and the preview
+# fields, part 2 (0x5000 | key) the leading 12 bytes of an IPv6 destination.
+# A prefix of ten zero bytes and ffff is the IPv4 form; any other is IPv6.
+# Key 1: IPv4, with a part 1 in the IPv4 form and preview fields. Key 2: a
+# part 2 with an IPv6 group. Key 3: a part 1 with an IPv6 source. Only key 1
+# is a range igmpd can enforce; the part rows are not ranges of their own.
+m=$(grep -c 'multicast policy written' "$log")
+send "$log" 0200 48 0135 0001 "0200c000"
+K1P0=$(pad 40010fff000b00000000e1010000e10100ff 24)
+K1P1=$(pad 480100000000000000000000ffff00ff000a 24)
+K2P0=$(pad 40020fff000b00000000e2000000e20000ff 24)
+K2P2=$(pad 5002ff3e00000000000000001234 24)
+K3P0=$(pad 40030fff000b00000000e3000000e30000ff 24)
+K3P1=$(pad 480320010db8000000000000abcd00ff000a 24)
+t=0201
+for row in $K1P0 $K1P1 $K2P0 $K2P2 $K3P0 $K3P1; do
+	send "$log" "$t" 48 0135 0001 "0200$row"
+	t=$(printf '%04x' $((0x$t + 1)))
+done
+written "$log" $((m + 1))
+check "ACL parts: the table holds all six rows" \
+      "$(table "$log" b20 0135 0001 0200 | wc -c)" "288"
+check "ACL parts: only the IPv4 row is a range; part rows and IPv6 rows are not" \
+      "$(policy | grep '^allow')" "allow=225.1.0.0-225.1.0.255"
+
+# An OLT that provisions only IPv6 rows: nothing to enforce, so no ACL at
+# all, not an IPv4 list that denies every join.
+m=$(grep -c 'multicast policy written' "$log")
+send "$log" 0210 48 0135 0001 "0200c000"
+K5P0=$(pad 40050fff000b00000000e5000000e50000ff 24)
+K5P2=$(pad 5005ff3e00000000000000005678 24)
+send "$log" 0211 48 0135 0001 "0200$K5P0"
+send "$log" 0212 48 0135 0001 "0200$K5P2"
+written "$log" $((m + 1))
+check "an IPv6-only ACL: no IPv4 range is listed" "$(policy | grep -c '^allow')" "0"
+
+# ------------------------------------- ME 310 service package table
+# Said once when the OLT provisions it, not on every write; the profile is
+# still the pointer's (the policy keeps its timers).
+check "no service package table: nothing said" \
+      "$(grep -c 'service package table' "$log")" "0"
+m=$(grep -c 'multicast policy written' "$log")
+send "$log" 0220 48 0136 0001 "0400$(pad 4001ffff 20)"
+send "$log" 0221 48 0136 0001 "0400$(pad 4002ffff 20)"
+sync_send "$log"
+sleep 1.5
+check "a service package table: said once as not selecting by VID" \
+      "$(grep -c 'does not select a profile by VID' "$log")" "1"
+
 # ------------------------------------- ME 311, from what igmpd writes
 # Class 311 (0x0137) instance 1. The state file is igmpd's; written here the
 # way it writes it.
@@ -209,7 +281,7 @@ rm -f /var/run/odi-mcast.state
 
 # --------------------------------------------------------------- MIB reset
 send "$log" 0070 4f 0002 0000 ""
-written "$log" $((n + 5))
+written "$log" $((m + 1))
 check "a MIB reset: no snooping" "$(policy)" "snooping=0"
 omcid_stop "$pid"
 

@@ -414,6 +414,24 @@ says IGMP function 0. The profile also supplies
   member and never expires; a wider one cannot be named in the switch, and
   igmpd then leaves the PON's drop off so the range still flows.
 
+The access control lists are read as G.988 9.3.27 lays them out: a logical
+row is a part 0 row (GEM port, VLAN, IPv4 source, start and end of the
+range) and, from OMCC version 0xA1 on, optional parts 1 (IPv6 source prefix,
+preview fields) and 2 (IPv6 destination prefix) of the same row key. Only
+part 0 makes a range. A row whose part 1 or part 2 prefix is not the IPv4
+form (ten zero bytes, then 0000 or ffff) is an IPv6 row and is left out, as
+igmpd takes IPv4 ranges only; so a list of IPv6 rows alone is an empty list
+and restricts nothing, never an IPv4 list that refuses every join.
+
+**Not supported yet: the multicast service package table.** G.988 lets the
+service package table of ME 310 (attribute 6) choose the profile by the VLAN
+of the join, and says the profile pointer (attribute 2) is then ignored. This
+daemon does not do that: the profile named by the pointer is always the one
+exported, whatever the table holds, and an OLT that gives several profiles to
+one UNI by VLAN gets the pointer's profile for every join. omcid logs
+`mcast: 310/<id> has a multicast service package table, which does not select
+a profile by VID here` once when the OLT first provisions the table.
+
 An IGMP function other than 0 (snooping with proxy reporting, proxy) is not
 done: the OLT then expects the ONU to answer its queries, which this one
 does not, so the multicast stays transparent.
