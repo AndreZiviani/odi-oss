@@ -76,6 +76,7 @@ enum omci_me_class {
 	OMCI_ME_IP_HOST_CONFIG_DATA           = 134, /* IP host config data */
 	OMCI_ME_AUTH_SECURITY_METHOD          = 148, /* authentication security method */
 	OMCI_ME_LARGE_STRING                  = 157, /* large string */
+	OMCI_ME_OCTET_STRING                  = 307, /* octet string */
 	OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA  = 171, /* extended VLAN tagging op cfg */
 	OMCI_ME_ONU_G                         = 256, /* ONU-G */
 	OMCI_ME_ONU2_G                        = 257, /* ONU2-G */

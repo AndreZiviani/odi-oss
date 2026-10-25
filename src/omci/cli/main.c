@@ -103,10 +103,10 @@ static const struct cmd cmds[] = {
 { "set",  "loid",     11,  ANS_NONE,  A_LOID,    F_WRITE, "<loid> [password]" },
 { "set",  "resetlauth", 15, ANS_QUEUE, A_NONE,   F_WRITE, "reset the loid auth attempt count" },
 
-{ "mib",  "get",      29,  ANS_FILE,  A_MIBSEL, 0, "[all | classId | tableName] [entityId]" },
+{ "mib",  "get",      29,  ANS_FILE,  A_MIBSEL, 0, "[all | classId | tableName] [entityId] [--secrets]" },
 { "mib",  "getcurr",  30,  ANS_FILE,  A_MIBSEL, 0, "PM current accumulations: classId|tableName [entityId]" },
 { "mib",  "getalm",   31,  ANS_FILE,  A_CLSENT, 0, "[classId [entityId]]" },
-{ "mib",  "getattr",  33,  ANS_QUEUE, A_ATTR,   0, "classId entityId attrIndex" },
+{ "mib",  "getattr",  33,  ANS_QUEUE, A_ATTR,   0, "classId entityId attrIndex [--secrets]" },
 { "mib",  "create",   26,  ANS_NONE,  A_MIBCREATE, F_WRITE, "classId entityId \"set-by-create values\"" },
 { "mib",  "delete",   27,  ANS_NONE,  A_MIBDEL,    F_WRITE, "classId entityId" },
 { "mib",  "set",      28,  ANS_NONE,  A_MIBSET,    F_WRITE, "classId entityId attrName value" },
@@ -346,6 +346,11 @@ static void print_reply(uint32_t id)
 static struct omcli_req nreq;
 static struct omcli_rep nrep;
 
+/* --secrets: lifted out of the command line in main(), because the vendor
+ * protocol carries it in a byte of its own and the native one as a last
+ * argument, never in the middle of the selector. */
+static int want_secrets;
+
 static int native_run(int argc, char **argv, int first, long q)
 {
 	uint32_t arglen = 0, nargs = 0;
@@ -382,6 +387,13 @@ static int native_run(int argc, char **argv, int first, long q)
 		cleanup_q = -1;
 			return 1;
 		}
+		nreq.args[arglen++] = 0;
+		nargs++;
+	}
+	if (want_secrets && nargs < OMCLI_MAXARGS &&
+	    arglen + sizeof "--secrets" < OMCLI_ARGS) {
+		for (const char *a = "--secrets"; *a; a++)
+			nreq.args[arglen++] = (uint8_t)*a;
 		nreq.args[arglen++] = 0;
 		nargs++;
 	}
@@ -493,6 +505,8 @@ static int fill_args(const struct cmd *c, int argc, char **argv, int first)
 {
 	uint32_t v;
 
+	if (want_secrets && (c->args == A_MIBSEL || c->args == A_ATTR))
+		req.p[OMCI_P_BYTE0] = 1;
 	switch (c->args) {
 	case A_NONE:
 		return 0;
@@ -761,9 +775,12 @@ int main(int argc, char **argv)
 	 * flag at the end worked. Compacting argv here means either spelling
 	 * behaves the same. */
 	for (int i = 1; i < argc;) {
-		if (str_eq(argv[i], "-f") || str_eq(argv[i], "--vendor")) {
+		if (str_eq(argv[i], "-f") || str_eq(argv[i], "--vendor") ||
+		    str_eq(argv[i], "--secrets")) {
 			if (argv[i][1] == 'f')
 				force = 1;
+			else if (argv[i][2] == 's')
+				want_secrets = 1;
 			else
 				vendor = 1;
 			for (int k = i; k + 1 < argc; k++)
