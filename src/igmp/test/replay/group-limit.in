@@ -1,4 +1,4 @@
-# A limit of two groups. The third is refused (denied counts it), a report
+# A limit of two groups. The third is refused (denied counts it, joins does not), a report
 # for a group already held is a refresh and is not, and once one group is
 # left the third fits.
 0 policy

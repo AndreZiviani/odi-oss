@@ -1,0 +1,26 @@
+# The profile says the OLT queries every 60 s (membership 2 x 60 + 10 = 130 s)
+# but the OLT really queries every 150 s, so the host reports every 150 s and
+# the profile alone would drop the group between reports. The first membership
+# lapses once at 130 s, because nothing yet says the interval is longer; from
+# the second report on the group is held for 2 x 150 + 10 = 310 s and stays
+# through the reports at 300 and 450. When the host stops after 450, the row
+# goes 310 s later, at 760.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=0
+robustness=2
+query_interval=60
+query_max_response=10
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+131 tick
+151 v2join 1 0 192.168.1.10 239.1.1.1
+290 tick
+301 v2join 1 0 192.168.1.10 239.1.1.1
+451 v2join 1 0 192.168.1.10 239.1.1.1
+600 tick
+760 tick
+761 tick
+762 state
