@@ -267,6 +267,52 @@ struct mib_tblent tblpool[MIB_TBL_NODES];
 
 struct mib_row mib[MIB_ROWS];
 
+/* The side pool: bytes MIB_ROW_MAX and up of the rows of the classes that
+ * need them. A slot is free when no row in use points at it, so freeing a
+ * row, resetting the MIB and loading a snapshot need no bookkeeping of their
+ * own. */
+static uint8_t wide_pool[MIB_WIDE_ROWS][MIB_WIDE_MAX - MIB_ROW_MAX];
+
+/* Whether the model packs more than MIB_ROW_MAX bytes of attributes for the
+ * class, computed from the model rather than listed: a class a later model
+ * adds, or a wider one, is covered without anyone remembering this. Today it
+ * is the large strings (157, 373, 307), the authentication method (148), the
+ * IP host (134), the extended multicast profile (65531) and 65534. */
+static int class_wide(const struct omci_class *c)
+{
+	unsigned off = 0;
+
+	for (unsigned k = 1; c && k < c->nattr && k <= 16; k++)
+		off += attr_width(c, k);
+	return off > MIB_ROW_MAX;
+}
+
+static uint8_t *wide_alloc(void)
+{
+	static int warned;
+
+	for (int s = 0; s < MIB_WIDE_ROWS; s++) {
+		int used = 0;
+
+		for (int i = 0; i < MIB_ROWS; i++)
+			if (mib[i].used && mib[i].tail == wide_pool[s])
+				used = 1;
+		if (!used) {
+			for (unsigned j = 0; j < sizeof wide_pool[s]; j++)
+				wide_pool[s][j] = 0;
+			return wide_pool[s];
+		}
+	}
+	/* Exhausted: the row keeps the 96 bytes it always had and says so
+	 * (`truncated`, once an attribute does not fit). */
+	if (!warned) {
+		warned = 1;
+		out_fmt("   wide-row pool of %d is full; later wide rows are truncated\n",
+			(long)MIB_WIDE_ROWS);
+	}
+	return 0;
+}
+
 /* Offset of attribute k in our packed row, or -1 if it does not fit. */
 int attr_offset(const struct omci_class *c, unsigned k)
 {
@@ -274,7 +320,7 @@ int attr_offset(const struct omci_class *c, unsigned k)
 
 	for (unsigned i = 1; i < k; i++) {
 		off += attr_width(c, i);
-		if (off > MIB_ROW_MAX)
+		if (off > MIB_WIDE_MAX)
 			return -1;
 	}
 	return off;
@@ -677,8 +723,11 @@ struct mib_row *mib_add(uint16_t cls, uint16_t inst)
 			r->written = 0;
 			r->tbl_head = MIB_TBL_NONE;
 			r->tbl_count = 0;
+			r->tail = 0;
 			for (int j = 0; j < MIB_ROW_MAX; j++)
 				r->data[j] = r->prev[j] = 0;
+			if (class_wide(find_class(cls)))
+				r->tail = wide_alloc();
 			return r;
 		}
 	return 0;
@@ -765,8 +814,9 @@ int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
 const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst)
 {
 	static struct mib_row v;
+	static uint8_t view_tail[MIB_WIDE_MAX - MIB_ROW_MAX];
 	const struct mib_row *r = mib_find(c->classId, inst);
-	uint8_t tmp[MIB_ROW_MAX];
+	uint8_t tmp[MIB_WIDE_MAX];
 
 	for (unsigned i = 0; i < sizeof v; i++)
 		((uint8_t *)&v)[i] = 0;
@@ -777,15 +827,22 @@ const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst)
 	v.tbl_count = r ? r->tbl_count : 0;
 	v.truncated = r ? r->truncated : 0;
 	v.written = r ? r->written : 0;
+	/* The view of a wide class is whole even when the stored row is not
+	 * (pool full): what the OLT can read is what the dump shows. */
+	if (class_wide(c)) {
+		for (unsigned i = 0; i < sizeof view_tail; i++)
+			view_tail[i] = 0;
+		v.tail = view_tail;
+	}
 	for (unsigned k = 1; k < c->nattr && k <= 16; k++) {
 		uint16_t w = attr_width(c, k);
 		int off = attr_offset(c, k);
 
-		if (!w || off < 0 || off + w > MIB_ROW_MAX)
+		if (!w || off < 0 || off + w > row_cap(&v) || w > sizeof tmp)
 			continue;
 		attr_value(c, inst, k, tmp);
 		for (uint16_t b = 0; b < w; b++)
-			v.data[off + b] = tmp[b];
+			row_put(&v, (unsigned)off + b, tmp[b]);
 	}
 	return &v;
 }
@@ -830,11 +887,11 @@ uint16_t mib_write(struct mib_row *r, const struct omci_class *c,
 			continue;
 		}
 		off = attr_offset(c, k);
-		if (off < 0 || off + w > MIB_ROW_MAX) {
+		if (off < 0 || off + w > row_cap(r)) {
 			r->truncated = 1;
 		} else {
 			for (uint16_t i = 0; i < w; i++)
-				r->data[off + i] = src[used + i];
+				row_put(r, (unsigned)off + i, src[used + i]);
 			r->written |= (uint16_t)(1u << (16 - k));
 		}
 		/* A table attribute also accumulates. The flat copy above is
@@ -972,9 +1029,9 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 	 * built-in answers below have to keep serving the attributes nobody
 	 * wrote. */
 	if (r && (r->written & (1u << (16 - k))) && off >= 0
-	    && off + n <= MIB_ROW_MAX) {
+	    && off + n <= row_cap(r)) {
 		for (uint16_t i = 0; i < n; i++)
-			out[i] = r->data[off + i];
+			out[i] = row_get(r, (unsigned)off + i);
 		return n;
 	}
 	/* What the vendor stack answers for the same instance on this device

@@ -13,13 +13,13 @@ static void row_hex(const struct mib_row *r, int off, uint16_t w, int mask)
 	if (mask) {
 		mask = 0;
 		for (uint16_t b = 0; b < w; b++)
-			mask |= r->data[off + b] != 0;
+			mask |= row_get(r, (unsigned)off + b) != 0;
 	}
 	for (uint16_t b = 0; b < w; b++) {
 		if (mask)
 			out("**");
 		else
-			out_hex(r->data[off + b], 2);
+			out_hex(row_get(r, (unsigned)off + b), 2);
 	}
 }
 
@@ -33,7 +33,7 @@ void cli_row(const struct mib_row *r, int secrets)
 		uint16_t w = attr_width(c, k);
 		int off = attr_offset(c, k);
 
-		if (!w || off < 0 || off + w > MIB_ROW_MAX)
+		if (!w || off < 0 || off + w > row_cap(r))
 			continue;
 		out_fmt("    %-24s ", c->attrs[k].name);
 		row_hex(r, off, w, !secrets && me_attr_secret(r->classId, k));

@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- omcid: the entities wider than a 96-byte row are now stored whole. A large
+  string kept only its number of parts and the first three parts, so any
+  address over 75 characters (a SIP proxy, an ACS URL) came back cut, and the
+  authentication method dropped its second username. Rows of the classes
+  whose attributes add up to more than 96 bytes (large strings, the
+  authentication method, IP host config data, the extended multicast profile)
+  now take a slot of a small pool of 16 full-width rows, about 5 KB in all.
+  If the pool is ever full the row behaves as before (cut, and marked
+  truncated) and omcid logs it once. A Get, a MIB upload and `omcicli mib get`
+  show the whole row, and the resume snapshot carries it (format 5: a
+  snapshot written by an older omcid is not used, and the ONU registers
+  again as it does after any format change).
 - omcid: the credentials an OLT provisions are no longer printed by default.
   `omcli mib` / `omcicli mib get` (and `mib getattr`) show the username,
   password and realm of an authentication security method (class 148) and
