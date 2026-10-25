@@ -81,6 +81,10 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
 		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
 		conn_dirty = 1;
+	/* Which IP host is the voice one follows these two (iphost_is_voice()). */
+	if (c && pots_ports && (c->classId == OMCI_ME_SIP_AGENT_CFG_DATA ||
+				c->classId == OMCI_ME_TCP_UDP_CFG_DATA))
+		conn_dirty = 1;
 	if (!c)
 		return;
 	if (mcast_policy_class(c->classId))
@@ -175,6 +179,17 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 		  c->classId == OMCI_ME_GEM_IW_TP ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
 		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
+		conn_dirty = 1;
+	/* With phone ports on, a SIP agent's TCP/UDP pointer (attribute 5)
+	 * and a TCP/UDP config data's IP host pointer (4) say which IP host
+	 * is the voice one (iphost_is_voice()), whichever comes first: the
+	 * OLT may build the bridge port before them. A Set of anything else
+	 * of theirs (the SIP response table, say) changes no connection. */
+	if (c && pots_ports &&
+	    ((c->classId == OMCI_ME_SIP_AGENT_CFG_DATA &&
+	      (creating || (mask & (1u << (16 - 5))))) ||
+	     (c->classId == OMCI_ME_TCP_UDP_CFG_DATA &&
+	      (creating || (mask & (1u << (16 - 4)))))))
 		conn_dirty = 1;
 	if (c && mcast_policy_class(c->classId))
 		mcast_dirty = 1;

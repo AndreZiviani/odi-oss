@@ -301,6 +301,18 @@ void evtocd_oper_rest(struct omci_vlan_oper *vr);
 int evtocd_plan_ds(const struct evtocd_plan *u, uint8_t ds_mode,
 		   struct evtocd_plan *d, const char **why);
 
+/* An upstream plan of an IP host's table, made into one for the host lane
+ * (OMCI_POTS_PORTS). The frames the OLT means are the IP host's own; on this
+ * stick they come from the router behind it, on the same port as every other
+ * service's, so a rule that matched untagged frames there would take all of
+ * them. An entry that tags the IP host's untagged frames with one C-tag is
+ * matched on that tag instead -- the router sends the voice VLAN tagged, as
+ * the OLT sets it -- keeps its VID, takes the priority the entry assigns,
+ * and *ds_mode becomes the one that leaves the tag on downstream. An entry on
+ * tagged frames that names their VID is the router's to send as it is, and
+ * stays. Returns NULL, or a static reason the rule cannot go on the lane. */
+const char *evtocd_plan_lane(struct evtocd_plan *p, uint8_t *ds_mode);
+
 /* The plan as the bridge rule of cmd 51, rule_gen OMCI_VLAN_OPER_EXTVLAN_GEN
  * (omci_bdgconn.h). Either direction's plan; the caller sets the descriptor's
  * direction. */

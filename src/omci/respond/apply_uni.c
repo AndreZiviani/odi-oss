@@ -510,9 +510,10 @@ void apply_mbpcd(const struct omci_class *c, uint16_t inst,
  * instance has the id of its port, as the stock stack creates it.
  *
  * Which switch port a bridge port stands for follows the stock choice: the
- * UNI of a PPTP Ethernet UNI, the CPU port for an IP host, and the PON port
- * for everything else (a VEIP, a mapper, a GEM IWTP). No per-VLAN split, as
- * in the stock stack.
+ * UNI of a PPTP Ethernet UNI, the CPU port for an IP host (the host lane
+ * for the voice one with OMCI_POTS_PORTS on, iphost_switch_port()), and
+ * the PON port for everything else (a VEIP, a mapper, a GEM IWTP). No
+ * per-VLAN split, as in the stock stack.
  */
 #define BRIDGE_TBL_PAGES_MAX 64       /* 64 pages of 30: past any real table */
 
@@ -522,7 +523,7 @@ static int bridge_port_of(const struct mib_row *r, const struct omci_class *c)
 	case MBPCD_TP_PPTP_ETH_UNI:
 		return uni_switch_port((uint16_t)row_u32(r, c, 4), OMCI_UNI_SLOT_PPTP);
 	case MBPCD_TP_IP_HOST:
-		return (int)caps_u32(OMCI_CAPS_OFF_CPUPORT);
+		return iphost_switch_port((uint16_t)row_u32(r, c, 4));
 	default:
 		return (int)caps_u32(OMCI_CAPS_OFF_PONPORT);
 	}
