@@ -136,6 +136,66 @@ for isp in isp1 isp2; do
 	fi
 done
 
+# ---------------------------------------------------- a wide row resumes whole
+# A large string and an authentication method keep their later attributes in
+# the side pool; the snapshot carries them (format 5), so a respawned omcid
+# still answers part 15 and username 2, not the zeros of a row cut at 96.
+frame() {
+	_c=$5
+	while [ "${#_c}" -lt 64 ]; do _c="${_c}0"; done
+	printf '%s%s0a%s%s%s0000002800000000' "$1" "$2" "$3" "$4" "$_c"
+}
+amask() { printf '%04x' $((1 << (16 - $1))); }
+aval() {
+	_b=$(printf '%02x' $((0x10 + $1)))
+	_s=""; _n=0
+	while [ "$_n" -lt 25 ]; do _s="$_s$_b"; _n=$((_n + 1)); done
+	printf '%s' "$_s"
+}
+
+cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+rm -f /var/run/omcid-mib.snap /var/run/omcid-resume-decision
+wlog1=/tmp/omcid-resume-wide-before.log
+wlog2=/tmp/omcid-resume-wide-after.log
+$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-isp2 > "$wlog1" 2>&1 &
+pid=$!
+omcid_up "$wlog1"
+inject_wait "$wlog1" "$(frame 0001 44 009d 0001 "")"
+inject_wait "$wlog1" "$(frame 0002 44 0094 0002 "")"
+inject_wait "$wlog1" "$(frame 0003 48 009d 0001 "$(amask 16)$(aval 16)")"
+inject_wait "$wlog1" "$(frame 0004 48 0094 0002 "$(amask 5)$(aval 5)")"
+settled "$wlog1"
+kill -9 "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
+
+$Q respond/build/omcid-drvtrace -a -w 20 -c "$CAPS" -s 5 -g /tmp/resume-gpon-isp2 > "$wlog2" 2>&1 &
+pid=$!
+omcid_up "$wlog2"
+if grep -q 'resume: onu state 5, snapshot loaded' "$wlog2"; then
+	echo "ok    wide rows: the respawned instance took the resume path"
+else
+	echo "FAIL  wide rows: the respawned instance did not take the resume path"
+	sed -n '1,20p' "$wlog2"
+	fail=$((fail + 1))
+fi
+inject_wait "$wlog2" "$(frame 0011 49 009d 0001 "$(amask 16)")"
+inject_wait "$wlog2" "$(frame 0012 49 0094 0002 "$(amask 5)")"
+got=$(grep -- '^-> 0011' "$wlog2" | tail -1 | cut -c20-75)
+if [ "$got" = "00$(amask 16)$(aval 16)" ]; then
+	echo "ok    wide rows: part 15 of the large string survives the resume"
+else
+	echo "FAIL  wide rows: part 15 of the large string after resume: $got"
+	fail=$((fail + 1))
+fi
+got=$(grep -- '^-> 0012' "$wlog2" | tail -1 | cut -c20-75)
+if [ "$got" = "00$(amask 5)$(aval 5)" ]; then
+	echo "ok    wide rows: username 2 survives the resume"
+else
+	echo "FAIL  wide rows: username 2 after resume: $got"
+	fail=$((fail + 1))
+fi
+omcid_stop "$pid"
+
 echo
 [ "$fail" -eq 0 ] && echo "resume-test.sh: all checks passed" || echo "resume-test.sh: $fail check(s) failed"
 suite_exit

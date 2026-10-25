@@ -15,11 +15,11 @@ void cli_row(const struct mib_row *r)
 		uint16_t w = attr_width(c, k);
 		int off = attr_offset(c, k);
 
-		if (!w || off < 0 || off + w > MIB_ROW_MAX)
+		if (!w || off < 0 || off + w > row_cap(r))
 			continue;
 		out_fmt("    %-24s ", c->attrs[k].name);
 		for (uint16_t b = 0; b < w; b++)
-			out_hex(r->data[off + b], 2);
+			out_hex(row_get(r, (unsigned)off + b), 2);
 		out_char('\n');
 	}
 	/* Class 171 in words. The vendor dump prints PRI 15, VID 4096 and

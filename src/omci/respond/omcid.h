@@ -64,9 +64,18 @@
  * the next at 64), and the ones that are not -- LargeString at 400 -- hold
  * the ACS URL and credentials, which this has no reason to keep. A truncated
  * row is marked rather than silently short.
+ *
+ * The classes that do hold more -- LargeString, whose parts carry the SIP
+ * and ACS addresses, and the authentication method with its second username
+ * -- are the exception: a bounded side pool gives each such row its full
+ * width (see class_wide() in mibstore.c). Only when the pool is full does a
+ * row fall back to the 96 bytes and the `truncated` mark.
  */
 #define MIB_ROWS      256
 #define MIB_ROW_MAX   96
+#define MIB_WIDE_MAX  384                /* covers the widest entity of the
+					  * model, a large string at 376 */
+#define MIB_WIDE_ROWS 16
 
 /* ------------------------------------------------------- table attributes
  *
@@ -136,7 +145,31 @@ struct mib_row {
 	 * row is fresh and this is zeroes, which reads as "everything changed"
 	 * -- also what the vendor sees. */
 	uint8_t prev[MIB_ROW_MAX];
+	/* Bytes MIB_ROW_MAX and up of a wide row, a slot of the side pool;
+	 * 0 for every other row. `prev` stays 96 bytes: no wide class has a
+	 * handler that compares before and after. */
+	uint8_t *tail;
 };
+
+/* The width of a row's storage, and its bytes by offset. The caller checks
+ * the offset against row_cap() first, as it did against MIB_ROW_MAX. */
+static inline unsigned row_cap(const struct mib_row *r)
+{
+	return r->tail ? MIB_WIDE_MAX : MIB_ROW_MAX;
+}
+
+static inline uint8_t row_get(const struct mib_row *r, unsigned off)
+{
+	return off < MIB_ROW_MAX ? r->data[off] : r->tail[off - MIB_ROW_MAX];
+}
+
+static inline void row_put(struct mib_row *r, unsigned off, uint8_t v)
+{
+	if (off < MIB_ROW_MAX)
+		r->data[off] = v;
+	else
+		r->tail[off - MIB_ROW_MAX] = v;
+}
 
 /* ---------------------------------------------------------------- GEM flows
  *
