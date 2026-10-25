@@ -410,6 +410,11 @@ the result; it never opens `/dev/odi_sw` or the redirect device and refuses
 
 Other events: `v3join`, `v3leave`, `query PORT VID SRC`, `policy-file PATH`,
 `nopolicy`, `status` (what `igmpd -s` prints). A policy change is read at the next second the clock moves to.
+While the policy has the reports taken (below), the frames the verbs build are
+marked taken as the kernel marks them (an `rx` payload says so itself, bit 7 of
+its second byte), and the transcript shows what would go up and with which
+tag (`up:` lines); with tag control 0 the tag is the classifier row's, which
+only the kernel can say, so the line says only that.
 Golden transcripts are in `src/igmp/test/replay`, run by `make test-igmp`;
 `src/omci/mcast-test.sh` replays the policy file omcid wrote.
 
@@ -441,7 +446,17 @@ daemon only under `-w`, which is how the service runs it) and
 `/var/run/odi-mcast.conf`; naming two files reads those instead, e.g. copies
 taken off a stick, and then times are the daemon's seconds, not ages.
 Nothing here is OMCI: the OLT sees the same ME 311 counters as before, and
-`denied` still holds the refusals by the lists and the limit.
+`denied` still holds the refusals by the lists and the limit. While the
+reports are taken (below), a second line under the policy says how they go
+up, and a line under the joins counts them:
+
+      upstream: reports taken and sent by igmpd; tag added, vid 420 pri 5; at most 2 a second; unauthorized joins withheld
+    sent up 40, withheld 3, over the rate 0, not sent 0
+
+`withheld` counts the messages of joins outside the lists alone and the
+queries from the host side; `not sent` the ones that should have gone and
+could not (no classifier row takes the frame, which the switch would have
+dropped too, or a failed send), which the log names each time.
 
 **Off unless asked for.** `svc-igmpd.sh` runs `igmpd -w` only while
 `IGMP_SNOOPING=1` is in the config store (`apply.sh igmp` applies a change);
@@ -506,12 +521,46 @@ An IGMP function other than 0 (snooping with proxy reporting, proxy) is not
 done: the OLT then expects the ONU to answer its queries, which this one
 does not, so the multicast stays transparent.
 
+**The upstream IGMP tag, the rate and unauthorized joins** (ME 309 attributes
+4 to 6 and 15, G.988 9.3.27). The switch forwards the host's IGMP like any
+other frame, by the extended VLAN rules, which is what tag control 0 asks.
+When the profile asks for more, the copy becomes a take: the switch hands
+the host's IGMP to the CPU and forwards none of it, and igmpd sends each
+message up itself. That happens when the profile has a tag control of 1 to 3,
+a rate other than 0, or access control lists that restrict something with
+unauthorized joins discarded (attribute 15 false, the G.988 default). Then:
+
+- a message whose joins the lists all refuse is withheld (with attribute 15
+  true it goes); a leave, an allowed join, a join past the group limit and a
+  message igmpd cannot parse go up as the switch would have sent them;
+- a query from the host side is not sent: the OLT is the querier;
+- no more than the profile's rate of messages go up in one second;
+- tag control 1 puts the profile's TCI in front as a C-tag (TPID 0x8100);
+  2 replaces the whole TCI of the outer tag, 3 its VID alone (priority and
+  DEI kept), and both add the TCI as 1 does when the frame is untagged. The
+  message goes up the flow of the classifier row that carries that VLAN (and
+  priority) upstream, or, when no row does, the flow the host's own frame
+  would have taken;
+- tag control 0: the message gets the tag treatment of the classifier row its
+  frame matches (the extended VLAN discards first, then the lowest matching
+  row) and goes up that row's flow. A frame no row takes, or one a discard
+  drops, is not sent, as the switch would not have sent it.
+
+The kernel says which row and flow (`ODI_SW_IOC_MC_ROUTE`) and does the
+send (`ODI_SW_IOC_MC_SEND`), and sends only for the holder of the lease, only
+while it holds the take, only an IPv4 IGMP frame to an IPv4 multicast MAC,
+and only on a flow an upstream row queues on (`docs/SWITCH.md`, "Snooping").
+If igmpd dies, the lease goes with its descriptor, the rule with it, and the
+switch forwards the host's IGMP by itself again.
+
 **What it does with the switch.** While snooping is on the daemon holds a
 lease on the switch (an ioctl on its open `/dev/odi_sw`, `docs/KERNEL.md`):
 
 1. an ACL rule copies IGMP entering the UNI port to the CPU. The frame is
    forwarded exactly as before (the OLT sees every report and leave) and a
-   copy goes to igmpd on redirect type 4;
+   copy goes to igmpd on redirect type 4. When the profile asks for an
+   upstream tag, a rate or the discard of unauthorized joins, the same rule
+   takes the frame instead and igmpd sends it up (above);
 2. for one membership interval the switch keeps flooding, so every group the
    host already watches can report again; then
 3. IPv4 multicast from the PON that no row names is dropped, except
@@ -527,7 +576,8 @@ it, the rows it wrote are deleted and the PON floods again.
 its only ingress, so a frame from the PON never matches it, the OLT's
 queries are not copied (the host answers them itself and the answers are the
 reports the daemon sees), and the NIC still drops every PON frame that is
-not OMCI. The daemon has no transmit path.
+not OMCI. The daemon's one transmit is the host's own report, taken, sent
+toward the OLT; it never answers anything from the fibre.
 
 **What it reports.** `/var/run/odi-mcast.state` holds the join count and the
 groups the subscriber holds; omcid answers the multicast subscriber monitor

@@ -8,6 +8,7 @@
  */
 #include "odi_switch_cmd.h"
 #include "odi_switch_dal.h"
+#include "odi_switch_mcast.h"
 
 #include "uapi/omci_bdgconn.h"
 
@@ -1103,4 +1104,187 @@ int odi_switch_bdgconn_deactivate(void *buf, uint32_t len)
 		}
 	}
 	return 0; /* deactivating an unknown/already-gone service_id is not an error */
+}
+
+/* ---- the upstream rows read back, for igmpd's taken reports -------------
+ *
+ * While igmpd takes the host's reports (odi_switch_mcast.h, TRAP), the switch
+ * no longer sends them up itself, so igmpd has to send each where the switch
+ * would have: the row a frame matches, its tag treatment and its flow. The
+ * answer comes from the rows as programmed here (odi_sw_cf, odi_sw_acl), by
+ * the rules docs/SWITCH.md gives for them: the extended VLAN discards decide
+ * first, then the lowest-numbered matching row; a row matches when the bits
+ * it cares about (rule | mask, the TCAM data/care pair) equal its rule bits.
+ * The VLAN table's ingress filter is not modelled: a VID no row names has no
+ * row to match either, and a rule that passes any VID puts its members on
+ * every VLAN row.
+ */
+
+/* The key of a frame from the UNI (port 0) in rule word 1: the VID and
+ * priority of the tag the row's template reads (template 1 the S-tag,
+ * template 0 the C-tag, 0 when the frame has no such tag), the two tag
+ * flags, the source port, the direction (0, upstream). */
+static uint32_t us_key(const struct odi_sw_us_tags *t, int tmpl)
+{
+	uint32_t vid = 0, pri = 0, k;
+
+	if (tmpl && t->stag) {
+		vid = t->svid;
+		pri = t->spri;
+	} else if (!tmpl && t->ctag) {
+		vid = t->cvid;
+		pri = t->cpri;
+	}
+	k = ((vid << ODI_SW_CF_W1_VID_SHIFT) & ODI_SW_CF_W1_VID_MASK) |
+	    ((pri << ODI_SW_CF_W1_PRI_SHIFT) & ODI_SW_CF_W1_PRI_MASK);
+	if (t->stag)
+		k |= ODI_SW_CF_W1_STAG;
+	if (t->ctag)
+		k |= ODI_SW_CF_W1_CTAG;
+	return k;
+}
+
+static int us_row_matches(const struct odi_sw_cf_row *r, const struct odi_sw_us_tags *t)
+{
+	uint32_t care = r->rule_w1 | r->mask_w1;
+
+	if ((us_key(t, r->tmpl) & care) != r->rule_w1)
+		return 0;
+	/* The EtherType is compared on an untagged frame only (the rows that
+	 * name one also require no tag, so this is belt and braces). */
+	if (r->et) {
+		uint32_t ecare = (r->rule_w0 | r->mask_w0) & ODI_SW_CF_W0_ET_MASK;
+
+		if (t->stag || t->ctag || (t->ethertype & ecare) != r->rule_w0)
+			return 0;
+	}
+	return 1;
+}
+
+/* Bits 32..31 of an upstream action: 0 forward, anything else drop or trap. */
+static uint32_t us_drop_field(const struct odi_sw_cf_row *r)
+{
+	return ((r->act[1] & 1U) << 1) | (r->act[2] >> 31);
+}
+
+void odi_switch_bdgconn_us_classify(const struct odi_sw_us_tags *t, struct odi_sw_us_treat *out)
+{
+	const struct odi_sw_cf_row *r;
+	unsigned int i;
+
+	*out = (struct odi_sw_us_treat){ .verdict = ODI_SW_US_NONE };
+	if (t->ctag)
+		for (i = 0; i < ODI_SW_ACL_DROP_MAX; i++)
+			if (odi_sw_acl[i].used && (odi_sw_acl[i].ports & ODI_SW_BOARD_UNI_PORTS) &&
+			    odi_sw_acl[i].vid == (int)t->cvid &&
+			    (odi_sw_acl[i].pri < 0 || odi_sw_acl[i].pri == (int)t->cpri)) {
+				out->verdict = ODI_SW_US_DISCARD;
+				return;
+			}
+	for (i = 0; i < ODI_SW_CF_ROWS; i++) {
+		r = &odi_sw_cf[i];
+		if (!r->used || !r->is_us || !us_row_matches(r, t))
+			continue;
+		out->row = i;
+		if (us_drop_field(r)) {
+			out->verdict = ODI_SW_US_DISCARD;
+			return;
+		}
+		/* A row that names no flow leaves the frame without a stream,
+		 * and the PON MAC drops it. */
+		if (!(r->act[2] & ODI_SW_CF_A2_US_SID_ACT))
+			return;
+		out->verdict = ODI_SW_US_FWD;
+		out->flow = (r->act[2] >> ODI_SW_CF_A2_US_FLOW_SHIFT) & 0x7fU;
+		out->c_act = (r->act[1] >> ODI_SW_CF_A1_CACT_SHIFT) & 3U;
+		out->c_vid = (r->act[1] >> ODI_SW_CF_A1_C_VID_SHIFT) & 0xfffU;
+		out->c_pri = (r->act[1] >> ODI_SW_CF_A1_C_PRI_SHIFT) & 7U;
+		out->c_src = (((r->act[1] >> ODI_SW_CF_A1_CVID_ACT_SHIFT) & 7U) ? ODI_SW_US_SRC_VID : 0U) |
+			     (((r->act[1] >> ODI_SW_CF_A1_CPRI_ACT_SHIFT) & 7U) ? ODI_SW_US_SRC_PRI : 0U);
+		out->s_act = r->act[2] & 7U;
+		out->s_vid = (r->act[2] >> ODI_SW_CF_A2_CS_VID_SHIFT) & 0xfffU;
+		out->s_pri = (r->act[2] >> ODI_SW_CF_A2_CS_PRI_SHIFT) & 7U;
+		out->s_src = (((r->act[2] >> ODI_SW_CF_A2_CSVID_ACT_SHIFT) & 3U) ? ODI_SW_US_SRC_VID : 0U) |
+			     (((r->act[2] >> ODI_SW_CF_A2_CSPRI_ACT_SHIFT) & 7U) ? ODI_SW_US_SRC_PRI : 0U);
+		return;
+	}
+}
+
+/* The C-tag an upstream row's frames leave with, as far as the row says
+ * it: 0 and *vid, *pri (-1: the frame's own priority, which the row does
+ * not fix), or -1 when they leave without exactly one C-tag of a VID the
+ * row fixes (a delete, an S-tag added, a row that passes any VID). */
+static int us_row_out_ctag(const struct odi_sw_cf_row *r, int *vid, int *pri)
+{
+	uint32_t care = r->rule_w1 | r->mask_w1;
+	uint32_t cact = (r->act[1] >> ODI_SW_CF_A1_CACT_SHIFT) & 3U;
+	uint32_t sact = r->act[2] & 7U;
+	int cared_pri = (care & ODI_SW_CF_W1_PRI_MASK) == ODI_SW_CF_W1_PRI_MASK ?
+			(int)((r->rule_w1 & ODI_SW_CF_W1_PRI_MASK) >> ODI_SW_CF_W1_PRI_SHIFT) : -1;
+
+	/* No S-tag in front of the C-tag on the way out: none added, and none
+	 * kept from a frame the row only matches with one. */
+	if (sact == ODI_SW_CF_CSACT_ADD || sact == 5U)
+		return -1;
+	if (sact != ODI_SW_CF_CSACT_DEL && (r->rule_w1 & ODI_SW_CF_W1_STAG))
+		return -1;
+	if (cact == ODI_SW_CF_CACT_ADD) {
+		if (!((r->act[1] >> ODI_SW_CF_A1_CVID_ACT_SHIFT) & 7U))
+			return -1;
+		*vid = (int)((r->act[1] >> ODI_SW_CF_A1_C_VID_SHIFT) & 0xfffU);
+		*pri = ((r->act[1] >> ODI_SW_CF_A1_CPRI_ACT_SHIFT) & 7U) ?
+		       (int)((r->act[1] >> ODI_SW_CF_A1_C_PRI_SHIFT) & 7U) :
+		       (r->tmpl ? -1 : cared_pri);
+		return 0;
+	}
+	if (cact == ODI_SW_CF_CACT_DEL || r->tmpl)
+		return -1;
+	/* Transparent, or no action: the C-tag the row matched, when it
+	 * matches one VID (and not only untagged frames). */
+	if ((care & ODI_SW_CF_W1_VID_MASK) != ODI_SW_CF_W1_VID_MASK ||
+	    ((care & ODI_SW_CF_W1_CTAG) && !(r->rule_w1 & ODI_SW_CF_W1_CTAG)))
+		return -1;
+	*vid = (int)((r->rule_w1 & ODI_SW_CF_W1_VID_MASK) >> ODI_SW_CF_W1_VID_SHIFT);
+	*pri = cared_pri;
+	return 0;
+}
+
+int odi_switch_bdgconn_us_by_tag(uint32_t vid, uint32_t pri, uint32_t *flow, uint32_t *row)
+{
+	int any = -1, ovid, opri;
+	unsigned int i;
+
+	for (i = 0; i < ODI_SW_CF_ROWS; i++) {
+		const struct odi_sw_cf_row *r = &odi_sw_cf[i];
+
+		if (!r->used || !r->is_us || us_drop_field(r) ||
+		    !(r->act[2] & ODI_SW_CF_A2_US_SID_ACT) ||
+		    us_row_out_ctag(r, &ovid, &opri) || ovid != (int)vid)
+			continue;
+		if (opri == (int)pri) {
+			any = (int)i;
+			break;
+		}
+		if (opri < 0 && any < 0)
+			any = (int)i;
+	}
+	if (any < 0)
+		return -1;
+	*row = (uint32_t)any;
+	*flow = (odi_sw_cf[any].act[2] >> ODI_SW_CF_A2_US_FLOW_SHIFT) & 0x7fU;
+	return 0;
+}
+
+int odi_switch_bdgconn_us_flow_known(uint32_t flow)
+{
+	unsigned int i;
+
+	for (i = 0; i < ODI_SW_CF_ROWS; i++) {
+		const struct odi_sw_cf_row *r = &odi_sw_cf[i];
+
+		if (r->used && r->is_us && (r->act[2] & ODI_SW_CF_A2_US_SID_ACT) &&
+		    ((r->act[2] >> ODI_SW_CF_A2_US_FLOW_SHIFT) & 0x7fU) == flow)
+			return 1;
+	}
+	return 0;
 }

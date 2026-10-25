@@ -1,23 +1,31 @@
 > 0 policy
 > 0 tick
 policy: snooping, function 0, immediate leave, 2/125/1 s, limit 2, 1 allow + 0 static ranges
-snooping lease: copy host IGMP to the CPU  (not written)
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
 > 1 v2join 1 0 192.168.1.10 225.1.1.1
 port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 225.1.1.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
   set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
 > 2 v2join 1 0 192.168.1.10 225.1.1.2
 port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:02  v2 report  group 225.1.1.2  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
   set vid 0 01:00:5e:01:01:02 ports 0x5  (not written)
 > 3 v2join 1 0 192.168.1.10 225.1.1.3
 port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:03  v2 report  group 225.1.1.3  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
 > 4 v2join 1 0 192.168.1.10 225.1.1.1
 port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 225.1.1.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
 > 5 v2join 1 0 192.168.1.10 239.9.9.9
 port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:09:09  v2 report  group 239.9.9.9  src 192.168.1.10
+  up: withheld: every join outside the access control lists
 > 6 status
 policy: snooping, function 0, immediate leave, 2/125/1 s, limit 2, 1 allow + 0 static ranges
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
   allow 225.0.0.0 - 225.255.255.255
 joins 3, refused by the profile 2 (lists 1, group limit 1), table full 0
+sent up 4, withheld 1, over the rate 0, not sent 0
 groups held: 2
   225.1.1.1
   225.1.1.2
@@ -30,6 +38,8 @@ denied=2
 groups=2
 refused_acl=1
 refused_limit=1
+up_sent=4
+up_withheld=1
 group=225.1.1.1
 group=225.1.1.2
 refused=limit 225.1.1.3 vid=0 at=3 n=1

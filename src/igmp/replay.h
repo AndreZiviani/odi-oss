@@ -15,6 +15,9 @@ void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
 /* Switch main.c to a transcript's clock (every later now_seconds() answers
  * `now`) and policy text (what the policy file would hold; the pointer must
  * stay valid). Nothing in a replay opens the device. */
+/* The snooping lease the daemon holds (or, in a dry run, would hold):
+ * ODI_SW_MC_SNOOP_* flags. */
+uint32_t igmpd_lease(void);
 void igmpd_replay_clock(uint32_t now);
 void igmpd_replay_policy(const char *text, uint32_t len);
 void igmpd_state_dump(const struct igmp_db *db);

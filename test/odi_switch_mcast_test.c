@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * odi_switch_mcast_test.c -- the switch half of IGMP snooping
- * (odi_switch_mcast.c): the ACL rule that copies the host port's IGMP to
- * the CPU, the drop of unregistered IPv4 multicast from the PON, and the
- * lease that takes both back with the rows the holder wrote.
+ * (odi_switch_mcast.c): the ACL rule that copies (or takes) the host port's
+ * IGMP to the CPU, the drop of unregistered IPv4 multicast from the PON, the
+ * lease that takes them back with the rows the holder wrote, and the way a
+ * taken report goes up: what may be sent, by whom, on which flow.
  *
  * The rule is checked by what it MATCHES, not by comparing its words with
  * words typed in from the same reading: a small matcher built from the
@@ -88,9 +89,69 @@ int odi_switch_l2_mcast_del(const struct odi_sw_l2_mcast_req *req, int *found)
 	return 0;
 }
 
+/* The classifier rows odi_switch_bdgconn.c answers from, for the way up:
+ * one upstream row (row 70, flow 3) that adds C-VID 11, the flows it knows,
+ * and what was asked. The lookups themselves are tested against real rows in
+ * odi_switch_bdgconn_extvlan_test.c. */
+#include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_mcast.h"
+
+static struct odi_sw_us_tags last_tags;
+static unsigned int n_classify, n_by_tag;
+static int by_tag_hit;
+
+void odi_switch_bdgconn_us_classify(const struct odi_sw_us_tags *t, struct odi_sw_us_treat *out)
+{
+	n_classify++;
+	last_tags = *t;
+	memset(out, 0, sizeof(*out));
+	if (t->ctag && t->cvid == 99) {
+		out->verdict = ODI_SW_US_DISCARD;
+		return;
+	}
+	out->verdict = ODI_SW_US_FWD;
+	out->row = 70;
+	out->flow = 3;
+	out->c_act = 1;
+	out->c_vid = 11;
+	out->c_src = ODI_SW_US_SRC_VID | ODI_SW_US_SRC_PRI;
+	out->s_act = 4;
+}
+
+int odi_switch_bdgconn_us_by_tag(uint32_t vid, uint32_t pri, uint32_t *flow, uint32_t *row)
+{
+	n_by_tag++;
+	(void)pri;
+	if (!by_tag_hit || vid != 420)
+		return -1;
+	*flow = 5;
+	*row = 66;
+	return 0;
+}
+
+int odi_switch_bdgconn_us_flow_known(uint32_t flow)
+{
+	return flow == 3 || flow == 5;
+}
+
+/* The transmit odi_omci.c would do: recorded. */
+static unsigned int n_tx;
+static uint32_t tx_len, tx_flow;
+static int tx_rc;
+
+static int tx_record(const uint8_t *frame, uint32_t len, uint32_t flow)
+{
+	(void)frame;
+	n_tx++;
+	tx_len = len;
+	tx_flow = flow;
+	return tx_rc;
+}
+
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_mcast.c"
 
 static int failures;
+
+#define COPY_DROP (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP)
 
 #define CHECK(cond, msg) do { \
 	if (!(cond)) { \
@@ -187,6 +248,7 @@ static void boot_state(void)
 	held = 0;
 	ntracked = 0;
 	odi_sw_mcast_copy_on = 0;
+	odi_sw_mcast_trap_on = 0;
 	/* Templates as a stick reads them (junk in template 6 included, and
 	 * the unused top bits of each word set), the ACL lookup on for every
 	 * port, MC_UNKNOWN_CFG as claro reads it (reserved IPv4 groups not
@@ -306,7 +368,7 @@ static void test_rx_hook_enabled_before_the_rule(void)
 	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0, "copy installs");
 	CHECK(rx_enable_calls == 1, "the hook is registered when the copy is first installed");
 	CHECK(rx_enable_at_ntw == 0, "and before any ACL write, so no copy arrives unhooked");
-	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_ALL) == 0 && rx_enable_calls == 1,
+	CHECK(odi_switch_mcast_snoop_set(COPY_DROP) == 0 && rx_enable_calls == 1,
 	      "changing the flags does not register it again");
 	odi_switch_mcast_release();
 	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0 && rx_enable_calls == 2,
@@ -330,15 +392,18 @@ static void test_pon_drop(void)
 	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_PON_DROP) < 0,
 	      "the drop without the copy is refused: no group would ever be registered");
 	CHECK(reg(ODI_SW_MC_UNKNOWN_IP4_OFF) == 0, "and nothing is written");
-	CHECK(odi_switch_mcast_snoop_set(0x4) < 0, "an unknown flag is refused");
+	CHECK(odi_switch_mcast_snoop_set(0x8) < 0, "an unknown flag is refused");
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_TRAP) < 0,
+	      "the take without the copy is refused: it is a mode of the copy rule");
+	CHECK(odi_switch_mcast_flags() == 0 && ntw == 0, "and nothing is written");
 
 	set_reg(ODI_SW_MC_UNKNOWN_IP4_OFF, 0x0000000cU);	/* ports 1 and 3 flood-bits as they were */
-	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_ALL) == 0, "copy and drop together");
+	CHECK(odi_switch_mcast_snoop_set(COPY_DROP) == 0, "copy and drop together");
 	CHECK(reg(ODI_SW_MC_UNKNOWN_IP4_OFF) == (0x0cU | (1U << 4)),
 	      "port 2 (the PON) drops, the other ports keep what they had");
 	CHECK(reg(ODI_SW_MC_UNKNOWN_CFG_OFF) == 0x28,
 	      "the reserved IPv4 groups are flooded again (the OLT's general queries go to 224.0.0.1)");
-	CHECK(odi_switch_mcast_flags() == ODI_SW_MC_SNOOP_ALL, "both held");
+	CHECK(odi_switch_mcast_flags() == COPY_DROP, "both held");
 
 	/* Back to the copy alone: the drop goes, the copy stays. */
 	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0, "drop released");
@@ -348,7 +413,7 @@ static void test_pon_drop(void)
 	      "the copy is still on");
 
 	/* Dropping the copy while the drop is held takes the drop first. */
-	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_ALL) == 0, "both again");
+	CHECK(odi_switch_mcast_snoop_set(COPY_DROP) == 0, "both again");
 	CHECK(odi_switch_mcast_snoop_set(0) == 0, "all released");
 	CHECK(reg(ODI_SW_MC_UNKNOWN_IP4_OFF) == 0x0cU && reg(ODI_SW_MC_UNKNOWN_CFG_OFF) == 0x20,
 	      "registers are as found");
@@ -374,7 +439,7 @@ static void test_rows_and_release(void)
 	int found;
 
 	boot_state();
-	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_ALL) == 0, "lease taken");
+	CHECK(odi_switch_mcast_snoop_set(COPY_DROP) == 0, "lease taken");
 	mc(&r, 0x101);
 	CHECK(odi_switch_mcast_row_add(&r, &idx) == 0 && nrows == 1, "a row is added");
 	CHECK(odi_switch_mcast_row_add(&r, &idx) == 0 && nrows == 1 && ntracked == 1,
@@ -389,7 +454,7 @@ static void test_rows_and_release(void)
 	      "a second delete finds nothing and tracks nothing");
 
 	/* The end of the lease deletes what is left, after the flags. */
-	CHECK(held == ODI_SW_MC_SNOOP_ALL, "still held");
+	CHECK(held == COPY_DROP, "still held");
 	odi_switch_mcast_release();
 	CHECK(held == 0 && odi_sw_mcast_copy_on == 0, "release takes every flag back");
 	CHECK(nrows == 0 && ntracked == 0, "and the rows the holder added");
@@ -429,8 +494,208 @@ static void test_release_retries(void)
 	CHECK(ndel == 3, "three deletes for two rows");
 }
 
+/* The rule written by the last install: the ones plane (the write with the
+ * valid bit), the zeros plane and the action, from the table-write log. */
+static void last_rule(uint32_t **ones, uint32_t **zeros, uint32_t **act)
+{
+	unsigned int i;
+
+	*ones = *zeros = *act = 0;
+	for (i = 0; i < ntw; i++) {
+		if (tw[i].table == ODI_SW_TBL_ACL_PATTERN && (tw[i].w[0] & ODI_SW_MC_RULE_VALID))
+			*ones = tw[i].w;
+		if (tw[i].table == ODI_SW_TBL_ACL_PATTERN_MASK)
+			*zeros = tw[i].w;
+		if (tw[i].table == ODI_SW_TBL_ACL_ACTIONS)
+			*act = tw[i].w;
+	}
+}
+
+/* The take: the same rule, whose action is "trap" (3 at bits 42:41) with no
+ * port, as diag acl-probe measured it on a stick: the report reaches the CPU
+ * and nothing leaves by the PON. */
+static void test_trap_rule(void)
+{
+	uint32_t *ones, *zeros, *act;
+	unsigned int i;
+
+	boot_state();
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP) == 0,
+	      "the copy installs as a take");
+	CHECK(odi_switch_mcast_flags() == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP), "both held");
+	CHECK(odi_sw_mcast_copy_on == 1 && odi_sw_mcast_trap_on == 1, "the hook copies and marks taken");
+	last_rule(&ones, &zeros, &act);
+	CHECK(ones && zeros && act, "the rule, its mask and its action were written");
+	if (!ones || !zeros || !act)
+		return;
+	CHECK(act[0] == 0 && act[2] == 0 && act[1] == (3U << 9),
+	      "the action is trap (3 at bits 42:41), no port, nothing else");
+	CHECK(reg(0x15048U + 4U * 8U) == 0x10, "the entry applies only the forwarding class");
+	/* What it matches is the copy's: IGMP into the UNI, and from the PON
+	 * nothing at all. */
+	CHECK(frame_hits(ones, zeros, 6, 0, 0x0800, 0x0002), "IGMP from the UNI port is taken");
+	CHECK(!frame_hits(ones, zeros, 6, 2, 0x0800, 0x0002), "IGMP from the PON port is NOT taken");
+	CHECK(!frame_hits(ones, zeros, 6, 3, 0x0800, 0x0002), "nor from the CPU port");
+	CHECK(!frame_hits(ones, zeros, 6, 0, 0x0800, 0x0011) && !frame_hits(ones, zeros, 6, 0, 0x86dd, 0x0002),
+	      "nor anything but IPv4 IGMP");
+	for (i = 0; i < ntw; i++)
+		CHECK(tw[i].index == ODI_SW_MC_ACL_ENTRY, "every ACL write is entry 8");
+
+	/* Back to a copy with the rule in: the action entry alone is rewritten,
+	 * and the mark goes off after it. */
+	ntw = 0;
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0, "take to copy");
+	CHECK(ntw == 1 && tw[0].table == ODI_SW_TBL_ACL_ACTIONS && tw[0].index == ODI_SW_MC_ACL_ENTRY &&
+	      tw[0].w[1] == ((2U << 9) | (0x8U << 5)),
+	      "one write, the action entry: mirror to the CPU port again");
+	CHECK(odi_sw_mcast_trap_on == 0 && odi_sw_mcast_copy_on == 1, "the mark is off, the copy on");
+	ntw = 0;
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_ALL) == 0, "copy to take, with the drop");
+	CHECK(ntw == 1 && tw[0].table == ODI_SW_TBL_ACL_ACTIONS && tw[0].w[1] == (3U << 9),
+	      "one write, the action entry: trap");
+	CHECK(odi_sw_mcast_trap_on == 1 && odi_switch_mcast_flags() == ODI_SW_MC_SNOOP_ALL,
+	      "taken, and the drop on");
+
+	/* A failed mode write keeps the old mode, mark included. */
+	tw_fail = 1;
+	CHECK(odi_switch_mcast_snoop_set(COPY_DROP) == -5, "a table error is reported");
+	CHECK(odi_switch_mcast_flags() == ODI_SW_MC_SNOOP_ALL && odi_sw_mcast_trap_on == 1,
+	      "and the take is still held and marked");
+	tw_fail = 0;
+
+	/* The end of the lease takes the rule out whatever its mode: the host's
+	 * reports go up by the switch again. */
+	ntw = 0;
+	odi_switch_mcast_release();
+	CHECK(odi_switch_mcast_flags() == 0 && odi_sw_mcast_copy_on == 0 && odi_sw_mcast_trap_on == 0,
+	      "release: nothing held, nothing marked");
+	CHECK(ntw >= 3 && tw[0].table == ODI_SW_TBL_ACL_PATTERN && !(tw[0].w[0] & ODI_SW_MC_RULE_VALID),
+	      "the rule stops matching first");
+	CHECK(reg(0x15048U + 4U * 8U) == 0x7f, "the entry gets the reset enable word back");
+}
+
+/* An IGMPv2 report frame for 239.1.1.1, untagged, padded to 60 bytes. */
+static uint32_t report(uint8_t *f)
+{
+	memset(f, 0, 64);
+	memcpy(f, "\x01\x00\x5e\x01\x01\x01\x02\x00\x00\x00\x00\x09\x08\x00", 14);
+	f[14] = 0x46;
+	f[23] = 2;
+	return 60;
+}
+
+static void test_send(void)
+{
+	uint8_t f[64];
+	uint32_t n = report(f);
+
+	boot_state();
+	odi_sw_mcast_tx = tx_record;
+	n_tx = 0;
+	tx_rc = 0;
+	CHECK(odi_switch_mcast_send(f, n, 3) == -1, "no lease: nothing is sent (EPERM)");
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0, "the copy alone");
+	CHECK(odi_switch_mcast_send(f, n, 3) == -1,
+	      "with the copy alone the switch sent the report itself: nothing is sent");
+	CHECK(n_tx == 0, "the transmit was never called");
+
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP) == 0, "the take");
+	CHECK(odi_switch_mcast_send(f, n, 3) == 0 && n_tx == 1 && tx_len == 60 && tx_flow == 3,
+	      "a report on a flow an upstream row queues on: sent, once");
+	CHECK(odi_switch_mcast_send(f, n, 4) == -22 && n_tx == 1,
+	      "a flow no upstream row queues on: refused");
+	CHECK(odi_switch_mcast_send(f, n, 0x80) == -22, "a flow past seven bits: refused");
+	CHECK(odi_switch_mcast_send(f, 59, 3) == -22, "shorter than a minimum frame: refused");
+	CHECK(odi_switch_mcast_send(f, 1537, 3) == -22, "longer than the largest: refused");
+	f[23] = 17;
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22, "UDP, not IGMP: refused");
+	f[23] = 2;
+	f[0] = 0x02;
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22, "to a unicast MAC: refused");
+	f[0] = 0x01;
+	f[3] = 0x81;
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22, "to a MAC outside the IPv4 multicast block: refused");
+	f[3] = 0x01;
+	f[12] = 0x86;
+	f[13] = 0xdd;
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22, "IPv6: refused");
+	f[12] = 0x08;
+	f[13] = 0x00;
+	CHECK(n_tx == 1, "none of the refused ones reached the transmit");
+	tx_rc = -105;
+	CHECK(odi_switch_mcast_send(f, n, 5) == -105, "the transmit's error is passed back");
+	tx_rc = 0;
+
+	odi_switch_mcast_release();
+	CHECK(odi_switch_mcast_send(f, n, 3) == -1, "after the lease: nothing is sent");
+	odi_sw_mcast_tx = 0;
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP) == 0 &&
+	      odi_switch_mcast_send(f, n, 3) == -1, "with no transmit registered: refused, not a crash");
+	odi_switch_mcast_release();
+}
+
+static void test_route(void)
+{
+	struct odi_sw_mc_route r;
+
+	memset(&r, 0, sizeof r);
+	r.mode = ODI_SW_MC_ROUTE_FRAME;
+	n_classify = n_by_tag = 0;
+	CHECK(odi_switch_mcast_route(&r) == 0 && r.verdict == ODI_SW_US_FWD && r.via == ODI_SW_MC_ROUTE_FRAME &&
+	      r.row == 70 && r.flow == 3 && r.c_act == 1 && r.c_vid == 11 && r.s_act == 4 &&
+	      r.c_src == (ODI_SW_US_SRC_VID | ODI_SW_US_SRC_PRI),
+	      "FRAME: the row the frame matches, its flow and its treatment");
+	CHECK(n_classify == 1 && n_by_tag == 0 && !last_tags.ctag && !last_tags.stag,
+	      "classified once, by the frame's own tags");
+
+	memset(&r, 0, sizeof r);
+	r.mode = ODI_SW_MC_ROUTE_FRAME;
+	r.ctag = 1;
+	r.cvid = 99;
+	r.cpri = 3;
+	CHECK(odi_switch_mcast_route(&r) == 0 && r.verdict == ODI_SW_US_DISCARD && r.flow == 0,
+	      "a frame the extended VLAN rules discard: no flow");
+	CHECK(last_tags.ctag == 1 && last_tags.cvid == 99 && last_tags.cpri == 3, "the C-tag was passed on");
+
+	memset(&r, 0, sizeof r);
+	r.mode = ODI_SW_MC_ROUTE_TAG;
+	r.want_vid = 420;
+	r.want_pri = 5;
+	by_tag_hit = 1;
+	CHECK(odi_switch_mcast_route(&r) == 0 && r.verdict == ODI_SW_US_FWD && r.via == ODI_SW_MC_ROUTE_TAG &&
+	      r.flow == 5 && r.row == 66 && r.c_act == 0,
+	      "TAG: the row that carries VLAN 420 up, and no treatment to apply");
+	by_tag_hit = 0;
+	n_classify = 0;
+	CHECK(odi_switch_mcast_route(&r) == 0 && r.verdict == ODI_SW_US_FWD && r.via == ODI_SW_MC_ROUTE_FRAME &&
+	      r.flow == 3 && n_classify == 1,
+	      "TAG with no row for that VLAN: the flow the report itself would take");
+
+	memset(&r, 0, sizeof r);
+	CHECK(odi_switch_mcast_route(&r) == -22, "mode 0: refused");
+	r.mode = 3;
+	CHECK(odi_switch_mcast_route(&r) == -22, "mode 3: refused");
+	r.mode = ODI_SW_MC_ROUTE_FRAME;
+	r.cvid = 4096;
+	CHECK(odi_switch_mcast_route(&r) == -22, "a VID past 12 bits: refused");
+	r.cvid = 0;
+	r.ctag = 2;
+	CHECK(odi_switch_mcast_route(&r) == -22, "a tag flag not 0 or 1: refused");
+	r.ctag = 0;
+	r.mode = ODI_SW_MC_ROUTE_TAG;
+	r.want_vid = 4095;
+	CHECK(odi_switch_mcast_route(&r) == -22, "TAG of VID 4095: refused");
+
+	/* The ABI the userland copy (src/diag/src/odi_sw_ioctl.h) restates. */
+	CHECK(sizeof(struct odi_sw_mc_route) == 88 && sizeof(struct odi_sw_mc_send) == 1544,
+	      "the route request is 88 bytes, the send 1544");
+}
+
 int main(void)
 {
+	test_trap_rule();
+	test_send();
+	test_route();
 	test_rx_hook_enabled_before_the_rule();
 	test_release_retries();
 	test_copy_rule();

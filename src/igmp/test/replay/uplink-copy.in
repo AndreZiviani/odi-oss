@@ -1,0 +1,19 @@
+# A profile that asks nothing the switch cannot do itself: no upstream tag,
+# no rate, unauthorized joins forwarded. The reports stay a copy, the switch
+# sends them up as it always did, and igmpd sends nothing ("up:" never
+# appears): what every profile did before igmpd could send.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+unauthorized_join=1
+us_tag_control=0
+us_tci=41380
+us_rate=0
+allow=225.0.0.0-225.255.255.255
+end
+0 tick
+1 v2join 1 0 192.168.1.10 225.1.1.1
+2 v2join 1 0 192.168.1.10 239.1.1.1
+3 v2leave 1 0 192.168.1.10 225.1.1.1
+4 state

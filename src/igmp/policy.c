@@ -126,6 +126,12 @@ int igmp_policy_parse(const char *text, uint32_t len, struct igmp_policy *p)
 				p->max_groups = v;
 			} else if (is(l, eq, "unauthorized_join") && num(val, vn, &v)) {
 				p->unauthorized_join = v != 0;
+			} else if (is(l, eq, "us_tag_control") && num(val, vn, &v)) {
+				p->us_tag_control = v;
+			} else if (is(l, eq, "us_tci") && num(val, vn, &v)) {
+				p->us_tci = v & 0xffff;
+			} else if (is(l, eq, "us_rate") && num(val, vn, &v)) {
+				p->us_rate = v;
 			} else if (is(l, eq, "allow_overflow") && num(val, vn, &v)) {
 				p->overflow = v != 0;
 			} else if (is(l, eq, "allow") && range(val, vn, &r)) {
@@ -178,24 +184,41 @@ uint32_t igmp_policy_last_member_ttl(const struct igmp_policy *p)
 	return p->robustness * p->last_member_query;
 }
 
-uint32_t igmp_policy_lease(const struct igmp_policy *p, int static_overflow,
-			   uint32_t now, uint32_t learn_until, int pon_drop)
+int igmp_policy_takes(const struct igmp_policy *p)
 {
 	if (!p->snooping)
 		return 0;
+	/* A tag control G.988 does not define is not one to guess at: the
+	 * report goes as the switch sends it, which is control 0. */
+	if (p->us_tag_control >= IGMP_US_TAG_ADD && p->us_tag_control <= IGMP_US_TAG_VID)
+		return 1;
+	if (p->us_rate)
+		return 1;
+	return igmp_policy_acl_active(p) && !p->unauthorized_join;
+}
+
+uint32_t igmp_policy_lease(const struct igmp_policy *p, int static_overflow,
+			   uint32_t now, uint32_t learn_until, int pon_drop)
+{
+	uint32_t copy = ODI_SW_MC_SNOOP_COPY;
+
+	if (!p->snooping)
+		return 0;
+	if (igmp_policy_takes(p))
+		copy |= ODI_SW_MC_SNOOP_TRAP;
 	/* The drop is the one part that can cut a stream, so it is opt-in
 	 * (igmpd -d); without it the copy and the state run and the PON
 	 * keeps flooding. */
 	if (!pon_drop)
-		return ODI_SW_MC_SNOOP_COPY;
+		return copy;
 	/* Compared as a difference so it stays right across the wrap of a
 	 * 32-bit monotonic second counter. */
 	if ((int32_t)(now - learn_until) < 0)
-		return ODI_SW_MC_SNOOP_COPY;
+		return copy;
 	/* A list longer than fits lost some of its static ranges, and a range
 	 * too wide to name is not a row: either way a group the OLT promised
 	 * the subscriber would be dropped as unregistered. */
 	if (static_overflow || p->overflow)
-		return ODI_SW_MC_SNOOP_COPY;
-	return ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP;
+		return copy;
+	return copy | ODI_SW_MC_SNOOP_PON_DROP;
 }

@@ -12,6 +12,8 @@ static void out_group(uint32_t g)
 
 void igmp_policy_describe(const struct igmp_policy *p)
 {
+	uint32_t t = p->us_tci;
+
 	out_fmt("policy: %s, function %d, %s leave, %d/%d/%d s, limit %d, "
 		"%d allow + %d static ranges%s\n",
 		p->snooping ? "snooping" : "not snooping",
@@ -20,6 +22,31 @@ void igmp_policy_describe(const struct igmp_policy *p)
 		(long)p->last_member_query, (long)p->max_groups,
 		(long)p->nallow, (long)p->nstatic,
 		p->overflow ? " (too many: not enforced)" : "");
+	/* A second line only when the reports are taken: a profile the switch
+	 * already forwards as asked reads as it always did. */
+	if (!igmp_policy_takes(p))
+		return;
+	out("  upstream: reports taken and sent by igmpd; tag ");
+	switch (p->us_tag_control) {
+	case IGMP_US_TAG_ADD:
+		out_fmt("added, vid %u pri %u", t & 0x0fff, t >> 13);
+		break;
+	case IGMP_US_TAG_REPLACE:
+		out_fmt("replaced by vid %u pri %u", t & 0x0fff, t >> 13);
+		break;
+	case IGMP_US_TAG_VID:
+		out_fmt("vid replaced by %u", t & 0x0fff);
+		break;
+	default:
+		out("as the switch tags it");
+		break;
+	}
+	if (p->us_rate)
+		out_fmt("; at most %u a second", p->us_rate);
+	if (igmp_policy_acl_active(p))
+		out(p->unauthorized_join ? "; unauthorized joins forwarded" :
+		    "; unauthorized joins withheld");
+	out("\n");
 }
 
 static void out_ranges(const char *kind, const struct igmp_range *r, uint32_t n)
@@ -63,6 +90,9 @@ void igmp_status_print(const struct igmp_policy *p, int have_policy,
 	out_fmt("joins %u, refused by the profile %u (lists %u, group limit %u), "
 		"table full %u\n", v.joins, v.denied, v.refused[IGMP_REFUSE_ACL],
 		v.refused[IGMP_REFUSE_LIMIT], v.refused[IGMP_REFUSE_FULL]);
+	if (v.up_sent || v.up_withheld || v.up_limited || v.up_unsent)
+		out_fmt("sent up %u, withheld %u, over the rate %u, not sent %u\n",
+			v.up_sent, v.up_withheld, v.up_limited, v.up_unsent);
 	out_fmt("groups held: %u\n", v.groups);
 	for (uint32_t i = 0; i < v.ngroup; i++) {
 		out("  ");

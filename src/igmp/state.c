@@ -63,6 +63,17 @@ uint32_t igmp_state_format(const struct igmp_db *db, char *buf, uint32_t max)
 		at = put_s(buf, at, max, "refused_");
 		at = put_kv(buf, at, max, igmp_refusal_name(r), db->refused[r]);
 	}
+	/* The way up, while the reports are taken (uplink.h): a line only once
+	 * its count is above zero, like the refusals, so a snooper whose copy
+	 * stays a copy writes what it always wrote. */
+	if (db->up_sent)
+		at = put_kv(buf, at, max, "up_sent", db->up_sent);
+	if (db->up_withheld)
+		at = put_kv(buf, at, max, "up_withheld", db->up_withheld);
+	if (db->up_limited)
+		at = put_kv(buf, at, max, "up_limited", db->up_limited);
+	if (db->up_unsent)
+		at = put_kv(buf, at, max, "up_unsent", db->up_unsent);
 	/* One line a group, not a line a (vid, group): two VLANs of the same
 	 * group are one group to the OLT. */
 	for (int i = 0; i < IGMP_MAX_GROUPS; i++) {
@@ -177,6 +188,14 @@ int igmp_state_parse(const char *text, uint32_t len, struct igmp_state_view *v)
 			v->denied = x;
 		} else if (rd_lit(&p, e, "groups=") && rd_u(&p, e, &x)) {
 			v->groups = x;
+		} else if (rd_lit(&p, e, "up_sent=") && rd_u(&p, e, &x)) {
+			v->up_sent = x;
+		} else if (rd_lit(&p, e, "up_withheld=") && rd_u(&p, e, &x)) {
+			v->up_withheld = x;
+		} else if (rd_lit(&p, e, "up_limited=") && rd_u(&p, e, &x)) {
+			v->up_limited = x;
+		} else if (rd_lit(&p, e, "up_unsent=") && rd_u(&p, e, &x)) {
+			v->up_unsent = x;
 		} else if (rd_lit(&p, e, "refused_")) {
 			uint32_t r;
 

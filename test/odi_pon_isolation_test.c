@@ -25,6 +25,7 @@
 
 #include "odi_switch_unity.h"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_nic_hw.h"
+#include "../kernel/extra/drivers/net/ethernet/odi/odi_igmp_tx.h"
 
 static int failures;
 
@@ -233,6 +234,46 @@ static void test_nic_descriptors(void)
 	      "a PON data frame is from the PON with no OMCI reason: no hook takes it, the poll drops it");
 }
 
+/* The IGMP way up (odi_igmp_tx.h, odi_igmp_rx.h): while igmpd takes the
+ * host's reports and sends them up itself, the CPU gains a transmit toward
+ * the fibre and nothing else. A frame from the PON is still not one the IGMP
+ * hook takes, whatever the lease holds, so it still meets the NIC's drop; and
+ * what igmpd sends is a directed transmit to the PON port alone, never learnt
+ * from, never a lookup. */
+static void test_igmp_way_up(void)
+{
+	/* An IGMPv2 report as it would arrive, untagged, and the descriptor of a
+	 * frame from the PON port with the ACL reason of the snooping entry
+	 * (128 + 8): the case where the hook would matter. */
+	uint8_t f[60] = { 0x01, 0x00, 0x5e, 0x01, 0x01, 0x01, 0x02, 0, 0, 0, 0, 0x09, 0x08, 0x00,
+			  0x46 };
+	struct odi_rx_desc pon_igmp = { .opts1 = 0x36000040U, .opts2 = 0x80000000U,
+					.opts3 = 0x20000000U | (136U << ODI_RXD_REASON_SHIFT) };
+	struct odi_rx_desc host_igmp = { .opts1 = 0x36000040U, .opts2 = 0x80000000U,
+					 .opts3 = 0x00200000U | (136U << ODI_RXD_REASON_SHIFT) };
+	uint32_t o3;
+
+	f[23] = 2;
+	CHECK(odi_igmp_frame_wanted(f, sizeof f), "the frame is IGMP");
+	CHECK(odi_nic_rx_from_pon(&pon_igmp) && odi_nic_rx_reason(&pon_igmp) == 136U,
+	      "an IGMP frame from the PON with the snooping entry's reason");
+	CHECK(!odi_igmp_rx_takes(1, odi_nic_rx_src_port(&pon_igmp), f, sizeof f),
+	      "with the copy and the take held, the IGMP hook does not take it: the NIC drops it");
+	CHECK(odi_igmp_rx_takes(1, odi_nic_rx_src_port(&host_igmp), f, sizeof f),
+	      "the host's own report is taken");
+
+	o3 = odi_igmp_tx_opts3(5);
+	CHECK(((o3 >> ODI_TXD_PORTS_SHIFT) & ODI_TXD_PORTS_MASK) == (1U << PON),
+	      "a report sent up names the PON port alone");
+	CHECK(((o3 >> ODI_TXD_GEM_SHIFT) & ODI_TXD_GEM_MASK) == 5U, "on the flow it was given");
+	CHECK((ODI_IGMP_TX_OPTS1 & ODI_TXD_PORT_SEL) && (ODI_IGMP_TX_OPTS1 & ODI_TXD_NO_LEARN),
+	      "a directed transmit (PORT_SEL), never learnt from (the host's MAC stays on the host port)");
+	CHECK(!odi_igmp_tx_frame_ok(f, 59) && odi_igmp_tx_frame_ok(f, sizeof f),
+	      "and only an IGMP frame of a minimum frame's length or more goes");
+	f[0] = 0xff;
+	CHECK(!odi_igmp_tx_frame_ok(f, sizeof f), "never a broadcast");
+}
+
 int main(void)
 {
 	test_platform_words();
@@ -240,6 +281,7 @@ int main(void)
 	test_parameter();
 	test_nic_descriptors();
 	test_nic_stack_tx();
+	test_igmp_way_up();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

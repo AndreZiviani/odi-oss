@@ -1249,9 +1249,39 @@ With the lease held (`odi_switch_mcast.c`, `ODI_SW_IOC_MC_SNOOP`):
   touched. igmpd turns the drop on only after one membership interval, so
   every group the host already watches has reported again.
 
+- **The take.** When the OLT's profile asks for what the switch cannot do on
+  its own (an upstream IGMP tag, a rate, the discard of joins outside its
+  lists: `docs/TOOLS.md`, `igmpd`), the lease holds `ODI_SW_MC_SNOOP_TRAP`
+  as well, and the same rule's action is "trap" (3 at bits 42:41, no port)
+  instead of "mirror": the report reaches the CPU and nothing leaves by the
+  PON, as measured with `diag acl-probe` (below). The match is the copy's,
+  so the take, like the copy, never sees a frame from the PON. A change of
+  mode rewrites the action entry alone. The RX hook marks a frame received
+  while the take is on (bit 7 of the second prefix byte), and igmpd sends
+  only marked frames up; the mark goes on before the take and off after
+  it, so a report on the edge of a change may go up twice, never not at all.
+- **The way up.** igmpd sends a taken report up through two `/dev/odi_sw`
+  ioctls. `ODI_SW_IOC_MC_ROUTE` reads back the classifier rows the kernel
+  programmed (`odi_switch_bdgconn.c`): for the report's own tags, the row
+  the classifier would pick (the extended VLAN discards first, then the
+  lowest matching upstream row, a row matching when its cared bits equal
+  its rule bits, [CF rows](#cf-rows)) with its tag treatment and flow; for a
+  report igmpd re-tagged, the lowest upstream row whose frames leave with
+  that one C-tag (VID, and priority unless the row passes the frame's own).
+  `ODI_SW_IOC_MC_SEND` sends it: only for the holder of the lease, only
+  while it holds the take, only an IPv4 IGMP frame (behind at most two tags)
+  to an IPv4 multicast MAC of 60 bytes or more, and only on a flow an
+  upstream row queues on (`odi_switch_mcast_send()`). The descriptor is the
+  OMCI reply's (`odi_igmp_tx.h`): `PORT_SEL` with the PON port alone and
+  the flow as the stream, a directed transmit and not a lookup, and
+  `NO_LEARN`, which matters here: the frame carries the host's source MAC,
+  and a learn from the CPU port would move the host's address there.
+  `/proc/odi_omci` counts `igmp_sent_to_pon` and `igmp_send_fail`.
+
 The lease is held by the open file that takes it: closing it, or the daemon
-dying, releases the copy and the drop and deletes the rows that file wrote
-(up to 128). A second holder is refused with EBUSY. `odi_switch_init_modload()`
+dying, releases the copy (or the take) and the drop and deletes the rows that
+file wrote (up to 128). After the take goes, the switch forwards the host's
+IGMP by itself again. A second holder is refused with EBUSY. `odi_switch_init_modload()`
 and the isolation masks are not touched, and `test/odi_switch_mcast_test.c`
 checks the rule by what it matches (the UNI port and IGMP, nothing else, the
 PON least of all).
@@ -1495,11 +1525,15 @@ netfilter in this kernel, and only the driver knows the ingress port.
 ### Frames the stick sends
 
 The rule is that the only frames the CPU may send toward the fibre are the
-OMCI replies. The NIC transmits two kinds of descriptor:
+OMCI replies and, while igmpd takes the host's IGMP ([Snooping](#snooping)),
+the host's own reports, re-sent in their place. Neither answers anything
+that came from the fibre. The NIC transmits two kinds of descriptor:
 
-- the OMCI replies (`odi_omci.c`, through `odi_nic_tx_words()`, its only
-  caller): `PORT_SEL`, `NO_LEARN` and bit 25 in word 0, the PON port's bit
-  and the OMCC stream in word 3. `PORT_SEL` is what puts a frame onto a
+- the OMCI replies (`odi_omci.c`, through `odi_nic_tx_words()`):
+  `PORT_SEL`, `NO_LEARN` and bit 25 in word 0, the PON port's bit and the
+  OMCC stream in word 3. igmpd's re-sent reports use the same words with an
+  upstream flow as the stream (`odi_igmp_tx.h`), and only for what
+  `odi_switch_mcast_send()` lets through. `PORT_SEL` is what puts a frame onto a
   PON stream (the vendor SDK's debug CLI calls it "force pon forward" and
   takes the stream id with it); a reply without it never reached the OLT;
 - everything from the IP stack (`odi_start_xmit()`): no `PORT_SEL`, and the

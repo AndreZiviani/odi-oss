@@ -1,0 +1,40 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, timed leave, 2/125/1 s, limit 0, 1 allow + 0 static ranges
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; at most 1 a second; unauthorized joins forwarded
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
+> 2 v2join 1 0 192.168.1.10 225.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 225.1.1.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 2 v2join 1 0 192.168.1.11 225.1.1.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:02  v2 report  group 225.1.1.2  src 192.168.1.11
+  up: dropped: over the profile's upstream IGMP rate
+  set vid 0 01:00:5e:01:01:02 ports 0x5  (not written)
+> 2 v2join 1 0 192.168.1.12 239.9.9.9
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:09:09  v2 report  group 239.9.9.9  src 192.168.1.12
+  up: dropped: over the profile's upstream IGMP rate
+> 3 v2join 1 0 192.168.1.10 225.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 225.1.1.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+> 4 state
+joins=3
+denied=1
+groups=2
+refused_acl=1
+up_sent=2
+up_limited=2
+group=225.1.1.1
+group=225.1.1.2
+refused=acl 239.9.9.9 vid=0 at=2 n=1
+> end
+joins=3
+denied=1
+groups=2
+refused_acl=1
+up_sent=2
+up_limited=2
+group=225.1.1.1
+group=225.1.1.2
+refused=acl 239.9.9.9 vid=0 at=2 n=1
+status 0

@@ -15,7 +15,10 @@
  * Framing, the same transport omcid has on redirect type 1 with the prefix
  * the IGMP uid has (src/igmp/igmpd.h IGMP_RX_PREFIX): the 16-byte netlink
  * header, then three bytes, the source port ONE-based and the VLAN id in
- * twelve bits, then the Ethernet frame.
+ * twelve bits, then the Ethernet frame. Bit 7 of the second byte, above the
+ * VLAN id, says the frame was taken rather than copied (the lease's TRAP
+ * mode): the switch did not send it on, so it goes upstream only if igmpd
+ * sends it.
  */
 #ifndef ODI_IGMP_RX_H
 #define ODI_IGMP_RX_H
@@ -24,6 +27,8 @@
 
 #define ODI_IGMP_REDIRECT_TYPE	4u
 #define ODI_IGMP_RX_PREFIX	3u
+#define ODI_IGMP_RX_TAKEN	0x80u	/* in prefix byte 1 */
+#define ODI_IGMP_UNI_PORT	0u
 
 #define ODI_IGMP_ETH_P_IP	0x0800u
 #define ODI_IGMP_ETH_P_8021Q	0x8100u
@@ -62,14 +67,26 @@ static inline int odi_igmp_frame_wanted(const uint8_t *f, uint32_t len)
 	return f[off + 9] == ODI_IGMP_IPPROTO;
 }
 
+/* Whether the IGMP RX hook takes a frame: only while the lease holds the
+ * copy, only from the UNI port, and only IGMP. A frame from the PON port is
+ * never one of them, whatever the lease holds and whatever it carries: the
+ * hook leaves it to the NIC, which drops every PON frame no hook took
+ * (docs/SWITCH.md, "PON port isolation"). */
+static inline int odi_igmp_rx_takes(uint32_t copy_on, uint32_t src_port,
+				    const uint8_t *f, uint32_t len)
+{
+	return copy_on && src_port == ODI_IGMP_UNI_PORT && odi_igmp_frame_wanted(f, len);
+}
+
 static inline uint32_t odi_igmp_rx_total(uint32_t framelen)
 {
 	return ODI_OMCI_NLMSG_HDR + ODI_IGMP_RX_PREFIX + framelen;
 }
 
-/* port is the hardware port number: the prefix carries it plus one. */
+/* port is the hardware port number: the prefix carries it plus one. taken:
+ * the frame was taken, not copied. */
 static inline uint32_t odi_igmp_build_rx(uint8_t *buf, uint32_t port, uint32_t vid,
-					 const uint8_t *frame, uint32_t framelen)
+					 int taken, const uint8_t *frame, uint32_t framelen)
 {
 	uint32_t total = odi_igmp_rx_total(framelen);
 
@@ -78,7 +95,8 @@ static inline uint32_t odi_igmp_build_rx(uint8_t *buf, uint32_t port, uint32_t v
 	odi_omci_put32(buf + 8, 0);
 	odi_omci_put32(buf + 12, 0);
 	buf[ODI_OMCI_NLMSG_HDR] = (uint8_t)(port + 1u);
-	buf[ODI_OMCI_NLMSG_HDR + 1] = (uint8_t)((vid >> 8) & 0x0f);
+	buf[ODI_OMCI_NLMSG_HDR + 1] = (uint8_t)(((vid >> 8) & 0x0f) |
+						(taken ? ODI_IGMP_RX_TAKEN : 0u));
 	buf[ODI_OMCI_NLMSG_HDR + 2] = (uint8_t)vid;
 	memcpy(buf + ODI_OMCI_NLMSG_HDR + ODI_IGMP_RX_PREFIX, frame, framelen);
 	return total;

@@ -14,19 +14,23 @@ port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:02  v2 report  group 239.1
 > 20 policy
 > 21 tick
 policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 1 allow + 1 static ranges
-snooping lease: copy host IGMP to the CPU  (not written)
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
   set vid 0 01:00:5e:01:02:03 ports 0x5  (not written)
 > 22 v2join 1 0 192.168.1.10 239.1.1.2
 port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:02  v2 report  group 239.1.1.2  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
   set vid 0 01:00:5e:01:01:02 ports 0x5  (not written)
 > 23 state
 joins=1
 denied=0
 groups=1
+up_sent=1
 group=239.1.1.2
 > end
 joins=1
 denied=0
 groups=1
+up_sent=1
 group=239.1.1.2
 status 0

@@ -30,6 +30,14 @@ struct igmp_policy {
 	uint32_t last_member_query;     /* seconds */
 	uint32_t max_groups;            /* 0: no limit */
 	int      unauthorized_join;     /* 1: the OLT lets them through */
+	/* ME 309 attributes 4 to 6: what the host's IGMP goes upstream with.
+	 * Tag control 0 leaves it as the switch treats any frame; 1 adds the
+	 * TCI as a tag, 2 replaces the whole TCI of the tag there (adds it to
+	 * an untagged frame), 3 replaces only the VID (an untagged frame gets
+	 * the whole TCI). Rate: messages a second, 0 no limit. */
+	uint32_t us_tag_control;
+	uint32_t us_tci;
+	uint32_t us_rate;
 	int      overflow;              /* more ranges than fit: not enforced */
 	uint32_t nallow, nstatic;
 	struct igmp_range allow[IGMP_POLICY_MAX_RANGES];
@@ -65,13 +73,30 @@ uint32_t igmp_policy_membership_ttl(const struct igmp_policy *p);
  * there answers, which refreshes the membership. */
 uint32_t igmp_policy_last_member_ttl(const struct igmp_policy *p);
 
+/* The upstream tag controls G.988 defines (9.3.27 attribute 5). */
+#define IGMP_US_TAG_PASS      0
+#define IGMP_US_TAG_ADD       1
+#define IGMP_US_TAG_REPLACE   2
+#define IGMP_US_TAG_VID       3
+
+/* Whether the host's IGMP has to be taken and sent upstream by igmpd rather
+ * than forwarded by the switch: the profile asks for a tag (control 1 to 3),
+ * a rate, or the discard of joins outside its lists (unauthorized join
+ * behaviour 0, the G.988 default, with lists that restrict something). With
+ * none of these the switch's own forwarding is already what the profile
+ * says, and the copy is left a copy. */
+int igmp_policy_takes(const struct igmp_policy *p);
+
 /* The ODI_SW_MC_SNOOP_* flags to hold at second `now`: nothing when the OLT
  * does not ask for snooping; the copy alone until `learn_until`, so that
  * every group the host already watches can report once before an
  * unregistered one is a group nobody wants; then the copy and the PON's drop,
  * unless a static range was too wide to name, or the lists were longer than
  * fit (their groups would be dropped as unregistered). `pon_drop` is the
- * opt-in for the drop (igmpd -d): 0 holds the copy alone, always. */
+ * opt-in for the drop (igmpd -d): 0 holds the copy alone, always. The copy
+ * is a take (ODI_SW_MC_SNOOP_TRAP) whenever igmp_policy_takes() says so,
+ * from the start: it does not wait for the learning interval, since sending
+ * the report as the profile says is not a pruning. */
 uint32_t igmp_policy_lease(const struct igmp_policy *p, int static_overflow,
 			   uint32_t now, uint32_t learn_until, int pon_drop);
 
