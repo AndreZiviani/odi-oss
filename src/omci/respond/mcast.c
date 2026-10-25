@@ -262,6 +262,49 @@ static void svcpkg_note(const struct mib_row *sub)
 		(long)sub->inst);
 }
 
+/* VLAN (ANI) of each part 0 row of one access control list (bytes 4..5 of
+ * the row), each value once. IPv6 rows count too: the VLAN of a group does
+ * not depend on its address family. */
+static void acl_vids(const struct mib_row *r, unsigned attr, uint16_t *ani,
+		     int max, int *n)
+{
+	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next) {
+		const uint8_t *e = tblpool[i].data;
+		uint16_t v;
+		int k = 0;
+
+		if (tblpool[i].attr != attr || ACL_PART(e) != 0)
+			continue;
+		v = (uint16_t)(e[4] << 8 | e[5]);
+		while (k < *n && ani[k] != v)
+			k++;
+		if (k == *n && *n < max)
+			ani[(*n)++] = v;
+	}
+}
+
+int mcast_ds_tag_input(uint8_t tci[3], uint16_t *ani, int max, int *nani)
+{
+	const struct omci_class *c309 = find_class(CLS_MCAST_OPER_PROFILE);
+	const struct omci_class *c310 = find_class(CLS_MCAST_SUBSCRIBER);
+	struct mib_row *sub = subscriber_row(), *prof = 0;
+	uint8_t v[8] = { 0 };
+
+	*nani = 0;
+	tci[0] = tci[1] = tci[2] = 0;
+	if (sub && c310 && c309)
+		prof = mib_find(CLS_MCAST_OPER_PROFILE, (uint16_t)row_u32(sub, c310, 2));
+	if (!prof)
+		return 0;
+	attr_value(c309, prof->inst, 16, v);
+	tci[0] = v[0];
+	tci[1] = v[1];
+	tci[2] = v[2];
+	acl_vids(prof, 7, ani, max, nani);
+	acl_vids(prof, 8, ani, max, nani);
+	return 1;
+}
+
 static void build(void)
 {
 	const struct omci_class *c309 = find_class(CLS_MCAST_OPER_PROFILE);

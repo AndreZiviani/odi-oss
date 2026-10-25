@@ -1218,6 +1218,58 @@ exercised with a multicast stream: neither of our lines carries IPTV.
   Reports and queries cross the stick as plain multicast, so with no
   snooping the OLT sees every report and the host every query.
 
+### Downstream tag control
+
+The multicast profile (ME 309) says what happens to the tag of downstream
+multicast in attribute 16: a control type (0 pass, 1 strip the outer tag, 2
+add a tag, 3 replace it, 4 replace its VID only, 5 to 7 the same with the
+service package VID) and the TCI to write. omcid builds it into the bridge
+rules of the multicast bridge port (`src/omci/mcastvlan.c`,
+`respond/apply_bridge.c`).
+
+A downstream classifier row compares the tags of a frame and nothing that
+says it is multicast: not its GEM port, not its destination address ([CF
+rows](#cf-rows)). So the treatment is put on the VLANs the profile names as
+carrying its groups downstream, the VLAN (ANI) of the part 0 rows of its two
+access control lists: one rule per VLAN, rule_gen
+`OMCI_VLAN_OPER_EXTVLAN_GEN`, downstream only, matching a C-tag of that VID
+with no S-tag in front ([Extended VLAN rules](#extended-vlan-rules) for the
+row it becomes). The vendor OMCI stack builds its multicast rules per ACL
+VLAN the same way (read for reference), and another open
+implementation's measurements on this chip apply the profile's treatment on
+the ACL VLANs too.
+
+| type | rule |
+|---|---|
+| 0 | none: the rules of the line apply to multicast as to the rest, as G.988 says for a zero first byte |
+| 1 | C-tag removed |
+| 3 | C-tag rewritten with the TCI's VID and priority |
+| 4 | C-tag VID rewritten, its own priority (and DEI) kept |
+| 2 | the C-tag kept and an S-tag (TPID 0x88a8) with the TCI pushed in front: the classifier replaces a C-tag, it does not stack a second one |
+| 5, 6, 7 | none, logged: the service package table does not select by VID here (`docs/TOOLS.md`) |
+
+Left out, each logged once: VLAN (ANI) 0 (untagged groups) and 4097 (any
+tagged frame), since a rule on them would take unicast frames too, and
+0xffff (unspecified); a VID that a unicast rule of the line names (the
+manual VID, a class 84 filter, a class 171 entry), which is left to that
+rule; a TCI with DEI 1 for types 2 and 3 (no DEI field in the classifier),
+and VID 4095. `OMCI_CUSTOM_MCAST` bit 1 reads the type as 1 whatever the
+OLT set, as its stock plugin (`cf_force_ds_mcast_untagged`) does by writing
+1 over the first byte; omcid keeps the attribute as the OLT set it.
+
+The rules go in front of the port's own rules, which stay: the manual tag's
+removal (`manual-remove`, the stock rule: C-tag VID 0 priority 0, both tags
+removed) or forward-all. With no ACL VLAN named, as on both our lines
+(ISP1 provisions type 1, ISP2 type 0, neither an ACL row), nothing changes;
+`src/omci/drv-test.sh` holds the driver calls of both to their goldens with
+the attribute set as each OLT sets it.
+
+Not run on a stick: no line here carries a multicast stream, so none of these
+rules has met a frame. What is not known: whether a frame whose VID a rule
+replaced (types 3, 4) needs a VLAN row of the new VID to leave the UNI port
+(the rule writes the row of the VID it matches only), and whether the host
+side takes an S-tagged stream (type 2).
+
 ### Snooping
 
 With the lease held (`odi_switch_mcast.c`, `ODI_SW_IOC_MC_SNOOP`):

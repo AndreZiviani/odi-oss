@@ -309,6 +309,11 @@ int mcast_policy_class(uint16_t cls);
 #define CLS_MCAST_MONITOR 311
 uint32_t mcast_state_get(const char *key);
 uint16_t mcast_active_groups(uint8_t *out, uint16_t max);
+/* What the bridge connection's multicast rule takes from the subscriber's
+ * profile (../mcastvlan.h): attribute 16, the downstream IGMP and multicast
+ * TCI, and the VLAN (ANI) of each part 0 row of both access control lists,
+ * each value once, up to max. Returns 0 when the subscriber has no profile. */
+int mcast_ds_tag_input(uint8_t tci[3], uint16_t *ani, int max, int *nani);
 /* The next us_qos_rebuild() tears everything down first: set when the
  * PLOAM Alloc-ID list changed, since the T-CONT indexes (the CAM rows) may
  * have moved. */
@@ -717,6 +722,7 @@ struct cfg_snap {
 	int private_me;
 	int veip_on;
 	int custom_me;
+	int custom_mcast;
 };
 /* Identity class: one bit per key the OLT reads. */
 #define CFGD_SN         (1u << 0)
@@ -736,6 +742,8 @@ struct cfg_snap {
 #define CFGD_PRIVATE_ME (1u << 18)
 #define CFGD_VEIP_ON    (1u << 19)
 #define CFGD_CUSTOM_ME  (1u << 20)
+/* Rebuild class, like the VLAN keys: what the bridge rules are built from. */
+#define CFGD_CUSTOM_MCAST (1u << 21)
 #define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON | CFGD_CUSTOM_ME)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
@@ -762,6 +770,14 @@ void cfg_load_unknown_me(void);
 /* OMCI_CUSTOM_ME as stored, 0 when absent or not a number. */
 extern int custom_me;
 void cfg_load_custom_me(void);
+/* OMCI_CUSTOM_MCAST, the stock key, decimal. Bit 0x1 loads mc_00000001.so on
+ * the stock firmware, whose cf_force_ds_mcast_untagged writes control type 1
+ * (strip the outer tag) over byte 0 of class 309 attribute 16 before the
+ * profile is applied; here the bit does the same to the bridge rules, and
+ * the attribute keeps what the OLT set. */
+#define CUSTOM_MCAST_DS_UNTAGGED 0x1
+extern int custom_mcast;
+void cfg_load_custom_mcast(void);
 void cfg_load_veip_slot(void);
 void cfg_load_private_me(void);
 /* The slot key as stored (0..255), -1 when absent or not a valid slot; the

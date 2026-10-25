@@ -535,8 +535,10 @@ groups the subscriber holds; omcid answers the multicast subscriber monitor
 The bandwidth attributes read zero.
 
 IPv6 (MLD) is not snooped: IPv6 multicast is flooded as before. Upstream
-IGMP tag control (ME 309 attributes 4 to 6) and the downstream tag control
-(attribute 16) are stored and not acted on.
+IGMP tag control (ME 309 attributes 4 to 6) is stored and not acted on. The
+downstream tag control (attribute 16) is not igmpd's: omcid puts it in the
+bridge rules of the multicast port, on the VLANs the access control lists
+name (`docs/SWITCH.md`, "Downstream tag control").
 
 `-j` and `-l` drive the row path by hand, without registering anything, so
 an entry can be put in and checked without an IGMP frame:

@@ -2,11 +2,12 @@
 
 What you can configure on a stick running this image, what each setting
 actually does here, and what applying it costs. The config store this image
-shares with the stock firmware holds 184 keys; this image acts on 23 of them
-(22 the web UI (`confd`) offers for editing, and one bit of `OMCI_CUSTOM_ME`),
-besides keys of its own that the stock firmware never had. `omcicli` also
-prints the four `OMCI_CUSTOM_*` masks and `DUAL_MGMT_MODE`, as the stock one
-does; apart from that bit, they change nothing here. This page says
+shares with the stock firmware holds 184 keys; this image acts on 24 of them
+(22 the web UI (`confd`) offers for editing, bits of `OMCI_CUSTOM_ME` and one
+bit of `OMCI_CUSTOM_MCAST`), besides keys of its own that the stock firmware
+never had. `omcicli` also prints the four `OMCI_CUSTOM_*` masks and
+`DUAL_MGMT_MODE`, as the stock one does; apart from those bits, they change
+nothing here. This page says
 which is which, and why each one costs what it does.
 
 The programs named below are described in [`docs/TOOLS.md`](TOOLS.md).
@@ -56,7 +57,8 @@ process. omcid rereads the store and compares it with what it is running:
 
 - **Nothing changed**: logged (`event=reload changed=none`), nothing done.
 - **Only the four VLAN keys changed** (`VLAN_CFG_TYPE`, `VLAN_MANU_MODE`
-  including transparent mode 0, `VLAN_MANU_TAG_VID`, `VLAN_MANU_TAG_PRI`):
+  including transparent mode 0, `VLAN_MANU_TAG_VID`, `VLAN_MANU_TAG_PRI`),
+  or bit 1 of `OMCI_CUSTOM_MCAST`:
   omcid tears the bridge connections down and builds them again from the MIB
   it holds, by the same code as the first build. The ONU stays in O5 and is
   not re-ranged: **LIVE**. The rules it builds are the ones a fresh omcid
@@ -860,7 +862,7 @@ restore.
 | keys | why |
 |---|---|
 | `DEVICE_TYPE` | this image is a bridge (SFU) only |
-| `OMCI_CUSTOM_BDP`, `OMCI_CUSTOM_RDP`, `OMCI_CUSTOM_MCAST`, `OMCI_CUSTOM_ME`, `DUAL_MGMT_MODE` | select stock OMCI plugins; omcid displays them (`omcicli get cflag`, `get dmmode`) and acts on two bits of `OMCI_CUSTOM_ME`: 256 (with `OMCI_VEIP_SLOT_ID`, above) and 64, which creates the CTC ONU capability entity (class 65529) as the stock firmware does |
+| `OMCI_CUSTOM_BDP`, `OMCI_CUSTOM_RDP`, `OMCI_CUSTOM_MCAST`, `OMCI_CUSTOM_ME`, `DUAL_MGMT_MODE` | select stock OMCI plugins; omcid displays them (`omcicli get cflag`, `get dmmode`) and acts on two bits of `OMCI_CUSTOM_ME`: 256 (with `OMCI_VEIP_SLOT_ID`, above) and 64, which creates the CTC ONU capability entity (class 65529) as the stock firmware does; and on bit 1 of `OMCI_CUSTOM_MCAST`, which strips the tag of downstream multicast whatever the OLT's multicast profile asks (ME 309 attribute 16 read as type 1, as the stock plugin rewrites it), on the multicast VLANs the profile names (`docs/SWITCH.md`, "Downstream tag control"); `apply.sh omci` rebuilds the rules in place |
 | `OMCI_FAKE_OK` | the stock OMCI stack option; this image reads its own odi-only `OMCI_UNKNOWN_ME_OK` instead (above), so the stock slot keeps its own setting |
 | `OMCI_OLT_MODE`, `OMCI_PORT_TYPE`, `OMCI_TM_OPT`, `OMCI_WAN_QOS_QUEUE_NUM` | stock OMCI stack options with no counterpart in omcid |
 | `OMCI_LOGFILE`, `OMCI_LOGFILE_MASK`, `OMCI_DBGLVL` | omcid always logs every frame to `/var/log/omcid.log` |

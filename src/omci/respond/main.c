@@ -295,6 +295,9 @@ int main(int argc, char **argv)
 	cfg_load_private_me();
 	cfg_load_veip_on();
 	cfg_load_custom_me();
+	cfg_load_custom_mcast();
+	if (custom_mcast & CUSTOM_MCAST_DS_UNTAGGED)
+		out("multicast: downstream tag stripped whatever the OLT sets (OMCI_CUSTOM_MCAST bit 1)\n");
 	aut_rebuild();
 	if (!veip_on)
 		out("VEIP: none (OMCI_VEIP=0), the ONU presents its PPTP Ethernet UNI only\n");

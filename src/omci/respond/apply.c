@@ -79,7 +79,8 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 		  c->classId == OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA ||
 		  c->classId == OMCI_ME_GEM_IW_TP ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
-		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
+		  c->classId == OMCI_ME_MCAST_GEM_IW_TP ||
+		  c->classId == 309 || c->classId == 310))
 		conn_dirty = 1;
 	if (!c)
 		return;
@@ -170,6 +171,13 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 		  c->classId == OMCI_ME_GEM_IW_TP ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
 		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
+		conn_dirty = 1;
+	/* The multicast bridge rule follows the profile's downstream tag
+	 * control (309 attribute 16) on the VLANs its access control lists
+	 * (7, 8) name, and the profile the subscriber points at (310
+	 * attribute 2): apply_bridge.c, mcast_tag_plan(). */
+	if (c && ((c->classId == 309 && (creating || (mask & 0x0301))) ||
+		  (c->classId == 310 && (creating || (mask & 0x4000)))))
 		conn_dirty = 1;
 	if (c && mcast_policy_class(c->classId))
 		mcast_dirty = 1;

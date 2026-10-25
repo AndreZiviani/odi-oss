@@ -408,6 +408,17 @@ store 1 11 5
 reload_is "VLAN_MANU_TAG_PRI"                  vlan VLAN_MANU_TAG_PRI     rebuild
 store 1 12 5
 reload_is "VLAN_MANU_TAG_VID"                  vlan VLAN_MANU_TAG_VID     rebuild
+# Bit 1 of OMCI_CUSTOM_MCAST changes the multicast rule (309 attribute 16
+# forced to strip): a rebuild. Its other bits select stock plugins omcid does
+# not act on.
+store 1 12 5 "$(val OMCI_CUSTOM_MCAST 1)
+"
+reload_is "OMCI_CUSTOM_MCAST bit 1"            vlan OMCI_CUSTOM_MCAST     rebuild
+store 1 12 5 "$(val OMCI_CUSTOM_MCAST 3)
+"
+reload_is "OMCI_CUSTOM_MCAST 1 to 3, bit 1 kept: not a change" none ""   none
+store 1 12 5
+reload_is "OMCI_CUSTOM_MCAST removed"          vlan OMCI_CUSTOM_MCAST     rebuild
 store 0 12 5
 reload_is "VLAN_MANU_MODE 0, transparent"      vlan VLAN_MANU_MODE        rebuild
 store 0 12 5 "$(val VLAN_CFG_TYPE 2)

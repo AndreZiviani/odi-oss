@@ -129,6 +129,45 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	omcid_stop "$pid"
 fi
 
+# ------------------------------------------------ class 309 attribute 16
+#
+# The downstream multicast tag control as each line provisions it. The
+# session fixtures keep the first 16 bytes of each message, so their profile
+# Creates carry no attribute 16; ISP1's OLT sends 01 00 00 (strip the outer
+# tag) and ISP2's 00 00 00 (pass), here as a Set after the session. Neither
+# profile has an access control list row, so no multicast VLAN is named and
+# the rules stay those of the VLAN keys (mcastvlan.h): the driver calls must
+# be the goldens, call for call.
+
+# tci_case <isp> <309 instance> <attribute 16 hex>
+tci_case() {
+	cp "$FIX/omci-store-$1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-tci-$1-$2.log
+	: > "$log"
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g "/tmp/gpon-$1" > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	{
+		grep -v '^#' "$FIX/omci-session-$1.txt"
+		printf '0f01480a0135%s0001%s%054d00000028%08d\n' "$2" "$3" 0 0
+	} > /tmp/session-tci.txt
+	$Q cli/build/omcli --inject-file /tmp/session-tci.txt > /dev/null 2>&1
+	finish "$log"
+	if grep '^drv ' "$log" | cmp -s "$FIX/omci-drv-golden-$1.txt" - &&
+	   grep -q -- "^-> 0f01280a0135${2}00" "$log"; then
+		echo "ok    $1: attribute 16 $3 on profile $2 leaves the driver calls as the golden"
+	else
+		echo "FAIL  $1: attribute 16 $3 on profile $2 changed the driver calls"
+		grep '^drv ' "$log" | diff "$FIX/omci-drv-golden-$1.txt" - | head -20
+		fail=$((fail + 1))
+	fi
+}
+if [ "${UPDATE:-0}" != 1 ]; then
+	tci_case isp1 0001 010000
+	tci_case isp1 0002 010000
+	tci_case isp2 8005 000000
+fi
+
 # ------------------------------------------------ Alloc-IDs from this OLT
 #
 # The T-CONT Alloc-IDs come from the OLT, never from a table: set over OMCI
