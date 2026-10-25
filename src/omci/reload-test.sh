@@ -457,6 +457,36 @@ printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\nOMCI_
 reload_is "OMCI_PRIVATE_ME"                   identity OMCI_PRIVATE_ME reregister
 printf 'ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\nOMCI_PRIVATE_ME=0\nOLT_SW_DOWNLOAD=reject\nOMCI_ACCEPT_REBOOT=1\nSYSLOG_SERVER=10.0.0.1\n' > "$ODI"
 reload_is "OLT_SW_DOWNLOAD, OMCI_ACCEPT_REBOOT and other odi keys are not a reload" none ""   none
+# OMCI_POTS_PORTS: 0 is what an absent key reads as, so writing it is no
+# change; 2 is, and so is a value out of range, which reads as 0 again. The
+# classes the ONU accepts change with it, so it re-registers.
+ODIX='ONU_HW_VERSION=HW-2\nOMCI_UNKNOWN_ME_OK=1\nOMCI_FIXED_ME=200:0102\nOMCI_PRIVATE_ME=0\nOLT_SW_DOWNLOAD=reject\nOMCI_ACCEPT_REBOOT=1\nSYSLOG_SERVER=10.0.0.1\n'
+# shellcheck disable=SC2059  # ODIX is the format on purpose: its \n are the lines
+printf "${ODIX}OMCI_POTS_PORTS=0\n" > "$ODI"
+reload_is "OMCI_POTS_PORTS=0 is the same as absent" none ""                none
+# shellcheck disable=SC2059
+printf "${ODIX}OMCI_POTS_PORTS=2\n" > "$ODI"
+reload_is "OMCI_POTS_PORTS"                    identity OMCI_POTS_PORTS   reregister
+# shellcheck disable=SC2059
+printf "${ODIX}OMCI_POTS_PORTS=3\n" > "$ODI"
+reload_is "OMCI_POTS_PORTS out of range reads as 0, a change back" identity OMCI_POTS_PORTS reregister
+# OMCI_POTS_SLOT_ID moves the phone ports, which the OLT has to see again;
+# with no ports it changes nothing.
+# shellcheck disable=SC2059
+printf "${ODIX}OMCI_POTS_SLOT_ID=9\n" > "$ODI"
+reload_is "OMCI_POTS_SLOT_ID with no ports is not a change" none ""      none
+# shellcheck disable=SC2059
+printf "${ODIX}OMCI_POTS_SLOT_ID=9\nOMCI_POTS_PORTS=1\n" > "$ODI"
+reload_is "OMCI_POTS_PORTS on, in slot 9"      identity OMCI_POTS_PORTS   reregister
+# shellcheck disable=SC2059
+printf "${ODIX}OMCI_POTS_SLOT_ID=11\nOMCI_POTS_PORTS=1\n" > "$ODI"
+reload_is "OMCI_POTS_SLOT_ID"                  identity OMCI_POTS_SLOT_ID reregister
+# shellcheck disable=SC2059
+printf "${ODIX}OMCI_POTS_SLOT_ID=11\nOMCI_POTS_PORTS=2\n" > "$ODI"
+reload_is "OMCI_POTS_PORTS from 1 to 2"        identity OMCI_POTS_PORTS   reregister
+# shellcheck disable=SC2059
+printf "${ODIX}OMCI_POTS_PORTS=0\n" > "$ODI"
+reload_is "OMCI_POTS_PORTS off, the slot key gone with it" identity OMCI_POTS_PORTS reregister
 X="$X$(val OMCI_VEIP_SLOT_ID 14)
 "
 store 1 12 5 "$X"

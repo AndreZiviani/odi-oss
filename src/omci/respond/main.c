@@ -295,6 +295,7 @@ int main(int argc, char **argv)
 	cfg_load_private_me();
 	cfg_load_veip_on();
 	cfg_load_custom_me();
+	cfg_load_pots_ports();
 	aut_rebuild();
 	if (!veip_on)
 		out("VEIP: none (OMCI_VEIP=0), the ONU presents its PPTP Ethernet UNI only\n");
@@ -303,6 +304,9 @@ int main(int argc, char **argv)
 		veip_slot_key >= 0 && veip_slot == VEIP_SLOT_DEFAULT && veip_slot_key != veip_slot
 		? " (OMCI_VEIP_SLOT_ID is set but OMCI_CUSTOM_ME bit 256 is not)" : "",
 		private_me ? "created" : "left out (OMCI_PRIVATE_ME=0)");
+	if (pots_ports)
+		out_fmt("phone: %d POTS port(s) in slot %d, the VoIP entities accepted (OMCI_POTS_PORTS)\n",
+			(long)pots_ports, (long)pots_slot);
 	cfg_load_fixed_me();
 	if (fixed_me.n)
 		out_fmt("fixed entities: %d entr(ies) answered from OMCI_FIXED_ME\n",
@@ -356,14 +360,14 @@ int main(int argc, char **argv)
 		for (int id = 0; id < SERV_MAX; id++)
 			omci_deactiveBdgConn((uint32_t)id);
 		out_fmt("restart: %d bridge connection ids cleared\n", (long)SERV_MAX);
-		/* And the upstream T-CONTs, queues and flows the last omcid
-		 * programmed: this one starts with none of them in its tables,
-		 * and would otherwise meet their queue blocks and keep their
-		 * flows valid (odi_switch_cmd.c, command 0). */
+		/* And the T-CONTs, queues and flows (upstream and downstream)
+		 * the last omcid programmed: this one starts with none of them
+		 * in its tables, and would otherwise meet their queue blocks
+		 * and keep their flows valid (odi_switch_cmd.c, command 0). */
 		{
 			uint8_t none[4] = { 0, 0, 0, 0 };
 
-			out_fmt("restart: upstream reset -> %d\n",
+			out_fmt("restart: flow reset -> %d\n",
 				(long)omci_drv_call(OMCI_MIB_RESET_CMD, none, sizeof none));
 		}
 	}

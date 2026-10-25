@@ -31,8 +31,6 @@
 #define DRV_OPT        0x310au
 #define DRV_GET_SN     15
 #define DRV_GET_DEVID  4
-#define MIB_ROWS      256
-#define MIB_ROW_MAX   96
 #define OLT_ACC_CREATE 4
 #define OLT_ACC_WRITE  2
 #define PRIQ_DEFAULT_WEIGHT 1
@@ -70,12 +68,28 @@
  * -- are the exception: a bounded side pool gives each such row its full
  * width (see class_wide() in mibstore.c). Only when the pool is full does a
  * row fall back to the 96 bytes and the `truncated` mark.
+ *
+ * The counts are sized for a data service and two SIP lines at once. ISP1's
+ * whole provisioning holds 185 rows; two phone lines add about sixty (per
+ * line its voice CTP, SIP user, authentication method, the large strings and
+ * network addresses of its servers and number, four PM entities and their
+ * thresholds, the voice flow's GEM port and bridge port with their three
+ * tables; once, the profiles): about 245, which 256 would leave about ten
+ * from full and 320 leaves some seventy rows of margin, at 208 bytes a row.
+ * Past it a Create is answered "processing error" and logged ("no room in
+ * the MIB"), as it always was. The wide rows: with a SIP agent per line, as
+ * some OLTs provision it, each line points at four large strings (proxy,
+ * outbound proxy, host part, registrar address) besides its number,
+ * voicemail address and authentication method -- seven a line -- and the
+ * TR-069 server's two, the IP hosts the OLT sets (134 is wide too) and an
+ * extended multicast profile come on top: about nineteen, past the 16 slots
+ * the pool started with.
  */
-#define MIB_ROWS      256
+#define MIB_ROWS      320
 #define MIB_ROW_MAX   96
 #define MIB_WIDE_MAX  384                /* covers the widest entity of the
 					  * model, a large string at 376 */
-#define MIB_WIDE_ROWS 16
+#define MIB_WIDE_ROWS 32
 
 /* ------------------------------------------------------- table attributes
  *
@@ -98,9 +112,14 @@
  *
  * Nothing here allocates: a fixed pool, shared by every row, with rows linked
  * through indices. ISP1's two class 171 instances hold three and two rows.
+ * Voice is what fills it: one voice service profile carries four tables
+ * (tone patterns, tone events, ringing patterns and events), commonly 20 to
+ * 40 rows between them, and a dial plan and a SIP response table add tens
+ * more, per profile -- past the 128 the pool held. It is now as large as a
+ * one-byte index allows (MIB_TBL_NONE ends a list).
  */
 #define MIB_TBL_ENTRY 32                 /* the widest row: 65531's ACL, 30 */
-#define MIB_TBL_NODES 128
+#define MIB_TBL_NODES 255
 #define MIB_TBL_NONE  0xff
 
 struct mib_tblent {
@@ -281,7 +300,7 @@ struct mib_row *mib_row_at(int i);
  * values: see mibstore.c. The CLI dumps go through these, never the rows
  * alone. */
 struct mib_ent { uint16_t cls, inst; };
-#define MIB_ENTS_MAX 640                 /* 277 autonomous + MIB_ROWS */
+#define MIB_ENTS_MAX (AUT_MAX + MIB_ROWS) /* every autonomous one and every row */
 int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
 		 const struct mib_ent **out);
 const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
@@ -408,7 +427,10 @@ void apply_gem_ctp(const struct omci_class *c, const struct mib_row *r);
 /* A class 281 changed (`skip`: the instance being deleted, else -1): resend
  * the downstream flows whose multicast flag no longer matches. */
 void mcast_flag_refresh(int skip);
-void mcast_extra_refresh(int skip281, int skip309);
+/* The extra multicast GEM ports' downstream flows, sent or withdrawn to
+ * match the live class 281 and 309 rows (`skip*`: the instance of that
+ * class being deleted, else -1). */
+void mcast_extra_refresh(int skip281, int skip309, int skip268);
 void qos_reset(void);
 /* apply_uni.c */
 uint32_t bridge_uni_port_mask(uint16_t bridge_id);
@@ -717,6 +739,9 @@ struct cfg_snap {
 	int private_me;
 	int veip_on;
 	int custom_me;
+	int pots_ports;
+	int pots_slot_key;
+	int pots_slot;
 };
 /* Identity class: one bit per key the OLT reads. */
 #define CFGD_SN         (1u << 0)
@@ -736,7 +761,9 @@ struct cfg_snap {
 #define CFGD_PRIVATE_ME (1u << 18)
 #define CFGD_VEIP_ON    (1u << 19)
 #define CFGD_CUSTOM_ME  (1u << 20)
-#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON | CFGD_CUSTOM_ME)
+#define CFGD_POTS_PORTS (1u << 21)
+#define CFGD_POTS_SLOT  (1u << 22)
+#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON | CFGD_CUSTOM_ME | CFGD_POTS_PORTS | CFGD_POTS_SLOT)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
@@ -775,6 +802,20 @@ extern int private_me;
  * cardholder and circuit pack are then left out. */
 extern int veip_on;
 void cfg_load_veip_on(void);
+/* OMCI_POTS_PORTS (odi.conf): the phone ports, 0 to POTS_PORTS_MAX; 0 when
+ * absent or anything else. While it is 0 the VoIP classes of the model
+ * (voip_class(), mibstore.c) are unknown to the OLT, exactly as before the
+ * model had them, and the ONU creates none. With ports, it creates a POTS
+ * circuit pack in slot pots_slot (aut_rebuild()): OMCI_POTS_SLOT_ID
+ * (odi.conf) when that is a free slot, kept in pots_slot_key (-1 when
+ * absent or not usable), else the first free slot from 2 up. Both keys are
+ * read here, after the VEIP slot, which the POTS slot must avoid. */
+#define POTS_PORTS_MAX 2
+extern int pots_ports;
+extern int pots_slot_key;
+extern int pots_slot;
+void cfg_load_pots_ports(void);
+int voip_class(uint16_t cls);
 unsigned cfg_snap_diff(const struct cfg_snap *old, const struct cfg_snap *cur);
 /* The store key names of a diff mask, comma separated, into out. */
 void cfg_diff_names(unsigned mask, char *out, int max);

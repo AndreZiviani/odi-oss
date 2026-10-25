@@ -1,0 +1,25 @@
+# The same profile as uplink-add, run without -d (IGMP_PON_DROP unset): the
+# reports are taken and sent up exactly as with the drop, and the lease never
+# asks for the drop.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+unauthorized_join=0
+us_tag_control=1
+us_tci=41380
+us_rate=0
+allow=225.0.0.0-225.255.255.255
+end
+0 tick
+1 v2join 1 0 192.168.1.10 225.1.1.1
+2 v2join 1 10 192.168.1.10 225.2.2.2
+3 v2join 1 0 192.168.1.10 239.1.1.1
+4 v3join 1 0 192.168.1.10 239.1.1.2
+5 v2leave 1 0 192.168.1.10 225.1.1.1
+6 query 1 0 192.168.1.1
+7 state
+8 status
+400 tick
+401 v2join 1 0 192.168.1.10 225.2.2.2
+402 state

@@ -96,12 +96,35 @@ static void hook_set(int us_dir, uint32_t idx, uint32_t gem_port)
 	hook_set_n++;
 }
 
+static int hook_del_n, hook_del_us;
+static uint32_t hook_del_idx;
+
+static void hook_del(int us_dir, uint32_t idx)
+{
+	hook_del_n++;
+	hook_del_us = us_dir;
+	hook_del_idx = idx;
+}
+
 static void hook_clear(void)
 {
 	hook_clear_n++;
 }
 
-static const struct odi_switch_flow_ops hook_ops = { .set = hook_set, .clear = hook_clear };
+static const struct odi_switch_flow_ops hook_ops = {
+	.set = hook_set, .del = hook_del, .clear = hook_clear
+};
+
+/* cmd 25 with ena 0: the flow deleted. */
+static int gem_del(uint32_t dir, uint32_t flow)
+{
+	struct omci_gemflow g;
+
+	memset(&g, 0, sizeof g);
+	g.dir = dir;
+	g.flow_id = flow;
+	return odi_switch_cmd(OMCI_GEMFLOW_CMD, &g, sizeof g);
+}
 
 int main(void)
 {
@@ -243,6 +266,16 @@ int main(void)
 	ok(hook_us[1] == 0 && hook_idx[1] == 1 && hook_gem[1] == 1434, "DS 1 on its GEM port");
 	ok(hook_us[2] == 1 && hook_idx[2] == 4 && hook_gem[2] == 1562, "US 4 on its GEM port");
 	ok(hook_clear_n == 0, "nothing cleared yet");
+	ok(gem_del(OMCI_GEMFLOW_DS, 1) == 0, "DS 1 deleted");
+	ok(hook_del_n == 1 && hook_del_us == 0 && hook_del_idx == 1, "and the delete is reported");
+	memset(&f, 0, sizeof f);
+	(void)odi_switch_cmd(OMCI_FLOWS_CMD, &f, OMCI_FLOWS_LEN);
+	ok(f.ds_count == 1 && f.ds_gem[1] == 0 && f.ds_cfg[1] == 0,
+	   "the readback keeps DS 0 alone");
+	ok(gem_del(OMCI_GEMFLOW_US, 4) == 0, "US 4 deleted");
+	ok(hook_del_n == 2 && hook_del_us == 1 && hook_del_idx == 4, "and reported");
+	ok(gem_del(OMCI_GEMFLOW_US, 4) == 0 && hook_del_n == 2,
+	   "a slot not in use is no error, and nothing to report");
 	odi_switch_cmd_reset_state();
 	ok(hook_clear_n == 1, "the reset is reported");
 	odi_switch_cmd_set_flow_ops(NULL);

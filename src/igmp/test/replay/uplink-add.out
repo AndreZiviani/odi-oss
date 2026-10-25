@@ -46,12 +46,20 @@ groups held: 1
 recent refusals, newest first:
   239.1.1.2  vid 0  outside the access control lists (acl)  at 4 s
   239.1.1.1  vid 0  outside the access control lists (acl)  at 3 s
+> 400 tick
+snooping lease: take host IGMP to the CPU, igmpd sends it up, drop unregistered IPv4 multicast from the PON  (not written)
+  del vid 10 01:00:5e:02:02:02 ports 0x0  (not written)
+  router ports -> 0x0
+> 401 v2join 1 0 192.168.1.10 225.2.2.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:02:02:02  v2 report  group 225.2.2.2  src 192.168.1.10
+  up: send with vid 420 pri 5 (tag control 1)  (not sent)
+  set vid 0 01:00:5e:02:02:02 ports 0x5  (not written)
 > end
-joins=2
+joins=3
 denied=2
 groups=1
 refused_acl=2
-up_sent=3
+up_sent=4
 up_withheld=3
 group=225.2.2.2
 refused=acl 239.1.1.1 vid=0 at=3 n=1

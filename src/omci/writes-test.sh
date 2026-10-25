@@ -299,9 +299,10 @@ check "upload: its last record is username 2, whole" \
       "$(rec 18 | cut -c1-62)" "009400020800$(aval 5)"
 
 # The pool is bounded: past it a wide row behaves as before. 148 and the
-# large string above hold two slots; 20 more large strings exhaust it.
+# large string above hold two of its 32 slots; 34 more large strings
+# exhaust it, the last four finding it full.
 k=0
-while [ "$k" -lt 20 ]; do
+while [ "$k" -lt 34 ]; do
 	send "$log" "$(wtci $((0x200 + k * 4)))" 44 009d "$(printf '%04x' $((0x10 + k)))" ""
 	send "$log" "$(wtci $((0x201 + k * 4)))" 48 009d "$(printf '%04x' $((0x10 + k)))" "$(amask 2)$(aval 2)"
 	send "$log" "$(wtci $((0x202 + k * 4)))" 48 009d "$(printf '%04x' $((0x10 + k)))" "$(amask 6)$(aval 6)"
@@ -310,14 +311,14 @@ done
 send "$log" 0300 49 009d 0010 "$(amask 6)"
 check "an early large string beyond the 96 bytes still reads back" \
       "$(answer "$log" 0300 | cut -c1-56)" "00$(amask 6)$(aval 6)"
-send "$log" 0301 49 009d 0023 "$(amask 6)"
+send "$log" 0301 49 009d 0031 "$(amask 6)"
 check "one that found the pool full drops attribute 6, as before" \
       "$(answer "$log" 0301 | cut -c1-56)" "00$(amask 6)$(printf '%050d' 0)"
-send "$log" 0302 49 009d 0023 "$(amask 2)"
+send "$log" 0302 49 009d 0031 "$(amask 2)"
 check "and keeps the attributes inside 96 bytes" \
       "$(answer "$log" 0302 | cut -c1-56)" "00$(amask 2)$(aval 2)"
 check "the pool running out is logged once" \
-      "$(grep -c 'wide-row pool of 16 is full' "$log")" "1"
+      "$(grep -c 'wide-row pool of 32 is full' "$log")" "1"
 
 # ------------------------------------------------ Test (18)
 # Only the ANI-G has a test here (the optical measurements, answered with a
@@ -337,6 +338,28 @@ check "none of them sent a Test result" "$(grep -c '^-> test result' "$log")" "1
 send "$log" 0405 52 ff00 0000 ""
 check "a class the ONU does not hold keeps its old answer, ok" \
       "$(answer "$log" 0405 | cut -c1-2)" "00"
+
+# ------------------------------------------------ the MIB full
+# The store holds 320 rows. Past them a Create is answered result 1,
+# processing error, logged "no room in the MIB", and changes nothing; the
+# rows already held keep working. 330 Creates of TCP/UDP config data (no
+# driver side to them) in one batch after a MIB reset.
+send "$log" 0500 4f 0002 0000 ""
+i=1
+while [ "$i" -le 330 ]; do
+	frame "$(printf '%04x' $((0x1000 + i)))" 44 0088 "$(printf '%04x' "$i")" "13c411000000"
+	echo
+	i=$((i + 1))
+done > /tmp/writes-full.txt
+$Q cli/build/omcli --inject-file /tmp/writes-full.txt > /dev/null 2>&1
+sync_send "$log"
+check "320 Creates fill the MIB" "$(grep -c '^-> created (320 rows held)' "$log")" "1"
+check "the ten past it are refused, no room in the MIB" \
+      "$(grep -c '^-> no room in the MIB' "$log")" "10"
+check "with result 1, processing error" "$(answer "$log" 114a | cut -c1-2)" "01"
+send "$log" 0501 48 0088 0140 "100001"
+check "a row already held still takes a Set" "$(answer "$log" 0501 | cut -c1-2)" "00"
+send "$log" 0502 4f 0002 0000 ""
 
 omcid_stop "$pid"
 [ "$fail" -eq 0 ] || keep_log "$log" writes-test.log

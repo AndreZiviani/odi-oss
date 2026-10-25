@@ -23,3 +23,5 @@ end
 6 query 1 0 192.168.1.1
 7 state
 8 status
+400 tick
+401 v2join 1 0 192.168.1.10 225.2.2.2
