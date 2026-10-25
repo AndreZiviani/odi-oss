@@ -126,6 +126,198 @@ send "$log" 0050 4f 0002 0000 ""
 send "$log" 0010 44 010c 0005 "$GEM"
 check "after a MIB reset the same frame is a new request" "$(mds "$log" 0051)" "01"
 
+# ------------------------------------------- credentials: log and dumps
+# What an OLT provisions into an authentication security method (148), a
+# large string (157) and an octet string (307) is the line owner's secret. It
+# stays out of omcid.log, `omcli mib` masks it unless --secrets is given, and
+# the diag bundle never asks for it.
+hexof() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
+PW=hunter2xyz;           PWX=$(hexof "$PW")
+USR=alice-sip;           USRX=$(hexof "$USR")
+URL=http://bob:URLpw99@acs; URLX=$(hexof "$URL")
+OCT=octetsecret42;       OCTX=$(hexof "$OCT")
+
+send "$log" 0060 44 0094 0001 ""                         # 148 Create
+send "$log" 0061 48 0094 0001 "4000${USRX}"              # Username1
+send "$log" 0062 48 0094 0001 "2000${PWX}"               # Password
+send "$log" 0063 44 009d 0002 ""                         # 157 Create
+send "$log" 0064 48 009d 0002 "4000${URLX}"              # Part1
+send "$log" 0065 44 0133 0003 ""                         # 307 Create
+send "$log" 0066 48 0133 0003 "4000${OCTX}"              # Part1
+check "the Set of a password is answered ok" \
+      "$(answer "$log" 0062 | cut -c1-2)" "00"
+
+leaks() {	# <file> <value> <hex of it>: lines carrying it as text, hex or
+		# spaced hex (the log prints raw contents a byte at a time)
+	grep -c -i -e "$2" -e "$3" -e "$(printf '%s' "$3" | sed 's/../& /g;s/ $//')" "$1" || true
+}
+for v in "$PW $PWX" "$USR $USRX" "$URL $URLX" "$OCT $OCTX"; do
+	set -- $v
+	check "omcid.log never carries $1" "$(leaks "$log" "$1" "$2")" "0"
+done
+check "the contents of those Sets are logged as withheld" \
+      "$(grep -c 'contents withheld (credentials)' "$log")" "7"
+
+dump() {	# omcli mib arguments: one dump, to a file
+	$Q cli/build/omcli "$@" > /tmp/writes-dump 2>&1
+}
+for c in 148 157 307; do
+	dump mib "$c"
+	check "omcli mib $c masks the bytes" \
+	      "$([ "$(grep -c '\*\*' /tmp/writes-dump)" -gt 0 ] && echo masked)" masked
+done
+dump mib 148
+check "the default dump of 148 hides the password and the username" \
+      "$(leaks /tmp/writes-dump "$PW" "$PWX")$(leaks /tmp/writes-dump "$USR" "$USRX")" "00"
+pwlen() { grep Password /tmp/writes-dump | tr -s ' ' | cut -d' ' -f3 | tr -d '\n' | wc -c; }
+masked=$(pwlen)
+dump mib 148 --secrets
+check "a masked attribute keeps the width of the real one" "$masked" "$(pwlen)"
+dump mib 148
+dump mib 157
+check "the default dump of 157 hides the URL" "$(leaks /tmp/writes-dump "$URL" "$URLX")" "0"
+dump mib 307
+check "the default dump of 307 hides the octets" "$(leaks /tmp/writes-dump "$OCT" "$OCTX")" "0"
+dump mib 148 --secrets
+check "--secrets shows the password" "$(leaks /tmp/writes-dump "$PW" "$PWX")" "1"
+dump --secrets mib 148 1
+check "--secrets works in front too, with an entity id" \
+      "$(leaks /tmp/writes-dump "$USR" "$USRX")" "1"
+dump mib 157 --secrets
+check "--secrets shows the URL" "$(leaks /tmp/writes-dump "$URL" "$URLX")" "1"
+dump mib 307 --secrets
+check "--secrets shows the octets" "$(leaks /tmp/writes-dump "$OCT" "$OCTX")" "1"
+dump mib 148
+check "an attribute that is not a secret is not masked" \
+      "$(grep -c 'ValidSchem  *00' /tmp/writes-dump)" "1"
+
+# The vendor protocol (`omcicli mib get`, `mib getattr`) is a second way to
+# the same rows.
+dump --vendor mib get 148
+check "the vendor-protocol dump of 148 masks it" \
+      "$(leaks /tmp/writes-dump "$PW" "$PWX")" "0"
+dump --vendor mib get 148 --secrets
+check "and shows it with --secrets" "$(leaks /tmp/writes-dump "$PW" "$PWX")" "1"
+dump mib getattr 148 1 3
+check "mib getattr masks the password" "$(leaks /tmp/writes-dump "$PW" "$PWX")" "0"
+dump mib getattr 148 1 3 --secrets
+check "and shows it with --secrets" "$(leaks /tmp/writes-dump "$PW" "$PWX")" "1"
+dump mib getattr 148 1 1
+check "a getattr of a plain attribute is untouched" \
+      "$(cat /tmp/writes-dump)" "class 148 entity 1 attr 1 = 00"
+
+# The diag bundle runs `omcli mib <class>` for a fixed list and never passes
+# --secrets; a secret class in that list would still be masked, but it does
+# not belong there.
+for c in 148 157 307 340 134; do
+	check "diag-bundle.sh does not dump class $c" \
+	      "$(sed -n 's/^OMCI_CLASSES="\(.*\)"/\1/p' ../../rootfs/skeleton/etc/scripts/diag-bundle.sh | tr ' ' '\n' | grep -cx "$c")" "0"
+done
+check "diag-bundle.sh never passes --secrets" \
+      "$(grep -v '^[[:space:]]*#' ../../rootfs/skeleton/etc/scripts/diag-bundle.sh | grep -c -e '--secrets')" "0"
+
+# ------------------------------------- wide rows: large string, auth method
+# A row holds 96 bytes; LargeString (157) packs 376 and the authentication
+# method (148) 101, so their later attributes need the side pool. attribute k
+# of both is a 25-byte string (k = 1 of 157 is the number of parts), and a
+# Get answers 25 bytes of one attribute: result, mask, value.
+amask() { printf '%04x' $((1 << (16 - $1))); }
+aval() {                                 # 25 bytes, all of the byte 0x10 + k
+	_b=$(printf '%02x' $((0x10 + $1)))
+	_s=""; _n=0
+	while [ "$_n" -lt 25 ]; do _s="$_s$_b"; _n=$((_n + 1)); done
+	printf '%s' "$_s"
+}
+wtci() { printf '%04x' $(($1)); }
+
+send "$log" 0100 4f 0002 0000 ""         # MIB reset: the rows start empty
+send "$log" 0101 44 009d 0001 ""
+check "Create of a large string is answered ok" "$(answer "$log" 0101 | cut -c1-2)" "00"
+send "$log" "$(wtci 0x102)" 48 009d 0001 "$(amask 1)0f"
+check "Set of the number of parts (15) is ok" "$(answer "$log" 0102 | cut -c1-2)" "00"
+k=2
+while [ "$k" -le 16 ]; do
+	send "$log" "$(wtci $((0x110 + k)))" 48 009d 0001 "$(amask $k)$(aval $k)"
+	k=$((k + 1))
+done
+k=2; bad=0
+while [ "$k" -le 16 ]; do
+	send "$log" "$(wtci $((0x130 + k)))" 49 009d 0001 "$(amask $k)"
+	[ "$(answer "$log" "$(wtci $((0x130 + k)))" | cut -c1-56)" = "00$(amask $k)$(aval $k)" ] ||
+		{ bad=$k; echo "      large string attribute $k (part $((k - 1))) did not read back whole"; }
+	k=$((k + 1))
+done
+check "all 15 parts of a large string read back whole" "$bad" "0"
+send "$log" 0150 49 009d 0001 "$(amask 1)"
+check "and so does the number of parts" "$(answer "$log" 0150 | cut -c1-8)" "0080000f"
+check "the row is not marked truncated" \
+      "$($Q cli/build/omcli mib get 157 2>&1 | grep -c 'row truncated')" "0"
+
+# 148 with a username longer than 25 bytes: username 2 is the fifth attribute.
+send "$log" 0160 44 0094 0002 ""
+check "Create of an authentication method is ok" "$(answer "$log" 0160 | cut -c1-2)" "00"
+for k in 2 3 4 5; do
+	send "$log" "$(wtci $((0x170 + k)))" 48 0094 0002 "$(amask $k)$(aval $k)"
+done
+bad=0
+for k in 2 3 4 5; do
+	send "$log" "$(wtci $((0x180 + k)))" 49 0094 0002 "$(amask $k)"
+	[ "$(answer "$log" "$(wtci $((0x180 + k)))" | cut -c1-56)" = "00$(amask $k)$(aval $k)" ] ||
+		{ bad=$k; echo "      authentication method attribute $k did not read back"; }
+done
+check "username 1, password, realm and username 2 all read back" "$bad" "0"
+
+# The dump (omcicli mib get) shows the last part, not a row cut at part 3:
+# with --secrets, since a large string's parts are masked by default, and
+# masked across the whole width without it.
+check "the dump with --secrets shows part 15 of the large string" \
+      "$($Q cli/build/omcli mib get 157 --secrets 2>&1 | grep -ci "$(aval 16)")" "1"
+check "and the default dump masks part 15 too" \
+      "$($Q cli/build/omcli mib get 157 2>&1 | grep -ci "$(aval 16)")" "0"
+
+# MIB upload: the wide rows are the last two entities, 157 in 15 records (the
+# number of parts and part 1 share the first; every later part is a record of
+# its own, as no two fit 26 bytes) and 148 in four, the last of them
+# username 2. An attribute is never split across records.
+send "$log" 0190 4d 0002 0000 ""
+n=$((0x$(answer "$log" 0190 | cut -c1-4)))
+first=$((n - 19))
+s=$first
+while [ "$s" -lt "$n" ]; do
+	send "$log" "$(wtci $((0x1a0 + s - first)))" 4e 0002 0000 "$(printf '%04x' "$s")"
+	s=$((s + 1))
+done
+rec() { answer "$log" "$(wtci $((0x1a0 + $1)))"; }
+check "upload: record 0 of the large string carries the parts count and part 1 (mask c000)" \
+      "$(rec 0 | cut -c1-12)" "009d0001c000"
+check "upload: the last record of the large string is part 15, whole" \
+      "$(rec 14 | cut -c1-62)" "009d00010001$(aval 16)"
+check "upload: the next entity is the authentication method" \
+      "$(rec 15 | cut -c1-12)" "00940002c000"
+check "upload: its last record is username 2, whole" \
+      "$(rec 18 | cut -c1-62)" "009400020800$(aval 5)"
+
+# The pool is bounded: past it a wide row behaves as before. 148 and the
+# large string above hold two slots; 20 more large strings exhaust it.
+k=0
+while [ "$k" -lt 20 ]; do
+	send "$log" "$(wtci $((0x200 + k * 4)))" 44 009d "$(printf '%04x' $((0x10 + k)))" ""
+	send "$log" "$(wtci $((0x201 + k * 4)))" 48 009d "$(printf '%04x' $((0x10 + k)))" "$(amask 2)$(aval 2)"
+	send "$log" "$(wtci $((0x202 + k * 4)))" 48 009d "$(printf '%04x' $((0x10 + k)))" "$(amask 6)$(aval 6)"
+	k=$((k + 1))
+done
+send "$log" 0300 49 009d 0010 "$(amask 6)"
+check "an early large string beyond the 96 bytes still reads back" \
+      "$(answer "$log" 0300 | cut -c1-56)" "00$(amask 6)$(aval 6)"
+send "$log" 0301 49 009d 0023 "$(amask 6)"
+check "one that found the pool full drops attribute 6, as before" \
+      "$(answer "$log" 0301 | cut -c1-56)" "00$(amask 6)$(printf '%050d' 0)"
+send "$log" 0302 49 009d 0023 "$(amask 2)"
+check "and keeps the attributes inside 96 bytes" \
+      "$(answer "$log" 0302 | cut -c1-56)" "00$(amask 2)$(aval 2)"
+check "the pool running out is logged once" \
+      "$(grep -c 'wide-row pool of 16 is full' "$log")" "1"
+
 omcid_stop "$pid"
 [ "$fail" -eq 0 ] || keep_log "$log" writes-test.log
 if [ "$fail" -eq 0 ]; then echo "writes-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi

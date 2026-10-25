@@ -604,9 +604,12 @@ omcli uses omcid's own queue and commands:
                                          (the format is under metricsd)
     omcli conn                           the bridge connections omcid built
     omcli flows                          the GEM flow tables, per direction
-    omcli mib [all|classId] [entityId]   every managed entity, the ONU's own
+    omcli mib [all|classId] [entityId] [--secrets]
+                                         every managed entity, the ONU's own
                                          and the OLT's, with the values a Get
-                                         returns; ends with an `N rows` line
+                                         returns; ends with an `N rows` line.
+                                         Credentials the OLT provisioned are
+                                         masked, see below
     omcli caps                           the device capability blob, decoded
     omcli tcont                          T-CONT entity id to driver index, the
                                          PLOAM Alloc-IDs, and each T-CONT's
@@ -631,6 +634,16 @@ the stock command list; the setters in it (`set sn|devmode|dmmode|loid`, `mib
 set|create|delete`) need `-f` and omcid does not implement most of them.
 `omcicli get tables` is safe against our omcid (it has no lock to deadlock
 on), but the stock daemon wedges on it, so the web UI refuses it outright.
+
+Secrets in the MIB dump: the username, password and realm of an
+authentication security method (class 148), and the parts of a large string
+(157, which can hold a URL with `user:password@` in it) or an octet string
+(307) are shown as `**` for every byte, in `omcli mib`, `omcicli mib get` and
+`mib getattr`. The line keeps its width and its key, so a parser sees the same
+fields; an attribute that was never set still shows its zeros. `--secrets`
+(anywhere on the command line, native or `--vendor`) prints the real bytes.
+omcid also keeps the contents of a Create or Set of those classes out of its
+log. The diag bundle never passes `--secrets`.
 
 Maintenance flags: `--rmq KEY` removes a message queue left by a killed
 client (there is no `ipcrm` in the busybox), `--inject HEX` feeds a 48-byte

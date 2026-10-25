@@ -24,7 +24,7 @@
 #define SNAP_MAGIC1 'M'
 #define SNAP_MAGIC2 'S'
 #define SNAP_MAGIC3 '1'
-#define SNAP_VERSION 4   /* 2: the upstream state the driver holds (qos_prog_state()) and table attribute storage; 3: both; 4: rows of 96 bytes */
+#define SNAP_VERSION 5   /* 2: the upstream state the driver holds (qos_prog_state()) and table attribute storage; 3: both; 4: rows of 96 bytes; 5: a wide row also carries the bytes past 96 (side pool) */
 
 /* Header (26 bytes: magic 4, version 2, devid 8, serial 9, sync 1, alarm 2)
  * + one row's worst case (2+2+2+1+1+1+96 = 105) times every row, + the fixed
@@ -180,7 +180,8 @@ void snapshot_save(void)
 	rows_at = p;
 	put_u16(&p, 0);                          /* row_count, patched below */
 	for (int i = 0; i < MIB_ROWS; i++) {
-		uint32_t row_bytes = 2 + 2 + 2 + 1 + 1 + 1 + MIB_ROW_MAX;
+		uint32_t row_bytes = 2 + 2 + 2 + 1 + 1 + 1 + 1 + MIB_ROW_MAX +
+			(mib[i].tail ? MIB_WIDE_MAX - MIB_ROW_MAX : 0);
 
 		if (!mib[i].used)
 			continue;
@@ -192,7 +193,10 @@ void snapshot_save(void)
 		put_u8(&p, mib[i].truncated);
 		put_u8(&p, mib[i].tbl_head);
 		put_u8(&p, mib[i].tbl_count);
+		put_u8(&p, mib[i].tail != 0);    /* the bytes past 96 follow */
 		put_raw(&p, mib[i].data, MIB_ROW_MAX);
+		if (mib[i].tail)
+			put_raw(&p, mib[i].tail, MIB_WIDE_MAX - MIB_ROW_MAX);
 		rows++;
 	}
 	put_u16(&rows_at, rows);
@@ -306,12 +310,15 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 			uint8_t truncated = get_u8(&p);
 			uint8_t tbl_head = get_u8(&p);
 			uint8_t tbl_count = get_u8(&p);
+			uint8_t has_tail = get_u8(&p);
 			struct mib_row *r = mib_add(cls, inst);
 
 			if (!r) {                /* cannot happen with a
 						   * snapshot this process
 						   * itself wrote */
 				p += MIB_ROW_MAX;
+				if (has_tail)
+					p += MIB_WIDE_MAX - MIB_ROW_MAX;
 				continue;
 			}
 			r->written = written;
@@ -321,6 +328,16 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 			get_raw(&p, r->data, MIB_ROW_MAX);
 			for (int j = 0; j < MIB_ROW_MAX; j++)
 				r->prev[j] = r->data[j];
+			/* Whether this row has a slot now is the pool's say, not
+			 * the file's: bytes saved for a row the pool cannot hold
+			 * are dropped, as a Set of them would have been. */
+			if (has_tail) {
+				if (r->tail)
+					get_raw(&p, r->tail,
+						MIB_WIDE_MAX - MIB_ROW_MAX);
+				else
+					p += MIB_WIDE_MAX - MIB_ROW_MAX;
+			}
 		}
 
 		get_raw(&p, tblpool, sizeof tblpool);

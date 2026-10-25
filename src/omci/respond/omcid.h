@@ -64,9 +64,18 @@
  * the next at 64), and the ones that are not -- LargeString at 400 -- hold
  * the ACS URL and credentials, which this has no reason to keep. A truncated
  * row is marked rather than silently short.
+ *
+ * The classes that do hold more -- LargeString, whose parts carry the SIP
+ * and ACS addresses, and the authentication method with its second username
+ * -- are the exception: a bounded side pool gives each such row its full
+ * width (see class_wide() in mibstore.c). Only when the pool is full does a
+ * row fall back to the 96 bytes and the `truncated` mark.
  */
 #define MIB_ROWS      256
 #define MIB_ROW_MAX   96
+#define MIB_WIDE_MAX  384                /* covers the widest entity of the
+					  * model, a large string at 376 */
+#define MIB_WIDE_ROWS 16
 
 /* ------------------------------------------------------- table attributes
  *
@@ -136,7 +145,31 @@ struct mib_row {
 	 * row is fresh and this is zeroes, which reads as "everything changed"
 	 * -- also what the vendor sees. */
 	uint8_t prev[MIB_ROW_MAX];
+	/* Bytes MIB_ROW_MAX and up of a wide row, a slot of the side pool;
+	 * 0 for every other row. `prev` stays 96 bytes: no wide class has a
+	 * handler that compares before and after. */
+	uint8_t *tail;
 };
+
+/* The width of a row's storage, and its bytes by offset. The caller checks
+ * the offset against row_cap() first, as it did against MIB_ROW_MAX. */
+static inline unsigned row_cap(const struct mib_row *r)
+{
+	return r->tail ? MIB_WIDE_MAX : MIB_ROW_MAX;
+}
+
+static inline uint8_t row_get(const struct mib_row *r, unsigned off)
+{
+	return off < MIB_ROW_MAX ? r->data[off] : r->tail[off - MIB_ROW_MAX];
+}
+
+static inline void row_put(struct mib_row *r, unsigned off, uint8_t v)
+{
+	if (off < MIB_ROW_MAX)
+		r->data[off] = v;
+	else
+		r->tail[off - MIB_ROW_MAX] = v;
+}
 
 /* ---------------------------------------------------------------- GEM flows
  *
@@ -254,7 +287,13 @@ int mib_entities(uint16_t cls, int want_inst, uint16_t inst,
 const struct mib_row *mib_view(const struct omci_class *c, uint16_t inst);
 /* show.c: the dump behind `omcli mib` (vendor 0) and `omcicli mib get`
  * (vendor 1). Always ends with an "N rows" line; returns N. */
-int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor);
+int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor, int secrets);
+/* mibstore.c: the one list of classes whose contents are an owner's secret.
+ * me_is_secret(): omcid keeps the contents of a Create/Set/Delete of this
+ * class out of its log. me_attr_secret(): attribute k of the class is masked
+ * in every dump unless the caller asked for secrets. */
+int me_is_secret(uint16_t cls);
+int me_attr_secret(uint16_t cls, unsigned k);
 extern int conn_dirty;
 extern int qos_dirty;
 /* mcast.c: the multicast policy file igmpd reads. mcast_dirty is set by
@@ -394,7 +433,7 @@ void uni_start(void);
 /* apply_bridge.c */
 uint32_t veip_uni_port_mask(uint16_t veipId);
 uint32_t all_eth_uni_mask(void);
-void cli_row(const struct mib_row *r);
+void cli_row(const struct mib_row *r, int secrets);
 void v_banner(const struct omci_class *c);
 int vendor_row_exists(const struct omci_class *c);
 int vendor_row(const struct mib_row *r, const struct omci_class *c);
