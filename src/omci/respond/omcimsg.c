@@ -524,6 +524,12 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	const struct omci_class *c = find_class(cls);
 	uint8_t body[32];
 
+	/* The VoIP classes are in the model, but an ONU that tells the OLT of
+	 * no phone port has no business holding them: with OMCI_POTS_PORTS at
+	 * 0 every message about one is answered, logged and counted as for a
+	 * class the model never had, exactly as before they were modelled. */
+	if (c && !pots_ports && voip_class(cls))
+		c = 0;
 	omci_frames_handled++;
 	if (mt == OMCI_MT_MIB_UPLOAD_NEXT)
 		ev_mib_upload_next(nl_get16(f + 8));
@@ -828,14 +834,19 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	 * read-only: G.988 gives the OLT only a Get. Its model lists Get as the
 	 * one message it takes, so that is what is checked, and a Create, Set
 	 * or Delete is refused before it can add a row, write one or remove
-	 * the entity from under the profile. Every other class keeps the
+	 * the entity from under the profile. The voice classes are checked the
+	 * same way: the ONU creates the POTS UNI, its line status and the VoIP
+	 * config data (the OLT may not create or delete them, nor Set the line
+	 * status), and their models say so. Every other class keeps the
 	 * answer-everything behaviour below. */
-	if (c && cls == OMCI_ME_MAC_BRIDGE_CFG_DATA &&
+	if (c && (cls == OMCI_ME_MAC_BRIDGE_CFG_DATA || voip_class(cls)) &&
 	    (mt == OMCI_MT_CREATE || mt == OMCI_MT_SET || mt == OMCI_MT_DELETE) &&
 	    !(c->actions & (1u << mt))) {
 		body[0] = OMCI_ERR_NOT_SUPPORTED;
 		send_resp(fd, tid, f, body, 1);
-		out("-> not supported (the ONU creates it, the OLT can only get it)\n");
+		out(cls == OMCI_ME_MAC_BRIDGE_CFG_DATA
+		    ? "-> not supported (the ONU creates it, the OLT can only get it)\n"
+		    : "-> not supported (the ONU creates it, the OLT may not do this)\n");
 		return;
 	}
 	if (mt == OMCI_MT_CREATE) {

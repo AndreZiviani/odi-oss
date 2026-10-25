@@ -873,6 +873,25 @@ void cfg_load_private_me(void)
 		       && v[0] == '0');
 }
 
+/* ------------------------------------------------ OMCI_POTS_PORTS
+ *
+ * odi.conf, odi-only: the phone (POTS) ports, 1 or 2; anything else, an
+ * absent key included, is 0, no phone service. The stick has no phone
+ * socket: the ports are the SIP lines an OLT may provision for the router
+ * behind it to register. A change re-registers, like OMCI_UNKNOWN_ME_OK,
+ * since the classes the ONU accepts change with it. */
+int pots_ports;
+
+void cfg_load_pots_ports(void)
+{
+	char v[4];
+
+	pots_ports = 0;
+	if (cfg_odi_get(CFG_ODI_PATH, "OMCI_POTS_PORTS", v, sizeof v) == 1 &&
+	    v[0] >= '1' && v[0] <= '0' + POTS_PORTS_MAX)
+		pots_ports = v[0] - '0';
+}
+
 /* ------------------------------------------------ OMCI_UNKNOWN_ME_OK
  *
  * Only the value 1 turns it on: anything else, an absent key included, keeps
@@ -1155,6 +1174,7 @@ void cfg_load_all(void)
 	cfg_load_private_me();
 	cfg_load_veip_on();
 	cfg_load_custom_me();
+	cfg_load_pots_ports();
 	aut_rebuild();
 }
 
@@ -1170,6 +1190,7 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->private_me = private_me;
 	s->veip_on = veip_on;
 	s->custom_me = custom_me;
+	s->pots_ports = pots_ports;
 }
 
 void cfg_snap_restore(const struct cfg_snap *s)
@@ -1184,6 +1205,7 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	private_me = s->private_me;
 	veip_on = s->veip_on;
 	custom_me = s->custom_me;
+	pots_ports = s->pots_ports;
 	aut_rebuild();
 }
 
@@ -1241,6 +1263,8 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		m |= CFGD_VEIP_ON;
 	if ((o->custom_me ^ n->custom_me) & CUSTOM_ME_ONU_CAPABILITY)
 		m |= CFGD_CUSTOM_ME;
+	if (o->pots_ports != n->pots_ports)
+		m |= CFGD_POTS_PORTS;
 	if (o->fixed.n != n->fixed.n)
 		m |= CFGD_FIXED_ME;
 	else
@@ -1288,6 +1312,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_PRIVATE_ME, "OMCI_PRIVATE_ME" },
 		{ CFGD_VEIP_ON, "OMCI_VEIP" },
 		{ CFGD_CUSTOM_ME, "OMCI_CUSTOM_ME" },
+		{ CFGD_POTS_PORTS, "OMCI_POTS_PORTS" },
 		{ CFGD_VLAN_TYPE, "VLAN_CFG_TYPE" },
 		{ CFGD_VLAN_MODE, "VLAN_MANU_MODE" },
 		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },

@@ -256,11 +256,238 @@ class Plugin:
         return {off: val[1] for off, val in sorted(self.store['Oper'].items())}
 
 
-def g988_attr(index, name, typ, size):
-    # Read-only, mandatory, no AVC: what every attribute of class 46 is.
+def g988_attr(index, name, typ, size, acc=1, opt=1, avc=0):
+    # Read-only, mandatory, no AVC by default: what every attribute of class
+    # 46 is. `size` is the model's, so a string carries its NUL (the voice
+    # entries below pass width + 1, as the plugins store theirs).
     return dict(index=index, name=name, dataType=None, len=size, isIndex=int(index == 0),
-                mibSave=0, outStyle=None, oltAcc=1, avcFlag=0, optionType=1,
+                mibSave=0, outStyle=None, oltAcc=acc, avcFlag=avc, optionType=opt,
                 type=typ, size=size)
+
+
+# The VoIP entities of G.988 clause 9.9 (SIP over OMCI). The stock image has
+# no voice plugin, so the walk of the plugins finds none of them; these are
+# from the 11/2022 text of G.988, the attributes in its order, the widths and
+# the access it gives. Attribute 0 is the entity id. omcid holds them only
+# while the voice key is on (omcimsg.c, the gate in handle()).
+#
+# Access: R read, W write, C set-by-create (oltAcc bits 0, 1 and 2). Option:
+# M mandatory, O optional; T marks a table (its rows are what a Set adds,
+# mibstore.c tbl_defs[], and the upload leaves it out), P a PM counter (not
+# uploaded either). A 25-byte text is a string (it stays inline in a Get, as
+# the authentication method's do); a table row is octets, which the Get
+# answers with its size and Get-Next walks (mibstore.c, attr_is_big).
+G988_ACC = {'R': 1, 'W': 2, 'RW': 3, 'RC': 5, 'RWC': 7}
+G988_OPT = {'M': 0x001, 'O': 0x004, 'MT': 0x201, 'OT': 0x204, 'MP': 0x101, 'OP': 0x104}
+G988_WIDTH = {'u8': 1, 'u16': 2, 'u32': 4}
+G988_ACTIONS = {name: bit for bit, name in ACTIONS.items()}
+
+
+def g988_voice(cls, name, short, desc, onu, actions, attrs):
+    """One entity from a compact list: (name, type, width, access, option[,
+    avc]) per attribute after the entity id. A string's width is its bytes on
+    the wire; the model stores one more, as for the plugins' strings."""
+    out = [g988_attr(0, 'EntityId', 'u16', 2, acc=1 if onu else 5)]
+    for i, a in enumerate(attrs, 1):
+        nm, typ, width, acc, opt = a[:5]
+        size = width + 1 if typ == 'string' else width
+        out.append(g988_attr(i, nm, typ, size, acc=G988_ACC[acc],
+                             opt=G988_OPT[opt], avc=a[5] if len(a) > 5 else 0))
+    mask = 0
+    for act in actions:
+        mask |= 1 << G988_ACTIONS[act]
+    return {
+        'plugin': None,
+        'table': {'name': name, 'shortName': short, 'classId': cls, 'desc': desc,
+                  'initType': 0 if onu else 1, 'stdType': 1, 'actionType': mask,
+                  'attrNum': len(out), 'entrySize': sum(a['size'] for a in out),
+                  'actions': [n for b, n in sorted(ACTIONS.items()) if mask & (1 << b)],
+                  'extra': {}},
+        'oper': {},
+        'attrs': out,
+    }
+
+
+OLT_MADE = ['create', 'delete', 'set', 'get']
+PM_MADE = OLT_MADE + ['get-current-data']
+
+
+def g988_pm(cls, name, short, desc, counters, opt='MP'):
+    """A PM history data entity: interval end time, the threshold data
+    pointer, then four-byte counters."""
+    return g988_voice(cls, name, short, desc, False, PM_MADE,
+                      [('IntEndTime', 'u8', 1, 'R', 'MP'),
+                       ('ThresholdDataId', 'u16', 2, 'RWC', 'M')] +
+                      [(c, 'u32', 4, 'R', opt) for c in counters])
+
+
+G988_VOICE = [
+    # 9.9.1. Created by the ONU, one per POTS port (id: slot << 8 | port).
+    g988_voice(53, 'PptpPotsUni', 'POTS', 'PPTP POTS UNI', True,
+               ['set', 'get', 'test'],
+               [('AdminState', 'u8', 1, 'RW', 'M', 1),
+                ('Deprecated', 'u16', 2, 'RW', 'O'),
+                ('Arc', 'u8', 1, 'RW', 'O', 1),
+                ('ArcInterval', 'u8', 1, 'RW', 'O'),
+                ('Impedance', 'u8', 1, 'RW', 'O'),
+                ('TransmissionPath', 'u8', 1, 'RW', 'O'),
+                ('RxGain', 'u8', 1, 'RW', 'O'),
+                ('TxGain', 'u8', 1, 'RW', 'O'),
+                ('OpState', 'u8', 1, 'R', 'O', 1),
+                ('HookState', 'u8', 1, 'R', 'O'),
+                ('PotsHoldoverTime', 'u16', 2, 'RW', 'O'),
+                ('NominalFeedVoltage', 'u8', 1, 'RW', 'O'),
+                ('LossOfSoftswitch', 'u8', 1, 'RW', 'O')]),
+    # 9.9.6. Four tables of rows keyed by their first byte.
+    g988_voice(58, 'VoiceServiceProfile', 'VSP', 'Voice service profile', False,
+               OLT_MADE + ['get-next', 'set-table'],
+               [('AnnouncementType', 'u8', 1, 'RWC', 'M'),
+                ('JitterTarget', 'u16', 2, 'RWC', 'O'),
+                ('JitterBufferMax', 'u16', 2, 'RWC', 'O'),
+                ('EchoCancelInd', 'u8', 1, 'RWC', 'M'),
+                ('PstnProtocolVariant', 'u16', 2, 'RWC', 'O'),
+                ('DtmfDigitLevels', 'u16', 2, 'RWC', 'O'),
+                ('DtmfDigitDuration', 'u16', 2, 'RWC', 'O'),
+                ('HookFlashMinTime', 'u16', 2, 'RWC', 'O'),
+                ('HookFlashMaxTime', 'u16', 2, 'RWC', 'O'),
+                ('TonePatternTable', 'octets', 20, 'RW', 'OT'),
+                ('ToneEventTable', 'octets', 7, 'RW', 'OT'),
+                ('RingingPatternTable', 'octets', 5, 'RW', 'OT'),
+                ('RingingEventTable', 'octets', 7, 'RW', 'OT'),
+                ('NetworkSpecificExtPtr', 'u16', 2, 'RWC', 'O')]),
+    # 9.9.18. Created by the ONU, one instance, 0.
+    g988_voice(138, 'VoipConfigData', 'VCD', 'VoIP config data', True,
+               ['set', 'get'],
+               [('AvailSignallingProtocols', 'u8', 1, 'R', 'M'),
+                ('SignallingProtocolUsed', 'u8', 1, 'RW', 'M'),
+                ('AvailConfigMethods', 'u32', 4, 'R', 'M'),
+                ('ConfigMethodUsed', 'u8', 1, 'RW', 'M'),
+                ('ConfigAddressPtr', 'u16', 2, 'RW', 'M'),
+                ('ConfigState', 'u8', 1, 'R', 'M'),
+                ('RetrieveProfile', 'u8', 1, 'W', 'M'),
+                ('ProfileVersion', 'string', 25, 'R', 'M', 1)]),
+    # 9.9.4
+    g988_voice(139, 'VoipVoiceCtp', 'VCTP', 'VoIP voice CTP', False, OLT_MADE,
+               [('UserProtocolPtr', 'u16', 2, 'RWC', 'M'),
+                ('PptpPtr', 'u16', 2, 'RWC', 'M'),
+                ('VoipMediaProfilePtr', 'u16', 2, 'RWC', 'M'),
+                ('SignallingCode', 'u8', 1, 'RWC', 'M')]),
+    # 9.9.12
+    g988_pm(140, 'CallControlPmHistoryData', 'CCPM',
+            'Call control performance monitoring history data',
+            ['CallSetupFailures', 'CallSetupTimer', 'CallTerminateFailures',
+             'AnalogPortReleases', 'AnalogPortOffHookTimer']),
+    # 9.9.11. Created by the ONU with each PPTP POTS UNI, at its id.
+    g988_voice(141, 'VoipLineStatus', 'VLS', 'VoIP line status', True, ['get'],
+               [('VoipCodecUsed', 'u16', 2, 'R', 'M'),
+                ('VoipVoiceServerStatus', 'u8', 1, 'R', 'M'),
+                ('VoipPortSessionType', 'u8', 1, 'R', 'M'),
+                ('VoipCall1PacketPeriod', 'u16', 2, 'R', 'M'),
+                ('VoipCall2PacketPeriod', 'u16', 2, 'R', 'M'),
+                ('VoipCall1DestAddr', 'string', 25, 'R', 'M'),
+                ('VoipCall2DestAddr', 'string', 25, 'R', 'M'),
+                ('VoipLineState', 'u8', 1, 'R', 'O'),
+                ('EmergencyCallStatus', 'u8', 1, 'R', 'O', 1)]),
+    # 9.9.5. Four codec / packet period / silence suppression triples.
+    g988_voice(142, 'VoipMediaProfile', 'VMP', 'VoIP media profile', False, OLT_MADE,
+               [('FaxMode', 'u8', 1, 'RWC', 'M'),
+                ('VoiceServiceProfilePtr', 'u16', 2, 'RWC', 'M')] +
+               [(f % n, 'u8', 1, 'RWC', 'M') for n in (1, 2, 3, 4)
+                for f in ('CodecSelection%d', 'PacketPeriodSelection%d',
+                          'SilenceSuppression%d')] +
+               [('OobDtmf', 'u8', 1, 'RWC', 'M'),
+                ('RtpProfilePtr', 'u16', 2, 'RWC', 'M')]),
+    # 9.9.7
+    g988_voice(143, 'RtpProfileData', 'RTPP', 'RTP profile data', False, OLT_MADE,
+               [('LocalPortMin', 'u16', 2, 'RWC', 'M'),
+                ('LocalPortMax', 'u16', 2, 'RWC', 'O'),
+                ('DscpMark', 'u8', 1, 'RWC', 'M'),
+                ('PiggybackEvents', 'u8', 1, 'RWC', 'M'),
+                ('ToneEvents', 'u8', 1, 'RWC', 'M'),
+                ('DtmfEvents', 'u8', 1, 'RWC', 'M'),
+                ('CasEvents', 'u8', 1, 'RWC', 'M'),
+                ('IpHostConfigPtr', 'u16', 2, 'RW', 'O')]),
+    # 9.9.13
+    g988_pm(144, 'RtpPmHistoryData', 'RTPPM', 'RTP performance monitoring history data',
+            ['RtpErrors', 'PacketLoss', 'MaximumJitter', 'MaxTimeBetweenRtcp',
+             'BufferUnderflows', 'BufferOverflows']),
+    # 9.9.10. The dial plan rows: id, action (0 remove, 1 add), 28-byte token.
+    g988_voice(145, 'NetworkDialPlanTable', 'NDPT', 'Network dial plan table', False,
+               OLT_MADE + ['get-next', 'set-table'],
+               [('DialPlanNumber', 'u16', 2, 'R', 'M'),
+                ('DialPlanTableMaxSize', 'u16', 2, 'RC', 'M'),
+                ('CriticalDialTimeout', 'u16', 2, 'RWC', 'M'),
+                ('PartialDialTimeout', 'u16', 2, 'RWC', 'M'),
+                ('DialPlanFormat', 'u8', 1, 'RWC', 'M'),
+                ('DialPlanTable', 'octets', 30, 'RW', 'MT')]),
+    # 9.9.8. The 2022 text ends the entity with the warmline timer and an IP
+    # host pointer, both optional.
+    g988_voice(146, 'VoipAppServiceProfile', 'VASP', 'VoIP application service profile',
+               False, OLT_MADE,
+               [('CidFeatures', 'u8', 1, 'RWC', 'M'),
+                ('CallWaitingFeatures', 'u8', 1, 'RWC', 'M'),
+                ('CallProgressTransferFeatures', 'u16', 2, 'RWC', 'M'),
+                ('CallPresentationFeatures', 'u16', 2, 'RWC', 'M'),
+                ('DirectConnectFeature', 'u8', 1, 'RWC', 'M'),
+                ('DirectConnectUriPtr', 'u16', 2, 'RWC', 'M'),
+                ('BridgedLineAgentUriPtr', 'u16', 2, 'RWC', 'M'),
+                ('ConferenceFactoryUriPtr', 'u16', 2, 'RWC', 'M'),
+                ('DialToneFeatureDelayTimer', 'u16', 2, 'RW', 'O'),
+                ('IpHostPtr', 'u16', 2, 'RW', 'O')]),
+    # 9.9.9. Each code is up to five characters of 0-9, * and #.
+    g988_voice(147, 'VoipFeatureAccessCodes', 'VFAC', 'VoIP feature access codes', False,
+               OLT_MADE,
+               [(n, 'string', 5, 'RW', 'O') for n in (
+                   'CancelCallWaiting', 'CallHold', 'CallPark', 'CallerIdActivate',
+                   'CallerIdDeactivate', 'DndActivation', 'DndDeactivation',
+                   'DndPinChange', 'EmergencyServiceNumber', 'IntercomService',
+                   'UnattendedCallTransfer', 'AttendedCallTransfer')]),
+    # 9.9.3. The SIP response table rows: code (2, the key), tone, text pointer.
+    g988_voice(150, 'SipAgentConfigData', 'SACD', 'SIP agent config data', False,
+               OLT_MADE + ['get-next', 'set-table'],
+               [('ProxyServerAddrPtr', 'u16', 2, 'RWC', 'M'),
+                ('OutboundProxyAddrPtr', 'u16', 2, 'RWC', 'M'),
+                ('PrimarySipDns', 'u32', 4, 'RWC', 'M'),
+                ('SecondarySipDns', 'u32', 4, 'RWC', 'M'),
+                ('TcpUdpPtr', 'u16', 2, 'RW', 'M'),
+                ('SipRegExpTime', 'u32', 4, 'RW', 'M'),
+                ('SipReregHeadStartTime', 'u32', 4, 'RW', 'M'),
+                ('HostPartUri', 'u16', 2, 'RWC', 'M'),
+                ('SipStatus', 'u8', 1, 'R', 'M', 1),
+                ('SipRegistrar', 'u16', 2, 'RWC', 'M'),
+                ('Softswitch', 'string', 4, 'RWC', 'M'),
+                ('SipResponseTable', 'octets', 5, 'RW', 'OT'),
+                ('SipOptionTransmitControl', 'u8', 1, 'RWC', 'O'),
+                ('SipUriFormat', 'u8', 1, 'RWC', 'O'),
+                ('RedundantSipAgentPtr', 'u16', 2, 'RWC', 'O')]),
+    # 9.9.14
+    g988_pm(151, 'SipAgentPmHistoryData', 'SAPM',
+            'SIP agent performance monitoring history data',
+            ['Transactions', 'RxInviteReqs', 'RxInviteRetrans', 'RxNoninviteReqs',
+             'RxNoninviteRetrans', 'RxResponse', 'RxResponseRetrans', 'TxInviteReqs',
+             'TxInviteRetrans', 'TxNoninviteReqs', 'TxNoninviteRetrans', 'TxResponse',
+             'TxResponseRetrans'], opt='OP'),
+    # 9.9.15
+    g988_pm(152, 'SipCallInitPmHistoryData', 'SCIPM',
+            'SIP call initiation performance monitoring history data',
+            ['FailedToConnect', 'FailedToValidate', 'Timeout', 'FailureReceived',
+             'FailedToAuthenticate']),
+    # 9.9.2. The display name is the subscriber's: masked like a credential
+    # (mibstore.c, secret_me[]).
+    g988_voice(153, 'SipUserData', 'SUD', 'SIP user data', False, OLT_MADE,
+               [('SipAgentPtr', 'u16', 2, 'RWC', 'M'),
+                ('UserPartAor', 'u16', 2, 'RWC', 'M'),
+                ('SipDisplayName', 'string', 25, 'RW', 'M'),
+                ('UsernamePassword', 'u16', 2, 'RWC', 'M'),
+                ('VoicemailServerSipUri', 'u16', 2, 'RWC', 'M'),
+                ('VoicemailSubscriptionExpTime', 'u32', 4, 'RWC', 'M'),
+                ('NetworkDialPlanPtr', 'u16', 2, 'RWC', 'M'),
+                ('AppServicesProfilePtr', 'u16', 2, 'RWC', 'M'),
+                ('FeatureCodePtr', 'u16', 2, 'RWC', 'M'),
+                ('PptpPtr', 'u16', 2, 'RWC', 'M'),
+                ('ReleaseTimer', 'u8', 1, 'RW', 'O'),
+                ('RohTimer', 'u8', 1, 'RW', 'O')]),
+]
 
 
 # Classes G.988 defines that no stock plugin carries, so the walk of the
@@ -355,7 +582,7 @@ def main():
                     print('        %r' % at['desc'])
             print('   oper:', {hex(k): v for k, v in p.oper().items()})
 
-    model += G988_ONLY
+    model += G988_ONLY + G988_VOICE
     print('\n%d plugins, %d consistent, %d not; %d attributes total'
           % (len(files), ok, bad, sum(len(m['attrs']) for m in model)))
     if args.json:

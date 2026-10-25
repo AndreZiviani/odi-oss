@@ -28,6 +28,10 @@ uint8_t serial[9];      /* 4 ASCII vendor id + 4 binary */
  *   256  ONU-G: the logical ONU id and logical password (attributes 10 and
  *        11) are the same LOID and password. Masked in a dump only: the
  *        OLT's Sets of ONU-G carry nothing secret and stay in the log
+ *   153  SIP user data: the display name (attribute 3), the subscriber's
+ *        own; the rest are pointers. The SIP credentials themselves are an
+ *        authentication method (148) and the number a large string (157),
+ *        both above
  *
  * `last` is the last attribute masked; 0xff is every one from `first` on.
  * `log` keeps the contents of a Create, Set or Delete out of the log.
@@ -40,6 +44,7 @@ static const struct { uint16_t cls; uint8_t first, last, log; } secret_me[] = {
 	{ OMCI_ME_IP_HOST_CONFIG_DATA, 0xff, 0xff, 1 },
 	{ OMCI_ME_CTC_LOID_AUTH, 2, 3, 1 },
 	{ OMCI_ME_ONU_G, 10, 11, 0 },
+	{ OMCI_ME_SIP_USER_DATA, 3, 3, 1 },
 };
 
 int me_is_secret(uint16_t cls)
@@ -206,6 +211,37 @@ uint16_t canon_inst(uint16_t cls, uint16_t inst)
 	if (slot_port_class(cls) && inst == (uint16_t)((veip_slot << 8) | 1))
 		return SLOT6_PORT;
 	return inst;
+}
+
+/* The VoIP classes of G.988 9.9 the model carries for SIP over OMCI
+ * (tools/mib-tables.py, G988_VOICE), which handle() answers only while
+ * OMCI_POTS_PORTS is on. The large string, network address, authentication
+ * method, TCP/UDP config data and IP host they point at are not among them:
+ * the stock plugins carry those, and the OLT has always been answered for
+ * them (the TR-069 server uses the same ones). */
+int voip_class(uint16_t cls)
+{
+	switch (cls) {
+	case OMCI_ME_PPTP_POTS_UNI:
+	case OMCI_ME_VOICE_SERVICE_PROFILE:
+	case OMCI_ME_VOIP_CONFIG_DATA:
+	case OMCI_ME_VOIP_VOICE_CTP:
+	case OMCI_ME_CALL_CONTROL_PMHD:
+	case OMCI_ME_VOIP_LINE_STATUS:
+	case OMCI_ME_VOIP_MEDIA_PROFILE:
+	case OMCI_ME_RTP_PROFILE_DATA:
+	case OMCI_ME_RTP_PMHD:
+	case OMCI_ME_NETWORK_DIAL_PLAN_TABLE:
+	case OMCI_ME_VOIP_APP_SERVICE_PROFILE:
+	case OMCI_ME_VOIP_FEATURE_ACCESS_CODES:
+	case OMCI_ME_SIP_AGENT_CFG_DATA:
+	case OMCI_ME_SIP_AGENT_PMHD:
+	case OMCI_ME_SIP_CALL_INIT_PMHD:
+	case OMCI_ME_SIP_USER_DATA:
+		return 1;
+	default:
+		return 0;
+	}
 }
 
 const struct omci_class *find_class(uint16_t id)
@@ -402,6 +438,19 @@ uint16_t set_reject_mask(const struct omci_class *c, uint16_t mask)
  *                (MacFilterTableOper removes by MAC address instead; G.988
  *                keys the table by the index.)
  *
+ * The voice tables have no stock plugin to check against; their rules are
+ * G.988's alone (9.9.6, 9.9.3, 9.9.10):
+ *
+ *   TBL_INDEX    58/10 to /13, the tone pattern and tone event tables and
+ *                their ringing twins: byte 0 is the index (or the event) and
+ *                the key; a row with 0 there clears the table, any other adds
+ *                or replaces the row with that key. G.988 gives no way to
+ *                remove one row.
+ *   TBL_INDEX16  150/12, the SIP response table: the same, keyed by the
+ *                two-byte response code.
+ *   TBL_DIALPLAN 145/6, the dial plan table: byte 0 the dial plan id (the
+ *                key), byte 1 the action, 1 adds or replaces, 0 removes.
+ *
  * The control bits of a stored row read back as 00, as the stock stack
  * stores them.
  */
@@ -410,6 +459,9 @@ uint16_t set_reject_mask(const struct omci_class *c, uint16_t mask)
 #define TBL_CTRL_PART 3
 #define TBL_MCADDR    4
 #define TBL_MACFILT   5
+#define TBL_INDEX     6
+#define TBL_INDEX16   7
+#define TBL_DIALPLAN  8
 
 /* The extended multicast operations profile, 65531 once the model has its
  * true class id. */
@@ -426,6 +478,12 @@ static const struct { uint16_t cls; uint8_t attr, kind; } tbl_defs[] = {
 	{ OMCI_ME_MCAST_GEM_IW_TP, 9, TBL_MCADDR },  /* IPv4 address table */
 	{ OMCI_ME_MCAST_GEM_IW_TP, 10, TBL_MCADDR }, /* IPv6 address table */
 	{ 49, 1, TBL_MACFILT },                  /* MAC filter table */
+	{ OMCI_ME_VOICE_SERVICE_PROFILE, 10, TBL_INDEX },  /* tone pattern */
+	{ OMCI_ME_VOICE_SERVICE_PROFILE, 11, TBL_INDEX },  /* tone event */
+	{ OMCI_ME_VOICE_SERVICE_PROFILE, 12, TBL_INDEX },  /* ringing pattern */
+	{ OMCI_ME_VOICE_SERVICE_PROFILE, 13, TBL_INDEX },  /* ringing event */
+	{ OMCI_ME_SIP_AGENT_CFG_DATA, 12, TBL_INDEX16 },   /* SIP response table */
+	{ OMCI_ME_NETWORK_DIAL_PLAN_TABLE, 6, TBL_DIALPLAN }, /* dial plan table */
 };
 
 static unsigned tbl_kind(const struct omci_class *c, unsigned k)
@@ -599,6 +657,12 @@ static int key_index(const uint8_t *row, const uint8_t *e, uint16_t w)
 	return row[0] == e[0];
 }
 
+static int key_index16(const uint8_t *row, const uint8_t *e, uint16_t w)
+{
+	(void)w;
+	return row[0] == e[0] && row[1] == e[1];
+}
+
 /* The OMCC version this ONU reports (ONU2-G attribute 2). */
 static uint8_t omcc_version(void)
 {
@@ -705,6 +769,24 @@ static void tbl_set(struct mib_row *r, const struct omci_class *c, unsigned k,
 		default:
 			return;
 		}
+	case TBL_INDEX:
+		if (e[0])
+			tbl_put(r, k, e, w, key_index);
+		else
+			tbl_remove(r, k, 0, e, w);
+		return;
+	case TBL_INDEX16:
+		if (e[0] || e[1])
+			tbl_put(r, k, e, w, key_index16);
+		else
+			tbl_remove(r, k, 0, e, w);
+		return;
+	case TBL_DIALPLAN:
+		if (e[1] == 1)
+			tbl_put(r, k, e, w, key_index);
+		else if (e[1] == 0)
+			tbl_remove(r, k, key_index, e, w);
+		return;
 	default:
 		return;
 	}
@@ -1016,6 +1098,31 @@ static uint8_t pon_state_now(void)
 	return 1;
 }
 
+/* G.988's values at instantiation for the attributes of an OLT-created voice
+ * entity that a Create does not carry (none is set-by-create), where they are
+ * not zero: the pointers that are null until set, and the timers G.988 gives
+ * a default. An OLT that never Sets them reads these. */
+static const struct { uint16_t cls; uint8_t attr; uint16_t v; } voice_dfl[] = {
+	{ OMCI_ME_SIP_AGENT_CFG_DATA, 5, 0xffff },      /* TCP/UDP pointer */
+	{ OMCI_ME_SIP_AGENT_CFG_DATA, 6, 3600 },        /* registration expiry, s */
+	{ OMCI_ME_SIP_AGENT_CFG_DATA, 7, 360 },         /* re-registration head start, s */
+	{ OMCI_ME_SIP_USER_DATA, 11, 10 },              /* release timer, s */
+	{ OMCI_ME_SIP_USER_DATA, 12, 15 },              /* receiver off hook timer, s */
+	{ OMCI_ME_RTP_PROFILE_DATA, 8, 0xffff },        /* IP host config pointer */
+	{ OMCI_ME_VOIP_APP_SERVICE_PROFILE, 10, 0xffff }, /* IP host pointer */
+};
+
+/* The value in the attribute's own width, big-endian like every attribute. */
+static void voice_default(uint16_t cls, unsigned k, uint8_t *out, uint16_t n)
+{
+	for (unsigned i = 0; i < sizeof voice_dfl / sizeof voice_dfl[0]; i++)
+		if (voice_dfl[i].cls == cls && voice_dfl[i].attr == k) {
+			for (uint16_t b = 0; b < n; b++)
+				out[n - 1 - b] = b < 2 ? (uint8_t)(voice_dfl[i].v >> (8 * b)) : 0;
+			return;
+		}
+}
+
 /* The Weight mib_PriQ.so's own default row carries. See the longer note beside
  * ds_queue_words: isp1's live weights are not all 1, and which queues get a
  * non-default one is provisioning rather than derivation. */
@@ -1274,6 +1381,14 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		 * PriWeight 0. */
 		if (k == 1) { out[0] = (uint8_t)(inst >> 8); out[1] = (uint8_t)inst; }
 		else if (k == 3) out[0] = 2;           /* Policy */
+	} else if (c->classId == OMCI_ME_NETWORK_DIAL_PLAN_TABLE && k == 1 && n >= 2) {
+		/* Dial plan number: the rows the dial plan table holds now. */
+		unsigned rows = tbl_rows(r, 6);
+
+		out[0] = (uint8_t)(rows >> 8);
+		out[1] = (uint8_t)rows;
+	} else if (voip_class(c->classId)) {
+		voice_default(c->classId, k, out, n);
 	}
 	return n;
 }

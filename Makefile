@@ -110,7 +110,7 @@ image-all:
 # any did. TEST_JOBS is the number of legs at once (default: the CPUs);
 # `make test TEST_JOBS=1` runs them one by one. `make test-<leg>` runs one leg
 # on its own, its output streaming.
-OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables alarms writes mcast pm enc
+OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables alarms writes mcast pm enc voip
 TEST_LEGS := lint test-host test-diag test-omci-respond test-igmp $(OMCI_SUITES:%=test-omci-%)
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
@@ -257,7 +257,9 @@ test-diag:
 # download, activate and commit in both OLT_SW_DOWNLOAD modes, under
 # qemu -strace, and asserts nothing opens /dev/mtd, execs or reboots.
 # vlan-test.sh builds both ISP sessions with the manual tag on and off
-# (transparent) and checks the bridge rules.
+# (transparent) and checks the bridge rules. voip-test.sh provisions a SIP
+# line the way an OLT does, with OMCI_POTS_PORTS on, and checks that with it
+# off the VoIP classes are still unknown to the OLT.
 # One target per suite (test-omci-<suite>) so CI can run them as parallel
 # jobs; test-omci runs them all side by side, as `make test` does (see there).
 # Each suite needs only omcli and omcid (plus its drvtrace build), which
