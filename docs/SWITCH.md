@@ -1351,8 +1351,53 @@ port counters (`diag mib dump counter port all`, ports 0 and 2) and
 
 #### Measured on a stick
 
-None yet. The results block of `tools/mcast-probe/mcast-probe.sh` goes here,
-with the line, the image and the day it ran.
+ISP1, one run of `tools/mcast-probe/mcast-probe.sh` (848 s, windows as in
+the script), on an image with this tree's probes. The line carries no IPTV,
+and the OLT sent no IGMP during the run. The host sent its IGMP (80 reports
+in the 300 s count window); the multicast it was meant to send to the test
+group never left it, so no frame to the group entered the UNI. The run
+ended with every probe and the test row removed.
+
+What is now known:
+
+- **A counting rule counts and leaves forwarding alone.** The 80 reports
+  from the host were counted on the UNI, and the PON sent out 80
+  multicast frames in the same window (`MIB port 2 out multicast`).
+- **A log counter is free-running.** Every count read the same a second
+  later, with no traffic between.
+- **`LOG_TYPE` switches a pair to bytes, and a byte count includes the
+  FCS.** The same reports counted 2048 bytes for 32 frames, 64 bytes a
+  frame, while the CPU received them as 1920 bytes, 60 a frame: 4 bytes a
+  frame more on the switch, the FCS (untagged frames).
+- **A copy (`mirror`) of the UNI IGMP reaches the CPU once a frame and still
+  goes on.** 32 counted, 32 at the CPU, all with the receive reason 128 plus
+  the entry and source port 0, none by another reason, and 32 multicast
+  frames out of the PON. This is the mechanism the snooping copy uses.
+- **A trap takes the UNI IGMP to the CPU and nowhere else.** 32 frames at
+  the CPU by the rule's reason, and no multicast frame out of the PON in that
+  window. Upstream tag control by trap and re-send can rest on this.
+- **Nothing from the PON reached the CPU.** Over the run `rx_pon` (55)
+  equals the OMCI frames delivered (55), and `rx_pon_dropped` stayed 0.
+
+What is still not known, and why:
+
+- **Whether the OLT's IGMP reaches the ONU, and in which VLAN.** None
+  arrived: this OLT does not query a line without IPTV.
+- **Whether a counting rule counts on the PON ingress.** The two PON rules
+  counted 0 while the PON received 237 multicast frames
+  (`MIB port 2 in multicast`, all flooded to the UNI). With no IPv4
+  multicast counted on the UNI either, those were most likely IPv6 or
+  non-IP multicast, which the rules do not match; a PON rule that counts
+  nothing at all would read the same. A line with IPTV, or any IPv4
+  multicast from the OLT, settles it.
+- **Whether only the lower of two matching entries counts.** `overlap` ran
+  on the PON ingress and saw no frame.
+- **Whether a static row keyed on the group MAC steers a frame.** The row
+  went in (`01:00:5E:7F:4D:01`, SVL, port 1 alone, read back) but no frame
+  to the group came from the host. A second run with a sender that works,
+  untagged and then tagged, answers it.
+- Everything a real stream decides (the stream on its multicast GEM port,
+  the PON drop, tags on the fibre), and igmpd's own delivery path, as above.
 
 ## PON port isolation
 

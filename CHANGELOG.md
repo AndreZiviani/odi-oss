@@ -16,8 +16,17 @@ listed here.
   each other. `tools/mcast-probe/mcast-probe.sh` runs the measurements on a
   stick in one unattended run (about 15 minutes), puts everything back
   however it ends, and prints a results block for `docs/SWITCH.md`, where
-  the questions it answers are listed. `diag help` now keeps a space between
-  a long command and its description.
+  the questions it answers are listed, with what a first run on ISP1
+  settled: the trap and the copy of the host IGMP work, the counters count
+  frames and bytes (the FCS included), and nothing from the PON reached the
+  CPU. `diag help` now keeps a space between a long command and its
+  description.
+- tests: the OMCI suites no longer fail now and then on a busy machine. A
+  suite that restarts the daemon into the same log file waited for the
+  "answering as" line, and the shell had not always emptied the file yet, so it
+  read the previous daemon's line, went on before the new daemon was up, and
+  then lost its first frames or stopped it too early. Every start now empties
+  the log first. A failed `omcli --inject` in a suite also prints why.
 - omcid: the extra multicast GEM ports an OLT names only in address rows now
   get a downstream flow. G.988 lets one multicast GEM interworking TP (ME 281)
   spread the channels over several GEM ports by writing more rows, with other

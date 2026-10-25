@@ -88,6 +88,7 @@ ctrs 1000 100 5
 clock 1000
 
 log=/tmp/omcid-pm.log
+: > "$log"
 $Q respond/build/omcid -d -g /tmp/pm-gpon -n /tmp/pm-ctr -t /tmp/pm-clk > "$log" 2>&1 &
 pid=$!
 omcid_up "$log"
