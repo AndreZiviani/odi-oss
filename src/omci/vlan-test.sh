@@ -50,6 +50,7 @@ rules() {
 		cp "$FIX/omci-store-$1.xml" /var/config/lastgood.xml
 	fi
 	log=/tmp/omcid-vlan-$1-$2.log
+	: > "$log"
 	$Q respond/build/omcid -w 6 -c "$CAPS" > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -149,6 +150,7 @@ store() {
 run171() {
 	name=$1; shift
 	log=/tmp/omcid-171-$name.log
+	: > "$log"
 	$Q respond/build/omcid -w 6 -c "$CAPS" > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -246,6 +248,7 @@ check "Delete of the instance: back to transparent" "$got" "47/1002 gem 657 rule
 
 sed 's/"VLAN_MANU_MODE" Value="1"/"VLAN_MANU_MODE" Value="0"/' \
 	"$FIX/omci-store-isp2.xml" > /tmp/store-transparent.xml
+: > /tmp/omcid-vlan-cli.log
 $Q respond/build/omcid -w 6 > /tmp/omcid-vlan-cli.log 2>&1 &
 pid=$!
 omcid_up /tmp/omcid-vlan-cli.log

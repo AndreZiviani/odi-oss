@@ -4,10 +4,11 @@
  * /var/run/odi-mcast.conf, policy.h): take the switch's snooping lease
  * (a copy of the host port's IGMP to the CPU, switch_opt.h), keep the group
  * state those reports imply, and program one static L2 multicast row a
- * group, the host and the PON as members. Once every group the host already
- * watches has had a chance to report again (one membership interval), it
- * also turns on the PON's drop of IPv4 multicast no row names, so a group
- * nobody on the UNI joined stays off the UNI link.
+ * group, the host and the PON as members. With -d, once every group the host
+ * already watches has had a chance to report again (one membership interval),
+ * it also turns on the PON's drop of IPv4 multicast no row names, so a group
+ * nobody on the UNI joined stays off the UNI link. Without -d the PON keeps
+ * flooding.
  *
  * What it never does: receive a frame from the fibre. The copy is made only
  * for frames entering the UNI port, the OLT's queries are not copied and not
@@ -205,7 +206,7 @@ static uint32_t now_seconds(int *warned)
 
 static void usage(void)
 {
-	out("usage: igmpd [-w] [-f] [-n COUNT]\n"
+	out("usage: igmpd [-w] [-d] [-f] [-n COUNT]\n"
 	    "       igmpd -r FILE\n"
 	    "       igmpd -s [STATE [POLICY]]\n"
 	    "       igmpd [-w] -j GROUP -p PORTS [-v VID]\n"
@@ -215,6 +216,9 @@ static void usage(void)
 	    "  -w         WRITE the entries to the switch. Off by default: this\n"
 	    "             has never run on a device, and a wrong multicast entry\n"
 	    "             misforwards rather than failing.\n"
+	    "  -d         also drop IPv4 multicast no row names on the PON side,\n"
+	    "             after one membership interval. Off by default: it is the\n"
+	    "             one part that can cut a stream\n"
 	    "  -n COUNT   stop after COUNT frames (0, the default, is forever)\n"
 	    "  -f         start even if a live process holds uid 4\n"
 	    "  -j GROUP   one-shot: program GROUP (a.b.c.d) with member PORTS\n"
@@ -274,6 +278,8 @@ static uint32_t pol_len;
  * group nobody wants. */
 static uint32_t learn_until;
 static uint32_t lease_retry;
+/* -d: the PON's drop is wanted at all (IGMP_PON_DROP, svc-igmpd.sh). */
+static int pon_drop;
 
 /* Reads the policy file into buf. Returns its length, 0 when there is none
  * (omcid has not written it yet, or the MIB was reset and it says no
@@ -309,7 +315,7 @@ static int same_text(const char *a, uint32_t an, const char *b, uint32_t bn)
 /* What to hold at this second. */
 static uint32_t wanted_lease(const struct igmp_db *db, uint32_t now)
 {
-	return igmp_policy_lease(&pol, db->static_overflow, now, learn_until);
+	return igmp_policy_lease(&pol, db->static_overflow, now, learn_until, pon_drop);
 }
 
 /* Bring the lease to `want`. A failure is retried every ten seconds, and
@@ -515,6 +521,8 @@ int main(int argc, char **argv)
 			force = 1;
 		} else if (str_eq(argv[i], "-w")) {
 			igmp_hw_set_enabled(1);
+		} else if (str_eq(argv[i], "-d")) {
+			pon_drop = 1;
 		} else if (str_eq(argv[i], "-s")) {
 			const char *sp = i + 1 < argc ? argv[i + 1] : 0;
 			const char *pp = sp && i + 2 < argc ? argv[i + 2] : 0;

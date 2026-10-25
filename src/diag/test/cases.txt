@@ -62,3 +62,20 @@ pon get transceiver mon
 pon get transceiver limits
 pon get transceiver l
 pon get transceiver m
+acl-probe count 0 port 2 proto 2
+acl-probe count 1 port 0 group 0xefff4d01 32
+acl-probe bytes 2 port 2 group 0xe0000000 4
+acl-probe bytes 3 port 0 proto 2
+acl-probe mirror 4 igmp
+acl-probe trap 5 igmp
+acl-probe trap 5 igmp bytes
+acl-probe mirror 4 igmp b
+acl-probe show 5
+acl-probe delete 5
+acl-probe delete all
+acl-probe d a
+acl-probe count 0 port 2
+acl-probe count 0 port 2 group 0xe0000000
+acl-probe trap 1
+? acl-probe
+? acl-probe delete 

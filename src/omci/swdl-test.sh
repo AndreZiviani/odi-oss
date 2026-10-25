@@ -120,6 +120,7 @@ S=/tmp/swdl-accept.txt
 	getflags 0a34 0000
 } > "$S"
 
+: > "$log"
 $Q -strace respond/build/omcid -w 12 -c "$CAPS" > "$log" 2> "$trace" &
 pid=$!
 omcid_up "$log"
@@ -193,6 +194,7 @@ got=$(grep -c -E '(^|[^a-z_])(execve|fork|vfork|clone|reboot)\(' "$trace")
 check "no execve, fork, clone or reboot syscall" "$got" "0"
 
 # The flags hold across a respawn, for the rest of the boot.
+: > /tmp/omcid-swdl2.log
 $Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid-swdl2.log 2>&1 &
 pid=$!
 omcid_up /tmp/omcid-swdl2.log
@@ -216,6 +218,7 @@ R=/tmp/swdl-reject.txt
 	getflags 0b26 0000
 	getflags 0b27 0001
 } > "$R"
+: > "$log"
 $Q respond/build/omcid -w 12 -c "$CAPS" > "$log" 2>&1 &
 pid=$!
 omcid_up "$log"

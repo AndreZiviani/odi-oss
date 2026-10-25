@@ -305,24 +305,28 @@ static void test_lease(void)
 	struct igmp_policy p;
 
 	parse("snooping=0\n", &p);
-	ok(igmp_policy_lease(&p, 0, 1000, 0) == 0, "not snooping: no lease");
+	ok(igmp_policy_lease(&p, 0, 1000, 0, 1) == 0, "not snooping: no lease");
 	parse("snooping=1\n", &p);
-	ok(igmp_policy_lease(&p, 0, 1000, 1260) == ODI_SW_MC_SNOOP_COPY,
+	ok(igmp_policy_lease(&p, 0, 1000, 1260, 1) == ODI_SW_MC_SNOOP_COPY,
 	   "snooping, still learning: the copy alone, the PON keeps flooding");
-	ok(igmp_policy_lease(&p, 0, 1259, 1260) == ODI_SW_MC_SNOOP_COPY, "one second before the end of learning");
-	ok(igmp_policy_lease(&p, 0, 1260, 1260) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP),
+	ok(igmp_policy_lease(&p, 0, 1259, 1260, 1) == ODI_SW_MC_SNOOP_COPY, "one second before the end of learning");
+	ok(igmp_policy_lease(&p, 0, 1260, 1260, 1) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP),
 	   "at the end of learning: the copy and the drop");
-	ok(igmp_policy_lease(&p, 1, 5000, 1260) == ODI_SW_MC_SNOOP_COPY,
+	ok(igmp_policy_lease(&p, 1, 5000, 1260, 1) == ODI_SW_MC_SNOOP_COPY,
 	   "a static range too wide to name: the drop stays off");
 	parse("snooping=1\nallow_overflow=1\n", &p);
-	ok(igmp_policy_lease(&p, 0, 5000, 1260) == ODI_SW_MC_SNOOP_COPY,
+	ok(igmp_policy_lease(&p, 0, 5000, 1260, 1) == ODI_SW_MC_SNOOP_COPY,
 	   "lists longer than fit: the drop stays off, their static groups could not be named");
 	parse("snooping=1\n", &p);
+	ok(igmp_policy_lease(&p, 0, 5000, 1260, 0) == ODI_SW_MC_SNOOP_COPY,
+	   "drop not opted in: the copy alone, long after learning");
+	ok(igmp_policy_lease(&p, 0, 1000, 1260, 0) == ODI_SW_MC_SNOOP_COPY,
+	   "drop not opted in, still learning: the copy alone");
 	/* The second counter wraps between the start of learning and the end of
 	 * it: the deadline is 0x10 and now is 0xfffffff0. */
-	ok(igmp_policy_lease(&p, 0, 0xfffffff0u, 0x10u) == ODI_SW_MC_SNOOP_COPY,
+	ok(igmp_policy_lease(&p, 0, 0xfffffff0u, 0x10u, 1) == ODI_SW_MC_SNOOP_COPY,
 	   "before a deadline that lies past the wrap: still learning");
-	ok(igmp_policy_lease(&p, 0, 0x10u, 0x10u) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP),
+	ok(igmp_policy_lease(&p, 0, 0x10u, 0x10u, 1) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP),
 	   "and on it, after the wrap: the drop");
 }
 

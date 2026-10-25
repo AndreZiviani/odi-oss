@@ -179,10 +179,15 @@ uint32_t igmp_policy_last_member_ttl(const struct igmp_policy *p)
 }
 
 uint32_t igmp_policy_lease(const struct igmp_policy *p, int static_overflow,
-			   uint32_t now, uint32_t learn_until)
+			   uint32_t now, uint32_t learn_until, int pon_drop)
 {
 	if (!p->snooping)
 		return 0;
+	/* The drop is the one part that can cut a stream, so it is opt-in
+	 * (igmpd -d); without it the copy and the state run and the PON
+	 * keeps flooding. */
+	if (!pon_drop)
+		return ODI_SW_MC_SNOOP_COPY;
 	/* Compared as a difference so it stays right across the wrap of a
 	 * 32-bit monotonic second counter. */
 	if ((int32_t)(now - learn_until) < 0)

@@ -20,7 +20,12 @@ no() { echo "FAIL  $1"; fail=$((fail + 1)); }
 
 for in in test/replay/*.in; do
 	name=${in%.in}
-	got=$($Q $BIN -r "$in" 2>&1; echo "status $?")
+	# The goldens run with the PON drop opted in (-d); nodrop-* run without
+	# it, the default, and must never show a drop.
+	flag=-d
+	case $(basename "$name") in nodrop-*) flag= ;; esac
+	# shellcheck disable=SC2086
+	got=$($Q $BIN $flag -r "$in" 2>&1; echo "status $?")
 	if [ "$update" = 1 ]; then
 		printf '%s\n' "$got" > "$name.out"
 		echo "wrote $name.out"

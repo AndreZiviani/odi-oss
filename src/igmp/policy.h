@@ -70,8 +70,9 @@ uint32_t igmp_policy_last_member_ttl(const struct igmp_policy *p);
  * every group the host already watches can report once before an
  * unregistered one is a group nobody wants; then the copy and the PON's drop,
  * unless a static range was too wide to name, or the lists were longer than
- * fit (their groups would be dropped as unregistered). */
+ * fit (their groups would be dropped as unregistered). `pon_drop` is the
+ * opt-in for the drop (igmpd -d): 0 holds the copy alone, always. */
 uint32_t igmp_policy_lease(const struct igmp_policy *p, int static_overflow,
-			   uint32_t now, uint32_t learn_until);
+			   uint32_t now, uint32_t learn_until, int pon_drop);
 
 #endif
