@@ -1185,7 +1185,7 @@ what IGMP snooping adds. The data path needs no programming: a frame on the
 multicast GEM port is flagged by the downstream flow's type (below), the
 GPON MAC passes it, and the switch floods it to the host unless a row or a
 drop says otherwise. Snooping is opt-in (`IGMP_SNOOPING`, `docs/TOOLS.md`,
-`igmpd`) and only prunes.
+`igmpd`), and its pruning of the PON side is a second opt-in (`IGMP_PON_DROP`).
 
 What was read on a stick (ISP1, read-only) and what is taken from another
 open implementation's measurements on the same chip. Nothing below was
