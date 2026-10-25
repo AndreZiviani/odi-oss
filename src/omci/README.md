@@ -47,14 +47,16 @@ The device's `/lib/omci/mib_<Name>.so` plugins each export five fixed
 symbols (`gMib<Name>TableInfo`, `gMib<Name>AttrInfo`, `gMib<Name>DefRow`,
 `gMib<Name>Oper`, `mibTable_init()`); `tools/mib-tables.py` reads those
 exports straight out of the shipped `.so` files and emits
-`generated/omci_mib.[ch]` and `omci_mib.json` -- 82 managed entities,
-~740 attributes, each with name, type, width, OLT access and index. That is
+`generated/omci_mib.[ch]` and `omci_mib.json` -- 98 managed entities,
+~930 attributes, each with name, type, width, OLT access and index. That is
 what makes a from-scratch responder tractable: the information model does
 not need to be reverse-engineered by hand, and `generated/` regenerates from
-the shipped plugins rather than being hand-maintained. The one exception is
-ME 46, which G.988 defines and the stock image has no plugin for: it is
-declared beside the generator (`G988_ONLY` in `tools/mib-tables.py`) and
-emitted with the rest, so regenerating keeps it. `tools/me-drv-map.py`
+the shipped plugins rather than being hand-maintained. The exceptions are
+the classes G.988 defines and the stock image has no plugin for: ME 46, and
+the sixteen VoIP classes of G.988 clause 9.9 (SIP over OMCI, answered only
+while `OMCI_POTS_PORTS` is on, docs/SETTINGS.md). They are declared beside
+the generator (`G988_ONLY` and `G988_VOICE` in `tools/mib-tables.py`) and
+emitted with the rest, so regenerating keeps them. `tools/me-drv-map.py`
 shows only 21 of the 81 managed entities reach the driver at all (T-CONT,
 GEM port, bridge port and friends); the other 60 are pure MIB and need no
 driver call.

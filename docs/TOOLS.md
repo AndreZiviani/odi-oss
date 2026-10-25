@@ -182,7 +182,8 @@ the serial number until the kernel reports one (`GPON_SN`), the LOID keys
 all six reported only while `/etc/config/omci-identity.on` exists), and
 `DUAL_MGMT_MODE` and the `OMCI_CUSTOM_*` masks for display only; and, from
 `/etc/config/odi.conf`, `OMCI_UNKNOWN_ME_OK` (its start-up line `unknown
-entities: ...` says which way) `OMCI_PRIVATE_ME` and `OMCI_VEIP`; the VEIP slot (`OMCI_VEIP_SLOT_ID`,
+entities: ...` says which way) `OMCI_PRIVATE_ME`, `OMCI_VEIP` and `OMCI_POTS_PORTS` (its start-up line `phone: ...`
+when on); the VEIP slot (`OMCI_VEIP_SLOT_ID`,
 with bit 256 of `OMCI_CUSTOM_ME`) and the private-entity switch are on the start-up line `VEIP in slot ...`. At every
 Start software download, Activate and Commit from the OLT it reads
 `OLT_SW_DOWNLOAD` from `/etc/config/odi.conf`: accept (the default) answers the
@@ -230,7 +231,7 @@ switch off the report keys do not count) and does the least that applies:
 |---|---|---|
 | nothing | logs `event=reload changed=none` | untouched |
 | only `VLAN_CFG_TYPE`, `VLAN_MANU_MODE`, `VLAN_MANU_TAG_VID`, `VLAN_MANU_TAG_PRI` | tears the bridge connections down and builds them again from the MIB it holds, by the same `bdgconn_rebuild()` the first build uses | stays in O5, nothing re-ranged |
-| `GPON_SN`, `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity switch, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_VEIP_SLOT_ID` (with `OMCI_CUSTOM_ME`), bit 64 of `OMCI_CUSTOM_ME` (with or without VLAN keys) | writes `gpondeact` to `/proc/odi_init`, clears its MIB as a MIB reset does (`event=mib_reset side=local`), holds three seconds, hands the driver the serial number (`gponsn`, only if it changed) and the password (`gponpw`), writes `gponact`, and waits for O5 and the services | deactivated and ranged again; the process is never restarted |
+| `GPON_SN`, `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity switch, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_POTS_PORTS`, `OMCI_VEIP_SLOT_ID` (with `OMCI_CUSTOM_ME`), bit 64 of `OMCI_CUSTOM_ME` (with or without VLAN keys) | writes `gpondeact` to `/proc/odi_init`, clears its MIB as a MIB reset does (`event=mib_reset side=local`), holds three seconds, hands the driver the serial number (`gponsn`, only if it changed) and the password (`gponpw`), writes `gponact`, and waits for O5 and the services | deactivated and ranged again; the process is never restarted |
 
 The re-registration is a state machine advanced by the main loop, so no step
 sleeps: the CLI, the queues and the watchdog ping are served while the ONU is
@@ -728,7 +729,8 @@ on), but the stock daemon wedges on it, so the web UI refuses it outright.
 Secrets in the MIB dump: the username, password and realm of an
 authentication security method (class 148), and the parts of a large string
 (157, which can hold a URL with `user:password@` in it) or an octet string
-(307) are shown as `**` for every byte, in `omcli mib`, `omcicli mib get` and
+(307), and the display name of a SIP user (153, the subscriber's own) are
+shown as `**` for every byte, in `omcli mib`, `omcicli mib get` and
 `mib getattr`. The line keeps its width and its key, so a parser sees the same
 fields; an attribute that was never set still shows its zeros. `--secrets`
 (anywhere on the command line, native or `--vendor`) prints the real bytes.
