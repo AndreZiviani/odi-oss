@@ -89,6 +89,41 @@ struct odi_sw_mc_snoop {
 #define ODI_SW_MC_SNOOP_COPY      1u   /* copy the host port's IGMP to the CPU */
 #define ODI_SW_MC_SNOOP_PON_DROP  2u   /* drop unregistered IPv4 multicast from the PON */
 
+/* ACL probes, odi_switch_acl_probe.h in the kernel tree: hand-installed
+ * rules that count IPv4 frames entering the UNI or the PON port, or copy or
+ * take the IGMP entering the UNI to the CPU. SET and DEL belong to the open
+ * file that set first, until it closes (which removes them all); GET is
+ * open to anyone. */
+struct odi_sw_acl_probe {
+	uint32_t op;            /* ODI_SW_PROBE_SET / _GET / _DEL */
+	uint32_t slot;          /* 0..7, or ODI_SW_PROBE_ALL for a DEL */
+	uint32_t port;          /* 0 the UNI, 2 the PON */
+	uint32_t action;        /* ODI_SW_PROBE_COUNT / _MIRROR / _TRAP */
+	uint32_t bytes;         /* 1: count bytes, 0: frames */
+	uint32_t proto;         /* IPv4 protocol, or ODI_SW_PROBE_ANY */
+	uint32_t dst;           /* IPv4 destination */
+	uint32_t dst_mask;      /* the bits of dst compared */
+	uint32_t in_use;        /* GET: the slot holds a rule */
+	uint32_t entry;         /* its ACL entry */
+	uint32_t counter;       /* its log counter */
+	uint32_t base;          /* the counter when the rule went in */
+	uint32_t now;           /* GET: the counter now */
+	uint32_t cpu_hits;      /* GET: frames the CPU received from this rule */
+	uint32_t cpu_ports;     /* GET: the ports those came in by */
+	uint32_t uni_igmp_other; /* GET: IGMP from the UNI at the CPU, another reason */
+	uint32_t other_reason;  /* GET: the last such reason */
+	uint32_t cpu_bytes;     /* GET: the length of the cpu_hits frames */
+};
+#define ODI_SW_PROBE_SET     1u
+#define ODI_SW_PROBE_GET     2u
+#define ODI_SW_PROBE_DEL     3u
+#define ODI_SW_PROBE_COUNT   1u
+#define ODI_SW_PROBE_MIRROR  2u
+#define ODI_SW_PROBE_TRAP    3u
+#define ODI_SW_PROBE_ANY     0x100u
+#define ODI_SW_PROBE_ALL     0xffffffffu
+#define ODI_SW_PROBE_SLOTS   8u
+
 #define ODI_SW_IOC_REG_GET	0xC0085301U
 #define ODI_SW_IOC_REG_SET	0x80085302U
 #define ODI_SW_IOC_MIB_GET	0xC0105304U
@@ -99,5 +134,6 @@ struct odi_sw_mc_snoop {
 #define ODI_SW_IOC_L2_MC_DEL	0xC01C5309U
 #define ODI_SW_IOC_L2_MODE	0x4008530AU
 #define ODI_SW_IOC_MC_SNOOP	0x8008530BU
+#define ODI_SW_IOC_ACL_PROBE	0xC048530CU
 
 #endif

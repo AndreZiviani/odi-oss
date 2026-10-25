@@ -28,16 +28,27 @@ echo "RUN $*"
 EOF
 cat > "$T/etc/scripts/flash" <<'EOF'
 #!/bin/sh
-# flash get IGMP_SNOOPING: KEY=value, as the real one prints it
-echo "$2=${FAKE_VALUE-}"
+# flash get KEY: KEY=value, as the real one prints it
+case "$2" in
+IGMP_PON_DROP) echo "$2=${FAKE_DROP-}" ;;
+*) echo "$2=${FAKE_VALUE-}" ;;
+esac
 EOF
 chmod +x "$T"/etc/scripts/*
 : > "$T/bin/igmpd"; chmod +x "$T/bin/igmpd"
 
-run() { FAKE_VALUE="$1" sh "$T/svc.sh" 2>&1; }
+run() { FAKE_VALUE="$1" FAKE_DROP="${2-}" sh "$T/svc.sh" 2>&1; }
 
 eq "IGMP_SNOOPING=1 runs igmpd, writing, under respawn.sh" \
    "RUN 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1)"
+# IGMP_PON_DROP: strictly opt-in; only 1 asks for the drop.
+eq "IGMP_PON_DROP=0 snoops without the drop" \
+   "RUN 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1 0)"
+eq "IGMP_PON_DROP=1 drops" \
+   "RUN 0 /var/log/services.log $T/bin/igmpd -w -d" "$(run 1 1)"
+eq "IGMP_PON_DROP=yes is read as off" \
+   "RUN 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1 yes)"
+eq "IGMP_PON_DROP=1 alone does not start the daemon" OFF "$(run "" 1)"
 eq "unset parks" OFF "$(run "")"
 eq "0 parks" OFF "$(run 0)"
 eq "anything but 1 parks" OFF "$(run yes)"
@@ -52,6 +63,7 @@ eq "no binary parks" OFF "$(run 1)"
 
 # The gate is a real key: flash knows it, and init has the entry.
 grep -q 'IGMP_SNOOPING' rootfs/skeleton/etc/scripts/flash && ok "flash lists IGMP_SNOOPING as an odi-only key" || no "flash lists IGMP_SNOOPING"
+grep -q 'IGMP_PON_DROP' rootfs/skeleton/etc/scripts/flash && ok "flash lists IGMP_PON_DROP as an odi-only key" || no "flash lists IGMP_PON_DROP"
 grep -q '^::respawn:/etc/scripts/svc-igmpd.sh$' rootfs/skeleton/etc/inittab && ok "inittab has the respawn entry" || no "inittab has the respawn entry"
 
 echo "$pass ok, $fail failed"

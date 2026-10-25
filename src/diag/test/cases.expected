@@ -43,7 +43,7 @@ help => [help]
 e => [exit]
 vlan get entry 1 => Unrecognized command at word 0
     => (empty)
-?  => 23: [pon get transceiver vendor-name] [pon get transceiver part-number] [pon get transceiver temperature] [pon get transceiver voltage] [pon get transceiver bias-current] [pon get transceiver tx-power] [pon get transceiver rx-power] [pon get transceiver all] [pon get transceiver alarm-status] [pon get transceiver monitoring-type] [pon get transceiver limits] [gpon get onu-state] [gpon get alarm-status] [gpon get flows] [gpon get flow-counters] [mib dump counter port <ports>] [l2-table get all] [l2-table get entry address valid] [l2-table get index <index>] [register get <address> <words>] [register set <address> <value>] [help] [exit]
+?  => 34: [pon get transceiver vendor-name] [pon get transceiver part-number] [pon get transceiver temperature] [pon get transceiver voltage] [pon get transceiver bias-current] [pon get transceiver tx-power] [pon get transceiver rx-power] [pon get transceiver all] [pon get transceiver alarm-status] [pon get transceiver monitoring-type] [pon get transceiver limits] [gpon get onu-state] [gpon get alarm-status] [gpon get flows] [gpon get flow-counters] [mib dump counter port <ports>] [l2-table get all] [l2-table get entry address valid] [l2-table get index <index>] [register get <address> <words>] [register set <address> <value>] [acl-probe count <slot> port <port> proto <proto>] [acl-probe count <slot> port <port> group <group> <length>] [acl-probe bytes <slot> port <port> proto <proto>] [acl-probe bytes <slot> port <port> group <group> <length>] [acl-probe mirror <slot> igmp] [acl-probe mirror <slot> igmp bytes] [acl-probe trap <slot> igmp] [acl-probe trap <slot> igmp bytes] [acl-probe show <slot>] [acl-probe delete <slot>] [acl-probe delete all] [help] [exit]
 ? pon => 11: [pon get transceiver vendor-name] [pon get transceiver part-number] [pon get transceiver temperature] [pon get transceiver voltage] [pon get transceiver bias-current] [pon get transceiver tx-power] [pon get transceiver rx-power] [pon get transceiver all] [pon get transceiver alarm-status] [pon get transceiver monitoring-type] [pon get transceiver limits]
 ? pon get transceiver  => 11: [pon get transceiver vendor-name] [pon get transceiver part-number] [pon get transceiver temperature] [pon get transceiver voltage] [pon get transceiver bias-current] [pon get transceiver tx-power] [pon get transceiver rx-power] [pon get transceiver all] [pon get transceiver alarm-status] [pon get transceiver monitoring-type] [pon get transceiver limits]
 ? pon get transceiver t => 2: [pon get transceiver temperature] [pon get transceiver tx-power]
@@ -62,3 +62,20 @@ pon get transceiver mon => [pon get transceiver monitoring-type]
 pon get transceiver limits => [pon get transceiver limits]
 pon get transceiver l => [pon get transceiver limits]
 pon get transceiver m => [pon get transceiver monitoring-type]
+acl-probe count 0 port 2 proto 2 => [acl-probe count <slot> port <port> proto <proto>] u0=0x0 u1=0x2 u2=0x2
+acl-probe count 1 port 0 group 0xefff4d01 32 => [acl-probe count <slot> port <port> group <group> <length>] u0=0x1 u1=0x0 u2=0xefff4d01 u3=0x20
+acl-probe bytes 2 port 2 group 0xe0000000 4 => [acl-probe bytes <slot> port <port> group <group> <length>] u0=0x2 u1=0x2 u2=0xe0000000 u3=0x4
+acl-probe bytes 3 port 0 proto 2 => [acl-probe bytes <slot> port <port> proto <proto>] u0=0x3 u1=0x0 u2=0x2
+acl-probe mirror 4 igmp => [acl-probe mirror <slot> igmp] u0=0x4
+acl-probe trap 5 igmp => [acl-probe trap <slot> igmp] u0=0x5
+acl-probe trap 5 igmp bytes => [acl-probe trap <slot> igmp bytes] u0=0x5
+acl-probe mirror 4 igmp b => [acl-probe mirror <slot> igmp bytes] u0=0x4
+acl-probe show 5 => [acl-probe show <slot>] u0=0x5
+acl-probe delete 5 => [acl-probe delete <slot>] u0=0x5
+acl-probe delete all => [acl-probe delete all]
+acl-probe d a => [acl-probe delete all]
+acl-probe count 0 port 2 => Incomplete command
+acl-probe count 0 port 2 group 0xe0000000 => Incomplete command
+acl-probe trap 1 => Incomplete command
+? acl-probe => 11: [acl-probe count <slot> port <port> proto <proto>] [acl-probe count <slot> port <port> group <group> <length>] [acl-probe bytes <slot> port <port> proto <proto>] [acl-probe bytes <slot> port <port> group <group> <length>] [acl-probe mirror <slot> igmp] [acl-probe mirror <slot> igmp bytes] [acl-probe trap <slot> igmp] [acl-probe trap <slot> igmp bytes] [acl-probe show <slot>] [acl-probe delete <slot>] [acl-probe delete all]
+? acl-probe delete  => 2: [acl-probe delete <slot>] [acl-probe delete all]
