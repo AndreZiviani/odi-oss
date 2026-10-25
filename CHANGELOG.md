@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- CI: a slow package mirror no longer fails test-qemu. `tools/ci-apt.sh` cut
+  each install of qemu-system-mips off after 5 minutes, so a mirror that was
+  slow but still sending failed all three attempts. An install may now take
+  15 minutes (two attempts; a stalled connection is still caught by apt's
+  30-second read timeout and its own retries), and the test-qemu job may run
+  45 minutes instead of 20 to fit them.
 - igmpd: the upstream IGMP tag, rate and unauthorized-join behaviour the
   OLT's multicast profile asks for (ME 309 attributes 4 to 6 and 15) are now
   applied. When the profile asks for a tag (add, replace the whole tag, or
