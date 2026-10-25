@@ -107,8 +107,36 @@ uint32_t veip_uni_port_mask(uint16_t veipId)
 	return all_eth_uni_mask();
 }
 
+/* The host lane: the SFP's Ethernet side, toward the router, which is the
+ * first Ethernet UNI slot of the capability table. -1 without one. */
+static int host_lane_port(void)
+{
+	uint32_t m = all_eth_uni_mask();
+
+	for (int port = 0; port < 32; port++)
+		if (m & (1u << port))
+			return port;
+	return -1;
+}
+
+/* The switch port an IP host's bridge port stands for. The stock choice is
+ * the CPU port, and that is what it stays while OMCI_POTS_PORTS is 0. With
+ * phone ports on, the IP host the OLT builds a bridge port on is the voice
+ * one, whose SIP client is the router: the host lane. Never the CPU port
+ * toward the fibre either way -- the PON isolation cuts it, and with the key
+ * off no bridge rule is built for an IP host at all. */
+int iphost_switch_port(void)
+{
+	if (!caps_ok)
+		return -1;
+	if (pots_ports)
+		return host_lane_port();
+	return (int)caps_u32(OMCI_CAPS_OFF_CPUPORT);
+}
+
 /* The switch port of an ingress entity: a VEIP is the PON port, an IP
- * host the CPU port, anything else a UNI slot of the capability table.
+ * host what iphost_switch_port() says, anything else a UNI slot of the
+ * capability table.
  * Returns 0xFFFF for "no particular UNI" (the stock all-UNIs-plus-PON
  * sentinel) and -1, fatal for the rule, for an entity in no slot. These
  * are ONU-created, so omci_autonomous[] is checked as well as the store.
@@ -127,7 +155,7 @@ static int ingress_switch_port(int ingress)
 		return (int)caps_u32(OMCI_CAPS_OFF_PONPORT);
 	if (mib_find(OMCI_ME_IP_HOST_CONFIG_DATA, id) ||
 	    instance_is_autonomous(OMCI_ME_IP_HOST_CONFIG_DATA, id))
-		return (int)caps_u32(OMCI_CAPS_OFF_CPUPORT);
+		return iphost_switch_port();
 	return uni_switch_port(id, OMCI_UNI_SLOT_PPTP);
 }
 
@@ -562,6 +590,11 @@ struct ev_ctl {
 	int skip_tagged;         /* the single-tag default rule discards */
 };
 
+/* The two kinds that name the VID a frame carries, the only class 84 rules a
+ * bridge port on the host lane gets for an IP host (lane_rule_ok()). */
+static const char KIND_VID_FILTER[] = "vid-filter";
+static const char KIND_TCI_FILTER[] = "tci-filter";
+
 static int bp_put(struct bp_rule *rules, int n, const char *kind, int vid, int pri)
 {
 	for (int i = 0; i < n; i++)
@@ -672,11 +705,11 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		if (f.tagged != FWD_TAG_PRI && vid == mvid && !tag_from_olt)
 			continue;
 		if (f.tagged == FWD_TAG_VID) {
-			n = bp_put(rules, n, "vid-filter", vid, pbit);
+			n = bp_put(rules, n, KIND_VID_FILTER, vid, pbit);
 			if (n > had)
 				gen_vid_filter_rule(&rules[had].vr, (unsigned)vid, pbit);
 		} else if (f.tagged == FWD_TAG_TCI) {
-			n = bp_put(rules, n, "tci-filter", vid, pri);
+			n = bp_put(rules, n, KIND_TCI_FILTER, vid, pri);
 			if (n > had)
 				gen_vid_filter_rule(&rules[had].vr, (unsigned)vid, pri);
 		} else {
@@ -878,8 +911,8 @@ static int ev_match(const struct omci_class *c171, const struct mib_row *r,
 
 /* Read the table for every ingress into ev_tab. Returns how many ingresses
  * have one that is applied; 0, with ev_bad_why set, when an entry was not
- * a plan. */
-static int ev_build(const int *ingress, const int *bport, int ning)
+ * a plan. An IP host's (`iphost`) is not read here: lane_ev_build(). */
+static int ev_build(const int *ingress, const int *bport, const int *iphost, int ning)
 {
 	const struct omci_class *c171 = find_class(OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA);
 	int active = 0, anygood = 0;
@@ -893,6 +926,8 @@ static int ev_build(const int *ingress, const int *bport, int ning)
 		struct ev_ing *ev = &ev_tab[g];
 		int got = 0;
 
+		if (iphost[g])
+			continue;
 		ev->nrules = ev->ndrops = 0;
 		ev->ctl.skip_untagged = ev->ctl.skip_tagged = 0;
 		for (int pass = 0; pass < 2 && !got; pass++) {
@@ -954,6 +989,108 @@ static void ev_note_bad(void)
 	ev_said_why = ev_bad_why;
 	ev_said_entry = ev_bad_entry;
 	ev_said_inst = ev_bad_inst;
+}
+
+/* ---- an IP host's table, on the host lane
+ *
+ * With OMCI_POTS_PORTS on, the bridge port of an IP host is the host lane
+ * (iphost_switch_port()), and the class 171 instance that names the IP host
+ * (association type 3) or its bridge port (0) says what its frames carry,
+ * the voice VLAN. It is read whatever VLAN_CFG_TYPE says: the manual tag is
+ * the untagged handoff of the data service, which the voice is not. Each
+ * entry is made into what the lane can carry (evtocd_plan_lane()): the router
+ * sends the voice tagged, as the OLT sets it, and nothing that comes in
+ * untagged is taken. The table's default rules and discards are about the IP
+ * host's other frames, which on the lane are other services', so they are
+ * not applied there. One entry that cannot go on the lane leaves the table
+ * out, said once, and the IP host gets the class 84 rules that name a VID
+ * (lane_rule_ok()). */
+#define EXTVLAN_ASSOC_IP_HOST 3
+
+static const char *lane_said_why;
+static int lane_said_entry = -1;
+static uint16_t lane_said_inst;
+
+static int plane_same(const struct evtocd_plane *a, const struct evtocd_plane *b)
+{
+	return a->in == b->in && a->out == b->out && a->op == b->op &&
+	       a->f_vid == b->f_vid && a->f_pri == b->f_pri &&
+	       a->vid == b->vid && a->pri == b->pri;
+}
+
+static int lane_ev_build(struct ev_ing *ev, uint16_t iphost, uint16_t bport)
+{
+	const struct omci_class *c171 = find_class(OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA);
+	int n = 0;
+
+	ev->active = ev->nrules = ev->ndrops = 0;
+	ev->ctl.skip_untagged = ev->ctl.skip_tagged = 0;
+	ev_bad_why = 0;
+	if (!c171)
+		return 0;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		struct mib_row *r = mib_row_at(i);
+		uint32_t type, point;
+
+		if (!r || r->classId != OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA)
+			continue;
+		type = row_u32(r, c171, 1);
+		point = row_u32(r, c171, 7);
+		if ((type == EXTVLAN_ASSOC_IP_HOST && point == iphost) ||
+		    (type == 0 && point == bport))
+			ev_read(c171, r, ev);
+	}
+	ev->ndrops = 0;
+	ev->ctl.skip_untagged = ev->ctl.skip_tagged = 0;
+	/* Made into lane rules in place; entries that become the same rule
+	 * (IPoE and ARP of one VLAN, say) are one. */
+	for (int i = 0; i < ev->nrules && !ev_bad_why; i++) {
+		struct ev_rule *er = &ev->rules[i];
+		const char *why = evtocd_plan_lane(&er->u, &er->dsmode);
+		int k;
+
+		if (why) {
+			ev_bad(why, er->entry, er->inst);
+			break;
+		}
+		for (k = 0; k < n; k++)
+			if (plane_same(&ev->rules[k].u.c, &er->u.c) &&
+			    plane_same(&ev->rules[k].u.s, &er->u.s) &&
+			    ev->rules[k].u.et_n == er->u.et_n &&
+			    ev->rules[k].dsmode == er->dsmode)
+				break;
+		if (k == n)
+			ev->rules[n++] = *er;
+	}
+	if (ev_bad_why) {
+		if (ev_bad_why != lane_said_why || ev_bad_entry != lane_said_entry ||
+		    ev_bad_inst != lane_said_inst)
+			out_fmt("   ext vlan 171/%04x entry %d: IP host %04x rule not applied on the host lane (%s)\n",
+				(long)ev_bad_inst, (long)ev_bad_entry, (long)iphost, ev_bad_why);
+		lane_said_why = ev_bad_why;
+		lane_said_entry = ev_bad_entry;
+		lane_said_inst = ev_bad_inst;
+		ev_bad_why = 0;
+		ev->nrules = 0;
+		return 0;
+	}
+	ev->nrules = n;
+	ev->active = n > 0;
+	return ev->active;
+}
+
+/* Whether a class 84 rule may go on the host lane for an IP host: one that
+ * names the VID, which the router sends tagged. Any other would take frames
+ * of every service the lane carries -- untagged, or tagged with any VID. */
+static int lane_rule_ok(const char *kind)
+{
+	return kind == KIND_VID_FILTER || kind == KIND_TCI_FILTER;
+}
+
+static void lane_refused(uint16_t bp, uint32_t gem, const char *kind, int iphost)
+{
+	out_fmt("   [%s] 47/%04x gem %d rule %s: not for IP host %04x, on the host lane it takes every service's frames\n",
+		apply_hw ? "hw" : "dry", (long)bp, (long)gem, kind, (long)iphost);
 }
 
 /* ---- what one GEM-side bridge port gets of it */
@@ -1168,8 +1305,8 @@ void bdgconn_rebuild(void)
 	const struct omci_class *c281 = find_class(OMCI_ME_MCAST_GEM_IW_TP);
 	const struct omci_class *c84 = find_class(OMCI_ME_VLAN_TAGGING_FILTER_DATA);
 	const struct omci_class *c130 = find_class(OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE);
-	int ingress[8], ingress_bridge[8], ingress_bport[8], ning = 0, added = 0, mvid;
-	int nev = 0;
+	int ingress[8], ingress_bridge[8], ingress_bport[8], ingress_iphost[8];
+	int ning = 0, added = 0, mvid, nev = 0;
 
 	for (int i = 0; i < conn_nservs; i++) {
 		if (apply_hw)
@@ -1187,9 +1324,15 @@ void bdgconn_rebuild(void)
 		if (!r || r->classId != OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 			continue;
 		tp = row_u32(r, c47, 3);
-		if ((tp == 1 || tp == 11) && ning < 8) { /* Ethernet UNI, VEIP */
+		/* Ethernet UNI, VEIP; and with phone ports on, an IP host, whose
+		 * bridge port is the host lane (iphost_switch_port()). Off, an IP
+		 * host's bridge port gets no rule, as in the stock stack, where it
+		 * is the CPU port and the PON isolation cuts it anyway. */
+		if ((tp == 1 || tp == 11 || (tp == MBPCD_TP_IP_HOST && pots_ports)) &&
+		    ning < 8) {
 			ingress_bridge[ning] = (int)row_u32(r, c47, 1);
 			ingress_bport[ning] = r->inst;
+			ingress_iphost[ning] = tp == MBPCD_TP_IP_HOST;
 			ingress[ning++] = (int)row_u32(r, c47, 4);
 		}
 	}
@@ -1208,7 +1351,7 @@ void bdgconn_rebuild(void)
 		if (mvid < 0) {
 			/* The one shape was not there; the whole table, entry by
 			 * entry, may still be. */
-			nev = ev_build(ingress, ingress_bport, ning);
+			nev = ev_build(ingress, ingress_bport, ingress_iphost, ning);
 			if (nev)
 				olt_note(0);
 			else if (ev_bad_why)
@@ -1217,6 +1360,9 @@ void bdgconn_rebuild(void)
 				olt_note(why);
 		}
 	}
+	for (int g = 0; g < ning; g++)
+		if (ingress_iphost[g])
+			lane_ev_build(&ev_tab[g], (uint16_t)ingress[g], (uint16_t)ingress_bport[g]);
 	/* Service ids are classifier priority. OEM installs the configured
 	 * untagged service first, the other unicast services in reverse MIB order,
 	 * and the broad downstream multicast rule last. */
@@ -1348,6 +1494,10 @@ void bdgconn_rebuild(void)
 					continue;
 				if (use_ev && ev_tab[g].active)
 					continue;
+				if (ingress_iphost[g] && !lane_rule_ok(rules[k].kind)) {
+					lane_refused(r->inst, port, rules[k].kind, ingress[g]);
+					continue;
+				}
 				id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rules[k].vr);
 				if (id >= 0 && conn_nservs < SERV_MAX) {
 					conn_servs[conn_nservs++] = id;
@@ -1387,6 +1537,10 @@ void bdgconn_rebuild(void)
 				for (int k = 0; k < nrest; k++) {
 					int id;
 
+					if (ingress_iphost[g] && !lane_rule_ok(rest[k].kind)) {
+						lane_refused(r->inst, port, rest[k].kind, ingress[g]);
+						continue;
+					}
 					out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
 						apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
 						rest[k].kind, (long)rest[k].vid, (long)rest[k].pri);

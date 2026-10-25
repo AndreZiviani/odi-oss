@@ -453,6 +453,7 @@ void uni_start(void);
 /* apply_bridge.c */
 uint32_t veip_uni_port_mask(uint16_t veipId);
 uint32_t all_eth_uni_mask(void);
+int iphost_switch_port(void);
 void cli_row(const struct mib_row *r, int secrets);
 void v_banner(const struct omci_class *c);
 int vendor_row_exists(const struct omci_class *c);

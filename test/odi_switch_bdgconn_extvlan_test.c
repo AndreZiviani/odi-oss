@@ -771,6 +771,62 @@ int main(void)
 		}
 	}
 
+	/* The voice of an IP host on the host lane (OMCI_POTS_PORTS): omcid sends
+	 * its rules with the UNI alone in uni_mask. The same rule with the CPU
+	 * bit added -- what the stock choice, an IP host on the CPU port, would
+	 * send -- must not reach the CPU either: nothing from the fibre does. */
+	puts("an IP host's voice on the host lane, and never the CPU port:");
+	{
+		static const uint32_t masks[2] = { 1U, 1U | (1U << ODI_SW_CPU_PORT) };
+		unsigned int m;
+
+		for (m = 0; m < 2; m++) {
+			struct evtocd_entry t;
+			struct evtocd_plan u, dp;
+			struct omci_vlan_oper vr;
+			struct omci_bdgconn b;
+			uint8_t dsm = EVTOCD_DSMODE_INVERSE;
+			const char *dwhy = 0;
+			int uid, did, vlan_ok = 0;
+			unsigned int i;
+
+			build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  5, 200, 4);
+			evtocd_decode(e, &t);
+			ok(!evtocd_plan(&t, 0x8100, 0x8100, &u) && !evtocd_plan_lane(&u, &dsm) &&
+			   evtocd_plan_ds(&u, dsm, &dp, &dwhy) == 1,
+			   "untagged -> C-VID 200 pri 5, made a rule of the host lane");
+			evtocd_plan_oper(&u, &vr);
+			bdg_conn(&b, next_id, OMCI_DIR_US, masks[m], 4, 5, &vr);
+			uid = next_id++;
+			ok(odi_switch_cmd(51, &b, sizeof b) == 0, "its upstream leg is accepted");
+			evtocd_plan_oper(&dp, &vr);
+			bdg_conn(&b, next_id, OMCI_DIR_DS, masks[m], 4, 5, &vr);
+			did = next_id++;
+			ok(odi_switch_cmd(51, &b, sizeof b) == 0, "and its downstream leg");
+			r = row_of(uid, 0);
+			d = W1_CT | W1_VID(200) | UNI0;
+			care = CARE_US_BASE | VIDM;
+			ok_row("upstream: C-VID 200 from the UNI, any priority -> VID 200 pri 5",
+			       RULE(d), MASK(care, d),
+			       (1U << 21) | (1U << 18) | (5U << 15) | (200U << 3) | (1U << 1),
+			       US_FLOW | S_TRANSP, r);
+			r = row_of(did, 1);
+			d = W1_DS | W1_CT | W1_VID(200);
+			care = CARE_DS_BASE | VIDM;
+			ok_row("downstream: C-VID 200 keeps its tag and priority, to the UNI alone",
+			       RULE(d), MASK(care, d), (1U << 18) | (200U << 3) | (1U << 1) | DS_FWD_A1,
+			       DS_FWD_A2 | S_TRANSP, r);
+			for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++)
+				if (odi_sw_bdgconn[i].used && odi_sw_bdgconn[i].serv_id == uid)
+					vlan_ok = odi_sw_bdgconn[i].vlan_vid == 200U &&
+						  odi_sw_bdgconn[i].vlan_val ==
+						  ODI_SW_VLAN_ROW(1U | (1U << ODI_SW_PON_PORT), 0);
+			ok(vlan_ok, "VLAN 200: the UNI and the PON, tagged; not the CPU port");
+			release(uid);
+			release(did);
+		}
+	}
+
 	puts("what the driver refuses:");
 	{
 		struct evtocd_plan p;

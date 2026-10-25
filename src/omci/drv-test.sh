@@ -159,6 +159,104 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	rm -f /var/config/odi.conf
 fi
 
+# ------------------------------------------------ the voice path (OMCI_POTS_PORTS)
+#
+# The ISP1 session, then a voice session (test/fixtures/omci-session-voice.txt,
+# written by hand: no line provisions voice): IP host 1 in a bridge of its
+# own with one GEM port that admits VID 200, and a class 171 instance on the
+# IP host that tags its untagged frames with VLAN 200 priority 5. With phone
+# ports on, the IP host's bridge port is the host lane (switch port 0, the
+# router's side), never the CPU port: the router sends and gets the voice
+# tagged 200, and the voice rules match only frames tagged 200, so none of
+# the data service's untagged frames is taken. The golden is the whole run,
+# call for call. With the key off, the IP host gets no bridge rule at all,
+# as before: the bridge connections are the ISP1 ones exactly.
+voice_run() {   # voice_run <name> <key> <voice session file>
+	log=/tmp/omcid-drv-voice-$1.log
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	printf 'OMCI_POTS_PORTS=%s\n' "$2" > /var/config/odi.conf
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	cat "$FIX/omci-session-isp1.txt" "$3" > /tmp/session-voice-$1.txt
+	$Q cli/build/omcli --inject-file /tmp/session-voice-$1.txt > /tmp/inject-voice-$1.txt 2>&1
+	finish "$log"
+	rm -f /var/config/odi.conf
+	grep '^drv ' "$log" > /tmp/omci-drv-voice-$1.txt
+}
+vchk() { if [ "$2" = "$3" ]; then echo "ok    $1"; else echo "FAIL  $1: '$2', want '$3'"; fail=$((fail + 1)); fi; }
+# The uni_mask word of every cmd 51 (descriptor bytes 12-15), one per line.
+unimasks() { sed -n 's/^drv 51 160 .\{24\}\(.\{8\}\).*/\1/p' "$1"; }
+
+voice_run on 1 "$FIX/omci-session-voice.txt"
+want=$FIX/omci-drv-golden-voice.txt
+frames=$(cat "$FIX/omci-session-isp1.txt" "$FIX/omci-session-voice.txt" | grep -c '^[0-9a-f]')
+if ! grep -q "injected $frames frames" /tmp/inject-voice-on.txt; then
+	echo "FAIL  voice: omcli did not inject all $frames frames"
+	fail=$((fail + 1))
+elif [ "${UPDATE:-0}" = 1 ]; then
+	cp /tmp/omci-drv-voice-on.txt "$want"
+	echo "updated $want ($(wc -l < "$want") driver calls)"
+elif cmp -s "$want" /tmp/omci-drv-voice-on.txt; then
+	echo "ok    voice: $(wc -l < "$want") driver calls identical ($frames frames)"
+else
+	echo "FAIL  voice: driver calls differ from $want"
+	diff "$want" /tmp/omci-drv-voice-on.txt | head -40
+	keep_log "$log" drv-test-voice.log
+	fail=$((fail + 1))
+fi
+if [ "${UPDATE:-0}" != 1 ]; then
+	# The rules of IP host 0001 on GEM port 1600: the IP host's table made
+	# a lane rule (upstream, then downstream), then the class 84 VID 200
+	# filter, all three on the UNI alone (unimask 1).
+	vchk "voice: the IP host's rules are on the host lane alone" \
+	     "$(sed -n 's/.*\] bdgconn ingress 0001 gem 1600 dir \([0-9]\) serv [0-9]* us [0-9]* ds [0-9]* unimask \([0-9]*\) .*/dir \1 unimask \2/p' "$log" | tr '\n' ' ')" \
+	     "dir 1 unimask 1 dir 2 unimask 1 dir 3 unimask 1 "
+	vchk "voice: the lane rule matches C-VID 200, no untagged frame" \
+	     "$(grep -c 'rule ext-vlan vid 200 pri -1$' "$log")" 1
+	vchk "voice: no bridge rule names the CPU port (bit 3)" \
+	     "$(unimasks /tmp/omci-drv-voice-on.txt | grep -c '[89a-f]$')" 0
+	cp "$log" /tmp/omcid-drv-voice-on-kept.log
+
+	# Off: the same sessions, and not one bridge rule more than ISP1 has.
+	voice_run off 0 "$FIX/omci-session-voice.txt"
+	vchk "voice, key off: the IP host gets no bridge rule" \
+	     "$(grep -c 'bdgconn ingress 0001 ' "$log")" 0
+	vchk "voice, key off: the bridge connections are the ISP1 ones, byte for byte" \
+	     "$(grep '^drv 5[01] ' /tmp/omci-drv-voice-off.txt | cksum)" \
+	     "$(grep '^drv 5[01] ' "$FIX/omci-drv-golden-isp1.txt" | cksum)"
+	# The voice rules come first in the service order (the classifier
+	# priority, reverse MIB order), so the data rules move to other ids;
+	# what they are does not change.
+	data_rules() {
+		grep -e '\] bdgconn ingress' -e '\] 47/[0-9a-f]* gem [0-9]* rule ' "$1" |
+			grep -v ' gem 1600 ' | sed 's/ serv [0-9]*//' | sort
+	}
+	vchk "voice: the data service rules are the ones of the key off" \
+	     "$(data_rules /tmp/omcid-drv-voice-on-kept.log | cksum)" "$(data_rules "$log" | cksum)"
+
+	# No class 171 on the IP host: the class 84 filter alone, VID 200
+	# tagged both ways.
+	grep -v '^0c0[89a]' "$FIX/omci-session-voice.txt" > /tmp/voice-no171.txt
+	voice_run no171 1 /tmp/voice-no171.txt
+	vchk "voice, no class 171: the VID 200 filter alone, on the host lane" \
+	     "$(sed -n 's/.*\] bdgconn ingress 0001 gem 1600 dir \([0-9]\) .* unimask \([0-9]*\) .*/dir \1 unimask \2/p' "$log" | tr '\n' ' ')" \
+	     "dir 3 unimask 1 "
+
+	# A GEM side that forwards everything (no class 84) and no class 171:
+	# on the lane that rule would take the data service's untagged frames
+	# (with ISP1's manual tag it is the add-tag rule), so the IP host gets
+	# none, and says why.
+	grep -v '^0c0[789a]' "$FIX/omci-session-voice.txt" > /tmp/voice-open.txt
+	voice_run open 1 /tmp/voice-open.txt
+	vchk "voice, no VLAN filter: nothing for the IP host on the lane" \
+	     "$(grep -c 'bdgconn ingress 0001 ' "$log")" 0
+	vchk "voice, no VLAN filter: the log says why" \
+	     "$(grep -c 'rule manual-add: not for IP host 0001, on the host lane' "$log")" 1
+	vchk "voice, no VLAN filter: no rule names the CPU port" \
+	     "$(unimasks /tmp/omci-drv-voice-open.txt | grep -c '[89a-f]$')" 0
+fi
+
 # ------------------------------------------------ Alloc-IDs from this OLT
 #
 # The T-CONT Alloc-IDs come from the OLT, never from a table: set over OMCI

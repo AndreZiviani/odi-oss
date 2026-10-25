@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- omcid: with `OMCI_POTS_PORTS` on, the voice an OLT provisions now reaches
+  the router. The OLT carries it on an IP host; the bridge port it builds on
+  that IP host is now the stick's host port, toward the router, instead of
+  the stick's own CPU port, where the voice went nowhere. The voice VLAN
+  reaches the router tagged, as the OLT sets it, and the router's SIP client
+  sends it tagged the same way. A rule that would tag the IP host's untagged
+  frames is matched on that VLAN instead, so it cannot take the data
+  service's untagged frames; a rule that would match every untagged or every
+  tagged frame is not installed, and the log says why. The stick itself is
+  still unreachable from the fibre. With the key off nothing changes: a
+  bridge port on an IP host gets no rule, as before. Experimental: no OLT
+  that offers voice has been tried yet.
 - omcid: `OMCI_POTS_PORTS=1` or `2` now tells the OLT of that many phone
   ports, so an OLT that offers voice can provision a SIP line on each for the
   router behind the stick to register: a POTS circuit pack in the first free
@@ -13,7 +25,7 @@ listed here.
   data, which offers SIP over OMCI only. The stick has no phone socket and
   says so: the line status reads "config done" once the OLT has provisioned a
   line, never "registered"; a line test is refused; no voice alarm is raised.
-  The voice traffic itself does not reach the router yet. Off (the default),
+  Off (the default),
   the MIB upload is the stock one, record for record. Experimental: not yet
   run against an OLT that offers voice. Changing either key re-registers the
   ONU.
