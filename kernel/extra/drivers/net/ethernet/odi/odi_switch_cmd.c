@@ -763,21 +763,26 @@ static int cmd_pri_queue_del(void *buf, uint32_t len)
 	return 0;
 }
 
-/* cmd 0: a MIB reset, the upstream half (uapi/omci_gemflow.h). Every
- * upstream flow is deleted as cmd 25 ena 0 deletes one (GEM 0, not valid,
- * the PBO thresholds for one flow fewer), then every queue cmd 23 put on a
- * data T-CONT as cmd 24 deletes one (drained, out of the T-CONT's mask, the
+/* cmd 0: a MIB reset (uapi/omci_gemflow.h). Every upstream flow is
+ * deleted as cmd 25 ena 0 deletes one (GEM 0, not valid, the PBO
+ * thresholds for one flow fewer), then every queue cmd 23 put on a data
+ * T-CONT as cmd 24 deletes one (drained, out of the T-CONT's mask, the
  * T-CONT disabled with its last queue), and every T-CONT block is freed.
- * After it, cmd 21 reserves on an empty group again. The stock driver's
- * MIB reset (pf_rtl96xx_ResetMib) does this and more: it resets every flow
- * and destroys the logical T-CONTs, and omci_app sends it on an OLT MIB
- * reset. Without it a new provisioning met the old one's queue blocks, and
- * its flows stayed valid. Left alone: the Alloc-ID CAM (PLOAM's, G.984.3
- * 5.5.4), the OMCC (T-CONT 16, flow 64), the downstream GEM rows (no
- * downstream delete here; the bridge connections that forward them are
- * omcid's to take down) and the bridge connections themselves.
+ * After it, cmd 21 reserves on an empty group again. Every downstream flow
+ * cmd 25 created goes too, as cmd 25 ena 0 deletes one (its CAM row
+ * cleared and read back clear): omcid forgets them with the MIB, and a row
+ * the next provisioning does not write again would keep delivering a GEM
+ * port the OLT no longer provisions. A row that does not read back clear
+ * stays recorded (and logged), and does not stop the rest. The stock
+ * driver's MIB reset (pf_rtl96xx_ResetMib) also resets every flow and
+ * destroys the logical T-CONTs, and omci_app sends it on an OLT MIB reset.
+ * Without it a new provisioning met the old one's queue blocks, and its
+ * flows stayed valid. Left alone: the Alloc-ID CAM (PLOAM's, G.984.3
+ * 5.5.4), the OMCC (T-CONT 16, flow 64, GEM row 64) and the bridge
+ * connections, which are omcid's to take down.
  */
 static int us_flow_delete(uint32_t slot);
+static int ds_flow_delete(uint32_t idx);
 
 static int cmd_mib_reset(void *buf, uint32_t len)
 {
@@ -789,6 +794,9 @@ static int cmd_mib_reset(void *buf, uint32_t len)
 	odi_switch_bdgconn_ds_pri_clear();
 	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
 		(void)us_flow_delete(i);
+	for (i = 0; i < ODI_SW_CMD_GEM_DS_MAX; i++)
+		if (flow_used(odi_sw_gem_ds_used, i))
+			(void)ds_flow_delete(i);
 	for (t = 0; t < ODI_SW_PONQ_TCONTS; t++) {
 		struct odi_sw_tcont_slot *s = &odi_sw_tcont[t];
 
@@ -895,6 +903,40 @@ static int us_flow_delete(uint32_t slot)
 	odi_sw_sid2qid[slot] = ODI_SW_SID_UNMAPPED;
 	if (slot < OMCI_FLOWS_MAX)
 		odi_sw_gem_us_gem[slot] = 0;
+	if (odi_sw_flow_ops && odi_sw_flow_ops->del)
+		odi_sw_flow_ops->del(1, slot);
+	return 0;
+}
+
+/* cmd 25 downstream with ena 0: the flow taken out, as the stock driver's
+ * flow delete does it (dal_rtl9602c_gpon_dsGemPort_del, read, not copied):
+ * the CAM row cleared and the flow type word 0, here also read back clear
+ * (odi_sw_gpon_ds_flow_del()). Only then is the flow forgotten: its
+ * readback row, its priority on the bridge connections' downstream rows
+ * and its counters. A row that did not read back clear is an error, and
+ * the flow stays recorded, so omcid keeps the id and retries; a row given
+ * to another port before it read clear could leave that port, or this
+ * one, in the CAM twice. A flow id not in use is cleared all the same: a
+ * row 0..63 is cmd 25's alone (the OMCC is row 64), and clearing an empty
+ * row costs two requests.
+ */
+static int ds_flow_delete(uint32_t idx)
+{
+	int rc;
+
+	if (idx >= ODI_SW_CMD_GEM_DS_MAX)
+		return ODI_SW_EOPNOTSUPP;
+	rc = odi_sw_gpon_ds_flow_del(idx);
+	if (rc)
+		return rc;
+	odi_sw_gem_ds_used[idx / 32U] &= ~(1U << (idx % 32U));
+	if (idx < OMCI_FLOWS_MAX) {
+		odi_sw_gem_ds_gem[idx] = 0;
+		odi_sw_gem_ds_cfg[idx] = 0;
+	}
+	odi_switch_bdgconn_ds_pri_set(idx, -1);
+	if (odi_sw_flow_ops && odi_sw_flow_ops->del)
+		odi_sw_flow_ops->del(0, idx);
 	return 0;
 }
 
@@ -945,17 +987,10 @@ static int cmd_gem_flow(void *buf, uint32_t len)
 		uint32_t idx = g->flow_id;
 		uint32_t traffic_cfg = g->mcast_filter ? 3U : 2U;
 
+		if (!g->ena)
+			return ds_flow_delete(idx);
 		if (idx >= ODI_SW_CMD_GEM_DS_MAX)
 			return ODI_SW_EOPNOTSUPP;
-		/* omcid never deletes a downstream flow, and this driver has
-		 * no downstream delete: refused rather than taken for a
-		 * create.
-		 */
-		if (!g->ena) {
-			ODI_SW_WARN("cmd 25: downstream flow %u delete not implemented\n",
-				    (unsigned int)idx);
-			return ODI_SW_EOPNOTSUPP;
-		}
 		/* A CAM write that did not complete is no flow: omcid does
 		 * not claim it on a nonzero return, and neither does this
 		 * table.

@@ -315,6 +315,29 @@ static void test_clear(void)
 	      "the flows and their totals are gone");
 }
 
+/* One flow deleted (cmd 25 with ena 0): no longer read or shown, its
+ * totals gone, and the other flows go on.
+ */
+static void test_del(void)
+{
+	start();
+	odi_gpon_flows_set(&f, DS, 1, 1434U);
+	odi_gpon_flows_set(&f, DS, 2, 4000U);
+	odi_gpon_flows_set(&f, US, 4, 1562U);
+	ds_set(2, 10U, 100U, 10U, 10U);
+	odi_gpon_flows_sample(&f);
+	CHECK(odi_gpon_flows_del(&f, DS, 2) == 0, "a downstream flow is deleted");
+	CHECK(odi_gpon_flows_del(&f, US, 4) == 0, "an upstream flow is deleted");
+	memset(touched, 0, sizeof(touched));
+	odi_gpon_flows_sample(&f);
+	CHECK(!touched[0][2] && !touched[1][4], "neither is read after its delete");
+	CHECK(touched[0][1] == 4U, "the other flow still is");
+	CHECK(!f.ds[2].active && f.ds[2].gem_frames == 0 && !f.us[4].active,
+	      "the deleted flows and their totals are gone");
+	CHECK(odi_gpon_flows_del(&f, DS, ODI_GPON_FLOWS_DS) == -1, "a DS index past the table");
+	CHECK(odi_gpon_flows_del(&f, (enum odi_gpon_flow_dir)7, 0) == -1, "an unknown direction");
+}
+
 static void test_bad_index(void)
 {
 	start();
@@ -475,6 +498,7 @@ int main(int argc, char **argv)
 	test_only_active_flows_are_read();
 	test_flow_created_again();
 	test_clear();
+	test_del();
 	test_bad_index();
 	test_ack_is_bounded();
 	test_saturation();

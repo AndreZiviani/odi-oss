@@ -388,9 +388,16 @@ commands, from the command table of the shipped binary:
 - **cmd 25** downstream is the DS GEM port CAM row and its
   `DSF_GEM_FLOW_TYPE` word (FLAGS 2, Ethernet, plus bit 0, multicast, when
   omcid sets `mcast_filter`: the GEM port of a multicast GEM interworking TP,
-  as the stock OMCI layer flags it; ISP1's is 0xfff, ISP2's 0xffe), plus the slot record the AES path reads (below). `ena` 0 (a
-  delete) is refused downstream: omcid never sends one and the driver has
-  no downstream delete. The upstream side is below.
+  as the stock OMCI layer flags it; ISP1's is 0xfff, ISP2's 0xffe), plus the slot record the AES path reads (below). `ena` 0 is
+  a delete, as the stock driver reads it: the flow type word goes to 0,
+  the CAM row is cleared (MODE 3) and read back (MODE 2), and only a row
+  that reads back clear forgets the flow (its slot record, its readback
+  row, its downstream priority, its counters); otherwise the command
+  fails and the flow stays recorded for omcid to retry. omcid sends it
+  for a multicast GEM port no row names any more, and cmd 0, the MIB
+  reset, deletes every downstream flow the same way.
+  `/proc/odi_gpon/cam` reads the rows back (`gem_cam`). The upstream side
+  is below.
 
 - **cmd 10**: one SFF-8472 DDM word, for the ANI-G Test result. omcid
   sends `{type, data[32]}` with the type (2 temperature, 3 supply voltage,
@@ -695,8 +702,9 @@ on queue 64) before any OMCI.
 - **cmd 0** (the stock resetMib, the first of the stock command enum)
   empties the upstream state: every upstream flow deleted as cmd 25 `ena`
   0 does, every queue of a data T-CONT deleted as cmd 24 does, every
-  T-CONT block freed. The Alloc-ID CAM (PLOAM's), the OMCC (T-CONT 16,
-  flow 64), the downstream GEM rows and the bridge connections are left.
+  T-CONT block freed. Every downstream flow goes as well, as cmd 25 `ena`
+  0 deletes one. The Alloc-ID CAM (PLOAM's), the OMCC (T-CONT 16, flow
+  64, GEM row 64) and the bridge connections are left.
   omcid sends it on a MIB reset (the OLT's, the CLI's, a re-registration)
   and when it starts again in the same boot without resuming, so the next
   provisioning never meets the last one's queue blocks or flows.

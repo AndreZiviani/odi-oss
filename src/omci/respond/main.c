@@ -356,14 +356,14 @@ int main(int argc, char **argv)
 		for (int id = 0; id < SERV_MAX; id++)
 			omci_deactiveBdgConn((uint32_t)id);
 		out_fmt("restart: %d bridge connection ids cleared\n", (long)SERV_MAX);
-		/* And the upstream T-CONTs, queues and flows the last omcid
-		 * programmed: this one starts with none of them in its tables,
-		 * and would otherwise meet their queue blocks and keep their
-		 * flows valid (odi_switch_cmd.c, command 0). */
+		/* And the T-CONTs, queues and flows (upstream and downstream)
+		 * the last omcid programmed: this one starts with none of them
+		 * in its tables, and would otherwise meet their queue blocks
+		 * and keep their flows valid (odi_switch_cmd.c, command 0). */
 		{
 			uint8_t none[4] = { 0, 0, 0, 0 };
 
-			out_fmt("restart: upstream reset -> %d\n",
+			out_fmt("restart: flow reset -> %d\n",
 				(long)omci_drv_call(OMCI_MIB_RESET_CMD, none, sizeof none));
 		}
 	}
