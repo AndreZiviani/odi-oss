@@ -10,11 +10,17 @@
  * nobody on the UNI joined stays off the UNI link. Without -d the PON keeps
  * flooding.
  *
+ * When the profile asks for what the switch cannot do on its own (an
+ * upstream IGMP tag, a rate, the discard of joins outside its lists), the
+ * copy becomes a take: the switch hands the report to the CPU and forwards
+ * nothing, and this daemon sends each message up itself, tagged as the
+ * profile says, or withholds it (uplink.h).
+ *
  * What it never does: receive a frame from the fibre. The copy is made only
  * for frames entering the UNI port, the OLT's queries are not copied and not
  * needed (the host answers them by itself, the PON is a member of every
- * row, and the answers are the reports this daemon sees), and nothing here
- * transmits.
+ * row, and the answers are the reports this daemon sees). The one thing it
+ * transmits is the host's own report, taken, toward the OLT.
  *
  * The lease is the descriptor of /dev/odi_sw this process holds: if the
  * daemon dies, the switch goes back to flooding and the rows it wrote are
@@ -34,6 +40,7 @@
 #include "state.h"
 #include "status.h"
 #include "replay.h"
+#include "uplink.h"
 #include "../omci/nl.h"
 #include "../omci/redirect_guard.h"
 
@@ -339,7 +346,7 @@ static void settle_lease(struct igmp_db *db, uint32_t want, uint32_t now)
 /* The join and refusal counts the state file last carried: reports that
  * change nothing still count, and the file follows them once a second at
  * most. */
-static uint32_t state_joins, state_refusals;
+static uint32_t state_joins, state_refusals, state_up;
 
 static uint32_t refusal_total(const struct igmp_db *db)
 {
@@ -350,6 +357,13 @@ static uint32_t refusal_total(const struct igmp_db *db)
 	return t;
 }
 
+/* The way-up counts move with every taken message, a refresh included; the
+ * file follows them at most once a second, like the joins. */
+static uint32_t up_total(const struct igmp_db *db)
+{
+	return db->up_sent + db->up_withheld + db->up_limited + db->up_unsent;
+}
+
 static void write_state(const struct igmp_db *db)
 {
 	static char buf[IGMP_STATE_MAX];
@@ -358,6 +372,7 @@ static void write_state(const struct igmp_db *db)
 
 	state_joins = db->joins;
 	state_refusals = refusal_total(db);
+	state_up = up_total(db);
 	if (!n || !igmp_hw_enabled())
 		return;
 	fd = sys_create(IGMP_STATE_TMP_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -430,8 +445,134 @@ void igmpd_tick(struct igmp_db *db, uint32_t now, int first)
 		resync_at = now + 5;
 		resync(db);
 	}
-	if (changes || db->joins != state_joins || refusal_total(db) != state_refusals)
+	if (changes || db->joins != state_joins || refusal_total(db) != state_refusals ||
+	    up_total(db) != state_up)
 		write_state(db);
+}
+
+/* ---- the way up, for a report the switch took (uplink.h) ---------- */
+
+static struct igmp_up_rate up_rate;
+
+static void out_tci(uint16_t tci)
+{
+	out_fmt("vid %d pri %d", tci & 0x0fff, tci >> 13);
+}
+
+/* The tags of a frame, as a route request carries them. */
+static void route_tags(struct odi_sw_mc_route *r, const struct igmp_up_tags *t)
+{
+	r->ethertype = t->ethertype;
+	r->stag = (uint32_t)t->stag;
+	r->svid = t->stci & 0x0fffu;
+	r->spri = (uint32_t)t->stci >> 13;
+	r->ctag = (uint32_t)t->ctag;
+	r->cvid = t->ctci & 0x0fffu;
+	r->cpri = (uint32_t)t->ctci >> 13;
+}
+
+/* Send one taken message up as the profile says, or say why it is not.
+ * `say`: the frame was described (a dry run, a change, an error), so the
+ * outcome is said too; a refresh that went up, or was withheld again, says
+ * nothing but its count. A message that should have gone up and could not
+ * is always said. Returns whether the message went up (in a dry run: would
+ * have). */
+static int uplink(struct igmp_db *db, const struct igmp_rx *rx,
+		  enum igmp_parse_rc prc, uint32_t now, int say)
+{
+	static uint8_t frame[IGMP_UP_MAX_FRAME];
+	struct odi_sw_mc_route r;
+	struct igmp_up_tags t;
+	enum igmp_up_verdict v;
+	uint32_t ctl = pol.us_tag_control, n = 0;
+	uint16_t vid = 0;
+	uint8_t pri = 0;
+	int all_refused = prc == IGMP_OK && db->rx_acl_refused && !db->rx_passable;
+
+	/* A message that did not parse is not judged by the lists (it named
+	 * no group this daemon could read), but it is still the host's IGMP,
+	 * which the switch would have forwarded: it goes up like any other,
+	 * under the same tag and rate. */
+	v = igmp_up_decide(&pol, prc == IGMP_OK ? rx->type : 0, all_refused, &up_rate, now);
+	if (v != IGMP_UP_SEND) {
+		/* Counted, and said with the frame: a set-top box asking
+		 * again for a refused group does so every query interval. */
+		if (v == IGMP_UP_RATE)
+			db->up_limited++;
+		else
+			db->up_withheld++;
+		if (say)
+			out_fmt("  up: %s\n", igmp_up_verdict_str(v));
+		return 0;
+	}
+	if (!igmp_up_read_tags(rx->eth, rx->eth_len, &t)) {
+		db->up_unsent++;
+		out("  up: not sent: the frame is too short for its tags\n");
+		return 0;
+	}
+	for (unsigned i = 0; i < sizeof r; i++)
+		((uint8_t *)&r)[i] = 0;
+	route_tags(&r, &t);
+	if (ctl >= IGMP_US_TAG_ADD && ctl <= IGMP_US_TAG_VID) {
+		n = igmp_up_retag(rx->eth, rx->eth_len, ctl, (uint16_t)pol.us_tci,
+				  frame, sizeof frame, &vid, &pri);
+		if (!n) {
+			db->up_unsent++;
+			out("  up: not sent: the tagged frame does not fit\n");
+			return 0;
+		}
+		r.mode = ODI_SW_MC_ROUTE_TAG;
+		r.want_vid = vid;
+		r.want_pri = pri;
+	} else {
+		r.mode = ODI_SW_MC_ROUTE_FRAME;
+	}
+
+	if (!igmp_hw_enabled()) {
+		db->up_sent++;
+		if (r.mode == ODI_SW_MC_ROUTE_TAG)
+			out_fmt("  up: send with vid %d pri %d (tag control %d)  (not sent)\n",
+				vid, pri, ctl);
+		else
+			out("  up: send as the switch tags it (tag control 0)  (not sent)\n");
+		return 1;
+	}
+	if (igmp_hw_route(&r)) {
+		db->up_unsent++;
+		return 0;
+	}
+	if (r.verdict != ODI_SW_US_FWD) {
+		db->up_unsent++;
+		out_fmt("  up: not sent: %s\n", r.verdict == ODI_SW_US_DISCARD ?
+			"the extended VLAN rules discard it" :
+			"no upstream row takes it (the switch would have dropped it)");
+		return 0;
+	}
+	if (r.mode == ODI_SW_MC_ROUTE_FRAME) {
+		n = igmp_up_treat(rx->eth, rx->eth_len, &r, frame, sizeof frame);
+		if (!n) {
+			db->up_unsent++;
+			out_fmt("  up: not sent: row %d treats the tags in a way not done here\n",
+				r.row);
+			return 0;
+		}
+	}
+	if (igmp_hw_send(frame, n, r.flow)) {
+		db->up_unsent++;
+		return 0;
+	}
+	db->up_sent++;
+	if (say) {
+		struct igmp_up_tags o;
+
+		out_fmt("  up: sent on flow %d (row %d", r.flow, r.row);
+		if (igmp_up_read_tags(frame, n, &o) && (o.stag || o.ctag)) {
+			out(", ");
+			out_tci(o.stag ? o.stci : o.ctci);
+		}
+		out(")\n");
+	}
+	return 1;
 }
 
 /* One redirect payload, prefix included, NLMSG header already removed. */
@@ -441,8 +582,9 @@ void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
 	static struct igmp_change ch[MAX_CHANGES];
 	struct igmp_rx rx;
 	enum igmp_parse_rc prc = igmp_parse(payload, len, &rx);
-	int changes = 0;
+	int changes = 0, say;
 
+	db->rx_acl_refused = db->rx_passable = 0;
 	/* Only while snooping: a copy that arrives after the
 	 * policy said stop is not state to keep. */
 	if (prc == IGMP_OK && pol.snooping)
@@ -451,13 +593,24 @@ void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
 	 * come every few seconds per group, and this goes to a
 	 * log on a small tmpfs. A dry run, which exists to be
 	 * watched, and anything refused or malformed, is said. */
-	if (!igmp_hw_enabled() || changes || prc != IGMP_OK ||
-	    !pol.snooping)
+	say = !igmp_hw_enabled() || changes || prc != IGMP_OK || !pol.snooping;
+	if (say)
 		describe(&rx, prc);
+	/* Taken, not copied: the switch has not sent it, so it goes up only
+	 * from here. Only under the take this daemon holds: a frame taken
+	 * under a lease since given back is one the kernel would refuse. */
+	if (rx.taken && rx.eth && (lease & ODI_SW_MC_SNOOP_TRAP))
+		uplink(db, &rx, prc, now, say);
 	if (changes) {
 		apply(db, ch, changes, MAX_CHANGES);
 		write_state(db);
 	}
+}
+
+/* The lease held, for replay.c: a frame it builds is taken while it is. */
+uint32_t igmpd_lease(void)
+{
+	return lease;
 }
 
 /* The daemon's state at start. */
@@ -465,6 +618,7 @@ void igmpd_reset(struct igmp_db *db)
 {
 	igmp_db_init(db);
 	igmp_policy_defaults(&pol);
+	up_rate.started = 0;
 }
 
 /* Run on a transcript instead of the redirect device (replay.c). The policy

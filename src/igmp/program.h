@@ -4,6 +4,7 @@
 #define ODI_IGMP_PROGRAM_H
 
 #include <stdint.h>
+#include "odi_sw_ioctl.h"
 
 void igmp_hw_set_enabled(int on);
 int  igmp_hw_enabled(void);
@@ -18,5 +19,11 @@ int igmp_hw_snoop(uint32_t flags);
 
 int igmp_hw_group_set(uint16_t vid, uint32_t group, uint32_t ports);
 int igmp_hw_group_del(uint16_t vid, uint32_t group);
+
+/* The way up for a taken report (uplink.h): the route the kernel gives, and
+ * the send. Never called in a dry run, which sends nothing. Each returns 0
+ * or the negative errno, and says what failed. */
+int igmp_hw_route(struct odi_sw_mc_route *r);
+int igmp_hw_send(const uint8_t *frame, uint32_t len, uint32_t flow);
 
 #endif

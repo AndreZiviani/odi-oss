@@ -4,18 +4,19 @@
  * and policy.c) are fed events with a clock the transcript sets, and print
  * what they decide: the policy line, every frame as the dry run describes it,
  * every row it would write or remove, the lease it would take, the router
- * ports. Nothing opens /dev/odi_sw or the redirect device, and the output
- * depends on the transcript alone, so a golden file can say what igmpd does.
- * Nothing transmits: igmpd has no transmit path today, so there is no "frame
- * it would send" line yet.
+ * ports, and, while the policy has the reports taken, what it would send up
+ * and with which tag ("up:" lines; the route and the send need the kernel, so
+ * tag control 0 says only that the switch's row would tag it). Nothing opens
+ * /dev/odi_sw or the redirect device, and the output depends on the
+ * transcript alone, so a golden file can say what igmpd does.
  *
  * Format: one event a line, `#` starts a comment, blank lines are skipped.
  *
  *   T tick                   the clock reaches second T and nothing else happens
- *   T rx HEX                 one redirect payload as igmp_drv delivers it:
- *                            port (one-based), VLAN id high nibble and low
- *                            byte, then the Ethernet frame (the driver puts
- *                            the 802.1Q tag back when there was one)
+ *   T rx HEX                 one redirect payload as the kernel delivers it:
+ *                            port (one-based), VLAN id high nibble (bit 7 of
+ *                            that byte: taken, not copied) and low byte, then
+ *                            the Ethernet frame (the 802.1Q tag left in it)
  *   T v2join   PORT VID SRC GROUP     a v2 membership report
  *   T v2leave  PORT VID SRC GROUP     a v2 leave (sent to 224.0.0.2)
  *   T v3join   PORT VID SRC GROUP     a v3 report, one IS_EXCLUDE record, no sources
@@ -128,9 +129,11 @@ static void put32(uint8_t *p, uint32_t v)
 	put16(p + 2, (uint16_t)v);
 }
 
-/* The payload igmp_drv would deliver: prefix, Ethernet, an IPv4 header with
- * the router alert option, the IGMP message. `msg` is the IGMP message with
- * its checksum field zero. The source MAC is made up from the port. */
+/* The payload the kernel would deliver: prefix, Ethernet, an IPv4 header
+ * with the router alert option, the IGMP message. `msg` is the IGMP message
+ * with its checksum field zero. The source MAC is made up from the port. The
+ * frame is marked taken while the lease the daemon holds takes the reports,
+ * as the kernel marks it. */
 static uint32_t build(uint8_t *b, uint8_t port, uint16_t vid, uint32_t sip,
 		      uint32_t dip, const uint8_t *msg, uint32_t mlen)
 {
@@ -139,6 +142,8 @@ static uint32_t build(uint8_t *b, uint8_t port, uint16_t vid, uint32_t sip,
 
 	b[0] = port;
 	b[1] = (uint8_t)((vid >> 8) & 0x0f);
+	if (igmpd_lease() & ODI_SW_MC_SNOOP_TRAP)
+		b[1] |= IGMP_RX_TAKEN;
 	b[2] = (uint8_t)vid;
 	eth[0] = 0x01;
 	eth[1] = 0x00;

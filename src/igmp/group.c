@@ -214,19 +214,25 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 	struct igmp_entry *e;
 	uint32_t bit, before;
 
-	if (port == 0 || port > IGMP_MAX_PORTS || !igmp_group_snoopable(group))
+	if (port == 0 || port > IGMP_MAX_PORTS || !igmp_group_snoopable(group)) {
+		db->rx_passable++;
 		return n;
+	}
 	/* The profile decides. A join it does not allow gets no state, so the
 	 * group is unregistered and, with the PON's drop on, the stream never
 	 * reaches the host: the ONU-side enforcement the access control lists
-	 * ask for. The report itself still goes upstream (the switch forwards
-	 * it, the copy is only a copy), which is the "forward" behaviour of an
-	 * ONU that leaves the OLT as the authority. */
+	 * ask for. Whether the report itself still goes upstream is the
+	 * profile's unauthorized join behaviour: with the copy alone the switch
+	 * forwards it whatever this says; with the report taken (uplink.h) a
+	 * message of refused joins alone is withheld unless the profile
+	 * forwards them. */
 	if (!igmp_policy_allows(&db->pol, group)) {
 		db->denied++;
+		db->rx_acl_refused++;
 		refuse(db, IGMP_REFUSE_ACL, vid, group, now);
 		return n;
 	}
+	db->rx_passable++;
 	e = find(db, vid, group);
 	/* The limit is on groups: a group already held on another VLAN is not a
 	 * new one, and neither is a static one. */
@@ -277,6 +283,7 @@ static int leave(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 	struct igmp_entry *e = find(db, vid, group);
 	uint32_t deadline;
 
+	db->rx_passable++;
 	if (!e || port == 0 || port > IGMP_MAX_PORTS || e->fixed)
 		return n;
 	if (!(e->ports & IGMP_PORTBIT(port)))
@@ -342,6 +349,8 @@ int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
 {
 	int n = 0;
 
+	db->rx_acl_refused = 0;
+	db->rx_passable = 0;
 	switch (rx->type) {
 	case IGMP_QUERY:
 		/* Any query makes the port it arrived on a router port -- a
@@ -394,6 +403,8 @@ int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
 				 ((t == 1 || t == 3 || t == 5) && nsrc > 0))
 				n = join(db, rx->vid, grp, rx->port, now,
 					 out, max, n);
+			else
+				db->rx_passable++;
 			p += len;
 			left -= len;
 		}

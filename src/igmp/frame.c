@@ -107,6 +107,7 @@ enum igmp_parse_rc igmp_parse(const uint8_t *buf, uint32_t len,
 
 	rx->port = buf[0];
 	rx->vid = (uint16_t)(((uint16_t)(buf[1] & 0x0f) << 8) | buf[2]);
+	rx->taken = (buf[1] & IGMP_RX_TAKEN) != 0;
 
 	eth = buf + IGMP_RX_PREFIX;
 	eth_len = len - IGMP_RX_PREFIX;

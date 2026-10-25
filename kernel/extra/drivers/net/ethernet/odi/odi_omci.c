@@ -14,6 +14,11 @@
  *
  * OP_CMD carries one odi_switch_cmd() call; /proc/odi_omci shows the
  * registrations and counters and takes the one switch_init write.
+ *
+ * The host's IGMP rides the same RX hook table to igmpd (redirect type 4),
+ * and, while igmpd takes the reports rather than copying them, igmpd's
+ * re-sent report goes up the PON through odi_igmp_send_to_pon() below, the
+ * one transmit toward the fibre besides the OMCI replies.
  */
 
 #include <linux/module.h>
@@ -33,6 +38,7 @@
 #include "odi_nic.h"
 #include "odi_omci_wire.h"
 #include "odi_igmp_rx.h"
+#include "odi_igmp_tx.h"
 #include "odi_switch_mcast.h"
 #include "odi_switch_acl_probe.h"
 
@@ -217,17 +223,21 @@ static int odi_omci_rxhook(struct sk_buff *skb, const struct odi_rx_words *info)
 
 /* ---- RX: host port -> igmpd ------------------------------------------- */
 
-/* Below the OMCI hook, and only for the UNI port: the copy of an IGMP frame
- * the switch's ACL rule makes (odi_switch_mcast.c) is the one thing the
- * CPU wants from that port beyond what the net devices take. A frame from
- * the PON port never reaches this hook, and the NIC still drops every PON
- * frame no hook took, so nothing here widens what the fibre can reach.
+/* Below the OMCI hook, and only for the UNI port: the copy (or, in the
+ * lease's TRAP mode, the take) of an IGMP frame the switch's ACL rule makes
+ * (odi_switch_mcast.c) is the one thing the CPU wants from that port beyond
+ * what the net devices take. A frame from the PON port never reaches this
+ * hook, the hook would refuse it if it did (odi_igmp_rx_takes()), and the
+ * NIC still drops every PON frame no hook took, so nothing here widens what
+ * the fibre can reach.
  */
 #define ODI_IGMP_RXHOOK_PRIO	(INT_MAX - 2)
 #define ODI_IGMP_RXHOOK_PORTMASK (1U << 0)
 
 static u32 odi_igmp_cnt_delivered;
 static u32 odi_igmp_cnt_dropped;
+static atomic_t odi_igmp_cnt_sent = ATOMIC_INIT(0);
+static atomic_t odi_igmp_cnt_send_fail = ATOMIC_INIT(0);
 static DEFINE_RATELIMIT_STATE(odi_igmp_rx_drop_rl, 5 * HZ, 3);
 
 static int odi_igmp_rxhook(struct sk_buff *skb, const struct odi_rx_words *info)
@@ -235,11 +245,15 @@ static int odi_igmp_rxhook(struct sk_buff *skb, const struct odi_rx_words *info)
 	unsigned int src_port = (info->opts3 >> ODI_RXD_SRC_PORT_SHIFT) & ODI_RXD_SRC_PORT_MASK;
 	struct sk_buff *nskb;
 	u32 dst_pid, total;
+	int taken;
 
-	if (!READ_ONCE(odi_sw_mcast_copy_on))
+	if (!odi_igmp_rx_takes(READ_ONCE(odi_sw_mcast_copy_on), src_port,
+			       skb->data, skb->len))
 		return ODI_RXHOOK_CONTINUE;
-	if (src_port != 0 || !odi_igmp_frame_wanted(skb->data, skb->len))
-		return ODI_RXHOOK_CONTINUE;
+	/* Read as the frame is handed on: the switch took it, or copied it,
+	 * by the mode of the moment (odi_switch_mcast.c orders the change so a
+	 * frame on the edge is at worst sent up twice). */
+	taken = READ_ONCE(odi_sw_mcast_trap_on) != 0;
 
 	/* The frame is a copy, the original went on by the switch: a copy
 	 * nobody wants is dropped, not handed to the IP stack. */
@@ -256,7 +270,7 @@ static int odi_igmp_rxhook(struct sk_buff *skb, const struct odi_rx_words *info)
 	/* The VLAN id in the prefix is 0: no row is keyed on it (every VLAN here
 	 * is shared, docs/KERNEL.md) and a tag still on the frame is read from
 	 * the frame itself by igmpd. */
-	odi_igmp_build_rx(skb_put(nskb, total), src_port, 0, skb->data, skb->len);
+	odi_igmp_build_rx(skb_put(nskb, total), src_port, 0, taken, skb->data, skb->len);
 	if (netlink_unicast(odi_omci_nlsk, nskb, dst_pid, MSG_DONTWAIT) < 0) {
 		odi_igmp_cnt_dropped++;
 		if (__ratelimit(&odi_igmp_rx_drop_rl))
@@ -283,6 +297,34 @@ static void odi_igmp_rx_enable(void)
 		pr_warn(DRV_NAME ": IGMP rxhook not registered\n");
 	else
 		registered = true;
+}
+
+/* ---- TX: igmpd -> PON, a taken report sent up in its place ------------- */
+
+/* Called by odi_switch_mcast_send() under odi_switch_lock, after it checked
+ * the take is held, the frame is IGMP to a multicast MAC and the flow is one
+ * an upstream bridge rule queues on. The descriptor is odi_igmp_tx.h's: a
+ * directed transmit to the PON port on that flow, never learnt from. */
+static DEFINE_RATELIMIT_STATE(odi_igmp_tx_fail_rl, 5 * HZ, 3);
+
+static int odi_igmp_send_to_pon(const u8 *frame, u32 len, u32 flow)
+{
+	struct odi_tx_words ti = { 0 };
+	int rc;
+
+	ti.opts1 = ODI_IGMP_TX_OPTS1;
+	ti.opts2 = ODI_IGMP_TX_OPTS2;
+	ti.opts3 = odi_igmp_tx_opts3(flow);
+	rc = odi_nic_tx_words(frame, (unsigned short)len, &ti);
+	if (rc) {
+		atomic_inc(&odi_igmp_cnt_send_fail);
+		if (__ratelimit(&odi_igmp_tx_fail_rl))
+			pr_info(DRV_NAME ": IGMP report up flow %u, odi_nic_tx_words failed (%d)\n",
+				flow, rc);
+		return rc < 0 ? rc : -EIO;
+	}
+	atomic_inc(&odi_igmp_cnt_sent);
+	return 0;
 }
 
 /* ---- RX: what the ACL probes send the CPU ------------------------------ */
@@ -494,6 +536,8 @@ static int odi_omci_proc_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "cmd_replies %u\n", (u32)atomic_read(&odi_omci_cnt_cmd_replies));
 	seq_printf(seq, "igmp_delivered %u\n", odi_igmp_cnt_delivered);
 	seq_printf(seq, "igmp_dropped %u\n", odi_igmp_cnt_dropped);
+	seq_printf(seq, "igmp_sent_to_pon %u\n", (u32)atomic_read(&odi_igmp_cnt_sent));
+	seq_printf(seq, "igmp_send_fail %u\n", (u32)atomic_read(&odi_igmp_cnt_send_fail));
 	return 0;
 }
 
@@ -563,6 +607,7 @@ static int __init odi_omci_init(void)
 	/* The IGMP hook is registered when the copy is first installed, not
 	 * here: until then no frame needs it. */
 	odi_sw_mcast_rx_enable = odi_igmp_rx_enable;
+	odi_sw_mcast_tx = odi_igmp_send_to_pon;
 	odi_sw_probe_rx_enable = odi_probe_rx_enable;
 
 	if (!proc_create("odi_omci", 0644, NULL, &odi_omci_proc_fops))

@@ -88,6 +88,49 @@ struct odi_sw_mc_snoop {
 };
 #define ODI_SW_MC_SNOOP_COPY      1u   /* copy the host port's IGMP to the CPU */
 #define ODI_SW_MC_SNOOP_PON_DROP  2u   /* drop unregistered IPv4 multicast from the PON */
+#define ODI_SW_MC_SNOOP_TRAP      4u   /* take it instead (with COPY): igmpd sends it up */
+
+/* Where a taken report goes up (odi_switch_mcast.h in the kernel tree).
+ * FRAME: as the switch would have sent it, the frame's tags in, the
+ * classifier row's treatment and upstream flow out. TAG: the flow of the row
+ * that carries C-tag want_vid/want_pri up, or failing one (.via FRAME) the
+ * flow the frame itself would have taken. Open to any file. */
+struct odi_sw_mc_route {
+	uint32_t mode;          /* ODI_SW_MC_ROUTE_* */
+	uint32_t ethertype;     /* of an untagged frame */
+	uint32_t stag, svid, spri;
+	uint32_t ctag, cvid, cpri;
+	uint32_t want_vid, want_pri;
+	uint32_t verdict;       /* ODI_SW_US_* */
+	uint32_t via;           /* ODI_SW_MC_ROUTE_*: what found the flow */
+	uint32_t row, flow;
+	uint32_t c_act, c_vid, c_pri, c_src;
+	uint32_t s_act, s_vid, s_pri, s_src;
+};
+#define ODI_SW_MC_ROUTE_FRAME  1u
+#define ODI_SW_MC_ROUTE_TAG    2u
+#define ODI_SW_US_NONE         0u   /* no row: no stream, the switch drops it */
+#define ODI_SW_US_FWD          1u
+#define ODI_SW_US_DISCARD      2u   /* an extended VLAN discard */
+#define ODI_SW_US_SRC_VID      1u   /* .c_src/.s_src: the row assigns the VID */
+#define ODI_SW_US_SRC_PRI      2u   /* ... and the priority */
+#define ODI_SW_CACT_NONE       0u   /* .c_act */
+#define ODI_SW_CACT_ADD        1u   /* add, or replace the VID of one there */
+#define ODI_SW_CACT_DEL        2u
+#define ODI_SW_CACT_TRANSPARENT 3u
+#define ODI_SW_SACT_ADD        1u   /* .s_act: add (TPID 0x88a8) or replace */
+#define ODI_SW_SACT_REWRITE    2u   /* the S-tag rewritten into a C-tag: not used */
+#define ODI_SW_SACT_DEL        3u
+#define ODI_SW_SACT_ADD_TOO    5u   /* acts as ADD */
+
+/* One taken report up the PON on .flow: the lease holder only, while it
+ * holds the take; an IGMP frame to an IPv4 multicast MAC, 60 bytes or more. */
+#define ODI_SW_MC_SEND_MAX     1536u
+struct odi_sw_mc_send {
+	uint32_t len;
+	uint32_t flow;
+	uint8_t frame[ODI_SW_MC_SEND_MAX];
+};
 
 /* ACL probes, odi_switch_acl_probe.h in the kernel tree: hand-installed
  * rules that count IPv4 frames entering the UNI or the PON port, or copy or
@@ -135,5 +178,7 @@ struct odi_sw_acl_probe {
 #define ODI_SW_IOC_L2_MODE	0x4008530AU
 #define ODI_SW_IOC_MC_SNOOP	0x8008530BU
 #define ODI_SW_IOC_ACL_PROBE	0xC048530CU
+#define ODI_SW_IOC_MC_ROUTE	0xC058530DU
+#define ODI_SW_IOC_MC_SEND	0x8608530EU
 
 #endif

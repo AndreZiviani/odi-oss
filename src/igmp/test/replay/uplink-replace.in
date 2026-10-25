@@ -1,0 +1,25 @@
+# Tag control 2: the whole TCI of the tag a report has is replaced by the
+# profile's (priority 3, VID 300: 0x612c), an untagged one gets it added.
+# Then tag control 3: only the VID is replaced, the host's priority kept.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+us_tag_control=2
+us_tci=24876
+end
+0 tick
+1 v2join 1 10 192.168.1.10 239.1.1.1
+2 v2join 1 0 192.168.1.10 239.1.1.2
+3 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+us_tag_control=3
+us_tci=24876
+end
+4 tick
+# A report tagged VID 11 priority 5, as the kernel hands it over taken:
+5 rx 01:80:0b:01005e0101030200000000018100a00b080046c000200000000001027261c0a8010aef010103940400001600f9faef010103
+6 v2join 1 0 192.168.1.10 239.1.1.4
+7 state

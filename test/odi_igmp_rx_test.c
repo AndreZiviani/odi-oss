@@ -109,7 +109,7 @@ static void test_delivery_parses(void)
 	uint32_t n, total;
 
 	n = v2_report(f, 0, 0x8100);
-	total = odi_igmp_build_rx(buf, 0, 0, f, n);
+	total = odi_igmp_build_rx(buf, 0, 0, 0, f, n);
 	CHECK(total == odi_igmp_rx_total(n) && total == 16u + 3u + n, "the length");
 	CHECK(odi_omci_get32(buf) == total, "the netlink length field");
 	CHECK(ODI_IGMP_REDIRECT_TYPE == IGMP_REDIRECT_UID, "the redirect type is igmpd's uid");
@@ -125,22 +125,52 @@ static void test_delivery_parses(void)
 
 	/* A tagged frame: the prefix carries the VLAN id too. */
 	n = v2_report(f, 1, 0x8100);
-	total = odi_igmp_build_rx(buf, 0, 0x00b, f, n);
+	total = odi_igmp_build_rx(buf, 0, 0x00b, 0, f, n);
 	CHECK(igmp_parse(buf + ODI_OMCI_NLMSG_HDR, total - ODI_OMCI_NLMSG_HDR, &rx) == IGMP_OK,
 	      "a tagged delivery parses");
 	CHECK(rx.tagged && rx.vid == 0x00b, "the VLAN id");
 	CHECK(buf[ODI_OMCI_NLMSG_HDR + 1] == 0 && buf[ODI_OMCI_NLMSG_HDR + 2] == 0x0b, "prefix bytes 1 and 2");
-	odi_igmp_build_rx(buf, 0, 0xabc, f, n);
+	odi_igmp_build_rx(buf, 0, 0xabc, 0, f, n);
 	CHECK(buf[ODI_OMCI_NLMSG_HDR + 1] == 0x0a && buf[ODI_OMCI_NLMSG_HDR + 2] == 0xbc,
 	      "a twelve-bit id: high nibble then low byte");
-	odi_igmp_build_rx(buf, 0, 0xfabc, f, n);
+	odi_igmp_build_rx(buf, 0, 0xfabc, 0, f, n);
 	CHECK(buf[ODI_OMCI_NLMSG_HDR + 1] == 0x0a, "bits above the VLAN id are cut");
+	CHECK(igmp_parse(buf + ODI_OMCI_NLMSG_HDR, total - ODI_OMCI_NLMSG_HDR, &rx) == IGMP_OK &&
+	      !rx.taken, "a copy is not marked taken");
+
+	/* Taken, not copied (the lease's TRAP mode): bit 7 of prefix byte 1,
+	 * which igmpd reads as "upstream only if I send it". */
+	total = odi_igmp_build_rx(buf, 0, 0x00b, 1, f, n);
+	CHECK(ODI_IGMP_RX_TAKEN == IGMP_RX_TAKEN, "the taken bit is the one igmpd reads");
+	CHECK(buf[ODI_OMCI_NLMSG_HDR + 1] == 0x80 && buf[ODI_OMCI_NLMSG_HDR + 2] == 0x0b,
+	      "taken: bit 7 above the VLAN id");
+	CHECK(igmp_parse(buf + ODI_OMCI_NLMSG_HDR, total - ODI_OMCI_NLMSG_HDR, &rx) == IGMP_OK &&
+	      rx.taken && rx.vid == 0x00b && rx.port == 1,
+	      "igmp_parse reads it as taken, the VLAN and port as before");
+	odi_igmp_build_rx(buf, 0, 0xfff, 1, f, n);
+	CHECK(buf[ODI_OMCI_NLMSG_HDR + 1] == 0x8f, "the bit does not touch a twelve-bit VLAN id");
+}
+
+/* What the hook takes: from the UNI port only, only IGMP, only while the
+ * lease holds the copy (or the take). Never a frame from the PON. */
+static void test_hook_takes(void)
+{
+	uint8_t f[128];
+	uint32_t n = v2_report(f, 0, 0x8100), port;
+
+	CHECK(odi_igmp_rx_takes(1, 0, f, n), "IGMP from the UNI port, the copy on: taken");
+	CHECK(!odi_igmp_rx_takes(0, 0, f, n), "the copy off: left to the net device");
+	for (port = 1; port < 8; port++)
+		CHECK(!odi_igmp_rx_takes(1, port, f, n), "from any other port, the PON (2) above all: not taken");
+	f[23] = 17;
+	CHECK(!odi_igmp_rx_takes(1, 0, f, n), "UDP from the UNI: not taken");
 }
 
 int main(void)
 {
 	test_classifier();
 	test_delivery_parses();
+	test_hook_takes();
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
 		return 1;

@@ -85,6 +85,7 @@ static void show(const char *what, uint16_t vid, uint32_t group, uint32_t ports)
 static const char *sw_err(int rc)
 {
 	switch (rc) {
+	case -1:  return "refused: the reports are not taken, or not by this process";
 	case -2:  return "no /dev/odi_sw";
 	case -16: return "busy: the table engine, or another snooper holds the lease";
 	case -22: return "refused by the driver";
@@ -99,7 +100,9 @@ int igmp_hw_snoop(uint32_t flags)
 	int rc;
 
 	out_fmt("snooping lease: %s%s%s\n",
-		flags & ODI_SW_MC_SNOOP_COPY ? "copy host IGMP to the CPU" : "released",
+		!(flags & ODI_SW_MC_SNOOP_COPY) ? "released" :
+		flags & ODI_SW_MC_SNOOP_TRAP ? "take host IGMP to the CPU, igmpd sends it up" :
+		"copy host IGMP to the CPU",
 		flags & ODI_SW_MC_SNOOP_PON_DROP ? ", drop unregistered IPv4 multicast from the PON" : "",
 		hw_enabled ? "" : "  (not written)");
 	if (!hw_enabled)
@@ -146,5 +149,31 @@ int igmp_hw_group_del(uint16_t vid, uint32_t group)
 		out_fmt("  l2 multicast del: %d (%s)\n", rc, sw_err(rc));
 	else if (!m.found)
 		out("  no such entry in the switch\n");
+	return rc;
+}
+
+int igmp_hw_route(struct odi_sw_mc_route *r)
+{
+	int rc = igmp_sw_route(r);
+
+	if (rc)
+		out_fmt("  route ioctl: %d (%s)\n", rc, sw_err(rc));
+	return rc;
+}
+
+int igmp_hw_send(const uint8_t *frame, uint32_t len, uint32_t flow)
+{
+	static struct odi_sw_mc_send m;
+	int rc;
+
+	if (len > sizeof m.frame)
+		return -22;
+	m.len = len;
+	m.flow = flow;
+	for (uint32_t i = 0; i < len; i++)
+		m.frame[i] = frame[i];
+	rc = igmp_sw_send(&m);
+	if (rc)
+		out_fmt("  send ioctl: %d (%s)\n", rc, sw_err(rc));
 	return rc;
 }

@@ -1,10 +1,10 @@
 /* igmpd -- IGMP/MLD snooping for the RTL9602C, freestanding.
  *
- * The frames do not arrive on a netdev. The switch traps IGMP and MLD control
- * packets to the CPU with rx reason 215, and igmp_drv hands them to whichever
- * userland app registered for packet-redirect uid 4. That is the same
- * mechanism omcid already speaks on uid 1, with a different prefix. That is
- * the stock kernel; on ours nothing delivers uid 4 yet (main.c).
+ * The frames do not arrive on a netdev. Our kernel hands the host port's IGMP,
+ * which the switch's snooping rule copies (or takes) to the CPU, to whichever
+ * userland app registered for redirect uid 4 (odi_omci.c,
+ * odi_igmp_rx.h): the same mechanism omcid speaks on uid 1, with a different
+ * prefix. The stock kernel did the same from rx reason 215 through igmp_drv.
  *
  * This header is the wire format and nothing else. The state machine lives
  * above it.
@@ -30,8 +30,14 @@
  *
  * When the frame arrived tagged the driver also re-inserts the 802.1Q tag it
  * stripped, so the id is in two places and they agree. When it arrived
- * untagged both bytes are zero and no tag is present. */
+ * untagged both bytes are zero and no tag is present. (Our kernel leaves the
+ * tag in the frame and the id zero.)
+ *
+ * Bit 7 of byte 1, above the VLAN id, is ours: the switch took the frame
+ * rather than copying it (the lease's TRAP mode), so it has not gone
+ * upstream and goes only if this daemon sends it. */
 #define IGMP_RX_PREFIX      3
+#define IGMP_RX_TAKEN       0x80
 
 /* Transmit: eight bytes ahead of the frame, native byte order.
  *
@@ -78,6 +84,7 @@ struct igmp_rx {
 	uint8_t  port;          /* as received: one-based */
 	uint16_t vid;           /* 0 when the frame was untagged */
 	int      tagged;        /* an 802.1Q tag was present in the frame */
+	int      taken;         /* the switch took it: upstream only if sent */
 
 	const uint8_t *eth;     /* the Ethernet frame, prefix removed */
 	uint32_t eth_len;

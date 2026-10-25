@@ -8,7 +8,8 @@
 # multicast GEM interworking TP with an address row) giving snooping with
 # the profile's timers, the subscriber's group limit and both access control
 # lists; the units (tenths of a second to seconds, defaults for zero); a
-# function other than snooping turning it off; a delete of the address row
+# function other than snooping turning it off; the upstream IGMP tag control,
+# TCI and rate exported, and read by igmpd; a delete of the address row
 # turning it off; a MIB reset; the file rewritten only when it changed; the
 # access control list rows of OMCC 0xB0 (row parts 1 and 2, IPv6 ranges left
 # out, an IPv6-only list enforcing nothing); the width of attribute 16 of
@@ -134,6 +135,9 @@ query_interval=125
 query_max_response=10
 last_member_query=1
 unauthorized_join=0
+us_tag_control=0
+us_tci=0
+us_rate=0
 max_groups=8"
 
 # Attributes 10 to 15 in one Set: robustness 3, querier 0, query interval
@@ -172,6 +176,9 @@ query_interval=60
 query_max_response=5
 last_member_query=2
 unauthorized_join=1
+us_tag_control=0
+us_tci=0
+us_rate=0
 max_groups=8
 allow=225.0.0.0-225.255.255.255
 static=226.1.2.3-226.1.2.3"
@@ -214,6 +221,30 @@ else
 	check "igmpd is built for the contract test (make test-omci-build)" "missing" "built"
 	: > /tmp/mcast-state-from-igmpd
 fi
+
+# The upstream IGMP tag control, its TCI and the rate (attributes 5, 4, 6;
+# mask 0x1c00): tag control 1, TCI 0xa1a4 (priority 5, VID 420), 2 messages a
+# second. With them igmpd takes the reports and sends each up itself, with
+# that tag (uplink.h); the same contract, read by igmpd.
+send "$log" 0034 48 0135 0001 "1c00a1a40100000002"
+written "$log" 4
+check "the upstream tag control, TCI and rate are exported as set" \
+      "$(policy | grep '^us_')" "us_tag_control=1
+us_tci=41380
+us_rate=2"
+if [ -x "$IGMPD" ]; then
+	cp /var/run/odi-mcast.conf /tmp/mcast-policy-snap
+	$Q "$IGMPD" -r /tmp/mcast-replay.in > /tmp/mcast-replay.out 2>&1
+	check "igmpd takes the reports under that profile" \
+	      "$(rep | grep -c '^snooping lease: take host IGMP')" "1"
+	check "igmpd sends each report and the leave up with VID 420 priority 5" \
+	      "$(rep | grep -c 'up: send with vid 420 pri 5 (tag control 1)')" "4"
+fi
+send "$log" 0035 48 0135 0001 "1c0000000000000000"
+written "$log" 5
+check "and back to none: no tag, no rate" "$(policy | grep '^us_')" "us_tag_control=0
+us_tci=0
+us_rate=0"
 
 # A Set that changes nothing the file holds writes nothing.
 n=$(grep -c 'multicast policy written' "$log")

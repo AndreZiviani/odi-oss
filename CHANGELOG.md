@@ -5,6 +5,24 @@ listed here.
 
 ## Unreleased
 
+- igmpd: the upstream IGMP tag, rate and unauthorized-join behaviour the
+  OLT's multicast profile asks for (ME 309 attributes 4 to 6 and 15) are now
+  applied. When the profile asks for a tag (add, replace the whole tag, or
+  replace only the VLAN), a rate, or the discard of joins outside its access
+  lists, the switch hands the host's IGMP to igmpd instead of forwarding it,
+  and igmpd sends each message up itself: tagged as asked, on the flow that
+  carries that VLAN up, no more than the rate allows, and a join for a group
+  the lists refuse is kept from the OLT unless the profile says to forward
+  it. A query from the host side is not sent. With tag control 0 a message
+  goes up exactly as the switch would have tagged it. A profile that asks for
+  none of this changes nothing: the host's IGMP is forwarded by the switch as
+  before. If igmpd stops or dies, the switch forwards the host's IGMP by
+  itself again. The kernel lets igmpd send only IGMP to a multicast address,
+  only on an upstream flow a bridge rule uses, and only while it holds the
+  snooping lease; nothing from the fibre reaches it. `igmpd -s` shows how
+  the reports go up and counts them; `/proc/odi_omci` counts what was sent.
+  Still behind `IGMP_SNOOPING=1`, and experimental: no OLT with IPTV has yet
+  seen a re-sent report.
 - omcid: the downstream multicast tag control of the OLT's multicast profile
   (ME 309 attribute 16) is applied. Strip the tag, replace it, replace its
   VID only, or add one (an S-tag in front of the C-tag, the only tag the

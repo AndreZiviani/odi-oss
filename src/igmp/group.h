@@ -156,6 +156,17 @@ struct igmp_db {
 	uint32_t refused[IGMP_REFUSE_REASONS];
 	uint32_t refusals;                      /* ring entries ever written */
 	struct igmp_refusal ring[IGMP_REFUSAL_RING];
+	/* The last message igmp_db_rx() read: how many of its joins the lists
+	 * refused, and how many of its items would go upstream all the same
+	 * (a leave, a join the lists allow, one past the group limit, a record
+	 * that is neither). A message with refusals and nothing else is an
+	 * unauthorized join request (G.988 9.3.27 attribute 15, uplink.h). */
+	uint32_t rx_acl_refused;
+	uint32_t rx_passable;
+	/* What the way up did (uplink.h): messages sent, withheld as
+	 * unauthorized, dropped over the rate, and not sent for want of a row,
+	 * a flow or a transmit. Counted only while the reports are taken. */
+	uint32_t up_sent, up_withheld, up_limited, up_unsent;
 };
 
 void igmp_db_init(struct igmp_db *db);
