@@ -119,17 +119,42 @@ static int host_lane_port(void)
 	return -1;
 }
 
-/* The switch port an IP host's bridge port stands for. The stock choice is
- * the CPU port, and that is what it stays while OMCI_POTS_PORTS is 0. With
- * phone ports on, the IP host the OLT builds a bridge port on is the voice
- * one, whose SIP client is the router: the host lane. Never the CPU port
- * toward the fibre either way -- the PON isolation cuts it, and with the key
- * off no bridge rule is built for an IP host at all. */
-int iphost_switch_port(void)
+/* Whether IP host `id` is the voice one: a SIP agent (class 150) names, by
+ * its TCP/UDP pointer (attribute 5), a TCP/UDP config data (136) whose IP
+ * host pointer (4) names it -- the path the SIP signalling takes (G.988
+ * 9.9.3, 9.4.3). A pointer decides, not the class: an OLT builds IP hosts for
+ * other things too, TR-069 management among them, and those are not the
+ * router's business. With OMCI_POTS_PORTS at 0 no SIP agent is ever held. */
+int iphost_is_voice(uint16_t id)
+{
+	const struct omci_class *c150 = find_class(OMCI_ME_SIP_AGENT_CFG_DATA);
+	const struct omci_class *c136 = find_class(OMCI_ME_TCP_UDP_CFG_DATA);
+
+	if (!c150 || !c136)
+		return 0;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		struct mib_row *r = mib_row_at(i), *tu;
+
+		if (!r || r->classId != OMCI_ME_SIP_AGENT_CFG_DATA)
+			continue;
+		tu = mib_find(OMCI_ME_TCP_UDP_CFG_DATA, (uint16_t)row_u32(r, c150, 5));
+		if (tu && row_u32(tu, c136, 4) == id)
+			return 1;
+	}
+	return 0;
+}
+
+/* The switch port the bridge port of IP host `id` stands for. The stock
+ * choice is the CPU port, and that is what it stays for every IP host but
+ * the voice one, and for that one too while OMCI_POTS_PORTS is 0. With phone
+ * ports on, the voice IP host's SIP client is the router: the host lane.
+ * Never the CPU port toward the fibre either way -- the PON isolation cuts
+ * it, and no bridge rule is built for any other IP host at all. */
+int iphost_switch_port(uint16_t id)
 {
 	if (!caps_ok)
 		return -1;
-	if (pots_ports)
+	if (pots_ports && iphost_is_voice(id))
 		return host_lane_port();
 	return (int)caps_u32(OMCI_CAPS_OFF_CPUPORT);
 }
@@ -155,7 +180,7 @@ static int ingress_switch_port(int ingress)
 		return (int)caps_u32(OMCI_CAPS_OFF_PONPORT);
 	if (mib_find(OMCI_ME_IP_HOST_CONFIG_DATA, id) ||
 	    instance_is_autonomous(OMCI_ME_IP_HOST_CONFIG_DATA, id))
-		return iphost_switch_port();
+		return iphost_switch_port(id);
 	return uni_switch_port(id, OMCI_UNI_SLOT_PPTP);
 }
 
@@ -993,8 +1018,8 @@ static void ev_note_bad(void)
 
 /* ---- an IP host's table, on the host lane
  *
- * With OMCI_POTS_PORTS on, the bridge port of an IP host is the host lane
- * (iphost_switch_port()), and the class 171 instance that names the IP host
+ * With OMCI_POTS_PORTS on, the bridge port of the voice IP host is the host
+ * lane (iphost_switch_port()), and the class 171 instance that names the IP host
  * (association type 3) or its bridge port (0) says what its frames carry,
  * the voice VLAN. It is read whatever VLAN_CFG_TYPE says: the manual tag is
  * the untagged handoff of the data service, which the voice is not. Each
@@ -1324,11 +1349,14 @@ void bdgconn_rebuild(void)
 		if (!r || r->classId != OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 			continue;
 		tp = row_u32(r, c47, 3);
-		/* Ethernet UNI, VEIP; and with phone ports on, an IP host, whose
-		 * bridge port is the host lane (iphost_switch_port()). Off, an IP
-		 * host's bridge port gets no rule, as in the stock stack, where it
-		 * is the CPU port and the PON isolation cuts it anyway. */
-		if ((tp == 1 || tp == 11 || (tp == MBPCD_TP_IP_HOST && pots_ports)) &&
+		/* Ethernet UNI, VEIP; and with phone ports on, the voice IP host,
+		 * whose bridge port is the host lane (iphost_switch_port()). Any
+		 * other IP host's bridge port, and every one with the key off,
+		 * gets no rule, as in the stock stack, where it is the CPU port
+		 * and the PON isolation cuts it anyway. */
+		if ((tp == 1 || tp == 11 ||
+		     (tp == MBPCD_TP_IP_HOST && pots_ports &&
+		      iphost_is_voice((uint16_t)row_u32(r, c47, 4)))) &&
 		    ning < 8) {
 			ingress_bridge[ning] = (int)row_u32(r, c47, 1);
 			ingress_bport[ning] = r->inst;

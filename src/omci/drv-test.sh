@@ -164,9 +164,10 @@ fi
 # The ISP1 session, then a voice session (test/fixtures/omci-session-voice.txt,
 # written by hand: no line provisions voice): IP host 1 in a bridge of its
 # own with one GEM port that admits VID 200, and a class 171 instance on the
-# IP host that tags its untagged frames with VLAN 200 priority 5. With phone
-# ports on, the IP host's bridge port is the host lane (switch port 0, the
-# router's side), never the CPU port: the router sends and gets the voice
+# IP host that tags its untagged frames with VLAN 200 priority 5; a SIP agent
+# whose TCP/UDP pointer names IP host 1 is what makes it the voice one. With
+# phone ports on, the voice IP host's bridge port is the host lane (switch
+# port 0, the router's side), never the CPU port: the router sends and gets the voice
 # tagged 200, and the voice rules match only frames tagged 200, so none of
 # the data service's untagged frames is taken. The golden is the whole run,
 # call for call. With the key off, the IP host gets no bridge rule at all,
@@ -255,6 +256,51 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	     "$(grep -c 'rule manual-add: not for IP host 0001, on the host lane' "$log")" 1
 	vchk "voice, no VLAN filter: no rule names the CPU port" \
 	     "$(unimasks /tmp/omci-drv-voice-open.txt | grep -c '[89a-f]$')" 0
+
+	# A second IP host, for management, on its own VLAN (300) with a
+	# TCP/UDP config data no SIP agent names: it is not the voice one, so
+	# it keeps the stock mapping and gets no rule, and VLAN 300 is in no
+	# cmd 51 at all. The voice IP host's rules are unchanged beside it.
+	cat "$FIX/omci-session-voice.txt" "$FIX/omci-session-voice-mgmt.txt" > /tmp/voice-mgmt.txt
+	voice_run mgmt 1 /tmp/voice-mgmt.txt
+	vchk "voice + management IP host: the management one gets no rule" \
+	     "$(grep -c 'bdgconn ingress 0002 ' "$log")" 0
+	vchk "voice + management IP host: VLAN 300 is in no bridge rule" \
+	     "$(grep '^drv 51 ' /tmp/omci-drv-voice-mgmt.txt | grep -c '0000012c')" 0
+	vchk "voice + management IP host: the voice rules are as before" \
+	     "$(sed -n 's/.*\] bdgconn ingress 0001 gem 1600 dir \([0-9]\) .* unimask \([0-9]*\) .*/dir \1 unimask \2/p' "$log" | tr '\n' ' ')" \
+	     "dir 1 unimask 1 dir 2 unimask 1 dir 3 unimask 1 "
+	vchk "voice + management IP host: no rule names the CPU port" \
+	     "$(unimasks /tmp/omci-drv-voice-mgmt.txt | grep -c '[89a-f]$')" 0
+
+	# The SIP agent after the bridge connections are built: until it
+	# names IP host 1, that IP host is no voice one and gets nothing; its
+	# Create and the Set of its TCP/UDP pointer bring a rebuild that puts
+	# the voice on the lane.
+	{
+		cat "$FIX/omci-session-isp1.txt"
+		grep -v '^0c0[cd]' "$FIX/omci-session-voice.txt"
+	} > /tmp/voice-nosip.txt
+	log=/tmp/omcid-drv-voice-late.log
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	printf 'OMCI_POTS_PORTS=1\n' > /var/config/odi.conf
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	$Q cli/build/omcli --inject-file /tmp/voice-nosip.txt > /dev/null 2>&1
+	settled "$log"
+	n=$(rebuilt "$log")
+	vchk "voice, SIP agent not yet there: IP host 1 gets no rule" \
+	     "$(grep -c 'bdgconn ingress 0001 ' "$log")" 0
+	grep '^0c0[cd]' "$FIX/omci-session-voice.txt" > /tmp/voice-sip.txt
+	$Q cli/build/omcli --inject-file /tmp/voice-sip.txt > /dev/null 2>&1
+	wait_for "$log" 'bridge connections rebuilt' 30 $((n + 1))
+	omcid_stop "$pid"
+	rm -f /var/config/odi.conf
+	vchk "voice, SIP agent last: the rebuild it brings puts IP host 1 on the lane" \
+	     "$(awk -v n="$n" '/bridge connections rebuilt/ { r++ } r >= n' "$log" |
+	        sed -n 's/.*\] bdgconn ingress 0001 gem 1600 dir \([0-9]\) .* unimask \([0-9]*\) .*/dir \1 unimask \2/p' | tr '\n' ' ')" \
+	     "dir 1 unimask 1 dir 2 unimask 1 dir 3 unimask 1 "
 fi
 
 # ------------------------------------------------ Alloc-IDs from this OLT
