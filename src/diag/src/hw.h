@@ -108,6 +108,13 @@ int hw_l2_get(uint32_t index, struct odi_sw_l2_row *row);
 int hw_l2_next(uint32_t *index, struct odi_sw_l2_row *row);
 int hw_l2_mode(uint32_t *rows, uint32_t *ipmc_on_group);
 
+/* One ACL probe request (odi_sw_ioctl.h), answered in place. Returns 0 or
+ * the driver's negative errno: -22 for a request it refuses, -16 while
+ * another process holds the probes or the snooping lease is held, -25 on a
+ * kernel without the probes. */
+struct odi_sw_acl_probe;
+int hw_acl_probe(struct odi_sw_acl_probe *p);
+
 /* The GEM flows odi_switch recorded. Returns 0 when answered, 1 when there is
  * no netlink command path, and 2 when the path answered but the kernel has no
  * flow readback (EOPNOTSUPP). */

@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- diag and the switch driver: `diag acl-probe` installs ACL rules by hand to
+  measure the multicast path before anything is built on it. A rule counts
+  the IPv4 frames of one protocol, or to one address prefix, entering the
+  UNI or the PON, in frames or in bytes, without changing where they go; or
+  it copies or takes the IGMP entering the UNI to the CPU, which counts what
+  arrives. Nothing else can be sent to the CPU, and nothing from the PON.
+  Nothing in the image installs a probe; they belong to the diag process that
+  installed them and go when it exits, and they and IGMP snooping exclude
+  each other. `tools/mcast-probe/mcast-probe.sh` runs the measurements on a
+  stick in one unattended run (about 15 minutes), puts everything back
+  however it ends, and prints a results block for `docs/SWITCH.md`, where
+  the questions it answers are listed, with what a first run on ISP1
+  settled: the trap and the copy of the host IGMP work, the counters count
+  frames and bytes (the FCS included), and nothing from the PON reached the
+  CPU. `diag help` now keeps a space between a long command and its
+  description.
 - tests: the OMCI suites no longer fail now and then on a busy machine. A
   suite that restarts the daemon into the same log file waited for the
   "answering as" line, and the shell had not always emptied the file yet, so it
