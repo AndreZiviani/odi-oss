@@ -56,6 +56,10 @@ int main(void)
 	      == ODI_SW_IOC_MC_SNOOP, "ODI_SW_IOC_MC_SNOOP");
 	check(mips_ioc(2 | 4, 'S', 12, sizeof(struct odi_sw_acl_probe))
 	      == ODI_SW_IOC_ACL_PROBE, "ODI_SW_IOC_ACL_PROBE");
+	check(mips_ioc(2 | 4, 'S', 13, sizeof(struct odi_sw_mc_route))
+	      == ODI_SW_IOC_MC_ROUTE, "ODI_SW_IOC_MC_ROUTE");
+	check(mips_ioc(4 /* WRITE */, 'S', 14, sizeof(struct odi_sw_mc_send))
+	      == ODI_SW_IOC_MC_SEND, "ODI_SW_IOC_MC_SEND");
 
 	/* Struct sizes the marshalling actually depends on -- a size that
 	 * silently grew (padding, a wider field) would still compile and
@@ -68,6 +72,14 @@ int main(void)
 	check(sizeof(struct odi_sw_l2_mcast) == 28, "struct odi_sw_l2_mcast is 28 bytes");
 	check(sizeof(struct odi_sw_l2_mode) == 8, "struct odi_sw_l2_mode is 8 bytes");
 	check(sizeof(struct odi_sw_acl_probe) == 72, "struct odi_sw_acl_probe is 72 bytes");
+	check(sizeof(struct odi_sw_mc_route) == 88, "struct odi_sw_mc_route is 88 bytes");
+	check(sizeof(struct odi_sw_mc_send) == 1544, "struct odi_sw_mc_send is 1544 bytes");
+	check(offsetof(struct odi_sw_mc_route, want_pri) == 36 &&
+	      offsetof(struct odi_sw_mc_route, verdict) == 40 &&
+	      offsetof(struct odi_sw_mc_route, flow) == 52 &&
+	      offsetof(struct odi_sw_mc_route, s_src) == 84 &&
+	      offsetof(struct odi_sw_mc_send, frame) == 8,
+	      "struct odi_sw_mc_route / _send field offsets");
 	/* The kernel copy's field order: the request half, then the answer. */
 	check(offsetof(struct odi_sw_acl_probe, dst_mask) == 28 &&
 	      offsetof(struct odi_sw_acl_probe, in_use) == 32 &&

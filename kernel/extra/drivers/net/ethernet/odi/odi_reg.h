@@ -2,8 +2,8 @@
 /*
  * odi_reg.h -- the /dev/odi_sw ioctl ABI: switch-core register get/set,
  * per-port MIB counter get, the L2 lookup table (row readback, the
- * valid-row walk, L2 multicast add/delete), the snooping lease and the ACL
- * probes. The replacement
+ * valid-row walk, L2 multicast add/delete), the snooping lease, the way
+ * igmpd sends a taken report up, and the ACL probes. The replacement
  * for the register-only sockopts the stock kernel answers (RTK_OPT_
  * REGISTER, RTK_OPT_ADDRESS_GET/SET, RTK_OPT_STAT_PORT),
  * plus RTK_OPT_TRANSCEIVER (DDM, ODI_SW_IOC_DDM_GET -- odi_ddm.c/odi_i2c.c
@@ -46,6 +46,7 @@
 #include "odi_ddm.h" /* ODI_DDM_BUF_LEN, for struct odi_sw_ddm below */
 #include "odi_switch_l2.h" /* struct odi_sw_l2_row / _mcast_req, below */
 #include "odi_switch_acl_probe.h" /* struct odi_sw_acl_probe, below */
+#include "odi_switch_mcast.h" /* struct odi_sw_mc_route / _send, below */
 
 /* Switch-core register get/set -- one word at a caller-given offset, no
  * field decode. Covers RTK_OPT_ADDRESS_GET/SET and RTK_OPT_REGISTER
@@ -128,6 +129,15 @@ struct odi_sw_mc_snoop {
 	uint32_t reserved;
 };
 
+/* The way up for a report the lease takes (ODI_SW_MC_SNOOP_TRAP,
+ * odi_switch_mcast.h). MC_ROUTE: the argument is struct odi_sw_mc_route
+ * itself, 88 bytes, open to any file (it reads the classifier rows the
+ * kernel programmed and changes nothing). MC_SEND: struct odi_sw_mc_send,
+ * 1544 bytes, the lease holder only, and only while it holds the take:
+ * EPERM otherwise, EINVAL for a frame that is not an IGMP frame to an IPv4
+ * multicast MAC of 60 bytes or more, or a flow no upstream row queues on.
+ */
+
 /* ACL probes (odi_switch_acl_probe.h): the argument is struct
  * odi_sw_acl_probe itself, 72 bytes. SET and DEL are the hold of the open
  * file that made the first SET: its close removes every rule, and another
@@ -147,5 +157,7 @@ struct odi_sw_mc_snoop {
 #define ODI_SW_IOC_L2_MODE	0x4008530AU	/* _IOR ('S', 10, struct odi_sw_l2_mode) */
 #define ODI_SW_IOC_MC_SNOOP	0x8008530BU	/* _IOW ('S', 11, struct odi_sw_mc_snoop) */
 #define ODI_SW_IOC_ACL_PROBE	0xC048530CU	/* _IOWR('S', 12, struct odi_sw_acl_probe) */
+#define ODI_SW_IOC_MC_ROUTE	0xC058530DU	/* _IOWR('S', 13, struct odi_sw_mc_route) */
+#define ODI_SW_IOC_MC_SEND	0x8608530EU	/* _IOW ('S', 14, struct odi_sw_mc_send) */
 
 #endif /* ODI_REG_H */

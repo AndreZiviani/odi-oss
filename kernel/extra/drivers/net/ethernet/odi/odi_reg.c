@@ -4,7 +4,8 @@
  * register and per-port MIB accessors of odi_switch_mib.c (which
  * has the counter mapping and what is left out), and the L2 lookup table of odi_switch_l2.c: row readback, the
  * valid-row walk behind `diag l2-table`, and the L2 multicast add/delete
- * igmpd programs groups with; and the ACL probes of `diag acl-probe`
+ * igmpd programs groups with, its snooping lease and the way it sends a
+ * taken report up; and the ACL probes of `diag acl-probe`
  * (odi_switch_acl_probe.h), off until a shell on the stick asks.
  * Replaces the stock kernel's handling of RTK_OPT_REGISTER,
  * RTK_OPT_ADDRESS_GET/SET and RTK_OPT_STAT_PORT for our own userland:
@@ -245,6 +246,35 @@ static long odi_sw_ioctl_cmd(struct file *f, unsigned int cmd, void __user *argp
 			return rc;
 		odi_sw_snoop_owner = f;
 		return 0;
+	}
+	case ODI_SW_IOC_MC_ROUTE: {
+		struct odi_sw_mc_route r;
+		int rc;
+
+		if (copy_from_user(&r, argp, sizeof(r)))
+			return -EFAULT;
+		rc = odi_switch_mcast_route(&r);
+		if (rc)
+			return rc;
+		if (copy_to_user(argp, &r, sizeof(r)))
+			return -EFAULT;
+		return 0;
+	}
+	case ODI_SW_IOC_MC_SEND: {
+		/* Static, not on the stack: 1.5 KiB is a lot of a kernel
+		 * stack, and every ioctl here runs under odi_switch_lock, so
+		 * there is one caller at a time. */
+		static struct odi_sw_mc_send m;
+
+		/* The holder of the lease alone: what goes up is a report it
+		 * took, and nothing is anyone else's to send. */
+		if (f != odi_sw_snoop_owner)
+			return -EPERM;
+		if (copy_from_user(&m, argp, sizeof(m)))
+			return -EFAULT;
+		if (m.len > sizeof(m.frame))
+			return -EINVAL;
+		return odi_switch_mcast_send(m.frame, m.len, m.flow);
 	}
 	case ODI_SW_IOC_ACL_PROBE: {
 		struct odi_sw_acl_probe pr;

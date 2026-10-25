@@ -1,0 +1,21 @@
+# The upstream IGMP rate (attribute 6): one message a second. Three reports
+# in one second: the first goes up, the other two are dropped; the next
+# second one goes again. Tag control 0: each goes up as the switch's own row
+# would have tagged it (the dry run says so; the row is the kernel's answer).
+# Unauthorized joins are forwarded here, so the lists alone would not take
+# the reports: the rate does.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=0
+unauthorized_join=1
+us_tag_control=0
+us_rate=1
+allow=225.0.0.0-225.255.255.255
+end
+0 tick
+2 v2join 1 0 192.168.1.10 225.1.1.1
+2 v2join 1 0 192.168.1.11 225.1.1.2
+2 v2join 1 0 192.168.1.12 239.9.9.9
+3 v2join 1 0 192.168.1.10 225.1.1.1
+4 state

@@ -17,6 +17,7 @@ TEST  := $(BUILD)/frame_test
 GTEST := $(BUILD)/group_test
 PTEST := $(BUILD)/policy_test
 ETEST := $(BUILD)/entry_test
+UTEST := $(BUILD)/uplink_test
 DIAG  := ../diag
 
 ifeq ($(IN_CONTAINER),1)
@@ -32,11 +33,11 @@ CFLAGS := -std=c11 -Os -Wall -Wextra \
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
            -Wl,--gc-sections
 
-# switch_opt.c holds the three /dev/odi_sw ioctls this daemon programs the
-# switch with; its header lists them.
+# switch_opt.c holds the /dev/odi_sw ioctls this daemon programs the switch
+# with; its header lists them. uplink.c is the way up for a taken report.
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o $(BUILD)/group.o \
         $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/status.o $(BUILD)/entry.o $(BUILD)/program.o $(BUILD)/switch_opt.o \
-        $(BUILD)/replay.o $(BUILD)/main.o
+        $(BUILD)/uplink.o $(BUILD)/replay.o $(BUILD)/main.o
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
@@ -53,6 +54,10 @@ $(GTEST): test/group_test.c group.h policy.h igmpd.h $(BUILD)/start.o $(BUILD)/i
 $(PTEST): test/policy_test.c group.h policy.h state.h entry.h igmpd.h $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/group.o $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/entry.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/policy_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/group.o $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/entry.o
+
+$(UTEST): test/uplink_test.c uplink.h policy.h group.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/uplink.o $(BUILD)/policy.o $(BUILD)/group.o $(BUILD)/frame.o $(BUILD)/entry.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/uplink_test.c \
+	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/uplink.o $(BUILD)/policy.o $(BUILD)/group.o $(BUILD)/frame.o $(BUILD)/entry.o
 
 $(ETEST): test/entry_test.c entry.h $(DIAG)/src/odi_sw_ioctl.h $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/entry.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/entry_test.c \
@@ -73,7 +78,7 @@ $(BUILD)/group.o: group.c group.h policy.h igmpd.h | $(BUILD)
 $(BUILD)/state.o: state.c state.h group.h policy.h igmpd.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/status.o: status.c status.h state.h group.h policy.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/status.o: status.c status.h state.h group.h policy.h $(DIAG)/src/odi_sw_ioctl.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/policy.o: policy.c policy.h entry.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
@@ -88,10 +93,13 @@ $(BUILD)/program.o: program.c program.h entry.h switch_opt.h $(DIAG)/src/odi_sw_
 $(BUILD)/switch_opt.o: switch_opt.c switch_opt.h $(DIAG)/src/odi_sw_ioctl.h $(DIAG)/src/sys.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+$(BUILD)/uplink.o: uplink.c uplink.h policy.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 $(BUILD)/replay.o: replay.c replay.h igmpd.h group.h policy.h entry.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c status.h replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/main.o: main.c uplink.h status.h replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD):
@@ -115,11 +123,12 @@ igmpd: image
 # qemu with no device and no netlink. That is the point of keeping frame.c
 # free of syscalls.
 test: image
-	$(RUN) make IN_CONTAINER=1 $(TEST) $(GTEST) $(ETEST) $(PTEST) $(BIN)
+	$(RUN) make IN_CONTAINER=1 $(TEST) $(GTEST) $(ETEST) $(PTEST) $(UTEST) $(BIN)
 	@$(RUN) qemu-mips-static $(TEST)
 	@$(RUN) qemu-mips-static $(GTEST)
 	@$(RUN) qemu-mips-static $(ETEST)
 	@$(RUN) qemu-mips-static $(PTEST)
+	@$(RUN) qemu-mips-static $(UTEST)
 	@$(RUN) sh test/replay_test.sh
 
 size: igmpd

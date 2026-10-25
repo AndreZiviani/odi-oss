@@ -50,3 +50,13 @@ int igmp_sw_snoop(uint32_t flags)
 	sn.reserved = 0;
 	return sw_ioctl(ODI_SW_IOC_MC_SNOOP, &sn);
 }
+
+int igmp_sw_route(struct odi_sw_mc_route *r)
+{
+	return sw_ioctl(ODI_SW_IOC_MC_ROUTE, r);
+}
+
+int igmp_sw_send(struct odi_sw_mc_send *m)
+{
+	return sw_ioctl(ODI_SW_IOC_MC_SEND, m);
+}

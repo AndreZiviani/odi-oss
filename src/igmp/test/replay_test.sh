@@ -69,6 +69,7 @@ pf=/tmp/status-policy.txt
 printf 'snooping=1\nallow=225.0.0.0-225.255.255.255\n' > $pf
 out=$($Q $BIN -s $sf $pf 2>&1); rc=$?
 want='policy: snooping, function 0, timed leave, 2/125/1 s, limit 0, 1 allow + 0 static ranges
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
   allow 225.0.0.0 - 225.255.255.255
 joins 3, refused by the profile 2 (lists 2, group limit 0), table full 0
 groups held: 1

@@ -1,0 +1,44 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+  upstream: reports taken and sent by igmpd; tag replaced by vid 300 pri 3
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
+> 1 v2join 1 10 192.168.1.10 239.1.1.1
+port 1  vlan 10  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+  up: send with vid 300 pri 3 (tag control 2)  (not sent)
+  set vid 10 01:00:5e:01:01:01 ports 0x5  (not written)
+> 2 v2join 1 0 192.168.1.10 239.1.1.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:02  v2 report  group 239.1.1.2  src 192.168.1.10
+  up: send with vid 300 pri 3 (tag control 2)  (not sent)
+  set vid 0 01:00:5e:01:01:02 ports 0x5  (not written)
+> 3 policy
+> 4 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+  upstream: reports taken and sent by igmpd; tag vid replaced by 300
+> 5 rx 01:80:0b:01005e0101030200000000018100a00b080046c000200000000001027261c0a8010aef010103940400001600f9faef010103
+port 1  vlan 11  02:00:00:00:00:01 -> 01:00:5e:01:01:03  v2 report  group 239.1.1.3  src 192.168.1.10
+  up: send with vid 300 pri 5 (tag control 3)  (not sent)
+  set vid 11 01:00:5e:01:01:03 ports 0x5  (not written)
+> 6 v2join 1 0 192.168.1.10 239.1.1.4
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:04  v2 report  group 239.1.1.4  src 192.168.1.10
+  up: send with vid 300 pri 3 (tag control 3)  (not sent)
+  set vid 0 01:00:5e:01:01:04 ports 0x5  (not written)
+> 7 state
+joins=4
+denied=0
+groups=4
+up_sent=4
+group=239.1.1.1
+group=239.1.1.2
+group=239.1.1.3
+group=239.1.1.4
+> end
+joins=4
+denied=0
+groups=4
+up_sent=4
+group=239.1.1.1
+group=239.1.1.2
+group=239.1.1.3
+group=239.1.1.4
+status 0

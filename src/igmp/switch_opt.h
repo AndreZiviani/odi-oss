@@ -1,4 +1,4 @@
-/* The switch accessors igmpd programs through: three /dev/odi_sw ioctls,
+/* The switch accessors igmpd programs through: /dev/odi_sw ioctls,
  * answered by odi_switch_l2.c in our kernel (odi_reg.c dispatches them under
  * odi_switch_lock).
  *
@@ -34,5 +34,13 @@ int igmp_sw_mcast_del(struct odi_sw_l2_mcast *m);
  * wrote. -16 when another process holds it, -22 for flags the kernel
  * refuses, -25 for a kernel without the ioctl. */
 int igmp_sw_snoop(uint32_t flags);
+
+/* While the lease takes the reports (ODI_SW_MC_SNOOP_TRAP): where one goes up
+ * (the classifier row and flow, odi_sw_ioctl.h), and the send itself, on the
+ * same descriptor as the lease, which the kernel requires. -1 (EPERM) for a
+ * send without the take, -22 for a frame or flow the kernel refuses, -25 for
+ * a kernel without the ioctls. */
+int igmp_sw_route(struct odi_sw_mc_route *r);
+int igmp_sw_send(struct odi_sw_mc_send *m);
 
 #endif

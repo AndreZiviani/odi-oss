@@ -330,6 +330,48 @@ static void test_lease(void)
 	   "and on it, after the wrap: the drop");
 }
 
+/* When the reports are taken (ODI_SW_MC_SNOOP_TRAP) and igmpd sends them up:
+ * only for what the switch cannot do on its own (uplink.h). */
+static void test_take(void)
+{
+	struct igmp_policy p;
+
+	parse("snooping=1\n", &p);
+	ok(!igmp_policy_takes(&p) && igmp_policy_lease(&p, 0, 5000, 1260, 1) ==
+	   (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP),
+	   "no tag, no rate, no lists: a copy, as before");
+	parse("snooping=1\nus_tag_control=0\nus_tci=420\nus_rate=0\nunauthorized_join=0\n", &p);
+	ok(!igmp_policy_takes(&p) && p.us_tci == 420,
+	   "tag control 0 and rate 0, written out: a copy (the TCI alone asks nothing)");
+	parse("snooping=1\nus_tag_control=1\nus_tci=41380\n", &p);
+	ok(igmp_policy_takes(&p) && p.us_tag_control == 1 && p.us_tci == 41380,
+	   "tag control 1: taken");
+	ok(igmp_policy_lease(&p, 0, 1000, 1260, 1) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP),
+	   "taken from the start, while still learning");
+	ok(igmp_policy_lease(&p, 0, 5000, 1260, 1) ==
+	   (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP | ODI_SW_MC_SNOOP_PON_DROP),
+	   "and with the drop once learning is over");
+	ok(igmp_policy_lease(&p, 0, 5000, 1260, 0) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP),
+	   "the drop is still its own opt-in");
+	parse("snooping=1\nus_tag_control=2\n", &p);
+	ok(igmp_policy_takes(&p), "tag control 2: taken");
+	parse("snooping=1\nus_tag_control=3\n", &p);
+	ok(igmp_policy_takes(&p), "tag control 3: taken");
+	parse("snooping=1\nus_tag_control=7\n", &p);
+	ok(!igmp_policy_takes(&p), "a tag control G.988 does not define: left a copy");
+	parse("snooping=1\nus_rate=2\n", &p);
+	ok(igmp_policy_takes(&p), "a rate: taken");
+	parse("snooping=1\nallow=225.0.0.0-225.255.255.255\n", &p);
+	ok(igmp_policy_takes(&p), "lists, unauthorized joins discarded (the default): taken");
+	parse("snooping=1\nallow=225.0.0.0-225.255.255.255\nunauthorized_join=1\n", &p);
+	ok(!igmp_policy_takes(&p), "lists, unauthorized joins forwarded: a copy");
+	parse("snooping=1\nallow=225.0.0.0-225.255.255.255\nallow_overflow=1\n", &p);
+	ok(!igmp_policy_takes(&p), "lists not enforced (too many): a copy");
+	parse("snooping=0\nus_tag_control=1\nus_rate=5\n", &p);
+	ok(!igmp_policy_takes(&p) && igmp_policy_lease(&p, 0, 5000, 1260, 1) == 0,
+	   "not snooping: nothing taken, no lease");
+}
+
 static void test_state(void)
 {
 	static struct igmp_db db;
@@ -390,6 +432,7 @@ static void test_state(void)
 int main(void)
 {
 	test_lease();
+	test_take();
 	test_state();
 	test_parse();
 	test_acl();

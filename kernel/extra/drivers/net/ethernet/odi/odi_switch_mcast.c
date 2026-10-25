@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * The switch half of IGMP snooping: the ACL rule that copies the host's
- * IGMP to the CPU, the drop of unregistered IPv4 multicast from the PON
- * port, and the bookkeeping that lets both be taken back. odi_switch_mcast.h
- * says what each does and why.
+ * The switch half of IGMP snooping: the ACL rule that copies (or takes) the
+ * host's IGMP to the CPU, the drop of unregistered IPv4 multicast from the
+ * PON port, the bookkeeping that lets them be taken back, and the narrow way
+ * a taken report goes back up. odi_switch_mcast.h says what each does and
+ * why.
  *
  * The rule's words follow the ACL layout decoded from another open
  * implementation's measurements (a rule is two entries of one table, the
@@ -34,12 +35,16 @@
 #include "odi_switch_hw.h"
 #include "odi_switch_reg.h"
 #include "odi_switch_tbl.h"
+#include "odi_igmp_tx.h"
 
+#define ODI_SW_MC_EPERM		(-1)
 #define ODI_SW_MC_EINVAL	(-22)
 #define ODI_SW_MC_ENOSPC	(-28)
 
 volatile uint32_t odi_sw_mcast_copy_on;
+volatile uint32_t odi_sw_mcast_trap_on;
 void (*odi_sw_mcast_rx_enable)(void);
+int (*odi_sw_mcast_tx)(const uint8_t *frame, uint32_t len, uint32_t flow);
 
 /* What the copy rule changed, so it can be put back. */
 static uint32_t held;
@@ -115,21 +120,34 @@ static void mc_rule_planes(uint32_t ones[ODI_SW_MC_RULE_WORDS],
 
 /* The forwarding decision is bits 42:41 of the 96-bit action entry
  * (word 1 bits 10:9), 2 meaning "mirror", and its port mask bits 40:37
- * (word 1 bits 8:5): the CPU port, 3, alone.
+ * (word 1 bits 8:5): the CPU port, 3, alone. 3 is "trap", with no port:
+ * the frame goes to the CPU and nowhere else. Both were measured on a stick
+ * with diag acl-probe on the host's IGMP (docs/SWITCH.md, "Measured on a
+ * stick"): a mirror reached the CPU and still left by the PON, a trap
+ * reached the CPU by the rule's reason and nothing left by the PON.
  */
 #define MC_ACT_FWD_MIRROR	2U
+#define MC_ACT_FWD_TRAP		3U
 #define MC_ACT_CPU_PORT		3U
 
-static int mc_acl_install(void)
+static void mc_action(int trap, uint32_t act[ODI_SW_MC_ACTION_WORDS])
+{
+	act[0] = 0;
+	act[1] = trap ? MC_ACT_FWD_TRAP << 9 :
+		 (MC_ACT_FWD_MIRROR << 9) | ((1U << MC_ACT_CPU_PORT) << 5);
+	act[2] = 0;
+}
+
+static int mc_acl_install(int trap)
 {
 	static const uint32_t zero[ODI_SW_MC_RULE_WORDS] = { 0 };
 	uint32_t ones[ODI_SW_MC_RULE_WORDS], zeros[ODI_SW_MC_RULE_WORDS];
-	uint32_t act[ODI_SW_MC_ACTION_WORDS] = { 0, 0, 0 };
+	uint32_t act[ODI_SW_MC_ACTION_WORDS];
 	uint32_t permit, en;
 	int rc;
 
 	mc_rule_planes(ones, zeros);
-	act[1] = (MC_ACT_FWD_MIRROR << 9) | ((1U << MC_ACT_CPU_PORT) << 5);
+	mc_action(trap, act);
 
 	/* A permit for a frame no rule matches must be in place before the
 	 * lookup is on for the port: without it a port with lookup on drops
@@ -168,6 +186,17 @@ static int mc_acl_install(void)
 		return rc;
 	}
 	return 0;
+}
+
+/* The rule in place, mirror to take or back: only the action entry is
+ * rewritten, so the rule never stops matching on the way. */
+static int mc_acl_mode(int trap)
+{
+	uint32_t act[ODI_SW_MC_ACTION_WORDS];
+
+	mc_action(trap, act);
+	return odi_switch_table_write(ODI_SW_TBL_ACL_ACTIONS, ODI_SW_MC_ACL_ENTRY,
+				      act, ODI_SW_MC_ACTION_WORDS);
 }
 
 static void mc_acl_remove(void)
@@ -244,8 +273,9 @@ int odi_switch_mcast_snoop_set(uint32_t flags)
 		return ODI_SW_MC_EINVAL;
 	/* The drop only makes sense with the copy: without it no report
 	 * reaches the snooper, no row is ever written, and every group would
-	 * be dropped. */
-	if ((flags & ODI_SW_MC_SNOOP_PON_DROP) && !(flags & ODI_SW_MC_SNOOP_COPY))
+	 * be dropped. The take is a mode of the copy rule. */
+	if ((flags & (ODI_SW_MC_SNOOP_PON_DROP | ODI_SW_MC_SNOOP_TRAP)) &&
+	    !(flags & ODI_SW_MC_SNOOP_COPY))
 		return ODI_SW_MC_EINVAL;
 
 	/* Off first, on last, so the order of a change never leaves the drop
@@ -256,16 +286,40 @@ int odi_switch_mcast_snoop_set(uint32_t flags)
 	}
 	if ((held & ODI_SW_MC_SNOOP_COPY) && !(flags & ODI_SW_MC_SNOOP_COPY)) {
 		odi_sw_mcast_copy_on = 0;
+		odi_sw_mcast_trap_on = 0;
 		mc_acl_remove();
-		held &= ~ODI_SW_MC_SNOOP_COPY;
+		held &= ~(ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP);
+	}
+	/* A change of mode with the rule in: the hook's mark goes on before
+	 * the take and off after it, so a report in between is at worst sent
+	 * up twice (once by the switch, once by igmpd), never not at all. */
+	if ((held & ODI_SW_MC_SNOOP_COPY) && (flags & ODI_SW_MC_SNOOP_COPY) &&
+	    (held & ODI_SW_MC_SNOOP_TRAP) != (flags & ODI_SW_MC_SNOOP_TRAP)) {
+		int trap = (flags & ODI_SW_MC_SNOOP_TRAP) != 0;
+
+		if (trap)
+			odi_sw_mcast_trap_on = 1;
+		rc = mc_acl_mode(trap);
+		if (rc) {
+			odi_sw_mcast_trap_on = (held & ODI_SW_MC_SNOOP_TRAP) != 0;
+			return rc;
+		}
+		if (!trap)
+			odi_sw_mcast_trap_on = 0;
+		held = (held & ~ODI_SW_MC_SNOOP_TRAP) | (flags & ODI_SW_MC_SNOOP_TRAP);
 	}
 	if ((flags & ODI_SW_MC_SNOOP_COPY) && !(held & ODI_SW_MC_SNOOP_COPY)) {
+		int trap = (flags & ODI_SW_MC_SNOOP_TRAP) != 0;
+
 		if (odi_sw_mcast_rx_enable)
 			odi_sw_mcast_rx_enable();
-		rc = mc_acl_install();
-		if (rc)
+		odi_sw_mcast_trap_on = (uint32_t)trap;
+		rc = mc_acl_install(trap);
+		if (rc) {
+			odi_sw_mcast_trap_on = 0;
 			return rc;
-		held |= ODI_SW_MC_SNOOP_COPY;
+		}
+		held |= flags & (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP);
 		odi_sw_mcast_copy_on = 1;
 	}
 	if ((flags & ODI_SW_MC_SNOOP_PON_DROP) && !(held & ODI_SW_MC_SNOOP_PON_DROP)) {
@@ -335,4 +389,68 @@ void odi_switch_mcast_release(void)
 				    req.mac[0], req.mac[1], req.mac[2], req.mac[3],
 				    req.mac[4], req.mac[5]);
 	}
+}
+
+/* ---- the way back up --------------------------------------------------- */
+
+int odi_switch_mcast_route(struct odi_sw_mc_route *r)
+{
+	struct odi_sw_us_tags t;
+	struct odi_sw_us_treat tr;
+	uint32_t flow, row;
+
+	if ((r->mode != ODI_SW_MC_ROUTE_FRAME && r->mode != ODI_SW_MC_ROUTE_TAG) ||
+	    r->stag > 1U || r->ctag > 1U || r->svid > 4095U || r->cvid > 4095U ||
+	    r->spri > 7U || r->cpri > 7U || r->ethertype > 0xffffU ||
+	    (r->mode == ODI_SW_MC_ROUTE_TAG && (r->want_vid > 4094U || r->want_pri > 7U)))
+		return ODI_SW_MC_EINVAL;
+	r->verdict = ODI_SW_US_NONE;
+	r->via = r->row = r->flow = 0;
+	r->c_act = r->c_vid = r->c_pri = r->c_src = 0;
+	r->s_act = r->s_vid = r->s_pri = r->s_src = 0;
+
+	if (r->mode == ODI_SW_MC_ROUTE_TAG &&
+	    !odi_switch_bdgconn_us_by_tag(r->want_vid, r->want_pri, &flow, &row)) {
+		r->verdict = ODI_SW_US_FWD;
+		r->via = ODI_SW_MC_ROUTE_TAG;
+		r->row = row;
+		r->flow = flow;
+		return 0;
+	}
+	t.stag = r->stag;
+	t.svid = r->svid;
+	t.spri = r->spri;
+	t.ctag = r->ctag;
+	t.cvid = r->cvid;
+	t.cpri = r->cpri;
+	t.ethertype = r->ethertype;
+	odi_switch_bdgconn_us_classify(&t, &tr);
+	r->verdict = tr.verdict;
+	r->via = ODI_SW_MC_ROUTE_FRAME;
+	r->row = tr.row;
+	r->flow = tr.flow;
+	r->c_act = tr.c_act;
+	r->c_vid = tr.c_vid;
+	r->c_pri = tr.c_pri;
+	r->c_src = tr.c_src;
+	r->s_act = tr.s_act;
+	r->s_vid = tr.s_vid;
+	r->s_pri = tr.s_pri;
+	r->s_src = tr.s_src;
+	return 0;
+}
+
+int odi_switch_mcast_send(const uint8_t *frame, uint32_t len, uint32_t flow)
+{
+	/* Only while the reports are taken: with the copy alone the switch
+	 * has already sent the report, and with no lease nothing is igmpd's
+	 * to send. */
+	if (!(held & ODI_SW_MC_SNOOP_TRAP))
+		return ODI_SW_MC_EPERM;
+	if (!odi_igmp_tx_frame_ok(frame, len) || flow > ODI_IGMP_TX_FLOW_MAX ||
+	    !odi_switch_bdgconn_us_flow_known(flow))
+		return ODI_SW_MC_EINVAL;
+	if (!odi_sw_mcast_tx)
+		return ODI_SW_MC_EPERM;
+	return odi_sw_mcast_tx(frame, len, flow);
 }

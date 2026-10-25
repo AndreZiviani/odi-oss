@@ -21,6 +21,9 @@
  *   last_member_query=S  seconds (tenths in the profile), 1 when unset
  *   max_groups=N         ME 310 maximum simultaneous groups, 0 = no limit
  *   unauthorized_join=0|1
+ *   us_tag_control=N     attribute 5, the upstream IGMP tag control as sent
+ *   us_tci=N             attribute 4, the upstream IGMP TCI (16 bits)
+ *   us_rate=N            attribute 6, messages a second, 0 = no limit
  *   allow=A-B            a range of the dynamic access control list
  *   static=A-B           a range of the static access control list
  *   allow_overflow=1     the OLT sent more ranges than fit: not enforced
@@ -336,6 +339,9 @@ static void build(void)
 	pkv("query_max_response", tenths_to_s(row_u32(prof, c309, 13), 100));
 	pkv("last_member_query", tenths_to_s(row_u32(prof, c309, 14), 10));
 	pkv("unauthorized_join", row_u32(prof, c309, 15) ? 1u : 0u);
+	pkv("us_tag_control", row_u32(prof, c309, 5));
+	pkv("us_tci", row_u32(prof, c309, 4));
+	pkv("us_rate", row_u32(prof, c309, 6));
 	pkv("max_groups", row_u32(sub, c310, 3));
 	if (acl_lines(prof, 7, "allow") < 0)
 		ov = 1;
