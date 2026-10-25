@@ -40,9 +40,8 @@ chmod +x "$T"/etc/scripts/*
 run() { FAKE_VALUE="$1" FAKE_DROP="${2-}" sh "$T/svc.sh" 2>&1; }
 
 eq "IGMP_SNOOPING=1 runs igmpd, writing, under respawn.sh" \
-   "RUN 0 /var/log/services.log $T/bin/igmpd -w -d" "$(run 1)"
-# IGMP_PON_DROP: unset follows IGMP_SNOOPING (a stick that ran with
-# IGMP_SNOOPING=1 keeps its drop); 0 snoops only; 1 asks for the drop.
+   "RUN 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1)"
+# IGMP_PON_DROP: strictly opt-in; only 1 asks for the drop.
 eq "IGMP_PON_DROP=0 snoops without the drop" \
    "RUN 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1 0)"
 eq "IGMP_PON_DROP=1 drops" \

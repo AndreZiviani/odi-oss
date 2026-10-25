@@ -8,10 +8,11 @@ listed here.
 - igmpd: the PON-side drop of unjoined multicast is now its own opt-in key,
   `IGMP_PON_DROP`, instead of coming with `IGMP_SNOOPING=1`. Snooping can run
   (the copy of the host's IGMP, the group rows, the OLT's limits and lists)
-  with nothing dropped, which is the part that can cut a stream. `1` drops,
-  `0` does not; unset follows `IGMP_SNOOPING`, so a config that already had
-  `IGMP_SNOOPING=1` behaves exactly as before and nothing needs changing.
-  To snoop without the drop, set `IGMP_PON_DROP=0` and run `apply.sh igmp`.
+  with nothing dropped, which is the part that can cut a stream. Only
+  `1` drops; unset is off. A config with `IGMP_SNOOPING=1` that wants the
+  drop as before must now set `IGMP_PON_DROP=1` (and run `apply.sh igmp`);
+  without it, unjoined multicast is simply no longer dropped on the PON side.
+  Snooping is still experimental.
   `igmpd` gets `-d` for it; without `-d` it never asks the switch to drop.
 
 - omcid: the extra multicast GEM ports an OLT names only in address rows now
