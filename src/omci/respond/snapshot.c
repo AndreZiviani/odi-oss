@@ -13,7 +13,7 @@
  * Written atomically (temp file + rename, cfgstore.c's own pattern) after
  * every MIB-changing message (Create, Set, Delete); mib_reset_all() deletes
  * it instead, so a MIB reset is never followed by a resume into a MIB the
- * OLT just discarded. Compact: the two pools sized for the worst case (384
+ * OLT just discarded. Compact: the two pools sized for the worst case (320
  * rows, 256 services) are written only as the entries actually in use, not
  * the fixed arrays -- ISP1's few dozen rows and half a dozen services are a
  * few KB, not the tens of KB the fixed pools would cost.
@@ -27,14 +27,22 @@
 #define SNAP_VERSION 6   /* 2: the upstream state the driver holds (qos_prog_state()) and table attribute storage; 3: both; 4: rows of 96 bytes; 5: a wide row also carries the bytes past 96 (side pool); 6: a table pool of 255 rows */
 
 /* Header (26 bytes: magic 4, version 2, devid 8, serial 9, sync 1, alarm 2)
- * + one row's worst case (2+2+2+1+1+1+1+96 = 106) times every row (384:
- * 40704), + the bytes past 96 of every wide row (32 * 288: 9216), + the
+ * + one row's worst case (2+2+2+1+1+1+1+96 = 106) times every row (320:
+ * 33920), + the bytes past 96 of every wide row (32 * 288: 9216), + the
  * fixed pools (tblpool 255 * 35, flow_us, flow_ds, bc_flow, tcont_map, the
  * upstream state) + the service table worst case (256 * (2 + 160)) + the
- * trailing crc32 (4): a little over 100 KB. Every row and 256 services in
- * use at once never happens on this MIB (ISP1 holds 185 rows and a handful
- * of services), but the buffer is sized for it so a pathological session
+ * trailing crc32 (4): close to 100 KB. Every row and 256 services in use at
+ * once never happens on this MIB (ISP1 holds 185 rows and a handful of
+ * services), but the buffer is sized for it so a pathological session
  * degrades to "truncated, next save catches up" rather than overrunning.
+ *
+ * One buffer serves both the save and the resume. They cannot overlap:
+ * the resume runs once, from main() before the main loop, and nothing it
+ * calls saves; every save comes later, from the loop (a Create, Set or
+ * Delete, a rebuild, an alarm, a reload). And the resume keeps nothing that
+ * points into the buffer -- it copies every row, pool and service out --
+ * so the first save may overwrite it. Two buffers cost 128 KB of RAM for
+ * nothing.
  */
 #define SNAP_BUF_MAX 131072
 
@@ -246,7 +254,7 @@ static int refuse(const char **why, const char *reason)
 
 int snapshot_try_resume(uint32_t onu_state, const char **why)
 {
-	static uint8_t buf[SNAP_BUF_MAX];
+	uint8_t *buf = snapbuf;                  /* see SNAP_BUF_MAX */
 	const uint8_t *p;
 	long fd, n;
 	uint16_t rows, servs;
@@ -258,7 +266,7 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 	fd = sys_open(SNAPSHOT_PATH, O_RDONLY);
 	if (fd < 0)
 		return refuse(why, "no_snapshot");
-	n = sys_read((int)fd, buf, sizeof buf);
+	n = sys_read((int)fd, buf, SNAP_BUF_MAX);
 	sys_close((int)fd);
 	/* Header plus at least the fixed tail and its own crc; anything
 	 * shorter is not a snapshot this code wrote. */

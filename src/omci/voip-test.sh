@@ -375,8 +375,25 @@ check "the SIP agent's set TCP/UDP pointer is back" \
 $Q cli/build/omcli mib get 153 --secrets > /tmp/voip-dump 2>&1
 check "the display name is back" "$(leaks /tmp/voip-dump "$NAME" "$NAMEX")" "1"
 
+# The resume and the saves share one buffer (snapshot.c): a Set after a
+# resume is saved, together with everything the resume brought back, and a
+# second respawn finds both.
+send "$log2" 00e3 48 0096 0001 040000000708
+kill -9 "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
+log3=/tmp/omcid-voip3.log
+$Q respond/build/omcid -d -s 5 -g /tmp/voip-gpon > "$log3" 2>&1 &
+pid=$!
+omcid_up "$log3"
+check "a second respawn resumed too" "$(grep -c 'snapshot loaded' "$log3")" "1"
+send "$log3" 00e4 49 0096 0001 0400
+check "with the Set made after the first resume" \
+      "$(answer "$log3" 00e4 | cut -c1-14)" "00040000000708"
+check "and the rows the first resume brought back" \
+      "$(table "$log3" b14 0091 0001 0400)" "$D3$D2"
+
 # A MIB reset drops every one of them, and the snapshot.
-send "$log2" 00f0 4f 0002 0000 ""
+send "$log3" 00f0 4f 0002 0000 ""
 for c in 58 139 145 150 153; do
 	check "after a MIB reset class $c holds nothing" \
 	      "$($Q cli/build/omcli mib get "$c" 2>&1 | tail -1)" "0 rows"
@@ -384,6 +401,6 @@ done
 check "and the snapshot is gone" "$([ -e /var/run/omcid-mib.snap ] && echo there)" ""
 omcid_stop "$pid"
 
-[ "$fail" -eq 0 ] || { keep_log "$log" voip-test.log; keep_log "${log2:-$log}" voip-test2.log; }
+[ "$fail" -eq 0 ] || { keep_log "$log" voip-test.log; keep_log "${log2:-$log}" voip-test2.log; keep_log "${log3:-$log}" voip-test3.log; }
 if [ "$fail" -eq 0 ]; then echo "voip-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
 suite_exit

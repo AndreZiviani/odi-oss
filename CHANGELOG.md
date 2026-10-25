@@ -17,9 +17,10 @@ listed here.
   name stay out of the log and are masked in `omcicli mib get`. The stick does
   not tell the OLT of any phone port yet, so on its own the key changes
   nothing an OLT sees. Changing it re-registers the ONU. To make room for a
-  data service and two phone lines at once, omcid now holds 384 managed
+  data service and two phone lines at once, omcid now holds 320 managed
   entities (was 256), 32 entities wider than a row (was 16) and 255 table
-  rows (was 128).
+  rows (was 128); its MIB snapshot reuses one buffer for saving and
+  resuming, so its RAM still shrinks by about 37 KB overall.
 - omcid: the extra multicast GEM ports an OLT names only in address rows now
   get a downstream flow. G.988 lets one multicast GEM interworking TP (ME 281)
   spread the channels over several GEM ports by writing more rows, with other

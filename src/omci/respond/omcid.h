@@ -74,16 +74,18 @@
  * line its voice CTP, SIP user, authentication method, the large strings and
  * network addresses of its servers and number, four PM entities and their
  * thresholds, the voice flow's GEM port and bridge port with their three
- * tables; once, the profiles), which would leave 256 rows about ten from
- * full, no margin for an OLT that provisions more than ISP1's. The wide
- * rows: with a SIP agent per line, as some OLTs provision it, each line
- * points at four large strings (proxy, outbound proxy, host part, registrar
- * address) besides its number, voicemail address and authentication method
- * -- seven a line -- and the TR-069 server's two, the IP hosts the OLT sets
- * (134 is wide too) and an extended multicast profile come on top: about
- * nineteen, past the 16 slots the pool started with.
+ * tables; once, the profiles): about 245, which 256 would leave about ten
+ * from full and 320 leaves some seventy rows of margin, at 208 bytes a row.
+ * Past it a Create is answered "processing error" and logged ("no room in
+ * the MIB"), as it always was. The wide rows: with a SIP agent per line, as
+ * some OLTs provision it, each line points at four large strings (proxy,
+ * outbound proxy, host part, registrar address) besides its number,
+ * voicemail address and authentication method -- seven a line -- and the
+ * TR-069 server's two, the IP hosts the OLT sets (134 is wide too) and an
+ * extended multicast profile come on top: about nineteen, past the 16 slots
+ * the pool started with.
  */
-#define MIB_ROWS      384
+#define MIB_ROWS      320
 #define MIB_ROW_MAX   96
 #define MIB_WIDE_MAX  384                /* covers the widest entity of the
 					  * model, a large string at 376 */
