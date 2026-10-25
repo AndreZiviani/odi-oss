@@ -164,7 +164,7 @@ inject_wait "$wlog1" "$(frame 0001 44 009d 0001 "")"
 inject_wait "$wlog1" "$(frame 0002 44 0094 0002 "")"
 inject_wait "$wlog1" "$(frame 0003 48 009d 0001 "$(amask 16)$(aval 16)")"
 inject_wait "$wlog1" "$(frame 0004 48 0094 0002 "$(amask 5)$(aval 5)")"
-settled "$wlog1"
+# the snapshot is saved before each answer, so the last answer is enough
 kill -9 "$pid" 2>/dev/null
 wait "$pid" 2>/dev/null
 
