@@ -1,0 +1,659 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, timed leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+snooping lease: copy host IGMP to the CPU  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 225.1.1.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.2.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:02:01  v2 report  group 225.1.2.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:02:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.3.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:03:01  v2 report  group 225.1.3.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:03:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.4.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:04:01  v2 report  group 225.1.4.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:04:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.5.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:05:01  v2 report  group 225.1.5.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:05:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.6.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:06:01  v2 report  group 225.1.6.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:06:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.7.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:07:01  v2 report  group 225.1.7.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:07:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.8.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:08:01  v2 report  group 225.1.8.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:08:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.9.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:09:01  v2 report  group 225.1.9.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:09:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.10.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:0a:01  v2 report  group 225.1.10.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:0a:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.11.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:0b:01  v2 report  group 225.1.11.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:0b:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.12.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:0c:01  v2 report  group 225.1.12.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:0c:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.13.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:0d:01  v2 report  group 225.1.13.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:0d:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.14.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:0e:01  v2 report  group 225.1.14.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:0e:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.15.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:0f:01  v2 report  group 225.1.15.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:0f:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.16.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:10:01  v2 report  group 225.1.16.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:10:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.17.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:11:01  v2 report  group 225.1.17.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:11:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.18.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:12:01  v2 report  group 225.1.18.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:12:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.19.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:13:01  v2 report  group 225.1.19.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:13:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.20.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:14:01  v2 report  group 225.1.20.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:14:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.21.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:15:01  v2 report  group 225.1.21.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:15:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.22.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:16:01  v2 report  group 225.1.22.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:16:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.23.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:17:01  v2 report  group 225.1.23.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:17:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.24.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:18:01  v2 report  group 225.1.24.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:18:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.25.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:19:01  v2 report  group 225.1.25.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:19:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.26.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:1a:01  v2 report  group 225.1.26.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:1a:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.27.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:1b:01  v2 report  group 225.1.27.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:1b:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.28.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:1c:01  v2 report  group 225.1.28.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:1c:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.29.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:1d:01  v2 report  group 225.1.29.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:1d:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.30.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:1e:01  v2 report  group 225.1.30.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:1e:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.31.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:1f:01  v2 report  group 225.1.31.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:1f:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.32.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:20:01  v2 report  group 225.1.32.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:20:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.33.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:21:01  v2 report  group 225.1.33.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:21:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.34.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:22:01  v2 report  group 225.1.34.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:22:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.35.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:23:01  v2 report  group 225.1.35.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:23:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.36.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:24:01  v2 report  group 225.1.36.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:24:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.37.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:25:01  v2 report  group 225.1.37.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:25:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.38.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:26:01  v2 report  group 225.1.38.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:26:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.39.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:27:01  v2 report  group 225.1.39.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:27:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.40.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:28:01  v2 report  group 225.1.40.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:28:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.41.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:29:01  v2 report  group 225.1.41.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:29:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.42.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:2a:01  v2 report  group 225.1.42.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:2a:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.43.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:2b:01  v2 report  group 225.1.43.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:2b:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.44.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:2c:01  v2 report  group 225.1.44.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:2c:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.45.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:2d:01  v2 report  group 225.1.45.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:2d:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.46.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:2e:01  v2 report  group 225.1.46.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:2e:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.47.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:2f:01  v2 report  group 225.1.47.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:2f:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.48.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:30:01  v2 report  group 225.1.48.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:30:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.49.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:31:01  v2 report  group 225.1.49.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:31:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.50.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:32:01  v2 report  group 225.1.50.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:32:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.51.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:33:01  v2 report  group 225.1.51.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:33:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.52.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:34:01  v2 report  group 225.1.52.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:34:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.53.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:35:01  v2 report  group 225.1.53.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:35:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.54.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:36:01  v2 report  group 225.1.54.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:36:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.55.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:37:01  v2 report  group 225.1.55.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:37:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.56.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:38:01  v2 report  group 225.1.56.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:38:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.57.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:39:01  v2 report  group 225.1.57.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:39:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.58.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:3a:01  v2 report  group 225.1.58.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:3a:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.59.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:3b:01  v2 report  group 225.1.59.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:3b:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.60.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:3c:01  v2 report  group 225.1.60.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:3c:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.61.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:3d:01  v2 report  group 225.1.61.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:3d:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.62.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:3e:01  v2 report  group 225.1.62.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:3e:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.63.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:3f:01  v2 report  group 225.1.63.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:3f:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.64.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:40:01  v2 report  group 225.1.64.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:40:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.65.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:41:01  v2 report  group 225.1.65.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:41:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.66.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:42:01  v2 report  group 225.1.66.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:42:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.67.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:43:01  v2 report  group 225.1.67.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:43:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.68.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:44:01  v2 report  group 225.1.68.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:44:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.69.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:45:01  v2 report  group 225.1.69.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:45:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.70.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:46:01  v2 report  group 225.1.70.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:46:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.71.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:47:01  v2 report  group 225.1.71.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:47:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.72.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:48:01  v2 report  group 225.1.72.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:48:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.73.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:49:01  v2 report  group 225.1.73.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:49:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.74.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:4a:01  v2 report  group 225.1.74.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:4a:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.75.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:4b:01  v2 report  group 225.1.75.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:4b:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.76.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:4c:01  v2 report  group 225.1.76.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:4c:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.77.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:4d:01  v2 report  group 225.1.77.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:4d:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.78.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:4e:01  v2 report  group 225.1.78.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:4e:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.79.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:4f:01  v2 report  group 225.1.79.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:4f:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.80.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:50:01  v2 report  group 225.1.80.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:50:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.81.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:51:01  v2 report  group 225.1.81.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:51:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.82.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:52:01  v2 report  group 225.1.82.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:52:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.83.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:53:01  v2 report  group 225.1.83.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:53:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.84.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:54:01  v2 report  group 225.1.84.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:54:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.85.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:55:01  v2 report  group 225.1.85.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:55:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.86.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:56:01  v2 report  group 225.1.86.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:56:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.87.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:57:01  v2 report  group 225.1.87.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:57:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.88.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:58:01  v2 report  group 225.1.88.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:58:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.89.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:59:01  v2 report  group 225.1.89.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:59:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.90.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:5a:01  v2 report  group 225.1.90.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:5a:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.91.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:5b:01  v2 report  group 225.1.91.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:5b:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.92.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:5c:01  v2 report  group 225.1.92.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:5c:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.93.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:5d:01  v2 report  group 225.1.93.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:5d:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.94.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:5e:01  v2 report  group 225.1.94.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:5e:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.95.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:5f:01  v2 report  group 225.1.95.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:5f:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.96.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:60:01  v2 report  group 225.1.96.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:60:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.97.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:61:01  v2 report  group 225.1.97.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:61:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.98.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:62:01  v2 report  group 225.1.98.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:62:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.99.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:63:01  v2 report  group 225.1.99.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:63:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.100.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:64:01  v2 report  group 225.1.100.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:64:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.101.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:65:01  v2 report  group 225.1.101.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:65:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.102.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:66:01  v2 report  group 225.1.102.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:66:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.103.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:67:01  v2 report  group 225.1.103.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:67:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.104.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:68:01  v2 report  group 225.1.104.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:68:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.105.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:69:01  v2 report  group 225.1.105.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:69:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.106.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:6a:01  v2 report  group 225.1.106.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:6a:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.107.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:6b:01  v2 report  group 225.1.107.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:6b:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.108.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:6c:01  v2 report  group 225.1.108.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:6c:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.109.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:6d:01  v2 report  group 225.1.109.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:6d:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.110.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:6e:01  v2 report  group 225.1.110.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:6e:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.111.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:6f:01  v2 report  group 225.1.111.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:6f:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.112.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:70:01  v2 report  group 225.1.112.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:70:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.113.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:71:01  v2 report  group 225.1.113.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:71:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.114.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:72:01  v2 report  group 225.1.114.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:72:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.115.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:73:01  v2 report  group 225.1.115.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:73:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.116.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:74:01  v2 report  group 225.1.116.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:74:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.117.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:75:01  v2 report  group 225.1.117.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:75:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.118.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:76:01  v2 report  group 225.1.118.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:76:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.119.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:77:01  v2 report  group 225.1.119.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:77:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.120.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:78:01  v2 report  group 225.1.120.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:78:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.121.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:79:01  v2 report  group 225.1.121.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:79:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.122.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:7a:01  v2 report  group 225.1.122.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:7a:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.123.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:7b:01  v2 report  group 225.1.123.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:7b:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.124.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:7c:01  v2 report  group 225.1.124.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:7c:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.125.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:7d:01  v2 report  group 225.1.125.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:7d:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.126.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:7e:01  v2 report  group 225.1.126.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:7e:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.127.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:7f:01  v2 report  group 225.1.127.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:7f:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.128.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:80:01  v2 report  group 225.1.128.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:80:01 ports 0x5  (not written)
+> 2 v2join 1 0 192.168.1.10 225.2.0.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:02:00:01  v2 report  group 225.2.0.1  src 192.168.1.10
+> 3 status
+policy: snooping, function 0, timed leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+joins 128, refused by the profile 0 (lists 0, group limit 0), table full 1
+groups held: 128
+  225.1.1.1
+  225.1.2.1
+  225.1.3.1
+  225.1.4.1
+  225.1.5.1
+  225.1.6.1
+  225.1.7.1
+  225.1.8.1
+  225.1.9.1
+  225.1.10.1
+  225.1.11.1
+  225.1.12.1
+  225.1.13.1
+  225.1.14.1
+  225.1.15.1
+  225.1.16.1
+  225.1.17.1
+  225.1.18.1
+  225.1.19.1
+  225.1.20.1
+  225.1.21.1
+  225.1.22.1
+  225.1.23.1
+  225.1.24.1
+  225.1.25.1
+  225.1.26.1
+  225.1.27.1
+  225.1.28.1
+  225.1.29.1
+  225.1.30.1
+  225.1.31.1
+  225.1.32.1
+  225.1.33.1
+  225.1.34.1
+  225.1.35.1
+  225.1.36.1
+  225.1.37.1
+  225.1.38.1
+  225.1.39.1
+  225.1.40.1
+  225.1.41.1
+  225.1.42.1
+  225.1.43.1
+  225.1.44.1
+  225.1.45.1
+  225.1.46.1
+  225.1.47.1
+  225.1.48.1
+  225.1.49.1
+  225.1.50.1
+  225.1.51.1
+  225.1.52.1
+  225.1.53.1
+  225.1.54.1
+  225.1.55.1
+  225.1.56.1
+  225.1.57.1
+  225.1.58.1
+  225.1.59.1
+  225.1.60.1
+  225.1.61.1
+  225.1.62.1
+  225.1.63.1
+  225.1.64.1
+  225.1.65.1
+  225.1.66.1
+  225.1.67.1
+  225.1.68.1
+  225.1.69.1
+  225.1.70.1
+  225.1.71.1
+  225.1.72.1
+  225.1.73.1
+  225.1.74.1
+  225.1.75.1
+  225.1.76.1
+  225.1.77.1
+  225.1.78.1
+  225.1.79.1
+  225.1.80.1
+  225.1.81.1
+  225.1.82.1
+  225.1.83.1
+  225.1.84.1
+  225.1.85.1
+  225.1.86.1
+  225.1.87.1
+  225.1.88.1
+  225.1.89.1
+  225.1.90.1
+  225.1.91.1
+  225.1.92.1
+  225.1.93.1
+  225.1.94.1
+  225.1.95.1
+  225.1.96.1
+  225.1.97.1
+  225.1.98.1
+  225.1.99.1
+  225.1.100.1
+  225.1.101.1
+  225.1.102.1
+  225.1.103.1
+  225.1.104.1
+  225.1.105.1
+  225.1.106.1
+  225.1.107.1
+  225.1.108.1
+  225.1.109.1
+  225.1.110.1
+  225.1.111.1
+  225.1.112.1
+  225.1.113.1
+  225.1.114.1
+  225.1.115.1
+  225.1.116.1
+  225.1.117.1
+  225.1.118.1
+  225.1.119.1
+  225.1.120.1
+  225.1.121.1
+  225.1.122.1
+  225.1.123.1
+  225.1.124.1
+  225.1.125.1
+  225.1.126.1
+  225.1.127.1
+  225.1.128.1
+recent refusals, newest first:
+  225.2.0.1  vid 0  no free table entry (full)  at 2 s
+> end
+joins=128
+denied=0
+groups=128
+refused_full=1
+group=225.1.1.1
+group=225.1.2.1
+group=225.1.3.1
+group=225.1.4.1
+group=225.1.5.1
+group=225.1.6.1
+group=225.1.7.1
+group=225.1.8.1
+group=225.1.9.1
+group=225.1.10.1
+group=225.1.11.1
+group=225.1.12.1
+group=225.1.13.1
+group=225.1.14.1
+group=225.1.15.1
+group=225.1.16.1
+group=225.1.17.1
+group=225.1.18.1
+group=225.1.19.1
+group=225.1.20.1
+group=225.1.21.1
+group=225.1.22.1
+group=225.1.23.1
+group=225.1.24.1
+group=225.1.25.1
+group=225.1.26.1
+group=225.1.27.1
+group=225.1.28.1
+group=225.1.29.1
+group=225.1.30.1
+group=225.1.31.1
+group=225.1.32.1
+group=225.1.33.1
+group=225.1.34.1
+group=225.1.35.1
+group=225.1.36.1
+group=225.1.37.1
+group=225.1.38.1
+group=225.1.39.1
+group=225.1.40.1
+group=225.1.41.1
+group=225.1.42.1
+group=225.1.43.1
+group=225.1.44.1
+group=225.1.45.1
+group=225.1.46.1
+group=225.1.47.1
+group=225.1.48.1
+group=225.1.49.1
+group=225.1.50.1
+group=225.1.51.1
+group=225.1.52.1
+group=225.1.53.1
+group=225.1.54.1
+group=225.1.55.1
+group=225.1.56.1
+group=225.1.57.1
+group=225.1.58.1
+group=225.1.59.1
+group=225.1.60.1
+group=225.1.61.1
+group=225.1.62.1
+group=225.1.63.1
+group=225.1.64.1
+group=225.1.65.1
+group=225.1.66.1
+group=225.1.67.1
+group=225.1.68.1
+group=225.1.69.1
+group=225.1.70.1
+group=225.1.71.1
+group=225.1.72.1
+group=225.1.73.1
+group=225.1.74.1
+group=225.1.75.1
+group=225.1.76.1
+group=225.1.77.1
+group=225.1.78.1
+group=225.1.79.1
+group=225.1.80.1
+group=225.1.81.1
+group=225.1.82.1
+group=225.1.83.1
+group=225.1.84.1
+group=225.1.85.1
+group=225.1.86.1
+group=225.1.87.1
+group=225.1.88.1
+group=225.1.89.1
+group=225.1.90.1
+group=225.1.91.1
+group=225.1.92.1
+group=225.1.93.1
+group=225.1.94.1
+group=225.1.95.1
+group=225.1.96.1
+group=225.1.97.1
+group=225.1.98.1
+group=225.1.99.1
+group=225.1.100.1
+group=225.1.101.1
+group=225.1.102.1
+group=225.1.103.1
+group=225.1.104.1
+group=225.1.105.1
+group=225.1.106.1
+group=225.1.107.1
+group=225.1.108.1
+group=225.1.109.1
+group=225.1.110.1
+group=225.1.111.1
+group=225.1.112.1
+group=225.1.113.1
+group=225.1.114.1
+group=225.1.115.1
+group=225.1.116.1
+group=225.1.117.1
+group=225.1.118.1
+group=225.1.119.1
+group=225.1.120.1
+group=225.1.121.1
+group=225.1.122.1
+group=225.1.123.1
+group=225.1.124.1
+group=225.1.125.1
+group=225.1.126.1
+group=225.1.127.1
+group=225.1.128.1
+refused=full 225.2.0.1 vid=0 at=2 n=1
+status 0

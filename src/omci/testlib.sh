@@ -82,7 +82,10 @@ omcid_stop() {
 
 # omcid_up <log> [seconds]: omcid has started and is serving (it prints this
 # line, flushed, just before its loop). Everything it printed at startup is in
-# the log by then.
+# the log by then. A suite that reuses a log path empties it (`: > log`)
+# BEFORE starting the daemon: `omcid > log &` truncates in the forked child,
+# so without that this can still read the previous daemon's line and return
+# before the new one has its queue or has printed anything.
 omcid_up() {
 	wait_for "$1" 'answering as' "${2:-30}"
 }
@@ -103,8 +106,8 @@ tci_of() {
 inject_wait() {
 	_iw_tci=$(tci_of "$2")
 	_iw_n=$(grep -c -- "^-> $_iw_tci" "$1" 2>/dev/null || true)
-	if ! $Q cli/build/omcli --inject "$2" > /dev/null 2>&1; then
-		echo "FAIL  omcli --inject did not send the frame $2 (no daemon queue?)"
+	if ! _iw_out=$($Q cli/build/omcli --inject "$2" 2>&1); then
+		echo "FAIL  omcli --inject did not send the frame $2 (no daemon queue?): $_iw_out"
 		fail=$((fail + 1))
 		return 1
 	fi

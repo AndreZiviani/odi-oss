@@ -1,0 +1,33 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 1 allow + 1 static ranges
+snooping lease: copy host IGMP to the CPU  (not written)
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+> 2 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+> 3 v2join 1 100 192.168.1.10 239.1.1.1
+port 1  vlan 100  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+> 4 v2join 1 0 192.168.1.10 225.2.2.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:02:02:02  v2 report  group 225.2.2.2  src 192.168.1.10
+  set vid 0 01:00:5e:02:02:02 ports 0x5  (not written)
+> 5 status
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 1 allow + 1 static ranges
+  allow 225.0.0.0 - 225.255.255.255
+  static 226.1.1.1 - 226.1.1.1
+joins 1, refused by the profile 3 (lists 3, group limit 0), table full 0
+groups held: 1
+  225.2.2.2
+recent refusals, newest first:
+  239.1.1.1  vid 100  outside the access control lists (acl)  at 3 s
+  239.1.1.1  vid 0  outside the access control lists (acl)  x2  at 2 s
+> end
+joins=1
+denied=3
+groups=1
+refused_acl=3
+group=225.2.2.2
+refused=acl 239.1.1.1 vid=0 at=2 n=2
+refused=acl 239.1.1.1 vid=100 at=3 n=1
+status 0

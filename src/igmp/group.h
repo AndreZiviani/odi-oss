@@ -114,16 +114,48 @@ struct igmp_hist {
 	uint32_t gap;
 };
 
+/* Why a join got no state. The numbers are the state file's order. */
+enum igmp_refusal_reason {
+	IGMP_REFUSE_ACL = 1,    /* outside the OLT's access control lists */
+	IGMP_REFUSE_LIMIT,      /* past the group limit of ME 310 */
+	IGMP_REFUSE_FULL,       /* the table has no free entry */
+	IGMP_REFUSE_REASONS     /* one past the last, for array sizes */
+};
+
+/* The last few refusals, for whoever has to answer "why does this channel not
+ * play". Eight, fixed: the ring goes into the state file, which omcid reads in
+ * a 4096-byte buffer next to up to 128 group lines, so it cannot be allowed to
+ * grow; and what a support question needs is the group the set-top box keeps
+ * asking for, which it re-reports every query interval, so a handful is as
+ * good as a long log. A refusal equal to the newest entry (same reason, VLAN
+ * and group: a host repeating an unsolicited report) bumps its count and time
+ * instead of taking a slot. */
+#define IGMP_REFUSAL_RING   8
+
+struct igmp_refusal {
+	uint8_t  reason;        /* enum igmp_refusal_reason; 0 is an unused slot */
+	uint16_t vid;
+	uint32_t group;
+	uint32_t at;            /* monotonic seconds of the latest one */
+	uint32_t count;         /* how many times in a row */
+};
+
 struct igmp_db {
 	struct igmp_entry g[IGMP_MAX_GROUPS];
 	struct igmp_hist hist[IGMP_HIST_MAX];
 	uint32_t router_ports;
 	uint32_t router_expires[IGMP_MAX_PORTS];
-	uint32_t dropped;                       /* joins refused, table full */
 	struct igmp_policy pol;                 /* what the OLT provisioned */
 	uint32_t joins;                         /* join messages accepted (ME 311 attr 3) */
 	uint32_t denied;                        /* joins refused: profile or limit */
 	int      static_overflow;               /* a static range too wide to name */
+	/* Every refusal since the daemon started (or the policy last said "not
+	 * snooping"), by reason, and the last few in order. A table too small
+	 * is a number somebody has to be able to read: a snooper that quietly
+	 * stops learning looks exactly like one that is working. */
+	uint32_t refused[IGMP_REFUSE_REASONS];
+	uint32_t refusals;                      /* ring entries ever written */
+	struct igmp_refusal ring[IGMP_REFUSAL_RING];
 };
 
 void igmp_db_init(struct igmp_db *db);

@@ -34,6 +34,7 @@
 #include "odi_omci_wire.h"
 #include "odi_igmp_rx.h"
 #include "odi_switch_mcast.h"
+#include "odi_switch_acl_probe.h"
 
 #include "odi_switch_cmd.h"
 #include "odi_switch_reg.h" /* odi_switch_lock */
@@ -284,6 +285,42 @@ static void odi_igmp_rx_enable(void)
 		registered = true;
 }
 
+/* ---- RX: what the ACL probes send the CPU ------------------------------ */
+
+/* Below the IGMP hook (the probes and the snooping lease are never in at
+ * the same time), for every port: a frame an ACL probe sent the CPU is
+ * counted by its reason, and then goes on exactly as it would have. The
+ * hook takes nothing, so a frame from the PON is still dropped by the NIC,
+ * and a frame from the UNI still reaches the net device. */
+#define ODI_PROBE_RXHOOK_PRIO	(INT_MAX - 3)
+
+static int odi_probe_rxhook(struct sk_buff *skb, const struct odi_rx_words *info)
+{
+	unsigned int reason = (info->opts3 >> ODI_RXD_REASON_SHIFT) & ODI_RXD_REASON_MASK;
+	unsigned int src_port = (info->opts3 >> ODI_RXD_SRC_PORT_SHIFT) & ODI_RXD_SRC_PORT_MASK;
+
+	if (!READ_ONCE(odi_sw_probe_on))
+		return ODI_RXHOOK_CONTINUE;
+	odi_sw_probe_rx(reason, src_port, skb->len,
+			src_port == 0 && odi_igmp_frame_wanted(skb->data, skb->len));
+	return ODI_RXHOOK_CONTINUE;
+}
+
+/* Registered the first time a probe is installed, before its rule, for the
+ * same reason as the IGMP hook: an image nobody probes pays nothing. */
+static void odi_probe_rx_enable(void)
+{
+	static bool registered;
+
+	if (registered)
+		return;
+	if (odi_nic_rxhook_register(ODI_OMCI_RXHOOK_PORTMASK, ODI_PROBE_RXHOOK_PRIO,
+				    odi_probe_rxhook))
+		pr_warn(DRV_NAME ": ACL probe rxhook not registered\n");
+	else
+		registered = true;
+}
+
 /* ---- TX: omcid -> PON ----------------------------------------------------- */
 
 /* The words a stock OMCI reply carries: opts1 bit 25, NO_LEARN and
@@ -526,6 +563,7 @@ static int __init odi_omci_init(void)
 	/* The IGMP hook is registered when the copy is first installed, not
 	 * here: until then no frame needs it. */
 	odi_sw_mcast_rx_enable = odi_igmp_rx_enable;
+	odi_sw_probe_rx_enable = odi_probe_rx_enable;
 
 	if (!proc_create("odi_omci", 0644, NULL, &odi_omci_proc_fops))
 		pr_warn(DRV_NAME ": /proc/odi_omci create failed (non-fatal)\n");

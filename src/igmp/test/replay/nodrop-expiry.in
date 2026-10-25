@@ -1,0 +1,22 @@
+# Membership expiry with the profile's own timers: robustness 2, query
+# interval 30 s, response 5 s, so 65 s. A refresh at 40 moves the deadline to
+# 105; the row survives the tick at 104 and is removed at 105. The PON's drop
+# of unregistered multicast comes on once the learning window (65 s from the
+# policy appearing) has passed.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=0
+robustness=2
+query_interval=30
+query_max_response=5
+end
+0 tick
+10 v2join 1 0 192.168.1.10 239.1.1.1
+40 v2join 1 0 192.168.1.10 239.1.1.1
+64 tick
+65 tick
+66 tick
+104 tick
+105 tick
+106 state

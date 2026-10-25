@@ -305,24 +305,28 @@ static void test_lease(void)
 	struct igmp_policy p;
 
 	parse("snooping=0\n", &p);
-	ok(igmp_policy_lease(&p, 0, 1000, 0) == 0, "not snooping: no lease");
+	ok(igmp_policy_lease(&p, 0, 1000, 0, 1) == 0, "not snooping: no lease");
 	parse("snooping=1\n", &p);
-	ok(igmp_policy_lease(&p, 0, 1000, 1260) == ODI_SW_MC_SNOOP_COPY,
+	ok(igmp_policy_lease(&p, 0, 1000, 1260, 1) == ODI_SW_MC_SNOOP_COPY,
 	   "snooping, still learning: the copy alone, the PON keeps flooding");
-	ok(igmp_policy_lease(&p, 0, 1259, 1260) == ODI_SW_MC_SNOOP_COPY, "one second before the end of learning");
-	ok(igmp_policy_lease(&p, 0, 1260, 1260) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP),
+	ok(igmp_policy_lease(&p, 0, 1259, 1260, 1) == ODI_SW_MC_SNOOP_COPY, "one second before the end of learning");
+	ok(igmp_policy_lease(&p, 0, 1260, 1260, 1) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP),
 	   "at the end of learning: the copy and the drop");
-	ok(igmp_policy_lease(&p, 1, 5000, 1260) == ODI_SW_MC_SNOOP_COPY,
+	ok(igmp_policy_lease(&p, 1, 5000, 1260, 1) == ODI_SW_MC_SNOOP_COPY,
 	   "a static range too wide to name: the drop stays off");
 	parse("snooping=1\nallow_overflow=1\n", &p);
-	ok(igmp_policy_lease(&p, 0, 5000, 1260) == ODI_SW_MC_SNOOP_COPY,
+	ok(igmp_policy_lease(&p, 0, 5000, 1260, 1) == ODI_SW_MC_SNOOP_COPY,
 	   "lists longer than fit: the drop stays off, their static groups could not be named");
 	parse("snooping=1\n", &p);
+	ok(igmp_policy_lease(&p, 0, 5000, 1260, 0) == ODI_SW_MC_SNOOP_COPY,
+	   "drop not opted in: the copy alone, long after learning");
+	ok(igmp_policy_lease(&p, 0, 1000, 1260, 0) == ODI_SW_MC_SNOOP_COPY,
+	   "drop not opted in, still learning: the copy alone");
 	/* The second counter wraps between the start of learning and the end of
 	 * it: the deadline is 0x10 and now is 0xfffffff0. */
-	ok(igmp_policy_lease(&p, 0, 0xfffffff0u, 0x10u) == ODI_SW_MC_SNOOP_COPY,
+	ok(igmp_policy_lease(&p, 0, 0xfffffff0u, 0x10u, 1) == ODI_SW_MC_SNOOP_COPY,
 	   "before a deadline that lies past the wrap: still learning");
-	ok(igmp_policy_lease(&p, 0, 0x10u, 0x10u) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP),
+	ok(igmp_policy_lease(&p, 0, 0x10u, 0x10u, 1) == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP),
 	   "and on it, after the wrap: the drop");
 }
 
@@ -335,7 +339,8 @@ static void test_state(void)
 	struct igmp_rx rx;
 	uint32_t n;
 	static const char want[] =
-		"joins=2\ndenied=1\ngroups=2\ngroup=239.1.1.1\ngroup=239.1.1.2\n";
+		"joins=2\ndenied=1\ngroups=2\nrefused_limit=1\ngroup=239.1.1.1\ngroup=239.1.1.2\n"
+		"refused=limit 239.1.1.3 vid=0 at=100 n=1\n";
 
 	igmp_db_init(&db);
 	parse("snooping=1\nmax_groups=2\nallow=239.0.0.0-239.255.255.255\nstatic=226.1.1.1-226.1.1.1\n", &p);
@@ -349,6 +354,37 @@ static void test_state(void)
 	n = igmp_state_format(&db, buf, sizeof buf);
 	ok(n == sizeof want - 1 && starts(buf, n, want), "the state file: counters, then the joined groups");
 	ok(igmp_state_format(&db, buf, 10) == 0, "a buffer too small is reported, not truncated");
+
+	/* The reader: what was written comes back, and a file cut off at any
+	 * byte gives the complete lines before the cut and nothing from the
+	 * last, partial one. */
+	{
+		static struct igmp_state_view v;
+		static const char odd[] = "joins=7\nfuture=1\nrefused=bogus 1.2.3.4 vid=0 at=1 n=1\n"
+				    "refused=acl 239.1.1.1 vid=99999 at=1 n=1\ngroup=300.1.1.1\n"
+				    "denied=x\ngroups=3\n";
+		uint32_t cut;
+
+		ok(igmp_state_parse(buf, n, &v) == 7 && v.joins == 2 && v.denied == 1 &&
+		   v.groups == 2 && v.refused[IGMP_REFUSE_LIMIT] == 1 && v.ngroup == 2 &&
+		   v.group[1] == G(239, 1, 1, 2) && v.nrefusal == 1 &&
+		   v.ref[0].reason == IGMP_REFUSE_LIMIT && v.ref[0].group == G(239, 1, 1, 3) &&
+		   v.ref[0].at == 100 && v.ref[0].count == 1,
+		   "the reader gives back what the writer wrote");
+		for (cut = 0; cut < n; cut++) {
+			int lines = 0;
+
+			for (uint32_t i = 0; i < cut; i++)
+				if (buf[i] == '\n')
+					lines++;
+			if (igmp_state_parse(buf, cut, &v) != lines)
+				break;
+		}
+		ok(cut == n, "cut anywhere, the reader takes the whole lines and drops the partial one");
+		ok(igmp_state_parse(odd, sizeof odd - 1, &v) == 2 &&
+		   v.joins == 7 && v.groups == 3 && v.nrefusal == 0 && v.ngroup == 0,
+		   "unknown keys and malformed lines are skipped, not trusted");
+	}
 }
 
 int main(void)

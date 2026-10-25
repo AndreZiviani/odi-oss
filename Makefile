@@ -176,6 +176,8 @@ test-host:
 	bash test/odi_nic_hw_test.sh
 	bash test/odi_switch_test.sh
 	bash test/odi_switch_mcast_test.sh
+	bash test/odi_switch_acl_probe_test.sh
+	bash test/mcast_probe_test.sh
 	bash test/odi_igmp_rx_test.sh
 	bash test/odi_switch_mmio_bounds_test.sh
 	bash test/odi_switch_tbl_desc_test.sh
@@ -205,6 +207,7 @@ test-host:
 	bash test/odi_replay_blob_test.sh
 	bash test/odi_gpon_init_clean_test.sh
 	bash test/odi_switch_ds_encrypt_test.sh
+	bash test/odi_switch_ds_flow_del_test.sh
 	bash test/omci_ageing_time_test.sh
 	bash test/odi_gpon_test.sh
 	bash test/odi_gpon_pw_test.sh
@@ -311,12 +314,12 @@ lint:
 	@# because busybox ash is what interprets them -- not bash. These were
 	@# outside the lint entirely until 2026-09-14, which is backwards: they
 	@# are the only ones whose failure costs a stick rather than a build.
-	@# tools/regdump/dump.sh joins them here for the same reason: it is
-	@# pushed to and run on the stick, against a minimal busybox, not
-	@# built or run on the host. test/qemu/diag-stub.sh and memhog.sh are
+	@# tools/regdump/dump.sh and tools/mcast-probe/mcast-probe.sh join them
+	@# here for the same reason: each is pushed to and run on the stick,
+	@# against a minimal busybox, not built or run on the host. test/qemu/diag-stub.sh and memhog.sh are
 	@# the same shape one step removed: they run under busybox ash INSIDE
 	@# the qemu guest, never on the build host.
-	shellcheck -S warning -s sh rootfs/skeleton/etc/init.d/* rootfs/skeleton/etc/scripts/*.sh rootfs/skeleton/etc/scripts/flash tools/regdump/dump.sh test/qemu/diag-stub.sh test/qemu/memhog.sh
+	shellcheck -S warning -s sh rootfs/skeleton/etc/init.d/* rootfs/skeleton/etc/scripts/*.sh rootfs/skeleton/etc/scripts/flash tools/regdump/dump.sh tools/mcast-probe/mcast-probe.sh test/qemu/diag-stub.sh test/qemu/memhog.sh
 	@echo "shellcheck: clean"
 	@./tools/check-inline-quotes.sh toolchain/*.sh kernel/*.sh packages/*.sh \
 	          packages/*/*.sh image/*.sh src/*.sh tools/*.sh test/*.sh test/qemu/*.sh

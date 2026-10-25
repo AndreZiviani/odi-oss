@@ -52,6 +52,7 @@ for isp in isp1 isp2; do
 
 	# 1: a whole session into a first, daemon-mode instance (-d: no idle
 	# exit -- this one has to still be up when we kill it).
+	: > "$before_log"
 	$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-$isp > "$before_log" 2>&1 &
 	pid=$!
 	omcid_up "$before_log"
@@ -79,6 +80,7 @@ for isp in isp1 isp2; do
 	# 4: a fresh instance, -s 5 standing in for "PON is O5" (qemu has no
 	# netlink to ask the driver over). -w 6 is only a backstop: it is stopped
 	# once our three dumps are done.
+	: > "$after_log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -s 5 -g /tmp/resume-gpon-$isp > "$after_log" 2>&1 &
 	pid=$!
 	omcid_up "$after_log"
@@ -157,6 +159,7 @@ cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
 rm -f /var/run/omcid-mib.snap /var/run/omcid-resume-decision
 wlog1=/tmp/omcid-resume-wide-before.log
 wlog2=/tmp/omcid-resume-wide-after.log
+: > "$wlog1"
 $Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-isp2 > "$wlog1" 2>&1 &
 pid=$!
 omcid_up "$wlog1"
@@ -168,6 +171,7 @@ inject_wait "$wlog1" "$(frame 0004 48 0094 0002 "$(amask 5)$(aval 5)")"
 kill -9 "$pid" 2>/dev/null
 wait "$pid" 2>/dev/null
 
+: > "$wlog2"
 $Q respond/build/omcid-drvtrace -a -w 20 -c "$CAPS" -s 5 -g /tmp/resume-gpon-isp2 > "$wlog2" 2>&1 &
 pid=$!
 omcid_up "$wlog2"

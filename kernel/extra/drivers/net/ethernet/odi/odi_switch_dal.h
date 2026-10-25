@@ -246,6 +246,14 @@ void odi_sw_ponq_glb_th_set(uint32_t nflows);
  */
 int odi_sw_gpon_usflow_set(uint32_t idx, uint32_t gem_port_id, uint32_t traffic_cfg);
 
+/* cmd 25 downstream with ena 0: slot idx deleted, its CAM row cleared
+ * and read back clear, its flow type word 0 (AES bit included), and its
+ * slot record dropped (__odi_switch_gpon_ds_port_clear()). Returns 0, or
+ * -ETIMEDOUT / -EIO when the row did not read back clear; the record is
+ * kept then, and the failure logged.
+ */
+int odi_sw_gpon_ds_flow_del(uint32_t idx);
+
 /* Which DS slot holds which GEM port: recorded when cmd 25 creates the
  * port, looked up when an Encrypted_Port-ID PLOAM names it. _reset, which
  * also forgets every Encrypted_Port-ID, is for the host tests, which run
