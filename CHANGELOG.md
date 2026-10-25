@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- CI: a slow package mirror no longer fails test-qemu. `tools/ci-apt.sh` cut
+  each install of qemu-system-mips off after 5 minutes, so a mirror that was
+  slow but still sending failed all three attempts. An install may now take
+  15 minutes (two attempts; a stalled connection is still caught by apt's
+  30-second read timeout and its own retries), and the test-qemu job may run
+  45 minutes instead of 20 to fit them.
+
 - omcid: `omcicli voip` prints the phone lines the OLT provisioned, resolved
   into one block per port: the SIP user, the SIP servers as URLs without any
   `user:password@`, the codecs, the voice VLAN and priority, and the line
