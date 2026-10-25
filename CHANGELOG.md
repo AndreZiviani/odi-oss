@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- omcid: the extra multicast GEM ports an OLT names only in address rows now
+  get a downstream flow. G.988 lets one multicast GEM interworking TP (ME 281)
+  spread the channels over several GEM ports by writing more rows, with other
+  GEM port ids, into its IPv4 or IPv6 address table (or into the multicast
+  access control rows of ME 309), without creating a GEM port network CTP
+  for them. Only the CTP's own port had a flow, so the others dropped their
+  frames. Each such port now gets a multicast downstream flow like the CTP's,
+  and loses it when its last row, or the ME, goes; a line whose OLT names one
+  port is unchanged. The kernel has no downstream flow delete yet, so a
+  withdrawn flow is refused there and stays in the switch until the next
+  change; this is logged.
 - omci: a Test on an entity omcid cannot test (anything but the ANI-G, the
   IP host included) is now refused with result 2, "not supported", instead of
   being acknowledged. Before, the OLT got a success and then waited for a Test

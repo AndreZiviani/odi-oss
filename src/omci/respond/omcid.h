@@ -408,6 +408,7 @@ void apply_gem_ctp(const struct omci_class *c, const struct mib_row *r);
 /* A class 281 changed (`skip`: the instance being deleted, else -1): resend
  * the downstream flows whose multicast flag no longer matches. */
 void mcast_flag_refresh(int skip);
+void mcast_extra_refresh(int skip281, int skip309);
 void qos_reset(void);
 /* apply_uni.c */
 uint32_t bridge_uni_port_mask(uint16_t bridge_id);

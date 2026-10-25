@@ -154,6 +154,51 @@ need "$log" 'gem 4095 ds flow 0 .* mcast 0 ' 10 3
 check "deleting the class 281 clears the flag" \
       "$(grep -c 'gem 4095 ds flow 0 .* mcast 0 ' "$log")" "3"
 
+# ------------------- extra multicast GEM ports named only by address rows
+# G.988 9.2.5: the first row names the CTP's port; more rows with other GEM
+# port ids spread the channels over more multicast GEM ports, and no further
+# GEM port network CTP is created for them. Each such port needs a downstream
+# flow of its own, as the CTP's port has. 281/3 on CTP 5 (flow 0, GEM 4095).
+send "$log" 0040 44 0119 0003 "0005"
+send "$log" 0041 48 0119 0003 "0080$A1"
+check "extra port: a row naming only the CTP's port makes no second flow" \
+      "$(grep -c 'gem [0-9]* ds flow 1 ' "$log")" "0"
+X1=0fa00000e0000000e00000ff
+X2=0fa10000e1000000e10000ff
+send "$log" 0042 48 0119 0003 "0080$X1"
+check "extra port: a row naming another GEM port gets a multicast downstream flow" \
+      "$(grep -c 'gem 4000 ds flow 1 .* mcast 1 ' "$log")" "1"
+send "$log" 0043 48 0119 0003 "0080$(pad 0fa00000 12)"
+check "extra port: deleting its last row withdraws the flow" \
+      "$(grep -c 'gem 4000 ds flow 1 withdrawn' "$log")" "1"
+send "$log" 0045 48 0119 0003 "0080$X1"
+send "$log" 0046 48 0119 0003 "0080$X2"
+check "extra port: a second extra port takes the next flow" \
+      "$(grep -c 'gem 4001 ds flow 2 .* mcast 1 ' "$log")" "1"
+send "$log" 0047 46 0119 0003 ""                        # Delete 281/3
+check "extra port: deleting the class 281 withdraws both flows" \
+      "$(grep -c 'gem 4000 ds flow 1 withdrawn' "$log")$(grep -c 'gem 4001 ds flow 2 withdrawn' "$log")" "21"
+check "extra port: the CTP's own flow was never withdrawn" \
+      "$(grep -c 'gem 4095 ds flow 0 withdrawn' "$log")" "0"
+# A class 309 row names a multicast GEM port too: control 2, GEM port 2,
+# VLAN 2, source 4, range start 4, range end 4.
+send "$log" 0048 44 0119 0004 "0005"
+send "$log" 0049 48 0119 0004 "0080$A1"
+acl() { printf '%s%s0000%s%s%s' "$1" "$2" 00000000 e0000001 e00000ff; }
+send "$log" 004a 48 0135 0001 "0200$(acl 4001 0fa2)"
+check "extra port: an ACL row of class 309 names a port and gets its flow" \
+      "$(grep -c 'gem 4002 ds flow 1 .* mcast 1 ' "$log")" "1"
+send "$log" 004b 48 0135 0001 "02008001"
+check "extra port: deleting that ACL row withdraws the flow" \
+      "$(grep -c 'gem 4002 ds flow 1 withdrawn' "$log")" "1"
+send "$log" 004c 46 0119 0004 ""                        # Delete 281/4
+# With no class 281 on file the OLT has set up no multicast GEM port, so a
+# port in an ACL row gets no flow.
+send "$log" 004e 48 0135 0001 "0200$(acl 4001 0fa3)"
+check "extra port: an ACL row with no class 281 on file makes no flow" \
+      "$(grep -c 'gem 4003 ds flow' "$log")" "0"
+send "$log" 004f 48 0135 0001 "0200c000"
+
 # ------------------------------------------- class 310, service packages
 P1=$(pad 000100190002000f4240 20)
 P2=$(pad 000200640004000186a0 20)
