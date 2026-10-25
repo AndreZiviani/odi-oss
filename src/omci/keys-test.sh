@@ -59,6 +59,7 @@ RUN_ARGS=
 run() {
 	rm -f "$1"
 	# shellcheck disable=SC2086  # RUN_ARGS is a word list on purpose
+	: > "$1"
 	$Q respond/build/omcid -d $RUN_ARGS > "$1" 2>&1 &
 	pid=$!
 	wait_count "$1" "answering as" 1 20
@@ -424,6 +425,7 @@ awk '!(substr($0, 9, 4) == "002f" && substr($0, 23, 2) == "0b")' "$FIX/omci-sess
 bdg() {   # bdg <session> <odi.conf text> <log>: the bridge connections the session builds
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	printf '%s' "$2" > /var/config/odi.conf
+	: > "$3"
 	$Q respond/build/omcid-drvtrace -a -w 1 -c "$CAPS" -g /tmp/keys-gpon > "$3" 2>&1 &
 	pid=$!
 	sleep 2

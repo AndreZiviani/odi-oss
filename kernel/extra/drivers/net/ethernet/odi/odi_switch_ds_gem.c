@@ -132,6 +132,35 @@ int odi_sw_gpon_usflow_set(uint32_t idx, uint32_t gem_port_id, uint32_t traffic_
 	return rc;
 }
 
+/* The CAM row cleared and read back clear, and the slot record dropped,
+ * in one critical section: an Encrypted_Port-ID for the old port then
+ * finds no slot (its flag is kept for a later create), and none can set
+ * the AES bit on a row between its clear and its record going. A clear
+ * that did not land keeps the record, so the port stays known to be in
+ * the row until a retry clears it. Logged after the unlock.
+ */
+int odi_sw_gpon_ds_flow_del(uint32_t idx)
+{
+	unsigned long flags;
+	uint32_t port = 0;
+	int rc, had = 0;
+
+	spin_lock_irqsave(&odi_switch_dsf_lock, flags);
+	rc = __odi_switch_gpon_ds_port_clear(idx);
+	if (idx < ODI_SWITCH_DS_SLOT_COUNT) {
+		had = odi_sw_ds_slot_valid[idx];
+		port = odi_sw_ds_slot_gem_port_id[idx];
+		if (!rc)
+			odi_sw_ds_slot_valid[idx] = 0U;
+	}
+	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
+
+	if (rc)
+		ODI_SW_WARN("DS slot %u (GEM port 0x%03x%s): CAM delete not done (%d), slot kept\n",
+			    idx, port, had ? "" : ", none recorded", rc);
+	return rc;
+}
+
 void odi_switch_ds_slot_record(uint32_t idx, uint32_t gem_port_id)
 {
 	unsigned long flags;

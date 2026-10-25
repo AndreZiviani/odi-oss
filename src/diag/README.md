@@ -6,7 +6,7 @@ and the switch through the interfaces our kernel provides, and nothing else:
 
 | interface | driver | used for |
 |---|---|---|
-| `/dev/odi_sw` ioctls | `odi_reg.c`, `odi_ddm.c`, `odi_switch_l2.c` | register get/set, MIB counters, DDM, the L2 table |
+| `/dev/odi_sw` ioctls | `odi_reg.c`, `odi_ddm.c`, `odi_switch_l2.c`, `odi_switch_acl_probe.c` | register get/set, MIB counters, DDM, the L2 table, the ACL probes |
 | `/proc/odi_gpon/status` | `odi_gpon.c` | ONU state, the LOS sample |
 | `/proc/odi_gpon/flows` | `odi_gpon.c` | the per-flow GEM counters |
 | odi_omci netlink, `OMCI_FLOWS_CMD` | `odi_omci.c`, `odi_switch_cmd.c` | GEM flows |
@@ -21,7 +21,7 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
 |  | before | now |
 |---|---|---|
 | size | 373,280 bytes | 21,208 bytes |
-| commands | 1,973 parsed, 929 wired, a handful working on 6.18 | 20, all working on 6.18 |
+| commands | 1,973 parsed, 929 wired, a handful working on 6.18 | 31, all working on 6.18 |
 | links | nothing | nothing |
 
 ## Commands
@@ -49,6 +49,17 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
     l2-table get index <index>        one L2 table row by number, valid or not, with raw words
     register get <address> <words>    read switch-core registers, four per line
     register set <address> <value>    write one switch-core register
+    acl-probe count <slot> port <port> proto <proto> count the IPv4 frames of a protocol entering port 0 (UNI) or 2 (PON)
+    acl-probe count <slot> port <port> group <group> <length> count the IPv4 frames to an address prefix entering port 0 or 2
+    acl-probe bytes <slot> port <port> proto <proto> the same, counting bytes
+    acl-probe bytes <slot> port <port> group <group> <length> the same, counting bytes
+    acl-probe mirror <slot> igmp      copy the IGMP entering the UNI to the CPU, and count it
+    acl-probe mirror <slot> igmp bytes the same, counting bytes
+    acl-probe trap <slot> igmp        take the IGMP entering the UNI to the CPU instead, and count it
+    acl-probe trap <slot> igmp bytes  the same, counting bytes
+    acl-probe show <slot>             one probe: its rule, what it counted, what reached the CPU
+    acl-probe delete <slot>           remove one probe
+    acl-probe delete all              remove every probe
     help                              list the commands
     exit                              leave the shell
 
@@ -102,6 +113,22 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
   octet, so `get index 0x6d` on an empty row prints
   `00:00:00:00:00:1B ... valid no  raw 0x00002000 0x00000000 0x0000001b`.
   `docs/KERNEL.md` ("The L2 table") has the readout behind this.
+
+- `acl-probe` installs one of eight ACL rules (entries 88 to 95) that count
+  the IPv4 frames of a protocol, or to an address prefix (`<group>` in hex,
+  `0xefff4d01` for 239.255.77.1, and a prefix `<length>`), entering the UNI
+  (port 0) or the PON (port 2), in frames or in bytes; or that copy
+  (`mirror`) or take (`trap`) the IGMP entering the UNI to the CPU. Nothing
+  else can be sent to the CPU, and nothing from the PON. A counting rule
+  changes no frame's forwarding. The rules belong to the diag process that
+  installed the first of them and go when it exits, so install and read them
+  from one diag reading stdin; `show` works from any process. Each answer is
+  one line of `key=value` words: `counted` is what the rule counted since it
+  went in, `cpu` the frames the CPU received with the rule's receive
+  reason, `uni_igmp_other` the IGMP from the UNI that reached the CPU by
+  another reason (and `other_reason` the last one). `docs/SWITCH.md`,
+  "Multicast", has what they are for and `tools/mcast-probe/` the script
+  that runs them.
 
 Everything else in `/proc/odi_gpon/`, `/proc/odi_omci` and
 `/proc/odi_init` is plain text; read those with `cat`.

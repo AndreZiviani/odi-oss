@@ -105,7 +105,12 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 	if (c->classId == OMCI_ME_MCAST_GEM_IW_TP)
 		mcast_flag_refresh(inst);
 	if (c->classId == 309)
-		mcast_extra_refresh(-1, inst);
+		mcast_extra_refresh(-1, inst, -1);
+	/* The extra multicast GEM ports take the queue of the CTP their class
+	 * 281 points at; with that CTP gone (and no other class 281 on a
+	 * downstream CTP) they have none, and their flows are withdrawn. */
+	if (c->classId == OMCI_ME_GEM_PORT_CTP)
+		mcast_extra_refresh(-1, -1, inst);
 }
 
 /* Class 131, OLT-G: a Set that carries ToDInfo sends its fourteen bytes
@@ -225,7 +230,7 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 	case 309:
 		/* Its access control rows name the multicast GEM ports too
 		 * (apply_qos.c, mcast_extra_refresh). */
-		mcast_extra_refresh(-1, -1);
+		mcast_extra_refresh(-1, -1, -1);
 		return;
 	case OMCI_ME_GEM_IW_TP:
 		/* A step on the way to the broadcast flow; the OLT creates

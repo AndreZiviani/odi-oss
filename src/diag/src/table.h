@@ -35,7 +35,19 @@ enum cmd_id {
 	CMD_REG_SET,
 	CMD_L2_ALL,
 	CMD_L2_INDEX,
+	CMD_PROBE_SET,          /* sel: PROBE_SEL_* below */
+	CMD_PROBE_SHOW,
+	CMD_PROBE_DELETE,
+	CMD_PROBE_DELETE_ALL,
 };
+
+/* The variants of `acl-probe`: the action, the counter unit and the match. */
+#define PROBE_SEL_COUNT    0x01u
+#define PROBE_SEL_MIRROR   0x02u
+#define PROBE_SEL_TRAP     0x03u
+#define PROBE_SEL_ACTION   0x03u
+#define PROBE_SEL_BYTES    0x04u
+#define PROBE_SEL_GROUP    0x08u   /* <group> <length>, else proto <proto> */
 
 struct cmd_def {
 	const char *syntax;

@@ -125,6 +125,17 @@ int odi_gpon_flows_set(struct odi_gpon_flows *f, enum odi_gpon_flow_dir dir, uin
 	return 0;
 }
 
+int odi_gpon_flows_del(struct odi_gpon_flows *f, enum odi_gpon_flow_dir dir, uint32_t idx)
+{
+	if (dir == ODI_GPON_FLOW_DIR_DS && idx < ODI_GPON_FLOWS_DS)
+		memset(&f->ds[idx], 0, sizeof(f->ds[idx]));
+	else if (dir == ODI_GPON_FLOW_DIR_US && idx < ODI_GPON_FLOWS_US)
+		memset(&f->us[idx], 0, sizeof(f->us[idx]));
+	else
+		return -1;
+	return 0;
+}
+
 void odi_gpon_flows_clear(struct odi_gpon_flows *f)
 {
 	memset(f->ds, 0, sizeof(f->ds));

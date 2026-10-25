@@ -54,6 +54,7 @@ rm -f /var/config/odi.conf /var/config/lastgood.xml /var/config/lastgood_hs.xml 
 printf 'state 5 (O5)\nonu_id 1\nsn 4f44495400000001\nalloc_ids 0\n' > /tmp/writes-gpon
 
 log=/tmp/omcid-writes.log
+: > "$log"
 $Q respond/build/omcid -d -g /tmp/writes-gpon > "$log" 2>&1 &
 pid=$!
 omcid_up "$log"

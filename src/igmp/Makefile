@@ -35,7 +35,7 @@ LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
 # switch_opt.c holds the three /dev/odi_sw ioctls this daemon programs the
 # switch with; its header lists them.
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o $(BUILD)/group.o \
-        $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/entry.o $(BUILD)/program.o $(BUILD)/switch_opt.o \
+        $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/status.o $(BUILD)/entry.o $(BUILD)/program.o $(BUILD)/switch_opt.o \
         $(BUILD)/replay.o $(BUILD)/main.o
 
 $(BIN): $(OBJS)
@@ -73,6 +73,9 @@ $(BUILD)/group.o: group.c group.h policy.h igmpd.h | $(BUILD)
 $(BUILD)/state.o: state.c state.h group.h policy.h igmpd.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+$(BUILD)/status.o: status.c status.h state.h group.h policy.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 $(BUILD)/policy.o: policy.c policy.h entry.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -88,7 +91,7 @@ $(BUILD)/switch_opt.o: switch_opt.c switch_opt.h $(DIAG)/src/odi_sw_ioctl.h $(DI
 $(BUILD)/replay.o: replay.c replay.h igmpd.h group.h policy.h entry.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/main.o: main.c status.h replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD):

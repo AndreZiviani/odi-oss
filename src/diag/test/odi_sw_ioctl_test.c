@@ -54,6 +54,8 @@ int main(void)
 	      == ODI_SW_IOC_L2_MODE, "ODI_SW_IOC_L2_MODE");
 	check(mips_ioc(4 /* WRITE */, 'S', 11, sizeof(struct odi_sw_mc_snoop))
 	      == ODI_SW_IOC_MC_SNOOP, "ODI_SW_IOC_MC_SNOOP");
+	check(mips_ioc(2 | 4, 'S', 12, sizeof(struct odi_sw_acl_probe))
+	      == ODI_SW_IOC_ACL_PROBE, "ODI_SW_IOC_ACL_PROBE");
 
 	/* Struct sizes the marshalling actually depends on -- a size that
 	 * silently grew (padding, a wider field) would still compile and
@@ -65,6 +67,15 @@ int main(void)
 	check(sizeof(struct odi_sw_l2_row) == 48, "struct odi_sw_l2_row is 48 bytes");
 	check(sizeof(struct odi_sw_l2_mcast) == 28, "struct odi_sw_l2_mcast is 28 bytes");
 	check(sizeof(struct odi_sw_l2_mode) == 8, "struct odi_sw_l2_mode is 8 bytes");
+	check(sizeof(struct odi_sw_acl_probe) == 72, "struct odi_sw_acl_probe is 72 bytes");
+	/* The kernel copy's field order: the request half, then the answer. */
+	check(offsetof(struct odi_sw_acl_probe, dst_mask) == 28 &&
+	      offsetof(struct odi_sw_acl_probe, in_use) == 32 &&
+	      offsetof(struct odi_sw_acl_probe, base) == 44 &&
+	      offsetof(struct odi_sw_acl_probe, cpu_hits) == 52 &&
+	      offsetof(struct odi_sw_acl_probe, other_reason) == 64 &&
+	      offsetof(struct odi_sw_acl_probe, cpu_bytes) == 68,
+	      "struct odi_sw_acl_probe field offsets");
 	/* The same offsets test/odi_switch_l2_test.c asserts on the kernel
 	 * copy: the two restatements agree field for field, not just in
 	 * total size. */

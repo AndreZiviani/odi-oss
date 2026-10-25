@@ -70,6 +70,7 @@ for isp in isp1 isp2 isp3; do
 	want=$FIX/omci-drv-golden-$isp.txt
 	cp "$FIX/omci-store-$isp.xml" /var/config/lastgood.xml
 
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-$isp > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -106,6 +107,7 @@ done
 if [ "${UPDATE:-0}" != 1 ]; then
 	log=/tmp/omcid-drv-poll.log
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -315,6 +317,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	# A synthetic OLT: the ISP1 session, other Alloc-IDs by PLOAM.
 	gpon /tmp/gpon-other "5 1000 1001 1002 1003 1004"
 	log=/tmp/omcid-drv-other.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-other > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -350,6 +353,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	# (0x00FF is refused), rather than one a table says this OLT uses.
 	gpon /tmp/gpon-none "0"
 	log=/tmp/omcid-drv-none.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-none > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -369,6 +373,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
 	gpon /tmp/gpon-isp2b "2 400 348"
 	log=/tmp/omcid-drv-isp2b.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp2b > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -395,6 +400,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	# programmed again after it.
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	log=/tmp/omcid-drv-both.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp2b > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -418,6 +424,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	gpon /tmp/gpon-move "5 282 794 1050 1306 538"
 	log=/tmp/omcid-drv-move.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-move > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -451,6 +458,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
 	gpon /tmp/gpon-late "0"
 	log=/tmp/omcid-drv-late.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-late > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -507,6 +515,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 			rm -f /var/config/odi.conf
 		fi
 		log=/tmp/omcid-drv-$1.log
+		: > "$log"
 		$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g "$3" > "$log" 2>&1 &
 		pid=$!
 		omcid_up "$log"
@@ -600,6 +609,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	}
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	log=/tmp/omcid-drv-lock.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -623,6 +633,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 
 	printf 'OMCI_UNI_LOCK=0\n' > /var/config/odi.conf
 	log=/tmp/omcid-drv-lock0.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -654,6 +665,7 @@ fi
 if [ "${UPDATE:-0}" != 1 ]; then
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	log=/tmp/omcid-drv-anig.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -684,6 +696,7 @@ fi
 if [ "${UPDATE:-0}" != 1 ]; then
 	cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
 	log=/tmp/omcid-drv-td.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp2 > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -730,6 +743,7 @@ fi
 if [ "${UPDATE:-0}" != 1 ]; then
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	log=/tmp/omcid-drv-incr.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 8 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -790,6 +804,7 @@ fi
 if [ "${UPDATE:-0}" != 1 ]; then
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	log=/tmp/omcid-drv-reset.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
@@ -827,6 +842,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	}
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	log=/tmp/omcid-drv-limits.log
+	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"

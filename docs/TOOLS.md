@@ -375,6 +375,7 @@ disabled NTP never shows an old sync.
 
     igmpd [-w] [-f] [-n COUNT]
     igmpd -r FILE
+    igmpd -s [STATE [POLICY]]
     igmpd [-w] -j GROUP -p PORTS [-v VID]
     igmpd [-w] -l GROUP [-v VID]
 
@@ -387,6 +388,8 @@ disabled NTP never shows an old sync.
     -l GROUP   one-shot: remove GROUP and exit
     -r FILE    replay a transcript of timestamped events (- is stdin) and
                print what the daemon decides; no device, no uid 4
+    -s         print the policy in force, the groups held and the last
+               refused joins, then exit (details below)
     -v VID     the VID a one-shot names (default 0); printed only, the
                entry is keyed on filtering id 0 (SVL)
     -h         this text; registers nothing
@@ -407,16 +410,50 @@ the result; it never opens `/dev/odi_sw` or the redirect device and refuses
     9 state                        # the state file it would write
 
 Other events: `v3join`, `v3leave`, `query PORT VID SRC`, `policy-file PATH`,
-`nopolicy`. A policy change is read at the next second the clock moves to.
+`nopolicy`, `status` (what `igmpd -s` prints). A policy change is read at the next second the clock moves to.
 Golden transcripts are in `src/igmp/test/replay`, run by `make test-igmp`;
 `src/omci/mcast-test.sh` replays the policy file omcid wrote.
+
+**Why a channel does not play.** `igmpd -s` answers it on the stick, without
+touching the switch or the redirect channel: the policy in force with its
+ranges, the counters, the groups held, and the last refused joins, newest
+first, each with its VLAN, the reason and how long ago:
+
+    policy: snooping, function 0, immediate leave, 2/125/1 s, limit 2, 1 allow + 0 static ranges
+      allow 225.0.0.0 - 225.255.255.255
+    joins 3, refused by the profile 2 (lists 1, group limit 1), table full 0
+    groups held: 2
+      225.1.1.1
+      225.1.1.2
+    recent refusals, newest first:
+      239.9.9.9  vid 0  outside the access control lists (acl)  12 s ago
+      225.1.1.3  vid 0  past the group limit (limit)  x3  40 s ago
+
+The three reasons are `acl` (outside the lists the OLT provisioned), `limit`
+(past the group limit of ME 310) and `full` (igmpd's own table of 128 entries
+has no free slot; not counted in ME 311's refused figure). A host that
+repeats the same refused report (an unsolicited report is sent twice) makes
+one entry with a count, and the ring keeps the last 8 distinct ones: it
+goes into the state file, which omcid reads in 4096 bytes next to up to 128
+group lines, so it is small and fixed, and a set-top box re-reports the
+group it wants every query interval, so a few entries show what is being
+asked for. The report is read from `/var/run/odi-mcast.state` (written by the
+daemon only under `-w`, which is how the service runs it) and
+`/var/run/odi-mcast.conf`; naming two files reads those instead, e.g. copies
+taken off a stick, and then times are the daemon's seconds, not ages.
+Nothing here is OMCI: the OLT sees the same ME 311 counters as before, and
+`denied` still holds the refusals by the lists and the limit.
 
 **Off unless asked for.** `svc-igmpd.sh` runs `igmpd -w` only while
 `IGMP_SNOOPING=1` is in the config store (`apply.sh igmp` applies a change);
 otherwise the respawn entry parks and the switch floods multicast as it
 always did. With the key set the daemon is still idle until the OLT
 provisions what it needs (below), so setting it on a line that carries no
-multicast does nothing.
+multicast does nothing. The PON-side drop of IPv4 multicast no row names
+(`igmpd -d`) is a separate opt-in, `IGMP_PON_DROP`: only `1` drops, unset
+snoops only (an existing `IGMP_SNOOPING=1` config that wants the drop must
+now set `IGMP_PON_DROP=1`). Without `-d` the PON keeps flooding and only the
+copy, the rows and the state run.
 
 **What the OLT decides.** omcid writes what it was provisioned to
 `/var/run/odi-mcast.conf` (a quiet second after the last OMCI frame, only
@@ -531,6 +568,13 @@ reference; the commands:
     l2-table get index <index>        one row by number, with its raw words
     register get <address> <words>    switch-core register read
     register set <address> <value>    switch-core register write
+    acl-probe count|bytes <slot> port <port> proto <proto>
+    acl-probe count|bytes <slot> port <port> group <group> <length>
+                                      count IPv4 entering port 0 (UNI) or 2 (PON)
+    acl-probe mirror|trap <slot> igmp [bytes]
+                                      the UNI IGMP copied or taken to the CPU
+    acl-probe show <slot>             a probe, its count, what reached the CPU
+    acl-probe delete <slot>|all       remove probes
     help                              the list, with descriptions
     exit
 
@@ -589,6 +633,19 @@ for byte, and `register get` keeps its `0x<address> 0x<value>` layout for
 rcS and network.sh. `register set` writes the switch core
 directly: it is how rcS and network.sh program the optics and the host
 SerDes, and a wrong value there can take the host link away.
+
+`acl-probe` is for measuring the switch, and nothing in the image runs it.
+It installs one of eight ACL rules (entries 88 to 95) that counts the IPv4
+frames of one protocol, or to one address prefix, entering the UNI or the
+PON, in frames or bytes, without changing where they go; or that copies
+(`mirror`) or takes (`trap`) the IGMP entering the UNI to the CPU. It
+refuses anything else to the CPU, and anything at all from the PON to the
+CPU. The rules belong to the diag process that installed the first one and
+go when it exits, so they are installed and read from one diag fed on
+stdin; `show` works from any process. It refuses while igmpd holds its
+snooping lease, and igmpd is refused while probes are in.
+`tools/mcast-probe/mcast-probe.sh` runs the measurements
+(`docs/SWITCH.md`, "Multicast").
 
 ### `i2cget`, `i2cdump`, `i2cset` -- the optics module over I2C
 
@@ -1121,12 +1178,12 @@ drivers behind them.
 
 | file | read | write |
 |---|---|---|
-| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes and the snooping lease (igmpd -w) |
+| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table, the ACL probes (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes and the snooping lease (igmpd -w), the ACL probes (diag acl-probe) |
 | `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
-| `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault | -- |
+| `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault. Then the downstream GEM port CAM, the table that decides which GEM ports the ONU receives: `gem_cam <row> hw <GEM port|-> type 0x<FLAGS>` for each of rows 0..64 valid in the hardware or with a flow type word not zero (rows 0..63 are the downstream flows OMCI created, the row being the flow id, `diag gpon get flows`; row 64 is the OMCC; FLAGS bit 0 multicast, 1 Ethernet, 2 OMCI, 4 AES), then `gem_cam_valid <n>`. A flow OMCI deleted leaves no line | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
@@ -1420,6 +1477,9 @@ this repository:
 - Killing omcid leaves the OLT unanswered until init has respawned it.
 - `diag register set` and writes to `/proc/odi_init` or `/proc/odi_omci`
   reprogram the hardware under a running stack.
+- `diag acl-probe trap` keeps the IGMP of the host from the OLT while it is
+  in: a line carrying IPTV loses its joins for that long. The counting
+  probes change no forwarding.
 - `igmpd -w` (the daemon or `-j`/`-l`) writes static L2 multicast entries.
   The driver refuses unicast, broadcast and 01:80:c2:00:00:0x addresses, but
   a wrong member mask on a group that carries traffic misforwards it
