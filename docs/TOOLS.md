@@ -534,6 +534,13 @@ reference; the commands:
     l2-table get index <index>        one row by number, with its raw words
     register get <address> <words>    switch-core register read
     register set <address> <value>    switch-core register write
+    acl-probe count|bytes <slot> port <port> proto <proto>
+    acl-probe count|bytes <slot> port <port> group <group> <length>
+                                      count IPv4 entering port 0 (UNI) or 2 (PON)
+    acl-probe mirror|trap <slot> igmp [bytes]
+                                      the UNI IGMP copied or taken to the CPU
+    acl-probe show <slot>             a probe, its count, what reached the CPU
+    acl-probe delete <slot>|all       remove probes
     help                              the list, with descriptions
     exit
 
@@ -592,6 +599,19 @@ for byte, and `register get` keeps its `0x<address> 0x<value>` layout for
 rcS and network.sh. `register set` writes the switch core
 directly: it is how rcS and network.sh program the optics and the host
 SerDes, and a wrong value there can take the host link away.
+
+`acl-probe` is for measuring the switch, and nothing in the image runs it.
+It installs one of eight ACL rules (entries 88 to 95) that counts the IPv4
+frames of one protocol, or to one address prefix, entering the UNI or the
+PON, in frames or bytes, without changing where they go; or that copies
+(`mirror`) or takes (`trap`) the IGMP entering the UNI to the CPU. It
+refuses anything else to the CPU, and anything at all from the PON to the
+CPU. The rules belong to the diag process that installed the first one and
+go when it exits, so they are installed and read from one diag fed on
+stdin; `show` works from any process. It refuses while igmpd holds its
+snooping lease, and igmpd is refused while probes are in.
+`tools/mcast-probe/mcast-probe.sh` runs the measurements
+(`docs/SWITCH.md`, "Multicast").
 
 ### `i2cget`, `i2cdump`, `i2cset` -- the optics module over I2C
 
@@ -1123,7 +1143,7 @@ drivers behind them.
 
 | file | read | write |
 |---|---|---|
-| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes and the snooping lease (igmpd -w) |
+| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table, the ACL probes (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes and the snooping lease (igmpd -w), the ACL probes (diag acl-probe) |
 | `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
@@ -1422,6 +1442,9 @@ this repository:
 - Killing omcid leaves the OLT unanswered until init has respawned it.
 - `diag register set` and writes to `/proc/odi_init` or `/proc/odi_omci`
   reprogram the hardware under a running stack.
+- `diag acl-probe trap` keeps the IGMP of the host from the OLT while it is
+  in: a line carrying IPTV loses its joins for that long. The counting
+  probes change no forwarding.
 - `igmpd -w` (the daemon or `-j`/`-l`) writes static L2 multicast entries.
   The driver refuses unicast, broadcast and 01:80:c2:00:00:0x addresses, but
   a wrong member mask on a group that carries traffic misforwards it
