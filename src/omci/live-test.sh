@@ -46,8 +46,8 @@ wait_count() {
 }
 
 # attr <class> <instance> <attribute>: the value of one attribute, as hex
-attr() {
-	$Q cli/build/omcli mib getattr "$1" "$2" "$3" 2>&1 | sed 's/^.* = //'
+attr() {   # attr <class> <entity> <attribute> [--secrets]
+	$Q cli/build/omcli mib getattr "$@" 2>&1 | sed 's/^.* = //'
 }
 
 # gpon <file> <state> <sn hex>: the /proc/odi_gpon/status shape
@@ -150,14 +150,18 @@ done
 check "TR-069 server: locked until the OLT unlocks it" "$(attr 340 1537 1)" "01"
 check "TR-069 server: no ACS address yet (0xffff, the stock default row)" "$(attr 340 1537 2)" "ffff"
 check "TR-069 server: no associated tag yet (0xffff)" "$(attr 340 1537 3)" "ffff"
-# The LOID as the stock MIB reset fills it, in ONU-G and in the CTC entity.
-check "ONU-G logical ONU ID is the configured LOID" "$(attr 256 0 10 | cut -c1-24)" \
+# The LOID as the stock MIB reset fills it, in ONU-G and in the CTC entity:
+# read with --secrets, since a dump masks both, and masked without it.
+check "ONU-G logical ONU ID is the configured LOID" "$(attr 256 0 10 --secrets | cut -c1-24)" \
       "4f4449544553544c4f494400"
-check "ONU-G logical password is the configured one" "$(attr 256 0 11)" \
+check "ONU-G logical password is the configured one" "$(attr 256 0 11 --secrets)" \
       "4f4449505700000000000000"
 check "CTC LOID authentication: OperationId is \"CTC \"" "$(attr 65530 0 1)" "43544320"
-check "CTC LOID authentication: the same LOID" "$(attr 65530 0 2 | cut -c1-24)" \
+check "CTC LOID authentication: the same LOID" "$(attr 65530 0 2 --secrets | cut -c1-24)" \
       "4f4449544553544c4f494400"
+check "without --secrets the ONU-G logical ONU ID is masked" "$(attr 256 0 10 | cut -c1-6)" "******"
+check "and so is the logical password" "$(attr 256 0 11 | cut -c1-6)" "******"
+check "and the CTC entity's LOID" "$(attr 65530 0 2 | cut -c1-6)" "******"
 # An OLT-set MAC ageing time is seconds; cmd 62 takes tenths (100 s -> 1000).
 $Q cli/build/omcli --inject "0c03480a002d00010040$(printf '00000064%052d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
 wait_count /tmp/live-a.log "ageing time 1000" 1 10

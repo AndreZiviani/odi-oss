@@ -1,6 +1,6 @@
 # The profile lists one dynamic range, 225.0.0.0/8. A join inside it is
 # programmed; a join outside it gets no state, no row and one count in
-# denied; the report is still counted as a join.
+# denied and none in joins (ME 311 counts accepted joins only).
 0 policy
 snooping=1
 igmp_function=0

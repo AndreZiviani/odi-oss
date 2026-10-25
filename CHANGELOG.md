@@ -10,6 +10,33 @@ listed here.
   being acknowledged. Before, the OLT got a success and then waited for a Test
   result that never came. The ANI-G test, the one OLTs actually send, is
   unchanged.
+- omcid: the LOID and its password are masked in MIB dumps like the other
+  credentials, where they appear twice: the LOID authentication entity (class
+  65530, its LOID and password) and ONU-G (class 256, its logical ONU id and
+  logical password). They show as `**`; the other attributes of both stay
+  readable, the OLT's Sets of ONU-G stay in the log, and `--secrets` shows
+  the values. Both come from the config store, and `omcicli mib get` printed
+  them.
+- igmpd: three fixes to the group table. The ME 311 join counter counted
+  every join message, refused ones included; it now counts only the joins
+  that were accepted (refused ones stay in the denied count of the state
+  file). The group limit counted a group once per VLAN, so one group on two
+  VLANs used two of the limit; it counts groups now. A group is no longer
+  dropped from the table, and its stream cut off while the PON drop is on,
+  when the OLT queries less often than the profile says: igmpd measures the
+  interval between a host's own reports and holds the group for robustness
+  times that plus the response time, never less than the profile's figure and
+  at most 1800 s. A leave without immediate leave still shortens the port to
+  the last-member time, because igmpd cannot send a group-specific query yet;
+  `docs/TOOLS.md` says what that relies on. The golden transcripts of the
+  refused-join and group-limit cases change only in their joins line, and so does the ME 311 check fed from igmpd's own state file (the refused join is no longer counted).
+- CI: the OMCI suites `tables`, `alarms` and `writes` run in CI too; they were
+  left out of the job matrix and ran only under `make test`. `make lint` now
+  fails when that matrix and `OMCI_SUITES` in the Makefile name different
+  suites. The `tables` suite waits for the downstream flow line before it
+  counts the multicast flag, instead of reading the log the moment the frame
+  is answered, which failed now and then.
+
 - igmpd: `igmpd -r FILE` replays a transcript of timestamped events (IGMP
   frames with their port and VLAN, clock ticks, policy file changes) through
   the daemon's own decision code and prints what it would do: the rows it
