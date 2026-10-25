@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- omcid: a Get whose attributes do not all fit the answer's 25 bytes of
+  values now answers result 9 (attribute failed or unknown), with G.988's
+  optional-attribute and attribute execution masks, instead of success with
+  the attributes left out. The OLT is told which ones to ask for again. Seen
+  on one ISP: GEM port PM history data (class 267) polled for attributes 1
+  and 3 to 7 is 33 bytes, and transmitted blocks was never sent. An attribute
+  the class does not have is reported in the optional-attribute mask the same
+  way. Attribute values also stop at byte 27 of the answer, where the two
+  masks begin; before, they could run up to byte 31.
+
 - CI: package installs on the runner are bounded (`tools/ci-apt.sh`): a read
   timeout and retries per connection, a time limit per `apt-get` call, and
   three attempts. A stalled apt mirror connection used
