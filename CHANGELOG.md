@@ -23,7 +23,44 @@ listed here.
   the reports go up and counts them; `/proc/odi_omci` counts what was sent.
   Still behind `IGMP_SNOOPING=1`, and experimental: no OLT with IPTV has yet
   seen a re-sent report.
+- omcid: the downstream multicast tag control of the OLT's multicast profile
+  (ME 309 attribute 16) is applied. Strip the tag, replace it, replace its
+  VID only, or add one (an S-tag in front of the C-tag, the only tag the
+  switch can add to a tagged frame) now acts on the multicast VLANs the
+  profile's access control lists name, one switch rule each, in front of the
+  rules the line had. The switch tells multicast from unicast by the VLAN
+  alone, so nothing is done for untagged or "any VLAN" groups, for a VLAN a
+  unicast service of the line also uses, or when no VLAN is named; omcid
+  logs once what it left out and why. Types 5 to 7 (the VID of the service
+  package table) are not done, and say so. `OMCI_CUSTOM_MCAST` bit 1 now
+  strips whatever the profile says, as on the stock firmware, and a change
+  of it rebuilds the rules (`apply.sh omci`). Neither of our lines names a
+  multicast VLAN, so their rules are unchanged, byte for byte.
 
+- omcid: `omcicli voip` prints the phone lines the OLT provisioned, resolved
+  into one block per port: the SIP user, the SIP servers as URLs without any
+  `user:password@`, the codecs, the voice VLAN and priority, and the line
+  status. The phone number, the display name and the login name are masked
+  like the serial in the diag bundle, and the password is never printed;
+  `omcicli voip --secrets` shows them, and `--secrets-list` prints only the
+  secret strings, one per line, for a scrub list. A login that belongs to the
+  TR-069 server is not shown as a SIP credential. With no voice provisioned
+  it says so in one line.
+
+- omcid: with `OMCI_POTS_PORTS` on, the voice an OLT provisions now reaches
+  the router. The OLT carries it on an IP host; the bridge port it builds on
+  that IP host is now the stick's host port, toward the router, instead of
+  the stick's own CPU port, where the voice went nowhere. The voice IP host
+  is the one the OLT's SIP agent names; any other IP host (TR-069
+  management, say) stays as it was and its VLAN never reaches the router. The voice VLAN
+  reaches the router tagged, as the OLT sets it, and the router's SIP client
+  sends it tagged the same way. A rule that would tag the IP host's untagged
+  frames is matched on that VLAN instead, so it cannot take the data
+  service's untagged frames; a rule that would match every untagged or every
+  tagged frame is not installed, and the log says why. The stick itself is
+  still unreachable from the fibre. With the key off nothing changes: a
+  bridge port on any IP host gets no rule, as before. Experimental: no OLT
+  that offers voice has been tried yet.
 - omcid: `OMCI_POTS_PORTS=1` or `2` now tells the OLT of that many phone
   ports, so an OLT that offers voice can provision a SIP line on each for the
   router behind the stick to register: a POTS circuit pack in the first free
@@ -32,7 +69,7 @@ listed here.
   data, which offers SIP over OMCI only. The stick has no phone socket and
   says so: the line status reads "config done" once the OLT has provisioned a
   line, never "registered"; a line test is refused; no voice alarm is raised.
-  The voice traffic itself does not reach the router yet. Off (the default),
+  Off (the default),
   the MIB upload is the stock one, record for record. Experimental: not yet
   run against an OLT that offers voice. Changing either key re-registers the
   ONU.

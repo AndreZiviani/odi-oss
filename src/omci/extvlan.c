@@ -803,6 +803,36 @@ int evtocd_plan_ds(const struct evtocd_plan *u, uint8_t ds_mode,
 }
 
 
+const char *evtocd_plan_lane(struct evtocd_plan *p, uint8_t *ds_mode)
+{
+	struct evtocd_plane *q = &p->c;
+
+	if (p->s.in || p->c.in) {
+		const struct evtocd_plane *m = p->cmp == EVTOCD_CMP_S ? &p->s : &p->c;
+
+		if (m->f_vid < 0)
+			return "a rule on tagged frames of any VID, which on the host lane are every service's";
+		return 0;
+	}
+	if (!p->out_tags)
+		return "a rule that leaves the frames untagged, which on the host lane are every service's";
+	if (p->out_tags != 1 || !q->out || q->op != EVTOCD_OP_PUSH)
+		return "a rule that adds an S-tag, or two tags, which the router does not send";
+	/* PUSH from an untagged match always has a written VID and priority:
+	 * evtocd_plan() refuses a copy from a tag the frame has not got. */
+	q->in = 1;
+	q->f_vid = q->vid;
+	q->f_pri = -1;
+	q->op = EVTOCD_OP_REWRITE;
+	p->cmp = EVTOCD_CMP_C;
+	/* The EtherType of a frame behind a tag is not compared (evtocd_plan()):
+	 * entries that told IPoE from ARP all come to this one rule. */
+	p->et_n = 0;
+	p->et[0] = p->et[1] = 0;
+	*ds_mode = EVTOCD_DSMODE_VID;
+	return 0;
+}
+
 /* ---- a plan as the bridge rule the switch driver reads
 
  * The rule_gen OMCI_VLAN_OPER_EXTVLAN_GEN encoding of omci_bdgconn.h: one

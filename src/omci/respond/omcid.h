@@ -328,6 +328,11 @@ int mcast_policy_class(uint16_t cls);
 #define CLS_MCAST_MONITOR 311
 uint32_t mcast_state_get(const char *key);
 uint16_t mcast_active_groups(uint8_t *out, uint16_t max);
+/* What the bridge connection's multicast rule takes from the subscriber's
+ * profile (../mcastvlan.h): attribute 16, the downstream IGMP and multicast
+ * TCI, and the VLAN (ANI) of each part 0 row of both access control lists,
+ * each value once, up to max. Returns 0 when the subscriber has no profile. */
+int mcast_ds_tag_input(uint8_t tci[3], uint16_t *ani, int max, int *nani);
 /* The next us_qos_rebuild() tears everything down first: set when the
  * PLOAM Alloc-ID list changed, since the T-CONT indexes (the CAM rows) may
  * have moved. */
@@ -456,6 +461,8 @@ void uni_start(void);
 /* apply_bridge.c */
 uint32_t veip_uni_port_mask(uint16_t veipId);
 uint32_t all_eth_uni_mask(void);
+int iphost_is_voice(uint16_t id);
+int iphost_switch_port(uint16_t id);
 void cli_row(const struct mib_row *r, int secrets);
 void v_banner(const struct omci_class *c);
 int vendor_row_exists(const struct omci_class *c);
@@ -466,6 +473,7 @@ uint32_t cli_caps(void);
 uint32_t cli_tcont(void);
 uint32_t cli_state(void);
 uint32_t cli_provision(void);
+uint32_t cli_voip(void);
 uint32_t cli_conn(void);
 void qmap_dump(void);
 uint32_t cli_bridge(void);
@@ -739,6 +747,7 @@ struct cfg_snap {
 	int private_me;
 	int veip_on;
 	int custom_me;
+	int custom_mcast;
 	int pots_ports;
 	int pots_slot_key;
 	int pots_slot;
@@ -764,6 +773,8 @@ struct cfg_snap {
 #define CFGD_POTS_PORTS (1u << 21)
 #define CFGD_POTS_SLOT  (1u << 22)
 #define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON | CFGD_CUSTOM_ME | CFGD_POTS_PORTS | CFGD_POTS_SLOT)
+/* Rebuild class, like the VLAN keys: what the bridge rules are built from. */
+#define CFGD_CUSTOM_MCAST (1u << 23)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
@@ -789,6 +800,14 @@ void cfg_load_unknown_me(void);
 /* OMCI_CUSTOM_ME as stored, 0 when absent or not a number. */
 extern int custom_me;
 void cfg_load_custom_me(void);
+/* OMCI_CUSTOM_MCAST, the stock key, decimal. Bit 0x1 loads mc_00000001.so on
+ * the stock firmware, whose cf_force_ds_mcast_untagged writes control type 1
+ * (strip the outer tag) over byte 0 of class 309 attribute 16 before the
+ * profile is applied; here the bit does the same to the bridge rules, and
+ * the attribute keeps what the OLT set. */
+#define CUSTOM_MCAST_DS_UNTAGGED 0x1
+extern int custom_mcast;
+void cfg_load_custom_mcast(void);
 void cfg_load_veip_slot(void);
 void cfg_load_private_me(void);
 /* The slot key as stored (0..255), -1 when absent or not a valid slot; the
