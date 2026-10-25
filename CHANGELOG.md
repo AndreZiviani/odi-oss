@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- tests: the OMCI suites no longer fail now and then on a busy machine. A
+  suite that restarts the daemon into the same log file waited for the
+  "answering as" line, and the shell had not always emptied the file yet, so it
+  read the previous daemon's line, went on before the new daemon was up, and
+  then lost its first frames or stopped it too early. Every start now empties
+  the log first. A failed `omcli --inject` in a suite also prints why.
 - omcid: the extra multicast GEM ports an OLT names only in address rows now
   get a downstream flow. G.988 lets one multicast GEM interworking TP (ME 281)
   spread the channels over several GEM ports by writing more rows, with other

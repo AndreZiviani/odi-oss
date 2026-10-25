@@ -59,6 +59,7 @@ rm -f /var/config/odi.conf /var/config/lastgood.xml /var/config/lastgood_hs.xml 
 status ""
 
 log=/tmp/omcid-enc.log
+: > "$log"
 $Q respond/build/omcid -d -g /tmp/enc-gpon > "$log" 2>&1 &
 pid=$!
 omcid_up "$log"
