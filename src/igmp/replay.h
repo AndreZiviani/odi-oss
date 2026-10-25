@@ -18,6 +18,8 @@ void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
 void igmpd_replay_clock(uint32_t now);
 void igmpd_replay_policy(const char *text, uint32_t len);
 void igmpd_state_dump(const struct igmp_db *db);
+/* What `igmpd -s` prints for this table and the policy in force. */
+void igmpd_status_dump(const struct igmp_db *db);
 
 /* replay.c: run FILE ("-" for stdin). Returns the exit status. */
 int igmp_replay(const char *path);

@@ -59,7 +59,35 @@ out=$($Q $BIN -w -r test/replay/join-leave.in 2>&1); rc=$?
 [ "$rc" = 2 ] && [ "$out" != "${out#*never writes}" ] \
 	&& ok "-r with -w is refused before anything is read" \
 	|| no "-r with -w is refused ($rc)"
-rm -f $t /tmp/replay-got.txt
+
+# igmpd -s: the same report from files, offline. The state file is what the
+# daemon writes (the refused-ring golden prints it), cut off mid-line as a
+# reader with a short buffer would see it.
+sf=/tmp/status-state.txt
+printf 'joins=3\ndenied=2\ngroups=1\nrefused_acl=2\ngroup=225.2.2.2\nrefused=acl 239.1.1.1 vid=0 at=5 n=2\nrefused=acl 239.1.1.2 vid=0 at=9 n=1\n' > $sf
+pf=/tmp/status-policy.txt
+printf 'snooping=1\nallow=225.0.0.0-225.255.255.255\n' > $pf
+out=$($Q $BIN -s $sf $pf 2>&1); rc=$?
+want='policy: snooping, function 0, timed leave, 2/125/1 s, limit 0, 1 allow + 0 static ranges
+  allow 225.0.0.0 - 225.255.255.255
+joins 3, refused by the profile 2 (lists 2, group limit 0), table full 0
+groups held: 1
+  225.2.2.2
+recent refusals, newest first:
+  239.1.1.2  vid 0  outside the access control lists (acl)  at 9 s
+  239.1.1.1  vid 0  outside the access control lists (acl)  x2  at 5 s'
+[ "$rc" = 0 ] && [ "$out" = "$want" ] \
+	&& ok "igmpd -s reads a state file and a policy file" \
+	|| { no "igmpd -s reads a state file and a policy file ($rc)"; printf '%s\n' "$out"; }
+head -c 120 $sf > $t.cut
+out=$($Q $BIN -s $t.cut $pf 2>&1)
+[ "$out" != "${out#*joins 3}" ] && [ "$out" = "${out%239.1.1.2*}" ] \
+	&& ok "igmpd -s on a cut-off state file drops the partial last line" \
+	|| { no "igmpd -s on a cut-off state file"; printf '%s\n' "$out"; }
+out=$($Q $BIN -s /nonexistent /nonexistent 2>&1); rc=$?
+[ "$rc" = 0 ] && [ "$out" != "${out#*policy: none}" ] && [ "$out" != "${out#*state: none}" ] \
+	&& ok "igmpd -s with no files says so" || no "igmpd -s with no files ($rc)"
+rm -f $t $t.cut $sf $pf /tmp/replay-got.txt
 
 [ "$fail" -eq 0 ] && echo "replay_test.sh: all checks passed" || echo "FAILED ($fail)"
 [ "$fail" -eq 0 ]

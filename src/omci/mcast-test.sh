@@ -326,6 +326,22 @@ check "311 JoinMsgCounter from igmpd's own state file" \
       "$(send "$log" 0073 49 0137 0001 "2000" && answer "$log" 0073 | cut -c7-14)" "00000002"
 check "311 active group list from igmpd's own state file: the group still held" \
       "$(table "$log" b12 0137 0001 0800)" "$(pad 000000000000e1020202 24)"
+check "311 reads igmpd's own file with its refusal line: the group list is unchanged" \
+      "$(table "$log" b15 0137 0001 0800)" "$(pad 000000000000e1020202 24)"
+# The refusal counters and ring that igmpd adds (state.h): header keys, then
+# the group lines, then the ring. omcid reads joins and group= lines and
+# skips every other key; and a file cut off inside a ring line (a reader
+# with a short buffer) still gives the joins and the groups before the cut.
+printf 'joins=5\ndenied=2\ngroups=1\nrefused_acl=1\nrefused_limit=1\ngroup=239.1.2.3\nrefused=acl 239.9.9.9 vid=0 at=5 n=1\nrefused=limit 239.9.9.8 vid=10 at=9 n=1\n' > /var/run/odi-mcast.state
+check "311 JoinMsgCounter with refusal counters and a ring in the file" \
+      "$(send "$log" 0074 49 0137 0001 "2000" && answer "$log" 0074 | cut -c7-14)" "00000005"
+check "311 active group list with a ring after the groups" \
+      "$(table "$log" b13 0137 0001 0800)" "$G1"
+printf 'joins=6\ndenied=2\ngroups=1\nrefused_acl=1\ngroup=239.1.2.3\nrefused=acl 239.9.9.9 vid=0 at=5 n=1\nrefused=limit 239.9' > /var/run/odi-mcast.state
+check "311 JoinMsgCounter from a file cut off inside a refusal line" \
+      "$(send "$log" 0075 49 0137 0001 "2000" && answer "$log" 0075 | cut -c7-14)" "00000006"
+check "311 active group list from a file cut off inside a refusal line" \
+      "$(table "$log" b14 0137 0001 0800)" "$G1"
 rm -f /var/run/odi-mcast.state
 
 # --------------------------------------------------------------- MIB reset
