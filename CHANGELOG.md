@@ -18,6 +18,56 @@ listed here.
   strips whatever the profile says, as on the stock firmware, and a change
   of it rebuilds the rules (`apply.sh omci`). Neither of our lines names a
   multicast VLAN, so their rules are unchanged, byte for byte.
+
+- omcid: `OMCI_POTS_PORTS=1` or `2` now tells the OLT of that many phone
+  ports, so an OLT that offers voice can provision a SIP line on each for the
+  router behind the stick to register: a POTS circuit pack in the first free
+  slot (2 unless the VEIP is there; the new `OMCI_POTS_SLOT_ID` picks
+  another), a POTS UNI per port with its line status, and the VoIP config
+  data, which offers SIP over OMCI only. The stick has no phone socket and
+  says so: the line status reads "config done" once the OLT has provisioned a
+  line, never "registered"; a line test is refused; no voice alarm is raised.
+  The voice traffic itself does not reach the router yet. Off (the default),
+  the MIB upload is the stock one, record for record. Experimental: not yet
+  run against an OLT that offers voice. Changing either key re-registers the
+  ONU.
+
+- tools: `make lint` no longer passes silently when git is unusable. Its
+  git grep rules read a failing git grep as "no match", so a build from a
+  git worktree through `tools/remote-build.sh` (whose `.git` file points at
+  a path that does not exist on the build host) skipped them all. `make
+  lint` now stops with a message when the tree is not a usable git
+  checkout, and `tools/remote-build.sh` gives a worktree a throwaway
+  repository on the build host so the rules really run there.
+
+- omcid: the VoIP managed entities of G.988 (SIP over OMCI: the SIP agent and
+  user, the voice service, media and RTP profiles, the dial plan, the
+  application profile and feature codes, the voice CTP, the voice PM
+  entities, and the POTS UNI, line status and VoIP config data the ONU
+  creates) are now in its model, behind a new experimental key,
+  `OMCI_POTS_PORTS` (odi.conf, 0 by default). Off, an OLT that sends one of
+  these gets "unknown entity", exactly as before. On (1 or 2), omcid accepts
+  what an OLT provisions for a phone line, keeps it, answers it back and
+  resumes it after a restart; the SIP password and the subscriber's display
+  name stay out of the log and are masked in `omcicli mib get`. The stick does
+  not tell the OLT of any phone port yet, so on its own the key changes
+  nothing an OLT sees. Changing it re-registers the ONU. To make room for a
+  data service and two phone lines at once, omcid now holds 320 managed
+  entities (was 256), 32 entities wider than a row (was 16) and 255 table
+  rows (was 128); its MIB snapshot reuses one buffer for saving and
+  resuming, so its RAM still shrinks by about 37 KB overall.
+- kernel, omcid: a downstream GEM flow can now be deleted. A multicast GEM
+  port withdrawn by the OLT used to keep its flow, and the GEM port stayed
+  received, until the next reboot. Now its flow is taken out of the switch
+  when its last address row goes, when its multicast ME goes, and now also
+  when the GEM port network CTP that ME points at is deleted. A MIB reset
+  deletes every downstream flow too, as it already did the upstream ones,
+  so a GEM port the OLT does not provision again after the reset is no
+  longer received. The driver clears the row and reads it back before it
+  frees the flow id; a row that does not clear is logged and kept, and
+  omcid tries again. `/proc/odi_gpon/cam` now also lists the downstream GEM
+  port rows (`gem_cam`), as the hardware holds them.
+
 - igmpd: the PON-side drop of unjoined multicast is now its own opt-in key,
   `IGMP_PON_DROP`, instead of coming with `IGMP_SNOOPING=1`. Snooping can run
   (the copy of the host's IGMP, the group rows, the OLT's limits and lists)
@@ -68,9 +118,7 @@ listed here.
   for them. Only the CTP's own port had a flow, so the others dropped their
   frames. Each such port now gets a multicast downstream flow like the CTP's,
   and loses it when its last row, or the ME, goes; a line whose OLT names one
-  port is unchanged. The kernel has no downstream flow delete yet, so a
-  withdrawn flow is refused there and stays in the switch until the next
-  change; this is logged.
+  port is unchanged.
 - omci: a Test on an entity omcid cannot test (anything but the ANI-G, the
   IP host included) is now refused with result 2, "not supported", instead of
   being acknowledged. Before, the OLT got a success and then waited for a Test

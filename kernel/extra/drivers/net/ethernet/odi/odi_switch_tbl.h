@@ -54,6 +54,17 @@ int odi_switch_gpon_ds_port_write(uint32_t idx, uint32_t gem_port_id, uint32_t t
  */
 int __odi_switch_gpon_ds_port_write(uint32_t idx, uint32_t gem_port_id, uint32_t traffic_cfg);
 
+/* The row taken out again, the stock driver's delete (MODE 3, no WDATA,
+ * DONE polled, the flow type word 0), with the flow type word written
+ * first and the row then read back (MODE 2): the delete counts only when
+ * the row reads not valid. A row left valid would keep delivering its GEM
+ * port, and the same port written to another row later would be in the
+ * CAM twice. Returns 0, -ETIMEDOUT when a request
+ * never finished, or -EIO when the row still reads valid. The caller
+ * holds odi_switch_dsf_lock.
+ */
+int __odi_switch_gpon_ds_port_clear(uint32_t idx);
+
 /* The Alloc-ID CAM: the same handshake on DSF_ALLOC_CAM_CTL/_WDATA,
  * without the flow type word. No capture exercises it: it follows the
  * register table, and odi_switch_test.c says so.

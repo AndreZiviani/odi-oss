@@ -64,17 +64,34 @@
  * mibstore.c and show.c compare against. */
 enum omci_me_class {
 	OMCI_ME_ONT_DATA                      = 2,   /* ONT data */
+	OMCI_ME_CARDHOLDER                    = 5,   /* cardholder */
 	OMCI_ME_CIRCUIT_PACK                  = 6,   /* circuit pack */
 	OMCI_ME_SOFTWARE_IMAGE                = 7,   /* software image */
 	OMCI_ME_PPTP_ETH_UNI                  = 11,  /* PPTP Ethernet UNI */
 	OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE    = 45,  /* MAC bridge service profile */
 	OMCI_ME_MAC_BRIDGE_CFG_DATA           = 46,  /* MAC bridge configuration data */
 	OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA      = 47,  /* MAC bridge port config data */
+	OMCI_ME_PPTP_POTS_UNI                 = 53,  /* PPTP POTS UNI */
+	OMCI_ME_VOICE_SERVICE_PROFILE         = 58,  /* voice service profile */
 	OMCI_ME_VLAN_TAGGING_FILTER_DATA      = 84,  /* VLAN tagging filter data */
 	OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE  = 130, /* 802.1p mapper service profile */
 	OMCI_ME_OLT_G                         = 131, /* OLT-G */
 	OMCI_ME_IP_HOST_CONFIG_DATA           = 134, /* IP host config data */
+	OMCI_ME_VOIP_CONFIG_DATA              = 138, /* VoIP config data */
+	OMCI_ME_VOIP_VOICE_CTP                = 139, /* VoIP voice CTP */
+	OMCI_ME_CALL_CONTROL_PMHD             = 140, /* call control PM history data */
+	OMCI_ME_VOIP_LINE_STATUS              = 141, /* VoIP line status */
+	OMCI_ME_VOIP_MEDIA_PROFILE            = 142, /* VoIP media profile */
+	OMCI_ME_RTP_PROFILE_DATA              = 143, /* RTP profile data */
+	OMCI_ME_RTP_PMHD                      = 144, /* RTP PM history data */
+	OMCI_ME_NETWORK_DIAL_PLAN_TABLE       = 145, /* network dial plan table */
+	OMCI_ME_VOIP_APP_SERVICE_PROFILE      = 146, /* VoIP application service profile */
+	OMCI_ME_VOIP_FEATURE_ACCESS_CODES     = 147, /* VoIP feature access codes */
 	OMCI_ME_AUTH_SECURITY_METHOD          = 148, /* authentication security method */
+	OMCI_ME_SIP_AGENT_CFG_DATA            = 150, /* SIP agent config data */
+	OMCI_ME_SIP_AGENT_PMHD                = 151, /* SIP agent PM history data */
+	OMCI_ME_SIP_CALL_INIT_PMHD            = 152, /* SIP call initiation PM history data */
+	OMCI_ME_SIP_USER_DATA                 = 153, /* SIP user data */
 	OMCI_ME_LARGE_STRING                  = 157, /* large string */
 	OMCI_ME_OCTET_STRING                  = 307, /* octet string */
 	OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA  = 171, /* extended VLAN tagging op cfg */
@@ -82,6 +99,7 @@ enum omci_me_class {
 	OMCI_ME_ONU2_G                        = 257, /* ONU2-G */
 	OMCI_ME_TCONT                         = 262, /* T-CONT */
 	OMCI_ME_ANI_G                         = 263, /* ANI-G */
+	OMCI_ME_UNI_G                         = 264, /* UNI-G */
 	OMCI_ME_GEM_IW_TP                     = 266, /* GEM interworking TP */
 	OMCI_ME_GEM_PORT_CTP                  = 268, /* GEM port network CTP */
 	OMCI_ME_PRIORITY_QUEUE                = 277, /* priority queue */

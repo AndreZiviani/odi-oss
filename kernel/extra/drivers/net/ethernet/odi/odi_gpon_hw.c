@@ -1242,6 +1242,47 @@ void odi_gpon_hw_alloc_cam_read(int hw[32], int recorded[32])
 	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
 }
 
+/* /proc/odi_gpon/cam, the downstream half: rows 0..64 of the GEM port
+ * CAM (cmd 25's flows, then the OMCC's row) as the hardware holds them,
+ * each with its DSF_GEM_FLOW_TYPE word, so a stick can show that a flow
+ * cmd 25 deleted left its row clear. Same lock and walk as the Alloc-ID
+ * read above: a request that never completes ends it, and that row and
+ * the rest read -2.
+ */
+void odi_gpon_hw_gem_cam_read(int hw[ODI_GPON_HW_GEM_CAM_ROWS],
+			      uint32_t type[ODI_GPON_HW_GEM_CAM_ROWS])
+{
+	unsigned long flags;
+	unsigned int row;
+	uint32_t ind, ctl = 0;
+	int stuck = 0;
+
+	spin_lock_irqsave(&odi_switch_dsf_lock, flags);
+	for (row = 0; row < ODI_GPON_HW_GEM_CAM_ROWS; row++) {
+		type[row] = ODI_SW_DSF_GEM_FLOW_TYPE_FLAGS_GET(
+			odi_reg_read(ODI_SW_DSF_GEM_FLOW_TYPE(row)));
+		if (stuck) {
+			hw[row] = -2;
+			continue;
+		}
+		ind = ODI_SW_DSF_GEM_CAM_CTL_OP_SET(0, 2);
+		ind = ODI_SW_DSF_GEM_CAM_CTL_CAM_ROW_SET(ind, row);
+		odi_reg_write(ODI_SW_DSF_GEM_CAM_CTL_OFF, ind);
+		odi_reg_write(ODI_SW_DSF_GEM_CAM_CTL_OFF, ODI_SW_DSF_GEM_CAM_CTL_REQ_SET(ind, 1));
+		if (odi_poll_reg(ODI_SW_DSF_GEM_CAM_CTL_OFF, ODI_SW_DSF_GEM_CAM_CTL_DONE,
+				 ODI_SW_DSF_GEM_CAM_CTL_DONE, ODI_SW_TABLE_POLL_DELAY_US,
+				 ODI_SW_TABLE_POLL_US, &ctl)) {
+			stuck = 1;
+			hw[row] = -2;
+			continue;
+		}
+		hw[row] = (ctl & ODI_SW_DSF_GEM_CAM_CTL_ROW_VALID) ?
+			  (int)ODI_SW_DSF_GEM_CAM_RDATA_GEM_PORT_GET(odi_reg_read(ODI_SW_DSF_GEM_CAM_RDATA_OFF)) :
+			  -1;
+	}
+	spin_unlock_irqrestore(&odi_switch_dsf_lock, flags);
+}
+
 /* Assign_Alloc-ID with type 255 (G.984.3 9.2.3.9, "deallocate"): the OLT
  * takes that Alloc-ID back. Its CAM row is deleted with the same MODE=3
  * leaf gpondeact uses, under the same lock, and the row is free for the

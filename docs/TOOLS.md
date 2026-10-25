@@ -182,7 +182,8 @@ the serial number until the kernel reports one (`GPON_SN`), the LOID keys
 all six reported only while `/etc/config/omci-identity.on` exists), and
 `DUAL_MGMT_MODE` and the `OMCI_CUSTOM_*` masks for display only; and, from
 `/etc/config/odi.conf`, `OMCI_UNKNOWN_ME_OK` (its start-up line `unknown
-entities: ...` says which way) `OMCI_PRIVATE_ME` and `OMCI_VEIP`; the VEIP slot (`OMCI_VEIP_SLOT_ID`,
+entities: ...` says which way) `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_POTS_PORTS` and `OMCI_POTS_SLOT_ID` (the start-up
+line `phone: ... in slot ...` when on); the VEIP slot (`OMCI_VEIP_SLOT_ID`,
 with bit 256 of `OMCI_CUSTOM_ME`) and the private-entity switch are on the start-up line `VEIP in slot ...`. At every
 Start software download, Activate and Commit from the OLT it reads
 `OLT_SW_DOWNLOAD` from `/etc/config/odi.conf`: accept (the default) answers the
@@ -230,7 +231,7 @@ switch off the report keys do not count) and does the least that applies:
 |---|---|---|
 | nothing | logs `event=reload changed=none` | untouched |
 | only `VLAN_CFG_TYPE`, `VLAN_MANU_MODE`, `VLAN_MANU_TAG_VID`, `VLAN_MANU_TAG_PRI` | tears the bridge connections down and builds them again from the MIB it holds, by the same `bdgconn_rebuild()` the first build uses | stays in O5, nothing re-ranged |
-| `GPON_SN`, `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity switch, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_VEIP_SLOT_ID` (with `OMCI_CUSTOM_ME`), bit 64 of `OMCI_CUSTOM_ME` (with or without VLAN keys) | writes `gpondeact` to `/proc/odi_init`, clears its MIB as a MIB reset does (`event=mib_reset side=local`), holds three seconds, hands the driver the serial number (`gponsn`, only if it changed) and the password (`gponpw`), writes `gponact`, and waits for O5 and the services | deactivated and ranged again; the process is never restarted |
+| `GPON_SN`, `GPON_PLOAM_PASSWD`, the LOID keys, `OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, `OMCC_VER`, `OMCI_VENDOR_PRODUCT_CODE`, `ONU_HW_VERSION`, the identity switch, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_POTS_PORTS`, `OMCI_POTS_SLOT_ID` (with ports), `OMCI_VEIP_SLOT_ID` (with `OMCI_CUSTOM_ME`), bit 64 of `OMCI_CUSTOM_ME` (with or without VLAN keys) | writes `gpondeact` to `/proc/odi_init`, clears its MIB as a MIB reset does (`event=mib_reset side=local`), holds three seconds, hands the driver the serial number (`gponsn`, only if it changed) and the password (`gponpw`), writes `gponact`, and waits for O5 and the services | deactivated and ranged again; the process is never restarted |
 
 The re-registration is a state machine advanced by the main loop, so no step
 sleeps: the CLI, the queues and the watchdog ping are served while the ONU is
@@ -730,7 +731,8 @@ on), but the stock daemon wedges on it, so the web UI refuses it outright.
 Secrets in the MIB dump: the username, password and realm of an
 authentication security method (class 148), and the parts of a large string
 (157, which can hold a URL with `user:password@` in it) or an octet string
-(307) are shown as `**` for every byte, in `omcli mib`, `omcicli mib get` and
+(307), and the display name of a SIP user (153, the subscriber's own) are
+shown as `**` for every byte, in `omcli mib`, `omcicli mib get` and
 `mib getattr`. The line keeps its width and its key, so a parser sees the same
 fields; an attribute that was never set still shows its zeros. `--secrets`
 (anywhere on the command line, native or `--vendor`) prints the real bytes.
@@ -1183,7 +1185,7 @@ drivers behind them.
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
-| `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault | -- |
+| `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault. Then the downstream GEM port CAM, the table that decides which GEM ports the ONU receives: `gem_cam <row> hw <GEM port|-> type 0x<FLAGS>` for each of rows 0..64 valid in the hardware or with a flow type word not zero (rows 0..63 are the downstream flows OMCI created, the row being the flow id, `diag gpon get flows`; row 64 is the OMCC; FLAGS bit 0 multicast, 1 Ethernet, 2 OMCI, 4 AES), then `gem_cam_valid <n>`. A flow OMCI deleted leaves no line | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |

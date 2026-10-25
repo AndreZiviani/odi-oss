@@ -8,10 +8,11 @@
  * in the same cycle as odi_gpon_ctr_sample(), and it adds each read into a
  * 64-bit total. Only the flows the driver configured are read, never the
  * whole table: odi_switch_cmd.c tells odi_gpon.c when OMCI creates a flow
- * (odi_gpon_flows_set()) and when the flow state is emptied
- * (odi_gpon_flows_clear()). A flow created again starts from zero: its
- * totals are cleared, and so are its registers, with a read nobody keeps,
- * so counts from before the flow existed never reach the total.
+ * (odi_gpon_flows_set()), when it deletes one (odi_gpon_flows_del()) and
+ * when the flow state is emptied (odi_gpon_flows_clear()). A flow created
+ * again starts from zero: its totals are cleared, and so are its
+ * registers, with a read nobody keeps, so counts from before the flow
+ * existed never reach the total.
  *
  * The flow index is the driver's, not the GEM port id: a downstream flow
  * is a row of the GEM port CAM, an upstream flow a slot of the upstream
@@ -86,6 +87,12 @@ enum odi_gpon_flow_dir {
  */
 int odi_gpon_flows_set(struct odi_gpon_flows *f, enum odi_gpon_flow_dir dir, uint32_t idx,
 		       uint32_t gem_port);
+
+/* Flow idx of direction dir is gone (cmd 25 deleted it): no longer
+ * sampled or shown, its totals dropped. Returns 0, or -1 for an index the
+ * table does not hold. Lock held.
+ */
+int odi_gpon_flows_del(struct odi_gpon_flows *f, enum odi_gpon_flow_dir dir, uint32_t idx);
 
 /* Every flow is gone: forget them all, totals included. Lock held. */
 void odi_gpon_flows_clear(struct odi_gpon_flows *f);

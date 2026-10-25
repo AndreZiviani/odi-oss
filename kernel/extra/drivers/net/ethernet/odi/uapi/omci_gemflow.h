@@ -93,8 +93,8 @@ struct omci_gemflow {
 	/* 1 asks for a create, and is what every create path here uses; the
 	 * vendor wrapper treats any other value as an update of the flow the
 	 * port already holds, and fails if it holds none. At the driver, 0 is
-	 * a delete of the flow (the stock driver's reading, and ours
-	 * upstream; odi_switch_cmd.c refuses a downstream delete). */
+	 * a delete of the flow, in either direction (the stock driver's
+	 * reading, and ours: odi_switch_cmd.c). */
 	uint32_t ena;
 	/* Direction: US=1, DS=2. updateUsGemFlow forces 1 and
 	 * updateGemFlow forces 2, which is how this was found. */
