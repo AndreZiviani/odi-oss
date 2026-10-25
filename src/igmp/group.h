@@ -55,6 +55,26 @@
  * cuts off everyone else on the port. */
 #define IGMP_LAST_MEMBER_TTL   (IGMP_ROBUSTNESS * 1)
 
+/* The membership interval the profile gives assumes the OLT queries at the
+ * profile's query interval, and nothing here sees the OLT's queries (the copy
+ * rule matches UNI ingress only). What igmpd does see is the host answering
+ * them: one report per query. So a group port also remembers the gap between
+ * its own reports and holds the membership for robustness of those gaps plus
+ * the response interval, when that is longer than the profile's figure.
+ *
+ * Reports closer together than the profile's query response interval are
+ * retransmissions of one answer (a host repeats an unsolicited report), not
+ * two queries, and are not a gap. A gap above IGMP_OBS_GAP_MAX is a host that
+ * stopped and came back, not a query interval, and is not learned. The
+ * result is bounded by IGMP_OBS_TTL_MAX, so a host reporting rarely cannot
+ * pin a group for hours. The profile's figure is never undercut. The history
+ * outlives the membership on purpose: with a profile shorter than the real
+ * interval the first membership lapses before its second report, and without
+ * the history that gap could never be measured. */
+#define IGMP_OBS_GAP_MAX       600
+#define IGMP_OBS_TTL_MAX       1800
+#define IGMP_HIST_MAX          IGMP_MAX_GROUPS
+
 /* The widest static range igmpd turns into one row a group (the hardware
  * cannot say "this range", only name groups). A wider one stays unenforced
  * and keeps the PON's drop of unregistered multicast off, so the stream the
@@ -83,14 +103,26 @@ struct igmp_entry {
 	uint32_t expires[IGMP_MAX_PORTS];       /* per port, monotonic seconds */
 };
 
+/* When one port last reported one group, and the gap before that (0: not
+ * measured). Keyed like a membership, kept after it lapses. */
+struct igmp_hist {
+	uint8_t  used;
+	uint8_t  port;
+	uint16_t vid;
+	uint32_t group;
+	uint32_t last;
+	uint32_t gap;
+};
+
 struct igmp_db {
 	struct igmp_entry g[IGMP_MAX_GROUPS];
+	struct igmp_hist hist[IGMP_HIST_MAX];
 	uint32_t router_ports;
 	uint32_t router_expires[IGMP_MAX_PORTS];
 	uint32_t dropped;                       /* joins refused, table full */
 	struct igmp_policy pol;                 /* what the OLT provisioned */
-	uint32_t joins;                         /* join messages seen */
-	uint32_t denied;                        /* joins the profile refused */
+	uint32_t joins;                         /* join messages accepted (ME 311 attr 3) */
+	uint32_t denied;                        /* joins refused: profile or limit */
 	int      static_overflow;               /* a static range too wide to name */
 };
 
@@ -119,8 +151,8 @@ uint32_t igmp_db_mac_ports(const struct igmp_db *db, uint32_t group);
 /* How many groups are live. For the status line, and for the tests. */
 int igmp_db_count(const struct igmp_db *db);
 
-/* How many of them a subscriber joined: the static groups are not counted
- * against the profile's limit. */
+/* How many distinct groups a subscriber joined (one group on two VLANs is one):
+ * the static groups are not counted against the profile's limit. */
 int igmp_db_dynamic_count(const struct igmp_db *db);
 
 /* Run the table on a new policy. The static groups become fixed entries

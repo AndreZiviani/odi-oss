@@ -156,7 +156,7 @@ static void test_limits(void)
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 3));
 	n = igmp_db_rx(&db, &rx, 100, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 2, "the third group is past the limit and gets no state");
-	ok(db.denied == 1 && db.joins == 3, "denied and join counters");
+	ok(db.denied == 1 && db.joins == 2, "denied and join counters: the refused join is not a join");
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 1));
 	n = igmp_db_rx(&db, &rx, 110, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 2 && db.denied == 1, "a refresh of a held group is not counted against the limit");
@@ -335,7 +335,7 @@ static void test_state(void)
 	struct igmp_rx rx;
 	uint32_t n;
 	static const char want[] =
-		"joins=3\ndenied=1\ngroups=2\ngroup=239.1.1.1\ngroup=239.1.1.2\n";
+		"joins=2\ndenied=1\ngroups=2\ngroup=239.1.1.1\ngroup=239.1.1.2\n";
 
 	igmp_db_init(&db);
 	parse("snooping=1\nmax_groups=2\nallow=239.0.0.0-239.255.255.255\nstatic=226.1.1.1-226.1.1.1\n", &p);

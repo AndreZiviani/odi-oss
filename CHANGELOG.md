@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- igmpd: three fixes to the group table. The ME 311 join counter counted
+  every join message, refused ones included; it now counts only the joins
+  that were accepted (refused ones stay in the denied count of the state
+  file). The group limit counted a group once per VLAN, so one group on two
+  VLANs used two of the limit; it counts groups now. A group is no longer
+  dropped from the table, and its stream cut off while the PON drop is on,
+  when the OLT queries less often than the profile says: igmpd measures the
+  interval between a host's own reports and holds the group for robustness
+  times that plus the response time, never less than the profile's figure and
+  at most 1800 s. A leave without immediate leave still shortens the port to
+  the last-member time, because igmpd cannot send a group-specific query yet;
+  `docs/TOOLS.md` says what that relies on. The golden transcripts of the
+  refused-join and group-limit cases change only in their joins line, and so does the ME 311 check fed from igmpd's own state file (the refused join is no longer counted).
 - igmpd: `igmpd -r FILE` replays a transcript of timestamped events (IGMP
   frames with their port and VLAN, clock ticks, policy file changes) through
   the daemon's own decision code and prints what it would do: the rows it
