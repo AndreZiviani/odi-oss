@@ -141,6 +141,8 @@ check "key off: and records it as an unknown entity" \
 check "key off: the MIB upload announces 399 records, as the stock ONU" \
       "$(upload "$log")" "399"
 check "key off: no phone line in the startup log" "$(grep -c '^phone:' "$log")" "0"
+check "key off: omcicli voip says there is no voice, in one line" \
+      "$($Q cli/build/omcli voip 2>&1)" "no voice provisioned"
 omcid_stop "$pid"
 
 # ---------------------------------------------------------------- key on
@@ -158,6 +160,9 @@ send "$log" 0010 4f 0002 0000 ""                         # MIB reset
 check "key on: the upload carries the 14 records of one phone port" \
       "$(upload "$log")" "413"
 ga() { $Q cli/build/omcli mib getattr "$@" 2>&1; }
+check "key on, nothing provisioned: omcicli voip says so in one line" \
+      "$($Q cli/build/omcli voip 2>&1)" "no voice provisioned"
+check "and its secret list is empty" "$($Q cli/build/omcli voip --secrets-list 2>&1)" ""
 check "the POTS circuit pack is in slot 2, type 32 (POTS)" \
       "$(ga 6 258 1)" "class 6 entity 258 attr 1 = 20"
 check "with one port" "$(ga 6 258 2)" "class 6 entity 258 attr 2 = 01"
@@ -426,6 +431,81 @@ for c in 53 58 138 139 141 142 143 145 146 147 150 153; do
 	      "$(sed -n 's/^OMCI_CLASSES="\(.*\)"/\1/p' ../../rootfs/skeleton/etc/scripts/diag-bundle.sh | tr ' ' '\n' | grep -cx "$c")" "0"
 done
 
+# ------------------------------------------------------- omcicli voip
+# The resolved view. More of the provisioning first: a second server URL
+# with a login in it (the outbound proxy), a TCP/UDP config naming IP host 1,
+# the tag the OLT puts on that IP host, and a TR-069 login that must not
+# show up, a 148 reached by no SIP entity.
+OUTB='sip:user1:Url-Pw-9@proxy2.example.net:5070'; OUTBX=$(hexof "$OUTB")
+send "$log" 0100 44 009d 0004 ""
+send "$log" 0101 48 009d 0004 "c00002$(part "$OUTBX" 1)"
+send "$log" 0102 48 009d 0004 "2000$(part "$OUTBX" 2)"
+send "$log" 0103 48 0096 0001 "40000004"                  # outbound proxy -> 4
+send "$log" 0104 48 0088 0001 "10000001"                  # TCP/UDP -> IP host 1
+send "$log" 0105 44 00ab 0001 ""
+send "$log" 0106 48 00ab 0001 "800003"                    # association: IP host
+send "$log" 0107 48 00ab 0001 "02000001"                  #   of IP host 1
+send "$log" 0108 48 00ab 0001 "0400f8000000f800000000050324000f8000"  # untagged -> VID 100, PRI 5
+ACSPW=Acs-Pw-77; ACSPWX=$(hexof "$ACSPW"); ACSU=acs-user-x; ACSUX=$(hexof "$ACSU")
+ACSURL='https://acs-u:acs-p@acs.example.net/cwmp'; ACSURLX=$(hexof "$ACSURL")
+send "$log" 0110 44 0094 0009 ""
+send "$log" 0111 48 0094 0009 "c00001$(pad "$ACSUX" 25)"
+send "$log" 0112 48 0094 0009 "2000$(pad "$ACSPWX" 25)"
+send "$log" 0113 44 009d 0005 ""
+send "$log" 0114 48 009d 0005 "c00002$(part "$ACSURLX" 1)"
+send "$log" 0115 48 009d 0005 "2000$(part "$ACSURLX" 2)"
+send "$log" 0116 44 0089 8002 "00090005"
+$Q cli/build/omcli mib get 148 --secrets > /tmp/voip-dump 2>&1
+check "the TR-069 login is in the MIB, a 148 no SIP entity points at" \
+      "$(leaks /tmp/voip-dump "$ACSPW" "$ACSPWX")" "1"
+
+has() { grep -c -F -e "$2" "$1" || true; }
+v=/tmp/voip-view
+$Q cli/build/omcli voip > "$v" 2>&1
+check "voip: the line is on the POTS UNI 0x201" "$(has "$v" 'port 0x201 (voice CTP 0x1)')" "1"
+check "voip: the number and the display name are masked like the serial" \
+      "$(has "$v" 'sip user 0x1: aor MASKED-5678, display name MASKED-mple')" "1"
+check "voip: the login name is masked, the password only said to be set, the realm shown" \
+      "$(has "$v" 'sip user login 0x3: username MASKED-voip, password set (12 bytes), realm example.net')" "1"
+check "voip: neither the number, the name, the login nor the password is printed" \
+      "$(leaks "$v" "$AOR" "$AORX")$(leaks "$v" "$NAME" "$NAMEX")$(leaks "$v" "$USR" "$USRX")$(leaks "$v" "$PW" "$PWX")" "0000"
+check "voip: the proxy, as it is" "$(has "$v" "    proxy $PROXY")" "1"
+check "voip: the outbound proxy URL has its user:password@ stripped" \
+      "$(has "$v" '    outbound proxy sip:proxy2.example.net:5070')" "1"
+check "voip: and the stripped login is nowhere in the view" \
+      "$(leaks "$v" Url-Pw-9 "$(hexof Url-Pw-9)")$(grep -c 'user1' "$v" || true)" "00"
+check "voip: the registrar, through its network address" "$(has "$v" '    registrar registrar.example.net')" "1"
+check "voip: the agent port and protocol" "$(has "$v" '    port 5060/udp')" "1"
+check "voip: the codecs and the DTMF mode" \
+      "$(has "$v" 'codecs PCMU/20ms PCMA/20ms G729/20ms PCMU/20ms, dtmf out of band')" "1"
+check "voip: the RTP ports and DSCP" "$(has "$v" 'rtp ports 50000-50100 dscp 46')" "1"
+check "voip: the voice service profile" "$(has "$v" 'voice service profile 0x1: jitter target 0 max 0 ms, echo cancel on')" "1"
+check "voip: the voice VLAN and priority of the IP host" \
+      "$(has "$v" 'voice vlan 100 priority 5 (IP host 0x1)')" "1"
+check "voip: the line status is config done" "$(has "$v" 'line status config done (14)')" "1"
+check "voip: the TR-069 login is not shown as a SIP credential" \
+      "$(leaks "$v" "$ACSPW" "$ACSPWX")$(leaks "$v" "$ACSU" "$ACSUX")$(grep -c 'acs-' "$v" || true)" "000"
+
+$Q cli/build/omcli voip --secrets > "$v" 2>&1
+check "voip --secrets: the number, the name and the login in clear" \
+      "$(has "$v" "sip user 0x1: aor $AOR, display name $NAME")$(has "$v" "username $USR,")" "12"
+check "voip --secrets: the password, on its login line" \
+      "$(has "$v" "sip user login 0x3: username $USR, password $PW, realm example.net")" "1"
+check "voip --secrets: a URL is still stripped" \
+      "$(has "$v" '    outbound proxy sip:proxy2.example.net:5070')$(leaks "$v" Url-Pw-9 "$(hexof Url-Pw-9)")" "10"
+check "voip --secrets: the TR-069 login is still not there" \
+      "$(leaks "$v" "$ACSPW" "$ACSPWX")$(grep -c 'acs-' "$v" || true)" "00"
+
+$Q cli/build/omcli voip --secrets-list > "$v" 2>&1
+check "voip --secrets-list: only the secrets, one per line" \
+      "$(sort "$v" | tr '\n' ' ')" \
+      "$(printf '%s\n' "$AOR" "$NAME" "$USR" "$PW" user1 Url-Pw-9 "$USR" "$PW" | sort | tr '\n' ' ')"
+check "voip --secrets-list: not the TR-069 login" \
+      "$(grep -c -e acs- -e Acs- "$v" || true)" "0"
+$Q cli/build/omcli voip --nonsense > "$v" 2>&1
+check "voip: an unknown argument is refused" "$(has "$v" 'unknown argument --nonsense')" "1"
+check "the voip view leaves the password out of the log" "$(leaks "$log" "$ACSPW" "$ACSPWX")" "0"
+
 # ------------------------------------------------ respawn and resume
 send "$log" 00d0 49 0002 0000 8000
 mds=$(answer "$log" 00d0 | cut -c7-8)
@@ -473,6 +553,8 @@ for c in 58 139 145 150 153; do
 	      "$($Q cli/build/omcli mib get "$c" 2>&1 | tail -1)" "0 rows"
 done
 check "and the snapshot is gone" "$([ -e /var/run/omcid-mib.snap ] && echo there)" ""
+check "after a MIB reset omcicli voip finds no voice" \
+      "$($Q cli/build/omcli voip 2>&1)" "no voice provisioned"
 send "$log3" 00f1 49 008d 0201 4000
 check "the POTS UNI and its line status stay, the ONU's own: port not configured" \
       "$(answer "$log3" 00f1 | cut -c1-8)" "0040000d"

@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- omcid: `omcicli voip` prints the phone lines the OLT provisioned, resolved
+  into one block per port: the SIP user, the SIP servers as URLs without any
+  `user:password@`, the codecs, the voice VLAN and priority, and the line
+  status. The phone number, the display name and the login name are masked
+  like the serial in the diag bundle, and the password is never printed;
+  `omcicli voip --secrets` shows them, and `--secrets-list` prints only the
+  secret strings, one per line, for a scrub list. A login that belongs to the
+  TR-069 server is not shown as a SIP credential. With no voice provisioned
+  it says so in one line.
+
 - omcid: with `OMCI_POTS_PORTS` on, the voice an OLT provisions now reaches
   the router. The OLT carries it on an IP host; the bridge port it builds on
   that IP host is now the stick's host port, toward the router, instead of
