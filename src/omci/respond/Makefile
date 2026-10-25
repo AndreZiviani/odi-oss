@@ -35,7 +35,7 @@ LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
 SRCS := main mibstore drv apply apply_qos apply_uni apply_bridge show clisrv vqsrv omcimsg cfgstore snapshot events swimage reload alarm mcast pm voip
 
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(SRCS:%=$(BUILD)/%.o) \
-        $(BUILD)/extvlan.o $(BUILD)/omci_mib.o \
+        $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o $(BUILD)/omci_mib.o \
         $(BUILD)/omci_autonomous.o $(BUILD)/omci_defaults.o $(BUILD)/omci_drv.o $(BUILD)/omci_bdgconn.o
 
 $(BIN): $(OBJS)
@@ -62,13 +62,16 @@ OMCID_HDRS := omcid.h $(DIAG)/src/sys.h $(DIAG)/src/io.h \
               ../generated/omci_mib.h ../nl.h ../omci.h $(UAPI)/omci_gemflow.h \
               $(UAPI)/omci_caps.h $(UAPI)/omci_bdgconn.h $(UAPI)/omci_bridgeport.h \
               ../omci_cli_proto.h \
-              ../omci_msgq.h ../omci_tmpfile.h ../extvlan.h \
+              ../omci_msgq.h ../omci_tmpfile.h ../extvlan.h ../mcastvlan.h \
               ../procparse.h ../redirect_guard.h
 
 $(BUILD)/%.o: %.c $(OMCID_HDRS) | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/extvlan.o: ../extvlan.c ../extvlan.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/mcastvlan.o: ../mcastvlan.c ../mcastvlan.h ../extvlan.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # The class 171 entry decode, on its own. No message queue, no store, no
@@ -78,6 +81,13 @@ $(BUILD)/extvlan_test: ../test/extvlan_test.c ../extvlan.h \
                        $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -I.. -o $@ ../test/extvlan_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o
+
+# Class 309 attribute 16 as bridge rules, the same way: a pure generator and
+# its own binary.
+$(BUILD)/mcastvlan_test: ../test/mcastvlan_test.c ../mcastvlan.h ../extvlan.h \
+                         $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -I.. -o $@ ../test/mcastvlan_test.c \
+	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o
 
 $(BUILD)/omci_mib.o: ../generated/omci_mib.c ../generated/omci_mib.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -123,8 +133,9 @@ size: cap
 	@$(RUN) sh -c 'ls -l $(BIN); $(CROSS)size $(BIN)'
 
 test: image
-	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/extvlan_test
+	@$(RUN) qemu-mips-static $(BUILD)/mcastvlan_test
 
 clean:
 	rm -rf $(BUILD)

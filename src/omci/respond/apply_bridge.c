@@ -4,6 +4,7 @@
  */
 #include "omcid.h"
 #include "../extvlan.h"
+#include "../mcastvlan.h"
 
 int conn_dirty;
 
@@ -1322,6 +1323,67 @@ static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask)
 	return n;
 }
 
+/* ------------------------------------------- the multicast tag control
+ *
+ * Class 309 attribute 16 (../mcastvlan.h) as rules of the multicast bridge
+ * ports, in front of the rules the port has from the VLAN keys or class 84
+ * (the manual tag's removal, or forward-all). The switch tells multicast
+ * from unicast by the VLAN alone, so the treatment goes on the VLANs the
+ * profile's access control lists name, and a VLAN a unicast rule of the line
+ * names is left to that rule: uc_vids is every VID the unicast rules of this
+ * rebuild named, which is why the plan is made when the multicast ports'
+ * pass begins. */
+static uint8_t uc_vids[MCV_VIDMAP_BYTES];
+static struct mcv_out mcv, mcv_said;
+static int mcv_said_valid;
+
+/* Whether what the attribute came to differs from what was last logged. */
+static int mcv_changed(void)
+{
+	if (!mcv_said_valid || mcv.type != mcv_said.type || mcv.why != mcv_said.why ||
+	    mcv.nrule != mcv_said.nrule || mcv.nskip != mcv_said.nskip)
+		return 1;
+	for (int i = 0; i < mcv.nrule; i++)
+		if (mcv.rule[i].vid != mcv_said.rule[i].vid)
+			return 1;
+	for (int i = 0; i < mcv.nskip; i++)
+		if (mcv.skip[i].vid != mcv_said.skip[i].vid ||
+		    mcv.skip[i].why != mcv_said.skip[i].why)
+			return 1;
+	return 0;
+}
+
+static void mcast_tag_plan(void)
+{
+	uint16_t ani[32];
+	struct mcv_in in;
+
+	in.force_strip = (custom_mcast & CUSTOM_MCAST_DS_UNTAGGED) != 0;
+	in.ani = ani;
+	in.unicast = uc_vids;
+	if (mcast_ds_tag_input(in.tci, ani, 32, &in.nani)) {
+		mcv_plan(&in, &mcv);
+	} else {
+		mcv.type = MCV_PASS;     /* no profile: nothing to apply */
+		mcv.why = 0;
+		mcv.nrule = 0;
+		mcv.nskip = 0;
+	}
+	/* Said when it changes, not on every rebuild: a line whose profile
+	 * asks for what cannot be done says so once. */
+	if (!mcv_changed())
+		return;
+	mcv_said = mcv;
+	mcv_said_valid = 1;
+	if (mcv.why)
+		out_fmt("   mcast: downstream tag control %d (309 attribute 16) not "
+			"applied: %s\n", (long)mcv.type, mcv.why);
+	for (int i = 0; i < mcv.nskip; i++)
+		out_fmt("   mcast: downstream tag control %d, VLAN %d left to the "
+			"rules of the line: %s\n", (long)mcv.type, (long)mcv.skip[i].vid,
+			mcv.skip[i].why);
+}
+
 void bdgconn_rebuild(void)
 {
 	const struct omci_class *c47 = find_class(OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA);
@@ -1340,6 +1402,8 @@ void bdgconn_rebuild(void)
 			servtab[conn_servs[i]].in_use = 0;
 	}
 	conn_nservs = 0;
+	for (unsigned i = 0; i < sizeof uc_vids; i++)
+		uc_vids[i] = 0;
 	if (!c47 || !c266 || !c268 || !c281 || !c84)
 		return;
 	for (int i = 0; i < MIB_ROWS && ning < 8; i++) {
@@ -1395,6 +1459,8 @@ void bdgconn_rebuild(void)
 	 * untagged service first, the other unicast services in reverse MIB order,
 	 * and the broad downstream multicast rule last. */
 	for (int pass = 0; pass < 3; pass++) {
+		if (pass == 2)
+			mcast_tag_plan();
 		for (int i = 0; i < MIB_ROWS; i++) {
 			int row = pass == 1 ? MIB_ROWS - 1 - i : i;
 			struct mib_row *r = mib_row_at(row), *iw, *ctp, *mapper;
@@ -1508,10 +1574,32 @@ void bdgconn_rebuild(void)
 				if (ingress_bridge[g] == (int)row_u32(r, c47, 1) &&
 				    !(use_ev && ev_tab[g].active))
 					plain++;
+			/* A multicast port: the profile's tag control first, on
+			 * the VLANs it names; the port's own rules below take
+			 * every other frame. Downstream only, as the port is. */
+			for (int k = 0; tpType == 6 && k < mcv.nrule; k++) {
+				out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
+					apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
+					mcv.rule[k].kind, (long)mcv.rule[k].vid, -1L);
+				for (int g = 0; g < ning; g++) {
+					int id;
+
+					if (ingress_bridge[g] != (int)row_u32(r, c47, 1))
+						continue;
+					id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_DS,
+							 &mcv.rule[k].vr);
+					if (id >= 0 && conn_nservs < SERV_MAX) {
+						conn_servs[conn_nservs++] = id;
+						added++;
+					}
+				}
+			}
 			for (int k = 0; k < nrules && (!use_ev || plain); k++) {
 			out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
 				apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
 				rules[k].kind, (long)rules[k].vid, (long)rules[k].pri);
+			if (tpType != 6)
+				mcv_mark(uc_vids, &rules[k].vr);
 			for (int g = 0; g < ning; g++) {
 				int id;
 
@@ -1548,6 +1636,9 @@ void bdgconn_rebuild(void)
 					out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
 						apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
 						o->kind, (long)o->vid, (long)o->pri);
+					mcv_mark(uc_vids, &o->us);
+					if (o->has_ds)
+						mcv_mark(uc_vids, &o->ds);
 					id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_US, &o->us);
 					if (id >= 0 && conn_nservs < SERV_MAX) {
 						conn_servs[conn_nservs++] = id;
@@ -1572,6 +1663,7 @@ void bdgconn_rebuild(void)
 					out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
 						apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
 						rest[k].kind, (long)rest[k].vid, (long)rest[k].pri);
+					mcv_mark(uc_vids, &rest[k].vr);
 					id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rest[k].vr);
 					if (id >= 0 && conn_nservs < SERV_MAX) {
 						conn_servs[conn_nservs++] = id;

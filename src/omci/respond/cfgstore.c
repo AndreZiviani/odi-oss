@@ -857,6 +857,19 @@ void cfg_load_custom_me(void)
 	custom_me = me;
 }
 
+/* Likewise OMCI_CUSTOM_MCAST (runomci.sh -cmc); omcid.h says which bit acts. */
+int custom_mcast;
+
+void cfg_load_custom_mcast(void)
+{
+	char v[16];
+	int n = cfg_get(CFG_CS_PATH, "OMCI_CUSTOM_MCAST", v, sizeof v), mc = 0;
+
+	for (int i = 0; n > 0 && v[i] >= '0' && v[i] <= '9' && mc < 100000000; i++)
+		mc = mc * 10 + (v[i] - '0');
+	custom_mcast = mc;
+}
+
 void cfg_load_veip_on(void)
 {
 	char v[4];
@@ -1208,6 +1221,7 @@ void cfg_load_all(void)
 	cfg_load_private_me();
 	cfg_load_veip_on();
 	cfg_load_custom_me();
+	cfg_load_custom_mcast();
 	cfg_load_pots_ports();
 	aut_rebuild();
 }
@@ -1224,6 +1238,7 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->private_me = private_me;
 	s->veip_on = veip_on;
 	s->custom_me = custom_me;
+	s->custom_mcast = custom_mcast;
 	s->pots_ports = pots_ports;
 	s->pots_slot_key = pots_slot_key;
 	s->pots_slot = pots_slot;
@@ -1241,6 +1256,7 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	private_me = s->private_me;
 	veip_on = s->veip_on;
 	custom_me = s->custom_me;
+	custom_mcast = s->custom_mcast;
 	pots_ports = s->pots_ports;
 	pots_slot_key = s->pots_slot_key;
 	pots_slot = s->pots_slot;
@@ -1321,6 +1337,8 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 				if (a->data[k] != b->data[k])
 					m |= CFGD_FIXED_ME;
 		}
+	if ((o->custom_mcast ^ n->custom_mcast) & CUSTOM_MCAST_DS_UNTAGGED)
+		m |= CFGD_CUSTOM_MCAST;
 	if (o->vlan.type != n->vlan.type)
 		m |= CFGD_VLAN_TYPE;
 	if (o->vlan.mode != n->vlan.mode)
@@ -1361,6 +1379,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_VLAN_MODE, "VLAN_MANU_MODE" },
 		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },
 		{ CFGD_VLAN_PRI, "VLAN_MANU_TAG_PRI" },
+		{ CFGD_CUSTOM_MCAST, "OMCI_CUSTOM_MCAST" },
 	};
 	int o = 0;
 

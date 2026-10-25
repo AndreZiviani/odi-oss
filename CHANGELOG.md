@@ -11,6 +11,19 @@ listed here.
   15 minutes (two attempts; a stalled connection is still caught by apt's
   30-second read timeout and its own retries), and the test-qemu job may run
   45 minutes instead of 20 to fit them.
+- omcid: the downstream multicast tag control of the OLT's multicast profile
+  (ME 309 attribute 16) is applied. Strip the tag, replace it, replace its
+  VID only, or add one (an S-tag in front of the C-tag, the only tag the
+  switch can add to a tagged frame) now acts on the multicast VLANs the
+  profile's access control lists name, one switch rule each, in front of the
+  rules the line had. The switch tells multicast from unicast by the VLAN
+  alone, so nothing is done for untagged or "any VLAN" groups, for a VLAN a
+  unicast service of the line also uses, or when no VLAN is named; omcid
+  logs once what it left out and why. Types 5 to 7 (the VID of the service
+  package table) are not done, and say so. `OMCI_CUSTOM_MCAST` bit 1 now
+  strips whatever the profile says, as on the stock firmware, and a change
+  of it rebuilds the rules (`apply.sh omci`). Neither of our lines names a
+  multicast VLAN, so their rules are unchanged, byte for byte.
 
 - omcid: `omcicli voip` prints the phone lines the OLT provisioned, resolved
   into one block per port: the SIP user, the SIP servers as URLs without any
