@@ -298,9 +298,10 @@ check "upload: its last record is username 2, whole" \
       "$(rec 18 | cut -c1-62)" "009400020800$(aval 5)"
 
 # The pool is bounded: past it a wide row behaves as before. 148 and the
-# large string above hold two slots; 20 more large strings exhaust it.
+# large string above hold two of its 32 slots; 34 more large strings
+# exhaust it, the last four finding it full.
 k=0
-while [ "$k" -lt 20 ]; do
+while [ "$k" -lt 34 ]; do
 	send "$log" "$(wtci $((0x200 + k * 4)))" 44 009d "$(printf '%04x' $((0x10 + k)))" ""
 	send "$log" "$(wtci $((0x201 + k * 4)))" 48 009d "$(printf '%04x' $((0x10 + k)))" "$(amask 2)$(aval 2)"
 	send "$log" "$(wtci $((0x202 + k * 4)))" 48 009d "$(printf '%04x' $((0x10 + k)))" "$(amask 6)$(aval 6)"
@@ -309,14 +310,14 @@ done
 send "$log" 0300 49 009d 0010 "$(amask 6)"
 check "an early large string beyond the 96 bytes still reads back" \
       "$(answer "$log" 0300 | cut -c1-56)" "00$(amask 6)$(aval 6)"
-send "$log" 0301 49 009d 0023 "$(amask 6)"
+send "$log" 0301 49 009d 0031 "$(amask 6)"
 check "one that found the pool full drops attribute 6, as before" \
       "$(answer "$log" 0301 | cut -c1-56)" "00$(amask 6)$(printf '%050d' 0)"
-send "$log" 0302 49 009d 0023 "$(amask 2)"
+send "$log" 0302 49 009d 0031 "$(amask 2)"
 check "and keeps the attributes inside 96 bytes" \
       "$(answer "$log" 0302 | cut -c1-56)" "00$(amask 2)$(aval 2)"
 check "the pool running out is logged once" \
-      "$(grep -c 'wide-row pool of 16 is full' "$log")" "1"
+      "$(grep -c 'wide-row pool of 32 is full' "$log")" "1"
 
 # ------------------------------------------------ Test (18)
 # Only the ANI-G has a test here (the optical measurements, answered with a

@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- omcid: the VoIP managed entities of G.988 (SIP over OMCI: the SIP agent and
+  user, the voice service, media and RTP profiles, the dial plan, the
+  application profile and feature codes, the voice CTP, the voice PM
+  entities, and the POTS UNI, line status and VoIP config data the ONU
+  creates) are now in its model, behind a new experimental key,
+  `OMCI_POTS_PORTS` (odi.conf, 0 by default). Off, an OLT that sends one of
+  these gets "unknown entity", exactly as before. On (1 or 2), omcid accepts
+  what an OLT provisions for a phone line, keeps it, answers it back and
+  resumes it after a restart; the SIP password and the subscriber's display
+  name stay out of the log and are masked in `omcicli mib get`. The stick does
+  not tell the OLT of any phone port yet, so on its own the key changes
+  nothing an OLT sees. Changing it re-registers the ONU. To make room for a
+  data service and two phone lines at once, omcid now holds 384 managed
+  entities (was 256), 32 entities wider than a row (was 16) and 255 table
+  rows (was 128).
 - omcid: the extra multicast GEM ports an OLT names only in address rows now
   get a downstream flow. G.988 lets one multicast GEM interworking TP (ME 281)
   spread the channels over several GEM ports by writing more rows, with other
