@@ -15,7 +15,12 @@
 # the application service profile, the feature access codes, the SIP user
 # (the display name kept out of the log and masked in a dump), the voice CTP
 # and a PM entity; the ONU-created classes refused a Create; a respawn that
-# resumes it all from the snapshot; a MIB reset that drops it.
+# resumes it all from the snapshot; a MIB reset that drops it. And what the
+# ONU creates for the port the key asks for: the POTS circuit pack, the PPTP
+# POTS UNI and its line status ("port not configured" until a SIP line names
+# the port, then "config done", never "registered"), the VoIP config data
+# (SIP over OMCI only; another method reads as failed), a Test refused, no
+# alarm.
 #
 # Run from src/omci, inside the toolchain image (make test-omci-voip):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
@@ -145,10 +150,47 @@ $Q respond/build/omcid -d -g /tmp/voip-gpon > "$log" 2>&1 &
 pid=$!
 omcid_up "$log"
 check "key on: the startup log says so" \
-      "$(grep -c '^phone: 1 POTS port(s), the VoIP entities accepted' "$log")" "1"
+      "$(grep -c '^phone: 1 POTS port(s) in slot 2, the VoIP entities accepted' "$log")" "1"
 send "$log" 0010 4f 0002 0000 ""                         # MIB reset
-check "key on: nothing is advertised yet, the upload is the same 399 records" \
-      "$(upload "$log")" "399"
+# One port: the cardholder (2 records) and circuit pack (4) of the POTS
+# slot, the POTS UNI (1), its UNI-G (1) and line status (4), and the VoIP
+# config data (2), after the stock 399.
+check "key on: the upload carries the 14 records of one phone port" \
+      "$(upload "$log")" "413"
+ga() { $Q cli/build/omcli mib getattr "$@" 2>&1; }
+check "the POTS circuit pack is in slot 2, type 32 (POTS)" \
+      "$(ga 6 258 1)" "class 6 entity 258 attr 1 = 20"
+check "with one port" "$(ga 6 258 2)" "class 6 entity 258 attr 2 = 01"
+check "its cardholder expects a POTS card with one port" \
+      "$(ga 5 258 2)$(ga 5 258 3)" "class 5 entity 258 attr 2 = 20class 5 entity 258 attr 3 = 01"
+check "the POTS UNI 0x0201 is unlocked and enabled, on hook" \
+      "$(ga 53 513 1)$(ga 53 513 9)$(ga 53 513 10)" \
+      "class 53 entity 513 attr 1 = 00class 53 entity 513 attr 9 = 00class 53 entity 513 attr 10 = 00"
+check "the VoIP config data offers SIP, over OMCI only" \
+      "$(ga 138 0 1)$(ga 138 0 3)" "class 138 entity 0 attr 1 = 01class 138 entity 0 attr 3 = 00000001"
+check "the line status says port not configured (13)" \
+      "$(ga 141 513 2)" "class 141 entity 513 attr 2 = 0d"
+
+# The VoIP config data: the OLT picks SIP and OMCI (attributes 2 and 4).
+send "$log" 0011 48 008a 0000 "50000101"
+send "$log" 0012 49 008a 0000 5400
+check "SIP over OMCI picked: stored, the state inactive (0)" \
+      "$(answer "$log" 0012 | cut -c1-12)" "005400010100"
+send "$log" 0013 48 008a 0000 "100002"
+send "$log" 0014 49 008a 0000 0400
+check "a method that fetches a configuration reads as failed (3)" \
+      "$(answer "$log" 0014 | cut -c1-8)" "00040003"
+send "$log" 0015 48 008a 0000 "100001"
+send "$log" 0016 49 008a 0000 0400
+check "back to OMCI, the state is inactive again" \
+      "$(answer "$log" 0016 | cut -c1-8)" "00040000"
+# The POTS UNI: locked, it is disabled; unlocked, enabled again.
+send "$log" 0017 48 0035 0201 "800001"
+send "$log" 0018 49 0035 0201 0080
+check "a locked POTS UNI is disabled (1)" "$(answer "$log" 0018 | cut -c1-8)" "00008001"
+send "$log" 0019 48 0035 0201 "800000"
+send "$log" 001a 49 0035 0201 0080
+check "unlocked, enabled again (0)" "$(answer "$log" 001a | cut -c1-8)" "00008000"
 
 # Large strings: the proxy (60 bytes, three parts), the registrar and the
 # number. A Set carries the number of parts and part 1, later parts one by
@@ -307,8 +349,25 @@ NAME='Alice Example';      NAMEX=$(hexof "$NAME")
 send "$log" 00a2 48 0099 0001 "2000$(pad "$NAMEX" 25)"
 check "the display name Set is answered ok" "$(answer "$log" 00a2 | cut -c1-2)" "00"
 # The voice CTP ties them together: SIP user, POTS UNI, media profile, loop
-# start.
+# start. Only then is the line configured.
+send "$log" 00a5 49 008d 0201 4000
+check "line status: port not configured while no voice CTP names the port" \
+      "$(answer "$log" 00a5 | cut -c1-8)" "0040000d"
 send "$log" 00a3 44 008b 0001 "00010201000101"
+send "$log" 00a6 49 008d 0201 4000
+check "line status: config done (14) once one does; never registered" \
+      "$(answer "$log" 00a6 | cut -c1-8)" "0040000e"
+send "$log" 00a7 49 008d 0201 f980
+check "line status: idle, no codec, no packet period, line idle, no emergency call" \
+      "$(answer "$log" 00a7)" "00f98000000e00000000000000$(printf '%038d' 0)"
+send "$log" 00ab 49 008d 0201 0400
+check "line status: no called address" \
+      "$(answer "$log" 00ab)" "000400$(printf '%058d' 0)"
+send "$log" 00a8 46 008b 0001 ""
+send "$log" 00a9 49 008d 0201 4000
+check "line status: not configured again when the voice CTP goes" \
+      "$(answer "$log" 00a9 | cut -c1-8)" "0040000d"
+send "$log" 00aa 44 008b 0001 "00010201000101"
 send "$log" 00a4 49 008b 0001 f000
 check "the voice CTP reads back" "$(answer "$log" 00a4 | cut -c1-20)" "00f00000010201000101"
 
@@ -336,6 +395,19 @@ done
 send "$log" 00c5 52 0035 0201 ""
 check "a Test of a POTS UNI is refused, result 2" "$(answer "$log" 00c5 | cut -c1-2)" "02"
 check "and no Test result follows" "$(grep -c '^-> test result' "$log")" "0"
+# Get all alarms: nothing of the phone port has an alarm to report.
+send "$log" 00c6 4b 0002 0000 ""
+na=$((0x$(answer "$log" 00c6 | cut -c1-4)))
+s=0; voice=0
+while [ "$s" -lt "$na" ]; do
+	t=$(printf '%04x' $((0xd00 + s)))
+	send "$log" "$t" 4c 0002 0000 "$(printf '%04x' "$s")"
+	case $(answer "$log" "$t" | cut -c1-8) in
+	00050102|00060102|0035*|008a*|008d*|01080201) voice=$((voice + 1)) ;;
+	esac
+	s=$((s + 1))
+done
+check "Get all alarms lists none of the phone port's entities" "$voice" "0"
 
 # ----------------------------------------------------------- secrets
 check "the SIP password is in no log line" "$(leaks "$log" "$PW" "$PWX")" "0"
@@ -374,6 +446,8 @@ check "the SIP agent's set TCP/UDP pointer is back" \
       "$(answer "$log2" 00e1 | cut -c1-26)" "000e00000100000e1000000168"
 $Q cli/build/omcli mib get 153 --secrets > /tmp/voip-dump 2>&1
 check "the display name is back" "$(leaks /tmp/voip-dump "$NAME" "$NAMEX")" "1"
+send "$log2" 00e2 49 008d 0201 4000
+check "and the line is still config done" "$(answer "$log2" 00e2 | cut -c1-8)" "0040000e"
 
 # A MIB reset drops every one of them, and the snapshot.
 send "$log2" 00f0 4f 0002 0000 ""
@@ -382,6 +456,9 @@ for c in 58 139 145 150 153; do
 	      "$($Q cli/build/omcli mib get "$c" 2>&1 | tail -1)" "0 rows"
 done
 check "and the snapshot is gone" "$([ -e /var/run/omcid-mib.snap ] && echo there)" ""
+send "$log2" 00f1 49 008d 0201 4000
+check "the POTS UNI and its line status stay, the ONU's own: port not configured" \
+      "$(answer "$log2" 00f1 | cut -c1-8)" "0040000d"
 omcid_stop "$pid"
 
 [ "$fail" -eq 0 ] || { keep_log "$log" voip-test.log; keep_log "${log2:-$log}" voip-test2.log; }

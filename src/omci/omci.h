@@ -64,6 +64,7 @@
  * mibstore.c and show.c compare against. */
 enum omci_me_class {
 	OMCI_ME_ONT_DATA                      = 2,   /* ONT data */
+	OMCI_ME_CARDHOLDER                    = 5,   /* cardholder */
 	OMCI_ME_CIRCUIT_PACK                  = 6,   /* circuit pack */
 	OMCI_ME_SOFTWARE_IMAGE                = 7,   /* software image */
 	OMCI_ME_PPTP_ETH_UNI                  = 11,  /* PPTP Ethernet UNI */
@@ -98,6 +99,7 @@ enum omci_me_class {
 	OMCI_ME_ONU2_G                        = 257, /* ONU2-G */
 	OMCI_ME_TCONT                         = 262, /* T-CONT */
 	OMCI_ME_ANI_G                         = 263, /* ANI-G */
+	OMCI_ME_UNI_G                         = 264, /* UNI-G */
 	OMCI_ME_GEM_IW_TP                     = 266, /* GEM interworking TP */
 	OMCI_ME_GEM_PORT_CTP                  = 268, /* GEM port network CTP */
 	OMCI_ME_PRIORITY_QUEUE                = 277, /* priority queue */

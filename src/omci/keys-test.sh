@@ -81,6 +81,9 @@ upload() {
 }
 
 # 0x0601 = 1537, 0x0106 = 262, 0x0e01 = 3585, 0x010e = 270.
+# 0x0102 = 258, 0x0201 = 513, 0x0202 = 514, 0x0301 = 769, 0x0109 = 265,
+# 0x0901 = 2305.
+ga2() { $Q cli/build/omcli mib getattr "$@" 2>&1; }
 
 # --------------------------------------------------------------- the VEIP
 rm -f /var/config/odi.conf
@@ -190,6 +193,106 @@ for v in 1 ""; do
 	check "OMCI_VEIP=$v: the VEIP is created" "$(inst 329)" "1537,"
 	stop
 done
+
+# ------------------------------------------------------------ phone ports
+# OMCI_POTS_PORTS (odi.conf) puts a POTS circuit pack in the first free slot
+# (OMCI_POTS_SLOT_ID names another): a cardholder and a circuit pack at
+# 0x0100 | slot, and per port a PPTP POTS UNI, its UNI-G and its VoIP line
+# status at slot << 8 | port, and the VoIP config data 0. At 0, or absent,
+# the MIB upload is the stock one, record for record.
+#
+# upl_dump <log> <file>: every record of a MIB upload, one answer line
+# each, in order, without the trailer and with the ONU2-G uptime (the only
+# value that moves between two runs, and the CRC with it) blanked. All the
+# Nexts go in one omcli process.
+upl_dump() {
+	_n=$(upload "$1")
+	{
+		printf '0e014d0a00020000%064d00000028%08d\n' 0 0
+		_s=0
+		while [ "$_s" -lt "$_n" ]; do
+			printf '%04x4e0a00020000%04x%060d00000028%08d\n' $((0x1000 + _s)) "$_s" 0 0
+			_s=$((_s + 1))
+		done
+	} > /tmp/keys-upl.txt
+	_have=$(grep -c -- '^-> ....2e0a' "$1")
+	$Q cli/build/omcli --inject-file /tmp/keys-upl.txt > /dev/null 2>&1
+	wait_count "$1" "2e0a00020000" $((_have + _n)) 30
+	grep -- '^-> ....2e0a' "$1" | tail -n "$_n" | cut -c1-83 |
+		sed 's/^\(-> ....2e0a000200000101000007fc.\{12\}\).\{8\}/\1uptime--/' > "$2"
+}
+UPL=../../test/fixtures/omci-upload-default.txt
+store "" ""
+rm -f /var/config/odi.conf
+run /tmp/keys-p0.log
+upl_dump /tmp/keys-p0.log /tmp/keys-upl-none.txt
+stop
+if [ "${UPDATE:-0}" = 1 ]; then
+	cp /tmp/keys-upl-none.txt "$UPL"
+	echo "updated $UPL ($(wc -l < "$UPL") records)"
+fi
+check "no key: the MIB upload is the golden, record for record ($(wc -l < "$UPL") records)" \
+      "$(cmp -s "$UPL" /tmp/keys-upl-none.txt && echo same)" "same"
+printf 'OMCI_POTS_PORTS=0\n' > /var/config/odi.conf
+run /tmp/keys-p1.log
+upl_dump /tmp/keys-p1.log /tmp/keys-upl-0.txt
+check "OMCI_POTS_PORTS=0: the MIB upload is the same golden, byte for byte" \
+      "$(cmp -s "$UPL" /tmp/keys-upl-0.txt && echo same)" "same"
+check "OMCI_POTS_PORTS=0: no phone entity" "$(inst 53)$(inst 141)$(inst 138)" ""
+check "OMCI_POTS_PORTS=0: no slot 2" "$(inst 5)" "257,262,384,"
+stop
+
+printf 'OMCI_POTS_PORTS=2\n' > /var/config/odi.conf
+run /tmp/keys-p2.log
+check "OMCI_POTS_PORTS=2: a cardholder and circuit pack in slot 2, the first free" \
+      "$(inst 5)$(inst 6)" "257,258,262,384,257,258,262,384,"
+check "OMCI_POTS_PORTS=2: two POTS UNIs, 0x0201 and 0x0202" "$(inst 53)" "513,514,"
+check "OMCI_POTS_PORTS=2: each with its UNI-G" "$(inst 264)" "257,513,514,1537,"
+check "OMCI_POTS_PORTS=2: and its VoIP line status" "$(inst 141)" "513,514,"
+check "OMCI_POTS_PORTS=2: one VoIP config data" "$(inst 138)" "0,"
+check "OMCI_POTS_PORTS=2: the circuit pack is type 32 (POTS) with two ports" \
+      "$(ga2 6 258 1)$(ga2 6 258 2)" "class 6 entity 258 attr 1 = 20class 6 entity 258 attr 2 = 02"
+check "OMCI_POTS_PORTS=2: the start-up line names the slot" \
+      "$(grep -c '^phone: 2 POTS port(s) in slot 2' /tmp/keys-p2.log)" "1"
+upl_dump /tmp/keys-p2.log /tmp/keys-upl-2.txt
+check "OMCI_POTS_PORTS=2: the stock records come first, unchanged" \
+      "$(head -n "$(wc -l < "$UPL")" /tmp/keys-upl-2.txt | cmp -s "$UPL" - && echo same)" "same"
+# Cardholder 2 records, circuit pack 4; per port the POTS UNI 1, its UNI-G
+# 1, its line status 4; the VoIP config data 2.
+check "OMCI_POTS_PORTS=2: then the 20 records of the phone entities, in order" \
+      "$(tail -n +"$(( $(wc -l < "$UPL") + 1 ))" /tmp/keys-upl-2.txt | cut -c20-27 | tr '\n' ' ')" \
+      "00050102 00050102 00060102 00060102 00060102 00060102 00350201 01080201 008d0201 008d0201 008d0201 008d0201 00350202 01080202 008d0202 008d0202 008d0202 008d0202 008a0000 008a0000 "
+stop
+
+printf 'OMCI_POTS_PORTS=1\n' > /var/config/odi.conf
+run /tmp/keys-p3.log
+check "OMCI_POTS_PORTS=1: one POTS UNI" "$(inst 53)" "513,"
+check "OMCI_POTS_PORTS=1: the upload grows by 14 records" "$(upload /tmp/keys-p3.log)" "$((base + 14))"
+stop
+
+# The slot: away from the VEIP's, and the key when it names a free one.
+store 2 65792
+run /tmp/keys-p4.log
+check "VEIP in slot 2: the phone ports take slot 3" "$(inst 53)" "769,"
+stop
+store 2 ""
+run /tmp/keys-p5.log
+check "a VEIP key of 2 not in force still keeps slot 2 for it: slot 3" "$(inst 53)" "769,"
+stop
+store "" ""
+printf 'OMCI_POTS_PORTS=1\nOMCI_POTS_SLOT_ID=9\n' > /var/config/odi.conf
+run /tmp/keys-p6.log
+check "OMCI_POTS_SLOT_ID=9: the pack at 0x0109, the port at 0x0901" \
+      "$(inst 6)$(inst 53)" "257,262,265,384,2305,"
+stop
+for bad in 1 6 128 255 0 abc; do
+	printf 'OMCI_POTS_PORTS=1\nOMCI_POTS_SLOT_ID=%s\n' "$bad" > /var/config/odi.conf
+	run /tmp/keys-pbad.log
+	check "OMCI_POTS_SLOT_ID=$bad is ignored: the first free slot, 2" "$(inst 53)" "513,"
+	check "and reported" "$(grep -c 'OMCI_POTS_SLOT_ID ignored' /tmp/keys-pbad.log)" "1"
+	stop
+done
+rm -f /var/config/odi.conf
 
 # The tables the ONU keeps for each MAC bridge port (classes 49, 50 and 79)
 # are created when the OLT creates the port, each at the port's entity id,
