@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- omcid: the LOID authentication entity (class 65530) is masked in MIB dumps
+  like the other credentials: its LOID and password show as `**`, the
+  operation id and the authentication status the OLT sets stay readable, and
+  `--secrets` shows them. Both come from the config store, and `omcicli mib
+  get 65530` printed them.
+
 - igmpd: `igmpd -r FILE` replays a transcript of timestamped events (IGMP
   frames with their port and VLAN, clock ticks, policy file changes) through
   the daemon's own decision code and prints what it would do: the rows it

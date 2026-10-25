@@ -10,9 +10,9 @@ uint8_t serial[9];      /* 4 ASCII vendor id + 4 binary */
 
 /* Classes whose contents may be a secret of whoever provisions them, in one
  * place so the log, the dumps and anything added later cannot disagree.
- * `first` is the first attribute index that carries the secret (everything
- * from there on is masked in a dump); 0xff means the class is kept out of the
- * log but has no secret attribute to mask.
+ * `first` is the first attribute index that carries the secret (masked in
+ * a dump, up to `last`); 0xff means the class is kept out of the log but has
+ * no secret attribute to mask.
  *
  *   148  authentication security method: username, password, realm
  *   157  large string: URLs, which may carry user:password@ (the ACS URL)
@@ -22,13 +22,19 @@ uint8_t serial[9];      /* 4 ASCII vendor id + 4 binary */
  *   340  TR-069 management server and 134 IP host config data: their own
  *        attributes are addresses and pointers, but the OLT sets the
  *        credentials around them, and the log never showed their contents
+ *   65530 LOID authentication: the LOID and its password (attributes 2 and
+ *        3), the line owner's from the config store; the operation id and
+ *        the status the OLT sets stay readable
+ *
+ * `last` is the last attribute masked; 0xff is every one from `first` on.
  */
-static const struct { uint16_t cls; uint8_t first; } secret_me[] = {
-	{ OMCI_ME_AUTH_SECURITY_METHOD, 2 },
-	{ OMCI_ME_LARGE_STRING, 2 },
-	{ OMCI_ME_OCTET_STRING, 2 },
-	{ OMCI_ME_TR069_MGMT_SERVER, 0xff },
-	{ OMCI_ME_IP_HOST_CONFIG_DATA, 0xff },
+static const struct { uint16_t cls; uint8_t first, last; } secret_me[] = {
+	{ OMCI_ME_AUTH_SECURITY_METHOD, 2, 0xff },
+	{ OMCI_ME_LARGE_STRING, 2, 0xff },
+	{ OMCI_ME_OCTET_STRING, 2, 0xff },
+	{ OMCI_ME_TR069_MGMT_SERVER, 0xff, 0xff },
+	{ OMCI_ME_IP_HOST_CONFIG_DATA, 0xff, 0xff },
+	{ OMCI_ME_CTC_LOID_AUTH, 2, 3 },
 };
 
 int me_is_secret(uint16_t cls)
@@ -43,7 +49,7 @@ int me_attr_secret(uint16_t cls, unsigned k)
 {
 	for (unsigned i = 0; i < sizeof secret_me / sizeof secret_me[0]; i++)
 		if (secret_me[i].cls == cls)
-			return k >= secret_me[i].first;
+			return k >= secret_me[i].first && k <= secret_me[i].last;
 	return 0;
 }
 
