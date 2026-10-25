@@ -1,0 +1,14 @@
+# The profile lists one dynamic range, 225.0.0.0/8. A join inside it is
+# programmed; a join outside it gets no state, no row and one count in
+# denied; the report is still counted as a join.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+allow=225.0.0.0-225.255.255.255
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+2 v2join 1 0 192.168.1.10 225.2.2.2
+3 v2join 1 0 192.168.1.10 239.1.1.1
+4 state

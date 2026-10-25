@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- igmpd: `igmpd -r FILE` replays a transcript of timestamped events (IGMP
+  frames with their port and VLAN, clock ticks, policy file changes) through
+  the daemon's own decision code and prints what it would do: the rows it
+  writes and removes, the lease, the router ports and the state file. It opens
+  neither the switch nor the redirect device, so IPTV behaviour can be tested
+  with no OLT and no stick. The tests gain golden transcripts (join and leave,
+  two ports on one group, a refused join, the group limit, expiry, frames,
+  a policy change) and a contract test that feeds the policy file omcid wrote
+  to igmpd, and igmpd's state file back to omcid's ME 311. The daemon itself
+  behaves as before.
+
 - omcid: a Get whose attributes do not all fit the answer's 25 bytes of
   values now answers result 9 (attribute failed or unknown), with G.988's
   optional-attribute and attribute execution masks, instead of success with

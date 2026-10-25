@@ -1,0 +1,11 @@
+# One host joins a group and leaves it. The profile asks for immediate leave,
+# so the leave removes the row on the spot.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+5 v2leave 1 0 192.168.1.10 239.1.1.1
+6 state

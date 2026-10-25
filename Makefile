@@ -279,6 +279,7 @@ test-igmp:
 test-omci-build:
 	$(MAKE) -C src/omci/cli
 	$(MAKE) -C src/omci/respond cap drvtrace
+	$(MAKE) -C src/igmp igmpd
 
 $(OMCI_SUITES:%=test-omci-%): test-omci-%:
 	docker run --rm -v "$(CURDIR)":/src -w /src/src/omci "$(DIAG_IMAGE)" sh $*-test.sh

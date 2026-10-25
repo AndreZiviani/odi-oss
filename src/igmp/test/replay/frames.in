@@ -1,0 +1,17 @@
+# What the parser and the table make of different frames: a v3 report on a
+# tagged VLAN (a join, then a leave by a TO_INCLUDE record with no sources),
+# a query (its port becomes a router port, recorded and not programmed), a
+# corrupted frame (a zeroed IP checksum) and a frame for a
+# link-local group, which gets no state.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+end
+0 tick
+1 v3join 1 14 192.168.1.10 239.1.1.1
+2 query 1 0 192.168.1.1
+3 v3leave 1 14 192.168.1.10 239.1.1.1
+4 v2join 1 0 192.168.1.10 224.0.0.251
+5 rx 01000001005e0000010200000000010800460000200000000001020000c0a8010ae0000001940400001100ee9b00000000
+6 state

@@ -31,6 +31,7 @@
 #include "entry.h"
 #include "policy.h"
 #include "state.h"
+#include "replay.h"
 #include "../omci/nl.h"
 #include "../omci/redirect_guard.h"
 
@@ -173,12 +174,23 @@ static void apply(const struct igmp_db *db, const struct igmp_change *ch,
 	}
 }
 
+/* Replay (replay.c): the transcript drives the clock and the policy, and
+ * nothing here touches the device. Both are plain variables rather than hooks
+ * in the callers, so the decision code below is the daemon's own, unchanged. */
+static int replaying;
+static uint32_t replay_now;
+static const char *replay_pol;
+static uint32_t replay_pol_len;
+
 /* Monotonic seconds. A failure here is not fatal: time stops advancing, which
  * freezes every expiry, and a snooper that forgets nothing over-forwards. That
  * is the safe direction, and the message says it happened. */
 static uint32_t now_seconds(int *warned)
 {
 	long sec = 0, nsec = 0;
+
+	if (replaying)
+		return replay_now;
 
 	if (sys_clock_gettime(CLOCK_MONOTONIC, &sec, &nsec) != 0) {
 		if (!*warned) {
@@ -193,6 +205,7 @@ static uint32_t now_seconds(int *warned)
 static void usage(void)
 {
 	out("usage: igmpd [-w] [-f] [-n COUNT]\n"
+	    "       igmpd -r FILE\n"
 	    "       igmpd [-w] -j GROUP -p PORTS [-v VID]\n"
 	    "       igmpd [-w] -l GROUP [-v VID]\n"
 	    "  Registers for packet-redirect uid 4, describes every IGMP control\n"
@@ -208,6 +221,9 @@ static void usage(void)
 	    "  -l GROUP   one-shot: remove GROUP from the switch and exit\n"
 	    "  -v VID     the VID the one-shot names (default 0); printed only:\n"
 	    "             the entry is keyed on filtering id 0 (SVL)\n"
+	    "  -r FILE    replay a transcript of timestamped events (- is stdin) through\n"
+	    "             the same decision code and print what it decides; touches\n"
+	    "             neither /dev/odi_sw nor uid 4 (format: replay.c)\n"
 	    "  -h         this text; registers nothing\n");
 }
 
@@ -259,8 +275,15 @@ static uint32_t lease_retry;
  * snooping anyway). */
 static uint32_t read_policy(char *buf, uint32_t max)
 {
-	long fd = sys_open(IGMP_POLICY_PATH, O_RDONLY), n;
+	long fd, n;
 
+	if (replaying) {
+		n = replay_pol_len < max ? replay_pol_len : max;
+		for (long i = 0; i < n; i++)
+			buf[i] = replay_pol[i];
+		return (uint32_t)n;
+	}
+	fd = sys_open(IGMP_POLICY_PATH, O_RDONLY);
 	if (fd < 0)
 		return 0;
 	n = sys_read((int)fd, buf, max);
@@ -376,18 +399,93 @@ static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 		settle_lease(db, wanted_lease(db, now), now);
 }
 
+/* One second of the daemon: the policy file, the expiries, the rows that
+ * failed to write, the state file. The loop in main runs it when the second
+ * changes; replay.c runs it when the transcript's clock does. */
+void igmpd_tick(struct igmp_db *db, uint32_t now, int first)
+{
+	static struct igmp_change ch[MAX_CHANGES];
+	int changes;
+
+	policy_tick(db, now, first);
+	changes = igmp_db_tick(db, now, ch, MAX_CHANGES);
+	apply(db, ch, changes, MAX_CHANGES);
+	if (rows_dirty && lease && (int32_t)(now - resync_at) >= 0) {
+		rows_dirty = 0;
+		resync_at = now + 5;
+		resync(db);
+	}
+	if (changes || db->joins != state_joins)
+		write_state(db);
+}
+
+/* One redirect payload, prefix included, NLMSG header already removed. */
+void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
+		 uint32_t now)
+{
+	static struct igmp_change ch[MAX_CHANGES];
+	struct igmp_rx rx;
+	enum igmp_parse_rc prc = igmp_parse(payload, len, &rx);
+	int changes = 0;
+
+	/* Only while snooping: a copy that arrives after the
+	 * policy said stop is not state to keep. */
+	if (prc == IGMP_OK && pol.snooping)
+		changes = igmp_db_rx(db, &rx, now, ch, MAX_CHANGES);
+	/* A refresh changes nothing and says nothing: reports
+	 * come every few seconds per group, and this goes to a
+	 * log on a small tmpfs. A dry run, which exists to be
+	 * watched, and anything refused or malformed, is said. */
+	if (!igmp_hw_enabled() || changes || prc != IGMP_OK ||
+	    !pol.snooping)
+		describe(&rx, prc);
+	if (changes) {
+		apply(db, ch, changes, MAX_CHANGES);
+		write_state(db);
+	}
+}
+
+/* The daemon's state at start. */
+void igmpd_reset(struct igmp_db *db)
+{
+	igmp_db_init(db);
+	igmp_policy_defaults(&pol);
+}
+
+/* Run on a transcript instead of the redirect device (replay.c). The policy
+ * text is what the file would hold; the clock is the one the transcript
+ * sets. */
+void igmpd_replay_clock(uint32_t now)
+{
+	replaying = 1;
+	replay_now = now;
+}
+
+void igmpd_replay_policy(const char *text, uint32_t len)
+{
+	replay_pol = text;
+	replay_pol_len = len;
+}
+
+void igmpd_state_dump(const struct igmp_db *db)
+{
+	static char buf[IGMP_STATE_MAX];
+	uint32_t n = igmp_state_format(db, buf, sizeof buf);
+
+	out_n(buf, (int)n);
+}
+
 int main(int argc, char **argv)
 {
 	static uint8_t buf[NLMSG_HDR + IGMP_MAX_PAYLOAD];
 	static struct igmp_db db;
-	static struct igmp_change ch[MAX_CHANGES];
-	struct igmp_rx rx;
 	uint32_t last_tick = 0;
 	int clock_warned = 0;
 	/* nl_open fills tid only on success, and gcc cannot see the early
 	 * return between the two. */
 	uint32_t tid = 0, want = 0, seen = 0;
 	int force = 0, shot = 0;
+	const char *replay_file = 0;
 	uint32_t shot_group = 0, shot_ports = 0, shot_vid = 0;
 	int have_ports = 0;
 	long fd;
@@ -400,6 +498,8 @@ int main(int argc, char **argv)
 			force = 1;
 		} else if (str_eq(argv[i], "-w")) {
 			igmp_hw_set_enabled(1);
+		} else if (str_eq(argv[i], "-r") && i + 1 < argc) {
+			replay_file = argv[++i];
 		} else if (str_eq(argv[i], "-n") && i + 1 < argc) {
 			if (!parse_uint(argv[++i], &want)) {
 				usage();
@@ -437,6 +537,15 @@ int main(int argc, char **argv)
 		return one_shot(shot == 1, shot_group, shot_ports, shot_vid);
 	}
 
+	if (replay_file) {
+		/* -w would write what a transcript decided to the real switch. */
+		if (igmp_hw_enabled()) {
+			out("-r never writes to the switch: drop -w\n");
+			return 2;
+		}
+		return igmp_replay(replay_file);
+	}
+
 	fd = nl_open(&tid, RCV_TIMEOUT_US);
 	if (fd < 0) {
 		out_fmt("netlink open failed: %d\n", (int)fd);
@@ -457,8 +566,7 @@ int main(int argc, char **argv)
 		sys_close((int)fd);
 		return 1;
 	}
-	igmp_db_init(&db);
-	igmp_policy_defaults(&pol);
+	igmpd_reset(&db);
 	igmp_hw_probe();
 	out_fmt("listening on redirect uid %d, mtu %d, %s\n",
 		IGMP_REDIRECT_UID, IGMP_MAX_PAYLOAD,
@@ -475,45 +583,14 @@ int main(int argc, char **argv)
 		 * a lapse is applied to the state after the lapse rather than
 		 * before it. */
 		if (now != last_tick || first) {
-			int changes;
-
 			last_tick = now;
-			policy_tick(&db, now, first);
-			changes = igmp_db_tick(&db, now, ch, MAX_CHANGES);
-			apply(&db, ch, changes, MAX_CHANGES);
-			if (rows_dirty && lease && (int32_t)(now - resync_at) >= 0) {
-				rows_dirty = 0;
-				resync_at = now + 5;
-				resync(&db);
-			}
-			if (changes || db.joins != state_joins)
-				write_state(&db);
+			igmpd_tick(&db, now, first);
 		}
 		if (rc <= 0 || len == 0) {    /* the receive timeout, mostly */
 			out_flush();
 			continue;
 		}
-		{
-			enum igmp_parse_rc prc =
-				igmp_parse(buf + NLMSG_HDR, len, &rx);
-			int changes = 0;
-
-			/* Only while snooping: a copy that arrives after the
-			 * policy said stop is not state to keep. */
-			if (prc == IGMP_OK && pol.snooping)
-				changes = igmp_db_rx(&db, &rx, now, ch, MAX_CHANGES);
-			/* A refresh changes nothing and says nothing: reports
-			 * come every few seconds per group, and this goes to a
-			 * log on a small tmpfs. A dry run, which exists to be
-			 * watched, and anything refused or malformed, is said. */
-			if (!igmp_hw_enabled() || changes || prc != IGMP_OK ||
-			    !pol.snooping)
-				describe(&rx, prc);
-			if (changes) {
-				apply(&db, ch, changes, MAX_CHANGES);
-				write_state(&db);
-			}
-		}
+		igmpd_frame(&db, buf + NLMSG_HDR, len, now);
 		out_flush();
 		if (want && ++seen >= want)
 			break;

@@ -1,0 +1,19 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+snooping lease: copy host IGMP to the CPU  (not written)
+> 1 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 5 v2leave 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:02  leave  group 239.1.1.1  src 192.168.1.10
+  del vid 0 01:00:5e:01:01:01 ports 0x0  (not written)
+> 6 state
+joins=1
+denied=0
+groups=0
+> end
+joins=1
+denied=0
+groups=0
+status 0
