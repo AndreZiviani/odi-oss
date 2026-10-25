@@ -305,8 +305,8 @@ int main(int argc, char **argv)
 		? " (OMCI_VEIP_SLOT_ID is set but OMCI_CUSTOM_ME bit 256 is not)" : "",
 		private_me ? "created" : "left out (OMCI_PRIVATE_ME=0)");
 	if (pots_ports)
-		out_fmt("phone: %d POTS port(s), the VoIP entities accepted (OMCI_POTS_PORTS)\n",
-			(long)pots_ports);
+		out_fmt("phone: %d POTS port(s) in slot %d, the VoIP entities accepted (OMCI_POTS_PORTS)\n",
+			(long)pots_ports, (long)pots_slot);
 	cfg_load_fixed_me();
 	if (fixed_me.n)
 		out_fmt("fixed entities: %d entr(ies) answered from OMCI_FIXED_ME\n",

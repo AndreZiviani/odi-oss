@@ -740,6 +740,8 @@ struct cfg_snap {
 	int veip_on;
 	int custom_me;
 	int pots_ports;
+	int pots_slot_key;
+	int pots_slot;
 };
 /* Identity class: one bit per key the OLT reads. */
 #define CFGD_SN         (1u << 0)
@@ -760,7 +762,8 @@ struct cfg_snap {
 #define CFGD_VEIP_ON    (1u << 19)
 #define CFGD_CUSTOM_ME  (1u << 20)
 #define CFGD_POTS_PORTS (1u << 21)
-#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON | CFGD_CUSTOM_ME | CFGD_POTS_PORTS)
+#define CFGD_POTS_SLOT  (1u << 22)
+#define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON | CFGD_CUSTOM_ME | CFGD_POTS_PORTS | CFGD_POTS_SLOT)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
@@ -802,9 +805,15 @@ void cfg_load_veip_on(void);
 /* OMCI_POTS_PORTS (odi.conf): the phone ports, 0 to POTS_PORTS_MAX; 0 when
  * absent or anything else. While it is 0 the VoIP classes of the model
  * (voip_class(), mibstore.c) are unknown to the OLT, exactly as before the
- * model had them. */
+ * model had them, and the ONU creates none. With ports, it creates a POTS
+ * circuit pack in slot pots_slot (aut_rebuild()): OMCI_POTS_SLOT_ID
+ * (odi.conf) when that is a free slot, kept in pots_slot_key (-1 when
+ * absent or not usable), else the first free slot from 2 up. Both keys are
+ * read here, after the VEIP slot, which the POTS slot must avoid. */
 #define POTS_PORTS_MAX 2
 extern int pots_ports;
+extern int pots_slot_key;
+extern int pots_slot;
 void cfg_load_pots_ports(void);
 int voip_class(uint16_t cls);
 unsigned cfg_snap_diff(const struct cfg_snap *old, const struct cfg_snap *cur);

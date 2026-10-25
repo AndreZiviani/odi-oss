@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- omcid: `OMCI_POTS_PORTS=1` or `2` now tells the OLT of that many phone
+  ports, so an OLT that offers voice can provision a SIP line on each for the
+  router behind the stick to register: a POTS circuit pack in the first free
+  slot (2 unless the VEIP is there; the new `OMCI_POTS_SLOT_ID` picks
+  another), a POTS UNI per port with its line status, and the VoIP config
+  data, which offers SIP over OMCI only. The stick has no phone socket and
+  says so: the line status reads "config done" once the OLT has provisioned a
+  line, never "registered"; a line test is refused; no voice alarm is raised.
+  The voice traffic itself does not reach the router yet. Off (the default),
+  the MIB upload is the stock one, record for record. Experimental: not yet
+  run against an OLT that offers voice. Changing either key re-registers the
+  ONU.
+
 - tools: `make lint` no longer passes silently when git is unusable. Its
   git grep rules read a failing git grep as "no match", so a build from a
   git worktree through `tools/remote-build.sh` (whose `.git` file points at

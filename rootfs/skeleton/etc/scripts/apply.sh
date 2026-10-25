@@ -31,7 +31,7 @@
 #                            PLOAM password, the LOID keys, the identity keys
 #                            and switch, OMCI_UNKNOWN_ME_OK, OMCI_FIXED_ME,
 #                            OMCI_PRIVATE_ME, OMCI_VEIP, OMCI_VEIP_SLOT_ID,
-#                            OMCI_POTS_PORTS): omcid
+#                            OMCI_POTS_PORTS, OMCI_POTS_SLOT_ID): omcid
 #                            deactivates the ONU, clears its MIB, hands the
 #                            driver the new serial number and password and
 #                            activates again, and the OLT provisions it from

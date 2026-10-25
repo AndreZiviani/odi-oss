@@ -878,18 +878,52 @@ void cfg_load_private_me(void)
  * odi.conf, odi-only: the phone (POTS) ports, 1 or 2; anything else, an
  * absent key included, is 0, no phone service. The stick has no phone
  * socket: the ports are the SIP lines an OLT may provision for the router
- * behind it to register. A change re-registers, like OMCI_UNKNOWN_ME_OK,
- * since the classes the ONU accepts change with it. */
+ * behind it to register. A change re-registers: the entities the ONU
+ * creates, and the classes it accepts, change with it.
+ *
+ * The ports live in a slot of their own, a circuit pack of type POTS. Not
+ * a fixed slot: the VEIP's moves with OMCI_VEIP_SLOT_ID, so a fixed one
+ * could collide with it. The first slot from 2 up that the ONU does not
+ * already use (1 the Ethernet UNI, 128 the ANI, the VEIP's, the slot the
+ * VEIP key names even while the key is not in force, and 6, the stock VEIP
+ * slot, whose ids the generated defaults carry), unless OMCI_POTS_SLOT_ID
+ * names a free one. */
 int pots_ports;
+int pots_slot_key = -1;
+int pots_slot = 2;
+
+static int slot_taken(int s)
+{
+	return s == 1 || s == 128 || s == VEIP_SLOT_DEFAULT || s == veip_slot ||
+	       s == veip_slot_key;
+}
 
 void cfg_load_pots_ports(void)
 {
-	char v[4];
+	char v[16];
+	int n, slot = 0, i = 0;
 
 	pots_ports = 0;
 	if (cfg_odi_get(CFG_ODI_PATH, "OMCI_POTS_PORTS", v, sizeof v) == 1 &&
 	    v[0] >= '1' && v[0] <= '0' + POTS_PORTS_MAX)
 		pots_ports = v[0] - '0';
+
+	pots_slot_key = -1;
+	n = cfg_odi_get(CFG_ODI_PATH, "OMCI_POTS_SLOT_ID", v, sizeof v);
+	if (n > 0) {
+		for (; v[i] >= '0' && v[i] <= '9' && slot < 1000; i++)
+			slot = slot * 10 + (v[i] - '0');
+		if (i == 0 || v[i] || slot < 2 || slot > 254 || slot_taken(slot))
+			out("OMCI_POTS_SLOT_ID ignored: not a free slot (2 to 254, not 6, 128 or the VEIP's)\n");
+		else
+			pots_slot_key = slot;
+	}
+	if (pots_slot_key >= 0) {
+		pots_slot = pots_slot_key;
+	} else {
+		for (pots_slot = 2; slot_taken(pots_slot); pots_slot++)
+			;
+	}
 }
 
 /* ------------------------------------------------ OMCI_UNKNOWN_ME_OK
@@ -1191,6 +1225,8 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->veip_on = veip_on;
 	s->custom_me = custom_me;
 	s->pots_ports = pots_ports;
+	s->pots_slot_key = pots_slot_key;
+	s->pots_slot = pots_slot;
 }
 
 void cfg_snap_restore(const struct cfg_snap *s)
@@ -1206,6 +1242,8 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	veip_on = s->veip_on;
 	custom_me = s->custom_me;
 	pots_ports = s->pots_ports;
+	pots_slot_key = s->pots_slot_key;
+	pots_slot = s->pots_slot;
 	aut_rebuild();
 }
 
@@ -1265,6 +1303,11 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		m |= CFGD_CUSTOM_ME;
 	if (o->pots_ports != n->pots_ports)
 		m |= CFGD_POTS_PORTS;
+	/* The slot matters only while there are ports in it, before and after:
+	 * ports coming or going are the change above, wherever they sit. */
+	if (o->pots_ports && n->pots_ports &&
+	    (o->pots_slot_key != n->pots_slot_key || o->pots_slot != n->pots_slot))
+		m |= CFGD_POTS_SLOT;
 	if (o->fixed.n != n->fixed.n)
 		m |= CFGD_FIXED_ME;
 	else
@@ -1313,6 +1356,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_VEIP_ON, "OMCI_VEIP" },
 		{ CFGD_CUSTOM_ME, "OMCI_CUSTOM_ME" },
 		{ CFGD_POTS_PORTS, "OMCI_POTS_PORTS" },
+		{ CFGD_POTS_SLOT, "OMCI_POTS_SLOT_ID" },
 		{ CFGD_VLAN_TYPE, "VLAN_CFG_TYPE" },
 		{ CFGD_VLAN_MODE, "VLAN_MANU_MODE" },
 		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },

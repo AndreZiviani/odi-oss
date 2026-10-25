@@ -129,6 +129,38 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	omcid_stop "$pid"
 fi
 
+# ------------------------------------------------ phone ports (OMCI_POTS_PORTS)
+#
+# At 0 the key is off: every session's driver calls are the golden, call for
+# call. At 2 the ONU tells the OLT of two phone ports, and still nothing of
+# them reaches the driver: an OLT session with no voice in it programs the
+# switch exactly as before.
+if [ "${UPDATE:-0}" != 1 ]; then
+	for run in "isp1 0" "isp2 0" "isp3 0" "isp1 2"; do
+		set -- $run
+		isp=$1
+		log=/tmp/omcid-drv-pots-$isp-$2.log
+		got=/tmp/omci-drv-pots-$isp-$2.txt
+		cp "$FIX/omci-store-$isp.xml" /var/config/lastgood.xml
+		printf 'OMCI_POTS_PORTS=%s\n' "$2" > /var/config/odi.conf
+		$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-$isp > "$log" 2>&1 &
+		pid=$!
+		omcid_up "$log"
+		$Q cli/build/omcli --inject-file "$FIX/omci-session-$isp.txt" > /dev/null 2>&1
+		finish "$log"
+		grep '^drv ' "$log" > "$got"
+		if cmp -s "$FIX/omci-drv-golden-$isp.txt" "$got"; then
+			echo "ok    $isp with OMCI_POTS_PORTS=$2: the driver calls are the golden"
+		else
+			echo "FAIL  $isp with OMCI_POTS_PORTS=$2: driver calls differ from the golden"
+			diff "$FIX/omci-drv-golden-$isp.txt" "$got" | head -20
+			keep_log "$log" "drv-test-pots-$isp-$2.log"
+			fail=$((fail + 1))
+		fi
+	done
+	rm -f /var/config/odi.conf
+fi
+
 # ------------------------------------------------ Alloc-IDs from this OLT
 #
 # The T-CONT Alloc-IDs come from the OLT, never from a table: set over OMCI
