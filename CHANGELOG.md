@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: the LOID and its password are masked in MIB dumps like the other
+  credentials, where they appear twice: the LOID authentication entity (class
+  65530, its LOID and password) and ONU-G (class 256, its logical ONU id and
+  logical password). They show as `**`; the other attributes of both stay
+  readable, the OLT's Sets of ONU-G stay in the log, and `--secrets` shows
+  the values. Both come from the config store, and `omcicli mib get` printed
+  them.
 - igmpd: three fixes to the group table. The ME 311 join counter counted
   every join message, refused ones included; it now counts only the joins
   that were accepted (refused ones stay in the denied count of the state

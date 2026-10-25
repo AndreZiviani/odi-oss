@@ -1008,6 +1008,29 @@ check "and it is the real vendor-format srvflow dump, not silence" "$got" "0 ser
 # 0x0101 and a GEM-side port 47/0012 onto GEM IW TP 3, GEM 1000, whose
 # class 84 row lists VID 100 priority 0 and VID 200 priority 5.
 omcid_stop "$pid"
+
+# ------------------------------------------- the LOID entity hides its secrets
+#
+# Class 65530 carries the LOID and its password from the config store (the
+# invented ones of cfg_agree). A MIB dump masks both, byte for byte, and
+# leaves the operation id readable; --secrets shows them.
+mkdir -p /var/config
+cp test/cfg_agree.xml /var/config/lastgood.xml
+cp test/cfg_agree_hs.xml /var/config/lastgood_hs.xml
+$Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid-loid.log 2>&1 &
+pid=$!
+omcid_up /tmp/omcid-loid.log
+LOIDX=$(printf 'user-one' | od -An -tx1 | tr -d ' \n')
+LPWX=$(printf 'pw-current' | od -An -tx1 | tr -d ' \n')
+out=$($Q cli/build/omcli mib 65530 2>&1)
+check "the LOID entity's dump hides the LOID" "$(echo "$out" | grep -ci "$LOIDX")" "0"
+check "and its password" "$(echo "$out" | grep -ci "$LPWX")" "0"
+check "and keeps the operation id readable" \
+      "$(echo "$out" | grep -ci 'OperationId *43544320')" "1"
+out=$($Q cli/build/omcli mib 65530 --secrets 2>&1)
+check "--secrets shows the LOID and the password" \
+      "$(echo "$out" | grep -ci -e "$LOIDX" -e "$LPWX")" "2"
+omcid_stop "$pid"
 rm -f /var/config/lastgood.xml /var/config/lastgood_hs.xml
 $Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid4.log 2>&1 &
 pid=$!
