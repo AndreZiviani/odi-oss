@@ -199,6 +199,29 @@ check "total code words: a count past 32 bits stops at 4294967295" \
 # An entity that does not exist answers nothing it was not given.
 check "a Get of an instance that was never created: zeros" \
       "$(get 8009 hist)" "00${Z}${Z}${Z}${Z}0000"
+
+# A Get whose attributes do not all fit the 25 bytes of values: GEM port PM
+# history data (class 267) asked for attributes 1 and 3-7, as an OLT polls it,
+# is 1 + 4 + 4 + 8 + 8 + 8 = 33 bytes. Result 9: the first five (25 bytes)
+# under the mask answered, attribute 7 in the attribute execution mask
+# (contents 30-31), none in the optional-attribute mask (28-29).
+send "$(tci)" 44 010b 0001 000a
+T=$(tci)
+send "$T" 49 010b 0001 be00
+A=$(answer "$T")
+check "Get past 25 bytes: result 9, mask answered bc00" "$(echo "$A" | cut -c1-6)" "09bc00"
+check "Get past 25 bytes: attribute 7 failed, none unsupported" "$(echo "$A" | cut -c57-64)" "00000200"
+T=$(tci)
+send "$T" 49 010b 0001 0200
+check "the attribute that failed, asked alone: ok" "$(answer "$T" | cut -c1-6)" "000200"
+# Attribute 16 is past the class's last: unsupported, the rest answered.
+T=$(tci)
+send "$T" 49 010b 0001 8001
+A=$(answer "$T")
+check "an attribute the class does not have: result 9, the rest answered" \
+      "$(echo "$A" | cut -c1-6)" "098000"
+check "and it is in the optional-attribute mask, not the failed one" \
+      "$(echo "$A" | cut -c57-64)" "00010000"
 omcid_stop "$pid"
 
 [ "$fail" -eq 0 ] || keep_log "$log" pm-test.log

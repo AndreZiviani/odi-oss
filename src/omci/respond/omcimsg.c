@@ -275,6 +275,11 @@ static void handle_upload_next(int fd, uint32_t tid, const uint8_t *f)
 
 struct getnext_ctx getnext;
 
+/* End of the attribute values in a Get response's contents: three bytes of
+ * result and mask, then 25 of values (G.988, the Get response layout).
+ * The two masks of result 9 follow at 28 and 30. */
+#define GET_VALUES_END 28u
+
 /* How many alarm records the last Get All Alarms promised (alarm.c). Not
  * static: snapshot.c persists it across a respawn, alongside the MIB data
  * sync counter. */
@@ -676,8 +681,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	 * "not supported" once a minute (a reporter's bundle, 2026-10). */
 	if ((mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA) && c) {
 		uint16_t mask = nl_get16(f + 8);
-		uint16_t got = 0;
-		uint16_t n = 0;
+		uint16_t got = 0, unsup = 0, failed = 0;
+		uint16_t n = 0, vlen;
 
 		/* A big attribute takes the whole message: the vendor breaks
 		 * out of the mask walk at the first one it finds and hands the
@@ -690,46 +695,64 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 				return;
 			}
 
-		body[0] = OMCI_OK;
+		/* G.988 lays a Get response out as the result, the mask
+		 * answered, 25 bytes of attribute values (contents 3 to 27),
+		 * then the optional-attribute mask (28-29) and the attribute
+		 * execution mask (30-31), which only result 9 uses. Values stop
+		 * at byte 27, so they never run into the two masks. */
 		n = 3;
 		/* A PM entity answers its completed interval to a Get and the
 		 * one in progress to Get current data (pm.c). */
 		pm_view(mt == OMCI_MT_GET_CURRENT_DATA);
 		for (unsigned k = 1; k <= 16; k++) {
+			uint16_t bit = (uint16_t)(1u << (16 - k));
 			uint16_t w;
 
-			if (!(mask & (1u << (16 - k))))
+			if (!(mask & bit))
 				continue;
 			w = attr_width(c, k);
-			if (!w)
-				continue;       /* past nattr, or unsized */
-			if (n + w > (uint16_t)sizeof body)
-				break;          /* would not fit the frame */
+			if (!w) {
+				unsup |= bit;   /* past nattr, or unsized */
+				continue;
+			}
+			if (failed || n + w > GET_VALUES_END) {
+				/* It does not fit; nor does anything after
+				 * it, so the values stay in mask order and the
+				 * OLT asks for these again on their own. */
+				failed |= bit;
+				continue;
+			}
 			attr_value(c, inst, k, body + n);
-			got |= (uint16_t)(1u << (16 - k));
+			got |= bit;
 			n = (uint16_t)(n + w);
 		}
-		/* The mask that goes back is the one actually answered, not the
-		 * one asked for. Echoing the request while skipping an
-		 * attribute -- because it is past nattr, unsized, or would not
-		 * fit -- tells the OLT bytes are present that are not, and it
-		 * then parses every attribute after the gap at the wrong
-		 * offset. handle_upload_next has always built its mask this
-		 * way; this is the same discipline on the get path. */
 		pm_view(0);
+		/* The mask that goes back is the one actually answered, not the
+		 * one asked for: echoing the request while leaving an
+		 * attribute out tells the OLT bytes are present that are not,
+		 * and it then parses every attribute after the gap at the
+		 * wrong offset. handle_upload_next builds its mask the same
+		 * way. Anything left out is result 9, attribute(s) failed or
+		 * unknown, with the two masks saying which and why. */
 		nl_put16(body + 1, got);
-		/* NOT OMCI_ERR_ATTR_FAILED, tempting as it is. G.988 result 9
-		 * requires an unsupported-attributes mask and a failed-
-		 * attributes mask in the last four bytes of the 32-byte
-		 * response body, and sending the code without them would leave
-		 * the OLT parsing a body that does not match its result. The
-		 * corrected mask above is the part that stops it misreading
-		 * the attributes; saying 9 properly is separate work. */
+		vlen = (uint16_t)(n - 3);
+		if (unsup || failed) {
+			body[0] = OMCI_ERR_ATTR_FAILED;
+			for (unsigned b = n; b < GET_VALUES_END; b++)
+				body[b] = 0;
+			nl_put16(body + GET_VALUES_END, unsup);
+			nl_put16(body + GET_VALUES_END + 2, failed);
+			n = GET_VALUES_END + 4;
+		} else {
+			body[0] = OMCI_OK;
+		}
 		send_resp(fd, tid, f, body, n);
-		out_fmt("-> ok, mask %04x", (long)mask);
-		if (got != mask)
-			out_fmt(" (answered %04x)", (long)got);
-		out_fmt(", %d bytes\n", (long)(n - 3));
+		if (body[0] == OMCI_OK)
+			out_fmt("-> ok, mask %04x", (long)mask);
+		else
+			out_fmt("-> attribute failed, mask %04x (answered %04x, unsupported %04x, failed %04x)",
+				(long)mask, (long)got, (long)unsup, (long)failed);
+		out_fmt(", %d bytes\n", (long)vlen);
 		return;
 	}
 	/* A class OMCI_FIXED_ME names, when omcid has no model of its own for
@@ -756,7 +779,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 			if (!(mask & (1u << (16 - k))))
 				continue;
 			x = fixed_me_attr(cls, inst, k);
-			if (!x || n + x->len > (uint16_t)sizeof body)
+			if (!x || n + x->len > GET_VALUES_END)
 				continue;
 			for (int i = 0; i < x->len; i++)
 				body[n + i] = x->data[i];
