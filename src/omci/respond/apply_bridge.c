@@ -321,6 +321,8 @@ void gen_no_vlan_filter_rule(struct omci_vlan_oper *vr)
  * from the config store; class 171 carries only the 4096 "no VID").
  * Upstream (`isMc` 0): accept untagged, ADD a C-TAG. Downstream multicast
  * (`isMc` 1): match priority/VID zero, remove both tags, emit no tag.
+ * `isMc` 2 is the same match with the tag kept as received, for a profile
+ * whose downstream tag control (309 attribute 16) is type 0, transparent.
  */
 void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
 {
@@ -341,10 +343,11 @@ void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
 	vr->filter.inner.vid = isMc ? 0u : (uint32_t)vid;
 	vr->filter.inner.tpid = OMCI_FILTER_TPID_DO_NOT;
 	vr->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
-	vr->outer_act.tag_op = isMc ? OMCI_TAGOP_POP : OMCI_TAGOP_PASS;
+	vr->outer_act.tag_op = isMc == 1 ? OMCI_TAGOP_POP : OMCI_TAGOP_PASS;
 	vr->outer_act.vid_op  = OMCI_VIDOP_SET;
 	vr->outer_act.pri_op  = OMCI_PRIOP_SET;
-	vr->inner_act.tag_op = isMc ? OMCI_TAGOP_POP : OMCI_TAGOP_PUSH;
+	vr->inner_act.tag_op = isMc == 1 ? OMCI_TAGOP_POP :
+			       isMc == 2 ? OMCI_TAGOP_PASS : OMCI_TAGOP_PUSH;
 	vr->inner_act.vid_op  = OMCI_VIDOP_SET;
 	vr->inner_act.pri_op  = OMCI_PRIOP_SET;
 	vr->inner_act.set_tag.pri  = (uint32_t)pri;
@@ -352,7 +355,7 @@ void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
 	vr->inner_act.set_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
 	vr->out.is_default = 0;
 	vr->out.is_mcast = isMc ? 1u : 0u;
-	vr->out.tag_count = isMc ? 0u : 1u;
+	vr->out.tag_count = isMc == 1 ? 0u : 1u;
 	vr->out.tpid = OMCI_OUT_TPID_8100;
 	vr->out.ds_mode = 0;
 	vr->out.ds_tag_op = 0;
@@ -602,6 +605,10 @@ static int olt_tag(int *pri, const char **why_out)
  * for untagged frames, one for tagged ones. */
 #define BP_RULES_MAX 14
 
+/* Whether the manual-mode multicast row strips the tag of priority-tagged
+ * frames, set by mcast_tag_plan() from the profile before the rules are made. */
+static int mcv_vid0_strip = 1;
+
 struct bp_rule {
 	struct omci_vlan_oper vr;
 	const char *kind;
@@ -665,8 +672,12 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	*manual = 0;
 	/* Downstream only (multicast) under the manual tag: the tag comes off. */
 	if (dir == 2 && mvid >= 0) {
-		n = bp_put(rules, n, "manual-remove", mvid, tag_pri);
-		gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 1);
+		/* The profile's downstream tag control decides whether the
+		 * priority-tagged groups lose their tag (mcv_vid0_strips()). */
+		n = bp_put(rules, n, mcv_vid0_strip ? "manual-remove" : "manual-pass",
+			   mvid, tag_pri);
+		gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri,
+				     mcv_vid0_strip ? 1 : 2);
 		return n;
 	}
 	/* No class 84, or one with an empty list: as before any FwdOp was
@@ -1358,10 +1369,13 @@ static void mcast_tag_plan(void)
 	uint16_t ani[32];
 	struct mcv_in in;
 
+	mcv_vid0_strip = 1;          /* no profile: the strip the row always had */
+
 	in.force_strip = (custom_mcast & CUSTOM_MCAST_DS_UNTAGGED) != 0;
 	in.ani = ani;
 	in.unicast = uc_vids;
 	if (mcast_ds_tag_input(in.tci, ani, 32, &in.nani)) {
+		mcv_vid0_strip = mcv_vid0_strips(in.tci, in.force_strip);
 		mcv_plan(&in, &mcv);
 	} else {
 		mcv.type = MCV_PASS;     /* no profile: nothing to apply */

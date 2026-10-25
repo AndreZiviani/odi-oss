@@ -82,8 +82,8 @@ got=$(grep -c 'manual vlan off (transparent)' /tmp/omcid-vlan-isp1-transparent.l
 check "and omcid says so at start" "$got" "1"
 
 got=$(rules isp2 manual)
-check "ISP2, manual tag on: VID 10 added upstream, removed from multicast" "$got" \
-"47/0ffe gem 4094 rule manual-remove vid 10 pri 0
+check "ISP2, manual tag on: VID 10 added upstream, multicast tag passed (attribute 16 type 0)" "$got" \
+"47/0ffe gem 4094 rule manual-pass vid 10 pri 0
 47/1002 gem 657 rule manual-add vid 10 pri 0"
 got=$(rules isp2 transparent)
 check "ISP2, transparent: forward-all, every tag passes both ways" "$got" \
@@ -177,7 +177,7 @@ session "$ADD100" "$DEF1" "$DEF2" > /tmp/s171-29.txt
 run171 29 /tmp/s171-29.txt
 got=$(rebuild /tmp/omcid-171-29.log 0)
 check "#29, VLAN_CFG_TYPE 0: the OLT's VLAN 100 is the add-tag rule" "$got" \
-"47/0ffe gem 4094 rule manual-remove vid 100 pri 0
+"47/0ffe gem 4094 rule manual-pass vid 100 pri 0
 47/1002 gem 657 rule manual-add vid 100 pri 0"
 got=$(grep -c 'untagged frames get VLAN 100 pri 0 from the OLT' /tmp/omcid-171-29.log)
 check "and the log says where the tag came from" "$got" "1"
@@ -196,7 +196,7 @@ for t in "$ADD1" "$ADD100"; do
 	run171 man /tmp/s171-man.txt
 	got=$(rebuild /tmp/omcid-171-man.log 0)
 	check "manual tag on (type 1, mode 1): VLAN_MANU_TAG_VID 10 wins over $t" "$got" \
-"47/0ffe gem 4094 rule manual-remove vid 10 pri 0
+"47/0ffe gem 4094 rule manual-pass vid 10 pri 0
 47/1002 gem 657 rule manual-add vid 10 pri 0"
 done
 store 1 0
@@ -424,7 +424,7 @@ sessionx 8100 8100 "$TRANS410" "$DEF1" "$DEF2" > /tmp/s171-m.txt
 run171 ev-man /tmp/s171-m.txt
 got=$(rebuild /tmp/omcid-171-ev-man.log 0)
 check "manual tag on (type 1, mode 1): the table is not read" "$got" \
-"47/0ffe gem 4094 rule manual-remove vid 10 pri 0
+"47/0ffe gem 4094 rule manual-pass vid 10 pri 0
 47/1002 gem 657 rule manual-add vid 10 pri 0"
 store 0 0
 
@@ -581,7 +581,11 @@ ISP1_MANUAL="47/0003 gem 1434 rule vid-filter vid 10 pri -1
 47/0006 gem 1946 rule vid-filter vid 14 pri -1
 47/0007 gem 1562 rule manual-add vid 11 pri 0
 47/ffff gem 4095 rule manual-remove vid 11 pri 0"
-ISP2_MANUAL="47/0ffe gem 4094 rule manual-remove vid 10 pri 0
+ISP2_MANUAL="47/0ffe gem 4094 rule manual-pass vid 10 pri 0
+47/1002 gem 657 rule manual-add vid 10 pri 0"
+# The same line when the profile asks for a strip (types 1, and 2 to 7 for
+# the VID 0 row, which no tag-writing rule can be meant for).
+ISP2_STRIP="47/0ffe gem 4094 rule manual-remove vid 10 pri 0
 47/1002 gem 657 rule manual-add vid 10 pri 0"
 
 # 1. The two lines as they are: no VLAN named, the rules of above, and the
@@ -684,10 +688,34 @@ tci_store isp2 1
 tci_session isp2 8005 050064 4000 > /tmp/s-tci.txt
 run171 tci-isp2-pkg /tmp/s-tci.txt
 check "ISP2 05 00 64 (service package VID): no rule" \
-	"$(rebuild /tmp/omcid-171-tci-isp2-pkg.log 0)" "$ISP2_MANUAL"
+	"$(rebuild /tmp/omcid-171-tci-isp2-pkg.log 0)" "$ISP2_STRIP"
 check "and it says why" \
 	"$(grep -c 'downstream tag control 5 (309 attribute 16) not applied: types 5 to 7' \
 		/tmp/omcid-171-tci-isp2-pkg.log)" "1"
+
+# 8. The VID 0 multicast row of the manual mode follows the profile of the
+#    subscriber: type 0 passes the tag, type 1 and the types a VID 0 row cannot
+#    use strip it, and with no profile at all the strip stays.
+tci_store isp1 1
+tci_session isp1 0001 000000 > /tmp/s-tci.txt
+run171 tci-isp1-t0 /tmp/s-tci.txt
+check "ISP1 provisioned 00 00 00 instead: its multicast tag passes too" \
+	"$(rebuild /tmp/omcid-171-tci-isp1-t0.log 0)" "47/0003 gem 1434 rule vid-filter vid 10 pri -1
+47/0004 gem 1690 rule vid-filter vid 12 pri 5
+47/0005 gem 1818 rule vid-filter vid 13 pri 4
+47/0006 gem 1946 rule vid-filter vid 14 pri -1
+47/0007 gem 1562 rule manual-add vid 11 pri 0
+47/ffff gem 4095 rule manual-pass vid 11 pri 0"
+tci_store isp2 1
+tci_session isp2 8005 020064 > /tmp/s-tci.txt
+run171 tci-isp2-t2 /tmp/s-tci.txt
+check "ISP2 02 00 64 (add a tag), no VLAN named: the VID 0 row keeps its strip" \
+	"$(rebuild /tmp/omcid-171-tci-isp2-t2.log 0)" "$ISP2_STRIP"
+tci_store isp2 1 1
+tci_session isp2 8005 000000 > /tmp/s-tci.txt
+run171 tci-isp2-t0force /tmp/s-tci.txt
+check "ISP2 00 00 00 under OMCI_CUSTOM_MCAST=1: the VID 0 row strips" \
+	"$(rebuild /tmp/omcid-171-tci-isp2-t0force.log 0)" "$ISP2_STRIP"
 
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 suite_exit

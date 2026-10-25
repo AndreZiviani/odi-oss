@@ -188,3 +188,8 @@ void mcv_plan(const struct mcv_in *in, struct mcv_out *o)
 		}
 	}
 }
+
+int mcv_vid0_strips(const uint8_t tci[3], int force_strip)
+{
+	return force_strip || tci[0] != MCV_PASS;
+}

@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a line whose OLT asks for transparent multicast now gets the VID-0
+  multicast tag passed through, as the stock firmware does; no change on lines
+  that ask for strip. In the manual VLAN mode the multicast row for
+  priority-tagged groups always removed the tag; it now follows the multicast
+  profile's downstream tag control (ME 309 attribute 16): type 0 keeps the tag
+  as received, type 1 and `OMCI_CUSTOM_MCAST` bit 1 strip it. Types 2 to 7 keep
+  the strip, since a VID 0 row cannot be the VLAN they write a tag on.
 - CI: a slow package mirror no longer fails test-qemu. `tools/ci-apt.sh` cut
   each install of qemu-system-mips off after 5 minutes, so a mirror that was
   slow but still sending failed all three attempts. An install may now take
