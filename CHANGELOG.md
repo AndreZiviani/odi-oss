@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+**Automated dependency bump.**
+- linux 6.18.57 -> 6.18.58
+- iproute2 7.2.0 -> 7.3.0
+
+
 - omcid: a line whose OLT asks for transparent multicast now gets the VID-0
   multicast tag passed through, as the stock firmware does; no change on lines
   that ask for strip. In the manual VLAN mode the multicast row for
