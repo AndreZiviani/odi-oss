@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.9.0: the Phone tab shows what the OLT provisioned for
+  voice and the line state a router reports (`OMCI_VOIP_LINE_REPORT`), the
+  Config page has every odi-only key (`IGMP_PON_DROP`, `MLD_SNOOPING`, the
+  phone-port and Dying_Gasp keys), and the MIB browser refuses the classes
+  that carry provisioned secrets. metricsd stays at v1.7.0.
+
 - igmpd: MLD (IPv6) snooping, opt-in with the new key `MLD_SNOOPING=1`
   (needs `IGMP_SNOOPING=1`; `apply.sh igmp` applies it). The switch copies the
   host's MLD queries, reports and dones to igmpd as it copies its IGMP, or
