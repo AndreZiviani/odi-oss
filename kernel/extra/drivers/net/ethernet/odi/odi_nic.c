@@ -55,12 +55,11 @@ static bool odi_nic_debug;
 module_param_named(debug, odi_nic_debug, bool, 0644);
 MODULE_PARM_DESC(debug, "trace the first interrupts and RX descriptors, dump the NIC state after open (default off)");
 
-/* odi_nic.omci_ring: run the second RX ring and route the OMCI frames to
- * it, or (the default) run ring 1 alone: RUN1 and the route words as
- * before the OMCI ring existed. Both rings are allocated, programmed
- * before the engine starts (odi_start_hw()) and served either way; the
- * parameter switches multi-ring RX on or off, at once when a device is
- * open (odi_nic_omci_ring_set(), odi_rx_multi_apply()).
+/* odi_nic.omci_ring: route the OMCI frames to the second RX ring, or (the
+ * default) every frame to ring 1. Both rings are allocated, programmed
+ * before the engine starts with multi-ring RX on (odi_start_hw()) and
+ * served either way; the parameter switches the route words only, at once
+ * when a device is open (odi_nic_omci_ring_set(), odi_rx_multi_apply()).
  */
 static bool odi_nic_omci_ring;
 
@@ -644,7 +643,7 @@ static void odi_init_hw_rx(void)
 	/* FIFO_CFG RING_IRQS stays clear: see odi_init_hw_mac(). */
 	odi_w32(ODI_NIC_FIFO_CFG, ODI_NIC_FIFO_RX_2K);
 
-	/* The single-ring route words (odi_nic_hw.h); multi-ring RX rewrites
+	/* Every priority to ring 1 (odi_nic_hw.h); the OMCI ring rewrites
 	 * them (odi_rx_multi_apply()).
 	 */
 	for (i = 0; i < ODI_NIC_RX_RING_MAP_WORDS; i++)
@@ -689,10 +688,11 @@ static void odi_regw_apply(const struct odi_nic_regw *w, unsigned int n)
  * bits are written only once request_irq and napi_enable have succeeded,
  * so no interrupt can arrive with no handler or a disabled NAPI context.
  *
- * Rings 2 to 6 go in the same sequence, before the go bits, whether or not
- * the OMCI ring will be turned on (odi_nic_hw.h, "Multi-ring RX"): a ring
- * the engine first sees while running loses the first frame routed to it.
- * With MULTI_RX clear they take no frame and assert no PAUSE.
+ * Rings 2 to 6 go in the same sequence, before the go bits, and RUN1 sets
+ * MULTI_RX with them, whether or not the OMCI ring will be turned on
+ * (odi_nic_hw.h, "Multi-ring RX"): with MULTI_RX set only later, the first
+ * frame routed to ring 2 was lost. The route words, every priority to
+ * ring 1, keep every frame on ring 1 until the OMCI ring is turned on.
  */
 static void odi_start_hw(void)
 {
@@ -1354,13 +1354,13 @@ static atomic_t odi_open_count = ATOMIC_INIT(0);
 /* Multi-ring RX on or off (odi_nic_hw.h, "Multi-ring RX: the start,
  * enable and disable sequences"), with a device open, under the RTNL: from
  * the first ndo_open and from the parameter, so the two never interleave.
- * Only the route words and RUN1 change: the rings were programmed at the
+ * Only the route words change: the rings and MULTI_RX were set at the
  * start and the poll serves ring 2 either way, so its head is not touched
  * and the poll need not be held off.
  */
 static void odi_rx_multi_apply(bool on)
 {
-	struct odi_nic_regw w[ODI_NIC_MULTI_RX_ON_MAX];	/* the off sequence fits too: odi_nic_init() */
+	struct odi_nic_regw w[ODI_NIC_MULTI_RX_MAX];
 	unsigned int n;
 
 	ASSERT_RTNL();
@@ -1368,10 +1368,11 @@ static void odi_rx_multi_apply(bool on)
 		return;
 
 	if (!on) {
-		n = odi_nic_multi_rx_off(w);
+		n = odi_nic_multi_rx_route(w, 0);
 		odi_regw_apply(w, n);
 		WRITE_ONCE(odi.rx2_routed, 0);
-		pr_info(DRV_NAME ": omci ring off: one RX ring, run1=0x%08x\n", odi_r32(ODI_NIC_RUN1));
+		pr_info(DRV_NAME ": omci ring off: every frame to ring 1, route=0x%08x\n",
+			odi_r32(ODI_NIC_RX_RING_MAP));
 		return;
 	}
 
@@ -1380,7 +1381,7 @@ static void odi_rx_multi_apply(bool on)
 		return;
 	}
 	odi.rx2_idx_on = odi_r16(ODI_NIC_RX2_INDEX);
-	n = odi_nic_multi_rx_on(w);
+	n = odi_nic_multi_rx_route(w, 1);
 	odi_regw_apply(w, n);
 	WRITE_ONCE(odi.rx2_routed, 1);
 	pr_info(DRV_NAME ": omci ring on: ring 2 at engine index %u (%u at the start, driver at %u), rings 3..6 parked, run1=0x%08x route=0x%08x pause=0x%02x\n",
@@ -1720,8 +1721,6 @@ static int __init odi_nic_init(void)
 	 */
 	BUILD_BUG_ON(ODI_NIC_RX_PARK_DEPTH * sizeof(struct odi_rx_desc) > ODI_NIC_PARK_BUF_OFF);
 	BUILD_BUG_ON(ODI_NIC_PARK_ALLOC - ODI_NIC_PARK_BUF_OFF < ODI_NIC_RX_ALLOC);
-	/* odi_rx_multi_apply() builds both sequences in one array. */
-	BUILD_BUG_ON(ODI_NIC_MULTI_RX_OFF_MAX > ODI_NIC_MULTI_RX_ON_MAX);
 
 	odi_mmio = ioremap(CPHYSADDR(ODI_NIC_MMIO_BASE), ODI_NIC_MMIO_SIZE);
 	if (!odi_mmio) {

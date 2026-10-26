@@ -98,40 +98,40 @@ Error paths:
   is the only traffic from the fibre the CPU accepts. `/proc/odi_nic`
   counts `rx_pon` (every frame from the PON port) and `rx_pon_dropped`
   (`docs/SWITCH.md`, "PON port isolation").
-- One RX ring by default, two with `odi_nic.omci_ring=1` (at boot, or
-  live). Off, RUN1 is 0x30010001 (bit 25, multi-ring RX, clear) and the
-  route words the single-ring ones, as they always were. On, ring 1 takes
-  every frame of internal priority 0 to 6 and the OMCI ring (32
-  descriptors, RX ring 2) priority 7, which the switch gives the OMCI
-  frames it traps (the sdkinit replay writes 7 to the OMCI trap
-  configuration, 0x0111f8). With bit 25 set the engine checks the flow
-  control of all six RX rings, and a ring left at its reset values holds
-  PAUSE for good, so rings 3 to 6 are parked, each on a two-descriptor
-  ring the CPU owns with one descriptor always available and thresholds
-  0, and ring 2 programmed from its engine index (which cannot be
-  written). That happens at every open, on or off, before the engine
-  starts: a ring the engine first sees while running lost the first frame
-  routed to it (on a stick, 5 boots of 5, when ring 2 was programmed by
-  the live switch), and with bit 25 clear the engine routes nothing to
-  rings 2 to 6 and checks none of their flow control. Turning it on then
-  writes the route words (priority 7 to ring 2, every other field ring 1:
-  the only two values measured on this chip) and sets RUN1 to 0x32000001
-  last. Off clears bit 25 first. The sequences are lists of writes in
-  `odi_nic_hw.h`, host-tested against a model of the six comparators and
-  of the start. Every poll serves the OMCI ring first, then ring 1 with
-  the rest of the budget, through the same frame path (`odi_rx_ring()`),
-  so a host-side flood that keeps ring 1 full cannot take OMCI's
-  descriptors. An engine index beyond its ring at open leaves rings 2 to
-  6 alone and refuses the switch, with a warning. `/proc/odi_nic` shows
-  `omci_ring` (what is in effect), `rx1_taken`, `rx2_taken`, `rx2_other`
-  (frames on the OMCI ring that are not OMCI: a host frame of priority 7)
-  and `rx_missed` (frames the engine dropped for want of a descriptor,
-  `RX_NO_DESC_CNT` at 0x2A); then `rx2_no_desc` (interrupts that found
-  ring 2's descriptor-unavailable bit, ISR bit 11, set), `rx2_idx_start`
-  and `rx2_idx_on` (the ring-2 engine index at the start and at the last
-  switch on), `rx2_idx` and `rx2_head` (the engine index and the driver's
-  next descriptor now). Both rings raise the same RX interrupt; the storm
-  guard counts both, the watchdog CPU-port rule ring 1 only
+- One RX ring in use by default, two with `odi_nic.omci_ring=1` (at
+  boot, or live). The engine runs multi-ring RX either way: RUN1
+  0x32000001 (bit 25 set, the value the stock firmware's register reads),
+  ring 2 programmed from its engine index (which cannot be written), and
+  rings 3 to 6 parked, each on a two-descriptor ring the CPU owns with one
+  descriptor always available and thresholds 0 (with bit 25 set the
+  engine checks the flow control of all six RX rings, and a ring left at
+  its reset values holds PAUSE for good). All of it is written at every
+  open before the go bits. Off, every field of the route words is 0, so
+  every frame lands in ring 1; on, priority 7, which the switch gives the
+  OMCI frames it traps (the sdkinit replay writes 7 to the OMCI trap
+  configuration, 0x0111f8), goes to ring 2 (field value 2; 0 and 2 are
+  the only values measured on this chip). Turning it on or off writes the
+  route words only. Setting bit 25 only when the ring was turned on lost
+  the first OMCI frame routed to ring 2 on every boot (on a stick, 5 of 5,
+  whether ring 2 was programmed then or before the start); the stock
+  driver and another open implementation both set it before the go bits.
+  The sequences are lists of writes in `odi_nic_hw.h`, host-tested against
+  a model of the six comparators and of the start. Every poll serves the
+  OMCI ring first, then ring 1 with the rest of the budget, through the
+  same frame path (`odi_rx_ring()`), so a host-side flood that keeps ring
+  1 full cannot take OMCI's descriptors. An engine index beyond its ring
+  at open leaves rings 2 to 6 alone, starts with bit 25 clear (RUN1
+  0x30010001, one ring) and refuses the switch, with a warning.
+  `/proc/odi_nic` shows `omci_ring` (what is in effect), `rx1_taken`,
+  `rx2_taken`, `rx2_other` (frames on the OMCI ring that are not OMCI: a
+  host frame of priority 7) and `rx_missed` (frames the engine dropped for
+  want of a descriptor, `RX_NO_DESC_CNT` at 0x2A); then `rx2_no_desc`
+  (interrupts that found ring 2's descriptor-unavailable bit, ISR bit 11,
+  set; it stayed 0 across such a drop), `rx2_idx_start` and `rx2_idx_on`
+  (the ring-2 engine index at the start and at the last switch on),
+  `rx2_idx` and `rx2_head` (the engine index and the driver's next
+  descriptor now). Both rings raise the same RX interrupt; the storm guard
+  counts both, the watchdog CPU-port rule ring 1 only
   (`odi_nic_rx_taken()`).
 - A frame from the IP stack is sent with the port mask of its device
   (`odi_nic_stack_tx_mask()`): the host-side ports only, never the PON or

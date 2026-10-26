@@ -7,15 +7,14 @@ listed here.
 
 - NIC: with the OMCI ring turned on (`odi_nic.omci_ring=1`, still off by
   default), the first OMCI message after the switch is no longer lost. On a
-  stick, turning it on live and then re-registering lost exactly one of the
-  first burst's messages, on every boot; later bursts lost none. The second
-  ring and the unused ones are now set up every time the NIC starts, before
-  it starts receiving, as the stock firmware does, instead of when the
-  ring is turned on; turning it on or off now changes only where OMCI
-  frames go. With the ring off this changes nothing: the extra rings take no
-  frames. `/proc/odi_nic` gains `rx2_no_desc`, `rx2_idx_start`, `rx2_idx_on`,
-  `rx2_idx` and `rx2_head`, to tell a frame the second ring had no room for
-  from one it never saw.
+  stick, turning it on and then re-registering lost exactly one of the
+  first burst's messages, on every boot; later bursts lost none. The NIC
+  now starts with both receive rings running (the unused ones parked), as
+  the stock firmware does, and the switch only changes which ring OMCI
+  frames go to. With the ring off every frame still goes to the first
+  ring. `/proc/odi_nic` gains `rx2_no_desc`, `rx2_idx_start`, `rx2_idx_on`,
+  `rx2_idx` and `rx2_head`, to tell a frame the second ring had no room
+  for from one it never saw.
 
 **Automated dependency bump.**
 - linux 6.18.57 -> 6.18.58
