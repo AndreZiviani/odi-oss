@@ -99,4 +99,13 @@ void mcv_plan(const struct mcv_in *in, struct mcv_out *out);
  * and hands the map to mcv_plan(). */
 void mcv_mark(uint8_t *map, const struct omci_vlan_oper *vr);
 
+/* What the multicast row of the manual VLAN mode does to a frame that comes
+ * priority-tagged (VID 0), the "untagged groups" of the line: 1 strips the
+ * tag, 0 leaves it as received. Only the control type 0, transparent, keeps
+ * it; type 1 and OMCI_CUSTOM_MCAST bit 1 strip, as before. Types 2 to 4 write
+ * a tag on a VLAN the access control lists name, and a VID 0 row is never
+ * one of those (untagged groups, above), so there they keep the strip the
+ * row always had; so do types 5 to 7 and the reserved ones. */
+int mcv_vid0_strips(const uint8_t tci[3], int force_strip);
+
 #endif

@@ -229,6 +229,21 @@ int main(void)
 		   "a VID filter marks its VID; a tag it does not write is not marked");
 	}
 
+	/* ---- the VID 0 multicast row of the manual mode follows the type */
+	{
+		const uint8_t t0[3] = { MCV_PASS, 0, 0 }, t1[3] = { MCV_STRIP, 0, 0 };
+		const uint8_t t2[3] = { MCV_ADD, 0x00, 0x64 }, t4[3] = { MCV_REPLACE_VID, 0, 0x64 };
+		const uint8_t t5[3] = { MCV_ADD_PKG, 0, 0 }, t9[3] = { 9, 0, 0 };
+
+		ok(!mcv_vid0_strips(t0, 0), "type 0: the VID 0 row keeps the tag as received");
+		ok(mcv_vid0_strips(t0, 1), "type 0 with OMCI_CUSTOM_MCAST bit 1: stripped, forced");
+		ok(mcv_vid0_strips(t1, 0), "type 1: the VID 0 row strips");
+		ok(mcv_vid0_strips(t2, 0) && mcv_vid0_strips(t4, 0),
+		   "types 2 and 4: no VID 0 rule is meaningful, the row keeps its strip");
+		ok(mcv_vid0_strips(t5, 0) && mcv_vid0_strips(t9, 0),
+		   "types 5 to 7 and reserved ones: the row keeps its strip");
+	}
+
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();
 	return failures ? 1 : 0;

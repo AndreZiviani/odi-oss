@@ -1267,8 +1267,14 @@ OLT set, as its stock plugin (`cf_force_ds_mcast_untagged`) does by writing
 
 The rules go in front of the port's own rules, which stay: the manual tag's
 removal (`manual-remove`, the stock rule: C-tag VID 0 priority 0, both tags
-removed) or forward-all. With no ACL VLAN named, as on both our lines
-(ISP1 provisions type 1, ISP2 type 0, neither an ACL row), nothing changes;
+removed) or forward-all. That VID 0 row, for the priority-tagged and untagged
+groups, follows the profile too: type 0 keeps the tag as received
+(`manual-pass`, the same match with the tag left alone), type 1 and
+`OMCI_CUSTOM_MCAST` bit 1 strip it. Types 2 to 4 write a tag on a VLAN the
+lists name and a VID 0 row is never one of those, so there the row keeps its
+strip, as do types 5 to 7; with no multicast profile at all it strips as it
+always did. With no ACL VLAN named, as on both our lines (ISP1 provisions
+type 1, ISP2 type 0, neither an ACL row), no `mcast-*` rule is added;
 `src/omci/drv-test.sh` holds the driver calls of both to their goldens with
 the attribute set as each OLT sets it.
 
