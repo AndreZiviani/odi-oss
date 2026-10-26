@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.12.0 - 2026-10-26
+
 - Releases: confd v1.9.0: the Phone tab shows what the OLT provisioned for
   voice and the line state a router reports (`OMCI_VOIP_LINE_REPORT`), the
   Config page has every odi-only key (`IGMP_PON_DROP`, `MLD_SNOOPING`, the
@@ -27,8 +29,10 @@ listed here.
   DHCPv6 keep working. omcid now writes the IPv6 rows of the access control
   lists (row parts 0 and 2) to the multicast policy file as `allow6=` and
   `static6=` lines; with the key unset nothing changes: igmpd runs with the
-  same command line and the switch is programmed as before. Not yet run on a
-  stick.
+  same command line and the switch is programmed as before. Run on a stick on
+  a line without IPTV: the rows are written, the drop holds, and router and
+  neighbour discovery keep working through it; not yet run against a real
+  IPv6 multicast stream.
 - igmpd (IGMP snooping, still opt-in and experimental): each joined group is
   now metered with a counter in the switch, so the OLT can see which groups
   stopped arriving and how much multicast the subscriber receives. A group
@@ -37,9 +41,11 @@ listed here.
   as soon as the stream comes back; the subscriber monitor (ME 311) reports the
   bandwidth, and for each active group its VLAN, bandwidth, client address and
   time since the join. A group whose counter has never counted anything is
-  reported as unknown, never lost: that the switch counts on the fibre side is
-  not yet proved on a stick, and `tools/mcast-probe/count-proof.sh` is the
-  measurement that proves it (about 18 minutes, on a line without IPTV). The maximum multicast bandwidth of ME 310 is now
+  reported as unknown, never lost. That the switch counts what enters from the
+  fibre was measured on a stick with `tools/mcast-probe/count-proof.sh` (its
+  counters matched the port's own count, frame for frame), on a line without
+  IPTV, so no joined group's stream has been counted yet. The maximum
+  multicast bandwidth of ME 310 is now
   honoured: a new join past it is counted (ME 311 attribute 4) and, when the
   OLT enforces it, refused; a group already playing is never cut. Lines that
   do not turn snooping on, and profiles without a maximum, see no change.
