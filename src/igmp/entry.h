@@ -34,6 +34,10 @@
 int igmp_mac_entry(struct odi_sw_l2_mcast *m, uint16_t vid, uint32_t group,
 		   uint32_t ports, int vid_valid);
 
+/* The same for a MAC already worked out: an IPv6 group's (mld.h). */
+int igmp_mac_entry_mac(struct odi_sw_l2_mcast *m, uint16_t vid, const uint8_t mac[6],
+		       uint32_t ports, int vid_valid);
+
 /* The Ethernet address an IPv4 multicast group maps to: 01:00:5e and the low
  * 23 bits of the address. Exposed because the daemon prints it and the test
  * checks it. */

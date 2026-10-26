@@ -1,0 +1,24 @@
+# With the reports taken (an upstream tag, G.988 9.3.27 attributes 4 and 5:
+# control 1, TCI 0xa1a4, priority 5 VID 420), the host's MLD goes up as its
+# IGMP does: each report and done with the profile's tag in front, a join
+# the IPv6 list refuses withheld (attribute 15 = 0), a query from the host
+# side never sent. One take for both families: the lease takes IGMP and MLD
+# alike.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+unauthorized_join=0
+us_tag_control=1
+us_tci=41380
+us_rate=0
+allow6=ff3e::8000:0-ff3e::8000:ffff
+end
+0 tick
+1 mld1join 1 0 fe80::2 ff3e::8000:1
+2 mld2join 1 10 fe80::2 ff3e::8000:2
+3 mld1join 1 0 fe80::2 ff3e::1
+4 mld1done 1 0 fe80::2 ff3e::8000:1
+5 mldquery 1 0 fe80::1
+6 v2join 1 0 192.168.1.10 239.1.1.1
+7 state

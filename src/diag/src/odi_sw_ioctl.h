@@ -89,6 +89,9 @@ struct odi_sw_mc_snoop {
 #define ODI_SW_MC_SNOOP_COPY      1u   /* copy the host port's IGMP to the CPU */
 #define ODI_SW_MC_SNOOP_PON_DROP  2u   /* drop unregistered IPv4 multicast from the PON */
 #define ODI_SW_MC_SNOOP_TRAP      4u   /* take it instead (with COPY): igmpd sends it up */
+#define ODI_SW_MC_SNOOP_MLD       8u   /* the host port's MLD too (with COPY), copied or taken alike */
+#define ODI_SW_MC_SNOOP_PON_DROP6 16u  /* drop unregistered IPv6 multicast from the PON (with MLD),
+					* the link-scope and solicited-node groups still flooded */
 
 /* Where a taken report goes up (odi_switch_mcast.h in the kernel tree).
  * FRAME: as the switch would have sent it, the frame's tags in, the

@@ -20,6 +20,10 @@ int igmp_hw_snoop(uint32_t flags);
 int igmp_hw_group_set(uint16_t vid, uint32_t group, uint32_t ports);
 int igmp_hw_group_del(uint16_t vid, uint32_t group);
 
+/* The same row by its MAC: what an IPv6 group (mld.h) is keyed on. */
+int igmp_hw_mac_set(uint16_t vid, const uint8_t mac[6], uint32_t ports);
+int igmp_hw_mac_del(uint16_t vid, const uint8_t mac[6]);
+
 /* The way up for a taken report (uplink.h): the route the kernel gives, and
  * the send. Never called in a dry run, which sends nothing. Each returns 0
  * or the negative errno, and says what failed. */

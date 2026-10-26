@@ -1311,9 +1311,45 @@ With the lease held (`odi_switch_mcast.c`, `ODI_SW_IOC_MC_SNOOP`):
   it, which exempts 224.0.0.0/24: ISP1 reads `0x20` there (the reset value
   is `0x28`), without which the OLT's general queries to 224.0.0.1 would be
   dropped as unregistered, the host would never report, and the stream would
-  lapse. Both are put back as found when the drop is released. IPv6 is not
-  touched. igmpd turns the drop on only after one membership interval, so
-  every group the host already watches has reported again.
+  lapse. Both are put back as found when the drop is released. IPv6 is the
+  MLD drop's (below). igmpd turns the drop on only after one membership
+  interval, so every group the host already watches has reported again.
+- **MLD** (`ODI_SW_MC_SNOOP_MLD`, igmpd `-6`, only with the copy). Three
+  more rules, ACL entries 9 to 11 on template 2, which no rule here names
+  (the discards are on 5, the probes on 4, the replayed rule on 3; entries 9
+  to 15 are kept for snooping): slot 0 the EtherType, slot 1 field code
+  0x15, the next header behind any IPv6 extension headers (its low octet;
+  the traffic class above it is not compared), slot 2 field code 0x40, the
+  window of user field selector 0 (`FIELDSEL_CFG` 0x023144, written 6:
+  origin the start of the IP payload, offset 0), whose high octet is an
+  ICMPv6 message's type. Each rule: ingress port 0 only, EtherType 0x86dd,
+  next header 58, and the type under a mask: 130 and 131 (query, v1 report;
+  `0x8200` under `0xfe00`), 132 (v1 done), 143 (v2 report). Neighbour and
+  router discovery, echo and the error messages match none of them, so they
+  are never copied and never taken. The action is the IGMP rule's (mirror to
+  the CPU, or trap with the take), and a change of mode rewrites the four
+  action entries. The field codes, the selector's origin (behind the
+  hop-by-hop header an MLD message carries) and the trap of MLDv1 and MLDv2
+  reports from the host side are another open implementation's measurements
+  on this chip; nothing here or in the replays points selector 0 anywhere,
+  and the lease saves its word and template 2 and puts both back. The RX
+  hook takes a frame from port 0 that is an MLD message (the four types,
+  behind at most two tags and four extension headers) while MLD is held,
+  and hands it to igmpd like the IGMP copies.
+- **The IPv6 drop** (`ODI_SW_MC_SNOOP_PON_DROP6`, igmpd `-6 -d`, only with
+  MLD). `MC_UNKNOWN_IP6` (0x01c018), set to drop for port 2. Before it,
+  `MC_UNKNOWN_CFG` bits 6:5 are set to 1 (the reserved IPv6 groups flooded
+  whatever the drop says), bit 8 (the link-scope groups ff02::/16 are
+  reserved) and bit 12 (the solicited-node groups ff02::1:ff00:0/104 are);
+  out of reset no IPv6 class is selected, so the drop alone would prune
+  them. ISP1 reads `0x20` there: bits 6:5 already 1, no class. Router
+  advertisements (ff02::1), DHCPv6 (ff02::1:2), MLDv2 (ff02::16) and
+  neighbour discovery ride those groups; another open implementation saw
+  router advertisements and DHCPv6 stop when they followed a pruned flood
+  mask. The register meanings are that implementation's measurements on the
+  PON port; the drop goes off before the reserved classes are put back as
+  found, so no frame of theirs ever meets the drop alone
+  (`test/odi_switch_mcast_test.c` checks the order).
 
 - **The take.** When the OLT's profile asks for what the switch cannot do on
   its own (an upstream IGMP tag, a rate, the discard of joins outside its
@@ -1336,7 +1372,8 @@ With the lease held (`odi_switch_mcast.c`, `ODI_SW_IOC_MC_SNOOP`):
   that one C-tag (VID, and priority unless the row passes the frame's own).
   `ODI_SW_IOC_MC_SEND` sends it: only for the holder of the lease, only
   while it holds the take, only an IPv4 IGMP frame (behind at most two tags)
-  to an IPv4 multicast MAC of 60 bytes or more, and only on a flow an
+  to an IPv4 multicast MAC, or, while MLD is held, an MLD report or done (no
+  query) to a 33:33 MAC, of 60 bytes or more, and only on a flow an
   upstream row queues on (`odi_switch_mcast_send()`). The descriptor is the
   OMCI reply's (`odi_igmp_tx.h`): `PORT_SEL` with the PON port alone and
   the flow as the stream, a directed transmit and not a lookup, and
@@ -1345,12 +1382,12 @@ With the lease held (`odi_switch_mcast.c`, `ODI_SW_IOC_MC_SNOOP`):
   `/proc/odi_omci` counts `igmp_sent_to_pon` and `igmp_send_fail`.
 
 The lease is held by the open file that takes it: closing it, or the daemon
-dying, releases the copy (or the take) and the drop and deletes the rows that
-file wrote (up to 128). After the take goes, the switch forwards the host's
-IGMP by itself again. A second holder is refused with EBUSY. `odi_switch_init_modload()`
+dying, releases the copy (or the take), MLD and the drops and deletes the rows
+that file wrote (up to 256). After the take goes, the switch forwards the host's
+IGMP and MLD by itself again. A second holder is refused with EBUSY. `odi_switch_init_modload()`
 and the isolation masks are not touched, and `test/odi_switch_mcast_test.c`
-checks the rule by what it matches (the UNI port and IGMP, nothing else, the
-PON least of all).
+checks each rule by what it matches (the UNI port and IGMP, or the four MLD
+types, nothing else, the PON least of all).
 
 ### ACL probes
 

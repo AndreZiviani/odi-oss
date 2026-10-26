@@ -5,6 +5,25 @@ listed here.
 
 ## Unreleased
 
+- igmpd: MLD (IPv6) snooping, opt-in with the new key `MLD_SNOOPING=1`
+  (needs `IGMP_SNOOPING=1`; `apply.sh igmp` applies it). The switch copies the
+  host's MLD queries, reports and dones to igmpd as it copies its IGMP, or
+  takes them when the multicast profile asks for an upstream tag, a rate or
+  the discard of joins outside its lists, and no other ICMPv6: neighbour and
+  router discovery are never touched. IPv6 groups get a row each (their 33:33
+  MAC, the host and the PON as members), the profile's IPv6 access control
+  list rows and group limit are enforced, refusals land in a ring shown by
+  `igmpd -s`, and the reports go up tagged as for IGMP. With
+  `IGMP_PON_DROP=1` as well, IPv6 multicast from the PON that no group row
+  names is dropped too, after the learning interval; the link-scope groups
+  (ff02::/16) and the solicited-node groups always flood both ways and are
+  never snooped or refused, so router advertisements, neighbour discovery and
+  DHCPv6 keep working. omcid now writes the IPv6 rows of the access control
+  lists (row parts 0 and 2) to the multicast policy file as `allow6=` and
+  `static6=` lines; with the key unset nothing changes: igmpd runs with the
+  same command line and the switch is programmed as before. Not yet run on a
+  stick.
+
 **Automated dependency bump.**
 - linux 6.18.57 -> 6.18.58
 - iproute2 7.2.0 -> 7.3.0

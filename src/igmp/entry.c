@@ -16,6 +16,15 @@ void igmp_group_mac(uint8_t *mac, uint32_t group)
 int igmp_mac_entry(struct odi_sw_l2_mcast *m, uint16_t vid, uint32_t group,
 		   uint32_t ports, int vid_valid)
 {
+	uint8_t mac[6];
+
+	igmp_group_mac(mac, group);
+	return igmp_mac_entry_mac(m, vid, mac, ports, vid_valid);
+}
+
+int igmp_mac_entry_mac(struct odi_sw_l2_mcast *m, uint16_t vid, const uint8_t mac[6],
+		       uint32_t ports, int vid_valid)
+{
 	uint8_t *b = (uint8_t *)m;
 
 	/* Zeroed whole, the output fields with it: nothing left over from the
@@ -24,7 +33,8 @@ int igmp_mac_entry(struct odi_sw_l2_mcast *m, uint16_t vid, uint32_t group,
 		b[i] = 0;
 	if (ports & ~IGMP_HW_PORTS_MASK)
 		return -1;
-	igmp_group_mac(m->req.mac, group);
+	for (int i = 0; i < 6; i++)
+		m->req.mac[i] = mac[i];
 	if (vid_valid) {
 		m->req.key = (uint16_t)(vid & 0xfff);
 		m->req.ivl = 1;

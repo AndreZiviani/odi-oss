@@ -27,6 +27,10 @@
  *   allow=A-B            a range of the dynamic access control list
  *   static=A-B           a range of the static access control list
  *   allow_overflow=1     the OLT sent more ranges than fit: not enforced
+ *   allow6=A-B           an IPv6 range of the dynamic list (A and B in the
+ *                        RFC 5952 text form), for igmpd -6 (MLD)
+ *   static6=A-B          an IPv6 range of the static list
+ *   allow6_overflow=1    more IPv6 ranges than fit: not enforced
  *
  * The subscriber is the one UNI: the profile is taken from the ME 310 whose
  * instance is a bridge port of the PPTP Ethernet UNI (else of the VEIP, else
@@ -172,19 +176,28 @@ static int acl_v4_prefix(const uint8_t *p)
 	return p[10] == p[11] && (p[10] == 0x00 || p[10] == 0xff);
 }
 
-/* Whether the logical row of `key` has a part `part` that turns the part 0
- * addresses into IPv6 ones. A row without that part is IPv4. */
-static int acl_part_is_v6(const struct mib_row *r, unsigned attr, unsigned key,
-			  unsigned part)
+/* Part `part` of the logical row of `key`, or 0 when the row has none. */
+static const uint8_t *acl_part(const struct mib_row *r, unsigned attr, unsigned key,
+			       unsigned part)
 {
 	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next) {
 		const uint8_t *e = tblpool[i].data;
 
 		if (tblpool[i].attr == attr && ACL_PART(e) == part &&
 		    ACL_KEY(e) == key)
-			return !acl_v4_prefix(e + 2);
+			return e;
 	}
 	return 0;
+}
+
+/* Whether the logical row of `key` has a part `part` that turns the part 0
+ * addresses into IPv6 ones. A row without that part is IPv4. */
+static int acl_part_is_v6(const struct mib_row *r, unsigned attr, unsigned key,
+			  unsigned part)
+{
+	const uint8_t *e = acl_part(r, attr, key, part);
+
+	return e && !acl_v4_prefix(e + 2);
 }
 
 /* One access control list table of the profile, as `key=A-B` lines. A row
@@ -192,9 +205,10 @@ static int acl_part_is_v6(const struct mib_row *r, unsigned attr, unsigned key,
  * start 4, end 4, bandwidth 4, reserved 2. Parts 1 and 2 (IPv6 source and
  * destination prefixes, preview fields) are other rows of the same key and
  * are not ranges: they are never read as one, and a part 0 row they make
- * IPv6 is left out, since igmpd enforces the IPv4 list only. An IPv6-only
- * table therefore lists nothing, and nothing is enforced. Returns how many
- * rows it listed, or -1 when there were more than fit. */
+ * IPv6 is left out here (acl6_lines() lists those with an IPv6 destination
+ * for igmpd -6). An IPv6-only table therefore lists no IPv4 range, and
+ * nothing IPv4 is enforced. Returns how many rows it listed, or -1 when
+ * there were more than fit. */
 static int acl_lines(const struct mib_row *r, unsigned attr, const char *key)
 {
 	int n = 0;
@@ -225,6 +239,107 @@ static int acl_lines(const struct mib_row *r, unsigned attr, const char *key)
 		pip(lo);
 		pc('-');
 		pip(hi);
+		pc('\n');
+		n++;
+	}
+	return n;
+}
+
+/* An IPv6 address in the RFC 5952 text form: lower case, no leading zeros,
+ * the longest run of two or more zero fields as "::". */
+static void pip6(const uint8_t *a)
+{
+	static const char hex[] = "0123456789abcdef";
+	int best = -1, best_len = 1, run = 0;
+
+	for (int k = 0; k < 8; k++) {
+		if (!a[2 * k] && !a[2 * k + 1]) {
+			if (++run > best_len) {
+				best_len = run;
+				best = k - run + 1;
+			}
+		} else {
+			run = 0;
+		}
+	}
+	for (int k = 0; k < 8; k++) {
+		uint32_t v = (uint32_t)a[2 * k] << 8 | a[2 * k + 1];
+		int lead = 1;
+
+		if (k == best) {
+			pc(':');
+			if (k == 0)
+				pc(':');
+			k += best_len - 1;
+			continue;
+		}
+		for (int sh = 12; sh >= 0; sh -= 4) {
+			uint32_t d = (v >> sh) & 0xf;
+
+			if (d || !lead || !sh) {
+				pc(hex[d]);
+				lead = 0;
+			}
+		}
+		if (k < 7)
+			pc(':');
+	}
+}
+
+/* The longest line acl6_lines() writes, "static6=" and two full addresses,
+ * and the overflow line after it: a line is written only while both still
+ * fit, so the file stays under the size igmpd reads. */
+#define ACL6_LINE_MAX  (8 + 39 + 1 + 39 + 1)
+#define ACL6_TAIL      (sizeof "allow6_overflow=1\n")
+
+/* The IPv6 rows of one list, as `key=A-B` lines for igmpd -6: a part 0 row
+ * whose part 2 makes its destinations IPv6 (acl_lines() leaves those out),
+ * the 12 leading bytes from part 2 and the last 4 of the start and end from
+ * part 0, an end of zero the single-address form as for IPv4. A row whose
+ * part 1 makes only its source IPv6 has IPv4 destinations and is neither
+ * here nor there (no source is filtered). Returns how many rows it listed,
+ * or -1 when there were more than fit. */
+static int acl6_lines(const struct mib_row *r, unsigned attr, const char *key)
+{
+	int n = 0;
+
+	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next) {
+		const uint8_t *e = tblpool[i].data, *p2;
+		uint8_t lo[16], hi[16];
+		int k, zlo = 1, zhi = 1, cmp = 0;
+
+		if (tblpool[i].attr != attr || ACL_PART(e) != 0)
+			continue;
+		p2 = acl_part(r, attr, ACL_KEY(e), 2);
+		if (!p2 || acl_v4_prefix(p2 + 2))
+			continue;
+		for (k = 0; k < 12; k++)
+			lo[k] = hi[k] = p2[2 + k];
+		for (k = 0; k < 4; k++) {
+			lo[12 + k] = e[10 + k];
+			hi[12 + k] = e[14 + k];
+			if (hi[12 + k])
+				zhi = 0;
+		}
+		for (k = 0; k < 16; k++)
+			if (lo[k])
+				zlo = 0;
+		if (zlo)
+			continue;
+		if (zhi)
+			for (k = 12; k < 16; k++)
+				hi[k] = lo[k];
+		for (k = 0; k < 16 && !cmp; k++)
+			cmp = lo[k] < hi[k] ? -1 : lo[k] > hi[k] ? 1 : 0;
+		if (cmp > 0)
+			continue;
+		if (n >= MC_MAX_RANGES || plen + ACL6_LINE_MAX + ACL6_TAIL >= sizeof pbuf)
+			return -1;
+		ps(key);
+		pc('=');
+		pip6(lo);
+		pc('-');
+		pip6(hi);
 		pc('\n');
 		n++;
 	}
@@ -349,6 +464,15 @@ static void build(void)
 		ov = 1;
 	if (ov)
 		pkv("allow_overflow", 1);
+	/* The IPv6 rows after every IPv4 line, so a file that had none reads as
+	 * it always did. */
+	ov = 0;
+	if (acl6_lines(prof, 7, "allow6") < 0)
+		ov = 1;
+	if (acl6_lines(prof, 8, "static6") < 0)
+		ov = 1;
+	if (ov)
+		pkv("allow6_overflow", 1);
 }
 
 void mcast_policy_export(void)

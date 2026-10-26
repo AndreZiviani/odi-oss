@@ -68,11 +68,8 @@ int igmp_hw_probe(void)
 	return 0;
 }
 
-static void show(const char *what, uint16_t vid, uint32_t group, uint32_t ports)
+static void show(const char *what, uint16_t vid, const uint8_t mac[6], uint32_t ports)
 {
-	uint8_t mac[6];
-
-	igmp_group_mac(mac, group);
 	out_fmt("  %s vid %d ", what, vid);
 	for (int i = 0; i < 6; i++) {
 		if (i)
@@ -99,11 +96,14 @@ int igmp_hw_snoop(uint32_t flags)
 {
 	int rc;
 
-	out_fmt("snooping lease: %s%s%s\n",
+	out_fmt("snooping lease: %s%s%s%s%s\n",
 		!(flags & ODI_SW_MC_SNOOP_COPY) ? "released" :
 		flags & ODI_SW_MC_SNOOP_TRAP ? "take host IGMP to the CPU, igmpd sends it up" :
 		"copy host IGMP to the CPU",
+		flags & ODI_SW_MC_SNOOP_MLD ? ", and its MLD" : "",
 		flags & ODI_SW_MC_SNOOP_PON_DROP ? ", drop unregistered IPv4 multicast from the PON" : "",
+		flags & ODI_SW_MC_SNOOP_PON_DROP6 ?
+		", drop unregistered IPv6 multicast from the PON (ff02::/16 and solicited-node flooded)" : "",
 		hw_enabled ? "" : "  (not written)");
 	if (!hw_enabled)
 		return 0;
@@ -115,13 +115,29 @@ int igmp_hw_snoop(uint32_t flags)
 
 int igmp_hw_group_set(uint16_t vid, uint32_t group, uint32_t ports)
 {
+	uint8_t mac[6];
+
+	igmp_group_mac(mac, group);
+	return igmp_hw_mac_set(vid, mac, ports);
+}
+
+int igmp_hw_group_del(uint16_t vid, uint32_t group)
+{
+	uint8_t mac[6];
+
+	igmp_group_mac(mac, group);
+	return igmp_hw_mac_del(vid, mac);
+}
+
+int igmp_hw_mac_set(uint16_t vid, const uint8_t mac[6], uint32_t ports)
+{
 	struct odi_sw_l2_mcast m;
 	int rc;
 
-	show("set", vid, group, ports);
+	show("set", vid, mac, ports);
 	if (!hw_enabled)
 		return 0;
-	if (igmp_mac_entry(&m, vid, group, ports, 0) != 0) {
+	if (igmp_mac_entry_mac(&m, vid, mac, ports, 0) != 0) {
 		out_fmt("  not written: ports 0x%x name a port the switch does not have\n",
 			ports);
 		return -22;
@@ -134,16 +150,16 @@ int igmp_hw_group_set(uint16_t vid, uint32_t group, uint32_t ports)
 	return rc;
 }
 
-int igmp_hw_group_del(uint16_t vid, uint32_t group)
+int igmp_hw_mac_del(uint16_t vid, const uint8_t mac[6])
 {
 	struct odi_sw_l2_mcast m;
 	int rc;
 
-	show("del", vid, group, 0);
+	show("del", vid, mac, 0);
 	if (!hw_enabled)
 		return 0;
 	/* The member mask is not part of the key, so zero. */
-	igmp_mac_entry(&m, vid, group, 0, 0);
+	igmp_mac_entry_mac(&m, vid, mac, 0, 0);
 	rc = igmp_sw_mcast_del(&m);
 	if (rc)
 		out_fmt("  l2 multicast del: %d (%s)\n", rc, sw_err(rc));
