@@ -8,7 +8,7 @@ listed here.
 - omcid: new opt-in key `OMCI_VOIP_LINE_REPORT=1` (default off): the router
   behind the stick can report whether its SIP client is registered, and the
   VoIP line status of a line the OLT provisioned then reads that (registered,
-  in session, or a registration failure) instead of "config done". The report
+  in session, or a registration or invite failure) instead of "config done". The report
   comes from odi-ui (`POST /api/voip/status`), carries only the port and a
   state word, and counts only while fresh (300 s); without a fresh report, or
   with the key off, the line status is exactly what it was. `omcicli voip`

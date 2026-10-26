@@ -1185,9 +1185,9 @@ static int voip_line_configured(uint16_t pptp)
  * received. Only a fact that is fresh counts: a report older than
  * VOIP_REPORT_TTL_S, from the future, unreadable or not one of the words
  * below is not a report, and the line reads "config done" as it always did.
- * The words are G.988 9.9.11 voice server status values 0 to 7 (registration
- * outcomes); the invite failures (8 to 12) are not told by a router that only
- * registers. Read at every Get, so a change is live. Returns the status, or
+ * The words are G.988 9.9.11 voice server status values 0 to 12: none,
+ * registered, in session, the registration failures (3 to 7) and the invite
+ * failures (8 to 12). Read at every Get, so a change is live. Returns the status, or
  * -1 for no report. */
 #define VOIP_REPORT_PATH   "/var/run/voip-line-status"
 #define VOIP_REPORT_TTL_S  300
@@ -1202,6 +1202,11 @@ static const struct { const char *word; uint8_t status; } voip_report_words[] = 
 	{ "failed_auth",    5 },
 	{ "failed_timeout", 6 },
 	{ "failed_server",  7 },
+	{ "failed_invite_icmp",    8 },
+	{ "failed_invite_tcp",     9 },
+	{ "failed_invite_auth",   10 },
+	{ "failed_invite_timeout", 11 },
+	{ "failed_invite_server", 12 },
 };
 
 static int voip_line_reported(uint16_t pptp)

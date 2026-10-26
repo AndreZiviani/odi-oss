@@ -391,7 +391,9 @@ check "report: a fresh registered report is ignored while the key is off" \
 printf 'OMCI_POTS_PORTS=1\nOMCI_VOIP_LINE_REPORT=1\n' > /var/config/odi.conf
 check "report: key on, fresh registered: line status 1" "$(status_of 0c02)" "00400001"
 for w in 'in_session 2' 'failed_icmp 3' 'failed_tcp 4' 'failed_auth 5' \
-         'failed_timeout 6' 'failed_server 7' 'none 0'; do
+         'failed_timeout 6' 'failed_server 7' 'failed_invite_icmp 8' \
+         'failed_invite_tcp 9' 'failed_invite_auth 10' 'failed_invite_timeout 11' \
+         'failed_invite_server 12' 'none 0'; do
 	printf 'LINE1=%s %s\n' "${w% *}" "$(up)" > $REP
 	check "report: ${w% *} reads as ${w#* }" "$(status_of 0c03)" "004000$(printf %02x "${w#* }")"
 done

@@ -361,6 +361,11 @@ static const char *status_name(unsigned s)
 	case 5:  return "registration failed (authentication)";
 	case 6:  return "registration failed (timeout)";
 	case 7:  return "registration failed (server fail code)";
+	case 8:  return "invite failed (icmp error)";
+	case 9:  return "invite failed (tcp error)";
+	case 10: return "invite failed (authentication)";
+	case 11: return "invite failed (timeout)";
+	case 12: return "invite failed (server fail code)";
 	case 13: return "port not configured";
 	case 14: return "config done";
 	default: return 0;
