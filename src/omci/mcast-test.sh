@@ -378,6 +378,7 @@ check "no maximum and no imputed bandwidth: no bandwidth line" \
       "$(policy | grep -c '^max_bandwidth\|^bw')" "0"
 m=$(grep -c 'multicast policy written' "$log")
 send "$log" 0230 48 0136 0001 "1800000003e801"
+send "$log" 022f 48 0135 0001 "0200c000"
 send "$log" 0231 48 0135 0001 "0200$(pad 40060fff000b00000000e6010100e60101ff000002580000 24)"
 send "$log" 0232 48 0135 0001 "0200$(pad 40070fff000b00000000e7010100e70101ff000000000000 24)"
 written "$log" $((m + 1))
