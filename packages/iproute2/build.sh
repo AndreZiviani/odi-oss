@@ -22,9 +22,9 @@ ROOT=$(cd ../.. && pwd)
 #
 # gcc 16.2.0 compiles all of it. This is the ceiling the toolchain work was
 # supposed to lift, and it lifted.
-VERSION=7.2.0
+VERSION=7.3.0
 URL=https://mirrors.edge.kernel.org/pub/linux/utils/net/iproute2/iproute2-$VERSION.tar.xz
-SHA256=4c2fa124c2cf0afd7ca34d1eeacba6ba048a56f6374e2aab93dafbdbd4eea9c0
+SHA256=5c1789d290bba048a6135ed1ab81b0402dd0fb528d1f1421765c42b1fc3d6289
 
 # Built against our sysroot, in the uclibc toolchain image (toolchain/images.env);
 # oss-env.sh pulls it on first use and says what to do when it cannot.
