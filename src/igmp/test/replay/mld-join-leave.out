@@ -1,0 +1,48 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, timed leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+policy6: 0 allow + 0 static IPv6 ranges
+snooping lease: copy host IGMP to the CPU, and its MLD  (not written)
+> 1 mld1join 1 0 fe80::2 ff3e::8000:1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:80:00:00:01  MLD v1 report  group ff3e::8000:1  src fe80::2
+  set vid 0 33:33:80:00:00:01 ports 0x5  (not written)
+> 2 mld2join 1 0 fe80::2 ff15::1234
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:16  MLD v2 report (1 records)  src fe80::2
+  set vid 0 33:33:00:00:12:34 ports 0x5  (not written)
+> 3 mld1join 1 0 fe80::2 ff3e::8000:1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:80:00:00:01  MLD v1 report  group ff3e::8000:1  src fe80::2
+> 4 state
+joins=0
+denied=0
+groups=0
+# /var/run/odi-mcast6.state
+joins=3
+denied=0
+groups=2
+group=ff3e::8000:1
+group=ff15::1234
+> 10 mld1done 1 0 fe80::2 ff3e::8000:1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:02  MLD done  group ff3e::8000:1  src fe80::2
+> 12 tick
+  del vid 0 33:33:80:00:00:01 ports 0x0  (not written)
+> 13 mld2leave 1 0 fe80::2 ff15::1234
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:16  MLD v2 report (1 records)  src fe80::2
+> 15 tick
+  del vid 0 33:33:00:00:12:34 ports 0x0  (not written)
+> 16 state
+joins=0
+denied=0
+groups=0
+# /var/run/odi-mcast6.state
+joins=3
+denied=0
+groups=0
+> end
+joins=0
+denied=0
+groups=0
+# /var/run/odi-mcast6.state
+joins=3
+denied=0
+groups=0
+status 0

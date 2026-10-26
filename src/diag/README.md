@@ -6,7 +6,7 @@ and the switch through the interfaces our kernel provides, and nothing else:
 
 | interface | driver | used for |
 |---|---|---|
-| `/dev/odi_sw` ioctls | `odi_reg.c`, `odi_ddm.c`, `odi_switch_l2.c`, `odi_switch_acl_probe.c` | register get/set, MIB counters, DDM, the L2 table, the ACL probes |
+| `/dev/odi_sw` ioctls | `odi_reg.c`, `odi_ddm.c`, `odi_switch_l2.c`, `odi_switch_acl_probe.c`, `odi_switch_mc_count.c` | register get/set, MIB counters, DDM, the L2 table, the ACL probes, the multicast group counters |
 | `/proc/odi_gpon/status` | `odi_gpon.c` | ONU state, the LOS sample |
 | `/proc/odi_gpon/flows` | `odi_gpon.c` | the per-flow GEM counters |
 | odi_omci netlink, `OMCI_FLOWS_CMD` | `odi_omci.c`, `odi_switch_cmd.c` | GEM flows |
@@ -60,6 +60,17 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
     acl-probe show <slot>             one probe: its rule, what it counted, what reached the CPU
     acl-probe delete <slot>           remove one probe
     acl-probe delete all              remove every probe
+    mc-count frames <slot> pon mac <high> <low> <length> count the frames to a MAC prefix entering the PON (high: octets 0-1, low: 2-5)
+    mc-count frames <slot> uni mac <high> <low> <length> the same, entering the UNI
+    mc-count bytes <slot> pon mac <high> <low> <length> the same, counting bytes, entering the PON
+    mc-count bytes <slot> uni mac <high> <low> <length> the same, counting bytes, entering the UNI
+    mc-count frames <slot> pon ipv4 <address> <length> count the IPv4 frames to an address prefix entering the PON
+    mc-count frames <slot> uni ipv4 <address> <length> the same, entering the UNI
+    mc-count bytes <slot> pon ipv4 <address> <length> the same, counting bytes, entering the PON
+    mc-count bytes <slot> uni ipv4 <address> <length> the same, counting bytes, entering the UNI
+    mc-count show <slot>              one group counter: its rule and what it counted
+    mc-count delete <slot>            remove one group counter
+    mc-count delete all               remove every group counter
     help                              list the commands
     exit                              leave the shell
 
@@ -129,6 +140,20 @@ runs keep the stock syntax and output (see [the contract](#the-exporter-contract
   another reason (and `other_reason` the last one). `docs/SWITCH.md`,
   "Multicast", has what they are for and `tools/mcast-probe/` the script
   that runs them.
+
+- `mc-count` installs one of sixteen multicast group counters (ACL entries
+  48 to 63), the rules igmpd meters its groups with: each counts, in frames
+  or in bytes (the FCS included), the frames entering the PON or the UNI to
+  a destination MAC prefix (`mac <high> <low> <length>`: the first two
+  octets, the last four, and the prefix length, so `0x3333 0x00000001 48`
+  is 33:33:00:00:00:01 and `0x3333 0 16` every IPv6 multicast MAC) or to an
+  IPv4 address prefix (`ipv4 <address> <length>`). A counter changes no
+  frame's forwarding. Slots 2k and 2k+1 share a unit, so a pair is all
+  frames or all bytes. Held like the probes, by the diag that installed the
+  first, and the two exclude each other (while igmpd meters its groups
+  neither goes in). `counted` is what the rule counted since it went in,
+  64 bits, folded by the kernel on every read. `tools/mcast-probe/count-proof.sh`
+  is the script that runs them on a stick.
 
 Everything else in `/proc/odi_gpon/`, `/proc/odi_omci` and
 `/proc/odi_init` is plain text; read those with `cat`.

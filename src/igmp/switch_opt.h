@@ -43,4 +43,11 @@ int igmp_sw_snoop(uint32_t flags);
 int igmp_sw_route(struct odi_sw_mc_route *r);
 int igmp_sw_send(struct odi_sw_mc_send *m);
 
+/* The multicast group counters (odi_sw_ioctl.h, meter.h): a request
+ * answered in place, on the same descriptor as the lease, so the daemon
+ * dying takes the counters out with the rest. -16 while another process
+ * holds the counters or an ACL probe is in, -22 for a request the kernel
+ * refuses, -25 for a kernel without them. */
+int igmp_sw_count(struct odi_sw_mc_count *c);
+
 #endif

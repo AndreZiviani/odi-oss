@@ -80,6 +80,21 @@ static int range(const char *s, uint32_t n, struct igmp_range *r)
 	return r->lo <= r->hi;
 }
 
+/* "A-B N": a range, one space, its bandwidth. */
+static int bw_range(const char *s, uint32_t n, struct igmp_bw_range *b)
+{
+	struct igmp_range r;
+	uint32_t i = 0;
+
+	while (i < n && s[i] != ' ')
+		i++;
+	if (i == n || !range(s, i, &r) || !num(s + i + 1, n - i - 1, &b->bytes))
+		return 0;
+	b->lo = r.lo;
+	b->hi = r.hi;
+	return 1;
+}
+
 /* One `key=value` token of a row's tail (s[0..n)), into r. A token this
  * parser does not know, or cannot read, leaves the field as it was: the
  * wildcard, so a newer omcid never makes an older igmpd stricter. */
@@ -208,6 +223,7 @@ int igmp_policy_parse(const char *text, uint32_t len, struct igmp_policy *p)
 		const char *l = text + at;
 		uint32_t n = 0, eq, v;
 		struct igmp_range r;
+		struct igmp_bw_range b;
 		struct igmp_grant g;
 
 		while (at + n < len && l[n] != '\n')
@@ -258,6 +274,13 @@ int igmp_policy_parse(const char *text, uint32_t len, struct igmp_policy *p)
 					p->allow[p->nallow++] = r;
 				else
 					p->overflow = 1;
+			} else if (is(l, eq, "max_bandwidth") && num(val, vn, &v)) {
+				p->max_bandwidth = v;
+			} else if (is(l, eq, "bw_enforce") && num(val, vn, &v)) {
+				p->bw_enforce = v != 0;
+			} else if (is(l, eq, "bw") && bw_range(val, vn, &b)) {
+				if (p->nbw < IGMP_POLICY_MAX_RANGES)
+					p->bw[p->nbw++] = b;
 			} else if (is(l, eq, "grant") && grant(val, vn, &g)) {
 				/* Only ever widens what is let in, so a table
 				 * past the cap loses its last rows quietly. */
@@ -297,6 +320,14 @@ int igmp_policy_allows(const struct igmp_policy *p, uint32_t group)
 		return 1;
 	return in_ranges(p->allow, p->nallow, group) ||
 	       in_ranges(p->stat, p->nstatic, group);
+}
+
+uint32_t igmp_policy_imputed(const struct igmp_policy *p, uint32_t group)
+{
+	for (uint32_t i = 0; i < p->nbw; i++)
+		if (group >= p->bw[i].lo && group <= p->bw[i].hi)
+			return p->bw[i].bytes;
+	return 0;
 }
 
 void igmp_policy_ani(const struct igmp_policy *p, struct igmp_join *j)

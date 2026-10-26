@@ -207,6 +207,28 @@ static void refuse(struct igmp_db *db, uint8_t reason, uint16_t vid,
 	db->refusals++;
 }
 
+/* Whether joining `group` takes the imputed bandwidth of the groups held
+ * past the profile's maximum. Each group counts once, whatever its VLANs;
+ * static groups are not joins and count nothing. A group the lists impute
+ * nothing to never does (G.988: 0 is outside the limit). */
+static int bw_over(const struct igmp_db *db, uint32_t group)
+{
+	uint32_t want = igmp_policy_imputed(&db->pol, group), sum = 0;
+
+	if (!db->pol.max_bandwidth || !want)
+		return 0;
+	for (int i = 0; i < IGMP_MAX_GROUPS; i++) {
+		const struct igmp_entry *e = &db->g[i];
+		uint32_t b;
+
+		if (!e->in_use || e->fixed || group_before(db, i, e->group, 1))
+			continue;
+		b = igmp_policy_imputed(&db->pol, e->group);
+		sum = sum + b < sum ? 0xffffffffu : sum + b;
+	}
+	return sum + want < sum || sum + want > db->pol.max_bandwidth;
+}
+
 /* The sources an IGMPv3 record names (RFC 3376 4.2.12), for the access
  * control lists' source match. A v1 or v2 report names none. */
 struct join_src {
@@ -407,6 +429,19 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 		db->denied++;
 		refuse(db, IGMP_REFUSE_LIMIT, vid, group, now);
 		return n;
+	}
+	/* The bandwidth is on new groups too, by what the lists impute to
+	 * each (G.988 9.3.28 attributes 4 and 5): a join that would take the
+	 * total past the maximum is counted, and refused only when the profile
+	 * enforces it. A group already held is never refused, so no stream
+	 * that plays is cut, not even when the maximum is lowered under it. */
+	if (!e && !group_known(db, group) && bw_over(db, group)) {
+		db->bw_exceeded++;
+		if (db->pol.bw_enforce) {
+			db->denied++;
+			refuse(db, IGMP_REFUSE_BW, vid, group, now);
+			return n;
+		}
 	}
 	if (!e)
 		e = find_or_add(db, vid, group);

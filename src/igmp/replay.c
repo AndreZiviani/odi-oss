@@ -27,12 +27,26 @@
  *   T query    PORT VID SRC           a general query (224.0.0.1)
  *                                     PORT is the ONE-BASED port, VID 0 is untagged,
  *                                     SRC and GROUP are dotted quads
+ *   T mld1join  PORT VID SRC6 GROUP6  an MLDv1 report, to the group
+ *   T mld1done  PORT VID SRC6 GROUP6  an MLDv1 done, to ff02::2
+ *   T mld2join  PORT VID SRC6 GROUP6  an MLDv2 report, one IS_EXCLUDE record, no sources
+ *   T mld2leave PORT VID SRC6 GROUP6  an MLDv2 report, one TO_INCLUDE record, no sources
+ *   T mldquery  PORT VID SRC6         an MLDv1 general query, to ff02::1
+ *                                     SRC6 and GROUP6 are IPv6 addresses; each
+ *                                     message behind a hop-by-hop header with the
+ *                                     router alert. They reach the IPv6 table only
+ *                                     with -6, as on a stick
  *   T policy                 the lines up to a line `end` become the policy file
  *   T policy-file PATH       the policy file is this file's content now
  *   T nopolicy               the policy file is gone
  *   T state                  print the state file igmpd would write
  *   T status                 print what `igmpd -s` would, from that file and
  *                            the policy in force
+ *   T ctr GROUP BYTES        the counter of GROUP's MAC has counted BYTES (the
+ *                            low 32 bits, wrapping) since the transcript began;
+ *                            the daemon reads it on its next second, as it
+ *                            reads the switch's (meter.h)
+ *   T meter                  print the meter file igmpd would write
  *
  * T is whole seconds on the synthetic clock, never backwards. Before every
  * event except the three policy ones the daemon runs its once-a-second step if
@@ -51,6 +65,7 @@
 #include "group.h"
 #include "policy.h"
 #include "entry.h"
+#include "mld.h"
 #include "replay.h"
 
 #define MAX_TRANSCRIPT  (96 * 1024)
@@ -59,6 +74,19 @@
 static char text[MAX_TRANSCRIPT];
 static char pol_buf[IGMP_POLICY_MAX_BYTES];
 static struct igmp_db db;
+
+/* The counters a transcript set, by group MAC. */
+#define MAX_CTRS 32
+static struct { uint32_t mac, bytes; } ctrs[MAX_CTRS];
+static uint32_t nctrs;
+
+uint32_t igmp_replay_counter(uint32_t group)
+{
+	for (uint32_t i = 0; i < nctrs; i++)
+		if (ctrs[i].mac == (group & 0x7fffffu))
+			return ctrs[i].bytes;
+	return 0;
+}
 
 static uint32_t read_all(long fd, char *buf, uint32_t max)
 {
@@ -212,6 +240,100 @@ static uint32_t frame_for(const char *verb, uint8_t port, uint16_t vid,
 		return build(b, port, vid, sip, 0xe0000001u, m, 8);
 	}
 	return 0;
+}
+
+/* The same for MLD: prefix, Ethernet to the destination's 33:33 MAC, an
+ * IPv6 header, a hop-by-hop header with the router alert, the ICMPv6
+ * message `msg` with its checksum field zero. */
+static uint32_t build6(uint8_t *b, uint8_t port, uint16_t vid, const uint8_t sip[16],
+		       const uint8_t dip[16], const uint8_t *msg, uint32_t mlen)
+{
+	static const uint8_t hbh[8] = { 58, 0, 5, 2, 0, 0, 1, 0 };
+	uint8_t *eth = b + IGMP_RX_PREFIX, *ip;
+	uint32_t at = 12;
+
+	b[0] = port;
+	b[1] = (uint8_t)((vid >> 8) & 0x0f);
+	if (igmpd_lease() & ODI_SW_MC_SNOOP_TRAP)
+		b[1] |= IGMP_RX_TAKEN;
+	b[2] = (uint8_t)vid;
+	mld_group_mac(eth, dip);
+	eth[6] = 0x02;
+	eth[7] = eth[8] = eth[9] = eth[10] = 0;
+	eth[11] = port;
+	if (vid) {
+		put16(eth + at, ETH_P_8021Q);
+		put16(eth + at + 2, vid);
+		at += 4;
+	}
+	put16(eth + at, ETH_P_IPV6);
+	ip = eth + at + 2;
+	ip[0] = 0x60;
+	ip[1] = ip[2] = ip[3] = 0;
+	put16(ip + 4, (uint16_t)(8 + mlen));
+	ip[6] = 0;              /* hop-by-hop */
+	ip[7] = 1;
+	for (int i = 0; i < 16; i++) {
+		ip[8 + i] = sip[i];
+		ip[24 + i] = dip[i];
+	}
+	for (int i = 0; i < 8; i++)
+		ip[40 + i] = hbh[i];
+	for (uint32_t i = 0; i < mlen; i++)
+		ip[48 + i] = msg[i];
+	put16(ip + 48 + 2, mld_cksum(sip, dip, ip + 48, mlen));
+	return IGMP_RX_PREFIX + (uint32_t)(ip + 48 + mlen - eth);
+}
+
+/* Returns the payload length, or 0 for a verb that is not an MLD frame. */
+static uint32_t frame6_for(const char *verb, uint8_t port, uint16_t vid,
+			   const uint8_t sip[16], const uint8_t group[16], uint8_t *b)
+{
+	uint8_t m[28], dst[16];
+	uint32_t mlen = 24;
+
+	for (int i = 0; i < 28; i++)
+		m[i] = 0;
+	for (int i = 0; i < 16; i++)
+		dst[i] = 0;
+	dst[0] = 0xff;
+	dst[1] = 0x02;
+	if (str_eq(verb, "mld1join") || str_eq(verb, "mld1done")) {
+		int done = verb[4] == 'd';
+
+		m[0] = done ? MLD_V1_DONE : MLD_V1_REPORT;
+		for (int i = 0; i < 16; i++)
+			m[8 + i] = group[i];
+		if (done)
+			dst[15] = 2;
+		else
+			for (int i = 0; i < 16; i++)
+				dst[i] = group[i];
+	} else if (str_eq(verb, "mld2join") || str_eq(verb, "mld2leave")) {
+		m[0] = MLD_V2_REPORT;
+		put16(m + 6, 1);
+		m[8] = verb[4] == 'l' ? 3 : 2;
+		for (int i = 0; i < 16; i++)
+			m[12 + i] = group[i];
+		dst[15] = 0x16;
+		mlen = 28;
+	} else if (str_eq(verb, "mldquery")) {
+		m[0] = MLD_QUERY;
+		put16(m + 4, 10000);
+		dst[15] = 1;
+	} else {
+		return 0;
+	}
+	return build6(b, port, vid, sip, dst, m, mlen);
+}
+
+static int ip6_word(const char *w, uint8_t out[16])
+{
+	uint32_t n = 0;
+
+	while (w[n])
+		n++;
+	return mld_parse_ipv6(w, n, out);
 }
 
 /* A v3 report with one record that names sources, `list` being dotted quads
@@ -392,6 +514,22 @@ int igmp_replay(const char *path)
 			igmpd_state_dump(&db);
 		} else if (str_eq(w[1], "status") && nw == 2) {
 			igmpd_status_dump(&db);
+		} else if (str_eq(w[1], "meter") && nw == 2) {
+			igmpd_meter_dump(&db);
+		} else if (str_eq(w[1], "ctr")) {
+			uint32_t group, bytes, i;
+
+			if (nw != 4 || !igmp_parse_ipv4(w[2], &group) ||
+			    !igmp_parse_num(w[3], &bytes))
+				return fail(line, "expected: T ctr GROUP BYTES");
+			for (i = 0; i < nctrs && ctrs[i].mac != (group & 0x7fffffu); i++)
+				;
+			if (i == nctrs) {
+				if (nctrs == MAX_CTRS)
+					return fail(line, "too many counters");
+				ctrs[nctrs++].mac = group & 0x7fffffu;
+			}
+			ctrs[i].bytes = bytes;
 		} else if (str_eq(w[1], "rx") && nw == 3) {
 			int n = unhex(w[2], pay, (int)sizeof pay);
 
@@ -431,6 +569,22 @@ int igmp_replay(const char *path)
 				return fail(line, "expected: T VERB PORT VID SRC GROUP");
 			igmpd_frame(&db, pay, frame_for(w[1], (uint8_t)port,
 				    (uint16_t)vid, sip, group, pay), now);
+		} else if ((nw == 5 || nw == 6) && w[1][0] == 'm' && w[1][1] == 'l' &&
+			   w[1][2] == 'd') {
+			uint32_t port, vid, fl;
+			uint8_t sip6[16], g6[16];
+
+			for (int i = 0; i < 16; i++)
+				g6[i] = 0;
+			if (!igmp_parse_num(w[2], &port) || port == 0 || port > 255 ||
+			    !igmp_parse_num(w[3], &vid) || vid > 4095 || !ip6_word(w[4], sip6) ||
+			    (nw == 6 && !ip6_word(w[5], g6)) ||
+			    (nw == 5) != str_eq(w[1], "mldquery"))
+				return fail(line, "expected: T MLDVERB PORT VID SRC6 [GROUP6]");
+			fl = frame6_for(w[1], (uint8_t)port, (uint16_t)vid, sip6, g6, pay);
+			if (!fl)
+				return fail(line, "unknown event");
+			igmpd_frame(&db, pay, fl, now);
 		} else {
 			return fail(line, "unknown event");
 		}

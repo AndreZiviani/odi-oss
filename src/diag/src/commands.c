@@ -7,6 +7,7 @@
 #include "omci_flows.h"
 #include "l2.h"
 #include "acl_probe.h"
+#include "mc_count.h"
 
 /* Width of the syntax column in the help listing: the longest syntax line
  * plus two spaces. */
@@ -438,6 +439,14 @@ int cmd_run(const struct parsed *p)
 		return cmd_probe_delete(p->u[0]);
 	case CMD_PROBE_DELETE_ALL:
 		return cmd_probe_delete(ODI_SW_PROBE_ALL);
+	case CMD_MCC_SET:
+		return cmd_mcc_set(p->cmd->sel, p->u);
+	case CMD_MCC_SHOW:
+		return cmd_mcc_show(p->u[0]);
+	case CMD_MCC_DELETE:
+		return cmd_mcc_delete(p->u[0]);
+	case CMD_MCC_DELETE_ALL:
+		return cmd_mcc_delete(ODI_SW_MCC_ALL);
 	}
 	return 1;
 }

@@ -40,6 +40,16 @@
  *                        a row of the allowed preview groups table of ME 310
  *                        (attribute 7): group G is fully authorized
  *   allow_overflow=1     the OLT sent more ranges than fit: not enforced
+ *   bw=A-B N             the imputed bandwidth of a dynamic range, bytes a
+ *                        second; a line only for a row that imputes one
+ *   max_bandwidth=N      ME 310 attribute 4, bytes a second; a line only
+ *                        when the OLT set one (0 is no limit)
+ *   bw_enforce=1         ME 310 attribute 5: a join past it is refused; a
+ *                        line only when set
+ *   allow6=A-B           an IPv6 range of the dynamic list (A and B in the
+ *                        RFC 5952 text form), for igmpd -6 (MLD)
+ *   static6=A-B          an IPv6 range of the static list
+ *   allow6_overflow=1    more IPv6 ranges than fit: not enforced
  *
  * The subscriber is the one UNI: the profile is taken from the ME 310 whose
  * instance is a bridge port of the PPTP Ethernet UNI (else of the VEIP, else
@@ -51,7 +61,7 @@
 #define MCAST_POLICY_TMP_PATH "/var/run/odi-mcast.conf.tmp"
 
 #define MCAST_STATE_PATH      "/var/run/odi-mcast.state"
-#define CLS_MCAST_OPER_PROFILE 309
+#define MCAST_METER_PATH      "/var/run/odi-mcast.meter"
 #define CLS_MCAST_SUBSCRIBER   310
 #define CLS_BRIDGE_PORT        47
 #define MC_MAX_RANGES          32
@@ -62,6 +72,10 @@
 /* Starts set: a fresh or resumed omcid writes the file once, so it is never
  * older than the MIB it was derived from. */
 int mcast_dirty = 1;
+
+/* What the file last said: the OLT asks for snooping. Only then can igmpd
+ * be metering anything, so only then is its meter file read. */
+static int mcast_snooping;
 
 /* The classes the file is derived from. */
 int mcast_policy_class(uint16_t cls)
@@ -187,28 +201,58 @@ static int acl_v4_prefix(const uint8_t *p)
 	return p[10] == p[11] && (p[10] == 0x00 || p[10] == 0xff);
 }
 
-/* Whether the logical row of `key` has a part `part` that turns the part 0
- * addresses into IPv6 ones. A row without that part is IPv4. */
-static int acl_part_is_v6(const struct mib_row *r, unsigned attr, unsigned key,
-			  unsigned part)
+/* Part `part` of the logical row of `key`, or 0 when the row has none. */
+static const uint8_t *acl_part(const struct mib_row *r, unsigned attr, unsigned key,
+			       unsigned part)
 {
 	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next) {
 		const uint8_t *e = tblpool[i].data;
 
 		if (tblpool[i].attr == attr && ACL_PART(e) == part &&
 		    ACL_KEY(e) == key)
-			return !acl_v4_prefix(e + 2);
+			return e;
 	}
 	return 0;
 }
 
-/* One access control list table of the profile, as `key=A-B` lines. A row
- * is the 24 bytes of G.988 part 0: control 2, GEM port 2, VLAN 2, source 4,
- * start 4, end 4, bandwidth 4, reserved 2. Parts 1 and 2 (IPv6 source and
- * destination prefixes, preview fields) are other rows of the same key and
- * are not ranges: they are never read as one, and a part 0 row they make
- * IPv6 is left out, since igmpd enforces the IPv4 list only. An IPv6-only
- * table therefore lists nothing, and nothing is enforced. Returns how many
+/* Whether the logical row of `key` has a part `part` that turns the part 0
+ * addresses into IPv6 ones. A row without that part is IPv4. */
+static int acl_part_is_v6(const struct mib_row *r, unsigned attr, unsigned key,
+			  unsigned part)
+{
+	const uint8_t *e = acl_part(r, attr, key, part);
+
+	return e && !acl_v4_prefix(e + 2);
+}
+
+/* The IPv4 range of one part 0 row of an access control list, into *lo and
+ * *hi: 0 for a row that is not one. A row is the 24 bytes of G.988 part 0:
+ * control 2, GEM port 2, VLAN 2, source 4, start 4, end 4, bandwidth 4,
+ * reserved 2. Parts 1 and 2 (IPv6 source and destination prefixes, preview
+ * fields) are other rows of the same key and are not ranges: they are never
+ * read as one, and a part 0 row they make IPv6 is left out here
+ * (acl6_lines() lists those with an IPv6 destination for igmpd -6). */
+static int acl_row_v4(const struct mib_row *r, unsigned attr, const uint8_t *e,
+		      uint32_t *lo, uint32_t *hi)
+{
+	if (ACL_PART(e) != 0)
+		return 0;
+	if (acl_part_is_v6(r, attr, ACL_KEY(e), 1) ||
+	    acl_part_is_v6(r, attr, ACL_KEY(e), 2))
+		return 0;
+	*lo = be32(e + 10);
+	*hi = be32(e + 14);
+	/* An end below the start is a row nobody can match; an end of
+	 * zero is the single-address form some OLTs send. */
+	if (!*lo)
+		return 0;
+	if (!*hi)
+		*hi = *lo;
+	return *hi >= *lo;
+}
+
+/* One access control list table of the profile, as `key=A-B` lines. An
+ * IPv6-only table lists no IPv4 range, and nothing IPv4 is enforced. Returns how many
  * rows it listed, or -1 when there were more than fit. */
 /* The preview fields (row part 1, bytes 14 to 21) of the logical row of
  * `key`, or 0 when it has no part 1. */
@@ -244,20 +288,7 @@ static int acl_lines(const struct mib_row *r, unsigned attr, const char *key)
 		const uint8_t *e = tblpool[i].data;
 		uint32_t lo, hi;
 
-		if (tblpool[i].attr != attr || ACL_PART(e) != 0)
-			continue;
-		if (acl_part_is_v6(r, attr, ACL_KEY(e), 1) ||
-		    acl_part_is_v6(r, attr, ACL_KEY(e), 2))
-			continue;
-		lo = be32(e + 10);
-		hi = be32(e + 14);
-		/* An end below the start is a row nobody can match; an end of
-		 * zero is the single-address form some OLTs send. */
-		if (!lo)
-			continue;
-		if (!hi)
-			hi = lo;
-		if (hi < lo)
+		if (tblpool[i].attr != attr || !acl_row_v4(r, attr, e, &lo, &hi))
 			continue;
 		if (n >= MC_MAX_RANGES)
 			return -1;
@@ -336,6 +367,137 @@ static int grant_lines(const struct mib_row *sub)
 		ptok("u", be16(p0 + 20) & 0x0fff);
 		if (be16(e + 18))
 			ptok("d", be16(e + 18));
+		pc('\n');
+		n++;
+	}
+	return n;
+}
+
+/* The imputed bandwidth of the dynamic list (G.988 9.3.27 attribute 7,
+ * bytes 18 to 21 of the row, bytes a second), as `bw=A-B N` lines for the
+ * rows that impute one: what igmpd weighs a join against ME 310's maximum
+ * by. A row of 0 imputes nothing, which G.988 makes a group the maximum
+ * does not apply to, so it needs no line. As many as acl_lines() lists. */
+static void bw_lines(const struct mib_row *r)
+{
+	int n = 0;
+
+	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next) {
+		const uint8_t *e = tblpool[i].data;
+		uint32_t lo, hi, bw;
+
+		if (tblpool[i].attr != 7 || !acl_row_v4(r, 7, e, &lo, &hi))
+			continue;
+		if (n++ >= MC_MAX_RANGES)
+			return;
+		bw = be32(e + 18);
+		if (!bw)
+			continue;
+		ps("bw=");
+		pip(lo);
+		pc('-');
+		pip(hi);
+		pc(' ');
+		pd(bw);
+		pc('\n');
+	}
+}
+
+/* An IPv6 address in the RFC 5952 text form: lower case, no leading zeros,
+ * the longest run of two or more zero fields as "::". */
+static void pip6(const uint8_t *a)
+{
+	static const char hex[] = "0123456789abcdef";
+	int best = -1, best_len = 1, run = 0;
+
+	for (int k = 0; k < 8; k++) {
+		if (!a[2 * k] && !a[2 * k + 1]) {
+			if (++run > best_len) {
+				best_len = run;
+				best = k - run + 1;
+			}
+		} else {
+			run = 0;
+		}
+	}
+	for (int k = 0; k < 8; k++) {
+		uint32_t v = (uint32_t)a[2 * k] << 8 | a[2 * k + 1];
+		int lead = 1;
+
+		if (k == best) {
+			pc(':');
+			if (k == 0)
+				pc(':');
+			k += best_len - 1;
+			continue;
+		}
+		for (int sh = 12; sh >= 0; sh -= 4) {
+			uint32_t d = (v >> sh) & 0xf;
+
+			if (d || !lead || !sh) {
+				pc(hex[d]);
+				lead = 0;
+			}
+		}
+		if (k < 7)
+			pc(':');
+	}
+}
+
+/* The longest line acl6_lines() writes, "static6=" and two full addresses,
+ * and the overflow line after it: a line is written only while both still
+ * fit, so the file stays under the size igmpd reads. */
+#define ACL6_LINE_MAX  (8 + 39 + 1 + 39 + 1)
+#define ACL6_TAIL      (sizeof "allow6_overflow=1\n")
+
+/* The IPv6 rows of one list, as `key=A-B` lines for igmpd -6: a part 0 row
+ * whose part 2 makes its destinations IPv6 (acl_lines() leaves those out),
+ * the 12 leading bytes from part 2 and the last 4 of the start and end from
+ * part 0, an end of zero the single-address form as for IPv4. A row whose
+ * part 1 makes only its source IPv6 has IPv4 destinations and is neither
+ * here nor there (no source is filtered). Returns how many rows it listed,
+ * or -1 when there were more than fit. */
+static int acl6_lines(const struct mib_row *r, unsigned attr, const char *key)
+{
+	int n = 0;
+
+	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next) {
+		const uint8_t *e = tblpool[i].data, *p2;
+		uint8_t lo[16], hi[16];
+		int k, zlo = 1, zhi = 1, cmp = 0;
+
+		if (tblpool[i].attr != attr || ACL_PART(e) != 0)
+			continue;
+		p2 = acl_part(r, attr, ACL_KEY(e), 2);
+		if (!p2 || acl_v4_prefix(p2 + 2))
+			continue;
+		for (k = 0; k < 12; k++)
+			lo[k] = hi[k] = p2[2 + k];
+		for (k = 0; k < 4; k++) {
+			lo[12 + k] = e[10 + k];
+			hi[12 + k] = e[14 + k];
+			if (hi[12 + k])
+				zhi = 0;
+		}
+		for (k = 0; k < 16; k++)
+			if (lo[k])
+				zlo = 0;
+		if (zlo)
+			continue;
+		if (zhi)
+			for (k = 12; k < 16; k++)
+				hi[k] = lo[k];
+		for (k = 0; k < 16 && !cmp; k++)
+			cmp = lo[k] < hi[k] ? -1 : lo[k] > hi[k] ? 1 : 0;
+		if (cmp > 0)
+			continue;
+		if (n >= MC_MAX_RANGES || plen + ACL6_LINE_MAX + ACL6_TAIL >= sizeof pbuf)
+			return -1;
+		ps(key);
+		pc('=');
+		pip6(lo);
+		pc('-');
+		pip6(hi);
 		pc('\n');
 		n++;
 	}
@@ -438,6 +600,7 @@ static void build(void)
 	 * itself, which this one does not: the multicast then stays as
 	 * transparent as with no profile at all. */
 	snoop = prof && fun == 0 && gem_carries_groups();
+	mcast_snooping = snoop;
 
 	ps("# written by omcid from the OLT provisioning, read by igmpd\n");
 	pkv("snooping", (uint32_t)snoop);
@@ -462,13 +625,29 @@ static void build(void)
 	pkv("us_tci", row_u32(prof, c309, 4));
 	pkv("us_rate", row_u32(prof, c309, 6));
 	pkv("max_groups", row_u32(sub, c310, 3));
+	/* A line each only when set, so a profile without a maximum writes
+	 * the file it always wrote. */
+	if (row_u32(sub, c310, 4))
+		pkv("max_bandwidth", row_u32(sub, c310, 4));
+	if (row_u32(sub, c310, 5))
+		pkv("bw_enforce", 1);
 	if (acl_lines(prof, 7, "allow") < 0)
 		ov = 1;
 	if (acl_lines(prof, 8, "static") < 0)
 		ov = 1;
 	if (ov)
 		pkv("allow_overflow", 1);
+	bw_lines(prof);
 	grant_lines(sub);
+	/* The IPv6 rows after every IPv4 line, so a file that had none reads as
+	 * it always did. */
+	ov = 0;
+	if (acl6_lines(prof, 7, "allow6") < 0)
+		ov = 1;
+	if (acl6_lines(prof, 8, "static6") < 0)
+		ov = 1;
+	if (ov)
+		pkv("allow6_overflow", 1);
 }
 
 /* The attributes of a class 309 Create or Set (`mask`, the values in `data`
@@ -616,15 +795,252 @@ uint32_t mcast_state_get(const char *key)
 	return 0;
 }
 
-/* G.988 9.3.28, attribute 6: VLAN id 2, source 4, destination 4, best
+/* ---- what igmpd meters (its meter file, src/igmp/meter.h) ------------- */
+
+/* One group line of the meter file:
+ *   group=A.B.C.D vid=V client=A.B.C.D joined=T [bps=N] flow=up|lost|unknown */
+struct meter_line {
+	uint32_t group, vid, client, joined, bps;
+	int lost;
+};
+
+static int is_digit(char c)
+{
+	return c >= '0' && c <= '9';
+}
+
+/* "A.B.C.D" at l[*pos], up to len; 0 when it is not one. */
+static int dotted(const char *l, uint32_t len, uint32_t *pos, uint32_t *out)
+{
+	uint32_t a = 0, used, v;
+
+	for (int i = 0; i < 4; i++) {
+		if (*pos >= len)
+			return 0;
+		v = dec(l + *pos, len - *pos, &used);
+		if (!used || v > 255)
+			return 0;
+		a = a << 8 | v;
+		*pos += used;
+		if (i < 3) {
+			if (*pos >= len || l[*pos] != '.')
+				return 0;
+			(*pos)++;
+		}
+	}
+	*out = a;
+	return 1;
+}
+
+/* The value of ` key=` in a line, as a number or a dotted address. */
+static int line_val(const char *l, uint32_t len, const char *key, int ip, uint32_t *out)
+{
+	for (uint32_t at = 0; at < len; at++) {
+		uint32_t k = 0, pos, used;
+
+		if (l[at] != ' ')
+			continue;
+		while (key[k] && at + 1 + k < len && l[at + 1 + k] == key[k])
+			k++;
+		if (key[k] || at + 1 + k >= len || l[at + 1 + k] != '=')
+			continue;
+		pos = at + 2 + k;
+		if (ip)
+			return dotted(l, len, &pos, out);
+		*out = dec(l + pos, len - pos, &used);
+		return used && (pos + used == len || l[pos + used] == ' ' ||
+				!is_digit(l[pos + used]));
+	}
+	return 0;
+}
+
+static int line_has(const char *l, uint32_t len, const char *word)
+{
+	for (uint32_t at = 0; at < len; at++) {
+		uint32_t k = 0;
+
+		while (word[k] && at + k < len && l[at + k] == word[k])
+			k++;
+		if (!word[k] && (at + k == len || l[at + k] == ' '))
+			return 1;
+	}
+	return 0;
+}
+
+static int meter_parse(const char *l, uint32_t len, struct meter_line *m)
+{
+	uint32_t pos = 6;
+
+	if (len <= 6 || l[0] != 'g' || l[1] != 'r' || l[2] != 'o' || l[3] != 'u' ||
+	    l[4] != 'p' || l[5] != '=' || !dotted(l, len, &pos, &m->group))
+		return 0;
+	if (!line_val(l, len, "vid", 0, &m->vid) || m->vid > 4095)
+		return 0;
+	if (!line_val(l, len, "client", 1, &m->client))
+		m->client = 0;
+	if (!line_val(l, len, "joined", 0, &m->joined))
+		m->joined = 0;
+	if (!line_val(l, len, "bps", 0, &m->bps))
+		m->bps = 0;
+	m->lost = line_has(l, len, "flow=lost");
+	return 1;
+}
+
+/* igmpd's meter file, whole, into a buffer held here; its length, 0 when
+ * there is none or nothing asks for snooping. Bigger than the state file:
+ * a line per group carries the client, the join time and the flow. */
+static char meter_buf[16384];
+
+static uint32_t meter_read(void)
+{
+	long fd, n;
+
+	if (!mcast_snooping)
+		return 0;
+	fd = sys_open(MCAST_METER_PATH, O_RDONLY);
+	if (fd < 0)
+		return 0;
+	n = sys_read((int)fd, meter_buf, sizeof meter_buf);
+	sys_close((int)fd);
+	return n > 0 ? (uint32_t)n : 0;
+}
+
+/* The next complete line of buf from *at, its length in *len; 0 at the end
+ * or at a last line without its newline (cut off, not trusted). */
+static const char *next_line(const char *buf, uint32_t n, uint32_t *at, uint32_t *len)
+{
+	const char *l = buf + *at;
+	uint32_t k = 0;
+
+	if (*at >= n)
+		return 0;
+	while (*at + k < n && l[k] != '\n')
+		k++;
+	if (*at + k >= n)
+		return 0;
+	*at += k + 1;
+	*len = k;
+	return l;
+}
+
+static long mono_now(void)
+{
+	long s = 0, ns = 0;
+
+	sys_clock_gettime(CLOCK_MONOTONIC, &s, &ns);
+	return s;
+}
+
+uint32_t mcast_meter_get(const char *key)
+{
+	uint32_t n = meter_read(), at = 0, len;
+	const char *l;
+
+	while ((l = next_line(meter_buf, n, &at, &len)) != 0) {
+		uint32_t k = 0, used, v;
+
+		while (key[k] && k < len && l[k] == key[k])
+			k++;
+		if (!key[k] && k < len && l[k] == '=') {
+			v = dec(l + k + 1, len - k - 1, &used);
+			return used ? v : 0;
+		}
+	}
+	return 0;
+}
+
+/* The profile igmpd's lost groups belong to: the subscriber's. */
+static int subscriber_profile(uint16_t *inst)
+{
+	const struct omci_class *c310 = find_class(CLS_MCAST_SUBSCRIBER);
+	struct mib_row *sub = subscriber_row();
+
+	if (!sub || !c310)
+		return 0;
+	*inst = (uint16_t)row_u32(sub, c310, 2);
+	return mib_find(CLS_MCAST_OPER_PROFILE, *inst) != 0;
+}
+
+/* G.988 9.3.27, attribute 9, one 10-byte row a lost group: VLAN id 2,
+ * source 4 (0.0.0.0, not used: no source filtering here), destination 4.
+ * Only the subscriber's profile has any. */
+uint16_t mcast_lost_groups(uint16_t inst, uint8_t *out, uint16_t max)
+{
+	uint32_t n, at = 0, len;
+	uint16_t w = 0, prof;
+	const char *l;
+
+	if (!subscriber_profile(&prof) || prof != inst)
+		return 0;
+	n = meter_read();
+	while ((l = next_line(meter_buf, n, &at, &len)) != 0) {
+		struct meter_line m;
+
+		if (!meter_parse(l, len, &m) || !m.lost)
+			continue;
+		if (w + 10 > max)
+			break;
+		out[w] = (uint8_t)(m.vid >> 8);
+		out[w + 1] = (uint8_t)m.vid;
+		for (int i = 2; i < 6; i++)
+			out[w + i] = 0;
+		nl_put32(out + w + 6, m.group);
+		w = (uint16_t)(w + 10);
+	}
+	return w;
+}
+
+int mcast_lost_alarm(uint16_t *inst)
+{
+	if (!subscriber_profile(inst))
+		return -1;
+	return mcast_meter_get("lost") != 0;
+}
+
+/* G.988 9.3.29, attribute 5: VLAN id 2, source 4, destination 4, best
  * efforts bandwidth 4, client 4, time since the last join 4, reserved 2.
- * What igmpd knows is the group; the rest is not measured and reads zero. */
+ * From igmpd's meter file when there is one: a row per (VLAN, group), the
+ * bandwidth its counter measured (0 when it has none), the client of its
+ * last join and the seconds since. Otherwise from the state file, which
+ * knows the group alone, and the rest reads zero. */
+static uint16_t meter_groups(uint8_t *out, uint16_t max, uint32_t n)
+{
+	uint32_t at = 0, len;
+	uint32_t now = (uint32_t)mono_now();
+	uint16_t w = 0;
+	const char *l;
+
+	while ((l = next_line(meter_buf, n, &at, &len)) != 0) {
+		struct meter_line m;
+
+		if (!meter_parse(l, len, &m))
+			continue;
+		if (w + 24 > max)
+			break;
+		for (int i = 0; i < 24; i++)
+			out[w + i] = 0;
+		out[w] = (uint8_t)(m.vid >> 8);
+		out[w + 1] = (uint8_t)m.vid;
+		nl_put32(out + w + 6, m.group);
+		nl_put32(out + w + 10, m.bps);
+		nl_put32(out + w + 14, m.client);
+		/* The same monotonic clock as igmpd's; a join stamped ahead of
+		 * it (it cannot be, but) reads as just now. */
+		nl_put32(out + w + 18, m.joined && now >= m.joined ? now - m.joined : 0);
+		w = (uint16_t)(w + 24);
+	}
+	return w;
+}
+
 uint16_t mcast_active_groups(uint8_t *out, uint16_t max)
 {
 	static char buf[4096];
-	uint32_t n = state_read(buf, sizeof buf), at = 0;
+	uint32_t n = meter_read(), at = 0;
 	uint16_t w = 0;
 
+	if (n)
+		return meter_groups(out, max, n);
+	n = state_read(buf, sizeof buf);
 	while (at < n) {
 		const char *l = buf + at;
 		uint32_t len = 0;

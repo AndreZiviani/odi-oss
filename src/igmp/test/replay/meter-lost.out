@@ -1,0 +1,57 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+snooping lease: copy host IGMP to the CPU  (not written)
+> 1 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 2 meter
+bps=0
+lost=0
+group=239.1.1.1 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+> 3 ctr 239.1.1.1 1000
+> 4 tick
+> 4 ctr 239.1.1.1 2000
+> 5 tick
+> 5 ctr 239.1.1.1 3000
+> 6 tick
+> 6 ctr 239.1.1.1 4000
+> 7 tick
+> 7 ctr 239.1.1.1 5000
+> 8 tick
+> 8 ctr 239.1.1.1 6000
+> 9 tick
+> 10 meter
+bps=800
+lost=0
+group=239.1.1.1 vid=0 client=192.168.1.10 joined=1 bps=800 flow=up
+> 18 tick
+> 18 meter
+bps=181
+lost=0
+group=239.1.1.1 vid=0 client=192.168.1.10 joined=1 bps=181 flow=up
+> 19 tick
+  lost: 239.1.1.1: nothing arrived for 10 s
+> 19 meter
+bps=181
+lost=1
+group=239.1.1.1 vid=0 client=192.168.1.10 joined=1 bps=181 flow=lost
+> 20 v2join 1 0 192.168.1.20 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.20
+> 21 meter
+bps=181
+lost=1
+group=239.1.1.1 vid=0 client=192.168.1.20 joined=20 bps=181 flow=lost
+> 24 ctr 239.1.1.1 6500
+> 25 tick
+  flowing again: 239.1.1.1
+> 25 meter
+bps=0
+lost=0
+group=239.1.1.1 vid=0 client=192.168.1.20 joined=20 bps=0 flow=up
+> end
+joins=2
+denied=0
+groups=1
+group=239.1.1.1
+status 0

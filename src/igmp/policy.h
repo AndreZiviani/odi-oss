@@ -49,6 +49,13 @@ struct igmp_grant {
 	uint16_t minutes;
 };
 
+/* The imputed bandwidth of the groups of one dynamic list range (G.988
+ * 9.3.27 attribute 7, bytes 18 to 21 of the row), in bytes a second. */
+struct igmp_bw_range {
+	uint32_t lo, hi;
+	uint32_t bytes;
+};
+
 struct igmp_policy {
 	int      snooping;              /* the OLT asks for it: 0 otherwise */
 	uint32_t function;              /* ME 309 attribute 2 as sent */
@@ -70,6 +77,13 @@ struct igmp_policy {
 	uint32_t us_tag_control;
 	uint32_t us_tci;
 	uint32_t us_rate;
+	/* ME 310 attributes 4 and 5: the most imputed bandwidth the subscriber
+	 * may join, bytes a second (0: no limit), and whether a join past it
+	 * is refused (1) or only counted (0). */
+	uint32_t max_bandwidth;
+	int      bw_enforce;
+	uint32_t nbw;
+	struct igmp_bw_range bw[IGMP_POLICY_MAX_RANGES];
 	int      overflow;              /* more ranges than fit: not enforced */
 	uint32_t nallow, nstatic, ngrant;
 	struct igmp_range allow[IGMP_POLICY_MAX_RANGES];
@@ -95,6 +109,10 @@ int igmp_policy_acl_active(const struct igmp_policy *p);
  * a static range. */
 int igmp_policy_allows(const struct igmp_policy *p, uint32_t group);
 
+/* The imputed bandwidth of a group, bytes a second: that of the first
+ * dynamic list range holding it, 0 when none says (G.988: 0 is a group no
+ * bandwidth limit applies to). */
+uint32_t igmp_policy_imputed(const struct igmp_policy *p, uint32_t group);
 /* What one join asks for, as the group table knows it. */
 struct igmp_join {
 	uint32_t group;

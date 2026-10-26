@@ -1,0 +1,49 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/10/1 s, limit 0, 0 allow + 0 static ranges
+policy6: 1 allow + 0 static IPv6 ranges
+snooping lease: copy host IGMP to the CPU, and its MLD  (not written)
+> 1 mld1join 1 0 fe80::2 ff02::1:ff00:1234
+port 1  untagged  02:00:00:00:00:01 -> 33:33:ff:00:12:34  MLD v1 report  group ff02::1:ff00:1234  src fe80::2
+> 2 mld1join 1 0 fe80::2 ff02::1:2
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:01:00:02  MLD v1 report  group ff02::1:2  src fe80::2
+> 3 mld2join 1 0 fe80::2 ff02::fb
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:16  MLD v2 report (1 records)  src fe80::2
+> 4 mld2join 1 0 fe80::2 ff02::16
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:16  MLD v2 report (1 records)  src fe80::2
+> 5 mld1join 1 0 fe80::2 ff02::2
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:02  MLD v1 report  group ff02::2  src fe80::2
+> 6 mld1join 1 0 fe80::2 ff02::1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:01  MLD v1 report  group ff02::1  src fe80::2
+> 7 mld1join 1 0 fe80::2 ff12::8000:1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:80:00:00:01  MLD v1 report  group ff12::8000:1  src fe80::2
+> 8 mld1done 1 0 fe80::2 ff02::1:2
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:02  MLD done  group ff02::1:2  src fe80::2
+> 9 mld1join 1 0 fe80::2 ff3e::8000:7
+port 1  untagged  02:00:00:00:00:01 -> 33:33:80:00:00:07  MLD v1 report  group ff3e::8000:7  src fe80::2
+  set vid 0 33:33:80:00:00:07 ports 0x5  (not written)
+> 21 tick
+snooping lease: copy host IGMP to the CPU, and its MLD, drop unregistered IPv4 multicast from the PON, drop unregistered IPv6 multicast from the PON (ff02::/16 and solicited-node flooded)  (not written)
+> 22 mld2join 1 0 fe80::2 ff02::1:ff00:1234
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:16  MLD v2 report (1 records)  src fe80::2
+> 23 mld1join 1 0 fe80::2 ff3e::8000:7
+port 1  untagged  02:00:00:00:00:01 -> 33:33:80:00:00:07  MLD v1 report  group ff3e::8000:7  src fe80::2
+> 24 state
+joins=0
+denied=0
+groups=0
+# /var/run/odi-mcast6.state
+joins=2
+denied=0
+groups=1
+group=ff3e::8000:7
+> end
+joins=0
+denied=0
+groups=0
+# /var/run/odi-mcast6.state
+joins=2
+denied=0
+groups=1
+group=ff3e::8000:7
+status 0

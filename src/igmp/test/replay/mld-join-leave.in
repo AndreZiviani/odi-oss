@@ -1,0 +1,21 @@
+# MLD (igmpd -6): an MLDv1 report and an MLDv2 report each make an IPv6
+# group, keyed on its 33:33 MAC with the host and the PON as members; a
+# refresh changes nothing; an MLDv1 done shortens the membership to the
+# last-member time (no immediate leave), and an MLDv2 TO_INCLUDE of nothing
+# does the same. The IPv4 table is untouched by any of it, and the IPv6
+# state file lists the groups.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=0
+end
+0 tick
+1 mld1join 1 0 fe80::2 ff3e::8000:1
+2 mld2join 1 0 fe80::2 ff15::1234
+3 mld1join 1 0 fe80::2 ff3e::8000:1
+4 state
+10 mld1done 1 0 fe80::2 ff3e::8000:1
+12 tick
+13 mld2leave 1 0 fe80::2 ff15::1234
+15 tick
+16 state

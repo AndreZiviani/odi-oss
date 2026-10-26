@@ -1,0 +1,23 @@
+# The IPv6 rows of the access control lists (allow6, static6, written by
+# omcid from row parts 0 and 2) decide MLD joins as the IPv4 rows decide
+# IGMP ones: a group outside them gets no state and no row, and goes into
+# the recent refusals, the same host repeating it one entry with a count; a
+# group inside gets its row; a static IPv6 group is held without a join. The
+# IPv4 list says nothing about IPv6 and the IPv6 one nothing about IPv4.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+unauthorized_join=1
+allow=225.0.0.0-225.255.255.255
+allow6=ff3e::8000:0-ff3e::8000:ffff
+static6=ff15::10-ff15::11
+end
+0 tick
+1 mld1join 1 0 fe80::2 ff3e::9
+2 mld1join 1 0 fe80::2 ff3e::9
+3 mld2join 1 0 fe80::2 ff3e::8000:5
+4 v2join 1 0 192.168.1.10 225.1.1.1
+5 v2join 1 0 192.168.1.10 239.1.1.1
+6 state
+7 status

@@ -1,0 +1,37 @@
+# Sixteen counters, one a MAC: the seventeenth group joined has none, and its
+# flow is unknown however long it stays (never lost). When one of the first
+# sixteen leaves, its counter goes to the seventeenth on the next second,
+# which is unknown until that counter grows, and up once it does.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.3.0.1
+1 v2join 1 0 192.168.1.10 239.3.0.2
+1 v2join 1 0 192.168.1.10 239.3.0.3
+1 v2join 1 0 192.168.1.10 239.3.0.4
+1 v2join 1 0 192.168.1.10 239.3.0.5
+1 v2join 1 0 192.168.1.10 239.3.0.6
+1 v2join 1 0 192.168.1.10 239.3.0.7
+1 v2join 1 0 192.168.1.10 239.3.0.8
+1 v2join 1 0 192.168.1.10 239.3.0.9
+1 v2join 1 0 192.168.1.10 239.3.0.10
+1 v2join 1 0 192.168.1.10 239.3.0.11
+1 v2join 1 0 192.168.1.10 239.3.0.12
+1 v2join 1 0 192.168.1.10 239.3.0.13
+1 v2join 1 0 192.168.1.10 239.3.0.14
+1 v2join 1 0 192.168.1.10 239.3.0.15
+1 v2join 1 0 192.168.1.10 239.3.0.16
+1 v2join 1 0 192.168.1.10 239.3.0.17
+1 ctr 239.3.0.17 700
+2 tick
+2 ctr 239.3.0.17 900
+3 tick
+20 meter
+21 v2leave 1 0 192.168.1.10 239.3.0.1
+22 tick
+22 ctr 239.3.0.17 1500
+23 tick
+24 meter

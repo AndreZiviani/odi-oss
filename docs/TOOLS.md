@@ -373,14 +373,17 @@ disabled NTP never shows an old sync.
 
 ### `igmpd` -- IGMP snooping (opt-in)
 
-    igmpd [-w] [-f] [-n COUNT]
-    igmpd -r FILE
-    igmpd -s [STATE [POLICY]]
+    igmpd [-w] [-d] [-6] [-f] [-n COUNT]
+    igmpd [-6] -r FILE
+    igmpd -s [STATE [POLICY [STATE6]]]
     igmpd [-w] -j GROUP -p PORTS [-v VID]
     igmpd [-w] -l GROUP [-v VID]
 
     -w         WRITE to the switch. Off by default: the daemon then prints
                what it would do and holds no lease
+    -d         also drop multicast no row names on the PON side, after one
+               membership interval (IGMP_PON_DROP)
+    -6         MLD (IPv6) as well (MLD_SNOOPING; below)
     -n COUNT   stop after COUNT frames (0, the default, is forever)
     -f         start even if a live process holds uid 4
     -j GROUP   one-shot: program GROUP with member PORTS (hardware port
@@ -411,7 +414,11 @@ the result; it never opens `/dev/odi_sw` or the redirect device and refuses
 
 Other events: `v3join`, `v3leave`, `v3src incl|excl PORT VID SRC GROUP S1[,S2..]`
 (a v3 record that names sources), `query PORT VID SRC`, `policy-file PATH`,
-`nopolicy`, `status` (what `igmpd -s` prints). A policy change is read at the next second the clock moves to.
+`nopolicy`, `status` (what `igmpd -s` prints), `ctr GROUP BYTES` (what the
+counter of the group's MAC has counted, read on the next second as the
+switch's would be), `meter` (the meter file it would write, below), and the
+MLD ones, which reach the IPv6 table only with `-6`: `mld1join`, `mld1done`,
+`mld2join`, `mld2leave` (`T VERB PORT VID SRC6 GROUP6`) and `mldquery PORT VID SRC6`. A policy change is read at the next second the clock moves to.
 While the policy has the reports taken (below), the frames the verbs build are
 marked taken as the kernel marks them (an `rx` payload says so itself, bit 7 of
 its second byte), and the transcript shows what would go up and with which
@@ -435,8 +442,9 @@ first, each with its VLAN, the reason and how long ago:
       239.9.9.9  vid 0  outside the access control lists (acl)  12 s ago
       225.1.1.3  vid 0  past the group limit (limit)  x3  40 s ago
 
-The three reasons are `acl` (outside the lists the OLT provisioned), `limit`
-(past the group limit of ME 310) and `full` (igmpd's own table of 128 entries
+The four reasons are `acl` (outside the lists the OLT provisioned), `limit`
+(past the group limit of ME 310), `bw` (past the bandwidth of ME 310, when
+the OLT enforces it; below) and `full` (igmpd's own table of 128 entries
 has no free slot; not counted in ME 311's refused figure). A host that
 repeats the same refused report (an unsolicited report is sent twice) makes
 one entry with a count, and the ring keeps the last 8 distinct ones: it
@@ -455,6 +463,12 @@ up, and a line under the joins counts them:
       upstream: reports taken and sent by igmpd; tag added, vid 420 pri 5; at most 2 a second; unauthorized joins withheld
     sent up 40, withheld 3, over the rate 0, not sent 0
 
+With `-6` an MLD part follows, in the same shape, from
+`/var/run/odi-mcast6.state` (or the third file named): the IPv6 ranges of the
+lists, the MLD counts, the IPv6 groups held and the last IPv6 refusals. It
+is printed only when there is an IPv6 range or an IPv6 state file, so the
+report of a daemon without `-6` reads as before.
+
 `withheld` counts the messages of joins outside the lists alone and the
 queries from the host side; `not sent` the ones that should have gone and
 could not (no classifier row takes the frame, which the switch would have
@@ -469,7 +483,9 @@ multicast does nothing. The PON-side drop of IPv4 multicast no row names
 (`igmpd -d`) is a separate opt-in, `IGMP_PON_DROP`: only `1` drops, unset
 snoops only (an existing `IGMP_SNOOPING=1` config that wants the drop must
 now set `IGMP_PON_DROP=1`). Without `-d` the PON keeps flooding and only the
-copy, the rows and the state run.
+copy, the rows and the state run. MLD is a third opt-in, `MLD_SNOOPING`
+(`igmpd -6`, below); unset, the daemon runs with the command line it always
+had.
 
 **What the OLT decides.** omcid writes what it was provisioned to
 `/var/run/odi-mcast.conf` (a quiet second after the last OMCI frame, only
@@ -506,9 +522,13 @@ row is a part 0 row (GEM port, VLAN, IPv4 source, start and end of the
 range) and, from OMCC version 0xA1 on, optional parts 1 (IPv6 source prefix,
 preview fields) and 2 (IPv6 destination prefix) of the same row key. Only
 part 0 makes a range. A row whose part 1 or part 2 prefix is not the IPv4
-form (ten zero bytes, then 0000 or ffff) is an IPv6 row and is left out, as
-igmpd takes IPv4 ranges only; so a list of IPv6 rows alone is an empty list
-and restricts nothing, never an IPv4 list that refuses every join.
+form (ten zero bytes, then 0000 or ffff) is an IPv6 row and is left out of
+the IPv4 ranges; so a list of IPv6 rows alone restricts nothing of IPv4,
+never an IPv4 list that refuses every join. A row whose part 2 is IPv6 is an
+IPv6 range (part 2's twelve bytes, then the last four of part 0's start and
+end), written as `allow6=` or `static6=` for MLD (below); one whose part 1
+alone is IPv6 has an IPv6 source and IPv4 destinations, and is neither (no
+source is filtered).
 
 What more a row says, when it says it (an empty field is a wildcard, so a row
 that says nothing behaves as a bare range always did):
@@ -595,7 +615,8 @@ unauthorized joins discarded (attribute 15 false, the G.988 default). Then:
 The kernel says which row and flow (`ODI_SW_IOC_MC_ROUTE`) and does the
 send (`ODI_SW_IOC_MC_SEND`), and sends only for the holder of the lease, only
 while it holds the take, only an IPv4 IGMP frame to an IPv4 multicast MAC,
-and only on a flow an upstream row queues on (`docs/SWITCH.md`, "Snooping").
+(or, with MLD, an MLD report or done to an IPv6 multicast MAC), and only on a
+flow an upstream row queues on (`docs/SWITCH.md`, "Snooping").
 If igmpd dies, the lease goes with its descriptor, the rule with it, and the
 switch forwards the host's IGMP by itself again.
 
@@ -627,14 +648,93 @@ toward the OLT; it never answers anything from the fibre.
 
 **What it reports.** `/var/run/odi-mcast.state` holds the join count and the
 groups the subscriber holds; omcid answers the multicast subscriber monitor
-(ME 311) from it: the join message counter and the IPv4 active group list.
-The bandwidth attributes read zero.
+(ME 311) from it: the join message counter, the joins past the bandwidth
+(attribute 4) and, when there is no meter file, the IPv4 active group list
+with the group alone.
 
-IPv6 (MLD) is not snooped: IPv6 multicast is flooded as before. Upstream
-IGMP tag control (ME 309 attributes 4 to 6) is stored and not acted on. The
-downstream tag control (attribute 16) is not igmpd's: omcid puts it in the
-bridge rules of the multicast port, on the VLANs the access control lists
+**Lost groups and bandwidth.** While it holds the lease, igmpd meters each
+group it holds from the dynamic lists with a counter in the switch (`diag
+mc-count` installs the same by hand; 16 of them, one per group MAC, on the
+PON ingress, counting bytes, read once a second). A group whose counter has
+grown since it went in and then stood still for 10 s is **lost**, and flows
+again the second it grows; the log says both (`lost: 239.1.1.1: nothing
+arrived for 10 s`, `flowing again: 239.1.1.1`). A counter that has never
+grown says nothing: that group is **unknown**, never lost, and so is a group
+past the sixteenth MAC. That a counter on the PON ingress counts at all has
+not been measured on a stick yet (`docs/SWITCH.md`, "Multicast group
+counters"); until it is, a stick on which it does not reads every group as
+unknown, and the OLT is told nothing wrong. `/var/run/odi-mcast.meter`, a
+file per group, has what omcid answers from it:
+
+    bps=1500
+    lost=1
+    group=239.1.2.3 vid=10 client=192.168.1.10 joined=4211 bps=1000 flow=up
+    group=225.200.7.9 vid=0 client=192.168.1.11 joined=4302 bps=500 flow=lost
+
+the bytes a second of the metered groups (over the last 5 s, the FCS in it),
+how many are lost, and per (VLAN, group) the client of its last join, the
+second of it on the monotonic clock, its bandwidth and its flow. omcid reads
+it only while the policy asks for snooping, and from it answers ME 311's
+bandwidth (attribute 2) and the active group list with the VLAN, the
+bandwidth, the client and the seconds since the join; the lost groups list of
+the subscriber's multicast profile (ME 309 attribute 9: VLAN, source 0, the
+group); and that profile's alarm 0, raised while a group is lost.
+
+**Bandwidth of ME 310.** When the OLT sets a maximum multicast bandwidth on
+the subscriber (attribute 4, bytes a second), each new group a host joins is
+weighed by the bandwidth the dynamic list imputes to it (bytes 18 to 21 of
+its row): a join that would take the total of the groups held past the
+maximum is counted (`bw_exceeded`, ME 311 attribute 4), and refused only
+when attribute 5 enforces it (reason `bw`). A group already held is never
+refused, so lowering the maximum cuts no stream that plays, and a range that
+imputes 0 is outside the limit (G.988). With no maximum, the policy file and
+the decisions are as they were. `igmpd -s` adds a line under the policy:
+
+      bandwidth: at most 1000 bytes a second, enforced; ranges with an imputed one: 1
+
+and one under the joins once anything went past it.
+
+The downstream tag control (attribute 16) is not igmpd's: omcid puts it in
+the bridge rules of the multicast port, on the VLANs the access control lists
 name (`docs/SWITCH.md`, "Downstream tag control").
+
+**MLD (IPv6), opt-in.** Without `-6` IPv6 multicast is flooded as it always
+was and an MLD frame is not the daemon's. With `MLD_SNOOPING=1`
+(`svc-igmpd.sh` adds `-6`; it needs `IGMP_SNOOPING=1`, and `apply.sh igmp`
+applies a change) the host's MLD is snooped as its IGMP is, on the same
+profile (ME 309 is the IGMP/MLD profile):
+
+- the switch copies (or, while the reports are taken, takes) the MLD queries,
+  v1 reports, v1 dones and v2 reports entering the UNI port (three more ACL
+  rules, `docs/SWITCH.md`, "Snooping"), and nothing else of ICMPv6: neighbour
+  and router discovery are never copied or taken;
+- the IPv6 groups go into a table of their own (128 groups), one row a group
+  keyed on its MAC, 33:33 and the low 32 bits of the address, the host and
+  the PON as members, by the profile's timers and immediate leave; an MLD
+  join is held to the group limit of ME 310 with the IPv4 groups counted in
+  (an IGMP join still counts the IPv4 groups alone);
+- the IPv6 rows of the access control lists (`allow6=`, `static6=` in the
+  policy file) restrict IPv6 joins as the IPv4 rows restrict IGMP ones, with
+  the same refusals in the same ring shape; IPv4 rows alone restrict nothing
+  of IPv6, and IPv6 rows alone nothing of IPv4;
+- the way up is the IGMP one: the same take, tag, rate and unauthorized-join
+  rule, and the same counts;
+- with `-d`, after the learning interval, the PON also drops IPv6 multicast
+  no row names, and the switch is told to flood the link-scope groups
+  (ff02::/16) and the solicited-node groups whatever the drop says.
+
+A group of scope 2 or less (ff02::/16 and every other link-local scope) is
+never snooped: no state, no row, no refusal, whatever the lists say. Router
+advertisements (ff02::1), DHCPv6 (ff02::1:2), MLDv2 itself (ff02::16) and
+neighbour discovery (the solicited-node groups) ride them, and another open
+implementation's measurements on this chip saw router advertisements and
+DHCPv6 stop when they were pruned. A group whose MAC aliases one of them
+(ff3e::1 has the MAC of ff02::1) is snooped all the same: a row names the UNI
+and the PON, which is where flooding sends the frame, so it prunes nothing.
+The IPv6 state (counts, groups, refusals) is written to
+`/var/run/odi-mcast6.state`, which omcid does not read: ME 311's IPv6 active
+group list stays empty. MLD function 1 and 2 (proxy) are transparent, as
+for IGMP.
 
 `-j` and `-l` drive the row path by hand, without registering anything, so
 an entry can be put in and checked without an IGMP frame:
@@ -672,6 +772,12 @@ reference; the commands:
                                       the UNI IGMP copied or taken to the CPU
     acl-probe show <slot>             a probe, its count, what reached the CPU
     acl-probe delete <slot>|all       remove probes
+    mc-count frames|bytes <slot> pon|uni mac <high> <low> <length>
+    mc-count frames|bytes <slot> pon|uni ipv4 <address> <length>
+                                      count a multicast destination entering
+                                      the PON or the UNI (igmpd's counters)
+    mc-count show <slot>              a counter and what it counted
+    mc-count delete <slot>|all        remove counters
     help                              the list, with descriptions
     exit
 
@@ -743,6 +849,16 @@ stdin; `show` works from any process. It refuses while igmpd holds its
 snooping lease, and igmpd is refused while probes are in.
 `tools/mcast-probe/mcast-probe.sh` runs the measurements
 (`docs/SWITCH.md`, "Multicast").
+
+`mc-count` installs by hand the counters igmpd meters its groups with: one of
+sixteen ACL rules (entries 48 to 63) counting, in frames or in bytes, what
+enters the PON or the UNI to a destination MAC prefix (the first two octets,
+the last four and a prefix length: `mac 0x3333 0x00000001 48` is
+33:33:00:00:00:01) or to an IPv4 prefix. It only counts. Held like the
+probes, by the diag that installed the first, and the probes and these
+exclude each other; while igmpd meters its groups neither goes in.
+`tools/mcast-probe/count-proof.sh` is the measurement that proves a counter
+on the PON ingress counts (`docs/SWITCH.md`, "Multicast group counters").
 
 ### `i2cget`, `i2cdump`, `i2cset` -- the optics module over I2C
 
@@ -1297,7 +1413,7 @@ drivers behind them.
 
 | file | read | write |
 |---|---|---|
-| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table, the ACL probes (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes and the snooping lease (igmpd -w), the ACL probes (diag acl-probe) |
+| `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table, the ACL probes, the multicast group counters (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes, the snooping lease and the group counters (igmpd -w), the ACL probes (diag acl-probe), the group counters (diag mc-count) |
 | `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |

@@ -119,6 +119,7 @@ enum igmp_refusal_reason {
 	IGMP_REFUSE_ACL = 1,    /* outside the OLT's access control lists */
 	IGMP_REFUSE_LIMIT,      /* past the group limit of ME 310 */
 	IGMP_REFUSE_FULL,       /* the table has no free entry */
+	IGMP_REFUSE_BW,         /* past the bandwidth of ME 310, enforced */
 	IGMP_REFUSE_PREVIEW,    /* a preview used up: count or repeat time */
 	IGMP_REFUSE_REASONS     /* one past the last, for array sizes */
 };
@@ -177,6 +178,9 @@ struct igmp_db {
 	uint32_t grant_since[IGMP_POLICY_MAX_GRANTS];
 	uint32_t joins;                         /* join messages accepted (ME 311 attr 3) */
 	uint32_t denied;                        /* joins refused: profile or limit */
+	/* Joins of a new group whose imputed bandwidth would take the
+	 * subscriber past ME 310's maximum, refused or not (ME 311 attr 4). */
+	uint32_t bw_exceeded;
 	int      static_overflow;               /* a static range too wide to name */
 	/* Every refusal since the daemon started (or the policy last said "not
 	 * snooping"), by reason, and the last few in order. A table too small

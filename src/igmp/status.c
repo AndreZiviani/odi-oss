@@ -58,8 +58,12 @@ void igmp_policy_describe(const struct igmp_policy *p)
 			out("\n");
 		}
 	}
-	/* A second line only when the reports are taken: a profile the switch
-	 * already forwards as asked reads as it always did. */
+	/* A line only for a profile with a bandwidth maximum, and another
+	 * only when the reports are taken: a profile with neither reads as it
+	 * always did. */
+	if (p->max_bandwidth)
+		out_fmt("  bandwidth: at most %u bytes a second, %s; ranges with an imputed one: %u\n",
+			p->max_bandwidth, p->bw_enforce ? "enforced" : "counted only", p->nbw);
 	if (!igmp_policy_takes(p))
 		return;
 	out("  upstream: reports taken and sent by igmpd; tag ");
@@ -102,6 +106,7 @@ static const char *reason_text(uint32_t r)
 	case IGMP_REFUSE_ACL:   return "outside the access control lists";
 	case IGMP_REFUSE_LIMIT: return "past the group limit";
 	case IGMP_REFUSE_FULL:  return "no free table entry";
+	case IGMP_REFUSE_BW:    return "past the multicast bandwidth";
 	case IGMP_REFUSE_PREVIEW: return "preview used up";
 	}
 	return "unknown reason";
@@ -127,6 +132,9 @@ void igmp_status_print(const struct igmp_policy *p, int have_policy,
 	out_fmt("joins %u, refused by the profile %u (lists %u, group limit %u), "
 		"table full %u\n", v.joins, v.denied, v.refused[IGMP_REFUSE_ACL],
 		v.refused[IGMP_REFUSE_LIMIT], v.refused[IGMP_REFUSE_FULL]);
+	if (v.bw_exceeded || v.refused[IGMP_REFUSE_BW])
+		out_fmt("past the multicast bandwidth %u, of them refused %u\n",
+			v.bw_exceeded, v.refused[IGMP_REFUSE_BW]);
 	if (v.refused[IGMP_REFUSE_PREVIEW])
 		out_fmt("also refused: preview used up %u\n", v.refused[IGMP_REFUSE_PREVIEW]);
 	if (v.above_version)
@@ -162,6 +170,67 @@ void igmp_status_print(const struct igmp_policy *p, int have_policy,
 	}
 }
 
+static void out_group6(const uint8_t g[16])
+{
+	char t[40];
+
+	mld_format_ipv6(t, g);
+	out(t);
+}
+
+void mld_status_print(const struct mld_policy *p, const char *state, uint32_t len,
+		      uint32_t now)
+{
+	static struct mld_state_view v;
+
+	if (!len && !p->nallow && !p->nstatic && !p->overflow)
+		return;
+	out_fmt("MLD: %u allow + %u static IPv6 ranges%s\n", p->nallow, p->nstatic,
+		p->overflow ? " (too many: not enforced)" : "");
+	for (uint32_t i = 0; i < p->nallow + p->nstatic; i++) {
+		const struct mld_range *r = i < p->nallow ? &p->allow[i] : &p->stat[i - p->nallow];
+
+		out(i < p->nallow ? "  allow6 " : "  static6 ");
+		out_group6(r->lo);
+		out(" - ");
+		out_group6(r->hi);
+		out("\n");
+	}
+	if (!len) {
+		out("MLD state: none (igmpd runs without -6, or without -w)\n");
+		return;
+	}
+	mld_state_parse(state, len, &v);
+	out_fmt("MLD joins %u, refused by the profile %u (lists %u, group limit %u), "
+		"table full %u\n", v.joins, v.denied, v.refused[IGMP_REFUSE_ACL],
+		v.refused[IGMP_REFUSE_LIMIT], v.refused[IGMP_REFUSE_FULL]);
+	out_fmt("IPv6 groups held: %u\n", v.groups);
+	for (uint32_t i = 0; i < v.ngroup; i++) {
+		out("  ");
+		out_group6(v.group[i]);
+		out("\n");
+	}
+	if (!v.nrefusal) {
+		out("recent IPv6 refusals: none\n");
+		return;
+	}
+	out("recent IPv6 refusals, newest first:\n");
+	for (uint32_t i = v.nrefusal; i-- > 0;) {
+		const struct mld_refusal *r = &v.ref[i];
+
+		out("  ");
+		out_group6(r->group);
+		out_fmt("  vid %u  %s (%s)", (uint32_t)r->vid, reason_text(r->reason),
+			igmp_refusal_name(r->reason));
+		if (r->count > 1)
+			out_fmt("  x%u", r->count);
+		if (now && now >= r->at)
+			out_fmt("  %u s ago\n", now - r->at);
+		else
+			out_fmt("  at %u s\n", r->at);
+	}
+}
+
 /* The whole file into buf; its length, 0 when there is none. */
 static uint32_t slurp(const char *path, char *buf, uint32_t max)
 {
@@ -174,11 +243,14 @@ static uint32_t slurp(const char *path, char *buf, uint32_t max)
 	return n > 0 ? (uint32_t)n : 0;
 }
 
-int igmp_status_run(const char *state_path, const char *policy_path)
+int igmp_status_run(const char *state_path, const char *policy_path,
+		    const char *state6_path)
 {
 	static char sbuf[IGMP_STATE_MAX + 1], pbuf[IGMP_POLICY_MAX_BYTES];
+	static char sbuf6[MLD_STATE_MAX + 1];
+	static struct mld_policy p6;
 	struct igmp_policy p;
-	uint32_t sl, pl;
+	uint32_t sl, pl, sl6;
 	long sec = 0, nsec = 0;
 	uint32_t now = 0;
 
@@ -190,6 +262,12 @@ int igmp_status_run(const char *state_path, const char *policy_path)
 	pl = slurp(policy_path ? policy_path : IGMP_POLICY_PATH, pbuf, sizeof pbuf);
 	igmp_policy_parse(pbuf, pl, &p);
 	igmp_status_print(&p, pl != 0, sbuf, sl, now);
+	/* The IPv6 file of the daemon's own, or the one named; a state file
+	 * named without one has none. */
+	sl6 = state_path && !state6_path ? 0 :
+	      slurp(state6_path ? state6_path : MLD_STATE_PATH, sbuf6, MLD_STATE_MAX);
+	mld_policy_parse(pbuf, pl, &p6);
+	mld_status_print(&p6, sbuf6, sl6, now);
 	out_flush();
 	return 0;
 }

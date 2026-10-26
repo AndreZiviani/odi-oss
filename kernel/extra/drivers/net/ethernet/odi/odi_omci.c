@@ -15,7 +15,7 @@
  * OP_CMD carries one odi_switch_cmd() call; /proc/odi_omci shows the
  * registrations and counters and takes the one switch_init write.
  *
- * The host's IGMP rides the same RX hook table to igmpd (redirect type 4),
+ * The host's IGMP (and MLD) rides the same RX hook table to igmpd (redirect type 4),
  * and, while igmpd takes the reports rather than copying them, igmpd's
  * re-sent report goes up the PON through odi_igmp_send_to_pon() below, the
  * one transmit toward the fibre besides the OMCI replies.
@@ -224,12 +224,13 @@ static int odi_omci_rxhook(struct sk_buff *skb, const struct odi_rx_words *info)
 /* ---- RX: host port -> igmpd ------------------------------------------- */
 
 /* Below the OMCI hook, and only for the UNI port: the copy (or, in the
- * lease's TRAP mode, the take) of an IGMP frame the switch's ACL rule makes
- * (odi_switch_mcast.c) is the one thing the CPU wants from that port beyond
- * what the net devices take. A frame from the PON port never reaches this
- * hook, the hook would refuse it if it did (odi_igmp_rx_takes()), and the
- * NIC still drops every PON frame no hook took, so nothing here widens what
- * the fibre can reach.
+ * lease's TRAP mode, the take) of an IGMP or MLD frame the switch's ACL
+ * rules make (odi_switch_mcast.c) is the one thing the CPU wants from that
+ * port beyond what the net devices take. A frame from the PON port never
+ * reaches this hook, the hook would refuse it if it did
+ * (odi_igmp_rx_takes(), odi_mld_rx_takes()), and the NIC still drops every
+ * PON frame no hook took, so nothing here widens what the fibre can reach.
+ * The igmp_* counters count both.
  */
 #define ODI_IGMP_RXHOOK_PRIO	(INT_MAX - 2)
 #define ODI_IGMP_RXHOOK_PORTMASK (1U << 0)
@@ -248,7 +249,9 @@ static int odi_igmp_rxhook(struct sk_buff *skb, const struct odi_rx_words *info)
 	int taken;
 
 	if (!odi_igmp_rx_takes(READ_ONCE(odi_sw_mcast_copy_on), src_port,
-			       skb->data, skb->len))
+			       skb->data, skb->len) &&
+	    !odi_mld_rx_takes(READ_ONCE(odi_sw_mcast_mld_on), src_port,
+			      skb->data, skb->len))
 		return ODI_RXHOOK_CONTINUE;
 	/* Read as the frame is handed on: the switch took it, or copied it,
 	 * by the mode of the moment (odi_switch_mcast.c orders the change so a
