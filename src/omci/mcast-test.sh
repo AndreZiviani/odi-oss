@@ -428,10 +428,14 @@ check "311 CurrMcastBandwidth with no meter file: 0" \
 check "309 lost group list with no meter file: empty" \
       "$(table "$log" b30 0135 0001 0080)" ""
 # The meter file as igmpd writes it (src/igmp/meter.h): 239.1.2.3 on VLAN 10
-# joined 100 s ago by 192.168.1.10, flowing at 1000 bytes a second; 225.200.7.9
+# joined 100 s ago (less on a fresh boot) by 192.168.1.10, flowing at 1000 bytes a second; 225.200.7.9
 # on no VLAN, lost. The join time is on the monotonic clock omcid reads too.
+# A machine up for less than 100 s (a fresh qemu) gets a shorter age: a join
+# before the boot would be a negative time, which no meter file holds.
 up=$(cut -d. -f1 /proc/uptime)
-j=$((up - 100))
+age=100
+[ "$up" -gt 100 ] || age=$((up > 1 ? up - 1 : 0))
+j=$((up - age))
 printf 'bps=1500\nlost=1\ngroup=239.1.2.3 vid=10 client=192.168.1.10 joined=%s bps=1000 flow=up\ngroup=225.200.7.9 vid=0 client=192.168.1.11 joined=%s bps=500 flow=lost\n' \
 	"$j" "$j" > /var/run/odi-mcast.meter
 check "311 CurrMcastBandwidth is the meter's total" \
@@ -442,7 +446,7 @@ check "311 active group list from the meter: VLAN, group, bandwidth, client" \
       "000a00000000ef010203000003e8c0a8010a0000"
 since=$((0x$(printf '%s' "$rows" | cut -c37-44)))
 check "311 active group list: the time since the join, from the same clock" \
-      "$([ "$since" -ge 95 ] && [ "$since" -le 130 ] && echo ok || echo "$since")" "ok"
+      "$([ "$since" -ge $((age > 5 ? age - 5 : 0)) ] && [ "$since" -le $((age + 30)) ] && echo ok || echo "$since")" "ok"
 check "311 active group list: a row a (VLAN, group) of the meter" \
       "$(printf '%s' "$rows" | cut -c49-84)" "000000000000e1c80709000001f4c0a8010b"
 check "309 lost group list: the lost group, VLAN, no source, destination" \
