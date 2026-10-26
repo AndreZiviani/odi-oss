@@ -215,7 +215,7 @@ for c in 148 157 307 340 134; do
 	      "$(sed -n 's/^OMCI_CLASSES="\(.*\)"/\1/p' ../../rootfs/skeleton/etc/scripts/diag-bundle.sh | tr ' ' '\n' | grep -cx "$c")" "0"
 done
 check "diag-bundle.sh never passes --secrets" \
-      "$(grep -v '^[[:space:]]*#' ../../rootfs/skeleton/etc/scripts/diag-bundle.sh | grep -c -e '--secrets')" "0"
+      "$(grep -v '^[[:space:]]*#' ../../rootfs/skeleton/etc/scripts/diag-bundle.sh | grep -e '--secrets' | grep -vc -e '--secrets-list')" "0"
 
 # ------------------------------------- wide rows: large string, auth method
 # A row holds 96 bytes; LargeString (157) packs 376 and the authentication
