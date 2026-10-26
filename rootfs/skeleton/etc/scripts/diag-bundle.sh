@@ -21,7 +21,7 @@
 # replaced by REDACTED, and under pon/ the GPON and OMCI state: diag (ONU
 # state, alarms, GEM flows, port counters, the PON queue registers that
 # cmd 23 and 25 write), /proc/odi_gpon/ (status, counters, flows, ploam),
-# /proc/odi_omci, and omcli (state, provision, flows, tcont, conn, and the MIB
+# /proc/odi_omci, and omcli (state, provision, flows, tcont, conn, voip (masked), and the MIB
 # classes in OMCI_CLASSES), and under module/ the optics module on /dev/i2c-0: A0h whole (a0.txt), A2h
 # with the page select as found (a2.txt), and in chip.txt the page select,
 # the laser driver identity (A2h page 2 byte 0xa0, 0x6a for a GN25L95;
@@ -54,6 +54,11 @@
 # that carry the password or a key fragment are always withheld, and those
 # that carry the serial number unless --full: what is left of a value cut
 # by the ten-byte window would escape the scrub.
+#
+# The phone lines come in as pon/omcli_voip.txt, from omcli voip, which masks
+# the number, the display name and the login and never prints a password;
+# omcli voip --secrets-list feeds every one of those strings, and the login
+# of a server URL, to the scrub above, as it does the config store secrets.
 #
 # The MIB classes are a list on purpose, not the whole MIB: an OLT can push
 # credentials through OMCI (SIP user data, authentication methods, large
@@ -263,6 +268,12 @@ if step pon/omcli_state.txt omcli state; then
 	for c in provision flows tcont conn; do
 		step "pon/omcli_$c.txt" omcli "$c"
 	done
+	# The phone lines an OLT provisioned, in the view that masks the number,
+	# the display name and the login like the serial and never prints a
+	# password. The secrets themselves go to the scrub list, below, so a
+	# careless log line cannot give them away either.
+	step pon/omcli_voip.txt omcli voip
+	timeout "$STEP_TIMEOUT_S" omcli voip --secrets-list > "$work/voip.secrets" 2>/dev/null
 	for c in $OMCI_CLASSES; do
 		step "pon/omcli_mib_$c.txt" omcli mib "$c"
 	done
@@ -481,6 +492,12 @@ if [ -f /etc/config/confd.auth ]; then
 	cut -d: -f2- /etc/config/confd.auth | head -n 1 >> "$secrets"
 fi
 
+# The SIP credentials an OLT provisioned over OMCI (password, login, number,
+# display name; and any login inside a server URL): one per line from omcli,
+# scrubbed from every file like a secret of the config store. Only what
+# omcli printed in full, a line at a time, is taken.
+[ -s "$work/voip.secrets" ] && cat "$work/voip.secrets" >> "$secrets"
+
 # The identity: the IDENT_KEYS values from the config store, the serial in
 # /proc/odi_gpon/status (16 hex digits; its first four bytes are the vendor
 # id, so it is also turned into the text spelling the config uses), the MAC of
@@ -632,7 +649,7 @@ if [ -s "$script" ]; then
 		sed -i -f "$script" "$f"
 	done
 fi
-rm -f "$secrets" "$idents" "$rules" "$script" "$work"/gpon-*.raw "$work/module.serial" "$work/i2c.out"
+rm -f "$secrets" "$work/voip.secrets" "$idents" "$rules" "$script" "$work"/gpon-*.raw "$work/module.serial" "$work/i2c.out"
 
 tar -czf "$out.part" -C "$work" odi-diag || { rm -f "$out.part"; fail "tar failed"; }
 n=$(size_of "$out.part")

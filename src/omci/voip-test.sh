@@ -506,6 +506,56 @@ $Q cli/build/omcli voip --nonsense > "$v" 2>&1
 check "voip: an unknown argument is refused" "$(has "$v" 'unknown argument --nonsense')" "1"
 check "the voip view leaves the password out of the log" "$(leaks "$log" "$ACSPW" "$ACSPWX")" "0"
 
+# ------------------------------------------- the diagnostics bundle
+# diag-bundle.sh, run against this omcid with the provisioning above, and a
+# log file that quotes every SIP credential the way a careless log line
+# would (text, hex and spaced hex): the bundle must carry the masked voip
+# view and none of the strings, and still say a line is provisioned. Only
+# the steps that need a device fail here, and are listed as failing.
+DB=/tmp/voip-diag
+rm -rf "$DB"
+mkdir -p "$DB/bin" "$DB/log" "$DB/cfg"
+printf '#!/bin/sh\nexec %s %s/cli/build/omcli "$@"\n' "$Q" "$PWD" > "$DB/bin/omcli"
+chmod +x "$DB/bin/omcli"
+spaced() { printf '%s' "$1" | sed 's/../& /g;s/ $//'; }
+{
+	echo "harness: aor=$AOR name=$NAME user=$USR pw=$PW url=Url-Pw-9 login=user1"
+	echo "harness: hex aor=$AORX name=$NAMEX user=$USRX pw=$PWX url=$(hexof Url-Pw-9)"
+	echo "harness: ph pw=$(spaced "$PWX") name=$(spaced "$NAMEX")"
+} > "$DB/log/voip-harness.log"
+cp "$log" "$DB/log/omcid.log"
+CONFIG_DIR="$DB/cfg" LOG_DIR="$DB/log" PATH="$DB/bin:$PATH" METRICS_TIMEOUT_S=1 \
+	timeout 120 sh ../../rootfs/skeleton/etc/scripts/diag-bundle.sh "$DB/out.tar.gz" > "$DB/run.out" 2>&1
+check "the bundle is written" "$(tail -n 1 "$DB/run.out")" "$DB/out.tar.gz"
+mkdir "$DB/x"
+tar -xzf "$DB/out.tar.gz" -C "$DB/x" 2>/dev/null
+D=$DB/x/odi-diag
+check "the bundle carries the masked voice view" \
+      "$(has "$D/pon/omcli_voip.txt" 'port 0x201 (voice CTP 0x1)')$(has "$D/pon/omcli_voip.txt" 'line status config done (14)')" "11"
+check "and its step is listed with status 0" \
+      "$(awk '$3 == "pon/omcli_voip.txt" && $1 == 0 { n++ } END { print n + 0 }' "$D/MANIFEST.txt")" "1"
+planted=0
+for x in "$AOR" "$AORX" "$NAME" "$NAMEX" "$USR" "$USRX" "$PW" "$PWX" Url-Pw-9 "$(hexof Url-Pw-9)" \
+	"$(spaced "$PWX")" "$(spaced "$NAMEX")"; do
+	planted=$((planted + $(grep -r -l -i -F -e "$x" "$D" | wc -l)))
+done
+check "no SIP number, name, login or password is in any file of the bundle" "$planted" "0"
+check "the login in a server URL is not either, as a whole token" \
+      "$(grep -r -l -E '(^|[^A-Za-z0-9])user1([^A-Za-z0-9]|$)' "$D" | wc -l | tr -d ' ')" "0"
+check "the quoting log line is scrubbed in place, not dropped" \
+      "$(has "$D/log/voip-harness.log" 'harness: aor=REDACTED name=REDACTED user=REDACTED pw=REDACTED url=REDACTED login=REDACTED')" "1"
+rm -rf "$DB/x"
+mkdir "$DB/x"
+CONFIG_DIR="$DB/cfg" LOG_DIR="$DB/log" PATH="$DB/bin:$PATH" METRICS_TIMEOUT_S=1 \
+	timeout 120 sh ../../rootfs/skeleton/etc/scripts/diag-bundle.sh --full "$DB/full.tar.gz" > "$DB/run.out" 2>&1
+tar -xzf "$DB/full.tar.gz" -C "$DB/x" 2>/dev/null
+planted=0
+for x in "$AOR" "$NAME" "$USR" "$PW" Url-Pw-9; do
+	planted=$((planted + $(grep -r -l -i -F -e "$x" "$DB/x/odi-diag" | wc -l)))
+done
+check "--full keeps the identity but never a SIP credential" "$planted" "0"
+rm -rf "$DB"
+
 # ------------------------------------------------ respawn and resume
 send "$log" 00d0 49 0002 0000 8000
 mds=$(answer "$log" 00d0 | cut -c7-8)

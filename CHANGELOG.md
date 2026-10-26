@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- diag bundle: the phone lines an OLT provisioned are in the bundle, as
+  `pon/omcli_voip.txt`: the SIP servers, codecs, voice VLAN and line status,
+  with the phone number, display name and login masked like the serial and no
+  password at all. Every SIP credential (password, login, number, display
+  name, and a login inside a server URL) is also added to the list of
+  secrets the bundle scrubs from every file, as text and as hex, so none of
+  them can reach a bug report through a log line either.
 - CI: a slow package mirror no longer fails test-qemu. `tools/ci-apt.sh` cut
   each install of qemu-system-mips off after 5 minutes, so a mirror that was
   slow but still sending failed all three attempts. An install may now take
