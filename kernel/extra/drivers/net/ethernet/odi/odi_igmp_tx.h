@@ -11,6 +11,9 @@
  * tags, to an IPv4 multicast MAC (01:00:5e, bit 23 clear: every report and
  * leave goes to a group address or 224.0.0.2 or 224.0.0.22), at least the 60
  * bytes of a minimum Ethernet frame (the NIC adds the FCS but does not pad).
+ * With MLD snooping, also an MLD report or done (ICMPv6 131, 132, 143; never
+ * a query) to an IPv6 multicast MAC (33:33: a v1 report goes to its group,
+ * a done to ff02::2, a v2 report to ff02::16), the same length bounds.
  *
  * The descriptor is the one the OMCI reply already uses to reach the OLT
  * (odi_omci.c): PORT_SEL with the PON port alone and the upstream flow as
@@ -49,6 +52,18 @@ static inline int odi_igmp_tx_frame_ok(const uint8_t *f, uint32_t len)
 	if (f[0] != 0x01 || f[1] != 0x00 || f[2] != 0x5e || (f[3] & 0x80))
 		return 0;
 	return odi_igmp_frame_wanted(f, len);
+}
+
+static inline int odi_mld_tx_frame_ok(const uint8_t *f, uint32_t len)
+{
+	uint32_t t;
+
+	if (!f || len < ODI_IGMP_TX_MIN || len > ODI_IGMP_TX_MAX)
+		return 0;
+	if (f[0] != 0x33 || f[1] != 0x33)
+		return 0;
+	t = odi_mld_frame_type(f, len);
+	return t == ODI_MLD_V1_REPORT || t == ODI_MLD_V1_DONE || t == ODI_MLD_V2_REPORT;
 }
 
 #endif /* ODI_IGMP_TX_H */

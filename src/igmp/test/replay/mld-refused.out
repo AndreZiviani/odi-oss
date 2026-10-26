@@ -1,0 +1,64 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 1 allow + 0 static ranges
+policy6: 1 allow + 1 static IPv6 ranges
+snooping lease: copy host IGMP to the CPU, and its MLD  (not written)
+  set vid 0 33:33:00:00:00:10 ports 0x5  (not written)
+  set vid 0 33:33:00:00:00:11 ports 0x5  (not written)
+> 1 mld1join 1 0 fe80::2 ff3e::9
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:09  MLD v1 report  group ff3e::9  src fe80::2
+> 2 mld1join 1 0 fe80::2 ff3e::9
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:09  MLD v1 report  group ff3e::9  src fe80::2
+> 3 mld2join 1 0 fe80::2 ff3e::8000:5
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:16  MLD v2 report (1 records)  src fe80::2
+  set vid 0 33:33:80:00:00:05 ports 0x5  (not written)
+> 4 v2join 1 0 192.168.1.10 225.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 225.1.1.1  src 192.168.1.10
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 5 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+> 6 state
+joins=1
+denied=1
+groups=1
+refused_acl=1
+group=225.1.1.1
+refused=acl 239.1.1.1 vid=0 at=5 n=1
+# /var/run/odi-mcast6.state
+joins=1
+denied=2
+groups=1
+refused_acl=2
+group=ff3e::8000:5
+refused=acl ff3e::9 vid=0 at=2 n=2
+> 7 status
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 1 allow + 0 static ranges
+  allow 225.0.0.0 - 225.255.255.255
+joins 1, refused by the profile 1 (lists 1, group limit 0), table full 0
+groups held: 1
+  225.1.1.1
+recent refusals, newest first:
+  239.1.1.1  vid 0  outside the access control lists (acl)  at 5 s
+MLD: 1 allow + 1 static IPv6 ranges
+  allow6 ff3e::8000:0 - ff3e::8000:ffff
+  static6 ff15::10 - ff15::11
+MLD joins 1, refused by the profile 2 (lists 2, group limit 0), table full 0
+IPv6 groups held: 1
+  ff3e::8000:5
+recent IPv6 refusals, newest first:
+  ff3e::9  vid 0  outside the access control lists (acl)  x2  at 2 s
+> end
+joins=1
+denied=1
+groups=1
+refused_acl=1
+group=225.1.1.1
+refused=acl 239.1.1.1 vid=0 at=5 n=1
+# /var/run/odi-mcast6.state
+joins=1
+denied=2
+groups=1
+refused_acl=2
+group=ff3e::8000:5
+refused=acl ff3e::9 vid=0 at=2 n=2
+status 0

@@ -1,0 +1,15 @@
+# Without -6 (MLD_SNOOPING unset, the default) MLD is not the daemon's:
+# every MLD frame is described and dropped as IPv6, nothing is kept, no row
+# is written, and the lease and the state file are what they always were.
+# Run with -d only.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+allow6=ff3e::8000:0-ff3e::8000:ffff
+end
+0 tick
+1 mld1join 1 0 fe80::2 ff3e::8000:1
+2 mld2join 1 0 fe80::2 ff3e::9
+3 v2join 1 0 192.168.1.10 225.1.1.1
+4 state

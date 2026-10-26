@@ -261,6 +261,21 @@ static void test_igmp_way_up(void)
 	      "with the copy and the take held, the IGMP hook does not take it: the NIC drops it");
 	CHECK(odi_igmp_rx_takes(1, odi_nic_rx_src_port(&host_igmp), f, sizeof f),
 	      "the host's own report is taken");
+	{
+		/* The same for MLD: the OLT's query from the PON (ff02::1, ICMPv6
+		 * 130) is never taken, whatever the lease holds. */
+		uint8_t q[78] = { 0x33, 0x33, 0x00, 0x00, 0x00, 0x01, 0x02, 0, 0, 0, 0, 0x01,
+				  0x86, 0xdd, 0x60 };
+
+		q[14 + 5] = 24;
+		q[14 + 6] = 58;
+		q[14 + 40] = 130;
+		CHECK(odi_mld_frame_type(q, sizeof q) == 130, "the frame is an MLD query");
+		CHECK(!odi_mld_rx_takes(1, odi_nic_rx_src_port(&pon_igmp), q, sizeof q),
+		      "an MLD query from the PON, MLD held: not taken, the NIC drops it");
+		CHECK(odi_mld_rx_takes(1, odi_nic_rx_src_port(&host_igmp), q, sizeof q),
+		      "the host's own MLD is taken");
+	}
 
 	o3 = odi_igmp_tx_opts3(5);
 	CHECK(((o3 >> ODI_TXD_PORTS_SHIFT) & ODI_TXD_PORTS_MASK) == (1U << PON),

@@ -11,8 +11,9 @@
 # function other than snooping turning it off; the upstream IGMP tag control,
 # TCI and rate exported, and read by igmpd; a delete of the address row
 # turning it off; a MIB reset; the file rewritten only when it changed; the
-# access control list rows of OMCC 0xB0 (row parts 1 and 2, IPv6 ranges left
-# out, an IPv6-only list enforcing nothing); the width of attribute 16 of
+# access control list rows of OMCC 0xB0 (row parts 1 and 2, IPv6 ranges out
+# of the IPv4 lines and listed as allow6/static6 for igmpd -6, an IPv6-only
+# list enforcing nothing of IPv4); the width of attribute 16 of
 # class 309 (3 bytes, G.988); the service package table said not to select a
 # profile; the bandwidth of ME 310 and the imputed bandwidth of the rows; and
 # what igmpd meters, back into ME 311 (bandwidth, clients, times since the
@@ -290,8 +291,11 @@ check "34 ranges: the overflow is flagged" "$(policy | grep -c '^allow_overflow=
 # fields, part 2 (0x5000 | key) the leading 12 bytes of an IPv6 destination.
 # A prefix of ten zero bytes and ffff is the IPv4 form; any other is IPv6.
 # Key 1: IPv4, with a part 1 in the IPv4 form and preview fields. Key 2: a
-# part 2 with an IPv6 group. Key 3: a part 1 with an IPv6 source. Only key 1
-# is a range igmpd can enforce; the part rows are not ranges of their own.
+# part 2 with an IPv6 group. Key 3: a part 1 with an IPv6 source. Key 1 is the
+# one IPv4 range; key 2 is an IPv6 range (part 2's twelve bytes, then part
+# 0's last four of the start and end), listed for MLD; key 3's destinations
+# are IPv4 behind an IPv6 source, which nothing filters, and it is neither.
+# The part rows are not ranges of their own.
 m=$(grep -c 'multicast policy written' "$log")
 send "$log" 0200 48 0135 0001 "0200c000"
 K1P0=$(pad 40010fff000b00000000e1010000e10100ff 24)
@@ -308,8 +312,12 @@ done
 written "$log" $((m + 1))
 check "ACL parts: the table holds all six rows" \
       "$(table "$log" b20 0135 0001 0200 | wc -c)" "288"
-check "ACL parts: only the IPv4 row is a range; part rows and IPv6 rows are not" \
-      "$(policy | grep '^allow')" "allow=225.1.0.0-225.1.0.255"
+check "ACL parts: only the IPv4 row is an IPv4 range; part rows and IPv6 rows are not" \
+      "$(policy | grep '^allow=')" "allow=225.1.0.0-225.1.0.255"
+check "ACL parts: the IPv6 row is an IPv6 range, part 2's prefix and part 0's low bytes" \
+      "$(policy | grep '^allow6')" "allow6=ff3e::1234:e200:0-ff3e::1234:e200:ff"
+check "ACL parts: the IPv6 lines come after every IPv4 line" \
+      "$(policy | tail -1)" "allow6=ff3e::1234:e200:0-ff3e::1234:e200:ff"
 
 # An OLT that provisions only IPv6 rows: nothing to enforce, so no ACL at
 # all, not an IPv4 list that denies every join.
@@ -320,7 +328,33 @@ K5P2=$(pad 5005ff3e00000000000000005678 24)
 send "$log" 0211 48 0135 0001 "0200$K5P0"
 send "$log" 0212 48 0135 0001 "0200$K5P2"
 written "$log" $((m + 1))
-check "an IPv6-only ACL: no IPv4 range is listed" "$(policy | grep -c '^allow')" "0"
+check "an IPv6-only ACL: no IPv4 range is listed" "$(policy | grep -c '^allow=')" "0"
+check "an IPv6-only ACL: its range is listed for MLD" \
+      "$(policy | grep '^allow6')" "allow6=ff3e::5678:e500:0-ff3e::5678:e500:ff"
+
+# IPv6 rows of both lists: a single address (end zero, the single-address
+# form), a static range, a part 2 in the IPv4 form (an IPv4 row, not IPv6),
+# a backwards range left out. igmpd reads these lines (src/igmp/mld.c,
+# mld_policy_parse(), tested in src/igmp/test/mld_test.c in this form).
+m=$(grep -c 'multicast policy written' "$log")
+send "$log" 0213 48 0135 0001 "0200c000"
+send "$log" 0214 48 0135 0001 "0200$(pad 40060fff000b000000008000000100000000 24)"
+send "$log" 0215 48 0135 0001 "0200$(pad 5006ff1e00000000000000000000 24)"
+send "$log" 0216 48 0135 0001 "0200$(pad 40070fff000b00000000e7000005e7000001 24)"
+send "$log" 0217 48 0135 0001 "0200$(pad 5007ff3e00000000000000000000 24)"
+send "$log" 0218 48 0135 0001 "0200$(pad 40080fff000b00000000e8000000e80000ff 24)"
+send "$log" 0219 48 0135 0001 "0200$(pad 500800000000000000000000ffff 24)"
+send "$log" 021a 48 0135 0001 "0100c000"
+send "$log" 021b 48 0135 0001 "0100$(pad 40010fff000b00000000000a0000000a000f 24)"
+send "$log" 021c 48 0135 0001 "0100$(pad 5001ff150000000000000000abcd 24)"
+written "$log" $((m + 1))
+check "IPv6 rows: the IPv4 ranges as before, the IPv4-form part 2 among them" \
+      "$(policy | grep '^allow=')" "allow=232.0.0.0-232.0.0.255"
+check "IPv6 rows: the single address, the backwards range left out" \
+      "$(policy | grep '^allow6')" "allow6=ff1e::8000:1-ff1e::8000:1"
+check "IPv6 rows: the static list's IPv6 range" \
+      "$(policy | grep '^static6')" "static6=ff15::abcd:a:0-ff15::abcd:a:f"
+check "IPv6 rows: no overflow line" "$(policy | grep -c 'overflow')" "0"
 
 # ------------------------------------- ME 310 service package table
 # Said once when the OLT provisions it, not on every write; the profile is
@@ -344,6 +378,7 @@ check "no maximum and no imputed bandwidth: no bandwidth line" \
       "$(policy | grep -c '^max_bandwidth\|^bw')" "0"
 m=$(grep -c 'multicast policy written' "$log")
 send "$log" 0230 48 0136 0001 "1800000003e801"
+send "$log" 022f 48 0135 0001 "0200c000"
 send "$log" 0231 48 0135 0001 "0200$(pad 40060fff000b00000000e6010100e60101ff000002580000 24)"
 send "$log" 0232 48 0135 0001 "0200$(pad 40070fff000b00000000e7010100e70101ff000000000000 24)"
 written "$log" $((m + 1))

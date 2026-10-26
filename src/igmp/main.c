@@ -26,6 +26,12 @@
  * daemon dies, the switch goes back to flooding and the rows it wrote are
  * deleted, which is what an image without snooping does.
  *
+ * With -6 it does the same for the host's MLD (IPv6, mld.h): the switch
+ * copies (or takes) it too, IPv6 groups get rows keyed on 33:33 MACs, and
+ * with -d the PON also drops IPv6 multicast no row names, the link-scope
+ * and solicited-node groups excepted. Without -6 nothing of it runs and an
+ * MLD frame is described and dropped as before.
+ *
  * The programming is OFF unless -w is given: with it off the daemon prints
  * every row it would write and holds no lease, so a policy can be watched
  * before it is trusted. -j and -l drive the row path by hand.
@@ -42,6 +48,7 @@
 #include "replay.h"
 #include "uplink.h"
 #include "meter.h"
+#include "mld.h"
 #include "../omci/nl.h"
 #include "../omci/redirect_guard.h"
 
@@ -144,11 +151,14 @@ static int row_set(const struct igmp_db *db, uint16_t vid, uint32_t group)
 /* Every live group, written again: after the lease is taken, since rows
  * written before it are not the lease's to delete, and after a failed
  * write. */
+static void resync6(void);
+
 static void resync(const struct igmp_db *db)
 {
 	for (int i = 0; i < IGMP_MAX_GROUPS; i++)
 		if (db->g[i].in_use && row_set(db, db->g[i].vid, db->g[i].group))
 			rows_dirty = 1;
+	resync6();
 }
 
 /* Apply what changed. The count can exceed `cap` -- igmp_db_rx returns how
@@ -214,9 +224,9 @@ static uint32_t now_seconds(int *warned)
 
 static void usage(void)
 {
-	out("usage: igmpd [-w] [-d] [-f] [-n COUNT]\n"
-	    "       igmpd -r FILE\n"
-	    "       igmpd -s [STATE [POLICY]]\n"
+	out("usage: igmpd [-w] [-d] [-6] [-f] [-n COUNT]\n"
+	    "       igmpd [-6] -r FILE\n"
+	    "       igmpd -s [STATE [POLICY [STATE6]]]\n"
 	    "       igmpd [-w] -j GROUP -p PORTS [-v VID]\n"
 	    "       igmpd [-w] -l GROUP [-v VID]\n"
 	    "  Registers for packet-redirect uid 4, describes every IGMP control\n"
@@ -227,6 +237,10 @@ static void usage(void)
 	    "  -d         also drop IPv4 multicast no row names on the PON side,\n"
 	    "             after one membership interval. Off by default: it is the\n"
 	    "             one part that can cut a stream\n"
+	    "  -6         MLD (IPv6) as well: the host's MLD copied or taken like\n"
+	    "             its IGMP, IPv6 groups kept and programmed, and with -d\n"
+	    "             IPv6 multicast no row names dropped too (never ff02::/16\n"
+	    "             or a solicited-node group). Off by default\n"
 	    "  -n COUNT   stop after COUNT frames (0, the default, is forever)\n"
 	    "  -f         start even if a live process holds uid 4\n"
 	    "  -j GROUP   one-shot: program GROUP (a.b.c.d) with member PORTS\n"
@@ -239,8 +253,8 @@ static void usage(void)
 	    "             the same decision code and print what it decides; touches\n"
 	    "             neither /dev/odi_sw nor uid 4 (format: replay.c)\n"
 	    "  -s         print the policy in force, the groups held and the last\n"
-	    "             refused joins, from the daemon's files (or the two named),\n"
-	    "             and exit; touches neither the switch nor uid 4\n"
+	    "             refused joins, IPv6 too, from the daemon's files (or the\n"
+	    "             ones named), and exit; touches neither the switch nor uid 4\n"
 	    "  -h         this text; registers nothing\n");
 }
 
@@ -288,6 +302,10 @@ static uint32_t learn_until;
 static uint32_t lease_retry;
 /* -d: the PON's drop is wanted at all (IGMP_PON_DROP, svc-igmpd.sh). */
 static int pon_drop;
+/* -6: MLD as well (MLD_SNOOPING, svc-igmpd.sh), its lists and its table. */
+static int mld_on;
+static struct mld_policy pol6;
+static struct mld_db db6;
 
 /* Reads the policy file into buf. Returns its length, 0 when there is none
  * (omcid has not written it yet, or the MIB was reset and it says no
@@ -320,10 +338,18 @@ static int same_text(const char *a, uint32_t an, const char *b, uint32_t bn)
 	return 1;
 }
 
-/* What to hold at this second. */
+/* What to hold at this second. With -6 the MLD flags join it, and the IPv6
+ * lists can make it a take: there is one take for both, the profile's. */
 static uint32_t wanted_lease(const struct igmp_db *db, uint32_t now)
 {
-	return igmp_policy_lease(&pol, db->static_overflow, now, learn_until, pon_drop);
+	uint32_t l = igmp_policy_lease(&pol, db->static_overflow, now, learn_until, pon_drop);
+
+	if (!mld_on || !l)
+		return l;
+	l |= mld_policy_lease(&pol, &pol6, db6.static_overflow, now, learn_until, pon_drop);
+	if (mld_policy_takes(&pol, &pol6))
+		l |= ODI_SW_MC_SNOOP_TRAP;
+	return l;
 }
 
 /* Bring the lease to `want`. A failure is retried every ten seconds, and
@@ -390,12 +416,136 @@ static void write_state(const struct igmp_db *db)
 		sys_unlink(IGMP_STATE_TMP_PATH);
 }
 
+/* ---- MLD (-6): the IPv6 table's rows and its state file ------------- */
+
+/* The IPv6 state file's counts as last written, as for IPv4. */
+static uint32_t state6_joins, state6_refusals;
+
+static uint32_t refusal_total6(void)
+{
+	uint32_t t = 0;
+
+	for (uint32_t r = 1; r < IGMP_REFUSE_REASONS; r++)
+		t += db6.refused[r];
+	return t;
+}
+
+static void write_state6(void)
+{
+	static char buf[MLD_STATE_MAX];
+	uint32_t n;
+	long fd;
+
+	if (!mld_on)
+		return;
+	n = mld_state_format(&db6, buf, sizeof buf);
+	state6_joins = db6.joins;
+	state6_refusals = refusal_total6();
+	if (!n || !igmp_hw_enabled())
+		return;
+	fd = sys_create(MLD_STATE_TMP_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd < 0)
+		return;
+	if (sys_write((int)fd, buf, n) != (long)n) {
+		sys_close((int)fd);
+		sys_unlink(MLD_STATE_TMP_PATH);
+		return;
+	}
+	sys_close((int)fd);
+	if (sys_rename(MLD_STATE_TMP_PATH, MLD_STATE_PATH) < 0)
+		sys_unlink(MLD_STATE_TMP_PATH);
+}
+
+/* One row per MAC, the union of every IPv6 group on it (row_set() says
+ * why), the PON a member. */
+static int row_set6(uint16_t vid, const uint8_t g[16])
+{
+	uint32_t u = mld_db_mac_ports(&db6, g);
+	uint8_t mac[6];
+
+	mld_group_mac(mac, g);
+	return u ? igmp_hw_mac_set(vid, mac, u | PON_PORTBIT) : igmp_hw_mac_del(vid, mac);
+}
+
+static void resync6(void)
+{
+	if (!mld_on)
+		return;
+	for (int i = 0; i < MLD_MAX_GROUPS; i++)
+		if (db6.g[i].in_use && row_set6(db6.g[i].vid, db6.g[i].group))
+			rows_dirty = 1;
+}
+
+/* apply() for the IPv6 table. */
+static void apply6(const struct mld_change *ch, int n, int cap)
+{
+	if (n > cap) {
+		out_fmt("  %d changes, only %d recorded: writing every IPv6 group again\n", n, cap);
+		if (lease || !igmp_hw_enabled())
+			resync6();
+		return;
+	}
+	for (int i = 0; i < n; i++) {
+		if (ch[i].kind == IGMP_CHANGE_ROUTER) {
+			out_fmt("  MLD router ports -> 0x%x\n", ch[i].ports);
+			continue;
+		}
+		if ((lease || !igmp_hw_enabled()) && row_set6(ch[i].vid, ch[i].group))
+			rows_dirty = 1;
+	}
+}
+
+static void out_ip6(const uint8_t a[16])
+{
+	char t[40];
+
+	mld_format_ipv6(t, a);
+	out(t);
+}
+
+static void describe6(const struct mld_rx *rx, enum mld_parse_rc rc)
+{
+	out_fmt("port %d  ", rx->port);
+	if (rx->tagged)
+		out_fmt("vlan %d  ", rx->vid);
+	else
+		out("untagged  ");
+	out_mac(rx->src);
+	out(" -> ");
+	out_mac(rx->dst);
+	if (rc != MLD_OK) {
+		out_fmt("  DROP: %s\n", mld_parse_str(rc));
+		return;
+	}
+	out_fmt("  MLD %s", mld_type_str(rx->type));
+	if (rx->type == MLD_V2_REPORT) {
+		out_fmt(" (%d records)", rx->nrec);
+	} else {
+		out("  group ");
+		out_ip6(rx->group);
+	}
+	out("  src ");
+	out_ip6(rx->sip);
+	if (rx->hop_limit != 1)
+		out_fmt("  hop limit %d", rx->hop_limit);
+	if (!rx->router_alert)
+		out("  no-alert");
+	out_char('\n');
+}
+
+static void mld_policy_describe(const struct mld_policy *p)
+{
+	out_fmt("policy6: %d allow + %d static IPv6 ranges%s\n", (long)p->nallow,
+		(long)p->nstatic, p->overflow ? " (too many: not enforced)" : "");
+}
+
 /* Once a second: has the OLT changed what it asks for, and does the lease
  * match it. */
 static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 {
 	static char tmp[IGMP_POLICY_MAX_BYTES];
 	static struct igmp_change ch[MAX_CHANGES];
+	static struct mld_change ch6[MAX_CHANGES];
 	uint32_t n = read_policy(tmp, sizeof tmp);
 
 	if (first || !same_text(tmp, n, pol_text, pol_len)) {
@@ -408,6 +558,10 @@ static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 		igmp_policy_parse(tmp, n, &np);
 		pol = np;
 		igmp_policy_describe(&pol);
+		if (mld_on) {
+			mld_policy_parse(tmp, n, &pol6);
+			mld_policy_describe(&pol6);
+		}
 		if (!pol.snooping) {
 			/* Back to flooding. Releasing the lease deletes the rows,
 			 * so the table starts again from nothing. */
@@ -415,6 +569,11 @@ static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 			igmp_db_init(db);
 			igmp_db_set_policy(db, &pol, ch, MAX_CHANGES);
 			write_state(db);
+			if (mld_on) {
+				mld_db_init(&db6);
+				mld_db_set_policy(&db6, &pol, &pol6, ch6, MAX_CHANGES);
+				write_state6();
+			}
 			return;
 		}
 		if (!was)
@@ -425,6 +584,11 @@ static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 		changes = igmp_db_set_policy(db, &pol, ch, MAX_CHANGES);
 		apply(db, ch, changes, MAX_CHANGES);
 		write_state(db);
+		if (mld_on) {
+			changes = mld_db_set_policy(&db6, &pol, &pol6, ch6, MAX_CHANGES);
+			apply6(ch6, changes, MAX_CHANGES);
+			write_state6();
+		}
 		return;
 	}
 	if (pol.snooping)
@@ -534,11 +698,16 @@ static void write_meter(const struct igmp_db *db)
 void igmpd_tick(struct igmp_db *db, uint32_t now, int first)
 {
 	static struct igmp_change ch[MAX_CHANGES];
-	int changes;
+	static struct mld_change ch6[MAX_CHANGES];
+	int changes, changes6 = 0;
 
 	policy_tick(db, now, first);
 	changes = igmp_db_tick(db, now, ch, MAX_CHANGES);
 	apply(db, ch, changes, MAX_CHANGES);
+	if (mld_on) {
+		changes6 = mld_db_tick(&db6, now, ch6, MAX_CHANGES);
+		apply6(ch6, changes6, MAX_CHANGES);
+	}
 	if (rows_dirty && lease && (int32_t)(now - resync_at) >= 0) {
 		rows_dirty = 0;
 		resync_at = now + 5;
@@ -551,6 +720,9 @@ void igmpd_tick(struct igmp_db *db, uint32_t now, int first)
 	 * its row is the lease's, and goes with it. */
 	igmp_meter_tick(&meter, db, meter_ops(), lease != 0 && pol.snooping, now);
 	write_meter(db);
+	if (mld_on && (changes6 || db6.joins != state6_joins ||
+		       refusal_total6() != state6_refusals))
+		write_state6();
 }
 
 /* ---- the way up, for a report the switch took (uplink.h) ---------- */
@@ -575,13 +747,17 @@ static void route_tags(struct odi_sw_mc_route *r, const struct igmp_up_tags *t)
 }
 
 /* Send one taken message up as the profile says, or say why it is not.
- * `say`: the frame was described (a dry run, a change, an error), so the
- * outcome is said too; a refresh that went up, or was withheld again, says
- * nothing but its count. A message that should have gone up and could not
- * is always said. Returns whether the message went up (in a dry run: would
- * have). */
-static int uplink(struct igmp_db *db, const struct igmp_rx *rx,
-		  enum igmp_parse_rc prc, uint32_t now, int say)
+ * `type` is the message's IGMP type (IGMP_QUERY for an MLD query too, any
+ * other value for the rest of MLD, 0 for a message that did not parse) and
+ * `all_refused` whether the lists refused every join it carried. `say`: the
+ * frame was described (a dry run, a change, an error), so the outcome is
+ * said too; a refresh that went up, or was withheld again, says nothing but
+ * its count. A message that should have gone up and could not is always
+ * said. Returns whether the message went up (in a dry run: would have).
+ * IGMP and MLD share the counts and the rate: the profile's rate is one, on
+ * the UNI's IGMP and MLD messages together. */
+static int uplink(struct igmp_db *db, const uint8_t *eth, uint32_t eth_len,
+		  uint8_t type, int all_refused, uint32_t now, int say)
 {
 	static uint8_t frame[IGMP_UP_MAX_FRAME];
 	struct odi_sw_mc_route r;
@@ -590,13 +766,12 @@ static int uplink(struct igmp_db *db, const struct igmp_rx *rx,
 	uint32_t ctl = pol.us_tag_control, n = 0;
 	uint16_t vid = 0;
 	uint8_t pri = 0;
-	int all_refused = prc == IGMP_OK && db->rx_acl_refused && !db->rx_passable;
 
 	/* A message that did not parse is not judged by the lists (it named
 	 * no group this daemon could read), but it is still the host's IGMP,
 	 * which the switch would have forwarded: it goes up like any other,
 	 * under the same tag and rate. */
-	v = igmp_up_decide(&pol, prc == IGMP_OK ? rx->type : 0, all_refused, &up_rate, now);
+	v = igmp_up_decide(&pol, type, all_refused, &up_rate, now);
 	if (v != IGMP_UP_SEND) {
 		/* Counted, and said with the frame: a set-top box asking
 		 * again for a refused group does so every query interval. */
@@ -608,7 +783,7 @@ static int uplink(struct igmp_db *db, const struct igmp_rx *rx,
 			out_fmt("  up: %s\n", igmp_up_verdict_str(v));
 		return 0;
 	}
-	if (!igmp_up_read_tags(rx->eth, rx->eth_len, &t)) {
+	if (!igmp_up_read_tags(eth, eth_len, &t)) {
 		db->up_unsent++;
 		out("  up: not sent: the frame is too short for its tags\n");
 		return 0;
@@ -617,7 +792,7 @@ static int uplink(struct igmp_db *db, const struct igmp_rx *rx,
 		((uint8_t *)&r)[i] = 0;
 	route_tags(&r, &t);
 	if (ctl >= IGMP_US_TAG_ADD && ctl <= IGMP_US_TAG_VID) {
-		n = igmp_up_retag(rx->eth, rx->eth_len, ctl, (uint16_t)pol.us_tci,
+		n = igmp_up_retag(eth, eth_len, ctl, (uint16_t)pol.us_tci,
 				  frame, sizeof frame, &vid, &pri);
 		if (!n) {
 			db->up_unsent++;
@@ -652,7 +827,7 @@ static int uplink(struct igmp_db *db, const struct igmp_rx *rx,
 		return 0;
 	}
 	if (r.mode == ODI_SW_MC_ROUTE_FRAME) {
-		n = igmp_up_treat(rx->eth, rx->eth_len, &r, frame, sizeof frame);
+		n = igmp_up_treat(eth, eth_len, &r, frame, sizeof frame);
 		if (!n) {
 			db->up_unsent++;
 			out_fmt("  up: not sent: row %d treats the tags in a way not done here\n",
@@ -678,6 +853,33 @@ static int uplink(struct igmp_db *db, const struct igmp_rx *rx,
 	return 1;
 }
 
+/* An MLD message (-6): igmpd_frame() below, for the IPv6 table. `db` is
+ * the IPv4 one, for the group limit and the way-up counts. */
+static void mld_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
+		      uint32_t now)
+{
+	static struct mld_change ch[MAX_CHANGES];
+	struct mld_rx rx;
+	enum mld_parse_rc prc = mld_parse(payload, len, &rx);
+	int changes = 0, say;
+
+	db6.rx_acl_refused = db6.rx_passable = 0;
+	if (prc == MLD_OK && pol.snooping)
+		changes = mld_db_rx(&db6, &rx, now, (uint32_t)igmp_db_dynamic_count(db),
+				    ch, MAX_CHANGES);
+	say = !igmp_hw_enabled() || changes || prc != MLD_OK || !pol.snooping;
+	if (say)
+		describe6(&rx, prc);
+	if (rx.taken && rx.eth && (lease & ODI_SW_MC_SNOOP_TRAP))
+		uplink(db, rx.eth, rx.eth_len,
+		       prc != MLD_OK ? 0 : rx.type == MLD_QUERY ? IGMP_QUERY : rx.type,
+		       prc == MLD_OK && db6.rx_acl_refused && !db6.rx_passable, now, say);
+	if (changes) {
+		apply6(ch, changes, MAX_CHANGES);
+		write_state6();
+	}
+}
+
 /* One redirect payload, prefix included, NLMSG header already removed. */
 void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
 		 uint32_t now)
@@ -686,6 +888,11 @@ void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
 	struct igmp_rx rx;
 	enum igmp_parse_rc prc = igmp_parse(payload, len, &rx);
 	int changes = 0, say;
+
+	if (mld_on && prc == IGMP_IS_MLD) {
+		mld_frame(db, payload, len, now);
+		return;
+	}
 
 	db->rx_acl_refused = db->rx_passable = 0;
 	/* Only while snooping: a copy that arrives after the
@@ -705,7 +912,8 @@ void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
 	 * from here. Only under the take this daemon holds: a frame taken
 	 * under a lease since given back is one the kernel would refuse. */
 	if (rx.taken && rx.eth && (lease & ODI_SW_MC_SNOOP_TRAP))
-		uplink(db, &rx, prc, now, say);
+		uplink(db, rx.eth, rx.eth_len, prc == IGMP_OK ? rx.type : 0,
+		       prc == IGMP_OK && db->rx_acl_refused && !db->rx_passable, now, say);
 	if (changes) {
 		apply(db, ch, changes, MAX_CHANGES);
 		write_state(db);
@@ -724,6 +932,8 @@ void igmpd_reset(struct igmp_db *db)
 	igmp_db_init(db);
 	igmp_meter_init(&meter);
 	igmp_policy_defaults(&pol);
+	mld_db_init(&db6);
+	mld_policy_parse("", 0, &pol6);
 	up_rate.started = 0;
 }
 
@@ -745,9 +955,15 @@ void igmpd_replay_policy(const char *text, uint32_t len)
 void igmpd_state_dump(const struct igmp_db *db)
 {
 	static char buf[IGMP_STATE_MAX];
+	static char buf6[MLD_STATE_MAX];
 	uint32_t n = igmp_state_format(db, buf, sizeof buf);
 
 	out_n(buf, (int)n);
+	if (!mld_on)
+		return;
+	n = mld_state_format(&db6, buf6, sizeof buf6);
+	out("# " MLD_STATE_PATH "\n");
+	out_n(buf6, (int)n);
 }
 
 void igmpd_meter_dump(const struct igmp_db *db)
@@ -761,9 +977,14 @@ void igmpd_meter_dump(const struct igmp_db *db)
 void igmpd_status_dump(const struct igmp_db *db)
 {
 	static char buf[IGMP_STATE_MAX];
+	static char buf6[MLD_STATE_MAX];
 	uint32_t n = igmp_state_format(db, buf, sizeof buf);
 
 	igmp_status_print(&pol, 1, buf, n, 0);
+	if (!mld_on)
+		return;
+	n = mld_state_format(&db6, buf6, sizeof buf6);
+	mld_status_print(&pol6, buf6, n, 0);
 }
 
 int main(int argc, char **argv)
@@ -791,11 +1012,14 @@ int main(int argc, char **argv)
 			igmp_hw_set_enabled(1);
 		} else if (str_eq(argv[i], "-d")) {
 			pon_drop = 1;
+		} else if (str_eq(argv[i], "-6")) {
+			mld_on = 1;
 		} else if (str_eq(argv[i], "-s")) {
 			const char *sp = i + 1 < argc ? argv[i + 1] : 0;
 			const char *pp = sp && i + 2 < argc ? argv[i + 2] : 0;
+			const char *sp6 = pp && i + 3 < argc ? argv[i + 3] : 0;
 
-			return igmp_status_run(sp, pp);
+			return igmp_status_run(sp, pp, sp6);
 		} else if (str_eq(argv[i], "-r") && i + 1 < argc) {
 			replay_file = argv[++i];
 		} else if (str_eq(argv[i], "-n") && i + 1 < argc) {
@@ -866,9 +1090,10 @@ int main(int argc, char **argv)
 	}
 	igmpd_reset(&db);
 	igmp_hw_probe();
-	out_fmt("listening on redirect uid %d, mtu %d, %s\n",
+	out_fmt("listening on redirect uid %d, mtu %d, %s%s\n",
 		IGMP_REDIRECT_UID, IGMP_MAX_PAYLOAD,
-		igmp_hw_enabled() ? "WRITING to the switch" : "dry run (-w writes)");
+		igmp_hw_enabled() ? "WRITING to the switch" : "dry run (-w writes)",
+		mld_on ? ", MLD too" : "");
 	out_flush();
 
 	for (int first = 1;; first = 0) {

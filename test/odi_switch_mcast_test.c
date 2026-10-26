@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * odi_switch_mcast_test.c -- the switch half of IGMP snooping
- * (odi_switch_mcast.c): the ACL rule that copies (or takes) the host port's
- * IGMP to the CPU, the drop of unregistered IPv4 multicast from the PON, the
- * lease that takes them back with the rows the holder wrote, and the way a
- * taken report goes up: what may be sent, by whom, on which flow.
+ * odi_switch_mcast_test.c -- the switch half of IGMP and MLD snooping
+ * (odi_switch_mcast.c): the ACL rules that copy (or take) the host port's
+ * IGMP and MLD to the CPU, the drop of unregistered IPv4 and IPv6 multicast
+ * from the PON (the reserved IPv6 groups still flooded), the lease that
+ * takes them back with the rows the holder wrote, and the way a taken report
+ * goes up: what may be sent, by whom, on which flow.
  *
  * The rule is checked by what it MATCHES, not by comparing its words with
  * words typed in from the same reading: a small matcher built from the
@@ -152,6 +153,8 @@ static int tx_record(const uint8_t *frame, uint32_t len, uint32_t flow)
 static int failures;
 
 #define COPY_DROP (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP)
+/* Every IGMP flag: the lease before MLD. */
+#define IGMP_ALL (COPY_DROP | ODI_SW_MC_SNOOP_TRAP)
 
 #define CHECK(cond, msg) do { \
 	if (!(cond)) { \
@@ -248,6 +251,7 @@ static void boot_state(void)
 	held = 0;
 	ntracked = 0;
 	odi_sw_mcast_copy_on = 0;
+	odi_sw_mcast_mld_on = 0;
 	odi_sw_mcast_trap_on = 0;
 	/* Templates as a stick reads them (junk in template 6 included, and
 	 * the unused top bits of each word set), the ACL lookup on for every
@@ -392,7 +396,12 @@ static void test_pon_drop(void)
 	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_PON_DROP) < 0,
 	      "the drop without the copy is refused: no group would ever be registered");
 	CHECK(reg(ODI_SW_MC_UNKNOWN_IP4_OFF) == 0, "and nothing is written");
-	CHECK(odi_switch_mcast_snoop_set(0x8) < 0, "an unknown flag is refused");
+	CHECK(odi_switch_mcast_snoop_set(0x20) < 0, "an unknown flag is refused");
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_MLD) < 0,
+	      "the MLD copy without the IGMP one is refused: the lease is one");
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP6) < 0,
+	      "the IPv6 drop without the MLD copy is refused");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_IP6_OFF) == 0, "and nothing is written for IPv6");
 	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_TRAP) < 0,
 	      "the take without the copy is refused: it is a mode of the copy rule");
 	CHECK(odi_switch_mcast_flags() == 0 && ntw == 0, "and nothing is written");
@@ -461,7 +470,7 @@ static void test_rows_and_release(void)
 	CHECK(reg(ODI_SW_MC_UNKNOWN_IP4_OFF) == 0 && reg(ODI_SW_MC_UNKNOWN_CFG_OFF) == 0x20,
 	      "the PON floods as it did");
 
-	/* A holder cannot outgrow the track: the 129th row is refused and
+	/* A holder cannot outgrow the track: the row past it is refused and
 	 * the table is as it was. */
 	boot_state();
 	for (n = 0; n < ODI_SW_MC_TRACK_MAX; n++) {
@@ -550,16 +559,16 @@ static void test_trap_rule(void)
 	      "one write, the action entry: mirror to the CPU port again");
 	CHECK(odi_sw_mcast_trap_on == 0 && odi_sw_mcast_copy_on == 1, "the mark is off, the copy on");
 	ntw = 0;
-	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_ALL) == 0, "copy to take, with the drop");
+	CHECK(odi_switch_mcast_snoop_set(IGMP_ALL) == 0, "copy to take, with the drop");
 	CHECK(ntw == 1 && tw[0].table == ODI_SW_TBL_ACL_ACTIONS && tw[0].w[1] == (3U << 9),
 	      "one write, the action entry: trap");
-	CHECK(odi_sw_mcast_trap_on == 1 && odi_switch_mcast_flags() == ODI_SW_MC_SNOOP_ALL,
+	CHECK(odi_sw_mcast_trap_on == 1 && odi_switch_mcast_flags() == IGMP_ALL,
 	      "taken, and the drop on");
 
 	/* A failed mode write keeps the old mode, mark included. */
 	tw_fail = 1;
 	CHECK(odi_switch_mcast_snoop_set(COPY_DROP) == -5, "a table error is reported");
-	CHECK(odi_switch_mcast_flags() == ODI_SW_MC_SNOOP_ALL && odi_sw_mcast_trap_on == 1,
+	CHECK(odi_switch_mcast_flags() == IGMP_ALL && odi_sw_mcast_trap_on == 1,
 	      "and the take is still held and marked");
 	tw_fail = 0;
 
@@ -691,8 +700,315 @@ static void test_route(void)
 	      "the route request is 88 bytes, the send 1544");
 }
 
+/* ---- MLD --------------------------------------------------------------- */
+
+#define MLD_COPY (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_MLD)
+
+/* Whether rule `entry` of the last writes (ones and zeros planes, from the
+ * table-write log) matches a frame with these three slots: EtherType, IPv6
+ * traffic class and next header (or the IPv4 TOS and protocol), and the
+ * field selector's window (ICMPv6 type and code). 0 when the entry was never
+ * written with its valid bit. */
+static int entry_hits(uint32_t entry, unsigned int tmpl, unsigned int port, uint16_t ethertype,
+		      uint16_t nh, uint16_t window)
+{
+	const uint32_t *ones = 0, *zeros = 0;
+	uint16_t slot[8] = { 0 };
+	uint32_t key[5];
+	unsigned int i;
+
+	for (i = 0; i < ntw; i++) {
+		if (tw[i].index != entry)
+			continue;
+		if (tw[i].table == ODI_SW_TBL_ACL_PATTERN && (tw[i].w[0] & ODI_SW_MC_RULE_VALID))
+			ones = tw[i].w;
+		if (tw[i].table == ODI_SW_TBL_ACL_PATTERN_MASK)
+			zeros = tw[i].w;
+	}
+	if (!ones || !zeros)
+		return 0;
+	slot[0] = ethertype;
+	slot[1] = nh;
+	slot[2] = window;
+	key_of(key, tmpl, port, slot);
+	return rule_matches(ones, zeros, key);
+}
+
+/* Whether any of the MLD rules (or, with `igmp`, the IGMP rule too)
+ * matches. */
+static int mld_hits(unsigned int port, uint16_t ethertype, uint16_t nh, uint8_t type)
+{
+	uint32_t e;
+
+	for (e = ODI_SW_MC_MLD_ENTRY; e < ODI_SW_MC_MLD_ENTRY + ODI_SW_MC_MLD_RULES; e++)
+		if (entry_hits(e, 2, port, ethertype, nh, (uint16_t)(type << 8)))
+			return 1;
+	return 0;
+}
+
+static void test_mld_rules(void)
+{
+	uint32_t t2a, t2b;
+	unsigned int i, k, port;
+	static const uint8_t other[] = { 1, 2, 3, 4, 128, 129, 133, 134, 135, 136, 137, 141, 142, 151, 255 };
+
+	boot_state();
+	set_reg(0x23144U, 0x0000015dU);		/* selector 0 as something left it */
+	t2a = reg(0x15018U);
+	t2b = reg(0x1501cU);
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY) == 0, "the IGMP and MLD copies install");
+	CHECK(odi_switch_mcast_flags() == MLD_COPY, "both held");
+	CHECK(odi_sw_mcast_copy_on == 1 && odi_sw_mcast_mld_on == 1, "both hook flags are on");
+
+	CHECK(slot_code(2, 0) == 0x07, "template 2 slot 0 is the EtherType");
+	CHECK(slot_code(2, 1) == 0x15, "template 2 slot 1 is the IPv6 next header");
+	CHECK(slot_code(2, 2) == 0x40, "template 2 slot 2 is field selector 0");
+	for (i = 3; i < 8; i++)
+		CHECK(slot_code(2, i) == 0, "template 2 slots 3 to 7 compare nothing");
+	CHECK(slot_code(6, 0) == 0x07 && slot_code(6, 1) == 0x14, "template 6 is the IGMP rule's still");
+	CHECK(reg(0x23144U) == 6U, "selector 0: offset 0 from the start of the IP payload");
+	CHECK(reg(0x23148U) == 0 && reg(0x23150U) == 0, "no other selector is written");
+	for (k = 0; k < 3; k++)
+		CHECK(reg(0x15048U + 4U * (9U + k)) == 0x10, "entries 9 to 11 apply only the forwarding class");
+	CHECK(reg(0x15048U + 4U * 12U) == 0 && reg(0x15048U + 4U * 15U) == 0,
+	      "entries 12 to 15 are not touched");
+	for (i = 0; i < ntw; i++)
+		CHECK(tw[i].index >= 8U && tw[i].index <= 11U, "every ACL write is entry 8 to 11");
+	/* Each MLD entry: its first write clears the valid bit, its last sets
+	 * it. */
+	for (k = 9; k <= 11; k++) {
+		int first = -1, last = -1;
+
+		for (i = 0; i < ntw; i++)
+			if (tw[i].index == k) {
+				if (first < 0)
+					first = (int)i;
+				last = (int)i;
+			}
+		CHECK(first >= 0 && tw[first].table == ODI_SW_TBL_ACL_PATTERN &&
+		      !(tw[first].w[0] & ODI_SW_MC_RULE_VALID), "an MLD entry starts invalid");
+		CHECK(last >= 0 && tw[last].table == ODI_SW_TBL_ACL_PATTERN &&
+		      (tw[last].w[0] & ODI_SW_MC_RULE_VALID), "and its valid bit is written last");
+	}
+
+	/* What they match: the four MLD types entering the UNI, on template 2. */
+	CHECK(mld_hits(0, 0x86dd, 58, 130), "an MLD query from the UNI matches");
+	CHECK(mld_hits(0, 0x86dd, 58, 131), "an MLDv1 report from the UNI matches");
+	CHECK(mld_hits(0, 0x86dd, 58, 132), "an MLDv1 done from the UNI matches");
+	CHECK(mld_hits(0, 0x86dd, 58, 143), "an MLDv2 report from the UNI matches");
+	CHECK(mld_hits(0, 0x86dd, 0x0b3a, 143), "a traffic class is not compared");
+	for (port = 1; port < 6; port++)
+		CHECK(!mld_hits(port, 0x86dd, 58, 131) && !mld_hits(port, 0x86dd, 58, 143),
+		      "MLD from any other port, the PON (2) above all, does NOT match");
+	for (i = 0; i < sizeof other; i++)
+		CHECK(!mld_hits(0, 0x86dd, 58, other[i]),
+		      "no other ICMPv6 type matches: neighbour and router discovery, echo, errors");
+	CHECK(!mld_hits(0, 0x86dd, 17, 131), "UDP whose first octet reads 131 does not match");
+	CHECK(!mld_hits(0, 0x86dd, 0, 131), "the next header is not the hop-by-hop one");
+	CHECK(!mld_hits(0, 0x0800, 58, 131), "IPv4 does not match");
+	for (k = 9; k <= 11; k++)
+		CHECK(!entry_hits(k, 6, 0, 0x86dd, 58, 0x8300) && !entry_hits(k, 3, 0, 0x86dd, 58, 0x8300),
+		      "the same slots under another template do not match");
+	CHECK(!entry_hits(8, 6, 0, 0x86dd, 58, 0x8300), "the IGMP rule does not match MLD");
+	CHECK(entry_hits(8, 6, 0, 0x0800, 2, 0), "and still matches IGMP");
+
+	/* Release: the rules out, the template and the selector as found. */
+	odi_switch_mcast_release();
+	CHECK(odi_switch_mcast_flags() == 0 && odi_sw_mcast_mld_on == 0 && odi_sw_mcast_copy_on == 0,
+	      "release takes everything back");
+	for (k = 9; k <= 11; k++)
+		CHECK(reg(0x15048U + 4U * k) == 0x7f, "each MLD entry gets the reset enable word back");
+	CHECK(reg(0x15018U) == t2a && reg(0x1501cU) == t2b, "template 2 is restored");
+	CHECK(reg(0x23144U) == 0x15dU, "selector 0 is restored");
+
+	/* MLD off on its own: the IGMP copy stays. */
+	boot_state();
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY) == 0 &&
+	      odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0, "MLD dropped from the lease");
+	CHECK(odi_sw_mcast_mld_on == 0 && odi_sw_mcast_copy_on == 1 &&
+	      odi_switch_mcast_flags() == ODI_SW_MC_SNOOP_COPY, "the IGMP copy is still held");
+	CHECK(reg(0x15048U + 4U * 9U) == 0x7f && reg(0x15048U + 4U * 8U) == 0x10,
+	      "entry 9 is released, entry 8 is not");
+	odi_switch_mcast_release();
+
+	/* A table error part way leaves nothing of MLD. */
+	boot_state();
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0, "the copy alone");
+	tw_fail = 1;
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY) == -5, "a table error is reported");
+	tw_fail = 0;
+	CHECK(odi_switch_mcast_flags() == ODI_SW_MC_SNOOP_COPY && odi_sw_mcast_mld_on == 0,
+	      "MLD is not held and the hook does not take it");
+	CHECK(reg(0x23144U) == 0 && reg(0x15048U + 4U * 9U) == 0x7f,
+	      "the selector is back and entry 9 enables nothing");
+	odi_switch_mcast_release();
+}
+
+static void test_mld_trap(void)
+{
+	unsigned int i, k, n;
+
+	boot_state();
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY | ODI_SW_MC_SNOOP_TRAP) == 0, "MLD taken, with IGMP");
+	for (k = 8; k <= 11; k++) {
+		uint32_t *act = 0;
+
+		for (i = 0; i < ntw; i++)
+			if (tw[i].index == k && tw[i].table == ODI_SW_TBL_ACL_ACTIONS)
+				act = tw[i].w;
+		CHECK(act && act[0] == 0 && act[1] == (3U << 9) && act[2] == 0,
+		      "every rule's action is trap, no port");
+	}
+	CHECK(mld_hits(0, 0x86dd, 58, 143) && !mld_hits(2, 0x86dd, 58, 143),
+	      "the take matches the UNI's MLD and never the PON's");
+	ntw = 0;
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY) == 0, "take to copy");
+	for (i = 0, n = 0; i < ntw; i++) {
+		CHECK(tw[i].table == ODI_SW_TBL_ACL_ACTIONS && tw[i].w[1] == ((2U << 9) | (0x8U << 5)),
+		      "only action entries are rewritten, each to mirror to the CPU");
+		n |= 1U << tw[i].index;
+	}
+	CHECK(n == 0xf00U, "entries 8 to 11, each once");
+	CHECK(odi_sw_mcast_trap_on == 0 && odi_sw_mcast_mld_on == 1, "the mark off, MLD still copied");
+	odi_switch_mcast_release();
+}
+
+/* The reserved IPv6 groups flood both ways whatever the drop says: the
+ * drop is on the PON's ingress alone, and before it goes on the link-scope
+ * and solicited-node groups are made reserved and flooded. Pruning them is
+ * what cut router advertisements and DHCPv6 off in another open
+ * implementation's measurements. */
+static void test_pon_drop6(void)
+{
+	unsigned int i, at_cfg = 0, at_ip6 = 0;
+
+	boot_state();
+	set_reg(ODI_SW_MC_UNKNOWN_IP6_OFF, 0x00000003U);	/* port 0: some other value, kept */
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY | ODI_SW_MC_SNOOP_PON_DROP6) == 0,
+	      "MLD and the IPv6 drop together");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_IP6_OFF) == (0x3U | (1U << 4)),
+	      "port 2 (the PON) drops unregistered IPv6, the other ports keep what they had");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_IP4_OFF) == 0, "IPv4 is not dropped: that is PON_DROP's");
+	CHECK(((reg(ODI_SW_MC_UNKNOWN_CFG_OFF) >> 5) & 3U) == 1U,
+	      "reserved IPv6 groups are flooded whatever the drop says");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_CFG_OFF) & (1U << 8),
+	      "ff02::/16 is reserved: router advertisements, DHCPv6, MLDv2 reports");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_CFG_OFF) & (1U << 12),
+	      "the solicited-node groups are reserved: neighbour discovery");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_CFG_OFF) == 0x1120U, "and nothing else changed in the word");
+	for (i = 0; i < odi_mock.log_n; i++) {
+		if (odi_mock.log[i].kind != 'W')
+			continue;
+		if (odi_mock.log[i].addr == ODI_SW_MC_UNKNOWN_CFG_OFF && !at_cfg &&
+		    (odi_mock.log[i].val & 0x1100U) == 0x1100U)
+			at_cfg = i + 1;
+		if (odi_mock.log[i].addr == ODI_SW_MC_UNKNOWN_IP6_OFF && !at_ip6 &&
+		    (odi_mock.log[i].val & (1U << 4)))
+			at_ip6 = i + 1;
+	}
+	CHECK(at_cfg && at_ip6 && at_cfg < at_ip6,
+	      "the reserved groups are exempt before the drop goes on, never after");
+	CHECK(odi_switch_mcast_flags() == (MLD_COPY | ODI_SW_MC_SNOOP_PON_DROP6), "held");
+
+	/* Both drops, from a word with the reserved IPv6 groups not flooded. */
+	odi_switch_mcast_release();
+	boot_state();
+	set_reg(ODI_SW_MC_UNKNOWN_CFG_OFF, 0x08U);
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_ALL & ~ODI_SW_MC_SNOOP_TRAP) == 0,
+	      "both copies, both drops");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_CFG_OFF) == 0x1128U,
+	      "reserved IPv4 and IPv6 groups flooded, ff02::/16 and solicited-node among them");
+	/* The IPv6 drop off, MLD kept: the word as found for IPv6, the IPv4
+	 * half untouched. */
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY | ODI_SW_MC_SNOOP_PON_DROP) == 0, "the IPv6 drop alone off");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_IP6_OFF) == 0, "the PON floods IPv6 again");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_CFG_OFF) == 0x08U, "the IPv6 half as found, the IPv4 exemption still on");
+	odi_switch_mcast_release();
+	CHECK(reg(ODI_SW_MC_UNKNOWN_CFG_OFF) == 0x08U && reg(ODI_SW_MC_UNKNOWN_IP4_OFF) == 0 &&
+	      reg(ODI_SW_MC_UNKNOWN_IP6_OFF) == 0, "release: every register as found");
+
+	/* MLD released with the drop held takes the drop first. */
+	boot_state();
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY | ODI_SW_MC_SNOOP_PON_DROP6) == 0, "again");
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0, "MLD and its drop off");
+	CHECK(reg(ODI_SW_MC_UNKNOWN_IP6_OFF) == 0 && reg(ODI_SW_MC_UNKNOWN_CFG_OFF) == 0x20,
+	      "IPv6 floods as it did");
+	odi_switch_mcast_release();
+}
+
+/* An MLD frame, untagged: v1 report for ff3e::1:2 (or another type), behind
+ * a hop-by-hop header, padded to the minimum frame. */
+static uint32_t mld_frame(uint8_t *f, uint8_t type)
+{
+	memset(f, 0, 90);
+	memcpy(f, "\x33\x33\x00\x01\x00\x02\x02\x00\x00\x00\x00\x09\x86\xdd", 14);
+	f[14] = 0x60;
+	f[19] = 32;		/* payload length: 8 + 24 */
+	f[20] = 0;		/* next header: hop-by-hop */
+	f[21] = 1;
+	f[22] = 0xfe;		/* source fe80::... */
+	f[23] = 0x80;
+	f[38] = 0xff;		/* destination ff3e::1:2 */
+	f[39] = 0x3e;
+	f[51] = 0x01;
+	f[53] = 0x02;
+	f[54] = 58;		/* hop-by-hop: next header ICMPv6, length 0 */
+	f[56] = 5;		/* router alert */
+	f[57] = 2;
+	f[62] = type;
+	return 86;
+}
+
+static void test_mld_send(void)
+{
+	uint8_t f[96];
+	uint32_t n;
+
+	boot_state();
+	odi_sw_mcast_tx = tx_record;
+	n_tx = 0;
+	tx_rc = 0;
+	n = mld_frame(f, 131);
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP) == 0, "IGMP taken");
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22 && n_tx == 0,
+	      "MLD while only IGMP is taken: refused, the switch sent it itself");
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_TRAP | ODI_SW_MC_SNOOP_MLD) == 0,
+	      "MLD taken too");
+	CHECK(odi_switch_mcast_send(f, n, 3) == 0 && n_tx == 1 && tx_len == 86 && tx_flow == 3,
+	      "an MLDv1 report: sent");
+	n = mld_frame(f, 132);
+	CHECK(odi_switch_mcast_send(f, n, 3) == 0 && n_tx == 2, "an MLDv1 done: sent");
+	n = mld_frame(f, 143);
+	CHECK(odi_switch_mcast_send(f, n, 3) == 0 && n_tx == 3, "an MLDv2 report: sent");
+	n = mld_frame(f, 130);
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22, "an MLD query: refused, the OLT is the querier");
+	n = mld_frame(f, 135);
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22, "a neighbour solicitation: refused");
+	n = mld_frame(f, 128);
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22, "an echo request: refused");
+	n = mld_frame(f, 131);
+	f[0] = 0x01;
+	f[1] = 0x00;
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22, "to a MAC outside 33:33: refused");
+	f[0] = 0x33;
+	f[1] = 0x33;
+	f[54] = 17;
+	CHECK(odi_switch_mcast_send(f, n, 3) == -22, "not ICMPv6 behind the hop-by-hop: refused");
+	f[54] = 58;
+	CHECK(odi_switch_mcast_send(f, 59, 3) == -22, "shorter than a minimum frame: refused");
+	CHECK(odi_switch_mcast_send(f, n, 4) == -22, "a flow no upstream row queues on: refused");
+	CHECK(n_tx == 3, "none of the refused ones reached the transmit");
+	odi_switch_mcast_release();
+	CHECK(odi_switch_mcast_send(f, n, 3) == -1, "after the lease: nothing is sent");
+	odi_sw_mcast_tx = 0;
+}
+
 int main(void)
 {
+	test_mld_rules();
+	test_mld_trap();
+	test_pon_drop6();
+	test_mld_send();
 	test_trap_rule();
 	test_send();
 	test_route();
