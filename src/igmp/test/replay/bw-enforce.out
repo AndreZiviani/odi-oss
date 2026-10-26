@@ -1,0 +1,63 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 2 allow + 0 static ranges
+  bandwidth: at most 1000 bytes a second, enforced; ranges with an imputed one: 1
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
+> 1 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 2 v2join 1 0 192.168.1.10 239.1.1.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:02  v2 report  group 239.1.1.2  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+> 3 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+> 4 v2join 1 0 192.168.1.10 239.2.0.9
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:02:00:09  v2 report  group 239.2.0.9  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:02:00:09 ports 0x5  (not written)
+> 5 status
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 2 allow + 0 static ranges
+  bandwidth: at most 1000 bytes a second, enforced; ranges with an imputed one: 1
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
+  allow 239.1.1.0 - 239.1.1.255
+  allow 239.2.0.0 - 239.2.255.255
+joins 3, refused by the profile 1 (lists 0, group limit 0), table full 0
+past the multicast bandwidth 1, of them refused 1
+sent up 4, withheld 0, over the rate 0, not sent 0
+groups held: 2
+  239.1.1.1
+  239.2.0.9
+recent refusals, newest first:
+  239.1.1.2  vid 0  past the multicast bandwidth (bw)  at 2 s
+> 6 v2leave 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:02  leave  group 239.1.1.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  del vid 0 01:00:5e:01:01:01 ports 0x0  (not written)
+> 7 v2join 1 0 192.168.1.10 239.1.1.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:02  v2 report  group 239.1.1.2  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:01:01:02 ports 0x5  (not written)
+> 8 state
+joins=4
+denied=1
+groups=2
+refused_bw=1
+bw_exceeded=1
+up_sent=6
+group=239.1.1.2
+group=239.2.0.9
+refused=bw 239.1.1.2 vid=0 at=2 n=1
+> end
+joins=4
+denied=1
+groups=2
+refused_bw=1
+bw_exceeded=1
+up_sent=6
+group=239.1.1.2
+group=239.2.0.9
+refused=bw 239.1.1.2 vid=0 at=2 n=1
+status 0

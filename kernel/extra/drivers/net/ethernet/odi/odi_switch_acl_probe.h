@@ -21,7 +21,10 @@
  * (odi_reg.c): its close removes every one, so a probe that dies leaves the
  * switch as it found it. They are not installed while the snooping lease is
  * held (odi_switch_mcast.h), and the lease is not given while they are: the
- * copy rule and a probe of the same frames would decide for each other.
+ * copy rule and a probe of the same frames would decide for each other. Nor
+ * while a multicast group counter is in (odi_switch_mc_count.h), which is
+ * refused while a probe is: of two rules that match one frame only the
+ * lower entry counts it, and the counters sit below the probes.
  *
  * Plain C with no kernel dependency, like odi_switch_mcast.c: the host test
  * (test/odi_switch_acl_probe_test.c) builds it against test/odi_switch_mock.h.
@@ -36,6 +39,8 @@
 #include <stdint.h>
 #endif
 
+#include "odi_switch_log.h"
+
 /* Eight rules, ACL entries 88 to 95, all on template 4 (EtherType, IPv4
  * protocol and destination address in slots 0 to 3). The module-load replay
  * keeps entry 1 and template 3, the snooping copy entry 8 and template 6,
@@ -48,15 +53,9 @@
 #define ODI_SW_PROBE_TEMPLATE		4U
 #define ODI_SW_PROBE_COUNTER_BASE	16U
 
-/* The log counters: 32 words of 32 bits from LOG_CNT, and LOG_TYPE, a bit a
- * pair of counters, 1 counting bytes and 0 frames (from another open
- * implementation's measurements). Nothing else in this tree programs a log
- * counter, so LOG_TYPE is written whole from what the probes want and never
- * read: it is outside every register read made on a stick so far, and a
- * register is not read here on the strength of a guess.
+/* The log counters and LOG_TYPE are odi_switch_log.h's: the probes own
+ * counters 16 to 31, pairs 8 to 15, and change no other bit of LOG_TYPE.
  */
-#define ODI_SW_LOG_CNT_OFF		0x32600U
-#define ODI_SW_LOG_TYPE_OFF		0x34008U
 
 /* The receive reason of a frame an ACL rule sent the CPU: 128 plus the
  * entry (another open implementation's measurements, for both a trap and a
@@ -112,8 +111,9 @@ struct odi_sw_acl_probe {
 /* One request, under odi_switch_lock. Returns 0 or a negative errno:
  * -EINVAL for a slot, port, action or protocol out of range, a copy or a
  * trap of anything but IGMP from the UNI, or a counter mode not 0 or 1;
- * -EBUSY for a SET on a slot in use or while the snooping lease is held; the
- * table engine's error when a write timed out (the slot is left empty).
+ * -EBUSY for a SET on a slot in use, while the snooping lease is held or
+ * while a group counter is in; the table engine's error when a write timed
+ * out (the slot is left empty).
  */
 int odi_sw_probe_request(struct odi_sw_acl_probe *req);
 

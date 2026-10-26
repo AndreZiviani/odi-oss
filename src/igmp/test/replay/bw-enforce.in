@@ -1,0 +1,25 @@
+# ME 310 caps the subscriber at 1000 bytes a second and enforces it; the
+# dynamic list imputes 600 to each group of 239.1.1.0/24 and nothing to
+# 239.2.0.0/16. The first group joins (600); the second would make 1200 and
+# is refused with the reason "bw", counted in denied and in bw_exceeded. A
+# refresh of the first is never refused, and a group the list imputes
+# nothing to joins whatever the total.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+max_bandwidth=1000
+bw_enforce=1
+allow=239.1.1.0-239.1.1.255
+allow=239.2.0.0-239.2.255.255
+bw=239.1.1.0-239.1.1.255 600
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+2 v2join 1 0 192.168.1.10 239.1.1.2
+3 v2join 1 0 192.168.1.10 239.1.1.1
+4 v2join 1 0 192.168.1.10 239.2.0.9
+5 status
+6 v2leave 1 0 192.168.1.10 239.1.1.1
+7 v2join 1 0 192.168.1.10 239.1.1.2
+8 state

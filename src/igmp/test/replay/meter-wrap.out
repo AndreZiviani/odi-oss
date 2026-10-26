@@ -1,0 +1,35 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+snooping lease: copy host IGMP to the CPU  (not written)
+> 1 v3join 1 10 192.168.1.10 239.2.2.2
+port 1  vlan 10  02:00:00:00:00:01 -> 01:00:5e:00:00:16  v3 report (1 records)  src 192.168.1.10
+  set vid 10 01:00:5e:02:02:02 ports 0x5  (not written)
+> 1 ctr 239.2.2.2 4294956296
+> 2 tick
+> 2 ctr 239.2.2.2 4294961296
+> 3 tick
+> 3 ctr 239.2.2.2 4294966296
+> 4 tick
+> 4 ctr 239.2.2.2 4000
+> 5 tick
+> 5 ctr 239.2.2.2 9000
+> 6 tick
+> 6 ctr 239.2.2.2 14000
+> 7 tick
+> 7 meter
+bps=5000
+lost=0
+group=239.2.2.2 vid=10 client=192.168.1.10 joined=1 bps=5000 flow=up
+> 12 tick
+> 12 meter
+bps=0
+lost=0
+group=239.2.2.2 vid=10 client=192.168.1.10 joined=1 bps=0 flow=up
+> 13 tick
+> end
+joins=1
+denied=0
+groups=1
+group=239.2.2.2
+status 0

@@ -589,9 +589,12 @@ uint16_t tbl_serialise(const struct omci_class *c, uint16_t inst, unsigned k,
 	/* The bridge table of a port is the switch's, not the store's. */
 	if (c->classId == 50 && k == 1)
 		return bridge_table_read(inst, out, (uint16_t)(max - max % w));
-	/* The active group list is the snooper's. */
+	/* The active group list is the snooper's, and so is the profile's
+	 * list of lost groups. */
 	if (c->classId == CLS_MCAST_MONITOR && k == 5)
 		return mcast_active_groups(out, (uint16_t)(max - max % w));
+	if (c->classId == CLS_MCAST_OPER_PROFILE && k == 9)
+		return mcast_lost_groups(inst, out, (uint16_t)(max - max % w));
 	if (tbl_kind(c, k)) {
 		for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE;
 		     i = tblpool[i].next) {
@@ -1389,11 +1392,14 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 			out[0] = (uint8_t)(v >> 8); out[1] = (uint8_t)v;
 		} else if (k == 4) out[0] = tag ? (uint8_t)vlanCfg.pri : 0xff;
 	} else if (c->classId == CLS_MCAST_MONITOR) { /* multicast subscriber monitor */
-		/* The snooper's counters (mcast.c): joins the subscriber sent
-		 * (3). The bandwidth attributes stay zero, the ONU does not
-		 * meter streams. */
-		if (k == 3 && n >= 4) {
-			uint32_t v = mcast_state_get("joins");
+		/* The snooper's counters (mcast.c): the bandwidth its group
+		 * counters measure (2, zero while nothing is metered), the joins
+		 * the subscriber sent (3), and the joins past the bandwidth of
+		 * ME 310 (4). */
+		if ((k == 2 || k == 3 || k == 4) && n >= 4) {
+			uint32_t v = k == 2 ? mcast_meter_get("bps") :
+				     k == 3 ? mcast_state_get("joins") :
+				     mcast_state_get("bw_exceeded");
 
 			out[0] = (uint8_t)(v >> 24); out[1] = (uint8_t)(v >> 16);
 			out[2] = (uint8_t)(v >> 8);  out[3] = (uint8_t)v;

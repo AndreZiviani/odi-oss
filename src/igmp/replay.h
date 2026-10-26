@@ -23,6 +23,12 @@ void igmpd_replay_policy(const char *text, uint32_t len);
 void igmpd_state_dump(const struct igmp_db *db);
 /* What `igmpd -s` prints for this table and the policy in force. */
 void igmpd_status_dump(const struct igmp_db *db);
+/* The meter file igmpd would write (meter.h). */
+void igmpd_meter_dump(const struct igmp_db *db);
+
+/* replay.c: what the transcript says the counter of `group`'s MAC has
+ * counted (its `ctr` events), 0 before the first. */
+uint32_t igmp_replay_counter(uint32_t group);
 
 /* replay.c: run FILE ("-" for stdin). Returns the exit status. */
 int igmp_replay(const char *path);

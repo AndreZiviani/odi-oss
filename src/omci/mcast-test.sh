@@ -14,7 +14,9 @@
 # access control list rows of OMCC 0xB0 (row parts 1 and 2, IPv6 ranges left
 # out, an IPv6-only list enforcing nothing); the width of attribute 16 of
 # class 309 (3 bytes, G.988); the service package table said not to select a
-# profile.
+# profile; the bandwidth of ME 310 and the imputed bandwidth of the rows; and
+# what igmpd meters, back into ME 311 (bandwidth, clients, times since the
+# join), ME 309's lost group list and its alarm 0.
 #
 # Run from src/omci, inside the toolchain image (make test-omci-mcast):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
@@ -333,6 +335,44 @@ sleep 1.5
 check "a service package table: said once as not selecting by VID" \
       "$(grep -c 'does not select a profile by VID' "$log")" "1"
 
+# ------------------------------- ME 310 bandwidth, the imputed bandwidth
+# Attributes 4 and 5 of the subscriber (mask 0x1800): at most 1000 bytes a
+# second, enforced. Dynamic rows: 230.1.1.0/24 imputing 600 bytes a second
+# (bytes 18-21 of the row), 231.1.1.0/24 imputing none. Both keys appear
+# only when set, and a bw line only for the row that imputes one.
+check "no maximum and no imputed bandwidth: no bandwidth line" \
+      "$(policy | grep -c '^max_bandwidth\|^bw')" "0"
+m=$(grep -c 'multicast policy written' "$log")
+send "$log" 0230 48 0136 0001 "1800000003e801"
+send "$log" 0231 48 0135 0001 "0200$(pad 40060fff000b00000000e6010100e60101ff000002580000 24)"
+send "$log" 0232 48 0135 0001 "0200$(pad 40070fff000b00000000e7010100e70101ff000000000000 24)"
+written "$log" $((m + 1))
+check "the maximum, its enforcement and the imputed bandwidth are exported" \
+      "$(policy | grep '^max_bandwidth\|^bw')" "max_bandwidth=1000
+bw_enforce=1
+bw=230.1.1.0-230.1.1.255 600"
+check "and the rows are ranges as before" "$(policy | grep '^allow' | sort)" \
+"allow=230.1.1.0-230.1.1.255
+allow=231.1.1.0-231.1.1.255"
+if [ -x "$IGMPD" ]; then
+	cp /var/run/odi-mcast.conf /tmp/mcast-policy-snap
+	cat > /tmp/mcast-replay-bw.in <<'EOF2'
+0 policy-file /tmp/mcast-policy-snap
+0 tick
+1 v2join 1 0 192.168.1.10 230.1.1.1
+2 v2join 1 0 192.168.1.10 230.1.1.2
+3 v2join 1 0 192.168.1.10 231.1.1.9
+4 state
+EOF2
+	$Q "$IGMPD" -r /tmp/mcast-replay-bw.in > /tmp/mcast-replay.out 2>&1
+	check "igmpd reads the maximum: the first 600 joins" \
+	      "$(rep | grep -c 'set vid 0 01:00:5e:01:01:01 ports 0x5')" "1"
+	check "the second 600 would pass 1000: refused, and counted" \
+	      "$(rep | grep -c '01:00:5e:01:01:02 ports')$(rep | grep -c '^bw_exceeded=1$')" "02"
+	check "a group imputing nothing joins whatever the total" \
+	      "$(rep | grep -c 'set vid 0 01:00:5e:01:01:09 ports 0x5')" "1"
+fi
+
 # ------------------------------------- ME 311, from what igmpd writes
 # Class 311 (0x0137) instance 1. The state file is igmpd's; written here the
 # way it writes it.
@@ -373,9 +413,58 @@ check "311 JoinMsgCounter from a file cut off inside a refusal line" \
       "$(send "$log" 0075 49 0137 0001 "2000" && answer "$log" 0075 | cut -c7-14)" "00000006"
 check "311 active group list from a file cut off inside a refusal line" \
       "$(table "$log" b14 0137 0001 0800)" "$G1"
-rm -f /var/run/odi-mcast.state
+# The joins past the bandwidth (attribute 4, mask 0x1000), a state key.
+printf 'joins=6\ndenied=2\ngroups=1\nbw_exceeded=3\ngroup=239.1.2.3\n' > /var/run/odi-mcast.state
+check "311 BandwidthExcCounter is igmpd's bw_exceeded" \
+      "$(send "$log" 0076 49 0137 0001 "1000" && answer "$log" 0076 | cut -c7-14)" "00000003"
+
+# ------------------------- ME 311 and ME 309 from igmpd's meter file
+# With no meter file: the bandwidth reads 0, the active group list comes from
+# the state file as before, the lost group list is empty and there is no
+# alarm.
+rm -f /var/run/odi-mcast.meter
+check "311 CurrMcastBandwidth with no meter file: 0" \
+      "$(send "$log" 0300 49 0137 0001 "4000" && answer "$log" 0300 | cut -c7-14)" "00000000"
+check "309 lost group list with no meter file: empty" \
+      "$(table "$log" b30 0135 0001 0080)" ""
+# The meter file as igmpd writes it (src/igmp/meter.h): 239.1.2.3 on VLAN 10
+# joined 100 s ago by 192.168.1.10, flowing at 1000 bytes a second; 225.200.7.9
+# on no VLAN, lost. The join time is on the monotonic clock omcid reads too.
+up=$(cut -d. -f1 /proc/uptime)
+j=$((up - 100))
+printf 'bps=1500\nlost=1\ngroup=239.1.2.3 vid=10 client=192.168.1.10 joined=%s bps=1000 flow=up\ngroup=225.200.7.9 vid=0 client=192.168.1.11 joined=%s bps=500 flow=lost\n' \
+	"$j" "$j" > /var/run/odi-mcast.meter
+check "311 CurrMcastBandwidth is the meter's total" \
+      "$(send "$log" 0301 49 0137 0001 "4000" && answer "$log" 0301 | cut -c7-14)" "000005dc"
+rows=$(table "$log" b31 0137 0001 0800)
+check "311 active group list from the meter: VLAN, group, bandwidth, client" \
+      "$(printf '%s' "$rows" | cut -c1-36)$(printf '%s' "$rows" | cut -c45-48)" \
+      "000a00000000ef010203000003e8c0a8010a0000"
+since=$((0x$(printf '%s' "$rows" | cut -c37-44)))
+check "311 active group list: the time since the join, from the same clock" \
+      "$([ "$since" -ge 95 ] && [ "$since" -le 130 ] && echo ok || echo "$since")" "ok"
+check "311 active group list: a row a (VLAN, group) of the meter" \
+      "$(printf '%s' "$rows" | cut -c49-84)" "000000000000e1c80709000001f4c0a8010b"
+check "309 lost group list: the lost group, VLAN, no source, destination" \
+      "$(table "$log" b32 0135 0001 0080)" "000000000000e1c80709"
+check "309 lost group list: only on the subscriber's profile" \
+      "$(send "$log" 0302 44 0135 0002 "020001" && table "$log" b33 0135 0002 0080)" ""
+# Alarm 0 of the subscriber's profile (class 309, 0x0135, instance 1): raised
+# while a group is lost, cleared when none is, a level evaluated each second.
+need "$log" '^=> 0000100a0135000180' 5
+printf 'bps=1500\nlost=0\ngroup=239.1.2.3 vid=10 client=192.168.1.10 joined=%s bps=1000 flow=up\ngroup=225.200.7.9 vid=0 client=192.168.1.11 joined=%s bps=500 flow=up\n' \
+	"$j" "$j" > /var/run/odi-mcast.meter
+need "$log" '^=> 0000100a0135000100' 5
+check "309 alarm 0: raised once, cleared once" \
+      "$(grep -c '^=> 0000100a01350001' "$log")" "2"
+check "309 lost group list once it flows again: empty" \
+      "$(table "$log" b34 0135 0001 0080)" ""
+check "no alarm for the profile no subscriber points at" \
+      "$(grep -c '^=> 0000100a01350002' "$log")" "0"
+rm -f /var/run/odi-mcast.state /var/run/odi-mcast.meter
 
 # --------------------------------------------------------------- MIB reset
+m=$(grep -c 'multicast policy written' "$log")
 send "$log" 0070 4f 0002 0000 ""
 written "$log" $((m + 1))
 check "a MIB reset: no snooping" "$(policy)" "snooping=0"

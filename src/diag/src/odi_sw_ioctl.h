@@ -167,6 +167,36 @@ struct odi_sw_acl_probe {
 #define ODI_SW_PROBE_ALL     0xffffffffu
 #define ODI_SW_PROBE_SLOTS   8u
 
+/* Multicast group counters, odi_switch_mc_count.h in the kernel tree: rules
+ * that count the frames or bytes of one destination entering the UNI or the
+ * PON port, and nothing else. Held like the probes: SET and DEL belong to the
+ * open file that set first, until it closes; GET is open to anyone. The
+ * probes and these exclude each other (EBUSY). */
+struct odi_sw_mc_count {
+	uint32_t op;            /* ODI_SW_MCC_SET / _GET / _DEL */
+	uint32_t slot;          /* 0..15, or ODI_SW_MCC_ALL for a DEL */
+	uint32_t port;          /* 0 the UNI, 2 the PON */
+	uint32_t match;         /* ODI_SW_MCC_MATCH_MAC / _IPV4 */
+	uint32_t bytes;         /* 1: count bytes (FCS included), 0: frames */
+	uint8_t  mac[6];        /* MATCH_MAC: the destination MAC */
+	uint8_t  mac_mask[6];   /* the bits of mac compared */
+	uint32_t dst;           /* MATCH_IPV4: the destination */
+	uint32_t dst_mask;      /* the bits of dst compared */
+	uint32_t in_use;        /* GET: the slot holds a rule */
+	uint32_t entry;         /* its ACL entry */
+	uint32_t counter;       /* its log counter */
+	uint32_t now;           /* the counter word as read */
+	uint32_t total_lo;      /* what the rule counted since it went in, */
+	uint32_t total_hi;      /* folded to 64 bits on every read */
+};
+#define ODI_SW_MCC_SET         1u
+#define ODI_SW_MCC_GET         2u
+#define ODI_SW_MCC_DEL         3u
+#define ODI_SW_MCC_ALL         0xffffffffu
+#define ODI_SW_MCC_MATCH_MAC   1u
+#define ODI_SW_MCC_MATCH_IPV4  2u
+#define ODI_SW_MCC_SLOTS       16u
+
 #define ODI_SW_IOC_REG_GET	0xC0085301U
 #define ODI_SW_IOC_REG_SET	0x80085302U
 #define ODI_SW_IOC_MIB_GET	0xC0105304U
@@ -180,5 +210,6 @@ struct odi_sw_acl_probe {
 #define ODI_SW_IOC_ACL_PROBE	0xC048530CU
 #define ODI_SW_IOC_MC_ROUTE	0xC058530DU
 #define ODI_SW_IOC_MC_SEND	0x8608530EU
+#define ODI_SW_IOC_MC_COUNT	0xC040530FU
 
 #endif

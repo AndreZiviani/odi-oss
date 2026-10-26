@@ -60,3 +60,8 @@ int igmp_sw_send(struct odi_sw_mc_send *m)
 {
 	return sw_ioctl(ODI_SW_IOC_MC_SEND, m);
 }
+
+int igmp_sw_count(struct odi_sw_mc_count *c)
+{
+	return sw_ioctl(ODI_SW_IOC_MC_COUNT, c);
+}

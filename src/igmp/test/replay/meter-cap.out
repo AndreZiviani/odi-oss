@@ -1,0 +1,125 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+snooping lease: copy host IGMP to the CPU  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:01  v2 report  group 239.3.0.1  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:01 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:02  v2 report  group 239.3.0.2  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:02 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.3
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:03  v2 report  group 239.3.0.3  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:03 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.4
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:04  v2 report  group 239.3.0.4  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:04 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.5
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:05  v2 report  group 239.3.0.5  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:05 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.6
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:06  v2 report  group 239.3.0.6  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:06 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.7
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:07  v2 report  group 239.3.0.7  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:07 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.8
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:08  v2 report  group 239.3.0.8  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:08 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.9
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:09  v2 report  group 239.3.0.9  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:09 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.10
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:0a  v2 report  group 239.3.0.10  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:0a ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.11
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:0b  v2 report  group 239.3.0.11  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:0b ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.12
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:0c  v2 report  group 239.3.0.12  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:0c ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.13
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:0d  v2 report  group 239.3.0.13  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:0d ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.14
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:0e  v2 report  group 239.3.0.14  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:0e ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.15
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:0f  v2 report  group 239.3.0.15  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:0f ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.16
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:10  v2 report  group 239.3.0.16  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:10 ports 0x5  (not written)
+> 1 v2join 1 0 192.168.1.10 239.3.0.17
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:03:00:11  v2 report  group 239.3.0.17  src 192.168.1.10
+  set vid 0 01:00:5e:03:00:11 ports 0x5  (not written)
+> 1 ctr 239.3.0.17 700
+> 2 tick
+> 2 ctr 239.3.0.17 900
+> 3 tick
+> 20 meter
+bps=0
+lost=0
+group=239.3.0.1 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.2 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.3 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.4 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.5 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.6 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.7 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.8 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.9 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.10 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.11 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.12 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.13 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.14 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.15 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.16 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.17 vid=0 client=192.168.1.10 joined=1 flow=unknown
+> 21 v2leave 1 0 192.168.1.10 239.3.0.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:02  leave  group 239.3.0.1  src 192.168.1.10
+  del vid 0 01:00:5e:03:00:01 ports 0x0  (not written)
+> 22 tick
+> 22 ctr 239.3.0.17 1500
+> 23 tick
+> 24 meter
+bps=0
+lost=0
+group=239.3.0.2 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.3 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.4 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.5 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.6 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.7 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.8 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.9 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.10 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.11 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.12 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.13 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.14 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.15 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.16 vid=0 client=192.168.1.10 joined=1 bps=0 flow=unknown
+group=239.3.0.17 vid=0 client=192.168.1.10 joined=1 bps=0 flow=up
+> end
+joins=17
+denied=0
+groups=16
+group=239.3.0.2
+group=239.3.0.3
+group=239.3.0.4
+group=239.3.0.5
+group=239.3.0.6
+group=239.3.0.7
+group=239.3.0.8
+group=239.3.0.9
+group=239.3.0.10
+group=239.3.0.11
+group=239.3.0.12
+group=239.3.0.13
+group=239.3.0.14
+group=239.3.0.15
+group=239.3.0.16
+group=239.3.0.17
+status 0

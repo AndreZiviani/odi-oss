@@ -37,7 +37,7 @@ LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
 # with; its header lists them. uplink.c is the way up for a taken report.
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o $(BUILD)/group.o \
         $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/status.o $(BUILD)/entry.o $(BUILD)/program.o $(BUILD)/switch_opt.o \
-        $(BUILD)/uplink.o $(BUILD)/replay.o $(BUILD)/main.o
+        $(BUILD)/uplink.o $(BUILD)/meter.o $(BUILD)/replay.o $(BUILD)/main.o
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
@@ -96,10 +96,13 @@ $(BUILD)/switch_opt.o: switch_opt.c switch_opt.h $(DIAG)/src/odi_sw_ioctl.h $(DI
 $(BUILD)/uplink.o: uplink.c uplink.h policy.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+$(BUILD)/meter.o: meter.c meter.h group.h igmpd.h $(DIAG)/src/io.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 $(BUILD)/replay.o: replay.c replay.h igmpd.h group.h policy.h entry.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c uplink.h status.h replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/main.o: main.c uplink.h meter.h status.h replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD):

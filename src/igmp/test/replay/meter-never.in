@@ -1,0 +1,18 @@
+# A joined group whose counter never moves: on a stick where a rule on the
+# PON ingress counted nothing at all, every group would read like this. It
+# is never lost, however long it stays silent: flow=unknown and lost=0 at 15
+# and at 120 s, no alarm. The other group's counter moved once and then
+# stood still: that group is lost from 13 on, and this one stays unknown.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+1 v2join 1 0 192.168.1.10 239.1.1.2
+2 ctr 239.1.1.2 500
+3 tick
+15 meter
+120 tick
+120 meter

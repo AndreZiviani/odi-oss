@@ -22,8 +22,12 @@ void igmp_policy_describe(const struct igmp_policy *p)
 		(long)p->last_member_query, (long)p->max_groups,
 		(long)p->nallow, (long)p->nstatic,
 		p->overflow ? " (too many: not enforced)" : "");
-	/* A second line only when the reports are taken: a profile the switch
-	 * already forwards as asked reads as it always did. */
+	/* A line only for a profile with a bandwidth maximum, and another
+	 * only when the reports are taken: a profile with neither reads as it
+	 * always did. */
+	if (p->max_bandwidth)
+		out_fmt("  bandwidth: at most %u bytes a second, %s; ranges with an imputed one: %u\n",
+			p->max_bandwidth, p->bw_enforce ? "enforced" : "counted only", p->nbw);
 	if (!igmp_policy_takes(p))
 		return;
 	out("  upstream: reports taken and sent by igmpd; tag ");
@@ -66,6 +70,7 @@ static const char *reason_text(uint32_t r)
 	case IGMP_REFUSE_ACL:   return "outside the access control lists";
 	case IGMP_REFUSE_LIMIT: return "past the group limit";
 	case IGMP_REFUSE_FULL:  return "no free table entry";
+	case IGMP_REFUSE_BW:    return "past the multicast bandwidth";
 	}
 	return "unknown reason";
 }
@@ -90,6 +95,9 @@ void igmp_status_print(const struct igmp_policy *p, int have_policy,
 	out_fmt("joins %u, refused by the profile %u (lists %u, group limit %u), "
 		"table full %u\n", v.joins, v.denied, v.refused[IGMP_REFUSE_ACL],
 		v.refused[IGMP_REFUSE_LIMIT], v.refused[IGMP_REFUSE_FULL]);
+	if (v.bw_exceeded || v.refused[IGMP_REFUSE_BW])
+		out_fmt("past the multicast bandwidth %u, of them refused %u\n",
+			v.bw_exceeded, v.refused[IGMP_REFUSE_BW]);
 	if (v.up_sent || v.up_withheld || v.up_limited || v.up_unsent)
 		out_fmt("sent up %u, withheld %u, over the rate %u, not sent %u\n",
 			v.up_sent, v.up_withheld, v.up_limited, v.up_unsent);
