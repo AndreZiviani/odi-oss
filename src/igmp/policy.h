@@ -155,7 +155,9 @@ int igmp_policy_join(const struct igmp_policy *p, const struct igmp_join *j,
 
 /* Whether the profile's IGMP version admits this message type from the host
  * (G.988 9.3.27 attribute 1: support of a version implies the earlier ones).
- * A message above it is not one the profile supports, and is dropped. A
+ * A message above it is not one the profile supports; it is handled as any
+ * other and only counted (above_version), as a set-top box that is never
+ * queried does not fall back to the profile's version. A
  * profile that is not snooping, names no version, names 3 or an MLD version,
  * admits every one. */
 int igmp_policy_version_ok(const struct igmp_policy *p, uint8_t type);

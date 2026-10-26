@@ -357,7 +357,7 @@ send "$log" 021b 48 0135 0001 "0100$(pad 40010fff000b00000000000a0000000a000f 24
 send "$log" 021c 48 0135 0001 "0100$(pad 5001ff150000000000000000abcd 24)"
 written "$log" $((m + 1))
 check "IPv6 rows: the IPv4 ranges as before, the IPv4-form part 2 among them" \
-      "$(policy | grep '^allow=')" "allow=232.0.0.0-232.0.0.255"
+      "$(policy | grep '^allow=')" "allow=232.0.0.0-232.0.0.255 v=11 g=4095"
 check "IPv6 rows: the single address, the backwards range left out" \
       "$(policy | grep '^allow6')" "allow6=ff1e::8000:1-ff1e::8000:1"
 check "IPv6 rows: the static list's IPv6 range" \
@@ -395,8 +395,8 @@ check "the maximum, its enforcement and the imputed bandwidth are exported" \
 bw_enforce=1
 bw=230.1.1.0-230.1.1.255 600"
 check "and the rows are ranges as before" "$(policy | grep '^allow' | sort)" \
-"allow=230.1.1.0-230.1.1.255
-allow=231.1.1.0-231.1.1.255"
+"allow=230.1.1.0-230.1.1.255 v=11 g=4095 b=600
+allow=231.1.1.0-231.1.1.255 v=11 g=4095"
 if [ -x "$IGMPD" ]; then
 	cp /var/run/odi-mcast.conf /tmp/mcast-policy-snap
 	cat > /tmp/mcast-replay-bw.in <<'EOF2'
@@ -415,6 +415,11 @@ EOF2
 	check "a group imputing nothing joins whatever the total" \
 	      "$(rep | grep -c 'set vid 0 01:00:5e:01:01:09 ports 0x5')" "1"
 fi
+# Back to no maximum, so the later sections (rows imputing more than 1000
+# bytes a second) are not refused by this one.
+send "$log" 0233 48 0136 0001 "180000000000"
+sync_send "$log"
+sleep 1.5
 
 # ------------------------------------- ME 311, from what igmpd writes
 # Class 311 (0x0137) instance 1. The state file is igmpd's; written here the
@@ -570,16 +575,16 @@ check "309 Set: function 7 refused, immediate leave 0 beside it" \
 send "$log" 0113 49 0135 0001 "2000"
 check "309 Set: and the immediate leave was stored" "$(answer "$log" 0113 | cut -c7-8)" "00"
 send "$log" 0114 48 0135 0001 "200001"
-send "$log" 0115 44 0135 0002 "090001"
+send "$log" 0115 44 0135 0003 "090001"
 check "309 Create: IGMP version 9 is refused, result 9 and the attribute in the execution mask" \
       "$(answer "$log" 0115 | cut -c1-6)" "098000"
-send "$log" 0117 44 0135 0002 "020201"
+send "$log" 0117 44 0135 0003 "020201"
 check "309 Create: function 2 is accepted (and the refused Create made no instance: not 7)" \
       "$(answer "$log" 0117 | cut -c1-2)" "00"
-send "$log" 0118 49 0135 0002 "4000"
+send "$log" 0118 49 0135 0003 "4000"
 check "309 Create: and reads back as 2" "$(answer "$log" 0118 | cut -c7-8)" "02"
-send "$log" 0119 46 0135 0002 ""
-send "$log" 0120 44 0135 0002 "020103"
+send "$log" 0119 46 0135 0003 ""
+send "$log" 0120 44 0135 0003 "020103"
 check "309 Create: immediate leave 3 is refused" "$(answer "$log" 0120 | cut -c1-6)" "092000"
 send "$log" 0121 48 0135 0001 "800002"
 flush
