@@ -407,7 +407,7 @@ static void test_rx_ring_map(void)
 	CHECK(ODI_NIC_RX_RING_MAP_WORDS == 6, "six route words, 0x1370 to 0x1384");
 	CHECK(ODI_NIC_RUN1_VAL == 0x30010001U, "RUN1, one RX ring: the value it always had");
 	CHECK(!(ODI_NIC_RUN1_VAL & ODI_NIC_RUN1_MULTI_RX), "RUN1, one RX ring: MULTI_RX clear");
-	CHECK(ODI_NIC_RUN1_VAL_MULTI == 0x32000001U, "RUN1, multi-ring: the measured stock and other-implementation value");
+	CHECK(ODI_NIC_RUN1_VAL_MULTI == 0x32030001U, "RUN1, multi-ring trial: MULTI_RX with the bitmap of rings 1 and 2");
 	CHECK(ODI_NIC_RUN1_VAL_MULTI & ODI_NIC_RUN1_MULTI_RX, "RUN1, multi-ring: MULTI_RX set");
 	CHECK(ODI_NIC_RX2_RING == 0x1390 && ODI_NIC_RX2_INDEX == 0x1394 && ODI_NIC_RX2_LAST == 0x1396 &&
 	      ODI_NIC_RX2_CPU_IDX == 0x1398 && ODI_NIC_RX2_FC == 0x139C, "ring 2 block at 0x1390");

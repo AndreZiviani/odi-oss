@@ -14,7 +14,8 @@ listed here.
   frames go to. With the ring off every frame still goes to the first
   ring. `/proc/odi_nic` gains `rx2_no_desc`, `rx2_idx_start`, `rx2_idx_on`,
   `rx2_idx` and `rx2_head`, to tell a frame the second ring had no room
-  for from one it never saw.
+  for from one it never saw. (Trial variant: the start also writes the
+  ring bitmap bits of rings 1 and 2 with multi-ring RX, RUN1 0x32030001.)
 
 **Automated dependency bump.**
 - linux 6.18.57 -> 6.18.58

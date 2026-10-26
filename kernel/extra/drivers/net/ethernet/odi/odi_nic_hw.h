@@ -347,7 +347,11 @@ static inline unsigned int odi_nic_rx_cpu_idx(unsigned int next_to_inspect, unsi
  */
 #define ODI_NIC_RUN1_MULTI_RX	(1U << 25)
 #define ODI_NIC_RUN1_VAL	0x30010001U
-#define ODI_NIC_RUN1_VAL_MULTI	0x32000001U
+/* Trial variant: the ring bitmap bits of rings 1 and 2 (bits 16 and 17)
+ * written with MULTI_RX, as the stock driver writes the bitmap of the
+ * rings it configures; they read back 0.
+ */
+#define ODI_NIC_RUN1_VAL_MULTI	0x32030001U
 
 /* ---- Interrupt-storm guard -------------------------------------------
  *
