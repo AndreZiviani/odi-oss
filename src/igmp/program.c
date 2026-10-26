@@ -193,3 +193,64 @@ int igmp_hw_send(const uint8_t *frame, uint32_t len, uint32_t flow)
 		out_fmt("  send ioctl: %d (%s)\n", rc, sw_err(rc));
 	return rc;
 }
+
+static void count_req(struct odi_sw_mc_count *c, uint32_t op, uint32_t slot)
+{
+	uint8_t *b = (uint8_t *)c;
+
+	for (unsigned i = 0; i < sizeof *c; i++)
+		b[i] = 0;
+	c->op = op;
+	c->slot = slot;
+}
+
+int igmp_hw_count_set(uint32_t slot, uint32_t group)
+{
+	struct odi_sw_mc_count c;
+	int rc;
+
+	count_req(&c, ODI_SW_MCC_SET, slot);
+	c.port = 2;                     /* the PON: the stream comes in there */
+	c.match = ODI_SW_MCC_MATCH_MAC;
+	c.bytes = 1;
+	igmp_group_mac(c.mac, group);
+	for (int i = 0; i < 6; i++)
+		c.mac_mask[i] = 0xff;
+	rc = igmp_sw_count(&c);
+	if (rc)
+		out_fmt("  count ioctl: %d (%s)\n", rc,
+			rc == -16 ? "busy: another process holds the counters, or an ACL probe is in" :
+			sw_err(rc));
+	else
+		out_fmt("  counting %02x:%02x:%02x:%02x:%02x:%02x in slot %d (entry %d)\n",
+			c.mac[0], c.mac[1], c.mac[2], c.mac[3], c.mac[4], c.mac[5],
+			slot, c.entry);
+	return rc;
+}
+
+int igmp_hw_count_del(uint32_t slot)
+{
+	struct odi_sw_mc_count c;
+	int rc;
+
+	count_req(&c, ODI_SW_MCC_DEL, slot);
+	rc = igmp_sw_count(&c);
+	if (rc)
+		out_fmt("  count delete ioctl: %d (%s)\n", rc, sw_err(rc));
+	return rc;
+}
+
+int igmp_hw_count_get(uint32_t slot, uint32_t *total)
+{
+	struct odi_sw_mc_count c;
+	int rc;
+
+	count_req(&c, ODI_SW_MCC_GET, slot);
+	rc = igmp_sw_count(&c);
+	if (rc)
+		return rc;
+	if (!c.in_use)
+		return -2;
+	*total = c.total_lo;
+	return 0;
+}

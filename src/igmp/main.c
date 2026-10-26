@@ -47,6 +47,7 @@
 #include "status.h"
 #include "replay.h"
 #include "uplink.h"
+#include "meter.h"
 #include "mld.h"
 #include "../omci/nl.h"
 #include "../omci/redirect_guard.h"
@@ -372,7 +373,7 @@ static void settle_lease(struct igmp_db *db, uint32_t want, uint32_t now)
 /* The join and refusal counts the state file last carried: reports that
  * change nothing still count, and the file follows them once a second at
  * most. */
-static uint32_t state_joins, state_refusals, state_up;
+static uint32_t state_joins, state_refusals, state_up, state_bw;
 
 static uint32_t refusal_total(const struct igmp_db *db)
 {
@@ -399,6 +400,7 @@ static void write_state(const struct igmp_db *db)
 	state_joins = db->joins;
 	state_refusals = refusal_total(db);
 	state_up = up_total(db);
+	state_bw = db->bw_exceeded;
 	if (!n || !igmp_hw_enabled())
 		return;
 	fd = sys_create(IGMP_STATE_TMP_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -593,6 +595,103 @@ static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 		settle_lease(db, wanted_lease(db, now), now);
 }
 
+/* ---- the metering of the groups (meter.h) ---------------------------- */
+
+static struct igmp_meter meter;
+
+static int meter_hw_install(uint32_t slot, uint32_t group)
+{
+	return igmp_hw_count_set(slot, group);
+}
+
+static int meter_hw_remove(uint32_t slot)
+{
+	return igmp_hw_count_del(slot);
+}
+
+static int meter_hw_read(uint32_t slot, uint32_t group, uint32_t *total)
+{
+	(void)group;
+	return igmp_hw_count_get(slot, total);
+}
+
+/* A transcript's counters (replay.c): every rule goes in, and reads what
+ * the transcript says the group's MAC has counted. */
+static int meter_replay_install(uint32_t slot, uint32_t group)
+{
+	(void)slot;
+	(void)group;
+	return 0;
+}
+
+static int meter_replay_remove(uint32_t slot)
+{
+	(void)slot;
+	return 0;
+}
+
+static int meter_replay_read(uint32_t slot, uint32_t group, uint32_t *total)
+{
+	(void)slot;
+	*total = igmp_replay_counter(group);
+	return 0;
+}
+
+static const struct igmp_meter_ops meter_hw = {
+	meter_hw_install, meter_hw_remove, meter_hw_read
+};
+static const struct igmp_meter_ops meter_replay = {
+	meter_replay_install, meter_replay_remove, meter_replay_read
+};
+/* A dry run on a stick: no counters, so every flow is unknown. */
+static const struct igmp_meter_ops meter_dry = { 0, 0, 0 };
+
+static const struct igmp_meter_ops *meter_ops(void)
+{
+	return replaying ? &meter_replay : igmp_hw_enabled() ? &meter_hw : &meter_dry;
+}
+
+/* The meter file follows the table and the counters, written when its text
+ * changed: a client's report, a group in or out, a flow lost or back, a
+ * bandwidth that moved (at most every IGMP_METER_WINDOW_S seconds). */
+static void write_meter(const struct igmp_db *db)
+{
+	static char buf[IGMP_METER_MAX], last[IGMP_METER_MAX];
+	static uint32_t last_len;
+	static int last_ok;
+	uint32_t n = igmp_meter_format(&meter, db, buf, sizeof buf);
+	long fd;
+
+	if (!n || !igmp_hw_enabled())
+		return;
+	if (last_ok && n == last_len) {
+		uint32_t i = 0;
+
+		while (i < n && buf[i] == last[i])
+			i++;
+		if (i == n)
+			return;
+	}
+	fd = sys_create(IGMP_METER_TMP_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd < 0)
+		return;
+	if (sys_write((int)fd, buf, n) != (long)n) {
+		sys_close((int)fd);
+		sys_unlink(IGMP_METER_TMP_PATH);
+		return;
+	}
+	sys_close((int)fd);
+	if (sys_rename(IGMP_METER_TMP_PATH, IGMP_METER_PATH) < 0) {
+		sys_unlink(IGMP_METER_TMP_PATH);
+		last_ok = 0;
+		return;
+	}
+	for (uint32_t i = 0; i < n; i++)
+		last[i] = buf[i];
+	last_len = n;
+	last_ok = 1;
+}
+
 /* One second of the daemon: the policy file, the expiries, the rows that
  * failed to write, the state file. The loop in main runs it when the second
  * changes; replay.c runs it when the transcript's clock does. */
@@ -615,8 +714,12 @@ void igmpd_tick(struct igmp_db *db, uint32_t now, int first)
 		resync(db);
 	}
 	if (changes || db->joins != state_joins || refusal_total(db) != state_refusals ||
-	    up_total(db) != state_up)
+	    up_total(db) != state_up || db->bw_exceeded != state_bw)
 		write_state(db);
+	/* The counters only while the lease is held: a group is metered while
+	 * its row is the lease's, and goes with it. */
+	igmp_meter_tick(&meter, db, meter_ops(), lease != 0 && pol.snooping, now);
+	write_meter(db);
 	if (mld_on && (changes6 || db6.joins != state6_joins ||
 		       refusal_total6() != state6_refusals))
 		write_state6();
@@ -794,8 +897,10 @@ void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
 	db->rx_acl_refused = db->rx_passable = 0;
 	/* Only while snooping: a copy that arrives after the
 	 * policy said stop is not state to keep. */
-	if (prc == IGMP_OK && pol.snooping)
+	if (prc == IGMP_OK && pol.snooping) {
 		changes = igmp_db_rx(db, &rx, now, ch, MAX_CHANGES);
+		igmp_meter_rx(&meter, db, &rx, now);
+	}
 	/* A refresh changes nothing and says nothing: reports
 	 * come every few seconds per group, and this goes to a
 	 * log on a small tmpfs. A dry run, which exists to be
@@ -825,6 +930,7 @@ uint32_t igmpd_lease(void)
 void igmpd_reset(struct igmp_db *db)
 {
 	igmp_db_init(db);
+	igmp_meter_init(&meter);
 	igmp_policy_defaults(&pol);
 	mld_db_init(&db6);
 	mld_policy_parse("", 0, &pol6);
@@ -858,6 +964,14 @@ void igmpd_state_dump(const struct igmp_db *db)
 	n = mld_state_format(&db6, buf6, sizeof buf6);
 	out("# " MLD_STATE_PATH "\n");
 	out_n(buf6, (int)n);
+}
+
+void igmpd_meter_dump(const struct igmp_db *db)
+{
+	static char buf[IGMP_METER_MAX];
+	uint32_t n = igmp_meter_format(&meter, db, buf, sizeof buf);
+
+	out_n(buf, (int)n);
 }
 
 void igmpd_status_dump(const struct igmp_db *db)

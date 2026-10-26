@@ -85,6 +85,11 @@ int hw_acl_probe(struct odi_sw_acl_probe *p)
 	return sw_ioctl(ODI_SW_IOC_ACL_PROBE, p);
 }
 
+int hw_mc_count(struct odi_sw_mc_count *c)
+{
+	return sw_ioctl(ODI_SW_IOC_MC_COUNT, c);
+}
+
 int hw_transceiver_block_get(int sel, uint8_t out[DDM_RAW_LEN])
 {
 	struct odi_sw_ddm d;

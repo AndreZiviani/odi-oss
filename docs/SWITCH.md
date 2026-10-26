@@ -1403,10 +1403,13 @@ class type at bits 36:35 and counter at 34:30 of the action entry, class
 enable bit 3; trap 3 and mirror 2 at bits 42:41) and the receive reason of a
 frame an ACL rule sends the CPU (128 plus the entry) are another
 implementation's measurements; the probes are how they get checked here.
-`LOG_TYPE` is written whole and never read (nothing else uses the log
-counters, and no read of it has been made on a stick), and is left at 0
-when the last probe goes; the counter itself is read, and a probe reports
-what it counted as the difference from the moment it went in.
+`LOG_TYPE` is never read (no read of it has been made on a stick): it has
+two owners, the probes (pairs 8 to 15) and the multicast group counters
+below (pairs 0 to 7), so it is kept as a shadow (`odi_switch_log.c`) in which
+each changes only the bits of its own pairs, and the shadow is written
+whole; the last probe out puts its pairs back to frames and leaves the
+others. The counter itself is read, and a probe reports what it counted as
+the difference from the moment it went in.
 
 What a probe may do is narrow. A counting rule applies the log class alone
 (class word 0x08), which leaves the forwarding of the frames to the switch.
@@ -1420,7 +1423,9 @@ took, so the PON isolation below is unchanged. The probes belong to the open
 file of `/dev/odi_sw` that installed the first one: its close removes them
 all, and another file is refused (EBUSY) until then. Probes and the snooping
 lease exclude each other, since the copy rule and a probe of the same frames
-would decide for each other. `test/odi_switch_acl_probe_test.c` checks each
+would decide for each other, and so do probes and the group counters below
+(of two rules that match a frame only the lower entry counts it, and the
+counters sit below the probes). `test/odi_switch_acl_probe_test.c` checks each
 rule by what it matches and decodes its action by bit.
 
 `tools/mcast-probe/mcast-probe.sh` runs the measurements below on a stick as
@@ -1531,6 +1536,55 @@ What is still not known, and why:
   untagged and then tagged, answers it.
 - Everything a real stream decides (the stream on its multicast GEM port,
   the PON drop, tags on the fibre), and igmpd's own delivery path, as above.
+
+### Multicast group counters
+
+`odi_switch_mc_count.c` (`ODI_SW_IOC_MC_COUNT`; `diag mc-count` by hand)
+counts what enters a port to one destination: igmpd meters each group it
+holds with one, on the PON ingress, in bytes, for the lost groups of ME 309,
+its alarm 0 and the bandwidth of ME 311 (`docs/TOOLS.md`, `igmpd`).
+
+| | |
+|---|---|
+| entries | 48 to 63, one rule a slot (64 to 79 kept for more); below the probes (88 to 95), above the extended VLAN discards (16 to 47) |
+| template | 1: slots 0 to 2 the destination MAC (codes 0x01, 0x02, 0x03, bits 15:0 first), 3 the EtherType, 4 and 5 the IPv4 destination (0x12, 0x13); 6 and 7 nothing. The module-load replay writes codes into template 1, but no rule uses it (the tables are emptied at boot and the replayed rule is entry 1 on template 3); its words are saved with the first rule and put back with the last |
+| counters | slot n counts in log counter n, so the slots own pairs 0 to 7 of `LOG_TYPE`; slots 2k and 2k + 1 share a unit |
+| action | the log class alone (class word 0x08): a frame is forwarded exactly as without the rule |
+| match | a MAC under a mask (igmpd: the group MAC, whole), or EtherType 0x0800 and an IPv4 prefix |
+| the count | 32 bits in the switch, folded into 64 by the kernel on every read (a byte counter wraps in 13.8 s at the full downstream rate; igmpd reads each second) |
+| hold | the open file of `/dev/odi_sw` that installed the first: its close removes them all; the probes and these exclude each other |
+
+The ACL map, then: entry 1 and template 3 the module-load replay, entry 8
+and template 6 the snooping copy, entries 16 to 47 and template 5 the
+extended VLAN discards, entries 48 to 63 and template 1 these counters,
+entries 88 to 95 and template 4 the probes; log counters 0 to 15 these, 16
+to 31 the probes. `test/odi_switch_mc_count_test.c` checks each rule by what
+it matches, its action by bit, the folded total and the shared `LOG_TYPE`.
+
+What is not known, and how to find out. Two facts these rest on have not
+been measured on a stick: that a rule on the PON ingress counts at all (the
+probe run saw the two PON rules count nothing while the port received 237
+multicast frames, most likely not IPv4), and the order of the three MAC
+codes (taken from another open implementation's reading, by analogy with the
+IPv4 halves). Until both are, igmpd treats a counter that never grew as
+unknown, never as a lost group, so a stick on which neither holds tells the
+OLT nothing wrong. `tools/mcast-probe/count-proof.sh` settles both, on a line
+without IPTV, in one nohup script with its own restore (about 18 minutes; it
+refuses to run beside igmpd):
+
+- **pon**: every group-addressed frame entering the PON in three rules that
+  cannot overlap (33:33/16, first octet 01, broadcast), against `MIB port 2
+  in multicast` plus `in broadcast`. PASS is the counted sum within 5 % (or
+  3 frames) of the MIB, over at least 10 frames.
+- **ra**: 33:33:00:00:00:01 alone (router advertisements and MLD queries)
+  and 224.0.0.x, the multicast every line carries by itself.
+- **bytes**: the pon rules counting bytes; bytes a frame between 64 and
+  1522 says the unit igmpd uses works on the PON.
+- **ip**: an IPv4 rule for 224.0.0.0/4, the kind the probes ran.
+- **uni** and **uni-ip**: the test group the host sends to (the loop is in
+  the script header), by its exact MAC and then by its IPv4 address. Equal
+  rates are the MAC field order proved; the IPv4 rule counting and the MAC
+  rule not is the order wrong.
 
 ## PON port isolation
 

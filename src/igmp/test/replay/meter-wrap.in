@@ -1,0 +1,28 @@
+# The counter is 32 bits and wraps; the meter reads it each second and
+# takes the difference modulo 2^32, so a wrap between two reads is growth
+# like any other. From 4294966296 (2^32 - 1000) to 4000 is 5000 bytes. The
+# bandwidth is the growth over the last five seconds, divided by them:
+# 5000 bytes a second here, and 0 once it has been still for five.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+end
+0 tick
+1 v3join 1 10 192.168.1.10 239.2.2.2
+1 ctr 239.2.2.2 4294956296
+2 tick
+2 ctr 239.2.2.2 4294961296
+3 tick
+3 ctr 239.2.2.2 4294966296
+4 tick
+4 ctr 239.2.2.2 4000
+5 tick
+5 ctr 239.2.2.2 9000
+6 tick
+6 ctr 239.2.2.2 14000
+7 tick
+7 meter
+12 tick
+12 meter
+13 tick

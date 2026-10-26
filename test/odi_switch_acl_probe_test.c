@@ -54,14 +54,22 @@ int odi_switch_table_write(uint32_t table, uint32_t index, const uint32_t *data,
 	return 0;
 }
 
-/* The snooping lease, as odi_switch_mcast.c would answer. */
+/* The snooping lease, as odi_switch_mcast.c would answer, and the group
+ * counters, as odi_switch_mc_count.c would. */
 static uint32_t snoop_flags;
+static int mcc_active;
 
 uint32_t odi_switch_mcast_flags(void)
 {
 	return snoop_flags;
 }
 
+int odi_sw_mc_count_active(void)
+{
+	return mcc_active;
+}
+
+#include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_log.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_switch_acl_probe.c"
 
 static int failures;
@@ -197,6 +205,7 @@ static void boot_state(void)
 	ntw = 0;
 	tw_fail_at = -1;
 	snoop_flags = 0;
+	mcc_active = 0;
 	rx_enable_calls = 0;
 	odi_sw_probe_rx_enable = rx_enable_cb;
 	memset(slots, 0, sizeof slots);
@@ -442,6 +451,41 @@ static void test_busy(void)
 	CHECK(probe_set(0, 0, ODI_SW_PROBE_COUNT, 0, 2, 0, 0, NULL) == -16,
 	      "nothing goes in while the snooping lease is held");
 	CHECK(ntw == 0 || !(pat[ODI_SW_PROBE_ENTRY_BASE][0] & (1U << 16)), "and nothing was written valid");
+	snoop_flags = 0;
+	mcc_active = 1;
+	CHECK(probe_set(0, 0, ODI_SW_PROBE_COUNT, 0, 2, 0, 0, NULL) == -16,
+	      "nor while a multicast group counter is in: the lower entry would take its count");
+	CHECK(!slots[0].used, "and nothing is held");
+}
+
+/* LOG_TYPE has two owners: the probes (pairs 8 to 15) and the group
+ * counters (pairs 0 to 7, odi_switch_mc_count.c). The probes change their
+ * own bits and no other, whatever they do. */
+static void test_log_type_is_shared(void)
+{
+	uint32_t c;
+
+	boot_state();
+	/* The group counters' pairs counting bytes, as igmpd leaves them. */
+	for (c = 0; c < 16; c += 2)
+		odi_sw_log_unit(c, 1);
+	CHECK(reg(ODI_SW_LOG_TYPE_OFF) == 0xffU, "pairs 0 to 7 count bytes");
+	CHECK(probe_set(0, 2, ODI_SW_PROBE_COUNT, 1, 2, 0, 0, NULL) == 0, "a byte probe");
+	CHECK(probe_set(1, 0, ODI_SW_PROBE_COUNT, 0, 2, 0, 0, NULL) == 0, "a frame probe");
+	CHECK(reg(ODI_SW_LOG_TYPE_OFF) == 0x1ffU, "pair 8 bytes, pair 9 frames, pairs 0 to 7 kept");
+	CHECK(probe_del(0) == 0, "the byte probe goes");
+	CHECK((reg(ODI_SW_LOG_TYPE_OFF) & 0xffU) == 0xffU, "pairs 0 to 7 kept");
+	CHECK(probe_del(ODI_SW_PROBE_ALL) == 0, "the last probe goes");
+	CHECK(reg(ODI_SW_LOG_TYPE_OFF) == 0xffU,
+	      "the last probe leaves the group counters' pairs as they were");
+
+	/* A failed install leaves them too. */
+	boot_state();
+	odi_sw_log_unit(4, 1);
+	tw_fail_at = 2;
+	CHECK(probe_set(3, 2, ODI_SW_PROBE_COUNT, 1, 2, 0, 0, NULL) == -110, "a failed probe");
+	CHECK(reg(ODI_SW_LOG_TYPE_OFF) == (1U << 2), "pair 2 still counts bytes, pair 11 is back to frames");
+	CHECK(bad_reads == 0, "LOG_TYPE never read");
 }
 
 static void test_removal_restores(void)
@@ -548,6 +592,7 @@ int main(void)
 	test_removal_restores();
 	test_failed_install_rolls_back();
 	test_rx_accounting();
+	test_log_type_is_shared();
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
 		return 1;

@@ -589,9 +589,12 @@ uint16_t tbl_serialise(const struct omci_class *c, uint16_t inst, unsigned k,
 	/* The bridge table of a port is the switch's, not the store's. */
 	if (c->classId == 50 && k == 1)
 		return bridge_table_read(inst, out, (uint16_t)(max - max % w));
-	/* The active group list is the snooper's. */
+	/* The active group list is the snooper's, and so is the profile's
+	 * list of lost groups. */
 	if (c->classId == CLS_MCAST_MONITOR && k == 5)
 		return mcast_active_groups(out, (uint16_t)(max - max % w));
+	if (c->classId == CLS_MCAST_OPER_PROFILE && k == 9)
+		return mcast_lost_groups(inst, out, (uint16_t)(max - max % w));
 	if (tbl_kind(c, k)) {
 		for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE;
 		     i = tblpool[i].next) {
@@ -1177,6 +1180,72 @@ static int voip_line_configured(uint16_t pptp)
 	return 0;
 }
 
+/* OMCI_VOIP_LINE_REPORT=1 (odi.conf): the router behind the stick says what
+ * its SIP client really does, and the line status of a provisioned line
+ * follows it. The report is the file VOIP_REPORT_PATH, written by the web UI
+ * daemon (confd) when the router posts it: a line LINE<port>=<state> <s>,
+ * <s> being the seconds since boot (the /proc/uptime clock) when it was
+ * received. Only a fact that is fresh counts: a report older than
+ * VOIP_REPORT_TTL_S, from the future, unreadable or not one of the words
+ * below is not a report, and the line reads "config done" as it always did.
+ * The words are G.988 9.9.11 voice server status values 0 to 12: none,
+ * registered, in session, the registration failures (3 to 7) and the invite
+ * failures (8 to 12). Read at every Get, so a change is live. Returns the status, or
+ * -1 for no report. */
+#define VOIP_REPORT_PATH   "/var/run/voip-line-status"
+#define VOIP_REPORT_TTL_S  300
+#define CLOCK_BOOTTIME_ID  7
+
+static const struct { const char *word; uint8_t status; } voip_report_words[] = {
+	{ "none",           0 },
+	{ "registered",     1 },
+	{ "in_session",     2 },
+	{ "failed_icmp",    3 },
+	{ "failed_tcp",     4 },
+	{ "failed_auth",    5 },
+	{ "failed_timeout", 6 },
+	{ "failed_server",  7 },
+	{ "failed_invite_icmp",    8 },
+	{ "failed_invite_tcp",     9 },
+	{ "failed_invite_auth",   10 },
+	{ "failed_invite_timeout", 11 },
+	{ "failed_invite_server", 12 },
+};
+
+static int voip_line_reported(uint16_t pptp)
+{
+	char key[8] = "LINE", v[40];
+	long now = 0, ns = 0, stamp = 0;
+	int len, i = 0;
+
+	if (cfg_odi_get(CFG_ODI_PATH, "OMCI_VOIP_LINE_REPORT", v, sizeof v) != 1 ||
+	    v[0] != '1' || (pptp & 0xff) < 1 || (pptp & 0xff) > POTS_PORTS_MAX)
+		return -1;
+	key[4] = (char)('0' + (pptp & 0xff));
+	len = cfg_odi_get(VOIP_REPORT_PATH, key, v, sizeof v);
+	if (len < 3 || len >= (int)sizeof v ||
+	    sys_clock_gettime(CLOCK_BOOTTIME_ID, &now, &ns) != 0)
+		return -1;
+	while (v[i] && v[i] != ' ')
+		i++;
+	if (!v[i])
+		return -1;
+	v[i++] = 0;
+	if (!v[i])
+		return -1;
+	for (; v[i]; i++) {
+		if (v[i] < '0' || v[i] > '9' || stamp > 100000000L)
+			return -1;
+		stamp = stamp * 10 + (v[i] - '0');
+	}
+	if (stamp > now || now - stamp > VOIP_REPORT_TTL_S)
+		return -1;
+	for (unsigned w = 0; w < sizeof voip_report_words / sizeof voip_report_words[0]; w++)
+		if (str_eq(v, voip_report_words[w].word))
+			return voip_report_words[w].status;
+	return -1;
+}
+
 /* The voice attributes the ONU answers itself, then G.988's defaults.
  *
  * What the stick holds and can observe, never more: it has no phone socket,
@@ -1219,9 +1288,13 @@ static void voice_value(const struct omci_class *c, const struct mib_row *r,
 		}
 		break;
 	case OMCI_ME_VOIP_LINE_STATUS:
-		if (k == 2)                        /* voice server status */
-			out[0] = voip_line_configured(inst) ? LINE_CONFIG_DONE
+		if (k == 2) {                      /* voice server status */
+			int rep = voip_line_configured(inst) ? voip_line_reported(inst) : -1;
+
+			out[0] = rep >= 0 ? (uint8_t)rep :
+				 voip_line_configured(inst) ? LINE_CONFIG_DONE
 							    : LINE_NOT_CONFIGURED;
+		}
 		break;
 	case OMCI_ME_VOIP_CONFIG_DATA:
 		if (k == 1)
@@ -1389,11 +1462,14 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 			out[0] = (uint8_t)(v >> 8); out[1] = (uint8_t)v;
 		} else if (k == 4) out[0] = tag ? (uint8_t)vlanCfg.pri : 0xff;
 	} else if (c->classId == CLS_MCAST_MONITOR) { /* multicast subscriber monitor */
-		/* The snooper's counters (mcast.c): joins the subscriber sent
-		 * (3). The bandwidth attributes stay zero, the ONU does not
-		 * meter streams. */
-		if (k == 3 && n >= 4) {
-			uint32_t v = mcast_state_get("joins");
+		/* The snooper's counters (mcast.c): the bandwidth its group
+		 * counters measure (2, zero while nothing is metered), the joins
+		 * the subscriber sent (3), and the joins past the bandwidth of
+		 * ME 310 (4). */
+		if ((k == 2 || k == 3 || k == 4) && n >= 4) {
+			uint32_t v = k == 2 ? mcast_meter_get("bps") :
+				     k == 3 ? mcast_state_get("joins") :
+				     mcast_state_get("bw_exceeded");
 
 			out[0] = (uint8_t)(v >> 24); out[1] = (uint8_t)(v >> 16);
 			out[2] = (uint8_t)(v >> 8);  out[3] = (uint8_t)v;
