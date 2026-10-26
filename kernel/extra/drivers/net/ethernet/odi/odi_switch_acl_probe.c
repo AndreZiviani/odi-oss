@@ -27,6 +27,7 @@
 #endif
 
 #include "odi_switch_acl_probe.h"
+#include "odi_switch_mc_count.h"
 #include "odi_switch_mcast.h"
 #include "odi_switch_dal.h"
 #include "odi_switch_hw.h"
@@ -49,7 +50,6 @@ struct probe_slot {
 static struct probe_slot slots[ODI_SW_PROBE_SLOTS];
 static uint32_t nused;
 static uint32_t saved_tmpl[2];
-static uint32_t log_type;
 static uint32_t uni_igmp_other, other_reason;
 
 /* ---- template 4 --------------------------------------------------------- */
@@ -167,13 +167,16 @@ static void probe_entry_clear(uint32_t entry)
 	odi_reg_write(ODI_SW_ACL_ACT_EN_OFF + 4U * entry, ODI_SW_ACL_ACT_EN_RESET);
 }
 
-/* The last rule gone: the template and the counter modes as found. */
+/* The last rule gone: the template as found, and the probes' pairs back
+ * to frames, the reset value. The group counters' pairs are not theirs. */
 static void probe_all_gone(void)
 {
+	uint32_t n;
+
 	odi_sw_probe_on = 0;
 	probe_template_restore();
-	log_type = 0;
-	odi_reg_write(ODI_SW_LOG_TYPE_OFF, log_type);
+	for (n = 0; n < ODI_SW_PROBE_SLOTS; n++)
+		odi_sw_log_unit(probe_counter(n), 0);
 }
 
 static int probe_install(uint32_t n, struct probe_slot *s)
@@ -206,11 +209,7 @@ static int probe_install(uint32_t n, struct probe_slot *s)
 		odi_reg_write(ODI_SW_MC_ACL_PORT_EN_OFF, port_en | pbit);
 
 	/* What the pair counts, before anything can count in it. */
-	if (s->bytes)
-		log_type |= 1U << (counter / 2U);
-	else
-		log_type &= ~(1U << (counter / 2U));
-	odi_reg_write(ODI_SW_LOG_TYPE_OFF, log_type);
+	odi_sw_log_unit(counter, s->bytes);
 
 	rc = odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN, entry, zero, ODI_SW_MC_RULE_WORDS);
 	if (!rc)
@@ -223,15 +222,14 @@ static int probe_install(uint32_t n, struct probe_slot *s)
 		odi_reg_write(ODI_SW_ACL_ACT_EN_OFF + 4U * entry, en);
 		/* The counter is never cleared: what the rule counts is the
 		 * difference from here, the last moment before it can match. */
-		s->base = odi_reg_read(ODI_SW_LOG_CNT_OFF + 4U * counter);
+		s->base = odi_sw_log_read(counter);
 		rc = odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN, entry, ones,
 					    ODI_SW_MC_RULE_WORDS);
 	}
 	if (rc) {
 		probe_entry_clear(entry);
-		log_type &= ~(1U << (counter / 2U));
 		if (nused)
-			odi_reg_write(ODI_SW_LOG_TYPE_OFF, log_type);
+			odi_sw_log_unit(counter, 0);
 		else
 			probe_all_gone();
 		return rc;
@@ -289,7 +287,7 @@ static void probe_fill(uint32_t n, struct odi_sw_acl_probe *r)
 	r->dst = s->dst;
 	r->dst_mask = s->dst_mask;
 	r->base = s->base;
-	r->now = odi_reg_read(ODI_SW_LOG_CNT_OFF + 4U * r->counter);
+	r->now = odi_sw_log_read(r->counter);
 	r->cpu_hits = s->cpu_hits;
 	r->cpu_ports = s->cpu_ports;
 	r->cpu_bytes = s->cpu_bytes;
@@ -326,7 +324,7 @@ int odi_sw_probe_request(struct odi_sw_acl_probe *r)
 	rc = probe_check(r);
 	if (rc)
 		return rc;
-	if (s->used || odi_switch_mcast_flags())
+	if (s->used || odi_switch_mcast_flags() || odi_sw_mc_count_active())
 		return PROBE_EBUSY;
 	s->port = r->port;
 	s->action = r->action;

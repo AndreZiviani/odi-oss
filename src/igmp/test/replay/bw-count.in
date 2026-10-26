@@ -1,0 +1,14 @@
+# The same cap, not enforced (attribute 5 false): the join past it is
+# accepted and only counted in bw_exceeded, for ME 311 attribute 4.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+max_bandwidth=1000
+allow=239.1.1.0-239.1.1.255
+bw=239.1.1.0-239.1.1.255 600
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+2 v2join 1 0 192.168.1.10 239.1.1.2
+3 state

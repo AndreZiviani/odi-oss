@@ -39,6 +39,10 @@ enum cmd_id {
 	CMD_PROBE_SHOW,
 	CMD_PROBE_DELETE,
 	CMD_PROBE_DELETE_ALL,
+	CMD_MCC_SET,            /* sel: MCC_SEL_* below */
+	CMD_MCC_SHOW,
+	CMD_MCC_DELETE,
+	CMD_MCC_DELETE_ALL,
 };
 
 /* The variants of `acl-probe`: the action, the counter unit and the match. */
@@ -48,6 +52,11 @@ enum cmd_id {
 #define PROBE_SEL_ACTION   0x03u
 #define PROBE_SEL_BYTES    0x04u
 #define PROBE_SEL_GROUP    0x08u   /* <group> <length>, else proto <proto> */
+
+/* The variants of `mc-count`: the port, the unit and the match. */
+#define MCC_SEL_PON        0x01u   /* else the UNI */
+#define MCC_SEL_BYTES      0x02u   /* else frames */
+#define MCC_SEL_IPV4       0x04u   /* <address> <length>, else mac <high> <low> <length> */
 
 struct cmd_def {
 	const char *syntax;

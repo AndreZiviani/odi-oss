@@ -1,0 +1,22 @@
+# A lost group the host then leaves: it goes from the table and the meter
+# file, so nothing stays lost. A group that leaves takes its counter with it,
+# and the next one joined starts over unknown, even on the same MAC.
+# 225.1.1.1 shares the MAC of 239.1.1.1 (the low 23 bits): one counter, one
+# row, and both are lost together.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+1 v2join 1 0 192.168.1.10 225.1.1.1
+2 ctr 239.1.1.1 100
+3 tick
+14 meter
+15 v2leave 1 0 192.168.1.10 225.1.1.1
+16 meter
+17 v2leave 1 0 192.168.1.10 239.1.1.1
+18 meter
+19 v2join 1 0 192.168.1.10 239.1.1.1
+20 meter

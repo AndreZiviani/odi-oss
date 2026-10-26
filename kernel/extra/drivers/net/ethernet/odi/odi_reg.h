@@ -3,7 +3,8 @@
  * odi_reg.h -- the /dev/odi_sw ioctl ABI: switch-core register get/set,
  * per-port MIB counter get, the L2 lookup table (row readback, the
  * valid-row walk, L2 multicast add/delete), the snooping lease, the way
- * igmpd sends a taken report up, and the ACL probes. The replacement
+ * igmpd sends a taken report up, the ACL probes and the multicast group
+ * counters. The replacement
  * for the register-only sockopts the stock kernel answers (RTK_OPT_
  * REGISTER, RTK_OPT_ADDRESS_GET/SET, RTK_OPT_STAT_PORT),
  * plus RTK_OPT_TRANSCEIVER (DDM, ODI_SW_IOC_DDM_GET -- odi_ddm.c/odi_i2c.c
@@ -47,6 +48,7 @@
 #include "odi_switch_l2.h" /* struct odi_sw_l2_row / _mcast_req, below */
 #include "odi_switch_acl_probe.h" /* struct odi_sw_acl_probe, below */
 #include "odi_switch_mcast.h" /* struct odi_sw_mc_route / _send, below */
+#include "odi_switch_mc_count.h" /* struct odi_sw_mc_count, below */
 
 /* Switch-core register get/set -- one word at a caller-given offset, no
  * field decode. Covers RTK_OPT_ADDRESS_GET/SET and RTK_OPT_REGISTER
@@ -145,6 +147,14 @@ struct odi_sw_mc_snoop {
  * while the snooping lease is held, and for the lease while a rule is in.
  */
 
+/* Multicast group counters (odi_switch_mc_count.h): the argument is struct
+ * odi_sw_mc_count itself, 64 bytes. SET and DEL are the hold of the open
+ * file that made the first SET, like the probes: its close removes every
+ * rule, and another file gets EBUSY until then. GET is open to any file.
+ * EBUSY too for a SET while an ACL probe is in, and for a probe while a
+ * counter is.
+ */
+
 #define ODI_SW_IOC_REG_GET	0xC0085301U	/* _IOWR('S', 1, struct odi_sw_reg) */
 #define ODI_SW_IOC_REG_SET	0x80085302U	/* _IOW ('S', 2, struct odi_sw_reg) */
 /* Request 3 was a SoC-window get that no userland used; not reused. */
@@ -159,5 +169,6 @@ struct odi_sw_mc_snoop {
 #define ODI_SW_IOC_ACL_PROBE	0xC048530CU	/* _IOWR('S', 12, struct odi_sw_acl_probe) */
 #define ODI_SW_IOC_MC_ROUTE	0xC058530DU	/* _IOWR('S', 13, struct odi_sw_mc_route) */
 #define ODI_SW_IOC_MC_SEND	0x8608530EU	/* _IOW ('S', 14, struct odi_sw_mc_send) */
+#define ODI_SW_IOC_MC_COUNT	0xC040530FU	/* _IOWR('S', 15, struct odi_sw_mc_count) */
 
 #endif /* ODI_REG_H */

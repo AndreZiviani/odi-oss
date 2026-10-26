@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- igmpd (IGMP snooping, still opt-in and experimental): each joined group is
+  now metered with a counter in the switch, so the OLT can see which groups
+  stopped arriving and how much multicast the subscriber receives. A group
+  whose stream came and then stopped for 10 seconds is listed in the multicast
+  profile's lost groups (ME 309 attribute 9) and raises its alarm 0, cleared
+  as soon as the stream comes back; the subscriber monitor (ME 311) reports the
+  bandwidth, and for each active group its VLAN, bandwidth, client address and
+  time since the join. A group whose counter has never counted anything is
+  reported as unknown, never lost: that the switch counts on the fibre side is
+  not yet proved on a stick, and `tools/mcast-probe/count-proof.sh` is the
+  measurement that proves it (about 18 minutes, on a line without IPTV). The maximum multicast bandwidth of ME 310 is now
+  honoured: a new join past it is counted (ME 311 attribute 4) and, when the
+  OLT enforces it, refused; a group already playing is never cut. Lines that
+  do not turn snooping on, and profiles without a maximum, see no change.
+  `diag mc-count` installs the same counters by hand.
 - omcid: new opt-in key `OMCI_VOIP_LINE_REPORT=1` (default off): the router
   behind the stick can report whether its SIP client is registered, and the
   VoIP line status of a line the OLT provisioned then reads that (registered,

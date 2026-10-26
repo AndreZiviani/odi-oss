@@ -5,8 +5,10 @@
  * has the counter mapping and what is left out), and the L2 lookup table of odi_switch_l2.c: row readback, the
  * valid-row walk behind `diag l2-table`, and the L2 multicast add/delete
  * igmpd programs groups with, its snooping lease and the way it sends a
- * taken report up; and the ACL probes of `diag acl-probe`
- * (odi_switch_acl_probe.h), off until a shell on the stick asks.
+ * taken report up; the ACL probes of `diag acl-probe`
+ * (odi_switch_acl_probe.h), off until a shell on the stick asks; and the
+ * multicast group counters igmpd meters its groups with
+ * (odi_switch_mc_count.h).
  * Replaces the stock kernel's handling of RTK_OPT_REGISTER,
  * RTK_OPT_ADDRESS_GET/SET and RTK_OPT_STAT_PORT for our own userland:
  * src/diag reads this device directly. There is no vendor sockopt
@@ -48,6 +50,7 @@
 #include "odi_switch_l2.h"
 #include "odi_switch_mcast.h"
 #include "odi_switch_acl_probe.h"
+#include "odi_switch_mc_count.h"
 
 #define DRV_NAME "odi_reg"
 
@@ -69,6 +72,10 @@ static struct file *odi_sw_snoop_owner;
 /* The open file that holds the ACL probes (odi_switch_acl_probe.h), if
  * any, under odi_switch_lock like the lease. */
 static struct file *odi_sw_probe_owner;
+
+/* The open file that holds the multicast group counters
+ * (odi_switch_mc_count.h), if any, under odi_switch_lock too. */
+static struct file *odi_sw_mcc_owner;
 
 /* Every command but DDM_GET runs under odi_switch_lock (odi_switch.c), so
  * a register or MIB read never lands in the middle of a table sequence
@@ -108,6 +115,11 @@ static int odi_sw_release(struct inode *inode, struct file *f)
 		odi_sw_probe_release();
 		odi_sw_probe_owner = NULL;
 		pr_info(DRV_NAME ": ACL probes removed\n");
+	}
+	if (odi_sw_mcc_owner == f) {
+		odi_sw_mc_count_release();
+		odi_sw_mcc_owner = NULL;
+		pr_info(DRV_NAME ": multicast group counters removed\n");
 	}
 	mutex_unlock(&odi_switch_lock);
 	return 0;
@@ -297,6 +309,31 @@ static long odi_sw_ioctl_cmd(struct file *f, unsigned int cmd, void __user *argp
 		if (!odi_sw_probe_active())
 			odi_sw_probe_owner = NULL;
 		if (copy_to_user(argp, &pr, sizeof(pr)))
+			return -EFAULT;
+		return 0;
+	}
+	case ODI_SW_IOC_MC_COUNT: {
+		struct odi_sw_mc_count mc;
+		int rc;
+
+		if (copy_from_user(&mc, argp, sizeof(mc)))
+			return -EFAULT;
+		/* As the probes: reading is open to anyone; installing and
+		 * removing belong to the file that installed first, until it
+		 * closes. */
+		if (mc.op != ODI_SW_MCC_GET && odi_sw_mcc_owner && odi_sw_mcc_owner != f)
+			return -EBUSY;
+		rc = odi_sw_mc_count_request(&mc);
+		if (rc)
+			return rc;
+		if (mc.op == ODI_SW_MCC_SET && !odi_sw_mcc_owner) {
+			odi_sw_mcc_owner = f;
+			pr_info(DRV_NAME ": multicast group counter installed, held by pid %d\n",
+				task_pid_nr(current));
+		}
+		if (!odi_sw_mc_count_active())
+			odi_sw_mcc_owner = NULL;
+		if (copy_to_user(argp, &mc, sizeof(mc)))
 			return -EFAULT;
 		return 0;
 	}

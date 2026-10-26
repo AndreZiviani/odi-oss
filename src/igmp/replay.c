@@ -30,6 +30,11 @@
  *   T state                  print the state file igmpd would write
  *   T status                 print what `igmpd -s` would, from that file and
  *                            the policy in force
+ *   T ctr GROUP BYTES        the counter of GROUP's MAC has counted BYTES (the
+ *                            low 32 bits, wrapping) since the transcript began;
+ *                            the daemon reads it on its next second, as it
+ *                            reads the switch's (meter.h)
+ *   T meter                  print the meter file igmpd would write
  *
  * T is whole seconds on the synthetic clock, never backwards. Before every
  * event except the three policy ones the daemon runs its once-a-second step if
@@ -56,6 +61,19 @@
 static char text[MAX_TRANSCRIPT];
 static char pol_buf[IGMP_POLICY_MAX_BYTES];
 static struct igmp_db db;
+
+/* The counters a transcript set, by group MAC. */
+#define MAX_CTRS 32
+static struct { uint32_t mac, bytes; } ctrs[MAX_CTRS];
+static uint32_t nctrs;
+
+uint32_t igmp_replay_counter(uint32_t group)
+{
+	for (uint32_t i = 0; i < nctrs; i++)
+		if (ctrs[i].mac == (group & 0x7fffffu))
+			return ctrs[i].bytes;
+	return 0;
+}
 
 static uint32_t read_all(long fd, char *buf, uint32_t max)
 {
@@ -348,6 +366,22 @@ int igmp_replay(const char *path)
 			igmpd_state_dump(&db);
 		} else if (str_eq(w[1], "status") && nw == 2) {
 			igmpd_status_dump(&db);
+		} else if (str_eq(w[1], "meter") && nw == 2) {
+			igmpd_meter_dump(&db);
+		} else if (str_eq(w[1], "ctr")) {
+			uint32_t group, bytes, i;
+
+			if (nw != 4 || !igmp_parse_ipv4(w[2], &group) ||
+			    !igmp_parse_num(w[3], &bytes))
+				return fail(line, "expected: T ctr GROUP BYTES");
+			for (i = 0; i < nctrs && ctrs[i].mac != (group & 0x7fffffu); i++)
+				;
+			if (i == nctrs) {
+				if (nctrs == MAX_CTRS)
+					return fail(line, "too many counters");
+				ctrs[nctrs++].mac = group & 0x7fffffu;
+			}
+			ctrs[i].bytes = bytes;
 		} else if (str_eq(w[1], "rx") && nw == 3) {
 			int n = unhex(w[2], pay, (int)sizeof pay);
 

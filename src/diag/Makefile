@@ -50,7 +50,8 @@ LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
 # Everything but the hardware layer, shared by diag and diag_fake.
 CORE := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/shell.o $(BUILD)/parse.o \
         $(BUILD)/table.o $(BUILD)/commands.o $(BUILD)/io.o $(BUILD)/ddm.o \
-        $(BUILD)/gpon_status.o $(BUILD)/l2.o $(BUILD)/l2_fmt.o $(BUILD)/acl_probe.o
+        $(BUILD)/gpon_status.o $(BUILD)/l2.o $(BUILD)/l2_fmt.o $(BUILD)/acl_probe.o \
+        $(BUILD)/mc_count.o
 
 $(BIN): $(CORE) $(BUILD)/hw.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
