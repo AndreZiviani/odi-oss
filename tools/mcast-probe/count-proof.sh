@@ -35,7 +35,8 @@
 #
 # The UNI windows need multicast from the host. Run this beside the script,
 # on the host, on the interface that faces the stick (a Linux host; IFACE
-# and the group as here; twenty 1000-byte pings to the group every 25 s):
+# and the group as here; twenty 1000-byte pings to the group, a burst
+# every 9 s or so):
 #
 #     end=$(( $(date +%s) + 1200 )); while [ "$(date +%s)" -lt "$end" ]; do
 #       ping -q -c 20 -i 0.2 -s 1000 -t 1 -I IFACE 239.255.77.1; sleep 5; done

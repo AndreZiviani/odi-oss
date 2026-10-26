@@ -15,7 +15,7 @@ listed here.
   time since the join. A group whose counter has never counted anything is
   reported as unknown, never lost: that the switch counts on the fibre side is
   not yet proved on a stick, and `tools/mcast-probe/count-proof.sh` is the
-  measurement that proves it. The maximum multicast bandwidth of ME 310 is now
+  measurement that proves it (about 18 minutes, on a line without IPTV). The maximum multicast bandwidth of ME 310 is now
   honoured: a new join past it is counted (ME 311 attribute 4) and, when the
   OLT enforces it, refused; a group already playing is never cut. Lines that
   do not turn snooping on, and profiles without a maximum, see no change.
