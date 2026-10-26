@@ -1177,6 +1177,67 @@ static int voip_line_configured(uint16_t pptp)
 	return 0;
 }
 
+/* OMCI_VOIP_LINE_REPORT=1 (odi.conf): the router behind the stick says what
+ * its SIP client really does, and the line status of a provisioned line
+ * follows it. The report is the file VOIP_REPORT_PATH, written by the web UI
+ * daemon (confd) when the router posts it: a line LINE<port>=<state> <s>,
+ * <s> being the seconds since boot (the /proc/uptime clock) when it was
+ * received. Only a fact that is fresh counts: a report older than
+ * VOIP_REPORT_TTL_S, from the future, unreadable or not one of the words
+ * below is not a report, and the line reads "config done" as it always did.
+ * The words are G.988 9.9.11 voice server status values 0 to 7 (registration
+ * outcomes); the invite failures (8 to 12) are not told by a router that only
+ * registers. Read at every Get, so a change is live. Returns the status, or
+ * -1 for no report. */
+#define VOIP_REPORT_PATH   "/var/run/voip-line-status"
+#define VOIP_REPORT_TTL_S  300
+#define CLOCK_BOOTTIME_ID  7
+
+static const struct { const char *word; uint8_t status; } voip_report_words[] = {
+	{ "none",           0 },
+	{ "registered",     1 },
+	{ "in_session",     2 },
+	{ "failed_icmp",    3 },
+	{ "failed_tcp",     4 },
+	{ "failed_auth",    5 },
+	{ "failed_timeout", 6 },
+	{ "failed_server",  7 },
+};
+
+static int voip_line_reported(uint16_t pptp)
+{
+	char key[8] = "LINE", v[40];
+	long now = 0, ns = 0, stamp = 0;
+	int len, i = 0;
+
+	if (cfg_odi_get(CFG_ODI_PATH, "OMCI_VOIP_LINE_REPORT", v, sizeof v) != 1 ||
+	    v[0] != '1' || (pptp & 0xff) < 1 || (pptp & 0xff) > POTS_PORTS_MAX)
+		return -1;
+	key[4] = (char)('0' + (pptp & 0xff));
+	len = cfg_odi_get(VOIP_REPORT_PATH, key, v, sizeof v);
+	if (len < 3 || len >= (int)sizeof v ||
+	    sys_clock_gettime(CLOCK_BOOTTIME_ID, &now, &ns) != 0)
+		return -1;
+	while (v[i] && v[i] != ' ')
+		i++;
+	if (!v[i])
+		return -1;
+	v[i++] = 0;
+	if (!v[i])
+		return -1;
+	for (; v[i]; i++) {
+		if (v[i] < '0' || v[i] > '9' || stamp > 100000000L)
+			return -1;
+		stamp = stamp * 10 + (v[i] - '0');
+	}
+	if (stamp > now || now - stamp > VOIP_REPORT_TTL_S)
+		return -1;
+	for (unsigned w = 0; w < sizeof voip_report_words / sizeof voip_report_words[0]; w++)
+		if (str_eq(v, voip_report_words[w].word))
+			return voip_report_words[w].status;
+	return -1;
+}
+
 /* The voice attributes the ONU answers itself, then G.988's defaults.
  *
  * What the stick holds and can observe, never more: it has no phone socket,
@@ -1219,9 +1280,13 @@ static void voice_value(const struct omci_class *c, const struct mib_row *r,
 		}
 		break;
 	case OMCI_ME_VOIP_LINE_STATUS:
-		if (k == 2)                        /* voice server status */
-			out[0] = voip_line_configured(inst) ? LINE_CONFIG_DONE
+		if (k == 2) {                      /* voice server status */
+			int rep = voip_line_configured(inst) ? voip_line_reported(inst) : -1;
+
+			out[0] = rep >= 0 ? (uint8_t)rep :
+				 voip_line_configured(inst) ? LINE_CONFIG_DONE
 							    : LINE_NOT_CONFIGURED;
+		}
 		break;
 	case OMCI_ME_VOIP_CONFIG_DATA:
 		if (k == 1)

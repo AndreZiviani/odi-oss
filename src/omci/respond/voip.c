@@ -356,6 +356,11 @@ static const char *status_name(unsigned s)
 	case 0:  return "none (initial)";
 	case 1:  return "registered";
 	case 2:  return "in session";
+	case 3:  return "registration failed (icmp error)";
+	case 4:  return "registration failed (tcp error)";
+	case 5:  return "registration failed (authentication)";
+	case 6:  return "registration failed (timeout)";
+	case 7:  return "registration failed (server fail code)";
 	case 13: return "port not configured";
 	case 14: return "config done";
 	default: return 0;

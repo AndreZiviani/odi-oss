@@ -376,6 +376,47 @@ send "$log" 00aa 44 008b 0001 "00010201000101"
 send "$log" 00a4 49 008b 0001 f000
 check "the voice CTP reads back" "$(answer "$log" 00a4 | cut -c1-20)" "00f00000010201000101"
 
+# The router's report (OMCI_VOIP_LINE_REPORT): fresh facts only, from the file
+# confd writes; the seconds-since-boot stamp is the /proc/uptime clock.
+up() { cut -d. -f1 /proc/uptime; }
+status_of() {
+	send "$log" "$1" 49 008d 0201 4000
+	answer "$log" "$1" | cut -c1-8
+}
+REP=/var/run/voip-line-status
+rm -f $REP
+printf 'LINE1=registered %s\n' "$(up)" > $REP
+check "report: a fresh registered report is ignored while the key is off" \
+      "$(status_of 0c01)" "0040000e"
+printf 'OMCI_POTS_PORTS=1\nOMCI_VOIP_LINE_REPORT=1\n' > /var/config/odi.conf
+check "report: key on, fresh registered: line status 1" "$(status_of 0c02)" "00400001"
+for w in 'in_session 2' 'failed_icmp 3' 'failed_tcp 4' 'failed_auth 5' \
+         'failed_timeout 6' 'failed_server 7' 'none 0'; do
+	printf 'LINE1=%s %s\n' "${w% *}" "$(up)" > $REP
+	check "report: ${w% *} reads as ${w#* }" "$(status_of 0c03)" "004000$(printf %02x "${w#* }")"
+done
+printf 'LINE1=registered %s\n' "$(( $(up) - 400 ))" > $REP
+check "report: older than the TTL falls back to config done" "$(status_of 0c04)" "0040000e"
+printf 'LINE1=registered %s\n' "$(( $(up) + 1000 ))" > $REP
+check "report: a stamp from the future is no report" "$(status_of 0c05)" "0040000e"
+printf 'LINE1=ringing %s\n' "$(up)" > $REP
+check "report: an unknown state word is no report" "$(status_of 0c06)" "0040000e"
+printf 'LINE1=registered\n' > $REP
+check "report: no stamp is no report" "$(status_of 0c07)" "0040000e"
+printf 'LINE2=registered %s\n' "$(up)" > $REP
+check "report: another port's report does not count" "$(status_of 0c08)" "0040000e"
+printf 'LINE1=registered %s\n' "$(up)" > $REP
+send "$log" 0c09 46 008b 0001 ""
+check "report: no provisioned line, no reported state: port not configured" \
+      "$(status_of 0c0a)" "0040000d"
+send "$log" 0c0b 44 008b 0001 "00010201000101"
+check "report: the line is back, the report still counts" "$(status_of 0c0c)" "00400001"
+check "report: omcicli voip shows the reported state" \
+      "$($Q cli/build/omcli voip 2>&1 | grep -c 'line status registered (1)')" "1"
+rm -f $REP
+check "report: no file is no report" "$(status_of 0c0d)" "0040000e"
+printf 'OMCI_POTS_PORTS=1\n' > /var/config/odi.conf
+
 # A PM entity: the threshold data pointer is its one set-by-create
 # attribute; the counters are zero, the stick sees no calls.
 send "$log" 00b0 44 008c 0201 "0000"

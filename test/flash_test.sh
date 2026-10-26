@@ -175,6 +175,7 @@ t "OMCI_PRIVATE_ME is an odi key too" "OMCI_PRIVATE_ME=0" "$(sh $F set OMCI_PRIV
 t "and reads back from odi.conf, where omcid reads it" "1" "$(grep -c '^OMCI_PRIVATE_ME=0$' "$ODI_CONF")"
 t "OMCI_POTS_PORTS is an odi key too" "OMCI_POTS_PORTS=2" "$(sh $F set OMCI_POTS_PORTS 2)"
 t "and reads back from odi.conf, where omcid reads it" "1" "$(grep -c '^OMCI_POTS_PORTS=2$' "$ODI_CONF")"
+t "OMCI_VOIP_LINE_REPORT is an odi key too" "OMCI_VOIP_LINE_REPORT=1" "$(sh $F set OMCI_VOIP_LINE_REPORT 1)"
 t "OMCI_POTS_SLOT_ID is an odi key too" "OMCI_POTS_SLOT_ID=9" "$(sh $F set OMCI_POTS_SLOT_ID 9)"
 t "and reads back from odi.conf, where omcid reads it" "1" "$(grep -c '^OMCI_POTS_SLOT_ID=9$' "$ODI_CONF")"
 t "cleared, it reads empty (omcid then accepts)" "OLT_SW_DOWNLOAD=" "$(sh $F set OLT_SW_DOWNLOAD '')"
