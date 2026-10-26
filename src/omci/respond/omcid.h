@@ -321,6 +321,11 @@ extern int qos_dirty;
 extern int mcast_dirty;
 void mcast_policy_export(void);
 int mcast_policy_class(uint16_t cls);
+/* The attributes of a class 309 Create or Set that carry a value G.988 does
+ * not define (version, function, immediate leave, tag control, unauthorized
+ * join behaviour), as a mask: refused with result 9. */
+uint16_t mcast_value_reject(const struct omci_class *c, uint16_t mask,
+			    const uint8_t *data, uint16_t len);
 /* ME 311, the multicast subscriber monitor: what igmpd keeps in
  * /var/run/odi-mcast.state. A counter, 0 when there is no file; and the IPv4
  * active group list as 24-byte table rows (G.988 9.3.29), returning the

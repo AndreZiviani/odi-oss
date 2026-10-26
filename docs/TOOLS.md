@@ -412,7 +412,8 @@ the result; it never opens `/dev/odi_sw` or the redirect device and refuses
     7 rx 010000...                 # a raw payload: port (one-based), VID, frame
     9 state                        # the state file it would write
 
-Other events: `v3join`, `v3leave`, `query PORT VID SRC`, `policy-file PATH`,
+Other events: `v3join`, `v3leave`, `v3src incl|excl PORT VID SRC GROUP S1[,S2..]`
+(a v3 record that names sources), `query PORT VID SRC`, `policy-file PATH`,
 `nopolicy`, `status` (what `igmpd -s` prints), `ctr GROUP BYTES` (what the
 counter of the group's MAC has counted, read on the next second as the
 switch's would be), `meter` (the meter file it would write, below), and the
@@ -528,6 +529,50 @@ IPv6 range (part 2's twelve bytes, then the last four of part 0's start and
 end), written as `allow6=` or `static6=` for MLD (below); one whose part 1
 alone is IPv6 has an IPv6 source and IPv4 destinations, and is neither (no
 source is filtered).
+
+What more a row says, when it says it (an empty field is a wildcard, so a row
+that says nothing behaves as a bare range always did):
+
+- the VLAN (ANI): a join is held to the row of its own VLAN, so ranges of
+  different VLANs stay apart. A row's VLAN is the one its stream runs on
+  downstream, and the message asking for it need not be on that VLAN (the
+  upstream IGMP tag control may put another), so a join is held to the rows'
+  VLANs only when its own VLAN, as it goes up (the profile's tag with control
+  1 to 3, the message's own tag with control 0), is one that some row names.
+  A join on any other VLAN, or an untagged one with control 0, is judged by the
+  ranges alone;
+- the source address (SSM): an IGMPv3 record that names sources is held to it,
+  INCLUDE needing the row's source among them and EXCLUDE not naming it. A v1
+  or v2 report cannot name one and goes in on the group alone;
+- the GEM port and the imputed bandwidth are read and carried, not used
+  (`struct igmp_range`, `imputed_bw`, for the bandwidth limit);
+- the preview (row part 1): a group of a row with a preview length is
+  allowed that many seconds, then removed whatever the host keeps reporting,
+  and refused until the row's repeat time has passed since it ended (or since
+  the host left); at most the row's repeat count of previews, counted per group,
+  reset every 24 hours unless the reset time is 0 or 255 (the OLT's own reset
+  action is not seen). A group a row with no preview also covers is full
+  access. The refusals count under `preview` in the state file;
+- the allowed preview groups table of ME 310 (attribute 7), IPv4 rows only:
+  a group in it is fully authorized for its minutes (0: until the OLT removes
+  it), ahead of the preview rows, even if no row lists it. The ONU's own count
+  down of the time left starts when igmpd first sees the row (at the first
+  join that uses it, if the daemon has no clock yet), and a row the OLT
+  lengthens keeps its start.
+
+The profile's IGMP version (ME 309 attribute 1) only counts the host's messages
+above it (a v3 report under version 2, a v2 report or leave under version 1):
+they are handled as any other, since a set-top box does not fall back to an older
+version when it sees no query, and the count shows as `above_version` in the
+state file and `igmpd -s`. The
+querier address (attribute 11) is stored and shown, nothing is sent from it.
+
+A Set or Create of ME 309 refuses, with result 9 and the attribute in the mask,
+a value G.988 does not define for the IGMP version (1, 2, 3, 16, 17), the IGMP
+function (0 to 2), immediate leave and unauthorized join behaviour (0, 1) and
+the upstream tag control (0 to 3). Every defined value is accepted whether or
+not it is done: function 1 and 2 are stored and the multicast stays
+transparent.
 
 **Not supported yet: the multicast service package table.** G.988 lets the
 service package table of ME 310 (attribute 6) choose the profile by the VLAN

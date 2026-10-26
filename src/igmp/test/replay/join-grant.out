@@ -1,0 +1,53 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 1 allow + 0 static ranges
+  join rules: 1 are previews; 2 allowed preview groups
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
+> 1 v2join 1 0 192.168.1.10 239.9.5.5
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:05:05  v2 report  group 239.9.5.5  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:09:05:05 ports 0x5  (not written)
+> 2 v2join 1 0 192.168.1.10 226.5.5.5
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:05:05:05  v2 report  group 226.5.5.5  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:05:05:05 ports 0x5  (not written)
+> 3 v2join 1 0 192.168.1.10 239.9.6.6
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:06:06  v2 report  group 239.9.6.6  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:09:06:06 ports 0x5  (not written)
+> 34 tick
+  del vid 0 01:00:5e:09:06:06 ports 0x0  (not written)
+> 100 v2join 1 0 192.168.1.10 239.9.5.5
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:05:05  v2 report  group 239.9.5.5  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+> 125 v2join 1 0 192.168.1.10 239.9.5.5
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:05:05  v2 report  group 239.9.5.5  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+> 160 tick
+  del vid 0 01:00:5e:09:05:05 ports 0x0  (not written)
+> 170 v2join 1 0 192.168.1.10 239.9.5.5
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:05:05  v2 report  group 239.9.5.5  src 192.168.1.10
+  up: withheld: every join outside the access control lists
+> 200 v2join 1 0 192.168.1.10 226.5.5.5
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:05:05:05  v2 report  group 226.5.5.5  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+> 201 state
+joins=6
+denied=1
+groups=1
+refused_preview=1
+up_sent=6
+up_withheld=1
+group=226.5.5.5
+refused=preview 239.9.5.5 vid=0 at=170 n=1
+> end
+joins=6
+denied=1
+groups=1
+refused_preview=1
+up_sent=6
+up_withheld=1
+group=226.5.5.5
+refused=preview 239.9.5.5 vid=0 at=170 n=1
+status 0

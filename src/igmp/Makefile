@@ -87,7 +87,7 @@ $(BUILD)/state.o: state.c state.h group.h policy.h igmpd.h | $(BUILD)
 $(BUILD)/status.o: status.c status.h state.h group.h policy.h mld.h $(DIAG)/src/odi_sw_ioctl.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/policy.o: policy.c policy.h entry.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
+$(BUILD)/policy.o: policy.c policy.h entry.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/entry.o: entry.c entry.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)

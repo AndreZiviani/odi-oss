@@ -1,0 +1,38 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 2 allow + 0 static ranges
+  join rules: 2 of 2 rows name a VLAN
+  upstream: reports taken and sent by igmpd; tag added, vid 420 pri 0; unauthorized joins withheld
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 225.1.1.1  src 192.168.1.10
+  up: send with vid 420 pri 0 (tag control 1)  (not sent)
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 2 v2join 1 0 192.168.1.10 225.2.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:02:01:01  v2 report  group 225.2.1.1  src 192.168.1.10
+  up: send with vid 420 pri 0 (tag control 1)  (not sent)
+  set vid 0 01:00:5e:02:01:01 ports 0x5  (not written)
+> 3 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+  up: withheld: every join outside the access control lists
+> 4 state
+joins=2
+denied=1
+groups=2
+refused_acl=1
+up_sent=2
+up_withheld=1
+group=225.1.1.1
+group=225.2.1.1
+refused=acl 239.1.1.1 vid=0 at=3 n=1
+> end
+joins=2
+denied=1
+groups=2
+refused_acl=1
+up_sent=2
+up_withheld=1
+group=225.1.1.1
+group=225.2.1.1
+refused=acl 239.1.1.1 vid=0 at=3 n=1
+status 0

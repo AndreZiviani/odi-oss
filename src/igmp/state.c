@@ -36,6 +36,7 @@ const char *igmp_refusal_name(uint32_t reason)
 	case IGMP_REFUSE_LIMIT: return "limit";
 	case IGMP_REFUSE_FULL:  return "full";
 	case IGMP_REFUSE_BW:    return "bw";
+	case IGMP_REFUSE_PREVIEW: return "preview";
 	}
 	return "?";
 }
@@ -69,6 +70,8 @@ uint32_t igmp_state_format(const struct igmp_db *db, char *buf, uint32_t max)
 	/* The way up, while the reports are taken (uplink.h): a line only once
 	 * its count is above zero, like the refusals, so a snooper whose copy
 	 * stays a copy writes what it always wrote. */
+	if (db->above_version)
+		at = put_kv(buf, at, max, "above_version", db->above_version);
 	if (db->up_sent)
 		at = put_kv(buf, at, max, "up_sent", db->up_sent);
 	if (db->up_withheld)
@@ -193,6 +196,8 @@ int igmp_state_parse(const char *text, uint32_t len, struct igmp_state_view *v)
 			v->groups = x;
 		} else if (rd_lit(&p, e, "bw_exceeded=") && rd_u(&p, e, &x)) {
 			v->bw_exceeded = x;
+		} else if (rd_lit(&p, e, "above_version=") && rd_u(&p, e, &x)) {
+			v->above_version = x;
 		} else if (rd_lit(&p, e, "up_sent=") && rd_u(&p, e, &x)) {
 			v->up_sent = x;
 		} else if (rd_lit(&p, e, "up_withheld=") && rd_u(&p, e, &x)) {

@@ -865,6 +865,20 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 			out("-> instance exists\n");
 			return;
 		}
+		/* A multicast profile naming a value G.988 does not define for
+		 * a few-valued attribute is not created: result 9 and the
+		 * attributes at fault (mcast.c says which are judged). */
+		if (c && cls == 309) {
+			uint16_t bad = mcast_value_reject(c, create_mask(c), f + 8, 32);
+
+			if (bad) {
+				body[0] = OMCI_ERR_ATTR_FAILED;
+				nl_put16(body + 1, bad);
+				send_resp(fd, tid, f, body, 3);
+				out_fmt("-> refused: undefined value in %04x\n", (long)bad);
+				return;
+			}
+		}
 		r = c ? mib_add(cls, inst) : 0;
 		if (r)
 			pm_create(cls, inst);
@@ -918,6 +932,11 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		uint16_t mask = nl_get16(f + 8);
 		uint16_t failed = r ? set_reject_mask(c, mask) : 0;
 		int done;
+
+		/* The same for a Set of a multicast profile: the attribute with
+		 * the undefined value is refused, the others go through. */
+		if (r && cls == 309)
+			failed |= mcast_value_reject(c, mask, f + 10, 30);
 
 		if (!c && fake_unknown(fd, tid, f, mt))
 			return;

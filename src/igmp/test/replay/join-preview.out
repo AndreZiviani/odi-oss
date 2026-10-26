@@ -1,0 +1,76 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 2 allow + 0 static ranges
+  join rules: 1 are previews
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
+> 1 v2join 1 0 192.168.1.10 239.9.0.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:01  v2 report  group 239.9.0.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:09:00:01 ports 0x5  (not written)
+> 2 v2join 1 0 192.168.1.10 225.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 225.1.1.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 20 v2join 1 0 192.168.1.10 239.9.0.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:01  v2 report  group 239.9.0.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+> 30 tick
+> 31 tick
+  del vid 0 01:00:5e:09:00:01 ports 0x0  (not written)
+> 40 v2join 1 0 192.168.1.10 239.9.0.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:01  v2 report  group 239.9.0.1  src 192.168.1.10
+  up: withheld: every join outside the access control lists
+> 90 v2join 1 0 192.168.1.10 239.9.0.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:01  v2 report  group 239.9.0.1  src 192.168.1.10
+  up: withheld: every join outside the access control lists
+> 91 v2join 1 0 192.168.1.10 239.9.0.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:01  v2 report  group 239.9.0.1  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:09:00:01 ports 0x5  (not written)
+> 120 tick
+> 121 tick
+  del vid 0 01:00:5e:09:00:01 ports 0x0  (not written)
+> 200 v2join 1 0 192.168.1.10 239.9.0.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:01  v2 report  group 239.9.0.1  src 192.168.1.10
+  up: withheld: every join outside the access control lists
+> 300 v2join 1 0 192.168.1.10 239.9.0.2
+snooping lease: take host IGMP to the CPU, igmpd sends it up, drop unregistered IPv4 multicast from the PON  (not written)
+  del vid 0 01:00:5e:01:01:01 ports 0x0  (not written)
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:02  v2 report  group 239.9.0.2  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:09:00:02 ports 0x5  (not written)
+> 310 v2leave 1 0 192.168.1.10 239.9.0.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:02  leave  group 239.9.0.2  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  del vid 0 01:00:5e:09:00:02 ports 0x0  (not written)
+> 320 v2join 1 0 192.168.1.10 239.9.0.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:02  v2 report  group 239.9.0.2  src 192.168.1.10
+  up: withheld: every join outside the access control lists
+> 369 v2join 1 0 192.168.1.10 239.9.0.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:02  v2 report  group 239.9.0.2  src 192.168.1.10
+  up: withheld: every join outside the access control lists
+> 370 v2join 1 0 192.168.1.10 239.9.0.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:09:00:02  v2 report  group 239.9.0.2  src 192.168.1.10
+  up: send as the switch tags it (tag control 0)  (not sent)
+  set vid 0 01:00:5e:09:00:02 ports 0x5  (not written)
+> 400 state
+  del vid 0 01:00:5e:09:00:02 ports 0x0  (not written)
+joins=6
+denied=5
+groups=0
+refused_preview=5
+up_sent=7
+up_withheld=5
+refused=preview 239.9.0.1 vid=0 at=200 n=3
+refused=preview 239.9.0.2 vid=0 at=369 n=2
+> end
+joins=6
+denied=5
+groups=0
+refused_preview=5
+up_sent=7
+up_withheld=5
+refused=preview 239.9.0.1 vid=0 at=200 n=3
+refused=preview 239.9.0.2 vid=0 at=369 n=2
+status 0

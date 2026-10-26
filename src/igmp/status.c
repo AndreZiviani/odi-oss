@@ -22,6 +22,42 @@ void igmp_policy_describe(const struct igmp_policy *p)
 		(long)p->last_member_query, (long)p->max_groups,
 		(long)p->nallow, (long)p->nstatic,
 		p->overflow ? " (too many: not enforced)" : "");
+	/* The join rules past the plain ranges, only when the profile has any:
+	 * a profile of bare ranges reads as it always did. */
+	{
+		uint32_t rows = 0, vl = 0, sr = 0, pv = 0;
+
+		for (uint32_t i = 0; i < p->nallow; i++) {
+			rows++;
+			vl += p->allow[i].vid != 0;
+			sr += p->allow[i].src != 0;
+			pv += p->allow[i].pv_len != 0;
+		}
+		if (p->snooping && ((p->igmp_version && p->igmp_version < 3) ||
+				    vl || sr || pv || p->ngrant)) {
+			const char *sep = "  join rules: ";
+
+			if (p->igmp_version && p->igmp_version < 3) {
+				out_fmt("%sIGMP version %u at most (a message above it is only counted)", sep, p->igmp_version);
+				sep = "; ";
+			}
+			if (vl) {
+				out_fmt("%s%u of %u rows name a VLAN", sep, vl, rows);
+				sep = "; ";
+			}
+			if (sr) {
+				out_fmt("%s%u name a source", sep, sr);
+				sep = "; ";
+			}
+			if (pv) {
+				out_fmt("%s%u are previews", sep, pv);
+				sep = "; ";
+			}
+			if (p->ngrant)
+				out_fmt("%s%u allowed preview groups", sep, p->ngrant);
+			out("\n");
+		}
+	}
 	/* A line only for a profile with a bandwidth maximum, and another
 	 * only when the reports are taken: a profile with neither reads as it
 	 * always did. */
@@ -71,6 +107,7 @@ static const char *reason_text(uint32_t r)
 	case IGMP_REFUSE_LIMIT: return "past the group limit";
 	case IGMP_REFUSE_FULL:  return "no free table entry";
 	case IGMP_REFUSE_BW:    return "past the multicast bandwidth";
+	case IGMP_REFUSE_PREVIEW: return "preview used up";
 	}
 	return "unknown reason";
 }
@@ -98,6 +135,11 @@ void igmp_status_print(const struct igmp_policy *p, int have_policy,
 	if (v.bw_exceeded || v.refused[IGMP_REFUSE_BW])
 		out_fmt("past the multicast bandwidth %u, of them refused %u\n",
 			v.bw_exceeded, v.refused[IGMP_REFUSE_BW]);
+	if (v.refused[IGMP_REFUSE_PREVIEW])
+		out_fmt("also refused: preview used up %u\n", v.refused[IGMP_REFUSE_PREVIEW]);
+	if (v.above_version)
+		out_fmt("above the profile's IGMP version %u (handled as any other)\n",
+			v.above_version);
 	if (v.up_sent || v.up_withheld || v.up_limited || v.up_unsent)
 		out_fmt("sent up %u, withheld %u, over the rate %u, not sent %u\n",
 			v.up_sent, v.up_withheld, v.up_limited, v.up_unsent);

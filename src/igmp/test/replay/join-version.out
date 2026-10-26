@@ -1,0 +1,50 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+  join rules: IGMP version 2 at most (a message above it is only counted)
+  upstream: reports taken and sent by igmpd; tag added, vid 100 pri 0
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
+> 1 v2join 1 0 192.168.1.10 225.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 225.1.1.1  src 192.168.1.10
+  up: send with vid 100 pri 0 (tag control 1)  (not sent)
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 2 v3join 1 0 192.168.1.10 225.2.2.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:16  v3 report (1 records)  src 192.168.1.10
+  up: send with vid 100 pri 0 (tag control 1)  (not sent)
+  set vid 0 01:00:5e:02:02:02 ports 0x5  (not written)
+> 3 v3leave 1 0 192.168.1.10 225.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:16  v3 report (1 records)  src 192.168.1.10
+  up: send with vid 100 pri 0 (tag control 1)  (not sent)
+  del vid 0 01:00:5e:01:01:01 ports 0x0  (not written)
+> 4 v2leave 1 0 192.168.1.10 225.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:02  leave  group 225.1.1.1  src 192.168.1.10
+  up: send with vid 100 pri 0 (tag control 1)  (not sent)
+> 5 state
+joins=2
+denied=0
+groups=1
+above_version=2
+up_sent=4
+group=225.2.2.2
+> 20 policy
+> 21 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+  upstream: reports taken and sent by igmpd; tag added, vid 100 pri 0
+> 22 v3join 1 0 192.168.1.10 225.2.2.2
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:00:00:16  v3 report (1 records)  src 192.168.1.10
+  up: send with vid 100 pri 0 (tag control 1)  (not sent)
+> 23 state
+joins=3
+denied=0
+groups=1
+above_version=2
+up_sent=5
+group=225.2.2.2
+> end
+joins=3
+denied=0
+groups=1
+above_version=2
+up_sent=5
+group=225.2.2.2
+status 0
