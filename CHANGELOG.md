@@ -10,6 +10,28 @@ listed here.
 - iproute2 7.2.0 -> 7.3.0
 
 
+- igmpd, omcid: the access control lists, the IGMP version and the preview
+  rules of the OLT's multicast profile (ME 309, ME 310) are now honoured, all
+  of it only while `IGMP_SNOOPING` is `1`. A list row that names a VLAN is
+  held to the joins on that VLAN, so ranges of different VLANs stay apart (when
+  the join is on a VLAN some row names; any other join is judged by the
+  ranges as before), and a row that names a source address (SSM) is held to
+  IGMPv3 records that name sources, while a v2 report goes in as before. A
+  group of a row with a preview length is allowed for that many seconds, then
+  removed, refused until the repeat time has passed and for good once the
+  repeat count is spent; a group of the allowed preview table of ME 310 is full
+  access for its minutes. A host message above the profile's IGMP version (a v3
+  report under version 2) is handled as before, not dropped (a set-top box
+  does not fall back to an older version when it sees no query), and counted
+  as `above_version` in the state file and `igmpd -s`. The GEM port and imputed bandwidth of
+  each row are carried for the bandwidth limit, not enforced. Rows that say
+  nothing about any of these, and profiles with no version, behave as before.
+  A Set or Create of ME 309 now refuses (result 9) a value G.988 does not
+  define for the IGMP version, function, immediate leave, upstream tag control
+  or unauthorized join behaviour; function 1 and 2 are still accepted and the
+  multicast stays transparent. The state file and `igmpd -s` count refusals by
+  `preview`; `igmpd -r` has a `v3src` event for records that name
+  sources.
 - omcid: a line whose OLT asks for transparent multicast now gets the VID-0
   multicast tag passed through, as the stock firmware does; no change on lines
   that ask for strip. In the manual VLAN mode the multicast row for

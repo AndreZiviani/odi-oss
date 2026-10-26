@@ -1,0 +1,31 @@
+# IGMP version 2 in the profile (ME 309 attribute 1): a v3 report is above it.
+# It is not dropped (a set-top box that speaks v3 does not fall back to v2 when
+# it sees no query): it is held and goes up as any other, and is counted as
+# above the profile's version. The reports are taken (tag control 1) so that
+# what goes up shows. At second 20 the profile says version 3 and the same
+# report is not counted.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+igmp_version=2
+us_tag_control=1
+us_tci=100
+end
+0 tick
+1 v2join 1 0 192.168.1.10 225.1.1.1
+2 v3join 1 0 192.168.1.10 225.2.2.2
+3 v3leave 1 0 192.168.1.10 225.1.1.1
+4 v2leave 1 0 192.168.1.10 225.1.1.1
+5 state
+20 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+igmp_version=3
+us_tag_control=1
+us_tci=100
+end
+21 tick
+22 v3join 1 0 192.168.1.10 225.2.2.2
+23 state

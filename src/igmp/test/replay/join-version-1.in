@@ -1,0 +1,12 @@
+# Version 1: the v2 report is above it and is only counted; the v1 report (the
+# raw frame of one for 225.1.1.1) is not. Both are held.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+igmp_version=1
+end
+0 tick
+1 v2join 1 0 192.168.1.10 225.2.2.2
+2 rx 01000001005e010101020000000001080046c000200000000001028063c0a8010ae10101019404000012000bfde1010101
+3 state

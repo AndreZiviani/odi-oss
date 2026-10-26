@@ -21,6 +21,9 @@
  *   T v2leave  PORT VID SRC GROUP     a v2 leave (sent to 224.0.0.2)
  *   T v3join   PORT VID SRC GROUP     a v3 report, one IS_EXCLUDE record, no sources
  *   T v3leave  PORT VID SRC GROUP     a v3 report, one TO_INCLUDE record, no sources
+ *   T v3src incl|excl PORT VID SRC GROUP S1[,S2...]
+ *                            a v3 report, one IS_INCLUDE or IS_EXCLUDE record
+ *                            naming up to 4 sources
  *   T query    PORT VID SRC           a general query (224.0.0.1)
  *                                     PORT is the ONE-BASED port, VID 0 is untagged,
  *                                     SRC and GROUP are dotted quads
@@ -211,6 +214,47 @@ static uint32_t frame_for(const char *verb, uint8_t port, uint16_t vid,
 	return 0;
 }
 
+/* A v3 report with one record that names sources, `list` being dotted quads
+ * separated by commas. Returns the payload length, 0 on a bad list. */
+static uint32_t v3_sources(uint8_t *b, int exclude, uint8_t port, uint16_t vid,
+			   uint32_t sip, uint32_t group, char *list)
+{
+	uint8_t m[16 + 16];
+	uint32_t n = 0;
+	char *s = list;
+
+	for (unsigned i = 0; i < sizeof m; i++)
+		m[i] = 0;
+	while (*s) {
+		char *e = s;
+		uint32_t a;
+
+		while (*e && *e != ',')
+			e++;
+		if (n == 4)
+			return 0;
+		{
+			char save = *e;
+
+			*e = 0;
+			if (!igmp_parse_ipv4(s, &a))
+				return 0;
+			*e = save;
+		}
+		put32(m + 16 + 4 * n, a);
+		n++;
+		s = *e ? e + 1 : e;
+	}
+	if (!n)
+		return 0;
+	m[0] = IGMP_V3_REPORT;
+	put16(m + 6, 1);
+	m[8] = exclude ? 2 : 1;
+	put16(m + 10, (uint16_t)n);
+	put32(m + 12, group);
+	return build(b, port, vid, sip, 0xe0000016u, m, 16 + 4 * n);
+}
+
 /* ---- the transcript ---------------------------------------------------- */
 
 /* Split a line in place into words. Returns the count. */
@@ -354,6 +398,19 @@ int igmp_replay(const char *path)
 			if (n < 0)
 				return fail(line, "bad hex");
 			igmpd_frame(&db, pay, (uint32_t)n, now);
+		} else if (str_eq(w[1], "v3src")) {
+			uint32_t port, vid, sip, group, len;
+
+			if (nw != 8 || !(str_eq(w[2], "incl") || str_eq(w[2], "excl")) ||
+			    !igmp_parse_num(w[3], &port) || port == 0 || port > 255 ||
+			    !igmp_parse_num(w[4], &vid) || vid > 4095 ||
+			    !igmp_parse_ipv4(w[5], &sip) || !igmp_parse_ipv4(w[6], &group))
+				return fail(line, "expected: T v3src incl|excl PORT VID SRC GROUP SOURCES");
+			len = v3_sources(pay, w[2][1] == 'x', (uint8_t)port, (uint16_t)vid,
+					 sip, group, w[7]);
+			if (!len)
+				return fail(line, "bad source list (1 to 4 dotted quads, commas between)");
+			igmpd_frame(&db, pay, len, now);
 		} else if (str_eq(w[1], "query")) {
 			uint32_t port, vid, sip;
 

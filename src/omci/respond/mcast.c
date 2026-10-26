@@ -14,6 +14,9 @@
  *   snooping=1|0         the OLT asks for IGMP snooping (function 0) and a
  *                        multicast GEM port carries groups (281 holds a row)
  *   igmp_function=N      attribute 2 of the profile as sent
+ *   igmp_version=N       attribute 1 as sent (1, 2, 3, 16, 17), only when set
+ *   querier=A.B.C.D      attribute 11, the proxy querier address, only when
+ *                        set; nothing is sent from it
  *   immediate_leave=0|1
  *   robustness=N         the profile value, 2 when unset or zero
  *   query_interval=S     seconds, 125 when unset or zero
@@ -24,8 +27,18 @@
  *   us_tag_control=N     attribute 5, the upstream IGMP tag control as sent
  *   us_tci=N             attribute 4, the upstream IGMP TCI (16 bits)
  *   us_rate=N            attribute 6, messages a second, 0 = no limit
- *   allow=A-B            a range of the dynamic access control list
- *   static=A-B           a range of the static access control list
+ *   allow=A-B [v=VLAN] [s=SRC] [g=GEM] [b=BYTES/S] [p=LEN,REPEAT,COUNT,RESET]
+ *                        a row of the dynamic access control list: the range,
+ *                        then what the row says about the join, each only
+ *                        when it says something. VLAN (ANI) 1 to 4095; source
+ *                        address (SSM); GEM port; imputed bandwidth; the
+ *                        preview fields of row part 1 (length seconds, repeat
+ *                        time seconds, repeat count, reset time)
+ *   static=A-B [...]     a row of the static access control list, the same
+ *                        tokens but the preview
+ *   grant=G [s=SRC] [a=ANI] [u=UNI] [d=MINUTES]
+ *                        a row of the allowed preview groups table of ME 310
+ *                        (attribute 7): group G is fully authorized
  *   allow_overflow=1     the OLT sent more ranges than fit: not enforced
  *
  * The subscriber is the one UNI: the profile is taken from the ME 310 whose
@@ -57,7 +70,9 @@ int mcast_policy_class(uint16_t cls)
 	       cls == CLS_BRIDGE_PORT || cls == OMCI_ME_MCAST_GEM_IW_TP;
 }
 
-static char pbuf[4096];
+/* Up to 64 rows of about 115 bytes and 32 allowed preview rows, with the
+ * header lines. igmpd reads it with the same bound (igmp/policy.h). */
+static char pbuf[8192];
 static uint32_t plen;
 /* What was last written, so a MIB change that leaves the policy as it was
  * (every Set of an unrelated entity) writes nothing. */
@@ -195,6 +210,32 @@ static int acl_part_is_v6(const struct mib_row *r, unsigned attr, unsigned key,
  * IPv6 is left out, since igmpd enforces the IPv4 list only. An IPv6-only
  * table therefore lists nothing, and nothing is enforced. Returns how many
  * rows it listed, or -1 when there were more than fit. */
+/* The preview fields (row part 1, bytes 14 to 21) of the logical row of
+ * `key`, or 0 when it has no part 1. */
+static const uint8_t *acl_part1(const struct mib_row *r, unsigned attr, unsigned key)
+{
+	for (uint8_t i = r->tbl_head; i != MIB_TBL_NONE; i = tblpool[i].next) {
+		const uint8_t *e = tblpool[i].data;
+
+		if (tblpool[i].attr == attr && ACL_PART(e) == 1 && ACL_KEY(e) == key)
+			return e;
+	}
+	return 0;
+}
+
+static uint32_t be16(const uint8_t *p)
+{
+	return (uint32_t)p[0] << 8 | p[1];
+}
+
+static void ptok(const char *name, uint32_t v)
+{
+	pc(' ');
+	ps(name);
+	pc('=');
+	pd(v);
+}
+
 static int acl_lines(const struct mib_row *r, unsigned attr, const char *key)
 {
 	int n = 0;
@@ -225,6 +266,76 @@ static int acl_lines(const struct mib_row *r, unsigned attr, const char *key)
 		pip(lo);
 		pc('-');
 		pip(hi);
+		/* What the row says about the join. A VLAN of 0 (untagged
+		 * downstream), 4096, 4097 (any tagged) and 0xffff (unspecified)
+		 * names no VLAN to hold a join against; a source of 0.0.0.0 is
+		 * "ignored", by G.988. */
+		if (be16(e + 4) >= 1 && be16(e + 4) <= 4095)
+			ptok("v", be16(e + 4));
+		if (be32(e + 6)) {
+			pc(' ');
+			ps("s=");
+			pip(be32(e + 6));
+		}
+		if (be16(e + 2) && be16(e + 2) != 0xffff)
+			ptok("g", be16(e + 2));
+		if (be32(e + 18))
+			ptok("b", be32(e + 18));
+		if (attr == 7) {
+			const uint8_t *p1 = acl_part1(r, attr, ACL_KEY(e));
+
+			/* A length of 0 is a group fully authorized, and the
+			 * rest of the part is then ignored (G.988). */
+			if (p1 && be16(p1 + 14)) {
+				ps(" p=");
+				pd(be16(p1 + 14));
+				pc(',');
+				pd(be16(p1 + 16));
+				pc(',');
+				pd(be16(p1 + 18));
+				pc(',');
+				pd(be16(p1 + 20));
+			}
+		}
+		pc('\n');
+		n++;
+	}
+	return n;
+}
+
+/* The allowed preview groups of ME 310 (attribute 7, G.988 9.3.28) as
+ * `grant=` lines. A row is two parts of 22 bytes under one key: part 0 the
+ * source address (16 bytes), the VLAN on the ANI side and on the UNI side;
+ * part 1 the destination address (16 bytes), the duration in minutes and the
+ * time left, which the ONU counts down and igmpd does from when it first sees
+ * the row. Only IPv4 rows (the first 12 bytes of the address zero, or the
+ * ::ffff form) and only whole rows are listed. Returns how many. */
+static int grant_lines(const struct mib_row *sub)
+{
+	int n = 0;
+
+	for (uint8_t i = sub->tbl_head; i != MIB_TBL_NONE && n < MC_MAX_RANGES;
+	     i = tblpool[i].next) {
+		const uint8_t *e = tblpool[i].data, *p0 = 0;
+
+		if (tblpool[i].attr != 7 || ACL_PART(e) != 1 || !acl_v4_prefix(e + 2))
+			continue;
+		for (uint8_t k = sub->tbl_head; k != MIB_TBL_NONE; k = tblpool[k].next)
+			if (tblpool[k].attr == 7 && ACL_PART(tblpool[k].data) == 0 &&
+			    ACL_KEY(tblpool[k].data) == ACL_KEY(e))
+				p0 = tblpool[k].data;
+		if (!p0 || !be32(e + 14))
+			continue;
+		ps("grant=");
+		pip(be32(e + 14));
+		if (acl_v4_prefix(p0 + 2) && be32(p0 + 14)) {
+			ps(" s=");
+			pip(be32(p0 + 14));
+		}
+		ptok("a", be16(p0 + 18) & 0x0fff);
+		ptok("u", be16(p0 + 20) & 0x0fff);
+		if (be16(e + 18))
+			ptok("d", be16(e + 18));
 		pc('\n');
 		n++;
 	}
@@ -333,6 +444,14 @@ static void build(void)
 	if (!prof)
 		return;
 	pkv("igmp_function", fun);
+	/* Only when set: a profile that names none is every version. */
+	if (row_u32(prof, c309, 1))
+		pkv("igmp_version", row_u32(prof, c309, 1));
+	if (row_u32(prof, c309, 11)) {
+		ps("querier=");
+		pip(row_u32(prof, c309, 11));
+		pc('\n');
+	}
 	pkv("immediate_leave", row_u32(prof, c309, 3) ? 1u : 0u);
 	pkv("robustness", or_default(row_u32(prof, c309, 10), 2));
 	pkv("query_interval", or_default(row_u32(prof, c309, 12), 125));
@@ -349,6 +468,73 @@ static void build(void)
 		ov = 1;
 	if (ov)
 		pkv("allow_overflow", 1);
+	grant_lines(sub);
+}
+
+/* The attributes of a class 309 Create or Set (`mask`, the values in `data`
+ * in attribute order, as mib_write reads them) that carry a value G.988
+ * 9.3.27 does not define, as a mask. Only the few-valued ones are judged, and
+ * only against the values the text defines:
+ *
+ *   1 IGMP version               1, 2, 3 (IGMP), 16, 17 (MLD)
+ *   2 IGMP function              0 snooping, 1 snooping with proxy reporting,
+ *                                2 proxy
+ *   3 immediate leave            Boolean
+ *   5 upstream IGMP tag control  0 to 3
+ *   15 unauthorized join         Boolean
+ *
+ * Applies only while IGMP_SNOOPING is 1 in the config store: an ONU that
+ * does not run igmpd answers the profile exactly as it always did.
+ *
+ * A value that is defined is accepted whether or not this ONU does what it
+ * says: function 1 and 2 are stored and answered as set, and the multicast
+ * stays transparent (build() above), so an OLT that provisions a proxy still
+ * gets its Set accepted. Nothing else of the profile is refused here: its
+ * timers and tables take any value. */
+uint16_t mcast_value_reject(const struct omci_class *c, uint16_t mask,
+			    const uint8_t *data, uint16_t len)
+{
+	uint16_t bad = 0, used = 0;
+	char v[4];
+
+	/* Only for an ONU that runs the multicast feature (the opt-in key
+	 * igmpd runs on, read each time: apply.sh igmp changes it without a
+	 * reboot). Without it a profile is stored as the OLT sends it, as
+	 * before. */
+	if (cfg_odi_get(CFG_ODI_PATH, "IGMP_SNOOPING", v, sizeof v) != 1 || v[0] != '1')
+		return 0;
+
+	for (unsigned k = 1; k <= 16; k++) {
+		uint16_t w;
+		uint32_t v;
+		int ok = 1;
+
+		if (!(mask & (1u << (16 - k))))
+			continue;
+		w = attr_width(c, k);
+		if (!w || used + w > len)
+			break;
+		v = data[used];
+		switch (k) {
+		case 1:
+			ok = v == 1 || v == 2 || v == 3 || v == 16 || v == 17;
+			break;
+		case 2:
+			ok = v <= 2;
+			break;
+		case 3:
+		case 15:
+			ok = v <= 1;
+			break;
+		case 5:
+			ok = v <= 3;
+			break;
+		}
+		if (!ok)
+			bad |= (uint16_t)(1u << (16 - k));
+		used = (uint16_t)(used + w);
+	}
+	return bad;
 }
 
 void mcast_policy_export(void)

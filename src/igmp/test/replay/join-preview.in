@@ -1,0 +1,34 @@
+# Preview (ME 309 row part 1): group 239.9.0.1 is a preview group, 30 s long,
+# at least 60 s between two, twice at most. A join starts the first preview
+# (second 1, to 31); the host reporting again at 20 is the same preview; at 31
+# it ends and the group goes though the host still asks; a join at 40 is
+# inside the repeat time and is refused; at 91 the second preview begins;
+# when it ends at 121 the count is spent, and 200 is refused. 225.1.1.1 is
+# a group of a row with no preview: always allowed, as before. 239.9.0.2 is
+# a preview that the host ends itself with a leave at 310: the repeat time
+# counts from the leave.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+allow=225.0.0.0-225.255.255.255
+allow=239.9.0.0-239.9.255.255 p=30,60,2,0
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.9.0.1
+2 v2join 1 0 192.168.1.10 225.1.1.1
+20 v2join 1 0 192.168.1.10 239.9.0.1
+30 tick
+31 tick
+40 v2join 1 0 192.168.1.10 239.9.0.1
+90 v2join 1 0 192.168.1.10 239.9.0.1
+91 v2join 1 0 192.168.1.10 239.9.0.1
+120 tick
+121 tick
+200 v2join 1 0 192.168.1.10 239.9.0.1
+300 v2join 1 0 192.168.1.10 239.9.0.2
+310 v2leave 1 0 192.168.1.10 239.9.0.2
+320 v2join 1 0 192.168.1.10 239.9.0.2
+369 v2join 1 0 192.168.1.10 239.9.0.2
+370 v2join 1 0 192.168.1.10 239.9.0.2
+400 state
