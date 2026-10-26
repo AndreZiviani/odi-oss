@@ -55,6 +55,13 @@
 #define ODI_NIC_IRQ_TX_NO_DESC		(1U << 9)
 #define ODI_NIC_IRQ_SOFT		(1U << 10)
 #define ODI_NIC_IRQ_LINK	(1U << 8)	/* defined, not the real link source */
+/* Ring 2 descriptor unavailable, where the stock driver has it (rings 3 to
+ * 6 follow at bits 12 to 15). Never in the mask and never a poll source:
+ * odi_irq() acks it with the rest and only counts it (rx2_no_desc in
+ * /proc/odi_nic). Whether it is set while masked is not established, so
+ * a count of 0 does not prove ring 2 never ran dry.
+ */
+#define ODI_NIC_IRQ_RX2_NO_DESC	(1U << 11)
 #define ODI_NIC_IRQ_ALL	0xFFFFU
 /* The sources odi_irq() hands to the poll, and the mask the poll re-arms:
  * the RX sources, and TX completion for the reclaim.
@@ -672,7 +679,7 @@ static inline int odi_desc_aligned(const void *virt, uint32_t dma_addr)
 	return !((uintptr_t)virt % ODI_DESC_ALIGN) && !(dma_addr % ODI_DESC_ALIGN);
 }
 
-/* ---- Multi-ring RX: the enable and disable sequences --------------------
+/* ---- Multi-ring RX: the start, enable and disable sequences --------------
  *
  * With RUN1 MULTI_RX set the engine runs the flow-control comparator of
  * every RX ring, 1 to 6, not only of ring 1, and asserts PAUSE toward the
@@ -683,19 +690,34 @@ static inline int odi_desc_aligned(const void *virt, uint32_t dma_addr)
  * MULTI_RX with rings 3 to 6 unprogrammed: with the flow-control bits of
  * MSR set, a counter of the switch CPU port climbed with no traffic and
  * nothing was transmitted; with them clear (as it runs), transmit worked.
- * This driver keeps flow control on, so before MULTI_RX is set every ring
- * it does not use is parked: pointed at a two-descriptor ring of its own
- * that the CPU owns (the engine never writes it), CPU_IDX one behind the
- * engine index, so one descriptor is always available, and both thresholds
- * 0, so the comparator can never reach PAUSE. Nothing is ever routed to a
- * parked ring.
+ * This driver keeps flow control on, so every ring it does not use is
+ * parked: pointed at a two-descriptor ring of its own that the CPU owns
+ * (the engine never writes it), CPU_IDX one behind the engine index, so one
+ * descriptor is always available, and both thresholds 0, so the comparator
+ * can never reach PAUSE. Nothing is ever routed to a parked ring.
+ *
+ * Rings 2 to 6 are programmed before the engine starts, not when the OMCI
+ * ring is turned on. The engine is taken to read a ring's state in when it
+ * starts, and a ring programmed while it runs to stay unseen until a frame
+ * routed to it has been dropped for want of a descriptor. Measured on a
+ * stick, 5 boots of 5: with ring 2 programmed by a live enable, the first
+ * OMCI frame routed to it was dropped and counted in RX_NO_DESC_CNT, and
+ * none after it, that boot or on a later enable. The stock driver programs
+ * every RX ring between the block reset and the go bits, and records that
+ * a ring other than ring 1 did not receive its first frame with the order
+ * it used before; another open implementation also programs ring 2 before
+ * the start, and its measurements took every OMCI message of a
+ * registration on it. With MULTI_RX clear the engine routes nothing to
+ * rings 2 to 6 and compares none of them, so programming them at every
+ * open costs the single-ring default nothing.
  *
  * The sequences are lists of register writes, in order, which the driver
- * performs one by one (odi_nic.c, odi_rx_multi_apply()) and the host test
- * runs against a model of the six comparators. Enable: park rings 3 to 6,
- * program ring 2, write the route words, and set MULTI_RX last, so the
- * engine sees no ring before it is complete. Disable: clear MULTI_RX first,
- * then the single-ring route words; the rings stay as they are, unused.
+ * performs one by one (odi_nic.c, odi_regw_apply()) and the host test runs
+ * against a model of the six comparators and of that start. Start: park
+ * rings 3 to 6, program ring 2, then RUN1 (MULTI_RX clear) and RUN, the go
+ * bits, last. Enable: the route words, then MULTI_RX last, so the engine
+ * sees no route before it is complete. Disable: clear MULTI_RX first, then
+ * the single-ring route words; the rings stay as they are, unused.
  */
 #define ODI_NIC_RX_PARK_DEPTH		2U
 /* The parking ring's allocation: the descriptors at 0, the buffer they
@@ -710,7 +732,7 @@ struct odi_nic_regw {
 	uint32_t val;
 };
 
-/* What the enable needs to know: the bus addresses of ring 2 and of the
+/* What the start needs to know: the bus addresses of ring 2 and of the
  * parking ring, ring 2's depth, and the engine index of rings 2 to 6 as
  * read just before.
  */
@@ -721,7 +743,8 @@ struct odi_nic_multi_rx_cfg {
 	unsigned int hw_idx[ODI_NIC_RX_PARK_LAST + 1];	/* by ring number, 2 to 6 used */
 };
 
-#define ODI_NIC_MULTI_RX_ON_MAX		(4U * ODI_NIC_RX_PARK_NUM + 4U + ODI_NIC_RX_RING_MAP_WORDS + 1U)
+#define ODI_NIC_RX_START_MAX		(4U * ODI_NIC_RX_PARK_NUM + 4U + 2U)
+#define ODI_NIC_MULTI_RX_ON_MAX		(ODI_NIC_RX_RING_MAP_WORDS + 1U)
 #define ODI_NIC_MULTI_RX_OFF_MAX	(1U + ODI_NIC_RX_RING_MAP_WORDS)
 
 static inline unsigned int odi_nic_regw_put(struct odi_nic_regw *w, unsigned int n,
@@ -733,43 +756,61 @@ static inline unsigned int odi_nic_regw_put(struct odi_nic_regw *w, unsigned int
 	return n + 1;
 }
 
-/* Fills w (ODI_NIC_MULTI_RX_ON_MAX entries) and *rx2_head, the driver's
- * next descriptor to inspect on ring 2; returns the number of writes, or 0
- * with nothing to write when an engine index is beyond its ring (only a
- * longer ring left by earlier software can leave one): the engine would
- * then walk past the ring, so MULTI_RX stays clear.
+/* Fills w (ODI_NIC_RX_START_MAX entries) with the start of the engine and
+ * returns the number of writes: rings 2 to 6, then RUN1 with MULTI_RX
+ * clear, then RUN. *rx2_ok is 1, and *rx2_head the driver's next
+ * descriptor to inspect on ring 2, when the rings were programmed; 0, with
+ * rings 2 to 6 left as they are and *rx2_head untouched, when an engine
+ * index is beyond its ring (only a longer ring left by earlier software can
+ * leave one): the engine would then walk past the ring, so the OMCI ring
+ * must not be turned on. RUN1 and RUN are written either way.
  */
-static inline unsigned int odi_nic_multi_rx_on(const struct odi_nic_multi_rx_cfg *c,
-					       struct odi_nic_regw *w, unsigned int *rx2_head)
+static inline unsigned int odi_nic_rx_start(const struct odi_nic_multi_rx_cfg *c,
+					    struct odi_nic_regw *w, unsigned int *rx2_head,
+					    int *rx2_ok)
 {
-	unsigned int n = 0, r, i, head;
+	unsigned int n = 0, r, head;
+	int ok = 1;
 
 	for (r = ODI_NIC_RX_PARK_FIRST; r <= ODI_NIC_RX_PARK_LAST; r++)
 		if (c->hw_idx[r] >= ODI_NIC_RX_PARK_DEPTH)
-			return 0;
-	if (!odi_nic_rx2_start(c->hw_idx[2], c->rx2_depth, &head))
-		return 0;
+			ok = 0;
+	if (ok && !odi_nic_rx2_start(c->hw_idx[2], c->rx2_depth, &head))
+		ok = 0;
 
-	for (r = ODI_NIC_RX_PARK_FIRST; r <= ODI_NIC_RX_PARK_LAST; r++) {
-		n = odi_nic_regw_put(w, n, ODI_NIC_RXN_FC(r), 32, ODI_NIC_RX2_FC_VAL(0, 0));
-		n = odi_nic_regw_put(w, n, ODI_NIC_RXN_RING(r), 32, c->park_dma);
-		n = odi_nic_regw_put(w, n, ODI_NIC_RXN_LAST(r), 16, ODI_NIC_RX_PARK_DEPTH - 1U);
-		n = odi_nic_regw_put(w, n, ODI_NIC_RXN_CPU_IDX(r), 32,
-				     odi_nic_rx_cpu_idx(c->hw_idx[r], ODI_NIC_RX_PARK_DEPTH));
+	if (ok) {
+		for (r = ODI_NIC_RX_PARK_FIRST; r <= ODI_NIC_RX_PARK_LAST; r++) {
+			n = odi_nic_regw_put(w, n, ODI_NIC_RXN_FC(r), 32, ODI_NIC_RX2_FC_VAL(0, 0));
+			n = odi_nic_regw_put(w, n, ODI_NIC_RXN_RING(r), 32, c->park_dma);
+			n = odi_nic_regw_put(w, n, ODI_NIC_RXN_LAST(r), 16, ODI_NIC_RX_PARK_DEPTH - 1U);
+			n = odi_nic_regw_put(w, n, ODI_NIC_RXN_CPU_IDX(r), 32,
+					     odi_nic_rx_cpu_idx(c->hw_idx[r], ODI_NIC_RX_PARK_DEPTH));
+		}
+
+		n = odi_nic_regw_put(w, n, ODI_NIC_RX2_RING, 32, c->rx2_dma);
+		n = odi_nic_regw_put(w, n, ODI_NIC_RX2_LAST, 16, c->rx2_depth - 1U);
+		n = odi_nic_regw_put(w, n, ODI_NIC_RX2_CPU_IDX, 32, odi_nic_rx_cpu_idx(head, c->rx2_depth));
+		n = odi_nic_regw_put(w, n, ODI_NIC_RX2_FC, 32,
+				     ODI_NIC_RX2_FC_VAL(ODI_NIC_RX2_FC_ON, ODI_NIC_RX2_FC_OFF));
+		*rx2_head = head;
 	}
+	*rx2_ok = ok;
 
-	n = odi_nic_regw_put(w, n, ODI_NIC_RX2_RING, 32, c->rx2_dma);
-	n = odi_nic_regw_put(w, n, ODI_NIC_RX2_LAST, 16, c->rx2_depth - 1U);
-	n = odi_nic_regw_put(w, n, ODI_NIC_RX2_CPU_IDX, 32, odi_nic_rx_cpu_idx(head, c->rx2_depth));
-	n = odi_nic_regw_put(w, n, ODI_NIC_RX2_FC, 32,
-			     ODI_NIC_RX2_FC_VAL(ODI_NIC_RX2_FC_ON, ODI_NIC_RX2_FC_OFF));
+	n = odi_nic_regw_put(w, n, ODI_NIC_RUN1, 32, ODI_NIC_RUN1_VAL);
+	n = odi_nic_regw_put(w, n, ODI_NIC_RUN, 32, ODI_NIC_RUN_VAL);
+	return n;
+}
+
+/* Fills w (ODI_NIC_MULTI_RX_ON_MAX entries); returns the number of writes.
+ * Only after a start whose *rx2_ok was 1.
+ */
+static inline unsigned int odi_nic_multi_rx_on(struct odi_nic_regw *w)
+{
+	unsigned int n = 0, i;
 
 	for (i = 0; i < ODI_NIC_RX_RING_MAP_WORDS; i++)
 		n = odi_nic_regw_put(w, n, ODI_NIC_RX_RING_MAP + 4U * i, 32, odi_nic_rx_ring_map(1));
-
-	n = odi_nic_regw_put(w, n, ODI_NIC_RUN1, 32, ODI_NIC_RUN1_VAL_MULTI);
-	*rx2_head = head;
-	return n;
+	return odi_nic_regw_put(w, n, ODI_NIC_RUN1, 32, ODI_NIC_RUN1_VAL_MULTI);
 }
 
 /* Fills w (ODI_NIC_MULTI_RX_OFF_MAX entries); returns the number of writes. */

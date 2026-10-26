@@ -56,10 +56,11 @@ module_param_named(debug, odi_nic_debug, bool, 0644);
 MODULE_PARM_DESC(debug, "trace the first interrupts and RX descriptors, dump the NIC state after open (default off)");
 
 /* odi_nic.omci_ring: run the second RX ring and route the OMCI frames to
- * it, or (the default) run ring 1 alone, with the same register values as
- * before the OMCI ring existed. Both rings are allocated and served either
- * way; the parameter switches multi-ring RX on or off, at once when a
- * device is open (odi_nic_omci_ring_set(), odi_rx_multi_apply()).
+ * it, or (the default) run ring 1 alone: RUN1 and the route words as
+ * before the OMCI ring existed. Both rings are allocated, programmed
+ * before the engine starts (odi_start_hw()) and served either way; the
+ * parameter switches multi-ring RX on or off, at once when a device is
+ * open (odi_nic_omci_ring_set(), odi_rx_multi_apply()).
  */
 static bool odi_nic_omci_ring;
 
@@ -218,12 +219,23 @@ struct odi_nic {
 	dma_addr_t park_dma;
 
 	/* rx2_routed: multi-ring RX is on and priority 7 goes to the OMCI
-	 * ring (odi_nic.omci_ring, odi_rx_multi_apply()). rx2_other counts
-	 * frames on it that are not OMCI (a host frame that arrived with
-	 * priority 7), which take its descriptors too.
+	 * ring (odi_nic.omci_ring, odi_rx_multi_apply()); rx2_ready: rings 2
+	 * to 6 were programmed at the start (odi_start_hw()), without which
+	 * it cannot be turned on. rx2_other counts frames on it that are not
+	 * OMCI (a host frame that arrived with priority 7), which take its
+	 * descriptors too.
 	 */
 	int rx2_routed;
+	int rx2_ready;
 	u32 rx2_other;
+
+	/* For /proc/odi_nic: the ring-2 engine index read at the start and at
+	 * the last enable, and the interrupt entries that found its
+	 * descriptor-unavailable bit set (odi_nic_hw.h, IRQ_RX2_NO_DESC).
+	 */
+	unsigned int rx2_idx_start;
+	unsigned int rx2_idx_on;
+	u32 rx2_no_desc;
 
 	/* RX_NO_DESC_CNT folded in at every poll: frames the engine dropped
 	 * with no free descriptor, on either ring.
@@ -449,8 +461,8 @@ static int odi_rings_alloc(struct device *dev)
 
 	/* The hardware starts ring 1 and the TX ring at index 0 after
 	 * odi_reset_hw(), so a reopen after the last close starts ours there
-	 * too. The OMCI ring starts where its engine index is, once
-	 * multi-ring RX is turned on (odi_rx_multi_apply()).
+	 * too. The OMCI ring starts where its engine index is, read just
+	 * before the engine starts (odi_start_hw()).
 	 */
 	odi.tx_tail = 0;
 	odi.tx_reclaim = 0;
@@ -606,9 +618,8 @@ static void odi_init_hw_rings(void)
 			(u32)r1->dma, odi_r32(ODI_NIC_RX1_RING),
 			odi_r8(ODI_NIC_RX1_LAST), odi_r8(ODI_NIC_RX1_LAST_HI), odi_r32(ODI_NIC_RX1_CPU_IDX));
 
-	/* The OMCI ring and rings 3 to 6 are left alone here: with RUN1
-	 * MULTI_RX clear the engine runs ring 1 only, and odi_rx_multi_apply()
-	 * programs them when multi-ring RX is turned on.
+	/* The OMCI ring and rings 3 to 6 are programmed by odi_start_hw(),
+	 * just before the go bits, with their engine indices read then.
 	 */
 
 	odi_w32(ODI_NIC_R13FC, 0);
@@ -660,15 +671,54 @@ static void odi_init_hw(struct net_device *mac_dev)
 	odi_init_hw_rx();
 }
 
+static void odi_regw_apply(const struct odi_nic_regw *w, unsigned int n)
+{
+	unsigned int i;
+
+	for (i = 0; i < n; i++) {
+		if (w[i].width == 8)
+			odi_w8(w[i].off, (u8)w[i].val);
+		else if (w[i].width == 16)
+			odi_w16(w[i].off, (u16)w[i].val);
+		else
+			odi_w32(w[i].off, w[i].val);
+	}
+}
+
 /* Enabling is kept apart from programming: the interrupt mask and the go
  * bits are written only once request_irq and napi_enable have succeeded,
  * so no interrupt can arrive with no handler or a disabled NAPI context.
+ *
+ * Rings 2 to 6 go in the same sequence, before the go bits, whether or not
+ * the OMCI ring will be turned on (odi_nic_hw.h, "Multi-ring RX"): a ring
+ * the engine first sees while running loses the first frame routed to it.
+ * With MULTI_RX clear they take no frame and assert no PAUSE.
  */
 static void odi_start_hw(void)
 {
+	struct odi_nic_regw w[ODI_NIC_RX_START_MAX];
+	struct odi_nic_multi_rx_cfg c;
+	unsigned int n, r, head = 0;
+	int ok;
+
+	memset(&c, 0, sizeof(c));
+	c.rx2_dma = (u32)odi.rx[ODI_RXR_OMCI].dma;
+	c.rx2_depth = odi.rx[ODI_RXR_OMCI].depth;
+	c.park_dma = (u32)odi.park_dma;
+	for (r = 2; r <= ODI_NIC_RX_PARK_LAST; r++)
+		c.hw_idx[r] = odi_r16(ODI_NIC_RXN_INDEX(r));
+
+	n = odi_nic_rx_start(&c, w, &head, &ok);
+	odi.rx[ODI_RXR_OMCI].head = head;
+	odi.rx2_ready = ok;
+	odi.rx2_idx_start = c.hw_idx[2];
+
 	odi_w16(ODI_NIC_IRQ_MASK, ODI_NIC_IRQ_POLL_SOURCES);
-	odi_w32(ODI_NIC_RUN1, ODI_NIC_RUN1_VAL);
-	odi_w32(ODI_NIC_RUN, ODI_NIC_RUN_VAL);
+	odi_regw_apply(w, n);
+
+	if (!ok)
+		pr_warn(DRV_NAME ": rings 2..6 not programmed, the omci ring cannot be turned on: an RX ring engine index is beyond its ring (rings 2..6: %u %u %u %u %u)\n",
+			c.hw_idx[2], c.hw_idx[3], c.hw_idx[4], c.hw_idx[5], c.hw_idx[6]);
 }
 
 /* The DMA engine is not reset with the CPU: after a watchdog reset it
@@ -1208,6 +1258,8 @@ static irqreturn_t odi_irq(int irq, void *dev_id)
 
 	if (isr & ODI_NIC_IRQ_TX_OK)
 		odi.tok_irqs++;
+	if (isr & ODI_NIC_IRQ_RX2_NO_DESC)
+		odi.rx2_no_desc++;
 
 	if (odi_nic_irq_has_work(isr, (isr & ODI_NIC_IRQ_TX_OK) ? odi_tx_reclaimable() : 0)) {
 		odi_w16(ODI_NIC_IRQ_MASK, 0);	/* mask the poll sources until the poll re-arms them */
@@ -1299,32 +1351,17 @@ static void odi_state_dump_work(struct work_struct *work)
 
 static atomic_t odi_open_count = ATOMIC_INIT(0);
 
-static void odi_regw_apply(const struct odi_nic_regw *w, unsigned int n)
-{
-	unsigned int i;
-
-	for (i = 0; i < n; i++) {
-		if (w[i].width == 8)
-			odi_w8(w[i].off, (u8)w[i].val);
-		else if (w[i].width == 16)
-			odi_w16(w[i].off, (u16)w[i].val);
-		else
-			odi_w32(w[i].off, w[i].val);
-	}
-}
-
-/* Multi-ring RX on or off (odi_nic_hw.h, "Multi-ring RX: the enable and
- * disable sequences"), with a device open, under the RTNL: from the first
- * ndo_open and from the parameter, so the two never interleave. On, NAPI
- * is held off while ring 2 is reprogrammed, since the poll reads its head,
- * and scheduled again afterwards: an interrupt in between masked the
- * poll sources and could not schedule the poll that re-arms them.
+/* Multi-ring RX on or off (odi_nic_hw.h, "Multi-ring RX: the start,
+ * enable and disable sequences"), with a device open, under the RTNL: from
+ * the first ndo_open and from the parameter, so the two never interleave.
+ * Only the route words and RUN1 change: the rings were programmed at the
+ * start and the poll serves ring 2 either way, so its head is not touched
+ * and the poll need not be held off.
  */
 static void odi_rx_multi_apply(bool on)
 {
-	struct odi_nic_regw w[ODI_NIC_MULTI_RX_ON_MAX];
-	struct odi_nic_multi_rx_cfg c;
-	unsigned int n, r, head = 0;
+	struct odi_nic_regw w[ODI_NIC_MULTI_RX_ON_MAX];	/* the off sequence fits too: odi_nic_init() */
+	unsigned int n;
 
 	ASSERT_RTNL();
 	if (on == !!odi.rx2_routed)
@@ -1338,32 +1375,17 @@ static void odi_rx_multi_apply(bool on)
 		return;
 	}
 
-	memset(&c, 0, sizeof(c));
-	c.rx2_dma = (u32)odi.rx[ODI_RXR_OMCI].dma;
-	c.rx2_depth = odi.rx[ODI_RXR_OMCI].depth;
-	c.park_dma = (u32)odi.park_dma;
-	for (r = 2; r <= ODI_NIC_RX_PARK_LAST; r++)
-		c.hw_idx[r] = odi_r16(ODI_NIC_RXN_INDEX(r));
-
-	napi_disable(&odi.napi);
-	n = odi_nic_multi_rx_on(&c, w, &head);
-	if (n) {
-		odi_regw_apply(w, n);
-		odi.rx[ODI_RXR_OMCI].head = head;
-		WRITE_ONCE(odi.rx2_routed, 1);
-	}
-	napi_enable(&odi.napi);
-	local_bh_disable();
-	napi_schedule(&odi.napi);
-	local_bh_enable();
-
-	if (!n) {
-		pr_warn(DRV_NAME ": omci ring not turned on: an RX ring engine index is beyond its ring (rings 2..6: %u %u %u %u %u)\n",
-			c.hw_idx[2], c.hw_idx[3], c.hw_idx[4], c.hw_idx[5], c.hw_idx[6]);
+	if (!odi.rx2_ready) {
+		pr_warn(DRV_NAME ": omci ring not turned on: rings 2..6 were not programmed at the start (an engine index beyond its ring)\n");
 		return;
 	}
-	pr_info(DRV_NAME ": omci ring on: ring 2 at engine index %u, rings 3..6 parked, run1=0x%08x route=0x%08x pause=0x%02x\n",
-		head, odi_r32(ODI_NIC_RUN1), odi_r32(ODI_NIC_RX_RING_MAP), odi_r8(ODI_NIC_MSR));
+	odi.rx2_idx_on = odi_r16(ODI_NIC_RX2_INDEX);
+	n = odi_nic_multi_rx_on(w);
+	odi_regw_apply(w, n);
+	WRITE_ONCE(odi.rx2_routed, 1);
+	pr_info(DRV_NAME ": omci ring on: ring 2 at engine index %u (%u at the start, driver at %u), rings 3..6 parked, run1=0x%08x route=0x%08x pause=0x%02x\n",
+		odi.rx2_idx_on, odi.rx2_idx_start, READ_ONCE(odi.rx[ODI_RXR_OMCI].head),
+		odi_r32(ODI_NIC_RUN1), odi_r32(ODI_NIC_RX_RING_MAP), odi_r8(ODI_NIC_MSR));
 }
 
 /* Written on the command line it is read before any device is open and
@@ -1515,7 +1537,12 @@ void odi_nic_report(void)
  * rx1_taken and rx2_taken the descriptors taken from each ring (their sum
  * is rx_taken while the counters have not wrapped), rx2_other the frames on
  * the OMCI ring that were not OMCI, and rx_missed the frames the engine
- * dropped with no free descriptor on either ring. tok_irqs
+ * dropped with no free descriptor on either ring. Then, to tell a ring-2
+ * start apart from a ring-2 drop: rx2_no_desc the interrupt entries that
+ * found ring 2's descriptor-unavailable bit set, rx2_idx_start and
+ * rx2_idx_on the ring-2 engine index read at the start and at the last
+ * enable, rx2_idx the engine index now and rx2_head the driver's next
+ * descriptor (equal whenever the poll has caught up). tok_irqs
  * is the number of interrupt entries that carried the TX-completion bit:
  * zero under TX traffic means the interrupt does not fire on this unit and
  * every reclaim came from the poll, the xmit path or the backstop.
@@ -1531,6 +1558,10 @@ static int odi_nic_proc_show(struct seq_file *m, void *v)
 	seq_printf(m, "omci_ring %d\nrx1_taken %u\nrx2_taken %u\nrx2_other %u\nrx_missed %u\n",
 		   READ_ONCE(odi.rx2_routed), odi.rx[ODI_RXR_DATA].taken,
 		   odi.rx[ODI_RXR_OMCI].taken, odi.rx2_other, odi.rx_missed);
+	seq_printf(m, "rx2_no_desc %u\nrx2_idx_start %u\nrx2_idx_on %u\nrx2_idx %u\nrx2_head %u\n",
+		   odi.rx2_no_desc, odi.rx2_idx_start, odi.rx2_idx_on,
+		   atomic_read(&odi_open_count) > 0 ? odi_r16(ODI_NIC_RX2_INDEX) : 0U,
+		   READ_ONCE(odi.rx[ODI_RXR_OMCI].head));
 	return 0;
 }
 
@@ -1689,6 +1720,8 @@ static int __init odi_nic_init(void)
 	 */
 	BUILD_BUG_ON(ODI_NIC_RX_PARK_DEPTH * sizeof(struct odi_rx_desc) > ODI_NIC_PARK_BUF_OFF);
 	BUILD_BUG_ON(ODI_NIC_PARK_ALLOC - ODI_NIC_PARK_BUF_OFF < ODI_NIC_RX_ALLOC);
+	/* odi_rx_multi_apply() builds both sequences in one array. */
+	BUILD_BUG_ON(ODI_NIC_MULTI_RX_OFF_MAX > ODI_NIC_MULTI_RX_ON_MAX);
 
 	odi_mmio = ioremap(CPHYSADDR(ODI_NIC_MMIO_BASE), ODI_NIC_MMIO_SIZE);
 	if (!odi_mmio) {

@@ -11,9 +11,11 @@
  * of the hardware comparator, idle and under a flood, the
  * interrupt-storm guard, and the OMCI ring: the route words, where the ring
  * starts, the missed-frame counter, a model of a host flood with one ring
- * and with two, and the multi-ring enable and disable sequences against a
- * model of the six RX rings' flow-control comparators (with MULTI_RX set a
- * ring left at its reset values holds PAUSE).
+ * and with two, and the multi-ring start, enable and disable sequences
+ * against a model of the six RX rings' flow-control comparators (with
+ * MULTI_RX set a ring left at its reset values holds PAUSE) and of the
+ * engine start (a ring programmed while the engine runs loses its first
+ * frame).
  */
 #include <stdio.h>
 #include <string.h>
@@ -507,25 +509,35 @@ static void test_omci_ring_under_flood(void)
 }
 
 
-/* ---- The six RX rings' flow-control comparators ----------------------
+/* ---- The six RX rings' flow-control comparators, and the start --------
  *
- * A register file of the ring registers, every one 0 at reset, then ring 1
- * as odi_init_hw_rings() programs it, then whatever a sequence writes. The
- * comparator of a ring: PAUSE while the descriptors available, its CPU
- * index minus the engine index modulo the depth, are no more than its ON
- * threshold. With MULTI_RX clear only ring 1 is compared; with it set,
- * every ring.
+ * A register file of the ring registers, every one 0 after the block
+ * reset, then ring 1 as odi_init_hw_rings() programs it, the engine
+ * stopped; then whatever a sequence writes. The comparator of a ring:
+ * PAUSE while the descriptors available, its CPU index minus the engine
+ * index modulo the depth, are no more than its ON threshold. With MULTI_RX
+ * clear only ring 1 is compared; with it set, every ring.
+ *
+ * The start, as odi_nic_hw.h takes it to be: when RUN is written the
+ * engine takes in each ring's base, and works from that until a frame
+ * routed to the ring finds no descriptor there; that frame is dropped and
+ * counted (RX_NO_DESC_CNT), and only then does the engine take the ring in
+ * again. A ring programmed after the start therefore loses its first frame
+ * and none after it, which is what a stick showed on 5 boots of 5. This is
+ * the hypothesis the fix rests on, not a measured mechanism: the model
+ * shows the sequences avoid it, the stick shows whether it holds.
  */
 struct ringm {
 	uint32_t base;
 	unsigned int hw, last, cpu, on;
+	uint32_t taken_base;	/* what the engine took in, 0 for nothing */
 };
 
 struct nicm {
 	struct ringm r[7];	/* by ring number, 1 to 6 */
-	uint32_t run1;
+	uint32_t run1, run;
 	uint32_t map[ODI_NIC_RX_RING_MAP_WORDS];
-	unsigned int writes;
+	unsigned int writes, missed;
 	int bad_off;		/* a write to a register the model does not know */
 };
 
@@ -536,7 +548,6 @@ static void nicm_reset(struct nicm *m)
 	m->r[1].last = ODI_RX_RING_DEPTH - 1;
 	m->r[1].cpu = odi_nic_rx_cpu_idx(0, ODI_RX_RING_DEPTH);
 	m->r[1].on = ODI_NIC_FC_ON;
-	m->run1 = ODI_NIC_RUN1_VAL;
 	for (unsigned int i = 0; i < ODI_NIC_RX_RING_MAP_WORDS; i++)
 		m->map[i] = odi_nic_rx_ring_map(0);
 }
@@ -549,6 +560,13 @@ static void nicm_apply(struct nicm *m, const struct odi_nic_regw *w, unsigned in
 
 		if (off == ODI_NIC_RUN1 && w[k].width == 32) {
 			m->run1 = w[k].val;
+			continue;
+		}
+		if (off == ODI_NIC_RUN && w[k].width == 32) {
+			if (!m->run && w[k].val)
+				for (r = 1; r <= 6; r++)
+					m->r[r].taken_base = m->r[r].base;
+			m->run = w[k].val;
 			continue;
 		}
 		for (i = 0; i < ODI_NIC_RX_RING_MAP_WORDS; i++)
@@ -597,6 +615,32 @@ static unsigned int nicm_pause(const struct nicm *m)
 	return 0;
 }
 
+/* One frame of internal priority prio, routed as the route word says with
+ * MULTI_RX set and to ring 1 without; a CPU that keeps up hands the
+ * descriptor straight back. Returns the ring it landed on, 0 if dropped.
+ */
+static unsigned int nicm_frame(struct nicm *m, unsigned int prio)
+{
+	unsigned int ring = 1, depth;
+	struct ringm *g;
+
+	if (!m->run)
+		return 0;
+	if ((m->run1 & ODI_NIC_RUN1_MULTI_RX) &&
+	    ((m->map[0] >> (4 * prio)) & 0xFU) == ODI_NIC_RX_MAP_OMCI_RING)
+		ring = 2;
+	g = &m->r[ring];
+	depth = g->last + 1;
+	if (g->taken_base != g->base || !g->base || !ringm_avail(g)) {
+		m->missed++;
+		g->taken_base = g->base;
+		return 0;
+	}
+	g->hw = (g->hw + 1) % depth;
+	g->cpu = odi_nic_rx_cpu_idx(g->hw, depth);
+	return ring;
+}
+
 static void multi_cfg(struct odi_nic_multi_rx_cfg *c)
 {
 	memset(c, 0, sizeof(*c));
@@ -605,22 +649,65 @@ static void multi_cfg(struct odi_nic_multi_rx_cfg *c)
 	c->park_dma = 0x03000000U;
 }
 
-static void test_multi_rx_reset_rings_hold_pause(void)
+static int regw_is_go(const struct odi_nic_regw *w)
+{
+	return w->off == ODI_NIC_RUN1 || w->off == ODI_NIC_RUN;
+}
+
+/* nicm_reset(), then the start odi_start_hw() writes. */
+static unsigned int nicm_start(struct nicm *m, const struct odi_nic_multi_rx_cfg *c,
+			       unsigned int *head, int *ok)
+{
+	struct odi_nic_regw w[ODI_NIC_RX_START_MAX];
+	unsigned int n;
+
+	nicm_reset(m);
+	n = odi_nic_rx_start(c, w, head, ok);
+	nicm_apply(m, w, n);
+	return n;
+}
+
+static void nicm_on(struct nicm *m)
 {
 	struct odi_nic_regw w[ODI_NIC_MULTI_RX_ON_MAX];
+
+	nicm_apply(m, w, odi_nic_multi_rx_on(w));
+}
+
+static void nicm_off(struct nicm *m)
+{
+	struct odi_nic_regw w[ODI_NIC_MULTI_RX_OFF_MAX];
+
+	nicm_apply(m, w, odi_nic_multi_rx_off(w));
+}
+
+/* The OMCI frames of a burst that reach ring 2. */
+static unsigned int omci_burst(struct nicm *m, unsigned int frames)
+{
+	unsigned int i, got = 0;
+
+	for (i = 0; i < frames; i++)
+		got += nicm_frame(m, ODI_NIC_OMCI_PRIO) == 2;
+	return got;
+}
+
+static void test_multi_rx_reset_rings_hold_pause(void)
+{
+	struct odi_nic_regw w[ODI_NIC_RX_START_MAX];
 	struct odi_nic_multi_rx_cfg c;
 	struct nicm m;
 	unsigned int n, head, k, kept = 0;
+	int ok;
 
 	nicm_reset(&m);
 	CHECK(nicm_pause(&m) == 0, "one ring, rings 2..6 at reset: no PAUSE (MULTI_RX clear)");
 
-	/* The enable without the parking writes: ring 2, the route words and
-	 * MULTI_RX, the rest at reset. This is what took the management path
-	 * down; the model must see it.
+	/* The start without the parking writes, then the enable: ring 2,
+	 * the route words and MULTI_RX, the rest at reset. This is what took
+	 * the management path down; the model must see it.
 	 */
 	multi_cfg(&c);
-	n = odi_nic_multi_rx_on(&c, w, &head);
+	n = odi_nic_rx_start(&c, w, &head, &ok);
 	for (k = 0; k < n; k++) {
 		unsigned int off = w[k].off;
 
@@ -630,8 +717,48 @@ static void test_multi_rx_reset_rings_hold_pause(void)
 		w[kept++] = w[k];
 	}
 	nicm_apply(&m, w, kept);
+	CHECK(nicm_pause(&m) == 0, "unparked start, MULTI_RX clear: no PAUSE yet");
+	nicm_on(&m);
 	CHECK(m.run1 & ODI_NIC_RUN1_MULTI_RX, "unparked enable: MULTI_RX set");
 	CHECK(nicm_pause(&m) == ODI_NIC_RX_PARK_FIRST, "unparked enable: ring 3, at reset, holds PAUSE");
+}
+
+static void test_multi_rx_start_sequence(void)
+{
+	struct odi_nic_regw w[ODI_NIC_RX_START_MAX];
+	struct odi_nic_multi_rx_cfg c;
+	struct nicm m;
+	unsigned int n, head = 99, r, i;
+	int ok = 0;
+
+	multi_cfg(&c);
+	n = odi_nic_rx_start(&c, w, &head, &ok);
+	CHECK(ok && n == ODI_NIC_RX_START_MAX, "start: a sequence within its bound");
+	CHECK(w[n - 2].off == ODI_NIC_RUN1 && w[n - 2].val == ODI_NIC_RUN1_VAL &&
+	      w[n - 1].off == ODI_NIC_RUN && w[n - 1].val == ODI_NIC_RUN_VAL,
+	      "start: RUN1 with MULTI_RX clear, then RUN, last");
+	for (i = 0; i + 2 < n; i++)
+		CHECK(!regw_is_go(&w[i]), "start: every ring written before the go bits");
+
+	nicm_start(&m, &c, &head, &ok);
+	CHECK(!m.bad_off, "start: only known ring and go registers written");
+	CHECK(!(m.run1 & ODI_NIC_RUN1_MULTI_RX) && m.run, "start: running, MULTI_RX clear");
+	CHECK(nicm_pause(&m) == 0, "start: no PAUSE");
+	CHECK(head == 0 && ringm_avail(&m.r[2]) == ODI_RX2_RING_DEPTH - 1,
+	      "start after a board reset: ring 2 from 0, every descriptor the engine's");
+	CHECK(m.r[2].base == c.rx2_dma && m.r[2].last == ODI_RX2_RING_DEPTH - 1 &&
+	      m.r[2].on == ODI_NIC_RX2_FC_ON, "start: ring 2 programmed");
+	for (r = ODI_NIC_RX_PARK_FIRST; r <= ODI_NIC_RX_PARK_LAST; r++) {
+		CHECK(m.r[r].base == c.park_dma && m.r[r].base % ODI_DESC_ALIGN == 0,
+		      "start: rings 3..6 on the parking ring");
+		CHECK(m.r[r].last == ODI_NIC_RX_PARK_DEPTH - 1 && m.r[r].on == 0 &&
+		      ringm_avail(&m.r[r]) == 1, "start: a parked ring has one descriptor and ON 0");
+	}
+	for (i = 0; i < ODI_NIC_RX_RING_MAP_WORDS; i++)
+		CHECK(m.map[i] == ODI_NIC_RX_RING_MAP_SINGLE, "start: the single-ring route words untouched");
+	for (i = 0; i < 100; i++)
+		CHECK(nicm_frame(&m, i % 8) == 1, "start, OMCI ring off: every frame on ring 1");
+	CHECK(m.missed == 0, "start, OMCI ring off: nothing missed");
 }
 
 static void test_multi_rx_on_sequence(void)
@@ -639,29 +766,22 @@ static void test_multi_rx_on_sequence(void)
 	struct odi_nic_regw w[ODI_NIC_MULTI_RX_ON_MAX];
 	struct odi_nic_multi_rx_cfg c;
 	struct nicm m;
-	unsigned int n, head = 99, r, i, p;
+	unsigned int n, head = 99, i, p;
+	int ok;
 
-	nicm_reset(&m);
 	multi_cfg(&c);
-	n = odi_nic_multi_rx_on(&c, w, &head);
-	CHECK(n > 0 && n <= ODI_NIC_MULTI_RX_ON_MAX, "enable: a sequence within its bound");
+	nicm_start(&m, &c, &head, &ok);
+	n = odi_nic_multi_rx_on(w);
+	CHECK(n == ODI_NIC_MULTI_RX_ON_MAX, "enable: a sequence within its bound");
 	CHECK(w[n - 1].off == ODI_NIC_RUN1 && w[n - 1].val == ODI_NIC_RUN1_VAL_MULTI,
 	      "enable: MULTI_RX is the last write");
 	for (i = 0; i + 1 < n; i++)
-		CHECK(w[i].off != ODI_NIC_RUN1, "enable: RUN1 written once");
+		CHECK(w[i].off >= ODI_NIC_RX_RING_MAP &&
+		      w[i].off < ODI_NIC_RX_RING_MAP + 4 * ODI_NIC_RX_RING_MAP_WORDS,
+		      "enable: no ring register written, only the route words");
 	nicm_apply(&m, w, n);
-	CHECK(!m.bad_off, "enable: only known ring, route and RUN1 registers written");
+	CHECK(!m.bad_off, "enable: only known route and RUN1 registers written");
 	CHECK(nicm_pause(&m) == 0, "enable: no ring holds PAUSE");
-	CHECK(head == 0 && ringm_avail(&m.r[2]) == ODI_RX2_RING_DEPTH - 1,
-	      "enable after a board reset: ring 2 from 0, every descriptor the engine's");
-	CHECK(m.r[2].base == c.rx2_dma && m.r[2].last == ODI_RX2_RING_DEPTH - 1 &&
-	      m.r[2].on == ODI_NIC_RX2_FC_ON, "enable: ring 2 programmed");
-	for (r = ODI_NIC_RX_PARK_FIRST; r <= ODI_NIC_RX_PARK_LAST; r++) {
-		CHECK(m.r[r].base == c.park_dma && m.r[r].base % ODI_DESC_ALIGN == 0,
-		      "enable: rings 3..6 on the parking ring");
-		CHECK(m.r[r].last == ODI_NIC_RX_PARK_DEPTH - 1 && m.r[r].on == 0 &&
-		      ringm_avail(&m.r[r]) == 1, "enable: a parked ring has one descriptor and ON 0");
-	}
 	for (i = 0; i < ODI_NIC_RX_RING_MAP_WORDS; i++)
 		for (p = 0; p < 8; p++) {
 			unsigned int f = (m.map[i] >> (4 * p)) & 0xFU;
@@ -674,19 +794,78 @@ static void test_multi_rx_on_sequence(void)
 	 * back as odi_rx_cpu_idx_update() does: never PAUSE.
 	 */
 	for (i = 0; i < 40; i++) {
-		m.r[2].hw = (m.r[2].hw + 1) % ODI_RX2_RING_DEPTH;
-		head = (head + 1) % ODI_RX2_RING_DEPTH;
-		m.r[2].cpu = odi_nic_rx_cpu_idx(head, ODI_RX2_RING_DEPTH);
+		CHECK(nicm_frame(&m, ODI_NIC_OMCI_PRIO) == 2, "enable: an OMCI frame on ring 2");
+		CHECK(nicm_frame(&m, 0) == 1, "enable: a host frame on ring 1");
 		CHECK(nicm_pause(&m) == 0, "ring 2 in use: no PAUSE while the CPU keeps up");
 	}
 }
 
+/* The first OMCI frame after the OMCI ring is turned on: the start
+ * programs ring 2, so the engine has it before the first frame comes.
+ */
+static void test_omci_ring_first_frame(void)
+{
+	struct odi_nic_regw w[ODI_NIC_RX_START_MAX], go[2], rings[ODI_NIC_RX_START_MAX];
+	struct odi_nic_multi_rx_cfg c;
+	struct nicm m;
+	unsigned int n, k, ngo = 0, nrings = 0, head;
+	int ok;
+
+	/* The order before: the go bits with rings 2..6 untouched, then the
+	 * rings programmed live with the enable. The model loses the first
+	 * OMCI frame of the burst, as the stick did, and none after.
+	 */
+	multi_cfg(&c);
+	n = odi_nic_rx_start(&c, w, &head, &ok);
+	for (k = 0; k < n; k++) {
+		if (regw_is_go(&w[k]))
+			go[ngo++] = w[k];
+		else
+			rings[nrings++] = w[k];
+	}
+	nicm_reset(&m);
+	nicm_apply(&m, go, ngo);
+	nicm_apply(&m, rings, nrings);
+	nicm_on(&m);
+	CHECK(nicm_pause(&m) == 0 && m.missed == 0, "rings programmed while running: no PAUSE, nothing missed yet");
+	CHECK(omci_burst(&m, 20) == 19 && m.missed == 1, "rings programmed while running: the first OMCI frame is lost");
+	CHECK(omci_burst(&m, 98) == 98 && m.missed == 1, "... and none of the next burst");
+
+	/* Fresh boot, the OMCI ring turned on live later. */
+	multi_cfg(&c);
+	nicm_start(&m, &c, &head, &ok);
+	CHECK(omci_burst(&m, 20) == 0 && m.missed == 0, "OMCI ring off: OMCI on ring 1, not ring 2");
+	nicm_on(&m);
+	CHECK(omci_burst(&m, 20) == 20 && m.missed == 0, "live enable: every OMCI frame of the first burst on ring 2");
+	nicm_off(&m);
+	nicm_on(&m);
+	CHECK(omci_burst(&m, 98) == 98 && m.missed == 0, "off and on again: none lost");
+
+	/* odi_nic.omci_ring=1 at boot: the enable right after the start. */
+	multi_cfg(&c);
+	nicm_start(&m, &c, &head, &ok);
+	nicm_on(&m);
+	CHECK(omci_burst(&m, 20) == 20 && m.missed == 0, "enabled at open: every OMCI frame on ring 2");
+
+	/* After an interface restart ring 2 starts at its engine index. */
+	multi_cfg(&c);
+	c.hw_idx[2] = 19;
+	nicm_reset(&m);
+	m.r[2].hw = 19;
+	n = odi_nic_rx_start(&c, w, &head, &ok);
+	nicm_apply(&m, w, n);
+	nicm_on(&m);
+	CHECK(head == 19 && omci_burst(&m, 40) == 40 && m.missed == 0,
+	      "after a restart, from engine index 19 across the wrap: none lost");
+}
+
 static void test_multi_rx_engine_indices(void)
 {
-	struct odi_nic_regw w[ODI_NIC_MULTI_RX_ON_MAX];
+	struct odi_nic_regw w[ODI_NIC_RX_START_MAX];
 	struct odi_nic_multi_rx_cfg c;
 	struct nicm m;
 	unsigned int n, head = 99;
+	int ok = 0;
 
 	/* After an interface restart: ring 2 at 8, ring 4 at 1. */
 	nicm_reset(&m);
@@ -695,9 +874,10 @@ static void test_multi_rx_engine_indices(void)
 	c.hw_idx[4] = 1;
 	m.r[2].hw = 8;
 	m.r[4].hw = 1;
-	n = odi_nic_multi_rx_on(&c, w, &head);
+	n = odi_nic_rx_start(&c, w, &head, &ok);
 	nicm_apply(&m, w, n);
-	CHECK(n && head == 8, "ring 2 starts at its engine index");
+	nicm_on(&m);
+	CHECK(ok && head == 8, "ring 2 starts at its engine index");
 	CHECK(m.r[2].cpu == 7, "ring 2 CPU index one before it");
 	CHECK(m.r[4].cpu == 0 && ringm_avail(&m.r[4]) == 1, "a parked ring at engine index 1: CPU index 0");
 	CHECK(nicm_pause(&m) == 0, "no PAUSE whatever the engine indices");
@@ -705,22 +885,26 @@ static void test_multi_rx_engine_indices(void)
 	multi_cfg(&c);
 	c.hw_idx[2] = ODI_RX2_RING_DEPTH;
 	head = 99;
-	CHECK(odi_nic_multi_rx_on(&c, w, &head) == 0 && head == 99, "ring 2 index beyond the ring: refused");
+	n = odi_nic_rx_start(&c, w, &head, &ok);
+	CHECK(!ok && head == 99, "ring 2 index beyond the ring: refused");
+	CHECK(n == 2 && regw_is_go(&w[0]) && regw_is_go(&w[1]), "... and only the go bits written");
 	multi_cfg(&c);
 	c.hw_idx[6] = ODI_NIC_RX_PARK_DEPTH;
-	CHECK(odi_nic_multi_rx_on(&c, w, &head) == 0, "a parked ring's index beyond two: refused");
+	n = odi_nic_rx_start(&c, w, &head, &ok);
+	CHECK(!ok && n == 2, "a parked ring's index beyond two: refused");
 }
 
 static void test_multi_rx_off_sequence(void)
 {
-	struct odi_nic_regw w[ODI_NIC_MULTI_RX_ON_MAX];
+	struct odi_nic_regw w[ODI_NIC_MULTI_RX_OFF_MAX];
 	struct odi_nic_multi_rx_cfg c;
 	struct nicm m;
 	unsigned int n, head, i;
+	int ok;
 
-	nicm_reset(&m);
 	multi_cfg(&c);
-	nicm_apply(&m, w, odi_nic_multi_rx_on(&c, w, &head));
+	nicm_start(&m, &c, &head, &ok);
+	nicm_on(&m);
 	n = odi_nic_multi_rx_off(w);
 	CHECK(n == ODI_NIC_MULTI_RX_OFF_MAX, "disable: RUN1 and the six route words");
 	CHECK(w[0].off == ODI_NIC_RUN1 && w[0].val == ODI_NIC_RUN1_VAL, "disable: MULTI_RX cleared first");
@@ -729,8 +913,8 @@ static void test_multi_rx_off_sequence(void)
 	for (i = 0; i < ODI_NIC_RX_RING_MAP_WORDS; i++)
 		CHECK(m.map[i] == ODI_NIC_RX_RING_MAP_SINGLE, "disable: the single-ring route words back");
 
-	/* And on again, from the rings as the first enable left them. */
-	nicm_apply(&m, w, odi_nic_multi_rx_on(&c, w, &head));
+	/* And on again, from the rings as the start left them. */
+	nicm_on(&m);
 	CHECK((m.run1 & ODI_NIC_RUN1_MULTI_RX) && nicm_pause(&m) == 0, "on, off, on: no PAUSE");
 }
 
@@ -753,7 +937,9 @@ int main(void)
 	test_missed_delta();
 	test_omci_ring_under_flood();
 	test_multi_rx_reset_rings_hold_pause();
+	test_multi_rx_start_sequence();
 	test_multi_rx_on_sequence();
+	test_omci_ring_first_frame();
 	test_multi_rx_engine_indices();
 	test_multi_rx_off_sequence();
 
