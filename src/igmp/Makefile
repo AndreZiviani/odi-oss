@@ -18,6 +18,7 @@ GTEST := $(BUILD)/group_test
 PTEST := $(BUILD)/policy_test
 ETEST := $(BUILD)/entry_test
 UTEST := $(BUILD)/uplink_test
+MTEST := $(BUILD)/mld_test
 DIAG  := ../diag
 
 ifeq ($(IN_CONTAINER),1)
@@ -34,10 +35,11 @@ LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
            -Wl,--gc-sections
 
 # switch_opt.c holds the /dev/odi_sw ioctls this daemon programs the switch
-# with; its header lists them. uplink.c is the way up for a taken report.
+# with; its header lists them. uplink.c is the way up for a taken report,
+# mld.c the IPv6 half (-6).
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o $(BUILD)/group.o \
         $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/status.o $(BUILD)/entry.o $(BUILD)/program.o $(BUILD)/switch_opt.o \
-        $(BUILD)/uplink.o $(BUILD)/replay.o $(BUILD)/main.o
+        $(BUILD)/uplink.o $(BUILD)/meter.o $(BUILD)/mld.o $(BUILD)/replay.o $(BUILD)/main.o
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
@@ -59,6 +61,10 @@ $(UTEST): test/uplink_test.c uplink.h policy.h group.h igmpd.h $(DIAG)/src/odi_s
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/uplink_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/uplink.o $(BUILD)/policy.o $(BUILD)/group.o $(BUILD)/frame.o $(BUILD)/entry.o
 
+$(MTEST): test/mld_test.c mld.h group.h policy.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/mld.o $(BUILD)/policy.o $(BUILD)/entry.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/mld_test.c \
+	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/mld.o $(BUILD)/policy.o $(BUILD)/entry.o
+
 $(ETEST): test/entry_test.c entry.h $(DIAG)/src/odi_sw_ioctl.h $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/entry.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/entry_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/entry.o
@@ -78,10 +84,10 @@ $(BUILD)/group.o: group.c group.h policy.h igmpd.h | $(BUILD)
 $(BUILD)/state.o: state.c state.h group.h policy.h igmpd.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/status.o: status.c status.h state.h group.h policy.h $(DIAG)/src/odi_sw_ioctl.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/status.o: status.c status.h state.h group.h policy.h mld.h $(DIAG)/src/odi_sw_ioctl.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/policy.o: policy.c policy.h entry.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
+$(BUILD)/policy.o: policy.c policy.h entry.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/entry.o: entry.c entry.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
@@ -96,10 +102,16 @@ $(BUILD)/switch_opt.o: switch_opt.c switch_opt.h $(DIAG)/src/odi_sw_ioctl.h $(DI
 $(BUILD)/uplink.o: uplink.c uplink.h policy.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/replay.o: replay.c replay.h igmpd.h group.h policy.h entry.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/meter.o: meter.c meter.h group.h igmpd.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c uplink.h status.h replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/mld.o: mld.c mld.h group.h policy.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/replay.o: replay.c replay.h igmpd.h group.h policy.h entry.h mld.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/main.o: main.c uplink.h meter.h mld.h status.h replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD):
@@ -123,12 +135,13 @@ igmpd: image
 # qemu with no device and no netlink. That is the point of keeping frame.c
 # free of syscalls.
 test: image
-	$(RUN) make IN_CONTAINER=1 $(TEST) $(GTEST) $(ETEST) $(PTEST) $(UTEST) $(BIN)
+	$(RUN) make IN_CONTAINER=1 $(TEST) $(GTEST) $(ETEST) $(PTEST) $(UTEST) $(MTEST) $(BIN)
 	@$(RUN) qemu-mips-static $(TEST)
 	@$(RUN) qemu-mips-static $(GTEST)
 	@$(RUN) qemu-mips-static $(ETEST)
 	@$(RUN) qemu-mips-static $(PTEST)
 	@$(RUN) qemu-mips-static $(UTEST)
+	@$(RUN) qemu-mips-static $(MTEST)
 	@$(RUN) sh test/replay_test.sh
 
 size: igmpd

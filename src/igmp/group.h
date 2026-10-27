@@ -119,6 +119,8 @@ enum igmp_refusal_reason {
 	IGMP_REFUSE_ACL = 1,    /* outside the OLT's access control lists */
 	IGMP_REFUSE_LIMIT,      /* past the group limit of ME 310 */
 	IGMP_REFUSE_FULL,       /* the table has no free entry */
+	IGMP_REFUSE_BW,         /* past the bandwidth of ME 310, enforced */
+	IGMP_REFUSE_PREVIEW,    /* a preview used up: count or repeat time */
 	IGMP_REFUSE_REASONS     /* one past the last, for array sizes */
 };
 
@@ -140,14 +142,45 @@ struct igmp_refusal {
 	uint32_t count;         /* how many times in a row */
 };
 
+/* What a preview-only group (an ACL row with a preview length, G.988 9.3.27
+ * row part 1) has used. Per group, not per row: "the ONU maintains preview
+ * counters and interval timers on a per-multicast group basis". The table is
+ * small and a group that does not fit is let through unmetered, since a
+ * refusal needs the count that could not be kept. */
+#define IGMP_PREVIEW_MAX    32
+#define IGMP_PREVIEW_WINDOW 86400       /* the count resets every 24 h */
+
+struct igmp_preview {
+	uint8_t  used;
+	uint8_t  active;                /* a preview is running, until `end` */
+	uint8_t  has_next;              /* a preview ended: `next_ok` holds */
+	uint16_t repeat;                /* the row's repeat time, kept for the end */
+	uint32_t group;
+	uint32_t end;
+	uint32_t next_ok;               /* no new preview before this second */
+	uint32_t count;                 /* previews in this window */
+	uint32_t window;                /* when the window began */
+};
+
 struct igmp_db {
 	struct igmp_entry g[IGMP_MAX_GROUPS];
 	struct igmp_hist hist[IGMP_HIST_MAX];
 	uint32_t router_ports;
 	uint32_t router_expires[IGMP_MAX_PORTS];
 	struct igmp_policy pol;                 /* what the OLT provisioned */
+	uint32_t last_now;                      /* the clock at the last rx or tick */
+	struct igmp_preview preview[IGMP_PREVIEW_MAX];
+	/* When each row of the policy's allowed preview table began its
+	 * minutes, in the policy's order: the second the OLT wrote the row, as
+	 * the daemon's clock had it (0 when it had none yet: the minutes then
+	 * begin with the first join that uses the row). Carried over when the
+	 * OLT rewrites the table. */
+	uint32_t grant_since[IGMP_POLICY_MAX_GRANTS];
 	uint32_t joins;                         /* join messages accepted (ME 311 attr 3) */
 	uint32_t denied;                        /* joins refused: profile or limit */
+	/* Joins of a new group whose imputed bandwidth would take the
+	 * subscriber past ME 310's maximum, refused or not (ME 311 attr 4). */
+	uint32_t bw_exceeded;
 	int      static_overflow;               /* a static range too wide to name */
 	/* Every refusal since the daemon started (or the policy last said "not
 	 * snooping"), by reason, and the last few in order. A table too small
@@ -163,6 +196,11 @@ struct igmp_db {
 	 * unauthorized join request (G.988 9.3.27 attribute 15, uplink.h). */
 	uint32_t rx_acl_refused;
 	uint32_t rx_passable;
+	/* Host messages above the profile's IGMP version (a v3 report under
+	 * version 2). They are handled as any other, not refused: a set-top box
+	 * does not fall back to an older version when it sees no query, and
+	 * the lines here see none. Only counted, so that it can be seen. */
+	uint32_t above_version;
 	/* What the way up did (uplink.h): messages sent, withheld as
 	 * unauthorized, dropped over the rate, and not sent for want of a row,
 	 * a flow or a transmit. Counted only while the reports are taken. */

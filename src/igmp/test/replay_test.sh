@@ -21,9 +21,14 @@ no() { echo "FAIL  $1"; fail=$((fail + 1)); }
 for in in test/replay/*.in; do
 	name=${in%.in}
 	# The goldens run with the PON drop opted in (-d); nodrop-* run without
-	# it, the default, and must never show a drop.
+	# it, the default, and must never show a drop. mld-* run with MLD on
+	# (-6) as well; every other one runs without it, the default, and
+	# nomld-* checks that MLD is then left alone.
 	flag=-d
-	case $(basename "$name") in nodrop-*) flag= ;; esac
+	case $(basename "$name") in
+	nodrop-*) flag= ;;
+	mld-*) flag="-6 -d" ;;
+	esac
 	# shellcheck disable=SC2086
 	got=$($Q $BIN $flag -r "$in" 2>&1; echo "status $?")
 	if [ "$update" = 1 ]; then
@@ -85,6 +90,25 @@ out=$($Q $BIN -s $t.cut $pf 2>&1)
 [ "$out" != "${out#*joins 3}" ] && [ "$out" = "${out%239.1.1.2*}" ] \
 	&& ok "igmpd -s on a cut-off state file drops the partial last line" \
 	|| { no "igmpd -s on a cut-off state file"; printf '%s\n' "$out"; }
+# The IPv6 half: a third file, the IPv6 state, and the IPv6 lists of the
+# policy file. Without either, nothing of it is printed (above).
+sf6=/tmp/status-state6.txt
+printf 'joins=2\ndenied=1\ngroups=1\nrefused_acl=1\ngroup=ff3e::8000:5\nrefused=acl ff3e::9 vid=0 at=4 n=2\n' > $sf6
+printf 'snooping=1\nallow=225.0.0.0-225.255.255.255\nallow6=ff3e::8000:0-ff3e::8000:ffff\n' > $pf
+out=$($Q $BIN -s $sf $pf $sf6 2>&1); rc=$?
+want6='MLD: 1 allow + 0 static IPv6 ranges
+  allow6 ff3e::8000:0 - ff3e::8000:ffff
+MLD joins 2, refused by the profile 1 (lists 1, group limit 0), table full 0
+IPv6 groups held: 1
+  ff3e::8000:5
+recent IPv6 refusals, newest first:
+  ff3e::9  vid 0  outside the access control lists (acl)  x2  at 4 s'
+[ "$rc" = 0 ] && [ "$out" = "$want
+$want6" ] \
+	&& ok "igmpd -s reads the IPv6 state file and lists" \
+	|| { no "igmpd -s reads the IPv6 state file and lists ($rc)"; printf '%s\n' "$out"; }
+printf 'snooping=1\nallow=225.0.0.0-225.255.255.255\n' > $pf
+rm -f $sf6
 out=$($Q $BIN -s /nonexistent /nonexistent 2>&1); rc=$?
 [ "$rc" = 0 ] && [ "$out" != "${out#*policy: none}" ] && [ "$out" != "${out#*state: none}" ] \
 	&& ok "igmpd -s with no files says so" || no "igmpd -s with no files ($rc)"

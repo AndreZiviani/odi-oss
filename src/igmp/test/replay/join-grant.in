@@ -1,0 +1,25 @@
+# The allowed preview table (ME 310 attribute 7): a group in it is fully
+# authorized for its minutes, ahead of a preview-only row, and one outside
+# the lists is let in too. 239.9.5.5 is granted for 2 minutes from its first
+# join (second 1): at 100 it is full access, at 125 the grant has run out and
+# the preview row decides (a preview, 30 s, once: a second is refused at 170). 226.5.5.5 is in no row and is
+# granted with no end. 239.9.6.6 has no grant and is a preview from the start.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+allow=239.9.0.0-239.9.255.255 p=30,60,1,0
+grant=239.9.5.5 a=0 u=0 d=2
+grant=226.5.5.5 a=0 u=0
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.9.5.5
+2 v2join 1 0 192.168.1.10 226.5.5.5
+3 v2join 1 0 192.168.1.10 239.9.6.6
+34 tick
+100 v2join 1 0 192.168.1.10 239.9.5.5
+125 v2join 1 0 192.168.1.10 239.9.5.5
+160 tick
+170 v2join 1 0 192.168.1.10 239.9.5.5
+200 v2join 1 0 192.168.1.10 226.5.5.5
+201 state

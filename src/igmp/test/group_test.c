@@ -79,6 +79,189 @@ static uint32_t mk_v3(uint8_t *body, uint8_t rectype, uint32_t group,
 	return len;
 }
 
+
+static uint32_t slen(const char *s)
+{
+	uint32_t n = 0;
+
+	while (s[n])
+		n++;
+	return n;
+}
+
+/* A profile from the text omcid writes, on a fresh table. */
+static void policy_from(struct igmp_db *db, const char *text)
+{
+	static struct igmp_policy p;
+	struct igmp_change ch[IGMP_MAX_GROUPS];
+
+	igmp_db_init(db);
+	igmp_policy_parse(text, slen(text), &p);
+	igmp_db_set_policy(db, &p, ch, IGMP_MAX_GROUPS);
+}
+
+static int joined(struct igmp_db *db, uint8_t type, uint16_t vid, uint32_t group,
+		  uint32_t now)
+{
+	struct igmp_change ch[8];
+	struct igmp_rx rx = mk(type, 1, vid, group);
+	uint32_t before = db->joins;
+
+	igmp_db_rx(db, &rx, now, ch, 8);
+	return db->joins != before;
+}
+
+/* The rules the lists, the version and the previews add to a join. */
+static void test_join_rules(void)
+{
+	static struct igmp_db db;
+	struct igmp_change ch[IGMP_MAX_GROUPS];
+	struct igmp_rx rx;
+	uint8_t body[64];
+	uint32_t g = 0xef090001;                /* 239.9.0.1 */
+	int n;
+
+	/* The version: a v3 report under version 2 is above it, and is counted
+	 * and handled as before (a set-top box does not fall back to v2 when it
+	 * sees no query). */
+	policy_from(&db, "snooping=1\nigmp_version=2\n");
+	rx = mk(IGMP_V3_REPORT, 1, 0, 0);
+	rx.body = body;
+	rx.nrec = 1;
+	rx.body_len = mk_v3(body, 2, 0xe1020202, 0);
+	n = igmp_db_rx(&db, &rx, 10, ch, 8);
+	ok(n == 1 && db.joins == 1 && igmp_db_count(&db) == 1 && db.above_version == 1 &&
+	   db.refusals == 0 && db.denied == 0,
+	   "G7: a v3 report under version 2 is held as before, and counted above the version");
+	ok(joined(&db, IGMP_V2_REPORT, 0, 0xe1020203, 11) && db.above_version == 1,
+	   "G7: a v2 report under version 2 is not above it");
+	rx.body_len = mk_v3(body, 3, 0xe1020202, 0);               /* TO_INCLUDE {}: a leave */
+	n = igmp_db_rx(&db, &rx, 12, ch, 8);
+	ok(db.above_version == 2 && db.refusals == 0, "G7: a v3 leave is counted too");
+	policy_from(&db, "snooping=1\nigmp_version=3\n");
+	rx.body_len = mk_v3(body, 2, 0xe1020202, 0);
+	igmp_db_rx(&db, &rx, 10, ch, 8);
+	ok(db.joins == 1 && db.above_version == 0, "G7: the same v3 report under version 3 is not counted");
+	policy_from(&db, "snooping=1\n");
+	igmp_db_rx(&db, &rx, 10, ch, 8);
+	ok(db.joins == 1 && db.above_version == 0, "G7: and with no version in the profile");
+
+	/* SSM: a row with a source, a v3 record naming other sources. */
+	policy_from(&db, "snooping=1\nallow=232.1.0.0-232.1.255.255 s=10.0.0.2\n");
+	rx.body_len = mk_v3(body, 1, 0xe8010001, 3);               /* INCLUDE 10.0.0.1 .2 .3 */
+	igmp_db_rx(&db, &rx, 10, ch, 8);
+	ok(db.joins == 1, "G9: INCLUDE sources with the row's among them: in");
+	rx.body_len = mk_v3(body, 1, 0xe8010002, 1);               /* INCLUDE 10.0.0.1 */
+	igmp_db_rx(&db, &rx, 11, ch, 8);
+	ok(db.joins == 1 && db.refused[IGMP_REFUSE_ACL] == 1, "G9: INCLUDE sources without it: refused");
+	rx.body_len = mk_v3(body, 2, 0xe8010003, 2);               /* EXCLUDE 10.0.0.1 .2 */
+	igmp_db_rx(&db, &rx, 12, ch, 8);
+	ok(db.joins == 1 && db.refused[IGMP_REFUSE_ACL] == 2, "G9: EXCLUDE the row's source: refused");
+	rx.body_len = mk_v3(body, 2, 0xe8010004, 1);               /* EXCLUDE 10.0.0.1 */
+	igmp_db_rx(&db, &rx, 13, ch, 8);
+	ok(db.joins == 2, "G9: EXCLUDE another source: in");
+	ok(joined(&db, IGMP_V2_REPORT, 0, 0xe8010005, 14), "G9: a v2 report of a source row: in, as before");
+
+	/* The VLAN, from the profile's own tag. */
+	policy_from(&db, "snooping=1\nus_tag_control=1\nus_tci=100\n"
+		    "allow=225.1.0.0-225.1.255.255 v=100\nallow=225.2.0.0-225.2.255.255 v=200\n");
+	ok(joined(&db, IGMP_V2_REPORT, 0, 0xe1010101, 10), "G9: a group of the row for the join's VLAN: in");
+	ok(!joined(&db, IGMP_V2_REPORT, 0, 0xe1020101, 11) && db.refused[IGMP_REFUSE_ACL] == 1,
+	   "G9: a group of the row for another VLAN: refused");
+
+	/* Preview: 30 s long, 60 s apart, twice. */
+	policy_from(&db, "snooping=1\nimmediate_leave=1\nallow=239.9.0.0-239.9.255.255 p=30,60,2,0\n");
+	ok(joined(&db, IGMP_V2_REPORT, 0, g, 100), "G13: the first preview begins");
+	ok(joined(&db, IGMP_V2_REPORT, 0, g, 129), "G13: a report inside it is the same preview");
+	n = igmp_db_tick(&db, 129, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 1, "G13: one second before its end the group is still there");
+	n = igmp_db_tick(&db, 130, ch, 8);
+	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL && ch[0].group == g && igmp_db_count(&db) == 0,
+	   "G13: at its end the group goes");
+	ok(!joined(&db, IGMP_V2_REPORT, 0, g, 189) && db.refused[IGMP_REFUSE_PREVIEW] == 1,
+	   "G13: one second before the repeat time has passed: refused, by preview");
+	ok(joined(&db, IGMP_V2_REPORT, 0, g, 190), "G13: at the repeat time the second preview begins");
+	igmp_db_tick(&db, 220, ch, 8);
+	ok(igmp_db_count(&db) == 0 && !joined(&db, IGMP_V2_REPORT, 0, g, 1000) &&
+	   db.refused[IGMP_REFUSE_PREVIEW] == 2, "G13: the count is spent: refused for good");
+	ok(joined(&db, IGMP_V2_REPORT, 0, g + 1, 1001), "G13: another group has its own count");
+	ok(!joined(&db, IGMP_V2_REPORT, 0, g, 1000 + IGMP_PREVIEW_WINDOW - 1),
+	   "G13: a reset time of 0 never resets the count");
+	policy_from(&db, "snooping=1\nimmediate_leave=1\nallow=239.9.0.0-239.9.255.255 p=30,60,1,24\n");
+	joined(&db, IGMP_V2_REPORT, 0, g, 100);
+	igmp_db_tick(&db, 130, ch, 8);
+	ok(!joined(&db, IGMP_V2_REPORT, 0, g, 200), "G13: a count of 1 is spent");
+	ok(joined(&db, IGMP_V2_REPORT, 0, g, 100 + IGMP_PREVIEW_WINDOW),
+	   "G13: a reset time of 1 to 24: the count resets after a day");
+	policy_from(&db, "snooping=1\nimmediate_leave=1\nallow=239.9.0.0-239.9.255.255 p=30,0,0,0\n");
+	joined(&db, IGMP_V2_REPORT, 0, g, 100);
+	igmp_db_tick(&db, 130, ch, 8);
+	ok(joined(&db, IGMP_V2_REPORT, 0, g, 130), "G13: a repeat count of 0 and no repeat time: unlimited, at once");
+	/* A leave ends the preview, and the repeat time counts from it. */
+	policy_from(&db, "snooping=1\nimmediate_leave=1\nallow=239.9.0.0-239.9.255.255 p=30,60,0,0\n");
+	joined(&db, IGMP_V2_REPORT, 0, g, 100);
+	rx = mk(IGMP_V2_LEAVE, 1, 0, g);
+	igmp_db_rx(&db, &rx, 110, ch, 8);
+	ok(!joined(&db, IGMP_V2_REPORT, 0, g, 169) && joined(&db, IGMP_V2_REPORT, 0, g, 170),
+	   "G13: after a leave at 110 the next preview is at 170");
+	/* A group that is fully authorized by another row is never a preview. */
+	policy_from(&db, "snooping=1\nimmediate_leave=1\nallow=239.9.0.0-239.9.255.255 p=30,60,1,0\n"
+		    "allow=239.9.0.0-239.9.0.255\n");
+	joined(&db, IGMP_V2_REPORT, 0, g, 100);
+	n = igmp_db_tick(&db, 200, ch, 8);
+	ok(n == 0 && igmp_db_count(&db) == 1, "G13: a row with no preview covering the group: full access, no timing");
+	/* No preview rows: nothing changes. */
+	policy_from(&db, "snooping=1\nallow=239.9.0.0-239.9.255.255\n");
+	joined(&db, IGMP_V2_REPORT, 0, g, 100);
+	ok(joined(&db, IGMP_V2_REPORT, 0, g, 5000), "G13: a profile with no preview rows: as before");
+
+	/* The allowed preview table. */
+	policy_from(&db, "snooping=1\nallow=239.9.0.0-239.9.255.255 p=30,60,1,0\n"
+		    "grant=239.9.0.1 a=0 u=0 d=2\ngrant=226.5.5.5 a=0 u=0\ngrant=239.8.0.9 a=0 u=77\n");
+	ok(joined(&db, IGMP_V2_REPORT, 0, g, 10), "G13: a granted group goes in at full access");
+	ok(joined(&db, IGMP_V2_REPORT, 0, g, 129), "G13: still, inside its two minutes");
+	igmp_db_tick(&db, 130, ch, 8);
+	ok(igmp_db_count(&db) == 1, "G13: and not cut at the preview length");
+	ok(joined(&db, IGMP_V2_REPORT, 0, 0xe2050505, 20), "G13: a granted group in no row goes in");
+	ok(!joined(&db, IGMP_V2_REPORT, 0, 0xef080009, 21), "G13: a grant for another UNI VLAN is not this join's");
+	joined(&db, IGMP_V2_REPORT, 0, g, 131);
+	igmp_db_tick(&db, 165, ch, 8);
+	ok(igmp_db_count(&db) == 1, "G13: after its two minutes it is a preview (it ends 30 s on, the other group stays)");
+	/* A group only the table admits survives the policy being written again. */
+	policy_from(&db, "snooping=1\nallow=239.9.0.0-239.9.255.255 p=30,60,1,0\ngrant=226.5.5.5 a=0 u=0 d=2\n");
+	joined(&db, IGMP_V2_REPORT, 0, 0xe2050505, 10);
+	{
+		static struct igmp_policy same;
+		const char *t = "snooping=1\nallow=239.9.0.0-239.9.255.255 p=30,60,1,0\ngrant=226.5.5.5 a=0 u=0 d=2\n";
+
+		igmp_policy_parse(t, slen(t), &same);
+		n = igmp_db_set_policy(&db, &same, ch, IGMP_MAX_GROUPS);
+	}
+	ok(n == 0 && igmp_db_count(&db) == 1,
+	   "G13: a group in no list but the allowed preview table is not purged by a rewrite of the policy");
+	{
+		static struct igmp_policy gone;
+		const char *t = "snooping=1\nallow=239.9.0.0-239.9.255.255 p=30,60,1,0\n";
+
+		igmp_policy_parse(t, slen(t), &gone);
+		n = igmp_db_set_policy(&db, &gone, ch, IGMP_MAX_GROUPS);
+	}
+	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL && igmp_db_count(&db) == 0,
+	   "G13: and it goes when the OLT takes the row out");
+	/* A rewrite of the table that leaves the row alone does not restart its minutes. */
+	policy_from(&db, "snooping=1\nallow=239.9.0.0-239.9.255.255 p=30,60,1,0\ngrant=239.9.0.1 a=0 u=0 d=2\n");
+	joined(&db, IGMP_V2_REPORT, 0, g, 1000);
+	{
+		static struct igmp_policy np;
+		const char *t = "snooping=1\nallow=239.9.0.0-239.9.255.255 p=30,60,1,0\ngrant=239.9.0.1 a=0 u=0 d=5\n";
+
+		igmp_policy_parse(t, slen(t), &np);
+		igmp_db_set_policy(&db, &np, ch, IGMP_MAX_GROUPS);
+	}
+	ok(joined(&db, IGMP_V2_REPORT, 0, g, 1000 + 299) && db.grant_since[0] == 1000,
+	   "G13: the OLT lengthening a row moves its end, not its start");
+}
+
 int main(void)
 {
 	static struct igmp_db db;
@@ -466,5 +649,8 @@ int main(void)
 	ok(db.ring[(db.refusals - 1) % IGMP_REFUSAL_RING].group == 0xef000100 + IGMP_REFUSAL_RING + 2 &&
 	   db.ring[db.refusals % IGMP_REFUSAL_RING].group == 0xef000103,
 	   "the newest is the last written and the oldest kept is the one after it");
+	test_join_rules();
+	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
+	out_flush();
 	return failures ? 1 : 0;
 }

@@ -60,6 +60,8 @@ int main(void)
 	      == ODI_SW_IOC_MC_ROUTE, "ODI_SW_IOC_MC_ROUTE");
 	check(mips_ioc(4 /* WRITE */, 'S', 14, sizeof(struct odi_sw_mc_send))
 	      == ODI_SW_IOC_MC_SEND, "ODI_SW_IOC_MC_SEND");
+	check(mips_ioc(2 | 4, 'S', 15, sizeof(struct odi_sw_mc_count))
+	      == ODI_SW_IOC_MC_COUNT, "ODI_SW_IOC_MC_COUNT");
 
 	/* Struct sizes the marshalling actually depends on -- a size that
 	 * silently grew (padding, a wider field) would still compile and
@@ -74,6 +76,7 @@ int main(void)
 	check(sizeof(struct odi_sw_acl_probe) == 72, "struct odi_sw_acl_probe is 72 bytes");
 	check(sizeof(struct odi_sw_mc_route) == 88, "struct odi_sw_mc_route is 88 bytes");
 	check(sizeof(struct odi_sw_mc_send) == 1544, "struct odi_sw_mc_send is 1544 bytes");
+	check(sizeof(struct odi_sw_mc_count) == 64, "struct odi_sw_mc_count is 64 bytes");
 	check(offsetof(struct odi_sw_mc_route, want_pri) == 36 &&
 	      offsetof(struct odi_sw_mc_route, verdict) == 40 &&
 	      offsetof(struct odi_sw_mc_route, flow) == 52 &&

@@ -16,11 +16,95 @@ listed here.
   `rx2_idx` and `rx2_head`, to tell a frame the second ring had no room
   for from one it never saw.
 
+- omcid: a bridge port of TP type 3 whose pointer names both an 802.1p mapper
+  and a GEM interworking TP (entity ids are unique per class only) is read as
+  the mapper when that mapper sends any priority to another TP, so every GEM
+  port of the mapper gets its bridge connection. Before, only the priority-0
+  GEM port did, and on ISP3 the DHCP offers (priority 5) and ARP replies
+  (priority 7) were dropped: O5 and no lease. Pinned by `vlan-test.sh`.
+
+## v1.12.0 - 2026-10-26
+
+- Releases: confd v1.9.0: the Phone tab shows what the OLT provisioned for
+  voice and the line state a router reports (`OMCI_VOIP_LINE_REPORT`), the
+  Config page has every odi-only key (`IGMP_PON_DROP`, `MLD_SNOOPING`, the
+  phone-port and Dying_Gasp keys), and the MIB browser refuses the classes
+  that carry provisioned secrets. metricsd stays at v1.7.0.
+
+- igmpd: MLD (IPv6) snooping, opt-in with the new key `MLD_SNOOPING=1`
+  (needs `IGMP_SNOOPING=1`; `apply.sh igmp` applies it). The switch copies the
+  host's MLD queries, reports and dones to igmpd as it copies its IGMP, or
+  takes them when the multicast profile asks for an upstream tag, a rate or
+  the discard of joins outside its lists, and no other ICMPv6: neighbour and
+  router discovery are never touched. IPv6 groups get a row each (their 33:33
+  MAC, the host and the PON as members), the profile's IPv6 access control
+  list rows and group limit are enforced, refusals land in a ring shown by
+  `igmpd -s`, and the reports go up tagged as for IGMP. With
+  `IGMP_PON_DROP=1` as well, IPv6 multicast from the PON that no group row
+  names is dropped too, after the learning interval; the link-scope groups
+  (ff02::/16) and the solicited-node groups always flood both ways and are
+  never snooped or refused, so router advertisements, neighbour discovery and
+  DHCPv6 keep working. omcid now writes the IPv6 rows of the access control
+  lists (row parts 0 and 2) to the multicast policy file as `allow6=` and
+  `static6=` lines; with the key unset nothing changes: igmpd runs with the
+  same command line and the switch is programmed as before. Run on a stick on
+  a line without IPTV: the rows are written, the drop holds, and router and
+  neighbour discovery keep working through it; not yet run against a real
+  IPv6 multicast stream.
+- igmpd (IGMP snooping, still opt-in and experimental): each joined group is
+  now metered with a counter in the switch, so the OLT can see which groups
+  stopped arriving and how much multicast the subscriber receives. A group
+  whose stream came and then stopped for 10 seconds is listed in the multicast
+  profile's lost groups (ME 309 attribute 9) and raises its alarm 0, cleared
+  as soon as the stream comes back; the subscriber monitor (ME 311) reports the
+  bandwidth, and for each active group its VLAN, bandwidth, client address and
+  time since the join. A group whose counter has never counted anything is
+  reported as unknown, never lost. That the switch counts what enters from the
+  fibre was measured on a stick with `tools/mcast-probe/count-proof.sh` (its
+  counters matched the port's own count, frame for frame), on a line without
+  IPTV, so no joined group's stream has been counted yet. The maximum
+  multicast bandwidth of ME 310 is now
+  honoured: a new join past it is counted (ME 311 attribute 4) and, when the
+  OLT enforces it, refused; a group already playing is never cut. Lines that
+  do not turn snooping on, and profiles without a maximum, see no change.
+  `diag mc-count` installs the same counters by hand.
+- omcid: new opt-in key `OMCI_VOIP_LINE_REPORT=1` (default off): the router
+  behind the stick can report whether its SIP client is registered, and the
+  VoIP line status of a line the OLT provisioned then reads that (registered,
+  in session, or a registration or invite failure) instead of "config done". The report
+  comes from odi-ui (`POST /api/voip/status`), carries only the port and a
+  state word, and counts only while fresh (300 s); without a fresh report, or
+  with the key off, the line status is exactly what it was. `omcicli voip`
+  shows the new states. The two voice gauges for the exporter are not part of
+  this change.
+
 **Automated dependency bump.**
 - linux 6.18.57 -> 6.18.58
 - iproute2 7.2.0 -> 7.3.0
 
 
+- igmpd, omcid: the access control lists, the IGMP version and the preview
+  rules of the OLT's multicast profile (ME 309, ME 310) are now honoured, all
+  of it only while `IGMP_SNOOPING` is `1`. A list row that names a VLAN is
+  held to the joins on that VLAN, so ranges of different VLANs stay apart (when
+  the join is on a VLAN some row names; any other join is judged by the
+  ranges as before), and a row that names a source address (SSM) is held to
+  IGMPv3 records that name sources, while a v2 report goes in as before. A
+  group of a row with a preview length is allowed for that many seconds, then
+  removed, refused until the repeat time has passed and for good once the
+  repeat count is spent; a group of the allowed preview table of ME 310 is full
+  access for its minutes. A host message above the profile's IGMP version (a v3
+  report under version 2) is handled as before, not dropped (a set-top box
+  does not fall back to an older version when it sees no query), and counted
+  as `above_version` in the state file and `igmpd -s`. The GEM port and imputed bandwidth of
+  each row are carried for the bandwidth limit, not enforced. Rows that say
+  nothing about any of these, and profiles with no version, behave as before.
+  A Set or Create of ME 309 now refuses (result 9) a value G.988 does not
+  define for the IGMP version, function, immediate leave, upstream tag control
+  or unauthorized join behaviour; function 1 and 2 are still accepted and the
+  multicast stays transparent. The state file and `igmpd -s` count refusals by
+  `preview`; `igmpd -r` has a `v3src` event for records that name
+  sources.
 - omcid: a line whose OLT asks for transparent multicast now gets the VID-0
   multicast tag passed through, as the stock firmware does; no change on lines
   that ask for strip. In the manual VLAN mode the multicast row for

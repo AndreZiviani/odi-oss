@@ -321,13 +321,29 @@ extern int qos_dirty;
 extern int mcast_dirty;
 void mcast_policy_export(void);
 int mcast_policy_class(uint16_t cls);
+/* The attributes of a class 309 Create or Set that carry a value G.988 does
+ * not define (version, function, immediate leave, tag control, unauthorized
+ * join behaviour), as a mask: refused with result 9. */
+uint16_t mcast_value_reject(const struct omci_class *c, uint16_t mask,
+			    const uint8_t *data, uint16_t len);
 /* ME 311, the multicast subscriber monitor: what igmpd keeps in
  * /var/run/odi-mcast.state. A counter, 0 when there is no file; and the IPv4
- * active group list as 24-byte table rows (G.988 9.3.28), returning the
- * byte length written. */
+ * active group list as 24-byte table rows (G.988 9.3.29), returning the
+ * byte length written: from igmpd's meter file when there is one (client,
+ * time since the join, bandwidth), else from the state file. */
 #define CLS_MCAST_MONITOR 311
 uint32_t mcast_state_get(const char *key);
 uint16_t mcast_active_groups(uint8_t *out, uint16_t max);
+/* What igmpd meters (/var/run/odi-mcast.meter, src/igmp/meter.h), read only
+ * while the policy asks for snooping: a header number ("bps", "lost"), 0
+ * when there is none; ME 309 attribute 9 of profile `inst`, 10-byte rows of
+ * the lost groups (only the subscriber's profile has any); and alarm 0: -1
+ * when the subscriber has no profile, else whether any group is lost, with
+ * the profile's instance in *inst. */
+#define CLS_MCAST_OPER_PROFILE 309
+uint32_t mcast_meter_get(const char *key);
+uint16_t mcast_lost_groups(uint16_t inst, uint8_t *out, uint16_t max);
+int mcast_lost_alarm(uint16_t *inst);
 /* What the bridge connection's multicast rule takes from the subscriber's
  * profile (../mcastvlan.h): attribute 16, the downstream IGMP and multicast
  * TCI, and the VLAN (ANI) of each part 0 row of both access control lists,

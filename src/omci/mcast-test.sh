@@ -11,10 +11,19 @@
 # function other than snooping turning it off; the upstream IGMP tag control,
 # TCI and rate exported, and read by igmpd; a delete of the address row
 # turning it off; a MIB reset; the file rewritten only when it changed; the
-# access control list rows of OMCC 0xB0 (row parts 1 and 2, IPv6 ranges left
-# out, an IPv6-only list enforcing nothing); the width of attribute 16 of
+# access control list rows of OMCC 0xB0 (row parts 1 and 2, IPv6 ranges out
+# of the IPv4 lines and listed as allow6/static6 for igmpd -6, an IPv6-only
+# list enforcing nothing of IPv4); the width of attribute 16 of
 # class 309 (3 bytes, G.988); the service package table said not to select a
-# profile.
+# profile; the bandwidth of ME 310 and the imputed bandwidth of the rows; and
+# what igmpd meters, back into ME 311 (bandwidth, clients, times since the
+# join), ME 309's lost group list and its alarm 0;
+# the IGMP version and the querier address exported; the rows of
+# the access control lists carrying their VLAN, source, GEM port, bandwidth
+# and preview fields, and igmpd reading them; the allowed preview groups table
+# of ME 310; class 309 Set and Create refusing a value G.988 does not define
+# for version, function, immediate leave, tag control and unauthorized join,
+# and accepting function 1 and 2.
 #
 # Run from src/omci, inside the toolchain image (make test-omci-mcast):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
@@ -129,6 +138,7 @@ written "$log" 2
 check "profile, subscriber, address row: snooping with the defaults" "$(policy)" \
 "snooping=1
 igmp_function=0
+igmp_version=2
 immediate_leave=1
 robustness=2
 query_interval=125
@@ -170,6 +180,7 @@ written "$log" 3
 check "timers and both access control lists" "$(policy)" \
 "snooping=1
 igmp_function=0
+igmp_version=2
 immediate_leave=1
 robustness=3
 query_interval=60
@@ -180,8 +191,8 @@ us_tag_control=0
 us_tci=0
 us_rate=0
 max_groups=8
-allow=225.0.0.0-225.255.255.255
-static=226.1.2.3-226.1.2.3"
+allow=225.0.0.0-225.255.255.255 v=11 g=4095
+static=226.1.2.3-226.1.2.3 v=11 g=4095"
 
 # The contract with igmpd: the file just written, read by igmpd itself
 # (igmpd -r replays a transcript through the daemon's own decision code, with
@@ -288,8 +299,11 @@ check "34 ranges: the overflow is flagged" "$(policy | grep -c '^allow_overflow=
 # fields, part 2 (0x5000 | key) the leading 12 bytes of an IPv6 destination.
 # A prefix of ten zero bytes and ffff is the IPv4 form; any other is IPv6.
 # Key 1: IPv4, with a part 1 in the IPv4 form and preview fields. Key 2: a
-# part 2 with an IPv6 group. Key 3: a part 1 with an IPv6 source. Only key 1
-# is a range igmpd can enforce; the part rows are not ranges of their own.
+# part 2 with an IPv6 group. Key 3: a part 1 with an IPv6 source. Key 1 is the
+# one IPv4 range; key 2 is an IPv6 range (part 2's twelve bytes, then part
+# 0's last four of the start and end), listed for MLD; key 3's destinations
+# are IPv4 behind an IPv6 source, which nothing filters, and it is neither.
+# The part rows are not ranges of their own.
 m=$(grep -c 'multicast policy written' "$log")
 send "$log" 0200 48 0135 0001 "0200c000"
 K1P0=$(pad 40010fff000b00000000e1010000e10100ff 24)
@@ -306,8 +320,12 @@ done
 written "$log" $((m + 1))
 check "ACL parts: the table holds all six rows" \
       "$(table "$log" b20 0135 0001 0200 | wc -c)" "288"
-check "ACL parts: only the IPv4 row is a range; part rows and IPv6 rows are not" \
-      "$(policy | grep '^allow')" "allow=225.1.0.0-225.1.0.255"
+check "ACL parts: only the IPv4 row is an IPv4 range; part rows and IPv6 rows are not" \
+      "$(policy | grep '^allow=')" "allow=225.1.0.0-225.1.0.255 v=11 g=4095 p=255,10,0,0"
+check "ACL parts: the IPv6 row is an IPv6 range, part 2's prefix and part 0's low bytes" \
+      "$(policy | grep '^allow6')" "allow6=ff3e::1234:e200:0-ff3e::1234:e200:ff"
+check "ACL parts: the IPv6 lines come after every IPv4 line" \
+      "$(policy | tail -1)" "allow6=ff3e::1234:e200:0-ff3e::1234:e200:ff"
 
 # An OLT that provisions only IPv6 rows: nothing to enforce, so no ACL at
 # all, not an IPv4 list that denies every join.
@@ -318,7 +336,33 @@ K5P2=$(pad 5005ff3e00000000000000005678 24)
 send "$log" 0211 48 0135 0001 "0200$K5P0"
 send "$log" 0212 48 0135 0001 "0200$K5P2"
 written "$log" $((m + 1))
-check "an IPv6-only ACL: no IPv4 range is listed" "$(policy | grep -c '^allow')" "0"
+check "an IPv6-only ACL: no IPv4 range is listed" "$(policy | grep -c '^allow=')" "0"
+check "an IPv6-only ACL: its range is listed for MLD" \
+      "$(policy | grep '^allow6')" "allow6=ff3e::5678:e500:0-ff3e::5678:e500:ff"
+
+# IPv6 rows of both lists: a single address (end zero, the single-address
+# form), a static range, a part 2 in the IPv4 form (an IPv4 row, not IPv6),
+# a backwards range left out. igmpd reads these lines (src/igmp/mld.c,
+# mld_policy_parse(), tested in src/igmp/test/mld_test.c in this form).
+m=$(grep -c 'multicast policy written' "$log")
+send "$log" 0213 48 0135 0001 "0200c000"
+send "$log" 0214 48 0135 0001 "0200$(pad 40060fff000b000000008000000100000000 24)"
+send "$log" 0215 48 0135 0001 "0200$(pad 5006ff1e00000000000000000000 24)"
+send "$log" 0216 48 0135 0001 "0200$(pad 40070fff000b00000000e7000005e7000001 24)"
+send "$log" 0217 48 0135 0001 "0200$(pad 5007ff3e00000000000000000000 24)"
+send "$log" 0218 48 0135 0001 "0200$(pad 40080fff000b00000000e8000000e80000ff 24)"
+send "$log" 0219 48 0135 0001 "0200$(pad 500800000000000000000000ffff 24)"
+send "$log" 021a 48 0135 0001 "0100c000"
+send "$log" 021b 48 0135 0001 "0100$(pad 40010fff000b00000000000a0000000a000f 24)"
+send "$log" 021c 48 0135 0001 "0100$(pad 5001ff150000000000000000abcd 24)"
+written "$log" $((m + 1))
+check "IPv6 rows: the IPv4 ranges as before, the IPv4-form part 2 among them" \
+      "$(policy | grep '^allow=')" "allow=232.0.0.0-232.0.0.255 v=11 g=4095"
+check "IPv6 rows: the single address, the backwards range left out" \
+      "$(policy | grep '^allow6')" "allow6=ff1e::8000:1-ff1e::8000:1"
+check "IPv6 rows: the static list's IPv6 range" \
+      "$(policy | grep '^static6')" "static6=ff15::abcd:a:0-ff15::abcd:a:f"
+check "IPv6 rows: no overflow line" "$(policy | grep -c 'overflow')" "0"
 
 # ------------------------------------- ME 310 service package table
 # Said once when the OLT provisions it, not on every write; the profile is
@@ -332,6 +376,50 @@ sync_send "$log"
 sleep 1.5
 check "a service package table: said once as not selecting by VID" \
       "$(grep -c 'does not select a profile by VID' "$log")" "1"
+
+# ------------------------------- ME 310 bandwidth, the imputed bandwidth
+# Attributes 4 and 5 of the subscriber (mask 0x1800): at most 1000 bytes a
+# second, enforced. Dynamic rows: 230.1.1.0/24 imputing 600 bytes a second
+# (bytes 18-21 of the row), 231.1.1.0/24 imputing none. Both keys appear
+# only when set, and a bw line only for the row that imputes one.
+check "no maximum and no imputed bandwidth: no bandwidth line" \
+      "$(policy | grep -c '^max_bandwidth\|^bw')" "0"
+m=$(grep -c 'multicast policy written' "$log")
+send "$log" 0230 48 0136 0001 "1800000003e801"
+send "$log" 022f 48 0135 0001 "0200c000"
+send "$log" 0231 48 0135 0001 "0200$(pad 40060fff000b00000000e6010100e60101ff000002580000 24)"
+send "$log" 0232 48 0135 0001 "0200$(pad 40070fff000b00000000e7010100e70101ff000000000000 24)"
+written "$log" $((m + 1))
+check "the maximum, its enforcement and the imputed bandwidth are exported" \
+      "$(policy | grep '^max_bandwidth\|^bw')" "max_bandwidth=1000
+bw_enforce=1
+bw=230.1.1.0-230.1.1.255 600"
+check "and the rows are ranges as before" "$(policy | grep '^allow' | sort)" \
+"allow=230.1.1.0-230.1.1.255 v=11 g=4095 b=600
+allow=231.1.1.0-231.1.1.255 v=11 g=4095"
+if [ -x "$IGMPD" ]; then
+	cp /var/run/odi-mcast.conf /tmp/mcast-policy-snap
+	cat > /tmp/mcast-replay-bw.in <<'EOF2'
+0 policy-file /tmp/mcast-policy-snap
+0 tick
+1 v2join 1 0 192.168.1.10 230.1.1.1
+2 v2join 1 0 192.168.1.10 230.1.1.2
+3 v2join 1 0 192.168.1.10 231.1.1.9
+4 state
+EOF2
+	$Q "$IGMPD" -r /tmp/mcast-replay-bw.in > /tmp/mcast-replay.out 2>&1
+	check "igmpd reads the maximum: the first 600 joins" \
+	      "$(rep | grep -c 'set vid 0 01:00:5e:01:01:01 ports 0x5')" "1"
+	check "the second 600 would pass 1000: refused, and counted" \
+	      "$(rep | grep -c '01:00:5e:01:01:02 ports')$(rep | grep -c '^bw_exceeded=1$')" "02"
+	check "a group imputing nothing joins whatever the total" \
+	      "$(rep | grep -c 'set vid 0 01:00:5e:01:01:09 ports 0x5')" "1"
+fi
+# Back to no maximum, so the later sections (rows imputing more than 1000
+# bytes a second) are not refused by this one.
+send "$log" 0233 48 0136 0001 "180000000000"
+sync_send "$log"
+sleep 1.5
 
 # ------------------------------------- ME 311, from what igmpd writes
 # Class 311 (0x0137) instance 1. The state file is igmpd's; written here the
@@ -373,9 +461,232 @@ check "311 JoinMsgCounter from a file cut off inside a refusal line" \
       "$(send "$log" 0075 49 0137 0001 "2000" && answer "$log" 0075 | cut -c7-14)" "00000006"
 check "311 active group list from a file cut off inside a refusal line" \
       "$(table "$log" b14 0137 0001 0800)" "$G1"
-rm -f /var/run/odi-mcast.state
+# The joins past the bandwidth (attribute 4, mask 0x1000), a state key.
+printf 'joins=6\ndenied=2\ngroups=1\nbw_exceeded=3\ngroup=239.1.2.3\n' > /var/run/odi-mcast.state
+check "311 BandwidthExcCounter is igmpd's bw_exceeded" \
+      "$(send "$log" 0076 49 0137 0001 "1000" && answer "$log" 0076 | cut -c7-14)" "00000003"
+
+# ------------------------- ME 311 and ME 309 from igmpd's meter file
+# With no meter file: the bandwidth reads 0, the active group list comes from
+# the state file as before, the lost group list is empty and there is no
+# alarm.
+rm -f /var/run/odi-mcast.meter
+check "311 CurrMcastBandwidth with no meter file: 0" \
+      "$(send "$log" 0300 49 0137 0001 "4000" && answer "$log" 0300 | cut -c7-14)" "00000000"
+check "309 lost group list with no meter file: empty" \
+      "$(table "$log" b30 0135 0001 0080)" ""
+# The meter file as igmpd writes it (src/igmp/meter.h): 239.1.2.3 on VLAN 10
+# joined 100 s ago (less on a fresh boot) by 192.168.1.10, flowing at 1000 bytes a second; 225.200.7.9
+# on no VLAN, lost. The join time is on the monotonic clock omcid reads too.
+# A machine up for less than 100 s (a fresh qemu) gets a shorter age: a join
+# before the boot would be a negative time, which no meter file holds.
+up=$(cut -d. -f1 /proc/uptime)
+age=100
+[ "$up" -gt 100 ] || age=$((up > 1 ? up - 1 : 0))
+j=$((up - age))
+printf 'bps=1500\nlost=1\ngroup=239.1.2.3 vid=10 client=192.168.1.10 joined=%s bps=1000 flow=up\ngroup=225.200.7.9 vid=0 client=192.168.1.11 joined=%s bps=500 flow=lost\n' \
+	"$j" "$j" > /var/run/odi-mcast.meter
+check "311 CurrMcastBandwidth is the meter's total" \
+      "$(send "$log" 0301 49 0137 0001 "4000" && answer "$log" 0301 | cut -c7-14)" "000005dc"
+rows=$(table "$log" b31 0137 0001 0800)
+check "311 active group list from the meter: VLAN, group, bandwidth, client" \
+      "$(printf '%s' "$rows" | cut -c1-36)$(printf '%s' "$rows" | cut -c45-48)" \
+      "000a00000000ef010203000003e8c0a8010a0000"
+since=$((0x$(printf '%s' "$rows" | cut -c37-44)))
+check "311 active group list: the time since the join, from the same clock" \
+      "$([ "$since" -ge $((age > 5 ? age - 5 : 0)) ] && [ "$since" -le $((age + 30)) ] && echo ok || echo "$since")" "ok"
+check "311 active group list: a row a (VLAN, group) of the meter" \
+      "$(printf '%s' "$rows" | cut -c49-84)" "000000000000e1c80709000001f4c0a8010b"
+check "309 lost group list: the lost group, VLAN, no source, destination" \
+      "$(table "$log" b32 0135 0001 0080)" "000000000000e1c80709"
+check "309 lost group list: only on the subscriber's profile" \
+      "$(send "$log" 0302 44 0135 0002 "020001" && table "$log" b33 0135 0002 0080)" ""
+# Alarm 0 of the subscriber's profile (class 309, 0x0135, instance 1): raised
+# while a group is lost, cleared when none is, a level evaluated each second.
+need "$log" '^=> 0000100a0135000180' 5
+printf 'bps=1500\nlost=0\ngroup=239.1.2.3 vid=10 client=192.168.1.10 joined=%s bps=1000 flow=up\ngroup=225.200.7.9 vid=0 client=192.168.1.11 joined=%s bps=500 flow=up\n' \
+	"$j" "$j" > /var/run/odi-mcast.meter
+need "$log" '^=> 0000100a0135000100' 5
+check "309 alarm 0: raised once, cleared once" \
+      "$(grep -c '^=> 0000100a01350001' "$log")" "2"
+check "309 lost group list once it flows again: empty" \
+      "$(table "$log" b34 0135 0001 0080)" ""
+check "no alarm for the profile no subscriber points at" \
+      "$(grep -c '^=> 0000100a01350002' "$log")" "0"
+rm -f /var/run/odi-mcast.state /var/run/odi-mcast.meter
+
+# These come last: the checks above count the policy writes from the start, and these write
+# it many times over.
+# ---------------------------------------------- G.988 values, class 309
+# A Set or a Create of the few-valued attributes refuses a value G.988 9.3.27
+# does not define: result 9 and the attribute in the failed mask, the others
+# of the Set stored, while IGMP_SNOOPING is 1. Every defined value is accepted whether or not it is
+# done: function 1 and 2 (proxy) are stored and the multicast stays
+# transparent, so an OLT that provisions a proxy gets its Set accepted.
+# flush: the policy file has caught up with the Sets sent so far.
+flush() {
+	sync_send "$log"
+	sleep 1.5
+}
+# Without the opt-in key (IGMP_SNOOPING=1) nothing of it applies: the profile is
+# stored as the OLT sends it, as it always was.
+send "$log" 0098 48 0135 0001 "800009"
+check "309 Set: with IGMP_SNOOPING off, version 9 is stored as before" \
+      "$(answer "$log" 0098 | cut -c1-2)" "00"
+send "$log" 0099 48 0135 0001 "800002"
+printf 'IGMP_SNOOPING=1\n' > /var/config/odi.conf
+send "$log" 0100 48 0135 0001 "800009"
+check "309 Set: IGMP version 9 is refused, result 9 and the failed mask" \
+      "$(answer "$log" 0100 | cut -c1-2,7-10)" "098000"
+send "$log" 0101 49 0135 0001 "8000"
+check "309 Set: and the version is still 2" "$(answer "$log" 0101 | cut -c7-8)" "02"
+send "$log" 0102 48 0135 0001 "800003"
+check "309 Set: IGMP version 3 is accepted" "$(answer "$log" 0102 | cut -c1-2)" "00"
+flush
+check "309 Set: and exported" "$(policy | grep '^igmp_version')" "igmp_version=3"
+send "$log" 0103 48 0135 0001 "800011"
+check "309 Set: MLD version 17 is defined, accepted" "$(answer "$log" 0103 | cut -c1-2)" "00"
+send "$log" 0104 48 0135 0001 "800002"
+send "$log" 0105 48 0135 0001 "400002"
+check "309 Set: IGMP function 2 (proxy) is accepted" "$(answer "$log" 0105 | cut -c1-2)" "00"
+flush
+check "309 Set: function 2 is exported as set, and the multicast is transparent" \
+      "$(policy | sed -n 1,2p)" "snooping=0
+igmp_function=2"
+send "$log" 0106 48 0135 0001 "400003"
+check "309 Set: IGMP function 3 is refused" "$(answer "$log" 0106 | cut -c1-2,7-10)" "094000"
+send "$log" 0107 48 0135 0001 "400000"
+flush
+check "309 Set: function 0 again: snooping" "$(policy | sed -n 1p)" "snooping=1"
+send "$log" 0108 48 0135 0001 "080004"
+check "309 Set: upstream tag control 4 is refused" "$(answer "$log" 0108 | cut -c1-2,7-10)" "090800"
+send "$log" 0109 48 0135 0001 "000202"
+check "309 Set: unauthorized join behaviour 2 is refused" "$(answer "$log" 0109 | cut -c1-2,7-10)" "090002"
+send "$log" 0110 48 0135 0001 "200002"
+check "309 Set: immediate leave 2 is refused" "$(answer "$log" 0110 | cut -c1-2,7-10)" "092000"
+send "$log" 0111 48 0135 0001 "60000703"
+check "309 Set: function 7 and leave 3, both refused" \
+      "$(answer "$log" 0111 | cut -c1-2,7-10)" "096000"
+# One bad value does not take the others of the Set with it: function 7 is
+# refused, immediate leave off is stored.
+send "$log" 0112 48 0135 0001 "60000700"
+check "309 Set: function 7 refused, immediate leave 0 beside it" \
+      "$(answer "$log" 0112 | cut -c1-2,7-10)" "094000"
+send "$log" 0113 49 0135 0001 "2000"
+check "309 Set: and the immediate leave was stored" "$(answer "$log" 0113 | cut -c7-8)" "00"
+send "$log" 0114 48 0135 0001 "200001"
+send "$log" 0115 44 0135 0003 "090001"
+check "309 Create: IGMP version 9 is refused, result 9 and the attribute in the execution mask" \
+      "$(answer "$log" 0115 | cut -c1-6)" "098000"
+send "$log" 0117 44 0135 0003 "020201"
+check "309 Create: function 2 is accepted (and the refused Create made no instance: not 7)" \
+      "$(answer "$log" 0117 | cut -c1-2)" "00"
+send "$log" 0118 49 0135 0003 "4000"
+check "309 Create: and reads back as 2" "$(answer "$log" 0118 | cut -c7-8)" "02"
+send "$log" 0119 46 0135 0003 ""
+send "$log" 0120 44 0135 0003 "020103"
+check "309 Create: immediate leave 3 is refused" "$(answer "$log" 0120 | cut -c1-6)" "092000"
+send "$log" 0121 48 0135 0001 "800002"
+flush
+check "309: the refused writes and the restored ones leave the policy as it was" \
+      "$(policy | sed -n 1,4p)" "snooping=1
+igmp_function=0
+igmp_version=2
+immediate_leave=1"
+
+rm -f /var/config/odi.conf
+
+# The querier address (attribute 11, mask 0x0020), exported only when set.
+send "$log" 0130 48 0135 0001 "00200a010203"
+flush
+check "the querier address is exported when set" "$(policy | grep '^querier')" "querier=10.1.2.3"
+send "$log" 0131 48 0135 0001 "002000000000"
+flush
+check "and not when it is 0.0.0.0" "$(policy | grep -c '^querier')" "0"
+
+# ---------------------- the rows' VLAN, source, GEM port, bandwidth, preview
+# acl0 <control> <gem> <vlan> <src> <start> <end> <bw>: row part 0 (the
+# address fields in hex); acl1 <control> <length> <repeat> <count> <reset>:
+# part 1 in the IPv4 form (ten zero bytes, ffff) with the preview fields.
+# Key 1 names everything: 226.0.1.0-226.0.1.255, VLAN 1410, source 10.0.0.5,
+# GEM 4000, 123456 bytes/s, and a preview of 30 s, 60 s apart, 3 times. Key 2
+# says nothing (GEM port 0 and VLAN 0, an untagged downstream flow, source
+# 0.0.0.0, "ignored"): a bare range. Key 3 has a part 1 with a preview length of 0:
+# fully authorized, so no preview. Key 4 has VLAN 4097 (tagged, any VID) and
+# GEM 0xffff (unspecified), which say nothing about a join either.
+acl0() {
+	printf '%04x%04x%04x%s%s%s%s0000' "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+}
+acl1() {
+	printf '%04x00000000000000000000ffff%04x%04x%04x%04x0000' "$1" "$2" "$3" "$4" "$5"
+}
+m=$(grep -c 'multicast policy written' "$log")
+send "$log" 0300 48 0135 0001 "0200c000"
+t=0301
+for row in "$(acl0 $((0x4001)) 4000 1410 0a000005 e2000100 e20001ff 0001e240)" \
+           "$(acl1 $((0x4801)) 30 60 3 0)" \
+           "$(acl0 $((0x4002)) 0 0 00000000 e3000100 e30001ff 00000000)" \
+           "$(acl0 $((0x4003)) 0 0 00000000 e4000100 e40001ff 00000000)" \
+           "$(acl1 $((0x4803)) 0 60 3 0)" \
+           "$(acl0 $((0x4004)) 65535 4097 00000000 e5000100 e50001ff 00000000)"; do
+	send "$log" "$t" 48 0135 0001 "0200$row"
+	t=$(printf '%04x' $((0x$t + 1)))
+done
+written "$log" $((m + 1))
+check "ACL rows carry their VLAN, source, GEM port, bandwidth and preview, when they say something" \
+      "$(policy | grep '^allow' | sort)" "allow=226.0.1.0-226.0.1.255 v=1410 s=10.0.0.5 g=4000 b=123456 p=30,60,3,0
+allow=227.0.1.0-227.0.1.255
+allow=228.0.1.0-228.0.1.255
+allow=229.0.1.0-229.0.1.255"
+
+# The allowed preview groups table (ME 310 attribute 7, mask 0x0200): two rows
+# of 22 bytes under one key. Part 0 (0x4000 | key): source (16 bytes), VLAN on
+# the ANI side, on the UNI side. Part 1 (0x4800 | key): destination (16 bytes),
+# duration in minutes, time left. Z16 is an all-zero IPv4-form address.
+Z16=00000000000000000000000000000000
+agrant0() { printf '%04x%s%04x%04x' "$1" "$2" "$3" "$4"; }
+agrant1() { printf '%04x%s%04x0000' "$1" "$2" "$3"; }
+m=$(grep -c 'multicast policy written' "$log")
+send "$log" 0310 48 0136 0001 "0200$(agrant0 $((0x4001)) $Z16 100 0)"
+send "$log" 0311 48 0136 0001 "0200$(agrant1 $((0x4801)) 000000000000000000000000ef090505 0)"
+written "$log" $((m + 1))
+check "an allowed preview group: IPv4, the VLANs, no end" \
+      "$(policy | grep '^grant')" "grant=239.9.5.5 a=100 u=0"
+send "$log" 0312 48 0136 0001 "0200$(agrant1 $((0x4801)) 000000000000000000000000ef090505 90)"
+written "$log" $((m + 2))
+check "an allowed preview group: 90 minutes" \
+      "$(policy | grep '^grant')" "grant=239.9.5.5 a=100 u=0 d=90"
+send "$log" 0313 48 0136 0001 "0200$(agrant0 $((0x4002)) $Z16 0 0)"
+flush
+check "a half row (a part 0 with no part 1) is not listed" \
+      "$(policy | grep -c '^grant')" "1"
+send "$log" 0314 48 0136 0001 "0200$(agrant0 $((0x4003)) $Z16 0 0)"
+send "$log" 0315 48 0136 0001 "0200$(agrant1 $((0x4803)) ff3e0000000000000000000000001234 0)"
+flush
+check "an IPv6 row is not listed" "$(policy | grep -c '^grant')" "1"
+
+# igmpd reads what omcid just wrote (the contract): the join rules line, and
+# the groups of a bare row and of a preview row.
+if [ -x "$IGMPD" ]; then
+	cp /var/run/odi-mcast.conf /tmp/mcast-policy-snap
+	cat > /tmp/mcast-replay2.in <<'EOF2'
+0 policy-file /tmp/mcast-policy-snap
+0 tick
+1 v2join 1 0 192.168.1.10 227.0.1.5
+2 v2join 1 0 192.168.1.10 226.0.1.5
+3 state
+EOF2
+	$Q "$IGMPD" -r /tmp/mcast-replay2.in > /tmp/mcast-replay2.out 2>&1
+	check "igmpd reads the rows: version, VLAN, source, preview and allowed preview group" \
+	      "$(grep 'join rules' /tmp/mcast-replay2.out)" \
+	      "  join rules: IGMP version 2 at most (a message above it is only counted); 1 of 4 rows name a VLAN; 1 name a source; 1 are previews; 1 allowed preview groups"
+	check "igmpd lets in a bare row's group, and the first preview of a preview row" \
+	      "$(grep '^group=' /tmp/mcast-replay2.out | sort -u)" "group=226.0.1.5
+group=227.0.1.5"
+fi
 
 # --------------------------------------------------------------- MIB reset
+m=$(grep -c 'multicast policy written' "$log")
 send "$log" 0070 4f 0002 0000 ""
 written "$log" $((m + 1))
 check "a MIB reset: no snooping" "$(policy)" "snooping=0"

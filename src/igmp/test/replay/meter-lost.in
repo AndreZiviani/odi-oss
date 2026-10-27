@@ -1,0 +1,37 @@
+# A joined group whose stream arrives, stops and comes back. The counter of
+# its MAC grows from second 4 to 9 (1000 bytes a second), then stands still:
+# ten seconds after it last grew, at 19, the group is lost (the meter file
+# says flow=lost and lost=1, the omcid alarm follows). It grows again at 25
+# and the group flows again at once. The client and the time of the last
+# join come from the reports: the second report, from another host, moves
+# both.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+end
+0 tick
+1 v2join 1 0 192.168.1.10 239.1.1.1
+2 meter
+3 ctr 239.1.1.1 1000
+4 tick
+4 ctr 239.1.1.1 2000
+5 tick
+5 ctr 239.1.1.1 3000
+6 tick
+6 ctr 239.1.1.1 4000
+7 tick
+7 ctr 239.1.1.1 5000
+8 tick
+8 ctr 239.1.1.1 6000
+9 tick
+10 meter
+18 tick
+18 meter
+19 tick
+19 meter
+20 v2join 1 0 192.168.1.20 239.1.1.1
+21 meter
+24 ctr 239.1.1.1 6500
+25 tick
+25 meter

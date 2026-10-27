@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include "policy.h"
+#include "mld.h"
 
 /* The one-line summary the daemon logs whenever the policy changes. */
 void igmp_policy_describe(const struct igmp_policy *p);
@@ -18,8 +19,14 @@ void igmp_policy_describe(const struct igmp_policy *p);
 void igmp_status_print(const struct igmp_policy *p, int have_policy,
 		       const char *state, uint32_t len, uint32_t now);
 
-/* igmpd -s [STATE [POLICY]]: read the files (the daemon's own paths when not
- * named) and print. Returns the exit status. */
-int igmp_status_run(const char *state_path, const char *policy_path);
+/* The IPv6 half (igmpd -6): its lists and the IPv6 state file's text. Says
+ * nothing when there is neither, so a snooper without MLD reads as before. */
+void mld_status_print(const struct mld_policy *p, const char *state, uint32_t len,
+		      uint32_t now);
+
+/* igmpd -s [STATE [POLICY [STATE6]]]: read the files (the daemon's own paths
+ * when not named) and print. Returns the exit status. */
+int igmp_status_run(const char *state_path, const char *policy_path,
+		    const char *state6_path);
 
 #endif

@@ -34,6 +34,17 @@
  *                stock constant for this alarm is not decoded, so the module
  *                is the judge; it clears its flag with its own margin.
  *
+ *   Multicast operations profile 0  lost multicast group: a group the
+ *                subscriber joined from the dynamic list stopped arriving
+ *                (G.988 9.3.27). igmpd decides it from the switch's counter
+ *                of the group (src/igmp/meter.h: grown since the counter went
+ *                in, then still for 10 s; a counter that never grew is never
+ *                a loss) and says so in its meter file, read only while the
+ *                policy asks for snooping. Raised on the profile of the
+ *                subscriber's ME 310, the one whose attribute 9 lists the
+ *                groups; an entity the OLT created, so its bitmap is made the
+ *                first second that profile exists, and dropped with it.
+ *
  * Not raised: ONU-G 7 (dying gasp; nothing in our kernel raises one).
  *
  * Every alarm is a level, evaluated each second against what the entity's
@@ -79,6 +90,7 @@
 #define ALM_ANIG_HIGH_TX  5
 #define ALM_ANIG_BIAS     6
 #define ALM_UNI_LAN_LOS   0
+#define ALM_MCAST_LOST    0
 
 #define ANIG_ARC          8
 #define ANIG_LOW_RX_THR   11
@@ -193,7 +205,10 @@ static int suppressed_by_lock(uint8_t slot)
 
 static int alarm_suppressed(const struct alm *a)
 {
-	if (suppressed_by_lock((uint8_t)(a->inst >> 8)))
+	/* A profile's instance is the OLT's number, not a slot: only the
+	 * ONU-G's lock silences it. */
+	if (suppressed_by_lock(a->cls == CLS_MCAST_OPER_PROFILE ? 0 :
+			       (uint8_t)(a->inst >> 8)))
 		return 1;
 	if (a->cls == OMCI_ME_ANI_G)
 		return attr_u8(a->cls, a->inst, ANIG_ARC) == 1;
@@ -331,6 +346,39 @@ static void eval_uni(struct alm *a)
 
 	if (link >= 0)
 		bit_put(a, ALM_UNI_LAN_LOS, !link);
+}
+
+/* The subscriber's multicast profile: its bitmap follows the profile the
+ * subscriber points at, made when there is one and dropped when there is
+ * none (an entity that is gone has no alarm to clear), and moved, cleared,
+ * when the pointer moves. Then bit 0 is whether igmpd has a group lost. */
+static void mcast_alm_follow(void)
+{
+	uint16_t inst = 0;
+	int lost = mcast_lost_alarm(&inst);
+	unsigned i;
+
+	for (i = 0; i < alm_n && alm[i].cls != CLS_MCAST_OPER_PROFILE; i++)
+		;
+	if (lost < 0) {
+		if (i < alm_n)
+			alm[i] = alm[--alm_n];
+		return;
+	}
+	if (i == alm_n) {
+		if (alm_n >= ALM_MAX)
+			return;
+		alm_n++;
+		alm[i].cls = CLS_MCAST_OPER_PROFILE;
+		alm[i].inst = (uint16_t)~inst;
+	}
+	if (alm[i].inst != inst) {
+		alm[i].inst = inst;
+		for (unsigned b = 0; b < ALM_BYTES; b++)
+			alm[i].bits[b] = 0;
+		alm[i].pending = 0;
+	}
+	bit_put(&alm[i], ALM_MCAST_LOST, lost);
 }
 
 /* ------------------------------------------------------------------ ARC */
@@ -569,13 +617,14 @@ void alarm_tick(void)
 	 * callback before the notification goes out). */
 	arc_tick(t);
 	avc_tick();
+	mcast_alm_follow();
 	for (unsigned i = 0; i < alm_n; i++) {
 		struct alm *a = &alm[i];
 		uint8_t body[32];
 
 		if (a->cls == OMCI_ME_ANI_G)
 			eval_anig(a, proc, (int)n);
-		else
+		else if (a->cls == OMCI_ME_PPTP_ETH_UNI)
 			eval_uni(a);
 		if (!a->pending)
 			continue;

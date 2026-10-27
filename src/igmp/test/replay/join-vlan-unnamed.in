@@ -1,0 +1,18 @@
+# The same rows, but the IGMP tag control puts VID 420 on the joins, a VLAN no
+# row names. Then nothing says which row a join is for: the ranges alone
+# decide, as before the rows' VLANs were read. A tag control that names a VLAN
+# other than the streams' is what OLTs do, and it must not cut the TV off.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+us_tag_control=1
+us_tci=420
+allow=225.1.0.0-225.1.255.255 v=100
+allow=225.2.0.0-225.2.255.255 v=200
+end
+0 tick
+1 v2join 1 0 192.168.1.10 225.1.1.1
+2 v2join 1 0 192.168.1.10 225.2.1.1
+3 v2join 1 0 192.168.1.10 239.1.1.1
+4 state

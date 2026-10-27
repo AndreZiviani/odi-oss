@@ -207,11 +207,179 @@ static void refuse(struct igmp_db *db, uint8_t reason, uint16_t vid,
 	db->refusals++;
 }
 
+/* Whether joining `group` takes the imputed bandwidth of the groups held
+ * past the profile's maximum. Each group counts once, whatever its VLANs;
+ * static groups are not joins and count nothing. A group the lists impute
+ * nothing to never does (G.988: 0 is outside the limit). */
+static int bw_over(const struct igmp_db *db, uint32_t group)
+{
+	uint32_t want = igmp_policy_imputed(&db->pol, group), sum = 0;
+
+	if (!db->pol.max_bandwidth || !want)
+		return 0;
+	for (int i = 0; i < IGMP_MAX_GROUPS; i++) {
+		const struct igmp_entry *e = &db->g[i];
+		uint32_t b;
+
+		if (!e->in_use || e->fixed || group_before(db, i, e->group, 1))
+			continue;
+		b = igmp_policy_imputed(&db->pol, e->group);
+		sum = sum + b < sum ? 0xffffffffu : sum + b;
+	}
+	return sum + want < sum || sum + want > db->pol.max_bandwidth;
+}
+
+/* The sources an IGMPv3 record names (RFC 3376 4.2.12), for the access
+ * control lists' source match. A v1 or v2 report names none. */
+struct join_src {
+	int            has;
+	int            exclude;
+	const uint8_t *p;
+	uint32_t       n;
+};
+
+static const struct join_src no_src = { 0, 0, 0, 0 };
+
+/* Whether the allowed preview table (ME 310 attribute 7) grants this group
+ * now: full access for the row's minutes, which begin with the first join
+ * that uses it, or until the OLT takes the row out when it says 0. The IPv4
+ * rows only; the source address a row names is carried, not matched (a group
+ * the subscriber has paid for is paid for whoever sends it). */
+static int grant_active(struct igmp_db *db, const struct igmp_join *q, uint32_t now)
+{
+	for (uint32_t i = 0; i < db->pol.ngrant; i++) {
+		const struct igmp_grant *g = &db->pol.grant[i];
+
+		if (g->group != q->group || g->uni != q->uni_vid)
+			continue;
+		if (g->ani && q->ani_known && g->ani != q->ani_vid)
+			continue;
+		if (!g->minutes)
+			return 1;
+		if (!db->grant_since[i])
+			db->grant_since[i] = now ? now : 1;
+		if ((int32_t)(now - db->grant_since[i]) < (int32_t)(g->minutes * 60u))
+			return 1;
+	}
+	return 0;
+}
+
+/* Whether a row of the allowed preview table names this group and has not
+ * run out, whatever the VLANs: for what a rewrite of the policy may keep.
+ * A group admitted by the table alone is in no list. */
+static int grant_covers(const struct igmp_db *db, uint32_t group)
+{
+	for (uint32_t i = 0; i < db->pol.ngrant; i++) {
+		const struct igmp_grant *g = &db->pol.grant[i];
+
+		if (g->group != group)
+			continue;
+		if (!g->minutes || !db->grant_since[i] ||
+		    (int32_t)(db->last_now - db->grant_since[i]) < (int32_t)(g->minutes * 60u))
+			return 1;
+	}
+	return 0;
+}
+
+static struct igmp_preview *preview_find(struct igmp_db *db, uint32_t group)
+{
+	for (int i = 0; i < IGMP_PREVIEW_MAX; i++)
+		if (db->preview[i].used && db->preview[i].group == group)
+			return &db->preview[i];
+	return 0;
+}
+
+/* The preview ended at second `t`: the next may begin once the row's repeat
+ * time has passed, counted from the end of this one. */
+static void preview_finish(struct igmp_preview *s, uint32_t t)
+{
+	s->active = 0;
+	s->has_next = 1;
+	s->next_ok = t + s->repeat;
+}
+
+/* May this join of a preview-only group go in, and does it begin a preview.
+ * G.988: a preview lasts the row's length; between two there are at least the
+ * repeat time; the repeat count caps how many (0 is no cap) until the count
+ * resets. The slot is the group's state, if it has one. */
+static int preview_decide(struct igmp_db *db, uint32_t group,
+			  const struct igmp_range *row, uint32_t now,
+			  struct igmp_preview **slot, int *begins)
+{
+	struct igmp_preview *s = preview_find(db, group);
+
+	*slot = s;
+	*begins = 0;
+	if (s && s->active) {
+		if ((int32_t)(now - s->end) < 0)
+			return 1;               /* the running preview goes on */
+		preview_finish(s, s->end);
+	}
+	if (s) {
+		/* "Do not reset" (0) and the OLT's own reset (255, an action
+		 * this does not see) leave the count alone; anything else is
+		 * a daily reset, at no fixed time of day (the ONU has no
+		 * clock to name one: G.988 allows an indeterminate time). */
+		if (row->pv_reset != 0 && row->pv_reset != 255 && s->count &&
+		    (int32_t)(now - s->window) >= IGMP_PREVIEW_WINDOW)
+			s->count = 0;
+		if (s->has_next && (int32_t)(now - s->next_ok) < 0)
+			return 0;
+		if (row->pv_count && s->count >= row->pv_count)
+			return 0;
+	}
+	*begins = 1;
+	return 1;
+}
+
+/* A preview begins: the group's slot, made if there is none. A table with no
+ * free or finished slot lets the preview run unmetered. */
+static void preview_begin(struct igmp_db *db, struct igmp_preview *s,
+			  uint32_t group, const struct igmp_range *row, uint32_t now)
+{
+	if (!s) {
+		for (int i = 0; i < IGMP_PREVIEW_MAX && !s; i++)
+			if (!db->preview[i].used)
+				s = &db->preview[i];
+		for (int i = 0; i < IGMP_PREVIEW_MAX && !s; i++)
+			if (!db->preview[i].active)
+				s = &db->preview[i];
+		if (!s)
+			return;
+		for (unsigned k = 0; k < sizeof *s; k++)
+			((uint8_t *)s)[k] = 0;
+		s->used = 1;
+		s->group = group;
+	}
+	if (!s->count)
+		s->window = now;
+	s->count++;
+	s->active = 1;
+	s->has_next = 0;
+	s->repeat = row->pv_repeat;
+	s->end = now + row->pv_len;
+}
+
+/* The last entry of a group is gone: its preview is over, whatever its
+ * length said. */
+static void preview_gone(struct igmp_db *db, uint32_t group, uint32_t now)
+{
+	struct igmp_preview *s = preview_find(db, group);
+
+	if (s && s->active && !group_known(db, group))
+		preview_finish(s, now);
+}
+
 /* A port joins, or refreshes what it already had. */
 static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
-		uint32_t now, struct igmp_change *out, int max, int n)
+		uint32_t now, struct igmp_change *out, int max, int n,
+		const struct join_src *src)
 {
 	struct igmp_entry *e;
+	struct igmp_join q;
+	struct igmp_preview *pv = 0;
+	const struct igmp_range *row = 0;
+	int verdict, begins = 0;
 	uint32_t bit, before;
 
 	if (port == 0 || port > IGMP_MAX_PORTS || !igmp_group_snoopable(group)) {
@@ -226,10 +394,30 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 	 * forwards it whatever this says; with the report taken (uplink.h) a
 	 * message of refused joins alone is withheld unless the profile
 	 * forwards them. */
-	if (!igmp_policy_allows(&db->pol, group)) {
+	q.group = group;
+	q.uni_vid = vid;
+	q.has_src = src->has;
+	q.exclude = src->exclude;
+	q.srcs = src->p;
+	q.nsrc = src->n;
+	igmp_policy_ani(&db->pol, &q);
+	verdict = igmp_policy_join(&db->pol, &q, &row);
+	/* The search order of G.988 (9.3.28 attribute 7): the profile's fully
+	 * authorized groups, then the allowed preview table, then its
+	 * preview-only groups. */
+	if (verdict != IGMP_JOIN_FULL && grant_active(db, &q, now))
+		verdict = IGMP_JOIN_FULL;
+	if (verdict == IGMP_JOIN_DENY) {
 		db->denied++;
 		db->rx_acl_refused++;
 		refuse(db, IGMP_REFUSE_ACL, vid, group, now);
+		return n;
+	}
+	if (verdict == IGMP_JOIN_PREVIEW &&
+	    !preview_decide(db, group, row, now, &pv, &begins)) {
+		db->denied++;
+		db->rx_acl_refused++;
+		refuse(db, IGMP_REFUSE_PREVIEW, vid, group, now);
 		return n;
 	}
 	db->rx_passable++;
@@ -242,6 +430,19 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 		refuse(db, IGMP_REFUSE_LIMIT, vid, group, now);
 		return n;
 	}
+	/* The bandwidth is on new groups too, by what the lists impute to
+	 * each (G.988 9.3.28 attributes 4 and 5): a join that would take the
+	 * total past the maximum is counted, and refused only when the profile
+	 * enforces it. A group already held is never refused, so no stream
+	 * that plays is cut, not even when the maximum is lowered under it. */
+	if (!e && !group_known(db, group) && bw_over(db, group)) {
+		db->bw_exceeded++;
+		if (db->pol.bw_enforce) {
+			db->denied++;
+			refuse(db, IGMP_REFUSE_BW, vid, group, now);
+			return n;
+		}
+	}
 	if (!e)
 		e = find_or_add(db, vid, group);
 	if (!e) {
@@ -250,6 +451,10 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 		refuse(db, IGMP_REFUSE_FULL, vid, group, now);
 		return n;
 	}
+	/* The preview begins only for a join that goes in: one the limit or a
+	 * full table refused used none of the count. */
+	if (begins)
+		preview_begin(db, pv, group, row, now);
 	/* Counted here, past every refusal: ME 311 attribute 3 is the joins
 	 * that were accepted (G.988 9.3.29), and a refused one is in denied. */
 	db->joins++;
@@ -296,6 +501,7 @@ static int leave(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 		} else {
 			n = emit(out, max, n, IGMP_CHANGE_DEL, vid, group, 0);
 			e->in_use = 0;
+			preview_gone(db, group, now);
 		}
 		return n;
 	}
@@ -349,8 +555,13 @@ int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
 {
 	int n = 0;
 
+	db->last_now = now;
 	db->rx_acl_refused = 0;
 	db->rx_passable = 0;
+	/* A message above the profile's IGMP version (G.988 9.3.27 attribute
+	 * 1) is noted and otherwise handled as it always was. */
+	if (!igmp_policy_version_ok(&db->pol, rx->type))
+		db->above_version++;
 	switch (rx->type) {
 	case IGMP_QUERY:
 		/* Any query makes the port it arrived on a router port -- a
@@ -361,7 +572,7 @@ int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
 
 	case IGMP_V1_REPORT:
 	case IGMP_V2_REPORT:
-		n = join(db, rx->vid, rx->group, rx->port, now, out, max, n);
+		n = join(db, rx->vid, rx->group, rx->port, now, out, max, n, &no_src);
 		break;
 
 	case IGMP_V2_LEAVE:
@@ -400,9 +611,19 @@ int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
 				n = leave(db, rx->vid, grp, rx->port, now,
 					  out, max, n);
 			else if (t == 2 || t == 4 ||
-				 ((t == 1 || t == 3 || t == 5) && nsrc > 0))
+				 ((t == 1 || t == 3 || t == 5) && nsrc > 0)) {
+				struct join_src js;
+
+				/* The sources are for the lists' source match.
+				 * The rest of the table still treats the record
+				 * as a join for the group. */
+				js.has = nsrc > 0;
+				js.exclude = t == 2 || t == 4;
+				js.p = p + 8;
+				js.n = nsrc;
 				n = join(db, rx->vid, grp, rx->port, now,
-					 out, max, n);
+					 out, max, n, &js);
+			}
 			else
 				db->rx_passable++;
 			p += len;
@@ -420,6 +641,30 @@ int igmp_db_tick(struct igmp_db *db, uint32_t now,
 		 struct igmp_change *out, int max)
 {
 	int n = 0;
+
+	db->last_now = now;
+	/* A preview that has run its length is over: the group goes whatever
+	 * the host keeps reporting, and its next join is judged by the repeat
+	 * time and count. */
+	for (int i = 0; i < IGMP_PREVIEW_MAX; i++) {
+		struct igmp_preview *pv = &db->preview[i];
+
+		if (!pv->used || !pv->active || (int32_t)(now - pv->end) < 0)
+			continue;
+		preview_finish(pv, pv->end);
+		for (int k = 0; k < IGMP_MAX_GROUPS; k++) {
+			struct igmp_entry *e = &db->g[k];
+
+			if (!e->in_use || e->fixed || e->group != pv->group)
+				continue;
+			for (int p = 0; p < IGMP_MAX_PORTS; p++)
+				if (e->ports & ((uint32_t)1 << p))
+					hist_forget(db, e->vid, e->group, (uint8_t)(p + 1));
+			n = emit(out, max, n, IGMP_CHANGE_DEL, e->vid, e->group, 0);
+			e->in_use = 0;
+			e->ports = 0;
+		}
+	}
 
 	/* History is only worth keeping while the host could still come back
 	 * with a gap worth measuring. */
@@ -451,6 +696,7 @@ int igmp_db_tick(struct igmp_db *db, uint32_t now,
 			n = emit(out, max, n, IGMP_CHANGE_DEL, e->vid,
 				 e->group, 0);
 			e->in_use = 0;
+			preview_gone(db, e->group, now);
 		} else {
 			n = emit(out, max, n, IGMP_CHANGE_SET, e->vid,
 				 e->group, e->ports);
@@ -513,8 +759,25 @@ int igmp_db_set_policy(struct igmp_db *db, const struct igmp_policy *pol,
 		       struct igmp_change *out, int max)
 {
 	int n = 0;
+	uint32_t since[IGMP_POLICY_MAX_GRANTS];
 
+	/* The allowed preview rows the OLT leaves in place keep the minutes
+	 * they have run; a new one begins its minutes now (the first join that
+	 * uses it, if the clock is not known yet). The OLT lengthening a row
+	 * moves its end, which is what writing a new duration does. */
+	for (uint32_t i = 0; i < pol->ngrant; i++) {
+		since[i] = db->last_now;
+		for (uint32_t k = 0; k < db->pol.ngrant; k++)
+			if (db->pol.grant[k].group == pol->grant[i].group &&
+			    db->pol.grant[k].ani == pol->grant[i].ani &&
+			    db->pol.grant[k].uni == pol->grant[i].uni)
+				since[i] = db->grant_since[k];
+	}
 	db->pol = *pol;
+	for (uint32_t i = 0; i < pol->ngrant; i++)
+		db->grant_since[i] = since[i];
+	for (uint32_t i = pol->ngrant; i < IGMP_POLICY_MAX_GRANTS; i++)
+		db->grant_since[i] = 0;
 	db->static_overflow = 0;
 
 	/* The static groups of the new list become fixed. What was fixed before
@@ -553,11 +816,32 @@ int igmp_db_set_policy(struct igmp_db *db, const struct igmp_policy *pol,
 	for (int i = 0; i < IGMP_MAX_GROUPS; i++) {
 		struct igmp_entry *e = &db->g[i];
 
-		if (!e->in_use || e->fixed || igmp_policy_allows(pol, e->group))
+		if (!e->in_use || e->fixed || igmp_policy_allows(pol, e->group) ||
+		    grant_covers(db, e->group))
 			continue;
 		n = emit(out, max, n, IGMP_CHANGE_DEL, e->vid, e->group, 0);
 		e->in_use = 0;
 		e->ports = 0;
+	}
+
+	/* A preview the lists no longer call one (the group is fully
+	 * authorized now, or gone from them) stops being timed. */
+	for (int i = 0; i < IGMP_PREVIEW_MAX; i++) {
+		struct igmp_preview *pv = &db->preview[i];
+		struct igmp_join q;
+		const struct igmp_range *row;
+
+		if (!pv->used || !pv->active)
+			continue;
+		q.group = pv->group;
+		q.uni_vid = 0;
+		q.ani_known = 0;
+		q.ani_vid = 0;
+		q.has_src = q.exclude = 0;
+		q.srcs = 0;
+		q.nsrc = 0;
+		if (igmp_policy_join(pol, &q, &row) != IGMP_JOIN_PREVIEW)
+			pv->active = 0;
 	}
 	return n;
 }

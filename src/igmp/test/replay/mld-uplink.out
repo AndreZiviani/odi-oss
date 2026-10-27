@@ -1,0 +1,58 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+  upstream: reports taken and sent by igmpd; tag added, vid 420 pri 5
+policy6: 1 allow + 0 static IPv6 ranges
+snooping lease: take host IGMP to the CPU, igmpd sends it up, and its MLD  (not written)
+> 1 mld1join 1 0 fe80::2 ff3e::8000:1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:80:00:00:01  MLD v1 report  group ff3e::8000:1  src fe80::2
+  up: send with vid 420 pri 5 (tag control 1)  (not sent)
+  set vid 0 33:33:80:00:00:01 ports 0x5  (not written)
+> 2 mld2join 1 10 fe80::2 ff3e::8000:2
+port 1  vlan 10  02:00:00:00:00:01 -> 33:33:00:00:00:16  MLD v2 report (1 records)  src fe80::2
+  up: send with vid 420 pri 5 (tag control 1)  (not sent)
+  set vid 10 33:33:80:00:00:02 ports 0x5  (not written)
+> 3 mld1join 1 0 fe80::2 ff3e::1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:01  MLD v1 report  group ff3e::1  src fe80::2
+  up: withheld: every join outside the access control lists
+> 4 mld1done 1 0 fe80::2 ff3e::8000:1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:02  MLD done  group ff3e::8000:1  src fe80::2
+  up: send with vid 420 pri 5 (tag control 1)  (not sent)
+  del vid 0 33:33:80:00:00:01 ports 0x0  (not written)
+> 5 mldquery 1 0 fe80::1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:01  MLD query  group ::  src fe80::1
+  up: not sent: a query from the host side
+  MLD router ports -> 0x1
+> 6 v2join 1 0 192.168.1.10 239.1.1.1
+port 1  untagged  02:00:00:00:00:01 -> 01:00:5e:01:01:01  v2 report  group 239.1.1.1  src 192.168.1.10
+  up: send with vid 420 pri 5 (tag control 1)  (not sent)
+  set vid 0 01:00:5e:01:01:01 ports 0x5  (not written)
+> 7 state
+joins=1
+denied=0
+groups=1
+up_sent=4
+up_withheld=2
+group=239.1.1.1
+# /var/run/odi-mcast6.state
+joins=2
+denied=1
+groups=1
+refused_acl=1
+group=ff3e::8000:2
+refused=acl ff3e::1 vid=0 at=3 n=1
+> end
+joins=1
+denied=0
+groups=1
+up_sent=4
+up_withheld=2
+group=239.1.1.1
+# /var/run/odi-mcast6.state
+joins=2
+denied=1
+groups=1
+refused_acl=1
+group=ff3e::8000:2
+refused=acl ff3e::1 vid=0 at=3 n=1
+status 0

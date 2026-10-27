@@ -17,18 +17,28 @@
  *             dropped instead of flooded to the host, which is what makes a
  *             group the host did not join stay off the UNI link. The
  *             reserved groups 224.0.0.0/24 (the OLT's general queries go to
- *             224.0.0.1) keep flooding. IPv6 is left alone: igmpd does not
- *             do MLD.
+ *             224.0.0.1) keep flooding. IPv6 is PON_DROP6's.
  *   TRAP      the same rule takes the report instead of copying it: it
  *             reaches the CPU and goes no further, and igmpd sends upstream
  *             what the OLT's multicast profile allows, tagged as the
  *             profile says (G.988 9.3.27: upstream IGMP tag control, rate,
  *             unauthorized joins). Only with COPY, of which it is a mode.
  *             What igmpd sends goes through odi_switch_mcast_send() alone:
- *             IGMP to an IPv4 multicast MAC, onto an upstream flow a bridge
+ *             IGMP to an IPv4 multicast MAC (or, with MLD, an MLD report or
+ *             done to an IPv6 multicast MAC), onto an upstream flow a bridge
  *             rule queues on, and nothing else.
+ *   MLD       the same for the host's MLD (IPv6): three more rules on the
+ *             UNI port, ICMPv6 types 130 and 131 (query, v1 report), 132
+ *             (v1 done) and 143 (v2 report), copied or taken as the IGMP
+ *             rule is (TRAP is the mode of both). Only with COPY.
+ *   PON_DROP6 IPv6 multicast from the PON that no L2 row names is dropped,
+ *             as PON_DROP does for IPv4. The link-scope groups ff02::/16 and
+ *             the solicited-node groups keep flooding whatever the drop
+ *             says: router advertisements (ff02::1), neighbour solicitations
+ *             and DHCPv6 (ff02::1:2) ride them, and pruning them would cut the
+ *             host's IPv6 off. Only with MLD.
  *
- * All three are held by one open file of /dev/odi_sw (odi_reg.c): the file's
+ * All of them are held by one open file of /dev/odi_sw (odi_reg.c): the file's
  * close, or the daemon's death, takes them back and deletes every row the
  * holder added, so a dead snooper leaves the switch flooding as it did and
  * the host's reports going upstream by themselves again.
@@ -51,8 +61,11 @@
 #define ODI_SW_MC_SNOOP_COPY		1U
 #define ODI_SW_MC_SNOOP_PON_DROP	2U
 #define ODI_SW_MC_SNOOP_TRAP		4U
+#define ODI_SW_MC_SNOOP_MLD		8U
+#define ODI_SW_MC_SNOOP_PON_DROP6	16U
 #define ODI_SW_MC_SNOOP_ALL		(ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP | \
-					 ODI_SW_MC_SNOOP_TRAP)
+					 ODI_SW_MC_SNOOP_TRAP | ODI_SW_MC_SNOOP_MLD | \
+					 ODI_SW_MC_SNOOP_PON_DROP6)
 
 /* The ACL entry and template the copy rule owns. The ACL tables are emptied
  * at every boot (odi_switch_platform.c) and the only rule written after that
@@ -60,6 +73,25 @@
  */
 #define ODI_SW_MC_ACL_ENTRY		8U
 #define ODI_SW_MC_ACL_TEMPLATE		6U
+
+/* The MLD rules: entries 9 to 11 (of the 9 to 15 kept for snooping), ahead
+ * of every other rule but the IGMP one (the lowest matching entry decides),
+ * on template 2, which no rule here names (the extended VLAN discards are on
+ * 5, the ACL probes on 4, the replayed rule on 3). Template 2 compares the
+ * EtherType, the IPv6 next header behind any extension headers, and the
+ * window of user field selector 0, pointed at the start of the IPv6 payload:
+ * the type and code of an ICMPv6 message. Both field codes and the
+ * selector's origin are another open implementation's measurements on this
+ * chip (an MLDv1 report behind its hop-by-hop header reads 58 in the next
+ * header field and its type at payload offset 0). Nothing here or in the
+ * replays points selector 0 anywhere; the lease saves it and puts it back.
+ */
+#define ODI_SW_MC_MLD_ENTRY		9U
+#define ODI_SW_MC_MLD_RULES		3U
+#define ODI_SW_MC_MLD_TEMPLATE		2U
+#define ODI_SW_ACL_FIELD_IPV6_NH	0x15U
+#define ODI_SW_ACL_FIELD_USER0		0x40U
+#define ODI_SW_MC_MLD_FIELDSEL		0U
 
 /* The ACL tables as the table engine takes them (odi_switch_platform.c
  * has the same three numbers for the boot clean): a rule is five words, an
@@ -84,11 +116,24 @@
 #define ODI_SW_ACL_FIELD_ETHERTYPE	0x07U
 #define ODI_SW_ACL_FIELD_IPV4_PROTO	0x14U
 
+/* FIELDSEL_CFG(n): 0x023144 + 4n, user field selector n: a 16-bit window
+ * at byte offset bits 10:3 from origin bits 2:0, origin 6 the start of the
+ * IP payload behind any IPv6 extension headers.
+ */
+#define ODI_SW_FIELDSEL_CFG_OFF		0x23144U
+#define ODI_SW_FIELDSEL_ORIGIN_IP_PAYLOAD 6U
+
 /* MC_UNKNOWN_IP4: 0x01c014, two bits per ingress port, 0 flood, 1 drop.
- * MC_UNKNOWN_CFG: 0x01c01c, bits 4:3 the reserved IPv4 groups (1: flooded
- * whatever the port says).
+ * MC_UNKNOWN_IP6: 0x01c018, the same for IPv6.
+ * MC_UNKNOWN_CFG: 0x01c01c, bits 4:3 the reserved IPv4 groups and bits 6:5
+ * the reserved IPv6 groups (1: flooded whatever the port says), bit 8 makes
+ * the link-scope groups ff02::/16 reserved IPv6 groups and bit 12 the
+ * solicited-node groups ff02::1:ff00:0/104. The IPv6 half is another open
+ * implementation's measurement on the PON port; out of reset no IPv6 class
+ * is selected, so the drop alone would prune both.
  */
 #define ODI_SW_MC_UNKNOWN_IP4_OFF	0x1c014U
+#define ODI_SW_MC_UNKNOWN_IP6_OFF	0x1c018U
 #define ODI_SW_MC_UNKNOWN_CFG_OFF	0x1c01cU
 
 /* Set the flags held: ODI_SW_MC_SNOOP_* bits. 0 takes everything back. A
@@ -99,12 +144,14 @@
 int odi_switch_mcast_snoop_set(uint32_t flags);
 uint32_t odi_switch_mcast_flags(void);
 
-/* Whether the IGMP copy is on, and whether it is a take (TRAP), for the RX
- * hook (odi_omci.c): read without the switch lock, from NAPI context. The
- * hook marks a frame received while the take is on, so igmpd sends upstream
- * only a report the switch did not forward itself.
+/* Whether the IGMP copy is on, whether the MLD one is, and whether they
+ * are a take (TRAP), for the RX hook (odi_omci.c): read without the switch
+ * lock, from NAPI context. The hook marks a frame received while the take
+ * is on, so igmpd sends upstream only a report the switch did not forward
+ * itself.
  */
 extern volatile uint32_t odi_sw_mcast_copy_on;
+extern volatile uint32_t odi_sw_mcast_mld_on;
 extern volatile uint32_t odi_sw_mcast_trap_on;
 
 /* Called once, the first time the copy is installed, before the rule is
@@ -114,11 +161,11 @@ extern volatile uint32_t odi_sw_mcast_trap_on;
 extern void (*odi_sw_mcast_rx_enable)(void);
 
 /* The rows the holder programs, so that taking the lease back can delete
- * them: odi_switch_l2_mcast_add()/_del() plus the bookkeeping. An add that
- * would be the 129th distinct row is refused with -ENOSPC and leaves the
- * table as it was.
+ * them: odi_switch_l2_mcast_add()/_del() plus the bookkeeping. Room for the
+ * 128 groups of each family igmpd holds; an add that would be the 257th
+ * distinct row is refused with -ENOSPC and leaves the table as it was.
  */
-#define ODI_SW_MC_TRACK_MAX		128U
+#define ODI_SW_MC_TRACK_MAX		256U
 int odi_switch_mcast_row_add(const struct odi_sw_l2_mcast_req *req, uint32_t *index);
 int odi_switch_mcast_row_del(const struct odi_sw_l2_mcast_req *req, int *found);
 
@@ -213,6 +260,7 @@ struct odi_sw_mc_send {
 /* Send frame up the PON on upstream flow `flow`. Only while the take is
  * held (the caller checks it is the holder), and only what igmpd has any
  * business sending: an IPv4 IGMP frame (behind at most two tags) to an IPv4
+ * multicast MAC, or, while MLD is held too, an MLD report or done to an IPv6
  * multicast MAC, 60 bytes or more, on a flow an upstream row queues on.
  * Returns 0, -EPERM without the take, -EINVAL for any other frame or flow,
  * or the transmit's error. */

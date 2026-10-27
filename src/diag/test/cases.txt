@@ -78,4 +78,16 @@ acl-probe count 0 port 2
 acl-probe count 0 port 2 group 0xe0000000
 acl-probe trap 1
 ? acl-probe
+mc-count frames 0 pon mac 0x3333 0x00000001 48
+mc-count bytes 3 uni mac 0x0100 0x5e7f4d01 48
+mc-count f 1 p m 0x3333 0 16
+mc-count frames 2 pon ipv4 0xe0000000 4
+mc-count bytes 15 uni ipv4 0xefff4d01 32
+mc-count show 3
+mc-count delete 3
+mc-count delete all
+mc-count frames 0 pon mac 0x3333 0x00000001
+mc-count frames 0 pon
+mc-count frames 0 wan mac 1 2 3
+? mc-count
 ? acl-probe delete 

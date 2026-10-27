@@ -429,6 +429,133 @@ static void test_state(void)
 	}
 }
 
+
+/* The rows' own fields, the allowed preview table, the version and the
+ * querier: what omcid writes (respond/mcast.c), read back. */
+static void test_rules(void)
+{
+	struct igmp_policy p;
+	struct igmp_join j;
+	const struct igmp_range *row;
+	static const uint8_t s1[4] = { 10, 0, 0, 5 }, s2[4] = { 10, 0, 0, 9 };
+
+	parse("snooping=1\nigmp_version=2\nquerier=10.1.2.3\n"
+	      "allow=225.0.0.0-225.255.255.255 v=100 s=10.0.0.5 g=4000 b=125000 p=30,60,3,24\n"
+	      "allow=226.0.0.0-226.255.255.255\n"
+	      "static=227.1.1.1-227.1.1.1 v=5\n"
+	      "grant=239.5.5.5 s=10.0.0.1 a=100 u=0 d=90\n"
+	      "grant=239.6.6.6 a=0 u=20\n", &p);
+	ok(p.igmp_version == 2 && p.querier == G(10, 1, 2, 3), "the IGMP version and the querier are stored");
+	ok(p.nallow == 2 && p.allow[0].vid == 100 && p.allow[0].src == G(10, 0, 0, 5) &&
+	   p.allow[0].gem == 4000 && p.allow[0].imputed_bw == 125000 &&
+	   p.allow[0].pv_len == 30 && p.allow[0].pv_repeat == 60 &&
+	   p.allow[0].pv_count == 3 && p.allow[0].pv_reset == 24,
+	   "a row's VLAN, source, GEM port, imputed bandwidth and preview fields are read");
+	ok(p.allow[1].vid == 0 && p.allow[1].src == 0 && p.allow[1].gem == 0 &&
+	   p.allow[1].imputed_bw == 0 && p.allow[1].pv_len == 0,
+	   "a bare row leaves every one of them at the wildcard");
+	ok(p.nstatic == 1 && p.stat[0].vid == 5, "a static row is read too");
+	ok(p.ngrant == 2 && p.grant[0].group == G(239, 5, 5, 5) && p.grant[0].src == G(10, 0, 0, 1) &&
+	   p.grant[0].ani == 100 && p.grant[0].uni == 0 && p.grant[0].minutes == 90 &&
+	   p.grant[1].uni == 20 && p.grant[1].minutes == 0, "the allowed preview rows are read");
+
+	parse("snooping=1\nallow=225.0.0.0-225.255.255.255 v=0 v=99999 s=nonsense p=1,2,3 x=4 q\n", &p);
+	ok(p.nallow == 1 && p.allow[0].vid == 0 && p.allow[0].src == 0 && p.allow[0].pv_len == 0,
+	   "a token that is malformed, out of range or unknown leaves its field a wildcard");
+	parse("snooping=1\nallow=225.0.0.0-225.255.255.255 p=30,60,3,24 v=7\n", &p);
+	ok(p.allow[0].vid == 7 && p.allow[0].pv_len == 30, "the tokens come in any order");
+
+	/* The decision. */
+	parse("snooping=1\n"
+	      "allow=225.1.0.0-225.1.255.255 v=100\n"
+	      "allow=225.2.0.0-225.2.255.255 v=200\n"
+	      "allow=225.3.0.0-225.3.255.255\n"
+	      "allow=232.0.0.0-232.0.255.255 s=10.0.0.5\n"
+	      "allow=239.9.0.0-239.9.255.255 p=30,60,2,0\n"
+	      "static=226.1.1.1-226.1.1.1 v=300\n", &p);
+	for (unsigned i = 0; i < sizeof j; i++)
+		((uint8_t *)&j)[i] = 0;
+	j.group = G(225, 1, 1, 1);
+	j.uni_vid = 0;
+	j.ani_known = 1;
+	j.ani_vid = 100;
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL, "VLAN 100, the row for VLAN 100: in");
+	j.group = G(225, 2, 1, 1);
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_DENY,
+	   "VLAN 100, the row for VLAN 200 (a VLAN some row names): out");
+	j.ani_vid = 200;
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL, "VLAN 200, the row for VLAN 200: in");
+	j.ani_vid = 420;
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL,
+	   "a VLAN no row names: the ranges alone decide");
+	j.ani_known = 0;
+	j.group = G(225, 1, 1, 1);
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL, "a VLAN not known: the ranges alone decide");
+	j.ani_known = 1;
+	j.ani_vid = 100;
+	j.group = G(225, 3, 1, 1);
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL, "a row naming no VLAN takes any");
+	j.group = G(226, 1, 1, 1);
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL,
+	   "a static group goes in whatever the row's VLAN says");
+	j.group = G(239, 1, 1, 1);
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_DENY, "a group in no row: out");
+
+	j.ani_known = 0;
+	j.group = G(232, 0, 1, 1);
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL, "a v2 join (no sources) of a source row: in");
+	j.has_src = 1;
+	j.srcs = s1;
+	j.nsrc = 1;
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL, "INCLUDE the row's source: in");
+	j.srcs = s2;
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_DENY, "INCLUDE another source: out");
+	j.exclude = 1;
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL, "EXCLUDE another source: in");
+	j.srcs = s1;
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_DENY, "EXCLUDE the row's source: out");
+	j.has_src = j.exclude = 0;
+	j.group = G(239, 9, 1, 1);
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_PREVIEW && row && row->pv_len == 30,
+	   "a row with a preview length: a preview, with the row");
+	igmp_policy_defaults(&p);
+	parse("snooping=1\n", &p);
+	j.group = G(239, 1, 1, 1);
+	ok(igmp_policy_join(&p, &j, &row) == IGMP_JOIN_FULL, "no lists: everything is in");
+
+	/* The tag control says which VLAN a join goes up on. */
+	parse("snooping=1\nus_tag_control=1\nus_tci=40996\n", &p);   /* 0xa024: pri 5, VID 36 */
+	for (unsigned i = 0; i < sizeof j; i++)
+		((uint8_t *)&j)[i] = 0;
+	j.uni_vid = 7;
+	igmp_policy_ani(&p, &j);
+	ok(j.ani_known && j.ani_vid == 36, "tag control 1: the profile's VID, whatever the host sent");
+	parse("snooping=1\n", &p);
+	igmp_policy_ani(&p, &j);
+	ok(j.ani_known && j.ani_vid == 7, "tag control 0, a tagged join: the VID it came with");
+	j.uni_vid = 0;
+	igmp_policy_ani(&p, &j);
+	ok(!j.ani_known, "tag control 0, an untagged join: unknown");
+
+	/* The version. */
+	parse("snooping=1\nigmp_version=2\n", &p);
+	ok(igmp_policy_version_ok(&p, IGMP_V1_REPORT) && igmp_policy_version_ok(&p, IGMP_V2_REPORT) &&
+	   igmp_policy_version_ok(&p, IGMP_V2_LEAVE) && !igmp_policy_version_ok(&p, IGMP_V3_REPORT) &&
+	   igmp_policy_version_ok(&p, IGMP_QUERY), "version 2: v1 and v2 messages, not v3");
+	parse("snooping=1\nigmp_version=1\n", &p);
+	ok(igmp_policy_version_ok(&p, IGMP_V1_REPORT) && !igmp_policy_version_ok(&p, IGMP_V2_REPORT) &&
+	   !igmp_policy_version_ok(&p, IGMP_V2_LEAVE) && !igmp_policy_version_ok(&p, IGMP_V3_REPORT),
+	   "version 1: the v1 report only");
+	parse("snooping=1\nigmp_version=3\n", &p);
+	ok(igmp_policy_version_ok(&p, IGMP_V3_REPORT), "version 3: all");
+	parse("snooping=1\nigmp_version=17\n", &p);
+	ok(igmp_policy_version_ok(&p, IGMP_V3_REPORT), "an MLD version says nothing of IGMP: all");
+	parse("snooping=1\n", &p);
+	ok(igmp_policy_version_ok(&p, IGMP_V3_REPORT), "no version: all");
+	parse("snooping=0\nigmp_version=2\n", &p);
+	ok(igmp_policy_version_ok(&p, IGMP_V3_REPORT), "not snooping: all");
+}
+
 int main(void)
 {
 	test_lease();
@@ -439,6 +566,7 @@ int main(void)
 	test_limits();
 	test_leave();
 	test_static();
+	test_rules();
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();
 	return failures ? 1 : 0;
