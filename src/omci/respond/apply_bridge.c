@@ -1508,6 +1508,27 @@ void bdgconn_rebuild(void)
 				uint16_t ptr = (uint16_t)row_u32(r, c47, 4);
 
 				iw = mib_find(OMCI_ME_GEM_IW_TP, ptr);
+				/* ISP3 points TPPointer at the mapper, as G.988 says, and
+				 * also has a GEM IW TP of the same instance id (the
+				 * mapper's p-bit 0 one), with the priorities spread over
+				 * eight GEM ports. Taking the IW TP builds the p-bit 0
+				 * GEM alone, and what the OLT sends on the others is
+				 * dropped (on ISP3, DHCP on p-bit 5 and ARP on 7). A
+				 * mapper of that id naming another IW TP decides it is
+				 * the mapper. */
+				mapper = mib_find(OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE, ptr);
+				if (iw && mapper) {
+					int other = 0;
+
+					for (int pri = 0; pri < 8; pri++) {
+						uint32_t id = row_u32(mapper, c130, 2 + pri);
+
+						if (id != 0 && id != 0xffff && id != ptr)
+							other = 1;
+					}
+					if (other)
+						iw = 0;
+				}
 				if (iw) {
 					int pbit = -1;
 					unsigned pmask = 0xffu;
