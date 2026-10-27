@@ -462,6 +462,30 @@ got=$(rebuild /tmp/omcid-171-ev-split5.log 0 | grep ext-vlan)
 check "a rule that names priority 5 goes up the GEM port that carries 5, and only that" "$got" \
 "47/1002 gem 1000 rule ext-vlan vid 410 pri 5"
 
+# The same split, with the second GEM IW TP given the instance id of the
+# mapper, as ISP3 numbers them: the bridge port TPPointer 0x1002 names both
+# a mapper and an IW TP. It is the mapper, and both GEM ports carry the rule.
+collide_frames() {
+	frame 44 010c 0003 "03e8800003800700000008"     # GEM CTP: port 1000
+	frame 44 010a 1002 "00030510020000000200"       # GEM IW TP 0x1002 -> CTP 3: the id of the mapper
+	frame 48 0082 1002 "07801002100210021002"       # priorities 4-7 to IW TP 0x1002
+}
+{
+	sessionx 8100 8100 "$TRANS410" "$DEF1" "$DEF2"
+	collide_frames
+} > /tmp/s171-collide.txt
+run171 ev-collide /tmp/s171-collide.txt
+got=$(rebuild /tmp/omcid-171-ev-collide.log 0 | grep ext-vlan)
+check "a mapper and a GEM IW TP of the same id: the mapper, one rule per priority on each GEM port" "$got" \
+"47/1002 gem 1000 rule ext-vlan vid 410 pri 4
+47/1002 gem 1000 rule ext-vlan vid 410 pri 5
+47/1002 gem 1000 rule ext-vlan vid 410 pri 6
+47/1002 gem 1000 rule ext-vlan vid 410 pri 7
+47/1002 gem 657 rule ext-vlan vid 410 pri 0
+47/1002 gem 657 rule ext-vlan vid 410 pri 1
+47/1002 gem 657 rule ext-vlan vid 410 pri 2
+47/1002 gem 657 rule ext-vlan vid 410 pri 3"
+
 # ---- a bridge port of TP type 5 (GEM IW TP, no mapper) ----------------------
 #
 # Some OLTs attach the data GEM to the bridge directly: class 47 TPType 5,

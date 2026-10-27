@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a bridge port of TP type 3 whose pointer names both an 802.1p mapper
+  and a GEM interworking TP (entity ids are unique per class only) is read as
+  the mapper when that mapper sends any priority to another TP, so every GEM
+  port of the mapper gets its bridge connection. Before, only the priority-0
+  GEM port did, and on ISP3 the DHCP offers (priority 5) and ARP replies
+  (priority 7) were dropped: O5 and no lease. Pinned by `vlan-test.sh`.
+
 ## v1.12.0 - 2026-10-26
 
 - Releases: confd v1.9.0: the Phone tab shows what the OLT provisioned for
