@@ -1171,10 +1171,13 @@ unless `confirm` (over ssh or the web UI, so over the link being tried)
 stores the key first. `confirm` reads the key back and fails, leaving the
 trial to revert, when it did not stick. `try` refuses while a trial or the
 boot watch runs, and says so when the mode asked for is already the one
-running and stored. Exit 1 on every refusal; the reason is on stderr. Every
-state change takes a lock (`/var/run/host-autoneg.lock`, a directory; a
-holder that died is found by its pid) and replaces the state file in one
-rename.
+running and stored. It also refuses while the port runs a `HOST_SERDES`
+mode other than `fiber1g`, or while `host-serdes.sh` runs a trial or its
+boot watch, and a boot then applies nothing (`host-serdes.sh` below). Exit 1
+on every refusal; the reason is on stderr. Every state change takes a lock
+(`/var/run/host-autoneg.lock`, a directory; a holder that died is found by
+its pid), the host-port lock `host-serdes.sh` takes too, and replaces the
+state file in one rename.
 
 The state file, `/var/run/host-autoneg`, and `status` (the same fields,
 plus the live link, the uptime and whether this is a safe-mode boot), one `key=value`
@@ -1184,7 +1187,9 @@ bundle (`host-link.txt`):
 | key | value |
 |---|---|
 | `setting` | `on` or `off`: `HOST_AUTONEG` as this boot read it, or as a confirm stored it |
-| `running` | `on` or `off`: what the host port runs now |
+| `running` | `on` or `off`: what the host port runs now in Fiber 1G. While `host-serdes.sh` owns the port (below) the file keeps what this script runs in Fiber 1G, the value the port gets back there; `status` prints the bit the kernel holds instead |
+| `owner` (`status` only) | `host-autoneg`, or `host-serdes` while a `HOST_SERDES` mode other than `fiber1g` runs, or a `host-serdes.sh` trial, reapply or boot watch does: that script sets the bit then, and this one applies nothing |
+| `owner_message` (`status` only, with `owner=host-serdes`) | which link mode owns the bit, and that `HOST_AUTONEG` applies in Fiber 1G |
 | `phase` | `steady`, `watch` (the boot watch is deciding) or `trial` |
 | `fallback` | `1` while the port runs auto-negotiation with the key off because the forced link did not come up this boot |
 | `trial_mode`, `trial_deadline` | the mode on trial and the uptime, in seconds, at which it reverts |
@@ -1205,10 +1210,91 @@ klogd), at notice:
 | `fallback` | the link came up only with auto-negotiation; the key stays off |
 | `fallback_nolink` | no link in either mode for 10 minutes; stays on auto-negotiation |
 | `safe_mode_boot` | a safe-mode boot: nothing applied, auto-negotiation on, trials refused |
+| `serdes_mode` | a boot with the key off while the port runs a `HOST_SERDES` mode other than `fiber1g` (or its boot watch): nothing applied, that mode sets the bit |
 | `trial_started`, `trial_expired`, `trial_reverted`, `trial_confirmed`, `trial_failed` | a trial and how it ended |
 | `bad_value`, `no_kernel`, `apply_failed` | a key that is neither on nor off, a kernel without the parameter, a write that failed: the port runs auto-negotiation |
 
 A boot with the key unset logs nothing and writes nothing.
+
+### `host-serdes.sh` -- the host SerDes mode
+
+    /etc/scripts/host-serdes.sh try fiber1g|2500basex|hisgmii [SECONDS]
+                                                     a trial, 120 s by default (10 to 600)
+    /etc/scripts/host-serdes.sh confirm              keep it: stores HOST_SERDES
+    /etc/scripts/host-serdes.sh revert               end the trial now
+    /etc/scripts/host-serdes.sh reapply              run the sequence of the running mode again
+    /etc/scripts/host-serdes.sh status               the state, key=value
+    /etc/scripts/host-serdes.sh boot                 network.sh only
+
+Applies `HOST_SERDES` (`docs/SETTINGS.md`, "Host port SerDes mode"): the
+mode's register sequence through `diag` (`docs/SWITCH.md`, "Host port
+SerDes mode"), then the kernel parameters `odi_switch.host_forced` and
+`odi_switch.host_autoneg`. It does not touch the SFP EEPROM the host
+reads, which still advertises 1000BASE-LX (`docs/SETTINGS.md`, "What the
+host reads from the module"). These verbs and the `status` keys below are the
+interface the web UI is to use (through `/api/hostlink`, as for
+`host-autoneg.sh`); they are kept stable.
+
+`boot` runs from `network.sh`, before the MAC and the bridge: it reads every
+register of the mode and writes nothing when they already hold it, applies
+the whole sequence otherwise, and in 2500BASE-X starts the boot watch,
+detached. `try` answers at once and switches one second later, detached,
+so the answer leaves before the link changes; the trial reverts by itself
+at the end of its window unless `confirm` (over ssh, so over the link being
+tried) stores the key first. `confirm` reads the key back and fails,
+leaving the trial to revert, when it did not stick. A trial whose
+registers do not read back after the switch goes back at once
+(`trial_failed`). `reapply` answers at once and, one second later, runs the
+whole sequence of the running mode and its port side again, with no trial
+and nothing stored; the event says whether the registers read back. `try` and `reapply` refuse while a trial, a reapply or the boot
+watch runs, while `host-autoneg.sh` runs a trial or its boot watch, in a
+safe-mode boot (`try`), with `/etc/config/sds.off`, without `diag`, and for
+2500BASE-X and HiSGMII on a kernel without `host_forced`; `try` says so
+when the mode asked for is already running and stored. Exit 1 on every
+refusal; the reason is on stderr. State changes take the host-port lock
+(`/var/run/host-autoneg.lock`, shared with `host-autoneg.sh`) and replace
+the state file in one rename.
+
+The state file, `/var/run/host-serdes`, and `status` (the same fields, plus
+the live values below), one `key=value` per line; `status` is in the
+diagnostics bundle (`host-link.txt`):
+
+| key | value |
+|---|---|
+| `setting` | `fiber1g`, `2500basex` or `hisgmii`: `HOST_SERDES` as this boot read it, or as a confirm stored it |
+| `running` | the mode the host SerDes runs now; `unmanaged` with `sds.off` or without `diag`, `unknown` when the registers could not be read (nothing written) or, in `status`, with no state file |
+| `phase` | `steady`, `watch` (the boot watch of 2500basex is deciding), `trial` or `reapply` |
+| `fallback` | `1` while the port runs Fiber 1G with the key at 2500basex because only Fiber 1G linked this boot, or nothing linked in either mode |
+| `trial_mode`, `trial_deadline` | the mode on trial and the uptime, in seconds, at which it reverts |
+| `watch_until` | the uptime by which the boot watch ends at the latest |
+| `event`, `event_uptime`, `message` | the last event, below |
+| `uptime` (`status` only) | the uptime, in seconds |
+| `autoneg` (`status` only) | `on`, `off` or `unknown`: `odi_switch.host_autoneg` now |
+| `forced` (`status` only) | `1`, `0` or `unknown`: `odi_switch.host_forced` now |
+| `link` (`status` only) | `1`, `0` or `unknown`, from `link_source` |
+| `link_source` (`status` only) | `host_link` (Fiber 1G: the kernel parameter), `serdes_sync` (2500BASE-X: bit 17 of 0x214) or `none` (HiSGMII: `link` is `unknown`) |
+| `safe_mode_boot` (`status` only) | `1` on a safe-mode boot (`safe-mode.sh`) |
+
+Every event is one line to the kernel log (`host-serdes: event=<name>
+setting=... running=... <text>`, so dmesg, the ramlog and syslog through
+klogd), at notice:
+
+| event | when |
+|---|---|
+| `applied` | a boot applied 2500basex (and started the boot watch) or hisgmii (no watch: no link signal) |
+| `serdes_link` | the boot watch saw the 2500BASE-X sync; no fallback |
+| `watch_switch` | no link for 30 s; the watch switches mode |
+| `fallback` | the host linked only in Fiber 1G; the key stays 2500basex |
+| `fallback_nolink` | no link in either mode for 10 minutes; stays on Fiber 1G, the key unchanged |
+| `safe_mode_boot` | a safe-mode boot: Fiber 1G, nothing applied, trials refused |
+| `trial_started`, `trial_expired`, `trial_reverted`, `trial_confirmed`, `trial_failed` | a trial and how it ended |
+| `reapply_started`, `reapplied`, `reapply_failed` | a reapply, and whether the registers read back after it |
+| `bad_value`, `no_kernel`, `apply_failed`, `apply_unverified` | a key that is none of the three, a kernel without `host_forced` (both: the port runs Fiber 1G), a register or parameter that could not be read or written, a sequence that did not read back (the boot carries on in the mode) |
+| `sds_off`, `no_diag` | `/etc/config/sds.off` or no `diag`: nothing written to the host port |
+
+A boot in Fiber 1G logs nothing; its messages (`SerDes already Fiber 1G`,
+or the thirteen writes and `SerDes now Fiber 1G`) go to the boot output,
+as they did from `network.sh`.
 
 ### `mgmt-addr.sh` -- the management addresses, as a trial
 
@@ -1278,12 +1364,15 @@ row that ended that way make this boot a safe-mode boot as well
 about 54 s after a cold power-on on the sticks measured (the count lands at
 about 5 s of uptime), so a power-up counts as short when it is cut roughly
 60 to 110 s after power-on: "plug in, wait about 80 s, pull" (docs/SETTINGS.md). A boot that finds five short boots
-before it (three with `HOST_AUTONEG=off`) is a safe-mode boot: it writes
+before it (three with `HOST_AUTONEG=off`, or with `HOST_SERDES` at
+`2500basex` or `hisgmii`) is a safe-mode boot: it writes
 `/var/run/safe-mode` and the record `/etc/config/safe-mode`, removes
-`HOST_AUTONEG` when that was off, and bind-mounts a RAM copy of
+`HOST_AUTONEG` when that was off and `HOST_SERDES` when it held another
+mode than `fiber1g`, and bind-mounts a RAM copy of
 `/etc/passwd` with root's password `admin` over the read-only one
 (`docs/SETTINGS.md`, "Recovery: the safe mode"). The flag in `/var/run` is
-what the rest reads: `host-autoneg.sh` applies nothing, the PON steps
+what the rest reads: `host-serdes.sh` runs Fiber 1G, `host-autoneg.sh`
+applies nothing, the PON steps
 leave the laser off and skip `gponact` (`rcs-lib.sh`), `svc-dropbear.sh`
 offers passwords, and confd accepts `admin:admin`. `status` prints
 `active=0|1` with the flag's fields as `now_*` (`now_cause=` is
@@ -1295,7 +1384,8 @@ boot=N short_before=N limit=5|3 wdt_before=N wdt_limit=3 prev=REASON
 uptime=S` on every boot (the uptime is how early the count lands on a given
 stick; `prev` is the previous boot's `reason=`, `none` without a ramlog),
 `event=safe_mode cause=short_boots|watchdog|config short_boots=N
-wdt_resets=N cleared=HOST_AUTONEG|none|failed root_password=default|failed`, and
+wdt_resets=N cleared=HOST_AUTONEG|HOST_SERDES|HOST_AUTONEG,HOST_SERDES|none|failed
+root_password=default|failed`, and
 `event=safe_mode_ack`.
 
 ### `diag-bundle.sh` -- the diagnostics bundle
@@ -1397,7 +1487,8 @@ that `--full` keeps the identifiers but still no secret; and that the
 
 | script | what | safe to re-run |
 |---|---|---|
-| `/etc/scripts/network.sh` | host SerDes check (and fix), MAC, `br0` over `eth0.2`, the addresses | yes: it checks before it writes, and re-running it is how a management-path problem is debugged |
+| `/etc/scripts/network.sh` | host SerDes check (and fix, `host-serdes.sh boot`), MAC, `br0` over `eth0.2`, the addresses | yes: it checks before it writes, and re-running it is how a management-path problem is debugged. A re-run is a new boot to `host-serdes.sh`: in 2500BASE-X it starts the boot watch again |
+| `/etc/scripts/host-serdes.sh status` | the host SerDes mode state (above) | yes: read-only |
 | `/etc/scripts/host-autoneg.sh status` | the host-port auto-negotiation state (above) | yes: read-only |
 | `/etc/scripts/safe-mode.sh status` | the safe mode: this boot, the record, the boot count | yes: read-only |
 | `/etc/scripts/network.sh addr [-n]` | only the addresses: the primary and the second one (`br0:2`), live; `-n` says what it would change | yes; this is `apply.sh network` |
@@ -1427,7 +1518,8 @@ drivers behind them.
 | `/proc/odi_wdt/ping` | -- | `"<name>"`: a registered client's own ping, which restarts its deadline; refused (`-EINVAL`) for an unregistered name |
 | `/proc/odi_wdt/clients` | one line per registered client: name, deadline, armed, last-ping age | -- |
 | `/sys/module/odi_switch/parameters/host_autoneg` | `Y` or `N`: the host port negotiates, or runs forced 1000BASE-X | `1`/`0`: applied at once (`host-autoneg.sh` does this; by hand it lasts until the next boot) |
-| `/sys/module/odi_switch/parameters/host_link` | `1` while the host port has a link | -- |
+| `/sys/module/odi_switch/parameters/host_forced` | `Y` or `N`: the host port runs forced (link up, 1000 full duplex), as 2500BASE-X and HiSGMII need | `1`/`0`: applied at once (`host-serdes.sh` does this; by hand it lasts until the next boot) |
+| `/sys/module/odi_switch/parameters/host_link` | `1` while the host port has a link; always `1` while `host_forced` is `Y` | -- |
 | `/proc/odi_ramlog_prev` | the previous boot's DRAM ramlog, decoded: this boot's counter and slot, the previous boot's counter, slot, build id, last early crumb and reset reason (`reason=`, `docs/HACKING.md`), then its first 3984 bytes and its last 4080 (root only) | -- |
 | `/proc/odi_ramlog_prev_raw` | the same two pages as 8192 raw bytes, page A then page B, for `ramlog-read.sh`-style decoding off the stick (root only) | -- |
 
@@ -1595,6 +1687,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=reload_step verb=gponsn rc=0` | info, notice when `rc` is not 0 | one driver verb of a re-registration (`gpondeact`, `gponsn`, `gponpw`, `gponact`) and its errno (0 is success) |
 | `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services |
 | `host-autoneg: event=fallback setting=off running=on ...` | notice | the host-port auto-negotiation (`HOST_AUTONEG`): the boot watch, the fallback and every trial; the events are listed under `host-autoneg.sh` above |
+| `host-serdes: event=fallback setting=2500basex running=fiber1g ...` | notice | the host SerDes mode (`HOST_SERDES`): the boot watch, the fallback, every trial and reapply; the events are listed under `host-serdes.sh` above |
 | `safe-mode: event=boot_count boot=1 short_before=0 limit=5 wdt_before=0 wdt_limit=3 prev=reboot uptime=11` | notice | every boot's count, and a safe-mode boot (`event=safe_mode`); listed under `safe-mode.sh` above |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 

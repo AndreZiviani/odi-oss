@@ -284,6 +284,17 @@ static void odi_switch_platform_host_autoneg(void)
 		odi_sw_host_autoneg_apply();
 }
 
+/* The host port force, only when odi_switch.host_forced was turned on
+ * on the kernel command line: the default reads and writes nothing.
+ * Userland normally sets it through sysfs, from HOST_SERDES
+ * (host-serdes.sh), and then this writes the same values again.
+ */
+static void odi_switch_platform_host_forced(void)
+{
+	if (odi_sw_host_forced)
+		odi_sw_host_forced_apply();
+}
+
 /* The PON port isolated from the CPU side per odi_sw_pon_isolate (on by
  * default): nothing that enters from the fibre is ever forwarded to the
  * CPU, and nothing the CPU sends reaches the fibre by lookup, whatever an
@@ -310,6 +321,7 @@ static const struct {
 	{ odi_switch_platform_reserved_vid, "reserved vid" },
 	{ odi_switch_platform_host_pause, "host pause" },
 	{ odi_switch_platform_host_autoneg, "host autoneg" },
+	{ odi_switch_platform_host_forced, "host forced" },
 	{ odi_switch_platform_pon_isolate, "pon isolate" },
 };
 
