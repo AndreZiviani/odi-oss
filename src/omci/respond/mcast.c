@@ -726,8 +726,14 @@ void mcast_policy_export(void)
 
 		while (i < plen && pbuf[i] == last[i])
 			i++;
-		if (i == plen)
+		if (i == plen) {
+			/* Said, so the end of a session is in the log whether
+			 * or not the file moved: the test suites wait for one
+			 * of the two lines instead of a fixed time. One line
+			 * a session, in a log that is volatile. */
+			out_fmt("   multicast policy unchanged (%d bytes)\n", (long)plen);
 			return;
+		}
 	}
 	if (atomic_write(MCAST_POLICY_PATH, MCAST_POLICY_TMP_PATH,
 			 (const uint8_t *)pbuf, plen) < 0) {

@@ -182,7 +182,8 @@ check "VEIP: locked until the OLT unlocks it" "$(attr 329 1537 1)" "01"
 check "VEIP: and disabled while locked" "$(attr 329 1537 2)" "01"
 # Set VEIP 0x0601 AdminState to 0 (unlocked), as an OLT does.
 $Q cli/build/omcli --inject "0c01480a014906018000$(printf '00%058d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
-sleep 1
+# The answer is in the log once the Set has been applied.
+wait_count /tmp/live-a.log "-> 0c01" 1 20 || { echo "FAIL  no answer to the VEIP Set"; fail=$((fail + 1)); }
 check "VEIP: the OLT unlocked it, so it is unlocked" "$(attr 329 1537 1)" "00"
 check "VEIP: and enabled" "$(attr 329 1537 2)" "00"
 check "TR-069 server: the VEIP write did not touch it" "$(attr 340 1537 1)" "01"
@@ -202,7 +203,7 @@ check "no OMCI_CUSTOM_ME: no ONU capability entity (65529)" \
 # descriptor of attribute 2 onto it, which the model used to miss (width 0,
 # so a Set of it was dropped).
 $Q cli/build/omcli --inject "0c02480a008500002000$(printf '1234%056d' 0)00000028$(printf '%08d' 0)" > /dev/null 2>&1
-sleep 1
+wait_count /tmp/live-a.log "-> 0c02" 1 20 || { echo "FAIL  no answer to the power shedding Set"; fail=$((fail + 1)); }
 check "power shedding: a Set of the voice interval is kept" "$(attr 133 0 3)" "1234"
 stop
 
