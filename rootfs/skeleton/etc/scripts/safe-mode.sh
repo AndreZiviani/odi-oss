@@ -47,14 +47,12 @@
 # once. It leaves the next boot alone, which tries the partition again.
 #
 # The safe mode lasts this one boot, and writes nothing to the config
-# partition but its record (and, when HOST_AUTONEG=off made it fire, the
-# removal of that key, which is the setting that needed undoing):
-#   - the host port runs Fiber 1G with auto-negotiation (host-serdes.sh
-#     does not apply HOST_SERDES this boot, host-autoneg.sh not
-#     HOST_AUTONEG). HOST_SERDES is kept, not cleared: no signal tells a
-#     board that only links in another mode, and clearing it there would
-#     make every later boot unreachable too; the record names it, and
-#     host-serdes.sh clear removes it from this boot;
+# partition but its record (and, when HOST_AUTONEG=off or a HOST_SERDES
+# mode other than fiber1g made it fire, the removal of that key, which is
+# the setting that needed undoing):
+#   - the host port runs Fiber 1G (1000BASE-X), the most compatible host
+#     mode, with auto-negotiation (host-serdes.sh does not apply
+#     HOST_SERDES this boot, host-autoneg.sh not HOST_AUTONEG);
 #   - the PON is off: the PON steps leave the laser off and skip gponact
 #     (rcs-lib.sh), so the stick cannot disturb the OLT, and the kernel
 #     refuses an activation with the laser off anyway;
@@ -203,15 +201,24 @@ no_config() {
 	enter config 0 0 "" ""
 }
 
+# clear_key NAME: remove an odi.conf key, read it back, and add NAME (or
+# failed) to the comma-separated list in cleared.
+clear_key() {
+	"$TIMEOUT" "$IO_S" "$FLASH" set "$1" "" > /dev/null 2>&1
+	if [ -z "$(key "$1")" ]; then c=$1; else c=failed; fi
+	if [ "$cleared" = none ]; then cleared=$c; else cleared="$cleared,$c"; fi
+}
+
 # enter CAUSE SHORT WDT HOST_AUTONEG HOST_SERDES: the safe mode, for this
 # boot. CAUSE is short_boots, watchdog or config. HOST_SERDES is the
-# stored mode when it is not fiber1g, empty otherwise: kept, and named in
-# the flag and the record.
+# stored mode when it is not fiber1g, empty otherwise. After short boots,
+# the host-port keys that lowered the count are removed, so the boots
+# after this one stay in Fiber 1G with auto-negotiation too.
 enter() {
 	cause=$1 short=$2 wdt=$3 an=$4 hs=${5:-} cleared=none
-	if [ "$cause" = short_boots ] && [ "$an" = off ]; then
-		"$TIMEOUT" "$IO_S" "$FLASH" set HOST_AUTONEG "" > /dev/null 2>&1
-		if [ -z "$(key HOST_AUTONEG)" ]; then cleared=HOST_AUTONEG; else cleared=failed; fi
+	if [ "$cause" = short_boots ]; then
+		[ "$an" != off ] || clear_key HOST_AUTONEG
+		[ -z "$hs" ] || clear_key HOST_SERDES
 	fi
 	rm -f "$COUNTER" "$WDTFILE"
 	{
@@ -221,7 +228,6 @@ enter() {
 		echo "uptime=$(uptime_s)"
 		echo "cleared=$cleared"
 		echo "build=$(sed -n 's/^image=//p' "$BUILD" 2>/dev/null | head -n 1)"
-		[ -z "$hs" ] || echo "host_serdes=$hs"
 	} > "$FLAG.new.$$" && put "$FLAG"
 	[ "$cause" = config ] || { cp "$FLAG" "$RECORD.new.$$" 2>/dev/null && put "$RECORD"; }
 	# The root password of this boot: a copy of the account file in RAM,
@@ -232,7 +238,7 @@ enter() {
 		pw=default
 	fi
 	echo "root_password=$pw" >> "$FLAG"
-	event safe_mode "cause=$cause short_boots=$short wdt_resets=$wdt cleared=$cleared root_password=$pw${hs:+ host_serdes=$hs}: this boot only, the PON off, the host port in Fiber 1G with auto-negotiation${hs:+ (HOST_SERDES=$hs kept for the next boot)}, the web UI and root on the default password admin"
+	event safe_mode "cause=$cause short_boots=$short wdt_resets=$wdt cleared=$cleared root_password=$pw: this boot only, the PON off, the host port in Fiber 1G with auto-negotiation, the web UI and root on the default password admin"
 }
 
 boot_ok() {

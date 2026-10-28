@@ -12,10 +12,11 @@
 #                               1000BASE-X PCS powered down, the port forced
 #
 # Any other value runs fiber1g, and says so. There is no board signal that
-# tells one stick from another (the HSGQ XPON stick runs 2500basex or
-# hisgmii and never links in fiber1g), so the key is the only input: the
-# stock LAN_SDS_MODE is not read, since a stick that runs Fiber 1G can hold
-# any value there.
+# tells one stick from another (the stock firmware of the HSGQ XPON stick
+# runs 2500basex or hisgmii), so the key is the only input: the stock
+# LAN_SDS_MODE is not read, since a stick that runs Fiber 1G can hold any
+# value there. Fiber 1G is the fallback everywhere below: it is the most
+# compatible host mode.
 #
 # The mode is a register sequence, run through diag in the order below: the
 # mode parked, the analog block, the mode selected (docs/SWITCH.md, "Host
@@ -41,7 +42,6 @@
 #     host-serdes.sh reapply       run the sequence of the running mode
 #                                  again, one second later; no trial, nothing
 #                                  stored
-#     host-serdes.sh clear         a safe-mode boot only: remove HOST_SERDES
 #     host-serdes.sh status        the state as key=value lines
 #
 # The link each mode can see. host_link (odi_switch) is the port link, and
@@ -54,15 +54,13 @@
 #                      WATCH_S seconds; none: Fiber 1G for WATCH_S, watching
 #                      host_link (the fallback, logged and shown in the web
 #                      UI), then 2500basex again, and so on until one links,
-#                      for at most WATCH_MAX_S; past that it stays on
-#                      2500basex, the confirmed mode: on a board that never
-#                      links in Fiber 1G, ending there would strand it.
+#                      for at most WATCH_MAX_S; past that it stays on Fiber
+#                      1G. The watch never changes the key.
 #     safe mode        safe-mode.sh: three short boots in a row with a mode
 #                      other than fiber1g make the next boot a recovery
-#                      boot, which runs fiber1g for that boot and keeps the
-#                      key (docs/SETTINGS.md, "Recovery: the safe mode",
-#                      has why); there this script refuses a trial and
-#                      allows clear.
+#                      boot, which runs fiber1g and removes the key, as it
+#                      removes HOST_AUTONEG=off; there this script refuses a
+#                      trial.
 #
 # The PCS auto-negotiation. In 2500basex it is off (the only state seen to
 # link at 2.5G), in hisgmii on (the stock HSGQ value, on a PCS that is
@@ -492,7 +490,7 @@ boot() {
 	mode=$setting
 	if [ -f "$SAFE_FLAG" ]; then
 		mode=fiber1g
-		event safe_mode_boot "a safe-mode boot: Fiber 1G, trials refused; HOST_SERDES=${raw:-unset} is kept for the next boot"
+		event safe_mode_boot "a safe-mode boot: Fiber 1G, nothing applied, trials refused (HOST_SERDES=${raw:-unset})"
 	elif [ "$mode" != fiber1g ] && ! param_ok; then
 		mode=fiber1g
 		event no_kernel "this kernel has no odi_switch.host_forced; running Fiber 1G"
@@ -575,9 +573,9 @@ watch() {
 			return 0
 		fi
 		if [ $(( $(uptime_s) - t0 )) -ge "$WATCH_MAX_S" ]; then
-			[ "$running" = "$setting" ] || switch_to "$setting" || true
-			running=$setting fallback=0 phase=steady watch_until=
-			event watch_nolink "no host link in either mode for $(( $(uptime_s) - t0 )) s; staying on $(label "$setting"), the HOST_SERDES mode"
+			[ "$running" = fiber1g ] || switch_to fiber1g || true
+			running=fiber1g fallback=1 phase=steady watch_until=
+			event fallback_nolink "no host link in either mode for $(( $(uptime_s) - t0 )) s; staying on Fiber 1G. HOST_SERDES stays $setting"
 			save
 			unlock
 			return 0
@@ -615,7 +613,7 @@ precheck() {
 	[ ! -f "$SDS_OFF" ] || die "$SDS_OFF is set: the host SerDes is left alone"
 	[ -x "$DIAG" ] || die "no $DIAG"
 	[ "$1" = fiber1g ] || param_ok || die "this kernel has no odi_switch.host_forced"
-	[ ! -f "$SAFE_FLAG" ] || die "this is a safe-mode boot: it runs Fiber 1G; reboot to the saved configuration first (or clear HOST_SERDES)"
+	[ ! -f "$SAFE_FLAG" ] || die "this is a safe-mode boot: it runs Fiber 1G; reboot to the saved configuration first"
 }
 
 try() {
@@ -770,23 +768,6 @@ reapply_run() {
 	unlock
 }
 
-# clear: in a safe-mode boot, which runs Fiber 1G whatever the key says
-# and refuses a trial, the way to make that the stored mode too.
-clear_key() {
-	[ -f "$SAFE_FLAG" ] || die "not a safe-mode boot: use try fiber1g, then confirm"
-	lock_or_die
-	load
-	if ! store ""; then
-		unlock
-		die "could not remove HOST_SERDES"
-	fi
-	setting=fiber1g fallback=0
-	event cleared "HOST_SERDES removed in a safe-mode boot: the next boot runs Fiber 1G"
-	save
-	unlock
-	return 0
-}
-
 status() {
 	load
 	if [ ! -f "$STATE" ]; then
@@ -825,8 +806,7 @@ confirm)     confirm ;;
 revert)      revert ;;
 reapply)     reapply ;;
 reapply-run) reapply_run ;;
-clear)       clear_key ;;
 status)      status ;;
 parse)       parse "${2:-}" ;;
-*)           echo "usage: $0 boot|try fiber1g|2500basex|hisgmii [SECONDS]|confirm|revert|reapply|clear|status" >&2; exit 1 ;;
+*)           echo "usage: $0 boot|try fiber1g|2500basex|hisgmii [SECONDS]|confirm|revert|reapply|status" >&2; exit 1 ;;
 esac

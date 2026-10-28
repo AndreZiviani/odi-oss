@@ -16,15 +16,17 @@ listed here.
   the only setting seen to link to a 2.5G router port; why the stock HSGQ
   firmware links there with it on is not known). `host-serdes.sh` applies
   it from `network.sh` at boot and offers `try`, `confirm`, `revert`,
-  `reapply`, `clear` and `status`: a change is a trial that reverts after
-  120 s unless confirmed over the link. A 2500BASE-X boot watches the
-  SerDes sync (bit 17 of 0x214) and falls back to Fiber 1G, alternating,
-  for up to 10 minutes; HiSGMII has no link signal and no fallback.
-  `HOST_AUTONEG` applies to Fiber 1G only and stands aside while another
-  mode runs. A mode other than `fiber1g` makes three short boots enough for
-  the safe mode, whose boot runs Fiber 1G and keeps the key (an HSGQ stick
-  never links in Fiber 1G, and nothing on the board tells it apart). The
-  stock `LAN_SDS_MODE` is not read. The diagnostics bundle carries
+  `reapply` and `status`: a change is a trial that reverts after 120 s
+  unless confirmed over the link. Fiber 1G, the most compatible host mode,
+  is the fallback everywhere. A 2500BASE-X boot watches the SerDes sync
+  (bit 17 of 0x214) and falls back to Fiber 1G, alternating, for up to 10
+  minutes, staying in Fiber 1G when neither links (the key unchanged);
+  HiSGMII has no link signal and no boot fallback. `HOST_AUTONEG` applies
+  to Fiber 1G only and stands aside while another mode runs. A mode other
+  than `fiber1g` makes three short boots enough for the safe mode, whose
+  boot runs Fiber 1G and clears the key, as it clears `HOST_AUTONEG=off`
+  (`cleared=` can now name both). Whether the HSGQ board links in Fiber 1G
+  is untested. The stock `LAN_SDS_MODE` is not read. The diagnostics bundle carries
   `host-serdes.sh status`. Register values and the HSGQ port by Thaad-QR
   (their reads from a stock HSGQ stick). Host-tested
   (`test/host_serdes_test.sh`, `test/odi_host_forced_test.c`,

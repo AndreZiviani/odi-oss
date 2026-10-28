@@ -1221,7 +1221,6 @@ A boot with the key unset logs nothing and writes nothing.
     /etc/scripts/host-serdes.sh confirm              keep it: stores HOST_SERDES
     /etc/scripts/host-serdes.sh revert               end the trial now
     /etc/scripts/host-serdes.sh reapply              run the sequence of the running mode again
-    /etc/scripts/host-serdes.sh clear                a safe-mode boot only: remove HOST_SERDES
     /etc/scripts/host-serdes.sh status               the state, key=value
     /etc/scripts/host-serdes.sh boot                 network.sh only
 
@@ -1243,9 +1242,7 @@ leaving the trial to revert, when it did not stick. A trial whose
 registers do not read back after the switch goes back at once
 (`trial_failed`). `reapply` answers at once and, one second later, runs the
 whole sequence of the running mode and its port side again, with no trial
-and nothing stored; the event says whether the registers read back. `clear`
-removes the key, only in a safe-mode boot (which runs Fiber 1G and refuses
-a trial). `try` and `reapply` refuse while a trial, a reapply or the boot
+and nothing stored; the event says whether the registers read back. `try` and `reapply` refuse while a trial, a reapply or the boot
 watch runs, while `host-autoneg.sh` runs a trial or its boot watch, in a
 safe-mode boot (`try`), with `/etc/config/sds.off`, without `diag`, and for
 2500BASE-X and HiSGMII on a kernel without `host_forced`; `try` says so
@@ -1260,10 +1257,10 @@ diagnostics bundle (`host-link.txt`):
 
 | key | value |
 |---|---|
-| `setting` | `fiber1g`, `2500basex` or `hisgmii`: `HOST_SERDES` as this boot read it, or as a confirm or clear stored it |
+| `setting` | `fiber1g`, `2500basex` or `hisgmii`: `HOST_SERDES` as this boot read it, or as a confirm stored it |
 | `running` | the mode the host SerDes runs now; `unmanaged` with `sds.off` or without `diag`, `unknown` when the registers could not be read (nothing written) or, in `status`, with no state file |
 | `phase` | `steady`, `watch` (the boot watch of 2500basex is deciding), `trial` or `reapply` |
-| `fallback` | `1` while the port runs Fiber 1G with the key at 2500basex because only Fiber 1G linked this boot |
+| `fallback` | `1` while the port runs Fiber 1G with the key at 2500basex because only Fiber 1G linked this boot, or nothing linked in either mode |
 | `trial_mode`, `trial_deadline` | the mode on trial and the uptime, in seconds, at which it reverts |
 | `watch_until` | the uptime by which the boot watch ends at the latest |
 | `event`, `event_uptime`, `message` | the last event, below |
@@ -1284,11 +1281,10 @@ klogd), at notice:
 | `serdes_link` | the boot watch saw the 2500BASE-X sync; no fallback |
 | `watch_switch` | no link for 30 s; the watch switches mode |
 | `fallback` | the host linked only in Fiber 1G; the key stays 2500basex |
-| `watch_nolink` | no link in either mode for 10 minutes; stays on 2500BASE-X |
-| `safe_mode_boot` | a safe-mode boot: Fiber 1G, the key kept, trials refused |
+| `fallback_nolink` | no link in either mode for 10 minutes; stays on Fiber 1G, the key unchanged |
+| `safe_mode_boot` | a safe-mode boot: Fiber 1G, nothing applied, trials refused |
 | `trial_started`, `trial_expired`, `trial_reverted`, `trial_confirmed`, `trial_failed` | a trial and how it ended |
 | `reapply_started`, `reapplied`, `reapply_failed` | a reapply, and whether the registers read back after it |
-| `cleared` | `clear` removed the key in a safe-mode boot |
 | `bad_value`, `no_kernel`, `apply_failed`, `apply_unverified` | a key that is none of the three, a kernel without `host_forced` (both: the port runs Fiber 1G), a register or parameter that could not be read or written, a sequence that did not read back (the boot carries on in the mode) |
 | `sds_off`, `no_diag` | `/etc/config/sds.off` or no `diag`: nothing written to the host port |
 
@@ -1367,8 +1363,8 @@ about 5 s of uptime), so a power-up counts as short when it is cut roughly
 before it (three with `HOST_AUTONEG=off`, or with `HOST_SERDES` at
 `2500basex` or `hisgmii`) is a safe-mode boot: it writes
 `/var/run/safe-mode` and the record `/etc/config/safe-mode`, removes
-`HOST_AUTONEG` when that was off, keeps `HOST_SERDES` and names it
-(`host_serdes=`), and bind-mounts a RAM copy of
+`HOST_AUTONEG` when that was off and `HOST_SERDES` when it held another
+mode than `fiber1g`, and bind-mounts a RAM copy of
 `/etc/passwd` with root's password `admin` over the read-only one
 (`docs/SETTINGS.md`, "Recovery: the safe mode"). The flag in `/var/run` is
 what the rest reads: `host-serdes.sh` runs Fiber 1G, `host-autoneg.sh`
@@ -1384,8 +1380,8 @@ boot=N short_before=N limit=5|3 wdt_before=N wdt_limit=3 prev=REASON
 uptime=S` on every boot (the uptime is how early the count lands on a given
 stick; `prev` is the previous boot's `reason=`, `none` without a ramlog),
 `event=safe_mode cause=short_boots|watchdog|config short_boots=N
-wdt_resets=N cleared=HOST_AUTONEG|none|failed root_password=default|failed
-[host_serdes=MODE]`, and
+wdt_resets=N cleared=HOST_AUTONEG|HOST_SERDES|HOST_AUTONEG,HOST_SERDES|none|failed
+root_password=default|failed`, and
 `event=safe_mode_ack`.
 
 ### `diag-bundle.sh` -- the diagnostics bundle

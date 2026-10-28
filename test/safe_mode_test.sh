@@ -13,8 +13,8 @@
 # record, HOST_AUTONEG cleared only when it was off, nothing else written to
 # the config, the root password bind-mounted from RAM, the counter gone;
 # the next boot is normal and keeps the record until ack; status and active;
-# HOST_SERDES other than fiber1g counts like HOST_AUTONEG=off and is kept,
-# named in the event, the flag and the record;
+# HOST_SERDES other than fiber1g counts like HOST_AUTONEG=off and is
+# removed by the safe boot, alone or with HOST_AUTONEG;
 # the laser and gponact PON steps skipped on a safe-mode boot only.
 # The watchdog trigger: the previous boot's reason (a stand-in for
 # /proc/odi_ramlog_prev) counts wdt_*, panic and oops, power leaves the count,
@@ -138,32 +138,38 @@ t "  HOST_AUTONEG is cleared" "^$" "$(key)"
 sh "$S" ack > /dev/null
 
 # ---- HOST_SERDES other than fiber1g: three short boots too, and the key
-# is KEPT (a board that only links in that mode would be stranded for good
-# by its removal); the flag, the record and the event name it.
+# goes, as HOST_AUTONEG=off does: Fiber 1G is the fallback, the most
+# compatible host mode.
 "$F" set HOST_SERDES 2500basex > /dev/null
 for i in 1 2 3; do newboot 12; sh "$S" count > /dev/null; done
 [ ! -f "$FLAG" ] && ok "HOST_SERDES=2500basex: two short boots before is not enough" || no "HOST_SERDES=2500basex: two short boots before is not enough"
 t "HOST_SERDES=2500basex: the limit is 3" "limit=3" "$(cat "$T/kmsg")"
 newboot 12
 sh "$S" count > /dev/null
-t "HOST_SERDES=2500basex: the fourth boot is the safe one, the key named" "event=safe_mode cause=short_boots short_boots=3 wdt_resets=0 cleared=none root_password=default host_serdes=2500basex: .*Fiber 1G.*HOST_SERDES=2500basex kept" "$(cat "$T/kmsg")"
-t "  HOST_SERDES is kept" "^2500basex$" "$(sed -n 's/^HOST_SERDES=//p' "$ODI_CONF")"
-t "  the flag and the record name it" "host_serdes=2500basex.*host_serdes=2500basex" "$(tr '\n' ' ' < "$FLAG") $(tr '\n' ' ' < "$RECORD")"
-t "  status shows it" "now_host_serdes=2500basex.*record_host_serdes=2500basex" "$(sh "$S" status | tr '\n' ' ')"
+t "HOST_SERDES=2500basex: the fourth boot is the safe one, the key cleared" "event=safe_mode cause=short_boots short_boots=3 wdt_resets=0 cleared=HOST_SERDES root_password=default" "$(cat "$T/kmsg")"
+t "  HOST_SERDES is removed" "^$" "$(sed -n 's/^HOST_SERDES=//p' "$ODI_CONF")"
+t "  the flag and the record say so" "cleared=HOST_SERDES.*cleared=HOST_SERDES" "$(tr '\n' ' ' < "$FLAG") $(tr '\n' ' ' < "$RECORD")"
 sh "$S" ack > /dev/null
 "$F" set HOST_SERDES hisgmii > /dev/null
-for i in 1 2 3; do newboot 12; sh "$S" count > /dev/null; done
-t "HOST_SERDES=hisgmii: the limit is 3 too" "limit=3" "$(cat "$T/kmsg")"
-rm -f "$COUNTER"
+setkey off
+for i in 1 2 3 4; do newboot 12; sh "$S" count > /dev/null; done
+t "HOST_SERDES=hisgmii and HOST_AUTONEG=off: both cleared, in that order" "cleared=HOST_AUTONEG,HOST_SERDES " "$(cat "$T/kmsg")"
+t "  both keys gone" "^ $" "$(key) $(sed -n 's/^HOST_SERDES=//p' "$ODI_CONF")"
+sh "$S" ack > /dev/null; rm -f "$FLAG"
 "$F" set HOST_SERDES sideways > /dev/null
 newboot 12; sh "$S" count > /dev/null
 t "HOST_SERDES with a bad value (it runs fiber1g): the limit stays 5" "limit=5" "$(cat "$T/kmsg")"
 rm -f "$COUNTER"
+"$F" set HOST_SERDES hisgmii > /dev/null
+rm -f "$WDTFILE"
+for i in 1 2 3; do
+	newboot 12; echo "previous boot: boot=8 slot=1 build=x crumb=y reason=wdt_userland" > "$PREV"
+	sh "$S" count > /dev/null; [ -f "$FLAG" ] || rm -f "$COUNTER"
+done
+t "a watchdog safe mode leaves HOST_SERDES alone, as it does HOST_AUTONEG" "cause=watchdog.*cleared=none" "$(tr '\n' ' ' < "$FLAG")"
+t "  HOST_SERDES still set" "^hisgmii$" "$(sed -n 's/^HOST_SERDES=//p' "$ODI_CONF")"
+sh "$S" ack > /dev/null; rm -f "$FLAG" "$PREV" "$WDTFILE" "$COUNTER"
 "$F" set HOST_SERDES "" > /dev/null
-for i in 1 2 3 4 5 6; do newboot 12; sh "$S" count > /dev/null; done
-n "HOST_SERDES unset: the safe event names no mode" "host_serdes" "$(cat "$T/kmsg")"
-n "  and neither does the flag" "host_serdes" "$(cat "$FLAG")"
-sh "$S" ack > /dev/null; rm -f "$FLAG"
 
 # ---- a long boot in between starts again; an unreadable counter is 0
 setkey ""

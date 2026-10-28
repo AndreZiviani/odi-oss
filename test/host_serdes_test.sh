@@ -26,7 +26,7 @@
 # Fiber 1G, a host that comes up late, no host at all); the trial (expiry,
 # confirm, revert, a sequence that does not read back, every refusal); the
 # auto-negotiation handed back to host-autoneg.sh in Fiber 1G; reapply;
-# clear; status; host-autoneg.sh standing down while a mode other than
+# status; host-autoneg.sh standing down while a mode other than
 # Fiber 1G runs. The safe-mode count is test/safe_mode_test.sh.
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -325,12 +325,14 @@ t "late 2.5G host: back to 2500basex, in sync, no fallback" "^serdes_link 0 2500
 t "late 2.5G host: it went to Fiber 1G, then 2500BASE-X again" "trying Fiber 1G.*trying 2500BASE-X" "$(tr '\n' ' ' < "$T/kmsg")"
 t "late 2.5G host: port forced, auto-negotiation off again" "^1 0$" "$(p host_forced) $(p host_autoneg)"
 
-# No host: bounded, and it ends on the configured mode.
+# No host: bounded, and it ends on Fiber 1G, the most compatible mode;
+# the key is not changed.
 newboot
 echo none > "$T/model"
 sh "$S" boot > /dev/null 2>&1; sh "$S" watch > /dev/null 2>&1
-t "no host: watch_nolink, running 2500basex (the HOST_SERDES mode)" "^watch_nolink 0 2500basex steady$" "$(st event) $(st fallback) $(st running) $(st phase)"
-t "no host: the registers and the port are 2500BASE-X" "^0x16 1 0$" "$(printf '0x%x' $(( $(reg 0x214) & 0xa11f ))) $(p host_forced) $(p host_autoneg)"
+t "no host: fallback_nolink, running fiber1g" "^fallback_nolink 1 fiber1g steady$" "$(st event) $(st fallback) $(st running) $(st phase)"
+t "no host: the registers are Fiber 1G, the port follows its SerDes, auto-negotiation on" "^0x4 0 1$" "$(printf '0x%x' $(( $(reg 0x214) & 0xa11f ))) $(p host_forced) $(p host_autoneg)"
+t "no host: HOST_SERDES stays 2500basex" "^2500basex$" "$(key)"
 up=$(cut -d. -f1 "$T/uptime")
 [ "$up" -le $((15 + 40 + 5 + 2)) ] && ok "no host: the watch ended within WATCH_MAX_S (uptime $up)" || no "no host: bounded" "uptime $up"
 
@@ -376,22 +378,22 @@ t "no host_forced parameter: running fiber1g, logged" "^no_kernel fiber1g$" "$(s
 out=$(sh "$S" try 2500basex 2>&1)
 t "  ... and a trial of 2500basex refused" "no odi_switch.host_forced" "$out"
 
-# ---- a safe-mode boot: Fiber 1G, the key kept, no trial, clear allowed
+# ---- a safe-mode boot: Fiber 1G, no trial. Removing the key is
+# safe-mode.sh's (test/safe_mode_test.sh); this script writes none.
 newboot
 echo "short_boots=3" > "$SAFE_FLAG"
 sh "$S" boot > /dev/null 2>&1
 t "safe-mode boot: Fiber 1G, nothing on the port side" "^fiber1g N Y safe_mode_boot$" "$(st running) $(p host_forced) $(p host_autoneg) $(st event)"
-t "safe-mode boot: the key is kept" "^2500basex$" "$(key)"
+t "safe-mode boot: host-serdes.sh does not write the key" "^2500basex$" "$(key)"
 t "safe-mode boot: no watch" "^$" "$(spawned_none)"
 out=$(sh "$S" try 2500basex 2>&1)
 t "safe-mode boot: a trial is refused" "safe-mode boot" "$out"
 t "status says so" "safe_mode_boot=1" "$(sh "$S" status)"
-sh "$S" clear > /dev/null
-t "safe-mode boot: clear removes the key" "^$" "$(key)"
-t "  ... setting fiber1g, event cleared" "^fiber1g cleared$" "$(st setting) $(st event)"
 rm -f "$SAFE_FLAG"
-out=$(sh "$S" clear 2>&1)
-t "clear outside a safe-mode boot is refused" "not a safe-mode boot" "$out"
+out=$(sh "$S" clear 2>&1); rc=$?
+t "there is no clear verb" "usage" "$out"
+[ "$rc" = 1 ] && ok "  ... exit 1" || no "  ... exit 1" "rc $rc"
+setkey ""
 
 # ---- the trial, from Fiber 1G
 setkey ""
