@@ -1176,7 +1176,8 @@ Two kernel parameters, under `/sys/module/odi_switch/parameters/`:
   boot runs, from `HOST_AUTONEG` (`host-autoneg.sh`, `docs/TOOLS.md`).
 - `host_link` (read-only): `1` while `PORT_ABILITY(0).LINK_UP` is set, `0`
   otherwise, read when asked. What `host-autoneg.sh` and the web UI read to
-  decide whether a mode works.
+  decide whether a mode works. On a forced port (`host_forced`, below) it
+  reads the forced value, `1`, whatever the host does.
 
 `test/odi_host_autoneg_test.c` checks the writes in both directions, that a
 second apply writes nothing, that the other bits survive, that the default
@@ -1185,6 +1186,106 @@ platform settings neither read nor write the word, and the link read.
 To see it on a stick: `register get 0x21c00 1` in `diag` (bit 12), `cat
 /sys/module/odi_switch/parameters/host_link`, and on the host `ethtool
 <if>` (`Auto-negotiation: on|off`, `Link detected`).
+
+## Host port SerDes mode
+
+`HOST_SERDES` (`docs/SETTINGS.md`, "Host port SerDes mode") picks the mode
+of the host SerDes: Fiber 1G (1000BASE-X, the default), 2500BASE-X or
+HiSGMII. `host-serdes.sh` runs the mode's register sequence through `diag`,
+then sets the port side and the PCS auto-negotiation bit through two kernel
+parameters. The sequences and the forced port values are the reporter's,
+read off a stick running its stock HSGQ firmware in each mode; the Fiber 1G
+one is the sequence this image always ran.
+
+The sequence: the same thirteen steps in every mode, in this order (the
+mode parked, the analog block, the mode selected), and in 2500BASE-X two
+more, the 3.125G analog page before the mode is selected and a receive
+pulse after it. RMW is a read-modify-write of the bits named; the rest are
+plain writes.
+
+| step | register | Fiber 1G | 2500BASE-X | HiSGMII |
+|---|---|---|---|---|
+| 1 | `HOST_SERDES_MODE` 0x214 `HOLD_CLK_GLITCH` bit 13 := 1 (RMW) | same | same | same |
+| 2 | 0x214 `PCIE_SELECT` bit 15 := 0, `LINK_MODE` [4:0] := 0x1f, parked (RMW) | same | same | same |
+| 3 | `HOST_FIBER_CTRL` 0x21c00 `POWER_DOWN` bit 11 (RMW) | 0 | 0 | 1 |
+| 4 | `HOST_FIBER_TX` 0x22e4c `TX_MODE` [15:14] (RMW) | 0 | 1 | 1 |
+| 5-8 | 0x21680 := 0, 0x2168c := 0x3001, 0x21698 := 0x68, 0x215b8 := 0x98c5 | same | same | same |
+| 9 | 0x215b4, the TX amplitude word | 0x1264 | 0x1764 | 0x1564 |
+| 10-11 | 0x215bc := 0x400f, 0x215e4 := 0xfc00 | same | same | same |
+| -- | the 3.125G analog page: 0x21700 := 0x1800, 0x2170c := 0x7b01, 0x21718 := 0x168 | -- | written | -- |
+| 12 | 0x214 bits 15, 13, 8 and [4:0] := the mode (RMW, mask 0xa11f) | 0x4 | 0x16 | 0x112 (`PHY_SIDE_SEL` bit 8 and 0x12) |
+| 13 | `PHY_PATCH_STATUS` 0x110 `PATCH_DONE` bit 0 := 1 (RMW) | same | same | same |
+| -- | 0x21500 := 0x10, then 0x30, then 0: a receive pulse | -- | written | -- |
+
+What the boot compares, before writing anything and after: the words of
+steps 2 to 13 under their masks (0x214 under 0xa11f, 0x21c00 under 0x800,
+0x22e4c under 0xc000, the rest whole), plus the 3.125G page in 2500BASE-X.
+0x21500 is not compared: it reads 0 after its pulse. A stick that already
+holds the mode is not written; a live change (a trial, its revert, the boot
+watch, `reapply`) writes the whole sequence whatever the registers hold.
+Read back from the HSGQ stick in 2500BASE-X: 0x214 = 0x00260016, 0x21c00 =
+0x0140, 0x215b4 = 0x1764, 0x21500 = 0, the 3.125G page as written (and
+0x21600, 0x2160c, 0x21618 the same, written by nothing here), 0x2166c =
+0x2176c = 1. In HiSGMII 0x214 = 0x00260112 and 0x21c00 = 0x1940.
+
+After the sequence, in 2500BASE-X and HiSGMII, the port side and the PCS:
+
+- `odi_switch.host_forced` = `Y`: `PORT_FORCE_ABILITY(0)` = 0x16 (link up,
+  full duplex, 1000 Mb/s) and `PORT_FORCE_SELECT(0)` = 0xfff, the values of
+  the stock HSGQ firmware (read: 0x180 = 0x198 = 0x16, 0x1b4 = 0xfff). The
+  1000BASE-X PCS reports no link to the port in these modes, so without the
+  force the port has none.
+- `odi_switch.host_autoneg`: `N` in 2500BASE-X (0x21c00 0x1140 becomes
+  0x0140; the only setting seen to link to a 2.5G router port, see
+  `docs/SETTINGS.md`), `Y` in HiSGMII (0x1940, the stock value; the PCS is
+  powered down).
+
+Back in Fiber 1G during a boot, `host_forced` goes back to `N` (only when
+it was `Y`) and `host_autoneg` to what `host-autoneg.sh` last ran. A boot
+in Fiber 1G writes neither: the kernel defaults stand.
+
+**The link a mode can see.** `host_link` is `PORT_ABILITY(0).LINK_UP`, which
+a forced port reports as forced, `1`. So in the two forced modes it is
+blind. In 2500BASE-X bit 17 of 0x214 is set while the SerDes is in sync
+with the host: 0x00260016 on a stick that linked, 0x00240016 on one that
+did not (auto-negotiation on, against the same port). `host-serdes.sh`
+reads it through `diag` for its boot watch and its `status`; it is not a
+kernel parameter, because it is an observation of one mode on one stick.
+The same bit is set on a DFP-34X-2C2 running Fiber 1G (0x00260004). HiSGMII
+has no signal known: no boot watch there, only the trial revert.
+
+`odi_switch.host_forced` (bool, default `N`, 0644), `odi_sw_host_forced_apply()`
+in `odi_switch_port.c`: written `Y`, it writes the forced value, then the
+select, then the PAUSE policy again (which owns the `TX_PAUSE` bit of both
+words: with `host_pause=N` the select stays 0xfff, with `Y` it is 0xfbf);
+written `Y` again, it writes the same values again. Written `N` after `Y`,
+it clears the select word, so the port follows its SerDes again, then
+the PAUSE policy. Written `N` while already `N`, it writes nothing, so a
+stick that never forces the port keeps its registers exactly as before.
+On the command line it is stored, and the platform settings apply it (a
+step that reads and writes nothing while it is `N`: the boot goldens do
+not move). An OLT admin lock (cmd 32, `OMCI_UNI_LOCK`) survives it both
+ways: a locked port forced keeps its forced `LINK` value at 0, and a
+locked port unforced keeps its `LINK` select bit.
+
+cmd 32 on a forced port. The stock admin enable clears the `LINK` select
+bit on an unlock, handing the link back to the PHY or SerDes; on a forced
+port that would leave no link at all, and omcid unlocks the UNI at every
+provisioning. So while `host_forced` is set, cmd 32 on port 0 moves the
+forced `LINK` value instead (0 to lock, 1 to unlock, the value first) and
+keeps the select bit set. Other ports, and port 0 unforced, are as before.
+
+`test/odi_host_forced_test.c` checks the forced values both ways and with
+either PAUSE policy, the order of the writes, cmd 32 on a forced port, the
+ISP1 provisioning (cmd 32 among it) leaving the force in place, an admin
+lock across the force, and that the default platform settings write port
+0 for the PAUSE policy only. `test/host_serdes_test.sh` checks the write
+sequence of each mode, value for value and in order.
+
+To see it on a stick: `register get 0x214 1` in `diag` (bits 4:0 the mode,
+bit 17 the sync), `register get 0x180 1` and `register get 0x1b4 1`, `cat
+/sys/module/odi_switch/parameters/host_forced`, and `host-serdes.sh
+status`.
 
 ## Multicast
 

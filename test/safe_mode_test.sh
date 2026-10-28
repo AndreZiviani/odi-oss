@@ -13,6 +13,8 @@
 # record, HOST_AUTONEG cleared only when it was off, nothing else written to
 # the config, the root password bind-mounted from RAM, the counter gone;
 # the next boot is normal and keeps the record until ack; status and active;
+# HOST_SERDES other than fiber1g counts like HOST_AUTONEG=off and is kept,
+# named in the event, the flag and the record;
 # the laser and gponact PON steps skipped on a safe-mode boot only.
 # The watchdog trigger: the previous boot's reason (a stand-in for
 # /proc/odi_ramlog_prev) counts wdt_*, panic and oops, power leaves the count,
@@ -32,6 +34,7 @@ pass=0 fail=0
 ok() { echo "ok    $1"; pass=$((pass + 1)); }
 no() { echo "FAIL  $1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/        /'; fail=$((fail + 1)); }
 t() { if [[ $3 =~ $2 ]]; then ok "$1"; else no "$1" "wanted /$2/, got: $3"; fi; }
+n() { if [[ $3 =~ $2 ]]; then no "$1" "did not want /$2/, got: $3"; else ok "$1"; fi; }
 
 mkdir -p "$T/bin" "$T/config" "$T/run"
 cat > "$T/bin/timeout" <<'EOF'
@@ -133,6 +136,34 @@ sh "$S" count > /dev/null
 t "key off: the fourth boot is the safe one" "event=safe_mode cause=short_boots short_boots=3 wdt_resets=0 cleared=HOST_AUTONEG" "$(cat "$T/kmsg")"
 t "  HOST_AUTONEG is cleared" "^$" "$(key)"
 sh "$S" ack > /dev/null
+
+# ---- HOST_SERDES other than fiber1g: three short boots too, and the key
+# is KEPT (a board that only links in that mode would be stranded for good
+# by its removal); the flag, the record and the event name it.
+"$F" set HOST_SERDES 2500basex > /dev/null
+for i in 1 2 3; do newboot 12; sh "$S" count > /dev/null; done
+[ ! -f "$FLAG" ] && ok "HOST_SERDES=2500basex: two short boots before is not enough" || no "HOST_SERDES=2500basex: two short boots before is not enough"
+t "HOST_SERDES=2500basex: the limit is 3" "limit=3" "$(cat "$T/kmsg")"
+newboot 12
+sh "$S" count > /dev/null
+t "HOST_SERDES=2500basex: the fourth boot is the safe one, the key named" "event=safe_mode cause=short_boots short_boots=3 wdt_resets=0 cleared=none root_password=default host_serdes=2500basex: .*Fiber 1G.*HOST_SERDES=2500basex kept" "$(cat "$T/kmsg")"
+t "  HOST_SERDES is kept" "^2500basex$" "$(sed -n 's/^HOST_SERDES=//p' "$ODI_CONF")"
+t "  the flag and the record name it" "host_serdes=2500basex.*host_serdes=2500basex" "$(tr '\n' ' ' < "$FLAG") $(tr '\n' ' ' < "$RECORD")"
+t "  status shows it" "now_host_serdes=2500basex.*record_host_serdes=2500basex" "$(sh "$S" status | tr '\n' ' ')"
+sh "$S" ack > /dev/null
+"$F" set HOST_SERDES hisgmii > /dev/null
+for i in 1 2 3; do newboot 12; sh "$S" count > /dev/null; done
+t "HOST_SERDES=hisgmii: the limit is 3 too" "limit=3" "$(cat "$T/kmsg")"
+rm -f "$COUNTER"
+"$F" set HOST_SERDES sideways > /dev/null
+newboot 12; sh "$S" count > /dev/null
+t "HOST_SERDES with a bad value (it runs fiber1g): the limit stays 5" "limit=5" "$(cat "$T/kmsg")"
+rm -f "$COUNTER"
+"$F" set HOST_SERDES "" > /dev/null
+for i in 1 2 3 4 5 6; do newboot 12; sh "$S" count > /dev/null; done
+n "HOST_SERDES unset: the safe event names no mode" "host_serdes" "$(cat "$T/kmsg")"
+n "  and neither does the flag" "host_serdes" "$(cat "$FLAG")"
+sh "$S" ack > /dev/null; rm -f "$FLAG"
 
 # ---- a long boot in between starts again; an unreadable counter is 0
 setkey ""

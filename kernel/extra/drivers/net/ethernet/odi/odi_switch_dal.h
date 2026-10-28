@@ -61,7 +61,8 @@ void odi_sw_port_autoneg_set(uint32_t reg_a408, uint32_t reg_a412, uint32_t reg_
 /* cmd 32: the admin state of a port. enable 0 forces its link down
  * (PORT_FORCE_ABILITY LINK 0, then PORT_FORCE_SELECT LINK 1), enable 1
  * clears that select bit. Bit 4 of each word only: the host-port PAUSE
- * force (below) is kept.
+ * force (below) is kept. A forced host port (odi_sw_host_forced) keeps its
+ * select bit either way and moves the forced LINK value instead.
  */
 void odi_sw_port_admin_set(uint32_t port, int enable);
 
@@ -120,8 +121,26 @@ extern bool odi_sw_host_autoneg;
  */
 void odi_sw_host_autoneg_apply(void);
 
+/* Whether the host port runs forced, link up, full duplex, 1000 Mbit/s,
+ * whatever its SerDes reports: false (the default) leaves the port to its
+ * SerDes; true is what the host SerDes modes other than Fiber 1G need
+ * (2500BASE-X and HiSGMII, HOST_SERDES), where no 1000BASE-X PCS reports a
+ * link to the port. The kernel parameter odi_switch.host_forced
+ * (odi_switch.c) sets it; userland drives it from HOST_SERDES
+ * (docs/SWITCH.md#host-port-serdes-mode).
+ */
+extern bool odi_sw_host_forced;
+
+/* Applies odi_sw_host_forced to PORT_FORCE_ABILITY(0) and
+ * PORT_FORCE_SELECT(0), keeping an admin lock (cmd 32) across, then the
+ * PAUSE policy again, and logs the result. The caller holds
+ * odi_switch_lock.
+ */
+void odi_sw_host_forced_apply(void);
+
 /* LINK_UP of PORT_ABILITY(0): 1 while the host port has a link. A plain
- * read, safe without the lock.
+ * read, safe without the lock. On a forced host port (odi_sw_host_forced)
+ * it is the forced value, so it says nothing about the host.
  */
 uint32_t odi_sw_host_link_up(void);
 

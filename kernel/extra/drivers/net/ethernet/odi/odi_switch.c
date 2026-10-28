@@ -314,9 +314,46 @@ static const struct kernel_param_ops odi_switch_host_autoneg_param_ops = {
 module_param_cb(host_autoneg, &odi_switch_host_autoneg_param_ops, &odi_sw_host_autoneg, 0644);
 MODULE_PARM_DESC(host_autoneg, "1000BASE-X auto-negotiation on the host port (default: yes; no forces 1000BASE-X full duplex)");
 
+/* odi_switch.host_forced: the host port forced to link up, full duplex,
+ * 1000 Mbit/s, for the host SerDes modes other than Fiber 1G
+ * (odi_sw_host_forced_apply()). Written to
+ * /sys/module/odi_switch/parameters/host_forced it applies at once
+ * whenever the switch window is mapped; on the command line it is stored
+ * and the platform settings apply it. Writing N when it is already N
+ * writes nothing, so a stick that never forces the port keeps its
+ * registers exactly as before; Y is applied again on every write. Not
+ * persistent: HOST_SERDES and host-serdes.sh decide what each boot runs.
+ */
+static int odi_switch_host_forced_param_set(const char *val, const struct kernel_param *kp)
+{
+	bool on;
+	int rc;
+
+	rc = kstrtobool(val, &on);
+	if (rc)
+		return rc;
+	mutex_lock(&odi_switch_lock);
+	if (on || odi_sw_host_forced) {
+		odi_sw_host_forced = on;
+		if (odi_switch_base)
+			odi_sw_host_forced_apply();
+	}
+	mutex_unlock(&odi_switch_lock);
+	return 0;
+}
+
+static const struct kernel_param_ops odi_switch_host_forced_param_ops = {
+	.set = odi_switch_host_forced_param_set,
+	.get = param_get_bool,
+};
+module_param_cb(host_forced, &odi_switch_host_forced_param_ops, &odi_sw_host_forced, 0644);
+MODULE_PARM_DESC(host_forced, "force the host port to link up, full duplex, 1000 Mbit/s, for the 2500BASE-X and HiSGMII host SerDes modes (default: no, the port follows its SerDes)");
+
 /* odi_switch.host_link, read-only: 1 while the host port has a link
  * (PORT_ABILITY(0).LINK_UP, read when asked), 0 without one. What
  * host-autoneg.sh and the web UI read to decide whether a mode works.
+ * With odi_switch.host_forced set it reads the forced value, 1, whatever
+ * the host does.
  */
 static int odi_switch_host_link_param_get(char *buf, const struct kernel_param *kp)
 {

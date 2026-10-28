@@ -5,6 +5,31 @@ listed here.
 
 ## Unreleased
 
+- Host SerDes mode: the new odi-only key `HOST_SERDES` (default `fiber1g`,
+  the mode and the thirteen-write sequence the image always ran, value for
+  value) selects `2500basex`, for a 2.5G host and the HSGQ XPON stick, or
+  `hisgmii` (the stock "HiSGMII" mode, the MAC at 1000 Mb/s). In both the
+  host port is forced up (the new kernel parameter `odi_switch.host_forced`;
+  cmd 32 then moves the forced link value, so an OLT unlock keeps the
+  link), and the PCS auto-negotiation is set per mode (off in 2500BASE-X,
+  the only setting seen to link to a 2.5G router port; why the stock HSGQ
+  firmware links there with it on is not known). `host-serdes.sh` applies
+  it from `network.sh` at boot and offers `try`, `confirm`, `revert`,
+  `reapply`, `clear` and `status`: a change is a trial that reverts after
+  120 s unless confirmed over the link. A 2500BASE-X boot watches the
+  SerDes sync (bit 17 of 0x214) and falls back to Fiber 1G, alternating,
+  for up to 10 minutes; HiSGMII has no link signal and no fallback.
+  `HOST_AUTONEG` applies to Fiber 1G only and stands aside while another
+  mode runs. A mode other than `fiber1g` makes three short boots enough for
+  the safe mode, whose boot runs Fiber 1G and keeps the key (an HSGQ stick
+  never links in Fiber 1G, and nothing on the board tells it apart). The
+  stock `LAN_SDS_MODE` is not read. The diagnostics bundle carries
+  `host-serdes.sh status`. Register values and the HSGQ port by Thaad-QR
+  (their reads from a stock HSGQ stick). Host-tested
+  (`test/host_serdes_test.sh`, `test/odi_host_forced_test.c`,
+  `test/safe_mode_test.sh`); not yet run on hardware with this image.
+  Refs #229.
+
 - omcid: a bridge port of TP type 3 whose pointer names both an 802.1p mapper
   and a GEM interworking TP (entity ids are unique per class only) is read as
   the mapper when that mapper sends any priority to another TP, so every GEM

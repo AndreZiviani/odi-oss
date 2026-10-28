@@ -77,7 +77,7 @@ chmod +x "$T/bin/"*
 
 export PATH="$T/bin:$PATH"
 export FLASH=$F SELF=$S PARAM_DIR=$T/param STATE=$T/run/state LOCKDIR=$T/run/lock
-export SAFE_FLAG=$T/run/safe-mode
+export SAFE_FLAG=$T/run/safe-mode SERDES_STATE=$T/run/host-serdes
 export UPTIME=$T/uptime KMSG=$T/kmsg LOG=$T/services.log SLEEP=$T/bin/sleep TIMEOUT=$T/bin/timeout
 export BUILD=$T/odi-build
 export ODI_CONF=$T/config/odi.conf CS=$T/config/lastgood.xml HS=$T/config/lastgood_hs.xml TMPDIR_=$T

@@ -20,8 +20,8 @@
 # The trigger. Every boot adds one to a counter on the config partition as
 # early as the partition allows, and a boot that reaches BOOT_OK_S of uptime
 # clears it. When the boots before this one were all short -- SAFE_BOOTS_AN_OFF
-# (3) of them with HOST_AUTONEG=off, SAFE_BOOTS (5) otherwise -- this boot is
-# a safe-mode boot. So: plug the stick in, wait about 80 s, pull it; repeat;
+# (3) of them with HOST_AUTONEG=off or HOST_SERDES set to 2500basex or
+# hisgmii, SAFE_BOOTS (5) otherwise -- this boot is a safe-mode boot. So: plug the stick in, wait about 80 s, pull it; repeat;
 # then leave it in: the fourth (or sixth) boot is the safe one. Uptime
 # starts at the kernel, about 54 s after a cold power-on on the sticks
 # measured, so a power-up counts between about 60 and 110 s after
@@ -49,8 +49,12 @@
 # The safe mode lasts this one boot, and writes nothing to the config
 # partition but its record (and, when HOST_AUTONEG=off made it fire, the
 # removal of that key, which is the setting that needed undoing):
-#   - the host port runs auto-negotiation (host-autoneg.sh does not apply
-#     HOST_AUTONEG this boot);
+#   - the host port runs Fiber 1G with auto-negotiation (host-serdes.sh
+#     does not apply HOST_SERDES this boot, host-autoneg.sh not
+#     HOST_AUTONEG). HOST_SERDES is kept, not cleared: no signal tells a
+#     board that only links in another mode, and clearing it there would
+#     make every later boot unreachable too; the record names it, and
+#     host-serdes.sh clear removes it from this boot;
 #   - the PON is off: the PON steps leave the laser off and skip gponact
 #     (rcs-lib.sh), so the stick cannot disturb the OLT, and the kernel
 #     refuses an activation with the laser off anyway;
@@ -126,8 +130,9 @@ put() {
 	mv "$1.new.$$" "$1" 2>/dev/null || { rm -f "$1.new.$$"; return 1; }
 }
 
+# key NAME: the stored value of an odi.conf key, or nothing.
 key() {
-	"$TIMEOUT" "$IO_S" "$FLASH" get HOST_AUTONEG 2>/dev/null | sed -n 's/^HOST_AUTONEG=//p' | head -n 1
+	"$TIMEOUT" "$IO_S" "$FLASH" get "$1" 2>/dev/null | sed -n "s/^$1=//p" | head -n 1
 }
 
 # prev_reason: why the previous boot ended, as the kernel recorded it
@@ -171,17 +176,19 @@ count() {
 	fi
 	reason=$(prev_reason)
 	wdt=$(wdt_update "$reason")
-	an=$(key)
+	an=$(key HOST_AUTONEG)
+	hs=$(key HOST_SERDES)
+	case $hs in 2500basex|hisgmii) ;; *) hs="" ;; esac
 	limit=$SAFE_BOOTS
-	[ "$an" = off ] && limit=$SAFE_BOOTS_AN_OFF
+	{ [ "$an" = off ] || [ -n "$hs" ]; } && limit=$SAFE_BOOTS_AN_OFF
 	short=$(( n - 1 ))
 	event boot_count "boot=$n short_before=$short limit=$limit wdt_before=$wdt wdt_limit=$WDT_BOOTS prev=${reason:-none} uptime=$up"
 	if [ "$short" -ge "$limit" ]; then
-		enter short_boots "$short" "$wdt" "$an"
+		enter short_boots "$short" "$wdt" "$an" "$hs"
 		return 0
 	fi
 	if [ "$wdt" -ge "$WDT_BOOTS" ]; then
-		enter watchdog "$short" "$wdt" "$an"
+		enter watchdog "$short" "$wdt" "$an" "$hs"
 		return 0
 	fi
 	setsid sh "$SELF" boot-ok < /dev/null >> "$LOG" 2>&1 &
@@ -193,16 +200,18 @@ count() {
 # nowhere to write it; the flag in /var/run still says it).
 no_config() {
 	say "no writable $CONFIG_DIR: safe mode for this boot" >&2
-	enter config 0 0 ""
+	enter config 0 0 "" ""
 }
 
-# enter CAUSE SHORT WDT HOST_AUTONEG: the safe mode, for this boot. CAUSE is
-# short_boots, watchdog or config.
+# enter CAUSE SHORT WDT HOST_AUTONEG HOST_SERDES: the safe mode, for this
+# boot. CAUSE is short_boots, watchdog or config. HOST_SERDES is the
+# stored mode when it is not fiber1g, empty otherwise: kept, and named in
+# the flag and the record.
 enter() {
-	cause=$1 short=$2 wdt=$3 an=$4 cleared=none
+	cause=$1 short=$2 wdt=$3 an=$4 hs=${5:-} cleared=none
 	if [ "$cause" = short_boots ] && [ "$an" = off ]; then
 		"$TIMEOUT" "$IO_S" "$FLASH" set HOST_AUTONEG "" > /dev/null 2>&1
-		if [ -z "$(key)" ]; then cleared=HOST_AUTONEG; else cleared=failed; fi
+		if [ -z "$(key HOST_AUTONEG)" ]; then cleared=HOST_AUTONEG; else cleared=failed; fi
 	fi
 	rm -f "$COUNTER" "$WDTFILE"
 	{
@@ -212,6 +221,7 @@ enter() {
 		echo "uptime=$(uptime_s)"
 		echo "cleared=$cleared"
 		echo "build=$(sed -n 's/^image=//p' "$BUILD" 2>/dev/null | head -n 1)"
+		[ -z "$hs" ] || echo "host_serdes=$hs"
 	} > "$FLAG.new.$$" && put "$FLAG"
 	[ "$cause" = config ] || { cp "$FLAG" "$RECORD.new.$$" 2>/dev/null && put "$RECORD"; }
 	# The root password of this boot: a copy of the account file in RAM,
@@ -222,7 +232,7 @@ enter() {
 		pw=default
 	fi
 	echo "root_password=$pw" >> "$FLAG"
-	event safe_mode "cause=$cause short_boots=$short wdt_resets=$wdt cleared=$cleared root_password=$pw: this boot only, the PON off, the host port on auto-negotiation, the web UI and root on the default password admin"
+	event safe_mode "cause=$cause short_boots=$short wdt_resets=$wdt cleared=$cleared root_password=$pw${hs:+ host_serdes=$hs}: this boot only, the PON off, the host port in Fiber 1G with auto-negotiation${hs:+ (HOST_SERDES=$hs kept for the next boot)}, the web UI and root on the default password admin"
 }
 
 boot_ok() {
