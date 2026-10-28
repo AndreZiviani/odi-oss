@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- diag-bundle: `host-link.txt` reads the host SerDes pages (the 1.25G and
+  3.125G pages, RX enable, the analog words, the host port force, ability and
+  select words), read-only, and adds `host-serdes.sh status` when that script
+  is present, so a host-link report shows where the lane stands. Refs #229, Refs #231.
+
 - omcid: a bridge port of TP type 3 whose pointer names both an 802.1p mapper
   and a GEM interworking TP (entity ids are unique per class only) is read as
   the mapper when that mapper sends any priority to another TP, so every GEM

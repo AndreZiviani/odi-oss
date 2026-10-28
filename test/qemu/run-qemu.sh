@@ -493,6 +493,10 @@ for f in MANIFEST.txt dmesg.txt syslog.txt meminfo.txt mounts.txt uptime.txt ps.
 	log/services.log pon/diag.txt pon/omcli_state.txt; do
 	[ -s "$D/$f" ] || fail "the bundle has no $f (MANIFEST: $(cat "$D/MANIFEST.txt" 2>/dev/null))"
 done
+# host-link.txt names the SerDes pages it reads, and never the three
+# words that must not be read on this chip.
+grep -q '^# SerDes pages' "$D/host-link.txt" || fail "host-link.txt lacks the SerDes register list"
+! grep -q -i -E '0x0*2600[8c]|0x0*26010' "$D/host-link.txt" || fail "host-link.txt reads a forbidden register"
 grep -q '^gpon_' "$D/metrics.txt" || fail "the bundle has no exporter scrape"
 # qemu has no optics I2C bus: every module step is listed with a failing
 # status, no page was dumped, and the bundle above still succeeded.
