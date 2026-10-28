@@ -85,6 +85,7 @@ export PATH
 
 STEP_TIMEOUT_S=${STEP_TIMEOUT_S:-5}
 HOST_AUTONEG_SH=${HOST_AUTONEG_SH:-/etc/scripts/host-autoneg.sh}
+HOST_SERDES_SH=${HOST_SERDES_SH:-/etc/scripts/host-serdes.sh}
 SAFE_MODE_SH=${SAFE_MODE_SH:-/etc/scripts/safe-mode.sh}
 METRICS_TIMEOUT_S=${METRICS_TIMEOUT_S:-10}
 LOG_FILE_MAX=${LOG_FILE_MAX:-262144}
@@ -206,22 +207,28 @@ manifest - "$(size_of "$b/nv.txt")" nv.txt
 timeout "$METRICS_TIMEOUT_S" wget -q -O - "$METRICS_URL" > "$b/metrics.txt" 2>&1
 manifest "$?" "$(size_of "$b/metrics.txt")" metrics.txt
 
-# host-link.txt: the host-port auto-negotiation (HOST_AUTONEG): the state
-# host-autoneg.sh keeps (a trial, the boot fallback), the safe mode (this
+# host-link.txt: the host SerDes mode (HOST_SERDES) and the host-port
+# auto-negotiation (HOST_AUTONEG): the state host-serdes.sh and
+# host-autoneg.sh keep (a trial, the boot fallback), the safe mode (this
 # boot, the record, the boot count), then the words that decide the host link: the PCS
 # control word (HOST_FIBER_CTRL), the port ability the link runs with, the
-# forced-ability pair of port 0, and the host SerDes lane's control and
-# in-band negotiation words. All read before on a running stick.
+# forced-ability pair of port 0, the host SerDes lane's control and
+# in-band negotiation words, and the words the SerDes modes differ in. All
+# read before on a running stick.
 {
+	echo "# host-serdes.sh status"
+	timeout "$STEP_TIMEOUT_S" sh "$HOST_SERDES_SH" status 2>&1
 	echo "# host-autoneg.sh status"
 	timeout "$STEP_TIMEOUT_S" sh "$HOST_AUTONEG_SH" status 2>&1
 	echo "# safe-mode.sh status"
 	timeout "$STEP_TIMEOUT_S" sh "$SAFE_MODE_SH" status 2>&1
 	echo "# HOST_FIBER_CTRL 0x21c00, PORT_ABILITY(0) 0x198, PORT_FORCE_SELECT(0) 0x1b4, PORT_FORCE_ABILITY(0) 0x180,"
 	echo "# SDS_CTRL 0x214 (bit 17: the host lane receiver is in sync; bits 4:0 the lane mode, 4 = 1000BASE-X),"
-	echo "# SDS_AN_CTRL 0x21808 (bits 9:8 force in-band negotiation off, one bit per lane; bit 8 = the host lane)"
+	echo "# SDS_AN_CTRL 0x21808 (bits 9:8 force in-band negotiation off, one bit per lane; bit 8 = the host lane),"
+	echo "# HOST_FIBER_TX 0x22e4c, the TX amplitude 0x215b4, the 3.125G analog word 0x21700 (the HOST_SERDES words)"
 	printf '%s\n' "register get 0x21c00 1" "register get 0x198 1" "register get 0x1b4 1" "register get 0x180 1" \
-		"register get 0x214 1" "register get 0x21808 1" |
+		"register get 0x214 1" "register get 0x21808 1" "register get 0x22e4c 1" "register get 0x215b4 1" \
+		"register get 0x21700 1" |
 		timeout "$STEP_TIMEOUT_S" diag 2>&1
 } > "$b/host-link.txt"
 manifest - "$(size_of "$b/host-link.txt")" host-link.txt
