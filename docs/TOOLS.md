@@ -1229,7 +1229,9 @@ A boot with the key unset logs nothing and writes nothing.
 Applies `HOST_SERDES` (`docs/SETTINGS.md`, "Host port SerDes mode"): the
 mode's register sequence through `diag` (`docs/SWITCH.md`, "Host port
 SerDes mode"), then the kernel parameters `odi_switch.host_forced` and
-`odi_switch.host_autoneg`. These verbs and the `status` keys below are the
+`odi_switch.host_autoneg`. It does not touch the SFP EEPROM the host
+reads, which still advertises 1000BASE-LX (`docs/SETTINGS.md`, "What the
+host reads from the module"). These verbs and the `status` keys below are the
 interface the web UI is to use (through `/api/hostlink`, as for
 `host-autoneg.sh`); they are kept stable.
 

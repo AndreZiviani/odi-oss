@@ -1236,7 +1236,9 @@ After the sequence, in 2500BASE-X and HiSGMII, the port side and the PCS:
   1000BASE-X PCS reports no link to the port in these modes, so without the
   force the port has none.
 - `odi_switch.host_autoneg`: `N` in 2500BASE-X (0x21c00 0x1140 becomes
-  0x0140; the only setting seen to link to a 2.5G router port, see
+  0x0140; the only setting seen to link to the 2.5G router port it was
+  measured on, while another open implementation's measurements linked
+  2500BASE-X with it on and off against a matching host, see
   `docs/SETTINGS.md`), `Y` in HiSGMII (0x1940, the stock value; the PCS is
   powered down).
 

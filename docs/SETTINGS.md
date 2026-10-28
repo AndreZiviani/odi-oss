@@ -551,15 +551,29 @@ speaks. `HOST_SERDES` picks another:
 
 - `2500basex`: 2500BASE-X, for a host whose SFP port runs at 2.5 Gb/s. The
   PCS auto-negotiation is off and the switch port forced (link up, full
-  duplex) in this mode, whatever `HOST_AUTONEG` says. Against a 2.5G router
-  SFP port the link came up only with the auto-negotiation off, although a
-  stick running its stock HSGQ firmware links to the same port with it on;
-  why is not known. Auto-negotiation off is a setting that works there, not
-  an explanation.
+  duplex) in this mode, whatever `HOST_AUTONEG` says. Against the 2.5G
+  router SFP port it was measured on, the link came up only with the
+  auto-negotiation off, although a stick running its stock HSGQ firmware
+  links to the same port with it on; why is not known. Another open
+  implementation's measurements linked 2500BASE-X with the
+  auto-negotiation on and off against a matching host, re-latching 10 to
+  14 s after a host change (inside the 30 s phase of the boot watch,
+  below). So auto-negotiation off is what that router needs, not a
+  property of the lane, and it is a setting that works there, not an
+  explanation.
 - `hisgmii`: HiSGMII, the MAC forced to 1000 Mb/s, the 1000BASE-X PCS
   powered down and the port forced. This is the mode the stock firmware
   calls `LAN_SDS_MODE` 4 ("2500Mbps HiSGMII PHY"); it is not a 1G mode on
   the wire. Tested by its reporter against a media converter only.
+
+**What the host reads from the module.** The SFP's own EEPROM page the
+host reads (A0h, fixed memory) advertises the module as 1000BASE-LX at a
+nominal 1300 MBd, and this image cannot change it. A host that picks its
+port mode from that page (Linux phylink and its SFP driver, for example)
+may run its port at 1000BASE-X whatever `HOST_SERDES` says; a host whose
+port mode is set by hand (a router SFP port forced to 2.5G, as in the
+measurement above) is not affected. This is a caution, not a measured
+failure: no Linux host has been tried against `2500basex`.
 
 The HSGQ XPON stick is the same board as far as this image can see (the
 same U-Boot, environment and flash layout), and its stock firmware runs

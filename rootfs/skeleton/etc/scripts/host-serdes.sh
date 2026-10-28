@@ -63,7 +63,7 @@
 #                      trial.
 #
 # The PCS auto-negotiation. In 2500basex it is off (the only state seen to
-# link at 2.5G), in hisgmii on (the stock HSGQ value, on a PCS that is
+# link to the 2.5G router port it was measured on), in hisgmii on (the stock HSGQ value, on a PCS that is
 # powered down), whatever HOST_AUTONEG says: host-autoneg.sh applies nothing
 # and refuses a trial while the port runs one of them, or while a trial or
 # the boot watch here runs. Back in fiber1g the bit goes back to what

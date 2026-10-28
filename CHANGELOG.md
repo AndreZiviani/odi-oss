@@ -13,9 +13,14 @@ listed here.
   cmd 32 then moves the forced link value, so an OLT unlock keeps the
   link; back in `fiber1g` both port words return to what the force found),
   and the PCS auto-negotiation is set per mode (off in 2500BASE-X,
-  the only setting seen to link to a 2.5G router port; why the stock HSGQ
-  firmware links there with it on is not known). `host-serdes.sh` applies
-  it from `network.sh` at boot and offers `try`, `confirm`, `revert`,
+  the only setting seen to link to the 2.5G router port measured; why the
+  stock HSGQ firmware links there with it on is not known, and another open
+  implementation's measurements linked 2500BASE-X with it on and off
+  against a matching host, so it is what that router needs, not a property
+  of the lane). The SFP EEPROM still advertises 1000BASE-LX at 1300 MBd,
+  so a host that picks its port mode from it (Linux phylink, for example)
+  may run 1000BASE-X whatever the key says: a caution, not measured.
+  `host-serdes.sh` applies it from `network.sh` at boot and offers `try`, `confirm`, `revert`,
   `reapply` and `status`: a change is a trial that reverts after 120 s
   unless confirmed over the link. Fiber 1G, the most compatible host mode,
   is the fallback everywhere. A 2500BASE-X boot watches the SerDes sync
