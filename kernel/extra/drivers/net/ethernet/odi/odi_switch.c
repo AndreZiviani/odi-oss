@@ -321,7 +321,8 @@ MODULE_PARM_DESC(host_autoneg, "1000BASE-X auto-negotiation on the host port (de
  * whenever the switch window is mapped; on the command line it is stored
  * and the platform settings apply it. Writing N when it is already N
  * writes nothing, so a stick that never forces the port keeps its
- * registers exactly as before; Y is applied again on every write. Not
+ * registers exactly as before, and N after Y puts back the two words Y
+ * found (odi_sw_host_forced_apply()); Y is applied again on every write. Not
  * persistent: HOST_SERDES and host-serdes.sh decide what each boot runs.
  */
 static int odi_switch_host_forced_param_set(const char *val, const struct kernel_param *kp)
@@ -333,11 +334,7 @@ static int odi_switch_host_forced_param_set(const char *val, const struct kernel
 	if (rc)
 		return rc;
 	mutex_lock(&odi_switch_lock);
-	if (on || odi_sw_host_forced) {
-		odi_sw_host_forced = on;
-		if (odi_switch_base)
-			odi_sw_host_forced_apply();
-	}
+	odi_sw_host_forced_set(on, odi_switch_base != NULL);
 	mutex_unlock(&odi_switch_lock);
 	return 0;
 }

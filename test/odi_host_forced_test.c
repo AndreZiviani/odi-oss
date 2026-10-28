@@ -6,8 +6,10 @@
  * PORT_FORCE_ABILITY(0) and PORT_FORCE_SELECT(0) in each direction, with
  * the PAUSE policy either way; that cmd 32 (the OLT admin lock and unlock)
  * moves the forced LINK value and keeps the select on a forced port; that
- * the whole ISP1 provisioning leaves the force in place; that an admin
- * lock survives the force being turned on and off; and that the platform
+ * the whole ISP1 provisioning leaves the force in place; that turning it
+ * off puts both words back as the force found them, and writing it off
+ * while off touches nothing; that an admin lock survives the force being
+ * turned on and off; and that the platform
  * settings touch neither word for it unless it is on.
  *
  * Seeded as odi_host_pause_test.c is: port 0 not forced, its forced-ability
@@ -49,6 +51,11 @@ static uint32_t reg(uint32_t off)
 
 static void seed(void)
 {
+	/* The words a force saved belong to the driver: an off clears them,
+	 * whatever an earlier test left; the mock reset then wipes its writes.
+	 */
+	odi_sw_host_forced = false;
+	odi_sw_host_forced_apply();
 	odi_mock_reset();
 	odi_switch_cmd_reset_state();
 	odi_mock.regs[odi_mock_slot(ABILITY)] = 0x7fU;
@@ -158,18 +165,62 @@ static void test_on(void)
 	check_other_ports_untouched("on");
 }
 
-/* Off again: the port follows its SerDes, the PAUSE force kept. */
+/* Off again: both words back to what they held before the force, the
+ * PAUSE force kept. Twice, from the word a running stick reads (0x0) and
+ * from one with every other bit set, so a bit not put back shows.
+ */
 static void test_off(void)
 {
-	seed();
-	odi_switch_init_platform();
-	odi_sw_host_forced = true;
-	odi_sw_host_forced_apply();
-	odi_sw_host_forced = false;
-	odi_sw_host_forced_apply();
+	uint32_t seeds[2] = { 0x0U, 0x7fU }, before_val, before_sel;
+	unsigned int k;
+	char msg[160];
+
+	for (k = 0; k < 2; k++) {
+		seed();
+		odi_mock.regs[odi_mock_slot(ABILITY)] = seeds[k];
+		odi_switch_init_platform();
+		before_val = reg(ABILITY);
+		before_sel = reg(SELECT);
+		odi_sw_host_forced_set(true, true);
+		odi_sw_host_forced_set(true, true);
+		odi_sw_host_forced_set(false, true);
+		snprintf(msg, sizeof(msg), "on, on, off from 0x%02x: PORT_FORCE_ABILITY(0) back to 0x%02x (is 0x%02x)",
+			 (unsigned int)seeds[k], (unsigned int)before_val, (unsigned int)reg(ABILITY));
+		CHECK(reg(ABILITY) == before_val, msg);
+		snprintf(msg, sizeof(msg), "on, on, off from 0x%02x: PORT_FORCE_SELECT(0) back to 0x%02x (is 0x%02x)",
+			 (unsigned int)seeds[k], (unsigned int)before_sel, (unsigned int)reg(SELECT));
+		CHECK(reg(SELECT) == before_sel, msg);
+	}
 	CHECK(reg(SELECT) == TX_PAUSE_BIT, "off: PORT_FORCE_SELECT(0) back to TX_PAUSE only (0x40)");
 	CHECK((reg(ABILITY) & TX_PAUSE_BIT) == 0, "off: the forced TX_PAUSE value stays 0");
 	check_other_ports_untouched("off");
+
+	/* The second force saves afresh: a word changed between two forces
+	 * is what the second off puts back.
+	 */
+	seed();
+	odi_mock.regs[odi_mock_slot(ABILITY)] = 0x0U;
+	odi_switch_init_platform();
+	odi_sw_host_forced_set(true, true);
+	odi_sw_host_forced_set(false, true);
+	odi_mock.regs[odi_mock_slot(ABILITY)] = 0x01U;
+	odi_sw_host_forced_set(true, true);
+	odi_sw_host_forced_set(false, true);
+	CHECK(reg(ABILITY) == 0x01U, "a second on and off puts back the word the second on found");
+}
+
+/* N while already N: nothing read, nothing written. */
+static void test_off_while_off(void)
+{
+	seed();
+	odi_switch_init_platform();
+	odi_mock_log_reads = 1;
+	odi_mock.log_n = 0;
+	odi_sw_host_forced_set(false, true);
+	odi_sw_host_forced_set(false, true);
+	CHECK(odi_mock.log_n == 0, "N while N: no register read or written");
+	odi_mock_log_reads = 0;
+	CHECK(!odi_sw_host_forced, "N while N: still off");
 }
 
 /* cmd 32 on a forced port: the LINK value moves, the select stays. */
@@ -235,6 +286,7 @@ int main(void)
 	test_platform_default();
 	test_on();
 	test_off();
+	test_off_while_off();
 	test_cmd32();
 	test_provisioning();
 	test_lock_across();

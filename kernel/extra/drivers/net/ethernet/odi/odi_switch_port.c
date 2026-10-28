@@ -148,15 +148,22 @@ bool odi_sw_host_forced;
  * force the port never has one. The value first, then the select, as the
  * admin lock writes them.
  *
- * An admin lock (cmd 32: forced LINK 0 with its select bit set) is kept
- * across both directions: forcing a locked port writes LINK 0 into the
- * forced value, and leaving the force keeps the LINK select bit of a
- * locked port. Leaving it clears every other select bit, so the port
- * follows its SerDes again; the PAUSE policy, applied after either way,
- * owns the TX_PAUSE bit of both words.
+ * Forcing saves the two words as they were; leaving the force puts them
+ * back, so Fiber 1G after a trial of another mode holds the registers a
+ * boot leaves. Two bits are not taken from the saved words: TX_PAUSE,
+ * which the PAUSE policy owns (applied again after either way), and LINK,
+ * which carries the admin lock (cmd 32: forced LINK 0 with its select bit
+ * set). A lock is kept across both directions: forcing a locked port
+ * writes LINK 0 into the forced value, and leaving the force keeps the
+ * LINK select bit and value 0 of a port locked meanwhile; an unlocked port
+ * gets its LINK select bit clear, and the saved LINK value back.
  */
 #define ODI_SW_HOST_FORCED_ABILITY	0x016U
 #define ODI_SW_HOST_FORCED_SELECT	0xfffU
+
+static uint32_t odi_sw_host_forced_saved_ability;
+static uint32_t odi_sw_host_forced_saved_select;
+static bool odi_sw_host_forced_saved;
 
 void odi_sw_host_forced_apply(void)
 {
@@ -166,12 +173,23 @@ void odi_sw_host_forced_apply(void)
 			  !ODI_SW_PORT_FORCE_ABILITY_LINK_GET(ability);
 
 	if (odi_sw_host_forced) {
+		if (!odi_sw_host_forced_saved) {
+			odi_sw_host_forced_saved_ability = ability;
+			odi_sw_host_forced_saved_select = select;
+			odi_sw_host_forced_saved = true;
+		}
 		odi_reg_write(ODI_SW_PORT_FORCE_ABILITY(ODI_SW_HOST_PORT),
 			      ODI_SW_PORT_FORCE_ABILITY_LINK_SET(ODI_SW_HOST_FORCED_ABILITY, locked ? 0U : 1U));
 		odi_reg_write(ODI_SW_PORT_FORCE_SELECT(ODI_SW_HOST_PORT), ODI_SW_HOST_FORCED_SELECT);
 	} else {
+		ability = odi_sw_host_forced_saved ? odi_sw_host_forced_saved_ability : ability;
+		select = odi_sw_host_forced_saved ? odi_sw_host_forced_saved_select : 0U;
+		if (locked)
+			ability = ODI_SW_PORT_FORCE_ABILITY_LINK_SET(ability, 0U);
+		odi_reg_write(ODI_SW_PORT_FORCE_ABILITY(ODI_SW_HOST_PORT), ability);
 		odi_reg_write(ODI_SW_PORT_FORCE_SELECT(ODI_SW_HOST_PORT),
-			      ODI_SW_PORT_FORCE_SELECT_LINK_SET(0, locked));
+			      ODI_SW_PORT_FORCE_SELECT_LINK_SET(select, locked));
+		odi_sw_host_forced_saved = false;
 	}
 	odi_sw_host_pause_apply();
 	ODI_SW_LOG("host port %s%s: force ability 0x%03x, force select 0x%03x, ability 0x%03x\n",
@@ -180,6 +198,15 @@ void odi_sw_host_forced_apply(void)
 		   (unsigned int)odi_reg_read(ODI_SW_PORT_FORCE_ABILITY(ODI_SW_HOST_PORT)),
 		   (unsigned int)odi_reg_read(ODI_SW_PORT_FORCE_SELECT(ODI_SW_HOST_PORT)),
 		   (unsigned int)odi_reg_read(ODI_SW_PORT_ABILITY(ODI_SW_HOST_PORT)));
+}
+
+void odi_sw_host_forced_set(bool on, bool mapped)
+{
+	if (!on && !odi_sw_host_forced)
+		return;
+	odi_sw_host_forced = on;
+	if (mapped)
+		odi_sw_host_forced_apply();
 }
 
 bool odi_sw_pon_isolate = true;

@@ -1258,15 +1258,18 @@ has no signal known: no boot watch there, only the trial revert.
 in `odi_switch_port.c`: written `Y`, it writes the forced value, then the
 select, then the PAUSE policy again (which owns the `TX_PAUSE` bit of both
 words: with `host_pause=N` the select stays 0xfff, with `Y` it is 0xfbf);
-written `Y` again, it writes the same values again. Written `N` after `Y`,
-it clears the select word, so the port follows its SerDes again, then
-the PAUSE policy. Written `N` while already `N`, it writes nothing, so a
+written `Y` again, it writes the same values again. Forcing saves both
+words first, and `N` after `Y` puts them back, then the PAUSE policy, so
+the port follows its SerDes again with the registers a boot leaves (0x180
+= 0x0, 0x1b4 = 0x40 on a DFP-34X-2C2 after a trial of another mode, as
+before it). Written `N` while already `N`, it reads and writes nothing, so a
 stick that never forces the port keeps its registers exactly as before.
 On the command line it is stored, and the platform settings apply it (a
 step that reads and writes nothing while it is `N`: the boot goldens do
 not move). An OLT admin lock (cmd 32, `OMCI_UNI_LOCK`) survives it both
 ways: a locked port forced keeps its forced `LINK` value at 0, and a
-locked port unforced keeps its `LINK` select bit.
+locked port unforced keeps its `LINK` select bit and value 0; the
+`TX_PAUSE` bits are the PAUSE policy's, not taken from the saved words.
 
 cmd 32 on a forced port. The stock admin enable clears the `LINK` select
 bit on an unlock, handing the link back to the PHY or SerDes; on a forced
@@ -1276,7 +1279,8 @@ forced `LINK` value instead (0 to lock, 1 to unlock, the value first) and
 keeps the select bit set. Other ports, and port 0 unforced, are as before.
 
 `test/odi_host_forced_test.c` checks the forced values both ways and with
-either PAUSE policy, the order of the writes, cmd 32 on a forced port, the
+either PAUSE policy, that off puts both words back as the force found them
+and that `N` while `N` touches nothing, the order of the writes, cmd 32 on a forced port, the
 ISP1 provisioning (cmd 32 among it) leaving the force in place, an admin
 lock across the force, and that the default platform settings write port
 0 for the PAUSE policy only. `test/host_serdes_test.sh` checks the write

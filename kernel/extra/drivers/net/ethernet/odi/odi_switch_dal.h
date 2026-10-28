@@ -132,11 +132,18 @@ void odi_sw_host_autoneg_apply(void);
 extern bool odi_sw_host_forced;
 
 /* Applies odi_sw_host_forced to PORT_FORCE_ABILITY(0) and
- * PORT_FORCE_SELECT(0), keeping an admin lock (cmd 32) across, then the
+ * PORT_FORCE_SELECT(0): forcing saves both words first, leaving the force
+ * puts them back, an admin lock (cmd 32) kept across either way; then the
  * PAUSE policy again, and logs the result. The caller holds
  * odi_switch_lock.
  */
 void odi_sw_host_forced_apply(void);
+
+/* odi_switch.host_forced written: on, or off after on, sets the flag and,
+ * with the switch window mapped, applies it; off while already off does
+ * nothing at all, not even a read. The caller holds odi_switch_lock.
+ */
+void odi_sw_host_forced_set(bool on, bool mapped);
 
 /* LINK_UP of PORT_ABILITY(0): 1 while the host port has a link. A plain
  * read, safe without the lock. On a forced host port (odi_sw_host_forced)
