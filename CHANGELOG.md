@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- omcid tests: new suite `getall-test.sh` (`make test-omci-getall`) sends a Get
+  of every attribute to each class of the model that has a table or other big
+  attribute (voice service profile, multicast operations profile, multicast
+  subscriber config and the rest) and to each class whose plain attributes do
+  not fit in 25 bytes, and checks the answer against G.988: it stays in the 32
+  bytes of the baseline message, a table answers alone with its 4-byte size, and
+  what does not fit is named in the failed and unsupported masks. This was
+  prompted by another open implementation's report of a buffer overflow on
+  such a Get; omcid has none (no code change), and the suite keeps it so.
+
 - omcid: a bridge port of TP type 3 whose pointer names both an 802.1p mapper
   and a GEM interworking TP (entity ids are unique per class only) is read as
   the mapper when that mapper sends any priority to another TP, so every GEM
