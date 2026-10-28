@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- omcid tests: new suite `getall-test.sh` (`make test-omci-getall`) sends a Get
+  of every attribute to each class of the model that has a table or other big
+  attribute (voice service profile, multicast operations profile, multicast
+  subscriber config and the rest) and to each class whose plain attributes do
+  not fit in 25 bytes, and checks the answer against G.988: it stays in the 32
+  bytes of the baseline message, a table answers alone with its 4-byte size, and
+  what does not fit is named in the failed and unsupported masks. This was
+  prompted by another open implementation's report of a buffer overflow on
+  such a Get; omcid has none (no code change), and the suite keeps it so.
 - diag-bundle: `host-link.txt` reads the host SerDes pages (the 1.25G and
   3.125G pages, RX enable, the analog words, the host port force, ability and
   select words), read-only, and adds `host-serdes.sh status` when that script
