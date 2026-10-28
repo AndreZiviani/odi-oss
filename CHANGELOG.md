@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- test: `count_proof_test.sh` no longer flakes on "no PASS for the MAC order": its stub diag and
+  stub sleep run on a fake clock the sleep advances, so the 1 s UNI windows have an exact rate
+  ratio (the band and `count-proof.sh` are unchanged).
 - omcid: a bridge port of TP type 3 whose pointer names both an 802.1p mapper
   and a GEM interworking TP (entity ids are unique per class only) is read as
   the mapper when that mapper sends any priority to another TP, so every GEM

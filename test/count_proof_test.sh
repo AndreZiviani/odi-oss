@@ -17,6 +17,21 @@ bad() { echo "FAIL $1"; fail=1; }
 
 mkdir -p "$W/bin" "$W/proc"
 
+# The clock is a number in $FAKE_CLOCK, in whole seconds, that only the stub
+# sleep moves (by the seconds it is asked to sleep, without sleeping), so the
+# counts of the stub diag and the uptime it writes agree exactly and a window
+# of 1 s is 1 s however loaded the host is. A sleep of less than a second,
+# or FAKE_REAL_SLEEP=1 (the signal cases, which need a window that lasts),
+# is the real one.
+cat > "$W/bin/sleep" <<'STUB'
+#!/bin/sh
+case "$1" in
+*[!0-9]*|'') exec /bin/sleep "$@" ;;
+esac
+[ "${FAKE_REAL_SLEEP:-0}" = 1 ] && exec /bin/sleep "$@"
+echo $(( $(cat "$FAKE_CLOCK") + $1 )) > "$FAKE_CLOCK.new" && mv "$FAKE_CLOCK.new" "$FAKE_CLOCK"
+STUB
+
 # The stub diag: the counters are files in $FAKE_STATE, owned by the diag
 # reading stdin that installed the first one. Each counts FAKE_RATE a
 # second, or FAKE_ZERO_PON=1 nothing on the PON; the MIB of each port moves
@@ -29,7 +44,7 @@ held() { [ -f "$S/owner" ] && ! kill -0 "$(cat "$S/owner")" 2>/dev/null && gone;
 show() {
 	if [ -f "$S/slot$1" ]; then
 		read -r port since < "$S/slot$1"
-		n=$(( ($(date +%s) - since) * ${FAKE_RATE:-2} ))
+		n=$(( ($(cat "$FAKE_CLOCK") - since) * ${FAKE_RATE:-2} ))
 		[ "$port" = pon ] && [ "${FAKE_ZERO_PON:-0}" = 1 ] && n=0
 		echo "slot=$1 entry=$((48 + $1)) counter=$1 port=2 match=mac dst=33:33:00:00:00:00/16 unit=frames counted=$n now=0x00000000"
 	else
@@ -49,10 +64,10 @@ run() {
 		if [ "$OWNER" != 1 ]; then echo "% busy"; return; fi
 		[ -f "$S/slot$3" ] && { echo "% busy"; return; }
 		echo "$$" > "$S/owner"
-		echo "$4 $(date +%s)" > "$S/slot$3"
+		echo "$4 $(cat "$FAKE_CLOCK")" > "$S/slot$3"
 		echo "$*" >> "$S/log" ;;
 	"mib dump")
-		t=$(date +%s); echo "$t.00 1.00" > "$FAKE_PROC/uptime"
+		t=$(cat "$FAKE_CLOCK"); echo "$t.00 1.00" > "$FAKE_PROC/uptime"
 		for p in 0 2; do
 			echo "Port: $p"
 			echo "ifInMulticastPkts                  :                       $((t * 4))"
@@ -84,7 +99,8 @@ echo "100.00 1.00" > "$W/proc/uptime"
 setup() {
 	rm -rf "$W/state" "$W/out"
 	mkdir -p "$W/state"
-	export FAKE_STATE=$W/state FAKE_PROC=$W/proc
+	echo 1000 > "$W/clock"
+	export FAKE_STATE=$W/state FAKE_PROC=$W/proc FAKE_CLOCK=$W/clock FAKE_REAL_SLEEP=0
 	export PATH="$W/bin:$PATH" DEV=/dev/null PROC=$W/proc OUT=$W/out
 	export PON_S=2 RA_S=1 BYTES_S=1 IP_S=1 UNI_S=1
 }
@@ -124,7 +140,7 @@ if FAKE_IGMPD=1 sh "$SCRIPT" > "$W/run.log" 2>&1; then bad "ran beside igmpd"; e
 
 # 4. SIGTERM mid-window: the trap puts everything back.
 setup
-export PON_S=20
+export PON_S=20 FAKE_REAL_SLEEP=1
 sh "$SCRIPT" > "$W/run.log" 2>&1 &
 pid=$!
 for _ in $(seq 50); do [ "$(left)" -ge 3 ] && break; sleep 0.1; done
@@ -136,7 +152,7 @@ grep -q 'restored: counters left 0' "$W/run.log" && ok "SIGTERM: it says so" || 
 
 # 5. SIGKILL mid-window: no trap runs; the holder input ends and the counters go.
 setup
-export PON_S=20
+export PON_S=20 FAKE_REAL_SLEEP=1
 sh "$SCRIPT" > "$W/run.log" 2>&1 &
 pid=$!
 for _ in $(seq 50); do [ "$(left)" -ge 3 ] && break; sleep 0.1; done
