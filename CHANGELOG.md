@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.10.0 and metricsd v1.8.0. The web UI no longer shows the
+  identity keys as empty on a stick whose config store outgrew its buffer (a
+  stick that ran a router firmware before), offers a setup wizard for a stick
+  nobody has set up (web password, an ssh key, the ISP login, the VLAN
+  handling), says when a newer odi-oss release exists (the browser asks
+  GitHub at most once a day; System > Firmware turns it off), shows the SoC
+  chip temperature with its alarms, and orders the header bars by severity.
+  metricsd exports the chip temperature limits and alarms. Refs #229.
 - kernel: die-temperature alarms on the SoC hwmon device (`rtl9602c_soc`):
   `temp1_max` (default 95000) and `temp1_crit` (default 110000) in
   millidegrees, root-writable (0..150000, max <= crit) and not persisted, plus
