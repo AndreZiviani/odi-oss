@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+## v1.13.0 (2026-10-28)
+
+Not in this release: the host link modes (`HOST_SERDES`, 2500BASE-X and HiSGMII) and the
+host-side SFP diagnostics (`SFP_HOST_DDM`) from the v1.13.0 pre-releases are still being
+tested and follow in a later release. A stick that needs `HOST_SERDES` (for example an
+HSGQ stick at 2.5G) should stay on v1.13.0-beta.2 until then.
+
 - Releases: confd v1.10.0 and metricsd v1.8.0. The web UI no longer shows the
   identity keys as empty on a stick whose config store outgrew its buffer (a
   stick that ran a router firmware before), offers a setup wizard for a stick
