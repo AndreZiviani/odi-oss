@@ -262,7 +262,7 @@ sh "$S" revert > /dev/null
 
 # ---- status
 out=$(sh "$S" status)
-t "status: the fields" "setting=on.*running=on.*phase=steady.*uptime=[0-9]+.*link=[01].*safe_mode_boot=0" "$(printf '%s' "$out" | tr '\n' ' ')"
+t "status: the fields" "setting=on.*running=on.*owner=host-autoneg.*phase=steady.*uptime=[0-9]+.*link=[01].*safe_mode_boot=0" "$(printf '%s' "$out" | tr '\n' ' ')"
 rm -f "$T/param/host_link"
 t "status: link unknown without the parameter" "link=unknown" "$(sh "$S" status)"
 echo 1 > "$T/param/host_link"

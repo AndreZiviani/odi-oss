@@ -636,7 +636,9 @@ in RAM. `HOST_AUTONEG` keeps its stored value and applies again once the
 port runs Fiber 1G at a boot; while another mode runs, `host-autoneg.sh`
 applies nothing, starts no boot watch of its own (its on/off alternation
 would put 2500BASE-X into the auto-negotiation that does not link), and
-refuses a trial. Back in Fiber 1G during a boot (a trial reverted, the
+refuses a trial; its `status` then says `owner=host-serdes`, with
+`running=` the bit the port really runs and `setting=` the stored
+`HOST_AUTONEG`. Back in Fiber 1G during a boot (a trial reverted, the
 fallback), the bit goes back to what `host-autoneg.sh` last ran.
 
 The state of the running boot is `/var/run/host-serdes`, `key=value` lines

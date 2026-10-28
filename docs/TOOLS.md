@@ -1187,7 +1187,9 @@ bundle (`host-link.txt`):
 | key | value |
 |---|---|
 | `setting` | `on` or `off`: `HOST_AUTONEG` as this boot read it, or as a confirm stored it |
-| `running` | `on` or `off`: what the host port runs now |
+| `running` | `on` or `off`: what the host port runs now in Fiber 1G. While `host-serdes.sh` owns the port (below) the file keeps what this script runs in Fiber 1G, the value the port gets back there; `status` prints the bit the kernel holds instead |
+| `owner` (`status` only) | `host-autoneg`, or `host-serdes` while a `HOST_SERDES` mode other than `fiber1g` runs, or a `host-serdes.sh` trial, reapply or boot watch does: that script sets the bit then, and this one applies nothing |
+| `owner_message` (`status` only, with `owner=host-serdes`) | which link mode owns the bit, and that `HOST_AUTONEG` applies in Fiber 1G |
 | `phase` | `steady`, `watch` (the boot watch is deciding) or `trial` |
 | `fallback` | `1` while the port runs auto-negotiation with the key off because the forced link did not come up this boot |
 | `trial_mode`, `trial_deadline` | the mode on trial and the uptime, in seconds, at which it reverts |

@@ -26,7 +26,9 @@
 #                                   Only reaches the stick if the link works
 #                                   in that mode, which is the point
 #     host-autoneg.sh revert        end the trial now, back to the mode before
-#     host-autoneg.sh status        the state as key=value lines
+#     host-autoneg.sh status        the state as key=value lines; while
+#                                   host-serdes.sh owns the port, running=
+#                                   is the live bit and owner=host-serdes
 #
 # The boot watch. With HOST_AUTONEG=off the boot writes off and watches the
 # host link (odi_switch.host_link) for WATCH_S seconds. No link: it switches
@@ -452,14 +454,29 @@ revert() {
 	unlock
 }
 
+# status: the state file, plus what is live. While host-serdes.sh owns the
+# port, the file running= is what this script runs in Fiber 1G, not what the
+# port runs; status prints the bit the kernel holds instead, and says who
+# owns it.
 status() {
 	load
 	if [ ! -f "$STATE" ]; then
 		setting=$(parse "$(key_raw)")
 		[ "$(cat "$PARAM_DIR/host_autoneg" 2>/dev/null)" = N ] && running=off
 	fi
+	owner=host-autoneg
+	if serdes_owns; then
+		owner=host-serdes
+		case $("$TIMEOUT" "$IO_S" cat "$PARAM_DIR/host_autoneg" 2>/dev/null) in
+		N|0) running=off ;;
+		Y|1) running=on ;;
+		esac
+	fi
 	echo "setting=$setting"
 	echo "running=$running"
+	echo "owner=$owner"
+	[ "$owner" = host-autoneg ] ||
+		echo "owner_message=the link mode HOST_SERDES=$sd_running ($sd_phase) sets the auto-negotiation; HOST_AUTONEG ($setting) applies in fiber1g"
 	echo "phase=$phase"
 	echo "fallback=$fallback"
 	echo "trial_mode=$trial_mode"

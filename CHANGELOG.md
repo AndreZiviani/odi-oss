@@ -22,7 +22,8 @@ listed here.
   (bit 17 of 0x214) and falls back to Fiber 1G, alternating, for up to 10
   minutes, staying in Fiber 1G when neither links (the key unchanged);
   HiSGMII has no link signal and no boot fallback. `HOST_AUTONEG` applies
-  to Fiber 1G only and stands aside while another mode runs. A mode other
+  to Fiber 1G only and stands aside while another mode runs; its `status`
+  then prints the bit the port really runs and `owner=host-serdes`. A mode other
   than `fiber1g` makes three short boots enough for the safe mode, whose
   boot runs Fiber 1G and clears the key, as it clears `HOST_AUTONEG=off`
   (`cleared=` can now name both). Whether the HSGQ board links in Fiber 1G

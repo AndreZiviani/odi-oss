@@ -349,7 +349,20 @@ sh "$S" watch > /dev/null 2>&1
 out=$(anrun try on 2>&1); rc=$?
 t "host-autoneg try with 2500basex running is refused" "HOST_SERDES 2500basex" "$out"
 [ "$rc" = 1 ] && ok "  ... with exit 1" || no "  ... with exit 1" "rc $rc"
+out=$(anrun status | tr '\n' ' ')
+t "host-autoneg status with 2500basex: the stored setting, the live bit (off), owner host-serdes" \
+	"setting=off running=off owner=host-serdes owner_message=the link mode HOST_SERDES=2500basex" "$out"
+t "  ... and its own state file still holds what it runs in Fiber 1G (on)" "^on$" "$(sed -n 's/^running=//p' "$AN_STATE")"
 "$F" set HOST_AUTONEG "" > /dev/null
+# Back in Fiber 1G (a reverted trial), host-autoneg.sh owns the bit again.
+sh "$S" try fiber1g > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\nsh "%s" confirm >> "%s/confirm.out" 2>&1\n' "$S" "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+out=$(anrun status | tr '\n' ' ')
+t "host-autoneg status in Fiber 1G: running on, owner host-autoneg, no owner_message" "running=on owner=host-autoneg phase=" "$out"
+n "  ... no owner_message" "owner_message" "$out"
+setkey ""
 
 # ---- hisgmii
 setkey hisgmii
