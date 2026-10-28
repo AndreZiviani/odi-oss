@@ -209,8 +209,16 @@ steps, running concurrently with the respawn entries just started.
     in NO_ACK). It runs before the PON steps and outside their list, so a
     `pon-steps` override keeps it.
 13. **The PON steps**, each one `/proc/odi_init` verb: `i2c 1`, `i2cen 1`,
-    `laser`, `gpon`, `rxsd`, `gpondrv`, `gpondev`, then the switch init,
-    then `gponsn`, `gponpw` and `gponact`.
+    `laser`, then the host-side SFP EEPROM (not a verb), `gpon`, `rxsd`,
+    `gpondrv`, `gpondev`, then the switch init, then `gponsn`, `gponpw` and
+    `gponact`.
+
+    The host-side SFP EEPROM step runs `sfp-host-ddm.sh boot`: unless
+    `SFP_HOST_DDM=0` or this is a safe-mode boot, it writes
+    `odi_switch.sfp_mirror=1` and returns at once, and the kernel copies the
+    module's A0h and A2h into the SoC SFP slave and turns it on in the
+    background (`docs/SETTINGS.md`, "Host-side diagnostics"). It needs the
+    I2C steps, and comes after `laser`, which selects A2h page 2 for a moment.
 
     `laser` (`odi_board.c`) needs the I2C controller, which answers only
     after `i2c` and `i2cen` (before them a read returns 0 with no error).

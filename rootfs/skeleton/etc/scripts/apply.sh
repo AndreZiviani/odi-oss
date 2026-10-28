@@ -63,6 +63,13 @@
 #                        flooding for the moment the daemon is gone: its
 #                        lease on the switch is its open /dev/odi_sw.
 #
+#     apply.sh sfp       LIVE. Re-reads SFP_HOST_DDM and turns the host-side
+#                        SFP EEPROM on or off (sfp-host-ddm.sh apply): the
+#                        module identity and live diagnostics the router
+#                        reads, on board revisions that wire the SoC SFP
+#                        slave. Waits, bounded, for the kernel outcome;
+#                        exit 1 when it failed.
+#
 #     apply.sh ntp       SERVICE RESTART. Restarts ntpd so it re-reads
 #                        NTP_SERVER -- starting it for the first time if the
 #                        key was just set, or stopping it if just cleared
@@ -94,6 +101,7 @@ RELOAD_STATUS=${RELOAD_STATUS:-/var/run/omcid-reload}
 NETWORK=${NETWORK:-/etc/scripts/network.sh}
 MODULES_OFF=${MODULES_OFF:-/etc/config/modules.off}
 SERVICES_LOG=${SERVICES_LOG:-/var/log/services.log}
+SFP_HOST_DDM_SH=${SFP_HOST_DDM_SH:-/etc/scripts/sfp-host-ddm.sh}
 
 # How long each wait may take, in seconds.
 ACK_WAIT=${ACK_WAIT:-5}             # omcid takes the signal and starts the reload
@@ -213,12 +221,17 @@ igmp() {
 	restart_respawn igmpd
 }
 
+sfp() {
+	sh "$SFP_HOST_DDM_SH" apply
+}
+
 case "${1:-}" in
 network) network ;;
 omci)    shift; omci "$@" || exit 1 ;;
 syslog)  syslog ;;
 ntp)     ntp ;;
 igmp)    igmp ;;
-*)       echo "usage: $0 network|omci [seconds]|syslog|ntp|igmp" >&2; exit 1 ;;
+sfp)     sfp || exit 1 ;;
+*)       echo "usage: $0 network|omci [seconds]|syslog|ntp|igmp|sfp" >&2; exit 1 ;;
 esac
 exit 0
