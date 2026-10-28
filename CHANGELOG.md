@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+- omcid tests: the qemu suites no longer flake on a loaded machine. `omcli --inject-file` waits out a full omcid queue (30 s) instead of dropping the tail of the session after half a second, the suites wait for omcid's end-of-session lines (rebuild, multicast policy export, answers) instead of fixed sleeps, and omcid logs `multicast policy unchanged` when its quiet-second export has nothing to write.
+
 ## v1.13.0 (2026-10-28)
 
 Not in this release: the host link modes (`HOST_SERDES`, 2500BASE-X and HiSGMII) and the

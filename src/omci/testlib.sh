@@ -139,8 +139,15 @@ rebuilt() {
 # The rebuild is pending after any session that changed the MIB, so a log that
 # never shows one is a failed wait.
 settled() {
-	sync_send "$1"
+	# The count is read BEFORE the sentinel goes in: a rebuild that falls
+	# between the last frame and the sentinel's answer (a slow machine, a
+	# sentinel that took a second to start) is the one this waits for, and
+	# reading after it would wait for a second one that never comes. Every
+	# frame of the session is queued by now and omcid takes them in order,
+	# so nothing before the sentinel's answer can be a rebuild of half a
+	# session.
 	_st_n=$(rebuilt "$1")
+	sync_send "$1"
 	wait_for "$1" 'bridge connections rebuilt' "${WAIT_S:-30}" $((_st_n + 1))
 }
 
