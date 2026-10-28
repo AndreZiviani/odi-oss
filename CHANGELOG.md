@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- kernel, rootfs: the host-side SFP EEPROM, odi-only key `SFP_HOST_DDM`, on by
+  default. On the board revisions that wire the SoC's SFP EEPROM emulation to
+  the SFP edge (HSGQ v08 / DFP-34X-2C2 v08) the router now reads the module's
+  identity (A0h) and live diagnostics (A2h) from the stick, as with the stock
+  firmware, instead of 0 C and 0 V. The kernel copies A0h and A2h from the
+  module into the slave's 512-byte SRAM, reads it all back, makes it read-only
+  to the host except A2h 128-247, and only then turns the slave on (0x2ac bit
+  0, then 0x23018 bit 23, each a read-modify-write of that bit); A2h 96-119
+  (the five diagnostics, the TX_DISABLE/TX_FAULT/RX_LOS bits of byte 110, the
+  alarm and warning flags) is refreshed every second, and the module is never
+  written. `odi_switch.sfp_mirror` and `sfp_mirror_state`, `sfp-host-ddm.sh`
+  (a PON step after `laser`), `apply.sh sfp`; off in a safe-mode boot; `0`
+  turns it off. No effect on v06 boards, where the host reads a separate fixed
+  EEPROM. The behaviour follows measurements by Thaad-QR on a stock v08 stick.
+  Not yet checked on hardware. Host-tested (`test/odi_sfp_mirror_test.c`,
+  `test/sfp_host_ddm_test.sh`). Refs #231.
 - kernel: die-temperature alarms on the SoC hwmon device (`rtl9602c_soc`):
   `temp1_max` (default 95000) and `temp1_crit` (default 110000) in
   millidegrees, root-writable (0..150000, max <= crit) and not persisted, plus
