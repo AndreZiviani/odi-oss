@@ -9,7 +9,9 @@ listed here.
   3.125G pages, RX enable, the analog words, the host port force, ability and
   select words), read-only, and adds `host-serdes.sh status` when that script
   is present, so a host-link report shows where the lane stands. Refs #229, Refs #231.
-
+- test: `count_proof_test.sh` no longer flakes on "no PASS for the MAC order": its stub diag and
+  stub sleep run on a fake clock the sleep advances, so the 1 s UNI windows have an exact rate
+  ratio (the band and `count-proof.sh` are unchanged).
 - omcid: a bridge port of TP type 3 whose pointer names both an 802.1p mapper
   and a GEM interworking TP (entity ids are unique per class only) is read as
   the mapper when that mapper sends any priority to another TP, so every GEM
