@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- kernel: die-temperature alarms on the SoC hwmon device (`rtl9602c_soc`):
+  `temp1_max` (default 95000) and `temp1_crit` (default 110000) in
+  millidegrees, root-writable (0..150000, max <= crit) and not persisted, plus
+  read-only `temp1_max_alarm` / `temp1_crit_alarm`. An alarm sets at reading
+  >= limit and clears 2 C below it; a 10 s delayed work (one register read)
+  logs each crossing once (`pr_warn` max, `pr_crit` crit, `pr_info` on clear)
+  and notifies sysfs pollers. Nothing powers off or throttles: the scale is
+  not verified. The 95/110 defaults follow another open implementation's
+  measurements for the same chip. Host-tested (`test/odi_hwmon_test.c`).
 - omcid tests: new suite `getall-test.sh` (`make test-omci-getall`) sends a Get
   of every attribute to each class of the model that has a table or other big
   attribute (voice service profile, multicast operations profile, multicast
