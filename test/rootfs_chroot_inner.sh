@@ -386,6 +386,78 @@ if [ ! -f "$R/var/tmp/sdsset" ] && ! grep -q "SerDes" /tmp/sds5.log; then
 	ok "sds.off: no read, no write"
 else bad "sds.off did not stop the SerDes code" "$(cat /tmp/sds5.log)"; fi
 rm -f "$R/etc/config/sds.off" "$R/var/tmp/regs"
+
+# The other two modes, under the image's own ash: HOST_SERDES in odi.conf,
+# the kernel parameters plain files (network.sh passes PARAM_DIR on to
+# host-serdes.sh). The 3.125G page reads 0 until 2500BASE-X writes it. The
+# write lists are test/host_serdes_test.sh's, from the same starting values.
+serdes_mode() {   # serdes_mode MODE: boot network.sh in MODE from Fiber 1G
+	fiber1g
+	printf '0x21700=0x0\n0x2170c=0x0\n0x21718=0x0\n0x21500=0x0\n' >> "$R/var/tmp/regs"
+	rm -f "$R/var/tmp/sdsset" "$R/var/run/host-serdes"
+	mkdir -p "$R/var/tmp/param"
+	echo N > "$R/var/tmp/param/host_forced"; echo Y > "$R/var/tmp/param/host_autoneg"
+	echo 0 > "$R/var/tmp/param/host_link"
+	echo "HOST_SERDES=$1" > "$R/var/config/odi.conf"
+	PARAM_DIR=/var/tmp/param runlog "/tmp/sds-$1.log" /bin/busybox sh /etc/scripts/network.sh
+}
+note "SerDes: HOST_SERDES=2500basex, its nineteen writes in order, then the port forced"
+serdes_mode 2500basex
+cat > /tmp/sds-want-2500 <<'WANT'
+set 0x214 0x262004
+set 0x214 0x26201f
+set 0x21c00 0x1140
+set 0x22e4c 0x431b
+set 0x21680 0x0
+set 0x2168c 0x3001
+set 0x21698 0x68
+set 0x215b8 0x98c5
+set 0x215b4 0x1764
+set 0x215bc 0x400f
+set 0x215e4 0xfc00
+set 0x21700 0x1800
+set 0x2170c 0x7b01
+set 0x21718 0x168
+set 0x214 0x260016
+set 0x110 0x1
+set 0x21500 0x10
+set 0x21500 0x30
+set 0x21500 0x0
+WANT
+if grep -q "SerDes now 2500BASE-X" /tmp/sds-2500basex.log && cmp -s /tmp/sds-want-2500 "$R/var/tmp/sdsset"; then
+	ok "the 2500BASE-X sequence, in order, reads back"
+else bad "the 2500BASE-X sequence is not the expected one" "$(cat /tmp/sds-2500basex.log; echo ---; diff /tmp/sds-want-2500 "$R/var/tmp/sdsset" 2>&1)"; fi
+if [ "$(cat "$R/var/tmp/param/host_forced") $(cat "$R/var/tmp/param/host_autoneg")" = "1 0" ]; then
+	ok "2500BASE-X: host_forced 1, host_autoneg 0"
+else bad "2500BASE-X: the port side" "$(cat "$R/var/tmp/param/host_forced" "$R/var/tmp/param/host_autoneg")"; fi
+# The boot watch, spawned detached, reads the sync bit (set in the stub's
+# 0x260016) on its first poll and ends.
+i=0; while ! grep -q "^event=serdes_link" "$R/var/run/host-serdes" 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+if grep -q "^event=serdes_link" "$R/var/run/host-serdes"; then ok "2500BASE-X: the boot watch saw bit 17 of 0x214 and ended"
+else bad "2500BASE-X: the boot watch did not end on the sync bit" "$(cat "$R/var/run/host-serdes" 2>&1)"; fi
+
+note "SerDes: HOST_SERDES=hisgmii, its thirteen writes, the PCS powered down"
+serdes_mode hisgmii
+cat > /tmp/sds-want-hisgmii <<'WANT'
+set 0x214 0x262004
+set 0x214 0x26201f
+set 0x21c00 0x1940
+set 0x22e4c 0x431b
+set 0x21680 0x0
+set 0x2168c 0x3001
+set 0x21698 0x68
+set 0x215b8 0x98c5
+set 0x215b4 0x1564
+set 0x215bc 0x400f
+set 0x215e4 0xfc00
+set 0x214 0x260112
+set 0x110 0x1
+WANT
+if grep -q "SerDes now HiSGMII" /tmp/sds-hisgmii.log && cmp -s /tmp/sds-want-hisgmii "$R/var/tmp/sdsset" &&
+   [ "$(cat "$R/var/tmp/param/host_forced") $(cat "$R/var/tmp/param/host_autoneg")" = "1 1" ]; then
+	ok "the HiSGMII sequence, in order, reads back; host_forced 1, host_autoneg 1"
+else bad "the HiSGMII sequence or port side is not the expected one" "$(cat /tmp/sds-hisgmii.log; echo ---; diff /tmp/sds-want-hisgmii "$R/var/tmp/sdsset" 2>&1)"; fi
+rm -rf "$R/var/config/odi.conf" "$R/var/tmp/param" "$R/var/tmp/regs" "$R/var/run/host-serdes"
 mv "$R/bin/diag.real" "$R/bin/diag" 2>/dev/null
 rm -f "$R/stubdiag"
 
