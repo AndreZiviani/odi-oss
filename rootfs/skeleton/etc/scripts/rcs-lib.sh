@@ -275,6 +275,19 @@ pon_step_laser() {
 	fi
 }
 
+# The host-side SFP EEPROM (SFP_HOST_DDM in odi.conf, docs/SETTINGS.md):
+# the module A0h and A2h, with live diagnostics, served to the host through
+# the SoC SFP slave. After the laser step, which needs the same I2C and puts
+# the A2h page select back. sfp-host-ddm.sh reads the key (on unless 0, off
+# in a safe-mode boot), writes the kernel parameter and returns at once; the
+# kernel fills the slave and turns it on in the background. Bounded inside.
+SFP_HOST_DDM_SH=${SFP_HOST_DDM_SH:-/etc/scripts/sfp-host-ddm.sh}
+pon_step_sfphostddm() {
+	crumb "pon step sfp-host-ddm: start"
+	sh "$SFP_HOST_DDM_SH" boot > /dev/null 2>&1 || echo "rcS: sfp-host-ddm.sh boot failed" >&2
+	crumb "pon step sfp-host-ddm: done"
+}
+
 # Dying_Gasp on a reboot (GPON_DYING_GASP=1 in odi.conf, experimental,
 # docs/SETTINGS.md): tells the driver to send it from its reboot notifier.
 # Nothing is written, and nothing logged, while the key is not 1.
@@ -310,6 +323,7 @@ pon_steps_default() {
 	pon_step "i2c 1"
 	pon_step "i2cen 1"
 	pon_step_laser
+	pon_step_sfphostddm
 	pon_step gpon
 	pon_step rxsd
 	pon_step gpondrv
