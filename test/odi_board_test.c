@@ -276,6 +276,24 @@ static void test_tx_disable(void)
 	      "refused laser: GPIO 13 never driven, still an input");
 }
 
+/* Pin 27, the SoC SFP slave's on v08: the optics verb leaves it out of
+ * PIN_GPIO_SELECT while the host-side SFP EEPROM holds it, so a re-run of the
+ * verb cannot take the pin back from a mirror that is on.
+ */
+static void test_optics_sfp_slave_pin(void)
+{
+	optics_setup(0x6a, 0U);
+	CHECK(odi_board_optics() == 0 && odi_mock.log_n == 1 && odi_mock.log[0].addr == 0x48U &&
+	      odi_mock.log[0].val == 0x08082001U, "optics: 0x08082001 with the mirror off");
+	optics_setup(0x6a, 0U);
+	odi_board_sfp_slave_pin(1);
+	CHECK(odi_board_optics() == 0 && odi_mock.log_n == 1 && odi_mock.log[0].val == 0x00082001U,
+	      "optics: 0x00082001, bit 27 left to the mirror while it holds the pin");
+	optics_setup(0x6a, 0U);
+	odi_board_sfp_slave_pin(0);
+	CHECK(odi_board_optics() == 0 && odi_mock.log[0].val == 0x08082001U,
+	      "optics: 0x08082001 again once the mirror gave the pin back");
+}
 static int run_unit_checks(void)
 {
 	test_replay_order_and_kinds();
@@ -284,6 +302,7 @@ static int run_unit_checks(void)
 	test_optics_page_select();
 	test_optics_id_retry();
 	test_optics_unknown_laser_driver();
+	test_optics_sfp_slave_pin();
 	test_tx_disable();
 
 	if (failures) {

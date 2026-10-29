@@ -32,19 +32,31 @@
  *                (standard mode, byte order) are already set as the reset
  *                leaves them and are not touched.
  *   0x23018      pin modes: bit 23 gives the SFP edge I2C pins to the slave.
+ *   0x48         PIN_GPIO_SELECT, one bit per SoC pin, 1 = plain GPIO. The
+ *                optics verb writes 0x08082001 (odi_board.h); bit 27 must be
+ *                clear for the host to reach the slave on v08 (stock v08 runs
+ *                0x00082001; Thaad-QR's comparison with a stock v08 stick:
+ *                with only that bit cleared the router showed live DDM
+ *                within seconds). Nothing on v06 was seen to use pin 27.
  *
- * The enable is read-modify-write of exactly those two bits, nothing else.
+ * The enable is read-modify-write of exactly those three bits, nothing else.
+ * On: 0x2ac bit 0, 0x23018 bit 23, then 0x48 bit 27 cleared. Off: 0x48 bit
+ * 27 back to what it was first, then 0x23018, then 0x2ac. The pin is the
+ * host's way in: given last, once the slave behind it is set up, and taken
+ * back first, before the slave is taken apart, so the host never meets a
+ * slave in between.
+ *
  * Measured on a stock v08 stick with host diagnostics working (measurements
  * by Thaad-QR): 0x23018 = 0x01824040 and 0x2ac = 0x7; this image has
  * 0x01026040 and 0x6. Bit 13 of 0x23018 differs too: set here, clear on
  * that stock stick. It is the low bit of the two-bit I2C master pin field
  * (bits 14:13; the board init sets it around the first I2C master's setup
  * word) and is left as the boot sets it: why the stock image clears it is
- * not known. It is the first thing to try should the host still read
- * nothing on a v08 board with the slave on.
+ * not known, and on the v08 board tried pin 27 was what the host needed,
+ * not this bit.
  *
  * Order, a hard rule: the whole SRAM is written and read back, and the
- * write protect set, before either enable bit, so the host never sees an
+ * write protect set, before any enable bit, so the host never sees an
  * empty or partial EEPROM (it would lose the module identity, not just the
  * diagnostics). Nothing here writes the module: the mirror only reads it.
  *
@@ -73,6 +85,8 @@
 #define ODI_SFPM_CTRL_SLAVE_EN		(1U << 0)
 #define ODI_SFPM_IO_MODE_OFF		0x023018U
 #define ODI_SFPM_IO_MODE_SLAVE_PINS	(1U << 23)
+#define ODI_SFPM_PIN_SEL_OFF		0x000048U	/* ODI_SW_PIN_GPIO_SELECT(0) */
+#define ODI_SFPM_PIN_SEL_SFP_SLAVE	(1U << 27)	/* ODI_BOARD_PIN_SFP_SLAVE */
 
 /* One SRAM access is a few bus clocks; bounded at about 1 ms. */
 #define ODI_SFPM_ACCESS_POLL_DELAY_US	1U
@@ -164,6 +178,8 @@ static inline void odi_sfpm_a2_adjust(uint8_t a2[256], bool page0)
 struct odi_sfpm {
 	uint8_t img[ODI_SFPM_SIZE];	/* what the SRAM holds, as written */
 	unsigned int warned;
+	int pin_held;		/* 0x48 bit 27 cleared by odi_sfpm_start() */
+	int pin_was_gpio;	/* and set before that */
 };
 
 /* One byte of the SRAM through the CPU access register. 0, or -ETIMEDOUT
@@ -178,18 +194,20 @@ int odi_sfpm_sram_read(unsigned int addr, uint8_t *val);
 int odi_sfpm_read_live(uint8_t live[ODI_SFPM_A2_LIVE_LEN]);
 
 /* Fills the SRAM from the module (A0h, A2h), reads it all back, sets the
- * host write protect, then the two enable bits, then reads a few bytes and
- * the bits back. 0 with the mirror serving the host; otherwise an error,
- * logged, and both enable bits as they were before (a failure after the
- * enable clears them again). Process context: sleeps on odi_i2c_lock.
+ * host write protect, then the three enable bits (slave, pin mode, pin 27),
+ * then reads a few bytes and the bits back. 0 with the mirror serving the host; otherwise an error,
+ * logged, and the three enable bits as they were before (a failure after
+ * the enable puts them back). Process context: sleeps on odi_i2c_lock.
  */
 int odi_sfpm_start(struct odi_sfpm *m);
 
-/* Clears the two enable bits, pin mode first. The SRAM is left as it is. */
-void odi_sfpm_stop(void);
+/* Puts 0x48 bit 27 back as start found it (when start took it), then
+ * clears 0x23018 bit 23 and 0x2ac bit 0. The SRAM is left as it is.
+ */
+void odi_sfpm_stop(struct odi_sfpm *m);
 
 /* One refresh: A2h 96-119 from the module into the bytes of the SRAM that
- * changed, and the enable bits checked (set again, and logged once, when
+ * changed, and the three enable bits checked (set again, and logged once, when
  * something cleared them). A failed module read leaves the previous
  * values. 0, or the error of the module read.
  */

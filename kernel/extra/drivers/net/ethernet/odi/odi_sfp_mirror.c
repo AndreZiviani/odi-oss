@@ -17,8 +17,10 @@
  * second.
  */
 #include "odi_sfp_mirror.h"
+#include "odi_board.h"
 #include "odi_i2c.h"
 #include "odi_ddm.h"
+#include "odi_switch_hw.h"
 #include "odi_switch_reg.h"
 
 #ifdef __KERNEL__
@@ -38,6 +40,9 @@ void odi_sfpm_log(int warn, const char *fmt, ...);
 #define ODI_SFPM_INFO(fmt, ...)	odi_sfpm_log(0, fmt, ##__VA_ARGS__)
 #define ODI_SFPM_WARN(fmt, ...)	odi_sfpm_log(1, fmt, ##__VA_ARGS__)
 #endif
+
+_Static_assert(ODI_SFPM_PIN_SEL_OFF == ODI_SW_PIN_GPIO_SELECT_BASE, "PIN_GPIO_SELECT moved");
+_Static_assert(ODI_SFPM_PIN_SEL_SFP_SLAVE == ODI_BOARD_PIN_SFP_SLAVE, "SFP slave pin moved");
 
 static int odi_sfpm_access(uint32_t cmd, uint32_t *last)
 {
@@ -78,21 +83,31 @@ static void odi_sfpm_rmw(uint32_t off, uint32_t set, uint32_t clr)
 		odi_reg_write(off, n);
 }
 
-static bool odi_sfpm_enabled(uint32_t *ctrl, uint32_t *io)
+static bool odi_sfpm_enabled(uint32_t *ctrl, uint32_t *io, uint32_t *pin)
 {
 	*ctrl = odi_reg_read(ODI_SFPM_CTRL_OFF);
 	*io = odi_reg_read(ODI_SFPM_IO_MODE_OFF);
-	return (*ctrl & ODI_SFPM_CTRL_SLAVE_EN) && (*io & ODI_SFPM_IO_MODE_SLAVE_PINS);
+	*pin = odi_reg_read(ODI_SFPM_PIN_SEL_OFF);
+	return (*ctrl & ODI_SFPM_CTRL_SLAVE_EN) && (*io & ODI_SFPM_IO_MODE_SLAVE_PINS) &&
+	       !(*pin & ODI_SFPM_PIN_SEL_SFP_SLAVE);
 }
 
+/* The order of odi_sfp_mirror.h: slave, pin mode, then the pin itself. */
 static void odi_sfpm_enable(void)
 {
 	odi_sfpm_rmw(ODI_SFPM_CTRL_OFF, ODI_SFPM_CTRL_SLAVE_EN, 0);
 	odi_sfpm_rmw(ODI_SFPM_IO_MODE_OFF, ODI_SFPM_IO_MODE_SLAVE_PINS, 0);
+	odi_sfpm_rmw(ODI_SFPM_PIN_SEL_OFF, 0, ODI_SFPM_PIN_SEL_SFP_SLAVE);
 }
 
-void odi_sfpm_stop(void)
+void odi_sfpm_stop(struct odi_sfpm *m)
 {
+	if (m->pin_held) {
+		odi_board_sfp_slave_pin(0);
+		odi_sfpm_rmw(ODI_SFPM_PIN_SEL_OFF,
+			     m->pin_was_gpio ? ODI_SFPM_PIN_SEL_SFP_SLAVE : 0, 0);
+		m->pin_held = 0;
+	}
 	odi_sfpm_rmw(ODI_SFPM_IO_MODE_OFF, 0, ODI_SFPM_IO_MODE_SLAVE_PINS);
 	odi_sfpm_rmw(ODI_SFPM_CTRL_OFF, 0, ODI_SFPM_CTRL_SLAVE_EN);
 }
@@ -129,10 +144,12 @@ static const uint16_t odi_sfpm_check_bytes[] = {
 int odi_sfpm_start(struct odi_sfpm *m)
 {
 	uint8_t a0[256], a2[256], live[ODI_SFPM_A2_LIVE_LEN];
-	uint32_t ctrl, io;
+	uint32_t ctrl, io, pin;
 	unsigned int i;
 	bool page0;
 	int rc;
+
+	m->pin_held = 0;
 
 	/* Each page in one run: one hold of odi_i2c_lock, so nothing (a page
 	 * select through /dev/i2c-0) lands in the middle of the copy.
@@ -186,11 +203,15 @@ int odi_sfpm_start(struct odi_sfpm *m)
 	for (i = 0; i < ODI_SFPM_HOST_RO_WORDS; i++)
 		odi_reg_write(ODI_SFPM_HOST_RO_OFF + 4U * i, odi_sfpm_host_ro_word(i));
 
+	m->pin_was_gpio = !!(odi_reg_read(ODI_SFPM_PIN_SEL_OFF) & ODI_SFPM_PIN_SEL_SFP_SLAVE);
+	m->pin_held = 1;
+	odi_board_sfp_slave_pin(1);
 	odi_sfpm_enable();
 
-	rc = odi_sfpm_enabled(&ctrl, &io) ? 0 : -EIO;
+	rc = odi_sfpm_enabled(&ctrl, &io, &pin) ? 0 : -EIO;
 	if (rc)
-		ODI_SFPM_WARN("enable bits did not stick (0x2ac 0x%08x, 0x23018 0x%08x)", ctrl, io);
+		ODI_SFPM_WARN("enable bits did not stick (0x2ac 0x%08x, 0x23018 0x%08x, 0x48 0x%08x)",
+			      ctrl, io, pin);
 	for (i = 0; !rc && i < sizeof(odi_sfpm_check_bytes) / sizeof(odi_sfpm_check_bytes[0]); i++) {
 		unsigned int a = odi_sfpm_check_bytes[i];
 		uint8_t v = 0;
@@ -203,7 +224,7 @@ int odi_sfpm_start(struct odi_sfpm *m)
 				      a, v, m->img[a], rc);
 	}
 	if (rc) {
-		odi_sfpm_stop();
+		odi_sfpm_stop(m);
 		ODI_SFPM_WARN("host EEPROM disabled again after the failed self-check");
 		return rc;
 	}
@@ -216,7 +237,7 @@ int odi_sfpm_start(struct odi_sfpm *m)
 int odi_sfpm_refresh(struct odi_sfpm *m)
 {
 	uint8_t live[ODI_SFPM_A2_LIVE_LEN];
-	uint32_t ctrl, io;
+	uint32_t ctrl, io, pin;
 	unsigned int i;
 	int rc = odi_sfpm_read_live(live);
 
@@ -250,10 +271,10 @@ int odi_sfpm_refresh(struct odi_sfpm *m)
 			m->warned &= ~ODI_SFPM_W_SRAM;
 	}
 
-	if (!odi_sfpm_enabled(&ctrl, &io)) {
+	if (!odi_sfpm_enabled(&ctrl, &io, &pin)) {
 		if (!(m->warned & ODI_SFPM_W_LOST))
-			ODI_SFPM_WARN("an enable bit was cleared (0x2ac 0x%08x, 0x23018 0x%08x): set again",
-				      ctrl, io);
+			ODI_SFPM_WARN("an enable bit was undone (0x2ac 0x%08x, 0x23018 0x%08x, 0x48 0x%08x): set again",
+				      ctrl, io, pin);
 		m->warned |= ODI_SFPM_W_LOST;
 		odi_sfpm_enable();
 	} else {
@@ -317,7 +338,7 @@ void odi_sfp_mirror_request(bool on)
 		kick = true;
 	} else if (!on) {
 		if (odi_sfpm_st == ODI_SFPM_ON) {
-			odi_sfpm_stop();
+			odi_sfpm_stop(&odi_sfpm);
 			ODI_SFPM_INFO("host EEPROM off");
 		}
 		odi_sfpm_st = ODI_SFPM_OFF;

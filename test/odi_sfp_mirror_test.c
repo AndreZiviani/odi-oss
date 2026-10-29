@@ -16,8 +16,9 @@
  * 0), the order (no write to either enable register before all 512 SRAM
  * bytes and the 16 write protect words), the write protect pattern, the A0h
  * byte 93 adjustment and its checksum, the enable and disable as bit-exact
- * read-modify-writes of 0x2ac bit 0 and 0x23018 bit 23 (disable in the
- * reverse order), the refresh of A2h 96-119 (changed bytes only), a failed
+ * read-modify-writes of 0x2ac bit 0, 0x23018 bit 23 and 0x48 bit 27
+ * (0x08082001 <-> 0x00082001; the pin last on, first off, put back as it
+ * was, and the board told), 0x48 untouched with the mirror off, the refresh of A2h 96-119 (changed bytes only), a failed
  * module read logged once and its end once, an enable bit cleared behind
  * the mirror's back, and every failure of the start: nothing enabled, or
  * enabled and cleared again.
@@ -34,6 +35,17 @@
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_ddm.c"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_sfp_mirror.h"
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_sfp_mirror.c"
+
+/* odi_board.c is not in this build: what the mirror tells it about pin 27. */
+static int board_pin_held = -1;	/* -1: never told */
+
+void odi_board_sfp_slave_pin(int held)
+{
+	board_pin_held = held;
+}
+
+#define PIN_DFP		0x08082001U	/* what the optics verb writes */
+#define PIN_SLAVE	0x00082001U	/* bit 27 clear: stock v08, and ours with the mirror on */
 
 static int failures;
 
@@ -105,11 +117,11 @@ static void hook(uint32_t off, uint32_t val)
 		ro_writes++;
 		return;
 	}
-	if (off == ODI_SFPM_CTRL_OFF || off == ODI_SFPM_IO_MODE_OFF) {
+	if (off == ODI_SFPM_CTRL_OFF || off == ODI_SFPM_IO_MODE_OFF || off == ODI_SFPM_PIN_SEL_OFF) {
 		enable_writes++;
 		if (distinct_written() < ODI_SFPM_SIZE || ro_writes < ODI_SFPM_HOST_RO_WORDS)
 			enable_too_early = 1;
-		if (off == ODI_SFPM_IO_MODE_OFF && (val & ODI_SFPM_IO_MODE_SLAVE_PINS) &&
+		if (off == ODI_SFPM_PIN_SEL_OFF && !(val & ODI_SFPM_PIN_SEL_SFP_SLAVE) &&
 		    corrupt_on_enable)
 			sram[0] ^= 0x55U;
 	}
@@ -190,6 +202,8 @@ static void world_reset(uint32_t io_mode, uint32_t ctrl)
 	n_info = n_warn = 0;
 	odi_mock.regs[odi_mock_slot(ODI_SFPM_IO_MODE_OFF)] = io_mode;
 	odi_mock.regs[odi_mock_slot(ODI_SFPM_CTRL_OFF)] = ctrl;
+	odi_mock.regs[odi_mock_slot(ODI_SFPM_PIN_SEL_OFF)] = PIN_DFP;
+	board_pin_held = -1;
 }
 
 static uint32_t reg(uint32_t off)
@@ -241,7 +255,9 @@ static void test_start(void)
 	CHECK(memcmp(m.img, sram, sizeof(sram)) == 0, "start: the image is what the SRAM holds");
 	CHECK(sram_writes == ODI_SFPM_SIZE, "start: every SRAM byte written once");
 	CHECK(!enable_too_early, "start: no enable write before the whole SRAM and the write protect");
-	CHECK(enable_writes == 2, "start: one write to each enable register");
+	CHECK(enable_writes == 3, "start: one write to each enable register");
+	CHECK(reg(ODI_SFPM_PIN_SEL_OFF) == PIN_SLAVE, "start: 0x48 bit 27 cleared, 0x08082001 -> 0x00082001 (stock v08)");
+	CHECK(board_pin_held == 1 && m.pin_held && m.pin_was_gpio, "start: the board knows the mirror holds pin 27");
 	for (w = 0; w < ODI_SFPM_HOST_RO_WORDS; w++)
 		CHECK(reg(ODI_SFPM_HOST_RO_OFF + 4U * w) == odi_sfpm_host_ro_word(w),
 		      "start: the write protect words in place");
@@ -272,7 +288,11 @@ static void test_order_in_log(void)
 	}
 	CHECK(first_enable > last_sram && first_enable > last_ro,
 	      "order: the write log has the first enable write after the last SRAM and write protect writes");
-	CHECK(odi_mock.log[first_enable].addr == ODI_SFPM_CTRL_OFF, "order: slave enable before the pin mode");
+	CHECK(odi_mock.log[first_enable].addr == ODI_SFPM_CTRL_OFF, "order: slave enable first");
+	CHECK(odi_mock.log[first_enable + 1].addr == ODI_SFPM_IO_MODE_OFF &&
+	      odi_mock.log[first_enable + 2].addr == ODI_SFPM_PIN_SEL_OFF &&
+	      odi_mock.log[first_enable + 2].val == PIN_SLAVE,
+	      "order: then the pin mode, then 0x48 bit 27, the host's way in, last");
 }
 
 static void test_options_byte(void)
@@ -381,39 +401,58 @@ static void test_lost_bit(void)
 	odi_mock.regs[odi_mock_slot(ODI_SFPM_CTRL_OFF)] = 0x6U;
 	odi_sfpm_refresh(&m);
 	CHECK(reg(ODI_SFPM_CTRL_OFF) == 0x7U && n_warn == 2, "lost bit: a new loss after a clean refresh is logged again");
+	odi_sfpm_refresh(&m);
+	odi_mock.regs[odi_mock_slot(ODI_SFPM_PIN_SEL_OFF)] = PIN_DFP;	/* an optics verb that raced the start */
+	odi_sfpm_refresh(&m);
+	CHECK(reg(ODI_SFPM_PIN_SEL_OFF) == PIN_SLAVE && n_warn == 3, "lost bit: 0x48 bit 27 set behind the mirror is cleared again");
 }
 
 static void test_stop(void)
 {
 	struct odi_sfpm m;
-	unsigned int i, from, io_at = 0, ctrl_at = 0;
+	unsigned int i, from, pin_at = 0, io_at = 0, ctrl_at = 0;
 
 	world_reset(0x01026040U, 0x6U);
 	CHECK(odi_sfpm_start(&m) == 0, "stop: start succeeds");
 	from = odi_mock.log_n;
-	odi_sfpm_stop();
+	odi_sfpm_stop(&m);
+	CHECK(reg(ODI_SFPM_PIN_SEL_OFF) == PIN_DFP, "stop: 0x48 back to 0x08082001");
 	CHECK(reg(ODI_SFPM_IO_MODE_OFF) == 0x01026040U, "stop: 0x23018 back to the exact value");
 	CHECK(reg(ODI_SFPM_CTRL_OFF) == 0x6U, "stop: 0x2ac back to the exact value");
+	CHECK(board_pin_held == 0 && !m.pin_held, "stop: the board knows the pin is back");
 	for (i = from; i < odi_mock.log_n; i++) {
+		if (odi_mock.log[i].addr == ODI_SFPM_PIN_SEL_OFF)
+			pin_at = i;
 		if (odi_mock.log[i].addr == ODI_SFPM_IO_MODE_OFF)
 			io_at = i;
 		if (odi_mock.log[i].addr == ODI_SFPM_CTRL_OFF)
 			ctrl_at = i;
 	}
-	CHECK(io_at && ctrl_at && io_at < ctrl_at, "stop: pin mode cleared before the slave enable");
+	CHECK(pin_at && io_at && ctrl_at && pin_at < io_at && io_at < ctrl_at,
+	      "stop: 0x48 bit 27 first, then the pin mode, then the slave enable");
 	check_sram_is_module("stop: the SRAM is left as it is");
 	from = odi_mock.log_n;
-	odi_sfpm_stop();
+	odi_sfpm_stop(&m);
 	CHECK(odi_mock.log_n == from, "stop: nothing written when already off");
+
+	/* A pin that start found already clear stays clear. */
+	world_reset(0x01026040U, 0x6U);
+	odi_mock.regs[odi_mock_slot(ODI_SFPM_PIN_SEL_OFF)] = PIN_SLAVE;
+	CHECK(odi_sfpm_start(&m) == 0 && !m.pin_was_gpio, "stop: start found bit 27 clear");
+	odi_sfpm_stop(&m);
+	CHECK(reg(ODI_SFPM_PIN_SEL_OFF) == PIN_SLAVE, "stop: bit 27 restored to what it was, clear");
 
 	/* Every other bit kept, both ways. */
 	world_reset(0xff7fffffU, 0xfffffffeU);
+	odi_mock.regs[odi_mock_slot(ODI_SFPM_PIN_SEL_OFF)] = 0xffffffffU;
 	CHECK(odi_sfpm_start(&m) == 0, "rmw: start succeeds");
-	CHECK(reg(ODI_SFPM_IO_MODE_OFF) == 0xffffffffU && reg(ODI_SFPM_CTRL_OFF) == 0xffffffffU,
-	      "rmw: only the two bits set, every other bit kept");
-	odi_sfpm_stop();
-	CHECK(reg(ODI_SFPM_IO_MODE_OFF) == 0xff7fffffU && reg(ODI_SFPM_CTRL_OFF) == 0xfffffffeU,
-	      "rmw: only the two bits cleared");
+	CHECK(reg(ODI_SFPM_IO_MODE_OFF) == 0xffffffffU && reg(ODI_SFPM_CTRL_OFF) == 0xffffffffU &&
+	      reg(ODI_SFPM_PIN_SEL_OFF) == 0xf7ffffffU,
+	      "rmw: only the three bits changed, every other bit kept");
+	odi_sfpm_stop(&m);
+	CHECK(reg(ODI_SFPM_IO_MODE_OFF) == 0xff7fffffU && reg(ODI_SFPM_CTRL_OFF) == 0xfffffffeU &&
+	      reg(ODI_SFPM_PIN_SEL_OFF) == 0xffffffffU,
+	      "rmw: only the three bits put back");
 }
 
 static void check_untouched(const char *what)
@@ -423,7 +462,10 @@ static void check_untouched(const char *what)
 	snprintf(msg, sizeof(msg), "%s: neither enable register written", what);
 	CHECK(enable_writes == 0, msg);
 	snprintf(msg, sizeof(msg), "%s: enable registers unchanged", what);
-	CHECK(reg(ODI_SFPM_IO_MODE_OFF) == 0x01026040U && reg(ODI_SFPM_CTRL_OFF) == 0x6U, msg);
+	CHECK(reg(ODI_SFPM_IO_MODE_OFF) == 0x01026040U && reg(ODI_SFPM_CTRL_OFF) == 0x6U &&
+	      reg(ODI_SFPM_PIN_SEL_OFF) == PIN_DFP, msg);
+	snprintf(msg, sizeof(msg), "%s: the board never told about pin 27", what);
+	CHECK(board_pin_held == -1, msg);
 	snprintf(msg, sizeof(msg), "%s: logged", what);
 	CHECK(n_warn >= 1, msg);
 	snprintf(msg, sizeof(msg), "%s: no lock left held", what);
@@ -453,15 +495,32 @@ static void test_start_failures(void)
 	world_reset(0x01026040U, 0x6U);
 	corrupt_on_enable = 1;
 	CHECK(odi_sfpm_start(&m) == -EIO, "self-check: start fails");
-	CHECK(reg(ODI_SFPM_IO_MODE_OFF) == 0x01026040U && reg(ODI_SFPM_CTRL_OFF) == 0x6U,
-	      "self-check: both bits cleared again");
+	CHECK(reg(ODI_SFPM_IO_MODE_OFF) == 0x01026040U && reg(ODI_SFPM_CTRL_OFF) == 0x6U &&
+	      reg(ODI_SFPM_PIN_SEL_OFF) == PIN_DFP,
+	      "self-check: all three bits put back, 0x48 = 0x08082001");
+	CHECK(board_pin_held == 0, "self-check: the board knows the pin is back");
 	CHECK(n_warn == 2, "self-check: the mismatch and the disable logged");
 	CHECK(odi_mock_locks_idle(), "self-check: no lock left held");
+}
+
+/* The mirror off from boot (SFP_HOST_DDM=0, a safe-mode boot): nothing
+ * here runs, and 0x48 keeps what the optics verb wrote.
+ */
+static void test_off_at_boot(void)
+{
+	struct odi_sfpm m;
+
+	world_reset(0x01026040U, 0x6U);
+	memset(&m, 0, sizeof(m));
+	odi_sfpm_stop(&m);	/* an off request with nothing on */
+	CHECK(reg(ODI_SFPM_PIN_SEL_OFF) == PIN_DFP && board_pin_held == -1,
+	      "off at boot: 0x48 untouched, the board never told");
 }
 
 int main(void)
 {
 	test_ro_words();
+	test_off_at_boot();
 	test_start();
 	test_order_in_log();
 	test_options_byte();

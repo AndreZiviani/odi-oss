@@ -459,8 +459,11 @@ With `SFP_HOST_DDM` on (the default), the boot, once the optics I2C answers
 (after the `laser` PON step), asks the kernel for the mirror. The kernel
 copies the module's A0h and A2h (the upper half from page 0) into the SRAM,
 reads all of it back, makes every byte read-only to the host except the user
-EEPROM area (A2h 128-247), and only then turns the slave on; it never writes
-the module. From then on it rewrites A2h 96-119 once a second from the
+EEPROM area (A2h 128-247), and only then turns the slave on and gives it SoC
+pin 27 (out of plain GPIO mode, as the stock v08 image runs it: on v08 the
+router saw nothing until that pin was given, Thaad-QR's comparison with a
+stock v08 stick; on v06 nothing measured uses it); it never writes the
+module. From then on it rewrites A2h 96-119 once a second from the
 module: the five diagnostic words, the status/control byte 110 (bits 7, 2
 and 1: TX_DISABLE, TX_FAULT and RX_LOS as the module reports them) and the
 alarm and warning flags. A module read that fails leaves the last values and
@@ -474,8 +477,8 @@ that advertises none, as seen so far, reaches the host unchanged.
 Check it with `cat /sys/module/odi_switch/parameters/sfp_mirror_state`
 (`on`, `off`, `filling` or `failed`) and `dmesg | grep odi_sfp_mirror`;
 `sfp-host-ddm.sh status` shows the key too. `SFP_HOST_DDM=0` and `apply.sh
-sfp` turn the slave off at once; the router then reads what the board gives
-it with the emulation off.
+sfp` turn the slave off at once and give pin 27 back; the router then reads
+what the board gives it with the emulation off.
 
 ### Software download from the OLT
 
@@ -1089,11 +1092,14 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
 
 ## Not verified yet
 
-- The host-side SFP EEPROM (`SFP_HOST_DDM`) on hardware: on a v06 stick,
-  that the slave stays harmless with the refresh running (it is not wired
-  there; turned on by hand for 40 s it changed nothing the host read), and on
-  a v08 stick, that the router reads the identity and live diagnostics from
-  it. Host-tested against the register model only. How the host write
+- The host-side SFP EEPROM (`SFP_HOST_DDM`) with pin 27 handled by the
+  kernel. By hand: on a v08 stick running the mirror without the pin,
+  clearing bit 27 of PIN_GPIO_SELECT made the router show live diagnostics
+  within seconds (module I2C, the host link and PPPoE unaffected); on a v06
+  stick bit 27 cleared for 30 s left the module DDM updating, O5 and the
+  host link up, and the slave turned on by hand for 40 s changed nothing the
+  host read. The build that does all of it at boot, and a long run on v06,
+  are not checked yet; host-tested against the register model. How the host write
   protect packs its bits inside a word is taken from the register table and
   not checked: only A2h 224-255 depend on it.
 - The `HOST_AUTONEG` boot fallback on a stick: the write, the trial, its

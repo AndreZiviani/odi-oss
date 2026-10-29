@@ -12,14 +12,17 @@ listed here.
   firmware, instead of 0 C and 0 V. The kernel copies A0h and A2h from the
   module into the slave's 512-byte SRAM, reads it all back, makes it read-only
   to the host except A2h 128-247, and only then turns the slave on (0x2ac bit
-  0, then 0x23018 bit 23, each a read-modify-write of that bit); A2h 96-119
+  0, then 0x23018 bit 23, then SoC pin 27 out of plain GPIO mode, PIN_GPIO_SELECT
+  0x08082001 -> 0x00082001 as the stock v08 image runs it; each a
+  read-modify-write of that bit, undone pin first); A2h 96-119
   (the five diagnostics, the TX_DISABLE/TX_FAULT/RX_LOS bits of byte 110, the
   alarm and warning flags) is refreshed every second, and the module is never
   written. `odi_switch.sfp_mirror` and `sfp_mirror_state`, `sfp-host-ddm.sh`
   (a PON step after `laser`), `apply.sh sfp`; off in a safe-mode boot; `0`
   turns it off. No effect on v06 boards, where the host reads a separate fixed
-  EEPROM. The behaviour follows measurements by Thaad-QR on a stock v08 stick.
-  Not yet checked on hardware. Host-tested (`test/odi_sfp_mirror_test.c`,
+  EEPROM; pin 27 is unused there as measured. The behaviour follows
+  measurements by Thaad-QR on a stock v08 stick, and pin 27 Thaad-QR's
+  comparison with a stock v08 stick (with it, the router showed live DDM). Host-tested (`test/odi_sfp_mirror_test.c`,
   `test/sfp_host_ddm_test.sh`). Refs #231.
 - kernel: die-temperature alarms on the SoC hwmon device (`rtl9602c_soc`):
   `temp1_max` (default 95000) and `temp1_crit` (default 110000) in
