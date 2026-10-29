@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.11.0. The browser's password dialog is replaced by a
+  sign-in page: opening the stick goes to `/login`, and signing in there gives
+  the browser a session that ends after 30 minutes without use, after a day,
+  when the stick or confd restarts, or at sign-out. Sign out now ends the
+  session for certain and says so, instead of answering *cross-site request
+  refused* in Chromium browsers or opening the browser's own password dialog.
+  Changing the password keeps the browser that changed it signed in and signs
+  the others out. `curl -u` and scripts keep using HTTP Basic. Refs #239.
+
 - kernel, rootfs: the host-side SFP EEPROM, odi-only key `SFP_HOST_DDM`, on by
   default. On the board revisions that wire the SoC's SFP EEPROM emulation to
   the SFP edge (HSGQ v08 / DFP-34X-2C2 v08) the router now reads the module's
