@@ -27,6 +27,40 @@ listed here.
   DDM from this image at boot, another's v08 showed it once pin 27 was freed
   by hand, and a v06 stick ran the mirror for three days with the host's
   EEPROM unchanged. Refs #231.
+- Host SerDes mode: the new odi-only key `HOST_SERDES` (default `fiber1g`,
+  the mode and the thirteen-write sequence the image always ran, value for
+  value) selects `2500basex`, for a 2.5G host and the HSGQ XPON stick, or
+  `hisgmii` (the stock "HiSGMII" mode, the MAC at 1000 Mb/s). In both the
+  host port is forced up (the new kernel parameter `odi_switch.host_forced`;
+  cmd 32 then moves the forced link value, so an OLT unlock keeps the
+  link; back in `fiber1g` both port words return to what the force found),
+  and the PCS auto-negotiation is set per mode (off in 2500BASE-X,
+  the only setting seen to link to the 2.5G router port measured; why the
+  stock HSGQ firmware links there with it on is not known, and another open
+  implementation's measurements linked 2500BASE-X with it on and off
+  against a matching host, so it is what that router needs, not a property
+  of the lane). The SFP EEPROM still advertises 1000BASE-LX at 1300 MBd,
+  so a host that picks its port mode from it (Linux phylink, for example)
+  may run 1000BASE-X whatever the key says: a caution, not measured.
+  `host-serdes.sh` applies it from `network.sh` at boot and offers `try`, `confirm`, `revert`,
+  `reapply` and `status`: a change is a trial that reverts after 120 s
+  unless confirmed over the link. Fiber 1G, the most compatible host mode,
+  is the fallback everywhere. A 2500BASE-X boot watches the SerDes sync
+  (bit 17 of 0x214) and falls back to Fiber 1G, alternating, for up to 10
+  minutes, staying in Fiber 1G when neither links (the key unchanged);
+  HiSGMII has no link signal and no boot fallback. `HOST_AUTONEG` applies
+  to Fiber 1G only and stands aside while another mode runs; its `status`
+  then prints the bit the port really runs and `owner=host-serdes`. A mode other
+  than `fiber1g` makes three short boots enough for the safe mode, whose
+  boot runs Fiber 1G and clears the key, as it clears `HOST_AUTONEG=off`
+  (`cleared=` can now name both). Whether the HSGQ board links in Fiber 1G
+  is untested. The stock `LAN_SDS_MODE` is not read. The diagnostics bundle carries
+  `host-serdes.sh status`. Register values and the HSGQ port by Thaad-QR
+  (their reads from a stock HSGQ stick). Host-tested
+  (`test/host_serdes_test.sh`, `test/odi_host_forced_test.c`,
+  `test/safe_mode_test.sh`). On hardware: 2500BASE-X linked an HSGQ stick to a
+  2.5G router port (O5, PPPoE, voice), and Fiber 1G runs as before on a
+  DFP-34X-2C2; HiSGMII has not been run on hardware yet. Refs #229.
 - omcid tests: the qemu suites no longer flake on a loaded machine. `omcli --inject-file` waits out a full omcid queue (30 s) instead of dropping the tail of the session after half a second, the suites wait for omcid's end-of-session lines (rebuild, multicast policy export, answers) instead of fixed sleeps, and omcid logs `multicast policy unchanged` when its quiet-second export has nothing to write.
 
 ## v1.13.0 (2026-10-28)

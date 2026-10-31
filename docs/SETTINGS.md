@@ -145,6 +145,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `OMCI_TCONT_ALLOC_UNSET` | What a T-CONT the OLT never set reports as its Alloc-ID | `ploam` (the default, also for an absent or unknown value) reports, for a T-CONT the OLT has not Set, the next Alloc-ID the OLT assigned by PLOAM, in assignment order, as the stock firmware does. `unassigned` reports `0x00FF`, the "not assigned" value of the standard (G.988 9.2.2), in a Get, in the MIB upload and in `omcicli`. For an OLT that provisions a T-CONT by Setting its Alloc-ID and picks the first T-CONT that reports empty: with `ploam` it sees the first one as taken and puts the service on the second (`0x8001` instead of `0x8000`). A T-CONT the OLT did Set reports the OLT's value in both modes, and the key changes nothing else: the T-CONT still takes the PLOAM Alloc-ID in the switch, the GEM port network CTP pointers (ME 268) are the same, and a line whose OLT never Sets the Alloc-ID keeps its upstream. Use it only with an OLT that Sets the Alloc-ID of ME 262: one that does not Set it and reads the Alloc-ID back would see `0x00FF` and may treat the T-CONT as unusable. omcid logs a warning (`OMCI_TCONT_ALLOC_UNSET=unassigned`) for each T-CONT that carries GEM traffic without an Alloc-ID the OLT Set. Odi-only key, kept in `/etc/config/odi.conf` (see "Odi-only keys" below); read at every Get and rebuild, so a change needs neither a reload nor a re-registration | omcid, at every Get and MIB upload | LIVE (the next Get) |
 | `OMCI_UNI_LOCK` | Honour an OLT lock of the Ethernet UNI | `0` ignores it: the OLT's Set of the PPTP Ethernet UNI administrative state to locked (ME 11 attribute 5) is answered and stored as always, and the port stays up. Anything else, or absent, honours it as the stock firmware does: the host port's link is forced down until the OLT unlocks it. **On this SFP the UNI is the host port, the stick's only management path, so a lock cuts the web UI and ssh too** (OMCI still arrives over the fibre). Whatever the setting, omcid unlocks every Ethernet UNI when a MIB reset arrives (the reset puts the attribute back to unlocked, and the OLT then sends no unlock of its own) and when it starts with an empty MIB; it does not on a resume from a snapshot, whose MIB and switch state are still the old ones. The default honours the lock because it is the OLT's documented way to suspend a service (G.988 9.5.1) and some OLTs lock and unlock a UNI during provisioning; it is undone on a reset or restart so a stale lock can never strand the stick. Set `0` when the stick is managed from the host and the OLT must never take that link away. Odi-only key, kept in `/etc/config/odi.conf`; read at every Set of the attribute, so a change needs neither a reload nor a re-registration | omcid, at every ME 11 Set, MIB reset and start | LIVE (the next Set) |
 | `HOST_AUTONEG` | Host port auto-negotiation | `off` runs the host port (the SFP edge, toward the router) as forced 1000BASE-X full duplex with no auto-negotiation, for a host whose SFP port has auto-negotiation off; `on`, empty or absent negotiates (clause 37), as the stock image and every host seen so far do; any other value runs `on` and logs `event=bad_value`. Never stored directly: a change is a trial, applied in RAM and reverted after 120 s unless confirmed over the link it changed; a boot with `off` falls back to auto-negotiation while the host link stays down; three short boots in a row make the next a safe-mode boot, which clears it ("Host port auto-negotiation" and "Recovery: the safe mode" below). Odi-only key, kept in `/etc/config/odi.conf` | `host-autoneg.sh`, at boot and for a trial | LIVE (a trial: kept only when confirmed) |
+| `HOST_SERDES` | Host port SerDes mode | `2500basex` runs the host port as 2500BASE-X, for a host whose SFP port runs at 2.5 Gb/s, with the PCS auto-negotiation off and the port forced up; `hisgmii` runs HiSGMII, the MAC forced to 1000 Mb/s; `fiber1g`, empty or absent runs 1000BASE-X (Fiber 1G), the mode of the stock DFP-34X-2C2 image; any other value runs `fiber1g` and logs `event=bad_value`. Fiber 1G is the fallback everywhere, as the most compatible host mode. The stock firmware of the HSGQ XPON stick runs `2500basex` or `hisgmii`, and nothing on the board tells it apart; whether it links in Fiber 1G is untested. Never stored directly: a change is a trial, applied in RAM and reverted after 120 s unless confirmed over the link it changed; a boot in `2500basex` falls back to Fiber 1G while the SerDes does not sync, and stays there if neither links; three short boots in a row make the next a safe-mode boot, which runs Fiber 1G and clears it ("Host port SerDes mode" and "Recovery: the safe mode" below). Odi-only key, kept in `/etc/config/odi.conf` | `host-serdes.sh` (from `network.sh` at boot, and for a trial) | LIVE (a trial: kept only when confirmed) |
 | `IGMP_SNOOPING` | IGMP snooping | `1` runs `igmpd`, which then snoops the host's IGMP while the OLT provisions a multicast profile that asks for it (ME 281 with an address row, ME 309 IGMP function 0): one static row a group, the host and the PON as members, and the group limit and access control lists of the profile enforced (the rows' VLAN and source address, previews and the allowed preview groups too, and messages above the profile's IGMP version are counted: `docs/TOOLS.md`, `igmpd`). When the profile asks for an upstream IGMP tag, a rate, or the discard of joins outside its lists, `igmpd` takes the host's IGMP from the switch and sends it up itself, tagged as asked (`docs/TOOLS.md`, `igmpd`). Multicast the PON sends is still flooded unless `IGMP_PON_DROP` asks for the drop. Empty, absent or anything else: no daemon, and multicast is flooded as it always was. Odi-only key, kept in `/etc/config/odi.conf`. Takes effect with `apply.sh igmp`, no reboot | `svc-igmpd.sh`; `docs/TOOLS.md`, `igmpd` | SERVICE RESTART |
 | `IGMP_PON_DROP` | Drop unjoined multicast from the PON | `1` makes `igmpd` also drop IPv4 multicast from the PON that no group row names, one membership interval after snooping starts, so a group nobody on the host joined stays off the UNI link; `0` snoops without dropping anything. It is the one part of snooping that can cut a stream, hence its own key. Default off: unset or anything but `1` snoops without dropping. A config with `IGMP_SNOOPING=1` that wants the drop as before must now set `IGMP_PON_DROP=1`. With `MLD_SNOOPING=1` it drops unjoined IPv6 multicast as well, never the link-scope or solicited-node groups. Has no effect while `IGMP_SNOOPING` is not `1`. Odi-only key, kept in `/etc/config/odi.conf`. Takes effect with `apply.sh igmp`, no reboot | `svc-igmpd.sh` (`igmpd -d`); `docs/TOOLS.md`, `igmpd` | SERVICE RESTART |
 | `MLD_SNOOPING` | MLD (IPv6) snooping | `1` makes `igmpd` snoop the host's MLD as it snoops its IGMP, on the same multicast profile: the switch copies (or takes) the host's MLD queries, reports and dones to the CPU and nothing else of ICMPv6, IPv6 groups get a row each (keyed on their 33:33 MAC, the host and the PON as members), the profile's IPv6 access control list rows and its group limit are enforced, and the reports go up tagged as the profile says. With `IGMP_PON_DROP=1` as well, IPv6 multicast from the PON that no group row names is dropped too, one membership interval after snooping starts; the link-scope groups ff02::/16 and the solicited-node groups always flood, both ways, so router advertisements, neighbour discovery and DHCPv6 are never pruned, and they are never snooped or refused. Empty, absent or anything else: MLD is not snooped and IPv6 multicast is flooded as it always was; `igmpd` runs exactly as without the key. Has no effect while `IGMP_SNOOPING` is not `1`. Odi-only key, kept in `/etc/config/odi.conf`. Takes effect with `apply.sh igmp`, no reboot | `svc-igmpd.sh` (`igmpd -6`); `docs/TOOLS.md`, `igmpd` | SERVICE RESTART |
@@ -155,7 +156,7 @@ The UI's reboot confirmation says which slot it comes back on.
 Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
 `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`,
 `OMCI_POTS_PORTS`, `OMCI_POTS_SLOT_ID`, `OMCI_VOIP_LINE_REPORT`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `OMCI_TCONT_ALLOC_UNSET`, `ODI_LASER_UNVERIFIED`,
-`HOST_AUTONEG`, `IGMP_SNOOPING`, `IGMP_PON_DROP`, `MLD_SNOOPING`, `GPON_DYING_GASP`, `GPON_KEEP_DISABLE` and `SFP_HOST_DDM` are the only
+`HOST_AUTONEG`, `HOST_SERDES`, `IGMP_SNOOPING`, `IGMP_PON_DROP`, `MLD_SNOOPING`, `GPON_DYING_GASP`, `GPON_KEEP_DISABLE` and `SFP_HOST_DDM` are the only
 keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
 in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
@@ -523,7 +524,10 @@ negotiation off on the stick too, forced 1000 Mb/s full duplex
 (`docs/SWITCH.md`, "Host port auto-negotiation"). Leave it unset unless the
 router needs it: a mode the two ends disagree on takes the only way into
 the stick down with the internet, so everything below exists to get it
-back.
+back. It is the auto-negotiation of Fiber 1G: while `HOST_SERDES` runs
+another mode, that mode sets the bit itself, and `HOST_AUTONEG` is neither
+applied at boot (`event=serdes_mode` when it is off) nor open to a trial
+("Host port SerDes mode" below).
 
 **A change is a trial.** The web UI (Config, Network, "Host port") or
 `host-autoneg.sh try off` (`docs/TOOLS.md`) applies the mode one second
@@ -580,6 +584,122 @@ uptime. What no stick has shown is the boot fallback: both hosts accept a
 forced partner, so the forced side never lacked a link ("Not verified
 yet").
 
+### Host port SerDes mode
+
+The host port's SerDes runs Fiber 1G (1000BASE-X) by default: the mode the
+stock image of the DFP-34X-2C2 runs, and the one every host of that stick
+speaks. `HOST_SERDES` picks another:
+
+- `2500basex`: 2500BASE-X, for a host whose SFP port runs at 2.5 Gb/s. The
+  PCS auto-negotiation is off and the switch port forced (link up, full
+  duplex) in this mode, whatever `HOST_AUTONEG` says. Against the 2.5G
+  router SFP port it was measured on, the link came up only with the
+  auto-negotiation off, although a stick running its stock HSGQ firmware
+  links to the same port with it on; why is not known. Another open
+  implementation's measurements linked 2500BASE-X with the
+  auto-negotiation on and off against a matching host, re-latching 10 to
+  14 s after a host change (inside the 30 s phase of the boot watch,
+  below). So auto-negotiation off is what that router needs, not a
+  property of the lane, and it is a setting that works there, not an
+  explanation.
+- `hisgmii`: HiSGMII, the MAC forced to 1000 Mb/s, the 1000BASE-X PCS
+  powered down and the port forced. This is the mode the stock firmware
+  calls `LAN_SDS_MODE` 4 ("2500Mbps HiSGMII PHY"); it is not a 1G mode on
+  the wire. Tested by its reporter against a media converter only.
+
+**What the host reads from the module.** The SFP's own EEPROM page the
+host reads (A0h, fixed memory) advertises the module as 1000BASE-LX at a
+nominal 1300 MBd, and this image cannot change it. A host that picks its
+port mode from that page (Linux phylink and its SFP driver, for example)
+may run its port at 1000BASE-X whatever `HOST_SERDES` says; a host whose
+port mode is set by hand (a router SFP port forced to 2.5G, as in the
+measurement above) is not affected. This is a caution, not a measured
+failure: no Linux host has been tried against `2500basex`.
+
+The HSGQ XPON stick is the same board as far as this image can see (the
+same U-Boot, environment and flash layout), and its stock firmware runs
+one of these two. Nothing on the board says which stick it is, so the key
+is the only input, and the stock `LAN_SDS_MODE` is not read: a DFP-34X-2C2
+can hold 3 there and run Fiber 1G. Whether the HSGQ board links in Fiber
+1G is untested (the one run without the key changed two things at once,
+against an unknown host), and its reporter has been asked. Until it is
+known, set the key on an HSGQ stick before the first boot of this image:
+from the stock firmware's shell, `echo HOST_SERDES=2500basex >>
+/var/config/odi.conf`, then flash and trial the image as usual
+(`docs/FLASHING.md`). A trial boot that does not come up returns to the
+stock slot by itself.
+
+**Fiber 1G is the fallback everywhere.** 1000BASE-X is the most compatible
+host mode, so every way back below ends in it: the trial revert from a
+Fiber 1G boot, the boot watch of 2500basex when nothing links, and the
+safe mode, which also clears the key.
+
+The register sequence of each mode and the port force are in
+`docs/SWITCH.md`, "Host port SerDes mode". `network.sh` runs
+`host-serdes.sh boot` before the MAC and the bridge, as the Fiber 1G
+sequence always ran there; Fiber 1G is the sequence it always was, value
+for value, and a stick already in it is not written at all.
+
+**A change is a trial**, as with `HOST_AUTONEG`: `host-serdes.sh try
+2500basex` (`docs/TOOLS.md`) answers at once, applies the mode one second
+later, in RAM only, and reverts by itself after 120 s unless `host-serdes.sh
+confirm` arrives first, which can only happen over the link in the new
+mode. Only the confirm stores `HOST_SERDES` (confirming `fiber1g` removes
+it). A reboot during the trial also undoes it. A trial is refused while
+another one runs, while the boot watch (below) runs, while a
+`host-autoneg.sh` trial or boot watch runs, in a safe-mode boot, and with
+`/etc/config/sds.off`. The web UI does not offer the setting yet.
+`host-serdes.sh reapply` runs the sequence of the running mode again, live,
+with no trial and nothing stored: the way to check on a stick that the
+sequence itself brings a link back.
+
+**What protects each mode.** The kernel's `host_link` is the switch port's
+link, and a forced port reads it as up whatever the host does, so in
+`2500basex` and `hisgmii` it says nothing about the host. `2500basex` has
+another signal: bit 17 of `HOST_SERDES_MODE` (0x214) is set while the SerDes
+is in sync with the host (0x00260016 on a stick that links, 0x00240016 on
+one that does not). `hisgmii` has none known. omcid reads `host_link` too,
+for the Ethernet UNI the OLT sees (ME 11), so in the two forced modes the
+OLT sees the UNI up at 1000 Mb/s full duplex whatever the host does; an OLT
+lock of the UNI still takes the link down (`docs/SWITCH.md`). So the
+protections are not the same in every mode, and not the same as
+`HOST_AUTONEG`'s:
+
+| mode | trial revert | boot watch and fallback | safe mode |
+|---|---|---|---|
+| `fiber1g` | yes | `HOST_AUTONEG`'s, when that is off (above) | the mode of every safe-mode boot |
+| `2500basex` | yes | yes: the SerDes sync, falling back to Fiber 1G and ending there (below) | counts after three short boots; that boot runs Fiber 1G and clears the key |
+| `hisgmii` | yes | none: nothing tells a dead host from a live one | as `2500basex` |
+
+**The boot watch of 2500basex.** A boot with `HOST_SERDES=2500basex`
+applies it and watches the SerDes sync for 30 s. With no sync it switches
+to Fiber 1G for 30 s, watching `host_link` there (the port is no longer
+forced), then back to 2500BASE-X, and so on until one of them links, for at
+most 10 minutes. A link in Fiber 1G is the **fallback**: `event=fallback`,
+`fallback=1` in the state file, the key unchanged. Past the 10 minutes with
+no link in either mode it stays on Fiber 1G (`event=fallback_nolink`,
+`fallback=1`), as `HOST_AUTONEG` ends on its default; the key is not
+changed by the watch, so the next boot tries 2500BASE-X again. A 2.5G host
+that comes up later than that finds the stick in Fiber 1G until it
+reboots. In Fiber 1G during and after the watch the auto-negotiation is
+on.
+
+**The auto-negotiation.** `host-serdes.sh` sets the PCS auto-negotiation
+bit itself in the two other modes (off in `2500basex`, on in `hisgmii`,
+where the PCS is powered down anyway), through `odi_switch.host_autoneg`,
+in RAM. `HOST_AUTONEG` keeps its stored value and applies again once the
+port runs Fiber 1G at a boot; while another mode runs, `host-autoneg.sh`
+applies nothing, starts no boot watch of its own (its on/off alternation
+would put 2500BASE-X into the auto-negotiation that does not link), and
+refuses a trial; its `status` then says `owner=host-serdes`, with
+`running=` the bit the port really runs and `setting=` the stored
+`HOST_AUTONEG`. Back in Fiber 1G during a boot (a trial reverted, the
+fallback), the bit goes back to what `host-autoneg.sh` last ran.
+
+The state of the running boot is `/var/run/host-serdes`, `key=value` lines
+replaced by a rename (`docs/TOOLS.md`, "host-serdes.sh"); the diagnostics
+bundle (`host-link.txt`) carries its `status`.
+
 ### Recovery: the safe mode
 
 A way back into a stick that cannot be reached or logged into -- a host
@@ -587,7 +707,8 @@ port mode the router does not speak, a forgotten web UI password, lost ssh
 keys -- with nothing but its power:
 
 **Plug the stick in, wait about 80 seconds, pull it, wait a few seconds.
-Do that five times in a row (three times when `HOST_AUTONEG` is off). Then
+Do that five times in a row (three times when `HOST_AUTONEG` is off or
+`HOST_SERDES` is `2500basex` or `hisgmii`). Then
 plug it in and leave it in: that boot is the safe-mode boot. Do not pull it
 again.**
 
@@ -596,7 +717,8 @@ the middle of it. Every boot adds one to a counter on the config partition
 right after the partition is mounted, before the network comes up, and
 logs the uptime of that moment (`event=boot_count ... uptime=`); a boot
 that reaches 60 s of uptime clears it. A boot that finds five short boots
-before it (three with `HOST_AUTONEG=off`) is a safe-mode boot. Uptime
+before it (three with `HOST_AUTONEG=off` or a `HOST_SERDES` mode other than
+`fiber1g`) is a safe-mode boot. Uptime
 starts when the kernel does, not at power-on: measured on ISP1's stick, a
 cold power-on spends about 54 s in U-Boot and loading the image, the count
 lands at about 5 s of uptime (about 59 s after power-on) and the clear at
@@ -613,7 +735,9 @@ watchdog reset, and a config partition that is not mounted.
 
 A safe-mode boot lasts that one boot. It:
 
-- runs the host port on auto-negotiation, whatever `HOST_AUTONEG` says;
+- runs the host port in Fiber 1G (1000BASE-X, the most compatible host
+  mode) with auto-negotiation, whatever `HOST_SERDES` and `HOST_AUTONEG`
+  say;
 - leaves the PON off: the PON steps keep the laser off and skip the
   activation, so there is no internet through the stick and it cannot
   disturb the OLT or the other ONUs on it while someone works on it;
@@ -621,8 +745,10 @@ A safe-mode boot lasts that one boot. It:
   and `admin` for root over ssh (password logins are offered for that boot
   even on a keys-only image), on top of the ssh keys already installed;
 - writes nothing to the config partition but its record,
-  `/etc/config/safe-mode`, and, when `HOST_AUTONEG=off` was what made it
-  fire, the removal of that key. The saved web UI credential, the ssh keys
+  `/etc/config/safe-mode`, and, when `HOST_AUTONEG=off` or a `HOST_SERDES`
+  mode other than `fiber1g` lowered the count to three, the removal of
+  those keys, so the boots after it stay in Fiber 1G with
+  auto-negotiation too. The saved web UI credential, the ssh keys
   and every other setting are left as they are, and the next boot uses
   them again. The default passwords are in memory only: the web UI reads a
   flag in `/var/run`, and root's account file is a copy in RAM bind-mounted
@@ -639,6 +765,16 @@ an ssh key if that is what was lost -- both are saved and in force from the
 next boot -- acknowledge, and reboot. The record outlives the boot, so the
 banner says a safe-mode boot happened until someone acknowledges it (its
 button, or `safe-mode.sh ack`).
+
+**The SerDes mode.** Fiber 1G is the fallback here as everywhere: a
+safe-mode boot runs it, and after short boots it removes a `HOST_SERDES`
+mode other than `fiber1g`, as it removes `HOST_AUTONEG=off` (`cleared=`
+names what it removed: `HOST_AUTONEG`, `HOST_SERDES`, both, `none`, or
+`failed`). A safe mode after watchdog resets removes neither. Such a mode
+also lowers the count to three short boots, as `HOST_AUTONEG=off` does.
+Whether the HSGQ board links in Fiber 1G is untested; if it does not, a
+safe-mode boot there is unreachable, and the key has to be set again from
+outside (the stock slot), as on its first boot.
 
 **The trade-off.** Anyone who can power-cycle the stick five times can log
 into it for one boot, with the password everybody knows, and read or change
@@ -667,7 +803,8 @@ and one of them ends in the safe mode:
    is nowhere to write it. The flag in `/var/run` still says it, and the
    web UI reads the flag.
 2. `boot-count` reached 5 short boots before this one (3 with
-   `HOST_AUTONEG=off`): `cause=short_boots`.
+   `HOST_AUTONEG=off` or `HOST_SERDES` `2500basex` or `hisgmii`):
+   `cause=short_boots`.
 3. `boot-wdt` reached 3 boots before this one: `cause=watchdog`. The
    safe-mode record says `wdt_resets=3`.
 
@@ -725,8 +862,9 @@ count until it reaches 60 s, or through a run of short boots),
 `/etc/config/boot-wdt` (one number; present from a watchdog reset until
 the next boot that lives 600 s or ends in a reboot), `/etc/config/safe-mode`
 (`cause=` `short_boots`, `watchdog` or `config`, `short_boots=`,
-`wdt_resets=`, `uptime=`, `cleared=` (`HOST_AUTONEG`, `none` or `failed`),
-`build=`; until acknowledged), and `/var/run/safe-mode` (the same, plus
+`wdt_resets=`, `uptime=`, `cleared=` (`HOST_AUTONEG`, `HOST_SERDES`,
+`HOST_AUTONEG,HOST_SERDES`, `none` or `failed`), `build=`; until
+acknowledged), and `/var/run/safe-mode` (the same, plus
 `root_password=default` or `failed`; this boot only). `safe-mode.sh status` prints them (`docs/TOOLS.md`), and
 the diagnostics bundle carries it (`host-link.txt`).
 
@@ -913,7 +1051,7 @@ restore.
 | `OMCI_LOGFILE`, `OMCI_LOGFILE_MASK`, `OMCI_DBGLVL` | omcid always logs every frame to `/var/log/omcid.log` |
 | `PON_MODE`, `PON_DETECT_ENABLE`, `EPON_*` | this image is GPON only and never rewrites the PON type |
 | `PON_VENDOR_ID`, `MAC_KEY`, `GPON_PLOAM_FORMAT` | the vendor id comes from `GPON_SN`; the other two are read by the stock firmware only. Keep them in backups |
-| `FIBER_MODE`, `LAN_SDS_MODE` | `network.sh` always sets the host SerDes to Fiber 1G; the UI never writes them |
+| `FIBER_MODE`, `LAN_SDS_MODE` | the host SerDes mode is the odi-only `HOST_SERDES` (Fiber 1G unless set, "Host port SerDes mode" above): a stick that runs Fiber 1G can hold any `LAN_SDS_MODE`, so the stock value cannot choose it; the UI never writes them |
 | `LASER_POLARITY_TYPE`, `PON_LED_SPEC` | rcS drives the laser enable itself; there is no PON LED |
 | `SUSER_NAME`, `SUSER_PASSWORD`, `USER_*`, `E8BDUSER_*`, `SUPER_*` | stock firmware accounts; this image logs in as root with SSH keys or the per-build password |
 | `SNOOPING_ENABLED`, `RTK_IGMP_*` | the stock keys are not read: `igmpd` takes its settings from what the OLT provisions (ME 309, ME 310) and runs only while the odi-only key `IGMP_SNOOPING` is `1`; the PON drop has its own key, `IGMP_PON_DROP` |
@@ -1092,16 +1230,20 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
 
 ## Not verified yet
 
-- The host-side SFP EEPROM (`SFP_HOST_DDM`) with pin 27 handled by the
-  kernel. By hand: on a v08 stick running the mirror without the pin,
-  clearing bit 27 of PIN_GPIO_SELECT made the router show live diagnostics
-  within seconds (module I2C, the host link and PPPoE unaffected); on a v06
-  stick bit 27 cleared for 30 s left the module DDM updating, O5 and the
-  host link up, and the slave turned on by hand for 40 s changed nothing the
-  host read. The build that does all of it at boot, and a long run on v06,
-  are not checked yet; host-tested against the register model. How the host write
-  protect packs its bits inside a word is taken from the register table and
-  not checked: only A2h 224-255 depend on it.
+- `HOST_SERDES`: the register sequences and the port force are the
+  reporter's, read off a stock HSGQ stick. On this image 2500BASE-X linked an
+  HSGQ stick to a 2.5G router port, and on a DFP-34X-2C2 `reapply` of Fiber
+  1G, a 2500basex trial and its revert, and the boot watch falling back to
+  Fiber 1G with no 2.5G host left the SerDes and port words as before. Not run
+  on hardware: `hisgmii` with this image, the safe mode with the key set,
+  whether the HSGQ board links in Fiber 1G, and bit 17 of 0x214 as the sync
+  signal beyond those runs (`test/host_serdes_test.sh` and
+  `test/odi_host_forced_test.c` cover them as write sequences).
+- The host-side SFP EEPROM (`SFP_HOST_DDM`): how the host write protect
+  packs its bits inside a word is taken from the register table and not
+  checked; only A2h 224-255 depend on it. The rest has run on hardware: one
+  reporter's router reads live DDM from it at boot, and a v06 stick ran it
+  for three days with the host's EEPROM unchanged.
 - The `HOST_AUTONEG` boot fallback on a stick: the write, the trial, its
   expiry and the forced link against a host forced off were all seen
   ("Host port auto-negotiation"), but both hosts tried accept a forced

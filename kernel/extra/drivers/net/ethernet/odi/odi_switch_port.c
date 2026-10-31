@@ -95,6 +95,19 @@ void odi_sw_port_admin_set(uint32_t port, int enable)
 {
 	uint32_t reg;
 
+	/* A forced host port (odi_sw_host_forced) has no SerDes link for the
+	 * port to fall back to: an unlock that cleared the select bit would
+	 * leave it with none. Lock and unlock move the forced LINK value
+	 * instead, the value first, and the select bit stays set.
+	 */
+	if (port == ODI_SW_HOST_PORT && odi_sw_host_forced) {
+		reg = odi_reg_read(ODI_SW_PORT_FORCE_ABILITY(port));
+		odi_reg_write(ODI_SW_PORT_FORCE_ABILITY(port),
+			      ODI_SW_PORT_FORCE_ABILITY_LINK_SET(reg, enable ? 1U : 0U));
+		reg = odi_reg_read(ODI_SW_PORT_FORCE_SELECT(port));
+		odi_reg_write(ODI_SW_PORT_FORCE_SELECT(port), ODI_SW_PORT_FORCE_SELECT_LINK_SET(reg, 1U));
+		return;
+	}
 	if (!enable) {
 		reg = odi_reg_read(ODI_SW_PORT_FORCE_ABILITY(port));
 		odi_reg_write(ODI_SW_PORT_FORCE_ABILITY(port), ODI_SW_PORT_FORCE_ABILITY_LINK_SET(reg, 0));
@@ -124,6 +137,76 @@ void odi_sw_host_pause_apply(void)
 		   (unsigned int)ODI_SW_PORT_ABILITY_LINK_UP_GET(reg),
 		   (unsigned int)ODI_SW_PORT_ABILITY_TX_PAUSE_GET(reg),
 		   (unsigned int)ODI_SW_PORT_ABILITY_RX_PAUSE_GET(reg));
+}
+
+bool odi_sw_host_forced;
+
+/* The host port forced the way a stock HSGQ stick runs it, read off one:
+ * PORT_FORCE_ABILITY(0) 0x16 (link up, full duplex, 1000 Mbit/s) and
+ * PORT_FORCE_SELECT(0) 0xfff (every field forced). In 2500BASE-X and
+ * HiSGMII the 1000BASE-X PCS reports no link to the port, so without the
+ * force the port never has one. The value first, then the select, as the
+ * admin lock writes them.
+ *
+ * Forcing saves the two words as they were; leaving the force puts them
+ * back, so Fiber 1G after a trial of another mode holds the registers a
+ * boot leaves. Two bits are not taken from the saved words: TX_PAUSE,
+ * which the PAUSE policy owns (applied again after either way), and LINK,
+ * which carries the admin lock (cmd 32: forced LINK 0 with its select bit
+ * set). A lock is kept across both directions: forcing a locked port
+ * writes LINK 0 into the forced value, and leaving the force keeps the
+ * LINK select bit and value 0 of a port locked meanwhile; an unlocked port
+ * gets its LINK select bit clear, and the saved LINK value back.
+ */
+#define ODI_SW_HOST_FORCED_ABILITY	0x016U
+#define ODI_SW_HOST_FORCED_SELECT	0xfffU
+
+static uint32_t odi_sw_host_forced_saved_ability;
+static uint32_t odi_sw_host_forced_saved_select;
+static bool odi_sw_host_forced_saved;
+
+void odi_sw_host_forced_apply(void)
+{
+	uint32_t ability = odi_reg_read(ODI_SW_PORT_FORCE_ABILITY(ODI_SW_HOST_PORT));
+	uint32_t select = odi_reg_read(ODI_SW_PORT_FORCE_SELECT(ODI_SW_HOST_PORT));
+	uint32_t locked = ODI_SW_PORT_FORCE_SELECT_LINK_GET(select) &&
+			  !ODI_SW_PORT_FORCE_ABILITY_LINK_GET(ability);
+
+	if (odi_sw_host_forced) {
+		if (!odi_sw_host_forced_saved) {
+			odi_sw_host_forced_saved_ability = ability;
+			odi_sw_host_forced_saved_select = select;
+			odi_sw_host_forced_saved = true;
+		}
+		odi_reg_write(ODI_SW_PORT_FORCE_ABILITY(ODI_SW_HOST_PORT),
+			      ODI_SW_PORT_FORCE_ABILITY_LINK_SET(ODI_SW_HOST_FORCED_ABILITY, locked ? 0U : 1U));
+		odi_reg_write(ODI_SW_PORT_FORCE_SELECT(ODI_SW_HOST_PORT), ODI_SW_HOST_FORCED_SELECT);
+	} else {
+		ability = odi_sw_host_forced_saved ? odi_sw_host_forced_saved_ability : ability;
+		select = odi_sw_host_forced_saved ? odi_sw_host_forced_saved_select : 0U;
+		if (locked)
+			ability = ODI_SW_PORT_FORCE_ABILITY_LINK_SET(ability, 0U);
+		odi_reg_write(ODI_SW_PORT_FORCE_ABILITY(ODI_SW_HOST_PORT), ability);
+		odi_reg_write(ODI_SW_PORT_FORCE_SELECT(ODI_SW_HOST_PORT),
+			      ODI_SW_PORT_FORCE_SELECT_LINK_SET(select, locked));
+		odi_sw_host_forced_saved = false;
+	}
+	odi_sw_host_pause_apply();
+	ODI_SW_LOG("host port %s%s: force ability 0x%03x, force select 0x%03x, ability 0x%03x\n",
+		   odi_sw_host_forced ? "forced (link up, 1000 full duplex)" : "follows its SerDes",
+		   locked ? ", admin locked" : "",
+		   (unsigned int)odi_reg_read(ODI_SW_PORT_FORCE_ABILITY(ODI_SW_HOST_PORT)),
+		   (unsigned int)odi_reg_read(ODI_SW_PORT_FORCE_SELECT(ODI_SW_HOST_PORT)),
+		   (unsigned int)odi_reg_read(ODI_SW_PORT_ABILITY(ODI_SW_HOST_PORT)));
+}
+
+void odi_sw_host_forced_set(bool on, bool mapped)
+{
+	if (!on && !odi_sw_host_forced)
+		return;
+	odi_sw_host_forced = on;
+	if (mapped)
+		odi_sw_host_forced_apply();
 }
 
 bool odi_sw_pon_isolate = true;
