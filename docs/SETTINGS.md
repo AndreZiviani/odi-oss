@@ -1060,6 +1060,17 @@ table: where each file is read, its default, and which ones are development
 aids, together with the kernel parameters, build variables and
 `/proc` control files.
 
+## Die temperature limits (runtime, not an odi.conf key)
+
+The SoC hwmon device (`rtl9602c_soc`) carries `temp1_max` (default 95000) and
+`temp1_crit` (default 110000), in millidegrees C. Root writes them through
+sysfs (`echo 90000 > /sys/class/hwmon/hwmonN/temp1_max`); the accepted range
+is 0..150000 with max <= crit, and they are **not persisted**: every boot
+starts at the defaults. `temp1_max_alarm` and `temp1_crit_alarm` read 0 or 1.
+The alarms only flag and log (kernel log, on transitions); nothing powers
+off or throttles, because the temperature scale is not verified. See
+[`KERNEL.md`](KERNEL.md), "Our drivers".
+
 ## Watchdog rules
 
 **The kernel (`odi_wdt`) is the only owner of the hardware watchdog.** It

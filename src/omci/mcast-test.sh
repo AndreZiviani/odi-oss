@@ -72,6 +72,18 @@ written() {
 	need "$1" 'multicast policy written' 10 "$2"
 }
 
+# The quiet second after the last frame ends in one export, which says
+# "written" or "unchanged": the count is read before the sentinel so an export
+# that falls before its answer is the one waited for.
+exported() {
+	grep -c 'multicast policy [wu]' "$1" 2>/dev/null
+}
+flush() {
+	_fl_n=$(exported "$log")
+	sync_send "$log"
+	wait_for "$log" 'multicast policy [wu]' "${WAIT_S:-30}" $((_fl_n + 1))
+}
+
 # table <log> <tci base> <class> <inst> <mask>: Get the table attribute, then
 # walk it with Get-Next; the table bytes as hex, empty when it is empty.
 table() {
@@ -260,8 +272,7 @@ us_rate=0"
 # A Set that changes nothing the file holds writes nothing.
 n=$(grep -c 'multicast policy written' "$log")
 send "$log" 0040 48 0135 0001 "004003"
-sync_send "$log"
-sleep 1.5
+flush
 check "a Set of the policy's own value leaves the file alone" \
       "$(grep -c 'multicast policy written' "$log")" "$n"
 
@@ -372,8 +383,7 @@ check "no service package table: nothing said" \
 m=$(grep -c 'multicast policy written' "$log")
 send "$log" 0220 48 0136 0001 "0400$(pad 4001ffff 20)"
 send "$log" 0221 48 0136 0001 "0400$(pad 4002ffff 20)"
-sync_send "$log"
-sleep 1.5
+flush
 check "a service package table: said once as not selecting by VID" \
       "$(grep -c 'does not select a profile by VID' "$log")" "1"
 
@@ -418,8 +428,7 @@ fi
 # Back to no maximum, so the later sections (rows imputing more than 1000
 # bytes a second) are not refused by this one.
 send "$log" 0233 48 0136 0001 "180000000000"
-sync_send "$log"
-sleep 1.5
+flush
 
 # ------------------------------------- ME 311, from what igmpd writes
 # Class 311 (0x0137) instance 1. The state file is igmpd's; written here the
@@ -523,11 +532,6 @@ rm -f /var/run/odi-mcast.state /var/run/odi-mcast.meter
 # of the Set stored, while IGMP_SNOOPING is 1. Every defined value is accepted whether or not it is
 # done: function 1 and 2 (proxy) are stored and the multicast stays
 # transparent, so an OLT that provisions a proxy gets its Set accepted.
-# flush: the policy file has caught up with the Sets sent so far.
-flush() {
-	sync_send "$log"
-	sleep 1.5
-}
 # Without the opt-in key (IGMP_SNOOPING=1) nothing of it applies: the profile is
 # stored as the OLT sends it, as it always was.
 send "$log" 0098 48 0135 0001 "800009"

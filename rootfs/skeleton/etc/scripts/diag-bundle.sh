@@ -85,8 +85,8 @@ export PATH
 
 STEP_TIMEOUT_S=${STEP_TIMEOUT_S:-5}
 HOST_AUTONEG_SH=${HOST_AUTONEG_SH:-/etc/scripts/host-autoneg.sh}
-HOST_SERDES_SH=${HOST_SERDES_SH:-/etc/scripts/host-serdes.sh}
 SAFE_MODE_SH=${SAFE_MODE_SH:-/etc/scripts/safe-mode.sh}
+HOST_SERDES_SH=${HOST_SERDES_SH:-/etc/scripts/host-serdes.sh}
 METRICS_TIMEOUT_S=${METRICS_TIMEOUT_S:-10}
 LOG_FILE_MAX=${LOG_FILE_MAX:-262144}
 LOG_TOTAL_MAX=${LOG_TOTAL_MAX:-1048576}
@@ -224,12 +224,15 @@ manifest "$?" "$(size_of "$b/metrics.txt")" metrics.txt
 	timeout "$STEP_TIMEOUT_S" sh "$SAFE_MODE_SH" status 2>&1
 	echo "# HOST_FIBER_CTRL 0x21c00, PORT_ABILITY(0) 0x198, PORT_FORCE_SELECT(0) 0x1b4, PORT_FORCE_ABILITY(0) 0x180,"
 	echo "# SDS_CTRL 0x214 (bit 17: the host lane receiver is in sync; bits 4:0 the lane mode, 4 = 1000BASE-X),"
-	echo "# SDS_AN_CTRL 0x21808 (bits 9:8 force in-band negotiation off, one bit per lane; bit 8 = the host lane),"
-	echo "# HOST_FIBER_TX 0x22e4c, the TX amplitude 0x215b4, the 3.125G analog word 0x21700 (the HOST_SERDES words)"
-	printf '%s\n' "register get 0x21c00 1" "register get 0x198 1" "register get 0x1b4 1" "register get 0x180 1" \
-		"register get 0x214 1" "register get 0x21808 1" "register get 0x22e4c 1" "register get 0x215b4 1" \
-		"register get 0x21700 1" |
-		timeout "$STEP_TIMEOUT_S" diag 2>&1
+	echo "# SDS_AN_CTRL 0x21808 (bits 9:8 force in-band negotiation off, one bit per lane; bit 8 = the host lane)"
+	echo "# SerDes pages, one word each, read-only: 0x214 host SerDes mode (bit 17 = in sync), 0x110 host port,"
+	echo "# 0x21500 RX enable, 0x2160x 0x2161x 0x2166x 0x2168x 0x2169x 1.25G page, 0x2170x 0x2171x 0x2176x 3.125G page,"
+	echo "# 0x215bx 0x215e4 analog, 0x21c04 fiber word 2, 0x22e4c"
+	for a in 0x21c00 0x198 0x1b4 0x180 0x214 0x21808 0x110 0x21500 0x21600 0x2160c 0x21618 0x2166c \
+		0x21680 0x2168c 0x21698 0x21700 0x2170c 0x21718 0x2176c 0x215b4 0x215b8 0x215bc 0x215e4 \
+		0x21c04 0x22e4c; do
+		echo "register get $a 1"
+	done | timeout "$STEP_TIMEOUT_S" diag 2>&1
 } > "$b/host-link.txt"
 manifest - "$(size_of "$b/host-link.txt")" host-link.txt
 
