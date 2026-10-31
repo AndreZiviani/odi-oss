@@ -127,7 +127,11 @@ reset: a trial that never answered still says how far it got
 6. **The management address** (`/etc/scripts/network.sh`), after the
    config partition, which holds the address, and before the services:
    dropbear bound on a box with no routable interface looks exactly like a
-   panic from outside. Then the host-port auto-negotiation
+   panic from outside. Its first step is the host SerDes mode
+   (`host-serdes.sh boot`, `HOST_SERDES`, `docs/SETTINGS.md`): Fiber 1G
+   unless the key says otherwise, nothing written when the registers
+   already hold the mode, and in 2500BASE-X a boot watch left running in
+   the background. Then the host-port auto-negotiation
    (`/etc/scripts/host-autoneg.sh boot`), after `network.sh` has set the
    SerDes mode it changes one bit of: with `HOST_AUTONEG` unset it reads
    the key and returns; with it off it forces 1000BASE-X and leaves the boot watch running in the background

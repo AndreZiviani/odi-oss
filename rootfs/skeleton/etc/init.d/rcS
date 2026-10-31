@@ -93,8 +93,8 @@ crumb "config mounted; kernel $(uname -r); $(grep -c "^mtd" /proc/mtd) mtd parti
 # safe mode"), as early as the config partition allows, so a short power-up
 # still counts: every boot adds one, a boot that reaches 60 s of uptime
 # clears it, and after enough short boots in a row this boot becomes the
-# safe one (the PON off, the host port on auto-negotiation, the default
-# password, for this boot only). Boots that ended in a watchdog reset count
+# safe one (the PON off, the host port in Fiber 1G with auto-negotiation,
+# the default password, for this boot only). Boots that ended in a watchdog reset count
 # too, and a config partition that is not mounted makes this boot the safe
 # one at once. Logs the uptime of the count. Bounded.
 if config_mounted; then
@@ -147,6 +147,8 @@ fi
 
 # ---- the management address, from the config partition, before the
 # services: dropbear bound on a box with no address looks like a panic.
+# network.sh first sets the host SerDes mode (host-serdes.sh boot,
+# HOST_SERDES): Fiber 1G unless the key says otherwise.
 /etc/scripts/network.sh || echo "rcS: no management address" >&2
 crumb "network: $(ifconfig br0 2>/dev/null | sed -n "s/.*inet addr:\([0-9.]*\).*/\1/p") on br0, eth0 $(cat /sys/class/net/eth0/operstate 2>/dev/null)"
 dev_hook network
@@ -157,7 +159,9 @@ dev_hook network
 # counted. With it off it counts the boot for the safe mode (three short
 # boots in a row clear the key), forces 1000BASE-X, and starts the boot
 # watch in the background, which falls back to auto-negotiation when the
-# host link does not come up. Bounded; it returns at once either way.
+# host link does not come up. While HOST_SERDES runs another mode, which
+# sets the bit itself, it applies nothing. Bounded; it returns at once
+# either way.
 /etc/scripts/host-autoneg.sh boot || echo "rcS: host-autoneg.sh boot failed" >&2
 
 # ---- ptys. devpts is mounted on /dev/pts already (the /etc/fstab mounts,

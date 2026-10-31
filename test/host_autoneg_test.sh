@@ -77,7 +77,7 @@ chmod +x "$T/bin/"*
 
 export PATH="$T/bin:$PATH"
 export FLASH=$F SELF=$S PARAM_DIR=$T/param STATE=$T/run/state LOCKDIR=$T/run/lock
-export SAFE_FLAG=$T/run/safe-mode
+export SAFE_FLAG=$T/run/safe-mode SERDES_STATE=$T/run/host-serdes
 export UPTIME=$T/uptime KMSG=$T/kmsg LOG=$T/services.log SLEEP=$T/bin/sleep TIMEOUT=$T/bin/timeout
 export BUILD=$T/odi-build
 export ODI_CONF=$T/config/odi.conf CS=$T/config/lastgood.xml HS=$T/config/lastgood_hs.xml TMPDIR_=$T
@@ -262,7 +262,7 @@ sh "$S" revert > /dev/null
 
 # ---- status
 out=$(sh "$S" status)
-t "status: the fields" "setting=on.*running=on.*phase=steady.*uptime=[0-9]+.*link=[01].*safe_mode_boot=0" "$(printf '%s' "$out" | tr '\n' ' ')"
+t "status: the fields" "setting=on.*running=on.*owner=host-autoneg.*phase=steady.*uptime=[0-9]+.*link=[01].*safe_mode_boot=0" "$(printf '%s' "$out" | tr '\n' ' ')"
 rm -f "$T/param/host_link"
 t "status: link unknown without the parameter" "link=unknown" "$(sh "$S" status)"
 echo 1 > "$T/param/host_link"
