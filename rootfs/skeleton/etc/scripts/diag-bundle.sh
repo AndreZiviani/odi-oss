@@ -207,13 +207,17 @@ manifest - "$(size_of "$b/nv.txt")" nv.txt
 timeout "$METRICS_TIMEOUT_S" wget -q -O - "$METRICS_URL" > "$b/metrics.txt" 2>&1
 manifest "$?" "$(size_of "$b/metrics.txt")" metrics.txt
 
-# host-link.txt: the host-port auto-negotiation (HOST_AUTONEG): the state
-# host-autoneg.sh keeps (a trial, the boot fallback), the safe mode (this
+# host-link.txt: the host SerDes mode (HOST_SERDES) and the host-port
+# auto-negotiation (HOST_AUTONEG): the state host-serdes.sh and
+# host-autoneg.sh keep (a trial, the boot fallback), the safe mode (this
 # boot, the record, the boot count), then the words that decide the host link: the PCS
 # control word (HOST_FIBER_CTRL), the port ability the link runs with, the
-# forced-ability pair of port 0, and the host SerDes lane's control and
-# in-band negotiation words. All read before on a running stick.
+# forced-ability pair of port 0, the host SerDes lane's control and
+# in-band negotiation words, and the words the SerDes modes differ in. All
+# read before on a running stick.
 {
+	echo "# host-serdes.sh status"
+	timeout "$STEP_TIMEOUT_S" sh "$HOST_SERDES_SH" status 2>&1
 	echo "# host-autoneg.sh status"
 	timeout "$STEP_TIMEOUT_S" sh "$HOST_AUTONEG_SH" status 2>&1
 	echo "# safe-mode.sh status"
@@ -229,11 +233,6 @@ manifest "$?" "$(size_of "$b/metrics.txt")" metrics.txt
 		0x21c04 0x22e4c; do
 		echo "register get $a 1"
 	done | timeout "$STEP_TIMEOUT_S" diag 2>&1
-	# host-serdes.sh ships with the host SerDes tool; absent on older images.
-	if [ -f "$HOST_SERDES_SH" ]; then
-		echo "# host-serdes.sh status"
-		timeout "$STEP_TIMEOUT_S" sh "$HOST_SERDES_SH" status 2>&1
-	fi
 } > "$b/host-link.txt"
 manifest - "$(size_of "$b/host-link.txt")" host-link.txt
 

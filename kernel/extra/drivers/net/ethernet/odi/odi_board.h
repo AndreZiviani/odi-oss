@@ -35,8 +35,25 @@ void odi_board_init(void);
  * port-1 I2C pins, DDM and the module status, stay muxed away and every
  * transaction ends in NO_ACK). The laser is left alone (odi_board_laser()).
  * The caller holds odi_switch_lock. Returns 0.
+ *
+ * Pin 27 is the SoC SFP slave's on v08 boards: there the host reads the
+ * host-side SFP EEPROM only with it out of plain GPIO mode, as the stock
+ * firmware of that board runs it (0x00082001; Thaad-QR's comparison with a
+ * stock v08 stick). On v06 nothing measured uses it: with bit 27 clear for
+ * 30 s the module DDM kept updating, the ONU stayed in O5 and the host link
+ * up. The mirror (odi_sfp_mirror.c) clears it while it serves the host and
+ * says so here, so that a later `optics` verb writes the word without bit
+ * 27 instead of taking the pin back.
  */
+#define ODI_BOARD_PIN_GPIO_SELECT	0x08082001U
+#define ODI_BOARD_PIN_SFP_SLAVE		(1U << 27)
 int odi_board_optics(void);
+
+/* held 1: the host-side SFP EEPROM holds pin 27 (bit 27 of PIN_GPIO_SELECT
+ * clear); 0: it does not. Only records it, for odi_board_optics(); the
+ * caller writes the register itself.
+ */
+void odi_board_sfp_slave_pin(int held);
 
 /* The laser: the odi_init verb `laser`, run after `i2c` and `i2cen` (the
  * I2C controller answers only after them: before, a read returns 0 with

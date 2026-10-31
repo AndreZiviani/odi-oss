@@ -26,7 +26,9 @@
 #                                   Only reaches the stick if the link works
 #                                   in that mode, which is the point
 #     host-autoneg.sh revert        end the trial now, back to the mode before
-#     host-autoneg.sh status        the state as key=value lines
+#     host-autoneg.sh status        the state as key=value lines; while
+#                                   host-serdes.sh owns the port, running=
+#                                   is the live bit and owner=host-serdes
 #
 # The boot watch. With HOST_AUTONEG=off the boot writes off and watches the
 # host link (odi_switch.host_link) for WATCH_S seconds. No link: it switches
@@ -44,8 +46,16 @@
 # which clears HOST_AUTONEG and runs auto-negotiation; on that boot this
 # script writes nothing and refuses a trial.
 #
+# The host SerDes mode (HOST_SERDES, host-serdes.sh). HOST_AUTONEG is the
+# auto-negotiation of Fiber 1G. While the port runs 2500basex or hisgmii,
+# host-serdes.sh sets the bit itself, so this script applies nothing at boot
+# (it logs event=serdes_mode when the key is off) and refuses a trial; it
+# also refuses one while host-serdes.sh runs a trial or its boot watch. Its
+# state, /var/run/host-serdes, is read under the same lock.
+#
 # Every wait is bounded (sysfs writes and reads, flash) and every state
-# change is one rename of the state file, under a mkdir lock.
+# change is one rename of the state file, under a mkdir lock, the host-port
+# lock host-serdes.sh takes too.
 set -u
 
 # confd starts its children with no environment; export a PATH so that
@@ -57,6 +67,7 @@ FLASH=${FLASH:-/etc/scripts/flash}
 SELF=${SELF:-/etc/scripts/host-autoneg.sh}
 PARAM_DIR=${PARAM_DIR:-/sys/module/odi_switch/parameters}
 STATE=${STATE:-/var/run/host-autoneg}
+SERDES_STATE=${SERDES_STATE:-/var/run/host-serdes}
 LOCKDIR=${LOCKDIR:-/var/run/host-autoneg.lock}
 SAFE_FLAG=${SAFE_FLAG:-/var/run/safe-mode}
 UPTIME=${UPTIME:-/proc/uptime}
@@ -117,6 +128,25 @@ hw_write() {
 # link: 1, 0, or nothing when the kernel cannot say.
 link() {
 	"$TIMEOUT" "$IO_S" cat "$PARAM_DIR/host_link" 2>/dev/null | sed -n '1s/^\([01]\)$/\1/p'
+}
+
+# serdes_owns: 0 when host-serdes.sh owns the port now: a mode other than
+# fiber1g runs, or its trial or boot watch does. Sets sd_running and
+# sd_phase. Read with the shell alone, under the lock; no state file is
+# fiber1g, steady.
+serdes_owns() {
+	sd_running=fiber1g sd_phase=steady
+	if [ -f "$SERDES_STATE" ]; then
+		while IFS='=' read -r _k _v; do
+			case $_k in
+			running) sd_running=$_v ;;
+			phase) sd_phase=$_v ;;
+			esac
+		done < "$SERDES_STATE"
+	fi
+	case $sd_running in 2500basex|hisgmii) return 0 ;; esac
+	case $sd_phase in watch|trial|reapply) return 0 ;; esac
+	return 1
 }
 
 # put_in_place FILE: puts FILE.new.$$ in place of FILE in one rename on the same
@@ -228,6 +258,12 @@ boot() {
 		unlock
 		return 0
 	fi
+	if serdes_owns; then
+		event serdes_mode "HOST_AUTONEG=off is not applied: the host port runs HOST_SERDES $sd_running ($sd_phase), which sets its own auto-negotiation"
+		save
+		unlock
+		return 0
+	fi
 	if ! param_ok; then
 		event no_kernel "this kernel has no odi_switch.host_autoneg; running auto-negotiation"
 		save
@@ -315,6 +351,10 @@ try() {
 	watch) unlock; die "the boot watch is still deciding the mode (until uptime $watch_until s); try again after it" ;;
 	trial) unlock; die "a trial of $trial_mode is already running; confirm or revert it first" ;;
 	esac
+	if serdes_owns; then
+		unlock
+		die "the host port runs HOST_SERDES $sd_running ($sd_phase), which sets its own auto-negotiation; HOST_AUTONEG applies to fiber1g (host-serdes.sh)"
+	fi
 	if [ "$mode" = "$running" ] && [ "$mode" = "$setting" ]; then
 		unlock
 		say "already $mode, nothing to try"
@@ -414,14 +454,29 @@ revert() {
 	unlock
 }
 
+# status: the state file, plus what is live. While host-serdes.sh owns the
+# port, the file running= is what this script runs in Fiber 1G, not what the
+# port runs; status prints the bit the kernel holds instead, and says who
+# owns it.
 status() {
 	load
 	if [ ! -f "$STATE" ]; then
 		setting=$(parse "$(key_raw)")
 		[ "$(cat "$PARAM_DIR/host_autoneg" 2>/dev/null)" = N ] && running=off
 	fi
+	owner=host-autoneg
+	if serdes_owns; then
+		owner=host-serdes
+		case $("$TIMEOUT" "$IO_S" cat "$PARAM_DIR/host_autoneg" 2>/dev/null) in
+		N|0) running=off ;;
+		Y|1) running=on ;;
+		esac
+	fi
 	echo "setting=$setting"
 	echo "running=$running"
+	echo "owner=$owner"
+	[ "$owner" = host-autoneg ] ||
+		echo "owner_message=the link mode HOST_SERDES=$sd_running ($sd_phase) sets the auto-negotiation; HOST_AUTONEG ($setting) applies in fiber1g"
 	echo "phase=$phase"
 	echo "fallback=$fallback"
 	echo "trial_mode=$trial_mode"

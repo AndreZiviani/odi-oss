@@ -15,6 +15,62 @@ listed here.
   the others out. `curl -u` and scripts keep using HTTP Basic. A reboot from
   the web page now shows a progress bar until the stick answers again (about a
   minute), then opens the sign-in page. Refs #239.
+- kernel, rootfs: the host-side SFP EEPROM, odi-only key `SFP_HOST_DDM`, on by
+  default. On the board revisions that wire the SoC's SFP EEPROM emulation to
+  the SFP edge (HSGQ v08 / DFP-34X-2C2 v08) the router now reads the module's
+  identity (A0h) and live diagnostics (A2h) from the stick, as with the stock
+  firmware, instead of 0 C and 0 V. The kernel copies A0h and A2h from the
+  module into the slave's 512-byte SRAM, reads it all back, makes it read-only
+  to the host except A2h 128-247, and only then turns the slave on (0x2ac bit
+  0, then 0x23018 bit 23, then SoC pin 27 out of plain GPIO mode, PIN_GPIO_SELECT
+  0x08082001 -> 0x00082001 as the stock v08 image runs it; each a
+  read-modify-write of that bit, undone pin first); A2h 96-119
+  (the five diagnostics, the TX_DISABLE/TX_FAULT/RX_LOS bits of byte 110, the
+  alarm and warning flags) is refreshed every second, and the module is never
+  written. `odi_switch.sfp_mirror` and `sfp_mirror_state`, `sfp-host-ddm.sh`
+  (a PON step after `laser`), `apply.sh sfp`; off in a safe-mode boot; `0`
+  turns it off. No effect on v06 boards, where the host reads a separate fixed
+  EEPROM; pin 27 is unused there as measured. The behaviour follows
+  measurements by Thaad-QR on a stock v08 stick, and pin 27 Thaad-QR's
+  comparison with a stock v08 stick (with it, the router showed live DDM). Host-tested (`test/odi_sfp_mirror_test.c`,
+  `test/sfp_host_ddm_test.sh`). On hardware: one reporter's router reads live
+  DDM from this image at boot, another's v08 showed it once pin 27 was freed
+  by hand, and a v06 stick ran the mirror for three days with the host's
+  EEPROM unchanged. Refs #231.
+- Host SerDes mode: the new odi-only key `HOST_SERDES` (default `fiber1g`,
+  the mode and the thirteen-write sequence the image always ran, value for
+  value) selects `2500basex`, for a 2.5G host and the HSGQ XPON stick, or
+  `hisgmii` (the stock "HiSGMII" mode, the MAC at 1000 Mb/s). In both the
+  host port is forced up (the new kernel parameter `odi_switch.host_forced`;
+  cmd 32 then moves the forced link value, so an OLT unlock keeps the
+  link; back in `fiber1g` both port words return to what the force found),
+  and the PCS auto-negotiation is set per mode (off in 2500BASE-X,
+  the only setting seen to link to the 2.5G router port measured; why the
+  stock HSGQ firmware links there with it on is not known, and another open
+  implementation's measurements linked 2500BASE-X with it on and off
+  against a matching host, so it is what that router needs, not a property
+  of the lane). The SFP EEPROM still advertises 1000BASE-LX at 1300 MBd,
+  so a host that picks its port mode from it (Linux phylink, for example)
+  may run 1000BASE-X whatever the key says: a caution, not measured.
+  `host-serdes.sh` applies it from `network.sh` at boot and offers `try`, `confirm`, `revert`,
+  `reapply` and `status`: a change is a trial that reverts after 120 s
+  unless confirmed over the link. Fiber 1G, the most compatible host mode,
+  is the fallback everywhere. A 2500BASE-X boot watches the SerDes sync
+  (bit 17 of 0x214) and falls back to Fiber 1G, alternating, for up to 10
+  minutes, staying in Fiber 1G when neither links (the key unchanged);
+  HiSGMII has no link signal and no boot fallback. `HOST_AUTONEG` applies
+  to Fiber 1G only and stands aside while another mode runs; its `status`
+  then prints the bit the port really runs and `owner=host-serdes`. A mode other
+  than `fiber1g` makes three short boots enough for the safe mode, whose
+  boot runs Fiber 1G and clears the key, as it clears `HOST_AUTONEG=off`
+  (`cleared=` can now name both). Whether the HSGQ board links in Fiber 1G
+  is untested. The stock `LAN_SDS_MODE` is not read. The diagnostics bundle carries
+  `host-serdes.sh status`. Register values and the HSGQ port by Thaad-QR
+  (their reads from a stock HSGQ stick). Host-tested
+  (`test/host_serdes_test.sh`, `test/odi_host_forced_test.c`,
+  `test/safe_mode_test.sh`). On hardware: 2500BASE-X linked an HSGQ stick to a
+  2.5G router port (O5, PPPoE, voice), and Fiber 1G runs as before on a
+  DFP-34X-2C2; HiSGMII has not been run on hardware yet. Refs #229.
 - omcid tests: the qemu suites no longer flake on a loaded machine. `omcli --inject-file` waits out a full omcid queue (30 s) instead of dropping the tail of the session after half a second, the suites wait for omcid's end-of-session lines (rebuild, multicast policy export, answers) instead of fixed sleeps, and omcid logs `multicast policy unchanged` when its quiet-second export has nothing to write.
 
 ## v1.13.0 (2026-10-28)

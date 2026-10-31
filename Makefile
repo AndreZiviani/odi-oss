@@ -161,6 +161,8 @@ test-host:
 	bash test/network_addr_test.sh
 	bash test/apply_test.sh
 	bash test/host_autoneg_test.sh
+	bash test/host_serdes_test.sh
+	bash test/sfp_host_ddm_test.sh
 	bash test/mgmt_addr_test.sh
 	bash test/safe_mode_test.sh
 	bash test/ntp_event_test.sh
@@ -200,6 +202,7 @@ test-host:
 	bash test/odi_switch_acl_clean_test.sh
 	bash test/odi_host_pause_test.sh
 	bash test/odi_host_autoneg_test.sh
+	bash test/odi_host_forced_test.sh
 	bash test/odi_pon_isolation_test.sh
 	bash test/odi_omci_test.sh
 	bash test/regdump_test.sh
@@ -232,6 +235,7 @@ test-host:
 	bash test/odi_board_test.sh
 	bash test/odi_i2c_test.sh
 	bash test/odi_ddm_test.sh
+	bash test/odi_sfp_mirror_test.sh
 	bash test/odi_optics_model_test.sh
 	bash test/odi_ddm_limits_test.sh
 	bash test/odi_init_test.sh

@@ -53,7 +53,6 @@ void odi_board_init(void)
 	ODI_BOARD_LOG("board init replay: %u events applied\n", odi_board_init_event_count);
 }
 
-#define ODI_BOARD_PIN_GPIO_SELECT	0x08082001U
 #define ODI_BOARD_GPIO_TX_DISABLE	13U
 
 static struct odi_board_laser odi_board_laser_state = { .laser_on = 0, .ldd_id = -1 };
@@ -150,10 +149,34 @@ static int odi_board_ldd_id(void)
 	return -1;
 }
 
+/* Set and cleared by the host-side SFP EEPROM under its own lock, read here
+ * under odi_switch_lock: a plain word, one store and one load. A verb that
+ * reads it just before the mirror takes the pin writes bit 27 back; the
+ * mirror finds that at its next refresh and clears it again.
+ */
+static int odi_board_sfp_pin_held;
+
+void odi_board_sfp_slave_pin(int held)
+{
+#ifdef __KERNEL__
+	WRITE_ONCE(odi_board_sfp_pin_held, held);
+#else
+	odi_board_sfp_pin_held = held;
+#endif
+}
+
 int odi_board_optics(void)
 {
-	odi_reg_write(ODI_SW_PIN_GPIO_SELECT(0), ODI_BOARD_PIN_GPIO_SELECT);
-	ODI_BOARD_LOG("optics: PIN_GPIO_SELECT 0x%08x\n", (unsigned int)ODI_BOARD_PIN_GPIO_SELECT);
+	uint32_t v = ODI_BOARD_PIN_GPIO_SELECT;
+
+#ifdef __KERNEL__
+	if (READ_ONCE(odi_board_sfp_pin_held))
+#else
+	if (odi_board_sfp_pin_held)
+#endif
+		v &= ~ODI_BOARD_PIN_SFP_SLAVE;
+	odi_reg_write(ODI_SW_PIN_GPIO_SELECT(0), v);
+	ODI_BOARD_LOG("optics: PIN_GPIO_SELECT 0x%08x\n", (unsigned int)v);
 	return 0;
 }
 

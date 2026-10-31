@@ -15,7 +15,8 @@
 # No `set -e`: this runs from rcS as sysinit, which completes BEFORE init
 # starts any shell, so a failed step must not abort the boot.
 #
-#     network.sh            the boot bring-up: SerDes, MAC, br0, the addresses
+#     network.sh            the boot bring-up: SerDes (host-serdes.sh boot),
+#                           MAC, br0, the addresses
 #     network.sh addr       re-apply only the addresses, live: the primary
 #                           (LAN_IP_ADDR/LAN_SUBNET, or /etc/config/lan-ip) and
 #                           the second one (LAN_ENABLE_IP2, LAN_IP_ADDR2,
@@ -380,105 +381,23 @@ fi
 #
 # MAC0 on this chip is the electrical side of the SFP, the only way into the
 # device. The stock image sets its mode from a kernel module with no /proc
-# interface here, so this script applies the stock "Fiber 1G" mode (option 1,
-# the mode every working stick reports) register for register. Every target
-# value was read back from a stick running that mode, with the stock diag
-# and ours (all twelve matched).
-#
-#   HOST_SERDES_MODE 0x214   PCIE_SELECT bit15, HOLD_CLK_GLITCH bit13,
-#                            PHY_SIDE_SEL bit8 all clear; LINK_MODE [4:0] = 4
-#   PHY_PATCH_STATUS 0x110   PATCH_DONE bit0 = 1   ("switch ready")
-#   HOST_FIBER_CTRL  0x21c00 POWER_DOWN bit11 = 0 (AUTONEG, bit12, belongs to host-autoneg.sh)
-#   HOST_FIBER_TX    0x22e4c TX_MODE [15:14] = 0
-#   SerDes analog    0x21680 speed select = 0         0x2168c PLL divider N = 0x30
-#                    0x21698 CMU pre-divider = 0      0x215b8 TX common-mode resistor on
-#                    0x215b4 TX amplitude = 2         0x215bc CMU charge pump = 0
-#                    0x215e4 LDO voltage = 0
-#
-# (Register and field names are ours, src/diag/tools/regnames.txt. The
-# analog words are not in the register table, so they go by address.)
+# interface here, so host-serdes.sh applies it register for register: the
+# mode HOST_SERDES names, Fiber 1G (the stock "option 1", the mode every
+# DFP-34X-2C2 reports) by default, 2500BASE-X or HiSGMII when set, Fiber 1G
+# on a safe-mode boot. Every register is read first, and nothing is written
+# when they already hold the mode; otherwise the whole sequence is applied,
+# in order. It also starts the boot watch of 2500BASE-X. The same sequence
+# is what a trial of another mode runs live (host-serdes.sh, docs/TOOLS.md).
+# /etc/config/sds.off skips all of it. No per-register override: a wrong
+# value here takes the host link away until the next boot.
 #
 # PON_SERDES_MODE 0x1d0 is not part of this mode set; the 8 it holds is not
 # the mode.
-#
-# Every register is read first. If all of them already hold the Fiber 1G
-# state (the normal case after the stock image configured it), nothing is
-# written. Otherwise the stock sequence is applied whole and IN ORDER:
-# the order is the mode-set procedure (park the mode at 0x1f, program the
-# analog block, then select the mode), not a list of independent fixes.
-# Skip everything with /etc/config/sds.off. No per-register override: a wrong
-# value here takes the host link away and survives every reflash.
-#
-# diag is INTERACTIVE and is fed on stdin, never as bare argv. Ours exits on
-# EOF; timeout is belt and braces against a hang that would stall sysinit.
-sds_read() {
-	printf "register get %s 1\n" "$1" | timeout 10 /bin/diag 2>/dev/null |
-		sed -n "s/^0x[0-9a-fA-F]* *0x\([0-9a-fA-F]*\).*/\1/p" | head -n 1
-}
-sds_write() {
-	printf "register set %s %s\n" "$1" "$2" | timeout 10 /bin/diag >/dev/null 2>&1 ||
-		echo "network: SerDes write $1 failed" >&2
-}
-# read-modify-write: clear the bits in $2, set the bits in $3
-sds_rmw() {
-	cur=$(sds_read "$1")
-	[ -n "$cur" ] || { echo "network: SerDes read $1 failed mid-sequence" >&2; return 1; }
-	sds_write "$1" "$(( (0x$cur & ~$2) | $3 ))"
-}
-# addr mask want, one per line: the register holds want under mask.
-SDS_TARGET='
-0x214   0xa11f      0x4
-0x110   0x1         0x1
-0x21c00 0x800       0x0
-0x22e4c 0xc000      0x0
-0x21680 0xffffffff  0x0
-0x2168c 0xffffffff  0x3001
-0x21698 0xffffffff  0x68
-0x215b8 0xffffffff  0x98c5
-0x215b4 0xffffffff  0x1264
-0x215bc 0xffffffff  0x400f
-0x215e4 0xffffffff  0xfc00
-'
-sds_check() {
-	# prints "ok", "differs: <list>" or "unreadable"
-	diff=""
-	for line in $(echo "$SDS_TARGET" | tr -s ' ' ',' | grep .); do
-		a=${line%%,*}; rest=${line#*,}; m=${rest%%,*}; w=${rest#*,}
-		cur=$(sds_read "$a")
-		[ -n "$cur" ] || { echo unreadable; return; }
-		[ $(( 0x$cur & m )) -eq $(( w )) ] || diff="$diff $a=0x$cur"
-	done
-	if [ -z "$diff" ]; then echo ok; else echo "differs:$diff"; fi
-}
-if [ ! -f /etc/config/sds.off ] && [ -x /bin/diag ]; then
-	state=$(sds_check)
-	case $state in
-	ok)
-		echo "network: SerDes already Fiber 1G (option 1)"
-		;;
-	unreadable)
-		echo "network: could not read the SerDes registers, leaving them alone" >&2
-		;;
-	*)
-		echo "network: SerDes not in Fiber 1G (${state#differs: }), applying lan_sds_mode_set(1)" >&2
-		sds_rmw 0x214 0x0 0x2000 &&
-		sds_rmw 0x214 0x801f 0x1f &&
-		sds_rmw 0x21c00 0x800 0x0 &&
-		sds_rmw 0x22e4c 0xc000 0x0 &&
-		sds_write 0x21680 0x0 &&
-		sds_write 0x2168c 0x3001 &&
-		sds_write 0x21698 0x68 &&
-		sds_write 0x215b8 0x98c5 &&
-		sds_write 0x215b4 0x1264 &&
-		sds_write 0x215bc 0x400f &&
-		sds_write 0x215e4 0xfc00 &&
-		sds_rmw 0x214 0xa11f 0x4 &&
-		sds_rmw 0x110 0x0 0x1
-		after=$(sds_check)
-		if [ "$after" = ok ]; then echo "network: SerDes now Fiber 1G"
-		else echo "network: SerDes still not Fiber 1G after the sequence ($after)" >&2; fi
-		;;
-	esac
+HOST_SERDES_SH=${HOST_SERDES_SH:-/etc/scripts/host-serdes.sh}
+if [ -f "$HOST_SERDES_SH" ]; then
+	sh "$HOST_SERDES_SH" boot || echo "network: host-serdes.sh boot failed" >&2
+else
+	echo "network: no $HOST_SERDES_SH, the host SerDes is left as the boot loader set it" >&2
 fi
 
 # The MAC, before the interface comes up.

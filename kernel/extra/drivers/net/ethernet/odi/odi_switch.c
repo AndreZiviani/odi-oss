@@ -29,6 +29,7 @@
 #include "odi_switch_l2.h"
 #include "odi_nic.h"
 #include "odi_wdt.h"
+#include "odi_sfp_mirror.h"
 
 #define DRV_NAME "odi_switch"
 
@@ -80,13 +81,16 @@ void __iomem *odi_switch_base;
  * I2C_CMD, I2C_READ_DATA): a DDM read is setup, address, start, poll, read
  * per byte, and a second reader in between returns the wrong bytes. Taken
  * by odi_i2c_read_bytes() and odi_i2c_write_byte() (DDM_GET; cmd 10,
- * through odi_ddm_get() under odi_switch_lock; and the i2c adapter,
- * odi_i2c_adapter.c, under the i2c core bus lock) and by the sdkinit i2c
+ * through odi_ddm_get() under odi_switch_lock; the i2c adapter,
+ * odi_i2c_adapter.c, under the i2c core bus lock; and the host EEPROM
+ * mirror, odi_sfp_mirror.c, under its own lock) and by the sdkinit i2c
  * and i2cen verbs, the last two under odi_switch_lock.
  *
  * Lock order, outermost first:
  *   odi_switch_lock -> odi_i2c_lock
  *   i2c core bus lock (i2c-0) -> odi_i2c_lock
+ *   odi_sfpm_req_lock -> odi_sfpm_lock -> odi_i2c_lock  (odi_sfp_mirror.c;
+ *   neither is ever taken with odi_switch_lock)
  *   odi_switch_lock -> odi_gpon_lock -> odi_switch_dsf_lock
  *   odi_gpon_lock -> odi_switch_dsf_lock  (the switch interrupt handler)
  *   RTNL -> odi_switch_lock  (the netdevice notifier of odi_switch_pin.c;
@@ -314,9 +318,43 @@ static const struct kernel_param_ops odi_switch_host_autoneg_param_ops = {
 module_param_cb(host_autoneg, &odi_switch_host_autoneg_param_ops, &odi_sw_host_autoneg, 0644);
 MODULE_PARM_DESC(host_autoneg, "1000BASE-X auto-negotiation on the host port (default: yes; no forces 1000BASE-X full duplex)");
 
+/* odi_switch.host_forced: the host port forced to link up, full duplex,
+ * 1000 Mbit/s, for the host SerDes modes other than Fiber 1G
+ * (odi_sw_host_forced_apply()). Written to
+ * /sys/module/odi_switch/parameters/host_forced it applies at once
+ * whenever the switch window is mapped; on the command line it is stored
+ * and the platform settings apply it. Writing N when it is already N
+ * writes nothing, so a stick that never forces the port keeps its
+ * registers exactly as before, and N after Y puts back the two words Y
+ * found (odi_sw_host_forced_apply()); Y is applied again on every write. Not
+ * persistent: HOST_SERDES and host-serdes.sh decide what each boot runs.
+ */
+static int odi_switch_host_forced_param_set(const char *val, const struct kernel_param *kp)
+{
+	bool on;
+	int rc;
+
+	rc = kstrtobool(val, &on);
+	if (rc)
+		return rc;
+	mutex_lock(&odi_switch_lock);
+	odi_sw_host_forced_set(on, odi_switch_base != NULL);
+	mutex_unlock(&odi_switch_lock);
+	return 0;
+}
+
+static const struct kernel_param_ops odi_switch_host_forced_param_ops = {
+	.set = odi_switch_host_forced_param_set,
+	.get = param_get_bool,
+};
+module_param_cb(host_forced, &odi_switch_host_forced_param_ops, &odi_sw_host_forced, 0644);
+MODULE_PARM_DESC(host_forced, "force the host port to link up, full duplex, 1000 Mbit/s, for the 2500BASE-X and HiSGMII host SerDes modes (default: no, the port follows its SerDes)");
+
 /* odi_switch.host_link, read-only: 1 while the host port has a link
  * (PORT_ABILITY(0).LINK_UP, read when asked), 0 without one. What
  * host-autoneg.sh and the web UI read to decide whether a mode works.
+ * With odi_switch.host_forced set it reads the forced value, 1, whatever
+ * the host does.
  */
 static int odi_switch_host_link_param_get(char *buf, const struct kernel_param *kp)
 {
@@ -339,6 +377,56 @@ static const struct kernel_param_ops odi_switch_host_link_param_ops = {
 };
 module_param_cb(host_link, &odi_switch_host_link_param_ops, NULL, 0444);
 MODULE_PARM_DESC(host_link, "1 while the host port has a link (read-only)");
+
+/* odi_switch.sfp_mirror: the host-side SFP EEPROM (odi_sfp_mirror.h), the
+ * module's A0h and A2h with live diagnostics served to the host by the
+ * SoC's SFP slave. Y fills the slave's SRAM from the module and then turns
+ * the slave on, in a work item, so the write returns at once; the outcome is
+ * odi_switch.sfp_mirror_state. N turns it off before the write returns. Off
+ * until written: the fill needs the optics I2C, which answers only after
+ * the i2c and i2cen PON steps, so a boot step (sfp-host-ddm.sh, from
+ * SFP_HOST_DDM) writes it, and it is refused on the command line.
+ */
+static int odi_switch_sfp_mirror_param_set(const char *val, const struct kernel_param *kp)
+{
+	bool on;
+	int rc;
+
+	if (!odi_switch_base)
+		return -ENODEV;
+	rc = kstrtobool(val, &on);
+	if (rc)
+		return rc;
+	odi_sfp_mirror_request(on);
+	return 0;
+}
+
+static int odi_switch_sfp_mirror_param_get(char *buf, const struct kernel_param *kp)
+{
+	return sysfs_emit(buf, "%c\n", odi_sfp_mirror_requested() ? 'Y' : 'N');
+}
+
+static const struct kernel_param_ops odi_switch_sfp_mirror_param_ops = {
+	.set = odi_switch_sfp_mirror_param_set,
+	.get = odi_switch_sfp_mirror_param_get,
+};
+module_param_cb(sfp_mirror, &odi_switch_sfp_mirror_param_ops, NULL, 0644);
+MODULE_PARM_DESC(sfp_mirror, "serve the module A0h/A2h with live diagnostics to the host through the SoC SFP slave (default: no until written; the boot writes SFP_HOST_DDM)");
+
+/* odi_switch.sfp_mirror_state, read-only: off, filling, on (the host is
+ * served) or failed (the kernel log has why).
+ */
+static int odi_switch_sfp_mirror_state_get(char *buf, const struct kernel_param *kp)
+{
+	return sysfs_emit(buf, "%s\n", odi_sfp_mirror_state());
+}
+
+static const struct kernel_param_ops odi_switch_sfp_mirror_state_ops = {
+	.set = odi_switch_host_link_param_set,	/* refused, as for host_link */
+	.get = odi_switch_sfp_mirror_state_get,
+};
+module_param_cb(sfp_mirror_state, &odi_switch_sfp_mirror_state_ops, NULL, 0444);
+MODULE_PARM_DESC(sfp_mirror_state, "the host-side SFP EEPROM: off, filling, on or failed (read-only)");
 
 int odi_poll_reg(uint32_t off, uint32_t mask, uint32_t want,
 		 unsigned int delay_us, unsigned int timeout_us, uint32_t *last)
