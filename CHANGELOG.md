@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.14.0 (2026-10-31)
+
 - Releases: confd v1.12.0. The browser's password dialog is replaced by a
   sign-in page: opening the stick goes to `/login`, and signing in there gives
   the browser a session that ends after 30 minutes without use, after a day,
