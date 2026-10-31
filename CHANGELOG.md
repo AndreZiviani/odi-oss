@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.12.0. The browser's password dialog is replaced by a
+  sign-in page: opening the stick goes to `/login`, and signing in there gives
+  the browser a session that ends after 30 minutes without use, after a day,
+  when the stick or confd restarts, or at sign-out. Sign out now ends the
+  session for certain and says so, instead of answering *cross-site request
+  refused* in Chromium browsers or opening the browser's own password dialog.
+  Changing the password keeps the browser that changed it signed in and signs
+  the others out. `curl -u` and scripts keep using HTTP Basic. A reboot from
+  the web page now shows a progress bar until the stick answers again (about a
+  minute), then opens the sign-in page. Refs #239.
 - omcid tests: the qemu suites no longer flake on a loaded machine. `omcli --inject-file` waits out a full omcid queue (30 s) instead of dropping the tail of the session after half a second, the suites wait for omcid's end-of-session lines (rebuild, multicast policy export, answers) instead of fixed sleeps, and omcid logs `multicast policy unchanged` when its quiet-second export has nothing to write.
 
 ## v1.13.0 (2026-10-28)
