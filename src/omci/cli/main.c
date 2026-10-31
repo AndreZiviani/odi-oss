@@ -710,6 +710,8 @@ static long inject_queue(void)
 	return q;
 }
 
+#define INJECT_WAIT_ROUNDS 60
+
 static int inject_frame(long q, const char *h)
 {
 	struct omci_msg m;
@@ -742,12 +744,26 @@ static int inject_frame(long q, const char *h)
 	m.mtype   = OMCI_MQ_MTYPE;
 	m.msgType = OMCI_MQ_TYPE_FRAME;
 	m.len     = OMCI_FRAME_LEN;
-	if (mq_send(q, &m) < 0) {
-		out("% could not send the frame\n");
-		out_flush();
-		return 1;
+	/* mq_send() gives up after half a second of a full queue, which is the
+	 * right bound for a client of a daemon in production. A session file
+	 * is hundreds of frames in a queue of a few dozen KB, and omcid takes
+	 * one per loop pass: on a loaded machine the file outruns it, the
+	 * queue stays full for longer than that, and the tail of the session
+	 * was lost. Here the caller is a test or an operator replaying a
+	 * file, who wants every frame in, in order, so a full queue is waited
+	 * out for INJECT_WAIT_ROUNDS half seconds (30 s) -- a daemon that is
+	 * not draining at all still ends it, with the error. */
+	for (int round = 0;; round++) {
+		long rc = mq_send(q, &m);
+
+		if (rc >= 0)
+			return 0;
+		if (rc != -MQ_EAGAIN || round >= INJECT_WAIT_ROUNDS)
+			break;
 	}
-	return 0;
+	out("% could not send the frame\n");
+	out_flush();
+	return 1;
 }
 
 int main(int argc, char **argv)

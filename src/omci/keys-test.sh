@@ -17,6 +17,7 @@
 set -u
 Q=qemu-mips-static
 fail=0
+. ./testlib.sh
 
 check() {
 	if [ "$2" = "$3" ]; then
@@ -426,11 +427,12 @@ bdg() {   # bdg <session> <odi.conf text> <log>: the bridge connections the sess
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	printf '%s' "$2" > /var/config/odi.conf
 	: > "$3"
-	$Q respond/build/omcid-drvtrace -a -w 1 -c "$CAPS" -g /tmp/keys-gpon > "$3" 2>&1 &
+	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/keys-gpon > "$3" 2>&1 &
 	pid=$!
-	sleep 2
+	omcid_up "$3"
 	$Q cli/build/omcli --inject-file "$1" > /dev/null 2>&1
-	wait "$pid"
+	settled "$3"
+	omcid_stop "$pid"
 	grep -c '^drv 51 ' "$3"
 }
 whole=$(bdg "$FIX/omci-session-isp1.txt" "" /tmp/keys-b1.log)

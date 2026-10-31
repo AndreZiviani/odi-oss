@@ -23,7 +23,27 @@ listed here.
   EEPROM; pin 27 is unused there as measured. The behaviour follows
   measurements by Thaad-QR on a stock v08 stick, and pin 27 Thaad-QR's
   comparison with a stock v08 stick (with it, the router showed live DDM). Host-tested (`test/odi_sfp_mirror_test.c`,
-  `test/sfp_host_ddm_test.sh`). Refs #231.
+  `test/sfp_host_ddm_test.sh`). On hardware: one reporter's router reads live
+  DDM from this image at boot, another's v08 showed it once pin 27 was freed
+  by hand, and a v06 stick ran the mirror for three days with the host's
+  EEPROM unchanged. Refs #231.
+- omcid tests: the qemu suites no longer flake on a loaded machine. `omcli --inject-file` waits out a full omcid queue (30 s) instead of dropping the tail of the session after half a second, the suites wait for omcid's end-of-session lines (rebuild, multicast policy export, answers) instead of fixed sleeps, and omcid logs `multicast policy unchanged` when its quiet-second export has nothing to write.
+
+## v1.13.0 (2026-10-28)
+
+Not in this release: the host link modes (`HOST_SERDES`, 2500BASE-X and HiSGMII) and the
+host-side SFP diagnostics (`SFP_HOST_DDM`) from the v1.13.0 pre-releases are still being
+tested and follow in a later release. A stick that needs `HOST_SERDES` (for example an
+HSGQ stick at 2.5G) should stay on v1.13.0-beta.2 until then.
+
+- Releases: confd v1.10.0 and metricsd v1.8.0. The web UI no longer shows the
+  identity keys as empty on a stick whose config store outgrew its buffer (a
+  stick that ran a router firmware before), offers a setup wizard for a stick
+  nobody has set up (web password, an ssh key, the ISP login, the VLAN
+  handling), says when a newer odi-oss release exists (the browser asks
+  GitHub at most once a day; System > Firmware turns it off), shows the SoC
+  chip temperature with its alarms, and orders the header bars by severity.
+  metricsd exports the chip temperature limits and alarms. Refs #229.
 - kernel: die-temperature alarms on the SoC hwmon device (`rtl9602c_soc`):
   `temp1_max` (default 95000) and `temp1_crit` (default 110000) in
   millidegrees, root-writable (0..150000, max <= crit) and not persisted, plus
