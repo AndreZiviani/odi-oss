@@ -45,7 +45,7 @@ classes, in this document and beside it in the UI:
 
 | class | meaning | how it is applied |
 |---|---|---|
-| **LIVE** | takes effect at once, no interruption | `apply.sh network` (the management addresses) or `apply.sh omci` (the four VLAN keys, rebuilt in place); the UI runs it straight after the save |
+| **LIVE** | takes effect at once, no interruption | `apply.sh network` (the management addresses), `apply.sh omci` (the four VLAN keys, rebuilt in place) or `apply.sh sfp` (`SFP_HOST_DDM`); the UI runs it straight after the save |
 | **SERVICE RESTART** | a daemon restarts; the fibre service stays up | `apply.sh syslog`/`apply.sh ntp` |
 | **INTERRUPTS INTERNET** | applied without a reboot, but the fibre service drops while it is | `apply.sh omci`; the UI offers "Apply now" behind a confirmation |
 | **REBOOT** | read only at boot | a reboot; the UI offers "Reboot now" behind a confirmation |
@@ -151,11 +151,12 @@ The UI's reboot confirmation says which slot it comes back on.
 | `MLD_SNOOPING` | MLD (IPv6) snooping | `1` makes `igmpd` snoop the host's MLD as it snoops its IGMP, on the same multicast profile: the switch copies (or takes) the host's MLD queries, reports and dones to the CPU and nothing else of ICMPv6, IPv6 groups get a row each (keyed on their 33:33 MAC, the host and the PON as members), the profile's IPv6 access control list rows and its group limit are enforced, and the reports go up tagged as the profile says. With `IGMP_PON_DROP=1` as well, IPv6 multicast from the PON that no group row names is dropped too, one membership interval after snooping starts; the link-scope groups ff02::/16 and the solicited-node groups always flood, both ways, so router advertisements, neighbour discovery and DHCPv6 are never pruned, and they are never snooped or refused. Empty, absent or anything else: MLD is not snooped and IPv6 multicast is flooded as it always was; `igmpd` runs exactly as without the key. Has no effect while `IGMP_SNOOPING` is not `1`. Odi-only key, kept in `/etc/config/odi.conf`. Takes effect with `apply.sh igmp`, no reboot | `svc-igmpd.sh` (`igmpd -6`); `docs/TOOLS.md`, `igmpd` | SERVICE RESTART |
 | `GPON_DYING_GASP` | Dying_Gasp on a reboot (experimental) | `1` makes the stick send the GPON Dying_Gasp PLOAM message (G.984.3 clause 9.2.4.3, up to three copies, each given 50 ms to leave) just before an orderly restart, halt or power-off, so the OLT can tell a planned reboot or firmware update from a lost ONU. Sent only when the ONU is ranging or operating (O4 or O5), only from the reboot path and once per reboot; never when the PON drops. The kernel logs `Dying_Gasp sent <n> of 3 times before the restart`, which survives the reboot in `/proc/odi_ramlog_prev`. Empty, absent or anything else: not sent. Default off, because this project cannot see what the OLT does with it: on a reboot in O5 all three copies have been seen to leave (on a stick under test, and in another open implementation's measurements on the same chip), and G.984.3 tells the OLT not to stop allocations on a Dying_Gasp alone, but an OLT that gets one without a restart following may deactivate and re-activate the ONU. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `gpondg` PON step at boot; the driver's reboot notifier | REBOOT |
 | `GPON_KEEP_DISABLE` | Stay disabled when the OLT disables this ONU | `1` keeps the ONU in Emergency Stop (O7) once the OLT has disabled it with Disable_Serial_Number (G.984.3), across this stick's own PON restarts and across reboots and power-offs, until the OLT enables it again, as the standard asks ("Keeping the OLT's disable" below). The disable is recorded in the marker file `/etc/config/gpon-hold`; a boot that finds it starts in O7 with the laser off and waits for the enable. Empty, absent or anything else: today's behaviour, the stick leaves O7 on any restart, and no marker is written or read. Default off, because a stick that stays dark when the OLT disabled it cannot be brought back from the fibre side except by the OLT itself, and an OLT that disabled it by mistake is not asked. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `gponkeep` and `gponhold` PON steps at boot; the driver; `gpon-hold.sh` | REBOOT |
+| `SFP_HOST_DDM` | Diagnostics for the router (host-side SFP EEPROM) | the router reads the module's identity (A0h) and its live diagnostics (A2h: temperature, supply voltage, bias current, tx and rx power, the alarm and warning flags, and the TX_DISABLE, TX_FAULT and RX_LOS bits) from the stick, as from any SFP with digital diagnostics, on the board revisions that wire the SoC's own SFP EEPROM emulation to the SFP edge (HSGQ v08 / DFP-34X-2C2 v08, where the stock firmware does the same). `0` turns it off; `1`, empty or absent serve it (the default); any other value serves it and logs `event=bad_value`. On v06 boards the router reads a separate fixed EEPROM with no diagnostics whatever this says: the emulation is not wired there. Left off in a safe-mode boot. Odi-only key, kept in `/etc/config/odi.conf`. Takes effect with `apply.sh sfp`, no reboot ("Host-side diagnostics" below) | `sfp-host-ddm.sh`: a PON step at boot, and `apply.sh sfp`; the kernel does the rest (`odi_switch.sfp_mirror`) | LIVE |
 
 Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
 `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`,
 `OMCI_POTS_PORTS`, `OMCI_POTS_SLOT_ID`, `OMCI_VOIP_LINE_REPORT`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `OMCI_TCONT_ALLOC_UNSET`, `ODI_LASER_UNVERIFIED`,
-`HOST_AUTONEG`, `HOST_SERDES`, `IGMP_SNOOPING`, `IGMP_PON_DROP`, `MLD_SNOOPING`, `GPON_DYING_GASP` and `GPON_KEEP_DISABLE` are the only
+`HOST_AUTONEG`, `HOST_SERDES`, `IGMP_SNOOPING`, `IGMP_PON_DROP`, `MLD_SNOOPING`, `GPON_DYING_GASP`, `GPON_KEEP_DISABLE` and `SFP_HOST_DDM` are the only
 keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
 in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
@@ -439,6 +440,46 @@ the ONU is between O2 and O6, and it sends nothing upstream. Then
 `gpondeact` and `gponact` in `/proc/odi_init` still end in O7, a reboot starts
 in O7, and `gpon-hold.sh clear` ends it. It refuses (`-EPERM`) while the key
 is off.
+
+### Host-side diagnostics (`SFP_HOST_DDM`)
+
+A router reads an SFP module's identity at I2C address 0x50 (A0h) and, when
+A0h byte 92 says the module has digital diagnostics, the live readings at
+0x51 (A2h, SFF-8472). On this stick the host pins do not reach the optics
+module's own diagnostics. The RTL9602C has an SFP EEPROM emulation: an I2C slave on
+the SFP edge pins answering from a 512-byte SRAM. On the board revisions that
+wire it to the edge (HSGQ v08 / DFP-34X-2C2 v08) the stock firmware turns it
+on and keeps it filled, and the router shows the module's temperature,
+voltage, bias and optical powers; with it off, as earlier builds of this
+image left it, the router shows 0 C and 0 V (measurements by Thaad-QR on a
+stock v08 stick, from the router's own EEPROM dump). On v06 boards the host
+pins go to a separate fixed EEPROM with no diagnostics, and turning the
+slave on there changes nothing the host reads.
+
+With `SFP_HOST_DDM` on (the default), the boot, once the optics I2C answers
+(after the `laser` PON step), asks the kernel for the mirror. The kernel
+copies the module's A0h and A2h (the upper half from page 0) into the SRAM,
+reads all of it back, makes every byte read-only to the host except the user
+EEPROM area (A2h 128-247), and only then turns the slave on and gives it SoC
+pin 27 (out of plain GPIO mode, as the stock v08 image runs it: on v08 the
+router saw nothing until that pin was given, Thaad-QR's comparison with a
+stock v08 stick; on v06 nothing measured uses it); it never writes the
+module. From then on it rewrites A2h 96-119 once a second from the
+module: the five diagnostic words, the status/control byte 110 (bits 7, 2
+and 1: TX_DISABLE, TX_FAULT and RX_LOS as the module reports them) and the
+alarm and warning flags. A module read that fails leaves the last values and
+is logged once. Writes from the host are refused except in A2h 128-247, and
+nothing acts on those: the host cannot switch the laser off through byte
+110. For that reason A0h byte 93 keeps only what is served (alarm and
+warning flags, soft TX_FAULT and RX_LOS monitoring) and drops any soft
+control the module advertises, with its checksum moved to match; a module
+that advertises none, as seen so far, reaches the host unchanged.
+
+Check it with `cat /sys/module/odi_switch/parameters/sfp_mirror_state`
+(`on`, `off`, `filling` or `failed`) and `dmesg | grep odi_sfp_mirror`;
+`sfp-host-ddm.sh status` shows the key too. `SFP_HOST_DDM=0` and `apply.sh
+sfp` turn the slave off at once and give pin 27 back; the router then reads
+what the board gives it with the emulation off.
 
 ### Software download from the OLT
 
@@ -1189,15 +1230,20 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
 
 ## Not verified yet
 
-- `HOST_SERDES=2500basex` and `hisgmii` on this image: the register
-  sequences and the port force are the reporter's, read off a stock HSGQ
-  stick and run on one (2500BASE-X against a 2.5G router SFP port, HiSGMII
-  against a media converter), and host-tested here as write sequences
-  (`test/host_serdes_test.sh`, `test/odi_host_forced_test.c`). The trial,
-  its revert, the boot watch and its fallback to Fiber 1G, the safe mode
-  with the key set, and bit 17 of 0x214 as the sync signal in every case
-  (it was read on one stick, linked and not) are host-tested only.
-  `reapply` of Fiber 1G on a DFP-34X-2C2 is the first check on hardware.
+- `HOST_SERDES`: the register sequences and the port force are the
+  reporter's, read off a stock HSGQ stick. On this image 2500BASE-X linked an
+  HSGQ stick to a 2.5G router port, and on a DFP-34X-2C2 `reapply` of Fiber
+  1G, a 2500basex trial and its revert, and the boot watch falling back to
+  Fiber 1G with no 2.5G host left the SerDes and port words as before. Not run
+  on hardware: `hisgmii` with this image, the safe mode with the key set,
+  whether the HSGQ board links in Fiber 1G, and bit 17 of 0x214 as the sync
+  signal beyond those runs (`test/host_serdes_test.sh` and
+  `test/odi_host_forced_test.c` cover them as write sequences).
+- The host-side SFP EEPROM (`SFP_HOST_DDM`): how the host write protect
+  packs its bits inside a word is taken from the register table and not
+  checked; only A2h 224-255 depend on it. The rest has run on hardware: one
+  reporter's router reads live DDM from it at boot, and a v06 stick ran it
+  for three days with the host's EEPROM unchanged.
 - The `HOST_AUTONEG` boot fallback on a stick: the write, the trial, its
   expiry and the forced link against a host forced off were all seen
   ("Host port auto-negotiation"), but both hosts tried accept a forced

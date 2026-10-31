@@ -1490,6 +1490,7 @@ that `--full` keeps the identifiers but still no secret; and that the
 | `/etc/scripts/network.sh` | host SerDes check (and fix, `host-serdes.sh boot`), MAC, `br0` over `eth0.2`, the addresses | yes: it checks before it writes, and re-running it is how a management-path problem is debugged. A re-run is a new boot to `host-serdes.sh`: in 2500BASE-X it starts the boot watch again |
 | `/etc/scripts/host-serdes.sh status` | the host SerDes mode state (above) | yes: read-only |
 | `/etc/scripts/host-autoneg.sh status` | the host-port auto-negotiation state (above) | yes: read-only |
+| `/etc/scripts/sfp-host-ddm.sh status\|apply` | the host-side SFP EEPROM (`SFP_HOST_DDM`, `docs/SETTINGS.md`): `status` is the key, the kernel request and its state; `apply` is `apply.sh sfp` (on or off from the key, waits up to 10 s for the kernel). The boot runs `sfp-host-ddm.sh boot` as a PON step | `status` yes: read-only; `apply` yes |
 | `/etc/scripts/safe-mode.sh status` | the safe mode: this boot, the record, the boot count | yes: read-only |
 | `/etc/scripts/network.sh addr [-n]` | only the addresses: the primary and the second one (`br0:2`), live; `-n` says what it would change | yes; this is `apply.sh network` |
 | `/etc/scripts/gpon-hold.sh status\|clear` | the kept Emergency Stop (`GPON_KEEP_DISABLE`, `docs/SETTINGS.md`): `status` is key, marker file and what the driver holds; `clear` removes `/etc/config/gpon-hold` and releases the hold now. The kernel runs `gpon-hold.sh sync` itself to write or remove the marker | `status` yes: read-only; `clear` yes |
@@ -1520,6 +1521,8 @@ drivers behind them.
 | `/sys/module/odi_switch/parameters/host_autoneg` | `Y` or `N`: the host port negotiates, or runs forced 1000BASE-X | `1`/`0`: applied at once (`host-autoneg.sh` does this; by hand it lasts until the next boot) |
 | `/sys/module/odi_switch/parameters/host_forced` | `Y` or `N`: the host port runs forced (link up, 1000 full duplex), as 2500BASE-X and HiSGMII need | `1`/`0`: applied at once (`host-serdes.sh` does this; by hand it lasts until the next boot) |
 | `/sys/module/odi_switch/parameters/host_link` | `1` while the host port has a link; always `1` while `host_forced` is `Y` | -- |
+| `/sys/module/odi_switch/parameters/sfp_mirror` | `Y` or `N`: the host-side SFP EEPROM asked for or not | `1`: fill the SoC SFP slave from the module and turn it on (in the background); `0`: off at once (`sfp-host-ddm.sh` does this; by hand it lasts until the next boot) |
+| `/sys/module/odi_switch/parameters/sfp_mirror_state` | `off`, `filling`, `on` or `failed` | -- |
 | `/proc/odi_ramlog_prev` | the previous boot's DRAM ramlog, decoded: this boot's counter and slot, the previous boot's counter, slot, build id, last early crumb and reset reason (`reason=`, `docs/HACKING.md`), then its first 3984 bytes and its last 4080 (root only) | -- |
 | `/proc/odi_ramlog_prev_raw` | the same two pages as 8192 raw bytes, page A then page B, for `ramlog-read.sh`-style decoding off the stick (root only) | -- |
 
@@ -1688,6 +1691,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services |
 | `host-autoneg: event=fallback setting=off running=on ...` | notice | the host-port auto-negotiation (`HOST_AUTONEG`): the boot watch, the fallback and every trial; the events are listed under `host-autoneg.sh` above |
 | `host-serdes: event=fallback setting=2500basex running=fiber1g ...` | notice | the host SerDes mode (`HOST_SERDES`): the boot watch, the fallback, every trial and reapply; the events are listed under `host-serdes.sh` above |
+| `sfp-host-ddm: event=requested setting=on ...` | notice | the host-side SFP EEPROM (`SFP_HOST_DDM`): `requested` (the boot asked the kernel), `off` (the key is 0), `safe_mode_boot`, `bad_value`, `no_kernel`, and from `apply` `applied`, `apply_failed` or `apply_timeout`. The kernel's own lines start `odi_sfp_mirror:` (`host EEPROM on`, `host EEPROM off`, and each failure, once) |
 | `safe-mode: event=boot_count boot=1 short_before=0 limit=5 wdt_before=0 wdt_limit=3 prev=reboot uptime=11` | notice | every boot's count, and a safe-mode boot (`event=safe_mode`); listed under `safe-mode.sh` above |
 | `omcid: event=suppressed count=12 window_s=60` | notice | omcid's rate limit dropped that many lines in the last minute |
 
