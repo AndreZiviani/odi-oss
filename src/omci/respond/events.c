@@ -790,7 +790,8 @@ void ev_tick(void)
 		unk_save();
 }
 
-/* A frame rx_accept() dropped. An OLT speaking the extended format retries
+/* A frame rx_accept() flagged: dropped, or for reason trailer answered anyway
+ * (action=accepted). An OLT speaking the extended format retries
  * every request, and that must not spend the shared burst of ev_emit() on one
  * fault, so each reason has a window of its own: the first frame is logged at
  * once, the next line comes EV_WINDOW_S later and says how many frames were
@@ -817,6 +818,7 @@ void ev_rx_reject(int reason, uint8_t devid, uint32_t len)
 	ev_str(&e, "reason", name[reason]);
 	ev_num(&e, "count", omci_rx_reject[reason] - last_total[reason]);
 	ev_num(&e, "total", omci_rx_reject[reason]);
+	ev_str(&e, "action", reason == RX_REJ_TRAILER ? "accepted" : "dropped");
 	if (reason == RX_REJ_DEVID)
 		ev_num(&e, "devid", devid);
 	ev_num(&e, "len", len);

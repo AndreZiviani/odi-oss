@@ -5,15 +5,17 @@ listed here.
 
 ## Unreleased
 
-- omcid checks every received frame before it reads or changes anything: at
-  least 48 bytes, device identifier 0x0a, baseline trailer `00 00 00 28` and
-  the CRC-32 of bytes 0-43 in bytes 44-47. A frame that fails any of them is
-  dropped with no answer (an extended-format 0x0b frame included, so the OLT
-  falls back to baseline), counted per reason (`omcli state`, `rx dropped`) and
-  logged as `event=rx_reject reason=length|devid|trailer|crc`, at most one line
-  per reason a minute. The same check covers injected frames: `omcli --inject`
-  now fills in the trailer and CRC, and `--inject-raw` sends bytes as given.
-  Frames captured from an OLT carry valid CRCs; not yet trialled on a stick.
+- omcid checks every received frame before it reads or changes anything. A
+  frame under 48 bytes, with a device identifier other than 0x0a (an
+  extended-format 0x0b frame included, so the OLT falls back to baseline) or
+  with a CRC-32 that does not match bytes 0-43 is dropped with no answer. A
+  trailer other than `00 00 00 28` (what our OLT sends) under a valid CRC is
+  answered, and only counted. Each reason is counted (`omcli state`, `rx
+  dropped`) and logged as `event=rx_reject reason=length|devid|crc|trailer
+  action=dropped|accepted`, at most one line per reason a minute. The same
+  check covers injected frames: `omcli --inject` now fills in the trailer and
+  CRC, and `--inject-raw` sends bytes as given. Frames captured from an OLT
+  carry valid CRCs; not yet trialled on a stick.
   Refs #251.
 - README: the DFP-34X-2C3 moves from "never tried" to reported working, on
   one user's report of v1.14.0 on a 2C3 with stock `V1.1.4-250620`.

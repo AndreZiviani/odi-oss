@@ -523,9 +523,10 @@ void handle(int fd, uint32_t tid, const uint8_t *f);
 /* OMCI frames handle() has taken, from the line or injected: the main loop
  * times the quiet second before its rebuilds on this, not on CLI traffic. */
 extern unsigned long omci_frames_handled;
-/* Received frames dropped before handle(), per reason: the index is one of
- * RX_REJ_*. rx_accept() is the check, for the line and the injection queue
- * (omcimsg.c); a frame it refuses is never answered. */
+/* Received frames the check in rx_accept() flagged, per reason: the index is
+ * one of RX_REJ_*, for the line and the injection queue (omcimsg.c). A frame
+ * it refuses is never answered; RX_REJ_TRAILER is only counted, the frame is
+ * answered. */
 #define RX_REJ_LENGTH   0
 #define RX_REJ_DEVID    1
 #define RX_REJ_TRAILER  2
