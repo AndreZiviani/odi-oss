@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- docs: `docs/TOOLS.md` points from the syslog and exporter sections to the
+  Prometheus alert rules and their notes in the odi-sfp-exporter repository.
+  Refs #270.
 - docs: `SECURITY.md` states that only the latest release is supported, that
   fixes ship as a new release, and that vulnerabilities are reported privately
   through GitHub private vulnerability reporting. Linked from the README.
