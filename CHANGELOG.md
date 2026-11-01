@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- docs: stale statements corrected. The kernel is 6.18.58 everywhere it is
+  named (README, `docs/BUILDING.md`, `docs/HACKING.md`, `docs/KERNEL.md`), and
+  the README no longer states the current release. `image/README.md` said the
+  root hash is MD5 crypt and that rcS waits for an ARP reply by default; the
+  build writes SHA-512 crypt (`image/build.sh`) and the ARP wait is the
+  development-only `confirm-arp` flag (`rootfs/skeleton/etc/init.d/rcS.dev`),
+  the default being the 120 s userland deadline plus the 300 s trial guard.
+  `make lint` now runs `tools/check-doc-pins.sh`, which fails when README.md or
+  `docs/BUILDING.md` names a kernel other than the `VERSION=` pin in
+  `kernel/618/fetch.sh`, or a confd/metricsd tag other than the one in
+  `src/fetch-releases.sh`. Refs #273.
 - CI: every action in the workflows is pinned to a full commit SHA with its
   version in a trailing comment, `make lint` rejects a mutable reference, and
   `.github/dependabot.yml` proposes weekly updates for the `github-actions`

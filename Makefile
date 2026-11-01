@@ -416,6 +416,8 @@ lint:
 		exit 1; \
 	fi
 	@echo "workflow actions pinned to commit SHAs: clean"
+	@./tools/check-doc-pins.sh
+	@echo "documented version pins match the code: clean"
 
 clean:
 	rm -rf build out
