@@ -395,7 +395,7 @@ extern uint16_t alarm_snapshot;
 #define SNAPSHOT_PATH          "/var/run/omcid-mib.snap"
 #define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
 #define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
-void snapshot_save(void);
+int snapshot_save(void);
 /* Write `buf` to `tmp`, then rename it over `path`: a reader never sees a
  * half-written file. 0 on success. */
 int atomic_write(const char *path, const char *tmp, const uint8_t *buf,
@@ -523,6 +523,17 @@ void handle(int fd, uint32_t tid, const uint8_t *f);
 /* OMCI frames handle() has taken, from the line or injected: the main loop
  * times the quiet second before its rebuilds on this, not on CLI traffic. */
 extern unsigned long omci_frames_handled;
+/* Received frames the check in rx_accept() flagged, per reason: the index is
+ * one of RX_REJ_*, for the line and the injection queue (omcimsg.c). A frame
+ * it refuses is never answered; RX_REJ_TRAILER is only counted, the frame is
+ * answered. */
+#define RX_REJ_LENGTH   0
+#define RX_REJ_DEVID    1
+#define RX_REJ_TRAILER  2
+#define RX_REJ_CRC      3
+#define RX_REJ_N        4
+extern unsigned long omci_rx_reject[RX_REJ_N];
+int rx_accept(const uint8_t *f, uint32_t len);
 
 /* ------------------------------------------------------------- event lines
  *
@@ -535,6 +546,7 @@ void ev_mib_upload(uint16_t total);
 void ev_mib_upload_next(uint16_t seq);
 void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst, const char *result);
+void ev_snapshot_fail(unsigned rows);
 void ev_alloc_ids(const uint16_t *ids, unsigned n);
 /* A config reload (reload.c): the decision, a step that failed, and the
  * outcome. `keys` is store key names only, never values. */
@@ -589,6 +601,9 @@ int omci_drv_call_quiet(uint32_t cmd, void *buf, uint32_t len);
 #define UNKNOWN_PATH     "/var/log/omcid-unknown.txt"
 #define UNKNOWN_TMP_PATH "/var/log/omcid-unknown.txt.tmp"
 int ev_msg_known(uint8_t mt);
+/* A received frame dropped by rx_accept(): event=rx_reject, at most one line
+ * per reason per minute, carrying the count since the last one. */
+void ev_rx_reject(int reason, uint8_t devid, uint32_t len);
 void ev_unknown_me(uint16_t cls, uint8_t mt);
 void ev_unknown_msg(uint8_t mt, uint16_t cls);
 /* A Get, Get current data, Set or Delete of a modelled class, addressed to

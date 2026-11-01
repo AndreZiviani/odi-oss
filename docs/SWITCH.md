@@ -1442,7 +1442,13 @@ With the lease held (`odi_switch_mcast.c`, `ODI_SW_IOC_MC_SNOOP`):
   and the lease saves its word and template 2 and puts both back. The RX
   hook takes a frame from port 0 that is an MLD message (the four types,
   behind at most two tags and four extension headers) while MLD is held,
-  and hands it to igmpd like the IGMP copies.
+  and hands it to igmpd like the IGMP copies. The tag rule is one contract
+  for the hook and igmpd: up to two VLAN tags, each 802.1Q (0x8100) or
+  802.1ad (0x88a8), so a C-tag, an S-tag or an S-tag over a C-tag all reach
+  a report; a third tag is refused by the hook and not parsed by igmpd. The
+  VID igmpd keys a report by is that of the outermost tag, 0 when untagged
+  (`eth_l2_parse()` in `src/igmp/igmpd.h`, shared by the IGMP and MLD
+  parsers).
 - **The IPv6 drop** (`ODI_SW_MC_SNOOP_PON_DROP6`, igmpd `-6 -d`, only with
   MLD). `MC_UNKNOWN_IP6` (0x01c018), set to drop for port 2. Before it,
   `MC_UNKNOWN_CFG` bits 6:5 are set to 1 (the reserved IPv6 groups flooded

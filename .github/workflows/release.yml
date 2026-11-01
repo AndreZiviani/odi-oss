@@ -38,10 +38,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# Read-only by default; only the release job, which publishes and attests,
+# raises its own scope. The tests job runs repository code and gets none of it.
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
   # The release is gated on the same tests as a pull request (`make test`:
@@ -55,7 +55,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Tests
         run: |
@@ -67,8 +69,15 @@ jobs:
   release:
     needs: tests
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write # gh release create/edit/upload
+      id-token: write # keyless signing for the attestations
+      attestations: write # store the attestations
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Upstream tarballs (busybox, dropbear, iproute2, the Linux tree and its
       # signature) and the confd/metricsd release assets land in dl/. The key
@@ -76,11 +85,11 @@ jobs:
       # cache and fetches anew. A hit only skips the download: every fetch
       # script still re-checks the pinned SHA-256 of the file it finds there.
       - name: Cache pinned downloads (dl/)
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
             dl
-          key: dl-release-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh', 'tools/bundle-sources.sh', 'toolchain/images.env') }}
+          key: dl-release-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh', 'src/release-sha256.txt', 'tools/bundle-sources.sh', 'toolchain/images.env') }}
 
       - name: Version from the tag
         run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
@@ -126,7 +135,7 @@ jobs:
       # them against the file bytes, so this has to run before either is
       # renamed -- and before the SBOM step output is touched again.
       - name: Attest build provenance (image tarball + checksums)
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
           subject-path: |
             out/image/${{ env.VERSION }}.tar
@@ -134,7 +143,7 @@ jobs:
             out/image/SHA256SUMS
 
       - name: Attest SBOM
-        uses: actions/attest-sbom@v3
+        uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3.0.0
         with:
           subject-path: out/image/${{ env.VERSION }}.tar
           sbom-path: out/image/sbom.cdx.json

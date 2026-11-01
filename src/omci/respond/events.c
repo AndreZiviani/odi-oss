@@ -432,6 +432,18 @@ void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst, const char *result)
 	ev_emit(&e, EV_SEV_NOTICE);
 }
 
+/* The snapshot could not be written (full tmpfs, a failed write or rename).
+ * The previous snapshot is still on disk, so a respawn resumes from an older
+ * MIB than the one the OLT was told about. */
+void ev_snapshot_fail(unsigned rows)
+{
+	struct evline e;
+
+	ev_begin(&e, "snapshot_fail");
+	ev_num(&e, "rows", rows);
+	ev_emit(&e, EV_SEV_NOTICE);
+}
+
 /* One step of a software download, activate or commit (swimage.c). Download
  * sections are counted there, not logged: an image is thousands of them. */
 void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
@@ -788,4 +800,40 @@ void ev_tick(void)
 		prov_close();
 	if (unk_dirty)
 		unk_save();
+}
+
+/* A frame rx_accept() flagged: dropped, or for reason trailer answered anyway
+ * (action=accepted). An OLT speaking the extended format retries
+ * every request, and that must not spend the shared burst of ev_emit() on one
+ * fault, so each reason has a window of its own: the first frame is logged at
+ * once, the next line comes EV_WINDOW_S later and says how many frames were
+ * dropped since (count) and in all (total, which `omcli state` shows too).
+ * devid and len are those of the frame that triggered the line. */
+void ev_rx_reject(int reason, uint8_t devid, uint32_t len)
+{
+	static const char *const name[RX_REJ_N] = {
+		"length", "devid", "trailer", "crc"
+	};
+	static long win_start[RX_REJ_N];
+	static unsigned long last_total[RX_REJ_N];
+	static int seen[RX_REJ_N];
+	long now = ev_now().s;
+	struct evline e;
+
+	if (reason < 0 || reason >= RX_REJ_N)
+		return;
+	if (seen[reason] && now - win_start[reason] < EV_WINDOW_S)
+		return;
+	seen[reason] = 1;
+	win_start[reason] = now;
+	ev_begin(&e, "rx_reject");
+	ev_str(&e, "reason", name[reason]);
+	ev_num(&e, "count", omci_rx_reject[reason] - last_total[reason]);
+	ev_num(&e, "total", omci_rx_reject[reason]);
+	ev_str(&e, "action", reason == RX_REJ_TRAILER ? "accepted" : "dropped");
+	if (reason == RX_REJ_DEVID)
+		ev_num(&e, "devid", devid);
+	ev_num(&e, "len", len);
+	last_total[reason] = omci_rx_reject[reason];
+	ev_emit(&e, EV_SEV_NOTICE);
 }

@@ -924,8 +924,12 @@ static void us_flow_send_delete(unsigned slot)
 		((uint32_t *)&f)[w] = 0;
 	f.flow_id = slot;
 	f.dir = OMCI_GEMFLOW_US;
-	if (apply_hw)
-		omci_drv_call(OMCI_GEMFLOW_CMD, &f, sizeof f);
+	if (apply_hw) {
+		int rc = omci_drv_call(OMCI_GEMFLOW_CMD, &f, sizeof f);
+
+		if (rc)
+			out_fmt("   [hw] us flow %d delete -> %d\n", (long)slot, (long)rc);
+	}
 	out_fmt("   [%s] us flow %d delete\n", apply_hw ? "hw" : "dry", (long)slot);
 	prog.f[slot].live = 0;
 }
@@ -1085,8 +1089,13 @@ void us_qos_rebuild(void)
 			pq.index = usq_hw[i].ordinal;
 			pq.owner = usq_hw[i].tcontIndex;
 			pq.dir = OMCI_GEMFLOW_US;
-			if (apply_hw)
-				omci_drv_call(OMCI_PRIQ_DEL_CMD, &pq, sizeof pq);
+			if (apply_hw) {
+				int rc = omci_drv_call(OMCI_PRIQ_DEL_CMD, &pq, sizeof pq);
+
+				if (rc)
+					out_fmt("   [hw] us priq ordinal %d tcont %d delete -> %d\n",
+						(long)pq.index, (long)pq.owner, (long)rc);
+			}
 			out_fmt("   [%s] us priq %d ordinal %d tcont %d delete\n",
 				apply_hw ? "hw" : "dry", (long)usq_hw[i].meId,
 				(long)pq.index, (long)pq.owner);

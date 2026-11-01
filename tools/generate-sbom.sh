@@ -75,9 +75,9 @@ component() {
 	echo ','
 	component "iproute2" "$iproute2_ver" "GPL-2.0-only" "kernel.org" "pkg:generic/iproute2@$iproute2_ver"
 	echo ','
-	component "metricsd" "$metricsd_tag" "NOASSERTION" "AndreZiviani/odi-sfp-exporter" "pkg:github/AndreZiviani/odi-sfp-exporter@$metricsd_tag"
+	component "metricsd" "$metricsd_tag" "GPL-2.0-or-later" "AndreZiviani/odi-sfp-exporter" "pkg:github/AndreZiviani/odi-sfp-exporter@$metricsd_tag"
 	echo ','
-	component "confd" "${confd_tag:-local}" "NOASSERTION" "AndreZiviani/odi-ui" "pkg:github/AndreZiviani/odi-ui@${confd_tag:-local}"
+	component "confd" "${confd_tag:-local}" "GPL-2.0-or-later" "AndreZiviani/odi-ui" "pkg:github/AndreZiviani/odi-ui@${confd_tag:-local}"
 	echo ','
 	component "odi-oss-kernel-drivers" "$VERSION" "GPL-2.0-or-later" "AndreZiviani/odi-oss" "pkg:github/AndreZiviani/odi-oss@$VERSION"
 	echo ','

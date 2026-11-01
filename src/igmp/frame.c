@@ -98,6 +98,7 @@ enum igmp_parse_rc igmp_parse(const uint8_t *buf, uint32_t len,
 	const uint8_t *eth, *ip, *body;
 	uint32_t eth_len, off, hlen, total, body_len;
 	uint16_t ethertype;
+	struct eth_l2 l2;
 
 	for (unsigned i = 0; i < sizeof *rx; i++)
 		((uint8_t *)rx)[i] = 0;
@@ -116,19 +117,17 @@ enum igmp_parse_rc igmp_parse(const uint8_t *buf, uint32_t len,
 	rx->dst = eth;
 	rx->src = eth + 6;
 
-	ethertype = rd16(eth + 12);
-	off = ETH_HDR_LEN;
-	if (ethertype == ETH_P_8021Q) {
-		if (eth_len < ETH_HDR_LEN + 4)
-			return IGMP_SHORT;
-		rx->tagged = 1;
+	if (eth_l2_parse(eth, eth_len, &l2) < 0)
+		return IGMP_SHORT;
+	if (l2.tags) {
+		rx->tagged = l2.tags;
 		/* The tag the driver re-inserted. It agrees with the prefix,
 		 * and is preferred because it is what the frame itself says --
 		 * the prefix is only a fallback for an untagged frame. */
-		rx->vid = (uint16_t)(rd16(eth + 14) & 0x0fff);
-		ethertype = rd16(eth + 16);
-		off = ETH_HDR_LEN + 4;
+		rx->vid = l2.vid;
 	}
+	ethertype = l2.ethertype;
+	off = l2.off;
 	rx->ethertype = ethertype;
 
 	if (ethertype == ETH_P_IPV6)

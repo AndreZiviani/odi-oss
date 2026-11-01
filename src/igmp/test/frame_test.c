@@ -96,6 +96,95 @@ static uint32_t build(uint8_t *b, uint8_t port, uint16_t vid, int tagged,
 	return IGMP_RX_PREFIX + off + hlen + ilen;
 }
 
+/* Puts `n` tags (TPID and VID each, outermost first) in front of the
+ * EtherType of an untagged payload build() made, and returns the new length.
+ * No checksum covers the Ethernet header, so nothing else changes. */
+static uint32_t retag(uint8_t *b, uint32_t len, int n, const uint16_t *tpid,
+		      const uint16_t *vid)
+{
+	uint8_t *at = b + IGMP_RX_PREFIX + 12;
+	uint32_t tail = len - (IGMP_RX_PREFIX + 12);
+
+	for (uint32_t i = tail; i-- > 0; )
+		at[4 * n + i] = at[i];
+	for (int t = 0; t < n; t++) {
+		put16(at + 4 * t, tpid[t]);
+		put16(at + 4 * t + 2, vid[t]);
+	}
+	return len + 4u * (uint32_t)n;
+}
+
+static void ok3(int cond, const char *shape, const char *msg, const char *what)
+{
+	if (cond) {
+		out_fmt("ok    %s, %s: %s\n", shape, msg, what);
+	} else {
+		out_fmt("FAIL  %s, %s: %s\n", shape, msg, what);
+		failures++;
+	}
+}
+
+/* The kernel hook (odi_igmp_rx.h) lets through up to two tags, each 0x8100
+ * or 0x88a8, so the parser has to read exactly those: a frame it admits and
+ * igmpd then calls "not IP" is a report lost without a trace. */
+static void test_tags(void)
+{
+	static const struct {
+		const char *name;
+		int n;
+		uint16_t tpid[2], vid[2];
+	} shape[] = {
+		{ "untagged", 0, { 0, 0 }, { 0, 0 } },
+		{ "C-tag", 1, { 0x8100, 0 }, { 100, 0 } },
+		{ "S-tag", 1, { 0x88a8, 0 }, { 200, 0 } },
+		{ "S-tag and C-tag", 2, { 0x88a8, 0x8100 }, { 200, 100 } },
+		{ "two C-tags", 2, { 0x8100, 0x8100 }, { 200, 100 } },
+	};
+	static const struct { const char *name; uint8_t type; } msg[] = {
+		{ "v2 report", IGMP_V2_REPORT },
+		{ "v3 report", IGMP_V3_REPORT },
+	};
+	static const uint16_t three_tpid[3] = { 0x88a8, 0x8100, 0x8100 };
+	static const uint16_t three_vid[3] = { 300, 200, 100 };
+	uint8_t b[128];
+	struct igmp_rx rx;
+	uint32_t n;
+
+	for (unsigned s = 0; s < sizeof shape / sizeof shape[0]; s++) {
+		for (unsigned m = 0; m < sizeof msg / sizeof msg[0]; m++) {
+			const char *sn = shape[s].name, *mn = msg[m].name;
+
+			n = build(b, 2, 0, 0, msg[m].type, 0xe1010101, 0xc0a80105, 1);
+			if (msg[m].type == IGMP_V3_REPORT) {
+				/* No group records: reserved 0, count 0. */
+				uint8_t *i = b + n - 8;
+
+				put32(i + 4, 0);
+				put16(i + 2, 0);
+				put16(i + 2, igmp_cksum(i, 8));
+			}
+			n = retag(b, n, shape[s].n, shape[s].tpid, shape[s].vid);
+			ok3(igmp_parse(b, n, &rx) == IGMP_OK, sn, mn, "parses");
+			ok3(rx.type == msg[m].type && rx.tagged == shape[s].n, sn, mn,
+			    "type and tag count");
+			ok3(rx.vid == shape[s].vid[0], sn, mn,
+			    "the VID is the outermost tag's (0 untagged)");
+			ok3(rx.ethertype == ETH_P_IP && rx.sip == 0xc0a80105, sn, mn,
+			    "the IP header is found behind the tags");
+		}
+	}
+
+	/* Past what the kernel admits: three tags are not IP. */
+	n = build(b, 2, 0, 0, IGMP_V2_REPORT, 0xe1010101, 0xc0a80105, 1);
+	n = retag(b, n, 3, three_tpid, three_vid);
+	ok(igmp_parse(b, n, &rx) == IGMP_NOT_IP, "three tags are not parsed, as the hook refuses them");
+
+	/* A second tag cut short is a truncation, not a read past the frame. */
+	n = build(b, 2, 0, 0, IGMP_V2_REPORT, 0xe1010101, 0xc0a80105, 1);
+	n = retag(b, n, 2, shape[3].tpid, shape[3].vid);
+	ok(igmp_parse(b, IGMP_RX_PREFIX + 14 + 6, &rx) == IGMP_SHORT, "a tag cut short is short");
+}
+
 int main(void)
 {
 	uint8_t b[128];
@@ -194,6 +283,8 @@ int main(void)
 		ok(igmp_cksum(odd, 1) == 0x00ff,
 		   "an odd trailing byte is the high half of the word");
 	}
+
+	test_tags();
 
 	out_fmt("\n%s\n", failures ? "FAILURES" : "all ok");
 	out_flush();

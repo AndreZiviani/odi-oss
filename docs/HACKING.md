@@ -72,7 +72,7 @@ activates the GPON MAC once `omcid` has registered.
 |---|---|---|
 | `Makefile` | the whole build and the gates; `make help` | `lint:` and `test-host:` |
 | `toolchain/` | gcc 16.2.0, binutils 2.47, uClibc-ng 1.0.59 for this CPU, built in a container into a Docker volume | [`toolchain/README.md`](../toolchain/README.md) |
-| `kernel/618/fetch.sh`, `mainline/` | fetches and GPG-verifies linux-6.18.56; `mainline/` is the pristine tree (gitignored) | |
+| `kernel/618/fetch.sh`, `mainline/` | fetches and GPG-verifies linux-6.18.58; `mainline/` is the pristine tree (gitignored) | |
 | `kernel/618/patches/` | **only** edits to files mainline already has: 19 lines in 6 files today (`tools/kernel-footprint.sh`) | [`docs/KERNEL.md`](KERNEL.md) "Patches and the overlay" |
 | `kernel/618/debug/` | debug-only mainline edits, applied with `CRUMBS_CORE=1` | |
 | `kernel/618/config` | the seed config, completed by `olddefconfig`; every line has its reason | "The config" in KERNEL.md |
@@ -142,7 +142,7 @@ file by file against one built with the old pin.
 The toolchain images bring their own kernel headers, so `kernel-tree` no
 longer gates them; `image-all` still runs it first, since `kernel` needs
 it. `make image-all` runs, in order: `kernel-tree` (fetch and verify
-linux-6.18.56, pack it into `build/kernel-618/tree.tar`), `toolchain` (pull
+linux-6.18.58, pack it into `build/kernel-618/tree.tar`), `toolchain` (pull
 the two pinned images, under a minute), `toolchain-audit`, `kernel`
 (2 min), `packages`, `src`, `releases`, `image`. After the first build
 every target skips work it has already done; a second `make image-all`
@@ -272,6 +272,15 @@ attestations, and notes from `tools/release-notes.sh` (the tag's own
 `CHANGELOG.md` section plus a flash-and-first-login paragraph).
 `.github/workflows/dependency-bump.yml` runs `tools/bump-deps.sh` every
 Monday and opens a pull request only if the tests pass against the new pins.
+
+Workflow permissions: every workflow defaults to `contents: read`, and every
+checkout that does not push uses `persist-credentials: false`, so code run by
+a test job holds no write token. Write scopes sit on the one job that needs
+them: `release.yml`'s `release` job (`contents: write` to publish,
+`id-token: write` and `attestations: write` for the attestations) and
+`dependency-bump.yml`'s `bump` job (`contents: write` to push its branch,
+`pull-requests: write` to open the PR). Every job also sets
+`timeout-minutes`.
 
 ## The recovery mechanism
 
@@ -597,7 +606,8 @@ test above and the exporter contract are the coverage for this path.
 `src/omci/qemu-test.sh`, in the freestanding toolchain image as root
 (it creates `/var/config` inside the container). qemu-user cannot open
 our own netlink protocol number (`NETLINK_ODI`), so there is no line side:
-it injects frames on the message queue, and checks the MIB store, the
+it injects frames on the message queue (`omcli --inject` fills in the trailer and
+CRC omcid requires of every received frame; `--inject-raw` does not), and checks the MIB store, the
 45-command CLI protocol and
 the dump renderers against output captured from live sticks. Full OLT
 sessions are not covered here; they are exercised through the kernel side

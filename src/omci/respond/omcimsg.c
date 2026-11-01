@@ -385,6 +385,45 @@ static void handle_get_next(int fd, uint32_t tid, const uint8_t *f,
 
 unsigned long omci_frames_handled;
 
+/* Frames dropped before handle(), per reason (RX_REJ_*). */
+unsigned long omci_rx_reject[RX_REJ_N];
+
+/* What omcid relies on in a received baseline frame, checked before handle()
+ * reads or changes anything, for a frame off the line and an injected one
+ * alike. The MAC may already have dropped a frame with a bad CRC; this does
+ * not rely on it. A frame that fails is dropped with no answer, counted per
+ * reason and logged (ev_rx_reject()), so the OLT retransmits or falls back
+ * as it does for any lost frame.
+ *
+ * len is the number of bytes delivered. Dropped, in this order:
+ *   length   fewer than the 48 bytes of a baseline frame;
+ *   devid    byte 3 is not 0x0a. The extended format (0x0b) is not
+ *            implemented here: dropping it, rather than reading it as a
+ *            baseline frame, is what lets the OLT fall back to baseline;
+ *   crc      the CRC-32 in bytes 44-47 does not match bytes 0-43.
+ * Not dropped: bytes 40-43 other than 00 00 00 28, which is what our OLT
+ * sends. They are inside the CRC, so with a valid CRC the OLT sent them on
+ * purpose; the frame is answered and only counted and logged (action=accepted),
+ * so an OLT that fills those fields differently is not silenced. */
+int rx_accept(const uint8_t *f, uint32_t len)
+{
+	int why = -1;
+
+	if (len < OMCI_FRAME_LEN)
+		why = RX_REJ_LENGTH;
+	else if (f[3] != OMCI_DEVICE_ID)
+		why = RX_REJ_DEVID;
+	else if (nl_get32(f + 44) != omci_crc(f, 44))
+		why = RX_REJ_CRC;
+	else if (nl_get32(f + 40) != OMCI_TRAILER)
+		why = RX_REJ_TRAILER;
+	if (why < 0)
+		return 1;
+	omci_rx_reject[why]++;
+	ev_rx_reject(why, len > 3 ? f[3] : 0, len);
+	return why == RX_REJ_TRAILER;
+}
+
 int unknown_me_ok;
 
 /* The operations that name one managed entity: an unknown class on any of
