@@ -472,6 +472,7 @@ uint32_t odi_switch_mcast_flags(void)
 
 int odi_switch_mcast_snoop_set(uint32_t flags)
 {
+	uint32_t entry_held = held;
 	int rc;
 
 	if (flags & ~ODI_SW_MC_SNOOP_ALL)
@@ -547,6 +548,13 @@ int odi_switch_mcast_snoop_set(uint32_t flags)
 		rc = mc_mld_install((held & ODI_SW_MC_SNOOP_TRAP) != 0);
 		if (rc) {
 			odi_sw_mcast_mld_on = 0;
+			/* The call fails as a whole: put back what it changed
+			 * before this stage (the IGMP rule it installed, a mode
+			 * change, a drop it took off), so the caller, which
+			 * keeps no lease on a failure, and the switch agree.
+			 * The state to go back to has no MLD, so this does not
+			 * reach here again. */
+			(void)odi_switch_mcast_snoop_set(entry_held);
 			return rc;
 		}
 		held |= ODI_SW_MC_SNOOP_MLD;

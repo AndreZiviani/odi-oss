@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- kernel: enabling IGMP and MLD snooping in one call no longer leaves the
+  IGMP rule behind when the MLD rules fail to install: the call now puts the
+  switch back to what it held before it, so a failed ioctl means nothing
+  changed and igmpd can retry. Refs #249.
 - omcid, kernel: a bridge-connection, upstream flow or priority-queue delete
   that the driver refuses is now logged with its result (`[hw] ... -> rc`),
   and a failed clear of a snooping ACL entry is a rate-limited kernel warning

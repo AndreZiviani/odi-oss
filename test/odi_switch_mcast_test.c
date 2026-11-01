@@ -853,6 +853,51 @@ static void test_mld_rules(void)
 	odi_switch_mcast_release();
 }
 
+/* The MLD stage fails after the IGMP stage went in, at every table write in
+ * turn: whichever one it is, the call reports it and the switch and the hook
+ * are as they were before the call. */
+static void test_mld_stage_rolls_back_igmp(void)
+{
+	unsigned int n, failed = 0;
+
+	for (n = 1; n <= 60; n++) {
+		boot_state();
+		tw_fail_nth = n;
+		if (odi_switch_mcast_snoop_set(MLD_COPY) == 0)
+			continue;
+		failed++;
+		CHECK(odi_switch_mcast_flags() == 0, "nothing is held");
+		CHECK(odi_sw_mcast_copy_on == 0 && odi_sw_mcast_mld_on == 0 &&
+		      odi_sw_mcast_trap_on == 0, "the hook takes nothing");
+		CHECK(reg(0x15048U + 4U * 8U) != 0x10 && reg(0x15048U + 4U * 9U) != 0x10 &&
+		      reg(0x15048U + 4U * 10U) != 0x10 && reg(0x15048U + 4U * 11U) != 0x10,
+		      "no entry enables the forward action");
+		CHECK(reg(0x23144U) == 0, "the field selector is back");
+	}
+	CHECK(failed >= 8, "the failing write was found in both stages");
+
+	/* The IGMP rule was already held: it stays, as it was. */
+	boot_state();
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0, "the copy alone");
+	tw_fail = 1;
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY) == -5, "the MLD stage fails");
+	tw_fail = 0;
+	CHECK(odi_switch_mcast_flags() == ODI_SW_MC_SNOOP_COPY && odi_sw_mcast_copy_on == 1,
+	      "the held copy stays");
+
+	/* Mirror to take in the same call as MLD: the mode goes back. */
+	boot_state();
+	CHECK(odi_switch_mcast_snoop_set(ODI_SW_MC_SNOOP_COPY) == 0, "the mirror");
+	tw_calls = 0;
+	tw_fail_nth = 4;
+	CHECK(odi_switch_mcast_snoop_set(MLD_COPY | ODI_SW_MC_SNOOP_TRAP) != 0,
+	      "the take with MLD fails at the MLD stage");
+	tw_fail_nth = 0;
+	CHECK(odi_switch_mcast_flags() == ODI_SW_MC_SNOOP_COPY && odi_sw_mcast_trap_on == 0,
+	      "back to the mirror");
+	odi_switch_mcast_release();
+}
+
 /* A teardown write that fails is said, not dropped. */
 static void test_teardown_failure_warns(void)
 {
@@ -1027,6 +1072,7 @@ static void test_mld_send(void)
 int main(void)
 {
 	test_mld_rules();
+	test_mld_stage_rolls_back_igmp();
 	test_teardown_failure_warns();
 	test_mld_trap();
 	test_pon_drop6();
