@@ -19,7 +19,7 @@ sum() { (sha256sum "$1" 2>/dev/null || shasum -a 256 "$1") | cut -d' ' -f1; }
 make_dir() {
 	D=$T/$1/v9-sources; rm -rf "${T:?}/$1"; mkdir -p "$D"
 	for f in linux-6.tar.xz linux-6.tar.sign busybox-1.tar.bz2 dropbear-1.tar.bz2 \
-		iproute2-1.tar.xz binutils-1.tar.xz gcc-1.tar.xz uClibc-ng-1.tar.xz \
+		iproute2-1.tar.xz uClibc-ng-1.tar.xz \
 		odi-ui-v1-source.tar.gz odi-sfp-exporter-v1-source.tar.gz \
 		odi-toolchain-uclibc-v4.tar.gz odi-oss-v9.tar.gz; do
 		[ -z "$2" ] || case $f in "$2"*) continue ;; esac
@@ -37,8 +37,8 @@ ok "complete bundle passes" 0 $B --check "$T/good.tar"
 ok "missing file fails" 1 $B --check "$T/none.tar"
 : > "$T/empty.tar"
 ok "empty file fails" 1 $B --check "$T/empty.tar"
-make_dir nogcc gcc-
-ok "bundle without gcc fails" 1 $B --check "$T/nogcc.tar"
+make_dir nogcc uClibc-
+ok "bundle without uClibc-ng fails" 1 $B --check "$T/nogcc.tar"
 make_dir bad ""
 echo tamper >> "$T/bad/v9-sources/busybox-1.tar.bz2"
 tar -cf "$T/bad.tar" -C "$T/bad" v9-sources

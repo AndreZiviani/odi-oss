@@ -15,11 +15,11 @@
 #     SHA-256 (the Linux kernel and its signature, busybox, dropbear,
 #     iproute2), taken from the same dl/ cache, so the release build does not
 #     download them twice;
-#   - the toolchain that built every target binary: binutils, gcc, uClibc-ng
-#     and the Linux headers it was built against, the upstream tarballs the
-#     odi-toolchain image pinned by toolchain/images.env was built from, each
-#     verified against the SHA-256 pinned there, plus that repository tag
-#     (its patches, configs and build scripts);
+#   - uClibc-ng (LGPL, linked statically into every target binary) and the
+#     odi-toolchain tag the image pinned by toolchain/images.env was built
+#     from (its patches, configs and build scripts). gcc, binutils and the
+#     Linux headers are build tools that do not ship: SOURCES.md names them
+#     with URL and pinned SHA-256, the files are not included;
 #   - confd and metricsd at the tags this image fetched (releases.env), as
 #     GitHub tag archives of their own repositories;
 #   - this repository at the release commit (git archive): our patches,
@@ -59,7 +59,7 @@ if [ "${1:-}" = --check ]; then
 		n=$((n + 1))
 	done < "$d/SOURCES.SHA256SUMS"
 	[ "$n" -ge 10 ] || die "only $n files listed in $f; expected the whole set"
-	for need in linux- busybox- dropbear- iproute2- binutils- gcc- uClibc-ng- odi-ui- odi-sfp-exporter- odi-toolchain- odi-oss-; do
+	for need in linux- busybox- dropbear- iproute2- uClibc-ng- odi-ui- odi-sfp-exporter- odi-toolchain- odi-oss-; do
 		grep -q "^[0-9a-f]\{64\}  $need" "$d/SOURCES.SHA256SUMS" || die "no $need* source in $f"
 		grep -q "$need" "$d/SOURCES.md" || die "$need not described in SOURCES.md"
 	done
@@ -93,6 +93,11 @@ add() {
 	cp "$6" "$D/$(basename "$6")"
 	printf '| %s | %s | %s | %s | `%s` | `%s` | `%s` |\n' \
 		"$1" "$2" "$3" "$4" "$(basename "$6")" "$5" "$(sha256 "$6")" >> "$rows"
+}
+
+# note <name> <version> <role> <url> <sha256>: a build tool, named but not included
+note() {
+	printf '| %s | %s | %s | `%s` | `%s` |\n' "$1" "$2" "$3" "$4" "$5" >> "$work/notrows"
 }
 
 # pin <file> <VAR>: the first top-level VAR=value of a script, unquoted
@@ -150,14 +155,16 @@ while read -r line; do
 	url=$(echo "$line" | sed -n 's/^.*fetch "\([^"]*\)".*$/\1/p')
 	sha=$(echo "$line" | sed -n 's/^.*fetch "[^"]*" "\$\([A-Z_0-9]*\)".*$/\1/p')
 	eval "url=\"$url\" sha=\"\${$sha}\""
-	f=$("$ROOT/packages/fetch.sh" "$url" "$sha" "$DL")
-	b=$(basename "$f")
-	case $b in
-	binutils-*) add binutils "$BINUTILS" "GPL-3.0-or-later" "toolchain (assembler and linker)" "$url" "$f" ;;
-	gcc-*) add gcc "$GCC" "GPL-3.0-or-later with the GCC Runtime Library Exception" "toolchain (compiler; libgcc is linked into every binary)" "$url" "$f" ;;
-	uClibc-ng-*) add uClibc-ng "$UCLIBC" "LGPL-2.1-or-later" "C library, linked statically into every target binary" "$url" "$f" ;;
-	linux-*) add "linux (headers)" "$LINUX" "GPL-2.0-only with the Linux-syscall-note" "UAPI headers uClibc-ng was built against" "$url" "$f" ;;
-	*) die "unknown toolchain source $b" ;;
+	# Only uClibc-ng ships (linked statically into the image). The rest of
+	# the toolchain is build tools: named in SOURCES.md, not downloaded.
+	case $(basename "$url") in
+	uClibc-ng-*)
+		f=$("$ROOT/packages/fetch.sh" "$url" "$sha" "$DL")
+		add uClibc-ng "$UCLIBC" "LGPL-2.1-or-later" "C library, linked statically into every target binary" "$url" "$f" ;;
+	binutils-*) note binutils "$BINUTILS" "assembler and linker" "$url" "$sha" ;;
+	gcc-*) note gcc "$GCC" "compiler; its runtime library parts linked into binaries fall under the GCC Runtime Library Exception" "$url" "$sha" ;;
+	linux-*) note "linux (headers)" "$LINUX" "UAPI headers uClibc-ng was built against" "$url" "$sha" ;;
+	*) die "unknown toolchain source $(basename "$url")" ;;
 	esac
 	n=$((n + 1))
 done < <(grep -E '^[[:space:]]*t=\$\(fetch "' "$tb")
@@ -190,8 +197,8 @@ add odi-oss "$VERSION ($(git -C "$ROOT" rev-parse --short=12 HEAD))" "GPL-2.0-or
 {
 	echo "# Corresponding source of odi-oss $VERSION"
 	echo
-	echo "Everything below is the upstream source of what the $VERSION image"
-	echo "contains or was built with, unmodified, byte for byte what the build"
+	echo "Everything in the first table is the upstream source of what the $VERSION image"
+	echo "contains, unmodified, byte for byte what the build"
 	echo "downloaded and checked. Our own changes to it are in the odi-oss"
 	echo "archive: kernel patches and added files in \`kernel/618/patches/\` and"
 	echo "\`kernel/extra/\`, package configs in \`packages/*/\`, rootfs in"
@@ -201,6 +208,19 @@ add odi-oss "$VERSION ($(git -C "$ROOT" rev-parse --short=12 HEAD))" "GPL-2.0-or
 	echo "| component | version | license | role | file | upstream | sha256 |"
 	echo "|---|---|---|---|---|---|---|"
 	cat "$rows"
+	cat <<'EOF'
+
+## Build tools: not distributed, not included
+
+Used to build the image, nothing of them is in it (gcc's runtime library
+parts linked into binaries fall under the GCC Runtime Library Exception).
+Pinned by URL and SHA-256 in `uclibc/build.sh` of the odi-toolchain archive
+above.
+
+| component | version | role | upstream | sha256 |
+|---|---|---|---|---|
+EOF
+	cat "$work/notrows"
 	cat <<'EOF'
 
 ## Rebuilding the image

@@ -8,8 +8,8 @@ listed here.
 - Releases: every release now also carries `<version>-sources.tar`, the
   complete corresponding source of the image for GPL and LGPL compliance: the
   exact upstream tarballs the build verified (Linux kernel and signature,
-  busybox, dropbear, iproute2), the toolchain's (binutils, gcc, uClibc-ng,
-  Linux headers) with the odi-toolchain tag, `confd` and `metricsd` at their
+  busybox, dropbear, iproute2), uClibc-ng with the odi-toolchain tag (build
+  tools gcc, binutils and the Linux headers are named, not included), `confd` and `metricsd` at their
   tags, and this repository at the release commit, with a `SOURCES.md`
   manifest (component, version, license, URL, sha256), rebuild and uClibc-ng
   relink steps and a written offer. Built by `tools/bundle-sources.sh` in the

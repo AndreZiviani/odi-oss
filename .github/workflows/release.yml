@@ -101,8 +101,8 @@ jobs:
           fi
 
       # The complete corresponding source of the image (GPL/LGPL): the same
-      # verified tarballs make image-all used from dl/, the toolchain's
-      # sources, confd and metricsd at their tags and this tree, in one
+      # verified tarballs make image-all used from dl/, uClibc-ng, confd and
+      # metricsd at their tags and this tree, in one
       # asset. The script checks its own result and fails the job if it is missing,
       # empty or does not match its own checksums; its sha256 joins
       # SHA256SUMS, so the attestation below covers it too.

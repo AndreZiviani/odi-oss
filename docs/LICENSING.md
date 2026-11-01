@@ -63,12 +63,16 @@ Every release carries, as an asset next to the image, `<version>-sources.tar`
 the complete corresponding source of what the image contains, built by
 `tools/bundle-sources.sh` in the release job. Inside, byte for byte what the
 build downloaded and checked against its pinned SHA-256: the Linux kernel
-tarball and its signature, busybox, dropbear and iproute2; the toolchain's
-sources (binutils, gcc, uClibc-ng, the Linux headers uClibc-ng was built
-against) and the odi-toolchain tag with its patches and build scripts;
+tarball and its signature, busybox, dropbear, iproute2 and uClibc-ng (the
+LGPL library linked statically into every binary); the odi-toolchain tag
+with the patches, configs and build scripts of the toolchain image;
 `confd` and `metricsd` at the tags the image has; and this repository at the
 release commit (our kernel patches, drivers, configs, rootfs and build
-scripts). `SOURCES.md` lists each component with version, license, upstream
+scripts). gcc, binutils and the Linux headers the toolchain was built with
+are build tools that do not ship, so they are not included: `SOURCES.md`
+names them with upstream URL and pinned sha256 (gcc's runtime library parts
+linked into binaries fall under the GCC Runtime Library Exception).
+`SOURCES.md` lists each included component with version, license, upstream
 URL and sha256, and `SOURCES.SHA256SUMS` checks every file. The release job
 fails if the bundle is missing, empty or does not match its own sums.
 
@@ -76,7 +80,8 @@ To rebuild, unpack the `odi-oss-*` archive and follow `docs/BUILDING.md`
 (`make image-all`; or drop the files into `dl/` to build without downloads).
 To relink the statically linked LGPL library, uClibc-ng, against a modified
 copy: build the toolchain image from the `odi-toolchain` archive with your
-uClibc-ng source, point `OSS_IMAGE=` at it (`toolchain/README.md`) and run
+uClibc-ng source (its build also downloads the build tools above), point
+`OSS_IMAGE=` at it (`toolchain/README.md`) and run
 `make packages src image`; the packages and our tools are rebuilt from
 source, so the relink is a rebuild with the same flags. `SOURCES.md` has the
 same steps and the written offer for anything else.
