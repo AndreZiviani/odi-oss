@@ -432,6 +432,18 @@ void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst, const char *result)
 	ev_emit(&e, EV_SEV_NOTICE);
 }
 
+/* The snapshot could not be written (full tmpfs, a failed write or rename).
+ * The previous snapshot is still on disk, so a respawn resumes from an older
+ * MIB than the one the OLT was told about. */
+void ev_snapshot_fail(unsigned rows)
+{
+	struct evline e;
+
+	ev_begin(&e, "snapshot_fail");
+	ev_num(&e, "rows", rows);
+	ev_emit(&e, EV_SEV_NOTICE);
+}
+
 /* One step of a software download, activate or commit (swimage.c). Download
  * sections are counted there, not logged: an image is thousands of them. */
 void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,

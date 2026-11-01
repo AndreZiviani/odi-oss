@@ -92,8 +92,14 @@ register descriptions. `src/diag/README.md` has the details.
 
 Separate projects, fetched here as pinned release assets
 (`src/fetch-releases.sh`) rather than built from source in this repository.
-Their licenses are whatever those projects declare; this repo does not
-restate them.
+Both are licensed **GPL-2.0-or-later**, as the README of each states (the
+`LICENSE` file in each is the GPL version 2 text): `confd` is built from
+[odi-ui](https://github.com/AndreZiviani/odi-ui), `metricsd` from
+[odi-sfp-exporter](https://github.com/AndreZiviani/odi-sfp-exporter). The
+SBOM of a release (`tools/generate-sbom.sh`) records that license for both
+instead of `NOASSERTION`. `metricsd` also bundles one small piece of MIT code
+that its own repository documents; the terms of the release a given image
+carries are those of that tag in the project's repository.
 
 ## Public references this code is written against
 

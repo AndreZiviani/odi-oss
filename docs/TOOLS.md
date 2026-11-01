@@ -354,6 +354,13 @@ set in the config store (docs/SETTINGS.md), syslogd also adds `-L -R
 host[:port]`: forwarded remotely, kept in the local circular buffer too.
 `apply.sh syslog` restarts it without a reboot.
 
+The local buffer is small and lives in RAM, so for anything beyond a bench
+setup set `SYSLOG_SERVER`. Alerting on the metrics side is covered by the
+exporter project: a ready-made Prometheus rule file
+([`prometheus/alerts.yml`](https://github.com/AndreZiviani/odi-sfp-exporter/blob/main/prometheus/alerts.yml))
+and the notes on loading and routing it
+([`docs/ALERTS.md`](https://github.com/AndreZiviani/odi-sfp-exporter/blob/main/docs/ALERTS.md)).
+
 ### `ntpd` -- NTP client (opt-in)
 
 `svc-ntpd.sh` starts busybox ntpd (`-n -p NTP_SERVER`) only while
@@ -1683,6 +1690,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `odi_gpon: event=o7_hold action=recorded cause=disable_serial_number` | notice | `GPON_KEEP_DISABLE=1`: the OLT disabled this ONU and the stick will stay disabled across its own restarts and reboots. `action` is `recorded` (the OLT disabled it; `cause=gponhold` for the test hook), `kept` (a boot found the marker and starts in O7), `released` (the OLT enabled it; `cause` is `enable_serial_number` or `enable_all_serial_numbers`) or `cleared` (by hand, `gpon-hold.sh clear`); `marker_not_synced` says the helper that writes the marker could not be started |
 | `gpon-hold: event=marker action=written` | notice | the marker file `/etc/config/gpon-hold` was written, `removed` or `failed what=write` (or `remove`) |
 | `omcid: event=olt_reboot class=256 inst=0 result=refused` | notice | the OLT asked for a reboot: `result=refused` (`OMCI_ACCEPT_REBOOT` off, answered "command not supported"), `accepted` (answered success, the stick reboots a second later), `acknowledged` (`OMCI_ACCEPT_REBOOT=2`, answered success, no reboot) or, for any class but ONU-G, `not_supported` (docs/SETTINGS.md) |
+| `omcid: event=snapshot_fail rows=161` | notice | omcid could not write its MIB snapshot (`/var/run/omcid-mib.snap`: a full tmpfs, a failed write or rename); `rows` is the MIB rows held. The previous snapshot stays on disk, so a respawn resumes from an older MIB than the OLT was told about, or re-registers if there is none |
 | `omcid: event=sw_image op=download_start inst=1 size=2621440 window=32 result=ok` | notice | a software download step from the OLT: `op=download_start` (the image size and sections per window), `download_end` (`sections=N`, the sections accepted, and `crc=ok` or `bad`), `activate`, `commit`. `result` is `ok`; `not_supported` with `OLT_SW_DOWNLOAD=reject`; `refused_active` (a download to the image that is active or committed), `refused_invalid` (activate or commit of an image that is not valid), `crc_error`, `size_mismatch`, `short` or `no_download` otherwise. Accepted or not, the image is discarded and nothing is flashed (docs/SETTINGS.md, "Software download from the OLT") |
 | `omcid: event=unknown_me class=351 op=create mt=4` | notice | the first request this boot for a managed entity class omcid has no model for, per class and operation (`op` is `create`, `set`, `get`, `delete`, `get_next` or `test`; `mt` the message type); answered "unknown entity" unless `OMCI_UNKNOWN_ME_OK=1` (docs/SETTINGS.md) |
 | `omcid: event=rx_reject reason=crc count=1 total=1 action=dropped len=48` | notice | a received frame omcid flagged before it read or changed anything. `action=dropped`, no answer: `reason` is `length` (under the 48 bytes of a baseline frame), `devid` (device identifier not 0x0a; the extended format, 0x0b, is not implemented, so an OLT that sends it is left to fall back to baseline; the line adds `devid=11`. omcid reports the baseline set only (`0x80`) unless `OMCC_VER` is set with `omci-identity.on`, see `docs/SETTINGS.md`) or `crc` (the CRC-32 in bytes 44-47 does not match bytes 0-43). `reason=trailer action=accepted`: bytes 40-43 are not `00 00 00 28` (what our OLT sends) but the CRC is valid, so the frame is answered and only counted. At most one line per reason a minute, with `count` the frames since the last line and `total` since omcid started; `omcli state` shows the totals (`rx dropped`). The frames our OLT sends never trigger it |

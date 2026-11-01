@@ -1,0 +1,8 @@
+# Expected SHA-256 of every release asset src/fetch-releases.sh downloads,
+# committed here so a release that replaces an asset and its SHA256SUMS
+# together is still refused. One line per asset: repo, tag, asset, sha256.
+# tools/bump-deps.sh rewrites the lines of a repo whenever it moves that
+# repo's tag; a tag with no line here fails the fetch (see fetch-releases.sh).
+AndreZiviani/odi-sfp-exporter v1.8.0 metricsd 667e560314a41755d0ea993c923130f64c2f38379bb978e90b8d94258a760dd7
+AndreZiviani/odi-ui v1.12.0 confd 2e86fb91be725c8d69f94430f03abcd63ec94955d79d638fcffbfd078f1356dc
+AndreZiviani/odi-ui v1.12.0 confd-assets.tar.gz 5abb8827743dc716ebc11f88774d71d786539039fb1aff2673c73d2e98b836ef

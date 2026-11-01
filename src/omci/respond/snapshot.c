@@ -160,7 +160,9 @@ void snapshot_invalidate(void)
 	sys_unlink(SNAPSHOT_TMP_PATH);
 }
 
-void snapshot_save(void)
+/* 0 when the snapshot is on disk, -1 when it could not be written; the old
+ * snapshot then stands, and event=snapshot_fail says so. */
+int snapshot_save(void)
 {
 	uint8_t *p = snapbuf;
 	uint8_t *rows_at, *servs_at, *crc_at;
@@ -241,8 +243,12 @@ void snapshot_save(void)
 		put_u32(&crc_at, crc);
 	}
 
-	atomic_write(SNAPSHOT_PATH, SNAPSHOT_TMP_PATH, snapbuf,
-		     (uint32_t)(p - snapbuf));
+	if (atomic_write(SNAPSHOT_PATH, SNAPSHOT_TMP_PATH, snapbuf,
+			 (uint32_t)(p - snapbuf)) < 0) {
+		ev_snapshot_fail(rows);
+		return -1;
+	}
+	return 0;
 }
 
 /* Why a resume was refused, for omcid's event=start line (events.c). */
