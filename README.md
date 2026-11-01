@@ -17,17 +17,19 @@ toolchain.
 
 ## Supported hardware
 
-**Only the ODI DFP-34X-2C2.** It is the one device this firmware was written
-for and the only one it has been tested on. The image drives the board
-directly (GPIO numbers, I2C wiring of the optics, flash layout, switch and
-PON registers), so on any other stick it will at best not boot and at worst
-leave it unreachable.
+**The ODI DFP-34X-2C2, and the DFP-34X-2C3 on one user report.** The 2C2 is
+the device this firmware was written for and the one it is tested on. The
+image drives the board directly (GPIO numbers, I2C wiring of the optics,
+flash layout, switch and PON registers), so on any other stick it will at
+best not boot and at worst leave it unreachable.
 
-- **DFP-34X-2C3:** as far as we know it differs from the 2C2 only in the
-  polish of the fiber connector: the 2C2 is SC/UPC (blue), the 2C3 SC/APC
-  (green). The electronics should be the same, so the image should
-  work, but it has **never been tried on a 2C3**. If you do, you are the
-  first; please report the result.
+- **DFP-34X-2C3:** reported working. It differs from the 2C2 in the polish
+  of the fiber connector: the 2C2 is SC/UPC (blue), the 2C3 SC/APC (green).
+  One user installed v1.14.0, unmodified, on a 2C3 that shipped with stock
+  `V1.1.4-250620`, booted it on trial and committed it: O5 with full OMCI
+  provisioning, internet over IPv4 and IPv6, stable. The image still calls
+  the stick a 2C2 on a 2C3. This is one report, not testing here; if you run
+  a 2C3, a report either way helps.
 - **Anything else** (other ODI models, other RTL9601/RTL9602C sticks,
   rebrands with a different board): not supported, even with the same SoC.
 

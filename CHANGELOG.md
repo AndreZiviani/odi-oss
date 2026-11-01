@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- README: the DFP-34X-2C3 moves from "never tried" to reported working, on
+  one user's report of v1.14.0 on a 2C3 with stock `V1.1.4-250620`.
+
 ## v1.14.0 (2026-10-31)
 
 - Releases: confd v1.12.0. The browser's password dialog is replaced by a
