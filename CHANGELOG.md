@@ -24,7 +24,9 @@ listed here.
   without touching any pin if an asset does not match its release checksums.
   The assets tarball is listed before extraction and refused if it holds a
   link, device, absolute path or `..` component. `test/fetch_releases_test.sh`
-  covers replaced checksums and hostile archives. Refs #256.
+  covers replaced checksums and hostile archives. The CI and release download
+  caches are keyed on `src/release-sha256.txt` too, so a corrected hash is
+  never checked against assets restored from an older cache. Refs #256.
 - docs: stale statements corrected. The kernel is 6.18.58 everywhere it is
   named (README, `docs/BUILDING.md`, `docs/HACKING.md`, `docs/KERNEL.md`), and
   the README no longer states the current release. `image/README.md` said the

@@ -171,7 +171,7 @@ jobs:
         with:
           path: |
             dl
-          key: dl-clean-build-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh') }}
+          key: dl-clean-build-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh', 'src/release-sha256.txt') }}
 
       # Fetches the pinned linux-6.18.x fresh (VERSION in kernel/618/fetch.sh) and re-checks its
       # pinned SHA-256 and the upstream GPG signature; packs it into
@@ -219,7 +219,7 @@ jobs:
         with:
           path: |
             dl
-          key: dl-test-qemu-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh') }}
+          key: dl-test-qemu-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh', 'src/release-sha256.txt') }}
 
       - name: qemu-system-mips
         run: tools/ci-apt.sh qemu-system-mips
@@ -297,7 +297,7 @@ jobs:
           path: |
             build-a/dl
             build-b/dl
-          key: dl-reproducible-${{ runner.os }}-${{ hashFiles('build-a/packages/fetch.sh', 'build-a/packages/*/build.sh', 'build-a/kernel/618/fetch.sh', 'build-a/src/fetch-releases.sh') }}
+          key: dl-reproducible-${{ runner.os }}-${{ hashFiles('build-a/packages/fetch.sh', 'build-a/packages/*/build.sh', 'build-a/kernel/618/fetch.sh', 'build-a/src/fetch-releases.sh', 'build-a/src/release-sha256.txt') }}
 
       - name: Version for this comparison
         run: echo "VERSION=${GITHUB_REF_NAME:-repro-dispatch}" >> "$GITHUB_ENV"

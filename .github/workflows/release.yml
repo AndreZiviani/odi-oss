@@ -88,7 +88,7 @@ jobs:
         with:
           path: |
             dl
-          key: dl-release-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh') }}
+          key: dl-release-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh', 'src/release-sha256.txt') }}
 
       - name: Version from the tag
         run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
