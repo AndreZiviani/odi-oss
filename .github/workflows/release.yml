@@ -123,7 +123,7 @@ jobs:
       # them against the file bytes, so this has to run before either is
       # renamed -- and before the SBOM step output is touched again.
       - name: Attest build provenance (image tarball + checksums)
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             out/image/${{ env.VERSION }}.tar
