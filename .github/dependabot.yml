@@ -1,0 +1,10 @@
+# Proposes updates for the GitHub Actions the workflows use. Every action is
+# pinned to a full commit SHA with its version in a trailing comment;
+# Dependabot rewrites both. tools/bump-deps.sh (dependency-bump.yml) covers
+# the firmware pins only and does not touch workflow files.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

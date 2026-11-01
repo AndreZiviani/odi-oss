@@ -27,7 +27,7 @@ jobs:
       contents: write # push the dep-bump branch
       pull-requests: write # open the PR
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check upstream versions, rewrite any pin that is behind
         run: tools/bump-deps.sh | tee /tmp/bump-summary.txt

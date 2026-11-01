@@ -408,6 +408,14 @@ lint:
 		exit 1; \
 	fi
 	@echo "CI omci matrix matches OMCI_SUITES: clean"
+	@# Every action in the workflows is pinned to a full commit SHA with its
+	@# version in a trailing comment; a tag can be moved, a SHA cannot.
+	@if grep -nE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[^./[:space:]][^@[:space:]]*@' .github/workflows/*.yml | \
+		grep -vE '@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9]'; then \
+		echo "lint: a workflow action above is not pinned to a full commit SHA with a version comment" >&2; \
+		exit 1; \
+	fi
+	@echo "workflow actions pinned to commit SHAs: clean"
 
 clean:
 	rm -rf build out

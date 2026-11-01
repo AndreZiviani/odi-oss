@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- CI: every action in the workflows is pinned to a full commit SHA with its
+  version in a trailing comment, `make lint` rejects a mutable reference, and
+  `.github/dependabot.yml` proposes weekly updates for the `github-actions`
+  ecosystem (`dependency-bump.yml` only handles the firmware pins, so it is not
+  extended). Refs #257.
 - CI: `release.yml` is read-only at workflow level; `contents: write`,
   `id-token: write` and `attestations: write` are granted only to the `release`
   job, not to the test job that runs repository code. Checkouts that do not push
