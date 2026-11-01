@@ -1410,8 +1410,13 @@ void bdgconn_rebuild(void)
 	int ning = 0, added = 0, mvid, nev = 0;
 
 	for (int i = 0; i < conn_nservs; i++) {
-		if (apply_hw)
-			omci_deactiveBdgConn((uint32_t)conn_servs[i]);
+		if (apply_hw) {
+			int rc = omci_deactiveBdgConn((uint32_t)conn_servs[i]);
+
+			if (rc)
+				out_fmt("   [hw] bridge connection %d deactivate -> %d\n",
+					(long)conn_servs[i], (long)rc);
+		}
 		if (conn_servs[i] >= 0 && conn_servs[i] < SERV_MAX)
 			servtab[conn_servs[i]].in_use = 0;
 	}
