@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- CI: `release.yml` is read-only at workflow level; `contents: write`,
+  `id-token: write` and `attestations: write` are granted only to the `release`
+  job, not to the test job that runs repository code. Checkouts that do not push
+  use `persist-credentials: false`. `dependency-bump.yml` keeps the write scopes it needs
+  (it pushes a branch and opens a PR), now on its job only. Refs #255.
 - CI: every job in `ci.yml` and `release.yml` now has `timeout-minutes`, sized
   from the longest successful run seen plus headroom (a hung test used to hold a
   runner for GitHub's six-hour default). Refs #266.

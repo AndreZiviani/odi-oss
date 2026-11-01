@@ -29,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: PR touches CHANGELOG.md, or is docs/CI-only, or is labelled no-changelog
@@ -66,6 +67,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Lint (shellcheck, inline-quote check)
         run: |
@@ -79,6 +82,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Host-side tests
         run: make test-host
@@ -92,6 +97,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Host C tests under ASan and UBSan
         run: make test-host-asan
@@ -101,6 +108,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: diag, including the exporter contract under qemu
         run: make test-diag
@@ -117,6 +126,8 @@ jobs:
         suite: [qemu, drv, resume, events, swdl, vlan, reload, live, keys, tables, getall, alarms, writes, mcast, pm, enc, voip]
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Build omcli and omcid
         run: make test-omci-build
@@ -136,6 +147,8 @@ jobs:
         target: [test-omci-respond, test-igmp]
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: "Unit tests: ${{ matrix.target }}"
         run: make ${{ matrix.target }}
@@ -145,6 +158,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # Upstream tarballs (busybox, dropbear, iproute2, the Linux tree and its
       # signature) and the confd/metricsd release assets land in dl/. The key
@@ -191,6 +206,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # Upstream tarballs (busybox, dropbear, iproute2, the Linux tree and its
       # signature) and the confd/metricsd release assets land in dl/. The key
@@ -233,6 +250,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Our binaries (freestanding, in the freestanding toolchain image)
         run: make src
@@ -259,10 +278,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          persist-credentials: false
           path: build-a
 
       - uses: actions/checkout@v7
         with:
+          persist-credentials: false
           path: build-b
 
       # Upstream tarballs (busybox, dropbear, iproute2, the Linux tree and its

@@ -273,6 +273,15 @@ attestations, and notes from `tools/release-notes.sh` (the tag's own
 `.github/workflows/dependency-bump.yml` runs `tools/bump-deps.sh` every
 Monday and opens a pull request only if the tests pass against the new pins.
 
+Workflow permissions: every workflow defaults to `contents: read`, and every
+checkout that does not push uses `persist-credentials: false`, so code run by
+a test job holds no write token. Write scopes sit on the one job that needs
+them: `release.yml`'s `release` job (`contents: write` to publish,
+`id-token: write` and `attestations: write` for the attestations) and
+`dependency-bump.yml`'s `bump` job (`contents: write` to push its branch,
+`pull-requests: write` to open the PR). Every job also sets
+`timeout-minutes`.
+
 ## The recovery mechanism
 
 Everything about working on this device rests on one fact: **a new image is
