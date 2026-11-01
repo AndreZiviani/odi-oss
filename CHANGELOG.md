@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- docs: `SECURITY.md` states that only the latest release is supported, that
+  fixes ship as a new release, and that vulnerabilities are reported privately
+  through GitHub private vulnerability reporting. Linked from the README.
+  Refs #272.
 - release: the SBOM now records `GPL-2.0-or-later` for `confd` and `metricsd`
   instead of `NOASSERTION`, and `docs/LICENSING.md` states it, from the README
   of odi-ui and odi-sfp-exporter. Refs #276.

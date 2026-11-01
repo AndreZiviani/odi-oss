@@ -282,6 +282,7 @@ This is new, actively developed firmware. Before relying on it:
   build, the recovery mechanism in full, testing, the known traps, and every
   feature toggle, for a developer who wants to change this firmware.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — scope, reporting issues, the gates.
+- [`SECURITY.md`](SECURITY.md) — supported versions and how to report a vulnerability privately.
 - [`AGENTS.md`](AGENTS.md) — repo layout, build/test commands and house rules,
   for anyone (human or AI) working on this codebase.
 
