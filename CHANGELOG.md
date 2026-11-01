@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- build: `make releases` checks `confd`, `confd-assets.tar.gz` and `metricsd`
+  against SHA-256 values committed in `src/release-sha256.txt`, on top of the
+  release's own `SHA256SUMS`, so a release that replaced an asset and its
+  checksum file together is refused. A tag with no committed hash stops the
+  build (`ALLOW_UNPINNED_RELEASES=1` makes it a warning, for trials).
+  `tools/bump-deps.sh` rewrites the hashes whenever it moves a tag, and stops
+  without touching any pin if an asset does not match its release checksums.
+  The assets tarball is listed before extraction and refused if it holds a
+  link, device, absolute path or `..` component. `test/fetch_releases_test.sh`
+  covers replaced checksums and hostile archives. Refs #256.
 - docs: stale statements corrected. The kernel is 6.18.58 everywhere it is
   named (README, `docs/BUILDING.md`, `docs/HACKING.md`, `docs/KERNEL.md`), and
   the README no longer states the current release. `image/README.md` said the
