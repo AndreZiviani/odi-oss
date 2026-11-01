@@ -56,6 +56,31 @@ upstream license:
 `bridge-utils` is deliberately not built at all (`packages/bridge-utils/README.md`),
 so it does not appear above.
 
+## Source for each release
+
+Every release carries, as an asset next to the image, `<version>-sources.tar`
+(its sha256 is in the release `SHA256SUMS`, and the attestation covers it):
+the complete corresponding source of what the image contains, built by
+`tools/bundle-sources.sh` in the release job. Inside, byte for byte what the
+build downloaded and checked against its pinned SHA-256: the Linux kernel
+tarball and its signature, busybox, dropbear and iproute2; the toolchain's
+sources (binutils, gcc, uClibc-ng, the Linux headers uClibc-ng was built
+against) and the odi-toolchain tag with its patches and build scripts;
+`confd` and `metricsd` at the tags the image has; and this repository at the
+release commit (our kernel patches, drivers, configs, rootfs and build
+scripts). `SOURCES.md` lists each component with version, license, upstream
+URL and sha256, and `SOURCES.SHA256SUMS` checks every file. The release job
+fails if the bundle is missing, empty or does not match its own sums.
+
+To rebuild, unpack the `odi-oss-*` archive and follow `docs/BUILDING.md`
+(`make image-all`; or drop the files into `dl/` to build without downloads).
+To relink the statically linked LGPL library, uClibc-ng, against a modified
+copy: build the toolchain image from the `odi-toolchain` archive with your
+uClibc-ng source, point `OSS_IMAGE=` at it (`toolchain/README.md`) and run
+`make packages src image`; the packages and our tools are rebuilt from
+source, so the relink is a rebuild with the same flags. `SOURCES.md` has the
+same steps and the written offer for anything else.
+
 ## Our own tools: `src/`, the rootfs skeleton, every build script
 
 `src/diag`, `src/omci`, `src/igmp`, `src/nv`, the rootfs skeleton

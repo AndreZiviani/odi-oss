@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Releases: every release now also carries `<version>-sources.tar`, the
+  complete corresponding source of the image for GPL and LGPL compliance: the
+  exact upstream tarballs the build verified (Linux kernel and signature,
+  busybox, dropbear, iproute2), the toolchain's (binutils, gcc, uClibc-ng,
+  Linux headers) with the odi-toolchain tag, `confd` and `metricsd` at their
+  tags, and this repository at the release commit, with a `SOURCES.md`
+  manifest (component, version, license, URL, sha256), rebuild and uClibc-ng
+  relink steps and a written offer. Built by `tools/bundle-sources.sh` in the
+  release job, listed in `SHA256SUMS` and attested; the job fails if the
+  bundle is missing, empty or altered. See `docs/LICENSING.md`. Refs #275.
 - README: the DFP-34X-2C3 moves from "never tried" to reported working, on
   one user's report of v1.14.0 on a 2C3 with stock `V1.1.4-250620`.
 
