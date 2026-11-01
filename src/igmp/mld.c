@@ -110,6 +110,7 @@ enum mld_parse_rc mld_parse(const uint8_t *buf, uint32_t len, struct mld_rx *rx)
 	const uint8_t *eth, *ip;
 	uint32_t eth_len, off, plen, end, ext = 0;
 	uint16_t ethertype;
+	struct eth_l2 l2;
 	uint8_t nh;
 
 	zero(rx, sizeof *rx);
@@ -126,17 +127,15 @@ enum mld_parse_rc mld_parse(const uint8_t *buf, uint32_t len, struct mld_rx *rx)
 	rx->dst = eth;
 	rx->src = eth + 6;
 
-	/* One C-tag at most, read as frame.c reads it for IGMP. */
-	ethertype = rd16(eth + 12);
-	off = ETH_HDR_LEN;
-	if (ethertype == ETH_P_8021Q) {
-		if (eth_len < ETH_HDR_LEN + 4)
-			return MLD_SHORT;
-		rx->tagged = 1;
-		rx->vid = (uint16_t)(rd16(eth + 14) & 0x0fff);
-		ethertype = rd16(eth + 16);
-		off = ETH_HDR_LEN + 4;
+	/* The tags as frame.c reads them for IGMP (igmpd.h). */
+	if (eth_l2_parse(eth, eth_len, &l2) < 0)
+		return MLD_SHORT;
+	if (l2.tags) {
+		rx->tagged = l2.tags;
+		rx->vid = l2.vid;
 	}
+	ethertype = l2.ethertype;
+	off = l2.off;
 	if (ethertype != ETH_P_IPV6)
 		return MLD_NOT_IPV6;
 	if (eth_len < off + 40)

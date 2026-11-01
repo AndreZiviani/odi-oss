@@ -195,6 +195,83 @@ static void test_parse(void)
 	ok(mld_parse(b, n, &rx) == MLD_NOT_IPV6, "IPv4 is not MLD's");
 }
 
+/* Puts `n` tags (TPID and VID each, outermost first) in front of the
+ * EtherType of an untagged payload frame() made; no checksum covers it. */
+static uint32_t retag(uint8_t *b, uint32_t len, int n, const uint16_t *tpid,
+		      const uint16_t *vid)
+{
+	uint8_t *at = b + 3 + 12;
+	uint32_t tail = len - (3 + 12);
+
+	for (uint32_t i = tail; i-- > 0; )
+		at[4 * n + i] = at[i];
+	for (int t = 0; t < n; t++) {
+		put16(at + 4 * t, tpid[t]);
+		put16(at + 4 * t + 2, vid[t]);
+	}
+	return len + 4u * (uint32_t)n;
+}
+
+static void ok3(int cond, const char *shape, const char *msg, const char *what)
+{
+	if (cond) {
+		out_fmt("ok    %s, %s: %s\n", shape, msg, what);
+	} else {
+		out_fmt("FAIL  %s, %s: %s\n", shape, msg, what);
+		failures++;
+	}
+}
+
+/* The kernel hook (odi_igmp_rx.h) admits up to two tags, each 0x8100 or
+ * 0x88a8; the parser reads exactly those, as igmp_parse does. */
+static void test_tags(void)
+{
+	static const struct {
+		const char *name;
+		int n;
+		uint16_t tpid[2], vid[2];
+	} shape[] = {
+		{ "untagged", 0, { 0, 0 }, { 0, 0 } },
+		{ "C-tag", 1, { 0x8100, 0 }, { 100, 0 } },
+		{ "S-tag", 1, { 0x88a8, 0 }, { 200, 0 } },
+		{ "S-tag and C-tag", 2, { 0x88a8, 0x8100 }, { 200, 100 } },
+		{ "two C-tags", 2, { 0x8100, 0x8100 }, { 200, 100 } },
+	};
+	static const uint16_t three_tpid[3] = { 0x88a8, 0x8100, 0x8100 };
+	static const uint16_t three_vid[3] = { 300, 200, 100 };
+	static const uint8_t rec[1] = { 4 };
+	static const char *const recg[1] = { "ff15::1" };
+	uint8_t b[256], g[16];
+	struct mld_rx rx;
+	uint32_t n;
+
+	ip6("ff15::1", g);
+	for (unsigned s = 0; s < sizeof shape / sizeof shape[0]; s++) {
+		const char *sn = shape[s].name;
+
+		n = v1(b, MLD_V1_REPORT, "ff15::1");
+		n = retag(b, n, shape[s].n, shape[s].tpid, shape[s].vid);
+		ok3(mld_parse(b, n, &rx) == MLD_OK, sn, "MLDv1", "parses");
+		ok3(rx.type == MLD_V1_REPORT && same(rx.group, g, 16) &&
+		    rx.tagged == shape[s].n && rx.vid == shape[s].vid[0] &&
+		    rx.router_alert, sn, "MLDv1", "type, group, tags, VID and router alert");
+
+		n = v2(b, 1, rec, recg);
+		n = retag(b, n, shape[s].n, shape[s].tpid, shape[s].vid);
+		ok3(mld_parse(b, n, &rx) == MLD_OK, sn, "MLDv2", "parses");
+		ok3(rx.type == MLD_V2_REPORT && rx.nrec == 1 && rx.tagged == shape[s].n &&
+		    rx.vid == shape[s].vid[0], sn, "MLDv2", "type, records, tags and VID");
+	}
+
+	n = v1(b, MLD_V1_REPORT, "ff15::1");
+	n = retag(b, n, 3, three_tpid, three_vid);
+	ok(mld_parse(b, n, &rx) == MLD_NOT_IPV6, "three tags are not parsed, as the hook refuses them");
+
+	n = v1(b, MLD_V1_REPORT, "ff15::1");
+	n = retag(b, n, 2, shape[3].tpid, shape[3].vid);
+	ok(mld_parse(b, 3 + 14 + 6, &rx) == MLD_SHORT, "a tag cut short is short");
+}
+
 static void test_text(void)
 {
 	static const char *const ok_forms[][2] = {
@@ -438,6 +515,7 @@ static void test_state(void)
 int main(void)
 {
 	test_parse();
+	test_tags();
 	test_text();
 	test_snoopable();
 	test_policy();

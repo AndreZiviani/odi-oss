@@ -395,7 +395,7 @@ extern uint16_t alarm_snapshot;
 #define SNAPSHOT_PATH          "/var/run/omcid-mib.snap"
 #define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
 #define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
-void snapshot_save(void);
+int snapshot_save(void);
 /* Write `buf` to `tmp`, then rename it over `path`: a reader never sees a
  * half-written file. 0 on success. */
 int atomic_write(const char *path, const char *tmp, const uint8_t *buf,
@@ -535,6 +535,7 @@ void ev_mib_upload(uint16_t total);
 void ev_mib_upload_next(uint16_t seq);
 void ev_config_write(uint8_t mt, uint16_t cls, uint16_t inst);
 void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst, const char *result);
+void ev_snapshot_fail(unsigned rows);
 void ev_alloc_ids(const uint16_t *ids, unsigned n);
 /* A config reload (reload.c): the decision, a step that failed, and the
  * outcome. `keys` is store key names only, never values. */

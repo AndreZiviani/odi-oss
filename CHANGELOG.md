@@ -51,6 +51,25 @@ listed here.
 - CI: every job in `ci.yml` and `release.yml` now has `timeout-minutes`, sized
   from the longest successful run seen plus headroom (a hung test used to hold a
   runner for GitHub's six-hour default). Refs #266.
+
+- igmpd: the IGMP and MLD parsers now read the same VLAN tags the kernel hook
+  admits, up to two, each 802.1Q or 802.1ad, instead of one 802.1Q tag only.
+  A membership report behind an S-tag or a QinQ pair used to reach igmpd and
+  be classified as not IP, so no membership row was installed (and, with the
+  PON drop on, the group was dropped). A report is keyed by the VID of its
+  outermost tag. Refs #250.
+- kernel: enabling IGMP and MLD snooping in one call no longer leaves the
+  IGMP rule behind when the MLD rules fail to install: the call now puts the
+  switch back to what it held before it, so a failed ioctl means nothing
+  changed and igmpd can retry. Refs #249.
+- omcid, kernel: a bridge-connection, upstream flow or priority-queue delete
+  that the driver refuses is now logged with its result (`[hw] ... -> rc`),
+  and a failed clear of a snooping ACL entry is a rate-limited kernel warning
+  (`odi_switch_mcast: clearing table ... failed`), instead of both being
+  dropped silently. Nothing is retried. Refs #248.
+- omcid: a snapshot write that fails (full tmpfs, a failed write or rename) is
+  now logged as `event=snapshot_fail rows=N` instead of being dropped
+  silently; the previous snapshot stays in place. Refs #247.
 - README: the DFP-34X-2C3 moves from "never tried" to reported working, on
   one user's report of v1.14.0 on a 2C3 with stock `V1.1.4-250620`.
 
