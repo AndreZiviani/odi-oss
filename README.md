@@ -67,7 +67,7 @@ the same hardware.
 | area | stock (OEM) firmware | this firmware |
 |---|---|---|
 | source | closed | fully open: mainline Linux + our own drivers and userland, all built from source, no proprietary code shipped or linked |
-| kernel | Linux 2.6.30 | Linux 6.18.56 (current LTS), carried as 19 changed lines in 6 mainline files plus our own overlay, so the next LTS port is cheap |
+| kernel | Linux 2.6.30 | Linux 6.18.58 (current LTS), carried as 19 changed lines in 6 mainline files plus our own overlay, so the next LTS port is cheap |
 | switch / GPON MAC driver | closed | our own GPL driver, an independent implementation, built straight into the kernel |
 | fibre loss (LOS/LOF) | leaves O5 on a loss and ranges again when the light is back (seen during a fibre swap) | the same, by G.984.3 Table 10-1: a loss of signal or of framing in O5 enters O6 and, with no POPUP within TO2 (100 ms), O1, giving up the ONU-ID, the Alloc-IDs and the OMCC port; the light back takes it to O2 and the OLT ranges it again. The line is sampled every 100 ms as well as on interrupts, so a pulled fibre is seen with no downstream traffic at all. v1.2.1 and earlier stayed in O5 through a fibre pull while the OLT deregistered them, until a reboot (ISP2). Host-tested against the register model (`test/odi_gpon_los_test.c`); not yet trialled on hardware |
 | flow control toward the host | the host port negotiates PAUSE with the host, so a stick whose upstream stops draining sends a continuous stream of XOFF frames: an Intel 10G NIC behind it received about 5.9 million, stalled its transmit queue and reset itself in a loop | the host port never sends PAUSE (its transmit side forced off, receive left negotiated): when the upstream cannot drain, the switch drops at its own buffers, as an ONU should, and the host link stays up. Kernel parameter `odi_switch.host_pause` restores the stock behaviour, live or at boot ([`docs/SWITCH.md`](docs/SWITCH.md), "Host port PAUSE"). Host-tested against the register model (`test/odi_host_pause_test.c`) and verified on a stick: no PAUSE toward the host through a fibre pull |
@@ -198,8 +198,8 @@ every port and how to move files on and off the stick:
 
 ## Status and limitations
 
-**Tested on real sticks.** The current release is v1.10.0
-([`CHANGELOG.md`](CHANGELOG.md)). The firmware runs on two DFP-34X-2C2
+**Tested on real sticks.** Releases are listed in
+[`CHANGELOG.md`](CHANGELOG.md). The firmware runs on two DFP-34X-2C2
 sticks on two different ISPs' GPON networks, and both now run it as their
 committed image, with the stock firmware kept in the other slot. The
 figures below were measured on an earlier release,
@@ -282,6 +282,7 @@ This is new, actively developed firmware. Before relying on it:
   build, the recovery mechanism in full, testing, the known traps, and every
   feature toggle, for a developer who wants to change this firmware.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — scope, reporting issues, the gates.
+- [`SECURITY.md`](SECURITY.md) — supported versions and how to report a vulnerability privately.
 - [`AGENTS.md`](AGENTS.md) — repo layout, build/test commands and house rules,
   for anyone (human or AI) working on this codebase.
 

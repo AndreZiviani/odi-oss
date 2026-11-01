@@ -106,11 +106,11 @@ to `out/image/root-password.txt` and, so the next build does not overwrite
 it, `out/image/root-password-<version>.txt`. `ROOT_PW=...` sets your own;
 `ROOT_PW=none` gives an empty password.
 
-The hash is **MD5 crypt (`$1$`, `openssl passwd -1`)**. That was forced by
-the vendor uClibc this image once linked, whose `crypt()` did DES and MD5
-only; the uClibc-ng it links now has SHA-256/512 crypt
-(`toolchain/README.md`), so the constraint is gone, but the hash has not
-been changed.
+The hash is **SHA-512 crypt (`$6$`, `openssl passwd -6`, default rounds)**,
+which the uClibc-ng this image links verifies for both dropbear and busybox
+login (`toolchain/README.md`; the reasoning is in `image/build.sh`).
+`ROOT_PW=locked`, what the published releases use, ships no password at all
+(`docs/BUILDING.md`, "The root password and image versioning").
 
 ## Flashing
 
@@ -120,8 +120,10 @@ The image is **inert** when written. On the stick:
     nv setenv sw_tryactive <slot>      # boots it ONCE, watchdog armed
 
 A trial that does not come up reverts by itself: `odi_wdt` resets the board
-at 120 s of uptime unless `rcS` has confirmed that the host side answers
-ARP. Writing `sw_commit` up front throws away the only free safety net there
+at 120 s of uptime unless `rcS` has confirmed userland, and the trial guard
+resets it at 300 s unless something has reached the management path
+(`docs/FLASHING.md`, "The trial guard"). Waiting for an ARP reply first is a
+development option (`/etc/config/confirm-arp`), off by default. Writing `sw_commit` up front throws away the only free safety net there
 is. `docs/FLASHING.md` is the full procedure, including reading a failed
 trial's log.
 

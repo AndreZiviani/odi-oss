@@ -5,6 +5,53 @@ listed here.
 
 ## Unreleased
 
+- docs: `docs/TOOLS.md` points from the syslog and exporter sections to the
+  Prometheus alert rules and their notes in the odi-sfp-exporter repository.
+  Refs #270.
+- docs: `SECURITY.md` states that only the latest release is supported, that
+  fixes ship as a new release, and that vulnerabilities are reported privately
+  through GitHub private vulnerability reporting. Linked from the README.
+  Refs #272.
+- release: the SBOM now records `GPL-2.0-or-later` for `confd` and `metricsd`
+  instead of `NOASSERTION`, and `docs/LICENSING.md` states it, from the README
+  of odi-ui and odi-sfp-exporter. Refs #276.
+- build: `make releases` checks `confd`, `confd-assets.tar.gz` and `metricsd`
+  against SHA-256 values committed in `src/release-sha256.txt`, on top of the
+  release's own `SHA256SUMS`, so a release that replaced an asset and its
+  checksum file together is refused. A tag with no committed hash stops the
+  build (`ALLOW_UNPINNED_RELEASES=1` makes it a warning, for trials).
+  `tools/bump-deps.sh` rewrites the hashes whenever it moves a tag, and stops
+  without touching any pin if an asset does not match its release checksums.
+  The assets tarball is listed before extraction and refused if it holds a
+  link, device, absolute path or `..` component. `test/fetch_releases_test.sh`
+  covers replaced checksums and hostile archives. The CI and release download
+  caches are keyed on `src/release-sha256.txt` too, so a corrected hash is
+  never checked against assets restored from an older cache. Refs #256.
+- docs: stale statements corrected. The kernel is 6.18.58 everywhere it is
+  named (README, `docs/BUILDING.md`, `docs/HACKING.md`, `docs/KERNEL.md`), and
+  the README no longer states the current release. `image/README.md` said the
+  root hash is MD5 crypt and that rcS waits for an ARP reply by default; the
+  build writes SHA-512 crypt (`image/build.sh`) and the ARP wait is the
+  development-only `confirm-arp` flag (`rootfs/skeleton/etc/init.d/rcS.dev`),
+  the default being the 120 s userland deadline plus the 300 s trial guard.
+  `make lint` now runs `tools/check-doc-pins.sh`, which fails when README.md or
+  `docs/BUILDING.md` names a kernel other than the `VERSION=` pin in
+  `kernel/618/fetch.sh`, or a confd/metricsd tag other than the one in
+  `src/fetch-releases.sh`. Refs #273.
+- CI: every action in the workflows is pinned to a full commit SHA with its
+  version in a trailing comment, `make lint` rejects a mutable reference, and
+  `.github/dependabot.yml` proposes weekly updates for the `github-actions`
+  ecosystem (`dependency-bump.yml` only handles the firmware pins, so it is not
+  extended). Refs #257.
+- CI: `release.yml` is read-only at workflow level; `contents: write`,
+  `id-token: write` and `attestations: write` are granted only to the `release`
+  job, not to the test job that runs repository code. Checkouts that do not push
+  use `persist-credentials: false`. `dependency-bump.yml` keeps the write scopes it needs
+  (it pushes a branch and opens a PR), now on its job only. Refs #255.
+- CI: every job in `ci.yml` and `release.yml` now has `timeout-minutes`, sized
+  from the longest successful run seen plus headroom (a hung test used to hold a
+  runner for GitHub's six-hour default). Refs #266.
+
 - igmpd: the IGMP and MLD parsers now read the same VLAN tags the kernel hook
   admits, up to two, each 802.1Q or 802.1ad, instead of one 802.1Q tag only.
   A membership report behind an S-tag or a QinQ pair used to reach igmpd and

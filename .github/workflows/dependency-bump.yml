@@ -17,15 +17,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   bump:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write # push the dep-bump branch
+      pull-requests: write # open the PR
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check upstream versions, rewrite any pin that is behind
         run: tools/bump-deps.sh | tee /tmp/bump-summary.txt
@@ -96,7 +98,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add kernel/618/fetch.sh packages/*/build.sh toolchain/images.env \
-            src/fetch-releases.sh CHANGELOG.md
+            src/fetch-releases.sh src/release-sha256.txt CHANGELOG.md
           git commit -m "deps: weekly upstream version check
 
           $(cat /tmp/bump-summary.txt)"

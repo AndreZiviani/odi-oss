@@ -354,6 +354,13 @@ set in the config store (docs/SETTINGS.md), syslogd also adds `-L -R
 host[:port]`: forwarded remotely, kept in the local circular buffer too.
 `apply.sh syslog` restarts it without a reboot.
 
+The local buffer is small and lives in RAM, so for anything beyond a bench
+setup set `SYSLOG_SERVER`. Alerting on the metrics side is covered by the
+exporter project: a ready-made Prometheus rule file
+([`prometheus/alerts.yml`](https://github.com/AndreZiviani/odi-sfp-exporter/blob/main/prometheus/alerts.yml))
+and the notes on loading and routing it
+([`docs/ALERTS.md`](https://github.com/AndreZiviani/odi-sfp-exporter/blob/main/docs/ALERTS.md)).
+
 ### `ntpd` -- NTP client (opt-in)
 
 `svc-ntpd.sh` starts busybox ntpd (`-n -p NTP_SERVER`) only while

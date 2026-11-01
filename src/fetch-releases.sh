@@ -51,8 +51,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 #           API instead of the plain /releases/download/ URL.
 #
 # USE_CURL=1 skips gh even when it is there.
-# Either way the asset is checked against the release SHA256SUMS below, so
-# the transport is not trusted.
+# Either way the asset is checked against the release SHA256SUMS and the
+# committed src/release-sha256.txt below, so the transport is not trusted.
 use_gh=0
 if [ "${USE_CURL:-0}" != 1 ] && have gh && gh auth status >/dev/null 2>&1; then
 	use_gh=1
@@ -62,7 +62,7 @@ have gh || have curl || { echo "gh or curl is required to fetch releases" >&2; e
 curl_asset() {
 	repo=$1 tag=$2 asset=$3 out=$4
 	if [ -z "${GITHUB_TOKEN:-}" ]; then
-		curl -fsSL --retry 3 -o "$out" \
+		curl -fsSL --connect-timeout 20 --max-time 600 --retry 3 -o "$out" \
 			"https://github.com/$repo/releases/download/$tag/$asset"
 		return
 	fi
@@ -72,13 +72,13 @@ curl_asset() {
 	# uploader after its name). Tokenised with tr and read with awk rather
 	# than jq, which a build host need not have either; this works on the
 	# compact and the pretty-printed form alike.
-	id=$(curl -fsSL --retry 3 -H "Authorization: Bearer $GITHUB_TOKEN" \
+	id=$(curl -fsSL --connect-timeout 20 --max-time 600 --retry 3 -H "Authorization: Bearer $GITHUB_TOKEN" \
 		-H 'Accept: application/vnd.github+json' "$api/releases/tags/$tag" |
 		tr -d ' \n\r\t' | tr ',{}' '\n\n\n' | sed -n '/^"assets":/,$p' |
 		awk -F: -v n="\"$asset\"" '$1 == "\"id\"" {id = $2}
 			$1 == "\"name\"" && $2 == n {print id; exit}')
 	[ -n "$id" ] || { echo "  no asset $asset in $repo $tag" >&2; return 1; }
-	curl -fsSL --retry 3 -H "Authorization: Bearer $GITHUB_TOKEN" \
+	curl -fsSL --connect-timeout 20 --max-time 600 --retry 3 -H "Authorization: Bearer $GITHUB_TOKEN" \
 		-H 'Accept: application/octet-stream' -o "$out" "$api/releases/assets/$id"
 }
 
@@ -115,6 +115,57 @@ verify_sum() {
 	[ "$want" = "$got" ] || { echo "  $name sha256 mismatch: $got" >&2; exit 1; }
 }
 
+# The release SHA256SUMS comes from the same release as the asset, so a
+# release that swapped both would pass verify_sum. src/release-sha256.txt
+# (repo tag asset sha256, committed here, rewritten by tools/bump-deps.sh)
+# is the independent root: every downloaded asset has to match it as well. A
+# tag with no line there (a CONFD_TAG/METRICSD_TAG override) stops the build;
+# ALLOW_UNPINNED_RELEASES=1 downgrades that to a warning for a trial.
+verify_pinned() {
+	file=$1 repo=$2 tag=$3 name=$4
+	want=$(awk -v r="$repo" -v t="$tag" -v n="$name" \
+		'$1 !~ /^#/ && $1 == r && $2 == t && $3 == n {print $4; exit}' "$ROOT/src/release-sha256.txt")
+	if [ -z "$want" ]; then
+		if [ "${ALLOW_UNPINNED_RELEASES:-0}" = 1 ]; then
+			echo "  WARNING: no committed sha256 for $repo $tag $name (ALLOW_UNPINNED_RELEASES=1)" >&2
+			return 0
+		fi
+		echo "  no committed sha256 for $repo $tag $name in src/release-sha256.txt;" >&2
+		echo "  add it, or set ALLOW_UNPINNED_RELEASES=1 for a trial of an unpinned tag" >&2
+		exit 1
+	fi
+	got=$( (sha256sum "$file" 2>/dev/null || shasum -a 256 "$file") | cut -d' ' -f1)
+	[ "$want" = "$got" ] || {
+		echo "  $name sha256 $got does not match the committed $want (src/release-sha256.txt)" >&2
+		exit 1
+	}
+}
+
+# Extract a confd-assets tarball only if every member is a plain file or
+# directory with a relative name and no .. component. Listed first, with the
+# names (tar -t) and the types (first column of tar -tv) in two passes, since
+# the verbose layout differs between GNU tar and busybox tar but its first
+# character is the type in both. A link, device, fifo, absolute path or
+# escaping name refuses the whole archive.
+safe_extract() {
+	tgz=$1 dest=$2
+	names=$(tar -tzf "$tgz") || { echo "  cannot list $tgz" >&2; exit 1; }
+	types=$(tar -tzvf "$tgz" | cut -c1) || { echo "  cannot list $tgz" >&2; exit 1; }
+	[ "$(printf '%s\n' "$names" | wc -l)" -eq "$(printf '%s\n' "$types" | wc -l)" ] || {
+		echo "  $tgz: member listing is ambiguous (odd file names), refusing it" >&2
+		exit 1
+	}
+	if printf '%s\n' "$types" | grep -qv '^[-d]$'; then
+		echo "  $tgz holds a member that is not a plain file or directory, refusing it" >&2
+		exit 1
+	fi
+	if printf '%s\n' "$names" | grep -qE '^/|(^|/)\.\.(/|$)'; then
+		echo "  $tgz holds an absolute or .. path, refusing it" >&2
+		exit 1
+	fi
+	tar -xzf "$tgz" -C "$dest"
+}
+
 # What went in, for the image manifest (image/build.sh copies these into
 # /etc/odi-build as exporter= and confd= lines, which the exporter itself
 # reports as gpon_image_info labels).
@@ -128,6 +179,7 @@ else
 	bin=$(fetch_asset "$METRICSD_REPO" "$METRICSD_TAG" metricsd)
 	sums=$(fetch_asset "$METRICSD_REPO" "$METRICSD_TAG" SHA256SUMS)
 	verify_sum "$sums" "$bin" metricsd
+	verify_pinned "$bin" "$METRICSD_REPO" "$METRICSD_TAG" metricsd
 	install -m 755 "$bin" "$OUT/metricsd"
 	echo "  verified, $(wc -c < "$bin" | tr -d ' ') bytes"
 fi
@@ -145,10 +197,12 @@ if [ -n "$CONFD_TAG" ]; then
 	sums=$(fetch_asset "$CONFD_REPO" "$CONFD_TAG" SHA256SUMS)
 	verify_sum "$sums" "$bin" confd
 	verify_sum "$sums" "$tgz" confd-assets.tar.gz
+	verify_pinned "$bin" "$CONFD_REPO" "$CONFD_TAG" confd
+	verify_pinned "$tgz" "$CONFD_REPO" "$CONFD_TAG" confd-assets.tar.gz
 	install -m 755 "$bin" "$OUT/confd"
 	rm -rf "$ASSETS"
 	mkdir -p "$ASSETS"
-	tar -xzf "$tgz" -C "$ASSETS"
+	safe_extract "$tgz" "$ASSETS"
 	echo "  verified, $(wc -c < "$bin" | tr -d ' ') bytes + $(find "$ASSETS" -type f | wc -l | tr -d ' ') asset files"
 elif [ -n "${CONFD_BIN:-}" ]; then
 	# A local odi-ui build. Its assets live in the checkout, not beside the
@@ -165,7 +219,7 @@ elif [ -n "${CONFD_BIN:-}" ]; then
 	if [ -f "$src" ]; then
 		rm -rf "$ASSETS"
 		mkdir -p "$ASSETS"
-		tar -xzf "$src" -C "$ASSETS"
+		safe_extract "$src" "$ASSETS"
 		echo "  assets from $src"
 	elif [ -n "$src" ] && [ -d "$src/web" ] && [ -d "$src/schema" ]; then
 		rm -rf "$ASSETS"

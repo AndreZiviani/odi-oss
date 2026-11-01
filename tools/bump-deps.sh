@@ -5,7 +5,7 @@
 # (Linux 6.18.y), packages/{busybox,dropbear,iproute2}/build.sh, the three
 # image digests in toolchain/images.env (odi-toolchain releases), and the
 # METRICSD_TAG/CONFD_TAG defaults in src/fetch-releases.sh (odi-sfp-exporter,
-# odi-ui). Driven by .github/workflows/dependency-bump.yml, which then runs
+# odi-ui) together with the asset hashes in src/release-sha256.txt. Driven by .github/workflows/dependency-bump.yml, which then runs
 # the test suite against whatever this script changed and opens a PR only if
 # it passes -- this script itself does not decide whether a bump is safe, it
 # only proposes one and computes the checksum that goes with it.
@@ -104,18 +104,39 @@ bump_package iproute2 \
 	'https://mirrors.edge.kernel.org/pub/linux/utils/net/iproute2/iproute2-$latest.tar.xz'
 
 # --- odi-sfp-exporter / odi-ui release tags (src/fetch-releases.sh) -----
+# A tag move also rewrites that repo's lines in src/release-sha256.txt (the
+# committed hashes fetch-releases.sh checks on top of the release SHA256SUMS).
+# The assets are downloaded first and checked against the release SHA256SUMS;
+# if that fails the script exits non-zero before touching any pin, so a bump
+# can never leave a new tag without its hashes. The PR a human reviews shows
+# the new hashes beside the new tag.
 bump_release_tag() {
-	var=$1 repo=$2
+	var=$1 repo=$2 assets=$3
 	current=$(grep -m1 -oE "${var}[:-]+v[0-9.]+" src/fetch-releases.sh | grep -oE 'v[0-9.]+' | tail -1)
 	latest=$(gh release list --repo "$repo" --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
 	[ -n "$latest" ] || { echo "bump-deps.sh: could not list releases for $repo (gh not authenticated?)" >&2; return; }
 	[ "$latest" != "$current" ] || return 0
+	tmp=$(mktemp -d)
+	new_lines=
+	for a in $assets; do
+		timeout 300 gh release download "$latest" --repo "$repo" --pattern "$a" --pattern SHA256SUMS -D "$tmp" --clobber ||
+			{ echo "bump-deps.sh: cannot download $a from $repo $latest; pins left unchanged" >&2; rm -rf "$tmp"; exit 1; }
+		got=$(sha256_of "$tmp/$a")
+		want=$(awk -v n="$a" '$2 == n {print $1; exit}' "$tmp/SHA256SUMS")
+		[ -n "$want" ] && [ "$want" = "$got" ] ||
+			{ echo "bump-deps.sh: $a of $repo $latest does not match its release SHA256SUMS; pins left unchanged" >&2; rm -rf "$tmp"; exit 1; }
+		new_lines="$new_lines$repo $latest $a $got
+"
+	done
+	rm -rf "$tmp"
 	sed -i.bak -E "s/${var}:-$current/${var}:-$latest/; s/${var}-$current/${var}-$latest/" src/fetch-releases.sh
 	rm -f src/fetch-releases.sh.bak
+	{ grep -vE "^${repo} " src/release-sha256.txt; printf '%s' "$new_lines"; } > src/release-sha256.txt.new
+	mv src/release-sha256.txt.new src/release-sha256.txt
 	note "$repo tag $current -> $latest"
 }
-bump_release_tag METRICSD_TAG AndreZiviani/odi-sfp-exporter
-bump_release_tag CONFD_TAG AndreZiviani/odi-ui
+bump_release_tag METRICSD_TAG AndreZiviani/odi-sfp-exporter "metricsd"
+bump_release_tag CONFD_TAG AndreZiviani/odi-ui "confd confd-assets.tar.gz"
 
 # --- odi-toolchain images (toolchain/images.env) ------------------------
 # odi-toolchain has no GitHub Releases, only git tags per image, prefixed
