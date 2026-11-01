@@ -25,6 +25,7 @@
  * so slot 0 is the high half of word 4 and slot 1 the low half of word 3.
  */
 #ifdef __KERNEL__
+#include <linux/printk.h>
 #include <linux/string.h>
 #else
 #include <string.h>
@@ -36,6 +37,17 @@
 #include "odi_switch_reg.h"
 #include "odi_switch_tbl.h"
 #include "odi_igmp_tx.h"
+
+/* A teardown write that fails leaves a rule the switch may still match on;
+ * nothing retries it, so the failure is at least said. The host test counts
+ * these by defining the macro first. */
+#ifndef MC_WARN
+#ifdef __KERNEL__
+#define MC_WARN(fmt, ...) pr_warn_ratelimited("odi_switch_mcast: " fmt, ##__VA_ARGS__)
+#else
+#define MC_WARN(fmt, ...) ((void)0)
+#endif
+#endif
 
 #define ODI_SW_MC_EPERM		(-1)
 #define ODI_SW_MC_EINVAL	(-22)
@@ -201,6 +213,16 @@ static int mc_acl_mode(int trap)
 				      act, ODI_SW_MC_ACTION_WORDS);
 }
 
+/* One write of a teardown: the failure is reported, the sequence goes on. */
+static void mc_table_clear(uint32_t table, uint32_t entry, const uint32_t *data, uint32_t n)
+{
+	int rc = odi_switch_table_write(table, entry, data, n);
+
+	if (rc)
+		MC_WARN("clearing table %u entry %u failed (%d), the rule may still match\n",
+			table, entry, rc);
+}
+
 static void mc_acl_remove(void)
 {
 	static const uint32_t zero[ODI_SW_MC_RULE_WORDS] = { 0 };
@@ -208,12 +230,10 @@ static void mc_acl_remove(void)
 
 	/* Valid bit first, so the rule stops matching before anything under
 	 * it changes. */
-	(void)odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN, ODI_SW_MC_ACL_ENTRY,
-				     zero, ODI_SW_MC_RULE_WORDS);
-	(void)odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN_MASK, ODI_SW_MC_ACL_ENTRY,
-				     zero, ODI_SW_MC_RULE_WORDS);
-	(void)odi_switch_table_write(ODI_SW_TBL_ACL_ACTIONS, ODI_SW_MC_ACL_ENTRY,
-				     zact, ODI_SW_MC_ACTION_WORDS);
+	mc_table_clear(ODI_SW_TBL_ACL_PATTERN, ODI_SW_MC_ACL_ENTRY, zero, ODI_SW_MC_RULE_WORDS);
+	mc_table_clear(ODI_SW_TBL_ACL_PATTERN_MASK, ODI_SW_MC_ACL_ENTRY, zero,
+		       ODI_SW_MC_RULE_WORDS);
+	mc_table_clear(ODI_SW_TBL_ACL_ACTIONS, ODI_SW_MC_ACL_ENTRY, zact, ODI_SW_MC_ACTION_WORDS);
 	/* A released entry gets the reset value back, never zero: zero chains
 	 * an entry to the one before it. */
 	odi_reg_write(ODI_SW_ACL_ACT_EN_OFF + 4U * ODI_SW_MC_ACL_ENTRY,
@@ -272,10 +292,9 @@ static void mc_entry_clear(uint32_t entry)
 	/* Valid bit first, so the rule stops matching before anything under
 	 * it changes; the reset enable word back, never zero (zero chains an
 	 * entry to the one before it). */
-	(void)odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN, entry, zero, ODI_SW_MC_RULE_WORDS);
-	(void)odi_switch_table_write(ODI_SW_TBL_ACL_PATTERN_MASK, entry, zero,
-				     ODI_SW_MC_RULE_WORDS);
-	(void)odi_switch_table_write(ODI_SW_TBL_ACL_ACTIONS, entry, zact, ODI_SW_MC_ACTION_WORDS);
+	mc_table_clear(ODI_SW_TBL_ACL_PATTERN, entry, zero, ODI_SW_MC_RULE_WORDS);
+	mc_table_clear(ODI_SW_TBL_ACL_PATTERN_MASK, entry, zero, ODI_SW_MC_RULE_WORDS);
+	mc_table_clear(ODI_SW_TBL_ACL_ACTIONS, entry, zact, ODI_SW_MC_ACTION_WORDS);
 	odi_reg_write(ODI_SW_ACL_ACT_EN_OFF + 4U * entry, ODI_SW_ACL_ACT_EN_RESET);
 }
 

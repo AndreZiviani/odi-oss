@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- omcid, kernel: a bridge-connection, upstream flow or priority-queue delete
+  that the driver refuses is now logged with its result (`[hw] ... -> rc`),
+  and a failed clear of a snooping ACL entry is a rate-limited kernel warning
+  (`odi_switch_mcast: clearing table ... failed`), instead of both being
+  dropped silently. Nothing is retried. Refs #248.
 - omcid: a snapshot write that fails (full tmpfs, a failed write or rename) is
   now logged as `event=snapshot_fail rows=N` instead of being dropped
   silently; the previous snapshot stays in place. Refs #247.
