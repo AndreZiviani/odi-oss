@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- CI: every job in `ci.yml` and `release.yml` now has `timeout-minutes`, sized
+  from the longest successful run seen plus headroom (a hung test used to hold a
+  runner for GitHub's six-hour default). Refs #266.
 - README: the DFP-34X-2C3 moves from "never tried" to reported working, on
   one user's report of v1.14.0 on a 2C3 with stock `V1.1.4-250620`.
 
