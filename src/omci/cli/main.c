@@ -185,6 +185,8 @@ static void usage(void)
 	out("  --rmq KEY       remove a message queue left by a killed client\n");
 	out("  --inject HEX    feed a 48-byte OMCI frame in as if it arrived\n"
 	    "                  off the line; the answer goes out the line\n"
+	    "                  (trailer and CRC are filled in; omcid drops a bad one)\n"
+	    "  --inject-raw HEX  the same, bytes exactly as given, any length\n"
 	    "  --inject-file F the same for every frame in F, one per line\n");
 	out("\nThe list above is the stock daemon's. When omcid is listening its\n"
 	    "own commands are used instead -- `omcli help` for those.\n");
@@ -712,6 +714,16 @@ static long inject_queue(void)
 
 #define INJECT_WAIT_ROUNDS 60
 
+/* An injected frame is sent as the OLT would send it: omcid refuses a frame
+ * whose trailer or CRC is wrong (respond/omcimsg.c, rx_accept()), and a
+ * session file or a test builds its frames with those fields zero or stale, so
+ * by default the baseline trailer (00 00 00 28) is written into bytes 40-43
+ * and the CRC of bytes 0-43 into bytes 44-47 here. Every other byte, device
+ * identifier included, goes as given. `--inject-raw` sends the bytes exactly
+ * as given, of any length, which is how a frame omcid must drop (bad trailer,
+ * bad CRC, truncated) is injected. */
+static int inject_raw;
+
 static int inject_frame(long q, const char *h)
 {
 	struct omci_msg m;
@@ -735,15 +747,29 @@ static int inject_frame(long q, const char *h)
 		}
 		m.p[n++] = (uint8_t)((hi << 4) | lo);
 	}
-	if (n != OMCI_FRAME_LEN) {
+	if (inject_raw ? n == 0 : n != OMCI_FRAME_LEN) {
 		out_fmt("%% a baseline OMCI frame is %d bytes; got %d\n",
 			(long)OMCI_FRAME_LEN, (long)n);
 		out_flush();
 		return 1;
 	}
+	if (!inject_raw) {
+		uint32_t crc;
+
+		m.p[40] = (uint8_t)(OMCI_TRAILER >> 24);
+		m.p[41] = (uint8_t)(OMCI_TRAILER >> 16);
+		m.p[42] = (uint8_t)(OMCI_TRAILER >> 8);
+		m.p[43] = (uint8_t)OMCI_TRAILER;
+		crc = omci_crc(m.p, 44);
+
+		m.p[44] = (uint8_t)(crc >> 24);
+		m.p[45] = (uint8_t)(crc >> 16);
+		m.p[46] = (uint8_t)(crc >> 8);
+		m.p[47] = (uint8_t)crc;
+	}
 	m.mtype   = OMCI_MQ_MTYPE;
 	m.msgType = OMCI_MQ_TYPE_FRAME;
-	m.len     = OMCI_FRAME_LEN;
+	m.len     = n;
 	/* mq_send() gives up after half a second of a full queue, which is the
 	 * right bound for a client of a daemon in production. A session file
 	 * is hundreds of frames in a queue of a few dozen KB, and omcid takes
@@ -837,13 +863,15 @@ int main(int argc, char **argv)
 	}
 
 	/* One frame (inject_frame() has why it goes to the vendor queue). */
-	if (str_eq(argv[1], "--inject") && argc > 2) {
-		long q = inject_queue();
+	if ((str_eq(argv[1], "--inject") || str_eq(argv[1], "--inject-raw")) &&
+	    argc > 2) {
+		long q;
 
+		inject_raw = str_eq(argv[1], "--inject-raw");
+		q = inject_queue();
 		if (q < 0 || inject_frame(q, argv[2]) != 0)
 			return 1;
-		out_fmt("injected %d bytes; the answer goes to the line, not "
-			"here\n", (long)OMCI_FRAME_LEN);
+		out("injected; the answer goes to the line, not here\n");
 		out_flush();
 		return 0;
 	}

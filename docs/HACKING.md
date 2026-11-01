@@ -597,7 +597,8 @@ test above and the exporter contract are the coverage for this path.
 `src/omci/qemu-test.sh`, in the freestanding toolchain image as root
 (it creates `/var/config` inside the container). qemu-user cannot open
 our own netlink protocol number (`NETLINK_ODI`), so there is no line side:
-it injects frames on the message queue, and checks the MIB store, the
+it injects frames on the message queue (`omcli --inject` fills in the trailer and
+CRC omcid requires of every received frame; `--inject-raw` does not), and checks the MIB store, the
 45-command CLI protocol and
 the dump renderers against output captured from live sticks. Full OLT
 sessions are not covered here; they are exercised through the kernel side

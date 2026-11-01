@@ -553,6 +553,11 @@ uint32_t cli_state(void)
 		out("onu state  : unreadable\n");
 	out_fmt("mib sync   : %d\n", (long)mib_data_sync);
 	out_fmt("programming: %s\n", apply_hw ? "on" : "off");
+	out_fmt("rx dropped : length %d  devid %d  trailer %d  crc %d\n",
+		(long)omci_rx_reject[RX_REJ_LENGTH],
+		(long)omci_rx_reject[RX_REJ_DEVID],
+		(long)omci_rx_reject[RX_REJ_TRAILER],
+		(long)omci_rx_reject[RX_REJ_CRC]);
 	return OMCLI_OK;
 }
 

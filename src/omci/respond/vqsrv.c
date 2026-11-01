@@ -443,15 +443,15 @@ int vq_poll(void)
 		 * frame. With no OLT attached that send reaches nobody, which
 		 * is the point: what is being checked is the answer this
 		 * daemon composes, and that is logged either way. */
-		if (vreq.len >= OMCI_FRAME_LEN) {
+		if (rx_accept(vreq.p, vreq.len)) {
 			out_fmt("[mq] injected frame, %d bytes\n",
 				(long)vreq.len);
 			handle((int)nl_fd, nl_tid, vreq.p);
 			out_flush();
 		} else {
-			out_fmt("[mq] injected frame ignored: %d bytes, "
-				"need %d\n", (long)vreq.len,
-				(long)OMCI_FRAME_LEN);
+			/* Counted and logged by rx_accept(). */
+			out_fmt("[mq] injected frame dropped: %d bytes\n",
+				(long)vreq.len);
 			out_flush();
 		}
 		return 1;                        /* a frame arrived: not idle */

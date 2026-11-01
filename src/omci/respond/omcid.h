@@ -523,6 +523,16 @@ void handle(int fd, uint32_t tid, const uint8_t *f);
 /* OMCI frames handle() has taken, from the line or injected: the main loop
  * times the quiet second before its rebuilds on this, not on CLI traffic. */
 extern unsigned long omci_frames_handled;
+/* Received frames dropped before handle(), per reason: the index is one of
+ * RX_REJ_*. rx_accept() is the check, for the line and the injection queue
+ * (omcimsg.c); a frame it refuses is never answered. */
+#define RX_REJ_LENGTH   0
+#define RX_REJ_DEVID    1
+#define RX_REJ_TRAILER  2
+#define RX_REJ_CRC      3
+#define RX_REJ_N        4
+extern unsigned long omci_rx_reject[RX_REJ_N];
+int rx_accept(const uint8_t *f, uint32_t len);
 
 /* ------------------------------------------------------------- event lines
  *
@@ -589,6 +599,9 @@ int omci_drv_call_quiet(uint32_t cmd, void *buf, uint32_t len);
 #define UNKNOWN_PATH     "/var/log/omcid-unknown.txt"
 #define UNKNOWN_TMP_PATH "/var/log/omcid-unknown.txt.tmp"
 int ev_msg_known(uint8_t mt);
+/* A received frame dropped by rx_accept(): event=rx_reject, at most one line
+ * per reason per minute, carrying the count since the last one. */
+void ev_rx_reject(int reason, uint8_t devid, uint32_t len);
 void ev_unknown_me(uint16_t cls, uint8_t mt);
 void ev_unknown_msg(uint8_t mt, uint16_t cls);
 /* A Get, Get current data, Set or Delete of a modelled class, addressed to
