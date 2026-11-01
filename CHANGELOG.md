@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- omcid: a snapshot write that fails (full tmpfs, a failed write or rename) is
+  now logged as `event=snapshot_fail rows=N` instead of being dropped
+  silently; the previous snapshot stays in place. Refs #247.
 - README: the DFP-34X-2C3 moves from "never tried" to reported working, on
   one user's report of v1.14.0 on a 2C3 with stock `V1.1.4-250620`.
 
