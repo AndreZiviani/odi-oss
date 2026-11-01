@@ -801,3 +801,39 @@ void ev_tick(void)
 	if (unk_dirty)
 		unk_save();
 }
+
+/* A frame rx_accept() flagged: dropped, or for reason trailer answered anyway
+ * (action=accepted). An OLT speaking the extended format retries
+ * every request, and that must not spend the shared burst of ev_emit() on one
+ * fault, so each reason has a window of its own: the first frame is logged at
+ * once, the next line comes EV_WINDOW_S later and says how many frames were
+ * dropped since (count) and in all (total, which `omcli state` shows too).
+ * devid and len are those of the frame that triggered the line. */
+void ev_rx_reject(int reason, uint8_t devid, uint32_t len)
+{
+	static const char *const name[RX_REJ_N] = {
+		"length", "devid", "trailer", "crc"
+	};
+	static long win_start[RX_REJ_N];
+	static unsigned long last_total[RX_REJ_N];
+	static int seen[RX_REJ_N];
+	long now = ev_now().s;
+	struct evline e;
+
+	if (reason < 0 || reason >= RX_REJ_N)
+		return;
+	if (seen[reason] && now - win_start[reason] < EV_WINDOW_S)
+		return;
+	seen[reason] = 1;
+	win_start[reason] = now;
+	ev_begin(&e, "rx_reject");
+	ev_str(&e, "reason", name[reason]);
+	ev_num(&e, "count", omci_rx_reject[reason] - last_total[reason]);
+	ev_num(&e, "total", omci_rx_reject[reason]);
+	ev_str(&e, "action", reason == RX_REJ_TRAILER ? "accepted" : "dropped");
+	if (reason == RX_REJ_DEVID)
+		ev_num(&e, "devid", devid);
+	ev_num(&e, "len", len);
+	last_total[reason] = omci_rx_reject[reason];
+	ev_emit(&e, EV_SEV_NOTICE);
+}

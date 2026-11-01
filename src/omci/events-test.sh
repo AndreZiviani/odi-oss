@@ -282,6 +282,67 @@ check "nothing is stored, and MIB data sync counts the faked writes" \
 omcid_stop "$pid2"
 rm -f /var/config/odi.conf
 
+# Receive-side validation (respond/omcimsg.c, rx_accept()): a frame whose
+# length, device identifier or CRC is wrong is dropped before it is looked at --
+# no answer, one counter per reason, one event line per reason. A trailer other
+# than 00000028 under a valid CRC is answered, and counted and logged.
+# --inject fills in the trailer and CRC (so only the field a case spoils is wrong);
+# --inject-raw sends the bytes as given.
+#
+# VEC is a frame captured from an OLT: ONU2-G Get, trailer 00000028, CRC
+# 624bea37 (the AAL5 CRC-32, poly 04c11db7, init and final xor ffffffff, no
+# reflection). Sent raw, it is answered only if omcid computes that CRC.
+VEC=b397490a01010000004000000000000000000000000000000000000000000000000000000000000000000028624bea37
+rx_run() {
+	printf 'SYSLOG_SERVER=\n' > /var/config/odi.conf
+	: > /tmp/omcid-rx.log
+	$Q respond/build/omcid -w 12 -c "$CAPS" > /tmp/omcid-rx.log 2>&1 &
+	pid4=$!
+	omcid_up /tmp/omcid-rx.log
+}
+rx_run
+rxlog=/tmp/omcid-rx.log
+got=$(printf '%s' "$VEC" | wc -c)
+check "the captured frame is 48 bytes" "$got" "96"
+$Q cli/build/omcli --inject-raw "$VEC" > /dev/null 2>&1
+need "$rxlog" '^-> b397' 10
+got=$(grep -c '^event=rx_reject ' "$rxlog")
+check "the captured frame, CRC and all, is answered and not counted" "$got" "0"
+# Each bad frame is a Get of ONU-G that would be answered if it got through.
+base=$(frame 0f01 49 0100 0000)
+bad_crc=$(printf '%s' "$base" | sed 's/00000000$/deadbeef/')
+$Q cli/build/omcli --inject-raw "$bad_crc" > /dev/null 2>&1
+# A trailer of 00000029 with a CRC that matches it: answered, but counted.
+$Q cli/build/omcli --inject-raw 0f02490a01000000000000000000000000000000000000000000000000000000000000000000000000000029c44f7a32 > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0f03 49 0100 0000 | sed 's/^\(....49\)0a/\10b/')" > /dev/null 2>&1
+$Q cli/build/omcli --inject-raw "$(frame 0f04 49 0100 0000 | sed 's/..$//')" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0f05 49 0100 0000)" > /dev/null 2>&1
+need "$rxlog" '^-> 0f05' 10
+got=$(grep -c '^-> 0f02' "$rxlog")
+check "a bad trailer under a valid CRC is answered" "$got" "1"
+for t in 0f01 0f03 0f04; do
+	got=$(grep -c "^-> $t" "$rxlog")
+	check "a frame with a bad length, device id or CRC is not answered ($t)" "$got" "0"
+done
+got=$(grep '^event=rx_reject ' "$rxlog" | sed 's/ len=[0-9]*$//')
+check "one event line per reason, with the count" "$got" \
+"event=rx_reject reason=crc count=1 total=1 action=dropped
+event=rx_reject reason=trailer count=1 total=1 action=accepted
+event=rx_reject reason=devid count=1 total=1 action=dropped devid=11
+event=rx_reject reason=length count=1 total=1 action=dropped"
+got=$($Q cli/build/omcli state 2>&1 | grep -a '^rx dropped')
+check "omcli state counts them per reason" "$got" "rx dropped : length 1  devid 1  crc 1  (trailer odd, answered: 1)"
+# The same fault again inside the window is counted, not logged again.
+$Q cli/build/omcli --inject-raw "$bad_crc" > /dev/null 2>&1
+$Q cli/build/omcli --inject-raw "$bad_crc" > /dev/null 2>&1
+sync_send "$rxlog"
+got=$(grep -c '^event=rx_reject reason=crc ' "$rxlog")
+check "a repeat inside the window is counted, not logged" "$got" "1"
+got=$($Q cli/build/omcli state 2>&1 | grep -a '^rx dropped')
+check "and the counter moved" "$got" "rx dropped : length 1  devid 1  crc 3  (trailer odd, answered: 1)"
+omcid_stop "$pid4"
+rm -f /var/config/odi.conf
+
 # OMCI_FIXED_ME: a Get of a listed class, which omcid does not model,
 # answers its bytes under the mask asked for, and the bytes are not logged.
 # A class omcid does model is not overridden; a malformed list is off.

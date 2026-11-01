@@ -514,7 +514,9 @@ int main(int argc, char **argv)
 			continue;
 		}
 		idle = 0;
-		if (plen >= NL_FRAME_OFF + OMCI_FRAME_LEN) {
+		if (plen >= NL_FRAME_OFF &&
+		    rx_accept(rxbuf + NLMSG_HDR + NL_FRAME_OFF,
+			      (uint32_t)plen - NL_FRAME_OFF)) {
 			n++;
 			handle((int)fd, tid, rxbuf + NLMSG_HDR + NL_FRAME_OFF);
 		}

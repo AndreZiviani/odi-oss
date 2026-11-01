@@ -981,8 +981,10 @@ voice provisioned it prints `no voice provisioned`.
 
 Maintenance flags: `--rmq KEY` removes a message queue left by a killed
 client (there is no `ipcrm` in the busybox), `--inject HEX` feeds a 48-byte
-OMCI frame in as if it came off the line (`--inject-file F` every frame in
-F, one per line, back to back), `--vendor` talks to a stock
+OMCI frame in as if it came off the line, with the trailer and CRC filled in
+(omcid drops a frame whose trailer or CRC is wrong; `--inject-raw HEX` sends
+bytes exactly as given, of any length, to test that; `--inject-file F` every
+frame in F, one per line, back to back), `--vendor` talks to a stock
 daemon instead, `--id N [-f]` sends a raw command id.
 
 ### `omciprobe` -- one raw driver command
@@ -1691,6 +1693,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=snapshot_fail rows=161` | notice | omcid could not write its MIB snapshot (`/var/run/omcid-mib.snap`: a full tmpfs, a failed write or rename); `rows` is the MIB rows held. The previous snapshot stays on disk, so a respawn resumes from an older MIB than the OLT was told about, or re-registers if there is none |
 | `omcid: event=sw_image op=download_start inst=1 size=2621440 window=32 result=ok` | notice | a software download step from the OLT: `op=download_start` (the image size and sections per window), `download_end` (`sections=N`, the sections accepted, and `crc=ok` or `bad`), `activate`, `commit`. `result` is `ok`; `not_supported` with `OLT_SW_DOWNLOAD=reject`; `refused_active` (a download to the image that is active or committed), `refused_invalid` (activate or commit of an image that is not valid), `crc_error`, `size_mismatch`, `short` or `no_download` otherwise. Accepted or not, the image is discarded and nothing is flashed (docs/SETTINGS.md, "Software download from the OLT") |
 | `omcid: event=unknown_me class=351 op=create mt=4` | notice | the first request this boot for a managed entity class omcid has no model for, per class and operation (`op` is `create`, `set`, `get`, `delete`, `get_next` or `test`; `mt` the message type); answered "unknown entity" unless `OMCI_UNKNOWN_ME_OK=1` (docs/SETTINGS.md) |
+| `omcid: event=rx_reject reason=crc count=1 total=1 action=dropped len=48` | notice | a received frame omcid flagged before it read or changed anything. `action=dropped`, no answer: `reason` is `length` (under the 48 bytes of a baseline frame), `devid` (device identifier not 0x0a; the extended format, 0x0b, is not implemented, so an OLT that sends it is left to fall back to baseline; the line adds `devid=11`. omcid reports the baseline set only (`0x80`) unless `OMCC_VER` is set with `omci-identity.on`, see `docs/SETTINGS.md`) or `crc` (the CRC-32 in bytes 44-47 does not match bytes 0-43). `reason=trailer action=accepted`: bytes 40-43 are not `00 00 00 28` (what our OLT sends) but the CRC is valid, so the frame is answered and only counted. At most one line per reason a minute, with `count` the frames since the last line and `total` since omcid started; `omcli state` shows the totals (`rx dropped`). The frames our OLT sends never trigger it |
 | `omcid: event=unknown_msg type=17 class=256` | notice | the first frame this boot of a message type omcid does not handle, per type, with the class of that first frame; answered "not supported" |
 | `omcid: event=no_instance class=45 inst=2457 op=get mt=9` | notice | the first Get, Get current data, Set or Delete this boot that names an instance of a modelled class which omcid neither created itself nor was given by the OLT, per class and instance (`op` and `mt` are those of the first such request). Diagnostic only: omcid answers it as before (built-in values, a new row for a Set, success for a Delete), where G.988 and the stock stack answer "unknown instance"; the lines say whether an OLT relies on that |
 | `omcid: event=vlan_fwdop code=0x06 inst=18 result=unsupported built_as=0x10` | notice | a class 84 forward operation no bridge rule can express (negative filtering, filtering by TCI and MAC address, a code past G.988 table 9.3.11-1): built as 0x10 instead, once per code per omcid run |

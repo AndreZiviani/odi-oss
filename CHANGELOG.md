@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- omcid checks every received frame before it reads or changes anything. A
+  frame under 48 bytes, with a device identifier other than 0x0a (an
+  extended-format 0x0b frame included, so the OLT falls back to baseline) or
+  with a CRC-32 that does not match bytes 0-43 is dropped with no answer. A
+  trailer other than `00 00 00 28` (what our OLT sends) under a valid CRC is
+  answered, and only counted. Each reason is counted (`omcli state`, `rx
+  dropped`) and logged as `event=rx_reject reason=length|devid|crc|trailer
+  action=dropped|accepted`, at most one line per reason a minute. The same
+  check covers injected frames: `omcli --inject` now fills in the trailer and
+  CRC, and `--inject-raw` sends bytes as given. omcid implements the baseline
+  message set only and reports it (OMCC version `0x80`); docs/SETTINGS.md now
+  says that an `OMCC_VER` copied from an ONU that advertises the extended set
+  gets its extended messages dropped. Frames captured from an OLT carry valid
+  CRCs; on a stick, 75 messages from an OLT were answered with none dropped.
+  Refs #251.
+
 - docs: `docs/TOOLS.md` points from the syslog and exporter sections to the
   Prometheus alert rules and their notes in the odi-sfp-exporter repository.
   Refs #270.
