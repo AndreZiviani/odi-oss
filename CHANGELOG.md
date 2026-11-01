@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- release: the SBOM now records `GPL-2.0-or-later` for `confd` and `metricsd`
+  instead of `NOASSERTION`, and `docs/LICENSING.md` states it, from the README
+  of odi-ui and odi-sfp-exporter. Refs #276.
 - build: `make releases` checks `confd`, `confd-assets.tar.gz` and `metricsd`
   against SHA-256 values committed in `src/release-sha256.txt`, on top of the
   release's own `SHA256SUMS`, so a release that replaced an asset and its
