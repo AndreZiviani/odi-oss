@@ -51,8 +51,49 @@
 
 #define ETH_HDR_LEN         14
 #define ETH_P_8021Q         0x8100
+#define ETH_P_8021AD        0x88a8
 #define ETH_P_IP            0x0800
 #define ETH_P_IPV6          0x86dd
+
+/* The VLAN tags in front of the EtherType, read the way the kernel hook
+ * (odi_igmp_rx.h) admits a frame: up to two, each 0x8100 or 0x88a8. A frame
+ * the hook lets through is therefore one the parsers can read; a third tag,
+ * or a tag past the end of the frame, is not.
+ *
+ * `vid` is the VID of the outermost tag (0 with none), the one a bridge
+ * keeps a frame by; `ethertype` the one behind the tags and `off` where it
+ * ends. Returns 0, or -1 when a tag runs past `eth_len`. */
+#define ETH_MAX_TAGS        2
+
+struct eth_l2 {
+	uint16_t vid;
+	uint16_t ethertype;
+	uint32_t off;
+	int      tags;
+};
+
+static inline int eth_l2_parse(const uint8_t *eth, uint32_t eth_len,
+			       struct eth_l2 *l2)
+{
+	uint16_t type = (uint16_t)((eth[12] << 8) | eth[13]);
+
+	l2->vid = 0;
+	l2->off = ETH_HDR_LEN;
+	l2->tags = 0;
+	while ((type == ETH_P_8021Q || type == ETH_P_8021AD) &&
+	       l2->tags < ETH_MAX_TAGS) {
+		if (eth_len < l2->off + 4)
+			return -1;
+		if (!l2->tags)
+			l2->vid = (uint16_t)(((eth[l2->off] << 8) |
+					      eth[l2->off + 1]) & 0x0fff);
+		type = (uint16_t)((eth[l2->off + 2] << 8) | eth[l2->off + 3]);
+		l2->off += 4;
+		l2->tags++;
+	}
+	l2->ethertype = type;
+	return 0;
+}
 
 #define IPPROTO_IGMP        2
 #define IPPROTO_ICMPV6      58
@@ -83,14 +124,14 @@ enum igmp_parse_rc {
 struct igmp_rx {
 	uint8_t  port;          /* as received: one-based */
 	uint16_t vid;           /* 0 when the frame was untagged */
-	int      tagged;        /* an 802.1Q tag was present in the frame */
+	int      tagged;        /* VLAN tags in the frame: 0, 1 or 2 (802.1Q or 802.1ad) */
 	int      taken;         /* the switch took it: upstream only if sent */
 
 	const uint8_t *eth;     /* the Ethernet frame, prefix removed */
 	uint32_t eth_len;
 	const uint8_t *dst;     /* 6 bytes */
 	const uint8_t *src;     /* 6 bytes */
-	uint16_t ethertype;     /* after the tag, when there was one */
+	uint16_t ethertype;     /* after the tags, when there were any */
 
 	const uint8_t *ip;      /* IPv4 header */
 	uint32_t ip_hlen;

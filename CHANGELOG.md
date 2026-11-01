@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- igmpd: the IGMP and MLD parsers now read the same VLAN tags the kernel hook
+  admits, up to two, each 802.1Q or 802.1ad, instead of one 802.1Q tag only.
+  A membership report behind an S-tag or a QinQ pair used to reach igmpd and
+  be classified as not IP, so no membership row was installed (and, with the
+  PON drop on, the group was dropped). A report is keyed by the VID of its
+  outermost tag. Refs #250.
 - kernel: enabling IGMP and MLD snooping in one call no longer leaves the
   IGMP rule behind when the MLD rules fail to install: the call now puts the
   switch back to what it held before it, so a failed ioctl means nothing
