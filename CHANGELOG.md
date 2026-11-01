@@ -14,8 +14,11 @@ listed here.
   dropped`) and logged as `event=rx_reject reason=length|devid|crc|trailer
   action=dropped|accepted`, at most one line per reason a minute. The same
   check covers injected frames: `omcli --inject` now fills in the trailer and
-  CRC, and `--inject-raw` sends bytes as given. Frames captured from an OLT
-  carry valid CRCs; not yet trialled on a stick.
+  CRC, and `--inject-raw` sends bytes as given. omcid implements the baseline
+  message set only and reports it (OMCC version `0x80`); docs/SETTINGS.md now
+  says that an `OMCC_VER` copied from an ONU that advertises the extended set
+  gets its extended messages dropped. Frames captured from an OLT carry valid
+  CRCs; on a stick, 75 messages from an OLT were answered with none dropped.
   Refs #251.
 - README: the DFP-34X-2C3 moves from "never tried" to reported working, on
   one user's report of v1.14.0 on a 2C3 with stock `V1.1.4-250620`.
