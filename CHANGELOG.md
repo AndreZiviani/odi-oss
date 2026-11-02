@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- Releases: every release now also carries `<version>-sources.tar`, the
+  complete corresponding source of the image for GPL and LGPL compliance: the
+  exact upstream tarballs the build verified (Linux kernel and signature,
+  busybox, dropbear, iproute2), uClibc-ng with the odi-toolchain tag (build
+  tools gcc, binutils and the Linux headers are named, not included), `confd` and `metricsd` at their
+  tags, and this repository at the release commit, with a `SOURCES.md`
+  manifest (component, version, license, URL, sha256), rebuild and uClibc-ng
+  relink steps and a written offer. Built by `tools/bundle-sources.sh` in the
+  release job, listed in `SHA256SUMS` and attested; the job fails if the
+  bundle is missing, empty or altered. See `docs/LICENSING.md`. Refs #275.
+
 - omcid checks every received frame before it reads or changes anything. A
   frame under 48 bytes, with a device identifier other than 0x0a (an
   extended-format 0x0b frame included, so the OLT falls back to baseline) or

@@ -5,8 +5,9 @@ name: release
 # ROOT_PW=locked (docs/BUILDING.md): a public release image ships keys-only,
 # never a per-build password baked into a squashfs anyone can unpack. The
 # result is published as a GitHub release: the tarball, its SHA256SUMS, an
-# SBOM (tools/generate-sbom.sh), release notes built from CHANGELOG.md by
-# tools/release-notes.sh, and a build-provenance + SBOM attestation for the
+# SBOM (tools/generate-sbom.sh), the corresponding-source bundle
+# (tools/bundle-sources.sh, docs/LICENSING.md), release notes built from
+# CHANGELOG.md by tools/release-notes.sh, and a build-provenance + SBOM attestation for the
 # tarball, its checksums and the SBOM itself -- see docs/FLASHING.md,
 # "Verifying a release", for how to check them.
 #
@@ -88,7 +89,7 @@ jobs:
         with:
           path: |
             dl
-          key: dl-release-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh', 'src/release-sha256.txt') }}
+          key: dl-release-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh', 'src/release-sha256.txt', 'tools/bundle-sources.sh', 'toolchain/images.env') }}
 
       - name: Version from the tag
         run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
@@ -107,6 +108,17 @@ jobs:
             echo "release.yml: a root-password file exists for a ROOT_PW=locked build -- refusing to publish" >&2
             exit 1
           fi
+
+      # The complete corresponding source of the image (GPL/LGPL): the same
+      # verified tarballs make image-all used from dl/, uClibc-ng, confd and
+      # metricsd at their tags and this tree, in one
+      # asset. The script checks its own result and fails the job if it is missing,
+      # empty or does not match its own checksums; its sha256 joins
+      # SHA256SUMS, so the attestation below covers it too.
+      - name: Corresponding source bundle
+        run: |
+          tools/bundle-sources.sh "$VERSION" "out/image/$VERSION-sources.tar"
+          (cd out/image && sha256sum "$VERSION-sources.tar" >> SHA256SUMS)
 
       # Reads the pins already in the tree (kernel/618/fetch.sh,
       # packages/*/build.sh, toolchain/images.env) plus the metricsd/confd
@@ -127,6 +139,7 @@ jobs:
         with:
           subject-path: |
             out/image/${{ env.VERSION }}.tar
+            out/image/${{ env.VERSION }}-sources.tar
             out/image/SHA256SUMS
 
       - name: Attest SBOM
@@ -146,9 +159,14 @@ jobs:
         run: |
           assets=(
             "out/image/$VERSION.tar"
+            "out/image/$VERSION-sources.tar"
             out/image/SHA256SUMS
             out/image/sbom.cdx.json
           )
+          [ -s "out/image/$VERSION-sources.tar" ] || {
+            echo "release.yml: the sources asset is missing or empty -- refusing to publish" >&2
+            exit 1
+          }
           flags=()
           case "$VERSION" in
           *-*) flags=(--prerelease --latest=false) ;;
