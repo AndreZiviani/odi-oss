@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.15.0 (2026-11-02)
+
 - Releases: confd v1.13.0. System, Backup & reset can encrypt the
   configuration backup with a password, in the browser; the file opens
   without the stick with `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000
