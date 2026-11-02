@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.13.0. System, Backup & reset can encrypt the
+  configuration backup with a password, in the browser; the file opens
+  without the stick with `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000
+  -md sha256`, and restore takes both encrypted and plain files. Config,
+  Network shows `SFP_HOST_DDM` (whether the router can read the module
+  identity and diagnostics from the stick) and applies it at once, without a
+  reboot.
+
 - Releases: every release now also carries `<version>-sources.tar`, the
   complete corresponding source of the image for GPL and LGPL compliance: the
   exact upstream tarballs the build verified (Linux kernel and signature,
