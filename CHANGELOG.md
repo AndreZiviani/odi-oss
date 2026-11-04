@@ -5,6 +5,26 @@ listed here.
 
 ## Unreleased
 
+- Kernel: hardening options on, each measured. New: `FORTIFY_SOURCE`,
+  hardened user copies, heap memory zeroed on allocation and on free,
+  list-corruption checks that stop the kernel (`LIST_HARDENED`,
+  `BUG_ON_DATA_CORRUPTION`), the stack-end check on every schedule,
+  `dmesg_restrict`, the user heap start randomised too, mmap randomisation
+  widened to 15 bits and nothing mapped below 64 KB; and, as `sysctl.*` words
+  on the built-in command line, `kptr_restrict=2` and the four
+  `fs.protected_*` rules. The strong stack protector and zeroed stack
+  variables, already on by default, are now stated. 9,410 bytes of uImage
+  (1,172,555 of 1,359,872, 187,317 spare). docs/KERNEL.md ("Hardening") has the
+  matrix: what this CPU and toolchain support (no read-only kernel text, no
+  kernel address randomisation, no virtually mapped stacks on this MIPS; a
+  trapping UBSAN would emit trap instructions the core does not run; gcc
+  plugins do not build with the toolchain image), the bytes each option
+  costs, and why `ZERO_CALL_USED_REGS`, the slab freelist options (they need
+  `SLUB_TINY` off) and `PANIC_ON_OOPS` stay off for now.
+  `tools/check-kernel-hardening.sh` fails `make lint` when the seed loses one
+  of the options and `kernel/build.sh` when `olddefconfig` drops one. Not yet
+  trialled on hardware. Refs #254.
+
 - omcid: an OLT lock of the Ethernet UNI no longer takes the host port down
   by default. On this SFP that port is the stick's only management path, so
   a lock from the OLT (ME 11 administrative state) cut the web UI, ssh,

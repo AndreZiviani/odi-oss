@@ -420,6 +420,10 @@ lint:
 	@echo "workflow actions pinned to commit SHAs: clean"
 	@./tools/check-doc-pins.sh
 	@echo "documented version pins match the code: clean"
+	@# The kernel hardening options stay stated in the seed; kernel/build.sh
+	@# runs the same script on the completed .config (docs/KERNEL.md,
+	@# "Hardening").
+	@./tools/check-kernel-hardening.sh
 
 clean:
 	rm -rf build out
