@@ -46,6 +46,7 @@
 #define EV_MSG_DONTWAIT  0x40
 #define EV_LOG_PATH      "/dev/log"
 #define EV_FAC_DAEMON    (3 << 3)
+#define EV_SEV_WARNING   4
 #define EV_SEV_NOTICE    5
 #define EV_SEV_INFO      6
 
@@ -791,6 +792,42 @@ void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used)
 	ev_str(&e, "result", "unsupported");
 	ev_str(&e, "built_as", u);
 	ev_emit(&e, EV_SEV_NOTICE);
+}
+
+/* The OLT locked or unlocked an Ethernet UNI (apply_uni.c). action is
+ * applied (OMCI_UNI_LOCK=1: the host link goes down now, and with it the
+ * web UI and ssh, so the line is a warning and is sent before the port is
+ * touched), ignored (the default: answered, the port stays up), unlocked
+ * (the OLT's unlock of a port it had locked) or cleared (a MIB reset or an
+ * omcid start unlocked a port a lock had taken down; inst is 0). One line
+ * per change of state of the port, so an OLT that repeats the same Set says
+ * it once. */
+void ev_uni_lock(uint16_t inst, int port, const char *action)
+{
+	/* 0 never locked, 1 unlocked, 2 lock ignored, 3 lock applied */
+	static uint8_t st[32];
+	uint8_t to = action[0] == 'a' ? 3 : action[0] == 'i' ? 2 : 1;
+	struct evline e;
+
+	if (port < 0 || port >= 32)
+		return;
+	if (action[0] == 'c') {
+		to = st[port];
+		st[port] = 0;
+		if (to != 3)
+			return;
+	} else {
+		if (st[port] == to || (to == 1 && st[port] <= 1))
+			return;
+		st[port] = to;
+	}
+	ev_begin(&e, "uni_lock");
+	ev_num(&e, "inst", inst);
+	ev_num(&e, "port", (unsigned long)port);
+	ev_str(&e, "action", action);
+	if (action[0] == 'a')
+		ev_str(&e, "effect", "host_link_down_until_unlock");
+	ev_emit(&e, action[0] == 'a' ? EV_SEV_WARNING : EV_SEV_NOTICE);
 }
 
 /* Once a second, from the main loop. */

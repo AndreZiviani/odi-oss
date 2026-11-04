@@ -561,6 +561,9 @@ void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
 /* A class 84 forward operation no bridge rule can express, built as
  * `used` instead: logged once per code for the life of the process. */
 void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used);
+/* An OLT lock or unlock of an Ethernet UNI, or a lock a MIB reset or start
+ * undid (apply_uni.c): event=uni_lock, once per change of a port's state. */
+void ev_uni_lock(uint16_t inst, int port, const char *action);
 void ev_tick(void);
 
 /* ------------------------------------------- alarms and AVCs (alarm.c)

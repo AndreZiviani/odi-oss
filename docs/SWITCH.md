@@ -357,7 +357,8 @@ commands, from the command table of the shipped binary:
   `PORT_FORCE_SELECT(0)`: both ISPs leave the UNI unlocked. On this SFP the
   UNI is the host port, so a lock takes the host link down, the stick's own
   management path included, until the OLT unlocks; OMCI does not cross that
-  port. A lock of the PON or CPU port is refused (it would cut OMCI itself).
+  port. omcid sends a lock only with `OMCI_UNI_LOCK=1`; by default it
+  answers the OLT's lock and keeps the port up. A lock of the PON or CPU port is refused (it would cut OMCI itself).
   The host tests compare the unlock bracket with the capture under the
   stock policy (`test/odi_host_pause_test.c` covers the lock).
 - **cmd 64**: `{sel, enable, portMask}`, a lookup-miss flood mask, as the
