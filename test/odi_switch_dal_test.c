@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_dal_test.c -- dumps one ring-dump bracket per implemented
  * switch-core leaf (odi_switch_dal.h), using the parameters recovered from the boot5

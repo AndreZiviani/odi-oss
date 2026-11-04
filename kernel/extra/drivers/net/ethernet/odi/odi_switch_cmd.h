@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_cmd.h -- odi_switch_cmd(), the OMCI driver command dispatch
  * omcid drives through the odi_omci netlink socket, keyed on the command

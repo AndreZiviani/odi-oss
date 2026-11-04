@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_ramlog.c -- odi_ramlog.h's own implementation. Two halves, the same
  * shape every other odi_* driver in this directory uses:

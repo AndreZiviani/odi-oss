@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # svc-dropbear.sh -- the /etc/inittab respawn entry for dropbear. The key
 # setup (mkdir, keygen, the zero-length-key recovery) runs on every start,
 # same as it did every boot from /etc/init.d/services before -- idempotent,

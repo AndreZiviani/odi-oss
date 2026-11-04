@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Hand-installed ACL rules that count multicast, or copy or take the host's
  * IGMP to the CPU, for measuring the switch (odi_switch_acl_probe.h says what

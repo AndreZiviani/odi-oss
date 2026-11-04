@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_isp2_test.c -- cmd 51 on the service profile of the second stick,
  * the one the isp1-only replay got wrong. ISP2 is PPPoE over C-TAG VID 10

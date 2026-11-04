@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* MLD snooping, the IPv6 half of igmpd -- see mld.h. No syscalls. */
 #include "mld.h"
 #include "odi_sw_ioctl.h"

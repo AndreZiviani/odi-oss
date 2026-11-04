@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_us_ploam_test.sh -- compiles and runs odi_gpon_us_ploam_test.c,
 # the upstream PLOAM push against the register mock: pushed only when the
 # urgent queue has room within the bounded wait, counted as dropped

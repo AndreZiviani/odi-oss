@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Randomised cases for out_fmt, generated identically on both sides.
  *
  * fmt_cases.h is a hand-written list of the conversions the vendor's format

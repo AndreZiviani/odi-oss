@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # /etc/init.d/services `stop <name>` writes /etc/config/<name>.off and kills
 # the daemon; it stays down only if that daemon's respawn entry,

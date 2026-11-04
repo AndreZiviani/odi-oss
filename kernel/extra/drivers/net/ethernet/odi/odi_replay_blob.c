@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_replay_blob.c -- validation and record decoding for the
  * register-replay firmware blobs; odi_replay_blob.h has the format and the

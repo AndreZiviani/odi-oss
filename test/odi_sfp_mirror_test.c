@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_sfp_mirror_test.c -- host test of the host-side SFP EEPROM
  * (odi_sfp_mirror.c), against the register model (test/odi_switch_mock.h)

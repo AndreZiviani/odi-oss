@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # omcli — the omcicli replacement.
 #
 # Same freestanding runtime as diag and omcid: one _start, one syscall layer,

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_gpon_init.c -- odi_gpon_init_apply(), the replay of gpon_init.bin
  * through odi_replay_run() with the serial number substituted, and the

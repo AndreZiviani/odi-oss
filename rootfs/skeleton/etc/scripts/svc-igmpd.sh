@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # svc-igmpd.sh -- the /etc/inittab respawn entry for igmpd. Opt-in: nothing
 # runs unless IGMP_SNOOPING=1 is set in the config store (docs/SETTINGS.md),
 # and with it set igmpd still does nothing until the OLT provisions a

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # svc-metricsd.sh -- the /etc/inittab respawn entry for metricsd. Checked on
 # every start (a fresh exec, not only at boot), so `services stop metricsd`
 # (writes the .off flag and kills the running process) takes effect the

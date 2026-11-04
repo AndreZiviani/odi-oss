@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_reg_test.sh -- compiles and runs odi_reg_test.c with the host cc.
 # No kernel, no target toolchain: same unity-build shape as
 # odi_switch_dal_test.sh. Part of `make test-host`.

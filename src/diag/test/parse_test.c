@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Host-side parser harness: feeds each line of stdin through parse_line()
  * and prints what it resolved, for the Makefile to diff against
  * test/cases.expected. A line starting with "? " is a help query instead:

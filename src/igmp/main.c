@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* igmpd: IGMP snooping for the one UNI.
  *
  * What it does, when the OLT asks for snooping (omcid writes the profile to

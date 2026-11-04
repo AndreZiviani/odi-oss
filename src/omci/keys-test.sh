@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The two keys that decide which entities the ONU creates for itself:
 #
 #   OMCI_VEIP_SLOT_ID (config store, the stock key; effective only with bit

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Image assembly: squashfs-tools writes the rootfs, qemu-user-static runs the
 # cross-built busybox just far enough to ask it which applets it has.
 #

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """The GEM flow descriptor, which is a 68-byte structure passed BY VALUE.
 
 The three wrappers that send command 25 all look at first like they pack a

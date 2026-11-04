@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/trial-guard.sh, off the device. The slot
 # state file, /proc/uptime, /proc/net/tcp{,6} and the odi_wdt register are

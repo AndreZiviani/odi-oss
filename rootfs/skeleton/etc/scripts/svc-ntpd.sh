@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # svc-ntpd.sh -- the /etc/inittab respawn entry for ntpd. Opt-in: the
 # stock image has no NTP client at all, and this one starts ntpd only when NTP_SERVER is set in the
 # config store (docs/SETTINGS.md). The inittab entry is static (busybox

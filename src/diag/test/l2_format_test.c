@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The L2 listing line, natively: every row type, the column alignment
  * against the header, and the fields a reader zips by header word.
  *

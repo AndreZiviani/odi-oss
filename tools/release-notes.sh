@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Release notes for a GitHub release: CHANGELOG.md's own section for the
 # given version, plus a short flash-and-first-login paragraph. Used by

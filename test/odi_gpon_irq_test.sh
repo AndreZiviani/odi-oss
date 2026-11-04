@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_irq_test.sh -- compiles and runs odi_gpon_irq_test.c, the switch
 # interrupt line of odi_gpon_isr.c, with the host cc against the register
 # mock. Part of `make test-host`.

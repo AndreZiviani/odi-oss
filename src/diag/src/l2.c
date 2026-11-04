@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* `l2-table get all` and `l2-table get index <n>`, over /dev/odi_sw. */
 #include "l2.h"
 #include "hw.h"

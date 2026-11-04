@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Recover omci_app's CLI command table.
 
 OMCI_HandleMsg dispatches msgType 4 through a 45-entry gp-relative jump table.

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The UNI side: the PPTP Ethernet UNI (class 11), the MAC bridge port
  * (class 47) and service profile (class 45) work on a UNI port, the dot1
  * rate limiter (class 298), flooding, and the DSCP-to-P-bit map of classes

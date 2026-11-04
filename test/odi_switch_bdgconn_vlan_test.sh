@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_bdgconn_vlan_test.sh -- cmd 51 for the class 84 forward
 # operation rules: their CF match and the VLAN rows they leave.
 set -euo pipefail

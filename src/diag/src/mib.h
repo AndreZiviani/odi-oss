@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* MIB counter names, by the index ODI_SW_IOC_MIB_GET takes (odi_switch_mib.c,
  * odi_sw_mib_get()). The index is the ABI, and it is the stock CLI's counter
  * order, so the order matters. The names are RFC 1213/1493/2665 names and are

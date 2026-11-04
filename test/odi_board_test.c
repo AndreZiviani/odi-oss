@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_board_test.c -- CONFIG_ODI_BOARD own odi_board_init() (odi_board.c),
  * exercised against the mock the same way odi_switch_sdkinit_test.c

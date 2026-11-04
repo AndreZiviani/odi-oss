@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* flock(2) for the o32 ABI, the one thing nv's writer lock needs.
  *
  * __NR_flock is __NR_Linux + 143 (asm/unistd_o32.h), EAGAIN (EWOULDBLOCK) is

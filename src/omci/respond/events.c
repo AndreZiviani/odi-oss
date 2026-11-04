@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* omcid's event lines: what the OLT did to this ONU's management channel, and
  * what omcid itself did, one line per event.
  *

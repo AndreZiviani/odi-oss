@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Assemble a flashable image: stage the rootfs, squash it, and tar it with the
 # kernel, our fwu.sh and the md5.txt the flasher checks.

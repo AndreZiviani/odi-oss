@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_optics_model_test.c -- odi_i2c_read_bytes()/odi_ddm_get() against the
  * scriptable SFF-8472 model (odi_optics_model.h), covering what the fixed

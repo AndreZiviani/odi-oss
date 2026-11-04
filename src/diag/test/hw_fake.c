@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Fixed hardware answers for the exporter contract test -- the baseline
  * scenario: a healthy module, no alarm, no warning, no LOS.
  *

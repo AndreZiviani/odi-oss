@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_i2c_test.sh -- compiles and runs odi_i2c_test.c with the host cc.
 # odi_i2c.c is #included directly by the test (unity build, same posture
 # as odi_gpon_irq_test.sh): no kernel, no target toolchain, its portable core

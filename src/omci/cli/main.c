@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* omcli -- omcicli, without the race.
  *
  * See ../README.md for the design rationale. The wire format is the

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The switch accessors igmpd programs through: /dev/odi_sw ioctls,
  * answered by odi_switch_l2.c in our kernel (odi_reg.c dispatches them under
  * odi_switch_lock).

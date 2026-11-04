@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/ntp-event.sh and the status-file handling in
 # svc-ntpd.sh, off the device. The events are fed the way busybox ntpd feeds

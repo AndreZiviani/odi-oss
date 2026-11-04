@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # respawn.sh -- exec a foreground daemon under a busybox init `respawn`
 # entry, after setting its own oom_score_adj (docs/SETTINGS.md).
 #

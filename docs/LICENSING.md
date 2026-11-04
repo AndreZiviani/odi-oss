@@ -10,7 +10,7 @@ and no copied vendor source; every kernel module that used to be a closed
 binary blob on this class of device has an open replacement of our own
 here instead, built straight into the kernel (`docs/KERNEL.md`).
 
-## The kernel: GPL-2.0
+## The kernel: GPL-2.0-only, with our additions GPL-2.0-or-later
 
 `kernel/618/mainline/` is a pristine, GPG-verified `cdn.kernel.org` release
 tarball (`kernel/618/fetch.sh`), never committed. `kernel/618/patches/` are
@@ -21,8 +21,13 @@ drivers, and `drivers/net/ethernet/odi/`, our own driver directory
 console) — an independent implementation,
 our own code written from public specifications (ITU-T G.984.3 and G.988 for
 GPON and OMCI, SFF-8472 for optics), hardware behaviour observed on this
-board, and the behaviour of the stock firmware observed as a black box. All
-GPL-2.0, same as the kernel tree it extends.
+board, and the behaviour of the stock firmware observed as a black box.
+
+The kernel tree itself stays **GPL-2.0-only**, as upstream ships it. Our
+patches are hunks against upstream files and follow the license of the file
+they modify (GPL-2.0-only); the files in `kernel/extra/` are ours and are
+**GPL-2.0-or-later**, combined into the GPL-2.0-only kernel, which
+GPL-2.0-or-later permits.
 
 ### The register replay tables
 
@@ -91,9 +96,10 @@ same steps and the written offer for anything else.
 `src/diag`, `src/omci`, `src/igmp`, `src/nv`, the rootfs skeleton
 (`rootfs/skeleton/`), and every build script in this repo are entirely
 ours, written for this project. They are licensed under the **GNU General
-Public License, version 2 or later** (GPL-2.0-or-later). The kernel patches
-and drivers under `kernel/618/patches/` and `kernel/extra/` are also
-GPL-2.0-or-later, combined into a GPL-2.0-only kernel as upstream ships it.
+Public License, version 2 or later** (GPL-2.0-or-later). The drivers and
+board code under `kernel/extra/` are also GPL-2.0-or-later, combined into a
+GPL-2.0-only kernel as upstream ships it; the patches under
+`kernel/618/patches/` modify upstream files and stay GPL-2.0-only.
 The full GPL-2.0 text (correct for "or later") is in [`LICENSE`](../LICENSE).
 
 ### `src/diag`: what comes from the stock firmware, and what is ours
@@ -130,6 +136,24 @@ SBOM of a release (`tools/generate-sbom.sh`) records that license for both
 instead of `NOASSERTION`. `metricsd` also bundles one small piece of MIT code
 that its own repository documents; the terms of the release a given image
 carries are those of that tag in the project's repository.
+
+## How each file says which license it has (REUSE)
+
+The tree follows the [REUSE](https://reuse.software) specification. Source
+files (C, headers, shell, Python, Makefiles, Kconfig, workflows, the rootfs
+scripts) carry an `SPDX-FileCopyrightText` and an
+`SPDX-License-Identifier` header. Files that take no comment, or that tests
+compare byte for byte (documents, test goldens and fixtures, the register
+replay tables, images, the kernel config, the rootfs config files, the
+patches, the generated sources in `src/omci/generated/`), are annotated in
+[`REUSE.toml`](../REUSE.toml). The license texts are in `LICENSES/`;
+`LICENSE` stays as the top-level GPL-2.0 text. Everything is
+GPL-2.0-or-later except the kernel patches (GPL-2.0-only, as above).
+`make lint` runs `reuse lint` when the tool is installed, and CI always runs
+it, with the version pinned and hash-checked in
+`tools/reuse-requirements.txt`. A new file gets a header in the same
+change; `reuse annotate --copyright "<year> <name>" --license
+GPL-2.0-or-later <file>` writes it.
 
 ## Public references this code is written against
 

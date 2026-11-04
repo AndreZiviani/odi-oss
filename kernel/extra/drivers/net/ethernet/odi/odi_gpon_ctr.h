@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_ctr.h -- the GPON MAC link counters, accumulated, and the link
  * state accounting kept beside them, for /proc/odi_gpon/status and

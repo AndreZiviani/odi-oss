@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_aes_key_test.sh -- compiles and runs odi_gpon_aes_key_test.c, the
 # Request_Key path through the FSM and the register leaves against the
 # register mock: a new key per request, the same bytes upstream and in the

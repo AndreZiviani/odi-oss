@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/sfp-host-ddm.sh and its boot step in rcs-lib.sh
 # (pon_step_sfphostddm), off the device (SFP_HOST_DDM).

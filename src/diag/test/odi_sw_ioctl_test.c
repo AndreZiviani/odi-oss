@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Re-derives every ODI_SW_IOC_* request number (odi_sw_ioctl.h) from the
  * MIPS o32 ioctl composition formula rather than trusting the header's hex
  * literals: a wrong constant still compiles and still "works", just against

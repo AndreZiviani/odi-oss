@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 name: ci
 
 # Pull requests and pushes to main run the tests, as parallel jobs: lint, the host-side
@@ -70,7 +73,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Lint (shellcheck, inline-quote check)
+      # The pinned REUSE tool, installed with hash checking. pip gets a
+      # timeout and retries, and the step a wall-clock limit, so a stalled
+      # index cannot hold the job.
+      - name: Install reuse (pinned, hash-checked)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/reuse"
+          timeout 300 "$RUNNER_TEMP/reuse/bin/pip" install --require-hashes \
+            --retries 3 --timeout 30 -r tools/reuse-requirements.txt
+          echo "$RUNNER_TEMP/reuse/bin" >> "$GITHUB_PATH"
+
+      - name: Lint (shellcheck, inline-quote check, REUSE)
+        env:
+          ODI_REQUIRE_REUSE: "1"
         run: |
           command -v shellcheck >/dev/null || {
             tools/ci-apt.sh shellcheck

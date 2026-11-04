@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* omcicap -- capture the OMCI channel between the OLT and this ONU.
  *
  * OMCI frames do not arrive on a netdev: the driver redirects them to

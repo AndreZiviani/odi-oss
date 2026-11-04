@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_hwmon_test.sh -- compiles and runs odi_hwmon_test.c with the host cc.
 # Only the pure decode and alarm logic of odi_hwmon.h are covered; the hwmon registration is
 # kernel-only. Part of `make test-host`.

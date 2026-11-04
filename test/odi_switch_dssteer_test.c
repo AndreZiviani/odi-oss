@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_dssteer_test.c -- which queue a downstream frame takes. The
  * frame's internal priority picks it (the UNI's priority to queue map is the

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_init_clean_test.sh -- compiles and runs odi_gpon_init_clean_test.c,
 # the GPON MAC reset wait and the boot clean of the GEM-port CAM, the
 # Alloc-ID CAM and the flow type words (odi_gpon_init.c), with the host cc

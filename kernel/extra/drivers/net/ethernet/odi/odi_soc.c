@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_soc.c -- the SoC-window accessors and their allowlist (odi_soc.h).
  * The host unity builds get the window from test/odi_soc_mock.h.

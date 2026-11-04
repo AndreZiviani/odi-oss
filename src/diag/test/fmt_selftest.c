@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Target side: the same cases through out_fmt, run under qemu. Its output is
  * diffed against fmt_ref's, so any disagreement with a real printf on a format
  * the vendor uses fails the build rather than showing up as a misaligned

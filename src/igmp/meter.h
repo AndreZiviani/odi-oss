@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Metering the joined groups: which client joined each, when, how much of
  * its stream arrives, and whether it stopped arriving.
  *

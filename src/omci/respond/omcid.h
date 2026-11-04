@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* What the modules of omcid share.
  *
  * omcid was one 3122-line main.c. The split is by what a piece TALKS TO,

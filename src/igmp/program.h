@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The switch side of the snooper. See program.c for why the writes are
  * opt-in. */
 #ifndef ODI_IGMP_PROGRAM_H

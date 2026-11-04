@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_switch_port.c -- port and L2 leaves: L2 ageing (cmd 62), the UNI PHY
  * auto-negotiation (cmd 30), the port force select (cmd 32), the flood

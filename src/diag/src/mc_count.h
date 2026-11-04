@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* `mc-count`: hand-installed multicast group counters, the rules igmpd meters
  * its groups with (odi_switch_mc_count.h in the kernel tree has what they
  * match and why they only count). Like the probes, the rules belong to the

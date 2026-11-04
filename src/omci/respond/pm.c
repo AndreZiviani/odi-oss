@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Performance monitoring history data: the 15-minute interval framework, and
  * ME 312 (FEC PMHD) on it.
  *

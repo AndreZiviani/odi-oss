@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_switch_pin.c -- the stick's own MACs pinned to the CPU port as
  * static L2 rows, so a frame from the fibre carrying one of them as its

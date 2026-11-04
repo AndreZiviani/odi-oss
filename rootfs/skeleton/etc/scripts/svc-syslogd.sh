@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # svc-syslogd.sh -- the /etc/inittab respawn entry for syslogd. Checked on
 # every start (a fresh exec, not only at boot), so a config change or
 # `apply.sh syslog` (docs/SETTINGS.md, SYSLOG_SERVER) takes effect the

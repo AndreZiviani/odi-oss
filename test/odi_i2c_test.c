@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_i2c_test.c -- host-side unit test for odi_i2c.c's
  * odi_i2c_read_bytes(): the register-write shape (I2C_MASTER_SETUP re-asserted,

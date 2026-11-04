@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_board.h -- the board init: the switch-core, LED and I2C setup the
  * stock board code makes before the first /proc/odi_init verb, replayed

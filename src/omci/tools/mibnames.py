@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Names the committed OMCI model uses for entities whose stock plugins name
 them after the OLT or ONT make they were written for.
 

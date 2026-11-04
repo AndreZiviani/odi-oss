@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # shellcheck shell=sh
 #
 # /etc/init.d/rcS.dev -- the development aids of the boot, sourced by both

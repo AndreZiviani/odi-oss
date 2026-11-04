@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_tbl_desc_test.c -- asserts the exact TABLE_CMD and
  * TABLE_WRITE_WORD register sequence odi_switch_table_write() produces

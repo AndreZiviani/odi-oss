@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Our /etc/scripts/flash, the config accessor confd reaches device settings
 # through. Runs on the HOST against a sample config, so it is fast and needs no
 # container; test/rootfs_chroot_inner.sh separately proves the same script runs

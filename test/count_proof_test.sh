@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # count_proof_test.sh -- runs tools/mcast-probe/count-proof.sh against stub
 # diag, timeout and pidof: the counters it installs, window by window, the
 # results block and its verdicts, and that it puts everything back however

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_ddm.c -- odi_ddm.h's own implementation: per-selector (device, byte
  * address, length) table plus the odi_i2c_read_bytes() call and the

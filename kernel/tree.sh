@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The pristine Linux 6.18 tree as one tarball: build/kernel-618/tree.tar.
 #
 # kernel/build.sh reads it to compile the tree in the prebuilt toolchain

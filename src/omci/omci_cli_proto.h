@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The omcid CLI protocol: argv in, a framed byte stream out.
  *
  * The vendor's arrangement is a 240-byte payload on one queue and, for

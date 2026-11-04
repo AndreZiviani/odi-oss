@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # mcast-probe.sh -- measure, on a stick, what the switch does with multicast
 # and IGMP, with the ACL probes of `diag acl-probe` (docs/SWITCH.md,

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # image/fwu.sh must run on the STOCK vendor image, because that is what it is
 # flashed FROM the first time. The stock userland is busybox 1.12.4 with 52

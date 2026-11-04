@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_reg.c -- /dev/odi_sw, a misc device exposing the switch-core
  * register and per-port MIB accessors of odi_switch_mib.c (which

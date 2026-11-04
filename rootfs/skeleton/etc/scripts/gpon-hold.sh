@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # gpon-hold.sh -- the marker of a kept Emergency Stop (GPON_KEEP_DISABLE,
 # docs/SETTINGS.md): when the OLT disables this ONU (G.984.3

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The command handlers, one per enum cmd_id (table.h). */
 #ifndef ODI_COMMANDS_H
 #define ODI_COMMANDS_H

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_omci.c -- the OMCI frame transport between omcid and the PON: a
  * ODI_OMCI_NETLINK kernel socket speaking the protocol of src/omci/nl.h

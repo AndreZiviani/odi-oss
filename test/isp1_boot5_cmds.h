@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * isp1_boot5_cmds.h -- the 91 driver commands of the ISP1 provisioning
  * capture (test/fixtures/isp1-260922-boot5.txt), in capture order, with

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_sfp_mirror.c -- odi_sfp_mirror.h's implementation: the fill, the
  * enable, the refresh, and (kernel build) the request state and the

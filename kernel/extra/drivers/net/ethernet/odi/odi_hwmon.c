@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_hwmon.c -- the SoC die temperature as a standard hwmon device,
  * /sys/class/hwmon/hwmonN with name rtl9602c_soc and temp1_input in

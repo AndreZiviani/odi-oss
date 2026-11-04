@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Build the module-load replay data table ("module-load replay" /
 "modload category 0 split") from a regtrace v5 capture of omcidrv.ko/
 pf_rtk.ko loading.

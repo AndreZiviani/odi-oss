@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_dal_test.sh -- compiles odi_switch_dal_test.c, dumps one
 # bracket per implemented leaf/instance, and checks each against its
 # boot5 fixture with tools/regtrace/compare.py. Part of `make

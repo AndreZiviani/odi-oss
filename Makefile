@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi-oss — firmware for the ODI DFP-34X-2C2, built from source.
 #
 # Read README.md and docs/FLASHING.md before expecting a working image.
@@ -20,7 +23,7 @@ help:
 	@echo "  image-all       everything above from a clean clone, in order (about 25 min native)"
 	@echo "  test            lint + the host-side tests + diag + the OMCI daemon under qemu, side by side (a few minutes)"
 	@echo "  test-omci-respond  omcid unit tests (class 171 decode), test-igmp  igmpd unit tests"
-	@echo "  lint            shellcheck every script here"
+	@echo "  lint            shellcheck every script here, the repo rules, REUSE compliance"
 	@echo "  test-rcs        the rcS action trace against its goldens (needs out/busybox, docker)"
 	@echo "  test-qemu       boot the real rootfs under qemu-system-mips, ssh/web/exporter + resilience scenarios"
 	@echo
@@ -420,6 +423,19 @@ lint:
 	@echo "workflow actions pinned to commit SHAs: clean"
 	@./tools/check-doc-pins.sh
 	@echo "documented version pins match the code: clean"
+	@# REUSE: every file has a copyright and a license, in its header or in
+	@# REUSE.toml, and every license used has its text in LICENSES/. The tool
+	@# is optional locally (pip install --require-hashes -r
+	@# tools/reuse-requirements.txt); CI sets ODI_REQUIRE_REUSE=1 so a missing
+	@# tool fails there instead of passing silently.
+	@if command -v reuse >/dev/null 2>&1; then \
+		reuse lint -q && echo "REUSE compliance: clean"; \
+	elif [ -n "$$ODI_REQUIRE_REUSE" ]; then \
+		echo "lint: reuse is required here (ODI_REQUIRE_REUSE) but is not installed" >&2; \
+		exit 1; \
+	else \
+		echo "REUSE compliance: skipped, reuse not installed (see tools/reuse-requirements.txt)"; \
+	fi
 
 clean:
 	rm -rf build out

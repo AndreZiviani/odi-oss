@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The two driver payloads a MAC bridge port config data row builds directly.
  *
  * Both were recovered from MacBriPortCfgDataDrvCfg in mib_MacBriPortCfgData.so
