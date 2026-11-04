@@ -6,4 +6,4 @@
 [ -x /sbin/klogd ] || exec /etc/scripts/respawn-off.sh
 
 # -n: foreground, same reason as svc-syslogd.sh.
-exec /etc/scripts/respawn.sh 0 /var/log/services.log /sbin/klogd -n
+exec /etc/scripts/respawn.sh klogd 0 /var/log/services.log /sbin/klogd -n

@@ -189,6 +189,40 @@ for svc in dropbear confd metricsd omcid; do
 	echo "  $svc: respawned (pid $pid -> $newpid)"
 done
 
+say "scenario: repeated kill -9 of dropbear, confd, metricsd, omcid -- backoff, state file, log line, still back"
+# The restart budget (rootfs/skeleton/etc/scripts/respawn.sh): a daemon that
+# dies within 30 s of its start is restarted after 1, 2, 4 ... seconds, up to
+# its cap, and every start rewrites /var/run/respawn/<name>. Five kills in a
+# row, each as soon as the previous one is back, so the runs are all short.
+# Each wait for the new pid is bounded (20 s; the longest wait here is 8 s).
+svc_pid() {
+	# PPid 1: the entry init tracks, not a dropbear session child
+	sshx "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = $1 ] && grep -q '^PPid:.1\$' \$p/status && echo \${p#/proc/}; done | head -1" 2>/dev/null || true
+}
+for svc in dropbear confd metricsd omcid; do
+	pid=$(svc_pid "$svc")
+	[ -n "$pid" ] || { echo "  $svc: not running, skipping" >&2; continue; }
+	for kill_n in 1 2 3 4 5; do
+		sshx "kill -9 $pid" || true
+		back=0
+		for _ in $(seq 1 20); do
+			sleep 1
+			newpid=$(svc_pid "$svc")
+			[ -n "$newpid" ] && [ "$newpid" != "$pid" ] && { back=1; break; }
+		done
+		[ "$back" = 1 ] || fail "$svc did not come back within 20s of kill -9 number $kill_n"
+		pid=$newpid
+	done
+	state=$(sshx "cat /var/run/respawn/$svc" 2>/dev/null) || state=""
+	fast=$(printf '%s\n' "$state" | sed -n 's/^fast=//p')
+	delay=$(printf '%s\n' "$state" | sed -n 's/^delay_s=//p')
+	[ -n "$fast" ] && [ "$fast" -ge 4 ] || fail "$svc: /var/run/respawn/$svc after five kills says fast=${fast:-none}, wanted 4 or more: $state"
+	[ -n "$delay" ] && [ "$delay" -ge 1 ] || fail "$svc: the latest start waited ${delay:-none} s, wanted a backoff of 1 s or more"
+	printf '%s\n' "$state" | grep -q '^state=\(backoff\|degraded\)$' || fail "$svc: state file is not backoff or degraded: $state"
+	sshx "dmesg | grep -q 'respawn: event=respawn service=$svc state='" || fail "$svc: no event=respawn line in the kernel log"
+	echo "  $svc: back after every kill, fast=$fast, last wait ${delay}s"
+done
+
 say "scenario: rcS registration of the omcid watchdog client is a no-op without /proc/odi_wdt"
 # v1.0.3: no more userland health-kicker to withhold a kick -- odi_wdt owns
 # every rule itself (docs/SETTINGS.md, "Watchdog rules"). Nothing here to
