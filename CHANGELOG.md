@@ -14,10 +14,11 @@ listed here.
   port up (`OMCI_UNI_LOCK=0` keeps working as it did). Every lock and unlock
   is logged once per change as `event=uni_lock action=ignored|applied|
   unlocked|cleared`; with `1`, the `applied` line is a warning sent before
-  the port goes down. A safe-mode boot after short boots now also removes
-  `OMCI_UNI_LOCK=1` (`cleared=OMCI_UNI_LOCK`), so five short boots get a
-  locked-out stick back: the safe mode keeps the PON off, and the next boots
-  ignore the lock. docs/SETTINGS.md, docs/TOOLS.md and docs/SWITCH.md
+  the port goes down. A locked-out stick comes back with a boot with the
+  fibre unplugged (it starts unlocked, and no OLT can lock it again before
+  the setting is turned off); a safe-mode boot after short boots now also
+  removes `OMCI_UNI_LOCK=1` (`cleared=OMCI_UNI_LOCK`), so five short boots
+  work too, without touching the fibre. docs/SETTINGS.md, docs/TOOLS.md and docs/SWITCH.md
   describe it; the drv golden covers both settings and the event order, and
   test/safe_mode_test.sh the clearing. Refs #287.
 
