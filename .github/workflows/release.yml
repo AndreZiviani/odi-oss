@@ -17,8 +17,9 @@ name: release
 #
 # Publication is gated, in order, on:
 #   1. `gate`: the tag commit is an ancestor of origin/main
-#      (tools/check-release-ancestry.sh). Final tags and pre-release tags are
-#      both cut from commits main contains, so one rule covers both.
+#      (tools/check-release-ancestry.sh). Final tags only: a pre-release tag
+#      (v1.2.2-beta.1) is how unmerged work is tested together and may be on
+#      an integration branch, so it skips this check, and still needs 2.
 #   2. `ci`: ci.yml, called as a reusable workflow on that same commit: lint,
 #      the host-side tests, diag, every OMCI suite, test-qemu, the rcS trace
 #      goldens, the clean-build check, `full` and the `reproducible` two-build
@@ -70,7 +71,7 @@ jobs:
           persist-credentials: false
 
       - name: The release commit is on origin/main
-        run: tools/check-release-ancestry.sh "$GITHUB_SHA" main
+        run: tools/check-release-ancestry.sh "$GITHUB_SHA" main "$GITHUB_REF_NAME"
 
   # Every release-grade check of ci.yml, for this exact commit. Job timeouts
   # are the ones set inside ci.yml; the longest (reproducible) is 90 minutes.

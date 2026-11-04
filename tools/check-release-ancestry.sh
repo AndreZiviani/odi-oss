@@ -2,12 +2,15 @@
 #
 # Refuse a release whose commit is not on the protected branch.
 #
-#   tools/check-release-ancestry.sh [<commit> [<branch>]]
+#   tools/check-release-ancestry.sh [<commit> [<branch> [<tag>]]]
 #
 # <commit> defaults to HEAD, <branch> to main. Passes only when <commit> is
 # an ancestor of (or equal to) origin/<branch>, after a bounded fetch of that
-# branch. Final tags and pre-release tags (v1.2.2-beta.1) are both cut from
-# commits that main already contains, so one rule covers both.
+# branch. A final tag is cut from a commit main contains. A pre-release tag
+# (v1.2.2-beta.1: a hyphen after the version) is how unmerged work is tested
+# together and usually sits on an integration branch, so when <tag> has that
+# form the check is skipped and the script passes. Anything else given as
+# <tag> (a branch name on a manual run, a final tag) is checked.
 #
 # The fetch is shallow-safe: a runner checkout is depth 1 by default, which
 # cannot answer an ancestry question, so the branch history is fetched in
@@ -17,7 +20,13 @@ set -euo pipefail
 
 commit=${1:-HEAD}
 branch=${2:-main}
+tag=${3:-}
 limit=${ODI_ANCESTRY_FETCH_TIMEOUT:-120}
+
+if [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+	echo "check-release-ancestry: $tag is a pre-release tag, ancestry is not required"
+	exit 0
+fi
 
 sha=$(git rev-parse --verify --quiet "$commit^{commit}") || {
 	echo "check-release-ancestry: $commit is not a commit in this checkout" >&2

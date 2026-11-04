@@ -46,10 +46,14 @@ if run "$T/shallow" "$tip"; then ok "a shallow clone passes the tip"; else no "a
 git -C "$T/shallow" rev-parse --is-shallow-repository | grep -q false && ok "the shallow clone was deepened" || no "the shallow clone was deepened"
 run "$T/full" "$c1" nosuchbranch && no "a missing branch fails" || ok "a missing branch fails"
 run "$T/full" deadbeefdeadbeef && no "an unknown commit fails" || ok "an unknown commit fails"
-# A pre-release tag on main is judged by its commit, like a final tag.
-(cd "$T/origin" && g -c tag.gpgsign=false tag v9.9.9-beta.1 "$c1")
-git -C "$T/full" fetch -q --tags
-run "$T/full" v9.9.9-beta.1 && ok "a pre-release tag on main passes" || no "a pre-release tag on main passes"
+# The tag name decides: a final tag is judged by its commit, a pre-release
+# tag (hyphen after the version) is exempt, and a name that merely contains
+# a hyphen, like a branch, is not.
+run "$T/full" "$side" main v9.9.9 && no "a final tag on a side branch is refused" || ok "a final tag on a side branch is refused"
+run "$T/full" "$side" main v9.9.9-beta.1 && ok "a pre-release tag on a side branch passes" || no "a pre-release tag on a side branch passes"
+run "$T/full" "$c1" main v9.9.9-beta.2 && ok "a pre-release tag on main passes" || no "a pre-release tag on main passes"
+run "$T/full" "$side" main release-gate && no "a hyphenated branch name is still checked" || ok "a hyphenated branch name is still checked"
+run "$T/full" "$c1" main v9.9.9 && ok "a final tag on main passes" || no "a final tag on main passes"
 # A fetch that cannot happen fails closed instead of passing on stale refs.
 git -C "$T/full" remote set-url origin "file://$T/nowhere"
 run "$T/full" "$c1" && no "an unreachable origin fails closed" || ok "an unreachable origin fails closed"

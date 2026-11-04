@@ -267,9 +267,9 @@ by member with `tools/compare-images.sh`. The kernel and the full image are
 nothing in it runs without a stick. Build the kernel yourself before you
 push a kernel change.
 
-`.github/workflows/release.yml`, on a `v*` tag only, first checks that the
-tagged commit is an ancestor of `origin/main`
-(`tools/check-release-ancestry.sh`), then calls `ci.yml` as a reusable
+`.github/workflows/release.yml`, on a `v*` tag only, first checks that a final
+tag's commit is an ancestor of `origin/main` (`tools/check-release-ancestry.sh`;
+pre-release tags such as `v1.2.2-beta.1` are exempt, they test unmerged work), then calls `ci.yml` as a reusable
 workflow on that same commit and publishes nothing unless every job of it,
 `test-qemu`, the rcS goldens, `full` and `reproducible` included, succeeded.
 Only then does it build the full
