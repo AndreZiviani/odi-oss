@@ -17,7 +17,7 @@ toolchain.
 
 ## Supported hardware
 
-**The ODI DFP-34X-2C2, and the DFP-34X-2C3 on one user report.** The 2C2 is
+**The ODI DFP-34X-2C2, and the DFP-34X-2C3 on user reports.** The 2C2 is
 the device this firmware was written for and the one it is tested on. The
 image drives the board directly (GPIO numbers, I2C wiring of the optics,
 flash layout, switch and PON registers), so on any other stick it will at
@@ -28,8 +28,10 @@ best not boot and at worst leave it unreachable.
   One user installed v1.14.0, unmodified, on a 2C3 that shipped with stock
   `V1.1.4-250620`, booted it on trial and committed it: O5 with full OMCI
   provisioning, internet over IPv4 and IPv6, stable. The image still calls
-  the stick a 2C2 on a 2C3. This is one report, not testing here; if you run
-  a 2C3, a report either way helps.
+  the stick a 2C2 on a 2C3. An earlier report (#42) ran a beta on a 2C3 too. These are reports, not
+  testing here; if you run a 2C3, a report either way helps.
+  [`docs/QUALIFICATION.md`](docs/QUALIFICATION.md) lists what each board, host
+  and feature path has been checked on, and by whom.
 - **Anything else** (other ODI models, other RTL9601/RTL9602C sticks,
   rebrands with a different board): not supported, even with the same SoC.
 
@@ -69,7 +71,7 @@ the same hardware.
 | source | closed | fully open: mainline Linux + our own drivers and userland, all built from source, no proprietary code shipped or linked |
 | kernel | Linux 2.6.30 | Linux 6.18.58 (current LTS), carried as 19 changed lines in 6 mainline files plus our own overlay, so the next LTS port is cheap |
 | switch / GPON MAC driver | closed | our own GPL driver, an independent implementation, built straight into the kernel |
-| fibre loss (LOS/LOF) | leaves O5 on a loss and ranges again when the light is back (seen during a fibre swap) | the same, by G.984.3 Table 10-1: a loss of signal or of framing in O5 enters O6 and, with no POPUP within TO2 (100 ms), O1, giving up the ONU-ID, the Alloc-IDs and the OMCC port; the light back takes it to O2 and the OLT ranges it again. The line is sampled every 100 ms as well as on interrupts, so a pulled fibre is seen with no downstream traffic at all. v1.2.1 and earlier stayed in O5 through a fibre pull while the OLT deregistered them, until a reboot (ISP2). Host-tested against the register model (`test/odi_gpon_los_test.c`); not yet trialled on hardware |
+| fibre loss (LOS/LOF) | leaves O5 on a loss and ranges again when the light is back (seen during a fibre swap) | the same, by G.984.3 Table 10-1: a loss of signal or of framing in O5 enters O6 and, with no POPUP within TO2 (100 ms), O1, giving up the ONU-ID, the Alloc-IDs and the OMCC port; the light back takes it to O2 and the OLT ranges it again. The line is sampled every 100 ms as well as on interrupts, so a pulled fibre is seen with no downstream traffic at all. v1.2.1 and earlier stayed in O5 through a fibre pull while the OLT deregistered them, until a reboot (ISP2). Host-tested against the register model (`test/odi_gpon_los_test.c`) and run on a stick: three fibre pulls of 16 to 27 s, each back to O5 with no reboot (release v1.3.0) |
 | flow control toward the host | the host port negotiates PAUSE with the host, so a stick whose upstream stops draining sends a continuous stream of XOFF frames: an Intel 10G NIC behind it received about 5.9 million, stalled its transmit queue and reset itself in a loop | the host port never sends PAUSE (its transmit side forced off, receive left negotiated): when the upstream cannot drain, the switch drops at its own buffers, as an ONU should, and the host link stays up. Kernel parameter `odi_switch.host_pause` restores the stock behaviour, live or at boot ([`docs/SWITCH.md`](docs/SWITCH.md), "Host port PAUSE"). Host-tested against the register model (`test/odi_host_pause_test.c`) and verified on a stick: no PAUSE toward the host through a fibre pull |
 | host link auto-negotiation | always on (1000BASE-X, clause 37: the PCS control word reads 0x1140 on the stock image too), with no setting to turn it off | on by default, as stock; `HOST_AUTONEG=off` forces 1000BASE-X full duplex for such a router. A change is a trial that reverts by itself after 120 s unless confirmed over the link it changed; a boot whose forced link does not come up falls back to auto-negotiation (and says so in the web UI); three short power-ups in a row (each cut about 80 s after power-on) make the next boot a safe-mode boot that clears the key. Host-tested (`test/odi_host_autoneg_test.c`, `test/host_autoneg_test.sh`) and run on a stick: the register write (PCS control 0x1140 to 0x0140, the link stays reported up), the trial, its expiry and the confirm over the same link, and a forced stick carrying traffic to a host whose SFP port has auto-negotiation off, which the stick with auto-negotiation on does not (link up, no traffic). The boot fallback has not been seen on hardware ([`docs/SETTINGS.md`(docs/SETTINGS.md), "Host port auto-negotiation") |
 | host SerDes mode | Fiber 1G (1000BASE-X) on the DFP-34X-2C2, 2500BASE-X or HiSGMII on the HSGQ XPON stick, chosen by the stock firmware from its own config, with no trial and no fallback | Fiber 1G by default, as stock on the DFP-34X-2C2 and value for value the same sequence; `HOST_SERDES=2500basex` (a 2.5G host, or an HSGQ stick) or `hisgmii` selects another, with the port forced and the auto-negotiation set per mode. The stock `LAN_SDS_MODE` is not read. A change is a trial that reverts by itself after 120 s unless confirmed over the link it changed; a 2500BASE-X boot whose SerDes does not sync falls back to Fiber 1G, alternating, for up to 10 minutes, and stays in Fiber 1G if neither links; three short power-ups in a row make the next boot a safe-mode boot in Fiber 1G that clears the key. Fiber 1G, the most compatible host mode, is the fallback everywhere; whether the HSGQ board links in it is untested. The register values and the HSGQ port are the reporter's, read off a stock HSGQ stick and run on one (2500BASE-X against a 2.5G router port, HiSGMII against a media converter); host-tested here (`test/host_serdes_test.sh`, `test/odi_host_forced_test.c`); not yet run on hardware with this image ([`docs/SETTINGS.md`](docs/SETTINGS.md), "Host port SerDes mode") |
@@ -104,8 +106,8 @@ the same hardware.
 | toolchain | a decade-old vendor cross-compiler | our own gcc / binutils / uClibc-ng, built from source, targeting the CPU's actual instruction set; published as prebuilt container images pinned by digest, so a build pulls the toolchain instead of compiling it for an hour: a clean image build takes about 3.5 minutes on a native 8-core host (building the toolchain from source is still one command) |
 | changing the management address | applied at once and kept: a typo in the address locks you out of the stick | a change is a trial: the new address is applied in RAM, the old one stays up beside it, and the stick goes back by itself after 90 s unless the change is confirmed over the new address; only a confirmed trial reaches the config store, and a reboot mid-trial comes up on the old address. Host-tested (`test/mgmt_addr_test.sh`, against the real `network.sh` and `flash`); not yet run on a stick ([`docs/SETTINGS.md`](docs/SETTINGS.md), "Management address trial") |
 | recovery without a login | no documented way back from a forgotten password | a safe mode from the power alone: five power cycles in a row, each cut about 80 s after power-on (three with `HOST_AUTONEG=off`), make the next boot a recovery boot for that boot only: the PON off (the OLT is not disturbed), the host port on auto-negotiation, the web UI and root on the default password `admin`, nothing in the saved configuration changed but `HOST_AUTONEG`; the web UI says so until acknowledged. Physical access to the power is enough, the documented trade-off ([`docs/SETTINGS.md`](docs/SETTINGS.md), "Recovery: the safe mode"). Host-tested (`test/safe_mode_test.sh`) and run on a stick: three real power cycles with `HOST_AUTONEG=off` gave the recovery boot (laser off, ONU in O1, key cleared, `admin`/`admin` on the web UI and over ssh) and an acknowledge plus a normal reboot returned to the saved password and keys; the five-cycle path was exercised by setting the counter, not by real power cycles |
-| boot safety | undocumented | one-shot trial boot (`sw_tryactive`) plus a watchdog the kernel alone owns and enforces (`docs/SETTINGS.md`, "Watchdog rules"): it self-reverts a boot whose userland never confirms, a registered daemon (omcid) that stops pinging its own deadline, `MemAvailable` held below a floor, or a CPU-port NIC that takes no frame for 30 s while the switch keeps offering them (the stick unreachable with everything else healthy) -- boot confirmation does not depend on the network. Every rule is host-tested against a fake clock (`test/odi_wdt_test.c`); the reset itself needs hardware to verify, not yet run on this redesign |
-| a trial nobody can reach | stays up until power-cycled | reverts to the committed slot by itself 300 s after boot unless the management path is seen working both ways (a TCP session from the host, or a neighbour that answered the stick), through an `odi_wdt` client only a trial registers (`docs/FLASHING.md`, "The trial guard"). Host-tested (`test/trial_guard_test.sh`, `test/odi_wdt_test.c`) and in the qemu harness; not yet seen revert a stick |
+| boot safety | undocumented | one-shot trial boot (`sw_tryactive`) plus a watchdog the kernel alone owns and enforces (`docs/SETTINGS.md`, "Watchdog rules"): it self-reverts a boot whose userland never confirms, a registered daemon (omcid) that stops pinging its own deadline, `MemAvailable` held below a floor, or a CPU-port NIC that takes no frame for 30 s while the switch keeps offering them (the stick unreachable with everything else healthy) -- boot confirmation does not depend on the network. Every rule is host-tested against a fake clock (`test/odi_wdt_test.c`); the omcid-heartbeat rule has reset a stick on hardware (three in a row ended in the safe mode); the other rules are host-tested only ([`docs/QUALIFICATION.md`](docs/QUALIFICATION.md)) |
+| a trial nobody can reach | stays up until power-cycled | reverts to the committed slot by itself 300 s after boot unless the management path is seen working both ways (a TCP session from the host, or a neighbour that answered the stick), through an `odi_wdt` client only a trial registers (`docs/FLASHING.md`, "The trial guard"). Host-tested (`test/trial_guard_test.sh`, `test/odi_wdt_test.c`) and in the qemu harness; armed and released on lab trials, and one user report of it reverting a stick (#241), not yet seen to revert one here |
 | committing a trial | by hand (`nv setenv sw_commit`), no sign that a boot is a trial | by hand with `nv commit <slot>`: both environment copies, in a power-cut-safe order, each read back, refusing any slot that is not the running one (host-tested against a fake flash that fails at every step, `src/nv/test/test_commit.c`, and run on a stick: both copies written and read back); an uncommitted image says so at every ssh login and as `gpon_uncommitted` / `gpon_committed_slot` on the exporter, from `/var/run/odi-slot` |
 | boot reliability | not a concern of the stock image | two bootloader leftovers found and fixed: NIC DMA still running into memory the kernel reuses (stopped first thing at boot), and an instruction cache that does not see new code (invalidated whenever a page can run); release images boot 15 of 15 in a row. After a power cut the GPON MAC tables come up full of garbage (on one stick 120 of 128 GEM-port rows and all 32 Alloc-ID rows valid, and the OLT deactivated it in a loop): every boot now waits for the GPON MAC reset, clears every row of them (and of the downstream multicast filter) and reads every row back, logging what it found and what it left ([`docs/SWITCH.md`](docs/SWITCH.md), "GPON boot init"). The switch ACL tables, on for the UNI and PON ports, get the same clean and read-back before ACL ingress is enabled: after a boot of the stock firmware they still held its rules ("Platform init") |
 | boot debugging | none (no serial console) | every console line mirrored into DRAM that survives a watchdog reset; the next boot of this image shows the failed one in `/proc/odi_ramlog_prev`, with fatal-signal register dumps and early-boot crumbs |
@@ -198,7 +200,9 @@ every port and how to move files on and off the stick:
 
 ## Status and limitations
 
-**Tested on real sticks.** Releases are listed in
+**Tested on real sticks.** What is maintainer-tested, user-reported,
+host-tested or untested is in [`docs/QUALIFICATION.md`](docs/QUALIFICATION.md).
+Releases are listed in
 [`CHANGELOG.md`](CHANGELOG.md). The firmware runs on two DFP-34X-2C2
 sticks on two different ISPs' GPON networks, and both now run it as their
 committed image, with the stock firmware kept in the other slot. The
@@ -227,9 +231,9 @@ This is new, actively developed firmware. Before relying on it:
   lines carries IPTV, so the copy rule, the group rows and the drop of
   unregistered multicast have been tested against a register model and the
   frame parsers, not against a multicast source, and no OLT has yet seen a
-  report igmpd re-tagged and sent up. MLD snooping (opt-in) has not run on
-  a stick either: its ACL rules and the IPv6 drop follow another open
-  implementation's register measurements. The OLT's IGMP and MLD proxy
+  report igmpd re-tagged and sent up. MLD snooping (opt-in) has run on a stick against a host's own MLD
+  joins, never against a multicast stream from the fibre; its ACL rules and
+  the IPv6 drop follow another open implementation's register measurements. The OLT's IGMP and MLD proxy
   modes are not done, and ME 311's IPv6 active group list stays empty.
 - The config store is shared with the stock firmware: of its 184 keys this
   image acts on 23, and the UI shows the other 161 read-only.
@@ -265,6 +269,9 @@ This is new, actively developed firmware. Before relying on it:
   piece, locally or on a remote build host.
 - [`docs/FLASHING.md`](docs/FLASHING.md) — the trial-boot procedure and
   recovery.
+- [`docs/QUALIFICATION.md`](docs/QUALIFICATION.md) — what has been checked on
+  which board, optics, host, SerDes mode and OLT line, who checked it, on
+  which release, and what a path must pass to be called supported.
 - [`docs/ACCESS.md`](docs/ACCESS.md) — ports, the web UI, SSH keys, moving
   files on and off the stick.
 - [`docs/CROSS-COMPILING.md`](docs/CROSS-COMPILING.md) — compiling your own C
