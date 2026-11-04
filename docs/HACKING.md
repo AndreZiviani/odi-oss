@@ -265,6 +265,13 @@ by member with `tools/compare-images.sh`. The kernel and the full image are
 nothing in it runs without a stick. Build the kernel yourself before you
 push a kernel change.
 
+Every job that builds one of our binaries also checks its hardening: each
+Makefile in `src/` runs `tools/check-hardening.sh` on the binary it ships
+(stack protector present and seeded, no executable stack, no writable and
+executable segment), and `make test-diag` runs the stack protector for real
+under qemu (`make -C src/diag ssp-test`). `docs/CROSS-COMPILING.md`,
+"Hardening the freestanding binaries", has the matrix.
+
 `.github/workflows/release.yml`, on a `v*` tag only, does build the full
 image (`VERSION=` from the tag, `ROOT_PW=locked`) and publishes it as a
 GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
