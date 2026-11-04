@@ -39,9 +39,12 @@
 # only then runs login.
 ttyS0::askfirst:/bin/login -p
 
-# syslogd, klogd, ntpd, metricsd, confd, dropbear, omcid: each restarted the
-# instant it exits, forever, by init itself -- no supervise.sh, no restart
-# budget, no rate limit (docs/SETTINGS.md, "native over hand-rolled"). Every
+# syslogd, klogd, ntpd, metricsd, confd, dropbear, omcid: each restarted
+# forever by init itself -- no supervise.sh (docs/SETTINGS.md, "native over
+# hand-rolled"). init has no rate limit, so a daemon that keeps dying young
+# waits a bounded, growing time inside respawn.sh before each start, and
+# leaves its count in /var/run/respawn/<name> (docs/SETTINGS.md, "Restart
+# budget"); the first start of the boot never waits. Every
 # entry is a script, not the daemon directly: each checks its own
 # /etc/config/<name>.off flag first (rootfs/skeleton/etc/scripts/svc-*.sh)
 # and sets its oom_score_adj right before exec-ing the daemon in place

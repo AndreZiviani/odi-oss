@@ -983,8 +983,10 @@ Each of these has cost real time. The pointer says where the evidence is.
   not run it on the stock slot. `omcicap` and `omciprobe -f` interfere with
   a running `omcid` (`docs/TOOLS.md`).
 - **Daemons are `respawn` entries, not sessions.** syslogd, klogd, ntpd,
-  metricsd, confd, dropbear and omcid are forked by busybox init itself and restarted the
-  instant one exits; `kill` alone brings a new one back within seconds, no
+  metricsd, confd, dropbear and omcid are forked by busybox init itself and restarted
+  as soon as one exits; `kill` alone brings a new one back within seconds
+  (after a wait of a few seconds if it keeps dying young, and
+  `/var/run/respawn/<name>` says so, `docs/SETTINGS.md` "Restart budget"), no
   `setsid` needed any more (`docs/TOOLS.md` "Restarting a daemon"). Use
   `/etc/init.d/services stop <name>` to keep one down across restarts.
 - **`/var` is RAM.** Every log is gone at reboot; only the ramlog and the
