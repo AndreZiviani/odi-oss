@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- CI: the two tests that install packages inside their Docker container
+  (`make test-rcs`, for `strace`, and the stock-flash test) now go through
+  `tools/ci-apt.sh`, as the runner steps already did: a read timeout and
+  retries per connection, a time limit on each apt call and two attempts.
+  The Debian snapshot mirror returning 504 for `strace` held test-qemu in
+  an unbounded `apt-get` for 42 minutes until the job timeout cancelled it;
+  it now fails in minutes and says the install failed. `tools/ci-apt.sh`
+  skips `sudo` when it already runs as root. No change to the image.
+
 ## v1.15.0 (2026-11-02)
 
 - Releases: confd v1.13.0. System, Backup & reset can encrypt the
