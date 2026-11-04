@@ -5,10 +5,10 @@ name: release
 # ROOT_PW=locked (docs/BUILDING.md): a public release image ships keys-only,
 # never a per-build password baked into a squashfs anyone can unpack. The
 # result is published as a GitHub release: the tarball, its SHA256SUMS, an
-# SBOM (tools/generate-sbom.sh), the corresponding-source bundle
-# (tools/bundle-sources.sh, docs/LICENSING.md), release notes built from
-# CHANGELOG.md by tools/release-notes.sh, and a build-provenance + SBOM attestation for the
-# tarball, its checksums and the SBOM itself -- see docs/FLASHING.md,
+# SBOM (tools/generate-sbom.sh, checked by tools/verify-sbom.sh), the
+# corresponding-source bundle (tools/bundle-sources.sh, docs/LICENSING.md),
+# release notes built from CHANGELOG.md by tools/release-notes.sh, and a
+# build-provenance + SBOM attestation for the tarball, its sources, its checksums and the SBOM itself -- see docs/FLASHING.md,
 # "Verifying a release", for how to check them.
 #
 # A tag with a hyphen after the version (v1.2.2-beta.1) is a test build: it
@@ -121,25 +121,35 @@ jobs:
           (cd out/image && sha256sum "$VERSION-sources.tar" >> SHA256SUMS)
 
       # Reads the pins already in the tree (kernel/618/fetch.sh,
-      # packages/*/build.sh, toolchain/images.env) plus the metricsd/confd
-      # tags make image-all actually fetched (out/bin/releases.env) --
-      # tools/generate-sbom.sh header has the detail.
+      # packages/*/build.sh, toolchain/images.env, src/release-sha256.txt) plus
+      # the metricsd/confd tags make image-all actually fetched
+      # (out/bin/releases.env), and hashes every file the image carries from
+      # the build output: tools/sbom.py header has the detail. SBOM_STRICT
+      # fails the job on a missing artifact rather than publish a SBOM with a
+      # hole in it. The SBOM is checked (tools/verify-sbom.sh) before it is
+      # published, and its sha256 joins SHA256SUMS, so the provenance
+      # attestation below covers it as a subject of its own.
       - name: SBOM
-        run: tools/generate-sbom.sh "$VERSION" out/bin/releases.env > out/image/sbom.cdx.json
+        run: |
+          SBOM_STRICT=1 SBOM_IMAGE="out/image/$VERSION.tar" \
+            tools/generate-sbom.sh "$VERSION" out/bin/releases.env > out/image/sbom.cdx.json
+          (cd out/image && sha256sum sbom.cdx.json >> SHA256SUMS)
+          tools/verify-sbom.sh out/image/sbom.cdx.json --sums out/image/SHA256SUMS
 
       - name: Release notes
         run: tools/release-notes.sh "$VERSION" > /tmp/release-notes.md
 
-      # Provenance for the image, its checksums and the SBOM: signed,
-      # keyless, tied to this workflow run. gh attestation verify checks
-      # them against the file bytes, so this has to run before either is
-      # renamed -- and before the SBOM step output is touched again.
+      # Provenance for the image, the sources, the SBOM and the checksums:
+      # signed, keyless, tied to this workflow run. gh attestation verify
+      # checks them against the file bytes, so this has to run after the last
+      # write to SHA256SUMS and before any file is renamed.
       - name: Attest build provenance (image tarball + checksums)
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
           subject-path: |
             out/image/${{ env.VERSION }}.tar
             out/image/${{ env.VERSION }}-sources.tar
+            out/image/sbom.cdx.json
             out/image/SHA256SUMS
 
       - name: Attest SBOM

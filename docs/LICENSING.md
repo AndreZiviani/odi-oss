@@ -127,9 +127,20 @@ Both are licensed **GPL-2.0-or-later**, as the README of each states (the
 [odi-ui](https://github.com/AndreZiviani/odi-ui), `metricsd` from
 [odi-sfp-exporter](https://github.com/AndreZiviani/odi-sfp-exporter). The
 SBOM of a release (`tools/generate-sbom.sh`) records that license for both
-instead of `NOASSERTION`. `metricsd` also bundles one small piece of MIT code
+instead of `NOASSERTION`, together with the SHA-256 of each binary and of the
+web assets, which is the one in `src/release-sha256.txt`. `metricsd` also bundles one small piece of MIT code
 that its own repository documents; the terms of the release a given image
 carries are those of that tag in the project's repository.
+
+## The SBOM
+
+Each release carries `sbom.cdx.json` (CycloneDX 1.5), which this document's
+tables feed: the license of each component is the one in `tools/sbom.py`, so
+change it there when a license changes here. Runtime components (what is on
+the flashed rootfs, with its files, hashes, purls and dependency graph) are
+told apart from build tools (gcc, binutils: scope `excluded`).
+`tools/verify-sbom.sh` checks it; `docs/FLASHING.md`, "Verifying a release",
+says how.
 
 ## Public references this code is written against
 

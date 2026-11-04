@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- Releases: the SBOM is now complete and checkable. `sbom.cdx.json` tells
+  runtime components from build tools (gcc and binutils are `excluded` and
+  nothing at runtime depends on them), gives every runtime component a
+  version, purl, license and `bom-ref`, adds a dependency graph, and lists
+  every file the image carries with its SHA-256 and rootfs path: the busybox,
+  dropbear and iproute2 binaries, our own daemons, `confd` and `metricsd`
+  (hashes from `src/release-sha256.txt`), the `confd` web assets and the three
+  register replay tables. Upstream source tarballs carry their pinned hash.
+  The SBOM is in `SHA256SUMS` and a subject of the provenance attestation.
+  `tools/verify-sbom.sh sbom.cdx.json --sums SHA256SUMS [--rootfs DIR]`
+  checks it with python3 alone; the release job runs it before publishing and
+  fails when a hashed artifact is missing, and `test/sbom_test.sh` (in
+  `make test-host`) covers it with a generated SBOM and deliberately broken ones.
+  `tools/generate-sbom.sh` is now a wrapper of `tools/sbom.py`. gcc now carries
+  the `GCC-exception-3.1` SPDX expression. docs/FLASHING.md and docs/LICENSING.md
+  describe it. Refs #260.
+
 - omcid: an OLT lock of the Ethernet UNI no longer takes the host port down
   by default. On this SFP that port is the stick's only management path, so
   a lock from the OLT (ME 11 administrative state) cut the web UI, ssh,
