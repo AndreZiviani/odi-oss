@@ -15,8 +15,21 @@ name: release
 # is published as a GitHub pre-release, never marked latest, with the
 # `## Unreleased` changelog section as its notes (tools/release-notes.sh).
 #
-# The tests run first (the `tests` job; the release job needs it), so a tag
-# on a tree whose `make test` fails publishes nothing.
+# Publication is gated, in order, on:
+#   1. `gate`: the tag commit is an ancestor of origin/main
+#      (tools/check-release-ancestry.sh). Final tags and pre-release tags are
+#      both cut from commits main contains, so one rule covers both.
+#   2. `ci`: ci.yml, called as a reusable workflow on that same commit: lint,
+#      the host-side tests, diag, every OMCI suite, test-qemu, the rcS trace
+#      goldens, the clean-build check, `full` and the `reproducible` two-build
+#      comparison. The release job needs it, so one failed, cancelled or
+#      still-running job there means nothing is published. ci.yml no longer
+#      starts on `v*` tags itself: calling it here runs it once per tag
+#      instead of twice, and makes the wait a plain `needs`.
+#   3. only then does `release` build the image and publish it.
+#
+# workflow_dispatch is a dry run: it runs 1 and 2 on the chosen ref and never
+# reaches the release job, so the gate can be exercised without a tag.
 #
 # This is the one workflow here that actually builds the kernel and the
 # image (ci.yml deliberately does not: about an hour of compiling a runner
@@ -33,6 +46,7 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}
@@ -44,30 +58,29 @@ permissions:
   contents: read
 
 jobs:
-  # The release is gated on the same tests as a pull request (`make test`:
-  # lint, the host-side tests, diag and every OMCI suite). A tag push also
-  # starts ci.yml, but a separate workflow cannot be waited for from here, and
-  # until now nothing stopped the image from being published while the tests
-  # failed or were still running. The full-system qemu job, the clean-build
-  # check and the reproducibility check stay in ci.yml; this is the cheap part
-  # that must pass before a build is published.
-  tests:
+  # The first thing that runs, so a tag on a commit main does not contain
+  # costs seconds, not an hour of CI. The full history is fetched by the
+  # script itself, with a bound.
+  gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Tests
-        run: |
-          command -v shellcheck >/dev/null || {
-            tools/ci-apt.sh shellcheck
-          }
-          make test
+      - name: The release commit is on origin/main
+        run: tools/check-release-ancestry.sh "$GITHUB_SHA" main
+
+  # Every release-grade check of ci.yml, for this exact commit. Job timeouts
+  # are the ones set inside ci.yml; the longest (reproducible) is 90 minutes.
+  ci:
+    needs: gate
+    uses: ./.github/workflows/ci.yml
 
   release:
-    needs: tests
+    needs: [gate, ci]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

@@ -257,21 +257,31 @@ job; `test-omci` is a matrix with one job per suite
 (`make test-omci-<suite>`, after `make test-omci-build`). Two more jobs
 run on every push: `clean-build` (`make kernel-tree` and `make src`, then
 checks that `make image` on a partial tree fails closed and names what is
-missing) and `test-qemu` (`make test-qemu`, below). On release tags (`v*`,
-`odi-oss-*`) and manual runs it adds `make src` on its own and a
+missing) and `test-qemu` (`make test-qemu`, below), whose last step is the
+rcS trace goldens (`make test-rcs`). On release tags (`v*` through
+`release.yml`, which calls this workflow; `odi-oss-*` directly) and manual
+runs it adds `make src` on its own and a
 `reproducible` job: `make image-all` twice in two checkouts, compared member
 by member with `tools/compare-images.sh`. The kernel and the full image are
 **not** built on a pull request: a kernel build is tens of minutes and
 nothing in it runs without a stick. Build the kernel yourself before you
 push a kernel change.
 
-`.github/workflows/release.yml`, on a `v*` tag only, does build the full
+`.github/workflows/release.yml`, on a `v*` tag only, first checks that the
+tagged commit is an ancestor of `origin/main`
+(`tools/check-release-ancestry.sh`), then calls `ci.yml` as a reusable
+workflow on that same commit and publishes nothing unless every job of it,
+`test-qemu`, the rcS goldens, `full` and `reproducible` included, succeeded.
+Only then does it build the full
 image (`VERSION=` from the tag, `ROOT_PW=locked`) and publishes it as a
 GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
 attestations, and notes from `tools/release-notes.sh` (the tag's own
 `CHANGELOG.md` section plus a flash-and-first-login paragraph).
 `.github/workflows/dependency-bump.yml` runs `tools/bump-deps.sh` every
 Monday and opens a pull request only if the tests pass against the new pins.
+A manual run of `release.yml` (`workflow_dispatch`) is a dry run of the gate:
+the ancestry check and the whole CI call on the chosen ref, and never the
+release job.
 
 Workflow permissions: every workflow defaults to `contents: read`, and every
 checkout that does not push uses `persist-credentials: false`, so code run by

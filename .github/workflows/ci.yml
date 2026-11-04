@@ -11,12 +11,20 @@ name: ci
 # binary in src/ on its own. This repository's own kernel and the full
 # image are not built here: about an hour of compiling this runner would
 # spend, and nothing in either is exercised without a stick.
+#
+# A `v*` tag does not trigger this workflow by itself: release.yml calls it
+# (workflow_call) as the job its release job needs, so the whole suite, the
+# full and reproducible jobs included, runs once per tag, on the tag commit,
+# and publication waits for every job of it. The jobs that gate on
+# `startsWith(github.ref, 'refs/tags/')` see the caller's ref, so they run
+# in that call exactly as they would on a tag push.
 on:
   push:
     branches: [main]
-    tags: ['v*', 'odi-oss-*']
+    tags: ['odi-oss-*']
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

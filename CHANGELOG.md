@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- CI: a release is published only after the whole of CI has passed on the
+  tag commit, and only for a commit that is on `main`. `release.yml` now
+  first checks that the tagged commit is an ancestor of `origin/main`
+  (`tools/check-release-ancestry.sh`, covered by `make test-host`), then
+  calls `ci.yml` as a reusable workflow, so the QEMU boot test, the rcS
+  trace goldens, every OMCI suite, `full` and the two-build `reproducible`
+  comparison must all succeed before the release job starts; it no longer
+  waits for a smaller `make test` copy of them. `ci.yml` stops starting by
+  itself on `v*` tags (the call replaces that run, so a tag costs one CI
+  run, not two). Running `release.yml` by hand is a dry run that stops
+  before publishing. Pre-release tags follow the same rules.
+
 - omcid: an OLT lock of the Ethernet UNI no longer takes the host port down
   by default. On this SFP that port is the stick's only management path, so
   a lock from the OLT (ME 11 administrative state) cut the web UI, ssh,
