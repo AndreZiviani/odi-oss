@@ -196,7 +196,8 @@ say "scenario: repeated kill -9 of dropbear, confd, metricsd, omcid -- backoff, 
 # row, each as soon as the previous one is back, so the runs are all short.
 # Each wait for the new pid is bounded (20 s; the longest wait here is 8 s).
 svc_pid() {
-	sshx "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = $1 ] && echo \${p#/proc/}; done | head -1" 2>/dev/null || true
+	# PPid 1: the entry init tracks, not a dropbear session child
+	sshx "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = $1 ] && grep -q '^PPid:.1\$' \$p/status && echo \${p#/proc/}; done | head -1" 2>/dev/null || true
 }
 for svc in dropbear confd metricsd omcid; do
 	pid=$(svc_pid "$svc")
