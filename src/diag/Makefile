@@ -11,6 +11,7 @@
 # and pulled on first use; DIAG_IMAGE overrides it (toolchain/image.sh).
 TOP := $(CURDIR)/../..
 -include $(TOP)/toolchain/images.env
+include $(TOP)/src/harden.mk
 DIAG_IMAGE ?= $(DIAG_IMAGE_PINNED)
 IMAGE := $(DIAG_IMAGE)
 CROSS := mips-linux-gnu-
@@ -39,13 +40,13 @@ STRIP := $(CROSS)strip
 # -ffreestanding   no libc, and no turning our loops back into libc calls
 CFLAGS := -std=c11 -Os -Wall -Wextra \
           -march=mips1 -mabi=32 -EB -msoft-float -G0 \
-          -fno-pic -mno-abicalls -ffreestanding -fno-builtin -fno-stack-protector \
+          -fno-pic -mno-abicalls -ffreestanding -fno-builtin $(HARDEN_CFLAGS) \
           -fno-tree-loop-distribute-patterns \
           -ffunction-sections -fdata-sections \
           -Isrc -I$(OMCI) -I$(UAPI)
 
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
-           -Wl,--gc-sections
+           -Wl,--gc-sections $(HARDEN_LDFLAGS)
 
 # Everything but the hardware layer, shared by diag and diag_fake.
 CORE := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/shell.o $(BUILD)/parse.o \
@@ -55,6 +56,7 @@ CORE := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/shell.o $(BUILD)/parse.o \
 
 $(BIN): $(CORE) $(BUILD)/hw.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(HARDEN_CHECK) $@
 	$(STRIP) $@
 
 # The exporter contract test: the real binary, with the accessors the
@@ -106,6 +108,15 @@ $(BUILD)/fmt_prop_selftest: $(BUILD)/start.o $(BUILD)/io.o \
 	$(CC) $(CFLAGS) -Itest $(LDFLAGS) -o $@ test/fmt_prop_selftest.c \
 	      $(BUILD)/start.o $(BUILD)/io.o
 
+# The stack protector, end to end (test/ssp-test.sh). Linked with start.o
+# alone; the _off build is the same file without the protector, which
+# check-hardening.sh must refuse.
+$(BUILD)/ssp_selftest: $(BUILD)/start.o test/ssp_selftest.c src/sys.h | $(BUILD)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/ssp_selftest.c $(BUILD)/start.o
+
+$(BUILD)/ssp_selftest_off: $(BUILD)/start.o test/ssp_selftest.c src/sys.h | $(BUILD)
+	$(CC) $(CFLAGS) -fno-stack-protector $(LDFLAGS) -o $@ test/ssp_selftest.c $(BUILD)/start.o
+
 $(BUILD):
 	mkdir -p $(BUILD)
 
@@ -117,7 +128,7 @@ else
 # the netlink transport from ../omci.
 RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../..:/src -w /src/src/diag $(IMAGE)
 
-.PHONY: all image diag test selftest exporter-test exporter-optics-test l2-test transceiver-test run verify size clean help
+.PHONY: all image diag test selftest ssp-test exporter-test exporter-optics-test l2-test transceiver-test run verify size clean help
 
 all: diag
 
@@ -214,7 +225,13 @@ l2-test: image
 # `make selftest SEED=$$RANDOM` explores instead.
 SEED ?= 1
 
-selftest: image exporter-test exporter-optics-test l2-test transceiver-test
+# The stack protector of ../harden.mk under qemu: the guard is seeded per
+# run, an overrun aborts, and the ELF check refuses an unprotected build.
+ssp-test: image
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/ssp_selftest $(BUILD)/ssp_selftest_off
+	@$(RUN) sh test/ssp-test.sh
+
+selftest: image exporter-test exporter-optics-test l2-test transceiver-test ssp-test
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/ddm_selftest
 	@$(RUN) qemu-mips-static $(BUILD)/ddm_selftest
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/fmt_selftest
@@ -254,7 +271,8 @@ help:
 	@echo "  make exporter-optics-test  the same batch, three scripted optics scenarios"
 	@echo "  make l2-test        the l2-table listing against its golden file, under qemu"
 	@echo "  make transceiver-test  the module monitoring type and limits against their golden file"
-	@echo "  make selftest       exporter-test plus the conversion vectors, under qemu"
+	@echo "  make ssp-test       the stack protector: seeded guard, overrun aborts, ELF check"
+	@echo "  make selftest       exporter-test, ssp-test and the conversion vectors, under qemu"
 	@echo "  make run ARGS='pon get transceiver rx-power'"
 	@echo "  make verify         confirm ELF32 / big-endian / MIPS / static"
 	@echo "  make size           section sizes"

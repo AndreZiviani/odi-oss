@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- Hardening of every freestanding binary (omcid, igmpd, diag, nv, omcli,
+  omciprobe, omcicap), from one place, `src/harden.mk`:
+  `-fstack-protector-strong`, `-fstack-clash-protection`,
+  `-ftrivial-auto-var-init=zero`, `-fno-strict-overflow`, `-Wvla` and
+  `-z noexecstack`. The stack protector runtime is our own, in `start.S`:
+  the guard is seeded from the kernel's `AT_RANDOM` bytes before `main`, and
+  a smashed guard writes `stack-protector: stack smashing detected,
+  aborting` to stderr and `/dev/kmsg`, then ends the process with SIGABRT
+  (init respawns it). The binaries no longer declare an executable stack
+  (`PT_GNU_STACK` was `RWE`, from `start.S` lacking its `.note.GNU-stack`).
+  Every build checks the result with `tools/check-hardening.sh`, and `make
+  test-diag` runs an overrun under qemu (`make -C src/diag ssp-test`). Text
+  grows 2-13% per binary (omcid +13.3 KB, +6.5%). FORTIFY, PIE, RELRO and
+  BIND_NOW do not apply to binaries with no libc and no dynamic linker;
+  `docs/CROSS-COMPILING.md`, "Hardening the freestanding binaries", says
+  why for each.
+
 - Respawned daemons get a restart budget. busybox init restarts a daemon the
   instant it exits and has no rate limit, so one that died at once was
   started again and again. `respawn.sh`, the last step of every `svc-*.sh`,
