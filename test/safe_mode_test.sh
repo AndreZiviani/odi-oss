@@ -171,6 +171,24 @@ t "  HOST_SERDES still set" "^hisgmii$" "$(sed -n 's/^HOST_SERDES=//p' "$ODI_CON
 sh "$S" ack > /dev/null; rm -f "$FLAG" "$PREV" "$WDTFILE" "$COUNTER"
 "$F" set HOST_SERDES "" > /dev/null
 
+# ---- OMCI_UNI_LOCK=1: an OLT lock cuts the host link, so the way back is
+# five short boots, and that safe mode removes the key. The limit stays 5:
+# a locked stick boots normally. A value other than 1 is the default and is
+# left alone.
+"$F" set OMCI_UNI_LOCK 1 > /dev/null
+for i in 1 2 3 4 5; do newboot 12; sh "$S" count > /dev/null; done
+[ ! -f "$FLAG" ] && ok "OMCI_UNI_LOCK=1: the limit stays 5" || no "OMCI_UNI_LOCK=1: the limit stays 5"
+newboot 12; sh "$S" count > /dev/null
+t "OMCI_UNI_LOCK=1: the sixth boot is the safe one, the key cleared" "event=safe_mode cause=short_boots short_boots=5 wdt_resets=0 cleared=OMCI_UNI_LOCK root_password=default" "$(cat "$T/kmsg")"
+t "  OMCI_UNI_LOCK is removed" "^$" "$(sed -n 's/^OMCI_UNI_LOCK=//p' "$ODI_CONF")"
+sh "$S" ack > /dev/null; rm -f "$FLAG"
+"$F" set OMCI_UNI_LOCK 0 > /dev/null
+for i in 1 2 3 4 5 6; do newboot 12; sh "$S" count > /dev/null; done
+t "OMCI_UNI_LOCK=0 is not cleared" "cleared=none" "$(cat "$T/kmsg")"
+t "  still set" "^0$" "$(sed -n 's/^OMCI_UNI_LOCK=//p' "$ODI_CONF")"
+sh "$S" ack > /dev/null; rm -f "$FLAG" "$COUNTER"
+"$F" set OMCI_UNI_LOCK "" > /dev/null
+
 # ---- a long boot in between starts again; an unreadable counter is 0
 setkey ""
 newboot 12; sh "$S" count > /dev/null

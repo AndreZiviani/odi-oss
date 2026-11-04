@@ -634,11 +634,13 @@ fi
 
 # ------------------------------------------------ the OLT locks the UNI
 #
-# Class 11 attribute 5 (AdministrativeState) = 1 forces the host link down
-# (driver command 32, state 0). The lock must not outlive the MIB it came
-# from: omcid unlocks when it starts with an empty MIB and on every MIB reset,
-# because the reset puts the attribute back to 0 and the OLT then sends no
-# unlock of its own. OMCI_UNI_LOCK=0 in odi.conf ignores the lock.
+# Class 11 attribute 5 (AdministrativeState) = 1 is a lock. By default it is
+# answered and stored, and the host link stays up (driver command 32 keeps
+# state 1). OMCI_UNI_LOCK=1 in odi.conf honours it: the link is forced down
+# (state 0), after an event=uni_lock action=applied line that says so. The
+# lock must not outlive the MIB it came from: omcid unlocks when it starts
+# with an empty MIB and on every MIB reset, because the reset puts the
+# attribute back to 0 and the OLT then sends no unlock of its own.
 if [ "${UPDATE:-0}" != 1 ]; then
 	uni_set() {   # uni_set <tci> <admin state>: Set of ME 11 0x0101, attribute 5
 		printf '%s480a000b01010800%02d%058d00000028%08d\n' "$1" "$2" 0 0
@@ -647,6 +649,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 		printf '%s4f0a00020000%064d00000028%08d\n' "$1" 0 0
 	}
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	printf 'OMCI_UNI_LOCK=1\n' > /var/config/odi.conf
 	log=/tmp/omcid-drv-lock.log
 	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
@@ -655,41 +658,56 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	{
 		uni_set 0e60 01
 		get_frame 0e61 0106 8000 8000
-		mib_reset 0e62
+		uni_set 0e62 01
 		get_frame 0e63 0106 8000 8000
+		mib_reset 0e64
+		get_frame 0e65 0106 8000 8000
 	} > /tmp/session-lock.txt
 	$Q cli/build/omcli --inject-file /tmp/session-lock.txt > /dev/null 2>&1
-	need "$log" '^drv 32 ' 20 3
+	need "$log" '^drv 32 ' 20 4
 	finish "$log"
+	rm -f /var/config/odi.conf
 	calls=$(grep '^drv 32 ' "$log" | sed 's/^drv 32 8 0*//; s/^$/0/' | tr '\n' ' ')
-	if [ "$calls" = "1 0 1 " ]; then
-		echo "ok    UNI lock: unlock at start, the OLT lock honoured, unlock again on the MIB reset"
+	if [ "$calls" = "1 0 0 1 " ]; then
+		echo "ok    OMCI_UNI_LOCK=1: unlock at start, the OLT lock honoured, unlock again on the MIB reset"
 	else
-		echo "FAIL  UNI lock: cmd 32 states were '$calls', want '1 0 1 '"
+		echo "FAIL  OMCI_UNI_LOCK=1: cmd 32 states were '$calls', want '1 0 0 1 '"
 		grep '^drv 32 ' "$log"
 		fail=$((fail + 1))
 	fi
+	# One warning for the two identical Sets, before the port goes down,
+	# and the MIB reset's unlock said too.
+	got=$(grep -E '^event=uni_lock |^drv 32 ' "$log" | sed 's/^drv 32 8 0*/drv /; s/^drv $/drv 0/' | tr '\n' '|')
+	want='drv 1|event=uni_lock inst=257 port=0 action=applied effect=host_link_down_until_unlock|drv 0|drv 0|event=uni_lock inst=0 port=0 action=cleared|drv 1|'
+	if [ "$got" = "$want" ]; then
+		echo "ok    OMCI_UNI_LOCK=1: event=uni_lock action=applied once, before the link goes down; cleared on the reset"
+	else
+		echo "FAIL  OMCI_UNI_LOCK=1 events: got '$got'"
+		echo "      want '$want'"
+		fail=$((fail + 1))
+	fi
 
-	printf 'OMCI_UNI_LOCK=0\n' > /var/config/odi.conf
 	log=/tmp/omcid-drv-lock0.log
 	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
 	pid=$!
 	omcid_up "$log"
-	uni_set 0e64 01 > /tmp/session-lock0.txt
+	uni_set 0e66 01 > /tmp/session-lock0.txt
 	$Q cli/build/omcli --inject-file /tmp/session-lock0.txt > /dev/null 2>&1
-	need "$log" 'lock ignored (OMCI_UNI_LOCK=0)' 20
+	need "$log" 'lock ignored (OMCI_UNI_LOCK not 1)' 20
 	# No bridge rebuild follows (nothing here touches a connection), so
 	# settled would wait for one that never comes: the Get answered is the
 	# sync point.
 	sync_send "$log"
 	omcid_stop "$pid"
-	rm -f /var/config/odi.conf
 	calls=$(grep '^drv 32 ' "$log" | sed 's/^drv 32 8 0*//; s/^$/0/' | tr '\n' ' ')
-	if [ "$calls" = "1 1 " ]; then
-		echo "ok    OMCI_UNI_LOCK=0: the OLT lock is answered but the port stays up"
+	if [ "$calls" = "1 1 " ] &&
+	   grep -q '^event=uni_lock inst=257 port=0 action=ignored$' "$log" &&
+	   ! grep -q 'action=applied' "$log"; then
+		echo "ok    OMCI_UNI_LOCK unset: the OLT lock is answered but the port stays up (action=ignored)"
 	else
-		echo "FAIL  OMCI_UNI_LOCK=0: cmd 32 states were '$calls', want '1 1 '"
+		echo "FAIL  OMCI_UNI_LOCK unset: cmd 32 states were '$calls', want '1 1 '"
+		grep 'event=uni_lock' "$log"
 		fail=$((fail + 1))
 	fi
 fi

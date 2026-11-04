@@ -213,12 +213,15 @@ clear_key() {
 # boot. CAUSE is short_boots, watchdog or config. HOST_SERDES is the
 # stored mode when it is not fiber1g, empty otherwise. After short boots,
 # the host-port keys that lowered the count are removed, so the boots
-# after this one stay in Fiber 1G with auto-negotiation too.
+# after this one stay in Fiber 1G with auto-negotiation too, and so is
+# OMCI_UNI_LOCK=1, so an OLT lock that took the host link away cannot do
+# it again on the next normal boot.
 enter() {
 	cause=$1 short=$2 wdt=$3 an=$4 hs=${5:-} cleared=none
 	if [ "$cause" = short_boots ]; then
 		[ "$an" != off ] || clear_key HOST_AUTONEG
 		[ -z "$hs" ] || clear_key HOST_SERDES
+		[ "$(key OMCI_UNI_LOCK)" != 1 ] || clear_key OMCI_UNI_LOCK
 	fi
 	rm -f "$COUNTER" "$WDTFILE"
 	{

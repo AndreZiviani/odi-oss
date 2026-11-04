@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- omcid: an OLT lock of the Ethernet UNI no longer takes the host port down
+  by default. On this SFP that port is the stick's only management path, so
+  a lock from the OLT (ME 11 administrative state) cut the web UI, ssh,
+  syslog and metrics until the OLT unlocked it, and looked like a frozen
+  stick from the host. `OMCI_UNI_LOCK` is now opt-in: `1` honours the lock
+  as before, anything else or absent answers and stores it but keeps the
+  port up (`OMCI_UNI_LOCK=0` keeps working as it did). Every lock and unlock
+  is logged once per change as `event=uni_lock action=ignored|applied|
+  unlocked|cleared`; with `1`, the `applied` line is a warning sent before
+  the port goes down. A safe-mode boot after short boots now also removes
+  `OMCI_UNI_LOCK=1` (`cleared=OMCI_UNI_LOCK`), so five short boots get a
+  locked-out stick back: the safe mode keeps the PON off, and the next boots
+  ignore the lock. docs/SETTINGS.md, docs/TOOLS.md and docs/SWITCH.md
+  describe it; the drv golden covers both settings and the event order, and
+  test/safe_mode_test.sh the clearing. Refs #287.
+
 ## v1.15.0 (2026-11-02)
 
 - Releases: confd v1.13.0. System, Backup & reset can encrypt the
