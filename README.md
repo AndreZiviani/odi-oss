@@ -245,8 +245,10 @@ This is new, actively developed firmware. Before relying on it:
   scripts never finish within 120 s, the board resets (a trial falls back
   to the committed slot). A stick that boots but is unreachable is not
   reset; power-cycle it. See [`docs/FLASHING.md`](docs/FLASHING.md).
-- Builds are not bit-reproducible: the kernel and the image manifest embed
-  build time, so two builds of the same tree are equivalent, not identical.
+- Builds are reproducible: two clean builds of one commit give the same
+  tarball (`ROOT_PW=locked`; a random root password differs by design),
+  checked by `tools/compare-images.sh` ([`docs/BUILDING.md`](docs/BUILDING.md),
+  "Reproducible builds").
 - There is no serial console on this device. If a trial boot goes wrong and
   you cannot reach the stick, `docs/FLASHING.md` covers what to do (and what
   it does not); a hardware UART is the last resort, and the point of the

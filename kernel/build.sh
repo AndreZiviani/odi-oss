@@ -83,18 +83,20 @@ PATCHHASH=$({ cat "$ROOT"/kernel/618/patches/*.patch 2>/dev/null
 # would pick today. Up to 39 characters from a safe set, because it lands
 # in a C string literal on the compiler command line.
 GITREV=$(git -C "$ROOT" describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
-ODI_BUILD_ID=${ODI_BUILD_ID:-${VERSION:-odi-oss-$(date +%y%m%d)-$GITREV}}
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$("$ROOT/tools/source-date-epoch.sh")}
+ODI_BUILD_ID=${ODI_BUILD_ID:-${VERSION:-odi-oss-$(date -u -d "@$SOURCE_DATE_EPOCH" +%y%m%d 2>/dev/null || date -u -r "$SOURCE_DATE_EPOCH" +%y%m%d)-$GITREV}}
 ODI_BUILD_ID=$(printf '%s' "$ODI_BUILD_ID" | tr -cd 'A-Za-z0-9._+-' | cut -c1-39)
 echo "--- build id: $ODI_BUILD_ID"
 # Reproducibility: scripts/mkcompile_h embeds the build timestamp, user and
 # host into every vmlinux unless told otherwise, so two builds of the same
 # commit a minute apart -- or on two different runners -- never matched
 # bit-for-bit (found by the ci.yml reproducible job the first time it ran for
-# real). SOURCE_DATE_EPOCH is the committer date of HEAD: identical for any
-# two checkouts of the same commit, unlike "now". KBUILD_BUILD_USER/HOST are
-# fixed strings for the same reason -- the actual build host and account
-# are exactly the kind of stamp this build is not supposed to carry.
-SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || echo 0)}
+# real). SOURCE_DATE_EPOCH (tools/source-date-epoch.sh, set above) is the
+# committer date of HEAD: identical for any two checkouts of the same commit,
+# unlike "now". It also reaches mkimage, which stamps the uImage header with
+# it. KBUILD_BUILD_USER/HOST are fixed strings for the same reason -- the
+# actual build host and account are exactly the kind of stamp this build is
+# not supposed to carry.
 KBUILD_BUILD_TIMESTAMP=${KBUILD_BUILD_TIMESTAMP:-$(date -u -d "@$SOURCE_DATE_EPOCH" 2>/dev/null || date -u -r "$SOURCE_DATE_EPOCH")}
 docker run --rm -v "$VOL":/build \
 	-v "$WORK:/out" -v "$ROOT/kernel/618/patches:/patches:ro" \
