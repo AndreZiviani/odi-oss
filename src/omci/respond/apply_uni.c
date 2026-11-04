@@ -328,16 +328,18 @@ void dot1rl_apply(const struct omci_class *c, uint16_t inst,
 	}
 }
 
-/* OMCI_UNI_LOCK in CFG_ODI_PATH: 0 ignores an OLT lock of the Ethernet UNI
- * (the port stays up, the lock is still stored and read back), anything
- * else, or absent, honours it as the stock firmware does. Read at every Set
- * that carries AdministrativeState, so a change is live. */
+/* OMCI_UNI_LOCK in CFG_ODI_PATH: 1 honours an OLT lock of the Ethernet UNI
+ * as the stock firmware does (the host link goes down until the OLT
+ * unlocks it); anything else, or absent, ignores it: the lock is still
+ * stored and read back, and the port stays up. Off by default because on
+ * this SFP the UNI is the host port, the stick's only management path.
+ * Read at every Set that carries AdministrativeState, so a change is live. */
 static int uni_lock_honoured(void)
 {
 	char v[4];
 
-	return !(cfg_odi_get(CFG_ODI_PATH, "OMCI_UNI_LOCK", v, sizeof v) == 1 &&
-		 v[0] == '0');
+	return cfg_odi_get(CFG_ODI_PATH, "OMCI_UNI_LOCK", v, sizeof v) == 1 &&
+	       v[0] == '1';
 }
 
 /* Unlock every Ethernet UNI switch port. A lock is a link forced down in
@@ -349,12 +351,13 @@ static void uni_unlock_all(void)
 {
 	uint32_t m = all_eth_uni_mask();
 
-	if (!apply_hw)
-		return;
 	for (int port = 0; port < 32; port++) {
 		int rc;
 
 		if (!(m & (1u << port)))
+			continue;
+		ev_uni_lock(0, port, "cleared");
+		if (!apply_hw)
 			continue;
 		rc = omci_setPortState(pair((uint32_t)port, 1));
 		out_fmt("   [hw] uni port %d unlocked (MIB reset or start) -> %d\n",
@@ -413,9 +416,16 @@ void apply_pptp_uni(const struct omci_class *c, uint16_t inst,
 		uint32_t lock = row_u32(r, c, 5) == 1;
 
 		if (lock && !uni_lock_honoured()) {
-			out_fmt("   uni %04x port %d lock ignored (OMCI_UNI_LOCK=0)\n",
+			out_fmt("   uni %04x port %d lock ignored (OMCI_UNI_LOCK not 1)\n",
 				(long)inst, (long)port);
+			ev_uni_lock(inst, port, "ignored");
 			lock = 0;
+		} else if (lock) {
+			/* Said before the port goes down: after it, the host
+			 * may never see the line. */
+			ev_uni_lock(inst, port, "applied");
+		} else {
+			ev_uni_lock(inst, port, "unlocked");
 		}
 		rc = apply_hw
 		   ? omci_setPortState(pair((uint32_t)port, !lock)) : 0;
