@@ -177,6 +177,7 @@ test-host:
 	bash test/omci_defaults_test.sh
 	bash test/rcs_cs_value_test.sh
 	bash test/services_off_test.sh
+	bash test/respawn_budget_test.sh
 	bash test/regtrace_decode_test.sh
 	bash test/regtrace_compare_test.sh
 	bash test/regtrace_compare_stream_test.sh
@@ -436,6 +437,10 @@ lint:
 	else \
 		echo "REUSE compliance: skipped, reuse not installed (see tools/reuse-requirements.txt)"; \
 	fi
+	@# The kernel hardening options stay stated in the seed; kernel/build.sh
+	@# runs the same script on the completed .config (docs/KERNEL.md,
+	@# "Hardening").
+	@./tools/check-kernel-hardening.sh
 
 clean:
 	rm -rf build out

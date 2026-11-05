@@ -1652,6 +1652,7 @@ them: not `diag register get`, not `memprobe`, and not the stock firmware
 | `/var/log/omcid.log` | every OMCI frame and driver call, omcid's startup | nothing (RAM, trimmed to 128-256 KB) |
 | `/var/log/omcid-unknown.txt` | each managed entity class and message type the OLT sent that omcid does not model, with a count ("Link and provisioning events") | an omcid respawn, not a reboot (RAM) |
 | `/var/log/services.log` | stderr of services: dropbear logins, confd, metricsd | nothing (RAM, trimmed) |
+| `/var/run/respawn/<name>` | the restart count, wait and state of each respawned daemon ("Restart budget" in docs/SETTINGS.md); the line in `logread` is `respawn: event=respawn service=...` | nothing (RAM) |
 | `/var/log/*.err` | the rcS `/proc/odi_omci` writes that failed | nothing |
 | `dmesg` | the kernel ring buffer, including `rcS:` progress lines | nothing; the web UI's Tools tab shows it too |
 | DRAM ramlog | console output of the last boot | a watchdog reset, not a power cut (`tools/memprobe` from the stock image; `/proc/odi_ramlog_prev` from ours, one boot back) |
@@ -1788,6 +1789,10 @@ restart one is just to kill it:
     kill $(pidof omcid)
 
 each comes back with a new pid within a second or two, no `setsid` needed.
+A daemon killed again within 30 s of its start waits first, 1 s, then 2 s,
+4 s ... up to a cap of 2 s (omcid) to 60 s; `cat /var/run/respawn/<name>`
+shows the count and the wait, and the kernel log carries one `respawn:
+event=respawn` line per restart (`docs/SETTINGS.md`, "Restart budget").
 For dropbear, kill the listening process (the one without `-2` in `ps`);
 open sessions are separate processes and stay up.
 

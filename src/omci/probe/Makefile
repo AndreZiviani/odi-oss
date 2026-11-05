@@ -11,6 +11,7 @@
 # and pulled on first use; DIAG_IMAGE overrides it (toolchain/image.sh).
 TOP := $(CURDIR)/../../..
 -include $(TOP)/toolchain/images.env
+include $(TOP)/src/harden.mk
 DIAG_IMAGE ?= $(DIAG_IMAGE_PINNED)
 IMAGE := $(DIAG_IMAGE)
 CROSS := mips-linux-gnu-
@@ -28,16 +29,17 @@ STRIP := $(CROSS)strip
 
 CFLAGS := -std=c11 -Os -Wall -Wextra \
           -march=mips1 -mabi=32 -EB -msoft-float -G0 \
-          -fno-pic -mno-abicalls -ffreestanding -fno-builtin -fno-stack-protector \
+          -fno-pic -mno-abicalls -ffreestanding -fno-builtin $(HARDEN_CFLAGS) \
           -ffunction-sections -fdata-sections \
           -I$(DIAG)/src -I../generated -I..
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
-           -Wl,--gc-sections
+           -Wl,--gc-sections $(HARDEN_LDFLAGS)
 
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/main.o
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(HARDEN_CHECK) $@
 	$(STRIP) $@
 
 $(BUILD)/start.o: $(DIAG)/src/start.S | $(BUILD)

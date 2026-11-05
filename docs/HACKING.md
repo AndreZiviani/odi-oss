@@ -84,7 +84,7 @@ activates the GPON MAC once `omcid` has registered.
 | `rootfs/skeleton/` | `/etc` (rcS, services, network.sh, apply.sh, flash, ...) and the register replay tables in `lib/firmware/odi/` | [`rootfs/README.md`](../rootfs/README.md), then `etc/init.d/rcS` |
 | `image/` | squashfs + uImage into a flashable tarball; `fwu.sh`, the on-device flasher | [`image/README.md`](../image/README.md) |
 | `test/` | host-side unit tests (C unity builds against a register mock, shell tests of the on-device scripts) and manual qemu harnesses | [Testing](#testing) |
-| `tools/` | `remote-build.sh`, `kernel-footprint.sh`, `check-inline-quotes.sh`, `fetch-refs.sh`, `bump-deps.sh` (moves the pinned upstream versions), `compare-images.sh` and `objdiff.sh`, `generate-sbom.sh`, `release-notes.sh`, `config-backup.sh`; `memprobe` (physical memory from any kernel), `regdump`, `regtrace` (offline tooling for the register captures the replay tables came from) | each directory's `README.md` |
+| `tools/` | `remote-build.sh`, `kernel-footprint.sh`, `check-inline-quotes.sh`, `check-kernel-hardening.sh`, `fetch-refs.sh`, `bump-deps.sh` (moves the pinned upstream versions), `compare-images.sh` and `objdiff.sh`, `generate-sbom.sh`, `release-notes.sh`, `config-backup.sh`; `memprobe` (physical memory from any kernel), `regdump`, `regtrace` (offline tooling for the register captures the replay tables came from) | each directory's `README.md` |
 | `docs/` | user and developer docs; `docs/kb/` field notes on the hardware and the stock firmware | [`docs/kb/README.md`](kb/README.md) |
 
 ### Where to start reading
@@ -259,11 +259,18 @@ run on every push: `clean-build` (`make kernel-tree` and `make src`, then
 checks that `make image` on a partial tree fails closed and names what is
 missing) and `test-qemu` (`make test-qemu`, below). On release tags (`v*`,
 `odi-oss-*`) and manual runs it adds `make src` on its own and a
-`reproducible` job: `make image-all` twice in two checkouts, compared member
-by member with `tools/compare-images.sh`. The kernel and the full image are
+`reproducible` job: `make image-all` twice in two checkouts, compared byte
+for byte with `tools/compare-images.sh`. The kernel and the full image are
 **not** built on a pull request: a kernel build is tens of minutes and
 nothing in it runs without a stick. Build the kernel yourself before you
 push a kernel change.
+
+Every job that builds one of our binaries also checks its hardening: each
+Makefile in `src/` runs `tools/check-hardening.sh` on the binary it ships
+(stack protector present and seeded, no executable stack, no writable and
+executable segment), and `make test-diag` runs the stack protector for real
+under qemu (`make -C src/diag ssp-test`). `docs/CROSS-COMPILING.md`,
+"Hardening the freestanding binaries", has the matrix.
 
 `.github/workflows/release.yml`, on a `v*` tag only, does build the full
 image (`VERSION=` from the tag, `ROOT_PW=locked`) and publishes it as a
@@ -983,8 +990,10 @@ Each of these has cost real time. The pointer says where the evidence is.
   not run it on the stock slot. `omcicap` and `omciprobe -f` interfere with
   a running `omcid` (`docs/TOOLS.md`).
 - **Daemons are `respawn` entries, not sessions.** syslogd, klogd, ntpd,
-  metricsd, confd, dropbear and omcid are forked by busybox init itself and restarted the
-  instant one exits; `kill` alone brings a new one back within seconds, no
+  metricsd, confd, dropbear and omcid are forked by busybox init itself and restarted
+  as soon as one exits; `kill` alone brings a new one back within seconds
+  (after a wait of a few seconds if it keeps dying young, and
+  `/var/run/respawn/<name>` says so, `docs/SETTINGS.md` "Restart budget"), no
   `setsid` needed any more (`docs/TOOLS.md` "Restarting a daemon"). Use
   `/etc/init.d/services stop <name>` to keep one down across restarts.
 - **`/var` is RAM.** Every log is gone at reboot; only the ramlog and the
@@ -1021,10 +1030,11 @@ Each of these has cost real time. The pointer says where the evidence is.
   mainline already has; new files go in `kernel/extra/`. Fold a fix into
   the patch it belongs to. `tools/kernel-footprint.sh` only goes down
   without a stated reason.
-- **Builds are not bit-reproducible**: the kernel's version string, the
-  ramlog build id and the image manifest embed the build time and version.
-  Two builds of one tree are equivalent, not identical; compare
-  disassembly, not files.
+- **Builds are reproducible, keep them so**: every time stamp comes from
+  `SOURCE_DATE_EPOCH` (`tools/source-date-epoch.sh`), never from the clock,
+  hostname or user, and nothing may depend on directory order or the host
+  umask. A new build step that embeds one of those breaks
+  `tools/compare-images.sh`; `docs/BUILDING.md`, "Reproducible builds".
 
 ## Feature toggles
 
@@ -1086,6 +1096,7 @@ added to `CONFIG_CMDLINE` takes effect after a kernel rebuild; U-Boot's
 | `odi_switch.sfp_mirror_state` | `odi_switch.c` (read-only) | `off`, `filling`, `on` (the host is served) or `failed` (the kernel log says why) | -- | read at any time | prod |
 | `print-fatal-signals=1` | `kernel/618/config:61` (mainline) | register dump of any process killed by SIGSEGV/SIGBUS/SIGILL, into the ramlog | on | boot | prod (debug aid) |
 | `panic=10` | `kernel/618/config` (mainline) | restart 10 s after a panic, through the watchdog restart handler, instead of waiting for the userland watchdog deadline (about 44 s) | on | boot | prod (availability) |
+| `sysctl.kernel.kptr_restrict=2`, `sysctl.fs.protected_{symlinks,hardlinks,fifos,regular}=1` | `kernel/618/config` (mainline) | the hardening sysctls, set by the kernel before init; `tools/check-kernel-hardening.sh` fails the build without them (`docs/KERNEL.md`, "Hardening") | on | boot, or live through `/proc/sys` | prod (hardening) |
 
 ### Kconfig
 

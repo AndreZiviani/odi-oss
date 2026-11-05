@@ -32,4 +32,4 @@ else
 	: > "$MARKER" 2>/dev/null
 fi
 
-exec /etc/scripts/respawn.sh -1000 /var/log/omcid.log /bin/omcid -a -d
+exec /etc/scripts/respawn.sh omcid -1000 /var/log/omcid.log /bin/omcid -a -d

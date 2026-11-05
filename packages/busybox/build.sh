@@ -52,6 +52,11 @@ set -e
 export PATH=/opt/oss/bin:$PATH
 export CROSS_COMPILE=mips-linux-uclibc-
 export ARCH=mips
+# The banner of every applet (`busybox --help`) embeds the build time through
+# AUTOCONF_TIMESTAMP, which kconfig writes into autoconf.h. This is its own
+# switch for leaving it out: the banner then carries no date, and two builds
+# of one source match bit for bit.
+export KCONFIG_NOTIMESTAMP=1
 
 make defconfig >/dev/null
 # Apply the device fragment: drop any existing setting for each symbol, then

@@ -30,7 +30,7 @@ if [ -n "$SERVER" ]; then
 	# -R host[:port] forwards a copy remotely; -L keeps the local circular
 	# buffer too, so `logread` still works when the remote collector is not
 	# reachable.
-	exec /etc/scripts/respawn.sh 0 /var/log/services.log /sbin/syslogd -n -C64 -L -R "$SERVER"
+	exec /etc/scripts/respawn.sh syslogd 0 /var/log/services.log /sbin/syslogd -n -C64 -L -R "$SERVER"
 else
-	exec /etc/scripts/respawn.sh 0 /var/log/services.log /sbin/syslogd -n -C64
+	exec /etc/scripts/respawn.sh syslogd 0 /var/log/services.log /sbin/syslogd -n -C64
 fi

@@ -44,25 +44,25 @@ chmod +x "$T"/etc/scripts/*
 run() { FAKE_VALUE="$1" FAKE_DROP="${2-}" FAKE_MLD="${3-}" sh "$T/svc.sh" 2>&1; }
 
 eq "IGMP_SNOOPING=1 runs igmpd, writing, under respawn.sh" \
-   "RUN 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1)"
+   "RUN igmpd 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1)"
 # IGMP_PON_DROP: strictly opt-in; only 1 asks for the drop.
 eq "IGMP_PON_DROP=0 snoops without the drop" \
-   "RUN 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1 0)"
+   "RUN igmpd 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1 0)"
 eq "IGMP_PON_DROP=1 drops" \
-   "RUN 0 /var/log/services.log $T/bin/igmpd -w -d" "$(run 1 1)"
+   "RUN igmpd 0 /var/log/services.log $T/bin/igmpd -w -d" "$(run 1 1)"
 eq "IGMP_PON_DROP=yes is read as off" \
-   "RUN 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1 yes)"
+   "RUN igmpd 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1 yes)"
 eq "IGMP_PON_DROP=1 alone does not start the daemon" OFF "$(run "" 1)"
 # MLD_SNOOPING: strictly opt-in too, and unset leaves the command line as it
 # was before the key existed.
 eq "MLD_SNOOPING=1 adds MLD" \
-   "RUN 0 /var/log/services.log $T/bin/igmpd -w -6" "$(run 1 "" 1)"
+   "RUN igmpd 0 /var/log/services.log $T/bin/igmpd -w -6" "$(run 1 "" 1)"
 eq "MLD_SNOOPING=1 with the drop" \
-   "RUN 0 /var/log/services.log $T/bin/igmpd -w -d -6" "$(run 1 1 1)"
+   "RUN igmpd 0 /var/log/services.log $T/bin/igmpd -w -d -6" "$(run 1 1 1)"
 eq "MLD_SNOOPING=0 is off" \
-   "RUN 0 /var/log/services.log $T/bin/igmpd -w -d" "$(run 1 1 0)"
+   "RUN igmpd 0 /var/log/services.log $T/bin/igmpd -w -d" "$(run 1 1 0)"
 eq "MLD_SNOOPING=yes is read as off" \
-   "RUN 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1 "" yes)"
+   "RUN igmpd 0 /var/log/services.log $T/bin/igmpd -w" "$(run 1 "" yes)"
 eq "MLD_SNOOPING=1 alone does not start the daemon" OFF "$(run "" "" 1)"
 eq "unset parks" OFF "$(run "")"
 eq "0 parks" OFF "$(run 0)"

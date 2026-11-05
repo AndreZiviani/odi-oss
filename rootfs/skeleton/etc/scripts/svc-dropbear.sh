@@ -41,7 +41,7 @@ KEY=/etc/config/dropbear.d/ed25519
 # passwords anyway: root has the default one for that boot, which is the
 # way back into a stick whose keys are lost.
 if [ -f /etc/odi-keys-only ] && [ ! -f /var/run/safe-mode ]; then
-	exec /etc/scripts/respawn.sh -1000 /var/log/services.log /sbin/dropbear -s -F -r "$KEY" -D /etc/config/dropbear.d -p 22
+	exec /etc/scripts/respawn.sh dropbear -1000 /var/log/services.log /sbin/dropbear -s -F -r "$KEY" -D /etc/config/dropbear.d -p 22
 else
-	exec /etc/scripts/respawn.sh -1000 /var/log/services.log /sbin/dropbear -F -r "$KEY" -D /etc/config/dropbear.d -p 22
+	exec /etc/scripts/respawn.sh dropbear -1000 /var/log/services.log /sbin/dropbear -F -r "$KEY" -D /etc/config/dropbear.d -p 22
 fi

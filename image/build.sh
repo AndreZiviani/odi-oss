@@ -17,6 +17,17 @@ set -euo pipefail
 cd "$(dirname "$0")"
 ROOT=$(cd .. && pwd)
 
+# Reproducible output: two builds of one commit give the same tarball, byte
+# for byte (docs/BUILDING.md, "Reproducible builds"). Every time written into
+# the image comes from SOURCE_DATE_EPOCH, never from the clock, and the
+# staging tree is made under a fixed umask so host settings cannot leak into
+# directory modes (squashfs records them).
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$("$ROOT/tools/source-date-epoch.sh")}
+export SOURCE_DATE_EPOCH
+umask 022
+# GNU date on Linux, BSD date on macOS.
+fmt_epoch() { date -u -d "@$SOURCE_DATE_EPOCH" "$1" 2>/dev/null || date -u -r "$SOURCE_DATE_EPOCH" "$1"; }
+
 # r0/r1 and k0/k1 from /proc/mtd on the DFP-34X-2C2. Exceeding either is a hard
 # stop: a partition that does not fit cannot be flashed, and finding that out
 # on the device costs a recovery.
@@ -33,10 +44,10 @@ BS=${BS:-262144}
 # TOOLS_IMAGE names the container (image/Dockerfile), for a build that must
 # not share the default tag with another one on the same Docker host.
 TOOLS=${TOOLS_IMAGE:-odi-oss-image}
-# Date plus the short commit: two builds on one day stay apart, and an image
+# Commit date plus the short commit: two builds on one day stay apart, and an image
 # names the tree that produced it (a dirty tree gets -dirty).
 GITREV=$(git -C "$ROOT" describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
-VERSION=${VERSION:-odi-oss-$(date +%y%m%d)-$GITREV}
+VERSION=${VERSION:-odi-oss-$(fmt_epoch +%y%m%d)-$GITREV}
 BUSYBOX=${BUSYBOX:-$ROOT/out/busybox}
 # The kernel .config that produced KERNEL, if the build left one beside it.
 KCONFIG=${KCONFIG:-}
@@ -91,7 +102,8 @@ ALLOW_PARTIAL=1 builds without the packages and releases."
 
 say "build environment"
 docker build -q -t "$TOOLS" -f "$ROOT/image/Dockerfile" "$ROOT/image" >/dev/null
-run() { docker run --rm -v "$ROOT:/work" -w /work "$TOOLS" "$@"; }
+# SOURCE_DATE_EPOCH goes into the container: mksquashfs and tar read it.
+run() { docker run --rm -e SOURCE_DATE_EPOCH -v "$ROOT:/work" -w /work "$TOOLS" "$@"; }
 
 say "staging the rootfs"
 rm -rf "$STAGE"
@@ -227,7 +239,7 @@ say "build manifest"
 	# sign into a gpon_image_info label, and image verification reads image=.
 	# The descriptive lines below carry no equals sign.
 	echo "image=$VERSION"
-	echo "built=$(date -u '+%Y-%m-%dT%H:%MZ')"
+	echo "built=$(fmt_epoch '+%Y-%m-%dT%H:%MZ')"
 	# The kernel release, from the header of the .config; the uImage file
 	# name when no config is staged.
 	kver=$(sed -n "s/^# Linux\/[^ ]* \([0-9][^ ]*\) Kernel Configuration.*/\1/p" "${KCONFIG:-/dev/null}" 2>/dev/null | head -n 1)
@@ -239,7 +251,7 @@ say "build manifest"
 		echo "confd=${CONFD_TAG:-unknown}"
 	fi
 	echo "version:   $VERSION"
-	echo "built:     $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+	echo "built:     $(fmt_epoch '+%Y-%m-%dT%H:%M:%SZ')"
 	echo "kernel:    $(basename "$KERNEL")  $(size "$KERNEL") bytes  md5 $(md5_of "$KERNEL")"
 	echo "busybox:   $(size "$BUSYBOX") bytes  md5 $(md5_of "$BUSYBOX")"
 	if [ -n "$KCONFIG" ]; then
@@ -261,7 +273,7 @@ sed 's/^/  /' "$STAGE/etc/odi-build"
 # /etc/version, in the shape of the stock one
 # (`ODI-260912-33520c6 -- Sat Sep 12 00:39:55 UTC 2026`): confd shows the
 # running version from it, up to the first space.
-echo "$VERSION -- $(date -u '+%a %d %b %Y %H:%M:%S %Z')" > "$STAGE/etc/version"
+echo "$VERSION -- $(fmt_epoch '+%a %d %b %Y %H:%M:%S %Z')" > "$STAGE/etc/version"
 echo "  /etc/version: $(cat "$STAGE/etc/version")"
 
 if [ -n "$KCONFIG" ]; then
@@ -339,9 +351,16 @@ EOF
 # shellcheck disable=SC2086
 "$ROOT/packages/isa-allowlist.sh" $elves | sed "s/^/  /"
 
+# -mkfs-time and -all-time set the creation time and every inode time (the
+# staged files carry checkout and build times). mksquashfs also reads
+# SOURCE_DATE_EPOCH itself, but refuses it together with these options and
+# only clamps times above it, so it is unset for this call and the options
+# are explicit. -all-root fixes ownership, -processors 1 keeps the block
+# order stable, and sorted directories plus the default -reproducible do the
+# rest.
 say "squashing"
-run mksquashfs build/rootfs build/rootfs.img \
-	-comp "$COMP" -b "$BS" \
+run env -u SOURCE_DATE_EPOCH mksquashfs build/rootfs build/rootfs.img \
+	-comp "$COMP" -b "$BS" -mkfs-time "$SOURCE_DATE_EPOCH" -all-time "$SOURCE_DATE_EPOCH" \
 	-pf rootfs/devices.pseudo \
 	-always-use-fragments -no-xattrs -noappend -no-sparse -all-root \
 	-processors 1 >/dev/null
@@ -379,8 +398,13 @@ TAR=$OUT/$VERSION.tar
 # in tar header": GNU writes `0000644\0`, bsdtar `000755 \0`) and extracts
 # nothing, and this is the tarball unpacked on the stick before fwu.sh.
 # test/image_tar_format_test.sh is the gate.
+#
+# Reproducible: members sorted by name, times from SOURCE_DATE_EPOCH, owner
+# root, and group and other write dropped from the modes so the host umask
+# cannot show (all native GNU tar options).
 run sh -c "cd '${PACK#"$ROOT"/}' && tar -cf '/work/${TAR#"$ROOT"/}' \
-	fwu.sh fwu_ver md5.txt rootfs uImage"
+	--sort=name --mtime=@\$SOURCE_DATE_EPOCH --owner=0 --group=0 --numeric-owner \
+	--mode=go-w fwu.sh fwu_ver md5.txt rootfs uImage"
 say "done"
 ls -l "$TAR"
 cat <<EOF

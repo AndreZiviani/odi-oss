@@ -59,6 +59,7 @@ echo "tarball:      $TAR"
 
 docker run --rm --privileged --platform linux/amd64 \
 	-v "$STICK:/stick:ro" -v "$TARDIR:/tars:ro" -v "$PWD/test:/t:ro" \
+	-v "$PWD/tools/ci-apt.sh:/ci-apt.sh:ro" \
 	debian:bookworm-slim bash /t/fwu_stock_flash_inner.sh "$(basename "$TAR")"
 rc=$?
 

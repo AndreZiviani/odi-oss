@@ -10,6 +10,7 @@
 # and pulled on first use; DIAG_IMAGE overrides it (toolchain/image.sh).
 TOP := $(CURDIR)/../../..
 -include $(TOP)/toolchain/images.env
+include $(TOP)/src/harden.mk
 DIAG_IMAGE ?= $(DIAG_IMAGE_PINNED)
 IMAGE := $(DIAG_IMAGE)
 CROSS := mips-linux-gnu-
@@ -26,11 +27,11 @@ STRIP := $(CROSS)strip
 
 CFLAGS := -std=c11 -Os -Wall -Wextra \
           -march=mips1 -mabi=32 -EB -msoft-float -G0 \
-          -fno-pic -mno-abicalls -ffreestanding -fno-builtin -fno-stack-protector \
+          -fno-pic -mno-abicalls -ffreestanding -fno-builtin $(HARDEN_CFLAGS) \
           -ffunction-sections -fdata-sections \
           -I$(DIAG)/src -I../generated -I$(UAPI)
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
-           -Wl,--gc-sections
+           -Wl,--gc-sections $(HARDEN_LDFLAGS)
 
 # The translation units of omcid, divided by what each one talks to: the
 # store, the driver, the renderers, one file per transport. omcid.h declares
@@ -43,6 +44,7 @@ OBJS := $(BUILD)/start.o $(BUILD)/io.o $(SRCS:%=$(BUILD)/%.o) \
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(HARDEN_CHECK) $@
 	$(STRIP) $@
 
 # The driver-call golden (../drv-test.sh): the same objects, except drv.c
@@ -50,6 +52,7 @@ $(BIN): $(OBJS)
 # Never shipped; omcid itself is unchanged by it.
 $(BUILD)/omcid-drvtrace: $(filter-out $(BUILD)/drv.o,$(OBJS)) $(BUILD)/drv-drvtrace.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(HARDEN_CHECK) $@
 	$(STRIP) $@
 
 $(BUILD)/drv-drvtrace.o: drv.c $(OMCID_HDRS) | $(BUILD)

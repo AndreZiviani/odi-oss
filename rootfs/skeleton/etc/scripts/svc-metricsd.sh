@@ -11,4 +11,4 @@
 # oom_score_adj left at the kernel default (0): the one daemon whose loss
 # costs neither management access nor GPON state, so it is first in line
 # for the OOM killer if it has to take something at all (docs/SETTINGS.md).
-exec /etc/scripts/respawn.sh 0 /var/log/services.log /bin/metricsd 9100
+exec /etc/scripts/respawn.sh metricsd 0 /var/log/services.log /bin/metricsd 9100

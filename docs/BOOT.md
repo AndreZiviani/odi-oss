@@ -147,9 +147,12 @@ reset: a trial that never answered still says how far it got
    in `/etc/inittab`
    (`/etc/scripts/svc-*.sh`, `docs/SETTINGS.md`, "native over hand-rolled"):
    busybox init starts all of them the moment this script returns and
-   restarts whichever one exits, forever, on its own -- no rate limit, no
-   restart budget, and no chance of losing track of the pid the way the
-   old shell-loop `supervise()` once did on hardware. Each script sets its
+   restarts whichever one exits, forever, on its own, with no chance of
+   losing track of the pid the way the old shell-loop `supervise()` once
+   did on hardware. A daemon that dies within 30 s of its start is
+   restarted after a growing wait (1 s, 2 s ... up to a cap per daemon,
+   `docs/SETTINGS.md`, "Restart budget"); the first start of the boot never
+   waits, and none of it runs before rcS has returned. Each script sets its
    own `oom_score_adj` right before it execs the daemon in place
    (`/etc/scripts/respawn.sh`), with its output appended to
    `/var/log/services.log` (`/var/log/omcid.log` for omcid) -- a file

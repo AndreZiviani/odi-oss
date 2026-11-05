@@ -11,9 +11,12 @@ fail=0
 ok()  { printf 'ok    %s\n' "$1"; pass=$((pass + 1)); }
 bad() { printf 'FAIL  %s\n' "$1"; fail=$((fail + 1)); }
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get -qq update >/dev/null 2>&1
-apt-get -qq install -y qemu-user-static python3 >/dev/null 2>&1
+# Bounded (tools/ci-apt.sh, mounted at /ci-apt.sh): a dead mirror fails here
+# in minutes instead of hanging the run.
+if ! bash /ci-apt.sh qemu-user-static python3 >/dev/null 2>&1; then
+	bad "could not install qemu-user-static and python3 (apt mirror down?)"
+	exit 1
+fi
 
 # Big-endian MIPS through binfmt_misc, so the stock busybox can exec its own
 # applets and the stub helpers.
