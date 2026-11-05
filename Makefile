@@ -154,6 +154,7 @@ test-host:
 	sh src/omci/testlib-test.sh
 	bash test/root_pw_test.sh
 	bash test/bundle_sources_check_test.sh
+	bash test/sbom_test.sh
 	bash test/fetch_releases_test.sh
 	bash test/flash_test.sh
 	bash test/slot_state_test.sh
