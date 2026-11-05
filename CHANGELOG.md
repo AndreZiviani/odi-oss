@@ -15,6 +15,36 @@ listed here.
   the busybox config fragment, `rootfs/devices.pseudo`,
   `src/diag/test/hw_fake_common.inc`) got their header. Refs #277.
 
+- Releases: the SBOM is now complete and checkable. `sbom.cdx.json` tells
+  runtime components from build tools (gcc and binutils are `excluded` and
+  nothing at runtime depends on them), gives every runtime component a
+  version, purl, license and `bom-ref`, adds a dependency graph, and lists
+  every file the image carries with its SHA-256 and rootfs path: the busybox,
+  dropbear and iproute2 binaries, our own daemons, `confd` and `metricsd`
+  (hashes from `src/release-sha256.txt`), the `confd` web assets and the three
+  register replay tables. Upstream source tarballs carry their pinned hash.
+  The SBOM is in `SHA256SUMS` and a subject of the provenance attestation.
+  `tools/verify-sbom.sh sbom.cdx.json --sums SHA256SUMS [--rootfs DIR]`
+  checks it with python3 alone; the release job runs it before publishing and
+  fails when a hashed artifact is missing, and `test/sbom_test.sh` (in
+  `make test-host`) covers it with a generated SBOM and deliberately broken ones.
+  `tools/generate-sbom.sh` is now a wrapper of `tools/sbom.py`. gcc now carries
+  the `GCC-exception-3.1` SPDX expression. docs/FLASHING.md and docs/LICENSING.md
+  describe it. Refs #260.
+
+- CI: a release is published only after the whole of CI has passed on the
+  tag commit, and only for a commit that is on `main`. `release.yml` now
+  first checks that a final tag is on a commit that is an ancestor of `origin/main`
+  (`tools/check-release-ancestry.sh`, covered by `make test-host`), then
+  calls `ci.yml` as a reusable workflow, so the QEMU boot test, the rcS
+  trace goldens, every OMCI suite, `full` and the two-build `reproducible`
+  comparison must all succeed before the release job starts; it no longer
+  waits for a smaller `make test` copy of them. `ci.yml` stops starting by
+  itself on `v*` tags (the call replaces that run, so a tag costs one CI
+  run, not two). Running `release.yml` by hand is a dry run that stops
+  before publishing. Pre-release tags (`vX.Y.Z-beta.N`) skip the ancestry check, since
+  they test unmerged work, but need the same CI call to pass.
+
 - Licensing: every project-owned source file now carries an SPDX copyright
   and license header, and the rest is annotated in `REUSE.toml`; the tree
   passes `reuse lint` (REUSE 3.3), which `make lint` runs when the tool is

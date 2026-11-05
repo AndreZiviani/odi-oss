@@ -223,10 +223,20 @@ A release is cut only when the maintainer asks for one. Before tagging:
    should ship. If a sibling repo has unreleased changes the image needs,
    release it first and bump the pin, with its own changelog entry, before
    tagging odi-oss.
+6. **Tag a commit that is on `origin/main`** (final tags only).
+   `release.yml` refuses a final tag on any other commit, and publishes
+   nothing, final or pre-release, until the whole of `ci.yml` (including `test-qemu`, the rcS goldens and
+   `reproducible`) has passed on that exact commit. The tag push therefore
+   starts one long run (up to ~90 minutes for `reproducible`), not a quick
+   one; to rehearse it without a tag, run `release` by hand
+   (`gh workflow run release.yml --ref <branch>`), a dry run that stops
+   before publishing.
 
 **A pre-release for testing** (also only when the maintainer asks) is a tag
 with a hyphen after the next version, `v1.2.2-beta.1`, signed, on the commit
 to test. It skips steps 3 and 5: `## Unreleased` stays where it is and
-becomes the notes, and the build ships whatever the pins say.
+becomes the notes, and the build ships whatever the pins say. Its commit may be on an
+integration branch main does not contain, so the ancestry part of step 6
+does not apply; the whole-CI part does.
 `.github/workflows/release.yml` publishes it as a GitHub pre-release, never
 marked latest. Check it as in step 4.
