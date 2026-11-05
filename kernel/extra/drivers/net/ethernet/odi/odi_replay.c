@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_replay.c -- odi_replay_run(), the one loop every register replay
  * goes through (odi_replay.h has the four sequences and what differs

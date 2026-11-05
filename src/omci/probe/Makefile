@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # omciprobe — phase 0 of the omci_app replacement.
 #
 # Reuses diag's freestanding runtime: the same _start, the same syscall

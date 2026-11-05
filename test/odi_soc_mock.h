@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_soc_mock.h -- the SoC window of odi_soc.c on the host: a flat
  * register file behind the allowlist, with access counts. Included before

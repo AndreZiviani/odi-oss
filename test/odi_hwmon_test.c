@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* odi_hwmon_test.c -- the die temperature decode (odi_hwmon.h), against the
  * words read on a stick and under the stock firmware. Host cc only.
  */

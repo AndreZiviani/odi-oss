@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Hardening flags for every freestanding binary in src/, in one place so the
 # seven Makefiles cannot drift apart. docs/CROSS-COMPILING.md, "Hardening",
 # has the whole matrix: what each flag buys on this target, and why the

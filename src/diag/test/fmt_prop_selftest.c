@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Target side of the out_fmt property test: the generated cases through
  * out_fmt, under qemu. Its output is diffed against fmt_prop_ref's, so any
  * disagreement with a real printf fails the build rather than showing up as a

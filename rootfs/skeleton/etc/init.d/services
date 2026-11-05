@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # /etc/init.d/services -- manual control over syslogd, klogd, ntpd,
 # metricsd, confd, dropbear and omcid. Since v1.0.4 each is its own

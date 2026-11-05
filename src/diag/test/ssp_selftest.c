@@ -1,3 +1,5 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* The stack protector runtime of start.S, exercised for real under qemu
  * (test/ssp-test.sh):
  *

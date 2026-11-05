@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Table attributes (respond/mibstore.c, tbl_defs[]): rows that a Set adds,
 # replaces or deletes one at a time, read back whole through Get and
 # Get-Next, and the downstream multicast flag that class 281's address table

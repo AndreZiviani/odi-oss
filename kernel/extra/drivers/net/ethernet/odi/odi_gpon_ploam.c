@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_gpon_ploam.c -- codec implementation for odi_gpon_ploam.h. No kernel
  * dependency: plain C, so test/odi_gpon_test.c compiles and runs it with

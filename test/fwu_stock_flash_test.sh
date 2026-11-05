@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # The FIRST flash, run for real: the stock vendor busybox as the shell, the
 # stock /bin as the only tools, the actual image tarball, and fwu.sh carried

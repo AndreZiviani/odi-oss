@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Run under qemu-user (src/nv/Makefile `test`): the flock(2) numbers in lock.h
  * against a real Linux kernel. Two open file descriptions of one file conflict
  * even inside one process, so: the first lock is granted, the second is

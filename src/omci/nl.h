@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The packet-redirect transport, shared by the capture and the responder.
  *
  * OMCI frames do not arrive on a netdev. The driver hands them to whichever

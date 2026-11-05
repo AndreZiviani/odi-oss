@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The U-Boot environment block, as this device stores it.
  *
  * Read off isp2's /dev/mtd1 rather than assumed:

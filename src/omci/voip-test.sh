@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The VoIP classes (G.988 9.9, SIP over OMCI): what an OLT provisions for a
 # phone line, accepted and held while OMCI_POTS_PORTS is on, and unknown to
 # the OLT, exactly as before they were modelled, while it is off.

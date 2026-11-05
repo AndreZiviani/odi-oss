@@ -1,3 +1,7 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-FileCopyrightText: 2026 Tomás Correia */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The bridge connections: the service table, the bridge rule of cmd 51
  * (bdgconn_add()), the VLAN rules, and the rebuild that derives every
  * connection from the MIB (bdgconn_rebuild()). See omcid.h.

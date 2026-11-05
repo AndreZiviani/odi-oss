@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Alarms and attribute value changes (respond/alarm.c): what omcid sends the
 # OLT on its own, and Get All Alarms / Get All Alarms Next.
 #

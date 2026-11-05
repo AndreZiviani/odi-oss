@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_init.h -- the GPON boot-init replay: the writes the
  * gpondrv/gpondev/gponsn/gponpw/gponact PON steps make, generated from a

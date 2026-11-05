@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # The config partition itself is mounted declaratively now: /etc/fstab has
 # `mtd:config /var/config jffs2 defaults 0 0`, and rcS's `mount -a` (second

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The omcicli transport: one System V message queue, one 260-byte message.
  *
  * `omci_app` owns queue key 0x800 and creates it; a client opens it without

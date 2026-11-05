@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_reregister_test.c -- one boot of the ONU on ISP1, then two more
  * registrations in the same boot, and the upstream path of the OMCC checked

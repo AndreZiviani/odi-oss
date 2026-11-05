@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Software download from the OLT (respond/swimage.c), both OLT_SW_DOWNLOAD
 # modes, driven end to end under qemu: Start, windows of Download sections,
 # End with the image CRC, Activate, Commit, and the software image flags the

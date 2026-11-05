@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * rtl8686_time_test.c -- host-side test of the TIMER0 clockevent in
  * kernel/extra/arch/mips/rtl8686/time.c (unity build). A small model of the

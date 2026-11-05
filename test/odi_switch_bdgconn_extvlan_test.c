@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_bdgconn_extvlan_test.c -- cmd 51 for the rules of the extended
  * VLAN tagging operation (class 171), from the table entry to the classifier

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* What igmpd tells omcid about the subscriber's multicast, for ME 311: a
  * small text file, written whole and renamed over the old one when the group
  * table changes (the same arrangement as the policy file in the other

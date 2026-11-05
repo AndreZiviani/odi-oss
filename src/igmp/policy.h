@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* What the OLT provisioned for multicast, as omcid writes it (omcid's
  * respond/mcast.c has the file format and the units). Parsing and the
  * questions asked of it are pure: no syscalls, so the tests drive them with

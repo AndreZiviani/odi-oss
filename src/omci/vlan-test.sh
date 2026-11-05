@@ -1,4 +1,8 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-FileCopyrightText: 2026 Tomás Correia
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # VLAN handling, both line shapes, both modes: the bridge rules omcid builds
 # for a whole OLT session of each ISP with the manual tag on (the stick adds
 # VLAN_MANU_TAG_VID to untagged frames) and off (transparent: no tag added

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # svc-omcid.sh -- the /etc/inittab respawn entry for omcid. Used to start
 # inline, deep in rcS PON steps, forked by supervise.sh; now its own
 # respawn entry, so its startup runs concurrently with rcS.pon (rcs-lib.sh

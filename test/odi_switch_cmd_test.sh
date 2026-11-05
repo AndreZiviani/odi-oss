@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_cmd_test.sh -- compiles odi_switch_cmd_test.c, replays the 91
 # command brackets of isp1-260922-boot5.txt through odi_switch_cmd(), and
 # runs tools/regtrace/compare.py against the reference trace directly.

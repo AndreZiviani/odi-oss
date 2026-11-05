@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_replay_blob.h -- the register-replay firmware blobs: three of the
  * captured write sequences odi_replay_run() replays (the sdkinit verbs,

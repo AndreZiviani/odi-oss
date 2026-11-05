@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The identity the line authenticates with, out of the jffs2 config store.
  *
  * `/etc/config` is a symlink to `/var/config`, mtd3 mounted jffs2, and the

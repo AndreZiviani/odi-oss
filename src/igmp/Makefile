@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # igmpd — IGMP snooping, milestone 1: the receive path.
 #
 # Same arrangement as omci/capture: diag owns the freestanding runtime (_start,

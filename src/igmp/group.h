@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Group and source state: who has asked for what, and until when.
  *
  * This is the half the vendor spent 8,224 of its 27,900 lines on, and the half

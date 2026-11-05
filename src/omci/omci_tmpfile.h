@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The /tmp file the vendor's OMCI CLI answers through.
  *
  * `omci_open_cli_fd()` in libomci_mib.so removes /tmp/temp_omcicli* and then

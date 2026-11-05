@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_switch.c -- the kernel half of the switch core: maps the switch-core
  * window and defines odi_reg_read()/odi_reg_write(), the accessors every

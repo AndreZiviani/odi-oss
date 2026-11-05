@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # diag -- the switch, GPON and optics CLI for our own kernel.
 #
 # A small hand-written command table (src/table.c) over /dev/odi_sw,

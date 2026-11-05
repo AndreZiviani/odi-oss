@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Fetch the public reference documents listed in docs/REFERENCES.md into
 # refs/ (gitignored) and check each against its recorded SHA-256.
 # The ITU download endpoint refuses non-browser clients, so the files come

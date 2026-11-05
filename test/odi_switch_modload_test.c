@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_modload_test.c -- the module-load replay against the shipped
  * rootfs/skeleton/lib/firmware/odi/modload.bin, loaded through the host

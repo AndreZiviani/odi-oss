@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_dlog_test.c -- the held log lines of the GPON interrupt
  * (odi_gpon_dlog.h): lines are formatted into the buffer in order and with

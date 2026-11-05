@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The GEM flow descriptor -- driver command 25, 68 bytes.
  *
  * Recovered from GemPortCtpDrvCfg in mib_GemPortCtp.so, which is where the

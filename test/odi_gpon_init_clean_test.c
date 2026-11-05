@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_init_clean_test.c -- the GPON MAC reset wait and table clean of
  * odi_gpon_init.c, against a model of the two CAMs and the reset register

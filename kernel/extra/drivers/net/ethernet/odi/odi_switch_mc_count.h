@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_mc_count.h -- ACL rules that count the frames or bytes of one
  * multicast destination entering the PON (or the UNI) port, and change

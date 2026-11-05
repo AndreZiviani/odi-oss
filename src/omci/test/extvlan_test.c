@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The class 171 table entry: decode, and what the vendor generator does with it.
  *
  * Built for the target and run under qemu. Nothing here needs a device, which

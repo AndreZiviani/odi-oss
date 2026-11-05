@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_replay_blob_test.sh -- compiles and runs odi_replay_blob_test.c (the
 # blob parser and the GPON init replay, unity build against the mock, no
 # kernel), then has tools/regtrace/replayblob.py validate and dump each

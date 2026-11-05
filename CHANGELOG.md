@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- Licensing: every project-owned source file now carries an SPDX copyright
+  and license header, and the rest is annotated in `REUSE.toml`; the tree
+  passes `reuse lint` (REUSE 3.3), which `make lint` runs when the tool is
+  installed and CI always runs, with a pinned, hash-checked version
+  (`tools/reuse-requirements.txt`). The 169 headers that said `GPL-2.0`
+  (the deprecated identifier, meaning GPL-2.0-only) in `kernel/extra/` and
+  `test/` now say `GPL-2.0-or-later`, as the README states for our own
+  code. The kernel patches are annotated GPL-2.0-only, like the upstream
+  files they modify. `docs/LICENSING.md` says the same. The texts are in
+  `LICENSES/`. Refs #277.
+
 - CI: the two tests that install packages inside their Docker container
   (`make test-rcs`, for `strace`, and the stock-flash test) now go through
   `tools/ci-apt.sh`, as the runner steps already did: a read timeout and

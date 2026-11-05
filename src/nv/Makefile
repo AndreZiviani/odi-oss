@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # nv — the /bin/nv replacement, without libmib.
 #
 # Same freestanding runtime as diag, omcid and omcli: one _start, one syscall

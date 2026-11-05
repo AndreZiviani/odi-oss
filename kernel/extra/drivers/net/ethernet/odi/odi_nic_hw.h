@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_nic_hw.h -- register offsets, descriptor layout and CPU-tag pack and
  * unpack for the RTL9602C CPU-port NIC: a from-scratch statement of the

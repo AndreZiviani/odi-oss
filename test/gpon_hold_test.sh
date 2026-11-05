@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/gpon-hold.sh and the boot step in rcs-lib.sh
 # (pon_step_keepdisable), off the device (GPON_KEEP_DISABLE). The driver is a

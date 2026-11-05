@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Hold the kernel register headers to src/diag/tools/regnames.txt.
 
 odi_gpon_hw.h and odi_switch_hw.h name registers and fields the same way

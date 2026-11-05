@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_replay_fw.c -- odi_replay_fw_load()/odi_replay_fw_release(), the
  * kernel half of odi_replay_blob.h: one request_firmware() per trigger, the

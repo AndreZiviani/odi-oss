@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Build the SDK-init replay table ("SDK-init replay") from a regtrace v5
 boot capture of the odi_init verbs and PON bring-up steps.
 

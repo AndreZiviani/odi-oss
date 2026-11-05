@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_ds_flow_del_test.c -- cmd 25 downstream with ena 0, the delete
  * of a downstream GEM flow, and cmd 0, the MIB reset that deletes them all,

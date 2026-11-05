@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # svc-klogd.sh -- the /etc/inittab respawn entry for klogd. Forwards kernel
 # log messages into the syslogd circular buffer (svc-syslogd.sh); it has
 # no settings of its own, so nothing here reads the config store.

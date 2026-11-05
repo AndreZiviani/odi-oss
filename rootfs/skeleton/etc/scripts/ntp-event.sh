@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # ntp-event.sh -- busybox ntpd runs this (ntpd -S) on every event it has a
 # name for: $1 is unsync (no peer answered for 8 polls), step, stratum or
 # periodic, with stratum, offset (seconds), freq_drift_ppm and poll_interval

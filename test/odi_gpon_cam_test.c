@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_cam_test.c -- the GPON CAM requests and their completion,
  * against test/odi_switch_mock.h: every delete (MODE 3) and the search

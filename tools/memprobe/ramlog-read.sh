@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Pull the two RAM log pages off the stick (memprobe must be in /tmp there) and
 # print them: page A = first 3984 bytes of printk (4016 from a format 1
 # metadata block, 4080 from an image without one), page B = ring of the last

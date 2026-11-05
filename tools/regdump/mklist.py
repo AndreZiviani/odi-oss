@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Build the read-only address list for regdump from the RTL9602C register listing.
 
     mklist.py <regmap.txt> [out.txt]

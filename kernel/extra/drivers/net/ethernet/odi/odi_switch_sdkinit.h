@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_sdkinit.h -- the SDK-init replay: the writes of each odi_init
  * verb (switch svlan stp oam acl qos sec rate classify stat trunk l2 vlan

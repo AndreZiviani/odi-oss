@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The L2 listing line builder: pure, so test/l2_format_test.c runs it
  * natively. l2.c has the commands. */
 #include "l2.h"

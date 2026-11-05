@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_test.sh -- compiles and runs odi_switch_test.c with the host cc.
 # No kernel, no target toolchain: odi_switch_hw.h, odi_switch_tbl.c and
 # odi_switch_mock.h all have no kernel dependency (guarded by

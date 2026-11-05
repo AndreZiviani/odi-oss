@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Build Linux 6.18 for the RTL9602C -- the only kernel this repo builds.
 #
 # Pristine tree from kernel/618/mainline (kernel/618/fetch.sh, a plain

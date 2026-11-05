@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
 # The kernel hardening choices of docs/KERNEL.md ("Hardening"), checked so
 # that none of them goes away without someone deciding it should.

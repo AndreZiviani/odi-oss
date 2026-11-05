@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # build-initramfs.sh -- pack odi-oss OWN rootfs (busybox, inittab,
 # services, dropbear, confd, metricsd, sysctls, everything under
 # rootfs/skeleton) into a cpio initramfs for the qemu full-system harness

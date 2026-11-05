@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Byte-for-byte comparison of two odi-oss image tarballs (the output of
 # image/build.sh), for the reproducibility check in ci.yml: build the same

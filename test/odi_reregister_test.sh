@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_reregister_test.sh -- compiles and runs odi_reregister_test.c with the
 # host cc: one boot on ISP1, two more registrations in the same boot, and the
 # OMCC upstream path plus the whole upstream queue state checked after each

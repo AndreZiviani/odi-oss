@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* What a Create, a Set or a Delete of a managed entity does to the
  * hardware: the dispatch by class, the delete, and the MIB reset. The work
  * per class is in apply_qos.c (T-CONTs, queues, GEM flows), apply_uni.c

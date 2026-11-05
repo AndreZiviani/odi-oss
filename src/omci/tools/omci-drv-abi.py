@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Recover the payload of every omci_wrapper_* call.
 
 Each wrapper funnels into one helper:

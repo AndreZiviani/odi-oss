@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_mcast_test.c -- the switch half of IGMP and MLD snooping
  * (odi_switch_mcast.c): the ACL rules that copy (or take) the host port's

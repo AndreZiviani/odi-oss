@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* OMCI baseline message format (G.988 11.2) and the CRC this OLT uses.
  *
  * A baseline frame is 48 bytes:

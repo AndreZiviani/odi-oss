@@ -1,4 +1,6 @@
 #!/usr/bin/env sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Print the SOURCE_DATE_EPOCH for this tree: the committer date of HEAD, so
 # any two checkouts of one commit agree and "now" never enters a build

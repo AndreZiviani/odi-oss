@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_switch_tbl.c -- the table handshakes of odi_switch_tbl.h. The
  * register accessors are those of odi_switch_reg.h in the kernel and of

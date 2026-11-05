@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
 # The restart budget of every respawned daemon (rootfs/skeleton/etc/scripts/
 # respawn.sh, docs/SETTINGS.md "Restart budget"), off the device, with a fake

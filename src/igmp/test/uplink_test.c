@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The way up (uplink.c): what igmpd sends in place of a report the switch
  * took, byte for byte, for every upstream IGMP tag control of G.988 9.3.27
  * (attribute 5, with the TCI of attribute 4), for the classifier treatments

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * ODI DFP-34X-2C2 (Realtek RTL9602C / RTL8686): what the files of this
  * directory call in one another. Nothing outside arch/mips/rtl8686 uses it.

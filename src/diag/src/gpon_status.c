@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 #include "gpon_status.h"
 
 int gpon_proc_parse_state(const char *buf, unsigned len, uint32_t *state)

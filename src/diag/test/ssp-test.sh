@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
 # The stack protector of src/harden.mk, end to end, under qemu-user in the
 # freestanding toolchain container (make -C src/diag ssp-test):

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_switch_qos.c -- the PON queue leaves: the downstream queue map of
  * cmd 23, and the upstream PON scheduler (queue add and delete, cmd 23 and

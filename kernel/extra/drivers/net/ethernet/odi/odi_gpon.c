@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_gpon.c -- odi_gpon kernel-integration glue: the real binding between
  * the host-tested FSM/PLOAM/register core (odi_gpon_drv.h and its .c

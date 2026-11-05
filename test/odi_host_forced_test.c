@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_host_forced_test.c -- the forced host port of the 2500BASE-X and
  * HiSGMII host SerDes modes (docs/SWITCH.md#host-port-serdes-mode), against

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The downstream IGMP and multicast TCI of a multicast operations profile
  * (class 309 attribute 16, G.988 9.3.27) as the bridge rules of cmd 51.
  *

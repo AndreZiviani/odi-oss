@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # run-qemu.sh -- boot the odi-oss real rootfs under qemu-system-mips (the
 # odi-toolchain-qemu-kernel-malta stock kernel), wait for it to come up,
 # check ssh/web/exporter, then run the resilience scenarios. make test-qemu

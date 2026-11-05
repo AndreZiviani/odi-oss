@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # host-serdes.sh -- the SerDes mode of the host port (the SFP edge, switch
 # port 0, the only way into the stick), from the odi-only key HOST_SERDES:

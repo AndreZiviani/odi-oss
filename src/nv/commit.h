@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* `nv commit <slot>` -- make the running slot the committed one, in BOTH
  * copies of the U-Boot environment, verified.
  *

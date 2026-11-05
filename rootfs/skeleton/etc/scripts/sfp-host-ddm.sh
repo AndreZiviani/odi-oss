@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # sfp-host-ddm.sh -- the host-side SFP EEPROM, from the odi-only key
 # SFP_HOST_DDM (docs/SETTINGS.md): the module identity (A0h) and its live

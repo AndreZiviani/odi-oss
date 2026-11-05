@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* memprobe: read or write physical pages through /dev/mem. Static, tiny.
  *   memprobe r ADDR LEN         hexdump of the first 64 bytes + 32-bit sum of LEN bytes
  *   memprobe w ADDR LEN TAG     fill LEN bytes with TAG repeated (TAG up to 60 chars),
