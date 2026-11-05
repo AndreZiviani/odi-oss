@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Licensing: `reuse lint` now fails on a source file without an SPDX
+  header. `REUSE.toml` annotated the whole tree (`**`) as a fallback, so a
+  new script or C file that forgot its header still passed; it now lists
+  only the kinds of file that take no header (markdown, text, XML, goldens,
+  the IGMP replay data, `LICENSE`, the kernel config and five rootfs config
+  files). The nine files that relied on the fallback and do take a comment
+  (`.gitignore`s, `dependabot.yml`, the issue template, `toolchain/images.env`,
+  the busybox config fragment, `rootfs/devices.pseudo`,
+  `src/diag/test/hw_fake_common.inc`) got their header. Refs #277.
+
 - Releases: the SBOM is now complete and checkable. `sbom.cdx.json` tells
   runtime components from build tools (gcc and binutils are `excluded` and
   nothing at runtime depends on them), gives every runtime component a

@@ -13,9 +13,25 @@ version = 1
 # Everything else that is ours and takes no header: markdown and text
 # documents, rootfs config files (inittab, fstab, ...), kernel config, test
 # fixtures and goldens (which tests compare byte for byte, so no header can
-# go into them), the kb field notes, the register tables as text.
+# go into them), the kb field notes, the register tables as text. Listed by
+# kind on purpose, not as "**": a catch-all would also cover a new source
+# file that forgot its header, and reuse lint could then never fail.
 [[annotations]]
-path = "**"
+path = [
+    "**/*.md",
+    "**/*.txt",
+    "**/*.xml",
+    "**/*.golden",
+    "**/*.expected",
+    "src/igmp/test/replay/**",
+    "LICENSE",
+    "kernel/618/config",
+    "rootfs/skeleton/etc/fstab",
+    "rootfs/skeleton/etc/group",
+    "rootfs/skeleton/etc/hostname",
+    "rootfs/skeleton/etc/hosts",
+    "rootfs/skeleton/etc/inittab",
+]
 precedence = "closest"
 SPDX-FileCopyrightText = "2026 Andre Ziviani"
 SPDX-License-Identifier = "GPL-2.0-or-later"

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Proposes updates for the GitHub Actions the workflows use. Every action is
 # pinned to a full commit SHA with its version in a trailing comment;
 # Dependabot rewrites both. tools/bump-deps.sh (dependency-bump.yml) covers
