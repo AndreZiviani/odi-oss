@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * bdgconn_rules.h -- the bridge rules omcid sends with cmd 51, rebuilt for
  * the host tests. The builders mirror the generators in

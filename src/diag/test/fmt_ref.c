@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Host side of the out_fmt test: the same cases through glibc's printf. */
 #include <stdio.h>
 #include "fmt_cases.h"

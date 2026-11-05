@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* What the OLT provisioned for multicast, as a small text file igmpd reads.
  *
  * omcid owns the managed entities (281 multicast GEM interworking TP, 309

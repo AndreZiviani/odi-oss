@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_flood_test.c -- cmd 64 (setFloodingPortMask) against the
  * register mock. The stock OMCI layer reads the mask of the type it is

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_alloc_cam_safety_test.sh -- compiles and runs odi_alloc_cam_safety_test.c
 # with the host cc: the Alloc-ID CAM holds only what the OLT assigned by PLOAM
 # in the current activation, through LOS, TO2, Deactivate_ONU-ID, O7,

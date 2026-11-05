@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Scripted scenario: rx power has drifted down to about -28 dBm. A real
  * SFF-8472 module would assert both its low-power alarm and warning at
  * that level (see odi_ddm.c/odi_ddm.h for the byte layout, and

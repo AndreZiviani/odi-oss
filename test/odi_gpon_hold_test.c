@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_hold_test.c -- the kept Emergency Stop (GPON_KEEP_DISABLE) in the
  * GPON leaf. The OLT disables the ONU (G.984.3 Disable_Serial_Number, O7);

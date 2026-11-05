@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* odi_gpon_pw_test.c -- odi_gpon_parse_pw (the gponpw argument) on the host:
  * every length 1..20, both forms, and the ones that must be refused. */
 #include <errno.h>

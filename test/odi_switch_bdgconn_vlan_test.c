@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_bdgconn_vlan_test.c -- cmd 51 for the rules the class 84
  * forward operation adds (src/omci/respond/apply_bridge.c, bp_rules()):

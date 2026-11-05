@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Building the L2 multicast entry igmpd hands the switch.
  *
  * Separate from the ioctl for the same reason frame.c is separate from the

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_tbl.h -- the indirect table handshakes of the switch core and
  * the GPON block: the downstream GEM port CAM, the Alloc-ID CAM, the VLAN

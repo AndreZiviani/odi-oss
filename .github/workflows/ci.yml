@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 name: ci
 
 # Pull requests and pushes to main run the tests, as parallel jobs: lint, the host-side
@@ -78,7 +81,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Lint (shellcheck, inline-quote check)
+      # The pinned REUSE tool, installed with hash checking. pip gets a
+      # timeout and retries, and the step a wall-clock limit, so a stalled
+      # index cannot hold the job.
+      - name: Install reuse (pinned, hash-checked)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/reuse"
+          timeout 300 "$RUNNER_TEMP/reuse/bin/pip" install --require-hashes \
+            --retries 3 --timeout 30 -r tools/reuse-requirements.txt
+          echo "$RUNNER_TEMP/reuse/bin" >> "$GITHUB_PATH"
+
+      - name: Lint (shellcheck, inline-quote check, REUSE)
+        env:
+          ODI_REQUIRE_REUSE: "1"
         run: |
           command -v shellcheck >/dev/null || {
             tools/ci-apt.sh shellcheck
@@ -175,7 +190,7 @@ jobs:
       # cache and fetches anew. A hit only skips the download: every fetch
       # script still re-checks the pinned SHA-256 of the file it finds there.
       - name: Cache pinned downloads (dl/)
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             dl
@@ -223,7 +238,7 @@ jobs:
       # cache and fetches anew. A hit only skips the download: every fetch
       # script still re-checks the pinned SHA-256 of the file it finds there.
       - name: Cache pinned downloads (dl/)
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             dl
@@ -300,7 +315,7 @@ jobs:
       # cache and fetches anew. A hit only skips the download: every fetch
       # script still re-checks the pinned SHA-256 of the file it finds there.
       - name: Cache pinned downloads (dl/)
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             build-a/dl

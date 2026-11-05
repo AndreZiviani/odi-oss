@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Diff two regdump captures against the mklist.py address list.
 
     diff.py <namelist.txt> <dump-a.txt> <dump-b.txt>

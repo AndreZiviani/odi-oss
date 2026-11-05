@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Checks the fixed-point SFF-8472 conversions against double-precision
  * reference values computed the way the vendor does. Host-side: ddm.c touches
  * no syscalls, so it builds natively. */

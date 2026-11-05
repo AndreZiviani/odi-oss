@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_sfp_mirror_test.sh -- compiles and runs odi_sfp_mirror_test.c with the
 # host cc: the host-side SFP EEPROM (odi_sfp_mirror.c) over odi_i2c.c and
 # odi_ddm.c, unity build against the register model. The work item and the

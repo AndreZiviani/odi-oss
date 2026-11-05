@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_dsq_test.c -- the schedule of the UNI's downstream queues,
  * which cmd 23 (direction DS) gives on top of the stock write of

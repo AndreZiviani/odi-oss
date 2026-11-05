@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 #include "entry.h"
 
 void igmp_group_mac(uint8_t *mac, uint32_t group)

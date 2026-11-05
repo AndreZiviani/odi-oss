@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Parsers for the two /proc files our 6.18 drivers publish, shared by the
  * OMCI tools. Pure functions over a buffer the caller already read: no
  * syscalls, no libc, so test/procparse_test.c builds them natively.

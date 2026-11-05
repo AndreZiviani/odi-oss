@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Runs INSIDE the diag toolchain container. See rcs_trace_test.sh.
 #
 # For each flag set: stage a root, run /etc/init.d/rcS in it under strace,

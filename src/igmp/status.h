@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* `igmpd -s`: what the daemon decided, readable by a person. The policy in
  * force, the groups held and the last refusals, from the two files the
  * daemon and omcid already keep (policy.h, state.h): nothing new is stored

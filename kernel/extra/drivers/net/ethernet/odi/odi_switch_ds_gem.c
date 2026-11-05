@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_switch_ds_gem.c -- downstream GEM ports: the DS GEM port write of
  * cmd 25 (downstream side), the record of which DS slot holds which GEM

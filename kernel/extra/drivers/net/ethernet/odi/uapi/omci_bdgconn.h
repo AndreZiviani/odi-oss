@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The bridge connection descriptor -- driver command 51, 160 bytes.
  *
  * Nine ints followed by a 124-byte VLAN operation block. On this firmware's

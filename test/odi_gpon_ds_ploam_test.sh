@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_ds_ploam_test.sh -- compiles and runs odi_gpon_ds_ploam_test.c,
 # the downstream PLOAM drain of odi_gpon_isr_poll() against the register
 # mock and its FIFO model: several queued messages drained in one

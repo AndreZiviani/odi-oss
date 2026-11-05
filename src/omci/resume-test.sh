@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The resume golden: omcid killed mid-session comes back answering exactly
 # as before, with zero switch-programming driver calls.
 #

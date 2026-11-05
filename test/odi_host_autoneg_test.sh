@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_host_autoneg_test.sh -- compiles and runs odi_host_autoneg_test.c: the
 # HOST_FIBER_CTRL writes of odi_switch.host_autoneg in each direction, the
 # platform step, and the host link read, against the register mock. No kernel, no target toolchain. Part of `make test-host`.

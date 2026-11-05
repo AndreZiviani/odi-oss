@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/omci-respawn-reprovision.sh, off the device --
 # the automatic re-provisioning svc-omcid.sh backgrounds after init respawns

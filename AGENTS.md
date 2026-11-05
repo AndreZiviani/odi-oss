@@ -129,6 +129,11 @@ behind every rule here.
   `src`: trial, image and boot ids, dates, old patch numbers, "this pass".
   A comment says what is true of the code now; the story goes in the
   commit message (`docs/HACKING.md`, "Repo rules").
+- `tools/check-kernel-hardening.sh` — every kernel hardening option of
+  `docs/KERNEL.md` ("Hardening") is stated in the seed config, and the
+  sysctls are on its built-in command line. `kernel/build.sh` runs the same
+  check on the completed `.config`, so an option `olddefconfig` drops fails
+  the build.
 
 ## Stick safety rules
 

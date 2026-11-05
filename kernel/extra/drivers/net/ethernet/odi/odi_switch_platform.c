@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_switch_platform.c -- the switch-core state the stock OMCI kernel
  * modules set up when they loaded: the platform settings, each a

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Shared helpers of the OMCI suites (src/omci/*-test.sh). POSIX sh, so it
 # runs under dash and busybox ash in the toolchain container.
 #

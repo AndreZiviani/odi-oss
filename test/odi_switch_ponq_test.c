@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* odi_switch_ponq_test.c -- the upstream PON queues of cmd 21, 23, 24 and
  * 25 in the shapes neither ISP1 nor ISP2 provisions (odi_switch_cmd_test.c
  * covers ISP1's against the stock capture): several queues on one T-CONT,

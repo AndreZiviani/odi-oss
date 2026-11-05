@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The SIGHUP reload: what omcid does when apply.sh omci tells it to reread
 # the config store (respond/reload.c, docs/SETTINGS.md "How apply works").
 #

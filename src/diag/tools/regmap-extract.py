@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Turn librtk's chip register table into C we can link, and name it.
 
 `reg_field_read(reg, field, &v)` resolves a register index and a field index

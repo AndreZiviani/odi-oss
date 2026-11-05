@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_optics_model_test.sh -- compiles and runs odi_optics_model_test.c with
 # the host cc: odi_i2c.c, odi_ddm.c (kernel/extra), src/diag/src/ddm.c and
 # the scriptable SFF-8472 model (odi_optics_model.h), unity-built together

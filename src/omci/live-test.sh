@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Values omcid answers from live state or from the configuration, not from the
 # generated defaults table (generated/omci_defaults.c): each one has to follow
 # its source, so a stick other than the one the table was captured from does

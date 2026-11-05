@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Exercises tools/regtrace/mkmodload.py against a small synthetic capture
 # and register map: the table-block 0x012000-0x01202c exclusion, the
 # classification-table sweep-vs-specific-rule repeat-write rule, the VLAN/L2_UNICAST/ACL

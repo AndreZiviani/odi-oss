@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # mcast_probe_test.sh -- runs tools/mcast-probe/mcast-probe.sh against stub
 # diag, igmpd, timeout and pidof: the order it installs and removes the
 # probes, the results block, and that it puts everything back however it

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* `voip`: the voice lines the OLT provisioned, resolved.
  *
  * What an OLT provisions for a phone line is spread over a dozen entities

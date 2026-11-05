@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Class 171, the received-frame VLAN tagging operation table.
  *
  * One table entry is four big-endian words, and the two halves are NOT laid

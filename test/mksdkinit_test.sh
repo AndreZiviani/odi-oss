@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Exercises tools/regtrace/mksdkinit.py against a small synthetic capture:
 # the per-verb window split (`== ... odi_init <verb>` / `== ... pon step
 # <verb>` markers), the TBL_ACCESS 0x012000-0x01202c exclusion, a plain

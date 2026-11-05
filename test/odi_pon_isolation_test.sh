@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_pon_isolation_test.sh -- compiles and runs odi_pon_isolation_test.c:
 # the PON port's isolation mask from the reset words a stick reads, a
 # forwarding model of every frame kind from the fibre, and the NIC's PON

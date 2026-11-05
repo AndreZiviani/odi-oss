@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_eqd_test.sh -- compiles and runs odi_gpon_eqd_test.c, the EqD
 # split, pre-assigned delay and protection path rules of odi_gpon_hw.c, with the host cc against the register
 # mock. Part of `make test-host`.

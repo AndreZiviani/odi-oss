@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Flash one image slot. This is OURS, not the vendor version: their fwu.sh is
 # what the stock upgrade path runs, and this reproduces its contract -- same

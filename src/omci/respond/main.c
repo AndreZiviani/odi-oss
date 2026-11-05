@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* omcid -- the OMCI stack: startup and the main loop.
  *
  * Takes redirect type 1 and answers the OLT (omcimsg.c), keeps the MIB

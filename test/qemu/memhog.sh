@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # memhog.sh -- a busybox-only memory hog for the OOM scenario test (make
 # test-qemu): doubles a shell variable until ash itself cannot grow it any
 # further or the OOM killer takes it first. No compiled tool needed -- ash

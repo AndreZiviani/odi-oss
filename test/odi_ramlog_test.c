@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_ramlog_test.c -- host-side unit test for odi_ramlog.c, unity-build
  * (#include the .c directly, the same posture test/odi_wdt_test.c uses

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The event lines (respond/events.c) and `omcli provision` (respond/show.c),
 # against a whole ISP1 provisioning session: the same OLT side drv-test.sh
 # replays for the driver-call golden (test/fixtures/omci-session-isp1.txt),

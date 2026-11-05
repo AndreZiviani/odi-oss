@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Ordered write-stream comparator for the odi_gpon replay test.
 
     gpon_replay_compare.py <expected.txt> <actual.txt>

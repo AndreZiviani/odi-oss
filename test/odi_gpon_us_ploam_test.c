@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_us_ploam_test.c -- the upstream PLOAM push of odi_gpon_hw.c
  * against test/odi_switch_mock.h: a reply goes into the urgent queue only

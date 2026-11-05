@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_omci_test.c -- host-side unit test for odi_omci_wire.h. Compiled
  * and run with the host cc, no kernel and no target toolchain needed:

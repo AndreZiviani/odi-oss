@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_mcast_test.sh -- compiles and runs odi_switch_mcast_test.c: the
 # ACL rule that copies the host port's IGMP to the CPU (what it matches and
 # what it must not), the drop of unregistered IPv4 multicast from the PON,

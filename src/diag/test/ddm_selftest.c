@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The same conversion vectors as ddm_test.c, but built for the target and run
  * under qemu. The host test proves the maths; this proves it survives
  * big-endian MIPS, 32-bit longs, and the absence of libgcc -- which is where

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_hold_test.sh -- compiles and runs odi_gpon_hold_test.c: the kept
 # Emergency Stop (GPON_KEEP_DISABLE) in the GPON leaf. Part of `make test-host`.
 set -euo pipefail

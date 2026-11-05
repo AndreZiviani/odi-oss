@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_sfp_mirror.h -- the host-side SFP EEPROM: the module's A0h and A2h,
  * with live diagnostics, served to the host (the router the stick is

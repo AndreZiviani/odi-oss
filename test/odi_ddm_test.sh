@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_ddm_test.sh -- compiles and runs odi_ddm_test.c with the host cc.
 # Unity build of odi_i2c.c, odi_ddm.c (kernel/extra) and src/diag/src/
 # ddm.c together: none of the three has a __KERNEL__-only dependency

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_replay_fw_host.h -- the host half of odi_replay_fw_load()/
  * odi_replay_fw_release() (odi_replay_blob.h): reads the table from the

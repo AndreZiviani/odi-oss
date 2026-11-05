@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # FEC performance monitoring history data (class 312) on omcid's 15-minute
 # interval framework (respond/pm.c).
 #

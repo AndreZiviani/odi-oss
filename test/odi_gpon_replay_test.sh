@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_replay_test.sh -- compiles and runs odi_gpon_replay_test.c, then
 # diffs its write log against test/fixtures/gpon-react-260922-excerpt.txt
 # with tools/regtrace/gpon_replay_compare.py. Part of `make test-host`.

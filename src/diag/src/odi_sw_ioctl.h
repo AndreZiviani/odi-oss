@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Restated copy of kernel/extra/drivers/net/ethernet/odi/odi_reg.h (and,
  * for the L2 table, odi_switch_l2.h) -- the /dev/odi_sw ioctl ABI. The two trees build separately (this one
  * freestanding, no libc, under src/diag's own cross Makefile; the kernel

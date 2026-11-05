@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # rtl8686_time_test.sh -- compiles and runs rtl8686_time_test.c with the host
 # cc. time.c is #included directly (unity build) against stub kernel headers
 # generated here into a temp dir: each one just pulls in the test own model

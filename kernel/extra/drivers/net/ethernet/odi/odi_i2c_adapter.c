@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_i2c_adapter.c -- the optics I2C port as an i2c adapter, i2c-0, so
  * the module's own devices (A0h = 0x50, A2h = 0x51: the identification

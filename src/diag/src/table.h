@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The command table: every command diag accepts, written out by hand.
  *
  * A row is a syntax line and a one-line description. A syntax word is either

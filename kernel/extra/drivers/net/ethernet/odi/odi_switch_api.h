@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_api.h -- the odi_omci.c-facing entry points into the switch
  * core (odi_switch.c and the odi_switch_dal.h leaves), one header instead of odi_omci.c

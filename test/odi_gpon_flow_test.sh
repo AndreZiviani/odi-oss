@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_flow_test.sh -- compiles and runs odi_gpon_flow_test.c, the
 # per-flow GEM counter sampler against a clear-on-read register model, with
 # the host cc. UPDATE=1 rewrites test/fixtures/odi_gpon_flows.txt. Part of

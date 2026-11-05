@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Split a vendor MIB dump into the entities the ONU creates and the ones the
 OLT does, and emit the autonomous set.
 

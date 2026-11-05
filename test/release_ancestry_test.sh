@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
 # tools/check-release-ancestry.sh against throwaway repositories: a commit on
 # the branch, the branch tip, a commit only on a side branch (the gate must

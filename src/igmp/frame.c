@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Parsing and validating a trapped IGMP frame.
  *
  * Deliberately separate from the daemon: this file touches no syscall, so the

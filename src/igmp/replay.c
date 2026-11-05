@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* igmpd -r FILE: run the daemon on a transcript instead of the switch.
  *
  * The daemon's decisions (main.c's igmpd_tick and igmpd_frame, over group.c

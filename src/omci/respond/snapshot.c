@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* omcid's own MIB state, snapshotted to tmpfs so a respawned process can
  * resume answering the OLT without re-registration. See omcid.h and
  * docs/BOOT.md, "Resume without re-registration".

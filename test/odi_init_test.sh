@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_init_test.sh -- compiles and runs odi_init_test.c with the
 # host cc. odi_init.c is #included directly by the test (unity build,
 # same posture as odi_gpon_irq_test.c): no kernel, no target toolchain, its

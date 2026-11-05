@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_ddm_limits_test.sh -- compiles and runs odi_ddm_limits_test.c with the
 # host cc: the module-limit and monitor-type selectors of odi_ddm.c and the
 # consistent 16-bit read, against test/odi_optics_model.h.

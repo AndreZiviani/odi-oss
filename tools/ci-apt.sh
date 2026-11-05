@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Install Debian packages on a CI runner, with every step bounded.
 #
 #   tools/ci-apt.sh <package>...
+#
+# Also used inside the test containers (test/rcs_trace_test.sh,
+# test/fwu_stock_flash_test.sh mount it), where it runs as root and there is
+# no sudo; there a dead mirror once held test-qemu for 42 minutes in an
+# unbounded apt-get, until the job timeout cancelled it.
 #
 # The runner's apt mirror sometimes stalls a connection without closing it,
 # and apt then waits on it with no limit: a step that normally takes 25 s
@@ -19,9 +27,12 @@ set -euo pipefail
 [ $# -ge 1 ] || { echo "usage: $0 <package>..." >&2; exit 1; }
 
 opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+sudo=sudo
+[ "$(id -u)" != 0 ] || sudo=
+export DEBIAN_FRONTEND=noninteractive
 for try in 1 2; do
-	if timeout 180 sudo apt-get "${opts[@]}" update -qq &&
-	   timeout 900 sudo apt-get "${opts[@]}" install -y -q "$@"; then
+	if timeout 180 $sudo apt-get "${opts[@]}" update -qq &&
+	   timeout 900 $sudo apt-get "${opts[@]}" install -y -q "$@"; then
 		exit 0
 	fi
 	echo "ci-apt: attempt $try for $* failed or timed out" >&2

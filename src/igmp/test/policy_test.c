@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The multicast policy: the file omcid writes, and what the group table does
  * once it runs on it. Pure arithmetic on text and calls with `now` in the
  * test's hand, like group_test.c.

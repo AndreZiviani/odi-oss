@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Built-in initcalls run in link order, which is the order below:
 # odi_switch.o maps the switch-core window before the others touch it. The board replay does not depend on this: its caller

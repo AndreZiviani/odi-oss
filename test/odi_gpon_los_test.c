@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_los_test.c -- a fibre pull and its return, through the line
  * sampling (odi_gpon_line_sample(), odi_gpon_isr.c), the FSM and the real

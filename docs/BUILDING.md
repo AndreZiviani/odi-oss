@@ -120,6 +120,31 @@ own tools — passes an instruction audit (`packages/isa-audit.sh`,
 This is a build gate, not a report: a binary carrying a trapping instruction
 fails the build rather than shipping.
 
+## Reproducible builds
+
+Two clean builds of one commit produce the same tarball, byte for byte, as
+long as the password mode is deterministic (`ROOT_PW=locked`, which is what
+releases use, or a fixed `ROOT_PW=`). Everything that could differ is pinned
+or normalised:
+
+| input | how it is fixed |
+|---|---|
+| every build time | `SOURCE_DATE_EPOCH`, the committer date of `HEAD` (`tools/source-date-epoch.sh`; an exported value wins, and `tools/remote-build.sh` hands the local one to a host whose copy has no history). It stamps the image manifest, `/etc/version`, the default `VERSION` date, the kernel (`KBUILD_BUILD_TIMESTAMP`, with `KBUILD_BUILD_USER`/`KBUILD_BUILD_HOST` fixed strings), the uImage header (`mkimage`), the squashfs and the tar |
+| the busybox banner | `KCONFIG_NOTIMESTAMP=1` (busybox kconfig): the `--help` banner carries no build date |
+| the squashfs | `-mkfs-time` and `-all-time` from `SOURCE_DATE_EPOCH`, `-all-root`, `-processors 1`, the default `-reproducible`, and a fixed `umask 022` while the rootfs is staged |
+| the tar | GNU tar with `--sort=name --mtime --owner=0 --group=0 --numeric-owner --mode=go-w` |
+| the toolchains | pinned by digest (`toolchain/images.env`) |
+| the image tools (`mksquashfs`, `qemu-mips-static`, `openssl`) | `image/Dockerfile`: `debian:bookworm-slim` by digest, packages from a dated snapshot.debian.org archive (the date the toolchain images use). The tools image is built once per host and cached, so a build with it present does not contact the snapshot |
+| upstream sources | version and SHA-256 pinned in each `build.sh` |
+
+`tools/compare-images.sh <a.tar> <b.tar>` checks it: identical tarballs
+print their SHA-256 and exit 0; otherwise it names what differs (tar
+headers, each member, the uImage header, and for the rootfs every inode and
+every file by path) and exits non-zero. Nothing is excluded, busybox
+included. The `reproducible` job in `ci.yml` runs it on release tags. Changing
+a toolchain, a base image or the snapshot date changes the output; that is
+expected, and a new release is the unit of comparison.
+
 ## The root password and image versioning
 
 `image/build.sh` generates a random 14-character root password per build
