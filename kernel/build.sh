@@ -102,6 +102,7 @@ docker run --rm -v "$VOL":/build \
 	-v "$WORK:/out" -v "$ROOT/kernel/618/patches:/patches:ro" \
 	-v "$ROOT/kernel/618/debug:/debug:ro" -e CRUMBS_CORE="$CRUMBS_CORE" \
 	-v "$ROOT/kernel/extra:/extra:ro" \
+	-v "$ROOT/tools/check-kernel-hardening.sh:/check-kernel-hardening.sh:ro" \
 	-w /build \
 	-e SCRIPTHASH="$SCRIPTHASH" -e PATCHHASH="$PATCHHASH" -e FRESH="${FRESH:-0}" \
 	-e ODI_BUILD_ID="$ODI_BUILD_ID" \
@@ -149,6 +150,10 @@ export KCFLAGS
 echo "--- compiler: $(${XC}gcc -dumpfullversion) ${XC}gcc, $(${XC}ld --version | head -1); KCFLAGS=$KCFLAGS"
 cp /out/seed.config .config
 make ARCH=mips CROSS_COMPILE=$XC olddefconfig > /out/olddefconfig.log 2>&1 || { tail -30 /out/olddefconfig.log; exit 1; }
+# The hardening options must have survived olddefconfig, which drops a
+# symbol whose dependency went away without a word (docs/KERNEL.md,
+# "Hardening"). Checked before compiling, not after.
+bash /check-kernel-hardening.sh .config || { echo "BUILD FAILED: hardening options missing from .config"; exit 1; }
 echo "--- config: $(grep -c "^CONFIG_" .config) on, $(grep -c "is not set" .config) off"
 echo "--- key symbols after olddefconfig ---"
 grep -E "^CONFIG_(MACH_RTL8686|CPU_R3000|CPU_HAS_SYNC|CPU_HAS_WB|CPU_R3K_TLB|IRQ_MIPS_CPU|DMA_NONCOHERENT|RTL8686_UART0|RTL8686_NOR|MTD|JFFS2_FS|SQUASHFS|ODI_)[= ]" .config || true
