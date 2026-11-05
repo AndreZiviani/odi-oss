@@ -153,7 +153,10 @@ GPL-2.0-or-later except the kernel patches (GPL-2.0-only, as above).
 it, with the version pinned and hash-checked in
 `tools/reuse-requirements.txt`. A new file gets a header in the same
 change; `reuse annotate --copyright "<year> <name>" --license
-GPL-2.0-or-later <file>` writes it.
+GPL-2.0-or-later <file>` writes it. `REUSE.toml` names the kinds of file
+that take no header (markdown, text, XML and goldens, the replay data, a
+few config files), never the whole tree, so `reuse lint` fails on a source
+file that has no header.
 
 ## Public references this code is written against
 

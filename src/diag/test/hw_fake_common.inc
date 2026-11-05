@@ -1,3 +1,5 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* hw_fake_common.inc -- the MIB and L2 fixture code every exporter/optics
  * scenario fixture shares (hw_fake.c and the scripted scenario fixtures:
  * hw_fake_rx_drift.c, hw_fake_los.c, hw_fake_absent.c). None of the

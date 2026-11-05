@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Licensing: `reuse lint` now fails on a source file without an SPDX
+  header. `REUSE.toml` annotated the whole tree (`**`) as a fallback, so a
+  new script or C file that forgot its header still passed; it now lists
+  only the kinds of file that take no header (markdown, text, XML, goldens,
+  the IGMP replay data, `LICENSE`, the kernel config and five rootfs config
+  files). The nine files that relied on the fallback and do take a comment
+  (`.gitignore`s, `dependabot.yml`, the issue template, `toolchain/images.env`,
+  the busybox config fragment, `rootfs/devices.pseudo`,
+  `src/diag/test/hw_fake_common.inc`) got their header. Refs #277.
+
 - Licensing: every project-owned source file now carries an SPDX copyright
   and license header, and the rest is annotated in `REUSE.toml`; the tree
   passes `reuse lint` (REUSE 3.3), which `make lint` runs when the tool is

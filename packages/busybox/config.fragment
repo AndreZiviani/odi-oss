@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Overrides applied on top of `make defconfig`, one per line, in .config syntax.
 #
 # Two jobs: turn off what this device has no use for, and turn ON the applets the
