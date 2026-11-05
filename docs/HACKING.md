@@ -259,8 +259,8 @@ run on every push: `clean-build` (`make kernel-tree` and `make src`, then
 checks that `make image` on a partial tree fails closed and names what is
 missing) and `test-qemu` (`make test-qemu`, below). On release tags (`v*`,
 `odi-oss-*`) and manual runs it adds `make src` on its own and a
-`reproducible` job: `make image-all` twice in two checkouts, compared member
-by member with `tools/compare-images.sh`. The kernel and the full image are
+`reproducible` job: `make image-all` twice in two checkouts, compared byte
+for byte with `tools/compare-images.sh`. The kernel and the full image are
 **not** built on a pull request: a kernel build is tens of minutes and
 nothing in it runs without a stick. Build the kernel yourself before you
 push a kernel change.
@@ -1030,10 +1030,11 @@ Each of these has cost real time. The pointer says where the evidence is.
   mainline already has; new files go in `kernel/extra/`. Fold a fix into
   the patch it belongs to. `tools/kernel-footprint.sh` only goes down
   without a stated reason.
-- **Builds are not bit-reproducible**: the kernel's version string, the
-  ramlog build id and the image manifest embed the build time and version.
-  Two builds of one tree are equivalent, not identical; compare
-  disassembly, not files.
+- **Builds are reproducible, keep them so**: every time stamp comes from
+  `SOURCE_DATE_EPOCH` (`tools/source-date-epoch.sh`), never from the clock,
+  hostname or user, and nothing may depend on directory order or the host
+  umask. A new build step that embeds one of those breaks
+  `tools/compare-images.sh`; `docs/BUILDING.md`, "Reproducible builds".
 
 ## Feature toggles
 

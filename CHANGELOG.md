@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- Build: release images are now reproducible. Two clean builds of one commit
+  (`ROOT_PW=locked`) give the same tarball, byte for byte; `docs/BUILDING.md`,
+  "Reproducible builds", lists every input and how it is fixed. What changed:
+  `image/Dockerfile` builds from `debian:bookworm-slim` pinned by digest with
+  its packages from a dated snapshot.debian.org archive, instead of a moving
+  tag and the current archive; `SOURCE_DATE_EPOCH` (the committer date of
+  `HEAD`, `tools/source-date-epoch.sh`) replaces the clock in the image
+  manifest, `/etc/version`, the default version date, the squashfs
+  (`-mkfs-time`, `-all-time`) and the tar (sorted, owner root, fixed times and modes), and
+  `tools/remote-build.sh` passes it to a host whose copy has no history; the
+  rootfs is staged under a fixed `umask`; busybox is built with
+  `KCONFIG_NOTIMESTAMP=1`, so its banner no longer embeds the build date.
+  `tools/compare-images.sh` now compares the tarballs byte for byte, with no
+  excluded component (busybox included), and on a difference names the tar
+  headers, member, uImage header, or rootfs inode and file that differs.
+  Refs #258.
+
 - Kernel: hardening options on, each measured. New: `FORTIFY_SOURCE`,
   hardened user copies, heap memory zeroed on allocation and on free,
   list-corruption checks that stop the kernel (`LIST_HARDENED`,
