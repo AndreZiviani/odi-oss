@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_bdgconn_uplink_test.c -- the upstream rows read back for the
  * reports igmpd takes and sends up itself (odi_switch_bdgconn.c,

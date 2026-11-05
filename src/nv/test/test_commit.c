@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Host-side tests for `nv commit` (commit.c), against a fake pair of
  * environment partitions that can fail at every step the real one can: a
  * write that erases and then dies, a write that lands wrong, a copy that

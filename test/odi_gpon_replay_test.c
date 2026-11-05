@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_replay_test.c -- drives the gpondeact verb, then the gponact
  * verb, then feeds the downstream PLOAM messages the stock-image capture

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Exercises the mklist.py packing model (narrow single-word, wide
 # per-item-word, wide multi-word), the exclusion table, the "|"-joined
 # collision handling, and the >MAX_ADDRESSES priority cap; then diff.py

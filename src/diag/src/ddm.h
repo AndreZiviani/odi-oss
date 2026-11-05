@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* SFF-8472 optical diagnostics, formatted the way the vendor formats them. */
 #ifndef ODI_DDM_H
 #define ODI_DDM_H

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Check a release SBOM without trusting it: the structure, the licenses, the
 # hashes, the dependency graph (no build tool is a runtime dependency), and

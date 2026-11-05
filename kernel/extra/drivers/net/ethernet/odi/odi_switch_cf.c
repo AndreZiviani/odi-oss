@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_switch_cf.c -- the bridge-connection leaves: the whole register and
  * table sequence of one cmd 51 (the CF rows it is handed, the VLAN table

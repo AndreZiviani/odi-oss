@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # shellcheck shell=sh
 #
 # rcs-lib.sh -- functions shared by /etc/init.d/rcS (sysinit) and

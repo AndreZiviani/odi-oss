@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The L2 table listing: `l2-table get all` and `l2-table get index <n>`.
  *
  * One line per valid row under one header, MAC first, and the header words

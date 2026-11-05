@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The driver-call golden: what omcid asks of the switch driver for a whole
 # OLT session, per ISP, compared call for call.
 #

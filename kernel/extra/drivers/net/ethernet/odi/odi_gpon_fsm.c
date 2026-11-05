@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_gpon_fsm.c -- implementation of the O1-O7 ONU activation state
  * machine declared in odi_gpon_fsm.h. Plain C, no kernel dependency.

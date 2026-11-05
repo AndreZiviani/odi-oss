@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_ploam.h -- downstream/upstream PLOAM message codec for the
  * RTL9602C GPON MAC block, against ITU-T G.984.3 clause 9 (PLOAM message

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_acl_probe.h -- ACL rules installed by hand, to measure what the
  * switch does with multicast before anything relies on it: a rule that

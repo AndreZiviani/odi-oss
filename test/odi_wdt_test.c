@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_wdt_test.c -- host-side unit test for odi_wdt.c, unity-build
  * (#include the .c directly): the pure encode/kick-value/force-reset-value

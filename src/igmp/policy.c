@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The multicast policy file: parsing, and the questions asked of it. */
 #include "policy.h"
 #include "entry.h"

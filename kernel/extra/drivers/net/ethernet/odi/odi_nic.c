@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_nic.c -- the RTL9602C CPU-port Ethernet NIC: one RX ring (and, with
  * odi_nic.omci_ring, a second one the switch routes OMCI to) and one TX ring

@@ -22,6 +22,104 @@ listed here.
   the `GCC-exception-3.1` SPDX expression. docs/FLASHING.md and docs/LICENSING.md
   describe it. Refs #260.
 
+- Licensing: every project-owned source file now carries an SPDX copyright
+  and license header, and the rest is annotated in `REUSE.toml`; the tree
+  passes `reuse lint` (REUSE 3.3), which `make lint` runs when the tool is
+  installed and CI always runs, with a pinned, hash-checked version
+  (`tools/reuse-requirements.txt`). The 169 headers that said `GPL-2.0`
+  (the deprecated identifier, meaning GPL-2.0-only) in `kernel/extra/` and
+  `test/` now say `GPL-2.0-or-later`, as the README states for our own
+  code. The kernel patches are annotated GPL-2.0-only, like the upstream
+  files they modify. `docs/LICENSING.md` says the same. The texts are in
+  `LICENSES/`. Refs #277.
+
+- CI: the two tests that install packages inside their Docker container
+  (`make test-rcs`, for `strace`, and the stock-flash test) now go through
+  `tools/ci-apt.sh`, as the runner steps already did: a read timeout and
+  retries per connection, a time limit on each apt call and two attempts.
+  The Debian snapshot mirror returning 504 for `strace` held test-qemu in
+  an unbounded `apt-get` for 42 minutes until the job timeout cancelled it;
+  it now fails in minutes and says the install failed. `tools/ci-apt.sh`
+  skips `sudo` when it already runs as root. No change to the image.
+
+- Build: release images are now reproducible. Two clean builds of one commit
+  (`ROOT_PW=locked`) give the same tarball, byte for byte; `docs/BUILDING.md`,
+  "Reproducible builds", lists every input and how it is fixed. What changed:
+  `image/Dockerfile` builds from `debian:bookworm-slim` pinned by digest with
+  its packages from a dated snapshot.debian.org archive, instead of a moving
+  tag and the current archive; `SOURCE_DATE_EPOCH` (the committer date of
+  `HEAD`, `tools/source-date-epoch.sh`) replaces the clock in the image
+  manifest, `/etc/version`, the default version date, the squashfs
+  (`-mkfs-time`, `-all-time`) and the tar (sorted, owner root, fixed times and modes), and
+  `tools/remote-build.sh` passes it to a host whose copy has no history; the
+  rootfs is staged under a fixed `umask`; busybox is built with
+  `KCONFIG_NOTIMESTAMP=1`, so its banner no longer embeds the build date.
+  `tools/compare-images.sh` now compares the tarballs byte for byte, with no
+  excluded component (busybox included), and on a difference names the tar
+  headers, member, uImage header, or rootfs inode and file that differs.
+  Refs #258.
+
+- Kernel: hardening options on, each measured. New: `FORTIFY_SOURCE`,
+  hardened user copies, heap memory zeroed on allocation and on free,
+  list-corruption checks that stop the kernel (`LIST_HARDENED`,
+  `BUG_ON_DATA_CORRUPTION`), the stack-end check on every schedule,
+  `dmesg_restrict`, the user heap start randomised too, mmap randomisation
+  widened to 15 bits and nothing mapped below 64 KB; and, as `sysctl.*` words
+  on the built-in command line, `kptr_restrict=2` and the four
+  `fs.protected_*` rules. The strong stack protector and zeroed stack
+  variables, already on by default, are now stated. 9,410 bytes of uImage
+  (1,172,555 of 1,359,872, 187,317 spare). docs/KERNEL.md ("Hardening") has the
+  matrix: what this CPU and toolchain support (no read-only kernel text, no
+  kernel address randomisation, no virtually mapped stacks on this MIPS; a
+  trapping UBSAN would emit trap instructions the core does not run; gcc
+  plugins do not build with the toolchain image), the bytes each option
+  costs, and why `ZERO_CALL_USED_REGS`, the slab freelist options (they need
+  `SLUB_TINY` off) and `PANIC_ON_OOPS` stay off for now.
+  `tools/check-kernel-hardening.sh` fails `make lint` when the seed loses one
+  of the options and `kernel/build.sh` when `olddefconfig` drops one.
+  Trialled on hardware: an overnight run on a stick in service (O5, OMCI and
+  forwarding as before, no oops, free memory flat). Refs #254.
+
+- Hardening of every freestanding binary (omcid, igmpd, diag, nv, omcli,
+  omciprobe, omcicap), from one place, `src/harden.mk`:
+  `-fstack-protector-strong`, `-fstack-clash-protection`,
+  `-ftrivial-auto-var-init=zero`, `-fno-strict-overflow`, `-Wvla` and
+  `-z noexecstack`. The stack protector runtime is our own, in `start.S`:
+  the guard is seeded from the kernel's `AT_RANDOM` bytes before `main`, and
+  a smashed guard writes `stack-protector: stack smashing detected,
+  aborting` to stderr and `/dev/kmsg`, then ends the process with SIGABRT
+  (init respawns it). The binaries no longer declare an executable stack
+  (`PT_GNU_STACK` was `RWE`, from `start.S` lacking its `.note.GNU-stack`).
+  Every build checks the result with `tools/check-hardening.sh`, and `make
+  test-diag` runs an overrun under qemu (`make -C src/diag ssp-test`). Text
+  grows 2-13% per binary (omcid +13.3 KB, +6.5%). FORTIFY, PIE, RELRO and
+  BIND_NOW do not apply to binaries with no libc and no dynamic linker;
+  `docs/CROSS-COMPILING.md`, "Hardening the freestanding binaries", says
+  why for each.
+
+- Respawned daemons get a restart budget. busybox init restarts a daemon the
+  instant it exits and has no rate limit, so one that died at once was
+  started again and again. `respawn.sh`, the last step of every `svc-*.sh`,
+  now waits 1, 2, 4 ... seconds before restarting a daemon whose previous run
+  lived under 30 s, up to a cap per daemon (omcid 2 s, dropbear 10 s, confd
+  and syslogd 30 s, metricsd, klogd, ntpd and igmpd 60 s); a run of 30 s or
+  more, and the first start of the boot, never wait. It is still the same
+  process exec-ed in place under init, so signals, `reboot` and pid tracking
+  do not change, and it runs only after rcS has returned, so the 120 s
+  userland confirmation is untouched. State goes to `/var/run/respawn/<name>`
+  (`state=ok|backoff|degraded`, `starts`, `fast`, `delay_s`, `last_run_s`,
+  for the exporter to read later) and each restart is one
+  `respawn: event=respawn service=... state=... fast=... delay_s=...` kernel
+  log line (every tenth beyond the fifth short run). Nothing disables a
+  daemon, enters safe mode or reboots: omcid stays with the watchdog, and
+  the others are retried at their cap. `services stop` also ends a daemon
+  that is in its wait. runsv, already in busybox, was weighed and not used
+  (fixed one-second wait, no count, and a supervision tree that changes how
+  every daemon is started and found). docs/SETTINGS.md, "Restart budget",
+  has the policy; `test/respawn_budget_test.sh` (every `respawn` entry,
+  fake clock, in `make test-host`) and a repeated `kill -9` scenario in
+  `make test-qemu` cover it. Refs #271.
+
 - omcid: an OLT lock of the Ethernet UNI no longer takes the host port down
   by default. On this SFP that port is the stick's only management path, so
   a lock from the OLT (ME 11 administrative state) cut the web UI, ssh,

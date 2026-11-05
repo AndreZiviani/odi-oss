@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_pw.h -- the argument of the gponpw verb: how the stored PLOAM
  * password text becomes the 10 bytes the ONU sends. No kernel dependency, so

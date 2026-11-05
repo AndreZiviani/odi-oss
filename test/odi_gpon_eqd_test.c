@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_eqd_test.c -- the USF_EQ_DELAY and burst overhead values odi_gpon_hw.c writes, against
  * test/odi_switch_mock.h: the split of the equalization delay into FRAMES and

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # svc-igmpd.sh -- the /etc/inittab respawn entry for igmpd. Opt-in: nothing
 # runs unless IGMP_SNOOPING=1 is set in the config store (docs/SETTINGS.md),
 # and with it set igmpd still does nothing until the OLT provisions a
@@ -41,4 +44,4 @@ MLD=$(/etc/scripts/flash get MLD_SNOOPING 2>/dev/null | sed 's/^[^=]*=//' | grep
 # stops or the daemon dies. oom_score_adj 0: it is no more important than the
 # other services, and less than omcid.
 # shellcheck disable=SC2086 # FLAGS is several words on purpose
-exec /etc/scripts/respawn.sh 0 /var/log/services.log /bin/igmpd $FLAGS
+exec /etc/scripts/respawn.sh igmpd 0 /var/log/services.log /bin/igmpd $FLAGS

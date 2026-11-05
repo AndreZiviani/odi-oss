@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_gpon_flow.c -- the per-flow GEM counters, read from the GPON MAC and
  * accumulated into 64-bit totals (odi_gpon_flow.h has the contract).

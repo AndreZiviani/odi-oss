@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # omci_defaults_test.sh -- the generated defaults table (src/omci/generated/
 # omci_defaults.c) carries capability values only: no environment-specific
 # value of the stick it was captured from, and no hex value turned into text.

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # diag-stub.sh -- the qemu test harness stand-in for /bin/diag
 # (docs/HACKING.md, make test-qemu). Installed ONLY in the harness
 # initramfs (test/qemu/build-initramfs.sh), never in rootfs/skeleton or a

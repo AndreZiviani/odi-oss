@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_sdkinit_replay_test.sh -- compiles odi_switch_sdkinit_test.c,
 # runs its unit checks (unknown verb, zero-event verb, the SoC enable
 # order), then replays EVERY verb in odi_switch_sdkinit_verbs[] own order

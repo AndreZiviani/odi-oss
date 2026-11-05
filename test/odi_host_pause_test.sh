@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_host_pause_test.sh -- compiles and runs odi_host_pause_test.c: the
 # TX_PAUSE force on the host port after the platform settings, after the
 # ISP1 provisioning and with odi_switch.host_pause toggled, against the

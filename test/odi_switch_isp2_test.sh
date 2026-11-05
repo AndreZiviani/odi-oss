@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_isp2_test.sh -- cmd 51 on the isp2 service profile (PPPoE over
 # C-TAG VID 10, VEIP ingress, plus the multicast rule). Two checks:
 #

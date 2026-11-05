@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_optics_model.h -- a scriptable SFF-8472 transceiver, host build only,
  * sitting behind the same modelled I2C controller test/odi_switch_mock.h

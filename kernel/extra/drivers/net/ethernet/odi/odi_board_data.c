@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_board_data.c -- odi_board_init_events[], the board-init write
  * sequence of a clean stock boot: 88 records, write-only, nothing dropped,

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The MIB store: what the OLT has created and set.
  *
  * Split out of main.c; see omcid.h.

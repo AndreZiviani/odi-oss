@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_cmd_test.c -- replays the 91 command brackets of the boot5
  * OMCI provisioning capture, in trace order, through

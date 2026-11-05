@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The upstream and downstream QoS: priority queues, T-CONTs, the GEM flow
  * tables and flow ids, the reconciler that rebuilds the upstream graph
  * (us_qos_rebuild()), the downstream broadcast flow, and the class 277 and

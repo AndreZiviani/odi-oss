@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_ctr_test.c -- host test for odi_gpon_ctr.c, the GPON link
  * counter sampler, against a register model that behaves the way the

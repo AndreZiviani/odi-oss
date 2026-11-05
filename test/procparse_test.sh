@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # procparse_test.sh -- the /proc parsers our userland tools read the 6.18
 # drivers with: src/omci/procparse.h (redirect holder, GPON serial) and
 # src/diag/src/gpon_status.c (ONU state, LOS sample, alarm bits). Host cc

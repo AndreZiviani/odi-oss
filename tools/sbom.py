@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 """CycloneDX 1.5 SBOM of a release image: generate it, and check it.
 
     tools/sbom.py generate <version> [--releases-env FILE] [--strict] [--image TAR]

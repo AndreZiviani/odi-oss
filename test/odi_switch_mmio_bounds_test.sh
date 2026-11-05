@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_mmio_bounds_test.sh -- compiles and runs
 # odi_switch_mmio_bounds_test.c. No kernel, no target toolchain. Part of
 # `make test-host`.

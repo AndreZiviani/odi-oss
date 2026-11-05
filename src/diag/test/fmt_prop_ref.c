@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Host side of the out_fmt property test: the generated cases through glibc. */
 #include <stdio.h>
 #include "fmt_prop.h"

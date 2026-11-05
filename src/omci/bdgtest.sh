@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # S2: does OUR 160-byte bridge connection descriptor reach the driver and
 # restore forwarding after the vendor's connections are torn down?
 #

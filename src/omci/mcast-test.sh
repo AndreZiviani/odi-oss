@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The multicast policy file (respond/mcast.c): what the OLT provisioned in
 # classes 281, 309 and 310, as igmpd reads it from /var/run/odi-mcast.conf,
 # and the class 309 attributes that did not fit the stored row (the profile

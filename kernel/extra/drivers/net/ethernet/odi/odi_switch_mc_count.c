@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Counting rules for one multicast destination each, entering the PON or
  * the UNI port (odi_switch_mc_count.h says what they are for and why they

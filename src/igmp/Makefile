@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # igmpd — IGMP snooping, milestone 1: the receive path.
 #
 # Same arrangement as omci/capture: diag owns the freestanding runtime (_start,
@@ -8,6 +11,7 @@
 # and pulled on first use; DIAG_IMAGE overrides it (toolchain/image.sh).
 TOP := $(CURDIR)/../..
 -include $(TOP)/toolchain/images.env
+include $(TOP)/src/harden.mk
 DIAG_IMAGE ?= $(DIAG_IMAGE_PINNED)
 IMAGE := $(DIAG_IMAGE)
 CROSS := mips-linux-gnu-
@@ -28,11 +32,11 @@ STRIP := $(CROSS)strip
 
 CFLAGS := -std=c11 -Os -Wall -Wextra \
           -march=mips1 -mabi=32 -EB -msoft-float -G0 \
-          -fno-pic -mno-abicalls -ffreestanding -fno-builtin -fno-stack-protector \
+          -fno-pic -mno-abicalls -ffreestanding -fno-builtin $(HARDEN_CFLAGS) \
           -ffunction-sections -fdata-sections \
           -I. -I$(DIAG)/src
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
-           -Wl,--gc-sections
+           -Wl,--gc-sections $(HARDEN_LDFLAGS)
 
 # switch_opt.c holds the /dev/odi_sw ioctls this daemon programs the switch
 # with; its header lists them. uplink.c is the way up for a taken report,
@@ -43,6 +47,7 @@ OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o $(BUILD)/group.o \
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(HARDEN_CHECK) $@
 	$(STRIP) $@
 
 $(TEST): test/frame_test.c igmpd.h $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o

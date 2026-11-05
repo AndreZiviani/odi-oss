@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_alloc_cam_safety_test.c -- the Alloc-ID CAM holds only the Alloc-IDs
  * the OLT assigned to this ONU, by PLOAM, in the current activation, through

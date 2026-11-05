@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # tools/bundle-sources.sh --check, the release gate: a complete bundle passes,
 # and a missing, empty, altered or incomplete one fails. A synthetic bundle, no
 # network: building the real one needs the pinned downloads.

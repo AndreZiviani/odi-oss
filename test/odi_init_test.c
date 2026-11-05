@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_init_test.c -- host-side unit test for odi_init.c own
  * verb-bucket dispatch (odi_init_apply()), against STUB

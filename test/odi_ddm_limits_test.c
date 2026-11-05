@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_ddm_limits_test.c -- the DDM selectors added for the module's own
  * description of its readings (odi_ddm.h: ODI_DDM_MONITOR_TYPE,

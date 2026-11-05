@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* omciprobe -- send one OMCI driver command and dump the answer.
  *
  * omcid programs the switch through one call, omci_drv_call(cmd, buf, len),

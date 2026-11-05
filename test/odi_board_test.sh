@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_board_test.sh -- compiles odi_board_test.c, runs its unit checks
 # (replay order + kind against odi_board_init_events[] itself, the two
 # board-init SoC addresses on the replay allowlist), then dumps a replay

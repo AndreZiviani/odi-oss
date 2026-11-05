@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Runs INSIDE the toolchain container. See rootfs_chroot_test.sh.
 set -u
 pass=0; fail=0

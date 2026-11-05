@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_irq_test.c -- the switch interrupt line of odi_gpon_isr.c
  * against test/odi_switch_mock.h: the boot reset, the GPON unmask that

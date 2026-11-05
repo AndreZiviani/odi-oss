@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* igmp_parse, against frames built here.
  *
  * Built for the target and run under qemu, because that is where the parse has

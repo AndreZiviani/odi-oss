@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_hw.h -- register offsets and field pack/unpack helpers for the
  * RTL9602C GPON MAC block (downstream and upstream framers, PLOAM FIFOs,

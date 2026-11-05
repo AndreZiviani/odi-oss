@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # /etc/init.d/services `stop <name>` writes /etc/config/<name>.off and kills
 # the daemon; it stays down only if that daemon's respawn entry,
@@ -43,6 +46,11 @@ check "start omcid registers the deadline again" "omcid 60" "$(cat "$T/register"
 : > "$T/register"
 svc stop confd
 check "stop confd leaves the watchdog alone" "" "$(cat "$T/register")"
+
+# a daemon in its restart wait is the respawn.sh shell, not yet the daemon:
+# stop has to reach it too, or it execs the daemon after the flag is written
+if grep -q 'kill_by_cmdline "respawn.sh \$svc "' "$S"; then echo "ok    stop also kills the respawn.sh restart wait"; pass=$((pass + 1))
+else echo "FAIL  stop does not reach a daemon in its restart wait"; fail=$((fail + 1)); fi
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_i2c.h -- byte-at-a-time access to the SoC switch-core I2C indirect
  * controller, port-1 instance: the optics port (dfp34x-optics-on-i2c-

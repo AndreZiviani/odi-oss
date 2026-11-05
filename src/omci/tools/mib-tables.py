@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Recover the OMCI information model from the /lib/omci plugins.
 
 Each `mib_<Name>.so` exports the same five symbols:

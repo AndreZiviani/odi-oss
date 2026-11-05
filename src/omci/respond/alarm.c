@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Alarms and attribute value changes: what the ONU tells the OLT on its own.
  *
  * The stock stack sends two kinds of autonomous message (read out of

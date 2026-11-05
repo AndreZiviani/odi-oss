@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_mock.h -- register access primitives for odi_switch, either
  * real MMIO (__KERNEL__) or a host register model plus write log (host

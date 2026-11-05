@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # image/gen-root-account.sh: the three shapes of the root account file
 # image/build.sh can write (ROOT_PW=locked, ROOT_PW=none, and the default
 # per-build password), against a scratch STAGE/OUT -- no docker, no kernel,

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_uni_limits_test.sh -- compiles and runs odi_switch_uni_limits_test.c:
 # the driver commands for the learning limit (53), the UNI rates (67), the
 # bridge table of ME 50 (61 and its page command), 63 and 40, and the MIB

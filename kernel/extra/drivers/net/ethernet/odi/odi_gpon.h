@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon.h -- thin interface between the odi_gpon FSM/PLOAM core in this
  * same directory (odi_gpon_hw.h, odi_gpon_ploam.*, odi_gpon_fsm.*, an

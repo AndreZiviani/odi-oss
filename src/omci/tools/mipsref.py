@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Find who references a string in a section-header-stripped MIPS ELF, and
 which imported function is called right after it.
 

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* procparse_test.c -- src/omci/procparse.h against the shapes our drivers
  * print: /proc/odi_omci "registered:" (odi_omci.c) and the
  * /proc/odi_gpon/status "sn" and "alloc_ids" lines (odi_gpon.c), plus the config store label

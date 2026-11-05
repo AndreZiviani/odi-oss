@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 name: release
 
 # Pushing a vX.Y.Z tag builds the full flashable image -- kernel, packages,
@@ -85,7 +88,7 @@ jobs:
       # cache and fetches anew. A hit only skips the download: every fetch
       # script still re-checks the pinned SHA-256 of the file it finds there.
       - name: Cache pinned downloads (dl/)
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             dl
@@ -144,7 +147,7 @@ jobs:
       # checks them against the file bytes, so this has to run after the last
       # write to SHA256SUMS and before any file is renamed.
       - name: Attest build provenance (image tarball + checksums)
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             out/image/${{ env.VERSION }}.tar
@@ -153,7 +156,7 @@ jobs:
             out/image/SHA256SUMS
 
       - name: Attest SBOM
-        uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3.0.0
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-path: out/image/${{ env.VERSION }}.tar
           sbom-path: out/image/sbom.cdx.json

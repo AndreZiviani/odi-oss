@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # diag-bundle.sh [--full] [OUT] -- collect what a bug report about this
 # stick needs into one tar.gz, with every secret redacted and the identity

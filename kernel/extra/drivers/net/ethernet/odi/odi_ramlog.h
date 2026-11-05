@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_ramlog.h -- CONFIG_ODI_RAMLOG, a struct console driver that mirrors
  * every console line into DRAM.

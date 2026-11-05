@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_soc.h -- the SoC system-controller window: every access our drivers
  * make there goes through odi_soc_read()/odi_soc_write(), which refuse any

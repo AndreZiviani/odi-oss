@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Read every address in a regdump list, in order, one memprobe reg call per
 # address, nothing else. Runs ON THE STICK -- busybox ash only, so it uses
 # nothing beyond sh builtins (read/while/case) and the two external tools

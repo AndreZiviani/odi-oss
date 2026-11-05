@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Scripted scenario: transceiver absent. Every I2C transaction NACKs
  * (odi_i2c_read_bytes() -> -ENXIO, odi_ddm_get() propagates it, the ioctl
  * answers EOPNOTSUPP) regardless of selector, matching what test/

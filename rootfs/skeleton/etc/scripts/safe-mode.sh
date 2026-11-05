@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # safe-mode.sh -- the recovery boot: a way back into a stick that cannot be
 # reached or logged into (a host port mode the router does not speak, a

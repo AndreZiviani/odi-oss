@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_test.c -- host-side unit test for odi_gpon_ploam.c/odi_gpon_fsm.c,
  * checked against ITU-T G.984.3 clauses 9 and 10 (see docs/REFERENCES.md

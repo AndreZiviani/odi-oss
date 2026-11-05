@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_init_platform_test.c -- asserts the exact register/table
  * write sequence odi_switch_init_platform() produces ("odi_switch

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Apply saved settings without a reboot. The web UI runs this after a save
 # (odi-ui confd.h APPLY_PATH); it is as usable from a shell.

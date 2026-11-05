@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_acl_clean_test.sh -- compiles and runs odi_switch_acl_clean_test.c
 # with the host cc, then checks the ACL clean log lines it printed: the
 # rows found before the clean (two valid rules, the first rule 1, four rows

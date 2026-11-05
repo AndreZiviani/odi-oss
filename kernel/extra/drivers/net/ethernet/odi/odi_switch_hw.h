@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_hw.h -- register offsets and field helpers of the RTL9602C
  * switch core (physical base 0x1B000000): the registers the leaves, the

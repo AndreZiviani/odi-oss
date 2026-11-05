@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Host test of testlib.sh itself: the helpers must fail the suite when the
 # daemon is dead or a wait times out, and must not when the line shows up.
 # No daemon and no container; a stub stands in for the qemu-user omcli.

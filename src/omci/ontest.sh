@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # One OMCI experiment, run entirely on the stick.
 #
 # The session that starts an experiment cannot be relied on to see it through:

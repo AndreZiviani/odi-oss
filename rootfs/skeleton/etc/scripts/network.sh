@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Bring up management networking: br0 over eth0, carrying the LAN address.
 # Without it dropbear and telnetd listen on a stick with no routable

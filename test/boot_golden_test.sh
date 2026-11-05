@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # boot_golden_test.sh -- the production boot register stream:
 # builds boot_golden_test.c, runs it for ISP1 and ISP2 and compares each
 # run with the committed golden. Phases 1-6 (board replay to the first

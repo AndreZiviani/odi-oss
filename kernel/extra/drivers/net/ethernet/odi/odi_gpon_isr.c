@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_gpon_isr.c -- odi_gpon_isr_poll(), the top-level GPON MAC block
  * interrupt servicing entry point, against G.984.3 clause 5.8 (GTC

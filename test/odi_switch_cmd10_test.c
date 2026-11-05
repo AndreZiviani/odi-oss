@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_cmd10_test.c -- cmd 10 (getTransceiverStatus), the DDM word
  * behind omcid's ANI-G Test result (src/omci/respond/omcimsg.c,

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # trial-guard.sh -- a trial boot that nobody can reach goes back by itself
 # (docs/FLASHING.md, "The trial guard"). Run by /etc/inittab as a `once`
 # entry, next to slot-state.sh, whose state file it reads.

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # decode.py joins trace lines to the register map and decodes fields.
 set -eu
 cd "$(dirname "$0")/.."

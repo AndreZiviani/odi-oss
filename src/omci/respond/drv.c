@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The switch driver: omci_drv_call(), the one way omcid reaches it, and the
  * capability block the driver describes the device with.
  *

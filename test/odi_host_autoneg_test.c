@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_host_autoneg_test.c -- the 1000BASE-X auto-negotiation of the host
  * port (docs/SWITCH.md#host-port-auto-negotiation), against the register

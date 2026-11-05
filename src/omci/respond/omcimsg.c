@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* OMCI frames: the OLT's questions and our answers.
  *
  * Split out of main.c; see omcid.h.

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_ponq_test.sh -- compiles and runs odi_switch_ponq_test.c with
 # the host cc, against the same register mock as odi_switch_cmd_test.sh.
 # Part of `make test-host`.

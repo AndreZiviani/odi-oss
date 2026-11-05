@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_reg_test.c -- unit test for the three leaves behind /dev/odi_sw
  * (odi_switch_mib.c: odi_sw_reg_get/_set, odi_sw_mib_get), the phase 3f

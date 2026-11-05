@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Realtek RTL8686/RTL9602C board-level interrupt controller (ODI
  * DFP-34X-2C2), an irqdomain-based irqchip driver -- the modern idiom this

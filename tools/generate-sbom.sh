@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # CycloneDX 1.5 SBOM for a release image, on stdout. The work is in
 # tools/sbom.py (its header says what the SBOM contains and why it is python3

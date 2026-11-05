@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 #include "state.h"
 
 static uint32_t put_s(char *b, uint32_t at, uint32_t max, const char *s)

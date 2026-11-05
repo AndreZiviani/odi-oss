@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_igmp_rx.h -- the frames igmpd is handed: which host-port frames they
  * are, and how they are framed on the redirect channel. Plain C, no kernel

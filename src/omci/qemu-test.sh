@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Exercise omcid without a stick.
 #
 # qemu-user cannot open our netlink protocol (NETLINK_ODI; the stock firmware

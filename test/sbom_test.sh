@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 # tools/generate-sbom.sh and tools/verify-sbom.sh: a SBOM generated from a
 # synthetic build tree passes the check, and each way of breaking it (a
 # build tool pulled into the runtime graph, a lost license, a missing hash, a
