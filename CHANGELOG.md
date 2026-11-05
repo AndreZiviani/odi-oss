@@ -22,8 +22,9 @@ listed here.
   costs, and why `ZERO_CALL_USED_REGS`, the slab freelist options (they need
   `SLUB_TINY` off) and `PANIC_ON_OOPS` stay off for now.
   `tools/check-kernel-hardening.sh` fails `make lint` when the seed loses one
-  of the options and `kernel/build.sh` when `olddefconfig` drops one. Not yet
-  trialled on hardware. Refs #254.
+  of the options and `kernel/build.sh` when `olddefconfig` drops one.
+  Trialled on hardware: an overnight run on a stick in service (O5, OMCI and
+  forwarding as before, no oops, free memory flat). Refs #254.
 
 - Hardening of every freestanding binary (omcid, igmpd, diag, nv, omcli,
   omciprobe, omcicap), from one place, `src/harden.mk`:
