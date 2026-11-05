@@ -102,6 +102,10 @@ if [ ${#GITEXCL[@]} -gt 0 ]; then
 	ssh "$ODI_REMOTE" "cd $ODI_REMOTE_DIR && chown \$(id -u):\$(id -g) . && rm -rf .git && timeout 120 sh -c 'git init -q && git add -A'"
 fi
 
+# The remote copy of a worktree has no history, so the commit date that every
+# build stamp derives from is taken here and handed over (tools/source-date-epoch.sh).
+SOURCE_DATE_EPOCH=$("$ROOT/tools/source-date-epoch.sh")
+
 say "building on $ODI_REMOTE: $*"
 # SC2029: deliberate -- $ODI_REMOTE_DIR and the command both expand locally,
 # then the whole line runs as one remote shell command. The command is
@@ -121,7 +125,7 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 			export GITHUB_TOKEN=\"\$TOKEN\"
 			cd $ODI_REMOTE_DIR
 			mkdir -p $ODI_REMOTE_DL
-			export DL=$ODI_REMOTE_DL
+			export DL=$ODI_REMOTE_DL SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH
 			set +e
 			( $* )
 			RC=\$?
@@ -130,7 +134,7 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 			exit \$RC
 		"
 else
-	ssh "$ODI_REMOTE" "cd $ODI_REMOTE_DIR && mkdir -p $ODI_REMOTE_DL && export DL=$ODI_REMOTE_DL && $*"
+	ssh "$ODI_REMOTE" "cd $ODI_REMOTE_DIR && mkdir -p $ODI_REMOTE_DL && export DL=$ODI_REMOTE_DL SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH && $*"
 fi
 
 say "syncing results back to $ROOT/out/image"
