@@ -34,4 +34,4 @@ SERVER=$(config_get NTP_SERVER || true)
 # setting it once and exiting (which would just have init respawn it,
 # stepping the clock repeatedly instead of slewing it). -S: ntpd runs
 # ntp-event.sh on each sync event, which records the state for the web UI.
-exec /etc/scripts/respawn.sh 0 /var/log/services.log /bin/ntpd -n -p "$SERVER" -S /etc/scripts/ntp-event.sh
+exec /etc/scripts/respawn.sh ntpd 0 /var/log/services.log /bin/ntpd -n -p "$SERVER" -S /etc/scripts/ntp-event.sh

@@ -174,6 +174,7 @@ test-host:
 	bash test/omci_defaults_test.sh
 	bash test/rcs_cs_value_test.sh
 	bash test/services_off_test.sh
+	bash test/respawn_budget_test.sh
 	bash test/regtrace_decode_test.sh
 	bash test/regtrace_compare_test.sh
 	bash test/regtrace_compare_stream_test.sh

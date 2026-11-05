@@ -265,6 +265,13 @@ by member with `tools/compare-images.sh`. The kernel and the full image are
 nothing in it runs without a stick. Build the kernel yourself before you
 push a kernel change.
 
+Every job that builds one of our binaries also checks its hardening: each
+Makefile in `src/` runs `tools/check-hardening.sh` on the binary it ships
+(stack protector present and seeded, no executable stack, no writable and
+executable segment), and `make test-diag` runs the stack protector for real
+under qemu (`make -C src/diag ssp-test`). `docs/CROSS-COMPILING.md`,
+"Hardening the freestanding binaries", has the matrix.
+
 `.github/workflows/release.yml`, on a `v*` tag only, does build the full
 image (`VERSION=` from the tag, `ROOT_PW=locked`) and publishes it as a
 GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
@@ -983,8 +990,10 @@ Each of these has cost real time. The pointer says where the evidence is.
   not run it on the stock slot. `omcicap` and `omciprobe -f` interfere with
   a running `omcid` (`docs/TOOLS.md`).
 - **Daemons are `respawn` entries, not sessions.** syslogd, klogd, ntpd,
-  metricsd, confd, dropbear and omcid are forked by busybox init itself and restarted the
-  instant one exits; `kill` alone brings a new one back within seconds, no
+  metricsd, confd, dropbear and omcid are forked by busybox init itself and restarted
+  as soon as one exits; `kill` alone brings a new one back within seconds
+  (after a wait of a few seconds if it keeps dying young, and
+  `/var/run/respawn/<name>` says so, `docs/SETTINGS.md` "Restart budget"), no
   `setsid` needed any more (`docs/TOOLS.md` "Restarting a daemon"). Use
   `/etc/init.d/services stop <name>` to keep one down across restarts.
 - **`/var` is RAM.** Every log is gone at reboot; only the ramlog and the

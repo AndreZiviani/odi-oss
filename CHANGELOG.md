@@ -25,6 +25,46 @@ listed here.
   of the options and `kernel/build.sh` when `olddefconfig` drops one. Not yet
   trialled on hardware. Refs #254.
 
+- Hardening of every freestanding binary (omcid, igmpd, diag, nv, omcli,
+  omciprobe, omcicap), from one place, `src/harden.mk`:
+  `-fstack-protector-strong`, `-fstack-clash-protection`,
+  `-ftrivial-auto-var-init=zero`, `-fno-strict-overflow`, `-Wvla` and
+  `-z noexecstack`. The stack protector runtime is our own, in `start.S`:
+  the guard is seeded from the kernel's `AT_RANDOM` bytes before `main`, and
+  a smashed guard writes `stack-protector: stack smashing detected,
+  aborting` to stderr and `/dev/kmsg`, then ends the process with SIGABRT
+  (init respawns it). The binaries no longer declare an executable stack
+  (`PT_GNU_STACK` was `RWE`, from `start.S` lacking its `.note.GNU-stack`).
+  Every build checks the result with `tools/check-hardening.sh`, and `make
+  test-diag` runs an overrun under qemu (`make -C src/diag ssp-test`). Text
+  grows 2-13% per binary (omcid +13.3 KB, +6.5%). FORTIFY, PIE, RELRO and
+  BIND_NOW do not apply to binaries with no libc and no dynamic linker;
+  `docs/CROSS-COMPILING.md`, "Hardening the freestanding binaries", says
+  why for each.
+
+- Respawned daemons get a restart budget. busybox init restarts a daemon the
+  instant it exits and has no rate limit, so one that died at once was
+  started again and again. `respawn.sh`, the last step of every `svc-*.sh`,
+  now waits 1, 2, 4 ... seconds before restarting a daemon whose previous run
+  lived under 30 s, up to a cap per daemon (omcid 2 s, dropbear 10 s, confd
+  and syslogd 30 s, metricsd, klogd, ntpd and igmpd 60 s); a run of 30 s or
+  more, and the first start of the boot, never wait. It is still the same
+  process exec-ed in place under init, so signals, `reboot` and pid tracking
+  do not change, and it runs only after rcS has returned, so the 120 s
+  userland confirmation is untouched. State goes to `/var/run/respawn/<name>`
+  (`state=ok|backoff|degraded`, `starts`, `fast`, `delay_s`, `last_run_s`,
+  for the exporter to read later) and each restart is one
+  `respawn: event=respawn service=... state=... fast=... delay_s=...` kernel
+  log line (every tenth beyond the fifth short run). Nothing disables a
+  daemon, enters safe mode or reboots: omcid stays with the watchdog, and
+  the others are retried at their cap. `services stop` also ends a daemon
+  that is in its wait. runsv, already in busybox, was weighed and not used
+  (fixed one-second wait, no count, and a supervision tree that changes how
+  every daemon is started and found). docs/SETTINGS.md, "Restart budget",
+  has the policy; `test/respawn_budget_test.sh` (every `respawn` entry,
+  fake clock, in `make test-host`) and a repeated `kill -9` scenario in
+  `make test-qemu` cover it. Refs #271.
+
 - omcid: an OLT lock of the Ethernet UNI no longer takes the host port down
   by default. On this SFP that port is the stick's only management path, so
   a lock from the OLT (ME 11 administrative state) cut the web UI, ssh,

@@ -1183,13 +1183,105 @@ these, they are fixed at boot.
 | `/tmp` (`/var/tmp`) size cap | 8 MB tmpfs | fits a firmware upload (`fwu_starter.sh` stages the tarball there, about 2.6 MB, plus its unpacked squashfs/uImage) and an scp of a few MB with room to spare; past it, a write gets `ENOSPC`, not a system-wide OOM |
 | `/var` (log/run/lock/config fallback) size cap | 6 MB tmpfs | `/var/log` is separately trimmed at 256 KB past a 128 KB floor already (rcS); this is the outer bound if that trim ever falls behind |
 | `oom_score_adj` | omcid, dropbear: `-1000` (never killed while anything else can be); confd: `-500`; metricsd: `0`, the kernel default | omcid and dropbear are what keeps the ONU provisioned and the box reachable; confd is a convenience next after them; metricsd is the one daemon whose loss costs neither -- first in line if the killer has to take something |
-| respawn | omcid, dropbear, confd, metricsd: each an `/etc/inittab` `respawn` entry (`/etc/scripts/svc-*.sh`, execing into `/etc/scripts/respawn.sh`), restarted the instant it exits, forever, by busybox init itself -- no restart budget, no rate limit | native over hand-rolled: a v1.0.4 trial on hardware killed omcid with `kill -9` and it stayed dead -- the old `supervise()` shell loop had lost track of it -- while busybox init, which forked the process itself and never lost the pid, does not have that failure mode; a daemon that still cannot stay up is still a problem for the watchdog rules above to escalate, not for a restart loop |
+| respawn | omcid, dropbear, confd, metricsd, syslogd, klogd, ntpd, igmpd: each an `/etc/inittab` `respawn` entry (`/etc/scripts/svc-*.sh`, execing into `/etc/scripts/respawn.sh`), restarted by busybox init the instant it exits; `respawn.sh` adds a bounded wait before the exec when the daemon keeps dying ("Restart budget" below) | native over hand-rolled: a v1.0.4 trial on hardware killed omcid with `kill -9` and it stayed dead -- the old `supervise()` shell loop had lost track of it -- while busybox init, which forked the process itself and never lost the pid, does not have that failure mode. The budget keeps that: nothing runs beside the daemon, the wait happens in the process init already tracks, and the daemon is exec-ed in place |
 | `vm.min_free_kbytes` | 1536 (`rcS`, up from the kernel's own default of roughly 128 KB on a box this size) | keeps a slightly larger page-allocator reserve free under pressure, so the OOM killer and a starved `oom_score_adj -1000` daemon get a better chance to make forward progress instead of every allocator racing for the same last few pages |
 
 `make test-qemu` (`docs/HACKING.md`) exercises everything above except the
 watchdog rules themselves, which need `/proc/odi_wdt` -- real hardware,
 not the stock kernel the harness boots; those are host-tested instead
 (`test/odi_wdt_test.c`, against a fake clock).
+
+## Restart budget
+
+busybox init restarts a `respawn` entry the moment it exits and has no rate
+limit of its own, so a daemon that dies at once would be started again and
+again, at the cost of CPU and of log lines. `/etc/scripts/respawn.sh`, the
+last step of every `svc-*.sh` before the daemon is exec-ed, now spaces such
+restarts out. It adds no process and no loop: the wait is a `sleep` in the
+shell init already tracks, then the same in-place `exec` as before.
+
+**Why not runit or start-stop-daemon.** busybox here already has `runsv`,
+`runsvdir`, `sv` and `svlogd` built in (no size to add), and they were
+weighed first. `runsv` waits a fixed second between restarts and keeps no
+count, so a budget would still be a hand-written `finish` script, on top of
+a supervision tree (`runsvdir`, one `runsv` per daemon, service directories
+in RAM) that changes how every daemon is started, found by `services` and
+`apply.sh`, signalled and stopped, and moves the pid init tracks. That is
+the kind of change this image paid for in v1.0.4. `start-stop-daemon` only
+starts a daemon, it does not supervise. The script is about forty lines of
+logic, and the one thing it must not do (lose the daemon) it does not do:
+it execs.
+
+**The rule.** Each start records the uptime at the exec; the next start (init
+ran the script again, so the daemon is gone) subtracts it. A run shorter
+than 30 s is a short run, 30 s or longer clears the count.
+
+| short runs in a row | wait before the start | state |
+|---|---|---|
+| 0 | none, as before | `ok` |
+| 1, 2, 3 ... | 1, 2, 4, 8 ... s, never above the daemon cap | `backoff` |
+| 5 or more | the cap | `degraded` |
+
+A first start of the boot never waits, so a normal boot is as fast as it was,
+and the 120 s userland confirmation (sysinit, `rcS`) is finished before init
+reads a single `respawn` entry: nothing here can delay it. Start order does
+not change. A reboot or shutdown during a wait ends the waiting shell like
+any process init signals; a `services stop <name>` also kills a wait in
+progress, so the daemon does not start after the flag is written.
+
+**Policy per daemon.** Nothing here disables a daemon, enters safe mode or
+reboots, because no daemon but omcid is worth a reboot, and a reboot loop
+or a stick whose only login is switched off is worse than a daemon that
+keeps being retried slowly. A daemon is never parked: at the cap it is
+retried every `cap` seconds, so a cause that clears (a missing peer, a
+full `/var`, a bad key later fixed) heals without anyone. To switch one
+off on purpose, `services stop <name>` (it survives a reboot).
+
+| daemon | cap | when it will not stay up |
+|---|---|---|
+| `omcid` | 2 s | watchdog: it stops pinging its 60 s deadline and the kernel resets the board, as before. The wait only stops a spin and stays far below that deadline, so it cannot hold back a recovery the watchdog would have given |
+| `dropbear` | 10 s | retried every 10 s at most: the only way in stays as close to a plain restart as a loop can be |
+| `confd`, `syslogd` | 30 s | retried every 30 s |
+| `metricsd`, `klogd`, `ntpd`, `igmpd` | 60 s | retried every 60 s |
+
+What changes for omcid is only the wait (1 s, then 2 s) after a start that
+lived under 30 s, the state file and the log line; a single crash after a
+long run is restarted at once, and the re-provisioning that follows a
+respawn (docs/BOOT.md) is untouched. The caps are fixed in `respawn.sh`:
+there is no setting.
+
+**Where it shows.** `/var/run/respawn/<name>` (RAM, written by rename,
+`key=value`), read by anything that wants it:
+
+    state=degraded
+    starts=9
+    fast=8
+    last_run_s=1
+    delay_s=30
+    cap_s=30
+    stable_s=30
+    last_start_s=842
+
+`state` is as of the latest start and is not rewritten when the daemon
+stays up, so a reader takes the daemon as healthy again once `uptime -
+last_start_s >= stable_s`. `starts` counts starts since boot, the first
+included; `fast` the short runs in a row. One kernel-log line per restart
+(`dmesg`, the ramlog, `logread` through klogd, and `SYSLOG_SERVER`), at
+notice for a restart after a long run and at warning for a short one:
+
+    respawn: event=respawn service=confd state=backoff starts=4 fast=3 last_run_s=1 delay_s=4 cap_s=30
+
+Beyond the fifth short run only every tenth line is written, so a crash
+loop cannot cycle the 64 KB ring; the state file always has the exact
+count. The daemon output is still appended to `/var/log/services.log` (omcid:
+`/var/log/omcid.log`), where its own last words are. The exit status is not
+recorded: init, not the script, reaps the daemon. A `services start` or a
+`kill` of a daemon within 30 s of its start counts as one short run (a wait
+of a second); several in a row, as in a test, back off like any crash.
+
+Tested by `test/respawn_budget_test.sh` (every `::respawn:` entry of the
+inittab, against a fake clock; in `make test-host`) and by the repeated
+`kill -9` scenario of `make test-qemu`.
 
 ## Bounded waits
 
