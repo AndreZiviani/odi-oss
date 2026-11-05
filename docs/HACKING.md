@@ -84,7 +84,7 @@ activates the GPON MAC once `omcid` has registered.
 | `rootfs/skeleton/` | `/etc` (rcS, services, network.sh, apply.sh, flash, ...) and the register replay tables in `lib/firmware/odi/` | [`rootfs/README.md`](../rootfs/README.md), then `etc/init.d/rcS` |
 | `image/` | squashfs + uImage into a flashable tarball; `fwu.sh`, the on-device flasher | [`image/README.md`](../image/README.md) |
 | `test/` | host-side unit tests (C unity builds against a register mock, shell tests of the on-device scripts) and manual qemu harnesses | [Testing](#testing) |
-| `tools/` | `remote-build.sh`, `kernel-footprint.sh`, `check-inline-quotes.sh`, `fetch-refs.sh`, `bump-deps.sh` (moves the pinned upstream versions), `compare-images.sh` and `objdiff.sh`, `generate-sbom.sh`, `release-notes.sh`, `config-backup.sh`; `memprobe` (physical memory from any kernel), `regdump`, `regtrace` (offline tooling for the register captures the replay tables came from) | each directory's `README.md` |
+| `tools/` | `remote-build.sh`, `kernel-footprint.sh`, `check-inline-quotes.sh`, `check-kernel-hardening.sh`, `fetch-refs.sh`, `bump-deps.sh` (moves the pinned upstream versions), `compare-images.sh` and `objdiff.sh`, `generate-sbom.sh`, `release-notes.sh`, `config-backup.sh`; `memprobe` (physical memory from any kernel), `regdump`, `regtrace` (offline tooling for the register captures the replay tables came from) | each directory's `README.md` |
 | `docs/` | user and developer docs; `docs/kb/` field notes on the hardware and the stock firmware | [`docs/kb/README.md`](kb/README.md) |
 
 ### Where to start reading
@@ -1095,6 +1095,7 @@ added to `CONFIG_CMDLINE` takes effect after a kernel rebuild; U-Boot's
 | `odi_switch.sfp_mirror_state` | `odi_switch.c` (read-only) | `off`, `filling`, `on` (the host is served) or `failed` (the kernel log says why) | -- | read at any time | prod |
 | `print-fatal-signals=1` | `kernel/618/config:61` (mainline) | register dump of any process killed by SIGSEGV/SIGBUS/SIGILL, into the ramlog | on | boot | prod (debug aid) |
 | `panic=10` | `kernel/618/config` (mainline) | restart 10 s after a panic, through the watchdog restart handler, instead of waiting for the userland watchdog deadline (about 44 s) | on | boot | prod (availability) |
+| `sysctl.kernel.kptr_restrict=2`, `sysctl.fs.protected_{symlinks,hardlinks,fifos,regular}=1` | `kernel/618/config` (mainline) | the hardening sysctls, set by the kernel before init; `tools/check-kernel-hardening.sh` fails the build without them (`docs/KERNEL.md`, "Hardening") | on | boot, or live through `/proc/sys` | prod (hardening) |
 
 ### Kconfig
 
