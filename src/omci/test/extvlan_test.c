@@ -315,34 +315,67 @@ int main(void)
 		/* single- and double-tagged defaults: discard */
 		build(tbl + 16, 15, 4096, 0,  14, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
 		build(tbl + 32, 14, 4096, 0,  14, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
-		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri);
+		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0);
 		ok(!why && vid == 100 && pri == 0, "#29: untagged adds VLAN 100 pri 0");
 
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  5, 1, 4);
-		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri);
+		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0);
 		ok(!why && vid == 1 && pri == 5, "ISP1: untagged adds VLAN 1, priority kept");
 
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  8, 100, 4);
-		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "copy-inner priority on untagged is not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0) != 0, "copy-inner priority on untagged is not applied");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 4096, 4);
-		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "VID 4096 is not a concrete VID");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0) != 0, "VID 4096 is not a concrete VID");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 4095, 4);
-		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "VID 4095 is reserved");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0) != 0, "VID 4095 is reserved");
 		/* Output TPID with DEI 0 (6), Output TPID 0x8100: the same tag
 		 * as 4 (f8000000f8000000000f000300000966). */
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 300, 6);
-		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri);
+		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0);
 		ok(!why && vid == 300 && pri == 0, "output TPID 0x8100, DEI 0: untagged adds VLAN 300");
-		ok(evtocd_olt_tag(tbl, 3, 0x88a8, &vid, &pri) != 0, "output TPID 0x88a8 is not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x88a8, &vid, &pri, 0) != 0, "output TPID 0x88a8 is not applied");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 300, 7);
-		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "a drop-eligible tag (DEI 1) is not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0) != 0, "a drop-eligible tag (DEI 1) is not applied");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  1, 15, 4096, 0,  0, 100, 4);
-		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "removing a tag as well is not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0) != 0, "removing a tag as well is not applied");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 0, 200, 4,  0, 100, 4);
-		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "two added tags are not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0) != 0, "two added tags are not applied");
 		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
-		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri) != 0, "untagged frames discarded is not applied");
-		ok(evtocd_olt_tag(tbl, 0, 0x8100, &vid, &pri) != 0, "an empty table is not applied");
+		ok(evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, 0) != 0, "untagged frames discarded is not applied");
+		ok(evtocd_olt_tag(tbl, 0, 0x8100, &vid, &pri, 0) != 0, "an empty table is not applied");
+	}
+
+	/* Whether single-tagged frames pass beside the added tag: the #29 table
+	 * discards them; the one of issue #302 passes them, and a table with
+	 * no default rule at all leaves them on G.988's pass. */
+	{
+		uint8_t tbl[3 * EVTOCD_ENTRY_LEN];
+		int vid = 0, pri = 0, tp = -1;
+		const char *why;
+
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 100, 4);
+		build(tbl + 16, 15, 4096, 0,  14, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
+		build(tbl + 32, 14, 4096, 0,  14, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
+		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, &tp);
+		ok(!why && tp == 0, "#29: the single-tag default discards, tagged frames do not pass");
+
+		/* untagged -> add VLAN 1 pri 0; both defaults pass */
+		build(tbl, 15, 4096, 0,  15, 4096, 0, 0,  0, 15, 4096, 0,  0, 1, 4);
+		build(tbl + 16, 15, 4096, 0,  14, 4096, 0, 0,  0, 15, 4096, 0,  15, 4096, 0);
+		build(tbl + 32, 14, 4096, 0,  14, 4096, 0, 0,  0, 15, 4096, 0,  15, 4096, 0);
+		tp = -1;
+		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, &tp);
+		ok(!why && vid == 1 && pri == 0 && tp == 1, "#302: VLAN 1 added, tagged frames pass");
+
+		/* only the double-tag default discards: single-tagged still pass */
+		build(tbl + 32, 14, 4096, 0,  14, 4096, 0, 0,  3, 15, 4096, 0,  15, 4096, 0);
+		tp = -1;
+		why = evtocd_olt_tag(tbl, 3, 0x8100, &vid, &pri, &tp);
+		ok(!why && tp == 1, "a double-tag discard alone leaves single-tagged frames passing");
+
+		tp = -1;
+		why = evtocd_olt_tag(tbl, 1, 0x8100, &vid, &pri, &tp);
+		ok(!why && tp == 1, "no default rule in the table: tagged frames pass");
 	}
 
 

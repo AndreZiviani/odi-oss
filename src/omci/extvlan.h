@@ -176,9 +176,12 @@ int evtocd_describe(const struct evtocd_entry *e, uint16_t input_tpid,
  * one instance, an untagged rule that adds a single tag with a concrete VID
  * (1..4094) and priority (0..7) at TPID 0x8100, and nothing else but default
  * rules that drop or pass. Returns NULL and the tag in *vid / *pri, or a
- * static reason naming what was not supported -- what an operator reports. */
+ * static reason naming what was not supported -- what an operator reports.
+ * *tagged_pass (when not NULL) says whether single-tagged frames pass as they
+ * are: 0 when the single-tag default rule discards them, 1 when it passes
+ * them or the table has none (G.988's default rules pass). */
 const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
-			   int *vid, int *pri);
+			   int *vid, int *pri, int *tagged_pass);
 
 
 /* ------------------------------------------ what the classifier can do -----

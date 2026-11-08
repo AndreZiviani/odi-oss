@@ -109,6 +109,9 @@ check "ISP2, transparent: forward-all, every tag passes both ways" "$got" \
 #   ISP1's  -> add VLAN 1 pri 0                 f8000000f8000000000f80000000000c
 DEF1=f8000000e8000000c00f8000000f8000
 DEF2=e8000000e8000000c00f8000000f8000
+# The same two defaults passing their frames unchanged (issue #302's OLT).
+PASS1=f8000000e8000000000f8000000f8000
+PASS2=e8000000e8000000000f8000000f8000
 ADD100=f8000000f8000000000f800000000324
 ADD1=f8000000f8000000000f80000000000c
 ADD100P5=f8000000f8000000000f800000050324
@@ -191,6 +194,22 @@ session "$ADD100P5" "$DEF1" "$DEF2" > /tmp/s171-p5.txt
 run171 p5 /tmp/s171-p5.txt
 got=$(rebuild /tmp/omcid-171-p5.log 0 | sed -n 2p)
 check "the OLT's priority 5 is kept" "$got" "47/1002 gem 657 rule manual-add vid 100 pri 5"
+
+# 2b. The table of issue #302: VLAN 1 added to untagged frames, and the
+#     single- and double-tagged defaults pass. Tagged frames (the router's
+#     own VLAN) keep going through unchanged beside the add-tag rule; with
+#     the #29 table above they do not, its defaults discard them.
+session "$ADD1" "$PASS1" "$PASS2" > /tmp/s171-302.txt
+run171 302 /tmp/s171-302.txt
+got=$(rebuild /tmp/omcid-171-302.log 0)
+check "#302, VLAN_CFG_TYPE 0, defaults pass: VLAN 1 added, tagged frames forwarded" "$got" \
+"47/0ffe gem 4094 rule manual-pass vid 1 pri 0
+47/1002 gem 657 rule manual-add vid 1 pri 0
+47/1002 gem 657 rule tagged vid -1 pri -1"
+session "$ADD1" > /tmp/s171-302b.txt
+run171 302b /tmp/s171-302b.txt
+got=$(rebuild /tmp/omcid-171-302b.log 0 | grep -c 'rule tagged')
+check "no default rule in the table: tagged frames forwarded too" "$got" "1"
 
 # 3. Manual mode wins: ISP1's table (VLAN 1, not its service VID) and the
 #    #29 table both leave the stick's own VID 10.

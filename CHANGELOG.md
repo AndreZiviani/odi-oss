@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- VLAN: frames the router tags itself now pass when the OLT's extended VLAN
+  table adds a tag to untagged frames and the line has no VLAN filter (class
+  84). With `VLAN_CFG_TYPE` other than 1, omcid built only the add-tag rule
+  in that case, so a router sending PPPoE on its own VLAN got nothing
+  upstream, while the stock firmware passed it. Tagged frames now go by the
+  table's single-tag default rule: forwarded unchanged when it passes them or
+  the table has none, still dropped when it discards them. The manual tag
+  and lines with a VLAN filter are unchanged. Refs #302.
+
 - Licensing: `reuse lint` now fails on a source file without an SPDX
   header. `REUSE.toml` annotated the whole tree (`**`) as a fallback, so a
   new script or C file that forgot its header still passed; it now lists
