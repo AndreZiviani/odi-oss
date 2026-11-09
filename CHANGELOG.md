@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- OMCI: a bridge rebuild in an omcid that resumed from a snapshot now
+  withdraws the services the snapshot restored. It took the ids to withdraw
+  from a list only the building process had, which is empty after a resume,
+  so a VLAN change then left the old rules in the switch beside the new
+  ones. The rebuild goes by the service table itself. `omcli bridge` rules
+  are in that table too and are withdrawn by the next rebuild. The resume
+  regression resets the resumed MIB and checks that every restored id is
+  withdrawn; not run under qemu or on hardware yet. Refs #305.
+
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each
   odi key, about 70 processes. On the stick it went from 0.36 s to 0.03 s,

@@ -388,8 +388,6 @@ void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
  * Multicast (direction 2 CTPs) is left to bc_gem_update. Rebuilt whole --
  * tear down, derive, add -- OLT_QUIET_MS after the last OMCI frame, since
  * the OLT sends these entities in no reliable order. */
-static int conn_servs[SERV_MAX];
-static int conn_nservs;
 
 static void gen_vid_filter_rule(struct omci_vlan_oper *vr, unsigned vid, int pbit)
 {
@@ -1425,18 +1423,24 @@ void bdgconn_rebuild(void)
 	int ingress[8], ingress_bridge[8], ingress_bport[8], ingress_iphost[8];
 	int ning = 0, added = 0, mvid, nev = 0;
 
-	for (int i = 0; i < conn_nservs; i++) {
+	/* Every service in servtab, not a list this process kept beside it:
+	 * snapshot_load restores servtab, so a resumed omcid has the services
+	 * of the last one here and would have had an empty list. A deactivate
+	 * that fails is logged and the slot freed all the same, as before:
+	 * the driver replaces a service whose id comes back with another rule
+	 * (odi_switch_bdgconn.c), so the next add of that id clears it. */
+	for (int i = 0; i < SERV_MAX; i++) {
+		if (!servtab[i].in_use)
+			continue;
 		if (apply_hw) {
-			int rc = omci_deactiveBdgConn((uint32_t)conn_servs[i]);
+			int rc = omci_deactiveBdgConn((uint32_t)i);
 
 			if (rc)
 				out_fmt("   [hw] bridge connection %d deactivate -> %d\n",
-					(long)conn_servs[i], (long)rc);
+					(long)i, (long)rc);
 		}
-		if (conn_servs[i] >= 0 && conn_servs[i] < SERV_MAX)
-			servtab[conn_servs[i]].in_use = 0;
+		servtab[i].in_use = 0;
 	}
-	conn_nservs = 0;
 	for (unsigned i = 0; i < sizeof uc_vids; i++)
 		uc_vids[i] = 0;
 	if (!c47 || !c266 || !c268 || !c281 || !c84)
@@ -1645,10 +1649,8 @@ void bdgconn_rebuild(void)
 						continue;
 					id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_DS,
 							 &mcv.rule[k].vr);
-					if (id >= 0 && conn_nservs < SERV_MAX) {
-						conn_servs[conn_nservs++] = id;
+					if (id >= 0)
 						added++;
-					}
 				}
 			}
 			for (int k = 0; k < nrules && (!use_ev || plain); k++) {
@@ -1672,10 +1674,8 @@ void bdgconn_rebuild(void)
 					continue;
 				}
 				id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rules[k].vr);
-				if (id >= 0 && conn_nservs < SERV_MAX) {
-					conn_servs[conn_nservs++] = id;
+				if (id >= 0)
 					added++;
-				}
 			}
 			}                        /* rules of this target */
 			for (int g = 0; use_ev && g < ning; g++) {
@@ -1697,16 +1697,12 @@ void bdgconn_rebuild(void)
 					if (o->has_ds)
 						mcv_mark(uc_vids, &o->ds);
 					id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_US, &o->us);
-					if (id >= 0 && conn_nservs < SERV_MAX) {
-						conn_servs[conn_nservs++] = id;
+					if (id >= 0)
 						added++;
-					}
 					if (o->has_ds && (dir & OMCI_DIR_DS)) {
 						id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_DS, &o->ds);
-						if (id >= 0 && conn_nservs < SERV_MAX) {
-							conn_servs[conn_nservs++] = id;
+						if (id >= 0)
 							added++;
-						}
 					}
 				}
 				nrest = bp_rules(r->inst, tgt_pbit[t], mvid, dir, rest, &mf, &ev->ctl);
@@ -1722,10 +1718,8 @@ void bdgconn_rebuild(void)
 						rest[k].kind, (long)rest[k].vid, (long)rest[k].pri);
 					mcv_mark(uc_vids, &rest[k].vr);
 					id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rest[k].vr);
-					if (id >= 0 && conn_nservs < SERV_MAX) {
-						conn_servs[conn_nservs++] = id;
+					if (id >= 0)
 						added++;
-					}
 				}
 			}
 			}                        /* targets of this bridge port */

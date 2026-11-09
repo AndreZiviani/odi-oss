@@ -95,6 +95,11 @@ $(BUILD)/mcastvlan_test: ../test/mcastvlan_test.c ../mcastvlan.h ../extvlan.h \
 	$(CC) $(CFLAGS) $(LDFLAGS) -I.. -o $@ ../test/mcastvlan_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o
 
+# The real teardown and service table, with the driver call wrapped to count
+# the deactivates. No device or netlink is opened.
+$(BUILD)/service_ownership_test: ../test/service_ownership_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
+
 $(BUILD)/omci_mib.o: ../generated/omci_mib.c ../generated/omci_mib.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -139,9 +144,10 @@ size: cap
 	@$(RUN) sh -c 'ls -l $(BIN); $(CROSS)size $(BIN)'
 
 test: image
-	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/service_ownership_test
 	@$(RUN) qemu-mips-static $(BUILD)/extvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/mcastvlan_test
+	@$(RUN) qemu-mips-static $(BUILD)/service_ownership_test
 
 clean:
 	rm -rf $(BUILD)
