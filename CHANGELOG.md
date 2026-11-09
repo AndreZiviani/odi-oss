@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Config: `flash all cs`, which the web UI runs every time it loads the
+  config, reads `odi.conf` in one pass instead of starting a `sed` for each
+  odi key, about 70 processes. On the stick it went from 0.36 s to 0.03 s,
+  with the same output. `test/flash_test.sh` checks the order and the
+  first-line-wins rule.
+
 - VLAN: frames the router tags itself now pass when the OLT's extended VLAN
   table adds a tag to untagged frames and the line has no VLAN filter (class
   84). With `VLAN_CFG_TYPE` other than 1, omcid built only the add-tag rule
