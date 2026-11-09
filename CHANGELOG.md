@@ -5,6 +5,28 @@ listed here.
 
 ## Unreleased
 
+- CI: four causes of failures that had nothing to do with the change under
+  test, from the last two weeks of runs. The SIGTERM and SIGKILL cases of
+  `test/mcast_probe_test.sh` gave the probe script 5 s to install its probes,
+  which a runner busy with the other legs of `make test` sometimes exceeded
+  ("the count window never started"); they now wait up to 30 s, with a
+  window long enough to cover it. `src/omci/reload-test.sh` read the daemon
+  log as soon as the status file said done, but omcid writes the status file
+  first, so the line could still be on its way ("O5 never reached: logged");
+  a log check now waits up to 5 s for its line. `tools/bump-deps.sh` moved
+  the kernel and release pins but not the versions `README.md` and
+  `docs/BUILDING.md` name, so every weekly bump failed its own `make lint`
+  and no bump PR was opened; it now rewrites those too. And the most common
+  one: `test-rcs` installed strace from a Debian snapshot mirror inside the
+  test container on every run, and failed whenever the mirror timed out.
+  The freestanding toolchain image is now pinned at v4, which carries
+  strace, and the test installs it only when an image lacks it.
+  `test/apply_test.sh` gave `apply.sh` 2 s to see the stub omcid take the
+  signal and 4 s for the outcome, while the stub ran its handler only after
+  its current one-second sleep, and gave the stub a fixed second to start;
+  the stub now runs its handler at once, the test waits for it to start, and
+  the bounds are generous except in the two cases that test them.
+
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each
   odi key, about 70 processes. On the stick it went from 0.36 s to 0.03 s,
