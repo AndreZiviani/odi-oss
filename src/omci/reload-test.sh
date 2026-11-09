@@ -65,7 +65,12 @@ bad() { echo "FAIL  $*"; fail=$((fail + 1)); }
 check() {   # check <label> <want> <got>
 	if [ "$2" = "$3" ]; then ok "$1"; else bad "$1: want '$2', got '$3'"; fi
 }
+# The line may trail what the check waited for: omcid writes its status file
+# before the event line reaches the log through qemu, so a line that is not
+# there yet gets up to 5 s.
 check_grep() {   # check_grep <label> <pattern> <file>
+	i=0
+	while ! grep -q -- "$2" "$3" && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
 	if grep -q -- "$2" "$3"; then ok "$1"; else bad "$1: no '$2' in $3"; sed -n '1,3p' "$3"; fi
 }
 
