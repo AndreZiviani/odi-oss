@@ -712,6 +712,11 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		}
 		return n;
 	}
+	/* The owner may override what the OLT wrote (RTK_DEVINFO_SPECVER). */
+	if (cfg_fwdop(bp, code) != code) {
+		ev_vlan_fwdop_override(bp, (uint8_t)code, (uint8_t)cfg_fwdop(bp, code));
+		code = cfg_fwdop(bp, code);
+	}
 	f = fwdop_decode(code);
 	if (!f.supported) {
 		ev_vlan_fwdop(bp, (uint8_t)code, FWDOP_MANDATORY);
@@ -1173,7 +1178,7 @@ static int ev_admits(uint16_t bp, int tags, int vid, int pri)
 	if (!vt)
 		return 1;
 	nent = row_u32(vt, c84, 3);
-	code = row_u32(vt, c84, 2);
+	code = cfg_fwdop(bp, row_u32(vt, c84, 2));
 	if (!nent)
 		return 1;
 	f = fwdop_decode(code);

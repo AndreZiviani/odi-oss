@@ -427,6 +427,15 @@ store 1 12 5 "$(val OMCI_CUSTOM_MCAST 3)
 reload_is "OMCI_CUSTOM_MCAST 1 to 3, bit 1 kept: not a change" none ""   none
 store 1 12 5
 reload_is "OMCI_CUSTOM_MCAST removed"          vlan OMCI_CUSTOM_MCAST     rebuild
+# The stock FwdOp override changes the rules of the ports it names: a rebuild.
+store 1 12 5 "$(val RTK_DEVINFO_SPECVER 0x1102:0x00)
+"
+reload_is "RTK_DEVINFO_SPECVER"                vlan RTK_DEVINFO_SPECVER   rebuild
+store 1 12 5 "$(val RTK_DEVINFO_SPECVER 0x1102:0x02)
+"
+reload_is "RTK_DEVINFO_SPECVER, another code"  vlan RTK_DEVINFO_SPECVER   rebuild
+store 1 12 5
+reload_is "RTK_DEVINFO_SPECVER removed"        vlan RTK_DEVINFO_SPECVER   rebuild
 store 0 12 5
 reload_is "VLAN_MANU_MODE 0, transparent"      vlan VLAN_MANU_MODE        rebuild
 store 0 12 5 "$(val VLAN_CFG_TYPE 2)

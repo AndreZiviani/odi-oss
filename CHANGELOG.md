@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- VLAN: the forward operation (FwdOp) of the OLT's VLAN filters can now be
+  overridden, with the same setting and format as the stock firmware's "VLAN
+  Forward Operation" page: `RTK_DEVINFO_SPECVER`, `EntityId[:FwdOp]` entries
+  separated by commas (`0x1102:0x00,0x110b`; no FwdOp means 0x02). Some
+  lines need it: an OLT that filters on the service VLAN with FwdOp 0x10
+  while sending its 802.1X EAP frames on VLAN 0 has them all dropped, and
+  the router never authenticates; 0x00 lets them through. Applied without a
+  reboot, the ONU stays in O5. The filter keeps the value the OLT wrote, so
+  the FwdOp page still shows 0x10; `omcli vlan` lists the overrides in force
+  and omcid logs each one once. Refs #301.
+
 - CI: four causes of failures that had nothing to do with the change under
   test, from the last two weeks of runs. The SIGTERM and SIGKILL cases of
   `test/mcast_probe_test.sh` gave the probe script 5 s to install its probes,
