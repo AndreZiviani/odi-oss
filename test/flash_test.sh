@@ -188,6 +188,15 @@ t "garbage lines are never read as a value" "SYSLOG_SERVER=" "$(sh $F get SYSLOG
 t "a set keeps other lines as they are"     "SYSLOG_SERVER=a.b" "$(sh $F set SYSLOG_SERVER a.b)"
 t "and the garbage is still there"          "4" "$(grep -c 'garbage line\|=novalue\|SYSLOG_SERVERX\|#SYSLOG' "$ODI_CONF")"
 t "no temp file is left behind"             "0" "$(find "$cfg" -name '*tmp*' | wc -l | tr -d ' ')"
+# flash all cs reads odi.conf in one pass. The same lines as before: the first
+# line of a key wins, as get reads it; keys print in ODI_KEYS order; empty and
+# unknown keys are left out; a value may hold an =.
+oc="$T/odi-all.conf"
+printf 'NTP_SERVER=b=c\nSYSLOG_SERVER=a\nNTP_SERVER=d\nOMCI_VEIP=\nNOT_A_KEY=x\n=v\nSYSLOG_SERVERX=no\n' > "$oc"
+t "flash all cs: ODI_KEYS order, first line wins, no empty or unknown key" \
+  "$(printf '\t\t<Value Name="SYSLOG_SERVER" Value="a"/>\n\t\t<Value Name="NTP_SERVER" Value="b=c"/>')" \
+  "$(ODI_CONF="$oc" sh $F all cs | grep 'Name="\(SYSLOG_SERVER\|NTP_SERVER\|OMCI_VEIP\|NOT_A_KEY\|SYSLOG_SERVERX\)"')"
+t "and get agrees on the first line"        "NTP_SERVER=b=c" "$(ODI_CONF="$oc" sh $F get NTP_SERVER)"
 sh $F set SYSLOG_SERVER 'a"b' >/dev/null 2>&1
 t "a quote in an odi value is refused"      "SYSLOG_SERVER=a.b" "$(sh $F get SYSLOG_SERVER)"
 nl=$(printf 'a\nNTP_SERVER=evil')

@@ -96,12 +96,28 @@ odi_value_of() {
 }
 
 # The odi keys that hold a value, as XML lines in the shape of the stock ones,
-# so confd (which parses `flash all cs` by that shape) sees them.
+# so confd (which parses `flash all cs` by that shape) sees them. In ODI_KEYS
+# order, and the first line of a key wins, as odi_value_of reads it.
+# One awk over odi.conf, not odi_value_of per key: that was a subshell, sed and
+# head for each of the keys, about 70 forks, and made `flash all cs` (every
+# load of the config page) take 0.37 s on the stick.
 odi_xml() {
-	for k_ in $ODI_KEYS; do
-		v_=$(odi_value_of "$k_")
-		[ -n "$v_" ] && printf '\t\t<Value Name="%s" Value="%s"/>\n' "$k_" "$v_"
-	done
+	[ -f "$ODI_CONF" ] || return 0
+	awk -v keys="$ODI_KEYS" '
+		BEGIN { n = split(keys, order, " ") }
+		{
+			i = index($0, "=")
+			if (i < 2)
+				next
+			k = substr($0, 1, i - 1)
+			if (!(k in v))
+				v[k] = substr($0, i + 1)
+		}
+		END {
+			for (j = 1; j <= n; j++)
+				if (v[order[j]] != "")
+					printf "\t\t<Value Name=\"%s\" Value=\"%s\"/>\n", order[j], v[order[j]]
+		}' "$ODI_CONF" 2>/dev/null
 	return 0
 }
 
