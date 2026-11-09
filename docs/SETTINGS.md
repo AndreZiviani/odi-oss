@@ -278,6 +278,12 @@ omcid. Two ways, tried in this order:
    still pass upstream unchanged when the OLT's VLAN filter (class 84) on the
    GEM side lists the VID, since the table leaves tagged frames on its default
    rule (G.988); the manual tag, by contrast, takes the place of that entry.
+   With no VLAN filter on the GEM side, frames the router tags with any VLAN
+   pass unchanged beside the added tag, unless the table's single-tag default
+   rule discards them; a table without that rule passes them, as G.988's
+   default does. On a line whose OLT adds VLAN 1 and passes the rest, the
+   router's PPPoE on its own VLAN goes through this way. The manual tag keeps
+   its one rule, so frames the router tags do not pass it.
    omcid logs `untagged frames get VLAN <vid> pri <p> from the OLT`.
 2. Any other table: each entry becomes its own rule, with the rule that
    undoes it downstream as DsMode says. A single VID translated to another

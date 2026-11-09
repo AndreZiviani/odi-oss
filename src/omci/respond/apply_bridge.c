@@ -534,6 +534,10 @@ static int tag_pri;
  * settings. Set by bdgconn_rebuild(). */
 static int tag_from_olt;
 
+/* Whether that class 171 table lets single-tagged frames through as they are
+ * (its single-tag default rule passes, or it has none). Set by olt_tag(). */
+static int olt_tagged_pass;
+
 /* The tag the OLT's class 171 provisions on the UNI, when the stick is not in
  * manual mode (VLAN_CFG_TYPE other than 1, as the stock firmware gates it):
  * the one shape evtocd_olt_tag() accepts, in the instance associated with the
@@ -587,7 +591,8 @@ static int olt_tag(int *pri, const char **why_out)
 		     n < EXTVLAN_ENTRIES_MAX; t = tblpool[t].next, n++)
 			for (int b = 0; b < EVTOCD_ENTRY_LEN; b++)
 				tbl[n * EVTOCD_ENTRY_LEN + b] = tblpool[t].data[b];
-		why = evtocd_olt_tag(tbl, n, (uint16_t)row_u32(r, c171, 4), &v, &p);
+		why = evtocd_olt_tag(tbl, n, (uint16_t)row_u32(r, c171, 4), &v, &p,
+				     &olt_tagged_pass);
 		if (!why) {
 			vid = v;
 			*pri = p;
@@ -687,11 +692,18 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	/* No class 84, or one with an empty list: as before any FwdOp was
 	 * read -- the manual tag, else everything forwarded. An investigating
 	 * code over an empty list would discard every tagged frame, which no
-	 * line has been seen to mean. */
+	 * line has been seen to mean. A tag from class 171 is added to
+	 * untagged frames only; the tagged ones go by the table's single-tag
+	 * default rule, which passes them unchanged unless it discards them.
+	 * The manual tag keeps the stock stack's one rule. */
 	if (!vt || !nent) {
 		if (mvid >= 0) {
 			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
 			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0);
+			if (tag_from_olt && olt_tagged_pass) {
+				n = bp_put(rules, n, "tagged", -1, -1);
+				gen_tagged_rule(&rules[n - 1].vr);
+			}
 		} else if (ev && ev->skip_tagged) {
 			ev_untagged_only(rules, &n, ev);
 		} else {
@@ -1456,6 +1468,7 @@ void bdgconn_rebuild(void)
 	mvid = cfg_manual_vid();
 	tag_pri = vlanCfg.pri;
 	tag_from_olt = 0;
+	olt_tagged_pass = 0;
 	for (int g = 0; g < 8; g++)
 		ev_tab[g].active = 0;
 	if (mvid < 0) {

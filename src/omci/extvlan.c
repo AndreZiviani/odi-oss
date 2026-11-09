@@ -213,20 +213,25 @@ static int default_is_plain(const struct evtocd_entry *e)
 }
 
 const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
-			   int *vid, int *pri)
+			   int *vid, int *pri, int *tagged_pass)
 {
 	struct evtocd_entry e, add;
 	struct evtocd_action a;
-	int have = 0;
+	int have = 0, pass = 1;
 
 	if (n < 1)
 		return "the table is empty";
 	for (int i = 0; i < n; i++) {
+		int dt;
+
 		evtocd_decode(tbl + i * EVTOCD_ENTRY_LEN, &e);
 		evtocd_action(&e, 0x8100, 0x8100, &a);
-		if (evtocd_default_rule_tags(&e) >= 0) {
+		dt = evtocd_default_rule_tags(&e);
+		if (dt >= 0) {
 			if (!default_is_plain(&e))
 				return "a default rule adds or removes tags";
+			if (dt == 1 && a.discard)
+				pass = 0;
 			continue;
 		}
 		if (a.tags_in != EVTOCD_UNTAGGED)
@@ -274,6 +279,8 @@ const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
 	}
 	*vid = a.add[0].vid;
 	*pri = a.add[0].pri;
+	if (tagged_pass)
+		*tagged_pass = pass;
 	return 0;
 }
 
