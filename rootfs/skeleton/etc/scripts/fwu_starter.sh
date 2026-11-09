@@ -51,6 +51,7 @@ slot=${1:-}
 tarball=${2:-}
 
 say() { echo "fwu_starter: $*"; }
+state() { echo "$*" > "$FWU_STATE.tmp" && mv "$FWU_STATE.tmp" "$FWU_STATE"; }
 die() { echo "fwu_starter: $*" >&2; exit 1; }
 
 case "$slot" in
@@ -62,6 +63,12 @@ case "$tarball" in
 /*) ;;
 *) tarball=$(pwd)/$tarball ;;
 esac
+
+# The lock inode lives outside the scratch directory, and is never removed.
+# Every writer inherits fd 9, so even a killed starter cannot release the
+# lock while its flasher is still using the shared files or flash devices.
+exec 9>"$FWU_STATE.lock" || die "cannot open writer lock"
+flock -n 9 || die "a write is already running; see $FWU_LOG"
 
 # One write at a time. The state file says running while fwu.sh is alive;
 # a state left saying running by a process that is gone (a reboot mid-write
@@ -103,23 +110,40 @@ got=$(md5sum "$FWU_DIR/fwu.sh" | cut -d' ' -f1)
 [ "$want" = "$got" ] || die "fwu.sh md5 mismatch (md5.txt $want, file $got)"
 say "slot $slot (running $running), $(basename "$tarball"), fwu.sh ok ($got)"
 
+# Both caller modes publish a live flasher pid for the upload guard. The
+# owner shell keeps fd 9 as well, until it has recorded the final state.
+state "running $$ $slot" || die "cannot record the writer state in $FWU_STATE"
 if [ "$fg" = 1 ]; then
-	cd "$FWU_DIR" && exec sh ./fwu.sh "$slot" "$tarball"
+	# Once writing starts, a closed session or a stray signal must not
+	# stop a flash half way or lose its outcome: the writer inherits the
+	# ignored signals. The wait has no bound on purpose (AGENTS.md,
+	# bounded waits): the only thing a timeout could do is kill a writer
+	# in the middle of an erase. A writer that hangs keeps the lock, and
+	# kill -9 of the pid in the state file releases it.
+	trap '' HUP INT TERM
+	cd "$FWU_DIR" || die "cannot enter $FWU_DIR"
+	sh ./fwu.sh "$slot" "$tarball" &
+	writer=$!
+	state "running $writer $slot"
+	wait "$writer"
+	rc=$?
+	if [ "$rc" = 0 ]; then state "ok $writer $slot"; else state "failed $writer $slot $rc"; fi
+	exit "$rc"
 fi
 
 : > "$FWU_LOG"
-# Claimed before the job starts, with this shell as the live pid, so a
-# second request in the gap cannot start a second writer.
-echo "running $$ $slot" > "$FWU_STATE"
-# The job records its own pid and outcome. setsid gives it a session of its
-# own: confd, and the shell that started this, can go away without a SIGHUP
-# reaching a flash in progress.
+# setsid detaches the worker while preserving the inherited lock fd. Its
+# wait is unbounded for the same reason as the foreground one.
 setsid sh -c '
+	state_file=$4
+	state() { echo "$*" > "$state_file.tmp" && mv "$state_file.tmp" "$state_file"; }
 	cd "$1" || exit 1
-	echo "running $$ $2" > "$4"
-	sh ./fwu.sh "$2" "$3" >> "$5" 2>&1
+	sh ./fwu.sh "$2" "$3" >> "$5" 2>&1 &
+	writer=$!
+	state "running $writer $2"
+	wait "$writer"
 	rc=$?
-	if [ "$rc" = 0 ]; then echo "ok $$ $2" > "$4"; else echo "failed $$ $2 $rc" > "$4"; fi
+	if [ "$rc" = 0 ]; then state "ok $writer $2"; else state "failed $writer $2 $rc"; fi
 ' fwu "$FWU_DIR" "$slot" "$tarball" "$FWU_STATE" "$FWU_LOG" \
 	< /dev/null > /dev/null 2>&1 &
 # Wait for the job to claim the state file, so a request that arrives right
@@ -128,7 +152,7 @@ setsid sh -c '
 sleep 1
 read -r st pid _ < "$FWU_STATE"
 if [ "$pid" = "$$" ]; then
-	echo "failed $$ $slot start" > "$FWU_STATE"
+	state "failed $$ $slot start"
 	die "the write job did not start"
 fi
 say "writing slot $slot in the background; progress in $FWU_LOG"
