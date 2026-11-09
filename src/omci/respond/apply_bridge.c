@@ -794,6 +794,75 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	return n;
 }
 
+/* Record each installed descriptor, including expanded mapper rules. The
+ * temporary bridge-port list remains bounded independently of expansion. */
+static int bp_add(int ingress, uint16_t port, uint32_t dir,
+		  const struct omci_vlan_oper *vr)
+{
+	int id = bdgconn_add(ingress, port, dir, vr);
+
+	if (id < 0)
+		return 0;
+	if (conn_nservs < SERV_MAX)
+		conn_servs[conn_nservs++] = id;
+	return 1;
+}
+
+/* A downstream-only descriptor needs the inverse treatment explicitly:
+ * the kernel derives that inverse automatically only for a BI descriptor. */
+static int bp_install(int ingress, uint16_t port, uint32_t dir,
+		      const struct bp_rule *r, unsigned pmask, unsigned unmarked)
+{
+	struct omci_vlan_oper vr;
+	int added = 0, downstream = (dir & OMCI_DIR_DS) != 0;
+	int untagged = r->vr.filter.inner_mode == OMCI_TAGF_UNTAGGED;
+	int all = r->vr.rule_gen == OMCI_VLAN_OPER_FORWARD_ALL;
+
+	if (pmask == 0xffu || !(dir & OMCI_DIR_US))
+		return bp_add(ingress, port, dir, &r->vr);
+	if ((r->vr.filter.inner_mode & OMCI_TAGF_PRI) &&
+	    r->vr.filter.inner.pri < 8 &&
+	    (pmask & (1u << r->vr.filter.inner.pri)))
+		return bp_add(ingress, port, dir, &r->vr);
+	if (untagged) {
+		unsigned owner = r->vid >= 0 ? (unsigned)tag_pri : unmarked;
+
+		if (owner < 8 && (pmask & (1u << owner)))
+			return bp_add(ingress, port, dir, &r->vr);
+	} else if (!(r->vr.filter.inner_mode & OMCI_TAGF_PRI)) {
+		for (unsigned pri = 0; pri < 8; pri++) {
+			uint32_t leg = OMCI_DIR_US;
+
+			if (!(pmask & (1u << pri)))
+				continue;
+			vr = r->vr;
+			if (all) {
+				gen_pri_filter_rule(&vr, pri);
+				vr.out = r->vr.out;
+			} else {
+				vr.filter.inner_mode |= OMCI_TAGF_PRI;
+				vr.filter.inner.pri = pri;
+			}
+			/* Keep one original downstream inverse on a BI descriptor.
+			 * It also owns the VID membership row in the kernel. */
+			if (downstream) {
+				leg |= OMCI_DIR_DS;
+				downstream = 0;
+			}
+			added += bp_add(ingress, port, leg, &vr);
+		}
+		if (all && unmarked < 8 && (pmask & (1u << unmarked))) {
+			gen_untagged_rule(&vr);
+			added += bp_add(ingress, port, OMCI_DIR_US, &vr);
+		}
+	}
+	if (downstream) {
+		evtocd_fallback_ds(&vr, &r->vr);
+		added += bp_add(ingress, port, OMCI_DIR_DS, &vr);
+	}
+	return added;
+}
+
 /* ------------------------------------------------------ class 171, in full
  *
  * With the manual tag off and the one shape olt_tag() accepts not present,
@@ -1499,7 +1568,7 @@ void bdgconn_rebuild(void)
 			mcast_tag_plan();
 		for (int i = 0; i < MIB_ROWS; i++) {
 			int row = pass == 1 ? MIB_ROWS - 1 - i : i;
-			struct mib_row *r = mib_row_at(row), *iw, *ctp, *mapper;
+			struct mib_row *r = mib_row_at(row), *iw, *ctp, *mapper = 0;
 			struct mib_row *tgt_iw[8];
 			int tgt_pbit[8], ntgt = 0;
 			unsigned tgt_pmask[8];   /* the priorities each target carries */
@@ -1658,8 +1727,6 @@ void bdgconn_rebuild(void)
 			if (tpType != 6)
 				mcv_mark(uc_vids, &rules[k].vr);
 			for (int g = 0; g < ning; g++) {
-				int id;
-
 				/* Only ingresses of the SAME bridge. Two bridges are
 				 * covered only by the ISP2 fixture in QEMU; every stick
 				 * seen has one. */
@@ -1671,11 +1738,9 @@ void bdgconn_rebuild(void)
 					lane_refused(r->inst, port, rules[k].kind, ingress[g]);
 					continue;
 				}
-				id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rules[k].vr);
-				if (id >= 0 && conn_nservs < SERV_MAX) {
-					conn_servs[conn_nservs++] = id;
-					added++;
-				}
+				added += bp_install(ingress[g], (uint16_t)port, dir,
+						    &rules[k], tgt_pmask[t],
+						    mapper && row_u32(mapper, c130, 10) == 1 ? row_u32(mapper, c130, 12) : 0);
 			}
 			}                        /* rules of this target */
 			for (int g = 0; use_ev && g < ning; g++) {
@@ -1711,7 +1776,6 @@ void bdgconn_rebuild(void)
 				}
 				nrest = bp_rules(r->inst, tgt_pbit[t], mvid, dir, rest, &mf, &ev->ctl);
 				for (int k = 0; k < nrest; k++) {
-					int id;
 
 					if (ingress_iphost[g] && !lane_rule_ok(rest[k].kind)) {
 						lane_refused(r->inst, port, rest[k].kind, ingress[g]);
@@ -1721,11 +1785,9 @@ void bdgconn_rebuild(void)
 						apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
 						rest[k].kind, (long)rest[k].vid, (long)rest[k].pri);
 					mcv_mark(uc_vids, &rest[k].vr);
-					id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rest[k].vr);
-					if (id >= 0 && conn_nservs < SERV_MAX) {
-						conn_servs[conn_nservs++] = id;
-						added++;
-					}
+					added += bp_install(ingress[g], (uint16_t)port, dir,
+							    &rest[k], tgt_pmask[t],
+							    mapper && row_u32(mapper, c130, 10) == 1 ? row_u32(mapper, c130, 12) : 0);
 				}
 			}
 			}                        /* targets of this bridge port */

@@ -328,4 +328,7 @@ void evtocd_plan_oper(const struct evtocd_plan *p, struct omci_vlan_oper *vr);
 /* One line for the log: "C-VID 410 pri 5 -> C-VID 1410 pri kept", say. */
 int evtocd_plan_describe(const struct evtocd_plan *p, char *buf, int max);
 
+/* Fallback inverse for a target that has no upstream untagged rule. */
+void evtocd_fallback_ds(struct omci_vlan_oper *d, const struct omci_vlan_oper *u);
+
 #endif

@@ -485,6 +485,60 @@ got=$(rebuild /tmp/omcid-171-ev-split5.log 0 | grep ext-vlan)
 check "a rule that names priority 5 goes up the GEM port that carries 5, and only that" "$got" \
 "47/1002 gem 1000 rule ext-vlan vid 410 pri 5"
 
+# The simple add-tag shortcut uses bp_rules, not ev_for_port. Its tagged
+# fallback must retain the whole mapper mask, and untagged priority 5
+# belongs only to GEM 1000. Parse real emitted descriptors below.
+store 0 0
+{
+	session "$ADD100P5" "$PASS1" "$PASS2"
+	split_frames
+} > /tmp/s171-fallback-split.txt
+run171 fallback-split /tmp/s171-fallback-split.txt
+if python3 - /tmp/omcid-171-fallback-split.log <<'PYTEST'
+import re, struct, sys
+rules = []
+current = []
+meta = None
+words = []
+for line in open(sys.argv[1]):
+    m = re.search(r'\[dry\] serv \d+ ingress [0-9a-f]+ gem (\d+) dir (\d+)', line)
+    if m:
+        meta = tuple(map(int, m.groups()))
+        words = []
+    m = re.match(r'   [0-9a-f]{3}  ([0-9a-f]{32})', line)
+    if m and meta:
+        words.extend(struct.unpack('>4I', bytes.fromhex(m[1])))
+        if len(words) == 40:
+            current.append((meta, words))
+            meta = None
+    if 'bridge connections rebuilt' in line:
+        rules, current = current, []
+seen = {657: set(), 1000: set()}
+untagged = {657: 0, 1000: 0}
+inverse = False
+for (gem, direction), w in rules:
+    if gem == 657 and direction == 2 and w[9] == 7:
+        inverse |= w[14] == 100 and w[13] == 5 and w[25] == 2
+    if gem not in seen or not direction & 1:
+        continue
+    # inner_mode is byte 68, inner priority is byte 52.
+    mode, pri = w[17], w[13]
+    if mode & 4:
+        untagged[gem] += 1
+    else:
+        assert mode & 16, (gem, 'unqualified upstream rule')
+        seen[gem].add(pri)
+assert seen == {657: {0, 1, 2, 3}, 1000: {4, 5, 6, 7}}, seen
+assert untagged == {657: 0, 1000: 1}, untagged
+assert inverse, "missing downstream inverse on the non-owner target"
+PYTEST
+then
+	echo "ok    fallback split: tagged priorities stay on their GEM, untagged priority 5 has one owner"
+else
+	echo "FAIL  fallback split: mapper separation lost"
+	fail=$((fail + 1))
+fi
+
 # The same split, with the second GEM IW TP given the instance id of the
 # mapper, as ISP3 numbers them: the bridge port TPPointer 0x1002 names both
 # a mapper and an IW TP. It is the mapper, and both GEM ports carry the rule.

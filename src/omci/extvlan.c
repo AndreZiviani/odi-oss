@@ -1082,3 +1082,35 @@ int evtocd_plan_describe(const struct evtocd_plan *p, char *out, int max)
 	out[b.n] = 0;
 	return b.n;
 }
+
+/* The explicit downstream inverse of a legacy fallback descriptor. */
+void evtocd_fallback_ds(struct omci_vlan_oper *d, const struct omci_vlan_oper *u)
+{
+	struct omci_vlan_oper tmp = {0};
+
+	*d = tmp;
+	d->filter.outer_mode = OMCI_TAGF_ANY;
+	d->filter.inner_mode = OMCI_TAGF_ANY;
+	d->out.out_tag.vid = OMCI_VID_ANY;
+	d->out.out_tag.pri = OMCI_PRI_ANY;
+	d->rule_gen = OMCI_VLAN_OPER_EXTVLAN_GEN;
+	d->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	if (u->filter.outer_mode & OMCI_TAGF_UNTAGGED) {
+		d->filter.outer_mode = OMCI_TAGF_UNTAGGED;
+		d->filter.inner_mode = u->out.tag_count ? OMCI_TAGF_TAGGED : OMCI_TAGF_UNTAGGED;
+		d->outer_act.tag_op = OMCI_TAGOP_POP;
+	} else {
+		d->outer_act = u->outer_act;
+	}
+	if (u->out.out_tag.vid < 4096u) {
+		d->filter.inner_mode |= OMCI_TAGF_VID;
+		d->filter.inner.vid = u->out.out_tag.vid;
+	}
+	if (u->out.out_tag.pri < 8u) {
+		d->filter.inner_mode |= OMCI_TAGF_PRI;
+		d->filter.inner.pri = u->out.out_tag.pri;
+	}
+	if (d->filter.inner_mode & (OMCI_TAGF_VID | OMCI_TAGF_PRI))
+		d->filter.inner_mode |= OMCI_TAGF_TAGGED;
+	d->inner_act.tag_op = u->inner_act.tag_op == OMCI_TAGOP_PUSH ? OMCI_TAGOP_POP : OMCI_TAGOP_PASS;
+}

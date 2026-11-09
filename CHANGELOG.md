@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- VLAN: fallback bridge rules preserve the complete 802.1p mapper mask
+  for grouped and single-priority GEM targets, including the simple
+  class-171 add-tag path. Untagged traffic has one upstream owner;
+  downstream inverses and VLAN membership are retained. Native descriptor
+  and kernel-derivation tests pass;
+  validation on a split-GEM OLT is still needed. Refs #306.
+
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each
   odi key, about 70 processes. On the stick it went from 0.36 s to 0.03 s,
