@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- OMCI: deleting a downstream GEM CTP now withdraws its own flow when no
+  surviving CTP or multicast table owns that port. Failed withdrawals keep
+  their ids, and a broadcast selection must be cleared before an id can be
+  freed. Native driver-stub tests cover deletion, sharing and retry; OLT
+  and hardware acceptance remain open. Refs #307.
+
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each
   odi key, about 70 processes. On the stick it went from 0.36 s to 0.03 s,
