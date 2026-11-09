@@ -21,6 +21,11 @@ listed here.
   test container on every run, and failed whenever the mirror timed out.
   The freestanding toolchain image is now pinned at v4, which carries
   strace, and the test installs it only when an image lacks it.
+  `test/apply_test.sh` gave `apply.sh` 2 s to see the stub omcid take the
+  signal and 4 s for the outcome, while the stub ran its handler only after
+  its current one-second sleep, and gave the stub a fixed second to start;
+  the stub now runs its handler at once, the test waits for it to start, and
+  the bounds are generous except in the two cases that test them.
 
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each
