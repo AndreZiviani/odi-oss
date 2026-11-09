@@ -138,6 +138,47 @@ static uint32_t lease;
 static int rows_dirty;
 static uint32_t resync_at;
 
+/* Rows whose delete failed. A delete comes when the last group on a MAC has
+ * gone from the table, so resync(), which walks the table, never reaches
+ * it again: the row would stay in the switch, forwarding a stream nobody
+ * asked for, until something else wrote that MAC (odi-oss #248). They are
+ * kept here and tried again by resync() until the switch takes them; a
+ * retry writes the row instead when a group has come back to the MAC in the
+ * meantime. One entry per group (v6: per IPv6 group), as many as the two
+ * tables hold; past that the row stays until its MAC is written again,
+ * which over-forwards, as a lost change does in apply(). */
+#define PEND_MAX (IGMP_MAX_GROUPS + MLD_MAX_GROUPS)
+struct pend_del {
+	uint16_t vid;
+	uint8_t v6;
+	uint32_t group;          /* IPv4 */
+	uint8_t group6[16];      /* IPv6 */
+};
+static struct pend_del pend[PEND_MAX];
+static int npend;
+
+static int same16(const uint8_t *a, const uint8_t *b)
+{
+	for (int i = 0; i < 16; i++)
+		if (a[i] != b[i])
+			return 0;
+	return 1;
+}
+
+static void pend_add(const struct pend_del *p)
+{
+	for (int i = 0; i < npend; i++)
+		if (pend[i].vid == p->vid && pend[i].v6 == p->v6 &&
+		    (p->v6 ? same16(pend[i].group6, p->group6)
+			   : pend[i].group == p->group))
+			return;
+	if (npend == PEND_MAX) {
+		out("  failed delete not kept (the list is full): the row stays until its MAC is written again\n");
+		return;
+	}
+	pend[npend++] = *p;
+}
+
 static int row_set(const struct igmp_db *db, uint16_t vid, uint32_t group)
 {
 	/* One hardware row per MAC, not per group: groups that alias, or the
@@ -146,9 +187,17 @@ static int row_set(const struct igmp_db *db, uint16_t vid, uint32_t group)
 	 * already in its final state for this batch, so the union is the same
 	 * whichever change of the batch is applied first. */
 	uint32_t u = igmp_db_mac_ports(db, group);
+	int rc;
 
-	return u ? igmp_hw_group_set(vid, group, u | PON_PORTBIT)
-		 : igmp_hw_group_del(vid, group);
+	if (u)
+		return igmp_hw_group_set(vid, group, u | PON_PORTBIT);
+	rc = igmp_hw_group_del(vid, group);
+	if (rc) {
+		struct pend_del p = { .vid = vid, .group = group };
+
+		pend_add(&p);
+	}
+	return rc;
 }
 
 /* Every live group, written again: after the lease is taken, since rows
@@ -156,8 +205,24 @@ static int row_set(const struct igmp_db *db, uint16_t vid, uint32_t group)
  * write. */
 static void resync6(void);
 
+static int row_set6(uint16_t vid, const uint8_t g[16]);
+static int mld_on;
+
 static void resync(const struct igmp_db *db)
 {
+	/* The failed deletes first, taken off the list: one that fails again
+	 * goes back on it through row_set(). */
+	int n = npend;
+
+	npend = 0;
+	for (int i = 0; i < n; i++) {
+		struct pend_del p = pend[i];
+
+		/* With MLD off the lease no longer covers IPv6 rows: dropped. */
+		if (p.v6 ? (mld_on && row_set6(p.vid, p.group6))
+			 : row_set(db, p.vid, p.group))
+			rows_dirty = 1;
+	}
 	for (int i = 0; i < IGMP_MAX_GROUPS; i++)
 		if (db->g[i].in_use && row_set(db, db->g[i].vid, db->g[i].group))
 			rows_dirty = 1;
@@ -305,8 +370,8 @@ static uint32_t learn_until;
 static uint32_t lease_retry;
 /* -d: the PON's drop is wanted at all (IGMP_PON_DROP, svc-igmpd.sh). */
 static int pon_drop;
-/* -6: MLD as well (MLD_SNOOPING, svc-igmpd.sh), its lists and its table. */
-static int mld_on;
+/* -6: MLD as well (MLD_SNOOPING, svc-igmpd.sh), its lists and its table.
+ * Declared above resync(), which needs it. */
 static struct mld_policy pol6;
 static struct mld_db db6;
 
@@ -466,8 +531,20 @@ static int row_set6(uint16_t vid, const uint8_t g[16])
 	uint32_t u = mld_db_mac_ports(&db6, g);
 	uint8_t mac[6];
 
+	int rc;
+
 	mld_group_mac(mac, g);
-	return u ? igmp_hw_mac_set(vid, mac, u | PON_PORTBIT) : igmp_hw_mac_del(vid, mac);
+	if (u)
+		return igmp_hw_mac_set(vid, mac, u | PON_PORTBIT);
+	rc = igmp_hw_mac_del(vid, mac);
+	if (rc) {
+		struct pend_del p = { .vid = vid, .v6 = 1 };
+
+		for (int i = 0; i < 16; i++)
+			p.group6[i] = g[i];
+		pend_add(&p);
+	}
+	return rc;
 }
 
 static void resync6(void)

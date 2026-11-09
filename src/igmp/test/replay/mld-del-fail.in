@@ -1,0 +1,16 @@
+# MLD (igmpd -6): an IPv6 row whose delete fails after its group is done is
+# tried again with the next resync, as an IPv4 one is (expiry-del-fail).
+# The done at 10 ends the membership at 12.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=0
+end
+0 tick
+1 mld1join 1 0 fe80::2 ff3e::8000:1
+10 mld1done 1 0 fe80::2 ff3e::8000:1
+11 hwfail 2
+12 tick
+16 tick
+17 tick
+18 tick

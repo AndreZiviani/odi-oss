@@ -36,6 +36,25 @@ int igmp_hw_enabled(void)
 	return hw_enabled;
 }
 
+/* Replay only (replay.c, `T hwfail N`): the next N row writes or deletes
+ * fail as a busy table engine makes them fail on a stick, so a transcript
+ * can show what the daemon does about it. Never set outside a replay. */
+static int hw_fail;
+
+void igmp_hw_fail_next(int n)
+{
+	hw_fail = n;
+}
+
+static int hw_failed(void)
+{
+	if (hw_fail <= 0)
+		return 0;
+	hw_fail--;
+	out("  failed: -16 (injected)\n");
+	return 1;
+}
+
 /* The entry is keyed on filtering id 0 (SVL), in either lookup mode, and
  * the VID plays no part in the key.
  *
@@ -138,6 +157,8 @@ int igmp_hw_mac_set(uint16_t vid, const uint8_t mac[6], uint32_t ports)
 	int rc;
 
 	show("set", vid, mac, ports);
+	if (hw_failed())
+		return -16;
 	if (!hw_enabled)
 		return 0;
 	if (igmp_mac_entry_mac(&m, vid, mac, ports, 0) != 0) {
@@ -159,6 +180,8 @@ int igmp_hw_mac_del(uint16_t vid, const uint8_t mac[6])
 	int rc;
 
 	show("del", vid, mac, 0);
+	if (hw_failed())
+		return -16;
 	if (!hw_enabled)
 		return 0;
 	/* The member mask is not part of the key, so zero. */

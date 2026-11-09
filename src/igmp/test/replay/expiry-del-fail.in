@@ -1,0 +1,30 @@
+# A row delete that fails after its group expired is tried again (odi-oss
+# #248). The group leaves the table when it expires, so walking the table
+# again would never reach it: the failed delete is kept aside and retried with
+# the next resync, five seconds on while it keeps failing, and the state shows
+# nothing stale once it went through. Membership is 65 s (2 x 30 + 5): the
+# join at 10 expires at 75.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=0
+robustness=2
+query_interval=30
+query_max_response=5
+end
+0 tick
+10 v2join 1 0 192.168.1.10 239.1.1.1
+74 hwfail 2
+75 tick
+79 tick
+80 tick
+81 state
+# The same, but the group comes back before the retry: the retry writes the
+# row with its members instead of deleting it (and the walk of the table writes
+# it once more, the same row). The join at 100 expires at 165.
+100 v2join 1 0 192.168.1.10 239.2.2.2
+164 hwfail 2
+165 tick
+167 v2join 1 0 192.168.1.10 239.2.2.2
+170 tick
+171 state

@@ -10,6 +10,8 @@
 #include "odi_sw_ioctl.h"
 
 void igmp_hw_set_enabled(int on);
+/* Replay only: fail the next n row writes and deletes. */
+void igmp_hw_fail_next(int n);
 int  igmp_hw_enabled(void);
 
 /* Read and print the IPv4 multicast lookup mode once. The entry is keyed

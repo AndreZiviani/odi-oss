@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- IGMP/MLD snooping: a multicast row whose removal from the switch failed
+  after its group expired or left is now tried again. igmpd retried failed
+  writes by walking its group table, which no longer holds a group that is
+  gone, so such a row stayed in the switch, forwarding the stream to the
+  port, until something else wrote that MAC. Failed deletes are kept aside
+  and retried with the next resync, every five seconds while they fail; a
+  group that comes back in the meantime gets its row written instead. The
+  replay mode gains `T hwfail N` to make the next row writes fail, and two
+  transcripts cover it (IPv4 and IPv6). Refs #248.
+
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each
   odi key, about 70 processes. On the stick it went from 0.36 s to 0.03 s,

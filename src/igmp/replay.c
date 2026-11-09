@@ -50,6 +50,8 @@
  *                            the daemon reads it on its next second, as it
  *                            reads the switch's (meter.h)
  *   T meter                  print the meter file igmpd would write
+ *   T hwfail N               the next N row writes or deletes fail (-16, the
+ *                            busy table engine), as on a stick
  *
  * T is whole seconds on the synthetic clock, never backwards. Before every
  * event except the three policy ones the daemon runs its once-a-second step if
@@ -70,6 +72,7 @@
 #include "entry.h"
 #include "mld.h"
 #include "replay.h"
+#include "program.h"
 
 #define MAX_TRANSCRIPT  (96 * 1024)
 #define MAX_WORDS       8
@@ -519,6 +522,12 @@ int igmp_replay(const char *path)
 			igmpd_status_dump(&db);
 		} else if (str_eq(w[1], "meter") && nw == 2) {
 			igmpd_meter_dump(&db);
+		} else if (str_eq(w[1], "hwfail")) {
+			uint32_t n;
+
+			if (nw != 3 || !igmp_parse_num(w[2], &n) || n > 100)
+				return fail(line, "expected: T hwfail N (0 to 100)");
+			igmp_hw_fail_next((int)n);
 		} else if (str_eq(w[1], "ctr")) {
 			uint32_t group, bytes, i;
 

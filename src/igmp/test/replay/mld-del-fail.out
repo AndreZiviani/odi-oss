@@ -1,0 +1,29 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, timed leave, 2/125/1 s, limit 0, 0 allow + 0 static ranges
+policy6: 0 allow + 0 static IPv6 ranges
+snooping lease: copy host IGMP to the CPU, and its MLD  (not written)
+> 1 mld1join 1 0 fe80::2 ff3e::8000:1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:80:00:00:01  MLD v1 report  group ff3e::8000:1  src fe80::2
+  set vid 0 33:33:80:00:00:01 ports 0x5  (not written)
+> 10 mld1done 1 0 fe80::2 ff3e::8000:1
+port 1  untagged  02:00:00:00:00:01 -> 33:33:00:00:00:02  MLD done  group ff3e::8000:1  src fe80::2
+> 11 hwfail 2
+> 12 tick
+  del vid 0 33:33:80:00:00:01 ports 0x0  (not written)
+  failed: -16 (injected)
+  del vid 0 33:33:80:00:00:01 ports 0x0  (not written)
+  failed: -16 (injected)
+> 16 tick
+> 17 tick
+  del vid 0 33:33:80:00:00:01 ports 0x0  (not written)
+> 18 tick
+> end
+joins=0
+denied=0
+groups=0
+# /var/run/odi-mcast6.state
+joins=1
+denied=0
+groups=0
+status 0
