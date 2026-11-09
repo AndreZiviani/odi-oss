@@ -148,6 +148,33 @@ t "apply network prints the plan first" "^network.sh addr -n" "$(sed -n 1p "$T/n
 t "then applies it, detached" "^network.sh addr$" "$(sed -n 2p "$T/netcalls")"
 t "and returns at once" "applying in one second" "$out"
 
+# A disabled service has no daemon pid. All anonymous placeholders must
+# be woken, rather than selecting an unrelated first match. No real pid
+# is signalled: the shell builtin is replaced in the child shell.
+respawn_run() {
+    env PATH="$T/bin:$PATH" APPLY_SCRIPT="$A" APPLY_ACTION="${1:-igmp}" bash -c '
+        pidof() { printf "%s\n" "${DAEMON_PIDS:-}"; }
+        pgrep() { printf "%s\n" "${OFF_PIDS:-}"; }
+        kill() {
+            if [ "$1" = -0 ]; then return "${KILL_PROBE_RC:-0}"; fi
+            printf "signal %s\n" "$*"; return "${KILL_RC:-0}";
+        }
+        . "$APPLY_SCRIPT" "$APPLY_ACTION"
+'
+}
+out=$(OFF_PIDS=$'1111\n2222' respawn_run)
+t "disabled apply wakes both anonymous placeholders" "signal 1111.*2222" "$(echo "$out" | tr '\n' ' ')"
+t "disabled apply reports placeholders honestly" "placeholders" "$out"
+out=$(DAEMON_PIDS='3333 4444' OFF_PIDS=1111 respawn_run)
+t "active apply signals every daemon pid separately" "signal 3333.*signal 4444" "$(echo "$out" | tr '\n' ' ')"
+t "active apply leaves placeholders alone" "^0$" "$(echo "$out" | grep -c 'signal 1111')"
+out=$(OFF_PIDS=2222 KILL_RC=1 respawn_run); rc=$?
+t "failed placeholder signal fails apply" "^1$" "$rc"
+out=$(OFF_PIDS=2222 KILL_RC=1 KILL_PROBE_RC=1 respawn_run); rc=$?
+t "a placeholder that exited before the signal is harmless" "^0$" "$rc"
+out=$(respawn_run)
+t "no matching process is reported" "nothing to restart" "$out"
+
 t "an unknown verb is refused" "usage" "$(run bogus)"
 
 echo

@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Apply: when a disabled service has no daemon pid, wake all anonymous
+  service placeholders so its own init entry rereads the setting. Signal
+  errors are reported as failures. Host-tested with two placeholders;
+  activation on a stick remains untested. Refs #309.
+
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each
   odi key, about 70 processes. On the stick it went from 0.36 s to 0.03 s,

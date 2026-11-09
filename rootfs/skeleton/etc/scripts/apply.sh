@@ -79,6 +79,9 @@
 #                        (svc-ntpd.sh's own off-flag-shaped gate on the key
 #                        being present at all).
 #
+#     syslog, igmp and ntp exit 1 when a process they had to signal is
+#     still alive and could not be signalled.
+#
 # Why a signal and not a restart. omcid reads the store at start and builds
 # connections only when the OLT provisions them, so a changed store needs
 # either a new process with an empty MIB (which the OLT then has to be forced
@@ -186,30 +189,34 @@ omci() {
 	esac
 }
 
-# restart_respawn <name>: kill whatever is running under this daemon's
-# respawn entry (respawn.sh execs the daemon itself in place, so its pid IS
-# what pidof finds -- same as omci() above using `pidof omcid`) and let
-# init's own respawn bring it back, re-reading the store: every svc-*.sh
-# checks it fresh on every start, off flag and setting both. Also the way a
-# daemon that was off (or, for ntpd, unconfigured) starts for the first
-# time: respawn-off.sh's own pid does not match $name, so this just reports
-# nothing was running, and the next scheduled respawn of that placeholder
-# (it loops in one-hour sleeps, so this does not START it sooner -- restart
-# the respawn-off.sh pid itself, found the same way, when the one-hour wait
-# would otherwise delay it) is what picks up the change. To take effect at
-# once either way, this restarts whichever of the two is currently running.
+# restart_respawn <name>: kill whatever runs under the respawn entry of
+# this daemon and let init bring it back, rereading the store.
+# respawn.sh execs each daemon in place, so pidof names its init entry.
+# Disabled services share anonymous respawn-off.sh placeholders. Wake all
+# of them on the fallback path, as services start does: each wrapper reads
+# its own enable flag again, and unrelated disabled services stay disabled.
+# Returns 1 when a process that is still alive could not be signalled.
 restart_respawn() {
 	name=$1
-	pid=$(pidof "$name" 2>/dev/null | head -n 1)
-	if [ -z "$pid" ]; then
-		pid=$(pgrep -f "/etc/scripts/respawn-off.sh" 2>/dev/null | head -n 1)
+	pids=$(pidof "$name" 2>/dev/null)
+	what="$name"
+	if [ -z "$pids" ]; then
+		pids=$(pgrep -f "/etc/scripts/respawn-off.sh" 2>/dev/null)
+		what="service placeholders"
 	fi
-	if [ -z "$pid" ]; then
+	if [ -z "$pids" ]; then
 		say "$name: no running process found, nothing to restart"
 		return 0
 	fi
-	kill "$pid" 2>/dev/null
-	say "$name (pid $pid) restarted; init will bring it back with the new setting"
+	failed=0
+	for pid in $pids; do
+		if ! kill "$pid" 2>/dev/null && kill -0 "$pid" 2>/dev/null; then
+			say "$what: could not signal pid $pid"
+			failed=1
+		fi
+	done
+	[ "$failed" = 0 ] || return 1
+	say "$what restarted; init will reread the service settings"
 }
 
 syslog() {
@@ -231,9 +238,9 @@ sfp() {
 case "${1:-}" in
 network) network ;;
 omci)    shift; omci "$@" || exit 1 ;;
-syslog)  syslog ;;
-ntp)     ntp ;;
-igmp)    igmp ;;
+syslog)  syslog || exit 1 ;;
+ntp)     ntp || exit 1 ;;
+igmp)    igmp || exit 1 ;;
 sfp)     sfp || exit 1 ;;
 *)       echo "usage: $0 network|omci [seconds]|syslog|ntp|igmp|sfp" >&2; exit 1 ;;
 esac
