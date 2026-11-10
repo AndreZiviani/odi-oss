@@ -10,9 +10,11 @@
 # a directory of plain files. strace records what it does; the trace keeps
 # the commands it executes (with their arguments) and every write it makes
 # under /proc, in process-tree order (test/rcs_trace_canon.py has why that
-# order is stable). Three flag sets: none, breadcrumbs.on and confirm-arp.
+# order is stable). Four flag sets: none, breadcrumbs.on, confirm-arp holding an
+# address and confirm-arp empty (the last two also run rcS.pon, where the
+# watchdog confirmation and so the ARP wait happen).
 #
-# A change to rcS that is meant to leave the boot alone must leave all three
+# A change to rcS that is meant to leave the boot alone must leave all of them
 # identical; one that is meant to change it shows exactly what moved.
 #
 #   BUSYBOX=out/busybox bash test/rcs_trace_test.sh      compare
@@ -28,7 +30,7 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 BUSYBOX=${BUSYBOX:-out/busybox}
 FIX=test/fixtures
-SETS="none breadcrumbs confirm-arp"
+SETS="none breadcrumbs confirm-arp confirm-arp-empty"
 
 [ -f "$BUSYBOX" ] || { echo "no busybox at $BUSYBOX -- make busybox, or set BUSYBOX" >&2; exit 1; }
 # The freestanding toolchain image (toolchain/images.env), not a Dockerfile

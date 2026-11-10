@@ -16,7 +16,9 @@ listed here.
   `--force` (or `-f`) is given; `breadcrumbs.on` only gets a one-line note.
   The ssh login banner names both files while they exist, committed slot or
   not (the confirm-arp address, or "no address: has no effect"). Host tests:
-  `test/rcs_dev_test.sh`, `test/slot_state_test.sh`, `src/nv/test`. Refs #334.
+  `test/rcs_dev_test.sh`, `test/slot_state_test.sh`, `src/nv/test`; the rcS
+  trace has a confirm-arp scenario with an address and one with an empty file,
+  both also running rcS.pon, where the confirmation happens. Refs #334.
 - Docs: new `docs/QUALIFICATION.md`, linked from the README's "Status and
   limitations" and "Documentation". It records, per board, laser driver, host,
   host SerDes mode and OLT line (named ISP1 and ISP2, never by make) and per
