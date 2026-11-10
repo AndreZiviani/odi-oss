@@ -14,7 +14,8 @@ listed here.
   `gpon_pon_id_reach_extender` from the PON-ID line (#321). The asset
   hashes in src/release-sha256.txt are the release SHA256SUMS; confd and
   metricsd were matched byte for byte by local builds of the tags, the
-  assets tarball by its contents.
+  assets tarball by its contents. `test/sbom_test.sh` takes the pinned
+  metricsd tag from `src/fetch-releases.sh` instead of naming one.
 
 - `/etc/scripts/flash set` no longer installs a truncated `odi.conf` or
   XML store when a write fails, for example on a full config partition.

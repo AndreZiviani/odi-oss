@@ -106,7 +106,10 @@ ok "strict mode refuses a missing artifact" 1 env SBOM_STRICT=1 $G v9.9.9 "$T/re
 ok "non-strict mode warns and goes on" 0 $G v9.9.9 "$T/releases.env"
 ok "a SBOM with a hole does not pass the check" 1 sh -c "$G v9.9.9 $T/releases.env > $T/hole.json && $V $T/hole.json"
 cp "$T/busybox" "$T/pkg/ip"
-printf 'METRICSD_TAG=v1.8.0\nCONFD_TAG=\n' > "$T/pinned.env"
+# The metricsd tag the tree pins now, so the check follows every pin bump.
+pinned=$(sed -n 's/^METRICSD_TAG=\${METRICSD_TAG:-\(v[^}]*\)}$/\1/p' src/fetch-releases.sh)
+[ -n "$pinned" ] || { echo "sbom_test: no METRICSD_TAG pin in src/fetch-releases.sh"; exit 1; }
+printf 'METRICSD_TAG=%s\nCONFD_TAG=\n' "$pinned" > "$T/pinned.env"
 ok "a metricsd that is not the committed pin fails" 1 $G v9.9.9 "$T/pinned.env"
 
 echo "sbom_test: $pass ok, $fail failed"
