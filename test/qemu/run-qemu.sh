@@ -87,11 +87,22 @@ fi
 echo "  ssh key auth ok"
 
 sshx() { ssh "${SSH_OPTS[@]}" root@127.0.0.1 "$@"; }
-# What an interactive login prints: dropbear shows /etc/motd only for a
-# login shell on a pty, never for `ssh host cmd`, so this asks for a shell
-# and feeds it exit.
+# login_banner <text>: what an interactive login prints. dropbear shows
+# /etc/motd only for a login shell on a pty, never for `ssh host cmd`, so this
+# asks for a shell and feeds it exit -- but only once <text> is back, or after
+# 20 s. dropbear closes the pty as soon as the input of the client ends, and
+# whatever the session had not passed back yet, the motd included, goes with
+# it: an input that ends right after the exit races the motd.
 login_banner() {
-	printf 'exit\n' | timeout 20 ssh -tt "${SSH_OPTS[@]}" root@127.0.0.1 2>/dev/null | tr -d '\r' || true
+	: > "$WORK/login.out"
+	{
+		for _ in $(seq 1 200); do
+			grep -qF -- "$1" "$WORK/login.out" && break
+			sleep 0.1
+		done
+		printf 'exit\n'
+	} | timeout 30 ssh -tt "${SSH_OPTS[@]}" root@127.0.0.1 > "$WORK/login.out" 2>/dev/null || true
+	tr -d '\r' < "$WORK/login.out"
 }
 
 say "scenario: slot-state.sh, the inittab once entry, wrote the slot state at boot"
@@ -108,7 +119,7 @@ done
 [ "$ok" = 1 ] || { sshx 'cat /var/run/odi-slot' >&2 || true; fail "slot-state.sh wrote no /var/run/odi-slot with uncommitted= at boot"; }
 sshx 'grep -qx "running=" /var/run/odi-slot' || fail "odi-slot names a running slot qemu does not have"
 sshx 'grep -q "SLOT STATE UNKNOWN" /etc/motd' || fail "/etc/motd does not carry the unknown-state notice"
-banner=$(login_banner)
+banner=$(login_banner "SLOT STATE UNKNOWN")
 echo "$banner" | grep -q "SLOT STATE UNKNOWN" || fail "dropbear did not print /etc/motd at an interactive login"
 echo "  /var/run/odi-slot written (state unknown under qemu), motd printed at login"
 
@@ -428,7 +439,7 @@ NV=$A/nv PROC_CMDLINE=$A/cmdline PROC_MTD=$A/mtd /etc/scripts/slot-state.sh
 GUEST
 sshx 'grep -qx "uncommitted=1" /var/run/odi-slot && grep -qx "running=1" /var/run/odi-slot && grep -qx "next_boot=0" /var/run/odi-slot' || \
 	{ sshx 'cat /var/run/odi-slot' >&2 || true; fail "odi-slot does not record the trial"; }
-banner=$(login_banner)
+banner=$(login_banner "TRIAL BOOT: running slot 1")
 echo "$banner" | grep -q "TRIAL BOOT: running slot 1, which is not committed (sw_commit=0 in both copies)" || \
 	fail "the login banner does not carry the TRIAL BOOT notice (got: $banner)"
 sshx 'logread | grep -q "slot-state: TRIAL BOOT: running slot 1"' || fail "the TRIAL BOOT notice did not reach syslog"

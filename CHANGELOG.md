@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Tests: `make test-qemu` could fail with "dropbear did not print
+  /etc/motd at an interactive login" now and then. The check typed `exit`
+  into the login shell and closed its input at once; dropbear closes the
+  session as soon as the client input ends, and a motd it had not passed
+  back yet was dropped (against the same dropbear on a host, 158 of 200
+  such logins came back without it). The check now keeps the input open
+  until the motd line is back, up to 20 s, and only then types `exit`
+  (all 397 logins that connected came back with it). The TRIAL BOOT
+  banner check goes the same way. Nothing changes on the stick.
+
 - Docs: the Luleey LL-XS2510 is listed as reported working, on one user
   report, with `HOST_SERDES=2500basex` set before the first boot. The
   README now records the first hardware runs of the host SerDes mode
