@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Docs: the Luleey LL-XS2510 is listed as reported working, on one user
+  report, with `HOST_SERDES=2500basex` set before the first boot. The
+  README now records the first hardware runs of the host SerDes mode
+  (`2500basex` linked, `hisgmii` passed no frames on that host) and of
+  the trial guard (a trial whose host link passed no frames went back to
+  stock by itself). Refs #321.
+
 - GPON: the driver decodes the PON-ID message some OLTs send (G.984.3
   Annex C), which it used to log once as unexpected.
   `/proc/odi_gpon/status` has a `pon_id` line with the ODN class, whether
