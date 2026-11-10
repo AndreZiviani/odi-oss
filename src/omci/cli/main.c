@@ -359,7 +359,7 @@ static int want_secrets;
 static int native_run(int argc, char **argv, int first, long q)
 {
 	uint32_t arglen = 0, nargs = 0;
-	long myq;
+	long myq, rc;
 
 	/* IPC_PRIVATE: a queue with no key, so no two clients can collide and
 	 * there is no key space to keep tidy. */
@@ -407,8 +407,16 @@ static int native_run(int argc, char **argv, int first, long q)
 	nreq.version  = OMCLI_VERSION;
 	nreq.replyQid = (uint32_t)myq;
 	nreq.nargs    = nargs;
-	if (mq_snd_flags(q, &nreq, OMCLI_REQ_LEN(arglen), 0) < 0) {
-		out("% send failed\n");
+	/* Bounded like every other send here (mq_snd_bounded, omci_msgq.h): a
+	 * queue that stays full is an omcid that is not reading it, and a
+	 * client that waited for it with no bound would hold its reply queue
+	 * until whoever ran it gave up and killed it, which leaks the queue. */
+	rc = mq_snd_bounded(q, &nreq, OMCLI_REQ_LEN(arglen));
+	if (rc < 0) {
+		if (rc == -MQ_EAGAIN)
+			out("% omcid did not take the request: its queue stayed full for 0.5 s\n");
+		else
+			out("% send failed\n");
 		mq_remove(myq);
 		cleanup_q = -1;
 		return 1;

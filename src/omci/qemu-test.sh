@@ -1213,5 +1213,44 @@ check "-w 1 exits by itself after five idle seconds, with status 0" "$got" "0"
 got=$(grep -c '^done after 0 frames$' /tmp/omcid5.log)
 check "and says it is done" "$got" "1"
 
+# omcli bounds its send. An omcid that stops reading its queue (SIGSTOP here)
+# lets the queue fill with requests; one more is refused within the bound of
+# the send, with a message and status 1, instead of waiting for the daemon.
+# The fillers carry a 400-byte argument so the queue fills with a few dozen of
+# them; their sends go in at once, and they wait for answers that come once the
+# daemon runs again.
+: > /tmp/omcid6.log
+$Q respond/build/omcid -d -c "$CAPS" > /tmp/omcid6.log 2>&1 &
+pid=$!
+omcid_up /tmp/omcid6.log
+kill -STOP "$pid"
+big=$(printf '%0400d' 0)
+qbytes=$(cat /proc/sys/kernel/msgmnb)
+fillers=""
+i=0
+while [ "$i" -lt $((qbytes / 400 + 4)) ]; do
+	$Q cli/build/omcli help "$big" > /dev/null 2>&1 &
+	fillers="$fillers $!"
+	i=$((i + 1))
+done
+# The queue is full when its byte count leaves no room for one more filler
+# (/proc/sysvipc/msg: key in decimal, cbytes in the fourth column).
+full=0
+for _ in $(seq 1 100); do
+	used=$(awk -v k=$((0x9601)) '$1 == k { print $4 }' /proc/sysvipc/msg)
+	[ -n "$used" ] && [ $((used + 450)) -gt "$qbytes" ] && { full=1; break; }
+	sleep 0.1
+done
+check "the queue of a stopped omcid fills up" "$full" "1"
+$Q cli/build/omcli help "$big" > /tmp/omcli-full.txt 2>&1 &
+cpid=$!
+wait_bounded "$cpid" 10; got=$?
+check "one more request: omcli gives up, status 1" "$got" "1"
+got=$(cat /tmp/omcli-full.txt)
+check "and says why" "$got" "% omcid did not take the request: its queue stayed full for 0.5 s"
+kill -CONT "$pid"
+for f in $fillers; do wait_bounded "$f" 30; done
+omcid_stop "$pid"
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 suite_exit

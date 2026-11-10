@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- omcli: a request to omcid gives up after 0.5 s when omcid is not taking
+  it, with "omcid did not take the request: its queue stayed full for
+  0.5 s" and status 1. Its own commands (`omcli state`, `omcli mib`,
+  `omcli provision`, which the exporter runs as `omcicli provision`) used
+  to wait with no bound for room in the queue of an omcid that had
+  stopped reading it; the exporter SIGKILLs omcicli at 2 s, which left
+  the reply queue of omcli behind for good, and the kernel has few queues
+  to spare. Now omcli ends first and removes its queue. The stock-format
+  commands and `--inject` were already bounded (0.5 s, and 30 s for a
+  frame). Tested in `qemu-test.sh` against an omcid stopped with SIGSTOP.
+
 - Build: `toolchain/image.sh` bounds its docker calls. A pull of a
   toolchain image gets 120 s (`PULL_TIMEOUT`; on GitHub runners these
   pulls take 2 to 8 s) and is tried up to 3 times (`PULL_TRIES`), 10 s
