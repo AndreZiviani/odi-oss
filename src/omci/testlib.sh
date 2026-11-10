@@ -102,10 +102,19 @@ tci_of() {
 # WAIT_S is the bound, in seconds, of the waits inject_wait and settled make
 # (default 30); testlib-test.sh shortens it to test the failure paths.
 #
-# inject_wait <log> <frame>: inject one frame and wait for omcid's answer to
-# it. The queue is first in, first out and omcid answers in order, so when the
-# answer is in the log every frame before it has been handled too. Every frame
-# that asks for an answer (the AR bit, 0x40, of the message type) gets one.
+# inject_wait <log> <frame>: inject one frame and return once omcid has
+# handled it, all of it. The queue is first in, first out and omcid answers in
+# order, so when the answer is in the log every frame before it has been
+# handled too. Every frame that asks for an answer (the AR bit, 0x40, of the
+# message type) gets one.
+#
+# The answer is not the end of the frame: omcid sends it, then applies the
+# change and logs what it did ("-> created", "set slot", "del slot", the
+# refusals of a handler), so a check that greps for those as soon as the
+# answer shows can run ahead of them. An `omcli help` after the answer closes
+# that gap. omcid has one thread and serves its omcli queue only between two
+# frames, so the reply means the frame is done; the reply goes to omcli, and
+# nothing of it reaches the log.
 inject_wait() {
 	_iw_tci=$(tci_of "$2")
 	_iw_n=$(grep -c -- "^-> $_iw_tci" "$1" 2>/dev/null || true)
@@ -114,7 +123,12 @@ inject_wait() {
 		fail=$((fail + 1))
 		return 1
 	fi
-	wait_for "$1" "^-> $_iw_tci" "${WAIT_S:-30}" $((${_iw_n:-0} + 1))
+	wait_for "$1" "^-> $_iw_tci" "${WAIT_S:-30}" $((${_iw_n:-0} + 1)) || return 1
+	if ! _iw_out=$($Q cli/build/omcli help 2>&1); then
+		echo "FAIL  omcid answered $_iw_tci, then not omcli: $_iw_out"
+		fail=$((fail + 1))
+		return 1
+	fi
 }
 
 # sync_send <log>: inject an inert Get of ONU-G (class 256, attribute 1) and

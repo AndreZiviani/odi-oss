@@ -173,16 +173,24 @@ static inline long mq_snd_flags(long qid, const void *m, unsigned long n,
 #define MQ_SEND_RETRIES   100
 #define MQ_SEND_RETRY_NS  (5 * 1000 * 1000)   /* 5 ms; 500 ms total */
 
-static inline long mq_send(long qid, const struct omci_msg *m)
+/* mq_snd_bounded() is that send for a message of any length (the omcli
+ * protocol requests are variable length); mq_send() is it for the fixed 260
+ * bytes of the vendor protocol. */
+static inline long mq_snd_bounded(long qid, const void *m, unsigned long n)
 {
 	for (int tries = 0; tries < MQ_SEND_RETRIES; tries++) {
-		long rc = mq_snd_flags(qid, m, OMCI_MQ_LEN - 4, IPC_NOWAIT);
+		long rc = mq_snd_flags(qid, m, n, IPC_NOWAIT);
 
-		if (rc >= 0 || rc != -MQ_EAGAIN)
+		if (rc != -MQ_EAGAIN)
 			return rc;
 		sys_nanosleep(0, MQ_SEND_RETRY_NS);
 	}
 	return -MQ_EAGAIN;
+}
+
+static inline long mq_send(long qid, const struct omci_msg *m)
+{
+	return mq_snd_bounded(qid, m, OMCI_MQ_LEN - 4);
 }
 
 static inline long mq_rcv_flags(long qid, void *m, unsigned long n,

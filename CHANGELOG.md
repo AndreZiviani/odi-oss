@@ -5,6 +5,49 @@ listed here.
 
 ## Unreleased
 
+- omcli: a request to omcid gives up after 0.5 s when omcid is not taking
+  it, with "omcid did not take the request: its queue stayed full for
+  0.5 s" and status 1. Its own commands (`omcli state`, `omcli mib`,
+  `omcli provision`, which the exporter runs as `omcicli provision`) used
+  to wait with no bound for room in the queue of an omcid that had
+  stopped reading it; the exporter SIGKILLs omcicli at 2 s, which left
+  the reply queue of omcli behind for good, and the kernel has few queues
+  to spare. Now omcli ends first and removes its queue. The stock-format
+  commands and `--inject` were already bounded (0.5 s, and 30 s for a
+  frame). Tested in `qemu-test.sh` against an omcid stopped with SIGSTOP.
+
+- Build: `toolchain/image.sh` bounds its docker calls. A pull of a
+  toolchain image gets 120 s (`PULL_TIMEOUT`; on GitHub runners these
+  pulls take 2 to 8 s) and is tried up to 3 times (`PULL_TRIES`), 10 s
+  apart (`PULL_PAUSE`), so a registry error no longer fails a CI job at
+  once, and a pull or a local image lookup (30 s) that hangs fails with a
+  message instead of holding the job until its own time limit. On a host
+  without `timeout` (stock macOS) the calls run unbounded, as before.
+  `test/toolchain_image_test.sh`, in `make test-host`, checks each case
+  against a stub docker.
+
+- Tests: the OMCI suites could check a line omcid had not logged yet.
+  `inject_wait` returned as soon as the answer to a frame was in the log,
+  but omcid answers first and then applies the change and logs what it
+  did (`-> created`, the rate limiter slots, a refused 802.1p mapper), so
+  a check right after it could run ahead of those lines; `qemu-test.sh`
+  failed "the row is stored" that way. Injecting Creates and checking at
+  once missed the line 9 times in 200 on a loaded machine. `inject_wait`
+  now also makes an `omcli help` round trip after the answer: omcid serves
+  omcli only between two frames, so the reply means the frame is done
+  (0 misses in 200). It costs about 13 ms per frame. `qemu-test.sh`, 16
+  runs side by side: 3 failures in 128 runs before, none in 128 after.
+
+- Tests: `make test-qemu` could fail with "dropbear did not print
+  /etc/motd at an interactive login" now and then. The check typed `exit`
+  into the login shell and closed its input at once; dropbear closes the
+  session as soon as the client input ends, and a motd it had not passed
+  back yet was dropped (against the same dropbear on a host, 158 of 200
+  such logins came back without it). The check now keeps the input open
+  until the motd line is back, up to 20 s, and only then types `exit`
+  (all 397 logins that connected came back with it). The TRIAL BOOT
+  banner check goes the same way. Nothing changes on the stick.
+
 - `/etc/scripts/flash set` no longer installs a truncated `odi.conf` or
   XML store when a write fails, for example on a full config partition.
   The grep and printf that build the new `odi.conf` are checked on their
