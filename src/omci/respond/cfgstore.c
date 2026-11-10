@@ -555,6 +555,7 @@ static int cfg_num(const char *path, const char *key, int missing)
 #define VLAN_MANU_MODE_TAG    1
 
 static void fwdop_load(const char *cs);
+static int eapol_load(void);
 
 void cfg_load_vlan_from(const char *cs)
 {
@@ -569,6 +570,7 @@ void cfg_load_vlan_from(const char *cs)
 		&& vlanCfg.mode == VLAN_MANU_MODE_TAG
 		&& vlanCfg.vid >= 0 && pri >= 0;
 	fwdop_load(cs);
+	vlanCfg.eapol = (uint8_t)eapol_load();
 	vlanCfg.loaded = 1;
 }
 
@@ -595,14 +597,25 @@ int cfg_olt_tagging(void)
 /* VLAN_EAPOL_UNTAGGED in CFG_ODI_PATH, odi-only: 1 lets 802.1X EAPOL frames
  * (EtherType 0x888e) cross the stick untagged while it adds the manual tag to
  * everything else. Anything else, or absent, is off, and then no rule is built
- * that differs from the manual tag alone. Read at every rebuild, so a change
- * is live after `apply.sh omci`. */
-int cfg_eapol_untagged(void)
+ * that differs from the manual tag alone. Read with the VLAN keys
+ * (cfg_load_vlan_from()) and held in vlanCfg with them, so a rebuild the OLT
+ * triggers keeps the value omcid runs with; an edited file takes effect on
+ * the reload (SIGHUP, `apply.sh omci`), which sees the change in
+ * cfg_snap_diff() and puts the old value back with the rest when it cannot
+ * re-register. */
+static int eapol_load(void)
 {
 	char v[4];
 
 	return cfg_odi_get(CFG_ODI_PATH, "VLAN_EAPOL_UNTAGGED", v, sizeof v) == 1 &&
 	       v[0] == '1';
+}
+
+int cfg_eapol_untagged(void)
+{
+	if (!vlanCfg.loaded)
+		cfg_load_vlan();
+	return vlanCfg.eapol;
 }
 
 void cfg_load_vlan(void)
@@ -641,7 +654,7 @@ void cfg_show_vlan(void)
 	for (int k = 0; k < vlanCfg.nfwdop; k++)
 		out_fmt("fwdop       84/%04x built as 0x%02x (RTK_DEVINFO_SPECVER)\n",
 			(long)vlanCfg.fwdop[k].inst, (long)vlanCfg.fwdop[k].code);
-	if (cfg_eapol_untagged())
+	if (vlanCfg.eapol)
 		out(vlanCfg.manual ?
 		    "eapol       untagged both ways (VLAN_EAPOL_UNTAGGED)\n" :
 		    "eapol       VLAN_EAPOL_UNTAGGED set, no effect without the manual tag\n");
@@ -1349,7 +1362,6 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->pots_ports = pots_ports;
 	s->pots_slot_key = pots_slot_key;
 	s->pots_slot = pots_slot;
-	s->eapol_untagged = cfg_eapol_untagged();
 }
 
 void cfg_snap_restore(const struct cfg_snap *s)
@@ -1447,7 +1459,7 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		}
 	if ((o->custom_mcast ^ n->custom_mcast) & CUSTOM_MCAST_DS_UNTAGGED)
 		m |= CFGD_CUSTOM_MCAST;
-	if (o->eapol_untagged != n->eapol_untagged)
+	if (o->vlan.eapol != n->vlan.eapol)
 		m |= CFGD_EAPOL;
 	if (o->vlan.nfwdop != n->vlan.nfwdop)
 		m |= CFGD_FWDOP;

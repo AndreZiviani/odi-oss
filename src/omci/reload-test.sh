@@ -258,6 +258,61 @@ check "unchanged: no driver verb" "0" "$(wc -c < "$INITLOG" | tr -d ' ')"
 check "unchanged: status done none" "done none ok" "$(st state) $(st changed) $(st result)"
 stop_omcid
 
+# ------------------------------------------------ VLAN_EAPOL_UNTAGGED, latched
+# The key is held with the VLAN keys: an edit of odi.conf changes nothing
+# until the reload, even when the OLT makes omcid rebuild before it (here the
+# session sent again), and the reload then sees the change and rebuilds.
+clean_state
+store 1 10 0
+log=/tmp/rl-eapol.log
+start_omcid "$log" -g /tmp/rl-gpon-isp2
+inject isp2
+settle "$log" 1
+rules_last "$log" > /tmp/rl-eapol-off.txt
+printf 'VLAN_EAPOL_UNTAGGED=1\n' > "$ODI"
+inject isp2
+settled "$log"
+rules_last "$log" > /tmp/rl-eapol-edited.txt
+if cmp -s /tmp/rl-eapol-off.txt /tmp/rl-eapol-edited.txt; then
+	ok "EAPOL key set, no reload: a rebuild by the OLT keeps the rules without it"
+else
+	bad "EAPOL key set, no reload: a rebuild by the OLT changed the rules"
+	diff /tmp/rl-eapol-off.txt /tmp/rl-eapol-edited.txt | head -10
+fi
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 15 || bad "EAPOL key set: the reload did not finish"
+check_grep "EAPOL key set: the reload sees it" \
+	"event=reload changed=vlan action=rebuild keys=VLAN_EAPOL_UNTAGGED\$" "$log"
+rules_in_place "$log" > /tmp/rl-eapol-on.txt
+check "EAPOL key set: the reload adds the three EAPOL rules" \
+	"$(( $(wc -l < /tmp/rl-eapol-off.txt) + 3 ))" "$(wc -l < /tmp/rl-eapol-on.txt | tr -d ' ')"
+printf 'VLAN_EAPOL_UNTAGGED=0\n' > "$ODI"
+inject isp2
+settled "$log"
+rules_last "$log" > /tmp/rl-eapol-edited.txt
+if cmp -s /tmp/rl-eapol-on.txt /tmp/rl-eapol-edited.txt; then
+	ok "EAPOL key cleared, no reload: a rebuild by the OLT keeps the EAPOL rules"
+else
+	bad "EAPOL key cleared, no reload: a rebuild by the OLT changed the rules"
+	diff /tmp/rl-eapol-on.txt /tmp/rl-eapol-edited.txt | head -10
+fi
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 15 || bad "EAPOL key cleared: the reload did not finish"
+check "EAPOL key cleared: the reload sees it" \
+	"event=reload changed=vlan action=rebuild keys=VLAN_EAPOL_UNTAGGED" \
+	"$(grep 'event=reload ' "$log" | tail -n 1)"
+rules_last "$log" > /tmp/rl-eapol-back.txt
+if cmp -s /tmp/rl-eapol-off.txt /tmp/rl-eapol-back.txt; then
+	ok "EAPOL key cleared: the rules are the ones without it, byte for byte"
+else
+	bad "EAPOL key cleared: the rules differ from the ones without it"
+	diff /tmp/rl-eapol-off.txt /tmp/rl-eapol-back.txt | head -10
+fi
+stop_omcid
+rm -f "$ODI"
+
 # ------------------------------------------------ 2. identity: re-register
 clean_state
 store 1 11 0 "$(val GPON_PLOAM_PASSWD 3132333435)
@@ -372,6 +427,9 @@ old_id=$(st id)
 store 1 11 0 "$(val LOID_OLD user2)
 $(val LOID user2)
 "
+# An EAPOL edit with it: the failed re-registration puts the old value back
+# with the rest, so the retry still names it.
+printf 'VLAN_EAPOL_UNTAGGED=1\n' > "$ODI"
 kill -HUP "$pid"
 wait_done "$old_id" 10 || bad "verb failure: no outcome"
 check "verb failure: result failed" "done failed" "$(st state) $(st result)"
@@ -382,6 +440,9 @@ kill -HUP "$pid"
 wait_done "$old_id" 10 || bad "verb failure: no outcome on the retry"
 check "verb failure: the next SIGHUP still sees the change and tries again" "identity failed" \
 	"$(st changed) $(st result)"
+check "verb failure: and still names the EAPOL key" \
+	"event=reload changed=identity action=reregister keys=LOID,VLAN_EAPOL_UNTAGGED" \
+	"$(grep 'event=reload ' "$log" | tail -n 1)"
 stop_omcid
 
 # ------------------------------------------------ 3. which key, which class
