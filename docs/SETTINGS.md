@@ -626,7 +626,10 @@ speaks. `HOST_SERDES` picks another:
 - `hisgmii`: HiSGMII, the MAC forced to 1000 Mb/s, the 1000BASE-X PCS
   powered down and the port forced. This is the mode the stock firmware
   calls `LAN_SDS_MODE` 4 ("2500Mbps HiSGMII PHY"); it is not a 1G mode on
-  the wire. Tested by its reporter against a media converter only.
+  the wire. Tested by its reporter against a media converter. On a Luleey
+  LL-XS2510 against a 2.5G router port (a UniFi gateway whose SFP+ port a
+  third-party tweak runs at 2.5G) it synced but passed no frames, where
+  `2500basex` linked.
 
 **What the host reads from the module.** The SFP's own EEPROM page the
 host reads (A0h, fixed memory) advertises the module as 1000BASE-LX at a

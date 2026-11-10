@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Docs: the Luleey LL-XS2510 is listed as reported working, on one user
+  report, with `HOST_SERDES=2500basex` set before the first boot. The
+  README now records the first hardware runs of the host SerDes mode
+  (`2500basex` linked, `hisgmii` passed no frames on that host) and of
+  the trial guard (a trial whose host link passed no frames went back to
+  stock by itself). Refs #321.
+
 - `/proc/odi_gpon/counters` now also has the downstream superframe count
   and FEC bit of the sample its totals come from, as `ctr_ds_superframe`
   and `ctr_fec_now ds`. A reader that works out a share of the downstream
