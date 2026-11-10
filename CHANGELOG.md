@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- OMCI: deleting a downstream GEM CTP now withdraws its own flow when no
+  surviving CTP or multicast table owns that port, so replacing CTPs on
+  new GEM ports no longer uses up the 64 flow slots. Only a downstream or
+  bidirectional CTP counts as the owner of a downstream flow: the port of
+  an upstream-only CTP can be an extra multicast port, and a CTP that is
+  Set to upstream-only gives its downstream flow back. A withdrawal the
+  driver refuses keeps the slot, a broadcast selection is cleared before
+  its flow is freed, and deleting the CTP that holds the broadcast flow
+  moves it to a surviving one. Not run against an OLT. Refs #307.
+
 - Firmware: `fwu_starter.sh` takes a file lock before it touches the
   shared extraction directory, in both modes, and the flasher inherits it,
   so the lock lasts until the write ends even if the starter is killed. A

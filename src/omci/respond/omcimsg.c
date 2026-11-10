@@ -1026,6 +1026,8 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * the driver at all. */
 		apply_delete(c, inst);
 		mib_del(cls, inst);
+		if (cls == OMCI_ME_GEM_PORT_CTP)
+			bc_gem_update(); /* only surviving CTPs may be selected */
 		pm_delete(cls, inst);
 		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 			mbpcd_tables_del(inst);

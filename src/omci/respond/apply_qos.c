@@ -1340,6 +1340,15 @@ static void ds_flow_withdraw(int id)
 	struct omci_gemflow f;
 	int rc;
 
+	/* Never recycle an id still selected as the broadcast flow. */
+	if (id == bc_flow) {
+		rc = apply_hw ? omci_setDsBcGemFlow(OMCI_BC_FLOW_NONE) : 0;
+		if (rc) {
+			out_fmt("   [hw] clear broadcast flow %d -> %d\n", (long)id, (long)rc);
+			return;
+		}
+		bc_flow = -1;
+	}
 	for (unsigned i = 0; i < sizeof f / 4; i++)
 		((uint32_t *)&f)[i] = 0;
 	f.gem_port = flow_ds[id].port;
@@ -1451,12 +1460,16 @@ static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
  * multicast GEM IW TP's reach is not a multicast GEM port, and a port a CTP
  * already owns keeps the CTP's flow. `skip281`, `skip309` and `skip268`
  * are the instances being deleted (-1 for none); a class 268 being deleted
- * is no CTP to hang the ports on, though its own flow is not this code's
- * to take back. */
+ * is no CTP to hang the ports on, and no owner of its own flow. */
 #define MCAST_XPORTS 16
 #define CLS_MCAST_OPER_PROFILE 309
 
-static int is_ctp_port(uint16_t port)
+/* Whether a CTP owns the downstream flow of `port`: one whose direction is
+ * downstream (2) or both (3), other than the instance being deleted. An
+ * upstream-only CTP (1) has no downstream flow of its own, so its port can
+ * be an extra multicast port, and a CTP that is Set to upstream-only gives
+ * its downstream flow back at the next refresh. */
+static int is_ctp_port(uint16_t port, int skip268)
 {
 	const struct omci_class *c = find_class(OMCI_ME_GEM_PORT_CTP);
 
@@ -1464,17 +1477,19 @@ static int is_ctp_port(uint16_t port)
 		const struct mib_row *r = mib_row_at(i);
 
 		if (r && r->classId == OMCI_ME_GEM_PORT_CTP &&
+		    (int)r->inst != skip268 &&
+		    (row_u32(r, c, 3) == 2 || row_u32(r, c, 3) == 3) &&
 		    (uint16_t)row_u32(r, c, 1) == port)
 			return 1;
 	}
 	return 0;
 }
 
-static void xport_add(uint16_t *ports, int *n, uint16_t port)
+static void xport_add(uint16_t *ports, int *n, uint16_t port, int skip268)
 {
 	/* 12-bit GEM port ids (4095 is the highest, and the CAM's width);
 	 * 0 and 0xffff are not ports. */
-	if (!port || port > 4095 || is_ctp_port(port))
+	if (!port || port > 4095 || is_ctp_port(port, skip268))
 		return;
 	for (int i = 0; i < *n; i++)
 		if (ports[i] == port)
@@ -1514,7 +1529,7 @@ static const struct mib_row *xports_wanted(uint16_t *ports, int *n,
 		for (uint8_t t = r->tbl_head; t != MIB_TBL_NONE; t = tblpool[t].next)
 			if (tblpool[t].attr == 9 || tblpool[t].attr == 10)
 				xport_add(ports, n, (uint16_t)(tblpool[t].data[0] << 8 |
-							       tblpool[t].data[1]));
+							       tblpool[t].data[1]), skip268);
 	}
 	if (!ctp) {
 		*n = 0;
@@ -1532,7 +1547,7 @@ static const struct mib_row *xports_wanted(uint16_t *ports, int *n,
 			if ((tblpool[t].attr == 7 || tblpool[t].attr == 8) &&
 			    !((tblpool[t].data[0] >> 3) & 7))
 				xport_add(ports, n, (uint16_t)(tblpool[t].data[2] << 8 |
-							       tblpool[t].data[3]));
+							       tblpool[t].data[3]), skip268);
 	}
 	return ctp;
 }
@@ -1547,13 +1562,13 @@ void mcast_extra_refresh(int skip281, int skip309, int skip268)
 	if (!c)
 		return;
 	ctp = xports_wanted(ports, &n, skip281, skip309, skip268);
-	/* Withdraw first, so the slots are free for a new port. A flow that
-	 * is flagged multicast and has no CTP is one of these. */
+	/* Every downstream flow needs a surviving downstream CTP or extra
+	 * multicast owner. Delete callbacks run before the row leaves the MIB. */
 	for (int id = 0; id < FLOW_MAX && id < (int)caps_flows(); id++) {
 		int keep = 0;
 
-		if (!flow_ds[id].used || !flow_ds[id].mcast ||
-		    is_ctp_port(flow_ds[id].port))
+		if (!flow_ds[id].used ||
+		    is_ctp_port(flow_ds[id].port, skip268))
 			continue;
 		for (int i = 0; i < n; i++)
 			keep |= ports[i] == flow_ds[id].port;
