@@ -158,6 +158,7 @@ test-host:
 	bash test/fetch_releases_test.sh
 	bash test/flash_test.sh
 	bash test/slot_state_test.sh
+	bash test/rcs_dev_test.sh
 	bash test/trial_guard_test.sh
 	bash test/release_ancestry_test.sh
 	bash test/toolchain_image_test.sh

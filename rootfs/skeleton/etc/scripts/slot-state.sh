@@ -43,6 +43,9 @@ PROC_MTD=${PROC_MTD:-/proc/mtd}
 STATE=${STATE:-/var/run/odi-slot}
 MOTD=${MOTD:-/var/run/motd}
 DEV_LOG=${DEV_LOG:-/dev/log}
+RCS_DEV=${RCS_DEV:-/etc/init.d/rcS.dev}
+BREADCRUMBS_ON=${BREADCRUMBS_ON:-/etc/config/breadcrumbs.on}
+CONFIRM_ARP_FILE=${CONFIRM_ARP_FILE:-/etc/config/confirm-arp}
 # nv reads two 8 KB partitions; 10 s is generous.
 NV_TIMEOUT_S=${NV_TIMEOUT_S:-10}
 LOG_WAIT_S=${LOG_WAIT_S:-30}
@@ -139,10 +142,35 @@ fallback_sw_commit=$commit_f
 next_boot=$next
 uncommitted=$uncommitted
 "
-if [ -n "$notice" ]; then
-	put "$MOTD" "
-*** $notice
 
+# The development toggles, on a committed slot too: confirm-arp turns an
+# unreachable host into a reset every 120 s, and neither is meant to stay.
+# The address is read by the code that rcS.dev boots with, so the banner and
+# the boot agree on what counts as a valid one.
+aids=
+if [ -f "$CONFIRM_ARP_FILE" ]; then
+	GW=
+	# shellcheck disable=SC1090
+	[ -r "$RCS_DEV" ] && . "$RCS_DEV"
+	command -v dev_gw >/dev/null 2>&1 && dev_gw
+	if [ -n "$GW" ]; then
+		aids="*** DEV AID confirm-arp: $CONFIRM_ARP_FILE is present, so every boot waits for an ARP reply from $GW before confirming the watchdog; if that host stops answering, the stick resets every 120 s. Remove it when the trial is done.
+"
+	else
+		aids="*** DEV AID confirm-arp: $CONFIRM_ARP_FILE is present with no address: has no effect on the boot. nv commit still refuses while it exists; remove it.
+"
+	fi
+fi
+if [ -f "$BREADCRUMBS_ON" ]; then
+	aids="$aids*** DEV AID breadcrumbs.on: $BREADCRUMBS_ON is present (boot breadcrumbs and extra logging); remove it when you are not debugging.
+"
+fi
+if [ -n "$notice" ] || [ -n "$aids" ]; then
+	text="
+"
+	[ -z "$notice" ] || text="$text*** $notice
+"
+	put "$MOTD" "$text$aids
 "
 else
 	put "$MOTD" ""

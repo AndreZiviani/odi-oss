@@ -1174,7 +1174,7 @@ applies to every later image.
 | `optics.off` | skip the `laser` PON step (the I2C steps still run): **the laser stays off, no service** | REBOOT |
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |
 | `breadcrumbs.on` | development: boot crumbs, `trial-diag.txt` and a heartbeat, on flash | REBOOT |
-| `confirm-arp` | development only: confirm the boot to the watchdog only after an ARP reply from the `.2` of the `br0` subnet, so an unreachable trial reverts by itself; **a stick whose host is not on `.2` then resets every 120 s** | REBOOT |
+| `confirm-arp` | development only: one line, the IPv4 address to ARP (`echo 192.168.1.2 > /etc/config/confirm-arp`); the boot confirms to the watchdog only after an ARP reply from it, so an unreachable trial reverts by itself; **a stick whose host stops answering there then resets every 120 s**. An empty file, or one that is not a dotted IPv4 address, is no target: logged, and the boot confirms as usual. `nv commit` refuses while it exists (`nv commit --force <slot>` overrides) and the login banner names it | REBOOT |
 | `confd.auth` | the UI credential, `user:password` | LIVE |
 | `dropbear.d/authorized_keys` | root's SSH keys | LIVE |
 | `confd/` | replacement web UI files and `.tsv` tables, by name | LIVE |
@@ -1182,8 +1182,10 @@ applies to every later image.
 Every REBOOT row interrupts internet, as every reboot does. The three
 development rows are read by `/etc/init.d/rcS.dev` and exist for trial
 boots; `docs/BOOT.md` has what each does. Of them only `confirm-arp` can
-reboot a stick by itself: left on one whose host is not on `.2`, it resets
-every 120 s.
+reboot a stick by itself: left on one whose host stops answering at the address
+in it, it resets every 120 s; that is why `nv commit` refuses while it
+exists. `breadcrumbs.on` only gets a one-line note from `nv commit`; the
+ssh login banner names both files while they exist.
 
 Files of earlier images that this one ignores, and that can be removed:
 `bdgconn-probe` (an older image rebooted unconditionally after the seconds
@@ -1220,7 +1222,7 @@ kernel itself.
 
 | rule | deadline / floor | armed by | source |
 |---|---|---|---|
-| boot confirmation | 120 s of uptime (`ODI_WDT_USERLAND_DEADLINE_S`) | always, from boot | rcS writes `1` to `/proc/odi_wdt/userland_ok` once userland is up (unchanged from v1.0.1); `/etc/config/confirm-arp` (development) makes that wait for an ARP reply from the `.2` address first |
+| boot confirmation | 120 s of uptime (`ODI_WDT_USERLAND_DEADLINE_S`) | always, from boot | rcS writes `1` to `/proc/odi_wdt/userland_ok` once userland is up (unchanged from v1.0.1); `/etc/config/confirm-arp` (development) makes that wait for an ARP reply from the address in the file first (no valid address: no wait) |
 | per-client ping deadline | one per registered client, e.g. 60 s for omcid (`ODI_WDT_OMCID_DEADLINE_S`) | registration itself, counted from that moment | rcS registers each required client once, by name and deadline, with `echo "<name> <deadline_s>" > /proc/odi_wdt/register` (idempotent: re-registering just updates the deadline AND resets the clock). The client itself pings its own deadline from its own main loop with `echo "<name>" > /proc/odi_wdt/ping` -- omcid does this every 15 s (`src/omci/respond/main.c`, `wdt_ping()`), a quarter of its 60 s deadline. A registered client that never pings at all is caught the same way one that pinged once and then stalled is (fixed 2026-09-28, hardware trial rc4: a client armed only by its own first ping is never checked if that first ping never comes, which is exactly the shape a daemon stuck before it ever pings takes). Because of this, rcS only registers a client under the same conditions that will actually start it (`svc-omcid.sh`'s own `modules.off`/binary-exists gate, mirrored in rcS before the `/proc/odi_wdt/register` write) -- a kernel too old to have `/proc/odi_wdt/register` still degrades to "never checked", silently, same as before |
 | trial guard | 300 s from registration, never pinged | `trial-guard.sh`, on a trial boot only | a client like omcid's, registered as `trial 300` and released (`trial 0`) once the management path is seen working both ways or the slot is committed; unreleased, it resets a trial nobody could reach back to the committed slot (`docs/FLASHING.md`, "The trial guard") |
 | memory floor | `MemAvailable` below 2048 KB (`ODI_WDT_MEM_FLOOR_KB`) for 3 consecutive 5 s checks (`ODI_WDT_MEM_FLOOR_CONSEC`) | always, from boot | sampled by the kernel itself every tick (`si_mem_available()`, `kernel/extra/drivers/net/ethernet/odi/odi_wdt.c`) -- no userland reader to lose along with the memory it would be reporting on. Several consecutive samples, not one, so a single allocation spike does not reset a box that is otherwise fine. This is the same "OOM took the box and nothing came back" case a 20 MB `scp` into an unbounded `/tmp` produced on ISP1 (2026-09-27), now caught kernel-side instead of by a process that OOM can also kill |

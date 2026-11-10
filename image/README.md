@@ -123,7 +123,7 @@ A trial that does not come up reverts by itself: `odi_wdt` resets the board
 at 120 s of uptime unless `rcS` has confirmed userland, and the trial guard
 resets it at 300 s unless something has reached the management path
 (`docs/FLASHING.md`, "The trial guard"). Waiting for an ARP reply first is a
-development option (`/etc/config/confirm-arp`), off by default. Writing `sw_commit` up front throws away the only free safety net there
+development option (`/etc/config/confirm-arp`, holding the address to ARP), off by default. Writing `sw_commit` up front throws away the only free safety net there
 is. `docs/FLASHING.md` is the full procedure, including reading a failed
 trial's log.
 

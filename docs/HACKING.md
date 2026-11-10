@@ -376,11 +376,13 @@ tmpfs, when the config partition is not mounted, when `network.sh
 configured` finds no configured management address, or when the switch init
 failed. It does not look at reachability: a trial whose management path
 comes up wrong stays up, and you power-cycle it. For development there is
-`/etc/config/confirm-arp` (read by `rcS.dev`): with it, rcS confirms only after an ARP reply
-from the `.2` address of the `br0` subnet, so an unreachable trial reverts
+`/etc/config/confirm-arp` (read by `rcS.dev`; it holds the IPv4 address to ARP): with it, rcS
+confirms only after an ARP reply from that address, so an unreachable trial reverts
 by itself **and keeps its ramlog** (a watchdog reset preserves DRAM; a
-power cycle does not). Never leave `confirm-arp` on a stick whose host is
-not on `.2`: every boot then resets at 120 s. The confirmation and the
+power cycle does not). Never leave `confirm-arp` on a stick whose host may stop
+answering there: every boot then resets at 120 s (`nv commit` refuses
+while it exists; `--force` overrides). An empty or invalid file is no
+target and the boot confirms as usual. The confirmation and the
 deadline are one mechanism; change neither without reading `rcs-lib.sh`,
 `rcS.dev` and `odi_wdt.c` together.
 
@@ -506,8 +508,8 @@ In order:
    the detector; a stick still on the factory placeholder serial never runs
    it. Our image is GPON only and never rewrites the PON type.
    [`docs/kb/rtl9601-pondetect-pon-mode-rewrite.md`](kb/rtl9601-pondetect-pon-mode-rewrite.md).
-5. **Rebooting every 120 s?** `confirm-arp` left on a stick whose host is
-   not on `.2` holds the confirmation back on every boot; remove it
+5. **Rebooting every 120 s?** `confirm-arp` left on a stick whose host no longer
+   answers at the address in it holds the confirmation back on every boot; remove it
    ([Feature toggles](#switch-files-on-the-config-partition)). An older
    image of ours also rebooted on purpose with `bdgconn-probe` there. A
    committed image of ours that never confirms loops every 120 s: if it is reachable
@@ -1074,7 +1076,7 @@ read at boot unless stated. rcS paths are
 | `pon-steps` | `etc/init.d/rcS.dev:188` | replaces the built-in PON steps: one verb per line, or `omcimods` (switch init, then the watchdog confirmation), `gponsn auto`, `gponpw auto`, `gponact` (`docs/BOOT.md`); a plain `laser` line ignores `optics.off` and `ODI_LASER_UNVERIFIED`; a wrong list means no PON | absent | dev |
 | `omci-identity.on` | `src/omci/respond/omcid.h:478` (`CFG_REPORT_SWITCH`), `cfgstore.c:882` | omcid reports the OLT identity keys (`OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, ...); `apply.sh omci` | absent: built-in values | prod |
 | `breadcrumbs.on` | `rcS.dev:27`, `:53`, `:62`, `:76`, `:87`, `:106` | boot crumbs to `breadcrumbs`, `trial-diag.txt`, a 30 s heartbeat to the kernel log, soft-lockup 20 s and hung-task 30 s | absent | dev |
-| `confirm-arp` | `rcS.dev:169` | confirm the watchdog only after an ARP reply from `.2` of `br0`; **resets every 120 s if the host is elsewhere** | absent: confirm unconditionally | dev |
+| `confirm-arp` | `rcS.dev`, `dev_confirm_ok()`; `nv commit` (`src/nv/commit.c`); `slot-state.sh` | the file holds one IPv4 address: confirm the watchdog only after an ARP reply from it; **resets every 120 s if the host stops answering**; `nv commit` refuses while it exists (`--force`) and the login banner names it | absent, empty or not an IPv4 address: confirm unconditionally | dev |
 | `odi.conf` | `etc/scripts/flash` (`ODI_KEYS`), written by `flash set`; `ODI_LASER_UNVERIFIED` is read by `pon_step_laser()` | odi-only keys: `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_POTS_PORTS`, `OMCI_POTS_SLOT_ID`, `OMCI_VOIP_LINE_REPORT`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `VLAN_EAPOL_UNTAGGED`, `OMCI_TCONT_ALLOC_UNSET`, `HOST_AUTONEG`, `HOST_SERDES`, `ODI_LASER_UNVERIFIED` (`docs/SETTINGS.md`); `ODI_LASER_UNVERIFIED=1` lights the laser on an unvalidated laser driver | absent: none set | prod |
 | `confd.auth`, `confd/`, `dropbear.d/authorized_keys` | confd (odi-ui); dropbear via `svc-dropbear.sh` (`-D`) | UI credential, UI overrides, root SSH keys | admin/admin; image assets; none | prod |
 
@@ -1194,8 +1196,8 @@ senders without `CAP_NET_ADMIN`.
    commit body.
 4. **Trial it on your own stick**, never on one carrying someone's only
    connection: stock committed in the other slot, `: >
-   /etc/config/breadcrumbs.on` first, `confirm-arp` if your host sits on
-   `.2`, `sw_tryactive`, never `sw_commit` before it has run. Record what
+   /etc/config/breadcrumbs.on` first, `echo <host address> > confirm-arp`
+   if you want an unreachable trial to revert, `sw_tryactive`, never `sw_commit` before it has run. Record what
    you saw.
 5. **Update the docs in the same change**: `docs/SETTINGS.md` for a
    setting, `docs/TOOLS.md` for a command, `docs/KERNEL.md` for a driver,
