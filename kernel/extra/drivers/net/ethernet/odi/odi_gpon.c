@@ -292,6 +292,7 @@ static bool odi_gpon_ds_type_known(uint8_t type)
 	case ODI_GPON_DS_BER_INTERVAL:
 	case ODI_GPON_DS_KEY_SWITCHING_TIME:
 	case ODI_GPON_DS_EXT_BURST_LENGTH:
+	case ODI_GPON_DS_PON_ID:
 	case ODI_GPON_DS_DISABLE_SERIAL_NUMBER_VS:
 		return true;
 	default:
@@ -307,13 +308,20 @@ static struct odi_gpon_ds_upstream_overhead odi_gpon_last_uo;
 static bool odi_gpon_last_uo_valid;
 static struct odi_gpon_ds_ranging_time odi_gpon_last_rng;
 static bool odi_gpon_last_rng_valid;
+/* The last PON-ID (G.984.3 Annex C) and when it came, for the pon_id line of
+ * /proc/odi_gpon/status. Forgotten at a loss of signal: the fibre that comes
+ * back may lead to another OLT port.
+ */
+static struct odi_gpon_ds_pon_id odi_gpon_last_pon_id;
+static bool odi_gpon_last_pon_id_valid;
+static u32 odi_gpon_last_pon_id_ms;
 
 static struct odi_gpon_ploam_entry odi_gpon_ring[ODI_GPON_PLOAM_RING_LEN];
 static unsigned int odi_gpon_ring_head;
 static unsigned int odi_gpon_ring_count;
 /* Downstream PLOAM types outside odi_gpon_ds_type_known() already logged
  * this boot. Some OLTs send the optional G.984.3 annex messages every few
- * seconds (0x18 Sleep_Allow, Annex E; 0x15 PON-ID, Annex C); one line per
+ * seconds (0x18 Sleep_Allow, Annex E); one line per
  * type is enough, odi_gpon_ds_type_count[] keeps the count.
  */
 static DECLARE_BITMAP(odi_gpon_ds_unknown_logged, 256);
@@ -344,6 +352,10 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
 		} else if (msg->type == ODI_GPON_DS_RANGING_TIME) {
 			odi_gpon_decode_ranging_time(msg, &odi_gpon_last_rng);
 			odi_gpon_last_rng_valid = true;
+		} else if (msg->type == ODI_GPON_DS_PON_ID && msg->onu_id == ODI_GPON_ONU_ID_BROADCAST) {
+			odi_gpon_decode_pon_id(msg, &odi_gpon_last_pon_id);
+			odi_gpon_last_pon_id_valid = true;
+			odi_gpon_last_pon_id_ms = e->timestamp_ms;
 		}
 		if (!odi_gpon_ds_type_known(msg->type) &&
 		    !__test_and_set_bit(msg->type, odi_gpon_ds_unknown_logged))
@@ -618,8 +630,10 @@ static void odi_gpon_line_check(void)
 				 jiffies_to_msecs(jiffies - INITIAL_JIFFIES));
 
 	los = (smp.alarms & ODI_GPON_DSF_ALARM_STATE_LOS_NOW) ? 1 : 0;
-	if (los && !odi_gpon_last_los_state)
+	if (los && !odi_gpon_last_los_state) {
 		odi_gpon_last_los_ms = jiffies_to_msecs(jiffies - INITIAL_JIFFIES);
+		odi_gpon_last_pon_id_valid = false;
+	}
 	odi_gpon_alarm_edge("los", los, &odi_gpon_last_los_state, &odi_gpon_los_since, prev);
 	odi_gpon_alarm_edge("lof", (smp.alarms & ODI_GPON_DSF_ALARM_STATE_LOF_NOW) ? 1 : 0,
 			    &odi_gpon_last_lof_state, &odi_gpon_lof_since, prev);
@@ -1290,8 +1304,8 @@ static struct odi_gpon_ctr *odi_gpon_proc_ctr_snap(void)
 
 /* /proc/odi_gpon/status: the ONU state, ONU-ID, serial number, EqD, the
  * Alloc-IDs, the decrypted GEM ports, the REI count and the TO1/TO2 expiries, the interrupt
- * bookkeeping, the laser, the last LOS edge, the last Upstream_Overhead and
- * Ranging_Time, then the sampler's live bits, alarm and ONU state times and
+ * bookkeeping, the laser, the last LOS edge, the last Upstream_Overhead,
+ * Ranging_Time and PON-ID, then the sampler's live bits, alarm and ONU state times and
  * state transitions.
  */
 static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
@@ -1312,8 +1326,10 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	unsigned int n_alloc;
 	struct odi_gpon_ds_upstream_overhead uo;
 	struct odi_gpon_ds_ranging_time rng;
+	struct odi_gpon_ds_pon_id pid;
+	u32 pid_ms;
 	struct odi_gpon_ranging_dbg rdbg;
-	bool uo_valid, rng_valid;
+	bool uo_valid, rng_valid, pid_valid;
 	int hold_keep, hold_held;
 
 	(void)v;
@@ -1340,6 +1356,9 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	uo_valid = odi_gpon_last_uo_valid;
 	rng = odi_gpon_last_rng;
 	rng_valid = odi_gpon_last_rng_valid;
+	pid = odi_gpon_last_pon_id;
+	pid_valid = odi_gpon_last_pon_id_valid;
+	pid_ms = odi_gpon_last_pon_id_ms;
 	odi_gpon_get_ranging_dbg(&rdbg);
 	hold_keep = odi_gpon_hw_hold_enabled();
 	hold_held = odi_gpon_hw_hold_get();
@@ -1417,6 +1436,16 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 			   rdbg.multframe, rdbg.inframe);
 	else
 		seq_puts(seq, "ranging_time none\n");
+	/* The last PON-ID (Annex C.2.2) since the last loss of signal: the
+	 * fields as sent, TOL raw (0.1 dB steps above -30 dBm, 65535 for not
+	 * reported), and when it came.
+	 */
+	if (pid_valid)
+		seq_printf(seq, "pon_id odn_class %u reach_extender %u tol %u id %*phN ms %u\n",
+			   pid.odn_class, pid.reach_extender, pid.tol,
+			   (int)ODI_GPON_PON_ID_LEN, pid.id, pid_ms);
+	else
+		seq_puts(seq, "pon_id none\n");
 
 	snap = odi_gpon_proc_ctr_snap();
 	if (snap) {

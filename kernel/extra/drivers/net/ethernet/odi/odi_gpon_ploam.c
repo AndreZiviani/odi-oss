@@ -135,6 +135,18 @@ void odi_gpon_decode_key_switching_time(const struct odi_gpon_ploam *msg,
 				  ((uint32_t)c[2] << 8) | (uint32_t)c[3];
 }
 
+void odi_gpon_decode_pon_id(const struct odi_gpon_ploam *msg, struct odi_gpon_ds_pon_id *out)
+{
+	const uint8_t *c = msg->content;
+	unsigned int i;
+
+	out->reach_extender = (uint8_t)(c[0] >> 7);
+	out->odn_class = (uint8_t)((c[0] >> 4) & 0x7U);
+	for (i = 0; i < ODI_GPON_PON_ID_LEN; i++)
+		out->id[i] = c[1 + i];
+	out->tol = (uint16_t)(((uint16_t)c[8] << 8) | c[9]);
+}
+
 /* ---- Upstream encoders (G.984.3 clause 9.2.4.x) ---- */
 
 static void odi_gpon_ploam_clear(struct odi_gpon_ploam *out, uint8_t onu_id, uint8_t type)
