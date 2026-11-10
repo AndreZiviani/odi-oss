@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Releases: the publishing job runs in a protected `release` environment,
+  so a release is published only after the maintainer approves it, once
+  all of CI has passed on the tag commit. The repository now also keeps
+  release tags (`v*`) immutable and signed, lets only admins create them,
+  and asks for a pull request with green CI on `main` (admins can still
+  push release commits). Refs #259.
+
 - `/etc/scripts/flash set` no longer installs a truncated `odi.conf` or
   XML store when a write fails, for example on a full config partition.
   The grep and printf that build the new `odi.conf` are checked on their
