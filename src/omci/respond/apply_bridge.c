@@ -801,8 +801,14 @@ static int bp_add(int ingress, uint16_t port, uint32_t dir,
 {
 	int id = bdgconn_add(ingress, port, dir, vr);
 
-	if (id < 0)
+	if (id < 0) {
+		/* Said here, with the port: a split mapper can turn one rule
+		 * into eight, and a rule that finds no room would otherwise
+		 * be a VLAN or a priority lost without a word. */
+		out_fmt("   [%s] bridge rule not installed: ingress %04x gem %d dir %d\n",
+			apply_hw ? "hw" : "dry", (long)ingress, (long)port, (long)dir);
 		return 0;
+	}
 	if (conn_nservs < SERV_MAX)
 		conn_servs[conn_nservs++] = id;
 	return 1;
@@ -861,6 +867,27 @@ static int bp_install(int ingress, uint16_t port, uint32_t dir,
 		added += bp_add(ingress, port, OMCI_DIR_DS, &vr);
 	}
 	return added;
+}
+
+/* Whether an 802.1p mapper sends its priorities to more than one GEM IW
+ * TP. Only then do the rules of a target need the priorities it carries: a
+ * mapper with one target and some priorities unmapped is the plain service,
+ * and keeps the single rule it always had. */
+static int mapper_splits(const struct mib_row *mapper, const struct omci_class *c130)
+{
+	uint32_t first = 0;
+
+	for (int pri = 0; mapper && pri < 8; pri++) {
+		uint32_t id = row_u32(mapper, c130, 2 + pri);
+
+		if (id == 0 || id == 0xffff)
+			continue;
+		if (!first)
+			first = id;
+		else if (id != first)
+			return 1;
+	}
+	return 0;
 }
 
 /* ------------------------------------------------------ class 171, in full
@@ -1674,6 +1701,15 @@ void bdgconn_rebuild(void)
 			}
 			for (int t = 0; t < ntgt; t++) {
 			struct bp_rule rules[BP_RULES_MAX];
+			/* The priorities bp_install() holds this target to: all of
+			 * them unless the mapper really splits. The owner of untagged
+			 * upstream frames is the mapper default priority when its
+			 * unmarked-frame option (attribute 10) is 1. With the DSCP
+			 * option the priority would come from the DSCP mapping, which
+			 * these rules cannot express: priority 0 is assumed. */
+			unsigned split_pmask = mapper_splits(mapper, c130) ? tgt_pmask[t] : 0xffu;
+			unsigned unmarked = mapper && row_u32(mapper, c130, 10) == 1 ?
+					    row_u32(mapper, c130, 12) : 0;
 			uint32_t port, dir;
 			int nrules, manual, use_ev, plain = 0;
 
@@ -1739,8 +1775,7 @@ void bdgconn_rebuild(void)
 					continue;
 				}
 				added += bp_install(ingress[g], (uint16_t)port, dir,
-						    &rules[k], tgt_pmask[t],
-						    mapper && row_u32(mapper, c130, 10) == 1 ? row_u32(mapper, c130, 12) : 0);
+						    &rules[k], split_pmask, unmarked);
 			}
 			}                        /* rules of this target */
 			for (int g = 0; use_ev && g < ning; g++) {
@@ -1786,8 +1821,7 @@ void bdgconn_rebuild(void)
 						rest[k].kind, (long)rest[k].vid, (long)rest[k].pri);
 					mcv_mark(uc_vids, &rest[k].vr);
 					added += bp_install(ingress[g], (uint16_t)port, dir,
-							    &rest[k], tgt_pmask[t],
-							    mapper && row_u32(mapper, c130, 10) == 1 ? row_u32(mapper, c130, 12) : 0);
+							    &rest[k], split_pmask, unmarked);
 				}
 			}
 			}                        /* targets of this bridge port */

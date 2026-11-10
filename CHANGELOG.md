@@ -5,12 +5,16 @@ listed here.
 
 ## Unreleased
 
-- VLAN: fallback bridge rules preserve the complete 802.1p mapper mask
-  for grouped and single-priority GEM targets, including the simple
-  class-171 add-tag path. Untagged traffic has one upstream owner;
-  downstream inverses and VLAN membership are retained. Native descriptor
-  and kernel-derivation tests pass;
-  validation on a split-GEM OLT is still needed. Refs #306.
+- OMCI: with no class 84 filter, the fallback bridge rules of an 802.1p
+  mapper that sends its priorities to more than one GEM port are now held
+  to the priorities each port carries; every target used to get the same
+  tagged rule. A tagged rule becomes one upstream rule per priority, the
+  first keeps the downstream leg and the VLAN membership, and untagged
+  upstream frames go to one target: the mapper default priority when its
+  unmarked-frame option is 1, otherwise priority 0. A mapper with a
+  single target, with or without unmapped priorities, keeps its one rule.
+  A rule that cannot be installed is logged with its ingress and GEM
+  port. Not run against an OLT that splits priorities. Refs #306.
 
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each
