@@ -187,7 +187,7 @@ steps, running concurrently with the respawn entries just started.
     a trial that never gets here (a hung kernel, a wedged rcS, or one of
     the three checks below failing). It needs no network REACHABILITY --
     no ARP, no ping (`confirm-arp`, in `rcS.dev`, is the development
-    exception that adds that on top) -- but it does refuse to confirm
+    exception that adds an ARP reply from a configured host on top) -- but it does refuse to confirm
     unless management is at least POSSIBLE:
     - `required_mounts_ok()`: every `/etc/fstab` mount the boot depends on
       other than the config partition -- `/var` and `/var/tmp`, both
@@ -399,11 +399,21 @@ leave there is readable from the image the stick reverts to.
 - The same questions go to the kernel log when `breadcrumbs.on` is set
   **or the config partition did not mount**: then this is the only
   diagnostic the boot gets.
-- **`confirm-arp`**: the watchdog is confirmed only after an ARP reply from
-  the `.2` of the `br0` subnet, a fixed test host. A trial that comes up
+- **`confirm-arp`**: the file holds one IPv4 address (one line, surrounding
+  whitespace ignored), and the watchdog is confirmed only after an ARP reply
+  from it: `: > /etc/config/confirm-arp` is not enough, write the address
+  (`echo 192.168.1.2 > /etc/config/confirm-arp`). A trial that comes up
   unreachable then reverts by itself and keeps its ramlog (a watchdog reset
-  keeps DRAM; a power cycle does not). Never leave it on a stick whose
-  host is not on `.2`: every boot then resets at 120 s.
+  keeps DRAM; a power cycle does not). An empty file, or content that is not
+  a dotted IPv4 address, is no target: the boot says so (stderr and a crumb)
+  and confirms the watchdog as usual, so a misconfigured toggle cannot start
+  a reset loop. Nothing derives a host from the `br0` address; the other
+  `arping` diagnostics use the same address and are skipped, with a log
+  line, when there is none. Never leave it on a stick whose host stops
+  answering there: every boot then resets at 120 s. Because of that, `nv
+  commit` refuses while the file exists (`nv commit --force <slot>` commits
+  anyway) and the ssh login banner names it, with its address, on every
+  slot, committed or not.
 - **`pon-steps`**: a list that replaces the built-in PON steps, one per
   line: a `/proc/odi_init` verb with its argument, or `omcimods` (the
   switch init, then the watchdog confirmation -- omcid starts as its own

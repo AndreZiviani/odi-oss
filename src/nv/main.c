@@ -10,7 +10,7 @@
  *     nv getenv [parameter_name]
  *     nv setenv [-c 1|2] parameter_name value
  *     nv fallback [parameter_name]
- *     nv commit slot
+ *     nv commit [--force] slot
  *
  * It matters more than its size: `sw_tryactive` and `sw_commit` are set
  * through it, and those are the one-shot safe-boot mechanism this project
@@ -428,15 +428,36 @@ static int running_slot(void)
 	return -1;
 }
 
-static int commit(const char *arg)
+static int file_exists(void *ctx, const char *path)
+{
+	int fd = (int)sys_open(path, O_RDONLY);
+
+	(void)ctx;
+	if (fd < 0)
+		return 0;
+	sys_close(fd);
+	return 1;
+}
+
+static int commit(const char *arg, int force)
 {
 	struct env_io io = { 0, io_read, io_write };
+	struct commit_aids aids = { 0, file_exists, NV_CONFIRM_ARP_PATH,
+				    NV_BREADCRUMBS_PATH, 0, 0 };
 	struct env_commit_report r;
 	int slot = str_eq(arg, "0") ? 0 : str_eq(arg, "1") ? 1 : -1;
 	int running = running_slot();
-	int rc = env_commit(&io, slot, running, &r);
+	int rc = env_commit_guarded(&io, &aids, force, slot, running, &r);
 
 	out_fmt("nv: commit %s: %s\n", arg, env_commit_msg(rc));
+	if (rc == NVC_CONFIRM_ARP) {
+		out_fmt("nv: %s exists: each boot then waits for an ARP reply from the address in it,\n"
+			"nv: and a committed slot has no trial to fall back to. If that host stops\n"
+			"nv: answering, the stick resets every 120 s until the safe mode comes up.\n"
+			"nv: Remove the file (rm %s), or commit anyway with: nv commit --force %s\n",
+			aids.confirm_arp, aids.confirm_arp, arg);
+		return 1;
+	}
 	if (rc == NVC_NOT_RUNNING) {
 		if (running < 0)
 			out("nv: running slot unknown (no root=31:N naming r0 or r1)\n");
@@ -447,6 +468,14 @@ static int commit(const char *arg)
 		out_fmt("nv: primary copy %d %s, fallback copy %d %s\n",
 			(long)r.primary, r.wrote_primary ? "written" : "unchanged",
 			(long)r.fallback, r.wrote_fallback ? "written" : "unchanged");
+	if (rc == NVC_DONE || rc == NVC_ALREADY) {
+		if (aids.has_confirm_arp)
+			out_fmt("nv: warning: committed with %s present (--force); each boot waits for an ARP reply from the address in it\n",
+				aids.confirm_arp);
+		if (aids.has_breadcrumbs)
+			out_fmt("nv: note: %s exists (a development aid meant to be temporary)\n",
+				aids.breadcrumbs);
+	}
 	return rc == NVC_DONE || rc == NVC_ALREADY ? 0 : 1;
 }
 
@@ -455,7 +484,10 @@ static void usage(void)
 	out("Usage: nv getenv [parameter_name]\n"
 	    "       nv setenv [-c 1|2] parameter_name value\n"
 	    "       nv fallback [parameter_name]\n"
-	    "       nv commit slot\n");
+	    "       nv commit [--force] slot\n"
+	    "  commit refuses while /etc/config/confirm-arp exists (each boot would wait\n"
+	    "  for an ARP reply, and a committed slot has no trial to fall back to);\n"
+	    "  --force (or -f) commits anyway\n");
 }
 
 int main(int argc, char **argv)
@@ -471,13 +503,17 @@ int main(int argc, char **argv)
 	 * partition I/O it writes with, and has its own answer for a missing
 	 * or invalid one. */
 	if (str_eq(argv[1], "commit")) {
-		if (argc != 3) {
+		int force = 0;
+
+		if (argc == 4 && (str_eq(argv[2], "--force") || str_eq(argv[2], "-f")))
+			force = 1;
+		else if (argc != 3) {
 			usage();
 			return 1;
 		}
 		if (!env_lock())
 			return 1;
-		return commit(argv[2]);
+		return commit(argv[argc - 1], force);
 	}
 	/* Before the read, not before the write: the block is read-modified-
 	 * written, so the read has to be inside the lock too. */

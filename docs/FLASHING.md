@@ -196,11 +196,11 @@ at a time and verify each before the next:
    the web UI) in that time, or let the metrics scraper do it. Separately,
    rcS confirms userland to the watchdog once its own steps have run,
    without looking at the network; with no confirmation within 120 s of
-   uptime the kernel resets the board. For development, `: > /etc/config/confirm-arp` makes rcS
-   confirm only after an ARP reply from the `.2` address of the management
-   subnet (`192.168.1.2` for the default `192.168.1.1`; see
+   uptime the kernel resets the board. For development, `echo <address> > /etc/config/confirm-arp` makes rcS
+   confirm only after an ARP reply from that IPv4 address (an empty or
+   invalid file is no target: the boot confirms as usual; see
    `docs/SETTINGS.md`), so an unreachable trial reverts by itself and keeps
-   its ramlog. Only set it when the host port really has that address: on
+   its ramlog. Only set it when the host really answers at that address: on
    a trial, no reply means a fall-back to the committed slot; on a
    committed slot of this image, a reboot loop.
 
@@ -282,9 +282,10 @@ resets. A kernel that is alive keeps kicking it, but it also holds a
 120 s of uptime, the kernel forces the reset itself. So a boot whose
 scripts hang reverts too. rcS confirms without looking at the network, so
 a boot whose management path never comes up stays up; power-cycle it. For
-development, `/etc/config/confirm-arp` makes rcS confirm only after an ARP
-reply from the `.2` address of the `br0` subnet, so an unreachable trial
-reverts by itself; never leave it on a stick whose host is not on `.2`. Because U-Boot cleared `sw_tryactive` before
+development, `/etc/config/confirm-arp` (the IPv4 address to ARP) makes rcS confirm only
+after an ARP reply from it, so an unreachable trial reverts by itself; never
+leave it on a stick whose host may stop answering there (`nv commit`
+refuses while it exists, `--force` overrides). Because U-Boot cleared `sw_tryactive` before
 handing over, every one of those resets lands on the committed slot, with
 nothing lost and nothing to do by hand. An image that confirms and then
 cannot be reached is the trial guard's (below). What neither catches is an
@@ -400,6 +401,11 @@ so in three places:
   (`docs/TOOLS.md`, "Slot state");
 - **an alert**: `OdiUncommittedImage`, a warning once `gpon_uncommitted`
   has been 1 for 30 minutes (odi-sfp-exporter's `prometheus/alerts.yml`).
+
+The banner also names the development files that are present, on a
+committed slot too: `/etc/config/confirm-arp` (with its address, or "no
+address: has no effect" for an empty or invalid file) and
+`/etc/config/breadcrumbs.on`.
 
 The file is written at boot: after `nv commit`, run `slot-state.sh` (it is
 on the ssh `PATH`) to clear the banner and the metric without a reboot.

@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- `confirm-arp` guard. The development file now holds the IPv4 address to
+  ARP (one line, whitespace ignored) instead of the hard-coded `.2` of the
+  `br0` subnet; an empty file, or content that is not a dotted IPv4 address,
+  is no target: the boot logs it (stderr and a crumb) and confirms the
+  watchdog as usual, so a misconfigured toggle cannot cause a reset loop. The
+  other `arping` diagnostics in `rcS.dev` use the same address and are
+  skipped, with a log line, when there is none. `nv commit` refuses while
+  `/etc/config/confirm-arp` exists, naming the file and why, unless
+  `--force` (or `-f`) is given; `breadcrumbs.on` only gets a one-line note.
+  The ssh login banner names both files while they exist, committed slot or
+  not (the confirm-arp address, or "no address: has no effect"). Host tests:
+  `test/rcs_dev_test.sh`, `test/slot_state_test.sh`, `src/nv/test`. Refs #334.
 - Docs: new `docs/QUALIFICATION.md`, linked from the README's "Status and
   limitations" and "Documentation". It records, per board, laser driver, host,
   host SerDes mode and OLT line (named ISP1 and ISP2, never by make) and per

@@ -822,8 +822,8 @@ point U-Boot's own `en_wdt` sets, and — critically — it also tracks a
 something writes `1` to `/proc/odi_wdt/userland_ok` within 120 s of
 uptime, the kernel forces the reset itself. rcS writes it once its own
 steps have run (the network is not a condition; with the development
-flag `/etc/config/confirm-arp` it waits for an ARP reply from the `.2`
-address of the `br0` subnet instead), so a kernel that boots fine but
+flag `/etc/config/confirm-arp` it waits for an ARP reply from the address
+the file holds instead), so a kernel that boots fine but
 whose init scripts hang still gets reset. Before that
 forced reset, the watchdog calls `wdt_pre_reset_hook`, which `odi_nic.c`
 sets to its own quiesce function, so the NIC's DMA engine is stopped the

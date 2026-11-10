@@ -132,6 +132,22 @@ int env_commit(const struct env_io *io, int slot, int running,
 	return r->wrote_primary || r->wrote_fallback ? NVC_DONE : NVC_ALREADY;
 }
 
+int env_commit_guarded(const struct env_io *io, struct commit_aids *a,
+		       int force, int slot, int running,
+		       struct env_commit_report *r)
+{
+	a->has_confirm_arp = a->exists && a->confirm_arp &&
+			     a->exists(a->ctx, a->confirm_arp);
+	a->has_breadcrumbs = a->exists && a->breadcrumbs &&
+			     a->exists(a->ctx, a->breadcrumbs);
+	if (a->has_confirm_arp && !force) {
+		r->primary = r->fallback = 0;
+		r->wrote_primary = r->wrote_fallback = 0;
+		return NVC_CONFIRM_ARP;
+	}
+	return env_commit(io, slot, running, r);
+}
+
 const char *env_commit_msg(int rc)
 {
 	switch (rc) {
@@ -147,6 +163,7 @@ const char *env_commit_msg(int rc)
 	case NVC_WRITE_FALLBACK:  return "the primary copy is committed and verified, the write of the fallback copy failed";
 	case NVC_VERIFY_FALLBACK: return "the primary copy is committed and verified, the fallback copy did not read back as written";
 	case NVC_FINAL:           return "the final read-back of both copies does not agree";
+	case NVC_CONFIRM_ARP:     return "refused, the confirm-arp development file exists, nothing written";
 	default:                  return "unknown result";
 	}
 }

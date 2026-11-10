@@ -13,9 +13,12 @@
 #                   /etc/config/trial-diag.txt, the SerDes and PON registers,
 #                   a 30 s heartbeat to the kernel log, lower lockup
 #                   thresholds
-#   confirm-arp     confirm the watchdog only after an ARP reply from the .2
-#                   address of br0; a trial that comes up unreachable then
-#                   reverts by itself, with its ramlog
+#   confirm-arp     holds one IPv4 address; confirm the watchdog only after
+#                   an ARP reply from it. A trial that comes up unreachable
+#                   then reverts by itself, with its ramlog. An empty file,
+#                   or one that does not hold a dotted IPv4 address, means
+#                   no target: the boot is logged and confirmed as usual.
+#                   nv commit refuses while the file exists (nv --force)
 #   pon-steps       a PON step list that replaces the built-in one
 #
 # The config partition is shared and fwu.sh never writes it, so what these
@@ -33,15 +36,38 @@ crumb() {
 	fi
 }
 
-# The .2 of the br0 subnet, the fixed test host; empty with no address.
+CONFIRM_ARP_FILE=${CONFIRM_ARP_FILE:-/etc/config/confirm-arp}
+
+# 0 when $1 is a dotted IPv4 address: four decimal fields of one to three
+# digits, each at most 255.
+valid_ipv4() {
+	case $1 in
+	"" | *[!0-9.]* | .* | *. | *..*) return 1 ;;
+	esac
+	_oifs=$IFS
+	IFS=.
+	# shellcheck disable=SC2086
+	set -- $1
+	IFS=$_oifs
+	[ $# -eq 4 ] || return 1
+	for _o in "$@"; do
+		[ ${#_o} -le 3 ] && [ "$_o" -le 255 ] || return 1
+	done
+	return 0
+}
+
+# The host to ARP: the first line of the confirm-arp file, surrounding
+# whitespace ignored. GW stays empty when the file is absent, empty or does
+# not hold a valid IPv4 address; nothing else names a host.
 GW=""
 dev_gw() {
-	if [ -z "$GW" ]; then
-		brip=$(ifconfig br0 2>/dev/null | sed -n "s/.*inet addr:\([0-9.]*\).*/\1/p")
-		if [ -n "$brip" ]; then
-			GW="${brip%.*}.2"
-		fi
+	[ -z "$GW" ] || return 0
+	[ -f "$CONFIRM_ARP_FILE" ] || return 0
+	_addr=$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;q;}' "$CONFIRM_ARP_FILE" 2>/dev/null)
+	if valid_ipv4 "$_addr"; then
+		GW=$_addr
 	fi
+	return 0
 }
 
 # Registers through diag, one line, for a crumb.
@@ -131,6 +157,8 @@ dev_trial_diag() {
 	sec "arp" cat /proc/net/arp
 	if [ -n "$GW" ]; then
 		sec "arping $GW" arping -c 3 -w 6 -I br0 "$GW"
+	else
+		sec "arping" echo "skipped: no valid address in confirm-arp"
 	fi
 	sec "services.log" cat /var/log/services.log
 	sec "dmesg" sh -c "dmesg | tail -n 90"
@@ -159,24 +187,30 @@ dev_klog_diag() {
 		fi
 		klog "arping $GW exit $rc"
 	else
-		klog "arping: no GW"
+		klog "arping: skipped, no valid address in confirm-arp"
 	fi
 	timeout 5 ip -s link show eth0 2>/dev/null | awk '/RX:|TX:/{print; getline; print}' | while read -r line; do
 		klog "eth0: $line"
 	done
 }
 
-# confirm-arp: never leave it on a stick whose host is not on .2, or every
-# boot resets at 120 s.
+# confirm-arp: the file holds the address to ARP. Never leave it on a stick
+# whose host does not answer there, or every boot resets at 120 s. A file
+# with no valid address is no target: logged, and the boot confirms.
 dev_confirm_ok() {
-	[ -f /etc/config/confirm-arp ] || return 0
+	[ -f "$CONFIRM_ARP_FILE" ] || return 0
 	dev_gw
-	if [ -n "$GW" ] && arping -c 1 -w 2 -I br0 "$GW" >/dev/null 2>&1; then
+	if [ -z "$GW" ]; then
+		echo "rcS: confirm-arp holds no valid IPv4 address, not waiting for an ARP reply" >&2
+		crumb "confirm-arp: no valid IPv4 address in the file, no ARP wait, watchdog confirmed as usual"
+		return 0
+	fi
+	if arping -c 1 -w 2 -I br0 "$GW" >/dev/null 2>&1; then
 		crumb "reachable: $GW answered arping (confirm-arp)"
 		return 0
 	fi
-	echo "rcS: confirm-arp set and no ARP reply from ${GW:-<no address>}, not confirming to the watchdog" >&2
-	crumb "unreachable: no ARP reply from ${GW:-<no address>}, watchdog NOT confirmed (confirm-arp)"
+	echo "rcS: confirm-arp set and no ARP reply from $GW, not confirming to the watchdog" >&2
+	crumb "unreachable: no ARP reply from $GW, watchdog NOT confirmed (confirm-arp)"
 	return 1
 }
 

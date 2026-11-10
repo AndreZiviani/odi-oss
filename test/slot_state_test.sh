@@ -71,7 +71,9 @@ envs() {
 run() {
 	env PATH="$T/bin:$PATH" NV="$T/bin/nv" LOGGER="$T/bin/logger" \
 	    PROC_CMDLINE="$T/cmdline" PROC_MTD="$T/mtd" STATE="$T/state" \
-	    MOTD="$T/motd" DEV_LOG="$T/devlog" sh "$S" > "$T/out" 2>&1
+	    MOTD="$T/motd" DEV_LOG="$T/devlog" RCS_DEV="$PWD/rootfs/skeleton/etc/init.d/rcS.dev" \
+	    CONFIRM_ARP_FILE="$T/confirm-arp" BREADCRUMBS_ON="$T/breadcrumbs.on" \
+	    sh "$S" > "$T/out" 2>&1
 	echo $? > "$T/rc"
 }
 
@@ -206,6 +208,29 @@ env PATH="$T/bin:$PATH" NV="$T/bin/nv" LOGGER="$T/bin/logger" LOG_WAIT_S=2 \
     DEV_LOG="$T/devlog" "$SH" "$S" > "$T/out" 2>&1
 if [ $((SECONDS - t0)) -ge 2 ]; then ok "the first run of a boot still waits for syslogd"; else no "the first run of a boot still waits for syslogd"; fi
 logged "and logs after the wait" "TRIAL BOOT: running slot 1"
+
+echo "== development aids in the banner, on a committed slot too"
+rm -f "$T/confirm-arp" "$T/breadcrumbs.on"
+setup 2        1 1 2                      1 1 2
+printf '  192.168.7.9 \r\n' > "$T/confirm-arp"
+run
+motd "confirm-arp with its address" "DEV AID confirm-arp: $T/confirm-arp is present, so every boot waits for an ARP reply from 192.168.7.9"
+motd "and the reset it risks" "resets every 120 s"
+if grep -q breadcrumbs "$T/motd"; then no "no breadcrumbs line without breadcrumbs.on"; else ok "no breadcrumbs line without breadcrumbs.on"; fi
+: > "$T/confirm-arp"
+run
+motd "an empty confirm-arp: no address, no effect" "present with no address: has no effect"
+printf '192.168.7.999\n' > "$T/confirm-arp"
+run
+motd "an invalid address is no address" "present with no address: has no effect"
+rm -f "$T/confirm-arp"
+: > "$T/breadcrumbs.on"
+run
+motd "breadcrumbs.on named" "DEV AID breadcrumbs.on: $T/breadcrumbs.on is present"
+if grep -q confirm-arp "$T/motd"; then no "no confirm-arp line without the file"; else ok "no confirm-arp line without the file"; fi
+rm -f "$T/breadcrumbs.on"
+run
+quiet "neither file, committed: still silent"
 
 echo
 echo "$pass passed, $fail failed"
