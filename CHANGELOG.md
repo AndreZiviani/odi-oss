@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.14.0 and metricsd v1.9.0. The web UI has the "VLAN
+  forward operation override" field on Config, VLAN (`RTK_DEVINFO_SPECVER`,
+  #301), a diagram of the stick on the Status tab, a faster page start
+  (two requests instead of nine, cached image files), and makes the OLT
+  lock of the Ethernet port opt-in to match `OMCI_UNI_LOCK`. The exporter
+  adds `gpon_olt_launch_power_dbm`, `gpon_pon_id_odn_class` and
+  `gpon_pon_id_reach_extender` from the PON-ID line (#321). The asset
+  hashes in src/release-sha256.txt are the release SHA256SUMS; confd and
+  metricsd were matched byte for byte by local builds of the tags, the
+  assets tarball by its contents. `test/sbom_test.sh` takes the pinned
+  metricsd tag from `src/fetch-releases.sh` instead of naming one.
+
 - omcli: a request to omcid gives up after 0.5 s when omcid is not taking
   it, with "omcid did not take the request: its queue stayed full for
   0.5 s" and status 1. Its own commands (`omcli state`, `omcli mib`,
