@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- OMCI respawn: the re-provisioning helper no longer acts on the previous
+  omcid's resume decision. `svc-omcid.sh` started the helper before the new
+  omcid existed (the supervisor can wait up to 2 s first), and a stale
+  `resumed` or `reprovision` file still in `/var/run` answered for the new
+  run. It now moves the old file to `omcid-resume-decision.prev` first, so
+  the helper only ever reads the new omcid's decision; omcid treats either
+  file as proof of a restart and removes both. Refs #324.
+
 - Docs: the Luleey LL-XS2510 is listed as reported working, on one user
   report, with `HOST_SERDES=2500basex` set before the first boot. The
   README now records the first hardware runs of the host SerDes mode

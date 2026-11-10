@@ -398,6 +398,7 @@ extern uint16_t alarm_snapshot;
 #define SNAPSHOT_PATH          "/var/run/omcid-mib.snap"
 #define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
 #define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
+#define RESUME_DECISION_PREV   RESUME_DECISION_PATH ".prev"
 int snapshot_save(void);
 /* Write `buf` to `tmp`, then rename it over `path`: a reader never sees a
  * half-written file. 0 on success. */
