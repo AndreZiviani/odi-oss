@@ -937,7 +937,9 @@ omcli uses omcid's own queue and commands:
     omcli cfgset <file> <dir> <key> <v>  write one key into a config store
     omcli help
 
-`bridge` and `cfgset` write; the rest read. The file arguments of `vlan` and
+`bridge` and `cfgset` write; the rest read. A rule built with `bridge` lasts
+until omcid next rebuilds its bridge connections, which withdraws every
+service it holds. The file arguments of `vlan` and
 `ident` are for tests: omcid loads what they name in place of the store, and
 keeps using it until it restarts. The stock command shapes
 (`get sn|log|logfile|devmode|dmmode|cflag|version`, `mib get <class>

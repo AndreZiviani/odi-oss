@@ -84,7 +84,7 @@ for isp in isp1 isp2; do
 	# netlink to ask the driver over). -w 6 is only a backstop: it is stopped
 	# once our three dumps are done.
 	: > "$after_log"
-	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -s 5 -g /tmp/resume-gpon-$isp > "$after_log" 2>&1 &
+	$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -s 5 -g /tmp/resume-gpon-$isp > "$after_log" 2>&1 &
 	pid=$!
 	omcid_up "$after_log"
 
@@ -99,7 +99,6 @@ for isp in isp1 isp2; do
 	mib_after=$($Q cli/build/omcli mib get all 2>&1 | grep -v '^    SysUpTime ')
 	conn_after=$($Q cli/build/omcli conn 2>&1)
 	flows_after=$($Q cli/build/omcli flows 2>&1)
-	omcid_stop "$pid"
 
 	# Plain temp files, not <(...): this runs under dash inside the
 	# toolchain image, which has no process substitution.
@@ -139,6 +138,24 @@ for isp in isp1 isp2; do
 		grep '^drv ' "$after_log" | head -20
 		fail=$((fail + 1))
 	fi
+	# The first later rebuild must withdraw every restored service before
+	# adding rules. MIB reset is independent of the stored VLAN mode.
+	# Every drv 50 in this log is counted, so the check holds only while
+	# the resumed omcid sends none before the rebuild: it is started
+	# without -r, whose clear of all 256 ids would land here too, and the
+	# check above has just found no driver call at all.
+	n=$(rebuilt "$after_log")
+	inject_wait "$after_log" "$(printf '7f004f0a00020000%064d00000028%08d' 0 0)"
+	wait_for "$after_log" 'bridge connections rebuilt' 30 $((n + 1))
+	want_ids=$(printf '%s\n' "$conn_before" | sed -n 's/^SERVID \([0-9]*\):.*/\1/p' | sort -n)
+	got_ids=$(sed -n 's/^drv 50 4 //p' "$after_log" | while read -r id; do printf '%d\n' "$((0x$id))"; done | sort -n)
+	if [ -n "$want_ids" ] && [ "$got_ids" = "$want_ids" ]; then
+		echo "ok    $isp: later MIB reset withdrew exactly the restored service ids"
+	else
+		echo "FAIL  $isp: later reset did not withdraw the restored service id set"
+		fail=$((fail + 1))
+	fi
+	omcid_stop "$pid"
 done
 
 # ---------------------------------------------------- a wide row resumes whole

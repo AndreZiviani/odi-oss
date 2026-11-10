@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- OMCI: a bridge rebuild in an omcid that resumed from a snapshot now
+  withdraws the services the snapshot restored. It took the ids to withdraw
+  from a list only the building process had, which is empty after a resume,
+  so a VLAN change then left the old rules in the switch beside the new
+  ones. The rebuild goes by the service table itself. `omcli bridge` rules
+  are in that table too and are withdrawn by the next rebuild. The resume
+  regression resets the resumed MIB and checks that every restored id is
+  withdrawn; not run under qemu or on hardware yet. Refs #305.
+
 - OMCI: deleting a downstream GEM CTP now withdraws its own flow when no
   surviving CTP or multicast table owns that port, so replacing CTPs on
   new GEM ports no longer uses up the 64 flow slots. Only a downstream or
