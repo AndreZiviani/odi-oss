@@ -226,7 +226,9 @@ A release is cut only when the maintainer asks for one. Before tagging:
 6. **Tag a commit that is on `origin/main`** (final tags only).
    `release.yml` refuses a final tag on any other commit, and publishes
    nothing, final or pre-release, until the whole of `ci.yml` (including `test-qemu`, the rcS goldens and
-   `reproducible`) has passed on that exact commit. The tag push therefore
+   `reproducible`) has passed on that exact commit, and the `release` job
+   then waits in the protected `release` environment until the maintainer
+   approves the deployment (the run's *Review deployments*). The tag push therefore
    starts one long run (up to ~90 minutes for `reproducible`), not a quick
    one; to rehearse it without a tag, run `release` by hand
    (`gh workflow run release.yml --ref <branch>`), a dry run that stops

@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Releases: the publishing job runs in a protected `release` environment,
+  so a release is published only after the maintainer approves it, once
+  all of CI has passed on the tag commit. The repository now also keeps
+  release tags (`v*`) immutable and signed, lets only admins create them,
+  and asks for a pull request with green CI on `main` (admins can still
+  push release commits). Refs #259.
+
 - Releases: confd v1.14.0 and metricsd v1.9.0. The web UI has the "VLAN
   forward operation override" field on Config, VLAN (`RTK_DEVINFO_SPECVER`,
   #301), a diagram of the stick on the Status tab, a faster page start

@@ -86,6 +86,11 @@ jobs:
     needs: [gate, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # The protected environment: publishing waits for the maintainer to
+    # approve the deployment (Settings, Environments, release: a required
+    # reviewer, deployments from v* tags only), so a pushed tag alone does
+    # not publish a release.
+    environment: release
     timeout-minutes: 60
     permissions:
       contents: write # gh release create/edit/upload
