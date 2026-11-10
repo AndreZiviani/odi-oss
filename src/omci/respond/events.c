@@ -797,6 +797,38 @@ void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used)
 	ev_emit(&e, EV_SEV_NOTICE);
 }
 
+/* A class 84 port built with the owner override of its FwdOp in place of
+ * the code the OLT wrote (RTK_DEVINFO_SPECVER, cfgstore.c). Once per port
+ * and pair of codes, for the same reason as above. */
+void ev_vlan_fwdop_override(uint16_t inst, uint8_t code, uint8_t used)
+{
+	static struct { uint16_t inst; uint8_t code, used; } seen[FWDOP_OVR_MAX];
+	static int nseen;
+	static const char hex[] = "0123456789abcdef";
+	char c[5] = { '0', 'x', hex[code >> 4], hex[code & 15], 0 };
+	char u[5] = { '0', 'x', hex[used >> 4], hex[used & 15], 0 };
+	struct evline e;
+	int k;
+
+	for (k = 0; k < nseen && seen[k].inst != inst; k++)
+		;
+	if (k < nseen && seen[k].code == code && seen[k].used == used)
+		return;
+	if (k == nseen && nseen < FWDOP_OVR_MAX)
+		nseen++;
+	if (k < nseen) {
+		seen[k].inst = inst;
+		seen[k].code = code;
+		seen[k].used = used;
+	}
+	ev_begin(&e, "vlan_fwdop");
+	ev_str(&e, "code", c);
+	ev_num(&e, "inst", inst);
+	ev_str(&e, "result", "override");
+	ev_str(&e, "built_as", u);
+	ev_emit(&e, EV_SEV_NOTICE);
+}
+
 /* The OLT locked or unlocked an Ethernet UNI (apply_uni.c). action is
  * applied (OMCI_UNI_LOCK=1: the host link goes down now, and with it the
  * web UI and ssh, so the line is a warning and is sent before the port is
