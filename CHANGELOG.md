@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Firmware: `fwu_starter.sh` takes a file lock before it touches the
+  shared extraction directory, in both modes, and the flasher inherits it,
+  so the lock lasts until the write ends even if the starter is killed. A
+  foreground write was not recorded anywhere and a second starter could
+  run beside it; it now also claims the state file, so the upload guard
+  sees it, and refuses to flash when it cannot. The web UI upload guard
+  still reads the state file only. Host-tested with stub writers, four
+  starters at once included; no flash written on a stick. Refs #308.
+
 - Apply: when a disabled service has no daemon pid, wake all anonymous
   service placeholders so its own init entry rereads the setting. Signal
   errors are reported as failures. Host-tested with two placeholders;
