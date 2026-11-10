@@ -38,15 +38,19 @@ STUB
 # The stub diag: the counters are files in $FAKE_STATE, owned by the diag
 # reading stdin that installed the first one. Each counts FAKE_RATE a
 # second, or FAKE_ZERO_PON=1 nothing on the PON; the MIB of each port moves
-# by what the stub's three PON or UNI rules would sum to.
+# by what the stub's three PON or UNI rules would sum to. The holder diag
+# and the readers run side by side, so every file a reader can open (the
+# owner, a slot) is written whole to a temporary name and renamed into
+# place: a reader sees the old file or the new one, never an empty one,
+# which it would take for an owner that is gone and drop every counter.
 cat > "$W/bin/diag" <<'STUB'
 #!/bin/sh
 S=$FAKE_STATE
 gone() { rm -f "$S"/slot* "$S/owner"; }
+put() { echo "$2" > "$S/new.$$" && mv "$S/new.$$" "$S/$1"; }
 held() { [ -f "$S/owner" ] && ! kill -0 "$(cat "$S/owner")" 2>/dev/null && gone; return 0; }
 show() {
-	if [ -f "$S/slot$1" ]; then
-		read -r port since < "$S/slot$1"
+	if read -r port since 2> /dev/null < "$S/slot$1"; then
 		n=$(( ($(cat "$FAKE_CLOCK") - since) * ${FAKE_RATE:-2} ))
 		[ "$port" = pon ] && [ "${FAKE_ZERO_PON:-0}" = 1 ] && n=0
 		echo "slot=$1 entry=$((48 + $1)) counter=$1 port=2 match=mac dst=33:33:00:00:00:00/16 unit=frames counted=$n now=0x00000000"
@@ -66,8 +70,8 @@ run() {
 	"mc-count frames"|"mc-count bytes")
 		if [ "$OWNER" != 1 ]; then echo "% busy"; return; fi
 		[ -f "$S/slot$3" ] && { echo "% busy"; return; }
-		echo "$$" > "$S/owner"
-		echo "$4 $(cat "$FAKE_CLOCK")" > "$S/slot$3"
+		put owner "$$"
+		put "slot$3" "$4 $(cat "$FAKE_CLOCK")"
 		echo "$*" >> "$S/log" ;;
 	"mib dump")
 		t=$(cat "$FAKE_CLOCK"); echo "$t.00 1.00" > "$FAKE_PROC/uptime"

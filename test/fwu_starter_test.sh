@@ -79,8 +79,11 @@ mkimg "$T/good.tar"
 mkimg "$T/bad.tar" bad
 
 run() {   # run <cmdline> [args...]
-	echo "$1" > "$T/cmdline"; shift
-	env PATH="$T/bin:$PATH" PROC_MTD="$T/mtd" PROC_CMDLINE="$T/cmdline" NV="$T/bin/nv" \
+	# One cmdline file per call: starters run side by side in the race
+	# test, and a shared file rewritten by one is read empty by another.
+	cl=$(mktemp "$T/cmdline.XXXXXX")
+	echo "$1" > "$cl"; shift
+	env PATH="$T/bin:$PATH" PROC_MTD="$T/mtd" PROC_CMDLINE="$cl" NV="$T/bin/nv" \
 	    FWU_DIR="$T/fwu.d" FWU_LOG="$T/fwu.log" FWU_STATE="$T/fwu.state" \
 	    sh "$S" "$@" 2>&1
 }

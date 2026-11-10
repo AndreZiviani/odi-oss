@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Tests: two host tests no longer fail now and then under load. In
+  `count_proof_test.sh` the stub `diag` rewrote its owner file in place, so
+  a reader that opened it mid-write took the holder for dead and dropped
+  every counter (the run then lacked a verdict); the owner and the counter
+  files are now written whole and renamed into place. In
+  `fwu_starter_test.sh` the four starters of the race check shared one
+  `cmdline` file, which one starter rewrote while another read it empty and
+  refused to write; each call now has its own file.
+
 - OMCI respawn: the re-provisioning helper no longer acts on the previous
   omcid's resume decision. `svc-omcid.sh` started the helper before the new
   omcid existed (the supervisor can wait up to 2 s first), and a stale
