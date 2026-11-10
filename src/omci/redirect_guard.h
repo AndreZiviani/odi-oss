@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Do not take a redirect type somebody else is using.
  *
  * Registering for a packet-redirect type overwrites whoever held it

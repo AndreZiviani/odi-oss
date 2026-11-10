@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Realtek/Lexra RLX5281 CCTL: CP0 register 20, the whole-cache
  * writeback/invalidate register (see arch/mips/rtl8686/cache.c's own

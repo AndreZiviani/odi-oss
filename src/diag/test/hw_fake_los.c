@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Scripted scenario: optical RX_LOS asserted (SFF-8472 A2h byte 110, bit 1)
  * -- no signal at all, as distinct from hw_fake_rx_drift.c's low-but-present
  * signal. The five numeric DDM fields still answer (a real module keeps

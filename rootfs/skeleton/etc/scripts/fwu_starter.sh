@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Write an uploaded image tarball to the slot this stick is NOT running.
 #
@@ -12,7 +15,8 @@
 # writes.
 #
 # What it does, in order, all before anything is erased:
-#   1. refuses a second write while one is running;
+#   1. refuses a second write while one is running, in either mode: a
+#      lock every writer inherits, taken before anything shared is touched;
 #   2. refuses any slot but the inactive one -- the running slot is read the
 #      way fwu.sh reads it, root=31:N in /proc/cmdline, then sw_active;
 #   3. extracts fwu.sh and md5.txt into a scratch directory in /tmp and checks
@@ -60,7 +64,17 @@ case "$tarball" in
 *) tarball=$(pwd)/$tarball ;;
 esac
 
-# One write at a time. The state file says running while fwu.sh is alive;
+# One writer at a time, in both modes. The lock is on a file of its own,
+# beside the state file and never removed, and fd 9 is inherited by
+# everything started below, fwu.sh included: it is held until the write
+# ends, even if this shell is killed first. The subshell probe is there
+# for the message: a redirection that fails on exec ends the shell before
+# any "|| die" could run.
+( : >> "$FWU_STATE.lock" ) 2>/dev/null || die "cannot open the writer lock $FWU_STATE.lock"
+exec 9>>"$FWU_STATE.lock"
+flock -n 9 || die "a write is already running; see $FWU_LOG"
+
+# The state file says running while fwu.sh is alive;
 # a state left saying running by a process that is gone (a reboot mid-write
 # cannot leave one, /tmp is RAM, but a kill can) does not block forever.
 st=''; pid=''
@@ -101,7 +115,16 @@ got=$(md5sum "$FWU_DIR/fwu.sh" | cut -d' ' -f1)
 say "slot $slot (running $running), $(basename "$tarball"), fwu.sh ok ($got)"
 
 if [ "$fg" = 1 ]; then
-	cd "$FWU_DIR" && exec sh ./fwu.sh "$slot" "$tarball"
+	# Claimed here too, for the upload guard, which reads only the state
+	# file: exec keeps this pid, so it is the flasher that the state
+	# names. Nothing is left to record the outcome; a running state whose
+	# pid is gone is read as stale.
+	echo "running $$ $slot" > "$FWU_STATE" || die "cannot record the writer state in $FWU_STATE"
+	if ! cd "$FWU_DIR"; then
+		echo "failed $$ $slot start" > "$FWU_STATE"
+		die "cannot enter $FWU_DIR"
+	fi
+	exec sh ./fwu.sh "$slot" "$tarball"
 fi
 
 : > "$FWU_LOG"

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Read back the GEM flows odi_switch has programmed -- ours, not a vendor
  * OMCI command.
  *

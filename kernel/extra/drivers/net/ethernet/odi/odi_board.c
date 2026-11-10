@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_board.c -- odi_board_init(), odi_board.h has the contract. Host
  * testable: everything it calls is modelled by test/odi_switch_mock.h.

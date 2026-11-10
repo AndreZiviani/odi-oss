@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_log.h -- the ACL log counters, shared by everything that
  * counts with them: the probes of diag acl-probe (odi_switch_acl_probe.h,

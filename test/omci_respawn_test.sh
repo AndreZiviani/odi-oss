@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/omci-respawn-reprovision.sh, off the device --
 # the automatic re-provisioning svc-omcid.sh backgrounds after init respawns
@@ -142,6 +145,38 @@ t "the respawn branch backgrounds the reprovision script" \
   '/etc/scripts/omci-respawn-reprovision\.sh &' "$svc"
 t "the first-start branch writes the marker instead" \
   ': > "\$MARKER"' "$svc"
+
+# A respawn must not read the decision of the previous omcid as its own.
+# svc-omcid.sh is run from a copy with its absolute paths pointed into $T;
+# the stub helper records, at the moment it starts, what the decision file
+# holds and whether the old one was set aside for omcid to find (omcid takes
+# either file as proof of a restart, so deleting it would make every respawn
+# look like a first start).
+mkdir -p "$T/scripts"
+sed -e "s#/etc/scripts/#$T/scripts/#g" -e "s#\[ -x /bin/omcid \]#[ -x $T/omcid ]#" "$SVC" > "$T/svc-omcid.sh"
+cat > "$T/scripts/omci-respawn-reprovision.sh" <<HELPER
+#!/bin/sh
+if [ -e "$T/dec" ]; then echo "dec=\$(cat "$T/dec")"; else echo "dec=none"; fi > "$T/helper.seen"
+[ -e "$T/dec.prev" ] && echo "prev=\$(cat "$T/dec.prev")" >> "$T/helper.seen"
+exit 0
+HELPER
+printf '#!/bin/sh\nexit 0\n' > "$T/scripts/respawn.sh"
+chmod +x "$T/scripts/omci-respawn-reprovision.sh" "$T/scripts/respawn.sh"
+svc_run() {
+	rm -f "$T/helper.seen"
+	env SVC_OMCID_MARKER="$T/marker" RESUME_DECISION="$T/dec" sh "$T/svc-omcid.sh"
+	poll '[ -s "$T/helper.seen" ]'
+	cat "$T/helper.seen" 2>/dev/null
+}
+rm -f "$T/marker" "$T/dec" "$T/dec.prev"
+printf 'resumed\n' > "$T/dec"
+seen=$(svc_run)
+t "first start of the boot starts no helper" "^none$" "${seen:-none}"
+t "and leaves the decision file for omcid to find" "^resumed$" "$(cat "$T/dec")"
+seen=$(svc_run)
+t "a respawn: the helper sees no decision file, so a stale one cannot answer" "^dec=none" "$seen"
+t "and the old decision is kept as .prev for omcid's restart detection" "^prev=resumed$" "$(grep '^prev=' "$T/helper.seen")"
+t "the old file is gone from the path the helper reads" "^1$" "$([ -e "$T/dec" ]; echo $?)"
 
 echo
 echo "$pass passed, $fail failed"

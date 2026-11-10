@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_nic.h -- the odi_nic.c <-> odi_omci.c interface: the RX/TX descriptor
  * word copies and the rxhook registration.

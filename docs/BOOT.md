@@ -147,9 +147,12 @@ reset: a trial that never answered still says how far it got
    in `/etc/inittab`
    (`/etc/scripts/svc-*.sh`, `docs/SETTINGS.md`, "native over hand-rolled"):
    busybox init starts all of them the moment this script returns and
-   restarts whichever one exits, forever, on its own -- no rate limit, no
-   restart budget, and no chance of losing track of the pid the way the
-   old shell-loop `supervise()` once did on hardware. Each script sets its
+   restarts whichever one exits, forever, on its own, with no chance of
+   losing track of the pid the way the old shell-loop `supervise()` once
+   did on hardware. A daemon that dies within 30 s of its start is
+   restarted after a growing wait (1 s, 2 s ... up to a cap per daemon,
+   `docs/SETTINGS.md`, "Restart budget"); the first start of the boot never
+   waits, and none of it runs before rcS has returned. Each script sets its
    own `oom_score_adj` right before it execs the daemon in place
    (`/etc/scripts/respawn.sh`), with its output appended to
    `/var/log/services.log` (`/var/log/omcid.log` for omcid) -- a file
@@ -355,7 +358,13 @@ path unchanged.
 (`"resumed"` or `"reprovision"`) before doing anything else that could
 fail or block, so `omci-respawn-reprovision.sh` -- backgrounded by
 `svc-omcid.sh` the same moment `omcid` starts -- only has to wait on that
-file briefly (`DECISION_WAIT`, 5 s default), not for full registration. A
+file briefly (`DECISION_WAIT`, 5 s default), not for full registration.
+The file still on tmpfs at that moment is the previous `omcid`'s, so
+`svc-omcid.sh` moves it to `/var/run/omcid-resume-decision.prev` before it
+backgrounds the helper: what the helper reads can only be the new `omcid`'s
+own decision. `omcid` takes either file as proof that an earlier run existed
+(a restart, not the first start of the boot) and removes both before it
+writes its decision. A
 `"resumed"` decision skips the deactivate/reactivate dance entirely and
 exits; anything else (including no file at all inside the wait, the safe
 default) runs the re-provisioning this section used to be the whole story

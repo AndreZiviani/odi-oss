@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_ctr.h -- the GPON MAC link counters, accumulated, and the link
  * state accounting kept beside them, for /proc/odi_gpon/status and
@@ -186,8 +187,8 @@ void odi_gpon_ctr_note_transition(struct odi_gpon_ctr *c, unsigned int from, uns
 /* The lines of /proc/odi_gpon/status and /proc/odi_gpon/counters that come
  * from the sampler, each passed to put() whole, newline included. The status
  * ones are the live alarm and FEC bits, the alarm and ONU state times and the
- * state transitions; the counters ones are the sample count and the 64-bit
- * totals. docs/TOOLS.md, "/proc/odi_gpon/", has the format.
+ * state transitions; the counters ones are the sample count, the frame count
+ * and downstream FEC bit of that sample, and the 64-bit totals. docs/TOOLS.md, "/proc/odi_gpon/", has the format.
  */
 typedef void (*odi_gpon_ctr_put_fn)(void *ctx, const char *line);
 void odi_gpon_ctr_show_status(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_fn put, void *ctx);

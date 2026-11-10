@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # igmpd — IGMP snooping, milestone 1: the receive path.
 #
 # Same arrangement as omci/capture: diag owns the freestanding runtime (_start,
@@ -8,6 +11,7 @@
 # and pulled on first use; DIAG_IMAGE overrides it (toolchain/image.sh).
 TOP := $(CURDIR)/../..
 -include $(TOP)/toolchain/images.env
+include $(TOP)/src/harden.mk
 DIAG_IMAGE ?= $(DIAG_IMAGE_PINNED)
 IMAGE := $(DIAG_IMAGE)
 CROSS := mips-linux-gnu-
@@ -28,21 +32,22 @@ STRIP := $(CROSS)strip
 
 CFLAGS := -std=c11 -Os -Wall -Wextra \
           -march=mips1 -mabi=32 -EB -msoft-float -G0 \
-          -fno-pic -mno-abicalls -ffreestanding -fno-builtin -fno-stack-protector \
+          -fno-pic -mno-abicalls -ffreestanding -fno-builtin $(HARDEN_CFLAGS) \
           -ffunction-sections -fdata-sections \
           -I. -I$(DIAG)/src
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
-           -Wl,--gc-sections
+           -Wl,--gc-sections $(HARDEN_LDFLAGS)
 
 # switch_opt.c holds the /dev/odi_sw ioctls this daemon programs the switch
 # with; its header lists them. uplink.c is the way up for a taken report,
 # mld.c the IPv6 half (-6).
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o $(BUILD)/group.o \
-        $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/status.o $(BUILD)/entry.o $(BUILD)/program.o $(BUILD)/switch_opt.o \
+        $(BUILD)/policy.o $(BUILD)/state.o $(BUILD)/status.o $(BUILD)/entry.o $(BUILD)/program.o $(BUILD)/rows.o $(BUILD)/switch_opt.o \
         $(BUILD)/uplink.o $(BUILD)/meter.o $(BUILD)/mld.o $(BUILD)/replay.o $(BUILD)/main.o
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(HARDEN_CHECK) $@
 	$(STRIP) $@
 
 $(TEST): test/frame_test.c igmpd.h $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/frame.o
@@ -69,6 +74,11 @@ $(ETEST): test/entry_test.c entry.h $(DIAG)/src/odi_sw_ioctl.h $(BUILD)/start.o 
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ test/entry_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/entry.o
 
+# The actual daemon paths with only hardware mutations wrapped for faults.
+$(BUILD)/rows_retry_test: test/rows_retry_test.c $(OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=igmp_hw_mac_set -Wl,--wrap=igmp_hw_mac_del \
+	      -Wl,--wrap=igmp_hw_snoop -o $@ $(filter-out $(BUILD)/main.o,$^)
+
 $(BUILD)/start.o: $(DIAG)/src/start.S | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -93,6 +103,9 @@ $(BUILD)/policy.o: policy.c policy.h entry.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h 
 $(BUILD)/entry.o: entry.c entry.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+$(BUILD)/rows.o: rows.c rows.h program.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 $(BUILD)/program.o: program.c program.h entry.h switch_opt.h $(DIAG)/src/odi_sw_ioctl.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -111,7 +124,7 @@ $(BUILD)/mld.o: mld.c mld.h group.h policy.h igmpd.h $(DIAG)/src/odi_sw_ioctl.h 
 $(BUILD)/replay.o: replay.c replay.h igmpd.h group.h policy.h entry.h mld.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c uplink.h meter.h mld.h status.h replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/main.o: main.c rows.h uplink.h meter.h mld.h status.h replay.h igmpd.h group.h policy.h state.h program.h entry.h ../omci/nl.h ../omci/redirect_guard.h ../omci/procparse.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD):
@@ -135,13 +148,14 @@ igmpd: image
 # qemu with no device and no netlink. That is the point of keeping frame.c
 # free of syscalls.
 test: image
-	$(RUN) make IN_CONTAINER=1 $(TEST) $(GTEST) $(ETEST) $(PTEST) $(UTEST) $(MTEST) $(BIN)
+	$(RUN) make IN_CONTAINER=1 $(TEST) $(GTEST) $(ETEST) $(PTEST) $(UTEST) $(MTEST) $(BIN) $(BUILD)/rows_retry_test
 	@$(RUN) qemu-mips-static $(TEST)
 	@$(RUN) qemu-mips-static $(GTEST)
 	@$(RUN) qemu-mips-static $(ETEST)
 	@$(RUN) qemu-mips-static $(PTEST)
 	@$(RUN) qemu-mips-static $(UTEST)
 	@$(RUN) qemu-mips-static $(MTEST)
+	@$(RUN) qemu-mips-static $(BUILD)/rows_retry_test
 	@$(RUN) sh test/replay_test.sh
 
 size: igmpd

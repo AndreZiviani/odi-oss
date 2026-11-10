@@ -6,24 +6,41 @@ README first if you have not already.
 
 ## Verifying a release
 
-Every GitHub release (`.github/workflows/release.yml`) ships four files
-beside the image tarball: `SHA256SUMS`, a CycloneDX SBOM (`sbom.cdx.json`,
-built by `tools/generate-sbom.sh` from the pins already in this tree --
-kernel, toolchain, busybox/dropbear/iproute2, and the metricsd/confd tags
-this build actually fetched), and two GitHub attestations covering the
-tarball: build provenance (this came from this repository's `release.yml`,
-from this commit) and an SBOM attestation (this SBOM describes this
-tarball). Checking them needs only `gh`, already authenticated:
+Every GitHub release (`.github/workflows/release.yml`) ships beside the image
+tarball: `<version>-sources.tar`, `SHA256SUMS` (the tarball, the sources and
+the SBOM), a CycloneDX SBOM (`sbom.cdx.json`, built by
+`tools/generate-sbom.sh`), and two kinds of GitHub attestation: build
+provenance (this came from this repository's `release.yml`, from this commit)
+for the tarball, the sources, the SBOM and `SHA256SUMS`, and an SBOM
+attestation (this SBOM describes this tarball). Checking them needs only `gh`,
+already authenticated:
 
     gh attestation verify odi-oss-<version>.tar -R AndreZiviani/odi-oss
+    gh attestation verify sbom.cdx.json -R AndreZiviani/odi-oss
     sha256sum -c SHA256SUMS
 
-`gh attestation verify` checks both attestation types against the file on
-disk and reports which workflow run produced them; a mismatch (wrong file,
-tampered tarball, or a build from a fork) fails loudly rather than silently
-serving a false positive. The SBOM itself is human-readable JSON --
-`jq . sbom.cdx.json`, or open it in anything that reads CycloneDX -- and is
-also covered by `gh attestation verify sbom.cdx.json -R AndreZiviani/odi-oss`.
+`gh attestation verify` checks the attestations against the file on disk and
+reports which workflow run produced them; a mismatch (wrong file, tampered
+tarball, or a build from a fork) fails loudly rather than silently serving a
+false positive.
+
+The SBOM is human-readable JSON (`jq . sbom.cdx.json`) and lists the runtime
+components of the image apart from the build tools: every runtime component
+has a version, a purl, a license and a place in the dependency graph, each
+file the image carries (the binaries, the `confd` web assets, the register
+replay tables) has its SHA-256 and the path it has in the rootfs, and gcc and
+binutils are marked `excluded` (build only). To check the SBOM itself, with
+python3 and nothing else:
+
+    tools/verify-sbom.sh sbom.cdx.json --sums SHA256SUMS
+
+That checks the structure, the licenses, the hashes, that no build tool is a
+runtime dependency and that the SBOM is the one `SHA256SUMS` lists. Add
+`--rootfs <dir>` with the rootfs of the image unpacked (`tar -xf
+<version>.tar`, then `unsquashfs -d <dir> rootfs`) to re-hash every file the
+SBOM lists against the real image. CI runs the same check against a generated
+SBOM and against deliberately broken ones (`test/sbom_test.sh`, part of
+`make test-host`).
 
 ## Backing up the whole flash
 

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # compare.py aligns command brackets between two ring dumps by command
 # number and occurrence order, diffs their write sequences, and exits
 # non-zero if any bracket differs.

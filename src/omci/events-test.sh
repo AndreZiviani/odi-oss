@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The event lines (respond/events.c) and `omcli provision` (respond/show.c),
 # against a whole ISP1 provisioning session: the same OLT side drv-test.sh
 # replays for the driver-call golden (test/fixtures/omci-session-isp1.txt),
@@ -48,6 +51,26 @@ cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 rm -f /var/log/omcid-unknown.txt /var/config/odi.conf
 rm -f /var/config/lastgood_hs.xml
 # No decision file: to omcid this is the first start of the boot.
+rm -f /var/run/omcid-resume-decision /var/run/omcid-resume-decision.prev
+
+# A respawn: svc-omcid.sh has moved the previous omcid decision to .prev, so
+# there is no decision file, and that alone must still read as a restart.
+# Both files are gone once this omcid has written its own decision.
+printf 'resumed\n' > /var/run/omcid-resume-decision.prev
+rlog=/tmp/omcid-events-restart.log
+: > "$rlog"
+$Q respond/build/omcid -w 12 -c "$CAPS" -g /tmp/events-gpon-restart > "$rlog" 2>&1 &
+rpid=$!
+need "$rlog" '^event=start ' 10
+got=$(grep '^event=start ' "$rlog" | sed 's/ mode=.*//')
+check "start: only the .prev decision of the last run is left, so a restart" "$got" \
+      "event=start run=restart"
+got=$(cat /var/run/omcid-resume-decision 2>/dev/null)
+check "and the decision file holds this run's own" "$got" "reprovision"
+[ -e /var/run/omcid-resume-decision.prev ]; got=$?
+check "and the .prev of the last run is gone" "$got" "1"
+kill "$rpid" 2>/dev/null
+wait "$rpid" 2>/dev/null
 rm -f /var/run/omcid-resume-decision
 
 log=/tmp/omcid-events.log

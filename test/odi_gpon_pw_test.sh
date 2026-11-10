@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_gpon_pw_test.sh -- compiles and runs odi_gpon_pw_test.c with the host cc.
 # odi_gpon_pw.c has no kernel dependency. Part of `make test-host`.
 set -euo pipefail

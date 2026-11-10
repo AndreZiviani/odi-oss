@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_ddm.h -- the seven SFF-8472 DDM readings RTK_OPT_TRANSCEIVER used to
  * answer, now read directly over the SoC I2C controller (odi_i2c.c)

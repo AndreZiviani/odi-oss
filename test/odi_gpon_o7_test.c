@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_o7_test.c -- the laser in Emergency Stop (O7): the GPON leaf
  * asserts the module's TX-disable line when it writes state O7 and

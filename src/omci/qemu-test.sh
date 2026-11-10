@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Exercise omcid without a stick.
 #
 # qemu-user cannot open our netlink protocol (NETLINK_ODI; the stock firmware
@@ -1133,6 +1136,49 @@ check "with its own line" "$got" "1"
 check "past the table (0x22): built as 0x10" "$(fwdop 22)" \
       "vid-filter vid 100 pri -1
 vid-filter vid 200 pri -1"
+
+# The owner override of FwdOp (RTK_DEVINFO_SPECVER, the stock firmware key
+# and format, cfgstore.c): the rules of a named port are built from its
+# code, the attribute keeps the one the OLT wrote. omcli vlan <store> loads
+# the key, the next Set rebuilds.
+ovr() {   # ovr <value>: a store with only the override key, loaded
+	printf '<Config Name="ROOT">\n\t<Dir Name="MIB_TABLE">\n\t\t<Value Name="RTK_DEVINFO_SPECVER" Value="%s"/>\n\t</Dir>\n</Config>\n' \
+		"$1" > /tmp/fwdop-ovr.xml
+	$Q cli/build/omcli vlan /tmp/fwdop-ovr.xml 2>&1 | grep '^fwdop'
+}
+check "omcli vlan shows the override" "$(ovr 0x12:0x00)" \
+      "fwdop       84/0012 built as 0x00 (RTK_DEVINFO_SPECVER)"
+check "0x10 from the OLT, 0x00 by the owner: one forward-all rule" "$(fwdop 10)" \
+      "forward-all vid -1 pri -1"
+got=$(grep '^event=vlan_fwdop code=0x10' /tmp/omcid4.log)
+check "and logged as an override" "$got" \
+      "event=vlan_fwdop code=0x10 inst=18 result=override built_as=0x00"
+got=$($Q cli/build/omcli mib get 84 --vendor 2>&1 | grep '^FwdOp')
+check "the attribute still holds what the OLT wrote" "$got" "FwdOp:  0x10"
+fwdop 10 > /dev/null
+got=$(grep -c '^event=vlan_fwdop code=0x10' /tmp/omcid4.log)
+check "said once, however often it is rebuilt" "$got" "1"
+ovr "18" > /dev/null
+check "an entry without a code (decimal instance): 0x02, as on the stock firmware" \
+      "$(fwdop 10)" "tagged vid -1 pri -1"
+ovr "0x13:0x00, 0x12:0x03" > /dev/null
+check "two entries, one of them this port" "$(fwdop 10)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1
+untagged vid -1 pri -1"
+ovr "0x13:0x00" > /dev/null
+check "a port the key does not name keeps the OLT code" "$(fwdop 10)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1"
+for bad in "0x12:0x00,0x12" "0x12:0x100" "0x12:zz" "0x10000" "0x12:"; do
+	got=$(ovr "$bad")
+	check "malformed ($bad): the whole key ignored" "$got" \
+	      "fwdop       RTK_DEVINFO_SPECVER malformed, ignored"
+done
+check "and the OLT code built" "$(fwdop 10)" \
+      "vid-filter vid 100 pri -1
+vid-filter vid 200 pri -1"
+check "an empty key: no override" "$(ovr '')" ""
 
 # The manual tag on (VID 10, priority 0 from the fixture store): an
 # untagged-bridging code builds the manual add-tag rule in place of the

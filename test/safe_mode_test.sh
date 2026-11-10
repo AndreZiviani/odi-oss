@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/safe-mode.sh, off the device, over simulated
 # boots: the counter on a temporary config partition, the uptime a file,
@@ -25,6 +28,8 @@
 # without the mount and address checks, and a normal boot with them.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=test/host-flock.sh
+. test/host-flock.sh
 S=$PWD/rootfs/skeleton/etc/scripts/safe-mode.sh
 F=$PWD/rootfs/skeleton/etc/scripts/flash
 LIB=$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh

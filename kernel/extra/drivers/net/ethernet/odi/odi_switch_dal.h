@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_dal.h -- the switch-core leaves the OMCI driver commands
  * (odi_switch_cmd.c) and the switch init are built from, one function per

@@ -62,10 +62,10 @@ compiles with:
 
     CFLAGS := -std=c11 -Os -Wall -Wextra \
               -march=mips1 -mabi=32 -EB -msoft-float -G0 \
-              -fno-pic -mno-abicalls -ffreestanding -fno-builtin -fno-stack-protector \
+              -fno-pic -mno-abicalls -ffreestanding -fno-builtin $(HARDEN_CFLAGS) \
               -ffunction-sections -fdata-sections
     LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
-               -Wl,--gc-sections
+               -Wl,--gc-sections $(HARDEN_LDFLAGS)
 
 (the freestanding tools build against Debian's `gcc-mips-linux-gnu` at
 `-march=mips1`, in the freestanding toolchain image, which is what CI uses and is a stricter subset than
@@ -76,7 +76,10 @@ there is no runtime here to set `$gp` up — and `-fno-pic -mno-abicalls`
 keeps the code absolute rather than position-independent, again because
 there is no dynamic linker to relocate it. `-nostdlib -nostartfiles` means
 no libc and no crt0 at all; `-Wl,-e,_start` tells the linker your own entry
-point is called `_start`.
+point is called `_start`. `HARDEN_CFLAGS` and `HARDEN_LDFLAGS` come from
+`src/harden.mk`, shared by every Makefile in `src/`; "Hardening the
+freestanding binaries" below says what they are and what the usual set
+leaves out here.
 
 **The entry point and the syscall layer**, shared by every freestanding tool
 (`src/diag/src/start.S`, reused by `src/nv`'s Makefile):
@@ -85,6 +88,8 @@ point is called `_start`.
 _start:
 	lw	$a0, 0($sp)		/* argc */
 	addiu	$a1, $sp, 4		/* argv */
+	jal	ssp_seed		/* the stack protector guard, see "Hardening" */
+	nop
 	addiu	$sp, $sp, -24		/* 16B arg save area, 8B-aligned */
 	move	$fp, $zero		/* terminate the frame chain */
 	jal	main
@@ -145,6 +150,73 @@ This is the same pattern for any autotools- or kbuild-style project: set
 image (`/opt/oss/bin`), set `ARCH=mips` if the project's build system asks for it, and make
 sure your own `CFLAGS` carry the three flags above — many build systems will
 not add them for you even when they otherwise get the target right.
+
+## Hardening the freestanding binaries
+
+`omcid` parses OMCI from the OLT and `igmpd` parses IGMP and MLD from the
+host and the PON side, both as root. The usual hardening set of a Linux
+distribution (FORTIFY, PIE, RELRO, BIND_NOW) assumes a libc and a dynamic
+linker, and these binaries have neither, so each mitigation was weighed for
+this target on its own. Every tool in `src/` gets the same flags, from one
+place, `src/harden.mk`, because they share one runtime (`start.S`, `io.c`).
+The compiler is the one in the freestanding toolchain image (Debian gcc
+12.2, binutils 2.40; `toolchain/images.env`). The busybox, dropbear and
+iproute2 builds use the uClibc-ng toolchain and are not covered here.
+
+| mitigation | state | why |
+|---|---|---|
+| `-fstack-protector-strong` | **on** | gcc on MIPS checks against a global `__stack_chk_guard`, not a TLS slot, so a freestanding program can provide it. `start.S` does: `_start` seeds the guard from the 16 random bytes the kernel passes in the aux vector (`AT_RANDOM`) before `main` runs, keeping the first byte in memory zero as glibc does (24 random bits on a 32-bit word), and `__stack_chk_fail` writes `stack-protector: stack smashing detected, aborting` to stderr (the daemon's own log, through `respawn.sh`) and to `/dev/kmsg` (`logread`, `dmesg`, the ramlog), then kills the process with SIGABRT, its default action restored first (so no handler runs), and `exit_group(127)` if SIGABRT is blocked. No wait anywhere: the process ends at once, `print-fatal-signals=1` logs its pid and registers, and init respawns it. Both are assembly because both must not be protected themselves: the seed runs before the guard holds its value, the failure path on a frame known to be overwritten. |
+| `-fstack-clash-protection` | **on** | gcc 12 implements it on MIPS as one probe store in every prologue, plus a probe loop for a frame over 4 KB. Nothing needs it today: the largest frame in any of these binaries is 8 KB (`nv`'s `env_set`; omcid's largest is 4.5 KB), none is sized at run time (no VLA, `-Wvla` keeps it so, no `alloca`), and the guard gap below a Linux stack is 1 MB. It is there so that a future large or dynamic frame cannot step over that gap. |
+| `-ftrivial-auto-var-init=zero` | **on** | a local read before it is written reads zero, not what an earlier call left on the stack. |
+| `-fno-strict-overflow` | **on** | signed and pointer arithmetic wrap, so a length check written as an overflow test is never optimised away. Costs nothing measurable. |
+| non-executable stack (`PT_GNU_STACK`) | **on**, declared | `-z noexecstack`, and a `.note.GNU-stack` section in `start.S`: one object without that note makes the linker mark the whole program as needing an executable stack (`GNU_STACK RWE`). The RLX5281 has no execute-inhibit bit (no RI/XI, an R3000-class TLB), so the hardware executes any readable page: the flag changes what the kernel records for the mapping, not what the CPU allows. It is kept because it is the correct declaration and costs nothing. |
+| no writable and executable segment | **on**, checked | text and rodata are one `R E` segment, data and bss one `RW` segment. Same caveat as the stack: nothing enforces it in hardware. |
+| `_FORTIFY_SOURCE` | not applicable | it swaps libc calls (`memcpy`, `strcpy`, `sprintf`, `read`) for checked versions through glibc headers. There are no libc headers here and no such calls: copies go through our own bounded helpers (`str_copy` takes the destination size), `out_fmt` writes through the bounded output buffer, and `memcpy`/`memset` in `io.c` exist only for the copies the compiler emits for struct assignments, whose sizes are constants. A home-made `__builtin_object_size` wrapper would have nothing to check. |
+| format checking (`-Wformat-security`) | not applicable | `out_fmt` is not printf: by design it takes every integer as a `long` (`io.c`), so printf's checker flags its correct calls (the attribute was tried: every `%d` call site warns). Every format string is a literal. |
+| PIE, static-pie, ASLR of the program | off | the binaries are static `ET_EXEC` at 0x400000: text, data and bss sit at fixed addresses, while the kernel still randomises the stack and the mmap base for them (mainline `fs/binfmt_elf.c`). static-pie on MIPS o32 needs `-mabicalls` code, every call and global access through `$t9` and the GOT, and a self-relocator in `_start` that does what the dynamic linker does for the MIPS GOT (local entries, global entries, the `DT_MIPS_*` tags): a loader of our own. Measured on omcid: +7.3% text and +18 KB of GOT and relocated data. Not worth it on a CPU where data is executable anyway, below. |
+| RELRO, BIND_NOW | not applicable | no dynamic linker, no PLT, no GOT (`-mno-abicalls`), no `.init_array`: nothing is written by relocation at start-up that could then be made read-only. Constant data, function-pointer tables declared `const` included, is in `.rodata`, in the read-only segment already. |
+| `-fcf-protection`, shadow stack, `-mbranch-protection` | not available | x86 and AArch64 only (gcc refuses `-fcf-protection` for this target). |
+| `-fzero-call-used-regs` | off | gcc accepts it on MIPS, but it is aimed at return-oriented gadgets on x86, and costs instructions on every return. |
+
+What this does not cover, so it is not mistaken for more: the stack
+protector catches a linear overrun of a local array that reaches the
+return path; it does not catch an indexed write that skips the guard, and
+it covers no static buffer. Most of omcid's state, its receive buffers
+included, is static (`.bss`, about 500 KB), and no compiler mitigation here
+protects it; with no execute-inhibit bit and fixed addresses, a corrupted
+function pointer in `.bss` is still a way to run code. The defence there is
+the code: bounded parsers, and the host tests under ASan and UBSan
+(`make test-host-asan`).
+
+**What it costs**, text bytes of the stripped binaries, before and after:
+
+| binary | before | after | growth |
+|---|---|---|---|
+| omcid | 211328 | 224980 | +13652 (+6.5%) |
+| igmpd | 65232 | 69612 | +4380 (+6.7%) |
+| omcicap | 37340 | 38140 | +800 (+2.1%) |
+| diag | 29804 | 33700 | +3896 (+13.1%) |
+| omcli | 15036 | 16024 | +988 (+6.6%) |
+| nv | 12172 | 13708 | +1536 (+12.6%) |
+| omciprobe | 8488 | 9196 | +708 (+8.3%) |
+
+Of omcid's growth, the stack protector is about 9.1 KB, zero-initialised
+locals 3.3 KB, the stack clash probes 1.2 KB and the runtime in `start.S`
+0.4 KB; `-fno-strict-overflow` changes nothing measurable.
+
+**Checked on every build.** Every Makefile in `src/` runs
+`tools/check-hardening.sh` on the binary it ships, after the link and before
+the strip (the checks need the symbol table), so `make src`, `make
+test-omci-build` and every CI job that builds a binary fail when a
+mitigation is lost: `PT_GNU_STACK` missing or executable, a segment both
+writable and executable, the guard or `__stack_chk_fail` undefined, `_start`
+not seeding the guard, or no function calling `__stack_chk_fail` at all.
+`make -C src/diag ssp-test` (part of `make test-diag`) runs the protector
+for real under qemu-user: two runs get two different guards, both with the
+zero first byte, an overrun of a local array dies of SIGABRT with the
+message before the function returns, the same call without the overrun
+returns, and the check refuses the same program built with
+`-fno-stack-protector`.
 
 ## Checking a binary before it goes anywhere near a stick
 

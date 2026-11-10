@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* igmpd: IGMP snooping for the one UNI.
  *
  * What it does, when the OLT asks for snooping (omcid writes the profile to
@@ -41,6 +44,7 @@
 #include "igmpd.h"
 #include "group.h"
 #include "program.h"
+#include "rows.h"
 #include "entry.h"
 #include "policy.h"
 #include "state.h"
@@ -135,6 +139,9 @@ static uint32_t lease;
 static int rows_dirty;
 static uint32_t resync_at;
 
+static struct igmp_rows rows;
+static uint32_t rows_wanted(void *ctx, const uint8_t *mac);
+
 static int row_set(const struct igmp_db *db, uint16_t vid, uint32_t group)
 {
 	/* One hardware row per MAC, not per group: groups that alias, or the
@@ -144,8 +151,10 @@ static int row_set(const struct igmp_db *db, uint16_t vid, uint32_t group)
 	 * whichever change of the batch is applied first. */
 	uint32_t u = igmp_db_mac_ports(db, group);
 
-	return u ? igmp_hw_group_set(vid, group, u | PON_PORTBIT)
-		 : igmp_hw_group_del(vid, group);
+	uint8_t mac[6];
+
+	igmp_group_mac(mac, group);
+	return igmp_rows_write(&rows, vid, mac, u ? u | PON_PORTBIT : 0);
 }
 
 /* Every live group, written again: after the lease is taken, since rows
@@ -155,17 +164,16 @@ static void resync6(void);
 
 static void resync(const struct igmp_db *db)
 {
+	if (igmp_rows_retry(&rows, rows_wanted, (void *)db))
+		rows_dirty = 1;
 	for (int i = 0; i < IGMP_MAX_GROUPS; i++)
 		if (db->g[i].in_use && row_set(db, db->g[i].vid, db->g[i].group))
 			rows_dirty = 1;
 	resync6();
 }
 
-/* Apply what changed. The count can exceed `cap` -- igmp_db_rx returns how
- * many there were, not how many fitted -- and anything past the array was
- * never written, so it must not be read: the table is written out whole
- * instead (a group that lapsed in the lost part keeps a stale row until its
- * MAC is written again, which only over-forwards). */
+/* Apply what changed. A count past cap is never read: resync reconciles
+ * tracked MACs against current membership, then writes every live group. */
 static void apply(const struct igmp_db *db, const struct igmp_change *ch,
 		  int n, int cap)
 {
@@ -365,6 +373,8 @@ static void settle_lease(struct igmp_db *db, uint32_t want, uint32_t now)
 		lease_retry = now + 10;
 		return;
 	}
+	if (!want)
+		igmp_rows_clear(&rows);
 	if (!lease && want)
 		resync(db);            /* rows kept while no lease was held */
 	lease = want;
@@ -464,7 +474,32 @@ static int row_set6(uint16_t vid, const uint8_t g[16])
 	uint8_t mac[6];
 
 	mld_group_mac(mac, g);
-	return u ? igmp_hw_mac_set(vid, mac, u | PON_PORTBIT) : igmp_hw_mac_del(vid, mac);
+	return igmp_rows_write(&rows, vid, mac, u ? u | PON_PORTBIT : 0);
+}
+
+/* Retry against current membership, never the ports cached at failure:
+ * an aliased group or a rejoin may now own the same hardware MAC. */
+static uint32_t rows_wanted(void *ctx, const uint8_t *mac)
+{
+	const struct igmp_db *db = ctx;
+	uint32_t ports = 0;
+	uint8_t m[6];
+
+	for (int i = 0; i < IGMP_MAX_GROUPS; i++) {
+		if (!db->g[i].in_use)
+			continue;
+		igmp_group_mac(m, db->g[i].group);
+		if (same_text((const char *)m, 6, (const char *)mac, 6))
+			ports |= db->g[i].ports;
+	}
+	for (int i = 0; mld_on && i < MLD_MAX_GROUPS; i++) {
+		if (!db6.g[i].in_use)
+			continue;
+		mld_group_mac(m, db6.g[i].group);
+		if (same_text((const char *)m, 6, (const char *)mac, 6))
+			ports |= db6.g[i].ports;
+	}
+	return ports ? ports | PON_PORTBIT : 0;
 }
 
 static void resync6(void)
@@ -480,6 +515,7 @@ static void resync6(void)
 static void apply6(const struct mld_change *ch, int n, int cap)
 {
 	if (n > cap) {
+		rows_dirty = 1; /* reconcile tracked MACs, including vanished groups */
 		out_fmt("  %d changes, only %d recorded: writing every IPv6 group again\n", n, cap);
 		if (lease || !igmp_hw_enabled())
 			resync6();

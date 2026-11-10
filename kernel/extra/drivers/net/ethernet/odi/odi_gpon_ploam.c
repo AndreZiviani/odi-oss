@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_gpon_ploam.c -- codec implementation for odi_gpon_ploam.h. No kernel
  * dependency: plain C, so test/odi_gpon_test.c compiles and runs it with
@@ -132,6 +133,18 @@ void odi_gpon_decode_key_switching_time(const struct odi_gpon_ploam *msg,
 
 	out->switch_superframe = ((uint32_t)(c[0] & 0x3fU) << 24) | ((uint32_t)c[1] << 16) |
 				  ((uint32_t)c[2] << 8) | (uint32_t)c[3];
+}
+
+void odi_gpon_decode_pon_id(const struct odi_gpon_ploam *msg, struct odi_gpon_ds_pon_id *out)
+{
+	const uint8_t *c = msg->content;
+	unsigned int i;
+
+	out->reach_extender = (uint8_t)(c[0] >> 7);
+	out->odn_class = (uint8_t)((c[0] >> 4) & 0x7U);
+	for (i = 0; i < ODI_GPON_PON_ID_LEN; i++)
+		out->id[i] = c[1 + i];
+	out->tol = (uint16_t)(((uint16_t)c[8] << 8) | c[9]);
 }
 
 /* ---- Upstream encoders (G.984.3 clause 9.2.4.x) ---- */

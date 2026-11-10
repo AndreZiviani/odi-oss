@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_test.c -- host-side unit test for odi_gpon_ploam.c/odi_gpon_fsm.c,
  * checked against ITU-T G.984.3 clauses 9 and 10 (see docs/REFERENCES.md
@@ -353,6 +354,8 @@ static void test_ds_decoders(void)
 	struct odi_gpon_ds_disable_serial_number dsn;
 	struct odi_gpon_ds_key_switching_time kst;
 	struct odi_gpon_ds_upstream_overhead boh;
+	struct odi_gpon_ds_pon_id pid;
+	unsigned int i;
 
 	msg = ds_upstream_overhead();
 	odi_gpon_decode_upstream_overhead(&msg, &boh);
@@ -382,6 +385,29 @@ static void test_ds_decoders(void)
 	odi_gpon_decode_key_switching_time(&msg, &kst);
 	CHECK(kst.switch_superframe == 0x3fffffffU,
 	      "key_switching_time decodes the full 30-bit superframe count");
+
+	/* PON-ID (Annex C.2.2): class B+ from the OLT at +3.4 dBm, the type
+	 * byte and TOL of a reporter's line; then a reach extender on class C+
+	 * that does not report TOL.
+	 */
+	memset(&msg, 0, sizeof(msg));
+	msg.onu_id = ODI_GPON_ONU_ID_BROADCAST;
+	msg.type = ODI_GPON_DS_PON_ID;
+	msg.content[0] = 0x20U;
+	for (i = 0; i < ODI_GPON_PON_ID_LEN; i++)
+		msg.content[1 + i] = (uint8_t)(0xa1U + i);
+	msg.content[8] = 0x01U;
+	msg.content[9] = 0x4eU;
+	odi_gpon_decode_pon_id(&msg, &pid);
+	CHECK(pid.odn_class == 2U && pid.reach_extender == 0U, "pon_id decodes class B+ from the OLT");
+	CHECK(pid.tol == 334U, "pon_id decodes TOL, 334 = +3.4 dBm");
+	CHECK(pid.id[0] == 0xa1U && pid.id[6] == 0xa7U, "pon_id decodes the 7-byte identifier from content[1..7]");
+	msg.content[0] = 0xc0U;
+	msg.content[8] = 0xffU;
+	msg.content[9] = 0xffU;
+	odi_gpon_decode_pon_id(&msg, &pid);
+	CHECK(pid.odn_class == 4U && pid.reach_extender == 1U, "pon_id decodes class C+ from a reach extender");
+	CHECK(pid.tol == ODI_GPON_PON_ID_TOL_NONE, "pon_id keeps 0xffff, TOL not reported");
 }
 
 static void test_us_encoders(void)

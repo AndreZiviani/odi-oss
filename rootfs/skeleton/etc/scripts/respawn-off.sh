@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # respawn-off.sh -- the placeholder a per-daemon respawn entry execs into
 # when its /etc/config/<name>.off flag is set (docs/SETTINGS.md). init
 # still restarts this every time it exits, same as any other respawn

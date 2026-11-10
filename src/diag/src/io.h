@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Buffered output and line input for the freestanding diag.
  *
  * Everything the CLI prints goes through one buffer, flushed on newline or when

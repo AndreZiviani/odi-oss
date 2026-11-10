@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The group table, with time driven by the test.
  *
  * group.c takes `now` as an argument and touches no syscall, so a membership

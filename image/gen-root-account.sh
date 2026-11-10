@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Writes the root account files for the image: /etc/passwd's one line for
 # root, the /etc/odi-keys-only marker, and out/image/root-password*.txt.

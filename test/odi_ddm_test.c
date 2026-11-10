@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_ddm_test.c -- host-side test that odi_ddm_get() (odi_ddm.c, over
  * odi_i2c.c) reproduces every one of the seven `pon get transceiver

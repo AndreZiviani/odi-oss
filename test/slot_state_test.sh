@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/slot-state.sh, off the device. nv is a stub
 # that prints the two environment copies in the shape the real one does

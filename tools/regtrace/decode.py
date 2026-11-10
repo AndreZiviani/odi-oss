@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Decode a /proc/rtk_regtrace dump against the RTL9602C register listing.
 
     decode.py <regmap.txt> <trace.txt> [--summary] [--collapse]

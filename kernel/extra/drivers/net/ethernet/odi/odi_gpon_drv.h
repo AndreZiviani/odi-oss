@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_drv.h -- what odi_gpon.c calls in the host-testable GPON core:
  * the FSM ops table bound to the register leaves (odi_gpon_hw.c), the

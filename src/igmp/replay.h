@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The seams between main.c (the daemon) and replay.c (a transcript driver):
  * what the daemon does once a second and once a frame, with the clock and
  * the policy file supplied by the caller. */

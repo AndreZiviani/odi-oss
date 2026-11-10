@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # omci_ageing_time_test.sh -- "open stack by default": the cmd 62
 # register (L2_LOOKUP_SETUP.AGE_TICKS) is tenths of a second, not seconds. apply.c
 # used to send the bare OMCI-attribute default, 300 (seconds), straight

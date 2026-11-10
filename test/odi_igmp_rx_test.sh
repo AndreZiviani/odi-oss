@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_igmp_rx_test.sh -- compiles and runs odi_igmp_rx_test.c: which host-port
 # frames (IGMP and MLD) the kernel hands igmpd, and that the parsers of igmpd
 # read the delivery the kernel builds. No kernel, no target toolchain. Part

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_wdt.h -- the SoC watchdog: a kernel thread kicks it, a userland
  * deadline resets the board if rcS never confirms, and a restart handler

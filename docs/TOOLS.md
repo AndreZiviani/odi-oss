@@ -937,7 +937,9 @@ omcli uses omcid's own queue and commands:
     omcli cfgset <file> <dir> <key> <v>  write one key into a config store
     omcli help
 
-`bridge` and `cfgset` write; the rest read. The file arguments of `vlan` and
+`bridge` and `cfgset` write; the rest read. A rule built with `bridge` lasts
+until omcid next rebuilds its bridge connections, which withdraws every
+service it holds. The file arguments of `vlan` and
 `ident` are for tests: omcid loads what they name in place of the store, and
 keeps using it until it restarts. The stock command shapes
 (`get sn|log|logfile|devmode|dmmode|cflag|version`, `mib get <class>
@@ -1515,7 +1517,7 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table, the ACL probes, the multicast group counters (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes, the snooping lease and the group counters (igmpd -w), the ACL probes (diag acl-probe), the group counters (diag mc-count) |
-| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
+| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), the last PON-ID since the last loss of signal (`pon_id odn_class <0-7> reach_extender <0|1> tol <n> id <14 hex digits> ms <ms since boot>`, or `pon_id none`: G.984.3 Annex C, sent only by an OLT provisioned to; `odn_class` 0 A, 1 B, 2 B+, 3 C, 4 C+; `reach_extender` 1 when TOL is a reach extender's rather than the OLT's; `tol` the mean launch power in 0.1 dB steps above -30 dBm, so `tol 334` is +3.4 dBm and the path loss is about that less the stick's receive power, 65535 when the OLT does not report it; `id` the PON identifier the operator set), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
@@ -1547,8 +1549,8 @@ missing one as nothing to report.
 
 | file | lines |
 |---|---|
-| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `enc_ports`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `laser_emergency_stop`, `last_los_ms`, `upstream_overhead`, `ranging_time`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
-| `counters` | `ctr_samples`, `ctr`, `ctr_saturated` |
+| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `enc_ports`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `laser_emergency_stop`, `last_los_ms`, `upstream_overhead`, `ranging_time`, `pon_id`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
+| `counters` | `ctr_samples`, `ctr_ds_superframe`, `ctr_fec_now`, `ctr`, `ctr_saturated` |
 | `flows` | `flow_ack_timeouts`, `flow_saturated`, `ds`, `us` |
 | `ploam` | `ploam ds_rx us_tx`, `ploam_us_dropped`, `ploam_type`, `ploam_ring` |
 
@@ -1585,6 +1587,11 @@ In `status` (the live bits are absent before the first sample):
 In `counters`:
 
     ctr_samples 11                    samples taken since boot
+    ctr_ds_superframe 305491896       the superframe count and downstream FEC
+    ctr_fec_now ds 1                  bit at the last sample, as in status;
+                                      here so that one read pairs them with
+                                      the totals (absent before the first
+                                      sample)
     ctr ds_bip_err_blocks 4           every counter, always
     ctr_saturated ds_gem_idle 1       samples that read it full; only
                                       counters that ever were
@@ -1652,6 +1659,7 @@ them: not `diag register get`, not `memprobe`, and not the stock firmware
 | `/var/log/omcid.log` | every OMCI frame and driver call, omcid's startup | nothing (RAM, trimmed to 128-256 KB) |
 | `/var/log/omcid-unknown.txt` | each managed entity class and message type the OLT sent that omcid does not model, with a count ("Link and provisioning events") | an omcid respawn, not a reboot (RAM) |
 | `/var/log/services.log` | stderr of services: dropbear logins, confd, metricsd | nothing (RAM, trimmed) |
+| `/var/run/respawn/<name>` | the restart count, wait and state of each respawned daemon ("Restart budget" in docs/SETTINGS.md); the line in `logread` is `respawn: event=respawn service=...` | nothing (RAM) |
 | `/var/log/*.err` | the rcS `/proc/odi_omci` writes that failed | nothing |
 | `dmesg` | the kernel ring buffer, including `rcS:` progress lines | nothing; the web UI's Tools tab shows it too |
 | DRAM ramlog | console output of the last boot | a watchdog reset, not a power cut (`tools/memprobe` from the stock image; `/proc/odi_ramlog_prev` from ours, one boot back) |
@@ -1698,6 +1706,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=unknown_msg type=17 class=256` | notice | the first frame this boot of a message type omcid does not handle, per type, with the class of that first frame; answered "not supported" |
 | `omcid: event=no_instance class=45 inst=2457 op=get mt=9` | notice | the first Get, Get current data, Set or Delete this boot that names an instance of a modelled class which omcid neither created itself nor was given by the OLT, per class and instance (`op` and `mt` are those of the first such request). Diagnostic only: omcid answers it as before (built-in values, a new row for a Set, success for a Delete), where G.988 and the stock stack answer "unknown instance"; the lines say whether an OLT relies on that |
 | `omcid: event=vlan_fwdop code=0x06 inst=18 result=unsupported built_as=0x10` | notice | a class 84 forward operation no bridge rule can express (negative filtering, filtering by TCI and MAC address, a code past G.988 table 9.3.11-1): built as 0x10 instead, once per code per omcid run |
+| `omcid: event=vlan_fwdop code=0x10 inst=4354 result=override built_as=0x00` | notice | a class 84 port built with the FwdOp the owner set in `RTK_DEVINFO_SPECVER` (docs/SETTINGS.md) instead of the code the OLT wrote; once per port and pair of codes per omcid run |
 | `omcid: event=reload changed=vlan action=rebuild keys=VLAN_MANU_TAG_VID` | notice | omcid took a SIGHUP (`apply.sh omci`) and reread the store: `changed` is `none`, `vlan` (bridge connections rebuilt in place, the ONU stays in O5) or `identity` (`action=reregister`: the ONU is deactivated and ranged again); `keys` names the store keys that differ, never their values. Never rate limited |
 | `omcid: event=reload_step verb=gponsn rc=0` | info, notice when `rc` is not 0 | one driver verb of a re-registration (`gpondeact`, `gponsn`, `gponpw`, `gponact`) and its errno (0 is success) |
 | `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services |
@@ -1788,6 +1797,10 @@ restart one is just to kill it:
     kill $(pidof omcid)
 
 each comes back with a new pid within a second or two, no `setsid` needed.
+A daemon killed again within 30 s of its start waits first, 1 s, then 2 s,
+4 s ... up to a cap of 2 s (omcid) to 60 s; `cat /var/run/respawn/<name>`
+shows the count and the wait, and the kernel log carries one `respawn:
+event=respawn` line per restart (`docs/SETTINGS.md`, "Restart budget").
 For dropbear, kill the listening process (the one without `-2` in `ps`);
 open sessions are separate processes and stay up.
 

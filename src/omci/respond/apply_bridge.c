@@ -1,3 +1,7 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-FileCopyrightText: 2026 Tomás Correia */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The bridge connections: the service table, the bridge rule of cmd 51
  * (bdgconn_add()), the VLAN rules, and the rebuild that derives every
  * connection from the MIB (bdgconn_rebuild()). See omcid.h.
@@ -383,9 +387,8 @@ void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
  * VID 11).
  * Multicast (direction 2 CTPs) is left to bc_gem_update. Rebuilt whole --
  * tear down, derive, add -- OLT_QUIET_MS after the last OMCI frame, since
- * the OLT sends these entities in no reliable order. */
-static int conn_servs[SERV_MAX];
-static int conn_nservs;
+ * the OLT sends these entities in no reliable order. What is torn down is
+ * every in_use entry of servtab (bdgconn_rebuild()). */
 
 static void gen_vid_filter_rule(struct omci_vlan_oper *vr, unsigned vid, int pbit)
 {
@@ -530,6 +533,10 @@ static int tag_pri;
  * settings. Set by bdgconn_rebuild(). */
 static int tag_from_olt;
 
+/* Whether that class 171 table lets single-tagged frames through as they are
+ * (its single-tag default rule passes, or it has none). Set by olt_tag(). */
+static int olt_tagged_pass;
+
 /* The tag the OLT's class 171 provisions on the UNI, when the stick is not in
  * manual mode (VLAN_CFG_TYPE other than 1, as the stock firmware gates it):
  * the one shape evtocd_olt_tag() accepts, in the instance associated with the
@@ -583,7 +590,8 @@ static int olt_tag(int *pri, const char **why_out)
 		     n < EXTVLAN_ENTRIES_MAX; t = tblpool[t].next, n++)
 			for (int b = 0; b < EVTOCD_ENTRY_LEN; b++)
 				tbl[n * EVTOCD_ENTRY_LEN + b] = tblpool[t].data[b];
-		why = evtocd_olt_tag(tbl, n, (uint16_t)row_u32(r, c171, 4), &v, &p);
+		why = evtocd_olt_tag(tbl, n, (uint16_t)row_u32(r, c171, 4), &v, &p,
+				     &olt_tagged_pass);
 		if (!why) {
 			vid = v;
 			*pri = p;
@@ -683,11 +691,18 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	/* No class 84, or one with an empty list: as before any FwdOp was
 	 * read -- the manual tag, else everything forwarded. An investigating
 	 * code over an empty list would discard every tagged frame, which no
-	 * line has been seen to mean. */
+	 * line has been seen to mean. A tag from class 171 is added to
+	 * untagged frames only; the tagged ones go by the table's single-tag
+	 * default rule, which passes them unchanged unless it discards them.
+	 * The manual tag keeps the stock stack's one rule. */
 	if (!vt || !nent) {
 		if (mvid >= 0) {
 			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
 			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0);
+			if (tag_from_olt && olt_tagged_pass) {
+				n = bp_put(rules, n, "tagged", -1, -1);
+				gen_tagged_rule(&rules[n - 1].vr);
+			}
 		} else if (ev && ev->skip_tagged) {
 			ev_untagged_only(rules, &n, ev);
 		} else {
@@ -695,6 +710,11 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 			gen_no_vlan_filter_rule(&rules[0].vr);
 		}
 		return n;
+	}
+	/* The owner may override what the OLT wrote (RTK_DEVINFO_SPECVER). */
+	if (cfg_fwdop(bp, code) != code) {
+		ev_vlan_fwdop_override(bp, (uint8_t)code, (uint8_t)cfg_fwdop(bp, code));
+		code = cfg_fwdop(bp, code);
 	}
 	f = fwdop_decode(code);
 	if (!f.supported) {
@@ -776,6 +796,100 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		}
 	}
 	return n;
+}
+
+/* Record each installed descriptor, including expanded mapper rules. The
+ * temporary bridge-port list remains bounded independently of expansion. */
+static int bp_add(int ingress, uint16_t port, uint32_t dir,
+		  const struct omci_vlan_oper *vr)
+{
+	int id = bdgconn_add(ingress, port, dir, vr);
+
+	if (id < 0) {
+		/* Said here, with the port: a split mapper can turn one rule
+		 * into eight, and a rule that finds no room would otherwise
+		 * be a VLAN or a priority lost without a word. */
+		out_fmt("   [%s] bridge rule not installed: ingress %04x gem %d dir %d\n",
+			apply_hw ? "hw" : "dry", (long)ingress, (long)port, (long)dir);
+		return 0;
+	}
+	return 1;
+}
+
+/* A downstream-only descriptor needs the inverse treatment explicitly:
+ * the kernel derives that inverse automatically only for a BI descriptor. */
+static int bp_install(int ingress, uint16_t port, uint32_t dir,
+		      const struct bp_rule *r, unsigned pmask, unsigned unmarked)
+{
+	struct omci_vlan_oper vr;
+	int added = 0, downstream = (dir & OMCI_DIR_DS) != 0;
+	int untagged = r->vr.filter.inner_mode == OMCI_TAGF_UNTAGGED;
+	int all = r->vr.rule_gen == OMCI_VLAN_OPER_FORWARD_ALL;
+
+	if (pmask == 0xffu || !(dir & OMCI_DIR_US))
+		return bp_add(ingress, port, dir, &r->vr);
+	if ((r->vr.filter.inner_mode & OMCI_TAGF_PRI) &&
+	    r->vr.filter.inner.pri < 8 &&
+	    (pmask & (1u << r->vr.filter.inner.pri)))
+		return bp_add(ingress, port, dir, &r->vr);
+	if (untagged) {
+		unsigned owner = r->vid >= 0 ? (unsigned)tag_pri : unmarked;
+
+		if (owner < 8 && (pmask & (1u << owner)))
+			return bp_add(ingress, port, dir, &r->vr);
+	} else if (!(r->vr.filter.inner_mode & OMCI_TAGF_PRI)) {
+		for (unsigned pri = 0; pri < 8; pri++) {
+			uint32_t leg = OMCI_DIR_US;
+
+			if (!(pmask & (1u << pri)))
+				continue;
+			vr = r->vr;
+			if (all) {
+				gen_pri_filter_rule(&vr, pri);
+				vr.out = r->vr.out;
+			} else {
+				vr.filter.inner_mode |= OMCI_TAGF_PRI;
+				vr.filter.inner.pri = pri;
+			}
+			/* Keep one original downstream inverse on a BI descriptor.
+			 * It also owns the VID membership row in the kernel. */
+			if (downstream) {
+				leg |= OMCI_DIR_DS;
+				downstream = 0;
+			}
+			added += bp_add(ingress, port, leg, &vr);
+		}
+		if (all && unmarked < 8 && (pmask & (1u << unmarked))) {
+			gen_untagged_rule(&vr);
+			added += bp_add(ingress, port, OMCI_DIR_US, &vr);
+		}
+	}
+	if (downstream) {
+		evtocd_fallback_ds(&vr, &r->vr);
+		added += bp_add(ingress, port, OMCI_DIR_DS, &vr);
+	}
+	return added;
+}
+
+/* Whether an 802.1p mapper sends its priorities to more than one GEM IW
+ * TP. Only then do the rules of a target need the priorities it carries: a
+ * mapper with one target and some priorities unmapped is the plain service,
+ * and keeps the single rule it always had. */
+static int mapper_splits(const struct mib_row *mapper, const struct omci_class *c130)
+{
+	uint32_t first = 0;
+
+	for (int pri = 0; mapper && pri < 8; pri++) {
+		uint32_t id = row_u32(mapper, c130, 2 + pri);
+
+		if (id == 0 || id == 0xffff)
+			continue;
+		if (!first)
+			first = id;
+		else if (id != first)
+			return 1;
+	}
+	return 0;
 }
 
 /* ------------------------------------------------------ class 171, in full
@@ -1157,7 +1271,7 @@ static int ev_admits(uint16_t bp, int tags, int vid, int pri)
 	if (!vt)
 		return 1;
 	nent = row_u32(vt, c84, 3);
-	code = row_u32(vt, c84, 2);
+	code = cfg_fwdop(bp, row_u32(vt, c84, 2));
 	if (!nent)
 		return 1;
 	f = fwdop_decode(code);
@@ -1409,18 +1523,24 @@ void bdgconn_rebuild(void)
 	int ingress[8], ingress_bridge[8], ingress_bport[8], ingress_iphost[8];
 	int ning = 0, added = 0, mvid, nev = 0;
 
-	for (int i = 0; i < conn_nservs; i++) {
+	/* Every service in servtab, not a list this process kept beside it:
+	 * snapshot_load restores servtab, so a resumed omcid has the services
+	 * of the last one here and would have had an empty list. A deactivate
+	 * that fails is logged and the slot freed all the same, as before:
+	 * the driver replaces a service whose id comes back with another rule
+	 * (odi_switch_bdgconn.c), so the next add of that id clears it. */
+	for (int i = 0; i < SERV_MAX; i++) {
+		if (!servtab[i].in_use)
+			continue;
 		if (apply_hw) {
-			int rc = omci_deactiveBdgConn((uint32_t)conn_servs[i]);
+			int rc = omci_deactiveBdgConn((uint32_t)i);
 
 			if (rc)
 				out_fmt("   [hw] bridge connection %d deactivate -> %d\n",
-					(long)conn_servs[i], (long)rc);
+					(long)i, (long)rc);
 		}
-		if (conn_servs[i] >= 0 && conn_servs[i] < SERV_MAX)
-			servtab[conn_servs[i]].in_use = 0;
+		servtab[i].in_use = 0;
 	}
-	conn_nservs = 0;
 	for (unsigned i = 0; i < sizeof uc_vids; i++)
 		uc_vids[i] = 0;
 	if (!c47 || !c266 || !c268 || !c281 || !c84)
@@ -1452,6 +1572,7 @@ void bdgconn_rebuild(void)
 	mvid = cfg_manual_vid();
 	tag_pri = vlanCfg.pri;
 	tag_from_olt = 0;
+	olt_tagged_pass = 0;
 	for (int g = 0; g < 8; g++)
 		ev_tab[g].active = 0;
 	if (mvid < 0) {
@@ -1482,7 +1603,7 @@ void bdgconn_rebuild(void)
 			mcast_tag_plan();
 		for (int i = 0; i < MIB_ROWS; i++) {
 			int row = pass == 1 ? MIB_ROWS - 1 - i : i;
-			struct mib_row *r = mib_row_at(row), *iw, *ctp, *mapper;
+			struct mib_row *r = mib_row_at(row), *iw, *ctp, *mapper = 0;
 			struct mib_row *tgt_iw[8];
 			int tgt_pbit[8], ntgt = 0;
 			unsigned tgt_pmask[8];   /* the priorities each target carries */
@@ -1588,6 +1709,15 @@ void bdgconn_rebuild(void)
 			}
 			for (int t = 0; t < ntgt; t++) {
 			struct bp_rule rules[BP_RULES_MAX];
+			/* The priorities bp_install() holds this target to: all of
+			 * them unless the mapper really splits. The owner of untagged
+			 * upstream frames is the mapper default priority when its
+			 * unmarked-frame option (attribute 10) is 1. With the DSCP
+			 * option the priority would come from the DSCP mapping, which
+			 * these rules cannot express: priority 0 is assumed. */
+			unsigned split_pmask = mapper_splits(mapper, c130) ? tgt_pmask[t] : 0xffu;
+			unsigned unmarked = mapper && row_u32(mapper, c130, 10) == 1 ?
+					    row_u32(mapper, c130, 12) : 0;
 			uint32_t port, dir;
 			int nrules, manual, use_ev, plain = 0;
 
@@ -1628,10 +1758,8 @@ void bdgconn_rebuild(void)
 						continue;
 					id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_DS,
 							 &mcv.rule[k].vr);
-					if (id >= 0 && conn_nservs < SERV_MAX) {
-						conn_servs[conn_nservs++] = id;
+					if (id >= 0)
 						added++;
-					}
 				}
 			}
 			for (int k = 0; k < nrules && (!use_ev || plain); k++) {
@@ -1641,8 +1769,6 @@ void bdgconn_rebuild(void)
 			if (tpType != 6)
 				mcv_mark(uc_vids, &rules[k].vr);
 			for (int g = 0; g < ning; g++) {
-				int id;
-
 				/* Only ingresses of the SAME bridge. Two bridges are
 				 * covered only by the ISP2 fixture in QEMU; every stick
 				 * seen has one. */
@@ -1654,11 +1780,8 @@ void bdgconn_rebuild(void)
 					lane_refused(r->inst, port, rules[k].kind, ingress[g]);
 					continue;
 				}
-				id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rules[k].vr);
-				if (id >= 0 && conn_nservs < SERV_MAX) {
-					conn_servs[conn_nservs++] = id;
-					added++;
-				}
+				added += bp_install(ingress[g], (uint16_t)port, dir,
+						    &rules[k], split_pmask, unmarked);
 			}
 			}                        /* rules of this target */
 			for (int g = 0; use_ev && g < ning; g++) {
@@ -1680,21 +1803,16 @@ void bdgconn_rebuild(void)
 					if (o->has_ds)
 						mcv_mark(uc_vids, &o->ds);
 					id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_US, &o->us);
-					if (id >= 0 && conn_nservs < SERV_MAX) {
-						conn_servs[conn_nservs++] = id;
+					if (id >= 0)
 						added++;
-					}
 					if (o->has_ds && (dir & OMCI_DIR_DS)) {
 						id = bdgconn_add(ingress[g], (uint16_t)port, OMCI_DIR_DS, &o->ds);
-						if (id >= 0 && conn_nservs < SERV_MAX) {
-							conn_servs[conn_nservs++] = id;
+						if (id >= 0)
 							added++;
-						}
 					}
 				}
 				nrest = bp_rules(r->inst, tgt_pbit[t], mvid, dir, rest, &mf, &ev->ctl);
 				for (int k = 0; k < nrest; k++) {
-					int id;
 
 					if (ingress_iphost[g] && !lane_rule_ok(rest[k].kind)) {
 						lane_refused(r->inst, port, rest[k].kind, ingress[g]);
@@ -1704,11 +1822,8 @@ void bdgconn_rebuild(void)
 						apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
 						rest[k].kind, (long)rest[k].vid, (long)rest[k].pri);
 					mcv_mark(uc_vids, &rest[k].vr);
-					id = bdgconn_add(ingress[g], (uint16_t)port, dir, &rest[k].vr);
-					if (id >= 0 && conn_nservs < SERV_MAX) {
-						conn_servs[conn_nservs++] = id;
-						added++;
-					}
+					added += bp_install(ingress[g], (uint16_t)port, dir,
+							    &rest[k], split_pmask, unmarked);
 				}
 			}
 			}                        /* targets of this bridge port */

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Reload on SIGHUP: reread the config store and act on what changed.
  *
  * SIGHUP is the Unix convention for "reread your configuration", and it is

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * The switch half of IGMP and MLD snooping: the ACL rules that copy (or
  * take) the host's IGMP and MLD to the CPU, the drop of unregistered IPv4

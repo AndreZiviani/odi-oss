@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Build Linux 6.18 for the RTL9602C -- the only kernel this repo builds.
 #
 # Pristine tree from kernel/618/mainline (kernel/618/fetch.sh, a plain
@@ -83,23 +86,26 @@ PATCHHASH=$({ cat "$ROOT"/kernel/618/patches/*.patch 2>/dev/null
 # would pick today. Up to 39 characters from a safe set, because it lands
 # in a C string literal on the compiler command line.
 GITREV=$(git -C "$ROOT" describe --always --dirty --abbrev=7 2>/dev/null || echo nogit)
-ODI_BUILD_ID=${ODI_BUILD_ID:-${VERSION:-odi-oss-$(date +%y%m%d)-$GITREV}}
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$("$ROOT/tools/source-date-epoch.sh")}
+ODI_BUILD_ID=${ODI_BUILD_ID:-${VERSION:-odi-oss-$(date -u -d "@$SOURCE_DATE_EPOCH" +%y%m%d 2>/dev/null || date -u -r "$SOURCE_DATE_EPOCH" +%y%m%d)-$GITREV}}
 ODI_BUILD_ID=$(printf '%s' "$ODI_BUILD_ID" | tr -cd 'A-Za-z0-9._+-' | cut -c1-39)
 echo "--- build id: $ODI_BUILD_ID"
 # Reproducibility: scripts/mkcompile_h embeds the build timestamp, user and
 # host into every vmlinux unless told otherwise, so two builds of the same
 # commit a minute apart -- or on two different runners -- never matched
 # bit-for-bit (found by the ci.yml reproducible job the first time it ran for
-# real). SOURCE_DATE_EPOCH is the committer date of HEAD: identical for any
-# two checkouts of the same commit, unlike "now". KBUILD_BUILD_USER/HOST are
-# fixed strings for the same reason -- the actual build host and account
-# are exactly the kind of stamp this build is not supposed to carry.
-SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || echo 0)}
+# real). SOURCE_DATE_EPOCH (tools/source-date-epoch.sh, set above) is the
+# committer date of HEAD: identical for any two checkouts of the same commit,
+# unlike "now". It also reaches mkimage, which stamps the uImage header with
+# it. KBUILD_BUILD_USER/HOST are fixed strings for the same reason -- the
+# actual build host and account are exactly the kind of stamp this build is
+# not supposed to carry.
 KBUILD_BUILD_TIMESTAMP=${KBUILD_BUILD_TIMESTAMP:-$(date -u -d "@$SOURCE_DATE_EPOCH" 2>/dev/null || date -u -r "$SOURCE_DATE_EPOCH")}
 docker run --rm -v "$VOL":/build \
 	-v "$WORK:/out" -v "$ROOT/kernel/618/patches:/patches:ro" \
 	-v "$ROOT/kernel/618/debug:/debug:ro" -e CRUMBS_CORE="$CRUMBS_CORE" \
 	-v "$ROOT/kernel/extra:/extra:ro" \
+	-v "$ROOT/tools/check-kernel-hardening.sh:/check-kernel-hardening.sh:ro" \
 	-w /build \
 	-e SCRIPTHASH="$SCRIPTHASH" -e PATCHHASH="$PATCHHASH" -e FRESH="${FRESH:-0}" \
 	-e ODI_BUILD_ID="$ODI_BUILD_ID" \
@@ -147,6 +153,10 @@ export KCFLAGS
 echo "--- compiler: $(${XC}gcc -dumpfullversion) ${XC}gcc, $(${XC}ld --version | head -1); KCFLAGS=$KCFLAGS"
 cp /out/seed.config .config
 make ARCH=mips CROSS_COMPILE=$XC olddefconfig > /out/olddefconfig.log 2>&1 || { tail -30 /out/olddefconfig.log; exit 1; }
+# The hardening options must have survived olddefconfig, which drops a
+# symbol whose dependency went away without a word (docs/KERNEL.md,
+# "Hardening"). Checked before compiling, not after.
+bash /check-kernel-hardening.sh .config || { echo "BUILD FAILED: hardening options missing from .config"; exit 1; }
 echo "--- config: $(grep -c "^CONFIG_" .config) on, $(grep -c "is not set" .config) off"
 echo "--- key symbols after olddefconfig ---"
 grep -E "^CONFIG_(MACH_RTL8686|CPU_R3000|CPU_HAS_SYNC|CPU_HAS_WB|CPU_R3K_TLB|IRQ_MIPS_CPU|DMA_NONCOHERENT|RTL8686_UART0|RTL8686_NOR|MTD|JFFS2_FS|SQUASHFS|ODI_)[= ]" .config || true

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Parses the first line of /proc/odi_gpon/status (kernel/extra/drivers/net/ethernet/
  * odi/odi_gpon.c: "state %d\n", odi_gpon_onu_state()), the ONU FSM state.
  *

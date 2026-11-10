@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Table attributes (respond/mibstore.c, tbl_defs[]): rows that a Set adds,
 # replaces or deletes one at a time, read back whole through Get and
 # Get-Next, and the downstream multicast flag that class 281's address table
@@ -201,7 +204,7 @@ check "extra port: an ACL row with no class 281 on file makes no flow" \
 send "$log" 004f 48 0135 0001 "0200c000"
 # The extra ports take the queue of the CTP their class 281 points at; with
 # that CTP deleted they have none, and their flows are withdrawn. The CTP's
-# own flow is not theirs to take back. 281/5 on CTP 5 names GEM 4000.
+# own flow is withdrawn too. 281/5 on CTP 5 names GEM 4000.
 send "$log" 0054 44 0119 0005 "0005"
 send "$log" 0055 48 0119 0005 "0080$A1"
 send "$log" 0056 48 0119 0005 "0080$X1"
@@ -211,8 +214,8 @@ check "extra port: named again, it gets its flow back" \
 send "$log" 0057 46 010c 0005 ""                        # Delete CTP 5
 check "extra port: deleting the CTP its class 281 points at withdraws the flow" \
       "$(grep -c 'gem 4000 ds flow 1 withdrawn' "$log")" "$((w0 + 1))"
-check "extra port: and leaves the CTP's own flow alone" \
-      "$(grep -c 'gem 4095 ds flow 0 withdrawn' "$log")" "0"
+check "extra port: also withdraws the deleted CTP own flow" \
+      "$(grep -c 'gem 4095 ds flow 0 withdrawn' "$log")" "1"
 send "$log" 0058 46 0119 0005 ""                        # Delete 281/5
 send "$log" 0059 44 010c 0005 "0fff00000200000000"      # CTP 5 again
 

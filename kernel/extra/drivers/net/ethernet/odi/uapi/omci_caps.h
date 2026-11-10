@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The device capability blob -- driver command 3, 120 bytes.
  *
  * OMCI_Init reads it straight into gInfo+112, so every gInfo offset the

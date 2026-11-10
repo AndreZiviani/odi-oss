@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* igmpd -- IGMP/MLD snooping for the RTL9602C, freestanding.
  *
  * The frames do not arrive on a netdev. Our kernel hands the host port's IGMP,

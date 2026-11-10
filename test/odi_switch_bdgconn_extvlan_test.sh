@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_bdgconn_extvlan_test.sh -- cmd 51 for the extended VLAN rules of
 # class 171, from the table entry to the classifier row (the plan of omcid
 # included, built for the host).

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/mgmt-addr.sh, off the device, on top of the real
 # network.sh and the real flash.
@@ -20,6 +23,8 @@
 # key that does not stick, and the stale lock.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=test/host-flock.sh
+. test/host-flock.sh
 S=$PWD/rootfs/skeleton/etc/scripts/mgmt-addr.sh
 N=$PWD/rootfs/skeleton/etc/scripts/network.sh
 F=$PWD/rootfs/skeleton/etc/scripts/flash

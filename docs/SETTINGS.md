@@ -119,6 +119,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of that tag, 0 to 7; a stored value above 7 (255 is the factory one) is used as 0 and the tag stays on | omcid, on SIGHUP | LIVE |
+| `RTK_DEVINFO_SPECVER` | VLAN forward operation override | the stock firmware's FwdOp override, same key and format: `EntityId[:FwdOp]` entries separated by commas (e.g. `0x1102:0x00,0x110b`; no FwdOp means 0x02). The bridge rules of each class 84 port named are built with that FwdOp instead of the OLT's; the attribute keeps the OLT's value. Anything malformed turns the whole key off ("VLAN handling" below) | omcid, on SIGHUP | LIVE |
 | `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password: exactly 20 hex digits are 10 bytes, 1 to 10 characters are the text itself (even if they are hex digits), `0x` and 2 to 20 hex digits are those bytes zero-padded; anything else is refused and logged, keeping the old password; empty means none is sent | the `gponpw` PON step in rcS (`rcs-lib.sh`, `pon_step_gponpw`, skipped when empty); omcid re-sends it on a re-registration | INTERRUPTS INTERNET |
 | `LOID`, `LOID_PASSWD` | LOID, LOID password | answered to CTC-profile OLTs in the LOID authentication entity | omcid, on SIGHUP | INTERRUPTS INTERNET |
 | `LOID_OLD`, `LOID_PASSWD_OLD` | LOID (in force) | the value actually answered when it differs from the one above | omcid, on SIGHUP | INTERRUPTS INTERNET |
@@ -278,6 +279,12 @@ omcid. Two ways, tried in this order:
    still pass upstream unchanged when the OLT's VLAN filter (class 84) on the
    GEM side lists the VID, since the table leaves tagged frames on its default
    rule (G.988); the manual tag, by contrast, takes the place of that entry.
+   With no VLAN filter on the GEM side, frames the router tags with any VLAN
+   pass unchanged beside the added tag, unless the table's single-tag default
+   rule discards them; a table without that rule passes them, as G.988's
+   default does. On a line whose OLT adds VLAN 1 and passes the rest, the
+   router's PPPoE on its own VLAN goes through this way. The manual tag keeps
+   its one rule, so frames the router tags do not pass it.
    omcid logs `untagged frames get VLAN <vid> pri <p> from the OLT`.
 2. Any other table: each entry becomes its own rule, with the rule that
    undoes it downstream as DsMode says. A single VID translated to another
@@ -331,6 +338,20 @@ port: every tag, and untagged frames, both ways. The switch then carries
 every VID 2..4094 on the UNI and the PON (`docs/SWITCH.md`, "CF rows").
 With the manual tag on, a FwdOp that bridges untagged frames gets the
 add-tag rule in place of a plain untagged one.
+
+Some lines need a FwdOp other than the OLT's. One (odi-oss #301) filters
+every GEM port with FwdOp 0x10 and the service VID while its 802.1X EAPOL
+frames come down priority-tagged (VID 0): the filter drops every one and
+the router never authenticates. `RTK_DEVINFO_SPECVER` overrides it per class
+84 instance, with the same key and format as the stock firmware's "VLAN
+Forward Operation" page, so a guide written for the stock firmware works
+here and both slots agree: `0x1102:0x00,0x110b:0x00` bridges everything,
+tagged and untagged, on those two ports. The instances are the ones
+`omcli mib get 84` lists. The stock firmware writes the code over the
+attribute; omcid keeps the OLT's value there, so a Get answers the OLT with
+what it wrote and the UI shows it, and only the rules change. `omcli vlan`
+lists the overrides in force, and each one is logged once
+(`event=vlan_fwdop ... result=override`).
 
 Measured under qemu for both shapes (`src/omci/vlan-test.sh`); on hardware,
 not yet: PPPoE discovery on ISP2 and DHCP on ISP1 through router-tagged
@@ -605,7 +626,10 @@ speaks. `HOST_SERDES` picks another:
 - `hisgmii`: HiSGMII, the MAC forced to 1000 Mb/s, the 1000BASE-X PCS
   powered down and the port forced. This is the mode the stock firmware
   calls `LAN_SDS_MODE` 4 ("2500Mbps HiSGMII PHY"); it is not a 1G mode on
-  the wire. Tested by its reporter against a media converter only.
+  the wire. Tested by its reporter against a media converter. On a Luleey
+  LL-XS2510 against a 2.5G router port (a UniFi gateway whose SFP+ port a
+  third-party tweak runs at 2.5G) it synced but passed no frames, where
+  `2500basex` linked.
 
 **What the host reads from the module.** The SFP's own EEPROM page the
 host reads (A0h, fixed memory) advertises the module as 1000BASE-LX at a
@@ -1183,13 +1207,105 @@ these, they are fixed at boot.
 | `/tmp` (`/var/tmp`) size cap | 8 MB tmpfs | fits a firmware upload (`fwu_starter.sh` stages the tarball there, about 2.6 MB, plus its unpacked squashfs/uImage) and an scp of a few MB with room to spare; past it, a write gets `ENOSPC`, not a system-wide OOM |
 | `/var` (log/run/lock/config fallback) size cap | 6 MB tmpfs | `/var/log` is separately trimmed at 256 KB past a 128 KB floor already (rcS); this is the outer bound if that trim ever falls behind |
 | `oom_score_adj` | omcid, dropbear: `-1000` (never killed while anything else can be); confd: `-500`; metricsd: `0`, the kernel default | omcid and dropbear are what keeps the ONU provisioned and the box reachable; confd is a convenience next after them; metricsd is the one daemon whose loss costs neither -- first in line if the killer has to take something |
-| respawn | omcid, dropbear, confd, metricsd: each an `/etc/inittab` `respawn` entry (`/etc/scripts/svc-*.sh`, execing into `/etc/scripts/respawn.sh`), restarted the instant it exits, forever, by busybox init itself -- no restart budget, no rate limit | native over hand-rolled: a v1.0.4 trial on hardware killed omcid with `kill -9` and it stayed dead -- the old `supervise()` shell loop had lost track of it -- while busybox init, which forked the process itself and never lost the pid, does not have that failure mode; a daemon that still cannot stay up is still a problem for the watchdog rules above to escalate, not for a restart loop |
+| respawn | omcid, dropbear, confd, metricsd, syslogd, klogd, ntpd, igmpd: each an `/etc/inittab` `respawn` entry (`/etc/scripts/svc-*.sh`, execing into `/etc/scripts/respawn.sh`), restarted by busybox init the instant it exits; `respawn.sh` adds a bounded wait before the exec when the daemon keeps dying ("Restart budget" below) | native over hand-rolled: a v1.0.4 trial on hardware killed omcid with `kill -9` and it stayed dead -- the old `supervise()` shell loop had lost track of it -- while busybox init, which forked the process itself and never lost the pid, does not have that failure mode. The budget keeps that: nothing runs beside the daemon, the wait happens in the process init already tracks, and the daemon is exec-ed in place |
 | `vm.min_free_kbytes` | 1536 (`rcS`, up from the kernel's own default of roughly 128 KB on a box this size) | keeps a slightly larger page-allocator reserve free under pressure, so the OOM killer and a starved `oom_score_adj -1000` daemon get a better chance to make forward progress instead of every allocator racing for the same last few pages |
 
 `make test-qemu` (`docs/HACKING.md`) exercises everything above except the
 watchdog rules themselves, which need `/proc/odi_wdt` -- real hardware,
 not the stock kernel the harness boots; those are host-tested instead
 (`test/odi_wdt_test.c`, against a fake clock).
+
+## Restart budget
+
+busybox init restarts a `respawn` entry the moment it exits and has no rate
+limit of its own, so a daemon that dies at once would be started again and
+again, at the cost of CPU and of log lines. `/etc/scripts/respawn.sh`, the
+last step of every `svc-*.sh` before the daemon is exec-ed, now spaces such
+restarts out. It adds no process and no loop: the wait is a `sleep` in the
+shell init already tracks, then the same in-place `exec` as before.
+
+**Why not runit or start-stop-daemon.** busybox here already has `runsv`,
+`runsvdir`, `sv` and `svlogd` built in (no size to add), and they were
+weighed first. `runsv` waits a fixed second between restarts and keeps no
+count, so a budget would still be a hand-written `finish` script, on top of
+a supervision tree (`runsvdir`, one `runsv` per daemon, service directories
+in RAM) that changes how every daemon is started, found by `services` and
+`apply.sh`, signalled and stopped, and moves the pid init tracks. That is
+the kind of change this image paid for in v1.0.4. `start-stop-daemon` only
+starts a daemon, it does not supervise. The script is about forty lines of
+logic, and the one thing it must not do (lose the daemon) it does not do:
+it execs.
+
+**The rule.** Each start records the uptime at the exec; the next start (init
+ran the script again, so the daemon is gone) subtracts it. A run shorter
+than 30 s is a short run, 30 s or longer clears the count.
+
+| short runs in a row | wait before the start | state |
+|---|---|---|
+| 0 | none, as before | `ok` |
+| 1, 2, 3 ... | 1, 2, 4, 8 ... s, never above the daemon cap | `backoff` |
+| 5 or more | the cap | `degraded` |
+
+A first start of the boot never waits, so a normal boot is as fast as it was,
+and the 120 s userland confirmation (sysinit, `rcS`) is finished before init
+reads a single `respawn` entry: nothing here can delay it. Start order does
+not change. A reboot or shutdown during a wait ends the waiting shell like
+any process init signals; a `services stop <name>` also kills a wait in
+progress, so the daemon does not start after the flag is written.
+
+**Policy per daemon.** Nothing here disables a daemon, enters safe mode or
+reboots, because no daemon but omcid is worth a reboot, and a reboot loop
+or a stick whose only login is switched off is worse than a daemon that
+keeps being retried slowly. A daemon is never parked: at the cap it is
+retried every `cap` seconds, so a cause that clears (a missing peer, a
+full `/var`, a bad key later fixed) heals without anyone. To switch one
+off on purpose, `services stop <name>` (it survives a reboot).
+
+| daemon | cap | when it will not stay up |
+|---|---|---|
+| `omcid` | 2 s | watchdog: it stops pinging its 60 s deadline and the kernel resets the board, as before. The wait only stops a spin and stays far below that deadline, so it cannot hold back a recovery the watchdog would have given |
+| `dropbear` | 10 s | retried every 10 s at most: the only way in stays as close to a plain restart as a loop can be |
+| `confd`, `syslogd` | 30 s | retried every 30 s |
+| `metricsd`, `klogd`, `ntpd`, `igmpd` | 60 s | retried every 60 s |
+
+What changes for omcid is only the wait (1 s, then 2 s) after a start that
+lived under 30 s, the state file and the log line; a single crash after a
+long run is restarted at once, and the re-provisioning that follows a
+respawn (docs/BOOT.md) is untouched. The caps are fixed in `respawn.sh`:
+there is no setting.
+
+**Where it shows.** `/var/run/respawn/<name>` (RAM, written by rename,
+`key=value`), read by anything that wants it:
+
+    state=degraded
+    starts=9
+    fast=8
+    last_run_s=1
+    delay_s=30
+    cap_s=30
+    stable_s=30
+    last_start_s=842
+
+`state` is as of the latest start and is not rewritten when the daemon
+stays up, so a reader takes the daemon as healthy again once `uptime -
+last_start_s >= stable_s`. `starts` counts starts since boot, the first
+included; `fast` the short runs in a row. One kernel-log line per restart
+(`dmesg`, the ramlog, `logread` through klogd, and `SYSLOG_SERVER`), at
+notice for a restart after a long run and at warning for a short one:
+
+    respawn: event=respawn service=confd state=backoff starts=4 fast=3 last_run_s=1 delay_s=4 cap_s=30
+
+Beyond the fifth short run only every tenth line is written, so a crash
+loop cannot cycle the 64 KB ring; the state file always has the exact
+count. The daemon output is still appended to `/var/log/services.log` (omcid:
+`/var/log/omcid.log`), where its own last words are. The exit status is not
+recorded: init, not the script, reaps the daemon. A `services start` or a
+`kill` of a daemon within 30 s of its start counts as one short run (a wait
+of a second); several in a row, as in a test, back off like any crash.
+
+Tested by `test/respawn_budget_test.sh` (every `::respawn:` entry of the
+inittab, against a fake clock; in `make test-host`) and by the repeated
+`kill -9` scenario of `make test-qemu`.
 
 ## Bounded waits
 

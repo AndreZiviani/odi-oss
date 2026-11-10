@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # The SIGHUP reload: what omcid does when apply.sh omci tells it to reread
 # the config store (respond/reload.c, docs/SETTINGS.md "How apply works").
 #
@@ -62,7 +65,12 @@ bad() { echo "FAIL  $*"; fail=$((fail + 1)); }
 check() {   # check <label> <want> <got>
 	if [ "$2" = "$3" ]; then ok "$1"; else bad "$1: want '$2', got '$3'"; fi
 }
+# The line may trail what the check waited for: omcid writes its status file
+# before the event line reaches the log through qemu, so a line that is not
+# there yet gets up to 5 s.
 check_grep() {   # check_grep <label> <pattern> <file>
+	i=0
+	while ! grep -q -- "$2" "$3" && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
 	if grep -q -- "$2" "$3"; then ok "$1"; else bad "$1: no '$2' in $3"; sed -n '1,3p' "$3"; fi
 }
 
@@ -419,6 +427,15 @@ store 1 12 5 "$(val OMCI_CUSTOM_MCAST 3)
 reload_is "OMCI_CUSTOM_MCAST 1 to 3, bit 1 kept: not a change" none ""   none
 store 1 12 5
 reload_is "OMCI_CUSTOM_MCAST removed"          vlan OMCI_CUSTOM_MCAST     rebuild
+# The stock FwdOp override changes the rules of the ports it names: a rebuild.
+store 1 12 5 "$(val RTK_DEVINFO_SPECVER 0x1102:0x00)
+"
+reload_is "RTK_DEVINFO_SPECVER"                vlan RTK_DEVINFO_SPECVER   rebuild
+store 1 12 5 "$(val RTK_DEVINFO_SPECVER 0x1102:0x02)
+"
+reload_is "RTK_DEVINFO_SPECVER, another code"  vlan RTK_DEVINFO_SPECVER   rebuild
+store 1 12 5
+reload_is "RTK_DEVINFO_SPECVER removed"        vlan RTK_DEVINFO_SPECVER   rebuild
 store 0 12 5
 reload_is "VLAN_MANU_MODE 0, transparent"      vlan VLAN_MANU_MODE        rebuild
 store 0 12 5 "$(val VLAN_CFG_TYPE 2)

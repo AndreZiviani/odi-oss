@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_gpon_hw.c -- the real register leaves behind struct odi_gpon_fsm_ops
  * (odi_gpon_fsm.h), plus the GEM-port/Alloc-ID/Acknowledge/verb-level

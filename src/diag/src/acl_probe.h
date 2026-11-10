@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* `acl-probe`: hand-installed ACL rules that count multicast entering the UNI
  * or the PON port, or copy or take the host's IGMP to the CPU, for measuring
  * the switch (odi_switch_acl_probe.h in the kernel tree has what each may

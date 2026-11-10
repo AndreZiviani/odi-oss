@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # A Get with every attribute bit set (respond/omcimsg.c, the Get handler): the
 # answer stays inside the 32-byte baseline contents, and says honestly what it
 # left out.

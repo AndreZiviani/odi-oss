@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_reg.h -- __KERNEL__ declarations for the odi_reg_read()/
  * odi_reg_write() pair odi_switch_tbl.c, the switch-core leaves, odi_gpon_hw.c,

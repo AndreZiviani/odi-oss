@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Class 309 attribute 16, the downstream IGMP and multicast TCI, as bridge
  * rules (../mcastvlan.c).
  *

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Class 171, the received-frame VLAN tagging operation table.
  *
  * One table entry is four big-endian words, and the two halves are NOT laid
@@ -173,9 +176,12 @@ int evtocd_describe(const struct evtocd_entry *e, uint16_t input_tpid,
  * one instance, an untagged rule that adds a single tag with a concrete VID
  * (1..4094) and priority (0..7) at TPID 0x8100, and nothing else but default
  * rules that drop or pass. Returns NULL and the tag in *vid / *pri, or a
- * static reason naming what was not supported -- what an operator reports. */
+ * static reason naming what was not supported -- what an operator reports.
+ * *tagged_pass (when not NULL) says whether single-tagged frames pass as they
+ * are: 0 when the single-tag default rule discards them, 1 when it passes
+ * them or the table has none (G.988's default rules pass). */
 const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
-			   int *vid, int *pri);
+			   int *vid, int *pri, int *tagged_pass);
 
 
 /* ------------------------------------------ what the classifier can do -----
@@ -321,5 +327,8 @@ void evtocd_plan_oper(const struct evtocd_plan *p, struct omci_vlan_oper *vr);
 
 /* One line for the log: "C-VID 410 pri 5 -> C-VID 1410 pri kept", say. */
 int evtocd_plan_describe(const struct evtocd_plan *p, char *buf, int max);
+
+/* Fallback inverse for a target that has no upstream untagged rule. */
+void evtocd_fallback_ds(struct omci_vlan_oper *d, const struct omci_vlan_oper *u);
 
 #endif

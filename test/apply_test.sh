@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rootfs/skeleton/etc/scripts/apply.sh, off the device.
 #
@@ -62,16 +65,24 @@ reload() {
 		mv "$T/status.new" "$T/status"
 	done < "$T/script"
 }
-while :; do sleep 1; done
+# The sleep in the background and a wait on it: bash runs a trap only once
+# the foreground command ends, and wait returns at the signal, so the reload
+# starts at once instead of up to a second later.
+while :; do sleep 1 & wait \$!; done
 DAEMON
 chmod +x "$T/daemon"
 "$T/daemon" > /dev/null 2>&1 &
-sleep 1
+# Up to 10 s for the stub to say its pid, not a fixed second.
+for _ in $(seq 100); do [ -s "$T/omcid.pid" ] && break; sleep 0.1; done
 first=$(cat "$T/omcid.pid")
 
+# Bounds well past what a case needs, so a busy runner does not fail one: a
+# case that ends returns as soon as it does. The two cases that test a bound
+# set it small themselves (ACK for the acknowledgement, the argument for the
+# outcome).
 run() {
 	env PATH="$T/bin:$PATH" RELOAD_STATUS="$T/status" MODULES_OFF="$T/modules.off" \
-	    ACK_WAIT=2 APPLY_WAIT=4 NETWORK="$T/network.sh" SERVICES_LOG="$T/services.log" \
+	    ACK_WAIT="${ACK:-15}" APPLY_WAIT=30 NETWORK="$T/network.sh" SERVICES_LOG="$T/services.log" \
 	    sh "$A" "$@" 2>&1
 }
 : > "$T/started"
@@ -114,7 +125,7 @@ t "running at the bound: says it carries on" "still working after 2 s" "$out"
 echo "done vlan rebuild ok VLAN_MANU_TAG_VID 100 - 0 0" > "$T/script"
 cp "$T/status" "$T/status.old"
 rm -f "$T/script"
-out=$(run omci); rc=$?
+out=$(ACK=2 run omci); rc=$?
 t "an omcid that never answers: exit 1" "^1$" "$rc"
 t "and it says why" "did not answer the signal" "$out"
 
@@ -144,6 +155,33 @@ while [ "$(wc -l < "$T/netcalls" 2>/dev/null | tr -d ' ')" -lt 2 ] && [ "$_i" -l
 t "apply network prints the plan first" "^network.sh addr -n" "$(sed -n 1p "$T/netcalls")"
 t "then applies it, detached" "^network.sh addr$" "$(sed -n 2p "$T/netcalls")"
 t "and returns at once" "applying in one second" "$out"
+
+# A disabled service has no daemon pid. All anonymous placeholders must
+# be woken, rather than selecting an unrelated first match. No real pid
+# is signalled: the shell builtin is replaced in the child shell.
+respawn_run() {
+    env PATH="$T/bin:$PATH" APPLY_SCRIPT="$A" APPLY_ACTION="${1:-igmp}" bash -c '
+        pidof() { printf "%s\n" "${DAEMON_PIDS:-}"; }
+        pgrep() { printf "%s\n" "${OFF_PIDS:-}"; }
+        kill() {
+            if [ "$1" = -0 ]; then return "${KILL_PROBE_RC:-0}"; fi
+            printf "signal %s\n" "$*"; return "${KILL_RC:-0}";
+        }
+        . "$APPLY_SCRIPT" "$APPLY_ACTION"
+'
+}
+out=$(OFF_PIDS=$'1111\n2222' respawn_run)
+t "disabled apply wakes both anonymous placeholders" "signal 1111.*2222" "$(echo "$out" | tr '\n' ' ')"
+t "disabled apply reports placeholders honestly" "placeholders" "$out"
+out=$(DAEMON_PIDS='3333 4444' OFF_PIDS=1111 respawn_run)
+t "active apply signals every daemon pid separately" "signal 3333.*signal 4444" "$(echo "$out" | tr '\n' ' ')"
+t "active apply leaves placeholders alone" "^0$" "$(echo "$out" | grep -c 'signal 1111')"
+out=$(OFF_PIDS=2222 KILL_RC=1 respawn_run); rc=$?
+t "failed placeholder signal fails apply" "^1$" "$rc"
+out=$(OFF_PIDS=2222 KILL_RC=1 KILL_PROBE_RC=1 respawn_run); rc=$?
+t "a placeholder that exited before the signal is harmless" "^0$" "$rc"
+out=$(respawn_run)
+t "no matching process is reported" "nothing to restart" "$out"
 
 t "an unknown verb is refused" "usage" "$(run bogus)"
 

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* What the modules of omcid share.
  *
  * omcid was one 3122-line main.c. The split is by what a piece TALKS TO,
@@ -250,6 +253,7 @@ void serial_forget(void);
 int serial_refresh(int log);
 extern uint8_t devid[40];
 extern uint8_t mib_data_sync;
+void mib_data_sync_advance(void);
 const struct omci_class *find_class(uint16_t id);
 uint16_t attr_width(const struct omci_class *c, unsigned k);
 extern struct mib_tblent tblpool[MIB_TBL_NODES];
@@ -395,6 +399,7 @@ extern uint16_t alarm_snapshot;
 #define SNAPSHOT_PATH          "/var/run/omcid-mib.snap"
 #define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
 #define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
+#define RESUME_DECISION_PREV   RESUME_DECISION_PATH ".prev"
 int snapshot_save(void);
 /* Write `buf` to `tmp`, then rename it over `path`: a reader never sees a
  * half-written file. 0 on success. */
@@ -561,6 +566,7 @@ void ev_sw_image(const char *op, uint16_t inst, long size, unsigned window,
 /* A class 84 forward operation no bridge rule can express, built as
  * `used` instead: logged once per code for the life of the process. */
 void ev_vlan_fwdop(uint16_t inst, uint8_t code, uint8_t used);
+void ev_vlan_fwdop_override(uint16_t inst, uint8_t code, uint8_t used);
 /* An OLT lock or unlock of an Ethernet UNI, or a lock a MIB reset or start
  * undid (apply_uni.c): event=uni_lock, once per change of a port's state. */
 void ev_uni_lock(uint16_t inst, int port, const char *action);
@@ -676,6 +682,8 @@ struct onu_identity {
 	uint8_t loaded;
 };
 
+#define FWDOP_OVR_MAX 12
+
 /* The manual VLAN, which is where the service's tag actually comes from. */
 struct onu_vlan_cfg {
 	int mode;                            /* VLAN_MANU_MODE, 0 = off */
@@ -684,6 +692,10 @@ struct onu_vlan_cfg {
 	int pri;                             /* VLAN_MANU_TAG_PRI, 0 when absent */
 	uint8_t manual;                      /* type 1, mode 1, vid and pri present */
 	uint8_t loaded;
+	/* RTK_DEVINFO_SPECVER, the stock FwdOp override (cfgstore.c): class 84
+	 * instance and the code to build it with. nfwdop -1: malformed, off. */
+	int nfwdop;
+	struct { uint16_t inst; uint8_t code; } fwdop[FWDOP_OVR_MAX];
 };
 
 /* What the OLT is told about this ONU, from the store. See cfgstore.c. */
@@ -809,6 +821,7 @@ struct cfg_snap {
 #define CFGD_IDENTITY   (0x0fffu | CFGD_FIXED_ME | CFGD_VEIP_SLOT | CFGD_PRIVATE_ME | CFGD_VEIP_ON | CFGD_CUSTOM_ME | CFGD_POTS_PORTS | CFGD_POTS_SLOT)
 /* Rebuild class, like the VLAN keys: what the bridge rules are built from. */
 #define CFGD_CUSTOM_MCAST (1u << 23)
+#define CFGD_FWDOP        (1u << 24)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
@@ -878,6 +891,7 @@ void cfg_load_vlan(void);
 void cfg_load_vlan_from(const char *cs);
 int cfg_manual_vid(void);
 int cfg_olt_tagging(void);
+uint32_t cfg_fwdop(uint16_t inst, uint32_t olt_code);
 void cfg_load_report(void);
 void cfg_load_report_from(const char *cs, const char *hs, const char *sw,
 			  const char *odi);

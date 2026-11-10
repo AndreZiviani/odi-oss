@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* omcid -- the OMCI stack: startup and the main loop.
  *
  * Takes redirect type 1 and answers the OLT (omcimsg.c), keeps the MIB
@@ -328,21 +331,28 @@ int main(int argc, char **argv)
 	 * The decision file is written before anything else here can fail or
 	 * block, so omci-respawn-reprovision.sh -- backgrounded by
 	 * svc-omcid.sh at the same moment this process starts -- only has to
-	 * wait on it briefly, not for full registration. Unlinked first so a
-	 * decision from an earlier run never answers for this one. */
+	 * wait on it briefly, not for full registration. svc-omcid.sh moves an
+	 * earlier run's file to RESUME_DECISION_PREV before this process
+	 * starts, so the main file read by that script is only ever this
+	 * run's; both are removed here before the new decision is written. */
 	{
 		uint32_t st = 0;
 		int resumed, restart;
 		const char *why = "no_snapshot";
 		long prev = sys_open(RESUME_DECISION_PATH, O_RDONLY);
+		long prevp = sys_open(RESUME_DECISION_PREV, O_RDONLY);
 
 		/* The decision file is on tmpfs and every omcid writes one, so
-		 * finding one says an omcid already ran this boot: this is a
-		 * respawn or an apply.sh restart, not the first start. */
-		restart = prev >= 0;
+		 * finding one (or the .prev svc-omcid.sh moved it to) says an
+		 * omcid already ran this boot: this is a respawn or a restart,
+		 * not the first start. */
+		restart = prev >= 0 || prevp >= 0;
 		if (prev >= 0)
 			sys_close((int)prev);
+		if (prevp >= 0)
+			sys_close((int)prevp);
 		sys_unlink(RESUME_DECISION_PATH);
+		sys_unlink(RESUME_DECISION_PREV);
 		if (state_from_arg)
 			st = state_arg;
 		else if (fd < 0 || omci_getOnuState(&st) != 0)

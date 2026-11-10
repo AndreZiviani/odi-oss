@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_bdgconn_uplink_test.sh -- the upstream classifier rows read back
 # for the IGMP reports igmpd takes and sends up itself: which row a frame
 # matches, its tag treatment and flow, and the row that carries a VLAN up.

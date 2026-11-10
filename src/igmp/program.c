@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Programming the switch, over the /dev/odi_sw ioctls in switch_opt.c.
  *
  * Named program.c rather than hw.c on purpose: diag owns a hw.h on the same

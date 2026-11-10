@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_init_platform_test.sh -- compiles and runs
 # odi_switch_init_platform_test.c (the exact write-sequence assertion),
 # then re-runs odi_switch_cmd_test.sh with

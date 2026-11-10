@@ -1,118 +1,132 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
-# Byte-for-byte comparison of two odi-oss image tarballs (the output of image/build.sh,
-# output), for the reproducibility check in ci.yml: build the same VERSION
-# twice, in two clean workspaces, and prove the results match except for
-# the documented build stamps.
+# Byte-for-byte comparison of two odi-oss image tarballs (the output of
+# image/build.sh), for the reproducibility check in ci.yml: build the same
+# commit twice, in two clean workspaces, and prove the tarballs are identical.
 #
-# Tolerated differences, because each is a stamp the build deliberately
-# writes at build time rather than derives from the sources:
-#   - etc/version, etc/odi-build   the build timestamp (image/build.sh)
-#   - busybox, and every applet    busybox compiles its own --help banner
-#     hardlinked to it             with __DATE__/__TIME__, so the one
-#                                   busybox binary never matches bit-for-bit
-#                                   between two builds -- and every applet
-#                                   name in bin/ and sbin/ is a hardlink to
-#                                   that same binary, so they all show as
-#                                   differing files for the same one reason.
-#                                   Found and identified by the inode they
-#                                   share with bin/busybox on each side, not
-#                                   by name, so a new applet needs no edit
-#                                   here.
-#   - etc/passwd                   only differs under ROOT_PW modes that
-#                                   generate a random password; the
-#                                   reproducibility job itself always
-#                                   builds ROOT_PW=locked (deterministic),
-#                                   so this tolerance is a safety net, not
-#                                   the expected path
-#   - md5.txt                      derived from the members above, so it
-#                                   changes whenever they do; comparing it
-#                                   would only restate the same finding
-# Anything else that differs is a real reproducibility bug: something in
-# the build depends on wall-clock time, PID, hostname, filesystem
-# iteration order, or another source of non-determinism nobody has
-# documented yet.
+# Nothing is excluded or normalised. Two builds of one commit with the same
+# VERSION and ROOT_PW=locked (or a fixed ROOT_PW) must match to the byte, and
+# when they do not, this names the component that differs rather than hiding
+# it:
+#
+#   - the tar itself   member order, mode, owner, mtime, size
+#   - each member      fwu.sh, fwu_ver, md5.txt, uImage, rootfs
+#   - uImage           the first differing offsets (offsets 0-63 are the
+#                      mkimage header: magic, header CRC, timestamp)
+#   - rootfs           the squashfs: every inode (name, mode, owner, time,
+#                      device numbers) and then the content of every file,
+#                      by path, busybox and its applets included
+#
+# A random root password (ROOT_PW unset) makes etc/passwd differ on purpose;
+# that is not a build bug, so use ROOT_PW=locked for the comparison.
 #
 # Usage: tools/compare-images.sh <tar1> <tar2>
+# Exit 0 only when the two files are identical.
 set -euo pipefail
 TAR1=${1:?usage: compare-images.sh <tar1> <tar2>}
 TAR2=${2:?usage: compare-images.sh <tar1> <tar2>}
 
+sha() { sha256sum "$1" | cut -d' ' -f1; }
+
+if cmp -s "$TAR1" "$TAR2"; then
+	echo "compare-images.sh: identical, byte for byte"
+	echo "  sha256 $(sha "$TAR1")"
+	exit 0
+fi
+
+echo "compare-images.sh: the tarballs DIFFER" >&2
+echo "  $TAR1  sha256 $(sha "$TAR1")" >&2
+echo "  $TAR2  sha256 $(sha "$TAR2")" >&2
+
 WORK=$(mktemp -d)
-# sudo unsquashfs below leaves root-owned files under $WORK; a plain rm -rf,
-# run as the non-root caller of this script, cannot remove them.
-trap 'sudo rm -rf "$WORK"' EXIT
+# unsquashfs below can leave root-owned files under $WORK when it runs under
+# sudo, and a plain rm -rf by the caller could not remove them.
+asroot() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
+trap 'asroot rm -rf "$WORK"' EXIT
+# unsquashfs from the host when there is one, else from the image tools
+# container (image/Dockerfile), which has it at the version that wrote the
+# rootfs. Device nodes in the image need root either way.
+unsq() {
+	if command -v unsquashfs >/dev/null 2>&1; then
+		asroot unsquashfs "$@"
+	else
+		docker run --rm -v "$WORK:$WORK" "${TOOLS_IMAGE:-odi-oss-image}" unsquashfs "$@"
+	fi
+}
 DIRA=$WORK/a DIRB=$WORK/b
 mkdir -p "$DIRA" "$DIRB"
 tar -xf "$TAR1" -C "$DIRA"
 tar -xf "$TAR2" -C "$DIRB"
 
-fail=0
+differ=()
 
-members1=$(cd "$DIRA" && find . -maxdepth 1 -type f | sort)
-members2=$(cd "$DIRB" && find . -maxdepth 1 -type f | sort)
-if [ "$members1" != "$members2" ]; then
-	echo "compare-images.sh: member list differs" >&2
-	diff <(echo "$members1") <(echo "$members2") >&2 || true
-	fail=1
+# The tar container: names in archive order with mode, owner and time.
+tar_listing() { tar --numeric-owner -tvf "$1"; }
+if ! diff <(tar_listing "$TAR1") <(tar_listing "$TAR2") >"$WORK/tar.diff"; then
+	echo "compare-images.sh: tar members differ in order, mode, owner, time or size:" >&2
+	sed 's/^/  /' "$WORK/tar.diff" >&2
+	differ+=("tar headers")
 fi
 
-for member in fwu.sh fwu_ver uImage; do
-	[ -f "$DIRA/$member" ] && [ -f "$DIRB/$member" ] || continue
-	if ! cmp -s "$DIRA/$member" "$DIRB/$member"; then
-		echo "compare-images.sh: $member differs between the two builds" >&2
-		fail=1
+members=$( (cd "$DIRA" && ls; cd "$DIRB" && ls) | LC_ALL=C sort -u)
+for member in $members; do
+	if [ ! -f "$DIRA/$member" ] || [ ! -f "$DIRB/$member" ]; then
+		echo "compare-images.sh: member $member is in only one tarball" >&2
+		differ+=("$member (missing)")
+		continue
 	fi
+	cmp -s "$DIRA/$member" "$DIRB/$member" && continue
+	echo "compare-images.sh: member $member differs ($(wc -c < "$DIRA/$member") and $(wc -c < "$DIRB/$member") bytes)" >&2
+	differ+=("$member")
+	case $member in
+	uImage)
+		echo "  first differing offsets (1-based byte, octal values; 1-64 is the mkimage header):" >&2
+		cmp -l "$DIRA/$member" "$DIRB/$member" 2>/dev/null | head -n 8 | sed 's/^/    /' >&2 || true
+		echo "  header: A $(od -An -tx1 -j0 -N64 "$DIRA/$member" | tr -d '\n')" >&2
+		echo "  header: B $(od -An -tx1 -j0 -N64 "$DIRB/$member" | tr -d '\n')" >&2
+		;;
+	rootfs)
+		# Superuser, not a fallback: rootfs/devices.pseudo puts real device
+		# nodes in the image, which unsquashfs can only recreate as root.
+		ra=$WORK/rootfs-a rb=$WORK/rootfs-b
+		la=$WORK/ll-a lb=$WORK/ll-b
+		# The inode table first: name, mode, owner, time, device numbers.
+		unsq -ll "$DIRB/rootfs" >"$lb" 2>/dev/null || true
+		unsq -ll "$DIRA/rootfs" >"$la" 2>/dev/null || true
+		if ! diff "$la" "$lb" >"$WORK/ll.diff"; then
+			echo "  rootfs inodes differ (name, mode, owner, time, device numbers):" >&2
+			head -n 40 "$WORK/ll.diff" | sed 's/^/    /' >&2
+		else
+			echo "  rootfs inode listings match; the difference is in file contents or in the superblock" >&2
+		fi
+		unsq -d "$ra" "$DIRA/rootfs" >/dev/null
+		unsq -d "$rb" "$DIRB/rootfs" >/dev/null
+		asroot chmod -R a+rX "$ra" "$rb"
+		# dev/ nodes are special files, which diff reports as different
+		# without reading them; the -ll listing above already covers them.
+		if diff -rq -x dev "$ra" "$rb" >"$WORK/files.diff" 2>&1; then
+			echo "  rootfs file contents match" >&2
+		else
+			echo "  rootfs files that differ:" >&2
+			sed 's/^/    /' "$WORK/files.diff" >&2
+		fi
+		;;
+	*)
+		diff -u "$DIRA/$member" "$DIRB/$member" 2>/dev/null | head -n 30 | sed 's/^/    /' >&2 || true
+		;;
+	esac
 done
 
-# rootfs is a squashfs image: compare the trees inside it, not the
-# compressed bytes (the squashfs metadata ordering mksquashfs itself picks is not at issue
-# here; the tolerated-file list above is). rootfs/devices.pseudo puts real
-# character/block device nodes in the image, which unsquashfs can only
-# recreate as an actual superuser -- sudo, not a fallback, on any runner
-# where this script runs unprivileged.
-sudo unsquashfs -d "$WORK/rootfs-a" "$DIRA/rootfs" >/dev/null
-sudo unsquashfs -d "$WORK/rootfs-b" "$DIRB/rootfs" >/dev/null
-sudo chmod -R a+rX "$WORK/rootfs-a" "$WORK/rootfs-b"
-
-# Delete busybox and every applet hardlinked to it, on both sides, before
-# the tree diff: found by inode, not by name, so this does not need
-# updating when the applet list in packages/busybox/build.sh changes.
-for side in a b; do
-	bb="$WORK/rootfs-$side/bin/busybox"
-	[ -f "$bb" ] || continue
-	inum=$(stat -c %i "$bb")
-	sudo find "$WORK/rootfs-$side" -inum "$inum" -delete
-done
-
-# dev/ is checked separately, not by plain diff: every node there is a
-# character or block special file (rootfs/devices.pseudo), and GNU diff
-# reports two special files as "differ" on sight, whether or not they
-# actually match, because it never reads their content. What identifies a
-# device node -- name, type, major:minor -- is checked explicitly instead;
-# dev/ is then excluded from the general diff below so that harmless "differ"
-# noise cannot mask a real difference elsewhere in the same run.
-dev_listing() { (cd "$1/dev" && find . | LC_ALL=C sort | xargs -I{} stat --format='%n %F %t:%T' {}); }
-dev_diff=$(diff <(dev_listing "$WORK/rootfs-a") <(dev_listing "$WORK/rootfs-b") || true)
-if [ -n "$dev_diff" ]; then
-	echo "compare-images.sh: dev/ differs (name, type or major:minor -- not tolerated):" >&2
-	echo "$dev_diff" >&2
-	fail=1
+if [ ${#differ[@]} -eq 0 ]; then
+	# Same members, same bytes in each, same listing, yet the files differ:
+	# padding or trailing data in the tar stream.
+	echo "compare-images.sh: members and headers match, yet the tarballs differ (archive padding or trailer)" >&2
+	differ+=("tar stream")
 fi
-
-rootfs_diff=$(diff -rq -x dev "$WORK/rootfs-a" "$WORK/rootfs-b" 2>/dev/null || true)
-unexpected=$(echo "$rootfs_diff" | grep -vE \
-	'^Files .*/etc/version and .*/etc/version differ$|^Files .*/etc/odi-build and .*/etc/odi-build differ$|^Files .*/etc/passwd and .*/etc/passwd differ$' \
-	| sed '/^$/d' || true)
-if [ -n "$rootfs_diff" ]; then
-	echo "compare-images.sh: rootfs differences (tolerated ones filtered out below the line, if any):" >&2
-	echo "$rootfs_diff" >&2
-fi
-if [ -n "$unexpected" ]; then
-	echo "compare-images.sh: rootfs differs outside the documented build stamps:" >&2
-	echo "$unexpected" >&2
-	fail=1
-fi
-
-[ "$fail" = 0 ] && echo "compare-images.sh: identical, modulo the documented build stamps"
-exit "$fail"
+printf 'compare-images.sh: differing components:' >&2
+printf ' %s;' "${differ[@]}" >&2
+echo >&2
+exit 1

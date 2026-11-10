@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_switch_bdgconn.c -- cmd 51 and cmd 50, activate and deactivate a
  * bridge connection: the service list, the CF table as programmed, and

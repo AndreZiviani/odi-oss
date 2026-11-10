@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_ds_encrypt_test.sh -- compiles and runs
 # odi_switch_ds_encrypt_test.c: odi_switch_gpon_encrypt_port(), the AES
 # bit of a downstream GEM port, set and cleared through its slot, the

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # igmpd -r against its golden transcripts (test/replay/*.in, expected output
 # *.out), and the refusals around it. Runs under qemu-user in the diag
 # toolchain container, from src/igmp, after the binary is built:

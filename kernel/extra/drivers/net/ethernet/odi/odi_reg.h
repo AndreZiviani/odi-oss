@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_reg.h -- the /dev/odi_sw ioctl ABI: switch-core register get/set,
  * per-port MIB counter get, the L2 lookup table (row readback, the

@@ -32,7 +32,9 @@ CONFIG_SLUB_TINY=y
 # CONFIG_MODULES is not set
 CONFIG_PROC_SYSCTL=y
 # CONFIG_IKCONFIG is not set
-# CONFIG_DEBUG_KERNEL is not set
+# DEBUG_KERNEL is not set here: EXPERT selects it, so it is on whatever the
+# seed says. It only opens the debug menus; each option under it is chosen
+# on its own below.
 # CONFIG_KALLSYMS is not set
 # printk ring: 6.18 sizes its descriptor metadata off this too (the default
 # 17 cost 540 KB); the ramlog console keeps the boot log anyway.
@@ -60,9 +62,18 @@ CONFIG_SYSVIPC=y
 # watchdog restart handler (odi_wdt.c) instead of waiting for the
 # userland watchdog deadline, about 44 s. 10 s leaves the panic trace time
 # to reach the ramlog. Without it the default is to wait.
+# sysctl.* (mainline, no code): the hardening sysctls, set by the kernel
+# itself before init runs, on every boot and whatever U-Boot passes, since
+# the built-in line always goes first. kptr_restrict=2 prints every %pK
+# pointer (the socket addresses in /proc/net, for one) as zeros, root
+# included; the four fs.protected_* refuse to follow a symlink, link a
+# file, or open a FIFO or regular file for writing in a sticky world-writable
+# directory such as /tmp when it belongs to another user. All root today, so
+# the last four bite only once a daemon runs as another user.
+# docs/KERNEL.md, "Hardening".
 CONFIG_MIPS_CMDLINE_BUILTIN_EXTEND=y
 CONFIG_CMDLINE_BOOL=y
-CONFIG_CMDLINE="console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:256K(boot),8K(env),8K(env2),240K(config),1328K(k0)ro,2512K(r0)ro,1328K(k1),2512K(r1),4K@0ro,4K@0ro,4K@0ro,4K@0ro,1328K@512K(linux),2512K@1840K(rootfs) print-fatal-signals=1 panic=10"
+CONFIG_CMDLINE="console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:256K(boot),8K(env),8K(env2),240K(config),1328K(k0)ro,2512K(r0)ro,1328K(k1),2512K(r1),4K@0ro,4K@0ro,4K@0ro,4K@0ro,1328K@512K(linux),2512K@1840K(rootfs) print-fatal-signals=1 panic=10 sysctl.kernel.kptr_restrict=2 sysctl.fs.protected_symlinks=1 sysctl.fs.protected_hardlinks=1 sysctl.fs.protected_fifos=1 sysctl.fs.protected_regular=1"
 CONFIG_DEVTMPFS=y
 CONFIG_DEVTMPFS_MOUNT=y
 
@@ -369,3 +380,56 @@ CONFIG_PARTITION_ADVANCED=y
 # No wireless: the vendor menus were on by default and select nothing.
 # CONFIG_WLAN is not set
 # CONFIG_WIRELESS is not set
+
+# Hardening. docs/KERNEL.md ("Hardening") has the whole matrix: what this
+# arch and toolchain support, the uImage bytes each option costs (measured,
+# one option at a time on this config) and why the rest stay off.
+# tools/check-kernel-hardening.sh fails make lint when a line below is
+# missing here, and kernel/build.sh when one did not survive olddefconfig.
+#
+# Already on by default before this section, now stated: the strong stack
+# protector (25,060 bytes against none; the canary is per task and is copied
+# into __stack_chk_guard on every context switch, r2300_switch.S, so it works
+# without SMP) and zeroing every stack variable at function entry (7,686).
+CONFIG_STACKPROTECTOR=y
+CONFIG_STACKPROTECTOR_STRONG=y
+CONFIG_INIT_STACK_ALL_ZERO=y
+# Bounds checks on the str*/mem* calls whose object size the compiler knows
+# (4,940 bytes; no new warning from our drivers, no trap instruction).
+CONFIG_FORTIFY_SOURCE=y
+# copy_to_user/copy_from_user refuse a copy that crosses a slab object, a
+# stack frame or kernel text (2,127 bytes).
+CONFIG_HARDENED_USERCOPY=y
+CONFIG_HARDENED_USERCOPY_DEFAULT_ON=y
+# Zero heap memory on allocation and on free (34 bytes: a static key). The
+# management path is the only traffic through the CPU; the switch forwards
+# the user datapath in hardware. init_on_alloc=0 / init_on_free=0 on the
+# command line turn either off without a rebuild.
+CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+CONFIG_INIT_ON_FREE_DEFAULT_ON=y
+# Linked-list pointer checks (2,885 bytes), and a BUG rather than a warning
+# when one, or another corruption check, fires (no further bytes).
+CONFIG_LIST_HARDENED=y
+CONFIG_BUG_ON_DATA_CORRUPTION=y
+# The end-of-stack magic checked on every schedule() (93 bytes). Its
+# DEBUG_KERNEL dependency is already on: EXPERT selects it.
+CONFIG_SCHED_STACK_END_CHECK=y
+# dmesg for CAP_SYSLOG only (no bytes). Everything runs as root today.
+CONFIG_SECURITY_DMESG_RESTRICT=y
+# User address space: brk randomised too (randomize_va_space 2), the widest
+# mmap randomisation 32-bit MIPS allows (15 bits), and nothing mapped below
+# 64 KB (every ELF here is a static executable linked at 0x400000). No bytes.
+# CONFIG_COMPAT_BRK is not set
+CONFIG_ARCH_MMAP_RND_BITS=15
+CONFIG_DEFAULT_MMAP_MIN_ADDR=65536
+# Off, and checked to stay off: interfaces nothing here uses that would widen
+# what a local process can reach in the kernel. MODULES, IO_URING, INET_DIAG,
+# KALLSYMS, LEGACY_TIOCSTI and LDISC_AUTOLOAD are set off above, for size or
+# for want of a user; these default off and stay that way.
+# CONFIG_BPF_SYSCALL is not set
+# CONFIG_PERF_EVENTS is not set
+# CONFIG_USERFAULTFD is not set
+# CONFIG_KEXEC is not set
+# CONFIG_MAGIC_SYSRQ is not set
+# CONFIG_PROC_KCORE is not set
+# CONFIG_DEBUG_FS is not set

@@ -618,8 +618,8 @@ completes it. It is sized for a 1328 KB kernel partition (1,359,872 bytes):
 `-Os`, dead code elimination, `SLUB_TINY`, no modules, no kallsyms, a 16 KB
 printk ring (`LOG_BUF_SHIFT=14`; the ramlog keeps the boot log anyway), IPv4,
 bridge and 802.1Q only. Every line carries its reason in a comment there.
-The LZMA uImage is 1,154,343 bytes, 205,529 spare (15%); the uncompressed
-kernel is 3,476,904 bytes. `ODI_HWMON` (the die temperature sensor, which
+The LZMA uImage is 1,172,555 bytes, 187,317 spare (13.8%), with the hardening
+options below; the uncompressed kernel is 3,544,984 bytes. `ODI_HWMON` (the die temperature sensor, which
 turns `HWMON` back on) added 2,746 bytes to the uImage and 8,488 to the
 uncompressed kernel.
 
@@ -686,9 +686,9 @@ regression here; a stick has to.
 What was measured and deliberately left on, with the saving in uImage bytes
 had it been turned off (each on top of the trimmed config):
 
-- `STACKPROTECTOR_STRONG`: 25,043 bytes. It is a security hardening against a
-  stack overflow in network-reachable kernel code, so it stays until someone
-  decides the saving is worth giving it up.
+- `STACKPROTECTOR_STRONG`: 25,060 bytes. It is a security hardening against a
+  stack overflow in network-reachable kernel code; it is one of the options
+  "Hardening" (below) requires.
 - `BRIDGE_IGMP_SNOOPING`, `COMPACTION` and `FUTEX_PI` together: 27,747 bytes.
   Bridge snooping changes how the kernel bridge forwards multicast it sees on
   the CPU port, and the sources do not show whether IGMP copied up for igmpd
@@ -716,6 +716,96 @@ below).
 arguments after it, so the bootloader's `root=` and `mtdparts=` win (the
 last occurrence of each is the one used); the default ordering made the
 slot-0 `root=` win on a slot-1 boot.
+
+### Hardening
+
+Every kernel hardening option this architecture and toolchain support was
+considered; the ones below marked "on" are set in the seed config, with
+their reasons, in its "Hardening" section. `tools/check-kernel-hardening.sh`
+holds the list: `make lint` fails when a line of it is missing from the
+seed, and `kernel/build.sh` runs the same check on the completed `.config`
+right after `olddefconfig`, before compiling, because `olddefconfig` turns an
+option off without a word when one of its dependencies goes away. The same
+script checks that the hardening sysctls are on the built-in command line.
+
+Sizes are uImage bytes (LZMA, what has to fit the 1,359,872-byte kernel
+partition), each option built alone on top of the config of the time
+(uImage 1,163,145 bytes), with the build `kernel/build.sh` runs. A few tens of
+bytes either way is LZMA noise: where the uncompressed kernel came out
+byte-for-byte the same size, the table says 0. Together, the options turned
+on here took the uImage to 1,172,555 bytes (9,410 more, less than the sum:
+LZMA compresses the checks together), 187,317 spare (13.8%).
+
+| Option | On this arch and toolchain | uImage bytes | Run-time cost | Here |
+|---|---|---|---|---|
+| `STACKPROTECTOR_STRONG` | yes: MIPS selects `HAVE_STACKPROTECTOR`; the canary is per task, drawn at fork, and the context switch copies it into the global `__stack_chk_guard` (`r2300_switch.S`, `!SMP` only), so it works on this uniprocessor | 25,060 against none (4,416 of it the plain stack protector) | a load and compare in every function with an array or address-taken local | on (already by default) |
+| `INIT_STACK_ALL_ZERO` | yes: gcc 16 has `-ftrivial-auto-var-init=zero` | 7,686 | a store per uninitialised local | on (already by default) |
+| `FORTIFY_SOURCE` | yes: MIPS selects `ARCH_HAS_FORTIFY_SOURCE` | 4,940 | a size compare on `str*`/`mem*` calls whose object size is known; nothing on the others | on |
+| `HARDENED_USERCOPY` | yes: no architecture dependency; works with `SLUB_TINY` | 2,127 | a few compares per `copy_to_user`/`copy_from_user` | on |
+| `INIT_ON_ALLOC_DEFAULT_ON`, `INIT_ON_FREE_DEFAULT_ON` | yes | 34 (a static key) | a `memset` of every page and slab object on free (and on allocation, for memory not zeroed at free). Only management traffic (ssh, the web UI, the exporter, OMCI) passes through the CPU; the switch forwards the subscriber datapath in hardware. Not measured on a stick yet; `init_on_alloc=0` / `init_on_free=0` on the command line turn either off without a rebuild | on |
+| `LIST_HARDENED`, `BUG_ON_DATA_CORRUPTION` | yes | 2,885, and 0 more for the second | pointer compares on every list add and delete | on |
+| `SCHED_STACK_END_CHECK` | yes: its `DEBUG_KERNEL` dependency is on already (`EXPERT` selects it) | 93 | one compare per `schedule()` | on |
+| `SECURITY_DMESG_RESTRICT` | yes | 0 | none | on (`kernel.dmesg_restrict=1`) |
+| `COMPAT_BRK` off, `ARCH_MMAP_RND_BITS=15`, `DEFAULT_MMAP_MIN_ADDR=65536` | yes: 15 is the 32-bit MIPS maximum; every ELF in the rootfs is a static executable linked at `0x400000` (readelf over all 13) | 0 | none; the user heap start is randomised too (`randomize_va_space` 2) and the mmap base over 128 MB instead of 1 MB | on |
+| `kernel.kptr_restrict=2`, `fs.protected_symlinks`, `_hardlinks`, `_fifos`, `_regular` = 1 | yes | the command-line string only | none | on, as `sysctl.*` words on the built-in command line, which the kernel applies before init on every boot (below) |
+| `ZERO_CALL_USED_REGS` | yes: gcc 16 has `-fzero-call-used-regs=used-gpr` | 18,774 (the uncompressed kernel 6.5% larger) | extra instructions at every function return, on a core with small caches | off: 6.5% more kernel text to fetch through a small instruction cache is a cost to measure on a stick first; it removes return-oriented gadgets in a kernel whose addresses are public anyway (below) |
+| `SLAB_FREELIST_RANDOM`, `SLAB_FREELIST_HARDENED`, `SLAB_BUCKETS` | only without `SLUB_TINY`: each `depends on !SLUB_TINY` | 9,782 for dropping `SLUB_TINY` alone, 11,214 with these three and `SHUFFLE_PAGE_ALLOCATOR` | dropping `SLUB_TINY` gives up the smallest slab footprint: larger slab orders, per-CPU slabs and separate reclaimable caches, on a 32 MB board that once ran short of slab | off: the memory it costs has to be measured on a stick (`Slab`, `MemAvailable`) before the uImage bytes are worth it |
+| `SHUFFLE_PAGE_ALLOCATOR` | yes | 9,950 | it shuffles free memory in blocks of the largest page order, 4 MB here (`ARCH_FORCE_MAX_ORDER=10`), so a 32 MB board has only a handful of blocks to shuffle, and only with `page_alloc.shuffle=1` on the command line | off: next to nothing randomised for its size |
+| `UBSAN_BOUNDS` with `UBSAN_TRAP` | no: the trap is gcc's `__builtin_trap`, which at `-march=mips2` is `teq`/`teqi`, a MIPS II trap this core does not implement; the build had 1,102 of them (the release kernel has 0) | 8,402 | | off; without `UBSAN_TRAP` it only logs, for more bytes |
+| `PANIC_ON_OOPS` | yes | 0 | an oops anywhere reboots the stick (`panic=10`) instead of leaving a half-working kernel | off, a policy choice: the link goes down for every oops |
+| gcc plugins (`GCC_PLUGIN_LATENT_ENTROPY`, `RANDSTRUCT`) | no: the toolchain image ships gcc plugin headers but not the GMP headers they include, so no plugin builds (`gmp.h: No such file or directory`) | | | off. A random struct layout would also have to be a fixed, published seed for the release build to stay reproducible, which leaves nothing secret |
+| `STRICT_KERNEL_RWX`, `STRICT_MODULE_RWX`, `DEBUG_WX` | no: MIPS selects neither `ARCH_HAS_STRICT_KERNEL_RWX` nor `ARCH_HAS_DEBUG_WX`, and the kernel runs from KSEG0, which the MMU does not map, so there are no page permissions to set; modules are off anyway | | | not available |
+| `VMAP_STACK`, `RANDOMIZE_KSTACK_OFFSET`, `KSTACK_ERASE` | no: MIPS selects none of `HAVE_ARCH_VMAP_STACK`, `HAVE_ARCH_RANDOMIZE_KSTACK_OFFSET`, `HAVE_ARCH_KSTACK_ERASE` | | | not available |
+| `RELOCATABLE`, `RANDOMIZE_BASE` (KASLR) | no: `RELOCATABLE` depends on `SYS_SUPPORTS_RELOCATABLE` and on a MIPS32/64 R2 or later CPU; this board is `CPU_R3000` and selects neither | | | not available |
+| `STRICT_DEVMEM` | no: MIPS has no `devmem_is_allowed()` (`ARCH_HAS_DEVMEM_IS_ALLOWED`) | | | not available; `/dev/mem` stays for root, as `tools/memprobe` and `tools/regdump` read registers through it |
+
+Already off, and now checked to stay off, because each widens what a local
+process can reach in the kernel: `MODULES`, `IO_URING`, `INET_DIAG`,
+`KALLSYMS`, `BPF_SYSCALL` (so `kernel.unprivileged_bpf_disabled` does not
+exist), `PERF_EVENTS` (likewise `kernel.perf_event_paranoid`), `USERFAULTFD`,
+`KEXEC`, `MAGIC_SYSRQ`, `PROC_KCORE`, `DEBUG_FS`, `LEGACY_TIOCSTI` and
+`LDISC_AUTOLOAD`. No security module (`SECURITY`, so no Yama ptrace scope) is
+built: every process runs as root, where none of them would restrict
+anything.
+
+**The sysctls are on the command line, not in a script.** Since 5.8 the
+kernel applies `sysctl.<name>=<value>` words of its command line itself,
+after the initcalls and before it starts init (`do_sysctl_args()`), and a
+word with a dot in it is never passed on to init. The built-in line always
+goes first (`MIPS_CMDLINE_BUILTIN_EXTEND`, above), so they hold on every boot
+whatever U-Boot passes, from before the first process runs, with no file in
+the rootfs and no step in rcS. `kptr_restrict=2` prints every `%pK` pointer
+(the socket addresses in `/proc/net`, for one) as zeros, root included. The
+four `fs.protected_*` refuse to follow a symlink, make a hard link, or open a
+FIFO or regular file for writing in a sticky world-writable directory such as
+`/tmp` when it belongs to another user. With everything running as root those
+four and `dmesg_restrict` change nothing today; they start to matter as soon as a daemon runs as another user.
+
+**What no option fixes on this board.**
+
+- No kernel address randomisation, no read-only kernel text and no guard
+  pages around kernel stacks (the rows marked "not available"), and the
+  release image is public and reproducible: anyone can rebuild it and read
+  every kernel address. Hardening here is about stopping a memory error from
+  becoming a write (stack protector, `FORTIFY_SOURCE`, user-copy checks, list
+  checks, zeroed memory), not about hiding where things are.
+- The stack canary of the boot task, and so of the idle task, is drawn early
+  in `start_kernel()`, before any interrupt has fed the entropy pool. On this
+  core `random_get_entropy()` has no cycle counter (`cpu_has_counter` is 0);
+  it falls back to the clocksource, still jiffies that early, and six bits of
+  the TLB `Random` register. Tasks forked later draw from a pool that
+  interrupts have fed, and rcS credits the seed saved by the previous boot
+  (`seedrng`). The board has no hardware random generator to do better, and
+  the latent-entropy plugin, made for exactly this, cannot be built (above).
+- `/dev/mem` stays readable and writable by root (no `STRICT_DEVMEM` on MIPS),
+  which on this board also means every SoC register.
+
+`qemu` runs a stock malta kernel, so none of this is exercised by
+`make test`; a stick has to: the boot log line `mem auto-init: stack:all(zero),
+heap alloc:on, heap free:on`, `cat /proc/sys/kernel/kptr_restrict` (2),
+`/proc/sys/kernel/dmesg_restrict` (1), `/proc/sys/fs/protected_regular` (1),
+`/proc/sys/vm/mmap_min_addr` (65536), `/proc/sys/kernel/randomize_va_space`
+(2), and no `Failed to set sysctl parameter` line in `dmesg`.
 
 ## The boot command line and the watchdog
 

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # compare.py --stream ignores brackets/marks entirely and diffs two dumps as
 # final-state write maps: one per register address, one per (table, row
 # index) with a closed run expanded back into one entry per row it covers.

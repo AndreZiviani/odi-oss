@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * The L2 lookup table: row readback, the valid-row walk behind the MAC
  * table, L2 multicast add/delete for igmpd, and the static unicast rows

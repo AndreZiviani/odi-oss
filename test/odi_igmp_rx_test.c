@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_igmp_rx_test.c -- the frames the kernel hands igmpd (odi_igmp_rx.h),
  * checked against igmpd's own parsers (src/igmp/frame.c and mld.c, which

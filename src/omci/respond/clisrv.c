@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Our own CLI protocol, on queue 0x9601.
  *
  * Split out of main.c; see omcid.h.

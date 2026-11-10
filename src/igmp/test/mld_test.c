@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The IPv6 half of igmpd (mld.c): the MLD parse against frames built here,
  * which groups are snooped (and which never are), the IPv6 lists of the
  * policy file, the lease bits, the table and its refusals, the state file.

@@ -1,0 +1,76 @@
+# REUSE annotations for the files that cannot carry an SPDX header of their
+# own (documents, data, goldens, binaries, config files whose syntax allows
+# no comment). Source files carry their header in the file; a header in the
+# file always wins over an entry here. Check with `reuse lint` (make lint
+# runs it when the tool is installed; CI pins it, see .github/workflows/ci.yml).
+#
+# Licensing decision: project-owned code, docs and data are
+# GPL-2.0-or-later. Anything that is a hunk against an upstream file keeps
+# the license of that upstream file (the patches below). See
+# docs/LICENSING.md.
+version = 1
+
+# Everything else that is ours and takes no header: markdown and text
+# documents, rootfs config files (inittab, fstab, ...), kernel config, test
+# fixtures and goldens (which tests compare byte for byte, so no header can
+# go into them), the kb field notes, the register tables as text. Listed by
+# kind on purpose, not as "**": a catch-all would also cover a new source
+# file that forgot its header, and reuse lint could then never fail.
+[[annotations]]
+path = [
+    "**/*.md",
+    "**/*.txt",
+    "**/*.xml",
+    "**/*.golden",
+    "**/*.expected",
+    "src/igmp/test/replay/**",
+    "LICENSE",
+    "kernel/618/config",
+    "rootfs/skeleton/etc/fstab",
+    "rootfs/skeleton/etc/group",
+    "rootfs/skeleton/etc/hostname",
+    "rootfs/skeleton/etc/hosts",
+    "rootfs/skeleton/etc/inittab",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Andre Ziviani"
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# Patches against mainline Linux. A patch carries the hunks of an upstream
+# file, so the patch follows the license of the files it modifies: the kernel
+# is GPL-2.0-only, as upstream ships it. The patch text is left unchanged.
+[[annotations]]
+path = ["kernel/618/patches/*.patch", "kernel/618/debug/*.patch"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Andre Ziviani"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+# Generated from the MIB model by src/omci/tools/*.py; regenerate rather
+# than edit. Same license as the generators and the daemon they feed.
+[[annotations]]
+path = "src/omci/generated/**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Andre Ziviani"
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# Register replay tables: binary data of our own format, recorded from this
+# board and packed by tools/regtrace; loaded with request_firmware().
+[[annotations]]
+path = "rootfs/skeleton/lib/firmware/odi/*.bin"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Andre Ziviani"
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# Screenshots of our own tools.
+[[annotations]]
+path = "docs/images/**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Andre Ziviani"
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# Lines by a second contributor in files that take no header.
+[[annotations]]
+path = ["CHANGELOG.md", "docs/kb/rtl9601-omci-tptype3-bridge-port-points-at-mapper-or-iwtp.md"]
+precedence = "closest"
+SPDX-FileCopyrightText = ["2026 Andre Ziviani", "2026 Tomás Correia"]
+SPDX-License-Identifier = "GPL-2.0-or-later"

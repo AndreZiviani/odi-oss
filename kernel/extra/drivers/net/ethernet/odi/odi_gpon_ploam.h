@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_ploam.h -- downstream/upstream PLOAM message codec for the
  * RTL9602C GPON MAC block, against ITU-T G.984.3 clause 9 (PLOAM message
@@ -95,6 +96,7 @@ enum odi_gpon_ds_ploam_type {
 	ODI_GPON_DS_BER_INTERVAL		= 0x12,	/* clause 9.2.3.18 */
 	ODI_GPON_DS_KEY_SWITCHING_TIME		= 0x13,	/* clause 9.2.3.19 */
 	ODI_GPON_DS_EXT_BURST_LENGTH		= 0x14,	/* clause 9.2.3.20 */
+	ODI_GPON_DS_PON_ID			= 0x15,	/* Annex C.2, optional */
 	/* Vendor-specific variant of Disable_Serial_Number, sent by some
 	 * OLTs; not a G.984.3 message ID.
 	 */
@@ -242,6 +244,25 @@ struct odi_gpon_ds_configure_port_id {
 };
 void odi_gpon_decode_configure_port_id(const struct odi_gpon_ploam *msg,
 					struct odi_gpon_ds_configure_port_id *out);
+
+/* PON-ID (Annex C.2.2). Broadcast, about once a second, only from an OLT
+ * provisioned to send it; it changes nothing in the ONU. content[0] is the
+ * PON-ID type ACCCpppp: A says whose launch power TOL is (0 the OLT, 1 a
+ * reach extender), CCC the ODN class (0 A, 1 B, 2 B+, 3 C, 4 C+, the rest
+ * reserved). content[1..7] is the PON identifier, a value the operator
+ * chooses. content[8..9] is TOL, the mean launch power in 0.1 dB steps
+ * above -30 dBm (0 is -30 dBm, 334 is +3.4 dBm); 0xffff when the OLT does
+ * not report it.
+ */
+#define ODI_GPON_PON_ID_LEN		7U
+#define ODI_GPON_PON_ID_TOL_NONE	0xffffU
+struct odi_gpon_ds_pon_id {
+	uint8_t reach_extender;	/* content[0] bit 7 */
+	uint8_t odn_class;	/* content[0] bits 6-4 */
+	uint8_t id[ODI_GPON_PON_ID_LEN];	/* content[1..7] */
+	uint16_t tol;		/* content[8] << 8 | content[9] */
+};
+void odi_gpon_decode_pon_id(const struct odi_gpon_ploam *msg, struct odi_gpon_ds_pon_id *out);
 
 /* BER_interval (clause 9.2.3.18). Directed or broadcast (0xFF). */
 struct odi_gpon_ds_ber_interval {

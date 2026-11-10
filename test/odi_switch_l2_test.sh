@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_l2_test.sh -- compiles and runs odi_switch_l2_test.c with the
 # host cc: the L2 lookup table layout, the TABLE_CMD words, the valid-row
 # walk and multicast add/delete against a model of the hashed table. No

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Hardware access, through the interfaces our kernel provides.
  *
  *   /dev/odi_sw      switch-core register get/set, per-port MIB counters,

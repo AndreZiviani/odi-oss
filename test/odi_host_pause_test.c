@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_host_pause_test.c -- the PAUSE policy of the host port
  * (docs/SWITCH.md#host-port-pause), against the register mock: the final

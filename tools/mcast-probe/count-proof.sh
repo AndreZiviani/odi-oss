@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # count-proof.sh -- prove, on a stick, that the multicast group counters
 # igmpd meters its groups with (diag mc-count, odi_switch_mc_count.h) count

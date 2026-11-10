@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Checks gpon_proc_parse_state against the actual /proc/odi_gpon/status first-line
  * shape (kernel/extra/drivers/net/ethernet/odi/odi_gpon.c: "state %d\n").
  * Host-side: gpon_status.c touches no syscalls, so it builds natively. */

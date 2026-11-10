@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # rcs-lib.sh reads the PLOAM password from the config store XML the way omcid
 # does (src/omci/respond/cfgstore.c): the five XML entities xmlconfig writes

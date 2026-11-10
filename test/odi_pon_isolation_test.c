@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_pon_isolation_test.c -- nothing from the fibre reaches the CPU, and
  * nothing the CPU sends by lookup reaches the fibre: the PON and CPU

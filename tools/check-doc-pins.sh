@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Docs that name a pinned version must name the pinned one. The kernel
 # version is read from VERSION= in kernel/618/fetch.sh; every 6.18.N in

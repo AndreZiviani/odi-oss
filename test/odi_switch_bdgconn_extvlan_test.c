@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_bdgconn_extvlan_test.c -- cmd 51 for the rules of the extended
  * VLAN tagging operation (class 171), from the table entry to the classifier
@@ -294,6 +295,37 @@ static void drop_entry(void)
 
 int main(void)
 {
+	/* A non-owner mapper target still needs the exact downstream manual
+	 * inverse, VLAN membership and UNI mask, even with the PON bit set. */
+	{
+		struct omci_bdgconn bi = {0}, directed;
+		struct odi_sw_cf_leg u1, d1, u2, d2;
+		uint32_t v1, val1, any1, v2, val2, any2;
+
+		bi.dir = OMCI_DIR_BI; bi.uni_mask = 5;
+		bdg_gen_manual(&bi.vlan_op, 100, 5, 0);
+		directed = bi; directed.dir = OMCI_DIR_DS;
+		evtocd_fallback_ds(&directed.vlan_op, &bi.vlan_op);
+		bdgconn_derive(&bi, &u1, &d1, &v1, &val1, &any1);
+		ok(!bdgconn_derive_gen(&directed, &u2, &d2, &v2, &val2, &any2), "fallback inverse is representable");
+		ok(v1 == 100 && v2 == v1 && val2 == val1, "fallback inverse preserves VID membership and untagged ports");
+
+		ok(d1.rule_w1 == d2.rule_w1 && d1.mask_w1 == d2.mask_w1 &&
+		   d2.act[0] == 0 && d2.act[1] == 0x00000005u &&
+		   d2.act[2] == 0x88000003u, "fallback inverse matches VID100/pri5, pops both tags, forwards only UNI0");
+		/* The first priority-specific leg keeps BI and the original
+		 * output style, so the kernel still installs VID membership. */
+		bdg_gen_vid_filter(&bi.vlan_op, 100, -1);
+		bdgconn_derive(&bi, &u1, &d1, &v1, &val1, &any1);
+		bi.vlan_op.filter.inner_mode |= OMCI_TAGF_PRI;
+		bi.vlan_op.filter.inner.pri = 2;
+		bdgconn_derive(&bi, &u2, &d2, &v2, &val2, &any2);
+		ok(v1 == 100 && v2 == v1 && val2 == val1 &&
+		   d1.rule_w1 == d2.rule_w1 && d1.mask_w1 == d2.mask_w1 &&
+		   !memcmp(d1.act, d2.act, sizeof d1.act), "first mapped BI leg preserves VLAN membership and downstream exactly");
+
+	}
+
 	uint8_t e[EVTOCD_ENTRY_LEN];
 	const struct odi_sw_cf_row *r;
 	const char *why = 0;

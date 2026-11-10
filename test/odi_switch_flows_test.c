@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* odi_switch_flows_test.c -- OMCI_FLOWS_CMD (src/omci/omci_flows.h), the
  * read-only readback of what cmd 25 programmed. Checks that it returns the
  * rows and slots cmd 25 was given, at their flow ids, that a multicast GEM

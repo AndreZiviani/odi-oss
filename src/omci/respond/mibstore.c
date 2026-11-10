@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* The MIB store: what the OLT has created and set.
  *
  * Split out of main.c; see omcid.h.
@@ -158,6 +161,15 @@ int serial_refresh(int log)
 uint8_t devid[40];      /* "RTL9602C", then the revision */
 
 uint8_t mib_data_sync;
+
+/* Counts one more change of the MIB. 0 is reserved for a MIB just
+ * instantiated or reset, so the counter goes from 255 to 1, never to 0. */
+void mib_data_sync_advance(void)
+{
+	mib_data_sync = (uint8_t)(mib_data_sync + 1);
+	if (mib_data_sync == 0)
+		mib_data_sync = 1;
+}
 
 struct omci_instance aut[AUT_MAX];
 unsigned aut_count;

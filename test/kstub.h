@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * kstub.h -- just enough of the kernel API for kernel/extra/arch/mips/
  * rtl8686/time.c to compile on the host, for rtl8686_time_test.c. The

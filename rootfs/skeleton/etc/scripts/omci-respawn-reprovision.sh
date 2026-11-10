@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # omci-respawn-reprovision.sh -- run in the background by svc-omcid.sh
 # whenever init has just respawned omcid (not the first start of this
 # boot). See docs/BOOT.md, "Respawn re-provisioning" and "Resume without

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # Checks every pinned upstream version against what is actually current, and
 # rewrites the pin in place when a newer one exists: kernel/618/fetch.sh
@@ -28,6 +31,16 @@ cd "$ROOT"
 
 changed=0
 note() { echo "bumped: $*"; changed=1; }
+# doc_pin <old, as an ERE> <new> <file>...: every mention of the old version
+# not followed by another digit or dot, rewritten.
+doc_pin() {
+	old=$1 new=$2
+	shift 2
+	for f in "$@"; do
+		sed -i.bak -E "s/${old}([^0-9.]|\$)/${new}\1/g" "$f"
+		rm -f "$f.bak"
+	done
+}
 
 sha256_of() { (sha256sum "$1" 2>/dev/null || shasum -a 256 "$1") | cut -d' ' -f1; }
 
@@ -61,6 +74,9 @@ if [ -n "$latest" ] && [ "$latest" != "$current" ]; then
 		sed -i.bak -E "s/^VERSION=[0-9.]+/VERSION=$latest/" kernel/618/fetch.sh
 		sed -i.bak -E "s/^SHA256_XZ=[0-9a-f]+/SHA256_XZ=$newsum/" kernel/618/fetch.sh
 		rm -f kernel/618/fetch.sh.bak
+		# The docs name the pinned kernel too, and make lint checks they
+		# agree (tools/check-doc-pins.sh), so a bump moves them with it.
+		doc_pin "${current//./\\.}" "$latest" README.md docs/BUILDING.md
 		note "linux $current -> $latest"
 	fi
 	rm -rf "$tmp"
@@ -131,6 +147,9 @@ bump_release_tag() {
 	rm -rf "$tmp"
 	sed -i.bak -E "s/${var}:-$current/${var}:-$latest/; s/${var}-$current/${var}-$latest/" src/fetch-releases.sh
 	rm -f src/fetch-releases.sh.bak
+	# docs/BUILDING.md says "confd vX, metricsd vY" (tools/check-doc-pins.sh).
+	name=$(echo "${var%_TAG}" | tr '[:upper:]' '[:lower:]')
+	doc_pin "$name ${current//./\\.}" "$name $latest" docs/BUILDING.md
 	{ grep -vE "^${repo} " src/release-sha256.txt; printf '%s' "$new_lines"; } > src/release-sha256.txt.new
 	mv src/release-sha256.txt.new src/release-sha256.txt
 	note "$repo tag $current -> $latest"

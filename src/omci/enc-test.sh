@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # GEM port network CTP (class 268) attribute 8, Encryption state: answered
 # from the enc_ports line of the driver status file (omcid -g here), which
 # lists the GEM ports the downstream path decrypts.

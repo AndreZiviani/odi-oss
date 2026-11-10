@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_gpon_flow_test.c -- host test for odi_gpon_flow.c, the per-flow GEM
  * counter sampler, against a register model that behaves the way the

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_acl_probe_test.sh -- compiles and runs
 # odi_switch_acl_probe_test.c: the hand-installed ACL rules of diag
 # acl-probe (what each matches and does, its counter and unit, what is

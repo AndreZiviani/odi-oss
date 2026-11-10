@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # mgmt-addr.sh -- a change of the management addresses (LAN_IP_ADDR,
 # LAN_SUBNET, LAN_ENABLE_IP2, LAN_IP_ADDR2, LAN_SUBNET2) as a trial that

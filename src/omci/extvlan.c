@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 #include "extvlan.h"
 #include "omci_bdgconn.h"
 
@@ -210,20 +213,25 @@ static int default_is_plain(const struct evtocd_entry *e)
 }
 
 const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
-			   int *vid, int *pri)
+			   int *vid, int *pri, int *tagged_pass)
 {
 	struct evtocd_entry e, add;
 	struct evtocd_action a;
-	int have = 0;
+	int have = 0, pass = 1;
 
 	if (n < 1)
 		return "the table is empty";
 	for (int i = 0; i < n; i++) {
+		int dt;
+
 		evtocd_decode(tbl + i * EVTOCD_ENTRY_LEN, &e);
 		evtocd_action(&e, 0x8100, 0x8100, &a);
-		if (evtocd_default_rule_tags(&e) >= 0) {
+		dt = evtocd_default_rule_tags(&e);
+		if (dt >= 0) {
 			if (!default_is_plain(&e))
 				return "a default rule adds or removes tags";
+			if (dt == 1 && a.discard)
+				pass = 0;
 			continue;
 		}
 		if (a.tags_in != EVTOCD_UNTAGGED)
@@ -271,6 +279,8 @@ const char *evtocd_olt_tag(const uint8_t *tbl, int n, uint16_t output_tpid,
 	}
 	*vid = a.add[0].vid;
 	*pri = a.add[0].pri;
+	if (tagged_pass)
+		*tagged_pass = pass;
 	return 0;
 }
 
@@ -1071,4 +1081,36 @@ int evtocd_plan_describe(const struct evtocd_plan *p, char *out, int max)
 	}
 	out[b.n] = 0;
 	return b.n;
+}
+
+/* The explicit downstream inverse of a legacy fallback descriptor. */
+void evtocd_fallback_ds(struct omci_vlan_oper *d, const struct omci_vlan_oper *u)
+{
+	struct omci_vlan_oper tmp = {0};
+
+	*d = tmp;
+	d->filter.outer_mode = OMCI_TAGF_ANY;
+	d->filter.inner_mode = OMCI_TAGF_ANY;
+	d->out.out_tag.vid = OMCI_VID_ANY;
+	d->out.out_tag.pri = OMCI_PRI_ANY;
+	d->rule_gen = OMCI_VLAN_OPER_EXTVLAN_GEN;
+	d->filter.ethertype = OMCI_ETHTYPE_NO_CARE;
+	if (u->filter.outer_mode & OMCI_TAGF_UNTAGGED) {
+		d->filter.outer_mode = OMCI_TAGF_UNTAGGED;
+		d->filter.inner_mode = u->out.tag_count ? OMCI_TAGF_TAGGED : OMCI_TAGF_UNTAGGED;
+		d->outer_act.tag_op = OMCI_TAGOP_POP;
+	} else {
+		d->outer_act = u->outer_act;
+	}
+	if (u->out.out_tag.vid < 4096u) {
+		d->filter.inner_mode |= OMCI_TAGF_VID;
+		d->filter.inner.vid = u->out.out_tag.vid;
+	}
+	if (u->out.out_tag.pri < 8u) {
+		d->filter.inner_mode |= OMCI_TAGF_PRI;
+		d->filter.inner.pri = u->out.out_tag.pri;
+	}
+	if (d->filter.inner_mode & (OMCI_TAGF_VID | OMCI_TAGF_PRI))
+		d->filter.inner_mode |= OMCI_TAGF_TAGGED;
+	d->inner_act.tag_op = u->inner_act.tag_op == OMCI_TAGOP_PUSH ? OMCI_TAGOP_POP : OMCI_TAGOP_PASS;
 }

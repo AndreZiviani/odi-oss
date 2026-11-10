@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # What a Create, Set or Delete does to the MIB and to MIB data sync, against
 # G.988: a request the OLT repeats (same transaction id, same frame) is
 # answered again with the same answer and changes nothing; a Create of an

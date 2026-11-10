@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_omci_wire.h -- the pkt_redirect wire layout, restated as pack/unpack
  * functions instead of two independent readings (one in the kernel module,

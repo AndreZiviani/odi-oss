@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # image/fwu.sh write ORDER: both partitions erased first, the rootfs written,
 # the kernel written LAST. U-Boot's bootm refuses a kernel that is erased or

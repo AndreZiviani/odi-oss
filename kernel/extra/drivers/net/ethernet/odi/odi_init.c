@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * odi_init.c -- /proc/odi_init: rcS writes one verb at a time, and a
  * read returns the result of the last one. Each verb is one of three:

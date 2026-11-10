@@ -17,6 +17,303 @@ listed here.
   statements on fibre-pull recovery, the watchdog reset, MLD snooping, the
   trial guard and the 2C3 are brought in line with it. Refs #268.
 
+- `/etc/scripts/flash set` no longer installs a truncated `odi.conf` or
+  XML store when a write fails, for example on a full config partition.
+  The grep and printf that build the new `odi.conf` are checked on their
+  own, and every rewrite (`odi.conf`, the XML store, `default cs`) is
+  checked byte for byte against the same rewrite run again before it
+  replaces the file, so a short file is refused even when the tool that
+  wrote it reported success; the old file is left as it was and the set
+  fails with a message. Two `flash set` (or a set and a `default cs`) at
+  once no longer lose one change: writers take an flock on a lock file,
+  the same mechanism as the firmware writer lock, waiting at most 5
+  seconds before failing with "busy". Refs #326.
+
+- Tests: two host tests no longer fail now and then under load. In
+  `count_proof_test.sh` the stub `diag` rewrote its owner file in place, so
+  a reader that opened it mid-write took the holder for dead and dropped
+  every counter (the run then lacked a verdict); the owner and the counter
+  files are now written whole and renamed into place. In
+  `fwu_starter_test.sh` the four starters of the race check shared one
+  `cmdline` file, which one starter rewrote while another read it empty and
+  refused to write; each call now has its own file.
+
+- OMCI respawn: the re-provisioning helper no longer acts on the previous
+  omcid's resume decision. `svc-omcid.sh` started the helper before the new
+  omcid existed (the supervisor can wait up to 2 s first), and a stale
+  `resumed` or `reprovision` file still in `/var/run` answered for the new
+  run. It now moves the old file to `omcid-resume-decision.prev` first, so
+  the helper only ever reads the new omcid's decision; omcid treats either
+  file as proof of a restart and removes both. Refs #324.
+
+- OMCI: the MIB data sync counter now goes from 255 to 1 instead of to 0.
+  G.988 keeps 0 for a MIB just instantiated or reset, so after 256
+  successful Create, Set or Delete commands since the last MIB reset the
+  ONU reported 0 where the OLT expected 1, which an OLT audit may answer
+  with a MIB upload or a reset. One helper now advances the counter at
+  all four places. Refs #325.
+
+- Docs: the Luleey LL-XS2510 is listed as reported working, on one user
+  report, with `HOST_SERDES=2500basex` set before the first boot. The
+  README now records the first hardware runs of the host SerDes mode
+  (`2500basex` linked, `hisgmii` passed no frames on that host) and of
+  the trial guard (a trial whose host link passed no frames went back to
+  stock by itself). Refs #321.
+
+- GPON: the driver decodes the PON-ID message some OLTs send (G.984.3
+  Annex C), which it used to log once as unexpected.
+  `/proc/odi_gpon/status` has a `pon_id` line with the ODN class, whether
+  the launch power is the OLT's or a reach extender's, the launch power
+  (TOL, 0.1 dB steps above -30 dBm, so the path loss can be estimated
+  from the stick's receive power), the PON identifier the operator set
+  and when it came; `pon_id none` before one arrives and after a loss of
+  signal. The diagnostics bundle masks the identifier, there and in the
+  PLOAM ring, unless `--full`. Refs #321.
+
+- `/proc/odi_gpon/counters` now also has the downstream superframe count
+  and FEC bit of the sample its totals come from, as `ctr_ds_superframe`
+  and `ctr_fec_now ds`. A reader that works out a share of the downstream
+  frames, such as the idle GEM frames per frame, gets both from one read;
+  `status` has the same values, but a read of a second file can land on
+  the next sample. `status` keeps its lines. Refs #319.
+
+- OMCI: with no class 84 filter, the fallback bridge rules of an 802.1p
+  mapper that sends its priorities to more than one GEM port are now held
+  to the priorities each port carries; every target used to get the same
+  tagged rule. A tagged rule becomes one upstream rule per priority, the
+  first keeps the downstream leg and the VLAN membership, and untagged
+  upstream frames go to one target: the mapper default priority when its
+  unmarked-frame option is 1, otherwise priority 0. A mapper with a
+  single target, with or without unmapped priorities, keeps its one rule.
+  A rule that cannot be installed is logged with its ingress and GEM
+  port. Not run against an OLT that splits priorities. Refs #306.
+
+- OMCI: a bridge rebuild in an omcid that resumed from a snapshot now
+  withdraws the services the snapshot restored. It took the ids to withdraw
+  from a list only the building process had, which is empty after a resume,
+  so a VLAN change then left the old rules in the switch beside the new
+  ones. The rebuild goes by the service table itself. `omcli bridge` rules
+  are in that table too and are withdrawn by the next rebuild. The resume
+  regression resets the resumed MIB and checks that every restored id is
+  withdrawn; not run under qemu or on hardware yet. Refs #305.
+
+- OMCI: deleting a downstream GEM CTP now withdraws its own flow when no
+  surviving CTP or multicast table owns that port, so replacing CTPs on
+  new GEM ports no longer uses up the 64 flow slots. Only a downstream or
+  bidirectional CTP counts as the owner of a downstream flow: the port of
+  an upstream-only CTP can be an extra multicast port, and a CTP that is
+  Set to upstream-only gives its downstream flow back. A withdrawal the
+  driver refuses keeps the slot, a broadcast selection is cleared before
+  its flow is freed, and deleting the CTP that holds the broadcast flow
+  moves it to a surviving one. Not run against an OLT. Refs #307.
+
+- Firmware: `fwu_starter.sh` takes a file lock before it touches the
+  shared extraction directory, in both modes, and the flasher inherits it,
+  so the lock lasts until the write ends even if the starter is killed. A
+  foreground write was not recorded anywhere and a second starter could
+  run beside it; it now also claims the state file, so the upload guard
+  sees it, and refuses to flash when it cannot. The web UI upload guard
+  still reads the state file only. Host-tested with stub writers, four
+  starters at once included; no flash written on a stick. Refs #308.
+
+- Apply: when a disabled service has no daemon pid, wake all anonymous
+  service placeholders so its own init entry rereads the setting. Signal
+  errors are reported as failures. Host-tested with two placeholders;
+  activation on a stick remains untested. Refs #309.
+
+- Multicast: retain every potentially programmed MAC until its hardware
+  deletion succeeds, including IPv4 and IPv6 groups already removed from
+  membership state. Retries recompute current MAC owners, so an alias or
+  rejoin is not deleted. A full tracking table defers new writes rather
+  than losing failed deletions. Host fault-injection and sanitizer tests
+  pass; real multicast hardware testing remains open. Refs #248.
+
+- VLAN: the forward operation (FwdOp) of the OLT's VLAN filters can now be
+  overridden, with the same setting and format as the stock firmware's "VLAN
+  Forward Operation" page: `RTK_DEVINFO_SPECVER`, `EntityId[:FwdOp]` entries
+  separated by commas (`0x1102:0x00,0x110b`; no FwdOp means 0x02). Some
+  lines need it: an OLT that filters on the service VLAN with FwdOp 0x10
+  while sending its 802.1X EAP frames on VLAN 0 has them all dropped, and
+  the router never authenticates; 0x00 lets them through. Applied without a
+  reboot, the ONU stays in O5. The filter keeps the value the OLT wrote, so
+  the FwdOp page still shows 0x10; `omcli vlan` lists the overrides in force
+  and omcid logs each one once. Refs #301.
+
+- CI: four causes of failures that had nothing to do with the change under
+  test, from the last two weeks of runs. The SIGTERM and SIGKILL cases of
+  `test/mcast_probe_test.sh` gave the probe script 5 s to install its probes,
+  which a runner busy with the other legs of `make test` sometimes exceeded
+  ("the count window never started"); they now wait up to 30 s, with a
+  window long enough to cover it. `src/omci/reload-test.sh` read the daemon
+  log as soon as the status file said done, but omcid writes the status file
+  first, so the line could still be on its way ("O5 never reached: logged");
+  a log check now waits up to 5 s for its line. `tools/bump-deps.sh` moved
+  the kernel and release pins but not the versions `README.md` and
+  `docs/BUILDING.md` name, so every weekly bump failed its own `make lint`
+  and no bump PR was opened; it now rewrites those too. And the most common
+  one: `test-rcs` installed strace from a Debian snapshot mirror inside the
+  test container on every run, and failed whenever the mirror timed out.
+  The freestanding toolchain image is now pinned at v4, which carries
+  strace, and the test installs it only when an image lacks it.
+  `test/apply_test.sh` gave `apply.sh` 2 s to see the stub omcid take the
+  signal and 4 s for the outcome, while the stub ran its handler only after
+  its current one-second sleep, and gave the stub a fixed second to start;
+  the stub now runs its handler at once, the test waits for it to start, and
+  the bounds are generous except in the two cases that test them.
+
+- Config: `flash all cs`, which the web UI runs every time it loads the
+  config, reads `odi.conf` in one pass instead of starting a `sed` for each
+  odi key, about 70 processes. On the stick it went from 0.36 s to 0.03 s,
+  with the same output. `test/flash_test.sh` checks the order and the
+  first-line-wins rule.
+
+- VLAN: frames the router tags itself now pass when the OLT's extended VLAN
+  table adds a tag to untagged frames and the line has no VLAN filter (class
+  84). With `VLAN_CFG_TYPE` other than 1, omcid built only the add-tag rule
+  in that case, so a router sending PPPoE on its own VLAN got nothing
+  upstream, while the stock firmware passed it. Tagged frames now go by the
+  table's single-tag default rule: forwarded unchanged when it passes them or
+  the table has none, still dropped when it discards them. The manual tag
+  and lines with a VLAN filter are unchanged. Refs #302.
+
+- Licensing: `reuse lint` now fails on a source file without an SPDX
+  header. `REUSE.toml` annotated the whole tree (`**`) as a fallback, so a
+  new script or C file that forgot its header still passed; it now lists
+  only the kinds of file that take no header (markdown, text, XML, goldens,
+  the IGMP replay data, `LICENSE`, the kernel config and five rootfs config
+  files). The nine files that relied on the fallback and do take a comment
+  (`.gitignore`s, `dependabot.yml`, the issue template, `toolchain/images.env`,
+  the busybox config fragment, `rootfs/devices.pseudo`,
+  `src/diag/test/hw_fake_common.inc`) got their header. Refs #277.
+
+- Releases: the SBOM is now complete and checkable. `sbom.cdx.json` tells
+  runtime components from build tools (gcc and binutils are `excluded` and
+  nothing at runtime depends on them), gives every runtime component a
+  version, purl, license and `bom-ref`, adds a dependency graph, and lists
+  every file the image carries with its SHA-256 and rootfs path: the busybox,
+  dropbear and iproute2 binaries, our own daemons, `confd` and `metricsd`
+  (hashes from `src/release-sha256.txt`), the `confd` web assets and the three
+  register replay tables. Upstream source tarballs carry their pinned hash.
+  The SBOM is in `SHA256SUMS` and a subject of the provenance attestation.
+  `tools/verify-sbom.sh sbom.cdx.json --sums SHA256SUMS [--rootfs DIR]`
+  checks it with python3 alone; the release job runs it before publishing and
+  fails when a hashed artifact is missing, and `test/sbom_test.sh` (in
+  `make test-host`) covers it with a generated SBOM and deliberately broken ones.
+  `tools/generate-sbom.sh` is now a wrapper of `tools/sbom.py`. gcc now carries
+  the `GCC-exception-3.1` SPDX expression. docs/FLASHING.md and docs/LICENSING.md
+  describe it. Refs #260.
+
+- CI: a release is published only after the whole of CI has passed on the
+  tag commit, and only for a commit that is on `main`. `release.yml` now
+  first checks that a final tag is on a commit that is an ancestor of `origin/main`
+  (`tools/check-release-ancestry.sh`, covered by `make test-host`), then
+  calls `ci.yml` as a reusable workflow, so the QEMU boot test, the rcS
+  trace goldens, every OMCI suite, `full` and the two-build `reproducible`
+  comparison must all succeed before the release job starts; it no longer
+  waits for a smaller `make test` copy of them. `ci.yml` stops starting by
+  itself on `v*` tags (the call replaces that run, so a tag costs one CI
+  run, not two). Running `release.yml` by hand is a dry run that stops
+  before publishing. Pre-release tags (`vX.Y.Z-beta.N`) skip the ancestry check, since
+  they test unmerged work, but need the same CI call to pass.
+
+- Licensing: every project-owned source file now carries an SPDX copyright
+  and license header, and the rest is annotated in `REUSE.toml`; the tree
+  passes `reuse lint` (REUSE 3.3), which `make lint` runs when the tool is
+  installed and CI always runs, with a pinned, hash-checked version
+  (`tools/reuse-requirements.txt`). The 169 headers that said `GPL-2.0`
+  (the deprecated identifier, meaning GPL-2.0-only) in `kernel/extra/` and
+  `test/` now say `GPL-2.0-or-later`, as the README states for our own
+  code. The kernel patches are annotated GPL-2.0-only, like the upstream
+  files they modify. `docs/LICENSING.md` says the same. The texts are in
+  `LICENSES/`. Refs #277.
+
+- CI: the two tests that install packages inside their Docker container
+  (`make test-rcs`, for `strace`, and the stock-flash test) now go through
+  `tools/ci-apt.sh`, as the runner steps already did: a read timeout and
+  retries per connection, a time limit on each apt call and two attempts.
+  The Debian snapshot mirror returning 504 for `strace` held test-qemu in
+  an unbounded `apt-get` for 42 minutes until the job timeout cancelled it;
+  it now fails in minutes and says the install failed. `tools/ci-apt.sh`
+  skips `sudo` when it already runs as root. No change to the image.
+
+- Build: release images are now reproducible. Two clean builds of one commit
+  (`ROOT_PW=locked`) give the same tarball, byte for byte; `docs/BUILDING.md`,
+  "Reproducible builds", lists every input and how it is fixed. What changed:
+  `image/Dockerfile` builds from `debian:bookworm-slim` pinned by digest with
+  its packages from a dated snapshot.debian.org archive, instead of a moving
+  tag and the current archive; `SOURCE_DATE_EPOCH` (the committer date of
+  `HEAD`, `tools/source-date-epoch.sh`) replaces the clock in the image
+  manifest, `/etc/version`, the default version date, the squashfs
+  (`-mkfs-time`, `-all-time`) and the tar (sorted, owner root, fixed times and modes), and
+  `tools/remote-build.sh` passes it to a host whose copy has no history; the
+  rootfs is staged under a fixed `umask`; busybox is built with
+  `KCONFIG_NOTIMESTAMP=1`, so its banner no longer embeds the build date.
+  `tools/compare-images.sh` now compares the tarballs byte for byte, with no
+  excluded component (busybox included), and on a difference names the tar
+  headers, member, uImage header, or rootfs inode and file that differs.
+  Refs #258.
+
+- Kernel: hardening options on, each measured. New: `FORTIFY_SOURCE`,
+  hardened user copies, heap memory zeroed on allocation and on free,
+  list-corruption checks that stop the kernel (`LIST_HARDENED`,
+  `BUG_ON_DATA_CORRUPTION`), the stack-end check on every schedule,
+  `dmesg_restrict`, the user heap start randomised too, mmap randomisation
+  widened to 15 bits and nothing mapped below 64 KB; and, as `sysctl.*` words
+  on the built-in command line, `kptr_restrict=2` and the four
+  `fs.protected_*` rules. The strong stack protector and zeroed stack
+  variables, already on by default, are now stated. 9,410 bytes of uImage
+  (1,172,555 of 1,359,872, 187,317 spare). docs/KERNEL.md ("Hardening") has the
+  matrix: what this CPU and toolchain support (no read-only kernel text, no
+  kernel address randomisation, no virtually mapped stacks on this MIPS; a
+  trapping UBSAN would emit trap instructions the core does not run; gcc
+  plugins do not build with the toolchain image), the bytes each option
+  costs, and why `ZERO_CALL_USED_REGS`, the slab freelist options (they need
+  `SLUB_TINY` off) and `PANIC_ON_OOPS` stay off for now.
+  `tools/check-kernel-hardening.sh` fails `make lint` when the seed loses one
+  of the options and `kernel/build.sh` when `olddefconfig` drops one.
+  Trialled on hardware: an overnight run on a stick in service (O5, OMCI and
+  forwarding as before, no oops, free memory flat). Refs #254.
+
+- Hardening of every freestanding binary (omcid, igmpd, diag, nv, omcli,
+  omciprobe, omcicap), from one place, `src/harden.mk`:
+  `-fstack-protector-strong`, `-fstack-clash-protection`,
+  `-ftrivial-auto-var-init=zero`, `-fno-strict-overflow`, `-Wvla` and
+  `-z noexecstack`. The stack protector runtime is our own, in `start.S`:
+  the guard is seeded from the kernel's `AT_RANDOM` bytes before `main`, and
+  a smashed guard writes `stack-protector: stack smashing detected,
+  aborting` to stderr and `/dev/kmsg`, then ends the process with SIGABRT
+  (init respawns it). The binaries no longer declare an executable stack
+  (`PT_GNU_STACK` was `RWE`, from `start.S` lacking its `.note.GNU-stack`).
+  Every build checks the result with `tools/check-hardening.sh`, and `make
+  test-diag` runs an overrun under qemu (`make -C src/diag ssp-test`). Text
+  grows 2-13% per binary (omcid +13.3 KB, +6.5%). FORTIFY, PIE, RELRO and
+  BIND_NOW do not apply to binaries with no libc and no dynamic linker;
+  `docs/CROSS-COMPILING.md`, "Hardening the freestanding binaries", says
+  why for each.
+
+- Respawned daemons get a restart budget. busybox init restarts a daemon the
+  instant it exits and has no rate limit, so one that died at once was
+  started again and again. `respawn.sh`, the last step of every `svc-*.sh`,
+  now waits 1, 2, 4 ... seconds before restarting a daemon whose previous run
+  lived under 30 s, up to a cap per daemon (omcid 2 s, dropbear 10 s, confd
+  and syslogd 30 s, metricsd, klogd, ntpd and igmpd 60 s); a run of 30 s or
+  more, and the first start of the boot, never wait. It is still the same
+  process exec-ed in place under init, so signals, `reboot` and pid tracking
+  do not change, and it runs only after rcS has returned, so the 120 s
+  userland confirmation is untouched. State goes to `/var/run/respawn/<name>`
+  (`state=ok|backoff|degraded`, `starts`, `fast`, `delay_s`, `last_run_s`,
+  for the exporter to read later) and each restart is one
+  `respawn: event=respawn service=... state=... fast=... delay_s=...` kernel
+  log line (every tenth beyond the fifth short run). Nothing disables a
+  daemon, enters safe mode or reboots: omcid stays with the watchdog, and
+  the others are retried at their cap. `services stop` also ends a daemon
+  that is in its wait. runsv, already in busybox, was weighed and not used
+  (fixed one-second wait, no count, and a supervision tree that changes how
+  every daemon is started and found). docs/SETTINGS.md, "Restart budget",
+  has the policy; `test/respawn_budget_test.sh` (every `respawn` entry,
+  fake clock, in `make test-host`) and a repeated `kill -9` scenario in
+  `make test-qemu` cover it. Refs #271.
+
 - omcid: an OLT lock of the Ethernet UNI no longer takes the host port down
   by default. On this SFP that port is the stick's only management path, so
   a lock from the OLT (ME 11 administrative state) cut the web UI, ssh,

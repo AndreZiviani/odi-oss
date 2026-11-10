@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # odi_switch_dssteer_test.sh -- compiles and runs odi_switch_dssteer_test.c:
 # the priority the downstream CF rows of a bridge connection assign, from the
 # queue its GEM port points at, and so the queue its frames take. Part of

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # svc-dropbear.sh -- the /etc/inittab respawn entry for dropbear. The key
 # setup (mkdir, keygen, the zero-length-key recovery) runs on every start,
 # same as it did every boot from /etc/init.d/services before -- idempotent,
@@ -38,7 +41,7 @@ KEY=/etc/config/dropbear.d/ed25519
 # passwords anyway: root has the default one for that boot, which is the
 # way back into a stick whose keys are lost.
 if [ -f /etc/odi-keys-only ] && [ ! -f /var/run/safe-mode ]; then
-	exec /etc/scripts/respawn.sh -1000 /var/log/services.log /sbin/dropbear -s -F -r "$KEY" -D /etc/config/dropbear.d -p 22
+	exec /etc/scripts/respawn.sh dropbear -1000 /var/log/services.log /sbin/dropbear -s -F -r "$KEY" -D /etc/config/dropbear.d -p 22
 else
-	exec /etc/scripts/respawn.sh -1000 /var/log/services.log /sbin/dropbear -F -r "$KEY" -D /etc/config/dropbear.d -p 22
+	exec /etc/scripts/respawn.sh dropbear -1000 /var/log/services.log /sbin/dropbear -F -r "$KEY" -D /etc/config/dropbear.d -p 22
 fi

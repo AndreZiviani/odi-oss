@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # Fetch and verify the 6.18 longterm release pinned in VERSION below
 # (tools/bump-deps.sh moves the pin) from cdn.kernel.org for
 # kernel/build.sh KVER=6.18. Two independent checks: a pinned SHA-256 of the

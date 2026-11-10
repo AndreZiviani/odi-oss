@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* Software download from the OLT: Start software download, Download section,
  * End software download, Activate image and Commit image (G.988 message types
  * 19 to 23, on the software image entity, class 7).

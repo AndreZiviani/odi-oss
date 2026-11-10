@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # src/fetch-releases.sh: the committed release hashes and the assets tar member
 # policy. Runs a copy of the script in a scratch tree against a pre-filled
 # download cache, so nothing is fetched and nothing in out/ is touched.

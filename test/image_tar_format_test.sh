@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #
 # The image tarball must be readable by busybox 1.12.4's tar, because that is
 # what unpacks it on the stock vendor stick before fwu.sh ever runs.

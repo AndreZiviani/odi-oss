@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # omcid, the OMCI daemon.
 #
 # Reuses the freestanding runtime of diag (_start, syscall wrappers, output
@@ -7,6 +10,7 @@
 # and pulled on first use; DIAG_IMAGE overrides it (toolchain/image.sh).
 TOP := $(CURDIR)/../../..
 -include $(TOP)/toolchain/images.env
+include $(TOP)/src/harden.mk
 DIAG_IMAGE ?= $(DIAG_IMAGE_PINNED)
 IMAGE := $(DIAG_IMAGE)
 CROSS := mips-linux-gnu-
@@ -23,11 +27,11 @@ STRIP := $(CROSS)strip
 
 CFLAGS := -std=c11 -Os -Wall -Wextra \
           -march=mips1 -mabi=32 -EB -msoft-float -G0 \
-          -fno-pic -mno-abicalls -ffreestanding -fno-builtin -fno-stack-protector \
+          -fno-pic -mno-abicalls -ffreestanding -fno-builtin $(HARDEN_CFLAGS) \
           -ffunction-sections -fdata-sections \
           -I$(DIAG)/src -I../generated -I$(UAPI)
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
-           -Wl,--gc-sections
+           -Wl,--gc-sections $(HARDEN_LDFLAGS)
 
 # The translation units of omcid, divided by what each one talks to: the
 # store, the driver, the renderers, one file per transport. omcid.h declares
@@ -40,6 +44,7 @@ OBJS := $(BUILD)/start.o $(BUILD)/io.o $(SRCS:%=$(BUILD)/%.o) \
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(HARDEN_CHECK) $@
 	$(STRIP) $@
 
 # The driver-call golden (../drv-test.sh): the same objects, except drv.c
@@ -47,6 +52,7 @@ $(BIN): $(OBJS)
 # Never shipped; omcid itself is unchanged by it.
 $(BUILD)/omcid-drvtrace: $(filter-out $(BUILD)/drv.o,$(OBJS)) $(BUILD)/drv-drvtrace.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(HARDEN_CHECK) $@
 	$(STRIP) $@
 
 $(BUILD)/drv-drvtrace.o: drv.c $(OMCID_HDRS) | $(BUILD)
@@ -88,6 +94,19 @@ $(BUILD)/mcastvlan_test: ../test/mcastvlan_test.c ../mcastvlan.h ../extvlan.h \
                          $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -I.. -o $@ ../test/mcastvlan_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o
+
+# Real downstream ownership paths, with fault injection at the command boundary.
+$(BUILD)/downstream_ownership_test: ../test/downstream_ownership_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
+
+# The real teardown and service table, with the driver call wrapped to count
+# the deactivates. No device or netlink is opened.
+$(BUILD)/service_ownership_test: ../test/service_ownership_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
+
+# The MIB data sync counter across its wrap.
+$(BUILD)/mib_sync_test: ../test/mib_sync_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
 
 $(BUILD)/omci_mib.o: ../generated/omci_mib.c ../generated/omci_mib.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -133,9 +152,12 @@ size: cap
 	@$(RUN) sh -c 'ls -l $(BIN); $(CROSS)size $(BIN)'
 
 test: image
-	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/downstream_ownership_test $(BUILD)/service_ownership_test $(BUILD)/mib_sync_test
 	@$(RUN) qemu-mips-static $(BUILD)/extvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/mcastvlan_test
+	@$(RUN) qemu-mips-static $(BUILD)/downstream_ownership_test
+	@$(RUN) qemu-mips-static $(BUILD)/service_ownership_test
+	@$(RUN) qemu-mips-static $(BUILD)/mib_sync_test
 
 clean:
 	rm -rf $(BUILD)

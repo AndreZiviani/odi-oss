@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Device nodes baked into the image, in mksquashfs -pf syntax: the /dev of
 # the squashfs itself. On 6.18 the kernel mounts devtmpfs on /dev before
 # init (CONFIG_DEVTMPFS_MOUNT), which covers these with its own nodes, so

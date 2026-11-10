@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* MLD snooping: the IPv6 half of igmpd (RFC 2710 MLDv1, RFC 3810 MLDv2).
  *
  * Opt-in (igmpd -6, MLD_SNOOPING): the switch then copies (or takes) the

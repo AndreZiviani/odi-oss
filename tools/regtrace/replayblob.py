@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Register-replay firmware blobs: the on-disk format the odi driver set
 loads with request_firmware() from /lib/firmware/odi/, written by
 mksdkinit.py, mkmodload.py and mkgponinit.py, read back here for tests and

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Andre Ziviani */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+
 /* One list of cases, expanded twice: once against the host's printf to produce
  * the reference, once against out_fmt on the target. Anything a handler's
  * format string uses belongs here.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: 2026 Andre Ziviani
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * The ACL log counters and the one register their owners share
  * (odi_switch_log.h says who owns what, and why LOG_TYPE is never read).

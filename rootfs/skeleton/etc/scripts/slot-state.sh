@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 # slot-state.sh -- record, at boot, which slot is running and whether it is
 # committed, and say so where it will be seen (docs/FLASHING.md,
 # "Committing"). Run by /etc/inittab as a `once` entry; also safe to run by
