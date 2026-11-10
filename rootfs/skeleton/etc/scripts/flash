@@ -55,6 +55,8 @@ HS=${HS:-/var/config/lastgood_hs.xml}
 DEFAULTS=${DEFAULTS:-/etc/config_default.xml}
 TMPDIR_=${TMPDIR_:-/var/tmp}
 ODI_CONF=${ODI_CONF:-/var/config/odi.conf}
+FLASH_LOCK=${FLASH_LOCK:-$TMPDIR_/flash-writer.lock}
+LOCK_S=${LOCK_S:-5}             # seconds to wait for the writer lock
 ODI_KEYS="SYSLOG_SERVER NTP_SERVER ONU_HW_VERSION OMCI_UNKNOWN_ME_OK OMCI_FIXED_ME OMCI_PRIVATE_ME OMCI_VEIP OMCI_POTS_PORTS OMCI_POTS_SLOT_ID OMCI_VOIP_LINE_REPORT OLT_SW_DOWNLOAD OMCI_ACCEPT_REBOOT OMCI_UNI_LOCK OMCI_TCONT_ALLOC_UNSET ODI_LASER_UNVERIFIED HOST_AUTONEG HOST_SERDES IGMP_SNOOPING IGMP_PON_DROP GPON_DYING_GASP GPON_KEEP_DISABLE MLD_SNOOPING SFP_HOST_DDM"
 
 # install_over TMP TARGET: puts TMP in place of TARGET in one rename on
@@ -69,6 +71,46 @@ install_over() {
 	fi
 	rm -f "$1" "$_new"
 	return 1
+}
+
+# take_lock: one writer at a time over the whole store, so two sets at once
+# cannot each read the old file and the second rename drop the first change.
+# The lock is flock on fd 9 of a file of its own that is never removed, the
+# same as the fwu writer lock; the kernel drops it when this shell ends, so a
+# killed holder leaves nothing stale. The wait is LOCK_S one-second tries.
+take_lock() {
+	command -v flock >/dev/null 2>&1 || { echo "flash: no flock to take the writer lock" >&2; exit 1; }
+	# The subshell probe is for the message: a redirection that fails on exec
+	# ends the shell before any "|| exit" could run.
+	( : >> "$FLASH_LOCK" ) 2>/dev/null || { echo "flash: cannot open the writer lock $FLASH_LOCK" >&2; exit 1; }
+	exec 9>>"$FLASH_LOCK"
+	_i=0
+	while ! flock -n 9; do
+		[ "$_i" -lt "$LOCK_S" ] || { echo "flash: busy, another flash holds $FLASH_LOCK" >&2; exit 1; }
+		sleep 1
+		_i=$((_i + 1))
+	done
+}
+
+# sed_set KEY ESCAPED_VALUE FILE: FILE with the value of KEY replaced. It is
+# run twice for every rewrite, once into the new file and once into a pipe
+# that cmp compares with it, because a write error in the first run does not
+# always show in the exit status (BusyBox 1.36 sed and grep under /dev/full).
+sed_set() {
+	sed "s/\(Name=\"$1\" Value=\"\)[^\"]*\"/\1$2\"/" "$3"
+}
+
+# add_default KEY VALUE FILE: FILE with KEY added right after the MIB_TABLE
+# Dir line, where xmlconfig would have written it; fails when there is none.
+# Run twice, like sed_set.
+add_default() {
+	awk -v k="$1" -v v="$2" '
+		{ print }
+		!done && /<Dir Name="MIB_TABLE">/ {
+			printf "\t\t<Value Name=\"%s\" Value=\"%s\"/>\n", k, v
+			done = 1
+		}
+		END { exit !done }' "$3"
 }
 
 usage() {
@@ -197,15 +239,30 @@ set)
 			echo "flash: $dir is not there -- is the config partition mounted?" >&2
 			exit 1
 		fi
+		take_lock
 		# Temp file in the SAME directory, so the rename is one jffs2 rename
 		# and a power cut leaves the old file whole. Other lines are kept
 		# as they are; only this key is replaced (or dropped when empty).
 		tmp="$ODI_CONF.tmp.$$"
-		{
-			grep -v "^$key=" "$ODI_CONF" 2>/dev/null
-			[ -n "$val" ] && printf '%s=%s\n' "$key" "$val"
-			true
-		} > "$tmp" || { echo "flash: could not write $tmp" >&2; rm -f "$tmp"; exit 1; }
+		( : > "$tmp" ) 2>/dev/null || { echo "flash: could not write $tmp" >&2; rm -f "$tmp"; exit 1; }
+		# grep -v exits 1 when it selects no line, which is fine; 2 is an
+		# error. No odi.conf yet is the same as an empty one.
+		odi_new() {
+			if [ -f "$ODI_CONF" ]; then
+				grep -v "^$key=" "$ODI_CONF"
+				[ $? -le 1 ] || return 1
+			fi
+			[ -z "$val" ] || printf '%s=%s\n' "$key" "$val"
+		}
+		# The new file must be byte for byte what the same pipeline gives
+		# now: every other line, in order, and the new line when a value is
+		# set. That catches a short file whatever the commands returned,
+		# and unlike a line count it also catches a last line cut short.
+		if ! odi_new > "$tmp" || ! odi_new | cmp -s - "$tmp"; then
+			echo "flash: could not write $tmp, $ODI_CONF left alone" >&2
+			rm -f "$tmp"
+			exit 1
+		fi
 		if ! mv "$tmp" "$ODI_CONF"; then
 			echo "flash: could not install the new $ODI_CONF" >&2
 			rm -f "$tmp"
@@ -224,16 +281,19 @@ set)
 		exit 1
 	fi
 
+	take_lock
 	tmp="$TMPDIR_/flash.$$"
-	if ! sed "s/\(Name=\"$key\" Value=\"\)[^\"]*\"/\1$esc\"/" "$target" > "$tmp" 2>/dev/null; then
+	if ! sed_set "$key" "$esc" "$target" > "$tmp" 2>/dev/null; then
 		echo "flash: could not rewrite $target" >&2
 		rm -f "$tmp"
 		exit 1
 	fi
 	# Never install an empty or truncated file over a good one -- a full
-	# jffs2 partition is the realistic way this goes wrong.
-	if [ ! -s "$tmp" ]; then
-		echo "flash: rewrite produced an empty file, $target left alone" >&2
+	# jffs2 partition is the realistic way this goes wrong. The check is
+	# the same as for odi.conf: the file must equal what the rewrite gives
+	# again, which a short file does not.
+	if [ ! -s "$tmp" ] || ! sed_set "$key" "$esc" "$target" | cmp -s - "$tmp"; then
+		echo "flash: rewrite produced an empty or short file, $target left alone" >&2
 		rm -f "$tmp"
 		exit 1
 	fi
@@ -270,6 +330,7 @@ default)
 		echo "flash: $CS is not there -- is the config partition mounted?" >&2
 		exit 1
 	fi
+	take_lock
 	tmp="$TMPDIR_/flash.$$"
 	cp "$CS" "$tmp" || { echo "flash: could not copy $CS" >&2; rm -f "$tmp"; exit 1; }
 	pairs=$(sed -n "s/.*<Value Name=\"\([A-Za-z0-9_]*\)\" Value=\"\([^\"]*\)\".*/\1 \2/p" "$DEFAULTS")
@@ -279,8 +340,9 @@ default)
 		[ -n "$key" ] || continue
 		if has_key "$key" "$tmp"; then
 			esc=$(printf '%s' "$val" | sed 's/[\\/]/\\&/g')
-			if sed "s/\(Name=\"$key\" Value=\"\)[^\"]*\"/\1$esc\"/" "$tmp" > "$tmp.n" &&
-			   [ -s "$tmp.n" ] && mv "$tmp.n" "$tmp"; then
+			if sed_set "$key" "$esc" "$tmp" > "$tmp.n" &&
+			   [ -s "$tmp.n" ] && sed_set "$key" "$esc" "$tmp" | cmp -s - "$tmp.n" &&
+			   mv "$tmp.n" "$tmp"; then
 				printf '%s=%s\n' "$key" "$val"
 			else
 				failed=1
@@ -290,13 +352,9 @@ default)
 		else
 			# Absent from both: insert it into the MIB_TABLE Dir, where
 			# xmlconfig would have written it.
-			if awk -v k="$key" -v v="$val" '
-				{ print }
-				!done && /<Dir Name="MIB_TABLE">/ {
-					printf "\t\t<Value Name=\"%s\" Value=\"%s\"/>\n", k, v
-					done = 1
-				}
-				END { exit !done }' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"; then
+			if add_default "$key" "$val" "$tmp" > "$tmp.n" &&
+			   add_default "$key" "$val" "$tmp" | cmp -s - "$tmp.n" &&
+			   mv "$tmp.n" "$tmp"; then
 				printf '%s=%s (added)\n' "$key" "$val"
 			else
 				echo "flash: no MIB_TABLE in $CS to add $key to" >&2
