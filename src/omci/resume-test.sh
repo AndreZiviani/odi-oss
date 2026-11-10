@@ -140,6 +140,10 @@ for isp in isp1 isp2; do
 	fi
 	# The first later rebuild must withdraw every restored service before
 	# adding rules. MIB reset is independent of the stored VLAN mode.
+	# Every drv 50 in this log is counted, so the check holds only while
+	# the resumed omcid sends none before the rebuild: it is started
+	# without -r, whose clear of all 256 ids would land here too, and the
+	# check above has just found no driver call at all.
 	n=$(rebuilt "$after_log")
 	inject_wait "$after_log" "$(printf '7f004f0a00020000%064d00000028%08d' 0 0)"
 	wait_for "$after_log" 'bridge connections rebuilt' 30 $((n + 1))

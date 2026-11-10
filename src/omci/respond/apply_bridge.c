@@ -387,7 +387,8 @@ void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
  * VID 11).
  * Multicast (direction 2 CTPs) is left to bc_gem_update. Rebuilt whole --
  * tear down, derive, add -- OLT_QUIET_MS after the last OMCI frame, since
- * the OLT sends these entities in no reliable order. */
+ * the OLT sends these entities in no reliable order. What is torn down is
+ * every in_use entry of servtab (bdgconn_rebuild()). */
 
 static void gen_vid_filter_rule(struct omci_vlan_oper *vr, unsigned vid, int pbit)
 {
