@@ -65,16 +65,24 @@ reload() {
 		mv "$T/status.new" "$T/status"
 	done < "$T/script"
 }
-while :; do sleep 1; done
+# The sleep in the background and a wait on it: bash runs a trap only once
+# the foreground command ends, and wait returns at the signal, so the reload
+# starts at once instead of up to a second later.
+while :; do sleep 1 & wait \$!; done
 DAEMON
 chmod +x "$T/daemon"
 "$T/daemon" > /dev/null 2>&1 &
-sleep 1
+# Up to 10 s for the stub to say its pid, not a fixed second.
+for _ in $(seq 100); do [ -s "$T/omcid.pid" ] && break; sleep 0.1; done
 first=$(cat "$T/omcid.pid")
 
+# Bounds well past what a case needs, so a busy runner does not fail one: a
+# case that ends returns as soon as it does. The two cases that test a bound
+# set it small themselves (ACK for the acknowledgement, the argument for the
+# outcome).
 run() {
 	env PATH="$T/bin:$PATH" RELOAD_STATUS="$T/status" MODULES_OFF="$T/modules.off" \
-	    ACK_WAIT=2 APPLY_WAIT=4 NETWORK="$T/network.sh" SERVICES_LOG="$T/services.log" \
+	    ACK_WAIT="${ACK:-15}" APPLY_WAIT=30 NETWORK="$T/network.sh" SERVICES_LOG="$T/services.log" \
 	    sh "$A" "$@" 2>&1
 }
 : > "$T/started"
@@ -117,7 +125,7 @@ t "running at the bound: says it carries on" "still working after 2 s" "$out"
 echo "done vlan rebuild ok VLAN_MANU_TAG_VID 100 - 0 0" > "$T/script"
 cp "$T/status" "$T/status.old"
 rm -f "$T/script"
-out=$(run omci); rc=$?
+out=$(ACK=2 run omci); rc=$?
 t "an omcid that never answers: exit 1" "^1$" "$rc"
 t "and it says why" "did not answer the signal" "$out"
 
