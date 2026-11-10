@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- OMCI respawn: the re-provisioning helper no longer acts on the previous
+  omcid's resume decision. `svc-omcid.sh` started the helper before the new
+  omcid existed (the supervisor can wait up to 2 s first), and a stale
+  `resumed` or `reprovision` file still in `/var/run` answered for the new
+  run. It now moves the old file to `omcid-resume-decision.prev` first, so
+  the helper only ever reads the new omcid's decision; omcid treats either
+  file as proof of a restart and removes both. Refs #324.
+
 - OMCI: the MIB data sync counter now goes from 255 to 1 instead of to 0.
   G.988 keeps 0 for a MIB just instantiated or reset, so after 256
   successful Create, Set or Delete commands since the last MIB reset the

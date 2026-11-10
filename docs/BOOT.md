@@ -358,7 +358,13 @@ path unchanged.
 (`"resumed"` or `"reprovision"`) before doing anything else that could
 fail or block, so `omci-respawn-reprovision.sh` -- backgrounded by
 `svc-omcid.sh` the same moment `omcid` starts -- only has to wait on that
-file briefly (`DECISION_WAIT`, 5 s default), not for full registration. A
+file briefly (`DECISION_WAIT`, 5 s default), not for full registration.
+The file still on tmpfs at that moment is the previous `omcid`'s, so
+`svc-omcid.sh` moves it to `/var/run/omcid-resume-decision.prev` before it
+backgrounds the helper: what the helper reads can only be the new `omcid`'s
+own decision. `omcid` takes either file as proof that an earlier run existed
+(a restart, not the first start of the boot) and removes both before it
+writes its decision. A
 `"resumed"` decision skips the deactivate/reactivate dance entirely and
 exits; anything else (including no file at all inside the wait, the safe
 default) runs the re-provisioning this section used to be the whole story
