@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Multicast: retain every potentially programmed MAC until its hardware
+  deletion succeeds, including IPv4 and IPv6 groups already removed from
+  membership state. Retries recompute current MAC owners, so an alias or
+  rejoin is not deleted. A full tracking table defers new writes rather
+  than losing failed deletions. Host fault-injection and sanitizer tests
+  pass; real multicast hardware testing remains open. Refs #248.
+
 - VLAN: the forward operation (FwdOp) of the OLT's VLAN filters can now be
   overridden, with the same setting and format as the stock firmware's "VLAN
   Forward Operation" page: `RTK_DEVINFO_SPECVER`, `EntityId[:FwdOp]` entries
