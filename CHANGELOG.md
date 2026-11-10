@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Docs: new `docs/QUALIFICATION.md`, linked from the README's "Status and
+  limitations" and "Documentation". It records, per board, laser driver, host,
+  host SerDes mode and OLT line (named ISP1 and ISP2, never by make) and per
+  feature path, whether it is maintainer-tested on a stick, community-reported
+  (issue linked), host-tested (test named) or untested, with the release it was
+  last checked on, so it changes when something is checked again and not per
+  release. It also states the minimum qualification suite a hardware path must
+  pass before it is called supported, and what a community report should
+  carry, including a diagnostics bundle without `--full`. The README's
+  statements on fibre-pull recovery, the watchdog reset, MLD snooping, the
+  trial guard and the 2C3 are brought in line with it. Refs #268.
+
 - Releases: the publishing job runs in a protected `release` environment,
   so a release is published only after the maintainer approves it, once
   all of CI has passed on the tag commit. The repository now also keeps
