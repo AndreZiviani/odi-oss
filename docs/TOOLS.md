@@ -91,8 +91,8 @@ Concurrently with those four, `rcS.pon`:
    replay, through `/proc/odi_omci`) and the watchdog confirmation
    (`/proc/odi_wdt/userland_ok`; without it the board resets at 120 s of
    uptime -- the network is not a condition, unless `/etc/config/confirm-arp`
-   exists, development only, then only after an ARP reply from the `.2` of
-   the `br0` subnet), then `gponsn` and `gponpw` (serial number and PLOAM
+   exists, development only, then only after an ARP reply from the address
+   it holds), then `gponsn` and `gponpw` (serial number and PLOAM
    password from the config store), then `gponact` -- which first polls
    `/proc/odi_omci` for the omcid registration itself, bounded at 10 s,
    since omcid now starts as its own respawn entry rather than being forked
@@ -1023,7 +1023,7 @@ in service.
     nv getenv [name]              print one variable, or all of them
     nv setenv [-c 1|2] name value set one (in the copy that was read, or copy 1|2)
     nv fallback [name]            read the OTHER copy, the one U-Boot falls back to
-    nv commit slot                sw_commit=slot and mupgrade_en=0 in BOTH copies, verified
+    nv commit [--force] slot      sw_commit=slot and mupgrade_en=0 in BOTH copies, verified
 
 Reads and writes the redundant environment (mtd `env` and `env2`) with a
 CRC check and no vendor library. It is what arms and commits a trial boot:
@@ -1046,7 +1046,12 @@ booted from (the last `root=` in `/proc/cmdline`, the one the kernel
 mounted: the built-in slot-0 line comes before U-Boot's) or than `sw_active` in the
 primary, and an environment whose two copies are not both valid; it never
 writes `sw_active`. A copy that already says so is not rewritten, so a
-second run writes nothing. Exit 0 means both copies now commit the slot;
+second run writes nothing. It also refuses, naming the file, while the
+development file `/etc/config/confirm-arp` exists: each boot then waits for
+an ARP reply from the address in it and a committed slot has no trial to
+fall back to, so a host that stops answering means a reset every 120 s.
+`--force` (or `-f`) commits anyway, with a warning. `/etc/config/breadcrumbs.on`
+never blocks; it earns a one-line note. Exit 0 means both copies now commit the slot;
 anything else says which step failed and whether the fallback copy was
 touched (it never is before the primary has verified). Interrupting it is
 safe at every step: until the primary is verified the fallback still holds

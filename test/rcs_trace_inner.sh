@@ -9,7 +9,7 @@
 set -u
 BB=/bb/busybox
 QEMU=$(command -v qemu-mips-static)
-SETS=${SETS:-none breadcrumbs confirm-arp}
+SETS=${SETS:-none breadcrumbs confirm-arp confirm-arp-empty}
 
 # The container has no binfmt entry for MIPS, so a MIPS ELF cannot be
 # execve()d directly. Every applet is therefore a two-line script whose
@@ -86,7 +86,8 @@ stage() {
 	printf '<Value Name="GPON_PLOAM_PASSWD" Value="30303030303030303030"/>\n' > "$R/var/config/lastgood.xml"
 	case $set in
 	breadcrumbs) : > "$R/var/config/breadcrumbs.on" ;;
-	confirm-arp) : > "$R/var/config/confirm-arp" ;;
+	confirm-arp) echo 192.168.0.77 > "$R/var/config/confirm-arp" ;;
+	confirm-arp-empty) : > "$R/var/config/confirm-arp" ;;
 	esac
 
 	# Stubs for what needs hardware, the network or a daemon.
@@ -158,8 +159,16 @@ for set in $SETS; do
 	T=/tmp/tr-$set
 	stage "$R" "$set"
 	rm -rf "$T"; mkdir -p "$T"
+	# The confirm-arp sets also run rcS.pon: the watchdog confirmation
+	# (and so the ARP wait) is a PON step, not part of rcS itself.
+	# The other sets keep the plain rcS command line, so their goldens do
+	# not carry the extra shell.
+	case $set in
+	confirm-arp*) set -- sh -c 'sh /etc/init.d/rcS; sh /etc/init.d/rcS.pon' ;;
+	*) set -- sh /etc/init.d/rcS ;;
+	esac
 	strace -f -ff -y -q -s 4096 -e trace=execve,write,clone,clone3,fork,vfork \
-		-o "$T/t" chroot "$R" /qemu-mips-static /bin/busybox sh /etc/init.d/rcS \
+		-o "$T/t" chroot "$R" /qemu-mips-static /bin/busybox "$@" \
 		< /dev/null > "/out/$set.console" 2>&1 &
 	spid=$!
 	settle "$T"

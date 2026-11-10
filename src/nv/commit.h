@@ -74,6 +74,7 @@ enum env_commit_rc {
 	NVC_WRITE_FALLBACK,
 	NVC_VERIFY_FALLBACK,
 	NVC_FINAL,
+	NVC_CONFIRM_ARP,       /* the confirm-arp development file exists and no force was given; nothing written */
 };
 
 struct env_commit_report {
@@ -88,6 +89,32 @@ struct env_commit_report {
  * NVC_DONE and NVC_ALREADY mean both copies now say sw_commit=<slot>. */
 int env_commit(const struct env_io *io, int slot, int running,
 	       struct env_commit_report *r);
+
+/* The development toggles a commit looks at, as files on the config
+ * partition. The paths are fields, so a test points them at fixtures. */
+#define NV_CONFIRM_ARP_PATH "/etc/config/confirm-arp"
+#define NV_BREADCRUMBS_PATH "/etc/config/breadcrumbs.on"
+
+struct commit_aids {
+	void *ctx;
+	/* 1 when the file at path exists. */
+	int (*exists)(void *ctx, const char *path);
+	const char *confirm_arp;
+	const char *breadcrumbs;
+	/* Out: which of the two exist. */
+	int has_confirm_arp;
+	int has_breadcrumbs;
+};
+
+/* env_commit behind the confirm-arp guard. While the confirm-arp file
+ * exists every boot waits for an ARP reply from the address in it, and a
+ * committed slot has no trial to fall back to, so an unreachable host
+ * means a reset every 120 s until safe mode: without `force` that is
+ * NVC_CONFIRM_ARP and nothing is read or written. breadcrumbs.on never
+ * blocks; the caller only reports it. Both flags are set in `a` first. */
+int env_commit_guarded(const struct env_io *io, struct commit_aids *a,
+		       int force, int slot, int running,
+		       struct env_commit_report *r);
 
 /* One line, no newline, for the rc. */
 const char *env_commit_msg(int rc);

@@ -155,7 +155,8 @@ it:
 - **rcS confirms userland to the watchdog within 120 s on every boot**, or
   the board resets (`docs/FLASHING.md`). The confirmation needs no network;
   only with `/etc/config/confirm-arp` (development) does it wait for an ARP
-  reply from the `.2` address of the management subnet. Do not change the
+  reply from the IPv4 address that file holds (`nv commit` refuses while it
+  exists, unless forced). Do not change the
   confirmation or the deadline without reading `rcS`, `rcS.dev` and
   `odi_wdt.c` together.
 - **A reboot with no commit returns to the stock (or previously committed)

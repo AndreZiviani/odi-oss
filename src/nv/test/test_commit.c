@@ -132,6 +132,16 @@ static int others_same(const uint8_t *a, const uint8_t *b)
 	return n > 0;
 }
 
+/* Which of the two toggle files exist. */
+struct present { int confirm_arp, breadcrumbs; };
+
+static int p_exists(void *ctx, const char *path)
+{
+	struct present *p = ctx;
+
+	return strstr(path, "confirm-arp") ? p->confirm_arp : strstr(path, "breadcrumbs") ? p->breadcrumbs : 0;
+}
+
 int main(void)
 {
 	static struct fake f;
@@ -343,7 +353,57 @@ int main(void)
 		ck(cmdline_root_index("root=31:\n") == -1, "no index: unknown");
 	}
 
-	for (int i = NVC_DONE; i <= NVC_FINAL; i++)
+	/* The development-aid guard (confirm-arp refuses, breadcrumbs.on only
+	 * reports). The fake "filesystem" is a list of existing paths. */
+	{
+		struct fake f;
+		struct env_commit_report r;
+		struct commit_aids a;
+		struct present p;
+		struct env_io io = { &f, f_read, f_write };
+		int rc;
+
+		memset(&a, 0, sizeof a);
+		a.ctx = &p;
+		a.exists = p_exists;
+		a.confirm_arp = "/x/confirm-arp";
+		a.breadcrumbs = "/x/breadcrumbs.on";
+
+		trial(&f);
+		memset(&p, 0, sizeof p);
+		rc = env_commit_guarded(&io, &a, 0, 1, 1, &r);
+		ck(rc == NVC_DONE && !a.has_confirm_arp && !a.has_breadcrumbs && f.nwrites == 2,
+		   "neither toggle: a normal commit, nothing flagged");
+
+		trial(&f);
+		memset(&p, 0, sizeof p);
+		p.confirm_arp = 1;
+		rc = env_commit_guarded(&io, &a, 0, 1, 1, &r);
+		ck(rc == NVC_CONFIRM_ARP && a.has_confirm_arp, "confirm-arp present: refused");
+		ck(f.nwrites == 0 && f.reads == 0, "  and nothing was read or written");
+		ck(val(&f, 1, "sw_commit", "0") && val(&f, 2, "sw_commit", "0"), "  both copies still commit slot 0");
+
+		rc = env_commit_guarded(&io, &a, 1, 1, 1, &r);
+		ck(rc == NVC_DONE && a.has_confirm_arp && val(&f, 1, "sw_commit", "1") && val(&f, 2, "sw_commit", "1"),
+		   "confirm-arp present with force: committed in both copies, still flagged for the warning");
+
+		trial(&f);
+		memset(&p, 0, sizeof p);
+		p.breadcrumbs = 1;
+		rc = env_commit_guarded(&io, &a, 0, 1, 1, &r);
+		ck(rc == NVC_DONE && a.has_breadcrumbs && !a.has_confirm_arp,
+		   "breadcrumbs.on only: committed, flagged for the note");
+
+		trial(&f);
+		memset(&p, 0, sizeof p);
+		p.confirm_arp = 1;
+		rc = env_commit_guarded(&io, &a, 0, 0, 1, &r);
+		ck(rc == NVC_CONFIRM_ARP, "the refusal comes before the slot checks");
+		rc = env_commit_guarded(&io, &a, 1, 0, 1, &r);
+		ck(rc == NVC_NOT_RUNNING, "force does not skip the other refusals");
+	}
+
+	for (int i = NVC_DONE; i <= NVC_CONFIRM_ARP; i++)
 		if (!strcmp(env_commit_msg(i), "unknown result"))
 			ck(0, "every result has a message");
 
