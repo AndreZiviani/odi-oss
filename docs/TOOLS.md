@@ -1550,7 +1550,7 @@ missing one as nothing to report.
 | file | lines |
 |---|---|
 | `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `enc_ports`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `laser_emergency_stop`, `last_los_ms`, `upstream_overhead`, `ranging_time`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
-| `counters` | `ctr_samples`, `ctr`, `ctr_saturated` |
+| `counters` | `ctr_samples`, `ctr_ds_superframe`, `ctr_fec_now`, `ctr`, `ctr_saturated` |
 | `flows` | `flow_ack_timeouts`, `flow_saturated`, `ds`, `us` |
 | `ploam` | `ploam ds_rx us_tx`, `ploam_us_dropped`, `ploam_type`, `ploam_ring` |
 
@@ -1587,6 +1587,11 @@ In `status` (the live bits are absent before the first sample):
 In `counters`:
 
     ctr_samples 11                    samples taken since boot
+    ctr_ds_superframe 305491896       the superframe count and downstream FEC
+    ctr_fec_now ds 1                  bit at the last sample, as in status;
+                                      here so that one read pairs them with
+                                      the totals (absent before the first
+                                      sample)
     ctr ds_bip_err_blocks 4           every counter, always
     ctr_saturated ds_gem_idle 1       samples that read it full; only
                                       counters that ever were

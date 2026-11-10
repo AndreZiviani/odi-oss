@@ -493,6 +493,8 @@ static void test_show_before_first_sample(void)
 	odi_gpon_ctr_show_counters(&c, put, NULL);
 	CHECK(strncmp(out, "ctr_samples 0\n", 14) == 0, "the sample count leads");
 	CHECK(strstr(out, "ctr ds_bip_err_blocks 0\n") != NULL, "the totals are there, at 0");
+	CHECK(!strstr(out, "ctr_ds_superframe ") && !strstr(out, "ctr_fec_now "),
+	      "no frame count or FEC bit in counters before the first sample");
 }
 
 /* Compares out with the golden file at path (UPDATE=1 rewrites it). */

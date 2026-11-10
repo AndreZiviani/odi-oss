@@ -437,6 +437,18 @@ void odi_gpon_ctr_show_counters(const struct odi_gpon_ctr *c, odi_gpon_ctr_put_f
 
 	snprintf(line, sizeof(line), "ctr_samples %u\n", c->samples);
 	put(ctx, line);
+	/* The frame count and FEC bit of the same sample as the totals, for a
+	 * reader that pairs them (a share of the downstream frames): status has
+	 * both too, but a second file can come from the next sample. Other
+	 * keys than in status, as metricsd parses the files as one text.
+	 */
+	if (c->samples) {
+		snprintf(line, sizeof(line), "ctr_ds_superframe %u\n", c->superframe);
+		put(ctx, line);
+		snprintf(line, sizeof(line), "ctr_fec_now ds %u\n",
+			 (c->alarm_state & ODI_GPON_DSF_ALARM_STATE_FEC_NOW) ? 1U : 0U);
+		put(ctx, line);
+	}
 	for (i = 0; i < ODI_GPON_CTR_COUNT; i++) {
 		snprintf(line, sizeof(line), "ctr %s %llu\n", odi_gpon_ctr_names[i],
 			 (unsigned long long)c->total[i]);
