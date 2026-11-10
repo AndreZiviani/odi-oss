@@ -122,11 +122,15 @@ if FAKE_IGMPD=1 sh "$SCRIPT" > "$W/run.log" 2>&1; then bad "ran beside igmpd"; e
 [ ! -f "$W/state/log" ] && ok "and installed nothing" || bad "installed a probe beside igmpd"
 
 # 3. SIGTERM mid-window: the trap puts everything back.
+# The window is long and the wait for its probes generous (30 s): on a CI
+# runner busy with the other legs of make test, installing five probes can
+# take several seconds. The kill comes as soon as they are in, so a fast
+# run stays fast.
 setup
-export COUNT_S=20
+export COUNT_S=120
 sh "$SCRIPT" > "$W/run.log" 2>&1 &
 pid=$!
-for _ in $(seq 50); do [ "$(probes_left)" -ge 5 ] && break; sleep 0.1; done
+for _ in $(seq 300); do [ "$(probes_left)" -ge 5 ] && break; sleep 0.1; done
 [ "$(probes_left)" -ge 5 ] && ok "five probes in for the count window" || bad "the count window never started"
 kill -TERM "$pid"
 wait "$pid" 2> /dev/null || true
@@ -136,12 +140,13 @@ grep -q 'restored: probes left 0' "$W/run.log" && ok "SIGTERM: it says so" || ba
 
 # 4. SIGKILL mid-window: no trap runs; the holder input ends and the probes go.
 setup
-export COUNT_S=20
+export COUNT_S=120
 sh "$SCRIPT" > "$W/run.log" 2>&1 &
 pid=$!
-for _ in $(seq 50); do [ "$(probes_left)" -ge 5 ] && break; sleep 0.1; done
+for _ in $(seq 300); do [ "$(probes_left)" -ge 5 ] && break; sleep 0.1; done
+[ "$(probes_left)" -ge 5 ] && ok "SIGKILL: five probes in first" || bad "SIGKILL: the count window never started"
 { kill -KILL "$pid"; wait "$pid"; } 2> /dev/null || true
-for _ in $(seq 50); do [ "$(probes_left)" = 0 ] && break; sleep 0.1; done
+for _ in $(seq 300); do [ "$(probes_left)" = 0 ] && break; sleep 0.1; done
 [ "$(probes_left)" = 0 ] && ok "SIGKILL: the probes go with the holder" || bad "SIGKILL: probes left"
 
 [ "$fail" = 0 ] && echo "mcast_probe_test: all checks passed"
