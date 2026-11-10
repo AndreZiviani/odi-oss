@@ -554,6 +554,8 @@ static int cfg_num(const char *path, const char *key, int missing)
 #define VLAN_CFG_TYPE_MANUAL  1
 #define VLAN_MANU_MODE_TAG    1
 
+static void fwdop_load(const char *cs);
+
 void cfg_load_vlan_from(const char *cs)
 {
 	int pri;
@@ -566,6 +568,7 @@ void cfg_load_vlan_from(const char *cs)
 	vlanCfg.manual = vlanCfg.type == VLAN_CFG_TYPE_MANUAL
 		&& vlanCfg.mode == VLAN_MANU_MODE_TAG
 		&& vlanCfg.vid >= 0 && pri >= 0;
+	fwdop_load(cs);
 	vlanCfg.loaded = 1;
 }
 
@@ -620,6 +623,11 @@ void cfg_show_vlan(void)
 			(long)vlanCfg.vid);
 	else
 		out("handling    transparent: no tag added or removed, the router tags\n");
+	if (vlanCfg.nfwdop < 0)
+		out("fwdop       RTK_DEVINFO_SPECVER malformed, ignored\n");
+	for (int k = 0; k < vlanCfg.nfwdop; k++)
+		out_fmt("fwdop       84/%04x built as 0x%02x (RTK_DEVINFO_SPECVER)\n",
+			(long)vlanCfg.fwdop[k].inst, (long)vlanCfg.fwdop[k].code);
 }
 
 /* What is safe to print. The serial is on the label and the OLT ranges on it,
@@ -1102,6 +1110,85 @@ void cfg_load_fixed_me(void)
 	fixed_me = s;
 }
 
+/* ------------------------------------------------ RTK_DEVINFO_SPECVER
+ *
+ * The override of the class 84 forward operation (FwdOp) on the stock firmware:
+ * its "VLAN Forward Operation" page stores EntityId[:FwdOp] entries,
+ * separated by commas, in this otherwise unused device-info key, and
+ * fix_vlan_fwdop.sh writes each code over the attribute once the OLT has
+ * provisioned the port. An entry without a code gets 0x02, as there:
+ *
+ *     RTK_DEVINFO_SPECVER=0x1102:0x00,0x110b
+ *
+ * Some lines need it. On one (odi-oss #301) the OLT filters every GEM-side
+ * port with FwdOp 0x10 and the service VID, while its EAPOL frames come down
+ * priority-tagged (VID 0): the filter drops every one, and 802.1X never
+ * completes. 0x00 lets them through.
+ *
+ * Here the attribute keeps what the OLT wrote, so a Get answers the OLT with
+ * its own value; only the bridge rules are built from the override
+ * (cfg_fwdop()). The same key in both slots means the same thing. Instances
+ * are decimal or 0x hex (0..65535), codes 0x hex or decimal (0..255).
+ * Anything malformed -- a bad entry, the same instance twice, more than
+ * FWDOP_OVR_MAX entries -- turns the whole key off, as OMCI_FIXED_ME does. */
+static void fwdop_load(const char *cs)
+{
+	char v[FWDOP_OVR_MAX * 16];
+	int len = cfg_get(cs, "RTK_DEVINFO_SPECVER", v, sizeof v);
+	int i = 0, n = 0;
+
+	vlanCfg.nfwdop = 0;
+	if (len <= 0)
+		return;
+	if (len >= (int)sizeof v - 1) {
+		vlanCfg.nfwdop = -1;
+		return;
+	}
+	while (i < len) {
+		int s = i, colon = -1, inst, code = 0x02;
+
+		if (v[i] == ',' || v[i] == ' ') {
+			i++;
+			continue;
+		}
+		for (; i < len && v[i] != ',' && v[i] != ' '; i++)
+			if (v[i] == ':' && colon < 0)
+				colon = i;
+		if (colon < 0) {
+			inst = fixed_me_num(v + s, i - s, 5, 1);
+		} else {
+			inst = fixed_me_num(v + s, colon - s, 5, 1);
+			code = fixed_me_num(v + colon + 1, i - colon - 1, 3, 1);
+		}
+		if (inst < 0 || code < 0 || code > 0xff || n == FWDOP_OVR_MAX) {
+			vlanCfg.nfwdop = -1;
+			return;
+		}
+		for (int k = 0; k < n; k++)
+			if (vlanCfg.fwdop[k].inst == inst) {
+				vlanCfg.nfwdop = -1;
+				return;
+			}
+		vlanCfg.fwdop[n].inst = (uint16_t)inst;
+		vlanCfg.fwdop[n].code = (uint8_t)code;
+		n++;
+	}
+	vlanCfg.nfwdop = n;
+}
+
+/* The forward operation the bridge rules of class 84 instance `inst` are
+ * built with: the override when the key names the instance, else the code
+ * the OLT wrote. */
+uint32_t cfg_fwdop(uint16_t inst, uint32_t olt_code)
+{
+	if (!vlanCfg.loaded)
+		cfg_load_vlan();
+	for (int k = 0; k < vlanCfg.nfwdop; k++)
+		if (vlanCfg.fwdop[k].inst == inst)
+			return vlanCfg.fwdop[k].code;
+	return olt_code;
+}
+
 /* The any-instance entry of a class, if the class is in the first form. */
 const struct fixed_me *fixed_me_find(uint16_t cls)
 {
@@ -1342,6 +1429,12 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		}
 	if ((o->custom_mcast ^ n->custom_mcast) & CUSTOM_MCAST_DS_UNTAGGED)
 		m |= CFGD_CUSTOM_MCAST;
+	if (o->vlan.nfwdop != n->vlan.nfwdop)
+		m |= CFGD_FWDOP;
+	for (int k = 0; k < n->vlan.nfwdop && k < o->vlan.nfwdop; k++)
+		if (o->vlan.fwdop[k].inst != n->vlan.fwdop[k].inst ||
+		    o->vlan.fwdop[k].code != n->vlan.fwdop[k].code)
+			m |= CFGD_FWDOP;
 	if (o->vlan.type != n->vlan.type)
 		m |= CFGD_VLAN_TYPE;
 	if (o->vlan.mode != n->vlan.mode)
@@ -1383,6 +1476,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_VLAN_VID, "VLAN_MANU_TAG_VID" },
 		{ CFGD_VLAN_PRI, "VLAN_MANU_TAG_PRI" },
 		{ CFGD_CUSTOM_MCAST, "OMCI_CUSTOM_MCAST" },
+		{ CFGD_FWDOP, "RTK_DEVINFO_SPECVER" },
 	};
 	int o = 0;
 

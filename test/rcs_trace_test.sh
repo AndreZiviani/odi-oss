@@ -32,10 +32,11 @@ SETS="none breadcrumbs confirm-arp"
 
 [ -f "$BUSYBOX" ] || { echo "no busybox at $BUSYBOX -- make busybox, or set BUSYBOX" >&2; exit 1; }
 # The freestanding toolchain image (toolchain/images.env), not a Dockerfile
-# of our own: it has qemu-mips-static already but not strace, so the
-# container installs that one package itself before the inner script runs,
-# through tools/ci-apt.sh so a dead mirror fails in minutes, not at the job
-# timeout.
+# of our own: it has qemu-mips-static, and from freestanding-v4 on strace
+# too. An older image lacks strace, and the container then installs it
+# before the inner script runs, through tools/ci-apt.sh so a dead mirror
+# fails in minutes, not at the job timeout. The image carries it so that
+# the test does not depend on a Debian mirror at run time.
 IMAGE=$(toolchain/image.sh diag) || exit 1
 
 OUT=$(mktemp -d)
@@ -46,7 +47,7 @@ docker run --rm --cap-add=SYS_PTRACE --cap-add=NET_ADMIN \
 	-v "$bb:/bb/busybox:ro" -v "$PWD/rootfs:/imagesrc:ro" -v "$PWD/test:/t:ro" \
 	-v "$PWD/tools/ci-apt.sh:/ci-apt.sh:ro" \
 	-v "$OUT:/out" -e SETS="$SETS" "$IMAGE" \
-	bash -c 'bash /ci-apt.sh strace >/dev/null || { echo "rcs_trace: could not install strace (apt mirror down?)" >&2; exit 1; }; exec bash /t/rcs_trace_inner.sh' || exit 1
+	bash -c 'command -v strace >/dev/null || bash /ci-apt.sh strace >/dev/null || { echo "rcs_trace: could not install strace (apt mirror down?)" >&2; exit 1; }; exec bash /t/rcs_trace_inner.sh' || exit 1
 
 fail=0
 for s in $SETS; do
