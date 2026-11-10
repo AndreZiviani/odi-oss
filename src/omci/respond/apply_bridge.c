@@ -610,8 +610,9 @@ static int olt_tag(int *pri, const char **why_out)
 }
 
 /* The rules of one GEM-side bridge port: at most one per filter entry, one
- * for untagged frames, one for tagged ones. */
-#define BP_RULES_MAX 14
+ * for untagged frames, one for tagged ones, and the three EAPOL rules beside
+ * the manual tag (bp_eapol()). */
+#define BP_RULES_MAX 18
 
 /* Whether the manual-mode multicast row strips the tag of priority-tagged
  * frames, set by mcast_tag_plan() from the profile before the rules are made. */
@@ -621,6 +622,9 @@ struct bp_rule {
 	struct omci_vlan_oper vr;
 	const char *kind;
 	int vid, pri;                    /* for the log line; -1 none */
+	uint32_t gen_dir;                /* 0: installed in the direction of the
+					  * GEM port; else the one direction a
+					  * rule_gen 7 descriptor carries */
 };
 
 /* What an ingress whose class 171 table is applied (ev_build()) leaves of the
@@ -646,7 +650,98 @@ static int bp_put(struct bp_rule *rules, int n, const char *kind, int vid, int p
 	rules[n].kind = kind;
 	rules[n].vid = vid;
 	rules[n].pri = pri;
+	rules[n].gen_dir = 0;
 	return n + 1;
+}
+
+/* VLAN_EAPOL_UNTAGGED, and the manual tag it needs: 802.1X EAPOL frames
+ * cross untagged while the stick adds the manual tag to the rest. Set by
+ * bdgconn_rebuild(); 0 whenever there is no manual tag. */
+static int eapol_on;
+
+#define EAPOL_ETHERTYPE 0x888e
+
+enum { EAPOL_UP, EAPOL_DOWN, EAPOL_DOWN_VID0 };
+
+/* Whether VLAN_EAPOL_UNTAGGED applies: the key is 1 and the manual tag is
+ * on. The key set without the manual tag does nothing, and says so once (and
+ * again after the key was off or the tag on in between). */
+static int eapol_noted;
+
+static int eapol_note(int manual)
+{
+	if (!cfg_eapol_untagged()) {
+		eapol_noted = 0;
+		return 0;
+	}
+	if (manual) {
+		eapol_noted = 0;
+		return 1;
+	}
+	if (!eapol_noted)
+		out("   vlan: VLAN_EAPOL_UNTAGGED has no effect without the manual tag"
+		    " (VLAN_CFG_TYPE 1, VLAN_MANU_MODE 1)\n");
+	eapol_noted = 1;
+	return 0;
+}
+
+/* One EAPOL rule as a rule_gen 7 descriptor (one direction, both halves
+ * stated outright, extvlan.c): no tag added or removed. Upstream and
+ * downstream name the EtherType of an untagged frame; the VID 0 one names a
+ * priority-tagged frame (VID 0, any priority) and no EtherType, as the
+ * classifier is not known to compare the EtherType behind a tag. */
+static void gen_eapol_rule(struct omci_vlan_oper *vr, int which)
+{
+	struct evtocd_plan p;
+
+	for (unsigned i = 0; i < sizeof p; i++)
+		((uint8_t *)&p)[i] = 0;
+	p.s.f_vid = p.c.f_vid = -1;
+	p.s.f_pri = p.c.f_pri = -1;
+	p.s.vid = p.c.vid = -1;
+	p.s.pri = p.c.pri = -1;
+	p.out_vid = -1;
+	p.out_pri = -1;
+	if (which == EAPOL_DOWN_VID0) {
+		p.c.in = p.c.out = 1;
+		p.c.f_vid = 0;
+		p.out_tags = 1;
+	}
+	evtocd_plan_oper(&p, vr);
+	if (which != EAPOL_DOWN_VID0)
+		evtocd_oper_ethertype(vr, EAPOL_ETHERTYPE);
+}
+
+/* The manual add-tag rule was just built at rules[at]. When
+ * VLAN_EAPOL_UNTAGGED is on, three rules go beside it, all on the same GEM
+ * port. The add-tag rule is left as it is: it names no VID, so the switch
+ * puts its upstream row in the bottom region, behind every row that names an
+ * EtherType (docs/SWITCH.md, "Extended VLAN rules"), and the EAPOL rule wins
+ * for the frames it names:
+ *  - eapol-up: untagged EAPOL from the router goes up as it is,
+ *  - eapol-down: untagged EAPOL from the OLT reaches the router as it is,
+ *  - eapol-down-vid0: so does a priority-tagged one (VID 0), tag kept.
+ * The manual rule itself keeps its tag and its downstream half. */
+static int bp_eapol(struct bp_rule *rules, int n)
+{
+	static const struct { const char *kind; int which; uint32_t dir; } r[] = {
+		{ "eapol-up", EAPOL_UP, OMCI_DIR_US },
+		{ "eapol-down", EAPOL_DOWN, OMCI_DIR_DS },
+		{ "eapol-down-vid0", EAPOL_DOWN_VID0, OMCI_DIR_DS },
+	};
+
+	if (!eapol_on)
+		return n;
+	for (unsigned i = 0; i < sizeof r / sizeof r[0]; i++) {
+		int had = n;
+
+		n = bp_put(rules, n, r[i].kind, -1, -1);
+		if (n > had) {
+			gen_eapol_rule(&rules[had].vr, r[i].which);
+			rules[had].gen_dir = r[i].dir;
+		}
+	}
+	return n;
 }
 
 /* Untagged frames passed unchanged and nothing else: all that is left of a
@@ -699,6 +794,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		if (mvid >= 0) {
 			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
 			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0);
+			n = bp_eapol(rules, n);
 			if (tag_from_olt && olt_tagged_pass) {
 				n = bp_put(rules, n, "tagged", -1, -1);
 				gen_tagged_rule(&rules[n - 1].vr);
@@ -750,6 +846,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
 			if (n > had) {
 				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
+				n = bp_eapol(rules, n);
 				*manual = 1;
 			}
 			had = n;
@@ -787,8 +884,10 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 
 		if (mvid >= 0) {
 			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
-			if (n > had)
+			if (n > had) {
 				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
+				n = bp_eapol(rules, n);
+			}
 		} else {
 			n = bp_put(rules, n, "untagged", -1, -1);
 			if (n > had)
@@ -826,6 +925,16 @@ static int bp_install(int ingress, uint16_t port, uint32_t dir,
 	int untagged = r->vr.filter.inner_mode == OMCI_TAGF_UNTAGGED;
 	int all = r->vr.rule_gen == OMCI_VLAN_OPER_FORWARD_ALL;
 
+	/* An EAPOL rule is one direction, installed on the GEM port that
+	 * carries the manual tag: on a mapper that splits the priorities, the
+	 * one whose priorities hold the tag priority. */
+	if (r->gen_dir) {
+		if (!(dir & r->gen_dir))
+			return 0;
+		if (pmask != 0xffu && !(tag_pri < 8 && (pmask & (1u << tag_pri))))
+			return 0;
+		return bp_add(ingress, port, r->gen_dir, &r->vr);
+	}
 	if (pmask == 0xffu || !(dir & OMCI_DIR_US))
 		return bp_add(ingress, port, dir, &r->vr);
 	if ((r->vr.filter.inner_mode & OMCI_TAGF_PRI) &&
@@ -1570,6 +1679,7 @@ void bdgconn_rebuild(void)
 	/* The manual tag, gated on VLAN_CFG_TYPE and VLAN_MANU_MODE as the
 	 * stock stack gates it (cfgstore.c); -1 builds no manual tag. */
 	mvid = cfg_manual_vid();
+	eapol_on = eapol_note(mvid >= 0);
 	tag_pri = vlanCfg.pri;
 	tag_from_olt = 0;
 	olt_tagged_pass = 0;

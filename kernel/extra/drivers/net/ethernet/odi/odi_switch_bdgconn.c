@@ -554,14 +554,19 @@ static int bdgconn_derive_gen(const struct omci_bdgconn *b, struct odi_sw_cf_leg
 	l->tmpl = tmpl;
 	l->key = cf_key_gen(vid, pri);
 	if (r->filter.ethertype != OMCI_ETHTYPE_NO_CARE) {
-		/* An EtherType is compared on an untagged frame going up and
-		 * nowhere else: the value behind a tag is not known to be in
-		 * the same place. A rule that names none while the table
-		 * has EtherType rules (REST) goes to the bottom region, after
-		 * every one of them. */
-		if (is_ds || stag != 0 || ctag != 0 || vid >= 0 || pri >= 0)
+		/* An EtherType is compared on an untagged frame and nowhere
+		 * else: the value behind a tag is not known to be in the same
+		 * place. Going up it was measured (docs/SWITCH.md); going down
+		 * the row is built the same way and has not been run on a
+		 * stick, and a frame it does not match falls to the rows
+		 * that follow. A rule that names none while the table has
+		 * EtherType rules (REST) goes to the bottom region, after every
+		 * one of them, and only upstream. */
+		if (stag != 0 || ctag != 0 || vid >= 0 || pri >= 0)
 			return -1;
 		if (r->filter.ethertype == OMCI_ETHTYPE_REST) {
+			if (is_ds)
+				return -1;
 			l->key = ODI_SW_CF_KEY_BOTTOM;
 		} else if (r->filter.ethertype & OMCI_ETHTYPE_LITERAL) {
 			uint32_t et = r->filter.ethertype & ODI_SW_CF_W0_ET_MASK;

@@ -436,6 +436,15 @@ store 1 12 5 "$(val RTK_DEVINFO_SPECVER 0x1102:0x02)
 reload_is "RTK_DEVINFO_SPECVER, another code"  vlan RTK_DEVINFO_SPECVER   rebuild
 store 1 12 5
 reload_is "RTK_DEVINFO_SPECVER removed"        vlan RTK_DEVINFO_SPECVER   rebuild
+# VLAN_EAPOL_UNTAGGED, an odi-only key in odi.conf, changes the rules of the
+# manual tag: a rebuild, and 0 for absent is not a change.
+store 1 12 5
+printf 'VLAN_EAPOL_UNTAGGED=1\n' > "$ODI"
+reload_is "VLAN_EAPOL_UNTAGGED 1"              vlan VLAN_EAPOL_UNTAGGED   rebuild
+printf 'VLAN_EAPOL_UNTAGGED=0\n' > "$ODI"
+reload_is "VLAN_EAPOL_UNTAGGED 0"              vlan VLAN_EAPOL_UNTAGGED   rebuild
+rm -f "$ODI"
+reload_is "VLAN_EAPOL_UNTAGGED absent, still off: not a change" none ""   none
 store 0 12 5
 reload_is "VLAN_MANU_MODE 0, transparent"      vlan VLAN_MANU_MODE        rebuild
 store 0 12 5 "$(val VLAN_CFG_TYPE 2)

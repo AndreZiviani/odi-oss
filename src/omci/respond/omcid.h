@@ -797,6 +797,7 @@ struct cfg_snap {
 	int pots_ports;
 	int pots_slot_key;
 	int pots_slot;
+	int eapol_untagged;       /* VLAN_EAPOL_UNTAGGED, odi.conf */
 };
 /* Identity class: one bit per key the OLT reads. */
 #define CFGD_SN         (1u << 0)
@@ -822,6 +823,7 @@ struct cfg_snap {
 /* Rebuild class, like the VLAN keys: what the bridge rules are built from. */
 #define CFGD_CUSTOM_MCAST (1u << 23)
 #define CFGD_FWDOP        (1u << 24)
+#define CFGD_EAPOL        (1u << 25)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
@@ -891,6 +893,9 @@ void cfg_load_vlan(void);
 void cfg_load_vlan_from(const char *cs);
 int cfg_manual_vid(void);
 int cfg_olt_tagging(void);
+/* VLAN_EAPOL_UNTAGGED (odi.conf): 1 passes EAPOL untagged under the manual
+ * tag. Whether it applies is up to the caller, which needs cfg_manual_vid() >= 0. */
+int cfg_eapol_untagged(void);
 uint32_t cfg_fwdop(uint16_t inst, uint32_t olt_code);
 void cfg_load_report(void);
 void cfg_load_report_from(const char *cs, const char *hs, const char *sw,

@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- New odi-only key `VLAN_EAPOL_UNTAGGED` (`/etc/config/odi.conf`, off by
+  default, live with `apply.sh omci`): with the manual tag on ("stick tags"),
+  802.1X EAPOL frames (EtherType 0x888e) cross the stick untagged in both
+  directions while every other frame keeps the manual tag, for an ISP that
+  authenticates the line untagged or on VLAN 0 and carries the service on a
+  VLAN. Three bridge rules go beside the add-tag rule on its GEM port
+  (`eapol-up`, `eapol-down`, `eapol-down-vid0`, shown by `omcli bridge`); the
+  add-tag rule itself is unchanged, and with the key off the rules are byte
+  for byte what they were. The switch driver now also accepts an EtherType
+  row for untagged frames downstream. Not yet run against a line that uses
+  EAP, and the downstream EtherType row has not been run on a stick
+  (`docs/SETTINGS.md`, `docs/SWITCH.md`). Refs #301.
 - `confirm-arp` guard. The development file now holds the IPv4 address to
   ARP (one line, whitespace ignored) instead of the hard-coded `.2` of the
   `br0` subnet; an empty file, or content that is not a dotted IPv4 address,

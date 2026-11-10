@@ -935,5 +935,129 @@ run171 tci-isp2-t0force /tmp/s-tci.txt
 check "ISP2 00 00 00 under OMCI_CUSTOM_MCAST=1: the VID 0 row strips" \
 	"$(rebuild /tmp/omcid-171-tci-isp2-t0force.log 0)" "$ISP2_STRIP"
 
+# ---- VLAN_EAPOL_UNTAGGED (odi.conf) -------------------------------------------
+# With the manual tag on and the key 1, 802.1X EAPOL crosses untagged: three
+# rules beside the manual add-tag rule, on its GEM port, and the add-tag rule
+# itself moves to the rest of the untagged frames. docs/SETTINGS.md, "VLAN_EAPOL_UNTAGGED".
+EAPOL3="eapol-down vid -1 pri -1
+eapol-down-vid0 vid -1 pri -1
+eapol-up vid -1 pri -1"
+eapol_conf() { printf 'VLAN_EAPOL_UNTAGGED=%s\n' "$1" > /var/config/odi.conf; }
+# eapol_rules <log>: the rules of the last rebuild with the EAPOL ones named
+# after their port, "47/<port> gem <n> rule <kind> ...", sorted.
+eapol_run() {   # eapol_run <isp> <manual mode> <name>
+	sed "s/\"VLAN_MANU_MODE\" Value=\"1\"/\"VLAN_MANU_MODE\" Value=\"$2\"/" \
+		"$FIX/omci-store-$1.xml" > /var/config/lastgood.xml
+	grep -v '^#' "$FIX/omci-session-$1.txt" > /tmp/s-eapol-$1.txt
+	run171 "$3" /tmp/s-eapol-$1.txt
+}
+
+# A. Key off (absent, 0, or anything but 1): every descriptor as without the key.
+rm -f /var/config/odi.conf
+eapol_run isp2 1 eapol-absent
+eapol_conf 0
+eapol_run isp2 1 eapol-zero
+eapol_conf yes
+eapol_run isp2 1 eapol-yes
+check "key 0: every descriptor as with no key" \
+	"$(dryblock /tmp/omcid-171-eapol-zero.log)" "$(dryblock /tmp/omcid-171-eapol-absent.log)"
+check "key not 1: every descriptor as with no key" \
+	"$(dryblock /tmp/omcid-171-eapol-yes.log)" "$(dryblock /tmp/omcid-171-eapol-absent.log)"
+check "key off, ISP2: the manual rules, no EAPOL rule" \
+	"$(rebuild /tmp/omcid-171-eapol-zero.log 0)" "$ISP2_MANUAL"
+check "key off: nothing said about it" \
+	"$(grep -c 'VLAN_EAPOL_UNTAGGED' /tmp/omcid-171-eapol-zero.log)" "0"
+
+# B. Key on, manual tag on: ISP2, one unicast GEM.
+eapol_conf 1
+eapol_run isp2 1 eapol-on2
+check "key on, ISP2: the manual rule and the three EAPOL rules, on the service GEM port" \
+	"$(rebuild /tmp/omcid-171-eapol-on2.log 0)" "47/0ffe gem 4094 rule manual-pass vid 10 pri 0
+$(printf '%s\n' "$EAPOL3" | sed 's|^|47/1002 gem 657 rule |')
+47/1002 gem 657 rule manual-add vid 10 pri 0"
+# The descriptors of the GEM 657 rules, read from the dry run: direction
+# (word 8), rule_gen (9), outer and inner filter mode (16, 17), the EtherType
+# (18) and the C-tag treatment (the tag op of the inner action, word 27).
+cat > /tmp/eapolrules.py <<'PYRULES'
+import re, struct, sys
+rules, current, meta, words = [], [], None, []
+for line in open(sys.argv[1]):
+    m = re.search(r'\[dry\] serv \d+ ingress [0-9a-f]+ gem (\d+) dir (\d+)', line)
+    if m:
+        meta, words = tuple(map(int, m.groups())), []
+    m = re.match(r'   [0-9a-f]{3}  ([0-9a-f]{32})', line)
+    if m and meta:
+        words.extend(struct.unpack('>4I', bytes.fromhex(m[1])))
+        if len(words) == 40:
+            current.append((meta, words))
+            meta = None
+    if 'bridge connections rebuilt' in line:
+        rules, current = current, []
+out = []
+for (gem, d), w in rules:
+    if gem != int(sys.argv[2]):
+        continue
+    et = w[18]
+    out.append('dir %d gen %d outer %#x inner %#x vid %d et %s' % (
+        d, w[9], w[16], w[17], w[14],
+        'none' if et == 0 else 'rest' if et == 1 << 17 else '%#x' % (et & 0xffff)
+        if et & (1 << 16) else 'code %d' % et))
+print('\n'.join(sorted(out)))
+PYRULES
+got=$(python3 /tmp/eapolrules.py /tmp/omcid-171-eapol-on2.log 657)
+check "key on, ISP2, descriptors: EAPOL up (untagged, 0x888e), down (untagged, 0x888e), down VID 0; the add-tag rule is unchanged" "$got" \
+"dir 1 gen 7 outer 0x4 inner 0x4 vid 4096 et 0x888e
+dir 2 gen 7 outer 0x4 inner 0x4 vid 4096 et 0x888e
+dir 2 gen 7 outer 0x4 inner 0xa vid 0 et none
+dir 3 gen 5 outer 0x4 inner 0x4 vid 10 et none"
+check "and the multicast GEM has no EAPOL rule" \
+	"$(python3 /tmp/eapolrules.py /tmp/omcid-171-eapol-on2.log 4094 | grep -c 'gen 7')" "0"
+
+# C. ISP1: five GEM ports, only the one the manual VID names gets the rules.
+eapol_run isp1 1 eapol-on1
+check "key on, ISP1: the EAPOL rules only on the port of the manual VID" \
+	"$(rebuild /tmp/omcid-171-eapol-on1.log 0)" "47/0003 gem 1434 rule vid-filter vid 10 pri -1
+47/0004 gem 1690 rule vid-filter vid 12 pri 5
+47/0005 gem 1818 rule vid-filter vid 13 pri 4
+47/0006 gem 1946 rule vid-filter vid 14 pri -1
+$(printf '%s\n' "$EAPOL3" | sed 's|^|47/0007 gem 1562 rule |')
+47/0007 gem 1562 rule manual-add vid 11 pri 0
+47/ffff gem 4095 rule manual-remove vid 11 pri 0"
+
+# D. Key on, no manual tag: no effect, said once; the descriptors are the
+# transparent ones.
+eapol_conf 0
+eapol_run isp2 0 eapol-tr-off
+eapol_conf 1
+eapol_run isp2 0 eapol-tr-on
+check "key on, transparent: the rules as with the key off" \
+	"$(rebuild /tmp/omcid-171-eapol-tr-on.log 0)" "$TRANSPARENT"
+check "key on, transparent: every descriptor as with the key off" \
+	"$(dryblock /tmp/omcid-171-eapol-tr-on.log)" "$(dryblock /tmp/omcid-171-eapol-tr-off.log)"
+check "key on, transparent: said once that it has no effect" \
+	"$(grep -c 'VLAN_EAPOL_UNTAGGED has no effect without the manual tag' /tmp/omcid-171-eapol-tr-on.log)" "1"
+# A line whose tag comes from the OLT (class 171) is not the manual tag either.
+store 0 0
+session "$ADD100" "$DEF1" "$DEF2" > /tmp/s171-eapol-olt.txt
+run171 eapol-olt /tmp/s171-eapol-olt.txt
+check "key on, VLAN from the OLT (type 0): no EAPOL rule" \
+	"$(rebuild /tmp/omcid-171-eapol-olt.log 0 | grep -c eapol)" "0"
+rm -f /var/config/odi.conf
+
+# E. `omcli vlan` names the setting only when it is on.
+eapol_conf 1
+: > /tmp/omcid-vlan-cli2.log
+$Q respond/build/omcid -w 6 > /tmp/omcid-vlan-cli2.log 2>&1 &
+pid=$!
+omcid_up /tmp/omcid-vlan-cli2.log
+got=$($Q cli/build/omcli vlan "$FIX/omci-store-isp2.xml" 2>&1 | grep eapol)
+check "omcli vlan, key on with the manual tag" "$got" "eapol       untagged both ways (VLAN_EAPOL_UNTAGGED)"
+got=$($Q cli/build/omcli vlan /tmp/store-transparent.xml 2>&1 | grep eapol)
+check "omcli vlan, key on without it" "$got" "eapol       VLAN_EAPOL_UNTAGGED set, no effect without the manual tag"
+rm -f /var/config/odi.conf
+check "omcli vlan, key off: no line" \
+	"$($Q cli/build/omcli vlan "$FIX/omci-store-isp2.xml" 2>&1 | grep -c eapol)" "0"
+omcid_stop "$pid"
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 suite_exit

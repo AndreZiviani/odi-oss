@@ -100,6 +100,16 @@ static const struct odi_sw_cf_row *us_row(int id)
 	return NULL;
 }
 
+static const struct odi_sw_bdgconn_slot *slot_of(int id)
+{
+	unsigned int i;
+
+	for (i = 0; i < ODI_SW_CMD_BDGCONN_MAX; i++)
+		if (odi_sw_bdgconn[i].used && odi_sw_bdgconn[i].serv_id == id)
+			return &odi_sw_bdgconn[i];
+	return NULL;
+}
+
 static uint32_t care(const struct odi_sw_cf_row *r)
 {
 	return r ? (r->rule_w1 | r->mask_w1) : 0;
@@ -187,6 +197,42 @@ int main(void)
 	   "upstream matches priority 5 on a C-tag, any VID");
 	vlan_replay();
 	ok(rows_are(both, 0, 0), "every row carries UNI and PON");
+
+	/* The manual add-tag rule beside an EAPOL row (VLAN_EAPOL_UNTAGGED).
+	 * The add-tag rule names no VID, so its upstream row is in the bottom
+	 * region whatever else is installed; an EtherType row is in the second
+	 * layout, ahead of it, so it matches the frames it names first,
+	 * whichever of the two went in first. */
+	puts("the manual add-tag rule and an EAPOL row:");
+	{
+		struct omci_vlan_oper manual, et;
+		struct omci_bdgconn b;
+		const struct odi_sw_bdgconn_slot *sl;
+		int round;
+
+		for (round = 0; round < 2; round++) {
+			odi_mock_reset();
+			odi_switch_cmd_reset_state();
+			odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x1009U;
+			bdg_gen_manual(&manual, 362, 0, 0);
+			bdg_gen_untagged(&et);
+			et.rule_gen = OMCI_VLAN_OPER_EXTVLAN_GEN;
+			et.filter.ethertype = OMCI_ETHTYPE_LITERAL | 0x888e;
+			bdg_conn(&b, 11, OMCI_DIR_US, 5, 4, 5, &et);
+			if (round == 0)
+				ok(activate(10, &manual) == 0, "the add-tag rule first: accepted");
+			ok(odi_switch_cmd(51, &b, sizeof b) == 0, "the EAPOL row, upstream: accepted");
+			if (round == 1)
+				ok(activate(10, &manual) == 0, "the add-tag rule after it: accepted");
+			sl = slot_of(10);
+			ok(sl && sl->us_row == 254, "the add-tag upstream row is row 254, the bottom region");
+			ok(sl && slot_of(11) && odi_sw_cf[slot_of(11)->us_row].et &&
+			   slot_of(11)->us_row >= 128 && slot_of(11)->us_row < sl->us_row,
+			   "the EAPOL row is in the second layout, below it");
+			ok(sl && sl->ds_row >= 64 && sl->ds_row < 128 && !odi_sw_cf[sl->ds_row].et,
+			   "and the add-tag downstream row is in the ordered region");
+		}
+	}
 
 	if (failures) {
 		printf("odi_switch_bdgconn_vlan_test: %d failure(s)\n", failures);
