@@ -21,6 +21,8 @@
 # test/safe_mode_test.sh.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=test/host-flock.sh
+. test/host-flock.sh
 S=$PWD/rootfs/skeleton/etc/scripts/host-autoneg.sh
 F=$PWD/rootfs/skeleton/etc/scripts/flash
 T=$(mktemp -d)

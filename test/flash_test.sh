@@ -12,26 +12,12 @@
 # two tables, a set whose KEY=value echo it parses, and the reset.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=test/host-flock.sh
+. test/host-flock.sh
 F=rootfs/skeleton/etc/scripts/flash
 T=$(mktemp -d) || exit 1
 trap 'rm -rf "$T"' EXIT
-mkdir -p "$T/var" "$T/bin"
-
-# flock is a busybox applet on the stick. A host without the util-linux
-# command (macOS) gets the same kernel lock through python; flash only ever
-# asks for the non-blocking form on fd 9.
-if ! command -v flock >/dev/null 2>&1; then
-	cat > "$T/bin/flock" <<'FLOCK'
-#!/usr/bin/env python3
-import fcntl, sys
-try:
-    fcntl.flock(int(sys.argv[-1]), fcntl.LOCK_EX | fcntl.LOCK_NB)
-except OSError:
-    sys.exit(1)
-FLOCK
-	chmod +x "$T/bin/flock"
-	PATH="$T/bin:$PATH"
-fi
+mkdir -p "$T/var"
 
 cat > "$T/cs.xml" <<'XML'
 <Config>
