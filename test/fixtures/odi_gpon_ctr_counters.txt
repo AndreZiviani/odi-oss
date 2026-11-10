@@ -1,4 +1,6 @@
 ctr_samples 11
+ctr_ds_superframe 305491896
+ctr_fec_now ds 1
 ctr ds_bip_err_blocks 4
 ctr ds_bip_err_bits 9
 ctr ds_fec_corrected_bits 2560000

@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- `/proc/odi_gpon/counters` now also has the downstream superframe count
+  and FEC bit of the sample its totals come from, as `ctr_ds_superframe`
+  and `ctr_fec_now ds`. A reader that works out a share of the downstream
+  frames, such as the idle GEM frames per frame, gets both from one read;
+  `status` has the same values, but a read of a second file can land on
+  the next sample. `status` keeps its lines. Refs #319.
+
 - OMCI: with no class 84 filter, the fallback bridge rules of an 802.1p
   mapper that sends its priorities to more than one GEM port are now held
   to the priorities each port carries; every target used to get the same
