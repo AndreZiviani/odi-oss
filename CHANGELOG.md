@@ -9,12 +9,10 @@ listed here.
   shared extraction directory, in both modes, and the flasher inherits it,
   so the lock lasts until the write ends even if the starter is killed. A
   foreground write was not recorded anywhere and a second starter could
-  run beside it. Foreground writes now publish their pid and outcome in
-  the state file like background ones, and a starter that cannot write the
-  state file refuses to flash. A foreground write no longer stops on HUP,
-  INT or TERM. busybox gains the `flock` applet for this. The web UI
-  upload guard still reads the state file only. Host-tested with stub
-  writers; no image built and no flash written. Refs #308.
+  run beside it; it now also claims the state file, so the upload guard
+  sees it, and refuses to flash when it cannot. The web UI upload guard
+  still reads the state file only. Host-tested with stub writers, four
+  starters at once included; no flash written on a stick. Refs #308.
 
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each

@@ -38,10 +38,10 @@ cat > "$T/bin/nv" <<'NV'
 [ -n "${NV_ACTIVE:-}" ] && echo "sw_active=$NV_ACTIVE"
 exit 0
 NV
-# flock is a BusyBox applet on the target. Use the same kernel advisory
-# lock through Python on hosts without the util-linux command.
+# flock is a busybox applet on the stick. A host without the util-linux
+# command gets the same kernel lock through python.
 if ! command -v flock >/dev/null 2>&1; then
-    cat > "$T/bin/flock" <<'FLOCK'
+	cat > "$T/bin/flock" <<'FLOCK'
 #!/usr/bin/env python3
 import fcntl, sys
 try:
@@ -49,13 +49,25 @@ try:
 except OSError:
     sys.exit(1)
 FLOCK
-    chmod +x "$T/bin/flock"
+	chmod +x "$T/bin/flock"
 fi
 chmod +x "$T/bin/setsid" "$T/bin/nv"
 md5_of() { (md5sum "$1" 2>/dev/null || md5 -r "$1") | cut -d' ' -f1; }
 
 mkimg() {   # mkimg <tar> [bad]
-	printf '#!/bin/sh\necho "fwu stub slot=$1 tar=$2"\n[ -z "${FWU_READY:-}" ] || : > "$FWU_READY"\n[ -z "${FWU_HOLD:-}" ] || sleep 3\nexit ${FWU_STUB_RC:-0}\n' > "$T/img/fwu.sh"
+	# The stub names itself in FWU_STARTS and, when FWU_HOLD is set, stays
+	# until that file exists (bounded): a writer the tests hold open and
+	# let go, with no fixed sleep to race against.
+	cat > "$T/img/fwu.sh" <<'STUB'
+#!/bin/sh
+echo "fwu stub slot=$1 tar=$2"
+[ -z "${FWU_STARTS:-}" ] || echo start >> "$FWU_STARTS"
+if [ -n "${FWU_HOLD:-}" ]; then
+	n=0
+	while [ ! -e "$FWU_HOLD" ] && [ "$n" -lt 200 ]; do sleep 0.1; n=$((n + 1)); done
+fi
+exit ${FWU_STUB_RC:-0}
+STUB
 	if [ "${2:-}" = bad ]; then
 		echo "00000000000000000000000000000000  fwu.sh" > "$T/img/md5.txt"
 	else
@@ -106,51 +118,78 @@ kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
 t "a stale running state does not block" "in the background" "$(run 'root=31:5' 1 "$T/good.tar")"
 sleep 1
 
-# Keep a foreground writer in the stub while both caller modes compete.
-# No flash tools or device paths are used.
-for mode in foreground background; do
-    rm -f "$T/ready" "$T/fwu.state"
-    fgflag=
-    [ "$mode" != foreground ] || fgflag=--foreground
-    # shellcheck disable=SC2086  # empty or one word, by construction
-    FWU_READY="$T/ready" FWU_HOLD=1 run 'root=31:5' $fgflag 1 "$T/good.tar" > "$T/first.log" & first=$!
-    for _ in {1..30}; do [ -f "$T/ready" ] && break; sleep 0.1; done
-    t "$mode writer reached the flasher" "^yes$" "$([ -f "$T/ready" ] && echo yes)"
-    t "$mode exposes a running state" "^running [0-9]* 1" "$(cat "$T/fwu.state" 2>/dev/null)"
-    before=$(md5_of "$T/fwu.d/fwu.sh")
-    saved=$(cat "$T/fwu.state")
-    rm -f "$T/fwu.state"
-    t "$mode lock excludes a writer without the advisory state" "already running" "$(run 'root=31:5' --foreground 1 "$T/good.tar")"
-    printf '%s\n' "$saved" > "$T/fwu.state"
-    t "$mode blocks foreground competitor" "already running" "$(run 'root=31:5' --foreground 1 "$T/good.tar")"
-    t "$mode blocks background competitor" "already running" "$(run 'root=31:5' 1 "$T/good.tar")"
-    t "$mode keeps scratch unchanged" "^$before$" "$(md5_of "$T/fwu.d/fwu.sh")"
-    wait "$first"
-    for _ in {1..40}; do grep -q '^ok ' "$T/fwu.state" 2>/dev/null && break; sleep 0.1; done
-    t "$mode records completion" "^ok " "$(cat "$T/fwu.state")"
+# until <seconds> <command...>: poll, bounded, in place of a fixed sleep.
+until_ok() {
+	_n=$(( $1 * 10 )); shift
+	while [ "$_n" -gt 0 ]; do "$@" 2>/dev/null && return 0; sleep 0.1; _n=$((_n - 1)); done
+	return 1
+}
+lines() { _c=$(grep -c "$1" "$2" 2>/dev/null); echo "${_c:-0}"; }
+# The lock is free again: no writer, and no detached job, still holds it.
+lock_free() { env PATH="$T/bin:$PATH" sh -c 'flock -n 9' 9>>"$T/fwu.state.lock"; }
+
+# A foreground write was recorded nowhere, so a second starter ran beside
+# it. Hold one writer of each mode open and send competitors of both.
+for mode in --foreground ''; do
+	name=${mode:-background}; name=${name#--}
+	rm -f "$T/fwu.state" "$T/release" "$T/starts"
+	# shellcheck disable=SC2086  # $mode is empty or one word
+	FWU_STARTS="$T/starts" FWU_HOLD="$T/release" run 'root=31:5' $mode 1 "$T/good.tar" > "$T/first.log" &
+	first=$!
+	until_ok 10 test -s "$T/starts"
+	t "$name: the writer is running" "^1$" "$(lines start "$T/starts")"
+	t "$name: and is in the state file" "^running [0-9]* 1" "$(cat "$T/fwu.state" 2>/dev/null)"
+	before=$(md5_of "$T/fwu.d/fwu.sh")
+	t "$name: a foreground competitor is refused" "already running" "$(FWU_STARTS="$T/starts" run 'root=31:5' --foreground 1 "$T/good.tar")"
+	t "$name: a background competitor is refused" "already running" "$(FWU_STARTS="$T/starts" run 'root=31:5' 1 "$T/good.tar")"
+	mv "$T/fwu.state" "$T/fwu.state.away"
+	t "$name: refused by the lock alone, with the state file gone" "already running" "$(FWU_STARTS="$T/starts" run 'root=31:5' --foreground 1 "$T/good.tar")"
+	mv "$T/fwu.state.away" "$T/fwu.state"
+	t "$name: the scratch directory was left alone" "^$before$" "$(md5_of "$T/fwu.d/fwu.sh")"
+	t "$name: still one writer" "^1$" "$(lines start "$T/starts")"
+	: > "$T/release"
+	wait "$first"
+	until_ok 10 lock_free
 done
 
-# A writer whose state cannot be published must not start: the upload
-# guard reads only the state file. A directory in place of the temporary
-# file makes the write fail.
-rm -f "$T/ready" "$T/fwu.state"
-mkdir "$T/fwu.state.tmp"
-out=$(FWU_READY="$T/ready" run 'root=31:5' --foreground 1 "$T/good.tar"); rc=$?
-rmdir "$T/fwu.state.tmp"
-t "a state that cannot be written is refused" "cannot record the writer state" "$out"
-t "and exits 1" "^1$" "$rc"
-t "and never reaches the flasher" "^no$" "$([ -f "$T/ready" ] && echo yes || echo no)"
+# The race itself: four starters at the same moment, two of each mode.
+# Exactly one may reach the flasher; the other three are refused.
+rm -f "$T/fwu.state" "$T/release" "$T/starts"
+until_ok 10 lock_free
+pids=
+for i in 1 2 3 4; do
+	mode=--foreground; [ $((i % 2)) = 0 ] && mode=
+	# shellcheck disable=SC2086
+	FWU_STARTS="$T/starts" FWU_HOLD="$T/release" run 'root=31:5' $mode 1 "$T/good.tar" > "$T/race.$i" &
+	pids="$pids $!"
+done
+refused() { [ "$(cat "$T"/race.? | grep -c 'already running')" = 3 ]; }
+until_ok 10 test -s "$T/starts"
+until_ok 10 refused
+t "four starters at once: three are refused" "^3$" "$(cat "$T"/race.? | grep -c 'already running')"
+t "four starters at once: one writer" "^1$" "$(lines start "$T/starts")"
+: > "$T/release"
+# shellcheck disable=SC2086
+wait $pids
+until_ok 10 lock_free
+t "and no second writer after the first is done" "^1$" "$(lines start "$T/starts")"
 
-# A signal to the foreground supervisor must not abandon the final state.
-rm -f "$T/ready" "$T/fwu.state"
-env PATH="$T/bin:$PATH" PROC_MTD="$T/mtd" PROC_CMDLINE="$T/cmdline" NV="$T/bin/nv" \
-    FWU_DIR="$T/fwu.d" FWU_LOG="$T/fwu.log" FWU_STATE="$T/fwu.state" \
-    FWU_READY="$T/ready" FWU_HOLD=1 sh "$S" --foreground 1 "$T/good.tar" > "$T/signal.log" 2>&1 & starter=$!
-for _ in {1..30}; do [ -f "$T/ready" ] && break; sleep 0.1; done
-kill -TERM "$starter"
-wait "$starter"; rc=$?
-t "foreground supervisor completes after TERM" "^0$" "$rc"
-t "foreground signal still records final state" "^ok " "$(cat "$T/fwu.state")"
+# A foreground writer leaves a running state with a pid that is gone
+# (exec keeps nothing behind to record the outcome): read as stale.
+rm -f "$T/fwu.state"
+run 'root=31:5' --foreground 1 "$T/good.tar" > /dev/null
+t "a finished foreground write leaves its claim" "^running [0-9]* 1" "$(cat "$T/fwu.state")"
+t "which does not block the next write" "fwu stub slot=1" "$(run 'root=31:5' --foreground 1 "$T/good.tar")"
+
+# A foreground writer that cannot claim the state file does not flash:
+# the upload guard reads nothing else. A directory in its place fails
+# the write.
+rm -f "$T/fwu.state" "$T/starts"; mkdir "$T/fwu.state"
+out=$(FWU_STARTS="$T/starts" run 'root=31:5' --foreground 1 "$T/good.tar"); rc=$?
+rmdir "$T/fwu.state"
+t "an unwritable state file is refused" "cannot record the writer state" "$out"
+t "with exit 1" "^1$" "$rc"
+t "before the flasher" "^0$" "$(lines start "$T/starts")"
 
 echo
 echo "$pass passed, $fail failed"

@@ -146,6 +146,3 @@ CONFIG_FLASH_ERASEALL=y
 # against our sysroot the applet does not compile at all. It was on only as
 # a busybox default.
 # CONFIG_TC is not set
-
-# The firmware starter holds an inherited descriptor lock across all writers.
-CONFIG_FLOCK=y
