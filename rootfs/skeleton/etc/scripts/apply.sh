@@ -26,7 +26,8 @@
 #                        applies:
 #                          - nothing changed: says so, touches nothing;
 #                          - only the VLAN keys (VLAN_CFG_TYPE, VLAN_MANU_MODE,
-#                            VLAN_MANU_TAG_VID, VLAN_MANU_TAG_PRI): rebuilds
+#                            VLAN_MANU_TAG_VID, VLAN_MANU_TAG_PRI,
+#                            OMCI_CUSTOM_MCAST, RTK_DEVINFO_SPECVER): rebuilds
 #                            the bridge connections in place from the MIB it
 #                            holds. LIVE: the fibre stays in O5, nothing is
 #                            re-ranged;
