@@ -1464,6 +1464,11 @@ static void ds_flow_send(const struct omci_class *c, const struct mib_row *r,
 #define MCAST_XPORTS 16
 #define CLS_MCAST_OPER_PROFILE 309
 
+/* Whether a CTP owns the downstream flow of `port`: one whose direction is
+ * downstream (2) or both (3), other than the instance being deleted. An
+ * upstream-only CTP (1) has no downstream flow of its own, so its port can
+ * be an extra multicast port, and a CTP that is Set to upstream-only gives
+ * its downstream flow back at the next refresh. */
 static int is_ctp_port(uint16_t port, int skip268)
 {
 	const struct omci_class *c = find_class(OMCI_ME_GEM_PORT_CTP);

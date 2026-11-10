@@ -6,10 +6,14 @@ listed here.
 ## Unreleased
 
 - OMCI: deleting a downstream GEM CTP now withdraws its own flow when no
-  surviving CTP or multicast table owns that port. Failed withdrawals keep
-  their ids, and a broadcast selection must be cleared before an id can be
-  freed. Native driver-stub tests cover deletion, sharing and retry; OLT
-  and hardware acceptance remain open. Refs #307.
+  surviving CTP or multicast table owns that port, so replacing CTPs on
+  new GEM ports no longer uses up the 64 flow slots. Only a downstream or
+  bidirectional CTP counts as the owner of a downstream flow: the port of
+  an upstream-only CTP can be an extra multicast port, and a CTP that is
+  Set to upstream-only gives its downstream flow back. A withdrawal the
+  driver refuses keeps the slot, a broadcast selection is cleared before
+  its flow is freed, and deleting the CTP that holds the broadcast flow
+  moves it to a surviving one. Not run against an OLT. Refs #307.
 
 - Config: `flash all cs`, which the web UI runs every time it loads the
   config, reads `odi.conf` in one pass instead of starting a `sed` for each
