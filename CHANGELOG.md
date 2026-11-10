@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Apply: when a disabled service has no daemon pid, wake all anonymous
+  service placeholders so its own init entry rereads the setting. Signal
+  errors are reported as failures. Host-tested with two placeholders;
+  activation on a stick remains untested. Refs #309.
+
 - Multicast: retain every potentially programmed MAC until its hardware
   deletion succeeds, including IPv4 and IPv6 groups already removed from
   membership state. Retries recompute current MAC owners, so an alias or
