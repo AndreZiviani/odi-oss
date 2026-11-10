@@ -485,6 +485,183 @@ got=$(rebuild /tmp/omcid-171-ev-split5.log 0 | grep ext-vlan)
 check "a rule that names priority 5 goes up the GEM port that carries 5, and only that" "$got" \
 "47/1002 gem 1000 rule ext-vlan vid 410 pri 5"
 
+# The simple add-tag shortcut uses bp_rules, not ev_for_port. Its tagged
+# fallback must retain the whole mapper mask, and untagged priority 5
+# belongs only to GEM 1000. Parse real emitted descriptors below.
+store 0 0
+{
+	session "$ADD100P5" "$PASS1" "$PASS2"
+	split_frames
+} > /tmp/s171-fallback-split.txt
+run171 fallback-split /tmp/s171-fallback-split.txt
+if python3 - /tmp/omcid-171-fallback-split.log <<'PYTEST'
+import re, struct, sys
+rules = []
+current = []
+meta = None
+words = []
+for line in open(sys.argv[1]):
+    m = re.search(r'\[dry\] serv \d+ ingress [0-9a-f]+ gem (\d+) dir (\d+)', line)
+    if m:
+        meta = tuple(map(int, m.groups()))
+        words = []
+    m = re.match(r'   [0-9a-f]{3}  ([0-9a-f]{32})', line)
+    if m and meta:
+        words.extend(struct.unpack('>4I', bytes.fromhex(m[1])))
+        if len(words) == 40:
+            current.append((meta, words))
+            meta = None
+    if 'bridge connections rebuilt' in line:
+        rules, current = current, []
+seen = {657: set(), 1000: set()}
+untagged = {657: 0, 1000: 0}
+inverse = False
+for (gem, direction), w in rules:
+    if gem == 657 and direction == 2 and w[9] == 7:
+        inverse |= w[14] == 100 and w[13] == 5 and w[25] == 2
+    if gem not in seen or not direction & 1:
+        continue
+    # inner_mode is byte 68, inner priority is byte 52.
+    mode, pri = w[17], w[13]
+    if mode & 4:
+        untagged[gem] += 1
+    else:
+        assert mode & 16, (gem, 'unqualified upstream rule')
+        seen[gem].add(pri)
+assert seen == {657: {0, 1, 2, 3}, 1000: {4, 5, 6, 7}}, seen
+assert untagged == {657: 0, 1000: 1}, untagged
+assert inverse, "missing downstream inverse on the non-owner target"
+PYTEST
+then
+	echo "ok    fallback split: tagged priorities stay on their GEM, untagged priority 5 has one owner"
+else
+	echo "FAIL  fallback split: mapper separation lost"
+	fail=$((fail + 1))
+fi
+
+# dryblock <log>: the descriptors of the last rebuild, as the dry run prints them
+dryblock() {
+	awk '/\[dry\] (serv|47\/)|^   [0-9a-f]{3}  / { cur = cur $0 "\n" }
+	     /bridge connections rebuilt/ { last = cur; cur = "" }
+	     END { printf "%s", last }' "$1"
+}
+
+# The other rule kinds on the same split mapper, read from the descriptors
+# the dry run prints. fbrules <log>: one line per descriptor of the last
+# rebuild on GEM 657 or 1000, "<gem> <us|ds|bi> <filter>", sorted. inner_mode
+# is word 17, the inner priority word 13 and the inner VID word 14.
+cat > /tmp/fbrules.py <<'PYRULES'
+import re, struct, sys
+rules, current, meta, words = [], [], None, []
+for line in open(sys.argv[1]):
+    m = re.search(r'\[dry\] serv \d+ ingress [0-9a-f]+ gem (\d+) dir (\d+)', line)
+    if m:
+        meta, words = tuple(map(int, m.groups())), []
+    m = re.match(r'   [0-9a-f]{3}  ([0-9a-f]{32})', line)
+    if m and meta:
+        words.extend(struct.unpack('>4I', bytes.fromhex(m[1])))
+        if len(words) == 40:
+            current.append((meta, words))
+            meta = None
+    if 'bridge connections rebuilt' in line:
+        rules, current = current, []
+out = []
+for (gem, direction), w in rules:
+    if gem not in (657, 1000):
+        continue
+    mode = w[17]
+    if mode & 4:
+        f = 'untagged'
+    else:
+        f = ' '.join(x for x in ('vid %d' % w[14] if mode & 8 else '',
+                                 'pri %d' % w[13] if mode & 16 else '') if x) or 'tagged'
+    out.append('%d %s %s' % (gem, {1: 'us', 2: 'ds', 3: 'bi'}[direction], f))
+print('\n'.join(sorted(out)))
+PYRULES
+fbrules() { python3 /tmp/fbrules.py "$1"; }
+
+# Transparent (forward-all): every tagged priority goes up the GEM port that
+# carries it. The first rule of a port keeps the downstream leg, the others
+# are upstream only, and untagged frames go up one port: priority 0, since
+# this mapper does not name a default priority.
+store 1 0
+{
+	session none
+	split_frames
+} > /tmp/s-fb-all.txt
+run171 fb-all /tmp/s-fb-all.txt
+check "split mapper, forward-all: a rule per priority on its port, one downstream leg each, untagged on one" \
+"$(fbrules /tmp/omcid-171-fb-all.log)" \
+"1000 bi pri 4
+1000 us pri 5
+1000 us pri 6
+1000 us pri 7
+657 bi pri 0
+657 us pri 1
+657 us pri 2
+657 us pri 3
+657 us untagged"
+
+# The manual tag (VID 10, priority 0): the port that carries priority 0 keeps
+# the add-tag rule both ways. The other port has no upstream rule for
+# untagged frames and gets the downstream leg alone.
+store 1 1
+run171 fb-manual /tmp/s-fb-all.txt
+check "split mapper, manual tag: the add-tag rule on the port of its priority, the other downstream only" \
+"$(fbrules /tmp/omcid-171-fb-manual.log)" \
+"1000 ds vid 10 pri 0
+657 bi untagged"
+
+# A class 84 list on the bridge port (VID 300, FwdOp 0x10): the VID filter
+# gains the priority of each lane.
+store 1 0
+{
+	session none
+	split_frames
+	frame 44 0054 1002 "012c$(printf '%044d' 0)1001"
+} > /tmp/s-fb-vid.txt
+run171 fb-vid /tmp/s-fb-vid.txt
+check "split mapper, VID filter: VID 300 by priority, on the port that carries it" \
+"$(fbrules /tmp/omcid-171-fb-vid.log | grep 'vid 300')" \
+"1000 bi vid 300 pri 4
+1000 us vid 300 pri 5
+1000 us vid 300 pri 6
+1000 us vid 300 pri 7
+657 bi vid 300 pri 0
+657 us vid 300 pri 1
+657 us vid 300 pri 2
+657 us vid 300 pri 3"
+
+# The widest case: a full class 84 list, twelve VIDs, is 96 rules on this
+# bridge port. All of them are installed and nothing is reported missing.
+{
+	session none
+	split_frames
+	frame 44 0054 1002 "006400650066006700680069006a006b006c006d006e006f100c"
+} > /tmp/s-fb-12.txt
+run171 fb-12 /tmp/s-fb-12.txt
+check "split mapper, twelve VIDs: 96 priority rules" \
+"$(fbrules /tmp/omcid-171-fb-12.log | grep -c 'vid 1[01][0-9] pri')" "96"
+check "of which one a VID and port keeps the downstream leg" \
+"$(fbrules /tmp/omcid-171-fb-12.log | grep -c ' bi vid ')" "24"
+check "and no rule is reported as not installed" \
+"$(grep -c 'bridge rule not installed' /tmp/omcid-171-fb-12.log)" "0"
+
+# A mapper that names one GEM IW TP and leaves a priority unmapped does not
+# split anything: ISP1's first service with priority 7 taken off its mapper
+# builds the descriptors it built before, not seven priority rules.
+cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+grep -v '^#' "$FIX/omci-session-isp1.txt" > /tmp/s-fb-one.txt
+run171 fb-one /tmp/s-fb-one.txt
+{
+	cat /tmp/s-fb-one.txt
+	frame 48 0082 0001 "0080ffff"
+} > /tmp/s-fb-one7.txt
+run171 fb-one7 /tmp/s-fb-one7.txt
+check "one target with a priority unmapped: every descriptor as with all eight" \
+"$(dryblock /tmp/omcid-171-fb-one7.log)" "$(dryblock /tmp/omcid-171-fb-one.log)"
+store 0 0
+
 # The same split, with the second GEM IW TP given the instance id of the
 # mapper, as ISP3 numbers them: the bridge port TPPointer 0x1002 names both
 # a mapper and an IW TP. It is the mapper, and both GEM ports carry the rule.
@@ -645,12 +822,6 @@ tci_session isp1 0001 010000 > /tmp/s-tci.txt
 run171 tci-isp1 /tmp/s-tci.txt
 check "ISP1 01 00 00, no ACL row: the rules are the manual ones" \
 	"$(rebuild /tmp/omcid-171-tci-isp1.log 0)" "$ISP1_MANUAL"
-# dryblock <log>: the descriptors of the last rebuild, as the dry run prints them
-dryblock() {
-	awk '/\[dry\] (serv|47\/)|^   [0-9a-f]{3}  / { cur = cur $0 "\n" }
-	     /bridge connections rebuilt/ { last = cur; cur = "" }
-	     END { printf "%s", last }' "$1"
-}
 check "ISP1 01 00 00: every descriptor as without the attribute" \
 	"$(dryblock /tmp/omcid-171-tci-isp1.log)" "$(dryblock /tmp/omcid-171-tci-isp1-none.log)"
 check "and it says once why nothing was applied" \
