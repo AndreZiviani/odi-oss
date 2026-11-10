@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Build: `toolchain/image.sh` bounds its docker calls. A pull of a
+  toolchain image gets 120 s (`PULL_TIMEOUT`; on GitHub runners these
+  pulls take 2 to 8 s) and is tried up to 3 times (`PULL_TRIES`), 10 s
+  apart (`PULL_PAUSE`), so a registry error no longer fails a CI job at
+  once, and a pull or a local image lookup (30 s) that hangs fails with a
+  message instead of holding the job until its own time limit. On a host
+  without `timeout` (stock macOS) the calls run unbounded, as before.
+  `test/toolchain_image_test.sh`, in `make test-host`, checks each case
+  against a stub docker.
+
 - Tests: the OMCI suites could check a line omcid had not logged yet.
   `inject_wait` returned as soon as the answer to a frame was in the log,
   but omcid answers first and then applies the change and logs what it
