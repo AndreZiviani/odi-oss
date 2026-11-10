@@ -119,6 +119,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of that tag, 0 to 7; a stored value above 7 (255 is the factory one) is used as 0 and the tag stays on | omcid, on SIGHUP | LIVE |
+| `RTK_DEVINFO_SPECVER` | VLAN forward operation override | the stock firmware's FwdOp override, same key and format: `EntityId[:FwdOp]` entries separated by commas (e.g. `0x1102:0x00,0x110b`; no FwdOp means 0x02). The bridge rules of each class 84 port named are built with that FwdOp instead of the OLT's; the attribute keeps the OLT's value. Anything malformed turns the whole key off ("VLAN handling" below) | omcid, on SIGHUP | LIVE |
 | `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password: exactly 20 hex digits are 10 bytes, 1 to 10 characters are the text itself (even if they are hex digits), `0x` and 2 to 20 hex digits are those bytes zero-padded; anything else is refused and logged, keeping the old password; empty means none is sent | the `gponpw` PON step in rcS (`rcs-lib.sh`, `pon_step_gponpw`, skipped when empty); omcid re-sends it on a re-registration | INTERRUPTS INTERNET |
 | `LOID`, `LOID_PASSWD` | LOID, LOID password | answered to CTC-profile OLTs in the LOID authentication entity | omcid, on SIGHUP | INTERRUPTS INTERNET |
 | `LOID_OLD`, `LOID_PASSWD_OLD` | LOID (in force) | the value actually answered when it differs from the one above | omcid, on SIGHUP | INTERRUPTS INTERNET |
@@ -337,6 +338,20 @@ port: every tag, and untagged frames, both ways. The switch then carries
 every VID 2..4094 on the UNI and the PON (`docs/SWITCH.md`, "CF rows").
 With the manual tag on, a FwdOp that bridges untagged frames gets the
 add-tag rule in place of a plain untagged one.
+
+Some lines need a FwdOp other than the OLT's. One (odi-oss #301) filters
+every GEM port with FwdOp 0x10 and the service VID while its 802.1X EAPOL
+frames come down priority-tagged (VID 0): the filter drops every one and
+the router never authenticates. `RTK_DEVINFO_SPECVER` overrides it per class
+84 instance, with the same key and format as the stock firmware's "VLAN
+Forward Operation" page, so a guide written for the stock firmware works
+here and both slots agree: `0x1102:0x00,0x110b:0x00` bridges everything,
+tagged and untagged, on those two ports. The instances are the ones
+`omcli mib get 84` lists. The stock firmware writes the code over the
+attribute; omcid keeps the OLT's value there, so a Get answers the OLT with
+what it wrote and the UI shows it, and only the rules change. `omcli vlan`
+lists the overrides in force, and each one is logged once
+(`event=vlan_fwdop ... result=override`).
 
 Measured under qemu for both shapes (`src/omci/vlan-test.sh`); on hardware,
 not yet: PPPoE discovery on ISP2 and DHCP on ISP1 through router-tagged
