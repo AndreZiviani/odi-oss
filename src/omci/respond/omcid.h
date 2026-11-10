@@ -253,6 +253,7 @@ void serial_forget(void);
 int serial_refresh(int log);
 extern uint8_t devid[40];
 extern uint8_t mib_data_sync;
+void mib_data_sync_advance(void);
 const struct omci_class *find_class(uint16_t id);
 uint16_t attr_width(const struct omci_class *c, unsigned k);
 extern struct mib_tblent tblpool[MIB_TBL_NODES];
@@ -398,6 +399,7 @@ extern uint16_t alarm_snapshot;
 #define SNAPSHOT_PATH          "/var/run/omcid-mib.snap"
 #define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
 #define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
+#define RESUME_DECISION_PREV   RESUME_DECISION_PATH ".prev"
 int snapshot_save(void);
 /* Write `buf` to `tmp`, then rename it over `path`: a reader never sees a
  * half-written file. 0 on success. */

@@ -162,6 +162,15 @@ uint8_t devid[40];      /* "RTL9602C", then the revision */
 
 uint8_t mib_data_sync;
 
+/* Counts one more change of the MIB. 0 is reserved for a MIB just
+ * instantiated or reset, so the counter goes from 255 to 1, never to 0. */
+void mib_data_sync_advance(void)
+{
+	mib_data_sync = (uint8_t)(mib_data_sync + 1);
+	if (mib_data_sync == 0)
+		mib_data_sync = 1;
+}
+
 struct omci_instance aut[AUT_MAX];
 unsigned aut_count;
 

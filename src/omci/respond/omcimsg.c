@@ -475,7 +475,7 @@ static int fake_unknown(int fd, uint32_t tid, const uint8_t *f, uint8_t mt)
 	 * answered mask, none. Set: the result alone. */
 	send_resp(fd, tid, f, body, mt == OMCI_MT_SET ? 1 : 3);
 	if (mt != OMCI_MT_GET && mt != OMCI_MT_GET_CURRENT_DATA)
-		mib_data_sync++;
+		mib_data_sync_advance();
 	out("-> ok (unknown entity, answered by OMCI_UNKNOWN_ME_OK)\n");
 	return 1;
 }
@@ -953,7 +953,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		body[0] = OMCI_OK;
 		body[1] = 0;                     /* attribute execution mask */
 		body[2] = 0;
-		mib_data_sync++;
+		mib_data_sync_advance();
 		if (cls == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA)
 			mbpcd_tables_add(inst);
 		if (cls == OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE)
@@ -1003,7 +1003,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * resolves; a refused one changed nothing and is not counted.
 		 * Saved before the answer, as for a Create. */
 		if (done) {
-			mib_data_sync++;
+			mib_data_sync_advance();
 			snapshot_save();
 		}
 		send_resp(fd, tid, f, body, failed ? 5 : 1);
@@ -1034,7 +1034,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		if (cls == OMCI_ME_MAC_BRIDGE_SERVICE_PROFILE)
 			mbcd_del(inst);
 		body[0] = OMCI_OK;
-		mib_data_sync++;
+		mib_data_sync_advance();
 		snapshot_save();               /* before the answer, as above */
 		send_resp(fd, tid, f, body, 1);
 		ev_config_write(mt, cls, inst);

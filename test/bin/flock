@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Host stand-in for the busybox flock applet, used only where the host has no
+# flock (macOS). It takes the non-blocking exclusive lock on the fd named by
+# the last argument, which is the only form the image scripts use.
+import fcntl, sys
+try:
+    fcntl.flock(int(sys.argv[-1]), fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit(1)

@@ -25,8 +25,18 @@
 # Kick off the re-provisioning in the background rather than here: it has
 # to wait for the omcid this same line is about to start, and svc-omcid.sh
 # itself must return control to init's exec below without waiting on it.
+#
+# The previous omcid left its resume decision behind, and the new omcid
+# only replaces it after it starts (respawn.sh can wait up to 2 s first).
+# Setting the old file aside as .prev, before the helper starts, means
+# $RESUME_DECISION can only ever be written by the omcid about to run,
+# while omcid still sees that a previous run existed (it treats either file
+# as a restart and removes both: src/omci/respond/main.c). Deleting the
+# file here instead would make every respawn look like a first start.
 MARKER=${SVC_OMCID_MARKER:-/var/run/svc-omcid.started}
+RESUME_DECISION=${RESUME_DECISION:-/var/run/omcid-resume-decision}
 if [ -e "$MARKER" ]; then
+	[ -e "$RESUME_DECISION" ] && mv -f "$RESUME_DECISION" "$RESUME_DECISION.prev"
 	/etc/scripts/omci-respawn-reprovision.sh &
 else
 	: > "$MARKER" 2>/dev/null

@@ -27,6 +27,42 @@ listed here.
   (all 397 logins that connected came back with it). The TRIAL BOOT
   banner check goes the same way. Nothing changes on the stick.
 
+- `/etc/scripts/flash set` no longer installs a truncated `odi.conf` or
+  XML store when a write fails, for example on a full config partition.
+  The grep and printf that build the new `odi.conf` are checked on their
+  own, and every rewrite (`odi.conf`, the XML store, `default cs`) is
+  checked byte for byte against the same rewrite run again before it
+  replaces the file, so a short file is refused even when the tool that
+  wrote it reported success; the old file is left as it was and the set
+  fails with a message. Two `flash set` (or a set and a `default cs`) at
+  once no longer lose one change: writers take an flock on a lock file,
+  the same mechanism as the firmware writer lock, waiting at most 5
+  seconds before failing with "busy". Refs #326.
+
+- Tests: two host tests no longer fail now and then under load. In
+  `count_proof_test.sh` the stub `diag` rewrote its owner file in place, so
+  a reader that opened it mid-write took the holder for dead and dropped
+  every counter (the run then lacked a verdict); the owner and the counter
+  files are now written whole and renamed into place. In
+  `fwu_starter_test.sh` the four starters of the race check shared one
+  `cmdline` file, which one starter rewrote while another read it empty and
+  refused to write; each call now has its own file.
+
+- OMCI respawn: the re-provisioning helper no longer acts on the previous
+  omcid's resume decision. `svc-omcid.sh` started the helper before the new
+  omcid existed (the supervisor can wait up to 2 s first), and a stale
+  `resumed` or `reprovision` file still in `/var/run` answered for the new
+  run. It now moves the old file to `omcid-resume-decision.prev` first, so
+  the helper only ever reads the new omcid's decision; omcid treats either
+  file as proof of a restart and removes both. Refs #324.
+
+- OMCI: the MIB data sync counter now goes from 255 to 1 instead of to 0.
+  G.988 keeps 0 for a MIB just instantiated or reset, so after 256
+  successful Create, Set or Delete commands since the last MIB reset the
+  ONU reported 0 where the OLT expected 1, which an OLT audit may answer
+  with a MIB upload or a reset. One helper now advances the counter at
+  all four places. Refs #325.
+
 - Docs: the Luleey LL-XS2510 is listed as reported working, on one user
   report, with `HOST_SERDES=2500basex` set before the first boot. The
   README now records the first hardware runs of the host SerDes mode
