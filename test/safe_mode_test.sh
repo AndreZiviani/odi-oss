@@ -28,6 +28,8 @@
 # without the mount and address checks, and a normal boot with them.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=test/host-flock.sh
+. test/host-flock.sh
 S=$PWD/rootfs/skeleton/etc/scripts/safe-mode.sh
 F=$PWD/rootfs/skeleton/etc/scripts/flash
 LIB=$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh

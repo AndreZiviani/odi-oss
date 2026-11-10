@@ -19,6 +19,8 @@
 # where the boot step sits among the PON steps.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=test/host-flock.sh
+. test/host-flock.sh
 S=$PWD/rootfs/skeleton/etc/scripts/sfp-host-ddm.sh
 F=$PWD/rootfs/skeleton/etc/scripts/flash
 A=$PWD/rootfs/skeleton/etc/scripts/apply.sh

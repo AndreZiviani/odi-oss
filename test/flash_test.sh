@@ -12,6 +12,8 @@
 # two tables, a set whose KEY=value echo it parses, and the reset.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=test/host-flock.sh
+. test/host-flock.sh
 F=rootfs/skeleton/etc/scripts/flash
 T=$(mktemp -d) || exit 1
 trap 'rm -rf "$T"' EXIT
@@ -244,6 +246,106 @@ cp "$T/rcs.xml" "$cfg/reset.xml"
 CS="$cfg/reset.xml" HS="$T/rhs.xml" DEFAULTS="$T/def.xml" PATH="$shim:$PATH" sh $F default cs >/dev/null 2>&1
 last=$(grep " $cfg/reset.xml\$" "$MVLOG" | tail -1)
 t "default cs reaches CS by a rename from beside it" "$cfg" "$(dirname "${last%% *}")"
+
+# A write that fails part way. ulimit -f caps the size of any file the
+# command writes and SIGXFSZ is ignored, so a write past the cap returns an
+# error, as it does on a full partition, from the real grep, sed and printf.
+# The store must be left exactly as it was and no temp file may remain.
+bigdir="$T/big"; mkdir -p "$bigdir"
+fill() {   # fill <file> <lines>: comment lines, which flash keeps as they are
+	i=0
+	while [ "$i" -lt "$2" ]; do echo "# filler line number $i, keeps the file large"; i=$((i + 1)); done > "$1"
+}
+failing() { ( ulimit -f 1; trap '' XFSZ; "$@" ); }
+oc="$bigdir/odi.conf"
+fill "$oc" 200
+echo "HOST_SERDES=2500basex" >> "$oc"
+before=$(cat "$oc")
+t "a set on a full partition fails" "1" "$(ODI_CONF="$oc" failing sh $F set SYSLOG_SERVER 10.0.0.9 >/dev/null 2>&1; echo $?)"
+t "and odi.conf is exactly as it was" "$before" "$(cat "$oc")"
+t "and no temp file is left"          "0" "$(find "$bigdir" -name '*.tmp.*' | wc -l | tr -d ' ')"
+t "the error message names the file"  "1" "$(ODI_CONF="$oc" failing sh $F set SYSLOG_SERVER 10.0.0.9 2>&1 >/dev/null | grep -c 'left alone')"
+
+# A short file whose writer reported success: a grep that stops half way and
+# exits 0, as BusyBox 1.36 did under /dev/full. The status says nothing here;
+# only the check of the new file can.
+REAL_GREP=$(command -v grep); REAL_SED=$(command -v sed); export REAL_GREP REAL_SED
+mkdir -p "$T/shortbin"
+cat > "$T/shortbin/grep" <<'SH'
+#!/bin/sh
+# Real grep, but the first call (the write) keeps only the first line.
+if [ ! -e "$SHORT_ONCE" ]; then
+	: > "$SHORT_ONCE"
+	"$REAL_GREP" "$@" | "$REAL_SED" 1q
+	exit 0
+fi
+exec "$REAL_GREP" "$@"
+SH
+chmod +x "$T/shortbin/grep"
+fill "$oc" 20
+echo "HOST_SERDES=2500basex" >> "$oc"
+before=$(cat "$oc")
+rm -f "$T/once"
+t "a short file with status 0 fails the set" "1" "$(SHORT_ONCE="$T/once" ODI_CONF="$oc" PATH="$T/shortbin:$PATH" sh $F set SYSLOG_SERVER 10.0.0.9 >/dev/null 2>&1; echo $?)"
+t "and odi.conf is exactly as it was (short file)" "$before" "$(cat "$oc")"
+t "and no temp file is left (short file)" "0" "$(find "$bigdir" -name '*.tmp.*' | wc -l | tr -d ' ')"
+t "a clear of an absent key still succeeds" "SYSLOG_SERVER=" "$(ODI_CONF="$oc" sh $F set SYSLOG_SERVER '')"
+t "and every other line is kept"      "$before" "$(cat "$oc")"
+t "the new line goes last"            "SYSLOG_SERVER=10.0.0.9" "$(ODI_CONF="$oc" sh $F set SYSLOG_SERVER 10.0.0.9 >/dev/null; tail -n 1 "$oc")"
+t "a set with no odi.conf yet creates it" "OMCI_VEIP=1" "$(rm -f "$bigdir/new.conf"; ODI_CONF="$bigdir/new.conf" sh $F set OMCI_VEIP 1; )"
+t "and the file holds that line only" "OMCI_VEIP=1" "$(cat "$bigdir/new.conf")"
+
+# The same for the XML store: a rewrite cut short must not replace a good file.
+cs="$bigdir/cs.xml"
+{ echo '<Config>'; i=0; while [ "$i" -lt 200 ]; do echo "  <Value Name=\"K$i\" Value=\"v$i\"/>"; i=$((i + 1)); done; echo '</Config>'; } > "$cs"
+before=$(cat "$cs")
+t "an XML set on a full partition fails" "1" "$(CS="$cs" failing sh $F set K7 changed >/dev/null 2>&1; echo $?)"
+t "and the XML file is exactly as it was" "$before" "$(cat "$cs")"
+t "and no temp file is left (xml)"    "0" "$(find "$bigdir" "$T/var" -name 'flash.*' -o -name '*.new.*' | wc -l | tr -d ' ')"
+mkdir -p "$T/shortsed"
+cat > "$T/shortsed/sed" <<'SH'
+#!/bin/sh
+# Only the rewrite of the store (its script names a Value), not the escaping.
+case "$*" in *'Value='*) [ -e "$SHORT_ONCE" ] || {
+	: > "$SHORT_ONCE"
+	"$REAL_SED" "$@" | "$REAL_SED" 3q
+	exit 0
+} ;; esac
+exec "$REAL_SED" "$@"
+SH
+chmod +x "$T/shortsed/sed"
+rm -f "$T/once"
+t "a short XML file with status 0 fails the set" "1" "$(SHORT_ONCE="$T/once" CS="$cs" PATH="$T/shortsed:$PATH" sh $F set K7 changed >/dev/null 2>&1; echo $?)"
+t "and the XML file is exactly as it was (short file)" "$before" "$(cat "$cs")"
+t "a good XML set on the same file works" "K7=changed" "$(CS="$cs" sh $F set K7 changed)"
+
+# Two sets at once. The shim grep sleeps before it reads, so without a lock
+# every set reads the file before any of them has written it and all but one
+# change is lost. With the lock they run one after the other.
+mkdir -p "$T/slowbin"
+cat > "$T/slowbin/grep" <<'SH'
+#!/bin/sh
+sleep 0.3
+exec "$REAL_GREP" "$@"
+SH
+chmod +x "$T/slowbin/grep"
+oc="$bigdir/race.conf"
+: > "$oc"
+for k in SYSLOG_SERVER NTP_SERVER OMCI_VEIP HOST_SERDES; do
+	ODI_CONF="$oc" LOCK_S=30 PATH="$T/slowbin:$PATH" sh $F set "$k" "v-$k" >/dev/null 2>&1 &
+done
+wait
+t "four concurrent sets are all kept" "4" "$(grep -c '^[A-Z_]*=v-' "$oc")"
+t "and each key once"                 "4" "$(sort -u "$oc" | wc -l | tr -d ' ')"
+
+# The wait is bounded: a lock that is held makes a set give up, with the
+# file as it was.
+before=$(cat "$oc")
+t "a held lock makes a set fail after LOCK_S" "1" "$( (
+	exec 9>>"$T/var/flash-writer.lock"; flock -n 9 || exit 2
+	ODI_CONF="$oc" LOCK_S=1 sh $F set NTP_SERVER other >/dev/null 2>&1; echo $? ) )"
+t "and odi.conf is as it was"         "$before" "$(cat "$oc")"
+t "the lock is free again once the holder ended" "NTP_SERVER=other" "$(ODI_CONF="$oc" sh $F set NTP_SERVER other)"
 
 echo
 echo "$pass passed, $fail failed"

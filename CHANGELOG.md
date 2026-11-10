@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- `/etc/scripts/flash set` no longer installs a truncated `odi.conf` or
+  XML store when a write fails, for example on a full config partition.
+  The grep and printf that build the new `odi.conf` are checked on their
+  own, and every rewrite (`odi.conf`, the XML store, `default cs`) is
+  checked byte for byte against the same rewrite run again before it
+  replaces the file, so a short file is refused even when the tool that
+  wrote it reported success; the old file is left as it was and the set
+  fails with a message. Two `flash set` (or a set and a `default cs`) at
+  once no longer lose one change: writers take an flock on a lock file,
+  the same mechanism as the firmware writer lock, waiting at most 5
+  seconds before failing with "busy". Refs #326.
+
 - Tests: two host tests no longer fail now and then under load. In
   `count_proof_test.sh` the stub `diag` rewrote its owner file in place, so
   a reader that opened it mid-write took the holder for dead and dropped
