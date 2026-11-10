@@ -40,6 +40,13 @@ ck "inject_wait on a dead daemon (empty log) fails" \
 	"$(run true 'inject_wait "$log" 00014a0a >/dev/null; echo $fail')" 1
 ck "inject_wait fails at once when the frame cannot be sent" \
 	"$(run false 'inject_wait "$log" 00014a0a; echo $fail')" 1
+# A daemon that answers the frame and is gone before the omcli round trip
+# that closes inject_wait: the stub answers --inject and refuses help.
+printf '#!/bin/sh\n[ "$2" = help ] && exit 1\necho "-> 0001" >> "%s"\n' "$T/log" > "$T/half"
+chmod +x "$T/half"
+: > "$T/log"
+ck "inject_wait fails when omcid answers the frame and then not omcli" \
+	"$(run "$T/half" 'inject_wait "$log" 00014a0a >/dev/null; echo $fail')" 1
 ck "settled on a dead daemon fails" \
 	"$(run true 'settled "$log" >/dev/null; echo $fail')" 2
 ck "omcid_up on a daemon that never serves fails" \

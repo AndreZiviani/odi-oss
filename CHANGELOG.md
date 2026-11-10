@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Tests: the OMCI suites could check a line omcid had not logged yet.
+  `inject_wait` returned as soon as the answer to a frame was in the log,
+  but omcid answers first and then applies the change and logs what it
+  did (`-> created`, the rate limiter slots, a refused 802.1p mapper), so
+  a check right after it could run ahead of those lines; `qemu-test.sh`
+  failed "the row is stored" that way. Injecting Creates and checking at
+  once missed the line 9 times in 200 on a loaded machine. `inject_wait`
+  now also makes an `omcli help` round trip after the answer: omcid serves
+  omcli only between two frames, so the reply means the frame is done
+  (0 misses in 200). It costs about 13 ms per frame. `qemu-test.sh`, 16
+  runs side by side: 3 failures in 128 runs before, none in 128 after.
+
 - Tests: `make test-qemu` could fail with "dropbear did not print
   /etc/motd at an interactive login" now and then. The check typed `exit`
   into the login shell and closed its input at once; dropbear closes the
