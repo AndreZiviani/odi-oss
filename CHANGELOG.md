@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- `VLAN_EAPOL_UNTAGGED` follow-ups from a review. omcid now reads the key
+  with the VLAN keys and holds it, so an edit of `odi.conf` takes effect on
+  `apply.sh omci` only: before, a rebuild the OLT triggered applied the file
+  as it stood, and the reload that followed (or the retry after a failed
+  re-registration) could report no change while the switch kept rules the key
+  no longer asked for. When the OLT gives the manual add-tag rule to more than
+  one GEM port, the EAPOL rules now go once, on the GEM port that carries the
+  untagged frames up (the last one installed), instead of on the first. With
+  `VLAN_MANU_TAG_VID` 0 the VID 0 rule is no longer built, so the service's
+  frames of other priorities are not passed with their tag. A downstream
+  EtherType row with no room is now logged as such, not as a full table.
+  `docs/SETTINGS.md` now says that the downstream rules match frames of every
+  GEM port, and what would happen if the switch ignored the EtherType
+  downstream. With the key off the rules are byte for byte what they were.
+  Host tests: `src/omci/reload-test.sh`, `src/omci/vlan-test.sh`,
+  `test/odi_switch_bdgconn_vlan_test.c`. Refs #338, #301.
 - New odi-only key `VLAN_EAPOL_UNTAGGED` (`/etc/config/odi.conf`, off by
   default, live with `apply.sh omci`): with the manual tag on ("stick tags"),
   802.1X EAPOL frames (EtherType 0x888e) cross the stick untagged in both

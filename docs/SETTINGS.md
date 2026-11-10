@@ -365,7 +365,7 @@ expect those frames untagged or with VLAN 0, while the internet service is on
 a VLAN. A router with one untagged WAN interface sends everything untagged,
 and "stick tags" would put the service VLAN on the EAPOL frames too. With
 `VLAN_EAPOL_UNTAGGED=1` and the manual tag on, three rules go beside the
-manual add-tag rule, on the same GEM port:
+manual add-tag rule, on its GEM port:
 
 | `omcli bridge` rule | frames | what happens |
 |---|---|---|
@@ -387,6 +387,11 @@ Setup (the key takes effect without a reboot):
 /etc/scripts/apply.sh omci
 ```
 
+omcid reads the key with the VLAN keys and holds it, so an edit of
+`odi.conf` changes nothing until `apply.sh omci`, even when the OLT makes
+omcid rebuild its rules in between; the reload then names the key
+(`keys=VLAN_EAPOL_UNTAGGED`) and rebuilds.
+
 On the router: one WAN interface, untagged (the stick adds the service VLAN),
 with the supplicant listening on that same interface, untagged and for VLAN 0
 (the stick delivers the OLT's EAPOL as it arrives, which on some lines is
@@ -402,12 +407,34 @@ Limits, and what is not known:
   that authenticates.
 - Upstream, the EtherType match is the one measured by another open
   implementation. Downstream (`eapol-down`) uses the same row with the
-  direction bit set, which nobody has run on a stick; if it does not match,
-  the frame falls to the rows that follow (dropped, as without the key).
+  direction bit set. The same implementation measured a downstream row of
+  that kind on its own driver (untagged frames of one EtherType took the row,
+  those of another did not; `docs/SWITCH.md`, the EtherType slot), but this
+  image's row has not been run on a stick. If the switch did not compare the
+  EtherType downstream here, it would go one of two ways, and nothing on the
+  host tells which: the row matches nothing, and EAPOL from the OLT falls to
+  the rows that follow (dropped, as without the key); or the row ignores the
+  EtherType, and `eapol-down` sends the router **every untagged frame** the
+  OLT sends, of any EtherType and on any GEM port, none of which a rule omcid
+  builds passes with the key off.
+- A downstream row cannot name the GEM port a frame came on (`docs/SWITCH.md`,
+  "a row cannot be told apart by GEM port"). So `eapol-down` takes untagged
+  EAPOL from every GEM port of the line, and `eapol-down-vid0` every VID 0
+  frame from every GEM port, the multicast one included, apart from what a
+  row ahead of it takes.
 - `eapol-down-vid0` names no EtherType, because the classifier is not known to
   compare it behind a tag: it passes every priority-tagged frame with VID 0
   that the OLT sends, not only EAPOL. On a line with multicast under the manual
   tag, VID 0 priority 0 is the multicast strip row (it goes first).
+- With `VLAN_MANU_TAG_VID` 0 there is no `eapol-down-vid0`: the add-tag rule's
+  own downstream half takes the VID 0 frames of `VLAN_MANU_TAG_PRI` and strips
+  the tag (EAPOL included), and a VID 0 rule would also pass the service's
+  frames of every other priority with their tag, which no rule omcid builds
+  passes with the key off. VID 0 EAPOL of another priority is then not delivered.
+- When the OLT gives the add-tag rule to more than one GEM port (several
+  GEM-side bridge ports with no VLAN filter, or with a forward operation that
+  bridges untagged frames), the untagged frames go up the GEM port whose rule
+  went in last, and the three EAPOL rules go on that GEM port, once.
 - The key needs the manual tag (`VLAN_CFG_TYPE` 1, `VLAN_MANU_MODE` 1, a VID
   and a priority). Without it, and with a tag from the OLT's own table
   (type other than 1), it has no effect, and omcid logs

@@ -937,17 +937,18 @@ check "ISP2 00 00 00 under OMCI_CUSTOM_MCAST=1: the VID 0 row strips" \
 
 # ---- VLAN_EAPOL_UNTAGGED (odi.conf) -------------------------------------------
 # With the manual tag on and the key 1, 802.1X EAPOL crosses untagged: three
-# rules beside the manual add-tag rule, on its GEM port, and the add-tag rule
-# itself moves to the rest of the untagged frames. docs/SETTINGS.md, "VLAN_EAPOL_UNTAGGED".
+# rules beside the manual add-tag rule, on its GEM port; the add-tag rule
+# itself is unchanged. docs/SETTINGS.md, "VLAN_EAPOL_UNTAGGED".
 EAPOL3="eapol-down vid -1 pri -1
 eapol-down-vid0 vid -1 pri -1
 eapol-up vid -1 pri -1"
 eapol_conf() { printf 'VLAN_EAPOL_UNTAGGED=%s\n' "$1" > /var/config/odi.conf; }
-# eapol_rules <log>: the rules of the last rebuild with the EAPOL ones named
-# after their port, "47/<port> gem <n> rule <kind> ...", sorted.
-eapol_run() {   # eapol_run <isp> <manual mode> <name>
-	sed "s/\"VLAN_MANU_MODE\" Value=\"1\"/\"VLAN_MANU_MODE\" Value=\"$2\"/" \
-		"$FIX/omci-store-$1.xml" > /var/config/lastgood.xml
+# eapol_run <isp> <manual mode> <name> [sed expression]: the ISP session with
+# its store, VLAN_MANU_MODE set to <manual mode> and the expression applied,
+# logged to /tmp/omcid-171-<name>.log.
+eapol_run() {
+	sed -e "s/\"VLAN_MANU_MODE\" Value=\"1\"/\"VLAN_MANU_MODE\" Value=\"$2\"/" \
+	    -e "${4:-s/^//}" "$FIX/omci-store-$1.xml" > /var/config/lastgood.xml
 	grep -v '^#' "$FIX/omci-session-$1.txt" > /tmp/s-eapol-$1.txt
 	run171 "$3" /tmp/s-eapol-$1.txt
 }
@@ -1042,6 +1043,52 @@ session "$ADD100" "$DEF1" "$DEF2" > /tmp/s171-eapol-olt.txt
 run171 eapol-olt /tmp/s171-eapol-olt.txt
 check "key on, VLAN from the OLT (type 0): no EAPOL rule" \
 	"$(rebuild /tmp/omcid-171-eapol-olt.log 0 | grep -c eapol)" "0"
+rm -f /var/config/odi.conf
+
+# F. Two GEM ports with the add-tag rule: ISP1 with the FwdOp of port 0003
+# built as 0x03 (RTK_DEVINFO_SPECVER), which bridges untagged frames, so that
+# port gets the add-tag rule too, after 0007 (whose list names the manual
+# VID). The later add-tag rule takes the untagged frames up (its bottom row is
+# lower, test/odi_switch_bdgconn_vlan_test.c), and the EAPOL rules go on its
+# GEM port, once.
+SPEC03='/"VLAN_MANU_TAG_PRI"/a\
+		<Value Name="RTK_DEVINFO_SPECVER" Value="0x0003:0x03"/>'
+eapol_conf 1
+eapol_run isp1 1 eapol-two "$SPEC03"
+check "two add-tag ports: the EAPOL rules once, on the port of the later one" \
+	"$(rebuild /tmp/omcid-171-eapol-two.log 0)" "$(printf '%s\n' "$EAPOL3" | sed 's|^|47/0003 gem 1434 rule |')
+47/0003 gem 1434 rule manual-add vid 11 pri 0
+47/0003 gem 1434 rule vid-filter vid 10 pri -1
+47/0004 gem 1690 rule vid-filter vid 12 pri 5
+47/0005 gem 1818 rule vid-filter vid 13 pri 4
+47/0006 gem 1946 rule vid-filter vid 14 pri -1
+47/0007 gem 1562 rule manual-add vid 11 pri 0
+47/ffff gem 4095 rule manual-remove vid 11 pri 0"
+# The order they went in: the add-tag rules, 0007 first, and the EAPOL rules
+# after every unicast rule.
+check "and the order: add-tag 0007, add-tag 0003, then the EAPOL rules" \
+	"$(awk '/\] 47\/[0-9a-f]+ gem [0-9]+ rule (manual-add|eapol)/ { sub(/.*\] /, ""); cur = cur $1 " " $5 "\n" }
+	       /bridge connections rebuilt/ { last = cur; cur = "" }
+	       END { printf "%s", last }' /tmp/omcid-171-eapol-two.log)" "47/0007 manual-add
+47/0003 manual-add
+47/0003 eapol-up
+47/0003 eapol-down
+47/0003 eapol-down-vid0"
+rm -f /var/config/odi.conf
+eapol_run isp1 1 eapol-two-off "$SPEC03"
+check "two add-tag ports, key off: no EAPOL rule" \
+	"$(rebuild /tmp/omcid-171-eapol-two-off.log 0 | grep -c eapol)" "0"
+
+# G. The manual VID 0: the downstream half of the add-tag rule takes the VID 0
+# frames of the tag priority, so no VID 0 rule is made beside it (it would
+# pass the other priorities with their tag).
+VID0='s/"VLAN_MANU_TAG_VID" Value="10"/"VLAN_MANU_TAG_VID" Value="0"/'
+eapol_conf 1
+eapol_run isp2 1 eapol-vid0 "$VID0"
+check "manual VID 0, key on: eapol-up and eapol-down, no VID 0 rule" \
+	"$(rebuild /tmp/omcid-171-eapol-vid0.log 0 | grep 'gem 657 ')" "47/1002 gem 657 rule eapol-down vid -1 pri -1
+47/1002 gem 657 rule eapol-up vid -1 pri -1
+47/1002 gem 657 rule manual-add vid 0 pri 0"
 rm -f /var/config/odi.conf
 
 # E. `omcli vlan` names the setting only when it is on.

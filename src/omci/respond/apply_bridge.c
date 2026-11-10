@@ -610,9 +610,8 @@ static int olt_tag(int *pri, const char **why_out)
 }
 
 /* The rules of one GEM-side bridge port: at most one per filter entry, one
- * for untagged frames, one for tagged ones, and the three EAPOL rules beside
- * the manual tag (bp_eapol()). */
-#define BP_RULES_MAX 18
+ * for untagged frames, one for tagged ones. */
+#define BP_RULES_MAX 14
 
 /* Whether the manual-mode multicast row strips the tag of priority-tagged
  * frames, set by mcast_tag_plan() from the profile before the rules are made. */
@@ -639,6 +638,8 @@ struct ev_ctl {
  * bridge port on the host lane gets for an IP host (lane_rule_ok()). */
 static const char KIND_VID_FILTER[] = "vid-filter";
 static const char KIND_TCI_FILTER[] = "tci-filter";
+/* The manual add-tag rule, which the EAPOL rules follow (eapol_at). */
+static const char KIND_MANUAL_ADD[] = "manual-add";
 
 static int bp_put(struct bp_rule *rules, int n, const char *kind, int vid, int pri)
 {
@@ -658,6 +659,24 @@ static int bp_put(struct bp_rule *rules, int n, const char *kind, int vid, int p
  * cross untagged while the stick adds the manual tag to the rest. Set by
  * bdgconn_rebuild(); 0 whenever there is no manual tag. */
 static int eapol_on;
+
+/* The GEM port the EAPOL rules go on: the one whose manual add-tag rule
+ * takes the untagged frames up. That rule names no VID, so its upstream row
+ * is in the bottom region, which fills from row 254 down, and the lowest
+ * matching row wins: when two GEM ports both get the rule, the one installed
+ * last takes the frames. An EtherType row fills the second layout from its
+ * first row up, where the one installed first would win. So the EAPOL rules
+ * are installed once, after every unicast port, on the port recorded here by
+ * the last add-tag rule whose upstream row went in (eapol_install()). */
+static struct {
+	int set;
+	uint16_t bp;             /* the GEM-side bridge port, for the log */
+	int bridge;              /* its bridge: the ingresses the rules are for */
+	int use_ev;              /* as for the other rules of the port */
+	uint16_t port;           /* the GEM port */
+	uint32_t dir;
+	unsigned pmask, unmarked;
+} eapol_at;
 
 #define EAPOL_ETHERTYPE 0x888e
 
@@ -712,34 +731,34 @@ static void gen_eapol_rule(struct omci_vlan_oper *vr, int which)
 		evtocd_oper_ethertype(vr, EAPOL_ETHERTYPE);
 }
 
-/* The manual add-tag rule was just built at rules[at]. When
- * VLAN_EAPOL_UNTAGGED is on, three rules go beside it, all on the same GEM
- * port. The add-tag rule is left as it is: it names no VID, so the switch
- * puts its upstream row in the bottom region, behind every row that names an
- * EtherType (docs/SWITCH.md, "Extended VLAN rules"), and the EAPOL rule wins
- * for the frames it names:
+/* The rules VLAN_EAPOL_UNTAGGED puts beside the manual add-tag rule, on the
+ * GEM port of eapol_at, into rules[] (at most 3). The add-tag rule is left as
+ * it is: it names no VID, so the switch puts its upstream row in the bottom
+ * region, behind every row that names an EtherType (docs/SWITCH.md,
+ * "Extended VLAN rules"), and the EAPOL rule wins for the frames it names:
  *  - eapol-up: untagged EAPOL from the router goes up as it is,
  *  - eapol-down: untagged EAPOL from the OLT reaches the router as it is,
  *  - eapol-down-vid0: so does a priority-tagged one (VID 0), tag kept.
- * The manual rule itself keeps its tag and its downstream half. */
-static int bp_eapol(struct bp_rule *rules, int n)
+ * The manual rule itself keeps its tag and its downstream half. With the
+ * manual VID 0 that downstream half already takes the VID 0 frames of the
+ * tag priority and strips them; a VID 0 rule would also pass the frames of
+ * every other priority with their tag, which no rule omcid builds passes
+ * with the key off, so it is not made. */
+static int bp_eapol(struct bp_rule *rules, int mvid)
 {
 	static const struct { const char *kind; int which; uint32_t dir; } r[] = {
 		{ "eapol-up", EAPOL_UP, OMCI_DIR_US },
 		{ "eapol-down", EAPOL_DOWN, OMCI_DIR_DS },
 		{ "eapol-down-vid0", EAPOL_DOWN_VID0, OMCI_DIR_DS },
 	};
+	int n = 0;
 
-	if (!eapol_on)
-		return n;
 	for (unsigned i = 0; i < sizeof r / sizeof r[0]; i++) {
-		int had = n;
-
+		if (r[i].which == EAPOL_DOWN_VID0 && mvid == 0)
+			continue;
 		n = bp_put(rules, n, r[i].kind, -1, -1);
-		if (n > had) {
-			gen_eapol_rule(&rules[had].vr, r[i].which);
-			rules[had].gen_dir = r[i].dir;
-		}
+		gen_eapol_rule(&rules[n - 1].vr, r[i].which);
+		rules[n - 1].gen_dir = r[i].dir;
 	}
 	return n;
 }
@@ -792,9 +811,8 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	 * The manual tag keeps the stock stack's one rule. */
 	if (!vt || !nent) {
 		if (mvid >= 0) {
-			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
+			n = bp_put(rules, n, KIND_MANUAL_ADD, mvid, tag_pri);
 			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0);
-			n = bp_eapol(rules, n);
 			if (tag_from_olt && olt_tagged_pass) {
 				n = bp_put(rules, n, "tagged", -1, -1);
 				gen_tagged_rule(&rules[n - 1].vr);
@@ -843,10 +861,9 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 			/* The service VID is the untagged handoff. OEM still has
 			 * a class-84 row for it, but builds the manual add-tag
 			 * rule. */
-			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
+			n = bp_put(rules, n, KIND_MANUAL_ADD, mvid, tag_pri);
 			if (n > had) {
 				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
-				n = bp_eapol(rules, n);
 				*manual = 1;
 			}
 			had = n;
@@ -883,11 +900,9 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		int had = n;
 
 		if (mvid >= 0) {
-			n = bp_put(rules, n, "manual-add", mvid, tag_pri);
-			if (n > had) {
+			n = bp_put(rules, n, KIND_MANUAL_ADD, mvid, tag_pri);
+			if (n > had)
 				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
-				n = bp_eapol(rules, n);
-			}
 		} else {
 			n = bp_put(rules, n, "untagged", -1, -1);
 			if (n > had)
@@ -1621,6 +1636,39 @@ static void mcast_tag_plan(void)
 			mcv.skip[i].why);
 }
 
+/* The EAPOL rules of VLAN_EAPOL_UNTAGGED, once, on the GEM port eapol_at
+ * names, for every ingress of its bridge, as for the other rules of that port.
+ * Returns how many descriptors were installed. */
+static int eapol_install(const int *ingress, const int *ingress_bridge,
+			 const int *ingress_iphost, int ning, int mvid)
+{
+	struct bp_rule rules[3];
+	int n, added = 0;
+
+	if (!eapol_on || !eapol_at.set)
+		return 0;
+	n = bp_eapol(rules, mvid);
+	for (int k = 0; k < n; k++) {
+		out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
+			apply_hw ? "hw" : "dry", (long)eapol_at.bp, (long)eapol_at.port,
+			rules[k].kind, (long)rules[k].vid, (long)rules[k].pri);
+		mcv_mark(uc_vids, &rules[k].vr);
+		for (int g = 0; g < ning; g++) {
+			if (ingress_bridge[g] != eapol_at.bridge)
+				continue;
+			if (eapol_at.use_ev && ev_tab[g].active)
+				continue;
+			if (ingress_iphost[g] && !lane_rule_ok(rules[k].kind)) {
+				lane_refused(eapol_at.bp, eapol_at.port, rules[k].kind, ingress[g]);
+				continue;
+			}
+			added += bp_install(ingress[g], eapol_at.port, eapol_at.dir,
+					    &rules[k], eapol_at.pmask, eapol_at.unmarked);
+		}
+	}
+	return added;
+}
+
 void bdgconn_rebuild(void)
 {
 	const struct omci_class *c47 = find_class(OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA);
@@ -1680,6 +1728,7 @@ void bdgconn_rebuild(void)
 	 * stock stack gates it (cfgstore.c); -1 builds no manual tag. */
 	mvid = cfg_manual_vid();
 	eapol_on = eapol_note(mvid >= 0);
+	eapol_at.set = 0;
 	tag_pri = vlanCfg.pri;
 	tag_from_olt = 0;
 	olt_tagged_pass = 0;
@@ -1709,8 +1758,13 @@ void bdgconn_rebuild(void)
 	 * untagged service first, the other unicast services in reverse MIB order,
 	 * and the broad downstream multicast rule last. */
 	for (int pass = 0; pass < 3; pass++) {
-		if (pass == 2)
+		if (pass == 2) {
+			/* After every unicast port, before the multicast plan
+			 * reads the unicast VIDs. */
+			added += eapol_install(ingress, ingress_bridge, ingress_iphost,
+					       ning, mvid);
 			mcast_tag_plan();
+		}
 		for (int i = 0; i < MIB_ROWS; i++) {
 			int row = pass == 1 ? MIB_ROWS - 1 - i : i;
 			struct mib_row *r = mib_row_at(row), *iw, *ctp, *mapper = 0;
@@ -1873,6 +1927,8 @@ void bdgconn_rebuild(void)
 				}
 			}
 			for (int k = 0; k < nrules && (!use_ev || plain); k++) {
+			int got = 0;
+
 			out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
 				apply_hw ? "hw" : "dry", (long)r->inst, (long)port,
 				rules[k].kind, (long)rules[k].vid, (long)rules[k].pri);
@@ -1890,8 +1946,24 @@ void bdgconn_rebuild(void)
 					lane_refused(r->inst, port, rules[k].kind, ingress[g]);
 					continue;
 				}
-				added += bp_install(ingress[g], (uint16_t)port, dir,
-						    &rules[k], split_pmask, unmarked);
+				got += bp_install(ingress[g], (uint16_t)port, dir,
+						  &rules[k], split_pmask, unmarked);
+			}
+			added += got;
+			/* The add-tag rule whose upstream row went in last takes
+			 * the untagged frames up; the EAPOL rules follow it. The
+			 * test is the one bp_install() makes for them. */
+			if (rules[k].kind == KIND_MANUAL_ADD && got && (dir & OMCI_DIR_US) &&
+			    (split_pmask == 0xffu ||
+			     (tag_pri < 8 && (split_pmask & (1u << tag_pri))))) {
+				eapol_at.set = 1;
+				eapol_at.bp = r->inst;
+				eapol_at.bridge = (int)row_u32(r, c47, 1);
+				eapol_at.use_ev = use_ev;
+				eapol_at.port = (uint16_t)port;
+				eapol_at.dir = dir;
+				eapol_at.pmask = split_pmask;
+				eapol_at.unmarked = unmarked;
 			}
 			}                        /* rules of this target */
 			for (int g = 0; use_ev && g < ning; g++) {

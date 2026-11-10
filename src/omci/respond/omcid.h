@@ -692,6 +692,7 @@ struct onu_vlan_cfg {
 	int pri;                             /* VLAN_MANU_TAG_PRI, 0 when absent */
 	uint8_t manual;                      /* type 1, mode 1, vid and pri present */
 	uint8_t loaded;
+	uint8_t eapol;                       /* VLAN_EAPOL_UNTAGGED=1 in odi.conf */
 	/* RTK_DEVINFO_SPECVER, the stock FwdOp override (cfgstore.c): class 84
 	 * instance and the code to build it with. nfwdop -1: malformed, off. */
 	int nfwdop;
@@ -797,7 +798,6 @@ struct cfg_snap {
 	int pots_ports;
 	int pots_slot_key;
 	int pots_slot;
-	int eapol_untagged;       /* VLAN_EAPOL_UNTAGGED, odi.conf */
 };
 /* Identity class: one bit per key the OLT reads. */
 #define CFGD_SN         (1u << 0)
@@ -893,8 +893,9 @@ void cfg_load_vlan(void);
 void cfg_load_vlan_from(const char *cs);
 int cfg_manual_vid(void);
 int cfg_olt_tagging(void);
-/* VLAN_EAPOL_UNTAGGED (odi.conf): 1 passes EAPOL untagged under the manual
- * tag. Whether it applies is up to the caller, which needs cfg_manual_vid() >= 0. */
+/* VLAN_EAPOL_UNTAGGED (odi.conf), as loaded with the VLAN keys: 1 passes EAPOL
+ * untagged under the manual tag. Whether it applies is up to the caller, which
+ * needs cfg_manual_vid() >= 0. */
 int cfg_eapol_untagged(void);
 uint32_t cfg_fwdop(uint16_t inst, uint32_t olt_code);
 void cfg_load_report(void);

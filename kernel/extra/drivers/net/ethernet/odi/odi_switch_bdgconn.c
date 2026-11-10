@@ -1070,7 +1070,10 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 		if (ds.present)
 			sl->ds_row = cf_insert(&ds);
 		if ((us.present && sl->us_row < 0) || (ds.present && sl->ds_row < 0)) {
-			if (us.present && us.et)
+			/* Named for the leg that found no row: an EtherType
+			 * row has only the second layout to go to. */
+			if ((us.present && us.et && sl->us_row < 0) ||
+			    (ds.present && ds.et && sl->ds_row < 0))
 				ODI_SW_CMD_LOG("bdgconn: no free row of the second layout for an EtherType rule\n");
 			else
 				ODI_SW_CMD_LOG("bdgconn: classification table full\n");

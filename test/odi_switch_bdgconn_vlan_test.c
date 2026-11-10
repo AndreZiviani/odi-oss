@@ -234,6 +234,77 @@ int main(void)
 		}
 	}
 
+	/* Two GEM ports that both get the add-tag rule, each with an EAPOL
+	 * row, in the order they go in: add-tag A, EAPOL A, add-tag B, EAPOL
+	 * B. The bottom region fills down, so B, the later add-tag rule, has
+	 * the lower row and takes the untagged frames; the second layout
+	 * fills up, so A, the earlier EAPOL row, takes the EAPOL frames. This
+	 * is why omcid installs the EAPOL rules once, after every port, on the
+	 * GEM port of the add-tag rule that went in last (apply_bridge.c,
+	 * eapol_at). */
+	puts("two add-tag rules, each with an EAPOL row:");
+	{
+		struct omci_vlan_oper manual, et;
+		struct omci_bdgconn b;
+		const struct odi_sw_bdgconn_slot *ma, *mb, *ea, *eb;
+
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x1009U;
+		bdg_gen_manual(&manual, 362, 0, 0);
+		bdg_gen_untagged(&et);
+		et.rule_gen = OMCI_VLAN_OPER_EXTVLAN_GEN;
+		et.filter.ethertype = OMCI_ETHTYPE_LITERAL | 0x888e;
+		bdg_conn(&b, 20, OMCI_DIR_BI, 5, 4, 5, &manual);
+		ok(odi_switch_cmd(51, &b, sizeof b) == 0, "add-tag A (stream 4): accepted");
+		bdg_conn(&b, 21, OMCI_DIR_US, 5, 4, 5, &et);
+		ok(odi_switch_cmd(51, &b, sizeof b) == 0, "EAPOL A (stream 4): accepted");
+		bdg_conn(&b, 22, OMCI_DIR_BI, 5, 6, 7, &manual);
+		ok(odi_switch_cmd(51, &b, sizeof b) == 0, "add-tag B (stream 6): accepted");
+		bdg_conn(&b, 23, OMCI_DIR_US, 5, 6, 7, &et);
+		ok(odi_switch_cmd(51, &b, sizeof b) == 0, "EAPOL B (stream 6): accepted");
+		ma = slot_of(20);
+		ea = slot_of(21);
+		mb = slot_of(22);
+		eb = slot_of(23);
+		ok(ma && mb && ma->us_row == 254 && mb->us_row == 253,
+		   "the later add-tag rule has the lower bottom row (253 under 254)");
+		ok(ea && eb && ea->us_row >= 128 && eb->us_row == ea->us_row + 1,
+		   "the earlier EAPOL row has the lower second-layout row");
+	}
+
+	/* A downstream EtherType row with the second layout full: refused, and
+	 * the log names the second layout, not the whole table (the script
+	 * reads the line printed after the marker). */
+	puts("a downstream EtherType row, the second layout full:");
+	{
+		struct omci_vlan_oper et;
+		struct omci_bdgconn b;
+		uint32_t row, from;
+		int all = 1, rc;
+
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+		odi_mock.regs[odi_mock_slot(ODI_SW_CLASSIFY_SETUP_OFF)] = 0x1009U;
+		bdg_gen_untagged(&et);
+		et.rule_gen = OMCI_VLAN_OPER_EXTVLAN_GEN;
+		et.filter.ethertype = OMCI_ETHTYPE_LITERAL | 0x888e;
+		from = odi_sw_cf_layout1_row();
+		for (row = from; row < ODI_SW_CF_BOTTOM + 1U; row++) {
+			bdg_conn(&b, (int)(row - from), OMCI_DIR_US, 5, 4, 5, &et);
+			if (odi_switch_cmd(51, &b, sizeof b) != 0)
+				all = 0;
+		}
+		ok(all && from == 128, "upstream EtherType rows fill rows 128 to 254");
+		bdg_conn(&b, 127, OMCI_DIR_DS, 5, 4, 5, &et);
+		fflush(stdout);
+		puts("-- log of the refused row:");
+		fflush(stdout);
+		rc = odi_switch_cmd(51, &b, sizeof b);
+		fflush(stdout);
+		ok(rc == ODI_SW_ENOSPC && !slot_of(127), "the downstream one: refused, no room");
+	}
+
 	if (failures) {
 		printf("odi_switch_bdgconn_vlan_test: %d failure(s)\n", failures);
 		return 1;
