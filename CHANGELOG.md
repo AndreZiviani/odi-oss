@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- OMCI: the MIB data sync counter now goes from 255 to 1 instead of to 0.
+  G.988 keeps 0 for a MIB just instantiated or reset, so after 256
+  successful Create, Set or Delete commands since the last MIB reset the
+  ONU reported 0 where the OLT expected 1, which an OLT audit may answer
+  with a MIB upload or a reset. One helper now advances the counter at
+  all four places. Refs #325.
+
 - Docs: the Luleey LL-XS2510 is listed as reported working, on one user
   report, with `HOST_SERDES=2500basex` set before the first boot. The
   README now records the first hardware runs of the host SerDes mode

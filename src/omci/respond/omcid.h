@@ -253,6 +253,7 @@ void serial_forget(void);
 int serial_refresh(int log);
 extern uint8_t devid[40];
 extern uint8_t mib_data_sync;
+void mib_data_sync_advance(void);
 const struct omci_class *find_class(uint16_t id);
 uint16_t attr_width(const struct omci_class *c, unsigned k);
 extern struct mib_tblent tblpool[MIB_TBL_NODES];

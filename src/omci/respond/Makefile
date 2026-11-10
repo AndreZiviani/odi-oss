@@ -104,6 +104,10 @@ $(BUILD)/downstream_ownership_test: ../test/downstream_ownership_test.c $(filter
 $(BUILD)/service_ownership_test: ../test/service_ownership_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
 
+# The MIB data sync counter across its wrap.
+$(BUILD)/mib_sync_test: ../test/mib_sync_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
+
 $(BUILD)/omci_mib.o: ../generated/omci_mib.c ../generated/omci_mib.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -148,11 +152,12 @@ size: cap
 	@$(RUN) sh -c 'ls -l $(BIN); $(CROSS)size $(BIN)'
 
 test: image
-	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/downstream_ownership_test $(BUILD)/service_ownership_test
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/downstream_ownership_test $(BUILD)/service_ownership_test $(BUILD)/mib_sync_test
 	@$(RUN) qemu-mips-static $(BUILD)/extvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/mcastvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/downstream_ownership_test
 	@$(RUN) qemu-mips-static $(BUILD)/service_ownership_test
+	@$(RUN) qemu-mips-static $(BUILD)/mib_sync_test
 
 clean:
 	rm -rf $(BUILD)
