@@ -12,6 +12,16 @@ listed here.
   the trial guard (a trial whose host link passed no frames went back to
   stock by itself). Refs #321.
 
+- GPON: the driver decodes the PON-ID message some OLTs send (G.984.3
+  Annex C), which it used to log once as unexpected.
+  `/proc/odi_gpon/status` has a `pon_id` line with the ODN class, whether
+  the launch power is the OLT's or a reach extender's, the launch power
+  (TOL, 0.1 dB steps above -30 dBm, so the path loss can be estimated
+  from the stick's receive power), the PON identifier the operator set
+  and when it came; `pon_id none` before one arrives and after a loss of
+  signal. The diagnostics bundle masks the identifier, there and in the
+  PLOAM ring, unless `--full`. Refs #321.
+
 - `/proc/odi_gpon/counters` now also has the downstream superframe count
   and FEC bit of the sample its totals come from, as `ctr_ds_superframe`
   and `ctr_fec_now ds`. A reader that works out a share of the downstream

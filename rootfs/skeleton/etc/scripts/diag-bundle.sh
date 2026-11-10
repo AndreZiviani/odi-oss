@@ -252,7 +252,10 @@ grab pon/odi_omci.txt /proc/odi_omci
 # Password (us 0x02) and Encryption_Key (us 0x05). Withheld unless --full,
 # for the serial number in them: Serial_Number_ONU (us 0x01), Acknowledge
 # (us 0x09, it echoes a downstream message), Serial_Number_Mask (ds 0x02),
-# Assign_ONU-ID (ds 0x03) and Disable_Serial_Number (ds 0x06, 0x81).
+# Assign_ONU-ID (ds 0x03) and Disable_Serial_Number (ds 0x06, 0x81). The
+# PON identifier of a PON-ID (ds 0x15, content bytes 2 to 8) names the OLT
+# port, so unless --full it is xx there and MASKED on the pon_id line of
+# status; the class and TOL stay.
 for f in status counters flows ploam; do
 	if [ -e "$GPON_PROC_DIR/$f" ]; then
 		timeout "$STEP_TIMEOUT_S" cat "$GPON_PROC_DIR/$f" > "$work/gpon-$f.raw" 2>&1
@@ -265,9 +268,14 @@ for f in status counters flows ploam; do
 				    (!full && (t == "us 0x01" || t == "us 0x09" || t == "ds 0x02" ||
 					       t == "ds 0x03" || t == "ds 0x06" || t == "ds 0x81"))) {
 					sub(/content .*/, "content (withheld)")
+				} else if (!full && t == "ds 0x15" && NF >= 17) {
+					for (i = 9; i <= 15; i++)
+						$i = "xx"
 				}
 			}
 			{ print }' "$work/gpon-$f.raw" > "$b/pon/odi_gpon-$f.txt"
+		elif [ "$f" = status ] && [ "$full" = 0 ]; then
+			sed 's/^\(pon_id .* id \)[0-9a-f]*/\1MASKED/' "$work/gpon-$f.raw" > "$b/pon/odi_gpon-$f.txt"
 		else
 			cp "$work/gpon-$f.raw" "$b/pon/odi_gpon-$f.txt"
 		fi
