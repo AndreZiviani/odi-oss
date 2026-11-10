@@ -653,7 +653,7 @@ int main(void)
 		{
 			struct omci_vlan_oper vr;
 			struct omci_bdgconn b;
-			struct evtocd_plan p;
+			struct evtocd_plan p, q;
 			int id;
 
 			build(e, 15, 4096, 0,  15, 4096, 0, 0,   0, 15, 4096, 0,  3, 300, 4);
@@ -663,11 +663,47 @@ int main(void)
 				evtocd_decode(e, &t);
 				(void)evtocd_plan(&t, 0x8100, 0x8100, &p);
 			}
-			evtocd_plan_oper(&p, &vr);
+			/* A plan that changes no tag, as omcid builds the EAPOL
+			 * rule of VLAN_EAPOL_UNTAGGED. */
+			memset(&q, 0, sizeof q);
+			q.s.f_vid = q.c.f_vid = -1;
+			q.s.f_pri = q.c.f_pri = -1;
+			q.s.vid = q.c.vid = -1;
+			q.s.pri = q.c.pri = -1;
+			q.out_vid = q.out_pri = -1;
+			evtocd_plan_oper(&q, &vr);
 			evtocd_oper_ethertype(&vr, 0x0800);
+			/* Downstream the value is compared on an untagged frame
+			 * as well (VLAN_EAPOL_UNTAGGED): the row sits in the
+			 * second layout, forwards to the UNI, changes no tag.
+			 * Not measured on a stick; the words are the upstream
+			 * ones with the direction bit. */
+			bdg_conn(&b, 95, OMCI_DIR_DS, 5, 4, 5, &vr);
+			ok(odi_switch_cmd(51, &b, sizeof b) == 0 && row_of(95, 1) != NULL,
+			   "an EtherType downstream, untagged frame: a row");
+			r = row_of(95, 1);
+			ok(r && r->rule_w0 == 0x0800 && r->mask_w0 == (~0x0800U & 0xffffU) &&
+			   row_index(95, 1) >= 128 && !r->tmpl,
+			   "in the second layout, template 0, the value in the ones plane");
+			ok(r && (r->rule_w1 & W1_DS) && !(r->rule_w1 & (W1_ST | W1_CT)) &&
+			   ((r->rule_w1 | r->mask_w1) & (W1_ST | W1_CT)) == (W1_ST | W1_CT),
+			   "downstream, no S-tag, no C-tag, both flags cared");
+			ok(r && r->act[1] == (DS_FWD_A1 | (ODI_SW_CF_CACT_TRANSPARENT << ODI_SW_CF_A1_CACT_SHIFT)) &&
+			   r->act[2] == (DS_FWD_A2 | ODI_SW_CF_CSACT_TRANSPARENT),
+			   "forward to the UNI, both tag actions transparent");
+			release(95);
+			evtocd_plan_oper(&q, &vr);
+			evtocd_oper_rest(&vr);
 			bdg_conn(&b, 95, OMCI_DIR_DS, 5, 4, 5, &vr);
 			ok(odi_switch_cmd(51, &b, sizeof b) != 0 && row_of(95, 1) == NULL,
-			   "an EtherType downstream: refused");
+			   "the rest of the untagged frames downstream: refused");
+			evtocd_plan_oper(&q, &vr);
+			evtocd_oper_ethertype(&vr, 0x0800);
+			vr.filter.inner_mode = OMCI_TAGF_TAGGED | OMCI_TAGF_VID;
+			vr.filter.inner.vid = 100;
+			bdg_conn(&b, 95, OMCI_DIR_DS, 5, 4, 5, &vr);
+			ok(odi_switch_cmd(51, &b, sizeof b) != 0 && row_of(95, 1) == NULL,
+			   "an EtherType on a tagged frame downstream: refused");
 			evtocd_plan_oper(&p, &vr);
 			vr.filter.ethertype = OMCI_ETHTYPE_IP;
 			bdg_conn(&b, 96, OMCI_DIR_US, 5, 4, 5, &vr);

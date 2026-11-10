@@ -912,6 +912,7 @@ read has measured.
 | filter or treatment TPID 0x9100, 0x9200 | refused | the second S-VLAN TPID register (0x0230c8) reads disabled; nothing says it can be used |
 | filter on the DEI bit, or an added tag with DEI 1 | refused | no DEI field in the classifier is known |
 | EtherType filter on untagged frames (IPoE 0x0800, PPPoE 0x8863 and 0x8864, ARP 0x0806, IPv6 0x86dd, EAPOL 0x888e) | done upstream: one row a value (PPPoE two) in the second layout, on template 0, no tag named; the way back is the inverse by VID. The untagged frames of every other EtherType (an entry with no EtherType, in a table that has some) are one row in the bottom region, after them | the measured EtherType slot, above |
+| EtherType filter on untagged frames, downstream (only the EAPOL rule of `VLAN_EAPOL_UNTAGGED`) | done: the same row in the second layout with the direction bit set, forwarded to the UNI, no tag change; the bottom-region REST rule stays upstream only. **Unproven**: nobody has run an EtherType row downstream on a stick | the upstream measurement, with the direction bit |
 | EtherType filter on tagged frames | refused | the EtherType behind a tag is not known |
 | VID copied from a tag whose VID the filter does not name (any-VID priority remap) | refused | whether C-tag action 1 with no VID source keeps the VID is not known |
 | priority copied between the two tags, or from the DSCP | refused unless the source is named in the filter, then done with its value | the source codes other than keep and assign are not known; DSCP needs a DSCP match |
@@ -924,6 +925,16 @@ read has measured.
 | DsMode 2, 3, 4 | done: the inverse on VID and priority, VID, or priority only | |
 | DsMode 5, 6, 7 | as 2, 3, 4, and logged that what they discard is forwarded | no drop action |
 | DsMode 8 | no downstream rule, logged | no drop action |
+
+`VLAN_EAPOL_UNTAGGED` (docs/SETTINGS.md) puts three such rules beside the
+manual add-tag rule: `eapol-up` (untagged, EtherType 0x888e, upstream, no tag
+change, on the service's stream), `eapol-down` (the same downstream, to the
+UNI) and `eapol-down-vid0` (a C-tag of VID 0, any priority, no EtherType,
+downstream, to the UNI, tag kept). The add-tag rule is the one it always was:
+its upstream row names no VID, so it sits in the bottom region, behind the
+EtherType row (`test/odi_switch_bdgconn_vlan_test.c` pins the order for both
+install orders). The downstream VID 0 row cares both tag flags, a C-tag and
+no S-tag; that a priority-tagged frame sets the C-tag flag is not measured.
 
 A table is applied whole: one entry in the refused rows leaves every frame as
 it comes and the log names the entry and the reason once.

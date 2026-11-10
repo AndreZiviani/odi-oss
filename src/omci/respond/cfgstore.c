@@ -592,6 +592,19 @@ int cfg_olt_tagging(void)
 	return vlanCfg.type != VLAN_CFG_TYPE_MANUAL;
 }
 
+/* VLAN_EAPOL_UNTAGGED in CFG_ODI_PATH, odi-only: 1 lets 802.1X EAPOL frames
+ * (EtherType 0x888e) cross the stick untagged while it adds the manual tag to
+ * everything else. Anything else, or absent, is off, and then no rule is built
+ * that differs from the manual tag alone. Read at every rebuild, so a change
+ * is live after `apply.sh omci`. */
+int cfg_eapol_untagged(void)
+{
+	char v[4];
+
+	return cfg_odi_get(CFG_ODI_PATH, "VLAN_EAPOL_UNTAGGED", v, sizeof v) == 1 &&
+	       v[0] == '1';
+}
+
 void cfg_load_vlan(void)
 {
 	cfg_load_vlan_from(CFG_CS);
@@ -628,6 +641,10 @@ void cfg_show_vlan(void)
 	for (int k = 0; k < vlanCfg.nfwdop; k++)
 		out_fmt("fwdop       84/%04x built as 0x%02x (RTK_DEVINFO_SPECVER)\n",
 			(long)vlanCfg.fwdop[k].inst, (long)vlanCfg.fwdop[k].code);
+	if (cfg_eapol_untagged())
+		out(vlanCfg.manual ?
+		    "eapol       untagged both ways (VLAN_EAPOL_UNTAGGED)\n" :
+		    "eapol       VLAN_EAPOL_UNTAGGED set, no effect without the manual tag\n");
 }
 
 /* What is safe to print. The serial is on the label and the OLT ranges on it,
@@ -1332,6 +1349,7 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->pots_ports = pots_ports;
 	s->pots_slot_key = pots_slot_key;
 	s->pots_slot = pots_slot;
+	s->eapol_untagged = cfg_eapol_untagged();
 }
 
 void cfg_snap_restore(const struct cfg_snap *s)
@@ -1429,6 +1447,8 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		}
 	if ((o->custom_mcast ^ n->custom_mcast) & CUSTOM_MCAST_DS_UNTAGGED)
 		m |= CFGD_CUSTOM_MCAST;
+	if (o->eapol_untagged != n->eapol_untagged)
+		m |= CFGD_EAPOL;
 	if (o->vlan.nfwdop != n->vlan.nfwdop)
 		m |= CFGD_FWDOP;
 	for (int k = 0; k < n->vlan.nfwdop && k < o->vlan.nfwdop; k++)
@@ -1477,6 +1497,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_VLAN_PRI, "VLAN_MANU_TAG_PRI" },
 		{ CFGD_CUSTOM_MCAST, "OMCI_CUSTOM_MCAST" },
 		{ CFGD_FWDOP, "RTK_DEVINFO_SPECVER" },
+		{ CFGD_EAPOL, "VLAN_EAPOL_UNTAGGED" },
 	};
 	int o = 0;
 
