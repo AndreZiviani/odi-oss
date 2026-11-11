@@ -281,6 +281,41 @@ static void test_client_slots_are_limited(void)
 	CHECK(odi_wdt_client_register(&st, "one-too-many", 60, 0) < 0, "one past the max is refused, not silently dropped");
 }
 
+/* The kernel hands these functions the uptime from the 64-bit tick count
+ * (odi_wdt_uptime_s), so it goes on past 2^32 / HZ seconds, 198.8 days at
+ * HZ=250, where a quotient of the 32-bit jiffies is back at 0. They compare
+ * it with stamps taken earlier and know nothing of a clock that steps back:
+ * a stamp ahead of the uptime would hold a deadline off. Across that mark
+ * the uptime keeps rising, and the heartbeat and a client deadline come due
+ * as anywhere else.
+ */
+#define JIFFIES32_RANGE_S	17179869U	/* 2^32 / 250 */
+
+static void test_uptime_past_the_32bit_jiffies_range(void)
+{
+	struct odi_wdt_deadline_state st;
+	unsigned int actions;
+
+	odi_wdt_deadline_state_init(&st);
+	st.watchdog_enabled = 1;
+	st.userland_ok = 1;
+	CHECK(odi_wdt_deadline_tick(&st, JIFFIES32_RANGE_S - 590, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT,
+	      "a heartbeat 590 s before the mark");
+	odi_wdt_client_register(&st, "omcid", 60, JIFFIES32_RANGE_S - 100);
+	CHECK(odi_wdt_client_ping(&st, "omcid", JIFFIES32_RANGE_S - 10) == 0, "the last ping 10 s before the mark");
+
+	actions = odi_wdt_deadline_tick(&st, JIFFIES32_RANGE_S + 9, AMPLE_KB);
+	CHECK(!(actions & ODI_WDT_ACTION_HEARTBEAT), "no heartbeat 599 s after the last one, 9 s past the mark");
+	CHECK(!(actions & ODI_WDT_ACTION_CLIENT_MISS), "no miss 19 s after the ping");
+	CHECK(odi_wdt_deadline_tick(&st, JIFFIES32_RANGE_S + 10, AMPLE_KB) & ODI_WDT_ACTION_HEARTBEAT,
+	      "the heartbeat is due 600 s after the last one, past the mark");
+	CHECK(!(odi_wdt_deadline_tick(&st, JIFFIES32_RANGE_S + 50, AMPLE_KB) & ODI_WDT_ACTION_CLIENT_MISS),
+	      "no miss AT the deadline, 50 s past the mark");
+	actions = odi_wdt_deadline_tick(&st, JIFFIES32_RANGE_S + 51, AMPLE_KB);
+	CHECK(actions & ODI_WDT_ACTION_CLIENT_MISS, "a client silent since before the mark misses its deadline past it");
+	CHECK(actions & ODI_WDT_ACTION_FORCE_RESET, "and the miss carries FORCE_RESET");
+}
+
 /* ---- Kernel-side memory floor: consecutive low samples, not one. ------- */
 
 static void test_mem_floor_needs_consecutive_low_samples(void)
@@ -580,6 +615,7 @@ int main(void)
 	test_client_register_is_idempotent_on_name();
 	test_client_reregister_resets_the_clock();
 	test_client_slots_are_limited();
+	test_uptime_past_the_32bit_jiffies_range();
 
 	test_mem_floor_needs_consecutive_low_samples();
 	test_mem_floor_fires_after_consecutive_low_samples();
