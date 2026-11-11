@@ -40,11 +40,12 @@
  *   - a slot the primary copy does not name as sw_active -- U-Boot writes
  *     sw_active as it boots a slot, so this is its own record of what it
  *     started. sw_active is NEVER written here;
- *   - both copies unreadable or failing their CRC: there is nothing to
- *     commit from.
+ *   - a copy that could not be read completely (NVC_READ): it may be
+ *     perfectly good, so it is not repaired over, and nothing is written;
+ *   - both copies failing their CRC: there is nothing to commit from.
  *
- * One invalid copy is not a refusal. The valid copy is the primary and the
- * invalid one is REPAIRED first: it is written with the whole new
+ * One copy that was read in full and fails its CRC is not a refusal. The
+ * valid copy is the primary and the invalid one is REPAIRED first: it is written with the whole new
  * environment (sw_commit and mupgrade_en applied), read back and compared,
  * and only then is the primary written. The only good copy is never erased
  * while it is the only one, so a second power cut during the commit still
@@ -65,7 +66,11 @@
 struct env_io {
 	void *ctx;
 	/* Read copy 1 (`env`) or 2 (`env2`) raw into buf, at most ENV_MAX
-	 * bytes. Returns the partition size read, 0 on any failure. */
+	 * bytes. Returns the partition size read, 0 when it could not be read
+	 * completely (open, a failed or short read, a partition that is not
+	 * there). 0 is NOT "invalid": a copy read in full that fails its CRC
+	 * is the invalid one the sequences below repair; one not read in full
+	 * says nothing about its content, and nothing is written on it. */
 	uint32_t (*read)(void *ctx, int copy, uint8_t *buf);
 	/* Erase copy and write len bytes of buf over it. 1 on success. */
 	int (*write)(void *ctx, int copy, const uint8_t *buf, uint32_t len);
@@ -87,6 +92,7 @@ enum env_commit_rc {
 	NVC_CONFIRM_ARP,       /* the confirm-arp development file exists and no force was given; nothing written */
 	NVC_WRITE_REPAIR,      /* the invalid copy could not be written; the valid one was not touched */
 	NVC_VERIFY_REPAIR,     /* the invalid copy did not read back as written; the valid one was not touched */
+	NVC_READ,              /* a copy could not be read completely (not the same as failing its CRC); nothing written */
 };
 
 struct env_commit_report {
@@ -114,7 +120,9 @@ int env_commit(const struct env_io *io, int slot, int running,
  *     copy rewritten and read back. With -c naming the invalid copy only that
  *     one is written. The valid copy is never erased while it is the only
  *     one;
- *   - neither valid: nothing is written.
+ *   - neither valid: nothing is written;
+ *   - a copy that could not be read completely (NVS_READ): not taken for an
+ *     invalid one, nothing is written, whichever copy -c names.
  *
  * Nothing is erased before the new block has fit, carried the value asked
  * for and had its CRC set. */
@@ -127,6 +135,7 @@ enum env_set_rc {
 	NVS_VERIFY_REPAIR,
 	NVS_WRITE,
 	NVS_VERIFY,
+	NVS_READ,              /* a copy could not be read completely; nothing written */
 };
 
 struct env_set_report {

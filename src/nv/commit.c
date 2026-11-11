@@ -95,8 +95,14 @@ int env_commit(const struct env_io *io, int slot, int running,
 
 	n1 = io->read(io->ctx, 1, c1);
 	n2 = io->read(io->ctx, 2, c2);
-	ok1 = n1 && env_valid(c1, n1);
-	ok2 = n2 && env_valid(c2, n2);
+	/* A copy that could not be read completely is not a copy that failed
+	 * its CRC: it may be perfectly good, and the repair below overwrites
+	 * the "invalid" one with the other. Only a copy read in full and
+	 * failing its CRC is repaired; otherwise nothing is written. */
+	if (!n1 || !n2)
+		return NVC_READ;
+	ok1 = env_valid(c1, n1);
+	ok2 = env_valid(c2, n2);
 	if (!ok1 && !ok2)
 		return NVC_NO_PAIR;
 	bad = !ok1 || !ok2;
@@ -216,8 +222,12 @@ int env_setenv(const struct env_io *io, int copy, const char *key,
 	r->target = r->repaired = r->wrote_target = 0;
 	n1 = io->read(io->ctx, 1, c1);
 	n2 = io->read(io->ctx, 2, c2);
-	ok1 = n1 && env_valid(c1, n1);
-	ok2 = n2 && env_valid(c2, n2);
+	/* As in env_commit: an incomplete read is not an invalid copy, and
+	 * nothing is written on it, whichever copy -c names. */
+	if (!n1 || !n2)
+		return NVS_READ;
+	ok1 = env_valid(c1, n1);
+	ok2 = env_valid(c2, n2);
 	if (!ok1 && !ok2)
 		return NVS_NONE_VALID;
 	win = env_pick(c1, ok1, c2, ok2);
@@ -277,6 +287,7 @@ const char *env_setenv_msg(int rc)
 	case NVS_VERIFY_REPAIR: return "the invalid copy did not read back as written; the valid copy was not touched";
 	case NVS_WRITE:         return "the write failed";
 	case NVS_VERIFY:        return "the copy written did not read back as written";
+	case NVS_READ:          return "a copy could not be read completely, nothing written (not treated as invalid; run it again)";
 	default:                return "unknown result";
 	}
 }
@@ -316,6 +327,7 @@ const char *env_commit_msg(int rc)
 	case NVC_CONFIRM_ARP:     return "refused, the confirm-arp development file exists, nothing written";
 	case NVC_WRITE_REPAIR:    return "the write of the invalid copy failed; the valid copy was not touched";
 	case NVC_VERIFY_REPAIR:   return "the invalid copy did not read back as written; the valid copy was not touched";
+	case NVC_READ:            return "a copy could not be read completely, nothing written (not treated as invalid; run it again)";
 	default:                  return "unknown result";
 	}
 }
