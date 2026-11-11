@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- Flash: `fwu.sh` no longer accepts a read-back that ended early. The
+  read-back pipes the tar member into `cmp` and took "EOF on -" for success,
+  which is what `cmp` says when the member ends before the partition does,
+  and also what it says when tar dies halfway (the OOM killer, say) and only
+  a prefix was compared. tar's exit status is now part of the check: a
+  non-zero one is `READ-BACK INCOMPLETE` and exit 1, before the kernel is
+  written. The write itself was already checked by tar's status, and both
+  members by md5 before the erase, so this closes a gap in the extra check
+  only. Found reading the code, not seen on a stick.
+- Flash: `fwu_starter.sh` waits up to 10 s (`FWU_START_S`) for the
+  background job to claim the state file, instead of one second. On a loaded
+  stick a job that took longer was reported as "the write job did not start"
+  and then ran and wrote the slot anyway. A job that starts after the
+  starter gave up now exits without writing. Found reading the code.
 - Build: `kernel/618/fetch.sh` checks the kernel signature with `gpgv`
   against the stable-release signing key pinned in the script, next to its
   fingerprint, instead of fetching that key from a keyserver on every run.

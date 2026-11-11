@@ -177,6 +177,34 @@ wait $pids
 until_ok 10 lock_free
 t "and no second writer after the first is done" "^1$" "$(lines start "$T/starts")"
 
+# The job can take longer than a second to claim the state file on a loaded
+# stick. The starter waits for it (FWU_START_S) instead of reporting a write
+# that then runs; a job that never starts is still reported; and a job that
+# starts after the starter gave up does not write. setsid is the stub that
+# delays or drops the job.
+cp "$T/bin/setsid" "$T/bin/setsid.plain"
+printf '#!/bin/sh\nsleep "${SETSID_DELAY:-0}"\n[ -z "${SETSID_DROP:-}" ] || exit 0\nexec "$@"\n' > "$T/bin/setsid"
+chmod +x "$T/bin/setsid"
+until_ok 10 lock_free
+rm -f "$T/fwu.state" "$T/starts"
+out=$(SETSID_DELAY=2 FWU_STARTS="$T/starts" run 'root=31:5' 1 "$T/good.tar"); rc=$?
+t "a job that takes 2 s to start is waited for" "in the background" "$out"
+t "with exit 0" "^0$" "$rc"
+until_ok 10 grep -q '^ok' "$T/fwu.state"
+t "and it wrote once" "^ok [0-9]* 1 1$" "$(cat "$T/fwu.state" | tr '\n' ' ')$(lines start "$T/starts")"
+until_ok 10 lock_free
+rm -f "$T/fwu.state" "$T/starts"
+out=$(SETSID_DROP=1 FWU_START_S=2 FWU_STARTS="$T/starts" run 'root=31:5' 1 "$T/good.tar"); rc=$?
+t "a job that never starts is reported" "did not start within 2 s" "$out"
+t "with exit 1 and a failed state" "^1 failed [0-9]* 1 start$" "$rc $(cat "$T/fwu.state")"
+until_ok 10 lock_free
+rm -f "$T/fwu.state" "$T/starts"
+out=$(SETSID_DELAY=4 FWU_START_S=2 FWU_STARTS="$T/starts" run 'root=31:5' 1 "$T/good.tar"); rc=$?
+t "a job later than the wait is reported as not started" "did not start within 2 s" "$out"
+until_ok 10 lock_free
+t "and does not write afterwards" "^0 failed [0-9]* 1 start$" "$(lines start "$T/starts") $(cat "$T/fwu.state")"
+cp "$T/bin/setsid.plain" "$T/bin/setsid"
+
 # A foreground writer leaves a running state with a pid that is gone
 # (exec keeps nothing behind to record the outcome): read as stale.
 rm -f "$T/fwu.state"
