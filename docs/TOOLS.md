@@ -1053,7 +1053,18 @@ environment, becomes the one picked. `setenv -c N` naming the invalid copy
 writes only that one; naming the valid copy still repairs the other first. A
 plain `setenv` then also rewrites the valid copy, because that is the copy
 U-Boot reads and the change would otherwise not take effect. Both invalid:
-nothing is written.
+nothing is written. Only a copy read in full whose CRC is wrong counts as
+invalid. A copy that could not be read completely (open, a failed or short
+read) says nothing about its content: `setenv` and `commit` then write nothing,
+`-c N` included, and print `a copy could not be read completely, nothing
+written`. After a transient failure, running them again is enough. While a
+copy stays unreadable, `commit` and every form of `setenv` stay refused
+(`commit --force` only skips the confirm-arp guard, not this), and `nv`
+offers no way out until the partition can be read again. A raw restore of the
+environment partitions (`docs/FLASHING.md`, "Restore") is the documented
+route for a damaged environment; it is not promised to help when the flash
+itself cannot be read. `getenv` and `fallback` do not check for this: they
+use the copy they could read.
 
 `nv commit` also sets `mupgrade_en=0`, in the same two writes. The stock
 bootloader ships it as 1, which makes it listen on the host link after the

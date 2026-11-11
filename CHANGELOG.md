@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- `nv setenv` and `nv commit` no longer take an environment copy they could not
+  read completely for an invalid one. A failed or short read of a copy that is
+  in fact valid (a transient error on `/dev/mtdN`) used to send the repair
+  down the invalid-copy path, which overwrote that copy with the other one and
+  lost whatever was only in the newer copy. Now only a copy read in full whose
+  CRC is wrong is repaired; if either copy cannot be read completely, nothing
+  is written, `-c N` included, and the tool says `a copy could not be read
+  completely, nothing written` and exits 1 (`setenv` says so also when the
+  other copy is invalid or unreadable too). Running it again repairs as
+  before; while a copy stays unreadable `commit` (`--force` too) and `setenv`
+  stay refused. `nv getenv` and `nv fallback` are unchanged. Host tests in
+  `src/nv/test/test_commit.c` fail one read on a valid copy for `commit` and
+  for each form of `setenv`; the power-cut tests of the repair now reach the
+  write they cut (with `env2` invalid the fixture's `env` named the wrong slot,
+  so `commit` stopped before writing and the test passed without a cut) and
+  assert the result code and the number of writes.
+
 - `nv setenv` and `nv commit` now repair an invalid environment copy as part
   of the write instead of refusing, or erasing the only good copy. With one
   copy invalid (a write cut by a power loss), the new environment is built and

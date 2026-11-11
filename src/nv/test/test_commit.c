@@ -31,6 +31,7 @@ struct fake {
 	int write_dies[3];          /* erase lands, the write never does */
 	int write_flips[3];         /* the write lands with one bit wrong */
 	int reads, garble_from;     /* reads of env2 return junk from this read on */
+	int fail_read_at;           /* the Nth read (1-based) fails once, returning 0: a transient error, the copy itself is fine */
 	int writes[8], nwrites;     /* which copy, in order */
 	int tear_at;                /* the Nth write (1-based) is cut half way: first half lands, rest stays erased */
 	int refuse_from;            /* from the Nth write on, the write is refused before it erases anything */
@@ -43,6 +44,8 @@ static uint32_t f_read(void *ctx, int copy, uint8_t *buf)
 
 	f->reads++;
 	if (f->unreadable[copy])
+		return 0;
+	if (f->fail_read_at && f->reads == f->fail_read_at)
 		return 0;
 	memcpy(buf, f->part[copy], PART);
 	if (copy == 2 && f->garble_from && f->reads >= f->garble_from)
@@ -169,10 +172,20 @@ static int pick_now(struct fake *f)
 }
 
 /* The trial pair with one copy damaged (a write cut by a power loss: the
- * first half landed, the rest is erased flash). */
+ * first half landed, the rest is erased flash). With env2 damaged the
+ * surviving copy is env, which has to name the running slot like the
+ * survivor does in the other case, or a commit of slot 1 stops at
+ * NVC_NOT_ACTIVE before any write: env gets sw_active=1 (flags 0x00 kept). */
 static void damaged(struct fake *f, int bad)
 {
 	trial(f);
+	if (bad == 2) {
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=0",
+				     "sw_tryactive=2", "sw_version0=V1", "sw_version1=V2",
+				     "mupgrade_en=1" };
+
+		build(f->part[1], 0x00, pr, 7);
+	}
 	memset(f->part[bad] + PART / 2, 0xff, PART / 2);
 }
 
@@ -314,19 +327,28 @@ static void repair_tests(void)
 	}
 
 	/* Power cut (a torn write) at every step: never zero valid copies,
-	 * and no erase ever begins while the other copy is invalid. */
+	 * and no erase ever begins while the other copy is invalid. The cut
+	 * must be reached: the exact result code of the write that was cut,
+	 * and as many writes as the step, so a refusal before any write
+	 * cannot pass for it. */
 	for (int bad = 1; bad <= 2; bad++) {
 		for (int step = 1; step <= 2; step++) {
+			int good = 3 - bad;
+
 			damaged(&rf, bad);
 			rf.tear_at = step;
 			rc = env_commit(&rio, 1, 1, &r);
-			ck(rc != NVC_DONE && rf.lost == 0 && valid_count(&rf) >= 1,
-			   "commit, power cut at a write, one copy invalid: a valid copy is left");
+			ck(rc == (step == 1 ? NVC_WRITE_REPAIR : NVC_WRITE_PRIMARY) && rf.nwrites == step &&
+			   rf.writes[step - 1] == (step == 1 ? bad : good) &&
+			   rf.lost == 0 && valid_count(&rf) >= 1,
+			   "commit, power cut at a write, one copy invalid: the cut write is reached, a valid copy is left");
 			damaged(&rf, bad);
 			rf.tear_at = step;
 			rc = env_setenv(&rio, 0, "sw_tryactive", "1", &sr);
-			ck(rc != NVS_DONE && rf.lost == 0 && valid_count(&rf) >= 1,
-			   "setenv, power cut at a write, one copy invalid: a valid copy is left");
+			ck(rc == (step == 1 ? NVS_WRITE_REPAIR : NVS_WRITE) && rf.nwrites == step &&
+			   rf.writes[step - 1] == (step == 1 ? bad : good) &&
+			   rf.lost == 0 && valid_count(&rf) >= 1,
+			   "setenv, power cut at a write, one copy invalid: the cut write is reached, a valid copy is left");
 			/* the same, then the next run finishes the repair */
 			rf.tear_at = 0;
 			rc = env_setenv(&rio, 0, "sw_tryactive", "1", &sr);
@@ -395,6 +417,87 @@ static void repair_tests(void)
 	memset(rf.part[2] + PART / 2, 0xff, PART / 2);
 	rc = env_setenv(&rio, 0, "k", "v", &sr);
 	ck(rc == NVS_NONE_VALID && rf.nwrites == 0, "setenv, no valid copy: refused, nothing written");
+}
+
+/* One read fails once and returns 0, as a transient MTD or read(2) error
+ * would, on a copy that is in fact valid. It must not be taken for an
+ * invalid copy and repaired over: nothing may be written, and a retry
+ * without the fault has to find the newer copy's changes intact. */
+static void read_error_tests(void)
+{
+	static uint8_t before[3][PART];
+	struct env_commit_report r;
+	struct env_set_report sr;
+	const char *older[] = { "bootdelay=1", "sw_active=1", "sw_commit=0", "mupgrade_en=1" };
+	const char *newer[] = { "bootdelay=1", "sw_active=1", "sw_commit=0", "mupgrade_en=1",
+				"only_in_newer=1" };
+	int rc;
+
+	/* Reads 1 and 2 are the two copies; a fault on either, for each verb. */
+	for (int at = 1; at <= 2; at++) {
+		memset(&rf, 0, sizeof rf);
+		build(rf.part[1], 0x00, older, 4);
+		build(rf.part[2], 0x01, newer, 5);          /* env2 is newer and wins */
+		memcpy(before[1], rf.part[1], PART);
+		memcpy(before[2], rf.part[2], PART);
+		rf.fail_read_at = at;
+		rc = env_commit(&rio, 1, 1, &r);
+		ck(rc == NVC_READ && rf.nwrites == 0 && !memcmp(before[1], rf.part[1], PART) &&
+		   !memcmp(before[2], rf.part[2], PART),
+		   "commit, one read fails once on a valid copy: refused as a read error, nothing written");
+		rf.fail_read_at = 0;
+		rc = env_commit(&rio, 1, 1, &r);
+		ck(rc == NVC_DONE && !r.repaired && val(&rf, 2, "only_in_newer", "1") && valid_count(&rf) == 2 &&
+		   val(&rf, 1, "sw_commit", "1") && val(&rf, 2, "sw_commit", "1"),
+		   "  run again without the fault: committed, no repair, the newer copy's change kept");
+
+		for (int c = 0; c <= 2; c++) {
+			memset(&rf, 0, sizeof rf);
+			build(rf.part[1], 0x00, older, 4);
+			build(rf.part[2], 0x01, newer, 5);
+			memcpy(before[1], rf.part[1], PART);
+			memcpy(before[2], rf.part[2], PART);
+			rf.fail_read_at = at;
+			rc = env_setenv(&rio, c, "sw_tryactive", "1", &sr);
+			ck(rc == NVS_READ && rf.nwrites == 0 && !memcmp(before[1], rf.part[1], PART) &&
+			   !memcmp(before[2], rf.part[2], PART),
+			   "setenv (plain, -c 1, -c 2), one read fails once: refused as a read error, nothing written");
+		}
+	}
+
+	/* A copy that cannot be read beside one that fails its CRC: still
+	 * nothing is written, the unreadable one may be the good one. */
+	damaged(&rf, 1);
+	rf.fail_read_at = 2;
+	memcpy(before[1], rf.part[1], PART);
+	memcpy(before[2], rf.part[2], PART);
+	rc = env_commit(&rio, 1, 1, &r);
+	ck(rc == NVC_READ && rf.nwrites == 0 && !memcmp(before[1], rf.part[1], PART) &&
+	   !memcmp(before[2], rf.part[2], PART),
+	   "one copy fails its CRC, the other cannot be read: refused as a read error, nothing written");
+
+	/* The valid copy of a damaged pair cannot be read once: no pair is
+	 * left to repair from, so nothing is written (a retry repairs). */
+	damaged(&rf, 2);
+	rf.fail_read_at = 1;                              /* env, the valid one, fails; env2 reads as invalid */
+	memcpy(before[1], rf.part[1], PART);
+	memcpy(before[2], rf.part[2], PART);
+	rc = env_commit(&rio, 1, 1, &r);
+	ck(rc == NVC_READ && rf.nwrites == 0 && !memcmp(before[1], rf.part[1], PART) &&
+	   !memcmp(before[2], rf.part[2], PART),
+	   "env2 invalid, the read of valid env fails once: refused, nothing written");
+	rf.fail_read_at = 0;
+	rc = env_commit(&rio, 1, 1, &r);
+	ck(rc == NVC_DONE && r.repaired == 2 && rf.writes[0] == 2 && valid_count(&rf) == 2,
+	   "  run again without the fault: env2 is repaired first as before");
+
+	/* A genuine invalid copy, read in full, is still repaired. */
+	damaged(&rf, 1);
+	rc = env_setenv(&rio, 0, "sw_tryactive", "0", &sr);
+	ck(rc == NVS_DONE && sr.repaired == 1 && valid_count(&rf) == 2, "a copy read in full that fails its CRC is still repaired");
+
+	ck(strstr(env_commit_msg(NVC_READ), "read") && strstr(env_setenv_msg(NVS_READ), "read"),
+	   "the read error says so");
 }
 
 int main(void)
@@ -535,7 +638,7 @@ int main(void)
 	f.unreadable[1] = 1;
 	f.unreadable[2] = 1;
 	rc = env_commit(&io, 1, 1, &r);
-	ck(rc == NVC_NO_PAIR && f.nwrites == 0, "both copies unreadable: refused");
+	ck(rc == NVC_READ && f.nwrites == 0, "both copies unreadable: refused as a read error, nothing written");
 
 	/* The primary fails: the fallback must not be touched. */
 	trial(&f);
@@ -658,11 +761,12 @@ int main(void)
 	}
 
 	repair_tests();
+	read_error_tests();
 
-	for (int i = NVC_DONE; i <= NVC_VERIFY_REPAIR; i++)
+	for (int i = NVC_DONE; i <= NVC_READ; i++)
 		if (!strcmp(env_commit_msg(i), "unknown result"))
 			ck(0, "every result has a message");
-	for (int i = NVS_DONE; i <= NVS_VERIFY; i++)
+	for (int i = NVS_DONE; i <= NVS_READ; i++)
 		if (!strcmp(env_setenv_msg(i), "unknown result"))
 			ck(0, "every setenv result has a message");
 

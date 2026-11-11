@@ -360,7 +360,13 @@ back, then reads both once more. It refuses a slot that is not the running
 one or not `sw_active`, and an environment with no valid copy; it never
 writes `sw_active`, and it is safe to interrupt at every step. If one copy
 is invalid (a write cut by a power loss) it writes that copy first, from
-the new environment, and the valid one only after the first read back. `nv setenv sw_commit <slot>` also still works but writes only the
+the new environment, and the valid one only after the first read back. A copy
+that could not be read completely is not taken for an invalid one: nothing is
+written. After a transient failure, run it again; while a copy stays
+unreadable, `nv commit` (`--force` included) and every `nv setenv` stay refused
+and `nv` has no way around it (the raw restore under "Restore" is for a
+damaged environment, and may not help if the flash cannot be read). `nv setenv
+sw_commit <slot>` also still works but writes only the
 primary copy; nv then prints that the fallback copy still names the old
 slot, and `nv setenv -c <copy> sw_commit <slot>` makes it agree. `nv
 commit` does both, in the safe order, and checks them.

@@ -54,7 +54,9 @@
  * the pair as a side effect of the write the operator asked for, with no
  * separate repair verb. The repaired copy is given the flags byte that keeps
  * the valid copy winning until the sequence is over (env.h,
- * env_repair_flags). commit.h has the sequences.
+ * env_repair_flags). commit.h has the sequences. Only a copy read in full
+ * with a wrong CRC counts as invalid: one that could not be read completely
+ * may be fine, and setenv and commit then write nothing.
  *
  * Writers (`setenv`, `commit`) are serialised with flock(2) on the env
  * partition device node (env_lock below), and every copy written is read
@@ -211,9 +213,17 @@ static unsigned int read_raw(const char *name, struct mtd_part *m, uint8_t *dst)
 	return got == m->size ? m->size : 0;
 }
 
+/* Set by read_part when a copy could not be read in full, which is not the
+ * same as a copy that fails its CRC (commit.h, struct env_io). */
+static int load_unread;
+
 static int read_part(const char *name, struct mtd_part *m, uint8_t *dst)
 {
-	return read_raw(name, m, dst) && env_valid(dst, m->size);
+	unsigned int n = read_raw(name, m, dst);
+
+	if (!n)
+		load_unread = 1;
+	return n && env_valid(dst, m->size);
 }
 
 /* Both copies are read, and the valid one with the HIGHER flags byte wins --
@@ -224,9 +234,11 @@ static unsigned int env_load(struct mtd_part *part)
 {
 	static uint8_t other[ENV_MAX];
 	struct mtd_part m1, m2;
-	int ok1 = read_part("env", &m1, blk);
-	int ok2 = read_part("env2", &m2, other);
+	int ok1, ok2;
 
+	load_unread = 0;
+	ok1 = read_part("env", &m1, blk);
+	ok2 = read_part("env2", &m2, other);
 	alt_len = 0;
 	if (ok1)
 		m1.copy = 1;
@@ -493,7 +505,12 @@ int main(int argc, char **argv)
 		return 1;
 	len = env_load(&part);
 	if (!len) {
-		out("nv: no valid environment in env or env2\n");
+		/* A copy that could not be read in full is not one that failed
+		 * its CRC; for setenv say so, as env_setenv would. */
+		if (load_unread && str_eq(argv[1], "setenv"))
+			out_fmt("nv: setenv: %s\n", env_setenv_msg(NVS_READ));
+		else
+			out("nv: no valid environment in env or env2\n");
 		return 1;
 	}
 
@@ -586,7 +603,11 @@ int main(int argc, char **argv)
 			return 1;
 		}
 		value = argc > a + 1 ? argv[a + 1] : 0;
-		if (!alt_len) {
+		if (load_unread) {
+			/* A copy could not be read in full: env_setenv reads
+			 * both again and refuses, or goes on, on its own
+			 * answer; "not valid" would be a guess. */
+		} else if (!alt_len) {
 			/* The other copy is invalid: it is written first, from
 			 * the new block, so the valid copy is never erased
 			 * while it is the only one (commit.h, env_setenv). */
