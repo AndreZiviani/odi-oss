@@ -39,6 +39,8 @@ set -u
 FWU_DIR=${FWU_DIR:-/tmp/fwu.d}
 FWU_LOG=${FWU_LOG:-/tmp/fwu.log}
 FWU_STATE=${FWU_STATE:-/tmp/fwu.state}
+# How long the background job may take to claim the state file.
+FWU_START_S=${FWU_START_S:-10}
 PROC_MTD=${PROC_MTD:-/proc/mtd}
 PROC_CMDLINE=${PROC_CMDLINE:-/proc/cmdline}
 NV=${NV:-/bin/nv}
@@ -134,22 +136,33 @@ echo "running $$ $slot" > "$FWU_STATE"
 # The job records its own pid and outcome. setsid gives it a session of its
 # own: confd, and the shell that started this, can go away without a SIGHUP
 # reaching a flash in progress.
+# It claims the state file only while that still names this shell: a job
+# that starts after this shell gave up on it (below) must not write.
 setsid sh -c '
 	cd "$1" || exit 1
+	read -r st pid _ < "$4"
+	[ "$st $pid" = "running $6" ] || exit 1
 	echo "running $$ $2" > "$4"
 	sh ./fwu.sh "$2" "$3" >> "$5" 2>&1
 	rc=$?
 	if [ "$rc" = 0 ]; then echo "ok $$ $2" > "$4"; else echo "failed $$ $2 $rc" > "$4"; fi
-' fwu "$FWU_DIR" "$slot" "$tarball" "$FWU_STATE" "$FWU_LOG" \
+' fwu "$FWU_DIR" "$slot" "$tarball" "$FWU_STATE" "$FWU_LOG" "$$" \
 	< /dev/null > /dev/null 2>&1 &
 # Wait for the job to claim the state file, so a request that arrives right
 # after this one returns sees a live writer, and a job that never started is
-# reported here rather than as a state that stays "running" forever.
-sleep 1
-read -r st pid _ < "$FWU_STATE"
-if [ "$pid" = "$$" ]; then
-	echo "failed $$ $slot start" > "$FWU_STATE"
-	die "the write job did not start"
-fi
+# reported here rather than as a state that stays "running" forever. Up to
+# FWU_START_S seconds: on a loaded stick the job can take longer than one to
+# get there, and giving up on it early reported a write that then ran.
+n=0
+while :; do
+	sleep 1
+	n=$((n + 1))
+	read -r st pid _ < "$FWU_STATE"
+	[ "$pid" = "$$" ] || break
+	if [ "$n" -ge "$FWU_START_S" ]; then
+		echo "failed $$ $slot start" > "$FWU_STATE"
+		die "the write job did not start within $FWU_START_S s"
+	fi
+done
 say "writing slot $slot in the background; progress in $FWU_LOG"
 exit 0

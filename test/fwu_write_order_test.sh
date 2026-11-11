@@ -123,5 +123,48 @@ t "a failed rootfs erase exits 1" "1" "$rc"
 t "the kernel partition is erased" "EEEE" "$(cat "$T/dev/mtd6")"
 t "the rootfs partition was never written" "no" "$([ -e "$T/dev/mtd7" ] && echo yes || echo no)"
 
+# 4. The read-back. tar's exit status is part of it: a tar that dies halfway
+#    ends cmp's input early, and cmp reports "EOF on -" for the prefix alone,
+#    which is also what a complete, matching member gives. The tar wrapper
+#    plays the dying tar: on the Nth extraction of a member to stdout it sends
+#    TAR_CUT bytes and exits 1 (the calls are md5, size, write, read-back, so
+#    the rootfs read-back is its 4th).
+printf '#!/bin/sh\necho "ERASE $1" >> "%s/log"\nprintf EEEE > "$1"\nexit 0\n' "$T" > "$B/flash_eraseall"
+mv "$B/tar" "$B/tar.real"
+cat > "$B/tar" <<WRAP
+#!/bin/sh
+if [ -n "\${TAR_CUT_MEMBER:-}" ] && [ "\$3" = "\$TAR_CUT_MEMBER" ] && [ "\${4:-}" = -O ]; then
+	n=\$(cat "$T/tarcalls" 2>/dev/null); n=\$((\${n:-0} + 1)); echo "\$n" > "$T/tarcalls"
+	if [ "\$n" = "\$TAR_CUT_CALL" ]; then
+		[ -z "\${TAR_CUT_BYTES:-}" ] || printf '%s' "\$TAR_CUT_BYTES"
+		echo "tar: killed" >&2
+		exit 1
+	fi
+fi
+exec "$B/tar.real" "\$@"
+WRAP
+chmod +x "$B/tar"
+runcut() {   # runcut <member> <call> <bytes>
+	rm -f "$T/dev/mtd6" "$T/dev/mtd7" "$T/tarcalls"; : > "$T/log"
+	( cd "$T/img" && env -i PATH="$B" PROC_MTD="$T/mtd" PROC_CMDLINE="$T/cmdline" DEV_DIR="$T/dev" \
+	    TAR_CUT_MEMBER="$1" TAR_CUT_CALL="$2" TAR_CUT_BYTES="$3" "$SH" "$FWU" 1 "$T/good.tar" 2>&1 )
+}
+ncalls=$(runcut rootfs 99 "" > /dev/null; cat "$T/tarcalls")
+t "the wrapper changes nothing while it does not cut" "0 ROOTFS-IMAGE-BYTES-LONGER" "$(runcut rootfs 99 "" > /dev/null; echo "$? $(cat "$T/dev/mtd7")")"
+out=$(runcut rootfs "$ncalls" "ROOTFS-IM"); rc=$?
+t "a read-back whose tar dies after a matching prefix exits 1" "1" "$rc"
+t "and is reported as incomplete, with tar's status" "1" "$(printf '%s' "$out" | grep -c 'READ-BACK INCOMPLETE on .*mtd7 -- tar ended with status 1')"
+t "the kernel is not written after it" "EEEE" "$(cat "$T/dev/mtd6")"
+out=$(runcut rootfs "$ncalls" ""); rc=$?
+t "a read-back whose tar sends nothing exits 1" "1 1" "$rc $(printf '%s' "$out" | grep -c 'READ-BACK INCOMPLETE')"
+# A byte that differs is still a mismatch: the device is changed between the
+# write and the read-back by a cmp wrapper that corrupts it first.
+mv "$B/cmp" "$B/cmp.real"
+printf '#!/bin/sh\ncase "$2" in */mtd7) printf X | dd of="$2" bs=1 seek=3 conv=notrunc 2>/dev/null ;; esac\nexec "%s/cmp.real" "$@"\n' "$B" > "$B/cmp"
+chmod +x "$B/cmp"; ln -s "$(command -v dd)" "$B/dd"
+out=$(runcut rootfs 99 ""); rc=$?
+t "a differing byte is still a mismatch" "1 1" "$rc $(printf '%s' "$out" | grep -c 'READ-BACK MISMATCH on .*mtd7')"
+mv "$B/cmp.real" "$B/cmp"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

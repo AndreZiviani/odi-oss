@@ -327,7 +327,41 @@ write() {
 	# the match is on "EOF on -", naming stdin: an EOF on the DEVICE would
 	# mean the partition is shorter than the member, which fits() already
 	# refused, and must not be read as success.
-	rb=$(tar -xf "$tarball" "$1" -O | cmp - "$dev" 2>&1) && rb=""
+	#
+	# EOF-on-stdin is only the success case when tar sent the whole member.
+	# A tar that dies halfway (the OOM killer, on a 32 MB device) ends
+	# cmp's input early too, and cmp says the same "EOF on -" for the
+	# prefix it saw. This shell has no pipefail, so tar's exit status
+	# travels on the captured stream as a line of its own, and tar's own
+	# stderr goes around the capture (fd 4) so a warning from it is not
+	# read as a cmp result.
+	exec 4>&2
+	out=$({ { tar -xf "$tarball" "$1" -O 2>&4; echo "fwu-tar-rc=$?" >&2; } | cmp - "$dev"; } 2>&1)
+	exec 4>&-
+	# Split the status line from what cmp said; either can come first.
+	trc=${out##*fwu-tar-rc=}
+	[ "$trc" != "$out" ] || trc=""
+	digits=${trc%%[!0-9]*}
+	rest=${trc#"$digits"}
+	trc=$digits
+	rb=${out%%fwu-tar-rc=*}$rest
+	nl='
+'
+	rb=${rb#"$nl"}; rb=${rb%"$nl"}
+	# A byte that differs first: cmp stops there, and tar then ends on the
+	# closed pipe, which is not the news.
+	case $rb in
+	*differ*)
+		echo "fwu: READ-BACK MISMATCH on $dev -- $rb" >&2
+		echo "     slot $slot is NOT trustworthy. Do not boot it." >&2
+		exit 1
+		;;
+	esac
+	if [ "$trc" != 0 ]; then
+		echo "fwu: READ-BACK INCOMPLETE on $dev -- tar ended with status ${trc:-unknown} before the whole of $1 was compared" >&2
+		echo "     slot $slot is NOT trustworthy. Do not boot it." >&2
+		exit 1
+	fi
 	case $rb in
 	"" | *"EOF on -"*)
 		;;
