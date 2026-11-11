@@ -34,8 +34,8 @@
  * winning goes on winning -- and it degrades the right way: a power cut
  * mid-write leaves that copy invalid and U-Boot falls back to the other, which
  * is stale but good. What it does NOT do is ping-pong between the copies,
- * which is what the redundancy is designed for. Settle the rule before
- * relying on this to arm a trial boot.
+ * which is what the redundancy is designed for. Whether U-Boot itself
+ * increments the flags byte is still not known, and nv never does.
  *
  * That leaves a second copy that can sit stale forever, and two things exist
  * for it. `fallback` READS it -- it is the value U-Boot uses if the active
@@ -46,11 +46,19 @@
  * however many times it is run. Because env_set preserves the flags byte,
  * writing the loser leaves it losing -- this cannot change which copy U-Boot
  * picks, only what the loser says.
-
+ *
+ * When one copy is INVALID (an interrupted write is how), the valid one is
+ * the only good environment and is never erased while it is the only one:
+ * setenv and commit build the new block in memory, write it to the invalid
+ * copy first, read it back, and only then write the valid copy. That repairs
+ * the pair as a side effect of the write the operator asked for, with no
+ * separate repair verb. The repaired copy is given the flags byte that keeps
+ * the valid copy winning until the sequence is over (env.h,
+ * env_repair_flags). commit.h has the sequences.
  *
  * Writers (`setenv`, `commit`) are serialised with flock(2) on the env
- * partition's device node, and a plain setenv reads its copy back after the
- * write, as commit always did; see env_lock and env_store below.
+ * partition device node (env_lock below), and every copy written is read
+ * back and compared.
  *
  * `commit slot` is the one operation that writes both: sw_commit=<slot> into
  * the primary, read back, then into the fallback, read back, then both read
@@ -255,21 +263,6 @@ static unsigned int env_load(struct mtd_part *part)
 	return 0;
 }
 
-/* Load one NAMED copy, valid or not, for `setenv -c N`. The flags byte is
- * preserved by env_set, so writing the losing copy leaves it losing -- this
- * cannot change which copy U-Boot picks, only what the loser says. */
-static unsigned int env_load_copy(int copy, struct mtd_part *part)
-{
-	struct mtd_part m;
-	const char *name = copy == 2 ? "env2" : "env";
-
-	if (!read_part(name, &m, blk))
-		return 0;
-	m.copy = copy;
-	*part = m;
-	return m.size;
-}
-
 static int env_store_buf(const struct mtd_part *m, const uint8_t *src)
 {
 	struct erase_info_user e;
@@ -302,30 +295,6 @@ static int env_store_buf(const struct mtd_part *m, const uint8_t *src)
 		done += (unsigned int)n;
 	}
 	sys_close(fd);
-	return 1;
-}
-
-/* What the partition holds now, against what was meant to land. env_store_buf
- * reports success when the write(2) calls returned, which says nothing about
- * the bits the flash kept; `nv commit` has always read each copy back, a plain
- * setenv did not. */
-static int env_store(const struct mtd_part *m)
-{
-	static uint8_t back[ENV_MAX];
-	struct mtd_part r;
-
-	if (!env_store_buf(m, blk))
-		return 0;
-	if (read_raw(m->copy == 2 ? "env2" : "env", &r, back) != m->size) {
-		out("nv: the copy written could not be read back\n");
-		return 0;
-	}
-	for (unsigned int i = 0; i < m->size; i++) {
-		if (back[i] != blk[i]) {
-			out("nv: the copy written did not read back as written\n");
-			return 0;
-		}
-	}
 	return 1;
 }
 
@@ -464,6 +433,9 @@ static int commit(const char *arg, int force)
 		else
 			out_fmt("nv: running slot is %d\n", (long)running);
 	}
+	if (r.repaired)
+		out_fmt("nv: copy %d was not valid; it was written first, from the new environment, and verified\n",
+			(long)r.repaired);
 	if (r.primary)
 		out_fmt("nv: primary copy %d %s, fallback copy %d %s\n",
 			(long)r.primary, r.wrote_primary ? "written" : "unchanged",
@@ -586,13 +558,18 @@ int main(int argc, char **argv)
 	}
 
 	if (str_eq(argv[1], "setenv")) {
+		struct env_io io = { 0, io_read, io_write };
+		struct env_set_report sr;
+		const char *value;
 		int copy = 0;
 		int a = 2;
+		int rc;
 
-		/* -c N writes a NAMED copy rather than the winning one. It is
-		 * the only way to make a stale fallback agree: setenv without
-		 * it writes back the copy it read, so the loser stays stale
-		 * however many times it is run. */
+		/* -c N writes a NAMED copy rather than the winning one. With
+		 * both copies valid it is the only way to make a stale
+		 * fallback agree: setenv without it writes back the copy it
+		 * read, so the loser stays stale however many times it is
+		 * run. Naming the invalid copy repairs just that one. */
 		if (argc > 3 && str_eq(argv[2], "-c")) {
 			if (str_eq(argv[3], "1"))
 				copy = 1;
@@ -608,45 +585,46 @@ int main(int argc, char **argv)
 			usage();
 			return 1;
 		}
-		if (copy) {
-			len = env_load_copy(copy, &part);
-			if (!len) {
-				out_fmt("nv: copy %d is not valid -- refusing to"
-					" write it\n", (long)copy);
-				return 1;
-			}
-		} else {
+		value = argc > a + 1 ? argv[a + 1] : 0;
+		if (!alt_len) {
+			/* The other copy is invalid: it is written first, from
+			 * the new block, so the valid copy is never erased
+			 * while it is the only one (commit.h, env_setenv). */
+			if (copy == 3 - part.copy)
+				out_fmt("nv: copy %d is not valid; only it is written and read back\n",
+					(long)copy);
+			else
+				out_fmt("nv: copy %d is not valid; it is written first and read back,"
+					" then copy %d\n", (long)(3 - part.copy), (long)part.copy);
+		} else if (!copy) {
 			/* What this erase costs if it is interrupted, said
 			 * before it happens rather than discovered after. */
-			if (!alt_len) {
-				out("nv: WARNING -- there is no valid second copy.\n");
-				out("nv: this erase leaves the board with NO good\n");
-				out("nv: environment until the write completes.\n");
-			} else {
-				char av[512];
-				int had = env_get(alt, alt_len, argv[a], av, sizeof av);
-				const char *want = argc > a + 1 ? argv[a + 1] : 0;
+			char av[512];
+			int had = env_get(alt, alt_len, argv[a], av, sizeof av);
 
-				if (!had)
-					out_fmt("nv: NOTE -- the fallback copy (%d) does"
-						" not set %s\n", (long)alt_part.copy, argv[a]);
-				else if (!want || !str_eq(av, want))
-					out_fmt("nv: NOTE -- the fallback copy (%d) still has"
-						" %s=%s\n", (long)alt_part.copy, argv[a], av);
-				if (!had || !want || !str_eq(av, want)) {
-					out("nv: if this write is interrupted, U-Boot uses"
-					    " that value.\n");
-					out_fmt("nv: to make them agree: nv setenv -c %d %s"
-						" <value>\n", (long)alt_part.copy, argv[a]);
-				}
+			if (!had)
+				out_fmt("nv: NOTE -- the fallback copy (%d) does"
+					" not set %s\n", (long)alt_part.copy, argv[a]);
+			else if (!value || !str_eq(av, value))
+				out_fmt("nv: NOTE -- the fallback copy (%d) still has"
+					" %s=%s\n", (long)alt_part.copy, argv[a], av);
+			if (!had || !value || !str_eq(av, value)) {
+				out("nv: if this write is interrupted, U-Boot uses"
+				    " that value.\n");
+				out_fmt("nv: to make them agree: nv setenv -c %d %s"
+					" <value>\n", (long)alt_part.copy, argv[a]);
 			}
 		}
-		if (!env_set(blk, len, argv[a], argc > a + 1 ? argv[a + 1] : 0)) {
-			out_fmt("Error: cannot set %s\n", argv[a]);
+		rc = env_setenv(&io, copy, argv[a], value, &sr);
+		if (rc != NVS_DONE) {
+			if (rc == NVS_NO_ROOM || rc == NVS_NOT_SET)
+				out_fmt("Error: cannot set %s\n", argv[a]);
+			out_fmt("nv: setenv %s: %s\n", argv[a], env_setenv_msg(rc));
 			return 1;
 		}
-		if (!env_store(&part))
-			return 1;
+		if (sr.repaired)
+			out_fmt("nv: copy %d was not valid and is now written and verified\n",
+				(long)sr.repaired);
 		return 0;
 	}
 

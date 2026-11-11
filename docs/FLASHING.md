@@ -357,9 +357,10 @@ meant to do doing it.
 `nv commit` (`docs/TOOLS.md`) writes `sw_commit` into the primary
 environment copy, reads it back, then into the fallback copy, reads it
 back, then reads both once more. It refuses a slot that is not the running
-one or not `sw_active`, and an environment whose two copies are not both
-valid; it never writes `sw_active`, and it is safe to interrupt at every
-step. `nv setenv sw_commit <slot>` also still works but writes only the
+one or not `sw_active`, and an environment with no valid copy; it never
+writes `sw_active`, and it is safe to interrupt at every step. If one copy
+is invalid (a write cut by a power loss) it writes that copy first, from
+the new environment, and the valid one only after the first read back. `nv setenv sw_commit <slot>` also still works but writes only the
 primary copy; nv then prints that the fallback copy still names the old
 slot, and `nv setenv -c <copy> sw_commit <slot>` makes it agree. `nv
 commit` does both, in the safe order, and checks them.

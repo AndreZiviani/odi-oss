@@ -62,4 +62,23 @@ int env_set(uint8_t *buf, uint32_t len, const char *key, const char *value);
  * about which copy is the primary. */
 int env_pick(const uint8_t *b1, int ok1, const uint8_t *b2, int ok2);
 
+/* The flags byte for a copy that is being REPAIRED -- written while it is
+ * invalid, with the other copy (the only valid one, flags `wflag`) still the
+ * winner -- chosen so that env_pick keeps choosing the other copy once the
+ * repaired one verifies. `l` is the copy being repaired, 1 or 2.
+ *
+ *   l = 2 (env2): the flags byte of the winner, a tie, which goes to env;
+ *   l = 1 (env):  one below that of the winner, so env2 still wins -- but
+ *                 there is nothing below 0, and a tie goes to env, so with
+ *                 env2 holding flags 0 the repaired env WINS. *keeps is set
+ *                 to 0 then. Not observed on any stick (env2 has been 0x01
+ *                 whenever env is 0x00); it is still safe, because the
+ *                 repaired copy holds the complete, verified new
+ *                 environment, but it is the one case where which copy wins
+ *                 changes during the sequence.
+ *
+ * The rule is that of env_pick, which is the one the vendor nv follows on the flags seen so far
+ * (0x00 and 0x01); nothing here assumes U-Boot does more. */
+uint8_t env_repair_flags(int l, uint8_t wflag, int *keeps);
+
 #endif

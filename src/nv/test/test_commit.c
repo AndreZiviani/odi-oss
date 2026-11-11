@@ -32,6 +32,9 @@ struct fake {
 	int write_flips[3];         /* the write lands with one bit wrong */
 	int reads, garble_from;     /* reads of env2 return junk from this read on */
 	int writes[8], nwrites;     /* which copy, in order */
+	int tear_at;                /* the Nth write (1-based) is cut half way: first half lands, rest stays erased */
+	int refuse_from;            /* from the Nth write on, the write is refused before it erases anything */
+	int lost;                   /* writes begun while the OTHER copy was not valid: an erase that could leave none */
 };
 
 static uint32_t f_read(void *ctx, int copy, uint8_t *buf)
@@ -53,9 +56,17 @@ static int f_write(void *ctx, int copy, const uint8_t *buf, uint32_t len)
 
 	if (len != PART)
 		return 0;
+	if (f->refuse_from && f->nwrites + 1 >= f->refuse_from)
+		return 0;
+	if (!env_valid(f->part[3 - copy], PART))
+		f->lost++;
 	if (f->nwrites < 8)
 		f->writes[f->nwrites++] = copy;
 	memset(f->part[copy], 0xff, PART);
+	if (f->tear_at && f->nwrites == f->tear_at) {
+		memcpy(f->part[copy], buf, PART / 2);
+		return 0;
+	}
 	if (f->write_dies[copy])
 		return 0;
 	memcpy(f->part[copy], buf, PART);
@@ -140,6 +151,250 @@ static int p_exists(void *ctx, const char *path)
 	struct present *p = ctx;
 
 	return strstr(path, "confirm-arp") ? p->confirm_arp : strstr(path, "breadcrumbs") ? p->breadcrumbs : 0;
+}
+
+
+static struct fake rf;
+static struct env_io rio = { &rf, f_read, f_write };
+
+static int valid_count(struct fake *f)
+{
+	return env_valid(f->part[1], PART) + env_valid(f->part[2], PART);
+}
+
+static int pick_now(struct fake *f)
+{
+	return env_pick(f->part[1], env_valid(f->part[1], PART),
+			f->part[2], env_valid(f->part[2], PART));
+}
+
+/* The trial pair with one copy damaged (a write cut by a power loss: the
+ * first half landed, the rest is erased flash). */
+static void damaged(struct fake *f, int bad)
+{
+	trial(f);
+	memset(f->part[bad] + PART / 2, 0xff, PART / 2);
+}
+
+static void repair_tests(void)
+{
+	struct env_commit_report r;
+	struct env_set_report sr;
+	static uint8_t keep[PART];
+	int rc, keeps, w;
+
+	/* The flags byte rule. */
+	ck(env_repair_flags(2, 0, &keeps) == 0 && keeps, "flags: env2 repaired beside env 0: 0, a tie env wins");
+	ck(env_repair_flags(2, 7, &keeps) == 7 && keeps, "flags: env2 repaired beside env 7: 7, a tie env wins");
+	ck(env_repair_flags(1, 1, &keeps) == 0 && keeps, "flags: env repaired beside env2 1: 0, env2 keeps winning");
+	ck(env_repair_flags(1, 9, &keeps) == 8 && keeps, "flags: env repaired beside env2 9: 8");
+	ck(env_repair_flags(1, 0, &keeps) == 0 && !keeps,
+	   "flags: env repaired beside env2 0: nothing lower, env would win, reported");
+	{
+		uint8_t a[8] = { 0 }, b[8] = { 0 };
+
+		for (int wf = 0; wf < 256; wf++) {
+			a[ENV_HDR_CRC] = (uint8_t)wf;                         /* env2 wins with wf */
+			b[ENV_HDR_CRC] = env_repair_flags(1, (uint8_t)wf, &keeps);
+			if (keeps != (env_pick(b, 1, a, 1) == 2))
+				ck(0, "flags: keeps agrees with env_pick (env repaired)");
+			b[ENV_HDR_CRC] = (uint8_t)wf;                         /* env wins with wf */
+			a[ENV_HDR_CRC] = env_repair_flags(2, (uint8_t)wf, &keeps);
+			if (!keeps || env_pick(b, 1, a, 1) != 1)
+				ck(0, "flags: env2 repaired never beats env");
+		}
+		ck(1, "flags: all 256 winner values checked against env_pick");
+	}
+
+	/* commit, env invalid (the loser of the trial layout): repaired first. */
+	damaged(&rf, 1);
+	memcpy(keep, rf.part[2], PART);
+	rc = env_commit(&rio, 1, 1, &r);
+	ck(rc == NVC_DONE && r.primary == 2 && r.repaired == 1, "commit, env invalid: committed, env reported repaired");
+	ck(rf.nwrites == 2 && rf.writes[0] == 1 && rf.writes[1] == 2, "  the invalid copy is written first, the valid one second");
+	ck(rf.lost == 0, "  no erase began while the other copy was not valid");
+	ck(valid_count(&rf) == 2 && val(&rf, 1, "sw_commit", "1") && val(&rf, 2, "sw_commit", "1") &&
+	   val(&rf, 1, "mupgrade_en", "0") && val(&rf, 2, "mupgrade_en", "0"), "  both copies valid and committed");
+	ck(val(&rf, 1, "sw_active", "1") && val(&rf, 2, "sw_active", "1"), "  sw_active carried over from the valid copy, not invented");
+	ck(rf.part[1][ENV_HDR_CRC] == 0x00 && rf.part[2][ENV_HDR_CRC] == 0x01 && pick_now(&rf) == 2,
+	   "  flags 0x00/0x01, env2 still the one picked");
+
+	/* ...and the state between the two writes: repaired copy verified, the
+	 * valid one still as it was, the pick unchanged. */
+	damaged(&rf, 1);
+	memcpy(keep, rf.part[2], PART);
+	rf.refuse_from = 2;
+	rc = env_commit(&rio, 1, 1, &r);
+	ck(rc == NVC_WRITE_PRIMARY && rf.nwrites == 1 && rf.writes[0] == 1, "commit cut between the two writes: reported");
+	ck(!memcmp(keep, rf.part[2], PART), "  the valid copy is byte for byte what it was");
+	ck(valid_count(&rf) == 2 && pick_now(&rf) == 2 && val(&rf, 1, "sw_commit", "1") && val(&rf, 2, "sw_commit", "0"),
+	   "  repaired copy valid with the new value, the old copy still picked");
+
+	/* commit, env2 invalid: env is the primary; the repaired env2 ties and env keeps winning. */
+	{
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=0", "sw_tryactive=2" };
+
+		memset(&rf, 0, sizeof rf);
+		build(rf.part[1], 0x00, pr, 4);
+		build(rf.part[2], 0x01, pr, 4);
+		memset(rf.part[2] + 100, 0xff, 200);
+		rf.refuse_from = 2;
+		rc = env_commit(&rio, 1, 1, &r);
+		ck(rc == NVC_WRITE_PRIMARY && rf.writes[0] == 2 && r.primary == 1 && r.repaired == 2, "commit, env2 invalid: env2 first");
+		ck(valid_count(&rf) == 2 && pick_now(&rf) == 1 && rf.part[2][ENV_HDR_CRC] == 0x00,
+		   "  repaired env2 gets the flags byte of env, a tie, env still picked");
+		rf.refuse_from = 0;
+		rf.nwrites = 0;
+		rc = env_commit(&rio, 1, 1, &r);
+		ck(rc == NVC_DONE && pick_now(&rf) == 1 && val(&rf, 1, "sw_commit", "1") && val(&rf, 2, "sw_commit", "1"),
+		   "  run again: committed in both");
+	}
+
+	/* The corner: env2 holds flags 0, env is invalid. */
+	{
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=0" };
+
+		memset(&rf, 0, sizeof rf);
+		build(rf.part[2], 0x00, pr, 3);
+		build(rf.part[1], 0x00, pr, 3);
+		memset(rf.part[1] + 100, 0xff, 200);
+		rc = env_commit(&rio, 1, 1, &r);
+		ck(rc == NVC_DONE && rf.lost == 0 && valid_count(&rf) == 2 && val(&rf, 1, "sw_commit", "1") &&
+		   val(&rf, 2, "sw_commit", "1"), "env2 flags 0, env invalid: committed, both valid, none lost");
+		ck(rf.writes[0] == 1 && rf.writes[1] == 2, "  repaired copy still first");
+	}
+
+	/* The valid copy already committed: only the invalid one is written. */
+	damaged(&rf, 1);
+	{
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=1", "mupgrade_en=0" };
+
+		build(rf.part[2], 0x01, pr, 4);
+	}
+	rc = env_commit(&rio, 1, 1, &r);
+	ck(rc == NVC_DONE && rf.nwrites == 1 && rf.writes[0] == 1 && !r.wrote_primary && r.wrote_fallback,
+	   "commit, valid copy already committed: just the invalid one is written");
+
+	/* Refusals kept with one invalid copy. */
+	damaged(&rf, 1);
+	rc = env_commit(&rio, 0, 1, &r);
+	ck(rc == NVC_NOT_RUNNING && rf.nwrites == 0, "one invalid copy: another slot than the running one still refused");
+	rc = env_commit(&rio, 0, 0, &r);
+	ck(rc == NVC_NOT_ACTIVE && rf.nwrites == 0, "one invalid copy: slot the valid copy does not name as sw_active refused");
+	rc = env_commit(&rio, 2, 2, &r);
+	ck(rc == NVC_BAD_SLOT && rf.nwrites == 0, "one invalid copy: slot 2 refused");
+	trial(&rf);
+	memset(rf.part[2] + PART / 2, 0xff, PART / 2);          /* env2 (sw_active=1) invalid; env says sw_active=0 */
+	rc = env_commit(&rio, 1, 1, &r);
+	ck(rc == NVC_NOT_ACTIVE && rf.nwrites == 0, "only the stale copy valid (sw_active=0), running slot 1: refused, nothing written");
+
+	/* Faults on the repair write: the valid copy is not touched. */
+	damaged(&rf, 1);
+	memcpy(keep, rf.part[2], PART);
+	rf.write_dies[1] = 1;
+	rc = env_commit(&rio, 1, 1, &r);
+	ck(rc == NVC_WRITE_REPAIR && rf.nwrites == 1 && !memcmp(keep, rf.part[2], PART) && valid_count(&rf) == 1,
+	   "repair write dies: reported, the valid copy untouched and still valid");
+	damaged(&rf, 1);
+	memcpy(keep, rf.part[2], PART);
+	rf.write_flips[1] = 1;
+	rc = env_commit(&rio, 1, 1, &r);
+	ck(rc == NVC_VERIFY_REPAIR && rf.nwrites == 1 && !memcmp(keep, rf.part[2], PART),
+	   "repair reads back wrong: reported, the valid copy untouched");
+	damaged(&rf, 1);
+	{
+		/* No room: nothing may be erased. */
+		static char big[ENV_MAX];
+
+		memset(big, 'x', sizeof big - 1);
+		rc = env_setenv(&rio, 0, "k", big, &sr);
+		ck(rc == NVS_NO_ROOM && rf.nwrites == 0, "setenv with a value that does not fit: nothing erased");
+		rc = env_setenv(&rio, 0, "nosuchkey", NULL, &sr);
+		ck(rc == NVS_NO_ROOM && rf.nwrites == 0, "setenv deleting an absent key: nothing erased");
+	}
+
+	/* Power cut (a torn write) at every step: never zero valid copies,
+	 * and no erase ever begins while the other copy is invalid. */
+	for (int bad = 1; bad <= 2; bad++) {
+		for (int step = 1; step <= 2; step++) {
+			damaged(&rf, bad);
+			rf.tear_at = step;
+			rc = env_commit(&rio, 1, 1, &r);
+			ck(rc != NVC_DONE && rf.lost == 0 && valid_count(&rf) >= 1,
+			   "commit, power cut at a write, one copy invalid: a valid copy is left");
+			damaged(&rf, bad);
+			rf.tear_at = step;
+			rc = env_setenv(&rio, 0, "sw_tryactive", "1", &sr);
+			ck(rc != NVS_DONE && rf.lost == 0 && valid_count(&rf) >= 1,
+			   "setenv, power cut at a write, one copy invalid: a valid copy is left");
+			/* the same, then the next run finishes the repair */
+			rf.tear_at = 0;
+			rc = env_setenv(&rio, 0, "sw_tryactive", "1", &sr);
+			ck(rc == NVS_DONE && valid_count(&rf) == 2 && val(&rf, 1, "sw_tryactive", "1") &&
+			   val(&rf, 2, "sw_tryactive", "1"), "  and a second setenv completes the repair, both agree");
+		}
+	}
+
+	/* setenv. Both valid: as before, one write to the copy read. */
+	trial(&rf);
+	rc = env_setenv(&rio, 0, "sw_tryactive", "0", &sr);
+	ck(rc == NVS_DONE && rf.nwrites == 1 && rf.writes[0] == 2 && !sr.repaired && val(&rf, 2, "sw_tryactive", "0") &&
+	   val(&rf, 1, "sw_tryactive", "1"), "setenv, both valid: only the copy read is written");
+	trial(&rf);
+	rc = env_setenv(&rio, 1, "sw_tryactive", "0", &sr);
+	ck(rc == NVS_DONE && rf.nwrites == 1 && rf.writes[0] == 1 && rf.part[1][ENV_HDR_CRC] == 0 &&
+	   rf.part[2][ENV_HDR_CRC] == 1, "setenv -c 1, both valid: that copy only, flags kept");
+	trial(&rf);
+	rf.write_flips[2] = 1;
+	rc = env_setenv(&rio, 0, "sw_tryactive", "0", &sr);
+	ck(rc == NVS_VERIFY, "setenv, both valid: a bad read-back is reported");
+
+	/* One invalid copy. */
+	for (w = 1; w <= 2; w++) {
+		int bad = 3 - w;
+
+		damaged(&rf, bad);
+		memcpy(keep, rf.part[w], PART);
+		rf.refuse_from = 2;
+		rc = env_setenv(&rio, 0, "sw_tryactive", "0", &sr);
+		ck(rc == NVS_WRITE && rf.nwrites == 1 && rf.writes[0] == bad && sr.repaired == bad,
+		   "setenv, one copy invalid: the invalid copy is written first");
+		ck(!memcmp(keep, rf.part[w], PART) && pick_now(&rf) == w && valid_count(&rf) == 2,
+		   "  the valid copy untouched until the read-back passed, both valid, same copy picked");
+		rf.refuse_from = 0;
+		rf.nwrites = 0;
+		damaged(&rf, bad);
+		rc = env_setenv(&rio, 0, "sw_tryactive", "0", &sr);
+		ck(rc == NVS_DONE && rf.nwrites == 2 && rf.writes[0] == bad && rf.writes[1] == w && rf.lost == 0,
+		   "  then the valid copy is rewritten, so the change takes effect");
+		ck(val(&rf, 1, "sw_tryactive", "0") && val(&rf, 2, "sw_tryactive", "0") && valid_count(&rf) == 2,
+		   "  both copies agree and verify");
+		ck(rf.part[1][ENV_HDR_CRC] == 0x00 && rf.part[2][ENV_HDR_CRC] == (w == 2 ? 0x01 : 0x00) && pick_now(&rf) == w,
+		   "  flags: env2 0x01 as before when it was the valid one, a tie 0x00/0x00 when env2 was repaired; the same copy picked");
+	}
+	damaged(&rf, 1);
+	memcpy(keep, rf.part[2], PART);
+	rc = env_setenv(&rio, 1, "sw_tryactive", "0", &sr);
+	ck(rc == NVS_DONE && rf.nwrites == 1 && rf.writes[0] == 1 && !memcmp(keep, rf.part[2], PART) &&
+	   val(&rf, 1, "sw_tryactive", "0") && valid_count(&rf) == 2, "setenv -c naming the invalid copy: only it is written");
+	damaged(&rf, 1);
+	rc = env_setenv(&rio, 2, "sw_tryactive", "0", &sr);
+	ck(rc == NVS_DONE && rf.nwrites == 2 && rf.writes[0] == 1 && rf.writes[1] == 2 && rf.lost == 0,
+	   "setenv -c naming the only valid copy: the invalid one is still repaired first");
+	damaged(&rf, 1);
+	rf.write_dies[1] = 1;
+	memcpy(keep, rf.part[2], PART);
+	rc = env_setenv(&rio, 0, "sw_tryactive", "0", &sr);
+	ck(rc == NVS_WRITE_REPAIR && !memcmp(keep, rf.part[2], PART), "setenv: repair write dies, the valid copy untouched");
+	damaged(&rf, 1);
+	rf.write_flips[1] = 1;
+	memcpy(keep, rf.part[2], PART);
+	rc = env_setenv(&rio, 0, "sw_tryactive", "0", &sr);
+	ck(rc == NVS_VERIFY_REPAIR && !memcmp(keep, rf.part[2], PART), "setenv: repair reads back wrong, the valid copy untouched");
+	damaged(&rf, 1);
+	memset(rf.part[2] + PART / 2, 0xff, PART / 2);
+	rc = env_setenv(&rio, 0, "k", "v", &sr);
+	ck(rc == NVS_NONE_VALID && rf.nwrites == 0, "setenv, no valid copy: refused, nothing written");
 }
 
 int main(void)
@@ -269,19 +524,18 @@ int main(void)
 		rc = env_commit(&io, 1, 1, &r);
 		ck(rc == NVC_NOT_ACTIVE && f.nwrites == 0, "no sw_active at all: refused");
 	}
+	/* One invalid copy is repaired, not refused (repair_tests below);
+	 * both invalid, or both unreadable, is. */
 	trial(&f);
 	f.part[1][ENV_HDR_LEN + 2] ^= 0x10;
-	rc = env_commit(&io, 1, 1, &r);
-	ck(rc == NVC_NO_PAIR && f.nwrites == 0, "the fallback failing its CRC: refused");
-	trial(&f);
 	f.part[2][ENV_HDR_LEN + 2] ^= 0x10;
 	rc = env_commit(&io, 1, 1, &r);
-	ck(rc == NVC_NO_PAIR && f.nwrites == 0,
-	   "the primary failing its CRC: refused, not committed to the other copy");
+	ck(rc == NVC_NO_PAIR && f.nwrites == 0, "both copies failing their CRC: refused");
 	trial(&f);
 	f.unreadable[1] = 1;
+	f.unreadable[2] = 1;
 	rc = env_commit(&io, 1, 1, &r);
-	ck(rc == NVC_NO_PAIR && f.nwrites == 0, "an unreadable copy: refused");
+	ck(rc == NVC_NO_PAIR && f.nwrites == 0, "both copies unreadable: refused");
 
 	/* The primary fails: the fallback must not be touched. */
 	trial(&f);
@@ -403,9 +657,14 @@ int main(void)
 		ck(rc == NVC_NOT_RUNNING, "force does not skip the other refusals");
 	}
 
-	for (int i = NVC_DONE; i <= NVC_CONFIRM_ARP; i++)
+	repair_tests();
+
+	for (int i = NVC_DONE; i <= NVC_VERIFY_REPAIR; i++)
 		if (!strcmp(env_commit_msg(i), "unknown result"))
 			ck(0, "every result has a message");
+	for (int i = NVS_DONE; i <= NVS_VERIFY; i++)
+		if (!strcmp(env_setenv_msg(i), "unknown result"))
+			ck(0, "every setenv result has a message");
 
 	printf("%s\n", fails ? "FAILED" : "all ok");
 	return fails ? 1 : 0;

@@ -165,3 +165,17 @@ int env_pick(const uint8_t *b1, int ok1, const uint8_t *b2, int ok2)
 		return 2;
 	return 0;
 }
+
+uint8_t env_repair_flags(int l, uint8_t wflag, int *keeps)
+{
+	if (l == 2) {
+		*keeps = 1;
+		return wflag;
+	}
+	if (wflag > 0) {
+		*keeps = 1;
+		return (uint8_t)(wflag - 1);
+	}
+	*keeps = 0;
+	return 0;
+}
