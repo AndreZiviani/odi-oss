@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- `omcicli mib set|create|delete` and the other stock setters omcid does not
+  implement (`set log|sn|devmode|dmmode|loid`, `debug simavc`) now say
+  `omcid does not implement ...; nothing was sent` and exit 1 when omcid is the
+  daemon, instead of sending a request omcid drops and printing nothing, which
+  read as a change that had been made. Against the stock daemon they are sent as
+  before. `docs/TOOLS.md` lists them. Host test: `src/omci/writes-test.sh`.
+  Refs #301.
 - `VLAN_EAPOL_UNTAGGED` follow-ups from a review. omcid now reads the key
   with the VLAN keys and holds it, so an edit of `odi.conf` takes effect on
   `apply.sh omci` only: before, a rebuild the OLT triggered applied the file
