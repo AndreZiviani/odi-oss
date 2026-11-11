@@ -106,8 +106,8 @@ activates the GPON MAC once `omcid` has registered.
 
 ### Prerequisites
 
-Docker, bash, GNU make, git, `curl`, `xz`, `gpg` and `shasum` (the kernel
-fetch), and for the host tests a C compiler, Python 3 and `shellcheck`.
+Docker, bash, GNU make, git, `curl`, `xz`, `gpg`, `gpgv` and `shasum` (the
+kernel fetch), and for the host tests a C compiler, Python 3 and `shellcheck`.
 `make releases` downloads public releases with `gh` when installed, or
 `curl` otherwise; no login or token is required
 ([confd and metricsd](#confd-and-metricsd)).

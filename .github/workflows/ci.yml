@@ -197,7 +197,8 @@ jobs:
           key: dl-clean-build-${{ runner.os }}-${{ hashFiles('packages/fetch.sh', 'packages/*/build.sh', 'kernel/618/fetch.sh', 'src/fetch-releases.sh', 'src/release-sha256.txt') }}
 
       # Fetches the pinned linux-6.18.x fresh (VERSION in kernel/618/fetch.sh) and re-checks its
-      # pinned SHA-256 and the upstream GPG signature; packs it into
+      # pinned SHA-256 and the upstream GPG signature, against the signing
+      # key pinned in that script (no keyserver is asked); packs it into
       # build/kernel-618/tree.tar. Does not compile it -- that is the ~hour
       # this job is not paying.
       - name: "Kernel tree: fetch and verify the pin"

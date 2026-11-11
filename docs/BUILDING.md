@@ -5,9 +5,9 @@ Nothing in this repo touches a stick.
 
 ## Prerequisites
 
-On the build host: Docker, `bash`, GNU `make`, `git`, `curl`, `xz`, `gpg`
-and `shasum` (the kernel fetch checks the tarball both ways), and about
-20 GB free: the toolchain volume is 9 GB, the kernel build volume, the
+On the build host: Docker, `bash`, GNU `make`, `git`, `curl`, `xz`, `gpg`,
+`gpgv` and `shasum` (the kernel fetch checks the tarball both ways), and
+about 20 GB free: the toolchain volume is 9 GB, the kernel build volume, the
 kernel tree and `build/` about 1.7 GB each, the Docker images 2.3 GB.
 The containers are `amd64`; on any other host they run under emulation,
 which is slow for the toolchain and the kernel

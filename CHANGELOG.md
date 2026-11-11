@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- Build: `kernel/618/fetch.sh` checks the kernel signature with `gpgv`
+  against the stable-release signing key pinned in the script, next to its
+  fingerprint, instead of fetching that key from a keyserver on every run.
+  The keyserver call had no time limit: it usually answers in 2 to 8 s, but
+  on 2026-11-11 it hung for 3 to 15 minutes at a time, which held the CI
+  `clean-build` job (normally under 1.5 minutes, cold cache included) for up
+  to 15 minutes and once past its time limit. The second keyserver never
+  returned a usable copy of the key. When neither answered, the check fell
+  back to the pinned SHA-256 alone; now the signature is always checked,
+  with no network, and a bad or missing signature, or one made by any other
+  key, fails the fetch. `gpgv` (part of GnuPG) is now listed with the build
+  prerequisites.
+
 - `nv setenv` and `nv commit` no longer take an environment copy they could not
   read completely for an invalid one. A failed or short read of a copy that is
   in fact valid (a transient error on `/dev/mtdN`) used to send the repair
