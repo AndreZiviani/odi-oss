@@ -27,7 +27,8 @@
 # nothing to the port side; a bad value, a safe-mode boot, no kernel
 # parameter, sds.off); the 2500basex boot watch (sync, the fallback to
 # Fiber 1G, a host that comes up late, no host at all); the trial (expiry,
-# confirm, revert, a sequence that does not read back, every refusal); the
+# confirm, revert, a sequence that does not read back, a state file that
+# cannot be written after the switch, every refusal); the
 # auto-negotiation handed back to host-autoneg.sh in Fiber 1G; reapply;
 # status; host-autoneg.sh standing down while a mode other than
 # Fiber 1G runs. The safe-mode count is test/safe_mode_test.sh.
@@ -95,10 +96,13 @@ if [ "\$sync" = 1 ]; then r=\$(( r | 0x20000 )); else r=\$(( r & ~0x20000 )); fi
 grep -v '^0x214=' "$T/regs" > "$T/regs.m"; printf '0x214=0x%x\n' "\$r" >> "$T/regs.m"; mv "$T/regs.m" "$T/regs"
 echo \$l > "$T/param/host_link"
 EOF
+# An iohook, when present, runs once before the next command: the moment
+# of a hardware write, between the load of the state file and its save.
 cat > "$T/bin/timeout" <<EOF
 #!/bin/sh
 shift
 "$T/bin/model"
+[ -x "$T/iohook" ] && { mv "$T/iohook" "$T/iohook.run"; "$T/iohook.run"; }
 exec "\$@"
 EOF
 cat > "$T/bin/setsid" <<EOF
@@ -466,6 +470,27 @@ printf '#!/bin/sh\nsh "%s" confirm >> "%s/confirm.out" 2>&1\n' "$S" "$T" > "$T/h
 sh "$S" trial-run "$id" 20 > /dev/null 2>&1
 t "confirm fiber1g: the key is removed" "^$" "$(key)"
 t "confirm fiber1g: setting fiber1g, the port follows its SerDes" "^trial_confirmed fiber1g 0 1$" "$(st event) $(st setting) $(p host_forced) $(p host_autoneg)"
+
+# The state file cannot be written after the switch (/var full). The file
+# still says the mode before, and expire and revert go by it, so the port
+# has to go back at once. The state directory is the link $T/varlink to
+# $T/run here: the iohook takes it away at the first register access and
+# the trial window puts it back, which stops root too (a read-only
+# directory would not).
+newboot
+echo x2500 > "$T/model"
+ln -s run "$T/varlink"
+STATE=$T/varlink/host-serdes sh "$S" boot > /dev/null
+STATE=$T/varlink/host-serdes sh "$S" try 2500basex > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\nmv "%s/varlink" "%s/varlink.off"\n' "$T" "$T" > "$T/iohook"; chmod +x "$T/iohook"
+printf '#!/bin/sh\ngrep "^0x214=" "%s/regs" > "%s/window.reg"\nmv "%s/varlink.off" "%s/varlink"\n' "$T" "$T" "$T" "$T" > "$T/hook"; chmod +x "$T/hook"
+out=$(STATE=$T/varlink/host-serdes sh "$S" trial-run "$id" 20 2>&1)
+t "no state file after the switch: said so" "could not write" "$out"
+t "  the registers are Fiber 1G before the window" "^0x4$" "$(printf '0x%x' $(( $(sed 's/^0x214=//' "$T/window.reg") & 0xa11f )))"
+t "  and after it, the port following its SerDes" "^0x4 0 1$" "$(printf '0x%x' $(( $(reg 0x214) & 0xa11f ))) $(p host_forced) $(p host_autoneg)"
+t "  logged" "event=trial_failed .*could not write .*back to Fiber 1G" "$(cat "$T/kmsg")"
+t "  the expiry clears the trial once the file can be written" "^fiber1g steady $" "$(st running) $(st phase) $(st trial_id)"
 
 # Back in Fiber 1G the auto-negotiation is what host-autoneg.sh last ran.
 newboot

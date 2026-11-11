@@ -20,7 +20,8 @@
 # trial comes up on the old address with the store untouched, a confirm over
 # the old address is refused, the same for a second-address-only and a
 # netmask-only change, every refusal of try, the SSH_CONNECTION fallback, a
-# key that does not stick, and the stale lock.
+# key that does not stick, a roll-back that does not stick either, and the
+# stale lock.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=test/host-flock.sh
@@ -346,6 +347,32 @@ t "  ... exit 1" "^1$" "$(cat "$T/confirm.rc")"
 t "  ... the key written before it is put back" "^192.168.0.1$" "$(key LAN_IP_ADDR)"
 t "  ... the trial carried on" "phase=trial" "$(cat "$T/status.out")"
 t "  ... and expired" "^trial_expired$" "$(st event)"
+
+# ---- the roll-back does not stick either: the message says what the store holds
+# flash-once is the real flash that writes one set and refuses every later
+# one, as a config partition that filled up after the first key.
+cat > "$T/bin/flash-once" <<EOF
+#!/bin/sh
+if [ "\$1" = set ]; then
+	[ ! -e "$T/set.done" ] || exit 1
+	: > "$T/set.done"
+fi
+exec sh "$F" "\$@"
+EOF
+chmod +x "$T/bin/flash-once"
+store 192.168.0.1 255.255.255.0 0 192.168.100.1
+newboot
+sh "$S" try LAN_IP_ADDR=10.1.1.1 LAN_SUBNET=255.255.0.0 > /dev/null
+hook "FLASH='$T/bin/flash-once' sh '$S' confirm 10.1.1.1 10.1.1.50 > '$T/confirm.out' 2>&1; echo \$? > '$T/confirm.rc'; sh '$S' status > '$T/status.out'"
+run_trial
+t "a roll-back that does not stick: refused, naming the key" "could not store LAN_SUBNET=255.255.0.0" "$(cat "$T/confirm.out")"
+t "  ... and what could not be put back, as the store holds it" "could not put back: LAN_IP_ADDR=10\.1\.1\.1\." "$(cat "$T/confirm.out")"
+n "  ... not as nothing kept" "nothing is kept" "$(cat "$T/confirm.out")"
+t "  ... exit 1" "^1$" "$(cat "$T/confirm.rc")"
+t "  ... the store is as the message says" "^10.1.1.1 255.255.255.0$" "$(key LAN_IP_ADDR) $(key LAN_SUBNET)"
+t "  ... the trial carried on" "phase=trial" "$(cat "$T/status.out")"
+t "  ... and expired" "^trial_expired$" "$(st event)"
+store 192.168.0.1
 
 # ---- status
 newboot

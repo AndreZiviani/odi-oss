@@ -1371,6 +1371,11 @@ back.
 
 `confirm` stores the keys that changed, reading each back (a key that does not
 stick puts the others back and leaves the trial running), then ends the trial.
+The keys go to the store one at a time (`flash set` writes one), and the ones
+put back are read back too: when one of those does not stick either, the
+refusal names it with the value the store holds, because the store then has
+new values next to old ones until the confirm is repeated or the old values
+are stored.
 `LOCAL` and `PEER` are the address the request arrived on and the client's;
 confd passes them from the socket, and over ssh they come from
 `SSH_CONNECTION`. The confirm is refused unless `LOCAL` is an address the
