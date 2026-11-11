@@ -162,7 +162,10 @@ reset: a trial that never answered still says how far it got
 9. **The log trim**, a background loop: `/var` is tmpfs now, capped, but
    still not evicted on its own, and omcid logs every OMCI frame (about
    1.7 MB a day on a busy OLT). Past 256 KB each log is cut back to its
-   last 128 KB; the writers append, so they carry on at the new end.
+   last 128 KB; the writers append, so they carry on at the new end. The
+   copy for the cut is written to `/var/tmp`, a tmpfs of its own, so a
+   full `/var` keeps those 128 KB too; a log whose copy cannot be made
+   whole there either is emptied (`log_trim`, `rcs-lib.sh`).
 10. **Registering the watchdog clients**
     (`echo "omcid 60" > /proc/odi_wdt/register`): a deadline the kernel
     enforces once omcid's own main loop starts pinging it, independent of

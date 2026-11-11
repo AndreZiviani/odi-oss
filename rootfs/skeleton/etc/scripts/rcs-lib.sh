@@ -101,6 +101,31 @@ omci_reactivate() {
 	echo "$found"
 }
 
+# log_trim <file>: past LOG_MAX bytes, cut <file> back to its last LOG_KEEP.
+# The copy goes to LOG_CUT_DIR, /var/tmp, a tmpfs of its own (/etc/fstab):
+# next to the log there is no room for it when /var is full. busybox tail -c
+# of a file exits 0 when its write fails, so the copy is judged by its size
+# and not by the status. A copy that is not whole empties the log, which
+# gives /var its space back all the same.
+LOG_MAX=${LOG_MAX:-262144}
+LOG_KEEP=${LOG_KEEP:-131072}
+LOG_CUT_DIR=${LOG_CUT_DIR:-/var/tmp}
+log_trim() {
+	f=$1
+	[ -f "$f" ] || return 0
+	n=$(wc -c < "$f" 2>/dev/null)
+	[ "${n:-0}" -gt "$LOG_MAX" ] || return 0
+	cut=$LOG_CUT_DIR/${f##*/}.cut
+	{ tail -c "$LOG_KEEP" "$f" > "$cut"; } 2>/dev/null
+	n=$({ wc -c < "$cut"; } 2>/dev/null)
+	if [ "${n:-0}" -eq "$LOG_KEEP" ]; then
+		cat "$cut" > "$f"
+	else
+		: > "$f"
+	fi
+	rm -f "$cut" 2>/dev/null
+}
+
 dev_hook() { :; }
 dev_confirm_ok() { return 0; }
 pon_steps() { pon_steps_default; }	# the rcS.dev pon-steps override replaces this

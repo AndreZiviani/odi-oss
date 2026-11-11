@@ -13,6 +13,19 @@ listed here.
   that could not be put back with the value the store holds. The keys are
   still written one at a time, so a power cut between two of them can leave
   the same mix.
+- Host link: a trial of `HOST_AUTONEG` or `HOST_SERDES` goes back at once
+  when its state file cannot be written after the switch (issue 358, found
+  reading the code, not seen on a stick). With `/var` full the file kept
+  saying the mode before, so the expiry and `revert` skipped the hardware
+  write and logged the port as back while it stayed in the unconfirmed
+  trial mode until a power cycle.
+- Logs: the log trim in `rcS` keeps the last 128 KB of a log when `/var` is
+  full (issue 359). It wrote its copy next to the log. With `/var` full the
+  copy came out empty or cut short, busybox `tail` exited 0 all the same,
+  and the log was replaced by that: the space came back, the log was gone.
+  The copy goes to `/var/tmp` now, a tmpfs of its own, and is judged by its
+  size; a log whose copy cannot be made whole there either is emptied.
+  Checked with the image busybox on a full tmpfs under qemu, not on a stick.
 - Flash: `fwu.sh` no longer accepts a read-back that ended early. The
   read-back pipes the tar member into `cmp` and took "EOF on -" for success,
   which is what `cmp` says when the member ends before the partition does,
