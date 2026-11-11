@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Management address: `mgmt-addr.sh confirm` reads back the roll-back after
+  a key that does not stick (issue 360, found reading the code, not seen on
+  a stick). When the roll-back fails too, the store holds new values next
+  to old ones, a set that was never tried and that the next boot would
+  use; the refusal said "nothing is kept" regardless. It now names each key
+  that could not be put back with the value the store holds. The keys are
+  still written one at a time, so a power cut between two of them can leave
+  the same mix.
 - Flash: `fwu.sh` no longer accepts a read-back that ended early. The
   read-back pipes the tar member into `cmp` and took "EOF on -" for success,
   which is what `cmp` says when the member ends before the partition does,
