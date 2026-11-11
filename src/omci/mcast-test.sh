@@ -697,6 +697,28 @@ m=$(grep -c 'multicast policy written' "$log")
 send "$log" 0070 4f 0002 0000 ""
 written "$log" $((m + 1))
 check "a MIB reset: no snooping" "$(policy)" "snooping=0"
+
+# A busy channel: an inert Get every ~0.3 s, so the quiet second never comes.
+# The MIB reset marks the policy dirty; it must still be exported by the cap
+# (5 s after the first change, respond/main.c), while the Gets go on.
+m=$(exported "$log")
+( _g=0
+  while [ "$_g" -lt 40 ]; do
+	_g=$((_g + 1))
+	$Q cli/build/omcli --inject "$(printf 'ee%02x490a%s%s%s%060d00000028%08d' "$_g" 0100 0000 8000 0 0)" > /dev/null 2>&1
+	sleep 0.3
+  done ) > /dev/null 2>&1 &
+busy=$!
+send "$log" 0071 4f 0002 0000 ""
+wait_for "$log" 'multicast policy [wu]' 9 $((m + 1))
+if kill -0 "$busy" 2>/dev/null; then
+	echo "ok    a rebuild runs under a channel that never goes quiet"
+else
+	echo "FAIL  the Gets ended before the rebuild: the cap was not what ran it"
+	fail=$((fail + 1))
+fi
+kill "$busy" 2>/dev/null
+wait "$busy" 2>/dev/null
 omcid_stop "$pid"
 
 [ "$fail" -eq 0 ] || keep_log "$log" mcast-test.log

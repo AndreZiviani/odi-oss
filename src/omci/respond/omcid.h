@@ -29,6 +29,9 @@
 #include "../omci_msgq.h"
 
 #define NL_POLL_US     2000    /* see nl_open: this paces the CLI too */
+/* The longest a dirty rebuild waits, in seconds, from the first change, when
+ * OMCI frames keep arriving less than a second apart (respond/main.c). */
+#define REBUILD_MAX_S  5
 #define CLI_RETRIES    100
 #define CLI_RETRY_NS   (5 * 1000 * 1000)
 #define DRV_OPT        0x310au
