@@ -721,6 +721,54 @@ kill "$busy" 2>/dev/null
 wait "$busy" 2>/dev/null
 omcid_stop "$pid"
 
+# The cap is timed from the first change to the QoS or the bridge connections,
+# not from the start of omcid, where only the multicast flag is pending (it
+# starts out set). The cap counts whole seconds (now_s - dirty_since_s >=
+# REBUILD_MAX_S), so a change marked at second c + f (0 <= f < 1) is capped at
+# c + 5, which is 5 - f s later: between 4 and 5 s.
+# A fresh omcid under a channel that never goes quiet, a bridge port created
+# about 3 s in (start at second u + g): the old cap, stamped at the start, ran
+# out at u + 5, 4 to 5 s after the start and so 1 to 2 s after the Create, and
+# had rebuilt by the check 2 s after the Create. The cap timed from the Create
+# runs out 4 to 5 s after it, so at that check, with 2 s to spare, nothing may
+# have been rebuilt; the bound on the wait for it is generous.
+rm -f /var/run/omcid-mib.snap /var/run/odi-mcast.conf
+: > "$log"
+$Q respond/build/omcid -d -g /tmp/mcast-gpon > "$log" 2>&1 &
+pid=$!
+omcid_up "$log"
+( _g=0
+  while [ "$_g" -lt 80 ]; do
+	_g=$((_g + 1))
+	$Q cli/build/omcli --inject "$(printf 'ee%02x490a%s%s%s%060d00000028%08d' "$_g" 0100 0000 8000 0 0)" > /dev/null 2>&1
+	sleep 0.3
+  done ) > /dev/null 2>&1 &
+busy=$!
+sleep 3
+send "$log" 0090 44 002f 0001 "00010101010100000001000101"
+sleep 2
+check "a Create 3 s in: nothing rebuilt 2 s later, the old cap (4 to 5 s after the start) has passed" \
+      "$(grep -c 'multicast policy [wu]\|bridge connections rebuilt' "$log")" "0"
+_rx1=$(grep -c '^<- ' "$log")
+wait_for "$log" 'bridge connections rebuilt' 8
+# Frames handled between the check and the rebuild: the Gets were arriving
+# while the cap ran out, at least a few of them (4 to 5 s after the Create,
+# 2 s of it after the check, a Get every 0.3 s plus the time an omcli takes).
+# This shows that frames kept arriving; it does not show that no gap reached a
+# second, which the quiet second would need to be what rebuilt: the 80 Gets
+# last longer than the whole wait, and the rebuild that comes is the cap's
+# only if the Get loop is still running when it does.
+_rx2=$(grep -c '^<- ' "$log")
+if kill -0 "$busy" 2>/dev/null && [ "$((_rx2 - _rx1))" -ge 3 ]; then
+	echo "ok    the cap rebuilds 4 to 5 s after the first change, Gets still arriving ($((_rx2 - _rx1)) in between)"
+else
+	echo "FAIL  the Gets ended or stopped (${_rx1} to ${_rx2} frames) before the rebuild: the cap was not what ran it"
+	fail=$((fail + 1))
+fi
+kill "$busy" 2>/dev/null
+wait "$busy" 2>/dev/null
+omcid_stop "$pid"
+
 [ "$fail" -eq 0 ] || keep_log "$log" mcast-test.log
 if [ "$fail" -eq 0 ]; then echo "mcast-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi
 suite_exit
