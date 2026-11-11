@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Watchdog: `odi_wdt` takes its uptime from the 64-bit tick count (issue
+  356, found reading the code; no stick of mine has been up that long). The
+  quotient of the 32-bit `jiffies` was back at 0 after 198.8 days of uptime.
+  From then on the heartbeat line stayed away for another 198 days, and a
+  client that pinged last before the wrap and hung before its next ping was
+  not reset. A healthy stick was not reset by it.
 - Flash: `fwu.sh` no longer accepts a read-back that ended early. The
   read-back pipes the tar member into `cmp` and took "EOF on -" for success,
   which is what `cmp` says when the member ends before the partition does,

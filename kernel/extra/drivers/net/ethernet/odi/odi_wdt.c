@@ -35,6 +35,7 @@
 #include <linux/seq_file.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
+#include <linux/math64.h>
 #include <linux/mm.h>
 #include <linux/swap.h>
 #include <linux/uaccess.h>
@@ -385,9 +386,17 @@ static struct timer_list odi_wdt_deadline_timer;
  */
 static DEFINE_MUTEX(odi_wdt_flag_lock);
 
+/* Seconds since boot, on the clock the deadline timer and the kicker run
+ * on: the tick. From the 64-bit count, because jiffies is 32 bits wide
+ * here and at HZ=250 its quotient is back at 0 after 2^32 / 250 s, 198.8
+ * days, below every stamp the deadline functions keep (last_ping_s,
+ * last_beat_s, last_kick_s): no heartbeat for the next 198 days, and no
+ * reset for a client whose last ping was before the wrap. As an unsigned
+ * int the seconds last 136 years.
+ */
 static unsigned int odi_wdt_uptime_s(void)
 {
-	return (unsigned int)((jiffies - INITIAL_JIFFIES) / HZ);
+	return (unsigned int)div_u64(get_jiffies_64() - INITIAL_JIFFIES, HZ);
 }
 
 static int odi_wdt_kick_thread(void *data)
