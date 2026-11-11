@@ -62,6 +62,11 @@ enum { A_NONE, A_MIBSEL, A_CLSENT, A_ATTR, A_NUM,
  * is a deleted managed entity. Reading needs no ceremony; `set log` and the
  * debug dumps are reversible and need none either. */
 #define F_WRITE 1
+/* The command exists in the stock daemon, and omcid does not implement it
+ * (respond/vqsrv.c has no case for the id): its reply goes to a file this
+ * client never reads for these rows, so the command would print nothing and
+ * change nothing. Against omcid the client says so and sends nothing. */
+#define F_NOOMCID 2
 
 /* Keyword tables the vendor resolves by strcmp inside the handler or the
  * client. Values read from the handlers, not from the usage text. */
@@ -98,21 +103,21 @@ static const struct cmd cmds[] = {
 { "get",  "version",  19,  ANS_FILE,  A_NONE,   0, "driver version" },
 { "get",  "tables",    6,  ANS_FILE,  A_NONE,   0, "registered MIB tables -- DEADLOCKS omci_app, needs -f" },
 
-{ "set",  "log",       2,  ANS_NONE,  A_LOG,     0, "<usrLevel> <drvLevel>, each off|err|warn|info|dbg" },
+{ "set",  "log",       2,  ANS_NONE,  A_LOG,     F_NOOMCID, "<usrLevel> <drvLevel>, each off|err|warn|info|dbg" },
 { "set",  "logfile",   4,  ANS_NONE,  A_LOGFILE, 0, "<mode> [actionMask] [file]" },
-{ "set",  "sn",        0,  ANS_NONE,  A_SN,      F_WRITE, "<vendorId> <8 hex digits>" },
-{ "set",  "devmode",   7,  ANS_NONE,  A_STR35,   F_WRITE, "router|bridge|hybrid" },
-{ "set",  "dmmode",    9,  ANS_NONE,  A_KEYNUM,  F_WRITE, "off|on_wq|on_bc_mc|on_wq_bc_mc" },
-{ "set",  "loid",     11,  ANS_NONE,  A_LOID,    F_WRITE, "<loid> [password]" },
+{ "set",  "sn",        0,  ANS_NONE,  A_SN,      F_WRITE | F_NOOMCID, "<vendorId> <8 hex digits>" },
+{ "set",  "devmode",   7,  ANS_NONE,  A_STR35,   F_WRITE | F_NOOMCID, "router|bridge|hybrid" },
+{ "set",  "dmmode",    9,  ANS_NONE,  A_KEYNUM,  F_WRITE | F_NOOMCID, "off|on_wq|on_bc_mc|on_wq_bc_mc" },
+{ "set",  "loid",     11,  ANS_NONE,  A_LOID,    F_WRITE | F_NOOMCID, "<loid> [password]" },
 { "set",  "resetlauth", 15, ANS_QUEUE, A_NONE,   F_WRITE, "reset the loid auth attempt count" },
 
 { "mib",  "get",      29,  ANS_FILE,  A_MIBSEL, 0, "[all | classId | tableName] [entityId] [--secrets]" },
 { "mib",  "getcurr",  30,  ANS_FILE,  A_MIBSEL, 0, "PM current accumulations: classId|tableName [entityId]" },
 { "mib",  "getalm",   31,  ANS_FILE,  A_CLSENT, 0, "[classId [entityId]]" },
 { "mib",  "getattr",  33,  ANS_QUEUE, A_ATTR,   0, "classId entityId attrIndex [--secrets]" },
-{ "mib",  "create",   26,  ANS_NONE,  A_MIBCREATE, F_WRITE, "classId entityId \"set-by-create values\"" },
-{ "mib",  "delete",   27,  ANS_NONE,  A_MIBDEL,    F_WRITE, "classId entityId" },
-{ "mib",  "set",      28,  ANS_NONE,  A_MIBSET,    F_WRITE, "classId entityId attrName value" },
+{ "mib",  "create",   26,  ANS_NONE,  A_MIBCREATE, F_WRITE | F_NOOMCID, "classId entityId \"set-by-create values\"" },
+{ "mib",  "delete",   27,  ANS_NONE,  A_MIBDEL,    F_WRITE | F_NOOMCID, "classId entityId" },
+{ "mib",  "set",      28,  ANS_NONE,  A_MIBSET,    F_WRITE | F_NOOMCID, "classId entityId attrName value" },
 { "mib",  "reset",    32,  ANS_NONE,  A_NONE,      F_WRITE, "trigger a MIB reset -- the OLT reprovisions, or does not" },
 
 { "dump", "avltree",  34,  ANS_FILE,  A_NUM,    0, "[avlKeyId]" },
@@ -121,7 +126,7 @@ static const struct cmd cmds[] = {
 { "dump", "srvflow",  37,  ANS_FILE,  A_NONE,   0, "data path service flows" },
 { "dump", "tasks",    38,  ANS_FILE,  A_NONE,   0, "tasks" },
 
-{ "debug", "simavc",  40,  ANS_NONE,  A_SIMAVC, F_WRITE, "classId entityId attrIndex (1..16)" },
+{ "debug", "simavc",  40,  ANS_NONE,  A_SIMAVC, F_WRITE | F_NOOMCID, "classId entityId attrIndex (1..16)" },
 { "debug", "detectiotvlan", 41, ANS_FILE, A_NONE, 0, "detect IOT vlan info" },
 { "debug", "gendot",  42,  ANS_FILE,  A_NONE,   0, "write /tmp/omci_dot_file" },
 { "debug", "showregmod", 43, ANS_FILE, A_NONE,  0, "registered feature modules" },
@@ -169,6 +174,21 @@ static int parse_u32(const char *s, uint32_t *out)
 	return n > 0;
 }
 
+/* 1, after saying so, when the row is one omcid does not implement and omcid
+ * is the daemon listening: its own queue existing is the handshake, as in
+ * main(). Against the stock daemon the command is sent as before. Nothing is
+ * sent here either way. */
+static int not_in_omcid(unsigned flags, const char *group, const char *name,
+			uint32_t id)
+{
+	if (!(flags & F_NOOMCID) || mq_open(OMCLI_KEY, 0) < 0)
+		return 0;
+	out_fmt("%% omcid does not implement `%s %s` (command %d); nothing was sent\n",
+		group, name, (long)id);
+	out_flush();
+	return 1;
+}
+
 static void usage(void)
 {
 	const char *g = "";
@@ -179,8 +199,9 @@ static void usage(void)
 			g = cmds[i].group;
 			out_fmt("  %s\n", g);
 		}
-		out_fmt("    %-11s id %-3d %s %s\n", cmds[i].name, (long)cmds[i].id,
-			(cmds[i].flags & F_WRITE) ? "-f" : "  ", cmds[i].help);
+		out_fmt("    %-11s id %-3d %s %s%s\n", cmds[i].name, (long)cmds[i].id,
+			(cmds[i].flags & F_WRITE) ? "-f" : "  ", cmds[i].help,
+			(cmds[i].flags & F_NOOMCID) ? " [stock daemon only]" : "");
 	}
 	out("\n  --id N [-f]     send a command id directly; -f is needed for\n"
 	    "                  any id not listed above, which is assumed to write\n");
@@ -192,7 +213,9 @@ static void usage(void)
 	    "  --inject-raw HEX  the same, bytes exactly as given, any length\n"
 	    "  --inject-file F the same for every frame in F, one per line\n");
 	out("\nThe list above is the stock daemon's. When omcid is listening its\n"
-	    "own commands are used instead -- `omcli help` for those.\n");
+	    "own commands are used instead -- `omcli help` for those. A command marked\n"
+	    "[stock daemon only] is refused when omcid is listening: omcid does not\n"
+	    "implement it, and sending it would print nothing and change nothing.\n");
 	out("  Read commands only for now; the setters come with their payloads.\n");
 	out_flush();
 }
@@ -963,6 +986,9 @@ int main(int argc, char **argv)
 			if (cmds[i].id == id) {
 				known = 1;
 				answer = cmds[i].answer;
+				if (not_in_omcid(cmds[i].flags, cmds[i].group,
+						 cmds[i].name, id))
+					return 1;
 			}
 		/* Same rule as omciprobe: an id this does not know is assumed
 		 * to write, because most of the 45 do. */
@@ -990,6 +1016,8 @@ int main(int argc, char **argv)
 		}
 		id = c->id;
 		answer = c->answer;
+		if (not_in_omcid(c->flags, c->group, c->name, id))
+			return 1;
 		if ((c->flags & F_WRITE) && !force) {
 			out_fmt("%% `%s %s` changes the daemon's state; add -f\n",
 				c->group, c->name);
