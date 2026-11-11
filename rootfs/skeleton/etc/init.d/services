@@ -28,11 +28,13 @@
 # re-registers it with deadline 0, which frees the client (odi_wdt.c
 # client_find skips a zero deadline), and `start omcid` registers it again
 # before killing the placeholder; the deadline counts from that moment and
-# omcid pings within 15 s of starting.
+# omcid pings within 15 s of starting. A safe-mode boot (safe-mode.sh) runs
+# omcid without a deadline, and `start omcid` leaves it that way.
 set -u
 OMCID_DEADLINE_S=${ODI_WDT_OMCID_DEADLINE_S:-60}
 WDT_REGISTER=${WDT_REGISTER:-/proc/odi_wdt/register}
 CONFIG_DIR=${CONFIG_DIR:-/etc/config}
+SAFE_FLAG=${SAFE_FLAG:-/var/run/safe-mode}
 
 # Writes "omcid <deadline>" to the watchdog, when there is one; bounded,
 # since a /proc write that blocks would hang the prompt.
@@ -99,7 +101,7 @@ stop)
 	;;
 start)
 	rm -f "$CONFIG_DIR/$svc.off" 2>/dev/null
-	[ "$svc" = omcid ] && wdt_omcid "$OMCID_DEADLINE_S"
+	[ "$svc" = omcid ] && [ ! -f "$SAFE_FLAG" ] && wdt_omcid "$OMCID_DEADLINE_S"
 	kill_by_comm "$comm"
 	# The placeholder (respawn-off.sh) always execs under that same path
 	# regardless of which .off entry launched it, so this can also kill an

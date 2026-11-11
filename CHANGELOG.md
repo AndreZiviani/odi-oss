@@ -19,6 +19,25 @@ listed here.
   stick a job that took longer was reported as "the write job did not start"
   and then ran and wrote the slot anyway. A job that starts after the
   starter gave up now exits without writing. Found reading the code.
+- Safe mode: a safe-mode boot can now be reached and stays up in three cases
+  where it could not (issues 351 and 352, found reading the code, not
+  seen on a stick). rcS no longer registers `omcid` with the kernel watchdog
+  in it, and `services start omcid` does not arm the deadline there: with
+  an omcid that dies before its first ping at every start, the safe-mode
+  boot was reset after 60 s like the three boots before it, and the stick
+  looped. `svc-confd.sh` and `svc-dropbear.sh` ignore `confd.off` and
+  `dropbear.off` in a safe-mode boot and leave the files in place: with both
+  set, that boot had the rescue address and the default password but neither
+  the web UI nor ssh, and no reflash removes the files. And with no ssh host
+  key and no way to write one, a safe-mode boot runs dropbear on a key in
+  RAM instead of parking it. A normal boot is unchanged.
+- Network: `network.sh` picks the management device by where the address
+  is, not by whether `br0` exists (issue 353, found reading the code). When
+  the bridge path fails after `br0` was created, the boot puts the address
+  on `eth0` and an empty `br0` stays behind; `network.sh configured` then
+  looked at `br0`, found nothing and never confirmed that boot to the
+  watchdog, and `addr` and `primary` acted on the empty bridge too. All
+  three modes now use `eth0` when `br0` holds no address and `eth0` does.
 - Build: `kernel/618/fetch.sh` checks the kernel signature with `gpgv`
   against the stable-release signing key pinned in the script, next to its
   fingerprint, instead of fetching that key from a keyserver on every run.

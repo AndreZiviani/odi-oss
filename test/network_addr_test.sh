@@ -99,6 +99,26 @@ store 192.168.0.1 1 192.168.100.1
 run addr > /dev/null
 t "with no bridge the addresses go on eth0" "192.168.100.1 255.255.255.0" "$(cat "$T/if/eth0:2")"
 
+# The boot can fall back to eth0 after br0 was created (brctl addbr worked,
+# addif or the address did not): br0 is there and empty. The device that
+# holds the address is the management device then, in every mode, or that
+# boot is never confirmed.
+mkdir -p "$T/sys/br0"
+rm -f "$T/if/br0" "$T/if/br0:2" "$T/if/eth0:2" "$T/if/calls"
+echo "192.168.0.1 255.255.255.0" > "$T/if/eth0"
+store 192.168.0.1 1 192.168.100.1
+t "an empty br0 beside an addressed eth0: configured confirms on eth0" \
+  "0 network: eth0 holds the configured address 192.168.0.1" "$(out=$(run configured); echo "$? $out")"
+t "primary reads eth0" "192.168.0.1 255.255.255.0" "$(run primary)"
+out=$(run addr)
+t "addr leaves the primary on eth0" "network: eth0 keeps 192.168.0.1 netmask 255.255.255.0" "$(echo "$out" | sed -n 1p)"
+t "and puts the second address beside it" "192.168.100.1 255.255.255.0" "$(cat "$T/if/eth0:2")"
+t "br0 stays empty" "absent" "$([ -f "$T/if/br0" ] || [ -f "$T/if/br0:2" ] && echo present || echo absent)"
+rm -f "$T/if/eth0" "$T/if/eth0:2" "$T/if/calls"
+t "a br0 with no address and no address on eth0 is still not confirmed" "1" "$(run configured > /dev/null; echo $?)"
+t "and is still the device addr sets" "192.168.0.1 255.255.255.0" "$(run addr > /dev/null; cat "$T/if/br0")"
+rm -f "$T/if/br0:2"
+
 # A value the kernel refuses is not applied, and never moves a running stick:
 # the address stays, `addr` says so and fails. (The boot falls back to the
 # stock default for the same values, as when the key is absent.)

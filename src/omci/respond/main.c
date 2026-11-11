@@ -15,9 +15,9 @@
 /* wdt_ping() -- the odi_wdt watchdog rule this daemon owns (docs/SETTINGS.md,
  * "Watchdog rules"): a cheap write to /proc/odi_wdt/ping every few seconds
  * from this OWN main loop, not a separate probing process. rcS registers
- * "omcid" with its deadline at boot (/proc/odi_wdt/register); the kernel
- * arms it on the first ping here and resets the board if this stops
- * arriving. A missing /proc/odi_wdt (host, qemu, a stock kernel) makes the
+ * "omcid" with its deadline at boot (/proc/odi_wdt/register), except in a
+ * safe-mode boot; the kernel arms it at that registration and resets the
+ * board if the pings here do not arrive in time. A missing /proc/odi_wdt (host, qemu, a stock kernel) makes the
  * open fail and the write a silent no-op -- exactly as intended off real
  * hardware.
  */
