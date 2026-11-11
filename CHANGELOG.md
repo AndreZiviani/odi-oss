@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Host link: a trial of `HOST_AUTONEG` or `HOST_SERDES` goes back at once
+  when its state file cannot be written after the switch (issue 358, found
+  reading the code, not seen on a stick). With `/var` full the file kept
+  saying the mode before, so the expiry and `revert` skipped the hardware
+  write and logged the port as back while it stayed in the unconfirmed
+  trial mode until a power cycle.
 - Logs: the log trim in `rcS` keeps the last 128 KB of a log when `/var` is
   full (issue 359). It wrote its copy next to the log. With `/var` full the
   copy came out empty or cut short, busybox `tail` exited 0 all the same,
