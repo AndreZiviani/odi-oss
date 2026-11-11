@@ -364,6 +364,23 @@ send "$log" 0501 48 0088 0140 "100001"
 check "a row already held still takes a Set" "$(answer "$log" 0501 | cut -c1-2)" "00"
 send "$log" 0502 4f 0002 0000 ""
 
+# The stock setters omcid does not implement: refused by the client, nothing
+# sent, exit 1 (the request used to be dropped silently). set logfile and mib
+# reset are implemented and are not in this list.
+for c in "mib set 84 4354 FwdOp 0x00" "mib create 84 1 0" "mib delete 84 1" \
+	 "set sn ABCD 01020304" "set devmode router" "set dmmode off" \
+	 "set loid abc" "set log err err" "debug simavc 84 1 1"; do
+	got=$($Q cli/build/omcli $c -f 2>&1); rc=$?
+	check "omcli $c: refused, status 1" "$rc" "1"
+	check "omcli $c: says omcid does not implement it" \
+	      "$(printf '%s' "$got" | grep -c 'omcid does not implement .*nothing was sent')" "1"
+done
+got=$($Q cli/build/omcli --vendor --id 28 -f 2>&1); rc=$?
+check "omcli --vendor --id 28 -f: refused too" "$rc:$(printf '%s' "$got" | grep -c 'does not implement')" "1:1"
+got=$($Q cli/build/omcli mib reset -f 2>&1); rc=$?
+check "an implemented setter (mib reset -f) is not refused" \
+      "$rc:$(printf '%s' "$got" | grep -c 'does not implement')" "0:0"
+
 omcid_stop "$pid"
 [ "$fail" -eq 0 ] || keep_log "$log" writes-test.log
 if [ "$fail" -eq 0 ]; then echo "writes-test.sh: all checks passed"; else echo "FAILED ($fail)"; fi

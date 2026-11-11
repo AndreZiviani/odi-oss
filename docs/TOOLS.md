@@ -946,8 +946,14 @@ keeps using it until it restarts. The stock command shapes
 [entity]`, `dump conn|srvflow|qmap|tasks`) are answered by omcid too, in the
 stock output format, which is what `confd`'s MIB and Services pages and the
 exporter's `omcicli dump srvflow` rely on. `omcli` with no arguments prints
-the stock command list; the setters in it (`set sn|devmode|dmmode|loid`, `mib
-set|create|delete`) need `-f` and omcid does not implement most of them.
+the stock command list. omcid implements none of the setters in it
+(`set log|sn|devmode|dmmode|loid`, `mib set|create|delete`, `debug simavc`;
+the list marks them `[stock daemon only]`): when omcid is listening, `omcli`
+says `omcid does not implement ...; nothing was sent` and exits 1, without
+sending, with or without `-f` (and for `--vendor --id N`). They are sent only to
+the stock daemon, which does implement them. Change the MIB with the OLT, or
+set a key in `odi.conf` and run `apply.sh omci`. `set logfile` and `mib reset`
+are the only setters omcid answers.
 `omcicli get tables` is safe against our omcid (it has no lock to deadlock
 on), but the stock daemon wedges on it, so the web UI refuses it outright.
 
@@ -1445,7 +1451,7 @@ Under `pon/`, the GPON and OMCI state a PON problem needs:
 | `diag.txt` | one `diag` run: `gpon get onu-state`, `gpon get alarm-status`, `gpon get flows`, `mib dump counter port all`, and `register get 0xf020a8 240`, the PON queue window that cmd 23 and 25 write (`docs/SWITCH.md`) |
 | `odi_gpon-status.txt`, `odi_gpon-counters.txt`, `odi_gpon-flows.txt`, `odi_gpon-ploam.txt` | `/proc/odi_gpon/status`: ONU state, Alloc-IDs, alarm and state times; `counters`: the link counters; `flows`: the per-flow GEM counters; `ploam`: PLOAM totals and the ring (bodies withheld, below) |
 | `odi_omci.txt` | `/proc/odi_omci`: the OMCI channel counters |
-| `omcli_{state,provision,flows,tcont,conn}.txt` | `omcli`: what omcid holds and programmed |
+| `omcli_{state,provision,flows,tcont,conn,vlan}.txt` | `omcli`: what omcid holds and programmed; `vlan` is the VLAN handling (stick tags or transparent) and any `FwdOp` override of class 84 from `RTK_DEVINFO_SPECVER`, numbers only, so the bundle alone shows whether the override is in force |
 | `omcli_mib_<class>.txt` | `omcli mib <class>` for ONU-G, ONU2-G, PPTP Ethernet UNI, VEIP, the bridge and mapper classes, VLAN filtering and extended VLAN tagging, T-CONT, ANI-G, GEM ports and interworking points, priority queues, traffic schedulers and descriptors, multicast |
 
 The MIB classes are a fixed list, not the whole MIB: an OLT can push

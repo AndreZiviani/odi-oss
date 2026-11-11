@@ -20,6 +20,30 @@ listed here.
   stays: a slot that is not the running one, not `sw_active` in the valid
   copy, no valid copy at all. Host tests: `src/nv/test/test_commit.c`, with a
   fake flash that cuts a write half way at each step. Refs #341.
+
+- The diagnostics bundle now includes `pon/omcli_vlan.txt` (`omcli vlan`): the
+  VLAN handling (the stick adds the manual tag, or it is transparent) and any
+  `FwdOp` override read from `RTK_DEVINFO_SPECVER`, so the bundle alone shows
+  whether the override is in force. The output is numbers and keywords: no
+  serial, password or MAC. Host test: `src/omci/voip-test.sh`. Refs #301.
+
+- `omcicli mib set|create|delete` and the other stock setters omcid does not
+  implement (`set log|sn|devmode|dmmode|loid`, `debug simavc`) now say
+  `omcid does not implement ...; nothing was sent` and exit 1 when omcid is the
+  daemon, instead of sending a request omcid drops and printing nothing, which
+  read as a change that had been made. Against the stock daemon they are sent as
+  before. `docs/TOOLS.md` lists them. Host test: `src/omci/writes-test.sh`.
+  Refs #301.
+
+- omcid no longer holds the rebuilds off for as long as OMCI frames keep
+  coming. The upstream QoS, the multicast policy and the bridge connections
+  were rebuilt one quiet second after the last OMCI frame, and every frame of
+  the line (Gets and PM polls too) restarted that second, so an OLT sending
+  more often than once a second would have kept the rules from ever being
+  programmed. A pending rebuild now runs at the latest 5 s after the first
+  change marked it, however busy the channel is; the quiet second is
+  unchanged otherwise. Host test: `src/omci/mcast-test.sh`. Refs #340.
+
 - `VLAN_EAPOL_UNTAGGED` follow-ups from a review. omcid now reads the key
   with the VLAN keys and holds it, so an edit of `odi.conf` takes effect on
   `apply.sh omci` only: before, a rebuild the OLT triggered applied the file
