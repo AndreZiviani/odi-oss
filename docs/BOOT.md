@@ -357,6 +357,15 @@ snapshot, a mismatched device, a state below O5, or a snapshot whose CRC or
 version does not check out -- falls back to the ordinary re-registration
 path unchanged.
 
+The snapshot also says which rebuild was still pending when it was written.
+A Create or Set is answered and saved at once, and the rebuild that programs
+it (the bridge connections, the upstream QoS) runs a quiet second later, at
+most `REBUILD_MAX_S` after the change. An `omcid` killed inside that wait
+leaves a MIB that is ahead of the switch; the respawned one takes the flags
+from the snapshot and runs that rebuild after its own quiet second. That is
+the one case in which a resume programs the switch. With nothing pending, which
+is every snapshot written after a rebuild, it still makes no driver call.
+
 `omcid` writes its decision to `/var/run/omcid-resume-decision`
 (`"resumed"` or `"reprovision"`) before doing anything else that could
 fail or block, so `omci-respawn-reprovision.sh` -- backgrounded by

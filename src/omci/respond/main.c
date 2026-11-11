@@ -328,7 +328,8 @@ int main(int argc, char **argv)
 	 * whose PON is still O5, with a snapshot on disk for this exact
 	 * device, loads it and answers from it -- no re-registration, no
 	 * switch reprogramming, because the datapath is already in hardware
-	 * (see kb rtl9601-omci-reapply-without-reboot). Everything else (no
+	 * (see kb rtl9601-omci-reapply-without-reboot); only a rebuild that
+	 * was pending when the last omcid died is run. Everything else (no
 	 * snapshot, a mismatched device, not O5, or a MIB the OLT has since
 	 * reset -- mib_reset_all() deletes the snapshot itself) falls back to
 	 * the ordinary path below unchanged.
@@ -369,6 +370,15 @@ int main(int argc, char **argv)
 		out_fmt("resume: onu state %d, %s\n", (long)st,
 			resumed ? "snapshot loaded, resuming without re-registration"
 				: "no valid snapshot for this state -- falling back to re-registration");
+		/* A Create or Set the last omcid answered and did not get to
+		 * program: its snapshot carried the flags (snapshot.c), and
+		 * the loop below runs the rebuild after the quiet second. */
+		if (resumed && (conn_dirty || qos_dirty))
+			out_fmt("resume: a rebuild was pending (%s%s%s)\n",
+				conn_dirty ? "bridge connections" : "",
+				conn_dirty && qos_dirty ? ", " : "",
+				!qos_dirty ? "" : qos_full ? "upstream QoS, in full"
+							   : "upstream QoS");
 		ev_start(restart, resumed, why, st);
 	}
 

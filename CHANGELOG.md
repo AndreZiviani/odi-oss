@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- OMCI: a respawned `omcid` runs the rebuild that was pending when the last
+  one died (issue 357, found reading the code, not seen on a stick). A
+  Create or Set is answered and saved at once, and the switch is programmed
+  a quiet second later. An `omcid` that died in between was resumed with the
+  new MIB and the sync counter the OLT expects, and the change stayed out of
+  the switch until some later message caused a rebuild. The snapshot (format
+  7) now carries the pending rebuilds, and the resume sets them again. A
+  resume with nothing pending still makes no driver call.
 - Watchdog: `odi_wdt` takes its uptime from the 64-bit tick count (issue
   356, found reading the code; no stick of mine has been up that long). The
   quotient of the 32-bit `jiffies` was back at 0 after 198.8 days of uptime.
