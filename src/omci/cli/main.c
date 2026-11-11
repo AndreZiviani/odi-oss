@@ -63,9 +63,11 @@ enum { A_NONE, A_MIBSEL, A_CLSENT, A_ATTR, A_NUM,
  * debug dumps are reversible and need none either. */
 #define F_WRITE 1
 /* The command exists in the stock daemon, and omcid does not implement it
- * (respond/vqsrv.c has no case for the id): its reply goes to a file this
- * client never reads for these rows, so the command would print nothing and
- * change nothing. Against omcid the client says so and sends nothing. */
+ * (respond/vqsrv.c has no case for the id, or a case that only returns): its
+ * reply goes to a file this client never reads for these rows, so the command
+ * would print nothing and change nothing. Against omcid the client says so and
+ * sends nothing. test/omcli_table_test.sh keeps the flag in step with
+ * vq_dispatch(). */
 #define F_NOOMCID 2
 
 /* Keyword tables the vendor resolves by strcmp inside the handler or the
@@ -104,12 +106,12 @@ static const struct cmd cmds[] = {
 { "get",  "tables",    6,  ANS_FILE,  A_NONE,   0, "registered MIB tables -- DEADLOCKS omci_app, needs -f" },
 
 { "set",  "log",       2,  ANS_NONE,  A_LOG,     F_NOOMCID, "<usrLevel> <drvLevel>, each off|err|warn|info|dbg" },
-{ "set",  "logfile",   4,  ANS_NONE,  A_LOGFILE, 0, "<mode> [actionMask] [file]" },
+{ "set",  "logfile",   4,  ANS_NONE,  A_LOGFILE, F_NOOMCID, "<mode> [actionMask] [file]" },
 { "set",  "sn",        0,  ANS_NONE,  A_SN,      F_WRITE | F_NOOMCID, "<vendorId> <8 hex digits>" },
 { "set",  "devmode",   7,  ANS_NONE,  A_STR35,   F_WRITE | F_NOOMCID, "router|bridge|hybrid" },
 { "set",  "dmmode",    9,  ANS_NONE,  A_KEYNUM,  F_WRITE | F_NOOMCID, "off|on_wq|on_bc_mc|on_wq_bc_mc" },
 { "set",  "loid",     11,  ANS_NONE,  A_LOID,    F_WRITE | F_NOOMCID, "<loid> [password]" },
-{ "set",  "resetlauth", 15, ANS_QUEUE, A_NONE,   F_WRITE, "reset the loid auth attempt count" },
+{ "set",  "resetlauth", 15, ANS_QUEUE, A_NONE,   F_WRITE | F_NOOMCID, "reset the loid auth attempt count" },
 
 { "mib",  "get",      29,  ANS_FILE,  A_MIBSEL, 0, "[all | classId | tableName] [entityId] [--secrets]" },
 { "mib",  "getcurr",  30,  ANS_FILE,  A_MIBSEL, 0, "PM current accumulations: classId|tableName [entityId]" },

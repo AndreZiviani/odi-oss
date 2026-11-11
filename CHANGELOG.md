@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- `omcicli set logfile` and `set resetlauth` now say `omcid does not
+  implement ...; nothing was sent` and exit 1 when omcid is the daemon, like
+  the other stock setters: omcid accepts `set logfile` and does nothing, and
+  answers `set resetlauth` with an empty reply that printed as if it had
+  worked. New host test `test/omcli_table_test.sh` compares the command table
+  of `omcli` with `vq_dispatch()` in `respond/vqsrv.c`, so a setter omcid
+  gains or lacks cannot go unmarked. Cases in `src/omci/writes-test.sh`.
+  Refs #301.
+
 - `nv setenv` and `nv commit` now repair an invalid environment copy as part
   of the write instead of refusing, or erasing the only good copy. With one
   copy invalid (a write cut by a power loss), the new environment is built and

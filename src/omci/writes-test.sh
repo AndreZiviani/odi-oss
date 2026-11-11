@@ -365,11 +365,14 @@ check "a row already held still takes a Set" "$(answer "$log" 0501 | cut -c1-2)"
 send "$log" 0502 4f 0002 0000 ""
 
 # The stock setters omcid does not implement: refused by the client, nothing
-# sent, exit 1 (the request used to be dropped silently). set logfile and mib
-# reset are implemented and are not in this list.
+# sent, exit 1 (the request used to be dropped silently). mib reset is
+# implemented and is not in this list. set logfile is accepted by omcid and
+# does nothing, which reads the same; set resetlauth gets an empty reply that
+# prints as if it had worked.
 for c in "mib set 84 4354 FwdOp 0x00" "mib create 84 1 0" "mib delete 84 1" \
 	 "set sn ABCD 01020304" "set devmode router" "set dmmode off" \
-	 "set loid abc" "set log err err" "debug simavc 84 1 1"; do
+	 "set loid abc" "set log err err" "set logfile 1" "set resetlauth" \
+	 "debug simavc 84 1 1"; do
 	got=$($Q cli/build/omcli $c -f 2>&1); rc=$?
 	check "omcli $c: refused, status 1" "$rc" "1"
 	check "omcli $c: says omcid does not implement it" \

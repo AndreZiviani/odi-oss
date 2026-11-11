@@ -179,6 +179,7 @@ test-host:
 	bash test/gpon_hold_test.sh
 	bash test/svc_igmpd_test.sh
 	bash test/omci_respawn_test.sh
+	bash test/omcli_table_test.sh
 	bash test/omci_defaults_test.sh
 	bash test/rcs_cs_value_test.sh
 	bash test/services_off_test.sh
