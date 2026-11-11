@@ -240,6 +240,19 @@ addr_of() {
 		sed -n "s/.*inet addr:\([0-9.]*\).*Mask:\([0-9.]*\).*/\1 \2/p" | head -n 1
 }
 
+# The device that carries the primary address: br0 when the boot bridged,
+# eth0 when it fell back to addressing it directly. The fallback can leave
+# an empty br0 behind (brctl addbr worked, addif or the address did not), so
+# that br0 exists does not decide it: br0 counts only when it holds an
+# address, or when eth0 holds none either.
+mgmt_dev() {
+	if [ -d "$SYSNET/$BR" ] && { [ -n "$(addr_of "$BR")" ] || [ -z "$(addr_of "$IF")" ]; }; then
+		echo "$BR"
+	else
+		echo "$IF"
+	fi
+}
+
 # The second management address, on the alias of the device that carries the
 # first. Off unless LAN_ENABLE_IP2 is 1, which is how both our sticks ship
 # (0, with 192.168.100.1/24 stored); a fixed rescue address for when the
@@ -337,8 +350,7 @@ trial_keep() {   # trial_keep <dev>
 }
 
 if [ "$MODE" = primary ]; then
-	dev=$IF
-	[ -d "$SYSNET/$BR" ] && dev=$BR
+	dev=$(mgmt_dev)
 	cur=$(addr_of "$dev")
 	[ -n "$cur" ] || exit 1
 	echo "$cur"
@@ -346,10 +358,7 @@ if [ "$MODE" = primary ]; then
 fi
 
 if [ "$MODE" = addr ]; then
-	# Whichever device carries the primary: br0 when the boot bridged,
-	# eth0 when it fell back to addressing it directly.
-	dev=$IF
-	[ -d "$SYSNET/$BR" ] && dev=$BR
+	dev=$(mgmt_dev)
 	cur=$(addr_of "$dev")
 	if [ "$cur" = "$IP $MASK" ]; then
 		echo "network: $dev keeps $IP netmask $MASK"
@@ -369,8 +378,7 @@ if [ "$MODE" = addr ]; then
 fi
 
 if [ "$MODE" = configured ]; then
-	dev=$IF
-	[ -d "$SYSNET/$BR" ] && dev=$BR
+	dev=$(mgmt_dev)
 	cur=$(addr_of "$dev")
 	if [ "$NET_CONFIGURED" = 1 ] && [ "$cur" = "$IP $MASK" ]; then
 		echo "network: $dev holds the configured address $IP"

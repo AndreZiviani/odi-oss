@@ -6,7 +6,12 @@
 # setup (mkdir, keygen, the zero-length-key recovery) runs on every start,
 # same as it did every boot from /etc/init.d/services before -- idempotent,
 # so a respawn after a crash costs nothing extra.
-[ -f /etc/config/dropbear.off ] && exec /etc/scripts/respawn-off.sh
+#
+# A safe-mode boot (safe-mode.sh, /var/run/safe-mode) starts it whatever
+# dropbear.off says: that boot is the way back into a stick that cannot be
+# reached, and the flag is on the config partition, which no reflash clears.
+# The file stays, so the next normal boot is as configured.
+[ -f /etc/config/dropbear.off ] && [ ! -f /var/run/safe-mode ] && exec /etc/scripts/respawn-off.sh
 [ -x /sbin/dropbear ] || exec /etc/scripts/respawn-off.sh
 
 mkdir -p /etc/config/dropbear.d
@@ -20,6 +25,14 @@ KEY=/etc/config/dropbear.d/ed25519
 # command here whose failure costs ssh, and it failed silently once already
 # -- no /dev/urandom, no key, no message.
 [ -s "$KEY" ] || /sbin/dropbearkey -t ed25519 -f "$KEY" >/dev/null
+# A safe-mode boot with no key and nowhere to keep one (the config partition
+# full, read-only or not mounted) gets a key in RAM for that boot, so ssh is
+# there when it is needed most. The client sees a host key it does not know.
+if [ ! -s "$KEY" ] && [ -f /var/run/safe-mode ]; then
+	KEY=/var/run/dropbear-safe-mode.ed25519
+	[ -e "$KEY" ] && [ ! -s "$KEY" ] && rm -f "$KEY"
+	[ -s "$KEY" ] || /sbin/dropbearkey -t ed25519 -f "$KEY" >/dev/null
+fi
 [ -s "$KEY" ] || exec /etc/scripts/respawn-off.sh	# no key: do not spin dropbear with none
 
 # No -E: dropbear logs through syslog by default (svc-syslogd.sh), same as
