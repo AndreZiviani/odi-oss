@@ -444,17 +444,27 @@ confirm() {
 	fi
 	# Store what changed, one key at a time, and read each back: flash set
 	# is not trusted for its exit code. A key that does not stick puts the
-	# ones written back and leaves the trial running.
+	# ones written back and leaves the trial running. Those writes are read
+	# back too: what stopped the key can stop them, and the store then
+	# holds new values next to old ones, a set that was never tried and
+	# that the next boot would use. flash set writes one key at a time, so
+	# this cannot be one write; the message names what the store holds.
 	wrote=''
 	for k in $KEYS; do
 		n=$(getv "new_$k") o=$(getv "old_$k")
 		[ "$n" != "$o" ] || continue
 		"$TIMEOUT" "$IO_S" "$FLASH" set "$k" "$n" > /dev/null 2>&1
 		if [ "$(store_get "$k")" != "$n" ]; then
-			for w in $wrote; do "$TIMEOUT" "$IO_S" "$FLASH" set "$w" "$(getv "old_$w")" > /dev/null 2>&1; done
-			"$TIMEOUT" "$IO_S" "$FLASH" set "$k" "$o" > /dev/null 2>&1
+			kept=''
+			for w in $wrote $k; do
+				o=$(getv "old_$w")
+				"$TIMEOUT" "$IO_S" "$FLASH" set "$w" "$o" > /dev/null 2>&1
+				v=$(store_get "$w")
+				[ "$v" = "$o" ] || kept="$kept $w=$v"
+			done
 			unlock
-			die "could not store $k=$n; nothing is kept and the trial carries on and reverts unless confirmed"
+			[ -n "$kept" ] || die "could not store $k=$n; nothing is kept and the trial carries on and reverts unless confirmed"
+			die "could not store $k=$n, and could not put back:$kept. The store now holds a mix of new and old values that the next boot would use: confirm again, or store the old values. The trial carries on and reverts unless confirmed"
 		fi
 		wrote="$wrote $k"
 	done
