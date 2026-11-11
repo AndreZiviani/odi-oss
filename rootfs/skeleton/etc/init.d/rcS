@@ -189,21 +189,15 @@ fi
 # to launch or wait for them.
 crumb "rcS done; daemons are inittab respawn entries"
 
-# /var is ramfs and nothing there is evicted; omcid logs every OMCI frame
-# (about 1.7 MB a day on a busy OLT). Each log is cut back to its last
-# LOG_KEEP bytes past LOG_MAX. The writers append, so they carry on at the
-# new end.
-LOG_MAX=262144
-LOG_KEEP=131072
+# /var is a tmpfs of 6 MB (/etc/fstab) and nothing there is evicted; omcid
+# logs every OMCI frame (about 1.7 MB a day on a busy OLT). Each log is cut
+# back to its last LOG_KEEP bytes past LOG_MAX (log_trim, rcs-lib.sh). The
+# writers append, so they carry on at the new end.
 (
 	while :; do
 		sleep 60
 		for f in /var/log/omcid.log /var/log/services.log; do
-			[ -f "$f" ] || continue
-			n=$(wc -c < "$f" 2>/dev/null)
-			[ "${n:-0}" -gt "$LOG_MAX" ] || continue
-			tail -c "$LOG_KEEP" "$f" > "$f.cut" 2>/dev/null && cat "$f.cut" > "$f"
-			rm -f "$f.cut"
+			log_trim "$f"
 		done
 	done
 ) &
