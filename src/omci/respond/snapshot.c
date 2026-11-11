@@ -11,7 +11,9 @@
  * programming already sitting in hardware. Restoring it is a plain memory
  * copy: nothing here calls apply_entity() or any driver function, so a
  * resume issues no switch-programming driver call at all -- the datapath is
- * untouched because this never touches it.
+ * untouched because this never touches it. The one thing it can start is a
+ * rebuild that was pending when the process was killed (SNAP_PENDING_*,
+ * below): the flags come back with the MIB, and the main loop runs it.
  *
  * Written atomically (temp file + rename, cfgstore.c's own pattern) after
  * every MIB-changing message (Create, Set, Delete); mib_reset_all() deletes
@@ -27,9 +29,19 @@
 #define SNAP_MAGIC1 'M'
 #define SNAP_MAGIC2 'S'
 #define SNAP_MAGIC3 '1'
-#define SNAP_VERSION 6   /* 2: the upstream state the driver holds (qos_prog_state()) and table attribute storage; 3: both; 4: rows of 96 bytes; 5: a wide row also carries the bytes past 96 (side pool); 6: a table pool of 255 rows */
+#define SNAP_VERSION 7   /* 2: the upstream state the driver holds (qos_prog_state()) and table attribute storage; 3: both; 4: rows of 96 bytes; 5: a wide row also carries the bytes past 96 (side pool); 6: a table pool of 255 rows; 7: the rebuilds pending (SNAP_PENDING_*) */
 
-/* Header (26 bytes: magic 4, version 2, devid 8, serial 9, sync 1, alarm 2)
+/* The rebuilds a Create, Set or Delete marked and the main loop has not run
+ * yet (conn_dirty, qos_dirty, qos_full): the MIB in the snapshot is ahead of
+ * the switch by these. A resume sets the flags again, so the pending
+ * rebuild runs after the first quiet second; with none pending it still
+ * touches nothing. */
+#define SNAP_PENDING_CONN     0x01
+#define SNAP_PENDING_QOS      0x02
+#define SNAP_PENDING_QOS_FULL 0x04
+
+/* Header (27 bytes: magic 4, version 2, devid 8, serial 9, sync 1, alarm 2,
+ * rebuilds pending 1)
  * + one row's worst case (2+2+2+1+1+1+1+96 = 106) times every row (320:
  * 33920), + the bytes past 96 of every wide row (32 * 288: 9216), + the
  * fixed pools (tblpool 255 * 35, flow_us, flow_ds, bc_flow, tcont_map, the
@@ -190,6 +202,9 @@ int snapshot_save(void)
 	put_raw(&p, serial, 9);
 	put_u8(&p, mib_data_sync);
 	put_u16(&p, alarm_snapshot);
+	put_u8(&p, (uint8_t)((conn_dirty ? SNAP_PENDING_CONN : 0) |
+			     (qos_dirty ? SNAP_PENDING_QOS : 0) |
+			     (qos_full ? SNAP_PENDING_QOS_FULL : 0)));
 
 	rows_at = p;
 	put_u16(&p, 0);                          /* row_count, patched below */
@@ -279,7 +294,7 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 	sys_close((int)fd);
 	/* Header plus at least the fixed tail and its own crc; anything
 	 * shorter is not a snapshot this code wrote. */
-	if (n < 26 + 2 + (long)sizeof(tblpool) + (long)sizeof(flow_us) +
+	if (n < 27 + 2 + (long)sizeof(tblpool) + (long)sizeof(flow_us) +
 		(long)sizeof(flow_ds) + 4 + (long)sizeof(tcont_map) + (long)qlen + 2 + 4)
 		return refuse(why, "bad_snapshot");
 
@@ -315,6 +330,7 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 	{
 		uint8_t sync = get_u8(&p);
 		uint16_t alarm = get_u16(&p);
+		uint8_t pending = get_u8(&p);
 
 		rows = get_u16(&p);
 		if (rows > MIB_ROWS)
@@ -382,6 +398,9 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 
 		mib_data_sync = sync;
 		alarm_snapshot = alarm;
+		conn_dirty = (pending & SNAP_PENDING_CONN) != 0;
+		qos_dirty = (pending & SNAP_PENDING_QOS) != 0;
+		qos_full = (pending & SNAP_PENDING_QOS_FULL) != 0;
 	}
 	*why = "resumed";
 	return 1;

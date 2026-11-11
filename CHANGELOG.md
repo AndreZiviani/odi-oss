@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- OMCI: a respawned `omcid` runs the rebuild that was pending when the last
+  one died (issue 357, found reading the code, not seen on a stick). A
+  Create or Set is answered and saved at once, and the switch is programmed
+  a quiet second later. An `omcid` that died in between was resumed with the
+  new MIB and the sync counter the OLT expects, and the change stayed out of
+  the switch until some later message caused a rebuild. The snapshot (format
+  7) now carries the pending rebuilds, and the resume sets them again. A
+  resume with nothing pending still makes no driver call.
 - Flash: `fwu.sh` no longer accepts a read-back that ended early. The
   read-back pipes the tar member into `cmp` and took "EOF on -" for success,
   which is what `cmp` says when the member ends before the partition does,

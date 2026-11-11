@@ -27,6 +27,10 @@
 #      second instance must hold not one `drv ` line -- the switch was
 #      never touched.
 #
+# Then two more: a wide row comes back whole, and an omcid killed between
+# the answer to a Set and the rebuild that programs it leaves that rebuild
+# to the respawned one.
+#
 # Run from src/omci, inside the toolchain image (make test-omci-resume):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
 #          sh resume-test.sh
@@ -216,6 +220,95 @@ if [ "$got" = "00$(amask 5)$(aval 5)" ]; then
 	echo "ok    wide rows: username 2 survives the resume"
 else
 	echo "FAIL  wide rows: username 2 after resume: $got"
+	fail=$((fail + 1))
+fi
+omcid_stop "$pid"
+
+# ---------------------------------------- a rebuild pending at the kill
+# A Set of a GEM port network CTP, which the bridge connections and the
+# upstream QoS are both built from, is answered and saved at once; the
+# rebuilds that program it run a quiet second later.
+# Killed inside that second, omcid leaves a snapshot whose MIB is ahead of
+# the switch. The snapshot says which rebuilds are pending (format 7), so the
+# respawned omcid runs them after its own quiet second, with nothing
+# injected; and the snapshot it saves after them has none pending.
+#
+# The kill has to land inside the quiet second. A machine slow enough for
+# the rebuild to run first leaves nothing pending, so that try is repeated.
+cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+olog1=/tmp/omcid-resume-pending-before.log
+olog2=/tmp/omcid-resume-pending-after.log
+olog3=/tmp/omcid-resume-pending-third.log
+# Set of GEM port network CTP 2, attribute 1 (the Port-ID), to the value it has.
+pending_set=$(printf '9001480a010c0002%s%056d00000028%08d' 80000291 0 0)
+try=0
+inside=0
+while [ "$try" -lt 5 ] && [ "$inside" = 0 ]; do
+	try=$((try + 1))
+	rm -f /var/run/omcid-mib.snap /var/run/omcid-resume-decision
+	: > "$olog1"
+	$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-isp2 > "$olog1" 2>&1 &
+	pid=$!
+	omcid_up "$olog1"
+	$Q cli/build/omcli --inject-file "$FIX/omci-session-isp2.txt" > /dev/null 2>&1
+	settled "$olog1"
+	n=$(rebuilt "$olog1")
+	inject_wait "$olog1" "$pending_set"
+	kill -9 "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null
+	[ "$(rebuilt "$olog1")" = "$n" ] && inside=1
+done
+if [ "$inside" = 1 ]; then
+	echo "ok    pending rebuild: omcid killed between the answer and the rebuild (try $try)"
+else
+	echo "FAIL  pending rebuild: the kill did not land inside the quiet second in $try tries"
+	fail=$((fail + 1))
+fi
+
+: > "$olog2"
+$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -s 5 -g /tmp/resume-gpon-isp2 > "$olog2" 2>&1 &
+pid=$!
+omcid_up "$olog2"
+if grep -q 'resume: onu state 5, snapshot loaded' "$olog2"; then
+	echo "ok    pending rebuild: the respawned instance took the resume path"
+else
+	echo "FAIL  pending rebuild: the respawned instance did not take the resume path"
+	sed -n '1,20p' "$olog2"
+	fail=$((fail + 1))
+fi
+if grep -q 'resume: a rebuild was pending (bridge connections, upstream QoS)' "$olog2"; then
+	echo "ok    pending rebuild: the snapshot says both rebuilds are pending"
+else
+	echo "FAIL  pending rebuild: the resumed omcid knows of no pending rebuild"
+	fail=$((fail + 1))
+fi
+# wait_for counts a timeout as a failed check and says what it waited for.
+if wait_for "$olog2" 'bridge connections rebuilt' 30; then
+	echo "ok    pending rebuild: the bridge connections are rebuilt after the resume, with nothing injected"
+fi
+# The QoS arm of the loop runs before the bridge one, in the same pass.
+if grep -q '\] us qos' "$olog2"; then
+	echo "ok    pending rebuild: and the upstream QoS"
+else
+	echo "FAIL  pending rebuild: no upstream QoS rebuild after the resume"
+	fail=$((fail + 1))
+fi
+# The reply to an omcli request means the loop pass with the rebuild, and
+# the save after it, is done.
+$Q cli/build/omcli help > /dev/null 2>&1
+kill -9 "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
+
+: > "$olog3"
+$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -s 5 -g /tmp/resume-gpon-isp2 > "$olog3" 2>&1 &
+pid=$!
+omcid_up "$olog3"
+if grep -q 'resume: onu state 5, snapshot loaded' "$olog3" &&
+   ! grep -q 'a rebuild was pending' "$olog3"; then
+	echo "ok    pending rebuild: the snapshot saved after the rebuild has none pending"
+else
+	echo "FAIL  pending rebuild: the snapshot saved after the rebuild still has one pending, or was not resumed"
+	sed -n '1,20p' "$olog3"
 	fail=$((fail + 1))
 fi
 omcid_stop "$pid"
