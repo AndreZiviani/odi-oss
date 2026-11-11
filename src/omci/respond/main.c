@@ -115,6 +115,11 @@ int main(int argc, char **argv)
 	int idle = 0, maxidle = 24, n = 0, want = 400, force = 0, restart = 0;
 	int quiet = 0;
 	unsigned long frames_seen = 0;
+	/* CLOCK_MONOTONIC second at which the oldest pending rebuild was first
+	 * marked dirty; -1 when none is pending. See the gate below. */
+	long dirty_since_s = -1;
+	long now_s = -1;
+	int rebuild_now = 0;
 	/* -s: an ONU state to use instead of asking the driver, the same
 	 * reason -c takes a capability blob -- a test harness with no line
 	 * side has no driver to answer command 13 either. */
@@ -423,19 +428,27 @@ int main(int argc, char **argv)
 		 * only thing that resets the -w count. */
 		if (cli_poll() || vq_poll())
 			idle = 0;
-		/* One quiet second after the last OMCI frame, from the line or
-		 * injected: rebuild the upstream QoS and the bridge connections
-		 * from the MIB as it stands (us_qos_rebuild(), bdgconn_rebuild()).
-		 * Quiet counts OMCI frames only: CLI and queue requests reset
-		 * `idle` (the -w exit) but not this, or a client polling omcicli
-		 * every few seconds, a metrics scrape, would hold the rebuild off
-		 * indefinitely and leave the ONU in O5 with no service. */
+		/* A rebuild of the upstream QoS, the multicast policy and the
+		 * bridge connections (us_qos_rebuild(), mcast_policy_export(),
+		 * bdgconn_rebuild()) runs from the MIB as it stands when either
+		 * holds: one quiet second has passed after the last OMCI frame,
+		 * from the line or injected, or REBUILD_MAX_S seconds have
+		 * passed since the first change was marked dirty, however busy
+		 * the channel is. Every frame resets the quiet count, Gets and
+		 * PM polls included, so an OLT that sends one more often than
+		 * once a second would otherwise keep the rules from ever being
+		 * programmed. Quiet counts OMCI frames only: CLI and queue
+		 * requests reset `idle` (the -w exit) but not this, or a client
+		 * polling omcicli every few seconds, a metrics scrape, would
+		 * hold the rebuild off indefinitely and leave the ONU in O5
+		 * with no service. */
 		if (omci_frames_handled != frames_seen) {
 			frames_seen = omci_frames_handled;
 			quiet = 0;
 		} else if (quiet < 1000000 / NL_POLL_US) {
 			quiet++;
 		}
+		now_s = -1;
 		{
 			/* CLOCK_MONOTONIC-gated, not loop-iteration-counted: this
 			 * used to count NL_POLL_US-spaced ticks and call a
@@ -451,7 +464,7 @@ int main(int argc, char **argv)
 			 * iteration takes. */
 			static long last_sample_s = -1;
 			static long last_ping_s = -1;
-			long now_s, now_ns;
+			long now_ns;
 
 			if (sys_clock_gettime(CLOCK_MONOTONIC, &now_s, &now_ns) == 0) {
 				if (last_sample_s < 0)
@@ -488,7 +501,14 @@ int main(int argc, char **argv)
 				}
 			}
 		}
-		if (qos_dirty && quiet >= 1000000 / NL_POLL_US) {
+		if (!(qos_dirty || mcast_dirty || conn_dirty))
+			dirty_since_s = -1;
+		else if (dirty_since_s < 0)
+			dirty_since_s = now_s;
+		rebuild_now = quiet >= 1000000 / NL_POLL_US ||
+			      (dirty_since_s >= 0 && now_s >= 0 &&
+			       now_s - dirty_since_s >= REBUILD_MAX_S);
+		if (qos_dirty && rebuild_now) {
 			qos_dirty = 0;
 			us_qos_rebuild();
 			/* The flow ids and T-CONT map us_qos_rebuild() just
@@ -502,15 +522,19 @@ int main(int argc, char **argv)
 			 * bookkeeping has not caught up with it yet. */
 			snapshot_save();
 		}
-		if (mcast_dirty && quiet >= 1000000 / NL_POLL_US) {
+		if (mcast_dirty && rebuild_now) {
 			mcast_dirty = 0;
 			mcast_policy_export();
 		}
-		if (conn_dirty && quiet >= 1000000 / NL_POLL_US) {
+		if (conn_dirty && rebuild_now) {
 			conn_dirty = 0;
 			bdgconn_rebuild();
 			snapshot_save();       /* see the qos_dirty arm above */
 		}
+		/* Whatever a rebuild marked dirty again is timed from the next
+		 * pass, not from the change that started this one. */
+		if (rebuild_now)
+			dirty_since_s = -1;
 		if (fd < 0) {
 			/* No line side: pace the loop as the netlink
 			 * receive timeout would. */
