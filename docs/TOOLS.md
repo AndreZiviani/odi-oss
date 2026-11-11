@@ -496,7 +496,9 @@ had.
 
 **What the OLT decides.** omcid writes what it was provisioned to
 `/var/run/odi-mcast.conf` (a quiet second after the last OMCI frame, only
-when it changed; the format is in `src/omci/respond/mcast.c`): snooping is
+when it changed, or with the 5 s cap on a rebuild of the QoS or the bridge
+connections; a Set that changes only the multicast profile is not capped and
+waits for the quiet second; the format is in `src/omci/respond/mcast.c`): snooping is
 on when a multicast GEM interworking TP (ME 281) holds an address row and
 the multicast operations profile (ME 309) of the UNI's subscriber (ME 310)
 says IGMP function 0. The profile also supplies

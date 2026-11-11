@@ -441,7 +441,14 @@ int main(int argc, char **argv)
 		 * requests reset `idle` (the -w exit) but not this, or a client
 		 * polling omcicli every few seconds, a metrics scrape, would
 		 * hold the rebuild off indefinitely and leave the ONU in O5
-		 * with no service. */
+		 * with no service. The cap is timed from the first change to
+		 * the QoS or the bridge connections, not from mcast_dirty,
+		 * which starts out set: from the start of omcid, a burst that
+		 * began inside the first REBUILD_MAX_S seconds would be rebuilt
+		 * half-way (bdgconn_rebuild() removes every service first). A
+		 * change that sets only mcast_dirty (a Set of class 309 or 310
+		 * that leaves out the tag, the access lists and the profile
+		 * pointer) waits for the quiet second, as it always did. */
 		if (omci_frames_handled != frames_seen) {
 			frames_seen = omci_frames_handled;
 			quiet = 0;
@@ -501,7 +508,7 @@ int main(int argc, char **argv)
 				}
 			}
 		}
-		if (!(qos_dirty || mcast_dirty || conn_dirty))
+		if (!(qos_dirty || conn_dirty))
 			dirty_since_s = -1;
 		else if (dirty_since_s < 0)
 			dirty_since_s = now_s;
