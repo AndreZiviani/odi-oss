@@ -24,7 +24,8 @@
 # replaced by REDACTED, and under pon/ the GPON and OMCI state: diag (ONU
 # state, alarms, GEM flows, port counters, the PON queue registers that
 # cmd 23 and 25 write), /proc/odi_gpon/ (status, counters, flows, ploam),
-# /proc/odi_omci, and omcli (state, provision, flows, tcont, conn, voip (masked), and the MIB
+# /proc/odi_omci, and omcli (state, provision, flows, tcont, conn, vlan (the VLAN handling and any
+# FwdOp override; numbers only), voip (masked), and the MIB
 # classes in OMCI_CLASSES), and under module/ the optics module on /dev/i2c-0: A0h whole (a0.txt), A2h
 # with the page select as found (a2.txt), and in chip.txt the page select,
 # the laser driver identity (A2h page 2 byte 0xa0, 0x6a for a GN25L95;
@@ -286,7 +287,7 @@ for f in status counters flows ploam; do
 done
 
 if step pon/omcli_state.txt omcli state; then
-	for c in provision flows tcont conn; do
+	for c in provision flows tcont conn vlan; do
 		step "pon/omcli_$c.txt" omcli "$c"
 	done
 	# The phone lines an OLT provisioned, in the view that masks the number,

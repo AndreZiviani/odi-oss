@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- The diagnostics bundle now includes `pon/omcli_vlan.txt` (`omcli vlan`): the
+  VLAN handling (the stick adds the manual tag, or it is transparent) and any
+  `FwdOp` override read from `RTK_DEVINFO_SPECVER`, so the bundle alone shows
+  whether the override is in force. The output is numbers and keywords: no
+  serial, password or MAC. Host test: `src/omci/voip-test.sh`. Refs #301.
+
 - `omcicli mib set|create|delete` and the other stock setters omcid does not
   implement (`set log|sn|devmode|dmmode|loid`, `debug simavc`) now say
   `omcid does not implement ...; nothing was sent` and exit 1 when omcid is the

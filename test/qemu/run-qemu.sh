@@ -538,7 +538,7 @@ tar -xzf "$WORK/diag.tar.gz" -C "$WORK/diag" || fail "the bundle is not a readab
 D=$WORK/diag/odi-diag
 for f in MANIFEST.txt dmesg.txt syslog.txt meminfo.txt mounts.txt uptime.txt ps.txt nv.txt metrics.txt \
 	config/lastgood.xml config/lastgood_hs.xml log/qemu-secrets.log log/qemu-ident.log \
-	log/services.log pon/diag.txt pon/omcli_state.txt; do
+	log/services.log pon/diag.txt pon/omcli_state.txt pon/omcli_vlan.txt; do
 	[ -s "$D/$f" ] || fail "the bundle has no $f (MANIFEST: $(cat "$D/MANIFEST.txt" 2>/dev/null))"
 done
 # host-link.txt names the SerDes pages it reads, and never the three
