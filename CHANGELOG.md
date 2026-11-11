@@ -44,6 +44,17 @@ listed here.
   before. `docs/TOOLS.md` lists them. Host test: `src/omci/writes-test.sh`.
   Refs #301.
 
+- omcid times the 5 s cap on a pending rebuild from the first change to the
+  upstream QoS or the bridge connections, no longer from the start of the
+  daemon. The multicast flag is set from the start, so on a busy channel the
+  cap ran out 5 s after omcid started and could rebuild the bridge connections
+  (which removes every service first) from a half-provisioned MIB when the
+  OLT's burst began inside those seconds. A change that only touches the
+  multicast policy (a Set of class 309 or 310 that leaves out the tag, the
+  access lists and the profile pointer) is not capped and waits for the quiet
+  second, as before the cap. The cap rebuilds all three as before. Host test:
+  `src/omci/mcast-test.sh`. Refs #340.
+
 - omcid no longer holds the rebuilds off for as long as OMCI frames keep
   coming. The upstream QoS, the multicast policy and the bridge connections
   were rebuilt one quiet second after the last OMCI frame, and every frame of
