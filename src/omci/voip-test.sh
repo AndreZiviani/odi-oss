@@ -580,6 +580,8 @@ check "the bundle carries the masked voice view" \
       "$(has "$D/pon/omcli_voip.txt" 'port 0x201 (voice CTP 0x1)')$(has "$D/pon/omcli_voip.txt" 'line status config done (14)')" "11"
 check "and its step is listed with status 0" \
       "$(awk '$3 == "pon/omcli_voip.txt" && $1 == 0 { n++ } END { print n + 0 }' "$D/MANIFEST.txt")" "1"
+check "the bundle carries the VLAN handling, and its step is listed with status 0" \
+      "$(has "$D/pon/omcli_vlan.txt" 'handling    ')$(awk '$3 == "pon/omcli_vlan.txt" && $1 == 0 { n++ } END { print n + 0 }' "$D/MANIFEST.txt")" "11"
 planted=0
 for x in "$AOR" "$AORX" "$NAME" "$NAMEX" "$USR" "$USRX" "$PW" "$PWX" Url-Pw-9 "$(hexof Url-Pw-9)" \
 	"$(spaced "$PWX")" "$(spaced "$NAMEX")"; do

@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- The diagnostics bundle now includes `pon/omcli_vlan.txt` (`omcli vlan`): the
+  VLAN handling (the stick adds the manual tag, or it is transparent) and any
+  `FwdOp` override read from `RTK_DEVINFO_SPECVER`, so the bundle alone shows
+  whether the override is in force. The output is numbers and keywords: no
+  serial, password or MAC. Host test: `src/omci/voip-test.sh`. Refs #301.
 - `VLAN_EAPOL_UNTAGGED` follow-ups from a review. omcid now reads the key
   with the VLAN keys and holds it, so an edit of `odi.conf` takes effect on
   `apply.sh omci` only: before, a rebuild the OLT triggered applied the file
