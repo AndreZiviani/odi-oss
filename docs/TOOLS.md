@@ -947,13 +947,15 @@ keeps using it until it restarts. The stock command shapes
 stock output format, which is what `confd`'s MIB and Services pages and the
 exporter's `omcicli dump srvflow` rely on. `omcli` with no arguments prints
 the stock command list. omcid implements none of the setters in it
-(`set log|sn|devmode|dmmode|loid`, `mib set|create|delete`, `debug simavc`;
-the list marks them `[stock daemon only]`): when omcid is listening, `omcli`
+(`set log|logfile|sn|devmode|dmmode|loid|resetlauth`, `mib set|create|delete`,
+`debug simavc`; the list marks them `[stock daemon only]`; omcid accepts `set
+logfile` and does nothing with it): when omcid is listening, `omcli`
 says `omcid does not implement ...; nothing was sent` and exits 1, without
 sending, with or without `-f` (and for `--vendor --id N`). They are sent only to
 the stock daemon, which does implement them. Change the MIB with the OLT, or
-set a key in `odi.conf` and run `apply.sh omci`. `set logfile` and `mib reset`
-are the only setters omcid answers.
+set a key in `odi.conf` and run `apply.sh omci`. `mib reset` is the only
+setter omcid carries out. `test/omcli_table_test.sh` compares the marks with
+`vq_dispatch()` in `respond/vqsrv.c`.
 `omcicli get tables` is safe against our omcid (it has no lock to deadlock
 on), but the stock daemon wedges on it, so the web UI refuses it outright.
 
