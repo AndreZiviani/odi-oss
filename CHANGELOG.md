@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- `nv setenv` and `nv commit` now repair an invalid environment copy as part
+  of the write instead of refusing, or erasing the only good copy. With one
+  copy invalid (a write cut by a power loss), the new environment is built and
+  checked in memory (it fits, the value is in it), written to the invalid copy
+  and read back, and only then is the valid copy rewritten and read back, so a
+  second power cut still leaves a valid copy. `commit` used to refuse with one
+  invalid copy and `setenv -c N` refused to write it; a plain `setenv` used to
+  erase the only valid copy with just a warning, which is gone. The repaired
+  copy gets the flags byte that keeps the valid copy the one U-Boot picks
+  until the sequence ends (the same byte when it is `env2`, one below when it
+  is `env`; with `env2` at 0 the repaired `env` wins, which is safe because it
+  already holds the whole new environment). Every other refusal of `commit`
+  stays: a slot that is not the running one, not `sw_active` in the valid
+  copy, no valid copy at all. Host tests: `src/nv/test/test_commit.c`, with a
+  fake flash that cuts a write half way at each step. Refs #341.
 - `VLAN_EAPOL_UNTAGGED` follow-ups from a review. omcid now reads the key
   with the VLAN keys and holds it, so an edit of `odi.conf` takes effect on
   `apply.sh omci` only: before, a rebuild the OLT triggered applied the file

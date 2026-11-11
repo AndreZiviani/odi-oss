@@ -1021,7 +1021,7 @@ in service.
 ### `nv` -- the U-Boot environment
 
     nv getenv [name]              print one variable, or all of them
-    nv setenv [-c 1|2] name value set one (in the copy that was read, or copy 1|2)
+    nv setenv [-c 1|2] name value set one (in the copy that was read, or copy 1|2; an invalid copy is repaired first)
     nv fallback [name]            read the OTHER copy, the one U-Boot falls back to
     nv commit [--force] slot      sw_commit=slot and mupgrade_en=0 in BOTH copies, verified
 
@@ -1029,9 +1029,25 @@ Reads and writes the redundant environment (mtd `env` and `env2`) with a
 CRC check and no vendor library. It is what arms and commits a trial boot:
 `sw_tryactive`, `sw_commit`, `sw_active`, `sw_version0/1`
 (`docs/FLASHING.md`). `setenv` erases and rewrites a partition U-Boot
-needs; a power cut in that window leaves that copy invalid and U-Boot on
-the other, stale one. **Never write `sw_commit` before you have booted and
-verified a trial from the running image.**
+needs; with both copies valid, a power cut in that window leaves that copy
+invalid and U-Boot on the other, stale one. **Never write `sw_commit` before
+you have booted and verified a trial from the running image.**
+
+When one copy is already invalid (a write cut by a power loss is how), `setenv`
+and `commit` repair it as part of the write: the new environment is built and
+checked in memory, written to the INVALID copy first and read back (CRC and
+content), and only then is the valid copy rewritten, so the only good copy is
+never erased while it is the only one and a second power cut still leaves a
+valid copy. The repaired copy gets the flags byte that keeps the valid copy
+the one U-Boot picks until the sequence is over (the valid copy's own byte
+when the repaired one is `env2`, one below it when it is `env`). The one
+exception is `env2` holding flags 0: nothing is below 0 and a tie goes to
+`env`, so the repaired `env`, which already holds the complete new
+environment, becomes the one picked. `setenv -c N` naming the invalid copy
+writes only that one; naming the valid copy still repairs the other first. A
+plain `setenv` then also rewrites the valid copy, because that is the copy
+U-Boot reads and the change would otherwise not take effect. Both invalid:
+nothing is written.
 
 `nv commit` also sets `mupgrade_en=0`, in the same two writes. The stock
 bootloader ships it as 1, which makes it listen on the host link after the
@@ -1044,8 +1060,9 @@ byte, then into the fallback copy the same way, then both read again. It
 refuses, before writing anything, a slot other than the one the kernel was
 booted from (the last `root=` in `/proc/cmdline`, the one the kernel
 mounted: the built-in slot-0 line comes before U-Boot's) or than `sw_active` in the
-primary, and an environment whose two copies are not both valid; it never
-writes `sw_active`. A copy that already says so is not rewritten, so a
+primary, and an environment with no valid copy; it never writes
+`sw_active`. With one invalid copy it repairs it first (above), so a commit
+no longer needs a hand repair. A copy that already says so is not rewritten, so a
 second run writes nothing. It also refuses, naming the file, while the
 development file `/etc/config/confirm-arp` exists: each boot then waits for
 an ARP reply from the address in it and a committed slot has no trial to

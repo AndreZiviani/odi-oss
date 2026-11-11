@@ -40,9 +40,19 @@
  *   - a slot the primary copy does not name as sw_active -- U-Boot writes
  *     sw_active as it boots a slot, so this is its own record of what it
  *     started. sw_active is NEVER written here;
- *   - either copy unreadable or failing its CRC: with one good copy, the
- *     erase leaves the board with no good environment for as long as the
- *     write takes, and there is no second copy to make agree.
+ *   - both copies unreadable or failing their CRC: there is nothing to
+ *     commit from.
+ *
+ * One invalid copy is not a refusal. The valid copy is the primary and the
+ * invalid one is REPAIRED first: it is written with the whole new
+ * environment (sw_commit and mupgrade_en applied), read back and compared,
+ * and only then is the primary written. The only good copy is never erased
+ * while it is the only one, so a second power cut during the commit still
+ * leaves a valid copy. The repaired copy gets the flags byte that keeps the
+ * primary winning (env_repair_flags, env.h); the one case where it cannot
+ * (env2 holding flags 0) makes the repaired copy, which holds the complete
+ * verified new environment, the winner, and the commit still ends with both
+ * copies agreeing.
  *
  * Nothing here makes a syscall: the partition I/O comes in through
  * struct env_io, so the whole sequence, failures included, is tested on the
@@ -75,6 +85,8 @@ enum env_commit_rc {
 	NVC_VERIFY_FALLBACK,
 	NVC_FINAL,
 	NVC_CONFIRM_ARP,       /* the confirm-arp development file exists and no force was given; nothing written */
+	NVC_WRITE_REPAIR,      /* the invalid copy could not be written; the valid one was not touched */
+	NVC_VERIFY_REPAIR,     /* the invalid copy did not read back as written; the valid one was not touched */
 };
 
 struct env_commit_report {
@@ -82,6 +94,7 @@ struct env_commit_report {
 	int fallback;
 	int wrote_primary;     /* 1 when that copy was rewritten (and verified) */
 	int wrote_fallback;
+	int repaired;          /* 1 or 2: the copy that was invalid and was written first, else 0 */
 };
 
 /* `slot` is what the caller asks to commit, `running` the slot the kernel
@@ -89,6 +102,42 @@ struct env_commit_report {
  * NVC_DONE and NVC_ALREADY mean both copies now say sw_commit=<slot>. */
 int env_commit(const struct env_io *io, int slot, int running,
 	       struct env_commit_report *r);
+
+/* `nv setenv`, behind the same io. `copy` is 0 for the copy U-Boot reads, or
+ * 1|2 for a named one. The sequence, which is what keeps one good copy on
+ * flash at every instant:
+ *
+ *   - both copies valid: the target alone is rewritten and read back (the
+ *     other copy is the fallback if that write is cut);
+ *   - one copy invalid: the new block is built and checked in memory, then
+ *     written to the INVALID copy and read back, and only then is the valid
+ *     copy rewritten and read back. With -c naming the invalid copy only that
+ *     one is written. The valid copy is never erased while it is the only
+ *     one;
+ *   - neither valid: nothing is written.
+ *
+ * Nothing is erased before the new block has fit, carried the value asked
+ * for and had its CRC set. */
+enum env_set_rc {
+	NVS_DONE = 0,
+	NVS_NONE_VALID,
+	NVS_NO_ROOM,
+	NVS_NOT_SET,
+	NVS_WRITE_REPAIR,
+	NVS_VERIFY_REPAIR,
+	NVS_WRITE,
+	NVS_VERIFY,
+};
+
+struct env_set_report {
+	int target;            /* the copy the change was meant for: 1 or 2 */
+	int repaired;          /* 1 or 2 when an invalid copy was written first, else 0 */
+	int wrote_target;      /* 1 when the target was rewritten and verified */
+};
+
+int env_setenv(const struct env_io *io, int copy, const char *key,
+	       const char *value, struct env_set_report *r);
+const char *env_setenv_msg(int rc);
 
 /* The development toggles a commit looks at, as files on the config
  * partition. The paths are fields, so a test points them at fixtures. */
