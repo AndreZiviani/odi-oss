@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Host link: a trial of `HOST_AUTONEG` or `HOST_SERDES` goes back at once
+  when its state file cannot be written after the switch (issue 358, found
+  reading the code, not seen on a stick). With `/var` full the file kept
+  saying the mode before, so the expiry and `revert` skipped the hardware
+  write and logged the port as back while it stayed in the unconfirmed
+  trial mode until a power cycle.
 - Flash: `fwu.sh` no longer accepts a read-back that ended early. The
   read-back pipes the tar member into `cmp` and took "EOF on -" for success,
   which is what `cmp` says when the member ends before the partition does,
