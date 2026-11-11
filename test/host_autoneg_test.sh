@@ -16,7 +16,8 @@
 #
 # What is checked: the key parsing, the boot (default, off, a safe-mode
 # boot), the boot watch (forced link, fallback, a host that comes up late,
-# no host at all), the trial (expiry, confirm, revert, every refusal),
+# no host at all), the trial (expiry, confirm, revert, a state file that
+# cannot be written after the switch, every refusal),
 # status, and the stale lock. The boot counter and the safe mode itself are
 # test/safe_mode_test.sh.
 set -u
@@ -56,10 +57,13 @@ an)     [ "\$p" = 1 ] && l=1 ;;
 esac
 echo \$l > "$T/param/host_link"
 EOF
+# An iohook, when present, runs once before the next command: the moment
+# of a hardware write, between the load of the state file and its save.
 cat > "$T/bin/timeout" <<EOF
 #!/bin/sh
 shift
 "$T/bin/model"
+[ -x "$T/iohook" ] && { mv "$T/iohook" "$T/iohook.run"; "$T/iohook.run"; }
 exec "\$@"
 EOF
 cat > "$T/bin/setsid" <<EOF
@@ -250,6 +254,26 @@ printf '#!/bin/sh\nsh "%s" confirm >> "%s/confirm.out" 2>&1\n' "$S" "$T" > "$T/h
 sh "$S" trial-run "$id" 20 > /dev/null
 t "confirm on: the key is removed" "^$" "$(key)"
 t "confirm on: setting on" "^trial_confirmed on on$" "$(st event) $(st setting) $(st running)"
+
+# The state file cannot be written after the switch (/var full). The file
+# still says the mode before, and expire and revert go by it, so the port
+# has to go back at once. The state directory is the link $T/varlink to
+# $T/run here: the iohook takes it away at the hardware write and the trial
+# window puts it back, which stops root too (a read-only directory would
+# not).
+newboot 1
+ln -s run "$T/varlink"
+STATE=$T/varlink/state sh "$S" boot > /dev/null
+STATE=$T/varlink/state sh "$S" try off > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\nmv "%s/varlink" "%s/varlink.off"\n' "$T" "$T" > "$T/iohook"; chmod +x "$T/iohook"
+printf '#!/bin/sh\ncat "%s/param/host_autoneg" > "%s/window.param"\nmv "%s/varlink.off" "%s/varlink"\n' "$T" "$T" "$T" "$T" > "$T/hook"; chmod +x "$T/hook"
+out=$(STATE=$T/varlink/state sh "$S" trial-run "$id" 20 2>&1)
+t "no state file after the switch: said so" "could not write" "$out"
+t "  the port is back before the window" "^1$" "$(cat "$T/window.param")"
+t "  and after it" "^1$" "$(cat "$T/param/host_autoneg")"
+t "  logged" "event=trial_failed .*could not write .*back to auto-negotiation on" "$(cat "$T/kmsg")"
+t "  the expiry clears the trial once the file can be written" "^on steady $" "$(st running) $(st phase) $(st trial_id)"
 
 # the refusals
 out=$(sh "$S" try on 2>&1)

@@ -200,7 +200,7 @@ save() {
 		echo "event_uptime=$ev_up"
 		echo "message=$ev_msg"
 	} > "$STATE.new.$$" || { rm -f "$STATE.new.$$"; say "could not write $STATE" >&2; return 1; }
-	put_in_place "$STATE" || say "could not install $STATE" >&2
+	put_in_place "$STATE" || { say "could not install $STATE" >&2; return 1; }
 }
 
 # ---- the lock: one state change at a time. mkdir is atomic; a holder that
@@ -387,7 +387,11 @@ trial_run() {
 	fi
 	if hw_write "$trial_mode"; then
 		running=$trial_mode
-		save
+		# expire and revert go by the file. If it cannot be written it
+		# still says the mode before, and they would leave the port in
+		# the trial mode: back at once. The expiry below gets a second
+		# go at the file.
+		save || back_to_prev trial_failed "could not write $STATE"
 	else
 		running=$trial_prev phase=steady
 		event trial_failed "could not write odi_switch.host_autoneg; still $running"
