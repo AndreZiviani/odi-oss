@@ -865,7 +865,20 @@ A safe-mode boot lasts that one boot. It:
 - confirms the boot to the kernel watchdog without the checks that a dead
   config partition or a missing address fail (`confirm_watchdog` in
   `rcs-lib.sh`; the switch init must still have worked), so a safe-mode boot
-  stays up for someone to reach instead of being reset at 123 s again.
+  stays up for someone to reach instead of being reset at 123 s again;
+- does not register `omcid` with the kernel watchdog (rcS), so it stays up
+  whatever state omcid is in: with the PON off omcid has no work, and an
+  omcid that dies at every start (a value in the config store, which both
+  slots share) would otherwise reset this boot after 60 s like the three
+  before it. `services start omcid` does not arm the deadline in it either;
+- starts the web UI and ssh whatever `/etc/config/confd.off` and
+  `/etc/config/dropbear.off` say, and leaves both files where they are, so
+  the next normal boot is as configured. Both stopped at once would
+  otherwise leave the rescue address with nothing listening on it, and a
+  reflash does not remove the files;
+- runs ssh on a host key in RAM (`/var/run`) when there is none and none
+  can be written (the config partition full, read-only or not mounted). The
+  ssh client then meets a host key it does not know.
 
 The web UI says so on every view while it lasts: that this is the safe
 mode, that the PON is off, that the password is the default for this boot
