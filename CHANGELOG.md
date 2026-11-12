@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Switch: the UNI drops a frame whose source MAC is learned on the PON
+  port, as the PON port already did the other way round (`SA_MOVED`
+  0x01c000 now `0x00000011`). A router that floods an OLT frame back out of
+  its SFP port (an IGMP general query, say) made the stick learn the OLT
+  MAC on the UNI and then drop every frame from that MAC on the fibre for
+  about 250 s, which cut IPTV every few minutes. Refs #369.
 - Releases: confd v1.15.0 and metricsd v1.10.0. The web UI adds the
   "802.1X EAPOL without the service tag" toggle on Config, VLAN
   (`VLAN_EAPOL_UNTAGGED`), the OLT launch power and path loss under the
