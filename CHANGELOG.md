@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.15.0 and metricsd v1.10.0. The web UI adds the
+  "802.1X EAPOL without the service tag" toggle on Config, VLAN
+  (`VLAN_EAPOL_UNTAGGED`), the OLT launch power and path loss under the
+  receive meter (from the PON-ID), the shared PON load on Status, coloured
+  zones on the optics meters, serial numbers typed as 16 hex digits, a
+  warning beside Commit while `confirm-arp` or `breadcrumbs.on` exists, and
+  refuses a reboot while a firmware write runs, a commit of a partition
+  that is not running, a backup from a failed dump and a change to an
+  `authorized_keys` it could not read whole. The exporter adds
+  `gpon_cpu_seconds_total`, `gpon_olt_info`, `gpon_ranging_eqd_bits`, the
+  PON-ID time, the counter sample superframe count and FEC bit, and the
+  restart state of the respawned daemons; `OdiResetLoop` no longer fires on
+  a power cut. The asset hashes in src/release-sha256.txt are the release
+  SHA256SUMS, checked by `make releases`.
 - OMCI: a respawned `omcid` runs the rebuild that was pending when the last
   one died (issue 357, found reading the code, not seen on a stick). A
   Create or Set is answered and saved at once, and the switch is programmed
