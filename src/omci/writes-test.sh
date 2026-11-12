@@ -359,6 +359,9 @@ before=$((0x$(answer "$log" 0601 | cut -c1-4)))
 send "$log" 0602 49 0122 0101 "c000"
 check "a Get of 290 before any Set answers zeros, not an unknown entity" \
       "$(answer "$log" 0602 | cut -c1-10)" "00c0000000"
+send "$log" 0640 49 0122 0101 "0280"
+check "and the port status (7) and server timeout (9) read their defaults, authorized and 30 s, before any Set" \
+      "$(answer "$log" 0640 | cut -c1-12)" "00028001001e"
 send "$log" 0603 48 0122 0101 "c0000102"
 check "a Set of 290 attributes 1 and 2 is answered ok without OMCI_UNKNOWN_ME_OK" \
       "$(answer "$log" 0603 | cut -c1-2)" "00"
@@ -374,10 +377,10 @@ check "a Set of a read-only attribute (3) fails with result 9, the failed mask 2
       "$(answer "$log" 0608 | cut -c1-10)" "0900002000"
 send "$log" 0609 49 0122 0101 "2000"
 check "and stores nothing" "$(answer "$log" 0609 | cut -c1-8)" "00200000"
-send "$log" 060a 48 0122 0101 "0180003c0e10"
-send "$log" 060b 49 0122 0101 "0180"
-check "the 16-bit timers (quiet period 8, server timeout 9) are stored whole" \
-      "$(answer "$log" 060b | cut -c1-14)" "000180003c0e10"
+send "$log" 060a 48 0122 0101 "0100003c"
+send "$log" 060b 49 0122 0101 "0100"
+check "the 16-bit quiet period (8) is stored whole" \
+      "$(answer "$log" 060b | cut -c1-10)" "000100003c"
 check "the key is still off" "$(grep -c '^unknown entities: answered unknown entity' "$log")" "1"
 send "$log" 0607 4d 0002 0000 ""
 after=$((0x$(answer "$log" 0607 | cut -c1-4)))
@@ -390,8 +393,8 @@ while [ "$s" -lt "$after" ]; do
 	[ "$(printf '%s' "$r" | cut -c1-8)" = "01220101" ] && found=$r
 	s=$((s + 1))
 done
-check "and it is 290 instance 257 with all twelve attributes, the unwritten ones zero" \
-      "$found" "01220101fff0010a0000000000003c0e1000000000"
+check "and it is 290 instance 257 with all twelve attributes, the unwritten ones at their defaults (port status 1, server timeout 30)" \
+      "$found" "01220101fff0010a0000000001003c001e00000000"
 send "$log" 0620 4f 0002 0000 ""
 send "$log" 0621 4d 0002 0000 ""
 check "a MIB reset takes it out of the upload again" \

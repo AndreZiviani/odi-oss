@@ -7,7 +7,8 @@ listed here.
 
 - OMCI: ME 290, Dot1X port extension package, is modelled with all twelve
   G.988 attributes, as stored values (omcid runs no 802.1X authenticator
-  and does not act on them; the state and status attributes stay zero). An
+  and does not act on them; the state and status attributes stay zero, except the port status,
+  authorized, and the server timeout, 30 s). An
   OLT that starts 802.1X on the UNI only after its Set of 290 is accepted
   had to be given `OMCI_UNKNOWN_ME_OK=1`; it is now answered with success
   by default. A Get returns the stored values, and the MIB upload lists

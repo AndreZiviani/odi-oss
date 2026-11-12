@@ -531,10 +531,13 @@ G988_ONLY = [{
     # 802.1X authenticator in the stick, the router behind it answers the
     # EAP exchange. That matters, as the OLT seen writes action 2 ("force
     # unauthenticated"), which would disable the port if it were carried out.
-    # The read-only attributes stay zero. G.988 has the ONU create one with
-    # each PPTP Ethernet UNI; omcid does not, so no instance exists until the
-    # OLT Sets one (a Get before that answers zeros) and a MIB upload is
-    # unchanged for an OLT that never touches the class. The stock image has
+    # The read-only attributes stay zero, except the port status (7, starts
+    # at 1, authorized) and the server timeout (9, 30 s), whose values at
+    # instantiation come from voice_dfl[] in mibstore.c. G.988 has the ONU
+    # create one with each PPTP Ethernet UNI; omcid does not, so no instance
+    # exists until the OLT Sets one (a Get before that answers those
+    # defaults and zeros) and a MIB upload is unchanged for an OLT that never
+    # touches the class. The stock image has
     # no plugin for it either.
     290, 'Dot1xPortExt', 'DOT1X', 'Dot1X port extension package', True,
     ['set', 'get'],
