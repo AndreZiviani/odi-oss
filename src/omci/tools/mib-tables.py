@@ -521,7 +521,20 @@ G988_ONLY = [{
               g988_attr(6, 'RootPortNum', 'u16', 2),
               g988_attr(7, 'HelloTime', 'u16', 2),
               g988_attr(8, 'ForwardDelay', 'u16', 2)],
-}]
+}, g988_voice(
+    # 290, Dot1X port extension package: the ONU creates it with each PPTP
+    # Ethernet UNI, at the same entity id. An OLT that runs 802.1X on the UNI
+    # Sets attribute 1 (enable) and 2 (action register) and starts the
+    # exchange only when the Set is accepted. Only those two attributes are
+    # modelled, the ones an OLT was seen to write; omcid holds the values and
+    # does not act on them (there is no authenticator in the stick). The
+    # stock image has no plugin for it, so there is no stock behaviour to
+    # copy. Not autonomous: no instance exists until the OLT Sets one (a Get
+    # before that answers zeros), so a MIB upload only lists it afterwards.
+    290, 'Dot1xPortExt', 'DOT1X', 'Dot1X port extension package', True,
+    ['set', 'get'],
+    [('Dot1xEnable', 'u8', 1, 'RW', 'M'),
+     ('ActionRegister', 'u8', 1, 'RW', 'O')])]
 
 
 def main():

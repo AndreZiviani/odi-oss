@@ -342,6 +342,47 @@ send "$log" 0405 52 ff00 0000 ""
 check "a class the ONU does not hold keeps its old answer, ok" \
       "$(answer "$log" 0405 | cut -c1-2)" "00"
 
+# ------------------------------------------------ Dot1X port extension (290)
+# An OLT that runs 802.1X on a UNI Sets class 290, instance 257 (the PPTP
+# Ethernet UNI), attributes 1 and 2 (mask c000: enable 1, action register 2),
+# and starts the exchange only if the Set is accepted. This run has no
+# OMCI_UNKNOWN_ME_OK (the key is off above), so the class has to be modelled.
+# omcid stores the values and does not act on them. The ONU holds no instance
+# until the Set, so the MIB upload gains one entity only then.
+send "$log" 0600 4f 0002 0000 ""
+send "$log" 0601 4d 0002 0000 ""
+before=$((0x$(answer "$log" 0601 | cut -c1-4)))
+send "$log" 0602 49 0122 0101 "c000"
+check "a Get of 290 before any Set answers zeros, not an unknown entity" \
+      "$(answer "$log" 0602 | cut -c1-10)" "00c0000000"
+send "$log" 0603 48 0122 0101 "c0000102"
+check "a Set of 290 attributes 1 and 2 is answered ok without OMCI_UNKNOWN_ME_OK" \
+      "$(answer "$log" 0603 | cut -c1-2)" "00"
+send "$log" 0604 49 0122 0101 "c000"
+check "and a Get returns the stored values" \
+      "$(answer "$log" 0604 | cut -c1-10)" "00c0000102"
+send "$log" 0605 48 0122 0101 "40000a"
+send "$log" 0606 49 0122 0101 "c000"
+check "a Set of one attribute keeps the other" \
+      "$(answer "$log" 0606 | cut -c1-10)" "00c000010a"
+check "the key is still off" "$(grep -c '^unknown entities: answered unknown entity' "$log")" "1"
+send "$log" 0607 4d 0002 0000 ""
+after=$((0x$(answer "$log" 0607 | cut -c1-4)))
+check "after the Set the MIB upload lists one more entity" "$((after - before))" "1"
+s=$before
+found=""
+while [ "$s" -lt "$after" ]; do
+	send "$log" "$(wtci $((0x610 + s - before)))" 4e 0002 0000 "$(printf '%04x' "$s")"
+	r=$(answer "$log" "$(wtci $((0x610 + s - before)))" | cut -c1-16)
+	[ "$(printf '%s' "$r" | cut -c1-8)" = "01220101" ] && found=$r
+	s=$((s + 1))
+done
+check "and it is 290 instance 257 with both attributes" "$found" "01220101c000010a"
+send "$log" 0620 4f 0002 0000 ""
+send "$log" 0621 4d 0002 0000 ""
+check "a MIB reset takes it out of the upload again" \
+      "$((0x$(answer "$log" 0621 | cut -c1-4)))" "$before"
+
 # ------------------------------------------------ the MIB full
 # The store holds 320 rows. Past them a Create is answered result 1,
 # processing error, logged "no room in the MIB", and changes nothing; the

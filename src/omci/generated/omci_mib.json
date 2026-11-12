@@ -13522,6 +13522,70 @@
  {
   "plugin": null,
   "table": {
+   "name": "Dot1xPortExt",
+   "shortName": "DOT1X",
+   "classId": 290,
+   "desc": "Dot1X port extension package",
+   "initType": 0,
+   "stdType": 1,
+   "actionType": 768,
+   "attrNum": 3,
+   "entrySize": 4,
+   "actions": [
+    "set",
+    "get"
+   ],
+   "extra": {}
+  },
+  "oper": {},
+  "attrs": [
+   {
+    "index": 0,
+    "name": "EntityId",
+    "dataType": null,
+    "len": 2,
+    "isIndex": 1,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 1,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u16",
+    "size": 2
+   },
+   {
+    "index": 1,
+    "name": "Dot1xEnable",
+    "dataType": null,
+    "len": 1,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 3,
+    "avcFlag": 0,
+    "optionType": 1,
+    "type": "u8",
+    "size": 1
+   },
+   {
+    "index": 2,
+    "name": "ActionRegister",
+    "dataType": null,
+    "len": 1,
+    "isIndex": 0,
+    "mibSave": 0,
+    "outStyle": null,
+    "oltAcc": 3,
+    "avcFlag": 0,
+    "optionType": 4,
+    "type": "u8",
+    "size": 1
+   }
+  ]
+ },
+ {
+  "plugin": null,
+  "table": {
    "name": "PptpPotsUni",
    "shortName": "POTS",
    "classId": 53,
