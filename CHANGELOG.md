@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- GPON: the `ranging_time` line of `/proc/odi_gpon/status` (and the EqD the
+  web UI and `gpon_ranging_eqd_bits` show) keeps only a Ranging_Time
+  addressed to this ONU, as the activation already did for the EqD it
+  applies. The PLOAM logs of our sticks have only shown their own ONU-ID
+  and broadcast, but a shared PON carries every ONU its own Ranging_Time.
 - Switch: the UNI drops a frame whose source MAC is learned on the PON
   port, as the PON port already did the other way round (`SA_MOVED`
   0x01c000 now `0x00000011`). A router that floods an OLT frame back out of
