@@ -84,7 +84,7 @@ got=$($Q cli/build/omcli get tables --vendor 2>&1 | sed -n '1p')
 check "get tables goes through when omcid is the one listening" \
       "$got" "TableId [0] Name: OntData!"
 got=$($Q cli/build/omcli -f get tables --vendor 2>&1 | grep -c '^TableId \[')
-check "with -f it lists every registered table (the 81 plugins, class 46 and the 16 VoIP classes)" "$got" "98"
+check "with -f it lists every registered table (the 81 plugins, class 46, class 290 and the 16 VoIP classes)" "$got" "99"
 got=$($Q cli/build/omcli -f get tables --vendor 2>&1 | sed -n '2p')
 check "in the vendor's own format" "$got" "TableId [1] Name: Cardholder!"
 # And the daemon is still alive afterwards.

@@ -16,6 +16,16 @@ listed here.
   filter that goes by priority alone, and an IP host with class 171 rules.
   There the rule is as before and `omcid` logs why. The idea and the guards
   follow #370. Refs #301.
+- OMCI: ME 290, Dot1X port extension package, is modelled with all twelve
+  G.988 attributes, as stored values (omcid runs no 802.1X authenticator
+  and does not act on them; the state and status attributes stay zero, except the port status,
+  authorized, and the server timeout, 30 s). An
+  OLT that starts 802.1X on the UNI only after its Set of 290 is accepted
+  had to be given `OMCI_UNKNOWN_ME_OK=1`; it is now answered with success
+  by default. A Get returns the stored values, and the MIB upload lists
+  the entity only after the OLT has Set it (the write-only action register
+  included, as for the other write-only attributes of the model).
+  Refs #301.
 - Releases: confd v1.15.0 and metricsd v1.10.0. The web UI adds the
   "802.1X EAPOL without the service tag" toggle on Config, VLAN
   (`VLAN_EAPOL_UNTAGGED`), the OLT launch power and path loss under the
