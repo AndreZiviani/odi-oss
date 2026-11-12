@@ -522,19 +522,32 @@ G988_ONLY = [{
               g988_attr(7, 'HelloTime', 'u16', 2),
               g988_attr(8, 'ForwardDelay', 'u16', 2)],
 }, g988_voice(
-    # 290, Dot1X port extension package: the ONU creates it with each PPTP
-    # Ethernet UNI, at the same entity id. An OLT that runs 802.1X on the UNI
-    # Sets attribute 1 (enable) and 2 (action register) and starts the
-    # exchange only when the Set is accepted. Only those two attributes are
-    # modelled, the ones an OLT was seen to write; omcid holds the values and
-    # does not act on them (there is no authenticator in the stick). The
-    # stock image has no plugin for it, so there is no stock behaviour to
-    # copy. Not autonomous: no instance exists until the OLT Sets one (a Get
-    # before that answers zeros), so a MIB upload only lists it afterwards.
+    # 290, Dot1X port extension package (G.988 Dot1X port extension package,
+    # ME 290): the ONU creates it with each PPTP Ethernet UNI, at the same
+    # entity id. An OLT that runs 802.1X on the UNI Sets attribute 1 (enable)
+    # and 2 (action register) and starts the exchange only when the Set is
+    # accepted. All twelve attributes are modelled, with the access G.988
+    # gives them: the action register is write only, the state and status
+    # ones are read only. omcid holds what the OLT writes and does not act on
+    # it (there is no 802.1X authenticator in the stick), so the read-only
+    # ones stay zero. The stock image has no plugin for the class, so there is
+    # no stock behaviour to copy. Not autonomous: no instance exists until the
+    # OLT Sets one (a Get before that answers zeros), so a MIB upload only
+    # lists it afterwards.
     290, 'Dot1xPortExt', 'DOT1X', 'Dot1X port extension package', True,
     ['set', 'get'],
     [('Dot1xEnable', 'u8', 1, 'RW', 'M'),
-     ('ActionRegister', 'u8', 1, 'RW', 'O')])]
+     ('ActionRegister', 'u8', 1, 'W', 'M'),
+     ('AuthenticatorPaeState', 'u8', 1, 'R', 'O'),
+     ('BackendAuthenticationState', 'u8', 1, 'R', 'O'),
+     ('AdminControlledDirections', 'u8', 1, 'RW', 'O'),
+     ('OperationalControlledDirections', 'u8', 1, 'R', 'O'),
+     ('AuthenticatorControlledPortStatus', 'u8', 1, 'R', 'O'),
+     ('QuietPeriod', 'u16', 2, 'RW', 'O'),
+     ('ServerTimeoutPeriod', 'u16', 2, 'RW', 'O'),
+     ('ReAuthenticationPeriod', 'u16', 2, 'R', 'O'),
+     ('ReAuthenticationEnabled', 'u8', 1, 'R', 'O'),
+     ('KeyTransmissionEnabled', 'u8', 1, 'RW', 'O')])]
 
 
 def main():

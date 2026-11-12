@@ -54,7 +54,7 @@ not need to be reverse-engineered by hand, and `generated/` regenerates from
 the shipped plugins rather than being hand-maintained. The exceptions are
 the classes G.988 defines and the stock image has no plugin for: ME 46, ME 290
 (Dot1X port extension package: an OLT that runs 802.1X on a UNI Sets it, and
-omcid keeps the two attributes it was seen to write without acting on them),
+omcid keeps what the OLT writes without acting on it),
 and the sixteen VoIP classes of G.988 clause 9.9 (SIP over OMCI, answered only
 while `OMCI_POTS_PORTS` is on, docs/SETTINGS.md). They are declared beside
 the generator (`G988_ONLY` and `G988_VOICE` in `tools/mib-tables.py`) and

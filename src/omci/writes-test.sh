@@ -348,7 +348,11 @@ check "a class the ONU does not hold keeps its old answer, ok" \
 # and starts the exchange only if the Set is accepted. This run has no
 # OMCI_UNKNOWN_ME_OK (the key is off above), so the class has to be modelled.
 # omcid stores the values and does not act on them. The ONU holds no instance
-# until the Set, so the MIB upload gains one entity only then.
+# until the Set, so the MIB upload gains one entity only then. Attribute 2 is
+# write only: like every write-only attribute of the model (the Reset of a
+# few classes) a Get answers what was stored and the upload lists it, as the
+# stock upload walk skips only the optional-not-supported, private, PM and
+# table options. Attributes 3 to 7, 10 and 11 are read only and refused.
 send "$log" 0600 4f 0002 0000 ""
 send "$log" 0601 4d 0002 0000 ""
 before=$((0x$(answer "$log" 0601 | cut -c1-4)))
@@ -365,6 +369,15 @@ send "$log" 0605 48 0122 0101 "40000a"
 send "$log" 0606 49 0122 0101 "c000"
 check "a Set of one attribute keeps the other" \
       "$(answer "$log" 0606 | cut -c1-10)" "00c000010a"
+send "$log" 0608 48 0122 0101 "2000ff"
+check "a Set of a read-only attribute (3) fails with result 9, the failed mask 2000" \
+      "$(answer "$log" 0608 | cut -c1-10)" "0900002000"
+send "$log" 0609 49 0122 0101 "2000"
+check "and stores nothing" "$(answer "$log" 0609 | cut -c1-8)" "00200000"
+send "$log" 060a 48 0122 0101 "0180003c0e10"
+send "$log" 060b 49 0122 0101 "0180"
+check "the 16-bit timers (quiet period 8, server timeout 9) are stored whole" \
+      "$(answer "$log" 060b | cut -c1-14)" "000180003c0e10"
 check "the key is still off" "$(grep -c '^unknown entities: answered unknown entity' "$log")" "1"
 send "$log" 0607 4d 0002 0000 ""
 after=$((0x$(answer "$log" 0607 | cut -c1-4)))
@@ -373,11 +386,12 @@ s=$before
 found=""
 while [ "$s" -lt "$after" ]; do
 	send "$log" "$(wtci $((0x610 + s - before)))" 4e 0002 0000 "$(printf '%04x' "$s")"
-	r=$(answer "$log" "$(wtci $((0x610 + s - before)))" | cut -c1-16)
+	r=$(answer "$log" "$(wtci $((0x610 + s - before)))" | cut -c1-42)
 	[ "$(printf '%s' "$r" | cut -c1-8)" = "01220101" ] && found=$r
 	s=$((s + 1))
 done
-check "and it is 290 instance 257 with both attributes" "$found" "01220101c000010a"
+check "and it is 290 instance 257 with all twelve attributes, the unwritten ones zero" \
+      "$found" "01220101fff0010a0000000000003c0e1000000000"
 send "$log" 0620 4f 0002 0000 ""
 send "$log" 0621 4d 0002 0000 ""
 check "a MIB reset takes it out of the upload again" \
