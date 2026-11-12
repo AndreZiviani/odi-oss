@@ -1146,10 +1146,13 @@ static uint8_t pon_state_now(void)
 	return 1;
 }
 
-/* G.988's values at instantiation for the attributes of a voice entity that
- * no Create carries, where they are not zero: the pointers that are null
- * until set, and the timers G.988 gives a default. An OLT that never Sets
- * them reads these. */
+/* G.988's values at instantiation for the attributes of an entity that no
+ * Create carries, where they are not zero: the pointers that are null until
+ * set, and the timers G.988 gives a default. An OLT that never Sets them
+ * reads these, with or without a row. Class 290 (Dot1X port extension
+ * package, G.988 9.3.14) is not a voice entity but is served the same way:
+ * its port status starts at 1, authorized (G.988 allows 1 or 2, and the
+ * stick never blocks the port), and its server timeout at 30 s. */
 static const struct { uint16_t cls; uint8_t attr; uint16_t v; } voice_dfl[] = {
 	{ OMCI_ME_SIP_AGENT_CFG_DATA, 5, 0xffff },      /* TCP/UDP pointer */
 	{ OMCI_ME_SIP_AGENT_CFG_DATA, 6, 3600 },        /* registration expiry, s */
@@ -1159,6 +1162,8 @@ static const struct { uint16_t cls; uint8_t attr; uint16_t v; } voice_dfl[] = {
 	{ OMCI_ME_RTP_PROFILE_DATA, 8, 0xffff },        /* IP host config pointer */
 	{ OMCI_ME_VOIP_APP_SERVICE_PROFILE, 10, 0xffff }, /* IP host pointer */
 	{ OMCI_ME_VOIP_CONFIG_DATA, 5, 0xffff },        /* configuration address pointer */
+	{ OMCI_ME_DOT1X_PORT_EXT, 7, 1 },                                  /* Dot1X controlled port status: authorized */
+	{ OMCI_ME_DOT1X_PORT_EXT, 9, 30 },                                 /* Dot1X server timeout, s */
 };
 
 /* The value in the attribute's own width, big-endian like every attribute. */
@@ -1596,6 +1601,8 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 		else if (k == 3) out[0] = 2;           /* Policy */
 	} else if (voip_class(c->classId)) {
 		voice_value(c, r, inst, k, out, n);
+	} else if (c->classId == OMCI_ME_DOT1X_PORT_EXT) {
+		voice_default(c->classId, k, out, n);
 	}
 	return n;
 }

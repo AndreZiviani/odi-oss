@@ -521,7 +521,38 @@ G988_ONLY = [{
               g988_attr(6, 'RootPortNum', 'u16', 2),
               g988_attr(7, 'HelloTime', 'u16', 2),
               g988_attr(8, 'ForwardDelay', 'u16', 2)],
-}]
+}, g988_voice(
+    # 290, Dot1X port extension package (G.988 clause 9.3.14). An OLT that
+    # runs 802.1X on the UNI Sets attribute 1 (enable) and 2 (action
+    # register) and starts the exchange only when the Set is accepted. All
+    # twelve attributes are modelled with the access G.988 gives them: the
+    # action register is write only, the state and status ones are read only.
+    # omcid holds what the OLT writes and does not act on it: there is no
+    # 802.1X authenticator in the stick, the router behind it answers the
+    # EAP exchange. That matters, as the OLT seen writes action 2 ("force
+    # unauthenticated"), which would disable the port if it were carried out.
+    # The read-only attributes stay zero, except the port status (7, starts
+    # at 1, authorized) and the server timeout (9, 30 s), whose values at
+    # instantiation come from voice_dfl[] in mibstore.c. G.988 has the ONU
+    # create one with each PPTP Ethernet UNI; omcid does not, so no instance
+    # exists until the OLT Sets one (a Get before that answers those
+    # defaults and zeros) and a MIB upload is unchanged for an OLT that never
+    # touches the class. The stock image has
+    # no plugin for it either.
+    290, 'Dot1xPortExt', 'DOT1X', 'Dot1X port extension package', True,
+    ['set', 'get'],
+    [('Dot1xEnable', 'u8', 1, 'RW', 'M'),
+     ('ActionRegister', 'u8', 1, 'W', 'M'),
+     ('AuthenticatorPaeState', 'u8', 1, 'R', 'O'),
+     ('BackendAuthenticationState', 'u8', 1, 'R', 'O'),
+     ('AdminControlledDirections', 'u8', 1, 'RW', 'O'),
+     ('OperationalControlledDirections', 'u8', 1, 'R', 'O'),
+     ('AuthenticatorControlledPortStatus', 'u8', 1, 'R', 'O'),
+     ('QuietPeriod', 'u16', 2, 'RW', 'O'),
+     ('ServerTimeoutPeriod', 'u16', 2, 'RW', 'O'),
+     ('ReAuthenticationPeriod', 'u16', 2, 'R', 'O'),
+     ('ReAuthenticationEnabled', 'u8', 1, 'R', 'O'),
+     ('KeyTransmissionEnabled', 'u8', 1, 'RW', 'O')])]
 
 
 def main():

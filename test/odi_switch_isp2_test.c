@@ -33,6 +33,11 @@
  *    behaviour is what the isp1 replay pins and which carried isp2 with
  *    this same omcid rule before the 6.18 port.
  *
+ * The add-tag rule here is the stock one (bdg_gen_manual_stock(): the out
+ * tag names the priority, so the downstream row cares it). omcid now sends
+ * the downstream half on the VID alone; odi_switch_bdgconn_vlan_test.c pins
+ * that row and its order.
+ *
  * Usage: odi_switch_isp2_test <out-file>: writes both brackets as a ring
  * dump for the .sh to compare, and returns non-zero on any field failure.
  */
@@ -150,7 +155,7 @@ int main(int argc, char **argv)
 	odi_switch_cmd_reset_state();
 	puts("cmd 51 on the isp2 profile (VID 10 untagged handoff + multicast):");
 
-	bdg_gen_manual(&vr, 10, 0, 0);
+	bdg_gen_manual_stock(&vr, 10, 0, 0);
 	bdg_conn(&b, 0, OMCI_DIR_BI, 5, 0, 0, &vr);
 	call(51, &b, sizeof b, "service_id 0 (both ways, add VID 10) accepted");
 
@@ -223,7 +228,7 @@ int main(int argc, char **argv)
 		ok(odi_switch_cmd(50, &id, sizeof id) == 0 && !odi_sw_cf[254].used &&
 		   !odi_sw_cf[64].used && odi_sw_cf[65].used, "service_id 0 released, multicast kept");
 		ok(odi_mock.log_n > before, "the release writes (invalid rows, VLAN row 10)");
-		bdg_gen_manual(&vr, 10, 0, 0);
+		bdg_gen_manual_stock(&vr, 10, 0, 0);
 		bdg_conn(&b, 0, OMCI_DIR_BI, 5, 0, 0, &vr);
 		/* Same class as the multicast row, so it goes after it; the
 		 * freed row 64 stays a hole until everything is rebuilt. */
