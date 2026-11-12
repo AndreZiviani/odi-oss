@@ -349,7 +349,13 @@ static void odi_gpon_ploam_log(unsigned int dir, const struct odi_gpon_ploam *ms
 		if (msg->type == ODI_GPON_DS_UPSTREAM_OVERHEAD) {
 			odi_gpon_decode_upstream_overhead(msg, &odi_gpon_last_uo);
 			odi_gpon_last_uo_valid = true;
-		} else if (msg->type == ODI_GPON_DS_RANGING_TIME) {
+		} else if (msg->type == ODI_GPON_DS_RANGING_TIME &&
+			   odi_gpon_fsm_directed_to_us(&odi_gpon_fsm_inst, msg)) {
+			/* Directed: only ours is kept, as the FSM takes the EqD
+			 * only from ours (odi_gpon_fsm.c, O4). The PLOAM logs
+			 * of both sticks have shown only their own ONU-ID and
+			 * broadcast, so the receiver appears to filter, but a
+			 * shared PON carries every ONU its own Ranging_Time. */
 			odi_gpon_decode_ranging_time(msg, &odi_gpon_last_rng);
 			odi_gpon_last_rng_valid = true;
 		} else if (msg->type == ODI_GPON_DS_PON_ID && msg->onu_id == ODI_GPON_ONU_ID_BROADCAST) {

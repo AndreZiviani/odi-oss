@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- GPON: the `ranging_time` line of `/proc/odi_gpon/status` (and the EqD the
+  web UI and `gpon_ranging_eqd_bits` show) keeps only a Ranging_Time
+  addressed to this ONU, as the activation already did for the EqD it
+  applies. The PLOAM logs of our sticks have only shown their own ONU-ID
+  and broadcast, but a shared PON carries every ONU its own Ranging_Time.
 - Releases: confd v1.15.0 and metricsd v1.10.0. The web UI adds the
   "802.1X EAPOL without the service tag" toggle on Config, VLAN
   (`VLAN_EAPOL_UNTAGGED`), the OLT launch power and path loss under the
