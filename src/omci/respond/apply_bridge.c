@@ -327,8 +327,11 @@ void gen_no_vlan_filter_rule(struct omci_vlan_oper *vr)
  * (`isMc` 1): match priority/VID zero, remove both tags, emit no tag.
  * `isMc` 2 is the same match with the tag kept as received, for a profile
  * whose downstream tag control (309 attribute 16) is type 0, transparent.
+ * `manual` is 1 for the stick's own tag (VLAN_MANU_TAG_VID and _PRI), 0 when
+ * the VID and priority are a class 171 tag, whose downstream half follows
+ * the entry's DsMode and so keeps the priority.
  */
-void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
+void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc, int manual)
 {
 	struct omci_bdgconn tmp;
 
@@ -368,7 +371,15 @@ void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
 		vr->out.out_tag.vid  = 0;
 		vr->out.out_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
 	} else {
-		vr->out.out_tag.pri  = (uint32_t)pri;
+		/* The downstream half of this rule matches out_tag (the driver,
+		 * bdgconn_derive()). The stock stack matches the VID and the
+		 * priority of the pushed tag, so a line whose OLT sends a
+		 * priority other than VLAN_MANU_TAG_PRI loses those frames; the
+		 * ignore sentinel makes the row match the VID alone, whatever
+		 * the priority. A deliberate improvement over stock: the
+		 * priority only sets what the upstream tag carries. A class 171
+		 * tag keeps its priority in the match (DsMode). */
+		vr->out.out_tag.pri  = manual ? OMCI_PRI_ANY : (uint32_t)pri;
 		vr->out.out_tag.vid  = (uint32_t)vid;
 		vr->out.out_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
 	}
@@ -740,10 +751,9 @@ static void gen_eapol_rule(struct omci_vlan_oper *vr, int which)
  *  - eapol-down: untagged EAPOL from the OLT reaches the router as it is,
  *  - eapol-down-vid0: so does a priority-tagged one (VID 0), tag kept.
  * The manual rule itself keeps its tag and its downstream half. With the
- * manual VID 0 that downstream half already takes the VID 0 frames of the
- * tag priority and strips them; a VID 0 rule would also pass the frames of
- * every other priority with their tag, which no rule omcid builds passes
- * with the key off, so it is not made. */
+ * manual VID 0 that downstream half already takes the VID 0 frames of any
+ * priority and strips them; a VID 0 rule would pass them with their tag,
+ * which no rule omcid builds passes with the key off, so it is not made. */
 static int bp_eapol(struct bp_rule *rules, int mvid)
 {
 	static const struct { const char *kind; int which; uint32_t dir; } r[] = {
@@ -799,7 +809,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		n = bp_put(rules, n, mcv_vid0_strip ? "manual-remove" : "manual-pass",
 			   mvid, tag_pri);
 		gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri,
-				     mcv_vid0_strip ? 1 : 2);
+				     mcv_vid0_strip ? 1 : 2, 1);
 		return n;
 	}
 	/* No class 84, or one with an empty list: as before any FwdOp was
@@ -812,7 +822,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	if (!vt || !nent) {
 		if (mvid >= 0) {
 			n = bp_put(rules, n, KIND_MANUAL_ADD, mvid, tag_pri);
-			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0);
+			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0, !tag_from_olt);
 			if (tag_from_olt && olt_tagged_pass) {
 				n = bp_put(rules, n, "tagged", -1, -1);
 				gen_tagged_rule(&rules[n - 1].vr);
@@ -863,7 +873,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 			 * rule. */
 			n = bp_put(rules, n, KIND_MANUAL_ADD, mvid, tag_pri);
 			if (n > had) {
-				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
+				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0, !tag_from_olt);
 				*manual = 1;
 			}
 			had = n;
@@ -902,7 +912,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		if (mvid >= 0) {
 			n = bp_put(rules, n, KIND_MANUAL_ADD, mvid, tag_pri);
 			if (n > had)
-				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
+				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0, !tag_from_olt);
 		} else {
 			n = bp_put(rules, n, "untagged", -1, -1);
 			if (n > had)

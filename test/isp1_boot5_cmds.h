@@ -3,7 +3,9 @@
 /*
  * isp1_boot5_cmds.h -- the 91 driver commands of the ISP1 provisioning
  * capture (test/fixtures/isp1-260922-boot5.txt), in capture order, with
- * the arguments omcid sent. odi_switch_cmd_test.c compares them bracket
+ * the arguments omcid sent (the stock rule, priority in the out tag: omcid
+ * since changed the manual rule's downstream half to ignore it,
+ * bdg_gen_manual_stock()). odi_switch_cmd_test.c compares them bracket
  * for bracket against the capture; boot_golden_test.c replays them as the
  * last phase of the ISP1 boot golden. `call` issues one command.
  *
@@ -199,7 +201,7 @@ static void isp1_boot5_replay(void (*call)(uint32_t cmd, void *buf, uint32_t len
 			if (svc[k].kind == 1)
 				bdg_gen_vid_filter(&vr, svc[k].vid, svc[k].pbit);
 			else
-				bdg_gen_manual(&vr, (int)svc[k].vid, 0, svc[k].kind == 2);
+				bdg_gen_manual_stock(&vr, (int)svc[k].vid, 0, svc[k].kind == 2);
 			bdg_conn(&b, svc[k].serv, svc[k].dir, (i & 1) ? 5u : 1u,
 				 svc[k].us, svc[k].ds, &vr);
 			call(51, &b, sizeof b);

@@ -604,12 +604,13 @@ check "split mapper, forward-all: a rule per priority on its port, one downstrea
 
 # The manual tag (VID 10, priority 0): the port that carries priority 0 keeps
 # the add-tag rule both ways. The other port has no upstream rule for
-# untagged frames and gets the downstream leg alone.
+# untagged frames and gets the downstream leg alone, on the VID with no
+# priority (the manual downstream row ignores the priority).
 store 1 1
 run171 fb-manual /tmp/s-fb-all.txt
 check "split mapper, manual tag: the add-tag rule on the port of its priority, the other downstream only" \
 "$(fbrules /tmp/omcid-171-fb-manual.log)" \
-"1000 ds vid 10 pri 0
+"1000 ds vid 10
 657 bi untagged"
 
 # A class 84 list on the bridge port (VID 300, FwdOp 0x10): the VID filter

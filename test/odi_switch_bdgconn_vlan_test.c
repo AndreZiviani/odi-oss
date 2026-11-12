@@ -234,6 +234,60 @@ int main(void)
 		}
 	}
 
+	/* The downstream half of the manual add-tag rule names the VID and no
+	 * priority: the OLT priority is not the one VLAN_MANU_TAG_PRI puts on
+	 * the upstream tag (the stock stack matches both). It stays ahead of the
+	 * "tagged" pass rule a FwdOp 0x00 override builds beside it, whichever
+	 * went in first. */
+	puts("the manual add-tag rule, downstream on the VID alone:");
+	{
+		struct omci_vlan_oper m0, m7, tagged;
+		const struct odi_sw_cf_row *d0, *d7;
+		const struct odi_sw_bdgconn_slot *sm, *st;
+		int round;
+
+		bdg_gen_manual(&m0, 10, 0, 0);
+		bdg_gen_manual(&m7, 10, 7, 0);
+		bdg_gen_tagged(&tagged);
+
+		odi_mock_reset();
+		odi_switch_cmd_reset_state();
+		ok(activate(30, &m0) == 0, "priority 0: accepted");
+		ok(activate(31, &m7) == 0, "priority 7: accepted");
+		sm = slot_of(30);
+		d0 = sm && sm->ds_row >= 0 ? &odi_sw_cf[sm->ds_row] : NULL;
+		sm = slot_of(31);
+		d7 = sm && sm->ds_row >= 0 ? &odi_sw_cf[sm->ds_row] : NULL;
+		ok(d0 && (care(d0) & ODI_SW_CF_W1_VID_MASK) == ODI_SW_CF_W1_VID_MASK &&
+		   ((d0->rule_w1 & ODI_SW_CF_W1_VID_MASK) >> ODI_SW_CF_W1_VID_SHIFT) == 10,
+		   "the downstream row names VID 10");
+		ok(d0 && !(care(d0) & ODI_SW_CF_W1_PRI_MASK) && (care(d0) & ODI_SW_CF_W1_CTAG) &&
+		   (d0->rule_w1 & ODI_SW_CF_W1_CTAG),
+		   "on a C-tag, no priority");
+		ok(d0 && d7 && d0->rule_w1 == d7->rule_w1 && d0->mask_w1 == d7->mask_w1,
+		   "the same row whatever VLAN_MANU_TAG_PRI is");
+		ok(d0 && ((d0->act[1] >> ODI_SW_CF_A1_CACT_SHIFT) & 3U) == ODI_SW_CF_CACT_DEL,
+		   "and it removes the tag");
+		r = us_row(31);
+		ok(r && (care(r) & ODI_SW_CF_W1_VID_MASK) == 0 && !(care(r) & ODI_SW_CF_W1_PRI_MASK) &&
+		   ((r->act[1] >> ODI_SW_CF_A1_C_PRI_SHIFT) & 7U) == 7U,
+		   "upstream is unchanged: untagged frames get the priority set");
+
+		for (round = 0; round < 2; round++) {
+			odi_mock_reset();
+			odi_switch_cmd_reset_state();
+			if (round == 0)
+				ok(activate(32, &m7) == 0, "the add-tag rule first: accepted");
+			ok(activate(33, &tagged) == 0, "the tagged pass rule: accepted");
+			if (round == 1)
+				ok(activate(32, &m7) == 0, "the add-tag rule after it: accepted");
+			sm = slot_of(32);
+			st = slot_of(33);
+			ok(sm && st && sm->ds_row >= 0 && st->ds_row >= 0 && sm->ds_row < st->ds_row,
+			   "the downstream add-tag row is ahead of the tagged pass row");
+		}
+	}
+
 	/* Two GEM ports that both get the add-tag rule, each with an EAPOL
 	 * row, in the order they go in: add-tag A, EAPOL A, add-tag B, EAPOL
 	 * B. The bottom region fills down, so B, the later add-tag rule, has
