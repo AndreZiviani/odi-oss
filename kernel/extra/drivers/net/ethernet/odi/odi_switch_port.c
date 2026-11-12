@@ -272,31 +272,40 @@ void odi_sw_pon_isolate_apply(void)
  * whose source MAC is a learned row on another port. 0 (the reset value
  * and the stock image's) moves the row to the port the frame came in by;
  * 1 drops the frame and leaves the row where it is. Set to 1 on the PON
- * port only: the fibre is the far side, no host moves from the UNI to it,
- * but a frame the OLT reflects, or one forged there, carrying a host's
- * source MAC would otherwise move that host's row to the PON port, and
- * traffic to the host would then be switched toward the fibre. Another open
- * implementation measured that on a reflecting OLT (pings failed both ways
- * until the PON port was set to 1). A static row, the stick's own pin on
- * the CPU port, is not moved either way in that implementation's reading;
- * this setting is a second guard, and keeps the frame itself from moving
- * anything. The UNI and CPU ports stay at
- * move: a host really can change port there. One read-modify-write, only
- * when the field differs.
+ * port and on the UNI, so whichever side learned a MAC first keeps it:
+ *  - PON: no host moves from the UNI to the fibre, but a frame the OLT
+ *    reflects, or one forged there, carrying a host's source MAC would
+ *    otherwise move that host's row to the PON port, and traffic to the
+ *    host would then be switched toward the fibre. Another open
+ *    implementation measured that on a reflecting OLT (pings failed both
+ *    ways until the PON port was set to 1).
+ *  - UNI: on an SFP stick a MAC from the fibre side never legitimately
+ *    appears behind the one UNI, but a router that floods an OLT frame back
+ *    out of its SFP port (an IGMP query, odi-oss #369) made the switch learn
+ *    the OLT MAC on the UNI, and the PON field then dropped every frame of
+ *    that MAC from the fibre until the row aged out (about 250 s). The
+ *    reflected frame is dropped here instead and the row stays on the PON.
+ *    A MAC whose row has already aged out of the PON is still learned from
+ *    such a frame; the field only protects a row that is there.
+ * A static row (the pin of a stick MAC on the CPU port) is not moved either
+ * way, as the other implementation reads it; this setting is a second guard
+ * there. The CPU port and the unused port 1 stay at move. One read-modify-write, only
+ * when a field differs.
  */
 #define ODI_SW_SA_MOVED_OFF		0x1c000U
 #define ODI_SW_SA_MOVED_DROP		1U
+#define ODI_SW_SA_MOVED_UNI_PORT	0U
 
 void odi_sw_sa_moved_apply(void)
 {
-	uint32_t shift = 2U * ODI_SW_PON_PORT;
+	uint32_t pon = 2U * ODI_SW_PON_PORT, uni = 2U * ODI_SW_SA_MOVED_UNI_PORT;
+	uint32_t mask = (3U << pon) | (3U << uni);
+	uint32_t want = (ODI_SW_SA_MOVED_DROP << pon) | (ODI_SW_SA_MOVED_DROP << uni);
 	uint32_t reg = odi_reg_read(ODI_SW_SA_MOVED_OFF);
 
-	if (((reg >> shift) & 3U) != ODI_SW_SA_MOVED_DROP) {
-		reg = (reg & ~(3U << shift)) | (ODI_SW_SA_MOVED_DROP << shift);
-		odi_reg_write(ODI_SW_SA_MOVED_OFF, reg);
-	}
-	ODI_SW_LOG("SA_MOVED 0x%08x: a frame from the PON port with a source MAC learned elsewhere is dropped, the row stays\n",
+	if ((reg & mask) != want)
+		odi_reg_write(ODI_SW_SA_MOVED_OFF, (reg & ~mask) | want);
+	ODI_SW_LOG("SA_MOVED 0x%08x: a frame from the PON port or the UNI with a source MAC learned on another port is dropped, the row stays\n",
 		   (unsigned int)odi_reg_read(ODI_SW_SA_MOVED_OFF));
 }
 

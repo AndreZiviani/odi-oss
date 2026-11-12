@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Switch: the UNI drops a frame whose source MAC is learned on the PON
+  port, as the PON port already did the other way round (`SA_MOVED`
+  0x01c000 now `0x00000011`). A router that floods an OLT frame back out of
+  its SFP port (an IGMP general query, say) made the stick learn the OLT
+  MAC on the UNI and then drop every frame from that MAC on the fibre for
+  about 250 s, which cut IPTV every few minutes. Refs #369.
 - VLAN: in manual VLAN mode the downstream half of the add-tag rule matches
   the manual VID whatever the priority, and removes the tag. It matched the
   VID and `VLAN_MANU_TAG_PRI` (as the stock stack does), so a line whose OLT

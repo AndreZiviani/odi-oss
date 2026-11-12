@@ -1895,11 +1895,17 @@ The stick's MACs are therefore static rows on the CPU port
 row from another port is an "illegal port move", whose action is
 `SA_MOVED` (0x01c000, two bits a port: 0 moves a learned row to the port
 the frame came in by, 1 drops the frame and leaves the row). The boot replay
-writes 0 on every port, and `odi_sw_sa_moved_apply()` sets the PON port to 1
-afterwards (`0x00000010`), leaving the others: a frame from the fibre whose
-source is a host's learned row, such as one an OLT reflects, is dropped
+writes 0 on every port, and `odi_sw_sa_moved_apply()` sets the PON port and
+the UNI (port 0) to 1 afterwards (`0x00000011`), leaving the CPU port and
+port 1: whichever side learned a MAC first keeps it. A frame from the fibre
+whose source is a host's learned row, such as one an OLT reflects, is dropped
 instead of moving the host to the PON port, which would switch traffic for
-that host toward the fibre. A static row, as the stick's pin, is not moved
+that host toward the fibre. The other way round, a router that floods an OLT
+frame back out of its SFP port (an IGMP query, #369) would move the OLT MAC to
+the UNI, and the PON field would then drop every frame of that MAC from the
+fibre until the row aged out (about 250 s, measured by the reporter); the
+reflected frame is dropped instead. A MAC whose row has already aged out of
+the PON is still learned from such a frame. A static row, as the stick's pin, is not moved
 either way (another open implementation's reading). The row is the one the hardware
 writes when it learns the stick's MAC from the CPU port (SVL, filtering id
 0, port 3, see [the L2 table readout](KERNEL.md)) plus the static bit, with
