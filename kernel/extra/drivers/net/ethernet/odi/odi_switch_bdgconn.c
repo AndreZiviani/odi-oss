@@ -341,6 +341,12 @@ static void bdgconn_derive(const struct omci_bdgconn *b, struct odi_sw_cf_leg *u
 		 * VID 11 priority 0 with a C-tag and no S-tag, and deletes both
 		 * tags; the VID filters match their VID (and p-bit when the
 		 * out-style carries one) and stay transparent.
+		 *
+		 * An out_tag priority of OMCI_PRI_ANY (8) leaves the priority
+		 * out of the match: omcid sets it on the manual add-tag rule,
+		 * so the row takes the VID alone. The stock stack matches the
+		 * priority too (VID 11 priority 0 above); ours does not, as
+		 * the OLT priority is not the one the stick pushes upstream.
 		 */
 		int vid = o->out_tag.vid < 4096U ? (int)o->out_tag.vid : -1;
 		int pri = o->out_tag.pri < 8U ? (int)o->out_tag.pri : -1;
