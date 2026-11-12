@@ -327,8 +327,11 @@ void gen_no_vlan_filter_rule(struct omci_vlan_oper *vr)
  * (`isMc` 1): match priority/VID zero, remove both tags, emit no tag.
  * `isMc` 2 is the same match with the tag kept as received, for a profile
  * whose downstream tag control (309 attribute 16) is type 0, transparent.
+ * `any_pri` is 1 when the downstream half matches the VID alone (the manual
+ * tag, any_pri_note() says when); 0 keeps the priority in the match, as the
+ * stock rule does and as a class 171 tag needs (DsMode).
  */
-void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
+void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc, int any_pri)
 {
 	struct omci_bdgconn tmp;
 
@@ -368,7 +371,16 @@ void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
 		vr->out.out_tag.vid  = 0;
 		vr->out.out_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
 	} else {
-		vr->out.out_tag.pri  = (uint32_t)pri;
+		/* The downstream half of this rule matches out_tag (the driver,
+		 * bdgconn_derive()). The stock stack matches the VID and the
+		 * priority of the pushed tag, so a line whose OLT sends a
+		 * priority other than VLAN_MANU_TAG_PRI loses those frames; the
+		 * ignore sentinel makes the row match the VID alone, whatever
+		 * the priority. A deliberate improvement over stock: the
+		 * priority only sets what the upstream tag carries. A class 171
+		 * tag keeps its priority in the match (DsMode), and so does any case
+		 * any_pri_note() stops. */
+		vr->out.out_tag.pri  = any_pri ? OMCI_PRI_ANY : (uint32_t)pri;
 		vr->out.out_tag.vid  = (uint32_t)vid;
 		vr->out.out_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
 	}
@@ -740,10 +752,11 @@ static void gen_eapol_rule(struct omci_vlan_oper *vr, int which)
  *  - eapol-down: untagged EAPOL from the OLT reaches the router as it is,
  *  - eapol-down-vid0: so does a priority-tagged one (VID 0), tag kept.
  * The manual rule itself keeps its tag and its downstream half. With the
- * manual VID 0 that downstream half already takes the VID 0 frames of the
- * tag priority and strips them; a VID 0 rule would also pass the frames of
- * every other priority with their tag, which no rule omcid builds passes
- * with the key off, so it is not made. */
+ * manual VID 0 that downstream half (which keeps the tag priority there,
+ * any_pri_note()) already takes the VID 0 frames of the tag priority and
+ * strips them; a VID 0 rule would also pass the frames of every other
+ * priority with their tag, which no rule omcid builds passes with the key
+ * off, so it is not made. */
 static int bp_eapol(struct bp_rule *rules, int mvid)
 {
 	static const struct { const char *kind; int which; uint32_t dir; } r[] = {
@@ -761,6 +774,79 @@ static int bp_eapol(struct bp_rule *rules, int mvid)
 		rules[n - 1].gen_dir = r[i].dir;
 	}
 	return n;
+}
+
+/* Whether the downstream half of the manual add-tag rule matches the VID at
+ * every priority (see gen_manual_vlan_rule()). Set by bdgconn_rebuild(); 0
+ * whenever a guard below stops it, and then the rule is the stock one, VID
+ * and VLAN_MANU_TAG_PRI. The idea and the guards follow a proposal by
+ * Optic00 (odi-oss #370). */
+static int any_pri_on;
+static const char *any_pri_said;
+
+int manual_any_pri(void)
+{
+	return any_pri_on;
+}
+
+/* Whether a class 84 row with a list investigates tagged frames by priority
+ * alone, after the owner override (RTK_DEVINFO_SPECVER), as bp_rules() reads
+ * it. */
+static int c84_pri_filter(void)
+{
+	const struct omci_class *c84 = find_class(OMCI_ME_VLAN_TAGGING_FILTER_DATA);
+
+	if (!c84)
+		return 0;
+	for (int i = 0; i < MIB_ROWS; i++) {
+		struct mib_row *r = mib_row_at(i);
+		struct fwdop f;
+		uint32_t code;
+
+		if (!r || r->classId != OMCI_ME_VLAN_TAGGING_FILTER_DATA ||
+		    !row_u32(r, c84, 3))
+			continue;
+		code = cfg_fwdop(r->inst, row_u32(r, c84, 2));
+		f = fwdop_decode(code);
+		if (!f.supported)
+			f = fwdop_decode(FWDOP_MANDATORY);
+		if (f.tagged == FWD_TAG_PRI)
+			return 1;
+	}
+	return 0;
+}
+
+/* Whether the manual tag is stripped downstream at any priority, given the
+ * manual VID (-1 none, or a tag from class 171), whether a class 84 filter of
+ * the line goes by priority alone, and whether an IP host lane has rules from
+ * its own class 171 table. The row that names the VID alone ranks after the
+ * rows that name a priority, so either of the latter could take frames of the
+ * manual VID first and pass them tagged; the manual VID 0 row would sort
+ * behind the multicast VID 0 priority 0 row. In those cases the stock row
+ * stays. Why is said once, and again when the reason changes. */
+static int any_pri_note(int mvid, int pri_filter, int lane_ev)
+{
+	const char *why = 0;
+
+	if (mvid < 0) {
+		any_pri_said = 0;
+		return 0;
+	}
+	if (mvid < 1 || mvid > 4094)
+		why = "with the manual VID 0";
+	else if (pri_filter)
+		why = "beside a VLAN filter (class 84) that goes by priority";
+	else if (lane_ev)
+		why = "beside the class 171 rules of an IP host";
+	if (!why) {
+		any_pri_said = 0;
+		return 1;
+	}
+	if (any_pri_said != why)
+		out_fmt("   vlan: the manual tag is stripped downstream only at"
+			" VLAN_MANU_TAG_PRI %s\n", why);
+	any_pri_said = why;
+	return 0;
 }
 
 /* Untagged frames passed unchanged and nothing else: all that is left of a
@@ -799,7 +885,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		n = bp_put(rules, n, mcv_vid0_strip ? "manual-remove" : "manual-pass",
 			   mvid, tag_pri);
 		gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri,
-				     mcv_vid0_strip ? 1 : 2);
+				     mcv_vid0_strip ? 1 : 2, 1);
 		return n;
 	}
 	/* No class 84, or one with an empty list: as before any FwdOp was
@@ -812,7 +898,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 	if (!vt || !nent) {
 		if (mvid >= 0) {
 			n = bp_put(rules, n, KIND_MANUAL_ADD, mvid, tag_pri);
-			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0);
+			gen_manual_vlan_rule(&rules[0].vr, mvid, tag_pri, 0, any_pri_on);
 			if (tag_from_olt && olt_tagged_pass) {
 				n = bp_put(rules, n, "tagged", -1, -1);
 				gen_tagged_rule(&rules[n - 1].vr);
@@ -863,7 +949,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 			 * rule. */
 			n = bp_put(rules, n, KIND_MANUAL_ADD, mvid, tag_pri);
 			if (n > had) {
-				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
+				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0, any_pri_on);
 				*manual = 1;
 			}
 			had = n;
@@ -902,7 +988,7 @@ static int bp_rules(uint16_t bp, int pbit, int mvid, uint32_t dir,
 		if (mvid >= 0) {
 			n = bp_put(rules, n, KIND_MANUAL_ADD, mvid, tag_pri);
 			if (n > had)
-				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0);
+				gen_manual_vlan_rule(&rules[had].vr, mvid, tag_pri, 0, any_pri_on);
 		} else {
 			n = bp_put(rules, n, "untagged", -1, -1);
 			if (n > had)
@@ -1754,6 +1840,15 @@ void bdgconn_rebuild(void)
 	for (int g = 0; g < ning; g++)
 		if (ingress_iphost[g])
 			lane_ev_build(&ev_tab[g], (uint16_t)ingress[g], (uint16_t)ingress_bport[g]);
+	{
+		int lane_ev = 0;
+
+		for (int g = 0; g < ning; g++)
+			lane_ev |= ingress_iphost[g] && ev_tab[g].active;
+		/* The manual tag only (tag_from_olt: the class 171 path). */
+		any_pri_on = any_pri_note(tag_from_olt ? -1 : mvid,
+					  c84_pri_filter(), lane_ev);
+	}
 	/* Service ids are classifier priority. OEM installs the configured
 	 * untagged service first, the other unicast services in reverse MIB order,
 	 * and the broad downstream multicast rule last. */

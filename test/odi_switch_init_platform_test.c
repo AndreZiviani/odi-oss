@@ -350,8 +350,8 @@ static void test_l3_off(void)
 	CHECK(n == 1, "an engine already off is not written (only the seed write is in the log)");
 }
 
-/* SA_MOVED (0x01c000): the PON port (bits 5:4) drops, the other ports keep
- * what they had; a second call writes nothing.
+/* SA_MOVED (0x01c000): the PON port (bits 5:4) and the UNI (bits 1:0) drop,
+ * the other ports keep what they had; a second call writes nothing.
  */
 static void test_sa_moved(void)
 {
@@ -359,25 +359,30 @@ static void test_sa_moved(void)
 
 	odi_mock_reset();
 	odi_sw_sa_moved_apply();
-	CHECK(odi_reg_read(0x1c000U) == 0x00000010U, "from the reset value 0: the PON port field 1");
+	CHECK(odi_reg_read(0x1c000U) == 0x00000011U, "from the reset value 0: the PON and UNI fields 1");
 
 	odi_mock_reset();
-	odi_reg_write(0x1c000U, 0x000000c3U);
+	odi_reg_write(0x1c000U, 0x000000cbU);
 	odi_sw_sa_moved_apply();
-	CHECK(odi_reg_read(0x1c000U) == 0x000000d3U, "the other ports' fields are kept, a stale PON value replaced");
+	CHECK(odi_reg_read(0x1c000U) == 0x000000d9U, "the other ports' fields are kept, stale PON and UNI values replaced");
 
 	odi_mock_reset();
-	odi_reg_write(0x1c000U, 0x00000030U);
+	odi_reg_write(0x1c000U, 0x00000033U);
 	odi_sw_sa_moved_apply();
-	CHECK(odi_reg_read(0x1c000U) == 0x00000010U, "a PON field of 3 becomes 1");
+	CHECK(odi_reg_read(0x1c000U) == 0x00000011U, "PON and UNI fields of 3 become 1");
 
 	odi_mock_reset();
 	odi_reg_write(0x1c000U, 0x00000010U);
 	odi_sw_sa_moved_apply();
+	CHECK(odi_reg_read(0x1c000U) == 0x00000011U, "the PON field alone set (an older image): the UNI is added");
+
+	odi_mock_reset();
+	odi_reg_write(0x1c000U, 0x00000011U);
+	odi_sw_sa_moved_apply();
 	for (i = 0; i < odi_mock.log_n; i++)
 		if (odi_mock.log[i].kind == 'W' && odi_mock.log[i].addr == 0x1c000U)
 			n++;
-	CHECK(n == 1 && odi_reg_read(0x1c000U) == 0x00000010U, "already set: no further write");
+	CHECK(n == 1 && odi_reg_read(0x1c000U) == 0x00000011U, "already set: no further write");
 }
 
 int main(void)

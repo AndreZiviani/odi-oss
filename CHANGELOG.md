@@ -10,6 +10,33 @@ listed here.
   addressed to this ONU, as the activation already did for the EqD it
   applies. The PLOAM logs of our sticks have only shown their own ONU-ID
   and broadcast, but a shared PON carries every ONU its own Ranging_Time.
+- Switch: the UNI drops a frame whose source MAC is learned on the PON
+  port, as the PON port already did the other way round (`SA_MOVED`
+  0x01c000 now `0x00000011`). A router that floods an OLT frame back out of
+  its SFP port (an IGMP general query, say) made the stick learn the OLT
+  MAC on the UNI and then drop every frame from that MAC on the fibre for
+  about 250 s, which cut IPTV every few minutes. Refs #369.
+- VLAN: in manual VLAN mode the downstream half of the add-tag rule matches
+  the manual VID whatever the priority, and removes the tag. It matched the
+  VID and `VLAN_MANU_TAG_PRI` (as the stock stack does), so a line whose OLT
+  sends control traffic and data at different priorities on the VID lost
+  the frames of the priority that was not configured, or with a FwdOp 0x00
+  override got them tagged. `VLAN_MANU_TAG_PRI` now only sets the priority
+  of the tag added upstream, always, except where another row could take the
+  frames of the VID first and pass them tagged: the manual VID 0, a class 84
+  filter that goes by priority alone, and an IP host with class 171 rules.
+  There the rule is as before and `omcid` logs why. The idea and the guards
+  follow #370. Refs #301.
+- OMCI: ME 290, Dot1X port extension package, is modelled with all twelve
+  G.988 attributes, as stored values (omcid runs no 802.1X authenticator
+  and does not act on them; the state and status attributes stay zero, except the port status,
+  authorized, and the server timeout, 30 s). An
+  OLT that starts 802.1X on the UNI only after its Set of 290 is accepted
+  had to be given `OMCI_UNKNOWN_ME_OK=1`; it is now answered with success
+  by default. A Get returns the stored values, and the MIB upload lists
+  the entity only after the OLT has Set it (the write-only action register
+  included, as for the other write-only attributes of the model).
+  Refs #301.
 - Releases: confd v1.15.0 and metricsd v1.10.0. The web UI adds the
   "802.1X EAPOL without the service tag" toggle on Config, VLAN
   (`VLAN_EAPOL_UNTAGGED`), the OLT launch power and path loss under the

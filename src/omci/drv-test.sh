@@ -262,6 +262,11 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	vchk "voice: no bridge rule names the CPU port (bit 3)" \
 	     "$(unimasks /tmp/omci-drv-voice-on.txt | grep -c '[89a-f]$')" 0
 	cp "$log" /tmp/omcid-drv-voice-on-kept.log
+	# The class 171 rules of the IP host sort ahead of a row that names the
+	# VID alone, so the manual rule keeps VLAN_MANU_TAG_PRI downstream
+	# (the golden has its descriptor) and omcid says why, once.
+	vchk "voice: the manual tag is stripped at its priority only, said once" \
+	     "$(grep -c 'manual tag is stripped downstream only at VLAN_MANU_TAG_PRI beside the class 171 rules of an IP host' /tmp/omcid-drv-voice-on-kept.log)" 1
 
 	# Off: the same sessions, and not one bridge rule more than ISP1 has.
 	voice_run off 0 "$FIX/omci-session-voice.txt"
@@ -270,6 +275,8 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	vchk "voice, key off: the bridge connections are the ISP1 ones, byte for byte" \
 	     "$(grep '^drv 5[01] ' /tmp/omci-drv-voice-off.txt | cksum)" \
 	     "$(grep '^drv 5[01] ' "$FIX/omci-drv-golden-isp1.txt" | cksum)"
+	vchk "voice, key off: no IP host rules, so nothing is said about the manual tag" \
+	     "$(grep -c 'manual tag is stripped downstream only' "$log")" 0
 	# The voice rules come first in the service order (the classifier
 	# priority, reverse MIB order), so the data rules move to other ids;
 	# what they are does not change.

@@ -926,6 +926,35 @@ read has measured.
 | DsMode 5, 6, 7 | as 2, 3, 4, and logged that what they discard is forwarded | no drop action |
 | DsMode 8 | no downstream rule, logged | no drop action |
 
+The downstream half of the manual add-tag rule matches the manual VID on a
+C-tag and no S-tag, **whatever the priority**, and removes the tag, where
+that cannot lose to another row. The stock stack matches the VID and the
+priority of the pushed tag, so an OLT that sends a frame at a priority other
+than `VLAN_MANU_TAG_PRI` (control traffic at 7 and data at 0 on one VID is
+seen) loses those frames: measured on a stick, with the tag priority 7 and
+the OLT at 0 every downstream frame was discarded at the PON port. This is a
+deliberate improvement over stock, and always on; the idea and the guards
+follow odi-oss #370. `VLAN_MANU_TAG_PRI` then only sets the priority of the
+upstream tag. omcid says it with the ignore sentinel (`OMCI_PRI_ANY`, 8) in
+the `out_tag` priority of that rule, which the both-ways derive reads as
+"priority not cared about" (the VID filters of class 84 do the same); the
+descriptor is otherwise the stock one. The row names a VID and the tag flags,
+so it is in class 1 of the ordered region: ahead of the VID-only rows of the
+class 84 filters and of the "tagged" pass row of a FwdOp 0x00 override
+(bottom region), behind a row that names VID and priority. Where such a row
+could take the frames of the manual VID first and pass them tagged, the rule
+is the stock one (VID and `VLAN_MANU_TAG_PRI`) and omcid logs why, once and
+again when the reason changes: the manual VID is 0 (the row would sort behind
+the multicast VID 0 priority 0 row), a class 84 filter of the line goes by
+priority alone (FwdOp 0x07, 0x08, 0x11, 0x12, 0x1e, 0x1f, after the
+`RTK_DEVINFO_SPECVER` override), or an IP host lane has rules from its own
+class 171 table. The class 171 tag (`tag_from_olt`) is never changed: its
+downstream half follows DsMode. The multicast rows (`manual-remove`,
+`manual-pass`) are not changed either: they are downstream-only rules built
+from a filter of VID 0 priority 0 that does not depend on
+`VLAN_MANU_TAG_PRI`, as on the stock stack.
+`test/odi_switch_bdgconn_vlan_test.c` pins the row and the order.
+
 `VLAN_EAPOL_UNTAGGED` (docs/SETTINGS.md) puts three such rules beside the
 manual add-tag rule: `eapol-up` (untagged, EtherType 0x888e, upstream, no tag
 change, on the service's stream), `eapol-down` (the same downstream, to the
@@ -1866,11 +1895,17 @@ The stick's MACs are therefore static rows on the CPU port
 row from another port is an "illegal port move", whose action is
 `SA_MOVED` (0x01c000, two bits a port: 0 moves a learned row to the port
 the frame came in by, 1 drops the frame and leaves the row). The boot replay
-writes 0 on every port, and `odi_sw_sa_moved_apply()` sets the PON port to 1
-afterwards (`0x00000010`), leaving the others: a frame from the fibre whose
-source is a host's learned row, such as one an OLT reflects, is dropped
+writes 0 on every port, and `odi_sw_sa_moved_apply()` sets the PON port and
+the UNI (port 0) to 1 afterwards (`0x00000011`), leaving the CPU port and
+port 1: whichever side learned a MAC first keeps it. A frame from the fibre
+whose source is a host's learned row, such as one an OLT reflects, is dropped
 instead of moving the host to the PON port, which would switch traffic for
-that host toward the fibre. A static row, as the stick's pin, is not moved
+that host toward the fibre. The other way round, a router that floods an OLT
+frame back out of its SFP port (an IGMP query, #369) would move the OLT MAC to
+the UNI, and the PON field would then drop every frame of that MAC from the
+fibre until the row aged out (about 250 s, measured by the reporter); the
+reflected frame is dropped instead. A MAC whose row has already aged out of
+the PON is still learned from such a frame. A static row, as the stick's pin, is not moved
 either way (another open implementation's reading). The row is the one the hardware
 writes when it learns the stick's MAC from the CPU port (SVL, filtering id
 0, port 3, see [the L2 table readout](KERNEL.md)) plus the static bit, with

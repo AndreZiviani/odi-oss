@@ -61,9 +61,20 @@ static inline void bdg_gen_manual(struct omci_vlan_oper *vr, int vid, int pri, i
 	vr->out.tpid = OMCI_OUT_TPID_8100;
 	vr->out.ds_mode = 0;
 	vr->out.ds_tag_op = 0;
-	vr->out.out_tag.pri = isMc ? 0u : (uint32_t)pri;
+	vr->out.out_tag.pri = isMc ? 0u : OMCI_PRI_ANY;
 	vr->out.out_tag.vid = isMc ? 0u : (uint32_t)vid;
 	vr->out.out_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
+}
+
+/* The same rule as the stock stack builds it, for the tests that replay a
+ * capture or a stock table: the out tag names the priority too, so the
+ * downstream half matches the VID and the priority. omcid no longer sends
+ * this one (bdg_gen_manual() above ignores the priority downstream). */
+static inline void bdg_gen_manual_stock(struct omci_vlan_oper *vr, int vid, int pri, int isMc)
+{
+	bdg_gen_manual(vr, vid, pri, isMc);
+	if (!isMc)
+		vr->out.out_tag.pri = (uint32_t)pri;
 }
 
 /* A tagged service: FILTER VID, or VID+PBIT when pbit >= 0. */
