@@ -654,7 +654,7 @@ uint32_t cli_bridge(void)
 			vid = (int)v;
 		}
 		if (vid >= 0) {
-			gen_manual_vlan_rule(&vr, vid, pri, dir == OMCI_DIR_DS, 1);
+			gen_manual_vlan_rule(&vr, vid, pri, dir == OMCI_DIR_DS, manual_any_pri());
 			out_fmt("rule: c-tag %s vid %d pri %d\n",
 				dir == OMCI_DIR_DS ? "remove" : "add",
 				(long)vid, (long)pri);

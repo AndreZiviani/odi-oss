@@ -927,32 +927,40 @@ read has measured.
 | DsMode 8 | no downstream rule, logged | no drop action |
 
 The downstream half of the manual add-tag rule matches the manual VID on a
-C-tag and no S-tag, **whatever the priority**, and removes the tag. The
-stock stack matches the VID and the priority of the pushed tag, so an OLT
-that sends a frame at a priority other than `VLAN_MANU_TAG_PRI` (control
-traffic at 7 and data at 0 on one VID is seen) loses those frames: measured
-on a stick, with the tag priority 7 and the OLT at 0 every downstream frame
-was discarded at the PON port. This is a deliberate improvement over stock;
-`VLAN_MANU_TAG_PRI` only sets the priority of the upstream tag. omcid says
-it with the ignore sentinel (`OMCI_PRI_ANY`, 8) in the `out_tag` priority of
-that rule, which the both-ways derive reads as "priority not cared about"
-(the VID filters of class 84 do the same); the descriptor is otherwise the
-stock one. The row names a VID and the tag flags, so it is in class 1 of the
-ordered region: ahead of the VID-only rows of the class 84 filters and of the
-"tagged" pass row of a FwdOp 0x00 override (bottom region), behind a row
-that names VID and priority, such as the multicast strip row.
-`test/odi_switch_bdgconn_vlan_test.c` pins the row and the order. The class
-171 tag (`tag_from_olt`) is not changed: its downstream half follows DsMode.
-The multicast rows (`manual-remove`, `manual-pass`) are not changed either:
-they are downstream-only rules built from a filter of VID 0 priority 0 that
-does not depend on `VLAN_MANU_TAG_PRI`, as on the stock stack.
+C-tag and no S-tag, **whatever the priority**, and removes the tag, where
+that cannot lose to another row. The stock stack matches the VID and the
+priority of the pushed tag, so an OLT that sends a frame at a priority other
+than `VLAN_MANU_TAG_PRI` (control traffic at 7 and data at 0 on one VID is
+seen) loses those frames: measured on a stick, with the tag priority 7 and
+the OLT at 0 every downstream frame was discarded at the PON port. This is a
+deliberate improvement over stock, and always on; the idea and the guards
+follow odi-oss #370. `VLAN_MANU_TAG_PRI` then only sets the priority of the
+upstream tag. omcid says it with the ignore sentinel (`OMCI_PRI_ANY`, 8) in
+the `out_tag` priority of that rule, which the both-ways derive reads as
+"priority not cared about" (the VID filters of class 84 do the same); the
+descriptor is otherwise the stock one. The row names a VID and the tag flags,
+so it is in class 1 of the ordered region: ahead of the VID-only rows of the
+class 84 filters and of the "tagged" pass row of a FwdOp 0x00 override
+(bottom region), behind a row that names VID and priority. Where such a row
+could take the frames of the manual VID first and pass them tagged, the rule
+is the stock one (VID and `VLAN_MANU_TAG_PRI`) and omcid logs why, once and
+again when the reason changes: the manual VID is 0 (the row would sort behind
+the multicast VID 0 priority 0 row), a class 84 filter of the line goes by
+priority alone (FwdOp 0x07, 0x08, 0x11, 0x12, 0x1e, 0x1f, after the
+`RTK_DEVINFO_SPECVER` override), or an IP host lane has rules from its own
+class 171 table. The class 171 tag (`tag_from_olt`) is never changed: its
+downstream half follows DsMode. The multicast rows (`manual-remove`,
+`manual-pass`) are not changed either: they are downstream-only rules built
+from a filter of VID 0 priority 0 that does not depend on
+`VLAN_MANU_TAG_PRI`, as on the stock stack.
+`test/odi_switch_bdgconn_vlan_test.c` pins the row and the order.
 
 `VLAN_EAPOL_UNTAGGED` (docs/SETTINGS.md) puts three such rules beside the
 manual add-tag rule: `eapol-up` (untagged, EtherType 0x888e, upstream, no tag
 change, on the service's stream), `eapol-down` (the same downstream, to the
 UNI) and `eapol-down-vid0` (a C-tag of VID 0, any priority, no EtherType,
 downstream, to the UNI, tag kept; not made when the manual VID is 0, as the
-add-tag rule's downstream row already takes VID 0 of any priority). The add-tag rule is the
+add-tag rule's downstream row already takes VID 0). The add-tag rule is the
 one it always was: its upstream row names no VID, so it sits in the bottom
 region, behind the EtherType row (`test/odi_switch_bdgconn_vlan_test.c` pins
 the order for both install orders). The bottom region fills down and the

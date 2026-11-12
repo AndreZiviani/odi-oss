@@ -11,7 +11,11 @@ listed here.
   sends control traffic and data at different priorities on the VID lost
   the frames of the priority that was not configured, or with a FwdOp 0x00
   override got them tagged. `VLAN_MANU_TAG_PRI` now only sets the priority
-  of the tag added upstream. Refs #301.
+  of the tag added upstream, always, except where another row could take the
+  frames of the VID first and pass them tagged: the manual VID 0, a class 84
+  filter that goes by priority alone, and an IP host with class 171 rules.
+  There the rule is as before and `omcid` logs why. The idea and the guards
+  follow #370. Refs #301.
 - Releases: confd v1.15.0 and metricsd v1.10.0. The web UI adds the
   "802.1X EAPOL without the service tag" toggle on Config, VLAN
   (`VLAN_EAPOL_UNTAGGED`), the OLT launch power and path loss under the

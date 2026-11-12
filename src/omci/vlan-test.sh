@@ -1107,5 +1107,85 @@ check "omcli vlan, key off: no line" \
 	"$($Q cli/build/omcli vlan "$FIX/omci-store-isp2.xml" 2>&1 | grep -c eapol)" "0"
 omcid_stop "$pid"
 
+# ---- the downstream half of the manual tag at any priority --------------------
+# With the manual tag on a VID 1 to 4094 the downstream half of the add-tag
+# rule matches the VID at every priority: its out tag priority (word 37 of
+# the descriptor, the one the driver matches downstream) is the "any" value 8
+# instead of the tag priority. Not with the manual VID 0, beside a class 84
+# filter that goes by priority alone, or beside the class 171 rules of an IP
+# host (the voice run of drv-test.sh), where the stock row stays and omcid
+# says why. Never for a tag from the OLT. Issue 301; the idea and the guards
+# follow odi-oss 370.
+rm -f /var/config/odi.conf
+cat > /tmp/anypri.py <<'PYRULES'
+import re, struct, sys
+rules, current, meta, words = [], [], None, []
+for line in open(sys.argv[1]):
+    m = re.search(r'\[dry\] serv \d+ ingress [0-9a-f]+ gem (\d+) dir (\d+)', line)
+    if m:
+        meta, words = tuple(map(int, m.groups())), []
+    m = re.match(r'   [0-9a-f]{3}  ([0-9a-f]{32})', line)
+    if m and meta:
+        words.extend(struct.unpack('>4I', bytes.fromhex(m[1])))
+        if len(words) == 40:
+            current.append((meta, words))
+            meta = None
+    if 'bridge connections rebuilt' in line:
+        rules, current = current, []
+print('\n'.join(sorted(set('gem %d dir %d gen %d out vid %d pri %d' % (
+    gem, d, w[9], w[38], w[37]) for (gem, d), w in rules))))
+PYRULES
+SAID='manual tag is stripped downstream only at VLAN_MANU_TAG_PRI'
+
+eapol_run isp2 1 anypri-isp2
+check "manual VID 10: the add-tag rule matches VID 10 at any priority (8)" \
+	"$(python3 /tmp/anypri.py /tmp/omcid-171-anypri-isp2.log)" \
+"gem 4094 dir 2 gen 5 out vid 0 pri 0
+gem 657 dir 3 gen 5 out vid 10 pri 8"
+check "manual VID 10: the rules are the same, nothing is said" \
+	"$(rebuild /tmp/omcid-171-anypri-isp2.log 0) $(grep -c "$SAID" /tmp/omcid-171-anypri-isp2.log)" "$ISP2_MANUAL 0"
+eapol_run isp1 1 anypri-isp1
+check "manual VID 11 on ISP1: the add-tag rule at any priority, the others as before" \
+	"$(python3 /tmp/anypri.py /tmp/omcid-171-anypri-isp1.log | grep -c 'out vid 11 pri 8')" "1"
+
+eapol_run isp2 1 anypri-vid0 "$VID0"
+check "manual VID 0: the add-tag rule keeps the tag priority" \
+	"$(python3 /tmp/anypri.py /tmp/omcid-171-anypri-vid0.log | grep 'gem 657')" \
+	"gem 657 dir 3 gen 5 out vid 0 pri 0"
+check "manual VID 0: said once why" \
+	"$(grep -c "$SAID with the manual VID 0" /tmp/omcid-171-anypri-vid0.log)" "1"
+
+# A tag priority other than 0 shows the difference: the stock row names it.
+PRI5='s/"VLAN_MANU_TAG_PRI" Value="0"/"VLAN_MANU_TAG_PRI" Value="5"/'
+eapol_run isp2 1 anypri-pri5 "$PRI5"
+check "manual VID 10, tag priority 5: any priority downstream, 5 up" \
+	"$(python3 /tmp/anypri.py /tmp/omcid-171-anypri-pri5.log | grep 'gem 657') / $(rebuild /tmp/omcid-171-anypri-pri5.log 0 | grep 'gem 657')" \
+	"gem 657 dir 3 gen 5 out vid 10 pri 8 / 47/1002 gem 657 rule manual-add vid 10 pri 5"
+eapol_run isp2 1 anypri-pri5vid0 "$PRI5;$VID0"
+check "manual VID 0, tag priority 5: the downstream row names priority 5" \
+	"$(python3 /tmp/anypri.py /tmp/omcid-171-anypri-pri5vid0.log | grep 'gem 657')" \
+	"gem 657 dir 3 gen 5 out vid 0 pri 5"
+
+# A class 84 filter that goes by priority (FwdOp 0x08 on port 0004, built so
+# by RTK_DEVINFO_SPECVER): the stock row stays, and omcid says why.
+SPECPRI='/"VLAN_MANU_TAG_PRI"/a\
+		<Value Name="RTK_DEVINFO_SPECVER" Value="0x0004:0x08"/>'
+eapol_run isp1 1 anypri-prif "$SPECPRI"
+check "a priority filter on ISP1: the add-tag rule keeps the tag priority" \
+	"$(python3 /tmp/anypri.py /tmp/omcid-171-anypri-prif.log | grep -c 'out vid 11 pri 8')" "0"
+check "a priority filter: said once why" \
+	"$(grep -c "$SAID beside a VLAN filter (class 84) that goes by priority" /tmp/omcid-171-anypri-prif.log)" "1"
+
+# A tag from the OLT (class 171, type 0): its downstream half keeps the
+# priority, and nothing is said about the manual tag.
+store 0 0
+session "$ADD100P5" "$PASS1" "$PASS2" > /tmp/s171-anypri-olt.txt
+run171 anypri-olt /tmp/s171-anypri-olt.txt
+check "VLAN from the OLT: the downstream half keeps priority 5" \
+	"$(python3 /tmp/anypri.py /tmp/omcid-171-anypri-olt.log | grep 'out vid 100')" \
+	"gem 657 dir 3 gen 5 out vid 100 pri 5"
+check "VLAN from the OLT: nothing said about the manual tag" \
+	"$(grep -c "$SAID" /tmp/omcid-171-anypri-olt.log)" "0"
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 suite_exit

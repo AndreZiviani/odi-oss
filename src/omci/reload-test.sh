@@ -298,8 +298,12 @@ else
 	diff /tmp/rl-eapol-on.txt /tmp/rl-eapol-edited.txt | head -10
 fi
 old_id=$(st id)
+done_n=$(grep -c 'event=reload_done' "$log")
 kill -HUP "$pid"
 wait_done "$old_id" 15 || bad "EAPOL key cleared: the reload did not finish"
+# The status file can read done a few milliseconds before the rebuild of the
+# reload is logged; the rules are read once its end line is there.
+wait_count "$log" 'event=reload_done' $((done_n + 1)) 15 || bad "EAPOL key cleared: no end line of the reload"
 check "EAPOL key cleared: the reload sees it" \
 	"event=reload changed=vlan action=rebuild keys=VLAN_EAPOL_UNTAGGED" \
 	"$(grep 'event=reload ' "$log" | tail -n 1)"

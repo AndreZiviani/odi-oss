@@ -232,12 +232,8 @@ check "the C-TAG action is ADD" \
       "$(row 060)" "   060  00000000000000010000000000000000"
 check "and it assigns vid 10 with tpid copy-from-inner" \
       "$(row 070)" "   070  000000000000000a0000000000000000"
-# The one deliberate difference from the stock dump: the stock out_tag also
-# carries the priority, which the driver turns into a downstream match on the
-# VID and the priority. Ours is the ignore sentinel 8, so the downstream half
-# matches the VID alone, whatever priority the OLT sends.
-check "the out-style carries one tag at the same vid, priority ignored" \
-      "$(row 090)" "   090  00000000000000080000000a00000000"
+check "the out-style carries one tag at the same vid" \
+      "$(row 090)" "   090  00000000000000000000000a00000000"
 
 # Downstream matches the OEM multicast rule: C-TAG VID+PBIT zero, remove both
 # tags, set is_mcast, and emit no output tag.
