@@ -110,6 +110,7 @@ enum omci_me_class {
 	OMCI_ME_TRAFFIC_SCHEDULER             = 278, /* traffic scheduler */
 	OMCI_ME_TRAFFIC_DESCRIPTOR            = 280, /* traffic descriptor */
 	OMCI_ME_MCAST_GEM_IW_TP               = 281, /* multicast GEM interworking TP */
+	OMCI_ME_DOT1X_PORT_EXT                = 290, /* Dot1X port extension package */
 	OMCI_ME_DOT1_RATE_LIMITER             = 298, /* dot1 rate limiter */
 	OMCI_ME_VEIP                          = 329, /* virtual Ethernet interface point */
 	OMCI_ME_TR069_MGMT_SERVER             = 340, /* TR-069 management server params */
