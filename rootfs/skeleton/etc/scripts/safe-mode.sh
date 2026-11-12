@@ -56,6 +56,9 @@
 #   - the host port runs Fiber 1G (1000BASE-X), the most compatible host
 #     mode, with auto-negotiation (host-serdes.sh does not apply
 #     HOST_SERDES this boot, host-autoneg.sh not HOST_AUTONEG);
+#   - the stored static routes (LAN_ROUTES) are not applied: network.sh skips
+#     them when this flag is set. The rescue address below is the way in, and a
+#     stored route is one of the things that may need repair;
 #   - the PON is off: the PON steps leave the laser off and skip gponact
 #     (rcs-lib.sh), so the stick cannot disturb the OLT, and the kernel
 #     refuses an activation with the laser off anyway;

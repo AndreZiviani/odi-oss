@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- Network: `LAN_ROUTES` (odi.conf), optional static routes for the management
+  interface, so the stick can be reached from other subnets without NAT, e.g.
+  `default via 192.168.1.253` behind a router that holds the stick subnet.
+  Up to 8 entries, `DEST via GW`, `DEST` being `default` or an IPv4
+  `a.b.c.d/len`, `GW` inside a management subnet; anything malformed turns the
+  whole key off with one log line. Disabled by default. `network.sh` installs
+  them after the addresses, at boot and on `apply.sh network`, on the device
+  carrying the primary address only, with `ip route replace ... proto static`
+  after flushing `proto static` there. `mgmt-addr.sh try LAN_ROUTES=...` makes
+  a change a trial like the addresses, and a trial that changes only the
+  routes is confirmed from any client. A safe-mode boot does not apply them.
+  The routes change what the stick answers, not what reaches it: nothing is
+  reachable from the fibre. Refs #367.
 - GPON: the `ranging_time` line of `/proc/odi_gpon/status` (and the EqD the
   web UI and `gpon_ranging_eqd_bits` show) keeps only a Ranging_Time
   addressed to this ONU, as the activation already did for the EqD it

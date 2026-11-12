@@ -9,7 +9,12 @@
 #     apply.sh network   LIVE. Re-apply the management addresses from the
 #                        store: LAN_IP_ADDR/LAN_SUBNET (or /etc/config/lan-ip)
 #                        and the second address, LAN_ENABLE_IP2, LAN_IP_ADDR2,
-#                        LAN_SUBNET2. Prints the plan, then applies it one
+#                        LAN_SUBNET2, and the static routes LAN_ROUTES (odi.conf,
+#                        docs/SETTINGS.md), which network.sh installs on the
+#                        management device after the addresses: the routes of
+#                        proto static on it are flushed and the stored ones
+#                        replaced; nothing else is touched, and a safe-mode
+#                        boot applies none. Prints the plan, then applies it one
 #                        second later, in the background -- moving the
 #                        primary drops the connection that asked for it, so
 #                        the answer has to leave first.

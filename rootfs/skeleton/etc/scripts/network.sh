@@ -39,10 +39,21 @@
 # keys, so they take effect without a reboot. Moving the primary moves every
 # way in; the second address is the one to reach the stick on meanwhile.
 #
+# Static routes (LAN_ROUTES, an odi-only key in /etc/config/odi.conf, docs/
+# SETTINGS.md): up to 8 "DEST via GW" entries, DEST `default` or a.b.c.d/len,
+# GW inside the primary subnet or the second one. Both the boot and `addr`
+# install them on the device that carries the primary address, after the
+# addresses, with `ip route replace ... proto static`, and only after
+# flushing the routes of `proto static` on that device: the routes the stick
+# owns are exactly those. Anything malformed, a duplicate DEST, more than 8
+# entries or a GW outside the subnets turns the whole key off, with one line
+# saying why (an address trial refuses it instead, so a typo is never stored).
+# A safe-mode boot does not apply them: the rescue address is the way in.
+#
 # An address trial (mgmt-addr.sh, docs/TOOLS.md) changes those addresses
 # without storing them: while its file, /var/run/mgmt-addr.trial, exists,
 # `addr` reads the five keys LAN_IP_ADDR, LAN_SUBNET, LAN_ENABLE_IP2,
-# LAN_IP_ADDR2 and LAN_SUBNET2 from it instead of the store, and keeps the
+# LAN_IP_ADDR2 and LAN_SUBNET2, and LAN_ROUTES, from it instead of the store, and keeps the
 # address the primary had before on its own alias (br0:4), so the way in that
 # worked stays up until the trial ends. The file is in /var/run, so a reboot
 # ends the trial and the boot, which never reads it, comes up on the store.
@@ -70,6 +81,11 @@ IP2_ALIAS=${IP2_ALIAS:-2}
 # The previous primary address, kept while an address trial runs, as br0:4.
 TRIAL_ALIAS=${TRIAL_ALIAS:-4}
 TRIAL=${TRIAL:-/var/run/mgmt-addr.trial}
+ODI_CONF=${ODI_CONF:-/etc/config/odi.conf}
+IPROUTE=${IPROUTE:-/sbin/ip}
+TIMEOUT=${TIMEOUT:-timeout}
+IP_S=${IP_S:-5}                 # one ip call
+ROUTES_MAX=8
 TRIAL_KEYS=" LAN_IP_ADDR LAN_SUBNET LAN_ENABLE_IP2 LAN_IP_ADDR2 LAN_SUBNET2 "
 # Per-port devices the multi-LAN driver creates; eth0.2 is the host port.
 HOSTIFS=${HOSTIFS:-eth0.2}
@@ -349,6 +365,173 @@ trial_keep() {   # trial_keep <dev>
 	fi
 }
 
+# ---- static routes (LAN_ROUTES)
+
+# in_net A B MASK: A and B are in one network under MASK (three valid quads).
+in_net() {
+	valid_quad "$1" || return 1
+	_n1=$Q1 _n2=$Q2 _n3=$Q3 _n4=$Q4
+	valid_quad "$2" || return 1
+	_m1=$Q1 _m2=$Q2 _m3=$Q3 _m4=$Q4
+	valid_quad "$3" || return 1
+	[ $(( _n1 & Q1 )) -eq $(( _m1 & Q1 )) ] &&
+	[ $(( _n2 & Q2 )) -eq $(( _m2 & Q2 )) ] &&
+	[ $(( _n3 & Q3 )) -eq $(( _m3 & Q3 )) ] &&
+	[ $(( _n4 & Q4 )) -eq $(( _m4 & Q4 )) ]
+}
+
+# route_dest D: D is `default` or a.b.c.d/len with len 0 to 32 and no host
+# bits set. Sets RD to the form installed: 0.0.0.0/0 is `default`.
+route_dest() {
+	RD=""
+	if [ "$1" = default ]; then
+		RD=default
+		return 0
+	fi
+	case $1 in
+	*/*) ;;
+	*) return 1 ;;
+	esac
+	_rip=${1%/*} _rlen=${1#*/}
+	case $_rlen in
+	0 | [1-9] | [12][0-9] | 3[0-2]) ;;
+	*) return 1 ;;
+	esac
+	valid_quad "$_rip" || return 1
+	_ri=0
+	for _ro in $Q1 $Q2 $Q3 $Q4; do
+		_rb=$(( _rlen - 8 * _ri ))
+		[ "$_rb" -ge 0 ] || _rb=0
+		[ "$_rb" -le 8 ] || _rb=8
+		_rm=$(( (255 << (8 - _rb)) & 255 ))
+		[ $(( _ro & (255 - _rm) )) -eq 0 ] || return 1
+		_ri=$(( _ri + 1 ))
+	done
+	if [ "$_rlen" = 0 ]; then RD=default; else RD=$1; fi
+	return 0
+}
+
+# route_gw GW: GW is a host address inside the primary subnet (IP, MASK) or
+# the second one (ip2, mask2, when LAN_ENABLE_IP2 is on and it is not the
+# primary), and not one of the stick own addresses.
+route_gw() {
+	valid_quad "$1" || return 1
+	[ "$1" != "$IP" ] || return 1
+	if in_net "$1" "$IP" "$MASK" && valid_host "$1" "$MASK"; then
+		return 0
+	fi
+	if [ "${en:-0}" = 1 ] && [ -n "${ip2:-}" ] && [ "$ip2" != "$IP" ] && [ "$1" != "$ip2" ] &&
+	   in_net "$1" "$ip2" "$mask2" && valid_host "$1" "$mask2"; then
+		return 0
+	fi
+	return 1
+}
+
+# parse_routes VALUE: sets ROUTE_LIST (one "DEST GW" line per route, DEST as
+# route_dest writes it) and ROUTE_TXT (the same for a log line), or returns 1
+# with ROUTE_WHY. Blank is no routes, and succeeds with an empty list.
+parse_routes() {
+	ROUTE_LIST="" ROUTE_TXT="" ROUTE_WHY=""
+	_pv=$1
+	_pt=$(printf '%s' "$_pv" | tr -d ' \t')
+	[ -n "$_pt" ] || return 0
+	_pn=0 _pseen=" "
+	_prest=$_pv
+	while :; do
+		case $_prest in
+		*,*) _pe=${_prest%%,*} _prest=${_prest#*,} _pmore=1 ;;
+		*)   _pe=$_prest _prest="" _pmore=0 ;;
+		esac
+		_pn=$(( _pn + 1 ))
+		if [ "$_pn" -gt "$ROUTES_MAX" ]; then
+			ROUTE_WHY="more than $ROUTES_MAX entries"
+			return 1
+		fi
+		set -f
+		# shellcheck disable=SC2086 # split on blanks, on purpose
+		set -- $_pe
+		set +f
+		if [ $# -ne 3 ] || [ "$2" != via ]; then
+			ROUTE_WHY="entry $_pn is not DEST via GW"
+			return 1
+		fi
+		route_dest "$1" || { ROUTE_WHY="entry $_pn: $1 is not default or a.b.c.d/len with no host bits"; return 1; }
+		_pd=$RD
+		route_gw "$3" || { ROUTE_WHY="entry $_pn: gateway $3 is not a host address in the management subnets"; return 1; }
+		case $_pseen in
+		*" $_pd "*) ROUTE_WHY="entry $_pn: destination $_pd twice"; return 1 ;;
+		esac
+		_pseen="$_pseen$_pd "
+		ROUTE_LIST="$ROUTE_LIST$_pd $3
+"
+		ROUTE_TXT="${ROUTE_TXT:+$ROUTE_TXT, }$_pd via $3"
+		[ "$_pmore" = 1 ] || break
+	done
+	return 0
+}
+
+# lan_routes_val: LAN_ROUTES, from the trial file while `addr` runs a trial,
+# else from odi.conf (the first line of the key wins, as flash get reads it).
+lan_routes_val() {
+	if [ "$MODE" = addr ] && [ -s "$TRIAL" ]; then
+		sed -n 's/^LAN_ROUTES=//p' "$TRIAL" 2>/dev/null | head -n 1
+	else
+		sed -n 's/^LAN_ROUTES=//p' "$ODI_CONF" 2>/dev/null | head -n 1
+	fi
+}
+
+# routes <dev>: the static routes of LAN_ROUTES on the device that carries the
+# primary address, after the addresses. The routes the stick owns are the
+# routes of `proto static` on that device: they are flushed, then the wanted
+# ones are installed, so a re-apply drops what the key no longer lists, and
+# nothing else (kernel, boot or any other device) is touched. A key that does
+# not pass turns off, and in the dry run of an address trial refuses it.
+# A safe-mode boot applies none.
+routes() {
+	_rdev=$1
+	_rv=$(lan_routes_val)
+	if [ -f "$SAFE_FLAG" ]; then
+		[ -z "$_rv" ] || echo "network: safe-mode boot, LAN_ROUTES not applied"
+		return 0
+	fi
+	if ! parse_routes "$_rv"; then
+		echo "network: LAN_ROUTES off: $ROUTE_WHY" >&2
+		if [ "$DRY" = 1 ] && [ -s "$TRIAL" ]; then
+			echo "network: nothing changed" >&2
+			exit 1
+		fi
+		ROUTE_LIST="" ROUTE_TXT=""
+	fi
+	if [ ! -x "$IPROUTE" ]; then
+		[ -z "$ROUTE_LIST" ] || echo "network: no $IPROUTE, LAN_ROUTES not applied" >&2
+		return 0
+	fi
+	_rcur=$("$TIMEOUT" "$IP_S" "$IPROUTE" -4 route show proto static dev "$_rdev" 2>/dev/null)
+	if [ "$DRY" = 1 ]; then
+		if [ -n "$ROUTE_LIST" ]; then
+			echo "network: would set the static routes on $_rdev: $ROUTE_TXT"
+		elif [ -n "$_rcur" ]; then
+			echo "network: would remove the static routes on $_rdev"
+		else
+			echo "network: no static routes"
+		fi
+		return 0
+	fi
+	if [ -z "$ROUTE_LIST" ] && [ -z "$_rcur" ]; then
+		echo "network: no static routes"
+		return 0
+	fi
+	"$TIMEOUT" "$IP_S" "$IPROUTE" -4 route flush proto static dev "$_rdev" 2>/dev/null ||
+		echo "network: could not flush the static routes on $_rdev" >&2
+	[ -n "$ROUTE_LIST" ] || { echo "network: static routes on $_rdev removed (LAN_ROUTES is empty or off)"; return 0; }
+	echo "network: static routes on $_rdev: $ROUTE_TXT"
+	printf '%s' "$ROUTE_LIST" | while read -r _rd _rg; do
+		"$TIMEOUT" "$IP_S" "$IPROUTE" -4 route replace "$_rd" via "$_rg" dev "$_rdev" proto static 2>/dev/null ||
+			echo "network: could not add the route $_rd via $_rg" >&2
+	done
+	return 0
+}
+
 if [ "$MODE" = primary ]; then
 	dev=$(mgmt_dev)
 	cur=$(addr_of "$dev")
@@ -374,6 +557,7 @@ if [ "$MODE" = addr ]; then
 	secondary "$dev"
 	rescue "$dev"
 	trial_keep "$dev"
+	routes "$dev"
 	exit 0
 fi
 
@@ -503,9 +687,11 @@ if [ "$bridged" = 0 ]; then
 	}
 	secondary "$IF"
 	rescue "$IF"
+	routes "$IF"
 else
 	secondary "$BR"
 	rescue "$BR"
+	routes "$BR"
 fi
 
 # Reaching here means an address applied -- either from config/lan-ip

@@ -64,7 +64,8 @@ backgrounds everything slow. In order, rcS:
    and releases it again (`docs/KERNEL.md`);
 4. brings up management networking with `/etc/scripts/network.sh` (host
    SerDes check, MAC, `br0` over `eth0.2`, the address, and the second
-   address `br0:2` when `LAN_ENABLE_IP2` is 1);
+   address `br0:2` when `LAN_ENABLE_IP2` is 1, and the static routes of
+   `LAN_ROUTES`, if any);
 5. registers omcid as a watchdog client (`/proc/odi_wdt/register`, 60 s
    deadline): omcid pings its own deadline from its own main loop once it
    starts, and the kernel -- the only owner of the hardware watchdog --
@@ -1358,8 +1359,12 @@ as they did from `network.sh`.
     /etc/scripts/mgmt-addr.sh status                          the state, key=value
 
 Applies a change of `LAN_IP_ADDR`, `LAN_SUBNET`, `LAN_ENABLE_IP2`,
-`LAN_IP_ADDR2` and `LAN_SUBNET2` (`docs/SETTINGS.md`, "Management address
-trial") without storing it. `try` takes the keys it changes as `KEY=VALUE`
+`LAN_IP_ADDR2`, `LAN_SUBNET2` and `LAN_ROUTES` (`docs/SETTINGS.md`, "Management
+address trial") without storing it. `LAN_ROUTES` (`try LAN_ROUTES="default via
+192.168.1.253"`, an empty value clears it) is applied by `network.sh addr` on
+the management device after the addresses, and a trial that changes only it
+is confirmed from any client, as `docs/SETTINGS.md` says; `try` refuses a
+`LAN_ROUTES` that `network.sh` would turn off. `try` takes the keys it changes as `KEY=VALUE`
 words, reads the rest from the store, has `network.sh addr -n` judge the
 whole set (a value the kernel would refuse fails there, with the reason, and
 nothing starts), writes the trial file `/var/run/mgmt-addr.trial` and answers
@@ -1381,11 +1386,11 @@ confd passes them from the socket, and over ssh they come from
 `SSH_CONNECTION`. The confirm is refused unless `LOCAL` is an address the
 trial added, the proof that the new address answers; with none added (the
 netmask moved, or the second address went away) `PEER` must be on the link of
-the new netmask. `revert` ends the trial at once and moves back one second
+the new netmask (except when only `LAN_ROUTES` changed: any client). `revert` ends the trial at once and moves back one second
 later, so an answer sent over the address being left still arrives. `try`
 refuses while a trial runs, in a safe-mode boot, while `/etc/config/lan-ip`
 exists and the primary or its netmask is asked for, and for any key but those
-five. Exit 1 on every refusal; the reason is on stderr. State changes take a
+six. Exit 1 on every refusal; the reason is on stderr. State changes take a
 lock (`/var/run/mgmt-addr.lock`) and replace the state file in one rename, as
 `host-autoneg.sh` does.
 
@@ -1398,7 +1403,7 @@ the web UI reads the file:
 | `applied` | `1` once the trial addresses are on the interface (a second after `try`) |
 | `trial_deadline` | the uptime, in seconds, at which the trial reverts |
 | `prev_ip`, `prev_mask` | the primary the stick ran before the trial, kept on `br0:4` |
-| `old_<KEY>`, `new_<KEY>` | the five keys as the store holds them and as the trial asks for them |
+| `old_<KEY>`, `new_<KEY>` | the six keys (`LAN_ROUTES` included) as the store holds them and as the trial asks for them |
 | `event`, `event_uptime`, `message` | the last event: `trial_started`, `trial_confirmed`, `trial_expired`, `trial_reverted` or `trial_failed` (also one line to the kernel log, `mgmt-addr: event=...`) |
 | `safe_mode_boot` (`status` only) | `1` on a safe-mode boot |
 
