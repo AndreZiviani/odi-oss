@@ -506,6 +506,13 @@ printf 'VLAN_EAPOL_UNTAGGED=0\n' > "$ODI"
 reload_is "VLAN_EAPOL_UNTAGGED 0"              vlan VLAN_EAPOL_UNTAGGED   rebuild
 rm -f "$ODI"
 reload_is "VLAN_EAPOL_UNTAGGED absent, still off: not a change" none ""   none
+# VLAN_UNTAG_ANY_PRI the same way: the downstream match of the add-tag rule.
+printf 'VLAN_UNTAG_ANY_PRI=1\n' > "$ODI"
+reload_is "VLAN_UNTAG_ANY_PRI 1"               vlan VLAN_UNTAG_ANY_PRI    rebuild
+printf 'VLAN_UNTAG_ANY_PRI=0\n' > "$ODI"
+reload_is "VLAN_UNTAG_ANY_PRI 0"               vlan VLAN_UNTAG_ANY_PRI    rebuild
+rm -f "$ODI"
+reload_is "VLAN_UNTAG_ANY_PRI absent, still off: not a change" none ""    none
 store 0 12 5
 reload_is "VLAN_MANU_MODE 0, transparent"      vlan VLAN_MANU_MODE        rebuild
 store 0 12 5 "$(val VLAN_CFG_TYPE 2)

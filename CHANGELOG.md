@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- VLAN: new odi-only key `VLAN_UNTAG_ANY_PRI` (issue 301). With "stick
+  tags" and the key 1, the stick removes the service tag downstream at every
+  priority, not only at `VLAN_MANU_TAG_PRI`. A line that sends some services
+  back at another priority, such as DHCP and EAP at 7 and data at 0 on AT&T,
+  left those frames tagged toward a router that expects the service
+  untagged. Off by default, so the rules stay the stock ones. It needs the
+  manual tag on a VID 1 to 4094 and does nothing, said once in the log,
+  beside a class 84 filter by priority or the class 171 rules of an IP
+  host, whose rows could rank ahead of it. Not run yet against a line.
+
 - Releases: confd v1.15.0 and metricsd v1.10.0. The web UI adds the
   "802.1X EAPOL without the service tag" toggle on Config, VLAN
   (`VLAN_EAPOL_UNTAGGED`), the OLT launch power and path loss under the

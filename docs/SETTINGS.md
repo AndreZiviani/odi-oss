@@ -120,6 +120,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of that tag, 0 to 7; a stored value above 7 (255 is the factory one) is used as 0 and the tag stays on | omcid, on SIGHUP | LIVE |
 | `VLAN_EAPOL_UNTAGGED` | 802.1X EAPOL without the service tag | `1`, with the manual tag on ("stick tags"): EAPOL frames (EtherType 0x888e) cross the stick **untagged** in both directions while everything else keeps the manual tag. Anything else, or absent, is off, and then no rule differs from the manual tag alone. With the manual tag off the key does nothing, and omcid logs that once. For an ISP that authenticates the line with 802.1X on the untagged (or VLAN 0) frames while the service itself is on a VLAN ("VLAN_EAPOL_UNTAGGED" below). Odi-only key, kept in `/etc/config/odi.conf`. Not run yet against a line that uses EAP | omcid, on SIGHUP (`apply.sh omci`) | LIVE |
+| `VLAN_UNTAG_ANY_PRI` | Remove the service tag at every priority | `1`, with the manual tag on ("stick tags") and `VLAN_MANU_TAG_VID` 1 to 4094: the stick removes the service tag from the frames of that VID that come from the OLT whatever their priority, instead of only at `VLAN_MANU_TAG_PRI` as the stock firmware does. For a line that sends some services back at another priority than the one the stick adds, such as DHCP and EAP at 7 and data at 0 ("VLAN_UNTAG_ANY_PRI" below). Anything else, or absent, is off, and then every rule is the stock one. Where a rule omcid builds could rank ahead of it (a tag from the OLT's own table, the manual VID 0, a class 84 filter by priority, the class 171 rules of an IP host) or with the manual tag off, the key does nothing, and omcid logs why once. Odi-only key, kept in `/etc/config/odi.conf`. Not run yet against a line | omcid, on SIGHUP (`apply.sh omci`) | LIVE |
 | `RTK_DEVINFO_SPECVER` | VLAN forward operation override | the stock firmware's FwdOp override, same key and format: `EntityId[:FwdOp]` entries separated by commas (e.g. `0x1102:0x00,0x110b`; no FwdOp means 0x02). The bridge rules of each class 84 port named are built with that FwdOp instead of the OLT's; the attribute keeps the OLT's value. Anything malformed turns the whole key off ("VLAN handling" below) | omcid, on SIGHUP | LIVE |
 | `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password: exactly 20 hex digits are 10 bytes, 1 to 10 characters are the text itself (even if they are hex digits), `0x` and 2 to 20 hex digits are those bytes zero-padded; anything else is refused and logged, keeping the old password; empty means none is sent | the `gponpw` PON step in rcS (`rcs-lib.sh`, `pon_step_gponpw`, skipped when empty); omcid re-sends it on a re-registration | INTERRUPTS INTERNET |
 | `LOID`, `LOID_PASSWD` | LOID, LOID password | answered to CTC-profile OLTs in the LOID authentication entity | omcid, on SIGHUP | INTERRUPTS INTERNET |
@@ -157,7 +158,7 @@ The UI's reboot confirmation says which slot it comes back on.
 
 Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
 `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`,
-`OMCI_POTS_PORTS`, `OMCI_POTS_SLOT_ID`, `OMCI_VOIP_LINE_REPORT`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `VLAN_EAPOL_UNTAGGED`, `OMCI_TCONT_ALLOC_UNSET`, `ODI_LASER_UNVERIFIED`,
+`OMCI_POTS_PORTS`, `OMCI_POTS_SLOT_ID`, `OMCI_VOIP_LINE_REPORT`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `VLAN_EAPOL_UNTAGGED`, `VLAN_UNTAG_ANY_PRI`, `OMCI_TCONT_ALLOC_UNSET`, `ODI_LASER_UNVERIFIED`,
 `HOST_AUTONEG`, `HOST_SERDES`, `IGMP_SNOOPING`, `IGMP_PON_DROP`, `MLD_SNOOPING`, `GPON_DYING_GASP`, `GPON_KEEP_DISABLE` and `SFP_HOST_DDM` are the only
 keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
@@ -441,6 +442,46 @@ Limits, and what is not known:
   `VLAN_EAPOL_UNTAGGED has no effect without the manual tag` once.
   `omcli vlan` shows the key when it is set.
 - Off by default: some ISPs expect EAP on the service VLAN.
+
+### `VLAN_UNTAG_ANY_PRI`: the service tag off at every priority
+
+With "stick tags" the stick adds `VLAN_MANU_TAG_VID` at `VLAN_MANU_TAG_PRI` to
+what the router sends untagged, and removes it again from what comes back.
+The stock firmware removes it only from frames of that priority, and so does
+this image by default. Some lines send part of the service back at another
+priority: on the AT&T line of issue 301 DHCP replies and EAP come at 7, data
+at 0, so whatever priority is set, half the frames reach the router still
+tagged, and a router with one untagged WAN interface drops them.
+
+With `VLAN_UNTAG_ANY_PRI=1` the downstream half of the add-tag rule names the
+VID alone (`omcli conn` shows its out tag priority as 8, "any"), so the tag
+comes off at every priority. The tag added upstream, the multicast rule and
+every other rule are as without the key.
+
+```
+/etc/scripts/flash set VLAN_UNTAG_ANY_PRI 1
+/etc/scripts/apply.sh omci
+```
+
+The key is read, held and reloaded like `VLAN_EAPOL_UNTAGGED`
+(`keys=VLAN_UNTAG_ANY_PRI` on the reload), and the two can be on together.
+
+Limits, and what is not known:
+
+- **Not yet run against a line.** It is tested as the bridge rules omcid
+  builds and the classifier row they become, under qemu and on the host.
+- The row that names the VID alone ranks after the rows that name a
+  priority (`docs/SWITCH.md`, "Extended VLAN rules"), and such a row could
+  take frames of the manual VID first and pass them tagged, those of the tag
+  priority included, which the stock row strips. So the key does nothing,
+  and omcid says why once, where omcid would build one: with a tag from the
+  OLT's own table (class 171) instead of the manual tag (a VLAN filter of
+  class 84 on the same VID and priority), with the manual VID 0 (the
+  multicast row, VID 0 priority 0), beside a class 84 filter that goes by
+  priority alone (FwdOp 0x07, 0x08 and the like, also as built by
+  `RTK_DEVINFO_SPECVER`), and beside the class 171 rules of an IP host
+  (`OMCI_POTS_PORTS`). The IP host case is not covered by a test.
+- Off by default, so a stick without the key programs exactly the stock rows.
 
 ### The OLT identity keys, and their switch
 

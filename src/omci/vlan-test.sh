@@ -1106,5 +1106,123 @@ check "omcli vlan, key off: no line" \
 	"$($Q cli/build/omcli vlan "$FIX/omci-store-isp2.xml" 2>&1 | grep -c eapol)" "0"
 omcid_stop "$pid"
 
+# ---- VLAN_UNTAG_ANY_PRI (odi.conf) --------------------------------------------
+# With the manual tag on a VID 1 to 4094 and the key 1, the downstream half of
+# the add-tag rule matches the VID at every priority: its out tag priority
+# (word 37 of the descriptor, the one the driver matches downstream) is the
+# "any" value 8 instead of the tag priority. Nothing else changes. Issue 301,
+# docs/SETTINGS.md, "VLAN_UNTAG_ANY_PRI".
+anypri_conf() { printf 'VLAN_UNTAG_ANY_PRI=%s\n' "$1" > /var/config/odi.conf; }
+cat > /tmp/anypri.py <<'PYRULES'
+import re, struct, sys
+rules, current, meta, words = [], [], None, []
+for line in open(sys.argv[1]):
+    m = re.search(r'\[dry\] serv \d+ ingress [0-9a-f]+ gem (\d+) dir (\d+)', line)
+    if m:
+        meta, words = tuple(map(int, m.groups())), []
+    m = re.match(r'   [0-9a-f]{3}  ([0-9a-f]{32})', line)
+    if m and meta:
+        words.extend(struct.unpack('>4I', bytes.fromhex(m[1])))
+        if len(words) == 40:
+            current.append((meta, words))
+            meta = None
+    if 'bridge connections rebuilt' in line:
+        rules, current = current, []
+print('\n'.join(sorted('gem %d dir %d gen %d out vid %d pri %d' % (
+    gem, d, w[9], w[38], w[37]) for (gem, d), w in rules)))
+PYRULES
+
+# A. Key off: the stock rule, the out tag carries the tag priority.
+rm -f /var/config/odi.conf
+eapol_run isp2 1 anypri-absent
+anypri_conf 0
+eapol_run isp2 1 anypri-zero
+check "any-pri key 0: every descriptor as with no key" \
+	"$(dryblock /tmp/omcid-171-anypri-zero.log)" "$(dryblock /tmp/omcid-171-anypri-absent.log)"
+check "any-pri key off, ISP2: the add-tag rule matches VID 10 priority 0 downstream" \
+	"$(python3 /tmp/anypri.py /tmp/omcid-171-anypri-zero.log)" \
+"gem 4094 dir 2 gen 5 out vid 0 pri 0
+gem 657 dir 3 gen 5 out vid 10 pri 0"
+
+# B. Key on: the add-tag rule names no priority downstream; the multicast
+# rule is unchanged, and so is every other word.
+anypri_conf 1
+eapol_run isp2 1 anypri-on2
+check "any-pri key on, ISP2: the add-tag rule matches VID 10 at any priority (8)" \
+	"$(python3 /tmp/anypri.py /tmp/omcid-171-anypri-on2.log)" \
+"gem 4094 dir 2 gen 5 out vid 0 pri 0
+gem 657 dir 3 gen 5 out vid 10 pri 8"
+check "any-pri key on, ISP2: the same rules" \
+	"$(rebuild /tmp/omcid-171-anypri-on2.log 0)" "$ISP2_MANUAL"
+check "any-pri key on, ISP2: nothing said about it" \
+	"$(grep -c 'VLAN_UNTAG_ANY_PRI' /tmp/omcid-171-anypri-on2.log)" "0"
+eapol_run isp1 1 anypri-on1
+rm -f /var/config/odi.conf
+eapol_run isp1 1 anypri-off1
+# ISP1 builds each rule once per ingress (two UNI-side ports): one line each.
+python3 /tmp/anypri.py /tmp/omcid-171-anypri-off1.log | sort -u > /tmp/anypri-off1.txt
+python3 /tmp/anypri.py /tmp/omcid-171-anypri-on1.log | sort -u > /tmp/anypri-on1.txt
+check "any-pri key on, ISP1: only the add-tag rule on GEM 1562 changes, to VID 11 at any priority" \
+	"$(diff /tmp/anypri-off1.txt /tmp/anypri-on1.txt | grep '^[<>]')" \
+"< gem 1562 dir 3 gen 5 out vid 11 pri 0
+> gem 1562 dir 3 gen 5 out vid 11 pri 8"
+
+# C. Key on, no manual tag, the manual VID 0, or a tag from the OLT: no
+# effect, every descriptor as with the key off, said once.
+rm -f /var/config/odi.conf
+eapol_run isp2 0 anypri-tr-off
+eapol_run isp2 1 anypri-vid0-off "$VID0"
+anypri_conf 1
+eapol_run isp2 0 anypri-tr-on
+eapol_run isp2 1 anypri-vid0-on "$VID0"
+check "any-pri key on, transparent: every descriptor as with the key off" \
+	"$(dryblock /tmp/omcid-171-anypri-tr-on.log)" "$(dryblock /tmp/omcid-171-anypri-tr-off.log)"
+check "any-pri key on, transparent: said once that it has no effect" \
+	"$(grep -c 'VLAN_UNTAG_ANY_PRI has no effect' /tmp/omcid-171-anypri-tr-on.log)" "1"
+check "any-pri key on, manual VID 0: every descriptor as with the key off" \
+	"$(dryblock /tmp/omcid-171-anypri-vid0-on.log)" "$(dryblock /tmp/omcid-171-anypri-vid0-off.log)"
+check "any-pri key on, manual VID 0: said once that it has no effect" \
+	"$(grep -c 'VLAN_UNTAG_ANY_PRI has no effect' /tmp/omcid-171-anypri-vid0-on.log)" "1"
+# A class 84 filter that goes by priority (FwdOp 0x08 on port 0004, built so
+# by RTK_DEVINFO_SPECVER): its rows could take frames of the manual VID ahead
+# of the broader row, so the key does nothing there either.
+SPECPRI='/"VLAN_MANU_TAG_PRI"/a\
+		<Value Name="RTK_DEVINFO_SPECVER" Value="0x0004:0x08"/>'
+rm -f /var/config/odi.conf
+eapol_run isp1 1 anypri-prif-off "$SPECPRI"
+anypri_conf 1
+eapol_run isp1 1 anypri-prif-on "$SPECPRI"
+check "any-pri key on, a priority filter on ISP1: every descriptor as with the key off" \
+	"$(dryblock /tmp/omcid-171-anypri-prif-on.log)" "$(dryblock /tmp/omcid-171-anypri-prif-off.log)"
+check "any-pri key on, a priority filter: said once why it has no effect" \
+	"$(grep -c 'VLAN_UNTAG_ANY_PRI has no effect beside a VLAN filter (class 84) that goes by priority' /tmp/omcid-171-anypri-prif-on.log)" "1"
+rm -f /var/config/odi.conf
+store 0 0
+session "$ADD100" "$DEF1" "$DEF2" > /tmp/s171-anypri-olt.txt
+run171 anypri-olt-off /tmp/s171-anypri-olt.txt
+anypri_conf 1
+store 0 0
+run171 anypri-olt-on /tmp/s171-anypri-olt.txt
+check "any-pri key on, VLAN from the OLT (type 0): every descriptor as with the key off" \
+	"$(dryblock /tmp/omcid-171-anypri-olt-on.log)" "$(dryblock /tmp/omcid-171-anypri-olt-off.log)"
+rm -f /var/config/odi.conf
+
+# D. `omcli vlan` names the setting only when it is on.
+anypri_conf 1
+: > /tmp/omcid-vlan-cli3.log
+$Q respond/build/omcid -w 6 > /tmp/omcid-vlan-cli3.log 2>&1 &
+pid=$!
+omcid_up /tmp/omcid-vlan-cli3.log
+check "omcli vlan, any-pri key on with the manual tag" \
+	"$($Q cli/build/omcli vlan "$FIX/omci-store-isp2.xml" 2>&1 | grep '^untag')" \
+	"untag       every priority downstream (VLAN_UNTAG_ANY_PRI)"
+check "omcli vlan, any-pri key on without it" \
+	"$($Q cli/build/omcli vlan /tmp/store-transparent.xml 2>&1 | grep '^untag')" \
+	"untag       VLAN_UNTAG_ANY_PRI set, no effect without the manual tag on VID 1 to 4094"
+rm -f /var/config/odi.conf
+check "omcli vlan, any-pri key off: no line" \
+	"$($Q cli/build/omcli vlan "$FIX/omci-store-isp2.xml" 2>&1 | grep -c '^untag')" "0"
+omcid_stop "$pid"
+
 if [ "$fail" -eq 0 ]; then echo "all ok"; else echo "FAILED ($fail)"; fi
 suite_exit

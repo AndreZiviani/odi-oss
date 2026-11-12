@@ -697,6 +697,7 @@ struct onu_vlan_cfg {
 	uint8_t manual;                      /* type 1, mode 1, vid and pri present */
 	uint8_t loaded;
 	uint8_t eapol;                       /* VLAN_EAPOL_UNTAGGED=1 in odi.conf */
+	uint8_t any_pri;                     /* VLAN_UNTAG_ANY_PRI=1 in odi.conf */
 	/* RTK_DEVINFO_SPECVER, the stock FwdOp override (cfgstore.c): class 84
 	 * instance and the code to build it with. nfwdop -1: malformed, off. */
 	int nfwdop;
@@ -828,6 +829,7 @@ struct cfg_snap {
 #define CFGD_CUSTOM_MCAST (1u << 23)
 #define CFGD_FWDOP        (1u << 24)
 #define CFGD_EAPOL        (1u << 25)
+#define CFGD_ANY_PRI      (1u << 26)
 /* VLAN class: the four keys that pick how a connection is tagged. */
 #define CFGD_VLAN_TYPE  (1u << 12)
 #define CFGD_VLAN_MODE  (1u << 13)
@@ -901,6 +903,10 @@ int cfg_olt_tagging(void);
  * untagged under the manual tag. Whether it applies is up to the caller, which
  * needs cfg_manual_vid() >= 0. */
 int cfg_eapol_untagged(void);
+/* VLAN_UNTAG_ANY_PRI (odi.conf), as loaded with the VLAN keys: 1 strips the
+ * manual tag downstream at every priority. Whether it applies is up to the
+ * caller (apply_bridge.c, any_pri_note()). */
+int cfg_untag_any_pri(void);
 uint32_t cfg_fwdop(uint16_t inst, uint32_t olt_code);
 void cfg_load_report(void);
 void cfg_load_report_from(const char *cs, const char *hs, const char *sw,

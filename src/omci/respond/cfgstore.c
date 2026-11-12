@@ -556,6 +556,7 @@ static int cfg_num(const char *path, const char *key, int missing)
 
 static void fwdop_load(const char *cs);
 static int eapol_load(void);
+static int any_pri_load(void);
 
 void cfg_load_vlan_from(const char *cs)
 {
@@ -571,6 +572,7 @@ void cfg_load_vlan_from(const char *cs)
 		&& vlanCfg.vid >= 0 && pri >= 0;
 	fwdop_load(cs);
 	vlanCfg.eapol = (uint8_t)eapol_load();
+	vlanCfg.any_pri = (uint8_t)any_pri_load();
 	vlanCfg.loaded = 1;
 }
 
@@ -618,6 +620,27 @@ int cfg_eapol_untagged(void)
 	return vlanCfg.eapol;
 }
 
+/* VLAN_UNTAG_ANY_PRI in CFG_ODI_PATH, odi-only: 1 makes the downstream half
+ * of the manual add-tag rule match the service VID at every priority, so the
+ * tag comes off frames the OLT sends at another priority than
+ * VLAN_MANU_TAG_PRI (issue 301: DHCP and EAP at 7, data at 0). The stock
+ * firmware matches the priority, and so does omcid with the key off or
+ * absent. Read and held like VLAN_EAPOL_UNTAGGED above. */
+static int any_pri_load(void)
+{
+	char v[4];
+
+	return cfg_odi_get(CFG_ODI_PATH, "VLAN_UNTAG_ANY_PRI", v, sizeof v) == 1 &&
+	       v[0] == '1';
+}
+
+int cfg_untag_any_pri(void)
+{
+	if (!vlanCfg.loaded)
+		cfg_load_vlan();
+	return vlanCfg.any_pri;
+}
+
 void cfg_load_vlan(void)
 {
 	cfg_load_vlan_from(CFG_CS);
@@ -658,6 +681,10 @@ void cfg_show_vlan(void)
 		out(vlanCfg.manual ?
 		    "eapol       untagged both ways (VLAN_EAPOL_UNTAGGED)\n" :
 		    "eapol       VLAN_EAPOL_UNTAGGED set, no effect without the manual tag\n");
+	if (vlanCfg.any_pri)
+		out(vlanCfg.manual && vlanCfg.vid >= 1 && vlanCfg.vid <= 4094 ?
+		    "untag       every priority downstream (VLAN_UNTAG_ANY_PRI)\n" :
+		    "untag       VLAN_UNTAG_ANY_PRI set, no effect without the manual tag on VID 1 to 4094\n");
 }
 
 /* What is safe to print. The serial is on the label and the OLT ranges on it,
@@ -1461,6 +1488,8 @@ unsigned cfg_snap_diff(const struct cfg_snap *o, const struct cfg_snap *n)
 		m |= CFGD_CUSTOM_MCAST;
 	if (o->vlan.eapol != n->vlan.eapol)
 		m |= CFGD_EAPOL;
+	if (o->vlan.any_pri != n->vlan.any_pri)
+		m |= CFGD_ANY_PRI;
 	if (o->vlan.nfwdop != n->vlan.nfwdop)
 		m |= CFGD_FWDOP;
 	for (int k = 0; k < n->vlan.nfwdop && k < o->vlan.nfwdop; k++)
@@ -1510,6 +1539,7 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 		{ CFGD_CUSTOM_MCAST, "OMCI_CUSTOM_MCAST" },
 		{ CFGD_FWDOP, "RTK_DEVINFO_SPECVER" },
 		{ CFGD_EAPOL, "VLAN_EAPOL_UNTAGGED" },
+		{ CFGD_ANY_PRI, "VLAN_UNTAG_ANY_PRI" },
 	};
 	int o = 0;
 

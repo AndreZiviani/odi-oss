@@ -66,6 +66,14 @@ static inline void bdg_gen_manual(struct omci_vlan_oper *vr, int vid, int pri, i
 	vr->out.out_tag.tpid = OMCI_TREAT_TPID_COPY_INNER;
 }
 
+/* The add-tag rule with VLAN_UNTAG_ANY_PRI (apply_bridge.c, gen_manual_add()):
+ * the downstream half matches the VID alone. */
+static inline void bdg_gen_manual_any_pri(struct omci_vlan_oper *vr, int vid, int pri)
+{
+	bdg_gen_manual(vr, vid, pri, 0);
+	vr->out.out_tag.pri = OMCI_PRI_ANY;
+}
+
 /* A tagged service: FILTER VID, or VID+PBIT when pbit >= 0. */
 static inline void bdg_gen_vid_filter(struct omci_vlan_oper *vr, unsigned vid, int pbit)
 {

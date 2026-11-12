@@ -326,6 +326,38 @@ int main(void)
 
 	}
 
+	/* VLAN_UNTAG_ANY_PRI (issue 301): VID 2 added at priority 0, a line
+	 * that sends DHCP and EAP back at priority 7 and data at 0. With the
+	 * key the downstream row names VID 2, a C-tag and no S-tag, and no
+	 * priority, and deletes the C-tag; without it (the stock rule) it
+	 * names priority 0 as well. The upstream row is the same either way. */
+	{
+		struct omci_bdgconn bi = {0};
+		struct odi_sw_cf_leg u0, d0, u, d;
+		uint32_t v, val, any, dcare;
+
+		bi.dir = OMCI_DIR_BI; bi.uni_mask = 5;
+		bdg_gen_manual(&bi.vlan_op, 2, 0, 0);
+		bdgconn_derive(&bi, &u0, &d0, &v, &val, &any);
+		ok((d0.rule_w1 & PRIM) == W1_PRI(0) && ((d0.rule_w1 | d0.mask_w1) & PRIM) == PRIM,
+		   "manual VID 2, key off: the downstream row names priority 0, as the stock rule");
+		bdg_gen_manual_any_pri(&bi.vlan_op, 2, 0);
+		bdgconn_derive(&bi, &u, &d, &v, &val, &any);
+		dcare = d.rule_w1 | d.mask_w1;
+		ok((dcare & CARE_DS_BASE) == CARE_DS_BASE &&
+		   (d.rule_w1 & (W1_DS | W1_CT | W1_ST)) == (W1_DS | W1_CT) &&
+		   (dcare & VIDM) == VIDM && (d.rule_w1 & VIDM) == W1_VID(2) &&
+		   !(dcare & PRIM),
+		   "key on: the downstream row matches VID 2, C-tag, no S-tag, any priority");
+		ok(((d.act[1] >> ODI_SW_CF_A1_CACT_SHIFT) & 3U) == ODI_SW_CF_CACT_DEL &&
+		   !memcmp(d.act, d0.act, sizeof d.act),
+		   "and deletes the C-tag, as without the key");
+		ok(u.rule_w1 == u0.rule_w1 && u.mask_w1 == u0.mask_w1 &&
+		   !memcmp(u.act, u0.act, sizeof u.act),
+		   "the upstream row is the same: VID 2 priority 0 added");
+		ok(v == 2, "VID 2 is in the VLAN table");
+	}
+
 	uint8_t e[EVTOCD_ENTRY_LEN];
 	const struct odi_sw_cf_row *r;
 	const char *why = 0;
