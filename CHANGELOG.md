@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- `nv commit` also sets `sw_tryactive=2` in both environment copies, in the
+  same writes as `sw_commit` and `mupgrade_en`. U-Boot clears it only in the
+  copy it saves as it starts a trial, so the other copy kept the value that
+  armed it, and a fall back to that copy would have started a one-shot trial
+  nobody asked for. A `sw_tryactive` other than 2 in the primary copy is a
+  trial queued since this boot, and `nv commit` now refuses it, nothing
+  written, rather than drop it (`--force` does not override this). A stick
+  committed earlier gets the fallback fixed by running `nv commit` again.
+  Refs #379.
 - Releases: confd v1.16.0. The web UI adds the static routes editor under
   Config, Network (`LAN_ROUTES`, empty by default, saved through the same Keep
   trial as the management address), the path loss as a meter of its own

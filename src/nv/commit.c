@@ -44,15 +44,16 @@ static int put(const struct env_io *io, int copy, const uint8_t *want,
 	return NVC_DONE;
 }
 
-/* What a copy must say once committed: sw_commit=<slot> and mupgrade_en=0.
- * 1 when it already does. */
+/* What a copy must say once committed: sw_commit=<slot>, mupgrade_en=0 and
+ * sw_tryactive=2 (no trial pending). 1 when it already does. */
 static int done(const uint8_t *buf, uint32_t len, const char *want)
 {
-	return has(buf, len, "sw_commit", want) && has(buf, len, "mupgrade_en", "0");
+	return has(buf, len, "sw_commit", want) && has(buf, len, "mupgrade_en", "0") &&
+	       has(buf, len, "sw_tryactive", "2");
 }
 
-/* Set whichever of the two is missing or different, in one rebuild, so the
- * copy is still written (and erased) once. 0 when it does not fit. */
+/* Set whichever of the three is missing or different, in one rebuild, so
+ * the copy is still written (and erased) once. 0 when it does not fit. */
 static int apply(uint8_t *buf, uint32_t len, const char *want)
 {
 	if (!has(buf, len, "sw_commit", want) &&
@@ -61,7 +62,22 @@ static int apply(uint8_t *buf, uint32_t len, const char *want)
 	if (!has(buf, len, "mupgrade_en", "0") &&
 	    !env_set(buf, len, "mupgrade_en", "0"))
 		return 0;
+	if (!has(buf, len, "sw_tryactive", "2") &&
+	    !env_set(buf, len, "sw_tryactive", "2"))
+		return 0;
 	return 1;
+}
+
+/* 1 when the block holds a sw_tryactive other than 2: bootcmd sends every
+ * such value to boot_by_tryactive. An absent one would take that branch
+ * too (a trial of slot 1), but nothing that queues a trial leaves it
+ * absent, so it is not refused: the commit writes 2. */
+static int trial_queued(const uint8_t *buf, uint32_t len)
+{
+	char v[2];
+
+	return env_get(buf, len, "sw_tryactive", v, sizeof v) &&
+	       !has(buf, len, "sw_tryactive", "2");
 }
 
 /* The image for the copy being repaired: the new environment, byte for
@@ -83,7 +99,7 @@ int env_commit(const struct env_io *io, int slot, int running,
 	const char *want = slot == 0 ? "0" : "1";
 	uint32_t n1, n2, pn, fn;
 	uint8_t *p, *f;
-	int ok1, ok2, rc, bad, need_p, expect, keeps = 1;
+	int ok1, ok2, rc, bad, need_p, need_f, expect, keeps = 1;
 
 	r->primary = r->fallback = 0;
 	r->wrote_primary = r->wrote_fallback = 0;
@@ -119,10 +135,24 @@ int env_commit(const struct env_io *io, int slot, int running,
 	 * last save, which after a trial boot is the slot booted before it. */
 	if (!has(p, pn, "sw_active", want))
 		return NVC_NOT_ACTIVE;
+	/* A trial queued since this boot: U-Boot set sw_tryactive=2 in the
+	 * copy it saved before it started this slot, so another value in the
+	 * primary was written after that (nv setenv, the web UI), and the
+	 * commit would drop it without a word. The fallback is not asked: it
+	 * still holds what the environment said before that save, the value
+	 * that armed this very trial, which is what the commit sets to 2. */
+	if (trial_queued(p, pn))
+		return NVC_TRIAL_PENDING;
 
 	need_p = !done(p, pn, want);
 	expect = r->primary;
 	if (need_p && !apply(p, pn, want))
+		return NVC_NO_ROOM;
+	/* The fallback too, before the primary is written: a fallback the new
+	 * values do not fit in must stop the commit while both copies are
+	 * still as they were, not after the primary has changed. */
+	need_f = !bad && !done(f, fn, want);
+	if (need_f && !apply(f, fn, want))
 		return NVC_NO_ROOM;
 
 	if (bad) {
@@ -154,9 +184,7 @@ int env_commit(const struct env_io *io, int slot, int running,
 				return rc;
 			r->wrote_primary = 1;
 		}
-		if (!done(f, fn, want)) {
-			if (!apply(f, fn, want))
-				return NVC_NO_ROOM;
+		if (need_f) {
 			rc = put(io, r->fallback, f, fn, NVC_WRITE_FALLBACK, NVC_VERIFY_FALLBACK);
 			if (rc != NVC_DONE)
 				return rc;
@@ -166,8 +194,8 @@ int env_commit(const struct env_io *io, int slot, int running,
 
 	/* Both again, from the partitions, as a reader will see them: both
 	 * valid, the expected copy winning (the primary, which env_set and the
-	 * repaired flags byte keep winning), sw_commit and mupgrade_en=0 in
-	 * both, sw_active untouched. */
+	 * repaired flags byte keep winning), sw_commit, mupgrade_en=0 and
+	 * sw_tryactive=2 in both, sw_active untouched. */
 	n1 = io->read(io->ctx, 1, c1);
 	n2 = io->read(io->ctx, 2, c2);
 	if (!n1 || !n2 || !env_valid(c1, n1) || !env_valid(c2, n2))
@@ -318,7 +346,7 @@ const char *env_commit_msg(int rc)
 	case NVC_NOT_RUNNING:     return "that is not the slot this kernel was booted from (root= in /proc/cmdline), nothing written";
 	case NVC_NO_PAIR:         return "neither environment copy is valid, nothing written";
 	case NVC_NOT_ACTIVE:      return "sw_active in the primary copy does not name that slot, nothing written";
-	case NVC_NO_ROOM:         return "sw_commit and mupgrade_en do not fit in the environment block";
+	case NVC_NO_ROOM:         return "sw_commit, mupgrade_en and sw_tryactive do not fit in the environment block";
 	case NVC_WRITE_PRIMARY:   return "the write of the primary copy failed; the fallback copy was not touched";
 	case NVC_VERIFY_PRIMARY:  return "the primary copy did not read back as written; the fallback copy was not touched";
 	case NVC_WRITE_FALLBACK:  return "the primary copy is committed and verified, the write of the fallback copy failed";
@@ -328,6 +356,7 @@ const char *env_commit_msg(int rc)
 	case NVC_WRITE_REPAIR:    return "the write of the invalid copy failed; the valid copy was not touched";
 	case NVC_VERIFY_REPAIR:   return "the invalid copy did not read back as written; the valid copy was not touched";
 	case NVC_READ:            return "a copy could not be read completely, nothing written (not treated as invalid; run it again)";
+	case NVC_TRIAL_PENDING:   return "a trial is queued (sw_tryactive in the primary copy is not 2), nothing written";
 	default:                  return "unknown result";
 	}
 }
