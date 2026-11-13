@@ -29,6 +29,7 @@
 #define ENV_MAX       8192
 
 uint32_t env_crc32(const uint8_t *p, uint32_t n);
+uint32_t env_crc32_update(uint32_t crc, const uint8_t *p, uint32_t n);
 
 /* Big-endian, because that is how the stored CRC reads. */
 uint32_t env_crc_stored(const uint8_t *buf);

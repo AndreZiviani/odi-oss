@@ -11,6 +11,7 @@
  *     nv setenv [-c 1|2] parameter_name value
  *     nv fallback [parameter_name]
  *     nv commit [--force] slot
+ *     nv slotcheck slot
  *
  * It matters more than its size: `sw_tryactive` and `sw_commit` are set
  * through it, and those are the one-shot safe-boot mechanism this project
@@ -18,6 +19,14 @@
  * arm its own trial boot.
  *
  * See env.h for the block layout, which was read off a device.
+ *
+ * `slotcheck slot` reads kN and rN and says whether the slot passes a
+ * PARTIAL check (slot.h): uImage magic, CRCs and size, a plausible
+ * squashfs superblock. Exit 0 passes, 1 fails, 2 could not check. It is not proof
+ * that the slot boots. A successful `commit` warns afterwards when the
+ * result slot-state.sh recorded for the other slot is a failure: after a
+ * commit it is the only way back, and only through a trial someone arms by
+ * hand.
  *
  *
  * getenv is verified against the vendor's own nv on a stick, byte for byte.
@@ -75,6 +84,7 @@
 #include "env.h"
 #include "commit.h"
 #include "lock.h"
+#include "slot.h"
 
 /* MEMERASE = _IOW('M', 2, struct erase_info_user).
  *
@@ -467,12 +477,132 @@ static int commit(const char *arg, int force)
 	return rc == NVC_DONE || rc == NVC_ALREADY ? 0 : 1;
 }
 
+/* The partial slot check (slot.h), on kN and rN. One partition read front
+ * to back through /dev/mtdN: the uImage header and payload of kN (at most
+ * the 1.3 MB partition), the first 96 bytes of rN. */
+struct mtd_fd {
+	int fd;
+};
+
+static long mtd_fd_read(void *ctx, uint8_t *buf, uint32_t n)
+{
+	return sys_read(((struct mtd_fd *)ctx)->fd, buf, n);
+}
+
+static uint8_t slot_buf[4096];
+
+/* One partition through check, or SLOT_K_READ / SLOT_R_READ when it is not
+ * there or will not open: that says nothing about the slot. */
+static int slot_part(const char *name, int is_kernel, struct slot_report *r)
+{
+	struct mtd_part m;
+	struct mtd_fd f;
+	struct slot_src src;
+	char path[16];
+	int rc;
+
+	if (!mtd_find(name, &m))
+		return is_kernel ? SLOT_K_READ : SLOT_R_READ;
+	mtd_path(m.index, path);
+	f.fd = (int)sys_open(path, O_RDONLY);
+	if (f.fd < 0)
+		return is_kernel ? SLOT_K_READ : SLOT_R_READ;
+	src.ctx = &f;
+	src.read = mtd_fd_read;
+	src.size = m.size;
+	rc = is_kernel ? slot_check_kernel(&src, slot_buf, sizeof slot_buf, r)
+		       : slot_check_rootfs(&src, r);
+	sys_close(f.fd);
+	return rc;
+}
+
+/* 0 when both parts pass, 1 when one is broken, 2 when one could not be
+ * read. A broken kernel is reported before the rootfs is read: U-Boot
+ * refuses it either way. */
+static int slot_check(int slot, int *rc_out, struct slot_report *r)
+{
+	char k[3] = { 'k', (char)('0' + slot), 0 };
+	char rf[3] = { 'r', (char)('0' + slot), 0 };
+	int rc;
+
+	r->kernel_size = r->rootfs_size = 0;
+	rc = slot_part(k, 1, r);
+	if (rc == SLOT_OK)
+		rc = slot_part(rf, 0, r);
+	*rc_out = rc;
+	if (rc == SLOT_OK)
+		return 0;
+	return slot_bad(rc) ? 1 : 2;
+}
+
+static int slotcheck(const char *arg)
+{
+	struct slot_report r;
+	int slot = str_eq(arg, "0") ? 0 : str_eq(arg, "1") ? 1 : -1;
+	int rc, res;
+
+	if (slot < 0) {
+		out("nv: slotcheck takes 0 or 1\n");
+		return 2;
+	}
+	res = slot_check(slot, &rc, &r);
+	if (res == 0)
+		out_fmt("nv: slot %d: passes the partial check (uImage %d bytes, header and data CRC match;"
+			" squashfs superblock, %d bytes); this is not proof that it boots\n",
+			(long)slot, (long)r.kernel_size, (long)r.rootfs_size);
+	else if (res == 1)
+		out_fmt("nv: slot %d: FAILS the partial check: %s\n", (long)slot, slot_check_msg(rc));
+	else
+		out_fmt("nv: slot %d: not checked: %s\n", (long)slot, slot_check_msg(rc));
+	return res;
+}
+
+/* After a commit, the slot it left behind. Nothing boots that slot again
+ * unless someone arms a trial of it, so a broken one is no way back. Only a
+ * warning, and only AFTER the writes and the "nv: commit <slot>:" line,
+ * which confd reads first. It reads the result slot-state.sh recorded
+ * (STATE_PATH) rather than the flash: confd kills nv commit after 10 s, and
+ * a 1.3 MB read after a commit that already went through must not turn it
+ * into a timeout. No file, or another slot in it: no warning. */
+#define STATE_PATH "/var/run/odi-slot"
+
+static void commit_warn_other(const char *arg)
+{
+	static char st[1024];
+	char other[4], check[16], detail[256];
+	int slot = str_eq(arg, "0") ? 0 : str_eq(arg, "1") ? 1 : -1;
+	int fd;
+	long n;
+
+	if (slot < 0)
+		return;
+	fd = (int)sys_open(STATE_PATH, O_RDONLY);
+	if (fd < 0)
+		return;
+	n = sys_read(fd, st, sizeof st);
+	sys_close(fd);
+	if (n <= 0)
+		return;
+	if (!slot_state_get(st, (uint32_t)n, "other_slot", other, sizeof other) ||
+	    other[0] != (char)('0' + 1 - slot) || other[1] ||
+	    !slot_state_get(st, (uint32_t)n, "other_slot_check", check, sizeof check) ||
+	    !str_eq(check, "fail"))
+		return;
+	if (!slot_state_get(st, (uint32_t)n, "other_slot_detail", detail, sizeof detail))
+		detail[0] = 0;
+	out_fmt("nv: WARNING: slot %d, the other slot, failed a partial check (%s): %s\n"
+		"nv: it would not boot as it is, so there is now no working slot to go back to.\n"
+		"nv: Flash it again (fwu.sh) to have one. Check again with: nv slotcheck %d\n",
+		(long)(1 - slot), STATE_PATH, detail, (long)(1 - slot));
+}
+
 static void usage(void)
 {
 	out("Usage: nv getenv [parameter_name]\n"
 	    "       nv setenv [-c 1|2] parameter_name value\n"
 	    "       nv fallback [parameter_name]\n"
 	    "       nv commit [--force] slot\n"
+	    "       nv slotcheck slot\n"
 	    "  commit refuses while /etc/config/confirm-arp exists (each boot would wait\n"
 	    "  for an ARP reply, and a committed slot has no trial to fall back to);\n"
 	    "  --force (or -f) commits anyway\n");
@@ -501,7 +631,18 @@ int main(int argc, char **argv)
 		}
 		if (!env_lock())
 			return 1;
-		return commit(argv[argc - 1], force);
+		if (commit(argv[argc - 1], force))
+			return 1;
+		commit_warn_other(argv[argc - 1]);
+		return 0;
+	}
+	/* Reads kN and rN only, never the environment. */
+	if (str_eq(argv[1], "slotcheck")) {
+		if (argc != 3) {
+			usage();
+			return 2;
+		}
+		return slotcheck(argv[2]);
 	}
 	/* Before the read, not before the write: the block is read-modified-
 	 * written, so the read has to be inside the lock too. */

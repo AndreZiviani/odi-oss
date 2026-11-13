@@ -1035,6 +1035,7 @@ in service.
     nv setenv [-c 1|2] name value set one (in the copy that was read, or copy 1|2; an invalid copy is repaired first)
     nv fallback [name]            read the OTHER copy, the one U-Boot falls back to
     nv commit [--force] slot      sw_commit=slot, mupgrade_en=0 and sw_tryactive=2 in BOTH copies, verified
+    nv slotcheck slot             a PARTIAL check of kN and rN: uImage magic, CRCs and size, squashfs superblock
 
 Reads and writes the redundant environment (mtd `env` and `env2`) with a
 CRC check and no vendor library. It is what arms and commits a trial boot:
@@ -1109,6 +1110,20 @@ the old environment, and after that the primary wins with the new one.
 It is how a trial is committed, by hand, once you have checked it
 (`docs/FLASHING.md`, "Committing"); run `slot-state.sh` after it to refresh
 the login notice and the exporter.
+After a successful commit, and after its own result line, it warns when
+`/var/run/odi-slot` records a failed check of the slot it left behind (the
+check below, run by `slot-state.sh`); it does not read that slot itself.
+
+`slotcheck` reads the kernel partition of a slot and the first 96 bytes of
+its rootfs partition, and answers with one line: exit 0, `passes the partial
+check`, exit 1, `FAILS the partial check: <reason>`, exit 2, `not checked:
+<reason>` (a partition missing or unreadable, which says nothing about the
+slot). It checks the uImage magic, header CRC and data CRC as U-Boot's
+`bootm` does, but not the other header fields, plus that the image fits the
+partition, and a version 4.0 squashfs
+superblock (block size, `bytes_used` within the partition). It is not proof
+that the slot boots (`docs/FLASHING.md`, "Checking the other slot").
+`slot-state.sh` runs it on the other slot at every boot.
 
 ### Slot state -- `/var/run/odi-slot`
 
@@ -1116,7 +1131,7 @@ the login notice and the exporter.
 `once` entry), and again whenever it is run by hand or after a commit from the web UI (confd runs it with no environment, so it sets its own `PATH`; a run after the first of a boot does not wait for syslogd). It only reads the
 environment (`nv getenv`, `nv fallback`) and `/proc/cmdline`, never writes
 either, and replaces the file by rename. One `KEY=value` per line, always
-all nine keys, a value empty when it cannot be told:
+all twelve keys, a value empty when it cannot be told:
 
 | key | value |
 |---|---|
@@ -1129,6 +1144,9 @@ all nine keys, a value empty when it cannot be told:
 | `fallback_sw_commit` | `sw_commit` in that copy, `0` or `1` |
 | `next_boot` | the slot the next reset boots: `sw_tryactive` when it is `0` or `1`, else `primary_sw_commit` |
 | `uncommitted` | `1` when a valid copy's `sw_commit` is not `running`; `0` when every valid copy names it; empty when the running slot or the environment cannot be read |
+| `other_slot` | the slot that is not running, `0` or `1`; empty when `running` is |
+| `other_slot_check` | `nv slotcheck` on it (`docs/FLASHING.md`, "Checking the other slot"), a partial check, not proof that the slot boots: `ok`, `fail`, `unknown` (not readable, or no answer), `pending` while it runs; empty when there is no `other_slot` |
+| `other_slot_detail` | what `nv slotcheck` said: the whole line on `ok`, the reason on `fail` and `unknown` |
 
 The exporter (metricsd) turns it into `gpon_boot_slot`,
 `gpon_committed_slot` and `gpon_uncommitted`; the web UI reads it for its
@@ -1137,7 +1155,12 @@ notice in `/var/run/motd` (`/etc/motd`, which dropbear prints at every
 interactive login) and in syslog (tag `slot-state`) -- `TRIAL BOOT`,
 `HALF COMMITTED` (the fallback copy still names the other slot) or `SLOT
 STATE UNKNOWN`, each naming the copies and the command that clears it; when
-it is `0` the motd is empty.
+it is `0` the motd is empty. A failed check of the other slot adds an
+`OTHER SLOT BROKEN` line to both, an unreadable one `OTHER SLOT UNCHECKED` to
+the motd only. The file is first written with `other_slot_check=pending` and
+replaced once the check has answered, so `trial-guard.sh` never waits on the
+flash read. The first nine keys keep their order: omcid reads `running` and
+`uncommitted` from the first 256 bytes.
 
 ### `flash` -- the config store
 

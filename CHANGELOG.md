@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Slots: `nv slotcheck <slot>`, a partial check of a slot: the kernel
+  partition holds a uImage whose magic, header CRC and data CRC are good and
+  whose size fits the partition, and the rootfs partition starts with a
+  version 4.0 squashfs superblock that fits it. Not proof that the slot
+  boots; it catches a slot that cannot, such as a kernel left half-written
+  by an interrupted flash. `slot-state.sh` runs it on the other slot at every
+  boot, after the state file is first written (trial-guard.sh waits only 60 s
+  for it), records `other_slot`, `other_slot_check` and `other_slot_detail`
+  in `/var/run/odi-slot`, and adds `OTHER SLOT BROKEN` to the login banner
+  and syslog when it fails. A successful `nv commit` warns, after its result
+  line, when that recorded check failed (issue #379, point 3).
+
 ## v1.16.0 (2026-11-13)
 
 - Watchdog: `odi_wdt` logs the control value it found at init

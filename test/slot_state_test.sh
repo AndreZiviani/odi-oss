@@ -40,6 +40,19 @@ getenv)
 fallback)
 	[ -s "$T/env\$f" ] || { echo "nv: no valid second copy of the environment"; exit 1; }
 	echo "Fallback environment: \$f"; cat "$T/env\$f"; echo; exit 0 ;;
+slotcheck)
+	echo "\$2" > "$T/slotcheck.asked"
+	# What the state file says while nv would be reading the flash.
+	cp "$T/state" "$T/state.during" 2>/dev/null
+	cp "$T/motd" "$T/motd.during" 2>/dev/null
+	# \$T/slotcheck: the exit status on line 1, what nv prints after it
+	# (SLOT is the slot asked about); absent, the slot passes.
+	if [ -f "$T/slotcheck" ]; then
+		sed 1d "$T/slotcheck" | sed "s/SLOT/\$2/"
+		exit "\$(head -n 1 "$T/slotcheck")"
+	fi
+	echo "nv: slot \$2: passes the partial check (uImage 1172619 bytes, header and data CRC match; squashfs superblock, 1542606 bytes); this is not proof that it boots"
+	exit 0 ;;
 esac
 exit 1
 EOF
@@ -58,7 +71,7 @@ printf 'mtd5: 00300000 00001000 "r0"\nmtd7: 00300000 00001000 "r1"\n' > "$T/mtd"
 
 # env1 / env2: the pairs of each copy; $T/primary: which one U-Boot boots.
 setup() {
-	rm -f "$T/state" "$T/motd" "$T/log"
+	rm -f "$T/state" "$T/motd" "$T/log" "$T/slotcheck" "$T/slotcheck.asked" "$T/state.during" "$T/motd.during"
 	envs "$@"
 }
 # The same, leaving the state file alone: the stick after the boot.
@@ -170,7 +183,7 @@ echo "== files are replaced by rename and nothing else is left behind"
 setup 2        0 0 1                      1 0 2
 run
 if [ -z "$(find "$T" -maxdepth 1 -name '*.tmp.*')" ]; then ok "no temp files left"; else no "no temp files left"; fi
-if [ "$(wc -l < "$T/state" | tr -d ' ')" = 9 ]; then ok "the state file has its nine keys"; else no "the state file has its nine keys"; fi
+if [ "$(wc -l < "$T/state" | tr -d ' ')" = 12 ]; then ok "the state file has its twelve keys"; else no "the state file has its twelve keys"; fi
 
 # After `nv commit` the web UI runs this again. confd starts its children
 # with NO environment, and the script must neither depend on a PATH it was not
@@ -208,6 +221,82 @@ env PATH="$T/bin:$PATH" NV="$T/bin/nv" LOGGER="$T/bin/logger" LOG_WAIT_S=2 \
     DEV_LOG="$T/devlog" "$SH" "$S" > "$T/out" 2>&1
 if [ $((SECONDS - t0)) -ge 2 ]; then ok "the first run of a boot still waits for syslogd"; else no "the first run of a boot still waits for syslogd"; fi
 logged "and logs after the wait" "TRIAL BOOT: running slot 1"
+
+echo "== the other slot: a partial check, after the state file is first written"
+setup 2        1 1 2                      1 1 2
+run
+st "other_slot is the slot not running" "other_slot=0"
+if [ "$(cat "$T/slotcheck.asked" 2>/dev/null)" = 0 ]; then ok "nv slotcheck is asked about slot 0"; else no "nv slotcheck is asked about slot 0"; fi
+st "a pass is recorded" "other_slot_check=ok"
+st "with what nv said, partial check and all" "other_slot_detail=slot 0: passes the partial check (uImage 1172619 bytes, header and data CRC match; squashfs superblock, 1542606 bytes); this is not proof that it boots"
+quiet "a pass on a committed slot adds nothing to the banner"
+if [ "$(sed -n 9p "$T/state")" = "uncommitted=0" ] && [ "$(sed -n 10p "$T/state")" = "other_slot=0" ]; then
+	ok "the new keys come after uncommitted (swimage.c reads the first 256 bytes)"
+else no "the new keys come after uncommitted"; fi
+if grep -qx "uncommitted=0" "$T/state.during" 2>/dev/null && grep -qx "other_slot_check=pending" "$T/state.during"; then
+	ok "the state file is complete, check pending, while nv reads the flash (trial-guard waits for it)"
+else no "the state file is complete, check pending, while nv reads the flash"; fi
+
+setup 2        1 1 2                      1 1 2
+printf '1\nnv: slot SLOT: FAILS the partial check: kernel: uImage data CRC does not match (incomplete or changed)\n' > "$T/slotcheck"
+run
+st "a failure is recorded" "other_slot_check=fail"
+st "with the reason alone" "other_slot_detail=kernel: uImage data CRC does not match (incomplete or changed)"
+motd "committed: the banner says there is no way back" "OTHER SLOT BROKEN: slot 0 fails a partial check (kernel: uImage data CRC does not match (incomplete or changed)), so it would not boot as it is, and there is no working slot to go back to. Flash it again (fwu.sh) to have one."
+motd "and how to check again" "Check again with: nv slotcheck 0 && slot-state.sh"
+logged "and it goes to syslog" "OTHER SLOT BROKEN: slot 0"
+if grep -q "TRIAL BOOT" "$T/motd"; then no "no trial notice on a committed slot"; else ok "no trial notice on a committed slot"; fi
+
+setup 2        0 0 1                      1 0 2
+printf '1\nnv: slot SLOT: FAILS the partial check: rootfs: no squashfs magic (erased or not a squashfs)\n' > "$T/slotcheck"
+run
+motd "a trial still gets its own notice" "TRIAL BOOT: running slot 1"
+motd "and the broken slot is where the next reboot goes" "OTHER SLOT BROKEN: slot 0 fails a partial check (rootfs: no squashfs magic (erased or not a squashfs)), so it would not boot as it is, and the next reboot boots it: until it is flashed again or slot 1 is committed, a reboot leaves the stick on a slot that does not boot."
+logged "both lines go to syslog" "TRIAL BOOT: running slot 1"
+logged "the second too" "OTHER SLOT BROKEN: slot 0"
+if grep -qx "uncommitted=1" "$T/state.during" 2>/dev/null; then ok "the trial is in the state file before the check"; else no "the trial is in the state file before the check"; fi
+
+# A refresh (the state file is there) starts from the last result for the
+# same slot: confd may cut it short at 12 s, and that must not wipe the
+# warning. Here the failure from just above is still in the file.
+printf '0\nnv: slot SLOT: passes the partial check (x); this is not proof that it boots\n' > "$T/slotcheck"
+envs 2         0 0 1                      1 0 2
+run
+if grep -qx "other_slot_check=fail" "$T/state.during" 2>/dev/null && grep -q "OTHER SLOT BROKEN" "$T/motd.during" 2>/dev/null; then
+	ok "a refresh keeps the last failure until the new check has answered"
+else no "a refresh keeps the last failure until the new check has answered"; fi
+st "and then takes the new result" "other_slot_check=ok"
+if grep -q "OTHER SLOT" "$T/motd"; then no "a pass clears the warning"; else ok "a pass clears the warning"; fi
+# Another slot in the file (the stick booted the other way): pending.
+sed -i.bak 's/^other_slot=0$/other_slot=1/; s/^other_slot_check=ok$/other_slot_check=fail/' "$T/state" && rm -f "$T/state.bak"
+run
+if grep -qx "other_slot_check=pending" "$T/state.during" 2>/dev/null; then ok "a result for another slot is not carried over"; else no "a result for another slot is not carried over"; fi
+
+setup 2        1 1 2                      1 1 2
+printf '2\nnv: slot SLOT: not checked: kernel: could not read the partition\n' > "$T/slotcheck"
+run
+st "a read failure is unknown, not a failure" "other_slot_check=unknown"
+st "with the reason" "other_slot_detail=kernel: could not read the partition"
+motd "and the banner says it was not checked" "OTHER SLOT UNCHECKED: slot 0 could not be checked (kernel: could not read the partition)"
+if [ -s "$T/log" ]; then no "an unchecked slot is not logged as a warning"; else ok "an unchecked slot is not logged as a warning"; fi
+
+setup 2        1 1 2                      1 1 2
+printf '1\nnv: unknown verb\n' > "$T/slotcheck"
+run
+st "an exit 1 without the FAILS line (an older nv) is unknown" "other_slot_check=unknown"
+st "and says nv gave no answer" "other_slot_detail=nv slotcheck gave no answer (exit 1)"
+setup 2        1 1 2                      1 1 2
+printf '0\n' > "$T/slotcheck"
+run
+st "an exit 0 with no pass line is not a pass" "other_slot_check=unknown"
+
+echo "== the other slot is not checked when the running one is unknown"
+setup 2        0 0 1                      1 0 2
+echo "console=ttyS0 rdinit=/init" > "$T/cmdline"
+run
+st "no other slot" "other_slot="
+st "and no check" "other_slot_check="
+if [ -f "$T/slotcheck.asked" ]; then no "nv slotcheck is not run"; else ok "nv slotcheck is not run"; fi
 
 echo "== development aids in the banner, on a committed slot too"
 rm -f "$T/confirm-arp" "$T/breadcrumbs.on"
