@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.16.0. The web UI adds the static routes editor under
+  Config, Network (`LAN_ROUTES`, empty by default, saved through the same Keep
+  trial as the management address), the path loss as a meter of its own
+  between Receive and Transmit with the window of the OLT fibre class, the
+  equalisation delay under Registration and the fibre length a change of it
+  equals, and both fibre rates on the stick diagram. The asset hashes in
+  src/release-sha256.txt are the release SHA256SUMS, checked by
+  `make releases`.
 - Network: `LAN_ROUTES` (odi.conf), optional static routes for the management
   interface, so the stick can be reached from other subnets without NAT, e.g.
   `default via 192.168.1.253` behind a router that holds the stick subnet.
