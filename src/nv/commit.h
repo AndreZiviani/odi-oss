@@ -28,8 +28,14 @@
  * relies on that listener. It rides in the copies' existing sw_commit
  * writes: a copy that lacks the variable gets it appended, one that already
  * says 0 is left as it is, and no extra erase cycle is spent. A copy needs
- * a write when either variable is off, so a stick committed before this
- * existed is fixed by running `nv commit` again. The crash argument above
+ * a write when any of them is off, so a stick committed before this
+ * existed is fixed by running `nv commit` again.
+ *
+ * sw_tryactive=2 rides along the same way. The copy U-Boot saved as it
+ * started the trial says 2, but the other one still holds the value that
+ * armed the trial; if U-Boot ever had to fall back to that copy, bootcmd
+ * would start a one-shot trial nobody asked for. The fallback's value is
+ * never a refusal, only the primary's (below). The crash argument above
  * is unchanged: each copy is still replaced whole, and a half-applied
  * state is only ever "old, valid copy" or "new, verified copy".
  *
@@ -40,13 +46,17 @@
  *   - a slot the primary copy does not name as sw_active -- U-Boot writes
  *     sw_active as it boots a slot, so this is its own record of what it
  *     started. sw_active is NEVER written here;
+ *   - a primary copy holding a sw_tryactive other than 2 (NVC_TRIAL_PENDING):
+ *     U-Boot set it to 2 in the copy it saved before starting this slot, so
+ *     another value there is a trial someone queued since, and committing
+ *     would drop it silently;
  *   - a copy that could not be read completely (NVC_READ): it may be
  *     perfectly good, so it is not repaired over, and nothing is written;
  *   - both copies failing their CRC: there is nothing to commit from.
  *
  * One copy that was read in full and fails its CRC is not a refusal. The
  * valid copy is the primary and the invalid one is REPAIRED first: it is written with the whole new
- * environment (sw_commit and mupgrade_en applied), read back and compared,
+ * environment (sw_commit, mupgrade_en and sw_tryactive applied), read back and compared,
  * and only then is the primary written. The only good copy is never erased
  * while it is the only one, so a second power cut during the commit still
  * leaves a valid copy. The repaired copy gets the flags byte that keeps the
@@ -93,6 +103,7 @@ enum env_commit_rc {
 	NVC_WRITE_REPAIR,      /* the invalid copy could not be written; the valid one was not touched */
 	NVC_VERIFY_REPAIR,     /* the invalid copy did not read back as written; the valid one was not touched */
 	NVC_READ,              /* a copy could not be read completely (not the same as failing its CRC); nothing written */
+	NVC_TRIAL_PENDING,     /* the primary copy holds a sw_tryactive other than 2; nothing written */
 };
 
 struct env_commit_report {

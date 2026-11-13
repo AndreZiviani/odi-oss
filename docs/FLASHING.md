@@ -357,7 +357,9 @@ meant to do doing it.
 `nv commit` (`docs/TOOLS.md`) writes `sw_commit` into the primary
 environment copy, reads it back, then into the fallback copy, reads it
 back, then reads both once more. It refuses a slot that is not the running
-one or not `sw_active`, and an environment with no valid copy; it never
+one or not `sw_active`, a trial queued since this boot (`sw_tryactive` other
+than 2 in the primary copy; let it run, or `nv setenv sw_tryactive 2`), and
+an environment with no valid copy; it never
 writes `sw_active`, and it is safe to interrupt at every step. If one copy
 is invalid (a write cut by a power loss) it writes that copy first, from
 the new environment, and the valid one only after the first read back. A copy
@@ -376,6 +378,9 @@ and, after the boot countdown, listens on the host link for a firmware image
 sent by multicast and writes it to flash without any authentication, so
 anyone on the LAN side during a reboot could replace the firmware. Every
 install of this image ends in `nv commit`, so every stick gets it turned off.
+They also set `sw_tryactive=2`: the copy U-Boot did not save as it started
+the trial still holds the value that armed it, which would start another
+trial if U-Boot ever fell back to that copy.
 
 **Know what committing costs.** Once committed, every reset boots this
 image. An image that later crashes, hangs or fails to confirm -- next

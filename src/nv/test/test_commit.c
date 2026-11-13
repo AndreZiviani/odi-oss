@@ -121,7 +121,7 @@ static int val(struct fake *f, int copy, const char *key, const char *want)
 	return env_get(f->part[copy], PART, key, v, sizeof v) && !strcmp(v, want);
 }
 
-/* Every pair other than sw_commit and mupgrade_en is byte-identical before and after. */
+/* Every pair other than the three a commit sets is byte-identical before and after. */
 static int others_same(const uint8_t *a, const uint8_t *b)
 {
 	uint32_t pa = 0;
@@ -137,7 +137,8 @@ static int others_same(const uint8_t *a, const uint8_t *b)
 			return 0;
 		memcpy(k, x, (size_t)(eq - x));
 		k[eq - x] = 0;
-		if (!strcmp(k, "sw_commit") || !strcmp(k, "mupgrade_en"))
+		if (!strcmp(k, "sw_commit") || !strcmp(k, "mupgrade_en") ||
+		    !strcmp(k, "sw_tryactive"))
 			continue;
 		if (!env_get(b, PART, k, v, sizeof v) || strcmp(v, eq + 1))
 			return 0;
@@ -280,9 +281,10 @@ static void repair_tests(void)
 	/* The valid copy already committed: only the invalid one is written. */
 	damaged(&rf, 1);
 	{
-		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=1", "mupgrade_en=0" };
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=1", "mupgrade_en=0",
+				     "sw_tryactive=2" };
 
-		build(rf.part[2], 0x01, pr, 4);
+		build(rf.part[2], 0x01, pr, 5);
 	}
 	rc = env_commit(&rio, 1, 1, &r);
 	ck(rc == NVC_DONE && rf.nwrites == 1 && rf.writes[0] == 1 && !r.wrote_primary && r.wrote_fallback,
@@ -539,9 +541,11 @@ int main(void)
 	ck(env_valid(f.part[1], PART) && env_valid(f.part[2], PART),
 	   "both copies verify");
 	ck(others_same(before1, f.part[1]) && others_same(before2, f.part[2]),
-	   "no pair other than sw_commit and mupgrade_en changed in either copy");
+	   "no pair other than sw_commit, mupgrade_en and sw_tryactive changed in either copy");
 	ck(val(&f, 1, "mupgrade_en", "0") && val(&f, 2, "mupgrade_en", "0"),
 	   "both copies read mupgrade_en=0 (it was 1)");
+	ck(val(&f, 1, "sw_tryactive", "2") && val(&f, 2, "sw_tryactive", "2"),
+	   "both copies read sw_tryactive=2 (the fallback still had the 1 that armed the trial)");
 
 	/* Again: nothing to do, nothing written. */
 	f.nwrites = 0;
@@ -566,17 +570,17 @@ int main(void)
 	{
 		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=0" };
 		const char *fb[] = { "bootdelay=1", "sw_active=0", "sw_commit=1",
-				     "mupgrade_en=0" };
+				     "mupgrade_en=0", "sw_tryactive=2" };
 
 		build(f.part[2], 0x01, pr, 3);
-		build(f.part[1], 0x00, fb, 4);
+		build(f.part[1], 0x00, fb, 5);
 		memcpy(before1, f.part[1], PART);
 	}
 	rc = env_commit(&io, 1, 1, &r);
 	ck(rc == NVC_DONE && f.nwrites == 1 && f.writes[0] == 2 && !r.wrote_fallback &&
 	   !memcmp(before1, f.part[1], PART) && val(&f, 2, "mupgrade_en", "0") &&
-	   val(&f, 2, "sw_commit", "1"),
-	   "variable absent in the primary: added with sw_commit; a fallback already right is untouched");
+	   val(&f, 2, "sw_commit", "1") && val(&f, 2, "sw_tryactive", "2"),
+	   "variables absent in the primary: added with sw_commit; a fallback already right is untouched");
 	trial(&f);
 	{
 		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=1",
@@ -591,14 +595,94 @@ int main(void)
 	   "sw_commit already right but mupgrade_en=1: both copies still written once each");
 	{
 		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=1",
-				     "mupgrade_en=0" };
+				     "mupgrade_en=0", "sw_tryactive=2" };
 
-		build(f.part[2], 0x01, pr, 4);
-		build(f.part[1], 0x00, pr, 4);
+		build(f.part[2], 0x01, pr, 5);
+		build(f.part[1], 0x00, pr, 5);
 	}
 	f.nwrites = 0;
 	rc = env_commit(&io, 1, 1, &r);
 	ck(rc == NVC_ALREADY && f.nwrites == 0, "both already committed with mupgrade_en=0: nothing written");
+
+	/* Committed before sw_tryactive was part of the commit: the fallback
+	 * still holds the value that armed the trial. Running it again fixes
+	 * that copy alone. */
+	{
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=1",
+				     "mupgrade_en=0", "sw_tryactive=2" };
+		const char *fb[] = { "bootdelay=1", "sw_active=0", "sw_commit=1",
+				     "mupgrade_en=0", "sw_tryactive=1" };
+
+		build(f.part[2], 0x01, pr, 5);
+		build(f.part[1], 0x00, fb, 5);
+		memcpy(before2, f.part[2], PART);
+	}
+	f.nwrites = 0;
+	rc = env_commit(&io, 1, 1, &r);
+	ck(rc == NVC_DONE && f.nwrites == 1 && f.writes[0] == 1 && !r.wrote_primary &&
+	   !memcmp(before2, f.part[2], PART) && val(&f, 1, "sw_tryactive", "2") &&
+	   val(&f, 1, "sw_active", "0"),
+	   "committed earlier, stale sw_tryactive=1 in the fallback: only the fallback is written, to 2");
+
+	/* A fallback the new values do not fit in: refused before the primary
+	 * is written, so the two copies never end up differing on it. */
+	{
+		static char fill[PART];
+		const char *fb[] = { "bootdelay=1", "sw_active=0", "sw_commit=0",
+				     "mupgrade_en=0", fill };
+		size_t l = PART - ENV_HDR_LEN - 51 - 5;   /* 5 bytes left, sw_tryactive=2 needs 15 */
+
+		memset(fill, 'a', l - 1);
+		fill[0] = 'x';
+		fill[1] = '=';
+		fill[l - 1] = 0;
+		trial(&f);
+		build(f.part[1], 0x00, fb, 5);
+		memcpy(before1, f.part[1], PART);
+		memcpy(before2, f.part[2], PART);
+		rc = env_commit(&io, 1, 1, &r);
+		ck(rc == NVC_NO_ROOM && f.nwrites == 0 && !memcmp(before1, f.part[1], PART) &&
+		   !memcmp(before2, f.part[2], PART),
+		   "no room for sw_tryactive in the fallback: refused before the primary is written");
+	}
+
+	/* A trial queued in the primary since this boot: refused, whatever it
+	 * names, a value bootcmd would also take for a trial included. */
+	{
+		const char *q[] = { "0", "1", "x", "22" };
+
+		for (int i = 0; i < 4; i++) {
+			char kv[32];
+			const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=0",
+					     "mupgrade_en=1", kv };
+
+			snprintf(kv, sizeof kv, "sw_tryactive=%s", q[i]);
+			trial(&f);
+			build(f.part[2], 0x01, pr, 5);
+			memcpy(before1, f.part[1], PART);
+			memcpy(before2, f.part[2], PART);
+			rc = env_commit(&io, 1, 1, &r);
+			if (rc != NVC_TRIAL_PENDING || f.nwrites != 0 ||
+			    memcmp(before1, f.part[1], PART) || memcmp(before2, f.part[2], PART)) {
+				printf("     sw_tryactive=%s: rc %d, %d writes\n", q[i], rc, f.nwrites);
+				ck(0, "a trial queued in the primary is refused, nothing written");
+			}
+		}
+		ck(1, "a trial queued in the primary (0, 1, x, 22) is refused, both copies untouched");
+	}
+	/* ...even with the other copy invalid: the refusal comes before the
+	 * repair, so nothing is written at all. */
+	{
+		const char *pr[] = { "bootdelay=1", "sw_active=1", "sw_commit=0",
+				     "sw_tryactive=0" };
+
+		trial(&f);
+		build(f.part[2], 0x01, pr, 4);
+		memset(f.part[1] + PART / 2, 0xff, PART / 2);
+		rc = env_commit(&io, 1, 1, &r);
+		ck(rc == NVC_TRIAL_PENDING && f.nwrites == 0 && !r.repaired,
+		   "a trial queued in the only valid copy: refused before any repair");
+	}
 
 	/* Interrupted between the two copies: the primary carries both
 	 * changes, the fallback is still the old valid copy. */
