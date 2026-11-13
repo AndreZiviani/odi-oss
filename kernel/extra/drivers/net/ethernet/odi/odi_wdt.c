@@ -299,9 +299,9 @@ static void odi_wdt_reg_write(uint32_t off, uint32_t val)
 
 /* odi_wdt_arm() -- programs the control register to the operating point odi_wdt.h
  * documents (ODI_WDT_PRESCALE/TIMEOUT1/TIMEOUT2/RESET_MODE, enabled), the same
- * value U-Boot's own en_wdt already wrote before this driver ever runs, and
- * kicks once immediately, in case the watchdog is already running and
- * boot took a while.
+ * value U-Boot en_wdt writes before a trial boot (a committed boot arrives
+ * with the watchdog off), and kicks once immediately, in case the watchdog
+ * is already running and boot took a while.
  */
 static void odi_wdt_kick(void);
 
@@ -778,14 +778,19 @@ static const struct proc_ops odi_wdt_clients_fops = {
 
 static int __init odi_wdt_init(void)
 {
+	uint32_t found;
+
 	odi_wdt_deadline_state_init(&odi_wdt_state);
+	/* Nothing to kick without the SoC window: a trial boot resets in
+	 * about 42 s, a committed one stays up unwatched. */
 	if (odi_soc_ensure() != 0)
-		return 0; /* nothing to kick: U-Boot armed it, so it resets in about 42 s */
+		return 0;
 
 	/* The watchdog was always enabled, unconditionally
 	 * -- this build has never shipped it any other way, so there is no
 	 * knob to preserve here: always arm and start the kicker at boot.
 	 */
+	found = odi_wdt_reg_read(SOC_WDT_CTRL);
 	odi_wdt_arm();
 	odi_wdt_state.watchdog_enabled = 1;
 	odi_wdt_thread_maintain(1);
@@ -812,9 +817,9 @@ static int __init odi_wdt_init(void)
 	timer_setup(&odi_wdt_deadline_timer, odi_wdt_deadline_timer_fn, 0);
 	mod_timer(&odi_wdt_deadline_timer, jiffies + ODI_WDT_TICK_INTERVAL_S * HZ);
 
-	pr_info(DRV_NAME ": armed (prescale=%u timeout1=%u timeout2=%u reset_mode=%u), deadline %u s\n",
+	pr_info(DRV_NAME ": armed (prescale=%u timeout1=%u timeout2=%u reset_mode=%u), deadline %u s, found ctrl 0x%08x\n",
 		ODI_WDT_PRESCALE, ODI_WDT_TIMEOUT1, ODI_WDT_TIMEOUT2, ODI_WDT_RESET_MODE,
-		ODI_WDT_USERLAND_DEADLINE_S);
+		ODI_WDT_USERLAND_DEADLINE_S, found);
 	return 0;
 }
 

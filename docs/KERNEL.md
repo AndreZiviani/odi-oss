@@ -815,7 +815,10 @@ U-Boot passes a per-slot command line in `argv`: which root device
 
 U-Boot arms the hardware watchdog before handing over to a **trial** boot
 (`nv setenv sw_tryactive <slot>`, see `docs/FLASHING.md`); the kernel's job
-is to keep kicking it. `odi_wdt.c` is a small, from-scratch kicker thread:
+is to keep kicking it. A committed boot (`boot_by_commit`) gets no `en_wdt`:
+the watchdog is off until `odi_wdt` arms it, and the driver logs what it
+found (`found ctrl 0x00000000` on a committed boot, `0xe7c00000` on a trial),
+so a committed image that hangs before that point is not reset. `odi_wdt.c` is a small, from-scratch kicker thread:
 it arms the watchdog itself at init, on every boot, at the same operating
 point U-Boot's own `en_wdt` sets, and — critically — it also tracks a
 **userland confirmation** deadline, not just "the kernel is alive." Unless

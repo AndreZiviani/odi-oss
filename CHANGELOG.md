@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Watchdog: `odi_wdt` logs the control value it found at init
+  (`found ctrl 0x...`), and the comments no longer say U-Boot arms the
+  watchdog before every boot. It does so before a trial boot only; a
+  committed boot reaches the kernel with the watchdog off (`found ctrl
+  0x00000000` on a stick), so a committed image that hangs before `odi_wdt`
+  starts is not reset. docs/KERNEL.md says so. Refs #379.
 - Releases: confd v1.16.0. The web UI adds the static routes editor under
   Config, Network (`LAN_ROUTES`, empty by default, saved through the same Keep
   trial as the management address), the path loss as a meter of its own
