@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.16.0 (2026-11-13)
+
 - Watchdog: `odi_wdt` logs the control value it found at init
   (`found ctrl 0x...`), and the comments no longer say U-Boot arms the
   watchdog before every boot. It does so before a trial boot only; a
@@ -673,6 +675,8 @@ listed here.
   work too, without touching the fibre. docs/SETTINGS.md, docs/TOOLS.md and docs/SWITCH.md
   describe it; the drv golden covers both settings and the event order, and
   test/safe_mode_test.sh the clearing. Refs #287.
+- CI: actions/cache 6.1.0, actions/attest-build-provenance 4.2.2 and
+  actions/attest-sbom 4.1.0 (Dependabot).
 
 ## v1.15.0 (2026-11-02)
 
