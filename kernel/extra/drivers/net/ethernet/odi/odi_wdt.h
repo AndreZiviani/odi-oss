@@ -13,12 +13,14 @@
  *   SOC_WDT_CTRL    bit 31 ENABLE, bits 30:29 PRESCALE, 26:22 TIMEOUT1,
  *                   19:15 TIMEOUT2, 1:0 RESET_MODE
  *
- * U-Boot arms it before every boot with CTRL = 0xe7c00000 (ENABLE,
- * PRESCALE 3, TIMEOUT1 31): a reset about 41.6 s after the last kick,
- * measured. odi_wdt_init() writes the same value, so the timeout never
- * shortens and the watchdog is never off between the loader and the
- * kicker. No stage-1 interrupt handler is installed: a stage-1 timeout
- * runs on into the hardware reset.
+ * U-Boot arms it before a trial boot only (boot_by_tryactive runs en_wdt,
+ * CTRL = 0xe7c00000: ENABLE, PRESCALE 3, TIMEOUT1 31, a reset about 41.6 s
+ * after the last kick, measured). boot_by_commit does not, and a committed
+ * boot reaches odi_wdt_init() with CTRL 0 (logged as "found ctrl", read on
+ * a stick): a committed image that hangs before this driver runs stays
+ * hung. odi_wdt_init() writes the en_wdt value on every boot, so from there
+ * on both paths run the same timeout. No stage-1 interrupt handler is
+ * installed: a stage-1 timeout runs on into the hardware reset.
  *
  * The userland deadline: unless something writes 1 to userland_ok within
  * ODI_WDT_USERLAND_DEADLINE_S of uptime, the deadline timer stops the NIC

@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Watchdog: `odi_wdt` logs the control value it found at init
+  (`found ctrl 0x...`), and the comments no longer say U-Boot arms the
+  watchdog before every boot. It does so before a trial boot only; a
+  committed boot reaches the kernel with the watchdog off (`found ctrl
+  0x00000000` on a stick), so a committed image that hangs before `odi_wdt`
+  starts is not reset. docs/KERNEL.md says so. Refs #379.
 - `nv commit` also sets `sw_tryactive=2` in both environment copies, in the
   same writes as `sw_commit` and `mupgrade_en`. U-Boot clears it only in the
   copy it saves as it starts a trial, so the other copy kept the value that
