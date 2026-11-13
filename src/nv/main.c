@@ -65,7 +65,8 @@
  * `commit slot` is the one operation that writes both: sw_commit=<slot> into
  * the primary, read back, then into the fallback, read back, then both read
  * again -- refusing any slot that is not the running one (root= in
- * /proc/cmdline) and not sw_active in the primary. commit.h has the
+ * /proc/cmdline) and not sw_active in the primary, and a trial queued in
+ * the primary (sw_tryactive other than 2). commit.h has the
  * sequence and why it is safe to interrupt. It is the one way to commit
  * both copies, so nobody has to act on the NOTE lines setenv prints.
  */
@@ -445,6 +446,9 @@ static int commit(const char *arg, int force)
 		else
 			out_fmt("nv: running slot is %d\n", (long)running);
 	}
+	if (rc == NVC_TRIAL_PENDING)
+		out("nv: the next reset would boot that trial, and a commit would drop it. Let it run\n"
+		    "nv: first, or cancel it with: nv setenv sw_tryactive 2\n");
 	if (r.repaired)
 		out_fmt("nv: copy %d was not valid; it was written first, from the new environment, and verified\n",
 			(long)r.repaired);

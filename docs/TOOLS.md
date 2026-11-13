@@ -1034,7 +1034,7 @@ in service.
     nv getenv [name]              print one variable, or all of them
     nv setenv [-c 1|2] name value set one (in the copy that was read, or copy 1|2; an invalid copy is repaired first)
     nv fallback [name]            read the OTHER copy, the one U-Boot falls back to
-    nv commit [--force] slot      sw_commit=slot and mupgrade_en=0 in BOTH copies, verified
+    nv commit [--force] slot      sw_commit=slot, mupgrade_en=0 and sw_tryactive=2 in BOTH copies, verified
 
 Reads and writes the redundant environment (mtd `env` and `env2`) with a
 CRC check and no vendor library. It is what arms and commits a trial boot:
@@ -1076,13 +1076,24 @@ bootloader ships it as 1, which makes it listen on the host link after the
 boot countdown for a firmware image sent by multicast and flash it with no
 authentication; 0 turns that listener off.
 
+It sets `sw_tryactive=2` (no trial pending) in both copies the same way.
+U-Boot writes 2 into the copy it saves as it starts a trial, but the other
+copy keeps the value that armed it, and if U-Boot ever had to fall back to
+that copy, the next boot would be a trial nobody asked for. A value other
+than 2 in the primary copy is different: U-Boot cleared it before this boot,
+so someone queued a trial since (`nv setenv sw_tryactive`, the web UI), and
+`commit` refuses it (`a trial is queued`), nothing written, rather than drop
+it. Let the trial run first, or cancel it with `nv setenv sw_tryactive 2`.
+`--force` does not override this.
+
 `commit` is the commit, as one operation: `sw_commit=<slot>` into the
 primary copy (the one U-Boot boots from), read back and compared byte for
 byte, then into the fallback copy the same way, then both read again. It
 refuses, before writing anything, a slot other than the one the kernel was
 booted from (the last `root=` in `/proc/cmdline`, the one the kernel
 mounted: the built-in slot-0 line comes before U-Boot's) or than `sw_active` in the
-primary, and an environment with no valid copy; it never writes
+primary, a trial queued in the primary (above), and an environment with
+no valid copy; it never writes
 `sw_active`. With one invalid copy it repairs it first (above), so a commit
 no longer needs a hand repair. A copy that already says so is not rewritten, so a
 second run writes nothing. It also refuses, naming the file, while the
