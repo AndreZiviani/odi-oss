@@ -27,6 +27,16 @@
 # name and renamed, so a reader never sees half of one. /var is tmpfs: the
 # state is rebuilt on every boot, never carried over.
 #
+# It also checks the OTHER slot, the one a reverted trial boots and the only
+# way back after a commit: `nv slotcheck`, a PARTIAL check (src/nv/slot.h)
+# that the kernel there still has a valid uImage header, data CRC and size
+# and the rootfs starts with a squashfs superblock. A slot that fails it
+# would not boot as it is, and the banner says so; one that passes is not
+# proven to boot. The check reads up to 1.3 MB of flash, so it runs AFTER
+# the state file is first written: trial-guard.sh waits only STATE_WAIT_S
+# for that file, and must not wait on the read. The file is then written
+# again with the result, still by rename.
+#
 # The running slot is read the way fwu.sh and nv read it: root=31:N in
 # /proc/cmdline, N the index of the MTD partition named r0 or r1.
 set -u
@@ -48,6 +58,9 @@ BREADCRUMBS_ON=${BREADCRUMBS_ON:-/etc/config/breadcrumbs.on}
 CONFIRM_ARP_FILE=${CONFIRM_ARP_FILE:-/etc/config/confirm-arp}
 # nv reads two 8 KB partitions; 10 s is generous.
 NV_TIMEOUT_S=${NV_TIMEOUT_S:-10}
+# nv slotcheck reads at most the 1.3 MB kernel partition and 96 bytes of the
+# rootfs one; NOR reads at well over 1 MB/s, so 30 s is a stuck read.
+SLOTCHECK_TIMEOUT_S=${SLOTCHECK_TIMEOUT_S:-30}
 LOG_WAIT_S=${LOG_WAIT_S:-30}
 
 running_slot() {
@@ -132,7 +145,51 @@ put() {
 	return 1
 }
 
-put "$STATE" "running=$running
+# The other slot: only when the running one is known, since that is what
+# "other" is measured from. Until the check below has answered, the file
+# carries what the last run this boot found for the same slot, or pending:
+# a refresh cut short (confd gives this script 12 s) must not wipe an
+# OTHER SLOT BROKEN it cannot replace.
+other=
+other_check=
+other_detail=
+other_notice=
+case $running in
+0 | 1)
+	other=$((1 - running))
+	other_check=pending
+	if [ "$first_run" = 0 ] && [ "$(sed -n 's/^other_slot=//p' "$STATE" 2>/dev/null | head -n 1)" = "$other" ]; then
+		prev=$(sed -n 's/^other_slot_check=//p' "$STATE" 2>/dev/null | head -n 1)
+		case $prev in
+		ok | fail | unknown)
+			other_check=$prev
+			other_detail=$(sed -n 's/^other_slot_detail=//p' "$STATE" 2>/dev/null | head -n 1) ;;
+		esac
+	fi ;;
+esac
+
+# The banner line for other_check and other_detail.
+set_other_notice() {
+	other_notice=
+	case $other_check in
+	fail)
+		# On a trial the other slot is where the next reboot goes; on a
+		# committed slot it is the only way back, through a trial armed
+		# by hand.
+		if [ "$next" = "$other" ]; then
+			what="and the next reboot boots it: until it is flashed again or slot $running is committed, a reboot leaves the stick on a slot that does not boot."
+		else
+			what="and there is no working slot to go back to. Flash it again (fwu.sh) to have one."
+		fi
+		other_notice="OTHER SLOT BROKEN: slot $other fails a partial check ($other_detail), so it would not boot as it is, $what Check again with: nv slotcheck $other && slot-state.sh" ;;
+	unknown)
+		other_notice="OTHER SLOT UNCHECKED: slot $other could not be checked ($other_detail). Check with: nv slotcheck $other" ;;
+	esac
+}
+set_other_notice
+
+write_state() {
+	put "$STATE" "running=$running
 sw_active=$active
 sw_tryactive=$tryactive
 primary_copy=$primary_copy
@@ -141,7 +198,11 @@ fallback_copy=$fallback_copy
 fallback_sw_commit=$commit_f
 next_boot=$next
 uncommitted=$uncommitted
+other_slot=$other
+other_slot_check=$other_check
+other_slot_detail=$other_detail
 "
+}
 
 # The development toggles, on a committed slot too: confirm-arp turns an
 # unreachable host into a reset every 120 s, and neither is meant to stay.
@@ -165,18 +226,52 @@ if [ -f "$BREADCRUMBS_ON" ]; then
 	aids="$aids*** DEV AID breadcrumbs.on: $BREADCRUMBS_ON is present (boot breadcrumbs and extra logging); remove it when you are not debugging.
 "
 fi
-if [ -n "$notice" ] || [ -n "$aids" ]; then
-	text="
+write_motd() {
+	if [ -n "$notice" ] || [ -n "$other_notice" ] || [ -n "$aids" ]; then
+		text="
 "
-	[ -z "$notice" ] || text="$text*** $notice
+		[ -z "$notice" ] || text="$text*** $notice
 "
-	put "$MOTD" "$text$aids
+		[ -z "$other_notice" ] || text="$text*** $other_notice
 "
-else
-	put "$MOTD" ""
+		put "$MOTD" "$text$aids
+"
+	else
+		put "$MOTD" ""
+	fi
+}
+
+write_state
+write_motd
+
+# Now the slow part. nv prints one line: "... passes the partial check ...",
+# "... FAILS the partial check: <reason>" (exit 1) or "... not checked:
+# <reason>" (exit 2). Anything else -- a timeout, an nv without the verb --
+# is an unknown, never a pass and never a failure.
+if [ -n "$other" ]; then
+	out=$(timeout "$SLOTCHECK_TIMEOUT_S" "$NV" slotcheck "$other" 2>/dev/null)
+	rc=$?
+	line=$(printf '%s\n' "$out" | head -n 1)
+	case "$rc:$line" in
+	"0:"*"passes the partial check"*)
+		other_check=ok
+		other_detail=${line#nv: } ;;
+	"1:"*"FAILS the partial check: "*)
+		other_check=fail
+		other_detail=${line#*FAILS the partial check: } ;;
+	"2:"*"not checked: "*)
+		other_check=unknown
+		other_detail=${line#*not checked: } ;;
+	*)
+		other_check=unknown
+		other_detail="nv slotcheck gave no answer (exit $rc)" ;;
+	esac
+	set_other_notice
+	write_state
+	write_motd
 fi
 
-[ -n "$notice" ] || exit 0
+[ -n "$notice" ] || [ "$other_check" = fail ] || exit 0
 # At boot this runs in the same breath as the syslogd respawn entry, and a
 # line logged before syslogd owns /dev/log is lost. Bounded: with syslogd
 # off the socket never appears and the line is dropped after LOG_WAIT_S. Only
@@ -187,5 +282,6 @@ while [ ! -e "$DEV_LOG" ] && [ "$i" -lt "$LOG_WAIT_S" ]; do
 	sleep 1
 	i=$((i + 1))
 done
-timeout 5 "$LOGGER" -t slot-state -p daemon.warning "$notice" 2>/dev/null || true
+[ -z "$notice" ] || timeout 5 "$LOGGER" -t slot-state -p daemon.warning "$notice" 2>/dev/null || true
+[ "$other_check" != fail ] || timeout 5 "$LOGGER" -t slot-state -p daemon.warning "$other_notice" 2>/dev/null || true
 exit 0

@@ -20,7 +20,11 @@ moment. It is not a boot stage: it reads the U-Boot environment (never
 writes it), records the running slot and whether it is committed in
 `/var/run/odi-slot`, and puts a notice in `/var/run/motd` (`/etc/motd` is a
 link to it) when it is not (`docs/FLASHING.md`, "Committing"). The running
-slot is the last `root=31:N` on the kernel command line. Nothing in the boot
+slot is the last `root=31:N` on the kernel command line. After that first
+write it runs a partial check of the other slot (`nv slotcheck`, up to 1.3 MB
+of flash read) and writes the state file again with the result, adding an
+`OTHER SLOT BROKEN` notice when that slot would not boot as it is
+(`docs/FLASHING.md`, "Checking the other slot"). Nothing in the boot
 waits for it, and it is safe to run again by hand: the web UI runs it after a
 commit to refresh the notice, and a run after the first of a boot does not
 wait for syslogd.

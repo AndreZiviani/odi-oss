@@ -389,6 +389,43 @@ stick sends it back to the other slot. The only way out is a boot that
 gets far enough for you to log in and point `sw_commit` back, or the UART.
 So commit only an image you have watched work.
 
+After a successful commit, `nv commit` warns when the last check of the
+slot it left behind (`nv slotcheck`, below, which `slot-state.sh` runs at
+boot) failed:
+
+    nv: commit 1: ...
+    nv: WARNING: slot 0, the other slot, failed a partial check (/var/run/odi-slot): kernel: uImage data CRC does not match (incomplete or changed)
+    nv: it would not boot as it is, so there is now no working slot to go back to.
+    nv: Flash it again (fwu.sh) to have one. Check again with: nv slotcheck 0
+
+It reads that result from the state file instead of the flash, and prints
+it after its result line: the web UI gives `nv commit` 10 s and reads that
+line first. The warning before you commit is the login banner (below).
+
+### Checking the other slot
+
+    nv slotcheck <slot>       # exit 0 passes, 1 fails, 2 could not check
+
+reads that slot's kernel partition (`k0`/`k1`) and the first 96 bytes of
+its rootfs partition (`r0`/`r1`) and checks what can be checked without
+booting it:
+
+- the kernel passes the uImage checks `bootm` makes on the magic, the
+  header CRC and the CRC of the data, and its data size fits the partition
+  (the whole kernel is read, up to 1.3 MB). The other header fields `bootm`
+  looks at (OS, architecture, image type, compression) are not checked;
+- the rootfs starts with a version 4.0 squashfs superblock whose block size
+  matches its `block_log` (at most 1 MiB) and whose `bytes_used` fits the
+  partition. The compressor is not checked: the stock firmware's LZMA
+  rootfs passes as well as this image's xz one.
+
+**This is a partial check, not proof that the slot boots.** It does not
+decompress the kernel or read the root filesystem past its superblock, and
+says nothing about what the image does once it runs. What it does catch is
+a slot that cannot boot at all: a kernel erased or half-written by an
+interrupted flash, kernel bytes that have changed, a rootfs partition with
+no filesystem on it. A slot that fails it would not boot as it is.
+
 ### The reminders
 
 Nothing commits a trial for you. So that an uncommitted image is never
@@ -413,6 +450,23 @@ so in three places:
   (`docs/TOOLS.md`, "Slot state");
 - **an alert**: `OdiUncommittedImage`, a warning once `gpon_uncommitted`
   has been 1 for 30 minutes (odi-sfp-exporter's `prometheus/alerts.yml`).
+
+The same script runs `nv slotcheck` on the other slot, on a committed slot
+too, after it has written the state file (`trial-guard.sh` waits only 60 s
+for that file, and the check reads up to 1.3 MB of flash). The result goes
+into the state file (`other_slot_check`), and a slot that fails gets a line
+of its own in the banner and in syslog:
+
+    *** OTHER SLOT BROKEN: slot 0 fails a partial check (kernel: uImage data
+    CRC does not match (incomplete or changed)), so it would not boot as it
+    is, and there is no working slot to go back to. Flash it again (fwu.sh)
+    to have one. Check again with: nv slotcheck 0 && slot-state.sh
+
+On a trial whose committed slot fails, the line says instead that the next
+reboot boots it. A slot that could not be read at all gets `OTHER SLOT
+UNCHECKED`; one that passes gets no line, since passing proves nothing more
+than the check above. The result is from the last run: after flashing the
+other slot, run `slot-state.sh` again.
 
 The banner also names the development files that are present, on a
 committed slot too: `/etc/config/confirm-arp` (with its address, or "no

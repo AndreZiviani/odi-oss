@@ -431,6 +431,7 @@ cat > $A/nv <<'NV'
 case "$1" in
 getenv)   printf 'Valid environment: 2\nsw_active=1\nsw_commit=0\nsw_tryactive=2\n\n' ;;
 fallback) printf 'Fallback environment: 1\nsw_active=0\nsw_commit=0\nsw_tryactive=1\n\n' ;;
+slotcheck) echo "nv: slot $2: FAILS the partial check: kernel: no uImage magic (erased or not a kernel)"; exit 1 ;;
 *) exit 1 ;;
 esac
 NV
@@ -443,8 +444,120 @@ banner=$(login_banner "TRIAL BOOT: running slot 1")
 echo "$banner" | grep -q "TRIAL BOOT: running slot 1, which is not committed (sw_commit=0 in both copies)" || \
 	fail "the login banner does not carry the TRIAL BOOT notice (got: $banner)"
 sshx 'logread | grep -q "slot-state: TRIAL BOOT: running slot 1"' || fail "the TRIAL BOOT notice did not reach syslog"
+sshx 'grep -qx "other_slot=0" /var/run/odi-slot && grep -qx "other_slot_check=fail" /var/run/odi-slot' || \
+	{ sshx 'cat /var/run/odi-slot' >&2 || true; fail "odi-slot does not record the failed check of slot 0"; }
+banner=$(login_banner "OTHER SLOT BROKEN")
+echo "$banner" | grep -q "OTHER SLOT BROKEN: slot 0 fails a partial check (kernel: no uImage magic (erased or not a kernel)), so it would not boot as it is, and the next reboot boots it" || \
+	fail "the login banner does not carry the OTHER SLOT BROKEN notice (got: $banner)"
+sshx 'logread | grep -q "slot-state: OTHER SLOT BROKEN: slot 0"' || fail "the OTHER SLOT BROKEN notice did not reach syslog"
 sshx 'rm -rf /tmp/ss'
-echo "  odi-slot records uncommitted=1, the login banner and syslog carry the TRIAL BOOT notice"
+echo "  odi-slot records uncommitted=1 and the failed check, the login banner and syslog carry both notices"
+
+say "scenario: nv slotcheck and the nv commit warning (real nv, partitions as files)"
+# The real MIPS nv, in a chroot whose /proc/mtd and /dev/mtdN are files: a
+# kernel partition with a uImage built here (zlib CRCs, the layout
+# src/nv/slot.h documents) and a rootfs one starting with a version 4
+# squashfs superblock. Slot 0 is whole, slot 1 has its kernel erased from the
+# middle on, the way an interrupted flash leaves it, and a rootfs partition
+# with nothing on it. src/nv/test/test_slot.c has every other shape.
+sshx 'test -x /bin/nv' || fail "no /bin/nv in the initramfs (make src builds it)"
+python3 - "$WORK/slotcheck" <<'PY'
+import os, struct, sys, zlib
+d = sys.argv[1]; os.makedirs(d, exist_ok=True)
+KPART, RPART = 0x14c000, 0x274000
+payload = bytes((i * 7 + 3) & 0xff for i in range(600000))
+h = bytearray(64)
+struct.pack_into('>IIIIIIIBBBB', h, 0, 0x27051956, 0, 0, len(payload), 0x80000000, 0x80000000,
+                 zlib.crc32(payload), 5, 5, 2, 3)
+struct.pack_into('>I', h, 4, zlib.crc32(bytes(h)))
+k = bytes(h) + payload
+open(f'{d}/k0', 'wb').write(k + b'\xff' * (KPART - len(k)))
+cut = 64 + 300000
+open(f'{d}/k1', 'wb').write(k[:cut] + b'\xff' * (KPART - cut))
+sb = bytearray(96)
+sb[0:4] = b'hsqs'
+struct.pack_into('<I', sb, 12, 1 << 18)
+struct.pack_into('<HH', sb, 20, 4, 18)
+struct.pack_into('<H', sb, 28, 4)
+struct.pack_into('<Q', sb, 40, 2000000)
+open(f'{d}/r0', 'wb').write(bytes(sb) + b'\xff' * (RPART - 96))
+open(f'{d}/r1', 'wb').write(b'\xff' * RPART)
+# Both environment copies already commit slot 0 (sw_tryactive=2 too), so
+# `nv commit 0` writes nothing and succeeds: the one success a chroot can
+# reach, since MEMERASE does not work on a file.
+pairs = b'sw_active=0\0sw_commit=0\0sw_tryactive=2\0mupgrade_en=0\0\0'
+for name, flags in (('env', 0), ('env2', 1)):
+    body = pairs + b'\0' * (0x2000 - 5 - len(pairs))
+    open(f'{d}/{name}', 'wb').write(struct.pack('>I', zlib.crc32(body)) + bytes([flags]) + body)
+PY
+sshx 'rm -rf /tmp/sc; mkdir -p /tmp/sc/proc /tmp/sc/dev /tmp/sc/bin && cp /bin/nv /tmp/sc/bin/nv'
+for f in k0 r0 k1 r1 env env2; do
+	sshx "cat > /tmp/sc/$f" < "$WORK/slotcheck/$f" || fail "could not copy $f to the guest"
+done
+sshx 'sh -s' <<'GUEST' > "$WORK/slotcheck.out" 2>&1 || { cat "$WORK/slotcheck.out" >&2; fail "nv slotcheck did not give the expected answers"; }
+set -e
+R=/tmp/sc
+printf 'mtd1: 00002000 00001000 "env"\nmtd2: 00002000 00001000 "env2"\nmtd4: 0014c000 00001000 "k0"\nmtd5: 00274000 00001000 "r0"\nmtd6: 0014c000 00001000 "k1"\nmtd7: 00274000 00001000 "r1"\n' > $R/proc/mtd
+mv $R/env $R/dev/mtd1; mv $R/env2 $R/dev/mtd2
+mv $R/k0 $R/dev/mtd4; mv $R/r0 $R/dev/mtd5; mv $R/k1 $R/dev/mtd6; mv $R/r1 $R/dev/mtd7
+rc=0; out=$(chroot $R /bin/nv slotcheck 0) || rc=$?
+echo "slot 0: rc=$rc $out"
+[ "$rc" = 0 ]
+echo "$out" | grep -q "slot 0: passes the partial check (uImage 600064 bytes, header and data CRC match; squashfs superblock, 2000000 bytes); this is not proof that it boots"
+rc=0; out=$(chroot $R /bin/nv slotcheck 1) || rc=$?
+echo "slot 1: rc=$rc $out"
+[ "$rc" = 1 ]
+echo "$out" | grep -q "slot 1: FAILS the partial check: kernel: uImage data CRC does not match (incomplete or changed)"
+# The kernel whole again: the empty rootfs partition is what fails now.
+cp $R/dev/mtd4 $R/dev/mtd6
+rc=0; out=$(chroot $R /bin/nv slotcheck 1) || rc=$?
+echo "slot 1, kernel restored: rc=$rc $out"
+[ "$rc" = 1 ]
+echo "$out" | grep -q "rootfs: no squashfs magic"
+# No partitions at all: not checked, which is not a failure.
+mkdir -p $R/proc.none && : > $R/proc.none/mtd
+mv $R/proc $R/proc.real && mv $R/proc.none $R/proc
+rc=0; out=$(chroot $R /bin/nv slotcheck 0) || rc=$?
+echo "no partitions: rc=$rc $out"
+[ "$rc" = 2 ]
+echo "$out" | grep -q "slot 0: not checked: kernel: could not read the partition"
+mv $R/proc $R/proc.none && mv $R/proc.real $R/proc
+# nv commit warns only after a commit that went through, and after its
+# result line, which is what confd reads first. No /proc/cmdline: refused
+# (running slot unknown), nothing written, no warning.
+rc=0; out=$(chroot $R /bin/nv commit 0 2>&1) || rc=$?
+echo "commit 0, running slot unknown: rc=$rc"; echo "$out"
+[ "$rc" = 1 ]
+echo "$out" | head -n 1 | grep -q "^nv: commit 0: "
+if echo "$out" | grep -q WARNING; then echo "a refused commit printed a warning"; exit 1; fi
+# Slot 0 running, already committed: success. The warning comes from the
+# result slot-state.sh recorded, not from the flash, and only for a failure
+# of the other slot.
+echo "console=ttyS0 root=31:5" > $R/proc/cmdline
+mkdir -p $R/var/run
+sum0=$(md5sum < $R/dev/mtd1); sum1=$(md5sum < $R/dev/mtd2)
+rc=0; out=$(chroot $R /bin/nv commit 0 2>&1) || rc=$?
+echo "commit 0, no state file: rc=$rc"; echo "$out"
+[ "$rc" = 0 ]
+echo "$out" | head -n 1 | grep -q "^nv: commit 0: both copies already commit this slot"
+if echo "$out" | grep -q WARNING; then echo "no state file, but a warning"; exit 1; fi
+printf 'running=0\nuncommitted=0\nother_slot=1\nother_slot_check=fail\nother_slot_detail=kernel: uImage data CRC does not match (incomplete or changed)\n' > $R/var/run/odi-slot
+rc=0; out=$(chroot $R /bin/nv commit 0 2>&1) || rc=$?
+echo "commit 0, slot 1 recorded as failed: rc=$rc"; echo "$out"
+[ "$rc" = 0 ]
+echo "$out" | head -n 1 | grep -q "^nv: commit 0: both copies already commit this slot"
+echo "$out" | grep -q "nv: WARNING: slot 1, the other slot, failed a partial check (/var/run/odi-slot): kernel: uImage data CRC does not match (incomplete or changed)"
+echo "$out" | grep -q "so there is now no working slot to go back to"
+[ "$(md5sum < $R/dev/mtd1)" = "$sum0" ]
+[ "$(md5sum < $R/dev/mtd2)" = "$sum1" ]
+sed -i 's/^other_slot_check=fail$/other_slot_check=ok/' $R/var/run/odi-slot
+out=$(chroot $R /bin/nv commit 0 2>&1)
+echo "commit 0, slot 1 recorded as ok: $out"
+if echo "$out" | grep -q WARNING; then echo "a passing other slot printed a warning"; exit 1; fi
+GUEST
+sed 's/^/    /' "$WORK/slotcheck.out"
+sshx 'rm -rf /tmp/sc'
+echo "  nv slotcheck: pass, failed data CRC, empty rootfs, no partitions; nv commit warns after its result line, from the recorded result"
 
 say "scenario: trial-guard.sh on that trial (real busybox, real /proc/net/tcp)"
 # The odi-slot just written says trial. The register is a file here (the
