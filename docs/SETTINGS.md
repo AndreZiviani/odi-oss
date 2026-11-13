@@ -115,6 +115,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `LAN_ENABLE_IP2` | Second management address | 1 adds a second address on `br0:2`, 0 removes it | `network.sh` | LIVE (a trial) |
 | `LAN_IP_ADDR2` | Second management IP | that address (192.168.100.1 is the stock default, and what both sticks store) | `network.sh` | LIVE (a trial) |
 | `LAN_SUBNET2` | Second management netmask | its netmask | `network.sh` | LIVE (a trial) |
+| `LAN_ROUTES` | Static routes of the management interface | Optional routes so the stick answers clients on other subnets without NAT, e.g. `default via 192.168.1.253` when a router holds the stick subnet at `192.168.1.253`. Up to 8 entries separated by commas, each `DEST via GW` (single spaces around `via`, extra spaces tolerated): `DEST` is `default` or an IPv4 `a.b.c.d/len` (len 0 to 32, host bits zero; `0.0.0.0/0` is `default`), `GW` an IPv4 host address inside the primary management subnet or, with `LAN_ENABLE_IP2` on, the second one (not the stick own address). Anything malformed, more than 8 entries, a destination twice or a gateway outside those subnets turns the whole key off, with one `network: LAN_ROUTES off: ...` line saying why. Empty or absent is no routes, the default, and the default route is allowed. Odi-only key, kept in `/etc/config/odi.conf`; IPv4 only. Applied by `network.sh` after the addresses, at boot and on `apply.sh network`, on the device that carries the primary address (`br0`, or `eth0` after the bridge fallback), never on another: the routes of `proto static` on that device are flushed and the listed ones installed with `ip route replace ... proto static`, so a re-apply drops what the key no longer lists and touches nothing else. Not applied in a safe-mode boot. A change is a trial, with the addresses ("Management address trial" below). The routes change what the stick answers, not what reaches it: nothing is reachable from the fibre whatever they say (docs/SWITCH.md, "PON port isolation") | `network.sh` | LIVE (a trial) |
 | `VLAN_CFG_TYPE` | VLAN config mode | 1 lets the manual tag through; anything else is no manual tag, and the OLT's class 171 rule drives the tagging when it has the supported shape ("VLAN handling" below) | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
@@ -158,7 +159,7 @@ The UI's reboot confirmation says which slot it comes back on.
 Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
 `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`,
 `OMCI_POTS_PORTS`, `OMCI_POTS_SLOT_ID`, `OMCI_VOIP_LINE_REPORT`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `VLAN_EAPOL_UNTAGGED`, `OMCI_TCONT_ALLOC_UNSET`, `ODI_LASER_UNVERIFIED`,
-`HOST_AUTONEG`, `HOST_SERDES`, `IGMP_SNOOPING`, `IGMP_PON_DROP`, `MLD_SNOOPING`, `GPON_DYING_GASP`, `GPON_KEEP_DISABLE` and `SFP_HOST_DDM` are the only
+`HOST_AUTONEG`, `HOST_SERDES`, `IGMP_SNOOPING`, `IGMP_PON_DROP`, `MLD_SNOOPING`, `GPON_DYING_GASP`, `GPON_KEEP_DISABLE`, `SFP_HOST_DDM` and `LAN_ROUTES` are the only
 keys this image has that the stock firmware never had, so they are not in `lastgood.xml` and
 `flash` (which edits keys already in the XML) could not save them. They live
 in `/etc/config/odi.conf` instead, a plain `KEY=value` file on the jffs2
@@ -1006,7 +1007,7 @@ the diagnostics bundle carries it (`host-link.txt`).
 
 A wrong management address is the one mistake that takes every way in with
 it, so a change of `LAN_IP_ADDR`, `LAN_SUBNET`, `LAN_ENABLE_IP2`,
-`LAN_IP_ADDR2` or `LAN_SUBNET2` is a trial, the way the host port is
+`LAN_IP_ADDR2`, `LAN_SUBNET2` or `LAN_ROUTES` is a trial, the way the host port is
 ("Host port auto-negotiation" above). The web UI (Config, Network, Save) or
 `mgmt-addr.sh try LAN_IP_ADDR=10.1.1.1` (`docs/TOOLS.md`) does not store the
 keys. One second later (so the answer leaves first) `network.sh addr` applies
@@ -1028,6 +1029,19 @@ addresses it had, and logs `event=trial_expired`.
   the netmask changed, or the second address went away) the client must be on
   the link of the new netmask. A confirm that cannot say where it arrived is
   refused.
+- **`LAN_ROUTES` is the sixth key of the trial.** `mgmt-addr.sh try
+  LAN_ROUTES="default via 192.168.1.253"` installs the routes in RAM (the
+  routes of `proto static` on the management device are flushed first) and
+  reverts them with the trial; `confirm` stores the key (an empty value
+  removes it). A trial that changes **only** `LAN_ROUTES` is confirmed from
+  **any** client, over any address: no address is new, and the confirm
+  arriving at all proves that the client still reaches the stick with the
+  routes in place, which is the one thing a route change risks. A trial that
+  changes an address key too keeps the rule above. `try` refuses a
+  `LAN_ROUTES` that `network.sh` would turn off (the reason is printed and
+  nothing starts), and it judges the stored routes against the new
+  addresses: moving the primary out of the subnet of a stored gateway is
+  refused until the same trial also changes or clears `LAN_ROUTES`.
 - **A reboot during the trial comes up on the old address.** The keys are
   written only by the confirm, and the trial state and file are in `/var/run`,
   which the boot starts empty; `network.sh` at the boot (and the watchdog

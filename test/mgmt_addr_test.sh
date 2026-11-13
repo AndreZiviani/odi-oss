@@ -21,7 +21,10 @@
 # the old address is refused, the same for a second-address-only and a
 # netmask-only change, every refusal of try, the SSH_CONNECTION fallback, a
 # key that does not stick, a roll-back that does not stick either, and the
-# stale lock.
+# stale lock. LAN_ROUTES, the sixth key: a trial that changes only it is
+# confirmed from any client, applied in RAM and reverted with the trial, a
+# value network.sh would turn off is refused by try, an address change
+# keeps its rule.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=test/host-flock.sh
@@ -76,6 +79,22 @@ echo "\$((up + \$1)).00 1.00" > "$T/uptime"
 [ -x "$T/hook" ] && [ "\$1" -gt 1 ] && { "$T/hook"; rm -f "$T/hook"; }
 exit 0
 EOF
+# ip: the static routes of network.sh, one file per device under $T/rt (route
+# show, flush and replace, always proto static), as in network_addr_test.sh.
+mkdir -p "$T/rt"
+cat > "$T/bin/ip" <<'STUB'
+#!/bin/sh
+[ "$1" = -4 ] && [ "$2" = route ] || exit 1
+verb=$3
+shift 3
+case $verb in
+show)    cat "$RTSTATE/$4.static" 2>/dev/null ;;
+flush)   [ "$1 $2 $3" = "proto static dev" ] || exit 1; rm -f "$RTSTATE/$4.static" ;;
+replace) [ "$2" = via ] && [ "$4" = dev ] && [ "$6" = proto ] && [ "$7" = static ] || exit 1
+         echo "$1 via $3" >> "$RTSTATE/$5.static" ;;
+*)       exit 1 ;;
+esac
+STUB
 chmod +x "$T/bin/"*
 
 export PATH="$T/bin:$PATH"
@@ -85,6 +104,7 @@ export UPTIME=$T/uptime KMSG=$T/kmsg LOG=$T/services.log SLEEP=$T/bin/sleep TIME
 export IFSTATE=$T/if IFCONFIG=$T/bin/ifconfig SYSNET=$T/sys
 export CS=$T/config/lastgood.xml HS=$T/config/lastgood_hs.xml CONF=$T/config/lastgood.xml HSCONF=$T/config/lastgood_hs.xml
 export ODI_CONF=$T/config/odi.conf TMPDIR_=$T
+export IPROUTE=$T/bin/ip RTSTATE=$T/rt
 export TRIAL_S=30 T
 echo '<Config Name="ROOT"/>' > "$HS"
 
@@ -116,8 +136,8 @@ boot_ifaces() {
 # A fresh boot: /var/run is a tmpfs, the uptime starts again, the interfaces
 # hold what the store says.
 newboot() {
-	rm -rf "$T/run" "$T/spawned" "$T/hook" "$T/lan-ip" "$T/kmsg"
-	mkdir -p "$T/run"
+	rm -rf "$T/run" "$T/spawned" "$T/hook" "$T/lan-ip" "$T/kmsg" "$T/rt" "$ODI_CONF"
+	mkdir -p "$T/run" "$T/rt"
 	echo "15.00 1.00" > "$T/uptime"
 	: > "$T/kmsg"
 	boot_ifaces
@@ -403,6 +423,125 @@ mkdir -p "$LOCKDIR"; echo $$ > "$LOCKDIR/pid"
 out=$(sh "$S" try LAN_IP_ADDR=10.1.1.1 2>&1)
 t "a lock held by a live process makes the caller give up, bounded" "busy" "$out"
 rm -rf "$LOCKDIR"
+
+
+# ---- LAN_ROUTES, the sixth key of the trial (odi.conf, applied by network.sh)
+rkey() { sed -n 's/^LAN_ROUTES=//p' "$ODI_CONF" 2>/dev/null | head -n 1; }
+rstat() { cat "$T/rt/br0.static" 2>/dev/null | tr '\n' ';'; }
+rsnap() { cat "$T/snap.rt" 2>/dev/null; }
+SNAPR='cat "$RTSTATE/br0.static" 2>/dev/null | tr "\n" ";" > "$T/snap.rt"'
+GW="default via 192.168.0.253"
+
+# only the routes change: applied in RAM, a confirm from ANY client stores it
+store 192.168.0.1 255.255.255.0 0 192.168.100.1
+newboot
+out=$(sh "$S" try LAN_ROUTES="$GW" 2>&1); rc=$?
+t "routes try: started, saying any client may confirm" "event=trial_started .*only the routes change: confirm from any client" "$out"
+t "routes try: the plan names the routes" "would set the static routes on br0: default via 192.168.0.253" "$out"
+t "routes try: the trial file carries LAN_ROUTES" "^LAN_ROUTES=$GW$" "$(grep '^LAN_ROUTES=' "$TRIAL")"
+t "routes try: nothing applied yet, nothing stored" "^; $" "$(rstat); $(rkey)"
+hook "$SNAPR; sh '$S' confirm 192.168.0.1 192.168.0.50 > '$T/confirm.out' 2>&1"
+run_trial
+t "routes confirm: the window had the route in RAM" "^default via 192.168.0.253;$" "$(rsnap)"
+t "routes confirm: from the OLD address (any client) is accepted" "^steady trial_confirmed$" "$(st phase) $(st event)"
+t "routes confirm: stored in odi.conf" "^$GW$" "$(rkey)"
+t "routes confirm: the route stays installed" "^default via 192.168.0.253;$" "$(rstat)"
+t "routes confirm: the addresses are as they were" "^$OLD none$" "$(iface br0) $(iface br0:4)"
+t "routes confirm: logged with what was stored" "event=trial_confirmed .*stored: LAN_ROUTES" "$(cat "$T/kmsg")"
+sh "$N" addr > /dev/null
+t "routes confirm: a later network.sh addr (a boot) keeps them" "^default via 192.168.0.253;$" "$(rstat)"
+
+# ... and from a client that is not even on the stick subnet, with no address at all
+store 192.168.0.1 255.255.255.0 0 192.168.100.1
+newboot
+sh "$S" try LAN_ROUTES="$GW" > /dev/null
+hook "sh '$S' confirm 172.16.0.9 172.16.0.50 > '$T/confirm.out' 2>&1"
+run_trial
+t "routes confirm: from an unrelated address is accepted" "^trial_confirmed$" "$(st event)"
+newboot
+sh "$S" try LAN_ROUTES="$GW" > /dev/null
+hook "sh '$S' confirm > '$T/confirm.out' 2>&1"
+run_trial
+t "routes confirm: with no address at all is accepted" "^trial_confirmed$" "$(st event)"
+
+# expiry and revert take the trial routes away, the stored ones come back
+store 192.168.0.1 255.255.255.0 0 192.168.100.1
+newboot
+printf 'SYSLOG_SERVER=x\nLAN_ROUTES=10.7.0.0/16 via 192.168.0.2\n' > "$ODI_CONF"
+sh "$N" addr > /dev/null
+t "routes: the stored routes are in place before the trial" "^10.7.0.0/16 via 192.168.0.2;$" "$(rstat)"
+sh "$S" try LAN_ROUTES="$GW" > /dev/null
+hook "$SNAPR"
+run_trial
+t "routes expiry: the window had the trial routes only" "^default via 192.168.0.253;$" "$(rsnap)"
+t "routes expiry: the stored routes are back" "^10.7.0.0/16 via 192.168.0.2;$" "$(rstat)"
+t "routes expiry: nothing was stored" "^10.7.0.0/16 via 192.168.0.2$" "$(rkey)"
+t "routes expiry: state steady, trial_expired" "^steady trial_expired$" "$(st phase) $(st event)"
+sh "$S" try LAN_ROUTES="$GW" > /dev/null
+hook "sh '$S' revert > '$T/revert.out' 2>&1; $SNAPR"
+run_trial
+sh "$S" settle > /dev/null
+t "routes revert: the trial routes are gone, the stored ones back" "^10.7.0.0/16 via 192.168.0.2;$" "$(rstat)"
+t "routes revert: nothing stored" "^10.7.0.0/16 via 192.168.0.2$" "$(rkey)"
+
+# an empty LAN_ROUTES is a change (clearing them), and removes the stored key
+newboot
+printf 'SYSLOG_SERVER=x\nLAN_ROUTES=10.7.0.0/16 via 192.168.0.2\n' > "$ODI_CONF"
+sh "$N" addr > /dev/null
+sh "$S" try LAN_ROUTES= > /dev/null
+hook "sh '$S' confirm 192.168.0.1 192.168.0.50 > '$T/confirm.out' 2>&1"
+run_trial
+t "routes cleared: the key is gone from odi.conf, other keys kept" "^none SYSLOG_SERVER=x$" "$(rkey | grep . || echo none) $(cat "$ODI_CONF")"
+t "routes cleared: no static route left" "^$" "$(rstat)"
+
+# an address change with routes: the address rule stands (a confirm on the old
+# address is refused, one on the new address stores both keys)
+store 192.168.0.1 255.255.255.0 0 192.168.100.1
+newboot
+out=$(sh "$S" try LAN_IP_ADDR=10.1.1.1 LAN_ROUTES="default via 10.1.1.254" 2>&1)
+t "routes+address try: confirm over the new address is asked for" "confirm over 10\.1\.1\.1 " "$out"
+hook "$SNAPR; sh '$S' confirm 192.168.0.1 192.168.0.50 > '$T/confirm.out' 2>&1; echo \$? > '$T/confirm.rc'"
+run_trial
+t "routes+address: the window had the route on the new subnet" "^default via 10.1.1.254;$" "$(rsnap)"
+t "routes+address: a confirm on the old address is refused" "not confirmed: it arrived on 192\.168\.0\.1" "$(cat "$T/confirm.out")"
+newboot
+sh "$S" try LAN_IP_ADDR=10.1.1.1 LAN_ROUTES="default via 10.1.1.254" > /dev/null
+hook "sh '$S' confirm 10.1.1.1 10.1.1.50 > '$T/confirm.out' 2>&1"
+run_trial
+t "routes+address: a confirm on the new address stores both" "^10.1.1.1 default via 10.1.1.254$" "$(key LAN_IP_ADDR) $(rkey)"
+t "routes+address: and the route stays" "^default via 10.1.1.254;$" "$(rstat)"
+
+# what network.sh would turn off, try refuses: nothing starts, nothing stored
+store 192.168.0.1 255.255.255.0 0 192.168.100.1
+newboot
+for bad in "default via" "default via 10.9.9.9" "10.0.0.1/8 via 192.168.0.2" "default via 192.168.0.2,default via 192.168.0.3" "default via 192.168.0.1"; do
+	out=$(sh "$S" try LAN_ROUTES="$bad" 2>&1); rc=$?
+	t "routes try refused: $bad" "^1 1 absent absent$" "$rc $(echo "$out" | grep -c 'network.sh refuses') $([ -e "$STATE" ] && echo present || echo absent) $([ -e "$TRIAL" ] && echo present || echo absent)"
+done
+t "routes try refused: names the reason" "LAN_ROUTES off: entry 1: gateway 10.9.9.9 is not a host address in the management subnets" "$(sh "$S" try LAN_ROUTES='default via 10.9.9.9' 2>&1)"
+# the stored routes are held to the new address too: a move out of their subnet is refused
+printf 'LAN_ROUTES=%s\n' "$GW" > "$ODI_CONF"
+out=$(sh "$S" try LAN_IP_ADDR=10.1.1.1 2>&1)
+t "an address change that leaves stored routes without a gateway is refused" "gateway 192.168.0.253 is not a host address" "$out"
+out=$(sh "$S" try LAN_IP_ADDR=10.1.1.1 LAN_ROUTES= 2>&1)
+t "  ... and goes through when the same trial clears them" "event=trial_started" "$out"
+sh "$S" revert > /dev/null; sh "$S" settle > /dev/null
+
+# the trial that changes nothing, and the key name check
+store 192.168.0.1 255.255.255.0 0 192.168.100.1
+newboot
+printf 'LAN_ROUTES=%s\n' "$GW" > "$ODI_CONF"
+out=$(sh "$S" try LAN_ROUTES="$GW" 2>&1)
+t "routes: the stored value asked for again is nothing to try" "nothing to try" "$out"
+out=$(sh "$S" status | tr '\n' ' ')
+t "status carries LAN_ROUTES" "new_LAN_ROUTES=" "$out"
+
+# a safe-mode boot: no trial, so no routes trial either
+newboot
+: > "$SAFE_FLAG"
+out=$(sh "$S" try LAN_ROUTES="$GW" 2>&1)
+t "safe mode: a routes trial is refused like any other" "safe-mode boot: no trial" "$out"
+rm -f "$SAFE_FLAG"
 
 echo
 echo "mgmt_addr_test: $pass passed, $fail failed"

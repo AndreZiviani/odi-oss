@@ -36,6 +36,27 @@ down) rm -f "$f" ;;
 esac
 STUB
 chmod +x "$T/ifconfig"
+# ip: the static routes, one file per device and kind under $T/rt. Only the
+# calls network.sh makes are understood: route show, flush and replace, always
+# with proto static. $dev.boot stands for routes of any other protocol, which
+# no call here may touch, and every call is logged.
+mkdir -p "$T/rt"
+cat > "$T/ip" <<'STUB'
+#!/bin/sh
+echo "$*" >> "$RTSTATE/calls"
+[ "$1" = -4 ] && [ "$2" = route ] || exit 1
+verb=$3
+shift 3
+case $verb in
+show)    cat "$RTSTATE/$4.static" 2>/dev/null ;;
+flush)   [ "$1 $2 $3" = "proto static dev" ] || exit 1; rm -f "$RTSTATE/$4.static" ;;
+replace) [ "$2" = via ] && [ "$4" = dev ] && [ "$6" = proto ] && [ "$7" = static ] || exit 1
+         echo "$1 via $3" >> "$RTSTATE/$5.static" ;;
+*)       exit 1 ;;
+esac
+STUB
+printf '#!/bin/sh\nshift\nexec "$@"\n' > "$T/timeout"
+chmod +x "$T/ip" "$T/timeout"
 echo "192.168.0.1 255.255.255.0" > "$T/if/br0"
 
 store() {   # store <LAN_IP_ADDR> <LAN_ENABLE_IP2> <LAN_IP_ADDR2>
@@ -53,7 +74,9 @@ XML
 }
 run() {
 	env IFSTATE="$T/if" IFCONFIG="$T/ifconfig" SYSNET="$T/sys" CONF="$T/cs.xml" \
-	    HSCONF="$T/hs.xml" OVERRIDE="$T/lan-ip" SAFE_FLAG="$T/safe-mode" sh "$N" "$@" 2>&1
+	    HSCONF="$T/hs.xml" OVERRIDE="$T/lan-ip" SAFE_FLAG="$T/safe-mode" \
+	    IPROUTE="${IPR:-$T/ip}" TIMEOUT="$T/timeout" ODI_CONF="$T/odi.conf" RTSTATE="$T/rt" TRIAL="$T/trial" \
+	    sh "$N" "$@" 2>&1
 }
 calls() { cat "$T/if/calls" 2>/dev/null | wc -l | tr -d ' '; }
 
@@ -255,6 +278,135 @@ echo "10.0.0.5" > "$T/lan-ip"
 store 192.168.0.1 0 192.168.100.1
 t "network.sh configured fails on an unusable /etc/config/lan-ip" "1" "$(echo 0.0.0.0 > "$T/lan-ip"; run configured > /dev/null; echo $?)"
 rm -f "$T/lan-ip"
+
+# ---- static routes (LAN_ROUTES, odi.conf): on the management device, after
+# the addresses, and only the routes of proto static there.
+mkdir -p "$T/sys/br0"
+rm -f "$T/if/br0:2" "$T/if/br0:3" "$T/if/br0:4" "$T/safe-mode" "$T/lan-ip" "$T/trial"
+echo "192.168.0.1 255.255.255.0" > "$T/if/br0"
+store 192.168.0.1 0 192.168.100.1
+rtd() { cat "$T/rt/br0.static" 2>/dev/null | tr '\n' ';'; }
+rtcalls() { cat "$T/rt/calls" 2>/dev/null | wc -l | tr -d ' '; }
+setroutes() { if [ -n "$1" ]; then printf 'SYSLOG_SERVER=x\nLAN_ROUTES=%s\n' "$1" > "$T/odi.conf"; else printf 'SYSLOG_SERVER=x\n' > "$T/odi.conf"; fi; }
+fresh_rt() { rm -rf "$T/rt"; mkdir -p "$T/rt"; }
+
+fresh_rt; rm -f "$T/odi.conf"
+out=$(run addr)
+t "routes: no odi.conf, no LAN_ROUTES: none, and the line says so" "network: no static routes" "$(echo "$out" | tail -n 1)"
+t "routes: nothing but the read was run" "0" "$(grep -cE 'flush|replace' "$T/rt/calls")"
+
+fresh_rt; setroutes ""
+run addr > /dev/null
+t "routes: an absent key is the default, no routes" "" "$(rtd)"
+
+fresh_rt; setroutes "default via 192.168.0.253"
+out=$(run addr -n)
+t "routes: the dry run says what it would set" "network: would set the static routes on br0: default via 192.168.0.253" "$(echo "$out" | tail -n 1)"
+t "routes: and only reads" "0" "$(grep -cE 'flush|replace' "$T/rt/calls")"
+out=$(run addr)
+t "routes: a default route is installed on br0" "default via 192.168.0.253;" "$(rtd)"
+t "routes: with ip route replace ... proto static" "1" "$(grep -c '^-4 route replace default via 192.168.0.253 dev br0 proto static$' "$T/rt/calls")"
+t "routes: and says so" "network: static routes on br0: default via 192.168.0.253" "$(echo "$out" | tail -n 1)"
+
+fresh_rt; setroutes "10.20.0.0/16  via   192.168.0.2 ,  default via 192.168.0.253"
+run addr > /dev/null
+t "routes: two routes, extra spaces tolerated" "10.20.0.0/16 via 192.168.0.2;default via 192.168.0.253;" "$(rtd)"
+
+# a re-apply flushes proto static on the device and nothing else
+fresh_rt; setroutes "10.20.0.0/16 via 192.168.0.2"
+echo "10.99.0.0/16 via 192.168.0.9 proto boot" > "$T/rt/br0.boot"
+echo "default via 172.16.0.1" > "$T/rt/eth0.static"
+run addr > /dev/null
+setroutes "172.16.0.0/12 via 192.168.0.3"
+run addr > /dev/null
+t "reapply: the old static route is gone, the new one is there" "172.16.0.0/12 via 192.168.0.3;" "$(rtd)"
+t "reapply: a route of another protocol on br0 is untouched" "10.99.0.0/16 via 192.168.0.9 proto boot" "$(cat "$T/rt/br0.boot")"
+t "reapply: a static route on another device is untouched" "default via 172.16.0.1" "$(cat "$T/rt/eth0.static")"
+t "reapply: every flush and replace names br0 and proto static" "0" "$(grep -E 'flush|replace' "$T/rt/calls" | grep -vcE 'proto static dev br0$|dev br0 proto static$')"
+setroutes ""
+run addr > /dev/null
+t "an emptied key removes the routes it had installed" "" "$(rtd)"
+t "  ... and still nothing else" "10.99.0.0/16 via 192.168.0.9 proto boot default via 172.16.0.1" "$(cat "$T/rt/br0.boot") $(cat "$T/rt/eth0.static")"
+
+# the whole key goes off for anything wrong, and the routes it had go with it
+eight="10.1.0.0/16 via 192.168.0.2,10.2.0.0/16 via 192.168.0.2,10.3.0.0/16 via 192.168.0.2,10.4.0.0/16 via 192.168.0.2,10.5.0.0/16 via 192.168.0.2,10.6.0.0/16 via 192.168.0.2,10.7.0.0/16 via 192.168.0.2,10.8.0.0/16 via 192.168.0.2"
+fresh_rt; setroutes "$eight"
+run addr > /dev/null
+t "routes: eight entries are accepted" "8" "$(grep -c . "$T/rt/br0.static")"
+bad_i=0
+while IFS= read -r bad; do
+	bad_i=$((bad_i + 1))
+	fresh_rt; echo "default via 192.168.0.253" > "$T/rt/br0.static"
+	setroutes "$bad"
+	out=$(run addr); rc=$?
+	t "routes off ($bad_i): $bad" "0 1 " "$rc $(echo "$out" | grep -c 'LAN_ROUTES off:') $(rtd)"
+done <<EOF
+default
+default via
+default via 192.168.0.253 extra
+default 192.168.0.253
+foo via 192.168.0.253
+default via foo
+default via 192.168.0.253,
+,default via 192.168.0.253
+default via 192.168.0.253,,10.0.0.0/8 via 192.168.0.253
+10.0.0.1/24 via 192.168.0.253
+10.0.0.0/33 via 192.168.0.253
+10.0.0.0/ via 192.168.0.253
+10.0.0.0 via 192.168.0.253
+10.0.0.0/08 via 192.168.0.253
+010.0.0.0/8 via 192.168.0.253
+10.0.0.0/8 via 192.168.0.253,default via 192.168.0.253,10.0.0.0/8 via 192.168.0.2
+default via 192.168.0.253,0.0.0.0/0 via 192.168.0.2
+$eight,10.9.0.0/16 via 192.168.0.2
+default via 192.168.5.1
+default via 192.168.0.1
+default via 192.168.0.0
+default via 192.168.0.255
+default via 0.0.0.0
+default via 192.168.0.253,10.0.0.0/8 via 10.0.0.1
+EOF
+
+# the second address is a subnet the stick holds when it is on
+fresh_rt; setroutes "default via 10.9.9.254"
+store 192.168.0.1 1 10.9.9.1
+run addr > /dev/null
+t "routes: a gateway in the second subnet (LAN_ENABLE_IP2=1) is accepted, on br0" "default via 10.9.9.254;" "$(rtd)"
+store 192.168.0.1 0 10.9.9.1
+rm -f "$T/if/br0:2"
+out=$(run addr)
+t "routes: the same gateway with LAN_ENABLE_IP2=0 turns the key off" "1 " "$(echo "$out" | grep -c 'LAN_ROUTES off:') $(rtd)"
+store 192.168.0.1 0 192.168.100.1
+
+# a safe-mode boot applies none, and touches none
+fresh_rt; setroutes "default via 192.168.0.253"
+echo "default via 192.168.0.250" > "$T/rt/br0.static"
+: > "$T/safe-mode"
+out=$(run addr)
+t "safe mode: LAN_ROUTES not applied, and the line says so" "1" "$(echo "$out" | grep -c 'safe-mode boot, LAN_ROUTES not applied')"
+t "safe mode: no ip call at all" "0" "$(rtcalls)"
+rm -f "$T/safe-mode"
+
+# an address trial reads the key from the trial file, and refuses a bad one
+fresh_rt; setroutes "default via 192.168.0.253"
+printf 'LAN_IP_ADDR=192.168.0.1\nLAN_SUBNET=255.255.255.0\nLAN_ENABLE_IP2=0\nLAN_IP_ADDR2=\nLAN_SUBNET2=\nLAN_ROUTES=10.5.0.0/16 via 192.168.0.7\nKEEP_IP=\nKEEP_MASK=\n' > "$T/trial"
+run addr > /dev/null
+t "trial: the routes of the trial file win over the store" "10.5.0.0/16 via 192.168.0.7;" "$(rtd)"
+printf 'LAN_IP_ADDR=192.168.0.1\nLAN_SUBNET=255.255.255.0\nLAN_ENABLE_IP2=0\nLAN_IP_ADDR2=\nLAN_SUBNET2=\nLAN_ROUTES=\nKEEP_IP=\nKEEP_MASK=\n' > "$T/trial"
+run addr > /dev/null
+t "trial: an empty LAN_ROUTES there is no routes, not the store" "" "$(rtd)"
+rm -f "$T/trial"
+run addr > /dev/null
+t "trial over: the stored routes are back" "default via 192.168.0.253;" "$(rtd)"
+printf 'LAN_IP_ADDR=192.168.0.1\nLAN_SUBNET=255.255.255.0\nLAN_ENABLE_IP2=0\nLAN_IP_ADDR2=\nLAN_SUBNET2=\nLAN_ROUTES=default via 10.0.0.1\nKEEP_IP=\nKEEP_MASK=\n' > "$T/trial"
+out=$(run addr -n); rc=$?
+t "trial dry run: a bad LAN_ROUTES is refused with exit 1" "1 1" "$rc $(echo "$out" | grep -c 'nothing changed')"
+rm -f "$T/trial"
+
+# no iproute2 in the image: nothing to run, said when routes were wanted
+fresh_rt; setroutes "default via 192.168.0.253"
+out=$(IPR=$T/none run addr)
+t "no ip binary: not applied, and the line says so" "1" "$(echo "$out" | grep -c 'LAN_ROUTES not applied')"
 
 t "an unknown mode is refused" "1" "$(run bogus > /dev/null; echo $?)"
 

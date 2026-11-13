@@ -4,8 +4,8 @@
 
 #
 # mgmt-addr.sh -- a change of the management addresses (LAN_IP_ADDR,
-# LAN_SUBNET, LAN_ENABLE_IP2, LAN_IP_ADDR2, LAN_SUBNET2) as a trial that
-# reverts by itself. A typo in an address is the one mistake that takes every
+# LAN_SUBNET, LAN_ENABLE_IP2, LAN_IP_ADDR2, LAN_SUBNET2) and of the static
+# routes beside them (LAN_ROUTES) as a trial that reverts by itself. A typo in an address is the one mistake that takes every
 # way in to the stick with it, so nothing here stores an address that has not
 # been seen to answer:
 #
@@ -26,8 +26,8 @@
 #                                   before it
 #     mgmt-addr.sh status           the state as key=value lines
 #
-# The old address stays up during the trial. network.sh addr reads the five
-# keys from the trial file (/var/run/mgmt-addr.trial) while it exists, moves
+# The old address stays up during the trial. network.sh addr reads the keys
+# (the five address keys and LAN_ROUTES) from the trial file (/var/run/mgmt-addr.trial) while it exists, moves
 # the primary to the new address and keeps the previous primary on its own
 # alias (br0:4); the second address follows the trial. So the way in that
 # worked stays there if the new one is wrong, and the page opened on it can
@@ -37,6 +37,18 @@
 # second address was turned off) the confirm must come from a client that is
 # on the link of the new netmask.
 #
+# LAN_ROUTES (up to 8 "DEST via GW" entries, docs/SETTINGS.md) is the sixth
+# key of the trial, the others kept as they are in the store: network.sh addr
+# installs the routes of the trial file in RAM (and flushes the routes of
+# proto static first), and the end of the trial puts the stored ones back.
+# A trial that changes ONLY LAN_ROUTES is confirmed from ANY client: no
+# address is new, and the confirm itself, arriving, proves that the client
+# still reaches the stick with the routes in place, which is the one thing a
+# route change risks. A trial that changes an address key too follows the rule
+# above. A LAN_ROUTES network.sh would turn off (malformed, a duplicate DEST, a
+# gateway outside the management subnets) is refused by try, so that
+# no such value is ever stored.
+#
 # A reboot during the trial undoes it. The keys are written only by confirm,
 # and the state and the trial file are in /var/run, so the boot reads the
 # store, which still holds the old addresses, and never the trial.
@@ -44,7 +56,8 @@
 # The safe mode (safe-mode.sh): a recovery boot is entered through the rescue
 # address (network.sh, br0:3) and the stored addresses are the thing being
 # repaired, from a client that is usually not on their network. There is no
-# trial in it: try refuses, and the web UI stores the keys directly then.
+# trial in it: try refuses, and the web UI stores the keys directly then. The
+# stored LAN_ROUTES are not applied in that boot either.
 #
 # Every wait is bounded (flash, network.sh) and every state change is one
 # rename of the state file, under a mkdir lock.
@@ -77,7 +90,8 @@ IO_S=${IO_S:-5}                 # one flash call
 NET_S=${NET_S:-15}              # one network.sh run
 LOCK_S=${LOCK_S:-10}            # waiting for the lock
 
-KEYS="LAN_IP_ADDR LAN_SUBNET LAN_ENABLE_IP2 LAN_IP_ADDR2 LAN_SUBNET2"
+KEYS="LAN_IP_ADDR LAN_SUBNET LAN_ENABLE_IP2 LAN_IP_ADDR2 LAN_SUBNET2 LAN_ROUTES"
+ADDR_KEYS="LAN_IP_ADDR LAN_SUBNET LAN_ENABLE_IP2 LAN_IP_ADDR2 LAN_SUBNET2"
 DEF_IP=192.168.1.1
 DEF_MASK=255.255.255.0
 
@@ -99,7 +113,7 @@ event() {
 	ev_msg=$*
 }
 
-# ---- the keys: five fixed names, held as old_NAME (the store, as the trial
+# ---- the keys: six fixed names, held as old_NAME (the store, as the trial
 # found it) and new_NAME (what the trial asks for)
 
 setv() { eval "$1=\$2"; }
@@ -135,8 +149,8 @@ load() {
 		trial_deadline) trial_deadline=$v ;;
 		prev_ip) prev_ip=$v ;;
 		prev_mask) prev_mask=$v ;;
-		old_LAN_IP_ADDR|old_LAN_SUBNET|old_LAN_ENABLE_IP2|old_LAN_IP_ADDR2|old_LAN_SUBNET2) setv "$k" "$v" ;;
-		new_LAN_IP_ADDR|new_LAN_SUBNET|new_LAN_ENABLE_IP2|new_LAN_IP_ADDR2|new_LAN_SUBNET2) setv "$k" "$v" ;;
+		old_LAN_IP_ADDR|old_LAN_SUBNET|old_LAN_ENABLE_IP2|old_LAN_IP_ADDR2|old_LAN_SUBNET2|old_LAN_ROUTES) setv "$k" "$v" ;;
+		new_LAN_IP_ADDR|new_LAN_SUBNET|new_LAN_ENABLE_IP2|new_LAN_IP_ADDR2|new_LAN_SUBNET2|new_LAN_ROUTES) setv "$k" "$v" ;;
 		event) ev=$v ;;
 		event_uptime) ev_up=$v ;;
 		message) ev_msg=$v ;;
@@ -222,6 +236,14 @@ mask_of() {
 # second_of PREFIX: the second address of the set, empty when it is off.
 second_of() {
 	if [ "$(getv "${1}LAN_ENABLE_IP2")" = 1 ]; then getv "${1}LAN_IP_ADDR2"; fi
+}
+
+# addr_changed: one of the five address keys differs from the store.
+addr_changed() {
+	for _k in $ADDR_KEYS; do
+		[ "$(getv "new_$_k")" = "$(getv "old_$_k")" ] || return 0
+	done
+	return 1
 }
 
 # fresh_addrs: the addresses the trial adds, the ones the stick did not answer
@@ -320,7 +342,12 @@ try() {
 	trial_deadline=$(( up + 1 + secs ))
 	phase=trial applied=0
 	fresh_addrs
-	event trial_started "trying for $secs s: confirm over${fresh:- a client on the new netmask} (mgmt-addr.sh confirm) or it reverts to ${prev_ip:-the stored addresses}"
+	if addr_changed; then
+		how="confirm over${fresh:- a client on the new netmask}"
+	else
+		how="only the routes change: confirm from any client"
+	fi
+	event trial_started "trying for $secs s: $how (mgmt-addr.sh confirm) or it reverts to ${prev_ip:-the stored addresses}"
 	put_in_place "$TRIAL" || { unlock; die "could not write $TRIAL"; }
 	save
 	unlock
@@ -390,6 +417,13 @@ settle() {
 # proves the new addresses. Sets why when it does not.
 via_check() {
 	_local=$1 _peer=$2
+	# Only LAN_ROUTES changed: no address is new and none can be proven by
+	# where the confirm arrived. The confirm arriving at all, from whichever
+	# client, is the proof: the routes are in place and the client reached
+	# the stick.
+	if ! addr_changed; then
+		return 0
+	fi
 	if [ -z "$_local" ]; then
 		why="it cannot be told which address it arrived on (over ssh, SSH_CONNECTION says; otherwise pass LOCAL)"
 		return 1
