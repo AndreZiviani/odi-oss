@@ -131,10 +131,15 @@ wait_count() {
 }
 # wait_done <previous id> <seconds>: the status file names a finished run
 # other than the previous one.
+# The file is read once per look: state and id read one after the other can
+# come from two runs, the done state of the last one and the id of the one
+# the signal just started, and the wait then ends before that run has.
 wait_done() {
 	i=0
 	while [ "$i" -lt $(( $2 * 10 )) ]; do
-		[ "$(st state)" = "done" ] && [ "$(st id)" != "$1" ] && return 0
+		_s=$(cat "$STATUS" 2>/dev/null)
+		[ "$(printf '%s\n' "$_s" | sed -n 's/^state=//p' | head -n 1)" = "done" ] &&
+			[ "$(printf '%s\n' "$_s" | sed -n 's/^id=//p' | head -n 1)" != "$1" ] && return 0
 		sleep 0.1
 		i=$((i + 1))
 	done
