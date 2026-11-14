@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Tests: `test/apply_test.sh` no longer fails now and then on a busy runner
+  ("identity: back in O5 with services"). Its stub omcid read the case
+  script while it ran, so a reload still in progress could read the
+  script of the next case from its old offset and overwrite the status
+  with a fragment of it. The stub now reads the script once per reload.
 - Docs: `QUALIFICATION.md` adds a second HSGQ v08 report at 2.5G against a
   MikroTik RB5009 (`HOST_SERDES=2500basex`, v1.15.0 and v1.16.0, warm and cold
   boot, a live try and confirm). Refs #369.

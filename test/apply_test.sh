@@ -53,6 +53,13 @@ trap 'reload' HUP
 reload() {
 	[ -f "$T/script" ] || return
 	n=\$((n + 1))
+	# Read the script once, before the first line is acted on. A HUP that
+	# arrives while a reload still runs nests this function, and the outer
+	# loop would go on reading the file the test has meanwhile rewritten
+	# for the next case, from its old offset: the tail of a new line becomes
+	# a phase of its own (state=6 changed=1) and replaces the done status.
+	local script
+	script=\$(cat "$T/script")
 	while read -r state changed action result keys dur o5 svc delay; do
 		[ "\$delay" -gt 0 ] && sleep "\$delay"
 		{
@@ -63,7 +70,7 @@ reload() {
 			echo "services=\$svc"
 		} > "$T/status.new"
 		mv "$T/status.new" "$T/status"
-	done < "$T/script"
+	done <<< "\$script"
 }
 # The sleep in the background and a wait on it: bash runs a trap only once
 # the foreground command ends, and wait returns at the signal, so the reload
