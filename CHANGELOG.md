@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- Docs: `QUALIFICATION.md` adds a second HSGQ v08 report at 2.5G against a
+  MikroTik RB5009 (`HOST_SERDES=2500basex`, v1.15.0 and v1.16.0, warm and cold
+  boot, a live try and confirm). Refs #369.
 - Slots: `nv slotcheck <slot>`, a partial check of a slot: the kernel
   partition holds a uImage whose magic, header CRC and data CRC are good and
   whose size fits the partition, and the rootfs partition starts with a
