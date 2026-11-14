@@ -254,7 +254,9 @@ Details that bite:
 - **The identity keys (`GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`,
   `GPON_ONU_MODEL`) need the UI's confirmation tick.** They cannot be
   regenerated: take a backup first.
-- **A key cannot be cleared from the UI**: `flash set` refuses an empty value.
+- **A key cannot be cleared from the UI.** Over ssh, `flash set KEY ""` stores
+  an empty value for a stock key (and removes an odi-only key); it does not
+  refuse it.
 
 ### VLAN handling: the stick tags, or the router does
 
