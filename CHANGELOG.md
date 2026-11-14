@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- GPON: `/proc/odi_gpon/drops`, a short record of the PON side around every
+  drop out of O5, frozen when it happens: the 60 s before and the 120 s
+  after, with PLOAM messages both ways (type and ONU-ID, no contents), ONU
+  state changes with their cause and side, LOS and LOF edges and the 1 s
+  sample (state, alarm bits, BIP error blocks). Four records, the first of
+  the boot kept and the latest three beside it, so a later drop never
+  overwrites the first. In the diagnostics bundle as
+  `pon/odi_gpon-drops.txt`. RAM only for now: a watchdog reset loses it.
+  Refs #390.
 - Tests: `test/apply_test.sh` no longer fails now and then on a busy runner
   ("identity: back in O5 with services"). Its stub omcid read the case
   script while it ran, so a reload still in progress could read the
