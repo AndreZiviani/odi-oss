@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- Docs: `SETTINGS.md` no longer says `flash set` refuses an empty value. It
+  stores one for a stock key and removes an odi-only key; only the web UI
+  cannot clear a key.
 - Docs: `QUALIFICATION.md` adds a second HSGQ v08 report at 2.5G against a
   MikroTik RB5009 (`HOST_SERDES=2500basex`, v1.15.0 and v1.16.0, warm and cold
   boot, a live try and confirm). Refs #369.
