@@ -611,6 +611,7 @@ uint32_t cli_state(void)
 			out_fmt("  %d more in " UNKNOWN_PATH "\n",
 				(long)(n - STATE_REJECTED_MAX));
 	}
+	rereg_show();
 	return OMCLI_OK;
 }
 

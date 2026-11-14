@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- omcid: re-registrations are counted, and held back after refusals. Every
+  re-registration a changed identity starts is one line in
+  `/etc/config/odi-reregister` (the newest 16: time, change or revert, result,
+  Deactivate_ONU-IDs, key names, never values). Three Deactivate_ONU-IDs
+  before O5, or O7, end the wait at once with `result=refused`; one or two do
+  not. After one refused change `apply.sh omci` warns; after two in a row
+  (within 24 h) omcid holds a changed identity back (`result=held`, the ONU
+  stays on the identity it runs) until `apply.sh omci --confirm`.
+  `apply.sh omci --revert` is the confirmation for going back, recorded as a
+  revert and skipped by the count. `omcli state` adds a `reregister` line,
+  `event=reload_done` a `refusals` field, the status file `refusals`,
+  `streak` and `today`. Refs #391.
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair
