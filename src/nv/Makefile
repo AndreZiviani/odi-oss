@@ -31,7 +31,7 @@ CFLAGS := -std=c11 -Os -Wall -Wextra \
 LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
            -Wl,--gc-sections $(HARDEN_LDFLAGS)
 
-OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/env.o $(BUILD)/commit.o $(BUILD)/slot.o $(BUILD)/main.o
+OBJS := $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/env.o $(BUILD)/commit.o $(BUILD)/slot.o $(BUILD)/guard.o $(BUILD)/main.o
 
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
@@ -53,7 +53,10 @@ $(BUILD)/commit.o: commit.c commit.h env.h | $(BUILD)
 $(BUILD)/slot.o: slot.c slot.h env.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: main.c env.h commit.h lock.h slot.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
+$(BUILD)/guard.o: guard.c guard.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/main.o: main.c env.h commit.h lock.h slot.h guard.h $(DIAG)/src/sys.h $(DIAG)/src/io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/flock_probe: test/flock_probe.c lock.h $(BUILD)/start.o $(BUILD)/io.o | $(BUILD)
@@ -83,7 +86,8 @@ size: nv
 # are tested on the host: the block against one built to the device layout,
 # `nv commit` against a fake pair of partitions that can fail a write or a
 # read-back at any step (test/test_commit.c), and the slot check against
-# kernel and rootfs images built in memory (test/test_slot.c). The partition I/O itself
+# kernel and rootfs images built in memory (test/test_slot.c), and the keys
+# setenv refuses without --force and its arguments (test/test_guard.c). The partition I/O itself
 # (MEMERASE, write(2) on /dev/mtdN) is not covered -- see the header of main.c.
 # The one syscall the writer lock adds, flock(2), is run for real under
 # qemu-user (test/flock_probe.c): two descriptions of one file conflict, and the
@@ -96,6 +100,8 @@ test:
 	 $(BUILD)/test_commit
 	@cc $(ODI_SAN_CFLAGS) -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_slot test/test_slot.c slot.c env.c && \
 	 $(BUILD)/test_slot
+	@cc $(ODI_SAN_CFLAGS) -std=c11 -Wall -Wextra -Werror -o $(BUILD)/test_guard test/test_guard.c guard.c && \
+	 $(BUILD)/test_guard
 	@$(RUN) make IN_CONTAINER=1 $(BUILD)/flock_probe >/dev/null
 	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/flock_probe'
 

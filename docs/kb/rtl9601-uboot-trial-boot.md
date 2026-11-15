@@ -18,7 +18,7 @@ all.
     nv setenv sw_tryactive <n>    # 0 or 1. Never 2.
     reboot
     # once satisfied it works:
-    nv setenv sw_commit <n>       # now it survives reboots
+    nv commit <n>                 # from slot n; now it survives reboots
 
 The bootloader env spells out the mechanism:
 

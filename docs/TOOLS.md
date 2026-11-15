@@ -1068,7 +1068,9 @@ in service.
 ### `nv` -- the U-Boot environment
 
     nv getenv [name]              print one variable, or all of them
-    nv setenv [-c 1|2] name value set one (in the copy that was read, or copy 1|2; an invalid copy is repaired first)
+    nv setenv [--force] [-c 1|2] [--] name [value]
+                                  set one, or unset it without a value (in the copy that was read, or copy 1|2;
+                                  an invalid copy is repaired first); the boot keys need --force, below
     nv fallback [name]            read the OTHER copy, the one U-Boot falls back to
     nv commit [--force] slot      sw_commit=slot, mupgrade_en=0 and sw_tryactive=2 in BOTH copies, verified
     nv slotcheck slot             a PARTIAL check of kN and rN: uImage magic, CRCs and size, squashfs superblock
@@ -1080,6 +1082,18 @@ CRC check and no vendor library. It is what arms and commits a trial boot:
 needs; with both copies valid, a power cut in that window leaves that copy
 invalid and U-Boot on the other, stale one. **Never write `sw_commit` before
 you have booted and verified a trial from the running image.**
+
+`setenv` refuses, before it reads or writes anything, the keys U-Boot boots
+by: `sw_commit`, `sw_active`, `mupgrade_en`, `bootcmd`, `boot_by_commit`,
+`boot_by_tryactive`, `b0`, `b1`, `set_act0`, `set_act1` and `en_wdt`, set or
+unset, and `sw_tryactive` unset or set to anything but 0, 1 or 2 (U-Boot
+trial-boots slot 1 for any value other than 0 and 2). The error says why and
+what to run instead where there is something: `nv commit <slot>` for
+`sw_commit`, a trial with `sw_tryactive` for `sw_active`. `--force` (or `-f`)
+writes them anyway. `sw_tryactive` 0, 1 or 2 and `sw_version0/1` stay open:
+the web UI and `fwu.sh` write them. A name with `=` in it, or an empty one,
+is refused, since a name is matched up to its own end and `bootcmd=x` would
+otherwise reach `bootcmd`. `--` ends the options.
 
 When one copy is already invalid (a write cut by a power loss is how), `setenv`
 and `commit` repair it as part of the write: the new environment is built and
@@ -1975,7 +1989,7 @@ this repository:
   silently. `diag l2-table` itself only reads.
 - Reading an undecoded SoC register address with `devmem` can stall the bus
   until the watchdog resets the stick.
-- `nv setenv sw_commit` removes the trial-boot fallback; `flash_eraseall` on
+- `nv setenv --force sw_commit` removes the trial-boot fallback; `flash_eraseall` on
   the config partition erases the identity (`GPON_SN`, `ELAN_MAC_ADDR`,
   `MAC_KEY`) the line authenticates on.
 - `diag` fed from a stdin that never closes waits forever: give it a pipe or

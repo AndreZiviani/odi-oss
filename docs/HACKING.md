@@ -514,7 +514,7 @@ In order:
    image of ours also rebooted on purpose with `bdgconn-probe` there. A
    committed image of ours that never confirms loops every 120 s: if it is reachable
    inside that window, `echo 1 > /proc/odi_wdt/userland_ok` stops
-   this boot's reset, and `nv setenv sw_commit <the other slot>` gets you
+   this boot's reset, and `nv setenv --force sw_commit <the other slot>` gets you
    off it.
 6. **Both slots unbootable**: the board UART is the only way in. Every rule
    above exists to keep you from here.

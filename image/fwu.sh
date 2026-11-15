@@ -177,7 +177,8 @@ case "$commit" in
 		echo "fwu: sw_commit is $slot, the slot being written. REFUSING." >&2
 		echo "     A failed trial would revert into this image rather than" >&2
 		echo "     away from it. Point sw_commit at the running slot first:" >&2
-		echo "       nv setenv sw_commit $running" >&2
+		echo "       nv commit $running" >&2
+		echo "     (a stock nv has no commit: nv setenv sw_commit $running)" >&2
 		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
 		echo "fwu: FWU_FORCE=1 -- writing anyway, with no good revert target" >&2
 	else
@@ -208,9 +209,9 @@ case "$alt" in
 		echo "     boot -- it is the one after an interrupted nv setenv, and" >&2
 		echo "     boot_by_commit never runs en_wdt, so a hung image hangs" >&2
 		echo "     forever rather than being reset. REFUSING." >&2
-		echo "     Make the two copies agree first -- a plain setenv writes" >&2
-		echo "     back the copy it read, so name the other one:" >&2
-		echo "       nv setenv -c <1|2> sw_commit $running" >&2
+		echo "     Make the two copies agree first; nv commit writes the one" >&2
+		echo "     that differs:" >&2
+		echo "       nv commit $running" >&2
 		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
 		echo "fwu: FWU_FORCE=1 -- writing anyway, with a bad fallback" >&2
 	else

@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- nv: `setenv` refuses the keys U-Boot boots by unless `--force` (or `-f`)
+  is given: `sw_commit`, `sw_active`, `mupgrade_en`, `bootcmd`,
+  `boot_by_commit`, `boot_by_tryactive`, `b0`, `b1`, `set_act0`, `set_act1`
+  and `en_wdt`, set or unset, and `sw_tryactive` unset or other than 0, 1 or
+  2, which U-Boot reads as a trial of slot 1. It refuses before it reads or
+  writes a copy, says why and names what to run instead (`nv commit` for
+  `sw_commit`). `sw_tryactive` 0, 1, 2 and `sw_version0/1` stay open for the
+  web UI and `fwu.sh`. A name with `=` in it, which would reach the entry
+  before it, and an empty one are refused; `--` ends the options. The hints in `fwu.sh` and `docs/FLASHING.md` now
+  point a stale fallback `sw_commit` to `nv commit <running slot>`, and
+  setenv's NOTE line adds it. Issue #414.
 - diag: a last input line without a newline is read as it stands. Before, a
   line shorter than the one before it kept the end of that line, so a batch
   that ended on `exit` without a newline ran `exitget ...` instead.
