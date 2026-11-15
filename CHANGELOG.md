@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- OMCI: `omcli check` derives queue ownership and ordering from the current
+  MIB, so a pending T-CONT or priority change is reported as a difference
+  instead of accepting the old programmed queue map.
+
 - OMCI: `omcli check` compares the MIB with what the chip holds and prints
   one line per object, `ok` or what differs: each T-CONT's Alloc-ID against
   its CAM row, enable bit and queue mask; each upstream queue's type,

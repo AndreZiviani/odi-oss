@@ -96,6 +96,9 @@ $(BUILD)/mcastvlan_test: ../test/mcastvlan_test.c ../mcastvlan.h ../extvlan.h \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o
 
 # Real downstream ownership paths, with fault injection at the command boundary.
+$(BUILD)/qos_check_test: ../test/qos_check_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
+	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ $^
+
 $(BUILD)/downstream_ownership_test: ../test/downstream_ownership_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
 
@@ -152,11 +155,12 @@ size: cap
 	@$(RUN) sh -c 'ls -l $(BIN); $(CROSS)size $(BIN)'
 
 test: image
-	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/downstream_ownership_test $(BUILD)/service_ownership_test $(BUILD)/mib_sync_test
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/downstream_ownership_test $(BUILD)/service_ownership_test $(BUILD)/mib_sync_test $(BUILD)/qos_check_test
 	@$(RUN) qemu-mips-static $(BUILD)/extvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/mcastvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/downstream_ownership_test
 	@$(RUN) qemu-mips-static $(BUILD)/service_ownership_test
+	@$(RUN) qemu-mips-static $(BUILD)/qos_check_test
 	@$(RUN) qemu-mips-static $(BUILD)/mib_sync_test
 
 clean:

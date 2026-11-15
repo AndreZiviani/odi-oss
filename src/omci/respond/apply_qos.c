@@ -1701,6 +1701,47 @@ static char chk_cam_buf[4096];
 static struct pp_ponq chk_ponq;
 static struct pp_cam chk_cam;
 static unsigned chk_ok, chk_bad, chk_skip;
+static struct us_queue chk_mib_q[USQ_MAX];
+static unsigned chk_mib_n;
+
+/* The queues the current MIB asks the rebuild to place, with the same
+ * reference limit, deduplication and ordering. No programming or changes
+ * to the last successfully programmed map. */
+static void chk_queue_plan(void)
+{
+	const struct omci_class *ctp = find_class(OMCI_ME_GEM_PORT_CTP);
+	unsigned nf = 0;
+
+	chk_mib_n = 0;
+	for (int i = 0; ctp && i < MIB_ROWS && nf < FLOW_MAX; i++) {
+		const struct mib_row *r = mib_row_at(i);
+		uint32_t dir;
+
+		if (!r || r->classId != OMCI_ME_GEM_PORT_CTP)
+			continue;
+		dir = row_u32(r, ctp, 3);
+		if (dir != 1 && dir != 3)
+			continue;
+		nf++;
+		us_queue_add(chk_mib_q, &chk_mib_n, (uint16_t)row_u32(r, ctp, 4));
+	}
+	for (unsigned i = 0; i < chk_mib_n; i++) {
+		chk_mib_q[i].ordinal = 0;
+		for (unsigned j = 0; j < chk_mib_n; j++)
+			if (chk_mib_q[j].tcontMe == chk_mib_q[i].tcontMe &&
+			    us_queue_before(&chk_mib_q[j], &chk_mib_q[i]))
+				chk_mib_q[i].ordinal++;
+	}
+}
+
+static const struct us_queue *chk_mib_queue(uint16_t meId)
+{
+	for (unsigned i = 0; i < chk_mib_n; i++)
+		if (chk_mib_q[i].meId == meId)
+			return &chk_mib_q[i];
+	return 0;
+}
+
 
 /* gpon_proc_path with its last component replaced by `name`. */
 static void chk_path(char *out, unsigned cap, const char *name)
@@ -1811,7 +1852,7 @@ static void chk_queues(void)
 	for (unsigned i = 0; i < usq_hw_n; i++) {
 		const struct us_queue *h = &usq_hw[i];
 		const struct omci_class *ctp = find_class(OMCI_ME_GEM_PORT_CTP);
-		struct us_queue m;
+		const struct us_queue *m = chk_mib_queue(h->meId);
 		uint32_t wcir = 0, wpir = 0, ww, raw_cir, raw_pir;
 		int pq = chk_pq(h->tcontIndex, h->ordinal);
 
@@ -1823,8 +1864,15 @@ static void chk_queues(void)
 			continue;
 		}
 		out_fmt(" (queue %d)", (long)pq);
-		if (!us_queue_decode(h->meId, &m)) {
-			out(": differs: mib has no such upstream queue");
+		if (!m) {
+			out(": differs: mib no longer references this upstream queue");
+			chk_line(0);
+			continue;
+		}
+		if (m->tcontMe != h->tcontMe || m->ordinal != h->ordinal) {
+			out_fmt(": differs: mib t-cont %04x ordinal %d, programmed t-cont %04x ordinal %d",
+				(long)m->tcontMe, (long)m->ordinal,
+				(long)h->tcontMe, (long)h->ordinal);
 			chk_line(0);
 			continue;
 		}
@@ -1841,7 +1889,7 @@ static void chk_queues(void)
 				wpir = p;
 			}
 		}
-		ww = m.wrr ? us_queue_weight(&m) : 1;
+		ww = m->wrr ? us_queue_weight(m) : 1;
 		if (ww > CHK_WEIGHT_MAX)
 			ww = CHK_WEIGHT_MAX;
 		raw_cir = chk_rate_raw(wcir);
@@ -1853,9 +1901,9 @@ static void chk_queues(void)
 		} else if (!chk_ponq.q[pq].seen) {
 			out(": differs: chip lists no such queue");
 			chk_line(0);
-		} else if (chk_ponq.q[pq].wfq != m.wrr || chk_ponq.q[pq].weight != ww) {
+		} else if (chk_ponq.q[pq].wfq != m->wrr || chk_ponq.q[pq].weight != ww) {
 			out_fmt(": differs: mib %s weight %d, chip %s weight %d",
-				m.wrr ? "wfq" : "strict", (long)ww,
+				m->wrr ? "wfq" : "strict", (long)ww,
 				chk_ponq.q[pq].wfq ? "wfq" : "strict",
 				(long)chk_ponq.q[pq].weight);
 			chk_line(0);
@@ -1884,7 +1932,7 @@ static void chk_us_flows(void)
 		seen[i] = 0;
 	for (int k = 0; ctp && k < MIB_ROWS; k++) {
 		const struct mib_row *r = mib_row_at(k);
-		const struct us_queue *b;
+		const struct us_queue *b, *m;
 		const struct us_tcont_prog *tp;
 		uint16_t port;
 		uint32_t dir;
@@ -1906,10 +1954,14 @@ static void chk_us_flows(void)
 		seen[slot] = 1;
 		out_fmt(" flow %d", (long)slot);
 		b = us_queue_bound((uint16_t)row_u32(r, ctp, 2), (uint16_t)row_u32(r, ctp, 4));
+		m = b ? chk_mib_queue(b->meId) : 0;
 		tp = b ? tc_prog_find(b->tcontMe) : 0;
 		pq = tp ? chk_pq(tp->index, b->ordinal) : -1;
 		if (!b || !tp) {
 			out(": differs: mib names a queue omcid has not programmed");
+			chk_line(0);
+		} else if (!m || m->tcontMe != b->tcontMe || m->ordinal != b->ordinal) {
+			out(": differs: mib queue mapping has changed since programming");
 			chk_line(0);
 		} else if (pq < 0) {
 			out(": differs: no queue block for its queue in the chip");
@@ -1973,6 +2025,7 @@ uint32_t qos_check(void)
 	if (!apply_hw)
 		out("programming is off: omcid sent nothing, so differences are expected\n");
 	chk_ok = chk_bad = chk_skip = 0;
+	chk_queue_plan();
 	chk_tconts();
 	chk_queues();
 	chk_us_flows();
