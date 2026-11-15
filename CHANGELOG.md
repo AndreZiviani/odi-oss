@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- diag: a last input line without a newline is read as it stands. Before, a
+  line shorter than the one before it kept the end of that line, so a batch
+  that ended on `exit` without a newline ran `exitget ...` instead.
 - omcid: a MIB reset loop is named instead of left to be counted in the log.
   Three or more MIB resets from the OLT within 600 s log one
   `event=mib_reset_loop state=start` (warning), and `state=end` after 600 s
