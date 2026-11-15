@@ -5,6 +5,26 @@ listed here.
 
 ## Unreleased
 
+- Diagnostics bundle: a scrub that fails on any file now fails the bundle
+  instead of letting that file out unscrubbed, and `diag-bundle.sh` runs
+  with a BSD sed and awk (macOS): the scrub no longer uses `sed -i`, and the
+  config redaction passes its key list to awk on one line, where a BSD awk
+  had refused it and left the config copies empty. The bundle runs under
+  `LC_ALL=C`, so a secret that is not valid UTF-8 still reaches the scrub.
+- Diagnostics: label O5 departures and LOS/LOF counts as events in the
+  retained log, not totals since boot. A wrapped or rate-limited dmesg
+  must not turn missing history into an all-clear.
+
+- Diagnostics bundle: two files at the top for whoever reads it. `README.md`
+  names the image, says what is redacted and whether the identity is masked,
+  maps questions to files and lists what a report has to add (ISP, router,
+  what changed). `SUMMARY.txt` is one screen of facts from the bundle files:
+  ONU state and its last change, O5 drops in the retained log by `cause`, LOS and LOF,
+  alarms set now, the `omcli state` reset and drop counts, optics, why the
+  previous boot ended, the safe-mode boot count and the failed steps. The new
+  `diag-summary.sh` writes it and reads only the bundle, so it also runs on a
+  PC against an unpacked bundle. The diag batch adds the five `pon get
+  transceiver` reads the exporter makes on every scrape.
 - Identity: the first boot of this image copies the provisioning identity
   (`GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`, `GPON_ONU_MODEL`, the four
   LOID keys, `ONU_HW_VERSION`, `MAC_KEY`, `PON_VENDOR_ID`,
