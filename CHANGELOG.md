@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- OMCI tooling: `src/omci/model/g988.json` is a fact table of ITU-T G.988
+  (11/2022) with Amendments 1 and 2 for 75 managed-entity classes: clause,
+  creation model, actions, and per attribute its width, access, requirement
+  and AVC, table and PM flags. It holds no wording of the Recommendation.
+  `tools/g988-extract.py` produces it from the PDF on a developer machine;
+  the PDF is not stored here.
+
 - Tests: `test/apply_test.sh` no longer fails now and then on a busy runner
   ("identity: back in O5 with services"). Its stub omcid read the case
   script while it ran, so a reload still in progress could read the
