@@ -5,6 +5,34 @@ listed here.
 
 ## Unreleased
 
+- OMCI tooling: `tools/omci-libcheck` holds `src/omci/model/g988.json`
+  against the G.988 definitions of omci-lib-go, a second reading of the
+  Recommendation by an unrelated parser. With omci-lib-go v2.2.4 the two
+  agree on 733 of the 736 attributes both define; in the other three the
+  Recommendation says what the fact table says. The library lacks class 330 and six attributes
+  G.988 added later. Developer tool only:
+  it needs Go and the network, nothing of it ships, and it is not part of
+  `make test`.
+
+- OMCI tooling: `tools/mib-gen.py` generates `omci_mib.{c,h,json}` from the
+  G.988 fact table and a device profile (`src/omci/model/profile.json`),
+  without a stock root filesystem. The profile holds what G.988 does not
+  define (names, row sizes, the private classes) and every deviation from the
+  derived value as an override with a classification and a reason;
+  `tools/mib-compare.py` lists them. The C tables, declarations and macros
+  are byte-identical; the header comments no longer name vendor symbols, and
+  the JSON drops the `oper` and `extra` keys, which nothing read. omcid
+  behaviour is unchanged. `test/omci_mib_gen_test.sh` runs in
+  `make test-host` and fails when the generated files differ from what the
+  sources produce.
+
+- OMCI tooling: `src/omci/model/g988.json` is a fact table of ITU-T G.988
+  (11/2022) with Amendments 1 and 2 for 75 managed-entity classes: clause,
+  creation model, actions, and per attribute its width, access, requirement
+  and AVC, table and PM flags. It holds no wording of the Recommendation.
+  `tools/g988-extract.py` produces it from the PDF on a developer machine;
+  the PDF is not stored here.
+
 - VLAN: with `VLAN_EAPOL_UNTAGGED=1` the stick now takes the tag off every
   priority-tagged frame (VID 0, any priority) the OLT sends, so EAPOL that
   comes down as VID 0 priority 7 reaches the router untagged. Before, the
