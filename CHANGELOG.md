@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- nv: an environment block whose CRC matches but whose last pair has no NUL
+  before the end of the block, or whose list lacks the closing empty string,
+  is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair
+  past the end of the block. U-Boot never writes one; it takes a corrupted
+  block whose CRC still matches.
 - omcid: a MIB reset loop is named instead of left to be counted in the log.
   Three or more MIB resets from the OLT within 600 s log one
   `event=mib_reset_loop state=start` (warning), and `state=end` after 600 s
