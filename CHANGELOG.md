@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- image: `/sbin/bridge` from iproute2 is no longer built or shipped. No
+  script, daemon, the web UI or the exporter calls it; `br0` is set up with
+  the busybox `brctl` applet, and `ip` stays. The v1.16.0 binary was 256,452
+  bytes, 84,472 with xz. Issue #423.
 - docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
   mapper with one target forwards the tagged frames of a priority the mapper
   sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.

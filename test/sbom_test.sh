@@ -28,7 +28,7 @@ done
 for n in index.html app.js keys.tsv; do
 	echo "$n bytes" > "$T/assets/$n"; cp "$T/assets/$n" "$R/etc/confd/$n"
 done
-for n in dropbearmulti ip bridge; do echo "$n bytes" > "$T/pkg/$n"; cp "$T/pkg/$n" "$R/sbin/$n"; done
+for n in dropbearmulti ip; do echo "$n bytes" > "$T/pkg/$n"; cp "$T/pkg/$n" "$R/sbin/$n"; done
 echo busybox bytes > "$T/busybox"; cp "$T/busybox" "$R/bin/busybox"
 echo uimage bytes > "$T/uImage"
 cp rootfs/skeleton/lib/firmware/odi/*.bin "$R/lib/firmware/odi/"

@@ -86,7 +86,7 @@ missing=""
 [ -f "$BUSYBOX" ] || missing="$missing
   busybox        make busybox (at $BUSYBOX)"
 if [ "${ALLOW_PARTIAL:-0}" != 1 ]; then
-	for p in dropbearmulti ip bridge; do
+	for p in dropbearmulti ip; do
 		[ -f "$PKG_DIR/$p" ] || missing="$missing
   $p$(printf '%*s' $((15 - ${#p})) '')make packages (at $PKG_DIR)"
 	done
@@ -215,17 +215,15 @@ elif [ "${ALLOW_PARTIAL:-0}" = 1 ]; then
 else
 	die "dropbearmulti missing at $PKG_DIR -- run 'make packages', or set ALLOW_PARTIAL=1 to build without it"
 fi
-for b in ip bridge; do
-	if [ -f "$PKG_DIR/$b" ]; then
-		install -m 755 "$PKG_DIR/$b" "$STAGE/sbin/$b"
-		printf '  %-10s %8d\n' "$b" "$(size "$PKG_DIR/$b")"
-		pkg=$((pkg + 1))
-	elif [ "${ALLOW_PARTIAL:-0}" = 1 ]; then
-		echo "  $b  MISSING at $PKG_DIR -- ALLOW_PARTIAL=1, shipping without it"
-	else
-		die "$b missing at $PKG_DIR -- run 'make packages', or set ALLOW_PARTIAL=1 to build without it"
-	fi
-done
+if [ -f "$PKG_DIR/ip" ]; then
+	install -m 755 "$PKG_DIR/ip" "$STAGE/sbin/ip"
+	printf '  %-10s %8d\n' ip "$(size "$PKG_DIR/ip")"
+	pkg=$((pkg + 1))
+elif [ "${ALLOW_PARTIAL:-0}" = 1 ]; then
+	echo "  ip  MISSING at $PKG_DIR -- ALLOW_PARTIAL=1, shipping without it"
+else
+	die "ip missing at $PKG_DIR -- run 'make packages', or set ALLOW_PARTIAL=1 to build without it"
+fi
 [ "$pkg" = 0 ] && echo "  none -- run make packages"
 
 # What this image is made of, on the image. /etc/odi-build lists every piece
@@ -263,7 +261,7 @@ say "build manifest"
 		[ -f "$STAGE/bin/$b" ] &&
 			echo "bin:       $b  $(size "$STAGE/bin/$b") bytes  md5 $(md5_of "$STAGE/bin/$b")"
 	done
-	for b in dropbearmulti ip bridge; do
+	for b in dropbearmulti ip; do
 		[ -f "$STAGE/sbin/$b" ] &&
 			echo "pkg:       $b  $(size "$STAGE/sbin/$b") bytes  md5 $(md5_of "$STAGE/sbin/$b")"
 	done
