@@ -976,11 +976,11 @@ fields; an attribute that was never set still shows its zeros. `--secrets`
 omcid also keeps the contents of a Create or Set of those classes out of its
 log. The diag bundle never passes `--secrets`.
 
-`omcli frames` prints the last 1024 OMCI frames omcid received or sent,
+`omcli frames` prints the last 2048 OMCI frames omcid received or sent,
 oldest first, one line each: the time (stick clock, seconds and
 microseconds), `<-` for a frame from the OLT and `->` for one to it, and the
 bytes in hex, CRC included. Frames omcid dropped (bad CRC, extended device
-id) are there too. omcid keeps them in a fixed ring in RAM (60 KB), filled
+id) are there too. omcid keeps them in a fixed ring in RAM (120 KB), filled
 where it already receives and sends, so nothing else reads the channel and
 nothing is written until asked; after a reboot or a restart of omcid the
 ring starts empty. A MIB upload alone is a few hundred frames each way, so
@@ -1536,7 +1536,7 @@ Under `pon/`, the GPON and OMCI state a PON problem needs:
 | `odi_gpon-status.txt`, `odi_gpon-counters.txt`, `odi_gpon-flows.txt`, `odi_gpon-ploam.txt` | `/proc/odi_gpon/status`: ONU state, Alloc-IDs, alarm and state times; `counters`: the link counters; `flows`: the per-flow GEM counters; `ploam`: PLOAM totals and the ring (bodies withheld, below) |
 | `odi_omci.txt` | `/proc/odi_omci`: the OMCI channel counters |
 | `omcli_{state,provision,flows,tcont,conn,vlan}.txt` | `omcli`: what omcid holds and programmed; `vlan` is the VLAN handling (stick tags or transparent) and any `FwdOp` override of class 84 from `RTK_DEVINFO_SPECVER`, numbers only, so the bundle alone shows whether the override is in force |
-| `omci.pcap` | `omcli frames --pcap`: the last 1024 OMCI frames, masked (above), never `--full`; withheld when a secret or, unless `--full`, an identity value shows in it as text. Not scrubbed like the text files: the scrub would shift its records |
+| `omci.pcap` | `omcli frames --pcap`: the last 2048 OMCI frames, masked (above), never `--full`; withheld when a secret or, unless `--full`, an identity value shows in it as text. Not scrubbed like the text files: the scrub would shift its records |
 | `omcli_mib_<class>.txt` | `omcli mib <class>` for ONU-G, ONU2-G, PPTP Ethernet UNI, VEIP, the bridge and mapper classes, VLAN filtering and extended VLAN tagging, T-CONT, ANI-G, GEM ports and interworking points, priority queues, traffic schedulers and descriptors, multicast |
 
 The MIB classes are a fixed list, not the whole MIB: an OLT can push

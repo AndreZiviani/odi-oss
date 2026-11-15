@@ -33,14 +33,14 @@
  * shorter than 48 bytes) has everything after its header masked: there is
  * no layout to read it by.
  *
- * Size: FRAMES_RING records of 60 bytes, 60 KB of the 32 MB. A MIB upload
- * alone is a few hundred frames each way, so the ring holds the end of a
- * registration and what followed it, not a whole day; a capture is meant to
- * be taken right after the problem shows.
+ * Size: FRAMES_RING records of 60 bytes, 120 KB of the 32 MB. A
+ * registration on ISP2, MIB upload included, is about 900 frames, so the
+ * ring holds one whole and what followed it, not a whole day; a capture is
+ * meant to be taken right after the problem shows.
  */
 #include "omcid.h"
 
-#define FRAMES_RING 1024
+#define FRAMES_RING 2048
 #define MASK_BYTE   0xee
 
 /* Locally administered, and easy to filter on (eth.src == ...). */

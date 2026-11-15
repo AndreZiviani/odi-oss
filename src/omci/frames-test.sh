@@ -177,21 +177,24 @@ $Q cli/build/omcli frames --bogus > /dev/null 2>&1
 check "an unknown argument: status 1" "$?" "1"
 
 # --------------------------------------------------------- the ring wraps
-# 600 Gets of ONT data, answered: 1200 more frames, over the 1024 kept.
-f=/tmp/frames-batch
-: > "$f"
+# 1100 Gets of ONT data, answered: 2200 more frames, over the 2048 kept. In
+# two files: omcli --inject-file reads at most 64 KB of one.
 i=0
-while [ "$i" -lt 600 ]; do
-	frame "$(printf '%04x' $((0x2000 + i)))" 49 0002 0000 8000 >> "$f"
-	echo >> "$f"
-	i=$((i + 1))
+for f in /tmp/frames-batch1 /tmp/frames-batch2; do
+	: > "$f"
+	n=$((i + 550))
+	while [ "$i" -lt "$n" ]; do
+		frame "$(printf '%04x' $((0x2000 + i)))" 49 0002 0000 8000 >> "$f"
+		echo >> "$f"
+		i=$((i + 1))
+	done
+	$Q cli/build/omcli --inject-file "$f" > /dev/null 2>&1
 done
-$Q cli/build/omcli --inject-file "$f" > /dev/null 2>&1
 sync_send "$log"
 last=$($Q cli/build/omcli frames | tail -1)
-check "the ring keeps the last 1024" "$(printf '%s' "$last" | cut -d' ' -f1-3)" "1024 frames, masked,"
+check "the ring keeps the last 2048" "$(printf '%s' "$last" | cut -d' ' -f1-3)" "2048 frames, masked,"
 check "and counts every one" \
-      "$(test "$(printf '%s' "$last" | cut -d' ' -f4)" -gt 1024 && echo yes)" "yes"
+      "$(test "$(printf '%s' "$last" | cut -d' ' -f4)" -gt 2048 && echo yes)" "yes"
 check "the newest is the last line" \
       "$(frames | tail -1 | cut -c1-13)" "-> ff02290a01"
 check "oldest first" \
