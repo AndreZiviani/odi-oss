@@ -26,9 +26,9 @@
  * overwritten with MASK_BYTE, and so are the attributes every dump masks
  * (me_attr_secret()) and the identity of the stick (ident_attr). The
  * header, the attribute masks and the result codes stay, so a masked
- * capture still decodes. The CRC is left as captured: a masked frame no
- * longer matches it, which says that it was masked, where a recomputed one
- * would not.
+ * capture still decodes. A frame with masked values has its CRC zeroed:
+ * the original CRC could otherwise reveal the values it covered. Only
+ * --full preserves that checksum.
  * A frame that is not a baseline frame (device id other than 0x0a, or
  * shorter than 48 bytes) has everything after its header masked: there is
  * no layout to read it by.
@@ -81,6 +81,8 @@ static void fill(uint8_t *f, unsigned from, unsigned to)
 {
 	for (unsigned i = from; i < to && i < 40; i++)
 		f[i] = MASK_BYTE;
+	/* A checksum of the original values can disclose what was hidden. */
+	nl_put32(f + 44, 0);
 }
 
 /* The identity of the stick, masked as the diag bundle masks it: the serial

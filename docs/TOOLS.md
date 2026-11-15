@@ -1004,8 +1004,9 @@ in the TR-069 server, IP host, LOID authentication and SIP user classes,
 every attribute value a frame carries is overwritten with `0xee`, and so are
 the logical ONU id and password of ONU-G, the serial number (ONU-G and the
 circuit packs) and the bridge and port MAC addresses. Headers, attribute
-masks and result codes stay, so the capture still decodes; the CRC is left
-as captured, which no longer matches a masked frame. A frame that is not a
+masks and result codes stay, so the capture still decodes. A frame whose
+values are masked has its CRC zeroed too: the original checksum can reveal
+hidden values. `--full` preserves the original CRC. A frame that is not a
 baseline frame has everything after its header masked. `--full` keeps every
 byte, for a capture shared privately.
 

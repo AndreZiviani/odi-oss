@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- OMCI: clear the original CRC of a masked frame in text and pcap exports,
+  so the checksum cannot reveal the hidden identity or secret. `--full`
+  still returns the captured frame unchanged.
+
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair
