@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- OMCI: `omcli frames` prints the last 2048 OMCI frames omcid received or
+  sent, as bytes, and `omcli frames --pcap FILE` writes them as a pcap that
+  Wireshark decodes with the common OMCI Lua dissector (Ethernet II,
+  EtherType 0x88B5). omcid keeps them in a fixed 120 KB ring in RAM, filled
+  where it already receives and sends. By default the values of the classes
+  omcid keeps out of its log, the LOID and password, the serial number and
+  the MACs are overwritten; `--full` keeps them. The diag bundle adds
+  `pon/omci.pcap`, always masked. Issue #394.
 - omcid: a MIB reset loop is named instead of left to be counted in the log.
   Three or more MIB resets from the OLT within 600 s log one
   `event=mib_reset_loop state=start` (warning), and `state=end` after 600 s

@@ -178,6 +178,7 @@ static void notify_send(uint8_t mt, uint16_t cls, uint16_t inst,
 	for (unsigned i = 0; i < OMCI_FRAME_LEN; i++)
 		out_hex(nframe[i], 2);
 	out_char('\n');
+	frames_note(FRAME_TX, nframe, OMCI_FRAME_LEN);
 	if (nl_fd >= 0)
 		nl_send_frame(nl_fd, nl_tid, ntxbuf, nframe, OMCI_FRAME_LEN);
 }

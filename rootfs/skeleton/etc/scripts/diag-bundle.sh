@@ -26,7 +26,8 @@
 # cmd 23 and 25 write), /proc/odi_gpon/ (status, counters, flows, ploam),
 # /proc/odi_omci, and omcli (state, provision, flows, tcont, conn, vlan (the VLAN handling and any
 # FwdOp override; numbers only), voip (masked), and the MIB
-# classes in OMCI_CLASSES), and under module/ the optics module on /dev/i2c-0: A0h whole (a0.txt), A2h
+# classes in OMCI_CLASSES), and the last OMCI frames as pon/omci.pcap
+# (omcli frames, masked), and under module/ the optics module on /dev/i2c-0: A0h whole (a0.txt), A2h
 # with the page select as found (a2.txt), and in chip.txt the page select,
 # the laser driver identity (A2h page 2 byte 0xa0, 0x6a for a GN25L95;
 # bytes 0x80 and 0xdc, the UX3320 variant markers) and the UX3320
@@ -70,6 +71,13 @@
 # omcli mib masks those classes by default (only --secrets prints them) and
 # the bundle never passes it, so a class added here by mistake still would
 # not leak; src/omci/writes-test.sh pins both halves.
+#
+# pon/omci.pcap is the masked export of omcli frames, with or without --full
+# here: omcid overwrites the values of the classes above, the serial number
+# and the MACs itself (src/omci/respond/frames.c). A pcap is binary and the
+# scrub below would shift its records, so it is not scrubbed; instead, a
+# pcap in which any secret, or any identity value unless --full, shows as
+# text is withheld, and MANIFEST.txt says so.
 #
 # Every step is bounded: a command through busybox timeout (STEP_TIMEOUT_S
 # each, METRICS_TIMEOUT_S for the exporter scrape, which runs diag and
@@ -299,6 +307,8 @@ if step pon/omcli_state.txt omcli state; then
 	for c in $OMCI_CLASSES; do
 		step "pon/omcli_mib_$c.txt" omcli mib "$c"
 	done
+	timeout "$STEP_TIMEOUT_S" omcli frames --pcap "$b/pon/omci.pcap" > "$work/frames.out" 2>&1
+	manifest "$?" "$(size_of "$b/pon/omci.pcap")" pon/omci.pcap
 else
 	manifest - - "pon/omcli_* (skipped: omcid did not answer omcli state)"
 fi
@@ -559,6 +569,20 @@ cat /sys/class/net/*/address 2>/dev/null |
 	grep -v -x -i -e '00:00:00:00:00:00' -e 'ff:ff:ff:ff:ff:ff' >> "$idents"
 cat "$work/module.serial" >> "$idents" 2>/dev/null
 
+# The pcap, before the lists go: withheld when a value it should not carry
+# is in it as text (see the header). Same lower bound as the scrub.
+pcap=$b/pon/omci.pcap
+if [ -f "$pcap" ]; then
+	if ! { cat "$secrets"; [ "$full" = 1 ] || cat "$idents"; } | sort -u |
+		while IFS= read -r v; do
+			[ "${#v}" -ge 3 ] || continue
+			if grep -q -F -e "$v" "$pcap"; then exit 1; fi
+		done; then
+		rm -f "$pcap"
+		manifest - - "pon/omci.pcap (withheld: a secret or identity value showed in it)"
+	fi
+fi
+
 # The scrub rules, as LENGTH TAB KIND TAB PATTERN TAB REPLACEMENT. They run
 # longest first, so a value never loses a piece to a shorter one inside it.
 # KIND is any (every occurrence), word (a whole token of text) or hex (a
@@ -667,11 +691,11 @@ sort -u "$rules" | sort -t "$tab" -k1,1nr | while IFS="$tab" read -r _ kind pat 
 	printf 's/^%s$/%s/\n' "$p" "$rep"
 done > "$script"
 if [ -s "$script" ]; then
-	find "$b" -type f | while IFS= read -r f; do
+	find "$b" -type f ! -name '*.pcap' | while IFS= read -r f; do
 		sed -i -f "$script" "$f"
 	done
 fi
-rm -f "$secrets" "$work/voip.secrets" "$idents" "$rules" "$script" "$work"/gpon-*.raw "$work/module.serial" "$work/i2c.out"
+rm -f "$secrets" "$work/voip.secrets" "$work/frames.out" "$idents" "$rules" "$script" "$work"/gpon-*.raw "$work/module.serial" "$work/i2c.out"
 
 tar -czf "$out.part" -C "$work" odi-diag || { rm -f "$out.part"; fail "tar failed"; }
 n=$(size_of "$out.part")
