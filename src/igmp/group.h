@@ -213,12 +213,15 @@ struct igmp_db {
 
 void igmp_db_init(struct igmp_db *db);
 
-/* Feed one accepted frame. Returns how many changes were written to out, which
+/* Feed one accepted frame. `others` is how many IPv6 groups the subscriber
+ * holds: the profile's group limit is on every group of the UNI, whichever
+ * its family (mld_db_rx() counts the IPv4 ones the same way). Returns how
+ * many changes were written to out, which
  * is never more than max; anything past that is lost, so max has to be at
  * least 2 -- a single report can both create a group and make its port a
  * router port. */
 int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
-	       struct igmp_change *out, int max);
+	       uint32_t others, struct igmp_change *out, int max);
 
 /* Expire whatever is due at `now`. Call it at least once a second: nothing
  * else moves time forward. */

@@ -110,7 +110,7 @@ static int joined(struct igmp_db *db, uint8_t type, uint16_t vid, uint32_t group
 	struct igmp_rx rx = mk(type, 1, vid, group);
 	uint32_t before = db->joins;
 
-	igmp_db_rx(db, &rx, now, ch, 8);
+	igmp_db_rx(db, &rx, now, 0, ch, 8);
 	return db->joins != before;
 }
 
@@ -132,36 +132,36 @@ static void test_join_rules(void)
 	rx.body = body;
 	rx.nrec = 1;
 	rx.body_len = mk_v3(body, 2, 0xe1020202, 0);
-	n = igmp_db_rx(&db, &rx, 10, ch, 8);
+	n = igmp_db_rx(&db, &rx, 10, 0, ch, 8);
 	ok(n == 1 && db.joins == 1 && igmp_db_count(&db) == 1 && db.above_version == 1 &&
 	   db.refusals == 0 && db.denied == 0,
 	   "G7: a v3 report under version 2 is held as before, and counted above the version");
 	ok(joined(&db, IGMP_V2_REPORT, 0, 0xe1020203, 11) && db.above_version == 1,
 	   "G7: a v2 report under version 2 is not above it");
 	rx.body_len = mk_v3(body, 3, 0xe1020202, 0);               /* TO_INCLUDE {}: a leave */
-	n = igmp_db_rx(&db, &rx, 12, ch, 8);
+	n = igmp_db_rx(&db, &rx, 12, 0, ch, 8);
 	ok(db.above_version == 2 && db.refusals == 0, "G7: a v3 leave is counted too");
 	policy_from(&db, "snooping=1\nigmp_version=3\n");
 	rx.body_len = mk_v3(body, 2, 0xe1020202, 0);
-	igmp_db_rx(&db, &rx, 10, ch, 8);
+	igmp_db_rx(&db, &rx, 10, 0, ch, 8);
 	ok(db.joins == 1 && db.above_version == 0, "G7: the same v3 report under version 3 is not counted");
 	policy_from(&db, "snooping=1\n");
-	igmp_db_rx(&db, &rx, 10, ch, 8);
+	igmp_db_rx(&db, &rx, 10, 0, ch, 8);
 	ok(db.joins == 1 && db.above_version == 0, "G7: and with no version in the profile");
 
 	/* SSM: a row with a source, a v3 record naming other sources. */
 	policy_from(&db, "snooping=1\nallow=232.1.0.0-232.1.255.255 s=10.0.0.2\n");
 	rx.body_len = mk_v3(body, 1, 0xe8010001, 3);               /* INCLUDE 10.0.0.1 .2 .3 */
-	igmp_db_rx(&db, &rx, 10, ch, 8);
+	igmp_db_rx(&db, &rx, 10, 0, ch, 8);
 	ok(db.joins == 1, "G9: INCLUDE sources with the row's among them: in");
 	rx.body_len = mk_v3(body, 1, 0xe8010002, 1);               /* INCLUDE 10.0.0.1 */
-	igmp_db_rx(&db, &rx, 11, ch, 8);
+	igmp_db_rx(&db, &rx, 11, 0, ch, 8);
 	ok(db.joins == 1 && db.refused[IGMP_REFUSE_ACL] == 1, "G9: INCLUDE sources without it: refused");
 	rx.body_len = mk_v3(body, 2, 0xe8010003, 2);               /* EXCLUDE 10.0.0.1 .2 */
-	igmp_db_rx(&db, &rx, 12, ch, 8);
+	igmp_db_rx(&db, &rx, 12, 0, ch, 8);
 	ok(db.joins == 1 && db.refused[IGMP_REFUSE_ACL] == 2, "G9: EXCLUDE the row's source: refused");
 	rx.body_len = mk_v3(body, 2, 0xe8010004, 1);               /* EXCLUDE 10.0.0.1 */
-	igmp_db_rx(&db, &rx, 13, ch, 8);
+	igmp_db_rx(&db, &rx, 13, 0, ch, 8);
 	ok(db.joins == 2, "G9: EXCLUDE another source: in");
 	ok(joined(&db, IGMP_V2_REPORT, 0, 0xe8010005, 14), "G9: a v2 report of a source row: in, as before");
 
@@ -204,7 +204,7 @@ static void test_join_rules(void)
 	policy_from(&db, "snooping=1\nimmediate_leave=1\nallow=239.9.0.0-239.9.255.255 p=30,60,0,0\n");
 	joined(&db, IGMP_V2_REPORT, 0, g, 100);
 	rx = mk(IGMP_V2_LEAVE, 1, 0, g);
-	igmp_db_rx(&db, &rx, 110, ch, 8);
+	igmp_db_rx(&db, &rx, 110, 0, ch, 8);
 	ok(!joined(&db, IGMP_V2_REPORT, 0, g, 169) && joined(&db, IGMP_V2_REPORT, 0, g, 170),
 	   "G13: after a leave at 110 the next preview is at 170");
 	/* A group that is fully authorized by another row is never a preview. */
@@ -277,7 +277,7 @@ int main(void)
 
 	/* A report creates the group and names the port. */
 	rx = mk(IGMP_V2_REPORT, 2, 100, 0xe1010101);
-	n = igmp_db_rx(&db, &rx, 1000, ch, 8);
+	n = igmp_db_rx(&db, &rx, 1000, 0, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_SET, "a report emits one change");
 	ok(ch[0].ports == IGMP_PORTBIT(2), "port 2 is bit 1, not bit 2");
 	ok(ch[0].vid == 100 && ch[0].group == 0xe1010101, "the change names the group");
@@ -285,12 +285,12 @@ int main(void)
 
 	/* The same report again is a refresh, and the switch cannot see a
 	 * refresh. Re-emitting would be a hardware write per report. */
-	n = igmp_db_rx(&db, &rx, 1010, ch, 8);
+	n = igmp_db_rx(&db, &rx, 1010, 0, ch, 8);
 	ok(n == 0, "a repeated report emits nothing");
 
 	/* A second port joins the same group. */
 	rx = mk(IGMP_V2_REPORT, 3, 100, 0xe1010101);
-	n = igmp_db_rx(&db, &rx, 1020, ch, 8);
+	n = igmp_db_rx(&db, &rx, 1020, 0, ch, 8);
 	ok(n == 1 && ch[0].ports == (IGMP_PORTBIT(2) | IGMP_PORTBIT(3)),
 	   "a second port is added to the mask");
 	ok(igmp_db_count(&db) == 1, "still one group");
@@ -298,7 +298,7 @@ int main(void)
 	/* The same group on another vlan is a different entry: the switch
 	 * forwards per vlan and merging them would leak traffic across. */
 	rx = mk(IGMP_V2_REPORT, 4, 200, 0xe1010101);
-	n = igmp_db_rx(&db, &rx, 1030, ch, 8);
+	n = igmp_db_rx(&db, &rx, 1030, 0, ch, 8);
 	ok(n == 1 && ch[0].vid == 200 && ch[0].ports == IGMP_PORTBIT(4),
 	   "the same group on another vlan is a separate entry");
 	ok(igmp_db_count(&db) == 2, "two groups now");
@@ -327,9 +327,9 @@ int main(void)
 	 * cuts off a second listener on the same port. */
 	igmp_db_init(&db);
 	rx = mk(IGMP_V2_REPORT, 5, 10, 0xe2020202);
-	igmp_db_rx(&db, &rx, 2000, ch, 8);
+	igmp_db_rx(&db, &rx, 2000, 0, ch, 8);
 	rx = mk(IGMP_V2_LEAVE, 5, 10, 0xe2020202);
-	n = igmp_db_rx(&db, &rx, 2000, ch, 8);
+	n = igmp_db_rx(&db, &rx, 2000, 0, ch, 8);
 	ok(n == 0, "a leave emits nothing by itself");
 	ok(igmp_db_count(&db) == 1, "and the group is still there");
 	n = igmp_db_tick(&db, 2000 + IGMP_LAST_MEMBER_TTL - 1, ch, 8);
@@ -342,11 +342,11 @@ int main(void)
 	 * remove immediately. */
 	igmp_db_init(&db);
 	rx = mk(IGMP_V2_REPORT, 5, 10, 0xe2020202);
-	igmp_db_rx(&db, &rx, 3000, ch, 8);
+	igmp_db_rx(&db, &rx, 3000, 0, ch, 8);
 	rx = mk(IGMP_V2_LEAVE, 5, 10, 0xe2020202);
-	igmp_db_rx(&db, &rx, 3000, ch, 8);
+	igmp_db_rx(&db, &rx, 3000, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 5, 10, 0xe2020202);
-	igmp_db_rx(&db, &rx, 3001, ch, 8);
+	igmp_db_rx(&db, &rx, 3001, 0, ch, 8);
 	n = igmp_db_tick(&db, 3000 + IGMP_LAST_MEMBER_TTL, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 1,
 	   "a report inside the last-member window rescues the port");
@@ -355,9 +355,9 @@ int main(void)
 	 * lapsing than the last-member interval. */
 	igmp_db_init(&db);
 	rx = mk(IGMP_V2_REPORT, 5, 10, 0xe2020202);
-	igmp_db_rx(&db, &rx, 4000, ch, 8);
+	igmp_db_rx(&db, &rx, 4000, 0, ch, 8);
 	rx = mk(IGMP_V2_LEAVE, 5, 10, 0xe2020202);
-	igmp_db_rx(&db, &rx, 4000 + IGMP_MEMBERSHIP_TTL - 1, ch, 8);
+	igmp_db_rx(&db, &rx, 4000 + IGMP_MEMBERSHIP_TTL - 1, 0, ch, 8);
 	n = igmp_db_tick(&db, 4000 + IGMP_MEMBERSHIP_TTL, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL,
 	   "a late leave does not extend the membership it shortens");
@@ -365,10 +365,10 @@ int main(void)
 	/* Router ports. Any query, general or group-specific. */
 	igmp_db_init(&db);
 	rx = mk(IGMP_QUERY, 1, 10, 0);
-	n = igmp_db_rx(&db, &rx, 5000, ch, 8);
+	n = igmp_db_rx(&db, &rx, 5000, 0, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_ROUTER &&
 	   ch[0].ports == IGMP_PORTBIT(1), "a query makes its port a router port");
-	n = igmp_db_rx(&db, &rx, 5010, ch, 8);
+	n = igmp_db_rx(&db, &rx, 5010, 0, ch, 8);
 	ok(n == 0, "a second query on the same port emits nothing");
 	n = igmp_db_tick(&db, 5010 + IGMP_ROUTER_TTL - 1, ch, 8);
 	ok(n == 0, "the router port survives to its deadline");
@@ -387,12 +387,12 @@ int main(void)
 	rx.nrec = 1;
 
 	rx.body_len = mk_v3(body, 4, 0xe3030303, 0);   /* CHANGE_TO_EXCLUDE {} */
-	n = igmp_db_rx(&db, &rx, 6000, ch, 8);
+	n = igmp_db_rx(&db, &rx, 6000, 0, ch, 8);
 	ok(n == 1 && ch[0].ports == IGMP_PORTBIT(6),
 	   "a v3 EXCLUDE with no sources is a join");
 
 	rx.body_len = mk_v3(body, 3, 0xe3030303, 0);   /* CHANGE_TO_INCLUDE {} */
-	igmp_db_rx(&db, &rx, 6000, ch, 8);
+	igmp_db_rx(&db, &rx, 6000, 0, ch, 8);
 	n = igmp_db_tick(&db, 6000 + IGMP_LAST_MEMBER_TTL, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL,
 	   "a v3 INCLUDE with no sources is a leave");
@@ -401,7 +401,7 @@ int main(void)
 	 * somebody leaving. Getting this backwards cuts off a listener. */
 	igmp_db_init(&db);
 	rx.body_len = mk_v3(body, 1, 0xe3030303, 2);   /* MODE_IS_INCLUDE, 2 */
-	n = igmp_db_rx(&db, &rx, 7000, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7000, 0, ch, 8);
 	ok(n == 1 && ch[0].ports == IGMP_PORTBIT(6),
 	   "a v3 INCLUDE naming sources is a join, not a leave");
 
@@ -409,10 +409,10 @@ int main(void)
 	 * some other port bit: 1 << (0 - 1) is not a port, it is undefined. */
 	igmp_db_init(&db);
 	rx = mk(IGMP_V2_REPORT, 0, 10, 0xe4040404);
-	n = igmp_db_rx(&db, &rx, 8000, ch, 8);
+	n = igmp_db_rx(&db, &rx, 8000, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 0, "port 0 is ignored");
 	rx = mk(IGMP_V2_REPORT, IGMP_MAX_PORTS + 1, 10, 0xe4040404);
-	n = igmp_db_rx(&db, &rx, 8000, ch, 8);
+	n = igmp_db_rx(&db, &rx, 8000, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 0, "a port past the table is ignored");
 
 	/* A full table counts what it refused. A snooper that quietly stops
@@ -420,7 +420,7 @@ int main(void)
 	igmp_db_init(&db);
 	for (int i = 0; i < IGMP_MAX_GROUPS + 4; i++) {
 		rx = mk(IGMP_V2_REPORT, 1, 10, 0xe5010000 + (uint32_t)i);
-		igmp_db_rx(&db, &rx, 9000, ch, 8);
+		igmp_db_rx(&db, &rx, 9000, 0, ch, 8);
 	}
 	ok(igmp_db_count(&db) == IGMP_MAX_GROUPS, "the table fills to its limit");
 	ok(db.refused[IGMP_REFUSE_FULL] == 4 && db.denied == 0,
@@ -438,19 +438,19 @@ int main(void)
 	rx.body = body;
 	rx.nrec = 1;
 	rx.body_len = mk_v3(body, 5, 0xe3030303, 0);   /* ALLOW_NEW_SOURCES {} */
-	n = igmp_db_rx(&db, &rx, 7100, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7100, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 0, "a v3 ALLOW with no sources joins nothing");
 	rx.body_len = mk_v3(body, 6, 0xe3030303, 2);   /* BLOCK_OLD_SOURCES */
-	n = igmp_db_rx(&db, &rx, 7100, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7100, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 0, "a v3 BLOCK joins nothing");
 	rx.body_len = mk_v3(body, 9, 0xe3030303, 1);   /* not a record type */
-	n = igmp_db_rx(&db, &rx, 7100, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7100, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 0, "an unknown v3 record type joins nothing");
 	rx.body_len = mk_v3(body, 5, 0xe3030303, 1);   /* ALLOW {one source} */
-	n = igmp_db_rx(&db, &rx, 7100, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7100, 0, ch, 8);
 	ok(n == 1 && ch[0].ports == IGMP_PORTBIT(6), "a v3 ALLOW naming a source is a join");
 	rx.body_len = mk_v3(body, 6, 0xe3030303, 1);   /* BLOCK on a live group */
-	n = igmp_db_rx(&db, &rx, 7101, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7101, 0, ch, 8);
 	ok(n == 0, "a BLOCK neither refreshes nor leaves a live group");
 	n = igmp_db_tick(&db, 7100 + IGMP_MEMBERSHIP_TTL - 1, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 1, "so the ALLOW deadline still stands");
@@ -458,16 +458,16 @@ int main(void)
 	/* Groups the snooper must not hold state for. */
 	igmp_db_init(&db);
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0x0a000001);       /* not multicast */
-	n = igmp_db_rx(&db, &rx, 7200, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7200, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 0, "a report for a unicast address is ignored");
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe00000fb);       /* 224.0.0.251, mDNS */
-	n = igmp_db_rx(&db, &rx, 7200, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7200, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 0, "a link-local group is never restricted");
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xef0000fb);       /* 239.0.0.251: same MAC */
-	n = igmp_db_rx(&db, &rx, 7200, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7200, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 0, "a group on a link-local MAC is not restricted either");
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe0000100);       /* 224.0.1.0, first outside */
-	n = igmp_db_rx(&db, &rx, 7200, ch, 8);
+	n = igmp_db_rx(&db, &rx, 7200, 0, ch, 8);
 	ok(n == 1, "the first group past the link-local MACs is snooped");
 	ok(igmp_group_snoopable(0xeffffffa), "239.255.255.250 (SSDP) is an ordinary group");
 	ok(!igmp_group_snoopable(0xdfffffff) && !igmp_group_snoopable(0xf0000000),
@@ -478,16 +478,16 @@ int main(void)
 	 * both are gone. The same group on two VLANs is the same row too. */
 	igmp_db_init(&db);
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
-	igmp_db_rx(&db, &rx, 7300, ch, 8);
+	igmp_db_rx(&db, &rx, 7300, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 3, 10, 0xe2010101);
-	igmp_db_rx(&db, &rx, 7300, ch, 8);
+	igmp_db_rx(&db, &rx, 7300, 0, ch, 8);
 	ok(igmp_db_mac_ports(&db, 0xe1010101) == (IGMP_PORTBIT(1) | IGMP_PORTBIT(3)),
 	   "aliased groups share one MAC row: the union of their ports");
 	ok(igmp_db_mac_ports(&db, 0xe2010101) == igmp_db_mac_ports(&db, 0xe1010101),
 	   "and either one names it");
 	ok(igmp_db_mac_ports(&db, 0xe1010102) == 0, "another MAC is untouched");
 	rx = mk(IGMP_V2_REPORT, 1, 20, 0xe1010101);
-	igmp_db_rx(&db, &rx, 7310, ch, 8);
+	igmp_db_rx(&db, &rx, 7310, 0, ch, 8);
 	/* 225.1.1.1 on vlan 10 and 226.1.1.1 lapse together (never refreshed);
 	 * the vlan 20 copy keeps the row alive, which writing the lapsing
 	 * group's own empty mask would not. */
@@ -508,35 +508,71 @@ int main(void)
 	db.pol.allow[0].hi = 0xe1ffffff;
 	db.pol.max_groups = 1;
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xef010101);        /* not in the list */
-	igmp_db_rx(&db, &rx, 9000, ch, 8);
+	igmp_db_rx(&db, &rx, 9000, 0, ch, 8);
 	ok(db.joins == 0 && db.denied == 1, "B2: a join outside the list is denied, not counted");
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
-	igmp_db_rx(&db, &rx, 9001, ch, 8);
-	igmp_db_rx(&db, &rx, 9011, ch, 8);
+	igmp_db_rx(&db, &rx, 9001, 0, ch, 8);
+	igmp_db_rx(&db, &rx, 9011, 0, ch, 8);
 	ok(db.joins == 2 && db.denied == 1, "B2: an accepted join and its refresh are both counted");
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010102);        /* listed, over the limit */
-	igmp_db_rx(&db, &rx, 9012, ch, 8);
+	igmp_db_rx(&db, &rx, 9012, 0, ch, 8);
 	ok(db.joins == 2 && db.denied == 2, "B2: a join over the group limit is denied, not counted");
 
 	/* B3: the limit is on groups. One group on two VLANs is one of them. */
 	igmp_db_init(&db);
 	db.pol.max_groups = 2;
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
-	igmp_db_rx(&db, &rx, 9100, ch, 8);
+	igmp_db_rx(&db, &rx, 9100, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 1, 20, 0xe1010101);
-	n = igmp_db_rx(&db, &rx, 9101, ch, 8);
+	n = igmp_db_rx(&db, &rx, 9101, 0, ch, 8);
 	ok(n == 1 && igmp_db_count(&db) == 2 && igmp_db_dynamic_count(&db) == 1,
 	   "B3: a group on two VLANs is two entries and one group");
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010102);
-	n = igmp_db_rx(&db, &rx, 9102, ch, 8);
+	n = igmp_db_rx(&db, &rx, 9102, 0, ch, 8);
 	ok(n == 1 && db.denied == 0, "B3: the second group fits a limit of two");
 	rx = mk(IGMP_V2_REPORT, 1, 30, 0xe1010101);
-	n = igmp_db_rx(&db, &rx, 9103, ch, 8);
+	n = igmp_db_rx(&db, &rx, 9103, 0, ch, 8);
 	ok(n == 1 && db.denied == 0, "B3: the first group on a third VLAN is not a new group");
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010103);
-	n = igmp_db_rx(&db, &rx, 9104, ch, 8);
+	n = igmp_db_rx(&db, &rx, 9104, 0, ch, 8);
 	ok(n == 0 && db.denied == 1 && igmp_db_dynamic_count(&db) == 2,
 	   "B3: a third group is refused");
+
+	/* B3b: the limit is the UNI's, whichever the family: IPv6 groups the
+	 * subscriber holds (`others`) count toward it, so the outcome does not
+	 * depend on which family joined first. */
+	igmp_db_init(&db);
+	db.pol.max_groups = 2;
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
+	n = igmp_db_rx(&db, &rx, 9200, 1, ch, 8);
+	ok(n == 1 && db.denied == 0, "B3b: one IPv6 group and one IPv4 group fit a limit of two");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010102);
+	n = igmp_db_rx(&db, &rx, 9201, 1, ch, 8);
+	ok(n == 0 && db.denied == 1 && db.refused[IGMP_REFUSE_LIMIT] == 1 &&
+	   igmp_db_dynamic_count(&db) == 1,
+	   "B3b: a second IPv4 group is past the limit with an IPv6 one held");
+	rx = mk(IGMP_V2_REPORT, 1, 20, 0xe1010101);
+	n = igmp_db_rx(&db, &rx, 9202, 1, ch, 8);
+	ok(n == 1 && db.denied == 1, "B3b: a group already held is not a new one");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010102);
+	n = igmp_db_rx(&db, &rx, 9203, 0, ch, 8);
+	ok(n == 1 && db.denied == 1, "B3b: with no IPv6 group held the second IPv4 group fits");
+
+	/* B3c: a static group never uses the limit, also when a report for it
+	 * arrives on another VLAN (that row is not fixed, but not dynamic). */
+	igmp_db_init(&db);
+	policy_from(&db, "snooping=1\nmax_groups=1\nallow=225.0.0.0-226.255.255.255\nstatic=226.1.1.1-226.1.1.1\n");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe2010101);
+	n = igmp_db_rx(&db, &rx, 9300, 0, ch, 8);
+	ok(igmp_db_count(&db) == 2 && igmp_db_dynamic_count(&db) == 0,
+	   "B3c: a report for a static group on another VLAN is not a dynamic group");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
+	n = igmp_db_rx(&db, &rx, 9301, 0, ch, 8);
+	ok(n == 1 && db.denied == 0 && igmp_db_dynamic_count(&db) == 1,
+	   "B3c: and a dynamic group still fits a limit of one");
+	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010102);
+	n = igmp_db_rx(&db, &rx, 9302, 0, ch, 8);
+	ok(n == 0 && db.denied == 1, "B3c: the second dynamic group does not");
 
 	/* B4: expiry follows the host's own reporting interval. The profile
 	 * says 60 s (membership 2 x 60 + 10 = 130) but the OLT really queries
@@ -544,17 +580,17 @@ int main(void)
 	igmp_db_init(&db);
 	db.pol.query_interval = 60;
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
-	igmp_db_rx(&db, &rx, 10000, ch, 8);
+	igmp_db_rx(&db, &rx, 10000, 0, ch, 8);
 	n = igmp_db_tick(&db, 10129, ch, 8);
 	ok(n == 0, "B4: the first membership holds the profile figure (nothing seen yet)");
 	n = igmp_db_tick(&db, 10130, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL,
 	   "B4: and lapses at it, once: the first gap cannot be known");
-	igmp_db_rx(&db, &rx, 10150, ch, 8);              /* gap 150 measured */
+	igmp_db_rx(&db, &rx, 10150, 0, ch, 8);              /* gap 150 measured */
 	n = igmp_db_tick(&db, 10150 + 130 + 10, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 1,
 	   "B4: after the second report the group outlives the profile's 130 s");
-	igmp_db_rx(&db, &rx, 10300, ch, 8);
+	igmp_db_rx(&db, &rx, 10300, 0, ch, 8);
 	n = igmp_db_tick(&db, 10300 + 2 * 150 + 10 - 1, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 1,
 	   "B4: it holds robustness x 150 + response, one second short");
@@ -565,17 +601,17 @@ int main(void)
 	/* ... never earlier than the profile, whatever the gap. */
 	igmp_db_init(&db);
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
-	igmp_db_rx(&db, &rx, 11000, ch, 8);
-	igmp_db_rx(&db, &rx, 11030, ch, 8);              /* gap 30, shorter */
+	igmp_db_rx(&db, &rx, 11000, 0, ch, 8);
+	igmp_db_rx(&db, &rx, 11030, 0, ch, 8);              /* gap 30, shorter */
 	n = igmp_db_tick(&db, 11030 + IGMP_MEMBERSHIP_TTL - 1, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 1, "B4: a short gap never shortens the profile interval");
 	/* a repeat inside the response interval is one answer, not a gap, and
 	 * does not overwrite the interval already measured */
 	igmp_db_init(&db);
 	db.pol.query_interval = 60;
-	igmp_db_rx(&db, &rx, 11100, ch, 8);
-	igmp_db_rx(&db, &rx, 11250, ch, 8);              /* gap 150 */
-	igmp_db_rx(&db, &rx, 11252, ch, 8);              /* a retransmission */
+	igmp_db_rx(&db, &rx, 11100, 0, ch, 8);
+	igmp_db_rx(&db, &rx, 11250, 0, ch, 8);              /* gap 150 */
+	igmp_db_rx(&db, &rx, 11252, 0, ch, 8);              /* a retransmission */
 	n = igmp_db_tick(&db, 11252 + 2 * 150 + 10 - 1, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 1, "B4: a retransmission is not taken for a gap");
 
@@ -583,16 +619,16 @@ int main(void)
 	igmp_db_init(&db);
 	db.pol.robustness = 16;
 	db.pol.query_interval = 10;
-	igmp_db_rx(&db, &rx, 12000, ch, 8);
-	igmp_db_rx(&db, &rx, 12600, ch, 8);
+	igmp_db_rx(&db, &rx, 12000, 0, ch, 8);
+	igmp_db_rx(&db, &rx, 12600, 0, ch, 8);
 	n = igmp_db_tick(&db, 12600 + IGMP_OBS_TTL_MAX - 1, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 1, "B4: the observed interval holds the cap, one second short");
 	n = igmp_db_tick(&db, 12600 + IGMP_OBS_TTL_MAX, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL, "B4: and is capped there");
 	/* a host that comes back after an hour has not shown a query interval */
 	igmp_db_init(&db);
-	igmp_db_rx(&db, &rx, 13000, ch, 8);
-	igmp_db_rx(&db, &rx, 13000 + IGMP_OBS_GAP_MAX + 1, ch, 8);
+	igmp_db_rx(&db, &rx, 13000, 0, ch, 8);
+	igmp_db_rx(&db, &rx, 13000 + IGMP_OBS_GAP_MAX + 1, 0, ch, 8);
 	n = igmp_db_tick(&db, 13000 + IGMP_OBS_GAP_MAX + 1 + IGMP_MEMBERSHIP_TTL, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL, "B4: a gap beyond the bound is not learned");
 
@@ -602,19 +638,19 @@ int main(void)
 	 * a join. Only the leaving port's membership is shortened. */
 	igmp_db_init(&db);
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);
-	igmp_db_rx(&db, &rx, 14000, ch, 8);
+	igmp_db_rx(&db, &rx, 14000, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 2, 10, 0xe1010101);
-	igmp_db_rx(&db, &rx, 14000, ch, 8);
+	igmp_db_rx(&db, &rx, 14000, 0, ch, 8);
 	rx = mk(IGMP_V2_LEAVE, 1, 10, 0xe1010101);
-	igmp_db_rx(&db, &rx, 14100, ch, 8);
+	igmp_db_rx(&db, &rx, 14100, 0, ch, 8);
 	n = igmp_db_tick(&db, 14100 + IGMP_LAST_MEMBER_TTL - 1, ch, 8);
 	ok(n == 0, "B5: the leaving port keeps the row until its last-member time is up");
 	rx = mk(IGMP_V2_REPORT, 1, 10, 0xe1010101);      /* answer to the OLT query */
-	igmp_db_rx(&db, &rx, 14101, ch, 8);
+	igmp_db_rx(&db, &rx, 14101, 0, ch, 8);
 	n = igmp_db_tick(&db, 14100 + IGMP_LAST_MEMBER_TTL, ch, 8);
 	ok(n == 0, "B5: a report after the leave (another box answering) keeps the port");
 	rx = mk(IGMP_V2_LEAVE, 1, 10, 0xe1010101);
-	igmp_db_rx(&db, &rx, 14200, ch, 8);
+	igmp_db_rx(&db, &rx, 14200, 0, ch, 8);
 	n = igmp_db_tick(&db, 14200 + IGMP_LAST_MEMBER_TTL, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_SET && ch[0].ports == IGMP_PORTBIT(2),
 	   "B5: with no answer the port goes at robustness x last-member time, port 2 stays");
@@ -628,23 +664,23 @@ int main(void)
 	acl225(&db);
 	for (int i = 0; i < 3; i++) {
 		rx = mk(IGMP_V2_REPORT, 1, 7, 0xef010101);
-		igmp_db_rx(&db, &rx, 100 + (uint32_t)i, ch, 8);
+		igmp_db_rx(&db, &rx, 100 + (uint32_t)i, 0, ch, 8);
 	}
 	ok(db.refusals == 1 && db.ring[0].count == 3 && db.ring[0].at == 102 &&
 	   db.refused[IGMP_REFUSE_ACL] == 3,
 	   "the same refusal three times in a row is one entry with a count, three in the total");
 	rx = mk(IGMP_V2_REPORT, 1, 8, 0xef010101);
-	igmp_db_rx(&db, &rx, 103, ch, 8);
+	igmp_db_rx(&db, &rx, 103, 0, ch, 8);
 	ok(db.refusals == 2 && db.ring[1].vid == 8,
 	   "the same group on another VLAN is its own entry");
 	rx = mk(IGMP_V2_REPORT, 1, 7, 0xef010101);
-	igmp_db_rx(&db, &rx, 104, ch, 8);
+	igmp_db_rx(&db, &rx, 104, 0, ch, 8);
 	ok(db.refusals == 3, "an older entry coming back after another one is a new entry");
 	igmp_db_init(&db);
 	acl225(&db);
 	for (int i = 0; i < IGMP_REFUSAL_RING + 3; i++) {
 		rx = mk(IGMP_V2_REPORT, 1, 7, 0xef000100 + (uint32_t)i);
-		igmp_db_rx(&db, &rx, 200 + (uint32_t)i, ch, 8);
+		igmp_db_rx(&db, &rx, 200 + (uint32_t)i, 0, ch, 8);
 	}
 	ok(db.refusals == IGMP_REFUSAL_RING + 3 &&
 	   db.refused[IGMP_REFUSE_ACL] == IGMP_REFUSAL_RING + 3,

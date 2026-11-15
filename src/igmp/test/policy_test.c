@@ -152,26 +152,26 @@ static void test_limits(void)
 	igmp_db_set_policy(&db, &p, ch, IGMP_MAX_GROUPS);
 
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 1));
-	n = igmp_db_rx(&db, &rx, 100, ch, 8);
+	n = igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_SET, "an allowed group joins");
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 2));
-	igmp_db_rx(&db, &rx, 100, ch, 8);
+	igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 3));
-	n = igmp_db_rx(&db, &rx, 100, ch, 8);
+	n = igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 2, "the third group is past the limit and gets no state");
 	ok(db.denied == 1 && db.joins == 2, "denied and join counters: the refused join is not a join");
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 1));
-	n = igmp_db_rx(&db, &rx, 110, ch, 8);
+	n = igmp_db_rx(&db, &rx, 110, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 2 && db.denied == 1, "a refresh of a held group is not counted against the limit");
 	rx = mk(IGMP_V2_REPORT, 1, G(238, 1, 1, 1));
-	n = igmp_db_rx(&db, &rx, 110, ch, 8);
+	n = igmp_db_rx(&db, &rx, 110, 0, ch, 8);
 	ok(n == 0 && db.denied == 2, "a group outside the list is refused");
 
 	/* A group frees its place when it lapses. */
 	n = igmp_db_tick(&db, 100 + igmp_policy_membership_ttl(&p) + 20, ch, 8);
 	ok(n >= 1 && igmp_db_count(&db) == 0, "everything lapsed");
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 3));
-	n = igmp_db_rx(&db, &rx, 1000, ch, 8);
+	n = igmp_db_rx(&db, &rx, 1000, 0, ch, 8);
 	ok(n == 1, "and the place is free");
 
 	/* A narrower list on a live table removes what it no longer allows. */
@@ -180,9 +180,9 @@ static void test_limits(void)
 	parse("snooping=1\nallow=239.0.0.0-239.255.255.255\n", &p);
 	igmp_db_set_policy(&db, &p, ch, IGMP_MAX_GROUPS);
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 1));
-	igmp_db_rx(&db, &rx, 100, ch, 8);
+	igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 3));
-	igmp_db_rx(&db, &rx, 100, ch, 8);
+	igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	parse("snooping=1\nallow=239.1.1.3-239.1.1.3\n", &p);
 	n = igmp_db_set_policy(&db, &p, ch, IGMP_MAX_GROUPS);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL && ch[0].group == G(239, 1, 1, 1) &&
@@ -202,9 +202,9 @@ static void test_leave(void)
 	parse("snooping=1\nrobustness=3\nlast_member_query=2\n", &p);
 	igmp_db_set_policy(&db, &p, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 1));
-	igmp_db_rx(&db, &rx, 100, ch, 8);
+	igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	rx = mk(IGMP_V2_LEAVE, 1, G(239, 1, 1, 1));
-	n = igmp_db_rx(&db, &rx, 200, ch, 8);
+	n = igmp_db_rx(&db, &rx, 200, 0, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 1, "a leave without immediate leave keeps the group for now");
 	n = igmp_db_tick(&db, 200 + 6 - 1, ch, 8);
 	ok(n == 0, "one second before robustness * last member interval it is still there");
@@ -213,11 +213,11 @@ static void test_leave(void)
 
 	/* A report in the window keeps it: the answer to the OLT's query. */
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 1));
-	igmp_db_rx(&db, &rx, 300, ch, 8);
+	igmp_db_rx(&db, &rx, 300, 0, ch, 8);
 	rx = mk(IGMP_V2_LEAVE, 1, G(239, 1, 1, 1));
-	igmp_db_rx(&db, &rx, 400, ch, 8);
+	igmp_db_rx(&db, &rx, 400, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 1));
-	igmp_db_rx(&db, &rx, 402, ch, 8);
+	igmp_db_rx(&db, &rx, 402, 0, ch, 8);
 	n = igmp_db_tick(&db, 410, ch, 8);
 	ok(n == 0 && igmp_db_count(&db) == 1, "a report after the leave holds the membership");
 
@@ -226,15 +226,15 @@ static void test_leave(void)
 	parse("snooping=1\nimmediate_leave=1\n", &p);
 	igmp_db_set_policy(&db, &p, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 1));
-	igmp_db_rx(&db, &rx, 100, ch, 8);
+	igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 3, G(239, 1, 1, 1));
-	igmp_db_rx(&db, &rx, 100, ch, 8);
+	igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	rx = mk(IGMP_V2_LEAVE, 1, G(239, 1, 1, 1));
-	n = igmp_db_rx(&db, &rx, 101, ch, 8);
+	n = igmp_db_rx(&db, &rx, 101, 0, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_SET && ch[0].ports == IGMP_PORTBIT(3),
 	   "immediate leave takes that port out now, the other stays");
 	rx = mk(IGMP_V2_LEAVE, 3, G(239, 1, 1, 1));
-	n = igmp_db_rx(&db, &rx, 102, ch, 8);
+	n = igmp_db_rx(&db, &rx, 102, 0, ch, 8);
 	ok(n == 1 && ch[0].kind == IGMP_CHANGE_DEL && igmp_db_count(&db) == 0,
 	   "the last one out removes the group");
 }
@@ -257,7 +257,7 @@ static void test_static(void)
 	n = igmp_db_tick(&db, 100 + 100000, ch, IGMP_MAX_GROUPS);
 	ok(n == 0 && igmp_db_count(&db) == 3, "a static group never expires");
 	rx = mk(IGMP_V2_LEAVE, 1, G(226, 1, 1, 2));
-	n = igmp_db_rx(&db, &rx, 100, ch, 8);
+	n = igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	igmp_db_tick(&db, 101 + 100, ch, 8);
 	ok(igmp_db_count(&db) == 3, "a leave does not take it away");
 
@@ -302,7 +302,7 @@ static void test_static(void)
 	parse("snooping=1\nstatic=226.1.1.1-226.1.1.2\n", &p);
 	igmp_db_set_policy(&db, &p, ch, IGMP_MAX_GROUPS);
 	rx = mk(IGMP_V2_REPORT, 1, G(226, 1, 1, 1));
-	igmp_db_rx(&db, &rx, 500, ch, 8);
+	igmp_db_rx(&db, &rx, 500, 0, ch, 8);
 	parse("snooping=1\n", &p);
 	igmp_db_set_policy(&db, &p, ch, IGMP_MAX_GROUPS);
 	n = igmp_db_tick(&db, 501, ch, IGMP_MAX_GROUPS);
@@ -416,11 +416,11 @@ static void test_state(void)
 	parse("snooping=1\nmax_groups=2\nallow=239.0.0.0-239.255.255.255\nstatic=226.1.1.1-226.1.1.1\n", &p);
 	igmp_db_set_policy(&db, &p, ch, IGMP_MAX_GROUPS);
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 1));
-	igmp_db_rx(&db, &rx, 100, ch, 8);
+	igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 2));
-	igmp_db_rx(&db, &rx, 100, ch, 8);
+	igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	rx = mk(IGMP_V2_REPORT, 1, G(239, 1, 1, 3));
-	igmp_db_rx(&db, &rx, 100, ch, 8);
+	igmp_db_rx(&db, &rx, 100, 0, ch, 8);
 	n = igmp_state_format(&db, buf, sizeof buf);
 	ok(n == sizeof want - 1 && starts(buf, n, want), "the state file: counters, then the joined groups");
 	ok(igmp_state_format(&db, buf, 10) == 0, "a buffer too small is reported, not truncated");

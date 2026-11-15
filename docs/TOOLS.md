@@ -722,8 +722,9 @@ profile (ME 309 is the IGMP/MLD profile):
 - the IPv6 groups go into a table of their own (128 groups), one row a group
   keyed on its MAC, 33:33 and the low 32 bits of the address, the host and
   the PON as members, by the profile's timers and immediate leave; an MLD
-  join is held to the group limit of ME 310 with the IPv4 groups counted in
-  (an IGMP join still counts the IPv4 groups alone);
+  join is held to the group limit of ME 310 with the IPv4 groups counted in,
+  and an IGMP join with the IPv6 groups counted in, so the limit does not
+  depend on which family joined first;
 - the IPv6 rows of the access control lists (`allow6=`, `static6=` in the
   policy file) restrict IPv6 joins as the IPv4 rows restrict IGMP ones, with
   the same refusals in the same ring shape; IPv4 rows alone restrict nothing

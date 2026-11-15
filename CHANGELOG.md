@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- igmpd: an IGMP join is held to the profile's group limit with the IPv6
+  groups counted in, as an MLD join already counted the IPv4 ones. Before,
+  with a limit of 2, an IPv6 group held first let two IPv4 groups in as
+  well, and the same groups joined the other way round were refused, so
+  the result depended on which family joined first. A group already held
+  or static is still not a new one. A report for a static group on another
+  VLAN no longer counts as a dynamic group in either family, so it no longer
+  takes a place under the limit.
 - igmpd: a static group that does not fit the group table (128 for IPv4, 128
   for IPv6) now counts as an overflow, like a range too wide to name, so
   `IGMP_PON_DROP=1` leaves the PON drop off. Before, the lease turned the
