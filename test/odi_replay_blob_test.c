@@ -22,8 +22,8 @@
 
 /* The record counts of the shipped tables. */
 #define SDKINIT_RECORDS		7429U
-#define MODLOAD_RECORDS		3619U
-#define GPON_INIT_RECORDS	2528U
+#define MODLOAD_RECORDS		1748U
+#define GPON_INIT_RECORDS	800U
 
 /* gponsn: the four serial-number words, USF_PLOAM_TX_WORD[1..4]. */
 #define GPON_SN_WORD1_OFF	0x007050e4U
@@ -101,10 +101,10 @@ static void test_shipped_tables_parse(void)
 	      fw.blob.count == SDKINIT_RECORDS, "sdkinit.bin parses, 7429 records");
 	odi_replay_fw_release(&fw);
 	CHECK(odi_replay_fw_load(ODI_REPLAY_TABLE_MODLOAD, &fw) == 0 &&
-	      fw.blob.count == MODLOAD_RECORDS, "modload.bin parses, 3619 records");
+	      fw.blob.count == MODLOAD_RECORDS, "modload.bin parses, 1748 records");
 	odi_replay_fw_release(&fw);
 	CHECK(odi_replay_fw_load(ODI_REPLAY_TABLE_GPON_INIT, &fw) == 0 &&
-	      fw.blob.count == GPON_INIT_RECORDS, "gpon_init.bin parses, 2528 records");
+	      fw.blob.count == GPON_INIT_RECORDS, "gpon_init.bin parses, 800 records");
 	odi_replay_fw_release(&fw);
 	CHECK(odi_replay_fw_host_loads == odi_replay_fw_host_releases, "every load was released");
 }

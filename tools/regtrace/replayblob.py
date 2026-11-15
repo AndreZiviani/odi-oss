@@ -25,6 +25,20 @@ captured; with bit 0 clear, bit 6 + G keeps the registers of reg_group G,
 and bit 30 keeps reg_group 0 (the three LUT flood masks) with the CPU
 port added, value FLOOD_CPU_VALUE.
 
+    replayblob.py trim-gpon <in-gpon_init.bin> <out.bin>
+
+removes the GPON_INIT_TRIMMED sweeps from a gpon_init blob: the shipped
+gpon_init.bin is the mkgponinit.py output trimmed this way. The driver
+does the table clean in code, and the counter index sweep reads nothing.
+
+    replayblob.py trim-modload-gpon <in-modload.bin> <gpon_init.bin> <out.bin>
+
+removes the GPON MAC register writes (0x700000-0x706fff) from a modload
+blob, after checking that every one of those registers is written again
+after the gpon_init PONMAC reset, by gpon_init or by the driver code that
+took over a GPON_INIT_TRIMMED sweep: the shipped modload.bin is the filtered
+mkmodload.py output trimmed this way.
+
 Format (kernel/extra/drivers/net/ethernet/odi/odi_replay_blob.h is the C
 side and must agree field for field). Every multi-byte field is
 big-endian, the byte order of the RTL9602C, and nothing depends on a C
@@ -250,7 +264,141 @@ def filter_modload(data, mask):
     return pack(TABLE_MODLOAD, kept)
 
 
+# The gpon_init sweeps the blob no longer carries, each as (name, rows,
+# per-row writes). The first three are the clean that
+# odi_gpon_init_clean_tables() does in code after the PONMAC reset wait,
+# with the DONE poll and a read-back: the flow type words and the
+# GEM-port CAM, the Alloc-ID CAM, and the downstream multicast filter, a
+# request of OP 3 (clear) per row with REQ clear, then set. The replay ran
+# them again after that clean, on tables already clear. The fourth selects
+# every per-flow counter of the four indirect pairs (odi_gpon_hw.h) without
+# reading one: the capture records writes only, so the read that clears a
+# counter is not in it, and odi_gpon_flow.c writes the index itself before
+# every read.
+GPON_INIT_TRIMMED = (
+    ("Alloc-ID CAM clean", 32,
+     lambda r: ((0x7010c0, 0x300 | r), (0x7010c0, 0x8300 | r))),
+    ("GEM-port CAM and flow type clean", 128,
+     lambda r: ((0x701100, 0x300 | r), (0x701100, 0x8300 | r), (0x701400 + 4 * r, 0))),
+    ("multicast filter clean", 256,
+     lambda r: ((0x704084, 0x300 | r), (0x704084, 0x8300 | r))),
+    ("per-flow counter index sweep", 128,
+     lambda r: ((0x701140, r), (0x701140, 0x100 | r), (0x704040, r), (0x70404c, r),
+                (0x706048, 0x8080 | r), (0x706048, 0x8000 | r))),
+)
+
+
+def _gpon_plain_reg(rec):
+    """(offset, value) of a gpon_init register record that carries no
+    serial-number word, else None.
+    """
+    kind, sn_word, _res, _tbl, _n, offset, value, *_words = _RECORD_GPON.unpack(rec)
+    if kind != KIND_REG or sn_word != SN_WORD_NONE:
+        return None
+    return offset, value
+
+
+def trim_gpon_init(data):
+    """A gpon_init blob without the GPON_INIT_TRIMMED sweeps, as bytes.
+    Each sweep must appear exactly once, whole and in order; anything else
+    raises ValueError, so a blob of another shape is never trimmed by
+    guess.
+    """
+    table, _crc, records = unpack(data)
+    if table != TABLE_GPON_INIT:
+        raise ValueError("not a gpon_init blob (table %s)" % TABLE_NAMES[table])
+    regs = [_gpon_plain_reg(r) for r in records]
+    drop = set()
+    for name, rows, row_writes in GPON_INIT_TRIMMED:
+        want = [w for r in range(rows) for w in row_writes(r)]
+        at = [i for i in range(len(regs) - len(want) + 1)
+              if regs[i:i + len(want)] == want]
+        if len(at) != 1:
+            raise ValueError("%s: found %d times, want once" % (name, len(at)))
+        drop.update(range(at[0], at[0] + len(want)))
+    return pack(TABLE_GPON_INIT, [r for i, r in enumerate(records) if i not in drop])
+
+
+# The GPON MAC register window. The stock modules loading write a GPON MAC
+# bring-up of their own, a PONMAC_RESET pulse included, which gpon_init.bin
+# repeats in full at the first gponact, after its own reset.
+GPON_MAC_FIRST = 0x700000
+GPON_MAC_END = 0x707000
+PONMAC_RESET = 0x70000c
+
+
+def _gpon_after_reset(gpon_init):
+    """The offsets gpon_init writes after it releases PONMAC_RESET (the
+    first write with RESET_REQ, bit 0, clear that follows one with it set).
+    """
+    table, _crc, records = unpack(gpon_init)
+    if table != TABLE_GPON_INIT:
+        raise ValueError("not a gpon_init blob (table %s)" % TABLE_NAMES[table])
+    regs = [_gpon_plain_reg(r) for r in records]
+    pulsed = False
+    for i, reg in enumerate(regs):
+        if reg is None or reg[0] != PONMAC_RESET:
+            continue
+        if reg[1] & 1:
+            pulsed = True
+        elif pulsed:
+            return {r[0] for r in regs[i + 1:] if r is not None}
+    raise ValueError("gpon_init has no PONMAC_RESET pulse")
+
+
+def trim_modload_gpon(modload, gpon_init):
+    """A modload blob without its GPON MAC register writes, as bytes. Every
+    register it drops but PONMAC_RESET must be written again after the
+    gpon_init reset, by gpon_init or by the code that took over a trimmed
+    sweep, or this raises ValueError: a write gpon_init does not
+    repeat is not dropped by guess.
+    """
+    table, _crc, records = unpack(modload)
+    if table != TABLE_MODLOAD:
+        raise ValueError("not a modload blob (table %s)" % TABLE_NAMES[table])
+    # The registers of the trimmed sweeps are written after the reset too:
+    # by the driver clean, or by odi_gpon_flow.c before every read.
+    again = _gpon_after_reset(gpon_init) | {
+        o for _n, rows, row_writes in GPON_INIT_TRIMMED
+        for r in range(rows) for o, _v in row_writes(r)}
+    kept = []
+    dropped = 0
+    for rec in records:
+        kind, _cat, _grp, _verb, _tbl, _n, offset, _value, *_w = _RECORD_SWITCH.unpack(rec)
+        if kind == KIND_REG and GPON_MAC_FIRST <= offset < GPON_MAC_END:
+            if offset != PONMAC_RESET and offset not in again:
+                raise ValueError("0x%06x: gpon_init does not write it after its reset" % offset)
+            dropped += 1
+            continue
+        kept.append(rec)
+    if not dropped:
+        raise ValueError("no GPON MAC register write to drop")
+    return pack(TABLE_MODLOAD, kept)
+
+
 def main(argv):
+    if len(argv) == 5 and argv[1] == "trim-modload-gpon":
+        with open(argv[2], "rb") as f:
+            modload = f.read()
+        with open(argv[3], "rb") as f:
+            gpon_init = f.read()
+        try:
+            out = trim_modload_gpon(modload, gpon_init)
+        except ValueError as e:
+            sys.exit("replayblob.py: %s: %s" % (argv[2], e))
+        with open(argv[4], "wb") as f:
+            f.write(out)
+        return
+    if len(argv) == 4 and argv[1] == "trim-gpon":
+        with open(argv[2], "rb") as f:
+            data = f.read()
+        try:
+            out = trim_gpon_init(data)
+        except ValueError as e:
+            sys.exit("replayblob.py: %s: %s" % (argv[2], e))
+        with open(argv[3], "wb") as f:
+            f.write(out)
+        return
     if len(argv) == 5 and argv[1] == "filter":
         with open(argv[2], "rb") as f:
             data = f.read()
