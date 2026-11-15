@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
+  mapper with one target forwards the tagged frames of a priority the mapper
+  sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair

@@ -799,6 +799,24 @@ fixed template: it is idempotent.
   `VLAN_ACCEPT_FRAMES(2)`; the register there is `VLAN_SETUP`, whose four
   fields decode the values written.
 
+#### Priorities an 802.1p mapper discards
+
+G.988 9.3.10 gives each priority of an 802.1p mapper (class 130) an
+interworking pointer, and the null pointer 0xffff discards the frames of that
+priority. omcid follows it only where the mapper sends its priorities to more
+than one GEM IW TP: the rules of each target then carry just the priorities
+the mapper gives it (`mapper_splits()` in `src/omci/respond/apply_bridge.c`).
+A bridge port on a mapper (TP type 3) whose mapped priorities all go to one target
+keeps the single rule it always had, so tagged frames of a priority the
+mapper sets to 0xffff still go up that GEM port. (A bridge port on the GEM IW
+TP itself, TP type 5, whose mapper gives it exactly one priority, filters on
+that priority, so the others do not pass there.)
+
+This is a deliberate deviation. No OLT is known to rely on the discard, and
+following it could only cost tagged traffic that works today (#306, #315,
+#421). The `vlan-test.sh` case "one target with a priority unmapped" holds
+it. If an OLT ever needs the discard, it can be added behind a key.
+
 ### CF rows
 
 A CF (classification) row is three tables at one index: `CLS_RULE_B` and
