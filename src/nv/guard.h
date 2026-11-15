@@ -25,9 +25,12 @@ const char *nv_guard(const char *key, const char *value);
 
 /* The arguments of `nv setenv`, after the verb:
  *
- *     [--force|-f] [-c 1|2] key [value]
+ *     [--force|-f] [-c 1|2] [--] key [value]
  *
- * the two options in either order. */
+ * the two options in either order; -- ends them, for a key that starts
+ * with '-'. A key with '=' in it is refused: the environment matches a
+ * name up to its own end, so `bootcmd=x` would reach the bootcmd entry
+ * past the guard. */
 struct nv_setenv_args {
 	int force;
 	int copy;          /* 0, or the copy -c named */
@@ -38,6 +41,7 @@ struct nv_setenv_args {
 #define NV_ARGS_OK     0
 #define NV_ARGS_USAGE  1  /* no key, or an unknown option */
 #define NV_ARGS_COPY   2  /* -c without 1 or 2 */
+#define NV_ARGS_NAME   3  /* an empty name, or one with '=' in it */
 
 /* argv[0] is the first word after "setenv". */
 int nv_setenv_parse(int argc, char **argv, struct nv_setenv_args *out);

@@ -81,6 +81,14 @@ int main(void)
 	ck(parse(&a, 1, "--force") == NV_ARGS_USAGE, "--force alone is usage");
 	ck(parse(&a, 0) == NV_ARGS_USAGE, "nothing is usage");
 	ck(parse(&a, 2, "--frce", "x") == NV_ARGS_USAGE, "an unknown option is usage");
+	ck(parse(&a, 2, "bootcmd=echo x", "y") == NV_ARGS_NAME,
+	   "a name with '=' is refused (it would reach bootcmd past the guard)");
+	ck(parse(&a, 1, "sw_commit=") == NV_ARGS_NAME, "a name ending in '=' is refused");
+	ck(parse(&a, 2, "", "x") == NV_ARGS_NAME, "an empty name is refused");
+	ck(parse(&a, 3, "--", "-x", "1") == NV_ARGS_OK && a.key[0] == '-' && a.value[0] == '1',
+	   "-- ends the options, for a key that starts with '-'");
+	ck(parse(&a, 4, "-f", "--", "sw_commit", "1") == NV_ARGS_OK && a.force,
+	   "--force before --");
 
 	printf("%s: %d failed\n", fails ? "FAIL" : "ok", fails);
 	return fails ? 1 : 0;

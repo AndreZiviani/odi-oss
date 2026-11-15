@@ -1037,7 +1037,7 @@ in service.
 ### `nv` -- the U-Boot environment
 
     nv getenv [name]              print one variable, or all of them
-    nv setenv [--force] [-c 1|2] name [value]
+    nv setenv [--force] [-c 1|2] [--] name [value]
                                   set one, or unset it without a value (in the copy that was read, or copy 1|2;
                                   an invalid copy is repaired first); the boot keys need --force, below
     nv fallback [name]            read the OTHER copy, the one U-Boot falls back to
@@ -1060,7 +1060,9 @@ trial-boots slot 1 for any value other than 0 and 2). The error says why and
 what to run instead where there is something: `nv commit <slot>` for
 `sw_commit`, a trial with `sw_tryactive` for `sw_active`. `--force` (or `-f`)
 writes them anyway. `sw_tryactive` 0, 1 or 2 and `sw_version0/1` stay open:
-the web UI and `fwu.sh` write them.
+the web UI and `fwu.sh` write them. A name with `=` in it, or an empty one,
+is refused, since a name is matched up to its own end and `bootcmd=x` would
+otherwise reach `bootcmd`. `--` ends the options.
 
 When one copy is already invalid (a write cut by a power loss is how), `setenv`
 and `commit` repair it as part of the write: the new environment is built and

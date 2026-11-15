@@ -54,6 +54,7 @@ const char *nv_guard(const char *key, const char *value)
 int nv_setenv_parse(int argc, char **argv, struct nv_setenv_args *out)
 {
 	int a = 0;
+	int i;
 
 	out->force = 0;
 	out->copy = 0;
@@ -63,6 +64,9 @@ int nv_setenv_parse(int argc, char **argv, struct nv_setenv_args *out)
 		if (same(argv[a], "--force") || same(argv[a], "-f")) {
 			out->force = 1;
 			a++;
+		} else if (same(argv[a], "--")) {
+			a++;
+			break;
 		} else if (same(argv[a], "-c")) {
 			if (a + 1 >= argc)
 				return NV_ARGS_USAGE;
@@ -83,5 +87,10 @@ int nv_setenv_parse(int argc, char **argv, struct nv_setenv_args *out)
 	 * does. */
 	out->key = argv[a];
 	out->value = argc - a >= 2 ? argv[a + 1] : 0;
+	if (!out->key[0])
+		return NV_ARGS_NAME;
+	for (i = 0; out->key[i]; i++)
+		if (out->key[i] == '=')
+			return NV_ARGS_NAME;
 	return NV_ARGS_OK;
 }

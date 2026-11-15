@@ -604,7 +604,7 @@ static void commit_warn_other(const char *arg)
 static void usage(void)
 {
 	out("Usage: nv getenv [parameter_name]\n"
-	    "       nv setenv [--force] [-c 1|2] parameter_name [value]\n"
+	    "       nv setenv [--force] [-c 1|2] [--] parameter_name [value]\n"
 	    "       nv fallback [parameter_name]\n"
 	    "       nv commit [--force] slot\n"
 	    "       nv slotcheck slot\n"
@@ -659,6 +659,10 @@ int main(int argc, char **argv)
 
 		if (prc == NV_ARGS_COPY) {
 			out("nv: -c takes 1 or 2\n");
+			return 1;
+		}
+		if (prc == NV_ARGS_NAME) {
+			out("nv: setenv: a name cannot be empty or contain '='\n");
 			return 1;
 		}
 		if (prc != NV_ARGS_OK) {

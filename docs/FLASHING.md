@@ -369,7 +369,7 @@ unreadable, `nv commit` (`--force` included) and every `nv setenv` stay refused
 and `nv` has no way around it (the raw restore under "Restore" is for a
 damaged environment, and may not help if the flash cannot be read). `nv setenv
 sw_commit <slot>` is refused; with `--force` it writes only one copy and
-skips every check above. When the fallback copy still names another slot,
+skips the slot and trial checks of `nv commit`. When the fallback copy still names another slot,
 `nv commit <running slot>` makes it agree: it writes only the copy that
 differs.
 

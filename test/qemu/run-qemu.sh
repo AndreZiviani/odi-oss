@@ -565,6 +565,19 @@ for args in "sw_commit 1" "-c 2 sw_commit 1" "sw_active 1" "bootcmd" "mupgrade_e
 done
 [ "$(md5sum < $R/dev/mtd1)" = "$sum0" ]
 [ "$(md5sum < $R/dev/mtd2)" = "$sum1" ]
+# The refusal comes before nv reads anything: with no partitions listed, a
+# guarded key is still refused, not "no valid environment".
+mv $R/proc/mtd $R/proc/mtd.real && : > $R/proc/mtd
+rc=0; out=$(chroot $R /bin/nv setenv sw_commit 1 2>&1) || rc=$?
+mv $R/proc/mtd.real $R/proc/mtd
+echo "setenv sw_commit 1, no partitions: rc=$rc"; echo "$out"
+[ "$rc" = 1 ]
+echo "$out" | head -n 1 | grep -q "^nv: setenv sw_commit: refused: "
+# A name with '=' would reach bootcmd past the guard: refused.
+rc=0; out=$(chroot $R /bin/nv setenv "bootcmd=x" y 2>&1) || rc=$?
+echo "setenv bootcmd=x y: rc=$rc"; echo "$out"
+[ "$rc" = 1 ]
+echo "$out" | grep -q "a name cannot be empty or contain '='"
 GUEST
 sed 's/^/    /' "$WORK/slotcheck.out"
 sshx 'rm -rf /tmp/sc'

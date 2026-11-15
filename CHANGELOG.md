@@ -12,7 +12,8 @@ listed here.
   2, which U-Boot reads as a trial of slot 1. It refuses before it reads or
   writes a copy, says why and names what to run instead (`nv commit` for
   `sw_commit`). `sw_tryactive` 0, 1, 2 and `sw_version0/1` stay open for the
-  web UI and `fwu.sh`. The hints in `fwu.sh` and `docs/FLASHING.md` now
+  web UI and `fwu.sh`. A name with `=` in it, which would reach the entry
+  before it, and an empty one are refused; `--` ends the options. The hints in `fwu.sh` and `docs/FLASHING.md` now
   point a stale fallback `sw_commit` to `nv commit <running slot>`, and
   setenv's NOTE line adds it. Issue #414.
 - omcid: a MIB reset loop is named instead of left to be counted in the log.
