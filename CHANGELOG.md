@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- Identity: the first boot of this image copies the provisioning identity
+  (`GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`, `GPON_ONU_MODEL`, the four
+  LOID keys, `ONU_HW_VERSION`, `MAC_KEY`, `PON_VENDOR_ID`,
+  `GPON_PLOAM_FORMAT`) to `/etc/config/identity.orig`, mode 600, and no later
+  boot rewrites it. `identity.sh show` compares it with the current values
+  (secrets hidden), `identity.sh restore` writes back what differs and says
+  whether `apply.sh omci` or a reboot is needed, and `identity.sh replace
+  --yes` takes a new copy on purpose. No copy on a safe-mode boot or from a
+  store without a serial. Not in the diagnostics bundle or the web UI backup.
+  The copy holds what the stick had at that boot, so on a stick changed
+  before it is not the factory identity. Taken at boot, before NTP, it
+  says `taken=unknown` and the file is dated 1970. `test/identity_test.sh`
+  runs on macOS too (no GNU `sed -i` or `stat -c`). Issue #387.
 - GPON: `/proc/odi_gpon/drops`, a short record of the PON side around every
   drop out of O5, frozen when it happens: the 60 s before and the 120 s
   after, with PLOAM messages both ways (type and ONU-ID, no contents), ONU

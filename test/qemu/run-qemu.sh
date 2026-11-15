@@ -649,6 +649,11 @@ DIAG_ZERO_LINE="harness: table 0052${DIAG_ZERO}${DIAG_ZERO}0000"
 sshx "sed -i 's|</Config>|\t<Value Name=\"LOID_PASSWD_OLD\" Value=\"$DIAG_ZERO\"/>\n</Config>|' /etc/config/lastgood.xml"
 sshx "grep -c 'Value=\"$DIAG_ZERO\"' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant LOID_PASSWD_OLD in lastgood.xml"
 sshx "echo '$DIAG_ZERO_LINE' > /var/log/qemu-zero.log"
+# The identity snapshot holds the same secrets, on the same partition: taken
+# here from the planted stores (identity.sh, mode 600), and never collected.
+sshx '/etc/scripts/identity.sh replace --yes' >/dev/null || fail "identity.sh replace --yes failed"
+[ "$(sshx 'stat -c %a /etc/config/identity.orig')" = 600 ] || fail "the identity snapshot is not mode 600"
+sshx "grep -c ' LOID_PASSWD=$DIAG_LOIDPW\$' /etc/config/identity.orig" | grep -qx 1 || fail "the identity snapshot does not hold the planted LOID password"
 # The same values sent to syslog (through /dev/kmsg and klogd: the image has
 # no logger), which the bundle copies from logread. klogd loses the first
 # kernel line after syslogd restarts (its socket send fails once, then it
@@ -691,6 +696,7 @@ for f in module/a0.txt module/a2.txt module/chip.txt; do
 done
 ! grep -q 'module/a2-p' "$D/MANIFEST.txt" || fail "a page was dumped with no I2C bus: $(grep module/ "$D/MANIFEST.txt")"
 echo "  module/: a0, a2 and chip listed with a failing status (no I2C bus in qemu), the bundle still succeeds"
+[ ! -e "$D/config/identity.orig" ] || fail "the identity snapshot is in the bundle"
 grep -q 'Name="GPON_PLOAM_PASSWD" Value="REDACTED"' "$D/config/lastgood.xml" || fail "GPON_PLOAM_PASSWD is not redacted in the config copy"
 grep -q 'Name="LAN_IP_ADDR" Value="10.0.2.15"' "$D/config/lastgood.xml" || fail "the config copy lost a key that is not a secret"
 [ ! -e "$D/config/confd.auth" ] || fail "confd.auth is in the bundle"

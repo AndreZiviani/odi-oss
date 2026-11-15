@@ -33,6 +33,7 @@ source here; `/etc/odi-build` on the stick records which releases went in
 | `omcicap` | CLI: capture the OMCI channel | you | odi_omci netlink (takes type 1) | stdout | -- |
 | `nv` | CLI: the U-Boot environment | you, confd | mtd `env`, `env2` | stdout | -- |
 | `flash` | CLI: the config store | confd, you | `/var/config/lastgood*.xml` | stderr | -- |
+| `identity.sh` | CLI: the identity snapshot (`snapshot`, `show`, `restore`, `replace --yes`) | rcS (`snapshot`), you | `/var/config/identity.orig`, `/var/config/lastgood*.xml`, `odi.conf` | stdout, stderr | -- |
 | `fwu.sh` | CLI: flash one slot | you, `fwu_starter.sh` (from the image tarball) | mtd `k0`/`r0` or `k1`/`r1` | stdout | -- |
 | `fwu_starter.sh` | CLI: write an uploaded tarball to the inactive slot | confd, you | runs `fwu.sh` from the tarball | `/tmp/fwu.log`, `/tmp/fwu.state` | -- |
 | `apply.sh` | CLI: apply saved settings without a reboot | confd, you | `network.sh addr`; SIGHUP to omcid | stdout | -- |

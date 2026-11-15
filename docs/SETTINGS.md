@@ -253,7 +253,9 @@ Details that bite:
   missing (display only; rcS reads the right file, so ranging was fine).
 - **The identity keys (`GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`,
   `GPON_ONU_MODEL`) need the UI's confirmation tick.** They cannot be
-  regenerated: take a backup first.
+  regenerated: take a backup first. The stick keeps one copy of its own,
+  taken at the first boot of an image that has it ("The identity snapshot"
+  below).
 - **A key cannot be cleared from the UI.** Over ssh, `flash set KEY ""` stores
   an empty value for a stock key (and removes an odi-only key); it does not
   refuse it.
@@ -1191,6 +1193,52 @@ then `systemctl enable --now odi-config-backup.timer`; a failed run shows in
 (`gpon_config_info`, odi-sfp-exporter), so an alert on a change can point at
 the backup taken before it.
 
+### The identity snapshot
+
+The first boot of an image that has `/etc/scripts/identity.sh` copies the
+provisioning identity to `/etc/config/identity.orig`, and no later boot
+writes it again. It is the way back after an identity edit, or after
+`flash default cs` emptied the LOID keys, when no backup was taken. It holds
+what the stick had at that boot: on a stick whose identity was changed
+before (under the stock firmware or an earlier image), that is the changed
+identity, not the factory one. Its `image=` and `taken=` lines say which
+image took it and when. The boot step runs before NTP can set the clock
+(the stick has no RTC), so a snapshot taken at boot always says
+`taken=unknown` and the file itself is dated 1970. A snapshot taken
+later, once NTP has set the clock, records a date; for an existing one
+that means `identity.sh replace --yes`.
+
+The keys: `GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`, `GPON_ONU_MODEL`,
+the four LOID keys, `ONU_HW_VERSION`, and the stock-only `MAC_KEY`,
+`PON_VENDOR_ID` and `GPON_PLOAM_FORMAT`. Each with the store that held it
+(`cs`, `hs` or `odi`) and its value as stored, or marked absent. The file is
+mode 600 and holds the passwords in clear, like the stores next to it; the
+diagnostics bundle does not collect it, and the web UI backup does not carry
+it (a backup restored onto another stick must not bring this stick's
+snapshot along). It is a separate file because the stock firmware drops a
+key it does not know from `lastgood*.xml` at its first save, and `odi.conf`
+holds live settings.
+
+| command | does |
+|---|---|
+| `identity.sh show` | the snapshot against the current values, one line per key (`same` or `differs`); secrets show as `(hidden)` |
+| `identity.sh restore` | writes back every value that differs, into the store that holds the key now, then reads them back. Applies nothing: it prints `apply.sh omci` when an OMCI key changed (INTERRUPTS INTERNET) and a reboot when `ELAN_MAC_ADDR` did; `GPON_ONU_MODEL` and `ONU_HW_VERSION` reach the OLT only while `omci-identity.on` exists. A key that is in no store any more is named and not restored (exit 1); an odi-only key that was cleared is added back |
+| `identity.sh replace --yes` | overwrites the snapshot with the current values, for example right after restoring a known-good backup on a stick whose snapshot holds a changed identity |
+
+rcS runs `identity.sh snapshot` at every boot, after the safe-mode count:
+it returns at once when the file exists, takes none on a safe-mode boot,
+and takes none from a store that is missing, cut off or has no `GPON_SN`
+(the next boot tries again). Snapshot and restore hold the writer lock of
+`flash`, and every file is written beside its target and renamed over it.
+restore writes `lastgood.xml`, `lastgood_hs.xml` and `odi.conf` one after
+the other, so a power cut between them leaves part of the keys restored;
+running it again finishes. The snapshot lives on the same partition as the
+stores, so it is no substitute for a backup off the stick ("Backing up from
+a host" above).
+
+Whether the stock firmware leaves the file alone when the stick falls back
+to it has not been measured; it is expected to, as with `odi.conf`.
+
 ## Keys this image stores but does not use
 
 Writing any of these changes the file and nothing else on this image; the UI
@@ -1234,6 +1282,7 @@ applies to every later image.
 | `pon-steps` | development: a PON step list that replaces the built-in one (`docs/BOOT.md`); a wrong list means no PON | REBOOT |
 | `sds.off` | skip the host SerDes check and fix in `network.sh` | REBOOT |
 | `boot-count`, `boot-wdt`, `safe-mode` | not switches: the boot counters and the safe-mode record ("Recovery: the safe mode" above), written by `safe-mode.sh`; removing the record is the acknowledgement | -- |
+| `identity.orig` | not a switch: the identity snapshot ("The identity snapshot" above), written once by `identity.sh`; `identity.sh replace --yes` rewrites it | -- |
 | `optics.off` | skip the `laser` PON step (the I2C steps still run): **the laser stays off, no service** | REBOOT |
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |
 | `breadcrumbs.on` | development: boot crumbs, `trial-diag.txt` and a heartbeat, on flash | REBOOT |
