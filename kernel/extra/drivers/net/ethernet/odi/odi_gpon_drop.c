@@ -51,19 +51,49 @@ static void odi_gpon_drop_add(struct odi_gpon_drop_rec *r, const struct odi_gpon
 	r->ev[r->n++] = *e;
 }
 
+/* A repeat of the PLOAM in last: same direction, type and ONU-ID, within
+ * ODI_GPON_DROP_FOLD_MS of its last copy. Counted in last if so.
+ */
+static int odi_gpon_drop_fold(struct odi_gpon_drop_ev *last, const struct odi_gpon_drop_ev *e,
+			      uint32_t now_ms)
+{
+	if (last->kind != ODI_GPON_DROP_PLOAM || e->kind != ODI_GPON_DROP_PLOAM ||
+	    last->a != e->a || last->b != e->b || last->c != e->c)
+		return 0;
+	if (!odi_gpon_drop_after(last->ms + last->v2, now_ms) ||
+	    now_ms - (last->ms + last->v2) > ODI_GPON_DROP_FOLD_MS)
+		return 0;
+	last->v++;
+	last->v2 = now_ms - last->ms;
+	return 1;
+}
+
 void odi_gpon_drop_note(struct odi_gpon_drop *d, uint32_t now_ms,
 			const struct odi_gpon_drop_ev *e)
 {
 	struct odi_gpon_drop_ev ev = *e;
+	struct odi_gpon_drop_rec *r;
 
 	odi_gpon_drop_close(d, now_ms);
+	r = d->open >= 0 ? &d->rec[d->open] : NULL;
 	ev.ms = now_ms;
-	d->ring[d->head] = ev;
-	d->head = (d->head + 1U) % ODI_GPON_DROP_RING;
-	if (d->count < ODI_GPON_DROP_RING)
-		d->count++;
-	if (d->open >= 0)
-		odi_gpon_drop_add(&d->rec[d->open], &ev);
+	if (ev.kind == ODI_GPON_DROP_PLOAM) {
+		ev.v = 0;
+		ev.v2 = 0;
+	}
+	/* The ring and the open record each fold a repeat into their own
+	 * last event; a record that is full counts the repeat as lost.
+	 */
+	if (!d->count ||
+	    !odi_gpon_drop_fold(&d->ring[(d->head + ODI_GPON_DROP_RING - 1U) % ODI_GPON_DROP_RING],
+				&ev, now_ms)) {
+		d->ring[d->head] = ev;
+		d->head = (d->head + 1U) % ODI_GPON_DROP_RING;
+		if (d->count < ODI_GPON_DROP_RING)
+			d->count++;
+	}
+	if (r && (r->n == 0U || r->lost || !odi_gpon_drop_fold(&r->ev[r->n - 1U], &ev, now_ms)))
+		odi_gpon_drop_add(r, &ev);
 }
 
 /* A new record for the drop at now_ms: the first one of the boot goes to
@@ -181,8 +211,9 @@ void odi_gpon_drop_show(const struct odi_gpon_drop *d, uint32_t now_ms,
 			odi_gpon_drop_rel(rel, sizeof(rel), r->at_ms, e->ms);
 			switch (e->kind) {
 			case ODI_GPON_DROP_PLOAM:
-				snprintf(line, sizeof(line), "  %s ploam %s type 0x%02x onu_id 0x%02x\n",
-					 rel, e->a ? "us" : "ds", e->b, e->c);
+				snprintf(line, sizeof(line),
+					 "  %s ploam %s type 0x%02x onu_id 0x%02x count %u over_ms %u\n",
+					 rel, e->a ? "us" : "ds", e->b, e->c, e->v + 1U, e->v2);
 				break;
 			case ODI_GPON_DROP_STATE:
 				snprintf(line, sizeof(line), "  %s state %s %s cause %s side %s\n",

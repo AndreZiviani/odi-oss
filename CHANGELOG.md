@@ -11,7 +11,9 @@ listed here.
   state changes with their cause and side, LOS and LOF edges and the 1 s
   sample (state, alarm bits, BIP error blocks). Four records, the first of
   the boot kept and the latest three beside it, so a later drop never
-  overwrites the first. In the diagnostics bundle as
+  overwrites the first. A PLOAM the OLT repeats within 10 ms is one line
+  with a count, so an OLT that sends every burst three times does not fill a
+  record before its 120 s. In the diagnostics bundle as
   `pon/odi_gpon-drops.txt`. RAM only for now: a watchdog reset loses it.
   Refs #390.
 - Tests: `test/apply_test.sh` no longer fails now and then on a busy runner

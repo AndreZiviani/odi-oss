@@ -14,6 +14,13 @@
  * that record for ODI_GPON_DROP_POST_MS more. That answers "who dropped
  * first" (an OLT deactivate against a LOS or LOF) after the fact.
  *
+ * An OLT may send the same PLOAM several times in a row (one seen sends
+ * every downstream burst three times, every 5 s). A PLOAM with the same
+ * direction, type and ONU-ID as the event before it, within
+ * ODI_GPON_DROP_FOLD_MS of its last copy, is counted in that event instead
+ * of taking a line of its own, so the repeats do not fill a record before
+ * its window has passed.
+ *
  * ODI_GPON_DROP_SLOTS records: the first of the boot is kept, the others
  * hold the latest, so a later drop never overwrites the first one. A drop
  * while a record is still collecting is counted in it, not given a new one.
@@ -35,9 +42,13 @@
 #define ODI_GPON_DROP_SLOTS	4U	/* records: the first and the latest three */
 #define ODI_GPON_DROP_PRE_MS	60000U	/* history copied in at the drop */
 #define ODI_GPON_DROP_POST_MS	120000U	/* and kept adding to after it */
+#define ODI_GPON_DROP_FOLD_MS	10U	/* a PLOAM repeated this soon is one event */
 
 enum odi_gpon_drop_kind {
-	ODI_GPON_DROP_PLOAM = 1,	/* a: 0 ds, 1 us; b: type; c: ONU-ID */
+	ODI_GPON_DROP_PLOAM = 1,	/* a: 0 ds, 1 us; b: type; c: ONU-ID;
+					 * v: repeats folded in; v2: ms from the
+					 * first copy to the last
+					 */
 	ODI_GPON_DROP_STATE,		/* a: from; b: to; s: cause; s2: side */
 	ODI_GPON_DROP_ALARM,		/* a: 0 LOS, 1 LOF; b: 1 on, 0 off; c: state */
 	ODI_GPON_DROP_SAMPLE,		/* a: state; v: alarm bits; v2: BIP error blocks since the last */

@@ -9,8 +9,10 @@
  * until POST_MS has passed and not after; a second drop while a record is
  * collecting is counted in it; the first record of the boot is kept while
  * the later ones rotate through the other slots; a record that is full
- * counts what it lost; a wrapping millisecond clock; and the
- * /proc/odi_gpon/drops lines.
+ * counts what it lost; a PLOAM repeated within FOLD_MS is one event with a
+ * count, in the ring and in the record, and an OLT that sends every burst
+ * three times no longer fills a record before its window ends; a wrapping
+ * millisecond clock; and the /proc/odi_gpon/drops lines.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -117,7 +119,7 @@ int main(void)
 	      "show: the record line");
 	CHECK(strstr(out, "  -0.500 los on state O5\n") != NULL, "show: the alarm half a second before");
 	CHECK(strstr(out, "  +0.000 state O5 O6 cause los side line\n") != NULL, "show: the change at offset 0");
-	CHECK(strstr(out, "  +0.020 ploam ds type 0x03 onu_id 0x01\n") != NULL, "show: a PLOAM after it");
+	CHECK(strstr(out, "  +0.020 ploam ds type 0x03 onu_id 0x01 count 1 over_ms 0\n") != NULL, "show: a PLOAM after it");
 	CHECK(strstr(out, "  -60.000 sample state O5 alarms 0x00000000 bip_blocks 0\n") != NULL,
 	      "show: the oldest sample is 60 s before");
 
@@ -144,9 +146,51 @@ int main(void)
 	odi_gpon_drop_reset(&d);
 	odi_gpon_drop_state(&d, 5000U, 5, 2, "deactivate_onu_id", "olt");
 	for (unsigned int i = 0; i < ODI_GPON_DROP_EVENTS + 10U; i++)
-		ploam(&d, 5001U + i, 0, 0x01);
+		ploam(&d, 5001U + i * (ODI_GPON_DROP_FOLD_MS + 1U), 0, 0x01);
 	CHECK(d.rec[0].n == ODI_GPON_DROP_EVENTS && d.rec[0].lost == 11,
 	      "a full record keeps its first events and counts the rest");
+
+	/* --- repeats fold --- */
+	odi_gpon_drop_reset(&d);
+	ploam(&d, 1000U, 0, 0x0a);
+	ploam(&d, 1001U, 0, 0x0a);
+	ploam(&d, 1003U, 0, 0x0a);
+	CHECK(d.count == 1 && d.ring[0].v == 2 && d.ring[0].v2 == 3,
+	      "three copies within a few ms are one event, counted");
+	ploam(&d, 1003U + ODI_GPON_DROP_FOLD_MS + 1U, 0, 0x0a);
+	CHECK(d.count == 2, "a copy past the fold window is an event of its own");
+	ploam(&d, 2000U, 0, 0x0a);
+	ploam(&d, 2001U, 1, 0x0a);
+	ploam(&d, 2002U, 0, 0x0b);
+	ploam(&d, 2003U, 0, 0x0b);
+	CHECK(d.count == 5, "another direction or type is not folded");
+	odi_gpon_drop_state(&d, 3000U, 5, 2, "deactivate_onu_id", "olt");
+	ploam(&d, 3001U, 0, 0x04);
+	ploam(&d, 3002U, 0, 0x04);
+	ploam(&d, 3004U, 0, 0x04);
+	CHECK(d.rec[0].ev[d.rec[0].n - 1U].v == 2, "the record folds them too");
+	show(&d, 4000U);
+	CHECK(strstr(out, "  +0.001 ploam ds type 0x04 onu_id 0x01 count 3 over_ms 3\n") != NULL,
+	      "show: one line with the count and the spread");
+	CHECK(strstr(out, "  -2.000 ploam ds type 0x0a onu_id 0x01 count 3 over_ms 3\n") != NULL,
+	      "show: the folded history copied in at the drop");
+
+	/* An OLT that sends every PLOAM burst three times, every 5 s, with the
+	 * 1 s sample: the record covers its whole 120 s and loses nothing.
+	 */
+	odi_gpon_drop_reset(&d);
+	for (ms = 0; ms < 300000U; ms += 1000U) {
+		if (ms == 100000U)
+			odi_gpon_drop_state(&d, ms, 5, 1, "deactivate_onu_id", "olt");
+		sample(&d, ms + 1U, ms < 100000U ? 5 : 1);
+		if (ms % 5000U == 0U)
+			for (unsigned int k = 0; k < 4; k++)
+				for (unsigned int c = 0; c < 3; c++)
+					ploam(&d, ms + 100U + k * 20U + c, 0, (uint8_t)(0x01 + k));
+	}
+	CHECK(!d.rec[0].collecting && d.rec[0].lost == 0 &&
+	      d.rec[0].ev[d.rec[0].n - 1U].ms >= 100000U + ODI_GPON_DROP_POST_MS - 1000U,
+	      "a burst sent three times fills no record before its 120 s");
 
 	/* --- the clock wraps --- */
 	odi_gpon_drop_reset(&d);
