@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Switch: the uniform table sweeps of `sdkinit.bin` and `modload.bin` (the
+  4,095 VLAN rows of the `vlan` verb, the 512 and 1,024 CF table rows of
+  `classify`, the 1,024 CF rows of the module-load replay) are now table
+  fills the driver writes in code, one call record each, instead of
+  replayed row by row. The writes and their order are unchanged:
+  `replayblob.py expand` gives back the previous files byte for byte.
+  `sdkinit.bin` shrinks from 267 KB to 65 KB, `modload.bin` from 130 KB to
+  93 KB, and what is left in them is register settings. Refs #398.
 - Tests: `test/apply_test.sh` no longer fails now and then on a busy runner
   ("identity: back in O5 with services"). Its stub omcid read the case
   script while it ran, so a reload still in progress could read the

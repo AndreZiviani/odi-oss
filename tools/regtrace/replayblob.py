@@ -13,6 +13,15 @@ prints one line per record, the same text a generator prints on stdout
 when it is given no output path, so a checked-in blob can be reviewed (and
 diffed) as text.
 
+    replayblob.py compact <in.bin> <out.bin>
+    replayblob.py expand <in.bin> <out.bin>
+
+compact replaces each uniform table sweep of an sdkinit or modload blob
+(a run of identical cleared rows, FILL_* below) by one CALL record the
+driver generates in code; expand writes the rows back. The shipped
+sdkinit.bin and modload.bin are compacted, and expanding them gives the
+generator output byte for byte (test/replayblob_fill_test.sh).
+
     replayblob.py filter <in-modload.bin> <out.bin> <mask>
 
 applies a module-load replay mask to a modload blob ahead of time, the
@@ -48,15 +57,20 @@ exactly HEADER_SIZE + count * RECORD_SIZE.
 
 Record, switch tables (sdkinit and modload):
 
-    0   u8   kind         KIND_REG, KIND_TABLE or KIND_SOC
-    1   u8   category     modload: 0-5; sdkinit: 0
+    0   u8   kind         KIND_REG, KIND_TABLE, KIND_SOC or KIND_CALL
+    1   u8   category     modload: 0-5 (a CALL record 1-5); sdkinit: 0
     2   u8   reg_group    modload category 0: 0..MAX_REG_GROUP; else 0
     3   u8   verb         sdkinit: index into SDKINIT_VERBS; modload: 0
-    4   u16  table        TABLE records: switch table id; else 0
-    6   u16  n_words      TABLE records: 1..MAX_WORDS; else 0
-    8   u32  offset       REG: MMIO offset; TABLE: row index; SOC: address
-    12  u32  value        REG and SOC records; 0 for TABLE
-    16  u32  words[5]     TABLE records, zero past n_words; else 0
+    4   u16  table        TABLE: switch table id; CALL: FILL_*; else 0
+    6   u16  n_words      TABLE: 1..MAX_WORDS; CALL: FILL_WORDS; else 0
+    8   u32  offset       REG: MMIO offset; TABLE: row index; SOC: address;
+                          CALL: first row
+    12  u32  value        REG and SOC records; CALL: row count; 0 for TABLE
+    16  u32  words[5]     TABLE and CALL records, zero past n_words; else 0
+
+A CALL record (sdkinit and modload only) stands for rows first ..
+first + count - 1, each written as fill_rows() says (enum odi_replay_fill
+in odi_replay_blob.h is the C side).
 
 Record, GPON init table:
 
@@ -87,7 +101,36 @@ TABLE_NAMES = {TABLE_SDKINIT: "sdkinit", TABLE_MODLOAD: "modload",
 KIND_REG = 0
 KIND_TABLE = 1
 KIND_SOC = 2
-KIND_NAMES = {KIND_REG: "REG", KIND_TABLE: "TABLE", KIND_SOC: "SOC"}
+KIND_CALL = 3
+KIND_NAMES = {KIND_REG: "REG", KIND_TABLE: "TABLE", KIND_SOC: "SOC",
+              KIND_CALL: "CALL"}
+
+# The switch tables the fills write (enum odi_sw_table, odi_switch_hw.h).
+TBL_CLS_DS_ACTION = 11
+TBL_CLS_US_ACTION = 12
+TBL_CLS_MASK_A = 13
+TBL_CLS_MASK_B = 14
+TBL_CLS_RULE_A = 16
+TBL_CLS_RULE_B = 17
+TBL_VLAN_MEMBERS = 23
+
+# The table fills of a CALL record (enum odi_replay_fill), their row
+# bounds and how many argument words each takes. The CF fills take one:
+# the first row of pattern 1, CF_ROW_COUNT when every row is pattern 0.
+FILL_VLAN_MEMBERS = 1
+FILL_CF_RULES = 2
+FILL_CF_RULES_ACTIONS = 3
+FILL_NAMES = {FILL_VLAN_MEMBERS: "vlan_members", FILL_CF_RULES: "cf_rules",
+              FILL_CF_RULES_ACTIONS: "cf_rules_actions"}
+VLAN_ROW_COUNT = 4096
+CF_ROW_COUNT = 256
+FILL_ROWS = {FILL_VLAN_MEMBERS: VLAN_ROW_COUNT, FILL_CF_RULES: CF_ROW_COUNT,
+             FILL_CF_RULES_ACTIONS: CF_ROW_COUNT}
+FILL_WORDS = {FILL_VLAN_MEMBERS: 0, FILL_CF_RULES: 1, FILL_CF_RULES_ACTIONS: 1}
+VLAN_MEMBERS_SENTINEL = 0xf0
+# compact turns a run into a CALL record only from this many rows on: the
+# sweeps are hundreds of rows, a single cleared row stays a TABLE record.
+FILL_MIN_ROWS = 16
 
 # reg_group 0..25 is mask bit 6..31 of filter; the kernel loader refuses
 # anything past that, and so does mkmodload.py.
@@ -138,6 +181,136 @@ def switch_soc(addr, value, verb=0):
 def switch_table(table, index, words, category=0, verb=0):
     return _RECORD_SWITCH.pack(KIND_TABLE, category, 0, verb, table, len(words),
                                index, 0, *_words(words))
+
+
+def switch_call(fill, first, count, args=(), category=0, verb=0):
+    return _RECORD_SWITCH.pack(KIND_CALL, category, 0, verb, fill, len(args),
+                               first, count, *_words(args))
+
+
+def fill_rows(fill, first, count, args):
+    """The (table, row, words) writes of a fill, in order."""
+    out = []
+    for i in range(first, first + count):
+        if fill == FILL_VLAN_MEMBERS:
+            out.append((TBL_VLAN_MEMBERS, i, (VLAN_MEMBERS_SENTINEL,)))
+            continue
+        b = i >= args[0]
+        out.append((TBL_CLS_RULE_B if b else TBL_CLS_RULE_A, i, (0, 0)))
+        out.append((TBL_CLS_MASK_B if b else TBL_CLS_MASK_A, i, (0, 0)))
+        if fill == FILL_CF_RULES_ACTIONS:
+            out.append((TBL_CLS_DS_ACTION, i, (0, 0, 0)))
+            out.append((TBL_CLS_US_ACTION, i, (0, 0, 0)))
+    return out
+
+
+def check_call(rec):
+    """Raises ValueError for a CALL record the kernel loader would refuse
+    (odi_replay_check_call()), returns (fill, first, count, args).
+    """
+    _k, _cat, _grp, _verb, fill, n, first, count, *words = _RECORD_SWITCH.unpack(rec)
+    if fill not in FILL_NAMES:
+        raise ValueError("call record fill %d unknown" % fill)
+    rows = FILL_ROWS[fill]
+    if count == 0 or first >= rows or count > rows - first:
+        raise ValueError("call record rows 0x%x+%d out of range" % (first, count))
+    if n != FILL_WORDS[fill]:
+        raise ValueError("call record has %d words, fill %s takes %d"
+                         % (n, FILL_NAMES[fill], FILL_WORDS[fill]))
+    if n and words[0] > CF_ROW_COUNT:
+        raise ValueError("call record pattern-1 row %d out of range" % words[0])
+    if any(words[n:]):
+        raise ValueError("call record has nonzero padding past its words")
+    return fill, first, count, tuple(words[:n])
+
+
+def _row(rec):
+    """(kind, category, reg_group, verb, table, row, words) of a record."""
+    kind, cat, grp, verb, tbl, n, offset, _value, *words = _RECORD_SWITCH.unpack(rec)
+    return kind, cat, grp, verb, tbl, offset, tuple(words[:n])
+
+
+def _match_fill(fill, records, i):
+    """The run of records from i that fill writes, as (count, args), or
+    None when it is shorter than FILL_MIN_ROWS rows. A CF run is pattern 0
+    up to its first B row and pattern 1 from there on.
+    """
+    head = _row(records[i])
+    if head[0] != KIND_TABLE:
+        return None
+    first = head[5]
+    per_row = len(fill_rows(fill, 0, 1, (CF_ROW_COUNT,)))
+    split = None
+    count = 0
+    while first + count < FILL_ROWS[fill]:
+        j = i + count * per_row
+        got = [_row(r) for r in records[j:j + per_row]]
+        if len(got) < per_row or any(g[:4] != head[:4] for g in got):
+            break
+        row = first + count
+        args = ()
+        if fill != FILL_VLAN_MEMBERS:
+            is_b = got[0][4] == TBL_CLS_RULE_B
+            args = (split if split is not None else row if is_b else CF_ROW_COUNT,)
+        if [(g[4], g[5], g[6]) for g in got] != fill_rows(fill, row, 1, args):
+            break
+        if args and args[0] == row:
+            split = row
+        count += 1
+    if count < FILL_MIN_ROWS:
+        return None
+    if fill == FILL_VLAN_MEMBERS:
+        return count, ()
+    return count, (split if split is not None else CF_ROW_COUNT,)
+
+
+def compact_records(table, records):
+    """records with each uniform sweep replaced by a CALL record."""
+    if table not in (TABLE_SDKINIT, TABLE_MODLOAD):
+        raise ValueError("only sdkinit and modload blobs take call records")
+    out = []
+    i = 0
+    while i < len(records):
+        _kind, cat, _grp, verb, _tbl, first, _w = _row(records[i])
+        # The widest row first: a CF_RULES_ACTIONS row starts like a
+        # CF_RULES one.
+        for fill in (FILL_CF_RULES_ACTIONS, FILL_CF_RULES, FILL_VLAN_MEMBERS):
+            m = _match_fill(fill, records, i)
+            if m:
+                count, args = m
+                out.append(switch_call(fill, first, count, args, category=cat, verb=verb))
+                i += len(fill_rows(fill, first, count, args))
+                break
+        else:
+            out.append(records[i])
+            i += 1
+    return out
+
+
+def expand_records(table, records):
+    """records with every CALL record written out as its table rows."""
+    out = []
+    for rec in records:
+        if rec[0] != KIND_CALL:
+            out.append(rec)
+            continue
+        if table not in (TABLE_SDKINIT, TABLE_MODLOAD):
+            raise ValueError("call record in a %s blob" % TABLE_NAMES[table])
+        fill, first, count, args = check_call(rec)
+        _k, cat, _grp, verb, *_rest = _RECORD_SWITCH.unpack(rec)
+        out.extend(switch_table(t, row, words, category=cat, verb=verb)
+                   for t, row, words in fill_rows(fill, first, count, args))
+    return out
+
+
+def compact(data):
+    table, _crc, records = unpack(data)
+    return pack(table, compact_records(table, records))
+
+
+def expand(data):
+    table, _crc, records = unpack(data)
+    return pack(table, expand_records(table, records))
 
 
 def gpon_reg(offset, value, sn_word=SN_WORD_NONE):
@@ -213,6 +386,10 @@ def dump_record(table, rec):
     if kind == KIND_TABLE:
         return "%sTABLE table=%d idx=0x%08x n=%d words=%s" % (
             prefix, tbl, offset, n, _hex_words(words, n))
+    if kind == KIND_CALL:
+        return "%sCALL fill=%s first=0x%08x count=%d words=%s" % (
+            prefix, FILL_NAMES.get(tbl, "%d" % tbl), offset, value,
+            _hex_words(words, n))
     return "%s%s off=0x%08x val=0x%08x" % (prefix, KIND_NAMES.get(kind, "KIND%d" % kind),
                                           offset, value)
 
@@ -231,7 +408,8 @@ def dump(data):
 def _modload_keep(mask, rec):
     """The record as the mask applies it, or None when the mask drops it."""
     kind, cat, grp, verb, tbl, n, offset, value, *words = _RECORD_SWITCH.unpack(rec)
-    if kind == KIND_TABLE:
+    # A call record stands for table records and keeps their category.
+    if kind in (KIND_TABLE, KIND_CALL):
         return rec if mask & (1 << cat) else None
     if mask & 1:
         return rec
@@ -250,7 +428,21 @@ def filter_modload(data, mask):
     return pack(TABLE_MODLOAD, kept)
 
 
+def _transform(argv, fn):
+    with open(argv[2], "rb") as f:
+        data = f.read()
+    try:
+        out = fn(data)
+    except ValueError as e:
+        sys.exit("replayblob.py: %s: %s" % (argv[2], e))
+    with open(argv[3], "wb") as f:
+        f.write(out)
+
+
 def main(argv):
+    if len(argv) == 4 and argv[1] in ("compact", "expand"):
+        _transform(argv, compact if argv[1] == "compact" else expand)
+        return
     if len(argv) == 5 and argv[1] == "filter":
         with open(argv[2], "rb") as f:
             data = f.read()

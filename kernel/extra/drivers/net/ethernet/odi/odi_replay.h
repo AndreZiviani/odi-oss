@@ -6,8 +6,8 @@
  *
  *   sequence    source                   REG record          also
  *   board init  odi_board_data.c         write               SOC
- *   sdkinit     sdkinit.bin, one verb    read, then write    SOC, TABLE
- *   modload     modload.bin              read, then write    TABLE
+ *   sdkinit     sdkinit.bin, one verb    read, then write    SOC, TABLE, CALL
+ *   modload     modload.bin              read, then write    TABLE, CALL
  *   gpon init   gpon_init.bin            write, value hook   TABLE
  *
  * The board table is compiled in because it runs at device_initcall,
@@ -34,6 +34,9 @@ enum odi_replay_kind {
 	ODI_REPLAY_REG = 0,	/* switch-core register: offset, value */
 	ODI_REPLAY_TABLE = 1,	/* switch-core table row: table, offset (the row), words */
 	ODI_REPLAY_SOC = 2,	/* SoC-window register: offset (its KSEG1 address), value */
+	ODI_REPLAY_CALL = 3,	/* table fill: table (the fill id), offset (first row),
+				 * value (row count), words (fill arguments)
+				 */
 };
 
 /* The widest row any capture writes (ACL_PATTERN, odi_sw_table_desc[]). */
@@ -45,11 +48,11 @@ struct odi_replay_event {
 	uint8_t sn_word;	/* gpon init REG: serial-number word 1..4 to write
 				 * instead of value; else 0
 				 */
-	uint16_t table;		/* TABLE: enum odi_sw_table id */
-	uint16_t n_words;	/* TABLE: words used */
+	uint16_t table;		/* TABLE: enum odi_sw_table id; CALL: the fill id */
+	uint16_t n_words;	/* TABLE, CALL: words used */
 	uint32_t offset;
-	uint32_t value;		/* REG, SOC */
-	uint32_t words[ODI_REPLAY_MAX_WORDS];	/* TABLE, zero past n_words */
+	uint32_t value;		/* REG, SOC; CALL: the row count */
+	uint32_t words[ODI_REPLAY_MAX_WORDS];	/* TABLE, CALL: zero past n_words */
 };
 
 #define ODI_REPLAY_ALL_VERBS	(-1)
@@ -61,15 +64,22 @@ struct odi_replay_opts {
 			 */
 	/* REG: the value to write, when set; ctx is passed through. */
 	uint32_t (*value)(const struct odi_replay_event *e, const void *ctx);
+	/* CALL: generates the fill the record names. Only the sdkinit and
+	 * modload replays set it, and only their blobs may hold a CALL
+	 * record (odi_replay_blob_parse()); a CALL record with no hook
+	 * writes nothing.
+	 */
+	void (*call)(const struct odi_replay_event *e, const void *ctx);
 	const void *ctx;
 };
 
 struct odi_replay_blob;	/* odi_replay_blob.h */
 
 /* Replays the records of blob in order, as opts says, and returns how
- * many it applied. A REG record goes through odi_reg_write(), a TABLE
- * record through odi_switch_table_write(), a SOC record through
- * odi_replay_soc_write().
+ * many it applied, a CALL record counting once. A REG record goes
+ * through odi_reg_write(), a TABLE record through
+ * odi_switch_table_write(), a SOC record through odi_replay_soc_write(),
+ * a CALL record through opts->call.
  */
 unsigned int odi_replay_run(const struct odi_replay_blob *blob,
 			    const struct odi_replay_opts *opts);

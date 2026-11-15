@@ -386,7 +386,7 @@ static unsigned int gem_rows_valid(void)
  */
 static void test_boot_table_without_wait(void)
 {
-	static const struct odi_replay_opts opts = { 0, ODI_REPLAY_ALL_VERBS, NULL, NULL };
+	static const struct odi_replay_opts opts = { .verb = ODI_REPLAY_ALL_VERBS };
 	struct odi_replay_fw fw;
 
 	if (boot_table_load(&fw))

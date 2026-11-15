@@ -16,7 +16,7 @@ trap 'rm -f "$BIN"' EXIT
 cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_replay_blob_test.c"
 "$BIN"
 
-for spec in sdkinit:7429 modload:3619 gpon_init:2528; do
+for spec in sdkinit:1801 modload:2596 gpon_init:2528; do
 	name=${spec%%:*}
 	want=${spec#*:}
 	head=$(python3 "$ROOT/tools/regtrace/replayblob.py" dump "$FW/$name.bin" | sed -n 1p)

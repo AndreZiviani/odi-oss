@@ -11,8 +11,9 @@ Reads a raw `W`/`R`/`T`/`D` regtrace dump (same format decode.py/compare.py/
 mkmodload.py/mkgponinit.py already read: `<ns> KIND addr val` per line,
 `#`-prefixed header lines ignored) and writes the sdkinit replay table as a
 firmware blob (replayblob.py has the format; the checked-in copy is
-rootfs/skeleton/lib/firmware/odi/sdkinit.bin, which the kernel loads with
-request_firmware() for each verb) -- one ordered event list PER VERB, the
+rootfs/skeleton/lib/firmware/odi/sdkinit.bin, this output with its table
+sweeps compacted into call records by replayblob.py compact, which the
+kernel loads with request_firmware() for each verb) -- one ordered event list PER VERB, the
 records grouped by verb, in the order the capture itself records within
 that verb own span, for every verb
 in VERBS_ORDER below: the twenty odi_init module inits (switch svlan stp

@@ -34,8 +34,8 @@ in `odi_replay.h`):
 | sequence | source | register record | also |
 |---|---|---|---|
 | board init | `odi_board_data.c`, compiled in | write | SoC |
-| sdkinit, one verb at a time | `sdkinit.bin` | read, then write | SoC, table rows |
-| module load | `modload.bin` | read, then write | table rows |
+| sdkinit, one verb at a time | `sdkinit.bin` | read, then write | SoC, table rows, table fills |
+| module load | `modload.bin` | read, then write | table rows, table fills |
 | GPON boot init | `gpon_init.bin` | write, serial-number words substituted | table rows |
 
 The read before a register write is the full-mask read-modify-write the
@@ -48,6 +48,31 @@ A SoC record carries the KSEG1 address of a SoC-window register and goes
 through `odi_soc_write()` (`odi_soc.c`), which accepts only the offsets on
 its one allowlist and logs any other. The replays write four of them
 (clock/reset enable, IP enable, two GPIO registers).
+
+A table fill (a call record) stands for one uniform sweep of the capture:
+a range of rows of one or more tables, every row written cleared. The
+driver writes the rows itself (`odi_switch_replay_call()` in
+`odi_switch_cf.c`, through the `call` hook of the replay options), in
+the order the capture wrote them. The record carries the fill, the first
+row, the row count and, for the CF fills, the first row of pattern 1, so
+what it writes does not depend on an earlier replayed write. There are
+three:
+
+| fill | rows | each row | where |
+|---|---|---|---|
+| `VLAN_MEMBERS` | 1 .. 0xfff | `VLAN_MEMBERS` to the sentinel `0xf0`, as cmd 51 sweeps it | sdkinit `vlan` |
+| `CF_RULES` | 0 .. 255 | rule and mask cleared, pattern 0 (`CLS_RULE_A`, `CLS_MASK_A`) | sdkinit `classify` |
+| `CF_RULES_ACTIONS` | 0 .. 255 | rule and mask cleared, the A tables below the first pattern-1 row and the B tables from it, then both action rows | sdkinit `classify` (pattern 1 from row 1), module load (from row 32) |
+
+These sweeps were 5,631 of the 7,429 sdkinit records and 1,024 of the
+module-load records. The generators still write every row; `replayblob.py
+compact` turns each sweep of 16 rows or more into a fill, and `replayblob.py
+expand` writes the rows back, which for the shipped files gives the
+generator output byte for byte (`test/replayblob_fill_test.sh`). The rest
+of the sdkinit `vlan` verb stays as captured: row 0 is written before nine
+register writes and keeps its own record, and row 1 is written again after
+the fill. The replay log counts a fill as one record (`vlan` 157, not
+4,251).
 
 ### Board init
 
@@ -192,7 +217,9 @@ Left out altogether:
 
 `modload.bin` is every switch-core write the stock OMCI kernel modules
 made while loading, in capture order: 2587 register writes and 1032 table
-rows. `tools/regtrace/mkmodload.py` generates it from that capture and
+rows, 1024 of them the CF sweep, which the file holds as one table fill
+(see [Register replays](#register-replays)). `tools/regtrace/mkmodload.py`
+generates it from that capture and
 tags each record with its family (`category`: registers, the CF sweep, the
 CF rules written over the sweep, the VLAN row, the L2 unicast row, the ACL
 rows; `reg_group` for a register: its register family). The families were

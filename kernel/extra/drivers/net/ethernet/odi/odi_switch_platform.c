@@ -15,9 +15,6 @@
 #include "odi_replay_blob.h"
 #include "odi_switch_reg.h"
 
-/* The CF rule, mask and action tables: 256 rows each. */
-#define ODI_SW_CF_ROW_COUNT		256U
-
 #define ODI_SWITCH_PLATFORM_UNI_PORT	0U
 #define ODI_SWITCH_PLATFORM_PON_PORT	2U
 #define ODI_SWITCH_PLATFORM_PORTS_N	4U
@@ -366,7 +363,11 @@ void odi_switch_init_platform(void)
 
 void odi_switch_init_modload(const struct odi_replay_blob *table)
 {
-	const struct odi_replay_opts opts = { .rmw = 1, .verb = ODI_REPLAY_ALL_VERBS };
+	const struct odi_replay_opts opts = {
+		.rmw = 1,
+		.verb = ODI_REPLAY_ALL_VERBS,
+		.call = odi_switch_replay_call,
+	};
 	uint32_t reg;
 
 	ODI_SW_LOG("init_modload: %u records\n", table->count);
