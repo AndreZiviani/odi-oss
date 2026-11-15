@@ -96,6 +96,12 @@
 # bundle taken from the web UI. Appended, so a PATH the caller set wins.
 PATH=${PATH:+$PATH:}/sbin:/usr/sbin:/bin:/usr/bin
 export PATH
+# Bytes, not characters: a secret or a log line need not be valid in the
+# caller locale, and awk, sort and sed in a UTF-8 locale can fail on one
+# (a BSD awk with "multibyte conversion failure", sort with "Illegal byte
+# sequence"), which would drop that secret from the scrub.
+LC_ALL=C
+export LC_ALL
 
 STEP_TIMEOUT_S=${STEP_TIMEOUT_S:-5}
 HOST_AUTONEG_SH=${HOST_AUTONEG_SH:-/etc/scripts/host-autoneg.sh}
@@ -486,7 +492,9 @@ done
 secrets=$work/secrets
 : > "$secrets"
 redact() {  # redact SRC DST
-	awk -v keys="$SECRET_KEYS" -v words="$SECRET_WORDS" -v secrets="$secrets" '
+	# The key list on one line: a BSD awk refuses a -v value with a
+	# newline in it, and the copy would then not be written at all.
+	awk -v keys="$(printf '%s' "$SECRET_KEYS" | tr '\n' ' ')" -v words="$SECRET_WORDS" -v secrets="$secrets" '
 	function secret(name,   i, n, w) {
 		if (index(" " keys " ", " " name " "))
 			return 1
@@ -760,9 +768,18 @@ sort -u "$rules" | sort -t "$tab" -k1,1nr | while IFS="$tab" read -r _ kind pat 
 	printf 's/^%s$/%s/\n' "$p" "$rep"
 done > "$script"
 if [ -s "$script" ]; then
-	find "$b" -type f ! -name '*.pcap' | while IFS= read -r f; do
-		sed -i -f "$script" "$f"
-	done
+	# Through a temporary file outside the bundle rather than sed -i, whose
+	# argument differs between implementations (a BSD sed takes the -f
+	# there as a backup suffix), so the scrub runs the same off the
+	# device. The list is taken first, so the walk never meets a file the
+	# loop writes. Any failure fails the bundle: a file the scrub could not
+	# rewrite would otherwise go out as collected.
+	find "$b" -type f ! -name '*.pcap' > "$work/files" || fail "scrub failed: cannot list the bundle"
+	while IFS= read -r f; do
+		sed -f "$script" "$f" > "$work/scrub.out" || fail "scrub failed on ${f#"$work"/}"
+		cat "$work/scrub.out" > "$f" || fail "scrub failed writing ${f#"$work"/}"
+	done < "$work/files"
+	rm -f "$work/files" "$work/scrub.out"
 fi
 rm -f "$secrets" "$work/voip.secrets" "$work/frames.out" "$idents" "$rules" "$script" "$work"/gpon-*.raw "$work/module.serial" "$work/i2c.out"
 

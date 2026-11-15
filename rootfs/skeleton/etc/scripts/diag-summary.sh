@@ -103,10 +103,13 @@ if readok dmesg.txt; then
 	}
 	/event=onu_state / {
 		n++
-		t = $0
-		sub(/^\[ */, "", t)
-		sub(/\].*/, "", t)
-		last_t = t
+		# The time since boot, when the kernel prints one ("[  123.456] ");
+		# a kernel without printk times prints the line bare.
+		last_t = ""
+		if (match($0, /^\[ *[0-9]+\.[0-9]+\]/)) {
+			last_t = substr($0, 2, RLENGTH - 2)
+			sub(/^ +/, "", last_t)
+		}
 		last = "from=" field("from") " to=" field("to") " cause=" field("cause") " side=" field("side")
 		if (field("from") == "O5") {
 			drops++
@@ -122,10 +125,14 @@ if readok dmesg.txt; then
 		if (n == 0) {
 			print "last change    : none in dmesg (in this state since boot, or the ring lost it)"
 		} else {
-			since = ""
-			if (up != "" && last_t ~ /^[0-9.]+$/)
-				since = sprintf(", %d s ago", up - last_t)
-			printf "last change    : at %s s%s: %s  (dmesg.txt)\n", last_t, since, last
+			if (last_t == "") {
+				printf "last change    : %s  (dmesg.txt, no time: the kernel prints no timestamps)\n", last
+			} else {
+				since = ""
+				if (up != "")
+					since = sprintf(", %d s ago", up - last_t)
+				printf "last change    : at %s s%s: %s  (dmesg.txt)\n", last_t, since, last
+			}
 		}
 		s = ""
 		for (i = 1; i <= nc; i++)

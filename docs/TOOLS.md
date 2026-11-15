@@ -1576,7 +1576,8 @@ runs as well on a PC against an unpacked bundle (`sh diag-summary.sh
 odi-diag`), also an older one. Both are
 written before the scrub and scrubbed like every other file. The counts
 from dmesg are those of the kernel ring as collected: early lines can be
-gone, and odi_gpon rate-limits its event lines.
+gone, and odi_gpon rate-limits its event lines. A kernel that prints no
+timestamps leaves the last change without its time.
 
 Under `pon/`, the GPON and OMCI state a PON problem needs:
 

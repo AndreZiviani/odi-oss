@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Diagnostics bundle: a scrub that fails on any file now fails the bundle
+  instead of letting that file out unscrubbed, and `diag-bundle.sh` runs
+  with a BSD sed and awk (macOS): the scrub no longer uses `sed -i`, and the
+  config redaction passes its key list to awk on one line, where a BSD awk
+  had refused it and left the config copies empty. The bundle runs under
+  `LC_ALL=C`, so a secret that is not valid UTF-8 still reaches the scrub.
 - Diagnostics: label O5 departures and LOS/LOF counts as events in the
   retained log, not totals since boot. A wrapped or rate-limited dmesg
   must not turn missing history into an all-clear.
