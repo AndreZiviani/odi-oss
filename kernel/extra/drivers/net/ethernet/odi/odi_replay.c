@@ -54,6 +54,10 @@ static void odi_replay_apply(const struct odi_replay_event *e, const struct odi_
 	case ODI_REPLAY_SOC:
 		(void)odi_replay_soc_write(e->offset, e->value);
 		break;
+	case ODI_REPLAY_CALL:
+		if (opts->call)
+			opts->call(e, opts->ctx);
+		break;
 	}
 }
 

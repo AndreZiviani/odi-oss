@@ -30,11 +30,15 @@
  *     1  u8  category     modload only
  *     2  u8  reg_group    modload category 0 only
  *     3  u8  verb         sdkinit only: enum odi_sw_sdkinit_verb_id
- *     4  u16 table        TABLE records only
- *     6  u16 n_words      TABLE records only
- *     8  u32 offset
- *    12  u32 value        REG and SOC records only
- *    16  u32 words[5]     TABLE records only, zero past n_words
+ *     4  u16 table        TABLE: switch table id; CALL: enum odi_replay_fill
+ *     6  u16 n_words      TABLE, CALL only
+ *     8  u32 offset       CALL: the first row
+ *    12  u32 value        REG and SOC records; CALL: the row count
+ *    16  u32 words[5]     TABLE, CALL only, zero past n_words
+ *
+ *   A CALL record (sdkinit and modload only) is a table fill the driver
+ *   generates (odi_switch_replay_call()); enum odi_replay_fill below has
+ *   what each one writes and what its words are.
  *
  *   GPON init record: byte 1 is sn_word (0xff for none), bytes 2..3 are
  *   reserved (0), the rest as the switch record. Byte 3 carries no verb.
@@ -87,6 +91,30 @@
 #define ODI_REPLAY_BLOB_GPON_SN_WORD_NONE	0xffU
 #define ODI_REPLAY_BLOB_GPON_SN_WORD_MIN	1U
 #define ODI_REPLAY_BLOB_GPON_SN_WORD_MAX	4U
+
+/* The table fills a CALL record names. Each writes rows offset ..
+ * offset + value - 1 in order, row by row, with the tables of one row in
+ * the order listed; every row is the same, so the record carries no row
+ * data. The rows are those of a cleared table as the capture writes them
+ * (docs/SWITCH.md, "Register replays").
+ *
+ *   VLAN_MEMBERS      VLAN_MEMBERS, one word, the sentinel 0xf0. No
+ *                     words.
+ *   CF_RULES          CLS_RULE and CLS_MASK, zero: the A tables below
+ *                     words[0], the first row of pattern 1, and the B
+ *                     tables from it. One word.
+ *   CF_RULES_ACTIONS  CF_RULES, then CLS_DS_ACTION and CLS_US_ACTION,
+ *                     zero. One word, as CF_RULES.
+ */
+enum odi_replay_fill {
+	ODI_REPLAY_FILL_VLAN_MEMBERS = 1,
+	ODI_REPLAY_FILL_CF_RULES = 2,
+	ODI_REPLAY_FILL_CF_RULES_ACTIONS = 3,
+};
+
+/* The rows each fill may cover: the VLAN table by VID, the CF tables. */
+#define ODI_REPLAY_FILL_VLAN_ROW_COUNT	4096U
+#define ODI_REPLAY_FILL_CF_ROW_COUNT	256U
 
 enum odi_replay_table {
 	ODI_REPLAY_TABLE_SDKINIT = 1,

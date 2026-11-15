@@ -13,6 +13,7 @@
 #include "odi_replay.h"
 #include "odi_replay_blob.h"
 #include "odi_switch_reg.h"
+#include "odi_switch_dal.h"	/* odi_switch_replay_call() */
 
 #ifdef __KERNEL__
 #include <linux/jiffies.h>
@@ -69,12 +70,17 @@ const char *const odi_switch_sdkinit_verb_names[ODI_SDKINIT_VERB_ID_COUNT] = {
 };
 
 /* Replays the records of one verb: a register record is a full-mask
- * read-modify-write, as in the capture (odi_replay.h).
+ * read-modify-write, as in the capture (odi_replay.h), a call record the
+ * table fill it names.
  */
 static unsigned int odi_switch_sdkinit_apply(const struct odi_replay_blob *blob,
 					     enum odi_sw_sdkinit_verb_id id)
 {
-	const struct odi_replay_opts opts = { .rmw = 1, .verb = (int)id };
+	const struct odi_replay_opts opts = {
+		.rmw = 1,
+		.verb = (int)id,
+		.call = odi_switch_replay_call,
+	};
 
 	return odi_replay_run(blob, &opts);
 }

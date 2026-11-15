@@ -468,6 +468,24 @@ uint32_t odi_sw_cf_layout1_row(void);
 /* One VLAN table row (a service leaving: its VID row back to 0). */
 void odi_sw_vlan_row_set(uint32_t vid, uint32_t val);
 
+/* VLAN table rows first .. first + count - 1 to the sentinel the boot and
+ * cmd 51 sweep with, one row write each; a range past the table writes
+ * nothing.
+ */
+void odi_sw_vlan_members_fill(uint32_t first, uint32_t count);
+
+/* The CF rule, mask and action tables: 256 rows each. */
+#define ODI_SW_CF_ROW_COUNT		256U
+
+struct odi_replay_event;	/* odi_replay.h */
+
+/* The call hook of the sdkinit and modload replays (struct
+ * odi_replay_opts): the table fill a CALL record names, row by row in
+ * capture order (enum odi_replay_fill in odi_replay_blob.h). A record the
+ * parser would refuse writes nothing.
+ */
+void odi_switch_replay_call(const struct odi_replay_event *e, const void *ctx);
+
 /* --- odi_switch_platform.c ------------------------------------------------ */
 
 /* The platform settings, after the odi_init "switch" verb; rcS runs them
