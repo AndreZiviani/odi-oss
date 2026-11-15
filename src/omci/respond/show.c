@@ -625,7 +625,7 @@ uint32_t cli_conn(void)
 	for (int i = 0; i < SERV_MAX; i++) {
 		const struct omci_bdgconn *r = &servtab[i];
 
-		if (!r->in_use)
+		if (r->in_use != 1)
 			continue;
 		out_fmt("SERVID %d: Used: 1, (DIR=%d, USFID=%d, DSFID=%d, "
 			"SERVID=%d, UNIMASK=%d)\n", (long)i, (long)r->dir,
@@ -900,7 +900,7 @@ uint32_t cli_provision(void)
 		out_fmt("vlan vid=%u source=%s\n", (unsigned long)prov_vlan[i].vid,
 			prov_vlan_src[prov_vlan[i].src]);
 	for (int i = 0; i < SERV_MAX; i++)
-		services += servtab[i].in_use ? 1u : 0u;
+		services += servtab[i].in_use == 1 ? 1u : 0u;
 	out_fmt("summary rows=%u tconts=%u gem_ports=%u vlans=%u "
 		"traffic_descriptors=%u services=%u mib_data_sync=%u\n",
 		(unsigned long)mib_count(), (unsigned long)tconts,

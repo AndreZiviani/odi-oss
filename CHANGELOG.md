@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a bridge connection whose deactivate fails stays owned as pending
+  and is deactivated again by the next rebuild. Before, the slot was freed
+  at once and the rule stayed in the switch whenever the next plan did not
+  reuse that service id, with omcid no longer knowing it owned it. A pending
+  service is not counted as live, its id is not handed out, and it survives
+  a respawn in the snapshot. The retry runs on its own every 5 seconds and
+  touches no live service; it does not trigger a full rebuild.
 - OMCI: clear the original CRC of a masked frame in text and pcap exports,
   so the checksum cannot reveal the hidden identity or secret. `--full`
   still returns the captured frame unchanged.
