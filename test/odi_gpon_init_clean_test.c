@@ -379,9 +379,10 @@ static unsigned int gem_rows_valid(void)
 	return n;
 }
 
-/* The table replayed straight through, as before this clean existed: its
- * own clean of the tables lands inside the reset and the garbage stays,
- * which is what a power cut did. Checks that the model reproduces the
+/* The table replayed straight through, as before this clean existed: the
+ * garbage stays, which is what a power cut did (the table then carried its
+ * own clean of the tables, which landed inside the reset; it no longer
+ * does). Checks that the model reproduces the
  * failure, so the next case means something.
  */
 static void test_boot_table_without_wait(void)
