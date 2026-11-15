@@ -200,6 +200,18 @@ t "partial store: the password was never changed" "GPON_PLOAM_PASSWD=oldsecret" 
 t "partial store: no undo file left" "^absent$" "$([ -e "$T/trial.conf.undo" ] && echo present || echo absent)"
 n "partial store: no value in the log" "newsecret|ODIT0000ABCD|oldsecret|ODIT00000001" "$(cat "$T/log" "$T/kmsg")"
 
+# Empty stored credentials are values too, including the LOID mirror.
+fresh
+printf 'GPON_SN=ODIT00000001\nGPON_PLOAM_PASSWD=\nLOID=\nLOID_OLD=\nLOID_PASSWD=\n' > "$T/store"
+echo "identity ok 0" > "$T/next"
+echo GPON_SN > "$T/flash-fails-key"
+run try GPON_PLOAM_PASSWD=newsecret LOID=newuser LOID_PASSWD=newpw GPON_SN=ODIT0000ABCD > /dev/null
+settle
+t "empty rollback: store_failed, not mixed" "^store_failed$" "$(st outcome)"
+for key in GPON_PLOAM_PASSWD LOID LOID_OLD LOID_PASSWD; do
+	t "empty rollback: $key restored" "^$key=$" "$(grep "^$key=" "$T/store")"
+done
+
 # The key that cannot go back is named, and the outcome says the store is mixed.
 fresh
 echo "identity ok 0" > "$T/next"
@@ -232,6 +244,17 @@ t "a serial number the driver would refuse" "four letters or digits and eight he
 t "a key that is not an identity key" "not an identity key" "$(run try VLAN_MANU_TAG_VID=10)"
 t "not KEY=VALUE" "is not KEY=VALUE" "$(run try GPON_SN)"
 t "nothing asked for" "usage" "$(run try)"
+for key in GPON_PLOAM_PASSWD LOID LOID_PASSWD; do
+	for value in 'test"value' 'test<value' 'test&value'; do
+		out=$(run try "$key=$value"); rc=$?
+		t "unstoreable $key: rejected before applying" "^1$" "$rc"
+		t "unstoreable $key: explains the character restriction" "cannot hold a quote, < or &" "$out"
+	done
+done
+t "invalid values: no reload requested" "^absent$" "$([ -e "$T/apply.log" ] && echo present || echo absent)"
+t "invalid values: no trial file written" "^absent$" "$([ -e "$T/trial.conf" ] && echo present || echo absent)"
+t "invalid values: stored password unchanged" "^GPON_PLOAM_PASSWD=oldsecret$" "$(grep '^GPON_PLOAM_PASSWD=' "$T/store")"
+
 echo "identity ok 0" > "$T/next"
 echo 2 > "$T/delay"
 run try GPON_PLOAM_PASSWD=newsecret > /dev/null

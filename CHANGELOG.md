@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- Identity trial: reject quotes, `<` and `&` before re-registering, since
+  `flash set` cannot persist them. Restore empty saved credentials too when
+  a later write fails, instead of leaving a mixed identity in the store.
+
 - Identity trial: `identity-trial.sh try KEY=VALUE...` changes `GPON_SN`,
   `GPON_PLOAM_PASSWD`, `LOID` or `LOID_PASSWD` as a trial. The values go to
   `/var/run/identity-trial.conf`, which omcid reads over the store, and omcid

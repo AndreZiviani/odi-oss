@@ -228,8 +228,13 @@ try() {
 		case $a in *=*) ;; *) die "$a is not KEY=VALUE" ;; esac
 		k=${a%%=*} v=${a#*=}
 		case " $KEYS " in *" $k "*) ;; *) die "$k is not an identity key ($KEYS)" ;; esac
-		case $v in *"
-"*) die "$k: a value cannot hold a newline" ;; esac
+		# Reject values the persistent XML store cannot accept, before
+		# any trial can interrupt the line. Keep this in step with flash.
+		case $v in
+		*[\"\<\&]*) die "$k: a value cannot hold a quote, < or &" ;;
+		*"
+"*) die "$k: a value cannot hold a newline" ;;
+		esac
 		# What the driver takes (gponsn): four characters, eight hex
 		# digits. Anything else would leave the old serial in force.
 		if [ "$k" = GPON_SN ]; then
@@ -347,7 +352,7 @@ finish_keep() {
 	if [ -n "$bad" ]; then
 		while IFS= read -r a; do
 			case $a in
-			*=?*) store_put "${a%%=*}" "${a#*=}" || mixed="$mixed ${a%%=*}" ;;
+			*=*) store_put "${a%%=*}" "${a#*=}" || mixed="$mixed ${a%%=*}" ;;
 			*) mixed="$mixed ${a%%=*}" ;;
 			esac
 		done < "$UNDO"
