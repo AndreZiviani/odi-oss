@@ -19,13 +19,12 @@ source here; `/etc/odi-build` on the stick records which releases went in
 |---|---|---|---|---|---|
 | `omcid` | daemon, the OMCI stack | inittab `respawn` (`/etc/scripts/svc-omcid.sh`) | odi_omci netlink (redirect type 1), SysV queues for `omcli`/`omcicli` | `/var/log/omcid.log` | respawned |
 | `confd` | daemon, the web UI | inittab `respawn` (`/etc/scripts/svc-confd.sh`) | TCP 80 | `/var/log/services.log` | respawned |
-| `metricsd` | daemon, the Prometheus exporter | inittab `respawn` (`/etc/scripts/svc-metricsd.sh`) | TCP 9100 | `/var/log/services.log` | respawned |
+| `metricsd` | daemon, the Prometheus exporter and the minute history | inittab `respawn` (`/etc/scripts/svc-metricsd.sh`) | TCP 9100; writes `/var/run/history` | `/var/log/services.log` | respawned |
 | `dropbear` | daemon, ssh and scp | inittab `respawn` (`/etc/scripts/svc-dropbear.sh`) | TCP 22 | syslog (every login) | respawned |
 | `syslogd` | daemon, the system log | inittab `respawn` (`/etc/scripts/svc-syslogd.sh`) | UDP 514, if `SYSLOG_SERVER` is set | its own circular buffer (`logread`) | respawned |
 | `klogd` | daemon, kernel log to syslog | inittab `respawn` (`/etc/scripts/svc-klogd.sh`) | -- | syslogd | respawned |
 | `ntpd` | daemon, NTP client (opt-in) | inittab `respawn` (`/etc/scripts/svc-ntpd.sh`), only while `NTP_SERVER` is set | UDP 123 to `NTP_SERVER` | syslog | respawned |
 | `igmpd` | daemon, IGMP snooping (opt-in) | inittab `respawn` (`/etc/scripts/svc-igmpd.sh`), only while `IGMP_SNOOPING=1` | odi_omci netlink (redirect type 4), `/dev/odi_sw`, `/var/run/odi-mcast.conf` | `/var/log/services.log` | respawned |
-| `history.sh` | shell loop, the minute history | inittab `respawn` (`/etc/scripts/svc-history.sh`) | runs `diag` once a minute; writes `/var/run/history` | `/var/log/services.log` | respawned |
 | `login` | serial console login | inittab `askfirst` (press Enter on the console) | ttyS0 | -- | respawned |
 | `diag` | CLI: optics, GPON state, counters, registers | you, rcS, network.sh, metricsd, confd | `/dev/odi_sw`, `/proc/odi_gpon/status`, netlink | stdout | -- |
 | `i2cget` / `i2cdump` / `i2cset` | CLI: the optics module I2C devices (busybox) | you | `/dev/i2c-0` | stdout | -- |
@@ -1165,42 +1164,24 @@ flash read. The first nine keys keep their order: omcid reads `running` and
 
 ### The minute history -- `/var/run/history`
 
-`/etc/scripts/history.sh run`, the inittab `respawn` entry
-`svc-history.sh`, takes one sample of the line a minute and keeps the newest
+From the first odi-sfp-exporter release after v1.10.0 on, `metricsd` also
+takes one sample of the line a minute, between scrapes, and keeps the newest
 120, two hours, in `/var/run/history`: for a look back after a failure on a
 stick that no Prometheus scrapes. The web UI draws it on the Status tab
 (odi-ui `GET /api/history`, which only serves the file), the diagnostics
 bundle carries it as `history.txt`, and `cat` over ssh reads it too. It is
 RAM (the `/var` tmpfs, about 20 KB) and starts empty at every boot; nothing
-is sent anywhere. `services stop history` stops it (`history.off`).
-`history.sh sample` prints one sample line and writes nothing.
+is sent anywhere. `services stop metricsd` stops the sampling along with the
+exporter and leaves the file as it was.
 
-A sample costs one `diag` run with the questions on stdin (the optics, the
-ONU state, the GPON alarms and the counters of switch port 2), one `awk`
-over `/proc/odi_gpon/status`, `/proc/odi_gpon/counters`, `/proc/stat` and
-`/proc/meminfo`, and a rename. The file is replaced by rename, so a reader
-never sees half of it. One line per sample, oldest first, space-separated
-`key=value`; a key whose source is missing is left out, never written as
-0 (a stock slot has no `/proc/odi_gpon`, a diag that failed gives no
-optics), and a reader takes the keys it knows:
-
-| key | value |
-|---|---|
-| `t` | wall clock, epoch seconds; meaningless until NTP synced |
-| `up` | `/proc/uptime`, whole seconds |
-| `st` | ONU state, `1` to `7` (`diag`, else the driver) |
-| `al` | asserted GPON alarms, comma separated (`LOS,LOF`), `-` for none |
-| `rx`, `tx` | receive and transmit power, dBm, two decimals |
-| `tc`, `bi` | module temperature (C) and bias current (mA) |
-| `di`, `do` | octets in and out of switch port 2, the fibre side; totals |
-| `los`, `lof`, `lom` | alarm events since the driver loaded (`alarm_events`) |
-| `o5i`, `o5o` | transitions into and out of O5 since then (`onu_transitions`): a drop between two samples shows here although both saw O5 |
-| `bip`, `fecu` | downstream BIP error bits and uncorrectable FEC codewords, totals |
-| `cb`, `ct` | CPU jiffies busy (all but idle and iowait) and in all, `/proc/stat` |
-| `ma` | `MemAvailable`, kB |
-
-Totals are totals: a reader takes the difference between two samples, and a
-total that went down (a driver reload) starts over.
+One line per sample, oldest first, space-separated `key=value`: the optics,
+the ONU state and GPON alarms, the octets of the fibre port, the
+`alarm_events` and O5 `onu_transitions` of `/proc/odi_gpon/status` (so a
+drop between two samples shows although both saw O5), the BIP and
+uncorrectable FEC totals, CPU and `MemAvailable`. A key whose source is
+missing is left out, never written as 0, and a reader takes the keys it
+knows. The keys are listed in the exporter's `docs/METRICS.md`, "The minute
+history".
 
 ### `flash` -- the config store
 

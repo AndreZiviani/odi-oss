@@ -197,7 +197,7 @@ step uptime.txt uptime
 grab meminfo.txt /proc/meminfo
 grab mounts.txt /proc/mounts
 grab cmdline.txt /proc/cmdline
-# The minute history (history.sh): the two hours before the bundle.
+# The minute history (metricsd writes it): the two hours before the bundle.
 grab history.txt /var/run/history
 step ps.txt ps
 

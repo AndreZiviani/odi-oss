@@ -17,15 +17,13 @@ listed here.
   and syslog when it fails. A successful `nv commit` warns, after its result
   line, when that recorded check failed (issue #379, point 3).
 
-- A minute history of the line, without Prometheus: `history.sh`, a new
-  inittab `respawn` entry (`svc-history.sh`, `services stop history`), takes
-  one sample a minute (rx/tx power, temperature, bias, ONU state, GPON
-  alarms, octets of the fibre port, LOS/LOF/LOM events, transitions into
-  and out of O5, BIP and uncorrectable FEC totals, CPU, `MemAvailable`) and
-  keeps the newest 120, two hours, in `/var/run/history`, about 20 KB of
-  RAM, gone at reboot. One `key=value` line per sample (`docs/TOOLS.md`,
-  "The minute history"). The diagnostics bundle carries it as
-  `history.txt`; the web UI (odi-ui) draws it on the Status tab.
+- The diagnostics bundle carries the minute history, `/var/run/history`, as
+  `history.txt`. The ring is written by `metricsd` from the first
+  odi-sfp-exporter release after v1.10.0 on (one sample a minute, the
+  newest 120, about 20 KB of RAM, gone at reboot) and drawn by the web UI
+  on the Status tab; `docs/TOOLS.md`, "The minute history". When the file
+  is missing the bundle lists it as absent in `MANIFEST.txt`, as it does
+  any other file.
 
 ## v1.16.0 (2026-11-13)
 
