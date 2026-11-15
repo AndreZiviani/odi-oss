@@ -368,10 +368,10 @@ written. After a transient failure, run it again; while a copy stays
 unreadable, `nv commit` (`--force` included) and every `nv setenv` stay refused
 and `nv` has no way around it (the raw restore under "Restore" is for a
 damaged environment, and may not help if the flash cannot be read). `nv setenv
-sw_commit <slot>` also still works but writes only the
-primary copy; nv then prints that the fallback copy still names the old
-slot, and `nv setenv -c <copy> sw_commit <slot>` makes it agree. `nv
-commit` does both, in the safe order, and checks them.
+sw_commit <slot>` is refused; with `--force` it writes only one copy and
+skips every check above. When the fallback copy still names another slot,
+`nv commit <running slot>` makes it agree: it writes only the copy that
+differs.
 
 The same two writes set `mupgrade_en=0`. The stock bootloader ships it as 1
 and, after the boot countdown, listens on the host link for a firmware image

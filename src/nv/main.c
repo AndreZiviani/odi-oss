@@ -8,7 +8,7 @@
  * crc32, so this replaces it with no vendor library:
  *
  *     nv getenv [parameter_name]
- *     nv setenv [-c 1|2] parameter_name value
+ *     nv setenv [--force] [-c 1|2] parameter_name [value]
  *     nv fallback [parameter_name]
  *     nv commit [--force] slot
  *     nv slotcheck slot
@@ -17,6 +17,10 @@
  * through it, and those are the one-shot safe-boot mechanism this project
  * flashes through. An image that cannot write the U-Boot environment cannot
  * arm its own trial boot.
+ *
+ * setenv refuses the keys U-Boot boots by unless --force is given (guard.h
+ * has the list and the reasons); a valid sw_tryactive and the version
+ * strings stay open, since the web UI and fwu.sh write them.
  *
  * See env.h for the block layout, which was read off a device.
  *
@@ -85,6 +89,7 @@
 #include "commit.h"
 #include "lock.h"
 #include "slot.h"
+#include "guard.h"
 
 /* MEMERASE = _IOW('M', 2, struct erase_info_user).
  *
@@ -599,18 +604,23 @@ static void commit_warn_other(const char *arg)
 static void usage(void)
 {
 	out("Usage: nv getenv [parameter_name]\n"
-	    "       nv setenv [-c 1|2] parameter_name value\n"
+	    "       nv setenv [--force] [-c 1|2] parameter_name [value]\n"
 	    "       nv fallback [parameter_name]\n"
 	    "       nv commit [--force] slot\n"
 	    "       nv slotcheck slot\n"
 	    "  commit refuses while /etc/config/confirm-arp exists (each boot would wait\n"
 	    "  for an ARP reply, and a committed slot has no trial to fall back to);\n"
-	    "  --force (or -f) commits anyway\n");
+	    "  --force (or -f) commits anyway\n"
+	    "  setenv refuses the keys U-Boot boots by (sw_commit, sw_active, bootcmd,\n"
+	    "  boot_by_*, b0, b1, set_act*, en_wdt, mupgrade_en, and sw_tryactive other\n"
+	    "  than 0, 1 or 2); --force (or -f) writes them anyway\n");
 }
 
 int main(int argc, char **argv)
 {
 	struct mtd_part part;
+	struct nv_setenv_args sa;
+	const char *guard = 0;
 	unsigned int len;
 
 	if (argc < 2) {
@@ -643,6 +653,25 @@ int main(int argc, char **argv)
 			return 2;
 		}
 		return slotcheck(argv[2]);
+	}
+	if (str_eq(argv[1], "setenv")) {
+		int prc = nv_setenv_parse(argc - 2, argv + 2, &sa);
+
+		if (prc == NV_ARGS_COPY) {
+			out("nv: -c takes 1 or 2\n");
+			return 1;
+		}
+		if (prc != NV_ARGS_OK) {
+			usage();
+			return 1;
+		}
+		/* Refused before the lock and the read: nothing is touched. */
+		guard = nv_guard(sa.key, sa.value);
+		if (guard && !sa.force) {
+			out_fmt("nv: setenv %s: refused: %s\n", sa.key, guard);
+			out("nv: add --force to write it anyway\n");
+			return 1;
+		}
 	}
 	/* Before the read, not before the write: the block is read-modified-
 	 * written, so the read has to be inside the lock too. */
@@ -722,32 +751,16 @@ int main(int argc, char **argv)
 	if (str_eq(argv[1], "setenv")) {
 		struct env_io io = { 0, io_read, io_write };
 		struct env_set_report sr;
-		const char *value;
-		int copy = 0;
-		int a = 2;
-		int rc;
-
+		const char *key = sa.key;
+		const char *value = sa.value;
 		/* -c N writes a NAMED copy rather than the winning one. With
 		 * both copies valid it is the only way to make a stale
 		 * fallback agree: setenv without it writes back the copy it
 		 * read, so the loser stays stale however many times it is
 		 * run. Naming the invalid copy repairs just that one. */
-		if (argc > 3 && str_eq(argv[2], "-c")) {
-			if (str_eq(argv[3], "1"))
-				copy = 1;
-			else if (str_eq(argv[3], "2"))
-				copy = 2;
-			else {
-				out("nv: -c takes 1 or 2\n");
-				return 1;
-			}
-			a = 4;
-		}
-		if (argc < a + 1) {
-			usage();
-			return 1;
-		}
-		value = argc > a + 1 ? argv[a + 1] : 0;
+		int copy = sa.copy;
+		int rc;
+
 		if (load_unread) {
 			/* A copy could not be read in full: env_setenv reads
 			 * both again and refuses, or goes on, on its own
@@ -766,26 +779,29 @@ int main(int argc, char **argv)
 			/* What this erase costs if it is interrupted, said
 			 * before it happens rather than discovered after. */
 			char av[512];
-			int had = env_get(alt, alt_len, argv[a], av, sizeof av);
+			int had = env_get(alt, alt_len, key, av, sizeof av);
 
 			if (!had)
 				out_fmt("nv: NOTE -- the fallback copy (%d) does"
-					" not set %s\n", (long)alt_part.copy, argv[a]);
+					" not set %s\n", (long)alt_part.copy, key);
 			else if (!value || !str_eq(av, value))
 				out_fmt("nv: NOTE -- the fallback copy (%d) still has"
-					" %s=%s\n", (long)alt_part.copy, argv[a], av);
+					" %s=%s\n", (long)alt_part.copy, key, av);
 			if (!had || !value || !str_eq(av, value)) {
 				out("nv: if this write is interrupted, U-Boot uses"
 				    " that value.\n");
-				out_fmt("nv: to make them agree: nv setenv -c %d %s"
-					" <value>\n", (long)alt_part.copy, argv[a]);
+				out_fmt("nv: to make them agree: nv setenv%s -c %d %s"
+					" <value>\n", guard ? " --force" : "",
+					(long)alt_part.copy, key);
+				if (str_eq(key, "sw_commit"))
+					out("nv: or, for the running slot: nv commit <slot>\n");
 			}
 		}
-		rc = env_setenv(&io, copy, argv[a], value, &sr);
+		rc = env_setenv(&io, copy, key, value, &sr);
 		if (rc != NVS_DONE) {
 			if (rc == NVS_NO_ROOM || rc == NVS_NOT_SET)
-				out_fmt("Error: cannot set %s\n", argv[a]);
-			out_fmt("nv: setenv %s: %s\n", argv[a], env_setenv_msg(rc));
+				out_fmt("Error: cannot set %s\n", key);
+			out_fmt("nv: setenv %s: %s\n", key, env_setenv_msg(rc));
 			return 1;
 		}
 		if (sr.repaired)

@@ -453,7 +453,7 @@ sshx 'logread | grep -q "slot-state: OTHER SLOT BROKEN: slot 0"' || fail "the OT
 sshx 'rm -rf /tmp/ss'
 echo "  odi-slot records uncommitted=1 and the failed check, the login banner and syslog carry both notices"
 
-say "scenario: nv slotcheck and the nv commit warning (real nv, partitions as files)"
+say "scenario: nv slotcheck, the nv commit warning and the setenv guard (real nv, partitions as files)"
 # The real MIPS nv, in a chroot whose /proc/mtd and /dev/mtdN are files: a
 # kernel partition with a uImage built here (zlib CRCs, the layout
 # src/nv/slot.h documents) and a rootfs one starting with a version 4
@@ -554,10 +554,21 @@ sed -i 's/^other_slot_check=fail$/other_slot_check=ok/' $R/var/run/odi-slot
 out=$(chroot $R /bin/nv commit 0 2>&1)
 echo "commit 0, slot 1 recorded as ok: $out"
 if echo "$out" | grep -q WARNING; then echo "a passing other slot printed a warning"; exit 1; fi
+# nv setenv refuses the keys U-Boot boots by without --force, before it
+# takes the lock or reads a copy: both partitions stay as they were.
+for args in "sw_commit 1" "-c 2 sw_commit 1" "sw_active 1" "bootcmd" "mupgrade_en 1" "sw_tryactive 7" "sw_tryactive"; do
+	rc=0; out=$(chroot $R /bin/nv setenv $args 2>&1) || rc=$?
+	echo "setenv $args: rc=$rc"; echo "$out"
+	[ "$rc" = 1 ]
+	echo "$out" | head -n 1 | grep -q "^nv: setenv [a-z_]*: refused: "
+	echo "$out" | grep -q "^nv: add --force to write it anyway$"
+done
+[ "$(md5sum < $R/dev/mtd1)" = "$sum0" ]
+[ "$(md5sum < $R/dev/mtd2)" = "$sum1" ]
 GUEST
 sed 's/^/    /' "$WORK/slotcheck.out"
 sshx 'rm -rf /tmp/sc'
-echo "  nv slotcheck: pass, failed data CRC, empty rootfs, no partitions; nv commit warns after its result line, from the recorded result"
+echo "  nv slotcheck: pass, failed data CRC, empty rootfs, no partitions; nv commit warns after its result line, from the recorded result; nv setenv refuses the boot keys without --force and writes nothing"
 
 say "scenario: trial-guard.sh on that trial (real busybox, real /proc/net/tcp)"
 # The odi-slot just written says trial. The register is a file here (the
