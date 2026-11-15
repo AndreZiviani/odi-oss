@@ -35,6 +35,8 @@ f="$T/store"
 case \$1 in
 get) grep "^\$2=" "\$f" || { echo "GET fail."; exit 1; } ;;
 set) [ -f "$T/flash-fails" ] && exit 1
+     [ "\$2" = "\$(cat "$T/flash-fails-key" 2>/dev/null)" ] && exit 1
+     [ "\$2=\$3" = "\$(cat "$T/flash-fails-pair" 2>/dev/null)" ] && exit 1
      grep -v "^\$2=" "\$f" > "\$f.new"; echo "\$2=\$3" >> "\$f.new"; mv "\$f.new" "\$f"; echo "\$2=\$3" ;;
 esac
 EOF
@@ -45,7 +47,7 @@ cat > "$T/bin/apply" <<EOF
 #!/bin/sh
 echo "\$*" >> "$T/apply.log"
 n=\$(( \$(cat "$T/seq" 2>/dev/null || echo 0) + 1 )); echo \$n > "$T/seq"
-if [ "\$2" = --revert ]; then set -- identity ok 0
+if [ "\$2" = --revert ]; then [ -f "$T/revert-fails" ] && exit 1; set -- identity ok 0
 else [ -f "$T/delay" ] && sleep "\$(cat "$T/delay")"; set -- \$(cat "$T/next"); fi
 printf 'id=1.%s\nstate=done\nchanged=%s\naction=reregister\nresult=%s\nrefusals=%s\n' \$n "\$1" "\$2" "\$3" > "$T/status"
 [ "\$2" = ok ]
@@ -86,7 +88,8 @@ settle() {
 	return 1
 }
 fresh() {
-	rm -f "$T/state" "$T/trial.conf" "$T/req" "$T/apply.log" "$T/delay" "$T/flash-fails"
+	rm -f "$T/state" "$T/trial.conf" "$T/req" "$T/apply.log" "$T/delay" "$T/flash-fails" \
+	      "$T/flash-fails-key" "$T/flash-fails-pair" "$T/revert-fails"
 	printf 'GPON_SN=ODIT00000001\nGPON_PLOAM_PASSWD=oldsecret\nLOID=olduser\nLOID_OLD=olduser\nLOID_PASSWD=oldpw\n' > "$T/store"
 	printf 'SERVID 0: Used: 1\nSERVID 1: Used: 1\n' > "$T/omcli-conn"
 	omcli_state O5 no
@@ -183,6 +186,45 @@ touch "$T/flash-fails"
 out=$(run try GPON_SN=ODIT0000ABCD)
 settle
 t "store refused: said so, the RAM file stays" "^store_failed present$" "$(st outcome) $([ -e "$T/trial.conf" ] && echo present || echo absent)"
+
+# ---- 6b. the store takes the first key and refuses a later one: the first
+# goes back, so a reboot does not register with a mix of old and new values.
+fresh
+echo "identity ok 0" > "$T/next"
+echo GPON_PLOAM_PASSWD > "$T/flash-fails-key"
+run try GPON_SN=ODIT0000ABCD GPON_PLOAM_PASSWD=newsecret > /dev/null
+settle
+t "partial store: store_failed, the RAM file stays" "^store_failed present$" "$(st outcome) $([ -e "$T/trial.conf" ] && echo present || echo absent)"
+t "partial store: the serial went back" "GPON_SN=ODIT00000001" "$(cat "$T/store")"
+t "partial store: the password was never changed" "GPON_PLOAM_PASSWD=oldsecret" "$(cat "$T/store")"
+t "partial store: no undo file left" "^absent$" "$([ -e "$T/trial.conf.undo" ] && echo present || echo absent)"
+n "partial store: no value in the log" "newsecret|ODIT0000ABCD|oldsecret|ODIT00000001" "$(cat "$T/log" "$T/kmsg")"
+
+# The key that cannot go back is named, and the outcome says the store is mixed.
+fresh
+echo "identity ok 0" > "$T/next"
+echo GPON_PLOAM_PASSWD > "$T/flash-fails-key"
+echo GPON_SN=ODIT00000001 > "$T/flash-fails-pair"
+run try GPON_SN=ODIT0000ABCD GPON_PLOAM_PASSWD=newsecret > /dev/null
+settle
+t "mixed store: store_mixed, the key named" "^store_mixed$" "$(st outcome)"
+t "mixed store: the log names the key" "state=store_mixed failed=GPON_PLOAM_PASSWD new=GPON_SN" "$(cat "$T/kmsg")"
+
+# ---- 6c. a revert whose reload fails: not reported as reverted, and a
+# second revert goes through.
+fresh
+echo "identity refused 3" > "$T/next"
+touch "$T/revert-fails"
+run try GPON_PLOAM_PASSWD=wrong > /dev/null
+for _ in $(seq 100); do [ "$(st phase)" = revert_failed ] && break; sleep 0.1; done
+t "revert failed: phase and outcome" "^revert_failed revert_failed refused$" "$(st phase) $(st outcome) $(st reason)"
+t "revert failed: the RAM file is gone" "^absent$" "$([ -e "$T/trial.conf" ] && echo present || echo absent)"
+for _ in $(seq 50); do run status | grep -q '^warning=' && break; sleep 0.1; done
+t "revert failed: status asks for a revert" "warning=the trial watcher is gone" "$(run status)"
+rm -f "$T/revert-fails"
+out=$(run revert)
+t "revert again: reverted" "^steady reverted asked$" "$(st phase) $(st outcome) $(st reason)"
+t "revert again: through the guard" "omci --revert 170$" "$(tail -n 1 "$T/apply.log")"
 
 # ---- 7. what try refuses, and the RAM file itself
 fresh

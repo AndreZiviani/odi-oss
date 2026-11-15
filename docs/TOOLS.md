@@ -1582,9 +1582,9 @@ line; key names, never values:
 
 | key | meaning |
 |---|---|
-| `phase` | `steady`, `applying` (omcid re-registers) or `watching` (back in O5, the loop window) |
+| `phase` | `steady`, `applying` (omcid re-registers), `watching` (back in O5, the loop window) or `revert_failed` (the revert reload failed: `identity-trial.sh revert` tries again) |
 | `keys` | the key names of the trial |
-| `outcome` | `kept`, `reverted`, `held`, or `store_failed` (the OLT took the values but `flash set` refused one: the RAM file stays, so omcid keeps answering them until a reboot reads the store) |
+| `outcome` | `kept`, `reverted`, `held`, `revert_failed` (the reload back to the store failed, so omcid may still run the trial values), `store_failed` (the OLT took the values but `flash set` refused one: the keys already written go back, so the store keeps the identity before the trial; the RAM file stays, so omcid keeps answering the trial values until a reboot reads the store) or `store_mixed` (as `store_failed`, but a key could not go back: the store holds a mix, set it by hand before a reboot) |
 | `reason` | why a trial went back: the reload result, `mib_reset_loop`, `asked` or `no_answer` |
 | `result`, `refusals` | the reload result of the trial and the Deactivate_ONU-IDs omcid counted |
 | `before_onu`, `before_services`, `before_olt_resets`, `before_loop` | the ONU state, the services, the OLT MIB resets and whether they were a loop, before the trial |
@@ -1592,7 +1592,7 @@ line; key names, never values:
 | `trial_file`, `warning` (`status` only) | whether the RAM file exists; a warning when the watcher is gone during a trial |
 
 Each step is one line to the kernel log, `identity-trial: event=identity_trial
-keys=... state=start|watching|kept|revert|reverted|held|store_failed`.
+keys=... state=start|watching|kept|revert|reverted|revert_failed|held|store_failed|store_mixed`.
 
 ### `safe-mode.sh` -- the boot counter and the recovery boot
 

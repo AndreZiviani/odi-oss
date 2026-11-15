@@ -271,16 +271,29 @@ try() {
 
 # finish_revert REASON: back to the store. The RAM file goes first, so the
 # reload finds the stored identity; --revert, so the guard lets it through.
+# A reload that fails leaves phase and outcome at revert_failed, not steady:
+# omcid may still run the trial values, and identity-trial.sh revert tries
+# again (no watcher runs any more, so ask() calls this directly).
 finish_revert() {
 	reason=$1
 	rm -f "$TRIAL"
 	event identity_trial "state=revert reason=$reason"
-	"$APPLY" omci --revert "$APPLY_S" || say "the revert did not end well: see apply.sh output above and /var/log/omcid.log" >&2
+	reverted=yes
+	"$APPLY" omci --revert "$APPLY_S" || reverted=no
 	_reason=$reason
 	lock
 	load
 	look_after
 	reason=$_reason
+	if [ "$reverted" = no ]; then
+		phase=revert_failed
+		outcome=revert_failed
+		save
+		unlock
+		event identity_trial "state=revert_failed reason=$reason after_onu=$after_onu after_services=$after_services"
+		say "the revert did not end well (apply.sh output above, /var/log/omcid.log): omcid may still run the trial values. identity-trial.sh revert tries again" >&2
+		return 1
+	fi
 	phase=steady
 	outcome=reverted
 	save
@@ -296,29 +309,68 @@ store_has() {
 	"$TIMEOUT" "$IO_S" "$FLASH" get "$1" 2>/dev/null | grep -q "^$1="
 }
 
+# store_swap KEY VALUE: VALUE into the store, and what to go back to into
+# $UNDO: KEY=OLD, or KEY alone when the store had no value for KEY (flash set
+# cannot clear a key, so that one cannot go back). Fails, and records
+# nothing, when the store refuses VALUE.
+store_swap() {
+	if store_has "$1"; then
+		_undo="$1=$("$TIMEOUT" "$IO_S" "$FLASH" get "$1" 2>/dev/null | sed -n "s/^$1=//p" | sed -n 1p)"
+	else
+		_undo=$1
+	fi
+	store_put "$1" "$2" || return 1
+	printf '%s\n' "$_undo" >> "$UNDO"
+}
+
 # finish_keep: the values into the store, then the RAM file away. A key the
-# store refuses leaves the RAM file in place, so omcid keeps answering what
-# the OLT took, and says so: the next reboot would read the store.
+# store refuses stops the writes, and the keys already written go back to
+# their stored values: the store holds the identity before the trial or the
+# new one, never a mix of the two that the next boot would register with.
+# The RAM file stays, so omcid keeps answering what the OLT took, and says
+# so: the next reboot reads the store. A key that cannot go back is named
+# (outcome store_mixed).
 finish_keep() {
-	bad=
-	while IFS= read -r a; do
+	bad='' mixed=''
+	UNDO=$TRIAL.undo
+	( umask 077; : > "$UNDO" ) || bad=" $UNDO"
+	while [ -z "$bad" ] && IFS= read -r a; do
 		k=${a%%=*} v=${a#*=}
-		store_put "$k" "$v" || bad="$bad $k"
+		store_swap "$k" "$v" || { bad=" $k"; break; }
 		case $k in
 		LOID|LOID_PASSWD)
-			if store_has "${k}_OLD"; then store_put "${k}_OLD" "$v" || bad="$bad ${k}_OLD"; fi ;;
+			if store_has "${k}_OLD"; then
+				store_swap "${k}_OLD" "$v" || { bad=" ${k}_OLD"; break; }
+			fi ;;
 		esac
 	done < "$TRIAL"
+	if [ -n "$bad" ]; then
+		while IFS= read -r a; do
+			case $a in
+			*=?*) store_put "${a%%=*}" "${a#*=}" || mixed="$mixed ${a%%=*}" ;;
+			*) mixed="$mixed ${a%%=*}" ;;
+			esac
+		done < "$UNDO"
+	fi
+	rm -f "$UNDO"
 	lock
 	load
 	look_after
 	phase=steady
+	if [ -n "$mixed" ]; then
+		outcome=store_mixed
+		save
+		unlock
+		event identity_trial "state=store_mixed failed=$(echo $bad | tr ' ' ',') new=$(echo $mixed | tr ' ' ',')"
+		say "the OLT took the new identity but the store refused$bad, and$mixed could not go back: the store holds a mix of old and new values. Set them by hand before a reboot" >&2
+		return 1
+	fi
 	if [ -n "$bad" ]; then
 		outcome=store_failed
 		save
 		unlock
 		event identity_trial "state=store_failed failed=$(echo $bad | tr ' ' ',')"
-		say "the OLT took the new identity but the store refused$bad: omcid keeps the trial values until a reboot, which reads the store. Set them by hand" >&2
+		say "the OLT took the new identity but the store refused$bad: the store keeps the identity before the trial, and omcid keeps the trial values until a reboot, which reads the store. Set them by hand" >&2
 		return 1
 	fi
 	rm -f "$TRIAL"
