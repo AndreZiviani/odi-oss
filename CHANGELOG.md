@@ -24,6 +24,11 @@ listed here.
   them out of the `mkgponinit.py` output, each sweep matched whole and once.
   The boot register stream loses exactly those 1,728 writes
   (`test/fixtures/boot-golden-common.txt`); nothing else moves.
+- Tests: `test/apply_test.sh` no longer fails now and then on a busy runner
+  ("identity: back in O5 with services"). Its stub omcid read the case
+  script while it ran, so a reload still in progress could read the
+  script of the next case from its old offset and overwrite the status
+  with a fragment of it. The stub now reads the script once per reload.
 - Docs: `SETTINGS.md` no longer says `flash set` refuses an empty value. It
   stores one for a stock key and removes an odi-only key; only the web UI
   cannot clear a key.
