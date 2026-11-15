@@ -258,7 +258,7 @@ static unsigned ev_services(void)
 	unsigned n = 0;
 
 	for (int i = 0; i < SERV_MAX; i++)
-		n += servtab[i].in_use ? 1u : 0u;
+		n += servtab[i].in_use == 1 ? 1u : 0u;
 	return n;
 }
 

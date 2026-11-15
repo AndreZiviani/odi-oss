@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a bridge connection whose deactivate fails stays owned as pending
+  and is deactivated again by the next rebuild. Before, the slot was freed
+  at once and the rule stayed in the switch whenever the next plan did not
+  reuse that service id, with omcid no longer knowing it owned it. A pending
+  service is not counted as live, its id is not handed out, and it survives
+  a respawn in the snapshot. The retry runs on its own every 5 seconds and
+  touches no live service; it does not trigger a full rebuild.
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair

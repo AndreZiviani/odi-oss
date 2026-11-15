@@ -119,6 +119,7 @@ int main(int argc, char **argv)
 	 * marked dirty; -1 when none is pending. See the gate below. */
 	long dirty_since_s = -1;
 	long now_s = -1;
+	long last_pending_s = 0;      /* the last bdgconn_retry_pending() pass */
 	int rebuild_now = 0;
 	/* -s: an ONU state to use instead of asking the driver, the same
 	 * reason -c takes a capability blob -- a test harness with no line
@@ -547,6 +548,18 @@ int main(int argc, char **argv)
 			conn_dirty = 0;
 			bdgconn_rebuild();
 			snapshot_save();       /* see the qos_dirty arm above */
+		}
+		/* A deactivate that failed is tried again every
+		 * PENDING_RETRY_S, on its own and not through a rebuild: that
+		 * one would tear down and re-add every live service. */
+		if (now_s >= 0 && now_s - last_pending_s >= PENDING_RETRY_S) {
+			int had = 0;
+
+			last_pending_s = now_s;
+			for (int i = 0; i < SERV_MAX; i++)
+				had += servtab[i].in_use == SERV_PENDING;
+			if (had && bdgconn_retry_pending() < had)
+				snapshot_save();
 		}
 		/* Whatever a rebuild marked dirty again is timed from the next
 		 * pass, not from the change that started this one. */
