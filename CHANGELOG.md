@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- OMCI: clear the original CRC of a masked frame in text and pcap exports,
+  so the checksum cannot reveal the hidden identity or secret. `--full`
+  still returns the captured frame unchanged.
+
 - OMCI: `omcli check` derives queue ownership and ordering from the current
   MIB, so a pending T-CONT or priority change is reported as a difference
   instead of accepting the old programmed queue map.
