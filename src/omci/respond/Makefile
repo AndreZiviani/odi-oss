@@ -95,10 +95,11 @@ $(BUILD)/mcastvlan_test: ../test/mcastvlan_test.c ../mcastvlan.h ../extvlan.h \
 	$(CC) $(CFLAGS) $(LDFLAGS) -I.. -o $@ ../test/mcastvlan_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o
 
-# Real downstream ownership paths, with fault injection at the command boundary.
+# MIB changes before a rebuild, against synthetic chip readbacks.
 $(BUILD)/qos_check_test: ../test/qos_check_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
 	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ $^
 
+# Real downstream ownership paths, with fault injection at the command boundary.
 $(BUILD)/downstream_ownership_test: ../test/downstream_ownership_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
 

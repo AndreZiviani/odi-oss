@@ -1726,11 +1726,19 @@ static void chk_queue_plan(void)
 		us_queue_add(chk_mib_q, &chk_mib_n, (uint16_t)row_u32(r, ctp, 4));
 	}
 	for (unsigned i = 0; i < chk_mib_n; i++) {
+		unsigned count = 0;
+
 		chk_mib_q[i].ordinal = 0;
-		for (unsigned j = 0; j < chk_mib_n; j++)
-			if (chk_mib_q[j].tcontMe == chk_mib_q[i].tcontMe &&
-			    us_queue_before(&chk_mib_q[j], &chk_mib_q[i]))
+		for (unsigned j = 0; j < chk_mib_n; j++) {
+			if (chk_mib_q[j].tcontMe != chk_mib_q[i].tcontMe)
+				continue;
+			count++;
+			if (us_queue_before(&chk_mib_q[j], &chk_mib_q[i]))
 				chk_mib_q[i].ordinal++;
+		}
+		/* The rebuild drops the whole group when it cannot fit. */
+		if (count > 8)
+			chk_mib_q[i].ordinal = 0xffff;
 	}
 }
 
@@ -1741,7 +1749,6 @@ static const struct us_queue *chk_mib_queue(uint16_t meId)
 			return &chk_mib_q[i];
 	return 0;
 }
-
 
 /* gpon_proc_path with its last component replaced by `name`. */
 static void chk_path(char *out, unsigned cap, const char *name)
@@ -1866,6 +1873,11 @@ static void chk_queues(void)
 		out_fmt(" (queue %d)", (long)pq);
 		if (!m) {
 			out(": differs: mib no longer references this upstream queue");
+			chk_line(0);
+			continue;
+		}
+		if (m->ordinal == 0xffff) {
+			out(": differs: mib needs more than 8 queues on this t-cont; rebuild drops it");
 			chk_line(0);
 			continue;
 		}

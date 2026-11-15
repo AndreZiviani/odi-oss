@@ -119,6 +119,24 @@ int main(void)
 	put(q, 7, 0x8001);
 	check("scheduler pointer also changes the queue owner",
 	      "mib t-cont 8001 ordinal 0, programmed t-cont 8000 ordinal 0");
+	put(q, 7, 0);
+	ctp = mib_find(268, 2);
+	put(ctp, 4, 0x8007);
+	check("unreferenced programmed queue is a difference",
+	      "mib no longer references this upstream queue");
+	put(ctp, 4, 0x8006);
+	for (unsigned i = 0; i < 7; i++) {
+		struct mib_row *extra = mib_add(277, 0x8010 + i);
+
+		put(extra, 6, 0x80000000);
+		ctp = mib_add(268, 10 + i);
+		put(ctp, 1, 1700 + i);
+		put(ctp, 2, 0x8000);
+		put(ctp, 3, 1);
+		put(ctp, 4, 0x8010 + i);
+	}
+	check("a ninth queue invalidates the whole T-CONT plan",
+	      "mib needs more than 8 queues on this t-cont; rebuild drops it");
 	out_flush();
 	return failures ? 1 : 0;
 }
