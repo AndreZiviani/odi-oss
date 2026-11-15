@@ -18,7 +18,7 @@ never needed it.
 Reads a raw `W`/`T`/`D` regtrace dump (same format decode.py/compare.py
 read: `<ns> KIND addr val` per line, `#`-prefixed header lines ignored) and
 writes the module-load replay table as a firmware blob (replayblob.py has
-the format; the checked-in copy is rootfs/skeleton/lib/firmware/odi/
+the format; tools/regtrace/tables/modload.txt is the dump of the shipped
 modload.bin, which the kernel loads with request_firmware() when the
 `init_modload` trigger fires) -- one record per register write or
 table-row write, IN THE CAPTURE'S OWN ORDER,

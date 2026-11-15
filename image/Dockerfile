@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # Image assembly: squashfs-tools writes the rootfs, qemu-user-static runs the
-# cross-built busybox just far enough to ask it which applets it has.
+# cross-built busybox just far enough to ask it which applets it has, and
+# python3 builds the register replay tables from their text
+# (tools/regtrace/replayblob.py build).
 #
 # Debian's squashfs-tools accepts `-comp lzma`, which is what this device's
 # squashfs reads, even though its own --help does not list it.
@@ -42,6 +44,7 @@ RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
 		binutils \
 		file \
 		xz-utils \
+		python3 \
 	&& rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work

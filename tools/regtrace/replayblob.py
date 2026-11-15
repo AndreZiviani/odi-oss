@@ -7,11 +7,30 @@ loads with request_firmware() from /lib/firmware/odi/, written by
 mksdkinit.py, mkmodload.py and mkgponinit.py, read back here for tests and
 for review.
 
-    replayblob.py dump <file.bin>
+    replayblob.py build <in.txt> <out.bin>
+    replayblob.py build-tables [<outdir>]
+
+The text in tools/regtrace/tables/ is the source of the three blobs: build
+turns one text file into its blob (out.bin "-" writes it to stdout), and
+build-tables writes all three into outdir, out/firmware/odi/ when none is
+given, rewriting a file only when its bytes change. The image build, the
+host tests and the SBOM read that output; nothing under rootfs/ holds a
+blob. The text format is the one dump prints (one line per record, see
+dump_record()), plus comments: a line starting with "#", a blank line, or
+"#" and anything after it at the end of a record line. The first line is
+the header dump writes; build takes the table and the format version from
+it, and when it also names records= and crc32=, both must match the
+records that follow, so a change to the records shows in the header of
+the diff. build refuses a field it does not know, a value that does not
+fit its field and any record the kernel loader would refuse
+(check_record()).
+
+    replayblob.py dump [--names <regnames.txt>] <file.bin>
 
 prints one line per record, the same text a generator prints on stdout
-when it is given no output path, so a checked-in blob can be reviewed (and
-diffed) as text.
+when it is given no output path, so a blob can be reviewed (and diffed)
+as text. With --names, a register record whose offset
+src/diag/tools/regnames.txt names gets that name as a trailing comment.
 
     replayblob.py compact <in.bin> <out.bin>
     replayblob.py expand <in.bin> <out.bin>
@@ -96,6 +115,7 @@ Record, GPON init table:
 sdkinit records are stored grouped by verb, in SDKINIT_VERBS order, each
 verb in capture order; a verb with nothing to replay has no records.
 """
+import os
 import struct
 import sys
 import zlib
@@ -105,6 +125,8 @@ VERSION = 1
 HEADER_SIZE = 24
 RECORD_SIZE = 36
 MAX_WORDS = 5
+# ODI_REPLAY_BLOB_MAX_RECORDS: the kernel loader refuses a longer blob.
+MAX_RECORDS = 65536
 
 TABLE_SDKINIT = 1
 TABLE_MODLOAD = 2
@@ -168,6 +190,12 @@ SDKINIT_VERBS = (
     "rldp", "trap", "gpio", "time", "ponmac",
     "i2c", "i2cen", "gpon", "rxsd",
 )
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(os.path.dirname(_HERE))
+TABLES_DIR = os.path.join(_HERE, "tables")
+OUT_DIR = os.path.join(_ROOT, "out", "firmware", "odi")
+REGNAMES = os.path.join(_ROOT, "src", "diag", "tools", "regnames.txt")
 
 _HEADER = struct.Struct(">IHHHHII")   # everything before crc32
 _CRC = struct.Struct(">I")
@@ -408,15 +436,276 @@ def dump_record(table, rec):
                                           offset, value)
 
 
-def dump(data):
+def record_offset(table, rec):
+    """The register offset of a register record, else None."""
+    if table == TABLE_GPON_INIT:
+        kind, _sn, _res, _tbl, _n, offset, *_rest = _RECORD_GPON.unpack(rec)
+    else:
+        kind, _c, _g, _v, _tbl, _n, offset, *_rest = _RECORD_SWITCH.unpack(rec)
+    return offset if kind == KIND_REG else None
+
+
+def load_regnames(path=REGNAMES):
+    """{offset: name} of the reg lines of src/diag/tools/regnames.txt."""
+    names = {}
+    with open(path) as f:
+        for line in f:
+            t = line.split("#", 1)[0].split()
+            if len(t) >= 3 and t[0] == "reg":
+                names[int(t[1], 16)] = t[2]
+    return names
+
+
+def dump(data, names=None):
     """The whole blob as text: a header comment line, then one line per
-    record.
+    record. names ({offset: name}) adds the name of a named register as a
+    trailing comment.
     """
     table, crc, records = unpack(data)
     lines = ["# odi replay blob: table=%s version=%d records=%d crc32=0x%08x"
              % (TABLE_NAMES[table], VERSION, len(records), crc)]
-    lines.extend(dump_record(table, r) for r in records)
+    for r in records:
+        line = dump_record(table, r)
+        name = names.get(record_offset(table, r)) if names else None
+        lines.append("%s  # %s" % (line, name) if name else line)
     return "\n".join(lines) + "\n"
+
+
+def _payload_ok(kind_table, n, value, tbl, words):
+    """The shared payload rules of odi_replay_check_payload()."""
+    if kind_table:
+        if not 1 <= n <= MAX_WORDS:
+            return "table record word count out of range"
+        if value:
+            return "table record carries a value"
+    elif n or tbl:
+        return "register record carries a table or words"
+    if any(words[n:]):
+        return "record has nonzero padding past its words"
+    return None
+
+
+def check_record(table, rec, prev_verb=0):
+    """Raises ValueError for a record the kernel loader refuses
+    (odi_replay_blob_parse() in odi_replay_blob.c, which this follows rule
+    for rule; test/odi_replay_blob_test.sh runs both on the same files).
+    """
+    if table == TABLE_GPON_INIT:
+        kind, sn, res, tbl, n, _off, value, *words = _RECORD_GPON.unpack(rec)
+        if res:
+            why = "gpon init record reserved field nonzero"
+        elif kind == KIND_REG:
+            why = None
+            if sn != SN_WORD_NONE and not SN_WORD_MIN <= sn <= SN_WORD_MAX:
+                why = "gpon init record sn_word out of range"
+            why = why or _payload_ok(False, n, value, tbl, words)
+        elif kind == KIND_TABLE:
+            why = ("gpon init table record carries an sn_word" if sn != SN_WORD_NONE
+                   else _payload_ok(True, n, value, tbl, words))
+        else:
+            why = "gpon init record kind not register or table"
+        if why:
+            raise ValueError(why)
+        return
+    kind, cat, grp, verb, tbl, n, _off, value, *words = _RECORD_SWITCH.unpack(rec)
+    if table == TABLE_MODLOAD:
+        if verb:
+            raise ValueError("modload record carries a verb")
+        if kind == KIND_REG:
+            if cat or grp > MAX_REG_GROUP:
+                raise ValueError("modload register record category or reg_group out of range")
+        elif kind in (KIND_TABLE, KIND_CALL):
+            if not 1 <= cat <= MAX_CATEGORY or grp:
+                raise ValueError("modload table record category or reg_group out of range")
+        else:
+            raise ValueError("modload record kind not register, table or call")
+    else:
+        if cat or grp:
+            raise ValueError("sdkinit record carries a category or reg_group")
+        if verb >= len(SDKINIT_VERBS):
+            raise ValueError("sdkinit record verb out of range")
+        if verb < prev_verb:
+            raise ValueError("sdkinit records not grouped by verb")
+        if kind not in (KIND_REG, KIND_TABLE, KIND_SOC, KIND_CALL):
+            raise ValueError("sdkinit record kind out of range")
+    if kind == KIND_CALL:
+        check_call(rec)
+        return
+    why = _payload_ok(kind == KIND_TABLE, n, value, tbl, words)
+    if why:
+        raise ValueError(why)
+
+
+def _field(tok, key, lo, hi, base=0):
+    """The value of tok, which must read key=<number>, within lo..hi."""
+    if not tok.startswith(key + "="):
+        raise ValueError("expected %s=, got %r" % (key, tok))
+    try:
+        v = int(tok[len(key) + 1:], base)
+    except ValueError:
+        raise ValueError("%s: not a number: %r" % (key, tok)) from None
+    if not lo <= v <= hi:
+        raise ValueError("%s=%d out of range %d..%d" % (key, v, lo, hi))
+    return v
+
+
+def _hex32(tok, key):
+    if not tok.startswith(key + "=0x"):
+        raise ValueError("expected %s=0x..., got %r" % (key, tok))
+    return _field(tok, key, 0, 0xffffffff, 16)
+
+
+def _words_field(toks, n):
+    """The words= list of a TABLE or CALL line: n words, or "-" for none."""
+    if not toks or not toks[0].startswith("words="):
+        raise ValueError("expected words=")
+    first = toks[0][len("words="):]
+    if n == 0:
+        if first != "-" or len(toks) != 1:
+            raise ValueError("n=0 takes words=-")
+        return []
+    vals = [first] + toks[1:]
+    if len(vals) != n:
+        raise ValueError("n=%d but %d words" % (n, len(vals)))
+    out = []
+    for v in vals:
+        if not v.startswith("0x"):
+            raise ValueError("word %r is not 0x..." % v)
+        out.append(int(v, 16))
+        if out[-1] > 0xffffffff:
+            raise ValueError("word %r wider than 32 bits" % v)
+    return out
+
+
+def parse_record(table, line):
+    """One record line (no comment) as record bytes, the inverse of
+    dump_record().
+    """
+    t = line.split()
+    if table == TABLE_GPON_INIT:
+        if t[:1] == ["TABLE"] and len(t) >= 5:
+            n = _field(t[3], "n", 0, MAX_WORDS)
+            return gpon_table(_field(t[1], "table", 0, 0xffff), _hex32(t[2], "idx"),
+                              _words_field(t[4:], n))
+        if t[:1] == ["REG"] and len(t) == 4:
+            sn = SN_WORD_NONE if t[1] == "sn=-" else _field(t[1], "sn", 0, 0xfe)
+            return gpon_reg(_hex32(t[2], "off"), _hex32(t[3], "val"), sn)
+        raise ValueError("not a gpon_init record")
+    cat = grp = verb = 0
+    if table == TABLE_SDKINIT:
+        if not t or t[0] not in SDKINIT_VERBS:
+            raise ValueError("unknown verb %r" % (t[0] if t else ""))
+        verb = SDKINIT_VERBS.index(t[0])
+        t = t[1:]
+    else:
+        if len(t) < 2:
+            raise ValueError("not a modload record")
+        cat = _field(t[0], "cat", 0, 0xff)
+        grp = _field(t[1], "grp", 0, 0xff)
+        t = t[2:]
+    kind = t[0] if t else ""
+    if kind in ("REG", "SOC") and len(t) == 3:
+        off, val = _hex32(t[1], "off"), _hex32(t[2], "val")
+        if kind == "SOC":
+            if cat or grp:
+                raise ValueError("SOC record with a category or reg_group")
+            return switch_soc(off, val, verb)
+        return switch_reg(off, val, cat, grp, verb)
+    if grp:
+        raise ValueError("%s record with a reg_group" % kind)
+    if kind == "TABLE" and len(t) >= 5:
+        n = _field(t[3], "n", 0, MAX_WORDS)
+        return switch_table(_field(t[1], "table", 0, 0xffff), _hex32(t[2], "idx"),
+                            _words_field(t[4:], n), cat, verb)
+    if kind == "CALL" and len(t) >= 5:
+        if not t[1].startswith("fill="):
+            raise ValueError("expected fill=")
+        fills = {v: k for k, v in FILL_NAMES.items()}
+        if t[1][5:] not in fills:
+            raise ValueError("unknown fill %r" % t[1][5:])
+        args = _words_field(t[4:], len(t[4:]) if t[4] != "words=-" else 0)
+        return switch_call(fills[t[1][5:]], _hex32(t[2], "first"),
+                           _field(t[3], "count", 0, 0xffffffff), args, cat, verb)
+    raise ValueError("unknown record %r" % kind)
+
+
+def parse_text(text):
+    """A table's text (dump's format, with comments) as (table, records).
+    Raises ValueError naming the line on any defect.
+    """
+    lines = text.splitlines()
+    head = lines[0].split() if lines else []
+    if head[:4] != ["#", "odi", "replay", "blob:"]:
+        raise ValueError("line 1: not an odi replay blob header")
+    fields = {}
+    for tok in head[4:]:
+        k, _, v = tok.partition("=")
+        if k not in ("table", "version", "records", "crc32") or k in fields:
+            raise ValueError("line 1: unexpected %r" % tok)
+        fields[k] = v
+    names = {v: k for k, v in TABLE_NAMES.items()}
+    if fields.get("table") not in names:
+        raise ValueError("line 1: unknown table %r" % fields.get("table"))
+    if fields.get("version") != str(VERSION):
+        raise ValueError("line 1: version %r, this reads %d" % (fields.get("version"), VERSION))
+    table = names[fields["table"]]
+    records = []
+    prev_verb = 0
+    for i, line in enumerate(lines[1:], 2):
+        body = line.split("#", 1)[0].strip()
+        if not body:
+            continue
+        try:
+            rec = parse_record(table, body)
+            check_record(table, rec, prev_verb)
+        except (ValueError, struct.error) as e:
+            raise ValueError("line %d: %s" % (i, e)) from None
+        if table == TABLE_SDKINIT:
+            prev_verb = rec[3]
+        records.append(rec)
+        if len(records) > MAX_RECORDS:
+            raise ValueError("line %d: more than %d records, the kernel loader refuses it"
+                             % (i, MAX_RECORDS))
+    if "records" in fields and fields["records"] != str(len(records)):
+        raise ValueError("line 1: records=%s, the text has %d" % (fields["records"], len(records)))
+    if "crc32" in fields:
+        crc = _CRC.unpack_from(pack(table, records), _HEADER.size)[0]
+        if fields["crc32"] != "0x%08x" % crc:
+            raise ValueError("line 1: crc32=%s, the records give 0x%08x" % (fields["crc32"], crc))
+    return table, records
+
+
+def build(text):
+    """The blob a table's text describes, as bytes."""
+    table, records = parse_text(text)
+    return pack(table, records)
+
+
+def build_tables(outdir=OUT_DIR, srcdir=TABLES_DIR):
+    """Writes <outdir>/<table>.bin for each table text in srcdir. A file
+    whose bytes would not change is left alone, and a new one is written
+    under a temporary name first, so a reader never sees half a blob.
+    """
+    os.makedirs(outdir, exist_ok=True)
+    for name in sorted(TABLE_NAMES.values()):
+        src = os.path.join(srcdir, name + ".txt")
+        with open(src) as f:
+            try:
+                data = build(f.read())
+            except ValueError as e:
+                raise ValueError("%s: %s" % (src, e)) from None
+        dst = os.path.join(outdir, name + ".bin")
+        try:
+            with open(dst, "rb") as f:
+                if f.read() == data:
+                    continue
+        except FileNotFoundError:
+            pass
+        tmp = "%s.%d.tmp" % (dst, os.getpid())
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, dst)
 
 
 def _modload_keep(mask, rec):
@@ -601,12 +890,35 @@ def main(argv):
         with open(argv[3], "wb") as f:
             f.write(out)
         return
+    if len(argv) == 4 and argv[1] == "build":
+        with open(argv[2]) as f:
+            text = f.read()
+        try:
+            out = build(text)
+        except ValueError as e:
+            sys.exit("replayblob.py: %s: %s" % (argv[2], e))
+        if argv[3] == "-":
+            sys.stdout.buffer.write(out)
+        else:
+            with open(argv[3], "wb") as f:
+                f.write(out)
+        return
+    if len(argv) in (2, 3) and argv[1] == "build-tables":
+        try:
+            build_tables(argv[2] if len(argv) == 3 else OUT_DIR)
+        except ValueError as e:
+            sys.exit("replayblob.py: %s" % e)
+        return
+    names = None
+    if len(argv) == 5 and argv[1] == "dump" and argv[2] == "--names":
+        names = load_regnames(argv[3])
+        argv = argv[:2] + argv[4:]
     if len(argv) != 3 or argv[1] != "dump":
         sys.exit(__doc__)
     with open(argv[2], "rb") as f:
         data = f.read()
     try:
-        sys.stdout.write(dump(data))
+        sys.stdout.write(dump(data, names))
     except ValueError as e:
         sys.exit("replayblob.py: %s: %s" % (argv[2], e))
 

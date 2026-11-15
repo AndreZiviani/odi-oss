@@ -54,14 +54,6 @@ precedence = "closest"
 SPDX-FileCopyrightText = "2026 Andre Ziviani"
 SPDX-License-Identifier = "GPL-2.0-or-later"
 
-# Register replay tables: binary data of our own format, recorded from this
-# board and packed by tools/regtrace; loaded with request_firmware().
-[[annotations]]
-path = "rootfs/skeleton/lib/firmware/odi/*.bin"
-precedence = "closest"
-SPDX-FileCopyrightText = "2026 Andre Ziviani"
-SPDX-License-Identifier = "GPL-2.0-or-later"
-
 # Screenshots of our own tools.
 [[annotations]]
 path = "docs/images/**"

@@ -20,6 +20,8 @@
 # bracket, the one compare.py aligns.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# The replay tables the test loads, built from tools/regtrace/tables/.
+python3 "$ROOT/tools/regtrace/replayblob.py" build-tables
 FIXTURE="$ROOT/test/fixtures/isp1-260922-v7-modload-filtered.txt"
 
 if [ ! -f "$FIXTURE" ]; then

@@ -15,6 +15,8 @@
 # the real capture, via its own vendored, filtered fixture).
 set -eu
 cd "$(dirname "$0")/.."
+# The replay tables the test reads, built from tools/regtrace/tables/.
+python3 tools/regtrace/replayblob.py build-tables
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 
 cat > "$T/regmap.txt" <<'EOF'
@@ -155,9 +157,9 @@ python3 tools/regtrace/replayblob.py dump "$T/bit0.bin" | grep -q "REG off=0x000
 	|| { echo "bit 0 did not keep the captured flood value"; exit 1; }
 # The shipped blob already carries the production mask: filtering it again
 # changes nothing.
-python3 tools/regtrace/replayblob.py filter rootfs/skeleton/lib/firmware/odi/modload.bin \
+python3 tools/regtrace/replayblob.py filter out/firmware/odi/modload.bin \
 	"$T/again.bin" "$(python3 -c 'import sys; sys.path.insert(0, "tools/regtrace"); import replayblob; print(replayblob.PRODUCTION_MODLOAD_MASK)')"
-cmp -s rootfs/skeleton/lib/firmware/odi/modload.bin "$T/again.bin" \
+cmp -s out/firmware/odi/modload.bin "$T/again.bin" \
 	|| { echo "the shipped modload.bin is not the production selection"; exit 1; }
 
 echo "mkmodload_test: ok"

@@ -3,13 +3,15 @@
 /*
  * odi_replay_fw_host.h -- the host half of odi_replay_fw_load()/
  * odi_replay_fw_release() (odi_replay_blob.h): reads the table from the
- * same file the image ships, rootfs/skeleton/lib/firmware/odi/<name>, and
+ * same file the image ships, out/firmware/odi/<name> as
+ * `replayblob.py build-tables` writes it from tools/regtrace/tables/, and
  * validates it with the same odi_replay_blob_parse() the kernel runs, so a
- * host test replays exactly the bytes a stick would load.
+ * host test replays exactly the bytes a stick would load. The test script
+ * runs build-tables before it starts the test.
  *
  * Include after odi_replay_blob.c. The directory is ODI_REPLAY_FW_DIR from
- * the environment when set, otherwise rootfs/skeleton/lib/firmware next to
- * this header (derived from __FILE__, so it works from any working
+ * the environment when set, otherwise out/firmware next to this header's
+ * directory (derived from __FILE__, so it works from any working
  * directory). odi_replay_fw_host_dir, when non-NULL, overrides both: a test
  * points it at a scratch directory to feed a missing or corrupted file.
  * The load/release counters let a test check that every load was released.
@@ -52,10 +54,10 @@ static void odi_replay_fw_host_path(char *path, size_t len, const char *name)
 		return;
 	}
 	if (slash)
-		snprintf(path, len, "%.*s/../rootfs/skeleton/lib/firmware/%s",
+		snprintf(path, len, "%.*s/../out/firmware/%s",
 			 (int)(slash - here), here, name);
 	else
-		snprintf(path, len, "../rootfs/skeleton/lib/firmware/%s", name);
+		snprintf(path, len, "../out/firmware/%s", name);
 }
 
 int odi_replay_fw_load(enum odi_replay_table table, struct odi_replay_fw *fw)

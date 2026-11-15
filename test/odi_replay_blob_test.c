@@ -3,10 +3,11 @@
 /*
  * odi_replay_blob_test.c -- the register-replay firmware blobs
  * (odi_replay_blob.h): the three files the image ships under
- * rootfs/skeleton/lib/firmware/odi/ parse with the record counts the
- * replay tests pin, odi_replay_blob_parse() refuses every defect it is
- * meant to (header fields, size, CRC, per-record rules, each checked with
- * a CRC that is otherwise valid so the rule itself is what refuses it), a
+ * /lib/firmware/odi/, as built into out/firmware/odi/ from
+ * tools/regtrace/tables/, parse with the record counts the replay tests
+ * pin, odi_replay_blob_parse() refuses every defect it is meant to
+ * (header fields, size, CRC, per-record rules, each checked with a CRC
+ * that is otherwise valid so the rule itself is what refuses it), a
  * missing file fails the load, and odi_gpon_init_apply() replays
  * gpon_init.bin with the serial-number words substituted. The other two
  * tables are replayed against their captures by

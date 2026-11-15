@@ -373,8 +373,9 @@ drivers call each other through plain declarations in shared headers
 The three captured write sequences the drivers replay — the SDK-init
 verbs (`sdkinit.bin`, 65 KB), the module-load replay (`modload.bin`,
 26 KB) and the GPON boot init (`gpon_init.bin`, 29 KB) — are not compiled
-into the kernel. They ship in the rootfs as `/lib/firmware/odi/*.bin`
-(committed under `rootfs/skeleton/lib/firmware/odi/`) and are loaded with
+into the kernel. They ship in the rootfs as `/lib/firmware/odi/*.bin`,
+built by `image/build.sh` from their text under `tools/regtrace/tables/`
+(`replayblob.py build`), and are loaded with
 `request_firmware()` when a trigger needs one, then released: nothing
 stays resident, which gave back about 484 KB of RAM and 8.5 KB of uImage.
 Every trigger comes after the root filesystem is mounted: the sdkinit and
@@ -396,8 +397,8 @@ mis-generated file is refused whole, never half applied.
 filesystem lookup only: no user-mode helper, no compressed firmware, no
 firmware cache. `test/odi_replay_blob_test.sh` (in `make test-host`) runs
 the C parser and the GPON init replay against the host mock, and has the
-Python writer validate and dump each committed file, so the writer and
-the reader are checked against the same bytes.
+Python writer validate and dump each built file, so the writer and the
+reader are checked against the same bytes.
 
 ### Locking
 

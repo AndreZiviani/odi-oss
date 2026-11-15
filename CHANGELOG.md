@@ -98,6 +98,20 @@ listed here.
   record before its 120 s. In the diagnostics bundle as
   `pon/odi_gpon-drops.txt`. RAM only for now: a watchdog reset loses it.
   Refs #390.
+- The register replay tables are text now: `tools/regtrace/tables/` holds
+  `sdkinit.txt`, `modload.txt` and `gpon_init.txt`, one line per record in
+  the format `replayblob.py dump` prints, and `image/build.sh` builds
+  `/lib/firmware/odi/*.bin` from them (`replayblob.py build`, in the tools
+  container, which now carries python3). The binaries are no longer
+  committed. A register that `src/diag/tools/regnames.txt` names carries
+  its name as a comment (718 of the 3,326 records), and a change to a table
+  shows as a text diff. The built files are byte for byte the ones shipped
+  before. `build` refuses any record the kernel loader refuses and checks
+  the record count and CRC-32 in the header line;
+  `test/replay_tables_test.sh` builds each table, dumps it and builds the
+  dump back byte for byte, and holds the text to what `dump` prints. Host
+  tests and the SBOM read `out/firmware/odi/` (`replayblob.py build-tables`).
+  Issue #411.
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair

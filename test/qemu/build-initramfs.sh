@@ -69,6 +69,10 @@ cp -a "$ROOT/rootfs/skeleton/." "$STAGE/"
 chmod 755 "$STAGE"/etc/init.d/* "$STAGE"/etc/scripts/*
 rm -rf "$STAGE/tmp"
 ln -s /var/tmp "$STAGE/tmp"
+# The register replay tables, built from their text as image/build.sh does
+# (host python3 here, as for the host tests).
+python3 "$ROOT/tools/regtrace/replayblob.py" build-tables "$STAGE/lib/firmware/odi" \
+	|| die "replayblob.py build-tables failed"
 
 # /etc/passwd: image/build.sh normally writes this (image/gen-root-account.sh),
 # a step this script does not otherwise run at all since it skips the

@@ -10,7 +10,7 @@
  *    verb own
  *    SoC-window PBO IP-enable write (0xb800063c) landing BEFORE every
  *    write into the PBO block it gates -- against the REAL generated
- *    table, rootfs/skeleton/lib/firmware/odi/sdkinit.bin, not synthetic
+ *    table, sdkinit.bin as built from tools/regtrace/tables/, not synthetic
  *    data, since the table own shape (which verbs are populated) is
  *    exactly what these checks need to describe. Every verb call that
  *    loads the file must also release it.

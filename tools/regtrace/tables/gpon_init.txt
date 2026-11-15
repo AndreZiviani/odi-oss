@@ -1,0 +1,810 @@
+# odi replay blob: table=gpon_init version=1 records=800 crc32=0x6db5e9eb
+#
+# The source of /lib/firmware/odi/gpon_init.bin: replayblob.py build-tables turns
+# this file into the blob the image ships. One line per record, in replay
+# order; tools/regtrace/replayblob.py has the format and the rules build
+# checks. The header above must name the record count and CRC-32 the
+# records give (build prints both when they differ). A trailing comment on
+# a register record starts with its name from src/diag/tools/regnames.txt
+# when it has one (test/replay_tables_test.sh holds the two together).
+#
+REG sn=- off=0x00f020f8 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f020f8 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f020f8 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f020f8 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f020fc val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f020fc val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f020fc val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f020fc val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02100 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02100 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02100 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02100 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02104 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02104 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02104 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02104 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02108 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02108 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02108 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02108 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f0210c val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f0210c val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f0210c val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f0210c val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02110 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02110 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02110 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02110 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02114 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02114 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02114 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02114 val=0x07efdfbf
+REG sn=- off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+REG sn=- off=0x00f02118 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02118 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02118 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02118 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f0211c val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f0211c val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f0211c val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f0211c val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02120 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02120 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02120 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02120 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02124 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02124 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02124 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02124 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02128 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02128 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02128 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02128 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f0212c val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f0212c val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f0212c val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f0212c val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02130 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02130 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02130 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02130 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02134 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02134 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02134 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02134 val=0x07efdfbf
+REG sn=- off=0x00f02140 val=0x00000000
+REG sn=- off=0x00f02138 val=0x00000040
+REG sn=- off=0x00f02144 val=0x00000001
+REG sn=- off=0x00f02154 val=0x00000040
+REG sn=- off=0x00f05434 val=0x90101050
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f0d434 val=0x90081050
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f020d8 val=0x00000002
+REG sn=- off=0x00f0a0ac val=0x00000080
+REG sn=- off=0x00f020e8 val=0x01eff000
+REG sn=- off=0x00f0a0b8 val=0x016ff000
+REG sn=- off=0x00f0215c val=0x1fff007f
+REG sn=- off=0x00f0a0cc val=0x1fff001f
+REG sn=- off=0x00f0215c val=0x1fff007f
+REG sn=- off=0x00f0a0cc val=0x1fff001f
+REG sn=- off=0x00f020e0 val=0x1f58007e
+REG sn=- off=0x00f0a0b4 val=0x1ff0001e
+REG sn=- off=0x00f020e0 val=0x1f58007e
+REG sn=- off=0x00f0a0b4 val=0x1fb8001e
+REG sn=- off=0x00f02450 val=0x00001f30
+REG sn=- off=0x00f02454 val=0x1ba81b08
+REG sn=- off=0x00f02454 val=0x1ba81b08
+REG sn=- off=0x00f02458 val=0x00960082
+REG sn=- off=0x00f02458 val=0x00960082
+REG sn=- off=0x00f0245c val=0x00960082
+REG sn=- off=0x00f0245c val=0x00960082
+REG sn=- off=0x00f02460 val=0x00960082
+REG sn=- off=0x00f02460 val=0x00960082
+REG sn=- off=0x00f02464 val=0x00960082
+REG sn=- off=0x00f02464 val=0x00960082
+REG sn=- off=0x00f02468 val=0x00960082
+REG sn=- off=0x00f02468 val=0x00960082
+REG sn=- off=0x00f0246c val=0x00960082
+REG sn=- off=0x00f0246c val=0x00960082
+REG sn=- off=0x00f02470 val=0x00960082
+REG sn=- off=0x00f02470 val=0x00960082
+REG sn=- off=0x00f02474 val=0x00960082
+REG sn=- off=0x00f02474 val=0x00960082
+REG sn=- off=0x00f02478 val=0x00960082
+REG sn=- off=0x00f02478 val=0x00960082
+REG sn=- off=0x00f0247c val=0x00960082
+REG sn=- off=0x00f0247c val=0x00960082
+REG sn=- off=0x00f02480 val=0x00960082
+REG sn=- off=0x00f02480 val=0x00960082
+REG sn=- off=0x00f02484 val=0x00960082
+REG sn=- off=0x00f02484 val=0x00960082
+REG sn=- off=0x00f02488 val=0x00960082
+REG sn=- off=0x00f02488 val=0x00960082
+REG sn=- off=0x00f0248c val=0x00960082
+REG sn=- off=0x00f0248c val=0x00960082
+REG sn=- off=0x00f02490 val=0x00960082
+REG sn=- off=0x00f02490 val=0x00960082
+REG sn=- off=0x00f02494 val=0x00960082
+REG sn=- off=0x00f02494 val=0x00960082
+REG sn=- off=0x00f02498 val=0x00960082
+REG sn=- off=0x00f02498 val=0x00960082
+REG sn=- off=0x00f0249c val=0x00960082
+REG sn=- off=0x00f0249c val=0x00960082
+REG sn=- off=0x00f024a0 val=0x00960082
+REG sn=- off=0x00f024a0 val=0x00960082
+REG sn=- off=0x00f024a4 val=0x00960082
+REG sn=- off=0x00f024a4 val=0x00960082
+REG sn=- off=0x00f024a8 val=0x00960082
+REG sn=- off=0x00f024a8 val=0x00960082
+REG sn=- off=0x00f024ac val=0x00960082
+REG sn=- off=0x00f024ac val=0x00960082
+REG sn=- off=0x00f024b0 val=0x00960082
+REG sn=- off=0x00f024b0 val=0x00960082
+REG sn=- off=0x00f024b4 val=0x00960082
+REG sn=- off=0x00f024b4 val=0x00960082
+REG sn=- off=0x00f024b8 val=0x00960082
+REG sn=- off=0x00f024b8 val=0x00960082
+REG sn=- off=0x00f024bc val=0x00960082
+REG sn=- off=0x00f024bc val=0x00960082
+REG sn=- off=0x00f024c0 val=0x00960082
+REG sn=- off=0x00f024c0 val=0x00960082
+REG sn=- off=0x00f024c4 val=0x00960082
+REG sn=- off=0x00f024c4 val=0x00960082
+REG sn=- off=0x00f024c8 val=0x00960082
+REG sn=- off=0x00f024c8 val=0x00960082
+REG sn=- off=0x00f024cc val=0x00960082
+REG sn=- off=0x00f024cc val=0x00960082
+REG sn=- off=0x00f024d0 val=0x00960082
+REG sn=- off=0x00f024d0 val=0x00960082
+REG sn=- off=0x00f024d4 val=0x00960082
+REG sn=- off=0x00f024d4 val=0x00960082
+REG sn=- off=0x00f024d8 val=0x00960082
+REG sn=- off=0x00f024d8 val=0x00960082
+REG sn=- off=0x00f024dc val=0x00960082
+REG sn=- off=0x00f024dc val=0x00960082
+REG sn=- off=0x00f024e0 val=0x00960082
+REG sn=- off=0x00f024e0 val=0x00960082
+REG sn=- off=0x00f024e4 val=0x00960082
+REG sn=- off=0x00f024e4 val=0x00960082
+REG sn=- off=0x00f024e8 val=0x00960082
+REG sn=- off=0x00f024e8 val=0x00960082
+REG sn=- off=0x00f024ec val=0x00960082
+REG sn=- off=0x00f024ec val=0x00960082
+REG sn=- off=0x00f024f0 val=0x00960082
+REG sn=- off=0x00f024f0 val=0x00960082
+REG sn=- off=0x00f024f4 val=0x00960082
+REG sn=- off=0x00f024f4 val=0x00960082
+REG sn=- off=0x00f024f8 val=0x00960082
+REG sn=- off=0x00f024f8 val=0x00960082
+REG sn=- off=0x00f024fc val=0x00960082
+REG sn=- off=0x00f024fc val=0x00960082
+REG sn=- off=0x00f02500 val=0x00960082
+REG sn=- off=0x00f02500 val=0x00960082
+REG sn=- off=0x00f02504 val=0x00960082
+REG sn=- off=0x00f02504 val=0x00960082
+REG sn=- off=0x00f02508 val=0x00960082
+REG sn=- off=0x00f02508 val=0x00960082
+REG sn=- off=0x00f0250c val=0x00960082
+REG sn=- off=0x00f0250c val=0x00960082
+REG sn=- off=0x00f02510 val=0x00960082
+REG sn=- off=0x00f02510 val=0x00960082
+REG sn=- off=0x00f02514 val=0x00960082
+REG sn=- off=0x00f02514 val=0x00960082
+REG sn=- off=0x00f02518 val=0x00960082
+REG sn=- off=0x00f02518 val=0x00960082
+REG sn=- off=0x00f0251c val=0x00960082
+REG sn=- off=0x00f0251c val=0x00960082
+REG sn=- off=0x00f02520 val=0x00960082
+REG sn=- off=0x00f02520 val=0x00960082
+REG sn=- off=0x00f02524 val=0x00960082
+REG sn=- off=0x00f02524 val=0x00960082
+REG sn=- off=0x00f02528 val=0x00960082
+REG sn=- off=0x00f02528 val=0x00960082
+REG sn=- off=0x00f0252c val=0x00960082
+REG sn=- off=0x00f0252c val=0x00960082
+REG sn=- off=0x00f02530 val=0x00960082
+REG sn=- off=0x00f02530 val=0x00960082
+REG sn=- off=0x00f02534 val=0x00960082
+REG sn=- off=0x00f02534 val=0x00960082
+REG sn=- off=0x00f02538 val=0x00960082
+REG sn=- off=0x00f02538 val=0x00960082
+REG sn=- off=0x00f0253c val=0x00960082
+REG sn=- off=0x00f0253c val=0x00960082
+REG sn=- off=0x00f02540 val=0x00960082
+REG sn=- off=0x00f02540 val=0x00960082
+REG sn=- off=0x00f02544 val=0x00960082
+REG sn=- off=0x00f02544 val=0x00960082
+REG sn=- off=0x00f02548 val=0x00960082
+REG sn=- off=0x00f02548 val=0x00960082
+REG sn=- off=0x00f0254c val=0x00960082
+REG sn=- off=0x00f0254c val=0x00960082
+REG sn=- off=0x00f02550 val=0x00960082
+REG sn=- off=0x00f02550 val=0x00960082
+REG sn=- off=0x00f02554 val=0x00960082
+REG sn=- off=0x00f02554 val=0x00960082
+REG sn=- off=0x00f02558 val=0x00960082
+REG sn=- off=0x00f02558 val=0x00960082
+REG sn=- off=0x00f0a0fc val=0x1fbc1f52
+REG sn=- off=0x00f0a0fc val=0x1f321f52
+REG sn=- off=0x00f020d8 val=0x00000002
+REG sn=- off=0x00f0a0ac val=0x00000080
+REG sn=- off=0x00f020d8 val=0x00000002
+REG sn=- off=0x00f020f0 val=0x00000013
+REG sn=- off=0x00f020f0 val=0x00000013
+REG sn=- off=0x00f0215c val=0x1fff007f
+REG sn=- off=0x00f0a0cc val=0x1fff001f
+REG sn=- off=0x00f05438 val=0x08000000
+REG sn=- off=0x00f05438 val=0x08000000
+REG sn=- off=0x00f0d438 val=0x08000000
+REG sn=- off=0x00f0d438 val=0x08000000
+REG sn=- off=0x00f020d8 val=0x00000003
+REG sn=- off=0x00f0a0ac val=0x00000081
+REG sn=- off=0x00f05400 val=0x00000040
+REG sn=- off=0x00f0d400 val=0x00000040
+REG sn=- off=0x00f0404c val=0x24030040
+REG sn=- off=0x00f0404c val=0x24030040
+REG sn=- off=0x00f0404c val=0x24030040
+REG sn=- off=0x00f0c04c val=0x24030040
+REG sn=- off=0x00f0c04c val=0x24030040
+REG sn=- off=0x00f0c04c val=0x24030040
+REG sn=- off=0x00f04040 val=0x00000c03
+REG sn=- off=0x00f04040 val=0x00000c03
+REG sn=- off=0x00f04040 val=0x00000c03
+REG sn=- off=0x00f04044 val=0x0000007f
+REG sn=- off=0x00f0c040 val=0x00000c03
+REG sn=- off=0x00f0c040 val=0x00000c03
+REG sn=- off=0x00f0c040 val=0x00000c03
+REG sn=- off=0x00f0c044 val=0x0000007f
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101060
+REG sn=- off=0x00f05434 val=0x90101070
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081060
+REG sn=- off=0x00f0d434 val=0x90081070
+REG sn=- off=0x00f0a0f4 val=0x00000002
+REG sn=- off=0x000001d0 val=0x0000001f  # PON_SERDES_MODE
+REG sn=- off=0x00022034 val=0x00000000
+REG sn=- off=0x00000104 val=0x00000001
+REG sn=- off=0x00022090 val=0x00001000
+REG sn=- off=0x000225d8 val=0x00000029
+REG sn=- off=0x000225d8 val=0x00000029
+REG sn=- off=0x000225ac val=0x0000b000
+REG sn=- off=0x000225b0 val=0x0000c848
+REG sn=- off=0x00022738 val=0x000080c5
+REG sn=- off=0x00022738 val=0x000080c5
+REG sn=- off=0x00022738 val=0x000080c5
+REG sn=- off=0x00022504 val=0x00000030
+REG sn=- off=0x00022504 val=0x00000030
+REG sn=- off=0x00022500 val=0x00000030
+REG sn=- off=0x00022500 val=0x00000010
+REG sn=- off=0x00022500 val=0x00000030
+REG sn=- off=0x00022038 val=0x00000900
+REG sn=- off=0x0002203c val=0x00000000
+REG sn=- off=0x000001d0 val=0x00000008  # PON_SERDES_MODE
+REG sn=- off=0x00022508 val=0x00003000
+REG sn=- off=0x00022508 val=0x00003000
+REG sn=- off=0x00020804 val=0x03320024
+REG sn=- off=0x000220e4 val=0x00000000
+REG sn=- off=0x00011018 val=0x000007ef  # MAX_FRAME_LEN_1
+REG sn=- off=0x00011010 val=0x00000003
+REG sn=- off=0x00011010 val=0x00000003
+REG sn=- off=0x0002311c val=0x02300224
+REG sn=- off=0x0002311c val=0x02300224
+REG sn=- off=0x00023120 val=0x02160207
+REG sn=- off=0x00023120 val=0x02160207
+REG sn=- off=0x00020c04 val=0x03320024
+REG sn=- off=0x0000004c val=0x00000a00
+REG sn=- off=0x0070000c val=0x00000001  # PONMAC_RESET
+REG sn=- off=0x0070000c val=0x00000000  # PONMAC_RESET
+REG sn=- off=0x00706260 val=0x00000028
+REG sn=- off=0x00705018 val=0x0000cc19
+REG sn=- off=0x00705040 val=0x00009132  # USF_MIN_RESP_DELAY
+REG sn=- off=0x00705040 val=0x00009132  # USF_MIN_RESP_DELAY
+REG sn=- off=0x00705018 val=0x00000000
+REG sn=- off=0x00f02568 val=0x00003002
+REG sn=- off=0x0070126c val=0x00001f3f
+REG sn=- off=0x0070126c val=0x04001f3f
+REG sn=- off=0x00705188 val=0x00504bfa
+REG sn=- off=0x0070526c val=0x00000001
+REG sn=- off=0x00706024 val=0x00100030
+REG sn=- off=0x00706024 val=0x00100100
+REG sn=- off=0x00000188 val=0x00000002
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x000001bc val=0x00000fff
+REG sn=- off=0x00011018 val=0x00000000  # MAX_FRAME_LEN_1
+REG sn=- off=0x00011010 val=0x00000003
+REG sn=- off=0x00011010 val=0x00000003
+REG sn=- off=0x0001600c val=0x00001001  # CLASSIFY_SETUP
+REG sn=- off=0x0001600c val=0x00001009  # CLASSIFY_SETUP
+REG sn=- off=0x00700014 val=0x0000edcb
+REG sn=- off=0x00700014 val=0x12345678
+REG sn=- off=0x00700040 val=0x00000000  # PONMAC_IRQ_ENABLE
+REG sn=- off=0x00701004 val=0x00000000  # DSF_IRQ_ENABLE
+REG sn=- off=0x00701004 val=0x00000000  # DSF_IRQ_ENABLE
+REG sn=- off=0x00700040 val=0x00000022  # PONMAC_IRQ_ENABLE
+REG sn=- off=0x00704064 val=0x00000000  # DS_GEM_MISC_SEL
+REG sn=- off=0x00704064 val=0x00000001  # DS_GEM_MISC_SEL
+REG sn=- off=0x00704064 val=0x00000002  # DS_GEM_MISC_SEL
+REG sn=- off=0x00704064 val=0x00000003  # DS_GEM_MISC_SEL
+REG sn=- off=0x00704064 val=0x00000004  # DS_GEM_MISC_SEL
+REG sn=- off=0x00704064 val=0x00000005  # DS_GEM_MISC_SEL
+REG sn=- off=0x00704064 val=0x00000006  # DS_GEM_MISC_SEL
+REG sn=- off=0x00705140 val=0x00000000  # USF_MISC_SEL
+REG sn=- off=0x00705140 val=0x00000001  # USF_MISC_SEL
+REG sn=- off=0x00705140 val=0x00000002  # USF_MISC_SEL
+REG sn=- off=0x00705140 val=0x00000003  # USF_MISC_SEL
+REG sn=- off=0x00705140 val=0x00000004  # USF_MISC_SEL
+REG sn=- off=0x00701010 val=0x0000ff01  # DSF_ONU_STATE
+REG sn=- off=0x00705010 val=0x0000ff00  # USF_ONU_ID
+REG sn=- off=0x00701010 val=0x0000ff01  # DSF_ONU_STATE
+REG sn=- off=0x00701040 val=0x00000003  # DSF_LOS_SETUP
+REG sn=- off=0x0070504c val=0x00002028  # USF_LASER_MARGIN
+REG sn=- off=0x00701014 val=0x00000622  # DSF_SETUP
+REG sn=- off=0x00701014 val=0x00000622  # DSF_SETUP
+REG sn=- off=0x00701014 val=0x00000620  # DSF_SETUP
+REG sn=- off=0x0070101c val=0x0000070b
+REG sn=- off=0x0070101c val=0x0000070b
+REG sn=- off=0x0070101c val=0x0000070b
+REG sn=- off=0x00701014 val=0x00000620  # DSF_SETUP
+REG sn=- off=0x00701014 val=0x00000620  # DSF_SETUP
+REG sn=- off=0x00701014 val=0x00000620  # DSF_SETUP
+REG sn=- off=0x00704098 val=0x00008110
+REG sn=- off=0x00704080 val=0x00000008
+REG sn=- off=0x00701208 val=0x00000011
+REG sn=- off=0x00701204 val=0x00000011
+REG sn=- off=0x00705018 val=0x0000cc19
+REG sn=- off=0x00705014 val=0x00000818
+REG sn=- off=0x00705018 val=0x00000000
+REG sn=- off=0x00705018 val=0x0000cc19
+REG sn=- off=0x00705014 val=0x00000818
+REG sn=- off=0x00705018 val=0x00000000
+REG sn=- off=0x00705018 val=0x0000cc19
+REG sn=- off=0x00705200 val=0x00000001
+REG sn=- off=0x00705018 val=0x00000000
+REG sn=- off=0x00705018 val=0x0000cc19
+REG sn=- off=0x00705200 val=0x00000001
+REG sn=- off=0x00705018 val=0x00000000
+REG sn=- off=0x00705018 val=0x0000cc19
+REG sn=- off=0x00705014 val=0x00000818
+REG sn=- off=0x00705018 val=0x00000000
+REG sn=- off=0x00705018 val=0x0000cc19
+REG sn=- off=0x00705014 val=0x00000c18
+REG sn=- off=0x00705018 val=0x00000000
+REG sn=- off=0x00705018 val=0x0000cc19
+REG sn=- off=0x00705014 val=0x00000c18
+REG sn=- off=0x00705018 val=0x00000000
+REG sn=- off=0x00706020 val=0x00001010
+REG sn=- off=0x00704080 val=0x00000048
+REG sn=- off=0x00704080 val=0x00000058
+REG sn=- off=0x0070409c val=0x0001005e
+REG sn=- off=0x007040a0 val=0x00003333
+REG sn=- off=0x00704080 val=0x00000059
+REG sn=- off=0x00704080 val=0x00000059
+REG sn=- off=0x00704080 val=0x00000059
+REG sn=- off=0x00704080 val=0x00000059
+REG sn=- off=0x00704080 val=0x00000059
+REG sn=- off=0x00705180 val=0x00000000
+REG sn=- off=0x00705018 val=0x0000cc19
+REG sn=- off=0x00705014 val=0x00000c18
+REG sn=- off=0x00705018 val=0x00000000
+REG sn=- off=0x00701014 val=0x00000620  # DSF_SETUP
+REG sn=- off=0x00705100 val=0x00000003  # USF_PLOAM_TX_SETUP
+REG sn=- off=0x00705100 val=0x00000003  # USF_PLOAM_TX_SETUP
+REG sn=- off=0x00703010 val=0x00004000  # DSK_SWITCH_ARM
+REG sn=- off=0x00703010 val=0x0000c000  # DSK_SWITCH_ARM
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000000  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008000  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000001  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008001  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000002  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008002  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000003  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008003  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000004  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008004  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000005  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008005  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000006  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008006  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000007  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008007  # DSK_KEY_LOAD
+REG sn=- off=0x00703014 val=0x00000000  # DSK_SWITCH_FRAME
+REG sn=- off=0x007050c0 val=0x00000700  # USF_PLOAM_TX_CTL
+REG sn=- off=0x007050e0 val=0x0000ff04  # USF_PLOAM_TX_WORD
+REG sn=- off=0x007050e4 val=0x0000aaaa
+REG sn=- off=0x007050e8 val=0x0000aaaa
+REG sn=- off=0x007050ec val=0x0000aaaa
+REG sn=- off=0x007050f0 val=0x0000aaaa
+REG sn=- off=0x007050f4 val=0x0000aaaa
+REG sn=- off=0x007050c0 val=0x00000701  # USF_PLOAM_TX_CTL
+REG sn=- off=0x0070101c val=0x0000070b
+REG sn=- off=0x007050c0 val=0x00000500  # USF_PLOAM_TX_CTL
+REG sn=- off=0x007050e0 val=0x0000ff03  # USF_PLOAM_TX_WORD
+REG sn=- off=0x007050e4 val=0x0000aaaa
+REG sn=- off=0x007050e8 val=0x0000aaaa
+REG sn=- off=0x007050ec val=0x0000aaaa
+REG sn=- off=0x007050f0 val=0x0000aaaa
+REG sn=- off=0x007050f4 val=0x0000aaaa
+REG sn=- off=0x007050c0 val=0x00000501  # USF_PLOAM_TX_CTL
+REG sn=- off=0x007050c0 val=0x00000600  # USF_PLOAM_TX_CTL
+REG sn=- off=0x007050e0 val=0x0000ff01  # USF_PLOAM_TX_WORD
+REG sn=- off=0x007050e4 val=0x00005254
+REG sn=- off=0x007050e8 val=0x00004b47
+REG sn=- off=0x007050ec val=0x00001111
+REG sn=- off=0x007050f0 val=0x00001111
+REG sn=- off=0x007050f4 val=0x00000005
+REG sn=- off=0x007050c0 val=0x00000601  # USF_PLOAM_TX_CTL
+REG sn=- off=0x0000004c val=0x00000a00
+REG sn=- off=0x00022030 val=0x00000b30
+REG sn=- off=0x00022030 val=0x00000f30
+REG sn=- off=0x00f05434 val=0x90101050
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f0d434 val=0x90081050
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f020d8 val=0x00000002
+REG sn=- off=0x00f0a0ac val=0x00000080
+REG sn=- off=0x00f020e8 val=0x01eff000
+REG sn=- off=0x00f0a0b8 val=0x016ff000
+REG sn=- off=0x00f0215c val=0x1fff007f
+REG sn=- off=0x00f0a0cc val=0x1fff001f
+REG sn=- off=0x00f0215c val=0x1fff007f
+REG sn=- off=0x00f0a0cc val=0x1fff001f
+REG sn=- off=0x00f020e0 val=0x1f58007e
+REG sn=- off=0x00f0a0b4 val=0x1ff0001e
+REG sn=- off=0x00f020e0 val=0x1f58007e
+REG sn=- off=0x00f0a0b4 val=0x1fb8001e
+REG sn=- off=0x00f02450 val=0x00001f30
+REG sn=- off=0x00f02454 val=0x1ba81b08
+REG sn=- off=0x00f02454 val=0x1ba81b08
+REG sn=- off=0x00f02458 val=0x00960082
+REG sn=- off=0x00f02458 val=0x00960082
+REG sn=- off=0x00f0245c val=0x00960082
+REG sn=- off=0x00f0245c val=0x00960082
+REG sn=- off=0x00f02460 val=0x00960082
+REG sn=- off=0x00f02460 val=0x00960082
+REG sn=- off=0x00f02464 val=0x00960082
+REG sn=- off=0x00f02464 val=0x00960082
+REG sn=- off=0x00f02468 val=0x00960082
+REG sn=- off=0x00f02468 val=0x00960082
+REG sn=- off=0x00f0246c val=0x00960082
+REG sn=- off=0x00f0246c val=0x00960082
+REG sn=- off=0x00f02470 val=0x00960082
+REG sn=- off=0x00f02470 val=0x00960082
+REG sn=- off=0x00f02474 val=0x00960082
+REG sn=- off=0x00f02474 val=0x00960082
+REG sn=- off=0x00f02478 val=0x00960082
+REG sn=- off=0x00f02478 val=0x00960082
+REG sn=- off=0x00f0247c val=0x00960082
+REG sn=- off=0x00f0247c val=0x00960082
+REG sn=- off=0x00f02480 val=0x00960082
+REG sn=- off=0x00f02480 val=0x00960082
+REG sn=- off=0x00f02484 val=0x00960082
+REG sn=- off=0x00f02484 val=0x00960082
+REG sn=- off=0x00f02488 val=0x00960082
+REG sn=- off=0x00f02488 val=0x00960082
+REG sn=- off=0x00f0248c val=0x00960082
+REG sn=- off=0x00f0248c val=0x00960082
+REG sn=- off=0x00f02490 val=0x00960082
+REG sn=- off=0x00f02490 val=0x00960082
+REG sn=- off=0x00f02494 val=0x00960082
+REG sn=- off=0x00f02494 val=0x00960082
+REG sn=- off=0x00f02498 val=0x00960082
+REG sn=- off=0x00f02498 val=0x00960082
+REG sn=- off=0x00f0249c val=0x00960082
+REG sn=- off=0x00f0249c val=0x00960082
+REG sn=- off=0x00f024a0 val=0x00960082
+REG sn=- off=0x00f024a0 val=0x00960082
+REG sn=- off=0x00f024a4 val=0x00960082
+REG sn=- off=0x00f024a4 val=0x00960082
+REG sn=- off=0x00f024a8 val=0x00960082
+REG sn=- off=0x00f024a8 val=0x00960082
+REG sn=- off=0x00f024ac val=0x00960082
+REG sn=- off=0x00f024ac val=0x00960082
+REG sn=- off=0x00f024b0 val=0x00960082
+REG sn=- off=0x00f024b0 val=0x00960082
+REG sn=- off=0x00f024b4 val=0x00960082
+REG sn=- off=0x00f024b4 val=0x00960082
+REG sn=- off=0x00f024b8 val=0x00960082
+REG sn=- off=0x00f024b8 val=0x00960082
+REG sn=- off=0x00f024bc val=0x00960082
+REG sn=- off=0x00f024bc val=0x00960082
+REG sn=- off=0x00f024c0 val=0x00960082
+REG sn=- off=0x00f024c0 val=0x00960082
+REG sn=- off=0x00f024c4 val=0x00960082
+REG sn=- off=0x00f024c4 val=0x00960082
+REG sn=- off=0x00f024c8 val=0x00960082
+REG sn=- off=0x00f024c8 val=0x00960082
+REG sn=- off=0x00f024cc val=0x00960082
+REG sn=- off=0x00f024cc val=0x00960082
+REG sn=- off=0x00f024d0 val=0x00960082
+REG sn=- off=0x00f024d0 val=0x00960082
+REG sn=- off=0x00f024d4 val=0x00960082
+REG sn=- off=0x00f024d4 val=0x00960082
+REG sn=- off=0x00f024d8 val=0x00960082
+REG sn=- off=0x00f024d8 val=0x00960082
+REG sn=- off=0x00f024dc val=0x00960082
+REG sn=- off=0x00f024dc val=0x00960082
+REG sn=- off=0x00f024e0 val=0x00960082
+REG sn=- off=0x00f024e0 val=0x00960082
+REG sn=- off=0x00f024e4 val=0x00960082
+REG sn=- off=0x00f024e4 val=0x00960082
+REG sn=- off=0x00f024e8 val=0x00960082
+REG sn=- off=0x00f024e8 val=0x00960082
+REG sn=- off=0x00f024ec val=0x00960082
+REG sn=- off=0x00f024ec val=0x00960082
+REG sn=- off=0x00f024f0 val=0x00960082
+REG sn=- off=0x00f024f0 val=0x00960082
+REG sn=- off=0x00f024f4 val=0x00960082
+REG sn=- off=0x00f024f4 val=0x00960082
+REG sn=- off=0x00f024f8 val=0x00960082
+REG sn=- off=0x00f024f8 val=0x00960082
+REG sn=- off=0x00f024fc val=0x00960082
+REG sn=- off=0x00f024fc val=0x00960082
+REG sn=- off=0x00f02500 val=0x00960082
+REG sn=- off=0x00f02500 val=0x00960082
+REG sn=- off=0x00f02504 val=0x00960082
+REG sn=- off=0x00f02504 val=0x00960082
+REG sn=- off=0x00f02508 val=0x00960082
+REG sn=- off=0x00f02508 val=0x00960082
+REG sn=- off=0x00f0250c val=0x00960082
+REG sn=- off=0x00f0250c val=0x00960082
+REG sn=- off=0x00f02510 val=0x00960082
+REG sn=- off=0x00f02510 val=0x00960082
+REG sn=- off=0x00f02514 val=0x00960082
+REG sn=- off=0x00f02514 val=0x00960082
+REG sn=- off=0x00f02518 val=0x00960082
+REG sn=- off=0x00f02518 val=0x00960082
+REG sn=- off=0x00f0251c val=0x00960082
+REG sn=- off=0x00f0251c val=0x00960082
+REG sn=- off=0x00f02520 val=0x00960082
+REG sn=- off=0x00f02520 val=0x00960082
+REG sn=- off=0x00f02524 val=0x00960082
+REG sn=- off=0x00f02524 val=0x00960082
+REG sn=- off=0x00f02528 val=0x00960082
+REG sn=- off=0x00f02528 val=0x00960082
+REG sn=- off=0x00f0252c val=0x00960082
+REG sn=- off=0x00f0252c val=0x00960082
+REG sn=- off=0x00f02530 val=0x00960082
+REG sn=- off=0x00f02530 val=0x00960082
+REG sn=- off=0x00f02534 val=0x00960082
+REG sn=- off=0x00f02534 val=0x00960082
+REG sn=- off=0x00f02538 val=0x00960082
+REG sn=- off=0x00f02538 val=0x00960082
+REG sn=- off=0x00f0253c val=0x00960082
+REG sn=- off=0x00f0253c val=0x00960082
+REG sn=- off=0x00f02540 val=0x00960082
+REG sn=- off=0x00f02540 val=0x00960082
+REG sn=- off=0x00f02544 val=0x00960082
+REG sn=- off=0x00f02544 val=0x00960082
+REG sn=- off=0x00f02548 val=0x00960082
+REG sn=- off=0x00f02548 val=0x00960082
+REG sn=- off=0x00f0254c val=0x00960082
+REG sn=- off=0x00f0254c val=0x00960082
+REG sn=- off=0x00f02550 val=0x00960082
+REG sn=- off=0x00f02550 val=0x00960082
+REG sn=- off=0x00f02554 val=0x00960082
+REG sn=- off=0x00f02554 val=0x00960082
+REG sn=- off=0x00f02558 val=0x00960082
+REG sn=- off=0x00f02558 val=0x00960082
+REG sn=- off=0x00f0a0fc val=0x1fbc1f52
+REG sn=- off=0x00f0a0fc val=0x1f321f52
+REG sn=- off=0x00f020d8 val=0x00000002
+REG sn=- off=0x00f0a0ac val=0x00000080
+REG sn=- off=0x00f020d8 val=0x00000002
+REG sn=- off=0x00f020f0 val=0x00000013
+REG sn=- off=0x00f020f0 val=0x00000013
+REG sn=- off=0x00f0215c val=0x1fff007f
+REG sn=- off=0x00f0a0cc val=0x1fff001f
+REG sn=- off=0x00f05438 val=0x08000000
+REG sn=- off=0x00f05438 val=0x08000000
+REG sn=- off=0x00f0d438 val=0x08000000
+REG sn=- off=0x00f0d438 val=0x08000000
+REG sn=- off=0x00f020d8 val=0x00000003
+REG sn=- off=0x00f0a0ac val=0x00000081
+REG sn=- off=0x00f05400 val=0x00000040
+REG sn=- off=0x00f0d400 val=0x00000040
+REG sn=- off=0x00f0404c val=0x24030040
+REG sn=- off=0x00f0404c val=0x24030040
+REG sn=- off=0x00f0404c val=0x24030040
+REG sn=- off=0x00f0c04c val=0x24030040
+REG sn=- off=0x00f0c04c val=0x24030040
+REG sn=- off=0x00f0c04c val=0x24030040
+REG sn=- off=0x00f04040 val=0x00000c03
+REG sn=- off=0x00f04040 val=0x00000c03
+REG sn=- off=0x00f04040 val=0x00000c03
+REG sn=- off=0x00f04044 val=0x0000007f
+REG sn=- off=0x00f0c040 val=0x00000c03
+REG sn=- off=0x00f0c040 val=0x00000c03
+REG sn=- off=0x00f0c040 val=0x00000c03
+REG sn=- off=0x00f0c044 val=0x0000007f
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101040
+REG sn=- off=0x00f05434 val=0x90101060
+REG sn=- off=0x00f05434 val=0x90101070
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081040
+REG sn=- off=0x00f0d434 val=0x90081060
+REG sn=- off=0x00f0d434 val=0x90081070
+REG sn=- off=0x007050c0 val=0x00000600  # USF_PLOAM_TX_CTL
+REG sn=- off=0x007050e0 val=0x0000ff01  # USF_PLOAM_TX_WORD
+REG sn=1 off=0x007050e4 val=0x00000000
+REG sn=2 off=0x007050e8 val=0x00000000
+REG sn=3 off=0x007050ec val=0x00000000
+REG sn=4 off=0x007050f0 val=0x00000000
+REG sn=- off=0x007050f4 val=0x00000005
+REG sn=- off=0x007050c0 val=0x00000601  # USF_PLOAM_TX_CTL
+REG sn=- off=0x00701010 val=0x0000ff01  # DSF_ONU_STATE
+REG sn=- off=0x00705010 val=0x0000ff00  # USF_ONU_ID
+REG sn=- off=0x00701010 val=0x0000ff01  # DSF_ONU_STATE
+REG sn=- off=0x00701010 val=0x0000ff02  # DSF_ONU_STATE
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000006
+REG sn=- off=0x00000188 val=0x00000016
+REG sn=- off=0x00000188 val=0x00000016
+REG sn=- off=0x00000188 val=0x00000016
+REG sn=- off=0x00000188 val=0x00000016
+REG sn=- off=0x00000188 val=0x00000016
+REG sn=- off=0x00000188 val=0x00000016
+REG sn=- off=0x00000188 val=0x00000016
+REG sn=- off=0x00000188 val=0x00000016
+REG sn=- off=0x00703010 val=0x00004000  # DSK_SWITCH_ARM
+REG sn=- off=0x00703010 val=0x0000c000  # DSK_SWITCH_ARM
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000000  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008000  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000001  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008001  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000002  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008002  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000003  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008003  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000004  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008004  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000005  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008005  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000006  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008006  # DSK_KEY_LOAD
+REG sn=- off=0x00703024 val=0x00000000  # DSK_KEY_WORD
+REG sn=- off=0x00703020 val=0x00000007  # DSK_KEY_LOAD
+REG sn=- off=0x00703020 val=0x00008007  # DSK_KEY_LOAD
+REG sn=- off=0x00703014 val=0x00000000  # DSK_SWITCH_FRAME
+REG sn=- off=0x00701004 val=0x00000400  # DSF_IRQ_ENABLE
+REG sn=- off=0x00701004 val=0x00000600  # DSF_IRQ_ENABLE
+REG sn=- off=0x00701004 val=0x00000700  # DSF_IRQ_ENABLE
+REG sn=- off=0x00701004 val=0x00000708  # DSF_IRQ_ENABLE
+REG sn=- off=0x00701004 val=0x0000070c  # DSF_IRQ_ENABLE
+REG sn=- off=0x00701004 val=0x0000070e  # DSF_IRQ_ENABLE
+REG sn=- off=0x00701004 val=0x0000070f  # DSF_IRQ_ENABLE
+REG sn=- off=0x00705004 val=0x00000004  # USF_IRQ_ENABLE
+REG sn=- off=0x00705004 val=0x00000084  # USF_IRQ_ENABLE
+REG sn=- off=0x00705004 val=0x000000a4  # USF_IRQ_ENABLE
+REG sn=- off=0x00700040 val=0x00000000  # PONMAC_IRQ_ENABLE
+REG sn=- off=0x00701080 val=0x00000000  # DSF_PLOAM_RX_CTL
+REG sn=- off=0x00701080 val=0x00000001  # DSF_PLOAM_RX_CTL
+REG sn=- off=0x00701080 val=0x00000000  # DSF_PLOAM_RX_CTL
+REG sn=- off=0x00701080 val=0x00000001  # DSF_PLOAM_RX_CTL
+REG sn=- off=0x00701080 val=0x00000000  # DSF_PLOAM_RX_CTL
+REG sn=- off=0x00701080 val=0x00000001  # DSF_PLOAM_RX_CTL
+REG sn=- off=0x00705054 val=0x0000080c  # USF_BURST_HDR_SETUP
+REG sn=- off=0x00705080 val=0x000000aa  # USF_BURST_HDR_BYTE
+REG sn=- off=0x00705084 val=0x000000aa
+REG sn=- off=0x00705088 val=0x000000aa
+REG sn=- off=0x0070508c val=0x000000aa
+REG sn=- off=0x00705090 val=0x000000aa
+REG sn=- off=0x00705094 val=0x000000aa
+REG sn=- off=0x00705098 val=0x000000aa
+REG sn=- off=0x0070509c val=0x000000aa
+REG sn=- off=0x007050a0 val=0x000000aa
+REG sn=- off=0x007050a4 val=0x000000ab
+REG sn=- off=0x007050a8 val=0x00000059
+REG sn=- off=0x007050ac val=0x00000083
+REG sn=- off=0x00701014 val=0x00000620  # DSF_SETUP
+REG sn=- off=0x00705044 val=0x00009100  # USF_EQ_DELAY
+REG sn=- off=0x00701010 val=0x0000ff03  # DSF_ONU_STATE
+REG sn=- off=0x00700040 val=0x00000022  # PONMAC_IRQ_ENABLE
