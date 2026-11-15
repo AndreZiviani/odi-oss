@@ -9,6 +9,18 @@ listed here.
   script, daemon, the web UI or the exporter calls it; `br0` is set up with
   the busybox `brctl` applet, and `ip` stays. The v1.16.0 binary was 256,452
   bytes, 84,472 with xz. Issue #423.
+- image: busybox is built from an explicit applet list,
+  `packages/busybox/applets.txt`: 176 applets instead of 385, and the
+  binary goes from 1,479,444 to 933,412 bytes (587,788 to 379,828 with xz).
+  Left out are, among others, the servers nothing here starts (`crond`,
+  `udhcpd`, `tcpsvd`), the runit tools, the module tools (the kernel has no module
+  support), the disk, filesystem, console and mail tools, and the `telnet`,
+  `ftpget` and `tftp` clients. Everything the boot scripts, the services,
+  `fwu.sh`, the web UI and the exporter call stays, and so do the tools the
+  docs name. The busybox build refuses a binary whose applets differ from
+  the list, and `make lint` (`make check-applets`, `tools/check-applets.py`)
+  refuses an on-device script, `/etc/inittab` line or `fwu.sh` command the
+  image does not ship. Issue #423.
 - docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
   mapper with one target forwards the tagged frames of a priority the mapper
   sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.

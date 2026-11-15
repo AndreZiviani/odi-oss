@@ -7,7 +7,7 @@
 
 .PHONY: help kernel-tree toolchain toolchain-audit kernel packages busybox \
 	src releases image image-all clean distclean lint test test-host test-host-asan test-omci \
-	test-diag test-rcs test-qemu test-omci-respond test-igmp
+	test-diag test-rcs test-qemu test-omci-respond test-igmp check-applets
 
 help:
 	@echo "targets:"
@@ -24,6 +24,7 @@ help:
 	@echo "  test            lint + the host-side tests + diag + the OMCI daemon under qemu, side by side (a few minutes)"
 	@echo "  test-omci-respond  omcid unit tests (class 171 decode), test-igmp  igmpd unit tests"
 	@echo "  lint            shellcheck every script here, the repo rules, REUSE compliance"
+	@echo "  check-applets   every command the on-device scripts run is in the image (part of lint)"
 	@echo "  test-rcs        the rcS action trace against its goldens (needs out/busybox, docker)"
 	@echo "  test-qemu       boot the real rootfs under qemu-system-mips, ssh/web/exporter + resilience scenarios"
 	@echo
@@ -155,6 +156,7 @@ test-host:
 	bash test/root_pw_test.sh
 	bash test/bundle_sources_check_test.sh
 	bash test/sbom_test.sh
+	bash test/check_applets_test.sh
 	bash test/fetch_releases_test.sh
 	bash test/flash_test.sh
 	bash test/identity_test.sh
@@ -336,6 +338,22 @@ test-qemu:
 	./test/qemu/build-initramfs.sh
 	./test/qemu/run-qemu.sh
 
+# The scripts that run on the stick, under its busybox ash: lint checks them
+# as POSIX sh, and check-applets checks every command they run against what
+# the image ships. image/fwu.sh runs on the stick too, from the release
+# tarball, but under bash rules for shellcheck (it is checked with image/).
+DEVICE_SCRIPTS = rootfs/skeleton/etc/init.d/* rootfs/skeleton/etc/scripts/*.sh \
+	rootfs/skeleton/etc/scripts/flash tools/regdump/dump.sh \
+	tools/mcast-probe/mcast-probe.sh tools/mcast-probe/count-proof.sh \
+	test/qemu/diag-stub.sh test/qemu/memhog.sh
+
+# busybox is built from packages/busybox/applets.txt, and an applet missing
+# from it shows up only on the stick, as an empty pipeline. This finds every
+# command the on-device scripts run and refuses one the image does not have
+# (tools/check-applets.py has what it does and does not see).
+check-applets:
+	python3 -I tools/check-applets.py rootfs/skeleton/etc/inittab $(DEVICE_SCRIPTS) image/fwu.sh
+
 lint:
 	@# Every rule below that starts with git grep passes when git grep cannot
 	@# run at all (exit 128, no repository): an if on its exit status reads
@@ -357,8 +375,9 @@ lint:
 	@# against a minimal busybox, not built or run on the host. test/qemu/diag-stub.sh and memhog.sh are
 	@# the same shape one step removed: they run under busybox ash INSIDE
 	@# the qemu guest, never on the build host.
-	shellcheck -S warning -s sh rootfs/skeleton/etc/init.d/* rootfs/skeleton/etc/scripts/*.sh rootfs/skeleton/etc/scripts/flash tools/regdump/dump.sh tools/mcast-probe/mcast-probe.sh tools/mcast-probe/count-proof.sh test/qemu/diag-stub.sh test/qemu/memhog.sh
+	shellcheck -S warning -s sh $(DEVICE_SCRIPTS)
 	@echo "shellcheck: clean"
+	@$(MAKE) -s check-applets
 	@./tools/check-inline-quotes.sh toolchain/*.sh kernel/*.sh packages/*.sh \
 	          packages/*/*.sh image/*.sh src/*.sh tools/*.sh test/*.sh test/qemu/*.sh
 	@# This repo is public; the private investigation workspace it was
