@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- GPON boot init: `gpon_init.bin` drops from 2,528 records to 800 (91 KB to
+  29 KB). Gone are the replay's own clean of the GEM-port CAM, the flow
+  type words, the Alloc-ID CAM and the multicast MAC filter, which ran
+  again after the driver's clean (`odi_gpon_init_clean_tables()`, with the
+  reset wait, the `DONE` poll and a read-back) on tables already clear, and
+  the stock driver's sweep of the per-flow counter index registers, which
+  selects each counter without reading it. `replayblob.py trim-gpon` takes
+  them out of the `mkgponinit.py` output, each sweep matched whole and once.
+  The boot register stream loses exactly those 1,728 writes
+  (`test/fixtures/boot-golden-common.txt`); nothing else moves.
 - Docs: `SETTINGS.md` no longer says `flash set` refuses an empty value. It
   stores one for a stock key and removes an odi-only key; only the web UI
   cannot clear a key.

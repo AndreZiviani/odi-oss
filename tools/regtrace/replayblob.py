@@ -25,6 +25,12 @@ captured; with bit 0 clear, bit 6 + G keeps the registers of reg_group G,
 and bit 30 keeps reg_group 0 (the three LUT flood masks) with the CPU
 port added, value FLOOD_CPU_VALUE.
 
+    replayblob.py trim-gpon <in-gpon_init.bin> <out.bin>
+
+removes the GPON_INIT_TRIMMED sweeps from a gpon_init blob: the shipped
+gpon_init.bin is the mkgponinit.py output trimmed this way. The driver
+does the table clean in code, and the counter index sweep reads nothing.
+
 Format (kernel/extra/drivers/net/ethernet/odi/odi_replay_blob.h is the C
 side and must agree field for field). Every multi-byte field is
 big-endian, the byte order of the RTL9602C, and nothing depends on a C
@@ -250,7 +256,72 @@ def filter_modload(data, mask):
     return pack(TABLE_MODLOAD, kept)
 
 
+# The gpon_init sweeps the blob no longer carries, each as (name, rows,
+# per-row writes). The first three are the clean that
+# odi_gpon_init_clean_tables() does in code after the PONMAC reset wait,
+# with the DONE poll and a read-back: the flow type words and the
+# GEM-port CAM, the Alloc-ID CAM, and the downstream multicast filter, a
+# request of OP 3 (clear) per row with REQ clear, then set. The replay ran
+# them again after that clean, on tables already clear. The fourth selects
+# every per-flow counter of the four indirect pairs (odi_gpon_hw.h) without
+# reading one: the capture records writes only, so the read that clears a
+# counter is not in it, and odi_gpon_flow.c writes the index itself before
+# every read.
+GPON_INIT_TRIMMED = (
+    ("Alloc-ID CAM clean", 32,
+     lambda r: ((0x7010c0, 0x300 | r), (0x7010c0, 0x8300 | r))),
+    ("GEM-port CAM and flow type clean", 128,
+     lambda r: ((0x701100, 0x300 | r), (0x701100, 0x8300 | r), (0x701400 + 4 * r, 0))),
+    ("multicast filter clean", 256,
+     lambda r: ((0x704084, 0x300 | r), (0x704084, 0x8300 | r))),
+    ("per-flow counter index sweep", 128,
+     lambda r: ((0x701140, r), (0x701140, 0x100 | r), (0x704040, r), (0x70404c, r),
+                (0x706048, 0x8080 | r), (0x706048, 0x8000 | r))),
+)
+
+
+def _gpon_plain_reg(rec):
+    """(offset, value) of a gpon_init register record that carries no
+    serial-number word, else None.
+    """
+    kind, sn_word, _res, _tbl, _n, offset, value, *_words = _RECORD_GPON.unpack(rec)
+    if kind != KIND_REG or sn_word != SN_WORD_NONE:
+        return None
+    return offset, value
+
+
+def trim_gpon_init(data):
+    """A gpon_init blob without the GPON_INIT_TRIMMED sweeps, as bytes.
+    Each sweep must appear exactly once, whole and in order; anything else
+    raises ValueError, so a blob of another shape is never trimmed by
+    guess.
+    """
+    table, _crc, records = unpack(data)
+    if table != TABLE_GPON_INIT:
+        raise ValueError("not a gpon_init blob (table %s)" % TABLE_NAMES[table])
+    regs = [_gpon_plain_reg(r) for r in records]
+    drop = set()
+    for name, rows, row_writes in GPON_INIT_TRIMMED:
+        want = [w for r in range(rows) for w in row_writes(r)]
+        at = [i for i in range(len(regs) - len(want) + 1)
+              if regs[i:i + len(want)] == want]
+        if len(at) != 1:
+            raise ValueError("%s: found %d times, want once" % (name, len(at)))
+        drop.update(range(at[0], at[0] + len(want)))
+    return pack(TABLE_GPON_INIT, [r for i, r in enumerate(records) if i not in drop])
+
+
 def main(argv):
+    if len(argv) == 4 and argv[1] == "trim-gpon":
+        with open(argv[2], "rb") as f:
+            data = f.read()
+        try:
+            out = trim_gpon_init(data)
+        except ValueError as e:
+            sys.exit("replayblob.py: %s: %s" % (argv[2], e))
+        with open(argv[3], "wb") as f:
+            f.write(out)
+        return
     if len(argv) == 5 and argv[1] == "filter":
         with open(argv[2], "rb") as f:
             data = f.read()

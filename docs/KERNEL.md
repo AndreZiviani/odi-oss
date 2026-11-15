@@ -372,7 +372,7 @@ drivers call each other through plain declarations in shared headers
 
 The three captured write sequences the drivers replay — the SDK-init
 verbs (`sdkinit.bin`, 267 KB), the module-load replay (`modload.bin`,
-130 KB) and the GPON boot init (`gpon_init.bin`, 91 KB) — are not compiled
+130 KB) and the GPON boot init (`gpon_init.bin`, 29 KB) — are not compiled
 into the kernel. They ship in the rootfs as `/lib/firmware/odi/*.bin`
 (committed under `rootfs/skeleton/lib/firmware/odi/`) and are loaded with
 `request_firmware()` when a trigger needs one, then released: nothing

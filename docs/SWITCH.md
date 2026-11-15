@@ -296,14 +296,23 @@ clear, so a block still in reset drops what reaches it. A warm reboot of
 the same image kept the garbage; one boot of the stock firmware, which
 waits for the reset, cleaned it.
 
-The replay's own clean records (and its clear of the 256-entry multicast
-MAC filter table that follows them, issued back to back with no wait for
-`DONE`) still run; after the wait they land in a block that is out of
-reset. The boot table sets the filter up to be consulted for downstream
+The file no longer carries the replay's own clean of these tables (the
+flow type words, the GEM-port and Alloc-ID CAMs, and the 256-entry
+multicast MAC filter, issued back to back with no wait for `DONE`): it ran
+again after the clean above, on tables that were already clear, and the
+clean does the same with the wait, the `DONE` poll and a read-back. Nor
+does it carry the stock driver's sweep of the per-flow counter index
+registers (128 flows, the four indirect pairs of `odi_gpon_hw.h`): the
+capture records writes only, so the read that clears a counter was never
+replayed, and `odi_gpon_flow.c` writes the index itself before every
+read. `tools/regtrace/replayblob.py trim-gpon` takes these 1,728 records
+out of the `mkgponinit.py` output (`GPON_INIT_TRIMMED` has the exact
+shapes, each matched whole and once), which leaves 800.
+The boot table sets the filter up to be consulted for downstream
 multicast (`GPON_GEM_DS_MC_CFG` 0x704080 ends at 0x59: no IPv4 or IPv6
-force pass or drop), so a row it left behind could change which groups
-get through; the clean above now reads it back and clears it as well, but
-what a stick holds there after a power cut has not been seen yet.
+force pass or drop), so a row left behind could change which groups
+get through; the clean above reads it back and clears it, but what a
+stick holds there after a power cut has not been seen yet.
 `test/odi_gpon_init_clean_test.sh` runs
 the clean against a model of the two CAMs whose reset drops writes for a
 while after its release, and checks that the plain replay leaves the
