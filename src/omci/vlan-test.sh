@@ -269,6 +269,18 @@ check "Set on the table: the rule follows to VLAN 200" "$got" "47/1002 gem 657 r
 got=$(rebuild /tmp/omcid-171-live.log 0 | sed -n 2p)
 check "Delete of the instance: back to transparent" "$got" "47/1002 gem 657 rule forward-all vid -1 pri -1"
 
+# 5b. A Delete of the 802.1p mapper alone rebuilds as well: the bridge port
+# 0x1002 names a mapper that is gone and keeps no rule. Before, the rules of
+# the last rebuild stayed until another change marked the bridge plan.
+session none > /tmp/s130-a.txt
+frame 46 0082 1002 "" > /tmp/s130-b.txt
+run171 del130-before /tmp/s130-a.txt
+got=$(rebuild /tmp/omcid-171-del130-before.log 0 | grep -c '^47/1002 ')
+check "before the mapper Delete: the bridge port has rules" "$([ "$got" -gt 0 ] && echo yes)" "yes"
+run171 del130 /tmp/s130-a.txt /tmp/s130-b.txt
+got=$(rebuild /tmp/omcid-171-del130.log 0 | grep -c '^47/1002 ')
+check "Delete of the mapper: the last rebuild has no rule on its port" "$got" "0"
+
 sed 's/"VLAN_MANU_MODE" Value="1"/"VLAN_MANU_MODE" Value="0"/' \
 	"$FIX/omci-store-isp2.xml" > /tmp/store-transparent.xml
 : > /tmp/omcid-vlan-cli.log

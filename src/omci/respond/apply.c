@@ -77,8 +77,12 @@ void apply_delete(const struct omci_class *c, uint16_t inst)
 		  (c->classId == OMCI_ME_TRAFFIC_DESCRIPTOR &&
 		   us_td_referenced(inst))))
 		qos_dirty = 1;
+	/* Every class whose Create or Set marks the bridge plan
+	 * (apply_entity()): a Delete takes away what that plan was built
+	 * from. A bridge port that names a deleted mapper has no service. */
 	if (c && (c->classId == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA ||
 		  c->classId == OMCI_ME_VLAN_TAGGING_FILTER_DATA ||
+		  c->classId == OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE ||
 		  c->classId == OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA ||
 		  c->classId == OMCI_ME_GEM_IW_TP ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||

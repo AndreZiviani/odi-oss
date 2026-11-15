@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- omcid: a Delete of an 802.1p mapper (class 130) rebuilds the bridge
+  connections, as its Create and Set do. Before, the rules built from the
+  deleted mapper stayed in the switch until another change marked the bridge
+  plan.
 - omcid: a MIB reset loop is named instead of left to be counted in the log.
   Three or more MIB resets from the OLT within 600 s log one
   `event=mib_reset_loop state=start` (warning), and `state=end` after 600 s
