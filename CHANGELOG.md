@@ -17,11 +17,20 @@ listed here.
 - omcid: re-registrations are counted, and held back after refusals. Every
   re-registration a changed identity starts is one line in
   `/etc/config/odi-reregister` (the newest 16: time, change or revert, result,
-  Deactivate_ONU-IDs, key names, never values). Three Deactivate_ONU-IDs
-  before O5, or O7, end the wait at once with `result=refused`; one or two do
-  not. After one refused change `apply.sh omci` warns; after two in a row
+  Deactivate_ONU-IDs, key names, never values). Three Deactivate_ONU-IDs for
+  the stick's own ONU-ID before O5, or O7, end the wait at once with
+  `result=refused`; one or two do not. The kernel counts them in the new
+  `deact_directed` line of `/proc/odi_gpon/status`; a broadcast, or one for
+  another ONU on the PON, is not counted. omcid never deactivates the ONU
+  itself after a refusal. After one refused change `apply.sh omci` warns; after two in a row
   (within 24 h) omcid holds a changed identity back (`result=held`, the ONU
-  stays on the identity it runs) until `apply.sh omci --confirm`.
+  stays on the identity it runs) until `apply.sh omci --confirm`. While it
+  holds, `flash set` refuses to store a changed `GPON_SN`,
+  `GPON_PLOAM_PASSWD`, `LOID`, `LOID_PASSWD`, `LOID_OLD` or
+  `LOID_PASSWD_OLD`, and `flash default cs` to reset one, so a held change
+  never reaches the store and a reboot cannot apply it
+  (`/var/run/omcid-reregister.hold`); `identity-trial.sh try --confirm` stores
+  it once the OLT accepts it.
   `apply.sh omci --revert` is the confirmation for going back, recorded as a
   revert and skipped by the count. `omcli state` adds a `reregister` line,
   `event=reload_done` a `refusals` field, the status file `refusals`,

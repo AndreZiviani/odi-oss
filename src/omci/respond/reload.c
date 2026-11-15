@@ -81,6 +81,7 @@ void reload_init(void)
 {
 	cfg_snap_take(&rl.base);
 	rereg_load();
+	rereg_hold_write();
 	/* A status file of an earlier omcid says nothing about this one. */
 	sys_unlink(RELOAD_STATUS_PATH);
 }
@@ -366,7 +367,7 @@ static void activate(void)
 		}
 		/* The count the refusals are measured from: whatever the
 		 * OLT sends after the activation is its answer to it. */
-		rl.deact_base = rereg_ploam_deacts();
+		rl.deact_base = rereg_deacts();
 		rc = odi_verb("gponact", 0);
 		ev_reload_step("gponact", rc);
 		if (rc) {
@@ -465,7 +466,7 @@ void reload_poll(void)
 	rl.last_check_s = s;
 	st = onu_state_now();
 	if (rl.deact_base >= 0) {
-		long d = rereg_ploam_deacts();
+		long d = rereg_deacts();
 
 		if (d >= rl.deact_base)
 			rl.refusals = (unsigned)(d - rl.deact_base);

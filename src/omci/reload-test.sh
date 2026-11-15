@@ -53,12 +53,12 @@ STATUS=/var/run/omcid-reload
 INITLOG=/tmp/rl-init
 REREG=/var/config/odi-reregister
 CONFIRM=/var/run/omcid-reregister.confirm
-PLOAM=/tmp/rl-ploam
+HOLDF=/var/run/omcid-reregister.hold
 TRIALF=/var/run/identity-trial.conf
 
 mkdir -p /var/config /var/run
 clean_state() {
-	rm -f "$HS" "$ODI" "$SW" "$REREG" "$CONFIRM" "$TRIALF" /var/run/omcid-mib.snap /var/run/omcid-mib.snap.tmp \
+	rm -f "$HS" "$ODI" "$SW" "$REREG" "$CONFIRM" "$TRIALF" "$HOLDF" /var/run/omcid-mib.snap /var/run/omcid-mib.snap.tmp \
 	      /var/run/omcid-resume-decision "$STATUS" "$INITLOG"
 	: > "$INITLOG"
 }
@@ -109,9 +109,15 @@ EOF
 }
 val() { printf '\t\t<Value Name="%s" Value="%s"/>\n' "$1" "$2"; }
 
+# DEACT, once set, is the deact_directed line the kernel adds (Deactivate_ONU-ID
+# PLOAMs for our own ONU-ID); before that the file has none, like an older
+# kernel, and omcid counts nothing.
+DEACT=
 gpon() {   # gpon <file> <state> <alloc_ids line value>
 	printf 'state %s (O%s)\nonu_id 26\nsn 4f44495400000001\neqd multiframe 0 inframe 0\nploam ds_rx 0 us_tx 0\nalloc_ids %s\n' \
-		"$2" "$2" "$3" > "$1"
+		"$2" "$2" "$3" > "$1.new"
+	[ -z "$DEACT" ] || printf 'deact_directed %s\n' "$DEACT" >> "$1.new"
+	mv "$1.new" "$1"
 }
 gpon /tmp/rl-gpon-isp1 5 "5 282 794 1050 1306 538"
 gpon /tmp/rl-gpon-isp2 5 "1 348"
@@ -663,9 +669,13 @@ stop_omcid
 
 # ------------------------------------------------ 2b. record and guard
 #
-# The ploam file stands in for /proc/odi_gpon/ploam: only the type count of
-# Deactivate_ONU-ID matters. -j 4 as for the failure paths.
-ploam() { printf 'ploam ds_rx 10 us_tx 10\nploam_type ds 0x01 4\nploam_type ds 0x05 %s\nploam_ring 0 entries\n' "$1" > "$PLOAM"; }
+# deact N: the kernel has counted N Deactivate_ONU-ID for our ONU-ID; the
+# line goes into the gpon file as it stands. -j 4 as for the failure paths.
+deact() {
+	DEACT=$1
+	{ grep -v '^deact_directed ' /tmp/rl-gpon-isp1; printf 'deact_directed %s\n' "$1"; } > /tmp/rl-gpon-isp1.new
+	mv /tmp/rl-gpon-isp1.new /tmp/rl-gpon-isp1
+}
 rr_line() { sed -n "${1}p" "$REREG" 2>/dev/null | cut -d' ' -f2-; }
 rr_state() { $Q cli/build/omcli state 2>&1 | sed -n 's/^reregister : //p'; }
 # change <serial>: a new serial in the store, the signal, the outcome.
@@ -677,14 +687,14 @@ change() {
 }
 
 clean_state
-ploam 2
+deact 2
 store 1 11 0 "$(val LOID_OLD user1)
 $(val LOID user1)
 "
 hs_sn ODIT00000001
 gpon /tmp/rl-gpon-isp1 5 "0"
 log=/tmp/rl-rereg.log
-start_omcid "$log" -g /tmp/rl-gpon-isp1 -P "$PLOAM" -j 4
+start_omcid "$log" -g /tmp/rl-gpon-isp1 -j 4
 check "record: none at the start" "0 recorded  refused in a row 0" \
 	"$(rr_state | sed 's/  accepted.*//')"
 
@@ -695,10 +705,10 @@ hs_sn ODIT00000002
 old_id=$(st id)
 kill -HUP "$pid"
 wait_count "$INITLOG" gponact 1 8 || bad "refused: no gponact"
-ploam 4
+deact 4
 sleep 1.5
 check "refused: two deactivations are not yet a refusal" "running" "$(st state)"
-ploam 5
+deact 5
 if wait_done "$old_id" 3; then ok "refused: the third ends the wait before the deadline"
 else bad "refused: the wait did not end"; fi
 check "refused: result and count" "refused 3 1" "$(st result) $(st refusals) $(st streak)"
@@ -709,6 +719,7 @@ check "refused: recorded" "c refused 3 GPON_SN" "$(rr_line 1)"
 change ODIT00000003
 check "timeout: result, two in a row" "timeout 0 2" "$(st result) $(st refusals) $(st streak)"
 check "timeout: recorded" "c timeout 0 GPON_SN" "$(rr_line 2)"
+check "timeout: the hold file for flash" "streak 2" "$(cat "$HOLDF" 2>/dev/null)"
 
 # 3. Held: the third change in a row, unconfirmed. Nothing reaches the
 # driver and nothing is recorded.
@@ -742,13 +753,15 @@ check "revert: the count is unchanged" "3" "$(st streak)"
 stop_omcid
 
 # 6. The record survives a restart; an accepted change ends the run.
-start_omcid "$log" -g /tmp/rl-gpon-isp1 -P "$PLOAM" -j 4
+start_omcid "$log" -g /tmp/rl-gpon-isp1 -j 4
 check "restart: the record is read back" "4 recorded  refused in a row 3" \
 	"$(rr_state | sed 's/  accepted.*//')"
+check "restart: the hold file is written again" "streak 3" "$(cat "$HOLDF" 2>/dev/null)"
 echo confirm > "$CONFIRM"
 change ODIT00000005
 check "accepted: the run of refusals ends" "no_services 0" "$(st result) $(st streak)"
 check "accepted: five lines" "5" "$(wc -l < "$REREG" | tr -d ' ')"
+[ ! -e "$HOLDF" ] && ok "accepted: the hold file is gone" || bad "accepted: the hold file is still there"
 # A confirmation left for a reload that does not need one is taken anyway.
 echo confirm > "$CONFIRM"
 change ODIT00000005
@@ -757,14 +770,14 @@ stop_omcid
 
 # ------------------------------------------------ 2c. the identity trial file
 clean_state
-ploam 0
+deact 0
 store 1 11 0 "$(val LOID_OLD user1)
 $(val LOID user1)
 "
 hs_sn ODIT00000001
 gpon /tmp/rl-gpon-isp1 5 "0"
 log=/tmp/rl-trial.log
-start_omcid "$log" -g /tmp/rl-gpon-isp1 -P "$PLOAM" -j 2
+start_omcid "$log" -g /tmp/rl-gpon-isp1 -j 2
 : > "$INITLOG"
 printf 'GPON_SN=ODIT0000ABCD\nLOID=trialuser\n' > "$TRIALF"
 old_id=$(st id)

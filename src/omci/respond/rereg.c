@@ -50,8 +50,6 @@
 #define RR_CLOCK_VALID 1704067200L
 #define RR_DAY_S       86400L
 
-const char *ploam_proc_path = PLOAM_PROC_PATH;
-
 static struct rr_ent {
 	long t;
 	char kind;
@@ -229,6 +227,7 @@ void rereg_record(int revert, const char *result, unsigned refusals,
 	e.keys[i] = 0;
 	rr_push(&e);
 	rereg_save();
+	rereg_hold_write();
 }
 
 /* ------------------------------------------------------------ the guard */
@@ -300,30 +299,64 @@ int rereg_take_confirm(void)
 	return str_has_prefix(b, "revert") ? 2 : 1;
 }
 
-/* Deactivate_ONU-ID PLOAMs (type 0x05) the driver has counted since it
- * loaded, from its ploam file: the type counts come before the message ring,
- * so the head of the file is enough, and a type with no line was never seen.
- * -1 when the file cannot be read. A disable needs no count: it leaves the
- * ONU in O7, which onu_state_now() shows. */
-long rereg_ploam_deacts(void)
+/* Deactivate_ONU-ID PLOAMs addressed to our own ONU-ID that the driver has
+ * counted since it loaded: the deact_directed line of its status file. A
+ * broadcast, or one for another ONU on the PON, is not on it, so another
+ * ONU's trouble is never our refusal. -1 when the file or the line is not
+ * there (a kernel that does not count them): then nothing is counted. A
+ * disable needs no count: it leaves the ONU in O7, which onu_state_now()
+ * shows. */
+long rereg_deacts(void)
 {
 	static char buf[2048];
-	static const char key[] = "ploam_type ds 0x05";
-	long fd = sys_open(ploam_proc_path, O_RDONLY), n, v = 0;
-	int at;
+	static const char key[] = "deact_directed";
+	long fd = sys_open(gpon_proc_path, O_RDONLY), n, v = 0;
+	int at, i;
 
 	if (fd < 0)
 		return -1;
 	n = sys_read((int)fd, buf, sizeof buf);
 	sys_close((int)fd);
-	if (n < 0)
+	if (n <= 0)
 		return -1;
 	at = pp_find_line(buf, (unsigned)n, key);
 	if (at < 0)
-		return 0;
-	for (int i = at + (int)sizeof key; i < n && buf[i] >= '0' && buf[i] <= '9'; i++)
+		return -1;
+	i = at + (int)sizeof key;
+	if (i >= n || buf[i] < '0' || buf[i] > '9')
+		return -1;
+	for (; i < n && buf[i] >= '0' && buf[i] <= '9'; i++)
 		v = v * 10 + (buf[i] - '0');
 	return v;
+}
+
+/* The hold, for flash: while a changed identity would be held back, a small
+ * file on tmpfs carries the streak, and flash refuses to store a changed
+ * identity key, so a held change never reaches the store and a reboot cannot
+ * apply it. Rewritten only when the streak changes: at start, after each
+ * record, and from the once a second tick, which ends it when the refusals
+ * leave the 24 h. */
+void rereg_hold_write(void)
+{
+	static long last = -1;
+	unsigned streak = rereg_streak();
+	long h = streak >= REREG_HOLD ? (long)streak : 0;
+	char b[24];
+	int o = 0;
+
+	if (h == last)
+		return;
+	if (!h) {
+		sys_unlink(REREG_HOLD_PATH);
+		last = 0;
+		return;
+	}
+	put(b, &o, sizeof b, "streak ");
+	putu(b, &o, sizeof b, (unsigned long)h);
+	put(b, &o, sizeof b, "\n");
+	if (atomic_write(REREG_HOLD_PATH, REREG_HOLD_TMP_PATH, (const uint8_t *)b,
+			 (uint32_t)o) == 0)
+		last = h;
 }
 
 /* For omcli state. */

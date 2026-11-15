@@ -92,9 +92,14 @@ before O5, or a disabled serial number (O7), are a refusal, and so is no O5 at
 all. After the first refusal `apply.sh omci` warns; after two in a row, within
 24 h, omcid does not re-register for a changed identity until the reload is
 confirmed with `apply.sh omci --confirm`, and the ONU stays on the identity it
-runs (`result=held`). The store keeps what was saved: a reboot or an omcid
-respawn applies it unconfirmed. Details in `docs/TOOLS.md` ("omcid",
-"Re-registrations are counted").
+runs (`result=held`). While that holds, `flash set` refuses to store a
+changed `GPON_SN`, `GPON_PLOAM_PASSWD`, `LOID`, `LOID_PASSWD`, `LOID_OLD` or
+`LOID_PASSWD_OLD` (and `flash default cs` to reset one), so a held change
+never reaches the store and a reboot cannot apply it either; the same value
+again is fine. `identity-trial.sh try --confirm` (below) is the way through:
+it stores the values once the OLT accepts them. Only Deactivate_ONU-IDs for
+the stick's own ONU-ID count, never a broadcast or one for another ONU on the
+PON. Details in `docs/TOOLS.md` ("omcid", "Re-registrations are counted").
 
 A serial number is applied by rewriting the PLOAM slot the boot activation
 armed, which the driver allows only while the ONU is deactivated; the

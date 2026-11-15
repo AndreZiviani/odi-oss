@@ -258,7 +258,9 @@ replaced whole by a rename; omcid removes a stale one at start.
 operators are said to block a line after a few refused registrations, and a
 wrong serial number or password costs one with every try. While a
 re-registration waits for O5, omcid counts the Deactivate_ONU-ID PLOAMs the
-OLT sends (`/proc/odi_gpon/ploam`, type 0x05). Three of them before O5, or
+OLT sends to the stick's own ONU-ID (`deact_directed` in
+`/proc/odi_gpon/status`; a broadcast, or one for another ONU on a shared PON,
+is not counted, and a kernel without the line counts nothing). Three of them before O5, or
 O7 (the OLT disabled the serial number), end the wait at once with
 `result=refused`; one or two do not, since an OLT may turn a correct
 credential down for a few discovery windows before it admits it. Every
@@ -278,7 +280,15 @@ From that record:
   `result=held`, the ONU stays on the identity it runs and nothing reaches the
   driver or the record. `apply.sh omci --confirm` confirms one reload (a file
   in `/var/run` that every reload takes away, used or not), and a change
-  confirmed that way is counted like any other.
+  confirmed that way is counted like any other. While the streak holds,
+  omcid keeps `/var/run/omcid-reregister.hold` (`streak <n>`), and `flash`
+  refuses to store a changed identity key (`GPON_SN`, `GPON_PLOAM_PASSWD`,
+  `LOID`, `LOID_PASSWD`, `LOID_OLD`, `LOID_PASSWD_OLD`) or to reset one with
+  `default cs`, so a held change never reaches the store and no reboot or
+  respawn applies it. `identity-trial.sh try --confirm` stores it once the OLT
+  accepts it. The file goes when an accepted change ends the streak or the
+  refusals leave the 24 h. omcid never deactivates the ONU itself after a
+  refusal: it behaves like the stock stack.
 - `today`, the accepted changes in the last 24 h (with the clock set):
   `apply.sh omci` warns from five on, and holds nothing.
 
@@ -1745,7 +1755,7 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table, the ACL probes, the multicast group counters (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes, the snooping lease and the group counters (igmpd -w), the ACL probes (diag acl-probe), the group counters (diag mc-count) |
-| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), the last PON-ID since the last loss of signal (`pon_id odn_class <0-7> reach_extender <0|1> tol <n> id <14 hex digits> ms <ms since boot>`, or `pon_id none`: G.984.3 Annex C, sent only by an OLT provisioned to; `odn_class` 0 A, 1 B, 2 B+, 3 C, 4 C+; `reach_extender` 1 when TOL is a reach extender's rather than the OLT's; `tol` the mean launch power in 0.1 dB steps above -30 dBm, so `tol 334` is +3.4 dBm and the path loss is about that less the stick's receive power, 65535 when the OLT does not report it; `id` the PON identifier the operator set), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
+| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `deact_directed <n>` (the Deactivate_ONU-ID PLOAMs addressed to the ONU-ID the ONU holds, counted since the driver loaded; broadcasts and other ONUs' are not: omcid counts refusals from it), `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), the last PON-ID since the last loss of signal (`pon_id odn_class <0-7> reach_extender <0|1> tol <n> id <14 hex digits> ms <ms since boot>`, or `pon_id none`: G.984.3 Annex C, sent only by an OLT provisioned to; `odn_class` 0 A, 1 B, 2 B+, 3 C, 4 C+; `reach_extender` 1 when TOL is a reach extender's rather than the OLT's; `tol` the mean launch power in 0.1 dB steps above -30 dBm, so `tol 334` is +3.4 dBm and the path loss is about that less the stick's receive power, 65535 when the OLT does not report it; `id` the PON identifier the operator set), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
@@ -1777,7 +1787,7 @@ missing one as nothing to report.
 
 | file | lines |
 |---|---|
-| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `enc_ports`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `laser_emergency_stop`, `last_los_ms`, `upstream_overhead`, `ranging_time`, `pon_id`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
+| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `enc_ports`, `rei_count`, `to1_expiries`, `to2_expiries`, `deact_directed`, `irq_*`, `laser`, `laser_emergency_stop`, `last_los_ms`, `upstream_overhead`, `ranging_time`, `pon_id`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
 | `counters` | `ctr_samples`, `ctr_ds_superframe`, `ctr_fec_now`, `ctr`, `ctr_saturated` |
 | `flows` | `flow_ack_timeouts`, `flow_saturated`, `ds`, `us` |
 | `ploam` | `ploam ds_rx us_tx`, `ploam_us_dropped`, `ploam_type`, `ploam_ring` |

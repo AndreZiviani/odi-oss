@@ -688,19 +688,20 @@ void reload_poll(void);
 #define REREG_PATH          "/var/config/odi-reregister"
 #define REREG_TMP_PATH      "/var/config/odi-reregister.tmp"
 #define REREG_CONFIRM_PATH  "/var/run/omcid-reregister.confirm"
-#define PLOAM_PROC_PATH     "/proc/odi_gpon/ploam"
+#define REREG_HOLD_PATH     "/var/run/omcid-reregister.hold"
+#define REREG_HOLD_TMP_PATH "/var/run/omcid-reregister.hold.tmp"
 #define REREG_MAX       16  /* lines kept */
 #define REREG_REFUSALS   3  /* Deactivate_ONU-IDs before O5 that make a refusal */
 #define REREG_HOLD       2  /* refused changes in a row that need a confirmation */
 #define REREG_DAY_WARN   5  /* accepted changes in 24 h that apply.sh warns about */
-extern const char *ploam_proc_path;
 void rereg_load(void);
 void rereg_record(int revert, const char *result, unsigned refusals,
 		  const char *keys);
 unsigned rereg_streak(void);
 int rereg_today(void);
 int rereg_take_confirm(void);
-long rereg_ploam_deacts(void);
+long rereg_deacts(void);
+void rereg_hold_write(void);
 void rereg_show(void);
 
 /* ------------------------------------------------ software download (swimage.c)
