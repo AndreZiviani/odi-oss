@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- omcid: a MIB reset loop is named instead of left to be counted in the log.
+  Three or more MIB resets from the OLT within 600 s log one
+  `event=mib_reset_loop state=start` (warning), and `state=end` after 600 s
+  without one. Each OLT `event=mib_reset` line adds `recent` (the OLT resets
+  in the last 600 s) and `before`, the last six requests before it as
+  `op:class.instance`, so the log shows what the OLT read or wrote just before
+  it gave up. `omcli state` adds a `mib resets` line with the counts and
+  whether a loop is on. Refs #393.
 - Module-load replay: `modload.bin` drops from 3,619 records to 1,748 (130 KB
   to 63 KB). The 1,871 GPON MAC register writes it carried are a bring-up
   with its own `PONMAC_RESET` pulse, the same sequence `gpon_init.bin`
