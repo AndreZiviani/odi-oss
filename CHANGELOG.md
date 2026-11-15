@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- odi_nic: a raw transmit (omcid's OMCI replies and the IGMP reports sent up
+  by igmpd) while every interface is down returns `-ENETDOWN` instead of
+  writing into a TX ring that is NULL or being freed. The driver keeps a
+  flag under its lock, set when the first open has the ring and the hardware
+  up and cleared first in the last stop, before the work is cancelled and the
+  rings freed; omcid sees a failed send, as it already does on a full ring.
+  Issue #419.
 - omcid: a bridge connection whose deactivate fails stays owned as pending
   and is deactivated again by the next rebuild. Before, the slot was freed
   at once and the rule stayed in the switch whenever the next plan did not

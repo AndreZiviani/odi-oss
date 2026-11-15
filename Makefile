@@ -192,6 +192,7 @@ test-host:
 	bash test/regtrace_compare_test.sh
 	bash test/regtrace_compare_stream_test.sh
 	bash test/odi_nic_hw_test.sh
+	bash test/odi_nic_raw_tx_test.sh
 	bash test/odi_switch_test.sh
 	bash test/odi_switch_mcast_test.sh
 	bash test/odi_switch_acl_probe_test.sh
