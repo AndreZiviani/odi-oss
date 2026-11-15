@@ -13,6 +13,33 @@ listed here.
   `op:class.instance`, so the log shows what the OLT read or wrote just before
   it gave up. `omcli state` adds a `mib resets` line with the counts and
   whether a loop is on. Refs #393.
+- Module-load replay: `modload.bin` drops from 3,619 records to 1,748 (130 KB
+  to 63 KB). The 1,871 GPON MAC register writes it carried are a bring-up
+  with its own `PONMAC_RESET` pulse, the same sequence `gpon_init.bin`
+  starts with; the GPON init resets the GPON MAC again at the first
+  `gponact` and writes every one of those registers after it, itself or
+  through the driver's table clean. `replayblob.py trim-modload-gpon` takes
+  them out and refuses a register the GPON init does not write again. The
+  boot register stream loses exactly those writes and the reads before
+  them; nothing else moves.
+- GPON boot init: `gpon_init.bin` drops from 2,528 records to 800 (91 KB to
+  29 KB). Gone are the replay's own clean of the GEM-port CAM, the flow
+  type words, the Alloc-ID CAM and the multicast MAC filter, which ran
+  again after the driver's clean (`odi_gpon_init_clean_tables()`, with the
+  reset wait, the `DONE` poll and a read-back) on tables already clear, and
+  the stock driver's sweep of the per-flow counter index registers, which
+  selects each counter without reading it. `replayblob.py trim-gpon` takes
+  them out of the `mkgponinit.py` output, each sweep matched whole and once.
+  The boot register stream loses exactly those 1,728 writes
+  (`test/fixtures/boot-golden-common.txt`); nothing else moves.
+- Tests: `test/apply_test.sh` no longer fails now and then on a busy runner
+  ("identity: back in O5 with services"). Its stub omcid read the case
+  script while it ran, so a reload still in progress could read the
+  script of the next case from its old offset and overwrite the status
+  with a fragment of it. The stub now reads the script once per reload.
+- Docs: `SETTINGS.md` no longer says `flash set` refuses an empty value. It
+  stores one for a stock key and removes an odi-only key; only the web UI
+  cannot clear a key.
 - Docs: `QUALIFICATION.md` adds a second HSGQ v08 report at 2.5G against a
   MikroTik RB5009 (`HOST_SERDES=2500basex`, v1.15.0 and v1.16.0, warm and cold
   boot, a live try and confirm). Refs #369.
