@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
+  mapper with one target forwards the tagged frames of a priority the mapper
+  sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.
 - igmpd: an IGMP join is held to the profile's group limit with the IPv6
   groups counted in, as an MLD join already counted the IPv4 ones. Before,
   with a limit of 2, an IPv6 group held first let two IPv4 groups in as
