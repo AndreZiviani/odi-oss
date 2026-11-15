@@ -112,6 +112,10 @@ reset: a trial that never answered still says how far it got
    mount and address checks, so it stays up; it is followed by a normal
    boot, never another safe one, so the state machine cannot loop
    (`docs/SETTINGS.md` has it whole).
+   Then `identity.sh snapshot` (`docs/SETTINGS.md`, "The identity
+   snapshot"): on the first boot of an image that has it, a copy of the
+   provisioning identity to `/etc/config/identity.orig`; on every later
+   boot, and on a safe-mode boot, nothing.
 3. **Entropy.** Nothing on this board feeds the pool early, so without a
    seed every daemon starts on a nearly empty one (dropbear once logged 27
    bits available). `seedrng` credits the seed the previous boot saved
