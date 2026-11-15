@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Diagnostics bundle: two files at the top for whoever reads it. `README.md`
+  names the image, says what is redacted and whether the identity is masked,
+  maps questions to files and lists what a report has to add (ISP, router,
+  what changed). `SUMMARY.txt` is one screen of facts from the bundle files:
+  ONU state and its last change, O5 drops this boot by `cause`, LOS and LOF,
+  alarms set now, the `omcli state` reset and drop counts, optics, why the
+  previous boot ended, the safe-mode boot count and the failed steps. The new
+  `diag-summary.sh` writes it and reads only the bundle, so it also runs on a
+  PC against an unpacked bundle. The diag batch adds the five `pon get
+  transceiver` reads the exporter makes on every scrape.
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair
