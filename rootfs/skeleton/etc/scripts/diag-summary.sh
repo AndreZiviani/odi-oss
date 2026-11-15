@@ -24,6 +24,16 @@ d=${1:-}
 
 na="not in bundle"
 
+# readok FILE: FILE is in the bundle and its step did not fail. The step
+# writes the file even when the command fails (an error text, or nothing),
+# and only MANIFEST.txt has the status; a file the manifest does not list
+# with a number other than 0 counts as read.
+readok() {
+	[ -f "$d/$1" ] || return 1
+	[ -f "$d/MANIFEST.txt" ] || return 0
+	awk -v f="$1" '$3 == f && $1 ~ /^[0-9]+$/ && $1 != 0 { bad = 1 } END { exit bad }' "$d/MANIFEST.txt"
+}
+
 # val FILE: the file, or nothing if it is absent.
 val() { [ -f "$d/$1" ] && cat "$d/$1"; }
 
@@ -83,7 +93,7 @@ echo
 # The ONU state, and the changes the kernel logged this boot, from dmesg:
 # "[  123.456] odi_gpon: event=onu_state from=O5 to=O2 ... cause=X side=Y".
 echo "onu state      : ${state:-$na}${state:+  (pon/odi_gpon-status.txt)}"
-if [ -f "$d/dmesg.txt" ]; then
+if readok dmesg.txt; then
 	awk -v up="$up" '
 	function field(k,   i) {
 		for (i = 1; i <= NF; i++)
@@ -127,16 +137,22 @@ if [ -f "$d/dmesg.txt" ]; then
 		printf "LOS / LOF      : %d / %d this boot  (dmesg.txt)\n", los, lof
 	}' "$d/dmesg.txt"
 else
-	echo "last change    : $na (no dmesg.txt)"
+	why="no dmesg.txt"
+	[ -f "$d/dmesg.txt" ] && why="the dmesg step failed"
+	echo "last change    : unread ($why)"
+	echo "left O5        : unread"
+	echo "LOS / LOF      : unread"
 fi
 
 # The GPON alarms set now, from gpon get alarm-status in pon/diag.txt:
-# "Alarm LOF, status: occur". "none" only when the LOS, LOF and LOM lines
-# are there and all clear: a failed read leaves the file with no such line
-# (or "% alarm status read failed"), and that is no all-clear.
-gal='^Alarm \(LOS\|LOF\|LOM\), status: \(clear\|occur\)'
-if [ -f "$d/pon/diag.txt" ] && [ "$(grep -c "$gal" "$d/pon/diag.txt")" -ge 3 ]; then
-	al=$(grep "$gal" "$d/pon/diag.txt" | sed -n 's/^Alarm \([^,]*\), status: occur.*/\1/p' | sort -u | tr '\n' ' ' | sed 's/ $//')
+# "Alarm LOF, status: occur", one line per alarm odi_gpon tracks (LOS, LOF,
+# LOM, SF, SD; src/diag/src/commands.c). "none" only when the read gave at
+# least one such line and none occurs: a failed read prints
+# "% alarm status read failed" and no line, and that is no all-clear.
+gal='^Alarm (LOS|LOF|LOM|SF|SD), status: (clear|occur)$'
+if [ -f "$d/pon/diag.txt" ] && grep -q -E "$gal" "$d/pon/diag.txt" &&
+	! grep -q '^% alarm status read failed' "$d/pon/diag.txt"; then
+	al=$(grep -E "$gal" "$d/pon/diag.txt" | sed -n 's/^Alarm \([^,]*\), status: occur$/\1/p' | sort -u | tr '\n' ' ' | sed 's/ $//')
 	echo "alarms now     : ${al:-none}  (pon/diag.txt)"
 else
 	echo "alarms now     : unread (no alarm-status lines in pon/diag.txt)"
@@ -148,8 +164,14 @@ for k in "mib resets" "rx dropped" "mib sync"; do
 	v=$( [ -f "$st" ] && sed -n "s/^$k *: *//p" "$st" | head -n 1)
 	printf '%-15s: %s\n' "$k" "${v:-$na}${v:+  (pon/omcli_state.txt)}"
 done
-n=$( [ -f "$d/syslog.txt" ] && grep -c 'event=unknown_me ' "$d/syslog.txt")
-echo "unknown MEs    : ${n:-$na}${n:+ first requests logged  (syslog.txt; log/omcid-unknown.txt has the list)}"
+if readok syslog.txt; then
+	n=$(grep -c 'event=unknown_me ' "$d/syslog.txt")
+	echo "unknown MEs    : $n first requests logged  (syslog.txt; log/omcid-unknown.txt has the list)"
+elif [ -f "$d/syslog.txt" ]; then
+	echo "unknown MEs    : unread (the logread step failed)"
+else
+	echo "unknown MEs    : $na"
+fi
 echo
 
 # Optics, from the transceiver lines of pon/diag.txt: "Rx Power: -22.92  dBm".
@@ -179,9 +201,9 @@ if [ -n "$pb" ]; then
 else
 	echo "previous boot  : $na"
 fi
-sm=$( [ -f "$d/dmesg.txt" ] && sed -n 's/.*safe-mode: event=boot_count \(.*\)/\1/p' "$d/dmesg.txt" | tail -n 1)
+sm=$(readok dmesg.txt && sed -n 's/.*safe-mode: event=boot_count \(.*\)/\1/p' "$d/dmesg.txt" | tail -n 1)
 echo "boot count     : ${sm:-$na}${sm:+  (dmesg.txt)}"
-sf=$( [ -f "$d/dmesg.txt" ] && grep -c 'safe-mode: event=safe_mode ' "$d/dmesg.txt")
+sf=$(readok dmesg.txt && grep -c 'safe-mode: event=safe_mode ' "$d/dmesg.txt")
 [ "${sf:-0}" -gt 0 ] && echo "SAFE MODE      : this boot is a safe-mode boot  (dmesg.txt)"
 echo
 

@@ -8,10 +8,11 @@
 # stub, for README.md and SUMMARY.txt.
 #
 # What is checked: each summary line from its file (image, uptime, slot,
-# with sw_tryactive 2 as no trial, 0 or 1 pending, a failed read unknown,
+# with sw_tryactive 2 as no trial, 0 or 1 pending, anything else unknown,
 # identity, ONU state, the last state change and how long ago, the O5
 # drops by cause, LOS and LOF, the alarms set now (a failed or empty
-# alarm read is unread, never none), the omcli state lines,
+# alarm read is unread, never none; SF or SD alone is named), a failed
+# dmesg or logread step reads unread, never 0, the omcli state lines,
 # the optics, the previous boot, a safe-mode boot, the failed steps); a
 # bundle with none of those files gives "not in bundle" on every line and
 # exits 0; no directory is refused. End to end: the bundle carries both
@@ -138,7 +139,24 @@ has "$T/s2" "slot           : active 1, committed 1, trial slot 0 pending  (nv.t
 sed -i 's/^getenv sw_tryactive: .*/getenv sw_tryactive: (rc 1)/' "$D/nv.txt"
 sh "$S" "$D" > "$T/s2" 2>&1
 has "$T/s2" "slot           : active 1, committed 1, trial unknown  (nv.txt)" "slot: a failed sw_tryactive read is unknown"
+sed -i 's/^getenv sw_tryactive: .*/getenv sw_tryactive: sw_tryactive=1/' "$D/nv.txt"
+sh "$S" "$D" > "$T/s2" 2>&1
+has "$T/s2" "slot           : active 1, committed 1, trial slot 1 pending  (nv.txt)" "slot: sw_tryactive 1 is a pending trial"
+sed -i 's/^getenv sw_tryactive: .*/getenv sw_tryactive: sw_tryactive=7/' "$D/nv.txt"
+sh "$S" "$D" > "$T/s2" 2>&1
+has "$T/s2" "slot           : active 1, committed 1, trial unknown  (nv.txt)" "slot: any other sw_tryactive is unknown"
 cp "$T/nv.keep" "$D/nv.txt"
+# A failed dmesg or logread step: the file is there (an error text), the
+# manifest has the status, and nothing from it reads as an all-clear.
+cp "$D/MANIFEST.txt" "$T/manifest.keep"
+sed -i 's/^0        200  dmesg.txt$/1         30  dmesg.txt/' "$D/MANIFEST.txt"
+printf '1         30  syslog.txt\n' >> "$D/MANIFEST.txt"
+sh "$S" "$D" > "$T/s2" 2>&1
+has "$T/s2" "last change    : unread (the dmesg step failed)" "a failed dmesg step: last change unread"
+has "$T/s2" "left O5        : unread" "a failed dmesg step: O5 drops unread, not 0"
+has "$T/s2" "LOS / LOF      : unread" "a failed dmesg step: LOS and LOF unread"
+has "$T/s2" "unknown MEs    : unread (the logread step failed)" "a failed logread step: unknown MEs unread, not 0"
+cp "$T/manifest.keep" "$D/MANIFEST.txt"
 # The alarms: a failed or empty read is unread, never none.
 cp "$D/pon/diag.txt" "$T/diag.keep"
 printf 'RTK.0> gpon get alarm-status
@@ -152,6 +170,16 @@ has "$T/s2" "alarms now     : unread (no alarm-status lines in pon/diag.txt)" "a
 sed 's/status: occur/status: clear/' "$T/diag.keep" > "$D/pon/diag.txt"
 sh "$S" "$D" > "$T/s2" 2>&1
 has "$T/s2" "alarms now     : none  (pon/diag.txt)" "alarms: all three clear is none"
+for a in SF SD; do
+	sed 's/status: occur/status: clear/' "$T/diag.keep" > "$D/pon/diag.txt"
+	printf 'Alarm SF, status: %s\nAlarm SD, status: %s\n' \
+		"$([ "$a" = SF ] && echo occur || echo clear)" "$([ "$a" = SD ] && echo occur || echo clear)" >> "$D/pon/diag.txt"
+	sh "$S" "$D" > "$T/s2" 2>&1
+	has "$T/s2" "alarms now     : $a  (pon/diag.txt)" "alarms: $a alone is named"
+done
+printf 'Alarm LOS, status: clear\n' > "$D/pon/diag.txt"
+sh "$S" "$D" > "$T/s2" 2>&1
+has "$T/s2" "alarms now     : none  (pon/diag.txt)" "alarms: fewer known alarms, all clear, is still none"
 cp "$T/diag.keep" "$D/pon/diag.txt"
 
 n=$(wc -l < "$out")
@@ -171,7 +199,8 @@ for k in image uptime "onu state" "mib resets" optics "previous boot" "boot coun
 	grep -q "^$k *: .*not in bundle" "$out" && ok "empty: $k says not in bundle" ||
 		no "empty: $k says not in bundle" "$(grep "^$k" "$out")"
 done
-has "$out" "last change    : not in bundle (no dmesg.txt)" "empty: no dmesg, no state change claimed"
+has "$out" "last change    : unread (no dmesg.txt)" "empty: no dmesg, no state change claimed"
+has "$out" "left O5        : unread" "empty: no O5 count claimed"
 has "$out" "alarms now     : unread (no alarm-status lines in pon/diag.txt)" "empty: alarms unread, not none"
 if sh "$S" "$T/none" > /dev/null 2>&1; then no "a missing directory is refused"; else ok "a missing directory is refused"; fi
 

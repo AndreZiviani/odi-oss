@@ -1570,8 +1570,10 @@ count, the optics (from `pon get transceiver` in `pon/diag.txt`, the reads
 the exporter makes on every scrape), why the previous boot ended
 (`reason=` of the ramlog), the safe-mode boot count, and every step that
 failed. It reads only the files of the bundle, so a fact missing there
-reads `not in bundle`, and it runs as well on a PC against an unpacked
-bundle (`sh diag-summary.sh odi-diag`), also an older one. Both are
+reads `not in bundle`, and one whose step failed in `MANIFEST.txt` (or an
+alarm read with no alarm line) reads `unread`, never as an all-clear. It
+runs as well on a PC against an unpacked bundle (`sh diag-summary.sh
+odi-diag`), also an older one. Both are
 written before the scrub and scrubbed like every other file. The counts
 from dmesg are those of the kernel ring as collected: early lines can be
 gone, and odi_gpon rate-limits its event lines.
