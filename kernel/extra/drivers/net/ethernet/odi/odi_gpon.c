@@ -54,6 +54,7 @@
 #ifdef __KERNEL__
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/mutex.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/spinlock.h>
@@ -1600,6 +1601,38 @@ static int odi_gpon_proc_cam_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
+/* /proc/odi_gpon/ponq: the upstream PON queue block read back from the
+ * chip next to what cmd 21 and cmd 25 recorded (odi_switch_ponq_show() has
+ * the line format), so a report can show whether a T-CONT, queue, rate or
+ * upstream flow omcid set up reached the hardware, even when omcid does not
+ * answer. Read only, and never DRN_CMD. Copied under odi_switch_lock, the
+ * lock every write to that block holds; formatted after.
+ */
+static int odi_gpon_proc_ponq_show(struct seq_file *seq, void *v)
+{
+	struct odi_switch_ponq_snap *snap = kmalloc(sizeof(*snap), GFP_KERNEL);
+
+	(void)v;
+	if (!snap)
+		return -ENOMEM;
+	mutex_lock(&odi_switch_lock);
+	odi_switch_ponq_snap(snap);
+	mutex_unlock(&odi_switch_lock);
+	odi_switch_ponq_show(snap, odi_gpon_proc_put, seq);
+	kfree(snap);
+	return 0;
+}
+
+static int odi_gpon_proc_ponq_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, odi_gpon_proc_ponq_show, NULL);
+}
+
+static const struct proc_ops odi_gpon_proc_ponq_fops = {
+	.proc_open = odi_gpon_proc_ponq_open, .proc_read = seq_read,
+	.proc_lseek = seq_lseek, .proc_release = single_release,
+};
+
 static int odi_gpon_proc_cam_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, odi_gpon_proc_cam_show, NULL);
@@ -1729,6 +1762,8 @@ static int __init odi_gpon_module_init(void)
 		pr_info("odi_gpon: /proc/odi_gpon/ploam not created\n");
 	if (!proc_create("cam", 0444, odi_gpon_proc_dir, &odi_gpon_proc_cam_fops))
 		pr_info("odi_gpon: /proc/odi_gpon/cam not created\n");
+	if (!proc_create("ponq", 0444, odi_gpon_proc_dir, &odi_gpon_proc_ponq_fops))
+		pr_info("odi_gpon: /proc/odi_gpon/ponq not created\n");
 	return 0; /* never fail module_init over odi_gpon_init()'s own result */
 }
 module_init(odi_gpon_module_init);

@@ -337,24 +337,34 @@ static int us_queue_decode(uint16_t meId, struct us_queue *q)
  * without one keeps 0 and 0, which the driver takes as no limit; when
  * several CTPs on one queue name different descriptors, the last CTP of
  * the store wins, as the last flow set does in the stock stack. */
+static int ctp_us_rates(uint16_t ctp, uint32_t *cir, uint32_t *pir)
+{
+	uint16_t td = (uint16_t)effective_u32(OMCI_ME_GEM_PORT_CTP, ctp, 5);
+	uint32_t c, p;
+
+	if (!td || !mib_find(OMCI_ME_TRAFFIC_DESCRIPTOR, td))
+		return 0;
+	c = effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 1);
+	p = effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 2);
+	if (effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 8) == 1)
+		p = p > c ? p - c : 0;
+	*cir = c / 1024u;
+	*pir = p / 1024u;
+	return 1;
+}
+
 static void us_queue_rates(struct us_queue *q, unsigned nq,
 			   const struct us_flow_plan *flows, unsigned nf)
 {
 	for (unsigned i = 0; i < nf; i++) {
-		uint16_t td = (uint16_t)effective_u32(OMCI_ME_GEM_PORT_CTP,
-						      flows[i].ctp, 5);
 		uint32_t cir, pir;
 
-		if (!td || !mib_find(OMCI_ME_TRAFFIC_DESCRIPTOR, td))
+		if (!ctp_us_rates(flows[i].ctp, &cir, &pir))
 			continue;
-		cir = effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 1);
-		pir = effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 2);
-		if (effective_u32(OMCI_ME_TRAFFIC_DESCRIPTOR, td, 8) == 1)
-			pir = pir > cir ? pir - cir : 0;
 		for (unsigned j = 0; j < nq; j++)
 			if (q[j].meId == flows[i].pqMe) {
-				q[j].cir = cir / 1024u;
-				q[j].pir = pir / 1024u;
+				q[j].cir = cir;
+				q[j].pir = pir;
 			}
 	}
 }
@@ -1662,4 +1672,301 @@ void qos_reset(void)
 	qos_dirty = 0;
 	qos_full = 0;
 	bc_flow = -1;
+}
+
+/* ------------------------------------------------------ omcli check
+ *
+ * What the MIB says against what the chip holds, for the upstream T-CONTs,
+ * queues and flows and the downstream flows omcid set up. The chip side is
+ * read from the kernel, never written: /proc/odi_gpon/ponq (the upstream
+ * PON queue block) and /proc/odi_gpon/cam (the Alloc-ID and downstream GEM
+ * CAMs), next to gpon_proc_path. Only rows omcid programmed are compared;
+ * the others hold whatever the replays or an earlier provisioning left.
+ *
+ * The expected values come from the MIB through the same derivation the
+ * rebuild uses (us_queue_decode(), ctp_us_rates(), tcont_bound_alloc_id());
+ * where things sit (the T-CONT index, a queue's ordinal, the flow slot,
+ * the queue block) comes from what omcid and the driver recorded. A Set
+ * whose rebuild has not run yet therefore shows as a difference too. */
+
+static char chk_ponq_buf[8192];
+static char chk_cam_buf[4096];
+static struct pp_ponq chk_ponq;
+static struct pp_cam chk_cam;
+static unsigned chk_ok, chk_bad;
+
+/* gpon_proc_path with its last component replaced by `name`. */
+static void chk_path(char *out, unsigned cap, const char *name)
+{
+	unsigned n = 0, cut = 0;
+
+	for (; gpon_proc_path[n] && n + 1 < cap; n++) {
+		out[n] = gpon_proc_path[n];
+		if (out[n] == '/')
+			cut = n + 1;
+	}
+	for (n = cut; *name && n + 1 < cap; n++)
+		out[n] = *name++;
+	out[n] = 0;
+}
+
+/* The whole of a /proc file: a seq_file read may stop short of the end. */
+static long chk_read(const char *name, char *buf, unsigned cap)
+{
+	char path[128];
+	long fd, n, got = 0;
+
+	chk_path(path, sizeof path, name);
+	fd = sys_open(path, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	while ((unsigned long)got < cap &&
+	       (n = sys_read((int)fd, buf + got, cap - (unsigned long)got)) > 0)
+		got += n;
+	sys_close((int)fd);
+	return got;
+}
+
+static void chk_line(int same)
+{
+	if (same) {
+		chk_ok++;
+		out(": ok\n");
+	} else {
+		chk_bad++;
+		out_char('\n');
+	}
+}
+
+/* A CIR or PIR as PON_QID_*_RATE holds it once the driver wrote it
+ * (odi_switch_qos.c, ponq_rate_set()): one less than asked, except for 0,
+ * 1 and the maximum; a PIR of 0 with a CIR of 0 is no limit
+ * (odi_switch_cmd.c, cmd_pri_queue()). */
+#define CHK_RATE_MAX 0x3ffffu
+#define CHK_WEIGHT_MAX 0x3ffu
+
+static uint32_t chk_rate_raw(uint32_t r)
+{
+	if (r > CHK_RATE_MAX)
+		r = CHK_RATE_MAX;
+	return r == 0 || r == 1 || r == CHK_RATE_MAX ? r : r - 1;
+}
+
+/* The physical queue of ordinal `ord` on T-CONT index `t`, from the queue
+ * block the driver recorded, or -1. */
+static int chk_pq(uint16_t t, uint16_t ord)
+{
+	if (t >= 16 || !chk_ponq.t[t].block || ord >= chk_ponq.t[t].qn)
+		return -1;
+	return (int)(32u * (t / 8u) + chk_ponq.t[t].qbase + ord);
+}
+
+static void chk_tconts(void)
+{
+	for (int i = 0; i < TCONT_MAX; i++) {
+		const struct us_tcont_prog *tp = &prog.t[i];
+		uint16_t want;
+		int32_t hw;
+
+		if (!tp->used)
+			continue;
+		want = tcont_bound_alloc_id(tp->meId, 0);
+		hw = tp->index < PP_CAM_ALLOC ? chk_cam.alloc[tp->index] : PP_CAM_UNLISTED;
+		out_fmt("tcont me %04x alloc %d index %d", (long)tp->meId, (long)want,
+			(long)tp->index);
+		if (want != tp->alloc) {
+			out_fmt(": differs: mib alloc %d, programmed with %d", (long)want,
+				(long)tp->alloc);
+			chk_line(0);
+		} else if (hw != (int32_t)want) {
+			out_fmt(": differs: cam row %d holds ", (long)tp->index);
+			if (hw >= 0)
+				out_fmt("%d", (long)hw);
+			else
+				out(hw == PP_CAM_TIMEOUT ? "(read timed out)" : "nothing");
+			chk_line(0);
+		} else if (tp->index >= 16 || !chk_ponq.t[tp->index].en) {
+			out(": differs: t-cont not enabled in the chip");
+			chk_line(0);
+		} else {
+			chk_line(1);
+		}
+	}
+}
+
+static void chk_queues(void)
+{
+	for (unsigned i = 0; i < usq_hw_n; i++) {
+		const struct us_queue *h = &usq_hw[i];
+		const struct omci_class *ctp = find_class(OMCI_ME_GEM_PORT_CTP);
+		struct us_queue m;
+		uint32_t wcir = 0, wpir = 0, ww, raw_cir, raw_pir;
+		int pq = chk_pq(h->tcontIndex, h->ordinal);
+
+		out_fmt("queue me %04x tcont %d ordinal %d", (long)h->meId,
+			(long)h->tcontIndex, (long)h->ordinal);
+		if (pq < 0) {
+			out(": differs: no queue block for it in the chip");
+			chk_line(0);
+			continue;
+		}
+		out_fmt(" (queue %d)", (long)pq);
+		if (!us_queue_decode(h->meId, &m)) {
+			out(": differs: mib has no such upstream queue");
+			chk_line(0);
+			continue;
+		}
+		for (int k = 0; ctp && k < MIB_ROWS; k++) {
+			const struct mib_row *r = mib_row_at(k);
+			uint32_t dir, c, p;
+
+			if (!r || r->classId != OMCI_ME_GEM_PORT_CTP ||
+			    (uint16_t)row_u32(r, ctp, 4) != h->meId)
+				continue;
+			dir = row_u32(r, ctp, 3);
+			if ((dir == 1 || dir == 3) && ctp_us_rates(r->inst, &c, &p)) {
+				wcir = c;
+				wpir = p;
+			}
+		}
+		ww = m.wrr ? us_queue_weight(&m) : 1;
+		if (ww > CHK_WEIGHT_MAX)
+			ww = CHK_WEIGHT_MAX;
+		raw_cir = chk_rate_raw(wcir);
+		raw_pir = wcir == 0 && wpir == 0 ? CHK_RATE_MAX : chk_rate_raw(wpir);
+		if (!((chk_ponq.t[h->tcontIndex].qmap >>
+		       (chk_ponq.t[h->tcontIndex].qbase + h->ordinal)) & 1u)) {
+			out(": differs: not in the t-cont's queue mask");
+			chk_line(0);
+		} else if (!chk_ponq.q[pq].seen) {
+			out(": differs: chip lists no such queue");
+			chk_line(0);
+		} else if (chk_ponq.q[pq].wfq != m.wrr || chk_ponq.q[pq].weight != ww) {
+			out_fmt(": differs: mib %s weight %d, chip %s weight %d",
+				m.wrr ? "wfq" : "strict", (long)ww,
+				chk_ponq.q[pq].wfq ? "wfq" : "strict",
+				(long)chk_ponq.q[pq].weight);
+			chk_line(0);
+		} else if (chk_ponq.q[pq].cir != raw_cir || chk_ponq.q[pq].pir != raw_pir) {
+			out_fmt(": differs: mib cir %d pir %d, chip cir %d pir %d (register units)",
+				(long)raw_cir, (long)raw_pir, (long)chk_ponq.q[pq].cir,
+				(long)chk_ponq.q[pq].pir);
+			chk_line(0);
+		} else {
+			chk_line(1);
+		}
+	}
+}
+
+/* The physical queue an upstream CTP's flow belongs on, from its T-CONT
+ * and priority queue as programmed, or -1 with *why set. */
+static int chk_ctp_pq(uint16_t tcontMe, uint16_t pqMe, const char **why)
+{
+	const struct us_tcont_prog *tp = tc_prog_find(tcontMe);
+
+	for (unsigned i = 0; tp && i < usq_hw_n; i++)
+		if (usq_hw[i].meId == pqMe && usq_hw[i].tcontMe == tcontMe)
+			return chk_pq(tp->index, usq_hw[i].ordinal);
+	*why = tp ? "its priority queue is not programmed" : "its t-cont is not programmed";
+	return -1;
+}
+
+static void chk_us_flows(void)
+{
+	const struct omci_class *ctp = find_class(OMCI_ME_GEM_PORT_CTP);
+	uint8_t seen[FLOW_MAX];
+
+	for (unsigned i = 0; i < FLOW_MAX; i++)
+		seen[i] = 0;
+	for (int k = 0; ctp && k < MIB_ROWS; k++) {
+		const struct mib_row *r = mib_row_at(k);
+		const char *why = "";
+		uint16_t port;
+		uint32_t dir;
+		int slot, pq;
+
+		if (!r || r->classId != OMCI_ME_GEM_PORT_CTP)
+			continue;
+		dir = row_u32(r, ctp, 3);
+		if (dir != 1 && dir != 3)
+			continue;
+		port = (uint16_t)row_u32(r, ctp, 1);
+		slot = flow_find(0, port);
+		out_fmt("us gem %d (ctp %04x)", (long)port, (long)r->inst);
+		if (slot < 0 || slot >= FLOW_MAX || !prog.f[slot].live) {
+			out(": differs: no upstream flow programmed for it");
+			chk_line(0);
+			continue;
+		}
+		seen[slot] = 1;
+		out_fmt(" flow %d", (long)slot);
+		pq = chk_ctp_pq((uint16_t)row_u32(r, ctp, 2), (uint16_t)row_u32(r, ctp, 4), &why);
+		if (pq < 0) {
+			out_fmt(": differs: %s", why);
+			chk_line(0);
+		} else if (!chk_ponq.f[slot].seen || !chk_ponq.f[slot].valid) {
+			out(": differs: not valid in the chip");
+			chk_line(0);
+		} else if (chk_ponq.f[slot].gem != port) {
+			out_fmt(": differs: chip maps the flow to gem %d", (long)chk_ponq.f[slot].gem);
+			chk_line(0);
+		} else if (chk_ponq.f[slot].queue != (unsigned)pq) {
+			out_fmt(": differs: mib queue %d, chip queue %d", (long)pq,
+				(long)chk_ponq.f[slot].queue);
+			chk_line(0);
+		} else {
+			chk_line(1);
+		}
+	}
+	/* A flow omcid still holds that no CTP asks for any more. */
+	for (unsigned i = 0; i < caps_flows() && i < FLOW_MAX; i++)
+		if (prog.f[i].live && !seen[i]) {
+			out_fmt("us flow %d gem %d: differs: programmed, but no upstream ctp "
+				"in the mib has that gem port\n", (long)i, (long)prog.f[i].gem);
+			chk_bad++;
+		}
+}
+
+static void chk_ds_flows(void)
+{
+	for (unsigned i = 0; i < caps_flows() && i < FLOW_MAX; i++) {
+		int32_t hw = i < PP_CAM_GEM ? chk_cam.gem[i] : PP_CAM_UNLISTED;
+
+		if (!flow_ds[i].used)
+			continue;
+		out_fmt("ds gem %d flow %d", (long)flow_ds[i].port, (long)i);
+		if (hw == (int32_t)flow_ds[i].port) {
+			chk_line(1);
+			continue;
+		}
+		out_fmt(": differs: gem cam row %d holds ", (long)i);
+		if (hw >= 0)
+			out_fmt("%d", (long)hw);
+		else
+			out(hw == PP_CAM_TIMEOUT ? "(read timed out)" : "nothing");
+		chk_line(0);
+	}
+}
+
+uint32_t qos_check(void)
+{
+	long np = chk_read("ponq", chk_ponq_buf, sizeof chk_ponq_buf);
+	long nc = chk_read("cam", chk_cam_buf, sizeof chk_cam_buf);
+	int rp = np > 0 ? pp_ponq(chk_ponq_buf, (unsigned)np, &chk_ponq) : -1;
+	int rc = nc > 0 ? pp_cam(chk_cam_buf, (unsigned)nc, &chk_cam) : -1;
+
+	if (rp < 0 || rc < 0) {
+		out("the chip state is not readable (/proc/odi_gpon/ponq and cam: "
+		    "not our kernel, or an older one)\n");
+		return OMCLI_EFAIL;
+	}
+	if (!apply_hw)
+		out("programming is off: omcid sent nothing, so differences are expected\n");
+	chk_ok = chk_bad = 0;
+	chk_tconts();
+	chk_queues();
+	chk_us_flows();
+	chk_ds_flows();
+	out_fmt("%d ok, %d differ\n", (long)chk_ok, (long)chk_bad);
+	return OMCLI_OK;
 }

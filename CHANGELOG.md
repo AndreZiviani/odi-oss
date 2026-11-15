@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- OMCI: `omcli check` compares the MIB with what the chip holds and prints
+  one line per object, `ok` or what differs: each T-CONT's Alloc-ID against
+  its CAM row, enable bit and queue mask; each upstream queue's type,
+  weight, CIR and PIR; each upstream GEM port's flow (valid bit, GEM port,
+  queue); each downstream GEM port against its CAM row. It looks only at
+  what omcid set up and writes nothing. The chip side is a new read-only
+  `/proc/odi_gpon/ponq`, the upstream PON queue block read back (never
+  `DRN_CMD`). The diag bundle adds `pon/omcli_check.txt` and
+  `pon/odi_gpon-ponq.txt` and `pon/odi_gpon-cam.txt`, so a report shows
+  whether a GEM port, queue or rate reached the hardware even when omcid
+  does not answer (issue #412).
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair

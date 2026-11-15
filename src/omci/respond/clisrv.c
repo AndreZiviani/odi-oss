@@ -194,6 +194,7 @@ static void cli_dispatch(void)
 	else if (str_eq(verb, "flows"))  status = cli_flows();
 	else if (str_eq(verb, "caps"))   status = cli_caps();
 	else if (str_eq(verb, "tcont"))  status = cli_tcont();
+	else if (str_eq(verb, "check"))  status = cli_check();
 	else if (str_eq(verb, "conn"))   status = cli_conn();
 	else if (str_eq(verb, "bridge")) status = cli_bridge();
 	else if (str_eq(verb, "state"))  status = cli_state();

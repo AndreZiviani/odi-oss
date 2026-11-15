@@ -15,6 +15,15 @@
  *                    the Alloc-IDs the OLT assigned by PLOAM (odi_gpon.c,
  *                    odi_gpon_proc_status_show), and "enc_ports <n> <id>...",
  *                    the GEM ports the downstream path decrypts.
+ *   /proc/odi_gpon/cam
+ *                    "alloc_cam <row> hw <id|-|timeout> ..." and
+ *                    "gem_cam <row> hw <port|-|timeout> ...", the Alloc-ID
+ *                    and downstream GEM CAMs read from the chip
+ *                    (odi_gpon_proc_cam_show).
+ *   /proc/odi_gpon/ponq
+ *                    "tcont", "queue" and "flow" lines, the upstream PON
+ *                    queue block read from the chip
+ *                    (odi_switch_cmd.c, odi_switch_ponq_show).
  */
 #ifndef ODI_OMCI_PROCPARSE_H
 #define ODI_OMCI_PROCPARSE_H
@@ -273,6 +282,183 @@ static inline int pp_ctr(const char *buf, unsigned len, const char *name, uint64
 		return -1;
 	*out = v;
 	return 0;
+}
+
+/* The value after the word `key` in one line (len bytes, no newline):
+ * decimal, or hex after 0x. Returns 1 and sets *v, 0 when the word is not
+ * there or no number follows it. A word counts only as a whole word, so
+ * "queue" never matches inside "queues". */
+static inline int pp_word_u32(const char *l, unsigned len, const char *key, uint32_t *v)
+{
+	unsigned i = 0;
+
+	while (i < len) {
+		unsigned k = 0, n = 0;
+		uint32_t x = 0;
+
+		while (key[k] && i + k < len && l[i + k] == key[k])
+			k++;
+		if (!key[k] && (i == 0 || l[i - 1] == ' ') && i + k < len && l[i + k] == ' ') {
+			unsigned j = i + k + 1;
+
+			if (j + 1 < len && l[j] == '0' && l[j + 1] == 'x') {
+				for (j += 2; j < len && pp_hexval(l[j]) >= 0; j++, n++)
+					x = x * 16 + (uint32_t)pp_hexval(l[j]);
+			} else {
+				for (; j < len && l[j] >= '0' && l[j] <= '9'; j++, n++)
+					x = x * 10 + (uint32_t)(l[j] - '0');
+			}
+			if (n && (j == len || l[j] == ' ' || l[j] == '+')) {
+				*v = x;
+				return 1;
+			}
+			return 0;
+		}
+		while (i < len && l[i] != ' ')
+			i++;
+		i++;
+	}
+	return 0;
+}
+
+/* Whether line l (len bytes) starts with the word `key`. */
+static inline int pp_starts(const char *l, unsigned len, const char *key)
+{
+	unsigned k = 0;
+
+	while (key[k] && k < len && l[k] == key[k])
+		k++;
+	return !key[k] && k < len && l[k] == ' ';
+}
+
+#define PP_PONQ_TCONTS 17u
+#define PP_PONQ_QUEUES 65u
+#define PP_PONQ_FLOWS  65u
+
+/* /proc/odi_gpon/ponq, row by row. `seen` is 1 for a row the file lists;
+ * a T-CONT's `block` is 1 when the driver recorded a queue block for it
+ * (first logical queue qbase, qn queues). */
+struct pp_ponq {
+	struct { uint8_t seen, en, block, qbase, qn; uint32_t qmap; } t[PP_PONQ_TCONTS];
+	struct { uint8_t seen, wfq; uint16_t weight; uint32_t cir, pir; } q[PP_PONQ_QUEUES];
+	struct { uint8_t seen, valid, rec, queue; uint16_t gem; } f[PP_PONQ_FLOWS];
+};
+
+/* Fills *p from the file. Returns the number of rows read, or -1 when the
+ * buffer has none at all (not our kernel, or an empty read): "cannot
+ * tell", never "nothing programmed". A malformed line is skipped. */
+static inline int pp_ponq(const char *buf, unsigned len, struct pp_ponq *p)
+{
+	unsigned at = 0;
+	int rows = 0;
+	uint8_t *z = (uint8_t *)p;
+
+	for (unsigned i = 0; i < sizeof *p; i++)
+		z[i] = 0;
+	while (at < len) {
+		const char *l = buf + at;
+		unsigned n = 0;
+		uint32_t id, a, b, c, d;
+
+		while (at + n < len && l[n] != '\n')
+			n++;
+		at += n + 1;
+		if (pp_starts(l, n, "tcont") && pp_word_u32(l, n, "tcont", &id) &&
+		    id < PP_PONQ_TCONTS && pp_word_u32(l, n, "en", &a) &&
+		    pp_word_u32(l, n, "qmap", &b)) {
+			p->t[id].seen = 1;
+			p->t[id].en = (uint8_t)a;
+			p->t[id].qmap = b;
+			if (pp_word_u32(l, n, "block", &c)) {
+				unsigned j = 0;
+
+				while (j < n && l[j] != '+')
+					j++;
+				d = 0;
+				for (j++; j < n && l[j] >= '0' && l[j] <= '9'; j++)
+					d = d * 10 + (uint32_t)(l[j] - '0');
+				p->t[id].block = 1;
+				p->t[id].qbase = (uint8_t)c;
+				p->t[id].qn = (uint8_t)d;
+			}
+			rows++;
+		} else if (pp_starts(l, n, "queue") && pp_word_u32(l, n, "queue", &id) &&
+			   id < PP_PONQ_QUEUES && pp_word_u32(l, n, "wfq", &a) &&
+			   pp_word_u32(l, n, "weight", &b) && pp_word_u32(l, n, "cir", &c) &&
+			   pp_word_u32(l, n, "pir", &d)) {
+			p->q[id].seen = 1;
+			p->q[id].wfq = (uint8_t)a;
+			p->q[id].weight = (uint16_t)b;
+			p->q[id].cir = c;
+			p->q[id].pir = d;
+			rows++;
+		} else if (pp_starts(l, n, "flow") && pp_word_u32(l, n, "flow", &id) &&
+			   id < PP_PONQ_FLOWS && pp_word_u32(l, n, "valid", &a) &&
+			   pp_word_u32(l, n, "gem", &b) && pp_word_u32(l, n, "queue", &c) &&
+			   pp_word_u32(l, n, "recorded", &d)) {
+			p->f[id].seen = 1;
+			p->f[id].valid = (uint8_t)a;
+			p->f[id].gem = (uint16_t)b;
+			p->f[id].queue = (uint8_t)c;
+			p->f[id].rec = (uint8_t)d;
+			rows++;
+		}
+	}
+	return rows ? rows : -1;
+}
+
+#define PP_CAM_ALLOC 32u
+#define PP_CAM_GEM   65u
+#define PP_CAM_NONE    (-1)      /* "-": the row is not valid */
+#define PP_CAM_TIMEOUT (-2)      /* "timeout": the read did not complete */
+#define PP_CAM_UNLISTED (-3)     /* no line for the row */
+
+/* /proc/odi_gpon/cam: what the hardware holds per row, or one of the
+ * PP_CAM_* values. Returns the number of rows read, or -1 for none. */
+struct pp_cam {
+	int32_t alloc[PP_CAM_ALLOC];
+	int32_t gem[PP_CAM_GEM];
+};
+
+static inline int pp_cam(const char *buf, unsigned len, struct pp_cam *c)
+{
+	unsigned at = 0;
+	int rows = 0;
+
+	for (unsigned i = 0; i < PP_CAM_ALLOC; i++)
+		c->alloc[i] = PP_CAM_UNLISTED;
+	for (unsigned i = 0; i < PP_CAM_GEM; i++)
+		c->gem[i] = PP_CAM_UNLISTED;
+	while (at < len) {
+		const char *l = buf + at;
+		unsigned n = 0, j;
+		uint32_t row, v;
+		int32_t *slot = 0;
+
+		while (at + n < len && l[n] != '\n')
+			n++;
+		at += n + 1;
+		if (pp_starts(l, n, "alloc_cam") && pp_word_u32(l, n, "alloc_cam", &row) &&
+		    row < PP_CAM_ALLOC)
+			slot = &c->alloc[row];
+		else if (pp_starts(l, n, "gem_cam") && pp_word_u32(l, n, "gem_cam", &row) &&
+			 row < PP_CAM_GEM)
+			slot = &c->gem[row];
+		if (!slot)
+			continue;
+		if (pp_word_u32(l, n, "hw", &v)) {
+			*slot = (int32_t)v;
+		} else {
+			for (j = 0; j + 3 < n && !(l[j] == ' ' && l[j + 1] == 'h' &&
+						    l[j + 2] == 'w' && l[j + 3] == ' '); j++)
+				;
+			if (j + 3 >= n)
+				continue;
+			*slot = j + 4 < n && l[j + 4] == 't' ? PP_CAM_TIMEOUT : PP_CAM_NONE;
+		}
+		rows++;
+	}
+	return rows ? rows : -1;
 }
 
 #endif

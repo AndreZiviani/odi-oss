@@ -762,6 +762,12 @@ is torn down (its flows, then its queues) and built again alone. Only a
 change of the PLOAM Alloc-ID list tears everything down, since the CAM
 rows, and so the T-CONT indexes, may have moved.
 
+`/proc/odi_gpon/ponq` reads these registers back (every one above but
+`DRN_CMD`, plus `US_GEM_PORT_MAP`) next to what cmd 21 and 25 recorded,
+and `omcli check` compares them, with `/proc/odi_gpon/cam`, against what
+the MIB asks for (docs/TOOLS.md). Reading the window while the line is up
+is what the read-modify-write of every field above already does (#412).
+
 The driver used to replay ISP1's words for these registers by T-CONT and
 flow ordinal, which gave every other OLT ISP1's weights, drained T-CONT
 4's queue when it set up T-CONTs 5 and up, put T-CONTs 8-15 on queues

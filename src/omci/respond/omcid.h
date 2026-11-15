@@ -497,6 +497,8 @@ uint32_t cli_mib(void);
 uint32_t cli_flows(void);
 uint32_t cli_caps(void);
 uint32_t cli_tcont(void);
+uint32_t cli_check(void);
+uint32_t qos_check(void);
 uint32_t cli_state(void);
 uint32_t cli_provision(void);
 uint32_t cli_voip(void);

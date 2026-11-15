@@ -113,7 +113,7 @@ image-all:
 # any did. TEST_JOBS is the number of legs at once (default: the CPUs);
 # `make test TEST_JOBS=1` runs them one by one. `make test-<leg>` runs one leg
 # on its own, its output streaming.
-OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables getall alarms writes mcast pm enc voip frames
+OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables getall alarms writes mcast pm enc voip frames check
 TEST_LEGS := lint test-host test-diag test-omci-respond test-igmp $(OMCI_SUITES:%=test-omci-%)
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
@@ -261,6 +261,7 @@ test-host:
 	bash test/procparse_test.sh
 	bash test/odi_switch_flows_test.sh
 	bash test/odi_switch_ponq_test.sh
+	bash test/odi_switch_ponq_show_test.sh
 	bash test/boot_golden_test.sh
 	python3 test/regnames_kernel_test.py
 
@@ -281,7 +282,8 @@ test-diag:
 # vlan-test.sh builds both ISP sessions with the manual tag on and off
 # (transparent) and checks the bridge rules. voip-test.sh provisions a SIP
 # line the way an OLT does, with OMCI_POTS_PORTS on, and checks that with it
-# off the VoIP classes are still unknown to the OLT.
+# off the VoIP classes are still unknown to the OLT. check-test.sh runs
+# omcli check against written /proc/odi_gpon/ponq and cam files.
 # One target per suite (test-omci-<suite>) so CI can run them as parallel
 # jobs; test-omci runs them all side by side, as `make test` does (see there).
 # Each suite needs only omcli and omcid (plus its drvtrace build), which
