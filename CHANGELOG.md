@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- OMCI: `omcli check` derives queue ownership and ordering from the current
+  MIB, so a pending T-CONT or priority change is reported as a difference
+  instead of accepting the old programmed queue map.
+
+- OMCI: `omcli check` compares the MIB with what the chip holds and prints
+  one line per object, `ok` or what differs: each T-CONT's Alloc-ID against
+  its CAM row, enable bit and queue mask; each upstream queue's type,
+  weight, CIR and PIR; each upstream GEM port's flow (valid bit, GEM port,
+  queue); each downstream GEM port against its CAM row. It looks only at
+  what omcid set up and writes nothing. The chip side is a new read-only
+  `/proc/odi_gpon/ponq`, the upstream PON queue block read back (never
+  `DRN_CMD`). The diag bundle adds `pon/omcli_check.txt` and
+  `pon/odi_gpon-ponq.txt` and `pon/odi_gpon-cam.txt`, so a report shows
+  whether a GEM port, queue or rate reached the hardware even when omcid
+  does not answer (issue #412).
 - Diagnostics bundle: a scrub that fails on any file now fails the bundle
   instead of letting that file out unscrubbed, and `diag-bundle.sh` runs
   with a BSD sed and awk (macOS): the scrub no longer uses `sed -i`, and the

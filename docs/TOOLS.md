@@ -944,6 +944,10 @@ omcli uses omcid's own queue and commands:
     omcli tcont                          T-CONT entity id to driver index, the
                                          PLOAM Alloc-IDs, and each T-CONT's
                                          Alloc-ID and where it came from
+    omcli check                          the MIB against the chip, one line
+                                         per T-CONT, upstream queue and GEM
+                                         flow omcid set up: `ok` or what
+                                         differs; see below
     omcli vlan [cs.xml]                  the manual VLAN from the config store,
                                          and whether the tag is applied
     omcli ident [cs.xml hs.xml [odi.conf]]  the identity and the OLT
@@ -955,6 +959,18 @@ omcli uses omcid's own queue and commands:
                                          a pcap for Wireshark; masked unless
                                          --full, see below
     omcli help
+
+`check` reads `/proc/odi_gpon/ponq` and `/proc/odi_gpon/cam` and compares
+them with what the MIB asks for: a T-CONT's Alloc-ID against its CAM row,
+its enable bit and its queue mask; each upstream queue's type, weight, CIR
+and PIR (in register units, after the conversion omcid and the driver
+apply); each upstream GEM CTP's flow (valid bit, GEM port, queue); and each
+downstream flow against its GEM CAM row. It looks only at what omcid set
+up, since rows nothing uses keep stale values: an upstream CTP omcid set up
+no flow for (its T-CONT has no Alloc-ID yet, say) is listed as `skipped`. A difference right after an
+OLT Set can be the rebuild that has not run yet; one that stays is a
+command that did not reach the hardware. It ends with `N ok, M differ` (and `K skipped`), and
+says so and fails when the kernel does not publish the files.
 
 `bridge` and `cfgset` write; the rest read. A rule built with `bridge` lasts
 until omcid next rebuilds its bridge connections, which withdraws every
@@ -1585,9 +1601,9 @@ Under `pon/`, the GPON and OMCI state a PON problem needs:
 | file | from |
 |---|---|
 | `diag.txt` | one `diag` run: `gpon get onu-state`, `gpon get alarm-status`, `gpon get flows`, `mib dump counter port all`, `register get 0xf020a8 240`, the PON queue window that cmd 23 and 25 write (`docs/SWITCH.md`), and `pon get transceiver` rx-power, tx-power, temperature, bias-current and voltage |
-| `odi_gpon-status.txt`, `odi_gpon-counters.txt`, `odi_gpon-flows.txt`, `odi_gpon-ploam.txt`, `odi_gpon-drops.txt` | `/proc/odi_gpon/status`: ONU state, Alloc-IDs, alarm and state times; `counters`: the link counters; `flows`: the per-flow GEM counters; `ploam`: PLOAM totals and the ring (bodies withheld, below); `drops`: the records frozen around each drop out of O5 (types only, no bodies) |
+| `odi_gpon-status.txt`, `odi_gpon-counters.txt`, `odi_gpon-flows.txt`, `odi_gpon-ploam.txt`, `odi_gpon-drops.txt`, `odi_gpon-cam.txt`, `odi_gpon-ponq.txt` | `/proc/odi_gpon/status`: ONU state, Alloc-IDs, alarm and state times; `counters`: the link counters; `flows`: the per-flow GEM counters; `ploam`: PLOAM totals and the ring (bodies withheld, below); `drops`: the records frozen around each drop out of O5 (types only, no bodies); `cam`: the Alloc-ID and downstream GEM CAMs read from the chip; `ponq`: the upstream T-CONTs, queues and flows read from the chip, there even when omcid does not answer |
 | `odi_omci.txt` | `/proc/odi_omci`: the OMCI channel counters |
-| `omcli_{state,provision,flows,tcont,conn,vlan}.txt` | `omcli`: what omcid holds and programmed; `vlan` is the VLAN handling (stick tags or transparent) and any `FwdOp` override of class 84 from `RTK_DEVINFO_SPECVER`, numbers only, so the bundle alone shows whether the override is in force |
+| `omcli_{state,provision,flows,tcont,check,conn,vlan}.txt` | `omcli`: what omcid holds and programmed; `check` compares the MIB with the chip for every T-CONT, upstream queue and GEM flow omcid set up; `vlan` is the VLAN handling (stick tags or transparent) and any `FwdOp` override of class 84 from `RTK_DEVINFO_SPECVER`, numbers only, so the bundle alone shows whether the override is in force |
 | `omci.pcap` | `omcli frames --pcap`: the last 2048 OMCI frames, masked (above), never `--full`; withheld when a secret or, unless `--full`, an identity value shows in it as text. Not scrubbed like the text files: the scrub would shift its records |
 | `omcli_mib_<class>.txt` | `omcli mib <class>` for ONU-G, ONU2-G, PPTP Ethernet UNI, VEIP, the bridge and mapper classes, VLAN filtering and extended VLAN tagging, T-CONT, ANI-G, GEM ports and interworking points, priority queues, traffic schedulers and descriptors, multicast |
 
@@ -1688,6 +1704,7 @@ drivers behind them.
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
 | `/proc/odi_gpon/drops` | a short record of the PON side around every drop out of O5, frozen when it happens, so "who dropped first" (an OLT deactivate against a LOS or LOF) can be answered after the fact. `drops <n> kept <n> pre_ms 60000 post_ms 120000`, then per record, oldest first, `drop <seq> at_ms <ms since boot> age_s <s> to <state> cause <cause> side <side> events <n> lost <n> more <n> collecting|done` (`cause` and `side` as on the `event=onu_state` line; `lost`: events past the 384 a record holds; `more`: further exits from O5 while it collected, which get no record of their own) and its events, each with its offset from the drop in seconds: `ploam ds|us type 0x<type> onu_id 0x<id> count <n> over_ms <ms>` (no contents; the same PLOAM repeated within 10 ms of its last copy is one line, `count` the copies and `over_ms` the time from the first to the last), `state <from> <to> cause <cause> side <side>`, `los|lof on|off state <state>`, and the 1 s sample `sample state <state> alarms 0x<DSF_ALARM_STATE> bip_blocks <BIP error blocks since the last sample>`. A record holds the 60 s before the drop and what follows for 120 s. Four records: the first of the boot is kept, the other three hold the latest. RAM only: a reboot or a watchdog reset loses them | -- |
 | `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault. Then the downstream GEM port CAM, the table that decides which GEM ports the ONU receives: `gem_cam <row> hw <GEM port|-> type 0x<FLAGS>` for each of rows 0..64 valid in the hardware or with a flow type word not zero (rows 0..63 are the downstream flows OMCI created, the row being the flow id, `diag gpon get flows`; row 64 is the OMCC; FLAGS bit 0 multicast, 1 Ethernet, 2 OMCI, 4 AES), then `gem_cam_valid <n>`. A flow OMCI deleted leaves no line | -- |
+| `/proc/odi_gpon/ponq` | the upstream PON queue block read back from the hardware (`docs/SWITCH.md#upstream-pon-queues`), next to what cmd 21 and 25 recorded: `tcont <t> en <0|1> qmap 0x<mask> block <first>+<count>|-` for each T-CONT enabled, with a queue in its mask, or with a queue block recorded (16 is the OMCC); `queue <q> wfq <0|1> weight <w> cir <raw> pir <raw>` for each physical queue in the mask of an enabled T-CONT, the rates as the register holds them (one less than asked, except 0, 1 and 262143, no limit); `flow <slot> valid <0|1> gem <port> queue <q> recorded <0|1>` for each upstream flow slot valid in the hardware or recorded (64 is the OMCC). Reads only, and never `DRN_CMD`. Rows nothing uses keep what the replays or an earlier provisioning left; `omcli check` compares only what omcid set up | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
 | `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |

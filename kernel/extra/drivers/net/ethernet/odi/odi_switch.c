@@ -59,7 +59,8 @@ void __iomem *odi_switch_base;
  *   - odi_sw_ioctl(), every /dev/odi_sw command except DDM_GET;
  *   - odi_init_proc_write(), every verb, the GPON ones included;
  *   - odi_switch_init(), for the state reset.
- *   - the netdevice notifier of odi_switch_pin.c, under RTNL.
+ *   - the netdevice notifier of odi_switch_pin.c, under RTNL;
+ *   - the read of /proc/odi_gpon/ponq (odi_gpon.c), for the copy only.
  * It may sleep inside (request_firmware() in the replays), and it is
  * never taken from IRQ, softirq or timer context or under a spinlock.
  *

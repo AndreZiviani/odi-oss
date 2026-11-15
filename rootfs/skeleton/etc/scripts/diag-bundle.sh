@@ -23,8 +23,9 @@
 # (lastgood.xml, lastgood_hs.xml, odi.conf) with every secret value
 # replaced by REDACTED, and under pon/ the GPON and OMCI state: diag (ONU
 # state, alarms, GEM flows, port counters, the PON queue registers that
-# cmd 23 and 25 write), /proc/odi_gpon/ (status, counters, flows, ploam),
-# /proc/odi_omci, and omcli (state, provision, flows, tcont, conn, vlan (the VLAN handling and any
+# cmd 23 and 25 write), /proc/odi_gpon/ (status, counters, flows, ploam,
+# cam, ponq), /proc/odi_omci, and omcli (state, provision, flows, tcont,
+# check (the MIB against the chip), conn, vlan (the VLAN handling and any
 # FwdOp override; numbers only), voip (masked), and the MIB
 # classes in OMCI_CLASSES), and the last OMCI frames as pon/omci.pcap
 # (omcli frames, masked), and under module/ the optics module on /dev/i2c-0: A0h whole (a0.txt), A2h
@@ -285,7 +286,7 @@ grab pon/odi_omci.txt /proc/odi_omci
 # status; the class and TOL stay.
 # drops (the records around each drop out of O5) has PLOAM types and
 # ONU-IDs only, never a body, so it is copied as it is.
-for f in status counters flows ploam drops; do
+for f in status counters flows ploam drops cam ponq; do
 	if [ -e "$GPON_PROC_DIR/$f" ]; then
 		timeout "$STEP_TIMEOUT_S" cat "$GPON_PROC_DIR/$f" > "$work/gpon-$f.raw" 2>&1
 		rc=$?
@@ -315,7 +316,7 @@ for f in status counters flows ploam drops; do
 done
 
 if step pon/omcli_state.txt omcli state; then
-	for c in provision flows tcont conn vlan; do
+	for c in provision flows tcont check conn vlan; do
 		step "pon/omcli_$c.txt" omcli "$c"
 	done
 	# The phone lines an OLT provisioned, in the view that masks the number,

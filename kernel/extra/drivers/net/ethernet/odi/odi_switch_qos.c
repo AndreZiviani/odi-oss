@@ -301,6 +301,36 @@ void odi_sw_ponq_sid2qid_set(uint32_t sid, uint32_t pq)
 		 ODI_SW_PONQ_QUEUE_MASK << shift, pq << shift);
 }
 
+void odi_sw_ponq_read(struct odi_sw_ponq_regs *r)
+{
+	uint32_t i, shift;
+
+	r->tcont_en = odi_reg_read(ponq_off(ODI_SW_PONQ_TCONT_EN));
+	for (i = 0; i < ODI_SW_PONQ_ALL_TCONTS; i++)
+		r->qmap[i] = odi_reg_read(ponq_off(ODI_SW_PONQ_SCH_QMAP + i));
+	for (i = 0; i < ODI_SW_PONQ_ALL_QUEUES; i++) {
+		shift = (i % ODI_SW_PONQ_WEIGHTS_PER_WORD) * ODI_SW_PONQ_WEIGHT_BITS;
+		r->cir[i] = odi_reg_read(ponq_off(ODI_SW_PONQ_CIR_RATE + i)) &
+			    ODI_SW_PONQ_RATE_MAX;
+		r->pir[i] = odi_reg_read(ponq_off(ODI_SW_PONQ_PIR_RATE + i)) &
+			    ODI_SW_PONQ_RATE_MAX;
+		r->weight[i] = (uint16_t)((odi_reg_read(ponq_off(ODI_SW_PONQ_WFQ_WEIGHT +
+						i / ODI_SW_PONQ_WEIGHTS_PER_WORD)) >> shift) &
+					  ODI_SW_PONQ_WEIGHT_MAX);
+		r->wfq[i] = (uint8_t)((odi_reg_read(ponq_off(ODI_SW_PONQ_WFQ_TYPE + i / 32U)) >>
+				       (i % 32U)) & 1U);
+	}
+	for (i = 0; i < ODI_SW_PONQ_ALL_FLOWS; i++) {
+		shift = (i % ODI_SW_PONQ_SID2QID_PER_WORD) * ODI_SW_PONQ_SID2QID_BITS;
+		r->valid[i] = (uint8_t)((odi_reg_read(ponq_off(ODI_SW_PONQ_SIDVALID + i / 32U)) >>
+					 (i % 32U)) & 1U);
+		r->queue[i] = (uint8_t)((odi_reg_read(ponq_off(ODI_SW_PONQ_SID2QID +
+						i / ODI_SW_PONQ_SID2QID_PER_WORD)) >> shift) &
+					ODI_SW_PONQ_QUEUE_MASK);
+		r->gem[i] = (uint16_t)(odi_reg_read(ODI_SW_US_GEM_PORT_MAP(i)) & 0xfffU);
+	}
+}
+
 void odi_sw_ponq_glb_th_set(uint32_t nflows)
 {
 	uint32_t step = (odi_reg_read(ponq_off(ODI_SW_PONQ_SID_RPV_TH)) >> ODI_SW_PONQ_TH_ON_SHIFT) &
