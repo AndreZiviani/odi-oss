@@ -58,10 +58,25 @@ void env_crc_store(uint8_t *buf, uint32_t crc)
 
 int env_valid(const uint8_t *buf, uint32_t len)
 {
+	const uint8_t *data = buf + ENV_HDR_LEN;
+	uint32_t n, p = 0;
+
 	if (len <= ENV_HDR_LEN)
 		return 0;
-	return env_crc_stored(buf)
-	    == env_crc32(buf + ENV_HDR_LEN, len - ENV_HDR_LEN);
+	n = len - ENV_HDR_LEN;
+	if (env_crc_stored(buf) != env_crc32(data, n))
+		return 0;
+	/* A CRC alone does not prove that the final pair is terminated. */
+	while (p < n) {
+		if (data[p] == '\0')
+			return 1;
+		while (p < n && data[p] != '\0')
+			p++;
+		if (p == n)
+			return 0;
+		p++;
+	}
+	return 0;
 }
 
 const char *env_next(const uint8_t *buf, uint32_t len, uint32_t *pos)
@@ -74,6 +89,8 @@ const char *env_next(const uint8_t *buf, uint32_t len, uint32_t *pos)
 	const char *s = d + p;
 	while (p < n && d[p] != '\0')
 		p++;
+	if (p == n)
+		return 0;                     /* malformed, unterminated pair */
 	*pos = p + 1;                    /* step over the NUL */
 	return s;
 }

@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- nv: an environment block whose CRC matches but whose last pair has no NUL
+  before the end of the block, or whose list lacks the closing empty string,
+  is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair
+  past the end of the block. U-Boot never writes one; it takes a corrupted
+  block whose CRC still matches.
 - nv: `setenv` refuses the keys U-Boot boots by unless `--force` (or `-f`)
   is given: `sw_commit`, `sw_active`, `mupgrade_en`, `bootcmd`,
   `boot_by_commit`, `boot_by_tryactive`, `b0`, `b1`, `set_act0`, `set_act1`
