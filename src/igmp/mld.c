@@ -466,12 +466,24 @@ static int group_before(const struct mld_db *db, int below, const uint8_t g[16],
 	return 0;
 }
 
+/* Whether any entry holds this group as a static one, on any VID. */
+static int group_fixed(const struct mld_db *db, const uint8_t g[16])
+{
+	for (int i = 0; i < MLD_MAX_GROUPS; i++)
+		if (db->g[i].in_use && db->g[i].fixed && same16(db->g[i].group, g))
+			return 1;
+	return 0;
+}
+
+/* A static group never uses the limit, so a report for it on another VLAN
+ * is not counted. */
 int mld_db_dynamic_count(const struct mld_db *db)
 {
 	int n = 0;
 
 	for (int i = 0; i < MLD_MAX_GROUPS; i++)
 		if (db->g[i].in_use && !db->g[i].fixed &&
+		    !group_fixed(db, db->g[i].group) &&
 		    !group_before(db, i, db->g[i].group, 1))
 			n++;
 	return n;
@@ -750,8 +762,12 @@ static int fix(struct mld_db *db, const uint8_t g[16], struct mld_change *out, i
 	if (!mld_group_snoopable(g))
 		return n;
 	e = find_or_add(db, 0, g);
-	if (!e)
+	if (!e) {
+		/* No room: a group the OLT promised is not a row, so the drop
+		 * stays off, as for a range too wide to name. */
+		db->static_overflow = 1;
 		return n;
+	}
 	before = e->ports;
 	e->fixed = 1;
 	e->ports |= IGMP_PORTBIT(1);

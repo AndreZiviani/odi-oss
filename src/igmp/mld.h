@@ -142,8 +142,8 @@ int mld_policy_takes(const struct igmp_policy *ip, const struct mld_policy *p);
 /* The ODI_SW_MC_SNOOP_* flags MLD adds to the lease at second `now`: none
  * while the profile does not ask for snooping; the MLD copy; and the IPv6
  * drop once the learning interval is over, when `pon_drop` asks for drops at
- * all (igmpd -d), unless an IPv6 static range was too wide to name or the
- * IPv6 lists were longer than fit. */
+ * all (igmpd -d), unless an IPv6 static range was too wide to name, a static group did
+ * not fit the table, or the IPv6 lists were longer than fit. */
 uint32_t mld_policy_lease(const struct igmp_policy *ip, const struct mld_policy *p,
 			  int static_overflow, uint32_t now, uint32_t learn_until,
 			  int pon_drop);
