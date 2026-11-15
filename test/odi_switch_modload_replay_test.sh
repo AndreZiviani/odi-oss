@@ -11,7 +11,8 @@
 # The shipped blob carries the production selection (replayblob.py
 # filter): the three LUT flood masks include the CPU port, 0xf where the
 # capture has its own value. The capture is compared with that one
-# substitution applied, plus the unknown-multicast mask the kernel writes
+# substitution applied, without the GPON MAC writes the blob no longer
+# carries, plus the unknown-multicast mask the kernel writes
 # back to 0x7 after the replay, so any other difference still fails.
 #
 # The capture has no OMCI command brackets (the stock modules load before
@@ -41,7 +42,11 @@ cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "
 
 WANT=$(mktemp -t odi_switch_modload_test_want.XXXXXX)
 trap 'rm -f "$BIN" "$OUT" "$RESULT" "$WANT"' EXIT
-sed -E 's/^([0-9]+ W 0x0001c02[048]) 0x[0-9a-f]{8}$/\1 0x0000000f/' "$FIXTURE" > "$WANT"
+# The capture's GPON MAC writes (0x700000-0x706fff) are not in the blob
+# (replayblob.py trim-modload-gpon: gpon_init.bin writes them again after
+# its own reset), so they leave the expected stream too.
+sed -E -e 's/^([0-9]+ W 0x0001c02[048]) 0x[0-9a-f]{8}$/\1 0x0000000f/' \
+	-e '/^[0-9]+ W 0x0070[0-6][0-9a-f]{3} /d' "$FIXTURE" > "$WANT"
 # And one write after the replay: odi_switch_init_modload() takes the CPU
 # out of the unknown-multicast flood mask again, the capture's 0x7.
 # Before the closing bracket mark, the fixture's last line.

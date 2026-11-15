@@ -11,9 +11,9 @@ Reads a raw `W`/`R`/`T`/`D` regtrace dump (same format decode.py/compare.py
 read: `<ns> KIND addr val` per line, `#`-prefixed header/marker lines ignored
 except the `== <uptime> pon step <name>` markers used to find each step own
 span) and writes the GPON boot init table as a firmware blob (replayblob.py
-has the format; the checked-in copy is rootfs/skeleton/lib/firmware/odi/
-gpon_init.bin, which the kernel loads with request_firmware() at the first
-gponact) -- one record per EVERY register write or table-row write the vendor driver makes
+has the format; the checked-in rootfs/skeleton/lib/firmware/odi/gpon_init.bin,
+which the kernel loads with request_firmware() at the first gponact, is this
+output trimmed by `replayblob.py trim-gpon`) -- one record per EVERY register write or table-row write the vendor driver makes
 across the five PON steps gpondrv/gpondev/gponsn/gponpw/gponact, in the
 capture own order, for the whole switch-core address space (not only the
 GPON MAC block own 0x700000-0x706fff window, as an earlier generation of
