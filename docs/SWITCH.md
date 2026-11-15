@@ -1002,8 +1002,13 @@ from a filter of VID 0 priority 0 that does not depend on
 manual add-tag rule: `eapol-up` (untagged, EtherType 0x888e, upstream, no tag
 change, on the service's stream), `eapol-down` (the same downstream, to the
 UNI) and `eapol-down-vid0` (a C-tag of VID 0, any priority, no EtherType,
-downstream, to the UNI, tag kept; not made when the manual VID is 0, as the
-add-tag rule's downstream row already takes VID 0). The add-tag rule is the
+downstream, to the UNI, C-tag action DEL, so every priority-tagged frame
+reaches the router untagged). It names the VID and no priority, so it is in
+class 1 of the ordered region, behind a row that names VID 0 and a priority:
+the multicast VID 0 priority 0 row keeps its own action, and with the manual
+VID 0 so does the add-tag rule's downstream row at `VLAN_MANU_TAG_PRI`
+(`test/odi_switch_bdgconn_vlan_test.c` pins the action, and the order beside
+the multicast row). The add-tag rule is the
 one it always was: its upstream row names no VID, so it sits in the bottom
 region, behind the EtherType row (`test/odi_switch_bdgconn_vlan_test.c` pins
 the order for both install orders). The bottom region fills down and the

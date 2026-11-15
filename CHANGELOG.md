@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- VLAN: with `VLAN_EAPOL_UNTAGGED=1` the stick now takes the tag off every
+  priority-tagged frame (VID 0, any priority) the OLT sends, so EAPOL that
+  comes down as VID 0 priority 7 reaches the router untagged. Before, the
+  `eapol-down-vid0` rule passed those frames with their VID 0 tag, and some
+  routers drop tagged EAPOL on an untagged WAN interface. The rule cannot
+  tell EAPOL from other frames behind a tag, so it applies to all VID 0
+  frames; a row that names VID 0 and a priority, such as the multicast VID 0
+  priority 0 row, still goes first. With the manual VID 0 the rule is now
+  made too and strips the priorities `VLAN_MANU_TAG_PRI` does not cover.
+  `docs/SETTINGS.md` says so. Refs #301.
 - Switch: the uniform table sweeps of `sdkinit.bin` and `modload.bin` (the
   4,095 VLAN rows of the `vlan` verb, the 512 and 1,024 CF table rows of
   `classify`, the 1,024 CF rows of the module-load replay) are now table
