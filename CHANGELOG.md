@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- omcid: refused answers are counted. Every answer to a class omcid models,
+  for a message type it handles, with a result other than success logs one
+  `event=rejected` per class, operation and result each boot, with the
+  result by name and, for a Create, Set or Get, the attribute mask the
+  answer named. `/var/log/omcid-unknown.txt` keeps them with a count beside
+  the unknowns, so they reach the diag bundle. `omcli state` adds an
+  `unknowns` line, a `rejected` line with the counts by result, and the
+  first 16 refusal lines.
 - omcid: a MIB reset loop is named instead of left to be counted in the log.
   Three or more MIB resets from the OLT within 600 s log one
   `event=mib_reset_loop state=start` (warning), and `state=end` after 600 s

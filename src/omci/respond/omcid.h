@@ -634,6 +634,16 @@ void ev_unknown_msg(uint8_t mt, uint16_t cls);
  * line and one summary line per (class, instance) per boot. Diagnostic only;
  * the answer is unchanged (omcimsg.c, "an instance omcid does not hold"). */
 void ev_no_instance(uint16_t cls, uint16_t inst, uint8_t mt);
+/* An answer to a modelled class and handled message type with a result
+ * other than success (send_resp(), omcimsg.c): one
+ * event line and one summary line per (class, operation, result) per boot,
+ * with `attrs` the attribute mask the answer named, if any. The counts by
+ * result and the entries are for `omcli state` (show.c). */
+void ev_rejected(uint16_t cls, uint8_t mt, uint8_t result, uint16_t attrs);
+unsigned ev_rejected_counts(unsigned long *by_code, unsigned codes,
+			    unsigned *unknown);
+const char *ev_rejected_name(unsigned code);
+int ev_rejected_line(unsigned k, char *buf, unsigned size);
 /* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
  * class omcid does not model with success instead of "unknown entity". */
 extern int unknown_me_ok;

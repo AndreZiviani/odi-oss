@@ -536,6 +536,9 @@ uint32_t cli_tcont(void)
 	return OMCLI_OK;
 }
 
+/* The rejected entries `state` lists before it points at the file. */
+#define STATE_REJECTED_MAX 16
+
 uint32_t cli_state(void)
 {
 	uint32_t st = 0;
@@ -571,6 +574,42 @@ uint32_t cli_state(void)
 			"loop %s  (loops %d)\n", (long)olt, (long)local,
 			(long)MIBLOOP_WINDOW_S, (long)recent,
 			loop ? "yes" : "no", (long)loops);
+	}
+	{
+		/* What /var/log/omcid-unknown.txt holds for this boot: the
+		 * number of each kind of unknown, then the answers that were
+		 * not success, by result and one line per class, operation
+		 * and result. */
+		unsigned long by[16], total = 0;
+		unsigned unknown[3];
+		unsigned n = ev_rejected_counts(by, 16, unknown), k;
+		char line[240];
+
+		out_fmt("unknowns   : me %d  msg %d  no instance %d  "
+			"(" UNKNOWN_PATH ")\n", (long)unknown[0],
+			(long)unknown[1], (long)unknown[2]);
+
+		for (k = 0; k < 16; k++)
+			total += by[k];
+		out_fmt("rejected   : %d", (long)total);
+		for (k = 1; k < 16; k++) {
+			const char *name = ev_rejected_name(k);
+
+			if (!by[k])
+				continue;
+			if (name)
+				out_fmt("  %s %d", name, (long)by[k]);
+			else
+				out_fmt("  result %d: %d", (long)k, (long)by[k]);
+		}
+		if (by[0])
+			out_fmt("  other %d", (long)by[0]);
+		out_char('\n');
+		for (k = 0; k < STATE_REJECTED_MAX && ev_rejected_line(k, line, sizeof line); k++)
+			out_fmt("  %s\n", line);
+		if (n > STATE_REJECTED_MAX)
+			out_fmt("  %d more in " UNKNOWN_PATH "\n",
+				(long)(n - STATE_REJECTED_MAX));
 	}
 	return OMCLI_OK;
 }

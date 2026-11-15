@@ -138,6 +138,18 @@ static void ev_num(struct evline *e, const char *key, unsigned long v)
 	ev_putu(e, v);
 }
 
+/* A value as 0x and `digits` lowercase hex digits, as G.988 prints masks. */
+static void ev_hex(struct evline *e, const char *key, unsigned long v, int digits)
+{
+	static const char h[] = "0123456789abcdef";
+
+	ev_put(e, " ");
+	ev_put(e, key);
+	ev_put(e, "=0x");
+	while (digits-- > 0 && e->n < EV_LINE_MAX - 1)
+		e->b[e->n++] = h[(v >> (4 * digits)) & 15];
+}
+
 /* Milliseconds as seconds with three decimals, the kernel lines' shape. */
 static void ev_secs(struct evline *e, const char *key, long ms)
 {
@@ -695,7 +707,13 @@ void ev_alloc_ids(const uint16_t *ids, unsigned n)
  * "Per boot", not per process: /var/log is tmpfs, so the file itself is the
  * record of this boot, and a respawned omcid reads it back before it logs
  * anything, rather than logging every unknown again. Counts are rewritten
- * at most once a second (ev_tick()); a new entry is written at once. */
+ * at most once a second (ev_tick()); a new entry is written at once.
+ *
+ * The same file keeps the answers to a class omcid models, for a message
+ * type it handles, with a result other than success: one line per (class,
+ * operation, result), as event=rejected the first time. What the OLT was
+ * told no is what a report from another OLT has to be asked for otherwise.
+ * The unknowns above are refused too, and are not repeated as rejected. */
 #define UNK_MAX      64
 #define UNK_BUF      8192
 
@@ -705,13 +723,17 @@ void ev_alloc_ids(const uint16_t *ids, unsigned n)
 #define UNK_ME       0
 #define UNK_MSG      1
 #define UNK_NO_INST  2
+#define UNK_REJECT   3
 
 struct unk_entry {
 	uint16_t cls;            /* unknown_me: the class; unknown_msg: the
 				  * class of the first frame of that type */
 	uint16_t inst;           /* no_instance: the instance */
 	uint8_t mt;              /* no_instance: of the first request */
-	uint8_t msg;             /* UNK_ME, UNK_MSG or UNK_NO_INST */
+	uint8_t msg;             /* UNK_ME, UNK_MSG, UNK_NO_INST or UNK_REJECT */
+	uint8_t result;          /* rejected: the result code */
+	uint16_t attrs;          /* rejected: the attributes the answers named,
+				  * all of them together */
 	unsigned long count;
 	unsigned long first_s;   /* monotonic seconds, i.e. uptime */
 };
@@ -746,7 +768,57 @@ static const char *unk_op(uint8_t mt)
 	}
 }
 
-/* The number after `key` on one line, or -1. */
+/* The result codes of G.988 table 11.2.2-2, as event=rejected names them;
+ * any other code is written as its number. */
+static const char *const rej_names[] = {
+	0, "processing_error", "not_supported", "parameter_error",
+	"unknown_me", "unknown_instance", "device_busy", "instance_exists",
+	0, "attr_failed",
+};
+#define REJ_NAMES (sizeof rej_names / sizeof rej_names[0])
+
+/* The code a result= value names, from a name or a number, or -1. */
+static long rej_code(const char *l, int n)
+{
+	static const char key[] = "result=";
+	int k = sizeof key - 1;
+
+	for (int i = 0; i + k <= n; i++) {
+		int j = 0;
+
+		if (i && l[i - 1] != ' ')
+			continue;
+		while (j < k && l[i + j] == key[j])
+			j++;
+		if (j < k)
+			continue;
+		i += k;
+		for (unsigned c = 1; c < REJ_NAMES; c++) {
+			int m = rej_names[c] ? str_len(rej_names[c]) : 0;
+
+			if (m && i + m <= n && (i + m == n || l[i + m] == ' ')) {
+				int t = 0;
+
+				while (t < m && l[i + t] == rej_names[c][t])
+					t++;
+				if (t == m)
+					return (long)c;
+			}
+		}
+		if (i >= n || l[i] < '0' || l[i] > '9')
+			return -1;
+		{
+			long v = 0;
+
+			for (; i < n && l[i] >= '0' && l[i] <= '9' && v < 256; i++)
+				v = v * 10 + (l[i] - '0');
+			return v;
+		}
+	}
+	return -1;
+}
+
+/* The number after `key` on one line, or -1. Decimal, or hex after 0x. */
 static long unk_field(const char *l, int n, const char *key)
 {
 	int k = str_len(key);
@@ -763,6 +835,17 @@ static long unk_field(const char *l, int n, const char *key)
 			continue;
 		if (i + k >= n || l[i + k] < '0' || l[i + k] > '9')
 			return -1;
+		if (i + k + 2 < n && l[i + k] == '0' && l[i + k + 1] == 'x') {
+			for (j = i + k + 2; j < n && j < i + k + 10; j++) {
+				int d = l[j] >= '0' && l[j] <= '9' ? l[j] - '0' :
+					l[j] >= 'a' && l[j] <= 'f' ? l[j] - 'a' + 10 : -1;
+
+				if (d < 0)
+					break;
+				v = v * 16 + d;
+			}
+			return v;
+		}
 		for (j = i + k; j < n && l[j] >= '0' && l[j] <= '9'; j++)
 			v = v * 10 + (l[j] - '0');
 		return v;
@@ -800,7 +883,7 @@ static void unk_load(void)
 	for (int i = 0; i < n && unk_n < UNK_MAX; ) {
 		int e = i;
 		const char *l = unkbuf + i;
-		long cls, mt, cnt, first, inst = 0;
+		long cls, mt, cnt, first, inst = 0, res = 0, attrs = 0;
 		int msg = -1;
 
 		while (e < n && unkbuf[e] != '\n')
@@ -811,10 +894,20 @@ static void unk_load(void)
 			msg = 1;
 		else if (unk_prefix(l, e - i, "no_instance "))
 			msg = 2;
+		else if (unk_prefix(l, e - i, "rejected "))
+			msg = 3;
 		cls = unk_field(l, e - i, "class=");
 		mt = unk_field(l, e - i, msg == UNK_MSG ? "type=" : "mt=");
 		if (msg == UNK_NO_INST)
 			inst = unk_field(l, e - i, "inst=");
+		if (msg == UNK_REJECT) {
+			res = rej_code(l, e - i);
+			attrs = unk_field(l, e - i, "attrs=");
+			if (attrs < 0)
+				attrs = 0;
+			if (res < 1 || res > 0xff || attrs > 0xffff)
+				msg = -1;
+		}
 		cnt = unk_field(l, e - i, "count=");
 		first = unk_field(l, e - i, "first_uptime_s=");
 		if (msg >= 0 && cls >= 0 && cls <= 0xffff && mt >= 0 && mt <= 0xff &&
@@ -825,6 +918,8 @@ static void unk_load(void)
 			u->inst = (uint16_t)inst;
 			u->mt = (uint8_t)mt;
 			u->msg = (uint8_t)msg;
+			u->result = (uint8_t)res;
+			u->attrs = (uint16_t)attrs;
 			u->count = (unsigned long)cnt;
 			u->first_s = (unsigned long)first;
 		} else if (unk_prefix(l, e - i, "overflow ") &&
@@ -844,6 +939,20 @@ static void unk_line(struct evline *e, const struct unk_entry *u)
 		ev_put(e, "unknown_msg");
 		ev_num(e, "type", u->mt);
 		ev_num(e, "class", u->cls);
+	} else if (u->msg == UNK_REJECT) {
+		ev_put(e, "rejected");
+		ev_num(e, "class", u->cls);
+		if (op)
+			ev_str(e, "op", op);
+		else
+			ev_num(e, "op", u->mt);
+		ev_num(e, "mt", u->mt);
+		if (u->result < REJ_NAMES && rej_names[u->result])
+			ev_str(e, "result", rej_names[u->result]);
+		else
+			ev_num(e, "result", u->result);
+		if (u->attrs)
+			ev_hex(e, "attrs", u->attrs, 4);
 	} else if (u->msg == UNK_NO_INST) {
 		ev_put(e, "no_instance");
 		ev_num(e, "class", u->cls);
@@ -869,7 +978,8 @@ static void unk_save(void)
 	static const char head[] =
 		"# omcid: what the OLT sent that omcid does not model, this boot.\n"
 		"# One line per class and operation (unknown_me), message type\n"
-		"# (unknown_msg) or instance omcid holds no row for (no_instance);\n"
+		"# (unknown_msg) or instance omcid holds no row for (no_instance),\n"
+		"# and each answer that was not success (rejected);\n"
 		"# docs/TOOLS.md, \"Link and provisioning events\".\n";
 	int n = 0;
 
@@ -903,12 +1013,14 @@ static void unk_save(void)
 	unk_dirty = 0;
 }
 
-static void unk_note(uint8_t msg, uint16_t cls, uint16_t inst, uint8_t mt)
+static void unk_note(uint8_t msg, uint16_t cls, uint16_t inst, uint8_t mt,
+		     uint8_t result, uint16_t attrs)
 {
 	struct evline e;
 	struct unk_entry *u;
 	const char *name = msg == UNK_MSG ? "unknown_msg" :
-			   msg == UNK_NO_INST ? "no_instance" : "unknown_me";
+			   msg == UNK_NO_INST ? "no_instance" :
+			   msg == UNK_REJECT ? "rejected" : "unknown_me";
 
 	if (!unk_loaded)
 		unk_load();
@@ -919,8 +1031,16 @@ static void unk_note(uint8_t msg, uint16_t cls, uint16_t inst, uint8_t mt)
 		 * addresses that instance at all. */
 		if (u->msg == msg &&
 		    (msg == UNK_NO_INST ? u->cls == cls && u->inst == inst
-					: u->mt == mt && (msg == UNK_MSG || u->cls == cls))) {
+					: u->mt == mt && (msg == UNK_MSG || u->cls == cls)) &&
+		    (msg != UNK_REJECT || u->result == result)) {
 			u->count++;
+			if ((u->attrs | attrs) != u->attrs) {
+				/* An attribute not named before: written at
+				 * once, like a new entry. */
+				u->attrs |= attrs;
+				unk_save();
+				return;
+			}
 			unk_dirty = 1;
 			return;
 		}
@@ -935,6 +1055,8 @@ static void unk_note(uint8_t msg, uint16_t cls, uint16_t inst, uint8_t mt)
 	u->cls = cls;
 	u->inst = inst;
 	u->mt = mt;
+	u->result = result;
+	u->attrs = attrs;
 	u->count = 1;
 	u->first_s = (unsigned long)ev_now().s;
 	unk_save();
@@ -953,17 +1075,73 @@ static void unk_note(uint8_t msg, uint16_t cls, uint16_t inst, uint8_t mt)
 
 void ev_unknown_me(uint16_t cls, uint8_t mt)
 {
-	unk_note(UNK_ME, cls, 0, mt);
+	unk_note(UNK_ME, cls, 0, mt, 0, 0);
 }
 
 void ev_unknown_msg(uint8_t mt, uint16_t cls)
 {
-	unk_note(UNK_MSG, cls, 0, mt);
+	unk_note(UNK_MSG, cls, 0, mt, 0, 0);
 }
 
 void ev_no_instance(uint16_t cls, uint16_t inst, uint8_t mt)
 {
-	unk_note(UNK_NO_INST, cls, inst, mt);
+	unk_note(UNK_NO_INST, cls, inst, mt, 0, 0);
+}
+
+void ev_rejected(uint16_t cls, uint8_t mt, uint8_t result, uint16_t attrs)
+{
+	unk_note(UNK_REJECT, cls, 0, mt, result, attrs);
+}
+
+/* For `omcli state` (show.c): the rejected answers of this boot by result
+ * code (any code past `codes` under 0), the number of unknown_me,
+ * unknown_msg and no_instance entries in unknown[0..2], and the number of
+ * rejected entries. */
+unsigned ev_rejected_counts(unsigned long *by_code, unsigned codes,
+			    unsigned *unknown)
+{
+	unsigned n = 0;
+
+	if (!unk_loaded)
+		unk_load();
+	for (unsigned c = 0; c < codes; c++)
+		by_code[c] = 0;
+	unknown[UNK_ME] = unknown[UNK_MSG] = unknown[UNK_NO_INST] = 0;
+	for (int i = 0; i < unk_n; i++) {
+		if (unk[i].msg != UNK_REJECT) {
+			unknown[unk[i].msg]++;
+			continue;
+		}
+		n++;
+		by_code[unk[i].result < codes ? unk[i].result : 0] += unk[i].count;
+	}
+	return n;
+}
+
+const char *ev_rejected_name(unsigned code)
+{
+	return code < REJ_NAMES ? rej_names[code] : 0;
+}
+
+/* Entry `k` of the rejected ones, as its summary line with the count and
+ * without the uptime, NUL-terminated into buf. Returns 0 past the last. */
+int ev_rejected_line(unsigned k, char *buf, unsigned size)
+{
+	for (int i = 0; i < unk_n; i++) {
+		struct evline e;
+		unsigned j;
+
+		if (unk[i].msg != UNK_REJECT || k--)
+			continue;
+		unk_line(&e, &unk[i]);
+		ev_num(&e, "count", unk[i].count);
+		for (j = 0; j < (unsigned)e.n && j + 1 < size; j++)
+			buf[j] = e.b[j];
+		if (size)
+			buf[j] = 0;
+		return 1;
+	}
+	return 0;
 }
 
 /* A VLAN filter forward operation (class 84 FwdOp) omcid cannot build and
