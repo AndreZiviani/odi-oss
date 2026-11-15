@@ -964,9 +964,10 @@ its enable bit and its queue mask; each upstream queue's type, weight, CIR
 and PIR (in register units, after the conversion omcid and the driver
 apply); each upstream GEM CTP's flow (valid bit, GEM port, queue); and each
 downstream flow against its GEM CAM row. It looks only at what omcid set
-up, since rows nothing uses keep stale values. A difference right after an
+up, since rows nothing uses keep stale values: an upstream CTP omcid set up
+no flow for (its T-CONT has no Alloc-ID yet, say) is listed as `skipped`. A difference right after an
 OLT Set can be the rebuild that has not run yet; one that stays is a
-command that did not reach the hardware. It ends with `N ok, M differ`, and
+command that did not reach the hardware. It ends with `N ok, M differ` (and `K skipped`), and
 says so and fails when the kernel does not publish the files.
 
 `bridge` and `cfgset` write; the rest read. A rule built with `bridge` lasts

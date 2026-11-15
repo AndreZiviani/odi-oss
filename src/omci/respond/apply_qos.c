@@ -947,6 +947,27 @@ static void us_flow_send_delete(unsigned slot)
 	prog.f[slot].live = 0;
 }
 
+/* The programmed queue a flow on T-CONT `tcontMe` and priority queue
+ * `pqMe` goes on: that queue, else one of the same T-CONT with the same
+ * type and the same weight (WFQ) or priority (strict), or 0. Shared by the
+ * rebuild and omcli check, so both bind a flow the same way. */
+static struct us_queue *us_queue_bound(uint16_t tcontMe, uint16_t pqMe)
+{
+	struct us_queue requested;
+
+	for (unsigned q = 0; q < usq_hw_n; q++)
+		if (usq_hw[q].meId == pqMe && usq_hw[q].tcontMe == tcontMe)
+			return &usq_hw[q];
+	if (!us_queue_decode(pqMe, &requested))
+		return 0;
+	for (unsigned q = 0; q < usq_hw_n; q++)
+		if (usq_hw[q].tcontMe == tcontMe && usq_hw[q].wrr == requested.wrr &&
+		    (requested.wrr ? usq_hw[q].weight == requested.weight
+				   : usq_hw[q].priority == requested.priority))
+			return &usq_hw[q];
+	return 0;
+}
+
 /* The upstream graph from the MIB, as a change to what the driver holds.
  *
  * The plan: every upstream GEM CTP, the class 277 queues they name, sorted
@@ -1197,28 +1218,14 @@ void us_qos_rebuild(void)
 
 	for (unsigned i = 0; i < nf; i++) {
 		struct omci_gemflow f;
-		struct us_queue requested;
-		struct us_queue *bound = 0;
+		struct us_queue *bound;
 		struct us_flow_prog *fp;
 		long rc;
 
 		if (flows[i].flow_id == 0xffff || flows[i].flow_id >= FLOW_MAX)
 			continue;
 		fp = &prog.f[flows[i].flow_id];
-		for (unsigned q = 0; q < usq_hw_n; q++)
-			if (usq_hw[q].meId == flows[i].pqMe &&
-			    usq_hw[q].tcontMe == flows[i].tcontMe)
-				bound = &usq_hw[q];
-		if (!bound && us_queue_decode(flows[i].pqMe, &requested))
-			for (unsigned q = 0; q < usq_hw_n; q++)
-				if (usq_hw[q].tcontMe == flows[i].tcontMe &&
-				    usq_hw[q].wrr == requested.wrr &&
-				    (requested.wrr
-				     ? usq_hw[q].weight == requested.weight
-				     : usq_hw[q].priority == requested.priority)) {
-					bound = &usq_hw[q];
-					break;
-				}
+		bound = us_queue_bound(flows[i].tcontMe, flows[i].pqMe);
 		if (!bound) {
 			out_fmt("   [hw] gem %d has no queue %04x on tcont %04x\n",
 				(long)flows[i].port, (long)flows[i].pqMe,
@@ -1693,7 +1700,7 @@ static char chk_ponq_buf[8192];
 static char chk_cam_buf[4096];
 static struct pp_ponq chk_ponq;
 static struct pp_cam chk_cam;
-static unsigned chk_ok, chk_bad;
+static unsigned chk_ok, chk_bad, chk_skip;
 
 /* gpon_proc_path with its last component replaced by `name`. */
 static void chk_path(char *out, unsigned cap, const char *name)
@@ -1756,9 +1763,14 @@ static uint32_t chk_rate_raw(uint32_t r)
  * block the driver recorded, or -1. */
 static int chk_pq(uint16_t t, uint16_t ord)
 {
+	uint32_t lq;
+
 	if (t >= 16 || !chk_ponq.t[t].block || ord >= chk_ponq.t[t].qn)
 		return -1;
-	return (int)(32u * (t / 8u) + chk_ponq.t[t].qbase + ord);
+	lq = (uint32_t)chk_ponq.t[t].qbase + ord;
+	if (lq >= 32u)
+		return -1;
+	return (int)(32u * (t / 8u) + lq);
 }
 
 static void chk_tconts(void)
@@ -1858,19 +1870,11 @@ static void chk_queues(void)
 	}
 }
 
-/* The physical queue an upstream CTP's flow belongs on, from its T-CONT
- * and priority queue as programmed, or -1 with *why set. */
-static int chk_ctp_pq(uint16_t tcontMe, uint16_t pqMe, const char **why)
-{
-	const struct us_tcont_prog *tp = tc_prog_find(tcontMe);
-
-	for (unsigned i = 0; tp && i < usq_hw_n; i++)
-		if (usq_hw[i].meId == pqMe && usq_hw[i].tcontMe == tcontMe)
-			return chk_pq(tp->index, usq_hw[i].ordinal);
-	*why = tp ? "its priority queue is not programmed" : "its t-cont is not programmed";
-	return -1;
-}
-
+/* The upstream flows omcid set up (prog.f), each against the MIB CTP of
+ * its GEM port and the chip. A CTP omcid has not set up a flow for (its
+ * T-CONT has no Alloc-ID yet, its queue is not programmed) is listed and
+ * skipped: the rebuild leaves it out on purpose, and there is nothing in
+ * the chip to compare. */
 static void chk_us_flows(void)
 {
 	const struct omci_class *ctp = find_class(OMCI_ME_GEM_PORT_CTP);
@@ -1880,7 +1884,8 @@ static void chk_us_flows(void)
 		seen[i] = 0;
 	for (int k = 0; ctp && k < MIB_ROWS; k++) {
 		const struct mib_row *r = mib_row_at(k);
-		const char *why = "";
+		const struct us_queue *b;
+		const struct us_tcont_prog *tp;
 		uint16_t port;
 		uint32_t dir;
 		int slot, pq;
@@ -1894,15 +1899,20 @@ static void chk_us_flows(void)
 		slot = flow_find(0, port);
 		out_fmt("us gem %d (ctp %04x)", (long)port, (long)r->inst);
 		if (slot < 0 || slot >= FLOW_MAX || !prog.f[slot].live) {
-			out(": differs: no upstream flow programmed for it");
-			chk_line(0);
+			out(": not set up by omcid, skipped\n");
+			chk_skip++;
 			continue;
 		}
 		seen[slot] = 1;
 		out_fmt(" flow %d", (long)slot);
-		pq = chk_ctp_pq((uint16_t)row_u32(r, ctp, 2), (uint16_t)row_u32(r, ctp, 4), &why);
-		if (pq < 0) {
-			out_fmt(": differs: %s", why);
+		b = us_queue_bound((uint16_t)row_u32(r, ctp, 2), (uint16_t)row_u32(r, ctp, 4));
+		tp = b ? tc_prog_find(b->tcontMe) : 0;
+		pq = tp ? chk_pq(tp->index, b->ordinal) : -1;
+		if (!b || !tp) {
+			out(": differs: mib names a queue omcid has not programmed");
+			chk_line(0);
+		} else if (pq < 0) {
+			out(": differs: no queue block for its queue in the chip");
 			chk_line(0);
 		} else if (!chk_ponq.f[slot].seen || !chk_ponq.f[slot].valid) {
 			out(": differs: not valid in the chip");
@@ -1962,11 +1972,15 @@ uint32_t qos_check(void)
 	}
 	if (!apply_hw)
 		out("programming is off: omcid sent nothing, so differences are expected\n");
-	chk_ok = chk_bad = 0;
+	chk_ok = chk_bad = chk_skip = 0;
 	chk_tconts();
 	chk_queues();
 	chk_us_flows();
 	chk_ds_flows();
-	out_fmt("%d ok, %d differ\n", (long)chk_ok, (long)chk_bad);
+	if (chk_skip)
+		out_fmt("%d ok, %d differ, %d skipped\n", (long)chk_ok, (long)chk_bad,
+			(long)chk_skip);
+	else
+		out_fmt("%d ok, %d differ\n", (long)chk_ok, (long)chk_bad);
 	return OMCLI_OK;
 }

@@ -377,9 +377,13 @@ static inline int pp_ponq(const char *buf, unsigned len, struct pp_ponq *p)
 				d = 0;
 				for (j++; j < n && l[j] >= '0' && l[j] <= '9'; j++)
 					d = d * 10 + (uint32_t)(l[j] - '0');
-				p->t[id].block = 1;
-				p->t[id].qbase = (uint8_t)c;
-				p->t[id].qn = (uint8_t)d;
+				/* A block lies inside the T-CONT's group of 32
+				 * queues; anything else is not the kernel's. */
+				if (c < 32 && d <= 32 - c) {
+					p->t[id].block = 1;
+					p->t[id].qbase = (uint8_t)c;
+					p->t[id].qn = (uint8_t)d;
+				}
 			}
 			rows++;
 		} else if (pp_starts(l, n, "queue") && pp_word_u32(l, n, "queue", &id) &&

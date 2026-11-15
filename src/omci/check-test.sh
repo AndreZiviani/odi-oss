@@ -148,6 +148,37 @@ got=$($Q cli/build/omcli check 2>&1 | grep '^queue')
 check "and once it has" "$got" \
       "queue me 8006 tcont 0 ordinal 0 (queue 0): ok"
 
+# A CTP on T-CONT 0x8001, which has no Alloc-ID (the PLOAM list has one,
+# and 0x8000 takes it): the rebuild sets up no flow for it, so check lists
+# it as skipped rather than as a difference.
+inject_wait /tmp/omcid-check.log "0f50440a010c0005$(printf '06a48001038009%066d' 0)"
+settled /tmp/omcid-check.log
+got=$($Q cli/build/omcli check 2>&1 | grep '^us gem 1700')
+check "a CTP omcid set up no flow for is skipped" "$got" \
+      "us gem 1700 (ctp 0005): not set up by omcid, skipped"
+got=$($Q cli/build/omcli check 2>&1 | tail -1)
+check "and counted apart" "$got" "4 ok, 1 differ, 1 skipped"
+# Its downstream flow omcid did set up, and the GEM CAM written here has
+# no row for it.
+got=$($Q cli/build/omcli check 2>&1 | grep '^ds gem 1700' | sed 's/flow [0-9]*/flow N/; s/row [0-9]*/row N/')
+check "while its downstream flow is checked" "$got" \
+      "ds gem 1700 flow N: differs: gem cam row N holds nothing"
+
+# A CTP whose priority queue 0x8010 hangs off T-CONT 0x8001 while the CTP
+# names T-CONT 0x8000: the rebuild puts its flow on a queue of 0x8000 with
+# the same type and priority (us_queue_bound()), and check expects it
+# there too.
+inject_wait /tmp/omcid-check.log "0f51480a01158010040080010001$(printf '%068d' 0)"
+inject_wait /tmp/omcid-check.log "0f52440a010c0006$(printf '06ae8000038010%066d' 0)"
+settled /tmp/omcid-check.log
+grep 'gem 1710 us flow' /tmp/omcid-check.log | tail -1
+slot=$($Q cli/build/omcli flows 2>&1 | awk '$3 == 1710 { print $1 }')
+ponq 1 0x00000001 249 1 1562 0 | sed 's/^queue 0 wfq 0 weight 1 cir 0 /queue 0 wfq 0 weight 1 cir 124 /' > "$D/ponq"
+printf 'flow %s valid 1 gem 1710 queue 0 recorded 1\n' "$slot" >> "$D/ponq"
+got=$($Q cli/build/omcli check 2>&1 | grep '^us gem 1710' | sed 's/ flow [0-9]*/ flow N/')
+check "a flow bound to a stand-in queue is ok" "$got" \
+      "us gem 1710 (ctp 0006) flow N: ok"
+
 omcid_stop "$pid"
 rm -rf "$D"
 suite_exit
