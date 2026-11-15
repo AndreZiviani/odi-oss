@@ -24,7 +24,8 @@ modload.bin, which the kernel loads with request_firmware() when the
 table-row write, IN THE CAPTURE'S OWN ORDER,
 each tagged with the family it belongs to. The shipped modload.bin is this
 output filtered with the production mask (replayblob.py filter, whose
-docstring has the bits) and its CF sweep compacted into one call record
+docstring has the bits), without its GPON MAC writes (replayblob.py
+trim-modload-gpon) and with its CF sweep compacted into one call record
 (replayblob.py compact); the kernel replays every record of it:
 
     0  plain register writes (every W line except the TABLE_CMD/

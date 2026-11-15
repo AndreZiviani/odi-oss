@@ -7,8 +7,8 @@
 # modload.bin to the generator output they were compacted from:
 #
 # 1. Expanding each shipped blob gives that output byte for byte (its
-#    SHA-256 below, the blob as mksdkinit.py and mkmodload.py plus the
-#    production filter wrote it), and compacting the expansion gives the
+#    SHA-256 below, the blob as mksdkinit.py wrote it, and as mkmodload.py
+#    plus the production filter and trim-modload-gpon wrote it), and compacting the expansion gives the
 #    shipped blob back. A regenerated blob updates the hash here.
 # 2. compact on synthetic records: a sweep from FILL_MIN_ROWS rows on
 #    becomes one call, a shorter one or a row with data stays, a run does
@@ -20,7 +20,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 SDKINIT_EXPANDED_SHA256=defb1db3727d85a507bd6dce5467cb1388334cff6fa51baafec6423517d6e1cd
-MODLOAD_EXPANDED_SHA256=f1b48c274dbf79871cd77e2271ce8fd8bb5cf6a11d640c1217c1e41f9ead84b9
+MODLOAD_EXPANDED_SHA256=0fb7fc7932c74c3412ab4674e998b4702a478e3ddde6eefab05602487b242b8c
 
 python3 - "$SDKINIT_EXPANDED_SHA256" "$MODLOAD_EXPANDED_SHA256" <<'PY'
 import hashlib

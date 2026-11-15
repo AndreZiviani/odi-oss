@@ -215,11 +215,18 @@ Left out altogether:
 
 ## Module-load replay
 
-`modload.bin` is every switch-core write the stock OMCI kernel modules
-made while loading, in capture order: 2587 register writes and 1032 table
+`modload.bin` is the switch-core writes the stock OMCI kernel modules
+made while loading, in capture order: 716 register writes and 1032 table
 rows, 1024 of them the CF sweep, which the file holds as one table fill
-(see [Register replays](#register-replays)). `tools/regtrace/mkmodload.py`
-generates it from that capture and
+(see [Register replays](#register-replays)). The capture has 1,871 more
+register writes, in the GPON MAC window (0x700000-0x706fff): a GPON MAC
+bring-up with its own `PONMAC_RESET` pulse, the same sequence
+`gpon_init.bin` starts with. `gpon_init.bin` resets the GPON MAC again at
+the first `gponact` and writes every one of those registers after the
+reset (itself, or through the driver's table clean), so they are not in
+the file: `tools/regtrace/replayblob.py trim-modload-gpon` takes them out,
+and refuses to drop a register the GPON init does not write again.
+`tools/regtrace/mkmodload.py` generates it from that capture and
 tags each record with its family (`category`: registers, the CF sweep, the
 CF rules written over the sweep, the VLAN row, the L2 unicast row, the ACL
 rows; `reg_group` for a register: its register family). The families were
@@ -323,14 +330,23 @@ clear, so a block still in reset drops what reaches it. A warm reboot of
 the same image kept the garbage; one boot of the stock firmware, which
 waits for the reset, cleaned it.
 
-The replay's own clean records (and its clear of the 256-entry multicast
-MAC filter table that follows them, issued back to back with no wait for
-`DONE`) still run; after the wait they land in a block that is out of
-reset. The boot table sets the filter up to be consulted for downstream
+The file no longer carries the replay's own clean of these tables (the
+flow type words, the GEM-port and Alloc-ID CAMs, and the 256-entry
+multicast MAC filter, issued back to back with no wait for `DONE`): it ran
+again after the clean above, on tables that were already clear, and the
+clean does the same with the wait, the `DONE` poll and a read-back. Nor
+does it carry the stock driver's sweep of the per-flow counter index
+registers (128 flows, the four indirect pairs of `odi_gpon_hw.h`): the
+capture records writes only, so the read that clears a counter was never
+replayed, and `odi_gpon_flow.c` writes the index itself before every
+read. `tools/regtrace/replayblob.py trim-gpon` takes these 1,728 records
+out of the `mkgponinit.py` output (`GPON_INIT_TRIMMED` has the exact
+shapes, each matched whole and once), which leaves 800.
+The boot table sets the filter up to be consulted for downstream
 multicast (`GPON_GEM_DS_MC_CFG` 0x704080 ends at 0x59: no IPv4 or IPv6
-force pass or drop), so a row it left behind could change which groups
-get through; the clean above now reads it back and clears it as well, but
-what a stick holds there after a power cut has not been seen yet.
+force pass or drop), so a row left behind could change which groups
+get through; the clean above reads it back and clears it, but what a
+stick holds there after a power cut has not been seen yet.
 `test/odi_gpon_init_clean_test.sh` runs
 the clean against a model of the two CAMs whose reset drops writes for a
 while after its release, and checks that the plain replay leaves the
