@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- omcid: a Delete of an 802.1p mapper (class 130) rebuilds the bridge
+  connections, as its Create and Set do. Before, the rules built from the
+  deleted mapper stayed in the switch until another change marked the bridge
+  plan.
 - omcid: refused answers are counted. Every answer to a class omcid models,
   for a message type it handles, with a result other than success logs one
   `event=rejected` per class, operation and result each boot, with the
