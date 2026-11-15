@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- igmpd: a static group that does not fit the group table (128 for IPv4, 128
+  for IPv6) now counts as an overflow, like a range too wide to name, so
+  `IGMP_PON_DROP=1` leaves the PON drop off. Before, the lease turned the
+  drop on although some static groups had no row, and the PON dropped them
+  as unregistered.
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair

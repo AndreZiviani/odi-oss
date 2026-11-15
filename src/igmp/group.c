@@ -748,8 +748,12 @@ static int fix(struct igmp_db *db, uint32_t g, struct igmp_change *out, int max,
 	if (!igmp_group_snoopable(g))
 		return n;
 	e = find_or_add(db, 0, g);
-	if (!e)
+	if (!e) {
+		/* No room: a group the OLT promised is not a row, so the drop
+		 * stays off, as for a range too wide to name. */
+		db->static_overflow = 1;
 		return n;
+	}
 	before = e->ports;
 	e->fixed = 1;
 	e->ports |= IGMP_PORTBIT(1);

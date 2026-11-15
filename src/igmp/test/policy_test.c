@@ -272,6 +272,31 @@ static void test_static(void)
 	n = igmp_db_tick(&db, 301, ch, IGMP_MAX_GROUPS);
 	ok(igmp_db_count(&db) == 0, "and the groups of the old list are gone");
 
+	/* More static groups than the table holds: the ones that did not fit
+	 * are no rows, so the PON drop stays off, as for a range too wide. */
+	{
+		static char txt[512];
+		static const char head[] = "snooping=1\n";
+		static const char tmpl[] = "static=226.2.N.1-226.2.N.16\n";
+		uint32_t at = 0;
+
+		for (uint32_t i = 0; head[i]; i++)
+			txt[at++] = head[i];
+		for (char r = '1'; r <= '9'; r++)
+			for (uint32_t i = 0; tmpl[i]; i++)
+				txt[at++] = tmpl[i] == 'N' ? r : tmpl[i];
+		txt[at] = 0;
+		parse(txt, &p);
+		n = igmp_db_set_policy(&db, &p, ch, IGMP_MAX_GROUPS);
+		ok(igmp_db_count(&db) == IGMP_MAX_GROUPS && db.static_overflow,
+		   "144 static groups in a table of 128: overflow");
+		ok((igmp_policy_lease(&p, db.static_overflow, 200, 100, 1) &
+		    ODI_SW_MC_SNOOP_PON_DROP) == 0, "so the PON drop stays off");
+		parse("snooping=1\nstatic=226.2.1.1-226.2.1.16\n", &p);
+		igmp_db_set_policy(&db, &p, ch, IGMP_MAX_GROUPS);
+		ok(!db.static_overflow, "a list that fits clears it again");
+	}
+
 	/* A static group let go of is held by its joins, and only by them. */
 	igmp_db_init(&db);
 	parse("snooping=1\nstatic=226.1.1.1-226.1.1.2\n", &p);

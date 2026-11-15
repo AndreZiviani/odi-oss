@@ -482,6 +482,29 @@ static void test_table(void)
 	   "two fixed groups, a range too wide to name, and ff15::5, now outside the lists, gone");
 	ip6("ff15::21", g);
 	ok(mld_db_mac_ports(&db, g) == 1, "a fixed group's row names the UNI");
+
+	/* More static groups than the table holds: the ones that did not fit
+	 * are no rows, so the PON drop stays off, as for a range too wide. */
+	{
+		static char txt[512];
+		static const char tmpl[] = "static6=ff15::N00-ff15::N0f\n";
+		uint32_t at = 0;
+
+		for (char r = '1'; r <= '9'; r++)
+			for (uint32_t i = 0; tmpl[i]; i++)
+				txt[at++] = tmpl[i] == 'N' ? r : tmpl[i];
+		txt[at] = 0;
+		mld_db_init(&db);
+		lists(txt, &p);
+		mld_db_set_policy(&db, &ip, &p, ch, 16);
+		ok(mld_db_count(&db) == MLD_MAX_GROUPS && db.static_overflow,
+		   "144 static groups in a table of 128: overflow");
+		ok((mld_policy_lease(&ip, &p, db.static_overflow, 200, 100, 1) &
+		    ODI_SW_MC_SNOOP_PON_DROP6) == 0, "so the IPv6 PON drop stays off");
+		lists("static6=ff15::100-ff15::10f\n", &p);
+		mld_db_set_policy(&db, &ip, &p, ch, 16);
+		ok(!db.static_overflow, "a list that fits clears it again");
+	}
 }
 
 static void test_state(void)

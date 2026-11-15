@@ -750,8 +750,12 @@ static int fix(struct mld_db *db, const uint8_t g[16], struct mld_change *out, i
 	if (!mld_group_snoopable(g))
 		return n;
 	e = find_or_add(db, 0, g);
-	if (!e)
+	if (!e) {
+		/* No room: a group the OLT promised is not a row, so the drop
+		 * stays off, as for a range too wide to name. */
+		db->static_overflow = 1;
 		return n;
+	}
 	before = e->ports;
 	e->fixed = 1;
 	e->ports |= IGMP_PORTBIT(1);

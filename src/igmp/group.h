@@ -184,7 +184,8 @@ struct igmp_db {
 	/* Joins of a new group whose imputed bandwidth would take the
 	 * subscriber past ME 310's maximum, refused or not (ME 311 attr 4). */
 	uint32_t bw_exceeded;
-	int      static_overflow;               /* a static range too wide to name */
+	int      static_overflow;               /* a static range too wide to name, or a static
+						 * group the table had no room for */
 	/* Every refusal since the daemon started (or the policy last said "not
 	 * snooping"), by reason, and the last few in order. A table too small
 	 * is a number somebody has to be able to read: a snooper that quietly
