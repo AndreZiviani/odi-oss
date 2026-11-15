@@ -917,7 +917,13 @@ omcli uses omcid's own queue and commands:
                                          since omcid started (`mib resets`:
                                          from the OLT, local, from the OLT in
                                          the last 600 s, whether that is a
-                                         loop now, and how many loops)
+                                         loop now, and how many loops), and
+                                         what /var/log/omcid-unknown.txt
+                                         holds this boot: the unknowns of
+                                         each kind (`unknowns`), the
+                                         refused answers by result
+                                         (`rejected`) and the first 16
+                                         refusal lines
     omcli provision                      what the OLT provisioned: T-CONTs,
                                          GEM ports, VLANs, traffic descriptors
                                          (the format is under metricsd)
@@ -1775,7 +1781,7 @@ them: not `diag register get`, not `memprobe`, and not the stock firmware
 | where | what | survives |
 |---|---|---|
 | `/var/log/omcid.log` | every OMCI frame and driver call, omcid's startup | nothing (RAM, trimmed to 128-256 KB) |
-| `/var/log/omcid-unknown.txt` | each managed entity class and message type the OLT sent that omcid does not model, with a count ("Link and provisioning events") | an omcid respawn, not a reboot (RAM) |
+| `/var/log/omcid-unknown.txt` | each managed entity class and message type the OLT sent that omcid does not model, and each answer omcid refused, with a count ("Link and provisioning events") | an omcid respawn, not a reboot (RAM) |
 | `/var/log/services.log` | stderr of services: dropbear logins, confd, metricsd | nothing (RAM, trimmed) |
 | `/var/run/respawn/<name>` | the restart count, wait and state of each respawned daemon ("Restart budget" in docs/SETTINGS.md); the line in `logread` is `respawn: event=respawn service=...` | nothing (RAM) |
 | `/var/log/*.err` | the rcS `/proc/odi_omci` writes that failed | nothing |
@@ -1824,6 +1830,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=rx_reject reason=crc count=1 total=1 action=dropped len=48` | notice | a received frame omcid flagged before it read or changed anything. `action=dropped`, no answer: `reason` is `length` (under the 48 bytes of a baseline frame), `devid` (device identifier not 0x0a; the extended format, 0x0b, is not implemented, so an OLT that sends it is left to fall back to baseline; the line adds `devid=11`. omcid reports the baseline set only (`0x80`) unless `OMCC_VER` is set with `omci-identity.on`, see `docs/SETTINGS.md`) or `crc` (the CRC-32 in bytes 44-47 does not match bytes 0-43). `reason=trailer action=accepted`: bytes 40-43 are not `00 00 00 28` (what our OLT sends) but the CRC is valid, so the frame is answered and only counted. At most one line per reason a minute, with `count` the frames since the last line and `total` since omcid started; `omcli state` shows the totals (`rx dropped`). The frames our OLT sends never trigger it |
 | `omcid: event=unknown_msg type=17 class=256` | notice | the first frame this boot of a message type omcid does not handle, per type, with the class of that first frame; answered "not supported" |
 | `omcid: event=no_instance class=45 inst=2457 op=get mt=9` | notice | the first Get, Get current data, Set or Delete this boot that names an instance of a modelled class which omcid neither created itself nor was given by the OLT, per class and instance (`op` and `mt` are those of the first such request). Diagnostic only: omcid answers it as before (built-in values, a new row for a Set, success for a Delete), where G.988 and the stock stack answer "unknown instance"; the lines say whether an OLT relies on that |
+| `omcid: event=rejected class=45 op=create mt=4 result=instance_exists` | notice | the first answer this boot with a result other than success to a class omcid models, for a message type it handles, per class, operation and result (a VoIP class with `OMCI_POTS_PORTS` at 0 counts as unknown, and the MIB upload and alarm walks count only their refusal of a sequence number past the end). `result` is G.988's code by name: `processing_error` (1), `not_supported` (2), `parameter_error` (3), `unknown_me` (4), `unknown_instance` (5), `device_busy` (6), `instance_exists` (7), `attr_failed` (9), any other as its number. A refused Create, Set or Get adds `attrs`, the attribute mask the answer named (`attrs=0x8000` is attribute 1). The unknowns above are refused too and keep their own lines. A repeat the OLT sends for the same transaction gets the stored answer and is not counted again. `omcli state` shows the counts (`rejected`) |
 | `omcid: event=vlan_fwdop code=0x06 inst=18 result=unsupported built_as=0x10` | notice | a class 84 forward operation no bridge rule can express (negative filtering, filtering by TCI and MAC address, a code past G.988 table 9.3.11-1): built as 0x10 instead, once per code per omcid run |
 | `omcid: event=vlan_fwdop code=0x10 inst=4354 result=override built_as=0x00` | notice | a class 84 port built with the FwdOp the owner set in `RTK_DEVINFO_SPECVER` (docs/SETTINGS.md) instead of the code the OLT wrote; once per port and pair of codes per omcid run |
 | `omcid: event=reload changed=vlan action=rebuild keys=VLAN_MANU_TAG_VID` | notice | omcid took a SIGHUP (`apply.sh omci`) and reread the store: `changed` is `none`, `vlan` (bridge connections rebuilt in place, the ONU stays in O5) or `identity` (`action=reregister`: the ONU is deactivated and ranged again); `keys` names the store keys that differ, never their values. Never rate limited |
@@ -1881,21 +1888,27 @@ Reading an outage:
   RAM, and forwarding stops with the board); the ramlog of the next boot
   records it (docs/KERNEL.md).
 
-What omcid does not model. Each unknown (class, operation) and each unknown
-message type is one line per boot, however often the OLT repeats it, and
+What omcid does not model, and what it refused. Each unknown (class,
+operation), each unknown message type and each refusal (class, operation,
+result) is one line per boot, however often the OLT repeats it, and
 `/var/log/omcid-unknown.txt` keeps all of them with a count and the uptime of
 the first, even the ones the rate limit dropped:
 
     unknown_me class=351 op=create mt=4 count=1 first_uptime_s=38
     unknown_msg type=17 class=256 count=9 first_uptime_s=39
     no_instance class=45 inst=2457 op=get mt=9 count=3 first_uptime_s=52
+    rejected class=256 op=set mt=8 result=attr_failed attrs=0xc000 count=2 first_uptime_s=61
 
 A respawned omcid reads the file back first, so "once" holds across a
 restart; `/var/log` is RAM, so a reboot starts it empty. It holds 64 distinct
 entries and counts the rest on an `overflow` line. `diag-bundle.sh` collects
 it with the rest of `/var/log`, as `odi-diag/log/omcid-unknown.txt`. On ISP1
 the OLT sends class 351 once and message types 17 and 1 to ONU-G three times
-each per provisioning: those three lines are what a session looks like there.
+each per provisioning: those three lines are what a session looks like there,
+and the recorded session has no `rejected` line. A `rejected` line is an answer the OLT was
+given "no": the class, the operation, the result, and for a Set or Get the
+attributes, which is what to look up in G.988 or compare with another ONU on
+the same OLT.
 
 Rate limits: the kernel lines have their own printk ratelimit, 30 a minute
 (the kernel prints how many it dropped); omcid's, 20 a minute, with an

@@ -114,10 +114,56 @@ static int retx_replay(int fd, uint32_t tid, const uint8_t *f)
 	return 0;
 }
 
+/* End of the attribute values in a Get response's contents: three bytes of
+ * result and mask, then 25 of values (G.988, the Get response layout).
+ * The two masks of result 9 follow at 28 and 30. */
+#define GET_VALUES_END 28u
+
+/* Whether an answer is a result code. The upload and alarm walks answer
+ * with a count or a record instead, never a single byte, and their Next
+ * refuses a sequence number past the end with the result code alone: for
+ * those, a one-byte answer is the refusal. */
+static int answer_is_result(uint8_t mt, uint16_t clen)
+{
+	if (mt == OMCI_MT_MIB_UPLOAD || mt == OMCI_MT_MIB_UPLOAD_NEXT ||
+	    mt == OMCI_MT_GET_ALL_ALARMS || mt == OMCI_MT_GET_ALL_ALARMS_NEXT)
+		return clen == 1;
+	return clen > 0;
+}
+
+/* The attributes a refusal names: for a Set the unsupported and the failed
+ * mask, for a Get the same two after the values, for a Create the
+ * parameter error mask. G.988 A.1.1 and A.2. */
+static uint16_t rejected_attrs(uint8_t mt, const uint8_t *c, uint16_t clen)
+{
+	if (mt == OMCI_MT_SET && clen >= 5)
+		return (uint16_t)(nl_get16(c + 1) | nl_get16(c + 3));
+	if ((mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA) &&
+	    clen >= GET_VALUES_END + 4)
+		return (uint16_t)(nl_get16(c + GET_VALUES_END) |
+				  nl_get16(c + GET_VALUES_END + 2));
+	if (mt == OMCI_MT_CREATE && clen >= 3)
+		return nl_get16(c + 1);
+	return 0;
+}
+
 void send_resp(int fd, uint32_t tid, const uint8_t *req,
 	       const uint8_t *contents, uint16_t clen)
 {
 	uint16_t i;
+	uint8_t mt = (uint8_t)OMCI_MT(req[2]);
+
+	/* Counted here, where every answer passes, and only here: a
+	 * retransmission repeats the stored answer without coming back. A
+	 * class omcid has no model for, or a message type it does not
+	 * handle, has its own line already (event=unknown_me, unknown_msg);
+	 * this is what omcid models and still refused. A VoIP class without
+	 * a phone port counts as unknown, as handle() treats it. */
+	if (answer_is_result(mt, clen) && contents[0] != OMCI_OK &&
+	    ev_msg_known(mt) && find_class(nl_get16(req + 4)) &&
+	    (pots_ports || !voip_class(nl_get16(req + 4))))
+		ev_rejected(nl_get16(req + 4), mt, contents[0],
+			    rejected_attrs(mt, contents, clen));
 
 	for (i = 0; i < OMCI_FRAME_LEN; i++)
 		frame[i] = 0;
@@ -292,11 +338,6 @@ static void handle_upload_next(int fd, uint32_t tid, const uint8_t *f)
 }
 
 struct getnext_ctx getnext;
-
-/* End of the attribute values in a Get response's contents: three bytes of
- * result and mask, then 25 of values (G.988, the Get response layout).
- * The two masks of result 9 follow at 28 and 30. */
-#define GET_VALUES_END 28u
 
 /* How many alarm records the last Get All Alarms promised (alarm.c). Not
  * static: snapshot.c persists it across a respawn, alongside the MIB data

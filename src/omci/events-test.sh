@@ -42,6 +42,11 @@ frame() {
 	printf '%s%s0a%s%s%s0000002800000000\n' "$1" "$2" "$3" "$4" \
 		"0000000000000000000000000000000000000000000000000000000000000000"
 }
+# The same with the first two bytes of the contents given: a Set's mask.
+frame_mask() {
+	printf '%s%s0a%s%s%s%s0000002800000000\n' "$1" "$2" "$3" "$4" "$5" \
+		"000000000000000000000000000000000000000000000000000000000000"
+}
 
 CAPS=020000ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000000000000010000000300000002ffffffff000000000000001000000040000000800000000800000000000000100000000f00000440
 
@@ -204,6 +209,7 @@ check "the summary counts every one of them" "$got" \
       "unknown_me class=351 op=create mt=4 count=2
 unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6
+rejected class=256 op=25 mt=25 result=not_supported count=1
 unknown_me class=351 op=get mt=9 count=1
 unknown_msg type=29 class=256 count=2"
 # A modelled class at an instance omcid holds no row for (MAC bridge service
@@ -237,10 +243,59 @@ check "an unknown message type is not supported" "$got" "-> 0e053d0a0100000001"
 got=$(grep '^unknown entities: ' "$log")
 check "the key is off unless set" "$got" "unknown entities: answered unknown entity"
 
+# What omcid models and still refused: the refused Reboot above, a Create of
+# the profile that now exists (instance exists, 7), twice, and a Set of the
+# ONU-G vendor id, which is read-only (attribute failed, 9, mask 8000). One
+# event line per (class, operation, result), a count for all, and the
+# unknowns above are not repeated as rejected.
+$Q cli/build/omcli --inject "$(frame 0e40 44 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e41 44 002d 0999)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame_mask 0e42 48 0100 0000 8000)" > /dev/null 2>&1
+# A MIB upload Next past the end is refused with the result code alone
+# (parameter error, 3), unlike the records it answers otherwise. A Get of a
+# VoIP class with no phone port (OMCI_POTS_PORTS unset) is an unknown class,
+# logged as unknown_me only. The event lines of these two fall to the rate
+# limit below; the summary has them.
+$Q cli/build/omcli --inject "$(frame_mask 0e43 4e 0002 0000 ffff)" > /dev/null 2>&1
+$Q cli/build/omcli --inject "$(frame 0e44 49 008a 0000)" > /dev/null 2>&1
+sync_send "$log"
+got=$(grep -o -- '-> 0e432e0a0002000003' "$log" | head -1)
+check "an upload Next past the end answers parameter error" "$got" "-> 0e432e0a0002000003"
+need /var/log/omcid-unknown.txt '^unknown_me class=138 ' 10
+got=$(grep 'class=138 ' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
+check "a VoIP class without a phone port is an unknown class, not a refusal" "$got" \
+      "unknown_me class=138 op=get mt=9 count=1"
+got=$(grep -o -- '-> 0e40240a002d099907' "$log" | head -1)
+check "a Create of an instance that exists answers instance exists" "$got" "-> 0e40240a002d099907"
+got=$(grep -o -- '-> 0e42280a010000000900008000' "$log" | head -1)
+check "a Set of a read-only attribute answers attribute failed" "$got" "-> 0e42280a010000000900008000"
+got=$(grep '^event=rejected ' "$log")
+check "each refusal is logged once" "$got" \
+      "event=rejected class=256 op=25 mt=25 result=not_supported
+event=rejected class=45 op=create mt=4 result=instance_exists
+event=rejected class=256 op=set mt=8 result=attr_failed attrs=0x8000"
+need /var/log/omcid-unknown.txt '^rejected class=45 op=create mt=4 result=instance_exists count=2' 10
+got=$(grep '^rejected ' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
+check "and counted in the summary" "$got" \
+      "rejected class=256 op=25 mt=25 result=not_supported count=1
+rejected class=45 op=create mt=4 result=instance_exists count=2
+rejected class=256 op=set mt=8 result=attr_failed attrs=0x8000 count=1
+rejected class=2 op=14 mt=14 result=parameter_error count=1"
+out=$($Q cli/build/omcli state 2>&1)
+got=$(echo "$out" | grep -a -A3 '^unknowns ')
+check "omcli state shows the unknowns and the refusals" "$got" \
+      "unknowns   : me 3  msg 3  no instance 1  (/var/log/omcid-unknown.txt)
+rejected   : 5  not_supported 1  parameter_error 1  instance_exists 2  attr_failed 1
+  rejected class=256 op=25 mt=25 result=not_supported count=1
+  rejected class=45 op=create mt=4 result=instance_exists count=2"
+
 # Rate limited: 30 more reboot requests, back to back, and the window of 20
-# lines a minute already holds 15 (start, Alloc-IDs, OLT reset, upload begin
+# lines a minute is already full: start, Alloc-IDs, OLT reset, upload begin
 # and end, provision begin and end, the three session unknowns, CLI reset,
-# reboot, sw_image, the two unknowns and the no_instance line above).
+# the reboot and its rejected line, sw_image, the two unknowns, the
+# no_instance line, the provisioning burst the Set above begins, and the
+# two rejected lines after it. The refused reboots count towards their
+# rejected entry, which is already logged.
 : > /tmp/reboots.txt
 i=0
 while [ "$i" -lt 30 ]; do
@@ -251,6 +306,13 @@ $Q cli/build/omcli --inject-file /tmp/reboots.txt > /dev/null 2>&1
 sync_send "$log"
 got=$(grep -c '^event=' "$log")
 check "a flood is cut at 20 event lines a minute" "$got" "20"
+
+# The 30 refused reboots are counted on the one entry. Waited for, so the
+# respawn below reads the file with them in it.
+need /var/log/omcid-unknown.txt '^rejected class=256 op=25 mt=25 result=not_supported count=31 ' 10
+got=$(grep '^rejected class=256 op=25 ' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
+check "every refused reboot is counted" "$got" \
+      "rejected class=256 op=25 mt=25 result=not_supported count=31"
 
 [ "$fail" -eq 0 ] || keep_log "$log" events-test.log
 
@@ -286,9 +348,14 @@ check "and the counts carry on across the respawn" "$got" \
       "unknown_me class=351 op=create mt=4 count=3
 unknown_msg type=17 class=256 count=9
 unknown_msg type=1 class=256 count=6
+rejected class=256 op=25 mt=25 result=not_supported count=31
 unknown_me class=351 op=get mt=9 count=2
 unknown_msg type=29 class=256 count=2
 no_instance class=45 inst=2457 op=get mt=9 count=3
+rejected class=45 op=create mt=4 result=instance_exists count=2
+rejected class=256 op=set mt=8 result=attr_failed attrs=0x8000 count=1
+rejected class=2 op=14 mt=14 result=parameter_error count=1
+unknown_me class=138 op=get mt=9 count=1
 unknown_me class=351 op=set mt=8 count=1
 unknown_me class=65021 op=create mt=4 count=1"
 got=$(grep -o -- '-> 0e07240a015f0002000000' "$log2" | head -1)
@@ -301,6 +368,17 @@ out=$($Q cli/build/omcli provision 2>&1 | grep '^summary ')
 check "nothing is stored, and MIB data sync counts the faked writes" \
       "$(echo "$out" | sed 's/.*rows=\([0-9]*\).*mib_data_sync=\([0-9]*\).*/rows=\1 mib_data_sync=\2/')" \
       "rows=0 mib_data_sync=3"
+# The ONU-G Set again, now of the version too (after the check above: a Set
+# adds the ONU-G row): the same entry, its mask grown, written at once, and
+# no new event line.
+$Q cli/build/omcli --inject "$(frame_mask 0e0b 48 0100 0000 c000)" > /dev/null 2>&1
+sync_send "$log2"
+got=$(grep -c '^event=rejected ' "$log2")
+check "a respawned omcid does not log a refusal this boot already logged" "$got" "0"
+need /var/log/omcid-unknown.txt '^rejected class=256 op=set mt=8 result=attr_failed attrs=0xc000 count=2' 10
+got=$(grep '^rejected class=256 op=set ' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')
+check "but counts it, with the attributes of both" "$got" \
+      "rejected class=256 op=set mt=8 result=attr_failed attrs=0xc000 count=2"
 [ "$fail" -eq 0 ] || keep_log "$log2" events-test2.log
 omcid_stop "$pid2"
 rm -f /var/config/odi.conf
