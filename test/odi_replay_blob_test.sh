@@ -16,7 +16,7 @@ trap 'rm -f "$BIN"' EXIT
 cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_replay_blob_test.c"
 "$BIN"
 
-for spec in sdkinit:7429 modload:3619 gpon_init:800; do
+for spec in sdkinit:7429 modload:1748 gpon_init:800; do
 	name=${spec%%:*}
 	want=${spec#*:}
 	head=$(python3 "$ROOT/tools/regtrace/replayblob.py" dump "$FW/$name.bin" | sed -n 1p)
@@ -59,4 +59,28 @@ for bad, why in ((keep + sweeps[0][:-1] + sweeps[1] + sweeps[2] + sweeps[3], "cu
         continue
     raise AssertionError("trim-gpon took a sweep %s" % why)
 print("odi_replay_blob_test: trim-gpon ok")
+
+# trim-modload-gpon: the shipped modload.bin writes nothing in the GPON MAC
+# window; a GPON MAC write that gpon_init repeats after its reset is
+# dropped, the rest kept, and one it does not repeat is refused.
+modload = open(sys.argv[2].replace("gpon_init.bin", "modload.bin"), "rb").read()
+_t, _c, recs = rb.unpack(modload)
+for r in recs:
+    kind, _cat, _grp, _verb, _tbl, _n, off, _v, *_w = rb._RECORD_SWITCH.unpack(r)
+    assert not (kind == rb.KIND_REG and rb.GPON_MAC_FIRST <= off < rb.GPON_MAC_END), \
+        "shipped modload.bin writes 0x%06x" % off
+gi = rb.pack(rb.TABLE_GPON_INIT, [rb.gpon_reg(0x70000c, 1), rb.gpon_reg(0x70000c, 0),
+                                  rb.gpon_reg(0x700040, 0x22)])
+other = rb.switch_reg(0x1c024, 0xf)
+ml = rb.pack(rb.TABLE_MODLOAD, [rb.switch_reg(0x70000c, 0x101), other,
+                                rb.switch_reg(0x700040, 0x22)])
+_t, _c, out = rb.unpack(rb.trim_modload_gpon(ml, gi))
+assert out == [other], "trim-modload-gpon kept %d records, want 1" % len(out)
+try:
+    rb.trim_modload_gpon(rb.pack(rb.TABLE_MODLOAD, [rb.switch_reg(0x700044, 1)]), gi)
+except ValueError:
+    pass
+else:
+    raise AssertionError("trim-modload-gpon dropped a write gpon_init does not repeat")
+print("odi_replay_blob_test: trim-modload-gpon ok")
 EOF

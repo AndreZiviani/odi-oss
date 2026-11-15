@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Module-load replay: `modload.bin` drops from 3,619 records to 1,748 (130 KB
+  to 63 KB). The 1,871 GPON MAC register writes it carried are a bring-up
+  with its own `PONMAC_RESET` pulse, the same sequence `gpon_init.bin`
+  starts with; the GPON init resets the GPON MAC again at the first
+  `gponact` and writes every one of those registers after it, itself or
+  through the driver's table clean. `replayblob.py trim-modload-gpon` takes
+  them out and refuses a register the GPON init does not write again. The
+  boot register stream loses exactly those writes and the reads before
+  them; nothing else moves.
 - GPON boot init: `gpon_init.bin` drops from 2,528 records to 800 (91 KB to
   29 KB). Gone are the replay's own clean of the GEM-port CAM, the flow
   type words, the Alloc-ID CAM and the multicast MAC filter, which ran

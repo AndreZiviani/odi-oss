@@ -190,9 +190,16 @@ Left out altogether:
 
 ## Module-load replay
 
-`modload.bin` is every switch-core write the stock OMCI kernel modules
-made while loading, in capture order: 2587 register writes and 1032 table
-rows. `tools/regtrace/mkmodload.py` generates it from that capture and
+`modload.bin` is the switch-core writes the stock OMCI kernel modules
+made while loading, in capture order: 716 register writes and 1032 table
+rows. The capture has 1,871 more register writes, in the GPON MAC window
+(0x700000-0x706fff): a GPON MAC bring-up with its own `PONMAC_RESET`
+pulse, the same sequence `gpon_init.bin` starts with. `gpon_init.bin`
+resets the GPON MAC again at the first `gponact` and writes every one of
+those registers after the reset (itself, or through the driver's table
+clean), so they are not in the file: `tools/regtrace/replayblob.py
+trim-modload-gpon` takes them out, and refuses to drop a register the
+GPON init does not write again. `tools/regtrace/mkmodload.py` generates it from that capture and
 tags each record with its family (`category`: registers, the CF sweep, the
 CF rules written over the sweep, the VLAN row, the L2 unicast row, the ACL
 rows; `reg_group` for a register: its register family). The families were
