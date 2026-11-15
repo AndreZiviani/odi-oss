@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- GPON: `/proc/odi_gpon/drops`, a short record of the PON side around every
+  drop out of O5, frozen when it happens: the 60 s before and the 120 s
+  after, with PLOAM messages both ways (type and ONU-ID, no contents), ONU
+  state changes with their cause and side, LOS and LOF edges and the 1 s
+  sample (state, alarm bits, BIP error blocks). Four records, the first of
+  the boot kept and the latest three beside it, so a later drop never
+  overwrites the first. A PLOAM the OLT repeats within 10 ms is one line
+  with a count, so an OLT that sends every burst three times does not fill a
+  record before its 120 s. In the diagnostics bundle as
+  `pon/odi_gpon-drops.txt`. RAM only for now: a watchdog reset loses it.
+  Refs #390.
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair
