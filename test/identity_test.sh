@@ -55,6 +55,10 @@ XML
 export CS="$T/c/cs.xml" HS="$T/c/hs.xml" ODI_CONF="$T/c/odi.conf" SNAP="$T/c/identity.orig" \
 	TMPDIR_="$T/tmp" SAFE_FLAG="$T/safe-mode" BUILD="$T/build" OMCI_IDENTITY_ON="$T/omci-identity.on"
 id() { $SH "$I" "$@"; }
+# sed -i and stat -c are GNU: BSD sed wants a suffix argument and BSD stat
+# has no -c, so make test-host on macOS failed here. These work on both.
+sedi() { sed "$1" "$2" > "$2.sedi" && mv "$2.sedi" "$2"; }
+mode_of() { ls -l "$1" | cut -c1-10; }
 fl() { $SH "$F" "$@"; }
 get() { fl get "$1" 2>/dev/null; }
 
@@ -63,7 +67,7 @@ fresh
 out=$(id snapshot 2>&1); rc=$?
 t "snapshot succeeds"                       "0" "$rc"
 t "and says where it wrote"                 "1" "$(printf '%s\n' "$out" | grep -c 'written to')"
-t "the file is mode 600"                    "600" "$(stat -c %a "$SNAP")"
+t "the file is mode 600"                    "-rw-------" "$(mode_of "$SNAP")"
 t "it names the image that took it"         "image=odi-oss-test" "$(grep '^image=' "$SNAP")"
 t "an HS key with its store"                "hs GPON_SN=TEST00000001" "$(grep ' GPON_SN=' "$SNAP")"
 t "a CS key, raw XML text kept"             "cs LOID_PASSWD=a&amp;b" "$(grep ' LOID_PASSWD=' "$SNAP")"
@@ -92,7 +96,7 @@ fresh; rm "$T/c/hs.xml"
 t "a missing store takes none, exit 1"      "1:0" "$(id snapshot >/dev/null 2>&1; echo $?):$([ -e "$SNAP" ] && echo 1 || echo 0)"
 fresh; head -n 3 "$T/c/hs.xml" > "$T/c/h"; mv "$T/c/h" "$T/c/hs.xml"
 t "a cut-off store takes none"              "1:0" "$(id snapshot >/dev/null 2>&1; echo $?):$([ -e "$SNAP" ] && echo 1 || echo 0)"
-fresh; sed -i 's/Value="TEST00000001"/Value=""/' "$T/c/hs.xml"
+fresh; sedi 's/Value="TEST00000001"/Value=""/' "$T/c/hs.xml"
 t "a store with no serial takes none"       "1:0" "$(id snapshot >/dev/null 2>&1; echo $?):$([ -e "$SNAP" ] && echo 1 || echo 0)"
 fresh
 t "a held writer lock fails, nothing written" "1:0" \
@@ -107,7 +111,7 @@ fl set ELAN_MAC_ADDR 02000000ffff >/dev/null
 fl set GPON_PLOAM_PASSWD 0x39393939 >/dev/null
 fl set ONU_HW_VERSION "" >/dev/null      # an odi key cleared: its line is gone
 fl default cs >/dev/null 2>&1 || true    # no defaults file here: nothing changes
-sed -i 's/Value="line-7"/Value=""/' "$CS"   # what flash default cs does to LOID
+sedi 's/Value="line-7"/Value=""/' "$CS"   # what flash default cs does to LOID
 fl set NTP_SERVER other.example >/dev/null
 out=$(id show 2>&1)
 t "show marks a changed key"                "GPON_SN: TEST00000001 [hs] differs" "$(printf '%s\n' "$out" | grep '^GPON_SN:')"
@@ -142,7 +146,7 @@ t "a backslash and a slash too"             'old/pw\x' "$(sed -n 's/.*"LOID_PASS
 # A key the snapshot has that is in no store now is reported, not invented.
 fresh
 id snapshot >/dev/null
-sed -i '/"MAC_KEY"/d' "$HS"
+sedi '/"MAC_KEY"/d' "$HS"
 out=$(id restore 2>&1); rc=$?
 t "a key gone from every store fails restore" "1" "$rc"
 t "and is named"                            "1" "$(printf '%s\n' "$out" | grep -c 'MAC_KEY: not restored')"
@@ -152,7 +156,7 @@ fresh
 id snapshot >/dev/null
 fl set GPON_SN TEST00000099 >/dev/null
 cp "$HS" "$T/hs.before"
-sed -i '/ LOID=/d' "$SNAP"
+sedi '/ LOID=/d' "$SNAP"
 t "a snapshot missing a key is refused"     "1" "$(id restore >/dev/null 2>&1; echo $?)"
 t "and nothing is written"                  "same" "$(cmp -s "$HS" "$T/hs.before" && echo same || echo differs)"
 fresh
@@ -161,7 +165,7 @@ printf 'cs LOID=x\n' >> "$SNAP"
 t "a key twice is refused"                  "1" "$(id restore >/dev/null 2>&1; echo $?)"
 fresh
 id snapshot >/dev/null
-sed -i 's/^cs LOID=.*/cs LOID=a"b/' "$SNAP"
+sedi 's/^cs LOID=.*/cs LOID=a"b/' "$SNAP"
 t "a quote in a value is refused"           "1" "$(id restore >/dev/null 2>&1; echo $?)"
 fresh
 t "no snapshot: show fails"                 "1" "$(id show >/dev/null 2>&1; echo $?)"

@@ -1195,8 +1195,11 @@ writes it again. It is the way back after an identity edit, or after
 what the stick had at that boot: on a stick whose identity was changed
 before (under the stock firmware or an earlier image), that is the changed
 identity, not the factory one. Its `image=` and `taken=` lines say which
-image took it and when (`unknown` when the clock was not set yet, as at
-every boot before NTP).
+image took it and when. The boot step runs before NTP can set the clock
+(the stick has no RTC), so a snapshot taken at boot always says
+`taken=unknown` and the file itself is dated 1970. A snapshot taken
+later, once NTP has set the clock, records a date; for an existing one
+that means `identity.sh replace --yes`.
 
 The keys: `GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`, `GPON_ONU_MODEL`,
 the four LOID keys, `ONU_HW_VERSION`, and the stock-only `MAC_KEY`,

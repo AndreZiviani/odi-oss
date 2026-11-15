@@ -15,7 +15,9 @@ listed here.
   --yes` takes a new copy on purpose. No copy on a safe-mode boot or from a
   store without a serial. Not in the diagnostics bundle or the web UI backup.
   The copy holds what the stick had at that boot, so on a stick changed
-  before it is not the factory identity. Issue #387.
+  before it is not the factory identity. Taken at boot, before NTP, it
+  says `taken=unknown` and the file is dated 1970. `test/identity_test.sh`
+  runs on macOS too (no GNU `sed -i` or `stat -c`). Issue #387.
 - omcid: a MIB reset loop is named instead of left to be counted in the log.
   Three or more MIB resets from the OLT within 600 s log one
   `event=mib_reset_loop state=start` (warning), and `state=end` after 600 s
