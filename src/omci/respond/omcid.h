@@ -544,6 +544,14 @@ extern unsigned long omci_frames_handled;
 #define RX_REJ_N        4
 extern unsigned long omci_rx_reject[RX_REJ_N];
 int rx_accept(const uint8_t *f, uint32_t len);
+/* frames.c: the last OMCI frames as bytes, for `omcli frames`. Every frame
+ * received (rx_accept) and sent (emit_frame, the test result, notify_send)
+ * is noted; frames_mask() is the sharing mask of the export. */
+#define FRAME_RX 0
+#define FRAME_TX 1
+void frames_note(int dir, const uint8_t *f, uint32_t len);
+void frames_mask(uint8_t *f, uint32_t len);
+uint32_t cli_frames(void);
 
 /* ------------------------------------------------------------- event lines
  *

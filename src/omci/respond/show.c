@@ -876,6 +876,9 @@ uint32_t cli_help(void)
 	    "                                 number and login masked, no password\n"
 	    "  ident [cs hs [odi]]            identity from the config store\n"
 	    "  cfgset <file> <dir> <key> <v>  write one key into a config store\n"
+	    "  frames [--pcap FILE] [--full]  the last OMCI frames as bytes, or as\n"
+	    "                                 a pcap; secrets and serial masked\n"
+	    "                                 unless --full"
 	    "  help\n");
 	return OMCLI_OK;
 }

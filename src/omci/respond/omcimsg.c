@@ -75,6 +75,7 @@ static void emit_frame(int fd, uint32_t tid)
 {
 	uint16_t i;
 
+	frames_note(FRAME_TX, frame, OMCI_FRAME_LEN);
 	if (fd < 0) {
 		/* No line side -- an injected frame on a bench, or qemu. The
 		 * answer is the thing being tested, so print it rather than
@@ -262,6 +263,7 @@ static void handle_test(int fd, uint32_t tid, const uint8_t *f, uint16_t cls,
 	frame[20] = 12; frame[21] = (uint8_t)(temp >> 8); frame[22] = (uint8_t)temp;
 	nl_put32(frame + 40, OMCI_TRAILER);
 	nl_put32(frame + 44, omci_crc(frame, 44));
+	frames_note(FRAME_TX, frame, OMCI_FRAME_LEN);
 	if (fd >= 0)
 		nl_send_frame(fd, tid, txbuf, frame, OMCI_FRAME_LEN);
 	out_fmt("-> test result: vcc %d mV, rx %d tx %d (0.002 dBuW), bias %d uA, temp %d/256 C\n",
@@ -412,6 +414,9 @@ int rx_accept(const uint8_t *f, uint32_t len)
 {
 	int why = -1;
 
+	/* Kept as it came, refused or not: a frame the OLT sent that omcid
+	 * drops is as much a part of the exchange. */
+	frames_note(FRAME_RX, f, len);
 	if (len < OMCI_FRAME_LEN)
 		why = RX_REJ_LENGTH;
 	else if (f[3] != OMCI_DEVICE_ID)

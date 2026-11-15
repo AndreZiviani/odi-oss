@@ -381,7 +381,51 @@ static struct omcli_rep nrep;
  * argument, never in the middle of the selector. */
 static int want_secrets;
 
+/* --pcap FILE: lifted out of the command line in main() like --secrets. The
+ * daemon is sent --pcap alone and streams the file; this client writes it,
+ * so omcid never opens a path it was handed. A run that fails removes the
+ * part it wrote. */
+static const char *pcap_path;
+static long pcap_fd = -1;
+
+static int write_all(long fd, const uint8_t *p, uint32_t n)
+{
+	while (n > 0) {
+		long w = sys_write((int)fd, p, n);
+
+		if (w <= 0)
+			return -1;
+		p += w;
+		n -= (uint32_t)w;
+	}
+	return 0;
+}
+
+static int native_stream(int argc, char **argv, int first, long q);
+
 static int native_run(int argc, char **argv, int first, long q)
+{
+	int rc;
+
+	if (pcap_path) {
+		pcap_fd = sys_create(pcap_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+		if (pcap_fd < 0) {
+			out_fmt("%% cannot write %s (%d)\n", pcap_path, pcap_fd);
+			out_flush();
+			return 1;
+		}
+	}
+	rc = native_stream(argc, argv, first, q);
+	if (pcap_fd >= 0) {
+		sys_close((int)pcap_fd);
+		pcap_fd = -1;
+		if (rc)
+			sys_unlink(pcap_path);
+	}
+	return rc;
+}
+
+static int native_stream(int argc, char **argv, int first, long q)
 {
 	uint32_t arglen = 0, nargs = 0;
 	long myq, rc;
@@ -423,6 +467,13 @@ static int native_run(int argc, char **argv, int first, long q)
 	if (want_secrets && nargs < OMCLI_MAXARGS &&
 	    arglen + sizeof "--secrets" < OMCLI_ARGS) {
 		for (const char *a = "--secrets"; *a; a++)
+			nreq.args[arglen++] = (uint8_t)*a;
+		nreq.args[arglen++] = 0;
+		nargs++;
+	}
+	if (pcap_path && nargs < OMCLI_MAXARGS &&
+	    arglen + sizeof "--pcap" < OMCLI_ARGS) {
+		for (const char *a = "--pcap"; *a; a++)
 			nreq.args[arglen++] = (uint8_t)*a;
 		nreq.args[arglen++] = 0;
 		nargs++;
@@ -472,7 +523,15 @@ static int native_run(int argc, char **argv, int first, long q)
 		cleanup_q = -1;
 			return 1;
 		}
-		if (nrep.len)
+		if (nrep.len && pcap_fd >= 0) {
+			if (write_all(pcap_fd, nrep.data, nrep.len) != 0) {
+				out_fmt("%% writing %s failed\n", pcap_path);
+				mq_remove(myq);
+				cleanup_q = -1;
+				out_flush();
+				return 1;
+			}
+		} else if (nrep.len)
 			out_n((const char *)nrep.data, (int)nrep.len);
 		if (!(nrep.flags & OMCLI_MORE)) {
 			if (nrep.status != OMCLI_OK)
@@ -853,6 +912,18 @@ int main(int argc, char **argv)
 	 * flag at the end worked. Compacting argv here means either spelling
 	 * behaves the same. */
 	for (int i = 1; i < argc;) {
+		if (str_eq(argv[i], "--pcap")) {
+			if (i + 1 >= argc) {
+				out("% --pcap needs a file\n");
+				out_flush();
+				return 1;
+			}
+			pcap_path = argv[i + 1];
+			for (int k = i; k + 2 < argc; k++)
+				argv[k] = argv[k + 2];
+			argc -= 2;
+			continue;
+		}
 		if (str_eq(argv[i], "-f") || str_eq(argv[i], "--vendor") ||
 		    str_eq(argv[i], "--secrets")) {
 			if (argv[i][1] == 'f')

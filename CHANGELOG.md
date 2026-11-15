@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- OMCI: `omcli frames` prints the last 1024 OMCI frames omcid received or
+  sent, as bytes, and `omcli frames --pcap FILE` writes them as a pcap that
+  Wireshark decodes with the common OMCI Lua dissector (Ethernet II,
+  EtherType 0x88B5). omcid keeps them in a fixed 60 KB ring in RAM, filled
+  where it already receives and sends. By default the values of the classes
+  omcid keeps out of its log, the LOID and password, the serial number and
+  the MACs are overwritten; `--full` keeps them. The diag bundle adds
+  `pon/omci.pcap`, always masked. Issue #394.
 - Tests: `test/apply_test.sh` no longer fails now and then on a busy runner
   ("identity: back in O5 with services"). Its stub omcid read the case
   script while it ran, so a reload still in progress could read the

@@ -202,6 +202,7 @@ static void cli_dispatch(void)
 	else if (str_eq(verb, "ident"))  status = cli_ident();
 	else if (str_eq(verb, "vlan"))   status = cli_vlan();
 	else if (str_eq(verb, "cfgset")) status = cli_cfgset();
+	else if (str_eq(verb, "frames")) status = cli_frames();
 	else if (str_eq(verb, "help"))   status = cli_help();
 	else {
 		out_fmt("no such command: %s\n", verb);
