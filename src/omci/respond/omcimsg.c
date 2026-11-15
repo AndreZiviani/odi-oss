@@ -118,14 +118,16 @@ static int retx_replay(int fd, uint32_t tid, const uint8_t *f)
  * The two masks of result 9 follow at 28 and 30. */
 #define GET_VALUES_END 28u
 
-/* Whether the answer to a message type starts with a result code. The
- * upload and alarm walks answer with a count or a record instead (and the
- * Next of the alarm walk refuses past its end with a result code where the
- * record would start, which cannot be told from a class id). */
-static int answer_has_result(uint8_t mt)
+/* Whether an answer is a result code. The upload and alarm walks answer
+ * with a count or a record instead, never a single byte, and their Next
+ * refuses a sequence number past the end with the result code alone: for
+ * those, a one-byte answer is the refusal. */
+static int answer_is_result(uint8_t mt, uint16_t clen)
 {
-	return mt != OMCI_MT_MIB_UPLOAD && mt != OMCI_MT_MIB_UPLOAD_NEXT &&
-	       mt != OMCI_MT_GET_ALL_ALARMS && mt != OMCI_MT_GET_ALL_ALARMS_NEXT;
+	if (mt == OMCI_MT_MIB_UPLOAD || mt == OMCI_MT_MIB_UPLOAD_NEXT ||
+	    mt == OMCI_MT_GET_ALL_ALARMS || mt == OMCI_MT_GET_ALL_ALARMS_NEXT)
+		return clen == 1;
+	return clen > 0;
 }
 
 /* The attributes a refusal names: for a Set the unsupported and the failed
@@ -154,9 +156,11 @@ void send_resp(int fd, uint32_t tid, const uint8_t *req,
 	 * retransmission repeats the stored answer without coming back. A
 	 * class omcid has no model for, or a message type it does not
 	 * handle, has its own line already (event=unknown_me, unknown_msg);
-	 * this is what omcid models and still refused. */
-	if (clen && contents[0] != OMCI_OK && answer_has_result(mt) &&
-	    ev_msg_known(mt) && find_class(nl_get16(req + 4)))
+	 * this is what omcid models and still refused. A VoIP class without
+	 * a phone port counts as unknown, as handle() treats it. */
+	if (answer_is_result(mt, clen) && contents[0] != OMCI_OK &&
+	    ev_msg_known(mt) && find_class(nl_get16(req + 4)) &&
+	    (pots_ports || !voip_class(nl_get16(req + 4))))
 		ev_rejected(nl_get16(req + 4), mt, contents[0],
 			    rejected_attrs(mt, contents, clen));
 
