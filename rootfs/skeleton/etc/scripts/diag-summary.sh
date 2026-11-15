@@ -90,7 +90,7 @@ kept) echo "identity       : KEPT, taken with --full: share this bundle privatel
 esac
 echo
 
-# The ONU state, and the changes the kernel logged this boot, from dmesg:
+# The ONU state, and the changes still present in the collected dmesg:
 # "[  123.456] odi_gpon: event=onu_state from=O5 to=O2 ... cause=X side=Y".
 echo "onu state      : ${state:-$na}${state:+  (pon/odi_gpon-status.txt)}"
 if readok dmesg.txt; then
@@ -131,10 +131,10 @@ if readok dmesg.txt; then
 		for (i = 1; i <= nc; i++)
 			s = s (i > 1 ? ", " : "") order[i] " " cause[order[i]]
 		if (drops)
-			printf "left O5        : %d this boot: %s  (dmesg.txt)\n", drops, s
+			printf "left O5        : %d in retained log: %s  (dmesg.txt)\n", drops, s
 		else
-			print "left O5        : 0 this boot  (dmesg.txt)"
-		printf "LOS / LOF      : %d / %d this boot  (dmesg.txt)\n", los, lof
+			print "left O5        : 0 in retained log  (dmesg.txt)"
+		printf "LOS / LOF      : %d / %d in retained log  (dmesg.txt)\n", los, lof
 	}' "$d/dmesg.txt"
 else
 	why="no dmesg.txt"

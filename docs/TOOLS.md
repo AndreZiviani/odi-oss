@@ -1563,7 +1563,7 @@ router and how it connects, what was changed and seen, whether the stock
 firmware works on the line). `SUMMARY.txt` is the output of
 `diag-summary.sh` on the bundle: image, uptime, slot, identity masked or
 not, the ONU state and its last change with how long ago, how often the
-ONU left O5 this boot and why (the `cause` of each `event=onu_state
+ONU left O5 in the retained log and why (the `cause` of each `event=onu_state
 from=O5`), LOS and LOF events, the alarms set now, the `mib resets`, `rx
 dropped` and `mib sync` lines of `omcli state`, the `event=unknown_me`
 count, the optics (from `pon get transceiver` in `pon/diag.txt`, the reads

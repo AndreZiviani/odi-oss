@@ -119,8 +119,8 @@ has "$out" "identity       : masked, serial, MACs and LOID cut to their last fou
 has "$out" "onu state      : O5  (pon/odi_gpon-status.txt)" "the ONU state"
 has "$out" "last change    : at 2322.500000 s, 5000 s ago: from=O4 to=O5 cause=ranging_time side=olt  (dmesg.txt)" \
 	"the last state change and how long ago"
-has "$out" "left O5        : 3 this boot: los 2, deactivate_onu_id 1  (dmesg.txt)" "O5 drops by cause, first seen first"
-has "$out" "LOS / LOF      : 1 / 1 this boot  (dmesg.txt)" "LOS and LOF counted on state=on only"
+has "$out" "left O5        : 3 in retained log: los 2, deactivate_onu_id 1  (dmesg.txt)" "O5 drops by cause, first seen first"
+has "$out" "LOS / LOF      : 1 / 1 in retained log  (dmesg.txt)" "LOS and LOF counted on state=on only"
 has "$out" "alarms now     : LOF  (pon/diag.txt)" "only the alarms that occur"
 has "$out" "mib resets     : olt 3  local 0  olt in last 600 s 3  loop yes  (loops 1)  (pon/omcli_state.txt)" "the mib resets line"
 has "$out" "rx dropped     : length 0  devid 0  crc 2  (trailer odd, answered: 0)  (pon/omcli_state.txt)" "the rx dropped line"
@@ -131,6 +131,15 @@ has "$out" "previous boot  : ended by wdt_userland  (ramlog_prev.txt)" "the prev
 has "$out" "boot count     : boot=1 short_before=0 limit=5 wdt_before=0 wdt_limit=3 prev=wdt_userland uptime=5  (dmesg.txt)" "the boot count line"
 has "$out" "failed steps   : module/a0.txt (rc 1)  (MANIFEST.txt)" "failed steps: a number other than 0, not a dash"
 grep -q '^SAFE MODE' "$out" && no "no safe-mode line on a normal boot" "$(cat "$out")" || ok "no safe-mode line on a normal boot"
+# A wrapped or rate-limited log is not a complete count since boot.
+cp "$D/dmesg.txt" "$T/dmesg.keep"
+printf '[ 7000.000000] unrelated message after log wrap\n' > "$D/dmesg.txt"
+printf 'onu_transitions O5 O2 3\n' > "$D/pon/odi_gpon-counters.txt"
+sh "$S" "$D" > "$T/s2" 2>&1
+has "$T/s2" "left O5        : 0 in retained log  (dmesg.txt)" "wrapped log: zero only describes retained lines"
+has "$T/s2" "LOS / LOF      : 0 / 0 in retained log  (dmesg.txt)" "wrapped log: alarm counts are limited too"
+cp "$T/dmesg.keep" "$D/dmesg.txt"
+
 # The trial slot: 0 or 1 pending, a failed or empty read unknown, not none.
 cp "$D/nv.txt" "$T/nv.keep"
 sed -i 's/^getenv sw_tryactive: sw_tryactive=2$/getenv sw_tryactive: sw_tryactive=0/' "$D/nv.txt"

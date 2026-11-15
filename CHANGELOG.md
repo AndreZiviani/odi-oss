@@ -5,11 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Diagnostics: label O5 departures and LOS/LOF counts as events in the
+  retained log, not totals since boot. A wrapped or rate-limited dmesg
+  must not turn missing history into an all-clear.
+
 - Diagnostics bundle: two files at the top for whoever reads it. `README.md`
   names the image, says what is redacted and whether the identity is masked,
   maps questions to files and lists what a report has to add (ISP, router,
   what changed). `SUMMARY.txt` is one screen of facts from the bundle files:
-  ONU state and its last change, O5 drops this boot by `cause`, LOS and LOF,
+  ONU state and its last change, O5 drops in the retained log by `cause`, LOS and LOF,
   alarms set now, the `omcli state` reset and drop counts, optics, why the
   previous boot ended, the safe-mode boot count and the failed steps. The new
   `diag-summary.sh` writes it and reads only the bundle, so it also runs on a
