@@ -20,6 +20,15 @@ listed here.
   needs no FwdOp override (`RTK_DEVINFO_SPECVER`) and does not set one.
   Refs #301.
 
+- Tests: `src/omci/mcast-test.sh` no longer reads a policy exported in the
+  middle of the 34 ranges as the final one. On a slow or busy runner omcid
+  could rebuild while the ranges still arrived (after a quiet second, or at
+  the 5 s cap), and that export's log line already met the count the test
+  waited for; the checks then read a policy with fewer ranges or without the
+  overflow flag. The test now waits for the newest range in the policy file,
+  which only the export after the last range lists, and then for the answer
+  to an inert Get, so that export's log line is out before the later counts.
+
 ## v1.17.0 (2026-11-16)
 
 - Releases: confd v1.17.0 and metricsd v1.11.0. The web UI adds a link

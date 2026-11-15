@@ -302,7 +302,12 @@ while [ "$i" -le 34 ]; do
 	send "$log" "01$(printf '%02x' "$i")" 48 0135 0001 "0200${row}e1ffffff000000000000"
 	i=$((i + 1))
 done
-written "$log" $((n + 4))
+# omcid may export while the ranges still arrive (a quiet second, or the
+# cap), and that export's line would meet a count of written lines. Wait for
+# the newest range instead: only the export after range 34 lists it. Then a
+# sentinel, so its log line is out before the counts below.
+wait_for /var/run/odi-mcast.conf '^allow=225\.0\.0\.34-' 15
+sync_send "$log"
 check "34 ranges: the first 32 are listed" "$(policy | grep -c '^allow=')" "32"
 check "34 ranges: the overflow is flagged" "$(policy | grep -c '^allow_overflow=1')" "1"
 
