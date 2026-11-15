@@ -366,8 +366,11 @@ int read_line(int fd, char *dst, int max)
 		char c;
 		long r = sys_read(fd, &c, 1);
 
-		if (r <= 0)
-			return n ? n : -1;   /* partial last line still counts */
+		if (r <= 0) {
+			if (!n)
+				return -1;
+			break;               /* partial last line still counts */
+		}
 		if (c == '\n')
 			break;
 		if (c == '\r')

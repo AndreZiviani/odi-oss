@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- diag: a last input line without a newline is read as it stands. Before, a
+  line shorter than the one before it kept the end of that line, so a batch
+  that ended on `exit` without a newline ran `exitget ...` instead.
 - omcid: a Delete of an 802.1p mapper (class 130) rebuilds the bridge
   connections, as its Create and Set do. Before, the rules built from the
   deleted mapper stayed in the switch until another change marked the bridge
