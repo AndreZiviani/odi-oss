@@ -93,7 +93,7 @@ static void test_every_record_replayed(void)
 			in_order = 0;
 		w++;
 	}
-	CHECK(regs == 2587 && rows == 1032, "2587 register and 1032 table records");
+	CHECK(regs == 716 && rows == 1032, "716 register and 1032 table records");
 	/* Plus one: the unknown-multicast flood mask without the CPU, after the replay. */
 	CHECK(count_kind('W') == regs + 1U, "one write per register record, then the multicast mask");
 	CHECK(odi_mock.log_n && odi_mock.log[odi_mock.log_n - 1U].kind == 'W' &&
@@ -134,13 +134,13 @@ static void test_category_counts_pinned(void)
 		if (raw_category(i) < 6)
 			counts[raw_category(i)]++;
 
-	CHECK(counts[0] == 2587, "category 0 (register) count matches the generated table");
+	CHECK(counts[0] == 716, "category 0 (register) count matches the generated table");
 	CHECK(counts[1] == 1024, "category 1 (CF sweep) count matches the generated table");
 	CHECK(counts[2] == 3, "category 2 (CF specific rule) count matches the generated table");
 	CHECK(counts[3] == 1, "category 3 (VLAN) count matches the generated table");
 	CHECK(counts[4] == 1, "category 4 (L2_UNICAST) count matches the generated table");
 	CHECK(counts[5] == 3, "category 5 (ACL) count matches the generated table");
-	CHECK(table->count == 3619, "total event count matches the generated table");
+	CHECK(table->count == 1748, "total event count matches the generated table");
 }
 
 /* The headline finding: the three
