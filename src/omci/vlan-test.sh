@@ -397,6 +397,50 @@ check "an entry with an EtherType filter on tagged frames: the table is not appl
 got=$(grep -c 'ext vlan 171/0001 entry 1: OLT rule not applied (an EtherType filter on tagged frames), transparent' /tmp/omcid-171-ev-bad.log)
 check "and the log names entry and reason, once" "$got" "1"
 
+# A table longer than omcid reads is refused whole, never read in part. New
+# entries go at the head of the list, so the ones a cap leaves out are those
+# written first: here the default discards, written before eleven
+# translations (VID 401..411 -> 1401..1411). Thirteen entries are read whole,
+# and the single-tag default discards the tagged frames no entry names.
+# xlate <first> <last>: one translation entry per VID, VID + 1000 out.
+xlate() {
+	v=$1
+	while [ "$v" -le "$2" ]; do
+		printf 'f8000000%08x400f8000%08x ' $((0x80000000 | v << 15)) $((0x80004 | (v + 1000) << 3))
+		v=$((v + 1))
+	done
+}
+# shellcheck disable=SC2046
+sessionx 8100 8100 "$DEF1" "$DEF2" $(xlate 401 411) > /tmp/s171-13.txt
+run171 ev-13 /tmp/s171-13.txt
+got=$(rebuild /tmp/omcid-171-ev-13.log 0)
+check "thirteen entries, the default discards written first: all applied" "$got" \
+"47/0ffe gem 4094 rule forward-all vid -1 pri -1
+47/1002 gem 657 rule ext-vlan vid 401 pri -1
+47/1002 gem 657 rule ext-vlan vid 402 pri -1
+47/1002 gem 657 rule ext-vlan vid 403 pri -1
+47/1002 gem 657 rule ext-vlan vid 404 pri -1
+47/1002 gem 657 rule ext-vlan vid 405 pri -1
+47/1002 gem 657 rule ext-vlan vid 406 pri -1
+47/1002 gem 657 rule ext-vlan vid 407 pri -1
+47/1002 gem 657 rule ext-vlan vid 408 pri -1
+47/1002 gem 657 rule ext-vlan vid 409 pri -1
+47/1002 gem 657 rule ext-vlan vid 410 pri -1
+47/1002 gem 657 rule ext-vlan vid 411 pri -1
+47/1002 gem 657 rule untagged vid -1 pri -1"
+got=$(grep -c 'OLT rule not applied' /tmp/omcid-171-ev-13.log)
+check "and nothing is said about a rule not applied" "$got" "0"
+
+# Thirty-five entries, one past what omcid reads: the table is not applied,
+# and the log says so, once.
+# shellcheck disable=SC2046
+sessionx 8100 8100 "$DEF1" "$DEF2" $(xlate 401 433) > /tmp/s171-35.txt
+run171 ev-35 /tmp/s171-35.txt
+got=$(rebuild /tmp/omcid-171-ev-35.log 0)
+check "thirty-five entries: the table is not applied" "$got" "$TRANSPARENT"
+got=$(grep -c 'ext vlan 171/0001 entry 34: OLT rule not applied (more entries than omcid keeps), transparent' /tmp/omcid-171-ev-35.log)
+check "and the log says why, once" "$got" "1"
+
 # ---- the EtherType of untagged frames ---------------------------------------
 #
 # IPoE, PPPoE (two EtherTypes, so two rules) and ARP each to its own VLAN, and

@@ -309,7 +309,8 @@ omcid. Two ways, tried in this order:
    which result VIDs are admitted. The single-tag default rule decides whether
    tagged frames the table does not name pass: a discard there means they do
    not. The table is applied whole or not at all: one entry the classifier
-   cannot carry out leaves every frame as it comes, and omcid logs once
+   cannot carry out, or more than the 34 entries omcid reads in one
+   instance, leaves every frame as it comes, and omcid logs once
    `ext vlan 171/<instance> entry <n>: OLT rule not applied (<reason>),
    transparent`; that line is what to report.
 

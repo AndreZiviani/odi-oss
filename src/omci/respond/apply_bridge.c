@@ -559,7 +559,31 @@ static int olt_tagged_pass;
  * Called before the rules are built, so a change of class 171 (Set, Create,
  * Delete) is picked up by the rebuild it sets conn_dirty for. */
 #define EXTVLAN_ASSOC_ETH_UNI 2
-#define EXTVLAN_ENTRIES_MAX   12
+
+/* The entries of one class 171 table that are read: as many as an ingress
+ * keeps (EV_RULES_MAX rules and EV_DROPS_MAX discards, below) and the default
+ * rules for single- and double-tagged frames, 16 bytes each on the stack. A
+ * longer table is refused whole and said so, never read in part: new entries
+ * go at the head of the list, so the ones past the cap are those the OLT
+ * wrote first. */
+#define EXTVLAN_ENTRIES_MAX   34
+
+static const char EV_TOO_LONG[] = "more entries than omcid keeps";
+
+/* The entries of a class 171 row into `tbl`. Returns how many, or -1 when
+ * there are more than EXTVLAN_ENTRIES_MAX. */
+static int ev_copy(const struct mib_row *r, uint8_t *tbl)
+{
+	int n = 0;
+
+	for (uint8_t t = r->tbl_head; t != MIB_TBL_NONE; t = tblpool[t].next, n++) {
+		if (n >= EXTVLAN_ENTRIES_MAX)
+			return -1;
+		for (int b = 0; b < EVTOCD_ENTRY_LEN; b++)
+			tbl[n * EVTOCD_ENTRY_LEN + b] = tblpool[t].data[b];
+	}
+	return n;
+}
 
 static const char *olt_logged;
 static int olt_logged_vid = -1, olt_logged_pri = -1;
@@ -593,15 +617,16 @@ static int olt_tag(int *pri, const char **why_out)
 	for (int i = 0; i < MIB_ROWS; i++) {
 		struct mib_row *r = mib_row_at(i);
 		uint8_t tbl[EXTVLAN_ENTRIES_MAX * EVTOCD_ENTRY_LEN];
-		int n = 0, p = 0, v = 0;
+		int n, p = 0, v = 0;
 
 		if (!r || r->classId != OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA ||
 		    row_u32(r, c171, 1) != EXTVLAN_ASSOC_ETH_UNI)
 			continue;
-		for (uint8_t t = r->tbl_head; t != MIB_TBL_NONE &&
-		     n < EXTVLAN_ENTRIES_MAX; t = tblpool[t].next, n++)
-			for (int b = 0; b < EVTOCD_ENTRY_LEN; b++)
-				tbl[n * EVTOCD_ENTRY_LEN + b] = tblpool[t].data[b];
+		n = ev_copy(r, tbl);
+		if (n < 0) {
+			why = EV_TOO_LONG;
+			break;
+		}
 		why = evtocd_olt_tag(tbl, n, (uint16_t)row_u32(r, c171, 4), &v, &p,
 				     &olt_tagged_pass);
 		if (!why) {
@@ -1172,17 +1197,18 @@ static int ev_read(const struct omci_class *c171, struct mib_row *r, struct ev_i
 {
 	uint16_t in_tpid = (uint16_t)row_u32(r, c171, 3), out_tpid = (uint16_t)row_u32(r, c171, 4);
 	uint8_t dsmode = (uint8_t)row_u32(r, c171, 5);
-	int n = 0, added = 0;
+	int n, added = 0;
 	uint8_t tbl[EXTVLAN_ENTRIES_MAX * EVTOCD_ENTRY_LEN];
 
 	if (!in_tpid)
 		in_tpid = EVTOCD_TPID_C;
 	if (!out_tpid)
 		out_tpid = EVTOCD_TPID_C;
-	for (uint8_t t = r->tbl_head; t != MIB_TBL_NONE && n < EXTVLAN_ENTRIES_MAX;
-	     t = tblpool[t].next, n++)
-		for (int b = 0; b < EVTOCD_ENTRY_LEN; b++)
-			tbl[n * EVTOCD_ENTRY_LEN + b] = tblpool[t].data[b];
+	n = ev_copy(r, tbl);
+	if (n < 0) {
+		ev_bad(EV_TOO_LONG, EXTVLAN_ENTRIES_MAX, r->inst);
+		return 0;
+	}
 
 	for (int i = 0; i < n; i++) {
 		struct evtocd_entry e;
@@ -1322,8 +1348,9 @@ static int ev_build(const int *ingress, const int *bport, const int *iphost, int
 		anygood += got;
 	}
 	/* Not one entry was a plan: that is not a table to apply, and the
-	 * reason olt_tag() found is the one to give. */
-	if (ev_bad_why && !anygood)
+	 * reason olt_tag() found is the one to give. A table too long to read
+	 * is said here, as olt_tag() reads only the instances on the UNI. */
+	if (ev_bad_why && !anygood && ev_bad_why != EV_TOO_LONG)
 		ev_bad_why = 0;
 	if (ev_bad_why) {
 		for (int g = 0; g < 8; g++)
