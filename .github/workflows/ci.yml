@@ -249,7 +249,7 @@ jobs:
         run: tools/ci-apt.sh qemu-system-mips
 
       # Everything test-qemu boots except the kernel (a stock, prebuilt
-      # image, toolchain/images.env): busybox, dropbear/ip/bridge, our own
+      # image, toolchain/images.env): busybox, dropbear/ip, our own
       # freestanding tools, and confd/metricsd from their own releases.
       - name: busybox, packages, src, releases
         run: |

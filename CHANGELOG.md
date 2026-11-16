@@ -16,6 +16,76 @@ listed here.
   nothing was logged. A mapper that names one GEM port and leaves some
   priorities unmapped now gets the same single rules as on the class 84
   path, not one rule per mapped priority. Refs #434.
+- trial-guard: the loopback addresses it skips are matched as the stick's
+  big-endian kernel prints them in `/proc/net/tcp` (127.0.0.1 as `7F000001`),
+  not in the little-endian form. Before, a management host at an address
+  ending in .127 never counted as TCP proof that the new image is reachable,
+  so a trial could revert although that host was connected, and a connection
+  between two different 127/8 addresses counted as proof. The test fixtures
+  use the big-endian form now. Refs #437.
+- Identity trial: reject quotes, `<` and `&` before re-registering, since
+  `flash set` cannot persist them. Restore empty saved credentials too when
+  a later write fails, instead of leaving a mixed identity in the store.
+
+- Identity trial: `identity-trial.sh try KEY=VALUE...` changes `GPON_SN`,
+  `GPON_PLOAM_PASSWD`, `LOID` or `LOID_PASSWD` as a trial. The values go to
+  `/var/run/identity-trial.conf`, which omcid reads over the store, and omcid
+  re-registers with them; a refused, timed-out or service-less
+  re-registration, or a MIB reset loop that starts within 600 s on a line that
+  had none, goes back to the stored identity by itself (`apply.sh omci
+  --revert`). After 600 s, or `keep`, the values are stored; a key the store
+  refuses puts the keys already written back, so a reboot never registers with
+  a mix of old and new values. A revert whose reload fails stays
+  `revert_failed`, and `revert` tries again. A reboot undoes a
+  trial. `status` shows the ONU state, services and MIB resets before and
+  after. The web UI does not use it yet. Refs #392.
+- omcid: re-registrations are counted, and held back after refusals. Every
+  re-registration a changed identity starts is one line in
+  `/etc/config/odi-reregister` (the newest 16: time, change or revert, result,
+  Deactivate_ONU-IDs, key names, never values). Three Deactivate_ONU-IDs for
+  the stick's own ONU-ID before O5, or O7, end the wait at once with
+  `result=refused`; one or two do not. The kernel counts them in the new
+  `deact_directed` line of `/proc/odi_gpon/status`; a broadcast, or one for
+  another ONU on the PON, is not counted. omcid never deactivates the ONU
+  itself after a refusal. After one refused change `apply.sh omci` warns; after two in a row
+  (within 24 h) omcid holds a changed identity back (`result=held`, the ONU
+  stays on the identity it runs) until `apply.sh omci --confirm`. While it
+  holds, `flash set` refuses to store a changed `GPON_SN`,
+  `GPON_PLOAM_PASSWD`, `LOID`, `LOID_PASSWD`, `LOID_OLD` or
+  `LOID_PASSWD_OLD`, and `flash default cs` to reset one, so a held change
+  never reaches the store and a reboot cannot apply it
+  (`/var/run/omcid-reregister.hold`); `identity-trial.sh try --confirm` stores
+  it once the OLT accepts it.
+  `apply.sh omci --revert` is the confirmation for going back, recorded as a
+  revert and skipped by the count. `omcli state` adds a `reregister` line,
+  `event=reload_done` a `refusals` field, the status file `refusals`,
+  `streak` and `today`. Refs #391.
+- Kernel: Linux 6.18.63 (was 6.18.58), the upstream stable updates.
+- scripts: `host-autoneg.sh`, `host-serdes.sh` and `mgmt-addr.sh` share the
+  lock, the state file, the event line and the trial run, expiry and revert
+  through `/etc/scripts/trial-lib.sh`, as rcS and rcS.pon share
+  `rcs-lib.sh`, instead of three copies. Their behaviour is the same, with
+  two exceptions in edge cases: the lock of `host-autoneg.sh` and
+  `mgmt-addr.sh` gives up when its directory cannot be made at all, as the
+  one of `host-serdes.sh` already did, instead of waiting for ever; and a
+  state file of `mgmt-addr.sh` that cannot be renamed into place now makes
+  the save fail, as in the other two. Issue #424.
+- image: `/sbin/bridge` from iproute2 is no longer built or shipped. No
+  script, daemon, the web UI or the exporter calls it; `br0` is set up with
+  the busybox `brctl` applet, and `ip` stays. The v1.16.0 binary was 256,452
+  bytes, 84,472 with xz. Issue #423.
+- image: busybox is built from an explicit applet list,
+  `packages/busybox/applets.txt`: 176 applets instead of 385, and the
+  binary goes from 1,479,444 to 933,412 bytes (587,788 to 379,828 with xz).
+  Left out are, among others, the servers nothing here starts (`crond`,
+  `udhcpd`, `tcpsvd`), the runit tools, the module tools (the kernel has no module
+  support), the disk, filesystem, console and mail tools, and the `telnet`,
+  `ftpget` and `tftp` clients. Everything the boot scripts, the services,
+  `fwu.sh`, the web UI and the exporter call stays, and so do the tools the
+  docs name. The busybox build refuses a binary whose applets differ from
+  the list, and `make lint` (`make check-applets`, `tools/check-applets.py`)
+  refuses an on-device script, `/etc/inittab` line or `fwu.sh` command the
+  image does not ship. Issue #423.
 - docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
   mapper with one target forwards the tagged frames of a priority the mapper
   sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.
@@ -194,6 +264,10 @@ listed here.
   omcid keeps out of its log, the LOID and password, the serial number and
   the MACs are overwritten; `--full` keeps them. The diag bundle adds
   `pon/omci.pcap`, always masked. Issue #394.
+- `make -C src/diag ssp-test` no longer leaves core files in `src/diag`. Its
+  overrun case aborts on purpose, and in a container with an unlimited core
+  size it wrote `core.N` and a qemu core there, which `make lint` (REUSE)
+  then refused when the two ran side by side in `make test`.
 - omcid: a MIB reset loop is named instead of left to be counted in the log.
   Three or more MIB resets from the OLT within 600 s log one
   `event=mib_reset_loop state=start` (warning), and `state=end` after 600 s

@@ -252,8 +252,50 @@ keys=...` (key names, never values), `event=reload_step verb=... rc=...` for
 each driver verb, and `event=reload_done ... result=... duration_s=...
 [o5_s=...] services=N`. They are never rate limited. `/var/run/omcid-reload`
 holds the same outcome for `apply.sh` (`id` pid.sequence, `state`, `changed`,
-`action`, `result`, `keys`, `duration_ms`, `o5_ms`, `services`), replaced whole
-by a rename; omcid removes a stale one at start.
+`action`, `result`, `keys`, `duration_ms`, `o5_ms`, `services`, and for an
+identity change `refusals`, `streak` and, with the clock set, `today`),
+replaced whole by a rename; omcid removes a stale one at start.
+
+**Re-registrations are counted, and held back after refusals.** Some
+operators are said to block a line after a few refused registrations, and a
+wrong serial number or password costs one with every try. While a
+re-registration waits for O5, omcid counts the Deactivate_ONU-ID PLOAMs the
+OLT sends to the stick's own ONU-ID (`deact_directed` in
+`/proc/odi_gpon/status`; a broadcast, or one for another ONU on a shared PON,
+is not counted, and a kernel without the line counts nothing). Three of them before O5, or
+O7 (the OLT disabled the serial number), end the wait at once with
+`result=refused`; one or two do not, since an OLT may turn a correct
+credential down for a few discovery windows before it admits it. Every
+re-registration is one line in `/etc/config/odi-reregister` on the config
+partition, the newest 16 kept: the wall clock (0 while it is not set), `c` for
+a change or `r` for a revert (`apply.sh omci --revert`, the identity trial
+going back), the result, the deactivations and the key names, never values.
+From that record:
+
+- `refused` and `timeout` (an unknown serial number is never ranged) are
+  refusals; `ok`, `no_services` and `sn_not_applied` are accepted (the OLT
+  ranged the ONU); `failed` (a local driver step) is neither.
+- **streak**, the refused changes in a row, newest first, within 24 h when the
+  clock is set: an accepted change ends it, reverts are skipped.
+- From one refusal on `apply.sh omci` warns; from **two**, omcid holds a
+  changed identity back: `event=reload changed=identity action=held`,
+  `result=held`, the ONU stays on the identity it runs and nothing reaches the
+  driver or the record. `apply.sh omci --confirm` confirms one reload (a file
+  in `/var/run` that every reload takes away, used or not), and a change
+  confirmed that way is counted like any other. While the streak holds,
+  omcid keeps `/var/run/omcid-reregister.hold` (`streak <n>`), and `flash`
+  refuses to store a changed identity key (`GPON_SN`, `GPON_PLOAM_PASSWD`,
+  `LOID`, `LOID_PASSWD`, `LOID_OLD`, `LOID_PASSWD_OLD`) or to reset one with
+  `default cs`, so a held change never reaches the store and no reboot or
+  respawn applies it. `identity-trial.sh try --confirm` stores it once the OLT
+  accepts it. The file goes when an accepted change ends the streak or the
+  refusals leave the 24 h. omcid never deactivates the ONU itself after a
+  refusal: it behaves like the stock stack.
+- `today`, the accepted changes in the last 24 h (with the clock set):
+  `apply.sh omci` warns from five on, and holds nothing.
+
+`omcli state` shows the record (`reregister`). The numbers are starting
+values: no operator's real limit is known here.
 
 ### `confd` -- the web UI
 
@@ -927,7 +969,13 @@ omcli uses omcid's own queue and commands:
                                          each kind (`unknowns`), the
                                          refused answers by result
                                          (`rejected`) and the first 16
-                                         refusal lines
+                                         refusal lines, and
+                                         the re-registrations recorded
+                                         (`reregister`: how many, refused
+                                         in a row, accepted in 24 h, the
+                                         last result, and whether a change
+                                         is held until `apply.sh omci
+                                         --confirm`)
     omcli provision                      what the OLT provisioned: T-CONTs,
                                          GEM ports, VLANs, traffic descriptors
                                          (the format is under metricsd)
@@ -1515,6 +1563,58 @@ the web UI reads the file:
 Nothing persists across a reboot: the state and the trial file are in
 `/var/run`, and the keys are written only by `confirm`.
 
+### `identity-trial.sh` -- the line identity, as a trial
+
+    /etc/scripts/identity-trial.sh try [--confirm] KEY=VALUE...   a trial of GPON_SN, GPON_PLOAM_PASSWD, LOID, LOID_PASSWD
+    /etc/scripts/identity-trial.sh keep                           store the values now (once back in O5 with services)
+    /etc/scripts/identity-trial.sh revert                         end the trial now, back to the stored identity
+    /etc/scripts/identity-trial.sh status                         the state, key=value
+
+A wrong serial number or PLOAM password leaves the line down until someone
+changes it back, so `try` stores nothing. It writes the values to
+`/var/run/identity-trial.conf` (mode 0600, a tmpfs), which omcid reads over the
+store (`cfgstore.c`), and starts a watcher in the background that runs
+`apply.sh omci` (170 s: omcid waits 150 s for O5) and judges the outcome:
+
+- `refused`, `timeout`, `no_services`, `sn_not_applied` or `failed`: the trial
+  goes back at once: the RAM file is removed and `apply.sh omci --revert`
+  re-registers with the stored identity (the re-registration guard lets a
+  revert through and does not count it; "omcid", "Re-registrations are
+  counted");
+- `ok`: the trial watches for 600 s, the MIB reset loop window. A loop that
+  starts then, on a line that had none before the trial (`omcli state`, `mib
+  resets`), goes back too. At the end of the window, or at `keep`, the
+  values are written with `flash set` (LOID and LOID_PASSWD to `LOID_OLD` and
+  `LOID_PASSWD_OLD` as well, where the store has them, so the LOID rule of
+  `docs/SETTINGS.md` answers the new values) and the RAM file removed; omcid
+  then reads from the store what it already runs, and nothing re-registers;
+- `held`: omcid did not re-register (two refused changes in a row); the RAM
+  file is removed and nothing else happens. `try --confirm` passes the
+  confirmation on.
+
+`--confirm` aside, `try` checks the keys (only the four, `GPON_SN` in the
+shape the driver takes) and refuses while a trial runs. A `revert` asked for
+while omcid still re-registers takes effect when that re-registration ends.
+A reboot undoes a trial: the RAM file is gone and the boot reads the store.
+An omcid respawn reads the RAM file and keeps the trial values.
+
+The state file, `/var/run/identity-trial`, and `status`, one `key=value` per
+line; key names, never values:
+
+| key | meaning |
+|---|---|
+| `phase` | `steady`, `applying` (omcid re-registers), `watching` (back in O5, the loop window) or `revert_failed` (the revert reload failed: `identity-trial.sh revert` tries again) |
+| `keys` | the key names of the trial |
+| `outcome` | `kept`, `reverted`, `held`, `revert_failed` (the reload back to the store failed, so omcid may still run the trial values), `store_failed` (the OLT took the values but `flash set` refused one: the keys already written go back, so the store keeps the identity before the trial; the RAM file stays, so omcid keeps answering the trial values until a reboot reads the store) or `store_mixed` (as `store_failed`, but a key could not go back: the store holds a mix, set it by hand before a reboot) |
+| `reason` | why a trial went back: the reload result, `mib_reset_loop`, `asked` or `no_answer` |
+| `result`, `refusals` | the reload result of the trial and the Deactivate_ONU-IDs omcid counted |
+| `before_onu`, `before_services`, `before_olt_resets`, `before_loop` | the ONU state, the services, the OLT MIB resets and whether they were a loop, before the trial |
+| `after_onu`, `after_services`, `after_olt_resets`, `after_loop` | the same when it ended |
+| `trial_file`, `warning` (`status` only) | whether the RAM file exists; a warning when the watcher is gone during a trial |
+
+Each step is one line to the kernel log, `identity-trial: event=identity_trial
+keys=... state=start|watching|kept|revert|reverted|revert_failed|held|store_failed|store_mixed`.
+
 ### `safe-mode.sh` -- the boot counter and the recovery boot
 
     /etc/scripts/safe-mode.sh status     this boot and the record, key=value
@@ -1701,7 +1801,7 @@ drivers behind them.
 | file | read | write |
 |---|---|---|
 | `/dev/odi_sw` | ioctls: registers, MIB counters, DDM, the L2 table, the ACL probes, the multicast group counters (diag, metricsd, igmpd) | register writes (diag), L2 multicast writes, the snooping lease and the group counters (igmpd -w), the ACL probes (diag acl-probe), the group counters (diag mc-count) |
-| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), the last PON-ID since the last loss of signal (`pon_id odn_class <0-7> reach_extender <0|1> tol <n> id <14 hex digits> ms <ms since boot>`, or `pon_id none`: G.984.3 Annex C, sent only by an OLT provisioned to; `odn_class` 0 A, 1 B, 2 B+, 3 C, 4 C+; `reach_extender` 1 when TOL is a reach extender's rather than the OLT's; `tol` the mean launch power in 0.1 dB steps above -30 dBm, so `tol 334` is +3.4 dBm and the path loss is about that less the stick's receive power, 65535 when the OLT does not report it; `id` the PON identifier the operator set), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
+| `/proc/odi_gpon/status` | ONU state, ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `deact_directed <n>` (the Deactivate_ONU-ID PLOAMs addressed to the ONU-ID the ONU holds, counted since the driver loaded; broadcasts and other ONUs' are not: omcid counts refusals from it), `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), the last PON-ID since the last loss of signal (`pon_id odn_class <0-7> reach_extender <0|1> tol <n> id <14 hex digits> ms <ms since boot>`, or `pon_id none`: G.984.3 Annex C, sent only by an OLT provisioned to; `odn_class` 0 A, 1 B, 2 B+, 3 C, 4 C+; `reach_extender` 1 when TOL is a reach extender's rather than the OLT's; `tol` the mean launch power in 0.1 dB steps above -30 dBm, so `tol 334` is +3.4 dBm and the path loss is about that less the stick's receive power, 65535 when the OLT does not report it; `id` the PON identifier the operator set), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
 | `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
@@ -1735,7 +1835,7 @@ missing one as nothing to report.
 
 | file | lines |
 |---|---|
-| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `enc_ports`, `rei_count`, `to1_expiries`, `to2_expiries`, `irq_*`, `laser`, `laser_emergency_stop`, `last_los_ms`, `upstream_overhead`, `ranging_time`, `pon_id`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
+| `status` | `state`, `onu_id`, `sn`, `eqd`, `alloc_ids`, `enc_ports`, `rei_count`, `to1_expiries`, `to2_expiries`, `deact_directed`, `irq_*`, `laser`, `laser_emergency_stop`, `last_los_ms`, `upstream_overhead`, `ranging_time`, `pon_id`, then the sampler's `alarm_now`, `fec_now`, `ds_superframe`, `alarm_events`, `alarm_ms`, `onu_state_ms`, `onu_transitions` |
 | `counters` | `ctr_samples`, `ctr_ds_superframe`, `ctr_fec_now`, `ctr`, `ctr_saturated` |
 | `flows` | `flow_ack_timeouts`, `flow_saturated`, `ds`, `us` |
 | `ploam` | `ploam ds_rx us_tx`, `ploam_us_dropped`, `ploam_type`, `ploam_ring` |
@@ -1897,7 +1997,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=vlan_fwdop code=0x10 inst=4354 result=override built_as=0x00` | notice | a class 84 port built with the FwdOp the owner set in `RTK_DEVINFO_SPECVER` (docs/SETTINGS.md) instead of the code the OLT wrote; once per port and pair of codes per omcid run |
 | `omcid: event=reload changed=vlan action=rebuild keys=VLAN_MANU_TAG_VID` | notice | omcid took a SIGHUP (`apply.sh omci`) and reread the store: `changed` is `none`, `vlan` (bridge connections rebuilt in place, the ONU stays in O5) or `identity` (`action=reregister`: the ONU is deactivated and ranged again); `keys` names the store keys that differ, never their values. Never rate limited |
 | `omcid: event=reload_step verb=gponsn rc=0` | info, notice when `rc` is not 0 | one driver verb of a re-registration (`gpondeact`, `gponsn`, `gponpw`, `gponact`) and its errno (0 is success) |
-| `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services |
+| `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `refused` (three Deactivate_ONU-IDs before O5, or O7); `held` (the identity change was held back after two refused ones, `action=held`); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services; `refusals`, on a re-registration, the Deactivate_ONU-IDs while it waited ("omcid", "Re-registrations are counted") |
 | `host-autoneg: event=fallback setting=off running=on ...` | notice | the host-port auto-negotiation (`HOST_AUTONEG`): the boot watch, the fallback and every trial; the events are listed under `host-autoneg.sh` above |
 | `host-serdes: event=fallback setting=2500basex running=fiber1g ...` | notice | the host SerDes mode (`HOST_SERDES`): the boot watch, the fallback, every trial and reapply; the events are listed under `host-serdes.sh` above |
 | `sfp-host-ddm: event=requested setting=on ...` | notice | the host-side SFP EEPROM (`SFP_HOST_DDM`): `requested` (the boot asked the kernel), `off` (the key is 0), `safe_mode_boot`, `bad_value`, `no_kernel`, and from `apply` `applied`, `apply_failed` or `apply_timeout`. The kernel's own lines start `odi_sfp_mirror:` (`host EEPROM on`, `host EEPROM off`, and each failure, once) |

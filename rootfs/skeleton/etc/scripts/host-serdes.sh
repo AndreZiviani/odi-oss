@@ -108,20 +108,21 @@ LOCK_S=${LOCK_S:-10}            # waiting for the lock
 say() { echo "host-serdes: $*"; }
 die() { echo "host-serdes: $*" >&2; exit 1; }
 
-uptime_s() { cut -d. -f1 "$UPTIME" 2>/dev/null; }
+# The lock, the state file, the event line and the trial run
+# (trial-lib.sh). The lock is the host-port lock, shared with
+# host-autoneg.sh (the directory keeps the name it had before this script).
+TAG=host-serdes
+LOCK_OWNER="host-port change"
+LOCK_STRICT=1
+STATE_KEYS="setting running phase fallback trial_mode trial_prev trial_id
+	trial_deadline watch_until event:ev event_uptime:ev_up message:ev_msg"
+# Next to this script; ${0%/*} rather than dirname, which would be one more
+# process on the boot path (and in the rcS trace goldens).
+case $0 in */*) TRIAL_LIB=${TRIAL_LIB:-${0%/*}/trial-lib.sh} ;; *) TRIAL_LIB=${TRIAL_LIB:-./trial-lib.sh} ;; esac
+# shellcheck source=rootfs/skeleton/etc/scripts/trial-lib.sh
+. "$TRIAL_LIB"
 
-# event NAME TEXT: one line to the kernel log (dmesg, the ramlog, and syslog
-# through klogd), at notice, and to stdout.
-event() {
-	name=$1
-	shift
-	line="event=$name setting=$setting running=$running $*"
-	printf '<5>host-serdes: %s\n' "$line" 2>/dev/null >> "$KMSG"
-	say "$line"
-	ev=$name
-	ev_up=$(uptime_s)
-	ev_msg=$*
-}
+event_fields() { echo "setting=$setting running=$running"; }
 
 # ---- the key, the modes
 
@@ -375,12 +376,6 @@ link_source() {
 	esac
 }
 
-# put_in_place FILE: puts FILE.new.$$ in place of FILE in one rename on the
-# same filesystem, so a reader or a power cut sees the old file or the new one.
-put_in_place() {
-	mv "$1.new.$$" "$1" 2>/dev/null || { rm -f "$1.new.$$"; return 1; }
-}
-
 # ---- the state file, /var/run/host-serdes
 
 clear_trial() { trial_mode='' trial_prev='' trial_id='' trial_deadline=''; }
@@ -389,85 +384,15 @@ load() {
 	setting=fiber1g running=fiber1g phase=steady fallback=0
 	clear_trial
 	watch_until='' ev='' ev_up='' ev_msg=''
-	[ -f "$STATE" ] || return 0
-	while IFS='=' read -r k v; do
-		case $k in
-		setting) setting=$v ;;
-		running) running=$v ;;
-		phase) phase=$v ;;
-		fallback) fallback=$v ;;
-		trial_mode) trial_mode=$v ;;
-		trial_prev) trial_prev=$v ;;
-		trial_id) trial_id=$v ;;
-		trial_deadline) trial_deadline=$v ;;
-		watch_until) watch_until=$v ;;
-		event) ev=$v ;;
-		event_uptime) ev_up=$v ;;
-		message) ev_msg=$v ;;
-		esac
-	done < "$STATE"
+	state_load
 }
-
-save() {
-	{
-		echo "setting=$setting"
-		echo "running=$running"
-		echo "phase=$phase"
-		echo "fallback=$fallback"
-		echo "trial_mode=$trial_mode"
-		echo "trial_prev=$trial_prev"
-		echo "trial_id=$trial_id"
-		echo "trial_deadline=$trial_deadline"
-		echo "watch_until=$watch_until"
-		echo "event=$ev"
-		echo "event_uptime=$ev_up"
-		echo "message=$ev_msg"
-	} > "$STATE.new.$$" || { rm -f "$STATE.new.$$"; say "could not write $STATE" >&2; return 1; }
-	put_in_place "$STATE" || { say "could not install $STATE" >&2; return 1; }
-}
-
-# ---- the lock: one host-port state change at a time, shared with
-# host-autoneg.sh (the directory keeps the name it had before this script).
-# mkdir is atomic; a holder that died is found by its pid and its lock taken
-# over. Returns 1 when the lock cannot be had within LOCK_S, or cannot be
-# made at all.
-
-lock() {
-	i=0
-	while ! mkdir "$LOCKDIR" 2>/dev/null; do
-		[ -d "$LOCKDIR" ] || [ -d "${LOCKDIR%/*}" ] || return 1
-		p=$(cat "$LOCKDIR/pid" 2>/dev/null)
-		if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then
-			rm -rf "$LOCKDIR"
-			continue
-		fi
-		# A holder killed between its mkdir and its pid write leaves no
-		# pid: after the wait, that lock is stale too.
-		if [ "$i" -ge "$LOCK_S" ] && [ -z "$p" ]; then
-			rm -rf "$LOCKDIR"
-			i=0
-			continue
-		fi
-		[ "$i" -lt "$LOCK_S" ] || return 1
-		"$SLEEP" 1
-		i=$((i + 1))
-	done
-	echo $$ > "$LOCKDIR/pid"
-}
-unlock() { rm -rf "$LOCKDIR"; }
-lock_or_die() { lock || die "busy: another host-port change holds $LOCKDIR"; }
-
-# spawn VERB ARGS...: this script again, detached, so it outlives the caller
-# (network.sh, confd). Its output goes to the services log.
-spawn() {
-	setsid sh "$SELF" "$@" < /dev/null >> "$LOG" 2>&1 &
-}
+save() { state_save; }
 
 # ---- boot
 
 boot() {
 	locked=0
-	if lock; then locked=1; else say "no lock ($LOCKDIR); applying anyway, the boot needs the link" >&2; fi
+	if lock_try; then locked=1; else say "no lock ($LOCKDIR); applying anyway, the boot needs the link" >&2; fi
 	load
 	raw=$(key_raw)
 	setting=$(parse "$raw")
@@ -538,7 +463,7 @@ boot_end() {
 # the mode it runs once a second.
 watch() {
 	t0=$(uptime_s)
-	lock_or_die
+	lock
 	load
 	unlock
 	[ "$phase" = watch ] || return 0
@@ -547,7 +472,7 @@ watch() {
 		i=0
 		while :; do
 			if [ "$(link "$mode")" = 1 ]; then
-				lock_or_die
+				lock
 				load
 				if [ "$phase" != watch ]; then
 					unlock
@@ -569,7 +494,7 @@ watch() {
 			"$SLEEP" 1
 			i=$((i + 1))
 		done
-		lock_or_die
+		lock
 		load
 		if [ "$phase" != watch ]; then
 			unlock
@@ -625,7 +550,7 @@ try() {
 	case $secs in ''|*[!0-9]*) die "SECONDS must be a number" ;; esac
 	[ "$secs" -ge 10 ] && [ "$secs" -le "$TRIAL_MAX_S" ] || die "SECONDS must be 10 to $TRIAL_MAX_S"
 	precheck "$mode"
-	lock_or_die
+	lock
 	load
 	refuse_busy
 	if [ "$mode" = "$running" ] && [ "$mode" = "$setting" ]; then
@@ -644,43 +569,18 @@ try() {
 	return 0
 }
 
-# trial-run ID SECONDS: one second for the caller answer to leave, the
-# switch, then the window, then the expiry.
-trial_run() {
-	id=$1 secs=$2
-	"$SLEEP" 1
-	lock_or_die
-	load
-	if [ "$phase" != trial ] || [ "$trial_id" != "$id" ]; then
-		unlock
-		return 0
-	fi
-	if switch_to "$trial_mode"; then
-		running=$trial_mode
-		# expire and revert go by the file. If it cannot be written it
-		# still says the mode before, and they would leave the port in
-		# the trial mode: back at once. The expiry below gets a second
-		# go at the file.
-		save || back_to_prev trial_failed "could not write $STATE"
-	else
-		running=$trial_mode
-		back_to_prev trial_failed "the $(label "$trial_mode") registers did not read back"
-		unlock
-		return 1
-	fi
-	unlock
-	"$SLEEP" "$secs"
-	expire "$id"
+# The trial run (trial_run, trial-lib.sh): the switch, then the window.
+trial_apply() { switch_to "$trial_mode"; }
+trial_applied() {
+	running=$trial_mode
+	# expire and revert go by the file. If it cannot be written it still
+	# says the mode before, and they would leave the port in the trial
+	# mode: back at once. The expiry gets a second go at the file.
+	save || back_to_prev trial_failed "could not write $STATE"
 }
-
-expire() {
-	id=$1
-	lock_or_die
-	load
-	if [ "$phase" = trial ] && [ "$trial_id" = "$id" ]; then
-		back_to_prev trial_expired "not confirmed in time"
-	fi
-	unlock
+trial_apply_failed() {
+	running=$trial_mode
+	back_to_prev trial_failed "the $(label "$trial_mode") registers did not read back"
 }
 
 back_to_prev() {
@@ -702,7 +602,7 @@ store() {
 }
 
 confirm() {
-	lock_or_die
+	lock
 	load
 	if [ "$phase" != trial ]; then
 		unlock
@@ -725,24 +625,13 @@ confirm() {
 	return 0
 }
 
-revert() {
-	lock_or_die
-	load
-	if [ "$phase" != trial ]; then
-		unlock
-		die "no trial is running"
-	fi
-	back_to_prev trial_reverted "reverted on request"
-	unlock
-}
-
 # reapply: the sequence of the running mode again, live, one second later
 # (so this answer leaves first). No trial and nothing stored: it is the mode
 # the port runs already, and a reboot applies the same one.
 reapply() {
 	[ ! -f "$SDS_OFF" ] || die "$SDS_OFF is set: the host SerDes is left alone"
 	[ -x "$DIAG" ] || die "no $DIAG"
-	lock_or_die
+	lock
 	load
 	refuse_busy
 	if [ "$running" != fiber1g ] && ! param_ok; then
@@ -759,7 +648,7 @@ reapply() {
 
 reapply_run() {
 	"$SLEEP" 1
-	lock_or_die
+	lock
 	load
 	if [ "$phase" != reapply ]; then
 		unlock

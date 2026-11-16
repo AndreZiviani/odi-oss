@@ -35,9 +35,10 @@ busybox's own `defconfig`, which `../busybox/build.sh` starts from. That covers
 `stp`. It is a superset of the five verbs above, at zero extra bytes, because
 busybox is being built either way.
 
-`ip` and `bridge` from `../iproute2/` cover the same ground over netlink,
-which is the interface the kernel actually prefers; the ioctl API `brctl` uses
-has been the compatibility path since 2.6.
+`ip` from `../iproute2/` covers the bridge ports over netlink, which is the
+interface the kernel actually prefers; the ioctl API `brctl` uses has been the
+compatibility path since 2.6. The iproute2 `bridge` tool is not built: nothing
+on the image calls it (issue #423).
 
 Note also that the vendor's own busybox 1.12.4 has **no** `brctl` applet, which
 is why their image carries a separate 27,640-byte `/bin/brctl`. Ours does have
