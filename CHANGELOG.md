@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- trial-guard: the loopback addresses it skips are matched as the stick's
+  big-endian kernel prints them in `/proc/net/tcp` (127.0.0.1 as `7F000001`),
+  not in the little-endian form. Before, a management host at an address
+  ending in .127 never counted as TCP proof that the new image is reachable,
+  so a trial could revert although that host was connected, and a connection
+  between two different 127/8 addresses counted as proof. The test fixtures
+  use the big-endian form now. Refs #437.
 - docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
   mapper with one target forwards the tagged frames of a priority the mapper
   sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.
