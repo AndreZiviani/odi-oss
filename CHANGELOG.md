@@ -5,6 +5,7 @@ listed here.
 
 ## Unreleased
 
+- Kernel: Linux 6.18.63 (was 6.18.58), the upstream stable updates.
 - docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
   mapper with one target forwards the tagged frames of a priority the mapper
   sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.
