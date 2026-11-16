@@ -92,8 +92,9 @@ toolchain itself used to add about an hour to a first build.
 Deliberately **not built**. Everything on this image that used to need
 `brctl` is already covered twice over: busybox's own `brctl` applet (built
 with the fancy/show features) is a superset of what anything here calls, and
-`ip`/`bridge` from iproute2 cover the same ground over netlink, which is the
-interface the kernel prefers anyway. `packages/bridge-utils/README.md` has
+`ip` from iproute2 covers the bridge ports over netlink, which is the
+interface the kernel prefers anyway. The iproute2 `bridge` tool is not built
+either, since nothing on the image calls it. `packages/bridge-utils/README.md` has
 the accounting; if something ever needs a `brctl` verb busybox does not
 implement, adding a `build.sh` there is a small, self-contained change.
 

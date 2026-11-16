@@ -3,11 +3,12 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 #
-# iproute2 for the RTL9602C: the real `ip`, plus `bridge`.
+# iproute2 for the RTL9602C: the real `ip`, and nothing else from it.
 #
 # busybox's cut-down `ip` is switched off in ../busybox/config.fragment, so
-# this is the only `ip` the image has. `bridge` comes with it, and is why no bridge-utils package exists
-# here; see ../bridge-utils/README.md.
+# this is the only `ip` the image has. The iproute2 `bridge` tool is not built: no
+# script, daemon, the web UI or the exporter calls it, and br0 is set up
+# with the busybox `brctl` applet (../bridge-utils/README.md).
 set -eu
 cd "$(dirname "$0")"
 ROOT=$(cd ../.. && pwd)
@@ -103,7 +104,7 @@ fi
 echo "==> configure results"
 grep -vE "^#" config.mk | grep -E "=" | sed "s/^/    /"
 
-# SUBDIRS: lib, ip and bridge only. tc needs flex/bison and a kernel with
+# SUBDIRS: lib and ip only. tc needs flex/bison and a kernel with
 # traffic-control modules this one is configured without; genl, misc, tipc,
 # devlink, rdma and dcb are netlink families this kernel does not have.
 # SHARED_LIBS=n drops -ldl and -Wl,-export-dynamic and turns on iproute2 own
@@ -112,13 +113,13 @@ grep -vE "^#" config.mk | grep -E "=" | sed "s/^/    /"
 # iproute2 ADDLIB: ADDLIB is accumulated with += in the top Makefile
 # (dnet/ipx/mpls ntop+pton), so setting it on the command line REPLACES that
 # list and the link dies on five unrelated undefined symbols.
-make -j4 SUBDIRS="lib ip bridge" SHARED_LIBS=n \
+make -j4 SUBDIRS="lib ip" SHARED_LIBS=n \
 	CCOPTS="$LEXRA_CFLAGS $COMPAT_DEFS" \
 	LDFLAGS="-static" \
 	> /src/build.log 2>&1 || {
 	echo "BUILD FAILED -- last errors:"; grep -nE "Error|error:|undefined" /src/build.log | tail -25; exit 1; }
 
-for b in ip/ip bridge/bridge; do
+for b in ip/ip; do
 	mips-linux-uclibc-strip "$b"
 	# Static is a build requirement, not a preference: this image guarantees
 	# nothing about a shared libc on the target.
@@ -131,12 +132,9 @@ done
 '
 mkdir -p "$ROOT/out"
 cp "$work/ip/ip" "$ROOT/out/ip"
-cp "$work/bridge/bridge" "$ROOT/out/bridge"
 
-../isa-audit.sh "$ROOT/out/ip" "$ROOT/out/bridge"
+../isa-audit.sh "$ROOT/out/ip"
 
-for b in ip bridge; do
-	raw=$(wc -c < "$ROOT/out/$b" | tr -d ' ')
-	xz=$(xz -9 -c "$ROOT/out/$b" | wc -c | tr -d ' ')
-	echo "$b at out/$b: $raw bytes, $xz compressed (xz -9)"
-done
+raw=$(wc -c < "$ROOT/out/ip" | tr -d ' ')
+xz=$(xz -9 -c "$ROOT/out/ip" | wc -c | tr -d ' ')
+echo "ip at out/ip: $raw bytes, $xz compressed (xz -9)"
