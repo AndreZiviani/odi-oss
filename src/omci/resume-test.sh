@@ -239,8 +239,10 @@ cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
 olog1=/tmp/omcid-resume-pending-before.log
 olog2=/tmp/omcid-resume-pending-after.log
 olog3=/tmp/omcid-resume-pending-third.log
-# Set of GEM port network CTP 2, attribute 1 (the Port-ID), to the value it has.
-pending_set=$(printf '9001480a010c0002%s%056d00000028%08d' 80000291 0 0)
+# Set of GEM port network CTP 2, attribute 10 (the encryption key ring, which
+# nothing reads), from 0 to 1. A Set to the values a CTP already has leaves no
+# bridge rebuild pending.
+pending_set=$(printf '9001480a010c0002%s%058d00000028%08d' 004001 0 0)
 try=0
 inside=0
 while [ "$try" -lt 5 ] && [ "$inside" = 0 ]; do

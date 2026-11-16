@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- omcid: a Set of a bridge port, VLAN filter, 802.1p mapper, extended VLAN
+  operation, GEM interworking TP, GEM port or multicast GEM interworking TP
+  that leaves every value as it was no longer rebuilds the bridge
+  connections. Before, any such Set had the rebuild a second later
+  deactivate and re-add every service, so an OLT re-sending its provisioning
+  on a live line interrupted the traffic for nothing. A Set that changes a
+  value rebuilds as before, and so does any Set of a table attribute (the
+  received-frame table of class 171, the multicast address tables of class
+  281); a Create and a Delete are unchanged. Refs #436.
 - trial-guard: the loopback addresses it skips are matched as the stick's
   big-endian kernel prints them in `/proc/net/tcp` (127.0.0.1 as `7F000001`),
   not in the little-endian form. Before, a management host at an address

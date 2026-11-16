@@ -1074,12 +1074,18 @@ vid-filter vid 200 pri -1"
 # runs in a subshell. A repeat of a frame with the same id is the OLT
 # retransmitting and is answered from the cache without running again, and
 # this suite sets the same code more than once on purpose.
+# A Set that changes no value rebuilds nothing, so the same burst also moves
+# the path cost of bridge port 0x11, which no rule reads, to a new value:
+# every call is followed by a rebuild, the code it sets changed or not.
 echo 0 > /tmp/fwdop-n
 fwdop() {   # fwdop <code>: Set FwdOp, wait for the rebuild, print its rules
 	n=$(wc -l < /tmp/omcid4.log)
 	i=$(( $(cat /tmp/fwdop-n) + 1 ))
 	echo "$i" > /tmp/fwdop-n
-	$Q cli/build/omcli --inject "$(f84 "$(printf '02%02x' "$i")" 48 0054 0012 "4000$1")" > /dev/null 2>&1
+	{ f84 "$(printf '02%02x' "$i")" 48 0054 0012 "4000$1"; echo
+	  f84 "$(printf '03%02x' "$i")" 48 002f 0011 "0400$(printf '%04x' "$i")"; echo
+	} > /tmp/fwdop-set.txt
+	$Q cli/build/omcli --inject-file /tmp/fwdop-set.txt > /dev/null 2>&1
 	wait_for /tmp/omcid4.log 'bridge connections rebuilt' 30 "$(( $(rebuilt /tmp/omcid4.log) + 1 ))"
 	rules_since "$n"
 }
