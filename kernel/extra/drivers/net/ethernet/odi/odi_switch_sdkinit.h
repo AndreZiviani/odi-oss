@@ -7,8 +7,8 @@
  * rxsd), captured from a clean boot. intr and irq have no records: they
  * set up the switch interrupt, which odi_gpon does at boot.
  *
- * The records (struct odi_replay_event: register, table row or SoC
- * write) live in /lib/firmware/odi/sdkinit.bin, grouped by verb in the
+ * The records (struct odi_replay_event: register, table row, SoC write
+ * or table fill) live in /lib/firmware/odi/sdkinit.bin, grouped by verb in the
  * enum order below and in capture order within a verb.
  */
 #ifndef ODI_SWITCH_SDKINIT_H

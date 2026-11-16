@@ -33,6 +33,12 @@
  * QoS or the bridge connections, when OMCI frames keep arriving less than a
  * second apart (respond/main.c). A multicast change alone is not timed. */
 #define REBUILD_MAX_S  5
+
+/* How often, in seconds, the main loop deactivates again a bridge connection
+ * whose deactivate failed (bdgconn_retry_pending()). Long enough that a
+ * persistent send failure costs a log line every few seconds, short enough
+ * that a transient one is gone before the next provisioning. */
+#define PENDING_RETRY_S 5
 #define CLI_RETRIES    100
 #define CLI_RETRY_NS   (5 * 1000 * 1000)
 #define DRV_OPT        0x310au
@@ -322,6 +328,13 @@ int mib_dump(uint16_t cls, int want_inst, uint16_t inst, int vendor, int secrets
 int me_is_secret(uint16_t cls);
 int me_attr_secret(uint16_t cls, unsigned k);
 extern int conn_dirty;
+
+/* servtab[].in_use: 0 free, 1 a live service, SERV_PENDING a service whose
+ * deactivate failed: the rule may still be in the switch, so the slot stays
+ * taken (and in the snapshot) until a rebuild or bdgconn_retry_pending()
+ * deactivates it. Read "live" as
+ * in_use == 1, never as non-zero. */
+#define SERV_PENDING 2
 extern int qos_dirty;
 /* mcast.c: the multicast policy file igmpd reads. mcast_dirty is set by
  * whatever changes a class that feeds it, and the file is rewritten a quiet
@@ -362,6 +375,7 @@ int mcast_ds_tag_input(uint8_t tci[3], uint16_t *ani, int max, int *nani);
  * have moved. */
 extern int qos_full;
 void bdgconn_rebuild(void);
+int bdgconn_retry_pending(void);
 void us_qos_rebuild(void);
 /* The upstream state the driver holds as omcid programmed it, one block,
  * for the resume snapshot. */
@@ -497,6 +511,8 @@ uint32_t cli_mib(void);
 uint32_t cli_flows(void);
 uint32_t cli_caps(void);
 uint32_t cli_tcont(void);
+uint32_t cli_check(void);
+uint32_t qos_check(void);
 uint32_t cli_state(void);
 uint32_t cli_provision(void);
 uint32_t cli_voip(void);
@@ -544,6 +560,14 @@ extern unsigned long omci_frames_handled;
 #define RX_REJ_N        4
 extern unsigned long omci_rx_reject[RX_REJ_N];
 int rx_accept(const uint8_t *f, uint32_t len);
+/* frames.c: the last OMCI frames as bytes, for `omcli frames`. Every frame
+ * received (rx_accept) and sent (emit_frame, the test result, notify_send)
+ * is noted; frames_mask() is the sharing mask of the export. */
+#define FRAME_RX 0
+#define FRAME_TX 1
+void frames_note(int dir, const uint8_t *f, uint32_t len);
+void frames_mask(uint8_t *f, uint32_t len);
+uint32_t cli_frames(void);
 
 /* ------------------------------------------------------------- event lines
  *
@@ -634,6 +658,16 @@ void ev_unknown_msg(uint8_t mt, uint16_t cls);
  * line and one summary line per (class, instance) per boot. Diagnostic only;
  * the answer is unchanged (omcimsg.c, "an instance omcid does not hold"). */
 void ev_no_instance(uint16_t cls, uint16_t inst, uint8_t mt);
+/* An answer to a modelled class and handled message type with a result
+ * other than success (send_resp(), omcimsg.c): one
+ * event line and one summary line per (class, operation, result) per boot,
+ * with `attrs` the attribute mask the answer named, if any. The counts by
+ * result and the entries are for `omcli state` (show.c). */
+void ev_rejected(uint16_t cls, uint8_t mt, uint8_t result, uint16_t attrs);
+unsigned ev_rejected_counts(unsigned long *by_code, unsigned codes,
+			    unsigned *unknown);
+const char *ev_rejected_name(unsigned code);
+int ev_rejected_line(unsigned k, char *buf, unsigned size);
 /* OMCI_UNKNOWN_ME_OK=1 in CFG_ODI_PATH: answer a Create, Set or Get of a
  * class omcid does not model with success instead of "unknown entity". */
 extern int unknown_me_ok;

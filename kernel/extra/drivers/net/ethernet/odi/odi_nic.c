@@ -150,6 +150,13 @@ struct odi_nic {
 
 	unsigned int tx_tail;	/* next descriptor to fill */
 	unsigned int tx_reclaim;	/* next descriptor to reclaim */
+	/* The TX ring exists and the hardware runs: set under lock once the
+	 * first open is done, cleared under lock first thing in the last
+	 * stop, before anything is torn down. odi_nic_xmit_raw() has no
+	 * net_device to stop, so it asks this under the same lock it holds
+	 * for every ring access.
+	 */
+	bool tx_up;
 
 	struct napi_struct napi;
 	struct net_device *napi_dev;	/* NAPI is device-scoped; any of ours will do */
@@ -757,6 +764,11 @@ static int odi_nic_xmit_raw(u32 opts1, u32 opts2, u32 opts3,
 	void *buf;
 
 	spin_lock_irqsave(&odi.lock, flags);
+
+	if (!odi.tx_up) {
+		spin_unlock_irqrestore(&odi.lock, flags);
+		return -ENETDOWN;
+	}
 
 	idx = odi.tx_tail;
 	if (odi_tx_full_locked()) {
@@ -1396,6 +1408,8 @@ MODULE_PARM_DESC(omci_ring, "run a second receive ring and route the OMCI frames
 
 static int odi_ndo_open(struct net_device *dev)
 {
+	unsigned long flags;
+
 	if (odi_nic_debug)
 		pr_info(DRV_NAME ": ndo_open(%s), open_count was %d\n",
 			dev->name, atomic_read(&odi_open_count));
@@ -1425,6 +1439,9 @@ static int odi_ndo_open(struct net_device *dev)
 		odi.irq_requested = 1;
 		napi_enable(&odi.napi);
 		odi_start_hw();
+		spin_lock_irqsave(&odi.lock, flags);
+		odi.tx_up = true;
+		spin_unlock_irqrestore(&odi.lock, flags);
 		pr_info(DRV_NAME ": IRQ requested, NAPI enabled, hardware live\n");
 
 		odi.irq_entries = 0;
@@ -1454,10 +1471,19 @@ static int odi_ndo_open(struct net_device *dev)
 
 static int odi_ndo_stop(struct net_device *dev)
 {
+	unsigned long flags;
+
 	netif_stop_queue(dev);
 	netif_carrier_off(dev);
 
 	if (atomic_dec_return(&odi_open_count) == 0) {
+		/* First: a raw sender (odi_omci.c) sits inside the ring code
+		 * only under odi.lock, so once this is out no one is in it, no
+		 * new one gets in, and none can re-arm the backstop below.
+		 */
+		spin_lock_irqsave(&odi.lock, flags);
+		odi.tx_up = false;
+		spin_unlock_irqrestore(&odi.lock, flags);
 		cancel_delayed_work_sync(&odi.state_dump_work);
 		napi_disable(&odi.napi);
 		/* After napi_disable and with every queue down, nothing can

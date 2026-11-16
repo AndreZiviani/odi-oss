@@ -212,8 +212,19 @@ with `request_firmware()` when the trigger fires, validates it whole
 blob as text, which is also what a generator prints when it is given no
 output path:
 
-    python3 tools/regtrace/mksdkinit.py boot.txt rootfs/skeleton/lib/firmware/odi/sdkinit.bin
+    python3 tools/regtrace/mksdkinit.py boot.txt sdkinit.full.bin
+    python3 tools/regtrace/replayblob.py compact sdkinit.full.bin rootfs/skeleton/lib/firmware/odi/sdkinit.bin
     python3 tools/regtrace/replayblob.py dump rootfs/skeleton/lib/firmware/odi/sdkinit.bin
+
+The generators write every captured row. `replayblob.py compact` then
+replaces each uniform table sweep of the sdkinit and module-load tables
+by one call record, which the driver writes out in code
+(`docs/SWITCH.md`, "Register replays"); `replayblob.py expand` writes the
+rows back. The shipped `sdkinit.bin` and `modload.bin` are compacted, and
+`test/replayblob_fill_test.sh` pins their expansion to the generator
+output, so a regenerated table updates the hash there. For `modload.bin`
+the order is generate, `filter` with `PRODUCTION_MODLOAD_MASK`, then
+`compact` (the two commute, the test checks that too).
 
 `mkmodload.py` takes the register listing as a second argument
 (`mkmodload.py <capture.txt> <regmap.txt> [out.bin]`); that listing is

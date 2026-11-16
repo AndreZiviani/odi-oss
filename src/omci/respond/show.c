@@ -536,6 +536,9 @@ uint32_t cli_tcont(void)
 	return OMCLI_OK;
 }
 
+/* The rejected entries `state` lists before it points at the file. */
+#define STATE_REJECTED_MAX 16
+
 uint32_t cli_state(void)
 {
 	uint32_t st = 0;
@@ -572,6 +575,42 @@ uint32_t cli_state(void)
 			(long)MIBLOOP_WINDOW_S, (long)recent,
 			loop ? "yes" : "no", (long)loops);
 	}
+	{
+		/* What /var/log/omcid-unknown.txt holds for this boot: the
+		 * number of each kind of unknown, then the answers that were
+		 * not success, by result and one line per class, operation
+		 * and result. */
+		unsigned long by[16], total = 0;
+		unsigned unknown[3];
+		unsigned n = ev_rejected_counts(by, 16, unknown), k;
+		char line[240];
+
+		out_fmt("unknowns   : me %d  msg %d  no instance %d  "
+			"(" UNKNOWN_PATH ")\n", (long)unknown[0],
+			(long)unknown[1], (long)unknown[2]);
+
+		for (k = 0; k < 16; k++)
+			total += by[k];
+		out_fmt("rejected   : %d", (long)total);
+		for (k = 1; k < 16; k++) {
+			const char *name = ev_rejected_name(k);
+
+			if (!by[k])
+				continue;
+			if (name)
+				out_fmt("  %s %d", name, (long)by[k]);
+			else
+				out_fmt("  result %d: %d", (long)k, (long)by[k]);
+		}
+		if (by[0])
+			out_fmt("  other %d", (long)by[0]);
+		out_char('\n');
+		for (k = 0; k < STATE_REJECTED_MAX && ev_rejected_line(k, line, sizeof line); k++)
+			out_fmt("  %s\n", line);
+		if (n > STATE_REJECTED_MAX)
+			out_fmt("  %d more in " UNKNOWN_PATH "\n",
+				(long)(n - STATE_REJECTED_MAX));
+	}
 	return OMCLI_OK;
 }
 
@@ -586,7 +625,7 @@ uint32_t cli_conn(void)
 	for (int i = 0; i < SERV_MAX; i++) {
 		const struct omci_bdgconn *r = &servtab[i];
 
-		if (!r->in_use)
+		if (r->in_use != 1)
 			continue;
 		out_fmt("SERVID %d: Used: 1, (DIR=%d, USFID=%d, DSFID=%d, "
 			"SERVID=%d, UNIMASK=%d)\n", (long)i, (long)r->dir,
@@ -861,7 +900,7 @@ uint32_t cli_provision(void)
 		out_fmt("vlan vid=%u source=%s\n", (unsigned long)prov_vlan[i].vid,
 			prov_vlan_src[prov_vlan[i].src]);
 	for (int i = 0; i < SERV_MAX; i++)
-		services += servtab[i].in_use ? 1u : 0u;
+		services += servtab[i].in_use == 1 ? 1u : 0u;
 	out_fmt("summary rows=%u tconts=%u gem_ports=%u vlans=%u "
 		"traffic_descriptors=%u services=%u mib_data_sync=%u\n",
 		(unsigned long)mib_count(), (unsigned long)tconts,
@@ -871,6 +910,12 @@ uint32_t cli_provision(void)
 	return OMCLI_OK;
 }
 
+/* `check`: apply_qos.c, qos_check(). */
+uint32_t cli_check(void)
+{
+	return qos_check();
+}
+
 uint32_t cli_help(void)
 {
 	out("omcid commands\n"
@@ -878,6 +923,8 @@ uint32_t cli_help(void)
 	    "  flows                          the gem flow tables, per direction\n"
 	    "  caps                           the device capability blob, decoded\n"
 	    "  tcont                          entity id to driver index\n"
+	    "  check                          the MIB against the chip: t-conts,\n"
+	    "                                 queues, rates, gem flows (read only)\n"
 	    "  conn                           the bridge connections we built\n"
 	    "  bridge <ingress|any> <gem> <dir>  build one N:1 all-pass rule\n"
 	    "  state                          serial, device, onu state\n"
@@ -887,6 +934,9 @@ uint32_t cli_help(void)
 	    "                                 number and login masked, no password\n"
 	    "  ident [cs hs [odi]]            identity from the config store\n"
 	    "  cfgset <file> <dir> <key> <v>  write one key into a config store\n"
+	    "  frames [--pcap FILE] [--full]  the last OMCI frames as bytes, or as\n"
+	    "                                 a pcap; secrets and serial masked\n"
+	    "                                 unless --full"
 	    "  help\n");
 	return OMCLI_OK;
 }

@@ -96,6 +96,26 @@ void odi_switch_bdgconn_reset(void);
 void odi_switch_bdgconn_ds_pri_set(uint32_t flow, int pri);
 void odi_switch_bdgconn_ds_pri_clear(void);
 
+/* /proc/odi_gpon/ponq: the upstream PON queue block (odi_sw_ponq_read())
+ * next to what cmd 21 and cmd 25 recorded: which data T-CONTs have a
+ * queue block (first logical queue and count) and which upstream flow
+ * slots are in use. _snap copies both and needs odi_switch_lock; _show
+ * formats a copy, one line at a time, and needs no lock.
+ */
+#include "odi_switch_dal.h"
+
+struct odi_switch_ponq_snap {
+	struct odi_sw_ponq_regs hw;
+	uint8_t t_used[ODI_SW_PONQ_TCONTS];
+	uint8_t t_qbase[ODI_SW_PONQ_TCONTS];
+	uint8_t t_qn[ODI_SW_PONQ_TCONTS];
+	uint8_t f_used[ODI_SW_CMD_GEM_US_MAX];
+};
+
+void odi_switch_ponq_snap(struct odi_switch_ponq_snap *s);
+void odi_switch_ponq_show(const struct odi_switch_ponq_snap *s,
+			  void (*put)(void *ctx, const char *line), void *ctx);
+
 /* buf/len: the argument struct omcid built for command cmd, as
  * omci_drv_call() sent it. Returns 0, or a negative errno (-EOPNOTSUPP,
  * -95, for a command not implemented).

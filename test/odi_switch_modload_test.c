@@ -68,11 +68,12 @@ static int is_flood_addr(uint32_t addr)
 }
 
 /* Every register record becomes one read and one write, every table
- * record one table op, in file order.
+ * record one table op, the call record its 256 CF rows of four table ops
+ * each, in file order.
  */
 static void test_every_record_replayed(void)
 {
-	unsigned int i, w = 0, regs = 0, rows = 0, in_order = 1;
+	unsigned int i, w = 0, regs = 0, rows = 0, calls = 0, in_order = 1;
 
 	odi_mock_reset();
 	odi_switch_init_modload(table);
@@ -81,6 +82,10 @@ static void test_every_record_replayed(void)
 	for (i = 0; i < table->count; i++) {
 		struct odi_replay_event e = event_at(i);
 
+		if (e.kind == ODI_REPLAY_CALL) {
+			calls++;
+			continue;
+		}
 		if (e.kind != ODI_REPLAY_REG) {
 			rows++;
 			continue;
@@ -93,14 +98,16 @@ static void test_every_record_replayed(void)
 			in_order = 0;
 		w++;
 	}
-	CHECK(regs == 716 && rows == 1032, "716 register and 1032 table records");
+	CHECK(regs == 716 && rows == 8 && calls == 1,
+	      "716 register, 8 table and 1 call records");
 	/* Plus one: the unknown-multicast flood mask without the CPU, after the replay. */
 	CHECK(count_kind('W') == regs + 1U, "one write per register record, then the multicast mask");
 	CHECK(odi_mock.log_n && odi_mock.log[odi_mock.log_n - 1U].kind == 'W' &&
 	      odi_mock.log[odi_mock.log_n - 1U].addr == 0x0001c024U &&
 	      odi_mock.log[odi_mock.log_n - 1U].val == 0x7U,
 	      "the last write: unknown multicast 0xf -> 0x7, the CPU out");
-	CHECK(count_kind('T') == rows, "one table op per table record (no two rows fold)");
+	CHECK(count_kind('T') == rows + 4U * 256U,
+	      "one table op per table record and per CF fill write (no two rows fold)");
 	CHECK(in_order, "the writes follow the file, value for value");
 }
 
@@ -135,12 +142,12 @@ static void test_category_counts_pinned(void)
 			counts[raw_category(i)]++;
 
 	CHECK(counts[0] == 716, "category 0 (register) count matches the generated table");
-	CHECK(counts[1] == 1024, "category 1 (CF sweep) count matches the generated table");
+	CHECK(counts[1] == 1, "category 1 (CF sweep, one call record) count matches the generated table");
 	CHECK(counts[2] == 3, "category 2 (CF specific rule) count matches the generated table");
 	CHECK(counts[3] == 1, "category 3 (VLAN) count matches the generated table");
 	CHECK(counts[4] == 1, "category 4 (L2_UNICAST) count matches the generated table");
 	CHECK(counts[5] == 3, "category 5 (ACL) count matches the generated table");
-	CHECK(table->count == 1748, "total event count matches the generated table");
+	CHECK(table->count == 725, "total event count matches the generated table");
 }
 
 /* The headline finding: the three

@@ -121,6 +121,36 @@ int main(void)
 		   "and the block is left exactly as it was");
 	}
 
+	/* A CRC that matches says nothing about the layout. A block whose last
+	 * pair has no NUL before the end (the whole data area text, here) used
+	 * to verify, and env_get then read past the buffer. */
+	{
+		static uint8_t full[ENV_MAX];
+		uint32_t pos = 0;
+
+		memset(full, 'x', sizeof full);
+		memcpy(full + ENV_HDR_LEN, "a=b", 3);
+		env_crc_store(full, env_crc32(full + ENV_HDR_LEN,
+					      sizeof full - ENV_HDR_LEN));
+		ck(!env_valid(full, sizeof full),
+		   "a block whose last pair is not terminated is refused");
+		ck(env_next(full, sizeof full, &pos) == 0,
+		   "and env_next does not hand that pair out");
+		ck(!env_get(full, sizeof full, "a", v, sizeof v),
+		   "nor does env_get read it");
+	}
+	/* Terminated pairs that fill the area to the last byte, without the
+	 * empty string that ends the list, are refused too. */
+	{
+		uint8_t tight[ENV_HDR_LEN + 8];
+
+		memcpy(tight + ENV_HDR_LEN, "a=b\0c=d\0", 8);
+		env_crc_store(tight, env_crc32(tight + ENV_HDR_LEN, 8));
+		tight[ENV_HDR_CRC] = 0;
+		ck(!env_valid(tight, sizeof tight),
+		   "a list without its closing empty string is refused");
+	}
+
 	printf("%s\n", fails ? "FAILED" : "all ok");
 	return fails ? 1 : 0;
 }

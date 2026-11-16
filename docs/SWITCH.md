@@ -34,8 +34,8 @@ in `odi_replay.h`):
 | sequence | source | register record | also |
 |---|---|---|---|
 | board init | `odi_board_data.c`, compiled in | write | SoC |
-| sdkinit, one verb at a time | `sdkinit.bin` | read, then write | SoC, table rows |
-| module load | `modload.bin` | read, then write | table rows |
+| sdkinit, one verb at a time | `sdkinit.bin` | read, then write | SoC, table rows, table fills |
+| module load | `modload.bin` | read, then write | table rows, table fills |
 | GPON boot init | `gpon_init.bin` | write, serial-number words substituted | table rows |
 
 The read before a register write is the full-mask read-modify-write the
@@ -48,6 +48,31 @@ A SoC record carries the KSEG1 address of a SoC-window register and goes
 through `odi_soc_write()` (`odi_soc.c`), which accepts only the offsets on
 its one allowlist and logs any other. The replays write four of them
 (clock/reset enable, IP enable, two GPIO registers).
+
+A table fill (a call record) stands for one uniform sweep of the capture:
+a range of rows of one or more tables, every row written cleared. The
+driver writes the rows itself (`odi_switch_replay_call()` in
+`odi_switch_cf.c`, through the `call` hook of the replay options), in
+the order the capture wrote them. The record carries the fill, the first
+row, the row count and, for the CF fills, the first row of pattern 1, so
+what it writes does not depend on an earlier replayed write. There are
+three:
+
+| fill | rows | each row | where |
+|---|---|---|---|
+| `VLAN_MEMBERS` | 1 .. 0xfff | `VLAN_MEMBERS` to the sentinel `0xf0`, as cmd 51 sweeps it | sdkinit `vlan` |
+| `CF_RULES` | 0 .. 255 | rule and mask cleared, pattern 0 (`CLS_RULE_A`, `CLS_MASK_A`) | sdkinit `classify` |
+| `CF_RULES_ACTIONS` | 0 .. 255 | rule and mask cleared, the A tables below the first pattern-1 row and the B tables from it, then both action rows | sdkinit `classify` (pattern 1 from row 1), module load (from row 32) |
+
+These sweeps were 5,631 of the 7,429 sdkinit records and 1,024 of the
+module-load records. The generators still write every row; `replayblob.py
+compact` turns each sweep of 16 rows or more into a fill, and `replayblob.py
+expand` writes the rows back, which for the shipped files gives the
+generator output byte for byte (`test/replayblob_fill_test.sh`). The rest
+of the sdkinit `vlan` verb stays as captured: row 0 is written before nine
+register writes and keeps its own record, and row 1 is written again after
+the fill. The replay log counts a fill as one record (`vlan` 157, not
+4,251).
 
 ### Board init
 
@@ -192,14 +217,16 @@ Left out altogether:
 
 `modload.bin` is the switch-core writes the stock OMCI kernel modules
 made while loading, in capture order: 716 register writes and 1032 table
-rows. The capture has 1,871 more register writes, in the GPON MAC window
-(0x700000-0x706fff): a GPON MAC bring-up with its own `PONMAC_RESET`
-pulse, the same sequence `gpon_init.bin` starts with. `gpon_init.bin`
-resets the GPON MAC again at the first `gponact` and writes every one of
-those registers after the reset (itself, or through the driver's table
-clean), so they are not in the file: `tools/regtrace/replayblob.py
-trim-modload-gpon` takes them out, and refuses to drop a register the
-GPON init does not write again. `tools/regtrace/mkmodload.py` generates it from that capture and
+rows, 1024 of them the CF sweep, which the file holds as one table fill
+(see [Register replays](#register-replays)). The capture has 1,871 more
+register writes, in the GPON MAC window (0x700000-0x706fff): a GPON MAC
+bring-up with its own `PONMAC_RESET` pulse, the same sequence
+`gpon_init.bin` starts with. `gpon_init.bin` resets the GPON MAC again at
+the first `gponact` and writes every one of those registers after the
+reset (itself, or through the driver's table clean), so they are not in
+the file: `tools/regtrace/replayblob.py trim-modload-gpon` takes them out,
+and refuses to drop a register the GPON init does not write again.
+`tools/regtrace/mkmodload.py` generates it from that capture and
 tags each record with its family (`category`: registers, the CF sweep, the
 CF rules written over the sweep, the VLAN row, the L2 unicast row, the ACL
 rows; `reg_group` for a register: its register family). The families were
@@ -735,6 +762,12 @@ is torn down (its flows, then its queues) and built again alone. Only a
 change of the PLOAM Alloc-ID list tears everything down, since the CAM
 rows, and so the T-CONT indexes, may have moved.
 
+`/proc/odi_gpon/ponq` reads these registers back (every one above but
+`DRN_CMD`, plus `US_GEM_PORT_MAP`) next to what cmd 21 and 25 recorded,
+and `omcli check` compares them, with `/proc/odi_gpon/cam`, against what
+the MIB asks for (docs/TOOLS.md). Reading the window while the line is up
+is what the read-modify-write of every field above already does (#412).
+
 The driver used to replay ISP1's words for these registers by T-CONT and
 flow ordinal, which gave every other OLT ISP1's weights, drained T-CONT
 4's queue when it set up T-CONTs 5 and up, put T-CONTs 8-15 on queues
@@ -771,6 +804,24 @@ fixed template: it is idempotent.
   slots. The capture addresses 0x013008 through the macro for
   `VLAN_ACCEPT_FRAMES(2)`; the register there is `VLAN_SETUP`, whose four
   fields decode the values written.
+
+#### Priorities an 802.1p mapper discards
+
+G.988 9.3.10 gives each priority of an 802.1p mapper (class 130) an
+interworking pointer, and the null pointer 0xffff discards the frames of that
+priority. omcid follows it only where the mapper sends its priorities to more
+than one GEM IW TP: the rules of each target then carry just the priorities
+the mapper gives it (`mapper_splits()` in `src/omci/respond/apply_bridge.c`).
+A bridge port on a mapper (TP type 3) whose mapped priorities all go to one target
+keeps the single rule it always had, so tagged frames of a priority the
+mapper sets to 0xffff still go up that GEM port. (A bridge port on the GEM IW
+TP itself, TP type 5, whose mapper gives it exactly one priority, filters on
+that priority, so the others do not pass there.)
+
+This is a deliberate deviation. No OLT is known to rely on the discard, and
+following it could only cost tagged traffic that works today (#306, #315,
+#421). The `vlan-test.sh` case "one target with a priority unmapped" holds
+it. If an OLT ever needs the discard, it can be added behind a key.
 
 ### CF rows
 
@@ -975,8 +1026,13 @@ from a filter of VID 0 priority 0 that does not depend on
 manual add-tag rule: `eapol-up` (untagged, EtherType 0x888e, upstream, no tag
 change, on the service's stream), `eapol-down` (the same downstream, to the
 UNI) and `eapol-down-vid0` (a C-tag of VID 0, any priority, no EtherType,
-downstream, to the UNI, tag kept; not made when the manual VID is 0, as the
-add-tag rule's downstream row already takes VID 0). The add-tag rule is the
+downstream, to the UNI, C-tag action DEL, so every priority-tagged frame
+reaches the router untagged). It names the VID and no priority, so it is in
+class 1 of the ordered region, behind a row that names VID 0 and a priority:
+the multicast VID 0 priority 0 row keeps its own action, and with the manual
+VID 0 so does the add-tag rule's downstream row at `VLAN_MANU_TAG_PRI`
+(`test/odi_switch_bdgconn_vlan_test.c` pins the action, and the order beside
+the multicast row). The add-tag rule is the
 one it always was: its upstream row names no VID, so it sits in the bottom
 region, behind the EtherType row (`test/odi_switch_bdgconn_vlan_test.c` pins
 the order for both install orders). The bottom region fills down and the

@@ -113,7 +113,7 @@ image-all:
 # any did. TEST_JOBS is the number of legs at once (default: the CPUs);
 # `make test TEST_JOBS=1` runs them one by one. `make test-<leg>` runs one leg
 # on its own, its output streaming.
-OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables getall alarms writes mcast pm enc voip
+OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables getall alarms writes mcast pm enc voip frames check
 TEST_LEGS := lint test-host test-diag test-omci-respond test-igmp $(OMCI_SUITES:%=test-omci-%)
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
@@ -157,6 +157,7 @@ test-host:
 	bash test/sbom_test.sh
 	bash test/fetch_releases_test.sh
 	bash test/flash_test.sh
+	bash test/identity_test.sh
 	bash test/slot_state_test.sh
 	bash test/rcs_dev_test.sh
 	bash test/trial_guard_test.sh
@@ -181,14 +182,17 @@ test-host:
 	bash test/omci_respawn_test.sh
 	bash test/omcli_table_test.sh
 	bash test/omci_defaults_test.sh
+	bash test/omci_mib_gen_test.sh
 	bash test/rcs_cs_value_test.sh
 	bash test/log_trim_test.sh
+	bash test/diag_summary_test.sh
 	bash test/services_off_test.sh
 	bash test/respawn_budget_test.sh
 	bash test/regtrace_decode_test.sh
 	bash test/regtrace_compare_test.sh
 	bash test/regtrace_compare_stream_test.sh
 	bash test/odi_nic_hw_test.sh
+	bash test/odi_nic_raw_tx_test.sh
 	bash test/odi_switch_test.sh
 	bash test/odi_switch_mcast_test.sh
 	bash test/odi_switch_acl_probe_test.sh
@@ -224,6 +228,7 @@ test-host:
 	bash test/mksdkinit_test.sh
 	bash test/odi_switch_sdkinit_replay_test.sh
 	bash test/odi_replay_blob_test.sh
+	bash test/replayblob_fill_test.sh
 	bash test/odi_gpon_init_clean_test.sh
 	bash test/odi_switch_ds_encrypt_test.sh
 	bash test/odi_switch_ds_flow_del_test.sh
@@ -244,6 +249,7 @@ test-host:
 	bash test/odi_gpon_los_test.sh
 	bash test/odi_gpon_eqd_test.sh
 	bash test/odi_gpon_ctr_test.sh
+	bash test/odi_gpon_drop_test.sh
 	bash test/odi_gpon_flow_test.sh
 	bash test/odi_board_test.sh
 	bash test/odi_i2c_test.sh
@@ -259,6 +265,7 @@ test-host:
 	bash test/procparse_test.sh
 	bash test/odi_switch_flows_test.sh
 	bash test/odi_switch_ponq_test.sh
+	bash test/odi_switch_ponq_show_test.sh
 	bash test/boot_golden_test.sh
 	python3 test/regnames_kernel_test.py
 
@@ -279,7 +286,8 @@ test-diag:
 # vlan-test.sh builds both ISP sessions with the manual tag on and off
 # (transparent) and checks the bridge rules. voip-test.sh provisions a SIP
 # line the way an OLT does, with OMCI_POTS_PORTS on, and checks that with it
-# off the VoIP classes are still unknown to the OLT.
+# off the VoIP classes are still unknown to the OLT. check-test.sh runs
+# omcli check against written /proc/odi_gpon/ponq and cam files.
 # One target per suite (test-omci-<suite>) so CI can run them as parallel
 # jobs; test-omci runs them all side by side, as `make test` does (see there).
 # Each suite needs only omcli and omcid (plus its drvtrace build), which

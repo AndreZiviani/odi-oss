@@ -5,6 +5,184 @@ listed here.
 
 ## Unreleased
 
+- docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
+  mapper with one target forwards the tagged frames of a priority the mapper
+  sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.
+- igmpd: an IGMP join is held to the profile's group limit with the IPv6
+  groups counted in, as an MLD join already counted the IPv4 ones. Before,
+  with a limit of 2, an IPv6 group held first let two IPv4 groups in as
+  well, and the same groups joined the other way round were refused, so
+  the result depended on which family joined first. A group already held
+  or static is still not a new one. A report for a static group on another
+  VLAN no longer counts as a dynamic group in either family, so it no longer
+  takes a place under the limit.
+- igmpd: a static group that does not fit the group table (128 for IPv4, 128
+  for IPv6) now counts as an overflow, like a range too wide to name, so
+  `IGMP_PON_DROP=1` leaves the PON drop off. Before, the lease turned the
+  drop on although some static groups had no row, and the PON dropped them
+  as unregistered.
+- odi_nic: a raw transmit (omcid's OMCI replies and the IGMP reports sent up
+  by igmpd) while every interface is down returns `-ENETDOWN` instead of
+  writing into a TX ring that is NULL or being freed. The driver keeps a
+  flag under its lock, set when the first open has the ring and the hardware
+  up and cleared first in the last stop, before the work is cancelled and the
+  rings freed; omcid sees a failed send, as it already does on a full ring.
+  Issue #419.
+- omcid: a bridge connection whose deactivate fails stays owned as pending
+  and is deactivated again by the next rebuild. Before, the slot was freed
+  at once and the rule stayed in the switch whenever the next plan did not
+  reuse that service id, with omcid no longer knowing it owned it. A pending
+  service is not counted as live, its id is not handed out, and it survives
+  a respawn in the snapshot. The retry runs on its own every 5 seconds and
+  touches no live service; it does not trigger a full rebuild.
+- OMCI: clear the original CRC of a masked frame in text and pcap exports,
+  so the checksum cannot reveal the hidden identity or secret. `--full`
+  still returns the captured frame unchanged.
+
+- OMCI: `omcli check` derives queue ownership and ordering from the current
+  MIB, so a pending T-CONT or priority change is reported as a difference
+  instead of accepting the old programmed queue map.
+
+- OMCI: `omcli check` compares the MIB with what the chip holds and prints
+  one line per object, `ok` or what differs: each T-CONT's Alloc-ID against
+  its CAM row, enable bit and queue mask; each upstream queue's type,
+  weight, CIR and PIR; each upstream GEM port's flow (valid bit, GEM port,
+  queue); each downstream GEM port against its CAM row. It looks only at
+  what omcid set up and writes nothing. The chip side is a new read-only
+  `/proc/odi_gpon/ponq`, the upstream PON queue block read back (never
+  `DRN_CMD`). The diag bundle adds `pon/omcli_check.txt` and
+  `pon/odi_gpon-ponq.txt` and `pon/odi_gpon-cam.txt`, so a report shows
+  whether a GEM port, queue or rate reached the hardware even when omcid
+  does not answer (issue #412).
+- Diagnostics bundle: a scrub that fails on any file now fails the bundle
+  instead of letting that file out unscrubbed, and `diag-bundle.sh` runs
+  with a BSD sed and awk (macOS): the scrub no longer uses `sed -i`, and the
+  config redaction passes its key list to awk on one line, where a BSD awk
+  had refused it and left the config copies empty. The bundle runs under
+  `LC_ALL=C`, so a secret that is not valid UTF-8 still reaches the scrub.
+- Diagnostics: label O5 departures and LOS/LOF counts as events in the
+  retained log, not totals since boot. A wrapped or rate-limited dmesg
+  must not turn missing history into an all-clear.
+
+- Diagnostics bundle: two files at the top for whoever reads it. `README.md`
+  names the image, says what is redacted and whether the identity is masked,
+  maps questions to files and lists what a report has to add (ISP, router,
+  what changed). `SUMMARY.txt` is one screen of facts from the bundle files:
+  ONU state and its last change, O5 drops in the retained log by `cause`, LOS and LOF,
+  alarms set now, the `omcli state` reset and drop counts, optics, why the
+  previous boot ended, the safe-mode boot count and the failed steps. The new
+  `diag-summary.sh` writes it and reads only the bundle, so it also runs on a
+  PC against an unpacked bundle. The diag batch adds the five `pon get
+  transceiver` reads the exporter makes on every scrape.
+- Identity: the first boot of this image copies the provisioning identity
+  (`GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`, `GPON_ONU_MODEL`, the four
+  LOID keys, `ONU_HW_VERSION`, `MAC_KEY`, `PON_VENDOR_ID`,
+  `GPON_PLOAM_FORMAT`) to `/etc/config/identity.orig`, mode 600, and no later
+  boot rewrites it. `identity.sh show` compares it with the current values
+  (secrets hidden), `identity.sh restore` writes back what differs and says
+  whether `apply.sh omci` or a reboot is needed, and `identity.sh replace
+  --yes` takes a new copy on purpose. No copy on a safe-mode boot or from a
+  store without a serial. Not in the diagnostics bundle or the web UI backup.
+  The copy holds what the stick had at that boot, so on a stick changed
+  before it is not the factory identity. Taken at boot, before NTP, it
+  says `taken=unknown` and the file is dated 1970. `test/identity_test.sh`
+  runs on macOS too (no GNU `sed -i` or `stat -c`). Issue #387.
+- GPON: `/proc/odi_gpon/drops`, a short record of the PON side around every
+  drop out of O5, frozen when it happens: the 60 s before and the 120 s
+  after, with PLOAM messages both ways (type and ONU-ID, no contents), ONU
+  state changes with their cause and side, LOS and LOF edges and the 1 s
+  sample (state, alarm bits, BIP error blocks). Four records, the first of
+  the boot kept and the latest three beside it, so a later drop never
+  overwrites the first. A PLOAM the OLT repeats within 10 ms is one line
+  with a count, so an OLT that sends every burst three times does not fill a
+  record before its 120 s. In the diagnostics bundle as
+  `pon/odi_gpon-drops.txt`. RAM only for now: a watchdog reset loses it.
+  Refs #390.
+- nv: an environment block whose CRC matches but whose last pair has no NUL
+  before the end of the block, or whose list lacks the closing empty string,
+  is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair
+  past the end of the block. U-Boot never writes one; it takes a corrupted
+  block whose CRC still matches.
+- nv: `setenv` refuses the keys U-Boot boots by unless `--force` (or `-f`)
+  is given: `sw_commit`, `sw_active`, `mupgrade_en`, `bootcmd`,
+  `boot_by_commit`, `boot_by_tryactive`, `b0`, `b1`, `set_act0`, `set_act1`
+  and `en_wdt`, set or unset, and `sw_tryactive` unset or other than 0, 1 or
+  2, which U-Boot reads as a trial of slot 1. It refuses before it reads or
+  writes a copy, says why and names what to run instead (`nv commit` for
+  `sw_commit`). `sw_tryactive` 0, 1, 2 and `sw_version0/1` stay open for the
+  web UI and `fwu.sh`. A name with `=` in it, which would reach the entry
+  before it, and an empty one are refused; `--` ends the options. The hints in `fwu.sh` and `docs/FLASHING.md` now
+  point a stale fallback `sw_commit` to `nv commit <running slot>`, and
+  setenv's NOTE line adds it. Issue #414.
+- diag: a last input line without a newline is read as it stands. Before, a
+  line shorter than the one before it kept the end of that line, so a batch
+  that ended on `exit` without a newline ran `exitget ...` instead.
+- omcid: a Delete of an 802.1p mapper (class 130) rebuilds the bridge
+  connections, as its Create and Set do. Before, the rules built from the
+  deleted mapper stayed in the switch until another change marked the bridge
+  plan.
+- omcid: refused answers are counted. Every answer to a class omcid models,
+  for a message type it handles, with a result other than success logs one
+  `event=rejected` per class, operation and result each boot, with the
+  result by name and, for a Create, Set or Get, the attribute mask the
+  answer named. `/var/log/omcid-unknown.txt` keeps them with a count beside
+  the unknowns, so they reach the diag bundle. `omcli state` adds an
+  `unknowns` line, a `rejected` line with the counts by result, and the
+  first 16 refusal lines.
+- OMCI tooling: `tools/omci-libcheck` holds `src/omci/model/g988.json`
+  against the G.988 definitions of omci-lib-go, a second reading of the
+  Recommendation by an unrelated parser. With omci-lib-go v2.2.4 the two
+  agree on 733 of the 736 attributes both define; in the other three the
+  Recommendation says what the fact table says. The library lacks class 330 and six attributes
+  G.988 added later. Developer tool only:
+  it needs Go and the network, nothing of it ships, and it is not part of
+  `make test`.
+
+- OMCI tooling: `tools/mib-gen.py` generates `omci_mib.{c,h,json}` from the
+  G.988 fact table and a device profile (`src/omci/model/profile.json`),
+  without a stock root filesystem. The profile holds what G.988 does not
+  define (names, row sizes, the private classes) and every deviation from the
+  derived value as an override with a classification and a reason;
+  `tools/mib-compare.py` lists them. The C tables, declarations and macros
+  are byte-identical; the header comments no longer name vendor symbols, and
+  the JSON drops the `oper` and `extra` keys, which nothing read. omcid
+  behaviour is unchanged. `test/omci_mib_gen_test.sh` runs in
+  `make test-host` and fails when the generated files differ from what the
+  sources produce.
+
+- OMCI tooling: `src/omci/model/g988.json` is a fact table of ITU-T G.988
+  (11/2022) with Amendments 1 and 2 for 75 managed-entity classes: clause,
+  creation model, actions, and per attribute its width, access, requirement
+  and AVC, table and PM flags. It holds no wording of the Recommendation.
+  `tools/g988-extract.py` produces it from the PDF on a developer machine;
+  the PDF is not stored here.
+
+- VLAN: with `VLAN_EAPOL_UNTAGGED=1` the stick now takes the tag off every
+  priority-tagged frame (VID 0, any priority) the OLT sends, so EAPOL that
+  comes down as VID 0 priority 7 reaches the router untagged. Before, the
+  `eapol-down-vid0` rule passed those frames with their VID 0 tag, and some
+  routers drop tagged EAPOL on an untagged WAN interface. The rule cannot
+  tell EAPOL from other frames behind a tag, so it applies to all VID 0
+  frames; a row that names VID 0 and a priority, such as the multicast VID 0
+  priority 0 row, still goes first. With the manual VID 0 the rule is now
+  made too and strips the priorities `VLAN_MANU_TAG_PRI` does not cover.
+  `docs/SETTINGS.md` says so. Refs #301.
+- Switch: the uniform table sweeps of `sdkinit.bin` and `modload.bin` (the
+  4,095 VLAN rows of the `vlan` verb, the 512 and 1,024 CF table rows of
+  `classify`, the 1,024 CF rows of the module-load replay) are now table
+  fills the driver writes in code, one call record each, instead of
+  replayed row by row. The writes and their order are unchanged:
+  `replayblob.py expand` gives back the previous files byte for byte.
+  `sdkinit.bin` shrinks from 267 KB to 65 KB, `modload.bin` from 63 KB to
+  26 KB, and what is left in them is register settings. Refs #398.
+- OMCI: `omcli frames` prints the last 2048 OMCI frames omcid received or
+  sent, as bytes, and `omcli frames --pcap FILE` writes them as a pcap that
+  Wireshark decodes with the common OMCI Lua dissector (Ethernet II,
+  EtherType 0x88B5). omcid keeps them in a fixed 120 KB ring in RAM, filled
+  where it already receives and sends. By default the values of the classes
+  omcid keeps out of its log, the LOID and password, the serial number and
+  the MACs are overwritten; `--full` keeps them. The diag bundle adds
+  `pon/omci.pcap`, always masked. Issue #394.
 - `make -C src/diag ssp-test` no longer leaves core files in `src/diag`. Its
   overrun case aborts on purpose, and in a container with an unlimited core
   size it wrote `core.N` and a qemu core there, which `make lint` (REUSE)

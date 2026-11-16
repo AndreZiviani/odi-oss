@@ -72,7 +72,7 @@ static int serv_same_except_uni(const struct omci_bdgconn *a,
 static int serv_update(const struct omci_bdgconn *r)
 {
 	for (int i = 0; i < SERV_MAX; i++)
-		if (servtab[i].in_use && serv_same_except_uni(r, &servtab[i])) {
+		if (servtab[i].in_use == 1 && serv_same_except_uni(r, &servtab[i])) {
 			servtab[i].uni_mask |= r->uni_mask;
 			return i;
 		}
@@ -717,10 +717,10 @@ static int eapol_note(int manual)
 }
 
 /* One EAPOL rule as a rule_gen 7 descriptor (one direction, both halves
- * stated outright, extvlan.c): no tag added or removed. Upstream and
- * downstream name the EtherType of an untagged frame; the VID 0 one names a
- * priority-tagged frame (VID 0, any priority) and no EtherType, as the
- * classifier is not known to compare the EtherType behind a tag. */
+ * stated outright, extvlan.c). Upstream and downstream name the EtherType of
+ * an untagged frame and change no tag. The VID 0 one names a priority-tagged
+ * frame (VID 0, any priority) and no EtherType, as the classifier is not
+ * known to compare the EtherType behind a tag, and takes the tag off. */
 static void gen_eapol_rule(struct omci_vlan_oper *vr, int which)
 {
 	struct evtocd_plan p;
@@ -734,9 +734,9 @@ static void gen_eapol_rule(struct omci_vlan_oper *vr, int which)
 	p.out_vid = -1;
 	p.out_pri = -1;
 	if (which == EAPOL_DOWN_VID0) {
-		p.c.in = p.c.out = 1;
+		p.c.in = 1;
+		p.c.op = EVTOCD_OP_POP;
 		p.c.f_vid = 0;
-		p.out_tags = 1;
 	}
 	evtocd_plan_oper(&p, vr);
 	if (which != EAPOL_DOWN_VID0)
@@ -744,20 +744,20 @@ static void gen_eapol_rule(struct omci_vlan_oper *vr, int which)
 }
 
 /* The rules VLAN_EAPOL_UNTAGGED puts beside the manual add-tag rule, on the
- * GEM port of eapol_at, into rules[] (at most 3). The add-tag rule is left as
- * it is: it names no VID, so the switch puts its upstream row in the bottom
- * region, behind every row that names an EtherType (docs/SWITCH.md,
- * "Extended VLAN rules"), and the EAPOL rule wins for the frames it names:
+ * GEM port of eapol_at, into rules[] (3). The add-tag rule is left as it is:
+ * it names no VID, so the switch puts its upstream row in the bottom region,
+ * behind every row that names an EtherType (docs/SWITCH.md, "Extended VLAN
+ * rules"), and the EAPOL rule wins for the frames it names:
  *  - eapol-up: untagged EAPOL from the router goes up as it is,
  *  - eapol-down: untagged EAPOL from the OLT reaches the router as it is,
- *  - eapol-down-vid0: so does a priority-tagged one (VID 0), tag kept.
- * The manual rule itself keeps its tag and its downstream half. With the
- * manual VID 0 that downstream half (which keeps the tag priority there,
- * any_pri_note()) already takes the VID 0 frames of the tag priority and
- * strips them; a VID 0 rule would also pass the frames of every other
- * priority with their tag, which no rule omcid builds passes with the key
- * off, so it is not made. */
-static int bp_eapol(struct bp_rule *rules, int mvid)
+ *  - eapol-down-vid0: a priority-tagged frame (VID 0, any priority) reaches
+ *    it untagged. Some OLTs send their EAPOL that way, and a router with one
+ *    untagged WAN interface may not take it tagged (odi-oss #301). The row
+ *    cannot tell EAPOL from the rest behind a tag, so every VID 0 frame
+ *    loses its tag. A row that names VID 0 and a priority ranks ahead of it:
+ *    the multicast VID 0 priority 0 row, and with the manual VID 0 the add-tag
+ *    rule's own downstream half, which strips at VLAN_MANU_TAG_PRI as well. */
+static int bp_eapol(struct bp_rule *rules)
 {
 	static const struct { const char *kind; int which; uint32_t dir; } r[] = {
 		{ "eapol-up", EAPOL_UP, OMCI_DIR_US },
@@ -767,8 +767,6 @@ static int bp_eapol(struct bp_rule *rules, int mvid)
 	int n = 0;
 
 	for (unsigned i = 0; i < sizeof r / sizeof r[0]; i++) {
-		if (r[i].which == EAPOL_DOWN_VID0 && mvid == 0)
-			continue;
 		n = bp_put(rules, n, r[i].kind, -1, -1);
 		gen_eapol_rule(&rules[n - 1].vr, r[i].which);
 		rules[n - 1].gen_dir = r[i].dir;
@@ -1726,14 +1724,14 @@ static void mcast_tag_plan(void)
  * names, for every ingress of its bridge, as for the other rules of that port.
  * Returns how many descriptors were installed. */
 static int eapol_install(const int *ingress, const int *ingress_bridge,
-			 const int *ingress_iphost, int ning, int mvid)
+			 const int *ingress_iphost, int ning)
 {
 	struct bp_rule rules[3];
 	int n, added = 0;
 
 	if (!eapol_on || !eapol_at.set)
 		return 0;
-	n = bp_eapol(rules, mvid);
+	n = bp_eapol(rules);
 	for (int k = 0; k < n; k++) {
 		out_fmt("   [%s] 47/%04x gem %d rule %s vid %d pri %d\n",
 			apply_hw ? "hw" : "dry", (long)eapol_at.bp, (long)eapol_at.port,
@@ -1755,6 +1753,31 @@ static int eapol_install(const int *ingress, const int *ingress_bridge,
 	return added;
 }
 
+/* Deactivate again the services a rebuild left pending, and only those: a
+ * live service is not touched. Returns how many are still pending after it,
+ * so the caller knows whether to come back; a dry run just frees them. */
+int bdgconn_retry_pending(void)
+{
+	int left = 0;
+
+	for (int i = 0; i < SERV_MAX; i++) {
+		if (servtab[i].in_use != SERV_PENDING)
+			continue;
+		if (apply_hw) {
+			int rc = omci_deactiveBdgConn((uint32_t)i);
+
+			if (rc) {
+				out_fmt("   [hw] bridge connection %d deactivate -> %d, still pending\n",
+					(long)i, (long)rc);
+				left++;
+				continue;
+			}
+		}
+		servtab[i].in_use = 0;
+	}
+	return left;
+}
+
 void bdgconn_rebuild(void)
 {
 	const struct omci_class *c47 = find_class(OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA);
@@ -1769,18 +1792,26 @@ void bdgconn_rebuild(void)
 	/* Every service in servtab, not a list this process kept beside it:
 	 * snapshot_load restores servtab, so a resumed omcid has the services
 	 * of the last one here and would have had an empty list. A deactivate
-	 * that fails is logged and the slot freed all the same, as before:
-	 * the driver replaces a service whose id comes back with another rule
-	 * (odi_switch_bdgconn.c), so the next add of that id clears it. */
+	 * that fails (a netlink send lost before the kernel ran it) leaves the
+	 * rule in the switch, so the slot stays owned as SERV_PENDING: the plan
+	 * below does not hand its id out and it is not a live service. Freeing
+	 * it here would forget a rule that a shrunk plan never replaces. No
+	 * conn_dirty: a rebuild tears down and re-adds every live service, so
+	 * asking for another one per failure would loop. The next rebuild tries
+	 * the deactivate again first, and bdgconn_retry_pending() does it on
+	 * its own, paced by the main loop. */
 	for (int i = 0; i < SERV_MAX; i++) {
 		if (!servtab[i].in_use)
 			continue;
 		if (apply_hw) {
 			int rc = omci_deactiveBdgConn((uint32_t)i);
 
-			if (rc)
-				out_fmt("   [hw] bridge connection %d deactivate -> %d\n",
+			if (rc) {
+				out_fmt("   [hw] bridge connection %d deactivate -> %d, kept pending\n",
 					(long)i, (long)rc);
+				servtab[i].in_use = SERV_PENDING;
+				continue;
+			}
 		}
 		servtab[i].in_use = 0;
 	}
@@ -1857,7 +1888,7 @@ void bdgconn_rebuild(void)
 			/* After every unicast port, before the multicast plan
 			 * reads the unicast VIDs. */
 			added += eapol_install(ingress, ingress_bridge, ingress_iphost,
-					       ning, mvid);
+					       ning);
 			mcast_tag_plan();
 		}
 		for (int i = 0; i < MIB_ROWS; i++) {

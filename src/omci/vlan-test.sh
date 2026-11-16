@@ -269,6 +269,18 @@ check "Set on the table: the rule follows to VLAN 200" "$got" "47/1002 gem 657 r
 got=$(rebuild /tmp/omcid-171-live.log 0 | sed -n 2p)
 check "Delete of the instance: back to transparent" "$got" "47/1002 gem 657 rule forward-all vid -1 pri -1"
 
+# 5b. A Delete of the 802.1p mapper alone rebuilds as well: the bridge port
+# 0x1002 names a mapper that is gone and keeps no rule. Before, the rules of
+# the last rebuild stayed until another change marked the bridge plan.
+session none > /tmp/s130-a.txt
+frame 46 0082 1002 "" > /tmp/s130-b.txt
+run171 del130-before /tmp/s130-a.txt
+got=$(rebuild /tmp/omcid-171-del130-before.log 0 | grep -c '^47/1002 ')
+check "before the mapper Delete: the bridge port has rules" "$([ "$got" -gt 0 ] && echo yes)" "yes"
+run171 del130 /tmp/s130-a.txt /tmp/s130-b.txt
+got=$(rebuild /tmp/omcid-171-del130.log 0 | grep -c '^47/1002 ')
+check "Delete of the mapper: the last rebuild has no rule on its port" "$got" "0"
+
 sed 's/"VLAN_MANU_MODE" Value="1"/"VLAN_MANU_MODE" Value="0"/' \
 	"$FIX/omci-store-isp2.xml" > /tmp/store-transparent.xml
 : > /tmp/omcid-vlan-cli.log
@@ -938,8 +950,9 @@ check "ISP2 00 00 00 under OMCI_CUSTOM_MCAST=1: the VID 0 row strips" \
 
 # ---- VLAN_EAPOL_UNTAGGED (odi.conf) -------------------------------------------
 # With the manual tag on and the key 1, 802.1X EAPOL crosses untagged: three
-# rules beside the manual add-tag rule, on its GEM port; the add-tag rule
-# itself is unchanged. docs/SETTINGS.md, "VLAN_EAPOL_UNTAGGED".
+# rules beside the manual add-tag rule, on its GEM port, the third of which
+# strips the tag of every VID 0 frame from the OLT; the add-tag rule itself is
+# unchanged. docs/SETTINGS.md, "VLAN_EAPOL_UNTAGGED".
 EAPOL3="eapol-down vid -1 pri -1
 eapol-down-vid0 vid -1 pri -1
 eapol-up vid -1 pri -1"
@@ -979,7 +992,8 @@ $(printf '%s\n' "$EAPOL3" | sed 's|^|47/1002 gem 657 rule |')
 47/1002 gem 657 rule manual-add vid 10 pri 0"
 # The descriptors of the GEM 657 rules, read from the dry run: direction
 # (word 8), rule_gen (9), outer and inner filter mode (16, 17), the EtherType
-# (18) and the C-tag treatment (the tag op of the inner action, word 27).
+# (18), the C-tag treatment (the tag op of the inner action, word 25: 1 push,
+# 2 pop, 4 pass) and the tags the frame leaves with (word 33).
 cat > /tmp/eapolrules.py <<'PYRULES'
 import re, struct, sys
 rules, current, meta, words = [], [], None, []
@@ -1000,18 +1014,18 @@ for (gem, d), w in rules:
     if gem != int(sys.argv[2]):
         continue
     et = w[18]
-    out.append('dir %d gen %d outer %#x inner %#x vid %d et %s' % (
+    out.append('dir %d gen %d outer %#x inner %#x vid %d et %s cop %d tags %d' % (
         d, w[9], w[16], w[17], w[14],
         'none' if et == 0 else 'rest' if et == 1 << 17 else '%#x' % (et & 0xffff)
-        if et & (1 << 16) else 'code %d' % et))
+        if et & (1 << 16) else 'code %d' % et, w[25], w[33]))
 print('\n'.join(sorted(out)))
 PYRULES
 got=$(python3 /tmp/eapolrules.py /tmp/omcid-171-eapol-on2.log 657)
-check "key on, ISP2, descriptors: EAPOL up (untagged, 0x888e), down (untagged, 0x888e), down VID 0; the add-tag rule is unchanged" "$got" \
-"dir 1 gen 7 outer 0x4 inner 0x4 vid 4096 et 0x888e
-dir 2 gen 7 outer 0x4 inner 0x4 vid 4096 et 0x888e
-dir 2 gen 7 outer 0x4 inner 0xa vid 0 et none
-dir 3 gen 5 outer 0x4 inner 0x4 vid 10 et none"
+check "key on, ISP2, descriptors: EAPOL up and down (untagged, 0x888e, tag passed), VID 0 down (tag popped); the add-tag rule is unchanged" "$got" \
+"dir 1 gen 7 outer 0x4 inner 0x4 vid 4096 et 0x888e cop 4 tags 0
+dir 2 gen 7 outer 0x4 inner 0x4 vid 4096 et 0x888e cop 4 tags 0
+dir 2 gen 7 outer 0x4 inner 0xa vid 0 et none cop 2 tags 0
+dir 3 gen 5 outer 0x4 inner 0x4 vid 10 et none cop 1 tags 1"
 check "and the multicast GEM has no EAPOL rule" \
 	"$(python3 /tmp/eapolrules.py /tmp/omcid-171-eapol-on2.log 4094 | grep -c 'gen 7')" "0"
 
@@ -1081,15 +1095,17 @@ check "two add-tag ports, key off: no EAPOL rule" \
 	"$(rebuild /tmp/omcid-171-eapol-two-off.log 0 | grep -c eapol)" "0"
 
 # G. The manual VID 0: the downstream half of the add-tag rule takes the VID 0
-# frames of the tag priority, so no VID 0 rule is made beside it (it would
-# pass the other priorities with their tag).
+# frames of the tag priority and strips them; the VID 0 rule beside it strips
+# those of every other priority, so all three EAPOL rules are made here too.
 VID0='s/"VLAN_MANU_TAG_VID" Value="10"/"VLAN_MANU_TAG_VID" Value="0"/'
 eapol_conf 1
 eapol_run isp2 1 eapol-vid0 "$VID0"
-check "manual VID 0, key on: eapol-up and eapol-down, no VID 0 rule" \
-	"$(rebuild /tmp/omcid-171-eapol-vid0.log 0 | grep 'gem 657 ')" "47/1002 gem 657 rule eapol-down vid -1 pri -1
-47/1002 gem 657 rule eapol-up vid -1 pri -1
+check "manual VID 0, key on: the three EAPOL rules beside the add-tag rule" \
+	"$(rebuild /tmp/omcid-171-eapol-vid0.log 0 | grep 'gem 657 ')" "$(printf '%s\n' "$EAPOL3" | sed 's|^|47/1002 gem 657 rule |')
 47/1002 gem 657 rule manual-add vid 0 pri 0"
+check "manual VID 0, key on: the VID 0 rule pops the tag" \
+	"$(python3 /tmp/eapolrules.py /tmp/omcid-171-eapol-vid0.log 657 | grep 'inner 0xa')" \
+	"dir 2 gen 7 outer 0x4 inner 0xa vid 0 et none cop 2 tags 0"
 rm -f /var/config/odi.conf
 
 # E. `omcli vlan` names the setting only when it is on.

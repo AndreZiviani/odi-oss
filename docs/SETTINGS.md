@@ -120,7 +120,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of the tag the stick adds to the router's untagged frames going up, 0 to 7; a stored value above 7 (255 is the factory one) is used as 0 and the tag stays on. Downstream the tag is removed whatever priority the OLT sends: only the VID is matched, except with the manual VID 0, beside a class 84 filter that goes by priority alone, or beside the class 171 rules of an IP host, where the tag is removed only at this priority and omcid logs which of them applies | omcid, on SIGHUP | LIVE |
-| `VLAN_EAPOL_UNTAGGED` | 802.1X EAPOL without the service tag | `1`, with the manual tag on ("stick tags"): EAPOL frames (EtherType 0x888e) cross the stick **untagged** in both directions while everything else keeps the manual tag. Anything else, or absent, is off, and then no rule differs from the manual tag alone. With the manual tag off the key does nothing, and omcid logs that once. For an ISP that authenticates the line with 802.1X on the untagged (or VLAN 0) frames while the service itself is on a VLAN ("VLAN_EAPOL_UNTAGGED" below). Odi-only key, kept in `/etc/config/odi.conf`. Not run yet against a line that uses EAP | omcid, on SIGHUP (`apply.sh omci`) | LIVE |
+| `VLAN_EAPOL_UNTAGGED` | 802.1X EAPOL without the service tag | `1`, with the manual tag on ("stick tags"): EAPOL frames (EtherType 0x888e) cross the stick **untagged** in both directions while everything else keeps the manual tag. It also takes the tag off **every** priority-tagged frame (VID 0, any priority) the OLT sends, not only EAPOL. Anything else, or absent, is off, and then no rule differs from the manual tag alone. With the manual tag off the key does nothing, and omcid logs that once. For an ISP that authenticates the line with 802.1X on the untagged (or VLAN 0) frames while the service itself is on a VLAN ("VLAN_EAPOL_UNTAGGED" below). Odi-only key, kept in `/etc/config/odi.conf`. Not run yet against a line that uses EAP | omcid, on SIGHUP (`apply.sh omci`) | LIVE |
 | `RTK_DEVINFO_SPECVER` | VLAN forward operation override | the stock firmware's FwdOp override, same key and format: `EntityId[:FwdOp]` entries separated by commas (e.g. `0x1102:0x00,0x110b`; no FwdOp means 0x02). The bridge rules of each class 84 port named are built with that FwdOp instead of the OLT's; the attribute keeps the OLT's value. Anything malformed turns the whole key off ("VLAN handling" below) | omcid, on SIGHUP | LIVE |
 | `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password: exactly 20 hex digits are 10 bytes, 1 to 10 characters are the text itself (even if they are hex digits), `0x` and 2 to 20 hex digits are those bytes zero-padded; anything else is refused and logged, keeping the old password; empty means none is sent | the `gponpw` PON step in rcS (`rcs-lib.sh`, `pon_step_gponpw`, skipped when empty); omcid re-sends it on a re-registration | INTERRUPTS INTERNET |
 | `LOID`, `LOID_PASSWD` | LOID, LOID password | answered to CTC-profile OLTs in the LOID authentication entity | omcid, on SIGHUP | INTERRUPTS INTERNET |
@@ -253,7 +253,9 @@ Details that bite:
   missing (display only; rcS reads the right file, so ranging was fine).
 - **The identity keys (`GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`,
   `GPON_ONU_MODEL`) need the UI's confirmation tick.** They cannot be
-  regenerated: take a backup first.
+  regenerated: take a backup first. The stick keeps one copy of its own,
+  taken at the first boot of an image that has it ("The identity snapshot"
+  below).
 - **A key cannot be cleared from the UI.** Over ssh, `flash set KEY ""` stores
   an empty value for a stock key (and removes an odi-only key); it does not
   refuse it.
@@ -374,9 +376,12 @@ manual add-tag rule, on its GEM port:
 |---|---|---|
 | `eapol-up` | untagged EAPOL from the router | up the PON as they are, no tag |
 | `eapol-down` | untagged EAPOL from the OLT | to the router as they are |
-| `eapol-down-vid0` | priority-tagged frames from the OLT (VID 0, any priority) | to the router as they are, the VID 0 tag kept |
+| `eapol-down-vid0` | priority-tagged frames from the OLT (VID 0, any priority) | to the router **untagged**, the VID 0 tag taken off |
 
-Everything else is as without the key: the router sends the service
+The third rule is not limited to EAPOL: the classifier is not known to read
+the EtherType behind a tag, so with the key on the router gets **every**
+priority-tagged frame of the line untagged (the limits below say which VID 0
+frames a row ahead of it keeps). Everything else is as without the key: the router sends the service
 untagged and the stick adds `VLAN_MANU_TAG_VID`/`_PRI`. The add-tag rule
 names no VID, so the switch ranks its upstream row after every row that names
 an EtherType (`docs/SWITCH.md`, "Extended VLAN rules"), and the EAPOL row
@@ -396,11 +401,12 @@ omcid rebuild its rules in between; the reload then names the key
 (`keys=VLAN_EAPOL_UNTAGGED`) and rebuilds.
 
 On the router: one WAN interface, untagged (the stick adds the service VLAN),
-with the supplicant listening on that same interface, untagged and for VLAN 0
-(the stick delivers the OLT's EAPOL as it arrives, which on some lines is
-priority-tagged VID 0). With the FwdOp override (`RTK_DEVINFO_SPECVER`) the
-VID 0 frames pass as tagged frames already; this key does it without
-opening every other tagged VID.
+with the supplicant listening on that same interface. Some OLTs send their
+EAPOL priority-tagged (VID 0, often priority 7), and some routers drop a tagged
+EAPOL frame on an untagged interface (odi-oss #301), so the stick takes the
+VID 0 tag off and the router sees every EAPOL frame untagged. With the FwdOp
+override (`RTK_DEVINFO_SPECVER`) alone the VID 0 frames pass with their tag;
+this key does it without opening every other tagged VID.
 
 Limits, and what is not known:
 
@@ -426,14 +432,17 @@ Limits, and what is not known:
   frame from every GEM port, the multicast one included, apart from what a
   row ahead of it takes.
 - `eapol-down-vid0` names no EtherType, because the classifier is not known to
-  compare it behind a tag: it passes every priority-tagged frame with VID 0
-  that the OLT sends, not only EAPOL. On a line with multicast under the manual
-  tag, VID 0 priority 0 is the multicast strip row (it goes first).
-- With `VLAN_MANU_TAG_VID` 0 there is no `eapol-down-vid0`: the add-tag rule's
-  own downstream half takes the VID 0 frames of `VLAN_MANU_TAG_PRI` and strips
-  the tag (EAPOL included), and a VID 0 rule would also pass the service's
-  frames of every other priority with their tag, which no rule omcid builds
-  passes with the key off. VID 0 EAPOL of another priority is then not delivered.
+  compare it behind a tag. So it applies to **every priority-tagged frame**
+  (VID 0, any priority) that the OLT sends, not only EAPOL: each one reaches
+  the router untagged and its priority bits are lost. A row that names VID 0
+  and a priority ranks ahead of it and keeps its own action: on a line with
+  multicast under the manual tag, VID 0 priority 0 is the multicast row, which
+  strips or keeps the tag as the multicast profile says (`docs/SWITCH.md`,
+  "Multicast"), and those frames are not touched by this rule.
+- With `VLAN_MANU_TAG_VID` 0 the add-tag rule's own downstream half takes the
+  VID 0 frames of `VLAN_MANU_TAG_PRI` and strips the tag, and
+  `eapol-down-vid0` strips those of every other priority. Without the key,
+  VID 0 frames of another priority are dropped there, as before.
 - When the OLT gives the add-tag rule to more than one GEM port (several
   GEM-side bridge ports with no VLAN filter, or with a forward operation that
   bridges untagged frames), the untagged frames go up the GEM port whose rule
@@ -1184,6 +1193,52 @@ then `systemctl enable --now odi-config-backup.timer`; a failed run shows in
 (`gpon_config_info`, odi-sfp-exporter), so an alert on a change can point at
 the backup taken before it.
 
+### The identity snapshot
+
+The first boot of an image that has `/etc/scripts/identity.sh` copies the
+provisioning identity to `/etc/config/identity.orig`, and no later boot
+writes it again. It is the way back after an identity edit, or after
+`flash default cs` emptied the LOID keys, when no backup was taken. It holds
+what the stick had at that boot: on a stick whose identity was changed
+before (under the stock firmware or an earlier image), that is the changed
+identity, not the factory one. Its `image=` and `taken=` lines say which
+image took it and when. The boot step runs before NTP can set the clock
+(the stick has no RTC), so a snapshot taken at boot always says
+`taken=unknown` and the file itself is dated 1970. A snapshot taken
+later, once NTP has set the clock, records a date; for an existing one
+that means `identity.sh replace --yes`.
+
+The keys: `GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`, `GPON_ONU_MODEL`,
+the four LOID keys, `ONU_HW_VERSION`, and the stock-only `MAC_KEY`,
+`PON_VENDOR_ID` and `GPON_PLOAM_FORMAT`. Each with the store that held it
+(`cs`, `hs` or `odi`) and its value as stored, or marked absent. The file is
+mode 600 and holds the passwords in clear, like the stores next to it; the
+diagnostics bundle does not collect it, and the web UI backup does not carry
+it (a backup restored onto another stick must not bring this stick's
+snapshot along). It is a separate file because the stock firmware drops a
+key it does not know from `lastgood*.xml` at its first save, and `odi.conf`
+holds live settings.
+
+| command | does |
+|---|---|
+| `identity.sh show` | the snapshot against the current values, one line per key (`same` or `differs`); secrets show as `(hidden)` |
+| `identity.sh restore` | writes back every value that differs, into the store that holds the key now, then reads them back. Applies nothing: it prints `apply.sh omci` when an OMCI key changed (INTERRUPTS INTERNET) and a reboot when `ELAN_MAC_ADDR` did; `GPON_ONU_MODEL` and `ONU_HW_VERSION` reach the OLT only while `omci-identity.on` exists. A key that is in no store any more is named and not restored (exit 1); an odi-only key that was cleared is added back |
+| `identity.sh replace --yes` | overwrites the snapshot with the current values, for example right after restoring a known-good backup on a stick whose snapshot holds a changed identity |
+
+rcS runs `identity.sh snapshot` at every boot, after the safe-mode count:
+it returns at once when the file exists, takes none on a safe-mode boot,
+and takes none from a store that is missing, cut off or has no `GPON_SN`
+(the next boot tries again). Snapshot and restore hold the writer lock of
+`flash`, and every file is written beside its target and renamed over it.
+restore writes `lastgood.xml`, `lastgood_hs.xml` and `odi.conf` one after
+the other, so a power cut between them leaves part of the keys restored;
+running it again finishes. The snapshot lives on the same partition as the
+stores, so it is no substitute for a backup off the stick ("Backing up from
+a host" above).
+
+Whether the stock firmware leaves the file alone when the stick falls back
+to it has not been measured; it is expected to, as with `odi.conf`.
+
 ## Keys this image stores but does not use
 
 Writing any of these changes the file and nothing else on this image; the UI
@@ -1227,6 +1282,7 @@ applies to every later image.
 | `pon-steps` | development: a PON step list that replaces the built-in one (`docs/BOOT.md`); a wrong list means no PON | REBOOT |
 | `sds.off` | skip the host SerDes check and fix in `network.sh` | REBOOT |
 | `boot-count`, `boot-wdt`, `safe-mode` | not switches: the boot counters and the safe-mode record ("Recovery: the safe mode" above), written by `safe-mode.sh`; removing the record is the acknowledgement | -- |
+| `identity.orig` | not a switch: the identity snapshot ("The identity snapshot" above), written once by `identity.sh`; `identity.sh replace --yes` rewrites it | -- |
 | `optics.off` | skip the `laser` PON step (the I2C steps still run): **the laser stays off, no service** | REBOOT |
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |
 | `breadcrumbs.on` | development: boot crumbs, `trial-diag.txt` and a heartbeat, on flash | REBOOT |

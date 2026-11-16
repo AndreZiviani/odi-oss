@@ -194,7 +194,8 @@ int igmp_policy_takes(const struct igmp_policy *p);
  * does not ask for snooping; the copy alone until `learn_until`, so that
  * every group the host already watches can report once before an
  * unregistered one is a group nobody wants; then the copy and the PON's drop,
- * unless a static range was too wide to name, or the lists were longer than
+ * unless a static range was too wide to name, a static group did not fit the
+ * table, or the lists were longer than
  * fit (their groups would be dropped as unregistered). `pon_drop` is the
  * opt-in for the drop (igmpd -d): 0 holds the copy alone, always. The copy
  * is a take (ODI_SW_MC_SNOOP_TRAP) whenever igmp_policy_takes() says so,

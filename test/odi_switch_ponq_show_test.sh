@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# odi_switch_ponq_show_test.sh -- compiles and runs odi_switch_ponq_show_test.c with
+# the host cc, against the same register mock as odi_switch_cmd_test.sh.
+# Part of `make test-host`.
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+BIN=$(mktemp -t odi_switch_ponq_show_test.XXXXXX)
+trap 'rm -f "$BIN"' EXIT
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" \
+	"$ROOT/test/odi_switch_ponq_show_test.c"
+"$BIN"

@@ -43,14 +43,25 @@ static int group_before(const struct igmp_db *db, int below, uint32_t group,
 	return 0;
 }
 
+/* Whether any entry holds this group as a static one, on any VID. */
+static int group_fixed(const struct igmp_db *db, uint32_t group)
+{
+	for (int i = 0; i < IGMP_MAX_GROUPS; i++)
+		if (db->g[i].in_use && db->g[i].fixed && db->g[i].group == group)
+			return 1;
+	return 0;
+}
+
 /* Distinct groups, not (vid, group) entries: ME 311 and the OLT's limit are
- * per group, and the same group on two VLANs is one of them. */
+ * per group, and the same group on two VLANs is one of them. A static group
+ * never uses the limit, so a report for it on another VLAN is not counted. */
 int igmp_db_dynamic_count(const struct igmp_db *db)
 {
 	int n = 0;
 
 	for (int i = 0; i < IGMP_MAX_GROUPS; i++)
 		if (db->g[i].in_use && !db->g[i].fixed &&
+		    !group_fixed(db, db->g[i].group) &&
 		    !group_before(db, i, db->g[i].group, 1))
 			n++;
 	return n;
@@ -375,8 +386,8 @@ static void preview_gone(struct igmp_db *db, uint32_t group, uint32_t now)
 
 /* A port joins, or refreshes what it already had. */
 static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
-		uint32_t now, struct igmp_change *out, int max, int n,
-		const struct join_src *src)
+		uint32_t now, uint32_t others, struct igmp_change *out, int max,
+		int n, const struct join_src *src)
 {
 	struct igmp_entry *e;
 	struct igmp_join q;
@@ -426,9 +437,10 @@ static int join(struct igmp_db *db, uint16_t vid, uint32_t group, uint8_t port,
 	db->rx_passable++;
 	e = find(db, vid, group);
 	/* The limit is on groups: a group already held on another VLAN is not a
-	 * new one, and neither is a static one. */
+	 * new one, and neither is a static one. `others` are the IPv6 groups
+	 * the subscriber holds, which count as MLD counts the IPv4 ones. */
 	if (!e && db->pol.max_groups && !group_known(db, group) &&
-	    (uint32_t)igmp_db_dynamic_count(db) >= db->pol.max_groups) {
+	    others + (uint32_t)igmp_db_dynamic_count(db) >= db->pol.max_groups) {
 		db->denied++;
 		refuse(db, IGMP_REFUSE_LIMIT, vid, group, now);
 		return n;
@@ -554,7 +566,7 @@ static uint32_t v3_record_len(const uint8_t *p, uint32_t avail)
 }
 
 int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
-	       struct igmp_change *out, int max)
+	       uint32_t others, struct igmp_change *out, int max)
 {
 	int n = 0;
 
@@ -575,7 +587,8 @@ int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
 
 	case IGMP_V1_REPORT:
 	case IGMP_V2_REPORT:
-		n = join(db, rx->vid, rx->group, rx->port, now, out, max, n, &no_src);
+		n = join(db, rx->vid, rx->group, rx->port, now, others, out, max, n,
+			&no_src);
 		break;
 
 	case IGMP_V2_LEAVE:
@@ -625,7 +638,7 @@ int igmp_db_rx(struct igmp_db *db, const struct igmp_rx *rx, uint32_t now,
 				js.p = p + 8;
 				js.n = nsrc;
 				n = join(db, rx->vid, grp, rx->port, now,
-					 out, max, n, &js);
+					 others, out, max, n, &js);
 			}
 			else
 				db->rx_passable++;
@@ -748,8 +761,12 @@ static int fix(struct igmp_db *db, uint32_t g, struct igmp_change *out, int max,
 	if (!igmp_group_snoopable(g))
 		return n;
 	e = find_or_add(db, 0, g);
-	if (!e)
+	if (!e) {
+		/* No room: a group the OLT promised is not a row, so the drop
+		 * stays off, as for a range too wide to name. */
+		db->static_overflow = 1;
 		return n;
+	}
 	before = e->ports;
 	e->fixed = 1;
 	e->ports |= IGMP_PORTBIT(1);

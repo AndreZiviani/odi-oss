@@ -327,6 +327,53 @@ int main(void)
 		   "the earlier EAPOL row has the lower second-layout row");
 	}
 
+	/* The VID 0 rule of VLAN_EAPOL_UNTAGGED (eapol-down-vid0, as
+	 * apply_bridge.c gen_eapol_rule() builds it): a C-tag of VID 0 at any
+	 * priority, downstream, popped. The multicast VID 0 priority 0 row names
+	 * a priority as well, so it ranks ahead of the VID 0 row whichever went
+	 * in first, and keeps the priority 0 frames to its own action. */
+	puts("the VID 0 strip row beside the multicast VID 0 row:");
+	{
+		struct omci_vlan_oper mc, v0;
+		struct omci_bdgconn b;
+		const struct odi_sw_bdgconn_slot *sm, *sv;
+		int round;
+
+		bdg_gen_manual(&mc, 10, 0, 1);
+		bdg_gen_untagged(&v0);
+		v0.rule_gen = OMCI_VLAN_OPER_EXTVLAN_GEN;
+		v0.filter.inner_mode = OMCI_TAGF_TAGGED | OMCI_TAGF_VID;
+		v0.filter.inner.vid = 0;
+		v0.filter.inner.pri = OMCI_PRI_ANY;
+		v0.inner_act.tag_op = OMCI_TAGOP_POP;
+		v0.out.tag_count = 0;
+		for (round = 0; round < 2; round++) {
+			odi_mock_reset();
+			odi_switch_cmd_reset_state();
+			if (round == 0) {
+				bdg_conn(&b, 40, OMCI_DIR_DS, 5, 0, 9, &mc);
+				ok(odi_switch_cmd(51, &b, sizeof b) == 0, "the multicast row first: accepted");
+			}
+			bdg_conn(&b, 41, OMCI_DIR_DS, 5, 4, 5, &v0);
+			ok(odi_switch_cmd(51, &b, sizeof b) == 0, "the VID 0 strip row: accepted");
+			if (round == 1) {
+				bdg_conn(&b, 40, OMCI_DIR_DS, 5, 0, 9, &mc);
+				ok(odi_switch_cmd(51, &b, sizeof b) == 0, "the multicast row after it: accepted");
+			}
+			sm = slot_of(40);
+			sv = slot_of(41);
+			r = sv && sv->ds_row >= 0 ? &odi_sw_cf[sv->ds_row] : NULL;
+			ok(r && (r->rule_w1 & ODI_SW_CF_W1_CTAG) && !(r->rule_w1 & ODI_SW_CF_W1_STAG) &&
+			   (care(r) & ODI_SW_CF_W1_VID_MASK) == ODI_SW_CF_W1_VID_MASK &&
+			   !(r->rule_w1 & ODI_SW_CF_W1_VID_MASK) && !(care(r) & ODI_SW_CF_W1_PRI_MASK),
+			   "the VID 0 row matches a C-tag of VID 0, any priority, no S-tag");
+			ok(r && ((r->act[1] >> ODI_SW_CF_A1_CACT_SHIFT) & 3U) == ODI_SW_CF_CACT_DEL,
+			   "and takes the C-tag off");
+			ok(sm && sv && sm->ds_row >= 0 && sm->ds_row < sv->ds_row,
+			   "the multicast VID 0 priority 0 row is ahead of it");
+		}
+	}
+
 	/* A downstream EtherType row with the second layout full: refused, and
 	 * the log names the second layout, not the whole table (the script
 	 * reads the line printed after the marker). */

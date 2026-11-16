@@ -106,6 +106,16 @@ else
 	/etc/scripts/safe-mode.sh no-config || echo "rcS: safe-mode.sh no-config failed" >&2
 fi
 
+# ---- the identity snapshot (docs/SETTINGS.md, "The identity snapshot"): the
+# first boot of an image with identity.sh copies the provisioning identity to
+# /etc/config/identity.orig, and every later boot finds it there and writes
+# nothing. After the safe-mode count, which sets the flag that makes a
+# safe-mode boot take none. Bounded: the writer lock wait is 5 s, and timeout
+# ends anything else; a failure only logs.
+if config_mounted; then
+	timeout 20 /etc/scripts/identity.sh snapshot || echo "rcS: identity snapshot not taken" >&2
+fi
+
 # ---- entropy. Nothing on this board feeds the pool early, so without a
 # seed every daemon starts on a nearly empty one. seedrng credits the seed
 # the previous boot saved and writes a fresh one. This early the pool is

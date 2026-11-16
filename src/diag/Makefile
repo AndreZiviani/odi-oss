@@ -167,7 +167,9 @@ test:
 # (its diag_secs table, then exit), run through the real binary under qemu
 # with the hardware answers fixed, and diffed byte for byte against the
 # output the pre-rework diag gave for the same answers. A second run drops
-# the exit and ends on end of input instead, the other way a batch ends.
+# the exit and ends on end of input instead, the other way a batch ends. A
+# third pair ends on a last line without a newline, shorter than the line
+# before it, and must give the same output as with the newline.
 exporter-test: image
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/diag_fake
 	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/diag_fake < test/exporter.txt' \
@@ -179,6 +181,14 @@ exporter-test: image
 	    > $(BUILD)/exporter_eof.out
 	@cmp $(BUILD)/exporter_eof.out test/exporter_eof.golden \
 	  || { diff -u test/exporter_eof.golden $(BUILD)/exporter_eof.out; exit 1; }
+	@printf 'pon get transceiver voltage\nexit\n' > $(BUILD)/partial_nl.txt
+	@printf 'pon get transceiver voltage\nexit' > $(BUILD)/partial.txt
+	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/diag_fake < $(BUILD)/partial_nl.txt' \
+	    > $(BUILD)/partial_nl.out
+	@$(RUN) sh -c 'qemu-mips-static $(BUILD)/diag_fake < $(BUILD)/partial.txt' \
+	    > $(BUILD)/partial.out
+	@cmp $(BUILD)/partial_nl.out $(BUILD)/partial.out \
+	  || { diff -u $(BUILD)/partial_nl.out $(BUILD)/partial.out; exit 1; }
 	@echo "exporter contract: output byte-identical to the golden files"
 
 # The three scripted optics scenarios, same batch (test/exporter.txt)

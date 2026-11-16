@@ -15,6 +15,7 @@
 #include "odi_switch_dal.h"
 #include "odi_switch_reg.h"
 #include "odi_switch_mcast.h"
+#include "odi_replay_blob.h"
 
 /* The VLAN table: 4096 rows by VID. */
 #define ODI_SW_VLAN_ID_COUNT		4096U
@@ -152,9 +153,7 @@ void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
 	}
 
 	/* First VLAN pass: every row to the sentinel, one row write each. */
-	v = ODI_SW_VLAN_MEMBERS_SENTINEL;
-	for (idx = 0; idx < ODI_SW_VLAN_ID_COUNT; idx++)
-		(void)odi_switch_table_write(ODI_SW_TBL_VLAN_MEMBERS, idx, &v, 1);
+	odi_sw_vlan_members_fill(0, ODI_SW_VLAN_ID_COUNT);
 
 	odi_reg_write(ODI_SW_VLAN_SETUP_OFF,
 		      ODI_SW_VLAN_SETUP_FILTER_ON_SET(
@@ -277,6 +276,66 @@ void odi_sw_cf_act_write(uint32_t idx, int is_us, const uint32_t act[3])
 void odi_sw_vlan_row_set(uint32_t vid, uint32_t val)
 {
 	(void)odi_switch_table_write(ODI_SW_TBL_VLAN_MEMBERS, vid, &val, 1);
+}
+
+/* ---- the table fills of the register replays ------------------------------
+ *
+ * The uniform sweeps of sdkinit.bin and modload.bin, generated here from a
+ * CALL record instead of replayed row by row (enum odi_replay_fill has
+ * what each writes). The same writes in the same order as the capture.
+ */
+
+void odi_sw_vlan_members_fill(uint32_t first, uint32_t count)
+{
+	const uint32_t v = ODI_SW_VLAN_MEMBERS_SENTINEL;
+	uint32_t idx;
+
+	if (first >= ODI_SW_VLAN_ID_COUNT || count > ODI_SW_VLAN_ID_COUNT - first)
+		return;
+	for (idx = first; idx < first + count; idx++)
+		(void)odi_switch_table_write(ODI_SW_TBL_VLAN_MEMBERS, idx, &v, 1);
+}
+
+/* Rule and mask of each row cleared, the A tables below pattern1 and the
+ * B tables from it, and with actions both action rows after them.
+ */
+static void odi_sw_cf_rows_fill(uint32_t first, uint32_t count, uint32_t pattern1,
+				int actions)
+{
+	static const uint32_t zero2[2] = { 0, 0 };
+	static const uint32_t zero3[3] = { 0, 0, 0 };
+	uint32_t i;
+
+	if (first >= ODI_SW_CF_ROW_COUNT || count > ODI_SW_CF_ROW_COUNT - first)
+		return;
+	for (i = first; i < first + count; i++) {
+		int b = i >= pattern1;
+
+		(void)odi_switch_table_write(b ? ODI_SW_TBL_CLS_RULE_B : ODI_SW_TBL_CLS_RULE_A,
+					      i, zero2, 2);
+		(void)odi_switch_table_write(b ? ODI_SW_TBL_CLS_MASK_B : ODI_SW_TBL_CLS_MASK_A,
+					      i, zero2, 2);
+		if (!actions)
+			continue;
+		(void)odi_switch_table_write(ODI_SW_TBL_CLS_DS_ACTION, i, zero3, 3);
+		(void)odi_switch_table_write(ODI_SW_TBL_CLS_US_ACTION, i, zero3, 3);
+	}
+}
+
+void odi_switch_replay_call(const struct odi_replay_event *e, const void *ctx)
+{
+	(void)ctx;
+	switch (e->table) {
+	case ODI_REPLAY_FILL_VLAN_MEMBERS:
+		odi_sw_vlan_members_fill(e->offset, e->value);
+		break;
+	case ODI_REPLAY_FILL_CF_RULES:
+		odi_sw_cf_rows_fill(e->offset, e->value, e->words[0], 0);
+		break;
+	case ODI_REPLAY_FILL_CF_RULES_ACTIONS:
+		odi_sw_cf_rows_fill(e->offset, e->value, e->words[0], 1);
+		break;
+	}
 }
 
 /* ---- the ACL rows of the extended VLAN discards ---------------------------

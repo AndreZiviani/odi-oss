@@ -36,7 +36,7 @@ LDFLAGS := -nostdlib -nostartfiles -static -Wl,-e,_start -Wl,--build-id=none \
 # The translation units of omcid, divided by what each one talks to: the
 # store, the driver, the renderers, one file per transport. omcid.h declares
 # everything that crosses.
-SRCS := main mibstore drv apply apply_qos apply_uni apply_bridge show clisrv vqsrv omcimsg cfgstore snapshot events swimage reload alarm mcast pm voip
+SRCS := main mibstore drv apply apply_qos apply_uni apply_bridge show clisrv vqsrv omcimsg cfgstore snapshot events swimage reload alarm mcast pm voip frames
 
 OBJS := $(BUILD)/start.o $(BUILD)/io.o $(SRCS:%=$(BUILD)/%.o) \
         $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o $(BUILD)/omci_mib.o \
@@ -95,6 +95,10 @@ $(BUILD)/mcastvlan_test: ../test/mcastvlan_test.c ../mcastvlan.h ../extvlan.h \
 	$(CC) $(CFLAGS) $(LDFLAGS) -I.. -o $@ ../test/mcastvlan_test.c \
 	      $(BUILD)/start.o $(BUILD)/io.o $(BUILD)/extvlan.o $(BUILD)/mcastvlan.o
 
+# MIB changes before a rebuild, against synthetic chip readbacks.
+$(BUILD)/qos_check_test: ../test/qos_check_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
+	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ $^
+
 # Real downstream ownership paths, with fault injection at the command boundary.
 $(BUILD)/downstream_ownership_test: ../test/downstream_ownership_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
@@ -152,11 +156,12 @@ size: cap
 	@$(RUN) sh -c 'ls -l $(BIN); $(CROSS)size $(BIN)'
 
 test: image
-	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/downstream_ownership_test $(BUILD)/service_ownership_test $(BUILD)/mib_sync_test
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/downstream_ownership_test $(BUILD)/service_ownership_test $(BUILD)/mib_sync_test $(BUILD)/qos_check_test
 	@$(RUN) qemu-mips-static $(BUILD)/extvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/mcastvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/downstream_ownership_test
 	@$(RUN) qemu-mips-static $(BUILD)/service_ownership_test
+	@$(RUN) qemu-mips-static $(BUILD)/qos_check_test
 	@$(RUN) qemu-mips-static $(BUILD)/mib_sync_test
 
 clean:

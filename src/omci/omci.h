@@ -38,6 +38,7 @@
 #define OMCI_MT_MIB_RESET       15
 #define OMCI_MT_GET_ALL_ALARMS      11
 #define OMCI_MT_GET_ALL_ALARMS_NEXT 12
+#define OMCI_MT_AVC                 17
 #define OMCI_MT_TEST                18
 #define OMCI_MT_START_SW_DOWNLOAD   19
 #define OMCI_MT_DOWNLOAD_SECTION    20

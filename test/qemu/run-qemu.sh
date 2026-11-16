@@ -453,7 +453,7 @@ sshx 'logread | grep -q "slot-state: OTHER SLOT BROKEN: slot 0"' || fail "the OT
 sshx 'rm -rf /tmp/ss'
 echo "  odi-slot records uncommitted=1 and the failed check, the login banner and syslog carry both notices"
 
-say "scenario: nv slotcheck and the nv commit warning (real nv, partitions as files)"
+say "scenario: nv slotcheck, the nv commit warning and the setenv guard (real nv, partitions as files)"
 # The real MIPS nv, in a chroot whose /proc/mtd and /dev/mtdN are files: a
 # kernel partition with a uImage built here (zlib CRCs, the layout
 # src/nv/slot.h documents) and a rootfs one starting with a version 4
@@ -554,10 +554,34 @@ sed -i 's/^other_slot_check=fail$/other_slot_check=ok/' $R/var/run/odi-slot
 out=$(chroot $R /bin/nv commit 0 2>&1)
 echo "commit 0, slot 1 recorded as ok: $out"
 if echo "$out" | grep -q WARNING; then echo "a passing other slot printed a warning"; exit 1; fi
+# nv setenv refuses the keys U-Boot boots by without --force, before it
+# takes the lock or reads a copy: both partitions stay as they were.
+for args in "sw_commit 1" "-c 2 sw_commit 1" "sw_active 1" "bootcmd" "mupgrade_en 1" "sw_tryactive 7" "sw_tryactive"; do
+	rc=0; out=$(chroot $R /bin/nv setenv $args 2>&1) || rc=$?
+	echo "setenv $args: rc=$rc"; echo "$out"
+	[ "$rc" = 1 ]
+	echo "$out" | head -n 1 | grep -q "^nv: setenv [a-z_]*: refused: "
+	echo "$out" | grep -q "^nv: add --force to write it anyway$"
+done
+[ "$(md5sum < $R/dev/mtd1)" = "$sum0" ]
+[ "$(md5sum < $R/dev/mtd2)" = "$sum1" ]
+# The refusal comes before nv reads anything: with no partitions listed, a
+# guarded key is still refused, not "no valid environment".
+mv $R/proc/mtd $R/proc/mtd.real && : > $R/proc/mtd
+rc=0; out=$(chroot $R /bin/nv setenv sw_commit 1 2>&1) || rc=$?
+mv $R/proc/mtd.real $R/proc/mtd
+echo "setenv sw_commit 1, no partitions: rc=$rc"; echo "$out"
+[ "$rc" = 1 ]
+echo "$out" | head -n 1 | grep -q "^nv: setenv sw_commit: refused: "
+# A name with '=' would reach bootcmd past the guard: refused.
+rc=0; out=$(chroot $R /bin/nv setenv "bootcmd=x" y 2>&1) || rc=$?
+echo "setenv bootcmd=x y: rc=$rc"; echo "$out"
+[ "$rc" = 1 ]
+echo "$out" | grep -q "a name cannot be empty or contain '='"
 GUEST
 sed 's/^/    /' "$WORK/slotcheck.out"
 sshx 'rm -rf /tmp/sc'
-echo "  nv slotcheck: pass, failed data CRC, empty rootfs, no partitions; nv commit warns after its result line, from the recorded result"
+echo "  nv slotcheck: pass, failed data CRC, empty rootfs, no partitions; nv commit warns after its result line, from the recorded result; nv setenv refuses the boot keys without --force and writes nothing"
 
 say "scenario: trial-guard.sh on that trial (real busybox, real /proc/net/tcp)"
 # The odi-slot just written says trial. The register is a file here (the
@@ -625,6 +649,11 @@ DIAG_ZERO_LINE="harness: table 0052${DIAG_ZERO}${DIAG_ZERO}0000"
 sshx "sed -i 's|</Config>|\t<Value Name=\"LOID_PASSWD_OLD\" Value=\"$DIAG_ZERO\"/>\n</Config>|' /etc/config/lastgood.xml"
 sshx "grep -c 'Value=\"$DIAG_ZERO\"' /etc/config/lastgood.xml" | grep -qx 1 || fail "could not plant LOID_PASSWD_OLD in lastgood.xml"
 sshx "echo '$DIAG_ZERO_LINE' > /var/log/qemu-zero.log"
+# The identity snapshot holds the same secrets, on the same partition: taken
+# here from the planted stores (identity.sh, mode 600), and never collected.
+sshx '/etc/scripts/identity.sh replace --yes' >/dev/null || fail "identity.sh replace --yes failed"
+[ "$(sshx 'stat -c %a /etc/config/identity.orig')" = 600 ] || fail "the identity snapshot is not mode 600"
+sshx "grep -c ' LOID_PASSWD=$DIAG_LOIDPW\$' /etc/config/identity.orig" | grep -qx 1 || fail "the identity snapshot does not hold the planted LOID password"
 # The same values sent to syslog (through /dev/kmsg and klogd: the image has
 # no logger), which the bundle copies from logread. klogd loses the first
 # kernel line after syslogd restarts (its socket send fails once, then it
@@ -649,7 +678,7 @@ sshx 'cat /tmp/odi-diag.tar.gz' > "$WORK/diag.tar.gz"
 mkdir "$WORK/diag"
 tar -xzf "$WORK/diag.tar.gz" -C "$WORK/diag" || fail "the bundle is not a readable tar.gz"
 D=$WORK/diag/odi-diag
-for f in MANIFEST.txt dmesg.txt syslog.txt meminfo.txt mounts.txt uptime.txt ps.txt nv.txt metrics.txt \
+for f in README.md SUMMARY.txt MANIFEST.txt dmesg.txt syslog.txt meminfo.txt mounts.txt uptime.txt ps.txt nv.txt metrics.txt \
 	config/lastgood.xml config/lastgood_hs.xml log/qemu-secrets.log log/qemu-ident.log \
 	log/services.log pon/diag.txt pon/omcli_state.txt pon/omcli_vlan.txt; do
 	[ -s "$D/$f" ] || fail "the bundle has no $f (MANIFEST: $(cat "$D/MANIFEST.txt" 2>/dev/null))"
@@ -667,6 +696,7 @@ for f in module/a0.txt module/a2.txt module/chip.txt; do
 done
 ! grep -q 'module/a2-p' "$D/MANIFEST.txt" || fail "a page was dumped with no I2C bus: $(grep module/ "$D/MANIFEST.txt")"
 echo "  module/: a0, a2 and chip listed with a failing status (no I2C bus in qemu), the bundle still succeeds"
+[ ! -e "$D/config/identity.orig" ] || fail "the identity snapshot is in the bundle"
 grep -q 'Name="GPON_PLOAM_PASSWD" Value="REDACTED"' "$D/config/lastgood.xml" || fail "GPON_PLOAM_PASSWD is not redacted in the config copy"
 grep -q 'Name="LAN_IP_ADDR" Value="10.0.2.15"' "$D/config/lastgood.xml" || fail "the config copy lost a key that is not a secret"
 [ ! -e "$D/config/confd.auth" ] || fail "confd.auth is in the bundle"

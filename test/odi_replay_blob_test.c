@@ -21,8 +21,8 @@
 #include "../kernel/extra/drivers/net/ethernet/odi/odi_gpon_init.c"
 
 /* The record counts of the shipped tables. */
-#define SDKINIT_RECORDS		7429U
-#define MODLOAD_RECORDS		1748U
+#define SDKINIT_RECORDS		1801U
+#define MODLOAD_RECORDS		725U
 #define GPON_INIT_RECORDS	800U
 
 /* gponsn: the four serial-number words, USF_PLOAM_TX_WORD[1..4]. */
@@ -98,10 +98,10 @@ static void test_shipped_tables_parse(void)
 	struct odi_replay_fw fw;
 
 	CHECK(odi_replay_fw_load(ODI_REPLAY_TABLE_SDKINIT, &fw) == 0 &&
-	      fw.blob.count == SDKINIT_RECORDS, "sdkinit.bin parses, 7429 records");
+	      fw.blob.count == SDKINIT_RECORDS, "sdkinit.bin parses, 1801 records");
 	odi_replay_fw_release(&fw);
 	CHECK(odi_replay_fw_load(ODI_REPLAY_TABLE_MODLOAD, &fw) == 0 &&
-	      fw.blob.count == MODLOAD_RECORDS, "modload.bin parses, 1748 records");
+	      fw.blob.count == MODLOAD_RECORDS, "modload.bin parses, 725 records");
 	odi_replay_fw_release(&fw);
 	CHECK(odi_replay_fw_load(ODI_REPLAY_TABLE_GPON_INIT, &fw) == 0 &&
 	      fw.blob.count == GPON_INIT_RECORDS, "gpon_init.bin parses, 800 records");
@@ -250,7 +250,7 @@ static void test_record_rules(void)
 				      "sdkinit: a record out of verb order is refused");
 		expect_record_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, 0U, ODI_REPLAY_REC_CATEGORY, 1U,
 				      "sdkinit: a record with a category is refused");
-		expect_record_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, 0U, ODI_REPLAY_REC_KIND, 3U,
+		expect_record_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, 0U, ODI_REPLAY_REC_KIND, 4U,
 				      "sdkinit: an unknown kind is refused");
 		free(d);
 	}
@@ -265,7 +265,222 @@ static void test_record_rules(void)
 				      "gpon init: a nonzero reserved field is refused");
 		expect_record_refused(d, size, ODI_REPLAY_TABLE_GPON_INIT, 0U, ODI_REPLAY_REC_KIND,
 				      ODI_REPLAY_SOC, "gpon init: a SoC-window record is refused");
+		expect_record_refused(d, size, ODI_REPLAY_TABLE_GPON_INIT, 0U, ODI_REPLAY_REC_KIND,
+				      ODI_REPLAY_CALL, "gpon init: a call record is refused");
 		free(d);
+	}
+}
+
+/* Sets the u32 at byte off of record i, checks the table refuses the
+ * blob, restores it.
+ */
+static void expect_call_refused(uint8_t *d, size_t size, enum odi_replay_table table,
+				uint32_t i, unsigned int off, uint32_t value, const char *msg)
+{
+	uint8_t *rec = record(d, i);
+	uint32_t old = odi_replay_be32(rec + off);
+	const char *why;
+
+	put_be32(rec + off, value);
+	reseal(d, size);
+	CHECK(parse(d, size, table, &why) == -EINVAL, msg);
+	put_be32(rec + off, old);
+	reseal(d, size);
+}
+
+/* The call records of the shipped tables and the rules the parser holds
+ * every call record to (odi_replay_check_call()).
+ */
+static void test_call_rules(void)
+{
+	size_t size;
+	uint8_t *d;
+	uint32_t call;
+	const char *why;
+
+	d = copy_of(ODI_REPLAY_TABLE_SDKINIT, &size);
+	CHECK(d != NULL, "test setup: a copy of sdkinit.bin");
+	if (d) {
+		call = first_of_kind(d, SDKINIT_RECORDS, ODI_REPLAY_CALL);
+		CHECK(call < SDKINIT_RECORDS, "sdkinit.bin has call records");
+		if (call < SDKINIT_RECORDS) {
+			/* The table field is the fill id, the offset the first
+			 * row, the value the row count.
+			 */
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_TABLE, 0x00000000U, /* fill 0, 0 words */
+					    "sdkinit: a call to fill 0 is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_TABLE, 0x00040001U,
+					    "sdkinit: a call to an unknown fill is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_TABLE, 0x00010001U,
+					    "sdkinit: a VLAN fill with an argument word is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_TABLE, 0x00020000U,
+					    "sdkinit: a CF fill without its pattern-1 row is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_VALUE, 0U,
+					    "sdkinit: a call over no rows is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_VALUE, ODI_REPLAY_FILL_CF_ROW_COUNT + 1U,
+					    "sdkinit: a call past the last row is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_OFFSET, ODI_REPLAY_FILL_CF_ROW_COUNT,
+					    "sdkinit: a call starting past the table is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_OFFSET, 0xffffffffU,
+					    "sdkinit: a first row that would wrap is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_WORDS, ODI_REPLAY_FILL_CF_ROW_COUNT + 1U,
+					    "sdkinit: a pattern-1 row past the table is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					    ODI_REPLAY_REC_WORDS + 4U, 1U,
+					    "sdkinit: a call with padding past its words is refused");
+			expect_record_refused(d, size, ODI_REPLAY_TABLE_SDKINIT, call,
+					      ODI_REPLAY_REC_CATEGORY, 1U,
+					      "sdkinit: a call record with a category is refused");
+		}
+		CHECK(parse(d, size, ODI_REPLAY_TABLE_SDKINIT, &why) == 0, "sdkinit: every edit above was undone");
+		free(d);
+	}
+
+	d = copy_of(ODI_REPLAY_TABLE_MODLOAD, &size);
+	CHECK(d != NULL, "test setup: a copy of modload.bin");
+	if (d) {
+		call = first_of_kind(d, MODLOAD_RECORDS, ODI_REPLAY_CALL);
+		CHECK(call < MODLOAD_RECORDS && record(d, call)[ODI_REPLAY_REC_CATEGORY] == 1U,
+		      "modload.bin has a call record, in category 1");
+		if (call < MODLOAD_RECORDS) {
+			expect_record_refused(d, size, ODI_REPLAY_TABLE_MODLOAD, call,
+					      ODI_REPLAY_REC_CATEGORY, 0U,
+					      "modload: a call record in category 0 is refused");
+			expect_record_refused(d, size, ODI_REPLAY_TABLE_MODLOAD, call,
+					      ODI_REPLAY_REC_REG_GROUP, 1U,
+					      "modload: a call record with a reg_group is refused");
+			expect_call_refused(d, size, ODI_REPLAY_TABLE_MODLOAD, call,
+					    ODI_REPLAY_REC_VALUE, 0U,
+					    "modload: a call over no rows is refused");
+		}
+		CHECK(parse(d, size, ODI_REPLAY_TABLE_MODLOAD, &why) == 0, "modload: every edit above was undone");
+		free(d);
+	}
+}
+
+/* The table op entries of the mock log, from entry *i on: the next 'T'
+ * (table, row), skipping its 'D' words. 0 when there is none.
+ */
+static int next_table_op(unsigned int *i, uint32_t *table, uint32_t *row)
+{
+	for (; *i < odi_mock.log_n; (*i)++) {
+		if (odi_mock.log[*i].kind != 'T')
+			continue;
+		*table = odi_mock.log[*i].addr >> 16;
+		*row = odi_mock.log[*i].addr & 0xffffU;
+		(*i)++;
+		return 1;
+	}
+	return 0;
+}
+
+static struct odi_replay_event call_event(uint16_t fill, uint32_t first, uint32_t count,
+					  uint32_t pattern1)
+{
+	struct odi_replay_event e;
+
+	memset(&e, 0, sizeof(e));
+	e.kind = ODI_REPLAY_CALL;
+	e.table = fill;
+	e.offset = first;
+	e.value = count;
+	e.n_words = fill == ODI_REPLAY_FILL_VLAN_MEMBERS ? 0 : 1;
+	e.words[0] = fill == ODI_REPLAY_FILL_VLAN_MEMBERS ? 0 : pattern1;
+	return e;
+}
+
+/* What each fill writes, row by row: the replay tests fold a run of equal
+ * rows into one entry, so the order inside a fill is pinned here.
+ */
+static void test_call_fills(void)
+{
+	static const uint32_t cf_rules[] = {
+		ODI_SW_TBL_CLS_RULE_A, ODI_SW_TBL_CLS_MASK_A,	/* row 0 */
+		ODI_SW_TBL_CLS_RULE_A, ODI_SW_TBL_CLS_MASK_A,	/* row 1 */
+		ODI_SW_TBL_CLS_RULE_B, ODI_SW_TBL_CLS_MASK_B,	/* row 2, pattern 1 */
+		ODI_SW_TBL_CLS_RULE_B, ODI_SW_TBL_CLS_MASK_B,	/* row 3 */
+	};
+	static const uint32_t cf_actions[] = {
+		ODI_SW_TBL_CLS_RULE_A, ODI_SW_TBL_CLS_MASK_A,
+		ODI_SW_TBL_CLS_DS_ACTION, ODI_SW_TBL_CLS_US_ACTION,	/* row 254 */
+		ODI_SW_TBL_CLS_RULE_A, ODI_SW_TBL_CLS_MASK_A,
+		ODI_SW_TBL_CLS_DS_ACTION, ODI_SW_TBL_CLS_US_ACTION,	/* row 255 */
+	};
+	struct odi_replay_event e;
+	unsigned int i, k, ok;
+	uint32_t table, row;
+
+	odi_mock_reset();
+	e = call_event(ODI_REPLAY_FILL_VLAN_MEMBERS, 1U, 4095U, 0);
+	odi_switch_replay_call(&e, NULL);
+	odi_mock_table_flush();
+	/* One run: its first row and word, then the run length, which only
+	 * grows while each row is the next one with the same word.
+	 */
+	CHECK(odi_mock.log_n == 3U && odi_mock.log[0].kind == 'T' &&
+	      odi_mock.log[0].addr == ((ODI_SW_TBL_VLAN_MEMBERS << 16) | 1U) &&
+	      odi_mock.log[1].kind == 'D' && odi_mock.log[1].val == 0xf0U &&
+	      odi_mock.log[2].kind == 'R' && odi_mock.log[2].val == 4095U,
+	      "vlan fill: rows 1 .. 0xfff to 0xf0, in order, one write each");
+
+	odi_mock_reset();
+	e = call_event(ODI_REPLAY_FILL_CF_RULES, 0, 4U, 2U);
+	odi_switch_replay_call(&e, NULL);
+	odi_mock_table_flush();
+	ok = 1;
+	i = 0;
+	for (k = 0; k < sizeof(cf_rules) / sizeof(cf_rules[0]); k++)
+		if (!next_table_op(&i, &table, &row) || table != cf_rules[k] || row != k / 2U)
+			ok = 0;
+	CHECK(ok && !next_table_op(&i, &table, &row),
+	      "cf rules fill: rule then mask per row, A below the pattern-1 row, B from it");
+
+	odi_mock_reset();
+	e = call_event(ODI_REPLAY_FILL_CF_RULES_ACTIONS, 254U, 2U, ODI_REPLAY_FILL_CF_ROW_COUNT);
+	odi_switch_replay_call(&e, NULL);
+	odi_mock_table_flush();
+	ok = 1;
+	i = 0;
+	for (k = 0; k < sizeof(cf_actions) / sizeof(cf_actions[0]); k++)
+		if (!next_table_op(&i, &table, &row) || table != cf_actions[k] || row != 254U + k / 4U)
+			ok = 0;
+	CHECK(ok && !next_table_op(&i, &table, &row),
+	      "cf rules and actions fill: rule, mask, DS and US action per row");
+
+	odi_mock_reset();
+	e = call_event(ODI_REPLAY_FILL_VLAN_MEMBERS, 4095U, 2U, 0);
+	odi_switch_replay_call(&e, NULL);
+	e = call_event(ODI_REPLAY_FILL_CF_RULES, 255U, 2U, 0);
+	odi_switch_replay_call(&e, NULL);
+	e = call_event(7U, 0, 1U, 0);
+	odi_switch_replay_call(&e, NULL);
+	odi_mock_table_flush();
+	CHECK(odi_mock.log_n == 0U, "a fill past its table, or an unknown one, writes nothing");
+
+	/* The engine without a call hook: the record counts, nothing is
+	 * written (the board and GPON replays never see one; their parsers
+	 * refuse it).
+	 */
+	{
+		const struct odi_replay_event ev[1] = {
+			call_event(ODI_REPLAY_FILL_VLAN_MEMBERS, 0, 16U, 0),
+		};
+		const struct odi_replay_blob blob = { .events = ev, .count = 1 };
+		const struct odi_replay_opts opts = { .verb = ODI_REPLAY_ALL_VERBS };
+
+		odi_mock_reset();
+		CHECK(odi_replay_run(&blob, &opts) == 1U, "a call record counts as one applied record");
+		odi_mock_table_flush();
+		CHECK(odi_mock.log_n == 0U, "a call record with no hook writes nothing");
 	}
 }
 
@@ -378,6 +593,8 @@ int main(void)
 	test_missing_file();
 	test_header_defects();
 	test_record_rules();
+	test_call_rules();
+	test_call_fills();
 	test_gpon_init_apply();
 	CHECK(odi_replay_fw_host_loads == odi_replay_fw_host_releases, "every load was released");
 

@@ -111,6 +111,53 @@ static int odi_replay_check_payload(const uint8_t *rec, int is_table, const char
 	return 0;
 }
 
+/* A CALL record: a known fill, a row range inside its table, the words
+ * that fill takes and nothing past them (enum odi_replay_fill).
+ */
+static int odi_replay_check_call(const uint8_t *rec, const char **why)
+{
+	uint16_t fill = odi_replay_be16(rec + ODI_REPLAY_REC_TABLE);
+	uint16_t n_words = odi_replay_be16(rec + ODI_REPLAY_REC_N_WORDS);
+	uint32_t first = odi_replay_be32(rec + ODI_REPLAY_REC_OFFSET);
+	uint32_t count = odi_replay_be32(rec + ODI_REPLAY_REC_VALUE);
+	uint32_t rows, want_words;
+	unsigned int w;
+
+	switch (fill) {
+	case ODI_REPLAY_FILL_VLAN_MEMBERS:
+		rows = ODI_REPLAY_FILL_VLAN_ROW_COUNT;
+		want_words = 0;
+		break;
+	case ODI_REPLAY_FILL_CF_RULES:
+	case ODI_REPLAY_FILL_CF_RULES_ACTIONS:
+		rows = ODI_REPLAY_FILL_CF_ROW_COUNT;
+		want_words = 1;
+		break;
+	default:
+		*why = "call record fill unknown";
+		return -EINVAL;
+	}
+	if (count == 0 || first >= rows || count > rows - first) {
+		*why = "call record row range out of range";
+		return -EINVAL;
+	}
+	if (n_words != want_words) {
+		*why = "call record word count wrong for its fill";
+		return -EINVAL;
+	}
+	if (want_words && odi_replay_word(rec, 0) > ODI_REPLAY_FILL_CF_ROW_COUNT) {
+		*why = "call record first pattern-1 row out of range";
+		return -EINVAL;
+	}
+	for (w = n_words; w < ODI_REPLAY_BLOB_MAX_WORDS; w++) {
+		if (odi_replay_word(rec, w) != 0) {
+			*why = "record has nonzero padding past its words";
+			return -EINVAL;
+		}
+	}
+	return 0;
+}
+
 static int odi_replay_check_modload(const uint8_t *rec, const char **why)
 {
 	uint8_t kind = rec[ODI_REPLAY_REC_KIND];
@@ -128,18 +175,23 @@ static int odi_replay_check_modload(const uint8_t *rec, const char **why)
 		}
 		return odi_replay_check_payload(rec, 0, why);
 	}
-	if (kind == ODI_REPLAY_TABLE) {
+	if (kind == ODI_REPLAY_TABLE || kind == ODI_REPLAY_CALL) {
+		/* A fill stands for table records and keeps their category:
+		 * replayblob.py filter keeps or drops it by that.
+		 */
 		if (category == 0 || category > ODI_REPLAY_BLOB_MODLOAD_MAX_CATEGORY ||
 		    reg_group != 0) {
 			*why = "modload table record category or reg_group out of range";
 			return -EINVAL;
 		}
+		if (kind == ODI_REPLAY_CALL)
+			return odi_replay_check_call(rec, why);
 		return odi_replay_check_payload(rec, 1, why);
 	}
 	/* No SoC-window kind: only the sdkinit and board sequences carry
 	 * one.
 	 */
-	*why = "modload record kind not register or table";
+	*why = "modload record kind not register, table or call";
 	return -EINVAL;
 }
 
@@ -160,6 +212,8 @@ static int odi_replay_check_sdkinit(const uint8_t *rec, uint8_t prev_verb, const
 		*why = "sdkinit records not grouped by verb";
 		return -EINVAL;
 	}
+	if (kind == ODI_REPLAY_CALL)
+		return odi_replay_check_call(rec, why);
 	if (kind != ODI_REPLAY_REG && kind != ODI_REPLAY_TABLE &&
 	    kind != ODI_REPLAY_SOC) {
 		*why = "sdkinit record kind out of range";
