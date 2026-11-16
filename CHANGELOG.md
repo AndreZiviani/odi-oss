@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.17.0 and metricsd v1.11.0. The web UI adds a link
+  check under the registration ladder on Status (light, registered, OMCI,
+  services, traffic, with the first failing stage as one finding), the
+  transceiver bias current and the uptime, a time on every kernel log line,
+  a shared PON figure that refreshes every second, a bar when the image
+  recreated the config store at boot (`config-reseed.sh`), and LOID, LOID
+  password and PLOAM password keys that can be emptied again; a write that
+  `flash` refuses answers with flash's own message. The exporter no longer
+  lets a client that connects and sends nothing hold every scrape behind
+  it, and waits after a failed `accept()` instead of spinning. The asset
+  hashes in src/release-sha256.txt are the release SHA256SUMS, checked by
+  `make releases`.
 - flash: waits at most 3 s for its writer lock, down from 5 s. confd gives
   up on a `flash` that prints nothing for 5 s, so while another write held
   the lock a web UI save reported "flash set timed out" instead of flash's
