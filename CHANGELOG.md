@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- flash: waits at most 3 s for its writer lock, down from 5 s. confd gives
+  up on a `flash` that prints nothing for 5 s, so while another write held
+  the lock a web UI save reported "flash set timed out" instead of flash's
+  own "flash: busy, another flash holds ..." line. Nothing was written
+  either way. Refs AndreZiviani/odi-ui#103.
 - test: `flash_test.sh` seeds the LOID of its "held" cases without `sed -i`,
   whose GNU form BSD sed reads differently, so the three checks pass on
   macOS too. Refs #404.
