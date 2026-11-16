@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- omcid: a class 171 table with more entries than omcid reads is refused
+  whole and logged once (`ext vlan 171/<instance> entry 34: OLT rule not
+  applied (more entries than omcid keeps), transparent`), instead of being
+  applied in part. Before, only the 12 entries written last were read and
+  the rest, the ones the OLT wrote first, were dropped without a word: a
+  13-entry table whose default rules were written first let tagged frames
+  through although its single-tag default discards them. The cap is now 34
+  entries per instance, the 24 rules and 8 discards an ingress keeps plus
+  the two default rules for tagged frames. Refs #435.
 - omcid: a Set of a bridge port, VLAN filter, 802.1p mapper, extended VLAN
   operation, GEM interworking TP, GEM port or multicast GEM interworking TP
   that leaves every value as it was no longer rebuilds the bridge
