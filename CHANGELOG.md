@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- omcid: a Set of a bridge port, VLAN filter, 802.1p mapper, extended VLAN
+  operation, GEM interworking TP, GEM port or multicast GEM interworking TP
+  that leaves every value as it was no longer rebuilds the bridge
+  connections. Before, any such Set had the rebuild a second later
+  deactivate and re-add every service, so an OLT re-sending its provisioning
+  on a live line interrupted the traffic for nothing. A Set that changes a
+  value rebuilds as before, and so does any Set of a table attribute (the
+  received-frame table of class 171, the multicast address tables of class
+  281); a Create and a Delete are unchanged. Refs #436.
 - docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
   mapper with one target forwards the tagged frames of a priority the mapper
   sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.

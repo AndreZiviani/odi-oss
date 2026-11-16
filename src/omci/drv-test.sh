@@ -864,6 +864,55 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	omcid_stop "$pid"
 fi
 
+# ------------------------------------------------ a bridge Set rebuilds only when it changes something
+#
+# After the ISP1 provisioning, three Sets an OLT may send on a live line:
+#   A. 802.1p mapper 1 Set to the IW TP pointers it already has (the
+#      session's own Set of them again): no rebuild;
+#   B. the same mapper's DSCP to P-bit map (attribute 11) Set to a new value:
+#      a rebuild;
+#   C. ext VLAN 1's received-frame table Set to the entry the session wrote
+#      last, which leaves the row's own copy of the attribute as it was: a
+#      rebuild all the same, a table attribute always counts as a change.
+# Before, any Set of a bridge class rebuilt, and a rebuild deactivates and
+# re-adds every service.
+if [ "${UPDATE:-0}" != 1 ]; then
+	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
+	log=/tmp/omcid-drv-bdgset.log
+	: > "$log"
+	$Q respond/build/omcid-drvtrace -a -w 8 -c "$CAPS" -g /tmp/gpon-isp1 > "$log" 2>&1 &
+	pid=$!
+	omcid_up "$log"
+	$Q cli/build/omcli --inject-file "$FIX/omci-session-isp1.txt" > /dev/null 2>&1
+	settled "$log"
+	n=$(rebuilt "$log")
+
+	# A has no event to wait for, as C of the block above.
+	sed -n 's/^ecbd\(480a00820001\)/0e80\1/p' "$FIX/omci-session-isp1.txt" > /tmp/bdgset-a.txt
+	get_frame 0e81 0100 0000 8000 >> /tmp/bdgset-a.txt
+	$Q cli/build/omcli --inject-file /tmp/bdgset-a.txt > /dev/null 2>&1
+	wait_for "$log" '0e81290a0100' 30
+	sleep 2.5
+	if [ "$(grep -c '^-> 0e80' "$log")" = 1 ] && [ "$(rebuilt "$log")" = "$n" ]; then
+		echo "ok    a mapper Set that changes nothing causes no bridge rebuild"
+	else
+		echo "FAIL  a mapper Set that changes nothing rebuilt the bridge connections ($n -> $(rebuilt "$log"))"
+		fail=$((fail + 1))
+	fi
+
+	inject_wait "$log" "$(printf '0e82480a008200010020%s%012d00000028%08d' \
+		"$(printf '%048d' 0 | tr 0 7)" 0 0)"
+	if wait_for "$log" 'bridge connections rebuilt' 30 $((n + 1)); then
+		echo "ok    a mapper Set that changes a value rebuilds the bridge connections"
+	fi
+
+	inject_wait "$log" "$(sed -n 's/^ed26\(480a00ab0001\)/0e83\1/p' "$FIX/omci-session-isp1.txt")"
+	if wait_for "$log" 'bridge connections rebuilt' 30 $((n + 2)); then
+		echo "ok    a Set of the class 171 table rebuilds, even with the entry it already holds"
+	fi
+	omcid_stop "$pid"
+fi
+
 # A MIB reset from the OLT throws the MIB away, and the stock firmware's
 # reset clears the datapath with it. The bridge connections built from the
 # old MIB have to go: the rebuild after the reset deactivates every one of

@@ -173,6 +173,20 @@ static void apply_ani_g(const struct omci_class *c, const struct mib_row *r,
 	out_fmt("   [hw] %s -> %d\n", "gem block length", (long)rc);
 }
 
+/* Whether a Set moved any attribute it carried (mib_changed(), against the
+ * row as it was before the Set). A table attribute always counts: the row
+ * keeps only the last entry written, which says nothing about the rows of
+ * the table. */
+static int set_moved(const struct omci_class *c, const struct mib_row *r,
+		     uint16_t mask)
+{
+	for (unsigned k = 1; k <= 16; k++)
+		if ((mask & (1u << (16 - k))) &&
+		    (tbl_is_rows(c, k) || mib_changed(r, c, k)))
+			return 1;
+	return 0;
+}
+
 /* The tables (flow ids, the T-CONT map, the services) are kept with or
  * without -a: they are ours, and they are what lets a dry run say what
  * would be programmed. Only the driver calls are gated on apply_hw, one by
@@ -180,13 +194,17 @@ static void apply_ani_g(const struct omci_class *c, const struct mib_row *r,
 void apply_entity(const struct omci_class *c, uint16_t inst,
 		  const struct mib_row *r, uint16_t mask, int creating)
 {
+	/* A Set that leaves every value as it was changes no connection: an
+	 * OLT re-sending its provisioning on a live line would otherwise have
+	 * the rebuild tear down and re-add every service. */
 	if (c && (c->classId == OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA ||
 		  c->classId == OMCI_ME_VLAN_TAGGING_FILTER_DATA ||
 		  c->classId == OMCI_ME_DOT1P_MAPPER_SERVICE_PROFILE ||
 		  c->classId == OMCI_ME_EXT_VLAN_TAGGING_OP_CFG_DATA ||
 		  c->classId == OMCI_ME_GEM_IW_TP ||
 		  c->classId == OMCI_ME_GEM_PORT_CTP ||
-		  c->classId == OMCI_ME_MCAST_GEM_IW_TP))
+		  c->classId == OMCI_ME_MCAST_GEM_IW_TP) &&
+	    (creating || set_moved(c, r, mask)))
 		conn_dirty = 1;
 	/* With phone ports on, a SIP agent's TCP/UDP pointer (attribute 5)
 	 * and a TCP/UDP config data's IP host pointer (4) say which IP host
