@@ -743,6 +743,57 @@ check "a mapper and a GEM IW TP of the same id: the mapper, one rule per priorit
 47/1002 gem 657 rule ext-vlan vid 410 pri 2
 47/1002 gem 657 rule ext-vlan vid 410 pri 3"
 
+# Untagged frames and the discards follow the mapper, as the class 84 rules
+# do. The split mapper above with priority 0 unmapped (0xffff), and its
+# unmarked-frame option 1 with default priority 1 (attributes 10 and 12):
+# untagged frames go up as priority 1, GEM 657. The table passes untagged
+# frames as they are and discards VID 20; both go on GEM 657, and nothing on
+# GEM 1000. With the rules held to the port of priority 0, which no port
+# carries here, neither was installed.
+UNTAGPASS=f8000000f8000000000f8000000f8000
+{
+	sessionx 8100 8100 "$UNTAGPASS" "$DROP20"
+	split_frames
+	frame 48 0082 1002 "4050ffff0101"   # priority 0 unmapped; option 1, default priority 1
+} > /tmp/s171-unm.txt
+run171 ev-unm /tmp/s171-unm.txt
+got=$(rebuild /tmp/omcid-171-ev-unm.log 0 | grep ext-vlan)
+check "split mapper, priority 0 unmapped, default priority 1: the untagged rule and the discard on its GEM port" "$got" \
+"47/1002 gem 657 rule ext-vlan discard vid 20 pri -1
+47/1002 gem 657 rule ext-vlan vid -1 pri -1"
+
+# The same mapper with its unmarked-frame option 0: untagged frames are
+# priority 0, which the mapper sends nowhere, so no port takes the untagged
+# rule (as no port takes the class 84 one). The discard still goes, once,
+# with the first GEM port the mapper names.
+{
+	sessionx 8100 8100 "$UNTAGPASS" "$DROP20"
+	split_frames
+	frame 48 0082 1002 "4000ffff"       # priority 0 unmapped, option 0
+} > /tmp/s171-unm0.txt
+run171 ev-unm0 /tmp/s171-unm0.txt
+got=$(rebuild /tmp/omcid-171-ev-unm0.log 0 | grep ext-vlan)
+check "split mapper, priority 0 unmapped, option 0: no untagged rule, the discard once" "$got" \
+"47/1002 gem 657 rule ext-vlan discard vid 20 pri -1"
+
+# One target: the bridge port names a mapper and a GEM IW TP of the same id,
+# and the mapper sends priorities 1-7 to that IW TP and priority 0 nowhere.
+# It does not split, so it keeps the single rules it always had, as on the
+# class 84 path (fb-one7 above): the untagged rule, the discard, and the
+# priority-keeping translation as one rule, not seven.
+{
+	sessionx 8100 8100 "$UNTAGPASS" "$DROP20" "$TRANS410"
+	frame 44 010c 0003 "03e8800003800700000008"     # GEM CTP: port 1000
+	frame 44 010a 1002 "00030510020000000200"       # GEM IW TP 0x1002 -> CTP 3: the id of the mapper
+	frame 48 0082 1002 "7f80ffff1002100210021002100210021002"   # 0 unmapped, 1-7 to 0x1002
+} > /tmp/s171-one.txt
+run171 ev-one /tmp/s171-one.txt
+got=$(rebuild /tmp/omcid-171-ev-one.log 0 | grep ext-vlan)
+check "one target, priority 0 unmapped: the untagged rule, the discard and one translation rule" "$got" \
+"47/1002 gem 1000 rule ext-vlan discard vid 20 pri -1
+47/1002 gem 1000 rule ext-vlan vid -1 pri -1
+47/1002 gem 1000 rule ext-vlan vid 410 pri -1"
+
 # ---- a bridge port of TP type 5 (GEM IW TP, no mapper) ----------------------
 #
 # Some OLTs attach the data GEM to the bridge directly: class 47 TPType 5,

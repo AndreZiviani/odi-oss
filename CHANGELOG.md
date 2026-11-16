@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- omcid: when the OLT's class 171 table is applied entry by entry, an entry
+  that leaves frames untagged now goes on the GEM port the 802.1p mapper
+  sends untagged frames to (its default priority, attribute 12, when its
+  unmarked-frame option, attribute 10, is 1), as the class 84 rules of the
+  same port already did. The table's discards go once, with that port, or
+  with the first port the mapper names when no port takes untagged frames.
+  Before, both went only with the port that carries priority 0, so on a
+  mapper that sends priority 0 nowhere they were not installed at all, and
+  nothing was logged. A mapper that names one GEM port and leaves some
+  priorities unmapped now gets the same single rules as on the class 84
+  path, not one rule per mapped priority. Refs #434.
 - omcid: a class 171 table with more entries than omcid reads is refused
   whole and logged once (`ext vlan 171/<instance> entry 34: OLT rule not
   applied (more entries than omcid keeps), transparent`), instead of being
