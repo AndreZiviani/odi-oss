@@ -352,8 +352,7 @@ t "the lock is free again once the holder ended" "NTP_SERVER=other" "$(ODI_CONF=
 # omcid holds identity changes back after refusals: a changed identity key is
 # not stored then, an unchanged one is (the web UI saves the whole page), and
 # any other key is as before. default cs does not reset the LOID either.
-cp "$T/rcs.xml" "$T/hcs.xml"
-sed -i 's/<Value Name="LOID" Value="[^"]*"/<Value Name="LOID" Value="someone"/' "$T/hcs.xml"
+sed 's/<Value Name="LOID" Value="[^"]*"/<Value Name="LOID" Value="someone"/' "$T/rcs.xml" > "$T/hcs.xml"
 hf() { CS="$T/hcs.xml" HS="$T/rhs.xml" DEFAULTS="$T/def.xml" sh $F "$@"; }
 printf 'streak 2\n' > "$T/hold"
 out=$(hf set LOID other 2>&1); rc=$?

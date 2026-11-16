@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- test: `flash_test.sh` seeds the LOID of its "held" cases without `sed -i`,
+  whose GNU form BSD sed reads differently, so the three checks pass on
+  macOS too. Refs #404.
 - boot: a config partition with no `lastgood.xml` or `lastgood_hs.xml`
   (after `flash_eraseall` of `config`, the usual way to start clean on the
   stock firmware) no longer ends in the safe mode with every web UI save
