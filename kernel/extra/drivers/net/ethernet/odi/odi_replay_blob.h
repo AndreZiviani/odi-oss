@@ -54,7 +54,8 @@
  * include it as source. odi_replay_fw_load()/odi_replay_fw_release() are
  * the one environment-specific pair: odi_replay_fw.c under __KERNEL__
  * (request_firmware()), test/odi_replay_fw_host.h on the host (a plain
- * file read from rootfs/skeleton/lib/firmware/).
+ * file read from out/firmware/, where replayblob.py build-tables writes
+ * the blobs it builds from tools/regtrace/tables/).
  */
 #ifndef ODI_REPLAY_BLOB_H
 #define ODI_REPLAY_BLOB_H

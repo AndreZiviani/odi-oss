@@ -16,11 +16,12 @@ behind every rule here.
       extra/                 every file of our own, at its tree path (board, CPU cache, irqchip, timer, SPI NOR)
       extra/drivers/net/ethernet/odi/   our own switch/GPON/NIC/OMCI/watchdog/ramlog drivers
     packages/                upstream userland: busybox, dropbear, iproute2 (bridge-utils deliberately not built)
-    rootfs/skeleton/         /etc and the init chain, ours; lib/firmware/odi/ the register replay tables
+    rootfs/skeleton/         /etc and the init chain, ours
     image/                   assembles squashfs + uImage into a flashable tarball, and the on-device flasher (fwu.sh)
     src/                     our own tools: diag, omci (omcid/omcli/omciprobe/omcicap), igmp, nv — freestanding
     test/                    host-side and qemu-based test harnesses
     tools/                   developer tooling: remote-build.sh, kernel-footprint.sh, objdiff.sh, fetch-refs.sh, memprobe, regdump, regtrace, lint helpers
+      regtrace/tables/       the register replay tables as text, the source of /lib/firmware/odi/*.bin
     docs/                    HACKING.md (contributor guide), BOOT.md, KERNEL.md, SWITCH.md, TOOLS.md, SETTINGS.md, BUILDING.md, FLASHING.md, ACCESS.md, CROSS-COMPILING.md, IMPROVEMENTS.md, LICENSING.md, REFERENCES.md; kb/ field notes
 
 ## Build and test commands

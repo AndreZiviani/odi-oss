@@ -8,6 +8,8 @@
 # (the file header has the scenario). Part of `make test-host`.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# The replay tables the test loads, built from tools/regtrace/tables/.
+python3 "$ROOT/tools/regtrace/replayblob.py" build-tables
 BIN=$(mktemp -t odi_reregister_test.XXXXXX)
 trap 'rm -f "$BIN"' EXIT
 cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -o "$BIN" "$ROOT/test/odi_reregister_test.c"

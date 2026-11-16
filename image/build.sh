@@ -145,6 +145,21 @@ say "applying the skeleton"
 cp -a "$ROOT/rootfs/skeleton/." "$STAGE/"
 chmod 755 "$STAGE"/etc/init.d/* "$STAGE"/etc/scripts/*
 
+# The register replay tables: built from their text in tools/regtrace/tables/
+# (replayblob.py build), inside the tools container so the host needs no
+# python3. Written to stdout and redirected here, so the files belong to the
+# user running the build, not to root in the container. out/firmware/odi/
+# keeps what was installed, for the SBOM (tools/sbom.py reads it).
+say "register replay tables (from tools/regtrace/tables)"
+FW_OUT=$ROOT/out/firmware/odi
+mkdir -p "$FW_OUT" "$STAGE/lib/firmware/odi"
+for t in sdkinit modload gpon_init; do
+	run python3 tools/regtrace/replayblob.py build "tools/regtrace/tables/$t.txt" - \
+		> "$FW_OUT/$t.bin.tmp" || die "replayblob.py build of $t failed"
+	mv "$FW_OUT/$t.bin.tmp" "$FW_OUT/$t.bin"
+	install -m 644 "$FW_OUT/$t.bin" "$STAGE/lib/firmware/odi/$t.bin"
+done
+
 # /tmp is a link to /var/tmp, as in the stock image: a real directory would be
 # in the read-only squashfs, and every temp file would fail with EROFS. /var is
 # the ramfs rcS mounts first thing, before anything writes a temp file

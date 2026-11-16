@@ -211,16 +211,19 @@ def generate(args):
     drivers["properties"].append({"name": "odi:embedded", "value": "built-into-kernel"})
 
     tables = comp("odi-register-replay-tables", version, "GPL-2.0-or-later", OWN,
-                  "pkg:github/%s@%s#rootfs/skeleton/lib/firmware/odi" % (OWN, version),
+                  "pkg:github/%s@%s#tools/regtrace/tables" % (OWN, version),
                   ref="odi-register-replay-tables", ctype="data")
     tables["description"] = "register write lists the kernel loads with request_firmware() (docs/LICENSING.md)"
     tables["components"] = []
-    fw = os.path.join(ROOT, "rootfs/skeleton/lib/firmware/odi")
-    for n in sorted(os.listdir(fw)):
-        if n.endswith(".bin"):
-            tables["components"].append(b.file_comp(os.path.join(fw, n), "/lib/firmware/odi/" + n))
-    if not tables["components"]:
-        die("no replay tables under rootfs/skeleton/lib/firmware/odi")
+    # Built from tools/regtrace/tables/ by image/build.sh (replayblob.py
+    # build-tables), which leaves the files it installs here.
+    fw = os.environ.get("FW_DIR", os.path.join(ROOT, "out/firmware/odi"))
+    # Exactly the three files image/build.sh installs, each required: the
+    # directory is build output, so anything else in it does not ship.
+    for n in ("gpon_init.bin", "modload.bin", "sdkinit.bin"):
+        if not os.path.isfile(os.path.join(fw, n)):
+            die("no replay table %s under %s (image/build.sh builds it)" % (n, fw))
+        tables["components"].append(b.file_comp(os.path.join(fw, n), "/lib/firmware/odi/" + n))
 
     # --- the libc and the upstream packages ---------------------------------
     uclibc = comp("uClibc-ng", uclibc_ver, "LGPL-2.1-only", "uClibc-ng project",

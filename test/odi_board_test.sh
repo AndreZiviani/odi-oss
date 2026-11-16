@@ -14,6 +14,8 @@
 # was linked with.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# The replay tables the test loads, built from tools/regtrace/tables/.
+python3 "$ROOT/tools/regtrace/replayblob.py" build-tables
 FIXTURE="$ROOT/test/fixtures/isp1-260923-g4-board-init-filtered.txt"
 
 if [ ! -f "$FIXTURE" ]; then

@@ -81,7 +81,7 @@ activates the GPON MAC once `omcid` has registered.
 | `src/` | our own userland: `diag`, `omci` (`omcid`, `omcli`/`omcicli`, `omciprobe`, `omcicap`), `igmp`, `nv`; freestanding binaries | [`src/diag/README.md`](../src/diag/README.md), [`src/omci/README.md`](../src/omci/README.md) |
 | `src/fetch-releases.sh` | pulls `metricsd` and `confd`, separate projects, as pinned checksummed releases | |
 | `packages/` | upstream busybox, dropbear, iproute2, statically linked against our uClibc-ng; the ISA audits | `packages/isa-audit.sh` |
-| `rootfs/skeleton/` | `/etc` (rcS, services, network.sh, apply.sh, flash, ...) and the register replay tables in `lib/firmware/odi/` | [`rootfs/README.md`](../rootfs/README.md), then `etc/init.d/rcS` |
+| `rootfs/skeleton/` | `/etc` (rcS, services, network.sh, apply.sh, flash, ...); the register replay tables are built into `lib/firmware/odi/` from `tools/regtrace/tables/` | [`rootfs/README.md`](../rootfs/README.md), then `etc/init.d/rcS` |
 | `image/` | squashfs + uImage into a flashable tarball; `fwu.sh`, the on-device flasher | [`image/README.md`](../image/README.md) |
 | `test/` | host-side unit tests (C unity builds against a register mock, shell tests of the on-device scripts) and manual qemu harnesses | [Testing](#testing) |
 | `tools/` | `remote-build.sh`, `kernel-footprint.sh`, `check-inline-quotes.sh`, `check-kernel-hardening.sh`, `fetch-refs.sh`, `bump-deps.sh` (moves the pinned upstream versions), `compare-images.sh` and `objdiff.sh`, `generate-sbom.sh`, `release-notes.sh`, `config-backup.sh`; `memprobe` (physical memory from any kernel), `regdump`, `regtrace` (offline tooling for the register captures the replay tables came from) | each directory's `README.md` |
@@ -554,8 +554,9 @@ five lines), and the wrapper goes into the `test-host` list in the
 Makefile.
 
 Tests replay what real sticks did: captured register sequences
-(`test/fixtures/`), the committed replay tables in
-`rootfs/skeleton/lib/firmware/odi/` (parsed by the C reader and dumped by
+(`test/fixtures/`), the replay tables built from `tools/regtrace/tables/`
+into `out/firmware/odi/` (each test script that loads one runs
+`replayblob.py build-tables` first; parsed by the C reader and dumped by
 the Python writer, so both are checked against the same bytes), a captured
 GPON re-activation, and OLT command sequences from both ISPs.
 

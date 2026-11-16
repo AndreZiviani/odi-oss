@@ -31,7 +31,7 @@ GPL-2.0-or-later permits.
 
 ### The register replay tables
 
-`rootfs/skeleton/lib/firmware/odi/` holds three binary files
+The image carries three binary files in `/lib/firmware/odi/`
 (`sdkinit.bin`, `modload.bin`, `gpon_init.bin`) that the kernel loads with
 `request_firmware()`. They are data, not code, and not vendor files: each
 is a list of register writes (address, value, table words) recorded with
@@ -39,9 +39,15 @@ is a list of register writes (address, value, table words) recorded with
 initialised it, and packed by our own generators into our own format
 (`odi_replay_blob.h`). They carry no strings and no identity: the serial
 number words of the GPON table are zero, and the kernel fills them in from
-the config store at boot. They are committed rather than generated at build
-time because the register listing the generators need is itself read from
-the stock firmware binary (below) and is not in this tree.
+the config store at boot.
+
+Their source is text, one line per record, in `tools/regtrace/tables/`,
+and the build makes the binary files from it (`replayblob.py build`), so
+the tree holds them in a form a person can read, review and change, and
+building them needs nothing outside this tree. The generators that turned
+the captures into that text need the raw captures and a register listing
+read from the stock firmware binary (below); neither is in this tree, and
+neither is needed unless someone records a new capture.
 
 ## The toolchain and upstream packages: their own licenses
 

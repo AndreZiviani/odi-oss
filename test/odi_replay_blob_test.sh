@@ -9,7 +9,9 @@
 # against the same bytes. Part of `make test-host`.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-FW="$ROOT/rootfs/skeleton/lib/firmware/odi"
+# The replay tables the test loads, built from tools/regtrace/tables/.
+python3 "$ROOT/tools/regtrace/replayblob.py" build-tables
+FW="$ROOT/out/firmware/odi"
 BIN=$(mktemp -t odi_replay_blob_test.XXXXXX)
 trap 'rm -f "$BIN"' EXIT
 

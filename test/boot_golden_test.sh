@@ -12,6 +12,8 @@
 # Part of `make test-host`.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# The replay tables the test loads, built from tools/regtrace/tables/.
+python3 "$ROOT/tools/regtrace/replayblob.py" build-tables
 FIX=$ROOT/test/fixtures
 DIR=$(mktemp -d -t boot_golden_test.XXXXXX)
 trap 'rm -rf "$DIR"' EXIT

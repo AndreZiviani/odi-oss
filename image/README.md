@@ -35,10 +35,11 @@ device costs a recovery.
 
 ## What goes into the rootfs
 
-`rootfs/skeleton/` is copied in first: `/etc` and the init chain, and the
+`rootfs/skeleton/` is copied in first: `/etc` and the init chain. Then the
 three register-replay tables the kernel loads with `request_firmware()`
-(`/lib/firmware/odi/sdkinit.bin`, `modload.bin`, `gpon_init.bin`, committed
-data, not built here). Then busybox and its applet links, dropbear (with
+(`/lib/firmware/odi/sdkinit.bin`, `modload.bin`, `gpon_init.bin`), built
+from their text in `tools/regtrace/tables/` by `replayblob.py build` in the
+tools container, and kept in `out/firmware/odi/` for the SBOM. Then busybox and its applet links, dropbear (with
 `dropbear`, `dropbearkey` and `scp` links), iproute2, and every binary found
 in `out/bin` (`diag`, `omcid`, `omcli` with its `omcicli` link, `omciprobe`,
 `omcicap`, `nv`, `igmpd`, `metricsd`, `confd`) plus confd's web assets. A

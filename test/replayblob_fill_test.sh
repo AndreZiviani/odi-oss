@@ -18,6 +18,8 @@
 # 4. A call record the kernel loader refuses is refused here too.
 set -eu
 cd "$(dirname "$0")/.."
+# The replay tables the test reads, built from tools/regtrace/tables/.
+python3 tools/regtrace/replayblob.py build-tables
 
 SDKINIT_EXPANDED_SHA256=defb1db3727d85a507bd6dce5467cb1388334cff6fa51baafec6423517d6e1cd
 MODLOAD_EXPANDED_SHA256=0fb7fc7932c74c3412ab4674e998b4702a478e3ddde6eefab05602487b242b8c
@@ -29,7 +31,7 @@ import sys
 sys.path.insert(0, "tools/regtrace")
 import replayblob as rb
 
-FW = "rootfs/skeleton/lib/firmware/odi/"
+FW = "out/firmware/odi/"
 fails = []
 
 

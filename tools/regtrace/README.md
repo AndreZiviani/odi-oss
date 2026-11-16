@@ -203,24 +203,47 @@ back into writes, and both hold for `odi_switch_table_write()`:
 Three captured write sequences are replayed by the kernel drivers
 themselves: the per-verb `odi_init` writes (`mksdkinit.py`), the
 module-load writes (`mkmodload.py`) and the GPON boot init
-(`mkgponinit.py`). They are not compiled into the kernel: each generator
-writes a firmware blob, checked in under `rootfs/skeleton/lib/firmware/odi/`
-(`sdkinit.bin`, `modload.bin`, `gpon_init.bin`), and the driver loads it
-with `request_firmware()` when the trigger fires, validates it whole
-(header, size, CRC-32, every record) and releases it once applied.
-`replayblob.py` documents the format; `replayblob.py dump <file>` prints a
-blob as text, which is also what a generator prints when it is given no
-output path:
+(`mkgponinit.py`). They are not compiled into the kernel: the driver
+loads each as a firmware blob (`/lib/firmware/odi/sdkinit.bin`,
+`modload.bin`, `gpon_init.bin`) with `request_firmware()` when the trigger
+fires, validates it whole (header, size, CRC-32, every record) and releases
+it once applied.
+
+The source of each blob is its text in `tables/` (`sdkinit.txt`,
+`modload.txt`, `gpon_init.txt`): one line per record, in the format
+`replayblob.py dump` prints, with comments. A register record that
+`src/diag/tools/regnames.txt` names carries that name as a trailing
+comment, and anything a reader works out about a value can go next to it.
+`replayblob.py build-tables` writes the three blobs into
+`out/firmware/odi/`; `image/build.sh` builds them the same way into the
+rootfs, and the host tests and the SBOM read that output. No blob is
+committed. `test/replay_tables_test.sh` builds each table, dumps the blob
+and builds the dump back byte for byte, and checks that the committed
+text is exactly what `dump` prints for it, comments aside.
+
+A change to a table is a change to its text. `build` refuses a record the
+kernel loader would refuse and checks the `records=` and `crc32=` of the
+header line against the records, and says what they should be, so a change
+to the records also changes the header in the diff:
+
+    $EDITOR tools/regtrace/tables/sdkinit.txt
+    python3 tools/regtrace/replayblob.py build-tables
+
+A new capture goes through the generators and the transforms below, and
+the result becomes the text:
 
     python3 tools/regtrace/mksdkinit.py boot.txt sdkinit.full.bin
-    python3 tools/regtrace/replayblob.py compact sdkinit.full.bin rootfs/skeleton/lib/firmware/odi/sdkinit.bin
-    python3 tools/regtrace/replayblob.py dump rootfs/skeleton/lib/firmware/odi/sdkinit.bin
+    python3 tools/regtrace/replayblob.py compact sdkinit.full.bin sdkinit.bin
+    python3 tools/regtrace/replayblob.py dump --names src/diag/tools/regnames.txt sdkinit.bin > tools/regtrace/tables/sdkinit.txt
+
+That replaces the comments of the old text, so carry over the ones that
+still hold.
 
 The generators write every captured row. `replayblob.py compact` then
 replaces each uniform table sweep of the sdkinit and module-load tables
 by one call record, which the driver writes out in code
 (`docs/SWITCH.md`, "Register replays"); `replayblob.py expand` writes the
-rows back. The shipped `sdkinit.bin` and `modload.bin` are compacted, and
+rows back. The tables of sdkinit and module load are compacted, and
 `test/replayblob_fill_test.sh` pins their expansion to the generator
 output, so a regenerated table updates the hash there. For `modload.bin`
 the order is generate, `filter` with `PRODUCTION_MODLOAD_MASK`, then
@@ -228,8 +251,9 @@ the order is generate, `filter` with `PRODUCTION_MODLOAD_MASK`, then
 
 `mkmodload.py` takes the register listing as a second argument
 (`mkmodload.py <capture.txt> <regmap.txt> [out.bin]`); that listing is
-generated from the stock firmware and not kept here, which is one reason
-the blobs are committed rather than rebuilt by `make`.
+generated from the stock firmware and not kept here, and neither are the
+raw captures. That is why the text in `tables/` is the source, not the
+generators: building the blobs needs nothing but this tree.
 
 ## The other files
 

@@ -2,7 +2,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_modload_test.c -- the module-load replay against the shipped
- * rootfs/skeleton/lib/firmware/odi/modload.bin, loaded through the host
+ * modload.bin (built into out/firmware/odi/), loaded through the host
  * half of odi_replay_fw_load() (odi_replay_fw_host.h) as the kernel
  * trigger loads it:
  *

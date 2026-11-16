@@ -9,6 +9,8 @@
 # Needs bash and python3, like the tools.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# The replay tables the test reads, built from tools/regtrace/tables/.
+python3 tools/regtrace/replayblob.py build-tables
 T=$(mktemp -d) || exit 1
 trap 'rm -rf "$T"' EXIT
 pass=0; fail=0
@@ -31,11 +33,16 @@ done
 for n in dropbearmulti ip; do echo "$n bytes" > "$T/pkg/$n"; cp "$T/pkg/$n" "$R/sbin/$n"; done
 echo busybox bytes > "$T/busybox"; cp "$T/busybox" "$R/bin/busybox"
 echo uimage bytes > "$T/uImage"
-cp rootfs/skeleton/lib/firmware/odi/*.bin "$R/lib/firmware/odi/"
+# The tables as image/build.sh leaves them in FW_DIR, plus a stray file
+# there that the image does not ship and the SBOM must not list.
+mkdir -p "$T/fw"
+cp out/firmware/odi/*.bin "$T/fw/"
+echo scratch > "$T/fw/scratch.bin"
+cp out/firmware/odi/*.bin "$R/lib/firmware/odi/"
 # a local build of confd and metricsd: no tag, so no committed pin to match
 printf 'METRICSD_TAG=local\nCONFD_TAG=\n' > "$T/releases.env"
 
-export BIN_DIR=$T/bin ASSET_DIR=$T/assets PKG_DIR=$T/pkg BUSYBOX=$T/busybox KERNEL_IMAGE=$T/uImage
+export BIN_DIR=$T/bin ASSET_DIR=$T/assets PKG_DIR=$T/pkg BUSYBOX=$T/busybox KERNEL_IMAGE=$T/uImage FW_DIR=$T/fw
 G=tools/generate-sbom.sh V=tools/verify-sbom.sh
 SBOM=$T/sbom.cdx.json
 SBOM_STRICT=1 SBOM_IMAGE=$T/uImage $G v9.9.9 "$T/releases.env" > "$SBOM" 2>"$T/err"
@@ -101,6 +108,10 @@ rm "$R/lib/firmware/odi/sdkinit.bin"
 ok "a missing file in the image fails" 1 $V "$SBOM" --rootfs "$R"
 
 # generator guards
+ok "a stray file next to the replay tables is not listed" 1 grep -q scratch.bin "$SBOM"
+mv "$T/fw/modload.bin" "$T/modload.bin"
+ok "a missing replay table fails" 1 $G v9.9.9 "$T/releases.env"
+mv "$T/modload.bin" "$T/fw/modload.bin"
 rm "$T/pkg/ip"
 ok "strict mode refuses a missing artifact" 1 env SBOM_STRICT=1 $G v9.9.9 "$T/releases.env"
 ok "non-strict mode warns and goes on" 0 $G v9.9.9 "$T/releases.env"

@@ -1,0 +1,735 @@
+# odi replay blob: table=modload version=1 records=725 crc32=0xf8036ac6
+#
+# The source of /lib/firmware/odi/modload.bin: replayblob.py build-tables turns
+# this file into the blob the image ships. One line per record, in replay
+# order; tools/regtrace/replayblob.py has the format and the rules build
+# checks. The header above must name the record count and CRC-32 the
+# records give (build prints both when they differ). A trailing comment on
+# a register record starts with its name from src/diag/tools/regnames.txt
+# when it has one (test/replay_tables_test.sh holds the two together).
+#
+cat=4 grp=0 TABLE table=20 idx=0x00000000 n=3 words=0x00000000 0x00000000 0x00000000
+cat=0 grp=2 REG off=0x0001600c val=0x00001c09  # CLASSIFY_SETUP
+cat=0 grp=2 REG off=0x0001600c val=0x00001c09  # CLASSIFY_SETUP
+cat=0 grp=1 REG off=0x00015040 val=0x00000001  # ACL_PORT_ENABLE
+cat=0 grp=1 REG off=0x00015040 val=0x00000003  # ACL_PORT_ENABLE
+cat=0 grp=1 REG off=0x00015040 val=0x0000000b  # ACL_PORT_ENABLE
+cat=0 grp=17 REG off=0x0001c0f4 val=0x00000003
+cat=0 grp=17 REG off=0x0001c0f4 val=0x00000e03
+cat=0 grp=17 REG off=0x0001c0f4 val=0x00000e03
+cat=0 grp=17 REG off=0x0001c0f4 val=0x00000e03
+cat=0 grp=17 REG off=0x0001c0f4 val=0x00000e03
+cat=0 grp=17 REG off=0x0001c0f4 val=0x00000e03
+cat=0 grp=17 REG off=0x0001c0c0 val=0x000000d5  # PORT_QUEUE_MAP
+cat=0 grp=17 REG off=0x0001c0bc val=0x00fac688
+cat=0 grp=17 REG off=0x0001c0bc val=0x00fac688
+cat=0 grp=17 REG off=0x0001c0bc val=0x00fac688
+cat=0 grp=17 REG off=0x0001c0bc val=0x00fac488
+cat=0 grp=17 REG off=0x0001c0bc val=0x00faa488
+cat=0 grp=17 REG off=0x0001c0bc val=0x00f92488
+cat=0 grp=17 REG off=0x0001c0bc val=0x00e92488
+cat=0 grp=17 REG off=0x0001c0bc val=0x00e92488
+cat=0 grp=18 REG off=0x0002d878 val=0x00000001
+cat=0 grp=18 REG off=0x0002d888 val=0x00000007
+cat=0 grp=18 REG off=0x0002d878 val=0x00000003
+cat=0 grp=18 REG off=0x0002d888 val=0x0000003f
+cat=0 grp=18 REG off=0x0002d878 val=0x00000007
+cat=0 grp=18 REG off=0x0002d888 val=0x000001ff
+cat=0 grp=18 REG off=0x0002d878 val=0x0000000f
+cat=0 grp=18 REG off=0x0002d888 val=0x00000fff
+cat=0 grp=18 REG off=0x0002d878 val=0x0000001f
+cat=0 grp=18 REG off=0x0002d888 val=0x00007fff
+cat=0 grp=18 REG off=0x0002d878 val=0x0000003f
+cat=0 grp=18 REG off=0x0002d888 val=0x0003ffff
+cat=0 grp=18 REG off=0x0002d878 val=0x0000007f
+cat=0 grp=18 REG off=0x0002d888 val=0x001fffff
+cat=0 grp=18 REG off=0x00025080 val=0x00027ffe
+cat=0 grp=18 REG off=0x00025080 val=0x00027fff
+cat=0 grp=18 REG off=0x0002507c val=0x00001388
+cat=0 grp=21 REG off=0x0001c0ac val=0x000000fe
+cat=0 grp=21 REG off=0x0001c0ac val=0x000000fc
+cat=0 grp=21 REG off=0x0001c0ac val=0x000000f8
+cat=0 grp=21 REG off=0x0001c0ac val=0x000000f0
+cat=0 grp=21 REG off=0x0001c0ac val=0x000000e0
+cat=0 grp=21 REG off=0x0001c0ac val=0x000000c0
+cat=0 grp=21 REG off=0x0001c0ac val=0x00000080
+cat=0 grp=21 REG off=0x0001c0ac val=0x00000000
+cat=0 grp=4 REG off=0x00023178 val=0x00000140
+cat=0 grp=4 REG off=0x00023178 val=0x00000141
+cat=0 grp=4 REG off=0x0002317c val=0x00000130
+cat=0 grp=4 REG off=0x0002317c val=0x00000131
+cat=0 grp=4 REG off=0x00023170 val=0x00000160
+cat=0 grp=4 REG off=0x00023170 val=0x00000161
+cat=0 grp=4 REG off=0x00023174 val=0x00000150
+cat=0 grp=4 REG off=0x00023174 val=0x00000151
+cat=0 grp=1 REG off=0x00015020 val=0x0972a484
+cat=0 grp=1 REG off=0x00015020 val=0x09728284
+cat=0 grp=1 REG off=0x00015020 val=0x09618284
+cat=0 grp=1 REG off=0x00015020 val=0x09618284
+cat=0 grp=1 REG off=0x00015024 val=0x09f3a6cc
+cat=0 grp=1 REG off=0x00015024 val=0x09f3a6cc
+cat=0 grp=1 REG off=0x00015024 val=0x09f3a6cc
+cat=0 grp=1 REG off=0x00015024 val=0x09f3a6cc
+cat=0 grp=1 REG off=0x00015018 val=0x0870a081
+cat=0 grp=1 REG off=0x00015018 val=0x08708101
+cat=0 grp=1 REG off=0x00015018 val=0x0860c101
+cat=0 grp=1 REG off=0x00015018 val=0x0240c101
+cat=0 grp=1 REG off=0x0001501c val=0x08f1a293
+cat=0 grp=1 REG off=0x0001501c val=0x08f18393
+cat=0 grp=1 REG off=0x0001501c val=0x08e24393
+cat=0 grp=1 REG off=0x0001501c val=0x09e24393
+cat=0 grp=0 REG off=0x0001c020 val=0x0000000f  # FLOOD_BCAST_PORTS
+cat=0 grp=0 REG off=0x0001c020 val=0x0000000f  # FLOOD_BCAST_PORTS
+cat=0 grp=0 REG off=0x0001c020 val=0x0000000f  # FLOOD_BCAST_PORTS
+cat=0 grp=0 REG off=0x0001c020 val=0x0000000f  # FLOOD_BCAST_PORTS
+cat=0 grp=0 REG off=0x0001c028 val=0x0000000f  # FLOOD_UNKN_UCAST_PORTS
+cat=0 grp=0 REG off=0x0001c028 val=0x0000000f  # FLOOD_UNKN_UCAST_PORTS
+cat=0 grp=0 REG off=0x0001c028 val=0x0000000f  # FLOOD_UNKN_UCAST_PORTS
+cat=0 grp=0 REG off=0x0001c028 val=0x0000000f  # FLOOD_UNKN_UCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=0 REG off=0x0001c024 val=0x0000000f  # FLOOD_UNKN_MCAST_PORTS
+cat=0 grp=1 REG off=0x0001504c val=0x0000007f
+cat=0 grp=1 REG off=0x0001504c val=0x0000003f
+cat=0 grp=1 REG off=0x0001504c val=0x0000001f
+cat=0 grp=1 REG off=0x0001504c val=0x0000000f
+cat=0 grp=1 REG off=0x0001504c val=0x00000007
+cat=0 grp=1 REG off=0x0001504c val=0x00000007
+cat=0 grp=1 REG off=0x0001504c val=0x00000005
+cat=0 grp=1 REG off=0x0001504c val=0x00000004
+cat=5 grp=0 TABLE table=8 idx=0x00000001 n=3 words=0x00000000 0x00001000 0x00000000
+cat=5 grp=0 TABLE table=9 idx=0x00000001 n=5 words=0x00010040 0x00000000 0x00000000 0x00000000 0x00001c03
+cat=5 grp=0 TABLE table=10 idx=0x00000001 n=5 words=0x00000000 0x00000000 0x00000000 0x00000000 0x0000e004
+cat=0 grp=3 REG off=0x00f020f8 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f020f8 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f020f8 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f020f8 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f020fc val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f020fc val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f020fc val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f020fc val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02100 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02100 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02100 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02100 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02104 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02104 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02104 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02104 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02108 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02108 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02108 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02108 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f0210c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f0210c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f0210c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f0210c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02110 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02110 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02110 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02110 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02114 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02114 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02114 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02114 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f0213c val=0x00000000  # PONQ_STREAM_VALID
+cat=0 grp=3 REG off=0x00f02118 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02118 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02118 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02118 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f0211c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f0211c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f0211c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f0211c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02120 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02120 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02120 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02120 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02124 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02124 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02124 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02124 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02128 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02128 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02128 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02128 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f0212c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f0212c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f0212c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f0212c val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02130 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02130 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02130 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02130 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02134 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02134 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02134 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02134 val=0x07efdfbf
+cat=0 grp=3 REG off=0x00f02140 val=0x00000000
+cat=0 grp=3 REG off=0x00f02138 val=0x00000040
+cat=0 grp=3 REG off=0x00f02144 val=0x00000001
+cat=0 grp=3 REG off=0x00f02154 val=0x00000040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101050
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081050
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=3 REG off=0x00f020d8 val=0x00000002
+cat=0 grp=3 REG off=0x00f0a0ac val=0x00000080
+cat=0 grp=3 REG off=0x00f020e8 val=0x01eff000
+cat=0 grp=3 REG off=0x00f0a0b8 val=0x016ff000
+cat=0 grp=3 REG off=0x00f0215c val=0x1fff007f
+cat=0 grp=3 REG off=0x00f0a0cc val=0x1fff001f
+cat=0 grp=3 REG off=0x00f0215c val=0x1fff007f
+cat=0 grp=3 REG off=0x00f0a0cc val=0x1fff001f
+cat=0 grp=3 REG off=0x00f020e0 val=0x1f58007e
+cat=0 grp=3 REG off=0x00f0a0b4 val=0x1ff0001e
+cat=0 grp=3 REG off=0x00f020e0 val=0x1f58007e
+cat=0 grp=3 REG off=0x00f0a0b4 val=0x1fb8001e
+cat=0 grp=3 REG off=0x00f02450 val=0x00001f30
+cat=0 grp=3 REG off=0x00f02454 val=0x1ba81b08
+cat=0 grp=3 REG off=0x00f02454 val=0x1ba81b08
+cat=0 grp=3 REG off=0x00f02458 val=0x00960082
+cat=0 grp=3 REG off=0x00f02458 val=0x00960082
+cat=0 grp=3 REG off=0x00f0245c val=0x00960082
+cat=0 grp=3 REG off=0x00f0245c val=0x00960082
+cat=0 grp=3 REG off=0x00f02460 val=0x00960082
+cat=0 grp=3 REG off=0x00f02460 val=0x00960082
+cat=0 grp=3 REG off=0x00f02464 val=0x00960082
+cat=0 grp=3 REG off=0x00f02464 val=0x00960082
+cat=0 grp=3 REG off=0x00f02468 val=0x00960082
+cat=0 grp=3 REG off=0x00f02468 val=0x00960082
+cat=0 grp=3 REG off=0x00f0246c val=0x00960082
+cat=0 grp=3 REG off=0x00f0246c val=0x00960082
+cat=0 grp=3 REG off=0x00f02470 val=0x00960082
+cat=0 grp=3 REG off=0x00f02470 val=0x00960082
+cat=0 grp=3 REG off=0x00f02474 val=0x00960082
+cat=0 grp=3 REG off=0x00f02474 val=0x00960082
+cat=0 grp=3 REG off=0x00f02478 val=0x00960082
+cat=0 grp=3 REG off=0x00f02478 val=0x00960082
+cat=0 grp=3 REG off=0x00f0247c val=0x00960082
+cat=0 grp=3 REG off=0x00f0247c val=0x00960082
+cat=0 grp=3 REG off=0x00f02480 val=0x00960082
+cat=0 grp=3 REG off=0x00f02480 val=0x00960082
+cat=0 grp=3 REG off=0x00f02484 val=0x00960082
+cat=0 grp=3 REG off=0x00f02484 val=0x00960082
+cat=0 grp=3 REG off=0x00f02488 val=0x00960082
+cat=0 grp=3 REG off=0x00f02488 val=0x00960082
+cat=0 grp=3 REG off=0x00f0248c val=0x00960082
+cat=0 grp=3 REG off=0x00f0248c val=0x00960082
+cat=0 grp=3 REG off=0x00f02490 val=0x00960082
+cat=0 grp=3 REG off=0x00f02490 val=0x00960082
+cat=0 grp=3 REG off=0x00f02494 val=0x00960082
+cat=0 grp=3 REG off=0x00f02494 val=0x00960082
+cat=0 grp=3 REG off=0x00f02498 val=0x00960082
+cat=0 grp=3 REG off=0x00f02498 val=0x00960082
+cat=0 grp=3 REG off=0x00f0249c val=0x00960082
+cat=0 grp=3 REG off=0x00f0249c val=0x00960082
+cat=0 grp=3 REG off=0x00f024a0 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a0 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a4 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a4 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a8 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a8 val=0x00960082
+cat=0 grp=3 REG off=0x00f024ac val=0x00960082
+cat=0 grp=3 REG off=0x00f024ac val=0x00960082
+cat=0 grp=3 REG off=0x00f024b0 val=0x00960082
+cat=0 grp=3 REG off=0x00f024b0 val=0x00960082
+cat=0 grp=3 REG off=0x00f024b4 val=0x00960082
+cat=0 grp=3 REG off=0x00f024b4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024b8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024b8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024bc val=0x00960082
+cat=0 grp=14 REG off=0x00f024bc val=0x00960082
+cat=0 grp=14 REG off=0x00f024c0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024cc val=0x00960082
+cat=0 grp=14 REG off=0x00f024cc val=0x00960082
+cat=0 grp=14 REG off=0x00f024d0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024dc val=0x00960082
+cat=0 grp=14 REG off=0x00f024dc val=0x00960082
+cat=0 grp=14 REG off=0x00f024e0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024ec val=0x00960082
+cat=0 grp=14 REG off=0x00f024ec val=0x00960082
+cat=0 grp=14 REG off=0x00f024f0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024fc val=0x00960082
+cat=0 grp=14 REG off=0x00f024fc val=0x00960082
+cat=0 grp=14 REG off=0x00f02500 val=0x00960082
+cat=0 grp=14 REG off=0x00f02500 val=0x00960082
+cat=0 grp=14 REG off=0x00f02504 val=0x00960082
+cat=0 grp=14 REG off=0x00f02504 val=0x00960082
+cat=0 grp=14 REG off=0x00f02508 val=0x00960082
+cat=0 grp=14 REG off=0x00f02508 val=0x00960082
+cat=0 grp=14 REG off=0x00f0250c val=0x00960082
+cat=0 grp=14 REG off=0x00f0250c val=0x00960082
+cat=0 grp=14 REG off=0x00f02510 val=0x00960082
+cat=0 grp=14 REG off=0x00f02510 val=0x00960082
+cat=0 grp=14 REG off=0x00f02514 val=0x00960082
+cat=0 grp=14 REG off=0x00f02514 val=0x00960082
+cat=0 grp=14 REG off=0x00f02518 val=0x00960082
+cat=0 grp=14 REG off=0x00f02518 val=0x00960082
+cat=0 grp=14 REG off=0x00f0251c val=0x00960082
+cat=0 grp=14 REG off=0x00f0251c val=0x00960082
+cat=0 grp=14 REG off=0x00f02520 val=0x00960082
+cat=0 grp=14 REG off=0x00f02520 val=0x00960082
+cat=0 grp=14 REG off=0x00f02524 val=0x00960082
+cat=0 grp=14 REG off=0x00f02524 val=0x00960082
+cat=0 grp=14 REG off=0x00f02528 val=0x00960082
+cat=0 grp=14 REG off=0x00f02528 val=0x00960082
+cat=0 grp=14 REG off=0x00f0252c val=0x00960082
+cat=0 grp=14 REG off=0x00f0252c val=0x00960082
+cat=0 grp=14 REG off=0x00f02530 val=0x00960082
+cat=0 grp=14 REG off=0x00f02530 val=0x00960082
+cat=0 grp=14 REG off=0x00f02534 val=0x00960082
+cat=0 grp=14 REG off=0x00f02534 val=0x00960082
+cat=0 grp=14 REG off=0x00f02538 val=0x00960082
+cat=0 grp=14 REG off=0x00f02538 val=0x00960082
+cat=0 grp=14 REG off=0x00f0253c val=0x00960082
+cat=0 grp=14 REG off=0x00f0253c val=0x00960082
+cat=0 grp=14 REG off=0x00f02540 val=0x00960082
+cat=0 grp=14 REG off=0x00f02540 val=0x00960082
+cat=0 grp=14 REG off=0x00f02544 val=0x00960082
+cat=0 grp=14 REG off=0x00f02544 val=0x00960082
+cat=0 grp=14 REG off=0x00f02548 val=0x00960082
+cat=0 grp=14 REG off=0x00f02548 val=0x00960082
+cat=0 grp=14 REG off=0x00f0254c val=0x00960082
+cat=0 grp=14 REG off=0x00f0254c val=0x00960082
+cat=0 grp=14 REG off=0x00f02550 val=0x00960082
+cat=0 grp=14 REG off=0x00f02550 val=0x00960082
+cat=0 grp=14 REG off=0x00f02554 val=0x00960082
+cat=0 grp=14 REG off=0x00f02554 val=0x00960082
+cat=0 grp=14 REG off=0x00f02558 val=0x00960082
+cat=0 grp=14 REG off=0x00f02558 val=0x00960082
+cat=0 grp=3 REG off=0x00f0a0fc val=0x1fbc1f52
+cat=0 grp=3 REG off=0x00f0a0fc val=0x1f321f52
+cat=0 grp=3 REG off=0x00f020d8 val=0x00000002
+cat=0 grp=3 REG off=0x00f0a0ac val=0x00000080
+cat=0 grp=3 REG off=0x00f020d8 val=0x00000002
+cat=0 grp=3 REG off=0x00f020f0 val=0x00000013
+cat=0 grp=3 REG off=0x00f020f0 val=0x00000013
+cat=0 grp=3 REG off=0x00f0215c val=0x1fff007f
+cat=0 grp=3 REG off=0x00f0a0cc val=0x1fff001f
+cat=0 grp=11 REG off=0x00f05438 val=0x08000000
+cat=0 grp=11 REG off=0x00f05438 val=0x08000000
+cat=0 grp=11 REG off=0x00f0d438 val=0x08000000
+cat=0 grp=11 REG off=0x00f0d438 val=0x08000000
+cat=0 grp=3 REG off=0x00f020d8 val=0x00000003
+cat=0 grp=3 REG off=0x00f0a0ac val=0x00000081
+cat=0 grp=15 REG off=0x00f05400 val=0x00000040
+cat=0 grp=15 REG off=0x00f0d400 val=0x00000040
+cat=0 grp=15 REG off=0x00f0404c val=0x24030040
+cat=0 grp=15 REG off=0x00f0404c val=0x24030040
+cat=0 grp=15 REG off=0x00f0404c val=0x24030040
+cat=0 grp=15 REG off=0x00f0c04c val=0x24030040
+cat=0 grp=15 REG off=0x00f0c04c val=0x24030040
+cat=0 grp=15 REG off=0x00f0c04c val=0x24030040
+cat=0 grp=15 REG off=0x00f04040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f04040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f04040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f04044 val=0x0000007f
+cat=0 grp=15 REG off=0x00f0c040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f0c040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f0c040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f0c044 val=0x0000007f
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101060
+cat=0 grp=11 REG off=0x00f05434 val=0x90101070
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081060
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081070
+cat=0 grp=3 REG off=0x00f0a0f4 val=0x00000002
+cat=0 grp=19 REG off=0x000001d0 val=0x0000001f  # PON_SERDES_MODE
+cat=0 grp=23 REG off=0x00022034 val=0x00000000
+cat=0 grp=11 REG off=0x00000104 val=0x00000001
+cat=0 grp=23 REG off=0x00022090 val=0x00001000
+cat=0 grp=19 REG off=0x000225d8 val=0x00000029
+cat=0 grp=19 REG off=0x000225d8 val=0x00000029
+cat=0 grp=19 REG off=0x000225ac val=0x0000b000
+cat=0 grp=19 REG off=0x000225b0 val=0x0000c848
+cat=0 grp=19 REG off=0x00022738 val=0x000080c5
+cat=0 grp=19 REG off=0x00022738 val=0x000080c5
+cat=0 grp=19 REG off=0x00022738 val=0x000080c5
+cat=0 grp=19 REG off=0x00022504 val=0x00000030
+cat=0 grp=19 REG off=0x00022504 val=0x00000030
+cat=0 grp=19 REG off=0x00022500 val=0x00000030
+cat=0 grp=19 REG off=0x00022500 val=0x00000010
+cat=0 grp=19 REG off=0x00022500 val=0x00000030
+cat=0 grp=23 REG off=0x00022038 val=0x00000900
+cat=0 grp=23 REG off=0x0002203c val=0x00000000
+cat=0 grp=19 REG off=0x000001d0 val=0x00000008  # PON_SERDES_MODE
+cat=0 grp=19 REG off=0x00022508 val=0x00003000
+cat=0 grp=19 REG off=0x00022508 val=0x00003000
+cat=0 grp=21 REG off=0x00020804 val=0x03320024
+cat=0 grp=16 REG off=0x000220e4 val=0x00000000
+cat=0 grp=13 REG off=0x00011018 val=0x000007ef  # MAX_FRAME_LEN_1
+cat=0 grp=13 REG off=0x00011010 val=0x00000003
+cat=0 grp=13 REG off=0x00011010 val=0x00000003
+cat=0 grp=4 REG off=0x0002311c val=0x02300224
+cat=0 grp=4 REG off=0x0002311c val=0x02300224
+cat=0 grp=4 REG off=0x00023120 val=0x02160207
+cat=0 grp=4 REG off=0x00023120 val=0x02160207
+cat=0 grp=21 REG off=0x00020c04 val=0x03320024
+cat=0 grp=11 REG off=0x0000004c val=0x00000a00
+cat=0 grp=10 REG off=0x00f02568 val=0x00003002
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x00000188 val=0x00000006
+cat=0 grp=16 REG off=0x000001bc val=0x00000fff
+cat=0 grp=13 REG off=0x00011018 val=0x00000000  # MAX_FRAME_LEN_1
+cat=0 grp=13 REG off=0x00011010 val=0x00000003
+cat=0 grp=13 REG off=0x00011010 val=0x00000003
+cat=0 grp=2 REG off=0x0001600c val=0x00001c09  # CLASSIFY_SETUP
+cat=0 grp=2 REG off=0x0001600c val=0x00001c09  # CLASSIFY_SETUP
+cat=0 grp=11 REG off=0x0000004c val=0x00000a00
+cat=0 grp=23 REG off=0x00022030 val=0x00000b30
+cat=0 grp=23 REG off=0x00022030 val=0x00000f30
+cat=0 grp=11 REG off=0x00f05434 val=0x90101050
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081050
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=3 REG off=0x00f020d8 val=0x00000002
+cat=0 grp=3 REG off=0x00f0a0ac val=0x00000080
+cat=0 grp=3 REG off=0x00f020e8 val=0x01eff000
+cat=0 grp=3 REG off=0x00f0a0b8 val=0x016ff000
+cat=0 grp=3 REG off=0x00f0215c val=0x1fff007f
+cat=0 grp=3 REG off=0x00f0a0cc val=0x1fff001f
+cat=0 grp=3 REG off=0x00f0215c val=0x1fff007f
+cat=0 grp=3 REG off=0x00f0a0cc val=0x1fff001f
+cat=0 grp=3 REG off=0x00f020e0 val=0x1f58007e
+cat=0 grp=3 REG off=0x00f0a0b4 val=0x1ff0001e
+cat=0 grp=3 REG off=0x00f020e0 val=0x1f58007e
+cat=0 grp=3 REG off=0x00f0a0b4 val=0x1fb8001e
+cat=0 grp=3 REG off=0x00f02450 val=0x00001f30
+cat=0 grp=3 REG off=0x00f02454 val=0x1ba81b08
+cat=0 grp=3 REG off=0x00f02454 val=0x1ba81b08
+cat=0 grp=3 REG off=0x00f02458 val=0x00960082
+cat=0 grp=3 REG off=0x00f02458 val=0x00960082
+cat=0 grp=3 REG off=0x00f0245c val=0x00960082
+cat=0 grp=3 REG off=0x00f0245c val=0x00960082
+cat=0 grp=3 REG off=0x00f02460 val=0x00960082
+cat=0 grp=3 REG off=0x00f02460 val=0x00960082
+cat=0 grp=3 REG off=0x00f02464 val=0x00960082
+cat=0 grp=3 REG off=0x00f02464 val=0x00960082
+cat=0 grp=3 REG off=0x00f02468 val=0x00960082
+cat=0 grp=3 REG off=0x00f02468 val=0x00960082
+cat=0 grp=3 REG off=0x00f0246c val=0x00960082
+cat=0 grp=3 REG off=0x00f0246c val=0x00960082
+cat=0 grp=3 REG off=0x00f02470 val=0x00960082
+cat=0 grp=3 REG off=0x00f02470 val=0x00960082
+cat=0 grp=3 REG off=0x00f02474 val=0x00960082
+cat=0 grp=3 REG off=0x00f02474 val=0x00960082
+cat=0 grp=3 REG off=0x00f02478 val=0x00960082
+cat=0 grp=3 REG off=0x00f02478 val=0x00960082
+cat=0 grp=3 REG off=0x00f0247c val=0x00960082
+cat=0 grp=3 REG off=0x00f0247c val=0x00960082
+cat=0 grp=3 REG off=0x00f02480 val=0x00960082
+cat=0 grp=3 REG off=0x00f02480 val=0x00960082
+cat=0 grp=3 REG off=0x00f02484 val=0x00960082
+cat=0 grp=3 REG off=0x00f02484 val=0x00960082
+cat=0 grp=3 REG off=0x00f02488 val=0x00960082
+cat=0 grp=3 REG off=0x00f02488 val=0x00960082
+cat=0 grp=3 REG off=0x00f0248c val=0x00960082
+cat=0 grp=3 REG off=0x00f0248c val=0x00960082
+cat=0 grp=3 REG off=0x00f02490 val=0x00960082
+cat=0 grp=3 REG off=0x00f02490 val=0x00960082
+cat=0 grp=3 REG off=0x00f02494 val=0x00960082
+cat=0 grp=3 REG off=0x00f02494 val=0x00960082
+cat=0 grp=3 REG off=0x00f02498 val=0x00960082
+cat=0 grp=3 REG off=0x00f02498 val=0x00960082
+cat=0 grp=3 REG off=0x00f0249c val=0x00960082
+cat=0 grp=3 REG off=0x00f0249c val=0x00960082
+cat=0 grp=3 REG off=0x00f024a0 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a0 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a4 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a4 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a8 val=0x00960082
+cat=0 grp=3 REG off=0x00f024a8 val=0x00960082
+cat=0 grp=3 REG off=0x00f024ac val=0x00960082
+cat=0 grp=3 REG off=0x00f024ac val=0x00960082
+cat=0 grp=3 REG off=0x00f024b0 val=0x00960082
+cat=0 grp=3 REG off=0x00f024b0 val=0x00960082
+cat=0 grp=3 REG off=0x00f024b4 val=0x00960082
+cat=0 grp=3 REG off=0x00f024b4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024b8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024b8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024bc val=0x00960082
+cat=0 grp=14 REG off=0x00f024bc val=0x00960082
+cat=0 grp=14 REG off=0x00f024c0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024c8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024cc val=0x00960082
+cat=0 grp=14 REG off=0x00f024cc val=0x00960082
+cat=0 grp=14 REG off=0x00f024d0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024d8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024dc val=0x00960082
+cat=0 grp=14 REG off=0x00f024dc val=0x00960082
+cat=0 grp=14 REG off=0x00f024e0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024e8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024ec val=0x00960082
+cat=0 grp=14 REG off=0x00f024ec val=0x00960082
+cat=0 grp=14 REG off=0x00f024f0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f0 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f4 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024f8 val=0x00960082
+cat=0 grp=14 REG off=0x00f024fc val=0x00960082
+cat=0 grp=14 REG off=0x00f024fc val=0x00960082
+cat=0 grp=14 REG off=0x00f02500 val=0x00960082
+cat=0 grp=14 REG off=0x00f02500 val=0x00960082
+cat=0 grp=14 REG off=0x00f02504 val=0x00960082
+cat=0 grp=14 REG off=0x00f02504 val=0x00960082
+cat=0 grp=14 REG off=0x00f02508 val=0x00960082
+cat=0 grp=14 REG off=0x00f02508 val=0x00960082
+cat=0 grp=14 REG off=0x00f0250c val=0x00960082
+cat=0 grp=14 REG off=0x00f0250c val=0x00960082
+cat=0 grp=14 REG off=0x00f02510 val=0x00960082
+cat=0 grp=14 REG off=0x00f02510 val=0x00960082
+cat=0 grp=14 REG off=0x00f02514 val=0x00960082
+cat=0 grp=14 REG off=0x00f02514 val=0x00960082
+cat=0 grp=14 REG off=0x00f02518 val=0x00960082
+cat=0 grp=14 REG off=0x00f02518 val=0x00960082
+cat=0 grp=14 REG off=0x00f0251c val=0x00960082
+cat=0 grp=14 REG off=0x00f0251c val=0x00960082
+cat=0 grp=14 REG off=0x00f02520 val=0x00960082
+cat=0 grp=14 REG off=0x00f02520 val=0x00960082
+cat=0 grp=14 REG off=0x00f02524 val=0x00960082
+cat=0 grp=14 REG off=0x00f02524 val=0x00960082
+cat=0 grp=14 REG off=0x00f02528 val=0x00960082
+cat=0 grp=14 REG off=0x00f02528 val=0x00960082
+cat=0 grp=14 REG off=0x00f0252c val=0x00960082
+cat=0 grp=14 REG off=0x00f0252c val=0x00960082
+cat=0 grp=14 REG off=0x00f02530 val=0x00960082
+cat=0 grp=14 REG off=0x00f02530 val=0x00960082
+cat=0 grp=14 REG off=0x00f02534 val=0x00960082
+cat=0 grp=14 REG off=0x00f02534 val=0x00960082
+cat=0 grp=14 REG off=0x00f02538 val=0x00960082
+cat=0 grp=14 REG off=0x00f02538 val=0x00960082
+cat=0 grp=14 REG off=0x00f0253c val=0x00960082
+cat=0 grp=14 REG off=0x00f0253c val=0x00960082
+cat=0 grp=14 REG off=0x00f02540 val=0x00960082
+cat=0 grp=14 REG off=0x00f02540 val=0x00960082
+cat=0 grp=14 REG off=0x00f02544 val=0x00960082
+cat=0 grp=14 REG off=0x00f02544 val=0x00960082
+cat=0 grp=14 REG off=0x00f02548 val=0x00960082
+cat=0 grp=14 REG off=0x00f02548 val=0x00960082
+cat=0 grp=14 REG off=0x00f0254c val=0x00960082
+cat=0 grp=14 REG off=0x00f0254c val=0x00960082
+cat=0 grp=14 REG off=0x00f02550 val=0x00960082
+cat=0 grp=14 REG off=0x00f02550 val=0x00960082
+cat=0 grp=14 REG off=0x00f02554 val=0x00960082
+cat=0 grp=14 REG off=0x00f02554 val=0x00960082
+cat=0 grp=14 REG off=0x00f02558 val=0x00960082
+cat=0 grp=14 REG off=0x00f02558 val=0x00960082
+cat=0 grp=3 REG off=0x00f0a0fc val=0x1fbc1f52
+cat=0 grp=3 REG off=0x00f0a0fc val=0x1f321f52
+cat=0 grp=3 REG off=0x00f020d8 val=0x00000002
+cat=0 grp=3 REG off=0x00f0a0ac val=0x00000080
+cat=0 grp=3 REG off=0x00f020d8 val=0x00000002
+cat=0 grp=3 REG off=0x00f020f0 val=0x00000013
+cat=0 grp=3 REG off=0x00f020f0 val=0x00000013
+cat=0 grp=3 REG off=0x00f0215c val=0x1fff007f
+cat=0 grp=3 REG off=0x00f0a0cc val=0x1fff001f
+cat=0 grp=11 REG off=0x00f05438 val=0x08000000
+cat=0 grp=11 REG off=0x00f05438 val=0x08000000
+cat=0 grp=11 REG off=0x00f0d438 val=0x08000000
+cat=0 grp=11 REG off=0x00f0d438 val=0x08000000
+cat=0 grp=3 REG off=0x00f020d8 val=0x00000003
+cat=0 grp=3 REG off=0x00f0a0ac val=0x00000081
+cat=0 grp=15 REG off=0x00f05400 val=0x00000040
+cat=0 grp=15 REG off=0x00f0d400 val=0x00000040
+cat=0 grp=15 REG off=0x00f0404c val=0x24030040
+cat=0 grp=15 REG off=0x00f0404c val=0x24030040
+cat=0 grp=15 REG off=0x00f0404c val=0x24030040
+cat=0 grp=15 REG off=0x00f0c04c val=0x24030040
+cat=0 grp=15 REG off=0x00f0c04c val=0x24030040
+cat=0 grp=15 REG off=0x00f0c04c val=0x24030040
+cat=0 grp=15 REG off=0x00f04040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f04040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f04040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f04044 val=0x0000007f
+cat=0 grp=15 REG off=0x00f0c040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f0c040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f0c040 val=0x00000c03
+cat=0 grp=15 REG off=0x00f0c044 val=0x0000007f
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101040
+cat=0 grp=11 REG off=0x00f05434 val=0x90101060
+cat=0 grp=11 REG off=0x00f05434 val=0x90101070
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081040
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081060
+cat=0 grp=11 REG off=0x00f0d434 val=0x90081070
+cat=1 grp=0 CALL fill=cf_rules_actions first=0x00000000 count=256 words=0x00000020
+cat=0 grp=2 REG off=0x0001600c val=0x00001c09  # CLASSIFY_SETUP
+cat=0 grp=2 REG off=0x0001602c val=0x00000000
+cat=2 grp=0 TABLE table=17 idx=0x000000ff n=2 words=0x00010000 0x80000000
+cat=2 grp=0 TABLE table=14 idx=0x000000ff n=2 words=0x00000000 0x00000000
+cat=2 grp=0 TABLE table=11 idx=0x000000ff n=3 words=0x00000000 0x00240000 0x80240000
+cat=0 grp=22 REG off=0x00013008 val=0x00000000  # VLAN_SETUP
+cat=0 grp=1 REG off=0x00015040 val=0x0000000b  # ACL_PORT_ENABLE
+cat=0 grp=1 REG off=0x00015040 val=0x0000000b  # ACL_PORT_ENABLE
+cat=0 grp=1 REG off=0x00015040 val=0x0000000f  # ACL_PORT_ENABLE
+cat=0 grp=1 REG off=0x00015040 val=0x0000000f  # ACL_PORT_ENABLE
+cat=3 grp=0 TABLE table=23 idx=0x00000000 n=1 words=0x000000ff
+cat=0 grp=22 REG off=0x0001300c val=0x00001000  # PORT_VLAN_INDEX
+cat=0 grp=22 REG off=0x0001300c val=0x00000000  # PORT_VLAN_INDEX
+cat=0 grp=22 REG off=0x00013010 val=0x00001000
+cat=0 grp=22 REG off=0x00013010 val=0x00000000
+cat=0 grp=20 REG off=0x000230c4 val=0x00000001  # SVLAN_UPLINK_PORTS
+cat=0 grp=20 REG off=0x00014004 val=0x00000000  # PORT_SVLAN_INDEX
+cat=0 grp=20 REG off=0x000230c4 val=0x00000003  # SVLAN_UPLINK_PORTS
+cat=0 grp=20 REG off=0x00014004 val=0x00000000  # PORT_SVLAN_INDEX
+cat=0 grp=20 REG off=0x000230c4 val=0x00000007  # SVLAN_UPLINK_PORTS
+cat=0 grp=20 REG off=0x00014008 val=0x00000000
+cat=0 grp=20 REG off=0x000230c4 val=0x0000000f  # SVLAN_UPLINK_PORTS
+cat=0 grp=20 REG off=0x00014008 val=0x00000000
+cat=0 grp=20 REG off=0x0001400c val=0x00000000  # SVLAN_SETUP
+cat=0 grp=20 REG off=0x0001400c val=0x00000008  # SVLAN_SETUP
+cat=0 grp=1 REG off=0x00015010 val=0x06044801
+cat=0 grp=1 REG off=0x00015010 val=0x06044101
+cat=0 grp=1 REG off=0x00015010 val=0x0600c101
+cat=0 grp=1 REG off=0x00015010 val=0x0080c101
+cat=0 grp=1 REG off=0x00015014 val=0x02649905
+cat=0 grp=1 REG off=0x00015014 val=0x02648305
+cat=0 grp=1 REG off=0x00015014 val=0x02624305
+cat=0 grp=1 REG off=0x00015014 val=0x01424305
+cat=0 grp=22 REG off=0x00013008 val=0x00000008  # VLAN_SETUP
+cat=0 grp=22 REG off=0x00013008 val=0x00000018  # VLAN_SETUP
+cat=0 grp=12 REG off=0x00017000 val=0x00400bb8  # L2_LOOKUP_SETUP
+cat=0 grp=3 REG off=0x00f023e4 val=0x00010000
+cat=0 grp=3 REG off=0x00f020e4 val=0x00000206
+cat=0 grp=3 REG off=0x00f023e0 val=0x00000001
+cat=0 grp=3 REG off=0x00f023f0 val=0x00000000
+cat=0 grp=3 REG off=0x00f0244c val=0x00000401
+cat=0 grp=3 REG off=0x00f02298 val=0x00000000
+cat=0 grp=3 REG off=0x00f0239c val=0x0003ffff
+cat=0 grp=3 REG off=0x00f02144 val=0x00000001
+cat=0 grp=3 REG off=0x00f02138 val=0x00000040
+cat=0 grp=20 REG off=0x0001400c val=0x00000009  # SVLAN_SETUP

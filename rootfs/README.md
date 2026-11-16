@@ -11,7 +11,6 @@ and reboots after roughly 24 seconds of light without sync.
     skeleton/etc/init.d/services  metricsd, confd and dropbear, backgrounded
     skeleton/etc/scripts/         network.sh, mount-config.sh, flash, apply.sh,
                                   fwu_starter.sh
-    skeleton/lib/firmware/odi/    the register-replay tables the kernel loads
 
 ## Two device facts the init chain has to respect
 
