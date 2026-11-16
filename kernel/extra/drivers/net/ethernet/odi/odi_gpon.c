@@ -1390,7 +1390,7 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	unsigned int i;
 	u8 sn[8];
 	unsigned long flags;
-	unsigned int irq_count, to1_exp, to2_exp, rei_count;
+	unsigned int irq_count, to1_exp, to2_exp, rei_count, deact_directed;
 	unsigned long last_los;
 	int last_los_state;
 	bool irq_attached;
@@ -1416,6 +1416,7 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	irq_count = odi_gpon_irq_count;
 	to1_exp = odi_gpon_to1_expiries;
 	to2_exp = odi_gpon_to2_expiries;
+	deact_directed = odi_gpon_fsm_inst.deact_directed;
 	rei_count = odi_gpon_rei_count;
 	last_los = odi_gpon_last_los_ms;
 	last_los_state = odi_gpon_last_los_state;
@@ -1476,6 +1477,11 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "rei_count %u\n", rei_count);
 	seq_printf(seq, "to1_expiries %u\n", to1_exp);
 	seq_printf(seq, "to2_expiries %u\n", to2_exp);
+	/* Deactivate_ONU-IDs for this ONU's own ONU-ID, never a broadcast
+	 * (odi_gpon_fsm.h, deact_directed): omcid counts the refusals of a
+	 * re-registration from it.
+	 */
+	seq_printf(seq, "deact_directed %u\n", deact_directed);
 	seq_printf(seq, "irq_count %u\n", irq_count);
 	seq_printf(seq, "irq_spurious %u\n", irq_spurious);
 	seq_printf(seq, "irq_last_top_sts 0x%08x irq_last_ds_dlt 0x%08x irq_last_us_sts 0x%08x\n",

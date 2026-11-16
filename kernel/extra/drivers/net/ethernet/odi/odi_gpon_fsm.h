@@ -200,6 +200,14 @@ struct odi_gpon_fsm {
 	 * wrapping at 8 bits; kept across activations.
 	 */
 	uint8_t key_index;
+	/* Deactivate_ONU-IDs addressed to the ONU-ID this ONU held when each
+	 * came (odi_gpon_fsm_directed_to_us()), since the module loaded; a
+	 * broadcast one, or one for another ONU on a shared PON, is not
+	 * counted. omcid reads it from /proc/odi_gpon/status to tell an OLT
+	 * that refuses a new serial number or password from one that drops
+	 * every ONU (src/omci/respond/rereg.c).
+	 */
+	uint32_t deact_directed;
 };
 
 void odi_gpon_fsm_init(struct odi_gpon_fsm *fsm);

@@ -5,6 +5,43 @@ listed here.
 
 ## Unreleased
 
+- Identity trial: reject quotes, `<` and `&` before re-registering, since
+  `flash set` cannot persist them. Restore empty saved credentials too when
+  a later write fails, instead of leaving a mixed identity in the store.
+
+- Identity trial: `identity-trial.sh try KEY=VALUE...` changes `GPON_SN`,
+  `GPON_PLOAM_PASSWD`, `LOID` or `LOID_PASSWD` as a trial. The values go to
+  `/var/run/identity-trial.conf`, which omcid reads over the store, and omcid
+  re-registers with them; a refused, timed-out or service-less
+  re-registration, or a MIB reset loop that starts within 600 s on a line that
+  had none, goes back to the stored identity by itself (`apply.sh omci
+  --revert`). After 600 s, or `keep`, the values are stored; a key the store
+  refuses puts the keys already written back, so a reboot never registers with
+  a mix of old and new values. A revert whose reload fails stays
+  `revert_failed`, and `revert` tries again. A reboot undoes a
+  trial. `status` shows the ONU state, services and MIB resets before and
+  after. The web UI does not use it yet. Refs #392.
+- omcid: re-registrations are counted, and held back after refusals. Every
+  re-registration a changed identity starts is one line in
+  `/etc/config/odi-reregister` (the newest 16: time, change or revert, result,
+  Deactivate_ONU-IDs, key names, never values). Three Deactivate_ONU-IDs for
+  the stick's own ONU-ID before O5, or O7, end the wait at once with
+  `result=refused`; one or two do not. The kernel counts them in the new
+  `deact_directed` line of `/proc/odi_gpon/status`; a broadcast, or one for
+  another ONU on the PON, is not counted. omcid never deactivates the ONU
+  itself after a refusal. After one refused change `apply.sh omci` warns; after two in a row
+  (within 24 h) omcid holds a changed identity back (`result=held`, the ONU
+  stays on the identity it runs) until `apply.sh omci --confirm`. While it
+  holds, `flash set` refuses to store a changed `GPON_SN`,
+  `GPON_PLOAM_PASSWD`, `LOID`, `LOID_PASSWD`, `LOID_OLD` or
+  `LOID_PASSWD_OLD`, and `flash default cs` to reset one, so a held change
+  never reaches the store and a reboot cannot apply it
+  (`/var/run/omcid-reregister.hold`); `identity-trial.sh try --confirm` stores
+  it once the OLT accepts it.
+  `apply.sh omci --revert` is the confirmation for going back, recorded as a
+  revert and skipped by the count. `omcli state` adds a `reregister` line,
+  `event=reload_done` a `refusals` field, the status file `refusals`,
+  `streak` and `today`. Refs #391.
 - Kernel: Linux 6.18.63 (was 6.18.58), the upstream stable updates.
 - scripts: `host-autoneg.sh`, `host-serdes.sh` and `mgmt-addr.sh` share the
   lock, the state file, the event line and the trial run, expiry and revert

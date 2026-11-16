@@ -81,9 +81,25 @@ how long until the ONU was back in O5 with services; it waits 20 s by
 default (`APPLY_WAIT`, counted from the signal), inside the 25 s the web UI gives it, and a
 re-registration still running then is reported as running, not as failed.
 Exit 1: no omcid running, no answer to the signal, or a `failed`, `timeout`,
-`no_services` or `sn_not_applied` result (`docs/TOOLS.md`, "omcid"). Every
+`refused`, `held`, `no_services` or `sn_not_applied` result (`docs/TOOLS.md`, "omcid"). Every
 step is an `event=reload` line in syslog (`docs/TOOLS.md`, "Link and
 provisioning events").
+
+**Refused re-registrations are counted, and two in a row hold the next
+change back.** omcid records every re-registration and whether the OLT took
+it (`/etc/config/odi-reregister`, `omcli state`); three Deactivate_ONU-IDs
+before O5, or a disabled serial number (O7), are a refusal, and so is no O5 at
+all. After the first refusal `apply.sh omci` warns; after two in a row, within
+24 h, omcid does not re-register for a changed identity until the reload is
+confirmed with `apply.sh omci --confirm`, and the ONU stays on the identity it
+runs (`result=held`). While that holds, `flash set` refuses to store a
+changed `GPON_SN`, `GPON_PLOAM_PASSWD`, `LOID`, `LOID_PASSWD`, `LOID_OLD` or
+`LOID_PASSWD_OLD` (and `flash default cs` to reset one), so a held change
+never reaches the store and a reboot cannot apply it either; the same value
+again is fine. `identity-trial.sh try --confirm` (below) is the way through:
+it stores the values once the OLT accepts them. Only Deactivate_ONU-IDs for
+the stick's own ONU-ID count, never a broadcast or one for another ONU on the
+PON. Details in `docs/TOOLS.md` ("omcid", "Re-registrations are counted").
 
 A serial number is applied by rewriting the PLOAM slot the boot activation
 armed, which the driver allows only while the ONU is deactivated; the
@@ -98,6 +114,15 @@ each respawn found the first still running and forced the line down and up
 again: 44 forced re-activations in two minutes, the ONU cycling O1 to O3 and
 never reaching O5. There is one omcid now, and a genuine crash still
 respawns and re-provisions as before (`docs/BOOT.md`).
+
+**The identity as a trial.** `identity-trial.sh try GPON_SN=... GPON_PLOAM_PASSWD=...`
+(`docs/TOOLS.md`) changes `GPON_SN`, `GPON_PLOAM_PASSWD`, `LOID` and
+`LOID_PASSWD` without storing them: omcid re-registers with values held in
+RAM, and they are stored only once the ONU is back in O5 with services and
+no MIB reset loop has started for 600 s. A refusal, no O5, no services or a
+new reset loop puts the stored identity back by itself, and so does a reboot.
+The web UI still saves these keys and runs `apply.sh omci`; using the trial
+from the UI is an odi-ui change.
 
 **Every REBOOT also interrupts internet.** A reboot takes the ONU off the
 line: on ISP1, 75 to 81 s from `reboot` until userland confirms (the
