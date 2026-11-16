@@ -1765,7 +1765,9 @@ static void chk_path(char *out, unsigned cap, const char *name)
 	out[n] = 0;
 }
 
-/* The whole of a /proc file: a seq_file read may stop short of the end. */
+/* The whole of a /proc file: a seq_file read may stop short of the end.
+ * Returns -1 when it cannot be opened or read; 0 is a file that opened and
+ * read fine with nothing in it. */
 static long chk_read(const char *name, char *buf, unsigned cap)
 {
 	char path[128];
@@ -1779,6 +1781,8 @@ static long chk_read(const char *name, char *buf, unsigned cap)
 	       (n = sys_read((int)fd, buf + got, cap - (unsigned long)got)) > 0)
 		got += n;
 	sys_close((int)fd);
+	if (!got && n < 0)
+		return -1;
 	return got;
 }
 
@@ -2026,7 +2030,10 @@ uint32_t qos_check(void)
 {
 	long np = chk_read("ponq", chk_ponq_buf, sizeof chk_ponq_buf);
 	long nc = chk_read("cam", chk_cam_buf, sizeof chk_cam_buf);
-	int rp = np > 0 ? pp_ponq(chk_ponq_buf, (unsigned)np, &chk_ponq) : -1;
+	/* An empty ponq is our kernel with nothing set up; a cam holding only
+	 * its summary lines is our kernel with nothing in the CAM. Neither is
+	 * "not readable": anything omcid programmed shows as a difference. */
+	int rp = np >= 0 ? pp_ponq(chk_ponq_buf, (unsigned)np, &chk_ponq) : -1;
 	int rc = nc > 0 ? pp_cam(chk_cam_buf, (unsigned)nc, &chk_cam) : -1;
 
 	if (rp < 0 || rc < 0) {
@@ -2042,7 +2049,9 @@ uint32_t qos_check(void)
 	chk_queues();
 	chk_us_flows();
 	chk_ds_flows();
-	if (chk_skip)
+	if (!chk_ok && !chk_bad && !chk_skip)
+		out("nothing provisioned yet: the OLT has set up no T-CONT or GEM port\n");
+	else if (chk_skip)
 		out_fmt("%d ok, %d differ, %d skipped\n", (long)chk_ok, (long)chk_bad,
 			(long)chk_skip);
 	else

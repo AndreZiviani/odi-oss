@@ -189,12 +189,18 @@ int main(void)
 		   "a flow");
 		ok(!p.f[4].seen, "a flow line cut short is skipped");
 		ok(p.f[64].seen && !p.f[64].rec, "the last line, no newline");
-		ok(pp_ponq("", 0, &p) == -1, "empty read: cannot tell");
+		ok(pp_ponq("", 0, &p) == 0, "empty file: our kernel, nothing set up");
+		ok(pp_ponq("x\n", 2, &p) == -1, "text with no row: not our file");
 		ok(pp_cam(cm, (unsigned)strlen(cm), &c) == 5, "five rows");
 		ok(c.alloc[0] == 1024 && c.alloc[1] == PP_CAM_NONE &&
 		   c.alloc[2] == PP_CAM_TIMEOUT && c.alloc[3] == PP_CAM_UNLISTED, "Alloc-ID rows");
 		ok(c.gem[0] == 1562 && c.gem[64] == 26 && c.gem[1] == PP_CAM_UNLISTED, "GEM rows");
 		ok(pp_cam("x", 1, &c) == -1, "nothing of ours: cannot tell");
+		ok(pp_cam("alloc_cam_valid 0\ngem_cam_valid 0\n", 34, &c) == 0 &&
+		   c.alloc[0] == PP_CAM_UNLISTED && c.gem[0] == PP_CAM_UNLISTED,
+		   "both summary lines, no row: our kernel, empty CAM");
+		ok(pp_cam("gem_cam_valid 0\n", 16, &c) == -1, "one summary line is not enough");
+		ok(pp_cam("", 0, &c) == -1, "empty read: cannot tell");
 	}
 
 	printf("%s (%d failures)\n", failures ? "FAILED" : "all ok", failures);
