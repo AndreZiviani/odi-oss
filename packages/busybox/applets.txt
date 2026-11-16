@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# The busybox applets this image ships, and no others. build.sh turns off
+# every applet not named here and refuses a binary whose `busybox --list`
+# differs from this file; tools/check-applets.py, in `make lint`, refuses an
+# on-device script that runs a command neither here nor elsewhere in the
+# image. Features stay as defconfig and config.fragment set them.
+#
+# A missing applet is not a build error: it is "applet not found" on
+# stderr and an empty pipeline, at run time, on the stick. So an applet
+# leaves this list only when nothing below still names it.
+#
+# Names, separated by blanks; # starts a comment.
+
+# --- init, the shell, logins
+init sh ash login passwd su
+
+# --- the boot scripts, the services and the flasher (rootfs/skeleton,
+# image/fwu.sh; `tools/check-applets.py --list` shows who calls what)
+mount umount mountpoint switch_root mdev mknod sysctl hostname
+reboot halt poweroff watchdog seedrng
+ifconfig route arp arping brctl udhcpc ping
+syslogd klogd logread logger ntpd
+start-stop-daemon setsid nohup timeout flock
+flash_eraseall devmem i2cget i2cset i2cdump i2cdetect
+dmesg uptime free ps top kill killall pidof pgrep pkill
+
+# --- odi-ui (confd) and the exporter (metricsd), which execve these by
+# path: /bin/sh, /bin/mkdir, /bin/md5sum, /bin/ping, /sbin/reboot; their
+# shell snippets add kill, pidof and sleep
+md5sum mkdir sleep
+
+# --- POSIX tools and coreutils: the scripts use most of them, and a shell
+# on the stick without them is a trap for whoever logs in
+[ [[ test echo printf true false expr seq yes
+cat cp mv rm rmdir ln link unlink ls mkfifo mktemp touch truncate chmod chown chgrp
+dd df du sync stat readlink realpath basename dirname pwd tty uname arch
+date sort uniq tac rev head tail cut paste tr wc tee nl comm split od hd
+hexdump xxd strings cmp diff patch find xargs grep egrep fgrep sed awk
+env printenv id whoami groups which install getopt nice renice nproc usleep
+sha1sum sha256sum sha512sum cksum crc32 base64
+tar cpio gzip gunzip zcat xz unxz xzcat
+
+# --- looking around on a live stick (docs/TOOLS.md, docs/kb)
+vi less more clear reset stty watch time tree
+lsof fuser netstat nc nslookup traceroute wget pstree pmap vmstat
+ipcs ipcrm hwclock
+nsenter unshare fallocate chroot

@@ -12,7 +12,7 @@
 # whole point of this harness is booting the real rootfs on a STOCK
 # malta kernel from odi-toolchain, never building our own kernel in CI.
 # So this repeats the staging steps that do not depend on the kernel
-# (busybox applets, the skeleton, our binaries, dropbear/ip/bridge,
+# (busybox applets, the skeleton, our binaries, dropbear/ip,
 # confd assets) rather than reusing that script outright.
 #
 # What is DIFFERENT from a flashed image, and why (see docs/HACKING.md,
@@ -96,9 +96,7 @@ if [ -f "$PKG_DIR/dropbearmulti" ]; then
 	ln -sf dropbearmulti "$STAGE/sbin/dropbearkey"
 	ln -sf ../sbin/dropbearmulti "$STAGE/bin/scp"
 fi
-for b in ip bridge; do
-	[ -f "$PKG_DIR/$b" ] && install -m 755 "$PKG_DIR/$b" "$STAGE/sbin/$b"
-done
+[ -f "$PKG_DIR/ip" ] && install -m 755 "$PKG_DIR/ip" "$STAGE/sbin/ip"
 
 for need in bin/busybox sbin/init sbin/dropbearmulti bin/metricsd bin/confd; do
 	[ -e "$STAGE/$need" ] || die "missing $need -- run 'make busybox packages src releases' first"

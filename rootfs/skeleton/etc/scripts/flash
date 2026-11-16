@@ -57,7 +57,15 @@ TMPDIR_=${TMPDIR_:-/var/tmp}
 ODI_CONF=${ODI_CONF:-/var/config/odi.conf}
 FLASH_LOCK=${FLASH_LOCK:-$TMPDIR_/flash-writer.lock}
 LOCK_S=${LOCK_S:-5}             # seconds to wait for the writer lock
+REREG_HOLD=${REREG_HOLD:-/var/run/omcid-reregister.hold}
 ODI_KEYS="SYSLOG_SERVER NTP_SERVER ONU_HW_VERSION OMCI_UNKNOWN_ME_OK OMCI_FIXED_ME OMCI_PRIVATE_ME OMCI_VEIP OMCI_POTS_PORTS OMCI_POTS_SLOT_ID OMCI_VOIP_LINE_REPORT OLT_SW_DOWNLOAD OMCI_ACCEPT_REBOOT OMCI_UNI_LOCK VLAN_EAPOL_UNTAGGED OMCI_TCONT_ALLOC_UNSET ODI_LASER_UNVERIFIED HOST_AUTONEG HOST_SERDES IGMP_SNOOPING IGMP_PON_DROP GPON_DYING_GASP GPON_KEEP_DISABLE MLD_SNOOPING SFP_HOST_DDM LAN_ROUTES"
+
+# The keys omcid presents to the OLT. While omcid holds a changed identity back
+# after refusals (REREG_HOLD is there, see "Re-registrations are counted" in
+# docs/TOOLS.md), set and default refuse to change them, so a held change
+# never reaches the store and a reboot cannot apply it either. Writing the
+# value a key already has is fine: the web UI saves the whole page.
+IDENTITY_KEYS="GPON_SN GPON_PLOAM_PASSWD LOID LOID_PASSWD LOID_OLD LOID_PASSWD_OLD"
 
 # install_over TMP TARGET: puts TMP in place of TARGET in one rename on
 # TARGET's own filesystem. TMP is copied beside TARGET, checked against
@@ -167,6 +175,25 @@ has_key() {
 	grep -q "Name=\"$1\" Value=" "$2" 2>/dev/null
 }
 
+# held KEY VALUE: true when KEY is an identity key, omcid holds identity
+# changes back, and VALUE is not what the store has. Says why on stderr.
+held() {
+	[ -f "$REREG_HOLD" ] || return 1
+	_id=0
+	for k_ in $IDENTITY_KEYS; do [ "$k_" = "$1" ] && _id=1; done
+	[ "$_id" = 1 ] || return 1
+	for f_ in "$CS" "$HS"; do
+		if has_key "$1" "$f_"; then
+			[ "$(value_of "$1" "$f_")" = "$2" ] && return 1
+			break
+		fi
+	done
+	_n=$(sed -n 's/^streak \([0-9][0-9]*\)$/\1/p' "$REREG_HOLD" 2>/dev/null | head -n 1)
+	echo "flash: $1 not stored: the OLT refused the last ${_n:-few} identity changes in a row." >&2
+	echo "flash: try it with identity-trial.sh try --confirm $1=..., which stores it once the OLT accepts it." >&2
+	return 0
+}
+
 [ $# -ge 1 ] || usage
 
 case "$1" in
@@ -232,6 +259,7 @@ set)
 	# to the rejection above -- it is what makes the byte stored in the file
 	# the byte the operator typed.
 	esc=$(printf '%s' "$val" | sed 's/[\\/]/\\&/g')
+	held "$key" "$val" && exit 1
 
 	if is_odi_key "$key"; then
 		dir=$(dirname "$ODI_CONF")
@@ -338,7 +366,11 @@ default)
 	failed=0
 	while read -r key val; do
 		[ -n "$key" ] || continue
-		if has_key "$key" "$tmp"; then
+		# A key kept in HS is not changed here, so it is not held either.
+		if { has_key "$key" "$tmp" || ! has_key "$key" "$HS"; } &&
+		   held "$key" "$val"; then
+			failed=1
+		elif has_key "$key" "$tmp"; then
 			esc=$(printf '%s' "$val" | sed 's/[\\/]/\\&/g')
 			if sed_set "$key" "$esc" "$tmp" > "$tmp.n" &&
 			   [ -s "$tmp.n" ] && sed_set "$key" "$esc" "$tmp" | cmp -s - "$tmp.n" &&

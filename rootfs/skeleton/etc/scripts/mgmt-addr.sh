@@ -98,20 +98,23 @@ DEF_MASK=255.255.255.0
 say() { echo "mgmt-addr: $*"; }
 die() { echo "mgmt-addr: $*" >&2; exit 1; }
 
-uptime_s() { cut -d. -f1 "$UPTIME" 2>/dev/null; }
+# The lock, the state file, the event line and the trial run
+# (trial-lib.sh). A revert runs from the address being left: back_to_prev
+# defers the move back.
+TAG=mgmt-addr
+LOCK_OWNER=mgmt-addr.sh
+REVERT_HOW=defer
+STATE_KEYS="phase applied trial_id trial_deadline prev_ip prev_mask"
+for k in $KEYS; do STATE_KEYS="$STATE_KEYS old_$k"; done
+for k in $KEYS; do STATE_KEYS="$STATE_KEYS new_$k"; done
+STATE_KEYS="$STATE_KEYS event:ev event_uptime:ev_up message:ev_msg"
+# Next to this script; ${0%/*} rather than dirname, which would be one more
+# process on the boot path (and in the rcS trace goldens).
+case $0 in */*) TRIAL_LIB=${TRIAL_LIB:-${0%/*}/trial-lib.sh} ;; *) TRIAL_LIB=${TRIAL_LIB:-./trial-lib.sh} ;; esac
+# shellcheck source=rootfs/skeleton/etc/scripts/trial-lib.sh
+. "$TRIAL_LIB"
 
-# event NAME TEXT: one line to the kernel log (dmesg, the ramlog, and syslog
-# through klogd), at notice, and to stdout.
-event() {
-	name=$1
-	shift
-	line="event=$name ip=${new_LAN_IP_ADDR:-} prev=${prev_ip:-} $*"
-	printf '<5>mgmt-addr: %s\n' "$line" 2>/dev/null >> "$KMSG"
-	say "$line"
-	ev=$name
-	ev_up=$(uptime_s)
-	ev_msg=$*
-}
+event_fields() { echo "ip=${new_LAN_IP_ADDR:-} prev=${prev_ip:-}"; }
 
 # ---- the keys: six fixed names, held as old_NAME (the store, as the trial
 # found it) and new_NAME (what the trial asks for)
@@ -121,12 +124,6 @@ getv() { eval "printf '%s' \"\${$1:-}\""; }
 
 store_get() {
 	"$TIMEOUT" "$IO_S" "$FLASH" get "$1" 2>/dev/null | sed -n "s/^$1=//p" | sed -n 1p
-}
-
-# put_in_place FILE: puts FILE.new.$$ in place of FILE in one rename on the same
-# filesystem, so a reader or a power cut sees the old file or the new one.
-put_in_place() {
-	mv "$1.new.$$" "$1" 2>/dev/null || { rm -f "$1.new.$$"; return 1; }
 }
 
 # net_addr: network.sh addr, bounded. It reads the trial file when there is one.
@@ -140,72 +137,9 @@ load() {
 	phase=steady applied=0 trial_id='' trial_deadline='' prev_ip='' prev_mask=''
 	ev='' ev_up='' ev_msg=''
 	for k in $KEYS; do setv "old_$k" ''; setv "new_$k" ''; done
-	[ -f "$STATE" ] || return 0
-	while IFS='=' read -r k v; do
-		case $k in
-		phase) phase=$v ;;
-		applied) applied=$v ;;
-		trial_id) trial_id=$v ;;
-		trial_deadline) trial_deadline=$v ;;
-		prev_ip) prev_ip=$v ;;
-		prev_mask) prev_mask=$v ;;
-		old_LAN_IP_ADDR|old_LAN_SUBNET|old_LAN_ENABLE_IP2|old_LAN_IP_ADDR2|old_LAN_SUBNET2|old_LAN_ROUTES) setv "$k" "$v" ;;
-		new_LAN_IP_ADDR|new_LAN_SUBNET|new_LAN_ENABLE_IP2|new_LAN_IP_ADDR2|new_LAN_SUBNET2|new_LAN_ROUTES) setv "$k" "$v" ;;
-		event) ev=$v ;;
-		event_uptime) ev_up=$v ;;
-		message) ev_msg=$v ;;
-		esac
-	done < "$STATE"
+	state_load
 }
-
-save() {
-	{
-		echo "phase=$phase"
-		echo "applied=$applied"
-		echo "trial_id=$trial_id"
-		echo "trial_deadline=$trial_deadline"
-		echo "prev_ip=$prev_ip"
-		echo "prev_mask=$prev_mask"
-		for k in $KEYS; do echo "old_$k=$(getv "old_$k")"; done
-		for k in $KEYS; do echo "new_$k=$(getv "new_$k")"; done
-		echo "event=$ev"
-		echo "event_uptime=$ev_up"
-		echo "message=$ev_msg"
-	} > "$STATE.new.$$" || { rm -f "$STATE.new.$$"; say "could not write $STATE" >&2; return 1; }
-	put_in_place "$STATE" || say "could not install $STATE" >&2
-}
-
-# ---- the lock: one state change at a time. mkdir is atomic; a holder that
-# died is found by its pid and its lock taken over.
-
-lock() {
-	i=0
-	while ! mkdir "$LOCKDIR" 2>/dev/null; do
-		p=$(cat "$LOCKDIR/pid" 2>/dev/null)
-		if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then
-			rm -rf "$LOCKDIR"
-			continue
-		fi
-		# A holder killed between its mkdir and its pid write leaves no
-		# pid: after the wait, that lock is stale too.
-		if [ "$i" -ge "$LOCK_S" ] && [ -z "$p" ]; then
-			rm -rf "$LOCKDIR"
-			i=0
-			continue
-		fi
-		[ "$i" -lt "$LOCK_S" ] || die "busy: another mgmt-addr.sh holds $LOCKDIR"
-		"$SLEEP" 1
-		i=$((i + 1))
-	done
-	echo $$ > "$LOCKDIR/pid"
-}
-unlock() { rm -rf "$LOCKDIR"; }
-
-# spawn VERB ARGS...: this script again, detached, so it outlives the caller
-# (confd). Its output goes to the services log.
-spawn() {
-	setsid sh "$SELF" "$@" < /dev/null >> "$LOG" 2>&1 &
-}
+save() { state_save; }
 
 # ---- addresses
 
@@ -355,38 +289,14 @@ try() {
 	return 0
 }
 
-# trial-run ID SECONDS: one second for the caller answer to leave, the
-# apply, then the window, then the expiry.
-trial_run() {
-	id=$1 secs=$2
-	"$SLEEP" 1
-	lock
-	load
-	if [ "$phase" != trial ] || [ "$trial_id" != "$id" ]; then
-		unlock
-		return 0
-	fi
-	if net_addr; then
-		applied=1
-		save
-	else
-		back_to_prev trial_failed "network.sh could not apply the addresses"
-		unlock
-		return 1
-	fi
-	unlock
-	"$SLEEP" "$secs"
-	expire "$id"
+# The trial run (trial_run, trial-lib.sh): the apply, then the window.
+trial_apply() { net_addr; }
+trial_applied() {
+	applied=1
+	save
 }
-
-expire() {
-	id=$1
-	lock
-	load
-	if [ "$phase" = trial ] && [ "$trial_id" = "$id" ]; then
-		back_to_prev trial_expired "not confirmed in time"
-	fi
-	unlock
+trial_apply_failed() {
+	back_to_prev trial_failed "network.sh could not apply the addresses"
 }
 
 # back_to_prev NAME WHY [defer]: ends the trial. The trial file goes, so
@@ -511,17 +421,6 @@ confirm() {
 	save
 	unlock
 	return 0
-}
-
-revert() {
-	lock
-	load
-	if [ "$phase" != trial ]; then
-		unlock
-		die "no trial is running"
-	fi
-	back_to_prev trial_reverted "reverted on request" defer
-	unlock
 }
 
 status() {

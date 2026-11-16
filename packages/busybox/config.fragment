@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Overrides applied on top of `make defconfig`, one per line, in .config syntax.
 #
+# Which applets are built at all is applets.txt, applied after this file:
+# an applet turned on here and not listed there is off. The module tools
+# (insmod, rmmod, lsmod) are not listed, since the kernel is built without
+# module support (CONFIG_MODULES is not set in kernel/618/config).
+#
 # Two jobs: turn off what this device has no use for, and turn ON the applets the
 # vendor's busybox 1.12.4 was configured without -- their absence is a
 # documented trap on this device, because a missing applet writes to stderr,
@@ -52,9 +57,6 @@ CONFIG_INIT=y
 CONFIG_LOGIN=y
 CONFIG_MDEV=y
 CONFIG_FEATURE_MDEV_CONF=y
-CONFIG_INSMOD=y
-CONFIG_RMMOD=y
-CONFIG_LSMOD=y
 CONFIG_MOUNT=y
 CONFIG_UMOUNT=y
 CONFIG_IFCONFIG=y

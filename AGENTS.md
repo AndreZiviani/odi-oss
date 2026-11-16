@@ -86,7 +86,7 @@ behind every rule here.
   hardware, left both a shell script and the exporter waiting on it
   forever (`CHANGELOG.md`, "Unreleased"). See `docs/SETTINGS.md`, "Bounded
   waits", for the pattern per case — a forked command goes through busybox
-  `timeout` (already built; `packages/busybox/config.fragment`), a bare
+  `timeout` (already built; `packages/busybox/applets.txt`), a bare
   `echo verb > /proc/...` write goes through `write_proc_bounded`/
   `read_proc_bounded` (`rootfs/skeleton/etc/scripts/rcs-lib.sh`), and a
   freestanding C daemon polls its child with a timeout and `SIGKILL`s it on
@@ -113,6 +113,11 @@ behind every rule here.
   `sh` mode, over the scripts that run **on the device** (`rootfs/skeleton/`,
   `tools/regdump/dump.sh`) — those are interpreted by busybox `ash`, not
   bash, and a failure there costs a stick, not just a build.
+- `tools/check-applets.py` (`make check-applets`) — every command those
+  on-device scripts, `/etc/inittab` and `image/fwu.sh` run is a builtin,
+  one of our scripts or binaries, or an applet in
+  `packages/busybox/applets.txt`. busybox is built from that list, so a
+  new command in a script means a new line there, or the check fails.
 - `tools/check-inline-quotes.sh` — the apostrophe/inline-quote rule above.
 - A `git grep` guard against references to the private investigation
   workspace this project was developed alongside (paths, document names,

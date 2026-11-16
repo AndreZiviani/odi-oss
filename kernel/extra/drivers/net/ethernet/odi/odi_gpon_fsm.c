@@ -393,6 +393,9 @@ static void odi_gpon_fsm_do_ploam_rx(struct odi_gpon_fsm *fsm, const struct odi_
 		return;
 
 	if (msg->type == ODI_GPON_DS_DEACTIVATE_ONU_ID) {
+		/* Counted before the deactivation gives the ONU-ID up. */
+		if (odi_gpon_fsm_directed_to_us(fsm, msg))
+			fsm->deact_directed++;
 		if (odi_gpon_onu_id_matches(fsm, msg->onu_id))
 			odi_gpon_fsm_apply_deactivate(fsm, ops, ctx);
 		return;
