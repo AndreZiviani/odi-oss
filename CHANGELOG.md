@@ -183,6 +183,10 @@ listed here.
   omcid keeps out of its log, the LOID and password, the serial number and
   the MACs are overwritten; `--full` keeps them. The diag bundle adds
   `pon/omci.pcap`, always masked. Issue #394.
+- `make -C src/diag ssp-test` no longer leaves core files in `src/diag`. Its
+  overrun case aborts on purpose, and in a container with an unlimited core
+  size it wrote `core.N` and a qemu core there, which `make lint` (REUSE)
+  then refused when the two ran side by side in `make test`.
 - omcid: a MIB reset loop is named instead of left to be counted in the log.
   Three or more MIB resets from the OLT within 600 s log one
   `event=mib_reset_loop state=start` (warning), and `state=end` after 600 s
