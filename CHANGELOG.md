@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- scripts: `host-autoneg.sh`, `host-serdes.sh` and `mgmt-addr.sh` share the
+  lock, the state file, the event line and the trial run, expiry and revert
+  through `/etc/scripts/trial-lib.sh`, as rcS and rcS.pon share
+  `rcs-lib.sh`, instead of three copies. Their behaviour is the same, with
+  two exceptions in edge cases: the lock of `host-autoneg.sh` and
+  `mgmt-addr.sh` gives up when its directory cannot be made at all, as the
+  one of `host-serdes.sh` already did, instead of waiting for ever; and a
+  state file of `mgmt-addr.sh` that cannot be renamed into place now makes
+  the save fail, as in the other two. Issue #424.
 - image: `/sbin/bridge` from iproute2 is no longer built or shipped. No
   script, daemon, the web UI or the exporter calls it; `br0` is set up with
   the busybox `brctl` applet, and `ip` stays. The v1.16.0 binary was 256,452
