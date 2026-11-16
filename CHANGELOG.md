@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.17.0 (2026-11-16)
+
 - Releases: confd v1.17.0 and metricsd v1.11.0. The web UI adds a link
   check under the registration ladder on Status (light, registered, OMCI,
   services, traffic, with the first failing stage as one finding), the
