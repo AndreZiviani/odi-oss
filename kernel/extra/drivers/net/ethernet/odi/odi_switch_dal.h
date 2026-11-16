@@ -254,6 +254,34 @@ void odi_sw_ponq_sidvalid_set(uint32_t sid, int valid);
 void odi_sw_ponq_sid2qid_set(uint32_t sid, uint32_t pq);
 void odi_sw_ponq_glb_th_set(uint32_t nflows);
 
+/* /proc/odi_gpon/ponq: the upstream PON queue block read back, every
+ * T-CONT (16 data, 17 with the OMCC's), every queue (65) and every flow
+ * (64, 65 with the OMCC's 64), as the registers hold them: a rate is the
+ * register value (one less than the rate cmd 23 was given, except 0, 1
+ * and ODI_SW_PONQ_RATE_MAX), a GEM port the 12 bits of US_GEM_PORT_MAP.
+ * Reads only: DRN_CMD, the one register here a write starts something
+ * with, is not touched. Rows no flow or T-CONT uses keep whatever the
+ * replays or an earlier provisioning left; the caller knows which are in
+ * use. The caller holds odi_switch_lock.
+ */
+#define ODI_SW_PONQ_ALL_TCONTS		17U
+#define ODI_SW_PONQ_ALL_QUEUES		65U
+#define ODI_SW_PONQ_ALL_FLOWS		65U
+
+struct odi_sw_ponq_regs {
+	uint32_t tcont_en;			/* PON_TCONT_EN */
+	uint32_t qmap[ODI_SW_PONQ_ALL_TCONTS];	/* PON_SCH_QMAP */
+	uint32_t cir[ODI_SW_PONQ_ALL_QUEUES];	/* PON_QID_CIR_RATE */
+	uint32_t pir[ODI_SW_PONQ_ALL_QUEUES];	/* PON_QID_PIR_RATE */
+	uint16_t weight[ODI_SW_PONQ_ALL_QUEUES];	/* PON_WFQ_WEIGHT */
+	uint8_t wfq[ODI_SW_PONQ_ALL_QUEUES];	/* PON_WFQ_TYPE: 1 WFQ, 0 strict */
+	uint8_t valid[ODI_SW_PONQ_ALL_FLOWS];	/* PON_SIDVALID */
+	uint8_t queue[ODI_SW_PONQ_ALL_FLOWS];	/* PON_SID2QID */
+	uint16_t gem[ODI_SW_PONQ_ALL_FLOWS];	/* US_GEM_PORT_MAP */
+};
+
+void odi_sw_ponq_read(struct odi_sw_ponq_regs *r);
+
 /* --- odi_switch_ds_gem.c -------------------------------------------------- */
 
 /* The DS slots: every downstream flow cmd 25 can create, rows 0..63 of

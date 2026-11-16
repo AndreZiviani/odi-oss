@@ -151,7 +151,7 @@ static unsigned services_in_use(void)
 	unsigned n = 0;
 
 	for (int i = 0; i < SERV_MAX; i++)
-		n += servtab[i].in_use ? 1u : 0u;
+		n += servtab[i].in_use == 1 ? 1u : 0u;
 	return n;
 }
 
@@ -326,8 +326,10 @@ static void do_reregister(const struct cfg_snap *old)
 	conn_dirty = 0;
 	qos_dirty = 0;
 	bdgconn_rebuild();
+	/* A deactivate that failed stays pending for the next rebuild. */
 	for (int i = 0; i < SERV_MAX; i++)
-		servtab[i].in_use = 0;
+		if (servtab[i].in_use == 1)
+			servtab[i].in_use = 0;
 	serial_forget();
 	status_write(0, "deactivated", -1);
 	rl.phase = RL_HOLD;

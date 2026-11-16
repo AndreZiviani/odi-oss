@@ -72,7 +72,7 @@ static int serv_same_except_uni(const struct omci_bdgconn *a,
 static int serv_update(const struct omci_bdgconn *r)
 {
 	for (int i = 0; i < SERV_MAX; i++)
-		if (servtab[i].in_use && serv_same_except_uni(r, &servtab[i])) {
+		if (servtab[i].in_use == 1 && serv_same_except_uni(r, &servtab[i])) {
 			servtab[i].uni_mask |= r->uni_mask;
 			return i;
 		}
@@ -1753,6 +1753,31 @@ static int eapol_install(const int *ingress, const int *ingress_bridge,
 	return added;
 }
 
+/* Deactivate again the services a rebuild left pending, and only those: a
+ * live service is not touched. Returns how many are still pending after it,
+ * so the caller knows whether to come back; a dry run just frees them. */
+int bdgconn_retry_pending(void)
+{
+	int left = 0;
+
+	for (int i = 0; i < SERV_MAX; i++) {
+		if (servtab[i].in_use != SERV_PENDING)
+			continue;
+		if (apply_hw) {
+			int rc = omci_deactiveBdgConn((uint32_t)i);
+
+			if (rc) {
+				out_fmt("   [hw] bridge connection %d deactivate -> %d, still pending\n",
+					(long)i, (long)rc);
+				left++;
+				continue;
+			}
+		}
+		servtab[i].in_use = 0;
+	}
+	return left;
+}
+
 void bdgconn_rebuild(void)
 {
 	const struct omci_class *c47 = find_class(OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA);
@@ -1767,18 +1792,26 @@ void bdgconn_rebuild(void)
 	/* Every service in servtab, not a list this process kept beside it:
 	 * snapshot_load restores servtab, so a resumed omcid has the services
 	 * of the last one here and would have had an empty list. A deactivate
-	 * that fails is logged and the slot freed all the same, as before:
-	 * the driver replaces a service whose id comes back with another rule
-	 * (odi_switch_bdgconn.c), so the next add of that id clears it. */
+	 * that fails (a netlink send lost before the kernel ran it) leaves the
+	 * rule in the switch, so the slot stays owned as SERV_PENDING: the plan
+	 * below does not hand its id out and it is not a live service. Freeing
+	 * it here would forget a rule that a shrunk plan never replaces. No
+	 * conn_dirty: a rebuild tears down and re-adds every live service, so
+	 * asking for another one per failure would loop. The next rebuild tries
+	 * the deactivate again first, and bdgconn_retry_pending() does it on
+	 * its own, paced by the main loop. */
 	for (int i = 0; i < SERV_MAX; i++) {
 		if (!servtab[i].in_use)
 			continue;
 		if (apply_hw) {
 			int rc = omci_deactiveBdgConn((uint32_t)i);
 
-			if (rc)
-				out_fmt("   [hw] bridge connection %d deactivate -> %d\n",
+			if (rc) {
+				out_fmt("   [hw] bridge connection %d deactivate -> %d, kept pending\n",
 					(long)i, (long)rc);
+				servtab[i].in_use = SERV_PENDING;
+				continue;
+			}
 		}
 		servtab[i].in_use = 0;
 	}

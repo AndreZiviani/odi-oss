@@ -934,7 +934,8 @@ void igmpd_frame(struct igmp_db *db, const uint8_t *payload, uint32_t len,
 	/* Only while snooping: a copy that arrives after the
 	 * policy said stop is not state to keep. */
 	if (prc == IGMP_OK && pol.snooping) {
-		changes = igmp_db_rx(db, &rx, now, ch, MAX_CHANGES);
+		changes = igmp_db_rx(db, &rx, now, (uint32_t)mld_db_dynamic_count(&db6),
+					     ch, MAX_CHANGES);
 		igmp_meter_rx(&meter, db, &rx, now);
 	}
 	/* A refresh changes nothing and says nothing: reports

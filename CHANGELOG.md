@@ -42,6 +42,99 @@ listed here.
   revert and skipped by the count. `omcli state` adds a `reregister` line,
   `event=reload_done` a `refusals` field, the status file `refusals`,
   `streak` and `today`. Refs #391.
+- docs/SWITCH.md, "Priorities an 802.1p mapper discards": a bridge port on a
+  mapper with one target forwards the tagged frames of a priority the mapper
+  sets to 0xffff, against G.988 9.3.10, on purpose. Refs #421.
+- igmpd: an IGMP join is held to the profile's group limit with the IPv6
+  groups counted in, as an MLD join already counted the IPv4 ones. Before,
+  with a limit of 2, an IPv6 group held first let two IPv4 groups in as
+  well, and the same groups joined the other way round were refused, so
+  the result depended on which family joined first. A group already held
+  or static is still not a new one. A report for a static group on another
+  VLAN no longer counts as a dynamic group in either family, so it no longer
+  takes a place under the limit.
+- igmpd: a static group that does not fit the group table (128 for IPv4, 128
+  for IPv6) now counts as an overflow, like a range too wide to name, so
+  `IGMP_PON_DROP=1` leaves the PON drop off. Before, the lease turned the
+  drop on although some static groups had no row, and the PON dropped them
+  as unregistered.
+- odi_nic: a raw transmit (omcid's OMCI replies and the IGMP reports sent up
+  by igmpd) while every interface is down returns `-ENETDOWN` instead of
+  writing into a TX ring that is NULL or being freed. The driver keeps a
+  flag under its lock, set when the first open has the ring and the hardware
+  up and cleared first in the last stop, before the work is cancelled and the
+  rings freed; omcid sees a failed send, as it already does on a full ring.
+  Issue #419.
+- omcid: a bridge connection whose deactivate fails stays owned as pending
+  and is deactivated again by the next rebuild. Before, the slot was freed
+  at once and the rule stayed in the switch whenever the next plan did not
+  reuse that service id, with omcid no longer knowing it owned it. A pending
+  service is not counted as live, its id is not handed out, and it survives
+  a respawn in the snapshot. The retry runs on its own every 5 seconds and
+  touches no live service; it does not trigger a full rebuild.
+- OMCI: clear the original CRC of a masked frame in text and pcap exports,
+  so the checksum cannot reveal the hidden identity or secret. `--full`
+  still returns the captured frame unchanged.
+
+- OMCI: `omcli check` derives queue ownership and ordering from the current
+  MIB, so a pending T-CONT or priority change is reported as a difference
+  instead of accepting the old programmed queue map.
+
+- OMCI: `omcli check` compares the MIB with what the chip holds and prints
+  one line per object, `ok` or what differs: each T-CONT's Alloc-ID against
+  its CAM row, enable bit and queue mask; each upstream queue's type,
+  weight, CIR and PIR; each upstream GEM port's flow (valid bit, GEM port,
+  queue); each downstream GEM port against its CAM row. It looks only at
+  what omcid set up and writes nothing. The chip side is a new read-only
+  `/proc/odi_gpon/ponq`, the upstream PON queue block read back (never
+  `DRN_CMD`). The diag bundle adds `pon/omcli_check.txt` and
+  `pon/odi_gpon-ponq.txt` and `pon/odi_gpon-cam.txt`, so a report shows
+  whether a GEM port, queue or rate reached the hardware even when omcid
+  does not answer (issue #412).
+- Diagnostics bundle: a scrub that fails on any file now fails the bundle
+  instead of letting that file out unscrubbed, and `diag-bundle.sh` runs
+  with a BSD sed and awk (macOS): the scrub no longer uses `sed -i`, and the
+  config redaction passes its key list to awk on one line, where a BSD awk
+  had refused it and left the config copies empty. The bundle runs under
+  `LC_ALL=C`, so a secret that is not valid UTF-8 still reaches the scrub.
+- Diagnostics: label O5 departures and LOS/LOF counts as events in the
+  retained log, not totals since boot. A wrapped or rate-limited dmesg
+  must not turn missing history into an all-clear.
+
+- Diagnostics bundle: two files at the top for whoever reads it. `README.md`
+  names the image, says what is redacted and whether the identity is masked,
+  maps questions to files and lists what a report has to add (ISP, router,
+  what changed). `SUMMARY.txt` is one screen of facts from the bundle files:
+  ONU state and its last change, O5 drops in the retained log by `cause`, LOS and LOF,
+  alarms set now, the `omcli state` reset and drop counts, optics, why the
+  previous boot ended, the safe-mode boot count and the failed steps. The new
+  `diag-summary.sh` writes it and reads only the bundle, so it also runs on a
+  PC against an unpacked bundle. The diag batch adds the five `pon get
+  transceiver` reads the exporter makes on every scrape.
+- Identity: the first boot of this image copies the provisioning identity
+  (`GPON_SN`, `GPON_PLOAM_PASSWD`, `ELAN_MAC_ADDR`, `GPON_ONU_MODEL`, the four
+  LOID keys, `ONU_HW_VERSION`, `MAC_KEY`, `PON_VENDOR_ID`,
+  `GPON_PLOAM_FORMAT`) to `/etc/config/identity.orig`, mode 600, and no later
+  boot rewrites it. `identity.sh show` compares it with the current values
+  (secrets hidden), `identity.sh restore` writes back what differs and says
+  whether `apply.sh omci` or a reboot is needed, and `identity.sh replace
+  --yes` takes a new copy on purpose. No copy on a safe-mode boot or from a
+  store without a serial. Not in the diagnostics bundle or the web UI backup.
+  The copy holds what the stick had at that boot, so on a stick changed
+  before it is not the factory identity. Taken at boot, before NTP, it
+  says `taken=unknown` and the file is dated 1970. `test/identity_test.sh`
+  runs on macOS too (no GNU `sed -i` or `stat -c`). Issue #387.
+- GPON: `/proc/odi_gpon/drops`, a short record of the PON side around every
+  drop out of O5, frozen when it happens: the 60 s before and the 120 s
+  after, with PLOAM messages both ways (type and ONU-ID, no contents), ONU
+  state changes with their cause and side, LOS and LOF edges and the 1 s
+  sample (state, alarm bits, BIP error blocks). Four records, the first of
+  the boot kept and the latest three beside it, so a later drop never
+  overwrites the first. A PLOAM the OLT repeats within 10 ms is one line
+  with a count, so an OLT that sends every burst three times does not fill a
+  record before its 120 s. In the diagnostics bundle as
+  `pon/odi_gpon-drops.txt`. RAM only for now: a watchdog reset loses it.
+  Refs #390.
 - nv: an environment block whose CRC matches but whose last pair has no NUL
   before the end of the block, or whose list lacks the closing empty string,
   is no longer valid. Before, `nv getenv` and `nv setenv` read such a pair

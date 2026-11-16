@@ -90,9 +90,13 @@ check "--full: vendor id and serial number in the answer" \
       "$(printf '%s' "$full" | cut -c17-46)" "00a0004f4449544f44495400000001"
 check "masked: the vendor id stays, the serial number does not" \
       "$(printf '%s' "$masked" | cut -c17-46)" "00a0004f444954eeeeeeeeeeeeeeee"
-check "masked: header and CRC unchanged" \
+check "masked: header and trailer unchanged, original CRC removed" \
       "$(printf '%s' "$masked" | cut -c1-16):$(printf '%s' "$masked" | cut -c81-96)" \
-      "$(printf '%s' "$full" | cut -c1-16):$(printf '%s' "$full" | cut -c81-96)"
+      "$(printf '%s' "$full" | cut -c1-16):0000002800000000"
+check "masking leaves the captured frame intact for --full" \
+      "$(frames --full | line '->' 0002290a)" "$full"
+onug_full_frame=$full
+onug_masked_frame=$masked
 
 # --------------------------------- large string: a class kept out of the log
 # Create large string (157) instance 1, then Set part 1 (attribute 2) to a
@@ -115,6 +119,12 @@ check "masked: the Get answer keeps result and mask, not the value" \
       "$(printf '%s\n' "$masked" | line '->' 0005290a | cut -c17-30)" "004000eeeeeeee"
 check "the secret is nowhere in the masked list" \
       "$(printf '%s\n' "$masked" | grep -c 7365637265)" "0"
+
+for spec in '<- 0003440a' '<- 0004480a' '-> 0005290a'; do
+	set -- $spec
+	check "masked: CRC removed from $spec" \
+	      "$(printf '%s\n' "$masked" | line "$1" "$2" | cut -c89-96)" "00000000"
+done
 
 # ------------------------------------------------------ MIB upload next
 send "$log" 0006 4d 0002 0000 ""                         # MIB upload
@@ -165,10 +175,14 @@ check "second record: ONU to OLT" \
       "$(printf '%s' "$hex" | cut -c237-260)" "020000000001020000000002"
 check "masked like the text: no serial, no secret" \
       "$(printf '%s' "$hex" | grep -c -e 4f44495400000001 -e 7365637265)" "0"
+check "pcap carries the masked serial frame with its CRC removed" \
+      "$(printf '%s' "$hex" | grep -F -c "$onug_masked_frame")" "1"
 $Q cli/build/omcli frames --pcap "$pc" --full > /dev/null 2>&1
 hex=$(od -An -v -tx1 "$pc" | tr -d ' \n')
 check "--pcap with --full: the serial is there" \
       "$(printf '%s' "$hex" | grep -c 4f44495400000001)" "1"
+check "--full pcap preserves the original serial frame and CRC" \
+      "$(printf '%s' "$hex" | grep -F -c "$onug_full_frame")" "1"
 got=$($Q cli/build/omcli frames --pcap 2>&1); rc=$?
 check "--pcap without a file is refused" "$rc:$got" "1:% --pcap needs a file"
 $Q cli/build/omcli frames --pcap /nonexistent/dir/x.pcap > /dev/null 2>&1

@@ -26,6 +26,7 @@
 #include "uapi/omci_flows.h"
 
 #ifdef __KERNEL__
+#include <linux/kernel.h>
 #include <linux/string.h>
 #else
 #include <string.h>
@@ -1304,6 +1305,100 @@ static int cmd_unsupported(uint32_t cmd, void *buf, uint32_t len)
  * stock driver name of each is in the comment. omcid reaches this only
  * through the odi_omci netlink socket.
  */
+void odi_switch_ponq_snap(struct odi_switch_ponq_snap *s)
+{
+	uint32_t i;
+
+	odi_sw_ponq_read(&s->hw);
+	for (i = 0; i < ODI_SW_PONQ_TCONTS; i++) {
+		s->t_used[i] = odi_sw_tcont[i].used && odi_sw_tcont[i].qn;
+		s->t_qbase[i] = odi_sw_tcont[i].qbase;
+		s->t_qn[i] = odi_sw_tcont[i].qn;
+	}
+	for (i = 0; i < ODI_SW_CMD_GEM_US_MAX; i++)
+		s->f_used[i] = (uint8_t)flow_used(odi_sw_gem_us_used, i);
+}
+
+/* The physical queues of T-CONT t that its mask holds, as a bitmap over
+ * the 65 queues: bit q of word q / 32.
+ */
+static void ponq_mask_queues(const struct odi_switch_ponq_snap *s, uint32_t t, uint32_t *map)
+{
+	uint32_t lq;
+
+	if (t == ODI_SW_PONQ_TCONTS) {		/* the OMCC: queue 64, bit 0 */
+		uint32_t pq = ODI_SW_PONQ_ALL_QUEUES - 1U;
+
+		if (s->hw.qmap[t] & 1U)
+			map[pq / 32U] |= 1U << (pq % 32U);
+		return;
+	}
+	for (lq = 0; lq < ODI_SW_PONQ_GROUP_QUEUES; lq++)
+		if (s->hw.qmap[t] & (1U << lq)) {
+			uint32_t pq = ponq_physical(t, lq);
+
+			map[pq / 32U] |= 1U << (pq % 32U);
+		}
+}
+
+/* The file, in three parts, one line per row:
+ *
+ *   tcont <t> en <0|1> qmap 0x<mask> block <first>+<count>|-
+ *	every T-CONT that is enabled, has a queue in its mask, or has a
+ *	block recorded (cmd 21); 16 is the OMCC's;
+ *   queue <q> wfq <0|1> weight <w> cir <raw> pir <raw>
+ *	every physical queue in the mask of an enabled T-CONT;
+ *   flow <slot> valid <0|1> gem <port> queue <q> recorded <0|1>
+ *	every upstream flow slot that is valid or recorded (cmd 25); 64 is
+ *	the OMCC's.
+ *
+ * Values are the registers', not the arguments of the commands.
+ */
+void odi_switch_ponq_show(const struct odi_switch_ponq_snap *s,
+			  void (*put)(void *ctx, const char *line), void *ctx)
+{
+	uint32_t map[(ODI_SW_PONQ_ALL_QUEUES + 31U) / 32U] = { 0 };
+	char line[96];
+	uint32_t i;
+
+	for (i = 0; i < ODI_SW_PONQ_ALL_TCONTS; i++) {
+		int en = (s->hw.tcont_en >> i) & 1U;
+		int rec = i < ODI_SW_PONQ_TCONTS && s->t_used[i];
+
+		if (!en && !s->hw.qmap[i] && !rec)
+			continue;
+		if (rec)
+			snprintf(line, sizeof(line), "tcont %u en %d qmap 0x%08x block %u+%u\n",
+				 (unsigned int)i, en, (unsigned int)s->hw.qmap[i],
+				 (unsigned int)s->t_qbase[i], (unsigned int)s->t_qn[i]);
+		else
+			snprintf(line, sizeof(line), "tcont %u en %d qmap 0x%08x block -\n",
+				 (unsigned int)i, en, (unsigned int)s->hw.qmap[i]);
+		put(ctx, line);
+		if (en)
+			ponq_mask_queues(s, i, map);
+	}
+	for (i = 0; i < ODI_SW_PONQ_ALL_QUEUES; i++) {
+		if (!((map[i / 32U] >> (i % 32U)) & 1U))
+			continue;
+		snprintf(line, sizeof(line), "queue %u wfq %u weight %u cir %u pir %u\n",
+			 (unsigned int)i, (unsigned int)s->hw.wfq[i],
+			 (unsigned int)s->hw.weight[i], (unsigned int)s->hw.cir[i],
+			 (unsigned int)s->hw.pir[i]);
+		put(ctx, line);
+	}
+	for (i = 0; i < ODI_SW_PONQ_ALL_FLOWS; i++) {
+		int rec = i < ODI_SW_CMD_GEM_US_MAX && s->f_used[i];
+
+		if (!s->hw.valid[i] && !rec)
+			continue;
+		snprintf(line, sizeof(line), "flow %u valid %u gem %u queue %u recorded %d\n",
+			 (unsigned int)i, (unsigned int)s->hw.valid[i],
+			 (unsigned int)s->hw.gem[i], (unsigned int)s->hw.queue[i], rec);
+		put(ctx, line);
+	}
+}
+
 int odi_switch_cmd(uint32_t cmd, void *buf, uint32_t len)
 {
 	switch (cmd) {

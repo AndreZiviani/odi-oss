@@ -149,6 +149,54 @@ int main(void)
 	ok(pp_sn_is_zero((const uint8_t *)"\0\0\0\0\0\0\0\0") &&
 	   !pp_sn_is_zero(want), "zero test");
 
+	puts("/proc/odi_gpon/ponq and cam");
+	{
+		static struct pp_ponq p;
+		static struct pp_cam c;
+		const char *pq =
+			"tcont 0 en 1 qmap 0x00000003 block 0+2\n"
+			"tcont 8 en 0 qmap 0x00000000 block 0+1\n"
+			"tcont 16 en 1 qmap 0x00000001 block -\n"
+			"tcont 9 en 1 qmap 0x00000001 block 30+5\n"
+			"queue 1 wfq 1 weight 30 cir 99 pir 199\n"
+			"queue 99 wfq 0 weight 1 cir 0 pir 0\n"
+			"queues 2 wfq 0 weight 1 cir 0 pir 0\n"
+			"flow 3 valid 1 gem 1562 queue 33 recorded 1\n"
+			"flow 4 valid 1 gem 1563\n"
+			"flow 64 valid 1 gem 0 queue 64 recorded 0";
+		const char *cm =
+			"alloc_cam 0 hw 1024 recorded 1024\n"
+			"alloc_cam 1 hw - recorded 1025\n"
+			"alloc_cam 2 hw timeout recorded -\n"
+			"alloc_cam_valid 1\n"
+			"gem_cam 0 hw 1562 type 0x02\n"
+			"gem_cam 64 hw 26 type 0x03\n";
+		uint32_t v = 0;
+
+		ok(pp_word_u32("a 12 b 0x1f", 11, "b", &v) == 1 && v == 31, "a hex value");
+		ok(pp_word_u32("ab 12 b 7", 9, "b", &v) == 1 && v == 7, "a whole word only");
+		ok(pp_word_u32("a 12x", 5, "a", &v) == 0, "trailing junk rejected");
+		ok(pp_ponq(pq, (unsigned)strlen(pq), &p) == 7, "seven rows; the malformed and out of range skipped");
+		ok(p.t[0].seen && p.t[0].en && p.t[0].qmap == 3 && p.t[0].block &&
+		   p.t[0].qbase == 0 && p.t[0].qn == 2, "a T-CONT with its block");
+		ok(p.t[8].seen && !p.t[8].en && p.t[8].block && p.t[8].qn == 1, "a block and no queue");
+		ok(p.t[16].seen && !p.t[16].block, "no block recorded");
+		ok(p.t[9].seen && !p.t[9].block, "a block past its group of 32 is not taken");
+		ok(p.q[1].seen && p.q[1].wfq && p.q[1].weight == 30 && p.q[1].cir == 99 &&
+		   p.q[1].pir == 199, "a queue");
+		ok(!p.q[2].seen, "\"queues\" is not \"queue\"");
+		ok(p.f[3].valid && p.f[3].gem == 1562 && p.f[3].queue == 33 && p.f[3].rec,
+		   "a flow");
+		ok(!p.f[4].seen, "a flow line cut short is skipped");
+		ok(p.f[64].seen && !p.f[64].rec, "the last line, no newline");
+		ok(pp_ponq("", 0, &p) == -1, "empty read: cannot tell");
+		ok(pp_cam(cm, (unsigned)strlen(cm), &c) == 5, "five rows");
+		ok(c.alloc[0] == 1024 && c.alloc[1] == PP_CAM_NONE &&
+		   c.alloc[2] == PP_CAM_TIMEOUT && c.alloc[3] == PP_CAM_UNLISTED, "Alloc-ID rows");
+		ok(c.gem[0] == 1562 && c.gem[64] == 26 && c.gem[1] == PP_CAM_UNLISTED, "GEM rows");
+		ok(pp_cam("x", 1, &c) == -1, "nothing of ours: cannot tell");
+	}
+
 	printf("%s (%d failures)\n", failures ? "FAILED" : "all ok", failures);
 	return failures != 0;
 }

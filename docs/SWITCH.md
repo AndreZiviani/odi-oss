@@ -762,6 +762,12 @@ is torn down (its flows, then its queues) and built again alone. Only a
 change of the PLOAM Alloc-ID list tears everything down, since the CAM
 rows, and so the T-CONT indexes, may have moved.
 
+`/proc/odi_gpon/ponq` reads these registers back (every one above but
+`DRN_CMD`, plus `US_GEM_PORT_MAP`) next to what cmd 21 and 25 recorded,
+and `omcli check` compares them, with `/proc/odi_gpon/cam`, against what
+the MIB asks for (docs/TOOLS.md). Reading the window while the line is up
+is what the read-modify-write of every field above already does (#412).
+
 The driver used to replay ISP1's words for these registers by T-CONT and
 flow ordinal, which gave every other OLT ISP1's weights, drained T-CONT
 4's queue when it set up T-CONTs 5 and up, put T-CONTs 8-15 on queues
@@ -798,6 +804,24 @@ fixed template: it is idempotent.
   slots. The capture addresses 0x013008 through the macro for
   `VLAN_ACCEPT_FRAMES(2)`; the register there is `VLAN_SETUP`, whose four
   fields decode the values written.
+
+#### Priorities an 802.1p mapper discards
+
+G.988 9.3.10 gives each priority of an 802.1p mapper (class 130) an
+interworking pointer, and the null pointer 0xffff discards the frames of that
+priority. omcid follows it only where the mapper sends its priorities to more
+than one GEM IW TP: the rules of each target then carry just the priorities
+the mapper gives it (`mapper_splits()` in `src/omci/respond/apply_bridge.c`).
+A bridge port on a mapper (TP type 3) whose mapped priorities all go to one target
+keeps the single rule it always had, so tagged frames of a priority the
+mapper sets to 0xffff still go up that GEM port. (A bridge port on the GEM IW
+TP itself, TP type 5, whose mapper gives it exactly one priority, filters on
+that priority, so the others do not pass there.)
+
+This is a deliberate deviation. No OLT is known to rely on the discard, and
+following it could only cost tagged traffic that works today (#306, #315,
+#421). The `vlan-test.sh` case "one target with a priority unmapped" holds
+it. If an OLT ever needs the discard, it can be added behind a key.
 
 ### CF rows
 
