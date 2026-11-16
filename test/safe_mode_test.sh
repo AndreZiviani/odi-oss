@@ -333,12 +333,15 @@ pon() {
 		. "$LIB"
 		# shellcheck disable=SC2034 # read by the sourced functions
 		SAFE_FLAG=$1
+		# shellcheck disable=SC2034 # read by the sourced functions
+		HS=$T/hs.xml
 		crumb() { echo "crumb $*"; }
 		pon_step() { echo "step $1"; }
 		pon_step_laser
 		pon_step_gponact
 	) 2>&1
 }
+printf '<Value Name="GPON_SN" Value="ODIT00000001"/>\n' > "$T/hs.xml"
 echo x > "$T/run/flag"
 out=$(pon "$T/run/flag")
 t "safe-mode boot: the laser step leaves the laser off" "crumb pon step laser: safe-mode boot, laser left off" "$out"

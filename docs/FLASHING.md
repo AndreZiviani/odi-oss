@@ -76,6 +76,57 @@ UI credentials. A new image does not recreate them, `flash_eraseall` on
 stick: it is in clear text. Keep the dump out of any repository, mode 600,
 in a directory only you can read.
 
+### An erased config partition
+
+An erase does not leave the stick unreachable. The stock firmware writes a
+default store into an empty partition at its next boot; this image does the
+same with `/etc/scripts/config-reseed.sh`, which rcS runs right after the
+partition is mounted and before anything reads the store. `lastgood.xml` or
+`lastgood_hs.xml`, when missing or empty, is installed from
+`/etc/config-template/` on the read-only rootfs. A file that is there is
+never touched, whatever it holds.
+
+What the stick then has:
+
+- the management address 192.168.1.1/24, so the boot is confirmed and the
+  web UI answers there (with admin/admin, as with no `confd.auth`, and the
+  page says so);
+- an empty `GPON_SN` and PLOAM password: the gponsn and gponact steps are
+  skipped, so the PON stays down instead of ranging with the driver's own
+  serial. Type the serial (and password, LOID) in the web UI and apply, or
+  restore a backup of the partition;
+- `ELAN_MAC_ADDR` of the Realtek prefix `00e04c` and three random bytes, so
+  two recreated sticks on one LAN do not share a MAC;
+- every other stock key at the stock default, so `flash set` and the web UI
+  can save any of them, and the stock slot, which shares the partition,
+  finds a store it knows.
+
+What is lost for good: the identity, the host keys and ssh authorized keys,
+the web UI password and every setting of `odi.conf` (each falls back to its
+default when the file is missing). The stock firmware also keeps its laser
+calibration on this partition (`rtl-3320-backup.bin`), which only the stock
+slot reads.
+
+The recreation is logged once in the kernel log (`config-reseed:
+event=config_reseeded`) and recorded in `/etc/config/config-reseeded` until
+`config-reseed.sh ack`; the diagnostics summary names it while the record is
+there.
+
+The template is the store the stock firmware (`V1.0-220923`) writes into an
+empty partition, taken off-device: its `configd`, which holds the defaults,
+and `xmlconfig -def_mib`, `-def_mib -hs`, `-nodef -if /etc/config_default*.xml`
+and `-of [-hs]`, run under qemu-user in a chroot of the stock rootfs, in the
+order its `config_xmlconfig.sh -b` uses for an empty store. qemu-user needs
+one change for it: the vendor library writes to unaligned addresses, which
+the stick's kernel completes in software and qemu-user faults on, so qemu was
+built with unaligned accesses allowed (`default_tcg_memop_mask = MO_UNALN` in
+`target/mips/tcg/translate.c`). From that output, `GPON_SN`,
+`GPON_PLOAM_PASSWD` and `ELAN_MAC_ADDR` are emptied (the stock defaults are a
+fixed serial, password and MAC shared by every stock stick), and the four
+login keys a stick in service does not carry (`USER_NAME`, `USER_PASSWORD`,
+`E8BDUSER_NAME`, `E8BDUSER_PASSWORD`) are left out; nothing in this image
+reads them.
+
 **Read it.** Read the partitions in order and stream them to the host; do not
 stage them on the stick, whose `/tmp` is RAM and cannot hold 8 MiB
 (`docs/ACCESS.md`, "Copying files: scp"). Reading the `...ro` nodes cannot

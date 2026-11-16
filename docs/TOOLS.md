@@ -242,7 +242,9 @@ down. It ends when `/proc/odi_gpon/status` says O5 and at least one service exis
 at `result=timeout` (O5 not reached) or `result=no_services` after 150 s, or
 at `result=failed` when the driver refused `gpondeact` (nothing was touched,
 and omcid goes back to the values it was running with, so the next SIGHUP
-tries again) or `gponact` (the ONU is left off the line). A refused `gponsn`
+tries again) or `gponact` (the ONU is left off the line), or at
+`result=no_serial` when the store holds no serial number at all: the ONU is
+left deactivated, as rcS leaves it at boot (`config-reseed.sh`). A refused `gponsn`
 does not stop the activation: the ONU comes back on the old serial number and
 the result is `sn_not_applied`. The serial number is rewritten into the
 PLOAM slot the boot activation armed, and only while the ONU is deactivated.
@@ -274,7 +276,8 @@ From that record:
 
 - `refused` and `timeout` (an unknown serial number is never ranged) are
   refusals; `ok`, `no_services` and `sn_not_applied` are accepted (the OLT
-  ranged the ONU); `failed` (a local driver step) is neither.
+  ranged the ONU); `failed` (a local driver step) and `no_serial` (no serial
+  number to range with) are neither.
 - **streak**, the refused changes in a row, newest first, within 24 h when the
   clock is set: an accepted change ends it, reverts are skipped.
 - From one refusal on `apply.sh omci` warns; from **two**, omcid holds a
@@ -1357,7 +1360,7 @@ A re-registration still running at the bound is reported as still working and
 is not a failure. Exit 1 when no omcid runs (or `/etc/config/modules.off` is
 set), when omcid does not answer the signal within 5 s (an older build treats
 SIGHUP as stop), or when the reload's result is `failed`, `timeout`,
-`no_services` or `sn_not_applied`. It never starts an omcid and writes
+`no_services`, `sn_not_applied` or `no_serial`. It never starts an omcid and writes
 nothing to the driver: init owns the process, and a second omcid started here
 used to make the ONU cycle through O1 to O3 while init's respawn entry
 re-provisioned around it.
@@ -1614,6 +1617,26 @@ line; key names, never values:
 
 Each step is one line to the kernel log, `identity-trial: event=identity_trial
 keys=... state=start|watching|kept|revert|reverted|revert_failed|held|store_failed|store_mixed`.
+
+### `config-reseed.sh` -- a missing config store, recreated
+
+    /etc/scripts/config-reseed.sh status   the record, key=value
+    /etc/scripts/config-reseed.sh ack      acknowledge a recreated store: removes the record
+    /etc/scripts/config-reseed.sh run      rcS only, right after the config partition is mounted
+
+`run` installs `lastgood.xml` or `lastgood_hs.xml` from `/etc/config-template/`
+when the file is missing or empty, through a temporary file beside it and a
+rename, and never touches one that is there. A recreated `lastgood_hs.xml`
+gets an `ELAN_MAC_ADDR` of the prefix `00e04c` and three random bytes; the
+serial number and the PLOAM password stay empty, so the PON steps leave the
+PON down (`rcs-lib.sh`), a respawned omcid does not activate the ONU
+(`omci-respawn-reprovision.sh`), and an `apply.sh omci` re-registration ends
+with `result=no_serial` and the ONU deactivated. Each recreation writes the
+record `/etc/config/config-reseeded` (`files=`, `build=`, `uptime=`) and one
+kernel log line, `config-reseed: event=config_reseeded files=...`; a file it
+could not install is logged as `event=config_reseed_failed`. `status` prints
+`record=0|1` and the record's fields as `record_*`. Always exits 0 on `run`.
+See `docs/FLASHING.md`, "An erased config partition".
 
 ### `safe-mode.sh` -- the boot counter and the recovery boot
 

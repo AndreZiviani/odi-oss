@@ -1307,6 +1307,7 @@ applies to every later image.
 | `pon-steps` | development: a PON step list that replaces the built-in one (`docs/BOOT.md`); a wrong list means no PON | REBOOT |
 | `sds.off` | skip the host SerDes check and fix in `network.sh` | REBOOT |
 | `boot-count`, `boot-wdt`, `safe-mode` | not switches: the boot counters and the safe-mode record ("Recovery: the safe mode" above), written by `safe-mode.sh`; removing the record is the acknowledgement | -- |
+| `config-reseeded` | not a switch: the record of a store `config-reseed.sh` recreated at boot (`docs/FLASHING.md`, "An erased config partition"); `config-reseed.sh ack` removes it | -- |
 | `identity.orig` | not a switch: the identity snapshot ("The identity snapshot" above), written once by `identity.sh`; `identity.sh replace --yes` rewrites it | -- |
 | `optics.off` | skip the `laser` PON step (the I2C steps still run): **the laser stays off, no service** | REBOOT |
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |

@@ -97,7 +97,13 @@ reset: a trial that never answered still says how far it got
    here, and a switch file that cannot be read is a switch that silently
    turns itself off. `rcS`'s watchdog confirmation (stage 11) refuses to
    confirm at all without this, except on a safe-mode boot.
-   Right after it, the boot counters (`/etc/scripts/safe-mode.sh count`,
+   Right after it, a store that is missing is recreated
+   (`/etc/scripts/config-reseed.sh run`, `docs/FLASHING.md`, "An erased
+   config partition"): `lastgood.xml` or `lastgood_hs.xml`, missing or
+   empty, is installed from `/etc/config-template/` with the line identity
+   empty, before anything reads the store. With `GPON_SN` empty the
+   `gponsn` and `gponact` steps are skipped and the PON stays down.
+   Then the boot counters (`/etc/scripts/safe-mode.sh count`,
    `docs/SETTINGS.md`, "Recovery: the safe mode"): as early as the counter
    can be written, so a short power-up still counts. It logs the uptime
    of the count, and after enough short boots in a row, or three boots in a

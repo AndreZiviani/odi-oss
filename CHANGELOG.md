@@ -5,6 +5,25 @@ listed here.
 
 ## Unreleased
 
+- boot: a config partition with no `lastgood.xml` or `lastgood_hs.xml`
+  (after `flash_eraseall` of `config`, the usual way to start clean on the
+  stock firmware) no longer ends in the safe mode with every web UI save
+  failing. `config-reseed.sh`, run by rcS right after the partition is
+  mounted, installs a missing or empty store file from
+  `/etc/config-template/` on the read-only rootfs: the store the stock
+  firmware writes into an empty partition, taken off-device, with the
+  serial number, PLOAM password and MAC emptied and four login keys nothing
+  reads left out. A file that is there is never touched. The stick then
+  boots on 192.168.1.1, every key can be saved again, and a recreated
+  `lastgood_hs.xml` gets a MAC of the Realtek prefix and three random
+  bytes. With `GPON_SN` empty the PON stays down: the `gponsn` and
+  `gponact` steps, a respawned omcid and an `apply.sh omci`
+  re-registration (`result=no_serial`) all leave the ONU deactivated
+  instead of ranging it on the driver's own serial. The recreation is
+  logged once (`config-reseed: event=config_reseeded`), recorded in
+  `/etc/config/config-reseeded` until `config-reseed.sh ack`, and named in
+  the diagnostics summary. `docs/FLASHING.md`, "An erased config
+  partition". Refs #438.
 - trial-guard: the loopback addresses it skips are matched as the stick's
   big-endian kernel prints them in `/proc/net/tcp` (127.0.0.1 as `7F000001`),
   not in the little-endian form. Before, a management host at an address

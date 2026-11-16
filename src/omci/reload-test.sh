@@ -61,6 +61,9 @@ clean_state() {
 	rm -f "$HS" "$ODI" "$SW" "$REREG" "$CONFIRM" "$TRIALF" "$HOLDF" /var/run/omcid-mib.snap /var/run/omcid-mib.snap.tmp \
 	      /var/run/omcid-resume-decision "$STATUS" "$INITLOG"
 	: > "$INITLOG"
+	# A store always has a serial on a stick in service; without one a
+	# re-registration leaves the ONU down (the no_serial case below).
+	hs_sn ODIT00000001
 }
 
 # The whole MIB, without what is live or follows the stored VLAN keys and so
@@ -392,6 +395,27 @@ check "identity: the serial number was read from the kernel again" "2" \
 sync_send "$log"
 check "identity: the MIB is what the session builds" "$mib_before" "$(mibdump)"
 check "identity: the connections are what the session builds" "$conn_before" "$($Q cli/build/omcli conn 2>&1)"
+stop_omcid
+
+# ------------------------------------------------ no serial number
+# A store with GPON_SN empty (config-reseed.sh recreated it, or the owner
+# emptied the key): the re-registration takes the ONU down and leaves it
+# there, as rcS does at boot, rather than activating it on the serial the
+# driver starts with.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 1 "0"
+log=/tmp/rl-nosn.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1 -j 4
+old_id=$(st id)
+hs_sn ""
+kill -HUP "$pid"
+if wait_done "$old_id" 20; then
+	check "no serial: result no_serial" "done no_serial identity" "$(st state) $(st result) $(st changed)"
+else bad "no serial: never finished"; fi
+check "no serial: deactivated, and no gponsn or gponact" "gpondeact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+check_grep "no serial: logged" "event=reload_done changed=identity action=reregister result=no_serial" "$log"
 stop_omcid
 
 # ------------------------------------------------ the failure paths

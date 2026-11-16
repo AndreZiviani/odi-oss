@@ -217,6 +217,13 @@ has "$T/s2" "boot count     : boot=1 short_before=0 limit=5 wdt_before=0 wdt_lim
 	"the boot count without timestamps"
 cp "$T/dmesg.keep" "$D/dmesg.txt"
 has "$out" "SAFE MODE      : this boot is a safe-mode boot  (dmesg.txt)" "a safe-mode boot is named"
+grep -q '^CONFIG STORE' "$out" && no "no config store line without a record" || ok "no config store line without a record"
+mkdir -p "$D/config"
+printf 'files=lastgood_hs.xml\nbuild=test\nuptime=12\n' > "$D/config/config-reseeded"
+sh "$S" "$D" > "$T/s3" 2>&1
+has "$T/s3" "CONFIG STORE   : recreated from the image defaults (lastgood_hs.xml), the line identity empty  (config/config-reseeded)" \
+	"a store config-reseed.sh recreated is named"
+rm -f "$D/config/config-reseeded"
 
 # ------------------------------------------------------- an empty bundle
 E=$T/empty
