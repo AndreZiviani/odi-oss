@@ -53,10 +53,11 @@ cat > "$T/cs.xml" <<'XML'
 	</Dir>
 </Config>
 XML
+printf '<Value Name="GPON_SN" Value="ODIT00000001"/>\n' > "$T/hs.xml"
 
 run() {
 	env PATH="$T/bin:$PATH" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
-	    ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" UPTIME="$T/uptime" \
+	    ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" HS="$T/hs.xml" UPTIME="$T/uptime" \
 	    RESUME_DECISION="$T/resume-decision" DECISION_WAIT=0 \
 	    DEACT_HOLD=0 REGISTER_WAIT=3 sh "$R" 2>&1
 }
@@ -104,13 +105,25 @@ env ODI_INIT="$T/no-such-proc-file" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rc
 t "no PON verbs on this kernel (qemu's stock kernel) -- a no-op, not a failure" "^0$" "$rc"
 t "and touches nothing" "^0$" "$(wc -c < "$T/verbs" | tr -d ' ')"
 
+# No serial in the store (a store recreated by config-reseed.sh): the boot
+# never activated the ONU, and the respawn leaves it deactivated too.
+: > "$T/verbs"
+printf '<Value Name="GPON_SN" Value=""/>\n' > "$T/hs.xml"
+start_omcid
+run > /dev/null; rc=$?
+sleep 0.5     # nothing to wait for: no verb is expected
+t "no GPON_SN in the store: a no-op, not a failure" "^0$" "$rc"
+t "and no PON verb, gponact least of all" "^0$" "$(wc -c < "$T/verbs" | tr -d ' ')"
+stop_omcid
+printf '<Value Name="GPON_SN" Value="ODIT00000001"/>\n' > "$T/hs.xml"
+
 # Resume without re-registration (docs/BOOT.md): a "resumed" decision from
 # the respawned omcid skips the whole gpondeact/gponact dance.
 : > "$T/verbs"
 printf 'resumed\n' > "$T/resume-decision"
 start_omcid
 env PATH="$T/bin:$PATH" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
-    ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" UPTIME="$T/uptime" \
+    ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" HS="$T/hs.xml" UPTIME="$T/uptime" \
     RESUME_DECISION="$T/resume-decision" DECISION_WAIT=3 \
     DEACT_HOLD=0 REGISTER_WAIT=3 sh "$R" > /dev/null 2>&1; rc=$?
 sleep 0.5     # nothing to wait for: no verb is expected
@@ -123,7 +136,7 @@ rm -f "$T/resume-decision"
 : > "$T/verbs"
 start_omcid
 env PATH="$T/bin:$PATH" RCS_LIB="$PWD/rootfs/skeleton/etc/scripts/rcs-lib.sh" \
-    ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" UPTIME="$T/uptime" \
+    ODI_INIT="$T/odi_init" ODI_OMCI="$T/odi_omci" CS="$T/cs.xml" HS="$T/hs.xml" UPTIME="$T/uptime" \
     RESUME_DECISION="$T/no-such-decision-file" DECISION_WAIT=1 \
     DEACT_HOLD=0 REGISTER_WAIT=3 sh "$R" > /dev/null; rc=$?
 wait_verbs 2

@@ -92,6 +92,15 @@ fi
 dev_hook config
 crumb "config mounted; kernel $(uname -r); $(grep -c "^mtd" /proc/mtd) mtd partitions; $(cat /etc/version 2>/dev/null)"
 
+# ---- a missing config store (docs/FLASHING.md, "An erased config
+# partition"): lastgood.xml or lastgood_hs.xml missing or empty, after an
+# erase of the partition, is recreated from /etc/config-template before
+# anything reads the store, with the line identity empty. A file that is
+# there is never touched. Bounded; a failure only logs.
+if config_mounted; then
+	timeout 20 /etc/scripts/config-reseed.sh run || echo "rcS: config-reseed.sh failed" >&2
+fi
+
 # ---- the boot counter and the safe mode (docs/SETTINGS.md, "Recovery: the
 # safe mode"), as early as the config partition allows, so a short power-up
 # still counts: every boot adds one, a boot that reaches 60 s of uptime

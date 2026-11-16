@@ -382,6 +382,19 @@ else
 	echo "  no NTP server on this host and no busybox ntpd applet -- skipping (see docs/HACKING.md, test-qemu)"
 fi
 
+say "scenario: a store file that is missing at boot is recreated (config-reseed.sh)"
+# The harness seeds lastgood.xml only (build-initramfs.sh), so lastgood_hs.xml
+# is missing when rcS runs, as after an erase of the config partition: it is
+# recreated from /etc/config-template with the serial number empty, recorded,
+# logged, and a web UI save of one of its keys then works.
+sshx 'grep -qx "files=lastgood_hs.xml" /etc/config/config-reseeded' || fail "no config-reseeded record naming lastgood_hs.xml"
+sshx 'grep -q "Name=\"GPON_SN\" Value=\"\"" /etc/config/lastgood_hs.xml' || fail "the recreated lastgood_hs.xml has a serial number"
+sshx 'grep -q "Name=\"LAN_IP_ADDR\" Value=\"10.0.2.15\"" /etc/config/lastgood.xml' || fail "the lastgood.xml that was there was replaced"
+sshx 'dmesg | grep -q "config-reseed: event=config_reseeded files=lastgood_hs.xml "' || fail "no config_reseeded line in the kernel log"
+res=$(curl -s -u admin:admin -X POST --data 'GPON_SN=ODIT00000001&_confirm=identity' "http://127.0.0.1:$HTTP_PORT/api/config") || res=""
+case "$res" in *'"ok":true'*) ;; *) fail "web UI save of GPON_SN into the recreated store failed: $res" ;; esac
+sshx '/etc/scripts/config-reseed.sh ack' > /dev/null || fail "config-reseed.sh ack failed"
+
 say "scenario: a web UI save of SYSLOG_SERVER is read back by svc-syslogd.sh"
 # The path a stick takes: confd runs the REAL /etc/scripts/flash set against the
 # writable config dir, then /api/apply restarts syslogd under init respawn and

@@ -270,6 +270,9 @@ t "a refused netmask falls back to the default pair and confirms" "0" "$(run con
 rm -f "$T/cs.xml"
 echo "192.168.1.1 255.255.255.0" > "$T/if/br0"
 t "no address stored at all is not confirmed, even on the default" "1" "$(run configured > /dev/null; echo $?)"
+cp rootfs/skeleton/etc/config-template/lastgood.xml "$T/cs.xml"
+t "a store config-reseed.sh recreated from the template is confirmed on its 192.168.1.1" "0" \
+  "$(run configured > /dev/null; echo $?)"
 store 192.168.0.1 0 192.168.100.1
 echo "192.168.0.1 255.255.255.0" > "$T/if/br0"
 t "a good stored address that is applied is confirmed" "0" "$(run configured > /dev/null; echo $?)"

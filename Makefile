@@ -179,6 +179,7 @@ test-host:
 	bash test/mgmt_addr_test.sh
 	bash test/identity_trial_test.sh
 	bash test/safe_mode_test.sh
+	bash test/config_reseed_test.sh
 	bash test/ntp_event_test.sh
 	bash test/gpon_hold_test.sh
 	bash test/svc_igmpd_test.sh

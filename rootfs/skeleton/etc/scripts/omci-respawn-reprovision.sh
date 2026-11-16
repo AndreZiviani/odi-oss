@@ -63,6 +63,13 @@ fi
 # dev image with modules.off) -- nothing to reprovision.
 [ -w "$ODI_INIT" ] || exit 0
 
+# No serial in the store: the boot never activated the ONU (pon_step_gponact,
+# rcs-lib.sh), and a respawn must not either.
+if [ -z "$(store_sn)" ]; then
+	crumb "omci respawn: no GPON_SN in the store, the ONU stays deactivated"
+	exit 0
+fi
+
 t0=$(uptime_s)
 if ! write_proc_bounded "$ODI_INIT" gpondeact 2>/dev/null; then
 	crumb "omci respawn: gpondeact failed, leaving the ONU as it is"

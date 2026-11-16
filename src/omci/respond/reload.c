@@ -345,6 +345,14 @@ static void activate(void)
 	if (apply_hw) {
 		const char *sn = cfg_sn_label(&ident);
 
+		/* No serial number at all (a store config-reseed.sh recreated,
+		 * or one the owner emptied): the ONU stays deactivated, as rcS
+		 * leaves it (pon_step_gponact), rather than ranging with the
+		 * serial the driver starts with. */
+		if (!ident.snLen) {
+			finish("no_serial", -1);
+			return;
+		}
 		if ((rl.mask & CFGD_SN) && sn) {
 			rc = odi_verb("gponsn", sn);
 			ev_reload_step("gponsn", rc);

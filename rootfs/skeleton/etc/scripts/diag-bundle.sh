@@ -534,7 +534,7 @@ redact() {  # redact SRC DST
 	{ print }' "$1" > "$2"
 }
 mkdir "$b/config"
-for f in lastgood.xml lastgood_hs.xml odi.conf; do
+for f in lastgood.xml lastgood_hs.xml odi.conf config-reseeded; do
 	if [ -f "$CONFIG_DIR/$f" ]; then
 		redact "$CONFIG_DIR/$f" "$b/config/$f"
 		manifest "$?" "$(size_of "$b/config/$f")" "config/$f (redacted)"

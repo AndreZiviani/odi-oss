@@ -212,6 +212,9 @@ sm=$(readok dmesg.txt && sed -n 's/.*safe-mode: event=boot_count \(.*\)/\1/p' "$
 echo "boot count     : ${sm:-$na}${sm:+  (dmesg.txt)}"
 sf=$(readok dmesg.txt && grep -c 'safe-mode: event=safe_mode ' "$d/dmesg.txt")
 [ "${sf:-0}" -gt 0 ] && echo "SAFE MODE      : this boot is a safe-mode boot  (dmesg.txt)"
+# config-reseed.sh recreated a missing store, and nobody acknowledged it yet.
+rs=$(val config/config-reseeded | sed -n 's/^files=//p' | head -n 1)
+[ -n "$rs" ] && echo "CONFIG STORE   : recreated from the image defaults ($rs), the line identity empty  (config/config-reseeded)"
 echo
 
 # The steps that failed, from the manifest: "rc bytes file", rc a number.

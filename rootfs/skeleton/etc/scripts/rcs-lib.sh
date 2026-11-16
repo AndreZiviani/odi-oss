@@ -167,8 +167,20 @@ pon_step() {
 # file) come from the config store, never from a file of ours. An empty
 # password (an OLT that authenticates on the serial alone) is not sent:
 # the driver keeps its default.
+store_sn() {
+	sed -n "s/.*Name=\"GPON_SN\" Value=\"\([^\"]*\)\".*/\1/p" "${HS:-/etc/config/lastgood_hs.xml}" 2>/dev/null | head -n 1
+}
+# An empty GPON_SN (a store recreated by config-reseed.sh, or one the owner
+# emptied) leaves the PON down: the gponsn step is skipped, and so is every
+# gponact (pon_step_gponact, omci-respawn-reprovision.sh), rather than the
+# ONU ranging with the serial the driver starts with.
 pon_step_gponsn() {
-	pon_step "gponsn $(sed -n "s/.*Name=\"GPON_SN\" Value=\"\([^\"]*\)\".*/\1/p" /etc/config/lastgood_hs.xml 2>/dev/null | head -n 1)"
+	sn=$(store_sn)
+	if [ -z "$sn" ]; then
+		crumb "pon step gponsn: no GPON_SN in the store, the PON stays down"
+		return 0
+	fi
+	pon_step "gponsn $sn"
 }
 pon_step_gponpw() {
 	pw=$(cs_value "${CS:-/etc/config/lastgood.xml}" GPON_PLOAM_PASSWD)
@@ -193,6 +205,10 @@ pon_step_gponpw() {
 pon_step_gponact() {
 	if [ -f "$SAFE_FLAG" ]; then
 		crumb "pon step gponact: safe-mode boot, not activated"
+		return 0
+	fi
+	if [ -z "$(store_sn)" ]; then
+		crumb "pon step gponact: no GPON_SN in the store, not activated"
 		return 0
 	fi
 	i=0
