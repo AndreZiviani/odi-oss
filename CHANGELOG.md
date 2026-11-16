@@ -5,6 +5,7 @@ listed here.
 
 ## Unreleased
 
+- Kernel: Linux 6.18.63 (was 6.18.58), the upstream stable updates.
 - scripts: `host-autoneg.sh`, `host-serdes.sh` and `mgmt-addr.sh` share the
   lock, the state file, the event line and the trial run, expiry and revert
   through `/etc/scripts/trial-lib.sh`, as rcS and rcS.pon share
