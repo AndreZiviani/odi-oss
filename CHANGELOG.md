@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- docs: `VLAN_EAPOL_UNTAGGED` has run on a line that uses EAP (#301): the
+  exchange completed with the router seeing EAPOL untagged. SETTINGS.md
+  says so, keeps the untagged-downstream rule as unproven, and says the key
+  needs no FwdOp override (`RTK_DEVINFO_SPECVER`) and does not set one.
+  Refs #301.
 ## v1.17.0 (2026-11-16)
 
 - Releases: confd v1.17.0 and metricsd v1.11.0. The web UI adds a link
