@@ -46,6 +46,34 @@ $Q respond/build/omcid -w 12 -c "$CAPS" -g "$D/status" > /tmp/omcid-check.log 2>
 pid=$!
 omcid_up /tmp/omcid-check.log
 
+# Nothing provisioned yet (the ONU in O2): our kernel prints no ponq row,
+# and the cam holds only its two summary lines. That is an empty chip, not
+# an unreadable one; with nothing in the MIB either there is nothing to
+# compare.
+NOTHING="nothing provisioned yet: the OLT has set up no T-CONT or GEM port"
+: > "$D/ponq"
+printf 'alloc_cam_valid 0\ngem_cam_valid 0\n' > "$D/cam"
+got=$($Q cli/build/omcli check 2>&1 | tail -1)
+check "empty chip, nothing provisioned: says so" "$got" "$NOTHING"
+$Q cli/build/omcli check > /dev/null 2>&1
+check "and the status is ok" "$?" "0"
+NOREAD="the chip state is not readable (/proc/odi_gpon/ponq and cam: not our kernel, or an older one)"
+printf 'gem_cam_valid 0\n' > "$D/cam"
+got=$($Q cli/build/omcli check 2>&1 | head -1)
+check "a cam without both summary lines: not our kernel" "$got" "$NOREAD"
+got=$($Q cli/build/omcli check 2>&1 | tail -1)
+check "with status 3" "$got" "% command failed, status 3"
+printf 'alloc_cam_valid 0\ngem_cam_valid 0\n' > "$D/cam"
+rm -f "$D/ponq"; mkdir "$D/ponq"
+got=$($Q cli/build/omcli check 2>&1 | head -1)
+check "a ponq that cannot be read" "$got" "$NOREAD"
+rmdir "$D/ponq"
+: > "$D/ponq"; rm -f "$D/cam"; mkdir "$D/cam"
+got=$($Q cli/build/omcli check 2>&1 | head -1)
+check "a cam that cannot be read" "$got" "$NOREAD"
+rmdir "$D/cam"
+rm -f "$D/ponq" "$D/cam"
+
 # T-CONT 0x8000 Set to Alloc-ID 1024, then GEM CTP 0x0002: port 1562, on
 # that T-CONT, both directions, upstream queue 0x8006 (the frames of
 # qemu-test.sh).
@@ -59,6 +87,15 @@ settled /tmp/omcid-check.log
 got=$($Q cli/build/omcli check 2>&1 | head -1)
 check "no chip state: says so, compares nothing" "$got" \
 "the chip state is not readable (/proc/odi_gpon/ponq and cam: not our kernel, or an older one)"
+
+# The same empty chip while omcid has set things up: every object differs.
+: > "$D/ponq"
+printf 'alloc_cam_valid 0\ngem_cam_valid 0\n' > "$D/cam"
+got=$($Q cli/build/omcli check 2>&1 | tail -1)
+check "empty chip, provisioned MIB: count" "$got" "0 ok, 4 differ"
+got=$($Q cli/build/omcli check 2>&1 | grep -c differs)
+check "every object shows as differing" "$got" "4"
+rm -f "$D/ponq" "$D/cam"
 
 # The chip as the driver leaves it for that provisioning: T-CONT index 0
 # (Alloc-ID CAM row 0) with logical queue 0, strict and unlimited, flow 0

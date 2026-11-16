@@ -344,9 +344,12 @@ struct pp_ponq {
 	struct { uint8_t seen, valid, rec, queue; uint16_t gem; } f[PP_PONQ_FLOWS];
 };
 
-/* Fills *p from the file. Returns the number of rows read, or -1 when the
- * buffer has none at all (not our kernel, or an empty read): "cannot
- * tell", never "nothing programmed". A malformed line is skipped. */
+/* Fills *p from the file. Returns the number of rows read; 0 for a
+ * zero-length buffer, since odi_switch_ponq_show() prints nothing while no
+ * T-CONT, queue or flow is enabled or recorded (our kernel, nothing set
+ * up); or -1 when a non-empty buffer has no row at all (not our kernel):
+ * "cannot tell". The caller tells a file it could not read from an empty
+ * one. A malformed line is skipped. */
 static inline int pp_ponq(const char *buf, unsigned len, struct pp_ponq *p)
 {
 	unsigned at = 0;
@@ -408,7 +411,7 @@ static inline int pp_ponq(const char *buf, unsigned len, struct pp_ponq *p)
 			rows++;
 		}
 	}
-	return rows ? rows : -1;
+	return rows ? rows : (len ? -1 : 0);
 }
 
 #define PP_CAM_ALLOC 32u
@@ -418,16 +421,20 @@ static inline int pp_ponq(const char *buf, unsigned len, struct pp_ponq *p)
 #define PP_CAM_UNLISTED (-3)     /* no line for the row */
 
 /* /proc/odi_gpon/cam: what the hardware holds per row, or one of the
- * PP_CAM_* values. Returns the number of rows read, or -1 for none. */
+ * PP_CAM_* values. */
 struct pp_cam {
 	int32_t alloc[PP_CAM_ALLOC];
 	int32_t gem[PP_CAM_GEM];
 };
 
+/* Returns the number of rows read. With no row it returns 0 when both
+ * summary lines odi_gpon_proc_cam_show() always ends a half with
+ * (alloc_cam_valid N, gem_cam_valid N) are there: our kernel, nothing in
+ * the CAM. Otherwise -1: not our kernel, or an older one. */
 static inline int pp_cam(const char *buf, unsigned len, struct pp_cam *c)
 {
 	unsigned at = 0;
-	int rows = 0;
+	int rows = 0, sum_alloc = 0, sum_gem = 0;
 
 	for (unsigned i = 0; i < PP_CAM_ALLOC; i++)
 		c->alloc[i] = PP_CAM_UNLISTED;
@@ -442,6 +449,12 @@ static inline int pp_cam(const char *buf, unsigned len, struct pp_cam *c)
 		while (at + n < len && l[n] != '\n')
 			n++;
 		at += n + 1;
+		if (pp_starts(l, n, "alloc_cam_valid") &&
+		    pp_word_u32(l, n, "alloc_cam_valid", &v))
+			sum_alloc = 1;
+		else if (pp_starts(l, n, "gem_cam_valid") &&
+			 pp_word_u32(l, n, "gem_cam_valid", &v))
+			sum_gem = 1;
 		if (pp_starts(l, n, "alloc_cam") && pp_word_u32(l, n, "alloc_cam", &row) &&
 		    row < PP_CAM_ALLOC)
 			slot = &c->alloc[row];
@@ -462,7 +475,7 @@ static inline int pp_cam(const char *buf, unsigned len, struct pp_cam *c)
 		}
 		rows++;
 	}
-	return rows ? rows : -1;
+	return rows ? rows : (sum_alloc && sum_gem ? 0 : -1);
 }
 
 #endif
