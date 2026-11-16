@@ -35,7 +35,7 @@ RAM, default `JOBS=4`, measured 2026-09-25:
 | `make toolchain` | pulls the two prebuilt toolchain images, pinned by digest in `toolchain/images.env`: gcc 16.2.0 / binutils 2.47 / uClibc-ng 1.0.59 for this CPU, and the freestanding Debian cross-gcc (see `toolchain/README.md`, and "The toolchain images" below) | under a minute, once the images pull |
 | `make toolchain-audit` | re-proves the target libraries in the uclibc image carry no instruction this CPU traps on (the image build already refused any) | seconds |
 | `make kernel` | Linux 6.18.58 for the RTL9602C (`VERSION=` stamps the ramlog build id, `CRUMBS_CORE=1` adds the debug crumbs) — `docs/KERNEL.md` | 2 min |
-| `make packages` | busybox (`make busybox`), our config fragment, then dropbear (with `scp`) and iproute2, all ISA-audited | 2 min |
+| `make packages` | busybox (`make busybox`) with our applet list and config fragment, then dropbear (with `scp`) and iproute2, all ISA-audited | 2 min |
 | `make src` | our own tools (`diag`, `omcid`, `omcli`, `omciprobe`, `omcicap`, `nv`, `igmpd`), freestanding, into `out/bin` — `docs/CROSS-COMPILING.md` | 10 s |
 | `make releases` | fetches `confd` and `metricsd` as pinned release assets, checked against the release `SHA256SUMS` and the hashes committed in `src/release-sha256.txt` (confd v1.16.0, metricsd v1.10.0; `CONFD_TAG=`/`METRICSD_TAG=` to override, or `CONFD_TAG= CONFD_BIN=<binary>` / `METRICSD_TAG= METRICSD_BIN=<binary>` for a local `confd` / `metricsd` build) | 5 s |
 | `make image` | assembles the flashable tarball into `out/image/`: squashfs rootfs (with the register replay tables in `/lib/firmware/odi/`), the uImage, `fwu.sh` and `md5.txt` | 15 s |

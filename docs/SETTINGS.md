@@ -1396,9 +1396,9 @@ last step of every `svc-*.sh` before the daemon is exec-ed, now spaces such
 restarts out. It adds no process and no loop: the wait is a `sleep` in the
 shell init already tracks, then the same in-place `exec` as before.
 
-**Why not runit or start-stop-daemon.** busybox here already has `runsv`,
-`runsvdir`, `sv` and `svlogd` built in (no size to add), and they were
-weighed first. `runsv` waits a fixed second between restarts and keeps no
+**Why not runit or start-stop-daemon.** busybox then had `runsv`,
+`runsvdir`, `sv` and `svlogd` built in (no size to add; they left with the
+applet list, `packages/busybox/applets.txt`), and they were weighed first. `runsv` waits a fixed second between restarts and keeps no
 count, so a budget would still be a hand-written `finish` script, on top of
 a supervision tree (`runsvdir`, one `runsv` per daemon, service directories
 in RAM) that changes how every daemon is started, found by `services` and
@@ -1488,7 +1488,7 @@ necessary the hard way (rc3, ISP1, 2026-09-28): a stuck omcid left both
 waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
 
 - **A forked command**: `timeout SECS cmd args...` (busybox `timeout`,
-  built into this image's busybox -- `packages/busybox/config.fragment`).
+  built into this image's busybox -- `packages/busybox/applets.txt`).
   Already the shape of every `diag` call (`network.sh`'s `sds_read`/
   `sds_write`, 10 s; `rcS.dev`'s dev-hook diag probes, 10 s) and of the
   `/proc` reads and `arping` in `rcS.dev`'s confirm-arp path (5 s, 2 s).
