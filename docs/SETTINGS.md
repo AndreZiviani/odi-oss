@@ -145,7 +145,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `VLAN_MANU_MODE` | VLAN handling | 1 ("stick tags"): tags with the VID and priority below; 0 ("router tags", transparent): no tag added or removed, every tag passes as the OLT provisioned it ("VLAN handling" below); anything else is 0 | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_VID` | Service VLAN ID | the C-VLAN the ONU adds upstream and strips downstream on the services the OLT provisions | omcid, on SIGHUP | LIVE |
 | `VLAN_MANU_TAG_PRI` | VLAN priority | the 802.1p bits of the tag the stick adds to the router's untagged frames going up, 0 to 7; a stored value above 7 (255 is the factory one) is used as 0 and the tag stays on. Downstream the tag is removed whatever priority the OLT sends: only the VID is matched, except with the manual VID 0, beside a class 84 filter that goes by priority alone, or beside the class 171 rules of an IP host, where the tag is removed only at this priority and omcid logs which of them applies | omcid, on SIGHUP | LIVE |
-| `VLAN_EAPOL_UNTAGGED` | 802.1X EAPOL without the service tag | `1`, with the manual tag on ("stick tags"): EAPOL frames (EtherType 0x888e) cross the stick **untagged** in both directions while everything else keeps the manual tag. It also takes the tag off **every** priority-tagged frame (VID 0, any priority) the OLT sends, not only EAPOL. Anything else, or absent, is off, and then no rule differs from the manual tag alone. With the manual tag off the key does nothing, and omcid logs that once. For an ISP that authenticates the line with 802.1X on the untagged (or VLAN 0) frames while the service itself is on a VLAN ("VLAN_EAPOL_UNTAGGED" below). Odi-only key, kept in `/etc/config/odi.conf`. Not run yet against a line that uses EAP | omcid, on SIGHUP (`apply.sh omci`) | LIVE |
+| `VLAN_EAPOL_UNTAGGED` | 802.1X EAPOL without the service tag | `1`, with the manual tag on ("stick tags"): EAPOL frames (EtherType 0x888e) cross the stick **untagged** in both directions while everything else keeps the manual tag. It also takes the tag off **every** priority-tagged frame (VID 0, any priority) the OLT sends, not only EAPOL. Anything else, or absent, is off, and then no rule differs from the manual tag alone. With the manual tag off the key does nothing, and omcid logs that once. For an ISP that authenticates the line with 802.1X on the untagged (or VLAN 0) frames while the service itself is on a VLAN ("VLAN_EAPOL_UNTAGGED" below). No FwdOp override (`RTK_DEVINFO_SPECVER`) is needed beside it, and the key does not set one. Odi-only key, kept in `/etc/config/odi.conf`. Run on one line that uses EAP so far (odi-oss #301) | omcid, on SIGHUP (`apply.sh omci`) | LIVE |
 | `RTK_DEVINFO_SPECVER` | VLAN forward operation override | the stock firmware's FwdOp override, same key and format: `EntityId[:FwdOp]` entries separated by commas (e.g. `0x1102:0x00,0x110b`; no FwdOp means 0x02). The bridge rules of each class 84 port named are built with that FwdOp instead of the OLT's; the attribute keeps the OLT's value. Anything malformed turns the whole key off ("VLAN handling" below) | omcid, on SIGHUP | LIVE |
 | `GPON_PLOAM_PASSWD` | PLOAM password (identity) | the PLOAM password: exactly 20 hex digits are 10 bytes, 1 to 10 characters are the text itself (even if they are hex digits), `0x` and 2 to 20 hex digits are those bytes zero-padded; anything else is refused and logged, keeping the old password; empty means none is sent | the `gponpw` PON step in rcS (`rcs-lib.sh`, `pon_step_gponpw`, skipped when empty); omcid re-sends it on a re-registration | INTERRUPTS INTERNET |
 | `LOID`, `LOID_PASSWD` | LOID, LOID password | answered to CTC-profile OLTs in the LOID authentication entity | omcid, on SIGHUP | INTERRUPTS INTERNET |
@@ -434,14 +434,20 @@ EAPOL priority-tagged (VID 0, often priority 7), and some routers drop a tagged
 EAPOL frame on an untagged interface (odi-oss #301), so the stick takes the
 VID 0 tag off and the router sees every EAPOL frame untagged. With the FwdOp
 override (`RTK_DEVINFO_SPECVER`) alone the VID 0 frames pass with their tag;
-this key does it without opening every other tagged VID.
+this key does it without opening every other tagged VID. The key does not
+set the override either: its own rules carry the EAPOL frames, so with the
+key on, leave `RTK_DEVINFO_SPECVER` empty.
 
 Limits, and what is not known:
 
-- **Not yet run against a line that uses EAP.** It is tested as the bridge
-  rules omcid builds and as the classifier rows they become, under qemu and
-  on the host. Whether the OLT's EAP exchange then completes needs a line
-  that authenticates.
+- **Run on one line that uses EAP** (odi-oss #301, v1.17.0, an OLT that
+  sends its EAPOL priority-tagged): the exchange completed and the router
+  got every EAPOL frame untagged, with the override empty. With the key off
+  and the override empty no EAPOL reached the router, as expected. That run
+  used `eapol-up` and `eapol-down-vid0`; `eapol-down`, for an OLT that sends
+  EAPOL untagged, has not met a line yet (next item). Beyond that, the rules
+  are tested as the bridge rules omcid builds and the classifier rows they
+  become, under qemu and on the host.
 - Upstream, the EtherType match is the one measured by another open
   implementation. Downstream (`eapol-down`) uses the same row with the
   direction bit set. The same implementation measured a downstream row of
