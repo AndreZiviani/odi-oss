@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- trial-guard: the loopback addresses it skips are matched as the stick's
+  big-endian kernel prints them in `/proc/net/tcp` (127.0.0.1 as `7F000001`),
+  not in the little-endian form. Before, a management host at an address
+  ending in .127 never counted as TCP proof that the new image is reachable,
+  so a trial could revert although that host was connected, and a connection
+  between two different 127/8 addresses counted as proof. The test fixtures
+  use the big-endian form now. Refs #437.
 - Identity trial: reject quotes, `<` and `&` before re-registering, since
   `flash set` cannot persist them. Restore empty saved credentials too when
   a later write fails, instead of leaving a mixed identity in the store.

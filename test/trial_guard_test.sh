@@ -118,21 +118,29 @@ run; expect "trial, nobody talks: armed, never released" 1 0 "the watchdog rever
 u=$(cut -d. -f1 "$T/uptime")
 if [ "$u" -ge 340 ] && [ "$u" -le 350 ]; then ok "it watches for the whole deadline (uptime $u)"; else no "watched until uptime $u, wanted about 340"; fi
 trial
-tcp 0100007F:0016 0100007F:A000 01		# ssh to 127.0.0.1
-tcp 0101A8C0:1F90 0101A8C0:B000 01		# the stick to its own address
-tcp 0101A8C0:0016 0201A8C0:C000 03		# SYN_RECV: our SYN-ACK unanswered
-tcp 0101A8C0:D000 0201A8C0:0050 02		# SYN_SENT
-tcp6 00000000000000000000000001000000:0016 00000000000000000000000001000000:A001 01
-tcp6 0000000000000000FFFF00000100007F:0016 0000000000000000FFFF00000100007F:A002 01
+tcp 7F000001:0016 7F000001:A000 01		# ssh to 127.0.0.1
+tcp C0A80101:1F90 C0A80101:B000 01		# the stick to its own address
+tcp C0A80101:0016 C0A80102:C000 03		# SYN_RECV: our SYN-ACK unanswered
+tcp C0A80101:D000 C0A80102:0050 02		# SYN_SENT
+tcp6 00000000000000000000000000000001:0016 00000000000000000000000000000001:A001 01
+tcp6 00000000000000000000FFFF7F000001:0016 00000000000000000000FFFF7F000001:A002 01
 run; expect "loopback, self, SYN_RECV and SYN_SENT prove nothing" 1 0
+# Two different loopback addresses: only the loopback match skips these,
+# the same-address check does not.
+trial
+tcp 7F000001:0016 7F000002:A003 01		# 127.0.0.1 to 127.0.0.2
+tcp6 00000000000000000000FFFF7F000001:0016 00000000000000000000FFFF7F000102:A004 01
+run; expect "two different 127/8 addresses prove nothing" 1 0
 
 # ---- proven -----------------------------------------------------------------
-trial; tcp 0101A8C0:0016 0201A8C0:C000 01
-run; expect "an ssh session from the host: released" 1 1 "tcp peer 0201A8C0 state 01"
-trial; tcp 0101A8C0:2386 0201A8C0:C100 06
+trial; tcp C0A80101:0016 C0A80102:C000 01
+run; expect "an ssh session from the host: released" 1 1 "tcp peer C0A80102 state 01"
+trial; tcp C0A80101:0016 C0A8017F:C000 01		# a host at 192.168.1.127
+run; expect "a host whose address ends in .127: released" 1 1 "tcp peer C0A8017F state 01"
+trial; tcp C0A80101:2386 C0A80102:C100 06
 run; expect "a finished scrape in TIME_WAIT: released" 1 1 "state 06"
-trial; tcp6 000080FE00000000FF0000000200FE02:0016 000080FE00000000FF0000000300FE03:C200 01
-run; expect "an IPv6 session: released" 1 1 "tcp peer 000080FE"
+trial; tcp6 FE80000000000000000000FFFE000002:0016 FE80000000000000000000FFFE000003:C200 01
+run; expect "an IPv6 session: released" 1 1 "tcp peer FE800000"
 trial; echo "192.168.1.2 dev br0 lladdr 02:00:00:00:00:02 REACHABLE" > "$T/neigh"
 run; expect "a reachable neighbour: released" 1 1 "reachable neighbour 192.168.1.2"
 trial; echo 3 > "$T/commit_after"

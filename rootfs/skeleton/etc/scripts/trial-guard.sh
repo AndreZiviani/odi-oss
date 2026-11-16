@@ -81,13 +81,15 @@ wdt_write() {
 	"$TIMEOUT" "$CMD_S" sh -c 'echo "$1" > "$2"' _ "$1" "$REGISTER" 2>/dev/null
 }
 
-# The hex address of /proc/net/tcp: IPv4 as one little-endian word, IPv6 as
-# four. 127/8, ::1 and ::ffff:127/8 are the stick talking to itself.
+# The hex address of /proc/net/tcp: IPv4 as one native word, IPv6 as four.
+# The stick is big-endian, so the digits are the address bytes in network
+# order (127.0.0.1 is 7F000001). 127/8, ::1 and ::ffff:127/8 are the stick
+# talking to itself.
 is_loopback() {
 	case "$1" in
-	??????7F) return 0 ;;
-	00000000000000000000000001000000) return 0 ;;
-	0000000000000000FFFF0000??????7F) return 0 ;;
+	7F??????) return 0 ;;
+	00000000000000000000000000000001) return 0 ;;
+	00000000000000000000FFFF7F??????) return 0 ;;
 	esac
 	return 1
 }
