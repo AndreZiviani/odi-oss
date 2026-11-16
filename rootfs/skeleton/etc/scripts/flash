@@ -56,7 +56,12 @@ DEFAULTS=${DEFAULTS:-/etc/config_default.xml}
 TMPDIR_=${TMPDIR_:-/var/tmp}
 ODI_CONF=${ODI_CONF:-/var/config/odi.conf}
 FLASH_LOCK=${FLASH_LOCK:-$TMPDIR_/flash-writer.lock}
-LOCK_S=${LOCK_S:-5}             # seconds to wait for the writer lock
+# Seconds to wait for the writer lock. It stays under the 5 s that confd
+# (odi-ui FLASH_TIMEOUT_MS) waits for any output: flash prints nothing while
+# it waits, so a longer wait was cut off by confd as "flash set timed out"
+# before the busy line below could reach the page. A set takes about 0.1 s
+# on a stick, so 3 s leaves room for the write itself.
+LOCK_S=${LOCK_S:-3}
 REREG_HOLD=${REREG_HOLD:-/var/run/omcid-reregister.hold}
 ODI_KEYS="SYSLOG_SERVER NTP_SERVER ONU_HW_VERSION OMCI_UNKNOWN_ME_OK OMCI_FIXED_ME OMCI_PRIVATE_ME OMCI_VEIP OMCI_POTS_PORTS OMCI_POTS_SLOT_ID OMCI_VOIP_LINE_REPORT OLT_SW_DOWNLOAD OMCI_ACCEPT_REBOOT OMCI_UNI_LOCK VLAN_EAPOL_UNTAGGED OMCI_TCONT_ALLOC_UNSET ODI_LASER_UNVERIFIED HOST_AUTONEG HOST_SERDES IGMP_SNOOPING IGMP_PON_DROP GPON_DYING_GASP GPON_KEEP_DISABLE MLD_SNOOPING SFP_HOST_DDM LAN_ROUTES"
 

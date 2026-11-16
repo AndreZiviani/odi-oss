@@ -347,6 +347,15 @@ t "a held lock makes a set fail after LOCK_S" "1" "$( (
 	exec 9>>"$T/var/flash-writer.lock"; flock -n 9 || exit 2
 	ODI_CONF="$oc" LOCK_S=1 sh $F set NTP_SERVER other >/dev/null 2>&1; echo $? ) )"
 t "and odi.conf is as it was"         "$before" "$(cat "$oc")"
+# With the default wait, the busy line comes out before confd (odi-ui) gives
+# up on a flash that printed nothing for 5 s.
+busy=$( (
+	exec 9>>"$T/var/flash-writer.lock"; flock -n 9 || exit 2
+	t0=$(date +%s)
+	out=$(ODI_CONF="$oc" sh $F set NTP_SERVER other 2>&1)
+	echo "$(( $(date +%s) - t0 )) $out" ) )
+t "the default wait says busy"        "flash: busy" "$(echo "$busy" | grep -o 'flash: busy')"
+t "and gives up within confd's 5 s"   "yes" "$( [ "${busy%% *}" -lt 5 ] && echo yes || echo "no: $busy")"
 t "the lock is free again once the holder ended" "NTP_SERVER=other" "$(ODI_CONF="$oc" sh $F set NTP_SERVER other)"
 
 # omcid holds identity changes back after refusals: a changed identity key is
