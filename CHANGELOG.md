@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a Get or Get current data whose attributes do not all fit the 25
+  bytes of an answer is no longer counted as `rejected`. Its result 9 names
+  in the failed mask the attributes left for the OLT to ask for on their
+  own, as G.988 has it, so an OLT that polls class 267 filled `omcli
+  state` with `rejected class=267 op=get ... attrs=0x0200` lines that
+  refused nothing. A Get that names an attribute the class does not
+  have is still counted, with only those attributes in `attrs`.
 - `omcli check` no longer reports the chip state as unreadable while the
   ONU is still in O2. An empty `/proc/odi_gpon/ponq` and a `cam` holding
   only its `alloc_cam_valid` and `gem_cam_valid` lines are our kernel with

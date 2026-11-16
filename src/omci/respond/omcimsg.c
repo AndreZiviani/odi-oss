@@ -131,8 +131,22 @@ static int answer_is_result(uint8_t mt, uint16_t clen)
 	return clen > 0;
 }
 
+/* Whether an answer is a Get whose result 9 says only that some attributes
+ * did not fit. The failed mask of a Get names the attributes the 25 bytes of
+ * values had no room for (handle(), "It does not fit"), and G.988 has the
+ * OLT ask for those again on their own: an answer in two parts, not a
+ * refusal. An attribute the class does not have is in the unsupported mask,
+ * and that is still refused. */
+static int get_split_only(uint8_t mt, const uint8_t *c, uint16_t clen)
+{
+	return (mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA) &&
+	       c[0] == OMCI_ERR_ATTR_FAILED && clen >= GET_VALUES_END + 4 &&
+	       !nl_get16(c + GET_VALUES_END);
+}
+
 /* The attributes a refusal names: for a Set the unsupported and the failed
- * mask, for a Get the same two after the values, for a Create the
+ * mask, for a Get the unsupported mask after the values (the failed one
+ * only says what did not fit, see get_split_only()), for a Create the
  * parameter error mask. G.988 A.1.1 and A.2. */
 static uint16_t rejected_attrs(uint8_t mt, const uint8_t *c, uint16_t clen)
 {
@@ -140,8 +154,7 @@ static uint16_t rejected_attrs(uint8_t mt, const uint8_t *c, uint16_t clen)
 		return (uint16_t)(nl_get16(c + 1) | nl_get16(c + 3));
 	if ((mt == OMCI_MT_GET || mt == OMCI_MT_GET_CURRENT_DATA) &&
 	    clen >= GET_VALUES_END + 4)
-		return (uint16_t)(nl_get16(c + GET_VALUES_END) |
-				  nl_get16(c + GET_VALUES_END + 2));
+		return nl_get16(c + GET_VALUES_END);
 	if (mt == OMCI_MT_CREATE && clen >= 3)
 		return nl_get16(c + 1);
 	return 0;
@@ -158,8 +171,10 @@ void send_resp(int fd, uint32_t tid, const uint8_t *req,
 	 * class omcid has no model for, or a message type it does not
 	 * handle, has its own line already (event=unknown_me, unknown_msg);
 	 * this is what omcid models and still refused. A VoIP class without
-	 * a phone port counts as unknown, as handle() treats it. */
+	 * a phone port counts as unknown, as handle() treats it. A Get
+	 * answered in two parts because it did not fit is not refused. */
 	if (answer_is_result(mt, clen) && contents[0] != OMCI_OK &&
+	    !get_split_only(mt, contents, clen) &&
 	    ev_msg_known(mt) && find_class(nl_get16(req + 4)) &&
 	    (pots_ports || !voip_class(nl_get16(req + 4))))
 		ev_rejected(nl_get16(req + 4), mt, contents[0],
