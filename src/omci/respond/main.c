@@ -508,6 +508,7 @@ int main(int argc, char **argv)
 					ev_tick();
 					alarm_tick();
 					pm_tick();
+					rereg_hold_write();
 				}
 				/* Every 15 s: a quarter of the 60 s deadline
 				 * odi_wdt.h/rcS register omcid with, so an

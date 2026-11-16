@@ -242,7 +242,7 @@ def generate(args):
     ip_ver, ip_url, ip_sha = package_pins("iproute2")
     ip = comp("iproute2", ip_ver, "GPL-2.0-only", "kernel.org", "pkg:generic/iproute2@" + ip_ver, ref="iproute2")
     ip["externalReferences"] = [source_ref(ip_url, ip_sha)]
-    ip["components"] = [b.file_comp(os.path.join(pkg_dir, n), "/sbin/" + n) for n in ("ip", "bridge")]
+    ip["components"] = [b.file_comp(os.path.join(pkg_dir, n), "/sbin/" + n) for n in ("ip",)]
     pkgs.append(ip)
 
     # --- our own userland ---------------------------------------------------

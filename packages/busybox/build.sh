@@ -70,6 +70,25 @@ for frag in $FRAGS; do
 	done
 done
 
+# The applet list: every applet not named in applets.txt is turned off,
+# through the config symbol its source declares for it
+# (//applet:IF_SYM(APPLET(name, ...))). A symbol behind several names, as
+# reboot, halt and poweroff, stays as it is while any of them is listed.
+# Only applet symbols are touched; the features stay as defconfig and the
+# fragment left them. After the fragment, so the list has the last word.
+want=$(sed "s/#.*//" /cfg/applets.txt | tr -s " \t" "\n\n" | grep . | sort -u)
+grep -rhoE "^//applet:[[:space:]]*IF_[A-Z0-9_]+\(([[:space:]]*IF_[A-Z0-9_]+\()*[[:space:]]*APPLET[A-Z_]*\([[:space:]]*[^,[:space:]]+" \
+	--include=*.c . |
+	sed -E "s@^//applet:[[:space:]]*IF_([A-Z0-9_]+)\(.*APPLET[A-Z_]*\([[:space:]]*@\1 @" > /tmp/applet-syms
+off=$(printf "%s\n" busybox "$want" | awk "NR == FNR { w[\$1] = 1; next }
+	{ sym[\$1] = 1; if (\$2 in w) keep[\$1] = 1 }
+	END { for (x in sym) if (!(x in keep)) print x }" - /tmp/applet-syms | sort)
+for sym in $off; do
+	sed -i "/^CONFIG_${sym}=/d; /^# CONFIG_${sym} is not set/d" .config
+	echo "# CONFIG_${sym} is not set" >> .config
+done
+echo "==> applets.txt: $(printf "%s\n" "$want" | grep -c .) applets listed, $(printf "%s\n" "$off" | grep -c .) applet symbols turned off"
+
 # The Lexra flags come from CONFIG_EXTRA_CFLAGS in config.fragment, not from a
 # CFLAGS_EXTRA= on this command line. Passing them here looks right and does
 # nothing: busybox kbuild does not thread CFLAGS_EXTRA into the per-file
@@ -133,7 +152,20 @@ if true; then
 	[ "$fail" = 0 ] || { echo "REFUSING: nsenter / sync -f did not land on this build" >&2; exit 1; }
 fi
 
-echo "==> applets enabled: $(grep -cE "^CONFIG_[A-Z0-9_]+=y" .config)"
+# The binary has the listed applets and no others, by the applet table the
+# build generated. One listed and missing was dropped by an unmet
+# dependency or is not an applet of this busybox; one present and not listed
+# shares its symbol with a listed name, and goes on the list or the symbol
+# is split by hand.
+sed -n "s/^\"\(.*\)\" \"\\\\0\"\$/\1/p" include/applet_tables.h | grep -vx busybox | sort > /tmp/applets-built
+printf "%s\n" "$want" > /tmp/applets-want
+if ! cmp -s /tmp/applets-want /tmp/applets-built; then
+	echo "REFUSING: the applets built are not packages/busybox/applets.txt" >&2
+	comm -23 /tmp/applets-want /tmp/applets-built | sed "s/^/    listed, not built: /" >&2
+	comm -13 /tmp/applets-want /tmp/applets-built | sed "s/^/    built, not listed: /" >&2
+	exit 1
+fi
+echo "==> applets built: $(grep -c . /tmp/applets-built), exactly applets.txt"
 '
 mkdir -p "$ROOT/out"
 OUTBB=$ROOT/out/busybox

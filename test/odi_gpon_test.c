@@ -626,6 +626,29 @@ static void test_deactivate(void)
 		odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &msg);
 	}
 	CHECK(fsm.state == ODI_GPON_STATE_O2, "a Deactivate_ONU-ID PLOAM also forces O2");
+	CHECK(fsm.deact_directed == 1U, "a Deactivate_ONU-ID for our ONU-ID is counted");
+
+	/* Only those for our own ONU-ID count: a broadcast one deactivates
+	 * this ONU too, but on a shared PON it is not a refusal of ours, and
+	 * one for another ONU-ID is neither acted on nor counted.
+	 */
+	fsm_setup(&fsm, &rec);
+	drive_to_o5(&fsm, &rec);
+	{
+		struct odi_gpon_ploam other = ds_deactivate_onu_id((uint8_t)(TEST_ASSIGNED_ONU_ID + 1U));
+		struct odi_gpon_ploam bcast = ds_deactivate_onu_id(ODI_GPON_ONU_ID_BROADCAST);
+
+		odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &other);
+		CHECK(fsm.state == ODI_GPON_STATE_O5 && fsm.deact_directed == 0U,
+		      "a Deactivate_ONU-ID for another ONU is neither acted on nor counted");
+		odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &bcast);
+		CHECK(fsm.state == ODI_GPON_STATE_O2 && fsm.deact_directed == 0U,
+		      "a broadcast Deactivate_ONU-ID deactivates but is not counted");
+		/* In O2 the ONU holds no ONU-ID: one for ONU-ID 0 is not ours. */
+		other = ds_deactivate_onu_id(0U);
+		odi_gpon_fsm_handle_event(&fsm, &test_ops, &rec, ODI_GPON_EVENT_PLOAM_RX, &other);
+		CHECK(fsm.deact_directed == 0U, "without an ONU-ID nothing is counted");
+	}
 
 	/* ...but is a no-op from O2/O3 (Table 10-1 shows dashes there). */
 	fsm_setup(&fsm, &rec);

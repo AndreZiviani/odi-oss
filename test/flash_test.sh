@@ -32,7 +32,7 @@ cat > "$T/hs.xml" <<'XML'
 </Config>
 XML
 
-export CS="$T/cs.xml" HS="$T/hs.xml" TMPDIR_="$T/var"
+export CS="$T/cs.xml" HS="$T/hs.xml" TMPDIR_="$T/var" REREG_HOLD="$T/hold"
 pass=0; fail=0
 t() {
 	if [ "$2" = "$3" ]; then echo "ok    $1"; pass=$((pass + 1))
@@ -348,6 +348,26 @@ t "a held lock makes a set fail after LOCK_S" "1" "$( (
 	ODI_CONF="$oc" LOCK_S=1 sh $F set NTP_SERVER other >/dev/null 2>&1; echo $? ) )"
 t "and odi.conf is as it was"         "$before" "$(cat "$oc")"
 t "the lock is free again once the holder ended" "NTP_SERVER=other" "$(ODI_CONF="$oc" sh $F set NTP_SERVER other)"
+
+# omcid holds identity changes back after refusals: a changed identity key is
+# not stored then, an unchanged one is (the web UI saves the whole page), and
+# any other key is as before. default cs does not reset the LOID either.
+cp "$T/rcs.xml" "$T/hcs.xml"
+sed -i 's/<Value Name="LOID" Value="[^"]*"/<Value Name="LOID" Value="someone"/' "$T/hcs.xml"
+hf() { CS="$T/hcs.xml" HS="$T/rhs.xml" DEFAULTS="$T/def.xml" sh $F "$@"; }
+printf 'streak 2\n' > "$T/hold"
+out=$(hf set LOID other 2>&1); rc=$?
+t "held: a changed LOID is refused"          "1" "$rc"
+t "held: and says why, and what to use"      "1 1" "$(printf '%s\n' "$out" | grep -c 'refused the last 2 identity changes') $(printf '%s\n' "$out" | grep -c 'identity-trial.sh try --confirm LOID=')"
+t "held: the store keeps the old LOID"       "LOID=someone" "$(hf get LOID)"
+t "held: the same value is stored"           "LOID=someone" "$(hf set LOID someone 2>/dev/null)"
+t "held: a changed HS identity key too"      "1" "$(hf set LOID_PASSWD_OLD new >/dev/null 2>&1; echo $?)"
+t "held: another key is not held"            "LAN_IP_ADDR=10.0.0.1" "$(hf set LAN_IP_ADDR 10.0.0.1 2>/dev/null)"
+cp "$T/hcs.xml" "$T/hcs.before"
+t "held: default cs does not reset the LOID" "1" "$(hf default cs >/dev/null 2>&1; echo $?)"
+t "held: and CS is left alone"               "same" "$(cmp -s "$T/hcs.xml" "$T/hcs.before" && echo same)"
+rm -f "$T/hold"
+t "not held: the change is stored"           "LOID=other" "$(hf set LOID other 2>/dev/null)"
 
 echo
 echo "$pass passed, $fail failed"

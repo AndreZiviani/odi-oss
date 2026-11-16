@@ -16,6 +16,13 @@
 # Run from src/diag, with build/ssp_selftest and build/ssp_selftest_off built.
 set -u
 
+# The overrun case aborts on purpose. With core dumps allowed (Docker gives
+# its containers an unlimited core size by default) qemu-user and the kernel
+# write a core file into src/diag for it, which REUSE then finds as an
+# unlicensed file when lint runs beside this test. dash takes -c.
+# shellcheck disable=SC3045
+ulimit -c 0
+
 BIN=build/ssp_selftest
 OFF=build/ssp_selftest_off
 CHECK=../../tools/check-hardening.sh
