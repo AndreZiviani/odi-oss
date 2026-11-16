@@ -305,8 +305,10 @@ omcid. Two ways, tried in this order:
    (PPPoE two). The GEM port of a rule
    is the priority its result leaves with, through the 802.1p mapper (a rule
    that keeps the frame's priority on a mapper that splits them becomes one
-   rule per priority); the class 84 list of the GEM-side port still decides
-   which result VIDs are admitted. The single-tag default rule decides whether
+   rule per priority, and one that leaves the frame untagged goes where the
+   mapper sends untagged frames: its default priority, attribute 12, when
+   attribute 10 is 1, else priority 0); the class 84 list of the GEM-side
+   port still decides which result VIDs are admitted. The single-tag default rule decides whether
    tagged frames the table does not name pass: a discard there means they do
    not. The table is applied whole or not at all: one entry the classifier
    cannot carry out leaves every frame as it comes, and omcid logs once

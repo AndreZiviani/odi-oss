@@ -1100,6 +1100,29 @@ static int mapper_splits(const struct mib_row *mapper, const struct omci_class *
 	return 0;
 }
 
+/* The target of a GEM-side bridge port that takes the class 171 rules that
+ * belong to no GEM port (ev_for_port()): the GEM IW TP the mapper sends
+ * untagged frames to (priority `unmarked`), else the first one it names.
+ * Without a mapper, the one target of the bridge port. -1 when that IW TP is
+ * not one of `tgt`: on a mapper whose targets each have a bridge port of
+ * their own, another bridge port takes them. */
+static int ev_once(const struct mib_row *mapper, const struct omci_class *c130,
+		   unsigned unmarked, struct mib_row *const *tgt, int ntgt)
+{
+	uint32_t id = 0;
+
+	if (!mapper)
+		return ntgt > 0 ? 0 : -1;
+	if (unmarked < 8)
+		id = row_u32(mapper, c130, 2 + unmarked);
+	for (int pri = 0; (id == 0 || id == 0xffff) && pri < 8; pri++)
+		id = row_u32(mapper, c130, 2 + pri);
+	for (int t = 0; t < ntgt; t++)
+		if (tgt[t]->inst == id)
+			return t;
+	return -1;
+}
+
 /* ------------------------------------------------------ class 171, in full
  *
  * With the manual tag off and the one shape olt_tag() accepts not present,
@@ -1121,7 +1144,8 @@ static int mapper_splits(const struct mib_row *mapper, const struct omci_class *
  * frame with, through the 802.1p mapper; an entry that leaves it following
  * the frame's own, on a mapper that splits the priorities over several GEM
  * ports, becomes one rule per priority. Frames left untagged go to the port
- * of priority 0. */
+ * of the priority the mapper gives untagged frames, as the class 84 rules do
+ * (bp_install()). */
 #define EV_RULES_MAX   24
 #define EV_DROPS_MAX   8
 /* Each rule is a bridge rule per EtherType (PPPoE has two) and per GEM port
@@ -1582,8 +1606,11 @@ static int ev_add_drop(int n, const struct ev_drop *dr, int pri)
 }
 
 /* The rules of ingress `g` for one GEM-side port, whose 802.1p mapper sends
- * the priorities in `pmask` (bit n: priority n) to this GEM port. */
-static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask)
+ * the priorities in `pmask` (bit n: priority n) to this GEM port, and
+ * untagged upstream frames as priority `unmarked`. `once`: this port takes
+ * the rules that belong to no GEM port (ev_once()). */
+static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask,
+		       unsigned unmarked, int once)
 {
 	int n = 0, has_et = 0;
 
@@ -1596,9 +1623,11 @@ static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask)
 		int rest = has_et && !u.et_n && !u.s.in && !u.c.in;
 
 		if (!u.out_tags) {
-			/* Left untagged: it goes where the default priority 0
-			 * goes, and is admitted by the untagged half of FwdOp. */
-			if ((pmask & 1u) && ev_admits(bp, 0, -1, -1))
+			/* Left untagged: it goes where the mapper sends
+			 * untagged frames, and is admitted by the untagged half
+			 * of FwdOp. */
+			if (unmarked < 8 && (pmask >> unmarked & 1u) &&
+			    ev_admits(bp, 0, -1, -1))
 				n = ev_add_out(n, er, &u, rest);
 			continue;
 		}
@@ -1620,7 +1649,7 @@ static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask)
 			const struct evtocd_plane *oth = q == &u.s ? &u.c : &u.s;
 
 			if (!q || (oth->in && (oth->f_vid >= 0 || oth->f_pri >= 0))) {
-				if (pmask & 1u)
+				if (once)
 					out_fmt("   ext vlan 171/%04x entry %d: not applied, its priorities are split over GEM ports and the rule names another tag\n",
 						(long)er->inst, (long)er->entry);
 				continue;
@@ -1638,9 +1667,8 @@ static int ev_for_port(const struct ev_ing *ev, uint16_t bp, unsigned pmask)
 			n = ev_add_out(n, er, &v, 0);
 		}
 	}
-	/* The discards are no GEM port's: they are sent once, with the port
-	 * that carries priority 0. */
-	if (pmask & 1u)
+	/* The discards belong to no GEM port: they are sent once. */
+	if (once)
 		for (int k = 0; k < ev->ndrops; k++) {
 			const struct ev_drop *dr = &ev->drops[k];
 			unsigned all = evtocd_drop_all(&dr->d);
@@ -1997,17 +2025,21 @@ void bdgconn_rebuild(void)
 					tgt_iw[0] = iw; tgt_pbit[0] = -1; tgt_pmask[0] = 0xffu; ntgt = 1;
 				}
 			}
-			for (int t = 0; t < ntgt; t++) {
-			struct bp_rule rules[BP_RULES_MAX];
-			/* The priorities bp_install() holds this target to: all of
-			 * them unless the mapper really splits. The owner of untagged
-			 * upstream frames is the mapper default priority when its
-			 * unmarked-frame option (attribute 10) is 1. With the DSCP
-			 * option the priority would come from the DSCP mapping, which
-			 * these rules cannot express: priority 0 is assumed. */
-			unsigned split_pmask = mapper_splits(mapper, c130) ? tgt_pmask[t] : 0xffu;
+			/* The owner of untagged upstream frames is the mapper
+			 * default priority when its unmarked-frame option (attribute
+			 * 10) is 1. With the DSCP option the priority would come from
+			 * the DSCP mapping, which these rules cannot express: priority
+			 * 0 is assumed. */
 			unsigned unmarked = mapper && row_u32(mapper, c130, 10) == 1 ?
 					    row_u32(mapper, c130, 12) : 0;
+			int splits = mapper_splits(mapper, c130);
+			int once = ev_once(mapper, c130, unmarked, tgt_iw, ntgt);
+
+			for (int t = 0; t < ntgt; t++) {
+			struct bp_rule rules[BP_RULES_MAX];
+			/* The priorities bp_install() and ev_for_port() hold this
+			 * target to: all of them unless the mapper really splits. */
+			unsigned split_pmask = splits ? tgt_pmask[t] : 0xffu;
 			uint32_t port, dir;
 			int nrules, manual, use_ev, plain = 0;
 
@@ -2099,7 +2131,7 @@ void bdgconn_rebuild(void)
 
 				if (!ev->active || ingress_bridge[g] != (int)row_u32(r, c47, 1))
 					continue;
-				nout = ev_for_port(ev, r->inst, tgt_pmask[t]);
+				nout = ev_for_port(ev, r->inst, split_pmask, unmarked, t == once);
 				for (int k = 0; k < nout; k++) {
 					const struct ev_out *o = &ev_outs[k];
 					int id;
