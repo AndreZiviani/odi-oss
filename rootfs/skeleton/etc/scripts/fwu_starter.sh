@@ -18,12 +18,15 @@
 #   1. refuses a second write while one is running, in either mode: a
 #      lock every writer inherits, taken before anything shared is touched;
 #   2. refuses any slot but the inactive one -- the running slot is read the
-#      way fwu.sh reads it, root=31:N in /proc/cmdline, then sw_active;
+#      way fwu.sh reads it, root=31:N in /proc/cmdline, then sw_active --
+#      and refuses either slot when sw_commit cannot be read;
 #   3. extracts fwu.sh and md5.txt into a scratch directory in /tmp and checks
 #      fwu.sh against its own md5.txt line;
 #   4. runs fwu.sh <slot> <tarball> there, detached (setsid, stdin from
 #      /dev/null) so neither confd nor an ssh session ending can stop it
-#      halfway, with its output in FWU_LOG and its outcome in FWU_STATE.
+#      halfway, with its output in FWU_LOG and its outcome in FWU_STATE,
+#      and then runs slot-state.sh, so the check of the other slot that the
+#      banner and the exporter show describes what was just written.
 #
 # fwu.sh itself checks both members md5 and size before erasing, reads the
 # write back, and never touches the U-Boot environment unless asked
@@ -44,6 +47,7 @@ FWU_START_S=${FWU_START_S:-10}
 PROC_MTD=${PROC_MTD:-/proc/mtd}
 PROC_CMDLINE=${PROC_CMDLINE:-/proc/cmdline}
 NV=${NV:-/bin/nv}
+SLOT_STATE=${SLOT_STATE:-/etc/scripts/slot-state.sh}
 
 fg=0
 if [ "${1:-}" = --foreground ]; then
@@ -106,6 +110,22 @@ fi
 [ -n "$running" ] || die "cannot tell which slot is running; refusing to write either"
 [ "$running" != "$slot" ] || die "slot $slot is the one this stick is running; write slot $((1 - slot))"
 
+# A line before the next nv read: confd ends a child that stays silent for
+# its timeout, and older confds allow 5 s.
+say "running slot $running; reading sw_commit"
+
+# The revert target. fwu.sh only warns when it cannot read sw_commit, because
+# the vendor nv that runs the first flash may not answer; this script ships
+# with our nv, so an empty answer is a failed read, not an old tool. On an
+# uncommitted trial the slot not running IS the committed one, and writing
+# it on a guess would erase the only image a failed trial can go back to.
+commit=$(timeout 5 "$NV" getenv sw_commit 2>/dev/null | sed -n "s/^sw_commit=//p")
+case "$commit" in
+0|1) ;;
+*) die "cannot read sw_commit, the slot a failed trial goes back to; refusing to write either slot. Check with: nv getenv sw_commit; nv fallback sw_commit" ;;
+esac
+say "sw_commit is $commit"
+
 rm -rf "$FWU_DIR"
 mkdir -p "$FWU_DIR" || die "cannot create $FWU_DIR"
 ( cd "$FWU_DIR" && tar -xf "$tarball" fwu.sh md5.txt ) 2>/dev/null ||
@@ -131,8 +151,10 @@ fi
 
 : > "$FWU_LOG"
 # Claimed before the job starts, with this shell as the live pid, so a
-# second request in the gap cannot start a second writer.
-echo "running $$ $slot" > "$FWU_STATE"
+# second request in the gap cannot start a second writer. Checked: a state
+# that cannot be written (a full /tmp) leaves nothing for the job to claim,
+# and the wait below would read the empty file as a job that had started.
+echo "running $$ $slot" > "$FWU_STATE" || die "cannot record the writer state in $FWU_STATE"
 # The job records its own pid and outcome. setsid gives it a session of its
 # own: confd, and the shell that started this, can go away without a SIGHUP
 # reaching a flash in progress.
@@ -146,7 +168,11 @@ setsid sh -c '
 	sh ./fwu.sh "$2" "$3" >> "$5" 2>&1
 	rc=$?
 	if [ "$rc" = 0 ]; then echo "ok $$ $2" > "$4"; else echo "failed $$ $2 $rc" > "$4"; fi
-' fwu "$FWU_DIR" "$slot" "$tarball" "$FWU_STATE" "$FWU_LOG" "$$" \
+	# The write is over: let go of the writer lock (fd 9) first, so the
+	# reads of the refresh do not hold Try, Upload and Reboot off in confd.
+	exec 9>&-
+	[ ! -x "$7" ] || "$7" > /dev/null 2>&1
+' fwu "$FWU_DIR" "$slot" "$tarball" "$FWU_STATE" "$FWU_LOG" "$$" "$SLOT_STATE" \
 	< /dev/null > /dev/null 2>&1 &
 # Wait for the job to claim the state file, so a request that arrives right
 # after this one returns sees a live writer, and a job that never started is
@@ -157,8 +183,15 @@ n=0
 while :; do
 	sleep 1
 	n=$((n + 1))
+	# Every few seconds a line, for the same reason as above.
+	[ $((n % 3)) != 0 ] || say "waiting for the write job to start ($n s)"
+	st=''; pid=''
 	read -r st pid _ < "$FWU_STATE"
-	[ "$pid" = "$$" ] || break
+	# Started only when the state names another writer; an empty or
+	# unreadable state is waited out like a job that has not started.
+	case "$st" in
+	running | ok | failed) [ "$pid" = "$$" ] || break ;;
+	esac
 	if [ "$n" -ge "$FWU_START_S" ]; then
 		echo "failed $$ $slot start" > "$FWU_STATE"
 		die "the write job did not start within $FWU_START_S s"

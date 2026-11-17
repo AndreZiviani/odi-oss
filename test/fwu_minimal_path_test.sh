@@ -114,6 +114,34 @@ head -c 1400000 /dev/zero | tr '\0' 'k' > "$T/img/uImage"
 ( cd "$T/img" && tar -cf ../big.tar uImage rootfs )
 t "an oversize member is refused" "REFUSING" "$(run "$T/big.tar")"
 
+# A tar that fails after sending part of a member: the prefix fits, so the
+# size check must not take it. Here every extraction of uImage fails that
+# way; the refusal has to come before the md5 check and the erase.
+head -c 5000 /dev/zero | tr '\0' 'k' > "$T/img/uImage"
+( cd "$T/img" && tar -cf ../good.tar uImage rootfs )
+mkdir -p "$T/failbin"
+for f in "$B"/*; do ln -s "$f" "$T/failbin/"; done
+rm "$T/failbin/tar"
+cat > "$T/failbin/tar" <<SHIM
+#!/bin/sh
+if [ "\$3" = uImage ]; then printf kkk; exit 1; fi
+exec "$B/tar" "\$@"
+SHIM
+chmod +x "$T/failbin/tar"
+out=$(run "$T/good.tar" "$T/failbin")
+t "a tar that fails halfway is not sized" "cannot read uImage" "$out"
+if printf '%s' "$out" | grep -q flash_eraseall; then
+	echo "FAIL  and nothing is erased"; fail=$((fail + 1))
+else
+	echo "ok    and nothing is erased"; pass=$((pass + 1))
+fi
+
+# An empty member is refused, not written.
+: > "$T/img/uImage.empty"
+( cd "$T/img" && mv uImage uImage.full && mv uImage.empty uImage && tar -cf ../empty.tar uImage rootfs &&
+  mv uImage.full uImage )
+t "an empty member is refused" "uImage is empty" "$(run "$T/empty.tar")"
+
 # A tool the script needs and the image lacks is named up front.
 rm "$B/cmp"
 t "a missing cmp is named before anything runs" "lacks: cmp" "$(run "$T/good.tar")"

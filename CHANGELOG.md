@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Upgrade: unknown states no longer read as good ones. The trial guard
+  releases its watchdog client only when `/var/run/odi-slot` says
+  `uncommitted=0`; an empty or missing value during a trial used to count
+  as committed and left a stranded trial up for good. `fwu_starter.sh`
+  refuses to write either slot when `sw_commit` cannot be read (on an
+  uncommitted trial the idle slot is the revert target), refuses when it
+  cannot write its state file in the background mode too (a full `/tmp`
+  made it report a write that never started), and runs `slot-state.sh`
+  after each background write so the banner's other-slot check is current.
+  `fwu.sh` sizes a member only when tar read it to the end: a tar that
+  failed halfway passed a prefix that fit, and an empty member is refused.
+
 - omcid: a Get or Get current data whose attributes do not all fit the 25
   bytes of an answer is no longer counted as `rejected`. Its result 9 names
   in the failed mask the attributes left for the OLT to ask for on their
