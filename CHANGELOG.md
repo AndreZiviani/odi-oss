@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- Tests: `test/mcast_probe_test.sh` no longer fails now and then with "the
+  count window never started". Its stub diag rewrote the file naming the
+  probe holder with `>`, and an `acl-probe show` that read the file while
+  it was empty took the holder for dead and dropped every probe installed
+  so far; the SIGTERM and SIGKILL cases then waited 30 s for five probes
+  that were never all in at once. The stub now writes that file by rename,
+  and a show that finds it missing or empty no longer takes that for a dead
+  holder. `tools/mcast-probe/mcast-probe.sh` also stops the sleep of the
+  current window on its way out: after a SIGTERM it was left running until
+  the window would have ended.
+
 - `omcli frames` and the `omci.pcap` in the diag bundle now mask the MAC
   bridge port bridge table (class 50) too. A Get-Next of it answers the
   MACs the switch learned on the LAN side, the router's among them, and
