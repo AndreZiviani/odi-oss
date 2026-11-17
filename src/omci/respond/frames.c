@@ -24,11 +24,11 @@
  * Both are masked unless --full: in the classes omcid keeps out of its log
  * (me_is_secret(), mibstore.c) every attribute value a frame carries is
  * overwritten with MASK_BYTE, and so are the attributes every dump masks
- * (me_attr_secret()) and the identity of the stick (ident_attr). The
- * header, the attribute masks and the result codes stay, so a masked
- * capture still decodes. A frame with masked values has its CRC zeroed:
- * the original CRC could otherwise reveal the values it covered. Only
- * --full preserves that checksum.
+ * (me_attr_secret()), the identity of the stick and the MACs learned on
+ * the LAN side (ident_attr). The header, the attribute masks and the
+ * result codes stay, so a masked capture still decodes. A frame with
+ * masked values has its CRC zeroed: the original CRC could otherwise
+ * reveal the values it covered. Only --full preserves that checksum.
  * A frame that is not a baseline frame (device id other than 0x0a, or
  * shorter than 48 bytes) has everything after its header masked: there is
  * no layout to read it by.
@@ -92,6 +92,10 @@ static const struct { uint16_t cls; uint8_t k; } ident_attr[] = {
 	{ OMCI_ME_CIRCUIT_PACK, 3 },             /* serial number */
 	{ OMCI_ME_MAC_BRIDGE_CFG_DATA, 1 },      /* bridge MAC address */
 	{ OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA, 10 }, /* port MAC address */
+	/* Not the stick's own: the bridge table of a port, the MACs the
+	 * switch learned on it (the router's among them). The bundle leaves
+	 * the class out of its MIB dumps; the capture masks it the same way. */
+	{ 50, 1 },
 };
 
 static int attr_hidden(uint16_t cls, unsigned k)

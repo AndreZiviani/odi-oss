@@ -6,9 +6,9 @@
 # (respond/frames.c). What a frame from the OLT and an answer to it look
 # like there, what the sharing mask hides (the values of the classes omcid
 # keeps out of its log, the serial number and the MACs of the stick, the
-# contents of a frame that is not baseline) and what it leaves (headers,
-# masks, result codes, every other attribute), --full, the pcap layout, and
-# the ring wrapping at its size.
+# MACs learned on the LAN side, the contents of a frame that is not
+# baseline) and what it leaves (headers, masks, result codes, every other
+# attribute), --full, the pcap layout, and the ring wrapping at its size.
 #
 # Run from src/omci, inside the toolchain image (make test-omci-frames):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
@@ -125,6 +125,22 @@ for spec in '<- 0003440a' '<- 0004480a' '-> 0005290a'; do
 	check "masked: CRC removed from $spec" \
 	      "$(printf '%s\n' "$masked" | line "$1" "$2" | cut -c89-96)" "00000000"
 done
+
+# ------------------------------------- the bridge table: learned LAN MACs
+# A Create of MAC bridge port config data (47) instance 1 brings its bridge
+# table data (50) with it. A Get-Next of that table (attribute 1) answers
+# the MACs the switch learned on the port, the router's among them: none
+# here, without a switch, but the answer is masked by class, not by what it
+# holds.
+send "$log" 0010 44 002f 0001 ""
+send "$log" 0011 5a 0032 0001 80000000
+full=$(frames --full | line '->' 00113a0a)
+masked=$(frames | line '->' 00113a0a)
+check "--full: the Get-Next answer of the bridge table, as sent" \
+      "$(printf '%s' "$full" | cut -c1-16)" "00113a0a00320001"
+check "masked: header and result stay, the table contents do not" \
+      "$(printf '%s' "$masked" | cut -c1-18):$(printf '%s' "$masked" | cut -c23-80)" \
+      "$(printf '%s' "$full" | cut -c1-18):eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 # ------------------------------------------------------ MIB upload next
 send "$log" 0006 4d 0002 0000 ""                         # MIB upload
