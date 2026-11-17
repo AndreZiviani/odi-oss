@@ -5,6 +5,21 @@ listed here.
 
 ## Unreleased
 
+- diag-bundle: the scrub fails closed. The rule list was built through
+  pipelines that report only their last stage, so a `sort` that failed (no
+  memory, a full `/tmp`) left the list short or empty, an empty list
+  skipped the scrub, and the archive went out as collected. A failed `od`
+  dropped a value's hex rules the same way, and a config copy, the SIP
+  secrets, the identity values or the masking of `module/a0.txt` could fail
+  without stopping the bundle. Every one of these steps is now checked, the
+  sed script must hold exactly the commands its rules make, and a failure
+  fails the bundle with no archive at the output path. A value the store
+  keeps XML-escaped (`&amp;`) is scrubbed in its decoded spelling too. A
+  value with a tab in it, which would split its rule, fails the bundle, and
+  each loop over the values and the files must read its whole list. The
+  pcap is captured outside the bundle and joins it only once its check has
+  passed, so a check that cannot run withholds it.
+
 - Memory: rcS sets `vm.percpu_pagelist_high_fraction` to 32. The kernel keeps
   a per-CPU list of free pages that `MemFree` and `MemAvailable` leave out, and
   by default its limit tuned itself up to about 3.3 MB, so the free memory

@@ -258,6 +258,8 @@ cat > "$T/bin/omcli" <<EOF
 #!/bin/sh
 case "\$1" in
 state) printf 'serial     : %s\nonu state  : O5\nmib resets : olt 0  local 0  olt in last 600 s 0  loop no  (loops 0)\n' "$SN" ;;
+frames) printf '%s\n' "\${PCAP_TEXT:-frames, nothing to hide}" > "\$3" ;;
+voip) [ "\$2" = --secrets-list ] || echo voip ;;
 *) echo "\$1" ;;
 esac
 EOF
@@ -268,6 +270,13 @@ EOF
 # also refuse to run outside the C locale, as a BSD sed or awk can fail on
 # a byte that is not valid UTF-8: the bundle runs under LC_ALL=C, and
 # run_bundle starts it in a UTF-8 locale to see that it sets it.
+# OD_FAIL makes od fail with no output, which tr in the hex step hides.
+real_od=$(command -v od)
+cat > "$T/bin/od" <<STUB
+#!/bin/sh
+[ -z "\${OD_FAIL:-}" ] || exit 1
+exec "$real_od" "\$@"
+STUB
 real_sed=$(command -v sed)
 real_awk=$(command -v awk)
 cat > "$T/bin/sed" <<STUB
@@ -278,6 +287,16 @@ for a; do
 	case "\${SED_FAIL_ON:-}" in ?*) case "\$a" in *"\$SED_FAIL_ON"*) echo "sed: injected failure" >&2; exit 1 ;; esac ;; esac
 done
 exec "$real_sed" "\$@"
+STUB
+# SORT_FAIL_ON makes sort fail on a file whose name ends in it, the way a
+# sort that runs out of memory or /tmp fails partway through the scrub.
+real_sort=$(command -v sort)
+cat > "$T/bin/sort" <<STUB
+#!/bin/sh
+for a; do
+	case "\${SORT_FAIL_ON:-}" in ?*) case "\$a" in *"/\$SORT_FAIL_ON") echo "sort: injected failure" >&2; exit 2 ;; esac ;; esac
+done
+exec "$real_sort" "\$@"
 STUB
 cat > "$T/bin/awk" <<STUB
 #!/bin/sh
@@ -296,7 +315,11 @@ exec "$real_awk" "\$@"
 STUB
 chmod +x "$T/bin/"*
 printf 'GPON_SN=%s\nGPON_PLOAM_PASSWD=%s\n' "$SN" "$PW" > "$T/cfg/odi.conf"
-echo "a log line" > "$T/log/messages"
+# A password the store keeps XML-escaped, and a log that quotes it as omcid
+# and the driver see it.
+XPW='Pw&amp;Xy9'
+printf '<Config Name="ROOT">\n\t<Dir Name="MIB_TABLE">\n\t\t<Value Name="LOID_PASSWD" Value="%s"/>\n\t</Dir>\n</Config>\n' "$XPW" > "$T/cfg/lastgood.xml"
+printf 'a log line\nlogin with Pw&Xy9 failed\n' > "$T/log/messages"
 run_bundle() {
 	LC_ALL=en_US.UTF-8 CONFIG_DIR="$T/cfg" LOG_DIR="$T/log" GPON_PROC_DIR="$T/nogpon" PATH="$T/bin:$PATH" \
 		METRICS_TIMEOUT_S=1 STEP_TIMEOUT_S=2 timeout 120 sh "$B" "$@" > "$T/run.out" 2>&1
@@ -348,6 +371,52 @@ rc=$?
 [ "$rc" != 0 ] && [ ! -e "$T/out.tar.gz" ] && ok "a failed scrub fails the bundle and leaves no file" ||
 	no "a failed scrub fails the bundle and leaves no file" "rc $rc: $(cat "$T/run.out")"
 grep -q 'scrub failed' "$T/run.out" && ok "and says which step" || no "and says which step" "$(cat "$T/run.out")"
+
+# So does a failure while the rules are built: an empty or short rule list
+# used to skip the scrub and pack the bundle as collected. An archive left
+# from an earlier run goes too, so nothing is there to fetch.
+for f in secrets idents rules rules.u; do
+	echo old > "$T/out.tar.gz"
+	SORT_FAIL_ON=$f run_bundle "$T/out.tar.gz"
+	rc=$?
+	[ "$rc" != 0 ] && [ ! -e "$T/out.tar.gz" ] && ok "a failed sort of $f fails the bundle and leaves no file" ||
+		no "a failed sort of $f fails the bundle and leaves no file" "rc $rc: $(cat "$T/run.out")"
+	grep -q 'scrub failed' "$T/run.out" && ok "and says so ($f)" || no "and says so ($f)" "$(cat "$T/run.out")"
+done
+
+# The hex of a value: an od that fails is not hidden by the tr after it.
+echo old > "$T/out.tar.gz"
+OD_FAIL=1 run_bundle "$T/out.tar.gz"
+rc=$?
+[ "$rc" != 0 ] && [ ! -e "$T/out.tar.gz" ] && ok "a failed od fails the bundle and leaves no file" ||
+	no "a failed od fails the bundle and leaves no file" "rc $rc: $(cat "$T/run.out")"
+grep -q 'cannot turn a value into hex' "$T/run.out" && ok "and says so (od)" || no "and says so (od)" "$(cat "$T/run.out")"
+
+# A tab inside a value would split its rule and leave part of it in clear.
+cp "$T/cfg/odi.conf" "$T/odi.conf.keep"
+printf 'GPON_SN=%s\nGPON_PLOAM_PASSWD=Ab\tcdefgh\n' "$SN" > "$T/cfg/odi.conf"
+echo old > "$T/out.tar.gz"
+run_bundle "$T/out.tar.gz"
+rc=$?
+[ "$rc" != 0 ] && [ ! -e "$T/out.tar.gz" ] && ok "a value with a tab fails the bundle and leaves no file" ||
+	no "a value with a tab fails the bundle and leaves no file" "rc $rc: $(cat "$T/run.out")"
+grep -q 'a value holds a tab' "$T/run.out" && ok "and says so (tab)" || no "and says so (tab)" "$(cat "$T/run.out")"
+mv "$T/odi.conf.keep" "$T/cfg/odi.conf"
+
+# The pcap: in the bundle, untouched by the scrub, when no value shows in
+# it; withheld when one does.
+rm -rf "$T/x" && mkdir "$T/x"
+run_bundle "$T/out.tar.gz" && tar -xzf "$T/out.tar.gz" -C "$T/x" 2>/dev/null
+grep -qx 'frames, nothing to hide' "$T/x/odi-diag/pon/omci.pcap" 2>/dev/null && ok "a clean pcap is in the bundle as captured" ||
+	no "a clean pcap is in the bundle as captured" "$(ls -R "$T/x" | head -40)"
+grep -q 'Pw&Xy9\|Pw&amp;Xy9' "$T/x/odi-diag/log/messages" 2>/dev/null &&
+	no "an XML-escaped password is scrubbed in its decoded spelling too" "$(cat "$T/x/odi-diag/log/messages")" ||
+	ok "an XML-escaped password is scrubbed in its decoded spelling too"
+rm -rf "$T/x" && mkdir "$T/x"
+PCAP_TEXT="frame with $PW in it" run_bundle "$T/out.tar.gz" && tar -xzf "$T/out.tar.gz" -C "$T/x" 2>/dev/null
+[ ! -e "$T/x/odi-diag/pon/omci.pcap" ] && ok "a pcap with a secret in it is withheld" || no "a pcap with a secret in it is withheld"
+grep -q 'omci.pcap (withheld: a secret or identity value showed in it)' "$T/x/odi-diag/MANIFEST.txt" &&
+	ok "and the manifest says why" || no "and the manifest says why" "$(cat "$T/x/odi-diag/MANIFEST.txt" 2>&1)"
 
 echo
 echo "diag_summary_test: $pass passed, $fail failed"
