@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- GPON: `/proc/odi_gpon/status` has a new line `in_state_s`, the whole
+  seconds the ONU has been in its current state. In O5 that is how long
+  the line has been up, apart from the uptime of the stick: a pulled fibre
+  or any other drop starts it over. It counts on the monotonic clock, so a
+  wall clock that NTP has not set does not matter. The driver now keeps the
+  times of the last state change and of the last LOS and LOF on 64-bit
+  jiffies, so the `in_state_s` and `lasted_s` of the event lines no longer
+  wrap after 198.8 days.
+
 ## v1.17.1 (2026-11-17)
 
 - Releases: confd v1.17.1. On Status the fibre-line down and up rates

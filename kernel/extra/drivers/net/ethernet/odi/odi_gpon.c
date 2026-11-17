@@ -60,6 +60,7 @@
 #include <linux/spinlock.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
+#include <linux/math64.h>
 #include <linux/printk.h>
 #include <linux/bitmap.h>
 #include <linux/ratelimit.h>
@@ -140,9 +141,12 @@ static __printf(2, 3) void odi_gpon_logf(enum odi_gpon_dlog_level level, const c
 		odi_gpon_dlog_print(level, text);
 	}
 }
-static unsigned long odi_gpon_state_since;	/* jiffies of the last transition */
-static unsigned long odi_gpon_los_since;	/* jiffies of the last LOS rising edge */
-static unsigned long odi_gpon_lof_since;	/* jiffies of the last LOF rising edge */
+/* 64-bit jiffies: unsigned long is 32 bits here and wraps after 198.8 days
+ * at HZ=250, a span an ONU spends in O5 without trouble.
+ */
+static u64 odi_gpon_state_since;	/* jiffies of the last transition */
+static u64 odi_gpon_los_since;		/* jiffies of the last LOS rising edge */
+static u64 odi_gpon_lof_since;		/* jiffies of the last LOF rising edge */
 
 /* The switch interrupt, "apl_sw": the board irqchip numbers its sources
  * from RTL8686_IRQ_BASE, so switch bit 8 is irq 16. Not shared: nothing
@@ -480,16 +484,16 @@ static const char *odi_gpon_state_name(enum odi_gpon_state st)
 	}
 }
 
-/* Seconds and milliseconds since `since`, for the event lines: printed as
- * N.mmm, which does not wrap where a u32 millisecond count would, at 49 days
- * of an ONU happily sitting in O5.
+/* Seconds and milliseconds since `since`, for the event lines and the
+ * in_state_s line: printed as N.mmm, which does not wrap where a u32
+ * millisecond count would, at 49 days of an ONU happily sitting in O5.
  */
-static void odi_gpon_elapsed(unsigned long since, unsigned long *s, unsigned int *ms)
+static void odi_gpon_elapsed(u64 since, unsigned long *s, unsigned int *ms)
 {
-	unsigned long d = jiffies - since;
+	u32 rem;
 
-	*s = d / HZ;
-	*ms = jiffies_to_msecs(d % HZ);
+	*s = (unsigned long)div_u64_rem(get_jiffies_64() - since, HZ, &rem);
+	*ms = jiffies_to_msecs(rem);
 }
 
 /* The event=ranging line, once per O4 -> O5 transition: what the Ranging_Time
@@ -581,7 +585,7 @@ static void odi_gpon_note_transition(enum odi_gpon_state prev,
 		break;
 	}
 	odi_gpon_elapsed(odi_gpon_state_since, &secs, &ms);
-	odi_gpon_state_since = jiffies;
+	odi_gpon_state_since = get_jiffies_64();
 	if (!__ratelimit(&odi_gpon_event_rs))
 		return;
 	if (prev == ODI_GPON_STATE_O5 || now == ODI_GPON_STATE_O7)
@@ -609,7 +613,7 @@ static void odi_gpon_note_event(enum odi_gpon_state prev, enum odi_gpon_event ev
  * state the loss found, state=off with how long it lasted. *last and
  * *since are that bit own record.
  */
-static void odi_gpon_alarm_edge(const char *name, int now, int *last, unsigned long *since,
+static void odi_gpon_alarm_edge(const char *name, int now, int *last, u64 *since,
 				enum odi_gpon_state st)
 {
 	unsigned long secs;
@@ -623,7 +627,7 @@ static void odi_gpon_alarm_edge(const char *name, int now, int *last, unsigned l
 		odi_gpon_drop_note(&odi_gpon_drop_inst, odi_gpon_now_ms(), &de);
 	}
 	if (now && !*last) {
-		*since = jiffies;
+		*since = get_jiffies_64();
 		if (__ratelimit(&odi_gpon_event_rs))
 			odi_gpon_logf(ODI_GPON_DLOG_NOTICE,
 				      "odi_gpon: event=%s state=on onu_state=%s\n",
@@ -971,7 +975,7 @@ int odi_gpon_init(void)
 	odi_gpon_isr_set_msg_hook(odi_gpon_isr_msg);
 	odi_gpon_booted = false;
 	odi_gpon_ber_period_ms = 0U;
-	odi_gpon_state_since = jiffies;
+	odi_gpon_state_since = get_jiffies_64();
 	odi_gpon_ctr_reset(&odi_gpon_ctr_inst);
 	odi_gpon_drop_reset(&odi_gpon_drop_inst);
 	odi_gpon_drop_last_bip = 0;
@@ -1406,6 +1410,9 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	struct odi_gpon_ranging_dbg rdbg;
 	bool uo_valid, rng_valid, pid_valid;
 	int hold_keep, hold_held;
+	u64 state_since;
+	unsigned long state_s;
+	unsigned int state_ms;
 
 	(void)v;
 
@@ -1438,13 +1445,20 @@ static int odi_gpon_proc_status_show(struct seq_file *seq, void *v)
 	odi_gpon_get_ranging_dbg(&rdbg);
 	hold_keep = odi_gpon_hw_hold_enabled();
 	hold_held = odi_gpon_hw_hold_get();
+	state_since = odi_gpon_state_since;
 	spin_unlock_irqrestore(&odi_gpon_lock, flags);
+	odi_gpon_elapsed(state_since, &state_s, &state_ms);
 
 	{
 		int state = odi_gpon_onu_state();
 
 		seq_printf(seq, "state %d (%s)\n", state, odi_gpon_state_name((enum odi_gpon_state)state));
 	}
+	/* How long the ONU has been in that state, on the monotonic clock, so
+	 * a wrong wall clock does not matter: in O5, the time since the line
+	 * last came up. Any transition restarts it, a pulled fibre included.
+	 */
+	seq_printf(seq, "in_state_s %lu\n", state_s);
 	/* GPON_KEEP_DISABLE: keep 1 = the feature is on; held 1 = Emergency
 	 * Stop is kept (the OLT disabled this ONU and has not enabled it).
 	 */
