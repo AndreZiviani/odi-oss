@@ -84,6 +84,9 @@ I1=8001
 I2=8002
 
 mkdir -p /var/config /var/run /var/log
+# No refusals left from another suite: the checks below read what this one
+# was told no.
+rm -f /var/log/omcid-unknown.txt
 rm -f /var/config/odi.conf /var/config/lastgood.xml /var/config/lastgood_hs.xml \
       /var/config/omci-identity.on /var/run/omcid-mib.snap /var/run/omcid-resume-decision
 printf 'state 5 (O5)\nonu_id 1\nsn 4f44495400000001\nalloc_ids 0\n' > /tmp/pm-gpon
@@ -218,6 +221,11 @@ check "Get past 25 bytes: attribute 7 failed, none unsupported" "$(echo "$A" | c
 T=$(tci)
 send "$T" 49 010b 0001 0200
 check "the attribute that failed, asked alone: ok" "$(answer "$T" | cut -c1-6)" "000200"
+# The same split for Get current data, as an OLT polls the interval running.
+T=$(tci)
+send "$T" 5c 010b 0001 be00
+check "Get current data past 25 bytes: result 9, mask answered bc00" \
+      "$(answer "$T" | cut -c1-6)" "09bc00"
 # Attribute 16 is past the class's last: unsupported, the rest answered.
 T=$(tci)
 send "$T" 49 010b 0001 8001
@@ -226,6 +234,13 @@ check "an attribute the class does not have: result 9, the rest answered" \
       "$(echo "$A" | cut -c1-6)" "098000"
 check "and it is in the optional-attribute mask, not the failed one" \
       "$(echo "$A" | cut -c57-64)" "00010000"
+# What was refused: the attribute the class does not have. The answers split
+# because they did not fit are not refusals (the OLT asks again, as above),
+# so class 267 has one rejected line, for that Get, naming attribute 16 only.
+need /var/log/omcid-unknown.txt '^rejected class=267 op=get ' 10
+check "a split Get is not counted as rejected, an unsupported attribute is" \
+      "$(grep '^rejected class=267 ' /var/log/omcid-unknown.txt | sed 's/ first_uptime_s=[0-9]*$//')" \
+      "rejected class=267 op=get mt=9 result=attr_failed attrs=0x0001 count=1"
 omcid_stop "$pid"
 
 [ "$fail" -eq 0 ] || keep_log "$log" pm-test.log
