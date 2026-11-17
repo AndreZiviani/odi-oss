@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- `omcli frames` and the `omci.pcap` in the diag bundle now mask the MAC
+  bridge port bridge table (class 50) too. A Get-Next of it answers the
+  MACs the switch learned on the LAN side, the router's among them, and
+  those went into the shared capture as they were. The bundle already left
+  the class out of its MIB dumps. `--full` keeps them.
+
 - `omcli check` no longer reports the chip state as unreadable while the
   ONU is still in O2. An empty `/proc/odi_gpon/ponq` and a `cam` holding
   only its `alloc_cam_valid` and `gem_cam_valid` lines are our kernel with
