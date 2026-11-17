@@ -87,6 +87,7 @@ POLL_TENTHS=50
 FIFO=$OUT/ctl
 RES=$OUT/results.txt
 HOLDER=
+NAP=
 ROW_SET=
 GROUP_MAC=
 OVERALL_S=$((COUNT_S + BYTES_S + OVERLAP_S + 3 * CPU_S + ROW_S + 300))
@@ -102,9 +103,13 @@ die() { say "$*"; exit 1; }
 diag1() { timeout "$DIAG_S" diag "$@" 4>&-; }
 # In the background and waited for: a shell runs a trap only once its
 # foreground command is done, and wait is the one that a signal ends.
+# NAP is the sleep, for the way out to stop it: a signal ends the wait, not
+# the sleep.
 nap() {
 	sleep "$1" 4>&- &
-	wait $!
+	NAP=$!
+	wait "$NAP"
+	NAP=
 }
 
 # ---- preconditions --------------------------------------------------------
@@ -242,6 +247,10 @@ window() {
 
 cleanup() {
 	trap '' INT TERM
+	if [ -n "$NAP" ]; then
+		kill "$NAP" 2>/dev/null
+		NAP=
+	fi
 	if [ -n "$ROW_SET" ]; then
 		timeout "$IGMPD_S" igmpd -w -l "$GROUP" 4>&- > /dev/null 2>&1
 		ROW_SET=

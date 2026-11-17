@@ -12,6 +12,45 @@ listed here.
   state` with `rejected class=267 op=get ... attrs=0x0200` lines that
   refused nothing. A Get that names an attribute the class does not
   have is still counted, with only those attributes in `attrs`.
+
+- GPON: `/proc/odi_gpon/status` has a new line `in_state_s`, the whole
+  seconds the ONU has been in its current state. In O5 that is how long
+  the line has been up, apart from the uptime of the stick: a pulled fibre
+  or any other drop starts it over. It counts on the monotonic clock, so a
+  wall clock that NTP has not set does not matter. The driver now keeps the
+  times of the last state change and of the last LOS and LOF on 64-bit
+  jiffies, so the `in_state_s` and `lasted_s` of the event lines no longer
+  wrap after 198.8 days.
+
+## v1.17.1 (2026-11-17)
+
+- Releases: confd v1.17.1. On Status the fibre-line down and up rates
+  refresh every second, from the PON port byte counters read without
+  forking `diag`. On Config the tags beside a setting are small labels
+  again, the legend says what the cost bars measure, and the help says
+  which identity keys only the stock firmware reads and that
+  `VLAN_EAPOL_UNTAGGED` has run on a line that uses EAP. The firmware page
+  shows the erase progress of a flash as one updating line. The asset
+  hashes in src/release-sha256.txt are the release SHA256SUMS, checked by
+  `make releases`.
+
+- Tests: `test/mcast_probe_test.sh` no longer fails now and then with "the
+  count window never started". Its stub diag rewrote the file naming the
+  probe holder with `>`, and an `acl-probe show` that read the file while
+  it was empty took the holder for dead and dropped every probe installed
+  so far; the SIGTERM and SIGKILL cases then waited 30 s for five probes
+  that were never all in at once. The stub now writes that file by rename,
+  and a show that finds it missing or empty no longer takes that for a dead
+  holder. `tools/mcast-probe/mcast-probe.sh` also stops the sleep of the
+  current window on its way out: after a SIGTERM it was left running until
+  the window would have ended.
+
+- `omcli frames` and the `omci.pcap` in the diag bundle now mask the MAC
+  bridge port bridge table (class 50) too. A Get-Next of it answers the
+  MACs the switch learned on the LAN side, the router's among them, and
+  those went into the shared capture as they were. The bundle already left
+  the class out of its MIB dumps. `--full` keeps them.
+
 - `omcli check` no longer reports the chip state as unreadable while the
   ONU is still in O2. An empty `/proc/odi_gpon/ponq` and a `cam` holding
   only its `alloc_cam_valid` and `gem_cam_valid` lines are our kernel with
@@ -26,6 +65,15 @@ listed here.
   says so, keeps the untagged-downstream rule as unproven, and says the key
   needs no FwdOp override (`RTK_DEVINFO_SPECVER`) and does not set one.
   Refs #301.
+
+- Tests: `src/omci/mcast-test.sh` no longer reads a policy exported in the
+  middle of the 34 ranges as the final one. On a slow or busy runner omcid
+  could rebuild while the ranges still arrived (after a quiet second, or at
+  the 5 s cap), and that export's log line already met the count the test
+  waited for; the checks then read a policy with fewer ranges or without the
+  overflow flag. The test now waits for the newest range in the policy file,
+  which only the export after the last range lists, and then for the answer
+  to an inert Get, so that export's log line is out before the later counts.
 
 ## v1.17.0 (2026-11-16)
 

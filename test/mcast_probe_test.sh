@@ -27,7 +27,13 @@ cat > "$W/bin/diag" <<'EOF'
 S=$FAKE_STATE
 gone() { rm -f "$S"/slot* "$S/owner"; }
 # The holder dead, as after a SIGKILL: the kernel would have closed its file.
-held() { [ -f "$S/owner" ] && ! kill -0 "$(cat "$S/owner")" 2>/dev/null && gone; return 0; }
+# No pid is no holder, not a dead one: a delete all can remove the file
+# between the test and the read.
+held() {
+	o=$(cat "$S/owner" 2> /dev/null)
+	[ -n "$o" ] && ! kill -0 "$o" 2>/dev/null && gone
+	return 0
+}
 show() {
 	if [ -f "$S/slot$1" ]; then cat "$S/slot$1"
 	else echo "slot=$1 entry=$((88 + $1)) counter=$((16 + 2 * $1)) empty"; fi
@@ -44,7 +50,9 @@ run() {
 	"acl-probe count"|"acl-probe bytes"|"acl-probe mirror"|"acl-probe trap")
 		if [ "$OWNER" != 1 ]; then echo "% busy"; return; fi
 		[ -f "$S/slot$3" ] && { echo "% busy"; return; }
-		echo "$$" > "$S/owner"
+		# By rename: a show reading the file while > had emptied it took the
+		# empty pid for a dead holder and dropped every probe.
+		echo "$$" > "$S/owner.$$" && mv -f "$S/owner.$$" "$S/owner"
 		echo "slot=$3 entry=$((88 + $3)) counter=$((16 + 2 * $3)) port=0 action=$2 unit=frames proto=2 dst=0.0.0.0/0 counted=7 base=0x00000000 now=0x00000007 cpu=7 cpu_ports=0x1 cpu_bytes=448 uni_igmp_other=0 other_reason=0" > "$S/slot$3"
 		echo "$*" >> "$S/log" ;;
 	"mib dump")
@@ -122,10 +130,8 @@ if FAKE_IGMPD=1 sh "$SCRIPT" > "$W/run.log" 2>&1; then bad "ran beside igmpd"; e
 [ ! -f "$W/state/log" ] && ok "and installed nothing" || bad "installed a probe beside igmpd"
 
 # 3. SIGTERM mid-window: the trap puts everything back.
-# The window is long and the wait for its probes generous (30 s): on a CI
-# runner busy with the other legs of make test, installing five probes can
-# take several seconds. The kill comes as soon as they are in, so a fast
-# run stays fast.
+# The window is long and the wait for its probes only a bound (30 s): the
+# five go in within a second, and the kill comes as soon as they are in.
 setup
 export COUNT_S=120
 sh "$SCRIPT" > "$W/run.log" 2>&1 &
