@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.17.1 (2026-11-17)
+
 - Releases: confd v1.17.1. On Status the fibre-line down and up rates
   refresh every second, from the PON port byte counters read without
   forking `diag`. On Config the tags beside a setting are small labels
