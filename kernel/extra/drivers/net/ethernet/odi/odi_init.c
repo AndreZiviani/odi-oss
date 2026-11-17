@@ -137,7 +137,10 @@ static ssize_t odi_init_proc_write(struct file *file, const char __user *buffer,
 	odi_init_last_ret = ret;
 	mutex_unlock(&odi_switch_lock);
 	pr_info("odi_init step %s: ret %d\n", name, ret);
-	return count;
+	/* A refused verb fails the write, so a writer sees it without a
+	 * second read (which another writer could overtake); the result
+	 * also stays readable, as rcS logs it. */
+	return ret < 0 ? ret : count;
 }
 
 static const struct proc_ops odi_init_proc_fops = {

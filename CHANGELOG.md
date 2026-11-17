@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- Identity: a PLOAM password the driver refuses is no longer kept as
+  tested. A write to `/proc/odi_init` returned success even when the driver
+  refused the verb (the result was only readable afterwards), so omcid's
+  reload took a refused `gpondeact`, `gponsn`, `gponpw` or `gponact` as
+  done, and `gpon-hold.sh clear` could not see a refused `gponhold 0`. The
+  write now fails with the verb's errno; the result stays readable for
+  rcS's log. A changed password the driver does not take is not sent and
+  ends the reload in the new result `pw_not_applied`, which the identity
+  trial reverts like `sn_not_applied`; before, the ONU came back on the old
+  password and the trial stored the refused one. A later reload with
+  nothing changed reports the refused serial number or password again
+  instead of `ok`, and after a refused `gponact`, which leaves the ONU
+  deactivated, it re-registers rather than reporting `ok`. `identity-trial.sh try` checks the password's form up
+  front (bytes, not characters; no spaces at either end, which the driver
+  never sees), and refuses a key given twice: omcid answered the first
+  value and the store kept the last.
+
 - Memory: rcS sets `vm.percpu_pagelist_high_fraction` to 32. The kernel keeps
   a per-CPU list of free pages that `MemFree` and `MemAvailable` leave out, and
   by default its limit tuned itself up to about 3.3 MB, so the free memory

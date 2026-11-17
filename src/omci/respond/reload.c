@@ -65,6 +65,9 @@ static struct {
 	long deadline_s;                 /* RL_WAIT_O5 gives up */
 	long last_check_s;
 	int sn_failed;
+	int pw_failed;
+	unsigned pending;                /* CFGD_SN, CFGD_PLOAM: in the store, not in the driver */
+	int act_failed;                  /* the last gponact failed: left deactivated */
 	int confirm;                     /* rereg_take_confirm() of this reload */
 	long deact_base;                 /* Deactivate_ONU-IDs before gponact, -1 unknown */
 	unsigned refusals;               /* and since */
@@ -193,7 +196,8 @@ static void status_write(int done, const char *result, long o5_ms)
  * writes and a timer sync, no waiting on another process), so nothing here
  * can be bounded further from userspace; a kernel that never returned would
  * stop the watchdog ping and the board would reset, as for any hang in this
- * loop. Returns 0, or the negative errno. */
+ * loop. A verb the driver refuses fails the write with its errno
+ * (odi_init.c). Returns 0, or the negative errno. */
 static long odi_verb(const char *verb, const char *arg)
 {
 	char line[64];
@@ -300,6 +304,7 @@ static void do_reregister(const struct cfg_snap *old)
 	ev_reload(rl.changed, rl.action, rl.keys);
 	status_write(0, "pending", -1);
 	rl.sn_failed = 0;
+	rl.pw_failed = 0;
 	rl.refusals = 0;
 	rl.deact_base = -1;
 
@@ -368,13 +373,28 @@ static void activate(void)
 		/* The password is written whenever there is one, as
 		 * omci_reactivate does, and cleared with the bare verb when
 		 * the key was just emptied: the driver then sends none. */
-		if (ident.ploamLen > 0) {
+		if (ident.ploamLen > 0 && cfg_ploam_ok(&ident)) {
 			rc = odi_verb("gponpw", ident.ploam);
 			ev_reload_step("gponpw", rc);
+			if (rc && (rl.mask & CFGD_PLOAM))
+				rl.pw_failed = 1;
+		} else if (ident.ploamLen > 0) {
+			/* Not a password the driver takes (odi_gpon_pw.c):
+			 * it would keep the old one, and an OLT that checks
+			 * passwords sees that one. Not sent, and said. */
+			ev_reload_step("gponpw", -22);
+			if (rl.mask & CFGD_PLOAM)
+				rl.pw_failed = 1;
 		} else if (rl.mask & CFGD_PLOAM) {
 			rc = odi_verb("gponpw", 0);
 			ev_reload_step("gponpw", rc);
+			if (rc)
+				rl.pw_failed = 1;
 		}
+		/* What the driver now holds: a refused value stays named
+		 * until the store changes again. */
+		rl.pending = (rl.sn_failed ? CFGD_SN : 0) |
+			     (rl.pw_failed ? CFGD_PLOAM : 0);
 		/* The count the refusals are measured from: whatever the
 		 * OLT sends after the activation is its answer to it. */
 		rl.deact_base = rereg_deacts();
@@ -382,10 +402,13 @@ static void activate(void)
 		ev_reload_step("gponact", rc);
 		if (rc) {
 			/* Left deactivated: better said loudly than retried
-			 * blind. rcS and the old apply.sh said the same. */
+			 * blind. rcS and the old apply.sh said the same. The
+			 * next apply tries again, changed or not. */
+			rl.act_failed = 1;
 			finish("failed", -1);
 			return;
 		}
+		rl.act_failed = 0;
 	}
 	now_ms(&rl.act_s, &rl.act_ms);
 	rl.deadline_s = rl.act_s + reload_o5_wait_s;
@@ -414,6 +437,7 @@ static void do_reload(void)
 {
 	struct cfg_snap old, cur;
 	unsigned mask;
+	int retry;
 
 	rl.seq++;
 	now_ms(&rl.start_s, &rl.start_ms);
@@ -425,10 +449,27 @@ static void do_reload(void)
 	cfg_load_all();
 	cfg_snap_take(&cur);
 	mask = cfg_snap_diff(&rl.base, &cur);
+	/* The last activation failed and the ONU is still deactivated: an
+	 * apply with nothing new re-registers all the same, since reporting
+	 * ok would leave the line down with nothing said. */
+	retry = !mask && rl.act_failed;
+	/* A re-registration sends again what the driver refused last time. */
+	if ((mask & CFGD_IDENTITY) || retry)
+		mask |= rl.pending;
 	rl.mask = mask;
 	cfg_diff_names(mask, rl.keys, sizeof rl.keys);
 
-	if (!mask) {
+	if (!mask && rl.pending && !retry) {
+		/* Nothing new, but the store still holds a serial number or
+		 * password the driver did not take: not ok, and no second
+		 * re-registration for the same value. */
+		rl.changed = "identity";
+		rl.action = "none";
+		ev_reload(rl.changed, rl.action, 0);
+		finish((rl.pending & CFGD_SN) ? "sn_not_applied" : "pw_not_applied", -1);
+		return;
+	}
+	if (!mask && !retry) {
 		rl.changed = "none";
 		rl.action = "none";
 		ev_reload(rl.changed, rl.action, 0);
@@ -438,12 +479,12 @@ static void do_reload(void)
 	/* The baseline moves with the decision: the daemon now runs the new
 	 * values. do_reregister puts the old ones back if it cannot start. */
 	rl.base = cur;
-	if ((mask & CFGD_IDENTITY) && !rl.confirm &&
+	if ((mask & CFGD_IDENTITY) && !retry && !rl.confirm &&
 	    rereg_streak() >= REREG_HOLD) {
 		hold(&old);
 		return;
 	}
-	if (mask & CFGD_IDENTITY) {
+	if ((mask & CFGD_IDENTITY) || retry) {
 		do_reregister(&old);
 		if (rl.phase == RL_IDLE)
 			rl.base = old;           /* gpondeact failed */
@@ -489,7 +530,8 @@ void reload_poll(void)
 		return;
 	}
 	if (st == 5 && services_in_use() > 0) {
-		finish(rl.sn_failed ? "sn_not_applied" : "ok",
+		finish(rl.sn_failed ? "sn_not_applied" :
+		       rl.pw_failed ? "pw_not_applied" : "ok",
 		       since_ms(rl.act_s, rl.act_ms));
 		return;
 	}
