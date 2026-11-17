@@ -73,6 +73,15 @@ ODI_WDT_OMCID_DEADLINE_S=${ODI_WDT_OMCID_DEADLINE_S:-60}
 # docs/SETTINGS.md has the number and the reasoning; not a cgroup or memcg
 # limit, just the global watermark.
 echo 1536 > /proc/sys/vm/min_free_kbytes 2>/dev/null || echo "rcS: vm.min_free_kbytes not set" >&2
+# vm.percpu_pagelist_high_fraction: the per-CPU list of free pages the
+# kernel keeps for quick reuse is left out of MemFree and MemAvailable, and
+# by default its limit tunes itself up to an eighth of RAM (839 pages, about
+# 3.3 MB, measured on a stick), so the free figure on Status, in the metrics
+# and in the odi_wdt alive line moved by up to 3 MB with no memory in use.
+# 32 fixes the limit at a thirty-second (about 210 pages, 840 KB).
+# docs/SETTINGS.md has the measurement.
+echo 32 > /proc/sys/vm/percpu_pagelist_high_fraction 2>/dev/null ||
+	echo "rcS: vm.percpu_pagelist_high_fraction not set" >&2
 /bin/mount -a >> /tmp/mount-a.trace 2>&1 || echo "rcS: mount -a (pass 2) reported a failure, see /tmp/mount-a.trace" >&2
 required_mounts_ok || true
 

@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Memory: rcS sets `vm.percpu_pagelist_high_fraction` to 32. The kernel keeps
+  a per-CPU list of free pages that `MemFree` and `MemAvailable` leave out, and
+  by default its limit tuned itself up to about 3.3 MB, so the free memory
+  shown on Status, in the metrics and in the `odi_wdt` alive line could drop
+  by 2 MB or more a few minutes after boot with nothing allocated. The limit
+  is now about 840 KB.
+
 ## v1.18.0 (2026-11-17)
 
 - Releases: confd v1.18.0. Firmware: a write flashes only the image the page
