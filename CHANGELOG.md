@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.18.0 (2026-11-17)
+
 - Releases: confd v1.18.0. Firmware: a write flashes only the image the page
   uploaded, named by its md5, and is refused while another write runs, while
   a trial of that partition is pending, or when the slot environment cannot
