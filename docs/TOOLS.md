@@ -1328,11 +1328,17 @@ to the U-Boot environment only with `FWU_RECORD_VERSION=1`. `docs/FLASHING.md` i
 
 What the Firmware tab's Write runs. Refuses a second write while one is
 running, and any slot but the inactive one (read the way `fwu.sh` reads it:
-`root=31:N` in `/proc/cmdline`, then `sw_active`); extracts `fwu.sh` and
+`root=31:N` in `/proc/cmdline`, then `sw_active`), and either slot when
+`nv getenv sw_commit` gives neither 0 nor 1: `fwu.sh` only warns there,
+because the vendor nv of a first flash may not answer, but this script ships
+with ours. Extracts `fwu.sh` and
 `md5.txt` from the tarball into `/tmp/fwu.d` and checks `fwu.sh` against its
 md5 line; then runs `fwu.sh <slot> <tar>` there, detached with `setsid`, its
 output in `/tmp/fwu.log` and its outcome in `/tmp/fwu.state` (`running`,
-`ok` or `failed <rc>`), which confd reports and the page polls. Never writes
+`ok` or `failed <rc>`), which confd reports and the page polls. A state file
+it cannot write is a refusal, in both modes. After a background write, ok or
+failed, it runs `slot-state.sh`, so the other-slot check in the banner and
+the exporter describes the slot as it is now. Never writes
 `sw_commit` or `sw_tryactive`; trying the slot is a separate step.
 
 ### `apply.sh` -- apply saved settings without a reboot

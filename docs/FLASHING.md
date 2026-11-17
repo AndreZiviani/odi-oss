@@ -366,7 +366,8 @@ the host only sees ARP go unanswered. `trial-guard.sh` (an `/etc/inittab`
   itself that got past the handshake (an ssh login, the web UI, a metrics
   scrape), or a neighbour in `REACHABLE`, which only an answer to
   something the stick sent puts there. It also releases once the slot is
-  committed (`nv commit` and `slot-state.sh` from the serial console).
+  committed (`nv commit` and `slot-state.sh` from the serial console): once
+  the state says `uncommitted=0`, not when it stops being readable.
 
 A frame arriving from the host does not count: it proves only that the
 stick receives, and a stick that cannot transmit still receives every ARP

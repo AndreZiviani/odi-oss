@@ -33,6 +33,14 @@ n=\$(cat "$T/sleeps" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "$T/sle
 if [ -s "$T/commit_after" ] && [ "\$n" -ge "\$(cat "$T/commit_after")" ]; then
 	sed 's/^uncommitted=1$/uncommitted=0/' "$T/state" > "$T/state.new" && mv "$T/state.new" "$T/state"
 fi
+# blank_after: after that many sleeps, the state cannot be told any more
+# (slot-state.sh rewrote it while nv failed); remove_after: the file is gone.
+if [ -s "$T/blank_after" ] && [ "\$n" -ge "\$(cat "$T/blank_after")" ]; then
+	sed 's/^uncommitted=.*$/uncommitted=/' "$T/state" > "$T/state.new" && mv "$T/state.new" "$T/state"
+fi
+if [ -s "$T/remove_after" ] && [ "\$n" -ge "\$(cat "$T/remove_after")" ]; then
+	rm -f "$T/state"
+fi
 exit 0
 EOF
 cat > "$T/bin/timeout" <<EOF
@@ -60,7 +68,7 @@ LISTEN22='   0: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 000
 # setup <state lines...>: a fresh run directory; the state file holds the
 # lines given (none: no state file at all).
 setup() {
-	rm -f "$T/calls" "$T/kmsg" "$T/neigh" "$T/sleeps" "$T/commit_after" "$T/state" "$T/off"
+	rm -f "$T/calls" "$T/kmsg" "$T/neigh" "$T/sleeps" "$T/commit_after" "$T/blank_after" "$T/remove_after" "$T/state" "$T/off"
 	echo "40.00 0.00" > "$T/uptime"
 	: > "$T/register"
 	printf '%s\n%s\n' "$TCP_HDR" "$LISTEN22" > "$T/tcp"
@@ -131,6 +139,13 @@ trial
 tcp 7F000001:0016 7F000002:A003 01		# 127.0.0.1 to 127.0.0.2
 tcp6 00000000000000000000FFFF7F000001:0016 00000000000000000000FFFF7F000102:A004 01
 run; expect "two different 127/8 addresses prove nothing" 1 0
+
+# An armed trial keeps its deadline when the state stops being readable:
+# only uncommitted=0 is a commit.
+trial; echo 3 > "$T/blank_after"
+run; expect "state unreadable during the trial: stays armed" 1 0 "the watchdog reverts this trial to slot 0"
+trial; echo 3 > "$T/remove_after"
+run; expect "state file gone during the trial: stays armed" 1 0 "the watchdog reverts this trial to slot 0"
 
 # ---- proven -----------------------------------------------------------------
 trial; tcp C0A80101:0016 C0A80102:C000 01

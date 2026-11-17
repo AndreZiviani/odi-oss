@@ -162,7 +162,11 @@ while :; do
 		release "management path proven, $why"
 		exit 0
 	fi
-	if [ "$(state_val uncommitted)" != 1 ]; then
+	# Committed only when the state says so. An empty answer is a state
+	# that cannot be read (slot-state.sh writes "uncommitted=" when nv
+	# fails, and a missing file reads the same), and releasing on it would
+	# leave a stranded trial up until the power is pulled.
+	if [ "$(state_val uncommitted)" = 0 ]; then
 		release "slot $running is committed now"
 		exit 0
 	fi

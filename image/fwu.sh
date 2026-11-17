@@ -234,6 +234,8 @@ if ! have_cmd flash_eraseall; then
 fi
 
 # Sizes, before the erase rather than after it. /proc/mtd is in hex.
+nl='
+'
 part_size() {
 	sed -n "s/^$1: \([0-9a-f]*\) .*/\1/p" "$PROC_MTD" | sed -n '1p'
 }
@@ -241,13 +243,34 @@ fits() {
 	# cksum prints "<crc> <bytes>". Split it with parameter expansion: `cut`
 	# is on the V1.0-220923 stock image but NOT on every vendor stock (the
 	# other has none), and a missing applet here made the size empty.
-	ck=$(tar -xf "$tarball" "$1" -O | cksum)
+	#
+	# cksum counts what tar sent, and a tar that fails halfway sends a
+	# prefix that fits. There is no pipefail, so tar's status comes back on
+	# fd 3 as a line of its own, as in the read-back below, and the count is
+	# only taken when tar finished.
+	ck=$({ { tar -xf "$tarball" "$1" -O; echo "fwu-tar-rc=$?" >&3; } | cksum; } 3>&1)
+	case $ck in
+	*fwu-tar-rc=0 | *"fwu-tar-rc=0$nl"*) ;;
+	*)
+		echo "fwu: cannot read $1 from $tarball (tar failed). Nothing has been" >&2
+		echo "     touched." >&2
+		return 1
+		;;
+	esac
+	case $ck in
+	fwu-tar-rc=*"$nl"*) ck=${ck#*"$nl"} ;;
+	*) ck=${ck%"$nl"fwu-tar-rc=*} ;;
+	esac
 	have=${ck#* }
 	have=${have%% *}
 	case $have in
 	"" | *[!0-9]*)
 		echo "fwu: cannot size $1 (cksum said: ${ck:-nothing}). Nothing has been" >&2
 		echo "     touched." >&2
+		return 1
+		;;
+	0)
+		echo "fwu: $1 is empty. REFUSING." >&2
 		return 1
 		;;
 	esac

@@ -33,11 +33,24 @@ mkdir -p "$T/bin" "$T/img"
 # setsid is not on every host this runs on; the stub runs the job in place,
 # which is what setsid does apart from the new session.
 printf '#!/bin/sh\nexec "$@"\n' > "$T/bin/setsid"
+# NV_COMMIT is what sw_commit reads as: 0 unless a test says otherwise, and
+# set but empty for an environment that cannot be read.
 cat > "$T/bin/nv" <<'NV'
 #!/bin/sh
-[ -n "${NV_ACTIVE:-}" ] && echo "sw_active=$NV_ACTIVE"
+case "$2" in
+sw_active) [ -n "${NV_ACTIVE:-}" ] && echo "sw_active=$NV_ACTIVE" ;;
+sw_commit) [ -n "${NV_COMMIT-0}" ] && echo "sw_commit=${NV_COMMIT-0}" ;;
+esac
 exit 0
 NV
+# slot-state.sh: says that it ran, and whether it got the writer lock (it
+# must not hold it, so it must be able to take it).
+cat > "$T/bin/slot-state" <<SS
+#!/bin/sh
+if PATH="$T/bin:\$PATH" flock -n 9 9>>"$T/fwu.state.lock"; then echo free; else echo held; fi > "$T/slot-state.lock"
+echo ran >> "$T/slot-state.runs"
+SS
+chmod +x "$T/bin/slot-state"
 # flock is a busybox applet on the stick. A host without the util-linux
 # command gets the same kernel lock through python.
 if ! command -v flock >/dev/null 2>&1; then
@@ -84,7 +97,7 @@ run() {   # run <cmdline> [args...]
 	cl=$(mktemp "$T/cmdline.XXXXXX")
 	echo "$1" > "$cl"; shift
 	env PATH="$T/bin:$PATH" PROC_MTD="$T/mtd" PROC_CMDLINE="$cl" NV="$T/bin/nv" \
-	    FWU_DIR="$T/fwu.d" FWU_LOG="$T/fwu.log" FWU_STATE="$T/fwu.state" \
+	    FWU_DIR="$T/fwu.d" FWU_LOG="$T/fwu.log" FWU_STATE="$T/fwu.state" SLOT_STATE="$T/bin/slot-state" \
 	    sh "$S" "$@" 2>&1
 }
 
@@ -95,23 +108,36 @@ t "the running slot is refused (cmdline names r1)" "running; write slot 0" "$(ru
 t "sw_active answers when the cmdline does not" "running; write slot 0" \
   "$(NV_ACTIVE=1 run 'console=ttyS0' 1 "$T/good.tar")"
 t "neither answering refuses both slots" "cannot tell which slot" "$(run 'console=ttyS0' 1 "$T/good.tar")"
+t "an unreadable sw_commit refuses the write" "cannot read sw_commit" "$(NV_COMMIT='' run 'root=31:5' 1 "$T/good.tar")"
+t "so does one that is neither 0 nor 1" "cannot read sw_commit" "$(NV_COMMIT=2 run 'root=31:5' 1 "$T/good.tar")"
 t "a fwu.sh that does not match md5.txt is refused" "md5 mismatch" "$(run 'root=31:5' 1 "$T/bad.tar")"
 t "a tar without fwu.sh is refused" "no fwu.sh" "$( : > "$T/empty"; ( cd "$T" && tar -cf notimg.tar empty ); run 'root=31:5' 1 "$T/notimg.tar")"
 
 out=$(run 'root=31:5' --foreground 1 "$T/good.tar")
 t "foreground runs fwu.sh with the slot and the tarball" "fwu stub slot=1 tar=$T/good.tar" "$out"
 
-rm -f "$T/fwu.state"
-out=$(run 'root=31:5' 1 "$T/good.tar")
+rm -f "$T/fwu.state" "$T/release0"
+# Held until the starter has returned, as an 80 s write is on the stick: the
+# lock check below is about the job, not about a starter still waiting.
+out=$(FWU_HOLD="$T/release0" run 'root=31:5' 1 "$T/good.tar")
+: > "$T/release0"
 t "background returns at once and says where the log is" "in the background" "$out"
 for _ in 1 2 3 4 5; do grep -q '^ok' "$T/fwu.state" 2>/dev/null && break; sleep 1; done
 t "the job records its outcome" "^ok [0-9]* 1" "$(cat "$T/fwu.state")"
 t "and its output lands in the log" "fwu stub slot=1" "$(cat "$T/fwu.log")"
+# until_slot_state <n>: slot-state.sh has run n times (it runs after the
+# job records its outcome, so the state file alone does not say it has).
+until_slot_state() { for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(grep -c ran "$T/slot-state.runs" 2>/dev/null)" = "$1" ] && return; sleep 0.5; done; }
+until_slot_state 1
+t "and the slot state is refreshed after the write" "^ran$" "$(cat "$T/slot-state.runs" 2>/dev/null)"
+t "without the writer lock" "^free$" "$(cat "$T/slot-state.lock" 2>/dev/null)"
 
 rm -f "$T/fwu.state"
 FWU_STUB_RC=3 run 'root=31:5' 1 "$T/good.tar" > /dev/null
 for _ in 1 2 3 4 5; do grep -q '^failed' "$T/fwu.state" 2>/dev/null && break; sleep 1; done
 t "a failing fwu.sh is recorded with its exit code" "^failed [0-9]* 1 3" "$(cat "$T/fwu.state")"
+until_slot_state 2
+t "the slot state is refreshed after a failed write too" "^ran ran$" "$(tr '\n' ' ' < "$T/slot-state.runs" | sed 's/ $//')"
 
 # A live writer holds the lock; a dead one does not.
 sleep 30 & live=$!
@@ -221,6 +247,16 @@ rmdir "$T/fwu.state"
 t "an unwritable state file is refused" "cannot record the writer state" "$out"
 t "with exit 1" "^1$" "$rc"
 t "before the flasher" "^0$" "$(lines start "$T/starts")"
+
+# The same in the background: the starter must not take a state it could
+# not write for a job that has claimed it.
+until_ok 10 lock_free
+rm -f "$T/fwu.state" "$T/starts"; mkdir "$T/fwu.state"
+out=$(FWU_START_S=2 FWU_STARTS="$T/starts" run 'root=31:5' 1 "$T/good.tar"); rc=$?
+rmdir "$T/fwu.state"
+t "background: an unwritable state file is refused" "cannot record the writer state" "$out"
+t "background: with exit 1" "^1$" "$rc"
+t "background: and nothing was flashed" "^0$" "$(lines start "$T/starts")"
 
 echo
 echo "$pass passed, $fail failed"

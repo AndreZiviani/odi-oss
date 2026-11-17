@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Upgrade: unknown states no longer read as good ones. The trial guard
+  releases its watchdog client only when `/var/run/odi-slot` says
+  `uncommitted=0`; an empty or missing value during a trial used to count
+  as committed and left a stranded trial up for good. `fwu_starter.sh`
+  refuses to write either slot when `sw_commit` cannot be read (on an
+  uncommitted trial the idle slot is the revert target), refuses when it
+  cannot write its state file in the background mode too (a full `/tmp`
+  made it report a write that never started), and runs `slot-state.sh`
+  after each background write so the banner's other-slot check is current.
+  `fwu.sh` sizes a member only when tar read it to the end: a tar that
+  failed halfway passed a prefix that fit, and an empty member is refused.
+
 ## v1.17.1 (2026-11-17)
 
 - Releases: confd v1.17.1. On Status the fibre-line down and up rates
