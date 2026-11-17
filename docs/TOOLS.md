@@ -55,7 +55,8 @@ backgrounds everything slow. In order, rcS:
 
 1. mounts `/proc`, `/sys`, `/var` (tmpfs, capped at 6 MB) and `/var/tmp`
    (its own tmpfs, capped at 8 MB -- `/tmp` is a symlink to it), makes the
-   `/var` directories, raises `vm.min_free_kbytes`, and mounts the jffs2
+   `/var` directories, raises `vm.min_free_kbytes`, caps the per-CPU free
+   page list (`vm.percpu_pagelist_high_fraction`), and mounts the jffs2
    `config` partition on `/var/config`
    (`/etc/scripts/mount-config.sh`; `/etc/config` is a symlink to it);
 2. seeds entropy (`seedrng`, seed kept in `/etc/config/seedrng`), sets the
