@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.18.0. Firmware: a write flashes only the image the page
+  uploaded, named by its md5, and is refused while another write runs, while
+  a trial of that partition is pending, or when the slot environment cannot
+  be read; a pending trial can be cancelled, and the trial banner offers
+  Commit when the two U-Boot copies disagree. Status: a "Line up" row from
+  `in_state_s`, and a link to the diagnostics bundle when the link check
+  finds a failing stage. Logs: the bundle text says what it masks. The
+  asset hashes in src/release-sha256.txt are the release SHA256SUMS,
+  checked by `make releases`.
+
 - Upgrade: unknown states no longer read as good ones. The trial guard
   releases its watchdog client only when `/var/run/odi-slot` says
   `uncommitted=0`; an empty or missing value during a trial used to count

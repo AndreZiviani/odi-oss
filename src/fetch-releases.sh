@@ -41,7 +41,7 @@ if [ -n "${METRICSD_BIN:-}" ]; then
 	METRICSD_TAG=local
 fi
 CONFD_REPO=${CONFD_REPO:-AndreZiviani/odi-ui}
-CONFD_TAG=${CONFD_TAG-v1.17.1}
+CONFD_TAG=${CONFD_TAG-v1.18.0}
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
