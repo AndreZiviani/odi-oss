@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.17.1. On Status the fibre-line down and up rates
+  refresh every second, from the PON port byte counters read without
+  forking `diag`. On Config the tags beside a setting are small labels
+  again, the legend says what the cost bars measure, and the help says
+  which identity keys only the stock firmware reads and that
+  `VLAN_EAPOL_UNTAGGED` has run on a line that uses EAP. The firmware page
+  shows the erase progress of a flash as one updating line. The asset
+  hashes in src/release-sha256.txt are the release SHA256SUMS, checked by
+  `make releases`.
+
 - Tests: `test/mcast_probe_test.sh` no longer fails now and then with "the
   count window never started". Its stub diag rewrote the file naming the
   probe holder with `>`, and an `acl-probe show` that read the file while
