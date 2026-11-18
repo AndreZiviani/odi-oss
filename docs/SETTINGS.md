@@ -758,11 +758,15 @@ speaks. `HOST_SERDES` picks another:
   1000BASE-X PCS powered down and the port forced. This is the mode the
   stock firmware calls `LAN_SDS_MODE` 4 ("2500Mbps HiSGMII PHY"); it is not
   a 1G mode on the wire, and not an IEEE 802.3 mode: no standard defines
-  it, so the host must be set to it. The sequence ends with 0x21808 :=
-  0x71e0, which only this mode writes (`docs/SWITCH.md`, "Host port SerDes
-  mode"). Reported linked, with this sequence, to a Banana Pi BPI-R4, a
-  MikroTik RB5009 (module EEPROM A0h byte 12 at 0x1F) and a media
-  converter. Before 0x21808 was written, on a Luleey LL-XS2510 against a
+  it, so the host must be set to it. The sequence ends with 0x21808 bit 8
+  set (0x70e0 becomes 0x71e0), in-band negotiation forced off on the host
+  lane; Fiber 1G and 2500BASE-X clear it (`docs/SWITCH.md`, "Host port
+  SerDes mode"). Reported linked, with this sequence on a downstream
+  build, to a Banana Pi BPI-R4, a MikroTik RB5009 and a media converter.
+  The RB5009 ran with a module EEPROM whose A0h byte 12 read 0x1F (3100
+  MBd); this image reports 1300 MBd ("What the host reads from the
+  module", below), so on a host that picks its rate from the EEPROM the
+  result does not carry over. Before 0x21808 was written, on a Luleey LL-XS2510 against a
   2.5G router port (a UniFi gateway whose SFP+ port a third-party tweak
   runs at 2.5G) it synced but passed no frames, where `2500basex` linked,
   and an RB5009 had the link up and received nothing; the LL-XS2510 has

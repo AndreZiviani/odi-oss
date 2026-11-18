@@ -310,7 +310,8 @@ STUB
 chmod +x "$R/stubdiag"
 cp "$R/bin/diag" "$R/bin/diag.real" 2>/dev/null
 cp "$R/stubdiag" "$R/bin/diag"
-# The Fiber 1G state as read off isp1 2026-09-15, with both diags.
+# The Fiber 1G state as read off isp1 2026-09-15, with both diags, plus
+# 0x21808 at its reset value (bit 8 clear), which Fiber 1G compares.
 fiber1g() {
 	cat > "$R/var/tmp/regs" <<'REGS'
 0x214=0x260004
@@ -324,6 +325,7 @@ fiber1g() {
 0x215b4=0x1264
 0x215bc=0x400f
 0x215e4=0xfc00
+0x21808=0x70e0
 0x1d0=0x8
 REGS
 }
@@ -396,7 +398,7 @@ rm -f "$R/etc/config/sds.off" "$R/var/tmp/regs"
 # write lists are test/host_serdes_test.sh's, from the same starting values.
 serdes_mode() {   # serdes_mode MODE: boot network.sh in MODE from Fiber 1G
 	fiber1g
-	printf '0x21700=0x0\n0x2170c=0x0\n0x21718=0x0\n0x21808=0x70e0\n0x21500=0x0\n' >> "$R/var/tmp/regs"
+	printf '0x21700=0x0\n0x2170c=0x0\n0x21718=0x0\n0x21500=0x0\n' >> "$R/var/tmp/regs"
 	rm -f "$R/var/tmp/sdsset" "$R/var/run/host-serdes"
 	mkdir -p "$R/var/tmp/param"
 	echo N > "$R/var/tmp/param/host_forced"; echo Y > "$R/var/tmp/param/host_autoneg"

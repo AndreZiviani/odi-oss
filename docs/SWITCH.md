@@ -1260,13 +1260,16 @@ is a UNI PHY ability for cmd 30, and the host SerDes has no such PHY.
 
 The bit layout is the one of the stock register table for this block. The
 same table has a second candidate, a two-bit "force auto-negotiation" field
-(bits 9:8) of another host SerDes word at 0x021808, never read on a stick.
-This image uses bit 12 of the PCS control word, whose meaning is the
-standard clause-22 one, and touches 0x021808 in no path. On a stick it
+(bits 9:8, one bit per lane, bit 8 the host lane) of another host SerDes
+word, `SDS_AN_CTRL` 0x021808. `HOST_AUTONEG` uses bit 12 of the PCS
+control word, whose meaning is the standard clause-22 one, and does not
+touch 0x021808. Only the host SerDes mode does: bit 8 set in HiSGMII,
+clear in Fiber 1G and 2500BASE-X ("Host port SerDes mode" below). On a stick it
 gives a working forced link: with the bit cleared (0x1140 becomes 0x0140)
 the port keeps reporting the link of a forced PCS, and against a host whose
 SFP port has auto-negotiation off a forced stick carries traffic where a
-negotiating one gets a link and none. The other candidate was never needed.
+negotiating one gets a link and none. For `HOST_AUTONEG` the other
+candidate was never needed.
 
 `odi_sw_host_autoneg_apply()` (`odi_switch_port.c`) is one read-modify-write
 of bit 12: cleared for off (`0x1140` becomes `0x0140`: no negotiation, 1000
@@ -1320,10 +1323,12 @@ one is the sequence this image always ran.
 The sequence: the same thirteen steps in every mode, in this order (the
 mode parked, the analog block, the mode selected). The two 3.125 Gbaud
 modes, 2500BASE-X and HiSGMII, add the 3.125G analog page before the mode
-is selected and a receive pulse after it. HiSGMII then writes 0x21808,
-as the stock HSGQ kernel does in its LAN SerDes mode 4 (HiSGMII PHY); it
-does not in mode 6 (2500BaseX). RMW is a read-modify-write of the bits
-named; the rest are plain writes.
+is selected and a receive pulse after it. Every mode ends with `SDS_AN_CTRL`
+0x21808 bit 8, in-band negotiation forced off on the host lane: set in
+HiSGMII, as the stock HSGQ kernel does in its LAN SerDes mode 4 (HiSGMII
+PHY; 0x70e0 becomes 0x71e0), clear in the other two (mode 6, 2500BaseX,
+leaves it at its reset value), so no change out of HiSGMII leaves it set.
+RMW is a read-modify-write of the bits named; the rest are plain writes.
 
 | step | register | Fiber 1G | 2500BASE-X | HiSGMII |
 |---|---|---|---|---|
@@ -1338,12 +1343,13 @@ named; the rest are plain writes.
 | 12 | 0x214 bits 15, 13, 8 and [4:0] := the mode (RMW, mask 0xa11f) | 0x4 | 0x16 | 0x112 (`PHY_SIDE_SEL` bit 8 and 0x12) |
 | 13 | `PHY_PATCH_STATUS` 0x110 `PATCH_DONE` bit 0 := 1 (RMW) | same | same | same |
 | -- | 0x21500 := 0x10, then 0x30, then 0: a receive pulse | -- | written | written |
-| -- | 0x21808 := 0x71e0 (0x70e0 out of reset) | -- | -- | written |
+| -- | `SDS_AN_CTRL` 0x21808 bit 8 (RMW; 0x70e0 out of reset) | 0, written only when it reads 1 | 0, written only when it reads 1 | 1 |
 
 What the boot compares, before writing anything and after: the words of
 steps 2 to 13 under their masks (0x214 under 0xa11f, 0x21c00 under 0x800,
-0x22e4c under 0xc000, the rest whole), plus the 3.125G page in 2500BASE-X
-and HiSGMII, and 0x21808 in HiSGMII.
+0x22e4c under 0xc000, 0x21808 under 0x100, the rest whole), plus the
+3.125G page in 2500BASE-X and HiSGMII. A Fiber 1G stick that never ran
+HiSGMII reads bit 8 clear, so its sequence is the stock thirteen writes.
 0x21500 is not compared: it reads 0 after its pulse. A stick that already
 holds the mode is not written; a live change (a trial, its revert, the boot
 watch, `reapply`) writes the whole sequence whatever the registers hold.

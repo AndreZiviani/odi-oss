@@ -495,6 +495,54 @@ sh "$S" trial-run "$id" 20 > /dev/null 2>&1
 t "confirm fiber1g: the key is removed" "^$" "$(key)"
 t "confirm fiber1g: setting fiber1g, the port follows its SerDes" "^trial_confirmed fiber1g 0 1$" "$(st event) $(st setting) $(p host_forced) $(p host_autoneg)"
 
+# 0x21808 bit 8 (in-band negotiation forced off on the host lane): HiSGMII
+# sets it, Fiber 1G and 2500BASE-X clear it, so no change out of HiSGMII
+# leaves it set. A revert from an applied HiSGMII to Fiber 1G:
+setkey ""
+newboot
+sh "$S" boot > /dev/null
+: > "$T/spawned"
+sh "$S" try hisgmii > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\ncp "%s/regs" "%s/regs.trial"; sh "%s" revert >> "%s/revert.out" 2>&1\n' "$T" "$T" "$S" "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+t "hisgmii trial: applied, 0x21808 bit 8 set" "^0x71e0$" "$(sed -n 's/^0x21808=//p' "$T/regs.trial")"
+t "revert from hisgmii: back to fiber1g" "^trial_reverted fiber1g$" "$(st event) $(st running)"
+t "revert from hisgmii: 0x21808 bit 8 clear" "^0x70e0$" "$(reg 0x21808)"
+t "revert from hisgmii: the clear is the last write" "^set 0x21808 0x70e0$" "$(tail -n 1 "$T/sdsset")"
+t "revert from hisgmii: Fiber 1G mode, PCS powered up" "^0x4 0x0$" "$(printf '0x%x 0x%x' $(( $(reg 0x214) & 0xa11f )) $(( $(reg 0x21c00) & 0x800 )))"
+rm -f "$T/regs.trial"
+: > "$T/sdsset"
+sh "$S" reapply > /dev/null 2>&1
+sh "$S" reapply-run > /dev/null 2>&1
+t "reapply of fiber1g, bit 8 already clear: the thirteen writes, none to 0x21808" "^13 0$" "$(wc -l < "$T/sdsset" | tr -d ' ') $(grep -c 0x21808 "$T/sdsset")"
+
+# HiSGMII confirmed, then 2500BASE-X confirmed: the stored mode runs with
+# bit 8 clear, as the next cold boot runs it.
+: > "$T/spawned"
+sh "$S" try hisgmii > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\nsh "%s" confirm >> "%s/confirm.out" 2>&1\n' "$S" "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+t "confirm hisgmii: stored, 0x21808 0x71e0" "^hisgmii 0x71e0$" "$(key) $(reg 0x21808)"
+: > "$T/spawned"
+echo x2500 > "$T/model"
+sh "$S" try 2500basex > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\nsh "%s" confirm >> "%s/confirm.out" 2>&1\n' "$S" "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+t "hisgmii -> 2500basex confirmed: stored, 0x21808 bit 8 clear" "^2500basex 2500basex 0x70e0$" "$(key) $(st running) $(reg 0x21808)"
+rm -f "$T/model"
+
+# A Fiber 1G boot over a stick that still holds bit 8 (a warm reboot out of
+# HiSGMII): the compare sees it, the sequence runs and clears it, last.
+setkey ""
+newboot
+sed -i.b 's/^0x21808=.*/0x21808=0x71e0/' "$T/regs"
+out=$(sh "$S" boot 2>&1)
+t "fiber1g boot, bit 8 set: not taken as Fiber 1G" "SerDes now Fiber 1G" "$out"
+t "fiber1g boot, bit 8 set: fourteen writes, the clear last" "^14 set 0x21808 0x70e0$" "$(wc -l < "$T/sdsset" | tr -d ' ') $(tail -n 1 "$T/sdsset")"
+
 # The state file cannot be written after the switch (/var full). The file
 # still says the mode before, and expire and revert go by it, so the port
 # has to go back at once. The state directory is the link $T/varlink to
