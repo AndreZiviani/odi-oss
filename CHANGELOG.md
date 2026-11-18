@@ -5,6 +5,24 @@ listed here.
 
 ## Unreleased
 
+- Host SerDes: HiSGMII (3.125 Gbaud) sets `SDS_AN_CTRL` 0x21808 bit 8, in-band
+  negotiation forced off on the host lane (0x70e0 out of reset becomes
+  0x71e0), last, as the stock HSGQ kernel does in its LAN SerDes mode 4, and
+  runs the 3.125G analog page and the receive pulse of 2500BASE-X. Without
+  the bit the SerDes synced and the host link came up, and no frame was
+  received from the host. Fiber 1G and 2500BASE-X clear the bit, writing
+  0x21808 only when it reads set, so a trial, its revert, the boot watch or
+  `reapply` out of HiSGMII does not leave it set, and a stick that never
+  ran HiSGMII runs the stock Fiber 1G sequence write for write. The boot
+  compares bit 8 in all three modes. HiSGMII is not an IEEE 802.3 mode; the
+  host port is set to it. Reported on a downstream build, A/B on two
+  sticks: a MediaTek MT7988A host (Banana Pi BPI-R4), a MikroTik RB5009
+  and a media converter with no 1G mode, all of 2026, passed frames only
+  with this sequence; a media converter of 2022 passed frames with and
+  without it. The RB5009 module EEPROM reported 3100 MBd (A0h byte 12 =
+  0x1F), where this image reports 1300 MBd. The mode reads "HiSGMII (3.125
+  Gbaud)" in the `host-serdes.sh` messages.
+
 - diag-bundle: the scrub fails closed. The rule list was built through
   pipelines that report only their last stage, so a `sort` that failed (no
   memory, a full `/tmp`) left the list short or empty, an empty list
@@ -45,24 +63,6 @@ listed here.
   `-ENOSYS`, so rcS does not log them as refused on every boot; any other
   verb without records is still a gap and fails. rcS and `pon_step` say
   `refused` rather than `failed to start` for a step the driver turned down.
-
-- Host SerDes: HiSGMII (3.125 Gbaud) sets `SDS_AN_CTRL` 0x21808 bit 8, in-band
-  negotiation forced off on the host lane (0x70e0 out of reset becomes
-  0x71e0), last, as the stock HSGQ kernel does in its LAN SerDes mode 4, and
-  runs the 3.125G analog page and the receive pulse of 2500BASE-X. Without
-  the bit the SerDes synced and the host link came up, and no frame was
-  received from the host. Fiber 1G and 2500BASE-X clear the bit, writing
-  0x21808 only when it reads set, so a trial, its revert, the boot watch or
-  `reapply` out of HiSGMII does not leave it set, and a stick that never
-  ran HiSGMII runs the stock Fiber 1G sequence write for write. The boot
-  compares bit 8 in all three modes. HiSGMII is not an IEEE 802.3 mode; the
-  host port is set to it. Reported on a downstream build, A/B on two
-  sticks: a MediaTek MT7988A host (Banana Pi BPI-R4), a MikroTik RB5009
-  and a media converter with no 1G mode, all of 2026, passed frames only
-  with this sequence; a media converter of 2022 passed frames with and
-  without it. The RB5009 module EEPROM reported 3100 MBd (A0h byte 12 =
-  0x1F), where this image reports 1300 MBd. The mode reads "HiSGMII (3.125
-  Gbaud)" in the `host-serdes.sh` messages.
 
 - Memory: rcS sets `vm.percpu_pagelist_high_fraction` to 32. The kernel keeps
   a per-CPU list of free pages that `MemFree` and `MemAvailable` leave out, and

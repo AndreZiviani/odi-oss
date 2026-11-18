@@ -766,10 +766,11 @@ speaks. `HOST_SERDES` picks another:
   batch) and a media converter with no 1G mode (2026 batch) passed frames
   only with this sequence, a media converter of 2022 with it and without
   it (without the 3.125G page, the receive pulse and 0x21808 bit 8; which
-  of the three the newer hosts need is not isolated). The RB5009 ran with a module EEPROM whose A0h byte 12 read 0x1F (3100
-  MBd); this image reports 1300 MBd ("What the host reads from the
-  module", below), so on a host that picks its rate from the EEPROM the
-  result does not carry over. Before 0x21808 was written, on a Luleey LL-XS2510 against a
+  of the three the newer hosts need is not isolated). The RB5009 ran with
+  a module EEPROM whose A0h byte 12 read 0x1F (3100 MBd); this image
+  reports 1300 MBd ("What the host reads from the module", below), so on a
+  host that picks its rate from the EEPROM the result does not carry over.
+  Before 0x21808 was written, on a Luleey LL-XS2510 against a
   2.5G router port (a UniFi gateway whose SFP+ port a third-party tweak
   runs at 2.5G) it synced but passed no frames, where `2500basex` linked,
   and an RB5009 had the link up and received nothing; the LL-XS2510 has
