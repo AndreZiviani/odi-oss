@@ -11,8 +11,9 @@
 #                               its auto-negotiation is HOST_AUTONEG
 #     2500basex                 2500BASE-X, for a 2.5G host port; the PCS
 #                               auto-negotiation off, the port forced
-#     hisgmii                   HiSGMII, the MAC forced to 1000 Mbit/s; the
-#                               1000BASE-X PCS powered down, the port forced
+#     hisgmii                   HiSGMII (3.125 Gbaud), the MAC forced to
+#                               1000 Mbit/s; the 1000BASE-X PCS powered
+#                               down, the port forced
 #
 # Any other value runs fiber1g, and says so. There is no board signal that
 # tells one stick from another (the stock firmware of the HSGQ XPON stick
@@ -146,7 +147,7 @@ label() {
 	case $1 in
 	fiber1g)   echo "Fiber 1G" ;;
 	2500basex) echo "2500BASE-X" ;;
-	hisgmii)   echo "HiSGMII" ;;
+	hisgmii)   echo "HiSGMII (3.125 Gbaud)" ;;
 	*)         echo "$1" ;;
 	esac
 }
@@ -187,20 +188,30 @@ sds_rmw() {
 #             (AUTONEG, bit12, is set after the sequence, below)
 #   SDS_TX    HOST_FIBER_TX 0x22e4c TX_MODE [15:14]: 0 in Fiber 1G, 1 else
 #   SDS_ANA   0x215b4, the TX amplitude word: 0x1264, 0x1764, 0x1564
+#   SDS_ANF   SDS_AN_CTRL 0x21808 bit 8, in-band negotiation forced off on
+#             the host lane: 0x100 in HiSGMII, 0 else (sds_anf, below)
 mode_vars() {
 	case $1 in
-	2500basex) SDS_MODE=0x16  SDS_FIB=0x0   SDS_TX=0x4000 SDS_ANA=0x1764 ;;
-	hisgmii)   SDS_MODE=0x112 SDS_FIB=0x800 SDS_TX=0x4000 SDS_ANA=0x1564 ;;
-	*)         SDS_MODE=0x4   SDS_FIB=0x0   SDS_TX=0x0    SDS_ANA=0x1264 ;;
+	2500basex) SDS_MODE=0x16  SDS_FIB=0x0   SDS_TX=0x4000 SDS_ANA=0x1764 SDS_ANF=0x0 ;;
+	hisgmii)   SDS_MODE=0x112 SDS_FIB=0x800 SDS_TX=0x4000 SDS_ANA=0x1564 SDS_ANF=0x100 ;;
+	*)         SDS_MODE=0x4   SDS_FIB=0x0   SDS_TX=0x0    SDS_ANA=0x1264 SDS_ANF=0x0 ;;
 	esac
 }
 
 # sds_target MODE: addr mask want, one per line: the registers hold want
 # under mask once the mode is set. Every target was read back from a stick
-# running that mode. 2500BASE-X also programs the 3.125G analog page
-# (0x21700, 0x2170c, 0x21718). The receive pulse it ends with (0x21500
-# 0x10, 0x30, 0) is a sequence, not a state: the word reads 0 after it, and
+# running that mode. The two 3.125 Gbaud modes, 2500BASE-X and HiSGMII,
+# also program the 3.125G analog page (0x21700, 0x2170c, 0x21718) before
+# the mode is selected, and end with a receive pulse (0x21500 0x10, 0x30,
+# 0). The pulse is a sequence, not a state: the word reads 0 after it, and
 # is not compared.
+#
+# SDS_AN_CTRL 0x21808 bit 8, in-band negotiation forced off on the host
+# lane (0x70e0 out of reset, bit 8 clear): set in HiSGMII, as the stock
+# HSGQ kernel does in its LAN SerDes mode 4 (0x70e0 -> 0x71e0); without it
+# the host links and receives no frames. Clear in Fiber 1G and 2500BASE-X,
+# so a change out of HiSGMII (a trial, its revert, the boot watch,
+# reapply) does not leave it set. Compared under 0x100 in all three modes.
 sds_target() {
 	mode_vars "$1"
 	cat <<EOF
@@ -215,14 +226,15 @@ sds_target() {
 0x215b4 0xffffffff  $SDS_ANA
 0x215bc 0xffffffff  0x400f
 0x215e4 0xffffffff  0xfc00
+0x21808 0x100       $SDS_ANF
 EOF
-	if [ "$1" = 2500basex ]; then
+	case $1 in 2500basex|hisgmii)
 		cat <<EOF
 0x21700 0xffffffff  0x1800
 0x2170c 0xffffffff  0x7b01
 0x21718 0xffffffff  0x168
 EOF
-	fi
+	esac
 }
 
 # sds_check MODE: prints "ok", "differs: <list>" or "unreadable"
@@ -254,14 +266,29 @@ sds_seq() {
 	sds_write 0x215b4 "$SDS_ANA" &&
 	sds_write 0x215bc 0x400f &&
 	sds_write 0x215e4 0xfc00 &&
-	if [ "$1" = 2500basex ]; then
+	case $1 in 2500basex|hisgmii)
 		sds_write 0x21700 0x1800 && sds_write 0x2170c 0x7b01 && sds_write 0x21718 0x168
-	fi &&
+	esac &&
 	sds_rmw 0x214 0xa11f "$SDS_MODE" &&
 	sds_rmw 0x110 0x0 0x1 &&
-	if [ "$1" = 2500basex ]; then
+	case $1 in 2500basex|hisgmii)
 		sds_write 0x21500 0x10 && sds_write 0x21500 0x30 && sds_write 0x21500 0x0
+	esac &&
+	sds_anf "$SDS_ANF"
+}
+
+# sds_anf WANT: 0x21808 bit 8 := WANT (0x100 or 0), read-modify-write. Set:
+# always written. Clear: written only when the bit reads set, so the Fiber
+# 1G sequence from a stick that never ran HiSGMII stays the stock one,
+# write for write.
+sds_anf() {
+	if [ "$1" != 0x0 ]; then
+		sds_rmw 0x21808 0x100 "$1"
+		return
 	fi
+	cur=$(sds_read 0x21808)
+	[ -n "$cur" ] || { echo "host-serdes: SerDes read 0x21808 failed mid-sequence" >&2; return 1; }
+	[ $(( 0x$cur & 0x100 )) -eq 0 ] || sds_write 0x21808 "$(( 0x$cur & ~0x100 ))"
 }
 
 # apply_boot MODE: what the boot does. Every register is read first; if all
@@ -448,7 +475,7 @@ boot() {
 		boot_end
 		spawn watch
 	else
-		event applied "HiSGMII, port forced; this mode has no link signal, so no boot watch"
+		event applied "HiSGMII (3.125 Gbaud), port forced; this mode has no link signal, so no boot watch"
 		boot_end
 	fi
 	return 0

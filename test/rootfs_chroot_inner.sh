@@ -310,7 +310,8 @@ STUB
 chmod +x "$R/stubdiag"
 cp "$R/bin/diag" "$R/bin/diag.real" 2>/dev/null
 cp "$R/stubdiag" "$R/bin/diag"
-# The Fiber 1G state as read off isp1 2026-09-15, with both diags.
+# The Fiber 1G state as read off isp1 2026-09-15, with both diags, plus
+# 0x21808 at its reset value (bit 8 clear), which Fiber 1G compares.
 fiber1g() {
 	cat > "$R/var/tmp/regs" <<'REGS'
 0x214=0x260004
@@ -324,6 +325,7 @@ fiber1g() {
 0x215b4=0x1264
 0x215bc=0x400f
 0x215e4=0xfc00
+0x21808=0x70e0
 0x1d0=0x8
 REGS
 }
@@ -439,7 +441,7 @@ i=0; while ! grep -q "^event=serdes_link" "$R/var/run/host-serdes" 2>/dev/null &
 if grep -q "^event=serdes_link" "$R/var/run/host-serdes"; then ok "2500BASE-X: the boot watch saw bit 17 of 0x214 and ended"
 else bad "2500BASE-X: the boot watch did not end on the sync bit" "$(cat "$R/var/run/host-serdes" 2>&1)"; fi
 
-note "SerDes: HOST_SERDES=hisgmii, its thirteen writes, the PCS powered down"
+note "SerDes: HOST_SERDES=hisgmii, its twenty writes, the PCS powered down, 0x21808 last"
 serdes_mode hisgmii
 cat > /tmp/sds-want-hisgmii <<'WANT'
 set 0x214 0x262004
@@ -453,8 +455,15 @@ set 0x215b8 0x98c5
 set 0x215b4 0x1564
 set 0x215bc 0x400f
 set 0x215e4 0xfc00
+set 0x21700 0x1800
+set 0x2170c 0x7b01
+set 0x21718 0x168
 set 0x214 0x260112
 set 0x110 0x1
+set 0x21500 0x10
+set 0x21500 0x30
+set 0x21500 0x0
+set 0x21808 0x71e0
 WANT
 if grep -q "SerDes now HiSGMII" /tmp/sds-hisgmii.log && cmp -s /tmp/sds-want-hisgmii "$R/var/tmp/sdsset" &&
    [ "$(cat "$R/var/tmp/param/host_forced") $(cat "$R/var/tmp/param/host_autoneg")" = "1 1" ]; then
