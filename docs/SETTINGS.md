@@ -81,7 +81,7 @@ how long until the ONU was back in O5 with services; it waits 20 s by
 default (`APPLY_WAIT`, counted from the signal), inside the 25 s the web UI gives it, and a
 re-registration still running then is reported as running, not as failed.
 Exit 1: no omcid running, no answer to the signal, or a `failed`, `timeout`,
-`refused`, `held`, `no_services` or `sn_not_applied` result (`docs/TOOLS.md`, "omcid"). Every
+`refused`, `held`, `no_services`, `sn_not_applied` or `pw_not_applied` result (`docs/TOOLS.md`, "omcid"). Every
 step is an `event=reload` line in syslog (`docs/TOOLS.md`, "Link and
 provisioning events").
 

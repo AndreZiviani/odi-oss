@@ -283,7 +283,7 @@ void ev_start(int restart, int resumed, const char *why, uint32_t onu_state)
  *                held> keys=<store key names>
  *   event=reload_step verb=<gpondeact|gponsn|gponpw|gponact> rc=<errno>
  *   event=reload_done changed=.. action=.. result=<ok|failed|timeout|
- *                no_services|sn_not_applied|refused|held> duration_s=..
+ *                no_services|sn_not_applied|pw_not_applied|refused|held> duration_s=..
  *                [o5_s=..] services=.. [refusals=..]
  *
  * refusals: the Deactivate_ONU-IDs the OLT sent while a re-registration

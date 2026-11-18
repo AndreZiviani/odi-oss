@@ -5,6 +5,47 @@ listed here.
 
 ## Unreleased
 
+- diag-bundle: the scrub fails closed. The rule list was built through
+  pipelines that report only their last stage, so a `sort` that failed (no
+  memory, a full `/tmp`) left the list short or empty, an empty list
+  skipped the scrub, and the archive went out as collected. A failed `od`
+  dropped a value's hex rules the same way, and a config copy, the SIP
+  secrets, the identity values or the masking of `module/a0.txt` could fail
+  without stopping the bundle. Every one of these steps is now checked, the
+  sed script must hold exactly the commands its rules make, and a failure
+  fails the bundle with no archive at the output path. A value the store
+  keeps XML-escaped (`&amp;`) is scrubbed in its decoded spelling too. A
+  value with a tab in it, which would split its rule, fails the bundle, and
+  each loop over the values and the files must read its whole list. The
+  pcap is captured outside the bundle and joins it only once its check has
+  passed, so a check that cannot run withholds it. When omcid gives no SIP
+  secret list (it hangs, or does not answer at all, which used to ship the
+  logs unscrubbed), the bundle is still written: whole with phone lines off
+  (`OMCI_POTS_PORTS`), and without the logs and the pcap with them on,
+  saying so in `MANIFEST.txt` and `README.md`.
+
+- Identity: a PLOAM password the driver refuses is no longer kept as
+  tested. A write to `/proc/odi_init` returned success even when the driver
+  refused the verb (the result was only readable afterwards), so omcid's
+  reload took a refused `gpondeact`, `gponsn`, `gponpw` or `gponact` as
+  done, and `gpon-hold.sh clear` could not see a refused `gponhold 0`. The
+  write now fails with the verb's errno; the result stays readable for
+  rcS's log. A changed password the driver does not take is not sent and
+  ends the reload in the new result `pw_not_applied`, which the identity
+  trial reverts like `sn_not_applied`; before, the ONU came back on the old
+  password and the trial stored the refused one. A later reload with
+  nothing changed reports the refused serial number or password again
+  instead of `ok`, and after a refused `gponact`, which leaves the ONU
+  deactivated, it re-registers rather than reporting `ok`.
+  `identity-trial.sh try` checks the password's form up front (bytes, not
+  characters; no spaces at either end, which the driver never sees), and
+  refuses a key given twice: omcid answered the first
+  value and the store kept the last. The boot steps `trunk` and `gpio`,
+  for which the reference capture holds no writes, now return 0 instead of
+  `-ENOSYS`, so rcS does not log them as refused on every boot; any other
+  verb without records is still a gap and fails. rcS and `pon_step` say
+  `refused` rather than `failed to start` for a step the driver turned down.
+
 - Host SerDes: HiSGMII (3.125 Gbaud) sets `SDS_AN_CTRL` 0x21808 bit 8, in-band
   negotiation forced off on the host lane (0x70e0 out of reset becomes
   0x71e0), last, as the stock HSGQ kernel does in its LAN SerDes mode 4, and
