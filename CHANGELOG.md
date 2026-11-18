@@ -56,9 +56,11 @@ listed here.
   `reapply` out of HiSGMII does not leave it set, and a stick that never
   ran HiSGMII runs the stock Fiber 1G sequence write for write. The boot
   compares bit 8 in all three modes. HiSGMII is not an IEEE 802.3 mode; the
-  host port is set to it. Reported linked, with the same sequence on a
-  downstream build, to a Banana Pi BPI-R4, a MikroTik RB5009 and a media
-  converter; the RB5009 module EEPROM reported 3100 MBd (A0h byte 12 =
+  host port is set to it. Reported on a downstream build, A/B on two
+  sticks: a MediaTek MT7988A host (Banana Pi BPI-R4), a MikroTik RB5009
+  and a media converter with no 1G mode, all of 2026, passed frames only
+  with this sequence; a media converter of 2022 passed frames with and
+  without it. The RB5009 module EEPROM reported 3100 MBd (A0h byte 12 =
   0x1F), where this image reports 1300 MBd. The mode reads "HiSGMII (3.125
   Gbaud)" in the `host-serdes.sh` messages.
 

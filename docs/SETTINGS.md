@@ -761,9 +761,12 @@ speaks. `HOST_SERDES` picks another:
   it, so the host must be set to it. The sequence ends with 0x21808 bit 8
   set (0x70e0 becomes 0x71e0), in-band negotiation forced off on the host
   lane; Fiber 1G and 2500BASE-X clear it (`docs/SWITCH.md`, "Host port
-  SerDes mode"). Reported linked, with this sequence on a downstream
-  build, to a Banana Pi BPI-R4, a MikroTik RB5009 and a media converter.
-  The RB5009 ran with a module EEPROM whose A0h byte 12 read 0x1F (3100
+  SerDes mode"). Reported on a downstream build, A/B on two sticks: a
+  MediaTek MT7988A host (Banana Pi BPI-R4), a MikroTik RB5009 (2026
+  batch) and a media converter with no 1G mode (2026 batch) passed frames
+  only with this sequence, a media converter of 2022 with it and without
+  it (without the 3.125G page, the receive pulse and 0x21808 bit 8; which
+  of the three the newer hosts need is not isolated). The RB5009 ran with a module EEPROM whose A0h byte 12 read 0x1F (3100
   MBd); this image reports 1300 MBd ("What the host reads from the
   module", below), so on a host that picks its rate from the EEPROM the
   result does not carry over. Before 0x21808 was written, on a Luleey LL-XS2510 against a
