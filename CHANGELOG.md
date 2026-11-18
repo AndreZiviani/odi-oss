@@ -17,10 +17,15 @@ listed here.
   password and the trial stored the refused one. A later reload with
   nothing changed reports the refused serial number or password again
   instead of `ok`, and after a refused `gponact`, which leaves the ONU
-  deactivated, it re-registers rather than reporting `ok`. `identity-trial.sh try` checks the password's form up
-  front (bytes, not characters; no spaces at either end, which the driver
-  never sees), and refuses a key given twice: omcid answered the first
-  value and the store kept the last.
+  deactivated, it re-registers rather than reporting `ok`.
+  `identity-trial.sh try` checks the password's form up front (bytes, not
+  characters; no spaces at either end, which the driver never sees), and
+  refuses a key given twice: omcid answered the first
+  value and the store kept the last. The boot steps `trunk` and `gpio`,
+  for which the reference capture holds no writes, now return 0 instead of
+  `-ENOSYS`, so rcS does not log them as refused on every boot; any other
+  verb without records is still a gap and fails. rcS and `pon_step` say
+  `refused` rather than `failed to start` for a step the driver turned down.
 
 - Memory: rcS sets `vm.percpu_pagelist_high_fraction` to 32. The kernel keeps
   a per-CPU list of free pages that `MemFree` and `MemAvailable` leave out, and

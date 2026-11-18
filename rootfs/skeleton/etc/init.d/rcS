@@ -171,7 +171,7 @@ fi
 if [ -w /proc/odi_init ]; then
 	for step in intr irq switch svlan stp oam acl qos sec rate classify stat trunk l2 vlan port mirror cpu rldp trap gpio time ponmac; do
 		crumb "odi_init step $step: start"
-		echo "$step" > /proc/odi_init 2>/dev/null || echo "rcS: odi_init $step failed to start" >&2
+		echo "$step" > /proc/odi_init 2>/dev/null || echo "rcS: odi_init $step refused" >&2
 		crumb "odi_init step $step: ret $(cat /proc/odi_init 2>/dev/null)"
 	done
 fi

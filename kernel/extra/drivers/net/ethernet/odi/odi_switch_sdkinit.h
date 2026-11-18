@@ -57,8 +57,9 @@ extern const char *const odi_switch_sdkinit_verb_names[ODI_SDKINIT_VERB_ID_COUNT
 /* Replays the records of `verb`: loads sdkinit.bin (this sleeps), applies
  * them in order, logs one line, releases the file and returns 0. An
  * unknown verb (intr, irq) returns -ENOENT without loading anything, a
- * verb with no records -ENOENT, a missing or invalid file the loader error
- * (logged). /proc/odi_init answers -ENOSYS for all three.
+ * verb with no records -ENOENT unless it is one the capture writes nothing
+ * for (trunk, gpio: 0), a missing or invalid file the loader error
+ * (logged). /proc/odi_init answers -ENOSYS for the three errors.
  */
 int odi_switch_sdkinit_verb(const char *verb);
 

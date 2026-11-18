@@ -82,20 +82,45 @@ static void test_unknown_verb_refused(void)
 	CHECK(odi_mock.log_n == 0, "unknown verb (intr): nothing touched the mock");
 }
 
-/* A verb the table knows about but the reference capture recorded zero
- * events for (trunk, gpio) must ALSO refuse -- same as unknown, so
- * the /proc/odi_init dispatch logs -ENOSYS either way.
+/* trunk and gpio: the reference capture holds no writes for them, a boot
+ * phase that writes nothing. They succeed and touch nothing, so rcS does
+ * not log a failure for them on every boot.
  */
-static void test_zero_event_verb_refused(void)
+static void test_zero_event_verb_ok(void)
 {
-	int id = find_verb("trunk");
+	static const char *const empty[] = { "trunk", "gpio" };
+	unsigned int k;
 
-	CHECK(id >= 0, "test setup: trunk is in the verb table");
-	CHECK(verb_record_count(id) == 0, "test setup: trunk has zero events in this capture");
+	for (k = 0; k < 2; k++) {
+		int id = find_verb(empty[k]);
 
-	odi_mock_reset();
-	CHECK(odi_switch_sdkinit_verb("trunk") == -ENOENT, "zero-event verb (trunk) returns -ENOENT");
-	CHECK(odi_mock.log_n == 0, "zero-event verb (trunk): nothing touched the mock");
+		CHECK(id >= 0, "test setup: the verb is in the verb table");
+		CHECK(verb_record_count(id) == 0, "test setup: the verb has zero events in this capture");
+		odi_mock_reset();
+		CHECK(odi_switch_sdkinit_verb(empty[k]) == 0, "zero-write verb (trunk, gpio) returns 0");
+		CHECK(odi_mock.log_n == 0, "zero-write verb (trunk, gpio): nothing touched the mock");
+	}
+}
+
+/* The list of verbs that may be empty matches the table both ways: a verb
+ * that lost its records (a generation gap) is not on it and fails, and a
+ * verb on it that gained records is noticed here so the list is trimmed.
+ */
+static void test_empty_list_matches_table(void)
+{
+	unsigned int id;
+
+	for (id = 0; id < ODI_SDKINIT_VERB_ID_COUNT; id++) {
+		int n = verb_record_count((int)id);
+
+		CHECK(n >= 0, "test setup: sdkinit.bin loads");
+		if ((n == 0) != odi_switch_sdkinit_verb_may_be_empty(id)) {
+			fprintf(stderr, "  verb %s: %d records, may_be_empty %d\n",
+				odi_switch_sdkinit_verb_names[id], n,
+				odi_switch_sdkinit_verb_may_be_empty(id));
+			CHECK(0, "a verb has no records exactly when it is listed as may be empty");
+		}
+	}
 }
 
 /* The trial f1 bug, pinned down: the `switch` verb own replay must apply the
@@ -149,7 +174,8 @@ static void test_missing_table_refused(void)
 static int run_unit_checks(void)
 {
 	test_unknown_verb_refused();
-	test_zero_event_verb_refused();
+	test_zero_event_verb_ok();
+	test_empty_list_matches_table();
 	test_switch_verb_soc_enable_before_pbo_write();
 	test_missing_table_refused();
 	CHECK(odi_replay_fw_host_loads > 0 &&

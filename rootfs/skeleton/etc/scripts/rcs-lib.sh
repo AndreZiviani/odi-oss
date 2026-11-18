@@ -159,7 +159,7 @@ required_mounts_ok() {
 pon_step() {
 	crumb "pon step ${1%% *}: start"
 	write_proc_bounded /proc/odi_init "$1" 2>/dev/null || \
-		echo "rcS: odi_init ${1%% *} failed to start" >&2
+		echo "rcS: odi_init ${1%% *} refused" >&2
 	crumb "pon step ${1%% *}: ret $(read_proc_bounded /proc/odi_init)"
 }
 
