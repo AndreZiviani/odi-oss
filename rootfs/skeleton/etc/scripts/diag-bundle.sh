@@ -67,6 +67,12 @@
 # the number, the display name and the login and never prints a password;
 # omcli voip --secrets-list feeds every one of those strings, and the login
 # of a server URL, to the scrub above, as it does the config store secrets.
+# When that list cannot be had (omcid does not answer omcli state, or the
+# list times out) and OMCI_POTS_PORTS allows phone lines, the free-text
+# logs (log/, syslog.txt, dmesg.txt, ramlog_prev.txt) and the pcap are
+# withheld rather than shipped without it, and MANIFEST.txt and README.md
+# say so; the rest of the bundle is written. With phone lines off there
+# are no SIP credentials to scrub, and the bundle is whole.
 #
 # The MIB classes are a list on purpose, not the whole MIB: an OLT can push
 # credentials through OMCI (SIP user data, authentication methods, large
@@ -171,6 +177,16 @@ trap 'exit 1' HUP INT TERM
 fail() { echo "diag-bundle: $*" >&2; rm -f "$out"; exit 1; }
 
 manifest() { printf '%-4s %8s  %s\n' "$1" "$2" "$3" >> "$b/MANIFEST.txt"; }
+# withhold NAME WHY: NAME leaves the bundle, and its MANIFEST line says why
+# instead of what was collected.
+withhold() {
+	rm -f "$b/$1"
+	awk -v n="$1" '$3 != n' "$b/MANIFEST.txt" > "$work/manifest.tmp" &&
+		cat "$work/manifest.tmp" > "$b/MANIFEST.txt" ||
+		fail "cannot update MANIFEST.txt"
+	rm -f "$work/manifest.tmp"
+	manifest - - "$1 (withheld: $2)"
+}
 size_of() { wc -c < "$1" 2>/dev/null | tr -d ' '; }
 
 # step NAME CMD ARGS...: run CMD under timeout into odi-diag/NAME, and
@@ -315,6 +331,8 @@ for f in status counters flows ploam drops cam ponq; do
 	fi
 done
 
+# ok once omcid gave the SIP secret list (empty or not).
+sip_list=missing
 if step pon/omcli_state.txt omcli state; then
 	for c in provision flows tcont check conn vlan; do
 		step "pon/omcli_$c.txt" omcli "$c"
@@ -324,16 +342,20 @@ if step pon/omcli_state.txt omcli state; then
 	# password. The secrets themselves go to the scrub list, below, so a
 	# careless log line cannot give them away either.
 	step pon/omcli_voip.txt omcli voip
-	# omcli answers 0 with nothing to list when no voice is provisioned.
-	timeout "$STEP_TIMEOUT_S" omcli voip --secrets-list > "$work/voip.secrets" 2>/dev/null ||
-		fail "scrub failed: omcli voip --secrets-list did not answer"
+	# omcli answers 0 with nothing to list when no voice is provisioned;
+	# anything else, a part of a list included, is no list.
+	if timeout "$STEP_TIMEOUT_S" omcli voip --secrets-list > "$work/voip.secrets" 2>/dev/null; then
+		sip_list=ok
+	else
+		rm -f "$work/voip.secrets"
+	fi
 	for c in $OMCI_CLASSES; do
 		step "pon/omcli_mib_$c.txt" omcli mib "$c"
 	done
 	# Outside the bundle until its check below has passed: whatever fails
 	# on the way leaves it out.
 	timeout "$STEP_TIMEOUT_S" omcli frames --pcap "$work/omci.pcap" > "$work/frames.out" 2>&1
-	manifest "$?" "$(size_of "$work/omci.pcap")" pon/omci.pcap
+	frames_rc=$?
 else
 	manifest - - "pon/omcli_* (skipped: omcid did not answer omcli state)"
 fi
@@ -571,6 +593,26 @@ fi
 if [ -s "$work/voip.secrets" ]; then
 	cat "$work/voip.secrets" >> "$secrets" || fail "scrub failed: cannot list the SIP secrets"
 fi
+# No list: phone lines off (OMCI_POTS_PORTS absent or 0, as omcid reads
+# it) means no SIP credentials exist to scrub. Otherwise the files a
+# careless log line could carry one into are withheld, not shipped.
+sip_why=
+if [ "$sip_list" = missing ]; then
+	pots=$(sed -n 's/^OMCI_POTS_PORTS=//p' "$CONFIG_DIR/odi.conf" 2>/dev/null | tail -n 1)
+	case $pots in
+	'' | 0) manifest - - "SIP secrets: no list from omcid; OMCI_POTS_PORTS is off, none to scrub" ;;
+	*)
+		sip_why="omcid gave no SIP secret list, so they could not be scrubbed"
+		echo "diag-bundle: $sip_why; the logs and the pcap are left out" >&2
+		for x in "$b"/log/*; do
+			[ -f "$x" ] && withhold "log/${x##*/}" "$sip_why"
+		done
+		for x in syslog.txt dmesg.txt ramlog_prev.txt; do
+			[ -f "$b/$x" ] && withhold "$x" "$sip_why"
+		done
+		;;
+	esac
+fi
 
 # The identity: the IDENT_KEYS values from the config store, the serial in
 # /proc/odi_gpon/status (16 hex digits; its first four bytes are the vendor
@@ -632,10 +674,13 @@ fi
 pcap=$work/omci.pcap
 pcap_ok=0
 if [ -f "$pcap" ]; then
+	manifest "$frames_rc" "$(size_of "$pcap")" pon/omci.pcap
 	# Withheld too when the values cannot be listed or a check cannot run:
 	# a value nobody looked for is not shown to be absent.
-	why=
-	if ! { cat "$secrets" && { [ "$full" = 1 ] || cat "$idents"; }; } > "$work/pcap.list" ||
+	why=$sip_why
+	if [ -n "$why" ]; then
+		:
+	elif ! { cat "$secrets" && { [ "$full" = 1 ] || cat "$idents"; }; } > "$work/pcap.list" ||
 	   ! sort -u "$work/pcap.list" > "$work/pcap.values" ||
 	   ! cat "$pcap" > /dev/null; then
 		why="the check could not run"
@@ -653,11 +698,14 @@ if [ -f "$pcap" ]; then
 		done < "$work/pcap.values" || why="the check could not run"
 	fi
 	if [ -n "$why" ]; then
-		manifest - - "pon/omci.pcap (withheld: $why)"
+		withhold pon/omci.pcap "$why"
+		rm -f "$pcap"
 	else
 		pcap_ok=1
 	fi
 	rm -f "$work/pcap.list" "$work/pcap.values"
+elif [ -n "${frames_rc:-}" ]; then
+	manifest "$frames_rc" - pon/omci.pcap
 fi
 
 # The scrub rules, as LENGTH TAB KIND TAB PATTERN TAB REPLACEMENT. They run
@@ -789,6 +837,8 @@ readme() {
 	else
 		idline="masked: the serial number, the MACs, the LOID and the module serial show as MASKED- and their last four characters."
 	fi
+	sipline=
+	[ -n "$sip_why" ] && sipline="- Left out: the logs and the pcap, because $sip_why. Fetch /var/log/omcid.log by hand if it is needed, and send it privately, never to a public issue."
 	cat <<-EOF
 	# odi-oss diagnostics bundle
 
@@ -803,6 +853,7 @@ readme() {
 	- Secrets: every password and key in the config store reads REDACTED,
 	  and the same values are scrubbed from the other files, as text and hex.
 	- Identity: $idline
+	$sipline
 
 	## Where to look
 

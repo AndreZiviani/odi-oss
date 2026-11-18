@@ -257,9 +257,15 @@ printf '#!/bin/sh\necho "syslog line"\n' > "$T/bin/logread"
 cat > "$T/bin/omcli" <<EOF
 #!/bin/sh
 case "\$1" in
-state) printf 'serial     : %s\nonu state  : O5\nmib resets : olt 0  local 0  olt in last 600 s 0  loop no  (loops 0)\n' "$SN" ;;
+state) [ -z "\${STATE_FAIL:-}" ] || exit 1
+	printf 'serial     : %s\nonu state  : O5\nmib resets : olt 0  local 0  olt in last 600 s 0  loop no  (loops 0)\n' "$SN" ;;
 frames) printf '%s\n' "\${PCAP_TEXT:-frames, nothing to hide}" > "\$3" ;;
-voip) [ "\$2" = --secrets-list ] || echo voip ;;
+voip) if [ "\$2" = --secrets-list ]; then
+		[ -z "\${VOIP_FAIL:-}" ] || { echo partial; exit 1; }
+		[ -z "\${VOIP_SECRET:-}" ] || echo "\$VOIP_SECRET"
+	else
+		echo voip
+	fi ;;
 *) echo "\$1" ;;
 esac
 EOF
@@ -417,6 +423,64 @@ PCAP_TEXT="frame with $PW in it" run_bundle "$T/out.tar.gz" && tar -xzf "$T/out.
 [ ! -e "$T/x/odi-diag/pon/omci.pcap" ] && ok "a pcap with a secret in it is withheld" || no "a pcap with a secret in it is withheld"
 grep -q 'omci.pcap (withheld: a secret or identity value showed in it)' "$T/x/odi-diag/MANIFEST.txt" &&
 	ok "and the manifest says why" || no "and the manifest says why" "$(cat "$T/x/odi-diag/MANIFEST.txt" 2>&1)"
+
+# A pcap the scrub would change (the password in hex, which the pcap
+# check does not look for) arrives byte for byte: the scrub never runs
+# over it.
+rm -rf "$T/x" && mkdir "$T/x"
+HEXPW=$(printf '%s' "$PW" | od -An -v -tx1 | tr -d ' \n')
+PCAP_TEXT="frame $HEXPW" run_bundle "$T/out.tar.gz" && tar -xzf "$T/out.tar.gz" -C "$T/x" 2>/dev/null
+[ "$(cat "$T/x/odi-diag/pon/omci.pcap" 2>/dev/null)" = "frame $HEXPW" ] && ok "the pcap is not touched by the scrub" ||
+	no "the pcap is not touched by the scrub" "$(cat "$T/x/odi-diag/pon/omci.pcap" 2>&1)"
+n=$(grep -c 'pon/omci.pcap' "$T/x/odi-diag/MANIFEST.txt")
+[ "$n" = 1 ] && ok "MANIFEST lists the pcap once" || no "MANIFEST lists the pcap once" "$(cat "$T/x/odi-diag/MANIFEST.txt")"
+
+# A SIP password from omcid's list is scrubbed from the logs.
+printf 'a log line\nregister with SipSecret77 failed\n' > "$T/log/messages"
+rm -rf "$T/x" && mkdir "$T/x"
+VOIP_SECRET=SipSecret77 run_bundle "$T/out.tar.gz" && tar -xzf "$T/out.tar.gz" -C "$T/x" 2>/dev/null
+grep -q 'register with REDACTED failed' "$T/x/odi-diag/log/messages" 2>/dev/null &&
+	ok "a SIP secret from omcid's list is scrubbed" || no "a SIP secret from omcid's list is scrubbed" "$(cat "$T/x/odi-diag/log/messages" 2>&1)"
+
+# No SIP list (the list fails, or omcid does not answer at all). With
+# phone lines off there is nothing to scrub: the bundle is whole.
+for how in VOIP_FAIL STATE_FAIL; do
+	rm -rf "$T/x" && mkdir "$T/x" && rm -f "$T/out.tar.gz"
+	if [ "$how" = VOIP_FAIL ]; then VOIP_FAIL=1 run_bundle "$T/out.tar.gz"; else STATE_FAIL=1 run_bundle "$T/out.tar.gz"; fi
+	rc=$?
+	tar -xzf "$T/out.tar.gz" -C "$T/x" 2>/dev/null
+	[ "$rc" = 0 ] && [ -f "$T/x/odi-diag/log/messages" ] && [ -f "$T/x/odi-diag/syslog.txt" ] &&
+		ok "no SIP list, phone lines off ($how): the bundle is whole" ||
+		no "no SIP list, phone lines off ($how): the bundle is whole" "rc $rc: $(cat "$T/run.out")"
+	grep -q 'OMCI_POTS_PORTS is off, none to scrub' "$T/x/odi-diag/MANIFEST.txt" 2>/dev/null &&
+		ok "and the manifest says why ($how)" || no "and the manifest says why ($how)"
+done
+
+# With phone lines on, the free-text logs and the pcap stay out, the rest
+# is written, and MANIFEST and README say why.
+cp "$T/cfg/odi.conf" "$T/odi.conf.keep"
+printf 'OMCI_POTS_PORTS=1\n' >> "$T/cfg/odi.conf"
+for how in VOIP_FAIL STATE_FAIL; do
+	rm -rf "$T/x" && mkdir "$T/x" && rm -f "$T/out.tar.gz"
+	if [ "$how" = VOIP_FAIL ]; then VOIP_FAIL=1 run_bundle "$T/out.tar.gz"; else STATE_FAIL=1 run_bundle "$T/out.tar.gz"; fi
+	rc=$?
+	tar -xzf "$T/out.tar.gz" -C "$T/x" 2>/dev/null
+	X=$T/x/odi-diag
+	[ "$rc" = 0 ] && [ -f "$X/MANIFEST.txt" ] && ok "no SIP list, phone lines on ($how): a bundle is written" ||
+		no "no SIP list, phone lines on ($how): a bundle is written" "rc $rc: $(cat "$T/run.out")"
+	left=$(ls "$X/log" 2>/dev/null; for x in syslog.txt dmesg.txt ramlog_prev.txt pon/omci.pcap; do [ -e "$X/$x" ] && echo "$x"; done)
+	[ -z "$left" ] && ok "and the logs and the pcap are left out ($how)" || no "and the logs and the pcap are left out ($how)" "$left"
+	grep -q 'log/messages (withheld: omcid gave no SIP secret list' "$X/MANIFEST.txt" &&
+		grep -q 'syslog.txt (withheld' "$X/MANIFEST.txt" &&
+		ok "and the manifest says why ($how)" || no "and the manifest says why ($how)" "$(cat "$X/MANIFEST.txt")"
+	awk '($3 == "syslog.txt" || $3 == "log/messages") && !/withheld/ { n++ } END { exit n != 0 }' "$X/MANIFEST.txt" &&
+		ok "and lists them only as withheld ($how)" || no "and lists them only as withheld ($how)" "$(cat "$X/MANIFEST.txt")"
+	grep -q '^- Left out: the logs and the pcap' "$X/README.md" && ok "and README says so ($how)" ||
+		no "and README says so ($how)" "$(cat "$X/README.md")"
+	[ -f "$X/config/odi.conf" ] && [ -f "$X/ps.txt" ] && ok "and the rest is there ($how)" ||
+		no "and the rest is there ($how)" "$(ls -R "$X" | head -30)"
+done
+mv "$T/odi.conf.keep" "$T/cfg/odi.conf"
 
 echo
 echo "diag_summary_test: $pass passed, $fail failed"

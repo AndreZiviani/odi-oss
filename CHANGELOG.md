@@ -18,7 +18,11 @@ listed here.
   value with a tab in it, which would split its rule, fails the bundle, and
   each loop over the values and the files must read its whole list. The
   pcap is captured outside the bundle and joins it only once its check has
-  passed, so a check that cannot run withholds it.
+  passed, so a check that cannot run withholds it. When omcid gives no SIP
+  secret list (it hangs, or does not answer at all, which used to ship the
+  logs unscrubbed), the bundle is still written: whole with phone lines off
+  (`OMCI_POTS_PORTS`), and without the logs and the pcap with them on,
+  saying so in `MANIFEST.txt` and `README.md`.
 
 - Memory: rcS sets `vm.percpu_pagelist_high_fraction` to 32. The kernel keeps
   a per-CPU list of free pages that `MemFree` and `MemAvailable` leave out, and

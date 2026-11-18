@@ -1788,6 +1788,14 @@ scrub that fails (a config copy, a value list, a sort, the hex of a value,
 a rule, the sed script, a file that cannot be rewritten) fails the bundle,
 and no archive is left at the output path.
 
+The SIP credentials an OLT provisioned come from `omcli voip
+--secrets-list`. When omcid gives no list (it does not answer `omcli state`,
+or the list times out) and `OMCI_POTS_PORTS` allows phone lines, `log/`,
+`syslog.txt`, `dmesg.txt`, `ramlog_prev.txt` and `omci.pcap` are left out
+rather than shipped unscrubbed; the rest of the bundle is written, and
+`MANIFEST.txt` and `README.md` say why. With `OMCI_POTS_PORTS` off there
+are no SIP credentials, and the bundle is whole.
+
 **Masking.** Many OLTs authenticate an ONU by its serial number alone, so a
 bundle posted in a public issue would hand out what it takes to clone the
 line. By default the serial number (`GPON_SN` and the one in
