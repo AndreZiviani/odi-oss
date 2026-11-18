@@ -67,6 +67,12 @@
 # the number, the display name and the login and never prints a password;
 # omcli voip --secrets-list feeds every one of those strings, and the login
 # of a server URL, to the scrub above, as it does the config store secrets.
+# When that list cannot be had (omcid does not answer omcli state, or the
+# list times out) and OMCI_POTS_PORTS allows phone lines, the free-text
+# logs (log/, syslog.txt, dmesg.txt, ramlog_prev.txt) and the pcap are
+# withheld rather than shipped without it, and MANIFEST.txt and README.md
+# say so; the rest of the bundle is written. With phone lines off there
+# are no SIP credentials to scrub, and the bundle is whole.
 #
 # The MIB classes are a list on purpose, not the whole MIB: an OLT can push
 # credentials through OMCI (SIP user data, authentication methods, large
@@ -171,6 +177,16 @@ trap 'exit 1' HUP INT TERM
 fail() { echo "diag-bundle: $*" >&2; rm -f "$out"; exit 1; }
 
 manifest() { printf '%-4s %8s  %s\n' "$1" "$2" "$3" >> "$b/MANIFEST.txt"; }
+# withhold NAME WHY: NAME leaves the bundle, and its MANIFEST line says why
+# instead of what was collected.
+withhold() {
+	rm -f "$b/$1"
+	awk -v n="$1" '$3 != n' "$b/MANIFEST.txt" > "$work/manifest.tmp" &&
+		cat "$work/manifest.tmp" > "$b/MANIFEST.txt" ||
+		fail "cannot update MANIFEST.txt"
+	rm -f "$work/manifest.tmp"
+	manifest - - "$1 (withheld: $2)"
+}
 size_of() { wc -c < "$1" 2>/dev/null | tr -d ' '; }
 
 # step NAME CMD ARGS...: run CMD under timeout into odi-diag/NAME, and
@@ -315,6 +331,8 @@ for f in status counters flows ploam drops cam ponq; do
 	fi
 done
 
+# ok once omcid gave the SIP secret list (empty or not).
+sip_list=missing
 if step pon/omcli_state.txt omcli state; then
 	for c in provision flows tcont check conn vlan; do
 		step "pon/omcli_$c.txt" omcli "$c"
@@ -324,12 +342,20 @@ if step pon/omcli_state.txt omcli state; then
 	# password. The secrets themselves go to the scrub list, below, so a
 	# careless log line cannot give them away either.
 	step pon/omcli_voip.txt omcli voip
-	timeout "$STEP_TIMEOUT_S" omcli voip --secrets-list > "$work/voip.secrets" 2>/dev/null
+	# omcli answers 0 with nothing to list when no voice is provisioned;
+	# anything else, a part of a list included, is no list.
+	if timeout "$STEP_TIMEOUT_S" omcli voip --secrets-list > "$work/voip.secrets" 2>/dev/null; then
+		sip_list=ok
+	else
+		rm -f "$work/voip.secrets"
+	fi
 	for c in $OMCI_CLASSES; do
 		step "pon/omcli_mib_$c.txt" omcli mib "$c"
 	done
-	timeout "$STEP_TIMEOUT_S" omcli frames --pcap "$b/pon/omci.pcap" > "$work/frames.out" 2>&1
-	manifest "$?" "$(size_of "$b/pon/omci.pcap")" pon/omci.pcap
+	# Outside the bundle until its check below has passed: whatever fails
+	# on the way leaves it out.
+	timeout "$STEP_TIMEOUT_S" omcli frames --pcap "$work/omci.pcap" > "$work/frames.out" 2>&1
+	frames_rc=$?
 else
 	manifest - - "pon/omcli_* (skipped: omcid did not answer omcli state)"
 fi
@@ -377,7 +403,8 @@ if [ "$full" = 0 ]; then
 	}
 	$1 == "40:" { $0 = blank($0, 4, 15) }
 	$1 == "50:" { $0 = blank($0, 0, 3) }
-	{ print }' "$b/module/a0.txt" > "$work/a0.blank" && mv "$work/a0.blank" "$b/module/a0.txt"
+	{ print }' "$b/module/a0.txt" > "$work/a0.blank" && mv "$work/a0.blank" "$b/module/a0.txt" ||
+		fail "scrub failed: cannot mask the module serial in module/a0.txt"
 fi
 
 # The paged tables, in one short block: note A2h byte 127 (the page
@@ -507,6 +534,12 @@ redact() {  # redact SRC DST
 				return 1
 		return 0
 	}
+	# The five entities xmlconfig writes, &amp; last (cs_value, rcs-lib.sh).
+	function dec(v) {
+		gsub(/&quot;/, "\"", v); gsub(/&apos;/, "\047", v)
+		gsub(/&lt;/, "<", v); gsub(/&gt;/, ">", v); gsub(/&amp;/, "\\&", v)
+		return v
+	}
 	BEGIN { gsub(/[ \t\n]+/, " ", keys) }
 	# <Value Name="KEY" Value="value"/>, the xmlconfig line.
 	match($0, /Name="[^"]*"/) {
@@ -515,6 +548,9 @@ redact() {  # redact SRC DST
 			val = substr($0, RSTART + 7, RLENGTH - 8)
 			if (val != "") {
 				print val >> secrets
+				# As omcid and the logs see it, too (cfgstore.c).
+				if (dec(val) != val)
+					print dec(val) >> secrets
 				$0 = substr($0, 1, RSTART - 1) "Value=\"REDACTED\"" substr($0, RSTART + RLENGTH)
 			}
 		}
@@ -536,22 +572,47 @@ redact() {  # redact SRC DST
 mkdir "$b/config"
 for f in lastgood.xml lastgood_hs.xml odi.conf config-reseeded; do
 	if [ -f "$CONFIG_DIR/$f" ]; then
-		redact "$CONFIG_DIR/$f" "$b/config/$f"
-		manifest "$?" "$(size_of "$b/config/$f")" "config/$f (redacted)"
+		# A copy that fails can leave its secrets off the scrub list.
+		redact "$CONFIG_DIR/$f" "$b/config/$f" || fail "scrub failed: cannot redact config/$f"
+		manifest 0 "$(size_of "$b/config/$f")" "config/$f (redacted)"
 	else
 		manifest - - "config/$f (absent)"
 	fi
 done
 # The web UI password: never collected, but scrubbed if a log quoted it.
 if [ -f /etc/config/confd.auth ]; then
-	cut -d: -f2- /etc/config/confd.auth | head -n 1 >> "$secrets"
+	cut -d: -f2- /etc/config/confd.auth > "$work/auth.pw" || fail "scrub failed: cannot read confd.auth"
+	head -n 1 "$work/auth.pw" >> "$secrets" || fail "scrub failed: cannot list the web UI password"
+	rm -f "$work/auth.pw"
 fi
 
 # The SIP credentials an OLT provisioned over OMCI (password, login, number,
 # display name; and any login inside a server URL): one per line from omcli,
 # scrubbed from every file like a secret of the config store. Only what
 # omcli printed in full, a line at a time, is taken.
-[ -s "$work/voip.secrets" ] && cat "$work/voip.secrets" >> "$secrets"
+if [ -s "$work/voip.secrets" ]; then
+	cat "$work/voip.secrets" >> "$secrets" || fail "scrub failed: cannot list the SIP secrets"
+fi
+# No list: phone lines off (OMCI_POTS_PORTS absent or 0, as omcid reads
+# it) means no SIP credentials exist to scrub. Otherwise the files a
+# careless log line could carry one into are withheld, not shipped.
+sip_why=
+if [ "$sip_list" = missing ]; then
+	pots=$(sed -n 's/^OMCI_POTS_PORTS=//p' "$CONFIG_DIR/odi.conf" 2>/dev/null | tail -n 1)
+	case $pots in
+	'' | 0) manifest - - "SIP secrets: no list from omcid; OMCI_POTS_PORTS is off, none to scrub" ;;
+	*)
+		sip_why="omcid gave no SIP secret list, so they could not be scrubbed"
+		echo "diag-bundle: $sip_why; the logs and the pcap are left out" >&2
+		for x in "$b"/log/*; do
+			[ -f "$x" ] && withhold "log/${x##*/}" "$sip_why"
+		done
+		for x in syslog.txt dmesg.txt ramlog_prev.txt; do
+			[ -f "$b/$x" ] && withhold "$x" "$sip_why"
+		done
+		;;
+	esac
+fi
 
 # The identity: the IDENT_KEYS values from the config store, the serial in
 # /proc/odi_gpon/status (16 hex digits; its first four bytes are the vendor
@@ -563,21 +624,32 @@ idents=$work/idents
 for f in lastgood.xml lastgood_hs.xml odi.conf; do
 	[ -f "$CONFIG_DIR/$f" ] || continue
 	awk -v keys="$IDENT_KEYS" '
+	function dec(v) {
+		gsub(/&quot;/, "\"", v); gsub(/&apos;/, "\047", v)
+		gsub(/&lt;/, "<", v); gsub(/&gt;/, ">", v); gsub(/&amp;/, "\\&", v)
+		return v
+	}
 	BEGIN { gsub(/[ \t\n]+/, " ", keys) }
 	match($0, /Name="[^"]*"/) {
 		name = substr($0, RSTART + 6, RLENGTH - 7)
-		if (index(" " keys " ", " " name " ") && match($0, /Value="[^"]*"/))
-			print substr($0, RSTART + 7, RLENGTH - 8)
+		if (index(" " keys " ", " " name " ") && match($0, /Value="[^"]*"/)) {
+			v = substr($0, RSTART + 7, RLENGTH - 8)
+			print v
+			if (dec(v) != v)
+				print dec(v)
+		}
 		next
 	}
 	/^[A-Za-z_][A-Za-z0-9_]*=/ {
 		eq = index($0, "=")
 		if (index(" " keys " ", " " substr($0, 1, eq - 1) " "))
 			print substr($0, eq + 1)
-	}' "$CONFIG_DIR/$f" >> "$idents"
+	}' "$CONFIG_DIR/$f" >> "$idents" || fail "scrub failed: cannot list the identity in $f"
 done
 if [ -f "$work/gpon-status.raw" ]; then
-	sed -n 's/^sn \([0-9a-f]\{16\}\)$/\1/p' "$work/gpon-status.raw" | awk '
+	sed -n 's/^sn \([0-9a-f]\{16\}\)$/\1/p' "$work/gpon-status.raw" > "$work/gpon.sn" ||
+		fail "scrub failed: cannot read the serial in the GPON status"
+	awk '
 	function h(c) { return index("0123456789abcdef", c) - 1 }
 	{
 		print
@@ -586,24 +658,54 @@ if [ -f "$work/gpon-status.raw" ]; then
 			v = v sprintf("%c", h(substr($0, i, 1)) * 16 + h(substr($0, i + 1, 1)))
 		if (v ~ /^[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]$/)
 			print v toupper(substr($0, 9))
-	}' >> "$idents"
+	}' "$work/gpon.sn" >> "$idents" || fail "scrub failed: cannot list the serial in the GPON status"
 fi
-cat /sys/class/net/*/address 2>/dev/null |
-	grep -v -x -i -e '00:00:00:00:00:00' -e 'ff:ff:ff:ff:ff:ff' >> "$idents"
-cat "$work/module.serial" >> "$idents" 2>/dev/null
+# A MAC that cannot be read is not collected either; grep says 1 when the
+# file is empty.
+cat /sys/class/net/*/address > "$work/macs" 2>/dev/null
+grep -v -x -i -e '00:00:00:00:00:00' -e 'ff:ff:ff:ff:ff:ff' "$work/macs" >> "$idents"
+[ "$?" -le 1 ] || fail "scrub failed: cannot list the MACs"
+if [ -f "$work/module.serial" ]; then
+	cat "$work/module.serial" >> "$idents" || fail "scrub failed: cannot list the module serial"
+fi
 
 # The pcap, before the lists go: withheld when a value it should not carry
 # is in it as text (see the header). Same lower bound as the scrub.
-pcap=$b/pon/omci.pcap
+pcap=$work/omci.pcap
+pcap_ok=0
 if [ -f "$pcap" ]; then
-	if ! { cat "$secrets"; [ "$full" = 1 ] || cat "$idents"; } | sort -u |
+	manifest "$frames_rc" "$(size_of "$pcap")" pon/omci.pcap
+	# Withheld too when the values cannot be listed or a check cannot run:
+	# a value nobody looked for is not shown to be absent.
+	why=$sip_why
+	if [ -n "$why" ]; then
+		:
+	elif ! { cat "$secrets" && { [ "$full" = 1 ] || cat "$idents"; }; } > "$work/pcap.list" ||
+	   ! sort -u "$work/pcap.list" > "$work/pcap.values" ||
+	   ! cat "$pcap" > /dev/null; then
+		why="the check could not run"
+	else
+		# The loop ends 0 when every value was looked for, nonzero
+		# when its list could not be opened.
 		while IFS= read -r v; do
 			[ "${#v}" -ge 3 ] || continue
-			if grep -q -F -e "$v" "$pcap"; then exit 1; fi
-		done; then
-		rm -f "$pcap"
-		manifest - - "pon/omci.pcap (withheld: a secret or identity value showed in it)"
+			grep -q -F -e "$v" "$pcap"
+			case $? in
+			1) ;;
+			0) why="a secret or identity value showed in it"; break ;;
+			*) why="the check could not run"; break ;;
+			esac
+		done < "$work/pcap.values" || why="the check could not run"
 	fi
+	if [ -n "$why" ]; then
+		withhold pon/omci.pcap "$why"
+		rm -f "$pcap"
+	else
+		pcap_ok=1
+	fi
+	rm -f "$work/pcap.list" "$work/pcap.values"
+elif [ -n "${frames_rc:-}" ]; then
+	manifest "$frames_rc" - pon/omci.pcap
 fi
 
 # The scrub rules, as LENGTH TAB KIND TAB PATTERN TAB REPLACEMENT. They run
@@ -612,8 +714,30 @@ fi
 # whole token of hex digits); see SHORT_LEN.
 rules=$work/rules
 : > "$rules"
-rule() { printf '%d\t%s\t%s\t%s\n' "${#1}" "${3:-any}" "$1" "$2" >> "$rules"; }
-hexof() { printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n'; }
+# Every step from here to the scrub fails the bundle when it fails: a rule
+# that was not written is a value that goes out as collected.
+# An empty pattern is a helper (upper, lower, spaced) that failed. A tab
+# would split the rule into the wrong columns and leave part of the value.
+tab=$(printf '\t')
+rule() {
+	[ -n "$1" ] || fail "scrub failed: an empty rule"
+	case $1 in *"$tab"*) fail "scrub failed: a value holds a tab" ;; esac
+	printf '%d\t%s\t%s\t%s\n' "${#1}" "${3:-any}" "$1" "$2" >> "$rules" || fail "scrub failed: cannot write a rule"
+}
+# hexof VALUE: hx is VALUE in hex, two digits a byte. Checked, as tr hides
+# an od that failed: a value would go without its hex rules.
+hexof() {
+	hx=$(printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n')
+	nb=$(printf '%s' "$1" | wc -c) || fail "scrub failed: cannot count a value"
+	[ "${#hx}" -eq $((2 * nb)) ] || fail "scrub failed: cannot turn a value into hex"
+	case $hx in *[!0-9a-f]*) fail "scrub failed: cannot turn a value into hex" ;; esac
+}
+# read_all LIST N: the loop over LIST read all its lines. A redirection
+# that failed does not stop the shell, it skips the loop.
+read_all() {
+	lines=$(wc -l < "$1") || fail "scrub failed: cannot count ${1#"$work"/}"
+	[ "$((lines))" = "$2" ] || fail "scrub failed: read $2 of $((lines)) lines of ${1#"$work"/}"
+}
 upper() { printf '%s' "$1" | tr 'a-z' 'A-Z'; }
 lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
 spaced() { printf '%s' "$1" | sed 's/../& /g; s/ $//'; }
@@ -641,14 +765,19 @@ kinds() {
 # character: the factory PLOAM password is twenty zeros, and scrubbing it
 # replaced every run of zeros in the MIB dumps with REDACTED (seen in a
 # reporter's bundle), while a password of all zeros is no secret to keep.
-sort -u "$secrets" | while IFS= read -r v; do
+sort -u "$secrets" > "$work/secrets.sorted" || fail "scrub failed: cannot sort the secrets"
+n=0
+while IFS= read -r v; do
+	n=$((n + 1))
 	[ "${#v}" -ge 3 ] || continue
 	first=${v%"${v#?}"}
 	case "$v" in *[!"$first"]*) ;; *) continue ;; esac
 	kinds "$v"
 	rule "$v" REDACTED "$tk"
-	hexforms "$(hexof "$v")" REDACTED "$hk"
-done
+	hexof "$v"
+	hexforms "$hx" REDACTED "$hk"
+done < "$work/secrets.sorted"
+read_all "$work/secrets.sorted" "$n"
 
 # Identity, unless --full: MASKED- and the last four letters or digits, or
 # MASKED alone for a value too short to give four away. The serial and the
@@ -656,7 +785,10 @@ done
 # a LOID of 1234 scrubbed as a substring would cut digits out of every
 # counter, so it gets the whole-token rule of a short secret.
 if [ "$full" = 0 ]; then
-	sort -u "$idents" | while IFS= read -r v; do
+	sort -u "$idents" > "$work/idents.sorted" || fail "scrub failed: cannot sort the identity values"
+	n=0
+	while IFS= read -r v; do
+		n=$((n + 1))
 		[ "${#v}" -ge 3 ] || continue
 		bare=$(printf '%s' "$v" | tr -cd 'A-Za-z0-9')
 		m=MASKED
@@ -665,7 +797,8 @@ if [ "$full" = 0 ]; then
 		for x in "$v" "$(upper "$v")" "$(lower "$v")"; do
 			rule "$x" "$m" "$tk"
 		done
-		hexforms "$(hexof "$v")" "$m" "$hk"
+		hexof "$v"
+		hexforms "$hx" "$m" "$hk"
 		# A MAC: every separator, both cases.
 		if printf '%s' "$bare" | grep -q -x '[0-9A-Fa-f]\{12\}'; then
 			lo=$(lower "$bare")
@@ -687,9 +820,11 @@ if [ "$full" = 0 ]; then
 				rule "$x$(lower "${v#????}")" "$m"
 				rule "$x$(upper "${v#????}")" "$m"
 			done
-			hexforms "$(hexof "$vid")$(lower "${v#????}")" "$m"
+			hexof "$vid"
+			hexforms "$hx$(lower "${v#????}")" "$m"
 		fi
-	done
+	done < "$work/idents.sorted"
+	read_all "$work/idents.sorted" "$n"
 fi
 
 # README.md and SUMMARY.txt: the way into the bundle for someone who did
@@ -702,6 +837,8 @@ readme() {
 	else
 		idline="masked: the serial number, the MACs, the LOID and the module serial show as MASKED- and their last four characters."
 	fi
+	sipline=
+	[ -n "$sip_why" ] && sipline="- Left out: the logs and the pcap, because $sip_why. Fetch /var/log/omcid.log by hand if it is needed, and send it privately, never to a public issue."
 	cat <<-EOF
 	# odi-oss diagnostics bundle
 
@@ -716,6 +853,7 @@ readme() {
 	- Secrets: every password and key in the config store reads REDACTED,
 	  and the same values are scrubbed from the other files, as text and hex.
 	- Identity: $idline
+	$sipline
 
 	## Where to look
 
@@ -755,9 +893,11 @@ manifest "$?" "$(size_of "$b/SUMMARY.txt")" SUMMARY.txt
 # two tokens one character apart the first pass replaces only one and the
 # second pass the other.
 script=$work/scrub.sed
-tab=$(printf '\t')
-sort -u "$rules" | sort -t "$tab" -k1,1nr | while IFS="$tab" read -r _ kind pat rep; do
+sort -u "$rules" > "$work/rules.u" || fail "scrub failed: cannot sort the rules"
+sort -t "$tab" -k1,1nr "$work/rules.u" > "$work/rules.s" || fail "scrub failed: cannot sort the rules"
+while IFS="$tab" read -r _ kind pat rep; do
 	p=$(printf '%s' "$pat" | sed 's/[]\/$*.^[]/\\&/g')
+	[ -n "$p" ] || fail "scrub failed: cannot quote a rule"
 	case $kind in
 	word) c=A-Za-z0-9 ;;
 	hex) c=0-9A-Fa-f ;;
@@ -769,7 +909,13 @@ sort -u "$rules" | sort -t "$tab" -k1,1nr | while IFS="$tab" read -r _ kind pat 
 	printf 's/^%s\\([^%s]\\)/%s\\1/\n' "$p" "$c" "$rep"
 	printf 's/\\([^%s]\\)%s$/\\1%s/\n' "$c" "$p" "$rep"
 	printf 's/^%s$/%s/\n' "$p" "$rep"
-done > "$script"
+done < "$work/rules.s" > "$script" || fail "scrub failed: cannot write the sed script"
+# Exactly the commands the rules make (one for any, five for word and hex),
+# or some were lost on the way (a full /tmp).
+want=$(awk -F "$tab" '{ n += ($2 == "word" || $2 == "hex") ? 5 : 1 } END { print n + 0 }' "$work/rules.s") ||
+	fail "scrub failed: cannot count the rules"
+have=$(wc -l < "$script") || fail "scrub failed: cannot count the sed script"
+[ "$((have))" = "$((want))" ] || fail "scrub failed: the sed script has $((have)) commands, the rules make $((want))"
 if [ -s "$script" ]; then
 	# Through a temporary file outside the bundle rather than sed -i, whose
 	# argument differs between implementations (a BSD sed takes the -f
@@ -777,15 +923,24 @@ if [ -s "$script" ]; then
 	# device. The list is taken first, so the walk never meets a file the
 	# loop writes. Any failure fails the bundle: a file the scrub could not
 	# rewrite would otherwise go out as collected.
-	find "$b" -type f ! -name '*.pcap' > "$work/files" || fail "scrub failed: cannot list the bundle"
+	find "$b" -type f > "$work/files" || fail "scrub failed: cannot list the bundle"
+	n=0
 	while IFS= read -r f; do
+		n=$((n + 1))
 		sed -f "$script" "$f" > "$work/scrub.out" || fail "scrub failed on ${f#"$work"/}"
 		cat "$work/scrub.out" > "$f" || fail "scrub failed writing ${f#"$work"/}"
 	done < "$work/files"
+	read_all "$work/files" "$n"
 	rm -f "$work/files" "$work/scrub.out"
 fi
-rm -f "$secrets" "$work/voip.secrets" "$work/frames.out" "$idents" "$rules" "$script" "$work"/gpon-*.raw "$work/module.serial" "$work/i2c.out"
+rm -f "$secrets" "$work/voip.secrets" "$work/frames.out" "$idents" "$rules" "$script" \
+	"$work/secrets.sorted" "$work/idents.sorted" "$work/rules.u" "$work/rules.s" "$work"/gpon-*.raw "$work/module.serial" "$work/i2c.out"
 
+# The pcap joins after the scrub, which would shift its records; only once
+# its own check has passed (above).
+if [ "$pcap_ok" = 1 ]; then
+	mv "$pcap" "$b/pon/omci.pcap" || fail "cannot add pon/omci.pcap"
+fi
 tar -czf "$out.part" -C "$work" odi-diag || { rm -f "$out.part"; fail "tar failed"; }
 n=$(size_of "$out.part")
 if [ "${n:-0}" -gt "$BUNDLE_MAX" ]; then

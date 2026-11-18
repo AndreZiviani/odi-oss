@@ -236,8 +236,16 @@ check "diag-bundle.sh asks for the pcap" \
       "$(grep -v '^[[:space:]]*#' "$B" | grep -c 'omcli frames --pcap')" "1"
 check "and never for the unmasked one" \
       "$(grep -v '^[[:space:]]*#' "$B" | grep 'omcli frames' | grep -c -e '--full')" "0"
-check "and never runs the text scrub over it" \
-      "$(grep -c "find \"\$b\" -type f ! -name '\*.pcap'" "$B")" "1"
+# The text scrub never runs over it: it is captured outside the bundle
+# and one place moves it in, after the scrub and before tar
+# (test/diag_summary_test.sh checks the bytes).
+check "and captures it outside the bundle" \
+      "$(grep -v '^[[:space:]]*#' "$B" | grep -c 'omcli frames --pcap "\$work/omci.pcap"')" "1"
+check "and one place puts it into the bundle" \
+      "$(grep -v '^[[:space:]]*#' "$B" | grep -c '"\$b/pon/omci.pcap"')" "1"
+check "after the text scrub and before tar" \
+      "$(awk '/sed -f "\$script" "\$f"/ { s = NR } /mv "\$pcap" "\$b\/pon\/omci.pcap"/ { m = NR } /tar -czf/ { t = NR }
+	      END { print (s && s < m && m < t) ? "yes" : "no" }' "$B")" "yes"
 
 omcid_stop "$pid"
 [ "$fail" -eq 0 ] || keep_log "$log" frames-test.log

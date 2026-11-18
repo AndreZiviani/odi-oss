@@ -1746,7 +1746,7 @@ Under `pon/`, the GPON and OMCI state a PON problem needs:
 | `odi_gpon-status.txt`, `odi_gpon-counters.txt`, `odi_gpon-flows.txt`, `odi_gpon-ploam.txt`, `odi_gpon-drops.txt`, `odi_gpon-cam.txt`, `odi_gpon-ponq.txt` | `/proc/odi_gpon/status`: ONU state, Alloc-IDs, alarm and state times; `counters`: the link counters; `flows`: the per-flow GEM counters; `ploam`: PLOAM totals and the ring (bodies withheld, below); `drops`: the records frozen around each drop out of O5 (types only, no bodies); `cam`: the Alloc-ID and downstream GEM CAMs read from the chip; `ponq`: the upstream T-CONTs, queues and flows read from the chip, there even when omcid does not answer |
 | `odi_omci.txt` | `/proc/odi_omci`: the OMCI channel counters |
 | `omcli_{state,provision,flows,tcont,check,conn,vlan}.txt` | `omcli`: what omcid holds and programmed; `check` compares the MIB with the chip for every T-CONT, upstream queue and GEM flow omcid set up; `vlan` is the VLAN handling (stick tags or transparent) and any `FwdOp` override of class 84 from `RTK_DEVINFO_SPECVER`, numbers only, so the bundle alone shows whether the override is in force |
-| `omci.pcap` | `omcli frames --pcap`: the last 2048 OMCI frames, masked (above), never `--full`; withheld when a secret or, unless `--full`, an identity value shows in it as text. Not scrubbed like the text files: the scrub would shift its records |
+| `omci.pcap` | `omcli frames --pcap`: the last 2048 OMCI frames, masked (above), never `--full`; withheld when a secret or, unless `--full`, an identity value shows in it as text, and when that check cannot run: it is captured outside the bundle and joins it only after the check. Not scrubbed like the text files: the scrub would shift its records |
 | `omcli_mib_<class>.txt` | `omcli mib <class>` for ONU-G, ONU2-G, PPTP Ethernet UNI, VEIP, the bridge and mapper classes, VLAN filtering and extended VLAN tagging, T-CONT, ANI-G, GEM ports and interworking points, priority queues, traffic schedulers and descriptors, multicast |
 
 The MIB classes are a fixed list, not the whole MIB: an OLT can push
@@ -1790,7 +1790,19 @@ Then every secret value found that way, plus the web UI password from
 and as upper- and lowercase hex, run together and space-separated, in case a
 log quoted one; values shorter than three characters are redacted in the
 config copies only. `confd.auth`, the dropbear keys and `/etc/passwd` are
-never collected.
+never collected. A value the store keeps XML-escaped is scrubbed in its
+decoded spelling too, the one omcid and the logs use. Any step of the
+scrub that fails (a config copy, a value list, a sort, the hex of a value,
+a rule, the sed script, a file that cannot be rewritten) fails the bundle,
+and no archive is left at the output path.
+
+The SIP credentials an OLT provisioned come from `omcli voip
+--secrets-list`. When omcid gives no list (it does not answer `omcli state`,
+or the list times out) and `OMCI_POTS_PORTS` allows phone lines, `log/`,
+`syslog.txt`, `dmesg.txt`, `ramlog_prev.txt` and `omci.pcap` are left out
+rather than shipped unscrubbed; the rest of the bundle is written, and
+`MANIFEST.txt` and `README.md` say why. With `OMCI_POTS_PORTS` off there
+are no SIP credentials, and the bundle is whole.
 
 **Masking.** Many OLTs authenticate an ONU by its serial number alone, so a
 bundle posted in a public issue would hand out what it takes to clone the
