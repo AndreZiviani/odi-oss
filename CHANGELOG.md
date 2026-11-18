@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
+  characters, stored with zero bytes after it the way the setup wizard
+  writes it, reads as its text instead of "Not printable ASCII". confd
+  reads its save tables into the static file buffer, 48 KB less memory.
+  The asset hashes in src/release-sha256.txt are the release SHA256SUMS,
+  checked by `make releases`.
+
 - Host SerDes: HiSGMII (3.125 Gbaud) sets `SDS_AN_CTRL` 0x21808 bit 8, in-band
   negotiation forced off on the host lane (0x70e0 out of reset becomes
   0x71e0), last, as the stock HSGQ kernel does in its LAN SerDes mode 4, and
