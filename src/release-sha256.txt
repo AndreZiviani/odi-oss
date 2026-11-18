@@ -4,5 +4,5 @@
 # tools/bump-deps.sh rewrites the lines of a repo whenever it moves that
 # repo's tag; a tag with no line here fails the fetch (see fetch-releases.sh).
 AndreZiviani/odi-sfp-exporter v1.11.0 metricsd f4e3bb7055811418cc4e21e5a72ef93d6544a26bb22bade79786fe9b9acd4203
-AndreZiviani/odi-ui v1.18.0 confd 87cb6720f73be35170614960d43ab93711bee457f554daa0d1b9867687bca77f
-AndreZiviani/odi-ui v1.18.0 confd-assets.tar.gz c86091ec8b3413e4dfa64fbff3c629ec1aed40d6151d50dd334ea12b6d5fd119
+AndreZiviani/odi-ui v1.18.1 confd 5154e820ff437573f95ecbe19db64b14d49568d563997a124b03ef8bf81894cd
+AndreZiviani/odi-ui v1.18.1 confd-assets.tar.gz ce5a1d8e50a0aaefa0fda3270a8ce1b48e41c173b4b78e1ec661192877ed9d22
