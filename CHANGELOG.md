@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- Host SerDes: HiSGMII (3.125 Gbaud) writes 0x21808 := 0x71e0 (0x70e0 out of
+  reset) last, as the stock HSGQ kernel does in its LAN SerDes mode 4, and
+  runs the 3.125G analog page and the receive pulse of 2500BASE-X. Without
+  0x21808 the SerDes synced and the host link came up, and no frame was
+  received from the host. The boot compares 0x21808 in HiSGMII, so a stick
+  that holds the rest of the mode is written once. 2500BASE-X does not
+  write 0x21808. HiSGMII is not an IEEE 802.3 mode; the host port is set to
+  it. Reported linked, with the same sequence, to a Banana Pi BPI-R4, a
+  MikroTik RB5009 and a media converter. The mode reads "HiSGMII (3.125
+  Gbaud)" in the `host-serdes.sh` messages.
+
 - Memory: rcS sets `vm.percpu_pagelist_high_fraction` to 32. The kernel keeps
   a per-CPU list of free pages that `MemFree` and `MemAvailable` leave out, and
   by default its limit tuned itself up to about 3.3 MB, so the free memory

@@ -11,8 +11,9 @@
 #                               its auto-negotiation is HOST_AUTONEG
 #     2500basex                 2500BASE-X, for a 2.5G host port; the PCS
 #                               auto-negotiation off, the port forced
-#     hisgmii                   HiSGMII, the MAC forced to 1000 Mbit/s; the
-#                               1000BASE-X PCS powered down, the port forced
+#     hisgmii                   HiSGMII (3.125 Gbaud), the MAC forced to
+#                               1000 Mbit/s; the 1000BASE-X PCS powered
+#                               down, the port forced
 #
 # Any other value runs fiber1g, and says so. There is no board signal that
 # tells one stick from another (the stock firmware of the HSGQ XPON stick
@@ -146,7 +147,7 @@ label() {
 	case $1 in
 	fiber1g)   echo "Fiber 1G" ;;
 	2500basex) echo "2500BASE-X" ;;
-	hisgmii)   echo "HiSGMII" ;;
+	hisgmii)   echo "HiSGMII (3.125 Gbaud)" ;;
 	*)         echo "$1" ;;
 	esac
 }
@@ -197,10 +198,13 @@ mode_vars() {
 
 # sds_target MODE: addr mask want, one per line: the registers hold want
 # under mask once the mode is set. Every target was read back from a stick
-# running that mode. 2500BASE-X also programs the 3.125G analog page
-# (0x21700, 0x2170c, 0x21718). The receive pulse it ends with (0x21500
-# 0x10, 0x30, 0) is a sequence, not a state: the word reads 0 after it, and
-# is not compared.
+# running that mode. The two 3.125 Gbaud modes, 2500BASE-X and HiSGMII,
+# also program the 3.125G analog page (0x21700, 0x2170c, 0x21718) before
+# the mode is selected, and end with a receive pulse (0x21500 0x10, 0x30,
+# 0). The pulse is a sequence, not a state: the word reads 0 after it, and
+# is not compared. HiSGMII then sets 0x21808 := 0x71e0 (0x70e0 out of
+# reset), as the stock HSGQ kernel does in its LAN SerDes mode 4; without
+# it the host links and receives no frames. 2500BASE-X does not write it.
 sds_target() {
 	mode_vars "$1"
 	cat <<EOF
@@ -216,12 +220,15 @@ sds_target() {
 0x215bc 0xffffffff  0x400f
 0x215e4 0xffffffff  0xfc00
 EOF
-	if [ "$1" = 2500basex ]; then
+	case $1 in 2500basex|hisgmii)
 		cat <<EOF
 0x21700 0xffffffff  0x1800
 0x2170c 0xffffffff  0x7b01
 0x21718 0xffffffff  0x168
 EOF
+	esac
+	if [ "$1" = hisgmii ]; then
+		echo "0x21808 0xffffffff  0x71e0"
 	fi
 }
 
@@ -254,13 +261,16 @@ sds_seq() {
 	sds_write 0x215b4 "$SDS_ANA" &&
 	sds_write 0x215bc 0x400f &&
 	sds_write 0x215e4 0xfc00 &&
-	if [ "$1" = 2500basex ]; then
+	case $1 in 2500basex|hisgmii)
 		sds_write 0x21700 0x1800 && sds_write 0x2170c 0x7b01 && sds_write 0x21718 0x168
-	fi &&
+	esac &&
 	sds_rmw 0x214 0xa11f "$SDS_MODE" &&
 	sds_rmw 0x110 0x0 0x1 &&
-	if [ "$1" = 2500basex ]; then
+	case $1 in 2500basex|hisgmii)
 		sds_write 0x21500 0x10 && sds_write 0x21500 0x30 && sds_write 0x21500 0x0
+	esac &&
+	if [ "$1" = hisgmii ]; then
+		sds_write 0x21808 0x71e0
 	fi
 }
 
@@ -448,7 +458,7 @@ boot() {
 		boot_end
 		spawn watch
 	else
-		event applied "HiSGMII, port forced; this mode has no link signal, so no boot watch"
+		event applied "HiSGMII (3.125 Gbaud), port forced; this mode has no link signal, so no boot watch"
 		boot_end
 	fi
 	return 0

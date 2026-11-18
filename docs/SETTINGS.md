@@ -754,13 +754,19 @@ speaks. `HOST_SERDES` picks another:
   below). So auto-negotiation off is what that router needs, not a
   property of the lane, and it is a setting that works there, not an
   explanation.
-- `hisgmii`: HiSGMII, the MAC forced to 1000 Mb/s, the 1000BASE-X PCS
-  powered down and the port forced. This is the mode the stock firmware
-  calls `LAN_SDS_MODE` 4 ("2500Mbps HiSGMII PHY"); it is not a 1G mode on
-  the wire. Tested by its reporter against a media converter. On a Luleey
-  LL-XS2510 against a 2.5G router port (a UniFi gateway whose SFP+ port a
-  third-party tweak runs at 2.5G) it synced but passed no frames, where
-  `2500basex` linked.
+- `hisgmii`: HiSGMII (3.125 Gbaud), the MAC forced to 1000 Mb/s, the
+  1000BASE-X PCS powered down and the port forced. This is the mode the
+  stock firmware calls `LAN_SDS_MODE` 4 ("2500Mbps HiSGMII PHY"); it is not
+  a 1G mode on the wire, and not an IEEE 802.3 mode: no standard defines
+  it, so the host must be set to it. The sequence ends with 0x21808 :=
+  0x71e0, which only this mode writes (`docs/SWITCH.md`, "Host port SerDes
+  mode"). Reported linked, with this sequence, to a Banana Pi BPI-R4, a
+  MikroTik RB5009 (module EEPROM A0h byte 12 at 0x1F) and a media
+  converter. Before 0x21808 was written, on a Luleey LL-XS2510 against a
+  2.5G router port (a UniFi gateway whose SFP+ port a third-party tweak
+  runs at 2.5G) it synced but passed no frames, where `2500basex` linked,
+  and an RB5009 had the link up and received nothing; the LL-XS2510 has
+  not been run since.
 
 **What the host reads from the module.** The SFP's own EEPROM page the
 host reads (A0h, fixed memory) advertises the module as 1000BASE-LX at a
@@ -1571,7 +1577,8 @@ waiting on it forever (CHANGELOG.md, "Unreleased"). The pattern:
   HSGQ stick to a 2.5G router port, and on a DFP-34X-2C2 `reapply` of Fiber
   1G, a 2500basex trial and its revert, and the boot watch falling back to
   Fiber 1G with no 2.5G host left the SerDes and port words as before. Not run
-  on hardware: `hisgmii` with this image, the safe mode with the key set,
+  on hardware: `hisgmii` with this image (only a downstream build that
+  carries the same sequence), the safe mode with the key set,
   whether the HSGQ board links in Fiber 1G, and bit 17 of 0x214 as the sync
   signal beyond those runs (`test/host_serdes_test.sh` and
   `test/odi_host_forced_test.c` cover them as write sequences).

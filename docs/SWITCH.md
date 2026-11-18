@@ -1311,17 +1311,19 @@ To see it on a stick: `register get 0x21c00 1` in `diag` (bit 12), `cat
 
 `HOST_SERDES` (`docs/SETTINGS.md`, "Host port SerDes mode") picks the mode
 of the host SerDes: Fiber 1G (1000BASE-X, the default), 2500BASE-X or
-HiSGMII. `host-serdes.sh` runs the mode's register sequence through `diag`,
-then sets the port side and the PCS auto-negotiation bit through two kernel
-parameters. The sequences and the forced port values are the reporter's,
+HiSGMII (3.125 Gbaud). `host-serdes.sh` runs the mode's register sequence
+through `diag`, then sets the port side and the PCS auto-negotiation bit
+through two kernel parameters. The sequences and the forced port values are the reporter's,
 read off a stick running its stock HSGQ firmware in each mode; the Fiber 1G
 one is the sequence this image always ran.
 
 The sequence: the same thirteen steps in every mode, in this order (the
-mode parked, the analog block, the mode selected), and in 2500BASE-X two
-more, the 3.125G analog page before the mode is selected and a receive
-pulse after it. RMW is a read-modify-write of the bits named; the rest are
-plain writes.
+mode parked, the analog block, the mode selected). The two 3.125 Gbaud
+modes, 2500BASE-X and HiSGMII, add the 3.125G analog page before the mode
+is selected and a receive pulse after it. HiSGMII then writes 0x21808,
+as the stock HSGQ kernel does in its LAN SerDes mode 4 (HiSGMII PHY); it
+does not in mode 6 (2500BaseX). RMW is a read-modify-write of the bits
+named; the rest are plain writes.
 
 | step | register | Fiber 1G | 2500BASE-X | HiSGMII |
 |---|---|---|---|---|
@@ -1332,21 +1334,29 @@ plain writes.
 | 5-8 | 0x21680 := 0, 0x2168c := 0x3001, 0x21698 := 0x68, 0x215b8 := 0x98c5 | same | same | same |
 | 9 | 0x215b4, the TX amplitude word | 0x1264 | 0x1764 | 0x1564 |
 | 10-11 | 0x215bc := 0x400f, 0x215e4 := 0xfc00 | same | same | same |
-| -- | the 3.125G analog page: 0x21700 := 0x1800, 0x2170c := 0x7b01, 0x21718 := 0x168 | -- | written | -- |
+| -- | the 3.125G analog page: 0x21700 := 0x1800, 0x2170c := 0x7b01, 0x21718 := 0x168 | -- | written | written |
 | 12 | 0x214 bits 15, 13, 8 and [4:0] := the mode (RMW, mask 0xa11f) | 0x4 | 0x16 | 0x112 (`PHY_SIDE_SEL` bit 8 and 0x12) |
 | 13 | `PHY_PATCH_STATUS` 0x110 `PATCH_DONE` bit 0 := 1 (RMW) | same | same | same |
-| -- | 0x21500 := 0x10, then 0x30, then 0: a receive pulse | -- | written | -- |
+| -- | 0x21500 := 0x10, then 0x30, then 0: a receive pulse | -- | written | written |
+| -- | 0x21808 := 0x71e0 (0x70e0 out of reset) | -- | -- | written |
 
 What the boot compares, before writing anything and after: the words of
 steps 2 to 13 under their masks (0x214 under 0xa11f, 0x21c00 under 0x800,
-0x22e4c under 0xc000, the rest whole), plus the 3.125G page in 2500BASE-X.
+0x22e4c under 0xc000, the rest whole), plus the 3.125G page in 2500BASE-X
+and HiSGMII, and 0x21808 in HiSGMII.
 0x21500 is not compared: it reads 0 after its pulse. A stick that already
 holds the mode is not written; a live change (a trial, its revert, the boot
 watch, `reapply`) writes the whole sequence whatever the registers hold.
 Read back from the HSGQ stick in 2500BASE-X: 0x214 = 0x00260016, 0x21c00 =
 0x0140, 0x215b4 = 0x1764, 0x21500 = 0, the 3.125G page as written (and
 0x21600, 0x2160c, 0x21618 the same, written by nothing here), 0x2166c =
-0x2176c = 1. In HiSGMII 0x214 = 0x00260112 and 0x21c00 = 0x1940.
+0x2176c = 1. In HiSGMII 0x214 = 0x00260112, 0x21c00 = 0x1940 and 0x21808
+= 0x71e0. Without 0x21808 the HiSGMII SerDes is in sync and the host link
+up, and no frame is received from the host.
+
+HiSGMII is not an IEEE 802.3 mode: SGMII signalling at 3.125 Gbaud, no
+standard to define the line or its negotiation. The host port is set to
+it; nothing on the line selects it.
 
 After the sequence, in 2500BASE-X and HiSGMII, the port side and the PCS:
 

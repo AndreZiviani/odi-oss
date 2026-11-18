@@ -134,7 +134,8 @@ reg() { sed -n "s/^$1=//p" "$T/regs"; }
 p() { cat "$T/param/$1" 2>/dev/null; }
 
 # The Fiber 1G state as a running stick reads it, plus the words only the
-# other modes compare (the 3.125G page reads 0 until 2500BASE-X sets it).
+# other modes compare (the 3.125G page reads 0 until a 3.125 Gbaud mode
+# sets it, 0x21808 its reset value 0x70e0 until HiSGMII sets it).
 fiber1g_regs() {
 	cat > "$T/regs" <<'REGS'
 0x214=0x260004
@@ -151,6 +152,7 @@ fiber1g_regs() {
 0x21700=0x0
 0x2170c=0x0
 0x21718=0x0
+0x21808=0x70e0
 0x21500=0x0
 REGS
 }
@@ -225,8 +227,15 @@ set 0x215b8 0x98c5
 set 0x215b4 0x1564
 set 0x215bc 0x400f
 set 0x215e4 0xfc00
+set 0x21700 0x1800
+set 0x2170c 0x7b01
+set 0x21718 0x168
 set 0x214 0x260112
 set 0x110 0x1
+set 0x21500 0x10
+set 0x21500 0x30
+set 0x21500 0x0
+set 0x21808 0x71e0
 WANT
 # Fiber 1G again from the 2500BASE-X state with no sync (bit 17 clear): the
 # same thirteen writes, from those starting values.
@@ -296,6 +305,7 @@ out=$(sh "$S" boot 2>&1)
 echo x2500 > "$T/model"
 same "2500basex boot: its nineteen writes, in order (3.125G page before the mode, the RX pulse after)" "$T/want-2500basex"
 t "2500basex boot: reads back" "SerDes now 2500BASE-X" "$out"
+t "2500basex boot: 0x21808 not written, its reset value" "^0x70e0$" "$(reg 0x21808)"
 t "2500basex boot: port forced, auto-negotiation off" "^1 0$" "$(p host_forced) $(p host_autoneg)"
 t "2500basex boot: running 2500basex, phase watch" "^2500basex watch$" "$(st running) $(st phase)"
 t "2500basex boot: the watch spawned" "^watch$" "$(spawned)"
@@ -377,11 +387,25 @@ setkey ""
 setkey hisgmii
 newboot
 out=$(sh "$S" boot 2>&1)
-same "hisgmii boot: its thirteen writes (PCS powered down, 0x214 mode 0x112)" "$T/want-hisgmii"
+same "hisgmii boot: its twenty writes (PCS powered down, the 3.125G page, 0x214 mode 0x112, the RX pulse, 0x21808 last)" "$T/want-hisgmii"
 t "hisgmii boot: port forced, auto-negotiation bit on" "^1 1$" "$(p host_forced) $(p host_autoneg)"
 t "hisgmii boot: steady, no watch (no link signal)" "^hisgmii steady applied$" "$(st running) $(st phase) $(st event)"
 t "hisgmii boot: nothing spawned" "^$" "$(spawned_none)"
 t "hisgmii status: link unknown, no source" "link=unknown.*link_source=none" "$(sh "$S" status | tr '\n' ' ')"
+t "hisgmii boot: reads back, the label" "SerDes now HiSGMII \(3\.125 Gbaud\)" "$out"
+t "hisgmii boot: 0x21808 0x71e0" "^0x71e0$" "$(reg 0x21808)"
+cp "$T/regs" "$T/regs.hisgmii"
+# The next boot over a stick that holds HiSGMII, 0x21808 included: nothing.
+newboot; cp "$T/regs.hisgmii" "$T/regs"
+out=$(sh "$S" boot 2>&1)
+t "hisgmii boot over HiSGMII: recognised" "SerDes already HiSGMII \(3\.125 Gbaud\)" "$out"
+[ ! -f "$T/sdsset" ] && ok "hisgmii boot over HiSGMII: nothing written" || no "hisgmii boot over HiSGMII: nothing written" "$(cat "$T/sdsset")"
+# The same with 0x21808 alone at its reset value: the whole sequence again.
+newboot; sed 's/^0x21808=.*/0x21808=0x70e0/' "$T/regs.hisgmii" > "$T/regs"
+out=$(sh "$S" boot 2>&1)
+t "hisgmii boot, 0x21808 at 0x70e0: the twenty writes, 0x21808 last" "^20 set 0x21808 0x71e0$" "$(wc -l < "$T/sdsset" | tr -d ' ') $(tail -n 1 "$T/sdsset")"
+t "hisgmii boot, 0x21808 at 0x70e0: reads back" "SerDes now HiSGMII \(3\.125 Gbaud\)" "$out"
+rm -f "$T/regs.hisgmii"
 
 # ---- a value that is none of them: Fiber 1G, logged
 setkey sideways
