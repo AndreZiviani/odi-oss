@@ -240,7 +240,7 @@ static int refused(const char *r)
 static int accepted(const char *r)
 {
 	return str_eq(r, "ok") || str_eq(r, "no_services") ||
-	       str_eq(r, "sn_not_applied");
+	       str_eq(r, "sn_not_applied") || str_eq(r, "pw_not_applied");
 }
 
 static int recent(long now, long t)

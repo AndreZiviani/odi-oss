@@ -1549,6 +1549,46 @@ void cfg_diff_names(unsigned mask, char *out, int max)
 	out[o < max ? o : max - 1] = 0;
 }
 
+/* 1 when the PLOAM password is one "gponpw" takes, the rules of
+ * odi_gpon_pw.c (odi_gpon_parse_pw): 0x and an even number of hex digits,
+ * 2 to 20; exactly 20 hex digits; or 1 to 10 bytes of text. Judged as the
+ * driver gets it: /proc/odi_init drops trailing spaces and newlines and the
+ * spaces in front of the argument, here and at boot alike. Anything else
+ * the driver refuses and keeps the old password. Keep in step. */
+int cfg_ploam_ok(const struct onu_identity *id)
+{
+	int b = 0, e = id->ploamLen;
+	const char *p = id->ploam;
+	int n;
+
+	if (e < 0 || e >= (int)sizeof id->ploam)
+		return e == 0;
+	while (e > 0 && (p[e - 1] == ' ' || p[e - 1] == '\n'))
+		e--;
+	while (b < e && p[b] == ' ')
+		b++;
+	p += b;
+	n = e - b;
+	if (n == 0)
+		return 1;
+	if (n > 2 && p[0] == '0' && (p[1] == 'x' || p[1] == 'X') &&
+	    n - 2 <= 20 && !((n - 2) & 1)) {
+		int i = 2;
+
+		while (i < n && hex_nib(p[i]) >= 0)
+			i++;
+		if (i == n)
+			return 1;
+	}
+	if (n == 20) {
+		for (int i = 0; i < n; i++)
+			if (hex_nib(p[i]) < 0)
+				return 0;
+		return 1;
+	}
+	return n <= 10;
+}
+
 /* The serial number as "gponsn" takes it: four ASCII vendor characters and
  * eight hex digits, twelve in all. Anything else is not sent, the driver
  * would refuse it. NULL when the store holds no usable one. */

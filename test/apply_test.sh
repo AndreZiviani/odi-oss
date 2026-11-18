@@ -120,7 +120,7 @@ t "identity: exit 0" "^0$" "$rc"
 t "identity: back in O5 with services, and how long" "back in O5 with 6 service(s) after 2.1 s" "$out"
 
 # A failure is reported and exits 1.
-for r in failed timeout refused no_services sn_not_applied; do
+for r in failed timeout refused no_services sn_not_applied pw_not_applied; do
 	printf 'done identity reregister %s GPON_SN 900 - 0 0\n' "$r" > "$T/script"
 	out=$(run omci); rc=$?
 	t "$r: exit 1" "^1$" "$rc"

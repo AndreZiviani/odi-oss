@@ -90,6 +90,16 @@ static int odi_switch_sdkinit_verb_is_i2c(unsigned int id)
 	return id == ODI_SDKINIT_I2C || id == ODI_SDKINIT_I2CEN;
 }
 
+/* Verbs the reference capture holds no writes for: a boot phase that
+ * writes nothing, not a generation gap. Any other verb with no records is
+ * a gap and stays an error. test/odi_switch_sdkinit_test.c checks this
+ * list against the table, both ways.
+ */
+static int odi_switch_sdkinit_verb_may_be_empty(unsigned int id)
+{
+	return id == ODI_SDKINIT_TRUNK || id == ODI_SDKINIT_GPIO;
+}
+
 int odi_switch_sdkinit_verb(const char *verb)
 {
 	struct odi_replay_fw fw;
@@ -122,12 +132,16 @@ int odi_switch_sdkinit_verb(const char *verb)
 	}
 	odi_replay_fw_release(&fw);
 
-	/* Known to this table, but the reference capture recorded nothing
-	 * replayable for it (e.g. `trunk`/`gpio`: a zero-write boot phase,
-	 * not a generation gap).
+	/* Known to this table, with nothing recorded for it: done when the
+	 * phase writes nothing (trunk, gpio), a gap otherwise. A later
+	 * capture with records for trunk replays them like any other verb.
 	 */
-	if (applied == 0)
-		return -ENOENT;
+	if (applied == 0) {
+		if (!odi_switch_sdkinit_verb_may_be_empty(id))
+			return -ENOENT;
+		ODI_SDKINIT_LOG("sdkinit verb %s: nothing to replay\n", verb);
+		return 0;
+	}
 
 	ODI_SDKINIT_LOG("sdkinit verb %s: %u events applied in %lu ms\n",
 			verb, applied, odi_sdkinit_clock_ms(start));

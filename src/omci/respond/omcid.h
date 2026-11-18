@@ -963,6 +963,7 @@ unsigned cfg_snap_diff(const struct cfg_snap *old, const struct cfg_snap *cur);
 void cfg_diff_names(unsigned mask, char *out, int max);
 /* The SN the driver takes in "gponsn": the 12-character label, or NULL. */
 const char *cfg_sn_label(const struct onu_identity *id);
+int cfg_ploam_ok(const struct onu_identity *id);
 void cfg_load_vlan(void);
 void cfg_load_vlan_from(const char *cs);
 int cfg_manual_vid(void);

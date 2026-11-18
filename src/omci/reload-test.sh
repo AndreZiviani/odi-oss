@@ -21,8 +21,9 @@
 #      written to a file with -i), the MIB is cleared, the loop is still
 #      served during the hold, the reload finishes when the ONU is back in O5
 #      with its services, and the pid never changes. The failure paths (a
-#      verb that fails, O5 never reached, O5 without services) and a burst
-#      of SIGHUPs during a re-registration are covered.
+#      verb that fails, a PLOAM password the driver would not take and the
+#      apply after it, O5 never reached, O5 without services) and a burst of
+#      SIGHUPs during a re-registration are covered.
 #   2b. Every re-registration is recorded with the OLT answer (rereg.c):
 #      a refusal (three Deactivate_ONU-IDs before O5, or O7), a timeout,
 #      the guard that holds the third change back until it is confirmed,
@@ -493,6 +494,90 @@ check "verb failure: the next SIGHUP still sees the change and tries again" "ide
 check "verb failure: and still names the EAPOL key" \
 	"event=reload changed=identity action=reregister keys=LOID,VLAN_EAPOL_UNTAGGED" \
 	"$(grep 'event=reload ' "$log" | tail -n 1)"
+stop_omcid
+
+# A PLOAM password the driver would refuse (eleven to nineteen characters):
+# not sent, and the ONU comes back on the old one, which is not ok.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "5 282 794 1050 1306 538"
+log=/tmp/rl-pw.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1
+inject isp1
+settle "$log" 1
+: > "$INITLOG"
+old_id=$(st id)
+store 1 11 0 "$(val GPON_PLOAM_PASSWD 0123456789abcde)
+"
+kill -HUP "$pid"
+wait_count "$INITLOG" gponact 1 8 || bad "bad password: no gponact"
+inject isp1
+wait_done "$old_id" 20 || bad "bad password: never finished"
+check "bad password: result pw_not_applied" "done pw_not_applied identity" "$(st state) $(st result) $(st changed)"
+check "bad password: not sent to the driver" "gpondeact gponact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+check_grep "bad password: the step is logged as refused" "event=reload_step verb=gponpw rc=22" "$log"
+n=$(grep -c '0123456789abcde' "$log")
+check "bad password: the value is not logged" "0" "$n"
+# Applied again with nothing changed: still not ok, and no second
+# re-registration for the same refused value.
+: > "$INITLOG"
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 10 || bad "bad password, again: no outcome"
+check "bad password, again: still pw_not_applied, nothing re-registered" "done pw_not_applied identity none" \
+	"$(st state) $(st result) $(st changed) $(st action)"
+check "bad password, again: no driver verb" "0" "$(wc -c < "$INITLOG" | tr -d ' ')"
+# Fixed in the store: re-registers, sends it, and ends ok.
+old_id=$(st id)
+store 1 11 0 "$(val GPON_PLOAM_PASSWD 0123456789)
+"
+kill -HUP "$pid"
+wait_count "$INITLOG" gponact 1 8 || bad "fixed password: no gponact"
+inject isp1
+wait_done "$old_id" 20 || bad "fixed password: never finished"
+check "fixed password: result ok" "done ok identity" "$(st state) $(st result) $(st changed)"
+check "fixed password: sent" "gpondeact gponpw 0123456789 gponact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+stop_omcid
+
+# An activation that fails: the ONU is left deactivated, so the next apply
+# re-registers even with nothing changed, rather than reporting ok.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "5 282 794 1050 1306 538"
+log=/tmp/rl-act.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1
+inject isp1
+settle "$log" 1
+: > "$INITLOG"
+old_id=$(st id)
+store 1 11 0 "$(val LOID_OLD actfail1)
+$(val LOID actfail1)
+"
+kill -HUP "$pid"
+# The deactivate goes through; then the driver file is gone, so gponact
+# fails (open without O_CREAT).
+wait_count "$INITLOG" gpondeact 1 8 || bad "failed activation: no gpondeact"
+rm -f "$INITLOG"
+wait_done "$old_id" 20 || bad "failed activation: never finished"
+check "failed activation: result failed" "done failed" "$(st state) $(st result)"
+check_grep "failed activation: the step is logged" "event=reload_step verb=gponact rc=2" "$log"
+: > "$INITLOG"
+old_id=$(st id)
+kill -HUP "$pid"
+wait_count "$INITLOG" gponact 1 8 || bad "failed activation, again: no gponact"
+inject isp1
+wait_done "$old_id" 20 || bad "failed activation, again: never finished"
+check "failed activation, again: re-registers and ends ok" "done ok identity reregister" \
+	"$(st state) $(st result) $(st changed) $(st action)"
+check "failed activation, again: deactivate and activate" "gpondeact gponact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 10 || bad "failed activation, then: no outcome"
+check "failed activation, then: nothing changed is ok again" "done ok none none" \
+	"$(st state) $(st result) $(st changed) $(st action)"
 stop_omcid
 
 # ------------------------------------------------ 3. which key, which class

@@ -249,6 +249,14 @@ left deactivated, as rcS leaves it at boot (`config-reseed.sh`). A refused `gpon
 does not stop the activation: the ONU comes back on the old serial number and
 the result is `sn_not_applied`. The serial number is rewritten into the
 PLOAM slot the boot activation armed, and only while the ONU is deactivated.
+A PLOAM password the driver does not take (`odi_gpon_pw.c`: 1 to 10
+bytes of text, 20 hex digits, or `0x` and an even number of hex digits up
+to 20) is not sent, and a changed one the driver refuses ends the same way,
+in `pw_not_applied`: the driver keeps the old password. A later reload with
+nothing changed in the store reports the same result again without a second
+re-registration, until the store holds a value the driver takes. A refused
+`gponact` ends in `failed` and leaves the ONU deactivated; the next reload
+re-registers even with nothing changed, rather than reporting `ok`.
 
 Three event lines tell the story (below): `event=reload changed=... action=...
 keys=...` (key names, never values), `event=reload_step verb=... rc=...` for
@@ -276,7 +284,7 @@ going back), the result, the deactivations and the key names, never values.
 From that record:
 
 - `refused` and `timeout` (an unknown serial number is never ranged) are
-  refusals; `ok`, `no_services` and `sn_not_applied` are accepted (the OLT
+  refusals; `ok`, `no_services`, `sn_not_applied` and `pw_not_applied` are accepted (the OLT
   ranged the ONU); `failed` (a local driver step) and `no_serial` (no serial
   number to range with) are neither.
 - **streak**, the refused changes in a row, newest first, within 24 h when the
@@ -1368,7 +1376,7 @@ A re-registration still running at the bound is reported as still working and
 is not a failure. Exit 1 when no omcid runs (or `/etc/config/modules.off` is
 set), when omcid does not answer the signal within 5 s (an older build treats
 SIGHUP as stop), or when the reload's result is `failed`, `timeout`,
-`no_services`, `sn_not_applied` or `no_serial`. It never starts an omcid and writes
+`no_services`, `sn_not_applied`, `pw_not_applied` or `no_serial`. It never starts an omcid and writes
 nothing to the driver: init owns the process, and a second omcid started here
 used to make the ONU cycle through O1 to O3 while init's respawn entry
 re-provisioned around it.
@@ -1587,7 +1595,7 @@ changes it back, so `try` stores nothing. It writes the values to
 store (`cfgstore.c`), and starts a watcher in the background that runs
 `apply.sh omci` (170 s: omcid waits 150 s for O5) and judges the outcome:
 
-- `refused`, `timeout`, `no_services`, `sn_not_applied` or `failed`: the trial
+- `refused`, `timeout`, `no_services`, `sn_not_applied`, `pw_not_applied` or `failed`: the trial
   goes back at once: the RAM file is removed and `apply.sh omci --revert`
   re-registers with the stored identity (the re-registration guard lets a
   revert through and does not count it; "omcid", "Re-registrations are
@@ -1840,7 +1848,7 @@ drivers behind them.
 | `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault. Then the downstream GEM port CAM, the table that decides which GEM ports the ONU receives: `gem_cam <row> hw <GEM port|-> type 0x<FLAGS>` for each of rows 0..64 valid in the hardware or with a flow type word not zero (rows 0..63 are the downstream flows OMCI created, the row being the flow id, `diag gpon get flows`; row 64 is the OMCC; FLAGS bit 0 multicast, 1 Ethernet, 2 OMCI, 4 AES), then `gem_cam_valid <n>`. A flow OMCI deleted leaves no line | -- |
 | `/proc/odi_gpon/ponq` | the upstream PON queue block read back from the hardware (`docs/SWITCH.md#upstream-pon-queues`), next to what cmd 21 and 25 recorded: `tcont <t> en <0|1> qmap 0x<mask> block <first>+<count>|-` for each T-CONT enabled, with a queue in its mask, or with a queue block recorded (16 is the OMCC); `queue <q> wfq <0|1> weight <w> cir <raw> pir <raw>` for each physical queue in the mask of an enabled T-CONT, the rates as the register holds them (one less than asked, except 0, 1 and 262143, no limit); `flow <slot> valid <0|1> gem <port> queue <q> recorded <0|1>` for each upstream flow slot valid in the hardware or recorded (64 is the OMCC). Reads only, and never `DRN_CMD`. Rows nothing uses keep what the replays or an earlier provisioning left; `omcli check` compares only what omcid set up | -- |
 | `/proc/odi_omci` | redirect registrations, frame and command counters | `switch_init`: the platform settings and the module-load replay (rcS does this once) |
-| `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once) |
+| `/proc/odi_init` | the last verb's return code | one SDK init or PON verb (rcS does these once); a refused verb fails the write |
 | `/proc/odi_wdt/userland_ok` | -- | `1`: userland is up, stop the 120 s reset (one-shot, boot only) |
 | `/proc/odi_wdt/watchdog_flag` | -- | `1`: keep kicking the hardware watchdog |
 | `/proc/odi_wdt/register` | -- | `"<name> <deadline_s>"`, e.g. `omcid 60`: register (or update) a watchdog client; idempotent, arms the deadline from that moment and resets its clock (`docs/SETTINGS.md`, "Watchdog rules") |
@@ -2028,7 +2036,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `omcid: event=vlan_fwdop code=0x10 inst=4354 result=override built_as=0x00` | notice | a class 84 port built with the FwdOp the owner set in `RTK_DEVINFO_SPECVER` (docs/SETTINGS.md) instead of the code the OLT wrote; once per port and pair of codes per omcid run |
 | `omcid: event=reload changed=vlan action=rebuild keys=VLAN_MANU_TAG_VID` | notice | omcid took a SIGHUP (`apply.sh omci`) and reread the store: `changed` is `none`, `vlan` (bridge connections rebuilt in place, the ONU stays in O5) or `identity` (`action=reregister`: the ONU is deactivated and ranged again); `keys` names the store keys that differ, never their values. Never rate limited |
 | `omcid: event=reload_step verb=gponsn rc=0` | info, notice when `rc` is not 0 | one driver verb of a re-registration (`gpondeact`, `gponsn`, `gponpw`, `gponact`) and its errno (0 is success) |
-| `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `refused` (three Deactivate_ONU-IDs before O5, or O7); `held` (the identity change was held back after two refused ones, `action=held`); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number). `o5_s` is the time from `gponact` to O5 with services; `refusals`, on a re-registration, the Deactivate_ONU-IDs while it waited ("omcid", "Re-registrations are counted") |
+| `omcid: event=reload_done changed=identity action=reregister result=ok duration_s=44.700 o5_s=41.310 services=6` | notice | the reload ended. `result` is `ok`; `failed` (the driver refused `gpondeact`, nothing touched, or `gponact`, the ONU left off the line); `timeout` (O5 not reached in 150 s); `refused` (three Deactivate_ONU-IDs before O5, or O7); `held` (the identity change was held back after two refused ones, `action=held`); `no_services` (O5, but none built); `sn_not_applied` (back, on the old serial number); `pw_not_applied` (back, on the old PLOAM password). `o5_s` is the time from `gponact` to O5 with services; `refusals`, on a re-registration, the Deactivate_ONU-IDs while it waited ("omcid", "Re-registrations are counted") |
 | `host-autoneg: event=fallback setting=off running=on ...` | notice | the host-port auto-negotiation (`HOST_AUTONEG`): the boot watch, the fallback and every trial; the events are listed under `host-autoneg.sh` above |
 | `host-serdes: event=fallback setting=2500basex running=fiber1g ...` | notice | the host SerDes mode (`HOST_SERDES`): the boot watch, the fallback, every trial and reapply; the events are listed under `host-serdes.sh` above |
 | `sfp-host-ddm: event=requested setting=on ...` | notice | the host-side SFP EEPROM (`SFP_HOST_DDM`): `requested` (the boot asked the kernel), `off` (the key is 0), `safe_mode_boot`, `bad_value`, `no_kernel`, and from `apply` `applied`, `apply_failed` or `apply_timeout`. The kernel's own lines start `odi_sfp_mirror:` (`host EEPROM on`, `host EEPROM off`, and each failure, once) |

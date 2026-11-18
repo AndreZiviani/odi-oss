@@ -34,7 +34,7 @@
 #   - the re-registration does not end with the ONU in O5 and services:
 #     result refused (the OLT deactivated the ONU three times, or disabled
 #     it), timeout (no O5 within the 150 s omcid waits), no_services,
-#     sn_not_applied or failed;
+#     sn_not_applied, pw_not_applied or failed;
 #   - within WATCH_S (600 s, the MIB reset loop window) of a good result, a
 #     MIB reset loop starts on a line that had none before the trial
 #     (omcli state, "mib resets");
@@ -220,14 +220,39 @@ status_get() { sed -n "s/^$1=//p" "$RELOAD_STATUS" 2>/dev/null | sed -n 1p; }
 # watcher_alive: the background watcher of this trial still runs.
 watcher_alive() { [ -n "$watcher" ] && kill -0 "$watcher" 2>/dev/null; }
 
+# ploam_ok VALUE: the password is one the driver takes (see try), counted in
+# bytes as the driver counts it. Spaces at either end and control characters
+# are refused too: /proc/odi_init drops some of them on the way, so the
+# driver would test other bytes than the store keeps.
+ploam_ok() {
+	case $1 in " "* | *" ") return 1 ;; esac
+	[ "$(printf '%s' "$1" | tr -d '\001-\037\177')" = "$1" ] || return 1
+	n=$(printf '%s' "$1" | wc -c) || return 1
+	n=$((n))
+	case $1 in
+	0[xX]*)
+		h=${1#??}
+		case $h in *[!0-9A-Fa-f]*) ;; ?*)
+			[ $(((n - 2) % 2)) = 0 ] && [ "$n" -le 22 ] && return 0 ;;
+		esac ;;
+	esac
+	[ "$n" -le 10 ] && return 0
+	[ "$n" = 20 ] && case $1 in *[!0-9A-Fa-f]*) return 1 ;; *) return 0 ;; esac
+	return 1
+}
+
 try() {
 	confirm=
 	if [ "${1:-}" = --confirm ]; then confirm=--confirm; shift; fi
 	[ $# -gt 0 ] || die "usage: identity-trial.sh try [--confirm] KEY=VALUE..."
+	seen=
 	for a in "$@"; do
 		case $a in *=*) ;; *) die "$a is not KEY=VALUE" ;; esac
 		k=${a%%=*} v=${a#*=}
 		case " $KEYS " in *" $k "*) ;; *) die "$k is not an identity key ($KEYS)" ;; esac
+		# omcid answers the first of two, the store would keep the last.
+		case " $seen " in *" $k "*) die "$k is given twice" ;; esac
+		seen="$seen $k"
 		# Reject values the persistent XML store cannot accept, before
 		# any trial can interrupt the line. Keep this in step with flash.
 		case $v in
@@ -242,6 +267,13 @@ try() {
 			[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]) ;;
 			*) die "GPON_SN must be four letters or digits and eight hex digits" ;;
 			esac
+		fi
+		# What the driver takes (gponpw, odi_gpon_pw.c): empty, 1 to 10
+		# characters of text, 20 hex digits, or 0x and an even number of
+		# hex digits up to 20. Anything else would leave the old
+		# password in force while the trial reads as passed.
+		if [ "$k" = GPON_PLOAM_PASSWD ] && ! ploam_ok "$v"; then
+			die "GPON_PLOAM_PASSWD must be 1 to 10 bytes of text without spaces at either end, 20 hex digits, or 0x and up to 20 hex digits (an even number)"
 		fi
 	done
 

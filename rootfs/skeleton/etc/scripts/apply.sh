@@ -219,6 +219,7 @@ omci() {
 		refused)        say "the OLT refused the new identity ($(status_get refusals) deactivation(s), or disabled the ONU)" >&2 ;;
 		no_services)    say "the ONU is in O5 but the OLT built no services" >&2 ;;
 		sn_not_applied) say "the ONU is back, but the driver did not take the new serial number" >&2 ;;
+		pw_not_applied) say "the ONU is back, but the driver did not take the new PLOAM password; it runs the old one" >&2 ;;
 		no_serial)      say "GPON_SN is empty: the ONU stays off the line until a serial number is set" >&2 ;;
 		esac
 		[ "$changed" != identity ] || rereg_warn

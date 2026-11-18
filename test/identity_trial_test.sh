@@ -116,7 +116,7 @@ n "good: no value in the log or the kernel log" "newsecret|ODIT0000ABCD|newuser"
 t "good: the key names are logged" "event=identity_trial keys=GPON_SN,LOID,GPON_PLOAM_PASSWD state=kept" "$(cat "$T/kmsg")"
 
 # ---- 2. refused by the OLT: back, with --revert
-for r in refused timeout no_services sn_not_applied failed; do
+for r in refused timeout no_services sn_not_applied pw_not_applied failed; do
 	fresh
 	echo "identity $r 3" > "$T/next"
 	run try GPON_PLOAM_PASSWD=wrong > /dev/null
@@ -244,6 +244,21 @@ t "a serial number the driver would refuse" "four letters or digits and eight he
 t "a key that is not an identity key" "not an identity key" "$(run try VLAN_MANU_TAG_VID=10)"
 t "not KEY=VALUE" "is not KEY=VALUE" "$(run try GPON_SN)"
 t "nothing asked for" "usage" "$(run try)"
+t "a key given twice" "GPON_SN is given twice" "$(run try GPON_SN=ODIT0000ABCD GPON_SN=ODIT0000ABCE)"
+# 0x123 is text: an odd number of hex digits after 0x is not hex to the
+# driver, and five characters are text it takes.
+for value in 0123456789a 0123456789abcdefghij 0x0123456789abcdef012345 0123456789abcdef012g \
+	' leading' 'trailing ' '   ' "$(printf 'tab\tin')" "$(printf 'cr\r')" 'éééééé'; do
+	out=$(run try "GPON_PLOAM_PASSWD=$value"); rc=$?
+	t "a password the driver would refuse ($value): rejected" "^1$" "$rc"
+	t "a password the driver would refuse ($value): explains" "1 to 10 bytes of text" "$out"
+done
+# The check runs per value, the twice check on the second: a first value
+# that passes the form ends at the second, never at the form.
+for value in '' 0123456789 0123456789abcdefABCD 0x12 0x0123456789abcdefABCD 0x123 'a b' 'ééééé'; do
+	t "a password the driver takes ('$value'): passes the form check" "is given twice" \
+		"$(run try "GPON_PLOAM_PASSWD=$value" GPON_PLOAM_PASSWD=x)"
+done
 for key in GPON_PLOAM_PASSWD LOID LOID_PASSWD; do
 	for value in 'test"value' 'test<value' 'test&value'; do
 		out=$(run try "$key=$value"); rc=$?

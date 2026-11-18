@@ -6489,7 +6489,7 @@ W 34014 1
 r 34018 0
 W 34018 21
 # odi_init stat: rc 0
-# odi_init trunk: rc -ENOSYS
+# odi_init trunk: rc 0
 r 17000 0
 W 17000 600bb8
 r 17008 0
@@ -7384,7 +7384,7 @@ W 1c100 0
 r 1c0cc 0
 W 1c0cc 0
 # odi_init trap: rc 0
-# odi_init gpio: rc -ENOSYS
+# odi_init gpio: rc 0
 r 111e8 0
 W 111e8 0
 r 111ec 0

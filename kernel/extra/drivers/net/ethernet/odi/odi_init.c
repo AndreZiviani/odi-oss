@@ -16,7 +16,9 @@
  *
  * A verb with no data returns -ENOSYS and logs, so a capture gap shows in
  * the boot log and the read-back instead of passing quietly. A misspelt
- * verb gets the same answer.
+ * verb gets the same answer. trunk and gpio are the exception: the capture
+ * holds no writes for them by design, and they return 0
+ * (odi_switch_sdkinit.c).
  */
 #ifdef __KERNEL__
 #include <linux/types.h>
@@ -53,7 +55,7 @@ static int odi_init_is_gpon_verb(const char *name)
 	return 0;
 }
 
-/* Returns 0 on success, -ENOSYS when the verb is known but this boot has
+/* Returns 0 on success, -ENOSYS when the verb is unknown or this boot has
  * nothing to serve it (see file header) -- never calls into anything
  * outside this file's own two dependencies.
  */
@@ -137,7 +139,10 @@ static ssize_t odi_init_proc_write(struct file *file, const char __user *buffer,
 	odi_init_last_ret = ret;
 	mutex_unlock(&odi_switch_lock);
 	pr_info("odi_init step %s: ret %d\n", name, ret);
-	return count;
+	/* A refused verb fails the write, so a writer sees it without a
+	 * second read (which another writer could overtake); the result
+	 * also stays readable, as rcS logs it. */
+	return ret < 0 ? ret : count;
 }
 
 static const struct proc_ops odi_init_proc_fops = {
