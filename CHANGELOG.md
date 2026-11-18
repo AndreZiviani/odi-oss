@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.18.1 (2026-11-18)
+
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
   characters, stored with zero bytes after it the way the setup wizard
   writes it, reads as its text instead of "Not printable ASCII". confd
