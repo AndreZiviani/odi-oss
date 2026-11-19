@@ -906,8 +906,13 @@ struct cfg_snap {
 #define CFGD_VLAN       0xf000u
 void cfg_snap_take(struct cfg_snap *s);
 void cfg_snap_restore(const struct cfg_snap *s);
+/* The values alone, the autonomous entities left as they are: for a reload
+ * that has not yet decided to run on what it read. */
+void cfg_snap_restore_values(const struct cfg_snap *s);
 /* Reread every key the daemon holds, the way startup reads them. */
 void cfg_load_all(void);
+/* The same, without rebuilding the autonomous entities from them. */
+void cfg_load_values(void);
 void cfg_load_unknown_me(void);
 /* OMCI_VEIP_SLOT_ID and OMCI_PRIVATE_ME: which instances the ONU creates for
  * itself. The VEIP key follows the stock firmware: a decimal slot number in

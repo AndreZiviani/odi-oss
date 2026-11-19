@@ -204,7 +204,15 @@ static void aut_push(unsigned *n, uint16_t cls, uint16_t inst)
 
 void aut_rebuild(void)
 {
-	unsigned n = 0;
+	/* The list as it was, to tell a rebuild that changes the entities
+	 * from one that does not. Static: 2 KB, off the stack. */
+	static struct omci_instance prev[AUT_MAX];
+	static int built;
+	unsigned n = 0, prev_n = aut_count;
+	int same;
+
+	for (unsigned i = 0; i < prev_n; i++)
+		prev[i] = aut[i];
 
 	for (unsigned i = 0; i < omci_autonomous_count && n < AUT_MAX; i++) {
 		uint16_t cls = omci_autonomous[i].classId;
@@ -245,8 +253,16 @@ void aut_rebuild(void)
 		aut_push(&n, OMCI_ME_VOIP_CONFIG_DATA, 0);
 	}
 	aut_count = n;
-	/* The entities that raise alarms and AVCs are these. */
-	alarm_init();
+	same = built && n == prev_n;
+	for (unsigned i = 0; same && i < n; i++)
+		same = aut[i].classId == prev[i].classId && aut[i].inst == prev[i].inst;
+	built = 1;
+	/* The entities that raise alarms and AVCs are these. Only when they
+	 * change: alarm_init() clears every alarm bitmap, pending notification
+	 * and ARC timer, and every reload rebuilds this list, so a reload that
+	 * changed nothing here declared each standing alarm to the OLT again. */
+	if (!same)
+		alarm_init();
 }
 
 uint16_t canon_inst(uint16_t cls, uint16_t inst)

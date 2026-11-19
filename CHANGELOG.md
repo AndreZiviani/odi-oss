@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- omcid: a reload keeps the alarm state of the ONU's own entities when it
+  does not change them. Each reload rebuilt that list and cleared every
+  alarm bitmap, pending notification and ARC timer with it, so an
+  `apply.sh omci` that changed nothing declared a standing alarm such as
+  LAN-LOS to the OLT again. A held or deferred reload now leaves the list
+  alone altogether: it is rebuilt only once the reload runs on what it
+  read.
+
 - omcli: `--id N` asks for `-f` when N is a known command that writes, as
   the named command does. Only unknown ids needed it, so `omcli --vendor
   --id 32` sent a MIB reset to omcid without the confirmation `omcli mib

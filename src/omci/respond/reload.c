@@ -427,7 +427,9 @@ static void activate(void)
  * then is. Nothing is recorded: the change never reached the OLT. */
 static void hold(const struct cfg_snap *old, const char *why)
 {
-	cfg_snap_restore(old);
+	/* The values only: the autonomous entities were never rebuilt from
+	 * the ones read, so their alarms and AVC baselines stand. */
+	cfg_snap_restore_values(old);
 	rl.base = *old;
 	rl.changed = "identity";
 	rl.action = why;
@@ -448,7 +450,10 @@ static void do_reload(void)
 	rl.confirm = rereg_take_confirm();
 	rl.refusals = 0;
 	cfg_snap_take(&old);
-	cfg_load_all();
+	/* The values first, the autonomous entities only once the reload
+	 * runs on them (below): a held or deferred reload leaves the ONU as
+	 * it was, its alarm state too. */
+	cfg_load_values();
 	cfg_snap_take(&cur);
 	mask = cfg_snap_diff(&rl.base, &cur);
 	/* The last activation failed and the ONU is still deactivated: an
@@ -465,6 +470,7 @@ static void do_reload(void)
 		/* Nothing new, but the store still holds a serial number or
 		 * password the driver did not take: not ok, and no second
 		 * re-registration for the same value. */
+		aut_rebuild();
 		rl.changed = "identity";
 		rl.action = "none";
 		ev_reload(rl.changed, rl.action, 0);
@@ -472,6 +478,7 @@ static void do_reload(void)
 		return;
 	}
 	if (!mask && !retry) {
+		aut_rebuild();
 		rl.changed = "none";
 		rl.action = "none";
 		ev_reload(rl.changed, rl.action, 0);
@@ -496,6 +503,7 @@ static void do_reload(void)
 		hold(&old, "held");
 		return;
 	}
+	aut_rebuild();
 	if ((mask & CFGD_IDENTITY) || retry) {
 		do_reregister(&old);
 		if (rl.phase == RL_IDLE)

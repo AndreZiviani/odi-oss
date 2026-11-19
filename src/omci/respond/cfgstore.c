@@ -1408,7 +1408,7 @@ int fixed_me_upload(int want, uint8_t *body, uint16_t *len)
  * empty are the same to the OLT, the report keys count only while the
  * identity switch is on (with it off they are stored and shown, never sent),
  * and a LOID is the one the vendor rule picks (LOID_OLD wins). */
-void cfg_load_all(void)
+void cfg_load_values(void)
 {
 	cfg_load_identity();
 	cfg_load_vlan();
@@ -1421,6 +1421,11 @@ void cfg_load_all(void)
 	cfg_load_custom_me();
 	cfg_load_custom_mcast();
 	cfg_load_pots_ports();
+}
+
+void cfg_load_all(void)
+{
+	cfg_load_values();
 	aut_rebuild();
 }
 
@@ -1442,7 +1447,7 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->pots_slot = pots_slot;
 }
 
-void cfg_snap_restore(const struct cfg_snap *s)
+void cfg_snap_restore_values(const struct cfg_snap *s)
 {
 	ident = s->ident;
 	vlanCfg = s->vlan;
@@ -1458,6 +1463,11 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	pots_ports = s->pots_ports;
 	pots_slot_key = s->pots_slot_key;
 	pots_slot = s->pots_slot;
+}
+
+void cfg_snap_restore(const struct cfg_snap *s)
+{
+	cfg_snap_restore_values(s);
 	aut_rebuild();
 }
 
