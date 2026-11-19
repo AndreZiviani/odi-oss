@@ -633,6 +633,11 @@ static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 			apply6(ch6, changes, MAX_CHANGES);
 			write_state6();
 		}
+		/* And again, now for this policy: the lease above was worked
+		 * out from the static list before it. A static group that
+		 * cannot be a row keeps the PON drop off (static_overflow),
+		 * and it does from this tick, not the next one. */
+		settle_lease(db, wanted_lease(db, now), now);
 		return;
 	}
 	settle_lease(db, pol.snooping ? wanted_lease(db, now) : 0, now);

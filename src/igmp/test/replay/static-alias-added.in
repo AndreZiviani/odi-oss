@@ -1,0 +1,21 @@
+# The other way round from static-alias: the drop is on after the learning
+# interval, and a policy that adds a static group with a link-local MAC
+# (239.0.0.9) turns it off at the tick the policy is read, not one later.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+static=239.1.1.9-239.1.1.9
+end
+0 tick
+300 tick
+310 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+static=239.0.0.9-239.0.0.9
+static=239.1.1.9-239.1.1.9
+end
+311 tick
+312 tick
+313 state

@@ -55,6 +55,14 @@ listed here.
   with `IGMP_PON_DROP=1`, the drop of unregistered multicast from the PON
   stayed on until the policy changed again or igmpd restarted.
 
+- igmpd: a static group the OLT lists whose MAC is a link-local one
+  (239.0.0.9 and every other group with the low 23 bits below 256, outside
+  224.0.0.0/24) keeps the PON drop off, as a static range that does not fit
+  already does. igmpd writes no row for such a group, so with
+  `IGMP_PON_DROP=1` its stream was dropped as unregistered. A policy that
+  adds or removes such a group, or a static range too wide for a row,
+  turns the drop off or on at once, where it waited for the next second.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10

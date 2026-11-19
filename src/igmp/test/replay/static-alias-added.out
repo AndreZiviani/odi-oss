@@ -1,0 +1,23 @@
+> 0 policy
+> 0 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 1 static ranges
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
+  set vid 0 01:00:5e:01:01:09 ports 0x5  (not written)
+> 300 tick
+snooping lease: take host IGMP to the CPU, igmpd sends it up, drop unregistered IPv4 multicast from the PON  (not written)
+> 310 policy
+> 311 tick
+policy: snooping, function 0, immediate leave, 2/125/1 s, limit 0, 0 allow + 2 static ranges
+  upstream: reports taken and sent by igmpd; tag as the switch tags it; unauthorized joins withheld
+snooping lease: take host IGMP to the CPU, igmpd sends it up  (not written)
+> 312 tick
+> 313 state
+joins=0
+denied=0
+groups=0
+> end
+joins=0
+denied=0
+groups=0
+status 0

@@ -1,0 +1,24 @@
+# A static group whose MAC is a link-local one (239.0.0.9 lands on
+# 01:00:5e:00:00:09) is not a row, and the OLT promised it: the PON drop
+# stays off after the learning interval, as for a static list that does not
+# fit. 239.1.1.9 is a row as usual. With 224.0.0.9 in its place the drop
+# comes on: it leaves 224.0.0.0/24 alone anyway.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+static=239.0.0.9-239.0.0.9
+static=239.1.1.9-239.1.1.9
+end
+0 tick
+300 tick
+310 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+static=224.0.0.9-224.0.0.9
+static=239.1.1.9-239.1.1.9
+end
+311 tick
+312 tick
+313 state

@@ -581,8 +581,10 @@ says IGMP function 0. The profile also supplies
   must not block a stream), and so does a list longer than 32 ranges. A
   static range of up to 16 groups becomes a row a group with the UNI as
   member and never expires; a wider one cannot be named in the switch, and
-  neither can a group past the 128 the table holds, and igmpd then leaves
-  the PON's drop off so the range still flows.
+  neither can a group past the 128 the table holds, nor one outside
+  224.0.0.0/24 whose MAC is a link-local one (239.0.0.9 is
+  01:00:5e:00:00:09, which igmpd never writes a row for), and igmpd then
+  leaves the PON's drop off so the range still flows.
 
 The access control lists are read as G.988 9.3.27 lays them out: a logical
 row is a part 0 row (GEM port, VLAN, IPv4 source, start and end of the
