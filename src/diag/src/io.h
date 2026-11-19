@@ -22,6 +22,10 @@ void out_flush(void);
 /* Redirect flushed output; NULL restores stdout. The sink must buffer -- see
  * io.c. */
 void out_set_sink(void (*fn)(const char *, int));
+/* Restore stdout without flushing: bytes buffered for a sink are dropped,
+ * bytes buffered for stdout are kept. For a signal handler that must not
+ * wait on a sink. */
+void out_drop_sink(void);
 
 /* 64-bit decimal. Needed for the MIB counters, and worth its own routine
  * because dividing a uint64_t by ten would otherwise call into libgcc. */

@@ -22,6 +22,13 @@ void out_set_sink(void (*fn)(const char *, int))
 	sink = fn;
 }
 
+void out_drop_sink(void)
+{
+	if (sink)
+		used = 0;
+	sink = 0;
+}
+
 void out_flush(void)
 {
 	int off = 0;

@@ -13,6 +13,9 @@ listed here.
   and its FCS (18 bytes) as a receive error. Before, anything above 4 bytes
   went to the RX hooks and the stack, which read the 14-byte header from
   whatever the buffer held before.
+- omcid: a stop signal in the middle of a CLI command no longer flushes the
+  half-written reply into the CLI queue before it deregisters. The handler
+  said it skipped that flush, but `out_set_sink(0)` flushed first.
 
 ## v1.18.1 (2026-11-18)
 
