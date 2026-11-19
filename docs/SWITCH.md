@@ -1360,6 +1360,19 @@ Read back from the HSGQ stick in 2500BASE-X: 0x214 = 0x00260016, 0x21c00 =
 = 0x71e0. Without 0x21808 the HiSGMII SerDes is in sync and the host link
 up, and no frame is received from the host.
 
+**The re-latch.** A 2500BASE-X lane started before the host sends 3.125
+Gbaud does not sync when the host starts later: bit 17 of 0x214 reads set
+for one read in fifteen to fifty, never for long. Started again while the
+host sends, it syncs within seconds. The re-latch starts it again with the
+word it holds: 0x214 `HOLD_CLK_GLITCH` bit 13 := 1, `LINK_MODE` [4:0] :=
+0x1f (parked), 20 ms, then the word read before with bit 13 clear. A
+`2500basex` trial and each 2500BASE-X phase of the boot watch run it every
+5 s (`RESYNC_S`) while bit 17 reads clear, and never on a lane in sync.
+Measured against a MikroTik hEX S 2025 (E60iUGS) on HSGQ sticks: a re-latch
+with the router port still at 1G gave one read in 25 with the bit set; the
+next, after the port was switched to 2.5G-baseX, 0x214 = 0x00260016 within
+2 s and frames both ways.
+
 HiSGMII is not an IEEE 802.3 mode: SGMII signalling at 3.125 Gbaud, no
 standard to define the line or its negotiation. The host port is set to
 it; nothing on the line selects it.

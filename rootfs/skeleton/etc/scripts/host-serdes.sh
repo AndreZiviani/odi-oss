@@ -102,6 +102,7 @@ TRIAL_S=${TRIAL_S:-120}         # a trial reverts after this long unconfirmed
 TRIAL_MAX_S=${TRIAL_MAX_S:-600} # the longest trial a caller may ask for
 WATCH_S=${WATCH_S:-30}          # each phase of the boot watch
 WATCH_MAX_S=${WATCH_MAX_S:-600} # the whole boot watch
+RESYNC_S=${RESYNC_S:-5}         # re-latch a 2500BASE-X lane out of sync this often
 DIAG_S=${DIAG_S:-10}            # one diag call
 IO_S=${IO_S:-5}                 # one sysfs or flash call
 LOCK_S=${LOCK_S:-10}            # waiting for the lock
@@ -289,6 +290,22 @@ sds_anf() {
 	cur=$(sds_read 0x21808)
 	[ -n "$cur" ] || { echo "host-serdes: SerDes read 0x21808 failed mid-sequence" >&2; return 1; }
 	[ $(( 0x$cur & 0x100 )) -eq 0 ] || sds_write 0x21808 "$(( 0x$cur & ~0x100 ))"
+}
+
+# sds_relatch: the lane parked and started again with the word it holds:
+# HOLD_CLK_GLITCH set, LINK_MODE parked (0x1f), 20 ms, the word back with
+# the clock running. A lane started before the host sends 3.125 Gbaud does
+# not sync when the host starts later (a host port switched to 2.5G-baseX
+# by hand after the stick, as a trial asks); started again while the host
+# sends, it syncs within seconds. Run only on a 2500BASE-X lane whose bit 17
+# reads clear: a lane in sync is never touched.
+sds_relatch() {
+	cur=$(sds_read 0x214)
+	[ -n "$cur" ] || return 1
+	sds_write 0x214 "$(printf '0x%x' $(( 0x$cur | 0x2000 )))"
+	sds_write 0x214 "$(printf '0x%x' $(( ((0x$cur | 0x2000) & ~0x801f) | 0x1f )))"
+	usleep 20000 2>/dev/null || "$SLEEP" 1
+	sds_write 0x214 "$(printf '0x%x' $(( 0x$cur & ~0x2000 )))"
 }
 
 # apply_boot MODE: what the boot does. Every register is read first; if all
@@ -520,6 +537,27 @@ watch() {
 			[ "$i" -lt "$WATCH_S" ] || break
 			"$SLEEP" 1
 			i=$((i + 1))
+			# A 2.5G host that started to send after this phase started
+			# the lane: start it again, every RESYNC_S s, while out of sync.
+			# lock_try counts with i as well, so i is kept aside around it:
+			# reset, it would restart the phase at every re-latch and
+			# Fiber 1G would never be tried.
+			if [ "$mode" = 2500basex ] && [ "$i" -lt "$WATCH_S" ] &&
+				[ $(( i % RESYNC_S )) -eq 0 ] && [ "$(link 2500basex)" = 0 ]; then
+				w_i=$i
+				lock_try
+				w_rc=$?
+				i=$w_i
+				if [ "$w_rc" != 1 ]; then
+					load
+					if [ "$phase" != watch ]; then
+						unlock
+						return 0
+					fi
+					sds_relatch || say "the lane could not be re-latched" >&2
+					unlock
+				fi
+			fi
 		done
 		lock
 		load
@@ -598,6 +636,35 @@ try() {
 
 # The trial run (trial_run, trial-lib.sh): the switch, then the window.
 trial_apply() { switch_to "$trial_mode"; }
+# trial_window ID SECONDS: in 2500BASE-X the window re-latches the lane
+# every RESYNC_S s while bit 17 reads clear (sds_relatch, above): the host
+# port is often switched to 2.5G by hand after the trial applied, over the
+# link the trial just dropped. Any other mode sleeps the window as before.
+# The window keeps its length; the expiry follows it as before.
+trial_window() {
+	[ "$trial_mode" = 2500basex ] || { "$SLEEP" "$2"; return 0; }
+	w_id=$1 w_end=$(( $(uptime_s) + $2 )) w_n=0
+	while :; do
+		w_left=$(( w_end - $(uptime_s) ))
+		[ "$w_left" -gt 0 ] || return 0
+		[ "$w_left" -le "$RESYNC_S" ] || w_left=$RESYNC_S
+		"$SLEEP" "$w_left"
+		[ "$(link 2500basex)" = 0 ] || continue
+		# lock_try, not lock: a busy lock skips this re-latch; lock would
+		# end the trial run here, before its expiry.
+		lock_try
+		[ $? != 1 ] || continue
+		load
+		if [ "$phase" != trial ] || [ "$trial_id" != "$w_id" ] || [ "$running" != 2500basex ]; then
+			unlock
+			continue
+		fi
+		sds_relatch || say "the lane could not be re-latched" >&2
+		unlock
+		w_n=$((w_n + 1))
+		[ "$w_n" != 1 ] || say "no sync in 2500BASE-X: re-latching the lane every ${RESYNC_S} s until it syncs or the trial ends"
+	done
+}
 trial_applied() {
 	running=$trial_mode
 	# expire and revert go by the file. If it cannot be written it still
