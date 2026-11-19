@@ -189,8 +189,13 @@ static void status_write(int done, const char *result, long o5_ms)
 		if (today >= 0)
 			sline_u(&s, "today", (unsigned long)today);
 	}
-	(void)atomic_write(RELOAD_STATUS_PATH, RELOAD_STATUS_TMP_PATH,
-			   (const uint8_t *)s.b, (uint32_t)s.n);
+	/* A status that cannot be written (a full /var) must not leave the
+	 * one before standing: the "running" this reload wrote at its start
+	 * would have apply.sh refuse every later reload as still applying. No
+	 * file is no run, which apply.sh reads as such. */
+	if (atomic_write(RELOAD_STATUS_PATH, RELOAD_STATUS_TMP_PATH,
+			 (const uint8_t *)s.b, (uint32_t)s.n) < 0)
+		sys_unlink(RELOAD_STATUS_PATH);
 }
 
 /* ------------------------------------------------------------ the driver */

@@ -224,9 +224,12 @@ t "a reload still running: the next one is refused, exit 1" "^1 .*still applying
 t "and omcid was not signalled" "^same$" "$(cmp -s "$T/status" "$T/status.before" && echo same)"
 t "and no confirmation was written" "^no$" "$([ -e "$T/confirm" ] && echo yes || echo no)"
 t "and the lock is free" "^free$" "$(flock -n "$T/omci.lock" true && echo free)"
-# It ends.
-sed 's/^state=running$/state=done/; s/^result=activated$/result=ok/' "$T/status.before" > "$T/status.new"
-mv "$T/status.new" "$T/status"
+# A status that says running for an omcid that no longer lives is no
+# reload: the one that died mid-reload left it, and the signal goes out.
+sed "s/^id=.*/id=999999.4/" "$T/status.before" > "$T/status"
+echo "done vlan rebuild ok VLAN_MANU_TAG_VID 400 - 6 0" > "$T/script"
+out=$(run omci); rc=$?
+t "running from an omcid that is gone: not refused, the reload runs" "^0 .*connections rebuilt in place" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
 
 # A reload that re-registers only because the last one left the ONU off the
 # line (retry=1): reported as a re-registration, and omci-live exits 4.
@@ -249,7 +252,19 @@ out=$(run omci-live); rc=$?
 t "retry that fails: exit 1, no empty key list" "^1 .*identity: failed after 0.9 s" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
 
 # The seconds spent waiting for the lock count against the bound: a lock
-# held 3 s and a bound of 4 s end after about 4 s, not 7.
+# held 3 s and a bound of 4 s end after about 4 s, not 7. The bound caps the
+# lock wait itself too: held past it, the run ends there, with nothing
+# signalled.
+flock "$T/omci.lock" sleep 4 &
+holder=$!
+for _ in $(seq 50); do flock -n "$T/omci.lock" true || break; sleep 0.1; done
+cp "$T/status" "$T/status.before"
+s0=$(date +%s)
+out=$(ACK=5 run omci 2); rc=$?
+took=$(( $(date +%s) - s0 ))
+wait "$holder"
+t "a lock held past a bound of 2 s: exit 1 after about 2 s ($took s)" "^1 [1-3] .*still waiting" "$rc $took $out"
+t "and omcid was not signalled" "^same$" "$(cmp -s "$T/status" "$T/status.before" && echo same)"
 printf 'running vlan rebuild pending VLAN_MANU_TAG_VID 0 - 6 0\n' > "$T/script"
 flock "$T/omci.lock" sleep 3 &
 holder=$!
@@ -280,8 +295,18 @@ mv "$T/status.new" "$T/status"
 for _ in $(seq 50); do flock -n "$T/omci.lock" true && break; sleep 0.1; done
 t "once omcid answers it, late, the lock is free" "^free$" "$(flock -n "$T/omci.lock" true && echo free)"
 
+# Unanswered again, and this time the omcid it went to goes away: the lock
+# is released when no omcid it signalled lives, not on a clock.
+rm -f "$T/script"
+out=$(ACK=2 run omci); rc=$?
+t "unanswered again: exit 1" "^1 .*did not answer the signal" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
+sleep 2
+t "the lock stays held while that omcid lives" "^held$" "$(flock -n "$T/omci.lock" true && echo free || echo held)"
+
 # No omcid at all.
 kill "$(cat "$T/omcid.pid")"; wait 2>/dev/null; rm -f "$T/omcid.pid"
+for _ in $(seq 50); do flock -n "$T/omci.lock" true && break; sleep 0.1; done
+t "once that omcid is gone, the lock is free" "^free$" "$(flock -n "$T/omci.lock" true && echo free)"
 out=$(run omci); rc=$?
 t "no omcid: exit 1" "^1$" "$rc"
 t "no omcid: says so" "no omcid is running" "$out"

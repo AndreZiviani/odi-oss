@@ -97,13 +97,17 @@ listed here.
   does not know and seconds that are no number, where it took either for
   the bound, and signals one reload at a time: two at once could swap the
   confirmation each one leaves for omcid. After a signal omcid did not
-  answer in time, the lock stays held until it does, at most 30 s, and the
-  outcome reported is always this run's. A reload is not signalled while
-  omcid still runs the one before: it takes the next signal only once that
-  is done, a re-registration up to 153 s on, by which time the lock would
-  be gone. apply.sh says so and exits 1. The seconds spent waiting for the
-  lock count against the bound, as those for the acknowledgement already
-  did, so two applies at once stay within the 25 s the web UI gives one.
+  answer in time, the lock stays held until it does or no omcid it went
+  to lives, and the outcome reported is always this run's. A reload is not
+  signalled while omcid still runs the one before: it takes the next
+  signal only once that is done, a re-registration up to 153 s on, by
+  which time the lock would be gone. apply.sh says so and exits 1; a
+  status left `running` by an omcid that is gone does not count. The
+  seconds spent waiting for the lock and for the acknowledgement count
+  against the bound, and neither wait goes past it, so two applies at once
+  stay within the 25 s the web UI gives one. When omcid cannot write the
+  status file (a full `/var`), it removes it instead of leaving the
+  `running` of the reload's start standing.
   omcid takes only the exact words apply.sh writes: an empty or cut
   confirmation file counted as `--confirm` and now counts as `omci-live`.
   `test/bin/flock`, the stand-in for a host without flock (macOS), also

@@ -49,7 +49,8 @@
 #                            seconds plus the OLT provisioning time. The
 #                            process is never restarted.
 #                        It waits SECONDS (default 20, APPLY_WAIT; the web UI
-#                        gives this script 25), counted from the signal, for the outcome: reload done,
+#                        gives this script 25) in all, the wait for the lock
+#                        and for the answer included, for the outcome: reload done,
 #                        or for a re-registration back in O5 with services,
 #                        and reports how long that took. A re-registration
 #                        still running at the bound is reported as running and
@@ -152,7 +153,6 @@ SFP_HOST_DDM_SH=${SFP_HOST_DDM_SH:-/etc/scripts/sfp-host-ddm.sh}
 # How long each wait may take, in seconds.
 ACK_WAIT=${ACK_WAIT:-5}             # omcid takes the signal and starts the reload
 APPLY_WAIT=${APPLY_WAIT:-20}        # the outcome; under the web UI 25 s bound
-LINGER_WAIT=${LINGER_WAIT:-30}      # the lock kept after a signal went unanswered
 
 say() { echo "apply: $*"; }
 die() { echo "apply: $*" >&2; exit 1; }
@@ -171,41 +171,56 @@ status_get() { sed -n "s/^$1=//p" "$RELOAD_STATUS" 2>/dev/null | head -n 1; }
 # snap_get <key>: the same from $snap, the file as read once.
 snap_get() { printf '%s\n' "$snap" | sed -n "s/^$1=//p" | head -n 1; }
 
+# run_alive <id> <pids>: 0 when the run <id> (pid.sequence) is of one of
+# the omcid <pids>.
+run_alive() {
+	for _p in $2; do
+		[ "${1%%.*}" = "$_p" ] && return 0
+	done
+	return 1
+}
+
 # secs <milliseconds>: whole and tenths of a second, for the report.
 secs() { echo "$(( ${1:-0} / 1000 )).$(( ${1:-0} % 1000 / 100 ))"; }
 
 # omci_lock: the one omci reload being signalled. The confirmation file is
 # shared: a second apply.sh writing or removing it between the write of the
 # first and omcid taking it would change what the first reload confirms.
-# Held from that write until omcid answers, at most ACK_WAIT seconds to get.
-# lock_s is the seconds it took, which count against the bound of the run.
+# Held from that write until omcid answers, at most ACK_WAIT seconds to get,
+# and no longer than the bound of the run. lock_s is the seconds it took,
+# which count against that bound.
 omci_lock() {
 	command -v flock >/dev/null 2>&1 || die "no flock to take $OMCI_LOCK"
 	( : >> "$OMCI_LOCK" ) 2>/dev/null || die "cannot open $OMCI_LOCK"
 	exec 8>>"$OMCI_LOCK"
 	lock_s=0
 	while ! flock -n 8; do
-		[ "$lock_s" -lt "$ACK_WAIT" ] || die "another apply.sh omci is still waiting for omcid to answer; try again"
+		[ "$lock_s" -lt "$ACK_WAIT" ] && [ "$lock_s" -lt "$wait_s" ] ||
+			die "another apply.sh omci is still waiting for omcid to answer; try again"
 		sleep 1
 		lock_s=$((lock_s + 1))
 	done
 }
 
-# omci_lock_linger <id>: the signal went unanswered and may still be taken.
-# The reload it starts would take whatever confirmation is on disk then,
-# the one of the next apply.sh included, and leave the signal of that one
-# with none. So the lock stays held, by a child with no output, until the
-# status file shows a run other than <id> or LINGER_WAIT seconds pass. A
-# reload that was still running when the signal went out is refused before
-# it (omci below), so what this waits out is an omcid slow to look.
+# omci_lock_linger <id> <pids>: the signal went unanswered and may still be
+# taken. The reload it starts would take whatever confirmation is on disk
+# then, the one of the next apply.sh included, and leave the signal of that
+# one with none. So the lock stays held, by a child with no output, until
+# the status file shows a run other than <id> or none of the omcid <pids>
+# it went to lives: an omcid that took the signal answers, and one that
+# never will is gone (an older build stops at SIGHUP) or, hung, is reset by
+# its watchdog rule. Not on a clock: a signal still pending after any wait
+# would be taken all the same. A reload that was still running when the
+# signal went out is refused before it (omci below), so what this waits out
+# is an omcid slow to look.
 omci_lock_linger() {
 	(
-		j=0
-		while [ "$j" -lt "$LINGER_WAIT" ]; do
+		while :; do
 			_id=$(status_get id)
 			[ -n "$_id" ] && [ "$_id" != "$1" ] && exit 0
+			# shellcheck disable=SC2086 # one pid per word
+			kill -0 $2 2>/dev/null || exit 0
 			sleep 1
-			j=$((j + 1))
 		done
 	) < /dev/null > /dev/null 2>&1 &
 }
@@ -238,8 +253,11 @@ omci() {
 	# wait that long, past the bound here and past the lock, and the reload
 	# it then starts would take the confirmation of whichever apply.sh
 	# wrote one last. Refused instead, with nothing written or signalled.
+	# Only a run of an omcid that still lives: the id is pid.sequence, and
+	# a status left by one that died mid-reload is no reload at all (a new
+	# omcid removes it at its start too).
 	snap=$(cat "$RELOAD_STATUS" 2>/dev/null)
-	if [ "$(snap_get state)" = running ]; then
+	if [ "$(snap_get state)" = running ] && run_alive "$(snap_get id)" "$pids"; then
 		die "omcid is still applying the last change ($(snap_get changed), $(snap_get result)); try again once it is done (event=reload_done in /var/log/omcid.log)"
 	fi
 	before=$(snap_get id)
@@ -261,9 +279,9 @@ omci() {
 	while :; do
 		id=$(status_get id)
 		[ -n "$id" ] && [ "$id" != "$before" ] && break
-		if [ "$((i - lock_s))" -ge "$ACK_WAIT" ]; then
-			omci_lock_linger "$before"
-			die "omcid did not answer the signal within ${ACK_WAIT} s (an older build treats SIGHUP as stop; init respawns it)"
+		if [ "$((i - lock_s))" -ge "$ACK_WAIT" ] || [ "$i" -ge "$wait_s" ]; then
+			omci_lock_linger "$before" "$pids"
+			die "omcid did not answer the signal within $((i - lock_s)) s (an older build treats SIGHUP as stop; init respawns it)"
 		fi
 		sleep 1
 		i=$((i + 1))

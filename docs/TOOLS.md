@@ -1403,14 +1403,17 @@ apply in place.
 One `omci` or `omci-live` reload is signalled at a time
 (`/var/run/apply-omci.lock`, held until omcid has answered): the
 confirmation it leaves for omcid is one shared file. A second apply.sh waits
-for the first one's answer, up to 5 s, and otherwise exits 1 without writing
-or signalling anything; the seconds it waited count against its bound. It
-also exits 1, with nothing written or signalled, while omcid still runs the
-reload before (`state=running`): omcid takes the next signal only once that
-one is done, a re-registration up to 153 s on. When omcid does not answer
-within those 5 s, the lock stays held until it does, at most `LINGER_WAIT`
-(30 s): the reload the signal starts late would take the confirmation the
-next apply.sh leaves.
+for the first one's answer, up to 5 s and never past its bound, and
+otherwise exits 1 without writing or signalling anything; the seconds it
+waited count against its bound. It also exits 1, with nothing written or
+signalled, while omcid still runs the reload before (`state=running`, with
+an `id` whose pid is a running omcid): omcid takes the next signal only
+once that one is done, a re-registration up to 153 s on. When omcid does not
+answer within those 5 s, the lock stays held until it does or no omcid the
+signal went to lives, on no clock: the reload the signal starts late would
+take the confirmation the next apply.sh leaves. omcid removes the status
+file when it cannot write it, so a `running` from the start of a reload
+does not outlive it.
 omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`); a
 file that is empty, cut short or says anything else confirms nothing and
 counts as `live`. The outcome reported is this run's: when the next reload

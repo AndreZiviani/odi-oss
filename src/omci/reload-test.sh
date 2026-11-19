@@ -1083,6 +1083,33 @@ check "trial file gone: back to the stored serial" "gpondeact gponsn ODIT0000000
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 stop_omcid
 
+# ------------------------------------------------ 2d. a status that cannot be written
+# The temp file a directory, as good as a full /var: the reload still runs
+# and logs, and the status of the run before is gone, not left standing.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "0"
+log=/tmp/rl-nostatus.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1
+store 1 20 0
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 15 || bad "no status: the reload before did not finish"
+mkdir "$STATUS.tmp"
+store 1 21 0
+kill -HUP "$pid"
+wait_count "$log" 'event=reload_done' 2 15 || bad "no status: the reload did not finish"
+check "no status: the reload ran and logged" "2" \
+	"$(grep -c 'event=reload_done changed=vlan action=rebuild result=ok' "$log")"
+check "no status: the status of the run before is gone" "absent" \
+	"$([ -e "$STATUS" ] && echo present || echo absent)"
+rmdir "$STATUS.tmp"
+store 1 22 0
+kill -HUP "$pid"
+wait_done "" 15 || bad "no status: the reload after did not write one"
+check "no status: once it can be written again, it is" "done ok" "$(st state) $(st result)"
+stop_omcid
+
 echo
 [ "$fail" -eq 0 ] && echo "reload-test.sh: all checks passed" || echo "reload-test.sh: $fail check(s) failed"
 suite_exit
