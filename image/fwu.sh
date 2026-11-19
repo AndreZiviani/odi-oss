@@ -159,7 +159,12 @@ fi
 if [ -z "$running" ]; then
 	# Second opinion, and the only other one on the device: U-Boot's own
 	# record of what it last booted.
-	running=$(nv_read getenv sw_active 2>/dev/null | sed -n "s/^sw_active=//p")
+	# Not from a read that could not see a copy whole (exit 3) or gave no
+	# answer (124 or more), as for sw_commit below.
+	running=$(nv_read getenv sw_active 2>/dev/null)
+	nv_rc=$?
+	{ [ "$nv_rc" = 3 ] || [ "$nv_rc" -ge 124 ]; } && running=
+	running=$(printf '%s\n' "$running" | sed -n "s/^sw_active=//p")
 	case "$running" in 0|1) ;; *) running= ;; esac
 fi
 if [ -z "$running" ]; then
@@ -198,14 +203,14 @@ fi
 # full, with exit 3: that copy may be the one U-Boot boots by, so neither the
 # value nor the revert target is known. That is a refusal here, as in
 # fwu_starter.sh, not the warning a missing sw_commit gets. So is a read that
-# gave no answer (exit 124 or more, above): a value it printed before it was
-# cut off is not taken either.
+# gave no answer (exit 124 or more, above). A value either printed is not
+# taken.
 nv_out=$(nv_read getenv sw_commit 2>&1)
 nv_rc=$?
 commit=$(printf '%s\n' "$nv_out" | sed -n "s/^sw_commit=//p")
 nv_unread=0
 nv_silent=0
-[ "$nv_rc" = 3 ] && nv_unread=1
+[ "$nv_rc" = 3 ] && nv_unread=1 commit=
 [ "$nv_rc" -ge 124 ] && nv_silent=1 commit=
 case "$commit" in
 0|1)
@@ -256,7 +261,7 @@ alt_out=$(nv_read fallback sw_commit 2>&1)
 alt_rc=$?
 alt=$(printf '%s\n' "$alt_out" | sed -n "s/^sw_commit=//p")
 alt_unread=0
-[ "$alt_rc" = 3 ] && alt_unread=1
+[ "$alt_rc" = 3 ] && alt_unread=1 alt=
 [ "$alt_rc" -ge 124 ] && alt_unread=1 alt=
 case "$alt" in
 0|1)

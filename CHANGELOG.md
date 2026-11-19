@@ -50,7 +50,10 @@ listed here.
   or from `fallback` (`FWU_FORCE=1` overrides it), where a missing
   `sw_commit` still only warns. It reads nv with a 10 s bound where the
   image has `timeout`, which the stock busybox does not, and a read that
-  ran into the bound, was killed or could not run is a refusal as well.
+  ran into the bound, was killed or could not run is a refusal as well. A
+  value printed with such a status or with exit 3 is not taken, for
+  `sw_commit`, the fallback copy and the `sw_active` it reads when
+  `/proc/cmdline` names no root slot.
 
 - igmpd: a redirect shorter than an Ethernet header is logged as `short
   redirect  DROP: truncated` instead of crashing the daemon on the missing
@@ -88,7 +91,9 @@ listed here.
   stick whose environment stays unreadable resets once and then stays up.
   `slot-state.sh` now goes by the exit status of `nv fallback` too: exit 3
   or no answer within its bound leaves `uncommitted` empty, where it took
-  that for "no valid second copy" and could write `uncommitted=0`.
+  that for "no valid second copy" and could write `uncommitted=0`. What a
+  failed `nv getenv` printed is not taken either: `sw_active`,
+  `sw_tryactive`, `primary_sw_commit` and `next_boot` stay empty.
 
 - Host SerDes: a trial whose way back does not read back (the sequence of
   the mode before it, after an expiry, a revert or a failed switch) or

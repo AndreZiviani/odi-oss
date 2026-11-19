@@ -92,9 +92,11 @@ primary_dump=$(timeout "$NV_TIMEOUT_S" "$NV" getenv 2>/dev/null)
 primary_rc=$?
 fallback_dump=$(timeout "$NV_TIMEOUT_S" "$NV" fallback 2>/dev/null)
 fallback_rc=$?
-primary_copy=
-[ "$primary_rc" = 0 ] &&
-	primary_copy=$(printf '%s\n' "$primary_dump" | sed -n 's/^Valid environment: \([12]\)$/\1/p')
+# What a failed primary read printed is dropped whole, so that neither
+# primary_copy nor sw_active, sw_tryactive, sw_commit and next_boot come
+# from it.
+[ "$primary_rc" = 0 ] || primary_dump=
+primary_copy=$(printf '%s\n' "$primary_dump" | sed -n 's/^Valid environment: \([12]\)$/\1/p')
 fallback_copy=
 fallback_known=0
 if [ "$fallback_rc" = 0 ]; then

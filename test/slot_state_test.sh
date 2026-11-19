@@ -35,12 +35,13 @@ cat > "$T/bin/nv" <<EOF
 p=\$(cat "$T/primary"); f=\$((3 - p))
 case "\$1" in
 getenv)
-	[ -f "$T/primary_rc" ] && { echo "Valid environment: \$p"; exit "\$(cat "$T/primary_rc")"; }
+	# \$T/primary_rc: a failed read that printed the copy all the same.
+	[ -f "$T/primary_rc" ] && { echo "Valid environment: \$p"; cat "$T/env\$p"; echo; exit "\$(cat "$T/primary_rc")"; }
 	[ -s "$T/env\$p" ] || { echo "nv: no valid environment in env or env2"; exit 1; }
 	echo "Valid environment: \$p"; cat "$T/env\$p"; echo; exit 0 ;;
 fallback)
 	# \$T/fallback_rc: a read that gave no dump to go by, with that status.
-	[ -f "$T/fallback_rc" ] && { echo "Fallback environment: \$f"; exit "\$(cat "$T/fallback_rc")"; }
+	[ -f "$T/fallback_rc" ] && { echo "Fallback environment: \$f"; cat "$T/env\$f"; echo; exit "\$(cat "$T/fallback_rc")"; }
 	[ -s "$T/env\$f" ] || { echo "nv: no valid second copy of the environment"; exit 1; }
 	echo "Fallback environment: \$f"; cat "$T/env\$f"; echo; exit 0 ;;
 slotcheck)
@@ -198,11 +199,21 @@ setup 2        0 0 1                      1 1 2
 echo 1 > "$T/fallback_rc"
 run
 st "fallback exit 1 without its line: unknown too" "uncommitted="
+for rc in 3 124; do
+	setup 2        0 0 1                      1 1 2
+	echo "$rc" > "$T/primary_rc"
+	run
+	st "getenv exit $rc: no primary copy taken" "primary_copy="
+	st "getenv exit $rc: uncommitted is empty" "uncommitted="
+	st "getenv exit $rc: no sw_active from what it printed" "sw_active="
+	st "getenv exit $rc: no sw_tryactive either" "sw_tryactive="
+	st "getenv exit $rc: no primary sw_commit" "primary_sw_commit="
+	st "getenv exit $rc: and no next_boot" "next_boot="
+done
 setup 2        0 0 1                      1 1 2
-echo 3 > "$T/primary_rc"
+echo 3 > "$T/fallback_rc"
 run
-st "getenv exit 3: no primary copy taken" "primary_copy="
-st "getenv exit 3: uncommitted is empty" "uncommitted="
+st "fallback exit 3: no fallback sw_commit from what it printed" "fallback_sw_commit="
 
 echo "== files are replaced by rename and nothing else is left behind"
 setup 2        0 0 1                      1 0 2
