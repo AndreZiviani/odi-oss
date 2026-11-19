@@ -594,11 +594,12 @@ if [ -s "$work/voip.secrets" ]; then
 	cat "$work/voip.secrets" >> "$secrets" || fail "scrub failed: cannot list the SIP secrets"
 fi
 # No list: phone lines off (OMCI_POTS_PORTS absent or 0, as omcid reads
-# it) means no SIP credentials exist to scrub. Otherwise the files a
+# it: the first line for the key wins, as in flash and cfgstore.c) means
+# no SIP credentials exist to scrub. Otherwise the files a
 # careless log line could carry one into are withheld, not shipped.
 sip_why=
 if [ "$sip_list" = missing ]; then
-	pots=$(sed -n 's/^OMCI_POTS_PORTS=//p' "$CONFIG_DIR/odi.conf" 2>/dev/null | tail -n 1)
+	pots=$(sed -n 's/^OMCI_POTS_PORTS=//p' "$CONFIG_DIR/odi.conf" 2>/dev/null | head -n 1)
 	case $pots in
 	'' | 0) manifest - - "SIP secrets: no list from omcid; OMCI_POTS_PORTS is off, none to scrub" ;;
 	*)

@@ -16,6 +16,10 @@ listed here.
 - omcid: a stop signal in the middle of a CLI command no longer flushes the
   half-written reply into the CLI queue before it deregisters. The handler
   said it skipped that flush, but `out_set_sink(0)` flushed first.
+- Support bundle: `OMCI_POTS_PORTS` is read from the first line for the
+  key, as omcid and `flash` read it. With two lines, the first on and a
+  later one 0, the bundle took the 0 and shipped the logs unscrubbed when
+  omcid gave no SIP secret list.
 
 ## v1.18.1 (2026-11-18)
 
