@@ -135,19 +135,35 @@ static struct odi_sw_bdgconn_slot *slot_of(int32_t id)
 	return NULL;
 }
 
-/* How many valid chip rows hold the rule word of the given software row. */
-static unsigned int chip_rows_with(int row)
+/* How many valid chip rows of the ordered region hold the rule words w0
+ * (with the valid bit) and w1. */
+static unsigned int chip_rows_matching(uint32_t w0, uint32_t w1)
 {
 	unsigned int r, n = 0;
 
-	if (row < 0)
-		return 0;
 	for (r = ODI_SW_CF_SORTED_BASE; r < ODI_SW_CF_BOTTOM + 1U; r++)
-		if ((hw_rule[r][0] & ODI_SW_CF_W0_VALID) &&
-		    hw_rule[r][0] == (ODI_SW_CF_W0_VALID | odi_sw_cf[row].rule_w0) &&
-		    hw_rule[r][1] == odi_sw_cf[row].rule_w1)
+		if ((hw_rule[r][0] & ODI_SW_CF_W0_VALID) && hw_rule[r][0] == w0 && hw_rule[r][1] == w1)
 			n++;
 	return n;
+}
+
+/* Valid chip rows of the ordered region. */
+static unsigned int chip_rows_valid(void)
+{
+	unsigned int r, n = 0;
+
+	for (r = ODI_SW_CF_SORTED_BASE; r < ODI_SW_CF_BOTTOM + 1U; r++)
+		if (hw_rule[r][0] & ODI_SW_CF_W0_VALID)
+			n++;
+	return n;
+}
+
+/* How many valid chip rows hold the rule word of the given software row. */
+static unsigned int chip_rows_with(int row)
+{
+	if (row < 0)
+		return 0;
+	return chip_rows_matching(ODI_SW_CF_W0_VALID | odi_sw_cf[row].rule_w0, odi_sw_cf[row].rule_w1);
 }
 
 /* The software table and the slots, as a refusal must leave them. */
@@ -192,13 +208,39 @@ static void refused(int rc, int32_t id)
 	ok(diverged() == 0, "software and chip rows agree");
 }
 
-/* A later cmd 50 of `gone` takes its own rows only, and `kept` keeps its. */
+/* A later cmd 50 of `gone` takes its own rows only, and `kept` keeps its:
+ * its two rules leave the chip, two valid rows fewer and no more, and every
+ * other service still has each of its rules on the chip once. */
 static void after(int32_t gone, int32_t kept)
 {
-	struct odi_sw_bdgconn_slot *sl;
+	struct odi_sw_bdgconn_slot *sl = slot_of(gone);
+	uint32_t us[2] = { 0, 0 }, ds[2] = { 0, 0 };
+	unsigned int s, valid, all_once = 1;
+	int two_way = sl && sl->us_row >= 0 && sl->ds_row >= 0;
 
+	ok(two_way, "the service to take away is a two-way one");
+	if (two_way) {
+		us[0] = ODI_SW_CF_W0_VALID | odi_sw_cf[sl->us_row].rule_w0;
+		us[1] = odi_sw_cf[sl->us_row].rule_w1;
+		ds[0] = ODI_SW_CF_W0_VALID | odi_sw_cf[sl->ds_row].rule_w0;
+		ds[1] = odi_sw_cf[sl->ds_row].rule_w1;
+	}
+	valid = chip_rows_valid();
 	ok(deactivate(gone) == 0, "cmd 50 of another service");
 	ok(diverged() == 0, "software and chip rows agree after the cmd 50");
+	ok(slot_of(gone) == NULL, "the service it named holds no slot");
+	ok(two_way && chip_rows_matching(us[0], us[1]) == 0 && chip_rows_matching(ds[0], ds[1]) == 0,
+	   "its upstream and downstream rules are off the chip");
+	ok(chip_rows_valid() + 2 == valid, "two valid chip rows fewer, no more");
+	for (s = 0; s < ODI_SW_CMD_BDGCONN_MAX; s++) {
+		sl = &odi_sw_bdgconn[s];
+		if (!sl->used)
+			continue;
+		if ((sl->us_row >= 0 && chip_rows_with(sl->us_row) != 1) ||
+		    (sl->ds_row >= 0 && chip_rows_with(sl->ds_row) != 1))
+			all_once = 0;
+	}
+	ok(all_once, "every other service has each of its rules on the chip once");
 	sl = slot_of(kept);
 	ok(sl != NULL, "its neighbour is still active");
 	ok(sl && chip_rows_with(sl->us_row) == 1, "the neighbour's upstream rule is on the chip once");
