@@ -390,7 +390,11 @@ static uint32_t pol_len;
  * watches has to be able to report once before an unregistered one is a
  * group nobody wants. */
 static uint32_t learn_until;
+/* The second from which a lease change that failed is tried again, and
+ * the same for a release that failed: each its own, so a change in its
+ * back-off does not hold up a release. */
 static uint32_t lease_retry;
+static uint32_t release_retry;
 /* -d: the PON's drop is wanted at all (IGMP_PON_DROP, svc-igmpd.sh). */
 static int pon_drop;
 /* -6: MLD as well (MLD_SNOOPING, svc-igmpd.sh), its lists and its table. */
@@ -444,18 +448,24 @@ static uint32_t wanted_lease(const struct igmp_db *db, uint32_t now)
 }
 
 /* Bring the lease to `want`. A failure is retried every ten seconds, and
- * says so once per change of mind. A release is not held back: the policy
- * says "not snooping" once, and a release skipped then would leave the copy
- * and the PON drop on with nothing left to ask again. */
+ * says so once per change of mind. A release is not held back by the
+ * back-off of a change: the policy says "not snooping" once, and a release
+ * skipped then would leave the copy and the PON drop on with nothing left
+ * to ask again. A release that fails has a back-off of its own, so it is
+ * not asked again, and logged, every second. */
 static void settle_lease(struct igmp_db *db, uint32_t want, uint32_t now)
 {
 	int rc;
 
-	if (want == lease || (want && (int32_t)(now - lease_retry) < 0))
+	if (want == lease ||
+	    (int32_t)(now - (want ? lease_retry : release_retry)) < 0)
 		return;
 	rc = igmp_hw_snoop(want);
 	if (rc) {
-		lease_retry = now + 10;
+		if (want)
+			lease_retry = now + 10;
+		else
+			release_retry = now + 10;
 		return;
 	}
 	if (!want)

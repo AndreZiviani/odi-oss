@@ -53,7 +53,9 @@ listed here.
   within the ten seconds after a failed lease change. The release was held
   back like any other change and never asked again, so the copy rule and,
   with `IGMP_PON_DROP=1`, the drop of unregistered multicast from the PON
-  stayed on until the policy changed again or igmpd restarted.
+  stayed on until the policy changed again or igmpd restarted. A release
+  that fails has a back-off of its own: it is tried again ten seconds
+  later, where it was asked again, with two log lines, every second.
 
 - igmpd: a static group the OLT lists whose MAC is a link-local one
   (239.0.0.9 and every other group with the low 23 bits below 256, outside

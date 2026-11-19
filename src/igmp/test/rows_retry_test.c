@@ -22,10 +22,11 @@ int __wrap_igmp_hw_mac_del(uint16_t vid, const uint8_t *mac)
 	programmed = 0;
 	return 0;
 }
-static int fail_snoop;
+static int fail_snoop, snoop_calls;
 int __wrap_igmp_hw_snoop(uint32_t flags)
 {
 	(void)flags;
+	snoop_calls++;
 	if (fail_snoop) { fail_snoop--; return -16; }
 	return 0;
 }
@@ -85,6 +86,18 @@ int main(void)
 	CHECK(lease == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP), 17);
 	settle_lease(&db, 0, 203);
 	CHECK(lease == 0, 18);
+	/* A release that fails waits ten seconds of its own before the next
+	 * try, where every policy tick asked for it again. */
+	lease = ODI_SW_MC_SNOOP_COPY;
+	fail_snoop = 1;
+	before = snoop_calls;
+	settle_lease(&db, 0, 300);
+	CHECK(lease == ODI_SW_MC_SNOOP_COPY && release_retry == 310 && snoop_calls == before + 1, 24);
+	settle_lease(&db, 0, 301);
+	settle_lease(&db, 0, 309);
+	CHECK(lease == ODI_SW_MC_SNOOP_COPY && snoop_calls == before + 1, 25);
+	settle_lease(&db, 0, 310);
+	CHECK(lease == 0 && snoop_calls == before + 2, 26);
 	/* The log budget: 4096 bytes a second, the rest counted, and a new
 	 * second starts again after one line on what was held back (it
 	 * prints "log limited: 1097 bytes not shown" here, 34 bytes, which
