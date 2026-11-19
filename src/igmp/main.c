@@ -236,6 +236,83 @@ static uint32_t now_seconds(int *warned)
 	return (uint32_t)sec;
 }
 
+/* ---- the log budget ---------------------------------------------------- */
+
+/* The daemon's lines go to the services log on /var, a 6 MB tmpfs the
+ * trimmer looks at once a minute, and a host on the LAN decides how many
+ * come a second: a report with a bad checksum is a line a frame, a v3 report
+ * that joins 128 groups and one that leaves them are 256 rows and about
+ * 13 KB. So the daemon says at most LOG_BUDGET bytes a second and, once the
+ * second is over, how much it held back. 4096 a second keeps a minute below
+ * the trimmer's LOG_MAX (rcs-lib.sh). Only the log is limited: the frames,
+ * the rows, the state file and igmpd -s are not, and -r and the one-shot
+ * forms never install it. */
+#define LOG_BUDGET      4096u
+
+static uint32_t log_now, log_sec, log_used, log_held;
+
+/* Whether n more bytes may go out this second; what may not is counted. */
+static int log_admit(uint32_t n)
+{
+	if (log_used + n > LOG_BUDGET) {
+		log_held += n;
+		return 0;
+	}
+	log_used += n;
+	return 1;
+}
+
+static void log_write(const char *s, uint32_t n)
+{
+	while (n) {
+		long w = sys_write(STDOUT_FILENO, s, n);
+
+		if (w <= 0)
+			return;    /* as io.c: nothing to recover to */
+		s += w;
+		n -= (uint32_t)w;
+	}
+}
+
+/* A new second: the budget starts again, after a line on what the last one
+ * held back, which is charged to the new one: the bound is 4096 bytes a
+ * second, the summary included. Formatted here, not with out_fmt: this runs
+ * inside a flush. */
+static void log_roll(void)
+{
+	static const char head[] = "log limited: ", tail[] = " bytes not shown\n";
+	char line[sizeof head + 10 + sizeof tail];
+	char digits[10];
+	uint32_t n = 0, d = 0, v = log_held;
+
+	if (log_now == log_sec)
+		return;
+	log_sec = log_now;
+	log_used = 0;
+	if (!log_held)
+		return;
+	log_held = 0;
+	do {
+		digits[d++] = (char)('0' + v % 10);
+		v /= 10;
+	} while (v);
+	for (uint32_t i = 0; head[i]; i++)
+		line[n++] = head[i];
+	while (d)
+		line[n++] = digits[--d];
+	for (uint32_t i = 0; tail[i]; i++)
+		line[n++] = tail[i];
+	log_used = n;
+	log_write(line, n);
+}
+
+static void log_sink(const char *s, int n)
+{
+	log_roll();
+	if (n > 0 && log_admit((uint32_t)n))
+		log_write(s, (uint32_t)n);
+}
+
 static void usage(void)
 {
 	out("usage: igmpd [-w] [-d] [-6] [-f] [-n COUNT]\n"
@@ -1144,6 +1221,7 @@ int main(int argc, char **argv)
 		igmp_hw_enabled() ? "WRITING to the switch" : "dry run (-w writes)",
 		mld_on ? ", MLD too" : "");
 	out_flush();
+	out_set_sink(log_sink);
 
 	for (int first = 1;; first = 0) {
 		uint32_t len = 0;
@@ -1151,6 +1229,8 @@ int main(int argc, char **argv)
 		long rc = nl_recv((int)fd, buf, sizeof buf, &len);
 
 		now = now_seconds(&clock_warned);
+		log_now = now;
+		log_roll();
 		/* Expiries first, so a frame that arrives in the same second as
 		 * a lapse is applied to the state after the lapse rather than
 		 * before it. */

@@ -538,6 +538,13 @@ queries from the host side; `not sent` the ones that should have gone and
 could not (no classifier row takes the frame, which the switch would have
 dropped too, or a failed send), which the log names each time.
 
+The daemon's log (a line or more for each frame that changes something or
+does not parse) is limited to 4096 bytes a second, so a host that floods the
+UNI with reports cannot fill `/var` with it; a second that had more is
+followed by `log limited: N bytes not shown`, which counts against the
+second it is written in. `igmpd -s`, the state file and
+the rows are not limited.
+
 **Off unless asked for.** `svc-igmpd.sh` runs `igmpd -w` only while
 `IGMP_SNOOPING=1` is in the config store (`apply.sh igmp` applies a change);
 otherwise the respawn entry parks and the switch floods multicast as it

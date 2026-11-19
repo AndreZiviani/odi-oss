@@ -63,6 +63,12 @@ listed here.
   adds or removes such a group, or a static range too wide for a row,
   turns the drop off or on at once, where it waited for the next second.
 
+- igmpd: the daemon's log is limited to 4096 bytes a second, then one line
+  `log limited: N bytes not shown`, which counts against the next second. A host on the UNI decided how many lines
+  a second igmpd wrote to the services log on the 6 MB `/var`: a report with
+  a bad checksum is a line a frame, and a 128-group join and leave are about
+  13 KB. Measured with a host build, not on a stick.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
