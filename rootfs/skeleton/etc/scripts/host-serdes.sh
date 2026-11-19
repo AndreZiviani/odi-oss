@@ -649,13 +649,22 @@ trial_window() {
 		[ "$w_left" -gt 0 ] || return 0
 		[ "$w_left" -le "$RESYNC_S" ] || w_left=$RESYNC_S
 		"$SLEEP" "$w_left"
+		# Confirmed or reverted: the trial is over, so is the window.
+		load
+		if [ "$phase" != trial ] || [ "$trial_id" != "$w_id" ]; then
+			return 0
+		fi
 		[ "$(link 2500basex)" = 0 ] || continue
 		# lock_try, not lock: a busy lock skips this re-latch; lock would
 		# end the trial run here, before its expiry.
 		lock_try
 		[ $? != 1 ] || continue
 		load
-		if [ "$phase" != trial ] || [ "$trial_id" != "$w_id" ] || [ "$running" != 2500basex ]; then
+		if [ "$phase" != trial ] || [ "$trial_id" != "$w_id" ]; then
+			unlock
+			return 0
+		fi
+		if [ "$running" != 2500basex ]; then
 			unlock
 			continue
 		fi

@@ -546,7 +546,25 @@ t "race: a host at 2.5G only after the apply, the trial still syncs and is confi
 t "race: said so" "re-latching the lane every 5 s" "$out"
 [ "$(printf '%s\n' "$out" | grep -c 're-latching')" = 1 ] &&
 	ok "  ... in one line, not one per re-latch" || no "  ... in one line" "$out"
+up=$(cut -d. -f1 "$T/uptime")
+[ "$up" -lt $((15 + 1 + 20)) ] && ok "  ... and the window ends with the confirm (uptime $up)" ||
+	no "  ... and the window ends with the confirm" "uptime $up"
 rm -f "$T/everyhook"
+# Reverted within the window: the window ends there too.
+setkey ""
+newboot
+sh "$S" boot > /dev/null
+echo none > "$T/model"
+: > "$T/spawned"
+sh "$S" try 2500basex > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\nsh "%s" revert >> "%s/revert.out" 2>&1\n' "$S" "$T" > "$T/hook"
+chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+up=$(cut -d. -f1 "$T/uptime")
+t "race, reverted: back to fiber1g" "^trial_reverted fiber1g$" "$(st event) $(st running)"
+[ "$up" -lt $((15 + 1 + 20)) ] && ok "  ... and the window ends with the revert (uptime $up)" ||
+	no "  ... and the window ends with the revert" "uptime $up"
 # A host already at 2.5G: in sync from the apply, never re-latched.
 setkey ""
 newboot

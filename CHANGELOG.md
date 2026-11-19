@@ -19,7 +19,8 @@ listed here.
   `trial-lib.sh` are unchanged. `trial-lib.sh` gets a `trial_window` hook,
   which sleeps the window as before unless the script defines its own. The
   re-latches take the lock with `lock_try` and skip a busy tick, so a busy
-  lock cannot end a trial run before its expiry.
+  lock cannot end a trial run before its expiry. The window ends
+  once the trial is confirmed or reverted.
 
 ## v1.18.1 (2026-11-18)
 
