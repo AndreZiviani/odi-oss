@@ -549,8 +549,40 @@ if [ "$MODE" = addr ]; then
 		echo "network: would move $dev to $IP netmask $MASK (was ${cur:-none})"
 	else
 		echo "network: $dev $IP netmask $MASK (was ${cur:-none})"
+		# An alias of the device can hold the address the primary is
+		# about to take: the previous primary on the trial alias when a
+		# trial ends, or the second address when the two swap. The kernel
+		# refuses one local address twice on a device, and when the mask
+		# is not the classful one it drops the address altogether while
+		# ifconfig still reports success, which left no IPv4 address at
+		# all. That alias goes down first; secondary and trial_keep below
+		# put back whatever is still wanted. When it stays up, the move
+		# is not made: the device keeps the address it has. When the
+		# primary then cannot take it, the alias gets it back: it may be
+		# the address the client on the other end is using.
+		_pb_al='' _pb=''
+		for _al in "$dev:$TRIAL_ALIAS" "$dev:$IP2_ALIAS"; do
+			_ca=$(addr_of "$_al")
+			if [ -n "$_ca" ] && [ "${_ca%% *}" = "$IP" ]; then
+				echo "network: $_al $IP taken down first (the primary moves to it)"
+				$IFCONFIG "$_al" down 2>/dev/null
+				_pb_al=$_al _pb=$_ca
+				_ca=$(addr_of "$_al")
+				if [ -n "$_ca" ] && [ "${_ca%% *}" = "$IP" ]; then
+					echo "network: could not take $IP off $_al; $dev stays on ${cur:-none}" >&2
+					exit 1
+				fi
+			fi
+		done
 		$IFCONFIG "$dev" "$IP" netmask "$MASK" up 2>/dev/null || {
 			echo "network: could not set $IP on $dev" >&2
+			if [ -n "$_pb_al" ]; then
+				if $IFCONFIG "$_pb_al" "${_pb%% *}" netmask "${_pb#* }" up 2>/dev/null; then
+					echo "network: $_pb_al is back on ${_pb%% *}; $dev stays on ${cur:-none}" >&2
+				else
+					echo "network: could not put ${_pb%% *} back on $_pb_al either" >&2
+				fi
+			fi
 			exit 1
 		}
 	fi

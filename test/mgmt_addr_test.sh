@@ -7,10 +7,11 @@
 # network.sh and the real flash.
 #
 # ifconfig is a stub that keeps one file per interface or alias under $T/if,
-# holding "ADDR MASK" (as network_addr_test.sh does), /proc/uptime is a file
-# the sleep stub advances, and setsid only records what would be spawned: each
-# test runs the spawned verb itself, so the order of events is the test, not
-# the scheduler. The config store is a temporary lastgood.xml, written by the
+# holding "ADDR MASK" (as network_addr_test.sh does) and refusing an address
+# another label of the same device holds, as the kernel does. /proc/uptime is
+# a file the sleep stub advances, and setsid only records what would be
+# spawned: each test runs the spawned verb itself, so the order of events is
+# the test, not the scheduler. The config store is a temporary lastgood.xml, written by the
 # real flash. A reboot is a wipe of /var/run (the state and the trial file) and
 # of the interfaces, then the addresses the store says.
 #
@@ -55,8 +56,23 @@ case "${2:-}" in
 "")   [ -f "$f" ] || { echo "ifconfig: $1: error fetching interface information" >&2; exit 1; }
       read -r a m < "$f"
       printf '%s  Link encap:Ethernet\n          inet addr:%s  Bcast:0.0.0.0  Mask:%s\n' "$1" "$a" "$m" ;;
-down) rm -f "$f" ;;
-*)    echo "$2 $4" > "$f" ;;
+down) # A label a test wants to stay up.
+      [ "$(cat "$IFSTATE.nodown" 2>/dev/null)" != "$1" ] ||
+          { echo "SIOCSIFFLAGS: Operation not permitted" >&2; exit 1; }
+      rm -f "$f" ;;
+*)    # An address a test wants refused, whatever the label, or on one label.
+      [ "$(cat "$IFSTATE.refuse" 2>/dev/null)" != "$2" ] ||
+          { echo "SIOCSIFADDR: Cannot assign requested address" >&2; exit 1; }
+      [ "$(cat "$IFSTATE.refuse_on" 2>/dev/null)" != "$1 $2" ] ||
+          { echo "SIOCSIFADDR: Cannot assign requested address" >&2; exit 1; }
+      # The kernel refuses a local address that another label of the same
+      # device already holds (EEXIST); a stub that took it would hide that.
+      for o in "$IFSTATE/${1%%:*}" "$IFSTATE/${1%%:*}":*; do
+          [ -f "$o" ] && [ "$o" != "$f" ] || continue
+          read -r oa om < "$o"
+          [ "$oa" != "$2" ] || { echo "SIOCSIFADDR: File exists" >&2; exit 1; }
+      done
+      echo "$2 $4" > "$f" ;;
 esac
 STUB
 cat > "$T/bin/timeout" <<'EOF'
@@ -193,6 +209,37 @@ out=$(sh "$S" confirm 10.1.1.1 192.168.0.50 2>&1); rc=$?
 t "confirm after the expiry is refused" "no trial is running" "$out"
 [ "$rc" = 1 ] && ok "  ... with exit 1" || no "  ... with exit 1" "rc $rc"
 
+# ---- a move back that fails is reported as such, not as "back to"
+newboot; : > "$T/spawned"
+sh "$S" try LAN_IP_ADDR=10.1.1.1 > /dev/null
+hook "echo 192.168.0.1 > '$T/if.refuse'"
+run_trial
+rm -f "$T/if.refuse"
+t "failed move back: the event says network.sh could not" "event=trial_expired .*not confirmed in time: network.sh could not move back to 192\.168\.0\.1 \(run network.sh addr, or reboot\); nothing was stored" "$(cat "$T/kmsg")"
+n "failed move back: it does not claim to be back" ": back to 192\.168\.0\.1" "$(cat "$T/kmsg")"
+t "failed move back: still steady, nothing stored" "^steady trial_expired 192.168.0.1$" "$(st phase) $(st event) $(key LAN_IP_ADDR)"
+
+# ---- the alias that holds the old primary does not go down: no move at all
+newboot; : > "$T/spawned"
+sh "$S" try LAN_IP_ADDR=10.1.1.1 > /dev/null
+hook "echo br0:4 > '$T/if.nodown'"
+run_trial
+t "alias stays up: the event says network.sh could not" "event=trial_expired .*network.sh could not move back to 192\.168\.0\.1" "$(cat "$T/kmsg")"
+t "alias stays up: one address each, as before" "^10.1.1.1 192.168.0.1$" "$(iface br0 | cut -d' ' -f1) $(iface br0:4 | cut -d' ' -f1)"
+out=$(sh "$N" addr 2>&1); rc=$?
+t "alias stays up: network.sh addr says so and exits 1" "^1 .*could not take 192\.168\.0\.1 off br0:4; br0 stays on 10\.1\.1\.1" "$rc $out"
+rm -f "$T/if.nodown"
+# The alias goes down, and then the primary cannot take its address: the
+# alias gets it back, so the address a client may be on is still there.
+echo "br0 192.168.0.1" > "$T/if.refuse_on"
+out=$(sh "$N" addr 2>&1); rc=$?
+t "primary refused after the alias went down: exit 1, the alias is back" \
+	"^1 .*br0:4 is back on 192\.168\.0\.1; br0 stays on 10\.1\.1\.1" "$rc $out"
+t "and both addresses are where they were" "^10.1.1.1 192.168.0.1$" "$(iface br0 | cut -d' ' -f1) $(iface br0:4 | cut -d' ' -f1)"
+rm -f "$T/if.refuse_on"
+sh "$N" addr > /dev/null 2>&1
+t "and once it goes down, the move is made" "^192.168.0.1 none$" "$(iface br0 | cut -d' ' -f1) $(iface br0:4)"
+
 # ---- a confirm over the NEW address stores the keys
 newboot; : > "$T/spawned"
 sh "$S" try LAN_IP_ADDR=10.1.1.1 > /dev/null
@@ -269,12 +316,39 @@ hook "sh '$S' revert > '$T/revert.out' 2>&1; $SNAP"
 run_trial
 t "revert: reported" "event=trial_reverted .*reverted on request" "$(cat "$T/revert.out")"
 t "revert: the answer left before anything moved" "^$NEW$" "$(snap br0)"
-_i=0; while ! grep -q '^settle$' "$T/spawned" 2>/dev/null && [ "$_i" -lt 100 ]; do /bin/sleep 0.05; _i=$((_i + 1)); done
-t "revert: the move back is spawned" "settle" "$(cat "$T/spawned")"
+_i=0; while ! grep -q '^settle ' "$T/spawned" 2>/dev/null && [ "$_i" -lt 100 ]; do /bin/sleep 0.05; _i=$((_i + 1)); done
+t "revert: the move back is spawned" "^settle trial_reverted reverted on request$" "$(grep '^settle ' "$T/spawned")"
 t "revert: the trial file is gone at once" "^absent$" "$([ -e "$TRIAL" ] && echo present || echo absent)"
 t "revert: state steady, nothing stored" "^steady trial_reverted 192.168.0.1$" "$(st phase) $(st event) $(key LAN_IP_ADDR)"
-sh "$S" settle > /dev/null
+t "revert: the event says the move is under way, not done" "reverted on request: moving back to 192\.168\.0\.1 in a second" "$(st message)"
+sh "$S" settle trial_reverted "reverted on request" > /dev/null
 t "revert: settle moves the primary back and drops br0:4" "^$OLD none$" "$(iface br0) $(iface br0:4)"
+t "revert: and then says it is back" "reverted on request: back to 192\.168\.0\.1; nothing was stored" "$(st message)"
+
+# ---- a deferred move back that fails says so once it has failed
+newboot
+sh "$S" try LAN_IP_ADDR=10.1.1.1 > /dev/null
+hook "sh '$S' revert > /dev/null 2>&1"
+run_trial
+echo 192.168.0.1 > "$T/if.refuse"
+sh "$S" settle trial_reverted "reverted on request" > /dev/null; rc=$?
+rm -f "$T/if.refuse"
+t "failed deferred move back: settle exits 1" "^1$" "$rc"
+t "failed deferred move back: the event says network.sh could not" "reverted on request: network.sh could not move back to 192\.168\.0\.1" "$(st message)"
+n "failed deferred move back: it does not claim to be back" "back to 192\.168\.0\.1;" "$(st message)"
+sh "$S" settle > /dev/null
+# The lock held past LOCK_S by a live process: the move is still made, and
+# its outcome still logged, though the state file is not written.
+newboot
+sh "$S" try LAN_IP_ADDR=10.1.1.1 > /dev/null
+hook "sh '$S' revert > /dev/null 2>&1"
+run_trial
+: > "$T/kmsg"
+mkdir -p "$LOCKDIR"; echo $$ > "$LOCKDIR/pid"
+LOCK_S=0 sh "$S" settle trial_reverted "reverted on request" > /dev/null; rc=$?
+rm -rf "$LOCKDIR"
+t "settle without the lock: the move is made" "^0 $OLD none$" "$rc $(iface br0) $(iface br0:4)"
+t "settle without the lock: the outcome is still logged" "event=trial_reverted .*reverted on request: back to .*the state file is busy" "$(cat "$T/kmsg")"
 out=$(sh "$S" revert 2>&1)
 t "revert with no trial is refused" "no trial is running" "$out"
 

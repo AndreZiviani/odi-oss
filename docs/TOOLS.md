@@ -1576,7 +1576,7 @@ the web UI reads the file:
 | `trial_deadline` | the uptime, in seconds, at which the trial reverts |
 | `prev_ip`, `prev_mask` | the primary the stick ran before the trial, kept on `br0:4` |
 | `old_<KEY>`, `new_<KEY>` | the six keys (`LAN_ROUTES` included) as the store holds them and as the trial asks for them |
-| `event`, `event_uptime`, `message` | the last event: `trial_started`, `trial_confirmed`, `trial_expired`, `trial_reverted` or `trial_failed` (also one line to the kernel log, `mgmt-addr: event=...`) |
+| `event`, `event_uptime`, `message` | the last event: `trial_started`, `trial_confirmed`, `trial_expired`, `trial_reverted` or `trial_failed` (also one line to the kernel log, `mgmt-addr: event=...`). `revert` moves back a second after its answer, so its `trial_reverted` comes twice: `moving back to ...` at once, then `back to ...` or `network.sh could not move back ...` once the move has run |
 | `safe_mode_boot` (`status` only) | `1` on a safe-mode boot |
 
 Nothing persists across a reboot: the state and the trial file are in

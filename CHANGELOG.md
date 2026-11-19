@@ -18,6 +18,23 @@ listed here.
   and the command exits 1: killing it with the deadline armed is the same
   reset.
 
+- Management address: an address trial to another subnet that nobody
+  confirmed could leave the stick with no IPv4 address until a reboot. The
+  move back put the old primary on `br0` while the trial still kept it on
+  `br0:4`, and the kernel does not take one address twice on a device. With
+  a mask that is not the classful one (10.0.0.1/24, 192.168.1.1/16) the
+  address was dropped and ifconfig still reported success; with
+  192.168.1.1/24 the move failed and every later `network.sh addr` failed
+  the same way. A trial that swaps the primary and the second address hit
+  the same at its start. `network.sh addr` now takes an alias that holds the
+  new primary down first, makes no move when that alias stays up, and puts
+  the address back on the alias when the primary then cannot take it. When
+  the move back fails anyway, the `trial_expired` or `trial_reverted` event
+  says so instead of "back to". A revert from the web UI moves back a
+  second after its answer: its event now says the move is under way, and a
+  second one, once it has run, how it ended, also when another change
+  holds the state file then.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
