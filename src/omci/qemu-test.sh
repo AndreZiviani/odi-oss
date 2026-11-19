@@ -842,8 +842,8 @@ check "a value of 193 bytes is refused" "$got" "write failed"
 got=$($Q cli/build/omcli cfgset /tmp/w.xml MIB_TABLE LOID "$(printf '%048d' 0 | tr 0 '&')" 2>&1 | sed -n '1p')
 check "a value past 192 escaped bytes is refused" "$got" "write failed"
 
-# A store past 16 KB: a stick that ran a router firmware keeps that
-# firmware's tables in the same file (30 KB is known). Keys after the first
+# A store past 16 KB: a stick that ran a router firmware keeps the tables
+# of that firmware in the same file (30 KB is known). Keys after the first
 # 16 KB are read, and a write keeps every byte around the value. 600 filler
 # keys of about 50 bytes go before the four of the fixture.
 big() {   # big <filler keys> <file>

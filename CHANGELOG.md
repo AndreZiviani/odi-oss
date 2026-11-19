@@ -25,6 +25,14 @@ listed here.
   `omci-live` exits 4 when it worked or still runs at the bound, so the web
   UI no longer says it applied without one.
 
+- omcid: an ANI-G attribute past 16 (17 to 20, the ONU default
+  thresholds) is no longer tested against the 16-bit mask of written
+  attributes. The alarm code reads them once a second in O5 when a
+  threshold is at its default and the OLT has Set any ANI-G attribute, and
+  the shift count was then negative, which C leaves undefined. On MIPS it
+  served the built-in default, the right value by accident; it now does so
+  by the code.
+
 - omcid: a reload keeps the alarm state of the ONU's own entities when it
   does not change them. Each reload rebuilt that list and cleared every
   alarm bitmap, pending notification and ARC timer with it, so an

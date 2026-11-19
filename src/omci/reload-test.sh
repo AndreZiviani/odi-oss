@@ -1041,8 +1041,8 @@ check "live: not recorded" "5" "$(wc -l < "$REREG" | tr -d ' ')"
 check_grep "live: logged" "event=reload changed=identity action=deferred keys=GPON_SN" "$log"
 [ ! -e "$CONFIRM" ] && ok "live: the request is used up" || bad "live: the file is still there"
 # Only the words apply.sh writes confirm anything. An empty file (what a
-# reader finds between echo's open and its write) or a cut one defers like
-# omci-live, rather than applying the serial number as --confirm would.
+# reader finds between the open by echo and its write) or a cut one defers
+# like omci-live, rather than applying the serial number as --confirm would.
 for m in "" "conf"; do
 	printf '%s' "$m" > "$CONFIRM"
 	change ODIT00000006

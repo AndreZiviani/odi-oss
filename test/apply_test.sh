@@ -192,7 +192,8 @@ out=$(run omci)
 t "one refused: a warning" "warning: the OLT refused the last 1 identity change" "$out"
 
 # Once omcid acknowledged a reload, another apply.sh may start the next one.
-# The outcome reported is this run's, or none: not the next run's result.
+# The outcome reported is the one of this run, or none: never the result of
+# the next run.
 printf 'running vlan rebuild pending VLAN_MANU_TAG_VID 0 - 6 0\n' > "$T/script"
 before=$(sed -n 's/^id=//p' "$T/status")
 run omci 10 > "$T/out.overtaken" &
