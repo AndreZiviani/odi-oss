@@ -37,6 +37,8 @@ case "\$1" in
 getenv)
 	# \$T/primary_rc: a failed read that printed the copy all the same.
 	[ -f "$T/primary_rc" ] && { echo "Valid environment: \$p"; cat "$T/env\$p"; echo; exit "\$(cat "$T/primary_rc")"; }
+	# \$T/primary_nohead: an exit 0 with the pairs and no header line.
+	[ -f "$T/primary_nohead" ] && { cat "$T/env\$p"; echo; exit 0; }
 	[ -s "$T/env\$p" ] || { echo "nv: no valid environment in env or env2"; exit 1; }
 	echo "Valid environment: \$p"; cat "$T/env\$p"; echo; exit 0 ;;
 fallback)
@@ -76,7 +78,7 @@ printf 'mtd5: 00300000 00001000 "r0"\nmtd7: 00300000 00001000 "r1"\n' > "$T/mtd"
 # env1 / env2: the pairs of each copy; $T/primary: which one U-Boot boots.
 setup() {
 	rm -f "$T/state" "$T/motd" "$T/log" "$T/slotcheck" "$T/slotcheck.asked" "$T/state.during" "$T/motd.during" \
-	    "$T/fallback_rc" "$T/primary_rc"
+	    "$T/fallback_rc" "$T/primary_rc" "$T/primary_nohead"
 	envs "$@"
 }
 # The same, leaving the state file alone: the stick after the boot.
@@ -214,6 +216,12 @@ setup 2        0 0 1                      1 1 2
 echo 3 > "$T/fallback_rc"
 run
 st "fallback exit 3: no fallback sw_commit from what it printed" "fallback_sw_commit="
+setup 2        0 0 1                      1 1 2
+touch "$T/primary_nohead"
+run
+st "getenv exit 0 without its header: no primary copy" "primary_copy="
+st "  no sw_commit from its pairs" "primary_sw_commit="
+st "  and no next_boot" "next_boot="
 
 echo "== files are replaced by rename and nothing else is left behind"
 setup 2        0 0 1                      1 0 2

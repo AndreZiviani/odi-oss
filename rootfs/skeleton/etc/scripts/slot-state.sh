@@ -94,13 +94,15 @@ fallback_dump=$(timeout "$NV_TIMEOUT_S" "$NV" fallback 2>/dev/null)
 fallback_rc=$?
 # What a failed primary read printed is dropped whole, so that neither
 # primary_copy nor sw_active, sw_tryactive, sw_commit and next_boot come
-# from it.
+# from it. So is a dump that does not start with its header line: that is
+# not the shape nv prints a copy in.
 [ "$primary_rc" = 0 ] || primary_dump=
-primary_copy=$(printf '%s\n' "$primary_dump" | sed -n 's/^Valid environment: \([12]\)$/\1/p')
+primary_copy=$(printf '%s\n' "$primary_dump" | sed -n '1s/^Valid environment: \([12]\)$/\1/p')
+[ -n "$primary_copy" ] || primary_dump=
 fallback_copy=
 fallback_known=0
 if [ "$fallback_rc" = 0 ]; then
-	fallback_copy=$(printf '%s\n' "$fallback_dump" | sed -n 's/^Fallback environment: \([12]\)$/\1/p')
+	fallback_copy=$(printf '%s\n' "$fallback_dump" | sed -n '1s/^Fallback environment: \([12]\)$/\1/p')
 	[ -n "$fallback_copy" ] && fallback_known=1
 elif [ "$fallback_rc" = 1 ] && [ "$fallback_dump" = "nv: no valid second copy of the environment" ]; then
 	fallback_known=1

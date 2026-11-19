@@ -93,7 +93,9 @@ listed here.
   or no answer within its bound leaves `uncommitted` empty, where it took
   that for "no valid second copy" and could write `uncommitted=0`. What a
   failed `nv getenv` printed is not taken either: `sw_active`,
-  `sw_tryactive`, `primary_sw_commit` and `next_boot` stay empty.
+  `sw_tryactive`, `primary_sw_commit` and `next_boot` stay empty. Nor is
+  a dump that exited 0 without its `Valid environment: N` or `Fallback
+  environment: N` header on its first line.
 
 - Host SerDes: a trial whose way back does not read back (the sequence of
   the mode before it, after an expiry, a revert or a failed switch) or
