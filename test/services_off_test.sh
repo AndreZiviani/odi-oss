@@ -31,8 +31,9 @@ T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/config"
 printf '#!/bin/sh\nshift\nexec "$@"\n' > "$T/bin/timeout"; chmod +x "$T/bin/timeout"
+printf '#!/bin/sh\n' > "$T/omcid"; chmod +x "$T/omcid"
 : > "$T/register"
-svc() { env PATH="$T/bin:$PATH" CONFIG_DIR="$T/config" WDT_REGISTER="$T/register" SAFE_FLAG="$T/no-safe-mode" sh "$S" "$@" >/dev/null 2>&1; }
+svc() { env PATH="$T/bin:$PATH" CONFIG_DIR="$T/config" WDT_REGISTER="$T/register" SAFE_FLAG="$T/no-safe-mode" OMCID_BIN="$T/omcid" sh "$S" "$@" >/dev/null 2>&1; }
 check() {
 	if [ "$2" = "$3" ]; then echo "ok    $1"; pass=$((pass + 1))
 	else echo "FAIL  $1: wanted '$2', got '$3'"; fail=$((fail + 1)); fi
@@ -43,6 +44,48 @@ check "stop omcid releases its watchdog deadline" "omcid 0" "$(cat "$T/register"
 svc start omcid
 check "start omcid removes omcid.off" no "$([ -f "$T/config/omcid.off" ] && echo yes || echo no)"
 check "start omcid registers the deadline again" "omcid 60" "$(cat "$T/register")"
+
+# svc-omcid.sh parks instead of starting omcid with modules.off, with an
+# omcid.off still there, or without the binary. start must leave the
+# deadline released then: nothing would ping, and the stick would reset a
+# minute later. Each case starts from a released client, and the first also
+# from an omcid that runs with its deadline armed (modules.off set while it
+# ran), where start kills the only process that pings.
+svc stop omcid
+: > "$T/config/modules.off"
+svc start omcid
+check "start omcid with modules.off does not arm the deadline" "omcid 0" "$(cat "$T/register")"
+rm -f "$T/config/omcid.off"
+echo "omcid 60" > "$T/register"
+svc start omcid; rc=$?
+check "start omcid with modules.off releases a deadline armed before" "omcid 0" "$(cat "$T/register")"
+check "and exits 1: omcid does not start" 1 "$rc"
+# A release that fails leaves the running omcid alone: killing it with the
+# deadline still armed is the reset this is all about. A timeout that fails
+# stands in for a watchdog write that does not go through.
+mkdir -p "$T/badwdt"
+printf '#!/bin/sh\nexit 1\n' > "$T/badwdt/timeout"; chmod +x "$T/badwdt/timeout"
+svc_badwdt() { env PATH="$T/badwdt:$T/bin:$PATH" CONFIG_DIR="$T/config" WDT_REGISTER="$T/register" SAFE_FLAG="$T/no-safe-mode" OMCID_BIN="$T/omcid" sh "$S" "$@" 2>&1; }
+echo "omcid 60" > "$T/register"
+out=$(svc_badwdt start omcid); rc=$?
+check "a failed release on a parking start: exit 1" 1 "$rc"
+check "and it does not kill omcid" "" "$(printf '%s\n' "$out" | grep "start requested")"
+rm -f "$T/config/modules.off"
+out=$(svc_badwdt stop omcid); rc=$?
+check "a failed release on stop: exit 1" 1 "$rc"
+check "and omcid.off is not left behind" no "$([ -f "$T/config/omcid.off" ] && echo yes || echo no)"
+check "and it says omcid was not stopped" "omcid NOT stopped" "$(printf '%s\n' "$out" | grep -o "omcid NOT stopped")"
+svc stop omcid
+mkdir -p "$T/norm"
+printf '#!/bin/sh\nexit 1\n' > "$T/norm/rm"; chmod +x "$T/norm/rm"
+env PATH="$T/norm:$T/bin:$PATH" CONFIG_DIR="$T/config" WDT_REGISTER="$T/register" SAFE_FLAG="$T/no-safe-mode" OMCID_BIN="$T/omcid" sh "$S" start omcid >/dev/null 2>&1
+check "start omcid with an omcid.off it cannot remove does not arm the deadline" "omcid 0" "$(cat "$T/register")"
+rm -f "$T/config/omcid.off"
+svc stop omcid
+env PATH="$T/bin:$PATH" CONFIG_DIR="$T/config" WDT_REGISTER="$T/register" SAFE_FLAG="$T/no-safe-mode" OMCID_BIN="$T/no-omcid" sh "$S" start omcid >/dev/null 2>&1
+check "start omcid without the binary does not arm the deadline" "omcid 0" "$(cat "$T/register")"
+svc start omcid
+check "and with all three in order it arms it" "omcid 60" "$(cat "$T/register")"
 : > "$T/register"
 svc stop confd
 check "stop confd leaves the watchdog alone" "" "$(cat "$T/register")"
@@ -99,7 +142,7 @@ if awk '/^if \[ -f \/var\/run\/safe-mode \]; then$/ { s = NR } /^elif .*\/proc\/
 else echo "FAIL  rcS registers omcid with odi_wdt in a safe-mode boot"; fail=$((fail + 1)); fi
 check "rcS registers omcid nowhere else" 1 "$(grep -c 'write_proc_bounded /proc/odi_wdt/register' "$R")"
 : > "$T/register"; : > "$T/safe"
-env PATH="$T/bin:$PATH" CONFIG_DIR="$T/config" WDT_REGISTER="$T/register" SAFE_FLAG="$T/safe" sh "$S" start omcid >/dev/null 2>&1
+env PATH="$T/bin:$PATH" CONFIG_DIR="$T/config" WDT_REGISTER="$T/register" SAFE_FLAG="$T/safe" OMCID_BIN="$T/omcid" sh "$S" start omcid >/dev/null 2>&1
 check "start omcid in a safe-mode boot does not arm the deadline" "" "$(cat "$T/register")"
 env PATH="$T/bin:$PATH" CONFIG_DIR="$T/config" WDT_REGISTER="$T/register" SAFE_FLAG="$T/safe" sh "$S" stop omcid >/dev/null 2>&1
 check "stop omcid in a safe-mode boot still releases it" "omcid 0" "$(cat "$T/register")"

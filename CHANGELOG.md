@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- services: `start omcid` arms omcid's watchdog deadline only when
+  `svc-omcid.sh` will start omcid. With `modules.off` set, an `omcid.off`
+  that could not be removed (a read-only config partition) or no
+  `/bin/omcid`, the entry parks, nothing pings, and the stick reset a
+  minute after the command reported success. It now names the reason,
+  releases the deadline, also one an omcid running since boot had armed,
+  with the same checks rcS makes at boot, and exits 1, as omcid does not
+  start. A watchdog register that is there and cannot be written counts as
+  a failed release, not as no watchdog. When that release, or the one
+  `stop omcid` makes, does not go through, the running omcid is left alone
+  and the command exits 1: killing it with the deadline armed is the same
+  reset.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
