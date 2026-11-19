@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- GPON: `/proc/odi_gpon/ploam` masks the PLOAM password. The ring printed
+  the ten password bytes of every upstream Password message (type 0x02) in
+  clear, three copies per Request_Password, until newer messages pushed
+  them out; only the AES key of an Encryption_Key was masked. The file is
+  world-readable and easy to paste into an issue. The password bytes now
+  print as `xx`; the diag bundle withholds the message as before.
+
 - Switch: a cmd 51 the classifier table refuses no longer deletes another
   service's rule. A two-way rule whose first leg went in with a row shift
   and whose second leg found no row was released before the shift reached
