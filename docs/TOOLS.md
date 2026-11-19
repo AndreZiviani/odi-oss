@@ -143,7 +143,9 @@ daemon that decides whether the OLT sees a working ONU.
 
     -a          program the switch (apply mode); without it, dry run
     -r          restart: first remove every bridge connection a previous
-                omcid left in the switch (with -a)
+                omcid left in the switch (with -a). A respawn that does
+                not resume does this on its own; a resumed omcid keeps
+                them either way
     -d          daemon: no frame or idle limit
     -w units    exit after this many idle 5 s units (default 24)
     -c hex      use this capability blob instead of the driver one

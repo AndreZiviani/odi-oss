@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- omcid: a respawn that does not resume removes the bridge connections,
+  flows and queues the omcid before it left in the switch, and the
+  snapshot that describes them. The clean-up ran only with `-r`, which
+  nothing passes, so a respawned omcid that started empty never withdrew
+  the old services, and a provisioning with fewer of them left the rest
+  forwarding until a reboot. A resumed omcid now keeps them even with
+  `-r`, which used to clear the datapath it had just taken over.
+  `svc-omcid.sh` passes `-r` on a respawn, so the clean-up does not depend
+  on the decision files an omcid that died early may have removed, and an
+  id whose deactivation fails stays taken and is tried again rather than
+  counted as cleared.
+
 - Reload: a store with no `GPON_SN` key in either file stops the
   re-registration at `no_serial`, as an empty key already did. An absent
   key reads as -1 and the check tested only for 0, so the ONU was
