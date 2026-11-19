@@ -45,6 +45,10 @@ listed here.
   or from `fallback` (`FWU_FORCE=1` overrides it), where a missing
   `sw_commit` still only warns.
 
+- igmpd: a redirect shorter than an Ethernet header is logged as `short
+  redirect  DROP: truncated` instead of crashing the daemon on the missing
+  addresses. The kernel hook does not pass one up; `igmpd -r` could.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10

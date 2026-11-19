@@ -87,6 +87,12 @@ static void out_ip(uint32_t a)
 
 static void describe(const struct igmp_rx *rx, enum igmp_parse_rc rc)
 {
+	/* Too short for an Ethernet header: igmp_parse set no addresses, and
+	 * not the port either, so there is nothing to print but the reason. */
+	if (!rx->eth) {
+		out_fmt("short redirect  DROP: %s\n", igmp_parse_str(rc));
+		return;
+	}
 	out_fmt("port %d  ", rx->port);
 	if (rx->tagged)
 		out_fmt("vlan %d  ", rx->vid);

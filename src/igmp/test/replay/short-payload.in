@@ -1,0 +1,12 @@
+# A redirect too short for an Ethernet header is said and dropped, with no
+# addresses to print, and the frame after it is handled as usual.
+0 policy
+snooping=1
+igmp_function=0
+immediate_leave=1
+end
+0 tick
+1 rx 010000
+2 rx 01000001005e0000010200000000
+3 v2join 1 0 192.168.1.10 239.1.1.1
+4 state
