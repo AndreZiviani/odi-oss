@@ -80,11 +80,29 @@ slot_or_empty() { case "$1" in 0 | 1) echo "$1" ;; esac; }
 running=$(running_slot)
 # The whole environment in one read each: nv getenv with no name prints
 # "Valid environment: N" (the copy U-Boot boots from) and every pair; nv
-# fallback the same for the other copy, or nothing when it is not valid.
+# fallback the same for the other copy, or its line for no valid second
+# copy and exit 1.
+#
+# Only a read that exited 0 is a dump to go by. Exit 3 is a copy that could
+# not be read in full, 124 or more a read that ran into the bound or was
+# killed; what either printed is not the environment. For fallback, exit 1
+# with that exact line is the one other known answer. Anything else leaves
+# the fallback copy unknown, and with it whether the slot is committed.
 primary_dump=$(timeout "$NV_TIMEOUT_S" "$NV" getenv 2>/dev/null)
+primary_rc=$?
 fallback_dump=$(timeout "$NV_TIMEOUT_S" "$NV" fallback 2>/dev/null)
-primary_copy=$(printf '%s\n' "$primary_dump" | sed -n 's/^Valid environment: \([12]\)$/\1/p')
-fallback_copy=$(printf '%s\n' "$fallback_dump" | sed -n 's/^Fallback environment: \([12]\)$/\1/p')
+fallback_rc=$?
+primary_copy=
+[ "$primary_rc" = 0 ] &&
+	primary_copy=$(printf '%s\n' "$primary_dump" | sed -n 's/^Valid environment: \([12]\)$/\1/p')
+fallback_copy=
+fallback_known=0
+if [ "$fallback_rc" = 0 ]; then
+	fallback_copy=$(printf '%s\n' "$fallback_dump" | sed -n 's/^Fallback environment: \([12]\)$/\1/p')
+	[ -n "$fallback_copy" ] && fallback_known=1
+elif [ "$fallback_rc" = 1 ] && [ "$fallback_dump" = "nv: no valid second copy of the environment" ]; then
+	fallback_known=1
+fi
 active=$(slot_or_empty "$(kv "$primary_dump" sw_active)")
 tryactive=$(kv "$primary_dump" sw_tryactive)
 commit_p=$(slot_or_empty "$(kv "$primary_dump" sw_commit)")
@@ -98,9 +116,10 @@ next=$(slot_or_empty "$tryactive")
 
 # uncommitted: 1 when either valid copy names another slot (or none), 0
 # when every valid copy names the running slot, empty when that cannot be
-# told -- no running slot, or no readable environment at all.
+# told -- no running slot, no readable environment, or no knowing whether
+# there is a valid fallback copy.
 uncommitted=
-if [ -n "$running" ] && [ -n "$primary_copy" ]; then
+if [ -n "$running" ] && [ -n "$primary_copy" ] && [ "$fallback_known" = 1 ]; then
 	uncommitted=0
 	[ "$commit_p" = "$running" ] || uncommitted=1
 	[ -z "$fallback_copy" ] || [ "$commit_f" = "$running" ] || uncommitted=1
@@ -111,6 +130,8 @@ if [ -z "$running" ]; then
 	notice="SLOT STATE UNKNOWN: no root=31:N naming r0 or r1 in $PROC_CMDLINE, so the running slot cannot be told. Check with: nv getenv; nv fallback"
 elif [ -z "$primary_copy" ]; then
 	notice="SLOT STATE UNKNOWN: running slot $running, but nv could not read a valid U-Boot environment. Check with: nv getenv; nv fallback"
+elif [ "$fallback_known" = 0 ]; then
+	notice="SLOT STATE UNKNOWN: running slot $running, but nv gave no usable answer for the fallback copy of the U-Boot environment, so whether the slot is committed cannot be told. Check with: nv fallback"
 elif [ "$uncommitted" = 0 ]; then
 	notice=
 elif [ "$commit_p" != "$running" ] && { [ -z "$fallback_copy" ] || [ "$commit_f" != "$running" ]; }; then

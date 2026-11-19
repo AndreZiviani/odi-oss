@@ -47,7 +47,8 @@ listed here.
   committed one. `fwu.sh` refuses to write on that answer, from `getenv`
   or from `fallback` (`FWU_FORCE=1` overrides it), where a missing
   `sw_commit` still only warns. It reads nv with a 10 s bound where the
-  image has `timeout`, which the stock busybox does not.
+  image has `timeout`, which the stock busybox does not, and a read that
+  ran into the bound, was killed or could not run is a refusal as well.
 
 - igmpd: a redirect shorter than an Ethernet header is logged as `short
   redirect  DROP: truncated` instead of crashing the daemon on the missing
@@ -83,6 +84,9 @@ listed here.
   same slot boots again. It arms once: on the boot after one it ended
   (`reason=wdt_client:trial`), an unknown state does not arm it again, so a
   stick whose environment stays unreadable resets once and then stays up.
+  `slot-state.sh` now goes by the exit status of `nv fallback` too: exit 3
+  or no answer within its bound leaves `uncommitted` empty, where it took
+  that for "no valid second copy" and could write `uncommitted=0`.
 
 - Host SerDes: a trial whose way back does not read back (the sequence of
   the mode before it, after an expiry, a revert or a failed switch) or

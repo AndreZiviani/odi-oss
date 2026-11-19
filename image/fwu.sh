@@ -112,8 +112,20 @@ fi
 # busybox does not (image/stock-commands.txt), so there it runs unbounded as
 # before. An nv stuck on the flash would otherwise hold the upgrade with
 # nothing said. Reads only: a setenv cut short mid-erase is worse than a wait.
+# A timeout of the older busybox syntax (-t SECS) takes the number for the
+# program and runs nothing, so the bound is tried once first.
+# FWU_NV_TIMEOUT_S is for the tests.
+#
+# A read that ran into the bound, was killed or could not run exits 124 or
+# more: 124 from a coreutils timeout, 128 plus the signal from busybox, 126
+# and 127 when nv could not run. That is no answer, and the checks below
+# refuse on it as on an incomplete read, never warn and write.
 nv_bound=
-have_cmd timeout && nv_bound="timeout 10"
+if have_cmd timeout; then
+	nv_bound="timeout ${FWU_NV_TIMEOUT_S:-10}"
+	# shellcheck disable=SC2086 # the two words of the bound
+	$nv_bound sh -c : 2>/dev/null || nv_bound=
+fi
 nv_read() {
 	# shellcheck disable=SC2086 # empty, or the two words of the bound
 	$nv_bound nv "$@"
@@ -185,12 +197,16 @@ fi
 # Our nv refuses to answer when a copy of the environment could not be read in
 # full, with exit 3: that copy may be the one U-Boot boots by, so neither the
 # value nor the revert target is known. That is a refusal here, as in
-# fwu_starter.sh, not the warning a missing sw_commit gets.
+# fwu_starter.sh, not the warning a missing sw_commit gets. So is a read that
+# gave no answer (exit 124 or more, above): a value it printed before it was
+# cut off is not taken either.
 nv_out=$(nv_read getenv sw_commit 2>&1)
 nv_rc=$?
 commit=$(printf '%s\n' "$nv_out" | sed -n "s/^sw_commit=//p")
 nv_unread=0
+nv_silent=0
 [ "$nv_rc" = 3 ] && nv_unread=1
+[ "$nv_rc" -ge 124 ] && nv_silent=1 commit=
 case "$commit" in
 0|1)
 	if [ "$commit" = "$slot" ]; then
@@ -211,6 +227,13 @@ case "$commit" in
 		echo "     so which copy U-Boot boots by, and the revert target," >&2
 		echo "     is UNKNOWN. REFUSING. Run it again; if it stays" >&2
 		echo "     unreadable, see docs/FLASHING.md, \"Restore\"." >&2
+		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
+		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown revert target" >&2
+	elif [ "$nv_silent" = 1 ]; then
+		echo "fwu: nv getenv gave no answer (exit $nv_rc): it ran into the" >&2
+		echo "     bound, was killed or could not run, so the revert target" >&2
+		echo "     is UNKNOWN. REFUSING. Run it again; if nv keeps hanging," >&2
+		echo "     see docs/FLASHING.md, \"Restore\"." >&2
 		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
 		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown revert target" >&2
 	else
@@ -234,6 +257,7 @@ alt_rc=$?
 alt=$(printf '%s\n' "$alt_out" | sed -n "s/^sw_commit=//p")
 alt_unread=0
 [ "$alt_rc" = 3 ] && alt_unread=1
+[ "$alt_rc" -ge 124 ] && alt_unread=1 alt=
 case "$alt" in
 0|1)
 	if [ "$alt" = "$slot" ]; then
@@ -252,10 +276,15 @@ case "$alt" in
 	fi
 	;;
 *)
-	if [ "$alt_unread" = 1 ] && [ "$nv_unread" = 0 ]; then
+	if [ "$alt_unread" = 1 ] && [ "$nv_unread$nv_silent" = 00 ]; then
 		# Read in full a moment ago, not now: what the fallback copy
-		# says is as unknown as an unread sw_commit above.
-		echo "fwu: nv could not read the fallback env copy in full, so" >&2
+		# says is as unknown as an unread sw_commit above. The same
+		# for a fallback read that gave no answer.
+		if [ "$alt_rc" = 3 ]; then
+			echo "fwu: nv could not read the fallback env copy in full, so" >&2
+		else
+			echo "fwu: nv fallback gave no answer (exit $alt_rc), so" >&2
+		fi
 		echo "     where U-Boot goes after an interrupted nv setenv is" >&2
 		echo "     UNKNOWN. REFUSING. Run it again; if it stays" >&2
 		echo "     unreadable, see docs/FLASHING.md, \"Restore\"." >&2
@@ -265,6 +294,8 @@ case "$alt" in
 		echo "fwu: the fallback env copy was not readable -- NOT checked." >&2
 		if [ "$nv_unread" = 1 ]; then
 			echo "     A copy could not be read in full, as above." >&2
+		elif [ "$nv_silent" = 1 ]; then
+			echo "     nv gave no answer, as above." >&2
 		else
 			echo "     Expected on the vendor nv, which has no fallback verb." >&2
 		fi

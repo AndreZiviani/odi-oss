@@ -1217,7 +1217,9 @@ give no value and exit 3, a status of its own (a name that is not set
 exits 0 with nothing printed, no valid copy exits 1), so a caller does not
 have to match the text. The upgrade guard (`fwu_starter.sh`) and
 `slot-state.sh` take it as unknown, and `fwu.sh` refuses to write on it
-(`FWU_FORCE=1` overrides it).
+(`FWU_FORCE=1` overrides it). `fwu.sh` bounds its reads with `timeout` where
+the image has it, and a read that ran into the bound, was killed or could
+not run (exit 124 or more) is a refusal there too.
 
 `nv commit` also sets `mupgrade_en=0`, in the same two writes. The stock
 bootloader ships it as 1, which makes it listen on the host link after the
@@ -1287,10 +1289,10 @@ all twelve keys, a value empty when it cannot be told:
 | `sw_tryactive` | `sw_tryactive` in the primary copy, as stored (`2` when no trial is pending) |
 | `primary_copy` | `1` or `2`: the copy U-Boot boots from (`env` or `env2`); empty when neither is valid |
 | `primary_sw_commit` | `sw_commit` in that copy, `0` or `1` |
-| `fallback_copy` | the other copy, `1` or `2`; empty when it is not valid |
+| `fallback_copy` | the other copy, `1` or `2`; empty when it is not valid, or when `nv fallback` gave no answer to go by |
 | `fallback_sw_commit` | `sw_commit` in that copy, `0` or `1` |
 | `next_boot` | the slot the next reset boots: `sw_tryactive` when it is `0` or `1`, else `primary_sw_commit` |
-| `uncommitted` | `1` when a valid copy's `sw_commit` is not `running`; `0` when every valid copy names it; empty when the running slot or the environment cannot be read |
+| `uncommitted` | `1` when a valid copy's `sw_commit` is not `running`; `0` when every valid copy names it; empty when the running slot or the environment cannot be read, or `nv fallback` gave neither a dump nor its line for no valid second copy (exit 3, or no answer within 10 s) |
 | `other_slot` | the slot that is not running, `0` or `1`; empty when `running` is |
 | `other_slot_check` | `nv slotcheck` on it (`docs/FLASHING.md`, "Checking the other slot"), a partial check, not proof that the slot boots: `ok`, `fail`, `unknown` (not readable, or no answer), `pending` while it runs; empty when there is no `other_slot` |
 | `other_slot_detail` | what `nv slotcheck` said: the whole line on `ok`, the reason on `fail` and `unknown` |
