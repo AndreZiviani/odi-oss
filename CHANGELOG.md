@@ -49,6 +49,23 @@ listed here.
   views now put back what omcid runs with and name the keys that differ on
   a `not applied` line. The forms with paths still load the files.
 
+- apply.sh: `omci-live` reloads only what keeps the ONU in O5. With an
+  identity change also waiting in the store (a serial number saved and not
+  applied) omcid applies nothing, the VLAN keys included, logs
+  `action=deferred`, and the report names the keys and exits 3; a plain
+  `apply.sh omci` applies both. It is for the web UI, whose save of VLAN
+  keys alone applies them straight away and took a pending serial number
+  along, so the ONU re-registered while the page said it stayed in O5. A
+  verb rather than an option, so an older apply.sh stops at its usage line
+  instead of applying the whole store. `omci` also refuses an option it
+  does not know and seconds that are no number, where it took either for
+  the bound, and signals one reload at a time: two at once could swap the
+  confirmation each one leaves for omcid. After a signal omcid did not
+  answer in time, the lock stays held until it does, at most 30 s, and the
+  outcome reported is always this run's. omcid takes only the exact words
+  apply.sh writes: an empty or cut confirmation file counted as
+  `--confirm` and now counts as `omci-live`.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10

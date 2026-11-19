@@ -27,6 +27,7 @@
 #   2b. Every re-registration is recorded with the OLT answer (rereg.c):
 #      a refusal (three Deactivate_ONU-IDs before O5, or O7), a timeout,
 #      the guard that holds the third change back until it is confirmed,
+#      a live reload that defers an identity change,
 #      a revert that the count skips, and the record surviving a restart.
 #   2c. The identity trial file (identity-trial.sh) is read over the store:
 #      its serial number is the one handed to the driver, and taking the
@@ -918,6 +919,33 @@ check "accepted: five lines" "5" "$(wc -l < "$REREG" | tr -d ' ')"
 echo confirm > "$CONFIRM"
 change ODIT00000005
 [ ! -e "$CONFIRM" ] && ok "unused confirmation: taken by the reload" || bad "unused confirmation: left behind"
+
+# A live reload (apply.sh omci-live, what the web UI sends after a VLAN
+# save) changes nothing that re-registers the ONU: a serial number saved
+# earlier is not applied with it, nor anything else, and nothing is
+# recorded. The next plain reload applies it.
+: > "$INITLOG"
+echo live > "$CONFIRM"
+change ODIT00000006
+check "live: deferred" "done deferred identity deferred" "$(st state) $(st result) $(st changed) $(st action)"
+check "live: no driver verb" "0" "$(wc -c < "$INITLOG" | tr -d ' ')"
+check "live: not recorded" "5" "$(wc -l < "$REREG" | tr -d ' ')"
+check_grep "live: logged" "event=reload changed=identity action=deferred keys=GPON_SN" "$log"
+[ ! -e "$CONFIRM" ] && ok "live: the request is used up" || bad "live: the file is still there"
+# Only the words apply.sh writes confirm anything. An empty file (what a
+# reader finds between echo's open and its write) or a cut one defers like
+# omci-live, rather than applying the serial number as --confirm would.
+for m in "" "conf"; do
+	printf '%s' "$m" > "$CONFIRM"
+	change ODIT00000006
+	check "marker '$m': deferred, not confirmed" "deferred 0" \
+		"$(st result) $(wc -c < "$INITLOG" | tr -d ' ')"
+done
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 15 || bad "live: the plain reload after it did not finish"
+check "live: a plain reload then applies the serial number" "gpondeact gponsn ODIT00000006 gponact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 stop_omcid
 
 # ------------------------------------------------ 2c. the identity trial file

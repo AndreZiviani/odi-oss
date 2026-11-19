@@ -24,6 +24,7 @@
 #                        a safe-mode boot.
 #
 #     apply.sh omci [--confirm|--revert] [SECONDS]
+#     apply.sh omci-live [SECONDS]
 #                        Tells the running omcid to reread the config store
 #                        (SIGHUP, the Unix convention for a reload) and waits,
 #                        bounded, for the outcome. omcid compares the store
@@ -69,6 +70,19 @@
 #                        a revert, which the count of refusals skips. From
 #                        one refusal on, and from REREG_DAY_WARN accepted
 #                        changes in 24 h, the report carries a warning.
+#                        omci-live (what the web UI sends after a VLAN
+#                        save) applies only what keeps the ONU in O5: with
+#                        an identity change also waiting in the store
+#                        nothing is applied (result deferred, exit 3, so a
+#                        caller can tell it from a failure), and a plain
+#                        apply.sh omci applies both. A verb of its own and
+#                        not an option of omci: an apply.sh without it
+#                        stops at the usage line before anything is
+#                        signalled, where an option would be taken for the
+#                        seconds and the whole store applied.
+#                        One omci reload is signalled at a time: the
+#                        confirmation file is shared, so a second apply.sh
+#                        waits (ACK_WAIT) until omcid has taken the first.
 #
 #     apply.sh syslog    SERVICE RESTART. Restarts syslogd so it re-reads
 #                        SYSLOG_SERVER. No OMCI interruption, no reboot: the
@@ -122,6 +136,7 @@ export PATH
 
 RELOAD_STATUS=${RELOAD_STATUS:-/var/run/omcid-reload}
 REREG_CONFIRM=${REREG_CONFIRM:-/var/run/omcid-reregister.confirm}
+OMCI_LOCK=${OMCI_LOCK:-/var/run/apply-omci.lock}
 NETWORK=${NETWORK:-/etc/scripts/network.sh}
 MODULES_OFF=${MODULES_OFF:-/etc/config/modules.off}
 SERVICES_LOG=${SERVICES_LOG:-/var/log/services.log}
@@ -130,6 +145,7 @@ SFP_HOST_DDM_SH=${SFP_HOST_DDM_SH:-/etc/scripts/sfp-host-ddm.sh}
 # How long each wait may take, in seconds.
 ACK_WAIT=${ACK_WAIT:-5}             # omcid takes the signal and starts the reload
 APPLY_WAIT=${APPLY_WAIT:-20}        # the outcome; under the web UI 25 s bound
+LINGER_WAIT=${LINGER_WAIT:-30}      # the lock kept after a signal went unanswered
 
 say() { echo "apply: $*"; }
 die() { echo "apply: $*" >&2; exit 1; }
@@ -145,21 +161,68 @@ network() {
 
 # status_get <key>: one value of the status file, empty when absent.
 status_get() { sed -n "s/^$1=//p" "$RELOAD_STATUS" 2>/dev/null | head -n 1; }
+# snap_get <key>: the same from $snap, the file as read once.
+snap_get() { printf '%s\n' "$snap" | sed -n "s/^$1=//p" | head -n 1; }
 
 # secs <milliseconds>: whole and tenths of a second, for the report.
 secs() { echo "$(( ${1:-0} / 1000 )).$(( ${1:-0} % 1000 / 100 ))"; }
 
+# omci_lock: the one omci reload being signalled. The confirmation file is
+# shared: a second apply.sh writing or removing it between the first one's
+# write and omcid taking it would change what the first reload confirms.
+# Held from that write until omcid answers, at most ACK_WAIT seconds to get.
+omci_lock() {
+	command -v flock >/dev/null 2>&1 || die "no flock to take $OMCI_LOCK"
+	( : >> "$OMCI_LOCK" ) 2>/dev/null || die "cannot open $OMCI_LOCK"
+	exec 8>>"$OMCI_LOCK"
+	j=0
+	while ! flock -n 8; do
+		[ "$j" -lt "$ACK_WAIT" ] || die "another apply.sh omci is still waiting for omcid to answer; try again"
+		sleep 1
+		j=$((j + 1))
+	done
+}
+
+# omci_lock_linger <id>: the signal went unanswered and may still be taken.
+# The reload it starts would take whatever confirmation is on disk then, the
+# next apply.sh's included, and leave that one's own signal with none. So
+# the lock stays held, by a child with no output, until the status file
+# shows a run other than <id> or LINGER_WAIT seconds pass.
+omci_lock_linger() {
+	(
+		j=0
+		while [ "$j" -lt "$LINGER_WAIT" ]; do
+			_id=$(status_get id)
+			[ -n "$_id" ] && [ "$_id" != "$1" ] && exit 0
+			sleep 1
+			j=$((j + 1))
+		done
+	) < /dev/null > /dev/null 2>&1 &
+}
+
+# omci <confirm> [option] [SECONDS]: confirm is empty for apply.sh omci,
+# which takes --confirm or --revert, and live for apply.sh omci-live,
+# which takes none.
 omci() {
-	confirm=
+	confirm=$1; shift
+	if [ -z "$confirm" ]; then
+		case ${1:-} in
+		--confirm) confirm=confirm; shift ;;
+		--revert)  confirm=revert; shift ;;
+		esac
+	fi
 	case ${1:-} in
-	--confirm) confirm=confirm; shift ;;
-	--revert)  confirm=revert; shift ;;
+	-*) die "omci: unknown option $1${confirm:+ for omci-live}" ;;
 	esac
 	wait_s=${1:-$APPLY_WAIT}
+	case $wait_s in
+	''|*[!0-9]*) die "omci: the bound in seconds is a whole number, not $wait_s" ;;
+	esac
 	[ ! -f "$MODULES_OFF" ] || die "$MODULES_OFF is set: this boot runs no omcid, nothing to reload"
 	pids=$(pidof omcid 2>/dev/null)
 	[ -n "$pids" ] || die "no omcid is running: nothing to reload (init respawns it; see /var/log/omcid.log)"
 
+	omci_lock
 	before=$(status_get id)
 	# The confirmation omcid takes away with this reload (and any other):
 	# written before the signal, so the reload it starts finds it.
@@ -178,45 +241,64 @@ omci() {
 	while :; do
 		id=$(status_get id)
 		[ -n "$id" ] && [ "$id" != "$before" ] && break
-		[ "$i" -lt "$ACK_WAIT" ] || die "omcid did not answer the signal within ${ACK_WAIT} s (an older build treats SIGHUP as stop; init respawns it)"
+		if [ "$i" -ge "$ACK_WAIT" ]; then
+			omci_lock_linger "$before"
+			die "omcid did not answer the signal within ${ACK_WAIT} s (an older build treats SIGHUP as stop; init respawns it)"
+		fi
 		sleep 1
 		i=$((i + 1))
 	done
+	# omcid has taken the confirmation: the next apply.sh may write its own.
+	exec 8>&-
 
 	# The outcome, bounded. Counted in iterations of one second: this is
 	# also what runs under the test fixture, where uptime is a constant.
 	# The seconds the acknowledgement took count against the same bound, so
 	# a slow acknowledgement plus a full wait cannot outlast the 25 s the
 	# web UI gives this script (ACK_WAIT 5 + APPLY_WAIT 20 did, by a hair).
-	while [ "$(status_get state)" != "done" ] && [ "$i" -lt "$wait_s" ]; do
+	# The file is read whole each time (omcid replaces it by rename), and
+	# only while it is this run's: once omcid acknowledged it, the next
+	# apply.sh may start another reload, and its result is not this one's.
+	while :; do
+		snap=$(cat "$RELOAD_STATUS" 2>/dev/null)
+		[ "$(snap_get id)" = "$id" ] || break
+		[ "$(snap_get state)" != "done" ] || break
+		[ "$i" -lt "$wait_s" ] || break
 		sleep 1
 		i=$((i + 1))
 	done
+	if [ "$(snap_get id)" != "$id" ]; then
+		say "another apply.sh omci started the next reload before the outcome of this one was read; see /var/log/omcid.log (event=reload_done)" >&2
+		return 1
+	fi
 
-	changed=$(status_get changed) result=$(status_get result)
-	keys=$(status_get keys)
-	if [ "$(status_get state)" != "done" ]; then
+	changed=$(snap_get changed) result=$(snap_get result)
+	keys=$(snap_get keys)
+	if [ "$(snap_get state)" != "done" ]; then
 		say "$changed: still working after ${wait_s} s (${result}); omcid carries on and logs event=reload_done when it ends"
 		return 0
 	fi
-	dur=$(secs "$(status_get duration_ms)")
+	dur=$(secs "$(snap_get duration_ms)")
 	case "$changed:$result" in
 	none:ok)
 		say "nothing changed in the store; nothing done" ;;
 	vlan:ok)
 		say "VLAN handling changed ($keys): connections rebuilt in place in ${dur} s, the ONU stayed in O5" ;;
 	identity:ok)
-		say "identity changed ($keys): the ONU re-registered and is back in O5 with $(status_get services) service(s) after $(secs "$(status_get o5_ms)") s (omcid $(status_get duration_ms) ms in all)"
+		say "identity changed ($keys): the ONU re-registered and is back in O5 with $(snap_get services) service(s) after $(secs "$(snap_get o5_ms)") s (omcid $(snap_get duration_ms) ms in all)"
 		rereg_warn ;;
 	identity:held)
-		say "identity changed ($keys) and NOT applied: the OLT refused the last $(status_get streak) changes; the ONU stays on the identity it runs. Check the values, then: apply.sh omci --confirm" >&2
+		say "identity changed ($keys) and NOT applied: the OLT refused the last $(snap_get streak) changes; the ONU stays on the identity it runs. Check the values, then: apply.sh omci --confirm" >&2
 		return 1 ;;
+	identity:deferred)
+		say "identity changed ($keys) and NOT applied, nor anything else: omci-live changes nothing that re-registers the ONU. Apply it with: apply.sh omci" >&2
+		return 3 ;;
 	*)
 		say "$changed ($keys): $result after ${dur} s -- see /var/log/omcid.log (event=reload_done)" >&2
 		case $result in
 		failed)         say "the driver refused a step; the ONU may be off the line until the next reload or a reboot" >&2 ;;
 		timeout)        say "the ONU did not reach O5 in time; the OLT may not know the new identity" >&2 ;;
-		refused)        say "the OLT refused the new identity ($(status_get refusals) deactivation(s), or disabled the ONU)" >&2 ;;
+		refused)        say "the OLT refused the new identity ($(snap_get refusals) deactivation(s), or disabled the ONU)" >&2 ;;
 		no_services)    say "the ONU is in O5 but the OLT built no services" >&2 ;;
 		sn_not_applied) say "the ONU is back, but the driver did not take the new serial number" >&2 ;;
 		pw_not_applied) say "the ONU is back, but the driver did not take the new PLOAM password; it runs the old one" >&2 ;;
@@ -230,7 +312,7 @@ omci() {
 # rereg_warn: what omcid recorded about re-registrations, when it calls for
 # care: refusals in a row, or many accepted changes in a day.
 rereg_warn() {
-	streak=$(status_get streak) today=$(status_get today)
+	streak=$(snap_get streak) today=$(snap_get today)
 	if [ "${streak:-0}" -ge 1 ]; then
 		say "warning: the OLT refused the last ${streak} identity change(s) in a row; some operators block a line after a few. From ${REREG_HOLD:-2} on, a change needs apply.sh omci --confirm" >&2
 	fi
@@ -287,11 +369,12 @@ sfp() {
 
 case "${1:-}" in
 network) network ;;
-omci)    shift; omci "$@" || exit 1 ;;
+omci)    shift; omci "" "$@" || exit $? ;;
+omci-live) shift; omci live "$@" || exit $? ;;
 syslog)  syslog || exit 1 ;;
 ntp)     ntp || exit 1 ;;
 igmp)    igmp || exit 1 ;;
 sfp)     sfp || exit 1 ;;
-*)       echo "usage: $0 network|omci [--confirm|--revert] [seconds]|syslog|ntp|igmp|sfp" >&2; exit 1 ;;
+*)       echo "usage: $0 network|omci [--confirm|--revert] [seconds]|omci-live [seconds]|syslog|ntp|igmp|sfp" >&2; exit 1 ;;
 esac
 exit 0

@@ -93,7 +93,7 @@ first=$(cat "$T/omcid.pid")
 # set it small themselves (ACK for the acknowledgement, the argument for the
 # outcome).
 run() {
-	env PATH="$T/bin:$PATH" RELOAD_STATUS="$T/status" MODULES_OFF="$T/modules.off" REREG_CONFIRM="$T/confirm" \
+	env PATH="$T/bin:$PATH" RELOAD_STATUS="$T/status" MODULES_OFF="$T/modules.off" REREG_CONFIRM="$T/confirm" OMCI_LOCK="$T/omci.lock" \
 	    ACK_WAIT="${ACK:-15}" APPLY_WAIT=30 NETWORK="$T/network.sh" SERVICES_LOG="$T/services.log" \
 	    sh "$A" "$@" 2>&1
 }
@@ -141,6 +141,44 @@ echo "done identity held held GPON_SN 5 - 6 0 refusals=0;streak=2" > "$T/script"
 out=$(run omci); rc=$?
 t "held: exit 1" "^1$" "$rc"
 t "held: says what to do" "NOT applied: the OLT refused the last 2 changes.*apply.sh omci --confirm" "$out"
+# omci-live (the web UI after a VLAN save): omcid finds it, and a deferred
+# identity change is a failure that says how to apply it.
+echo "done identity deferred deferred GPON_SN 5 - 6 0" > "$T/script"
+out=$(run omci-live); rc=$?
+t "omci-live: omcid finds it" "^live$" "$(cat "$T/confirm.seen" 2>/dev/null)"
+t "deferred: exit 3, not a failure's 1" "^3$" "$rc"
+t "deferred: names the keys and the plain apply" "identity changed (GPON_SN) and NOT applied, nor anything else.*Apply it with: apply.sh omci" "$out"
+# What is not understood is refused before anything is signalled. omci-live
+# is a verb because an option was taken for the seconds by an apply.sh that
+# did not know it, and the whole store applied.
+cp "$T/status" "$T/status.before"
+out=$(run omci --bogus 2>&1); rc=$?
+t "an unknown option is refused" "^1 .*unknown option --bogus" "$rc $out"
+out=$(run omci --live 2>&1); rc=$?
+t "omci --live is not an option: refused" "^1 .*unknown option --live" "$rc $out"
+out=$(run omci-live --confirm 2>&1); rc=$?
+t "omci-live takes no confirmation" "^1 .*unknown option --confirm for omci-live" "$rc $out"
+out=$(run omci soon 2>&1); rc=$?
+t "seconds that are no number: refused" "^1 .*whole number, not soon" "$rc $out"
+t "and none of those signalled omcid" "^same$" "$(cmp -s "$T/status" "$T/status.before" && echo same)"
+
+# One reload signalled at a time: the confirmation file is shared. Another
+# apply.sh holding the lock past ACK_WAIT is a refusal, with nothing written
+# or signalled.
+echo "done vlan rebuild ok VLAN_MANU_TAG_VID 100 - 0 0" > "$T/script"
+flock "$T/omci.lock" sleep 4 &
+holder=$!
+for _ in $(seq 50); do flock -n "$T/omci.lock" true || break; sleep 0.1; done
+echo revert > "$T/confirm"
+out=$(ACK=1 run omci --confirm); rc=$?
+t "lock held by another apply.sh: exit 1, says so" "^1 .*another apply.sh omci is still waiting" "$rc $out"
+t "and the other one's confirmation is left alone" "^revert$" "$(cat "$T/confirm" 2>/dev/null)"
+t "and omcid was not signalled" "^same$" "$(cmp -s "$T/status" "$T/status.before" && echo same)"
+wait "$holder"
+rm -f "$T/confirm"
+out=$(run omci --confirm); rc=$?
+t "the lock free again: the reload runs" "^0$" "$rc"
+t "and reports it" "connections rebuilt in place" "$out"
 echo "done identity reregister ok GPON_SN 2600 2100 6 0 refusals=1;streak=0;today=5" > "$T/script"
 out=$(run omci); rc=$?
 t "accepted after a deactivation: exit 0, no refusal warning" "^0$" "$rc"
@@ -148,6 +186,23 @@ t "five accepted in a day: a warning" "warning: 5 identity changes in the last 2
 echo "done identity reregister timeout GPON_SN 2600 - 0 0 refusals=0;streak=1;today=0" > "$T/script"
 out=$(run omci)
 t "one refused: a warning" "warning: the OLT refused the last 1 identity change" "$out"
+
+# Once omcid acknowledged a reload, another apply.sh may start the next one.
+# The outcome reported is this run's, or none: not the next run's result.
+printf 'running vlan rebuild pending VLAN_MANU_TAG_VID 0 - 6 0\n' > "$T/script"
+before=$(sed -n 's/^id=//p' "$T/status")
+run omci 10 > "$T/out.overtaken" &
+runner=$!
+# Acknowledged: a new id, and the lock released for the next apply.sh.
+for _ in $(seq 100); do
+	[ "$(sed -n 's/^id=//p' "$T/status")" != "$before" ] && flock -n "$T/omci.lock" true && break
+	sleep 0.1
+done
+printf 'id=next.1\nstate=done\nchanged=identity\naction=reregister\nresult=ok\n' > "$T/status.new"
+mv "$T/status.new" "$T/status"
+wait "$runner"; rc=$?
+t "overtaken by the next reload: exit 1, says so, not its ok" \
+	"^1 .*started the next reload before the outcome of this one was read" "$rc $(cat "$T/out.overtaken" | tr '\n' ' ')"
 
 # Still running at the bound: reported, not a failure.
 printf 'running identity reregister activated GPON_SN 100 - 0 0\n' > "$T/script"
@@ -162,6 +217,15 @@ rm -f "$T/script"
 out=$(ACK=2 run omci); rc=$?
 t "an omcid that never answers: exit 1" "^1$" "$rc"
 t "and it says why" "did not answer the signal" "$out"
+# Its signal may still be taken, and the reload it starts would take the
+# confirmation on disk then. Until omcid answers it, the lock stays held.
+out=$(ACK=1 run omci --confirm); rc=$?
+t "after an unanswered signal the lock is still held: exit 1" "^1 .*another apply.sh omci is still waiting" "$rc $out"
+t "and no confirmation is left for that reload to take" "^no$" "$([ -e "$T/confirm" ] && echo yes || echo no)"
+printf 'id=late.1\nstate=done\n' > "$T/status.new"
+mv "$T/status.new" "$T/status"
+for _ in $(seq 50); do flock -n "$T/omci.lock" true && break; sleep 0.1; done
+t "once omcid answers it, late, the lock is free" "^free$" "$(flock -n "$T/omci.lock" true && echo free)"
 
 # No omcid at all.
 kill "$(cat "$T/omcid.pid")"; wait 2>/dev/null; rm -f "$T/omcid.pid"

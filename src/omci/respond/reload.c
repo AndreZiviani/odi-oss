@@ -420,18 +420,19 @@ static void activate(void)
 		finish("ok", -1);
 }
 
-/* The guard (rereg.c): the OLT refused the last changes, and nobody
- * confirmed this one. The daemon goes on with the identity it runs, the OLT
- * sees nothing, and a confirmed reload applies the store as it then is.
- * Nothing is recorded: a held change never reached the OLT. */
-static void hold(const struct cfg_snap *old)
+/* A changed identity not applied, `why` says why: "held", the guard
+ * (rereg.c: the OLT refused the last changes, and nobody confirmed this
+ * one), or "deferred", a live reload (below). The daemon goes on with what
+ * it runs, the OLT sees nothing, and a later reload applies the store as it
+ * then is. Nothing is recorded: the change never reached the OLT. */
+static void hold(const struct cfg_snap *old, const char *why)
 {
 	cfg_snap_restore(old);
 	rl.base = *old;
 	rl.changed = "identity";
-	rl.action = "held";
+	rl.action = why;
 	ev_reload(rl.changed, rl.action, rl.keys);
-	finish("held", -1);
+	finish(why, -1);
 }
 
 static void do_reload(void)
@@ -480,9 +481,19 @@ static void do_reload(void)
 	/* The baseline moves with the decision: the daemon now runs the new
 	 * values. do_reregister puts the old ones back if it cannot start. */
 	rl.base = cur;
+	/* apply.sh omci-live, what the web UI sends after a VLAN save: a
+	 * reload that changes nothing that drops the line. An identity change
+	 * waiting in the store (saved earlier, not applied) is not applied with
+	 * it: the whole reload is deferred, the VLAN keys too, and a plain
+	 * reload applies both. A retry is not deferred: the line is down
+	 * already, and re-registering is the way back. */
+	if ((mask & CFGD_IDENTITY) && !retry && rl.confirm == 3) {
+		hold(&old, "deferred");
+		return;
+	}
 	if ((mask & CFGD_IDENTITY) && !retry && !rl.confirm &&
 	    rereg_streak() >= REREG_HOLD) {
-		hold(&old);
+		hold(&old, "held");
 		return;
 	}
 	if ((mask & CFGD_IDENTITY) || retry) {

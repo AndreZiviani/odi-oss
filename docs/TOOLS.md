@@ -1381,11 +1381,37 @@ VLAN rebuild in place, or a re-registration. The report says which:
 
     apply: identity changed (GPON_SN): the ONU re-registered and is back in O5 with 6 service(s) after 41.3 s (omcid 44700 ms in all)
 
+`omci-live [seconds]` asks for a reload that changes nothing that
+re-registers the ONU. A web UI newer than v1.18.1 sends it after a save of
+VLAN keys alone: an identity change saved earlier and not applied would
+otherwise go with it. It is a verb of its own, not an option of `omci`, because an
+apply.sh without it has to refuse it: an older one stops at its usage line,
+where it took an unknown option for the seconds and applied the whole store.
+With such a change in the store omcid applies nothing, the VLAN keys
+included (`event=reload changed=identity action=deferred`,
+`result=deferred`), and the report names the keys and exits 3, which a
+caller can tell from a failure; a plain `apply.sh omci` then applies both. A reload with no identity change runs as
+without the option, and so does one after a failed activation, where the
+line is down already.
+
+One `omci` or `omci-live` reload is signalled at a time
+(`/var/run/apply-omci.lock`, held until omcid has answered): the
+confirmation it leaves for omcid is one shared file. A second apply.sh waits
+for the first one's answer, up to 5 s, and otherwise exits 1 without writing
+or signalling anything. When omcid does not answer within those 5 s, the
+lock stays held until it does, at most `LINGER_WAIT` (30 s): the reload the
+signal starts late would take the confirmation the next apply.sh leaves.
+omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`); a
+file that is empty, cut short or says anything else confirms nothing and
+counts as `live`. The outcome reported is this run's: when the next reload
+has started before it was read, apply.sh says so and exits 1.
+
 A re-registration still running at the bound is reported as still working and
 is not a failure. Exit 1 when no omcid runs (or `/etc/config/modules.off` is
 set), when omcid does not answer the signal within 5 s (an older build treats
 SIGHUP as stop), or when the reload's result is `failed`, `timeout`,
-`no_services`, `sn_not_applied`, `pw_not_applied` or `no_serial`. It never starts an omcid and writes
+`no_services`, `sn_not_applied`, `pw_not_applied`, `no_serial` or `held`,
+and exit 3 for `deferred`. It never starts an omcid and writes
 nothing to the driver: init owns the process, and a second omcid started here
 used to make the ONU cycle through O1 to O3 while init's respawn entry
 re-provisioned around it.
