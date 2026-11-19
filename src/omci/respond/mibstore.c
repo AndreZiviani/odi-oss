@@ -1351,8 +1351,10 @@ uint16_t attr_value(const struct omci_class *c, uint16_t inst,
 	 * what was set. `written`, not merely `r`, because a row exists as soon
 	 * as any one attribute is set and the rest of it is still zero -- the
 	 * built-in answers below have to keep serving the attributes nobody
-	 * wrote. */
-	if (r && (r->written & (1u << (16 - k))) && off >= 0
+	 * wrote. Only attributes 1..16 have a bit: a baseline mask names no
+	 * other, and the alarm code reads ANI-G attributes 17..20, where the
+	 * shift count would go negative. */
+	if (r && k <= 16 && (r->written & (1u << (16 - k))) && off >= 0
 	    && off + n <= row_cap(r)) {
 		for (uint16_t i = 0; i < n; i++)
 			out[i] = row_get(r, (unsigned)off + i);
