@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a reload after a failed activation re-registers also when it
+  brings only VLAN keys. With nothing changed it already did; a new VLAN
+  value took the rebuild in place instead, and `apply.sh` reported the ONU
+  as still in O5 while it stayed deactivated. One that brings a new serial
+  number or password is an identity change like any other: `omci-live`
+  defers it, and a run of refusals holds it.
+
 - omcid: a reload keeps the alarm state of the ONU's own entities when it
   does not change them. Each reload rebuilt that list and cleared every
   alarm bitmap, pending notification and ARC timer with it, so an

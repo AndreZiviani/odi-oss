@@ -598,6 +598,72 @@ check "failed activation, then: nothing changed is ok again" "done ok none none"
 	"$(st state) $(st result) $(st changed) $(st action)"
 stop_omcid
 
+# A VLAN change after a failed activation re-registers too: the line is
+# down, and a rebuild in place would say the ONU stayed in O5.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "5 282 794 1050 1306 538"
+log=/tmp/rl-act2.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1
+inject isp1
+settle "$log" 1
+: > "$INITLOG"
+old_id=$(st id)
+store 1 11 0 "$(val LOID_OLD actfail2)
+$(val LOID actfail2)
+"
+kill -HUP "$pid"
+wait_count "$INITLOG" gpondeact 1 8 || bad "failed activation, VLAN: no gpondeact"
+rm -f "$INITLOG"
+wait_done "$old_id" 20 || bad "failed activation, VLAN: never finished"
+check "failed activation, VLAN: the first one failed" "done failed" "$(st state) $(st result)"
+: > "$INITLOG"
+old_id=$(st id)
+store 1 12 0 "$(val LOID_OLD actfail2)
+$(val LOID actfail2)
+"
+kill -HUP "$pid"
+wait_count "$INITLOG" gponact 1 8 || bad "failed activation, VLAN: no gponact"
+inject isp1
+wait_done "$old_id" 20 || bad "failed activation, VLAN: never finished again"
+check "failed activation, then a VLAN change: re-registers, not a rebuild in place" \
+	"done ok reregister" "$(st state) $(st result) $(st action)"
+check "failed activation, then a VLAN change: deactivate and activate" "gpondeact gponact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+stop_omcid
+
+# A retry that brings a new serial number or password is an identity change
+# like any other: omci-live defers it, as it does with the line up, rather
+# than re-registering with values no one confirmed.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "5 282 794 1050 1306 538"
+log=/tmp/rl-act3.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1
+inject isp1
+settle "$log" 1
+: > "$INITLOG"
+old_id=$(st id)
+store 1 11 0 "$(val LOID_OLD actfail3)
+$(val LOID actfail3)
+"
+kill -HUP "$pid"
+wait_count "$INITLOG" gpondeact 1 8 || bad "failed activation, new LOID: no gpondeact"
+rm -f "$INITLOG"
+wait_done "$old_id" 20 || bad "failed activation, new LOID: never finished"
+check "failed activation, new LOID: the first one failed" "done failed" "$(st state) $(st result)"
+: > "$INITLOG"
+store 1 11 0 "$(val LOID_OLD actfail4)
+$(val LOID actfail4)
+"
+echo live > "$CONFIRM"
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 15 || bad "failed activation, new LOID by omci-live: never finished"
+check "failed activation, then a new LOID by omci-live: deferred, no driver verb" \
+	"done deferred 0" "$(st state) $(st result) $(wc -c < "$INITLOG" | tr -d ' ')"
+stop_omcid
+
 # ------------------------------------------------ 3. which key, which class
 # A dry-run daemon (no -a, no driver): every reload is decided and logged,
 # and a re-registration completes at once, so a long list of edits is quick.

@@ -441,7 +441,7 @@ static void do_reload(void)
 {
 	struct cfg_snap old, cur;
 	unsigned mask;
-	int retry;
+	int retry, fresh;
 
 	rl.seq++;
 	now_ms(&rl.start_s, &rl.start_ms);
@@ -456,10 +456,13 @@ static void do_reload(void)
 	cfg_load_values();
 	cfg_snap_take(&cur);
 	mask = cfg_snap_diff(&rl.base, &cur);
+	/* A serial number or password edited since the last run. */
+	fresh = (mask & CFGD_IDENTITY) != 0;
 	/* The last activation failed and the ONU is still deactivated: an
-	 * apply with nothing new re-registers all the same, since reporting
-	 * ok would leave the line down with nothing said. */
-	retry = !mask && rl.act_failed;
+	 * apply re-registers whatever it brings, nothing new or VLAN keys
+	 * alone, since reporting ok, or a rebuild in place with the ONU "still
+	 * in O5", would leave the line down with nothing said. */
+	retry = rl.act_failed;
 	/* A re-registration sends again what the driver refused last time. */
 	if ((mask & CFGD_IDENTITY) || retry)
 		mask |= rl.pending;
@@ -492,13 +495,15 @@ static void do_reload(void)
 	 * reload that changes nothing that drops the line. An identity change
 	 * waiting in the store (saved earlier, not applied) is not applied with
 	 * it: the whole reload is deferred, the VLAN keys too, and a plain
-	 * reload applies both. A retry is not deferred: the line is down
-	 * already, and re-registering is the way back. */
-	if ((mask & CFGD_IDENTITY) && !retry && rl.confirm == 3) {
+	 * reload applies both. A retry is not deferred, nor held: the line is
+	 * down already, and re-registering is the way back. That is a retry
+	 * with no new identity; one that brings a new serial number or password
+	 * is an identity change like any other, and both rules hold for it. */
+	if ((mask & CFGD_IDENTITY) && (!retry || fresh) && rl.confirm == 3) {
 		hold(&old, "deferred");
 		return;
 	}
-	if ((mask & CFGD_IDENTITY) && !retry && !rl.confirm &&
+	if ((mask & CFGD_IDENTITY) && (!retry || fresh) && !rl.confirm &&
 	    rereg_streak() >= REREG_HOLD) {
 		hold(&old, "held");
 		return;

@@ -258,7 +258,8 @@ in `pw_not_applied`: the driver keeps the old password. A later reload with
 nothing changed in the store reports the same result again without a second
 re-registration, until the store holds a value the driver takes. A refused
 `gponact` ends in `failed` and leaves the ONU deactivated; the next reload
-re-registers even with nothing changed, rather than reporting `ok`.
+re-registers whatever it brings, nothing changed or VLAN keys alone, rather
+than reporting `ok` or rebuilding in place.
 
 Three event lines tell the story (below): `event=reload changed=... action=...
 keys=...` (key names, never values), `event=reload_step verb=... rc=...` for
@@ -1391,8 +1392,8 @@ With such a change in the store omcid applies nothing, the VLAN keys
 included (`event=reload changed=identity action=deferred`,
 `result=deferred`), and the report names the keys and exits 3, which a
 caller can tell from a failure; a plain `apply.sh omci` then applies both. A reload with no identity change runs as
-without the option, and so does one after a failed activation, where the
-line is down already.
+without the option, and so does one after a failed activation that brings
+no new serial number or password, where the line is down already.
 
 One `omci` or `omci-live` reload is signalled at a time
 (`/var/run/apply-omci.lock`, held until omcid has answered): the
