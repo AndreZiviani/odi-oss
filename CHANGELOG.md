@@ -18,7 +18,12 @@ listed here.
   value took the rebuild in place instead, and `apply.sh` reported the ONU
   as still in O5 while it stayed deactivated. One that brings a new serial
   number or password is an identity change like any other: `omci-live`
-  defers it, and a run of refusals holds it.
+  defers it, and a run of refusals holds it. A reload that stopped at
+  `no_serial` leaves the ONU deactivated as well, and the next one now
+  re-registers in the same way. Such a reload says `retry=1` in
+  `/var/run/omcid-reload`, and `apply.sh` reports it as a re-registration:
+  `omci-live` exits 4 when it worked or still runs at the bound, so the web
+  UI no longer says it applied without one.
 
 - omcid: a reload keeps the alarm state of the ONU's own entities when it
   does not change them. Each reload rebuilt that list and cleared every
@@ -85,9 +90,14 @@ listed here.
   the bound, and signals one reload at a time: two at once could swap the
   confirmation each one leaves for omcid. After a signal omcid did not
   answer in time, the lock stays held until it does, at most 30 s, and the
-  outcome reported is always this run's. omcid takes only the exact words
-  apply.sh writes: an empty or cut confirmation file counted as
-  `--confirm` and now counts as `omci-live`.
+  outcome reported is always this run's. A reload is not signalled while
+  omcid still runs the one before: it takes the next signal only once that
+  is done, a re-registration up to 153 s on, by which time the lock would
+  be gone. apply.sh says so and exits 1. The seconds spent waiting for the
+  lock count against the bound, as those for the acknowledgement already
+  did, so two applies at once stay within the 25 s the web UI gives one.
+  omcid takes only the exact words apply.sh writes: an empty or cut
+  confirmation file counted as `--confirm` and now counts as `omci-live`.
   `test/bin/flock`, the stand-in for a host without flock (macOS), also
   takes `flock FILE CMD`, and `test/apply_test.sh` uses it, so the lock
   cases run there too.

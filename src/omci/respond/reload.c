@@ -67,7 +67,9 @@ static struct {
 	int sn_failed;
 	int pw_failed;
 	unsigned pending;                /* CFGD_SN, CFGD_PLOAM: in the store, not in the driver */
-	int act_failed;                  /* the last gponact failed: left deactivated */
+	int act_failed;                  /* a reload left the ONU deactivated: gponact
+					  * failed, or the store had no serial number */
+	int retry;                       /* this reload re-registers for that alone */
 	int confirm;                     /* rereg_take_confirm() of this reload */
 	long deact_base;                 /* Deactivate_ONU-IDs before gponact, -1 unknown */
 	unsigned refusals;               /* and since */
@@ -173,6 +175,8 @@ static void status_write(int done, const char *result, long o5_ms)
 	sline(&s, "action", rl.action);
 	sline(&s, "result", result);
 	sline(&s, "keys", rl.keys);
+	if (rl.retry)
+		sline(&s, "retry", "1");
 	sline_u(&s, "duration_ms", (unsigned long)since_ms(rl.start_s, rl.start_ms));
 	if (o5_ms >= 0)
 		sline_u(&s, "o5_ms", (unsigned long)o5_ms);
@@ -356,6 +360,9 @@ static void activate(void)
 		 * leaves it (pon_step_gponact), rather than ranging with the
 		 * serial the driver starts with. */
 		if (ident.snLen <= 0) {
+			/* Deactivated, as after a failed gponact: the next
+			 * reload re-registers, VLAN keys alone or none. */
+			rl.act_failed = 1;
 			finish("no_serial", -1);
 			return;
 		}
@@ -444,6 +451,7 @@ static void do_reload(void)
 	int retry, fresh;
 
 	rl.seq++;
+	rl.retry = 0;
 	now_ms(&rl.start_s, &rl.start_ms);
 	/* Taken away by every reload, used or not: a confirmation is for the
 	 * reload apply.sh asked for, never a later one. */
@@ -471,11 +479,15 @@ static void do_reload(void)
 	mask = cfg_snap_diff(&rl.base, &cur);
 	/* A serial number or password edited since the last run. */
 	fresh = (mask & CFGD_IDENTITY) != 0;
-	/* The last activation failed and the ONU is still deactivated: an
-	 * apply re-registers whatever it brings, nothing new or VLAN keys
-	 * alone, since reporting ok, or a rebuild in place with the ONU "still
-	 * in O5", would leave the line down with nothing said. */
+	/* The last reload left the ONU deactivated (gponact failed, or there
+	 * was no serial number): an apply re-registers whatever it brings,
+	 * nothing new or VLAN keys alone, since reporting ok, or a rebuild in
+	 * place with the ONU "still in O5", would leave the line down with
+	 * nothing said. */
 	retry = rl.act_failed;
+	/* Said in the status file when that is the only reason: apply.sh
+	 * omci-live then reports a re-registration, not a rebuild in place. */
+	rl.retry = retry && !fresh;
 	/* A re-registration sends again what the driver refused last time. */
 	if ((mask & CFGD_IDENTITY) || retry)
 		mask |= rl.pending;

@@ -418,6 +418,19 @@ else bad "no serial: never finished"; fi
 check "no serial: deactivated, and no gponsn or gponact" "gpondeact" \
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 check_grep "no serial: logged" "event=reload_done changed=identity action=reregister result=no_serial" "$log"
+# The ONU is left deactivated, as after a failed gponact: the next reload
+# re-registers, a VLAN change alone too, and says why (retry=1). A rebuild
+# in place would report the ONU as still in O5.
+: > "$INITLOG"
+old_id=$(st id)
+store 1 12 0
+kill -HUP "$pid"
+if wait_done "$old_id" 20; then
+	check "no serial, then a VLAN change: re-registers, and says it is a retry" \
+		"done no_serial reregister 1" "$(st state) $(st result) $(st action) $(st retry)"
+else bad "no serial, then a VLAN change: never finished"; fi
+check "no serial, then a VLAN change: deactivated again, still no gponact" "gpondeact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 stop_omcid
 
 # The same with the key gone from both files instead of emptied: an absent
@@ -606,6 +619,7 @@ wait_count "$INITLOG" gpondeact 1 8 || bad "failed activation: no gpondeact"
 rm -f "$INITLOG"
 wait_done "$old_id" 20 || bad "failed activation: never finished"
 check "failed activation: result failed" "done failed" "$(st state) $(st result)"
+check "failed activation: an identity change, no retry" "" "$(st retry)"
 check_grep "failed activation: the step is logged" "event=reload_step verb=gponact rc=2" "$log"
 : > "$INITLOG"
 old_id=$(st id)
@@ -615,6 +629,7 @@ inject isp1
 wait_done "$old_id" 20 || bad "failed activation, again: never finished"
 check "failed activation, again: re-registers and ends ok" "done ok identity reregister" \
 	"$(st state) $(st result) $(st changed) $(st action)"
+check "failed activation, again: the status says it is a retry" "1" "$(st retry)"
 check "failed activation, again: deactivate and activate" "gpondeact gponact" \
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 old_id=$(st id)
@@ -622,6 +637,7 @@ kill -HUP "$pid"
 wait_done "$old_id" 10 || bad "failed activation, then: no outcome"
 check "failed activation, then: nothing changed is ok again" "done ok none none" \
 	"$(st state) $(st result) $(st changed) $(st action)"
+check "failed activation, then: no retry any more" "" "$(st retry)"
 stop_omcid
 
 # A VLAN change after a failed activation re-registers too: the line is
@@ -653,7 +669,7 @@ wait_count "$INITLOG" gponact 1 8 || bad "failed activation, VLAN: no gponact"
 inject isp1
 wait_done "$old_id" 20 || bad "failed activation, VLAN: never finished again"
 check "failed activation, then a VLAN change: re-registers, not a rebuild in place" \
-	"done ok reregister" "$(st state) $(st result) $(st action)"
+	"done ok reregister 1" "$(st state) $(st result) $(st action) $(st retry)"
 check "failed activation, then a VLAN change: deactivate and activate" "gpondeact gponact" \
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 stop_omcid

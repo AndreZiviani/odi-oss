@@ -45,10 +45,11 @@ chmod +x "$T/bin/pidof" "$T/bin/setsid"
 
 # The stub daemon. On SIGHUP it writes what $T/script says: one line per
 # phase, "state changed action result keys duration_ms o5_ms services delay
-# [extra]", delay in seconds before the line is written, extra more key=value
-# lines joined by semicolons. The confirmation apply.sh leaves is taken away,
-# as omcid does, and kept in confirm.seen for the check. No script: it ignores the
-# signal, as an older build that does not write a status file would.
+# [extra]" (keys - for none), delay in seconds before the line is written,
+# extra more key=value lines joined by semicolons. The confirmation apply.sh
+# leaves is taken away, as omcid does, and kept in confirm.seen for the
+# check. No script: it ignores the signal, as an older build that does not
+# write a status file would.
 cat > "$T/daemon" <<DAEMON
 #!/bin/bash
 echo \$\$ > "$T/omcid.pid"
@@ -67,6 +68,7 @@ reload() {
 	rm -f "$T/confirm.seen"
 	[ -f "$T/confirm" ] && mv "$T/confirm" "$T/confirm.seen"
 	while read -r state changed action result keys dur o5 svc delay extra; do
+		[ "\$keys" = - ] && keys=
 		[ "\$delay" -gt 0 ] && sleep "\$delay"
 		{
 			echo "id=\$\$.\$n"; echo "state=\$state"; echo "changed=\$changed"
@@ -211,6 +213,54 @@ printf 'running identity reregister activated GPON_SN 100 - 0 0\n' > "$T/script"
 out=$(run omci 2); rc=$?
 t "running at the bound: exit 0" "^0$" "$rc"
 t "running at the bound: says it carries on" "still working after 2 s" "$out"
+
+# While that reload runs, omcid would take a signal only once it is done,
+# up to 153 s on: refused, with nothing written or signalled.
+cp "$T/status" "$T/status.before"
+echo confirm > "$T/confirm.other"
+out=$(run omci --confirm); rc=$?
+t "a reload still running: the next one is refused, exit 1" "^1 .*still applying the last change (identity, activated)" "$rc $out"
+t "and omcid was not signalled" "^same$" "$(cmp -s "$T/status" "$T/status.before" && echo same)"
+t "and no confirmation was written" "^no$" "$([ -e "$T/confirm" ] && echo yes || echo no)"
+t "and the lock is free" "^free$" "$(flock -n "$T/omci.lock" true && echo free)"
+# It ends.
+sed 's/^state=running$/state=done/; s/^result=activated$/result=ok/' "$T/status.before" > "$T/status.new"
+mv "$T/status.new" "$T/status"
+
+# A reload that re-registers only because the last one left the ONU off the
+# line (retry=1): reported as a re-registration, and omci-live exits 4.
+echo "done identity reregister ok VLAN_MANU_TAG_VID 2600 2100 6 0 retry=1" > "$T/script"
+out=$(run omci-live); rc=$?
+t "retry, omci-live: exit 4" "^4$" "$rc"
+t "retry: says why it re-registers" "the last reload left the ONU off the line: this one re-registers it (VLAN_MANU_TAG_VID)" "$out"
+t "retry: and that it is back" "re-registered: the ONU is back in O5 with 6 service(s) after 2.1 s" "$out"
+t "retry: not reported as an identity change" "^0$" "$(printf '%s\n' "$out" | grep -c 'identity changed')"
+out=$(run omci); rc=$?
+t "retry, plain omci: exit 0" "^0$" "$rc"
+printf 'running identity reregister activated - 100 - 0 0 retry=1\n' > "$T/script"
+out=$(run omci-live 2); rc=$?
+t "retry still running at the bound, omci-live: exit 4" "^4$" "$rc"
+t "retry with no keys: none named" "re-registers it$" "$(printf '%s\n' "$out" | grep 'off the line')"
+sed 's/^state=running$/state=done/; s/^result=activated$/result=timeout/' "$T/status" > "$T/status.new"
+mv "$T/status.new" "$T/status"
+echo "done identity reregister failed - 900 - 0 0 retry=1" > "$T/script"
+out=$(run omci-live); rc=$?
+t "retry that fails: exit 1, no empty key list" "^1 .*identity: failed after 0.9 s" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
+
+# The seconds spent waiting for the lock count against the bound: a lock
+# held 3 s and a bound of 4 s end after about 4 s, not 7.
+printf 'running vlan rebuild pending VLAN_MANU_TAG_VID 0 - 6 0\n' > "$T/script"
+flock "$T/omci.lock" sleep 3 &
+holder=$!
+for _ in $(seq 50); do flock -n "$T/omci.lock" true || break; sleep 0.1; done
+s0=$(date +%s)
+out=$(ACK=5 run omci 4); rc=$?
+took=$(( $(date +%s) - s0 ))
+wait "$holder"
+t "the lock wait counts: still working after 4 s" "^0 .*still working after 4 s" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
+t "and it took about 4 s, not 7 ($took s)" "^[3-5]$" "$took"
+sed 's/^state=running$/state=done/; s/^result=pending$/result=ok/' "$T/status" > "$T/status.new"
+mv "$T/status.new" "$T/status"
 
 # A stale status file is not an answer: the new run has to have a new id.
 echo "done vlan rebuild ok VLAN_MANU_TAG_VID 100 - 0 0" > "$T/script"

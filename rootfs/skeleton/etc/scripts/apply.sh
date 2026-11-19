@@ -55,7 +55,10 @@
 #                        still running at the bound is reported as running and
 #                        is not a failure; omcid carries on and finishes it.
 #                        Exit 1 when no omcid runs, when omcid does not answer
-#                        the signal, or when the reload failed.
+#                        the signal, or when the reload failed; and, with
+#                        nothing signalled, while omcid still runs the reload
+#                        before (it takes the next signal only once that one
+#                        is done).
 #                        It never starts an omcid: init owns the process
 #                        (inittab respawns svc-omcid.sh), and a second one
 #                        made the ONU cycle through O1 to O3 on hardware.
@@ -75,10 +78,14 @@
 #                        an identity change also waiting in the store
 #                        nothing is applied (result deferred, exit 3, so a
 #                        caller can tell it from a failure), and a plain
-#                        apply.sh omci applies both. A verb of its own and
-#                        not an option of omci: an apply.sh without it
-#                        stops at the usage line before anything is
-#                        signalled, where an option would be taken for the
+#                        apply.sh omci applies both. After a reload that left
+#                        the ONU off the line (a failed activation, no serial
+#                        number) it re-registers all the same, the line being
+#                        down already, and exits 4 when that worked or still
+#                        runs at the bound: applied, but not in place. A verb
+#                        of its own and not an option of omci: an apply.sh
+#                        without it stops at the usage line before anything
+#                        is signalled, where an option would be taken for the
 #                        seconds and the whole store applied.
 #                        One omci reload is signalled at a time: the
 #                        confirmation file is shared, so a second apply.sh
@@ -168,26 +175,29 @@ snap_get() { printf '%s\n' "$snap" | sed -n "s/^$1=//p" | head -n 1; }
 secs() { echo "$(( ${1:-0} / 1000 )).$(( ${1:-0} % 1000 / 100 ))"; }
 
 # omci_lock: the one omci reload being signalled. The confirmation file is
-# shared: a second apply.sh writing or removing it between the first one's
-# write and omcid taking it would change what the first reload confirms.
+# shared: a second apply.sh writing or removing it between the write of the
+# first and omcid taking it would change what the first reload confirms.
 # Held from that write until omcid answers, at most ACK_WAIT seconds to get.
+# lock_s is the seconds it took, which count against the bound of the run.
 omci_lock() {
 	command -v flock >/dev/null 2>&1 || die "no flock to take $OMCI_LOCK"
 	( : >> "$OMCI_LOCK" ) 2>/dev/null || die "cannot open $OMCI_LOCK"
 	exec 8>>"$OMCI_LOCK"
-	j=0
+	lock_s=0
 	while ! flock -n 8; do
-		[ "$j" -lt "$ACK_WAIT" ] || die "another apply.sh omci is still waiting for omcid to answer; try again"
+		[ "$lock_s" -lt "$ACK_WAIT" ] || die "another apply.sh omci is still waiting for omcid to answer; try again"
 		sleep 1
-		j=$((j + 1))
+		lock_s=$((lock_s + 1))
 	done
 }
 
 # omci_lock_linger <id>: the signal went unanswered and may still be taken.
-# The reload it starts would take whatever confirmation is on disk then, the
-# next apply.sh's included, and leave that one's own signal with none. So
-# the lock stays held, by a child with no output, until the status file
-# shows a run other than <id> or LINGER_WAIT seconds pass.
+# The reload it starts would take whatever confirmation is on disk then,
+# the one of the next apply.sh included, and leave the signal of that one
+# with none. So the lock stays held, by a child with no output, until the
+# status file shows a run other than <id> or LINGER_WAIT seconds pass. A
+# reload that was still running when the signal went out is refused before
+# it (omci below), so what this waits out is an omcid slow to look.
 omci_lock_linger() {
 	(
 		j=0
@@ -223,7 +233,16 @@ omci() {
 	[ -n "$pids" ] || die "no omcid is running: nothing to reload (init respawns it; see /var/log/omcid.log)"
 
 	omci_lock
-	before=$(status_get id)
+	# omcid takes a signal only once the reload it runs is done, a
+	# re-registration up to 153 s after it began. A signal sent now would
+	# wait that long, past the bound here and past the lock, and the reload
+	# it then starts would take the confirmation of whichever apply.sh
+	# wrote one last. Refused instead, with nothing written or signalled.
+	snap=$(cat "$RELOAD_STATUS" 2>/dev/null)
+	if [ "$(snap_get state)" = running ]; then
+		die "omcid is still applying the last change ($(snap_get changed), $(snap_get result)); try again once it is done (event=reload_done in /var/log/omcid.log)"
+	fi
+	before=$(snap_get id)
 	# The confirmation omcid takes away with this reload (and any other):
 	# written before the signal, so the reload it starts finds it.
 	if [ -n "$confirm" ]; then
@@ -237,11 +256,12 @@ omci() {
 
 	# The acknowledgement: a new run appears in the status file. A daemon
 	# that never writes one is an older build, where SIGHUP means stop.
-	i=0
+	# i counts the seconds of the whole run, the wait for the lock first.
+	i=$lock_s
 	while :; do
 		id=$(status_get id)
 		[ -n "$id" ] && [ "$id" != "$before" ] && break
-		if [ "$i" -ge "$ACK_WAIT" ]; then
+		if [ "$((i - lock_s))" -ge "$ACK_WAIT" ]; then
 			omci_lock_linger "$before"
 			die "omcid did not answer the signal within ${ACK_WAIT} s (an older build treats SIGHUP as stop; init respawns it)"
 		fi
@@ -253,12 +273,13 @@ omci() {
 
 	# The outcome, bounded. Counted in iterations of one second: this is
 	# also what runs under the test fixture, where uptime is a constant.
-	# The seconds the acknowledgement took count against the same bound, so
-	# a slow acknowledgement plus a full wait cannot outlast the 25 s the
-	# web UI gives this script (ACK_WAIT 5 + APPLY_WAIT 20 did, by a hair).
-	# The file is read whole each time (omcid replaces it by rename), and
-	# only while it is this run's: once omcid acknowledged it, the next
-	# apply.sh may start another reload, and its result is not this one's.
+	# The seconds the lock and the acknowledgement took count against the
+	# same bound, so neither a slow acknowledgement nor a second apply.sh
+	# ahead of this one plus a full wait can outlast the 25 s the web UI
+	# gives this script (ACK_WAIT 5 + APPLY_WAIT 20 did, by a hair). The
+	# file is read whole each time (omcid replaces it by rename), and only
+	# while it holds this run: once omcid acknowledged it, the next apply.sh
+	# may start another reload, and the result of that is not this one.
 	while :; do
 		snap=$(cat "$RELOAD_STATUS" 2>/dev/null)
 		[ "$(snap_get id)" = "$id" ] || break
@@ -273,10 +294,19 @@ omci() {
 	fi
 
 	changed=$(snap_get changed) result=$(snap_get result)
-	keys=$(snap_get keys)
+	keys=$(snap_get keys) retry=$(snap_get retry)
+	# A reload that re-registers only because the last one left the ONU
+	# off the line (a failed activation, no serial number). omci-live then
+	# exits 4: applied, but not in place, which a caller can tell from both
+	# a plain success and a failure.
+	rereg_exit=0
+	if [ "$retry" = 1 ]; then
+		say "the last reload left the ONU off the line: this one re-registers it${keys:+ ($keys)}"
+		[ "$confirm" != live ] || rereg_exit=4
+	fi
 	if [ "$(snap_get state)" != "done" ]; then
 		say "$changed: still working after ${wait_s} s (${result}); omcid carries on and logs event=reload_done when it ends"
-		return 0
+		return "$rereg_exit"
 	fi
 	dur=$(secs "$(snap_get duration_ms)")
 	case "$changed:$result" in
@@ -285,8 +315,13 @@ omci() {
 	vlan:ok)
 		say "VLAN handling changed ($keys): connections rebuilt in place in ${dur} s, the ONU stayed in O5" ;;
 	identity:ok)
-		say "identity changed ($keys): the ONU re-registered and is back in O5 with $(snap_get services) service(s) after $(secs "$(snap_get o5_ms)") s (omcid $(snap_get duration_ms) ms in all)"
-		rereg_warn ;;
+		if [ "$retry" = 1 ]; then
+			say "re-registered: the ONU is back in O5 with $(snap_get services) service(s) after $(secs "$(snap_get o5_ms)") s (omcid $(snap_get duration_ms) ms in all)"
+		else
+			say "identity changed ($keys): the ONU re-registered and is back in O5 with $(snap_get services) service(s) after $(secs "$(snap_get o5_ms)") s (omcid $(snap_get duration_ms) ms in all)"
+		fi
+		rereg_warn
+		return "$rereg_exit" ;;
 	identity:held)
 		say "identity changed ($keys) and NOT applied: the OLT refused the last $(snap_get streak) changes; the ONU stays on the identity it runs. Check the values, then: apply.sh omci --confirm" >&2
 		return 1 ;;
@@ -294,7 +329,7 @@ omci() {
 		say "identity changed ($keys) and NOT applied, nor anything else: omci-live changes nothing that re-registers the ONU. Apply it with: apply.sh omci" >&2
 		return 3 ;;
 	*)
-		say "$changed ($keys): $result after ${dur} s -- see /var/log/omcid.log (event=reload_done)" >&2
+		say "$changed${keys:+ ($keys)}: $result after ${dur} s -- see /var/log/omcid.log (event=reload_done)" >&2
 		case $result in
 		failed)         say "the driver refused a step; the ONU may be off the line until the next reload or a reboot" >&2 ;;
 		timeout)        say "the ONU did not reach O5 in time; the OLT may not know the new identity" >&2 ;;
