@@ -453,7 +453,20 @@ static void do_reload(void)
 	/* The values first, the autonomous entities only once the reload
 	 * runs on them (below): a held or deferred reload leaves the ONU as
 	 * it was, its alarm state too. */
+	cfg_read_failed = 0;
 	cfg_load_values();
+	/* A store that opened but could not be read is not one without keys:
+	 * taken as read, a serial number missing from it would take the ONU
+	 * off the line (no_serial). Nothing changes, and apply.sh says so. */
+	if (cfg_read_failed) {
+		cfg_snap_restore_values(&old);
+		rl.keys[0] = 0;
+		rl.changed = "none";
+		rl.action = "none";
+		ev_reload(rl.changed, rl.action, 0);
+		finish("unreadable", -1);
+		return;
+	}
 	cfg_snap_take(&cur);
 	mask = cfg_snap_diff(&rl.base, &cur);
 	/* A serial number or password edited since the last run. */

@@ -52,11 +52,15 @@ static long cfg_read(long fd, char *p, unsigned long len)
 	return r;
 }
 
+int cfg_read_failed;
+
 /* The whole file into cfgbuf, NUL ended. Returns its length, -1 when it
  * cannot be opened or a read fails, or -2 when it does not fit: cfgbuf then
  * holds the part that did, which a reader may search and a writer must not
  * write back. A failed read is not the end of the file: what came before it
- * is not the store, and cfg_set() writing it back would cut the store there. */
+ * is not the store, and cfg_set() writing it back would cut the store there.
+ * It also sets cfg_read_failed, so a reload can tell it from a store without
+ * the key. */
 static int cfg_read_file(const char *path)
 {
 	long fd = sys_open(path, 0);
@@ -72,6 +76,7 @@ static int cfg_read_file(const char *path)
 		if (r < 0) {
 			sys_close((int)fd);
 			cfgbuf[0] = 0;
+			cfg_read_failed = 1;
 			return -1;
 		}
 		n += (int)r;
@@ -82,6 +87,7 @@ static int cfg_read_file(const char *path)
 			if (r < 0) {
 				sys_close((int)fd);
 				cfgbuf[0] = 0;
+				cfg_read_failed = 1;
 				return -1;
 			}
 			more = r > 0;

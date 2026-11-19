@@ -303,6 +303,7 @@ omci() {
 		sn_not_applied) say "the ONU is back, but the driver did not take the new serial number" >&2 ;;
 		pw_not_applied) say "the ONU is back, but the driver did not take the new PLOAM password; it runs the old one" >&2 ;;
 		no_serial)      say "GPON_SN is empty: the ONU stays off the line until a serial number is set" >&2 ;;
+		unreadable)     say "omcid could not read the config store; nothing was changed. Try again; if it stays unreadable, see /var/log/omcid.log" >&2 ;;
 		esac
 		[ "$changed" != identity ] || rereg_warn
 		return 1 ;;

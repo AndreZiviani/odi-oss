@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- omcid: a reload stops at `unreadable` and changes nothing when the
+  config store opens but a read of it fails. Since stores up to 65,535
+  bytes are read whole, such a store read as empty, and a reload took the
+  missing serial number for one deleted: it deactivated the ONU and left
+  it off the line at `no_serial`. Before, the first part read was taken
+  for the whole store, which a signal arriving during the read could cut
+  as well.
+
 - omcid: a reload after a failed activation re-registers also when it
   brings only VLAN keys. With nothing changed it already did; a new VLAN
   value took the rebuild in place instead, and `apply.sh` reported the ONU

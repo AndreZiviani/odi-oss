@@ -913,6 +913,10 @@ void cfg_snap_restore_values(const struct cfg_snap *s);
 void cfg_load_all(void);
 /* The same, without rebuilding the autonomous entities from them. */
 void cfg_load_values(void);
+/* Set when a store file opened but a read of it failed: what came back is not
+ * the store, and a key missing from it is not missing from the file. Cleared
+ * by the caller before the reads it asks about. */
+extern int cfg_read_failed;
 void cfg_load_unknown_me(void);
 /* OMCI_VEIP_SLOT_ID and OMCI_PRIVATE_ME: which instances the ONU creates for
  * itself. The VEIP key follows the stock firmware: a decimal slot number in

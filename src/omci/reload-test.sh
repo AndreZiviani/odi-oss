@@ -437,6 +437,32 @@ check "no serial key: deactivated, and no gponsn or gponact" "gpondeact" \
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 stop_omcid
 
+# A store that opens but cannot be read (a directory here, EIO on a
+# flash) is not a store without a serial number: nothing changes, and the
+# ONU stays on the line, where reading it as absent took it off.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "0"
+log=/tmp/rl-unreadable.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1 -j 4
+old_id=$(st id)
+rm -f "$HS"
+mkdir "$HS"
+kill -HUP "$pid"
+if wait_done "$old_id" 20; then
+	check "unreadable store: result unreadable, nothing changed" "done unreadable none" \
+		"$(st state) $(st result) $(st changed)"
+else bad "unreadable store: never finished"; fi
+check "unreadable store: no driver verb" "0" "$(wc -c < "$INITLOG" | tr -d ' ')"
+rmdir "$HS"
+hs_sn ODIT00000001
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 20 || bad "unreadable store: the reload after it did not finish"
+check "unreadable store: readable again, nothing to do" "done ok none" \
+	"$(st state) $(st result) $(st changed)"
+stop_omcid
+
 # ------------------------------------------------ the failure paths
 # -j 4: give up on O5 after four seconds instead of 150.
 clean_state

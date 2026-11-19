@@ -1411,8 +1411,9 @@ A re-registration still running at the bound is reported as still working and
 is not a failure. Exit 1 when no omcid runs (or `/etc/config/modules.off` is
 set), when omcid does not answer the signal within 5 s (an older build treats
 SIGHUP as stop), or when the reload's result is `failed`, `timeout`,
-`no_services`, `sn_not_applied`, `pw_not_applied`, `no_serial` or `held`,
-and exit 3 for `deferred`. It never starts an omcid and writes
+`no_services`, `sn_not_applied`, `pw_not_applied`, `no_serial`, `held` or
+`unreadable` (the config store opened but a read of it failed; nothing was
+changed), and exit 3 for `deferred`. It never starts an omcid and writes
 nothing to the driver: init owns the process, and a second omcid started here
 used to make the ONU cycle through O1 to O3 while init's respawn entry
 re-provisioned around it.
