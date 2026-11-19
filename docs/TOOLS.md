@@ -1213,8 +1213,10 @@ route for a damaged environment; it is not promised to help when the flash
 itself cannot be read. `getenv` and `fallback` refuse as well: the copy that
 could not be read may be the one U-Boot picks, so the other one is not the
 answer. They print `a copy of the environment could not be read in full`,
-give no value and exit 1, which the upgrade guard (`fwu_starter.sh`) and
-`slot-state.sh` take as unknown, and on which `fwu.sh` refuses to write
+give no value and exit 3, a status of its own (a name that is not set
+exits 0 with nothing printed, no valid copy exits 1), so a caller does not
+have to match the text. The upgrade guard (`fwu_starter.sh`) and
+`slot-state.sh` take it as unknown, and `fwu.sh` refuses to write on it
 (`FWU_FORCE=1` overrides it).
 
 `nv commit` also sets `mupgrade_en=0`, in the same two writes. The stock

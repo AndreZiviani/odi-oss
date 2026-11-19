@@ -108,6 +108,17 @@ if [ -n "$missing" ]; then
 	exit 1
 fi
 
+# An nv read, bounded where the image has timeout: ours does, the stock
+# busybox does not (image/stock-commands.txt), so there it runs unbounded as
+# before. An nv stuck on the flash would otherwise hold the upgrade with
+# nothing said. Reads only: a setenv cut short mid-erase is worse than a wait.
+nv_bound=
+have_cmd timeout && nv_bound="timeout 10"
+nv_read() {
+	# shellcheck disable=SC2086 # empty, or the two words of the bound
+	$nv_bound nv "$@"
+}
+
 # Find the partitions by NAME in /proc/mtd, never by a fixed number: this board
 # has fourteen and the numbering is not a promise.
 mtd_of() {
@@ -136,7 +147,7 @@ fi
 if [ -z "$running" ]; then
 	# Second opinion, and the only other one on the device: U-Boot's own
 	# record of what it last booted.
-	running=$(nv getenv sw_active 2>/dev/null | sed -n "s/^sw_active=//p")
+	running=$(nv_read getenv sw_active 2>/dev/null | sed -n "s/^sw_active=//p")
 	case "$running" in 0|1) ;; *) running= ;; esac
 fi
 if [ -z "$running" ]; then
@@ -172,15 +183,14 @@ fi
 # or the stock slot, hangs forever instead of being reset.
 #
 # Our nv refuses to answer when a copy of the environment could not be read in
-# full: that copy may be the one U-Boot boots by, so neither the value nor the
-# revert target is known. That is a refusal here, as in fwu_starter.sh, not the
-# warning a missing sw_commit gets.
-nv_out=$(nv getenv sw_commit 2>&1)
+# full, with exit 3: that copy may be the one U-Boot boots by, so neither the
+# value nor the revert target is known. That is a refusal here, as in
+# fwu_starter.sh, not the warning a missing sw_commit gets.
+nv_out=$(nv_read getenv sw_commit 2>&1)
+nv_rc=$?
 commit=$(printf '%s\n' "$nv_out" | sed -n "s/^sw_commit=//p")
-case "$nv_out" in
-*"could not be read in full"*) nv_unread=1 ;;
-*) nv_unread=0 ;;
-esac
+nv_unread=0
+[ "$nv_rc" = 3 ] && nv_unread=1
 case "$commit" in
 0|1)
 	if [ "$commit" = "$slot" ]; then
@@ -219,12 +229,11 @@ esac
 # Our nv answers for the loser with `fallback`. The VENDOR nv, which is what
 # runs the FIRST flash, has no such verb and prints its usage instead, so an
 # empty answer means NOT CHECKABLE and must not read as safe.
-alt_out=$(nv fallback sw_commit 2>&1)
+alt_out=$(nv_read fallback sw_commit 2>&1)
+alt_rc=$?
 alt=$(printf '%s\n' "$alt_out" | sed -n "s/^sw_commit=//p")
-case "$alt_out" in
-*"could not be read in full"*) alt_unread=1 ;;
-*) alt_unread=0 ;;
-esac
+alt_unread=0
+[ "$alt_rc" = 3 ] && alt_unread=1
 case "$alt" in
 0|1)
 	if [ "$alt" = "$slot" ]; then

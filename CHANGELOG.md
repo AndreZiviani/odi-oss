@@ -37,15 +37,17 @@ listed here.
   with the new address, not on the exit status of ifconfig alone, and a
   device left with no address at all gets the old one back.
 
-- nv: `getenv` and `fallback` give no value and exit 1 when a copy of the
+- nv: `getenv` and `fallback` give no value and exit 3 when a copy of the
   U-Boot environment could not be read in full, as `setenv` and `commit`
-  already refuse. They answered from the copy they could read, which is not
+  already refuse. Exit 3 is that answer alone, so a caller does not have
+  to match the message. They answered from the copy they could read, which is not
   the one U-Boot boots by when the unread copy has the higher flags byte.
   With `env2` unreadable and a stale `env` naming the other slot, the
   upgrade guard took that slot as the way back and could write over the
   committed one. `fwu.sh` refuses to write on that answer, from `getenv`
   or from `fallback` (`FWU_FORCE=1` overrides it), where a missing
-  `sw_commit` still only warns.
+  `sw_commit` still only warns. It reads nv with a 10 s bound where the
+  image has `timeout`, which the stock busybox does not.
 
 - igmpd: a redirect shorter than an Ethernet header is logged as `short
   redirect  DROP: truncated` instead of crashing the daemon on the missing

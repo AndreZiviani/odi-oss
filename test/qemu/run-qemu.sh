@@ -609,7 +609,7 @@ head -c 4096 $R/env2-one > $R/dev/mtd2
 for verb in "getenv sw_commit" "fallback sw_commit" "getenv"; do
 	rc=0; out=$(chroot $R /bin/nv $verb 2>&1) || rc=$?
 	echo "$verb, env2 cut short: rc=$rc"; echo "$out"
-	[ "$rc" = 1 ]
+	[ "$rc" = 3 ]
 	echo "$out" | grep -q "a copy of the environment could not be read in full"
 	if echo "$out" | grep -q "sw_commit="; then echo "an incomplete read gave an answer"; exit 1; fi
 done

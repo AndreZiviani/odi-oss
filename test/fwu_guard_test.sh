@@ -38,18 +38,18 @@ EOF
 # `nv getenv sw_commit` unqualified, so putting this first on PATH is enough.
 # NV_COMMIT unset means nv prints nothing, which is the cannot-read case.
 # NV_UNREAD=1 is our nv after a copy could not be read in full: the message on
-# stdout, no value, exit 1 (src/nv/main.c).
+# stdout, no value, exit 3 (src/nv/main.c).
 cat > "$T/nv" <<'STUB'
 #!/bin/sh
 if [ "${NV_UNREAD:-0}" = 1 ]; then
 	echo "nv: $1: a copy of the environment could not be read in full, so which one U-Boot uses is not known; run it again"
-	exit 1
+	exit 3
 fi
 # NV_FALLBACK_UNREAD=1: the same, for the fallback read alone (getenv read
 # both copies in full a moment before).
 if [ "$1" = fallback ] && [ "${NV_FALLBACK_UNREAD:-0}" = 1 ]; then
 	echo "nv: fallback: a copy of the environment could not be read in full, so which one U-Boot uses is not known; run it again"
-	exit 1
+	exit 3
 fi
 [ "$1" = getenv ] || exit 1
 case "$2" in
