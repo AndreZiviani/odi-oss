@@ -1124,7 +1124,8 @@ OMCI frame in as if it came off the line, with the trailer and CRC filled in
 (omcid drops a frame whose trailer or CRC is wrong; `--inject-raw HEX` sends
 bytes exactly as given, of any length, to test that; `--inject-file F` every
 frame in F, one per line, back to back), `--vendor` talks to a stock
-daemon instead, `--id N [-f]` sends a raw command id.
+daemon instead, `--id N [-f]` sends a raw command id (`-f` is needed for an
+id that writes, known or not, as for the named command).
 
 ### `omciprobe` -- one raw driver command
 

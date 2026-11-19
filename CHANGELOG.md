@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- omcli: `--id N` asks for `-f` when N is a known command that writes, as
+  the named command does. Only unknown ids needed it, so `omcli --vendor
+  --id 32` sent a MIB reset to omcid without the confirmation `omcli mib
+  reset` asks for.
+
 - omcid: config stores up to 65,535 bytes are read whole, and one that is
   still larger is never written back cut. A stick that ran a router
   firmware before keeps that firmware's tables in the same file (30 KB is

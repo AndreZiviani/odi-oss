@@ -1062,6 +1062,15 @@ int main(int argc, char **argv)
 				if (not_in_omcid(cmds[i].flags, cmds[i].group,
 						 cmds[i].name, id))
 					return 1;
+				/* A write by number needs -f as it does by
+				 * name: `--id 32` is the MIB reset. */
+				if ((cmds[i].flags & F_WRITE) && !force) {
+					out_fmt("%% id %d is `%s %s`, which changes the "
+						"daemon's state; add -f\n", (long)id,
+						cmds[i].group, cmds[i].name);
+					out_flush();
+					return 1;
+				}
 			}
 		/* Same rule as omciprobe: an id this does not know is assumed
 		 * to write, because most of the 45 do. */
