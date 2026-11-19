@@ -304,8 +304,9 @@ omci() {
 	# also what runs under the test fixture, where uptime is a constant.
 	# The seconds the lock and the acknowledgement took count against the
 	# same bound, so neither a slow acknowledgement nor a second apply.sh
-	# ahead of this one plus a full wait can outlast the 25 s the web UI
-	# gives this script (ACK_WAIT 5 + APPLY_WAIT 20 did, by a hair). The
+	# ahead of this one adds a full wait on top (ACK_WAIT 5 + APPLY_WAIT 20
+	# went past the 25 s the web UI gives this script, by a hair). It is
+	# counted in sleeps: the time the commands take comes on top. The
 	# file is read whole each time (omcid replaces it by rename), and only
 	# while it holds this run: once omcid acknowledged it, the next apply.sh
 	# may start another reload, and the result of that is not this one.

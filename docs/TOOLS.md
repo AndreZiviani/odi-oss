@@ -1412,11 +1412,11 @@ an `id` whose pid is a running omcid): omcid takes the next signal only
 once that one is done, a re-registration up to 153 s on. When omcid does not
 answer within those 5 s, the lock stays held until it does or no omcid the
 signal went to lives: the reload the signal starts late would take the
-confirmation the next apply.sh leaves. That is at most `LINGER_MAX` (180 s),
-past the longest reload, so an omcid that could not write its status does
-not hold every later apply off. omcid removes the status
-file when it cannot write it, so a `running` from the start of a reload
-does not outlive it.
+confirmation the next apply.sh leaves. That is at most `LINGER_MAX` (180
+one-second sleeps), past the longest reload, so an omcid that could not
+write its status does not hold every later apply off. omcid removes the
+status file when it cannot write it, so a `running` from the start of a
+reload does not outlive it, unless that removal fails as well.
 omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`); a
 file that is empty, cut short or says anything else confirms nothing and
 counts as `live`. The outcome reported is this run's: when the next reload

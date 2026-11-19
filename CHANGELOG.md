@@ -93,30 +93,29 @@ listed here.
   keys alone applies them straight away and took a pending serial number
   along, so the ONU re-registered while the page said it stayed in O5. A
   verb rather than an option, so an older apply.sh stops at its usage line
-  instead of applying the whole store. `omci` also refuses an option it
-  does not know and seconds that are no number, where it took either for
-  the bound, and signals one reload at a time: two at once could swap the
+  instead of applying the whole store. `omci` also refuses an option it does
+  not know and seconds that are no number, where it took either for the
+  bound, and signals one reload at a time: two at once could swap the
   confirmation each one leaves for omcid. Only a new run of an omcid it
-  signalled is the answer (the id is pid.sequence), and the omcid are
-  named under the lock. After a signal omcid did not answer in time, the
-  lock stays held until it does, no omcid it went to lives, or for at most
-  `LINGER_MAX` (180 s, past the longest reload), and the outcome reported
-  is always this run's. A reload is not
-  signalled while omcid still runs the one before: it takes the next
-  signal only once that is done, a re-registration up to 153 s on, by
-  which time the lock would be gone. apply.sh says so and exits 1; a
-  status left `running` by an omcid that is gone does not count. The
-  seconds spent waiting for the lock and for the acknowledgement count
-  against the bound, and neither wait goes past it. They are counted in
-  sleeps of one second, so two applies at once no longer add up to twice
-  the bound; the time the commands themselves take is not counted. When omcid cannot write the
-  status file (a full `/var`), it removes it instead of leaving the
-  `running` of the reload's start standing.
-  omcid takes only the exact words apply.sh writes: an empty or cut
-  confirmation file counted as `--confirm` and now counts as `omci-live`.
-  `test/bin/flock`, the stand-in for a host without flock (macOS), also
-  takes `flock FILE CMD`, and `test/apply_test.sh` uses it, so the lock
-  cases run there too.
+  signalled is the answer (the id is pid.sequence), and the omcid are named
+  under the lock. After a signal omcid did not answer in time, the lock
+  stays held until it does, no omcid it went to lives, or for at most
+  `LINGER_MAX` (180 one-second sleeps, past the longest reload), and the
+  outcome reported is always this run's. A reload is not signalled while
+  omcid still runs the one before: it takes the next signal only once that
+  is done, a re-registration up to 153 s on, by which time the lock would be
+  gone. apply.sh says so and exits 1; a status left `running` by an omcid
+  that is gone does not count. The seconds spent waiting for the lock and
+  for the acknowledgement count against the bound, and neither wait goes
+  past it. They are counted in sleeps of one second, so two applies at once
+  no longer add up to twice the bound; the time the commands themselves take
+  is not counted. When omcid cannot write the status file (a full `/var`),
+  it removes it instead of leaving the `running` of the reload's start
+  standing, unless the removal fails too. omcid takes only the exact words
+  apply.sh writes: an empty file, or one cut before its word ends, counted
+  as `--confirm` and now counts as `omci-live`. `test/bin/flock`, the
+  stand-in for a host without flock (macOS), also takes `flock FILE CMD`,
+  and `test/apply_test.sh` uses it, so the lock cases run there too.
 
 ## v1.18.1 (2026-11-18)
 
