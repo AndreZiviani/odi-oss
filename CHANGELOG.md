@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Switch: a cmd 51 the classifier table refuses no longer deletes another
+  service's rule. A two-way rule whose first leg went in with a row shift
+  and whose second leg found no row was released before the shift reached
+  the chip, so the release cleared the chip row of an older, active service,
+  and every later cmd 50 cleared the row next to the one it meant until
+  omcid rebuilt all services. The queued rows are now written before the
+  release, and only they: the VLAN table and the switch registers the full
+  sequence also rewrites stay as they are for a rule that is not going in.
+  A host test fills the ordered region, has the next service refused and
+  checks that software and chip rows still agree and that the refusal
+  writes nothing to the VLAN table.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10

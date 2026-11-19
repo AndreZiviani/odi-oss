@@ -1083,6 +1083,14 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 				ODI_SW_CMD_LOG("bdgconn: no free row of the second layout for an EtherType rule\n");
 			else
 				ODI_SW_CMD_LOG("bdgconn: classification table full\n");
+			/* The leg that did go in may have shifted the rows
+			 * above it in the software table; the chip has that
+			 * shift only once the queued writes go out. Write them
+			 * first, or the release deletes the chip row at the
+			 * old position, which is still another service's. The
+			 * rows only: the VLAN table and the registers
+			 * odi_sw_cf_add() also rewrites have not changed. */
+			odi_sw_cf_rows_write(odi_sw_cf_out, odi_sw_cf_out_n);
 			bdgconn_release(sl);
 			return ODI_SW_ENOSPC;
 		}
