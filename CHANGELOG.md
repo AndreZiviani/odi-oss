@@ -33,7 +33,9 @@ listed here.
   says so instead of "back to". A revert from the web UI moves back a
   second after its answer: its event now says the move is under way, and a
   second one, once it has run, how it ended, also when another change
-  holds the state file then.
+  holds the state file then. The move counts once the device reads back
+  with the new address, not on the exit status of ifconfig alone, and a
+  device left with no address at all gets the old one back.
 
 - nv: `getenv` and `fallback` give no value and exit 1 when a copy of the
   U-Boot environment could not be read in full, as `setenv` and `commit`

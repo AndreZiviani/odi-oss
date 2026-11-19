@@ -574,17 +574,32 @@ if [ "$MODE" = addr ]; then
 				fi
 			fi
 		done
-		$IFCONFIG "$dev" "$IP" netmask "$MASK" up 2>/dev/null || {
-			echo "network: could not set $IP on $dev" >&2
+		# The move counts once the device reads back with the address:
+		# the exit status of ifconfig alone missed the case above, an
+		# address dropped with success reported. A device left with no
+		# address at all gets the old one back first.
+		$IFCONFIG "$dev" "$IP" netmask "$MASK" up 2>/dev/null
+		_now=$(addr_of "$dev")
+		if [ "$_now" != "$IP $MASK" ]; then
+			echo "network: could not set $IP on $dev (it holds ${_now:-no address})" >&2
+			if [ -z "$_now" ] && [ -n "$cur" ]; then
+				if $IFCONFIG "$dev" "${cur%% *}" netmask "${cur#* }" up 2>/dev/null &&
+				    [ "$(addr_of "$dev")" = "$cur" ]; then
+					echo "network: $dev is back on ${cur%% *}" >&2
+				else
+					echo "network: could not put ${cur%% *} back on $dev either" >&2
+				fi
+				_now=$(addr_of "$dev")
+			fi
 			if [ -n "$_pb_al" ]; then
 				if $IFCONFIG "$_pb_al" "${_pb%% *}" netmask "${_pb#* }" up 2>/dev/null; then
-					echo "network: $_pb_al is back on ${_pb%% *}; $dev stays on ${cur:-none}" >&2
+					echo "network: $_pb_al is back on ${_pb%% *}; $dev stays on ${_now:-none}" >&2
 				else
 					echo "network: could not put ${_pb%% *} back on $_pb_al either" >&2
 				fi
 			fi
 			exit 1
-		}
+		fi
 	fi
 	secondary "$dev"
 	rescue "$dev"

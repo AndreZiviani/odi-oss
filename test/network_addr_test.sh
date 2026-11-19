@@ -32,7 +32,12 @@ case "${2:-}" in
       read -r a m < "$f"
       printf '%s  Link encap:Ethernet\n          inet addr:%s  Bcast:0.0.0.0  Mask:%s\n' "$1" "$a" "$m" ;;
 down) rm -f "$f" ;;
-*)    echo "$2 $4" > "$f"; echo "$*" >> "$IFSTATE/calls" ;;
+*)    echo "$*" >> "$IFSTATE/calls"
+      # .drop-DEV: the kernel drops the address and ifconfig reports
+      # success; .refuse-DEV: ifconfig fails and the device keeps its own.
+      if [ -f "$IFSTATE/.drop-$1" ]; then rm -f "$f" "$IFSTATE/.drop-$1"
+      elif [ -f "$IFSTATE/.refuse-$1" ]; then exit 1
+      else echo "$2 $4" > "$f"; fi ;;
 esac
 STUB
 chmod +x "$T/ifconfig"
@@ -108,6 +113,34 @@ store 192.168.0.9 1 192.168.100.1
 out=$(run addr)
 t "a new LAN_IP_ADDR moves the primary" "192.168.0.9 255.255.255.0" "$(cat "$T/if/br0")"
 t "and the second address is put back beside it" "192.168.100.1 255.255.255.0" "$(cat "$T/if/br0:2")"
+
+# The move counts once br0 reads back with the address. An address the
+# kernel drops while ifconfig reports success leaves br0 with none: addr
+# says so, fails, and puts the old one back.
+echo "192.168.0.1 255.255.255.0" > "$T/if/br0"
+rm -f "$T/if/br0:2"
+store 192.168.0.9 0 192.168.100.1
+: > "$T/if/.drop-br0"
+out=$(run addr); rc=$?
+t "a dropped address: addr fails and says so" "1 1" "$rc $(echo "$out" | grep -c 'could not set 192.168.0.9 on br0 (it holds no address)')"
+t "and br0 is back on the old address" "192.168.0.1 255.255.255.0" "$(cat "$T/if/br0" 2>/dev/null)"
+# The second address took the new primary: it goes down for the move and
+# comes back when the move fails.
+echo "192.168.0.9 255.255.255.0" > "$T/if/br0:2"
+store 192.168.0.9 0 192.168.100.1
+: > "$T/if/.drop-br0"
+out=$(run addr); rc=$?
+t "a dropped address after the alias went down: both are back" "1 192.168.0.1 255.255.255.0 192.168.0.9 255.255.255.0" \
+  "$rc $(cat "$T/if/br0" 2>/dev/null) $(cat "$T/if/br0:2" 2>/dev/null)"
+rm -f "$T/if/br0:2"
+# A refusal keeps the old address on br0, nothing to put back.
+: > "$T/if/.refuse-br0"
+out=$(run addr); rc=$?
+t "a refused address: addr fails, br0 keeps the old one" "1 192.168.0.1 255.255.255.0 1" \
+  "$rc $(cat "$T/if/br0" 2>/dev/null) $(echo "$out" | grep -c 'it holds 192.168.0.1 255.255.255.0')"
+rm -f "$T/if/.refuse-br0"
+store 192.168.0.9 1 192.168.100.1
+run addr > /dev/null
 
 echo "10.0.0.5" > "$T/lan-ip"
 store 192.168.0.1 0 192.168.100.1
