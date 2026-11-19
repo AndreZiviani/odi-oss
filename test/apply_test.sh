@@ -98,7 +98,7 @@ first=$(cat "$T/omcid.pid")
 # outcome).
 run() {
 	env PATH="$T/bin:$PATH" RELOAD_STATUS="$T/status" MODULES_OFF="$T/modules.off" REREG_CONFIRM="$T/confirm" OMCI_LOCK="$T/omci.lock" \
-	    ACK_WAIT="${ACK:-15}" APPLY_WAIT=30 NETWORK="$T/network.sh" SERVICES_LOG="$T/services.log" \
+	    ACK_WAIT="${ACK:-15}" APPLY_WAIT=30 LINGER_MAX="${LINGER:-180}" NETWORK="$T/network.sh" SERVICES_LOG="$T/services.log" \
 	    sh "$A" "$@" 2>&1
 }
 : > "$T/started"
@@ -290,10 +290,32 @@ t "and it says why" "did not answer the signal" "$out"
 out=$(ACK=1 run omci --confirm); rc=$?
 t "after an unanswered signal the lock is still held: exit 1" "^1 .*another apply.sh omci is still waiting" "$rc $out"
 t "and no confirmation is left for that reload to take" "^no$" "$([ -e "$T/confirm" ] && echo yes || echo no)"
-printf 'id=late.1\nstate=done\n' > "$T/status.new"
+# A new run of an omcid it did not signal is not that answer.
+printf 'id=999999.1\nstate=done\n' > "$T/status.new"
+mv "$T/status.new" "$T/status"
+sleep 2
+t "a run of another omcid does not free the lock" "^held$" "$(flock -n "$T/omci.lock" true && echo free || echo held)"
+printf 'id=%s.90\nstate=done\n' "$(cat "$T/omcid.pid")" > "$T/status.new"
 mv "$T/status.new" "$T/status"
 for _ in $(seq 50); do flock -n "$T/omci.lock" true && break; sleep 0.1; done
 t "once omcid answers it, late, the lock is free" "^free$" "$(flock -n "$T/omci.lock" true && echo free)"
+
+# Nor is such a run the acknowledgement of the signal.
+( sleep 0.5; printf 'id=999999.2\nstate=done\n' > "$T/status.new"; mv "$T/status.new" "$T/status" ) &
+out=$(ACK=2 run omci); rc=$?
+wait $!
+t "a run of another omcid is no acknowledgement: exit 1" "^1 .*did not answer the signal" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
+printf 'id=%s.91\nstate=done\n' "$(cat "$T/omcid.pid")" > "$T/status.new"
+mv "$T/status.new" "$T/status"
+for _ in $(seq 50); do flock -n "$T/omci.lock" true && break; sleep 0.1; done
+
+# An answer that never comes while that omcid lives (a reload that could
+# not write its status) holds the lock LINGER_MAX seconds, not for good.
+out=$(ACK=1 LINGER=2 run omci); rc=$?
+t "unanswered with a short LINGER_MAX: exit 1" "^1$" "$rc"
+t "the lock is held at first" "^held$" "$(flock -n "$T/omci.lock" true && echo free || echo held)"
+for _ in $(seq 60); do flock -n "$T/omci.lock" true && break; sleep 0.1; done
+t "and free after LINGER_MAX, the omcid still alive" "^free alive$" "$(flock -n "$T/omci.lock" true && echo free) $(kill -0 "$(cat "$T/omcid.pid")" && echo alive)"
 
 # Unanswered again, and this time the omcid it went to goes away: the lock
 # is released when no omcid it signalled lives, not on a clock.
