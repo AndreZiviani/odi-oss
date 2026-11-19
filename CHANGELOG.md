@@ -15,6 +15,9 @@ listed here.
   comment uses for a read of that source. `docs/SWITCH.md` also counted 16
   capture brackets as the check of the upstream queue registers: it is the
   ten upstream cmd 23 and cmd 25 brackets, and the capture has no delete.
+  The PBO threshold comments in `odi_switch_qos.c` and its test no longer
+  name the stock kernel function they were read from, only its address in
+  the V1.0-220923 vmlinux.
 
 ## v1.18.1 (2026-11-18)
 
