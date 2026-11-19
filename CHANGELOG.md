@@ -19,13 +19,15 @@ listed here.
   every later cmd 50 cleared the row next to the one it meant until omcid
   rebuilt all services. The refusal now takes the leg that went in back out
   of the software table and moves the shifted rows back, and writes nothing
-  to the switch: the refused rule is never live, and no other row moves. A
-  host test fills the ordered region and has two rules refused, one whose
-  upstream leg shifts every row and one whose downstream leg shifts the
-  rows below a hole after the bottom region had no row for its upstream
-  leg, and checks that nothing is written, that the software table is
-  what it was and agrees with the chip, and that a later cmd 50 takes only
-  its own rows.
+  to the switch for it: the refused rule is never live, and no other row
+  moves. A cmd 51 that gives a service id a different rule still releases
+  the old one first, as before, so only a new service is refused with no
+  write at all. A host test fills the ordered region and has two new
+  services refused, one whose upstream leg shifts every row and one whose
+  downstream leg shifts the rows below a hole after the bottom region had
+  no row for its upstream leg, and checks that nothing is written, that
+  the software table is what it was and agrees with the chip, and that a
+  later cmd 50 takes only its own rows.
 
 ## v1.18.1 (2026-11-18)
 

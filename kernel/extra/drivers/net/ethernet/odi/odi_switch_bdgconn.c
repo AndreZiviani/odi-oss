@@ -1111,9 +1111,10 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 			 * last insert first, so the table is again what the
 			 * chip holds. A release of the slot as it stands would
 			 * delete the chip row at the new position, which on the
-			 * chip is still another service's. Nothing is written:
-			 * the refused rule is never live, and no other row
-			 * moves. */
+			 * chip is still another service's. Nothing is written
+			 * for it: the refused rule is never live, and no other
+			 * row moves. An older rule this id named was released
+			 * above, before the inserts, as on any replace. */
 			if (sl->ds_row >= 0) {
 				r = (uint32_t)sl->ds_row;
 				sl->ds_row = -1;
