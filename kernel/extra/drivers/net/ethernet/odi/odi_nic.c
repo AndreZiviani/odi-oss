@@ -763,6 +763,11 @@ static int odi_nic_xmit_raw(u32 opts1, u32 opts2, u32 opts3,
 	dma_addr_t dma;
 	void *buf;
 
+	/* kmalloc(0) is not NULL, and a zero-length dma_map_single() ends in
+	 * the BUG_ON of the cache writeback (arch/mips/rtl8686/cache.c). */
+	if (!len)
+		return -EINVAL;
+
 	spin_lock_irqsave(&odi.lock, flags);
 
 	if (!odi.tx_up) {

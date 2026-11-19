@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Kernel: an OMCI send of zero bytes is refused, in the netlink parser and
+  in the NIC transmit path. A zero-length DMA mapping ends in the `BUG_ON`
+  of the cache writeback. omcid never sends one; only a process with
+  CAP_NET_ADMIN could.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
