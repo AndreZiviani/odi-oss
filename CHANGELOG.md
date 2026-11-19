@@ -35,6 +35,16 @@ listed here.
   second one, once it has run, how it ended, also when another change
   holds the state file then.
 
+- nv: `getenv` and `fallback` give no value and exit 1 when a copy of the
+  U-Boot environment could not be read in full, as `setenv` and `commit`
+  already refuse. They answered from the copy they could read, which is not
+  the one U-Boot boots by when the unread copy has the higher flags byte.
+  With `env2` unreadable and a stale `env` naming the other slot, the
+  upgrade guard took that slot as the way back and could write over the
+  committed one. `fwu.sh` refuses to write on that answer, from `getenv`
+  or from `fallback` (`FWU_FORCE=1` overrides it), where a missing
+  `sw_commit` still only warns.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10

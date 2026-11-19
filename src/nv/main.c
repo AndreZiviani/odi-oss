@@ -682,6 +682,16 @@ int main(int argc, char **argv)
 	if (str_eq(argv[1], "setenv") && !env_lock())
 		return 1;
 	len = env_load(&part);
+	/* A copy that could not be read in full may be the one with the higher
+	 * flags byte, the one U-Boot boots by, so the copy that was read is not
+	 * the answer however valid it is. A guard takes the sw_commit it reads
+	 * as the slot a failed trial goes back to: no answer is safer than one
+	 * from the other copy. setenv reads both again in env_setenv. */
+	if (load_unread && !str_eq(argv[1], "setenv")) {
+		out_fmt("nv: %s: a copy of the environment could not be read in full,"
+			" so which one U-Boot uses is not known; run it again\n", argv[1]);
+		return 1;
+	}
 	if (!len) {
 		/* A copy that could not be read in full is not one that failed
 		 * its CRC; for setenv say so, as env_setenv would. */

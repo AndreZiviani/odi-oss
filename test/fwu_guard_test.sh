@@ -37,8 +37,20 @@ EOF
 # A stub nv, so the sw_commit branch is reachable at all. fwu.sh calls
 # `nv getenv sw_commit` unqualified, so putting this first on PATH is enough.
 # NV_COMMIT unset means nv prints nothing, which is the cannot-read case.
+# NV_UNREAD=1 is our nv after a copy could not be read in full: the message on
+# stdout, no value, exit 1 (src/nv/main.c).
 cat > "$T/nv" <<'STUB'
 #!/bin/sh
+if [ "${NV_UNREAD:-0}" = 1 ]; then
+	echo "nv: $1: a copy of the environment could not be read in full, so which one U-Boot uses is not known; run it again"
+	exit 1
+fi
+# NV_FALLBACK_UNREAD=1: the same, for the fallback read alone (getenv read
+# both copies in full a moment before).
+if [ "$1" = fallback ] && [ "${NV_FALLBACK_UNREAD:-0}" = 1 ]; then
+	echo "nv: fallback: a copy of the environment could not be read in full, so which one U-Boot uses is not known; run it again"
+	exit 1
+fi
 [ "$1" = getenv ] || exit 1
 case "$2" in
 sw_commit) [ -n "${NV_COMMIT:-}" ] && echo "sw_commit=$NV_COMMIT" ;;
@@ -100,6 +112,26 @@ check "says so when sw_commit cannot be read" \
 check "FWU_FORCE=1 overrides the sw_commit refusal, loudly" \
       "no good revert target" \
       "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 NV_COMMIT=1 FWU_FORCE=1)"
+# A copy of the environment that could not be read in full is not a missing
+# sw_commit: the copy that was read may not be the one U-Boot boots by, so
+# this refuses where a missing value only warns.
+check "refuses when nv could not read a copy of the environment in full" \
+      "is UNKNOWN. REFUSING" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 NV_UNREAD=1)"
+check "FWU_FORCE=1 overrides that refusal, loudly" \
+      "with an unknown revert target" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 NV_UNREAD=1 FWU_FORCE=1)"
+# The same when only the fallback read comes back incomplete: the vendor nv,
+# which has no fallback verb, still only gets the warning.
+check "refuses when nv could not read the fallback copy in full" \
+      "fallback env copy in full.*REFUSING" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 NV_COMMIT=0 NV_FALLBACK_UNREAD=1 | tr '\n' ' ')"
+check "FWU_FORCE=1 overrides that refusal too, loudly" \
+      "with an unknown fallback" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 NV_COMMIT=0 NV_FALLBACK_UNREAD=1 FWU_FORCE=1)"
+check "a vendor nv without a fallback verb is only warned about" \
+      "Expected on the vendor nv" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 NV_COMMIT=0)"
 
 check "refuses when the running slot cannot be determined" \
       "REFUSING" \

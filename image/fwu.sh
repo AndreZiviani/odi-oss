@@ -170,7 +170,17 @@ fi
 # the watchdog itself once it initialises, so an image that boots far enough
 # is still reset when it does not confirm; one that hangs BEFORE that point,
 # or the stock slot, hangs forever instead of being reset.
-commit=$(nv getenv sw_commit 2>/dev/null | sed -n "s/^sw_commit=//p")
+#
+# Our nv refuses to answer when a copy of the environment could not be read in
+# full: that copy may be the one U-Boot boots by, so neither the value nor the
+# revert target is known. That is a refusal here, as in fwu_starter.sh, not the
+# warning a missing sw_commit gets.
+nv_out=$(nv getenv sw_commit 2>&1)
+commit=$(printf '%s\n' "$nv_out" | sed -n "s/^sw_commit=//p")
+case "$nv_out" in
+*"could not be read in full"*) nv_unread=1 ;;
+*) nv_unread=0 ;;
+esac
 case "$commit" in
 0|1)
 	if [ "$commit" = "$slot" ]; then
@@ -186,8 +196,17 @@ case "$commit" in
 	fi
 	;;
 *)
-	echo "fwu: cannot read sw_commit -- the revert target is UNKNOWN." >&2
-	echo "     Check it by hand before spending a trial boot." >&2
+	if [ "$nv_unread" = 1 ]; then
+		echo "fwu: nv could not read a copy of the environment in full," >&2
+		echo "     so which copy U-Boot boots by, and the revert target," >&2
+		echo "     is UNKNOWN. REFUSING. Run it again; if it stays" >&2
+		echo "     unreadable, see docs/FLASHING.md, \"Restore\"." >&2
+		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
+		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown revert target" >&2
+	else
+		echo "fwu: cannot read sw_commit -- the revert target is UNKNOWN." >&2
+		echo "     Check it by hand before spending a trial boot." >&2
+	fi
 	;;
 esac
 
@@ -200,7 +219,12 @@ esac
 # Our nv answers for the loser with `fallback`. The VENDOR nv, which is what
 # runs the FIRST flash, has no such verb and prints its usage instead, so an
 # empty answer means NOT CHECKABLE and must not read as safe.
-alt=$(nv fallback sw_commit 2>/dev/null | sed -n "s/^sw_commit=//p")
+alt_out=$(nv fallback sw_commit 2>&1)
+alt=$(printf '%s\n' "$alt_out" | sed -n "s/^sw_commit=//p")
+case "$alt_out" in
+*"could not be read in full"*) alt_unread=1 ;;
+*) alt_unread=0 ;;
+esac
 case "$alt" in
 0|1)
 	if [ "$alt" = "$slot" ]; then
@@ -219,8 +243,23 @@ case "$alt" in
 	fi
 	;;
 *)
-	echo "fwu: the fallback env copy was not readable -- NOT checked." >&2
-	echo "     Expected on the vendor nv, which has no fallback verb." >&2
+	if [ "$alt_unread" = 1 ] && [ "$nv_unread" = 0 ]; then
+		# Read in full a moment ago, not now: what the fallback copy
+		# says is as unknown as an unread sw_commit above.
+		echo "fwu: nv could not read the fallback env copy in full, so" >&2
+		echo "     where U-Boot goes after an interrupted nv setenv is" >&2
+		echo "     UNKNOWN. REFUSING. Run it again; if it stays" >&2
+		echo "     unreadable, see docs/FLASHING.md, \"Restore\"." >&2
+		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
+		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown fallback" >&2
+	else
+		echo "fwu: the fallback env copy was not readable -- NOT checked." >&2
+		if [ "$nv_unread" = 1 ]; then
+			echo "     A copy could not be read in full, as above." >&2
+		else
+			echo "     Expected on the vendor nv, which has no fallback verb." >&2
+		fi
+	fi
 	;;
 esac
 

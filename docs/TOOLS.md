@@ -1201,8 +1201,12 @@ copy stays unreadable, `commit` and every form of `setenv` stay refused
 offers no way out until the partition can be read again. A raw restore of the
 environment partitions (`docs/FLASHING.md`, "Restore") is the documented
 route for a damaged environment; it is not promised to help when the flash
-itself cannot be read. `getenv` and `fallback` do not check for this: they
-use the copy they could read.
+itself cannot be read. `getenv` and `fallback` refuse as well: the copy that
+could not be read may be the one U-Boot picks, so the other one is not the
+answer. They print `a copy of the environment could not be read in full`,
+give no value and exit 1, which the upgrade guard (`fwu_starter.sh`) and
+`slot-state.sh` take as unknown, and on which `fwu.sh` refuses to write
+(`FWU_FORCE=1` overrides it).
 
 `nv commit` also sets `mupgrade_en=0`, in the same two writes. The stock
 bootloader ships it as 1, which makes it listen on the host link after the
@@ -1340,7 +1344,8 @@ running, and any slot but the inactive one (read the way `fwu.sh` reads it:
 `root=31:N` in `/proc/cmdline`, then `sw_active`), and either slot when
 `nv getenv sw_commit` gives neither 0 nor 1: `fwu.sh` only warns there,
 because the vendor nv of a first flash may not answer, but this script ships
-with ours. Extracts `fwu.sh` and
+with ours. (`fwu.sh` refuses too when our nv says a copy of the environment
+could not be read in full.) Extracts `fwu.sh` and
 `md5.txt` from the tarball into `/tmp/fwu.d` and checks `fwu.sh` against its
 md5 line; then runs `fwu.sh <slot> <tar>` there, detached with `setsid`, its
 output in `/tmp/fwu.log` and its outcome in `/tmp/fwu.state` (`running`,
