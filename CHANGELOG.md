@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- omcli: `omcli vlan` and `omcli ident` without paths only show the store.
+  They loaded it into the running omcid: a VLAN edit not yet applied went
+  live at the next rebuild the OLT triggered, with no reload, and the diag
+  bundle runs `omcli vlan` every time. After `omcli ident` the
+  re-registration guard took the edited identity for the running one, so a
+  held change could end as `changed=none` and never reach the driver. The
+  views now put back what omcid runs with and name the keys that differ on
+  a `not applied` line. The forms with paths still load the files.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10

@@ -621,6 +621,32 @@ reload_is "OMCI_CUSTOM_MCAST bit 1"            vlan OMCI_CUSTOM_MCAST     rebuil
 store 1 12 5 "$(val OMCI_CUSTOM_MCAST 3)
 "
 reload_is "OMCI_CUSTOM_MCAST 1 to 3, bit 1 kept: not a change" none ""   none
+# The views read the store and leave what omcid runs with alone: an edit
+# shown by them is not applied, they say so, and the reload still sees it.
+store 1 13 5 "$(val OMCI_CUSTOM_MCAST 3)
+"
+got=$($Q cli/build/omcli vlan 2>&1)
+check "omcli vlan: shows the stored VID" "vlan vid    13" "$(printf '%s\n' "$got" | grep '^vlan vid')"
+check "omcli vlan: names the key not applied" "not applied VLAN_MANU_TAG_VID (apply.sh omci)" \
+	"$(printf '%s\n' "$got" | grep '^not applied')"
+check "omcli vlan: the OLT still sees the running VID" "ManualTagVid 000c" \
+	"$($Q cli/build/omcli mib get all 2>&1 | awk '/^65535 /{on=1; next} /^[0-9]+ /{on=0} on && $1 == "ManualTagVid" {print $1, $2}')"
+reload_is "VLAN_MANU_TAG_VID after omcli vlan"  vlan VLAN_MANU_TAG_VID     rebuild
+check "omcli vlan: nothing left to apply after the reload" "" \
+	"$($Q cli/build/omcli vlan 2>&1 | grep '^not applied')"
+store 1 12 5 "$(val OMCI_CUSTOM_MCAST 3)
+"
+reload_is "VLAN_MANU_TAG_VID back"             vlan VLAN_MANU_TAG_VID     rebuild
+hs_sn ODIT00000002
+got=$($Q cli/build/omcli ident 2>&1)
+check "omcli ident: shows the stored serial" "serial      ODIT00000002" "$(printf '%s\n' "$got" | grep '^serial')"
+check "omcli ident: names the key not applied" "not applied GPON_SN (apply.sh omci)" \
+	"$(printf '%s\n' "$got" | grep '^not applied')"
+check "omcli ident: still not applied when asked again" "not applied GPON_SN (apply.sh omci)" \
+	"$($Q cli/build/omcli ident 2>&1 | grep '^not applied')"
+reload_is "GPON_SN after omcli ident"           identity GPON_SN          reregister
+hs_sn ODIT00000001
+reload_is "GPON_SN back"                        identity GPON_SN          reregister
 store 1 12 5
 reload_is "OMCI_CUSTOM_MCAST removed"          vlan OMCI_CUSTOM_MCAST     rebuild
 # The stock FwdOp override changes the rules of the ports it names: a rebuild.

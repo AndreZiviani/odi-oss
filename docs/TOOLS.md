@@ -1015,6 +1015,12 @@ omcli uses omcid's own queue and commands:
     omcli ident [cs.xml hs.xml [odi.conf]]  the identity and the OLT
                                          identity keys, and whether those are
                                          reported (passwords are never printed)
+                                         Without paths both read the store
+                                         and change nothing omcid runs with;
+                                         keys that differ from it are named
+                                         on a `not applied` line. With paths
+                                         they load the files into omcid (the
+                                         suites inject fixtures that way)
     omcli bridge <ingress|any> <gem> <dir>   build one bridge rule by hand
     omcli cfgset <file> <dir> <key> <v>  write one key into a config store
     omcli frames [--pcap FILE] [--full]  the last OMCI frames as bytes, or as
