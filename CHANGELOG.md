@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- omcid: config stores up to 65,535 bytes are read whole, and one that is
+  still larger is never written back cut. A stick that ran a router
+  firmware before keeps that firmware's tables in the same file (30 KB is
+  known); omcid read 16 KB of it, so later keys such as the LOID or the
+  manual VLAN read as absent, and `omcli cfgset` wrote the first 16 KB
+  back as the whole store. The writer now copies straight from the read
+  buffer, which saves its second 16 KB buffer, and no longer writes a byte
+  past its 192-byte escape buffer for a value of exactly that length. It
+  also refuses a write that would grow the store past 65,535 bytes (the
+  next read could not take it whole), a read that fails part way (what
+  came before it is not the store), and a new file the filesystem reports
+  as not written at close.
+
 - omcid: a respawn that does not resume removes the bridge connections,
   flows and queues the omcid before it left in the switch, and the
   snapshot that describes them. The clean-up ran only with `-r`, which
