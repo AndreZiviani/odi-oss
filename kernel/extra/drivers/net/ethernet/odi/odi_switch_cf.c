@@ -113,17 +113,19 @@ static void classify_template_s(void)
 	odi_reg_write(ODI_SW_CLASSIFY_TEMPLATE(1), v);
 }
 
-/* The CF rows in the order handed over, each after the
- * CLASSIFY_PATTERN_SEL word holding its template bit (32 rows per word;
- * every row the stock stack builds is on template 0, so the word is 0 there,
- * and stays 0 for any bridge with no S-tag filter). The rows alone: what a
- * refused cmd 51 writes before it releases its slot, where the whole of
- * odi_sw_cf_add() would also sweep the 4096 VLAN rows and the global
- * registers for a rule that is not going in.
- */
-void odi_sw_cf_rows_write(const struct odi_sw_cf_entry *cf, unsigned int n_cf)
+void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
+				   const struct odi_sw_vlan_override *vlan_over, unsigned int n_over,
+				   uint32_t vlan_default)
 {
 	unsigned int i;
+	uint32_t idx;
+	uint32_t v;
+
+	/* The CF rows in the order handed over, each after the
+	 * CLASSIFY_PATTERN_SEL word holding its template bit (32 rows per
+	 * word; every row the stock stack builds is on template 0, so the word
+	 * is 0 there, and stays 0 for any bridge with no S-tag filter).
+	 */
 	int tmpl_cfg = 0;
 
 	for (i = 0; i < n_cf; i++) {
@@ -149,17 +151,6 @@ void odi_sw_cf_rows_write(const struct odi_sw_cf_entry *cf, unsigned int n_cf)
 		(void)odi_switch_table_write(cf[i].is_us ? ODI_SW_TBL_CLS_US_ACTION : ODI_SW_TBL_CLS_DS_ACTION,
 					      cf[i].idx, action, 3);
 	}
-}
-
-void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
-				   const struct odi_sw_vlan_override *vlan_over, unsigned int n_over,
-				   uint32_t vlan_default)
-{
-	unsigned int i;
-	uint32_t idx;
-	uint32_t v;
-
-	odi_sw_cf_rows_write(cf, n_cf);
 
 	/* First VLAN pass: every row to the sentinel, one row write each. */
 	odi_sw_vlan_members_fill(0, ODI_SW_VLAN_ID_COUNT);

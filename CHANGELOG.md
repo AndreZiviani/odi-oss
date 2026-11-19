@@ -13,16 +13,19 @@ listed here.
   print as `xx`; the diag bundle withholds the message as before.
 
 - Switch: a cmd 51 the classifier table refuses no longer deletes another
-  service's rule. A two-way rule whose first leg went in with a row shift
-  and whose second leg found no row was released before the shift reached
-  the chip, so the release cleared the chip row of an older, active service,
-  and every later cmd 50 cleared the row next to the one it meant until
-  omcid rebuilt all services. The queued rows are now written before the
-  release, and only they: the VLAN table and the switch registers the full
-  sequence also rewrites stay as they are for a rule that is not going in.
-  A host test fills the ordered region, has the next service refused and
-  checks that software and chip rows still agree and that the refusal
-  writes nothing to the VLAN table.
+  service's rule. A two-way rule with one leg that went in with a row shift
+  and one that found no row was released before the shift reached the chip,
+  so the release cleared the chip row of an older, active service, and
+  every later cmd 50 cleared the row next to the one it meant until omcid
+  rebuilt all services. The refusal now takes the leg that went in back out
+  of the software table and moves the shifted rows back, and writes nothing
+  to the switch: the refused rule is never live, and no other row moves. A
+  host test fills the ordered region and has two rules refused, one whose
+  upstream leg shifts every row and one whose downstream leg shifts the
+  rows below a hole after the bottom region had no row for its upstream
+  leg, and checks that nothing is written, that the software table is
+  what it was and agrees with the chip, and that a later cmd 50 takes only
+  its own rows.
 
 ## v1.18.1 (2026-11-18)
 

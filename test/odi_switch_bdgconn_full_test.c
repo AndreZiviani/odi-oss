@@ -2,21 +2,25 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * odi_switch_bdgconn_full_test.c -- a cmd 51 the classifier table refuses
- * must leave the chip rows as the software table has them.
+ * must leave the switch as it found it.
  *
  * A two-way rule inserts two legs. cf_insert() moves the rows above the
  * insertion point in the software table at once and only queues the chip
- * writes; they go out in odi_sw_cf_add(). When the first leg went in with
- * such a shift and the second leg finds no row, the refusal path used to
- * release the slot without writing the queue: the release then deleted the
- * chip row at the shifted position, which on the chip still held an older,
- * active service, and from then on every cmd 50 deleted the row next to the
- * one it meant.
+ * writes; they go out in odi_sw_cf_add(). When one leg went in with such a
+ * move and the other found no row, the refusal path used to release the
+ * slot without writing the queue: the release then deleted the chip row at
+ * the moved position, which on the chip still held an older, active
+ * service, and from then on every cmd 50 deleted the row next to the one it
+ * meant. The refusal now takes the leg back out of the software table and
+ * writes nothing.
  *
- * The test fills the ordered region with 95 two-way VID services, sends a
- * 96th that sorts before all of them (VID and priority), and checks that
- * the refusal leaves software and chip in step, that a later cmd 50 takes
- * only its own rows, and that a neighbour keeps its rule.
+ * Two refusals, each on a table with one way left in: the upstream leg goes
+ * in first and moves every row (a VID and priority rule that sorts first),
+ * and the downstream leg goes in and moves the rows below a hole after the
+ * upstream leg found the bottom region full (the manual add-tag rule). Each
+ * checks that nothing reaches the switch, that the software table is what
+ * it was, that it matches the chip, that a later cmd 50 takes only its own
+ * rows, and that a neighbour keeps its rule.
  *
  * Usage: odi_switch_bdgconn_full_test. Returns non-zero on any failure.
  */
@@ -67,27 +71,41 @@ static void hw_sync(void)
 	odi_mock.log_n = 0;
 }
 
-static int activate(int id, unsigned vid, int pbit)
+static int send(int id, uint32_t dir, const struct omci_vlan_oper *vr)
+{
+	struct omci_bdgconn b;
+
+	bdg_conn(&b, id, dir, 1, 1, 1, vr);
+	return odi_switch_cmd(51, &b, sizeof b);
+}
+
+static int activate(int id, uint32_t dir, unsigned vid, int pbit)
 {
 	struct omci_vlan_oper vr;
-	struct omci_bdgconn b;
 	int rc;
 
 	bdg_gen_vid_filter(&vr, vid, pbit);
-	bdg_conn(&b, id, OMCI_DIR_BI, 1, 1, 1, &vr);
-	rc = odi_switch_cmd(51, &b, sizeof b);
+	rc = send(id, dir, &vr);
 	hw_sync();
 	return rc;
 }
 
-/* Writes in the log, since the last hw_sync(), to one table. */
-static unsigned int table_writes(uint32_t tbl)
+static int deactivate(int32_t id)
+{
+	int rc = odi_switch_cmd(50, &id, sizeof id);
+
+	hw_sync();
+	return rc;
+}
+
+/* Register and table writes in the log since the last hw_sync(). */
+static unsigned int writes(void)
 {
 	unsigned int i, n = 0;
 
 	odi_mock_table_flush();
 	for (i = 0; i < odi_mock.log_n; i++)
-		if (odi_mock.log[i].kind == 'T' && (odi_mock.log[i].addr >> 16) == tbl)
+		if (odi_mock.log[i].kind == 'W' || odi_mock.log[i].kind == 'T')
 			n++;
 	return n;
 }
@@ -132,51 +150,104 @@ static unsigned int chip_rows_with(int row)
 	return n;
 }
 
-int main(void)
+/* The software table and the slots, as a refusal must leave them. */
+static struct odi_sw_cf_row saved_cf[ODI_SW_CF_ROWS];
+static struct odi_sw_bdgconn_slot saved_slots[ODI_SW_CMD_BDGCONN_MAX];
+
+static void save(void)
+{
+	memcpy(saved_cf, odi_sw_cf, sizeof saved_cf);
+	memcpy(saved_slots, odi_sw_bdgconn, sizeof saved_slots);
+}
+
+static int unchanged(void)
+{
+	unsigned int r;
+
+	for (r = 0; r < ODI_SW_CF_ROWS; r++) {
+		if (saved_cf[r].used != odi_sw_cf[r].used)
+			return 0;
+		if (odi_sw_cf[r].used && memcmp(&saved_cf[r], &odi_sw_cf[r], sizeof saved_cf[r]))
+			return 0;
+	}
+	for (r = 0; r < ODI_SW_CMD_BDGCONN_MAX; r++) {
+		if (saved_slots[r].used != odi_sw_bdgconn[r].used)
+			return 0;
+		if (odi_sw_bdgconn[r].used &&
+		    memcmp(&saved_slots[r], &odi_sw_bdgconn[r], sizeof saved_slots[r]))
+			return 0;
+	}
+	return 1;
+}
+
+/* The checks after a refused cmd 51 of service id: its rc, then the
+ * switch, the software table and the chip. */
+static void refused(int rc, int32_t id)
+{
+	ok(writes() == 0, "the refusal writes nothing to the switch");
+	hw_sync();
+	ok(rc == ODI_SW_ENOSPC, "the rule is refused (table full)");
+	ok(slot_of(id) == NULL, "the refused service holds no slot");
+	ok(unchanged(), "the software table is what it was before");
+	ok(diverged() == 0, "software and chip rows agree");
+}
+
+/* A later cmd 50 of `gone` takes its own rows only, and `kept` keeps its. */
+static void after(int32_t gone, int32_t kept)
 {
 	struct odi_sw_bdgconn_slot *sl;
-	int i, rc, fill_ok = 1;
-	int32_t id;
 
-	printf("odi_switch_bdgconn_full_test: a refused cmd 51 and the chip rows\n");
-	odi_mock_reset();
-	odi_switch_cmd_reset_state();
-	hw_sync();
-
-	for (i = 0; i < 95; i++)
-		if (activate(100 + i, 100 + (unsigned)i, -1) != 0)
-			fill_ok = 0;
-	ok(fill_ok, "95 two-way VID services accepted");
-	ok(diverged() == 0, "software and chip rows agree after the fill");
-
-	{
-		struct omci_vlan_oper vr;
-		struct omci_bdgconn b;
-
-		bdg_gen_vid_filter(&vr, 999, 3);
-		bdg_conn(&b, 999, OMCI_DIR_BI, 1, 1, 1, &vr);
-		rc = odi_switch_cmd(51, &b, sizeof b);
-		/* The refusal writes the queued rows and nothing of the
-		 * VLAN table: no service changed, and the full sequence would
-		 * set all 4096 rows to the sentinel and back. */
-		ok(table_writes(ODI_SW_TBL_VLAN_MEMBERS) == 0,
-		   "the refusal leaves the VLAN table alone");
-		hw_sync();
-	}
-	ok(rc == ODI_SW_ENOSPC, "a 96th that sorts first is refused (table full)");
-	ok(slot_of(999) == NULL, "the refused service holds no slot");
-	ok(diverged() == 0, "software and chip rows still agree after the refusal");
-
-	id = 100;
-	rc = odi_switch_cmd(50, &id, sizeof id);
-	hw_sync();
-	ok(rc == 0, "cmd 50 of the first service");
+	ok(deactivate(gone) == 0, "cmd 50 of another service");
 	ok(diverged() == 0, "software and chip rows agree after the cmd 50");
-
-	sl = slot_of(101);
+	sl = slot_of(kept);
 	ok(sl != NULL, "its neighbour is still active");
 	ok(sl && chip_rows_with(sl->us_row) == 1, "the neighbour's upstream rule is on the chip once");
 	ok(sl && chip_rows_with(sl->ds_row) == 1, "the neighbour's downstream rule is on the chip once");
+}
+
+/* 95 two-way VID services fill rows 64 to 253 of the ordered region. */
+static void fill(void)
+{
+	int i, fill_ok = 1;
+
+	odi_mock_reset();
+	odi_switch_cmd_reset_state();
+	memset(hw_rule, 0, sizeof hw_rule);
+	hw_sync();
+	for (i = 0; i < 95; i++)
+		if (activate(100 + i, OMCI_DIR_BI, 100 + (unsigned)i, -1) != 0)
+			fill_ok = 0;
+	ok(fill_ok, "95 two-way VID services accepted");
+	ok(diverged() == 0, "software and chip rows agree after the fill");
+}
+
+int main(void)
+{
+	struct omci_vlan_oper vr;
+	int rc;
+
+	printf("odi_switch_bdgconn_full_test: a refused cmd 51 and the chip rows\n");
+
+	puts("the upstream leg goes in and moves every row, the downstream leg finds none:");
+	fill();
+	save();
+	bdg_gen_vid_filter(&vr, 999, 3);
+	rc = send(999, OMCI_DIR_BI, &vr);
+	refused(rc, 999);
+	after(100, 101);
+
+	puts("the upstream leg finds the bottom region full, the downstream leg moves rows:");
+	fill();
+	/* Row 254 to a one-way service, so no row is left for an upstream
+	 * rule that compares no VID; then a hole in the middle. */
+	ok(activate(300, OMCI_DIR_DS, 300, -1) == 0, "a downstream-only VID service takes row 254");
+	ok(odi_sw_cf[ODI_SW_CF_BOTTOM].used, "row 254 is in use");
+	ok(deactivate(150) == 0, "cmd 50 of a service in the middle leaves a hole");
+	save();
+	bdg_gen_manual(&vr, 999, 0, 0);
+	rc = send(999, OMCI_DIR_BI, &vr);
+	refused(rc, 999);
+	after(100, 101);
 
 	if (failures) {
 		printf("odi_switch_bdgconn_full_test: %d failure(s)\n", failures);

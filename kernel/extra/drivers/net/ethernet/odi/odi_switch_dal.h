@@ -458,9 +458,6 @@ void odi_sw_cf_add(const struct odi_sw_cf_entry *cf, unsigned int n_cf,
 		   const struct odi_sw_vlan_override *vlan_over, unsigned int n_over,
 		   uint32_t vlan_default);
 
-/* The CF rows of that sequence alone, as odi_sw_cf_add() writes them first. */
-void odi_sw_cf_rows_write(const struct odi_sw_cf_entry *cf, unsigned int n_cf);
-
 /* Invalidates CF row idx: an all-zero rule row and action row. No capture
  * shows a delete; this is the encoding the layout implies.
  */

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # odi_switch_bdgconn_full_test.sh -- a cmd 51 the classifier table refuses
-# leaves the chip rows as the software table has them.
+# leaves the switch as it found it.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=$(mktemp -t odi_switch_bdgconn_full_test.XXXXXX)
