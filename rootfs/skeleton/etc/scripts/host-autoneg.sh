@@ -127,6 +127,14 @@ hw_write() {
 	"$TIMEOUT" "$IO_S" sh -c 'echo "$1" > "$2"' _ "$v" "$PARAM_DIR/host_autoneg" 2>/dev/null
 }
 
+# hw_read: on or off as the kernel holds it, nothing when it cannot say.
+hw_read() {
+	case $("$TIMEOUT" "$IO_S" cat "$PARAM_DIR/host_autoneg" 2>/dev/null) in
+	N|0) echo off ;;
+	Y|1) echo on ;;
+	esac
+}
+
 # link: 1, 0, or nothing when the kernel cannot say.
 link() {
 	"$TIMEOUT" "$IO_S" cat "$PARAM_DIR/host_link" 2>/dev/null | sed -n '1s/^\([01]\)$/\1/p'
@@ -319,13 +327,19 @@ trial_apply_failed() {
 
 # back_to_prev NAME WHY: the mode before the trial, live. Returns 1 when
 # the parameter cannot be written back, and the event says so, or when the
-# state file cannot be written.
+# state file cannot be written. After a failed write, running is what the
+# kernel reads back, or the trial mode it was left in when it cannot say.
 back_to_prev() {
 	name=$1 why=$2 rc=0 back="back to auto-negotiation $trial_prev"
 	if [ "$running" != "$trial_prev" ] && ! hw_write "$trial_prev"; then
-		back="could not write odi_switch.host_autoneg back to auto-negotiation $trial_prev" rc=1
+		now=$(hw_read)
+		[ -n "$now" ] && running=$now
+	else
+		running=$trial_prev
 	fi
-	running=$trial_prev
+	if [ "$running" != "$trial_prev" ]; then
+		back="could not write odi_switch.host_autoneg back to auto-negotiation $trial_prev; it stays $running" rc=1
+	fi
 	if [ "$setting" = off ] && [ "$running" = on ]; then fallback=1; else fallback=0; fi
 	phase=steady
 	event "$name" "$why: $back; HOST_AUTONEG unchanged ($setting)"
@@ -372,10 +386,8 @@ status() {
 	owner=host-autoneg
 	if serdes_owns; then
 		owner=host-serdes
-		case $("$TIMEOUT" "$IO_S" cat "$PARAM_DIR/host_autoneg" 2>/dev/null) in
-		N|0) running=off ;;
-		Y|1) running=on ;;
-		esac
+		_hw=$(hw_read)
+		[ -n "$_hw" ] && running=$_hw
 	fi
 	echo "setting=$setting"
 	echo "running=$running"

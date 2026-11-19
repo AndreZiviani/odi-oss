@@ -35,7 +35,9 @@ listed here.
   second one, once it has run, how it ended, also when another change
   holds the state file then. The move counts once the device reads back
   with the new address, not on the exit status of ifconfig alone, and a
-  device left with no address at all gets the old one back.
+  device left with no address at all gets the old one back. An alias that
+  gave up the address for the move and gets it back is read back the same
+  way.
 
 - nv: `getenv` and `fallback` give no value and exit 3 when a copy of the
   U-Boot environment could not be read in full, as `setenv` and `commit`
@@ -107,6 +109,9 @@ listed here.
   1 when `odi_switch.host_autoneg` cannot be written back, and the event
   says so instead of "back to". A `mgmt-addr.sh` expiry whose move back
   fails exits 1. Both returned the status of the state file write alone.
+  After a failed write back, `running` in the host-autoneg state is what
+  the kernel reads back, or the trial mode, not the mode it could not
+  return to.
 
 ## v1.18.1 (2026-11-18)
 

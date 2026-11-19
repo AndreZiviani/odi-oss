@@ -132,7 +132,17 @@ store 192.168.0.9 0 192.168.100.1
 out=$(run addr); rc=$?
 t "a dropped address after the alias went down: both are back" "1 192.168.0.1 255.255.255.0 192.168.0.9 255.255.255.0" \
   "$rc $(cat "$T/if/br0" 2>/dev/null) $(cat "$T/if/br0:2" 2>/dev/null)"
+# And when the alias drops it again on the way back, addr does not say it
+# is back: the read-back finds nothing there.
+echo "192.168.0.1 255.255.255.0" > "$T/if/br0"
+echo "192.168.0.9 255.255.255.0" > "$T/if/br0:2"
+: > "$T/if/.drop-br0"
+: > "$T/if/.drop-br0:2"
+out=$(run addr 2>&1); rc=$?
+t "an alias that drops it on the way back: addr says so" "1 0 1" \
+  "$rc $(echo "$out" | grep -c 'br0:2 is back on') $(echo "$out" | grep -c 'could not put 192.168.0.9 back on br0:2 either')"
 rm -f "$T/if/br0:2"
+echo "192.168.0.1 255.255.255.0" > "$T/if/br0"
 # A refusal keeps the old address on br0, nothing to put back.
 : > "$T/if/.refuse-br0"
 out=$(run addr); rc=$?

@@ -282,9 +282,12 @@ id=$(st trial_id)
 printf '#!/bin/sh\nrm -f "%s/param/host_autoneg"; mkdir "%s/param/host_autoneg"\nsh "%s" revert > /dev/null 2>&1; echo $? > "%s/revert.rc"\n' "$T" "$T" "$S" "$T" > "$T/hook"; chmod +x "$T/hook"
 sh "$S" trial-run "$id" 20 > /dev/null 2>&1
 t "a way back that cannot be written: revert exits 1" "^1$" "$(cat "$T/revert.rc")"
-t "  logged as such" "event=trial_reverted .*could not write odi_switch.host_autoneg back to auto-negotiation on" "$(cat "$T/kmsg")"
+t "  logged as such" "event=trial_reverted .*could not write odi_switch.host_autoneg back to auto-negotiation on; it stays off" "$(cat "$T/kmsg")"
 t "  the trial is over" "^steady $" "$(st phase) $(st trial_id)"
+t "  running is the trial mode the port was left in, not the way back" "^off$" "$(st running)"
 rmdir "$T/param/host_autoneg"; echo 1 > "$T/param/host_autoneg"
+# The port is on again by hand; a boot brings the state file back in line.
+sh "$S" boot > /dev/null
 
 # the refusals
 out=$(sh "$S" try on 2>&1)
