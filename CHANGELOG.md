@@ -68,7 +68,7 @@ listed here.
   (239.0.0.9 and every other group with the low 23 bits below 256, outside
   224.0.0.0/24) keeps the PON drop off, as a static range that does not fit
   already does. igmpd writes no row for such a group, so with
-  `IGMP_PON_DROP=1` its stream was dropped as unregistered. A policy that
+  `IGMP_PON_DROP=1` its stream could be dropped as unregistered. A policy that
   adds or removes such a group, or a static range too wide for a row,
   turns the drop off or on at once, where it waited for the next second.
 

@@ -359,8 +359,9 @@ the host only sees ARP go unanswered. `trial-guard.sh` (an `/etc/inittab`
   could not read the environment (`uncommitted=` empty): that may be a
   trial, and a committed slot only boots again. Not on the boot after one
   it ended (`reason=wdt_client:trial`), so a stick whose environment stays
-  unreadable resets once and then stays up. Never on a committed slot,
-  never with no running slot, never with `/etc/config/trial-guard.off`;
+  unreadable resets once and then stays up. Never on a slot known to be
+  committed, never with no running slot, never with
+  `/etc/config/trial-guard.off`;
 - it registers the `odi_wdt` client `trial` with a 300 s deadline and
   never pings it (`docs/SETTINGS.md`, "Watchdog rules"): unless it is
   released, the kernel resets the board 300 s later and the next boot is

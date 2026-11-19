@@ -20,8 +20,8 @@
 #     again. Once only: after a boot the guard ended (reason
 #     wdt_client:trial in /proc/odi_ramlog_prev) it does not arm on an
 #     unknown state, so a stick whose environment stays unreadable resets
-#     once and then stays up. Never on a committed slot, never with no
-#     running slot, never with /etc/config/trial-guard.off;
+#     once and then stays up. Never on a slot known to be committed,
+#     never with no running slot, never with /etc/config/trial-guard.off;
 #   - it registers an odi_wdt client, "trial", with a deadline of
 #     DEADLINE_S, and never pings it: unless released, the kernel stops
 #     kicking the watchdog at the deadline and the board resets, logged as a
