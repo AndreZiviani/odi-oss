@@ -14,6 +14,8 @@
 # each outcome, and is bounded when the daemon is silent or slow.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=test/host-flock.sh
+. test/host-flock.sh
 A=$PWD/rootfs/skeleton/etc/scripts/apply.sh
 T=$(mktemp -d)
 pass=0; fail=0

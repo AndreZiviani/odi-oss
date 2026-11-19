@@ -88,6 +88,9 @@ listed here.
   outcome reported is always this run's. omcid takes only the exact words
   apply.sh writes: an empty or cut confirmation file counted as
   `--confirm` and now counts as `omci-live`.
+  `test/bin/flock`, the stand-in for a host without flock (macOS), also
+  takes `flock FILE CMD`, and `test/apply_test.sh` uses it, so the lock
+  cases run there too.
 
 ## v1.18.1 (2026-11-18)
 

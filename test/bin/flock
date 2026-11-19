@@ -2,10 +2,38 @@
 # SPDX-FileCopyrightText: 2026 Andre Ziviani
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Host stand-in for the busybox flock applet, used only where the host has no
-# flock (macOS). It takes the non-blocking exclusive lock on the fd named by
-# the last argument, which is the only form the image scripts use.
-import fcntl, sys
+# flock (macOS). The two forms the image scripts and the host tests use, both
+# exclusive, -n failing at once (exit 1) where the lock is taken:
+#   flock [-n] FD            the lock on a descriptor the caller holds open
+#   flock [-n] FILE CMD...   the lock on FILE, held while CMD runs; the exit
+#                            status is the command's
+import fcntl
+import os
+import subprocess
+import sys
+
+args = sys.argv[1:]
+mode = fcntl.LOCK_EX
+while args and args[0].startswith("-"):
+    if args[0] == "-n":
+        mode |= fcntl.LOCK_NB
+    elif args[0] != "-x":
+        sys.stderr.write("flock: only -n and -x are known here\n")
+        sys.exit(2)
+    args = args[1:]
+
+if len(args) == 1 and args[0].isdigit():
+    try:
+        fcntl.flock(int(args[0]), mode)
+    except OSError:
+        sys.exit(1)
+    sys.exit(0)
+if len(args) < 2:
+    sys.stderr.write("usage: flock [-n] FD | flock [-n] FILE CMD...\n")
+    sys.exit(2)
+fd = os.open(args[0], os.O_RDONLY | os.O_CREAT, 0o644)
 try:
-    fcntl.flock(int(sys.argv[-1]), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    fcntl.flock(fd, mode)
 except OSError:
     sys.exit(1)
+sys.exit(subprocess.call(args[1:]))
