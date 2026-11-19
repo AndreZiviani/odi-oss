@@ -7,12 +7,12 @@
  * A two-way rule inserts two legs. cf_insert() moves the rows above the
  * insertion point in the software table at once and only queues the chip
  * writes; they go out in odi_sw_cf_add(). When one leg went in with such a
- * move and the other found no row, the refusal path used to release the
- * slot without writing the queue: the release then deleted the chip row at
- * the moved position, which on the chip still held an older, active
- * service, and from then on every cmd 50 deleted the row next to the one it
- * meant. The refusal now takes the leg back out of the software table and
- * writes nothing.
+ * move and the other found no row, the refusal path used to release the slot
+ * without writing the queue: the release then deleted the chip row at the
+ * moved position, which on the chip still held an older, active service, and
+ * from then on a cmd 50 for a service at a shifted position deleted the row
+ * next to the one it meant. The refusal now takes the leg back out of the
+ * software table and writes nothing.
  *
  * Two refusals, each on a table with one way left in: the upstream leg goes
  * in first and moves every row (a VID and priority rule that sorts first),

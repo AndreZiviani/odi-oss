@@ -15,19 +15,19 @@ listed here.
 - Switch: a cmd 51 the classifier table refuses no longer deletes another
   service's rule. A two-way rule with one leg that went in with a row shift
   and one that found no row was released before the shift reached the chip,
-  so the release cleared the chip row of an older, active service, and
-  every later cmd 50 cleared the row next to the one it meant until omcid
-  rebuilt all services. The refusal now takes the leg that went in back out
-  of the software table and moves the shifted rows back, and writes nothing
-  to the switch for it: the refused rule is never live, and no other row
-  moves. A cmd 51 that gives a service id a different rule still releases
-  the old one first, as before, so only a new service is refused with no
-  write at all. A host test fills the ordered region and has two new
-  services refused, one whose upstream leg shifts every row and one whose
-  downstream leg shifts the rows below a hole after the bottom region had
-  no row for its upstream leg, and checks that nothing is written, that
-  the software table is what it was and agrees with the chip, and that a
-  later cmd 50 takes only its own rows.
+  so the release cleared the chip row of an older, active service, and a
+  later cmd 50 for a service at a shifted position cleared the row next to
+  the one it meant until omcid rebuilt all services. The refusal now takes
+  the leg that went in back out of the software table and moves the shifted
+  rows back, and writes nothing to the switch for it: the refused rule is
+  never live, and no other row moves. A cmd 51 that gives a service id a
+  different rule still releases the old one first, as before, so only a new
+  service is refused with no write at all. A host test fills the ordered
+  region and has two new services refused, one whose upstream leg shifts
+  every row and one whose downstream leg shifts the rows below a hole after
+  the bottom region had no row for its upstream leg, and checks that nothing
+  is written, that the software table is what it was and agrees with the
+  chip, and that a later cmd 50 takes only its own rows.
 
 ## v1.18.1 (2026-11-18)
 
