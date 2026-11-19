@@ -22,7 +22,13 @@ int __wrap_igmp_hw_mac_del(uint16_t vid, const uint8_t *mac)
 	programmed = 0;
 	return 0;
 }
-int __wrap_igmp_hw_snoop(uint32_t flags) { (void)flags; return 0; }
+static int fail_snoop;
+int __wrap_igmp_hw_snoop(uint32_t flags)
+{
+	(void)flags;
+	if (fail_snoop) { fail_snoop--; return -16; }
+	return 0;
+}
 int main(void)
 {
 	static struct igmp_db db;
@@ -68,6 +74,17 @@ int main(void)
 	lease = 0; lease_retry = 0; before = delete_calls;
 	settle_lease(&db, ODI_SW_MC_SNOOP_COPY, 100);
 	CHECK(delete_calls == before + 1 && lease == ODI_SW_MC_SNOOP_COPY, 15);
-	out("ok    daemon delete retry, MAC alias rejoin, IPv6 overflow and lease acquisition\n");
+	/* A lease change that fails starts the ten-second back-off; "not
+	 * snooping" inside it still releases the lease at once. */
+	lease = ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP;
+	fail_snoop = 1;
+	settle_lease(&db, ODI_SW_MC_SNOOP_COPY, 200);
+	CHECK(lease == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP) &&
+	      lease_retry == 210, 16);
+	settle_lease(&db, ODI_SW_MC_SNOOP_COPY, 205);
+	CHECK(lease == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP), 17);
+	settle_lease(&db, 0, 203);
+	CHECK(lease == 0, 18);
+	out("ok    daemon delete retry, MAC alias rejoin, IPv6 overflow, lease acquisition and release in the back-off\n");
 	return 0;
 }

@@ -367,12 +367,14 @@ static uint32_t wanted_lease(const struct igmp_db *db, uint32_t now)
 }
 
 /* Bring the lease to `want`. A failure is retried every ten seconds, and
- * says so once per change of mind. */
+ * says so once per change of mind. A release is not held back: the policy
+ * says "not snooping" once, and a release skipped then would leave the copy
+ * and the PON drop on with nothing left to ask again. */
 static void settle_lease(struct igmp_db *db, uint32_t want, uint32_t now)
 {
 	int rc;
 
-	if (want == lease || (int32_t)(now - lease_retry) < 0)
+	if (want == lease || (want && (int32_t)(now - lease_retry) < 0))
 		return;
 	rc = igmp_hw_snoop(want);
 	if (rc) {
@@ -633,8 +635,7 @@ static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 		}
 		return;
 	}
-	if (pol.snooping)
-		settle_lease(db, wanted_lease(db, now), now);
+	settle_lease(db, pol.snooping ? wanted_lease(db, now) : 0, now);
 }
 
 /* ---- the metering of the groups (meter.h) ---------------------------- */

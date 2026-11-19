@@ -49,6 +49,12 @@ listed here.
   redirect  DROP: truncated` instead of crashing the daemon on the missing
   addresses. The kernel hook does not pass one up; `igmpd -r` could.
 
+- igmpd: "not snooping" from the OLT releases the snooping lease even
+  within the ten seconds after a failed lease change. The release was held
+  back like any other change and never asked again, so the copy rule and,
+  with `IGMP_PON_DROP=1`, the drop of unregistered multicast from the PON
+  stayed on until the policy changed again or igmpd restarted.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
