@@ -9,11 +9,9 @@
  * The upstream registers sit in the window odi_switch_hw.h calls
  * PONQ_COUNT_MASK, which is not one register: each index below is a
  * register of the chip's register map, named as the map names it. What
- * each does was read from the stock driver's queue add, queue delete and
- * flow add (the Realtek RTL9602C SDK, dal_rtl9602c_ponmac.c,
- * dal_rtl9602c_gpon.c and the GPON module's gpon_res.c, read as a
- * reference); applied to the arguments ISP1's provisioning sends, these
- * leaves write every word of the stock capture.
+ * each does matches the stock driver's queue add, queue delete and flow
+ * add; applied to the arguments ISP1's provisioning sends, the add leaves
+ * write every word of the stock capture, which has no delete.
  *
  * Every field write is a read-modify-write of the register, as the stock
  * driver makes it: the registers start from the values the sdkinit and
@@ -61,8 +59,7 @@
  * data flow add and delete. Read from the stock kernel of our image
  * (dal_rtl9602c_gpon_flowctrl_adjust_byFlowNum, at 0x80131f50 of the
  * V1.0-220923 vmlinux: the four constants, the sid 0 step and the floor
- * test are its instructions), which has no cap at five flows; the 5.10 GPL
- * SDK's dal_rtl9602c_gpon.c has the same function.
+ * test are its instructions), which has no cap at five flows.
  */
 #define ODI_SW_PONQ_GLB_ON_BASE		7904U
 #define ODI_SW_PONQ_GLB_OFF_BASE	7744U

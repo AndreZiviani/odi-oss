@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- Ten comments in the switch and GPON drivers and omcid, and two
+  paragraphs of `docs/SWITCH.md`, named source files and functions of the
+  vendor SDK or said they were read from it, which `AGENTS.md` rules out.
+  They now say what the stock firmware does, without saying where that was
+  read. `make lint` did not see them, because its vendor source check knew
+  header paths and a handful of names only; it now also refuses the names
+  of the SDK source files and of its OMCI platform layer, and the words a
+  comment uses for a read of that source. `docs/SWITCH.md` also counted 16
+  capture brackets as the check of the upstream queue registers: it is the
+  ten upstream cmd 23 and cmd 25 brackets, and the capture has no delete.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10

@@ -433,8 +433,14 @@ lint:
 	@# "bsp_" prefix) because those prefixes are also how this tree spells
 	@# sockopt ABI names and its own driver symbols.
 	@# The headers of the vendor SDK count too (rtk/l2.h, rtk_*.h): a
-	@# header name says where a fact was read.
-	@if git grep -nE 'prom\.c|re8686|c-rlx\.c|apollo|bsp_[a-z_]+\(|(^|[^A-Za-z0-9_])(rtk|rtdrv|hal|dal|osal|ioal)/[A-Za-z0-9_/]+\.h|(^|[^A-Za-z0-9_])(rtk|rtdrv|rtusr)_[a-z0-9_]+\.h' -- . ':!Makefile'; then \
+	@# header name says where a fact was read. So do the names of its
+	@# source files (the dal_ layer, the files named after the chip, the
+	@# GPON module and the CamelCase OMCI MIB files), the OMCI platform
+	@# layer (pf_rtl96xx), and the words a comment uses for a read of that
+	@# source: "read, not copied", "read for reference", "derived from
+	@# reading", a GPL drop or GPL SDK. Function names on their own stay
+	@# allowed: a symbol of a shipped binary is the black-box case.
+	@if git grep -nE 'prom\.c|re8686|c-rlx\.c|apollo|bsp_[a-z_]+\(|(^|[^A-Za-z0-9_])(rtk|rtdrv|hal|dal|osal|ioal)/[A-Za-z0-9_/]+\.h|(^|[^A-Za-z0-9_])(rtk|rtdrv|rtusr)_[a-z0-9_]+\.h|(^|[^A-Za-z0-9_])dal_[A-Za-z0-9_]+\.c([^A-Za-z0-9_]|$$)|rtl96[0-9a-z]*_[A-Za-z0-9_]+\.c([^A-Za-z0-9_]|$$)|(^|[^A-Za-z0-9_])gpon_(fsm|res|dev|ploam)\.c([^A-Za-z0-9_]|$$)|(^|[^A-Za-z0-9_])mib_[A-Z][A-Za-z0-9]*\.c([^A-Za-z0-9_]|$$)|pf_rtl96xx|[Rr]ead, not copied|[Rr]ead (as a|for) reference|[Dd]erived from reading|GPL (SDK|drop)' -- . ':!Makefile'; then \
 		echo "lint: found a vendor SOURCE file/function reference above -- describe the observed (black-box) behavior instead, and put vendor attribution in commit history/docs, per AGENTS.md" >&2; \
 		exit 1; \
 	fi

@@ -667,15 +667,13 @@ boot golden shows the stream.
 
 cmd 21, 23 (upstream), 24 and 25 (upstream) program the upstream scheduler
 from their arguments. Nothing in them is replayed. The register meanings
-come from the stock driver's queue add, queue delete and upstream flow add
-and delete (the RTL9602C SDK: `dal_rtl9602c_ponmac.c`,
-`dal_rtl9602c_gpon.c`, the GPON module's `gpon_res.c`, and the OMCI
-platform layer's `pf_rtl96xx_SetPriQueue`, read as a reference), with the
-register addresses and fields of the chip's register map. The proof that
-the reading is right: given the arguments omcid sends on ISP1 (five
-T-CONTs, one queue each, weights 1, 30, 24, 4, 4), the code writes every
-word of the 16 cmd 23 and cmd 25 brackets of the stock capture
-(`test/odi_switch_cmd_test.sh`), which were replayed word for word before.
+match the stock driver's queue add, queue delete and upstream flow add and
+delete, with the register addresses and fields of the chip's register map.
+The capture checks the add side: given the arguments omcid sends on ISP1
+(five T-CONTs, one queue each, weights 1, 30, 24, 4, 4), the code writes
+every word of the ten upstream cmd 23 and cmd 25 brackets of the stock
+capture (`test/odi_switch_cmd_test.sh`), which were replayed word for word
+before. The capture has no queue or flow delete.
 
 The window `PONQ_COUNT_MASK` (0xf020a8 + 4 n) holds these registers:
 
@@ -1485,10 +1483,9 @@ carrying its groups downstream, the VLAN (ANI) of the part 0 rows of its two
 access control lists: one rule per VLAN, rule_gen
 `OMCI_VLAN_OPER_EXTVLAN_GEN`, downstream only, matching a C-tag of that VID
 with no S-tag in front ([Extended VLAN rules](#extended-vlan-rules) for the
-row it becomes). The vendor OMCI stack builds its multicast rules per ACL
-VLAN the same way (read for reference), and another open
-implementation's measurements on this chip apply the profile's treatment on
-the ACL VLANs too.
+row it becomes). The stock OMCI stack builds its multicast rules per ACL
+VLAN the same way, and another open implementation's measurements on this
+chip apply the profile's treatment on the ACL VLANs too.
 
 | type | rule |
 |---|---|
