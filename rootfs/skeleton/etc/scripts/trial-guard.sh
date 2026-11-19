@@ -11,11 +11,17 @@
 # so every watchdog rule is satisfied) stays up until someone pulls the
 # power. This closes that gap for a trial only:
 #
-#   - armed only when /var/run/odi-slot says the running slot is not
-#     committed and the next boot goes to another slot (uncommitted=1,
-#     next_boot != running): a reboot then returns to the committed slot,
-#     which is the whole point. Never on a committed slot, never when the
-#     state cannot be told, never with /etc/config/trial-guard.off;
+#   - armed when /var/run/odi-slot says the running slot is not committed
+#     and the next boot goes to another slot (uncommitted=1, next_boot !=
+#     running): a reboot then returns to the committed slot, which is the
+#     whole point. Armed too when the running slot is known but nv could
+#     not read the environment (uncommitted= empty): that may be a trial,
+#     and the guard does nothing but reset, so a committed slot boots
+#     again. Once only: after a boot the guard ended (reason
+#     wdt_client:trial in /proc/odi_ramlog_prev) it does not arm on an
+#     unknown state, so a stick whose environment stays unreadable resets
+#     once and then stays up. Never on a committed slot, never with no
+#     running slot, never with /etc/config/trial-guard.off;
 #   - it registers an odi_wdt client, "trial", with a deadline of
 #     DEADLINE_S, and never pings it: unless released, the kernel stops
 #     kicking the watchdog at the deadline and the board resets, logged as a
@@ -53,6 +59,7 @@ REGISTER=${REGISTER:-/proc/odi_wdt/register}
 OFF_FLAG=${OFF_FLAG:-/etc/config/trial-guard.off}
 PROC_TCP=${PROC_TCP:-/proc/net/tcp /proc/net/tcp6}
 UPTIME=${UPTIME:-/proc/uptime}
+PREV=${PREV:-/proc/odi_ramlog_prev}
 KMSG=${KMSG:-/dev/kmsg}
 IP=${IP:-ip}
 LOGGER=${LOGGER:-logger}
@@ -76,6 +83,12 @@ log() {
 uptime_s() { cut -d. -f1 "$UPTIME" 2>/dev/null; }
 
 state_val() { sed -n "s/^$1=//p" "$STATE" 2>/dev/null | head -n 1; }
+
+# Why the previous boot ended, as the kernel recorded it (odi_ramlog.c,
+# "previous boot: ... reason=wdt_client:trial"); empty without the file.
+prev_reason() {
+	sed -n 's/^previous boot:.* reason=\([^ ]*\).*/\1/p' "$PREV" 2>/dev/null | head -n 1
+}
 
 wdt_write() {
 	"$TIMEOUT" "$CMD_S" sh -c 'echo "$1" > "$2"' _ "$1" "$REGISTER" 2>/dev/null
@@ -140,19 +153,33 @@ done
 
 running=$(state_val running)
 next=$(state_val next_boot)
+uncommitted=$(state_val uncommitted)
 case "$running" in 0 | 1) ;; *) exit 0 ;; esac
-case "$next" in 0 | 1) ;; *) exit 0 ;; esac
-[ "$(state_val uncommitted)" = 1 ] && [ "$next" != "$running" ] || exit 0
+if [ -z "$uncommitted" ]; then
+	# slot-state.sh could not read the environment. A trial that cannot be
+	# reached would otherwise stay up until the power is pulled.
+	if [ "$(prev_reason)" = "wdt_client:$CLIENT" ]; then
+		log "slot $running, its state unknown (nv could not read the environment), and the last boot ended at this guard: not armed again"
+		exit 0
+	fi
+	what="slot $running, its state unknown (nv could not read the environment)"
+	after="resets in ${DEADLINE_S} s, back to the committed slot if this is a trial, and does not arm on that boot"
+else
+	case "$next" in 0 | 1) ;; *) exit 0 ;; esac
+	[ "$uncommitted" = 1 ] && [ "$next" != "$running" ] || exit 0
+	what="trial of slot $running"
+	after="reverts to slot $next in ${DEADLINE_S} s"
+fi
 
 if [ ! -w "$REGISTER" ]; then
-	log "trial of slot $running, but no $REGISTER: not armed"
+	log "$what, but no $REGISTER: not armed"
 	exit 0
 fi
 if ! wdt_write "$CLIENT $DEADLINE_S"; then
-	log "trial of slot $running, but the $CLIENT client did not register: not armed"
+	log "$what, but the $CLIENT client did not register: not armed"
 	exit 0
 fi
-log "trial of slot $running: reverts to slot $next in ${DEADLINE_S} s unless the management path is seen working both ways (a TCP session or a reachable neighbour)"
+log "$what: $after unless the management path is seen working both ways (a TCP session or a reachable neighbour)"
 
 t0=$(uptime_s)
 case "$t0" in '' | *[!0-9]*) t0=0 ;; esac
@@ -175,5 +202,9 @@ while :; do
 	[ "$now" -lt "$end" ] || break
 	"$SLEEP" "$POLL_S"
 done
-log "no two-way management traffic in ${DEADLINE_S} s: the watchdog reverts this trial to slot $next"
+if [ -n "$uncommitted" ]; then
+	log "no two-way management traffic in ${DEADLINE_S} s: the watchdog reverts this trial to slot $next"
+else
+	log "no two-way management traffic in ${DEADLINE_S} s: the watchdog resets slot $running, whose state is unknown"
+fi
 exit 0

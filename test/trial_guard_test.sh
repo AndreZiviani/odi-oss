@@ -68,7 +68,7 @@ LISTEN22='   0: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 000
 # setup <state lines...>: a fresh run directory; the state file holds the
 # lines given (none: no state file at all).
 setup() {
-	rm -f "$T/calls" "$T/kmsg" "$T/neigh" "$T/sleeps" "$T/commit_after" "$T/blank_after" "$T/remove_after" "$T/state" "$T/off"
+	rm -f "$T/calls" "$T/kmsg" "$T/neigh" "$T/sleeps" "$T/commit_after" "$T/blank_after" "$T/remove_after" "$T/state" "$T/off" "$T/prev"
 	echo "40.00 0.00" > "$T/uptime"
 	: > "$T/register"
 	printf '%s\n%s\n' "$TCP_HDR" "$LISTEN22" > "$T/tcp"
@@ -81,7 +81,7 @@ tcp6() { echo "   1: $1 $2 $3 00000000:00000000 00:00000000 00000000     0      
 
 run() {
 	PATH="$T/bin:$PATH" TRIAL_GUARD_PATH="$T/bin" STATE="$T/state" REGISTER="${REG:-$T/register}" OFF_FLAG="$T/off" \
-		PROC_TCP="$T/tcp $T/tcp6" UPTIME="$T/uptime" KMSG="$T/kmsg" \
+		PROC_TCP="$T/tcp $T/tcp6" UPTIME="$T/uptime" PREV="$T/prev" KMSG="$T/kmsg" \
 		IP=ip LOGGER=logger SLEEP=sleep TIMEOUT=timeout \
 		STATE_WAIT_S=3 sh "$S"
 	echo "$?" > "$T/rc"
@@ -111,7 +111,21 @@ run; expect "committed slot: not armed" 0 0
 setup running=0 primary_sw_commit=0 fallback_sw_commit=1 next_boot=0 uncommitted=1
 run; expect "half committed (a reboot boots this slot again): not armed" 0 0
 setup running= next_boot= uncommitted=
-run; expect "slot state unknown: not armed" 0 0
+run; expect "no running slot: not armed" 0 0
+# nv could not read the environment, the running slot is known: it may be
+# a trial, so armed, once. After a boot the guard ended, not again.
+setup running=1 next_boot= uncommitted=
+echo "previous boot: boot=7 slot=1 build=x crumb=svc/3 reason=power" > "$T/prev"
+run; expect "slot known, state unknown: armed" 1 0 "the watchdog resets slot 1, whose state is unknown"
+setup running=1 next_boot= uncommitted=
+echo "previous boot: boot=7 slot=1 build=x crumb=svc/3 reason=wdt_client:trial" > "$T/prev"
+run; expect "slot known, state unknown, last boot ended by the guard: not armed again" 0 0 "not armed again"
+setup running=0 next_boot= uncommitted=
+echo "previous boot: boot=7 slot=1 build=x crumb=svc/3 reason=wdt_client:omcid" > "$T/prev"
+run; expect "slot known, state unknown, another client ended the last boot: armed" 1 0
+setup running=1 next_boot= uncommitted=
+tcp C0A80101:0016 C0A80102:D431 01
+run; expect "slot known, state unknown, an ssh session: released" 1 1 "tcp peer C0A80102 state 01"
 setup
 run; expect "no state file within the wait: not armed" 0 0
 trial; : > "$T/off"

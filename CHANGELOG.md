@@ -69,6 +69,15 @@ listed here.
   a bad checksum is a line a frame, and a 128-group join and leave are about
   13 KB. Measured with a host build, not on a stick.
 
+- Upgrade: the trial guard also arms when `nv` could not read the U-Boot
+  environment at boot and the running slot is known. `slot-state.sh` then
+  writes an empty `uncommitted`, and the guard did not arm, so a trial
+  image that fed the watchdog but could not be reached stayed on the trial
+  until a power cycle. The guard only resets, so on a committed slot the
+  same slot boots again. It arms once: on the boot after one it ended
+  (`reason=wdt_client:trial`), an unknown state does not arm it again, so a
+  stick whose environment stays unreadable resets once and then stays up.
+
 - Host SerDes: a trial whose way back does not read back (the sequence of
   the mode before it, after an expiry, a revert or a failed switch) or
   whose port side (`host_forced`, `host_autoneg`) cannot be written is
