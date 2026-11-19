@@ -351,10 +351,11 @@ static void activate(void)
 		const char *sn = cfg_sn_label(&ident);
 
 		/* No serial number at all (a store config-reseed.sh recreated,
-		 * or one the owner emptied): the ONU stays deactivated, as rcS
+		 * one the owner emptied, or one with the key gone from both
+		 * files, which reads as -1): the ONU stays deactivated, as rcS
 		 * leaves it (pon_step_gponact), rather than ranging with the
 		 * serial the driver starts with. */
-		if (!ident.snLen) {
+		if (ident.snLen <= 0) {
 			finish("no_serial", -1);
 			return;
 		}

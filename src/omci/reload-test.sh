@@ -419,6 +419,23 @@ check "no serial: deactivated, and no gponsn or gponact" "gpondeact" \
 check_grep "no serial: logged" "event=reload_done changed=identity action=reregister result=no_serial" "$log"
 stop_omcid
 
+# The same with the key gone from both files instead of emptied: an absent
+# key reads as -1, not 0, and must stop the activation all the same.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 1 "0"
+log=/tmp/rl-nosn-absent.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1 -j 4
+old_id=$(st id)
+rm -f "$HS"
+kill -HUP "$pid"
+if wait_done "$old_id" 20; then
+	check "no serial key: result no_serial" "done no_serial identity" "$(st state) $(st result) $(st changed)"
+else bad "no serial key: never finished"; fi
+check "no serial key: deactivated, and no gponsn or gponact" "gpondeact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+stop_omcid
+
 # ------------------------------------------------ the failure paths
 # -j 4: give up on O5 after four seconds instead of 150.
 clean_state

@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Reload: a store with no `GPON_SN` key in either file stops the
+  re-registration at `no_serial`, as an empty key already did. An absent
+  key reads as -1 and the check tested only for 0, so the ONU was
+  activated again on the serial the driver still held.
+
 - omcli: `omcli vlan` and `omcli ident` without paths only show the store.
   They loaded it into the running omcid: a VLAN edit not yet applied went
   live at the next rebuild the OLT triggered, with no reload, and the diag
