@@ -9,6 +9,10 @@ listed here.
   in the NIC transmit path. A zero-length DMA mapping ends in the `BUG_ON`
   of the cache writeback. omcid never sends one; only a process with
   CAP_NET_ADMIN could.
+- Kernel: the NIC drops a received frame shorter than an Ethernet header
+  and its FCS (18 bytes) as a receive error. Before, anything above 4 bytes
+  went to the RX hooks and the stack, which read the 14-byte header from
+  whatever the buffer held before.
 
 ## v1.18.1 (2026-11-18)
 
