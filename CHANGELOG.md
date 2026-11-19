@@ -69,6 +69,20 @@ listed here.
   a bad checksum is a line a frame, and a 128-group join and leave are about
   13 KB. Measured with a host build, not on a stick.
 
+- Host SerDes: a trial whose way back does not read back (the sequence of
+  the mode before it, after an expiry, a revert or a failed switch) or
+  whose port side (`host_forced`, `host_autoneg`) cannot be written is
+  `revert_unverified`, not `trial_expired` or `trial_reverted` with "back
+  to", and `host-serdes.sh revert` exits 1, as it does when the state file
+  cannot be written and the trial would stay on disk. A `host_forced` that
+  cannot be read on the way to Fiber 1G is cleared rather than left as it
+  is. The port is taken to run the mode before, so `reapply` runs it
+  again, as after `apply_unverified` at boot. The HiSGMII notes (README,
+  `docs/SWITCH.md`, the v1.18.1 entry below, the comment in
+  `host-serdes.sh`) no longer put the missing frames on 0x21808 bit 8
+  alone: the A/B changed the 3.125G page, the receive pulse and the bit
+  together, as `docs/QUALIFICATION.md` says.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
@@ -81,9 +95,10 @@ listed here.
 - Host SerDes: HiSGMII (3.125 Gbaud) sets `SDS_AN_CTRL` 0x21808 bit 8, in-band
   negotiation forced off on the host lane (0x70e0 out of reset becomes
   0x71e0), last, as the stock HSGQ kernel does in its LAN SerDes mode 4, and
-  runs the 3.125G analog page and the receive pulse of 2500BASE-X. Without
-  the bit the SerDes synced and the host link came up, and no frame was
-  received from the host. Fiber 1G and 2500BASE-X clear the bit, writing
+  runs the 3.125G analog page and the receive pulse of 2500BASE-X. With
+  none of the three the SerDes synced and the host link came up, and no
+  frame was received from the host; which of them the newer hosts need is
+  not isolated. Fiber 1G and 2500BASE-X clear the bit, writing
   0x21808 only when it reads set, so a trial, its revert, the boot watch or
   `reapply` out of HiSGMII does not leave it set, and a stick that never
   ran HiSGMII runs the stock Fiber 1G sequence write for write. The boot

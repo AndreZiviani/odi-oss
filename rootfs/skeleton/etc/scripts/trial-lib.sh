@@ -23,8 +23,8 @@
 #
 # and defines say, die, load (its defaults, then state_load), event_fields
 # (the fields every event line carries after its name), back_to_prev NAME
-# WHY [defer], and for trial_run the hooks trial_apply, trial_applied and
-# trial_apply_failed.
+# WHY [defer] (its status is that of expire and revert), and for trial_run
+# the hooks trial_apply, trial_applied and trial_apply_failed.
 
 uptime_s() { cut -d. -f1 "$UPTIME" 2>/dev/null; }
 
@@ -145,10 +145,12 @@ expire() {
 	id=$1
 	lock
 	load
+	_rc=0
 	if [ "$phase" = trial ] && [ "$trial_id" = "$id" ]; then
-		back_to_prev trial_expired "not confirmed in time"
+		back_to_prev trial_expired "not confirmed in time" || _rc=1
 	fi
 	unlock
+	return "$_rc"
 }
 
 # revert: ends the running trial on request. REVERT_HOW is passed on to
@@ -160,6 +162,8 @@ revert() {
 		unlock
 		die "no trial is running"
 	fi
-	back_to_prev trial_reverted "reverted on request" ${REVERT_HOW:+"$REVERT_HOW"}
+	_rc=0
+	back_to_prev trial_reverted "reverted on request" ${REVERT_HOW:+"$REVERT_HOW"} || _rc=1
 	unlock
+	return "$_rc"
 }

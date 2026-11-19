@@ -120,6 +120,11 @@ exit 0
 EOF
 chmod +x "$T/bin/"* "$T/diag"
 
+# mv: while $T/nomv exists, refuses to install the state file and nothing
+# else, the state file that cannot be written.
+printf '#!/bin/sh\nif [ -e "%s/nomv" ]; then case "$*" in *" %s/run/host-serdes") exit 1 ;; esac; fi\nexec /bin/mv "$@"\n' "$T" "$T" > "$T/bin/mv"
+chmod +x "$T/bin/mv"
+
 export PATH="$T/bin:$PATH"
 export FLASH=$F SELF=$S DIAG=$T/diag PARAM_DIR=$T/param STATE=$T/run/host-serdes
 export AN_STATE=$T/run/host-autoneg LOCKDIR=$T/run/lock SAFE_FLAG=$T/run/safe-mode SDS_OFF=$T/config/sds.off
@@ -588,6 +593,64 @@ sh "$S" trial-run "$id" 20 > /dev/null 2>&1
 t "a trial whose registers do not read back: trial_failed, back to fiber1g" "^trial_failed fiber1g steady$" "$(st event) $(st running) $(st phase)"
 t "  ... with the port side back too" "^0 1$" "$(p host_forced) $(p host_autoneg)"
 rm -f "$T/readonly"
+
+# A move back that does not read back is not reported as back: the trial
+# went (HiSGMII), then diag takes no write, so the registers stay HiSGMII.
+# The mode before is taken as running, so reapply can run it again.
+newboot
+sh "$S" boot > /dev/null
+sh "$S" try hisgmii > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\n: > "%s/readonly"\n' "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+t "an expiry that does not read back: revert_unverified, fiber1g, steady" "^revert_unverified fiber1g steady$" "$(st event) $(st running) $(st phase)"
+t "  ... logged as such, naming reapply" "event=revert_unverified .*not confirmed in time: back to Fiber 1G, but its registers did not all read back \(host-serdes.sh reapply" "$(cat "$T/kmsg")"
+n "  ... and not as trial_expired" "event=trial_expired" "$(cat "$T/kmsg")"
+rm -f "$T/readonly"
+out=$(sh "$S" reapply 2>&1); rc=$?
+t "  ... reapply is not refused after it" "^0 reapply$" "$rc $(st phase)"
+newboot
+sh "$S" boot > /dev/null
+sh "$S" try hisgmii > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\n: > "%s/readonly"\nsh "%s" revert > "%s/revert.out" 2>&1; echo $? > "%s/revert.rc"\n' "$T" "$S" "$T" "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+t "a revert that does not read back: exit 1, revert_unverified" "^1 revert_unverified fiber1g$" "$(cat "$T/revert.rc") $(st event) $(st running)"
+t "  ... and its answer says so" "reverted on request: back to Fiber 1G, but its registers did not all read back" "$(cat "$T/revert.out")"
+rm -f "$T/readonly"
+
+# The port side is part of the way back: a host_autoneg that cannot be
+# written is revert_unverified too, although the registers read back.
+newboot
+sh "$S" boot > /dev/null
+sh "$S" try hisgmii > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\nrm -f "%s/param/host_autoneg"; mkdir "%s/param/host_autoneg"\n' "$T" "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+t "an expiry whose port side cannot be written: revert_unverified" "^revert_unverified fiber1g steady$" "$(st event) $(st running) $(st phase)"
+t "  ... naming the port side" "event=revert_unverified .*back to Fiber 1G, but its port side \(host_forced, host_autoneg\) could not be written" "$(cat "$T/kmsg")"
+rmdir "$T/param/host_autoneg"; echo 1 > "$T/param/host_autoneg"
+
+# A host_forced that cannot be read on the way back is cleared all the
+# same: it is as likely the force the trial left as anything else.
+newboot
+sh "$S" boot > /dev/null
+sh "$S" try hisgmii > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\necho garbage > "%s/param/host_forced"\n' "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+t "an expiry with host_forced unreadable: cleared, back to fiber1g" "^0 trial_expired fiber1g$" "$(p host_forced) $(st event) $(st running)"
+
+# A revert whose state file cannot be written leaves the trial on disk, so
+# it is no success either.
+newboot
+sh "$S" boot > /dev/null
+sh "$S" try hisgmii > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\n: > "%s/nomv"\nsh "%s" revert > /dev/null 2>&1; echo $? > "%s/revert.rc"\nrm -f "%s/nomv"\n' "$T" "$S" "$T" "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+t "a revert whose state file cannot be written: exit 1" "^1$" "$(cat "$T/revert.rc")"
+t "  ... though the way back itself read back" "event=trial_reverted .*reverted on request: back to Fiber 1G;" "$(cat "$T/kmsg")"
 
 # the refusals
 out=$(sh "$S" try fiber1g 2>&1)

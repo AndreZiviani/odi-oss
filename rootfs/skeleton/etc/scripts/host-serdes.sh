@@ -208,8 +208,10 @@ mode_vars() {
 #
 # SDS_AN_CTRL 0x21808 bit 8, in-band negotiation forced off on the host
 # lane (0x70e0 out of reset, bit 8 clear): set in HiSGMII, as the stock
-# HSGQ kernel does in its LAN SerDes mode 4 (0x70e0 -> 0x71e0); without it
-# the host links and receives no frames. Clear in Fiber 1G and 2500BASE-X,
+# HSGQ kernel does in its LAN SerDes mode 4 (0x70e0 -> 0x71e0). Newer hosts
+# passed frames only with it, the 3.125G page and the receive pulse
+# together; which of the three they need is not isolated
+# (docs/QUALIFICATION.md). Clear in Fiber 1G and 2500BASE-X,
 # so a change out of HiSGMII (a trial, its revert, the boot watch,
 # reapply) does not leave it set. Compared under 0x100 in all three modes.
 sds_target() {
@@ -363,9 +365,15 @@ port_for() {
 	2500basex) param_write host_forced 1 && param_write host_autoneg 0 ;;
 	hisgmii)   param_write host_forced 1 && param_write host_autoneg 1 ;;
 	*)
-		case $(param_read host_forced) in
-		Y|1) param_write host_forced 0 || return 1 ;;
-		esac
+		# Cleared unless it reads as clear: a value that cannot be
+		# read is as likely the force a trial left. A kernel without
+		# the parameter has nothing to clear.
+		if [ -e "$PARAM_DIR/host_forced" ]; then
+			case $(param_read host_forced) in
+			N|0) ;;
+			*) param_write host_forced 0 || return 1 ;;
+			esac
+		fi
 		if [ "$(an_field running on)" = off ]; then param_write host_autoneg 0
 		else param_write host_autoneg 1; fi
 		;;
@@ -374,11 +382,14 @@ port_for() {
 
 # switch_to MODE: a live change (a trial, its revert, the boot watch,
 # reapply): the sequence unconditionally, the port side, then the read
-# back. Returns 1 when the registers do not read back as MODE.
+# back. Returns 1 when the registers do not read back as MODE or the port
+# side could not be written, and says which in unverified.
 switch_to() {
+	unverified=
 	sds_seq "$1"
-	port_for "$1" || say "could not write the port side for $(label "$1")" >&2
-	[ "$(sds_check "$1")" = ok ]
+	port_for "$1" || unverified="port side (host_forced, host_autoneg) could not be written"
+	[ "$(sds_check "$1")" = ok ] || unverified="registers did not all read back"
+	[ -z "$unverified" ]
 }
 
 # link MODE: 1, 0, or nothing when this mode has no signal (hisgmii) or the
@@ -536,7 +547,7 @@ watch() {
 			return 0
 		fi
 		if [ "$mode" = "$setting" ]; then mode=fiber1g; else mode=$setting; fi
-		switch_to "$mode" || say "the $(label "$mode") registers did not all read back" >&2
+		switch_to "$mode" || say "$(label "$mode"): its $unverified" >&2
 		running=$mode
 		if [ "$mode" = "$setting" ]; then fallback=0; else fallback=1; fi
 		event watch_switch "no host link for ${WATCH_S} s; trying $(label "$mode")"
@@ -607,19 +618,30 @@ trial_applied() {
 }
 trial_apply_failed() {
 	running=$trial_mode
-	back_to_prev trial_failed "the $(label "$trial_mode") registers did not read back"
+	back_to_prev trial_failed "$(label "$trial_mode"): its ${unverified:-registers did not all read back}"
 }
 
+# back_to_prev NAME WHY: the mode before the trial, live. A sequence that
+# does not read back, or a port side that cannot be written, is not "back
+# to": the event is revert_unverified, as apply_unverified at boot, the port
+# is taken to run that mode (reapply runs it again), and the status is 1. So
+# it is when the state file cannot be written: the trial would still be
+# there to confirm.
 back_to_prev() {
-	name=$1 why=$2
-	if [ "$running" != "$trial_prev" ]; then
-		switch_to "$trial_prev" || say "the $(label "$trial_prev") registers did not all read back" >&2
+	name=$1 why=$2 rc=0
+	if [ "$running" != "$trial_prev" ] && ! switch_to "$trial_prev"; then
+		name=revert_unverified rc=1
 	fi
 	running=$trial_prev
 	phase=steady
-	event "$name" "$why: back to $(label "$running"); HOST_SERDES unchanged ($setting)"
+	if [ "$rc" = 0 ]; then
+		event "$name" "$why: back to $(label "$running"); HOST_SERDES unchanged ($setting)"
+	else
+		event "$name" "$why: back to $(label "$running"), but its $unverified (host-serdes.sh reapply runs the sequence again); HOST_SERDES unchanged ($setting)"
+	fi
 	clear_trial
-	save
+	save || rc=1
+	return "$rc"
 }
 
 store() {
@@ -685,7 +707,7 @@ reapply_run() {
 	if switch_to "$running"; then
 		event reapplied "the $(label "$running") sequence ran again and reads back"
 	else
-		event reapply_failed "the $(label "$running") sequence ran again and does not read back"
+		event reapply_failed "the $(label "$running") sequence ran again, but its $unverified"
 	fi
 	save
 	unlock

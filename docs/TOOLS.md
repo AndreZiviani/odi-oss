@@ -1485,7 +1485,11 @@ at the end of its window unless `confirm` (over ssh, so over the link being
 tried) stores the key first. `confirm` reads the key back and fails,
 leaving the trial to revert, when it did not stick. A trial whose
 registers do not read back after the switch goes back at once
-(`trial_failed`). `reapply` answers at once and, one second later, runs the
+(`trial_failed`). When the way back does not read back either, or its port
+side (`host_forced`, `host_autoneg`) cannot be written, after an expiry, a
+revert or a failed switch, the event is `revert_unverified`, the port is
+taken to run the mode before (so `reapply` can run it again) and `revert`
+exits 1; it also exits 1 when the state file cannot be written. `reapply` answers at once and, one second later, runs the
 whole sequence of the running mode and its port side again, with no trial
 and nothing stored; the event says whether the registers read back. `try` and `reapply` refuse while a trial, a reapply or the boot
 watch runs, while `host-autoneg.sh` runs a trial or its boot watch, in a
@@ -1529,6 +1533,7 @@ klogd), at notice:
 | `fallback_nolink` | no link in either mode for 10 minutes; stays on Fiber 1G, the key unchanged |
 | `safe_mode_boot` | a safe-mode boot: Fiber 1G, nothing applied, trials refused |
 | `trial_started`, `trial_expired`, `trial_reverted`, `trial_confirmed`, `trial_failed` | a trial and how it ended |
+| `revert_unverified` | a trial ended, and the sequence of the mode before it did not read back or its port side could not be written |
 | `reapply_started`, `reapplied`, `reapply_failed` | a reapply, and whether the registers read back after it |
 | `bad_value`, `no_kernel`, `apply_failed`, `apply_unverified` | a key that is none of the three, a kernel without `host_forced` (both: the port runs Fiber 1G), a register or parameter that could not be read or written, a sequence that did not read back (the boot carries on in the mode) |
 | `sds_off`, `no_diag` | `/etc/config/sds.off` or no `diag`: nothing written to the host port |
