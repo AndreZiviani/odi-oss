@@ -96,6 +96,12 @@ listed here.
   alone: the A/B changed the 3.125G page, the receive pulse and the bit
   together, as `docs/QUALIFICATION.md` says.
 
+- Host port and management address trials: a way back that fails is the
+  exit status as well, not only the event. `host-autoneg.sh revert` exits
+  1 when `odi_switch.host_autoneg` cannot be written back, and the event
+  says so instead of "back to". A `mgmt-addr.sh` expiry whose move back
+  fails exits 1. Both returned the status of the state file write alone.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10

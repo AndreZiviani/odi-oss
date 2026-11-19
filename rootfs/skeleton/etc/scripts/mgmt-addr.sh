@@ -303,20 +303,23 @@ trial_apply_failed() {
 # network.sh addr reads the store again, and that moves the primary back and
 # takes the kept address down. Run at once, or with defer from a caller that is
 # itself on the address being left: its answer has to leave first, and the
-# event says the move is under way; settle records how it ended.
+# event says the move is under way; settle records how it ended. Returns 1
+# when the move back, run at once, fails, or the state file cannot be
+# written.
 back_to_prev() {
-	name=$1 why=$2
+	name=$1 why=$2 rc=0
 	back="back to ${prev_ip:-the stored addresses}"
 	rm -f "$TRIAL"
 	if [ "${3:-}" = defer ]; then
 		back="moving back to ${prev_ip:-the stored addresses} in a second"
 		spawn settle "$name" "$why"
 	elif ! net_addr; then
-		back="network.sh could not move back to ${prev_ip:-the stored addresses} (run network.sh addr, or reboot)"
+		back="network.sh could not move back to ${prev_ip:-the stored addresses} (run network.sh addr, or reboot)" rc=1
 	fi
 	phase=steady applied=0 trial_id='' trial_deadline=''
 	event "$name" "$why: $back; nothing was stored"
-	save
+	save || rc=1
+	return "$rc"
 }
 
 # settle [NAME WHY]: the move back, one second after the answer that asked

@@ -275,6 +275,17 @@ t "  and after it" "^1$" "$(cat "$T/param/host_autoneg")"
 t "  logged" "event=trial_failed .*could not write .*back to auto-negotiation on" "$(cat "$T/kmsg")"
 t "  the expiry clears the trial once the file can be written" "^on steady $" "$(st running) $(st phase) $(st trial_id)"
 
+# The parameter cannot be written back (a directory stands in for it):
+# revert says so in the event, not "back to", and exits 1.
+sh "$S" try off > /dev/null
+id=$(st trial_id)
+printf '#!/bin/sh\nrm -f "%s/param/host_autoneg"; mkdir "%s/param/host_autoneg"\nsh "%s" revert > /dev/null 2>&1; echo $? > "%s/revert.rc"\n' "$T" "$T" "$S" "$T" > "$T/hook"; chmod +x "$T/hook"
+sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+t "a way back that cannot be written: revert exits 1" "^1$" "$(cat "$T/revert.rc")"
+t "  logged as such" "event=trial_reverted .*could not write odi_switch.host_autoneg back to auto-negotiation on" "$(cat "$T/kmsg")"
+t "  the trial is over" "^steady $" "$(st phase) $(st trial_id)"
+rmdir "$T/param/host_autoneg"; echo 1 > "$T/param/host_autoneg"
+
 # the refusals
 out=$(sh "$S" try on 2>&1)
 t "try on while on: nothing to try" "already on" "$out"

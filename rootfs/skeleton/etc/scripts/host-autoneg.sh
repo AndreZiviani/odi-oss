@@ -317,15 +317,21 @@ trial_apply_failed() {
 	save
 }
 
+# back_to_prev NAME WHY: the mode before the trial, live. Returns 1 when
+# the parameter cannot be written back, and the event says so, or when the
+# state file cannot be written.
 back_to_prev() {
-	name=$1 why=$2
-	[ "$running" = "$trial_prev" ] || hw_write "$trial_prev"
+	name=$1 why=$2 rc=0 back="back to auto-negotiation $trial_prev"
+	if [ "$running" != "$trial_prev" ] && ! hw_write "$trial_prev"; then
+		back="could not write odi_switch.host_autoneg back to auto-negotiation $trial_prev" rc=1
+	fi
 	running=$trial_prev
 	if [ "$setting" = off ] && [ "$running" = on ]; then fallback=1; else fallback=0; fi
 	phase=steady
-	event "$name" "$why: back to auto-negotiation $running; HOST_AUTONEG unchanged ($setting)"
+	event "$name" "$why: $back; HOST_AUTONEG unchanged ($setting)"
 	clear_trial
-	save
+	save || rc=1
+	return "$rc"
 }
 
 confirm() {

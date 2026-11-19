@@ -1410,7 +1410,8 @@ and writes the mode one second later, detached, so the answer leaves before
 the link changes; the trial reverts by itself at the end of its window
 unless `confirm` (over ssh or the web UI, so over the link being tried)
 stores the key first. `confirm` reads the key back and fails, leaving the
-trial to revert, when it did not stick. `try` refuses while a trial or the
+trial to revert, when it did not stick. `revert` exits 1 when the parameter
+cannot be written back, and its event says so instead of "back to". `try` refuses while a trial or the
 boot watch runs, and says so when the mode asked for is already the one
 running and stored. It also refuses while the port runs a `HOST_SERDES`
 mode other than `fiber1g`, or while `host-serdes.sh` runs a trial or its

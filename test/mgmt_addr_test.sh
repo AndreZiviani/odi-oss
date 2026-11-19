@@ -213,8 +213,9 @@ t "confirm after the expiry is refused" "no trial is running" "$out"
 newboot; : > "$T/spawned"
 sh "$S" try LAN_IP_ADDR=10.1.1.1 > /dev/null
 hook "echo 192.168.0.1 > '$T/if.refuse'"
-run_trial
+run_trial; rc=$?
 rm -f "$T/if.refuse"
+t "failed move back: the expiry exits 1" "^1$" "$rc"
 t "failed move back: the event says network.sh could not" "event=trial_expired .*not confirmed in time: network.sh could not move back to 192\.168\.0\.1 \(run network.sh addr, or reboot\); nothing was stored" "$(cat "$T/kmsg")"
 n "failed move back: it does not claim to be back" ": back to 192\.168\.0\.1" "$(cat "$T/kmsg")"
 t "failed move back: still steady, nothing stored" "^steady trial_expired 192.168.0.1$" "$(st phase) $(st event) $(key LAN_IP_ADDR)"
