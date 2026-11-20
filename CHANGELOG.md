@@ -29,6 +29,10 @@ listed here.
   is written, that the software table is what it was and agrees with the
   chip, and that a later cmd 50 takes only its own rows.
 
+- Docs: `SETTINGS.md` no longer says the web UI lacks the host link mode;
+  it has run the same trial since confd v1.10.0. `QUALIFICATION.md` adds a
+  community report of a 2.5G media converter in HiSGMII on v1.18.1.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
