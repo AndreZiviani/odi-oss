@@ -6,7 +6,8 @@ listed here.
 ## Unreleased
 
 - Host SerDes: a 2500BASE-X lane out of sync is re-latched every 5 s
-  (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, its word back) during a
+  (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the 2500BASE-X word
+  back, so a re-latch cut before its restore is undone by the next) during a
   `2500basex` trial and in each 2500BASE-X phase of the boot watch, until
   bit 17 of 0x214 reads set. A lane started before the host sends 3.125
   Gbaud does not sync when the host starts later, and started again while
@@ -20,7 +21,8 @@ listed here.
   which sleeps the window as before unless the script defines its own. The
   re-latches take the lock with `lock_try` and skip a busy tick, so a busy
   lock cannot end a trial run before its expiry. The window ends
-  once the trial is confirmed or reverted.
+  once the trial is confirmed or reverted. A failed write in a re-latch is
+  reported as a failed re-latch.
 
 ## v1.18.1 (2026-11-18)
 

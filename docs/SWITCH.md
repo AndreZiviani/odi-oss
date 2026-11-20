@@ -1363,9 +1363,12 @@ up, and no frame is received from the host.
 **The re-latch.** A 2500BASE-X lane started before the host sends 3.125
 Gbaud does not sync when the host starts later: bit 17 of 0x214 reads set
 for one read in fifteen to fifty, never for long. Started again while the
-host sends, it syncs within seconds. The re-latch starts it again with the
-word it holds: 0x214 `HOLD_CLK_GLITCH` bit 13 := 1, `LINK_MODE` [4:0] :=
-0x1f (parked), 20 ms, then the word read before with bit 13 clear. A
+host sends, it syncs within seconds. The re-latch starts it again in
+2500BASE-X: 0x214 `HOLD_CLK_GLITCH` bit 13 := 1, `LINK_MODE` [4:0] := 0x1f
+(parked), 20 ms, then the word read before with the 2500BASE-X mode under
+0xa11f (0x16, bit 13 clear), the word a lane in 2500BASE-X held. A
+re-latch cut before that last write leaves the lane parked; the next one
+starts it again. A
 `2500basex` trial and each 2500BASE-X phase of the boot watch run it every
 5 s (`RESYNC_S`) while bit 17 reads clear, and never on a lane in sync.
 Measured against a MikroTik hEX S 2025 (E60iUGS) on HSGQ sticks: a re-latch

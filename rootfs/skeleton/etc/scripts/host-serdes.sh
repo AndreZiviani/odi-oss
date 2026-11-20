@@ -167,10 +167,15 @@ sds_read() {
 	printf "register get %s 1\n" "$1" | "$TIMEOUT" "$DIAG_S" "$DIAG" 2>/dev/null |
 		sed -n "s/^0x[0-9a-fA-F]* *0x\([0-9a-fA-F]*\).*/\1/p" | head -n 1
 }
-sds_write() {
-	printf "register set %s %s\n" "$1" "$2" | "$TIMEOUT" "$DIAG_S" "$DIAG" >/dev/null 2>&1 ||
-		echo "host-serdes: SerDes write $1 failed" >&2
+# sds_put ADDR VALUE: one write; a failed one is logged and returns 1.
+sds_put() {
+	printf "register set %s %s\n" "$1" "$2" | "$TIMEOUT" "$DIAG_S" "$DIAG" >/dev/null 2>&1 && return 0
+	echo "host-serdes: SerDes write $1 failed" >&2
+	return 1
 }
+# sds_write ADDR VALUE: the same, for the sequences, which go on past a
+# failed write and are judged by what reads back (sds_check).
+sds_write() { sds_put "$1" "$2" || :; }
 # read-modify-write: clear the bits in $2, set the bits in $3
 sds_rmw() {
 	cur=$(sds_read "$1")
@@ -292,20 +297,28 @@ sds_anf() {
 	[ $(( 0x$cur & 0x100 )) -eq 0 ] || sds_write 0x21808 "$(( 0x$cur & ~0x100 ))"
 }
 
-# sds_relatch: the lane parked and started again with the word it holds:
-# HOLD_CLK_GLITCH set, LINK_MODE parked (0x1f), 20 ms, the word back with
-# the clock running. A lane started before the host sends 3.125 Gbaud does
-# not sync when the host starts later (a host port switched to 2.5G-baseX
-# by hand after the stick, as a trial asks); started again while the host
-# sends, it syncs within seconds. Run only on a 2500BASE-X lane whose bit 17
-# reads clear: a lane in sync is never touched.
+# sds_relatch: the lane parked and started again in 2500BASE-X:
+# HOLD_CLK_GLITCH set, LINK_MODE parked (0x1f), 20 ms, then the 2500BASE-X
+# word (0x16 under 0xa11f, the other bits as read) with the clock running.
+# On a lane in 2500BASE-X that is the word it held. It is not the word read
+# back: a re-latch cut before its restore (a diag timeout, a failed write)
+# leaves the lane parked, and the next one starts it again. A lane started
+# before the host sends 3.125 Gbaud does not sync when the host starts
+# later (a host port switched to 2.5G-baseX by hand after the stick, as a
+# trial asks); started again while the host sends, it syncs within seconds.
+# Run only on a 2500BASE-X lane whose bit 17 reads clear: a lane in sync is
+# never touched. Returns 1 when the read or any write fails; the restore is
+# written even after a failed park.
 sds_relatch() {
+	mode_vars 2500basex
 	cur=$(sds_read 0x214)
 	[ -n "$cur" ] || return 1
-	sds_write 0x214 "$(printf '0x%x' $(( 0x$cur | 0x2000 )))"
-	sds_write 0x214 "$(printf '0x%x' $(( ((0x$cur | 0x2000) & ~0x801f) | 0x1f )))"
+	rl=0
+	sds_put 0x214 "$(printf '0x%x' $(( 0x$cur | 0x2000 )))" || rl=1
+	sds_put 0x214 "$(printf '0x%x' $(( ((0x$cur | 0x2000) & ~0x801f) | 0x1f )))" || rl=1
 	usleep 20000 2>/dev/null || "$SLEEP" 1
-	sds_write 0x214 "$(printf '0x%x' $(( 0x$cur & ~0x2000 )))"
+	sds_put 0x214 "$(printf '0x%x' $(( (0x$cur & ~0xa11f) | $SDS_MODE )))" || rl=1
+	return "$rl"
 }
 
 # apply_boot MODE: what the boot does. Every register is read first; if all

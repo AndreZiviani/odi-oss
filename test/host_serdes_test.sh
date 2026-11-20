@@ -19,7 +19,9 @@
 # syncs only with a lane started (0x214 written in 2500BASE-X with
 # HOLD_CLK_GLITCH clear) at or after it, as a MikroTik hEX S 2025 (E60iUGS)
 # port switched to 2.5G-baseX after the stick does; with no model
-# the registers are left as they are. Bit 17 is set in sync in either mode
+# the registers are left as they are. With "$T/failrestore" the next write
+# of 0x214 with HOLD_CLK_GLITCH clear fails and is not written, as a
+# re-latch cut before its restore. Bit 17 is set in sync in either mode
 # (a Fiber 1G stick linked to its host reads 0x260004). A forced port
 # (host_forced 1) reads host_link 1 whatever the host does, as the kernel
 # does. The real flash wrapper stores the key, in a temporary odi.conf.
@@ -69,6 +71,7 @@ case "\$1 \$2" in
 	a=\$(norm "\$3"); v=\$(printf "0x%x" "\$(( \$4 ))")
 	echo "set \$a \$v" >> "$T/sdsset"
 	[ -f "$T/readonly" ] && exit 0
+	[ -f "$T/failrestore" ] && [ "\$a" = 0x214 ] && [ \$(( v & 0x2000 )) = 0 ] && { rm -f "$T/failrestore"; exit 1; }
 	[ "\$a" = 0x214 ] && [ \$(( v & 0x1f )) = 22 ] && [ \$(( v & 0x2000 )) = 0 ] && cut -d. -f1 "$T/uptime" > "$T/lanestart"
 	grep -v "^\$a=" "$T/regs" > "$T/regs.n" 2>/dev/null; echo "\$a=\$v" >> "$T/regs.n"
 	mv "$T/regs.n" "$T/regs"
@@ -170,7 +173,7 @@ REGS
 # their defaults (host_forced N, host_autoneg Y), the registers in Fiber 1G
 # unless the test changes them; the config partition is kept.
 newboot() {
-	rm -rf "$T/run" "$T/spawned" "$T/hook" "$T/everyhook" "$T/model" "$T/sdsset" "$T/readonly" "$T/lanestart"
+	rm -rf "$T/run" "$T/spawned" "$T/hook" "$T/everyhook" "$T/model" "$T/sdsset" "$T/readonly" "$T/lanestart" "$T/failrestore"
 	mkdir -p "$T/run"
 	echo "15.00 1.00" > "$T/uptime"
 	echo N > "$T/param/host_forced"
@@ -611,6 +614,20 @@ echo latch:17 > "$T/model"
 RESYNC_S=2 sh "$S" watch > /dev/null 2>&1
 t "race, boot watch: in sync in 2500basex within the first phase, no fallback" "^serdes_link 0 2500basex$" "$(st event) $(st fallback) $(st running)"
 n "race, boot watch: no switch to Fiber 1G" "watch_switch" "$(cat "$T/kmsg")"
+# A re-latch cut between the park and the restore (a diag timeout, a
+# failed write) leaves the lane parked. The next one starts it again in
+# 2500BASE-X, not with the parked word it reads, and the failed write is
+# reported.
+setkey 2500basex
+newboot
+sh "$S" boot > /dev/null 2>&1
+echo latch:17 > "$T/model"
+: > "$T/failrestore"
+out=$(RESYNC_S=2 sh "$S" watch 2>&1)
+t "re-latch cut before its restore: the failed write reported" "SerDes write 0x214 failed.*could not be re-latched" "$(printf '%s' "$out" | tr '\n' ' ')"
+t "  ... the next re-latch syncs the lane, no fallback" "^serdes_link 0 2500basex$" "$(st event) $(st fallback) $(st running)"
+n "  ... within the first phase, no switch to Fiber 1G" "watch_switch" "$(cat "$T/kmsg")"
+t "  ... the lane in 2500BASE-X, the clock running" "^0x16$" "$(printf '0x%x' $(( $(reg 0x214) & 0xa11f )))"
 setkey ""
 rm -f "$T/model"
 
