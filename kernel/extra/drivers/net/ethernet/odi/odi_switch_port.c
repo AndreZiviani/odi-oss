@@ -84,12 +84,11 @@ void odi_sw_port_autoneg_set(uint32_t reg_a408, uint32_t reg_a412, uint32_t reg_
 
 bool odi_sw_host_pause;
 
-/* The stock admin enable of the RTL9602C SDK, as its OMCI layer reaches it
- * for a port with no forced ability (dal_rtl9602c_port_adminEnable_set(),
- * read, not copied): a lock forces the LINK ability to down, the value
- * first and then its select bit; an unlock clears the select bit and the
- * port follows its PHY or SerDes again. Field writes of bit 4 only, so
- * the host-port TX_PAUSE force (below) and anything else forced is kept.
+/* The stock firmware's port admin enable, as its OMCI layer reaches it for
+ * a port with no forced ability: a lock forces the LINK ability to down,
+ * the value first and then its select bit; an unlock clears the select bit
+ * and the port follows its PHY or SerDes again. Field writes of bit 4 only,
+ * so the host-port TX_PAUSE force (below) and anything else forced is kept.
  * The capture's unlock is this read and write on a word that held 0.
  */
 void odi_sw_port_admin_set(uint32_t port, int enable)

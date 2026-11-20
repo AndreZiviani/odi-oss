@@ -130,7 +130,9 @@ behind every rule here.
   remote build directory, the backups directory of a stick. A tool that needs such a path takes it from a
   variable (`STOCK_ROOTFS` for the extracted stock rootfs).
 - A `git grep` for known vendor source citations: file and function names,
-  and the headers of the vendor SDK (`rtk/*.h`, `rtk_*.h`).
+  the headers of the vendor SDK (`rtk/*.h`, `rtk_*.h`), its source files
+  (the `dal_` layer and the like) and OMCI platform layer, and the words a
+  comment uses for a read of that source.
 - A `git grep` for trial history in `kernel/extra`, `rootfs/skeleton` and
   `src`: trial, image and boot ids, dates, old patch numbers, "this pass".
   A comment says what is true of the code now; the story goes in the
