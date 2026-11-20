@@ -5,6 +5,8 @@ listed here.
 
 ## Unreleased
 
+## v1.19.0 (2026-11-20)
+
 - Releases: confd v1.19.0 and metricsd v1.11.1. The web UI gains an OMCI
   Topology subtab (the provisioned path drawn from the MIB pointers), asks
   before a change in a dialog of the page instead of `confirm()`, applies a
