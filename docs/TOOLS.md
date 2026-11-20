@@ -1403,7 +1403,7 @@ VLAN rebuild in place, or a re-registration. The report says which:
     apply: identity changed (GPON_SN): the ONU re-registered and is back in O5 with 6 service(s) after 41.3 s (omcid 44700 ms in all)
 
 `omci-live [seconds]` asks for a reload that changes nothing that
-re-registers the ONU. A web UI newer than v1.18.1 sends it after a save of
+re-registers the ONU. The web UI sends it from v1.19.0 on, after a save of
 VLAN keys alone: an identity change saved earlier and not applied would
 otherwise go with it. It is a verb of its own, not an option of `omci`, because an
 apply.sh without it has to refuse it: an older one stops at its usage line,
