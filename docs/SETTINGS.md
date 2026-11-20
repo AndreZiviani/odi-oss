@@ -78,7 +78,7 @@ process. omcid rereads the store and compares it with what it is running:
 
 The script reports which of the three happened and, for a re-registration,
 how long until the ONU was back in O5 with services; it waits 20 s by
-default (`APPLY_WAIT`, counted from the signal), inside the 25 s the web UI gives it, and a
+default (`APPLY_WAIT`, counted in one-second sleeps from its start, the wait for the lock included), meant to stay inside the 25 s the web UI gives it, and a
 re-registration still running then is reported as running, not as failed.
 Exit 1: no omcid running, no answer to the signal, or a `failed`, `timeout`,
 `refused`, `held`, `no_services`, `sn_not_applied` or `pw_not_applied` result (`docs/TOOLS.md`, "omcid"). Every

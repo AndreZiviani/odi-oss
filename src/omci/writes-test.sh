@@ -438,6 +438,10 @@ for c in "mib set 84 4354 FwdOp 0x00" "mib create 84 1 0" "mib delete 84 1" \
 done
 got=$($Q cli/build/omcli --vendor --id 28 -f 2>&1); rc=$?
 check "omcli --vendor --id 28 -f: refused too" "$rc:$(printf '%s' "$got" | grep -c 'does not implement')" "1:1"
+# A write by number needs -f as it does by name: id 32 is the MIB reset.
+got=$($Q cli/build/omcli --vendor --id 32 2>&1); rc=$?
+check "omcli --vendor --id 32 without -f: refused, status 1" \
+      "$rc:$(printf '%s' "$got" | grep -c 'is .mib reset., which changes')" "1:1"
 got=$($Q cli/build/omcli mib reset -f 2>&1); rc=$?
 check "an implemented setter (mib reset -f) is not refused" \
       "$rc:$(printf '%s' "$got" | grep -c 'does not implement')" "0:0"

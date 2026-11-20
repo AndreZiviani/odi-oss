@@ -280,8 +280,21 @@ int rereg_today(void)
 	return n;
 }
 
+/* b is the one word w, with or without the newline echo ends it with. */
+static int confirm_is(const char *b, const char *w)
+{
+	while (*w)
+		if (*b++ != *w++)
+			return 0;
+	return !*b || (b[0] == '\n' && !b[1]);
+}
+
 /* The confirmation apply.sh leaves for this reload: 0 none, 1 --confirm, 2
- * --revert. Taken away whatever it said. */
+ * --revert, 3 omci-live (no confirmation: change nothing that drops the line).
+ * Only the words apply.sh writes count. A file that is empty, cut short,
+ * unreadable or says anything else confirms nothing and is taken as 3: read
+ * as --confirm, as it used to be, it would apply a pending identity change
+ * that no one confirmed. Taken away whatever it said. */
 int rereg_take_confirm(void)
 {
 	char b[16];
@@ -290,13 +303,19 @@ int rereg_take_confirm(void)
 
 	if (fd < 0)
 		return 0;
-	n = sys_read((int)fd, b, sizeof b - 1);
+	do
+		n = sys_read((int)fd, b, sizeof b - 1);
+	while (n == -4);                 /* EINTR */
 	sys_close((int)fd);
 	sys_unlink(REREG_CONFIRM_PATH);
 	if (n <= 0)
-		return 1;
+		return 3;
 	b[n] = 0;
-	return str_has_prefix(b, "revert") ? 2 : 1;
+	if (confirm_is(b, "confirm"))
+		return 1;
+	if (confirm_is(b, "revert"))
+		return 2;
+	return 3;
 }
 
 /* Deactivate_ONU-ID PLOAMs addressed to our own ONU-ID that the driver has

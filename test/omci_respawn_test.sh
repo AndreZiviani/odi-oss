@@ -173,7 +173,7 @@ if [ -e "$T/dec" ]; then echo "dec=\$(cat "$T/dec")"; else echo "dec=none"; fi >
 [ -e "$T/dec.prev" ] && echo "prev=\$(cat "$T/dec.prev")" >> "$T/helper.seen"
 exit 0
 HELPER
-printf '#!/bin/sh\nexit 0\n' > "$T/scripts/respawn.sh"
+printf '#!/bin/sh\necho "$*" > "%s/respawn.args"\nexit 0\n' "$T" > "$T/scripts/respawn.sh"
 chmod +x "$T/scripts/omci-respawn-reprovision.sh" "$T/scripts/respawn.sh"
 svc_run() {
 	rm -f "$T/helper.seen"
@@ -186,7 +186,9 @@ printf 'resumed\n' > "$T/dec"
 seen=$(svc_run)
 t "first start of the boot starts no helper" "^none$" "${seen:-none}"
 t "and leaves the decision file for omcid to find" "^resumed$" "$(cat "$T/dec")"
+t "and starts omcid without -r" "/bin/omcid -a -d$" "$(cat "$T/respawn.args")"
 seen=$(svc_run)
+t "a respawn starts omcid with -r, which clears what the last one left" "/bin/omcid -a -d -r$" "$(cat "$T/respawn.args")"
 t "a respawn: the helper sees no decision file, so a stale one cannot answer" "^dec=none" "$seen"
 t "and the old decision is kept as .prev for omcid's restart detection" "^prev=resumed$" "$(grep '^prev=' "$T/helper.seen")"
 t "the old file is gone from the path the helper reads" "^1$" "$([ -e "$T/dec" ]; echo $?)"

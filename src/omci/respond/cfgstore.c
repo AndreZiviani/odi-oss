@@ -27,10 +27,78 @@
  */
 #include "omcid.h"
 
-/* Big enough for the whole store: isp1's is a few KB and the partition is
- * 240 KB with 204 KB free, so a file that does not fit here is not a config
- * store. Static, because there is no allocator. */
-static char cfgbuf[16384];
+/* Big enough for the whole store. The stores of this stick are a few KB,
+ * but a stick that ran a router firmware before keeps the WAN and
+ * port-binding tables of that firmware in the same file: one at 30 KB is
+ * known (odi-ui reads both stores into 64 KB for that reason). 16 KB used
+ * to be the size here, so the keys past it read as absent and cfg_set()
+ * wrote the cut file back.
+ * The partition is 240 KB. Static, because there is no allocator; only the
+ * pages a read touches are ever resident. */
+static char cfgbuf[65536];
+
+/* The largest store cfg_read_file() reads whole, and so the largest one
+ * cfg_set() may leave behind. */
+#define CFG_MAX ((int)sizeof cfgbuf - 1)
+
+/* One read, retried when a signal interrupts it (the omcid handlers are not
+ * SA_RESTART). 0 at the end of the file, below 0 on an error. */
+static long cfg_read(long fd, char *p, unsigned long len)
+{
+	long r;
+
+	do
+		r = sys_read((int)fd, p, len);
+	while (r == -4);                 /* EINTR */
+	return r;
+}
+
+int cfg_read_failed;
+
+/* The whole file into cfgbuf, NUL ended. Returns its length, -1 when it
+ * cannot be opened or a read fails, or -2 when it does not fit: cfgbuf then
+ * holds the part that did, which a reader may search and a writer must not
+ * write back. A failed read is not the end of the file: what came before it
+ * is not the store, and cfg_set() writing it back would cut the store there.
+ * It also sets cfg_read_failed, so a reload can tell it from a store without
+ * the key. */
+static int cfg_read_file(const char *path)
+{
+	long fd = sys_open(path, 0);
+	int n = 0, more = 0;
+
+	if (fd < 0)
+		return -1;
+	for (;;) {
+		long r = cfg_read(fd, cfgbuf + n, (unsigned long)(CFG_MAX - n));
+
+		if (r == 0)
+			break;
+		if (r < 0) {
+			sys_close((int)fd);
+			cfgbuf[0] = 0;
+			cfg_read_failed = 1;
+			return -1;
+		}
+		n += (int)r;
+		if (n >= CFG_MAX) {
+			char probe;
+
+			r = cfg_read(fd, &probe, 1);
+			if (r < 0) {
+				sys_close((int)fd);
+				cfgbuf[0] = 0;
+				cfg_read_failed = 1;
+				return -1;
+			}
+			more = r > 0;
+			break;
+		}
+	}
+	sys_close((int)fd);
+	cfgbuf[n] = 0;
+	return more ? -2 : n;
+}
 
 /* The five entities xmlconfig carries, in two tables in its rodata beside the
  * `<Value Name="%s" Value=` writer format. So values in the store ARE escaped,
@@ -126,22 +194,12 @@ static int xml_escape(const char *in, char *out, int max)
  * missing one means the store was never written. */
 int cfg_get(const char *path, const char *key, char *out, int max)
 {
-	long fd = sys_open(path, 0);
-	int n = 0, klen = str_len(key);
+	int n = cfg_read_file(path), klen = str_len(key);
 
-	if (fd < 0)
+	if (n == -1)
 		return -1;
-	for (;;) {
-		long r = sys_read((int)fd, cfgbuf + n, sizeof cfgbuf - 1 - n);
-
-		if (r <= 0)
-			break;
-		n += (int)r;
-		if (n >= (int)sizeof cfgbuf - 1)
-			break;
-	}
-	sys_close((int)fd);
-	cfgbuf[n] = 0;
+	if (n < 0)                       /* too big: search the part that fit */
+		n = (int)sizeof cfgbuf - 1;
 
 	for (int i = 0; i + 13 < n; i++) {
 		int j;
@@ -259,35 +317,40 @@ int cfg_odi_get(const char *path, const char *key, char *out, int max)
  * under when it has to be inserted -- "MIB_TABLE" or "HW_MIB_TABLE" -- and
  * getting it wrong creates a duplicate the vendor's own reader will not see.
  */
+static int write_all(long fd, const char *p, int len)
+{
+	for (int done = 0; done < len; ) {
+		long w = sys_write((int)fd, p + done, (unsigned long)(len - done));
+
+		if (w <= 0)
+			return -1;
+		done += (int)w;
+	}
+	return 0;
+}
+
+/* The element cfg_set() inserts for a key the Dir does not have yet. */
+static const char ins_pre[] = "\t\t<Value Name=\"";
+static const char ins_mid[] = "\" Value=\"";
+static const char ins_post[] = "\"/>\n";
+
 int cfg_set(const char *path, const char *dir, const char *key, const char *value)
 {
-	static char outbuf[sizeof cfgbuf + 256];
+	/* Only elen bytes of esc are ever used; it is not NUL ended. */
 	char esc[192];
 	char tmp[128];
-	int n, elen, o = 0, klen = str_len(key), dlen = str_len(dir);
+	int n, elen, klen = str_len(key), dlen = str_len(dir);
 	int at = -1, vstart = -1, vend = -1, dirend = -1;
 	long fd;
+	int bad;
 
 	elen = xml_escape(value, esc, (int)sizeof esc);
 	if (elen < 0)
 		return -1;                       /* would truncate: refuse */
-	esc[elen] = 0;
 
-	fd = sys_open(path, 0);
-	if (fd < 0)
-		return -1;
-	n = 0;
-	for (;;) {
-		long r = sys_read((int)fd, cfgbuf + n, sizeof cfgbuf - 1 - n);
-
-		if (r <= 0)
-			break;
-		n += (int)r;
-		if (n >= (int)sizeof cfgbuf - 1)
-			break;
-	}
-	sys_close((int)fd);
-	cfgbuf[n] = 0;
+	n = cfg_read_file(path);
+	if (n < 0)
+		return -1;                       /* missing, or too big to write back whole */
 
 	/* Find the key's value span, and -- in case it is absent -- the end of
 	 * the Dir it belongs in. Both in one pass over a file of a few KB. */
@@ -357,32 +420,18 @@ int cfg_set(const char *path, const char *dir, const char *key, const char *valu
 	if (at < 0 && dirend < 0)
 		return -1;                       /* no such Dir: refuse */
 
-	if (at >= 0) {
-		for (int i = 0; i < vstart; i++)
-			outbuf[o++] = cfgbuf[i];
-		for (int i = 0; i < elen; i++)
-			outbuf[o++] = esc[i];
-		for (int i = vend; i < n; i++)
-			outbuf[o++] = cfgbuf[i];
-	} else {
-		static const char pre[] = "\t\t<Value Name=\"";
-		static const char mid[] = "\" Value=\"";
-		static const char post[] = "\"/>\n";
+	/* The store as it will be, which the next read has to take whole: a
+	 * write that grows it past CFG_MAX would leave a store no later
+	 * cfg_set() may write, and keys at its end that cfg_get() reads as
+	 * absent. */
+	{
+		int out = at >= 0 ? n - (vend - vstart) + elen
+				  : n + (int)sizeof ins_pre - 1 + klen
+				    + (int)sizeof ins_mid - 1 + elen
+				    + (int)sizeof ins_post - 1;
 
-		for (int i = 0; i < dirend; i++)
-			outbuf[o++] = cfgbuf[i];
-		for (int i = 0; i < (int)sizeof pre - 1; i++)
-			outbuf[o++] = pre[i];
-		for (int i = 0; i < klen; i++)
-			outbuf[o++] = key[i];
-		for (int i = 0; i < (int)sizeof mid - 1; i++)
-			outbuf[o++] = mid[i];
-		for (int i = 0; i < elen; i++)
-			outbuf[o++] = esc[i];
-		for (int i = 0; i < (int)sizeof post - 1; i++)
-			outbuf[o++] = post[i];
-		for (int i = dirend; i < n; i++)
-			outbuf[o++] = cfgbuf[i];
+		if (out > CFG_MAX)
+			return -1;
 	}
 
 	/* Same directory, so the rename is within one filesystem. */
@@ -396,17 +445,28 @@ int cfg_set(const char *path, const char *dir, const char *key, const char *valu
 	fd = sys_create(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0)
 		return -1;
-	for (int done = 0; done < o; ) {
-		long w = sys_write((int)fd, outbuf + done, (unsigned long)(o - done));
-
-		if (w <= 0) {
-			sys_close((int)fd);
-			sys_unlink(tmp);
-			return -1;
-		}
-		done += (int)w;
+	/* Written in pieces straight from cfgbuf: the bytes before the value
+	 * (or before the closing tag of the Dir), the new part, the rest. */
+	if (at >= 0) {
+		bad = write_all(fd, cfgbuf, vstart) ||
+		      write_all(fd, esc, elen) ||
+		      write_all(fd, cfgbuf + vend, n - vend);
+	} else {
+		bad = write_all(fd, cfgbuf, dirend) ||
+		      write_all(fd, ins_pre, (int)sizeof ins_pre - 1) ||
+		      write_all(fd, key, klen) ||
+		      write_all(fd, ins_mid, (int)sizeof ins_mid - 1) ||
+		      write_all(fd, esc, elen) ||
+		      write_all(fd, ins_post, (int)sizeof ins_post - 1) ||
+		      write_all(fd, cfgbuf + dirend, n - dirend);
 	}
-	sys_close((int)fd);
+	/* jffs2 can report a write it could not finish only at close. */
+	if (sys_close((int)fd) < 0)
+		bad = 1;
+	if (bad) {
+		sys_unlink(tmp);
+		return -1;
+	}
 	if (sys_rename(tmp, path) < 0) {
 		sys_unlink(tmp);
 		return -1;
@@ -1355,7 +1415,7 @@ int fixed_me_upload(int want, uint8_t *body, uint16_t *len)
  * empty are the same to the OLT, the report keys count only while the
  * identity switch is on (with it off they are stored and shown, never sent),
  * and a LOID is the one the vendor rule picks (LOID_OLD wins). */
-void cfg_load_all(void)
+void cfg_load_values(void)
 {
 	cfg_load_identity();
 	cfg_load_vlan();
@@ -1368,6 +1428,11 @@ void cfg_load_all(void)
 	cfg_load_custom_me();
 	cfg_load_custom_mcast();
 	cfg_load_pots_ports();
+}
+
+void cfg_load_all(void)
+{
+	cfg_load_values();
 	aut_rebuild();
 }
 
@@ -1389,7 +1454,7 @@ void cfg_snap_take(struct cfg_snap *s)
 	s->pots_slot = pots_slot;
 }
 
-void cfg_snap_restore(const struct cfg_snap *s)
+void cfg_snap_restore_values(const struct cfg_snap *s)
 {
 	ident = s->ident;
 	vlanCfg = s->vlan;
@@ -1405,6 +1470,11 @@ void cfg_snap_restore(const struct cfg_snap *s)
 	pots_ports = s->pots_ports;
 	pots_slot_key = s->pots_slot_key;
 	pots_slot = s->pots_slot;
+}
+
+void cfg_snap_restore(const struct cfg_snap *s)
+{
+	cfg_snap_restore_values(s);
 	aut_rebuild();
 }
 

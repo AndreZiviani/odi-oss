@@ -67,7 +67,9 @@ static struct {
 	int sn_failed;
 	int pw_failed;
 	unsigned pending;                /* CFGD_SN, CFGD_PLOAM: in the store, not in the driver */
-	int act_failed;                  /* the last gponact failed: left deactivated */
+	int act_failed;                  /* a reload left the ONU deactivated: gponact
+					  * failed, or the store had no serial number */
+	int retry;                       /* this reload re-registers for that alone */
 	int confirm;                     /* rereg_take_confirm() of this reload */
 	long deact_base;                 /* Deactivate_ONU-IDs before gponact, -1 unknown */
 	unsigned refusals;               /* and since */
@@ -173,6 +175,8 @@ static void status_write(int done, const char *result, long o5_ms)
 	sline(&s, "action", rl.action);
 	sline(&s, "result", result);
 	sline(&s, "keys", rl.keys);
+	if (rl.retry)
+		sline(&s, "retry", "1");
 	sline_u(&s, "duration_ms", (unsigned long)since_ms(rl.start_s, rl.start_ms));
 	if (o5_ms >= 0)
 		sline_u(&s, "o5_ms", (unsigned long)o5_ms);
@@ -185,8 +189,13 @@ static void status_write(int done, const char *result, long o5_ms)
 		if (today >= 0)
 			sline_u(&s, "today", (unsigned long)today);
 	}
-	(void)atomic_write(RELOAD_STATUS_PATH, RELOAD_STATUS_TMP_PATH,
-			   (const uint8_t *)s.b, (uint32_t)s.n);
+	/* A status that cannot be written (a full /var) must not leave the
+	 * one before standing: the "running" this reload wrote at its start
+	 * would have apply.sh refuse every later reload as still applying. No
+	 * file is no run, which apply.sh reads as such. */
+	if (atomic_write(RELOAD_STATUS_PATH, RELOAD_STATUS_TMP_PATH,
+			 (const uint8_t *)s.b, (uint32_t)s.n) < 0)
+		sys_unlink(RELOAD_STATUS_PATH);
 }
 
 /* ------------------------------------------------------------ the driver */
@@ -351,10 +360,14 @@ static void activate(void)
 		const char *sn = cfg_sn_label(&ident);
 
 		/* No serial number at all (a store config-reseed.sh recreated,
-		 * or one the owner emptied): the ONU stays deactivated, as rcS
+		 * one the owner emptied, or one with the key gone from both
+		 * files, which reads as -1): the ONU stays deactivated, as rcS
 		 * leaves it (pon_step_gponact), rather than ranging with the
 		 * serial the driver starts with. */
-		if (!ident.snLen) {
+		if (ident.snLen <= 0) {
+			/* Deactivated, as after a failed gponact: the next
+			 * reload re-registers, VLAN keys alone or none. */
+			rl.act_failed = 1;
 			finish("no_serial", -1);
 			return;
 		}
@@ -419,40 +432,67 @@ static void activate(void)
 		finish("ok", -1);
 }
 
-/* The guard (rereg.c): the OLT refused the last changes, and nobody
- * confirmed this one. The daemon goes on with the identity it runs, the OLT
- * sees nothing, and a confirmed reload applies the store as it then is.
- * Nothing is recorded: a held change never reached the OLT. */
-static void hold(const struct cfg_snap *old)
+/* A changed identity not applied, `why` says why: "held", the guard
+ * (rereg.c: the OLT refused the last changes, and nobody confirmed this
+ * one), or "deferred", a live reload (below). The daemon goes on with what
+ * it runs, the OLT sees nothing, and a later reload applies the store as it
+ * then is. Nothing is recorded: the change never reached the OLT. */
+static void hold(const struct cfg_snap *old, const char *why)
 {
-	cfg_snap_restore(old);
+	/* The values only: the autonomous entities were never rebuilt from
+	 * the ones read, so their alarms and AVC baselines stand. */
+	cfg_snap_restore_values(old);
 	rl.base = *old;
 	rl.changed = "identity";
-	rl.action = "held";
+	rl.action = why;
 	ev_reload(rl.changed, rl.action, rl.keys);
-	finish("held", -1);
+	finish(why, -1);
 }
 
 static void do_reload(void)
 {
 	struct cfg_snap old, cur;
 	unsigned mask;
-	int retry;
+	int retry, fresh;
 
 	rl.seq++;
+	rl.retry = 0;
 	now_ms(&rl.start_s, &rl.start_ms);
 	/* Taken away by every reload, used or not: a confirmation is for the
 	 * reload apply.sh asked for, never a later one. */
 	rl.confirm = rereg_take_confirm();
 	rl.refusals = 0;
 	cfg_snap_take(&old);
-	cfg_load_all();
+	/* The values first, the autonomous entities only once the reload
+	 * runs on them (below): a held or deferred reload leaves the ONU as
+	 * it was, its alarm state too. */
+	cfg_read_failed = 0;
+	cfg_load_values();
+	/* A store that opened but could not be read is not one without keys:
+	 * taken as read, a serial number missing from it would take the ONU
+	 * off the line (no_serial). Nothing changes, and apply.sh says so. */
+	if (cfg_read_failed) {
+		cfg_snap_restore_values(&old);
+		rl.keys[0] = 0;
+		rl.changed = "none";
+		rl.action = "none";
+		ev_reload(rl.changed, rl.action, 0);
+		finish("unreadable", -1);
+		return;
+	}
 	cfg_snap_take(&cur);
 	mask = cfg_snap_diff(&rl.base, &cur);
-	/* The last activation failed and the ONU is still deactivated: an
-	 * apply with nothing new re-registers all the same, since reporting
-	 * ok would leave the line down with nothing said. */
-	retry = !mask && rl.act_failed;
+	/* A serial number or password edited since the last run. */
+	fresh = (mask & CFGD_IDENTITY) != 0;
+	/* The last reload left the ONU deactivated (gponact failed, or there
+	 * was no serial number): an apply re-registers whatever it brings,
+	 * nothing new or VLAN keys alone, since reporting ok, or a rebuild in
+	 * place with the ONU "still in O5", would leave the line down with
+	 * nothing said. */
+	retry = rl.act_failed;
+	/* Said in the status file when that is the only reason: apply.sh
+	 * omci-live then reports a re-registration, not a rebuild in place. */
+	rl.retry = retry && !fresh;
 	/* A re-registration sends again what the driver refused last time. */
 	if ((mask & CFGD_IDENTITY) || retry)
 		mask |= rl.pending;
@@ -463,6 +503,7 @@ static void do_reload(void)
 		/* Nothing new, but the store still holds a serial number or
 		 * password the driver did not take: not ok, and no second
 		 * re-registration for the same value. */
+		aut_rebuild();
 		rl.changed = "identity";
 		rl.action = "none";
 		ev_reload(rl.changed, rl.action, 0);
@@ -470,6 +511,7 @@ static void do_reload(void)
 		return;
 	}
 	if (!mask && !retry) {
+		aut_rebuild();
 		rl.changed = "none";
 		rl.action = "none";
 		ev_reload(rl.changed, rl.action, 0);
@@ -479,11 +521,24 @@ static void do_reload(void)
 	/* The baseline moves with the decision: the daemon now runs the new
 	 * values. do_reregister puts the old ones back if it cannot start. */
 	rl.base = cur;
-	if ((mask & CFGD_IDENTITY) && !retry && !rl.confirm &&
-	    rereg_streak() >= REREG_HOLD) {
-		hold(&old);
+	/* apply.sh omci-live, what the web UI sends after a VLAN save: a
+	 * reload that changes nothing that drops the line. An identity change
+	 * waiting in the store (saved earlier, not applied) is not applied with
+	 * it: the whole reload is deferred, the VLAN keys too, and a plain
+	 * reload applies both. A retry is not deferred, nor held: the line is
+	 * down already, and re-registering is the way back. That is a retry
+	 * with no new identity; one that brings a new serial number or password
+	 * is an identity change like any other, and both rules hold for it. */
+	if ((mask & CFGD_IDENTITY) && (!retry || fresh) && rl.confirm == 3) {
+		hold(&old, "deferred");
 		return;
 	}
+	if ((mask & CFGD_IDENTITY) && (!retry || fresh) && !rl.confirm &&
+	    rereg_streak() >= REREG_HOLD) {
+		hold(&old, "held");
+		return;
+	}
+	aut_rebuild();
 	if ((mask & CFGD_IDENTITY) || retry) {
 		do_reregister(&old);
 		if (rl.phase == RL_IDLE)

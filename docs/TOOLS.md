@@ -143,7 +143,9 @@ daemon that decides whether the OLT sees a working ONU.
 
     -a          program the switch (apply mode); without it, dry run
     -r          restart: first remove every bridge connection a previous
-                omcid left in the switch (with -a)
+                omcid left in the switch (with -a). A respawn that does
+                not resume does this on its own; a resumed omcid keeps
+                them either way
     -d          daemon: no frame or idle limit
     -w units    exit after this many idle 5 s units (default 24)
     -c hex      use this capability blob instead of the driver one
@@ -245,7 +247,8 @@ at `result=failed` when the driver refused `gpondeact` (nothing was touched,
 and omcid goes back to the values it was running with, so the next SIGHUP
 tries again) or `gponact` (the ONU is left off the line), or at
 `result=no_serial` when the store holds no serial number at all: the ONU is
-left deactivated, as rcS leaves it at boot (`config-reseed.sh`). A refused `gponsn`
+left deactivated, as rcS leaves it at boot (`config-reseed.sh`), and the next
+reload re-registers as after a refused `gponact` (below). A refused `gponsn`
 does not stop the activation: the ONU comes back on the old serial number and
 the result is `sn_not_applied`. The serial number is rewritten into the
 PLOAM slot the boot activation armed, and only while the ONU is deactivated.
@@ -256,15 +259,17 @@ in `pw_not_applied`: the driver keeps the old password. A later reload with
 nothing changed in the store reports the same result again without a second
 re-registration, until the store holds a value the driver takes. A refused
 `gponact` ends in `failed` and leaves the ONU deactivated; the next reload
-re-registers even with nothing changed, rather than reporting `ok`.
+re-registers whatever it brings, nothing changed or VLAN keys alone, rather
+than reporting `ok` or rebuilding in place. Its status file says `retry=1`
+when that is the only reason it re-registers.
 
 Three event lines tell the story (below): `event=reload changed=... action=...
 keys=...` (key names, never values), `event=reload_step verb=... rc=...` for
 each driver verb, and `event=reload_done ... result=... duration_s=...
 [o5_s=...] services=N`. They are never rate limited. `/var/run/omcid-reload`
 holds the same outcome for `apply.sh` (`id` pid.sequence, `state`, `changed`,
-`action`, `result`, `keys`, `duration_ms`, `o5_ms`, `services`, and for an
-identity change `refusals`, `streak` and, with the clock set, `today`),
+`action`, `result`, `keys`, `retry`, `duration_ms`, `o5_ms`, `services`, and
+for an identity change `refusals`, `streak` and, with the clock set, `today`),
 replaced whole by a rename; omcid removes a stale one at start.
 
 **Re-registrations are counted, and held back after refusals.** Some
@@ -1024,6 +1029,12 @@ omcli uses omcid's own queue and commands:
     omcli ident [cs.xml hs.xml [odi.conf]]  the identity and the OLT
                                          identity keys, and whether those are
                                          reported (passwords are never printed)
+                                         Without paths both read the store
+                                         and change nothing omcid runs with;
+                                         keys that differ from it are named
+                                         on a `not applied` line. With paths
+                                         they load the files into omcid (the
+                                         suites inject fixtures that way)
     omcli bridge <ingress|any> <gem> <dir>   build one bridge rule by hand
     omcli cfgset <file> <dir> <key> <v>  write one key into a config store
     omcli frames [--pcap FILE] [--full]  the last OMCI frames as bytes, or as
@@ -1125,7 +1136,8 @@ OMCI frame in as if it came off the line, with the trailer and CRC filled in
 (omcid drops a frame whose trailer or CRC is wrong; `--inject-raw HEX` sends
 bytes exactly as given, of any length, to test that; `--inject-file F` every
 frame in F, one per line, back to back), `--vendor` talks to a stock
-daemon instead, `--id N [-f]` sends a raw command id.
+daemon instead, `--id N [-f]` sends a raw command id (`-f` is needed for an
+id that writes, known or not, as for the named command).
 
 ### `omciprobe` -- one raw driver command
 
@@ -1390,11 +1402,52 @@ VLAN rebuild in place, or a re-registration. The report says which:
 
     apply: identity changed (GPON_SN): the ONU re-registered and is back in O5 with 6 service(s) after 41.3 s (omcid 44700 ms in all)
 
+`omci-live [seconds]` asks for a reload that changes nothing that
+re-registers the ONU. A web UI newer than v1.18.1 sends it after a save of
+VLAN keys alone: an identity change saved earlier and not applied would
+otherwise go with it. It is a verb of its own, not an option of `omci`, because an
+apply.sh without it has to refuse it: an older one stops at its usage line,
+where it took an unknown option for the seconds and applied the whole store.
+With such a change in the store omcid applies nothing, the VLAN keys
+included (`event=reload changed=identity action=deferred`,
+`result=deferred`), and the report names the keys and exits 3, which a
+caller can tell from a failure; a plain `apply.sh omci` then applies both. A reload with no identity change runs as
+without the option, and so does one after a failed activation (or a
+`no_serial`) that brings no new serial number or password, where the line is
+down already: it re-registers, the report says so, and `omci-live` exits 4
+when that worked or still runs at the bound, so a caller can tell it from an
+apply in place.
+
+One `omci` or `omci-live` reload is signalled at a time
+(`/var/run/apply-omci.lock`, held until omcid has answered, which is a
+new run in the status file of an omcid the signal went to): the
+confirmation it leaves for omcid is one shared file. A second apply.sh waits
+for the first one's answer, up to 5 s and never past its bound, and
+otherwise exits 1 without writing or signalling anything; the seconds it
+waited count against its bound. It also exits 1, with nothing written or
+signalled, while omcid still runs the reload before (`state=running`, with
+an `id` whose pid is a running omcid): omcid takes the next signal only
+once that one is done, a re-registration up to 153 s on. When omcid does not
+answer within those 5 s, the lock stays held until it does or no omcid the
+signal went to lives: the reload the signal starts late would take the
+confirmation the next apply.sh leaves. That is at most `LINGER_MAX` (180
+one-second sleeps), past the longest reload, so an omcid that could not
+write its status does not hold every later apply off. omcid removes the
+status file when it cannot write it, so a `running` from the start of a
+reload does not outlive it, unless that removal fails as well.
+omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`); a
+file that is empty, cut short or says anything else confirms nothing and
+counts as `live`. The outcome reported is this run's: when the next reload
+has started before it was read, apply.sh says so and exits 1.
+
 A re-registration still running at the bound is reported as still working and
 is not a failure. Exit 1 when no omcid runs (or `/etc/config/modules.off` is
 set), when omcid does not answer the signal within 5 s (an older build treats
 SIGHUP as stop), or when the reload's result is `failed`, `timeout`,
-`no_services`, `sn_not_applied`, `pw_not_applied` or `no_serial`. It never starts an omcid and writes
+`no_services`, `sn_not_applied`, `pw_not_applied`, `no_serial`, `held` or
+`unreadable` (the config store opened but a read of it failed; nothing was
+changed), exit 3 for `deferred`, and exit 4 for an `omci-live` that
+re-registered after a failed activation. It never starts an omcid and writes
 nothing to the driver: init owns the process, and a second omcid started here
 used to make the ONU cycle through O1 to O3 while init's respawn entry
 re-provisioned around it.

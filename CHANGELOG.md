@@ -5,6 +5,118 @@ listed here.
 
 ## Unreleased
 
+- omcid: a reload stops at `unreadable` and changes nothing when the
+  config store opens but a read of it fails. Since stores up to 65,535
+  bytes are read whole, such a store read as empty, and a reload took the
+  missing serial number for one deleted: it deactivated the ONU and left
+  it off the line at `no_serial`. Before, the first part read was taken
+  for the whole store, which a signal arriving during the read could cut
+  as well.
+
+- omcid: a reload after a failed activation re-registers also when it
+  brings only VLAN keys. With nothing changed it already did; a new VLAN
+  value took the rebuild in place instead, and `apply.sh` reported the ONU
+  as still in O5 while it stayed deactivated. One that brings a new serial
+  number or password is an identity change like any other: `omci-live`
+  defers it, and a run of refusals holds it. A reload that stopped at
+  `no_serial` leaves the ONU deactivated as well, and the next one now
+  re-registers in the same way. Such a reload says `retry=1` in
+  `/var/run/omcid-reload`, and `apply.sh` reports it as a re-registration:
+  `omci-live` exits 4 when it worked or still runs at the bound, so the web
+  UI no longer says it applied without one.
+
+- omcid: an ANI-G attribute past 16 (17 to 20, the ONU default
+  thresholds) is no longer tested against the 16-bit mask of written
+  attributes. The alarm code reads them once a second in O5 when a
+  threshold is at its default and the OLT has Set any ANI-G attribute, and
+  the shift count was then negative, which C leaves undefined. On MIPS it
+  served the built-in default, the right value by accident; it now does so
+  by the code.
+
+- omcid: a reload keeps the alarm state of the ONU's own entities when it
+  does not change them. Each reload rebuilt that list and cleared every
+  alarm bitmap, pending notification and ARC timer with it, so an
+  `apply.sh omci` that changed nothing declared a standing alarm such as
+  LAN-LOS to the OLT again. A held or deferred reload now leaves the list
+  alone altogether: it is rebuilt only once the reload runs on what it
+  read.
+
+- omcli: `--id N` asks for `-f` when N is a known command that writes, as
+  the named command does. Only unknown ids needed it, so `omcli --vendor
+  --id 32` sent a MIB reset to omcid without the confirmation `omcli mib
+  reset` asks for.
+
+- omcid: config stores up to 65,535 bytes are read whole, and one that is
+  still larger is never written back cut. A stick that ran a router
+  firmware before keeps that firmware's tables in the same file (30 KB is
+  known); omcid read 16 KB of it, so later keys such as the LOID or the
+  manual VLAN read as absent, and `omcli cfgset` wrote the first 16 KB
+  back as the whole store. The writer now copies straight from the read
+  buffer, which saves its second 16 KB buffer, and no longer writes a byte
+  past its 192-byte escape buffer for a value of exactly that length. It
+  also refuses a write that would grow the store past 65,535 bytes (the
+  next read could not take it whole), a read that fails part way (what
+  came before it is not the store), and a new file the filesystem reports
+  as not written at close.
+
+- omcid: a respawn that does not resume removes the bridge connections,
+  flows and queues the omcid before it left in the switch, and the
+  snapshot that describes them. The clean-up ran only with `-r`, which
+  nothing passes, so a respawned omcid that started empty never withdrew
+  the old services, and a provisioning with fewer of them left the rest
+  forwarding until a reboot. A resumed omcid now keeps them even with
+  `-r`, which used to clear the datapath it had just taken over.
+  `svc-omcid.sh` passes `-r` on a respawn, so the clean-up does not depend
+  on the decision files an omcid that died early may have removed, and an
+  id whose deactivation fails stays taken and is tried again rather than
+  counted as cleared.
+
+- Reload: a store with no `GPON_SN` key in either file stops the
+  re-registration at `no_serial`, as an empty key already did. An absent
+  key reads as -1 and the check tested only for 0, so the ONU was
+  activated again on the serial the driver still held.
+
+- omcli: `omcli vlan` and `omcli ident` without paths only show the store.
+  They loaded it into the running omcid: a VLAN edit not yet applied went
+  live at the next rebuild the OLT triggered, with no reload, and the diag
+  bundle runs `omcli vlan` every time. After `omcli ident` the
+  re-registration guard took the edited identity for the running one, so a
+  held change could end as `changed=none` and never reach the driver. The
+  views now put back what omcid runs with and name the keys that differ on
+  a `not applied` line. The forms with paths still load the files.
+
+- apply.sh: `omci-live` reloads only what keeps the ONU in O5. With an
+  identity change also waiting in the store (a serial number saved and not
+  applied) omcid applies nothing, the VLAN keys included, logs
+  `action=deferred`, and the report names the keys and exits 3; a plain
+  `apply.sh omci` applies both. It is for the web UI, whose save of VLAN
+  keys alone applies them straight away and took a pending serial number
+  along, so the ONU re-registered while the page said it stayed in O5. A
+  verb rather than an option, so an older apply.sh stops at its usage line
+  instead of applying the whole store. `omci` also refuses an option it does
+  not know and seconds that are no number, where it took either for the
+  bound, and signals one reload at a time: two at once could swap the
+  confirmation each one leaves for omcid. Only a new run of an omcid it
+  signalled is the answer (the id is pid.sequence), and the omcid are named
+  under the lock. After a signal omcid did not answer in time, the lock
+  stays held until it does, no omcid it went to lives, or for at most
+  `LINGER_MAX` (180 one-second sleeps, past the longest reload), and the
+  outcome reported is always this run's. A reload is not signalled while
+  omcid still runs the one before: it takes the next signal only once that
+  is done, a re-registration up to 153 s on, by which time the lock would be
+  gone. apply.sh says so and exits 1; a status left `running` by an omcid
+  that is gone does not count. The seconds spent waiting for the lock and
+  for the acknowledgement count against the bound, and neither wait goes
+  past it. They are counted in sleeps of one second, so two applies at once
+  no longer add up to twice the bound; the time the commands themselves take
+  is not counted. A bound of 0 s is refused before anything is signalled. When omcid cannot write the status file (a full `/var`),
+  it removes it instead of leaving the `running` of the reload's start
+  standing, unless the removal fails too. omcid takes only the exact words
+  apply.sh writes: an empty file, or one cut before its word ends, counted
+  as `--confirm` and now counts as `omci-live`. `test/bin/flock`, the
+  stand-in for a host without flock (macOS), also takes `flock FILE CMD`,
+  and `test/apply_test.sh` uses it, so the lock cases run there too.
+
 - services: `start omcid` arms omcid's watchdog deadline only when
   `svc-omcid.sh` will start omcid. With `modules.off` set, an `omcid.off`
   that could not be removed (a read-only config partition) or no
