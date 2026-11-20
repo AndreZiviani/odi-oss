@@ -762,8 +762,10 @@ static int cf_insert(const struct odi_sw_cf_leg *l, uint32_t *top)
 
 /* Takes back a cf_insert() of this call whose rows are still only queued:
  * row p leaves the software table, and the rows the insert moved up, p + 1
- * to top, move back down with their owners. The caller has already taken
- * p out of its slot, so cf_moved() finds only the rows of other services.
+ * to top, move back down with their owners: cf_moved() only sees rows
+ * above p, those of other services and the other leg of this slot, if it
+ * went in above p. The caller has already taken p out of its slot, so the
+ * release of the slot that follows has no row there to delete on the chip.
  */
 static void cf_uninsert(uint32_t p, uint32_t top)
 {
@@ -1111,7 +1113,7 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 			 * last insert first, so the table is again what the
 			 * chip holds. A release of the slot as it stands would
 			 * delete the chip row at the new position, which on the
-			 * chip is still another service's. Nothing is written
+			 * chip still belongs to another service. Nothing is written
 			 * for it: the refused rule is never live, and no other
 			 * row moves. An older rule this id named was released
 			 * above, before the inserts, as on any replace. */
