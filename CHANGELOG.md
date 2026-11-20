@@ -5,6 +5,30 @@ listed here.
 
 ## Unreleased
 
+- GPON: `/proc/odi_gpon/ploam` masks the PLOAM password. The ring printed
+  the ten password bytes of every upstream Password message (type 0x02) in
+  clear, three copies per Request_Password, until newer messages pushed
+  them out; only the AES key of an Encryption_Key was masked. The file is
+  world-readable and easy to paste into an issue. The password bytes now
+  print as `xx`; the diag bundle withholds the message as before.
+
+- Switch: a cmd 51 the classifier table refuses no longer deletes another
+  service's rule. A two-way rule with one leg that went in with a row shift
+  and one that found no row was released before the shift reached the chip,
+  so the release cleared the chip row of an older, active service, and a
+  later cmd 50 for a service at a shifted position cleared the row next to
+  the one it meant until omcid rebuilt all services. The refusal now takes
+  the leg that went in back out of the software table and moves the shifted
+  rows back, and writes nothing to the switch for it: the refused rule is
+  never live, and no other row moves. A cmd 51 that gives a service id a
+  different rule still releases the old one first, as before, so only a new
+  service is refused with no write at all. A host test fills the ordered
+  region and has two new services refused, one whose upstream leg shifts
+  every row and one whose downstream leg shifts the rows below a hole after
+  the bottom region had no row for its upstream leg, and checks that nothing
+  is written, that the software table is what it was and agrees with the
+  chip, and that a later cmd 50 takes only its own rows.
+
 - omcid: a reload stops at `unreadable` and changes nothing when the
   config store opens but a read of it fails. Since stores up to 65,535
   bytes are read whole, such a store read as empty, and a reload took the

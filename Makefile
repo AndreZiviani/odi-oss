@@ -219,6 +219,7 @@ test-host:
 	bash test/odi_switch_bdgconn_vlan_test.sh
 	bash test/odi_switch_bdgconn_extvlan_test.sh
 	bash test/odi_switch_bdgconn_uplink_test.sh
+	bash test/odi_switch_bdgconn_full_test.sh
 	bash test/odi_switch_init_platform_test.sh
 	bash test/odi_switch_acl_clean_test.sh
 	bash test/odi_host_pause_test.sh

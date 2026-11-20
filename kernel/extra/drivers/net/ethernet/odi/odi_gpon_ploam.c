@@ -212,12 +212,13 @@ void odi_gpon_ploam_ring_content(int upstream, uint8_t type,
 {
 	static const char hex[] = "0123456789abcdef";
 	int key = upstream && type == ODI_GPON_US_ENCRYPTION_KEY;
+	int pw = upstream && type == ODI_GPON_US_PASSWORD;
 	unsigned int i;
 
 	for (i = 0; i < ODI_GPON_PLOAM_CONTENT_LEN; i++) {
 		char *o = &out[3U * i];
 
-		if (key && i >= 2U) {
+		if (pw || (key && i >= 2U)) {
 			o[0] = 'x';
 			o[1] = 'x';
 		} else {

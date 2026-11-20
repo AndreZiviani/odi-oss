@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# odi_switch_bdgconn_full_test.sh -- a cmd 51 the classifier table refuses
+# leaves the switch as it found it.
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+BIN=$(mktemp -t odi_switch_bdgconn_full_test.XXXXXX)
+trap 'rm -f "$BIN"' EXIT
+cc ${ODI_SAN_CFLAGS-} -std=c99 -Wall -Wextra -Werror -I "$ROOT/test" -I "$ROOT/src/omci" \
+	-I "$ROOT/kernel/extra/drivers/net/ethernet/odi/uapi" \
+	-o "$BIN" "$ROOT/test/odi_switch_bdgconn_full_test.c"
+"$BIN"
