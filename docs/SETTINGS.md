@@ -817,7 +817,8 @@ mode. Only the confirm stores `HOST_SERDES` (confirming `fiber1g` removes
 it). A reboot during the trial also undoes it. A trial is refused while
 another one runs, while the boot watch (below) runs, while a
 `host-autoneg.sh` trial or boot watch runs, in a safe-mode boot, and with
-`/etc/config/sds.off`. The web UI does not offer the setting yet.
+`/etc/config/sds.off`. The web UI runs the same trial: Config, Network,
+Host port, the link mode, then Try this mode and Keep.
 `host-serdes.sh reapply` runs the sequence of the running mode again, live,
 with no trial and nothing stored: the way to check on a stick that the
 sequence itself brings a link back.
