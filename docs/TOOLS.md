@@ -538,6 +538,13 @@ queries from the host side; `not sent` the ones that should have gone and
 could not (no classifier row takes the frame, which the switch would have
 dropped too, or a failed send), which the log names each time.
 
+The daemon's log (a line or more for each frame that changes something or
+does not parse) is limited to 4096 bytes a second, so a host that floods the
+UNI with reports cannot fill `/var` with it; a second that had more is
+followed by `log limited: N bytes not shown`, which counts against the
+second it is written in. `igmpd -s`, the state file and
+the rows are not limited.
+
 **Off unless asked for.** `svc-igmpd.sh` runs `igmpd -w` only while
 `IGMP_SNOOPING=1` is in the config store (`apply.sh igmp` applies a change);
 otherwise the respawn entry parks and the switch floods multicast as it
@@ -581,8 +588,10 @@ says IGMP function 0. The profile also supplies
   must not block a stream), and so does a list longer than 32 ranges. A
   static range of up to 16 groups becomes a row a group with the UNI as
   member and never expires; a wider one cannot be named in the switch, and
-  neither can a group past the 128 the table holds, and igmpd then leaves
-  the PON's drop off so the range still flows.
+  neither can a group past the 128 the table holds, nor one outside
+  224.0.0.0/24 whose MAC is a link-local one (239.0.0.9 is
+  01:00:5e:00:00:09, which igmpd never writes a row for), and igmpd then
+  leaves the PON's drop off so the range still flows.
 
 The access control lists are read as G.988 9.3.27 lays them out: a logical
 row is a part 0 row (GEM port, VLAN, IPv4 source, start and end of the
@@ -1201,8 +1210,16 @@ copy stays unreadable, `commit` and every form of `setenv` stay refused
 offers no way out until the partition can be read again. A raw restore of the
 environment partitions (`docs/FLASHING.md`, "Restore") is the documented
 route for a damaged environment; it is not promised to help when the flash
-itself cannot be read. `getenv` and `fallback` do not check for this: they
-use the copy they could read.
+itself cannot be read. `getenv` and `fallback` refuse as well: the copy that
+could not be read may be the one U-Boot picks, so the other one is not the
+answer. They print `a copy of the environment could not be read in full`,
+give no value and exit 3, a status of its own (a name that is not set
+exits 0 with nothing printed, no valid copy exits 1), so a caller does not
+have to match the text. The upgrade guard (`fwu_starter.sh`) and
+`slot-state.sh` take it as unknown, and `fwu.sh` refuses to write on it
+(`FWU_FORCE=1` overrides it). `fwu.sh` bounds its reads with `timeout` where
+the image has it, and a read that ran into the bound, was killed or could
+not run (exit 124 or more) is a refusal there too.
 
 `nv commit` also sets `mupgrade_en=0`, in the same two writes. The stock
 bootloader ships it as 1, which makes it listen on the host link after the
@@ -1272,10 +1289,10 @@ all twelve keys, a value empty when it cannot be told:
 | `sw_tryactive` | `sw_tryactive` in the primary copy, as stored (`2` when no trial is pending) |
 | `primary_copy` | `1` or `2`: the copy U-Boot boots from (`env` or `env2`); empty when neither is valid |
 | `primary_sw_commit` | `sw_commit` in that copy, `0` or `1` |
-| `fallback_copy` | the other copy, `1` or `2`; empty when it is not valid |
+| `fallback_copy` | the other copy, `1` or `2`; empty when it is not valid, or when `nv fallback` gave no answer to go by |
 | `fallback_sw_commit` | `sw_commit` in that copy, `0` or `1` |
 | `next_boot` | the slot the next reset boots: `sw_tryactive` when it is `0` or `1`, else `primary_sw_commit` |
-| `uncommitted` | `1` when a valid copy's `sw_commit` is not `running`; `0` when every valid copy names it; empty when the running slot or the environment cannot be read |
+| `uncommitted` | `1` when a valid copy's `sw_commit` is not `running`; `0` when every valid copy names it; empty when the running slot or the environment cannot be read, or `nv fallback` gave neither a dump nor its line for no valid second copy (exit 3, or no answer within 10 s) |
 | `other_slot` | the slot that is not running, `0` or `1`; empty when `running` is |
 | `other_slot_check` | `nv slotcheck` on it (`docs/FLASHING.md`, "Checking the other slot"), a partial check, not proof that the slot boots: `ok`, `fail`, `unknown` (not readable, or no answer), `pending` while it runs; empty when there is no `other_slot` |
 | `other_slot_detail` | what `nv slotcheck` said: the whole line on `ok`, the reason on `fail` and `unknown` |
@@ -1340,7 +1357,8 @@ running, and any slot but the inactive one (read the way `fwu.sh` reads it:
 `root=31:N` in `/proc/cmdline`, then `sw_active`), and either slot when
 `nv getenv sw_commit` gives neither 0 nor 1: `fwu.sh` only warns there,
 because the vendor nv of a first flash may not answer, but this script ships
-with ours. Extracts `fwu.sh` and
+with ours. (`fwu.sh` refuses too when our nv says a copy of the environment
+could not be read in full.) Extracts `fwu.sh` and
 `md5.txt` from the tarball into `/tmp/fwu.d` and checks `fwu.sh` against its
 md5 line; then runs `fwu.sh <slot> <tar>` there, detached with `setsid`, its
 output in `/tmp/fwu.log` and its outcome in `/tmp/fwu.state` (`running`,
@@ -1396,7 +1414,8 @@ and writes the mode one second later, detached, so the answer leaves before
 the link changes; the trial reverts by itself at the end of its window
 unless `confirm` (over ssh or the web UI, so over the link being tried)
 stores the key first. `confirm` reads the key back and fails, leaving the
-trial to revert, when it did not stick. `try` refuses while a trial or the
+trial to revert, when it did not stick. `revert` exits 1 when the parameter
+cannot be written back, and its event says so instead of "back to". `try` refuses while a trial or the
 boot watch runs, and says so when the mode asked for is already the one
 running and stored. It also refuses while the port runs a `HOST_SERDES`
 mode other than `fiber1g`, or while `host-serdes.sh` runs a trial or its
@@ -1471,7 +1490,11 @@ at the end of its window unless `confirm` (over ssh, so over the link being
 tried) stores the key first. `confirm` reads the key back and fails,
 leaving the trial to revert, when it did not stick. A trial whose
 registers do not read back after the switch goes back at once
-(`trial_failed`). `reapply` answers at once and, one second later, runs the
+(`trial_failed`). When the way back does not read back either, or its port
+side (`host_forced`, `host_autoneg`) cannot be written, after an expiry, a
+revert or a failed switch, the event is `revert_unverified`, the port is
+taken to run the mode before (so `reapply` can run it again) and `revert`
+exits 1; it also exits 1 when the state file cannot be written. `reapply` answers at once and, one second later, runs the
 whole sequence of the running mode and its port side again, with no trial
 and nothing stored; the event says whether the registers read back. `try` and `reapply` refuse while a trial, a reapply or the boot
 watch runs, while `host-autoneg.sh` runs a trial or its boot watch, in a
@@ -1515,6 +1538,7 @@ klogd), at notice:
 | `fallback_nolink` | no link in either mode for 10 minutes; stays on Fiber 1G, the key unchanged |
 | `safe_mode_boot` | a safe-mode boot: Fiber 1G, nothing applied, trials refused |
 | `trial_started`, `trial_expired`, `trial_reverted`, `trial_confirmed`, `trial_failed` | a trial and how it ended |
+| `revert_unverified` | a trial ended, and the sequence of the mode before it did not read back or its port side could not be written |
 | `reapply_started`, `reapplied`, `reapply_failed` | a reapply, and whether the registers read back after it |
 | `bad_value`, `no_kernel`, `apply_failed`, `apply_unverified` | a key that is none of the three, a kernel without `host_forced` (both: the port runs Fiber 1G), a register or parameter that could not be read or written, a sequence that did not read back (the boot carries on in the mode) |
 | `sds_off`, `no_diag` | `/etc/config/sds.off` or no `diag`: nothing written to the host port |
@@ -1576,7 +1600,7 @@ the web UI reads the file:
 | `trial_deadline` | the uptime, in seconds, at which the trial reverts |
 | `prev_ip`, `prev_mask` | the primary the stick ran before the trial, kept on `br0:4` |
 | `old_<KEY>`, `new_<KEY>` | the six keys (`LAN_ROUTES` included) as the store holds them and as the trial asks for them |
-| `event`, `event_uptime`, `message` | the last event: `trial_started`, `trial_confirmed`, `trial_expired`, `trial_reverted` or `trial_failed` (also one line to the kernel log, `mgmt-addr: event=...`) |
+| `event`, `event_uptime`, `message` | the last event: `trial_started`, `trial_confirmed`, `trial_expired`, `trial_reverted` or `trial_failed` (also one line to the kernel log, `mgmt-addr: event=...`). `revert` moves back a second after its answer, so its `trial_reverted` comes twice: `moving back to ...` at once, then `back to ...` or `network.sh could not move back ...` once the move has run |
 | `safe_mode_boot` (`status` only) | `1` on a safe-mode boot |
 
 Nothing persists across a reboot: the state and the trial file are in

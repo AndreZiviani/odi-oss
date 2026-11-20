@@ -1357,8 +1357,10 @@ Read back from the HSGQ stick in 2500BASE-X: 0x214 = 0x00260016, 0x21c00 =
 0x0140, 0x215b4 = 0x1764, 0x21500 = 0, the 3.125G page as written (and
 0x21600, 0x2160c, 0x21618 the same, written by nothing here), 0x2166c =
 0x2176c = 1. In HiSGMII 0x214 = 0x00260112, 0x21c00 = 0x1940 and 0x21808
-= 0x71e0. Without 0x21808 the HiSGMII SerDes is in sync and the host link
-up, and no frame is received from the host.
+= 0x71e0. With the sequence before it (no 3.125G page, no receive pulse,
+0x21808 bit 8 clear) the HiSGMII SerDes is in sync and the host link up,
+and no frame is received from the host; which of the three the newer
+hosts need is not isolated (docs/QUALIFICATION.md).
 
 HiSGMII is not an IEEE 802.3 mode: SGMII signalling at 3.125 Gbaud, no
 standard to define the line or its negotiation. The host port is set to

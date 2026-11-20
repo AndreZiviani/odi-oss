@@ -5,6 +5,121 @@ listed here.
 
 ## Unreleased
 
+- services: `start omcid` arms omcid's watchdog deadline only when
+  `svc-omcid.sh` will start omcid. With `modules.off` set, an `omcid.off`
+  that could not be removed (a read-only config partition) or no
+  `/bin/omcid`, the entry parks, nothing pings, and the stick reset a
+  minute after the command reported success. It now names the reason,
+  releases the deadline, also one an omcid running since boot had armed,
+  with the same checks rcS makes at boot, and exits 1, as omcid does not
+  start. A watchdog register that is there and cannot be written counts as
+  a failed release, not as no watchdog. When that release, or the one
+  `stop omcid` makes, does not go through, the running omcid is left alone
+  and the command exits 1: killing it with the deadline armed is the same
+  reset.
+
+- Management address: an address trial to another subnet that nobody
+  confirmed could leave the stick with no IPv4 address until a reboot. The
+  move back put the old primary on `br0` while the trial still kept it on
+  `br0:4`, and the kernel does not take one address twice on a device. With
+  a mask that is not the classful one (10.0.0.1/24, 192.168.1.1/16) the
+  address was dropped and ifconfig still reported success; with
+  192.168.1.1/24 the move failed and every later `network.sh addr` failed
+  the same way. A trial that swaps the primary and the second address hit
+  the same at its start. `network.sh addr` now takes an alias that holds the
+  new primary down first, makes no move when that alias stays up, and puts
+  the address back on the alias when the primary then cannot take it. When
+  the move back fails anyway, the `trial_expired` or `trial_reverted` event
+  says so instead of "back to". A revert from the web UI moves back a
+  second after its answer: its event now says the move is under way, and a
+  second one, once it has run, how it ended, also when another change
+  holds the state file then. The move counts once the device reads back
+  with the new address, not on the exit status of ifconfig alone, and a
+  device left with no address at all gets the old one back. An alias that
+  gave up the address for the move and gets it back is read back the same
+  way.
+
+- nv: `getenv` and `fallback` give no value and exit 3 when a copy of the
+  U-Boot environment could not be read in full, as `setenv` and `commit`
+  already refuse. Exit 3 is that answer alone, so a caller does not have
+  to match the message. They answered from the copy they could read, which is not
+  the one U-Boot boots by when the unread copy has the higher flags byte.
+  With `env2` unreadable and a stale `env` naming the other slot, the
+  upgrade guard took that slot as the way back and could write over the
+  committed one. `fwu.sh` refuses to write on that answer, from `getenv`
+  or from `fallback` (`FWU_FORCE=1` overrides it), where a missing
+  `sw_commit` still only warns. It reads nv with a 10 s bound where the
+  image has `timeout`, which the stock busybox does not, and a read that
+  ran into the bound, was killed or could not run is a refusal as well. A
+  value printed with such a status or with exit 3 is not taken, for
+  `sw_commit`, the fallback copy and the `sw_active` it reads when
+  `/proc/cmdline` names no root slot.
+
+- igmpd: a redirect shorter than an Ethernet header is logged as `short
+  redirect  DROP: truncated` instead of crashing the daemon on the missing
+  addresses. The kernel hook does not pass one up; `igmpd -r` could.
+
+- igmpd: "not snooping" from the OLT releases the snooping lease even
+  within the ten seconds after a failed lease change. The release was held
+  back like any other change and never asked again, so the copy rule and,
+  with `IGMP_PON_DROP=1`, the drop of unregistered multicast from the PON
+  stayed on until the policy changed again or igmpd restarted. A release
+  that fails has a back-off of its own: it is tried again ten seconds
+  later, where it was asked again, with two log lines, every second.
+
+- igmpd: a static group the OLT lists whose MAC is a link-local one
+  (239.0.0.9 and every other group with the low 23 bits below 256, outside
+  224.0.0.0/24) keeps the PON drop off, as a static range that does not fit
+  already does. igmpd writes no row for such a group, so with
+  `IGMP_PON_DROP=1` its stream could be dropped as unregistered. A policy that
+  adds or removes such a group, or a static range too wide for a row,
+  turns the drop off or on at once, where it waited for the next second.
+
+- igmpd: the daemon's log is limited to 4096 bytes a second, then one line
+  `log limited: N bytes not shown`, which counts against the next second. A host on the UNI decided how many lines
+  a second igmpd wrote to the services log on the 6 MB `/var`: a report with
+  a bad checksum is a line a frame, and a 128-group join and leave are about
+  13 KB. Measured with a host build, not on a stick.
+
+- Upgrade: the trial guard also arms when `nv` could not read the U-Boot
+  environment at boot and the running slot is known. `slot-state.sh` then
+  writes an empty `uncommitted`, and the guard did not arm, so a trial
+  image that fed the watchdog but could not be reached stayed on the trial
+  until a power cycle. The guard only resets, so on a committed slot the
+  same slot boots again. It arms once: on the boot after one it ended
+  (`reason=wdt_client:trial`), an unknown state does not arm it again, so a
+  stick whose environment stays unreadable resets once and then stays up.
+  `slot-state.sh` now goes by the exit status of `nv fallback` too: exit 3
+  or no answer within its bound leaves `uncommitted` empty, where it took
+  that for "no valid second copy" and could write `uncommitted=0`. What a
+  failed `nv getenv` printed is not taken either: `sw_active`,
+  `sw_tryactive`, `primary_sw_commit` and `next_boot` stay empty. Nor is
+  a dump that exited 0 without its `Valid environment: N` or `Fallback
+  environment: N` header on its first line.
+
+- Host SerDes: a trial whose way back does not read back (the sequence of
+  the mode before it, after an expiry, a revert or a failed switch) or
+  whose port side (`host_forced`, `host_autoneg`) cannot be written is
+  `revert_unverified`, not `trial_expired` or `trial_reverted` with "back
+  to", and `host-serdes.sh revert` exits 1, as it does when the state file
+  cannot be written and the trial would stay on disk. A `host_forced` that
+  cannot be read on the way to Fiber 1G is cleared rather than left as it
+  is. The port is taken to run the mode before, so `reapply` runs it
+  again, as after `apply_unverified` at boot. The HiSGMII notes (README,
+  `docs/SWITCH.md`, the v1.18.1 entry below, the comment in
+  `host-serdes.sh`) no longer put the missing frames on 0x21808 bit 8
+  alone: the A/B changed the 3.125G page, the receive pulse and the bit
+  together, as `docs/QUALIFICATION.md` says.
+
+- Host port and management address trials: a way back that fails is the
+  exit status as well, not only the event. `host-autoneg.sh revert` exits
+  1 when `odi_switch.host_autoneg` cannot be written back, and the event
+  says so instead of "back to". A `mgmt-addr.sh` expiry whose move back
+  fails exits 1. Both returned the status of the state file write alone.
+  After a failed write back, `running` in the host-autoneg state is what
+  the kernel reads back, or the trial mode, not the mode it could not
+  return to.
+
 - Docs: `SETTINGS.md` no longer says the web UI lacks the host link mode;
   it has run the same trial since confd v1.10.0. `QUALIFICATION.md` adds a
   community report of a 2.5G media converter in HiSGMII on v1.18.1.
@@ -21,9 +136,10 @@ listed here.
 - Host SerDes: HiSGMII (3.125 Gbaud) sets `SDS_AN_CTRL` 0x21808 bit 8, in-band
   negotiation forced off on the host lane (0x70e0 out of reset becomes
   0x71e0), last, as the stock HSGQ kernel does in its LAN SerDes mode 4, and
-  runs the 3.125G analog page and the receive pulse of 2500BASE-X. Without
-  the bit the SerDes synced and the host link came up, and no frame was
-  received from the host. Fiber 1G and 2500BASE-X clear the bit, writing
+  runs the 3.125G analog page and the receive pulse of 2500BASE-X. With
+  none of the three the SerDes synced and the host link came up, and no
+  frame was received from the host; which of them the newer hosts need is
+  not isolated. Fiber 1G and 2500BASE-X clear the bit, writing
   0x21808 only when it reads set, so a trial, its revert, the boot watch or
   `reapply` out of HiSGMII does not leave it set, and a stick that never
   ran HiSGMII runs the stock Fiber 1G sequence write for write. The boot

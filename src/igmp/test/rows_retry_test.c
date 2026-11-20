@@ -22,7 +22,14 @@ int __wrap_igmp_hw_mac_del(uint16_t vid, const uint8_t *mac)
 	programmed = 0;
 	return 0;
 }
-int __wrap_igmp_hw_snoop(uint32_t flags) { (void)flags; return 0; }
+static int fail_snoop, snoop_calls;
+int __wrap_igmp_hw_snoop(uint32_t flags)
+{
+	(void)flags;
+	snoop_calls++;
+	if (fail_snoop) { fail_snoop--; return -16; }
+	return 0;
+}
 int main(void)
 {
 	static struct igmp_db db;
@@ -68,6 +75,47 @@ int main(void)
 	lease = 0; lease_retry = 0; before = delete_calls;
 	settle_lease(&db, ODI_SW_MC_SNOOP_COPY, 100);
 	CHECK(delete_calls == before + 1 && lease == ODI_SW_MC_SNOOP_COPY, 15);
-	out("ok    daemon delete retry, MAC alias rejoin, IPv6 overflow and lease acquisition\n");
+	/* A lease change that fails starts the ten-second back-off; "not
+	 * snooping" inside it still releases the lease at once. */
+	lease = ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP;
+	fail_snoop = 1;
+	settle_lease(&db, ODI_SW_MC_SNOOP_COPY, 200);
+	CHECK(lease == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP) &&
+	      lease_retry == 210, 16);
+	settle_lease(&db, ODI_SW_MC_SNOOP_COPY, 205);
+	CHECK(lease == (ODI_SW_MC_SNOOP_COPY | ODI_SW_MC_SNOOP_PON_DROP), 17);
+	settle_lease(&db, 0, 203);
+	CHECK(lease == 0, 18);
+	/* A release that fails waits ten seconds of its own before the next
+	 * try, where every policy tick asked for it again. */
+	lease = ODI_SW_MC_SNOOP_COPY;
+	fail_snoop = 1;
+	before = snoop_calls;
+	settle_lease(&db, 0, 300);
+	CHECK(lease == ODI_SW_MC_SNOOP_COPY && release_retry == 310 && snoop_calls == before + 1, 24);
+	settle_lease(&db, 0, 301);
+	settle_lease(&db, 0, 309);
+	CHECK(lease == ODI_SW_MC_SNOOP_COPY && snoop_calls == before + 1, 25);
+	settle_lease(&db, 0, 310);
+	CHECK(lease == 0 && snoop_calls == before + 2, 26);
+	/* The log budget: 4096 bytes a second, the rest counted, and a new
+	 * second starts again after one line on what was held back (it
+	 * prints "log limited: 1097 bytes not shown" here, 34 bytes, which
+	 * the new second pays for). */
+	log_now = log_sec = 7;
+	for (int i = 0; i < 50; i++)
+		(void)log_admit(100);
+	CHECK(log_used == 4000 && log_held == 1000, 19);
+	CHECK(!log_admit(97) && log_admit(96) && log_held == 1097, 20);
+	log_now = 8;
+	log_roll();
+	CHECK(log_sec == 8 && log_used == 34 && log_held == 0, 21);
+	CHECK(!log_admit(4063) && log_admit(4062) && log_used == 4096, 22);
+	/* A second with nothing held back starts with the whole budget. */
+	log_held = 0;
+	log_now = 9;
+	log_roll();
+	CHECK(log_used == 0 && log_admit(4096), 23);
+	out("ok    daemon delete retry, MAC alias rejoin, IPv6 overflow, lease acquisition and release in the back-off, log budget\n");
 	return 0;
 }

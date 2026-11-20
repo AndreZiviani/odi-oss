@@ -35,9 +35,15 @@ cat > "$T/bin/nv" <<EOF
 p=\$(cat "$T/primary"); f=\$((3 - p))
 case "\$1" in
 getenv)
+	# \$T/primary_rc: a failed read that printed the copy all the same.
+	[ -f "$T/primary_rc" ] && { echo "Valid environment: \$p"; cat "$T/env\$p"; echo; exit "\$(cat "$T/primary_rc")"; }
+	# \$T/primary_nohead: an exit 0 with the pairs and no header line.
+	[ -f "$T/primary_nohead" ] && { cat "$T/env\$p"; echo; exit 0; }
 	[ -s "$T/env\$p" ] || { echo "nv: no valid environment in env or env2"; exit 1; }
 	echo "Valid environment: \$p"; cat "$T/env\$p"; echo; exit 0 ;;
 fallback)
+	# \$T/fallback_rc: a read that gave no dump to go by, with that status.
+	[ -f "$T/fallback_rc" ] && { echo "Fallback environment: \$f"; cat "$T/env\$f"; echo; exit "\$(cat "$T/fallback_rc")"; }
 	[ -s "$T/env\$f" ] || { echo "nv: no valid second copy of the environment"; exit 1; }
 	echo "Fallback environment: \$f"; cat "$T/env\$f"; echo; exit 0 ;;
 slotcheck)
@@ -71,7 +77,8 @@ printf 'mtd5: 00300000 00001000 "r0"\nmtd7: 00300000 00001000 "r1"\n' > "$T/mtd"
 
 # env1 / env2: the pairs of each copy; $T/primary: which one U-Boot boots.
 setup() {
-	rm -f "$T/state" "$T/motd" "$T/log" "$T/slotcheck" "$T/slotcheck.asked" "$T/state.during" "$T/motd.during"
+	rm -f "$T/state" "$T/motd" "$T/log" "$T/slotcheck" "$T/slotcheck.asked" "$T/state.during" "$T/motd.during" \
+	    "$T/fallback_rc" "$T/primary_rc" "$T/primary_nohead"
 	envs "$@"
 }
 # The same, leaving the state file alone: the stick after the boot.
@@ -178,6 +185,43 @@ run
 st "no environment: running slot still recorded" "running=1"
 st "and uncommitted is empty" "uncommitted="
 motd "the motd says so" "nv could not read a valid U-Boot environment"
+
+echo "== a read that gave no dump to go by"
+# A committed slot whose fallback read fails: exit 3, or the bound. What nv
+# printed first is not taken, and the state is unknown, not committed.
+for rc in 3 124 143; do
+	setup 2        0 0 1                      1 1 2
+	echo "$rc" > "$T/fallback_rc"
+	run
+	st "fallback exit $rc: no fallback copy taken" "fallback_copy="
+	st "fallback exit $rc: uncommitted is empty, not 0" "uncommitted="
+	motd "fallback exit $rc: the motd says unknown" "no usable answer for the fallback copy"
+done
+setup 2        0 0 1                      1 1 2
+echo 1 > "$T/fallback_rc"
+run
+st "fallback exit 1 without its line: unknown too" "uncommitted="
+for rc in 3 124; do
+	setup 2        0 0 1                      1 1 2
+	echo "$rc" > "$T/primary_rc"
+	run
+	st "getenv exit $rc: no primary copy taken" "primary_copy="
+	st "getenv exit $rc: uncommitted is empty" "uncommitted="
+	st "getenv exit $rc: no sw_active from what it printed" "sw_active="
+	st "getenv exit $rc: no sw_tryactive either" "sw_tryactive="
+	st "getenv exit $rc: no primary sw_commit" "primary_sw_commit="
+	st "getenv exit $rc: and no next_boot" "next_boot="
+done
+setup 2        0 0 1                      1 1 2
+echo 3 > "$T/fallback_rc"
+run
+st "fallback exit 3: no fallback sw_commit from what it printed" "fallback_sw_commit="
+setup 2        0 0 1                      1 1 2
+touch "$T/primary_nohead"
+run
+st "getenv exit 0 without its header: no primary copy" "primary_copy="
+st "  no sw_commit from its pairs" "primary_sw_commit="
+st "  and no next_boot" "next_boot="
 
 echo "== files are replaced by rename and nothing else is left behind"
 setup 2        0 0 1                      1 0 2

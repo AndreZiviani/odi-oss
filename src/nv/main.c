@@ -233,6 +233,13 @@ static unsigned int read_raw(const char *name, struct mtd_part *m, uint8_t *dst)
  * same as a copy that fails its CRC (commit.h, struct env_io). */
 static int load_unread;
 
+/* The exit status of getenv and fallback when a copy could not be read in
+ * full: neither a value nor a missing one, so a caller can tell it from both
+ * without matching the message. A name that is not set exits 0 with nothing
+ * printed, as the stock nv does; no valid copy (for fallback, no valid
+ * second one) exits 1. */
+#define NV_EXIT_UNREAD 3
+
 static int read_part(const char *name, struct mtd_part *m, uint8_t *dst)
 {
 	unsigned int n = read_raw(name, m, dst);
@@ -682,6 +689,16 @@ int main(int argc, char **argv)
 	if (str_eq(argv[1], "setenv") && !env_lock())
 		return 1;
 	len = env_load(&part);
+	/* A copy that could not be read in full may be the one with the higher
+	 * flags byte, the one U-Boot boots by, so the copy that was read is not
+	 * the answer however valid it is. A guard takes the sw_commit it reads
+	 * as the slot a failed trial goes back to: no answer is safer than one
+	 * from the other copy. setenv reads both again in env_setenv. */
+	if (load_unread && !str_eq(argv[1], "setenv")) {
+		out_fmt("nv: %s: a copy of the environment could not be read in full,"
+			" so which one U-Boot uses is not known; run it again\n", argv[1]);
+		return NV_EXIT_UNREAD;
+	}
 	if (!len) {
 		/* A copy that could not be read in full is not one that failed
 		 * its CRC; for setenv say so, as env_setenv would. */

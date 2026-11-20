@@ -758,8 +758,14 @@ static int fix(struct igmp_db *db, uint32_t g, struct igmp_change *out, int max,
 	struct igmp_entry *e;
 	uint32_t before;
 
-	if (!igmp_group_snoopable(g))
+	if (!igmp_group_snoopable(g)) {
+		/* Outside 224.0.0.0/24, a group with a link-local MAC is not
+		 * a row either, and the OLT promised it: the drop stays off,
+		 * as for no room below. 224.0.0.0/24 the drop leaves alone. */
+		if ((g >> 28) == 0xe && (g >> 8) != 0xe00000u)
+			db->static_overflow = 1;
 		return n;
+	}
 	e = find_or_add(db, 0, g);
 	if (!e) {
 		/* No room: a group the OLT promised is not a row, so the drop
