@@ -164,6 +164,10 @@ out=$(run omci-live --confirm 2>&1); rc=$?
 t "omci-live takes no confirmation" "^1 .*unknown option --confirm for omci-live" "$rc $out"
 out=$(run omci soon 2>&1); rc=$?
 t "seconds that are no number: refused" "^1 .*whole number, not soon" "$rc $out"
+out=$(run omci 0 2>&1); rc=$?
+t "a bound of 0 s: refused" "^1 .*at least 1 s, not 0" "$rc $out"
+out=$(run omci 00 2>&1); rc=$?
+t "a bound of 00 s: refused" "^1 .*at least 1 s, not 00" "$rc $out"
 t "and none of those signalled omcid" "^same$" "$(cmp -s "$T/status" "$T/status.before" && echo same)"
 
 # One reload signalled at a time: the confirmation file is shared. Another

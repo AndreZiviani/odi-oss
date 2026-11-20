@@ -6,7 +6,7 @@
 # exclusive, -n failing at once (exit 1) where the lock is taken:
 #   flock [-n] FD            the lock on a descriptor the caller holds open
 #   flock [-n] FILE CMD...   the lock on FILE, held while CMD runs; the exit
-#                            status is the command's
+#                            status is that of the command
 import fcntl
 import os
 import subprocess

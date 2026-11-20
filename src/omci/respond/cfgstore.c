@@ -27,11 +27,12 @@
  */
 #include "omcid.h"
 
-/* Big enough for the whole store. This stick's own are a few KB, but a stick
- * that ran a router firmware before keeps that firmware's WAN and
- * port-binding tables in the same file: one at 30 KB is known (odi-ui reads
- * both stores into 64 KB for that reason). 16 KB used to be the size here,
- * so the keys past it read as absent and cfg_set() wrote the cut file back.
+/* Big enough for the whole store. The stores of this stick are a few KB,
+ * but a stick that ran a router firmware before keeps the WAN and
+ * port-binding tables of that firmware in the same file: one at 30 KB is
+ * known (odi-ui reads both stores into 64 KB for that reason). 16 KB used
+ * to be the size here, so the keys past it read as absent and cfg_set()
+ * wrote the cut file back.
  * The partition is 240 KB. Static, because there is no allocator; only the
  * pages a read touches are ever resident. */
 static char cfgbuf[65536];
@@ -40,7 +41,7 @@ static char cfgbuf[65536];
  * cfg_set() may leave behind. */
 #define CFG_MAX ((int)sizeof cfgbuf - 1)
 
-/* One read, retried when a signal interrupts it (omcid's handlers are not
+/* One read, retried when a signal interrupts it (the omcid handlers are not
  * SA_RESTART). 0 at the end of the file, below 0 on an error. */
 static long cfg_read(long fd, char *p, unsigned long len)
 {
@@ -445,7 +446,7 @@ int cfg_set(const char *path, const char *dir, const char *key, const char *valu
 	if (fd < 0)
 		return -1;
 	/* Written in pieces straight from cfgbuf: the bytes before the value
-	 * (or before the Dir's closing tag), the new part, the rest. */
+	 * (or before the closing tag of the Dir), the new part, the rest. */
 	if (at >= 0) {
 		bad = write_all(fd, cfgbuf, vstart) ||
 		      write_all(fd, esc, elen) ||

@@ -48,7 +48,7 @@
 #                            scratch. INTERRUPTS INTERNET for about ten
 #                            seconds plus the OLT provisioning time. The
 #                            process is never restarted.
-#                        It waits SECONDS (default 20, APPLY_WAIT; the web UI
+#                        It waits SECONDS (1 or more, default 20, APPLY_WAIT; the web UI
 #                        gives this script 25) in all, the wait for the lock
 #                        and for the answer included, for the outcome: reload done,
 #                        or for a re-registration back in O5 with services,
@@ -249,6 +249,9 @@ omci() {
 	case $wait_s in
 	''|*[!0-9]*) die "omci: the bound in seconds is a whole number, not $wait_s" ;;
 	esac
+	# At least one second: with none, the wait for the answer below ends
+	# before its first look and the reload reads as unanswered.
+	[ "$wait_s" -gt 0 ] || die "omci: the bound is at least 1 s, not $wait_s"
 	[ ! -f "$MODULES_OFF" ] || die "$MODULES_OFF is set: this boot runs no omcid, nothing to reload"
 	pids=$(pidof omcid 2>/dev/null)
 	[ -n "$pids" ] || die "no omcid is running: nothing to reload (init respawns it; see /var/log/omcid.log)"

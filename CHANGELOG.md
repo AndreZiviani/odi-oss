@@ -109,7 +109,7 @@ listed here.
   for the acknowledgement count against the bound, and neither wait goes
   past it. They are counted in sleeps of one second, so two applies at once
   no longer add up to twice the bound; the time the commands themselves take
-  is not counted. When omcid cannot write the status file (a full `/var`),
+  is not counted. A bound of 0 s is refused before anything is signalled. When omcid cannot write the status file (a full `/var`),
   it removes it instead of leaving the `running` of the reload's start
   standing, unless the removal fails too. omcid takes only the exact words
   apply.sh writes: an empty file, or one cut before its word ends, counted
