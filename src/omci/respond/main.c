@@ -47,9 +47,10 @@ static void wdt_ping(void)
 static void on_signal(int sig)
 {
 	(void)sig;
-	/* Reset the sink FIRST: mid-command it is cli_sink, and flushing through
-	 * it would spend the whole retry budget on a queue about to be deleted. */
-	out_set_sink(0);
+	/* Drop the sink FIRST, without a flush: mid-command it is cli_sink, and
+	 * flushing through it would spend the whole retry budget on a queue
+	 * about to be deleted. out_set_sink(0) flushes before it switches. */
+	out_drop_sink();
 	if (nl_fd >= 0)
 		nl_redirect(nl_fd, nl_tid, REDIRECT_TYPE, NL_ACT_DEREG, 0);
 	/* Queues outlive the process, and this kernel has 53 in total. Only

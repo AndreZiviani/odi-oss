@@ -176,7 +176,9 @@ static inline int odi_omci_parse(const uint8_t *buf, uint32_t len, struct odi_om
 		if (len < ODI_OMCI_NLMSG_HDR + ODI_OMCI_NL_BODY)
 			return -1;
 		dlen = odi_omci_get32(body + 12);
-		if (dlen > len - (ODI_OMCI_NLMSG_HDR + ODI_OMCI_NL_BODY))
+		/* An empty frame is refused too: there is nothing to send, and
+		 * a zero-length DMA mapping hits the BUG_ON in the cache code. */
+		if (dlen == 0 || dlen > len - (ODI_OMCI_NLMSG_HDR + ODI_OMCI_NL_BODY))
 			return -1;
 		out->op = op;
 		out->type = odi_omci_get16(body + 2);

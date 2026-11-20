@@ -480,6 +480,15 @@ for how in VOIP_FAIL STATE_FAIL; do
 	[ -f "$X/config/odi.conf" ] && [ -f "$X/ps.txt" ] && ok "and the rest is there ($how)" ||
 		no "and the rest is there ($how)" "$(ls -R "$X" | head -30)"
 done
+# A second, later OMCI_POTS_PORTS line does not turn phone lines off for
+# the bundle: omcid and flash take the first line for a key.
+printf 'OMCI_POTS_PORTS=0\n' >> "$T/cfg/odi.conf"
+rm -rf "$T/x" && mkdir "$T/x" && rm -f "$T/out.tar.gz"
+VOIP_FAIL=1 run_bundle "$T/out.tar.gz"
+tar -xzf "$T/out.tar.gz" -C "$T/x" 2>/dev/null
+[ ! -e "$T/x/odi-diag/log/messages" ] && [ ! -e "$T/x/odi-diag/syslog.txt" ] &&
+	ok "a later OMCI_POTS_PORTS=0 line does not ship the logs" ||
+	no "a later OMCI_POTS_PORTS=0 line does not ship the logs" "$(ls "$T/x/odi-diag" "$T/x/odi-diag/log" 2>&1)"
 mv "$T/odi.conf.keep" "$T/cfg/odi.conf"
 
 echo

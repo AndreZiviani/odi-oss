@@ -5,6 +5,22 @@ listed here.
 
 ## Unreleased
 
+- Kernel: an OMCI send of zero bytes is refused, in the netlink parser and
+  in the NIC transmit path. A zero-length DMA mapping ends in the `BUG_ON`
+  of the cache writeback. omcid never sends one; only a process with
+  CAP_NET_ADMIN could.
+- Kernel: the NIC drops a received frame shorter than an Ethernet header
+  and its FCS (18 bytes) as a receive error. Before, anything above 4 bytes
+  went to the RX hooks and the stack, which read the 14-byte header from
+  whatever the buffer held before.
+- omcid: a stop signal in the middle of a CLI command no longer flushes the
+  half-written reply into the CLI queue before it deregisters. The handler
+  said it skipped that flush, but `out_set_sink(0)` flushed first.
+- Support bundle: `OMCI_POTS_PORTS` is read from the first line for the
+  key, as omcid and `flash` read it. With two lines, the first on and a
+  later one 0, the bundle took the 0 and shipped the logs unscrubbed when
+  omcid gave no SIP secret list.
+
 - Ten comments in the switch and GPON drivers and omcid, and two
   paragraphs of `docs/SWITCH.md`, named source files and functions of the
   vendor SDK or said they were read from it, which `AGENTS.md` rules out.
