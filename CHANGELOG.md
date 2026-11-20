@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- Releases: confd v1.19.0 and metricsd v1.11.1. The web UI gains an OMCI
+  Topology subtab (the provisioned path drawn from the MIB pointers), asks
+  before a change in a dialog of the page instead of `confirm()`, applies a
+  save of VLAN keys alone live with `apply.sh omci-live`, and no longer
+  offers to write the committed partition during a trial. metricsd counts
+  every fall of the port octet registers as a reset, reports `gpon_omci_up`
+  0 when omcicli answers only with its own error, counts services in every
+  row of the vendor dump, and no longer ends a scrape whose request is
+  longer than 511 bytes with a connection reset. The asset hashes in src/release-sha256.txt are the
+  release SHA256SUMS, checked by `make releases`.
+
 - Kernel: an OMCI send of zero bytes is refused, in the netlink parser and
   in the NIC transmit path. A zero-length DMA mapping ends in the `BUG_ON`
   of the cache writeback. omcid never sends one; only a process with

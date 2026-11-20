@@ -3,6 +3,6 @@
 # together is still refused. One line per asset: repo, tag, asset, sha256.
 # tools/bump-deps.sh rewrites the lines of a repo whenever it moves that
 # repo's tag; a tag with no line here fails the fetch (see fetch-releases.sh).
-AndreZiviani/odi-sfp-exporter v1.11.0 metricsd f4e3bb7055811418cc4e21e5a72ef93d6544a26bb22bade79786fe9b9acd4203
-AndreZiviani/odi-ui v1.18.1 confd 5154e820ff437573f95ecbe19db64b14d49568d563997a124b03ef8bf81894cd
-AndreZiviani/odi-ui v1.18.1 confd-assets.tar.gz ce5a1d8e50a0aaefa0fda3270a8ce1b48e41c173b4b78e1ec661192877ed9d22
+AndreZiviani/odi-sfp-exporter v1.11.1 metricsd 526001c53c042aa3825f0ee14c6065c4444c325798aef3762fb87517f476d969
+AndreZiviani/odi-ui v1.19.0 confd a5a47b4382038869afa0847331203431a17458c4d9e6bfdef219d8f46ac82e95
+AndreZiviani/odi-ui v1.19.0 confd-assets.tar.gz f12c4875606b045ff56a34761f9132213ba524a99024815a284702668ef45fe8
