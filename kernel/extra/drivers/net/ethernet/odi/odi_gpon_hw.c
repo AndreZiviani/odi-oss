@@ -225,9 +225,8 @@ void odi_gpon_hw_test_set_key_source(void (*fn)(uint8_t key[16]))
 /* Emergency Stop (O7) turns the transmitter off: G.984.3 10.2.2 g) ("moves
  * to the emergency stop state (O7) and shuts its laser off"), and the stock
  * GPON module raises its TX-disable GPIO on every transition into O7 and
- * lowers it on the enable that leaves O7, nowhere else (the 2.6.30 GPL
- * drop, gpon_fsm.c, gpon_dev_rogueOntDisTx_set(); read, not copied). The
- * MAC alone does not show that it stops bursting in O7. So the line
+ * lowers it on the enable that leaves O7, nowhere else. The MAC alone does
+ * not show that it stops bursting in O7. So the line
  * follows the state written: asserted when it is O7, released when any
  * other state is written after it, whichever path leaves O7 (the enable,
  * the activate verb, gpondeact). Not tied to the FSM's laser_enable(),

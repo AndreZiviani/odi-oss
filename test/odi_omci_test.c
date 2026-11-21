@@ -117,6 +117,17 @@ static void test_send_overlong_len_rejected(void)
 	      "a dataLen exceeding the buffer is rejected, not truncated silently");
 }
 
+static void test_send_empty_rejected(void)
+{
+	uint8_t buf[ODI_OMCI_NLMSG_HDR + ODI_OMCI_NL_BODY];
+	struct odi_omci_msg msg;
+
+	build_send_msg(buf, 1, ODI_OMCI_REDIRECT_TYPE, 0, 0);
+
+	CHECK(odi_omci_parse(buf, sizeof buf, &msg) == -1,
+	      "a SEND with dataLen 0 is rejected: an empty DMA mapping is a BUG_ON");
+}
+
 static void test_short_buffer_rejected(void)
 {
 	uint8_t buf[ODI_OMCI_NLMSG_HDR + 4];
@@ -268,6 +279,7 @@ int main(void)
 	test_dereg_roundtrip();
 	test_send_roundtrip();
 	test_send_overlong_len_rejected();
+	test_send_empty_rejected();
 	test_short_buffer_rejected();
 	test_unknown_op_rejected();
 	test_build_rx_matches_main_c_receive_offset();

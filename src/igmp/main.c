@@ -87,6 +87,12 @@ static void out_ip(uint32_t a)
 
 static void describe(const struct igmp_rx *rx, enum igmp_parse_rc rc)
 {
+	/* Too short for an Ethernet header: igmp_parse set no addresses, and
+	 * not the port either, so there is nothing to print but the reason. */
+	if (!rx->eth) {
+		out_fmt("short redirect  DROP: %s\n", igmp_parse_str(rc));
+		return;
+	}
 	out_fmt("port %d  ", rx->port);
 	if (rx->tagged)
 		out_fmt("vlan %d  ", rx->vid);
@@ -230,6 +236,83 @@ static uint32_t now_seconds(int *warned)
 	return (uint32_t)sec;
 }
 
+/* ---- the log budget ---------------------------------------------------- */
+
+/* The daemon's lines go to the services log on /var, a 6 MB tmpfs the
+ * trimmer looks at once a minute, and a host on the LAN decides how many
+ * come a second: a report with a bad checksum is a line a frame, a v3 report
+ * that joins 128 groups and one that leaves them are 256 rows and about
+ * 13 KB. So the daemon says at most LOG_BUDGET bytes a second and, once the
+ * second is over, how much it held back. 4096 a second keeps a minute below
+ * the trimmer's LOG_MAX (rcs-lib.sh). Only the log is limited: the frames,
+ * the rows, the state file and igmpd -s are not, and -r and the one-shot
+ * forms never install it. */
+#define LOG_BUDGET      4096u
+
+static uint32_t log_now, log_sec, log_used, log_held;
+
+/* Whether n more bytes may go out this second; what may not is counted. */
+static int log_admit(uint32_t n)
+{
+	if (log_used + n > LOG_BUDGET) {
+		log_held += n;
+		return 0;
+	}
+	log_used += n;
+	return 1;
+}
+
+static void log_write(const char *s, uint32_t n)
+{
+	while (n) {
+		long w = sys_write(STDOUT_FILENO, s, n);
+
+		if (w <= 0)
+			return;    /* as io.c: nothing to recover to */
+		s += w;
+		n -= (uint32_t)w;
+	}
+}
+
+/* A new second: the budget starts again, after a line on what the last one
+ * held back, which is charged to the new one: the bound is 4096 bytes a
+ * second, the summary included. Formatted here, not with out_fmt: this runs
+ * inside a flush. */
+static void log_roll(void)
+{
+	static const char head[] = "log limited: ", tail[] = " bytes not shown\n";
+	char line[sizeof head + 10 + sizeof tail];
+	char digits[10];
+	uint32_t n = 0, d = 0, v = log_held;
+
+	if (log_now == log_sec)
+		return;
+	log_sec = log_now;
+	log_used = 0;
+	if (!log_held)
+		return;
+	log_held = 0;
+	do {
+		digits[d++] = (char)('0' + v % 10);
+		v /= 10;
+	} while (v);
+	for (uint32_t i = 0; head[i]; i++)
+		line[n++] = head[i];
+	while (d)
+		line[n++] = digits[--d];
+	for (uint32_t i = 0; tail[i]; i++)
+		line[n++] = tail[i];
+	log_used = n;
+	log_write(line, n);
+}
+
+static void log_sink(const char *s, int n)
+{
+	log_roll();
+	if (n > 0 && log_admit((uint32_t)n))
+		log_write(s, (uint32_t)n);
+}
+
 static void usage(void)
 {
 	out("usage: igmpd [-w] [-d] [-6] [-f] [-n COUNT]\n"
@@ -307,7 +390,11 @@ static uint32_t pol_len;
  * watches has to be able to report once before an unregistered one is a
  * group nobody wants. */
 static uint32_t learn_until;
+/* The second from which a lease change that failed is tried again, and
+ * the same for a release that failed: each its own, so a change in its
+ * back-off does not hold up a release. */
 static uint32_t lease_retry;
+static uint32_t release_retry;
 /* -d: the PON's drop is wanted at all (IGMP_PON_DROP, svc-igmpd.sh). */
 static int pon_drop;
 /* -6: MLD as well (MLD_SNOOPING, svc-igmpd.sh), its lists and its table. */
@@ -361,16 +448,24 @@ static uint32_t wanted_lease(const struct igmp_db *db, uint32_t now)
 }
 
 /* Bring the lease to `want`. A failure is retried every ten seconds, and
- * says so once per change of mind. */
+ * says so once per change of mind. A release is not held back by the
+ * back-off of a change: the policy says "not snooping" once, and a release
+ * skipped then would leave the copy and the PON drop on with nothing left
+ * to ask again. A release that fails has a back-off of its own, so it is
+ * not asked again, and logged, every second. */
 static void settle_lease(struct igmp_db *db, uint32_t want, uint32_t now)
 {
 	int rc;
 
-	if (want == lease || (int32_t)(now - lease_retry) < 0)
+	if (want == lease ||
+	    (int32_t)(now - (want ? lease_retry : release_retry)) < 0)
 		return;
 	rc = igmp_hw_snoop(want);
 	if (rc) {
-		lease_retry = now + 10;
+		if (want)
+			lease_retry = now + 10;
+		else
+			release_retry = now + 10;
 		return;
 	}
 	if (!want)
@@ -625,10 +720,14 @@ static void policy_tick(struct igmp_db *db, uint32_t now, int first)
 			apply6(ch6, changes, MAX_CHANGES);
 			write_state6();
 		}
+		/* And again, now for this policy: the lease above was worked
+		 * out from the static list before it. A static group that
+		 * cannot be a row keeps the PON drop off (static_overflow),
+		 * and it does from this tick, not the next one. */
+		settle_lease(db, wanted_lease(db, now), now);
 		return;
 	}
-	if (pol.snooping)
-		settle_lease(db, wanted_lease(db, now), now);
+	settle_lease(db, pol.snooping ? wanted_lease(db, now) : 0, now);
 }
 
 /* ---- the metering of the groups (meter.h) ---------------------------- */
@@ -1132,6 +1231,7 @@ int main(int argc, char **argv)
 		igmp_hw_enabled() ? "WRITING to the switch" : "dry run (-w writes)",
 		mld_on ? ", MLD too" : "");
 	out_flush();
+	out_set_sink(log_sink);
 
 	for (int first = 1;; first = 0) {
 		uint32_t len = 0;
@@ -1139,6 +1239,8 @@ int main(int argc, char **argv)
 		long rc = nl_recv((int)fd, buf, sizeof buf, &len);
 
 		now = now_seconds(&clock_warned);
+		log_now = now;
+		log_roll();
 		/* Expiries first, so a frame that arrives in the same second as
 		 * a lapse is applied to the state after the lapse rather than
 		 * before it. */

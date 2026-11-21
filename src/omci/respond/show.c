@@ -723,17 +723,49 @@ uint32_t cli_bridge(void)
 	return OMCLI_OK;
 }
 
+/* `omcli vlan` and `omcli ident` without paths show the store and leave
+ * the values omcid runs with alone. The loaders write those values, so a
+ * view that kept what it read would put an edit live with no reload: the
+ * next rebuild the OLT triggers would build with it, the re-registration
+ * guard would take it for what runs, and the reload after it would find
+ * nothing to apply. The diag bundle runs `omcli vlan` every time. What was
+ * read is compared with what runs, and the keys that differ are named. The
+ * forms with paths still load the fixture into the daemon: the suites use
+ * them for that. */
+static void show_not_applied(const struct cfg_snap *live, unsigned scope)
+{
+	struct cfg_snap stored;
+	unsigned mask;
+	char names[160];
+
+	cfg_snap_take(&stored);
+	mask = cfg_snap_diff(live, &stored) & scope;
+	if (!mask)
+		return;
+	cfg_diff_names(mask, names, (int)sizeof names);
+	out_fmt("not applied %s (apply.sh omci)\n", names);
+}
+
 /* The manual VLAN, which is where a service's tag comes from on both our
  * sticks. Takes an optional path so a test can point it at a fixture. */
 uint32_t cli_vlan(void)
 {
 	const char *cs = cli_arg(1);
 
-	if (cs)
+	if (cs) {
 		cfg_load_vlan_from(cs);
-	else
+		cfg_show_vlan();
+		return OMCLI_OK;
+	}
+	{
+		struct cfg_snap live;
+
+		cfg_snap_take(&live);
 		cfg_load_vlan();
-	cfg_show_vlan();
+		cfg_show_vlan();
+		show_not_applied(&live, CFGD_VLAN | CFGD_FWDOP | CFGD_EAPOL);
+		vlanCfg = live.vlan;
+	}
 	return OMCLI_OK;
 }
 
@@ -748,11 +780,23 @@ uint32_t cli_ident(void)
 		cfg_load_identity_from(cs, hs);
 		cfg_load_report_from(cs, hs, CFG_REPORT_SWITCH,
 				     odi ? odi : CFG_ODI_PATH);
-	} else {
+		cfg_show_identity();
+		return OMCLI_OK;
+	}
+	{
+		struct cfg_snap live;
+
+		cfg_snap_take(&live);
 		cfg_load_identity();
 		cfg_load_report();
+		cfg_show_identity();
+		show_not_applied(&live, CFGD_SN | CFGD_PLOAM | CFGD_LOID |
+				 CFGD_LOID_PWD | CFGD_SW_VER1 | CFGD_SW_VER2 |
+				 CFGD_MODEL | CFGD_OMCC_VER | CFGD_PRODUCT |
+				 CFGD_HW_VER | CFGD_SWITCH);
+		ident = live.ident;
+		report = live.report;
 	}
-	cfg_show_identity();
 	return OMCLI_OK;
 }
 

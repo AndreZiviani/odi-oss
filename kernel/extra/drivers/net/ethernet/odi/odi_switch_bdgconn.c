@@ -670,9 +670,11 @@ static void cf_moved(uint32_t from, uint32_t to)
 /* Place a new row, keeping the ordered region ordered: after the last row
  * of the same or a lower class; if that row is taken, every row from
  * there to the next free one moves up by one, the topmost first (ISP1
- * calls 5, 7 and 11 are exactly this). Returns the row, or -1 when full.
+ * calls 5, 7 and 11 are exactly this). Returns the row, or -1 when full,
+ * which changes nothing. *top is the highest row the insert filled: the
+ * new row itself, or the free row the move ended on.
  */
-static int cf_insert(const struct odi_sw_cf_leg *l)
+static int cf_insert(const struct odi_sw_cf_leg *l, uint32_t *top)
 {
 	uint32_t limit = ODI_SW_CF_BOTTOM + 1U, r, p, h;
 	int last = -1;
@@ -682,6 +684,7 @@ static int cf_insert(const struct odi_sw_cf_leg *l)
 			if (!odi_sw_cf[r].used) {
 				cf_set(r, l);
 				cf_emit(r, 1);
+				*top = r;
 				return (int)r;
 			}
 			if (odi_sw_cf[r].key != ODI_SW_CF_KEY_BOTTOM)
@@ -711,6 +714,7 @@ static int cf_insert(const struct odi_sw_cf_leg *l)
 			if (!odi_sw_cf[r].used) {
 				cf_set(r, l);
 				cf_emit(r, 1);
+				*top = r;
 				return (int)r;
 			}
 		}
@@ -752,7 +756,26 @@ static int cf_insert(const struct odi_sw_cf_leg *l)
 	}
 	cf_set(p, l);
 	cf_emit(p, h == p);
+	*top = h;
 	return (int)p;
+}
+
+/* Takes back a cf_insert() of this call whose rows are still only queued:
+ * row p leaves the software table, and the rows the insert moved up, p + 1
+ * to top, move back down with their owners: cf_moved() only sees rows
+ * above p, those of other services and the other leg of this slot, if it
+ * went in above p. The caller has already taken p out of its slot, so the
+ * release of the slot that follows has no row there to delete on the chip.
+ */
+static void cf_uninsert(uint32_t p, uint32_t top)
+{
+	uint32_t r;
+
+	for (r = p; r < top; r++) {
+		odi_sw_cf[r] = odi_sw_cf[r + 1U];
+		cf_moved(r + 1U, r);
+	}
+	odi_sw_cf[top].used = 0;
 }
 
 static void cf_remove(int idx)
@@ -1001,6 +1024,7 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 	struct odi_sw_bdgconn_slot *sl = NULL;
 	struct odi_sw_cf_leg us, ds;
 	uint32_t vlan_vid, vlan_val, vlan_any;
+	uint32_t us_top = 0, ds_top = 0, r;
 	unsigned int i;
 	int ds_flow;
 
@@ -1072,9 +1096,9 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 		sl->vlan_any = 0;
 		sl->used = 1;
 		if (us.present)
-			sl->us_row = cf_insert(&us);
+			sl->us_row = cf_insert(&us, &us_top);
 		if (ds.present)
-			sl->ds_row = cf_insert(&ds);
+			sl->ds_row = cf_insert(&ds, &ds_top);
 		if ((us.present && sl->us_row < 0) || (ds.present && sl->ds_row < 0)) {
 			/* Named for the leg that found no row: an EtherType
 			 * row has only the second layout to go to. */
@@ -1083,6 +1107,27 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 				ODI_SW_CMD_LOG("bdgconn: no free row of the second layout for an EtherType rule\n");
 			else
 				ODI_SW_CMD_LOG("bdgconn: classification table full\n");
+			/* The leg that did go in, and the rows it moved up,
+			 * are so far only in the software table: the chip
+			 * writes are still queued. Take it back out there, the
+			 * last insert first, so the table is again what the
+			 * chip holds. A release of the slot as it stands would
+			 * delete the chip row at the new position, which on the
+			 * chip still belongs to another service. Nothing is written
+			 * for it: the refused rule is never live, and no other
+			 * row moves. An older rule this id named was released
+			 * above, before the inserts, as on any replace. */
+			if (sl->ds_row >= 0) {
+				r = (uint32_t)sl->ds_row;
+				sl->ds_row = -1;
+				cf_uninsert(r, ds_top);
+			}
+			if (sl->us_row >= 0) {
+				r = (uint32_t)sl->us_row;
+				sl->us_row = -1;
+				cf_uninsert(r, us_top);
+			}
+			odi_sw_cf_out_n = 0;
 			bdgconn_release(sl);
 			return ODI_SW_ENOSPC;
 		}

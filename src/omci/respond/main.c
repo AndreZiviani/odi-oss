@@ -47,9 +47,10 @@ static void wdt_ping(void)
 static void on_signal(int sig)
 {
 	(void)sig;
-	/* Reset the sink FIRST: mid-command it is cli_sink, and flushing through
-	 * it would spend the whole retry budget on a queue about to be deleted. */
-	out_set_sink(0);
+	/* Drop the sink FIRST, without a flush: mid-command it is cli_sink, and
+	 * flushing through it would spend the whole retry budget on a queue
+	 * about to be deleted. out_set_sink(0) flushes before it switches. */
+	out_drop_sink();
 	if (nl_fd >= 0)
 		nl_redirect(nl_fd, nl_tid, REDIRECT_TYPE, NL_ACT_DEREG, 0);
 	/* Queues outlive the process, and this kernel has 53 in total. Only
@@ -113,6 +114,9 @@ int main(int argc, char **argv)
 	uint32_t tid = 0, plen;
 	long fd, rc;
 	int idle = 0, maxidle = 24, n = 0, want = 400, force = 0, restart = 0;
+	/* respawn: an omcid already ran this boot; resumed: this one loaded
+	 * its snapshot (both decided below, before the clean-up uses them). */
+	int respawn = 0, resumed = 0;
 	int quiet = 0;
 	unsigned long frames_seen = 0;
 	/* CLOCK_MONOTONIC second at which the oldest pending rebuild was first
@@ -145,7 +149,9 @@ int main(int argc, char **argv)
 			apply_hw = 1;
 		/* -r: replacing a running omcid, whose bridge connections are
 		 * still in the switch; without clearing them the first rebuild
-		 * adds a second set. /etc/scripts/apply passes it, rcS does not. */
+		 * adds a second set. svc-omcid.sh passes it on a respawn (its
+		 * marker says an omcid ran this boot), so the clean-up below
+		 * does not rest on the decision files alone. */
 		else if (str_eq(argv[i], "-r"))
 			restart = 1;
 		/* -d: the daemon, stopped only by a signal. Without it the
@@ -344,7 +350,6 @@ int main(int argc, char **argv)
 	 * run's; both are removed here before the new decision is written. */
 	{
 		uint32_t st = 0;
-		int resumed, restart;
 		const char *why = "no_snapshot";
 		long prev = sys_open(RESUME_DECISION_PATH, O_RDONLY);
 		long prevp = sys_open(RESUME_DECISION_PREV, O_RDONLY);
@@ -353,7 +358,7 @@ int main(int argc, char **argv)
 		 * finding one (or the .prev svc-omcid.sh moved it to) says an
 		 * omcid already ran this boot: this is a respawn or a restart,
 		 * not the first start. */
-		restart = prev >= 0 || prevp >= 0;
+		respawn = prev >= 0 || prevp >= 0;
 		if (prev >= 0)
 			sys_close((int)prev);
 		if (prevp >= 0)
@@ -380,15 +385,38 @@ int main(int argc, char **argv)
 				conn_dirty && qos_dirty ? ", " : "",
 				!qos_dirty ? "" : qos_full ? "upstream QoS, in full"
 							   : "upstream QoS");
-		ev_start(restart, resumed, why, st);
+		ev_start(respawn, resumed, why, st);
 	}
 
-	if (restart && apply_hw && fd >= 0) {
+	/* What an earlier omcid of this boot left in the switch: its bridge
+	 * connections, T-CONTs, queues and flows. This one starts with none of
+	 * them in its tables, so its rebuilds would never withdraw them, and a
+	 * provisioning that uses fewer service ids leaves the rest forwarding
+	 * until a reboot. They go when this omcid starts empty after another
+	 * one, respawned by init or started with -r. A resumed omcid took them
+	 * over from its snapshot and keeps them: the datapath was never
+	 * touched, and clearing it here would drop a line the snapshot
+	 * describes as working. */
+	if ((restart || respawn) && !resumed && apply_hw && fd >= 0) {
+		int kept = 0;
+
+		/* The snapshot on disk describes what is cleared here, so it
+		 * goes first. Left in place, it would be resumed by the next
+		 * respawn in O5 if this omcid died before saving its own, and
+		 * its services taken as programmed when none are. */
+		snapshot_invalidate();
 		/* Deactivating an id the driver does not hold is not an error
-		 * (odi_switch_cmd.c cmd 50), so every id is sent. */
+		 * (odi_switch_cmd.c cmd 50), so every id is sent. One that
+		 * fails may still forward: its slot is taken as SERV_PENDING,
+		 * so no plan hands the id out and the main loop sends the
+		 * deactivate again (bdgconn_retry_pending()). */
 		for (int id = 0; id < SERV_MAX; id++)
-			omci_deactiveBdgConn((uint32_t)id);
-		out_fmt("restart: %d bridge connection ids cleared\n", (long)SERV_MAX);
+			if (omci_deactiveBdgConn((uint32_t)id)) {
+				servtab[id].in_use = SERV_PENDING;
+				kept++;
+			}
+		out_fmt("restart: %d bridge connection ids cleared, %d kept pending\n",
+			(long)(SERV_MAX - kept), (long)kept);
 		/* And the T-CONTs, queues and flows (upstream and downstream)
 		 * the last omcid programmed: this one starts with none of them
 		 * in its tables, and would otherwise meet their queue blocks

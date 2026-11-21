@@ -1616,8 +1616,9 @@ static int odi_gpon_proc_ploam_show(struct seq_file *seq, void *v)
 	for (i = 0; i < count && i < ODI_GPON_PLOAM_RING_LEN; i++) {
 		char content[ODI_GPON_PLOAM_RING_CONTENT_CHARS];
 
-		/* The live AES key of an Encryption_Key is masked: this file
-		 * is world-readable (odi_gpon_ploam_ring_content()).
+		/* The live AES key of an Encryption_Key and the password of a
+		 * Password are masked: this file is world-readable
+		 * (odi_gpon_ploam_ring_content()).
 		 */
 		odi_gpon_ploam_ring_content(ring[i].direction == ODI_GPON_PLOAM_US,
 					    ring[i].type, ring[i].content, content);

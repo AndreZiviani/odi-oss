@@ -244,7 +244,7 @@ static int cmd_port_auto_nego(void *buf, uint32_t len)
 /* cmd 32: {port, state}, the admin state of an Ethernet UNI (ME 11
  * AdministrativeState, omcid's apply_uni.c sends !lock). state 0 forces
  * the port's link down, anything else releases it, as the stock OMCI
- * layer does through the SDK's admin enable (pf_rtl96xx_SetPortState).
+ * layer does through its port admin enable.
  * On this SFP the UNI is the host port: a lock takes the host link down,
  * and the stick's own management path with it, until the OLT unlocks;
  * OMCI itself does not cross that port. The PON and CPU ports are refused:
@@ -334,7 +334,7 @@ static int cmd_port_phy_pwrdown(void *buf, uint32_t len)
 }
 
 /* cmd 64: {sel, enable, portMask} (uapi/omci_bridgeport.h), a lookup-miss
- * flood mask. As the stock OMCI layer does (pf_rtl96xx_SetFloodingPortMask):
+ * flood mask. As the stock OMCI layer does it:
  * sel picks the mask (0 unknown unicast, 1 broadcast, 2 unknown
  * multicast), enable 1 adds portMask's ports, 0 removes them, and every
  * other port keeps its bit; enable 2 (trap) is refused, as stock refuses it.
@@ -776,8 +776,8 @@ static int cmd_pri_queue_del(void *buf, uint32_t len)
  * the next provisioning does not write again would keep delivering a GEM
  * port the OLT no longer provisions. A row that does not read back clear
  * stays recorded (and logged), and does not stop the rest. The stock
- * driver's MIB reset (pf_rtl96xx_ResetMib) also resets every flow and
- * destroys the logical T-CONTs, and omci_app sends it on an OLT MIB reset.
+ * driver's MIB reset also resets every flow and destroys the logical
+ * T-CONTs, and omci_app sends it on an OLT MIB reset.
  * Without it a new provisioning met the old one's queue blocks, and its
  * flows stayed valid. Left alone: the Alloc-ID CAM (PLOAM's, G.984.3
  * 5.5.4), the OMCC (T-CONT 16, flow 64, GEM row 64) and the bridge
@@ -911,15 +911,14 @@ static int us_flow_delete(uint32_t slot)
 }
 
 /* cmd 25 downstream with ena 0: the flow taken out, as the stock driver's
- * flow delete does it (dal_rtl9602c_gpon_dsGemPort_del, read, not copied):
- * the CAM row cleared and the flow type word 0, here also read back clear
- * (odi_sw_gpon_ds_flow_del()). Only then is the flow forgotten: its
- * readback row, its priority on the bridge connections' downstream rows
- * and its counters. A row that did not read back clear is an error, and
- * the flow stays recorded, so omcid keeps the id and retries; a row given
- * to another port before it read clear could leave that port, or this
- * one, in the CAM twice. A flow id not in use is cleared all the same: a
- * row 0..63 is cmd 25's alone (the OMCC is row 64), and clearing an empty
+ * flow delete does it: the CAM row cleared and the flow type word 0, here
+ * also read back clear (odi_sw_gpon_ds_flow_del()). Only then is the flow
+ * forgotten: its readback row, its priority on the bridge connections'
+ * downstream rows and its counters. A row that did not read back clear is an
+ * error, and the flow stays recorded, so omcid keeps the id and retries; a
+ * row given to another port before it read clear could leave that port, or
+ * this one, in the CAM twice. A flow id not in use is cleared all the same:
+ * a row 0..63 is cmd 25's alone (the OMCC is row 64), and clearing an empty
  * row costs two requests.
  */
 static int ds_flow_delete(uint32_t idx)
@@ -963,14 +962,13 @@ static void ds_flow_steer(uint32_t idx, const struct omci_gemflow *g)
 	odi_switch_bdgconn_ds_pri_set(idx, pri);
 }
 
-/* cmd 25: dir picks the table, the flow id the row (see the state
- * above), ena 1 creates or updates the flow and ena 0 deletes it (the
- * stock driver's reading of the field). A downstream flow is Ethernet
- * (FLAGS 2), plus the multicast bit (3) when omcid sets mcast_filter: the
- * stock OMCI layer sets its isFilterMcast for the GEM port of a multicast
- * GEM interworking TP (ME 281) with an address table row
- * (mib_MultiGemIwTp.c, read, not copied), and its flow add writes the bit
- * from it. Both used to be keyed on GEM port 0xfff, which is only ISP1's
+/* cmd 25: dir picks the table, the flow id the row (see the state above),
+ * ena 1 creates or updates the flow and ena 0 deletes it (the stock driver's
+ * reading of the field). A downstream flow is Ethernet (FLAGS 2), plus the
+ * multicast bit (3) when omcid sets mcast_filter: the stock OMCI layer marks
+ * the GEM port of a multicast GEM interworking TP (ME 281) with an address
+ * table row as a multicast port, and its flow add writes the bit from that
+ * mark. Both used to be keyed on GEM port 0xfff, which is only ISP1's
  * multicast GEM (downstream only, hence the capture's 6 downstream and 5
  * upstream instances): ISP2's multicast GEM (0xffe) and any other OLT's got
  * 2, and an OLT whose 0xfff is a two-way data port would have had its

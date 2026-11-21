@@ -29,19 +29,42 @@
 # client_find skips a zero deadline), and `start omcid` registers it again
 # before killing the placeholder; the deadline counts from that moment and
 # omcid pings within 15 s of starting. A safe-mode boot (safe-mode.sh) runs
-# omcid without a deadline, and `start omcid` leaves it that way.
+# omcid without a deadline, and `start omcid` leaves it that way. Neither
+# does it arm the deadline when svc-omcid.sh would park instead of starting
+# omcid (modules.off, an omcid.off that could not be removed, no binary):
+# nothing would ping, and the stick would reset a minute later. It releases
+# the deadline instead and exits 1, as omcid does not start; when a release
+# does not go through, stop and start leave the running omcid alone and
+# exit 1.
 set -u
 OMCID_DEADLINE_S=${ODI_WDT_OMCID_DEADLINE_S:-60}
 WDT_REGISTER=${WDT_REGISTER:-/proc/odi_wdt/register}
 CONFIG_DIR=${CONFIG_DIR:-/etc/config}
 SAFE_FLAG=${SAFE_FLAG:-/var/run/safe-mode}
+OMCID_BIN=${OMCID_BIN:-/bin/omcid}
 
 # Writes "omcid <deadline>" to the watchdog, when there is one; bounded,
-# since a /proc write that blocks would hang the prompt.
+# since a /proc write that blocks would hang the prompt. A register that is
+# there and cannot be written is a failure, not a watchdog that is absent.
 wdt_omcid() {
-	[ -w "$WDT_REGISTER" ] || return 0
-	timeout 5 sh -c 'echo "omcid $1" > "$2"' sh "$1" "$WDT_REGISTER" 2>/dev/null ||
-		echo "$0: could not set the omcid watchdog deadline to $1" >&2
+	[ -e "$WDT_REGISTER" ] || return 0
+	[ -w "$WDT_REGISTER" ] &&
+		timeout 5 sh -c 'echo "omcid $1" > "$2"' sh "$1" "$WDT_REGISTER" 2>/dev/null && return 0
+	echo "$0: could not set the omcid watchdog deadline to $1" >&2
+	return 1
+}
+
+# Why svc-omcid.sh would park instead of exec-ing omcid, or nothing when it
+# would start it: the same three checks, in the same order, that rcS makes
+# before it registers the client at boot.
+omcid_parks() {
+	if [ -f "$CONFIG_DIR/modules.off" ]; then
+		echo "$CONFIG_DIR/modules.off is set"
+	elif [ -f "$CONFIG_DIR/omcid.off" ]; then
+		echo "$CONFIG_DIR/omcid.off could not be removed"
+	elif [ ! -x "$OMCID_BIN" ]; then
+		echo "$OMCID_BIN is missing"
+	fi
 }
 
 usage() {
@@ -89,9 +112,17 @@ comm=$(svc_comm "$svc")
 case "$action" in
 stop)
 	mkdir -p "$CONFIG_DIR" 2>/dev/null
+	had_off=no
+	[ -f "$CONFIG_DIR/$svc.off" ] && had_off=yes
 	: > "$CONFIG_DIR/$svc.off" 2>/dev/null ||
 		echo "$0: could not write $CONFIG_DIR/$svc.off -- config partition mounted?" >&2
-	[ "$svc" = omcid ] && wdt_omcid 0
+	# A deadline still armed turns the kill into a reset a minute later:
+	# omcid is left running then, and the flag goes back to what it was.
+	if [ "$svc" = omcid ] && ! wdt_omcid 0; then
+		[ "$had_off" = yes ] || rm -f "$CONFIG_DIR/$svc.off"
+		echo "$0: omcid NOT stopped: its watchdog deadline is still armed, and a stopped omcid would reset the stick" >&2
+		exit 1
+	fi
 	kill_by_comm "$comm"
 	# A daemon in its restart wait (respawn.sh, docs/SETTINGS.md) is not yet
 	# the daemon: the waiting shell carries its name on the command line and
@@ -101,7 +132,21 @@ stop)
 	;;
 start)
 	rm -f "$CONFIG_DIR/$svc.off" 2>/dev/null
-	[ "$svc" = omcid ] && [ ! -f "$SAFE_FLAG" ] && wdt_omcid "$OMCID_DEADLINE_S"
+	if [ "$svc" = omcid ] && [ ! -f "$SAFE_FLAG" ]; then
+		why=$(omcid_parks)
+		if [ -z "$why" ]; then
+			wdt_omcid "$OMCID_DEADLINE_S"
+		else
+			# Released, not only left alone: an omcid running since
+			# boot holds an armed deadline, and the kill below stops
+			# the only process that pings it.
+			if ! wdt_omcid 0; then
+				echo "$0: omcid will not start ($why), and its watchdog deadline is still armed: the running omcid is left alone, as killing it would reset the stick" >&2
+				exit 1
+			fi
+			echo "$0: omcid will not start ($why); its watchdog deadline is released" >&2
+		fi
+	fi
 	kill_by_comm "$comm"
 	# The placeholder (respawn-off.sh) always execs under that same path
 	# regardless of which .off entry launched it, so this can also kill an
@@ -109,6 +154,10 @@ start)
 	# restarts it, its own .off flag is unchanged, and it goes straight
 	# back to waiting.
 	kill_by_cmdline "respawn-off.sh"
+	if [ -n "${why:-}" ]; then
+		echo "$svc: flag cleared, but svc-omcid.sh parks it ($why): not started" >&2
+		exit 1
+	fi
 	echo "$svc: start requested (flag cleared, current process killed so init restarts it)"
 	;;
 *)

@@ -763,6 +763,11 @@ static int odi_nic_xmit_raw(u32 opts1, u32 opts2, u32 opts3,
 	dma_addr_t dma;
 	void *buf;
 
+	/* kmalloc(0) is not NULL, and a zero-length dma_map_single() ends in
+	 * the BUG_ON of the cache writeback (arch/mips/rtl8686/cache.c). */
+	if (!len)
+		return -EINVAL;
+
 	spin_lock_irqsave(&odi.lock, flags);
 
 	if (!odi.tx_up) {
@@ -1072,12 +1077,15 @@ static int odi_rx_ring(unsigned int ring, int budget)
 		}
 
 		if ((d->opts1 & (ODI_RXD_BAD_CRC | ODI_RXD_TOO_LONG)) ||
-		    len <= ETH_FCS_LEN || len > ODI_NIC_RX_BUF_SIZE) {
+		    len < ETH_HLEN + ETH_FCS_LEN || len > ODI_NIC_RX_BUF_SIZE) {
 			/* Drop, and give the same buffer back: it is still mapped
 			 * from its last refill, so it is not mapped again (that
 			 * leaked a mapping each time). The length comes from the
 			 * descriptor, so a bad one is caught before the buffer is
-			 * given up.
+			 * given up. A frame shorter than an Ethernet header and
+			 * its FCS is dropped too: the RX hooks and eth_type_trans
+			 * read the header, and with fewer bytes they read what
+			 * the buffer held before.
 			 */
 			dev = odi_dev_for_port(ODI_PORT_CATCHALL);
 			if (dev)

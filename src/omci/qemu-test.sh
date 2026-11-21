@@ -829,6 +829,99 @@ check "the file still parses after an insert" "$got" "serial      ODIX00000001"
 got=$($Q cli/build/omcli cfgset /tmp/w.xml HW_MIB_TABLE GPON_SN nope 2>&1 | sed -n '1p')
 check "a Dir the file does not have is refused" "$got" "write failed"
 
+# The value is escaped into a 192-byte buffer: exactly 192 bytes fit, one
+# more is refused rather than cut. 48 ampersands are 48 bytes raw and 240
+# escaped, so the bound is on the escaped length.
+v192=$(printf '%0192d' 0)
+got=$($Q cli/build/omcli cfgset /tmp/w.xml MIB_TABLE LOID "$v192" 2>&1 | sed -n '1p')
+check "a value of 192 escaped bytes is written" "$got" "ok"
+got=$(grep -c "Name=\"LOID\" Value=\"$v192\"/>" /tmp/w.xml)
+check "all 192 of them, and the element closed after them" "$got" "1"
+got=$($Q cli/build/omcli cfgset /tmp/w.xml MIB_TABLE LOID "$(printf '%0193d' 0)" 2>&1 | sed -n '1p')
+check "a value of 193 bytes is refused" "$got" "write failed"
+got=$($Q cli/build/omcli cfgset /tmp/w.xml MIB_TABLE LOID "$(printf '%048d' 0 | tr 0 '&')" 2>&1 | sed -n '1p')
+check "a value past 192 escaped bytes is refused" "$got" "write failed"
+
+# A store past 16 KB: a stick that ran a router firmware keeps the tables
+# of that firmware in the same file (30 KB is known). Keys after the first
+# 16 KB are read, and a write keeps every byte around the value. 600 filler
+# keys of about 50 bytes go before the four of the fixture.
+big() {   # big <filler keys> <file>
+	{
+		echo '<Config Name="ROOT">'
+		printf '\t<Dir Name="MIB_TABLE">\n'
+		i=0
+		while [ "$i" -lt "$1" ]; do
+			printf '\t\t<Value Name="ROUTER_FILLER_%04d" Value="0123456789"/>\n' "$i"
+			i=$((i + 1))
+		done
+		sed -n '/DEVICE_TYPE/,/VLAN_MANU_TAG_PRI/p' test/cfg_agree.xml
+		printf '\t</Dir>\n</Config>\n'
+	} > "$2"
+}
+big 600 /tmp/w_big.xml
+got=$(wc -c < /tmp/w_big.xml | tr -d ' ')
+if [ "$got" -le 16384 ] || [ "$got" -ge 65535 ]; then
+	echo "FAIL  the large store is $got bytes, not between 16 and 64 KB"; fail=$((fail + 1))
+fi
+got=$($Q cli/build/omcli ident /tmp/w_big.xml /tmp/w_hs.xml 2>&1 | sed -n '3p')
+check "a key past 16 KB of the store is read" "$got" "loid        user-one"
+sed 's/Name="LOID" Value="user-one"/Name="LOID" Value="user-two"/' /tmp/w_big.xml > /tmp/w_big.want
+got=$($Q cli/build/omcli cfgset /tmp/w_big.xml MIB_TABLE LOID user-two 2>&1 | sed -n '1p')
+check "a key past 16 KB of the store is written" "$got" "ok"
+if cmp -s /tmp/w_big.xml /tmp/w_big.want; then
+	echo "ok    and every other byte of the large store is kept"
+else
+	echo "FAIL  the large store changed beyond the value"; fail=$((fail + 1))
+fi
+
+# A file past the 64 KB buffer is refused whole: writing back the part that
+# fit would drop the rest of the store.
+big 1400 /tmp/w_huge.xml
+cp /tmp/w_huge.xml /tmp/w_huge.orig
+got=$($Q cli/build/omcli cfgset /tmp/w_huge.xml MIB_TABLE LOID user-two 2>&1 | sed -n '1p')
+check "a store past 64 KB is not written" "$got" "write failed"
+if cmp -s /tmp/w_huge.xml /tmp/w_huge.orig; then
+	echo "ok    and is left as it was"
+else
+	echo "FAIL  a store past 64 KB was changed"; fail=$((fail + 1))
+fi
+
+# A write may not grow the store past what the next read takes whole
+# (65,535 bytes): that store could not be written again, and its last keys
+# would read as absent. A pad key brings the file to 65,531 bytes, so LOID
+# (user-one) may grow by 4 bytes and not by 5.
+big 1150 /tmp/w_edge.xml
+pad=$((65531 - $(wc -c < /tmp/w_edge.xml | tr -d ' ') - 31))
+if [ "$pad" -lt 0 ]; then
+	echo "FAIL  the edge store is already past 65,531 bytes"; fail=$((fail + 1))
+else
+	{
+		sed -n '1,2p' /tmp/w_edge.xml
+		printf '\t\t<Value Name="PAD" Value="%s"/>\n' "$(printf "%0${pad}d" 0)"
+		sed '1,2d' /tmp/w_edge.xml
+	} > /tmp/w_edge.new
+	mv /tmp/w_edge.new /tmp/w_edge.xml
+fi
+check "the edge store is 65,531 bytes" "$(wc -c < /tmp/w_edge.xml | tr -d ' ')" "65531"
+cp /tmp/w_edge.xml /tmp/w_edge.orig
+got=$($Q cli/build/omcli cfgset /tmp/w_edge.xml MIB_TABLE LOID user-one12345 2>&1 | sed -n '1p')
+check "a write that grows the store past 65,535 bytes is refused" "$got" "write failed"
+if cmp -s /tmp/w_edge.xml /tmp/w_edge.orig; then
+	echo "ok    and the store is left as it was"
+else
+	echo "FAIL  a refused write changed the store"; fail=$((fail + 1))
+fi
+got=$($Q cli/build/omcli cfgset /tmp/w_edge.xml MIB_TABLE LOID user-one1234 2>&1 | sed -n '1p')
+check "a write to exactly 65,535 bytes is made" "$got" "ok"
+check "the store is then 65,535 bytes" "$(wc -c < /tmp/w_edge.xml | tr -d ' ')" "65535"
+# LOID and LOID_OLD both: the reader takes LOID_OLD while the two differ.
+got=$($Q cli/build/omcli cfgset /tmp/w_edge.xml MIB_TABLE LOID user-two 2>&1 | sed -n '1p')
+check "and it can be written again" "$got" "ok"
+$Q cli/build/omcli cfgset /tmp/w_edge.xml MIB_TABLE LOID_OLD user-two > /dev/null 2>&1
+got=$($Q cli/build/omcli ident /tmp/w_edge.xml /tmp/w_hs.xml 2>&1 | sed -n '3p')
+check "and its last keys still read" "$got" "loid        user-two"
+
 # ------------------------------------------------------------------- class 47
 #
 # The part of the stock MacBriPortCfgDataDrvCfg (4888 bytes) that reaches

@@ -92,6 +92,26 @@ send 0103 4c 0002 0000 "0001"
 check "Get All Alarms Next past the end is a parameter error" \
       "$(answer 0103 | cut -c1-2)" "03"
 
+# A reload that changes nothing (apply.sh omci with the store as it was)
+# leaves the alarms as they stand: LAN-LOS is not declared again. It was,
+# with each reload, since every one rebuilt the autonomous entities and
+# their alarm state with them.
+n=$(count '=> ')
+before=$(sed -n 's/^id=//p' /var/run/omcid-reload 2>/dev/null)
+kill -HUP "$pid"
+i=0
+while [ "$i" -lt 50 ]; do
+	id=$(sed -n 's/^id=//p' /var/run/omcid-reload 2>/dev/null)
+	[ -n "$id" ] && [ "$id" != "$before" ] &&
+		grep -q '^state=done$' /var/run/omcid-reload && break
+	sleep 0.2
+	i=$((i + 1))
+done
+check "the reload ran, and changed nothing" \
+      "$(sed -n 's/^changed=//p' /var/run/omcid-reload)" "none"
+sleep 3
+check "a reload that changes nothing declares no standing alarm again" "$(count '=> ')" "$n"
+
 # The link comes back: enabled, LAN-LOS cleared. Get All Alarms reset the
 # sequence number, so this one is 1 again.
 printf '1\n' > /tmp/alarms-link

@@ -27,6 +27,7 @@
 #   2b. Every re-registration is recorded with the OLT answer (rereg.c):
 #      a refusal (three Deactivate_ONU-IDs before O5, or O7), a timeout,
 #      the guard that holds the third change back until it is confirmed,
+#      a live reload that defers an identity change,
 #      a revert that the count skips, and the record surviving a restart.
 #   2c. The identity trial file (identity-trial.sh) is read over the store:
 #      its serial number is the one handed to the driver, and taking the
@@ -417,6 +418,62 @@ else bad "no serial: never finished"; fi
 check "no serial: deactivated, and no gponsn or gponact" "gpondeact" \
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 check_grep "no serial: logged" "event=reload_done changed=identity action=reregister result=no_serial" "$log"
+# The ONU is left deactivated, as after a failed gponact: the next reload
+# re-registers, a VLAN change alone too, and says why (retry=1). A rebuild
+# in place would report the ONU as still in O5.
+: > "$INITLOG"
+old_id=$(st id)
+store 1 12 0
+kill -HUP "$pid"
+if wait_done "$old_id" 20; then
+	check "no serial, then a VLAN change: re-registers, and says it is a retry" \
+		"done no_serial reregister 1" "$(st state) $(st result) $(st action) $(st retry)"
+else bad "no serial, then a VLAN change: never finished"; fi
+check "no serial, then a VLAN change: deactivated again, still no gponact" "gpondeact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+stop_omcid
+
+# The same with the key gone from both files instead of emptied: an absent
+# key reads as -1, not 0, and must stop the activation all the same.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 1 "0"
+log=/tmp/rl-nosn-absent.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1 -j 4
+old_id=$(st id)
+rm -f "$HS"
+kill -HUP "$pid"
+if wait_done "$old_id" 20; then
+	check "no serial key: result no_serial" "done no_serial identity" "$(st state) $(st result) $(st changed)"
+else bad "no serial key: never finished"; fi
+check "no serial key: deactivated, and no gponsn or gponact" "gpondeact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+stop_omcid
+
+# A store that opens but cannot be read (a directory here, EIO on a
+# flash) is not a store without a serial number: nothing changes, and the
+# ONU stays on the line, where reading it as absent took it off.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "0"
+log=/tmp/rl-unreadable.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1 -j 4
+old_id=$(st id)
+rm -f "$HS"
+mkdir "$HS"
+kill -HUP "$pid"
+if wait_done "$old_id" 20; then
+	check "unreadable store: result unreadable, nothing changed" "done unreadable none" \
+		"$(st state) $(st result) $(st changed)"
+else bad "unreadable store: never finished"; fi
+check "unreadable store: no driver verb" "0" "$(wc -c < "$INITLOG" | tr -d ' ')"
+rmdir "$HS"
+hs_sn ODIT00000001
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 20 || bad "unreadable store: the reload after it did not finish"
+check "unreadable store: readable again, nothing to do" "done ok none" \
+	"$(st state) $(st result) $(st changed)"
 stop_omcid
 
 # ------------------------------------------------ the failure paths
@@ -562,6 +619,7 @@ wait_count "$INITLOG" gpondeact 1 8 || bad "failed activation: no gpondeact"
 rm -f "$INITLOG"
 wait_done "$old_id" 20 || bad "failed activation: never finished"
 check "failed activation: result failed" "done failed" "$(st state) $(st result)"
+check "failed activation: an identity change, no retry" "" "$(st retry)"
 check_grep "failed activation: the step is logged" "event=reload_step verb=gponact rc=2" "$log"
 : > "$INITLOG"
 old_id=$(st id)
@@ -571,6 +629,7 @@ inject isp1
 wait_done "$old_id" 20 || bad "failed activation, again: never finished"
 check "failed activation, again: re-registers and ends ok" "done ok identity reregister" \
 	"$(st state) $(st result) $(st changed) $(st action)"
+check "failed activation, again: the status says it is a retry" "1" "$(st retry)"
 check "failed activation, again: deactivate and activate" "gpondeact gponact" \
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 old_id=$(st id)
@@ -578,6 +637,73 @@ kill -HUP "$pid"
 wait_done "$old_id" 10 || bad "failed activation, then: no outcome"
 check "failed activation, then: nothing changed is ok again" "done ok none none" \
 	"$(st state) $(st result) $(st changed) $(st action)"
+check "failed activation, then: no retry any more" "" "$(st retry)"
+stop_omcid
+
+# A VLAN change after a failed activation re-registers too: the line is
+# down, and a rebuild in place would say the ONU stayed in O5.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "5 282 794 1050 1306 538"
+log=/tmp/rl-act2.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1
+inject isp1
+settle "$log" 1
+: > "$INITLOG"
+old_id=$(st id)
+store 1 11 0 "$(val LOID_OLD actfail2)
+$(val LOID actfail2)
+"
+kill -HUP "$pid"
+wait_count "$INITLOG" gpondeact 1 8 || bad "failed activation, VLAN: no gpondeact"
+rm -f "$INITLOG"
+wait_done "$old_id" 20 || bad "failed activation, VLAN: never finished"
+check "failed activation, VLAN: the first one failed" "done failed" "$(st state) $(st result)"
+: > "$INITLOG"
+old_id=$(st id)
+store 1 12 0 "$(val LOID_OLD actfail2)
+$(val LOID actfail2)
+"
+kill -HUP "$pid"
+wait_count "$INITLOG" gponact 1 8 || bad "failed activation, VLAN: no gponact"
+inject isp1
+wait_done "$old_id" 20 || bad "failed activation, VLAN: never finished again"
+check "failed activation, then a VLAN change: re-registers, not a rebuild in place" \
+	"done ok reregister 1" "$(st state) $(st result) $(st action) $(st retry)"
+check "failed activation, then a VLAN change: deactivate and activate" "gpondeact gponact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+stop_omcid
+
+# A retry that brings a new serial number or password is an identity change
+# like any other: omci-live defers it, as it does with the line up, rather
+# than re-registering with values no one confirmed.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "5 282 794 1050 1306 538"
+log=/tmp/rl-act3.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1
+inject isp1
+settle "$log" 1
+: > "$INITLOG"
+old_id=$(st id)
+store 1 11 0 "$(val LOID_OLD actfail3)
+$(val LOID actfail3)
+"
+kill -HUP "$pid"
+wait_count "$INITLOG" gpondeact 1 8 || bad "failed activation, new LOID: no gpondeact"
+rm -f "$INITLOG"
+wait_done "$old_id" 20 || bad "failed activation, new LOID: never finished"
+check "failed activation, new LOID: the first one failed" "done failed" "$(st state) $(st result)"
+: > "$INITLOG"
+store 1 11 0 "$(val LOID_OLD actfail4)
+$(val LOID actfail4)
+"
+echo live > "$CONFIRM"
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 15 || bad "failed activation, new LOID by omci-live: never finished"
+check "failed activation, then a new LOID by omci-live: deferred, no driver verb" \
+	"done deferred 0" "$(st state) $(st result) $(wc -c < "$INITLOG" | tr -d ' ')"
 stop_omcid
 
 # ------------------------------------------------ 3. which key, which class
@@ -621,6 +747,32 @@ reload_is "OMCI_CUSTOM_MCAST bit 1"            vlan OMCI_CUSTOM_MCAST     rebuil
 store 1 12 5 "$(val OMCI_CUSTOM_MCAST 3)
 "
 reload_is "OMCI_CUSTOM_MCAST 1 to 3, bit 1 kept: not a change" none ""   none
+# The views read the store and leave what omcid runs with alone: an edit
+# shown by them is not applied, they say so, and the reload still sees it.
+store 1 13 5 "$(val OMCI_CUSTOM_MCAST 3)
+"
+got=$($Q cli/build/omcli vlan 2>&1)
+check "omcli vlan: shows the stored VID" "vlan vid    13" "$(printf '%s\n' "$got" | grep '^vlan vid')"
+check "omcli vlan: names the key not applied" "not applied VLAN_MANU_TAG_VID (apply.sh omci)" \
+	"$(printf '%s\n' "$got" | grep '^not applied')"
+check "omcli vlan: the OLT still sees the running VID" "ManualTagVid 000c" \
+	"$($Q cli/build/omcli mib get all 2>&1 | awk '/^65535 /{on=1; next} /^[0-9]+ /{on=0} on && $1 == "ManualTagVid" {print $1, $2}')"
+reload_is "VLAN_MANU_TAG_VID after omcli vlan"  vlan VLAN_MANU_TAG_VID     rebuild
+check "omcli vlan: nothing left to apply after the reload" "" \
+	"$($Q cli/build/omcli vlan 2>&1 | grep '^not applied')"
+store 1 12 5 "$(val OMCI_CUSTOM_MCAST 3)
+"
+reload_is "VLAN_MANU_TAG_VID back"             vlan VLAN_MANU_TAG_VID     rebuild
+hs_sn ODIT00000002
+got=$($Q cli/build/omcli ident 2>&1)
+check "omcli ident: shows the stored serial" "serial      ODIT00000002" "$(printf '%s\n' "$got" | grep '^serial')"
+check "omcli ident: names the key not applied" "not applied GPON_SN (apply.sh omci)" \
+	"$(printf '%s\n' "$got" | grep '^not applied')"
+check "omcli ident: still not applied when asked again" "not applied GPON_SN (apply.sh omci)" \
+	"$($Q cli/build/omcli ident 2>&1 | grep '^not applied')"
+reload_is "GPON_SN after omcli ident"           identity GPON_SN          reregister
+hs_sn ODIT00000001
+reload_is "GPON_SN back"                        identity GPON_SN          reregister
 store 1 12 5
 reload_is "OMCI_CUSTOM_MCAST removed"          vlan OMCI_CUSTOM_MCAST     rebuild
 # The stock FwdOp override changes the rules of the ports it names: a rebuild.
@@ -875,6 +1027,33 @@ check "accepted: five lines" "5" "$(wc -l < "$REREG" | tr -d ' ')"
 echo confirm > "$CONFIRM"
 change ODIT00000005
 [ ! -e "$CONFIRM" ] && ok "unused confirmation: taken by the reload" || bad "unused confirmation: left behind"
+
+# A live reload (apply.sh omci-live, what the web UI sends after a VLAN
+# save) changes nothing that re-registers the ONU: a serial number saved
+# earlier is not applied with it, nor anything else, and nothing is
+# recorded. The next plain reload applies it.
+: > "$INITLOG"
+echo live > "$CONFIRM"
+change ODIT00000006
+check "live: deferred" "done deferred identity deferred" "$(st state) $(st result) $(st changed) $(st action)"
+check "live: no driver verb" "0" "$(wc -c < "$INITLOG" | tr -d ' ')"
+check "live: not recorded" "5" "$(wc -l < "$REREG" | tr -d ' ')"
+check_grep "live: logged" "event=reload changed=identity action=deferred keys=GPON_SN" "$log"
+[ ! -e "$CONFIRM" ] && ok "live: the request is used up" || bad "live: the file is still there"
+# Only the words apply.sh writes confirm anything. An empty file (what a
+# reader finds between the open by echo and its write) or a cut one defers
+# like omci-live, rather than applying the serial number as --confirm would.
+for m in "" "conf"; do
+	printf '%s' "$m" > "$CONFIRM"
+	change ODIT00000006
+	check "marker '$m': deferred, not confirmed" "deferred 0" \
+		"$(st result) $(wc -c < "$INITLOG" | tr -d ' ')"
+done
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 15 || bad "live: the plain reload after it did not finish"
+check "live: a plain reload then applies the serial number" "gpondeact gponsn ODIT00000006 gponact" \
+	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
 stop_omcid
 
 # ------------------------------------------------ 2c. the identity trial file
@@ -902,6 +1081,33 @@ kill -HUP "$pid"
 wait_done "$old_id" 15 || bad "trial file gone: the reload did not finish"
 check "trial file gone: back to the stored serial" "gpondeact gponsn ODIT00000001 gponact" \
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+stop_omcid
+
+# ------------------------------------------------ 2d. a status that cannot be written
+# The temp file a directory, as good as a full /var: the reload still runs
+# and logs, and the status of the run before is gone, not left standing.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "0"
+log=/tmp/rl-nostatus.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1
+store 1 20 0
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 15 || bad "no status: the reload before did not finish"
+mkdir "$STATUS.tmp"
+store 1 21 0
+kill -HUP "$pid"
+wait_count "$log" 'event=reload_done' 2 15 || bad "no status: the reload did not finish"
+check "no status: the reload ran and logged" "2" \
+	"$(grep -c 'event=reload_done changed=vlan action=rebuild result=ok' "$log")"
+check "no status: the status of the run before is gone" "absent" \
+	"$([ -e "$STATUS" ] && echo present || echo absent)"
+rmdir "$STATUS.tmp"
+store 1 22 0
+kill -HUP "$pid"
+wait_done "" 15 || bad "no status: the reload after did not write one"
+check "no status: once it can be written again, it is" "done ok" "$(st state) $(st result)"
 stop_omcid
 
 echo

@@ -108,6 +108,29 @@ if [ -n "$missing" ]; then
 	exit 1
 fi
 
+# An nv read, bounded where the image has timeout: ours does, the stock
+# busybox does not (image/stock-commands.txt), so there it runs unbounded as
+# before. An nv stuck on the flash would otherwise hold the upgrade with
+# nothing said. Reads only: a setenv cut short mid-erase is worse than a wait.
+# A timeout of the older busybox syntax (-t SECS) takes the number for the
+# program and runs nothing, so the bound is tried once first.
+# FWU_NV_TIMEOUT_S is for the tests.
+#
+# A read that ran into the bound, was killed or could not run exits 124 or
+# more: 124 from a coreutils timeout, 128 plus the signal from busybox, 126
+# and 127 when nv could not run. That is no answer, and the checks below
+# refuse on it as on an incomplete read, never warn and write.
+nv_bound=
+if have_cmd timeout; then
+	nv_bound="timeout ${FWU_NV_TIMEOUT_S:-10}"
+	# shellcheck disable=SC2086 # the two words of the bound
+	$nv_bound sh -c : 2>/dev/null || nv_bound=
+fi
+nv_read() {
+	# shellcheck disable=SC2086 # empty, or the two words of the bound
+	$nv_bound nv "$@"
+}
+
 # Find the partitions by NAME in /proc/mtd, never by a fixed number: this board
 # has fourteen and the numbering is not a promise.
 mtd_of() {
@@ -136,7 +159,12 @@ fi
 if [ -z "$running" ]; then
 	# Second opinion, and the only other one on the device: U-Boot's own
 	# record of what it last booted.
-	running=$(nv getenv sw_active 2>/dev/null | sed -n "s/^sw_active=//p")
+	# Not from a read that could not see a copy whole (exit 3) or gave no
+	# answer (124 or more), as for sw_commit below.
+	running=$(nv_read getenv sw_active 2>/dev/null)
+	nv_rc=$?
+	{ [ "$nv_rc" = 3 ] || [ "$nv_rc" -ge 124 ]; } && running=
+	running=$(printf '%s\n' "$running" | sed -n "s/^sw_active=//p")
 	case "$running" in 0|1) ;; *) running= ;; esac
 fi
 if [ -z "$running" ]; then
@@ -170,7 +198,20 @@ fi
 # the watchdog itself once it initialises, so an image that boots far enough
 # is still reset when it does not confirm; one that hangs BEFORE that point,
 # or the stock slot, hangs forever instead of being reset.
-commit=$(nv getenv sw_commit 2>/dev/null | sed -n "s/^sw_commit=//p")
+#
+# Our nv refuses to answer when a copy of the environment could not be read in
+# full, with exit 3: that copy may be the one U-Boot boots by, so neither the
+# value nor the revert target is known. That is a refusal here, as in
+# fwu_starter.sh, not the warning a missing sw_commit gets. So is a read that
+# gave no answer (exit 124 or more, above). A value either printed is not
+# taken.
+nv_out=$(nv_read getenv sw_commit 2>&1)
+nv_rc=$?
+commit=$(printf '%s\n' "$nv_out" | sed -n "s/^sw_commit=//p")
+nv_unread=0
+nv_silent=0
+[ "$nv_rc" = 3 ] && nv_unread=1 commit=
+[ "$nv_rc" -ge 124 ] && nv_silent=1 commit=
 case "$commit" in
 0|1)
 	if [ "$commit" = "$slot" ]; then
@@ -186,8 +227,24 @@ case "$commit" in
 	fi
 	;;
 *)
-	echo "fwu: cannot read sw_commit -- the revert target is UNKNOWN." >&2
-	echo "     Check it by hand before spending a trial boot." >&2
+	if [ "$nv_unread" = 1 ]; then
+		echo "fwu: nv could not read a copy of the environment in full," >&2
+		echo "     so which copy U-Boot boots by, and the revert target," >&2
+		echo "     is UNKNOWN. REFUSING. Run it again; if it stays" >&2
+		echo "     unreadable, see docs/FLASHING.md, \"Restore\"." >&2
+		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
+		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown revert target" >&2
+	elif [ "$nv_silent" = 1 ]; then
+		echo "fwu: nv getenv gave no answer (exit $nv_rc): it ran into the" >&2
+		echo "     bound, was killed or could not run, so the revert target" >&2
+		echo "     is UNKNOWN. REFUSING. Run it again; if nv keeps hanging," >&2
+		echo "     see docs/FLASHING.md, \"Restore\"." >&2
+		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
+		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown revert target" >&2
+	else
+		echo "fwu: cannot read sw_commit -- the revert target is UNKNOWN." >&2
+		echo "     Check it by hand before spending a trial boot." >&2
+	fi
 	;;
 esac
 
@@ -200,7 +257,12 @@ esac
 # Our nv answers for the loser with `fallback`. The VENDOR nv, which is what
 # runs the FIRST flash, has no such verb and prints its usage instead, so an
 # empty answer means NOT CHECKABLE and must not read as safe.
-alt=$(nv fallback sw_commit 2>/dev/null | sed -n "s/^sw_commit=//p")
+alt_out=$(nv_read fallback sw_commit 2>&1)
+alt_rc=$?
+alt=$(printf '%s\n' "$alt_out" | sed -n "s/^sw_commit=//p")
+alt_unread=0
+[ "$alt_rc" = 3 ] && alt_unread=1 alt=
+[ "$alt_rc" -ge 124 ] && alt_unread=1 alt=
 case "$alt" in
 0|1)
 	if [ "$alt" = "$slot" ]; then
@@ -219,8 +281,30 @@ case "$alt" in
 	fi
 	;;
 *)
-	echo "fwu: the fallback env copy was not readable -- NOT checked." >&2
-	echo "     Expected on the vendor nv, which has no fallback verb." >&2
+	if [ "$alt_unread" = 1 ] && [ "$nv_unread$nv_silent" = 00 ]; then
+		# Read in full a moment ago, not now: what the fallback copy
+		# says is as unknown as an unread sw_commit above. The same
+		# for a fallback read that gave no answer.
+		if [ "$alt_rc" = 3 ]; then
+			echo "fwu: nv could not read the fallback env copy in full, so" >&2
+		else
+			echo "fwu: nv fallback gave no answer (exit $alt_rc), so" >&2
+		fi
+		echo "     where U-Boot goes after an interrupted nv setenv is" >&2
+		echo "     UNKNOWN. REFUSING. Run it again; if it stays" >&2
+		echo "     unreadable, see docs/FLASHING.md, \"Restore\"." >&2
+		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
+		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown fallback" >&2
+	else
+		echo "fwu: the fallback env copy was not readable -- NOT checked." >&2
+		if [ "$nv_unread" = 1 ]; then
+			echo "     A copy could not be read in full, as above." >&2
+		elif [ "$nv_silent" = 1 ]; then
+			echo "     nv gave no answer, as above." >&2
+		else
+			echo "     Expected on the vendor nv, which has no fallback verb." >&2
+		fi
+	fi
 	;;
 esac
 

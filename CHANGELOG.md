@@ -24,6 +24,304 @@ listed here.
   once the trial is confirmed or reverted. A failed write in a re-latch is
   reported as a failed re-latch.
 
+## v1.19.0 (2026-11-20)
+
+- Releases: confd v1.19.0 and metricsd v1.11.1. The web UI gains an OMCI
+  Topology subtab (the provisioned path drawn from the MIB pointers), asks
+  before a change in a dialog of the page instead of `confirm()`, applies a
+  save of VLAN keys alone live with `apply.sh omci-live`, and no longer
+  offers to write the committed partition during a trial. metricsd counts
+  every fall of the port octet registers as a reset, reports `gpon_omci_up`
+  0 when omcicli answers only with its own error, counts services in every
+  row of the vendor dump, and no longer ends a scrape whose request is
+  longer than 511 bytes with a connection reset. The asset hashes in src/release-sha256.txt are the
+  release SHA256SUMS, checked by `make releases`.
+
+- Kernel: an OMCI send of zero bytes is refused, in the netlink parser and
+  in the NIC transmit path. A zero-length DMA mapping ends in the `BUG_ON`
+  of the cache writeback. omcid never sends one; only a process with
+  CAP_NET_ADMIN could.
+- Kernel: the NIC drops a received frame shorter than an Ethernet header
+  and its FCS (18 bytes) as a receive error. Before, anything above 4 bytes
+  went to the RX hooks and the stack, which read the 14-byte header from
+  whatever the buffer held before.
+- omcid: a stop signal in the middle of a CLI command no longer flushes the
+  half-written reply into the CLI queue before it deregisters. The handler
+  said it skipped that flush, but `out_set_sink(0)` flushed first.
+- Support bundle: `OMCI_POTS_PORTS` is read from the first line for the
+  key, as omcid and `flash` read it. With two lines, the first on and a
+  later one 0, the bundle took the 0 and shipped the logs unscrubbed when
+  omcid gave no SIP secret list.
+
+- Ten comments in the switch and GPON drivers and omcid, and two
+  paragraphs of `docs/SWITCH.md`, named source files and functions of the
+  vendor SDK or said they were read from it, which `AGENTS.md` rules out.
+  They now say what the stock firmware does, without saying where that was
+  read. `make lint` did not see them, because its vendor source check knew
+  header paths and a handful of names only; it now also refuses the names
+  of the SDK source files and of its OMCI platform layer, and the words a
+  comment uses for a read of that source. `docs/SWITCH.md` also counted 16
+  capture brackets as the check of the upstream queue registers: it is the
+  ten upstream cmd 23 and cmd 25 brackets, and the capture has no delete.
+  The PBO threshold comments in `odi_switch_qos.c` and its test no longer
+  name the stock kernel function they were read from, only its address in
+  the V1.0-220923 vmlinux.
+
+- GPON: `/proc/odi_gpon/ploam` masks the PLOAM password. The ring printed
+  the ten password bytes of every upstream Password message (type 0x02) in
+  clear, three copies per Request_Password, until newer messages pushed
+  them out; only the AES key of an Encryption_Key was masked. The file is
+  world-readable and easy to paste into an issue. The password bytes now
+  print as `xx`; the diag bundle withholds the message as before.
+
+- Switch: a cmd 51 the classifier table refuses no longer deletes another
+  service's rule. A two-way rule with one leg that went in with a row shift
+  and one that found no row was released before the shift reached the chip,
+  so the release cleared the chip row of an older, active service, and a
+  later cmd 50 for a service at a shifted position cleared the row next to
+  the one it meant until omcid rebuilt all services. The refusal now takes
+  the leg that went in back out of the software table and moves the shifted
+  rows back, and writes nothing to the switch for it: the refused rule is
+  never live, and no other row moves. A cmd 51 that gives a service id a
+  different rule still releases the old one first, as before, so only a new
+  service is refused with no write at all. A host test fills the ordered
+  region and has two new services refused, one whose upstream leg shifts
+  every row and one whose downstream leg shifts the rows below a hole after
+  the bottom region had no row for its upstream leg, and checks that nothing
+  is written, that the software table is what it was and agrees with the
+  chip, and that a later cmd 50 takes only its own rows.
+
+- omcid: a reload stops at `unreadable` and changes nothing when the
+  config store opens but a read of it fails. Since stores up to 65,535
+  bytes are read whole, such a store read as empty, and a reload took the
+  missing serial number for one deleted: it deactivated the ONU and left
+  it off the line at `no_serial`. Before, the first part read was taken
+  for the whole store, which a signal arriving during the read could cut
+  as well.
+
+- omcid: a reload after a failed activation re-registers also when it
+  brings only VLAN keys. With nothing changed it already did; a new VLAN
+  value took the rebuild in place instead, and `apply.sh` reported the ONU
+  as still in O5 while it stayed deactivated. One that brings a new serial
+  number or password is an identity change like any other: `omci-live`
+  defers it, and a run of refusals holds it. A reload that stopped at
+  `no_serial` leaves the ONU deactivated as well, and the next one now
+  re-registers in the same way. Such a reload says `retry=1` in
+  `/var/run/omcid-reload`, and `apply.sh` reports it as a re-registration:
+  `omci-live` exits 4 when it worked or still runs at the bound, so the web
+  UI no longer says it applied without one.
+
+- omcid: an ANI-G attribute past 16 (17 to 20, the ONU default
+  thresholds) is no longer tested against the 16-bit mask of written
+  attributes. The alarm code reads them once a second in O5 when a
+  threshold is at its default and the OLT has Set any ANI-G attribute, and
+  the shift count was then negative, which C leaves undefined. On MIPS it
+  served the built-in default, the right value by accident; it now does so
+  by the code.
+
+- omcid: a reload keeps the alarm state of the ONU's own entities when it
+  does not change them. Each reload rebuilt that list and cleared every
+  alarm bitmap, pending notification and ARC timer with it, so an
+  `apply.sh omci` that changed nothing declared a standing alarm such as
+  LAN-LOS to the OLT again. A held or deferred reload now leaves the list
+  alone altogether: it is rebuilt only once the reload runs on what it
+  read.
+
+- omcli: `--id N` asks for `-f` when N is a known command that writes, as
+  the named command does. Only unknown ids needed it, so `omcli --vendor
+  --id 32` sent a MIB reset to omcid without the confirmation `omcli mib
+  reset` asks for.
+
+- omcid: config stores up to 65,535 bytes are read whole, and one that is
+  still larger is never written back cut. A stick that ran a router
+  firmware before keeps that firmware's tables in the same file (30 KB is
+  known); omcid read 16 KB of it, so later keys such as the LOID or the
+  manual VLAN read as absent, and `omcli cfgset` wrote the first 16 KB
+  back as the whole store. The writer now copies straight from the read
+  buffer, which saves its second 16 KB buffer, and no longer writes a byte
+  past its 192-byte escape buffer for a value of exactly that length. It
+  also refuses a write that would grow the store past 65,535 bytes (the
+  next read could not take it whole), a read that fails part way (what
+  came before it is not the store), and a new file the filesystem reports
+  as not written at close.
+
+- omcid: a respawn that does not resume removes the bridge connections,
+  flows and queues the omcid before it left in the switch, and the
+  snapshot that describes them. The clean-up ran only with `-r`, which
+  nothing passes, so a respawned omcid that started empty never withdrew
+  the old services, and a provisioning with fewer of them left the rest
+  forwarding until a reboot. A resumed omcid now keeps them even with
+  `-r`, which used to clear the datapath it had just taken over.
+  `svc-omcid.sh` passes `-r` on a respawn, so the clean-up does not depend
+  on the decision files an omcid that died early may have removed, and an
+  id whose deactivation fails stays taken and is tried again rather than
+  counted as cleared.
+
+- Reload: a store with no `GPON_SN` key in either file stops the
+  re-registration at `no_serial`, as an empty key already did. An absent
+  key reads as -1 and the check tested only for 0, so the ONU was
+  activated again on the serial the driver still held.
+
+- omcli: `omcli vlan` and `omcli ident` without paths only show the store.
+  They loaded it into the running omcid: a VLAN edit not yet applied went
+  live at the next rebuild the OLT triggered, with no reload, and the diag
+  bundle runs `omcli vlan` every time. After `omcli ident` the
+  re-registration guard took the edited identity for the running one, so a
+  held change could end as `changed=none` and never reach the driver. The
+  views now put back what omcid runs with and name the keys that differ on
+  a `not applied` line. The forms with paths still load the files.
+
+- apply.sh: `omci-live` reloads only what keeps the ONU in O5. With an
+  identity change also waiting in the store (a serial number saved and not
+  applied) omcid applies nothing, the VLAN keys included, logs
+  `action=deferred`, and the report names the keys and exits 3; a plain
+  `apply.sh omci` applies both. It is for the web UI, whose save of VLAN
+  keys alone applies them straight away and took a pending serial number
+  along, so the ONU re-registered while the page said it stayed in O5. A
+  verb rather than an option, so an older apply.sh stops at its usage line
+  instead of applying the whole store. `omci` also refuses an option it does
+  not know and seconds that are no number, where it took either for the
+  bound, and signals one reload at a time: two at once could swap the
+  confirmation each one leaves for omcid. Only a new run of an omcid it
+  signalled is the answer (the id is pid.sequence), and the omcid are named
+  under the lock. After a signal omcid did not answer in time, the lock
+  stays held until it does, no omcid it went to lives, or for at most
+  `LINGER_MAX` (180 one-second sleeps, past the longest reload), and the
+  outcome reported is always this run's. A reload is not signalled while
+  omcid still runs the one before: it takes the next signal only once that
+  is done, a re-registration up to 153 s on, by which time the lock would be
+  gone. apply.sh says so and exits 1; a status left `running` by an omcid
+  that is gone does not count. The seconds spent waiting for the lock and
+  for the acknowledgement count against the bound, and neither wait goes
+  past it. They are counted in sleeps of one second, so two applies at once
+  no longer add up to twice the bound; the time the commands themselves take
+  is not counted. A bound of 0 s is refused before anything is signalled. When omcid cannot write the status file (a full `/var`),
+  it removes it instead of leaving the `running` of the reload's start
+  standing, unless the removal fails too. omcid takes only the exact words
+  apply.sh writes: an empty file, or one cut before its word ends, counted
+  as `--confirm` and now counts as `omci-live`. `test/bin/flock`, the
+  stand-in for a host without flock (macOS), also takes `flock FILE CMD`,
+  and `test/apply_test.sh` uses it, so the lock cases run there too.
+
+- services: `start omcid` arms omcid's watchdog deadline only when
+  `svc-omcid.sh` will start omcid. With `modules.off` set, an `omcid.off`
+  that could not be removed (a read-only config partition) or no
+  `/bin/omcid`, the entry parks, nothing pings, and the stick reset a
+  minute after the command reported success. It now names the reason,
+  releases the deadline, also one an omcid running since boot had armed,
+  with the same checks rcS makes at boot, and exits 1, as omcid does not
+  start. A watchdog register that is there and cannot be written counts as
+  a failed release, not as no watchdog. When that release, or the one
+  `stop omcid` makes, does not go through, the running omcid is left alone
+  and the command exits 1: killing it with the deadline armed is the same
+  reset.
+
+- Management address: an address trial to another subnet that nobody
+  confirmed could leave the stick with no IPv4 address until a reboot. The
+  move back put the old primary on `br0` while the trial still kept it on
+  `br0:4`, and the kernel does not take one address twice on a device. With
+  a mask that is not the classful one (10.0.0.1/24, 192.168.1.1/16) the
+  address was dropped and ifconfig still reported success; with
+  192.168.1.1/24 the move failed and every later `network.sh addr` failed
+  the same way. A trial that swaps the primary and the second address hit
+  the same at its start. `network.sh addr` now takes an alias that holds the
+  new primary down first, makes no move when that alias stays up, and puts
+  the address back on the alias when the primary then cannot take it. When
+  the move back fails anyway, the `trial_expired` or `trial_reverted` event
+  says so instead of "back to". A revert from the web UI moves back a
+  second after its answer: its event now says the move is under way, and a
+  second one, once it has run, how it ended, also when another change
+  holds the state file then. The move counts once the device reads back
+  with the new address, not on the exit status of ifconfig alone, and a
+  device left with no address at all gets the old one back. An alias that
+  gave up the address for the move and gets it back is read back the same
+  way.
+
+- nv: `getenv` and `fallback` give no value and exit 3 when a copy of the
+  U-Boot environment could not be read in full, as `setenv` and `commit`
+  already refuse. Exit 3 is that answer alone, so a caller does not have
+  to match the message. They answered from the copy they could read, which is not
+  the one U-Boot boots by when the unread copy has the higher flags byte.
+  With `env2` unreadable and a stale `env` naming the other slot, the
+  upgrade guard took that slot as the way back and could write over the
+  committed one. `fwu.sh` refuses to write on that answer, from `getenv`
+  or from `fallback` (`FWU_FORCE=1` overrides it), where a missing
+  `sw_commit` still only warns. It reads nv with a 10 s bound where the
+  image has `timeout`, which the stock busybox does not, and a read that
+  ran into the bound, was killed or could not run is a refusal as well. A
+  value printed with such a status or with exit 3 is not taken, for
+  `sw_commit`, the fallback copy and the `sw_active` it reads when
+  `/proc/cmdline` names no root slot.
+
+- igmpd: a redirect shorter than an Ethernet header is logged as `short
+  redirect  DROP: truncated` instead of crashing the daemon on the missing
+  addresses. The kernel hook does not pass one up; `igmpd -r` could.
+
+- igmpd: "not snooping" from the OLT releases the snooping lease even
+  within the ten seconds after a failed lease change. The release was held
+  back like any other change and never asked again, so the copy rule and,
+  with `IGMP_PON_DROP=1`, the drop of unregistered multicast from the PON
+  stayed on until the policy changed again or igmpd restarted. A release
+  that fails has a back-off of its own: it is tried again ten seconds
+  later, where it was asked again, with two log lines, every second.
+
+- igmpd: a static group the OLT lists whose MAC is a link-local one
+  (239.0.0.9 and every other group with the low 23 bits below 256, outside
+  224.0.0.0/24) keeps the PON drop off, as a static range that does not fit
+  already does. igmpd writes no row for such a group, so with
+  `IGMP_PON_DROP=1` its stream could be dropped as unregistered. A policy that
+  adds or removes such a group, or a static range too wide for a row,
+  turns the drop off or on at once, where it waited for the next second.
+
+- igmpd: the daemon's log is limited to 4096 bytes a second, then one line
+  `log limited: N bytes not shown`, which counts against the next second. A host on the UNI decided how many lines
+  a second igmpd wrote to the services log on the 6 MB `/var`: a report with
+  a bad checksum is a line a frame, and a 128-group join and leave are about
+  13 KB. Measured with a host build, not on a stick.
+
+- Upgrade: the trial guard also arms when `nv` could not read the U-Boot
+  environment at boot and the running slot is known. `slot-state.sh` then
+  writes an empty `uncommitted`, and the guard did not arm, so a trial
+  image that fed the watchdog but could not be reached stayed on the trial
+  until a power cycle. The guard only resets, so on a committed slot the
+  same slot boots again. It arms once: on the boot after one it ended
+  (`reason=wdt_client:trial`), an unknown state does not arm it again, so a
+  stick whose environment stays unreadable resets once and then stays up.
+  `slot-state.sh` now goes by the exit status of `nv fallback` too: exit 3
+  or no answer within its bound leaves `uncommitted` empty, where it took
+  that for "no valid second copy" and could write `uncommitted=0`. What a
+  failed `nv getenv` printed is not taken either: `sw_active`,
+  `sw_tryactive`, `primary_sw_commit` and `next_boot` stay empty. Nor is
+  a dump that exited 0 without its `Valid environment: N` or `Fallback
+  environment: N` header on its first line.
+
+- Host SerDes: a trial whose way back does not read back (the sequence of
+  the mode before it, after an expiry, a revert or a failed switch) or
+  whose port side (`host_forced`, `host_autoneg`) cannot be written is
+  `revert_unverified`, not `trial_expired` or `trial_reverted` with "back
+  to", and `host-serdes.sh revert` exits 1, as it does when the state file
+  cannot be written and the trial would stay on disk. A `host_forced` that
+  cannot be read on the way to Fiber 1G is cleared rather than left as it
+  is. The port is taken to run the mode before, so `reapply` runs it
+  again, as after `apply_unverified` at boot. The HiSGMII notes (README,
+  `docs/SWITCH.md`, the v1.18.1 entry below, the comment in
+  `host-serdes.sh`) no longer put the missing frames on 0x21808 bit 8
+  alone: the A/B changed the 3.125G page, the receive pulse and the bit
+  together, as `docs/QUALIFICATION.md` says.
+
+- Host port and management address trials: a way back that fails is the
+  exit status as well, not only the event. `host-autoneg.sh revert` exits
+  1 when `odi_switch.host_autoneg` cannot be written back, and the event
+  says so instead of "back to". A `mgmt-addr.sh` expiry whose move back
+  fails exits 1. Both returned the status of the state file write alone.
+  After a failed write back, `running` in the host-autoneg state is what
+  the kernel reads back, or the trial mode, not the mode it could not
+  return to.
+
+- Docs: `SETTINGS.md` no longer says the web UI lacks the host link mode;
+  it has run the same trial since confd v1.10.0. `QUALIFICATION.md` adds a
+  community report of a 2.5G media converter in HiSGMII on v1.18.1.
+
 ## v1.18.1 (2026-11-18)
 
 - Releases: confd v1.18.1. Config: a PLOAM password shorter than 10
@@ -36,9 +334,10 @@ listed here.
 - Host SerDes: HiSGMII (3.125 Gbaud) sets `SDS_AN_CTRL` 0x21808 bit 8, in-band
   negotiation forced off on the host lane (0x70e0 out of reset becomes
   0x71e0), last, as the stock HSGQ kernel does in its LAN SerDes mode 4, and
-  runs the 3.125G analog page and the receive pulse of 2500BASE-X. Without
-  the bit the SerDes synced and the host link came up, and no frame was
-  received from the host. Fiber 1G and 2500BASE-X clear the bit, writing
+  runs the 3.125G analog page and the receive pulse of 2500BASE-X. With
+  none of the three the SerDes synced and the host link came up, and no
+  frame was received from the host; which of them the newer hosts need is
+  not isolated. Fiber 1G and 2500BASE-X clear the bit, writing
   0x21808 only when it reads set, so a trial, its revert, the boot watch or
   `reapply` out of HiSGMII does not leave it set, and a stick that never
   ran HiSGMII runs the stock Fiber 1G sequence write for write. The boot

@@ -502,9 +502,15 @@ pairs = b'sw_active=0\0sw_commit=0\0sw_tryactive=2\0mupgrade_en=0\0\0'
 for name, flags in (('env', 0), ('env2', 1)):
     body = pairs + b'\0' * (0x2000 - 5 - len(pairs))
     open(f'{d}/{name}', 'wb').write(struct.pack('>I', zlib.crc32(body)) + bytes([flags]) + body)
+# For nv getenv: env2, the copy that wins, committing slot 1, once whole and
+# once with a CRC that does not match.
+body = pairs.replace(b'sw_commit=0', b'sw_commit=1')
+body += b'\0' * (0x2000 - 5 - len(body))
+open(f'{d}/env2-one', 'wb').write(struct.pack('>I', zlib.crc32(body)) + b'\x01' + body)
+open(f'{d}/env2-bad', 'wb').write(struct.pack('>I', zlib.crc32(body) ^ 1) + b'\x01' + body)
 PY
 sshx 'rm -rf /tmp/sc; mkdir -p /tmp/sc/proc /tmp/sc/dev /tmp/sc/bin && cp /bin/nv /tmp/sc/bin/nv'
-for f in k0 r0 k1 r1 env env2; do
+for f in k0 r0 k1 r1 env env2 env2-one env2-bad; do
 	sshx "cat > /tmp/sc/$f" < "$WORK/slotcheck/$f" || fail "could not copy $f to the guest"
 done
 sshx 'sh -s' <<'GUEST' > "$WORK/slotcheck.out" 2>&1 || { cat "$WORK/slotcheck.out" >&2; fail "nv slotcheck did not give the expected answers"; }
@@ -591,10 +597,33 @@ rc=0; out=$(chroot $R /bin/nv setenv "bootcmd=x" y 2>&1) || rc=$?
 echo "setenv bootcmd=x y: rc=$rc"; echo "$out"
 [ "$rc" = 1 ]
 echo "$out" | grep -q "a name cannot be empty or contain '='"
+# nv getenv answers from the copy U-Boot boots by, or not at all. env2 wins
+# on its flags byte; cut short, it may still be the copy U-Boot reads, so
+# env, valid and committing the other slot, is not the answer either.
+cp $R/dev/mtd2 $R/mtd2.keep
+cp $R/env2-one $R/dev/mtd2
+out=$(chroot $R /bin/nv getenv sw_commit)
+echo "getenv sw_commit, env2 whole: $out"
+[ "$out" = "sw_commit=1" ]
+head -c 4096 $R/env2-one > $R/dev/mtd2
+for verb in "getenv sw_commit" "fallback sw_commit" "getenv"; do
+	rc=0; out=$(chroot $R /bin/nv $verb 2>&1) || rc=$?
+	echo "$verb, env2 cut short: rc=$rc"; echo "$out"
+	[ "$rc" = 3 ]
+	echo "$out" | grep -q "a copy of the environment could not be read in full"
+	if echo "$out" | grep -q "sw_commit="; then echo "an incomplete read gave an answer"; exit 1; fi
+done
+# A copy read in full with a CRC that does not match is invalid, not
+# unknown: the other copy is the environment, as U-Boot falls back to it.
+cp $R/env2-bad $R/dev/mtd2
+out=$(chroot $R /bin/nv getenv sw_commit)
+echo "getenv sw_commit, env2 CRC wrong: $out"
+[ "$out" = "sw_commit=0" ]
+cp $R/mtd2.keep $R/dev/mtd2
 GUEST
 sed 's/^/    /' "$WORK/slotcheck.out"
 sshx 'rm -rf /tmp/sc'
-echo "  nv slotcheck: pass, failed data CRC, empty rootfs, no partitions; nv commit warns after its result line, from the recorded result; nv setenv refuses the boot keys without --force and writes nothing"
+echo "  nv slotcheck: pass, failed data CRC, empty rootfs, no partitions; nv commit warns after its result line, from the recorded result; nv setenv refuses the boot keys without --force and writes nothing; nv getenv answers from the winning copy, none when a copy cannot be read in full"
 
 say "scenario: trial-guard.sh on that trial (real busybox, real /proc/net/tcp)"
 # The odi-slot just written says trial. The register is a file here (the

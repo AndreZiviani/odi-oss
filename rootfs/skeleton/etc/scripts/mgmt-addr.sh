@@ -302,25 +302,59 @@ trial_apply_failed() {
 # back_to_prev NAME WHY [defer]: ends the trial. The trial file goes, so
 # network.sh addr reads the store again, and that moves the primary back and
 # takes the kept address down. Run at once, or with defer from a caller that is
-# itself on the address being left: its answer has to leave first.
+# itself on the address being left: its answer has to leave first, and the
+# event says the move is under way; settle records how it ended. Returns 1
+# when the move back, run at once, fails, or the state file cannot be
+# written.
 back_to_prev() {
-	name=$1 why=$2
+	name=$1 why=$2 rc=0
+	back="back to ${prev_ip:-the stored addresses}"
 	rm -f "$TRIAL"
 	if [ "${3:-}" = defer ]; then
-		spawn settle
-	else
-		net_addr
+		back="moving back to ${prev_ip:-the stored addresses} in a second"
+		spawn settle "$name" "$why"
+	elif ! net_addr; then
+		back="network.sh could not move back to ${prev_ip:-the stored addresses} (run network.sh addr, or reboot)" rc=1
 	fi
 	phase=steady applied=0 trial_id='' trial_deadline=''
-	event "$name" "$why: back to ${prev_ip:-the stored addresses}; nothing was stored"
-	save
+	event "$name" "$why: $back; nothing was stored"
+	save || rc=1
+	return "$rc"
 }
 
-# settle: the move back, one second after the answer that asked for it.
+# settle [NAME WHY]: the move back, one second after the answer that asked
+# for it, and the event of how it went. Under the lock when it can be had;
+# without, the move is still made and the event still logged, and the state
+# file is left to the holder.
 settle() {
+	name=${1:-trial_reverted} why=${2:-reverted on request}
 	"$SLEEP" 1
-	[ ! -s "$TRIAL" ] || return 0
-	net_addr
+	lock_try
+	_lk=$?
+	if [ -s "$TRIAL" ]; then
+		[ "$_lk" = 1 ] || unlock
+		return 0
+	fi
+	_ok=1
+	net_addr || _ok=0
+	if [ "$_lk" != 1 ]; then
+		load
+		if [ "$phase" = steady ]; then
+			event "$name" "$why: $(settled_how); nothing was stored"
+			save
+		fi
+		unlock
+	else
+		event "$name" "$why: $(settled_how); nothing was stored (the state file is busy)"
+	fi
+	[ "$_ok" = 1 ]
+}
+settled_how() {
+	if [ "$_ok" = 1 ]; then
+		echo "back to ${prev_ip:-the stored addresses}"
+	else
+		echo "network.sh could not move back to ${prev_ip:-the stored addresses} (run network.sh addr, or reboot)"
+	fi
 }
 
 # via_check LOCAL PEER: whether a confirm that arrived on LOCAL from PEER
@@ -442,7 +476,7 @@ case "${1:-}" in
 try)        shift; try "$@" ;;
 trial-run)  shift; trial_run "$@" ;;
 expire)     shift; expire "$@" ;;
-settle)     settle ;;
+settle)     shift; settle "$@" ;;
 confirm)    shift; confirm "$@" ;;
 revert)     revert ;;
 status)     status ;;

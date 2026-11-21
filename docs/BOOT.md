@@ -396,6 +396,20 @@ exits; anything else (including no file at all inside the wait, the safe
 default) runs the re-provisioning this section used to be the whole story
 of.
 
+An `omcid` that finds an earlier run and does not resume first removes what
+that run left in the switch: the snapshot that describes it, every bridge
+connection id, then the flows, T-CONTs and queues (driver command 0), the
+clean-up `-r` asks for. The snapshot goes first, so a respawn in O5 after
+this one dies early cannot resume services that are no longer there. Its own
+tables start empty, so its rebuilds would never withdraw them, and a
+provisioning with fewer services than the last one would leave the rest
+forwarding until a reboot. A resumed `omcid` keeps them, with `-r` or
+without: it took them over from the snapshot, and the datapath is the one
+it describes. `svc-omcid.sh` passes `-r` on a respawn (its marker says an
+`omcid` ran this boot), so this does not rest on the decision files alone.
+An id whose deactivation fails is kept as pending and sent again, as after
+a rebuild.
+
 Test-only: `-s state` (main.c) uses a given ONU state for the resume
 decision instead of asking the driver, the same reason `-c` takes a
 capability blob -- a harness with no line side has no driver to answer

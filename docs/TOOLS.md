@@ -143,7 +143,9 @@ daemon that decides whether the OLT sees a working ONU.
 
     -a          program the switch (apply mode); without it, dry run
     -r          restart: first remove every bridge connection a previous
-                omcid left in the switch (with -a)
+                omcid left in the switch (with -a). A respawn that does
+                not resume does this on its own; a resumed omcid keeps
+                them either way
     -d          daemon: no frame or idle limit
     -w units    exit after this many idle 5 s units (default 24)
     -c hex      use this capability blob instead of the driver one
@@ -245,7 +247,8 @@ at `result=failed` when the driver refused `gpondeact` (nothing was touched,
 and omcid goes back to the values it was running with, so the next SIGHUP
 tries again) or `gponact` (the ONU is left off the line), or at
 `result=no_serial` when the store holds no serial number at all: the ONU is
-left deactivated, as rcS leaves it at boot (`config-reseed.sh`). A refused `gponsn`
+left deactivated, as rcS leaves it at boot (`config-reseed.sh`), and the next
+reload re-registers as after a refused `gponact` (below). A refused `gponsn`
 does not stop the activation: the ONU comes back on the old serial number and
 the result is `sn_not_applied`. The serial number is rewritten into the
 PLOAM slot the boot activation armed, and only while the ONU is deactivated.
@@ -256,15 +259,17 @@ in `pw_not_applied`: the driver keeps the old password. A later reload with
 nothing changed in the store reports the same result again without a second
 re-registration, until the store holds a value the driver takes. A refused
 `gponact` ends in `failed` and leaves the ONU deactivated; the next reload
-re-registers even with nothing changed, rather than reporting `ok`.
+re-registers whatever it brings, nothing changed or VLAN keys alone, rather
+than reporting `ok` or rebuilding in place. Its status file says `retry=1`
+when that is the only reason it re-registers.
 
 Three event lines tell the story (below): `event=reload changed=... action=...
 keys=...` (key names, never values), `event=reload_step verb=... rc=...` for
 each driver verb, and `event=reload_done ... result=... duration_s=...
 [o5_s=...] services=N`. They are never rate limited. `/var/run/omcid-reload`
 holds the same outcome for `apply.sh` (`id` pid.sequence, `state`, `changed`,
-`action`, `result`, `keys`, `duration_ms`, `o5_ms`, `services`, and for an
-identity change `refusals`, `streak` and, with the clock set, `today`),
+`action`, `result`, `keys`, `retry`, `duration_ms`, `o5_ms`, `services`, and
+for an identity change `refusals`, `streak` and, with the clock set, `today`),
 replaced whole by a rename; omcid removes a stale one at start.
 
 **Re-registrations are counted, and held back after refusals.** Some
@@ -538,6 +543,13 @@ queries from the host side; `not sent` the ones that should have gone and
 could not (no classifier row takes the frame, which the switch would have
 dropped too, or a failed send), which the log names each time.
 
+The daemon's log (a line or more for each frame that changes something or
+does not parse) is limited to 4096 bytes a second, so a host that floods the
+UNI with reports cannot fill `/var` with it; a second that had more is
+followed by `log limited: N bytes not shown`, which counts against the
+second it is written in. `igmpd -s`, the state file and
+the rows are not limited.
+
 **Off unless asked for.** `svc-igmpd.sh` runs `igmpd -w` only while
 `IGMP_SNOOPING=1` is in the config store (`apply.sh igmp` applies a change);
 otherwise the respawn entry parks and the switch floods multicast as it
@@ -581,8 +593,10 @@ says IGMP function 0. The profile also supplies
   must not block a stream), and so does a list longer than 32 ranges. A
   static range of up to 16 groups becomes a row a group with the UNI as
   member and never expires; a wider one cannot be named in the switch, and
-  neither can a group past the 128 the table holds, and igmpd then leaves
-  the PON's drop off so the range still flows.
+  neither can a group past the 128 the table holds, nor one outside
+  224.0.0.0/24 whose MAC is a link-local one (239.0.0.9 is
+  01:00:5e:00:00:09, which igmpd never writes a row for), and igmpd then
+  leaves the PON's drop off so the range still flows.
 
 The access control lists are read as G.988 9.3.27 lays them out: a logical
 row is a part 0 row (GEM port, VLAN, IPv4 source, start and end of the
@@ -1015,6 +1029,12 @@ omcli uses omcid's own queue and commands:
     omcli ident [cs.xml hs.xml [odi.conf]]  the identity and the OLT
                                          identity keys, and whether those are
                                          reported (passwords are never printed)
+                                         Without paths both read the store
+                                         and change nothing omcid runs with;
+                                         keys that differ from it are named
+                                         on a `not applied` line. With paths
+                                         they load the files into omcid (the
+                                         suites inject fixtures that way)
     omcli bridge <ingress|any> <gem> <dir>   build one bridge rule by hand
     omcli cfgset <file> <dir> <key> <v>  write one key into a config store
     omcli frames [--pcap FILE] [--full]  the last OMCI frames as bytes, or as
@@ -1116,7 +1136,8 @@ OMCI frame in as if it came off the line, with the trailer and CRC filled in
 (omcid drops a frame whose trailer or CRC is wrong; `--inject-raw HEX` sends
 bytes exactly as given, of any length, to test that; `--inject-file F` every
 frame in F, one per line, back to back), `--vendor` talks to a stock
-daemon instead, `--id N [-f]` sends a raw command id.
+daemon instead, `--id N [-f]` sends a raw command id (`-f` is needed for an
+id that writes, known or not, as for the named command).
 
 ### `omciprobe` -- one raw driver command
 
@@ -1201,8 +1222,16 @@ copy stays unreadable, `commit` and every form of `setenv` stay refused
 offers no way out until the partition can be read again. A raw restore of the
 environment partitions (`docs/FLASHING.md`, "Restore") is the documented
 route for a damaged environment; it is not promised to help when the flash
-itself cannot be read. `getenv` and `fallback` do not check for this: they
-use the copy they could read.
+itself cannot be read. `getenv` and `fallback` refuse as well: the copy that
+could not be read may be the one U-Boot picks, so the other one is not the
+answer. They print `a copy of the environment could not be read in full`,
+give no value and exit 3, a status of its own (a name that is not set
+exits 0 with nothing printed, no valid copy exits 1), so a caller does not
+have to match the text. The upgrade guard (`fwu_starter.sh`) and
+`slot-state.sh` take it as unknown, and `fwu.sh` refuses to write on it
+(`FWU_FORCE=1` overrides it). `fwu.sh` bounds its reads with `timeout` where
+the image has it, and a read that ran into the bound, was killed or could
+not run (exit 124 or more) is a refusal there too.
 
 `nv commit` also sets `mupgrade_en=0`, in the same two writes. The stock
 bootloader ships it as 1, which makes it listen on the host link after the
@@ -1272,10 +1301,10 @@ all twelve keys, a value empty when it cannot be told:
 | `sw_tryactive` | `sw_tryactive` in the primary copy, as stored (`2` when no trial is pending) |
 | `primary_copy` | `1` or `2`: the copy U-Boot boots from (`env` or `env2`); empty when neither is valid |
 | `primary_sw_commit` | `sw_commit` in that copy, `0` or `1` |
-| `fallback_copy` | the other copy, `1` or `2`; empty when it is not valid |
+| `fallback_copy` | the other copy, `1` or `2`; empty when it is not valid, or when `nv fallback` gave no answer to go by |
 | `fallback_sw_commit` | `sw_commit` in that copy, `0` or `1` |
 | `next_boot` | the slot the next reset boots: `sw_tryactive` when it is `0` or `1`, else `primary_sw_commit` |
-| `uncommitted` | `1` when a valid copy's `sw_commit` is not `running`; `0` when every valid copy names it; empty when the running slot or the environment cannot be read |
+| `uncommitted` | `1` when a valid copy's `sw_commit` is not `running`; `0` when every valid copy names it; empty when the running slot or the environment cannot be read, or `nv fallback` gave neither a dump nor its line for no valid second copy (exit 3, or no answer within 10 s) |
 | `other_slot` | the slot that is not running, `0` or `1`; empty when `running` is |
 | `other_slot_check` | `nv slotcheck` on it (`docs/FLASHING.md`, "Checking the other slot"), a partial check, not proof that the slot boots: `ok`, `fail`, `unknown` (not readable, or no answer), `pending` while it runs; empty when there is no `other_slot` |
 | `other_slot_detail` | what `nv slotcheck` said: the whole line on `ok`, the reason on `fail` and `unknown` |
@@ -1340,7 +1369,8 @@ running, and any slot but the inactive one (read the way `fwu.sh` reads it:
 `root=31:N` in `/proc/cmdline`, then `sw_active`), and either slot when
 `nv getenv sw_commit` gives neither 0 nor 1: `fwu.sh` only warns there,
 because the vendor nv of a first flash may not answer, but this script ships
-with ours. Extracts `fwu.sh` and
+with ours. (`fwu.sh` refuses too when our nv says a copy of the environment
+could not be read in full.) Extracts `fwu.sh` and
 `md5.txt` from the tarball into `/tmp/fwu.d` and checks `fwu.sh` against its
 md5 line; then runs `fwu.sh <slot> <tar>` there, detached with `setsid`, its
 output in `/tmp/fwu.log` and its outcome in `/tmp/fwu.state` (`running`,
@@ -1372,11 +1402,52 @@ VLAN rebuild in place, or a re-registration. The report says which:
 
     apply: identity changed (GPON_SN): the ONU re-registered and is back in O5 with 6 service(s) after 41.3 s (omcid 44700 ms in all)
 
+`omci-live [seconds]` asks for a reload that changes nothing that
+re-registers the ONU. The web UI sends it from v1.19.0 on, after a save of
+VLAN keys alone: an identity change saved earlier and not applied would
+otherwise go with it. It is a verb of its own, not an option of `omci`, because an
+apply.sh without it has to refuse it: an older one stops at its usage line,
+where it took an unknown option for the seconds and applied the whole store.
+With such a change in the store omcid applies nothing, the VLAN keys
+included (`event=reload changed=identity action=deferred`,
+`result=deferred`), and the report names the keys and exits 3, which a
+caller can tell from a failure; a plain `apply.sh omci` then applies both. A reload with no identity change runs as
+without the option, and so does one after a failed activation (or a
+`no_serial`) that brings no new serial number or password, where the line is
+down already: it re-registers, the report says so, and `omci-live` exits 4
+when that worked or still runs at the bound, so a caller can tell it from an
+apply in place.
+
+One `omci` or `omci-live` reload is signalled at a time
+(`/var/run/apply-omci.lock`, held until omcid has answered, which is a
+new run in the status file of an omcid the signal went to): the
+confirmation it leaves for omcid is one shared file. A second apply.sh waits
+for the first one's answer, up to 5 s and never past its bound, and
+otherwise exits 1 without writing or signalling anything; the seconds it
+waited count against its bound. It also exits 1, with nothing written or
+signalled, while omcid still runs the reload before (`state=running`, with
+an `id` whose pid is a running omcid): omcid takes the next signal only
+once that one is done, a re-registration up to 153 s on. When omcid does not
+answer within those 5 s, the lock stays held until it does or no omcid the
+signal went to lives: the reload the signal starts late would take the
+confirmation the next apply.sh leaves. That is at most `LINGER_MAX` (180
+one-second sleeps), past the longest reload, so an omcid that could not
+write its status does not hold every later apply off. omcid removes the
+status file when it cannot write it, so a `running` from the start of a
+reload does not outlive it, unless that removal fails as well.
+omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`); a
+file that is empty, cut short or says anything else confirms nothing and
+counts as `live`. The outcome reported is this run's: when the next reload
+has started before it was read, apply.sh says so and exits 1.
+
 A re-registration still running at the bound is reported as still working and
 is not a failure. Exit 1 when no omcid runs (or `/etc/config/modules.off` is
 set), when omcid does not answer the signal within 5 s (an older build treats
 SIGHUP as stop), or when the reload's result is `failed`, `timeout`,
-`no_services`, `sn_not_applied`, `pw_not_applied` or `no_serial`. It never starts an omcid and writes
+`no_services`, `sn_not_applied`, `pw_not_applied`, `no_serial`, `held` or
+`unreadable` (the config store opened but a read of it failed; nothing was
+changed), exit 3 for `deferred`, and exit 4 for an `omci-live` that
+re-registered after a failed activation. It never starts an omcid and writes
 nothing to the driver: init owns the process, and a second omcid started here
 used to make the ONU cycle through O1 to O3 while init's respawn entry
 re-provisioned around it.
@@ -1396,7 +1467,8 @@ and writes the mode one second later, detached, so the answer leaves before
 the link changes; the trial reverts by itself at the end of its window
 unless `confirm` (over ssh or the web UI, so over the link being tried)
 stores the key first. `confirm` reads the key back and fails, leaving the
-trial to revert, when it did not stick. `try` refuses while a trial or the
+trial to revert, when it did not stick. `revert` exits 1 when the parameter
+cannot be written back, and its event says so instead of "back to". `try` refuses while a trial or the
 boot watch runs, and says so when the mode asked for is already the one
 running and stored. It also refuses while the port runs a `HOST_SERDES`
 mode other than `fiber1g`, or while `host-serdes.sh` runs a trial or its
@@ -1471,7 +1543,11 @@ at the end of its window unless `confirm` (over ssh, so over the link being
 tried) stores the key first. `confirm` reads the key back and fails,
 leaving the trial to revert, when it did not stick. A trial whose
 registers do not read back after the switch goes back at once
-(`trial_failed`). `reapply` answers at once and, one second later, runs the
+(`trial_failed`). When the way back does not read back either, or its port
+side (`host_forced`, `host_autoneg`) cannot be written, after an expiry, a
+revert or a failed switch, the event is `revert_unverified`, the port is
+taken to run the mode before (so `reapply` can run it again) and `revert`
+exits 1; it also exits 1 when the state file cannot be written. `reapply` answers at once and, one second later, runs the
 whole sequence of the running mode and its port side again, with no trial
 and nothing stored; the event says whether the registers read back. `try` and `reapply` refuse while a trial, a reapply or the boot
 watch runs, while `host-autoneg.sh` runs a trial or its boot watch, in a
@@ -1515,6 +1591,7 @@ klogd), at notice:
 | `fallback_nolink` | no link in either mode for 10 minutes; stays on Fiber 1G, the key unchanged |
 | `safe_mode_boot` | a safe-mode boot: Fiber 1G, nothing applied, trials refused |
 | `trial_started`, `trial_expired`, `trial_reverted`, `trial_confirmed`, `trial_failed` | a trial and how it ended |
+| `revert_unverified` | a trial ended, and the sequence of the mode before it did not read back or its port side could not be written |
 | `reapply_started`, `reapplied`, `reapply_failed` | a reapply, and whether the registers read back after it |
 | `bad_value`, `no_kernel`, `apply_failed`, `apply_unverified` | a key that is none of the three, a kernel without `host_forced` (both: the port runs Fiber 1G), a register or parameter that could not be read or written, a sequence that did not read back (the boot carries on in the mode) |
 | `sds_off`, `no_diag` | `/etc/config/sds.off` or no `diag`: nothing written to the host port |
@@ -1576,7 +1653,7 @@ the web UI reads the file:
 | `trial_deadline` | the uptime, in seconds, at which the trial reverts |
 | `prev_ip`, `prev_mask` | the primary the stick ran before the trial, kept on `br0:4` |
 | `old_<KEY>`, `new_<KEY>` | the six keys (`LAN_ROUTES` included) as the store holds them and as the trial asks for them |
-| `event`, `event_uptime`, `message` | the last event: `trial_started`, `trial_confirmed`, `trial_expired`, `trial_reverted` or `trial_failed` (also one line to the kernel log, `mgmt-addr: event=...`) |
+| `event`, `event_uptime`, `message` | the last event: `trial_started`, `trial_confirmed`, `trial_expired`, `trial_reverted` or `trial_failed` (also one line to the kernel log, `mgmt-addr: event=...`). `revert` moves back a second after its answer, so its `trial_reverted` comes twice: `moving back to ...` at once, then `back to ...` or `network.sh could not move back ...` once the move has run |
 | `safe_mode_boot` (`status` only) | `1` on a safe-mode boot |
 
 Nothing persists across a reboot: the state and the trial file are in
@@ -1855,7 +1932,7 @@ drivers behind them.
 | `/proc/odi_gpon/status` | ONU state, `in_state_s <n>` (whole seconds in that state on the monotonic clock, so a wrong wall clock does not move it; any transition restarts it, so in O5 it is the time since the line last came up), ONU id, the serial number, EqD, the Alloc-IDs the OLT assigned (`alloc_ids`, in CAM row order: the assignment order, a row freed by a deallocation reused first), the GEM ports the downstream path decrypts (`enc_ports <n> <port>...`: each DS slot whose AES bit is set in the hardware, and any port the OLT asked to decrypt that has no slot yet; omcid answers the GEM port network CTP's Encryption state from it), the REI count, the TO1/TO2 expiries, `deact_directed <n>` (the Deactivate_ONU-ID PLOAMs addressed to the ONU-ID the ONU holds, counted since the driver loaded; broadcasts and other ONUs' are not: omcid counts refusals from it), `o7_hold keep <0|1> held <0|1>` (`GPON_KEEP_DISABLE`: the key reached the driver, a kept Emergency Stop is in force), the interrupt bookkeeping, `laser on <0|1> ldd_id <id byte, -1 if unread> unverified <0|1>` (the `laser` verb's outcome: `on 0` means the laser was left off and `gponact` is refused, `docs/SETTINGS.md`), `laser_emergency_stop <0|1>` (1 while the OLT holds the ONU in Emergency Stop, O7: the TX-disable line is high and the laser off until the OLT re-enables it, or `gpondeact`/`gponact` or a reboot leaves O7), the last LOS sample, the last Upstream_Overhead and Ranging_Time decoded (`upstream_overhead`, `ranging_time`, with the USF_MIN_RESP_DELAY value and the MULTFRAME/INFRAME written), the last PON-ID since the last loss of signal (`pon_id odn_class <0-7> reach_extender <0|1> tol <n> id <14 hex digits> ms <ms since boot>`, or `pon_id none`: G.984.3 Annex C, sent only by an OLT provisioned to; `odn_class` 0 A, 1 B, 2 B+, 3 C, 4 C+; `reach_extender` 1 when TOL is a reach extender's rather than the OLT's; `tol` the mean launch power in 0.1 dB steps above -30 dBm, so `tol 334` is +3.4 dBm and the path loss is about that less the stick's receive power, 65535 when the OLT does not report it; `id` the PON identifier the operator set), and the live alarm and FEC bits and the alarm and ONU state times (below) | -- |
 | `/proc/odi_gpon/counters` | the sampled GPON link counters (below) | -- |
 | `/proc/odi_gpon/flows` | the sampled per-flow GEM counters, one line per flow OMCI created (below) | -- |
-| `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, print as `xx`) | -- |
+| `/proc/odi_gpon/ploam` | PLOAM message totals (`ploam ds_rx <n> us_tx <n>`, `ploam_us_dropped`: replies not sent because the upstream queue stayed full for 1 ms; `ploam_type ds|us 0x<type> <count>`, one line per type seen), and the last 32 PLOAM messages (`ploam_ring`: direction, ONU-ID, type, the 10 content bytes; the eight AES key bytes of an upstream Encryption_Key, type 0x05, and all ten password bytes of an upstream Password, type 0x02, print as `xx`) | -- |
 | `/proc/odi_gpon/drops` | a short record of the PON side around every drop out of O5, frozen when it happens, so "who dropped first" (an OLT deactivate against a LOS or LOF) can be answered after the fact. `drops <n> kept <n> pre_ms 60000 post_ms 120000`, then per record, oldest first, `drop <seq> at_ms <ms since boot> age_s <s> to <state> cause <cause> side <side> events <n> lost <n> more <n> collecting|done` (`cause` and `side` as on the `event=onu_state` line; `lost`: events past the 384 a record holds; `more`: further exits from O5 while it collected, which get no record of their own) and its events, each with its offset from the drop in seconds: `ploam ds|us type 0x<type> onu_id 0x<id> count <n> over_ms <ms>` (no contents; the same PLOAM repeated within 10 ms of its last copy is one line, `count` the copies and `over_ms` the time from the first to the last), `state <from> <to> cause <cause> side <side>`, `los|lof on|off state <state>`, and the 1 s sample `sample state <state> alarms 0x<DSF_ALARM_STATE> bip_blocks <BIP error blocks since the last sample>`. A record holds the 60 s before the drop and what follows for 120 s. Four records: the first of the boot is kept, the other three hold the latest. RAM only: a reboot or a watchdog reset loses them | -- |
 | `/proc/odi_gpon/cam` | the Alloc-ID CAM read back from the hardware, the table that decides which upstream grants the ONU answers: `alloc_cam <row> hw <Alloc-ID|-> recorded <Alloc-ID|->` for each row valid in the hardware or recorded by the driver (row 16 is the ONU-ID, the default Alloc-ID), then `alloc_cam_valid <n>`. A row whose `hw` and `recorded` differ is a fault. Then the downstream GEM port CAM, the table that decides which GEM ports the ONU receives: `gem_cam <row> hw <GEM port|-> type 0x<FLAGS>` for each of rows 0..64 valid in the hardware or with a flow type word not zero (rows 0..63 are the downstream flows OMCI created, the row being the flow id, `diag gpon get flows`; row 64 is the OMCC; FLAGS bit 0 multicast, 1 Ethernet, 2 OMCI, 4 AES), then `gem_cam_valid <n>`. A flow OMCI deleted leaves no line | -- |
 | `/proc/odi_gpon/ponq` | the upstream PON queue block read back from the hardware (`docs/SWITCH.md#upstream-pon-queues`), next to what cmd 21 and 25 recorded: `tcont <t> en <0|1> qmap 0x<mask> block <first>+<count>|-` for each T-CONT enabled, with a queue in its mask, or with a queue block recorded (16 is the OMCC); `queue <q> wfq <0|1> weight <w> cir <raw> pir <raw>` for each physical queue in the mask of an enabled T-CONT, the rates as the register holds them (one less than asked, except 0, 1 and 262143, no limit); `flow <slot> valid <0|1> gem <port> queue <q> recorded <0|1>` for each upstream flow slot valid in the hardware or recorded (64 is the OMCC). Reads only, and never `DRN_CMD`. Rows nothing uses keep what the replays or an earlier provisioning left; `omcli check` compares only what omcid set up | -- |

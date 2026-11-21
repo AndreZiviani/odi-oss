@@ -236,8 +236,8 @@ int main(void)
 	   "and its flow, the only one valid");
 
 	/* The stock kernel of our image computes the global PBO thresholds
-	 * in dal_rtl9602c_gpon_flowctrl_adjust_byFlowNum (0x80131f50 in
-	 * stock-vmlinux, read from its instructions, not from our code): ON =
+	 * in a function at 0x80131f50 of the V1.0-220923 vmlinux (read from
+	 * its instructions, not from our code): ON =
 	 * 7904 - (n-1)*step, OFF = 7744 - (n-1)*step, step = PON_SID_RPV_TH[0]
 	 * ON (0x96 = 150 after the sdkinit replay), and ON < 2000 gives
 	 * 2000/1840. No cap at five flows. The values below are that formula

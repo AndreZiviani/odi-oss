@@ -33,13 +33,21 @@
 # while omcid still sees that a previous run existed (it treats either file
 # as a restart and removes both: src/omci/respond/main.c). Deleting the
 # file here instead would make every respawn look like a first start.
+#
+# A respawn also passes -r: the omcid before left its bridge connections,
+# T-CONTs, queues and flows in the switch, and one that does not resume
+# clears them first (main.c). The decision files say the same, but an
+# omcid that dies between removing the old one and writing its own leaves
+# neither; the marker is still here.
 MARKER=${SVC_OMCID_MARKER:-/var/run/svc-omcid.started}
 RESUME_DECISION=${RESUME_DECISION:-/var/run/omcid-resume-decision}
+respawn=
 if [ -e "$MARKER" ]; then
+	respawn=-r
 	[ -e "$RESUME_DECISION" ] && mv -f "$RESUME_DECISION" "$RESUME_DECISION.prev"
 	/etc/scripts/omci-respawn-reprovision.sh &
 else
 	: > "$MARKER" 2>/dev/null
 fi
 
-exec /etc/scripts/respawn.sh omcid -1000 /var/log/omcid.log /bin/omcid -a -d
+exec /etc/scripts/respawn.sh omcid -1000 /var/log/omcid.log /bin/omcid -a -d $respawn

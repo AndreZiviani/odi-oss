@@ -944,8 +944,8 @@ static int render_shows_key(const char *out, const uint8_t key[16], unsigned int
 }
 
 /* /proc/odi_gpon/ploam is world-readable: its PLOAM ring must never print the
- * key an Encryption_Key carries. Every message one Request_Key sends is
- * rendered as the ring renders it.
+ * key an Encryption_Key carries, nor the password a Password carries. Every
+ * message one Request_Key sends is rendered as the ring renders it.
  */
 static void test_ring_masks_key(void)
 {
@@ -987,6 +987,22 @@ static void test_ring_masks_key(void)
 	CHECK(strcmp(out, "a0 a1 a2 a3 a4 a5 a6 a7 a8 a9") == 0, "a downstream 0x05 prints in full");
 	odi_gpon_ploam_ring_content(1, ODI_GPON_US_REI, msg.content, out);
 	CHECK(strcmp(out, "a0 a1 a2 a3 a4 a5 a6 a7 a8 a9") == 0, "another upstream type prints in full");
+
+	/* The Password message carries the PLOAM password in all ten bytes:
+	 * none of them reaches the ring. A downstream 0x02 (Serial_Number_Mask)
+	 * is not a password and prints in full.
+	 */
+	{
+		static const uint8_t pw[10] = { 'S', 'E', 'C', 'R', 'E', 'T', 'P', 'W', '0', '1' };
+
+		odi_gpon_encode_password(TEST_ASSIGNED_ONU_ID, pw, &msg);
+		odi_gpon_ploam_ring_content(1, msg.type, msg.content, out);
+		CHECK(strcmp(out, "xx xx xx xx xx xx xx xx xx xx") == 0,
+		      "the ten password bytes of an upstream Password print as xx");
+		odi_gpon_ploam_ring_content(0, msg.type, msg.content, out);
+		CHECK(strcmp(out, "53 45 43 52 45 54 50 57 30 31") == 0,
+		      "a downstream 0x02 prints in full");
+	}
 }
 
 static void test_key_switching_time(void)

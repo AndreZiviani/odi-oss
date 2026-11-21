@@ -751,10 +751,9 @@ void apply_mbsp(const struct omci_class *c, uint16_t inst,
 		/* Seconds (G.988 9.3.1 attribute 10); zero means the
 		 * default, 300 s. The register of cmd 62 counts tenths of a
 		 * second, and so does every value sent: the stock firmware
-		 * hands the seconds to pf_rtl96xx_SetMacAgeTime, which calls
-		 * rtk_l2_aging_set(ageTime * 10). This used to scale only the
-		 * default and pass an OLT's own value unscaled, so N seconds
-		 * aged out in N/10. */
+		 * sets the switch aging time to ten times the seconds. This
+		 * used to scale only the default and pass an OLT's own value
+		 * unscaled, so N seconds aged out in N/10. */
 		if (age == 0)
 			age = 300;
 		/* AGE_TICKS is 21 bits wide (0x1fffff, about 58 hours): a
