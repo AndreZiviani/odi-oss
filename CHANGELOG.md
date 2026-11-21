@@ -6,15 +6,15 @@ listed here.
 ## Unreleased
 
 - Kernel: the ONU is not activated when the boot clean of the GPON MAC
-  tables fails. Before, the result was logged and the activation went
-  ahead, on tables that could still hold the Alloc-IDs of other ONUs: an
-  ONU like that answers their grants, on the shared PON. Now the replay of
-  `gpon_init.bin` stops after the clean, `gponact` fails with `-EIO` (rows
-  survived both passes) or `-ETIMEDOUT` (a CAM request never finished),
-  the kernel log says `the PON is NOT activated`, and the ONU stays in O1.
-  The next `gponact` (by hand, or the one of the next boot) runs the whole
-  replay again, reset and clean included; nothing retries on its own
-  (`docs/SWITCH.md`, "GPON boot init").
+  tables fails; before, it was logged and activated anyway, on tables that
+  could hold the Alloc-IDs of other ONUs, whose grants it then answers.
+  `gponact` now fails with `-EIO` or `-ETIMEDOUT`, the reason is in the
+  kernel log, and the PON port drops every frame. The driver does not
+  retry; a later `gponact` (by hand, an omcid respawn, the next boot) runs
+  the whole replay again, and a `gpondeact` before any completed boot
+  replay no longer writes the GPON MAC. `apply.sh omci` reports a VLAN
+  rebuild as `the ONU was not re-registered` instead of `stayed in O5`,
+  which it does not know (`docs/SWITCH.md`, "GPON boot init").
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy
