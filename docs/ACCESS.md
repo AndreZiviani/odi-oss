@@ -22,7 +22,8 @@ A **release image is keys-only**: `ROOT_PW=locked` (`docs/BUILDING.md`)
 leaves root with no password at all (the `/etc/passwd` field is `!`, and
 dropbear runs with `-s`, refusing password logins outright — ssh does not
 even prompt for one). First access is through the web UI below, whose
-SSH-key admin page adds a key for root.
+System, Access page adds a key for root once a password of your own is set
+there.
 
 A **source build**, unless it also passes `ROOT_PW=locked`, generates its
 own password: `out/image/root-password-<version>.txt` beside the tarball.
@@ -47,11 +48,16 @@ Three ways to add one:
 - **The API** the UI uses (HTTP Basic with the UI credential). A confd
   newer than v1.19.0 adds no key while the built-in `admin` / `admin` is in
   force, so set your own password first. `read -s` keeps it off the screen
-  and out of the shell history, and `curl -u admin` asks for it:
+  and out of the shell history, the second entry catches a typo (a lost
+  password means the safe mode to get back in), and `curl -u admin` asks
+  for it afterwards. This runs in sh, bash and zsh:
 
-      read -rs PW
-      printf '%s' "$PW" | curl -u admin:admin --data-urlencode user=admin \
-           --data-urlencode password@- http://<stick>/api/password
+      printf 'Password: '; read -rs PW; echo
+      printf 'Again: '; read -rs PW2; echo
+      [ "$PW" = "$PW2" ] && printf '%s' "$PW" | curl -u admin:admin \
+           --data-urlencode user=admin --data-urlencode password@- \
+           http://<stick>/api/password
+      unset PW PW2
       curl -u admin -X POST --data-urlencode "key=$(cat ~/.ssh/id_ed25519.pub)" \
            http://<stick>/api/sshkeys
       curl -u admin http://<stick>/api/sshkeys        # list, with line numbers

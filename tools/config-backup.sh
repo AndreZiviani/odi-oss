@@ -80,10 +80,17 @@ code=$(printf 'user = "%s"\n' "$esc" |
 	curl -sS -K - -m "$timeout" --connect-timeout 5 \
 		-o "$tmp" -w '%{http_code}' "http://$host:$port/api/backup") ||
 	die "download from $host failed (curl exit $?, http ${code:-none})"
+# What confd said, for a refusal: its first line, cut short. A 403 is the
+# factory password still in force (odi-ui newer than v1.19.0), and its text
+# says how to get past it.
+why() {
+	r=$(head -c 300 "$tmp" | tr -d '\r' | head -n 1)
+	[ -n "$r" ] && printf ': %s' "$r"
+}
 case $code in
 200) ;;
 401) die "$host refused the credential (http 401)" ;;
-*) die "$host answered http $code to /api/backup" ;;
+*) die "$host answered http $code to /api/backup$(why)" ;;
 esac
 
 # The backup body is the XML `flash all cs` and `flash all hs` print. Anything

@@ -56,10 +56,11 @@ it into the slot you are not running and trial-boot it --
 Full procedure, including how to read a boot you could not otherwise see:
 [\`docs/FLASHING.md\`](docs/FLASHING.md).
 
-First access is the web UI on port 80 (\`admin\`/\`admin\` until you change
-it): add your SSH public key under its SSH-key admin page, then
-\`ssh root@<stick>\` with that key -- it keeps working across reboots and
-re-flashes. [\`docs/ACCESS.md\`](docs/ACCESS.md) has every way in and how to
+First access is the web UI on port 80, with \`admin\`/\`admin\` at first.
+Set a password of your own under System, Access, then add your SSH public
+key on the same page (confd adds no key while \`admin\`/\`admin\` is in
+force), and \`ssh root@<stick>\` with that key -- it keeps working across
+reboots and re-flashes. [\`docs/ACCESS.md\`](docs/ACCESS.md) has every way in and how to
 move files on and off the stick.
 
 Verify the download against \`SHA256SUMS\` before flashing anything:

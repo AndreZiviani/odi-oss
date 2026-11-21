@@ -9,7 +9,12 @@ listed here.
   API, without putting it in the shell history, and `SETTINGS.md` no longer
   offers adding a key from the web UI during the safe mode. A confd newer
   than v1.19.0 adds no key while the built-in `admin` / `admin` is in force
-  (#482).
+  (#482). The recipe asks for the password twice, with a prompt. The release
+  notes, `README.md`, `BUILDING.md` and the SSH key and backup rows of
+  `SETTINGS.md` say the same: password first, then the key. The same confd
+  refuses `/api/backup` with the factory password, so "Backing up from a
+  host" says a password of its own is needed, and `tools/config-backup.sh`
+  prints the reason confd gives for a refusal instead of the status alone.
 
 ## v1.19.0 (2026-11-20)
 
