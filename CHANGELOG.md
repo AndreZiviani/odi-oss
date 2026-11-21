@@ -10,6 +10,13 @@ listed here.
   it cannot read the fallback copy, before it extracts anything. `fwu.sh`
   makes the same checks, but the starter runs the `fwu.sh` of the uploaded
   image, so the rule now holds whatever that image carries (#482).
+- Docs: the README says what v1.16.0 to v1.19.0 changed in the web UI, that
+  every daemon restarts under the restart budget, that the safe mode
+  shortcut also follows `HOST_SERDES`, and that an unreachable trial goes
+  back by itself after 300 s. The stock key counts in README, SETTINGS,
+  IMPROVEMENTS and HACKING agree with SETTINGS.md (24, 22 in the UI). Rows
+  that said "not yet run on a stick" now cite the runs QUALIFICATION.md
+  records. The list of docs adds BOOT.md and SWITCH.md.
 
 ## v1.19.0 (2026-11-20)
 

@@ -168,7 +168,7 @@ shapes as `omcli`.
 the stock firmware shares with this image, the UI offers for editing only
 the 22 stock keys this image acts on (and its own), each marked with what applying it costs:
 LIVE, SERVICE RESTART, INTERRUPTS INTERNET or REBOOT, the last two behind a
-confirmation. The other 161 are shown read-only and still round-trip
+confirmation. The rest are shown read-only and still round-trip
 through backup and restore. `apply.sh` applies the management addresses
 live and the OMCI settings without a reboot (it re-ranges the ONU), the
 firmware page writes an uploaded image to the inactive slot
@@ -188,10 +188,10 @@ Fixed several ways, together (`docs/SETTINGS.md`, "Resilience" and
 "Watchdog rules"): `/tmp` and `/var` are size-capped tmpfs instead of
 unbounded ramfs, so a full `/tmp` gives `ENOSPC` rather than taking the box
 down with it; `oom_score_adj` biases the OOM killer away from omcid,
-dropbear and confd; those four critical daemons (omcid, dropbear, confd,
-metricsd) restart automatically the instant they die, forked and tracked
-by busybox init itself (`/etc/inittab` `respawn` entries, not a hand-rolled
-supervisor loop);
+dropbear and confd; every daemon restarts automatically when it dies,
+forked and tracked by busybox init itself (`/etc/inittab` `respawn`
+entries), after a wait of 1, 2, 4 ... s up to a cap per daemon when it
+died within 30 s of its start (`docs/SETTINGS.md`, "Restart budget");
 and the kernel's own odi_wdt watchdog -- the only owner of the hardware
 watchdog, with no separate userland process guessing at anything from
 `/proc` -- stops kicking (so the board resets) if omcid misses its own

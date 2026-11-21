@@ -980,8 +980,8 @@ Each of these has cost real time. The pointer says where the evidence is.
 
 - **The config store is shared with the stock firmware.** The jffs2
   `config` partition is not part of a slot: both images read it, and a
-  reflash never touches it. Of its 184 keys this image acts on 23 (22 the UI
-  edits, and bit 256 of `OMCI_CUSTOM_ME`); the UI shows the rest read-only. **Never delete a key** this image does not use
+  reflash never touches it. Of its 184 keys this image acts on 24 (22 the UI
+  edits, bits of `OMCI_CUSTOM_ME` and one bit of `OMCI_CUSTOM_MCAST`); the UI shows the rest read-only. **Never delete a key** this image does not use
   (the stock slot still reads it), never erase the partition (it holds the
   serial number and MAC the line authenticates on), and keep backups whole.
   `flash set` and `flash default` install the new file by rename on the
