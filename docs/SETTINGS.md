@@ -814,11 +814,12 @@ for value, and a stick already in it is not written at all.
 later, in RAM only, and reverts by itself after 120 s unless `host-serdes.sh
 confirm` arrives first, which can only happen over the link in the new
 mode. Only the confirm stores `HOST_SERDES` (confirming `fiber1g` removes
-it). In `2500basex` the window re-latches the lane every 5 s while bit 17
-of 0x214 reads clear (`docs/SWITCH.md`, "The re-latch"): the host port is
-usually switched to 2.5G by hand only after the trial applied, and a lane
-started before the host sends does not sync until it is started again. A
-lane in sync is not touched. A reboot during the trial also undoes it. A trial is refused while
+it). In `2500basex` and `hisgmii` the window re-latches the lane every 5 s
+while bit 17 of 0x214 reads clear (`docs/SWITCH.md`, "The re-latch"): the
+host port is usually switched to 2.5G by hand only after the trial applied,
+and a lane started before the host sends does not sync until it is started
+again. A lane in sync is not touched. In HiSGMII bit 17 serves the window
+only; the status still has no link source for it. A reboot during the trial also undoes it. A trial is refused while
 another one runs, while the boot watch (below) runs, while a
 `host-autoneg.sh` trial or boot watch runs, in a safe-mode boot, and with
 `/etc/config/sds.off`. The web UI runs the same trial: Config, Network,

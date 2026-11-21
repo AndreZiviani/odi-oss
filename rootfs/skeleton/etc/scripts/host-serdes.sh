@@ -102,7 +102,7 @@ TRIAL_S=${TRIAL_S:-120}         # a trial reverts after this long unconfirmed
 TRIAL_MAX_S=${TRIAL_MAX_S:-600} # the longest trial a caller may ask for
 WATCH_S=${WATCH_S:-30}          # each phase of the boot watch
 WATCH_MAX_S=${WATCH_MAX_S:-600} # the whole boot watch
-RESYNC_S=${RESYNC_S:-5}         # re-latch a 2500BASE-X lane out of sync this often
+RESYNC_S=${RESYNC_S:-5}         # re-latch a lane out of sync this often (2500BASE-X, and HiSGMII in a trial)
 DIAG_S=${DIAG_S:-10}            # one diag call
 IO_S=${IO_S:-5}                 # one sysfs or flash call
 LOCK_S=${LOCK_S:-10}            # waiting for the lock
@@ -299,20 +299,20 @@ sds_anf() {
 	[ $(( 0x$cur & 0x100 )) -eq 0 ] || sds_write 0x21808 "$(( 0x$cur & ~0x100 ))"
 }
 
-# sds_relatch: the lane parked and started again in 2500BASE-X:
-# HOLD_CLK_GLITCH set, LINK_MODE parked (0x1f), 20 ms, then the 2500BASE-X
-# word (0x16 under 0xa11f, the other bits as read) with the clock running.
-# On a lane in 2500BASE-X that is the word it held. It is not the word read
-# back: a re-latch cut before its restore (a diag timeout, a failed write)
-# leaves the lane parked, and the next one starts it again. A lane started
-# before the host sends 3.125 Gbaud does not sync when the host starts
-# later (a host port switched to 2.5G-baseX by hand after the stick, as a
-# trial asks); started again while the host sends, it syncs within seconds.
-# Run only on a 2500BASE-X lane whose bit 17 reads clear: a lane in sync is
-# never touched. Returns 1 when the read or any write fails; the restore is
-# written even after a failed park.
+# sds_relatch MODE: the lane parked and started again in MODE, 2500basex
+# or hisgmii: HOLD_CLK_GLITCH set, LINK_MODE parked (0x1f), 20 ms, then the
+# mode word (SDS_MODE under 0xa11f, the other bits as read) with the clock
+# running. On a lane in MODE that is the word it held. It is not the word
+# read back: a re-latch cut before its restore (a diag timeout, a failed
+# write) leaves the lane parked, and the next one starts it again. A lane
+# started before the host sends 3.125 Gbaud does not sync when the host
+# starts later (a host port switched to 2.5G by hand after the stick, as a
+# trial asks), in 2500BASE-X and in HiSGMII alike; started again while the
+# host sends, it syncs within seconds. Run only on a lane in MODE whose bit
+# 17 reads clear: a lane in sync is never touched. Returns 1 when the read
+# or any write fails; the restore is written even after a failed park.
 sds_relatch() {
-	mode_vars 2500basex
+	mode_vars "$1"
 	cur=$(sds_read 0x214)
 	[ -n "$cur" ] || return 1
 	rl=0
@@ -422,15 +422,22 @@ switch_to() {
 	[ -z "$unverified" ]
 }
 
-# link MODE: 1, 0, or nothing when this mode has no signal (hisgmii) or the
+# sds_sync: bit 17 of 0x214, the lane in sync: 1, 0, or nothing when the
 # read failed.
+sds_sync() {
+	v=$(sds_read 0x214)
+	[ -n "$v" ] || return 0
+	if [ $(( 0x$v & 0x20000 )) -ne 0 ]; then echo 1; else echo 0; fi
+}
+
+# link MODE: 1, 0, or nothing when this mode has no signal (hisgmii) or the
+# read failed. In HiSGMII bit 17 reads set with the lane in sync whether or
+# not frames pass (without 0x21808 bit 8 they did not), so it is not the
+# link of the status; the trial window uses it only to see a lane out of
+# sync.
 link() {
 	case $1 in
-	2500basex)
-		v=$(sds_read 0x214)
-		[ -n "$v" ] || return 0
-		if [ $(( 0x$v & 0x20000 )) -ne 0 ]; then echo 1; else echo 0; fi
-		;;
+	2500basex) sds_sync ;;
 	hisgmii) ;;
 	*) "$TIMEOUT" "$IO_S" cat "$PARAM_DIR/host_link" 2>/dev/null | sed -n '1s/^\([01]\)$/\1/p' ;;
 	esac
@@ -578,7 +585,7 @@ watch() {
 						unlock
 						return 0
 					fi
-					sds_relatch || say "the lane could not be re-latched" >&2
+					sds_relatch 2500basex || say "the lane could not be re-latched" >&2
 					unlock
 				fi
 			fi
@@ -660,13 +667,16 @@ try() {
 
 # The trial run (trial_run, trial-lib.sh): the switch, then the window.
 trial_apply() { switch_to "$trial_mode"; }
-# trial_window ID SECONDS: in 2500BASE-X the window re-latches the lane
-# every RESYNC_S s while bit 17 reads clear (sds_relatch, above): the host
-# port is often switched to 2.5G by hand after the trial applied, over the
-# link the trial just dropped. Any other mode sleeps the window as before.
-# The window keeps its length; the expiry follows it as before.
+# trial_window ID SECONDS: in 2500BASE-X and HiSGMII the window re-latches
+# the lane every RESYNC_S s while bit 17 reads clear (sds_relatch, above):
+# the host port is often switched to 2.5G by hand after the trial applied,
+# over the link the trial just dropped. Fiber 1G sleeps the window as
+# before. The window keeps its length; the expiry follows it as before.
 trial_window() {
-	[ "$trial_mode" = 2500basex ] || { "$SLEEP" "$2"; return 0; }
+	case $trial_mode in
+	2500basex|hisgmii) ;;
+	*) "$SLEEP" "$2"; return 0 ;;
+	esac
 	w_id=$1 w_end=$(( $(uptime_s) + $2 )) w_n=0
 	while :; do
 		w_left=$(( w_end - $(uptime_s) ))
@@ -678,7 +688,7 @@ trial_window() {
 		if [ "$phase" != trial ] || [ "$trial_id" != "$w_id" ]; then
 			return 0
 		fi
-		[ "$(link 2500basex)" = 0 ] || continue
+		[ "$(sds_sync)" = 0 ] || continue
 		# lock_try, not lock: a busy lock skips this re-latch; lock would
 		# end the trial run here, before its expiry.
 		lock_try
@@ -688,14 +698,14 @@ trial_window() {
 			unlock
 			return 0
 		fi
-		if [ "$running" != 2500basex ]; then
+		if [ "$running" != "$trial_mode" ]; then
 			unlock
 			continue
 		fi
-		sds_relatch || say "the lane could not be re-latched" >&2
+		sds_relatch "$trial_mode" || say "the lane could not be re-latched" >&2
 		unlock
 		w_n=$((w_n + 1))
-		[ "$w_n" != 1 ] || say "no sync in 2500BASE-X: re-latching the lane every ${RESYNC_S} s until it syncs or the trial ends"
+		[ "$w_n" != 1 ] || say "no sync in $(label "$trial_mode"): re-latching the lane every ${RESYNC_S} s until it syncs or the trial ends"
 	done
 }
 trial_applied() {

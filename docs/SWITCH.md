@@ -1363,18 +1363,23 @@ hosts need is not isolated (docs/QUALIFICATION.md).
 **The re-latch.** A 2500BASE-X lane started before the host sends 3.125
 Gbaud does not sync when the host starts later: bit 17 of 0x214 reads set
 for one read in fifteen to fifty, never for long. Started again while the
-host sends, it syncs within seconds. The re-latch starts it again in
-2500BASE-X: 0x214 `HOLD_CLK_GLITCH` bit 13 := 1, `LINK_MODE` [4:0] := 0x1f
-(parked), 20 ms, then the word read before with the 2500BASE-X mode under
-0xa11f (0x16, bit 13 clear), the word a lane in 2500BASE-X held. A
-re-latch cut before that last write leaves the lane parked; the next one
-starts it again. A
-`2500basex` trial and each 2500BASE-X phase of the boot watch run it every
-5 s (`RESYNC_S`) while bit 17 reads clear, and never on a lane in sync.
-Measured against a MikroTik hEX S 2025 (E60iUGS) on HSGQ sticks: a re-latch
-with the router port still at 1G gave one read in 25 with the bit set; the
-next, after the port was switched to 2.5G-baseX, 0x214 = 0x00260016 within
-2 s and frames both ways.
+host sends, it syncs within seconds. The re-latch starts it again in its
+mode: 0x214 `HOLD_CLK_GLITCH` bit 13 := 1, `LINK_MODE` [4:0] := 0x1f
+(parked), 20 ms, then the word read before with the mode word under 0xa11f
+(0x16 in 2500BASE-X, 0x112 in HiSGMII, bit 13 clear), the word a lane in
+that mode held. A re-latch cut before that last write leaves the lane
+parked; the next one starts it again. A `2500basex` or `hisgmii` trial and
+each 2500BASE-X phase of the boot watch run it every 5 s (`RESYNC_S`) while
+bit 17 reads clear, and never on a lane in sync. Measured against a
+MikroTik hEX S 2025 (E60iUGS) on HSGQ sticks: a re-latch with the router
+port still at 1G gave one read in 25 with the bit set; the next, after the
+port was switched to 2.5G-baseX, 0x214 = 0x00260016 within 2 s and frames
+both ways. HiSGMII has the same race (#477, an LL-XS2510 against a MikroTik
+RB5009): with the host port moved to 2.5G after a live switch to
+`hisgmii`, bit 17 stayed clear apart from brief flickers and no frames
+arrived until `reapply`. In HiSGMII bit 17 reads set in sync whether or not
+frames pass, so it is the sync check of the trial window only, not the
+link of the status.
 
 HiSGMII is not an IEEE 802.3 mode: SGMII signalling at 3.125 Gbaud, no
 standard to define the line or its negotiation. The host port is set to

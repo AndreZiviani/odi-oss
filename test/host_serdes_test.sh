@@ -16,9 +16,10 @@
 # "f1g" one that links only in Fiber 1G (host_link 1), "none" neither, and
 # "late:<uptime>:<model>" behaves as "none" until that uptime, and
 # "latch:<uptime>" is a 2.5G host that starts to send at that uptime and
-# syncs only with a lane started (0x214 written in 2500BASE-X with
-# HOLD_CLK_GLITCH clear) at or after it, as a MikroTik hEX S 2025 (E60iUGS)
-# port switched to 2.5G-baseX after the stick does; with no model
+# syncs only with a lane started (0x214 written in 2500BASE-X or HiSGMII
+# with HOLD_CLK_GLITCH clear) at or after it, as a MikroTik hEX S 2025
+# (E60iUGS) or RB5009 port switched to 2.5G-baseX after the stick does; it
+# syncs 2500BASE-X with auto-negotiation off, and HiSGMII; with no model
 # the registers are left as they are. With "$T/failrestore" the next write
 # of 0x214 with HOLD_CLK_GLITCH clear fails and is not written, as a
 # re-latch cut before its restore. Bit 17 is set in sync in either mode
@@ -72,7 +73,7 @@ case "\$1 \$2" in
 	echo "set \$a \$v" >> "$T/sdsset"
 	[ -f "$T/readonly" ] && exit 0
 	[ -f "$T/failrestore" ] && [ "\$a" = 0x214 ] && [ \$(( v & 0x2000 )) = 0 ] && { rm -f "$T/failrestore"; exit 1; }
-	[ "\$a" = 0x214 ] && [ \$(( v & 0x1f )) = 22 ] && [ \$(( v & 0x2000 )) = 0 ] && cut -d. -f1 "$T/uptime" > "$T/lanestart"
+	[ "\$a" = 0x214 ] && { [ \$(( v & 0x1f )) = 22 ] || [ \$(( v & 0x1f )) = 18 ]; } && [ \$(( v & 0x2000 )) = 0 ] && cut -d. -f1 "$T/uptime" > "$T/lanestart"
 	grep -v "^\$a=" "$T/regs" > "$T/regs.n" 2>/dev/null; echo "\$a=\$v" >> "$T/regs.n"
 	mv "$T/regs.n" "$T/regs"
 	;;
@@ -99,7 +100,8 @@ case \$m in
 x2500) [ "\$mode" = 22 ] && { [ "\$an" = 0 ] || [ "\$an" = N ]; } && sync=1 ;;
 latch:*)
 	at=\${m#latch:}; ls=\$(cat "$T/lanestart" 2>/dev/null || echo 0)
-	[ "\$up" -ge "\$at" ] && [ "\$ls" -ge "\$at" ] && [ "\$mode" = 22 ] && { [ "\$an" = 0 ] || [ "\$an" = N ]; } && sync=1 ;;
+	[ "\$up" -ge "\$at" ] && [ "\$ls" -ge "\$at" ] &&
+		{ [ "\$mode" = 18 ] || { [ "\$mode" = 22 ] && { [ "\$an" = 0 ] || [ "\$an" = N ]; }; }; } && sync=1 ;;
 f1g)   [ "\$mode" = 4 ] && l=1 sync=1 ;;
 esac
 { [ "\$fo" = 1 ] || [ "\$fo" = Y ]; } && l=1
@@ -599,16 +601,36 @@ t "race, no host: the registers are Fiber 1G again" "^0x4 0x1264$" "$(printf '0x
 up=$(cut -d. -f1 "$T/uptime")
 [ "$up" -le $((15 + 1 + 20 + 6)) ] && ok "race, no host: the window not stretched by the re-latches (uptime $up)" ||
 	no "race, no host: the window not stretched" "uptime $up"
-# A hisgmii trial sleeps its window as before: no re-latch.
+# HiSGMII has the same race (a host port switched to 2.5G after a live
+# switch to it, as measured on a MikroTik RB5009): the window re-latches it
+# too, back into HiSGMII. Bit 17 is the sync check of the window only; the
+# status keeps no link source for HiSGMII.
 setkey ""
 newboot
 sh "$S" boot > /dev/null
-echo none > "$T/model"
+echo latch:20 > "$T/model"
 : > "$T/spawned"
 sh "$S" try hisgmii > /dev/null
 id=$(st trial_id)
+confirm_on_sync
 out=$(sh "$S" trial-run "$id" 20 2>&1)
-n "race: a hisgmii trial is not re-latched" "re-latching" "$out"
+t "race, hisgmii: a host at 2.5G only after the apply, the trial still syncs and is confirmed" \
+	"^trial_confirmed hisgmii hisgmii$" "$(st event) $(key) $(st running)"
+t "race, hisgmii: said so" "no sync in HiSGMII.*re-latching the lane every 5 s" "$out"
+t "race, hisgmii: re-latched into HiSGMII (0x112 under 0xa11f), 0x21808 bit 8 kept" "^0x112 0x71e0$" \
+	"$(printf '0x%x' $(( $(reg 0x214) & 0xa11f ))) $(reg 0x21808)"
+t "race, hisgmii: the status keeps no link source" "link_source=none" "$(sh "$S" status | tr '\n' ' ')"
+rm -f "$T/everyhook"
+# A Fiber 1G trial sleeps its window as before: no re-latch.
+echo none > "$T/model"
+: > "$T/spawned"
+sh "$S" try fiber1g > /dev/null
+id=$(st trial_id)
+: > "$T/sdsset"
+out=$(sh "$S" trial-run "$id" 20 2>&1)
+n "race: a fiber1g trial is not re-latched" "re-latching" "$out"
+t "  ... the lane parked by the sequences only (in, and back out)" "^2$" "$(grep -c 'set 0x214 0x[0-9a-f]*1f$' "$T/sdsset")"
+setkey ""
 # The boot watch: a host switched to 2.5G after the boot applied. Each
 # 2500BASE-X phase re-latches every RESYNC_S seconds while out of sync, so
 # it syncs within the phase, with no fallback to Fiber 1G.
