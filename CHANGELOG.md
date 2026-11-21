@@ -10,13 +10,27 @@ listed here.
   it cannot read the fallback copy, before it extracts anything. `fwu.sh`
   makes the same checks, but the starter runs the `fwu.sh` of the uploaded
   image, so the rule now holds whatever that image carries (#482).
-- Docs: the README says what v1.16.0 to v1.19.0 changed in the web UI, that
-  every daemon restarts under the restart budget, that the safe mode
-  shortcut also follows `HOST_SERDES`, and that an unreachable trial goes
-  back by itself after 300 s. The stock key counts in README, SETTINGS,
-  IMPROVEMENTS and HACKING agree with SETTINGS.md (24, 22 in the UI). Rows
-  that said "not yet run on a stick" now cite the runs QUALIFICATION.md
-  records. The list of docs adds BOOT.md and SWITCH.md.
+- Docs: the README is rewritten around a first-time reader: which sticks
+  run this (a table with the state from QUALIFICATION.md and the setting
+  each board needs, in place of "for the DFP-34X-2C2 only"; the 2C2 v08
+  sold as the HSGQ XPON stick is listed as Community-reported, and
+  QUALIFICATION.md says so), the safety model, the install from the stock
+  firmware as numbered steps, the first login with the safe mode, the ways
+  back, updating, and the docs grouped by reader. The upgrade notes for
+  v1.4.0 to v1.6.0 are left to their CHANGELOG sections. The "area / stock
+  / this firmware" table moves, cell for cell, to the new
+  `docs/COMPARISON.md`, and the README keeps one line per area; AGENTS.md
+  points the house rule at the new page, and `tools/check-doc-pins.sh` and
+  `tools/bump-deps.sh` follow the kernel version there. The link to
+  SETTINGS.md in the host link auto-negotiation row works again. The table
+  says what v1.16.0 to v1.19.0 changed in the web UI, that every daemon
+  restarts under the restart budget, that the safe mode shortcut also
+  follows `HOST_SERDES`, and that an unreachable trial goes back by itself
+  after 300 s. The stock key counts in COMPARISON, SETTINGS, IMPROVEMENTS
+  and HACKING agree with SETTINGS.md (24, 22 in the UI); the README no
+  longer repeats them. Rows that said "not yet run on a stick" now cite
+  the runs QUALIFICATION.md records. The list of docs adds BOOT.md,
+  SWITCH.md and COMPARISON.md.
 
 ## v1.19.0 (2026-11-20)
 

@@ -3,8 +3,10 @@
 The stock ODI DFP-34X-2C2 firmware works. This project does not repack it —
 it builds a complete replacement from source — and along the way that also
 fixes or improves a number of things the stock firmware gets wrong, leaves
-out, or does closed. This is the detail behind the table in the top-level
-`README.md`; each point below is something you can read or run in this repo
+out, or does closed. This is the prose behind the comparison table: the
+top-level `README.md` has one line per area, and
+[`COMPARISON.md`](COMPARISON.md) has every row in full, with its
+evidence. Each point below is something you can read or run in this repo
 to confirm for yourself.
 
 ## Fully open
