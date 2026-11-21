@@ -40,14 +40,22 @@ key, as `ssh-keygen` prints it.
 
 Three ways to add one:
 
-- **The web UI**: Admin tab, "SSH keys", paste the public key, Add. The list
-  shows what is in the file and removes by line.
-- **The API** the UI uses (HTTP Basic with the UI credential):
+- **The web UI**: System, Access, "SSH keys", paste the public key, Add,
+  once a password of your own is set on the same page (a confd newer than
+  v1.19.0 refuses the key before that). The list shows what
+  is in the file and removes by line.
+- **The API** the UI uses (HTTP Basic with the UI credential). A confd
+  newer than v1.19.0 adds no key while the built-in `admin` / `admin` is in
+  force, so set your own password first. `read -s` keeps it off the screen
+  and out of the shell history, and `curl -u admin` asks for it:
 
-      curl -u admin:admin -X POST --data-urlencode "key=$(cat ~/.ssh/id_ed25519.pub)" \
+      read -rs PW
+      printf '%s' "$PW" | curl -u admin:admin --data-urlencode user=admin \
+           --data-urlencode password@- http://<stick>/api/password
+      curl -u admin -X POST --data-urlencode "key=$(cat ~/.ssh/id_ed25519.pub)" \
            http://<stick>/api/sshkeys
-      curl -u admin:admin http://<stick>/api/sshkeys        # list, with line numbers
-      curl -u admin:admin -X POST -d delete=0 http://<stick>/api/sshkeys
+      curl -u admin http://<stick>/api/sshkeys        # list, with line numbers
+      curl -u admin -X POST -d delete=0 http://<stick>/api/sshkeys
 
 - **By hand** over a password login:
 
