@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Docs: `ACCESS.md` sets a password before it adds an SSH key through the
+  API, without putting it in the shell history, and `SETTINGS.md` no longer
+  offers adding a key from the web UI during the safe mode. A confd newer
+  than v1.19.0 adds no key while the built-in `admin` / `admin` is in force
+  (#482).
+
 ## v1.19.0 (2026-11-20)
 
 - Releases: confd v1.19.0 and metricsd v1.11.1. The web UI gains an OMCI

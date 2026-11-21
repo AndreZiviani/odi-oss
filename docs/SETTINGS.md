@@ -943,9 +943,12 @@ A safe-mode boot lasts that one boot. It:
 
 The web UI says so on every view while it lasts: that this is the safe
 mode, that the PON is off, that the password is the default for this boot
-only, and how to leave: set a new web UI password (System, Access) or add
-an ssh key if that is what was lost -- both are saved and in force from the
-next boot -- acknowledge, and reboot. The record outlives the boot, so the
+only, and how to leave: set a new web UI password (System, Access) if that
+is what was lost -- it is saved and in force from the next boot --
+acknowledge, and reboot. A lost ssh key goes back after that reboot, from
+the web UI, or during the safe mode over ssh as root with the password
+`admin`: confd adds no key while the built-in web UI password is in force,
+and in the safe mode it is in force for the whole boot. The record outlives the boot, so the
 banner says a safe-mode boot happened until someone acknowledges it (its
 button, or `safe-mode.sh ack`).
 
