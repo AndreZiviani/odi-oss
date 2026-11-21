@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Upgrades: `fwu_starter.sh`, which the Firmware page runs, refuses to write
+  the slot `sw_commit` names, in either environment copy, and refuses when
+  it cannot read the fallback copy, before it extracts anything. `fwu.sh`
+  makes the same checks, but the starter runs the `fwu.sh` of the uploaded
+  image, so the rule now holds whatever that image carries (#482).
+
 ## v1.19.0 (2026-11-20)
 
 - Releases: confd v1.19.0 and metricsd v1.11.1. The web UI gains an OMCI
