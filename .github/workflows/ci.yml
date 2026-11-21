@@ -11,9 +11,13 @@ name: ci
 # and test-qemu (boots the real rootfs full-system on a STOCK kernel from
 # odi-toolchain, never this repository's own -- docs/HACKING.md). A release
 # tag runs the full suite: the tests, then the build of every freestanding
-# binary in src/ on its own. This repository's own kernel and the full
-# image are not built here: about an hour of compiling this runner would
-# spend, and nothing in either is exercised without a stick.
+# binary in src/ on its own. This repository's own kernel is not built
+# here: kernel.yml compiles it, and only for a change that can alter it, so
+# the other pull requests do not pay for it. The full image is built on tags
+# and manual runs only (the reproducible job, and release.yml). The cost is
+# minutes, not the hour this comment used to name: `make image-all` from a
+# clean checkout measured 5 min 26 s and 4 min 56 s on a hosted runner
+# (2026-11-15, the two builds of the reproducible job).
 #
 # A `v*` tag does not trigger this workflow by itself: release.yml calls it
 # (workflow_call) as the job its release job needs, so the whole suite, the
@@ -199,8 +203,8 @@ jobs:
       # Fetches the pinned linux-6.18.x fresh (VERSION in kernel/618/fetch.sh) and re-checks its
       # pinned SHA-256 and the upstream GPG signature, against the signing
       # key pinned in that script (no keyserver is asked); packs it into
-      # build/kernel-618/tree.tar. Does not compile it -- that is the ~hour
-      # this job is not paying.
+      # build/kernel-618/tree.tar. Does not compile it: kernel.yml does, for
+      # the pull requests that change the kernel.
       - name: "Kernel tree: fetch and verify the pin"
         run: make kernel-tree
 

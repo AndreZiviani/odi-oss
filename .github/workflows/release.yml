@@ -35,9 +35,12 @@ name: release
 # workflow_dispatch is a dry run: it runs 1 and 2 on the chosen ref and never
 # reaches the release job, so the gate can be exercised without a tag.
 #
-# This is the one workflow here that actually builds the kernel and the
-# image (ci.yml deliberately does not: about an hour of compiling a runner
-# would spend on every push). Expect this job to take several minutes.
+# This is the one workflow here that publishes what it builds. ci.yml
+# builds the full image only in its reproducible job (tags and manual runs),
+# and kernel.yml compiles the kernel alone for the pull requests that change
+# it; neither is called from here a second time. `make image-all` from a
+# clean checkout measured about five and a half minutes on a hosted runner
+# (2026-11-15), so expect this job to take several minutes.
 #
 # concurrency: a tag push has landed here twice for the same ref before
 # (the tag itself pushed, then the branch it was cut from merged a moment

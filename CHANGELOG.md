@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- CI: a new workflow, `kernel.yml`, builds this repository's own kernel on
+  pull requests and pushes to `main` that change what `kernel/build.sh`
+  reads (`kernel/`, the toolchain pin, the hardening check), and on manual
+  runs. A clean build every time, with only the kernel tarball cached; it
+  fails when the uImage is over the k0/k1 partition or the ISA audit finds
+  an instruction the CPU lacks in `vmlinux`, and its summary has the sizes,
+  the build time and the warnings. Until now the kernel was first compiled
+  by CI at the release tag. The comments that put a kernel or image build
+  at about an hour of CI are corrected: `make image-all` from a clean
+  checkout measured about five and a half minutes on a hosted runner.
+
 ## v1.19.0 (2026-11-20)
 
 - Releases: confd v1.19.0 and metricsd v1.11.1. The web UI gains an OMCI
