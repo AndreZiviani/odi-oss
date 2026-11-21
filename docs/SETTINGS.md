@@ -1153,7 +1153,7 @@ The state of the running boot is `/var/run/mgmt-addr` (`docs/TOOLS.md`,
 | Read the MAC table (Status) | works: confd runs `diag l2-table get entry address valid` (the stock spelling of `diag l2-table get all`), which walks the switch L2 lookup table through `/dev/odi_sw`; read-only | -- |
 | Services, MIB | `omcicli` answered by omcid | -- |
 | Firmware: Upload | into `/tmp/img.tar`, which is RAM (8 MB cap) | -- |
-| Firmware: Write | `fwu_starter.sh`: the inactive slot only, in the background; the page follows its log | -- (then Try) |
+| Firmware: Write | `fwu_starter.sh`: the inactive slot only, never the slot `sw_commit` names in either environment copy, in the background; the page follows its log | -- (then Try) |
 | Firmware: Try a partition | sets `sw_tryactive` with our `nv` | REBOOT |
 | Firmware: Keep | sets `sw_commit`: removes the fallback to the other slot | at the next boot |
 
