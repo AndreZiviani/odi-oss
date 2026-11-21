@@ -30,7 +30,10 @@ listed here.
   and HACKING agree with SETTINGS.md (24, 22 in the UI); the README no
   longer repeats them. Rows that said "not yet run on a stick" now cite
   the runs QUALIFICATION.md records. The list of docs adds BOOT.md,
-  SWITCH.md and COMPARISON.md.
+  SWITCH.md and COMPARISON.md. New screenshots from the odi-ui preview, at
+  twice the pixel density and kept in `docs/images/`: the Status page at the
+  top (light or dark, following the GitHub theme), Config, the OMCI
+  topology, a trial boot and `diag`.
 
 ## v1.19.0 (2026-11-20)
 

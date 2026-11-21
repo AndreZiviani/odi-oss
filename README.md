@@ -27,6 +27,14 @@ runs Linux 2.6.30; it is not a repack of it.
 > before you flash anything, and never flash a stick that is your only
 > connection to the Internet without a way back.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/ui-status-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/ui-status-light.png">
+    <img alt="The web UI's Status page: the stick drawn from fibre to router, receive and transmit power on the class B+ window, the registration ladder at O5 with every link check passed, and the transceiver readings" src="docs/images/ui-status-dark.png" width="900">
+  </picture>
+</p>
+
 ## Contents
 
 - [Highlights](#highlights)
@@ -319,12 +327,18 @@ what you see on the line (v1.4.0 the laser check and the OLT's VLAN, v1.5.0
 
 ## Screenshots
 
-| Web UI ([odi-ui](https://github.com/AndreZiviani/odi-ui)) | `diag` on the stick |
-|---|---|
-| ![Web UI: forwarding counters and the learned MAC table](https://raw.githubusercontent.com/AndreZiviani/odi-ui/main/docs/screenshots/ui-mactable.png) | ![diag output: optics readings, ONU state O5, all GPON alarms clear](docs/images/term-diag.png) |
+The web UI is [odi-ui](https://github.com/AndreZiviani/odi-ui), served by
+the stick itself. The Status page is at the top of this README.
 
-Identifiers in the screenshots are placeholders. More pages in the
-[odi-ui README](https://github.com/AndreZiviani/odi-ui#screenshots).
+| Config: every setting with what applying it costs | OMCI: what the OLT provisioned, from the fibre to the ports |
+|---|---|
+| <img alt="Config, VLAN subtab: each setting tagged Live, Service restart, Interrupts internet or Reboot" src="docs/images/ui-config-vlan.png" width="440"> | <img alt="OMCI topology: T-CONTs, GEM ports, interworking points, 802.1p mappers, bridge ports and UNIs, linked as the MIB pointers connect them" src="docs/images/ui-omci-topology.png" width="440"> |
+| **A trial boot: Commit, or reboot back** | **`diag` over ssh** |
+| <img alt="Firmware page during a trial: the banner on every page, the running and the committed partition, Commit to this image" src="docs/images/ui-firmware-trial.png" width="440"> | <img alt="diag output: optics readings, ONU state O5, all GPON alarms clear" src="docs/images/term-diag.png" width="300"> |
+
+The screenshots come from the odi-ui preview (`scripts/preview.sh`, the
+real `confd` under qemu with stub data), so every value and identifier in
+them is an example.
 
 ## Compared with the stock firmware
 
