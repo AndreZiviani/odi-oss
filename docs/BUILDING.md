@@ -112,7 +112,8 @@ CI (`.github/workflows/ci.yml`) runs `make lint`, `make test-host`,
 `make test-diag` and `make test-omci` (one job per suite) on every push to
 `main` and every pull request, plus `make test-qemu` (after `make busybox`,
 `packages`, `src` and `releases`), and adds `make src` on release tags and
-manual runs; the kernel and image are not built there. It pulls the public freestanding
+manual runs; the kernel and image are built there only on tags and manual
+runs (the `reproducible` job). It pulls the public freestanding
 toolchain image anonymously, no login needed. The kernel is built by
 `.github/workflows/kernel.yml`, on the pull requests and pushes to `main`
 that change it (`docs/HACKING.md`, "What CI runs").

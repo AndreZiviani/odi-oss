@@ -4,15 +4,16 @@
 name: kernel
 
 # Compiles the kernel of this repository when a change can alter it, and only
-# then. ci.yml does not: its jobs boot a stock kernel or none, so before this
-# workflow a kernel patch that no longer applied, a driver that no longer
-# compiled or a uImage grown past its partition was first seen on the
-# machine of the author, or at the release tag.
+# then. The jobs of ci.yml that run on a pull request boot a stock kernel or
+# none; the kernel was compiled only by its reproducible job, on tags and
+# manual runs, and by release.yml. So a kernel patch that no longer applied,
+# a driver that no longer compiled or a uImage grown past its partition was
+# first seen on the machine of the author, or at the tag.
 #
 # A workflow of its own, not a job in ci.yml, for two reasons. `paths` is a
 # trigger filter, so a pull request that touches nothing below starts no
-# runner at all; a job in ci.yml would need a runner and a full-history
-# checkout just to diff and decide to skip. And release.yml calls ci.yml as
+# runner at all; a job in ci.yml would need a runner just to diff and
+# decide to skip. And release.yml calls ci.yml as
 # a reusable workflow and then builds the kernel itself in `make image-all`:
 # a kernel job inside ci.yml would compile it a second time on every tag.
 # Nothing calls this file.
@@ -71,10 +72,12 @@ permissions:
   contents: read
 
 # A newer push to a pull request makes the build of the older one worthless,
-# so it is cancelled. Runs on main are left to finish: each is a commit that
-# landed, and a cancelled one saves no cache.
+# so it is cancelled. Every other run gets a group of its own (the run id):
+# a group keeps only one waiting run, so a shared group for main would let a
+# third push replace the second while the first still builds, and that
+# commit would go unchecked.
 concurrency:
-  group: kernel-${{ github.event.pull_request.number || github.ref }}
+  group: kernel-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -85,6 +88,10 @@ jobs:
     # toolchain image) and a slow runner, and still short enough that a hung
     # docker or download is cut off long before the 6 hour default.
     timeout-minutes: 20
+    # bash -eo pipefail for every run step, not the sh -e default.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,7 +139,7 @@ jobs:
       # kernel/build.sh prints the sizes and does not judge them; only
       # image/build.sh refuses a uImage that does not fit k0/k1, and no job
       # of a pull request gets that far. The limit is read from image/build.sh
-      # so there is one place that states it; a limit that cannot be read
+      # so this check and the image build share one statement of it; a limit that cannot be read
       # fails the job instead of passing it.
       - name: uImage fits the kernel partition; sizes and warnings
         run: |
@@ -146,13 +153,16 @@ jobs:
           out=build/kernel-618
           usize=$(stat -c %s "$out/uImage")
           vsize=$(stat -c %s "$out/vmlinux")
-          warnings=$(grep -c "warning:" "$out/build.log" || true)
+          linux=$(cat "$out/tree.tar.version")
+          # grep -c exits 1 for no match, which is a count of 0; any other
+          # failure (2, a log that cannot be read) fails the step.
+          warnings=$(grep -c "warning:" "$out/build.log") || [ $? -eq 1 ]
           {
             echo "### Kernel build"
             echo
             echo "| | |"
             echo "|---|---:|"
-            echo "| Linux | $(cat "$out/tree.tar.version") |"
+            echo "| Linux | ${linux} |"
             echo "| build time | ${BUILD_SECONDS} s |"
             echo "| vmlinux | ${vsize} bytes |"
             echo "| uImage | ${usize} bytes |"
@@ -164,7 +174,7 @@ jobs:
               echo "<details><summary>Warnings, most frequent first (40 at most)</summary>"
               echo
               echo '```'
-              { grep -o "[^ ]*: warning:.*" "$out/build.log" || true; } |
+              { grep -o "[^ ]*: warning:.*" "$out/build.log" || [ $? -eq 1 ]; } |
                 sort | uniq -c | sort -rn | sed -n "1,40p"
               echo '```'
               echo
@@ -176,6 +186,23 @@ jobs:
             echo "kernel: uImage over the k0/k1 partition by $((usize - part)) bytes" >&2
             exit 1
           fi
+
+      # kernel/618/debug/*.patch go in only with CRUMBS_CORE=1, which the
+      # build above leaves off. They are early-boot breadcrumbs for a stick
+      # that hangs, so a stable bump that breaks them is found the night
+      # they are needed. This applies them, release patches first as
+      # kernel/build.sh does, to a scratch copy of the tree; it does not
+      # compile them.
+      - name: Debug patches (CRUMBS_CORE=1) still apply
+        run: |
+          t=$(mktemp -d)
+          tar xf build/kernel-618/tree.tar -C "$t"
+          for pat in kernel/618/patches/*.patch kernel/618/debug/*.patch; do
+            [ -f "$pat" ] || continue
+            echo "  patch: $pat"
+            patch -d "$t" -p1 --batch --forward --quiet < "$pat"
+          done
+          rm -rf "$t"
 
       # An instruction this CPU lacks links clean and traps on the device
       # (docs/HACKING.md lists this as a gate of every kernel change; it was

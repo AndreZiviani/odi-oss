@@ -274,11 +274,13 @@ requests and pushes to `main` that change what `kernel/build.sh` reads
 clean build (`kernel/build.sh`, hardening check included; only the tarball
 in `dl/` is cached), then fails if the uImage is over the k0/k1 partition
 (`KERNEL_PART` of `image/build.sh`) or `packages/isa-audit.sh` finds
-anything in `vmlinux`. The job summary has the sizes, the spare bytes, the
+anything in `vmlinux`, and checks that the `CRUMBS_CORE=1` patches in
+`kernel/618/debug/` still apply (applied, not compiled). The job summary has the sizes, the spare bytes, the
 build time and the warnings. Nothing it builds is booted: a kernel change
 still needs a stick. A pull request `dependency-bump.yml` opens does not
 start it (a pull request created with `GITHUB_TOKEN` triggers no workflow);
-run it by hand on that branch when the kernel pin moved. `make image-all`
+run it by hand on that branch when the kernel pin or the toolchain image
+pin moved. `make image-all`
 from a clean checkout measured about five and a half minutes on a hosted
 runner (2026-11-15), the kernel being a part of that.
 

@@ -78,7 +78,8 @@ jobs:
       # 2026-11-15), and is the job of kernel.yml. That workflow does not
       # start by itself on the pull request opened below: a pull request
       # created with GITHUB_TOKEN triggers no workflow. Run it by hand
-      # (workflow_dispatch) on the bump branch when the kernel pin moved.
+      # (workflow_dispatch) on the bump branch when the kernel pin or the
+      # toolchain image pin moved.
       - name: "Kernel pin: fetch and verify"
         if: steps.diff.outputs.changed == '1'
         run: make kernel-tree
