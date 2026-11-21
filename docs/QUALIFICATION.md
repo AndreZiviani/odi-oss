@@ -116,6 +116,8 @@ a directory is given. A feature that is **off by default** says so.
 | Safe mode when the config partition is not mounted | Host-tested | `safe_mode_test.sh` | |
 | What safe mode clears: `HOST_AUTONEG=off`, a `HOST_SERDES` mode other than `fiber1g`, `OMCI_UNI_LOCK=1` | Host-tested | `safe_mode_test.sh`; only `HOST_AUTONEG` was seen on a stick | A safe-mode boot also keeps the PON off and accepts `admin`/`admin` for that boot only. |
 | Safe mode with `HOST_SERDES` set, or with `OMCI_UNI_LOCK=1` | Untested | none | |
+| Safe mode login: the default password only after a power cycle (`login=default`), the saved one otherwise (`login=stored`) | Host-tested | `safe_mode_test.sh`, every cause against every `reason=`; the confd half in the odi-ui smoke test. The script alone was also run under stubs on a test stick, from RAM (its busybox, its real `/proc/odi_ramlog_prev`, which read `reason=reboot`): five cases, all as expected | That run is the script under stubs on a stick, not a safe-mode boot. Not seen on a stick: that five real power cycles read `power` or `unknown` and never a recorded restart, what a short power cut leaves in the DRAM, and the web UI half, which needs a confd release this image does not pin yet. |
+| Safe mode timed exit (reboot at 1800 s unless acknowledged, waits for a firmware write) | Host-tested | `safe_mode_test.sh`, with a stub `reboot`, a stub `sleep` and a stand-in for the writer lock | Not seen on a stick: the reboot itself, `reason=reboot` after it, the wait behind a real `fwu.sh`, what it boots with a trial armed, and the cycle with a fault that persists. |
 
 ### Line and data path
 

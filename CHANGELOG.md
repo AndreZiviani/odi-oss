@@ -5,6 +5,50 @@ listed here.
 
 ## Unreleased
 
+- Safe mode: the default password opens only after a power cycle, and a
+  safe mode nobody acknowledges ends by itself (#482). A safe mode after
+  three watchdog resets, or with the config partition unusable, used to
+  open `admin` / `admin` on the web UI and root by password with nobody
+  touching the stick, and kept the PON off until someone rebooted it.
+  `safe-mode.sh` now decides the login from why the previous boot ended
+  (`reason=` in `/proc/odi_ramlog_prev`) and writes it to the flag,
+  `login=default` or `login=stored`: `default` on `reason=power` for every
+  cause, and after short boots also when the last one left no stamp
+  (`unknown`, or no ramlog), so the five (or three) power cycles work as
+  before; every restart the kernel stamped (`wdt_*`, `panic`, `oops`,
+  `reboot`, `halt`, `poweroff`) keeps the saved login. An unstamped reset,
+  for one a hard hang the hardware watchdog ended, reads `unknown` too:
+  that trade-off is one marked line in `login_for`. With `login=stored`
+  nothing is bind-mounted over `/etc/passwd` (`root_password=stored`) and
+  dropbear on a keys-only image stays keys-only. **The web UI half is not
+  in this image yet**: it needs a confd (odi-ui) release that reads
+  `login=`, none exists, and the pinned confd still accepts `admin` /
+  `admin` on every safe-mode boot. Root over ssh and the timed exit do not
+  depend on it. Every safe-mode boot spawns `safe-mode.sh exit`, which
+  reboots it at 1800 s of uptime (`exit_at=`, `SAFE_EXIT_S`);
+  `safe-mode.sh ack`, the banner button, holds it (`exit=held`), also when
+  there is no record to remove (`cause=config`; with the pinned confd that
+  case has no button, only `safe-mode.sh ack` from a shell). The two run
+  under a `flock`, without which neither acts:
+  the exit claims the flag (`exit=exiting`) before it reboots, and an ack
+  after that fails and keeps the record. The exit waits for a running
+  firmware write (the evidence the web UI reboot refuses on), 1800 s more
+  at most, holds the writer lock of `fwu_starter.sh` from its claim through
+  the reboot so that none starts then, and does not take a failed or early sleep for the deadline. It
+  boots what any reboot boots: an armed trial once, and with the config
+  partition still unusable a safe-mode boot again, the PON off throughout.
+  Acknowledge before flashing from a safe-mode boot (`docs/FLASHING.md`).
+  The flag is now written whole in one rename, the bind mount before it and
+  the record after it; when it cannot be written `count` and `no-config`
+  exit 1 and say what became of the default root account file.
+  New events `safe_mode_exit`, `safe_mode_exit_wait`,
+  `safe_mode_exit_failed`, `safe_mode_hold` and `safe_mode_failed`; `event=safe_mode` gains `prev=`, `login=` and
+  `exit_at=`, and says root apart when the account file could not be
+  replaced; the flag and the record gain `prev=` and `login=`. No new write
+  to the flash. Host-tested (`test/safe_mode_test.sh`, 280 checks); the
+  script alone also ran under stubs on a test stick, which is not a
+  safe-mode boot on hardware (`docs/QUALIFICATION.md`). `docs/SETTINGS.md`,
+  "Recovery: the safe mode", has the table and the reasoning.
 - Upgrades: `fwu_starter.sh`, which the Firmware page runs, refuses to write
   the slot `sw_commit` names, in either environment copy, and refuses when
   it cannot read the fallback copy, before it extracts anything. `fwu.sh`

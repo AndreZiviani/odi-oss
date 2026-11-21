@@ -115,7 +115,8 @@ fi
 # still counts: every boot adds one, a boot that reaches 60 s of uptime
 # clears it, and after enough short boots in a row this boot becomes the
 # safe one (the PON off, the host port in Fiber 1G with auto-negotiation,
-# the default password, for this boot only). Boots that ended in a watchdog reset count
+# the default password when a power cycle led into it, for this boot only,
+# and for 1800 s of it unless acknowledged). Boots that ended in a watchdog reset count
 # too, and a config partition that is not mounted makes this boot the safe
 # one at once. Logs the uptime of the count. Bounded.
 if config_mounted; then

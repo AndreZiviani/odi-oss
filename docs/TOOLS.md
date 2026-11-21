@@ -1734,10 +1734,11 @@ See `docs/FLASHING.md`, "An erased config partition".
 ### `safe-mode.sh` -- the boot counter and the recovery boot
 
     /etc/scripts/safe-mode.sh status     this boot and the record, key=value
-    /etc/scripts/safe-mode.sh ack        acknowledge a safe-mode boot: removes its record
+    /etc/scripts/safe-mode.sh ack        acknowledge a safe-mode boot: removes its record, and keeps this boot up past the timed exit
     /etc/scripts/safe-mode.sh active     exit 0 on a safe-mode boot
     /etc/scripts/safe-mode.sh count      rcS only, right after the config partition is mounted
     /etc/scripts/safe-mode.sh no-config  rcS only, instead of count, when it is not: a safe-mode boot with no record
+    /etc/scripts/safe-mode.sh exit       spawned by a safe-mode boot: reboots at 1800 s of uptime unless acknowledged
 
 `count` adds one to `/etc/config/boot-count` and spawns `boot-ok`, which
 removes it once the uptime reaches 60 s. It also reads why the previous boot
@@ -1753,15 +1754,32 @@ before it (three with `HOST_AUTONEG=off`, or with `HOST_SERDES` at
 `2500basex` or `hisgmii`) is a safe-mode boot: it writes
 `/var/run/safe-mode` and the record `/etc/config/safe-mode`, removes
 `HOST_AUTONEG` when that was off and `HOST_SERDES` when it held another
-mode than `fiber1g`, and bind-mounts a RAM copy of
+mode than `fiber1g`, and, when a power cycle led into it (`login=default`),
+bind-mounts a RAM copy of
 `/etc/passwd` with root's password `admin` over the read-only one
 (`docs/SETTINGS.md`, "Recovery: the safe mode"). The flag in `/var/run` is
 what the rest reads: `host-serdes.sh` runs Fiber 1G, `host-autoneg.sh`
 applies nothing, the PON steps
-leave the laser off and skip `gponact` (`rcs-lib.sh`), `svc-dropbear.sh`
-offers passwords, and confd accepts `admin:admin`. `status` prints
+leave the laser off and skip `gponact` (`rcs-lib.sh`), and with
+`login=default` `svc-dropbear.sh`
+offers passwords and confd accepts `admin:admin`; with `login=stored` (the
+stick entered the safe mode by itself) both keep what is saved (confd
+needs a release that reads `login=`; `docs/SETTINGS.md`, "The login").
+Every safe-mode boot spawns `exit`, which reboots it at 1800 s
+of uptime unless `ack` changed `exit=timed` to `exit=held` in the flag
+first. The two are serialised by a lock (`flock` on
+`/var/run/safe-mode.lock`; an `ack` that does not get it in 5 s exits 1):
+the exit claims the flag
+(`exit=exiting`) before it reboots, and an `ack` after that exits 1 and
+keeps the record. The exit waits for a running firmware write, 1800 s more
+at most, and holds the writer lock of `fwu_starter.sh` from its claim
+through the reboot, so none starts then. `status` prints
 `active=0|1` with the flag's fields as `now_*` (`now_cause=` is
-`short_boots`, `watchdog` or `config`), `record=0|1` with the record's as
+`short_boots`, `watchdog` or `config`; `now_prev=` the previous boot's
+reason, `now_login=default|stored`, `now_root_password=default|stored|failed`,
+`now_exit_at=` the uptime of the timed exit,
+`now_exit=timed|held|exiting|failed`),
+`record=0|1` with the record's as
 `record_*`, `boot_count` while there is one and `wdt_count` likewise.
 
 Its events, to the kernel log at notice: `safe-mode: event=boot_count
@@ -1770,8 +1788,19 @@ uptime=S` on every boot (the uptime is how early the count lands on a given
 stick; `prev` is the previous boot's `reason=`, `none` without a ramlog),
 `event=safe_mode cause=short_boots|watchdog|config short_boots=N
 wdt_resets=N cleared=HOST_AUTONEG|HOST_SERDES|HOST_AUTONEG,HOST_SERDES|none|failed
-root_password=default|failed`, and
-`event=safe_mode_ack`.
+root_password=default|stored|failed prev=REASON login=default|stored
+exit_at=S`, `event=safe_mode_ack` (the record removed),
+`event=safe_mode_hold` (an acknowledgement kept this boot up),
+`event=safe_mode_exit_wait state=postponed|gave_up` (the timed exit waits
+for a firmware write, or stopped waiting), `event=safe_mode_exit cause=...
+uptime=S` right before the reboot of the timed exit,
+`event=safe_mode_exit_failed` (the timed exit gave up without a reboot: a
+sleep failed, the uptime could not be read, the lock was never free, the
+reboot failed; the flag then says `exit=failed`, except when the lock
+could not be taken to write it),
+and `event=safe_mode_failed` (the flag could not be written: not a
+safe-mode boot, `count` and `no-config` exit 1, and the line says what
+became of the default root account file).
 
 ### `diag-bundle.sh` -- the diagnostics bundle
 

@@ -901,9 +901,12 @@ cannot stay up ends in the safe mode by itself, which is the point.
 
 Two more things make a boot the safe one without anyone touching the power
 (the state machine is below): three boots in a row that each ended in a
-watchdog reset, and a config partition that is not mounted.
+watchdog reset, and a config partition that is not mounted. Those two keep
+the stick reachable with the PON off; they do not open the default
+password ("The login" below).
 
-A safe-mode boot lasts that one boot. It:
+A safe-mode boot lasts that one boot, and at most 30 minutes of it unless
+someone acknowledges it ("The timed exit" below). It:
 
 - runs the host port in Fiber 1G (1000BASE-X, the most compatible host
   mode) with auto-negotiation, whatever `HOST_SERDES` and `HOST_AUTONEG`
@@ -911,9 +914,13 @@ A safe-mode boot lasts that one boot. It:
 - leaves the PON off: the PON steps keep the laser off and skip the
   activation, so there is no internet through the stick and it cannot
   disturb the OLT or the other ONUs on it while someone works on it;
-- accepts the built-in default password: `admin` / `admin` on the web UI,
-  and `admin` for root over ssh (password logins are offered for that boot
-  even on a keys-only image), on top of the ssh keys already installed;
+- accepts the built-in default password when a power cycle led into it
+  (`login=default`): `admin` / `admin` on the web UI, and `admin` for root
+  over ssh (password logins are offered for that boot even on a keys-only
+  image), on top of the ssh keys already installed. A safe-mode boot the
+  stick entered by itself (`login=stored`) accepts the saved web UI
+  credential and the installed ssh keys, and nothing else;
+- reboots at 1800 s of uptime, unless it was acknowledged;
 - writes nothing to the config partition but its record,
   `/etc/config/safe-mode`, and, when `HOST_AUTONEG=off` or a `HOST_SERDES`
   mode other than `fiber1g` lowered the count to three, the removal of
@@ -942,12 +949,163 @@ A safe-mode boot lasts that one boot. It:
   ssh client then meets a host key it does not know.
 
 The web UI says so on every view while it lasts: that this is the safe
-mode, that the PON is off, that the password is the default for this boot
-only, and how to leave: set a new web UI password (System, Access) or add
+mode, that the PON is off, whether the password is the default for this
+boot only or the saved one, when the boot ends by itself, and how to leave:
+set a new web UI password (System, Access) or add
 an ssh key if that is what was lost -- both are saved and in force from the
 next boot -- acknowledge, and reboot. The record outlives the boot, so the
 banner says a safe-mode boot happened until someone acknowledges it (its
 button, or `safe-mode.sh ack`).
+
+**The login.** The default password is for a person at the stick, and the
+one thing only that person can do is cut its power. So a safe-mode boot
+opens `admin` / `admin` and root's password `admin` only when the boot
+before it ended in a power cycle, which the kernel tells from the ramlog
+(`reason=power` in `/proc/odi_ramlog_prev`: the DRAM lost its content). The
+flag says which it is, `login=default` or `login=stored`:
+
+| cause | previous boot ended with | login |
+|---|---|---|
+| `short_boots` | `power`, `unknown`, or no ramlog | `default` |
+| `short_boots` | `wdt_*`, `panic`, `oops`, `reboot`, `halt`, `poweroff` | `stored` |
+| `watchdog` | `wdt_*`, `panic`, `oops` (what makes this cause) | `stored` |
+| `config` | `power` | `default` |
+| `config` | anything else, or no ramlog | `stored` |
+
+After short boots the count itself is the evidence of someone at the
+power, and that path has to stay the way back whatever else fails: it is
+`default` when the last short boot ended in `power`, and also when it left
+no stamp at all (`unknown`, or no ramlog to read). Every restart the kernel
+did stamp is the stick's own and keeps the saved login, so a stick whose
+three or five short boots end in a panic or a watchdog reset ends
+in the safe mode with the saved login, and as many power cycles end in it
+with the default one. Only the reason of the last short boot is read.
+
+The unstamped case is a trade-off, and it is the one open choice in this
+rule (`login_for` in `safe-mode.sh`, one marked line). A power cut short
+enough for the DRAM to keep its content reads as `unknown`, not `power`, so
+treating `unknown` as a power cycle is what keeps five quick power cycles
+working. But `unknown` is every reset the kernel had no chance to stamp:
+a hard hang that only the hardware watchdog ended, an emergency restart, a
+boot of the stock image in between. Three or five short boots, with no
+recorded reason for the last one, therefore open the default password with
+nobody at the stick. The stricter
+rule, `power` only, closes that and costs the person at the stick a longer
+wait with the power off on each cycle (ten seconds or more, so the DRAM
+does forget); it is that one line removed.
+
+Nobody counted anything for the other two causes, so only `reason=power`
+opens the default: a stick whose config partition died, and whose saved
+password is lost with it, takes one power cycle (leave it off for ten
+seconds or more). With `login=stored` nothing is
+bind-mounted over `/etc/passwd` (`root_password=stored`), dropbear on a
+keys-only image stays keys-only, and confd reads `confd.auth` as on any
+boot, with one difference: when the cause is `config`, a `confd.auth` that
+is absent, empty or unreadable is a partition that is not there, and confd
+refuses every web login instead of falling back to `admin` / `admin`. ssh
+has no stored key to accept then and no password either, so that boot is
+reachable and closed until the power cycle; a partition mounted read-only
+still serves the saved credential and keys. After watchdog resets the
+partition is there, and a missing `confd.auth` means what it means on any
+boot: nobody set a password yet.
+
+The web UI half of all this is confd's, and confd is released apart from
+this image (odi-ui). It needs a confd release that reads `login=`; none
+exists yet, and this image pins one that does not. **Until the image pins
+such a release, the web UI still accepts `admin` / `admin` on every
+safe-mode boot**, whatever `login=` says. What already holds with the
+pinned confd: root over ssh (the account file and dropbear follow
+`login=`), and the timed exit, which bounds that open web login to 30
+minutes.
+
+**The timed exit.** A safe mode the stick entered by itself is seen by
+nobody, and until this rule it kept the PON off until someone rebooted it:
+one bad quarter of an hour of an OLT or of omcid took a line down for
+good. Every safe-mode boot now spawns `safe-mode.sh exit`, which sleeps to
+`SAFE_EXIT_S` (1800) seconds of uptime and then reboots the stick (busybox
+`reboot`: orderly, and the kernel records `reason=reboot`, which clears the
+watchdog counter). An acknowledgement
+before that (the banner button, or `safe-mode.sh ack` from a shell) says a
+person is there: the flag changes from `exit=timed` to `exit=held`, and the
+boot stays up until that person reboots it. It works with no record on
+flash (`cause=config`), since it is kept in the flag. With the confd this
+image pins (v1.19.0) that case has no button: its banner offers
+Acknowledge only while there is a record, so with `cause=config` the only
+acknowledgement is `safe-mode.sh ack` from a shell, and where that banner
+says "Acknowledged" because it finds no record, nothing was acknowledged
+and the timer runs on. The exit covers all
+three causes. After short boots a person is usually there, and
+acknowledges; but five power cuts in a row also happen to a stick on a
+failing supply, and then the exit is what lets the PON come back and
+closes the default password again.
+
+The exit and the acknowledgement cannot both win. Both work under a lock
+(`flock` on `/var/run/safe-mode.lock`, which the kernel drops when its
+holder dies, so there is no stale one), and the exit claims the flag
+(`exit=exiting`) before it reboots: an acknowledgement before the claim
+holds the boot, and one after it is answered with an error that says the
+reboot has started, and keeps the record. Neither acts without the lock:
+an acknowledgement that does not get it within 5 s fails and changes
+nothing, and the exit tries three times, 60 s apart, before it gives up.
+Every wait of the exit is measured in uptime, read again after each sleep:
+a sleep that fails ends the exit, one that returns early is slept again,
+and neither is taken for the deadline; an uptime that cannot be read ends
+the exit as well, and is never taken for 0. An exit that gives up, or whose
+reboot fails, logs `event=safe_mode_exit_failed` and leaves the boot up. It
+also changes the flag to `exit=failed`, so the banner stops announcing a
+reboot, when it can: that write needs the same lock, so an exit that gave
+up because the lock was never free leaves `exit=timed` behind, with no
+timer running, and the event is what says so.
+
+A firmware write is not cut. Before it reboots, the exit looks for one the
+way the reboot of the web UI does (`/tmp/fwu.state` says `running` with a
+live pid, or the writer lock `/tmp/fwu.state.lock` is held,
+`fwu_starter.sh`); while one runs it waits, looking every 60 s and logging
+`event=safe_mode_exit_wait state=postponed`, until 1800 s of uptime after
+the wait began at most. A
+write takes about eighty seconds, so one still running after that is
+stuck, and the reboot goes ahead (`state=gave_up`). The look is not only a
+look: under the exit lock, in the step that claims the flag, the exit takes
+the writer lock itself, without waiting, and keeps it through the reboot.
+`fwu_starter.sh` takes that lock the same way before it touches anything
+and does not wait for it: it refuses with "a write is already running". So
+a write from the Firmware page that is running holds the exit off, and one
+asked for after the claim is refused, not begun and rebooted over. `fwu.sh`
+run by hand takes no lock at all and is not seen. So **in a safe-mode
+boot, acknowledge before flashing**, above all by hand with `fwu.sh`
+(`docs/FLASHING.md`): an acknowledged boot has no timer. An upload that has not
+started writing is in RAM and is simply lost; the trials of the host port
+and of the management address do not run in a safe-mode boot.
+
+Which image the reboot boots is not the exit's choice: it is what any
+reboot boots. That is the committed slot, except that **a trial armed with
+`sw_tryactive` boots once**, so a slot written and armed from an
+unacknowledged safe-mode boot is tried when the 30 minutes are up, with
+nobody watching; and a safe-mode boot that is itself an uncommitted trial
+goes back to the committed slot. Acknowledge before flashing from a
+safe-mode boot.
+
+Why 30 minutes: long enough for a person to notice the line is down, find
+the rescue address and sign in, with the banner saying when it reboots;
+short enough that an unattended stick tries its PON again within the hour.
+What follows the reboot depends on the fault, and neither case is a way
+out by itself:
+
+- **The config partition still cannot be used.** The next boot is a
+  safe-mode boot again, at once, and so is every boot after it: 30 minutes
+  up, about a minute of reboot, and the PON off across all of them until
+  the partition is back. The exit changes nothing for the line there; it
+  only retries the mount.
+- **A watchdog fault that comes back.** The next boot is a normal one with
+  the laser on. If it is reset three times in a row again (about three
+  minutes each), the fourth boot is the safe mode again, for 30 minutes.
+  The OLT then sees an ONU that tries an ordinary activation three times
+  and goes dark for half an hour, over and over, where before it saw one
+  that was gone. How long each try stays on the PON, and so how much of
+  the time the stick is reachable, depends on the fault and has not been
+  measured.
+
+The exit writes nothing to the flash.
 
 **The SerDes mode.** Fiber 1G is the fallback here as everywhere: a
 safe-mode boot runs it, and after short boots it removes a `HOST_SERDES`
@@ -972,8 +1130,15 @@ five. Without the key (the default) no lock takes the port down, and there
 is nothing to recover.
 
 **The trade-off.** Anyone who can power-cycle the stick five times can log
-into it for one boot, with the password everybody knows, and read or change
-its settings, the line credentials included. Physical possession already
+into it for one boot (30 minutes of it, unless they acknowledge), with the
+password everybody knows, and read or change
+its settings, the line credentials included. No restart the stick records
+as its own opens that password, and nothing that reaches it over the host
+port or the fibre can make a power cycle. The one case that is not told
+apart is the unstamped reset ("The login" above): three or five short
+boots, with no recorded reason for the last one (a hard hang ended by the
+hardware watchdog, for one), read like power cycles and open it with
+nobody at the stick. Physical possession already
 goes a long way (the flash can be read with a programmer), and this is what
 makes a lost password recoverable at all; but it is a real change for a stick
 whose host port is reachable by people who should not log into it. The PON
@@ -1003,16 +1168,19 @@ and one of them ends in the safe mode:
 3. `boot-wdt` reached 3 boots before this one: `cause=watchdog`. The
    safe-mode record says `wdt_resets=3`.
 
-Entering the safe mode removes both counters. The boot after a safe-mode
-boot is a normal one and finds a `reason=` of `reboot` (or `power`), so it
-starts from zero: the safe mode is never two boots in a row, it takes the
-whole count again, and so it cannot loop. What a safe-mode boot does is stay
+Entering the safe mode removes both counters, so the count that led here is
+spent: a safe-mode boot does not by itself make the next one. What the next
+boot is depends on the fault. With the config partition still unusable it
+is a safe-mode boot again, immediately and for as long as that lasts, and
+the PON stays off across those boots. Otherwise it is a normal boot, which
+finds a `reason=` of `reboot` (or `power`) and counts from zero; a watchdog
+fault that is still there takes three more resets (about ten minutes: 54 s
+of U-Boot and 123 s of unconfirmed userland each) to bring the safe mode
+back. What a safe-mode boot does is stay
 up: it confirms the watchdog (above), so a stick whose fault is a dead
 config partition or a userland that cannot configure itself is reachable
-until someone reboots it, with the PON off. If the fault persists and the
-person reboots anyway, the cycle is three more resets (about ten minutes:
-54 s of U-Boot and 123 s of unconfirmed userland each), then another
-safe-mode boot that stays up. A safe-mode boot that the watchdog resets
+for 30 minutes, or until someone who acknowledged it reboots it, with the
+PON off ("The timed exit" above). A safe-mode boot that the watchdog resets
 anyway (the switch init failed, so nothing is reachable) is not a safe mode
 that helped; it counts as the first of the next three.
 
@@ -1025,13 +1193,13 @@ and never turns the PON off. `unknown` clears the count rather than adding
 to it: it is also what the first boot after the stock image reports, and an
 unexplained reason is a poor ground for turning the PON off.
 
-The dead-config rule has a price: with the partition unreadable, the
-default password is in force for that boot without anyone touching the
-power, for as long as the stick stays up. The partition being gone is also
-the case where the stored credential and the ssh keys cannot be read, so the
-alternative is a stick nobody can log into or reach reliably; but a stick
-on a shared host port is exposed to whoever can reach it meanwhile. It lasts
-until the next reboot, which tries the partition again.
+The dead-config rule opens no password by itself: a boot that finds the
+partition unusable after a reset of its own keeps the saved login
+(`login=stored`), confd then refuses every web login when it finds no
+`confd.auth` (a confd release that knows `login=`; see "The login" above
+for the one this image pins), and one power cycle is what opens the
+default. Each such boot lasts 30 minutes unless acknowledged, and the next
+one tries the partition again.
 
 The management address is not moved: moving it on a pattern of power cuts
 would move the address of a stick whose only fault was the power. A
@@ -1058,9 +1226,13 @@ count until it reaches 60 s, or through a run of short boots),
 the next boot that lives 600 s or ends in a reboot), `/etc/config/safe-mode`
 (`cause=` `short_boots`, `watchdog` or `config`, `short_boots=`,
 `wdt_resets=`, `uptime=`, `cleared=` (`HOST_AUTONEG`, `HOST_SERDES`,
-`OMCI_UNI_LOCK`, a comma-separated list of those, `none` or `failed`), `build=`; until
+`OMCI_UNI_LOCK`, a comma-separated list of those, `none` or `failed`), `build=`,
+`prev=` (the previous boot's `reason=`, `none` without a ramlog),
+`login=` `default` or `stored`; until
 acknowledged), and `/var/run/safe-mode` (the same, plus
-`root_password=default` or `failed`; this boot only). `safe-mode.sh status` prints them (`docs/TOOLS.md`), and
+`root_password=default`, `stored` or `failed`, `exit_at=` (the uptime of
+the timed exit) and `exit=` `timed`, `held`, `exiting` or `failed`; this
+boot only, written whole in one rename). `safe-mode.sh status` prints them (`docs/TOOLS.md`), and
 the diagnostics bundle carries it (`host-link.txt`).
 
 ## Management address trial
