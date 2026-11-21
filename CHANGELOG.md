@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Upgrade: `fwu_starter.sh` says in the page log what the fallback
+  environment copy answered when it lets the write go on (its `sw_commit`,
+  or no valid second copy), and warns, as `fwu.sh` does, when that copy
+  sets no `sw_commit`. Its header lists the refusals of the slot
+  `sw_commit` names.
+
 - Upgrades: `fwu_starter.sh`, which the Firmware page runs, refuses to write
   the slot `sw_commit` names, in either environment copy, and refuses when
   it cannot read the fallback copy, before it extracts anything. `fwu.sh`
