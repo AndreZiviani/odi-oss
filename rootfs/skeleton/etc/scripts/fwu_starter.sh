@@ -125,6 +125,22 @@ case "$commit" in
 *) die "cannot read sw_commit, the slot a failed trial goes back to; refusing to write either slot. Check with: nv getenv sw_commit; nv fallback sw_commit" ;;
 esac
 say "sw_commit is $commit"
+# The refusals fwu.sh makes, made here before anything is extracted: the
+# starter runs whatever fwu.sh the upload brought, and does not rely on it.
+[ "$commit" != "$slot" ] || die "sw_commit is $slot, the slot this would write: a failed trial would revert into the half-written image. Commit the running slot first: nv commit $running"
+
+# The other environment copy, the one U-Boot boots by once the active copy
+# is lost (an interrupted nv setenv). Exit 0 is its value; exit 1 with its
+# line is no valid second copy, which is fine; anything else (3, a copy not
+# read in full; 124 or more, no answer) leaves it unknown.
+alt_out=$(timeout 5 "$NV" fallback sw_commit 2>/dev/null)
+alt_rc=$?
+if [ "$alt_rc" = 0 ]; then
+	alt=$(printf '%s\n' "$alt_out" | sed -n "s/^sw_commit=//p")
+	[ "$alt" != "$slot" ] || die "the fallback environment copy says sw_commit=$slot, the slot this would write. Make the two copies agree first: nv commit $running"
+elif [ "$alt_rc" != 1 ] || [ "$alt_out" != "nv: no valid second copy of the environment" ]; then
+	die "cannot read the fallback environment copy (nv fallback exit $alt_rc); refusing to write either slot. Check with: nv fallback sw_commit"
+fi
 
 rm -rf "$FWU_DIR"
 mkdir -p "$FWU_DIR" || die "cannot create $FWU_DIR"
