@@ -110,13 +110,17 @@ reset: a trial that never answered still says how far it got
    row that ended in a watchdog reset (the previous boot's `reason=` from
    `/proc/odi_ramlog_prev`), it makes this boot a safe-mode boot
    (`/var/run/safe-mode`): the PON steps then leave the laser off and skip
-   `gponact`, the host port runs auto-negotiation, and the web UI and root
-   accept the default password, for this boot only. With the config
+   `gponact`, the host port runs auto-negotiation, and, when a power cycle
+   led into it, the web UI and root accept the default password, for this
+   boot only. With the config
    partition not mounted rcS calls `safe-mode.sh no-config` instead, which
    makes this boot a safe-mode boot at once (no record: nowhere to write
    it). The safe-mode boot confirms the watchdog in stage 11 without the
-   mount and address checks, so it stays up; it is followed by a normal
-   boot, never another safe one, so the state machine cannot loop
+   mount and address checks, so it stays up, for 30 minutes or until
+   someone who acknowledged it reboots it (`safe-mode.sh exit`). The boot
+   after it is a normal one, which has to earn the safe mode again, unless
+   the config partition is still unusable: then every boot is a safe-mode
+   boot until it is back
    (`docs/SETTINGS.md` has it whole).
    Then `identity.sh snapshot` (`docs/SETTINGS.md`, "The identity
    snapshot"): on the first boot of an image that has it, a copy of the
