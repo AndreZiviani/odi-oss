@@ -392,9 +392,12 @@ send "$log" 00d9 46 009d 0130 ""
 # slot left it is created all the same with the attributes that fit; the
 # others are left out, logged, and a later Set of one answers result 9.
 XC=03000000000000000000020000007d00000064000000
+s2=$(syncv "$log" 00da)
 send "$log" 00d3 44 fffb 0001 "$XC"
-check "wide pool: a Create whose attributes do not all fit still succeeds" \
-      "$(answer "$log" 00d3 | cut -c1-2)" "00"
+check "wide pool: a Create whose attributes do not all fit still succeeds, no mask on the wire" \
+      "$(answer "$log" 00d3 | cut -c1-6)" "000000"
+check "wide pool: and counts once in the MIB data sync" \
+      "$(syncv "$log" 00db)" "$(printf '%02x' $(( (0x$s2 % 255) + 1 )))"
 check "wide pool: the log names the attributes there was no room for" \
       "$(grep -c 'no room in the MIB for 0019' "$log")" "1"
 send "$log" 00d4 49 fffb 0001 0040
@@ -404,7 +407,15 @@ send "$log" 00d5 48 fffb 0001 "00100000007d"
 check "wide pool: a Set of one left out answers result 9" \
       "$(answer "$log" 00d5 | cut -c1-10)" "0900000010"
 send "$log" 00d6 46 fffb 0001 ""
-k=0
+# With a wide slot free the same Create keeps every attribute: QueryInterval
+# reads back as sent (0x7d), so the loss above is the pool, not the class.
+send "$log" 00dc 46 009d 0100 ""                        # frees a wide slot
+send "$log" 00dd 44 fffb 0002 "$XC"
+send "$log" 00de 49 fffb 0002 0010
+check "wide pool: with a slot free a Create of 65531 keeps QueryInterval" \
+      "$(answer "$log" 00de | cut -c1-14)" "000010""0000007d"
+send "$log" 00df 46 fffb 0002 ""
+k=1
 while [ "$k" -le 32 ]; do
 	send "$log" "$(printf 'e%03x' "$k")" 46 009d "$(printf '%04x' $((0x100 + k)))" ""
 	k=$((k + 1))
