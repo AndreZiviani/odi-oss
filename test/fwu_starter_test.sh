@@ -44,6 +44,8 @@ sw_commit)
 		# NV_FALLBACK: the other copy says this; unset is no valid
 		# second copy, NV_FALLBACK_RC a read that failed.
 		[ -z "${NV_FALLBACK_RC:-}" ] || exit "$NV_FALLBACK_RC"
+		# NV_FALLBACK=none: a valid copy that sets no sw_commit.
+		[ "${NV_FALLBACK:-}" != none ] || exit 0
 		if [ -z "${NV_FALLBACK:-}" ]; then echo "nv: no valid second copy of the environment"; exit 1; fi
 		echo "sw_commit=$NV_FALLBACK"
 	else
@@ -125,6 +127,14 @@ t "so is the slot the fallback copy names, the active one being fine" "fallback 
   "$(NV_FALLBACK=1 run 'root=31:5' 1 "$T/good.tar")"
 t "a fallback copy that names the running slot is fine" "fwu stub slot=1" \
   "$(NV_FALLBACK=0 run 'root=31:5' --foreground 1 "$T/good.tar")"
+t "and the log says what it read" "fallback environment copy says sw_commit=0" \
+  "$(NV_FALLBACK=0 run 'root=31:5' --foreground 1 "$T/good.tar")"
+t "no second copy is said too" "no valid second environment copy" \
+  "$(run 'root=31:5' --foreground 1 "$T/good.tar")"
+t "a fallback copy without sw_commit is written with a warning" "warning: the fallback environment copy sets no sw_commit" \
+  "$(NV_FALLBACK=none run 'root=31:5' --foreground 1 "$T/good.tar")"
+t "and the write goes on" "fwu stub slot=1" \
+  "$(NV_FALLBACK=none run 'root=31:5' --foreground 1 "$T/good.tar")"
 t "a fallback copy not read in full refuses the write" "cannot read the fallback environment copy (nv fallback exit 3)" \
   "$(NV_FALLBACK_RC=3 run 'root=31:5' 1 "$T/good.tar")"
 t "and so does one nv gave no answer for" "nv fallback exit 124" \
