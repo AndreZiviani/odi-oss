@@ -12,11 +12,12 @@ listed here.
   attribute past byte 96 of a wide entity (a large string, the
   authentication method) whose row was added while the wide-row pool (32)
   was full. A Set that stores nothing, because every attribute it names
-  was refused (read-only, or no room), also removes the row it added for
-  an instance the MIB did not hold. A Create whose set-by-create
-  attributes do not fit is refused with result 1 and leaves no row, and a
-  Set with no row left in the MIB answers result 1 rather than "unknown
-  entity". The log says `no room for <mask>` (#482).
+  was refused (read-only, set-by-create only, or no room), also removes the
+  row it added for an instance the MIB did not hold. A Create whose
+  set-by-create attributes do not all fit still creates the entity with
+  the ones that do, as before, and logs the others; a later Set of one
+  answers result 9. A Set with no row left in the MIB answers result 1
+  rather than "unknown entity". The log says `no room for <mask>` (#482).
 
 - Kernel: the ONU is not activated when the boot clean of the GPON MAC
   tables fails; before, it was logged and activated anyway, on tables that

@@ -83,8 +83,8 @@
  * row added then fall back to the 96 bytes and the `truncated` mark, for as
  * long as it lives (a slot freed later does not widen it). A Set of an
  * attribute past them answers result 9 with that attribute in the failed
- * mask, the others of the Set stored; a Create that carries one is not made
- * (mib_write).
+ * mask, the others of the Set stored; a Create that carries one creates
+ * the entity without it and logs it (mib_write, omcimsg.c).
  *
  * The counts are sized for a data service and two SIP lines at once. ISP1's
  * whole provisioning holds 185 rows; two phone lines add about sixty (per

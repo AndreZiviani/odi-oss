@@ -999,14 +999,15 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		mask = create_mask(c);
 		lost = mib_write(r, c, mask, 0, f + 8, 32);
 		/* An attribute the store had no room for (the wide-row or the
-		 * table pool full): the entity is not created rather than
-		 * created without it. Nothing else has seen the row yet. */
+		 * table pool full) is left out and the entity is created all
+		 * the same, as a Set stores the attributes that fit: a
+		 * multicast profile with its query timers at their defaults
+		 * still works, where refusing it took the service down. A
+		 * Create answer names no failed attribute next to result 0, so
+		 * the log does, and a later Set of one answers result 9. */
 		if (lost) {
-			mib_del(cls, inst);
-			body[0] = OMCI_ERR_CMD;
-			send_resp(fd, tid, f, body, 1);
-			out_fmt("-> no room in the MIB for %04x\n", (long)lost);
-			return;
+			mask &= (uint16_t)~lost;
+			out_fmt("   no room in the MIB for %04x\n", (long)lost);
 		}
 		pm_create(cls, inst);
 		if (cls == OMCI_ME_GEM_PORT_CTP || cls == OMCI_ME_TCONT) {
