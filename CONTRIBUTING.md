@@ -37,10 +37,11 @@ house rules and applies to humans too.
 
 New functionality comes with a test that fails without it: a host test
 under `test/`, a golden for `make test-diag` or `make test-rcs`, or a qemu
-check. C follows the Linux kernel coding style (tabs, K&R braces) and
-builds without a warning under the `-Wall -Wextra` the Makefiles set;
-shell that runs on the stick is POSIX sh for busybox ash and passes
-`make lint`.
+check for `make test-omci` or `make test-qemu`. C follows the Linux kernel
+coding style (tabs, K&R braces). C under `src/` builds without a warning
+under the `-Wall -Wextra` its Makefiles set; kernel code has the kernel
+gate below. Shell that runs on the stick is POSIX sh for busybox ash and
+passes `make lint`.
 
 The gates, before you open a pull request:
 

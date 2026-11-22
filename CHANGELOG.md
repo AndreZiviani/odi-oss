@@ -5,7 +5,9 @@ listed here.
 
 ## Unreleased
 
-- Docs: CONTRIBUTING.md says that new functionality comes with a test, names the C and shell style, and points to #482 for the roadmap (#482).
+- Docs: CONTRIBUTING.md says that new functionality comes with a test,
+  names the C and shell style (no warning under `-Wall -Wextra` for the C
+  under `src/`), and points to #482 for the roadmap.
 
 - Host SerDes: a 2500BASE-X or HiSGMII lane out of sync is re-latched
   every 5 s (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the mode word
