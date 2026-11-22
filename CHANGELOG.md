@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- Docs: CONTRIBUTING.md says that new functionality comes with a test,
+  names the C and shell style (no warning under `-Wall -Wextra` for the C
+  under `src/`), and points to #482 for the roadmap.
+
 - Safe mode: the default password opens only after a power cycle, and a
   safe mode nobody acknowledges ends by itself (#482). A safe mode after
   three watchdog resets, or with the config partition unusable, used to
