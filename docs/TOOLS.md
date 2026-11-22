@@ -1596,6 +1596,7 @@ klogd), at notice:
 |---|---|
 | `applied` | a boot applied 2500basex (and started the boot watch) or hisgmii (no watch: no link signal) |
 | `serdes_link` | the boot watch saw the 2500BASE-X sync; no fallback |
+| `serdes_lost`, `serdes_back` | the keeper (after a sync of the boot watch or a confirmed `2500basex` trial): the 2500BASE-X sync was lost and the lane is re-latched every 5 s; the sync is back |
 | `watch_switch` | no link for 30 s; the watch switches mode |
 | `fallback` | the host linked only in Fiber 1G; the key stays 2500basex |
 | `fallback_nolink` | no link in either mode for 10 minutes; stays on Fiber 1G, the key unchanged |

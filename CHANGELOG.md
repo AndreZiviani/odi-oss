@@ -189,6 +189,25 @@ listed here.
   makes the same checks, but the starter runs the `fwu.sh` of the uploaded
   image, so the rule now holds whatever that image carries (#482).
 
+- Host SerDes: a 2500BASE-X link that loses the sync while the stick
+  keeps power is re-latched until it syncs again. With the host port set
+  to 1G and back to 2.5G-baseX, or disabled and enabled, the lane was
+  started again before the host sent, and stayed out of sync until the
+  next boot. A keeper, spawned by the boot watch once in sync and by a
+  confirmed `2500basex` trial, reads bit 17 of 0x214 every 5 s in phase
+  steady; clear twice a second apart, it re-latches the lane every 5 s
+  until the bit reads set, with one event when the sync is lost
+  (`serdes_lost`) and one when it is back (`serdes_back`). A lane in sync
+  is never touched and the mode never changes: a host port left at 1G is
+  for the next boot or a trial. It acts under the lock and skips a busy
+  tick, runs one at a time, and ends once `HOST_SERDES` or the running
+  mode is no longer `2500basex`. Run on HSGQ sticks: against a MikroTik hEX S
+  2025 (E60iUGS), the router port set to 1G and back to 2.5G-baseX gave
+  `serdes_back` "after 52 s" (most of it at 1G) and a disabled and enabled
+  port "after 10 s"; against a MikroTik RB5009, a `fiber1g` trial that
+  expired back to 2500BASE-X with the port still at 1G, set back to
+  2.5G-baseX by hand: "after 83 s", the time at 1G included.
+
 ## v1.19.0 (2026-11-20)
 
 - Releases: confd v1.19.0 and metricsd v1.11.1. The web UI gains an OMCI
