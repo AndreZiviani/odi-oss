@@ -13,8 +13,8 @@ runs Linux 2.6.30; it is not a repack of it.
 
 | | boards | what stands behind it |
 |---|---|---|
-| **Lab-tested** | ODI DFP-34X-2C2, hardware v06 | written for this board; two sticks on two ISPs' GPON lines run it as their committed image |
-| **Running on user reports** | ODI DFP-34X-2C3, Luleey LL-XS2510, and the DFP-34X-2C2 hardware v08 sold as the HSGQ XPON stick | issues linked under [Supported hardware](#supported-hardware); not reproduced in the lab |
+| **Maintainer-tested** | ODI DFP-34X-2C2, hardware v06 | written for this board; two sticks on two ISPs' GPON lines run it as their committed image |
+| **Community-reported** | ODI DFP-34X-2C3, Luleey LL-XS2510, and the DFP-34X-2C2 hardware v08 sold as the HSGQ XPON stick | issues linked under [Supported hardware](#supported-hardware); not reproduced in the lab |
 | **Untested** | every other stick, also with the same SoC | the image drives the board directly; do not flash it without reading that section |
 
 > [!WARNING]
@@ -262,9 +262,9 @@ the stock default and what an image with no valid stored address uses
 
 - **Release image, or a source build with `ROOT_PW=locked`**: root has no
   password at all (ssh with a password is refused). Open the web UI on
-  port 80 (`admin`/`admin` at first), set a password of your own under
-  System, Access, then add your SSH public key on the same page: confd adds
-  no key while `admin`/`admin` is in force. `ssh root@<stick>` with that
+  port 80 (your stored credential, or `admin`/`admin` if none is stored), set a password of your own under
+  System, Access, then add your SSH public key on the same page.
+  `ssh root@<stick>` with that
   key then works, and keeps working across reboots and re-flashes (the key
   lives on the config partition, not in the image).
 - **A default source build**: ssh as `root` with the password
@@ -273,8 +273,9 @@ the stock default and what an image with no valid stored address uses
   above, its password first. Add your own SSH key from there; the root
   password stays valid beside it.
 
-Either way, the web UI's own default credential is what a freshly reset or
-freshly flashed stick answers to, so change it before anything else. Full detail, including
+Either way, a stick with no stored web UI credential (a new one, or one
+with its config partition erased) answers to `admin`/`admin`, so change it
+before anything else. Full detail, including
 every port and how to move files on and off the stick:
 [`docs/ACCESS.md`](docs/ACCESS.md).
 
@@ -309,7 +310,7 @@ Which way back you have depends on where you are:
 | where you are | the way back | what it does not undo |
 |---|---|---|
 | on an uncommitted trial | any reboot or power cycle boots the stock slot again | settings saved on the shared config partition. The stock firmware's own management has been seen to write `sw_commit` by itself: read it back (`nv getenv sw_commit`) |
-| committed, stock still in the other slot | from a working shell, `nv setenv sw_tryactive OLD` and a reboot boot the stock slot once. Making stock permanent again has no tested recipe here: read `sw_commit` back under stock, which has been seen to write it itself ([`docs/FLASHING.md`](docs/FLASHING.md)) | the same settings. Nothing sends a committed image back by itself |
+| committed, stock still in the other slot | from a working shell, `nv setenv sw_tryactive OLD` and a reboot boot the stock slot. On the maintainer's sticks every such boot had stock write `sw_commit` to its own slot in both environment copies, so expect to stay on stock; `nv getenv sw_commit` under stock shows the copy it reads ([`docs/FLASHING.md`](docs/FLASHING.md)) | the same settings. Nothing sends a committed image back by itself |
 | after the first update | the update normally went into the slot that held the stock firmware, so the way back is the odi-oss release you left | the stock image is then gone from the stick; your flash backup is the only copy |
 
 **Updating** is the same procedure with this firmware in the place of the
@@ -391,18 +392,26 @@ This is new, actively developed firmware. Before relying on it:
   safety model is to make that resort as rare as possible.
 - **The watchdog is armed on every boot.** If the kernel hangs or the boot
   does not confirm within 120 s, the board resets (a trial falls back to
-  the committed slot). A committed image that boots but is unreachable is
-  not reset: power-cycle it, or use the safe mode.
+  the committed slot). Losing management access alone
+  does not reset a committed image. The watchdog does reset it when the
+  switch keeps offering frames to the CPU port and the NIC takes none for
+  30 s ([`docs/COMPARISON.md`](docs/COMPARISON.md), "boot safety"), and
+  three watchdog resets in a row end in the safe mode. Otherwise
+  power-cycle it, or use the safe mode.
 - **Management is open to the host side.** The web UI, ssh and the exporter
   listen on every address of the stick. By default nothing from the fibre
   reaches the stick's IP stack ([`docs/SWITCH.md`](docs/SWITCH.md), "PON
   port isolation"), but anyone on the host side can reach it: change the
   web UI's `admin`/`admin`.
-- **Multicast is unproven on a real stream.** IGMP and MLD snooping are
-  opt-in. Neither lab line carries IPTV, so they have been tested against a
+- **IGMP and MLD snooping are unproven on a real stream.** Multicast
+  itself is reported working: users run IPTV through it ([#300](https://github.com/AndreZiviani/odi-oss/issues/300),
+  [#369](https://github.com/AndreZiviani/odi-oss/issues/369)). Snooping is
+  opt-in, and neither lab line carries IPTV, so it has been tested against a
   register model, the frame parsers and a host's own reports, not against
-  a multicast source, and the OLT's IGMP and MLD proxy modes are not done
-  ([`docs/QUALIFICATION.md`](docs/QUALIFICATION.md), "Multicast and voice").
+  a multicast source ([`docs/QUALIFICATION.md`](docs/QUALIFICATION.md),
+  "Multicast and voice"). The OLT's IGMP and MLD proxy modes are not
+  done, and multicast then passes through unsnooped
+  ([`docs/TOOLS.md`](docs/TOOLS.md), "`igmpd` -- IGMP snooping (opt-in)").
 - **`diag` is not the stock CLI.** It carries only the commands our kernel
   can answer (`diag help` lists them). The handful the Prometheus exporter
   uses keep the stock syntax and output, so the exporter reads either

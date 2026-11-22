@@ -58,7 +58,10 @@ listed here.
   SWITCH.md and COMPARISON.md. New screenshots from the odi-ui preview, at
   twice the pixel density and kept in `docs/images/`: the Status page at the
   top (light or dark, following the GitHub theme), Config, the OMCI
-  topology, a trial boot and `diag`.
+  topology, a trial boot and `diag`. The known limits say that IGMP and MLD
+  snooping, not multicast, is unproven, and when the watchdog's CPU-port
+  rule resets an unreachable committed image; the ways back say that a
+  boot back to stock has so far always stayed on stock.
 
 ## v1.19.0 (2026-11-20)
 
