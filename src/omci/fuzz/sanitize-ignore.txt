@@ -1,0 +1,10 @@
+# Functions of omcid the fuzz build leaves uninstrumented (Makefile,
+# INSTR_fuzz): no coverage counters, no sanitizer checks.
+#
+# The CRC of the resume snapshot (respond/snapshot.c) is a bitwise loop over
+# the whole snapshot, run twice for every Create, Set and Delete. It has no
+# branch that depends on anything but its length, so there is nothing for a
+# fuzzer to learn in it, and instrumented it took most of the time of a
+# run. The bytes it reads are written by put_raw() or read from the file
+# just before, both instrumented.
+fun:crc32_calc

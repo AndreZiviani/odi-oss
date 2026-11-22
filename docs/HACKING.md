@@ -527,6 +527,7 @@ In order:
 |---|---|---|
 | `make lint` | shellcheck over every script (on-device ones as POSIX `sh`, since busybox ash runs them), the inline-quote check, `reuse lint` (REUSE copyright and license information; skipped when the tool is absent, always run in CI), and the greps for private-workspace references, machine-local paths, trial history in comments, internal plan ids and vendor source citations | `shellcheck`, git, `reuse` (optional locally; `tools/reuse-requirements.txt`) |
 | `make test-host` | about 60 host tests: driver logic, the on-device scripts, the replay tables and their generators | cc, bash, Python 3 |
+| `make fuzz-omci` | omcid, built for the host with ASan and UBSan, under libFuzzer for `FUZZ_SECONDS` (60) a target: nothing an OLT, a config store or a CLI client can send breaks it within that time. Not part of `make test`; its replay of the saved inputs is part of `make test-host` | clang with its libFuzzer runtime |
 | `make test-diag` | diag's parser and conversions natively, then under qemu: the conversion vectors, the L2 listing golden, **the exporter contract** | Docker |
 | `make test-omci` | builds `src/`, runs `omcid` under qemu-user (about 130 checks), its seven suites side by side | Docker |
 | `make test-qemu` | boots the real rootfs (busybox, inittab, services, dropbear, confd, metricsd) full-system under `qemu-system-mips -M malta`; checks ssh/web UI/exporter and the resilience scenarios (see below) | Docker, `qemu-system-mips`, `busybox`/`packages`/`src`/`releases` already built |
@@ -819,6 +820,23 @@ tolerate it tests for 77.
 The unit tests of omcid's class 171 decode (`src/omci/respond`, `make
 test-omci-respond`) and of igmpd (`src/igmp/test`, `make test-igmp`) are legs
 of `make test` and a CI job (`mips-units`).
+
+### Fuzzing omcid
+
+omcid answers whatever the OLT sends, so it is fuzzed on the build host:
+the daemon as shipped, against a model of the kernel, under libFuzzer with
+AddressSanitizer and UndefinedBehaviorSanitizer. `src/omci/fuzz/README.md`
+has the design, what the model covers and what it does not.
+
+    make fuzz-omci FUZZ_SECONDS=600 FUZZ_JOBS=4   # needs clang + libclang-rt
+    make fuzz-omci-replay                          # needs cc; in test-host
+
+When a run finds something, the fix goes into omcid, never into the
+harness, and the input goes into `src/omci/fuzz/corpus/<target>/` as text
+with a `# expect:` line, so that `make test-host` holds omcid to it from
+then on. A system call added to omcid needs a line in `sys_host.h` and a
+body in `fakeos.c`; a new translation unit needs adding to `SRCS` in the
+Makefile there (`make fuzz-omci-replay` says so).
 
 ### Pure refactors: prove the machine code did not change
 

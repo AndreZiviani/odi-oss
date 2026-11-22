@@ -1,0 +1,23 @@
+# A snapshot with a table-attribute list that runs into itself, read back
+# by a respawned omcid, and then a MIB reset. From the review of the first
+# snapshot fix.
+#
+# The five frames of snapshot-queue-count.txt, then the respawn (kind 7)
+# with a one-byte patch at offset 36: the list head of the first row, set
+# to 0. Node 0 of the pool is free and all zeros, so its next is 0 and the
+# list never ends. An omcid that resumed from it spun in tbl_free() at the
+# MIB reset in the last record (libFuzzer: timeout; the replay: killed by
+# timeout). snapshot_try_resume() refuses a list that loops, shares a node,
+# runs through a free node or is not as long as the row counts:
+#
+# expect: mode=reregister reason=bad_snapshot
+#
+# Offset 36 is the header of the file (23 bytes), sync, alarm and pending
+# (4), the row count (2) and seven bytes into the first row.
+033000 8004480a0100000002000000000000000000000000000000000000000000000000000000000000000000000000030000
+033000 8005440a002d00100001010000280008001e000000000000000000000000000000000000000000000000002800000000
+033000 8007440a00821002ffffffffffffffffffffffffffffffffffff00000000000000000000000000000000002800000000
+033000 8008440a002f1002001002031002001400c8000100000000000000000000000000000000000000000000002800000000
+033000 8009480a010680008000015c00000000000000000000000000000000000000000000000000000000000000d8f900ffff
+070400 24000000
+033000 800a4f0a0002000000000000000000000000000000000000000000000000000000000000000000000000002800000000

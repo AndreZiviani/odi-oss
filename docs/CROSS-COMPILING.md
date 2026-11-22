@@ -185,8 +185,9 @@ it covers no static buffer. Most of omcid's state, its receive buffers
 included, is static (`.bss`, about 500 KB), and no compiler mitigation here
 protects it; with no execute-inhibit bit and fixed addresses, a corrupted
 function pointer in `.bss` is still a way to run code. The defence there is
-the code: bounded parsers, and the host tests under ASan and UBSan
-(`make test-host-asan`).
+the code: bounded parsers, the host tests under ASan and UBSan
+(`make test-host-asan`), and omcid itself fuzzed on the host under both
+(`make fuzz-omci`, `src/omci/fuzz/README.md`).
 
 **What it costs**, text bytes of the stripped binaries, before and after:
 

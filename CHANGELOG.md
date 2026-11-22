@@ -5,6 +5,18 @@ listed here.
 
 ## Unreleased
 
+- Tests: omcid is fuzzed on the build host. `src/omci/fuzz` builds the
+  daemon from the shipped sources against a model of the kernel (files,
+  message queues, the netlink transport, a clock and signals, none of it
+  real) and runs it under libFuzzer with AddressSanitizer and
+  UndefinedBehaviorSanitizer: `make fuzz-omci`. One target takes sessions
+  of OMCI frames as the OLT sends them, the other the config stores, both
+  CLI protocols and a damaged resume snapshot. The seeds and every input
+  that once broke omcid run in `make test-host` and `make test-host-asan`
+  (`make fuzz-omci-replay`), each twice with the same outcome required,
+  and held to the line omcid has to print for it. Nothing in the image
+  changes (#482).
+
 - omcid: a resume snapshot is checked as a whole before any of it is
   loaded. A snapshot with a valid CRC, the right version and the right
   device was taken at its word. The count of upstream queues in it was

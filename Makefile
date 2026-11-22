@@ -7,7 +7,8 @@
 
 .PHONY: help kernel-tree toolchain toolchain-audit kernel packages busybox \
 	src releases image image-all clean distclean lint test test-host test-host-asan test-omci \
-	test-diag test-rcs test-qemu test-omci-respond test-igmp check-applets
+	test-diag test-rcs test-qemu test-omci-respond test-igmp check-applets \
+	fuzz-omci fuzz-omci-replay
 
 help:
 	@echo "targets:"
@@ -23,6 +24,8 @@ help:
 	@echo "  image-all       everything above from a clean clone, in order (about 25 min native)"
 	@echo "  test            lint + the host-side tests + diag + the OMCI daemon under qemu, side by side (a few minutes)"
 	@echo "  test-omci-respond  omcid unit tests (class 171 decode), test-igmp  igmpd unit tests"
+	@echo "  fuzz-omci       omcid on the host under libFuzzer, ASan and UBSan, FUZZ_SECONDS (60) per target (needs clang)"
+	@echo "  fuzz-omci-replay  the fuzz seeds and every input that once broke omcid (part of test-host)"
 	@echo "  lint            shellcheck every script here, the repo rules, REUSE compliance"
 	@echo "  check-applets   every command the on-device scripts run is in the image (part of lint)"
 	@echo "  test-rcs        the rcS action trace against its goldens (needs out/busybox, docker)"
@@ -128,7 +131,8 @@ test:
 # a C program does so through cc ${ODI_SAN_CFLAGS-}, empty in test-host, so
 # this runs those same scripts, plus the host-built tests of src/nv and src/diag
 # (the parser, conversions and formatters; the target builds stay in test-diag
-# under qemu), with the flags
+# under qemu) and the fuzz corpus through the host build of omcid
+# (src/omci/fuzz), with the flags
 # set: no second copy of any build line. The shell-only tests have nothing to
 # instrument and are not run here. -fno-sanitize-recover makes a UB report
 # fatal (the default is to print and carry on, exit 0); ASAN_OPTIONS keeps
@@ -148,6 +152,7 @@ test-host-asan:
 	done; \
 	echo "== src/nv"; $(MAKE) -C src/nv test || { echo "FAIL src/nv"; fail=1; }; \
 	echo "== src/diag (host part of test)"; $(MAKE) -C src/diag test || { echo "FAIL src/diag"; fail=1; }; \
+	echo "== src/omci/fuzz (replay)"; $(MAKE) -s -C src/omci/fuzz replay || { echo "FAIL src/omci/fuzz"; fail=1; }; \
 	[ $$fail = 0 ] || { echo "test-host-asan: failures above" >&2; exit 1; }; \
 	echo "test-host-asan: ok"
 
@@ -275,6 +280,7 @@ test-host:
 	bash test/odi_switch_ponq_show_test.sh
 	bash test/boot_golden_test.sh
 	python3 test/regnames_kernel_test.py
+	$(MAKE) -s -C src/omci/fuzz replay
 
 # diag's parser and conversion tests, natively, then under qemu in the diag
 # toolchain container: the conversion vectors and the exporter contract (the
@@ -324,6 +330,23 @@ test-omci-build:
 
 $(OMCI_SUITES:%=test-omci-%): test-omci-%:
 	docker run --rm -v "$(CURDIR)":/src -w /src/src/omci "$(DIAG_IMAGE)" sh $*-test.sh
+
+# omcid built for the host and linked against a model of the kernel instead
+# of the kernel, so the whole daemon runs with no stick, no qemu and no
+# container (src/omci/fuzz/README.md). fuzz-omci runs it under libFuzzer with
+# AddressSanitizer and UndefinedBehaviorSanitizer for FUZZ_SECONDS a target,
+# FUZZ_JOBS processes each, and fails on anything found; it needs clang and
+# its libFuzzer runtime, and is not part of `make test`: a fuzz run has no
+# fixed outcome. fuzz-omci-replay runs the seeds and every input that once
+# broke omcid through the same build with cc; that one is
+# deterministic, and test-host and test-host-asan run it.
+FUZZ_SECONDS ?= 60
+FUZZ_JOBS ?= 1
+fuzz-omci:
+	$(MAKE) -s -C src/omci/fuzz fuzz FUZZ_SECONDS=$(FUZZ_SECONDS) FUZZ_JOBS=$(FUZZ_JOBS)
+
+fuzz-omci-replay:
+	$(MAKE) -s -C src/omci/fuzz replay
 
 # The rcS action trace: what rcS executes and writes under /proc, for
 # three flag sets, against test/fixtures/rcs-trace-*.txt. Not part of `test`:
