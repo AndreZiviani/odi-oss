@@ -35,6 +35,13 @@ the trial boot keeps a stick recoverable, how to test, and the traps that
 have already cost time. [`AGENTS.md`](AGENTS.md) is the short list of
 house rules and applies to humans too.
 
+New functionality comes with a test that fails without it: a host test
+under `test/`, a golden for `make test-diag` or `make test-rcs`, or a qemu
+check. C follows the Linux kernel coding style (tabs, K&R braces) and
+builds without a warning under the `-Wall -Wextra` the Makefiles set;
+shell that runs on the stick is POSIX sh for busybox ash and passes
+`make lint`.
+
 The gates, before you open a pull request:
 
     make test          # lint + host tests + diag and the exporter contract + omcid under qemu
@@ -55,3 +62,9 @@ If your change affects users, the build, or the docs, add an entry under
 `## Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) in the same commit; a
 release moves `Unreleased` into a version section named after the tag. CI
 checks this on every pull request unless it is labelled `no-changelog`.
+
+## Decisions and roadmap
+
+André Ziviani maintains odi-oss and decides what is merged and released.
+Planned work and its order are tracked in
+[#482](https://github.com/AndreZiviani/odi-oss/issues/482).

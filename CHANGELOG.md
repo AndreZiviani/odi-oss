@@ -5,6 +5,7 @@ listed here.
 
 ## Unreleased
 
+- Docs: CONTRIBUTING.md says that new functionality comes with a test, names the C and shell style, and points to #482 for the roadmap (#482).
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy
