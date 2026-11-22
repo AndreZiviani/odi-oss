@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Docs: `confd.auth` is described as odi-ui stores it from the release after
+  v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
+  the password, which confd writes at the first sign-in or password save,
+  with a hand-written `user:password` line still accepted until then
+  (`docs/TOOLS.md`, `docs/SETTINGS.md`). `tools/config-backup.sh` and the
+  `ODI_AUTH_FILE` row in `docs/SETTINGS.md` no longer call that file the
+  shape to copy: `ODI_AUTH_FILE` needs the password as typed, and a copy of
+  a hashed `confd.auth` gets 401 from the backup.
+
 - Host SerDes: a 2500BASE-X or HiSGMII lane out of sync is re-latched
   every 5 s (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the mode word
   back, so a re-latch cut before its restore is undone by the next) during a
