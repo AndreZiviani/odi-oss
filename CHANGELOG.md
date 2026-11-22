@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Docs: `confd.auth` is described as odi-ui stores it from the release after
+  v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
+  the password, which confd writes at the first sign-in or password save,
+  with a hand-written `user:password` line still accepted until then
+  (`docs/TOOLS.md`, `docs/SETTINGS.md`). `tools/config-backup.sh` and the
+  `ODI_AUTH_FILE` row in `docs/SETTINGS.md` no longer call that file the
+  shape to copy: `ODI_AUTH_FILE` needs the password as typed, and a copy of
+  a hashed `confd.auth` gets 401 from the backup.
+
 - Docs: the README is rewritten around a first-time reader: which sticks
   run this (a table with the state from QUALIFICATION.md and the setting
   each board needs, in place of "for the DFP-34X-2C2 only"; the 2C2 v08

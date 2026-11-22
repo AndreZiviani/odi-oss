@@ -318,11 +318,15 @@ values: no operator's real limit is known here.
 
 The separate odi-ui project, fetched as a release. Serves the UI and its
 JSON API on the port given as its only argument (`confd 80` here), HTTP
-Basic with the credential in `/etc/config/confd.auth` (`user:password`;
-default `admin` / `admin` while that file is absent). It reads its pages and
-five `.tsv` tables (`keys`, `meta`, `consumers`, `features`, `settings`)
-from `/etc/confd/`, and any file of the same name in
-`/etc/config/confd/` overrides the shipped one; `settings.tsv` among them
+Basic with the credential in `/etc/config/confd.auth` (default `admin` /
+`admin` while that file is absent). The file holds
+`user:$pbkdf2-sha256$<iterations>$<salt>$<hash>` once a password was saved
+from the page or signed in with; a `user:password` line written by hand still
+works and is replaced by the hash at the first sign-in (not in safe mode or
+during a firmware trial). Releases up to odi-ui v1.19.0 keep the password as
+typed. It reads its pages and five `.tsv` tables (`keys`, `meta`,
+`consumers`, `features`, `settings`) from `/etc/confd/`, and any file of
+the same name in `/etc/config/confd/` overrides the shipped one; `settings.tsv` among them
 is the list of keys this image reads and what applying each costs. It runs
 `/etc/scripts/flash`, `/etc/scripts/apply.sh`, `/etc/scripts/fwu_starter.sh`,
 `/bin/diag`, `/bin/omcicli`, `/bin/nv`, `/bin/ping` and `/sbin/reboot` for
@@ -1900,12 +1904,12 @@ value stays empty, so "not set" still shows):
 - and any key whose name contains `PASS`, `PWD`, `PSK`, `SECRET`, `TOKEN`,
   `KEY`, `COMMUNITY` or `CRED`.
 
-Then every secret value found that way, plus the web UI password from
-`/etc/config/confd.auth`, is scrubbed from every file in the bundle, as text
-and as upper- and lowercase hex, run together and space-separated, in case a
-log quoted one; values shorter than three characters are redacted in the
-config copies only. `confd.auth`, the dropbear keys and `/etc/passwd` are
-never collected. A value the store keeps XML-escaped is scrubbed in its
+Then every secret value found that way, plus what `/etc/config/confd.auth`
+holds after the username (the web UI password, or its hash), is scrubbed
+from every file in the bundle, as text and as upper- and lowercase hex, run
+together and space-separated, in case a log quoted one; values shorter
+than three characters are redacted in the config copies only.
+`confd.auth`, the dropbear keys and `/etc/passwd` are never collected. A value the store keeps XML-escaped is scrubbed in its
 decoded spelling too, the one omcid and the logs use. Any step of the
 scrub that fails (a config copy, a value list, a sort, the hex of a value,
 a rule, the sed script, a file that cannot be rewritten) fails the bundle,

@@ -18,8 +18,9 @@
 #
 # Environment:
 #   ODI_HOST        the stick management address (required)
-#   ODI_AUTH_FILE   a file holding user:password for the web UI, one line
-#                   (the same shape as /etc/config/confd.auth on the stick)
+#   ODI_AUTH_FILE   a file holding user:password for the web UI, one line,
+#                   the password as typed. Not a copy of confd.auth from the
+#                   stick: confd stores a hash there, which gets 401
 #   ODI_USER, ODI_PASSWORD
 #                   the same credential from the environment, when there is
 #                   no ODI_AUTH_FILE

@@ -1387,7 +1387,7 @@ settings changed:
 | variable | meaning | default |
 |---|---|---|
 | `ODI_HOST` | the stick management address | required |
-| `ODI_AUTH_FILE` | a file holding the web UI `user:password`, one line | -- |
+| `ODI_AUTH_FILE` | a file holding the web UI `user:password`, one line, the password as typed (a copy of `confd.auth` from the stick holds a hash and gets 401) | -- |
 | `ODI_USER`, `ODI_PASSWORD` | the same credential from the environment, when there is no file | -- |
 | `ODI_BACKUP_DIR` | where the copies go | `./odi-config/<ODI_HOST>` |
 | `ODI_KEEP` | how many copies to keep | 30 |
@@ -1536,7 +1536,7 @@ applies to every later image.
 | `modules.off` | skip the platform init and omcid: **no OMCI, no service**; `apply.sh omci` refuses | REBOOT |
 | `breadcrumbs.on` | development: boot crumbs, `trial-diag.txt` and a heartbeat, on flash | REBOOT |
 | `confirm-arp` | development only: one line, the IPv4 address to ARP (`echo 192.168.1.2 > /etc/config/confirm-arp`); the boot confirms to the watchdog only after an ARP reply from it, so an unreachable trial reverts by itself; **a stick whose host stops answering there then resets every 120 s**. An empty file, or one that is not a dotted IPv4 address, is no target: logged, and the boot confirms as usual. `nv commit` refuses while it exists (`nv commit --force <slot>` overrides) and the login banner names it | REBOOT |
-| `confd.auth` | the UI credential, `user:password` | LIVE |
+| `confd.auth` | the UI credential: `user:` and a salted hash of the password, which confd writes; a `user:password` line written by hand works until the first sign-in replaces it | LIVE |
 | `dropbear.d/authorized_keys` | root's SSH keys | LIVE |
 | `confd/` | replacement web UI files and `.tsv` tables, by name | LIVE |
 
