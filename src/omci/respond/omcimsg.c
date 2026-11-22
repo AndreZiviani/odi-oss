@@ -1001,10 +1001,9 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		/* An attribute the store had no room for (the wide-row or the
 		 * table pool full) is left out and the entity is created all
 		 * the same, as a Set stores the attributes that fit, so the
-		 * rest of the OLT's provisioning can refer to it; refusing it
-		 * stopped that. A Create answer names no failed attribute
-		 * next to result 0, so the log does, and a later Set of one
-		 * answers result 9. */
+		 * rest of the OLT's provisioning can refer to it. A Create
+		 * answer names no failed attribute next to result 0, so the
+		 * log does, and a later Set of one answers result 9. */
 		if (lost) {
 			mask &= (uint16_t)~lost;
 			out_fmt("   no room in the MIB for %04x\n", (long)lost);

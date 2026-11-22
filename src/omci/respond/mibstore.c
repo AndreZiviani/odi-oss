@@ -1018,8 +1018,7 @@ int mib_count(void)
  * Returns the mask of the attributes that were to be stored and were not
  * for lack of room: one past the row's bytes (the wide-row pool was full
  * when the row was added) or a table row with no free node in the pool. The
- * OLT is told about those (result 9 for a Set); before, the Set answered
- * success and the value was gone. */
+ * OLT is told about those (result 9 for a Set). */
 uint16_t mib_write(struct mib_row *r, const struct omci_class *c,
 			  uint16_t mask, uint16_t skip, const uint8_t *src,
 			  uint16_t srclen)
