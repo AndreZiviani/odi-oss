@@ -141,6 +141,7 @@ EXIT_POLL_S=${EXIT_POLL_S:-60}         # between two looks at a firmware write t
 LOCK_S=${LOCK_S:-5}                    # waiting for the exit lock, one try
 EXIT_LOCK_TRIES=${EXIT_LOCK_TRIES:-3}  # tries of the timed exit at that lock, EXIT_POLL_S apart
 IO_S=${IO_S:-5}                        # one flash or mount call
+REBOOT_HOLD_S=${REBOOT_HOLD_S:-120}    # how long the exit waits for init to end it after reboot answered; 0 not at all
 
 # root:admin for this boot, SHA-512 crypt as image/build.sh writes it (the
 # hash of a public default is not a secret).
@@ -453,6 +454,14 @@ give_up() {
 #      the watchdog counter of the next boot). It boots what any reboot
 #      boots. One that fails gives the writer lock back and leaves
 #      exit=failed and the boot up.
+#   6. busybox reboot without -f only signals init and answers at once;
+#      init then runs the shutdown entry (umount -a -r) and only after that
+#      sends SIGTERM and SIGKILL to every process. Ending here would close
+#      fd 8 and free the writer lock before the shutdown even began. So the
+#      exit stays alive, the lock with it, until init kills it. Bounded:
+#      REBOOT_HOLD_S (120), far longer than one umount takes. A process
+#      still alive after that saw no reboot, and gives the lock back,
+#      leaves exit=failed and says so.
 safe_exit() {
 	[ -f "$FLAG" ] || return 0
 	[ "$EXIT_POLL_S" -ge 1 ] 2>/dev/null || EXIT_POLL_S=1
@@ -547,13 +556,19 @@ safe_exit() {
 		break
 	done
 	event safe_mode_exit "cause=$(sed -n 's/^cause=//p' "$FLAG" | head -n 1) uptime=$(uptime_s): nobody acknowledged the safe mode, rebooting"
-	"$TIMEOUT" "$IO_S" "$REBOOT" && return 0
+	if "$TIMEOUT" "$IO_S" "$REBOOT"; then
+		[ "$REBOOT_HOLD_S" -gt 0 ] 2>/dev/null || return 0
+		"$SLEEP" "$REBOOT_HOLD_S"
+		what="no reboot came ${REBOOT_HOLD_S} s after reboot answered"
+	else
+		what="reboot failed"
+	fi
 	[ "$wheld" != 1 ] || wunlock
 	if xlock; then
 		set_exit failed
 		xunlock
 	fi
-	event safe_mode_exit_failed "reboot failed: the safe mode stays up"
+	event safe_mode_exit_failed "$what: the safe mode stays up"
 	return 1
 }
 

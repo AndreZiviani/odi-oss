@@ -1074,6 +1074,12 @@ write takes about eighty seconds, so one still running after that is
 stuck, and the reboot goes ahead (`state=gave_up`). The look is not only a
 look: under the exit lock, in the step that claims the flag, the exit takes
 the writer lock itself, without waiting, and keeps it through the reboot.
+busybox `reboot` only signals init and returns at once, and init runs its
+shutdown entry (`umount -a -r`) before it kills every process, so the exit
+does not end when `reboot` answers: it waits, holding the lock, until init
+kills it. That wait is bounded (`REBOOT_HOLD_S`, 120 s): an exit still
+alive after it saw no reboot, and gives the lock back, sets `exit=failed`
+and logs `event=safe_mode_exit_failed`.
 `fwu_starter.sh` takes that lock the same way before it touches anything
 and does not wait for it: it refuses with "a write is already running". So
 a write from the Firmware page that is running holds the exit off, and one

@@ -34,7 +34,10 @@ listed here.
   after that fails and keeps the record. The exit waits for a running
   firmware write (the evidence the web UI reboot refuses on), 1800 s more
   at most, holds the writer lock of `fwu_starter.sh` from its claim through
-  the reboot so that none starts then, and does not take a failed or early sleep for the deadline. It
+  the reboot so that none starts then (busybox `reboot` returns at once, so
+  the exit stays alive with the lock until init kills it, 120 s at most,
+  `REBOOT_HOLD_S`), and does not take a failed or early sleep for the
+  deadline. It
   boots what any reboot boots: an armed trial once, and with the config
   partition still unusable a safe-mode boot again, the PON off throughout.
   Acknowledge before flashing from a safe-mode boot (`docs/FLASHING.md`).
@@ -45,7 +48,8 @@ listed here.
   `safe_mode_exit_failed`, `safe_mode_hold` and `safe_mode_failed`; `event=safe_mode` gains `prev=`, `login=` and
   `exit_at=`, and says root apart when the account file could not be
   replaced; the flag and the record gain `prev=` and `login=`. No new write
-  to the flash. Host-tested (`test/safe_mode_test.sh`, 280 checks); the
+  to the flash. Host-tested (`test/safe_mode_test.sh`, 287 checks, among them a
+  `reboot` stub that returns and then finds the writer lock still held); the
   script alone also ran under stubs on a test stick, which is not a
   safe-mode boot on hardware (`docs/QUALIFICATION.md`). `docs/SETTINGS.md`,
   "Recovery: the safe mode", has the table and the reasoning.

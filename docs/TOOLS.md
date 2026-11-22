@@ -1773,7 +1773,9 @@ the exit claims the flag
 (`exit=exiting`) before it reboots, and an `ack` after that exits 1 and
 keeps the record. The exit waits for a running firmware write, 1800 s more
 at most, and holds the writer lock of `fwu_starter.sh` from its claim
-through the reboot, so none starts then. `status` prints
+through the reboot, so none starts then: busybox `reboot` returns at once,
+so the exit stays alive with the lock until init kills it, 120 s at most
+(`REBOOT_HOLD_S`). `status` prints
 `active=0|1` with the flag's fields as `now_*` (`now_cause=` is
 `short_boots`, `watchdog` or `config`; `now_prev=` the previous boot's
 reason, `now_login=default|stored`, `now_root_password=default|stored|failed`,
@@ -1796,7 +1798,7 @@ for a firmware write, or stopped waiting), `event=safe_mode_exit cause=...
 uptime=S` right before the reboot of the timed exit,
 `event=safe_mode_exit_failed` (the timed exit gave up without a reboot: a
 sleep failed, the uptime could not be read, the lock was never free, the
-reboot failed; the flag then says `exit=failed`, except when the lock
+reboot failed, or no reboot came 120 s after `reboot` answered; the flag then says `exit=failed`, except when the lock
 could not be taken to write it),
 and `event=safe_mode_failed` (the flag could not be written: not a
 safe-mode boot, `count` and `no-config` exit 1, and the line says what

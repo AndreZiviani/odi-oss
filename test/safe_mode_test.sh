@@ -83,6 +83,9 @@ export PASSWD=$T/etc-passwd PASSWD_RUN=$T/run/safe-mode.passwd CONFIG_DIR=$T/con
 export PREV=$T/prev WDTFILE=$T/config/boot-wdt
 export UPTIME=$T/uptime KMSG=$T/kmsg BUILD=$T/odi-build LOG=$T/services.log
 export SLEEP=$T/bin/sleep TIMEOUT=$T/bin/timeout MOUNT=$T/bin/mount REBOOT=$T/bin/reboot
+# The stub reboot returns and nothing kills the exit afterwards, so the wait
+# for init to end it is off here; the cases below that are about it set it.
+export REBOOT_HOLD_S=0
 export ODI_CONF=$T/config/odi.conf CS=$T/config/lastgood.xml HS=$T/config/lastgood_hs.xml TMPDIR_=$T
 echo "image=test-image" > "$BUILD"
 echo 'root:!:0:0:root:/root:/bin/sh' > "$PASSWD"
@@ -798,6 +801,44 @@ flock -n "$FWU_STATE.lock" true && ok "a reboot that fails leaves the writer loc
 short_to power
 FWU_STATE=$T/not-a-dir/fwu.state sh "$S" exit > /dev/null 2>&1
 t "no writer lock file can be made: the reboot goes ahead" "^reboot $" "$(reboots)"
+rm -f "$FWU_STATE" "$FWU_STATE.lock"
+# busybox reboot only signals init and returns at once; init runs the
+# shutdown entry and only then kills every process. reboot-init plays that:
+# it returns, and after that a child of it tries the writer lock without
+# waiting, as fwu_starter.sh does, and then kills the exit and its children
+# with SIGTERM, as init does. The child closes the fd 8 it inherited, so the
+# lock it finds held is held by the exit alone. The real sleep, so that the
+# exit is still waiting when the child looks.
+cat > "$T/bin/reboot-init" <<EOF
+#!/bin/sh
+echo "reboot" >> "$T/reboots"
+caller=\$PPID
+(
+	/bin/sleep 0.5
+	if flock -n "$FWU_STATE.lock" true; then echo free; else echo refused; fi > "$T/init.saw"
+	pkill -TERM -P "\$caller"; kill -TERM "\$caller"
+) < /dev/null > /dev/null 2>&1 8>&- &
+exit 0
+EOF
+chmod +x "$T/bin/reboot-init"
+short_to power; rm -f "$T/init.saw"
+echo "1800.00 1.00" > "$T/uptime"
+began=$SECONDS
+out=$(REBOOT=$T/bin/reboot-init SLEEP=/bin/sleep REBOOT_HOLD_S=20 sh "$S" exit 2>&1); rc=$?
+i=0; while [ ! -s "$T/init.saw" ] && [ "$i" -lt 100 ]; do /bin/sleep 0.05; i=$((i + 1)); done
+t "after reboot returned, the writer lock is still held: a write is refused" "^refused$" "$(cat "$T/init.saw" 2>/dev/null)"
+t "  the exit was still alive for init to kill, and the flag says exiting" "^143 exiting reboot$" "$rc $(flagv exit) $(reboots)"
+[ $((SECONDS - began)) -lt 15 ] && ok "  it ended at the kill, not at the end of its wait" || no "  it ended at the kill, not at the end of its wait"
+flock -n "$FWU_STATE.lock" true && ok "  the writer lock is free once init killed it" || no "  the writer lock is free once init killed it"
+# a reboot that answered but never came: the wait is bounded, and then the
+# lock goes back and the flag stops promising a reboot
+short_to power; : > "$T/kmsg"
+echo "1800.00 1.00" > "$T/uptime"
+out=$(REBOOT_HOLD_S=120 sh "$S" exit 2>&1); rc=$?
+t "no kill 120 s after reboot answered: the exit gives up" "^1 1920 failed reboot  .*event=safe_mode_exit_failed no reboot came 120 s after reboot answered: the safe mode stays up" "$rc $(cut -d. -f1 "$T/uptime") $(flagv exit) $(reboots) $out"
+flock -n "$FWU_STATE.lock" true && ok "  and the writer lock is free again" || no "  and the writer lock is free again"
+sh "$S" ack > /dev/null; rc=$?
+t "  an ack then removes the record" "^0 0$" "$rc $([ -e "$RECORD" ] && echo 1 || echo 0)"
 rm -f "$FWU_STATE" "$FWU_STATE.lock"
 # An uptime that cannot be read is never taken for 0. Only the first read
 # of the wait for a write fails here: flock-busy says the writer lock is
