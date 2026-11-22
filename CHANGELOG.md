@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Diagnostics: the bundle adds `rss.txt`, the resident memory of each
+  process largest first, and `df.txt`, so a report shows which process grew
+  and whether `/var` or `/tmp` filled up (#465, #482). `rss.txt` is
+  collected as one step under `STEP_TIMEOUT_S`, with its exit status in
+  `MANIFEST.txt` like every other step.
+
 - OMCI: an attribute of a Set that the MIB store has no room for is
   answered result 9 (attribute failed), with that attribute in the failed
   mask and the other attributes of the Set stored, instead of success. That
@@ -18,6 +24,7 @@ listed here.
   the ones that do, as before, and logs the others; a later Set of one
   answers result 9. A Set with no row left in the MIB answers result 1
   rather than "unknown entity". The log says `no room for <mask>` (#482).
+
 - Host SerDes: a 2500BASE-X or HiSGMII lane out of sync is re-latched
   every 5 s (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the mode word
   back, so a re-latch cut before its restore is undone by the next) during a

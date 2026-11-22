@@ -1782,6 +1782,7 @@ prints OUT: the previous boot ramlog (`/proc/odi_ramlog_prev`), the tail of
 every `/var/log` file (256 KB each, 1 MB in all), `dmesg`, `/etc/odi-build`,
 `/etc/version`, `/proc/odi_wdt/{watchdog_flag,userland_ok,clients}`,
 `uptime`, `/proc/meminfo`, `/proc/mounts`, `/proc/cmdline`, `ps`,
+the resident memory of each process from `/proc/PID/status` (`rss.txt`), `df`,
 `sw_active`, `sw_commit`, `sw_tryactive` and `sw_version0/1` from both
 environment copies (`nv getenv` and `nv fallback`), one scrape of the
 exporter, and the config store. `MANIFEST.txt` lists every step with its
