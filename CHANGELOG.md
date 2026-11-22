@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- Releases: the release job publishes the image the `reproducible` job built
+  twice and found identical, instead of building a third one. It checks the
+  tarball against the SHA-256 that job reported and the SBOM against the
+  rootfs of that tarball before anything is published (#482).
+
 - Docs: `confd.auth` is described as odi-ui stores it from the release after
   v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
   the password, which confd writes at the first sign-in or password save,

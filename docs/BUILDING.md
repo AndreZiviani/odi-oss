@@ -142,7 +142,8 @@ or normalised:
 print their SHA-256 and exit 0; otherwise it names what differs (tar
 headers, each member, the uImage header, and for the rootfs every inode and
 every file by path) and exits non-zero. Nothing is excluded, busybox
-included. The `reproducible` job in `ci.yml` runs it on release tags. Changing
+included. The `reproducible` job in `ci.yml` runs it on release tags, and
+`release.yml` publishes the tarball that job compared. Changing
 a toolchain, a base image or the snapshot date changes the output; that is
 expected, and a new release is the unit of comparison.
 

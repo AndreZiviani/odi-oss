@@ -279,9 +279,10 @@ tag's commit is an ancestor of `origin/main` (`tools/check-release-ancestry.sh`;
 pre-release tags such as `v1.2.2-beta.1` are exempt, they test unmerged work), then calls `ci.yml` as a reusable
 workflow on that same commit and publishes nothing unless every job of it,
 `test-qemu`, the rcS goldens, `full` and `reproducible` included, succeeded.
-Only then does it build the full
-image (`VERSION=` from the tag, `ROOT_PW=locked`) and publishes it as a
-GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
+Only then does it publish the full image (`VERSION=` from the tag,
+`ROOT_PW=locked`) that `reproducible` built twice and compared, checked
+against the SHA-256 that job reported, rather than building a third one. It
+goes out as a GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
 attestations, and notes from `tools/release-notes.sh` (the tag's own
 `CHANGELOG.md` section plus a flash-and-first-login paragraph).
 `.github/workflows/dependency-bump.yml` runs `tools/bump-deps.sh` every
