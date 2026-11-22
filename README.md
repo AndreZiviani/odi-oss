@@ -202,9 +202,9 @@ Two things changed in v1.4.0 that you can see on the line:
 
 - **Release image, or a source build with `ROOT_PW=locked`**: root has no
   password at all (ssh with a password is refused). Open the web UI on
-  port 80 (`admin`/`admin` at first), set a password of your own under
-  System, Access, then add your SSH public key on the same page: confd adds
-  no key while `admin`/`admin` is in force. `ssh root@<stick>` with that
+  port 80 (your stored credential, or `admin`/`admin` if none is stored), set a password of your own under
+  System, Access, then add your SSH public key on the same page.
+  `ssh root@<stick>` with that
   key then works, and keeps working across reboots and re-flashes (the key
   lives on the config partition, not in the image).
 - **A default source build**: ssh as `root` with the password
@@ -213,8 +213,9 @@ Two things changed in v1.4.0 that you can see on the line:
   above, its password first. Add your own SSH key from there; the root
   password stays valid beside it.
 
-Either way, the web UI's own default credential is what a freshly reset or
-freshly flashed stick answers to, so change it before anything else. Full detail, including
+Either way, a stick with no stored web UI credential (a new one, or one
+with its config partition erased) answers to `admin`/`admin`, so change it
+before anything else. Full detail, including
 every port and how to move files on and off the stick:
 [`docs/ACCESS.md`](docs/ACCESS.md).
 

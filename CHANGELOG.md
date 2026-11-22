@@ -5,16 +5,6 @@ listed here.
 
 ## Unreleased
 
-- Docs: `ACCESS.md` sets a password before it adds an SSH key through the
-  API, without putting it in the shell history, and `SETTINGS.md` no longer
-  offers adding a key from the web UI during the safe mode. A confd newer
-  than v1.19.0 adds no key while the built-in `admin` / `admin` is in force
-  (#482). The recipe asks for the password twice, with a prompt. The release
-  notes, `README.md`, `BUILDING.md` and the SSH key and backup rows of
-  `SETTINGS.md` say the same: password first, then the key. The same confd
-  refuses `/api/backup` with the factory password, so "Backing up from a
-  host" says a password of its own is needed, and `tools/config-backup.sh`
-  prints the reason confd gives for a refusal instead of the status alone.
 - Host SerDes: a 2500BASE-X or HiSGMII lane out of sync is re-latched
   every 5 s (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the mode word
   back, so a re-latch cut before its restore is undone by the next) during a
@@ -36,6 +26,21 @@ listed here.
   lock cannot end a trial run before its expiry. The window ends
   once the trial is confirmed or reverted. A failed write in a re-latch is
   reported as a failed re-latch.
+- Docs: `ACCESS.md` sets a password before it adds an SSH key through the
+  API, without putting it in the shell history, and `SETTINGS.md` no longer
+  offers adding a key from the web UI during the safe mode. A confd newer
+  than v1.19.0 adds no key while the built-in `admin` / `admin` is in force
+  (#482). The recipe asks for the password twice, with a prompt, in plain
+  POSIX sh (`stty -echo`, so it runs in dash too). It says so when the two
+  entries differ, and `curl -f` shows a refused password before the key
+  step. The release notes, `README.md`, `BUILDING.md` and the SSH key and
+  backup rows of `SETTINGS.md` say the same: password first, then the key.
+  The README also says that `admin` / `admin` is what a stick with no
+  stored web UI credential answers to, not a freshly flashed one. The same
+  confd refuses `/api/backup` with the factory password, so "Backing up
+  from a host" says a password of its own is needed, and
+  `tools/config-backup.sh` prints the reason confd gives for a refusal
+  instead of the status alone.
 
 - Kernel: the ONU is not activated when the boot clean of the GPON MAC
   tables fails; before, it was logged and activated anyway, on tables that
