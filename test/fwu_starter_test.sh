@@ -39,7 +39,18 @@ cat > "$T/bin/nv" <<'NV'
 #!/bin/sh
 case "$2" in
 sw_active) [ -n "${NV_ACTIVE:-}" ] && echo "sw_active=$NV_ACTIVE" ;;
-sw_commit) [ -n "${NV_COMMIT-0}" ] && echo "sw_commit=${NV_COMMIT-0}" ;;
+sw_commit)
+	if [ "$1" = fallback ]; then
+		# NV_FALLBACK: the other copy says this; unset is no valid
+		# second copy, NV_FALLBACK_RC a read that failed.
+		[ -z "${NV_FALLBACK_RC:-}" ] || exit "$NV_FALLBACK_RC"
+		# NV_FALLBACK=none: a valid copy that sets no sw_commit.
+		[ "${NV_FALLBACK:-}" != none ] || exit 0
+		if [ -z "${NV_FALLBACK:-}" ]; then echo "nv: no valid second copy of the environment"; exit 1; fi
+		echo "sw_commit=$NV_FALLBACK"
+	else
+		[ -n "${NV_COMMIT-0}" ] && echo "sw_commit=${NV_COMMIT-0}"
+	fi ;;
 esac
 exit 0
 NV
@@ -110,6 +121,25 @@ t "sw_active answers when the cmdline does not" "running; write slot 0" \
 t "neither answering refuses both slots" "cannot tell which slot" "$(run 'console=ttyS0' 1 "$T/good.tar")"
 t "an unreadable sw_commit refuses the write" "cannot read sw_commit" "$(NV_COMMIT='' run 'root=31:5' 1 "$T/good.tar")"
 t "so does one that is neither 0 nor 1" "cannot read sw_commit" "$(NV_COMMIT=2 run 'root=31:5' 1 "$T/good.tar")"
+t "the slot sw_commit names is refused, whatever fwu.sh the image carries" "sw_commit is 1, the slot this would write" \
+  "$(NV_COMMIT=1 run 'root=31:5' 1 "$T/good.tar")"
+t "so is the slot the fallback copy names, the active one being fine" "fallback environment copy says sw_commit=1" \
+  "$(NV_FALLBACK=1 run 'root=31:5' 1 "$T/good.tar")"
+t "a fallback copy that names the running slot is fine" "fwu stub slot=1" \
+  "$(NV_FALLBACK=0 run 'root=31:5' --foreground 1 "$T/good.tar")"
+t "and the log says what it read" "fallback environment copy says sw_commit=0" \
+  "$(NV_FALLBACK=0 run 'root=31:5' --foreground 1 "$T/good.tar")"
+t "no second copy is said too" "no valid second environment copy" \
+  "$(run 'root=31:5' --foreground 1 "$T/good.tar")"
+t "a fallback copy without sw_commit is written with a warning" "warning: the fallback environment copy sets no sw_commit" \
+  "$(NV_FALLBACK=none run 'root=31:5' --foreground 1 "$T/good.tar")"
+t "and the write goes on" "fwu stub slot=1" \
+  "$(NV_FALLBACK=none run 'root=31:5' --foreground 1 "$T/good.tar")"
+t "a fallback copy not read in full refuses the write" "cannot read the fallback environment copy (nv fallback exit 3)" \
+  "$(NV_FALLBACK_RC=3 run 'root=31:5' 1 "$T/good.tar")"
+t "and so does one nv gave no answer for" "nv fallback exit 124" \
+  "$(NV_FALLBACK_RC=124 run 'root=31:5' 1 "$T/good.tar")"
+t "and nothing was extracted for it" "^gone$" "$(rm -rf "$T/fwu.d"; NV_COMMIT=1 run 'root=31:5' 1 "$T/good.tar" >/dev/null; [ -e "$T/fwu.d" ] && echo there || echo gone)"
 t "a fwu.sh that does not match md5.txt is refused" "md5 mismatch" "$(run 'root=31:5' 1 "$T/bad.tar")"
 t "a tar without fwu.sh is refused" "no fwu.sh" "$( : > "$T/empty"; ( cd "$T" && tar -cf notimg.tar empty ); run 'root=31:5' 1 "$T/notimg.tar")"
 
