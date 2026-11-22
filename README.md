@@ -78,7 +78,7 @@ few close relatives of the stick on the same SoC, listed below.
   models, the OMCI daemon replayed under qemu against captures from two
   ISPs, CI on every pull request.
 
-Each point is a line of
+Each point is backed by
 [Compared with the stock firmware](#compared-with-the-stock-firmware),
 with its evidence in [`docs/COMPARISON.md`](docs/COMPARISON.md).
 
