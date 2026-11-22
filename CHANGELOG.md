@@ -5,6 +5,20 @@ listed here.
 
 ## Unreleased
 
+- omcid: a resume snapshot is checked as a whole before any of it is
+  loaded. A snapshot with a valid CRC, the right version and the right
+  device was taken at its word. The count of upstream queues in it was
+  used as an index by the rebuild that follows a resume, and one past the
+  table (128) read and wrote outside it; a table-attribute list in it that
+  ran into itself was walked without end by the next MIB reset or Get
+  Next, on every respawn until the file was replaced. Such a snapshot is
+  now refused (`reason=bad_snapshot`) and omcid re-registers: a count past
+  its table, a length that is not the sum of the parts, a list that loops,
+  shares a row, runs through a free row or is not as long as its entity
+  says. A refusal no longer comes after the MIB rows of the refused file
+  were loaded. omcid writes the snapshot itself, on tmpfs, so this took a
+  damaged file to reach (#482).
+
 - Docs: `confd.auth` is described as odi-ui stores it from the release after
   v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
   the password, which confd writes at the first sign-in or password save,
@@ -177,6 +191,7 @@ listed here.
   `apply.sh omci` reports a VLAN rebuild as `the ONU was not
   re-registered` instead of `stayed in O5`, which it does not know
   (`docs/SWITCH.md`, "GPON boot init").
+
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy

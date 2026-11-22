@@ -276,6 +276,83 @@ static int refuse(const char **why, const char *reason)
 	return 0;
 }
 
+/* The rest of a snapshot, walked before any of it is loaded: every count
+ * within its table, every part inside the bytes that were read and the
+ * file exactly as long as its parts, and the table-attribute lists whole.
+ * The CRC says the file is what some omcid wrote, not that its memory was
+ * in order when it did. A count taken on trust becomes an index later (the
+ * queue count, in us_qos_rebuild()), and a list that runs into itself is
+ * walked for ever by the first thing that walks it (tbl_free() at a MIB
+ * reset, the Get Next of a table): every walker stops at MIB_TBL_NONE and
+ * at nothing else. Checked here and not where each part is loaded, because
+ * a refusal halfway through the load leaves half a MIB behind for the
+ * registration that follows. `p` is behind the device identity, `end` at
+ * the CRC. */
+static int snap_whole(const uint8_t *p, const uint8_t *end, uint32_t qlen)
+{
+	long fixed = (long)(sizeof(tblpool) + sizeof(flow_us) + sizeof(flow_ds) +
+			    4 + sizeof(tcont_map) + qlen + 2);
+	const uint8_t *rows_at;
+	const struct mib_tblent *pool;           /* bytes only: no alignment */
+	uint8_t seen[(MIB_TBL_NODES + 7) / 8];
+	uint16_t rows, servs;
+
+	if (end - p < 6)
+		return 0;
+	p += 4;                                  /* sync, alarm, pending */
+	rows = get_u16(&p);
+	if (rows > MIB_ROWS)
+		return 0;
+	rows_at = p;
+	for (uint16_t i = 0; i < rows; i++) {
+		long data = MIB_ROW_MAX;
+
+		if (end - p < 10)
+			return 0;
+		p += 9;
+		if (get_u8(&p))                  /* has_tail */
+			data = MIB_WIDE_MAX;
+		if (end - p < data)
+			return 0;
+		p += data;
+	}
+	if (end - p < fixed)
+		return 0;
+	pool = (const struct mib_tblent *)p;
+	p += fixed - (long)qlen - 2;
+	if (!qos_prog_state_ok(p))
+		return 0;
+	p += qlen;
+	servs = get_u16(&p);
+	if (servs > SERV_MAX)
+		return 0;
+	if (end - p != (long)servs * (long)(2 + sizeof(struct omci_bdgconn)))
+		return 0;
+
+	/* The list of each row: nodes in use, none of them twice, in this
+	 * list or in the list of another row, and as many as the row counts.
+	 * A node is marked when it is first met, so a walk ends after at most
+	 * MIB_TBL_NODES steps whatever the links say; an index is a byte and
+	 * 0xff is the end, so none is outside the pool. */
+	for (unsigned i = 0; i < sizeof seen; i++)
+		seen[i] = 0;
+	p = rows_at;
+	for (uint16_t i = 0; i < rows; i++) {
+		unsigned len = 0;
+
+		for (uint8_t t = p[7]; t != MIB_TBL_NONE; t = pool[t].next) {
+			if (!pool[t].used || (seen[t >> 3] & (1u << (t & 7))))
+				return 0;
+			seen[t >> 3] |= (uint8_t)(1u << (t & 7));
+			len++;
+		}
+		if (len != p[8])                 /* tbl_count */
+			return 0;
+		p += 10 + (p[9] ? MIB_WIDE_MAX : MIB_ROW_MAX);
+	}
+	return 1;
+}
+
 int snapshot_try_resume(uint32_t onu_state, const char **why)
 {
 	uint8_t *buf = snapbuf;                  /* see SNAP_BUF_MAX */
@@ -327,11 +404,16 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 				return refuse(why, "other_device");
 	}
 
+	if (!snap_whole(p, buf + n - 4, qlen))
+		return refuse(why, "bad_snapshot");
+
 	{
 		uint8_t sync = get_u8(&p);
 		uint16_t alarm = get_u16(&p);
 		uint8_t pending = get_u8(&p);
 
+		/* snap_whole() has refused a count past its table; the two
+		 * checks in this block are what it replaced and cost nothing. */
 		rows = get_u16(&p);
 		if (rows > MIB_ROWS)
 			return refuse(why, "bad_snapshot");
