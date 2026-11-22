@@ -278,9 +278,10 @@ anything in `vmlinux`, and checks that the `CRUMBS_CORE=1` patches in
 `kernel/618/debug/` still apply (applied, not compiled). The job summary has the sizes, the spare bytes, the
 build time and the warnings. Nothing it builds is booted: a kernel change
 still needs a stick. A pull request `dependency-bump.yml` opens does not
-start it (a pull request created with `GITHUB_TOKEN` triggers no workflow);
-run it by hand on that branch when the kernel pin or the toolchain image
-pin moved. `make image-all`
+start it (a pull request created with `GITHUB_TOKEN` triggers no workflow),
+so when the kernel pin or the toolchain image pin moved, that job starts it
+on the bump branch itself (`gh workflow run kernel.yml`, which the same
+token may do). `make image-all`
 from a clean checkout measured about five and a half minutes on a hosted
 runner (2026-11-15), the kernel being a part of that.
 

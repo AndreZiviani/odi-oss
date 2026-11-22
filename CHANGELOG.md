@@ -63,9 +63,12 @@ listed here.
   an instruction the CPU lacks in `vmlinux`, checks that the debug patches
   of `CRUMBS_CORE=1` still apply, and its summary has the sizes, the build
   time and the warnings. Until now CI compiled the kernel only on tags and
-  manual runs. The comments that put a kernel or image build
-  at about an hour of CI are corrected: `make image-all` from a clean
-  checkout measured about five and a half minutes on a hosted runner.
+  manual runs. The weekly `dependency-bump.yml` starts it on its bump
+  branch when the kernel pin or the toolchain image pin moved, since the
+  pull request that job opens starts no workflow. The comments that put a
+  kernel or image build at about an hour of CI are corrected: `make
+  image-all` from a clean checkout measured about five and a half minutes
+  on a hosted runner.
 
 ## v1.19.0 (2026-11-20)
 

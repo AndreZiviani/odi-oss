@@ -42,8 +42,12 @@ The gates, before you open a pull request:
 and, for a kernel change, a kernel build with no new warning, `packages/isa-audit.sh
 build/kernel-618/vmlinux` clean and `tools/kernel-footprint.sh` not grown
 without a reason; for anything that ships, `make image`. CI runs `make
-test`'s four parts on every pull request; it does not build the kernel or
-the image.
+test`'s four parts on every pull request. `kernel.yml` builds the kernel on
+a pull request that changes `kernel/` or another file `kernel/build.sh`
+reads, and fails on a uImage over the k0/k1 partition, an `isa-audit`
+finding or a debug patch that no longer applies. It does not compare
+warnings or run `tools/kernel-footprint.sh`, so those two stay yours. CI
+does not build the image on a pull request.
 
 Keep commits small and each about one change, with a subject like
 `area: what changed` and a body that says why and what you measured. Say
