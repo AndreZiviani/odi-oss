@@ -326,8 +326,15 @@ printf 'GPON_SN=%s\nGPON_PLOAM_PASSWD=%s\n' "$SN" "$PW" > "$T/cfg/odi.conf"
 XPW='Pw&amp;Xy9'
 printf '<Config Name="ROOT">\n\t<Dir Name="MIB_TABLE">\n\t\t<Value Name="LOID_PASSWD" Value="%s"/>\n\t</Dir>\n</Config>\n' "$XPW" > "$T/cfg/lastgood.xml"
 printf 'a log line\nlogin with Pw&Xy9 failed\n' > "$T/log/messages"
+# rss.txt reads PROC_DIR: two processes, one with a blank in its name,
+# a kernel thread without VmRSS, and an entry that is not a PID.
+mkdir -p "$T/proc/1" "$T/proc/2" "$T/proc/240" "$T/proc/sys"
+printf 'Name:\tinit\nState:\tS (sleeping)\nVmRSS:\t     512 kB\n' > "$T/proc/1/status"
+printf 'Name:\tkthreadd\nState:\tS (sleeping)\n' > "$T/proc/2/status"
+printf 'Name:\tomcid worker\nState:\tS (sleeping)\nVmRSS:\t    2048 kB\n' > "$T/proc/240/status"
+printf 'Name:\tnot a pid\nVmRSS:\t    9999 kB\n' > "$T/proc/sys/status"
 run_bundle() {
-	LC_ALL=en_US.UTF-8 CONFIG_DIR="$T/cfg" LOG_DIR="$T/log" GPON_PROC_DIR="$T/nogpon" PATH="$T/bin:$PATH" \
+	LC_ALL=en_US.UTF-8 CONFIG_DIR="$T/cfg" LOG_DIR="$T/log" GPON_PROC_DIR="$T/nogpon" PROC_DIR="$T/proc" PATH="$T/bin:$PATH" \
 		METRICS_TIMEOUT_S=1 STEP_TIMEOUT_S=2 timeout 120 sh "$B" "$@" > "$T/run.out" 2>&1
 }
 run_bundle "$T/out.tar.gz"
@@ -342,6 +349,11 @@ for f in README.md SUMMARY.txt rss.txt df.txt; do
 done
 awk '$3 == "SUMMARY.txt" && $1 == 0 { n++ } END { exit !n }' "$X/MANIFEST.txt" && ok "the summary step is listed with status 0" ||
 	no "the summary step is listed with status 0" "$(grep SUMMARY "$X/MANIFEST.txt")"
+printf '    2048 kB     240  omcid worker\n     512 kB       1  init\n' > "$T/rss.want"
+cmp -s "$T/rss.want" "$X/rss.txt" && ok "rss.txt: largest first, whole names, no kernel thread, PIDs only" ||
+	no "rss.txt: largest first, whole names, no kernel thread, PIDs only" "$(cat "$X/rss.txt")"
+awk '$3 == "rss.txt" && $1 == 0 { n++ } END { exit !n }' "$X/MANIFEST.txt" && ok "the rss step is listed with status 0" ||
+	no "the rss step is listed with status 0" "$(grep rss "$X/MANIFEST.txt")"
 grep -q '^- Identity: masked' "$X/README.md" && ok "README: identity masked" || no "README: identity masked" "$(cat "$X/README.md")"
 grep -q '^| ONU state, alarms' "$X/README.md" && ok "README: the where-to-look table" || no "README: the where-to-look table"
 grep -q '^optics         : rx -22.92 dBm' "$X/SUMMARY.txt" && ok "the summary has the optics from the diag batch" ||

@@ -7,7 +7,9 @@ listed here.
 
 - Diagnostics: the bundle adds `rss.txt`, the resident memory of each
   process largest first, and `df.txt`, so a report shows which process grew
-  and whether `/var` or `/tmp` filled up (#465, #482).
+  and whether `/var` or `/tmp` filled up (#465, #482). `rss.txt` is
+  collected as one step under `STEP_TIMEOUT_S`, with its exit status in
+  `MANIFEST.txt` like every other step.
 
 - Host SerDes: a 2500BASE-X or HiSGMII lane out of sync is re-latched
   every 5 s (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the mode word
