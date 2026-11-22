@@ -16,6 +16,22 @@ listed here.
   leaves no row, and a Set with no row left in the MIB answers result 1
   rather than "unknown entity". The log says `no room for <mask>` (#482).
 
+- Kernel: the ONU is not activated when the boot clean of the GPON MAC
+  tables fails; before, it was logged and activated anyway, on tables that
+  could hold the Alloc-IDs of other ONUs, whose grants it then answers.
+  `gponact` now fails with `-EIO` or `-ETIMEDOUT`, the reason is in the
+  kernel log, `/proc/odi_gpon/status` gains `boot_replay
+  not_run|done|failed <errno>`, and the PON port drops every frame. The
+  boot step tries again with `gponact boot` while that line reads
+  `failed -5` or `failed -145` (`-ETIMEDOUT` on MIPS), three tries in
+  all, five seconds apart; each one runs the whole replay again, and
+  `gponact boot` does nothing once the ONU was activated by another
+  path. After the boot a later
+  `gponact` (by hand, an omcid respawn) does the same, and a `gpondeact`
+  before any completed boot replay no longer writes the GPON MAC.
+  `apply.sh omci` reports a VLAN rebuild as `the ONU was not
+  re-registered` instead of `stayed in O5`, which it does not know
+  (`docs/SWITCH.md`, "GPON boot init").
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy
