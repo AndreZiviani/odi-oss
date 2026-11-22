@@ -45,7 +45,8 @@ EOF
 # other words: the status is what counts, not the text. NV_VALUE_RC=N prints
 # the value it was given and exits N all the same, so a value that came with
 # a failed read can be told from one that came with exit 0.
-# NV_FALLBACK_COMMIT is our nv answering for the fallback copy.
+# NV_FALLBACK_COMMIT is our nv answering for the fallback copy, and
+# NV_FALLBACK_NONE=1 is our nv with no valid second copy.
 cat > "$T/nv" <<'STUB'
 #!/bin/sh
 [ -n "${NV_RC:-}" ] && exit "$NV_RC"
@@ -62,6 +63,10 @@ if [ "$1" = fallback ] && [ "${NV_FALLBACK_UNREAD:-0}" = 1 ]; then
 	exit 3
 fi
 [ "$1" = fallback ] && [ -n "${NV_FALLBACK_RC:-}" ] && exit "$NV_FALLBACK_RC"
+if [ "$1" = fallback ] && [ "${NV_FALLBACK_NONE:-0}" = 1 ]; then
+	echo "nv: no valid second copy of the environment"
+	exit 1
+fi
 if [ "$1" = fallback ] && [ -n "${NV_FALLBACK_COMMIT:-}" ]; then
 	echo "sw_commit=$NV_FALLBACK_COMMIT"
 	exit "${NV_FALLBACK_VALUE_RC:-0}"
@@ -76,10 +81,14 @@ exit "${NV_VALUE_RC:-0}"
 STUB
 chmod +x "$T/nv"
 
+# The nv is the vendor one unless a run says FWU_ODI_BUILD="$T/odi-build", the
+# file an image of this project carries.
+: > "$T/odi-build"
 run() {   # run <cmdline> <slot> [env...]
 	cl=$1; slot=$2; shift 2
 	echo "$cl" > "$T/cmdline"
-	( cd "$T" && env PATH="$T:$PATH" PROC_MTD="$T/mtd" PROC_CMDLINE="$T/cmdline" "$@" \
+	( cd "$T" && env PATH="$T:$PATH" PROC_MTD="$T/mtd" PROC_CMDLINE="$T/cmdline" \
+	    FWU_ODI_BUILD="$T/no-odi-build" "$@" \
 	    sh "$OLDPWD/$FWU" "$slot" "$T/img.tar" 2>&1 )
 	echo $? > "$T/rc"
 }
@@ -201,6 +210,45 @@ check_passes "with exit 0 the same values pass" \
 check "and the fallback copy is checked" \
       "the fallback env copy says 0 too -- ok" \
       "$(run "console=ttyS0,115200 root=/dev/nowhere" 1 NV_ACTIVE=0 NV_COMMIT=0 NV_FALLBACK_COMMIT=0)"
+# Any other failed read: no value either, whatever it printed. Our nv fails
+# only when it could not read, so there it refuses; how the vendor nv of a
+# first flash fails is not known, so there it stays a warning.
+OWN="FWU_ODI_BUILD=$T/odi-build"
+check_stops "our nv: a failed getenv refuses" \
+      "nv getenv failed (exit 1).*REFUSING" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_RC=1 | tr '\n' ' ')"
+check_stops "our nv: a sw_commit printed with exit 2 is not taken" \
+      "nv getenv failed (exit 2).*REFUSING" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_COMMIT=0 NV_VALUE_RC=2 | tr '\n' ' ')"
+out=$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_COMMIT=0 NV_VALUE_RC=2 FWU_FORCE=1)
+check "FWU_FORCE=1 overrides that refusal, loudly" "with an unknown revert target" "$out"
+check_passes "and goes on past the guards" "$out"
+out=$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 NV_COMMIT=0 NV_VALUE_RC=2)
+check_passes "the vendor nv: a failed getenv is warned about" "$out"
+check "and what it printed is not taken" \
+      "exited 2; what it printed is not taken" "$out"
+if printf '%s' "$out" | grep -q "revert target is intact"; then
+	echo "FAIL  the vendor nv: a value from exit 2 read as intact"; fail=$((fail + 1))
+else
+	echo "ok    the vendor nv: a value from exit 2 is not read as intact"; pass=$((pass + 1))
+fi
+check_stops "a sw_active printed with exit 2 is not taken" \
+      "cannot tell which slot is running" \
+      "$(run "console=ttyS0,115200 root=/dev/nowhere" 1 NV_ACTIVE=0 NV_COMMIT=0 NV_VALUE_RC=2 | tr '\n' ' ')"
+check_stops "our nv: a fallback sw_commit printed with exit 2 is not taken" \
+      "nv fallback failed (exit 2).*REFUSING" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_COMMIT=0 NV_FALLBACK_COMMIT=0 NV_FALLBACK_VALUE_RC=2 | tr '\n' ' ')"
+check_stops "our nv: a fallback that prints usage and exits 1 refuses" \
+      "nv fallback failed (exit 1).*REFUSING" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_COMMIT=0 | tr '\n' ' ')"
+out=$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_COMMIT=0 NV_FALLBACK_NONE=1)
+check_passes "our nv: no valid second copy is not refused" "$out"
+check "and says there is nothing to check" "no valid second env copy -- nothing to check" "$out"
+out=$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_COMMIT=0 NV_FALLBACK_COMMIT=2)
+check "a fallback sw_commit that is no slot is named as such" "says sw_commit=2, not a slot" "$out"
+check_passes "our nv: values with exit 0 pass" \
+      "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_COMMIT=0 NV_FALLBACK_COMMIT=0)"
+
 # The bound itself, where the host has timeout (macOS has none).
 if command -v timeout >/dev/null 2>&1; then
 	check_stops "an nv that hangs is cut off by the bound and refused" \
