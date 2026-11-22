@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a Create of ME 309 with a value G.988 does not define for the IGMP
+  version, function, immediate leave, upstream tag control or unauthorized
+  join behaviour now answers result 3, parameter error, with the attribute
+  in the execution mask, instead of result 9. G.988 has no result 9 for a
+  Create and reads the mask only with result 3. A Set still answers result
+  9, and the Create still makes no instance.
+
 - Diagnostics: the bundle adds `rss.txt`, the resident memory of each
   process largest first, and `df.txt`, so a report shows which process grew
   and whether `/var` or `/tmp` filled up (#465, #482). `rss.txt` is

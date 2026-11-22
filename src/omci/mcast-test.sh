@@ -588,8 +588,8 @@ send "$log" 0113 49 0135 0001 "2000"
 check "309 Set: and the immediate leave was stored" "$(answer "$log" 0113 | cut -c7-8)" "00"
 send "$log" 0114 48 0135 0001 "200001"
 send "$log" 0115 44 0135 0003 "090001"
-check "309 Create: IGMP version 9 is refused, result 9 and the attribute in the execution mask" \
-      "$(answer "$log" 0115 | cut -c1-6)" "098000"
+check "309 Create: IGMP version 9 is refused, result 3 and the attribute in the execution mask" \
+      "$(answer "$log" 0115 | cut -c1-6)" "038000"
 send "$log" 0117 44 0135 0003 "020201"
 check "309 Create: function 2 is accepted (and the refused Create made no instance: not 7)" \
       "$(answer "$log" 0117 | cut -c1-2)" "00"
@@ -597,7 +597,7 @@ send "$log" 0118 49 0135 0003 "4000"
 check "309 Create: and reads back as 2" "$(answer "$log" 0118 | cut -c7-8)" "02"
 send "$log" 0119 46 0135 0003 ""
 send "$log" 0120 44 0135 0003 "020103"
-check "309 Create: immediate leave 3 is refused" "$(answer "$log" 0120 | cut -c1-6)" "092000"
+check "309 Create: immediate leave 3 is refused" "$(answer "$log" 0120 | cut -c1-6)" "032000"
 send "$log" 0121 48 0135 0001 "800002"
 flush
 check "309: the refused writes and the restored ones leave the policy as it was" \
