@@ -18,7 +18,8 @@
 # (/proc/odi_ramlog_prev), /var/log/*, dmesg, the syslog ring (logread:
 # the event= lines omcid sends only to syslog), /etc/odi-build, /etc/version,
 # the readable /proc/odi_wdt files, the host-link state (host-link.txt),
-# uptime, /proc/meminfo, /proc/mounts, /proc/cmdline, ps, the U-Boot slot variables from both environment copies
+# uptime, /proc/meminfo, /proc/mounts, /proc/cmdline, ps, each process's resident
+# memory (rss.txt), df, the U-Boot slot variables from both environment copies
 # (nv getenv and nv fallback), a scrape of the exporter, the config store
 # (lastgood.xml, lastgood_hs.xml, odi.conf) with every secret value
 # replaced by REDACTED, and under pon/ the GPON and OMCI state: diag (ONU
@@ -236,6 +237,18 @@ grab meminfo.txt /proc/meminfo
 grab mounts.txt /proc/mounts
 grab cmdline.txt /proc/cmdline
 step ps.txt ps
+step df.txt df
+
+# rss.txt: the resident memory of each process, largest first, from
+# /proc/PID/status (busybox ps shows only VSZ). One RSS that grows between
+# two bundles is what /proc/meminfo alone cannot point at (#465). Kernel
+# threads have no VmRSS and are left out.
+for d in /proc/[0-9]*; do
+	[ -r "$d/status" ] || continue
+	awk -v pid="${d#/proc/}" '$1 == "Name:" { n = $2 } $1 == "VmRSS:" { r = $2 }
+		END { if (r != "") printf "%8s kB  %6s  %s\n", r, pid, n }' "$d/status" 2>/dev/null
+done | sort -rn > "$b/rss.txt"
+manifest - "$(size_of "$b/rss.txt")" rss.txt
 
 : > "$b/nv.txt"
 for v in sw_active sw_commit sw_tryactive sw_version0 sw_version1; do
@@ -869,6 +882,7 @@ readme() {
 	| the host link to the router | host-link.txt |
 	| settings | config/ (redacted) |
 	| services and their logs | log/, ps.txt |
+	| memory: which process grew, a full /var | meminfo.txt, rss.txt, df.txt |
 
 	The event lines are documented in docs/TOOLS.md of odi-oss, in the
 	section "Link and provisioning events".

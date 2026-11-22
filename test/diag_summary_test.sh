@@ -335,7 +335,7 @@ run_bundle "$T/out.tar.gz"
 mkdir "$T/x"
 tar -xzf "$T/out.tar.gz" -C "$T/x" 2>/dev/null
 X=$T/x/odi-diag
-for f in README.md SUMMARY.txt; do
+for f in README.md SUMMARY.txt rss.txt df.txt; do
 	[ -s "$X/$f" ] && ok "the bundle has $f" || no "the bundle has $f"
 	awk -v f="$f" '$3 == f { n++ } END { exit !n }' "$X/MANIFEST.txt" && ok "MANIFEST lists $f" ||
 		no "MANIFEST lists $f" "$(cat "$X/MANIFEST.txt")"

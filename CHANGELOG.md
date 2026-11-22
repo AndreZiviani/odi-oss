@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- Diagnostics: the bundle adds `rss.txt`, the resident memory of each
+  process largest first, and `df.txt`, so a report shows which process grew
+  and whether `/var` or `/tmp` filled up (#465, #482).
+
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy
