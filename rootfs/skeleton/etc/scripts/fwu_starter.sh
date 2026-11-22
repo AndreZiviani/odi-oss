@@ -19,7 +19,9 @@
 #      lock every writer inherits, taken before anything shared is touched;
 #   2. refuses any slot but the inactive one -- the running slot is read the
 #      way fwu.sh reads it, root=31:N in /proc/cmdline, then sw_active --
-#      and refuses either slot when sw_commit cannot be read;
+#      and the slot sw_commit names, in the active environment copy or in
+#      the fallback one; refuses either slot when sw_commit or the fallback
+#      copy cannot be read;
 #   3. extracts fwu.sh and md5.txt into a scratch directory in /tmp and checks
 #      fwu.sh against its own md5.txt line;
 #   4. runs fwu.sh <slot> <tarball> there, detached (setsid, stdin from
@@ -135,10 +137,20 @@ say "sw_commit is $commit"
 # read in full; 124 or more, no answer) leaves it unknown.
 alt_out=$(timeout 5 "$NV" fallback sw_commit 2>/dev/null)
 alt_rc=$?
+# Each outcome that lets the write go on is said, so the page log shows what
+# was checked. A copy that sets no sw_commit is not refused, as in fwu.sh,
+# but warned about, since what U-Boot does with it is not checked.
 if [ "$alt_rc" = 0 ]; then
 	alt=$(printf '%s\n' "$alt_out" | sed -n "s/^sw_commit=//p")
 	[ "$alt" != "$slot" ] || die "the fallback environment copy says sw_commit=$slot, the slot this would write. Make the two copies agree first: nv commit $running"
-elif [ "$alt_rc" != 1 ] || [ "$alt_out" != "nv: no valid second copy of the environment" ]; then
+	if [ -n "$alt" ]; then
+		say "the fallback environment copy says sw_commit=$alt"
+	else
+		say "warning: the fallback environment copy sets no sw_commit; where U-Boot goes after an interrupted nv setenv is not checked"
+	fi
+elif [ "$alt_rc" = 1 ] && [ "$alt_out" = "nv: no valid second copy of the environment" ]; then
+	say "no valid second environment copy"
+else
 	die "cannot read the fallback environment copy (nv fallback exit $alt_rc); refusing to write either slot. Check with: nv fallback sw_commit"
 fi
 
