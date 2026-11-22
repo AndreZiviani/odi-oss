@@ -178,7 +178,7 @@ The UI's reboot confirmation says which slot it comes back on.
 | `IGMP_PON_DROP` | Drop unjoined multicast from the PON | `1` makes `igmpd` also drop IPv4 multicast from the PON that no group row names, one membership interval after snooping starts, so a group nobody on the host joined stays off the UNI link; `0` snoops without dropping anything. It is the one part of snooping that can cut a stream, hence its own key. Default off: unset or anything but `1` snoops without dropping. A config with `IGMP_SNOOPING=1` that wants the drop as before must now set `IGMP_PON_DROP=1`. With `MLD_SNOOPING=1` it drops unjoined IPv6 multicast as well, never the link-scope or solicited-node groups. Has no effect while `IGMP_SNOOPING` is not `1`. Odi-only key, kept in `/etc/config/odi.conf`. Takes effect with `apply.sh igmp`, no reboot | `svc-igmpd.sh` (`igmpd -d`); `docs/TOOLS.md`, `igmpd` | SERVICE RESTART |
 | `MLD_SNOOPING` | MLD (IPv6) snooping | `1` makes `igmpd` snoop the host's MLD as it snoops its IGMP, on the same multicast profile: the switch copies (or takes) the host's MLD queries, reports and dones to the CPU and nothing else of ICMPv6, IPv6 groups get a row each (keyed on their 33:33 MAC, the host and the PON as members), the profile's IPv6 access control list rows and its group limit are enforced, and the reports go up tagged as the profile says. With `IGMP_PON_DROP=1` as well, IPv6 multicast from the PON that no group row names is dropped too, one membership interval after snooping starts; the link-scope groups ff02::/16 and the solicited-node groups always flood, both ways, so router advertisements, neighbour discovery and DHCPv6 are never pruned, and they are never snooped or refused. Empty, absent or anything else: MLD is not snooped and IPv6 multicast is flooded as it always was; `igmpd` runs exactly as without the key. Has no effect while `IGMP_SNOOPING` is not `1`. Odi-only key, kept in `/etc/config/odi.conf`. Takes effect with `apply.sh igmp`, no reboot | `svc-igmpd.sh` (`igmpd -6`); `docs/TOOLS.md`, `igmpd` | SERVICE RESTART |
 | `GPON_DYING_GASP` | Dying_Gasp on a reboot (experimental) | `1` makes the stick send the GPON Dying_Gasp PLOAM message (G.984.3 clause 9.2.4.3, up to three copies, each given 50 ms to leave) just before an orderly restart, halt or power-off, so the OLT can tell a planned reboot or firmware update from a lost ONU. Sent only when the ONU is ranging or operating (O4 or O5), only from the reboot path and once per reboot; never when the PON drops. The kernel logs `Dying_Gasp sent <n> of 3 times before the restart`, which survives the reboot in `/proc/odi_ramlog_prev`. Empty, absent or anything else: not sent. Default off, because this project cannot see what the OLT does with it: on a reboot in O5 all three copies have been seen to leave (on a stick under test, and in another open implementation's measurements on the same chip), and G.984.3 tells the OLT not to stop allocations on a Dying_Gasp alone, but an OLT that gets one without a restart following may deactivate and re-activate the ONU. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `gpondg` PON step at boot; the driver's reboot notifier | REBOOT |
-| `GPON_KEEP_DISABLE` | Stay disabled when the OLT disables this ONU | `1` keeps the ONU in Emergency Stop (O7) once the OLT has disabled it with Disable_Serial_Number (G.984.3), across this stick's own PON restarts and across reboots and power-offs, until the OLT enables it again, as the standard asks ("Keeping the OLT's disable" below). The disable is recorded in the marker file `/etc/config/gpon-hold`; a boot that finds it starts in O7 with the laser off and waits for the enable. Empty, absent or anything else: today's behaviour, the stick leaves O7 on any restart, and no marker is written or read. Default off, because a stick that stays dark when the OLT disabled it cannot be brought back from the fibre side except by the OLT itself, and an OLT that disabled it by mistake is not asked. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `gponkeep` and `gponhold` PON steps at boot; the driver; `gpon-hold.sh` | REBOOT |
+| `GPON_KEEP_DISABLE` | Stay disabled when the OLT disables this ONU | On by default: the ONU stays in Emergency Stop (O7) once the OLT has disabled it with Disable_Serial_Number (G.984.3), across this stick's own PON restarts and across reboots and power-offs, until the OLT enables it again, as the standard asks ("Keeping the OLT's disable" below). The disable is recorded in the marker file `/etc/config/gpon-hold`; a boot that finds it starts in O7 with the laser off and waits for the enable. `0`: the behaviour of earlier releases, the stick leaves O7 on any restart, and no marker is written or read. Empty, absent or anything else counts as on. A safe-mode boot ignores the key and the marker, so a disabled stick stays reachable from the host side, and `gpon-hold.sh clear` releases it by hand. Odi-only key, kept in `/etc/config/odi.conf` | rcs-lib.sh, the `gponkeep` and `gponhold` PON steps at boot; the driver; `gpon-hold.sh` | REBOOT |
 | `SFP_HOST_DDM` | Diagnostics for the router (host-side SFP EEPROM) | the router reads the module's identity (A0h) and its live diagnostics (A2h: temperature, supply voltage, bias current, tx and rx power, the alarm and warning flags, and the TX_DISABLE, TX_FAULT and RX_LOS bits) from the stick, as from any SFP with digital diagnostics, on the board revisions that wire the SoC's own SFP EEPROM emulation to the SFP edge (HSGQ v08 / DFP-34X-2C2 v08, where the stock firmware does the same). `0` turns it off; `1`, empty or absent serve it (the default); any other value serves it and logs `event=bad_value`. On v06 boards the router reads a separate fixed EEPROM with no diagnostics whatever this says: the emulation is not wired there. Left off in a safe-mode boot. Odi-only key, kept in `/etc/config/odi.conf`. Takes effect with `apply.sh sfp`, no reboot ("Host-side diagnostics" below) | `sfp-host-ddm.sh`: a PON step at boot, and `apply.sh sfp`; the kernel does the rest (`odi_switch.sfp_mirror`) | LIVE |
 
 Odi-only keys. `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`,
@@ -539,7 +539,7 @@ power-off, until the OLT enables it with Disable_Serial_Number and the enable
 code, or with the broadcast enable. Without this key the stick keeps O7 only
 until its own next PON restart or reboot, and then ranges again.
 
-With `GPON_KEEP_DISABLE=1`:
+Unless `GPON_KEEP_DISABLE=0`:
 
 - When the OLT disables the ONU, the driver notes it, and the kernel runs
   `/etc/scripts/gpon-hold.sh sync` once, which writes the marker file
@@ -575,7 +575,7 @@ safe-mode boot):
 activated and ranges again. Whether the OLT then lets it in is its decision;
 if it disabled the ONU on purpose it will disable it again. To turn the
 feature off, `flash set GPON_KEEP_DISABLE 0` (the next boot ignores the marker;
-the file stays until `clear`, and counts again if the key is set again).
+the file stays until `clear`, and counts again once the key is no longer `0`).
 
 `/proc/odi_gpon/status` has the line `o7_hold keep <0|1> held <0|1>`: `keep 1`
 is the key as the driver was told at boot, `held 1` is a kept disable in force.
@@ -584,14 +584,14 @@ by an OLT disable and left by any restart. The kernel log has
 `odi_gpon: event=o7_hold action=<recorded|kept|released|cleared> cause=<...>`
 and `gpon-hold: event=marker action=<written|removed|failed>`.
 
-**Testing it without an OLT.** On a stick with the key set,
+**Testing it without an OLT.** On a stick with the key on,
 `echo "gponhold sim" > /proc/odi_init` acts as if the OLT had sent the stick
 Disable_Serial_Number for its own serial number: O7, laser line high, the
 hold recorded and the marker written. It is a test hook, answered only when
 the ONU is between O2 and O6, and it sends nothing upstream. Then
 `gpondeact` and `gponact` in `/proc/odi_init` still end in O7, a reboot starts
 in O7, and `gpon-hold.sh clear` ends it. It refuses (`-EPERM`) while the key
-is off.
+is `0`.
 
 ### Host-side diagnostics (`SFP_HOST_DDM`)
 

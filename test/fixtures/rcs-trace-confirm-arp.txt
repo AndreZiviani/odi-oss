@@ -220,7 +220,12 @@ write /proc/odi_init "gponpw 30303030303030303030\n"
 exec /bin/timeout ["timeout", "5", "cat", "/proc/odi_init"]
 exec /bin/cat ["cat", "/proc/odi_init"]
 exec /bin/grep ["grep", "-q", "^GPON_DYING_GASP=1$", "/etc/config/odi.conf"]
-exec /bin/grep ["grep", "-q", "^GPON_KEEP_DISABLE=1$", "/etc/config/odi.conf"]
+exec /bin/grep ["grep", "-q", "^GPON_KEEP_DISABLE=0$", "/etc/config/odi.conf"]
+exec /bin/timeout ["timeout", "5", "sh", "-c", "echo \"$1\" > \"$2\"", "_", "gponkeep 1", "/proc/odi_init"]
+exec /bin/sh ["sh", "-c", "echo \"$1\" > \"$2\"", "_", "gponkeep 1", "/proc/odi_init"]
+write /proc/odi_init "gponkeep 1\n"
+exec /bin/timeout ["timeout", "5", "cat", "/proc/odi_init"]
+exec /bin/cat ["cat", "/proc/odi_init"]
 exec /bin/sed ["sed", "-n", "s/.*Name=\"GPON_SN\" Value=\"\\([^\"]*\\)\".*/\\1/p", "/etc/config/lastgood_hs.xml"]
 exec /bin/head ["head", "-n", "1"]
 exec /bin/grep ["grep", "-q", "type=1 ", "/proc/odi_omci"]

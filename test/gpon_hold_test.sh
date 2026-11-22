@@ -124,6 +124,8 @@ rm -f "$GPON_HOLD_MARKER"; printf 'GPON_KEEP_DISABLE=1\n' > "$ODI_CONF"; status 
 eq "status: key on, no marker, not held" "key=1 marker=0 held=0" "$(sh "$S" status | tr '\n' ' ' | sed 's/ $//')"
 : > "$GPON_HOLD_MARKER"; printf 'GPON_KEEP_DISABLE=0\n' > "$ODI_CONF"; status 1 1
 eq "status: key off, marker, held" "key=0 marker=1 held=1" "$(sh "$S" status | tr '\n' ' ' | sed 's/ $//')"
+rm -f "$ODI_CONF"; status 1 1
+eq "status: no odi.conf: the key is on by default" "key=1 marker=1 held=1" "$(sh "$S" status | tr '\n' ' ' | sed 's/ $//')"
 sh "$S" bogus 2>/dev/null
 eq "an unknown action exits 2" 2 $?
 
@@ -140,13 +142,16 @@ run() { steps='' crumbs=''; pon_step_keepdisable; }
 
 rm -f "$GPON_HOLD_MARKER" "$SAFE_FLAG" "$ODI_CONF"
 run
-eq "boot: no odi.conf: nothing" "" "$steps$crumbs"
+eq "boot: no odi.conf: on by default, gponkeep only" "[gponkeep 1]" "$steps"
 printf 'GPON_KEEP_DISABLE=0\n' > "$ODI_CONF"; : > "$GPON_HOLD_MARKER"
 run
 eq "boot: key 0 with a marker: nothing, the marker is not read" "" "$steps$crumbs"
 printf 'GPON_KEEP_DISABLE=\n' > "$ODI_CONF"
 run
-eq "boot: key empty: nothing" "" "$steps$crumbs"
+eq "boot: key empty with a marker: on, gponkeep, then gponhold" "[gponkeep 1][gponhold 1]" "$steps"
+printf 'SYSLOG_SERVER=\n' > "$ODI_CONF"; rm -f "$GPON_HOLD_MARKER"
+run
+eq "boot: key absent from odi.conf: on, gponkeep only" "[gponkeep 1]" "$steps"
 printf 'GPON_KEEP_DISABLE=1\n' > "$ODI_CONF"; rm -f "$GPON_HOLD_MARKER"
 run
 eq "boot: key 1, no marker: gponkeep only" "[gponkeep 1]" "$steps"

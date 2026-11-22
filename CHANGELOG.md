@@ -5,6 +5,7 @@ listed here.
 
 ## Unreleased
 
+- GPON: an OLT Emergency Stop (Disable_Serial_Number) is kept across this stick's restarts and reboots by default, as G.984.3 asks. `GPON_KEEP_DISABLE=0` restores the old behaviour; empty or absent now means on. A safe-mode boot still ignores the key and the marker, and `gpon-hold.sh clear` releases a kept disable by hand. The rcS goldens gain the `gponkeep 1` step (#482).
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy

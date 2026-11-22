@@ -33,9 +33,9 @@
 # milliseconds apart) therefore end on the current state, and each run looks
 # again after it wrote, up to three times.
 #
-# The boot reads the marker in rcs-lib.sh (pon_step_keepdisable), only with
-# GPON_KEEP_DISABLE=1 and never in a safe-mode boot. With the key off nothing
-# here runs and no marker is read or written.
+# The boot reads the marker in rcs-lib.sh (pon_step_keepdisable), unless
+# GPON_KEEP_DISABLE=0, and never in a safe-mode boot. With the key at 0
+# nothing here runs and no marker is read or written.
 #
 # Every wait is bounded. Always exits 0 from sync; clear and status report.
 set -u
@@ -66,7 +66,7 @@ held() {
 	sed -n 's/^o7_hold keep [01] held \([01]\)$/\1/p' "$STATUS" 2>/dev/null | head -n 1
 }
 
-key_on() { grep -q '^GPON_KEEP_DISABLE=1$' "$ODI_CONF" 2>/dev/null; }
+key_on() { ! grep -q '^GPON_KEEP_DISABLE=0$' "$ODI_CONF" 2>/dev/null; }
 
 # flush: the marker is what a power cut right after the disable would lose.
 flush() { "$TIMEOUT" "$IO_S" sync 2>/dev/null || true; }
