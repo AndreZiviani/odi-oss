@@ -5,6 +5,19 @@ listed here.
 
 ## Unreleased
 
+- OMCI: an attribute of a Set that the MIB store has no room for is
+  answered result 9 (attribute failed), with that attribute in the failed
+  mask and the other attributes of the Set stored, instead of success. That
+  is a new table row once the shared table pool (255 rows) is full, and an
+  attribute past byte 96 of a wide entity (a large string, the
+  authentication method) whose row was added while the wide-row pool (32)
+  was full. A Set that stores nothing, because every attribute it names
+  was refused (read-only, set-by-create only, or no room), also removes the
+  row it added for an instance the MIB did not hold. A Create whose
+  set-by-create attributes do not all fit still creates the entity with
+  the ones that do, as before, and logs the others; a later Set of one
+  answers result 9. A Set with no row left in the MIB answers result 1
+  rather than "unknown entity". The log says `no room for <mask>` (#482).
 - Host SerDes: a 2500BASE-X or HiSGMII lane out of sync is re-latched
   every 5 s (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the mode word
   back, so a re-latch cut before its restore is undone by the next) during a
