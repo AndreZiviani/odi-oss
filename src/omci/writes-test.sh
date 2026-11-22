@@ -377,6 +377,15 @@ check "a Set of a read-only attribute (3) fails with result 9, the failed mask 2
       "$(answer "$log" 0608 | cut -c1-10)" "0900002000"
 send "$log" 0609 49 0122 0101 "2000"
 check "and stores nothing" "$(answer "$log" 0609 | cut -c1-8)" "00200000"
+# The same Set of an instance the MIB does not hold: refused whole, it takes
+# out the row it added, so the upload does not grow by a record.
+send "$log" 0650 4d 0002 0000 ""
+send "$log" 0651 48 0122 0103 "2000ff"
+check "a refused Set of an instance with no row fails with result 9" \
+      "$(answer "$log" 0651 | cut -c1-10)" "0900002000"
+send "$log" 0652 4d 0002 0000 ""
+check "and leaves no row: the upload has as many records as before" \
+      "$(answer "$log" 0652 | cut -c1-4)" "$(answer "$log" 0650 | cut -c1-4)"
 send "$log" 060a 48 0122 0101 "0100003c"
 send "$log" 060b 49 0122 0101 "0100"
 check "the 16-bit quiet period (8) is stored whole" \
