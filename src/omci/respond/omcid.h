@@ -80,7 +80,11 @@
  * and ACS addresses, and the authentication method with its second username
  * -- are the exception: a bounded side pool gives each such row its full
  * width (see class_wide() in mibstore.c). Only when the pool is full does a
- * row fall back to the 96 bytes and the `truncated` mark.
+ * row added then fall back to the 96 bytes and the `truncated` mark, for as
+ * long as it lives (a slot freed later does not widen it). A Set of an
+ * attribute past them answers result 9 with that attribute in the failed
+ * mask, the others of the Set stored; a Create that carries one is not made
+ * (mib_write).
  *
  * The counts are sized for a data service and two SIP lines at once. ISP1's
  * whole provisioning holds 185 rows; two phone lines add about sixty (per
@@ -129,7 +133,10 @@
  * (tone patterns, tone events, ringing patterns and events), commonly 20 to
  * 40 rows between them, and a dial plan and a SIP response table add tens
  * more, per profile -- past the 128 the pool held. It is now as large as a
- * one-byte index allows (MIB_TBL_NONE ends a list).
+ * one-byte index allows (MIB_TBL_NONE ends a list). A Set that would add a
+ * row to a full pool does not store that row and answers result 9, the
+ * table attribute in the failed mask; the other attributes of the Set are
+ * stored.
  */
 #define MIB_TBL_ENTRY 32                 /* the widest row: 65531's ACL, 30 */
 #define MIB_TBL_NODES 255

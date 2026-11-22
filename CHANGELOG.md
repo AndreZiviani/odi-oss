@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- OMCI: an attribute of a Set that the MIB store has no room for is
+  answered result 9 (attribute failed), with that attribute in the failed
+  mask and the other attributes of the Set stored, instead of success. That
+  is a new table row once the shared table pool (255 rows) is full, and an
+  attribute past byte 96 of a wide entity (a large string, the
+  authentication method) whose row was added while the wide-row pool (32)
+  was full. A Set that stores nothing leaves no new row behind. A Create
+  whose set-by-create attributes do not fit is refused with result 1 and
+  leaves no row, and a Set with no row left in the MIB answers result 1
+  rather than "unknown entity". The log says `no room for <mask>` (#482).
+
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy

@@ -420,6 +420,10 @@ check "the ten past it are refused, no room in the MIB" \
 check "with result 1, processing error" "$(answer "$log" 114a | cut -c1-2)" "01"
 send "$log" 0501 48 0088 0140 "100001"
 check "a row already held still takes a Set" "$(answer "$log" 0501 | cut -c1-2)" "00"
+# A Set of an instance with no row needs one too: result 1 as well, not
+# "unknown entity" (4), which would say the class is not supported.
+send "$log" 0503 48 0088 0150 "100001"
+check "a Set needing a row past them is answered result 1" "$(answer "$log" 0503 | cut -c1-2)" "01"
 send "$log" 0502 4f 0002 0000 ""
 
 # The stock setters omcid does not implement: refused by the client, nothing
