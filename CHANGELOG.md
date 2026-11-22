@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- OMCI: when omcid can neither write its reload status nor remove the one
+  before, it tries the removal again once a second, without another
+  signal, until it works or a new status is written. Before, a
+  `state=running` left from the start of that reload stood until omcid
+  restarted, and `apply.sh omci` refused every later change as still
+  applying (#482).
+
 - Docs: `confd.auth` is described as odi-ui stores it from the release after
   v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
   the password, which confd writes at the first sign-in or password save,
