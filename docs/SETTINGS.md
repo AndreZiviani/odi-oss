@@ -23,7 +23,7 @@ A few more settings are plain files on the same partition ("Switch files").
 
 **The partition is shared with the other slot.** Reflashing never touches
 it, and whichever slot boots reads it. On a stick that keeps the stock
-firmware as its committed slot, every key here -- including the 161 this
+firmware as its committed slot, every key here -- including the ones this
 image does not act on -- is still what the stock firmware reads when the stick
 falls back to it. Do not delete keys this image does not use, and keep
 backups whole: the UI's backup and restore carry every key.
@@ -1339,7 +1339,7 @@ The state of the running boot is `/var/run/mgmt-addr` (`docs/TOOLS.md`,
 | Host port (Config, Network) | `host-autoneg.sh try on\|off`, then a dialog counting down the 120 s: Keep runs `confirm` (stores `HOST_AUTONEG`), Revert runs `revert`; no answer reverts by itself | LIVE (a trial) |
 | Host link and safe-mode banner (every view) | shown while the boot fallback runs auto-negotiation with `HOST_AUTONEG=off`, during a safe-mode boot, and while a safe-mode record waits; its button acknowledges the safe mode (`safe-mode.sh ack`) | -- |
 | OLT identity switch (Config) | creates or removes `/etc/config/omci-identity.on` | INTERRUPTS INTERNET (with Apply now) |
-| Stock keys (tab) | the stock keys this image does not act on (161), read-only | -- |
+| Stock keys (tab) | the stock keys this image does not act on, read-only | -- |
 | Config UI credentials (Admin) | `/etc/config/confd.auth` | LIVE (sign in again) |
 | SSH keys (Admin) | `/etc/config/dropbear.d/authorized_keys`, read at every login | LIVE |
 | Download a full config backup (Admin) | both stores, every key, identity included; `tools/config-backup.sh` takes the same file from a host (below) | -- |

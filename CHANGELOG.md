@@ -5,6 +5,44 @@ listed here.
 
 ## Unreleased
 
+- Docs: the README is rewritten around a first-time reader: which sticks
+  run this (a table with the state from QUALIFICATION.md and the setting
+  each board needs, in place of "for the DFP-34X-2C2 only"; the 2C2 v08
+  sold as the HSGQ XPON stick is listed as Community-reported, and
+  QUALIFICATION.md says so), the safety model, the install from the stock
+  firmware as numbered steps, the first login with the safe mode, the ways
+  back, updating, and the docs grouped by reader. The upgrade notes for
+  v1.4.0 to v1.6.0 are left to their CHANGELOG sections. The "area / stock
+  / this firmware" table moves, cell for cell, to the new
+  `docs/COMPARISON.md`, and the README keeps one line per area; AGENTS.md
+  points the house rule at the new page, and `tools/check-doc-pins.sh` and
+  `tools/bump-deps.sh` follow the kernel version there. The link to
+  SETTINGS.md in the host link auto-negotiation row works again. The table
+  says what v1.16.0 to v1.19.0 changed in the web UI, that every daemon
+  restarts under the restart budget, that the safe mode shortcut also
+  follows `HOST_SERDES`, and that an unreachable trial goes back by itself
+  after 300 s. The stock key counts in COMPARISON, SETTINGS, IMPROVEMENTS
+  and HACKING agree with SETTINGS.md (24, 22 in the UI); the README no
+  longer repeats them. Rows that said "not yet run on a stick" now cite
+  the runs QUALIFICATION.md records. The list of docs adds BOOT.md,
+  SWITCH.md and COMPARISON.md. New screenshots from the odi-ui preview, at
+  twice the pixel density and kept in `docs/images/`: the Status page at the
+  top (light or dark, following the GitHub theme), Config, the OMCI
+  topology, a trial boot and `diag`. The known limits say that IGMP and MLD
+  snooping, not multicast, is unproven, and when the watchdog's CPU-port
+  rule resets an unreachable committed image; the ways back say that a
+  boot back to stock has so far always stayed on stock. The README states
+  the scope as CONTRIBUTING.md does: written for the DFP-34X-2C2, with the
+  boards users report on listed. In COMPARISON.md the host SerDes row
+  carries the re-latch above, the link in the boot reliability row
+  resolves, and the hardening row says that the program text is at a fixed
+  address and there is no NX, while the stack, heap and mmap base are
+  randomised.
+
+- Lint: the two rules that look for private-workspace references and
+  machine-local paths skip binary files (`git grep -I`), so the bytes of a
+  PNG under `docs/images/` no longer read as a path.
+
 - Docs: CONTRIBUTING.md says that new functionality comes with a test,
   names the C and shell style (no warning under `-Wall -Wextra` for the C
   under `src/`), and points to #482 for the roadmap.
