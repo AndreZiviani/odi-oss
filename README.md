@@ -4,12 +4,12 @@
 [![Latest release](https://img.shields.io/github/v/release/AndreZiviani/odi-oss)](https://github.com/AndreZiviani/odi-oss/releases/latest)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
 
-Open firmware for the **ODI DFP-34X** family of GPON SFP ONU sticks and
-close rebrands on the same SoC
+Open firmware for the **ODI DFP-34X-2C2** GPON SFP ONU stick
 (Realtek RTL9602C SoC, Lexra RLX5281 CPU, 32 MB RAM, 8 MB NOR flash),
 built from source: a current mainline Linux kernel, our own drivers and
 userland, and our own toolchain. It replaces the closed stock image, which
-runs Linux 2.6.30; it is not a repack of it.
+runs Linux 2.6.30; it is not a repack of it. Users report it working on a
+few close relatives of the stick on the same SoC, listed below.
 
 | | boards | what stands behind it |
 |---|---|---|
@@ -381,7 +381,7 @@ the maintainer runs before each release, is in
 
 This is new, actively developed firmware. Before relying on it:
 
-- **One board family.** It is written for the ODI DFP-34X-2C2 / RTL9602C
+- **One board.** It is written for the ODI DFP-34X-2C2 / RTL9602C
   and has run on the sticks under
   [Supported hardware](#supported-hardware). It is not a general MIPS or
   GPON-ONU firmware.

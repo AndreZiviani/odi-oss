@@ -83,7 +83,13 @@ listed here.
   topology, a trial boot and `diag`. The known limits say that IGMP and MLD
   snooping, not multicast, is unproven, and when the watchdog's CPU-port
   rule resets an unreachable committed image; the ways back say that a
-  boot back to stock has so far always stayed on stock.
+  boot back to stock has so far always stayed on stock. The README states
+  the scope as CONTRIBUTING.md does: written for the DFP-34X-2C2, with the
+  boards users report on listed. In COMPARISON.md the host SerDes row
+  carries the re-latch above, the link in the boot reliability row
+  resolves, and the hardening row says that the program text is at a fixed
+  address and there is no NX, while the stack, heap and mmap base are
+  randomised.
 
 ## v1.19.0 (2026-11-20)
 
