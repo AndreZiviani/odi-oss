@@ -18,6 +18,27 @@ listed here.
   the ones that do, as before, and logs the others; a later Set of one
   answers result 9. A Set with no row left in the MIB answers result 1
   rather than "unknown entity". The log says `no room for <mask>` (#482).
+- Host SerDes: a 2500BASE-X or HiSGMII lane out of sync is re-latched
+  every 5 s (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the mode word
+  back, so a re-latch cut before its restore is undone by the next) during a
+  `2500basex` or `hisgmii` trial and in each 2500BASE-X phase of the boot
+  watch, until bit 17 of 0x214 reads set. A lane started before the host sends 3.125
+  Gbaud does not sync when the host starts later, and started again while
+  the host sends it syncs within seconds; a trial writes the sequence one
+  second after `try` and the host port is switched to 2.5G by hand after
+  that, so against a MikroTik hEX S 2025 (E60iUGS) a `2500basex` trial
+  never synced, on HSGQ sticks of 2025 and 2026 batches, while a boot with
+  the router port already at 2.5G synced in 1 s. A lane in sync is never
+  touched; `fiber1g` trials and the other users of `trial-lib.sh` are
+  unchanged. HiSGMII has the same race (#477, an LL-XS2510 against a
+  MikroTik RB5009: no sync and no frames until `reapply`), which is likely
+  #478; in HiSGMII bit 17 is the sync check of the trial window only, and
+  the status keeps no link source for it. `trial-lib.sh` gets a `trial_window` hook,
+  which sleeps the window as before unless the script defines its own. The
+  re-latches take the lock with `lock_try` and skip a busy tick, so a busy
+  lock cannot end a trial run before its expiry. The window ends
+  once the trial is confirmed or reverted. A failed write in a re-latch is
+  reported as a failed re-latch.
 
 - Kernel: the ONU is not activated when the boot clean of the GPON MAC
   tables fails; before, it was logged and activated anyway, on tables that
