@@ -7,8 +7,9 @@
 #   make replay            every seed and saved input through each target,
 #                          built with cc; ODI_SAN_CFLAGS adds the sanitizers
 #                          (make test-host and make test-host-asan run this)
-#   make fuzz              each target under libFuzzer with ASan and UBSan
-#                          for FUZZ_SECONDS (default 60), FUZZ_JOBS at once
+#   make fuzz              the targets side by side under libFuzzer with ASan
+#                          and UBSan for FUZZ_SECONDS (default 60), FUZZ_JOBS
+#                          processes each
 #   make fuzz TARGETS=olt  one target
 #
 # Needs clang with its libFuzzer runtime for `fuzz` (Debian and
@@ -208,26 +209,37 @@ endif
 # what the others find. Not libFuzzer -fork: that starts a new process every
 # few seconds and each one runs the whole corpus first, which with a target
 # this slow (a whole daemon life per input) leaves little time to fuzz.
+# The targets run side by side, FUZZ_JOBS processes each: FUZZ_SECONDS is
+# the time the whole run takes, not the time per target.
 # -timeout: one input, the longest session included, takes well under a
-# second; twenty mean omcid no longer comes back.
+# second; twenty mean omcid no longer comes back. -report_slow_units is
+# above it, so the only files libFuzzer writes under artifacts are inputs
+# that broke omcid: a slow-unit file is written for a run that passed, on a
+# busy machine, and would fail this target with nothing behind it.
+# What an earlier run left under artifacts is removed first, or one finding
+# would fail every run after it, fixed or not.
 fuzz: check-srcs seeds $(TARGETS:%=$(BUILD)/fuzz/fuzz_%)
 	@mkdir -p $(BUILD)/artifacts
-	@rc=0; for t in $(TARGETS); do \
+	@rm -f $(BUILD)/artifacts/*
+	@rc=0; pids=; for t in $(TARGETS); do \
 		mkdir -p $(BUILD)/corpus/$$t; \
 		dict=; [ -f $$t.dict ] && dict=-dict=$$t.dict; \
 		echo "== fuzz_$$t for $(FUZZ_SECONDS) s, $(FUZZ_JOBS) process(es)"; \
-		pids=; j=1; while [ $$j -le $(FUZZ_JOBS) ]; do \
+		j=1; while [ $$j -le $(FUZZ_JOBS) ]; do \
 			ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:symbolize=1 \
 			UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
 			$(BUILD)/fuzz/fuzz_$$t -max_total_time=$(FUZZ_SECONDS) \
-				-max_len=$(FUZZ_MAX_LEN) -timeout=20 -rss_limit_mb=2048 \
-				$$dict -print_final_stats=1 \
+				-max_len=$(FUZZ_MAX_LEN) -timeout=20 -report_slow_units=25 \
+				-rss_limit_mb=2048 $$dict -print_final_stats=1 \
 				-artifact_prefix=$(BUILD)/artifacts/$$t- \
 				$(BUILD)/corpus/$$t $(BUILD)/seeds/$$t \
 				> $(BUILD)/fuzz-$$t-$$j.log 2>&1 & \
 			pids="$$pids $$!"; j=$$((j + 1)); \
 		done; \
-		for p in $$pids; do wait $$p || rc=1; done; \
+	done; \
+	for p in $$pids; do wait $$p || rc=1; done; \
+	for t in $(TARGETS); do \
+		echo "== fuzz_$$t"; \
 		j=1; while [ $$j -le $(FUZZ_JOBS) ]; do \
 			grep -E '^#[0-9]+[[:space:]]+DONE|^stat::(number_of_executed_units|average_exec_per_sec)' \
 				$(BUILD)/fuzz-$$t-$$j.log | sed "s/^/    [$$j] /"; \
@@ -246,7 +258,7 @@ fuzz: check-srcs seeds $(TARGETS:%=$(BUILD)/fuzz/fuzz_%)
 		exit 1; \
 	fi; \
 	[ $$rc = 0 ] || { echo "FAIL  fuzz: a target stopped with an error, see $(BUILD)/fuzz-*.log"; exit 1; }; \
-	echo "ok    fuzz: $(TARGETS), $(FUZZ_SECONDS) s each, nothing found"
+	echo "ok    fuzz: $(TARGETS), $(FUZZ_SECONDS) s, nothing found"
 
 # The working corpus cut down to the inputs that add coverage (libFuzzer
 # -merge). A corpus only grows while it

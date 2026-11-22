@@ -253,7 +253,8 @@ in odi-ui `schema/settings.tsv` and `docs/SETTINGS.md` together.
 `changelog` check (a pull request has to touch `CHANGELOG.md`, unless it is
 docs or CI only, or labelled `no-changelog`), `make lint`, `make
 test-host`, `make test-diag` and `make test-omci`, each as its own parallel
-job; `test-omci` is a matrix with one job per suite
+job, and `fuzz-omci` (`make fuzz-omci` for four minutes, on pull requests
+and pushes to main only; see [Fuzzing omcid](#fuzzing-omcid)); `test-omci` is a matrix with one job per suite
 (`make test-omci-<suite>`, after `make test-omci-build`). Two more jobs
 run on every push: `clean-build` (`make kernel-tree` and `make src`, then
 checks that `make image` on a partial tree fails closed and names what is

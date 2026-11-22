@@ -9,7 +9,9 @@ listed here.
   daemon from the shipped sources against a model of the kernel (files,
   message queues, the netlink transport, a clock and signals, none of it
   real) and runs it under libFuzzer with AddressSanitizer and
-  UndefinedBehaviorSanitizer: `make fuzz-omci`. One target takes sessions
+  UndefinedBehaviorSanitizer: `make fuzz-omci`, and a CI job of the same
+  name on pull requests and pushes to main, four minutes with both targets
+  side by side. One target takes sessions
   of OMCI frames as the OLT sends them, the other the config stores, both
   CLI protocols and a damaged resume snapshot. The seeds and every input
   that once broke omcid run in `make test-host` and `make test-host-asan`
