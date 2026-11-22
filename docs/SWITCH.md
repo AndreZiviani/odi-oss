@@ -314,9 +314,13 @@ it goes on:
    The `gponact` verb fails with what the clean returned (`-EIO` for
    rows that survived, `-ETIMEDOUT` for a request that never finished),
    so the boot crumb reads `pon step gponact: ret -5` for `-EIO` and
-   `ret -110` for `-ETIMEDOUT`. `/proc/odi_gpon/status` shows state O1,
-   which is the driver's own state machine and says nothing of why: the
-   reason is the two lines above, in the kernel log. A row left in the
+   `ret -145` for `-ETIMEDOUT` (MIPS o32 numbers it 145, not 110).
+   `/proc/odi_gpon/status` shows state O1 and `boot_replay failed -5`
+   (or `-145`); its other values are `not_run` before the first
+   `gponact`, `done` once a boot replay completed, and `failed` with
+   another errno when the last boot `gponact` was refused before the
+   replay (`-1` with the laser off). The reason is the two lines above,
+   in the kernel log. A row left in the
    Alloc-ID CAM is another ONU's upstream timeslot answered by this one,
    so a stick that stays off the line is the smaller harm: it costs this
    subscriber the service, the other costs the neighbours theirs. Up to
@@ -329,8 +333,19 @@ it goes on:
    port (`MAX_FRAME_LEN_1` 0x7ef, record 351; the rest of the table
    closes it again at record 386, until O5): the failed replay writes it
    back to 0, so the port drops every frame, as on a deactivated ONU.
-   The driver does not retry. The next `gponact` runs the whole replay
-   again from its first record, reset and clean included: by hand
+   The driver does not retry, but the boot step does: while
+   `boot_replay` reads `failed -5` or `failed -145`, `pon_step_gponact`
+   (`rcs-lib.sh`) writes `gponact boot`, up to three writes in all, five
+   seconds apart (`GPONACT_TRIES` 1 to 9, `GPONACT_RETRY_S` 1 to 59;
+   anything else falls back to these defaults), and logs each try
+   as a boot crumb. It reads the status line rather than
+   `/proc/odi_init`, whose read side holds the result of whichever verb
+   ran last. Anything else ends it at once, and so does a `done` that
+   another path (an omcid respawn) brought about while it waited;
+   `gponact boot` itself does nothing once a boot replay has completed,
+   so it never re-activates an ONU that is up. Until one has completed,
+   each `gponact` runs the whole replay again from its first record,
+   reset and clean included. After the boot it takes another one: by hand
    (`echo gponact > /proc/odi_init`), at the next boot, after an omcid
    respawn (`omci-respawn-reprovision.sh`) or in a re-registration omcid
    makes for a changed identity (`apply.sh omci`). A `gpondeact` before
