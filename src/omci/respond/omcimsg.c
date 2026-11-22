@@ -970,13 +970,15 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 			return;
 		}
 		/* A multicast profile naming a value G.988 does not define for
-		 * a few-valued attribute is not created: result 9 and the
-		 * attributes at fault (mcast.c says which are judged). */
+		 * a few-valued attribute is not created: result 3, parameter
+		 * error, with the attributes at fault in the execution mask
+		 * (mcast.c says which are judged). A Create response has no
+		 * result 9: G.988 uses the mask only with result 3. */
 		if (c && cls == 309) {
 			uint16_t bad = mcast_value_reject(c, create_mask(c), f + 8, 32);
 
 			if (bad) {
-				body[0] = OMCI_ERR_ATTR_FAILED;
+				body[0] = OMCI_ERR_BAD_PARAM;
 				nl_put16(body + 1, bad);
 				send_resp(fd, tid, f, body, 3);
 				out_fmt("-> refused: undefined value in %04x\n", (long)bad);

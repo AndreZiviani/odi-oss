@@ -648,10 +648,12 @@ version when it sees no query, and the count shows as `above_version` in the
 state file and `igmpd -s`. The
 querier address (attribute 11) is stored and shown, nothing is sent from it.
 
-A Set or Create of ME 309 refuses, with result 9 and the attribute in the mask,
-a value G.988 does not define for the IGMP version (1, 2, 3, 16, 17), the IGMP
+A Set or Create of ME 309 refuses, with the attribute in the mask, a value
+G.988 does not define for the IGMP version (1, 2, 3, 16, 17), the IGMP
 function (0 to 2), immediate leave and unauthorized join behaviour (0, 1) and
-the upstream tag control (0 to 3). Every defined value is accepted whether or
+the upstream tag control (0 to 3). A Set answers result 9 and stores the
+other attributes; a Create answers result 3, parameter error, and creates
+nothing. Every defined value is accepted whether or
 not it is done: function 1 and 2 are stored and the multicast stays
 transparent.
 

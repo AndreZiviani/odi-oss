@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a Create of ME 309 with a value G.988 does not define for the IGMP
+  version, function, immediate leave, upstream tag control or unauthorized
+  join behaviour now answers result 3, parameter error, with the attribute
+  in the execution mask, instead of result 9. G.988 has no result 9 for a
+  Create and reads the mask only with result 3. A Set still answers result
+  9, and the Create still makes no instance.
+
 - Host SerDes: a 2500BASE-X or HiSGMII lane out of sync is re-latched
   every 5 s (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the mode word
   back, so a re-latch cut before its restore is undone by the next) during a
