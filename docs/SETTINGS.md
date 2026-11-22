@@ -1025,6 +1025,18 @@ pinned confd: root over ssh (the account file and dropbear follow
 `login=`), and the timed exit, which bounds that open web login to 30
 minutes.
 
+**The pinned confd (v1.19.0) shows no countdown either.** It does not read
+`exit_at=` or `exit=`, so its banner never says that the boot reboots by
+itself at 1800 s of uptime, and its Acknowledge button reads as the
+dismissal of a record, not as what keeps the boot up. It is both: pressing
+it (or `safe-mode.sh ack` from a shell) is the only way to keep a
+safe-mode boot past the 30 minutes. Someone who power-cycled into the safe
+mode to fix a password or a host port setting, and does not press it, has
+the stick reboot under them. The ssh login banner (`/var/run/motd`,
+written by `slot-state.sh`) does say it on a safe-mode boot: a `SAFE MODE`
+line with the cause, the login, the uptime of the reboot and the command
+that keeps the boot up, or that the boot was acknowledged.
+
 **The timed exit.** A safe mode the stick entered by itself is seen by
 nobody, and until this rule it kept the PON off until someone rebooted it:
 one bad quarter of an hour of an OLT or of omcid took a line down for
@@ -1099,7 +1111,9 @@ goes back to the committed slot. Acknowledge before flashing from a
 safe-mode boot.
 
 Why 30 minutes: long enough for a person to notice the line is down, find
-the rescue address and sign in, with the banner saying when it reboots;
+the rescue address and sign in, with a banner saying when it reboots (the
+ssh one does; the web UI one does only with a confd that reads `exit_at=`,
+which this image does not pin yet, see above);
 short enough that an unattended stick tries its PON again within the hour.
 What follows the reboot depends on the fault, and neither case is a way
 out by itself:

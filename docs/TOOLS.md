@@ -1318,7 +1318,11 @@ interactive login) and in syslog (tag `slot-state`) -- `TRIAL BOOT`,
 STATE UNKNOWN`, each naming the copies and the command that clears it; when
 it is `0` the motd is empty. A failed check of the other slot adds an
 `OTHER SLOT BROKEN` line to both, an unreadable one `OTHER SLOT UNCHECKED` to
-the motd only. The file is first written with `other_slot_check=pending` and
+the motd only. On a safe-mode boot (`/var/run/safe-mode`) the motd also
+gets a `SAFE MODE` line, the first: the cause, the login, and while
+`exit=timed` the uptime at which the boot reboots by itself and the command
+that keeps it up (`safe-mode.sh ack`), or that it was acknowledged. It is
+written at boot and on the next run of the script, not on `ack`. The file is first written with `other_slot_check=pending` and
 replaced once the check has answered, so `trial-guard.sh` never waits on the
 flash read. The first nine keys keep their order: omcid reads `running` and
 `uncommitted` from the first 256 bytes.

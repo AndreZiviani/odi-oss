@@ -93,6 +93,7 @@ run() {
 	    PROC_CMDLINE="$T/cmdline" PROC_MTD="$T/mtd" STATE="$T/state" \
 	    MOTD="$T/motd" DEV_LOG="$T/devlog" RCS_DEV="$PWD/rootfs/skeleton/etc/init.d/rcS.dev" \
 	    CONFIRM_ARP_FILE="$T/confirm-arp" BREADCRUMBS_ON="$T/breadcrumbs.on" \
+	    SAFE_FLAG="$T/safe-mode" \
 	    sh "$S" > "$T/out" 2>&1
 	echo $? > "$T/rc"
 }
@@ -364,6 +365,24 @@ if grep -q confirm-arp "$T/motd"; then no "no confirm-arp line without the file"
 rm -f "$T/breadcrumbs.on"
 run
 quiet "neither file, committed: still silent"
+
+echo "== a safe-mode boot says when it reboots, on a committed slot too"
+printf 'cause=watchdog\nlogin=stored\nexit_at=1800\nexit=timed\n' > "$T/safe-mode"
+run
+motd "the safe mode, its cause and login" "SAFE MODE (cause=watchdog, login=stored): the PON is off"
+motd "and the timed exit" "reboots by itself at 1800 s of uptime unless someone acknowledges it"
+motd "and how to keep it up" "Keep it up with: /etc/scripts/safe-mode.sh ack"
+if [ -s "$T/log" ]; then no "no syslog line for it"; else ok "no syslog line for it"; fi
+printf 'cause=watchdog\nlogin=stored\nexit_at=1800\nexit=held\n' > "$T/safe-mode"
+run
+motd "acknowledged: it says the boot stays up" "Acknowledged: this boot stays up until a reboot"
+if grep -q 'reboots by itself' "$T/motd"; then no "  and no reboot is announced"; else ok "  and no reboot is announced"; fi
+printf 'cause=watchdog\nlogin=stored\nexit_at=1800\nexit=exiting\n' > "$T/safe-mode"
+run
+motd "any other exit state points at status" "See: /etc/scripts/safe-mode.sh status"
+rm -f "$T/safe-mode"
+run
+quiet "no flag: silent again"
 
 echo
 echo "$pass passed, $fail failed"

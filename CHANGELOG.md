@@ -37,7 +37,13 @@ listed here.
   the reboot so that none starts then (busybox `reboot` returns at once, so
   the exit stays alive with the lock until init kills it, 120 s at most,
   `REBOOT_HOLD_S`), and does not take a failed or early sleep for the
-  deadline. It
+  deadline. **The pinned confd shows no countdown**: its banner does not
+  read `exit_at=`, so nothing in the web UI says the boot reboots at 30
+  minutes, and its Acknowledge button, which reads as dismissing a record,
+  is what keeps the boot up. Press it, or run `safe-mode.sh ack`, before
+  you start fixing a password or a host port setting. The ssh login banner
+  (`slot-state.sh`) gets a `SAFE MODE` line that says when the boot
+  reboots and how to keep it up. The exit
   boots what any reboot boots: an armed trial once, and with the config
   partition still unusable a safe-mode boot again, the PON off throughout.
   Acknowledge before flashing from a safe-mode boot (`docs/FLASHING.md`).
@@ -49,7 +55,8 @@ listed here.
   `exit_at=`, and says root apart when the account file could not be
   replaced; the flag and the record gain `prev=` and `login=`. No new write
   to the flash. Host-tested (`test/safe_mode_test.sh`, 287 checks, among them a
-  `reboot` stub that returns and then finds the writer lock still held); the
+  `reboot` stub that returns and then finds the writer lock still held;
+  `test/slot_state_test.sh` for the banner line); the
   script alone also ran under stubs on a test stick, which is not a
   safe-mode boot on hardware (`docs/QUALIFICATION.md`). `docs/SETTINGS.md`,
   "Recovery: the safe mode", has the table and the reasoning.
