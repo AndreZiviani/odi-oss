@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- Lint: the two rules that look for private-workspace references and
+  machine-local paths skip binary files (`git grep -I`), so the bytes of a
+  PNG under `docs/images/` no longer read as a path.
 - Upgrades: `fwu_starter.sh`, which the Firmware page runs, refuses to write
   the slot `sw_commit` names, in either environment copy, and refuses when
   it cannot read the fallback copy, before it extracts anything. `fwu.sh`
