@@ -7,7 +7,7 @@
 
 .PHONY: help kernel-tree toolchain toolchain-audit kernel packages busybox \
 	src releases image image-all clean distclean lint test test-host test-host-asan test-omci \
-	test-diag test-rcs test-qemu test-omci-respond test-igmp check-applets
+	test-diag test-rcs test-qemu test-omci-respond test-igmp check-applets cppcheck
 
 help:
 	@echo "targets:"
@@ -25,6 +25,7 @@ help:
 	@echo "  test-omci-respond  omcid unit tests (class 171 decode), test-igmp  igmpd unit tests"
 	@echo "  lint            shellcheck every script here, the repo rules, REUSE compliance"
 	@echo "  check-applets   every command the on-device scripts run is in the image (part of lint)"
+	@echo "  cppcheck        static analysis of every C file here (about a minute on 8 cores; not part of test)"
 	@echo "  test-rcs        the rcS action trace against its goldens (needs out/busybox, docker)"
 	@echo "  test-qemu       boot the real rootfs under qemu-system-mips, ssh/web/exporter + resilience scenarios"
 	@echo
@@ -356,6 +357,19 @@ DEVICE_SCRIPTS = rootfs/skeleton/etc/init.d/* rootfs/skeleton/etc/scripts/*.sh \
 # from it shows up only on the stick, as an empty pipeline. This finds every
 # command the on-device scripts run and refuses one the image does not have
 # (tools/check-applets.py has what it does and does not see).
+# Static analysis of our C: every tracked .c file, the kernel overlay, the
+# tools and the tests included. Warnings and errors only; style and
+# portability findings (GNU arithmetic on void pointers, say) are not gates.
+# One preprocessor configuration per file: all of them took twice as long
+# and found nothing more. A finding that is not a bug is suppressed where it
+# is, with a cppcheck-suppress comment and the reason above it. CI runs this
+# as its own job with the cppcheck of its runner image (2.13 on
+# ubuntu-24.04); another version can report more.
+cppcheck:
+	cppcheck -q -j$(TEST_JOBS) --std=c11 --enable=warning --max-configs=1 \
+		--inline-suppr --error-exitcode=1 $$(git ls-files '*.c')
+	@echo "cppcheck: clean"
+
 check-applets:
 	python3 -I tools/check-applets.py rootfs/skeleton/etc/inittab $(DEVICE_SCRIPTS) image/fwu.sh
 

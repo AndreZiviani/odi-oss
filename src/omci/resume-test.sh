@@ -27,10 +27,11 @@
 #      second instance must hold not one `drv ` line -- the switch was
 #      never touched.
 #
-# Then three more: a wide row comes back whole, the wide slots go back to
-# the rows that had them, and an omcid killed between
+# Then four more: a wide row comes back whole, the wide slots go back to
+# the rows that had them, an omcid killed between
 # the answer to a Set and the rebuild that programs it leaves that rebuild
-# to the respawned one.
+# to the respawned one, and a save that fails leaves no snapshot to resume
+# from.
 #
 # Run from src/omci, inside the toolchain image (make test-omci-resume):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
@@ -385,6 +386,51 @@ else
 	echo "FAIL  pending rebuild: the snapshot saved after the rebuild still has one pending, or was not resumed"
 	sed -n '1,20p' "$olog3"
 	fail=$((fail + 1))
+fi
+omcid_stop "$pid"
+
+# ---------------------------------------- a save that fails
+# A save that cannot be written takes the older snapshot with it: resuming
+# from that one would answer for a MIB the OLT has since changed. A
+# directory where the temp file goes makes the next save fail, as a full
+# tmpfs would; the respawned omcid then finds no snapshot and does not resume.
+flog1=/tmp/omcid-resume-fail-before.log
+flog2=/tmp/omcid-resume-fail-after.log
+rm -f /var/run/omcid-mib.snap /var/run/omcid-mib.snap.tmp /var/run/omcid-resume-decision
+: > "$flog1"
+$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-isp2 > "$flog1" 2>&1 &
+pid=$!
+omcid_up "$flog1"
+$Q cli/build/omcli --inject-file "$FIX/omci-session-isp2.txt" > /dev/null 2>&1
+settled "$flog1"
+if [ -s /var/run/omcid-mib.snap ]; then
+	echo "ok    failed save: the session left a snapshot"
+else
+	echo "FAIL  failed save: no snapshot after the session"
+	fail=$((fail + 1))
+fi
+mkdir /var/run/omcid-mib.snap.tmp
+inject_wait "$flog1" "$pending_set"
+if grep -q 'event=snapshot_fail' "$flog1" && [ ! -e /var/run/omcid-mib.snap ]; then
+	echo "ok    failed save: event=snapshot_fail, and the older snapshot is gone"
+else
+	echo "FAIL  failed save: no snapshot_fail, or the older snapshot is still on disk"
+	grep 'snapshot' "$flog1" | head -5
+	fail=$((fail + 1))
+fi
+kill -9 "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
+rmdir /var/run/omcid-mib.snap.tmp
+
+: > "$flog2"
+$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -s 5 -g /tmp/resume-gpon-isp2 > "$flog2" 2>&1 &
+pid=$!
+omcid_up "$flog2"
+if grep -q 'resume: onu state 5, snapshot loaded' "$flog2"; then
+	echo "FAIL  failed save: the respawned instance resumed from the older snapshot"
+	fail=$((fail + 1))
+else
+	echo "ok    failed save: the respawned instance does not resume"
 fi
 omcid_stop "$pid"
 

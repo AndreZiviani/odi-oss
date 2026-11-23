@@ -34,9 +34,12 @@ mkdir -p "$T/bin" "$T/img"
 # which is what setsid does apart from the new session.
 printf '#!/bin/sh\nexec "$@"\n' > "$T/bin/setsid"
 # NV_COMMIT is what sw_commit reads as: 0 unless a test says otherwise, and
-# set but empty for an environment that cannot be read.
+# set but empty for an environment that cannot be read. NV_GETENV_RC=N
+# prints the value of getenv all the same and exits N.
 cat > "$T/bin/nv" <<'NV'
 #!/bin/sh
+rc=0
+[ "$1" = getenv ] && rc=${NV_GETENV_RC:-0}
 case "$2" in
 sw_active) [ -n "${NV_ACTIVE:-}" ] && echo "sw_active=$NV_ACTIVE" ;;
 sw_commit)
@@ -52,7 +55,7 @@ sw_commit)
 		[ -n "${NV_COMMIT-0}" ] && echo "sw_commit=${NV_COMMIT-0}"
 	fi ;;
 esac
-exit 0
+exit "$rc"
 NV
 # slot-state.sh: says that it ran, and whether it got the writer lock (it
 # must not hold it, so it must be able to take it).
@@ -120,6 +123,10 @@ t "sw_active answers when the cmdline does not" "running; write slot 0" \
   "$(NV_ACTIVE=1 run 'console=ttyS0' 1 "$T/good.tar")"
 t "neither answering refuses both slots" "cannot tell which slot" "$(run 'console=ttyS0' 1 "$T/good.tar")"
 t "an unreadable sw_commit refuses the write" "cannot read sw_commit" "$(NV_COMMIT='' run 'root=31:5' 1 "$T/good.tar")"
+t "a sw_commit printed with a failed read is not taken" "cannot read sw_commit" \
+  "$(NV_GETENV_RC=3 run 'root=31:5' 1 "$T/good.tar")"
+t "nor a sw_active" "cannot tell which slot is running" \
+  "$(NV_ACTIVE=0 NV_GETENV_RC=2 run 'console=ttyS0' 1 "$T/good.tar")"
 t "so does one that is neither 0 nor 1" "cannot read sw_commit" "$(NV_COMMIT=2 run 'root=31:5' 1 "$T/good.tar")"
 t "the slot sw_commit names is refused, whatever fwu.sh the image carries" "sw_commit is 1, the slot this would write" \
   "$(NV_COMMIT=1 run 'root=31:5' 1 "$T/good.tar")"

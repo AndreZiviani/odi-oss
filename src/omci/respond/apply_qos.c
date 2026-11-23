@@ -270,7 +270,7 @@ void *qos_prog_state(uint32_t *len)
 int qos_prog_state_ok(const void *state)
 {
 	const uint8_t *s = (const uint8_t *)state +
-			   ((const uint8_t *)&prog.n - (const uint8_t *)&prog);
+			   __builtin_offsetof(__typeof__(prog), n);
 	uint32_t n;
 
 	for (unsigned i = 0; i < sizeof n; i++)

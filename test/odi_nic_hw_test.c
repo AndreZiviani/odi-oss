@@ -545,6 +545,8 @@ static void nicm_reset(struct nicm *m)
 static void nicm_apply(struct nicm *m, const struct odi_nic_regw *w, unsigned int n)
 {
 	for (unsigned int k = 0; k < n; k++, m->writes++) {
+		/* The callers filled the first n entries of w. */
+		/* cppcheck-suppress uninitvar */
 		unsigned int off = w[k].off, r, i;
 		int known = 0;
 

@@ -511,7 +511,8 @@ static void test_activation_scenario(void)
 	i_o3 = find_action(&rec, (unsigned int)(i_overhead + 1), ACT_SET_STATE);
 	CHECK(i_to1_start >= 0 && i_o3 >= 0 && i_to1_start < i_o3,
 	      "Upstream_Overhead starts TO1 before the O2->O3 transition");
-	CHECK(rec.log[i_o3].a == ODI_GPON_STATE_O3, "Upstream_Overhead own transition sets state O3");
+	CHECK(i_o3 >= 0 && rec.log[i_o3].a == ODI_GPON_STATE_O3,
+	      "Upstream_Overhead own transition sets state O3");
 
 	/* The SN-request grant abstraction produces nothing at all now --
 	 * hardware answers it autonomously (this file own header comment,

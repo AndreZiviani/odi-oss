@@ -241,6 +241,9 @@ void apply_entity(const struct omci_class *c, uint16_t inst,
 		   us_td_referenced(inst))))
 		qos_dirty = 1;
 
+	/* Both callers (omcimsg.c) pass the class of a row they hold, so c is
+	 * never null here; the c && above are only habit. */
+	/* cppcheck-suppress nullPointerRedundantCheck */
 	switch (c->classId) {
 	case OMCI_ME_TCONT:
 		/* Applied by us_qos_rebuild(), once the queue graph settles. */
