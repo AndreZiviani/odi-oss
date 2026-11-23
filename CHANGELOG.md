@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- Docs: COMPARISON.md, BUILDING.md, HACKING.md and KERNEL.md name the pinned
+  kernel, 6.18.65, again; the bump to it left them at 6.18.63, and `make lint`
+  failed on main for the first two.
+
 - CI: `make cppcheck` runs cppcheck over every tracked C file, and CI runs
   it as its own job on ubuntu-24.04 (#482). Of the nine findings on main,
   one was a test that read `rec.log[-1]` when the action it looked for was
