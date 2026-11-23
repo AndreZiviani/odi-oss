@@ -321,12 +321,16 @@ sds_anf() {
 # starts later (a host port switched to 2.5G by hand after the stick, as a
 # trial asks), in 2500BASE-X and in HiSGMII alike; started again while the
 # host sends, it syncs within seconds. Run only on a lane in MODE whose bit
-# 17 reads clear: a lane in sync is never touched. Returns 1 when the read
-# or any write fails; the restore is written even after a failed park.
+# 17 read clear, under the lock: its own read of 0x214 looks at bit 17
+# again, and a lane that synced since the caller read it is left alone
+# (0, nothing written), so a lane in sync is never touched. Returns 1 when
+# the read or any write fails; the restore is written even after a failed
+# park.
 sds_relatch() {
 	mode_vars "$1"
 	cur=$(sds_read 0x214)
 	[ -n "$cur" ] || return 1
+	[ $(( 0x$cur & 0x20000 )) -eq 0 ] || return 0
 	rl=0
 	sds_put 0x214 "$(printf '0x%x' $(( 0x$cur | 0x2000 )))" || rl=1
 	sds_put 0x214 "$(printf '0x%x' $(( ((0x$cur | 0x2000) & ~0x801f) | 0x1f )))" || rl=1
@@ -789,16 +793,18 @@ confirm() {
 
 # keep: the keeper of a 2500basex link that was seen in sync. A lane that
 # loses the sync while the stick keeps power (the host port set to 1G and
-# back to 2.5G-baseX, or disabled and enabled; a host that reboots powers
-# the stick down too) is started before the host sends again, and stays
-# out of sync as in a trial (docs/SWITCH.md, "The re-latch"). Every
-# RESYNC_S s, in phase steady, it reads bit 17; clear, and clear again a
-# second later, it re-latches the lane, and again every RESYNC_S s until
-# the bit reads set. One event when the sync is lost and one when it is
-# back. A lane in sync is never touched and the mode never changes. One
-# keeper at a time (KEEP_PID); it acts under the lock and skips a tick
-# when the lock is busy, and it ends once HOST_SERDES or the running mode,
-# in phase steady, is no longer 2500basex.
+# back to 2.5G-baseX, or disabled and enabled) did not sync again, in the
+# runs, until it was re-latched, as in a trial (docs/SWITCH.md, "The
+# re-latch"). Every RESYNC_S s, in phase steady, it reads bit 17; clear,
+# and clear again a second later, it re-latches the lane, and again every
+# RESYNC_S s until the bit reads set, and set again a second later. One
+# event when the sync is lost and one when it is back. A lane in sync is
+# never touched and the mode never changes. It acts under the lock and
+# skips a tick when the lock is busy, and it ends once HOST_SERDES or the
+# running mode, in phase steady, is no longer 2500basex. One keeper at a
+# time, by a pid file (KEEP_PID) rather than a respawn entry: it starts
+# only once the boot watch saw the sync or a 2500basex trial was
+# confirmed, not with the boot, and it ends by itself.
 keep() {
 	if [ -f "$KEEP_PID" ]; then
 		k=$(cat "$KEEP_PID" 2>/dev/null)
@@ -823,8 +829,12 @@ keep() {
 		fi
 		[ "$running" = 2500basex ] || break
 		k_l=$(link 2500basex)
-		if [ "$k_l" = 0 ] && [ -z "$k_lost" ]; then
-			# One read is not a lost sync yet: read it again.
+		# One read is not a change yet, either way: a lane out of sync
+		# reads bit 17 set for one read in fifteen to fifty (docs/SWITCH.md,
+		# "The re-latch"). A lost sync, or one back, is read again a
+		# second later.
+		if { [ "$k_l" = 0 ] && [ -z "$k_lost" ]; } ||
+			{ [ "$k_l" = 1 ] && [ -n "$k_lost" ]; }; then
 			"$SLEEP" 1
 			k_l=$(link 2500basex)
 		fi

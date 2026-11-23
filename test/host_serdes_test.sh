@@ -721,6 +721,63 @@ sed -i 's/^phase=.*/phase=trial/' "$STATE"
 KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
 t "keeper, a trial running: nothing written" "^$" "$(cat "$T/sdsset")"
 sed -i 's/^phase=.*/phase=steady/' "$STATE"
+# A fiber1g trial applied (phase trial, running fiber1g): hands off, and
+# still there for the revert to 2500basex. Not in phase steady, the running
+# mode is not looked at.
+sed -i 's/^phase=.*/phase=trial/; s/^running=.*/running=fiber1g/' "$STATE"
+up=$(cut -d. -f1 "$T/uptime")
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+t "keeper, a fiber1g trial applied: nothing written, all its ticks run" "^$((up + 15)) $" \
+	"$(cut -d. -f1 "$T/uptime") $(cat "$T/sdsset")"
+sed -i 's/^phase=.*/phase=steady/; s/^running=.*/running=2500basex/' "$STATE"
+# iohook_at N CMD: CMD runs before the Nth command from now that goes
+# through the timeout stub (a register read or write, here).
+iohook_at() {
+	echo 0 > "$T/ion"
+	printf '#!/bin/sh\nn=$(( $(cat "%s/ion") + 1 )); echo $n > "%s/ion"\nif [ $n -lt %s ]; then cp "%s/iohook.at" "%s/iohook"; else %s; fi\n' \
+		"$T" "$T" "$1" "$T" "$T" "$2" > "$T/iohook.at"
+	chmod +x "$T/iohook.at"
+	cp "$T/iohook.at" "$T/iohook"
+}
+# Lost, then one read with bit 17 set (a lane out of sync reads it set now
+# and then): not back yet, read again, still out of sync, re-latched. The
+# keeper's first tick is 6 commands (two reads, the re-latch's read and
+# three writes); the 7th is the first read of the second.
+echo none > "$T/model"
+: > "$T/kmsg"
+: > "$T/sdsset"
+cat > "$T/bit17" <<EOF
+#!/bin/sh
+r=\$(sed -n 's/^0x214=//p' "$T/regs")
+sed -i "s/^0x214=.*/0x214=\$(printf '0x%x' \$(( r | 0x20000 )))/" "$T/regs"
+EOF
+chmod +x "$T/bit17"
+iohook_at 7 "$T/bit17"
+KEEP_TICKS=2 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/iohook" "$T/iohook.run"
+t "keeper, one read back in sync: no serdes_back, still lost" "^serdes_lost 1$" \
+	"$(st event) $(grep -c 'event=serdes' "$T/kmsg")"
+[ "$(grep -c 'set 0x214 0x2[46]201f' "$T/sdsset")" -ge 2 ] && ok "  ... and re-latched again" ||
+	no "  ... and re-latched again" "$(cat "$T/sdsset")"
+sed -i 's/^event=.*/event=serdes_back/' "$STATE"
+# Clear twice, then in sync by the re-latch's own read under the lock (the
+# host came back between the keeper's reads and the lock): nothing written.
+: > "$T/sdsset"
+iohook_at 3 "echo x2500 > \"$T/model\"; \"$T/bin/model\""
+KEEP_TICKS=1 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/iohook" "$T/iohook.run"
+t "keeper, the lane in sync by the re-latch's read: nothing written" "^$" "$(cat "$T/sdsset")"
+# A try that takes the lock between the keeper's load and its lock: under
+# the lock the keeper sees the trial and leaves the lane alone.
+echo none > "$T/model"
+: > "$T/sdsset"
+: > "$T/kmsg"
+iohook_at 1 "sh \"$S\" try fiber1g > /dev/null 2>&1"
+KEEP_TICKS=1 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/iohook" "$T/iohook.run"
+t "keeper, a try between its load and its lock: nothing written, no serdes_lost" "^trial_started trial $" \
+	"$(st event) $(st phase) $(cat "$T/sdsset")$(grep serdes_lost "$T/kmsg")"
+sed -i 's/^phase=.*/phase=steady/; s/^event=.*/event=serdes_back/; s/^trial_[a-z]*=.*//' "$STATE"
 # Fiber 1G running (a boot watch fallback): ends at once, no switch back.
 sed -i 's/^running=.*/running=fiber1g/' "$STATE"
 up=$(cut -d. -f1 "$T/uptime")
