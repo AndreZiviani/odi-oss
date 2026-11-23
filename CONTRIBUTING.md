@@ -66,6 +66,7 @@ checks this on every pull request unless it is labelled `no-changelog`.
 
 ## Decisions and roadmap
 
-André Ziviani maintains odi-oss and decides what is merged and released.
-Planned work and its order are tracked in
-[#482](https://github.com/AndreZiviani/odi-oss/issues/482).
+I'm the only maintainer, at least for now, of odi-oss, and I decide what is
+merged and released. Before a larger change, open a
+[discussion](https://github.com/AndreZiviani/odi-oss/discussions) or an issue
+for it, so its scope and order can be agreed first.

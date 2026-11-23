@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- CONTRIBUTING.md: a larger change starts with a discussion or an issue of
+  its own; the roadmap section no longer points to one tracking issue.
+
 - Identity trial: each event line goes to the kernel log before the state
   file records the step, so a reader that sees the trial end (`phase=steady`)
   also finds its outcome in the log. Before, the line followed the state, and
