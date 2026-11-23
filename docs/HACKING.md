@@ -208,8 +208,9 @@ command on stdin. The command is any shell line, so
 - **The root password** is generated per build and written to
   `out/image/root-password-<version>.txt`; `ROOT_PW=` chooses it,
   `ROOT_PW=none` leaves it empty, `ROOT_PW=locked` ships no password at all
-  and starts dropbear with `-s` (`.github/workflows/release.yml` builds
-  every release this way). It is baked into the read-only rootfs, so keep
+  and starts dropbear with `-s` (the `reproducible` job in
+  `.github/workflows/ci.yml` builds every release this way, and
+  `release.yml` publishes that build). It is baked into the read-only rootfs, so keep
   the file for as long as that image runs anywhere. All three shapes are
   `image/gen-root-account.sh`, tested by `test/root_pw_test.sh`.
 
@@ -280,9 +281,10 @@ tag's commit is an ancestor of `origin/main` (`tools/check-release-ancestry.sh`;
 pre-release tags such as `v1.2.2-beta.1` are exempt, they test unmerged work), then calls `ci.yml` as a reusable
 workflow on that same commit and publishes nothing unless every job of it,
 `test-qemu`, the rcS goldens, `full` and `reproducible` included, succeeded.
-Only then does it build the full
-image (`VERSION=` from the tag, `ROOT_PW=locked`) and publishes it as a
-GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
+Only then does it publish the full image (`VERSION=` from the tag,
+`ROOT_PW=locked`) that `reproducible` built twice and compared, checked
+against the SHA-256 that job reported, rather than building a third one. It
+goes out as a GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
 attestations, and notes from `tools/release-notes.sh` (the tag's own
 `CHANGELOG.md` section plus a flash-and-first-login paragraph).
 `.github/workflows/dependency-bump.yml` runs `tools/bump-deps.sh` every

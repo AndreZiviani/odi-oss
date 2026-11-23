@@ -270,7 +270,10 @@ each driver verb, and `event=reload_done ... result=... duration_s=...
 holds the same outcome for `apply.sh` (`id` pid.sequence, `state`, `changed`,
 `action`, `result`, `keys`, `retry`, `duration_ms`, `o5_ms`, `services`, and
 for an identity change `refusals`, `streak` and, with the clock set, `today`),
-replaced whole by a rename; omcid removes a stale one at start.
+replaced whole by a rename; omcid removes a stale one at start. A status it
+cannot write is removed, so the one before does not stand; when that fails
+too, omcid tries the removal again once a second until it works or a new
+status is written. The status it could not write is not published later.
 
 **Re-registrations are counted, and held back after refusals.** Some
 operators are said to block a line after a few refused registrations, and a
@@ -1401,7 +1404,9 @@ connection that asked for it, so the answer leaves first. It applies what the
 store holds, at once and with no way back; the web UI changes the management
 addresses through `mgmt-addr.sh` instead (below), and uses this only in a
 safe-mode boot. `omci [seconds]`
-sends SIGHUP to the running omcid (`pidof omcid`) and waits for its answer in
+sends SIGHUP to the running omcid (`pidof omcid`; with more than one it
+refuses, since init runs one and a confirmation can go to one only) and
+waits for its answer in
 `/var/run/omcid-reload`: first that omcid took the signal (5 s), then the
 outcome (20 s, `APPLY_WAIT` or the argument; the web UI gives the script 25).
 omcid decides what the change needs (the table under `omcid`): nothing, a
@@ -1445,9 +1450,13 @@ one-second sleeps), past the longest reload, so an omcid that could not
 write its status does not hold every later apply off. omcid removes the
 status file when it cannot write it, so a `running` from the start of a
 reload does not outlive it, unless that removal fails as well.
-omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`); a
-file that is empty, cut short or says anything else confirms nothing and
-counts as `live`. The outcome reported is this run's: when the next reload
+omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`),
+each followed by the pid of the omcid it signals (`confirm 412`); a file
+that is empty, cut short, names another pid (one left for an omcid that
+died before its reload) or says anything else confirms nothing and counts
+as `live`. A plain `omci` exits 1 without signalling when it cannot remove
+a confirmation left on disk, and one whose signal could not be sent is
+removed again. The outcome reported is this run's: when the next reload
 has started before it was read, apply.sh says so and exits 1.
 
 A re-registration still running at the bound is reported as still working and
@@ -1587,6 +1596,7 @@ diagnostics bundle (`host-link.txt`):
 | `link` (`status` only) | `1`, `0` or `unknown`, from `link_source` |
 | `link_source` (`status` only) | `host_link` (Fiber 1G: the kernel parameter), `serdes_sync` (2500BASE-X: bit 17 of 0x214) or `none` (HiSGMII: `link` is `unknown`) |
 | `safe_mode_boot` (`status` only) | `1` on a safe-mode boot (`safe-mode.sh`) |
+| `keeper` (`status` only) | the pid of the 2500BASE-X keeper (`serdes_lost` below), or `none`: nothing starts one again once it has ended |
 
 Every event is one line to the kernel log (`host-serdes: event=<name>
 setting=... running=... <text>`, so dmesg, the ramlog and syslog through
@@ -1596,6 +1606,7 @@ klogd), at notice:
 |---|---|
 | `applied` | a boot applied 2500basex (and started the boot watch) or hisgmii (no watch: no link signal) |
 | `serdes_link` | the boot watch saw the 2500BASE-X sync; no fallback |
+| `serdes_lost`, `serdes_back` | the keeper (after a sync of the boot watch or a confirmed `2500basex` trial): the 2500BASE-X sync was lost and the lane is re-latched every 5 s; the sync is back |
 | `watch_switch` | no link for 30 s; the watch switches mode |
 | `fallback` | the host linked only in Fiber 1G; the key stays 2500basex |
 | `fallback_nolink` | no link in either mode for 10 minutes; stays on Fiber 1G, the key unchanged |
