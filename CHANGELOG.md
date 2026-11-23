@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+- Docs: the README links the roadmap in #482 under "Contributing and
+  security", as `CONTRIBUTING.md` already does.
+
 - Identity trial: each event line goes to the kernel log before the state
   file records the step, so a reader that sees the trial end (`phase=steady`)
   also finds its outcome in the log. Before, the line followed the state, and

@@ -510,6 +510,10 @@ version, what you did, the evidence) and what a pull request must pass
 serial numbers, MAC addresses, LOIDs and passwords before you post a log;
 the diagnostics bundle masks them by default.
 
+Planned work and its order are tracked in
+[#482](https://github.com/AndreZiviani/odi-oss/issues/482); check it before
+you start on something larger.
+
 The web UI and the exporter are separate projects
 ([Related repositories](#related-repositories)); report their issues there.
 
