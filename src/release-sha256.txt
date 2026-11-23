@@ -3,6 +3,12 @@
 # together is still refused. One line per asset: repo, tag, asset, sha256.
 # tools/bump-deps.sh rewrites the lines of a repo whenever it moves that
 # repo's tag; a tag with no line here fails the fetch (see fetch-releases.sh).
+# source.tar.gz is the GitHub tag archive of that repo at that tag, which
+# tools/bundle-sources.sh puts in the release source bundle and checks here;
+# odi-toolchain has one line, for the uclibc tag toolchain/images.env pins.
 AndreZiviani/odi-sfp-exporter v1.11.1 metricsd 526001c53c042aa3825f0ee14c6065c4444c325798aef3762fb87517f476d969
 AndreZiviani/odi-ui v1.19.0 confd a5a47b4382038869afa0847331203431a17458c4d9e6bfdef219d8f46ac82e95
 AndreZiviani/odi-ui v1.19.0 confd-assets.tar.gz f12c4875606b045ff56a34761f9132213ba524a99024815a284702668ef45fe8
+AndreZiviani/odi-sfp-exporter v1.11.1 source.tar.gz bf6ebb954a2dcfa35d46d247d4f7c10649010cbfcc46d0a2a73425522c45e2c7
+AndreZiviani/odi-ui v1.19.0 source.tar.gz e67462c2d067df787802cec33140139e3d4a733a197c0d8ac5ed1c94ddcfb246
+AndreZiviani/odi-toolchain uclibc-v4 source.tar.gz bb2ac2db84266e30f52df8c1df5622853807338df1c938376166752719f0b275

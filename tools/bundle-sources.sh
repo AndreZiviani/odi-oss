@@ -91,6 +91,20 @@ curl_get() { # url dest: bounded, atomic
 	mv "$2.part.$$" "$2"
 }
 
+# tag_archive <repo> <tag> <url> <dest>: a GitHub tag archive, checked against
+# the source.tar.gz line for that repo and tag in src/release-sha256.txt. A
+# tag is a name that can be moved; the committed hash is what says this is the
+# source the release was built from. Checked also when the file is already in
+# dl/, so a cache from an earlier tag cannot pass for this one.
+tag_archive() {
+	want=$(awk -v r="$1" -v t="$2" '$1 !~ /^#/ && $1 == r && $2 == t && $3 == "source.tar.gz" {print $4; exit}' \
+		"$ROOT/src/release-sha256.txt")
+	[ -n "$want" ] || die "no source.tar.gz line for $1 $2 in src/release-sha256.txt (tools/bump-deps.sh writes it)"
+	[ -s "$4" ] || curl_get "$3" "$4"
+	have=$(sha256 "$4")
+	[ "$have" = "$want" ] || die "$4 is $have, but src/release-sha256.txt pins $want for $1 $2"
+}
+
 # add <name> <version> <license> <role> <url> <file>: copy the file in, record the row
 add() {
 	cp "$6" "$D/$(basename "$6")"
@@ -142,7 +156,8 @@ itag=$(echo "$img" | sed -n 's/^[^:]*:\(v[0-9][0-9]*\)@sha256:.*/\1/p')
 [ -n "$itag" ] || die "cannot read the image tag from OSS_IMAGE_PINNED in toolchain/images.env ($img)"
 ttag=uclibc-$itag
 tarc=$DL/odi-toolchain-$ttag.tar.gz
-[ -s "$tarc" ] || curl_get "https://github.com/AndreZiviani/odi-toolchain/archive/refs/tags/$ttag.tar.gz" "$tarc"
+tag_archive AndreZiviani/odi-toolchain "$ttag" \
+	"https://github.com/AndreZiviani/odi-toolchain/archive/refs/tags/$ttag.tar.gz" "$tarc"
 tb=$work/toolchain-build.sh
 member=$(tar -tzf "$tarc" | grep -m1 '/uclibc/build\.sh$') || die "no uclibc/build.sh in $tarc"
 tar -xzf "$tarc" -O "$member" > "$tb"
@@ -185,7 +200,7 @@ EOF
 	case $tag in "" | local) die "$comp is \"${tag:-unset}\" in $RELEASES_ENV: a release image uses a published tag" ;; esac
 	f=$DL/releases/$repo-$tag-source.tar.gz
 	mkdir -p "$DL/releases"
-	[ -s "$f" ] || curl_get "https://github.com/$path/archive/refs/tags/$tag.tar.gz" "$f"
+	tag_archive "$path" "$tag" "https://github.com/$path/archive/refs/tags/$tag.tar.gz" "$f"
 	add "$comp" "$tag" "see the repository" "$what, separate project, prebuilt binary in the image" \
 		"https://github.com/$path/archive/refs/tags/$tag.tar.gz" "$f"
 done
