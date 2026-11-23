@@ -866,8 +866,10 @@ confirmed `2500basex` trial, a keeper follows it while the stick keeps
 power. A lane that loses the sync (the host port set to 1G and back to
 2.5G-baseX, or disabled and enabled) is re-latched every 5 s until it
 syncs again: `event=serdes_lost` when the sync goes (bit 17 of 0x214
-clear twice, a second apart), `event=serdes_back` when it returns (set
-twice, a second apart). A lane in sync is not touched and the mode does
+clear twice, a second apart, and at the re-latch's own read),
+`event=serdes_back` when it returns (set twice, a second apart);
+`host-serdes.sh status` gives `keeper=<pid>`, or `keeper=none` once it
+has ended. A lane in sync is not touched and the mode does
 not change, so a host port left at 1G has no link until the next boot
 (whose watch falls back to Fiber 1G) or a `fiber1g` trial started with
 the port back at 2.5G.

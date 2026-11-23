@@ -1587,6 +1587,7 @@ diagnostics bundle (`host-link.txt`):
 | `link` (`status` only) | `1`, `0` or `unknown`, from `link_source` |
 | `link_source` (`status` only) | `host_link` (Fiber 1G: the kernel parameter), `serdes_sync` (2500BASE-X: bit 17 of 0x214) or `none` (HiSGMII: `link` is `unknown`) |
 | `safe_mode_boot` (`status` only) | `1` on a safe-mode boot (`safe-mode.sh`) |
+| `keeper` (`status` only) | the pid of the 2500BASE-X keeper (`serdes_lost` below), or `none`: nothing starts one again once it has ended |
 
 Every event is one line to the kernel log (`host-serdes: event=<name>
 setting=... running=... <text>`, so dmesg, the ramlog and syslog through

@@ -763,10 +763,13 @@ sed -i 's/^event=.*/event=serdes_back/' "$STATE"
 # Clear twice, then in sync by the re-latch's own read under the lock (the
 # host came back between the keeper's reads and the lock): nothing written.
 : > "$T/sdsset"
+: > "$T/kmsg"
 iohook_at 3 "echo x2500 > \"$T/model\"; \"$T/bin/model\""
-KEEP_TICKS=1 sh "$S" keep > /dev/null 2>&1
+out=$(KEEP_TICKS=1 sh "$S" keep 2>&1)
 rm -f "$T/iohook" "$T/iohook.run"
 t "keeper, the lane in sync by the re-latch's read: nothing written" "^$" "$(cat "$T/sdsset")"
+t "  ... no serdes_lost, the event kept" "^serdes_back $" "$(st event) $(cat "$T/kmsg")"
+n "  ... and no failure said" "could not be re-latched" "$out"
 # A try that takes the lock between the keeper's load and its lock: under
 # the lock the keeper sees the trial and leaves the lane alone.
 echo none > "$T/model"
@@ -798,7 +801,15 @@ echo $$ > "$KEEP_PID"
 out=$(KEEP_TICKS=3 sh "$S" keep 2>&1)
 t "keeper: a second one leaves at once" "already" "$out"
 t "  ... and leaves the pid file of the first one" "^$$\$" "$(cat "$KEEP_PID")"
+# status says whether a keeper runs: nothing starts one again once gone.
+t "status: the keeper's pid while it runs" "keeper=$$" "$(sh "$S" status)"
+sh -c 'exit 0' &
+dead=$!
+wait "$dead"
+echo "$dead" > "$KEEP_PID"
+t "status: keeper=none with the pid file of a keeper gone" "keeper=none" "$(sh "$S" status)"
 rm -f "$KEEP_PID"
+t "status: keeper=none without a pid file" "keeper=none" "$(sh "$S" status)"
 # A boot watch that falls back to Fiber 1G spawns no keeper.
 newboot
 echo f1g > "$T/model"
@@ -826,6 +837,43 @@ for m in 2500basex hisgmii; do
 		t "keeper: not spawned by the confirm of hisgmii" "^trial_confirmed $" "$(st event) $(spawned_none)"
 	fi
 done
+# A trial window whose lane syncs between its read and the re-latch's own
+# read: nothing written, and neither a re-latch nor a failure said. The
+# window's first sleep arms an iohook: its read reads clear, the
+# re-latch's read finds the host in sync.
+setkey ""
+newboot
+sh "$S" boot > /dev/null
+echo none > "$T/model"
+: > "$T/spawned"
+sh "$S" try 2500basex > /dev/null
+id=$(st trial_id)
+iohook_at 2 "echo x2500 > \"$T/model\"; \"$T/bin/model\""
+mv "$T/iohook" "$T/iohook.armed"
+printf '#!/bin/sh\nmv "%s/iohook.armed" "%s/iohook"\n' "$T" "$T" > "$T/hook"
+chmod +x "$T/hook"
+: > "$T/sdsset"
+out=$(sh "$S" trial-run "$id" 20 2>&1)
+rm -f "$T/iohook" "$T/iohook.run" "$T/iohook.armed"
+t "trial window, in sync by the re-latch's read: the lane parked by the sequences only" "^2$" "$(grep -c 'set 0x214 0x[0-9a-f]*1f$' "$T/sdsset")"
+n "  ... no re-latch said" "re-latching" "$out"
+n "  ... no failure said" "could not be re-latched" "$out"
+# The same in the boot watch, at its first re-latch (RESYNC_S=2: the
+# second sleep arms the iohook).
+setkey 2500basex
+newboot
+sh "$S" boot > /dev/null 2>&1
+echo none > "$T/model"
+iohook_at 2 "echo x2500 > \"$T/model\"; \"$T/bin/model\""
+mv "$T/iohook" "$T/iohook.armed"
+echo 0 > "$T/sleeps"
+printf '#!/bin/sh\nn=$(( $(cat "%s/sleeps") + 1 )); echo $n > "%s/sleeps"\n[ $n != 2 ] || mv "%s/iohook.armed" "%s/iohook"\n' "$T" "$T" "$T" "$T" > "$T/everyhook"
+chmod +x "$T/everyhook"
+: > "$T/sdsset"
+out=$(RESYNC_S=2 sh "$S" watch 2>&1)
+rm -f "$T/iohook" "$T/iohook.run" "$T/iohook.armed" "$T/everyhook"
+t "boot watch, in sync by the re-latch's read: in sync, nothing written" "^serdes_link 0 $" "$(st event) $(st fallback) $(cat "$T/sdsset")"
+n "  ... no failure said" "could not be re-latched" "$out"
 setkey ""
 rm -f "$T/model"
 

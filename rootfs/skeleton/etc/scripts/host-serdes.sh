@@ -322,15 +322,15 @@ sds_anf() {
 # trial asks), in 2500BASE-X and in HiSGMII alike; started again while the
 # host sends, it syncs within seconds. Run only on a lane in MODE whose bit
 # 17 read clear, under the lock: its own read of 0x214 looks at bit 17
-# again, and a lane that synced since the caller read it is left alone
-# (0, nothing written), so a lane in sync is never touched. Returns 1 when
-# the read or any write fails; the restore is written even after a failed
-# park.
+# again, and a lane that synced since the caller read it is left alone,
+# so a lane in sync is never touched. Returns 0 once re-latched, 2 when
+# that read found the lane in sync (nothing written), and 1 when the read
+# or any write fails; the restore is written even after a failed park.
 sds_relatch() {
 	mode_vars "$1"
 	cur=$(sds_read 0x214)
 	[ -n "$cur" ] || return 1
-	[ $(( 0x$cur & 0x20000 )) -eq 0 ] || return 0
+	[ $(( 0x$cur & 0x20000 )) -eq 0 ] || return 2
 	rl=0
 	sds_put 0x214 "$(printf '0x%x' $(( 0x$cur | 0x2000 )))" || rl=1
 	sds_put 0x214 "$(printf '0x%x' $(( ((0x$cur | 0x2000) & ~0x801f) | 0x1f )))" || rl=1
@@ -602,7 +602,8 @@ watch() {
 						unlock
 						return 0
 					fi
-					sds_relatch 2500basex || say "the lane could not be re-latched" >&2
+					sds_relatch 2500basex
+					[ $? != 1 ] || say "the lane could not be re-latched" >&2
 					unlock
 				fi
 			fi
@@ -719,8 +720,11 @@ trial_window() {
 			unlock
 			continue
 		fi
-		sds_relatch "$trial_mode" || say "the lane could not be re-latched" >&2
+		sds_relatch "$trial_mode"
+		w_rc=$?
 		unlock
+		[ "$w_rc" != 1 ] || say "the lane could not be re-latched" >&2
+		[ "$w_rc" != 2 ] || continue
 		w_n=$((w_n + 1))
 		[ "$w_n" != 1 ] || say "no sync in $(label "$trial_mode"): re-latching the lane every ${RESYNC_S} s until it syncs or the trial ends"
 	done
@@ -850,12 +854,16 @@ keep() {
 		[ $? != 1 ] || continue
 		load
 		if [ "$phase" = steady ] && [ "$setting" = 2500basex ] && [ "$running" = 2500basex ]; then
-			if [ -z "$k_lost" ]; then
+			# serdes_lost once the re-latch read bit 17 clear as well: a
+			# lane in sync by then (2) is left alone, and no loss logged.
+			sds_relatch 2500basex
+			k_rc=$?
+			[ "$k_rc" != 1 ] || say "the lane could not be re-latched" >&2
+			if [ "$k_rc" != 2 ] && [ -z "$k_lost" ]; then
 				k_lost=$(uptime_s)
 				event serdes_lost "the host SerDes lost the sync in 2500BASE-X; re-latching the lane every ${RESYNC_S} s until it syncs"
 				save
 			fi
-			sds_relatch 2500basex || say "the lane could not be re-latched" >&2
 		fi
 		unlock
 	done
@@ -941,6 +949,13 @@ status() {
 	echo "event_uptime=$ev_up"
 	echo "message=$ev_msg"
 	[ -f "$SAFE_FLAG" ] && echo "safe_mode_boot=1" || echo "safe_mode_boot=0"
+	# Nothing starts a keeper again once it is gone: say whether one runs.
+	k=$(cat "$KEEP_PID" 2>/dev/null)
+	if [ -n "$k" ] && kill -0 "$k" 2>/dev/null; then
+		echo "keeper=$k"
+	else
+		echo "keeper=none"
+	fi
 	return 0
 }
 

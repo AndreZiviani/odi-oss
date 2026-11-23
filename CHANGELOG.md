@@ -18,7 +18,10 @@ listed here.
   under the lock and skips a busy tick, runs one at a time, and ends once
   `HOST_SERDES` or the running mode is no longer `2500basex`. The
   re-latch, in a trial and the boot watch too, now reads bit 17 again
-  under the lock and leaves a lane that synced since alone. Reported on
+  under the lock and leaves a lane that synced since alone, with nothing
+  logged: the keeper logs `serdes_lost` only once that read is clear too.
+  `host-serdes.sh status` says whether a keeper runs (`keeper=<pid>` or
+  `keeper=none`), in the diag bundle as well. Reported on
   HSGQ sticks with a downstream build of v1.18.1 carrying it: against a
   MikroTik hEX S 2025 (E60iUGS), the router port set to 1G and back to
   2.5G-baseX gave `serdes_back` "after 52 s" (most of it at 1G) and a
