@@ -74,6 +74,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		uint8_t *f = frames[n];
 		uint8_t dev;
 
+		/* ev[] is static: a record left as the last input filled it
+		 * would carry that input's data into this one (a respawn that
+		 * patches the snapshot, say). fuzz_local.c does the same. */
+		memset(&ev[n], 0, sizeof ev[n]);
 		memcpy(f, data + off, len);
 		if (len < REC) {
 			ev[n].kind = FK_LINE_FRAME;

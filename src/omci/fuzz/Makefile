@@ -44,6 +44,8 @@ VPATH := $(RESPOND) .. ../generated $(DIAG)/src
 #   -include sys_host.h   the system call layer (sys_host.h says how)
 #   -fno-strict-overflow  from src/harden.mk: signed overflow wraps in the
 #                         shipped binary, so it is not reported here either
+#   -ftrivial-auto-var-init=zero  also from harden.mk: a local nobody wrote
+#                         is zero on the stick, so it is zero here too
 #   -O2 -g                fast enough to fuzz, and stack traces with lines
 #   -fno-common -fno-lto  every variable in a section of its object file. A
 #                         common symbol is in none, and the state reset is
@@ -51,7 +53,8 @@ VPATH := $(RESPOND) .. ../generated $(DIAG)/src
 # No -Wall here: the warnings of omcid are those of the target build, which
 # has the compiler that counts. A host compiler, clang above all, warns
 # about other things, and a test run is not the place to print them.
-OMCID_CFLAGS := -std=c11 -O2 -g -fno-strict-overflow -fno-common -fno-lto \
+OMCID_CFLAGS := -std=c11 -O2 -g -fno-strict-overflow -ftrivial-auto-var-init=zero \
+                -fno-common -fno-lto \
                 -fno-omit-frame-pointer -include sys_host.h \
                 -I$(DIAG)/src -I../generated -I$(UAPI) -I$(RESPOND)
 HARNESS_CFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-omit-frame-pointer \
@@ -97,19 +100,21 @@ HARNESS_HDRS := sys_host.h fakeos.h harness.h
 # An omcid object: compiled, then its .data and .bss renamed, so that state.c
 # can put all the variables of omcid back between two runs and none of the
 # harness. main() becomes omcid_main() (stick.c calls it), and the
-# memcpy/memset/memmove io.c supplies for the freestanding link get other
+# memcpy/memset/memmove/memcmp io.c supplies for the freestanding link get other
 # names: here libc has them, and the sanitizer watches those.
 EXTRA_main := -Dmain=omcid_main
-EXTRA_io   := -Dmemcpy=odi_io_memcpy -Dmemset=odi_io_memset -Dmemmove=odi_io_memmove
+EXTRA_io   := -Dmemcpy=odi_io_memcpy -Dmemset=odi_io_memset -Dmemmove=odi_io_memmove \
+              -Dmemcmp=odi_io_memcmp
 
 define flavour
 $(BUILD)/$(1)/omcid/%.o: %.c $$(OMCID_HDRS) Makefile check-sections.sh | $(BUILD)/$(1)/omcid
 	$$(CC_$(1)) $$(OMCID_CFLAGS) $$(ALL_$(1)) $$(INSTR_$(1)) $$(EXTRA_$$*) -c -o $$@.tmp.o $$<
 	$$(OBJCOPY) --rename-section .data=omcid_data --rename-section .bss=omcid_bss \
 	            --rename-section .data.rel.local=omcid_data \
-	            --rename-section .data.rel=omcid_data $$@.tmp.o $$@
+	            --rename-section .data.rel=omcid_data $$@.tmp.o $$@.ren.o
 	@rm -f $$@.tmp.o
-	@sh check-sections.sh $$@
+	@sh check-sections.sh $$@.ren.o || { rm -f $$@.ren.o; exit 1; }
+	@mv $$@.ren.o $$@
 
 # state.c takes no sanitizer: it copies across the red zones on purpose.
 $(BUILD)/$(1)/state.o: state.c $$(HARNESS_HDRS) Makefile | $(BUILD)/$(1)/omcid
@@ -257,7 +262,9 @@ fuzz: check-srcs seeds $(TARGETS:%=$(BUILD)/fuzz/fuzz_%)
 		done; \
 		exit 1; \
 	fi; \
-	[ $$rc = 0 ] || { echo "FAIL  fuzz: a target stopped with an error, see $(BUILD)/fuzz-*.log"; exit 1; }; \
+	[ $$rc = 0 ] || { \
+		for l in $(BUILD)/fuzz-*.log; do echo "== $$l (last 60 lines)"; tail -n 60 $$l; done; \
+		echo "FAIL  fuzz: a target stopped with an error, logs above"; exit 1; }; \
 	echo "ok    fuzz: $(TARGETS), $(FUZZ_SECONDS) s, nothing found"
 
 # The working corpus cut down to the inputs that add coverage (libFuzzer

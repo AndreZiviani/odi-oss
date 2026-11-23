@@ -61,6 +61,11 @@ def pause(seconds):
     return bytes([seconds >> 8, seconds & 0xFF, 0, 0]) + bytes(REC - 4)
 
 
+# Expectations of generated seeds, by name, as `# expect:` lines are for
+# the files under corpus/.
+EXPECT = {}
+
+
 def olt_seeds():
     out = {}
     fix = TOP / "test" / "fixtures"
@@ -89,6 +94,9 @@ def olt_seeds():
         out["session-respawn"] = (sessions["isp2"] + pause(3) + respawn + ask
                                   + sessions["isp2"][-48 * 12:] + respawn
                                   + ask + pause(2))
+        # The point of this seed: the respawned omcid resumes. Held to it,
+        # so that a change which sends it to re-registration fails here.
+        EXPECT["session-respawn"] = "mode=resume\n"
     frame = re.compile(r"(?<![0-9a-f])[0-9a-f]{96}(?![0-9a-f])")
     for sh in sorted((TOP / "src" / "omci").glob("*-test.sh")):
         frames = frame.findall(sh.read_text())
@@ -204,7 +212,7 @@ def main():
     target, outdir = sys.argv[1], Path(sys.argv[2])
     outdir.mkdir(parents=True, exist_ok=True)
     seeds = olt_seeds() if target == "olt" else local_seeds()
-    expect = {}
+    expect = {k: v for k, v in EXPECT.items() if k in seeds}
     for txt in sorted((HERE / "corpus" / target).glob("*.txt")):
         text = txt.read_text()
         seeds["corpus-" + txt.stem] = unhex(text)

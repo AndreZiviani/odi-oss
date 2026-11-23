@@ -191,8 +191,12 @@ jobs:
       # Only on main, and only after a clean run: a corpus is trimmed with
       # the build that just passed on it. Bounded, since it runs every
       # input once more.
+      # A trim that runs out of time leaves the corpus as it was (the
+      # trimmed set replaces it only on success), so main does not go red
+      # for it and the untrimmed corpus is saved instead.
       - name: Trim the corpus to what adds coverage
         if: ${{ github.ref == 'refs/heads/main' }}
+        continue-on-error: true
         run: timeout 600 make -s -C src/omci/fuzz minimize
 
       - name: Save the fuzz corpus
