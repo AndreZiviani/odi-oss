@@ -58,8 +58,8 @@ Full procedure, including how to read a boot you could not otherwise see:
 
 First access is the web UI on port 80, with \`admin\`/\`admin\` at first.
 Set a password of your own under System, Access, then add your SSH public
-key on the same page (a confd newer than v1.19.0 adds no key while
-\`admin\`/\`admin\` is in force), and \`ssh root@<stick>\` with that key -- it keeps working across
+key on the same page (a confd newer than v1.19.0 adds no key while no
+password is saved in \`confd.auth\`), and \`ssh root@<stick>\` with that key -- it keeps working across
 reboots and re-flashes. [\`docs/ACCESS.md\`](docs/ACCESS.md) has every way in and how to
 move files on and off the stick.
 

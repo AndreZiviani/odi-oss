@@ -163,8 +163,8 @@ listed here.
 - Docs: `ACCESS.md` sets a password before it adds an SSH key through the
   API, without putting it in the shell history, and `SETTINGS.md` no longer
   offers adding a key from the web UI during the safe mode. A confd newer
-  than v1.19.0 adds no key while the built-in `admin` / `admin` is in force
-  (#482). The recipe asks for the password twice, with a prompt, in plain
+  than v1.19.0 adds no key while no password is saved in `confd.auth` or a
+  safe-mode boot opens `admin` / `admin` (#482). The recipe asks for the password twice, with a prompt, in plain
   POSIX sh (`stty -echo`, so it runs in dash too). It says so when the two
   entries differ, and `curl -f` shows a refused password before the key
   step. The release notes, `README.md`, `BUILDING.md` and the SSH key and

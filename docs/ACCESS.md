@@ -46,8 +46,8 @@ Three ways to add one:
   v1.19.0 refuses the key before that). The list shows what
   is in the file and removes by line.
 - **The API** the UI uses (HTTP Basic with the UI credential). A confd
-  newer than v1.19.0 adds no key while the built-in `admin` / `admin` is in
-  force, so set your own password first. `stty -echo` keeps it off the
+  newer than v1.19.0 adds no key while no password is saved in
+  `confd.auth`, so set your own password first. `stty -echo` keeps it off the
   screen, `read` keeps it out of the shell history, the second entry
   catches a typo (a lost password means the safe mode to get back in), and
   `curl -u admin` asks for it afterwards. This is plain POSIX sh, so it

@@ -962,8 +962,8 @@ set a new web UI password (System, Access) if that is what was lost -- it
 is saved and in force from the next boot -- acknowledge, and reboot. A lost
 ssh key goes back after that reboot, from the web UI, or during a safe mode
 that opens the default over ssh as root with the password `admin`: a confd
-newer than v1.19.0 adds no key while the built-in web UI password is in
-force, and in such a safe mode it is in force for the whole boot. The record outlives the boot, so the
+newer than v1.19.0 adds no key while no password is saved in `confd.auth`
+or a safe-mode boot opens the default, which lasts the whole boot. The record outlives the boot, so the
 banner says a safe-mode boot happened until someone acknowledges it (its
 button, or `safe-mode.sh ack`).
 
@@ -1344,8 +1344,8 @@ The state of the running boot is `/var/run/mgmt-addr` (`docs/TOOLS.md`,
 | OLT identity switch (Config) | creates or removes `/etc/config/omci-identity.on` | INTERRUPTS INTERNET (with Apply now) |
 | Stock keys (tab) | the stock keys this image does not act on, read-only | -- |
 | Config UI credentials (Admin) | `/etc/config/confd.auth` | LIVE (sign in again) |
-| SSH keys (Admin) | `/etc/config/dropbear.d/authorized_keys`, read at every login; a confd newer than v1.19.0 adds no key while the built-in `admin`/`admin` is in force (403), so the credential above comes first | LIVE |
-| Download a full config backup (Admin) | both stores, every key, identity included; `tools/config-backup.sh` takes the same file from a host (below). A confd newer than v1.19.0 refuses it while the built-in `admin`/`admin` is in force (403) | -- |
+| SSH keys (Admin) | `/etc/config/dropbear.d/authorized_keys`, read at every login; a confd newer than v1.19.0 adds no key (403) while no password is saved in `confd.auth` or a safe-mode boot opens `admin`/`admin`, so the credential above comes first | LIVE |
+| Download a full config backup (Admin) | both stores, every key, identity included; `tools/config-backup.sh` takes the same file from a host (below). A confd newer than v1.19.0 refuses it (403) while no password is saved in `confd.auth` or a safe-mode boot opens `admin`/`admin` | -- |
 | Download a diagnostics bundle (Admin) | logs, the previous boot ramlog, slot state, the GPON/OMCI state and the config, every password redacted and the serial number, MACs and LOID masked, as a tar.gz (`/etc/scripts/diag-bundle.sh`, `docs/TOOLS.md`) | -- |
 | Restore (Admin) | writes the differences, every key, through the same checks as Save | per key; restored keys are not applied |
 | Reset the service config (Admin) | `flash default cs`: merges `/etc/config_default.xml` into CS (below) | LOID keys: INTERRUPTS INTERNET; the rest are stock-only |
@@ -1388,8 +1388,8 @@ settings changed:
     ODI_HOST=192.168.1.1 ODI_AUTH_FILE=/etc/odi/ui.auth tools/config-backup.sh
 
 The stick needs a web UI password of its own for this: a confd newer than
-v1.19.0 answers 403 to `/api/backup` while the built-in `admin`/`admin` is
-in force, and the script then fails with the reason confd gives.
+v1.19.0 answers 403 to `/api/backup` while no password is saved in
+`confd.auth` or a safe-mode boot opens `admin`/`admin`, and the script then fails with the reason confd gives.
 
 | variable | meaning | default |
 |---|---|---|
