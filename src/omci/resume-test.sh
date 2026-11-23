@@ -27,9 +27,11 @@
 #      second instance must hold not one `drv ` line -- the switch was
 #      never touched.
 #
-# Then two more: a wide row comes back whole, and an omcid killed between
+# Then four more: a wide row comes back whole, the wide slots go back to
+# the rows that had them, an omcid killed between
 # the answer to a Set and the rebuild that programs it leaves that rebuild
-# to the respawned one.
+# to the respawned one, and a save that fails leaves no snapshot to resume
+# from.
 #
 # Run from src/omci, inside the toolchain image (make test-omci-resume):
 #   docker run --rm -v "$PWD/../..":/src -w /src/src/omci "$(../../toolchain/image.sh diag)" \
@@ -224,6 +226,78 @@ else
 fi
 omcid_stop "$pid"
 
+# ------------------------------------- the wide slots come back where they were
+# The snapshot says which rows had a slot in the side pool. A respawn gives
+# the slots to those rows, not to the first 32 wide rows in index order:
+# with the pool full, a row created later can sit behind one that never had
+# a slot, and handing that one a slot on resume took it from the later row,
+# whose Sets past byte 96 then failed. 32 large strings fill the pool, a
+# 33rd gets none, the first is deleted and a non-wide row takes its index,
+# and a 34th, behind the 33rd, takes the freed slot.
+cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+rm -f /var/run/omcid-mib.snap /var/run/omcid-resume-decision
+slog1=/tmp/omcid-resume-slots-before.log
+slog2=/tmp/omcid-resume-slots-after.log
+: > "$slog1"
+$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-isp2 > "$slog1" 2>&1 &
+pid=$!
+omcid_up "$slog1"
+k=0
+while [ "$k" -le 32 ]; do
+	inject_wait "$slog1" "$(frame "$(printf '1%03x' "$k")" 44 009d "$(printf '%04x' $((0x100 + k)))" "")"
+	k=$((k + 1))
+done
+inject_wait "$slog1" "$(frame 1100 46 009d 0100 "")"     # frees its index and slot
+inject_wait "$slog1" "$(frame 1101 44 0135 0007 "")"     # a 309 row takes the index
+inject_wait "$slog1" "$(frame 1102 44 009d 0121 "")"     # the 34th takes the slot
+inject_wait "$slog1" "$(frame 1103 48 009d 0121 "$(amask 5)$(aval 5)")"
+got=$(grep -- '^-> 1103' "$slog1" | tail -1 | cut -c20-21)
+if [ "$got" = "00" ]; then
+	echo "ok    wide slots: the 34th large string has the freed slot before the kill"
+else
+	echo "FAIL  wide slots: Part4 of the 34th before the kill answered $got"
+	fail=$((fail + 1))
+fi
+kill -9 "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
+
+: > "$slog2"
+$Q respond/build/omcid-drvtrace -a -w 20 -c "$CAPS" -s 5 -g /tmp/resume-gpon-isp2 > "$slog2" 2>&1 &
+pid=$!
+omcid_up "$slog2"
+if grep -q 'resume: onu state 5, snapshot loaded' "$slog2"; then
+	echo "ok    wide slots: the respawned instance took the resume path"
+else
+	echo "FAIL  wide slots: the respawned instance did not take the resume path"
+	sed -n '1,20p' "$slog2"
+	fail=$((fail + 1))
+fi
+inject_wait "$slog2" "$(frame 1110 49 009d 0121 "$(amask 5)")"
+got=$(grep -- '^-> 1110' "$slog2" | tail -1 | cut -c20-75)
+if [ "$got" = "00$(amask 5)$(aval 5)" ]; then
+	echo "ok    wide slots: Part4 of the 34th survives the resume"
+else
+	echo "FAIL  wide slots: Part4 of the 34th after resume: $got"
+	fail=$((fail + 1))
+fi
+inject_wait "$slog2" "$(frame 1111 48 009d 0121 "$(amask 5)$(aval 6)")"
+got=$(grep -- '^-> 1111' "$slog2" | tail -1 | cut -c20-21)
+if [ "$got" = "00" ]; then
+	echo "ok    wide slots: and a Set past byte 96 on it still succeeds"
+else
+	echo "FAIL  wide slots: a Set of Part4 on the 34th after resume answered $got"
+	fail=$((fail + 1))
+fi
+inject_wait "$slog2" "$(frame 1112 48 009d 0120 "$(amask 5)$(aval 5)")"
+got=$(grep -- '^-> 1112' "$slog2" | tail -1 | cut -c20-21)
+if [ "$got" = "09" ]; then
+	echo "ok    wide slots: the 33rd still has no slot: its Part4 answers result 9"
+else
+	echo "FAIL  wide slots: Part4 of the 33rd after resume answered $got"
+	fail=$((fail + 1))
+fi
+omcid_stop "$pid"
+
 # ---------------------------------------- a rebuild pending at the kill
 # A Set of a GEM port network CTP, which the bridge connections and the
 # upstream QoS are both built from, is answered and saved at once; the
@@ -312,6 +386,51 @@ else
 	echo "FAIL  pending rebuild: the snapshot saved after the rebuild still has one pending, or was not resumed"
 	sed -n '1,20p' "$olog3"
 	fail=$((fail + 1))
+fi
+omcid_stop "$pid"
+
+# ---------------------------------------- a save that fails
+# A save that cannot be written takes the older snapshot with it: resuming
+# from that one would answer for a MIB the OLT has since changed. A
+# directory where the temp file goes makes the next save fail, as a full
+# tmpfs would; the respawned omcid then finds no snapshot and does not resume.
+flog1=/tmp/omcid-resume-fail-before.log
+flog2=/tmp/omcid-resume-fail-after.log
+rm -f /var/run/omcid-mib.snap /var/run/omcid-mib.snap.tmp /var/run/omcid-resume-decision
+: > "$flog1"
+$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-isp2 > "$flog1" 2>&1 &
+pid=$!
+omcid_up "$flog1"
+$Q cli/build/omcli --inject-file "$FIX/omci-session-isp2.txt" > /dev/null 2>&1
+settled "$flog1"
+if [ -s /var/run/omcid-mib.snap ]; then
+	echo "ok    failed save: the session left a snapshot"
+else
+	echo "FAIL  failed save: no snapshot after the session"
+	fail=$((fail + 1))
+fi
+mkdir /var/run/omcid-mib.snap.tmp
+inject_wait "$flog1" "$pending_set"
+if grep -q 'event=snapshot_fail' "$flog1" && [ ! -e /var/run/omcid-mib.snap ]; then
+	echo "ok    failed save: event=snapshot_fail, and the older snapshot is gone"
+else
+	echo "FAIL  failed save: no snapshot_fail, or the older snapshot is still on disk"
+	grep 'snapshot' "$flog1" | head -5
+	fail=$((fail + 1))
+fi
+kill -9 "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
+rmdir /var/run/omcid-mib.snap.tmp
+
+: > "$flog2"
+$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -s 5 -g /tmp/resume-gpon-isp2 > "$flog2" 2>&1 &
+pid=$!
+omcid_up "$flog2"
+if grep -q 'resume: onu state 5, snapshot loaded' "$flog2"; then
+	echo "FAIL  failed save: the respawned instance resumed from the older snapshot"
+	fail=$((fail + 1))
+else
+	echo "ok    failed save: the respawned instance does not resume"
 fi
 omcid_stop "$pid"
 

@@ -112,9 +112,9 @@ CI (`.github/workflows/ci.yml`) runs `make lint`, `make test-host`,
 `make test-diag` and `make test-omci` (one job per suite) on every push to
 `main` and every pull request, plus `make test-qemu` (after `make busybox`,
 `packages`, `src` and `releases`), and adds `make src` on release tags and
-manual runs; the kernel and image are built there only on tags and manual
-runs (the `reproducible` job). It pulls the public freestanding
-toolchain image anonymously, no login needed. The kernel is built by
+manual runs; the kernel and image are built there only by the
+`reproducible` job, on release tags and manual runs. It pulls the public freestanding
+toolchain image anonymously, no login needed. The kernel alone is built by
 `.github/workflows/kernel.yml`, on the pull requests and pushes to `main`
 that change it (`docs/HACKING.md`, "What CI runs").
 
@@ -145,7 +145,8 @@ or normalised:
 print their SHA-256 and exit 0; otherwise it names what differs (tar
 headers, each member, the uImage header, and for the rootfs every inode and
 every file by path) and exits non-zero. Nothing is excluded, busybox
-included. The `reproducible` job in `ci.yml` runs it on release tags. Changing
+included. The `reproducible` job in `ci.yml` runs it on release tags, and
+`release.yml` publishes the tarball that job compared. Changing
 a toolchain, a base image or the snapshot date changes the output; that is
 expected, and a new release is the unit of comparison.
 
@@ -165,8 +166,9 @@ to start dropbear with `-s` (refuse password logins outright), so ssh does
 not even offer a password prompt. This is what the published releases build
 with — a per-build password baked into a squashfs anyone can unpack is not
 a secret. First access to a `ROOT_PW=locked` image is through the web UI
-(`confd`, port 80 — the built-in `admin`/`admin` until a password is set),
-whose SSH-key admin page can add a key for root; `docs/FLASHING.md` has the
+(`confd`, port 80 — the built-in `admin`/`admin` until a password is set).
+Its System, Access page sets that password and then adds a key for root;
+a confd newer than v1.19.0 adds no key before the password is set. `docs/ACCESS.md` has the
 exact steps. The three shapes (`locked`, `none`, the default password) are
 written by `image/gen-root-account.sh`, which `test/root_pw_test.sh`
 (`make test-host`) exercises directly — no kernel or busybox needed for

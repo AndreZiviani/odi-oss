@@ -5,6 +5,270 @@ listed here.
 
 ## Unreleased
 
+- CI: `make cppcheck` runs cppcheck over every tracked C file, and CI runs
+  it as its own job on ubuntu-24.04 (#482). Of the nine findings on main,
+  one was a test that read `rec.log[-1]` when the action it looked for was
+  missing (`test/odi_gpon_test.c`), and `qos_prog_state_ok()` now takes the
+  offset of the queue count with `__builtin_offsetof` instead of subtracting
+  two pointers; omcid builds byte-identical. The other seven are not bugs and
+  carry an inline suppression with the reason.
+
+- omcid: a snapshot save that fails removes the older snapshot. It stayed on
+  disk, so a respawn after a full `/var/run` resumed from a MIB older than
+  the one the OLT had been answered for. The respawn now registers afresh.
+  A save that would not fit the buffer fails the same way instead of
+  writing a snapshot without the rows past the end. `resume-test.sh` covers
+  the failed write (#482).
+
+**Automated dependency bump.**
+- linux 6.18.63 -> 6.18.65
+
+- Upgrades: `fwu.sh` and `fwu_starter.sh` take `sw_active` and `sw_commit`
+  only from an `nv` that exited 0; a value a failed read printed is no
+  answer. When the nv is this project's, `fwu.sh` now refuses any failed
+  `nv getenv` or `nv fallback` read, not only exit 3 or no answer. Exit 1
+  with the line for no valid second copy still passes and says so. It tells
+  the nv by its usage, which lists `fallback`, not by `/etc/odi-build`: a
+  slot built on the stock base carries that file and runs the stock nv. On
+  the stock nv those other failures stay a warning, while exit 3 and no
+  answer still refuse; an unset `sw_commit` stays a warning in `fwu.sh`
+  (#482).
+
+- CONTRIBUTING.md: a larger change starts with a discussion or an issue of
+  its own; the roadmap section no longer points to one tracking issue.
+
+- Identity trial: each event line goes to the kernel log before the state
+  file records the step, so a reader that sees the trial end (`phase=steady`)
+  also finds its outcome in the log. Before, the line followed the state, and
+  `identity_trial_test.sh` failed now and then ("mixed store: the log names
+  the key") when it read the log in between.
+
+- Releases: the release job publishes the image the `reproducible` job built
+  twice and found identical, instead of building a third one. It checks the
+  tarball against the SHA-256 that job reported, takes the kernel hash of
+  the SBOM from that tarball and checks the SBOM against its rootfs before
+  anything is published (#482). `tools/bundle-sources.sh` checks the kernel
+  tarball's GPG signature also when both files are already in `dl/`.
+
+- Apply: `apply.sh omci` refuses when more than one omcid runs, instead of
+  signalling all of them: init runs one, and the confirmation it writes for
+  `--confirm` or `--revert` can go to one only. The confirmation now names
+  the pid of that omcid, and omcid takes one that names another pid as
+  `live`, so one left for an omcid that died is not honoured by the next.
+  A confirmation whose signal could not be sent is removed again, and a
+  plain apply that cannot remove one left on disk refuses (#482).
+
+- OMCI: when omcid can neither write its reload status nor remove the one
+  before, it tries the removal again once a second, without another
+  signal, until it works or a new status is written. Before, a
+  `state=running` left from the start of that reload stood until omcid
+  restarted, and `apply.sh omci` refused every later change as still
+  applying (#482).
+
+- omcid: a resume snapshot is checked as a whole before any of it is
+  loaded. A snapshot with a valid CRC, the right version and the right
+  device was taken at its word. The count of upstream queues in it was
+  used as an index by the rebuild that follows a resume, and one past the
+  table (128) read and wrote outside it; a table-attribute list in it that
+  ran into itself was walked without end by the next MIB reset or Get of
+  the table, on every respawn until the file was replaced. Such a snapshot
+  is now refused (`reason=bad_snapshot`) and omcid re-registers: a count
+  past its table, a length that is not the sum of the parts, a list that
+  loops, shares a row, runs through a free row or is not as long as its
+  entity says, a table node in use on no list (never freed again, so a
+  pool of them refused every table row), a row or a service saved twice
+  or a service outside its table, and more rows with a wide-row slot than
+  the pool has. A refusal no longer comes after the MIB rows of the refused file
+  were loaded. omcid writes the snapshot itself, on tmpfs, so this took a
+  damaged file to reach (#482).
+
+- Host SerDes: a 2500BASE-X link that loses the sync while the stick
+  keeps power is re-latched until it syncs again. With the host port set
+  to 1G and back to 2.5G-baseX, or disabled and enabled, the lane did not
+  sync again until the next boot. A keeper, spawned by the boot watch once
+  in sync and by a confirmed `2500basex` trial, reads bit 17 of 0x214
+  every 5 s in phase steady; clear twice a second apart, it re-latches the
+  lane every 5 s until the bit reads set twice a second apart, with one
+  event when the sync is lost (`serdes_lost`) and one when it is back
+  (`serdes_back`). A lane in sync is never touched and the mode never
+  changes: a host port left at 1G is for the next boot or a trial. It acts
+  under the lock and skips a busy tick, runs one at a time, and ends once
+  `HOST_SERDES` or the running mode is no longer `2500basex`. The
+  re-latch, in a trial and the boot watch too, now reads bit 17 again
+  under the lock and leaves a lane that synced since alone, with nothing
+  logged: the keeper logs `serdes_lost` only once that read is clear too.
+  `host-serdes.sh status` says whether a keeper runs (`keeper=<pid>` or
+  `keeper=none`), in the diag bundle as well. Reported on
+  HSGQ sticks with a downstream build of v1.18.1 carrying it: against a
+  MikroTik hEX S 2025 (E60iUGS), the router port set to 1G and back to
+  2.5G-baseX gave `serdes_back` "after 52 s" (most of it at 1G) and a
+  disabled and enabled port "after 10 s"; against a MikroTik RB5009, a
+  `fiber1g` trial that expired back to 2500BASE-X with the port still at
+  1G, set back to 2.5G-baseX by hand: "after 83 s", the time at 1G
+  included.
+
+- Docs: `ACCESS.md` sets a password before it adds an SSH key through the
+  API, without putting it in the shell history, and `SETTINGS.md` no longer
+  offers adding a key from the web UI during the safe mode. A confd newer
+  than v1.19.0 adds no key while no password is saved in `confd.auth` or a
+  safe-mode boot opens `admin` / `admin` (#482). The recipe asks for the password twice, with a prompt, in plain
+  POSIX sh (`stty -echo`, so it runs in dash too). It says so when the two
+  entries differ, and `curl -f` shows a refused password before the key
+  step. The release notes, `README.md`, `BUILDING.md` and the SSH key and
+  backup rows of `SETTINGS.md` say the same: password first, then the key.
+  The README also says that `admin` / `admin` is what a stick with no
+  stored web UI credential answers to, not a freshly flashed one. The same
+  confd refuses `/api/backup` with the factory password, so "Backing up
+  from a host" says a password of its own is needed, and
+  `tools/config-backup.sh` prints the reason confd gives for a refusal
+  instead of the status alone.
+
+- omcid: a respawn gives the wide-row slots back to the rows the snapshot
+  says had one. It gave them to the first 32 wide rows in index order, so
+  with the pool full a row created behind one that had no slot lost its own
+  on resume, and its Sets past byte 96 answered result 9 (#491).
+  `resume-test.sh` covers it.
+
+- Docs: QUALIFICATION.md and COMPARISON.md say that the safe-mode login
+  after a power cycle and the timed exit have run on a test stick: the
+  boot counter with a reboot kept the saved login, a power cut opened
+  `admin`/`admin` on the web UI, and an unacknowledged safe mode rebooted
+  into a normal boot (#488).
+
+- Docs: `confd.auth` is described as odi-ui stores it from the release after
+  v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
+  the password, which confd writes at the first sign-in or password save,
+  with a hand-written `user:password` line still accepted until then
+  (`docs/TOOLS.md`, `docs/SETTINGS.md`). `tools/config-backup.sh` and the
+  `ODI_AUTH_FILE` row in `docs/SETTINGS.md` no longer call that file the
+  shape to copy: `ODI_AUTH_FILE` needs the password as typed, and a copy of
+  a hashed `confd.auth` gets 401 from the backup.
+
+- Docs: the README is rewritten around a first-time reader: which sticks
+  run this (a table with the state from QUALIFICATION.md and the setting
+  each board needs, in place of "for the DFP-34X-2C2 only"; the 2C2 v08
+  sold as the HSGQ XPON stick is listed as Community-reported, and
+  QUALIFICATION.md says so), the safety model, the install from the stock
+  firmware as numbered steps, the first login with the safe mode, the ways
+  back, updating, and the docs grouped by reader. The upgrade notes for
+  v1.4.0 to v1.6.0 are left to their CHANGELOG sections. The "area / stock
+  / this firmware" table moves, cell for cell, to the new
+  `docs/COMPARISON.md`, and the README keeps one line per area; AGENTS.md
+  points the house rule at the new page, and `tools/check-doc-pins.sh` and
+  `tools/bump-deps.sh` follow the kernel version there. The link to
+  SETTINGS.md in the host link auto-negotiation row works again. The table
+  says what v1.16.0 to v1.19.0 changed in the web UI, that every daemon
+  restarts under the restart budget, that the safe mode shortcut also
+  follows `HOST_SERDES`, and that an unreachable trial goes back by itself
+  after 300 s. The stock key counts in COMPARISON, SETTINGS, IMPROVEMENTS
+  and HACKING agree with SETTINGS.md (24, 22 in the UI); the README no
+  longer repeats them. Rows that said "not yet run on a stick" now cite
+  the runs QUALIFICATION.md records. The list of docs adds BOOT.md,
+  SWITCH.md and COMPARISON.md. New screenshots from the odi-ui preview, at
+  twice the pixel density and kept in `docs/images/`: the Status page at the
+  top (light or dark, following the GitHub theme), Config, the OMCI
+  topology, a trial boot and `diag`. The known limits say that IGMP and MLD
+  snooping, not multicast, is unproven, and when the watchdog's CPU-port
+  rule resets an unreachable committed image; the ways back say that a
+  boot back to stock has so far always stayed on stock. The README states
+  the scope as CONTRIBUTING.md does: written for the DFP-34X-2C2, with the
+  boards users report on listed. In COMPARISON.md the host SerDes row
+  carries the re-latch above, the link in the boot reliability row
+  resolves, and the hardening row says that the program text is at a fixed
+  address and there is no NX, while the stack, heap and mmap base are
+  randomised.
+
+- Lint: the two rules that look for private-workspace references and
+  machine-local paths skip binary files (`git grep -I`), so the bytes of a
+  PNG under `docs/images/` no longer read as a path.
+
+- Docs: CONTRIBUTING.md says that new functionality comes with a test,
+  names the C and shell style (no warning under `-Wall -Wextra` for the C
+  under `src/`), and points to #482 for the roadmap.
+
+- Safe mode: the default password opens only after a power cycle, and a
+  safe mode nobody acknowledges ends by itself (#482). A safe mode after
+  three watchdog resets, or with the config partition unusable, used to
+  open `admin` / `admin` on the web UI and root by password with nobody
+  touching the stick, and kept the PON off until someone rebooted it.
+  `safe-mode.sh` now decides the login from why the previous boot ended
+  (`reason=` in `/proc/odi_ramlog_prev`) and writes it to the flag,
+  `login=default` or `login=stored`: `default` on `reason=power` for every
+  cause, and after short boots also when the last one left no stamp
+  (`unknown`, or no ramlog), so the five (or three) power cycles work as
+  before; every restart the kernel stamped (`wdt_*`, `panic`, `oops`,
+  `reboot`, `halt`, `poweroff`) keeps the saved login. An unstamped reset,
+  for one a hard hang the hardware watchdog ended, reads `unknown` too:
+  that trade-off is one marked line in `login_for`. With `login=stored`
+  nothing is bind-mounted over `/etc/passwd` (`root_password=stored`) and
+  dropbear on a keys-only image stays keys-only. **The web UI half is not
+  in this image yet**: it needs a confd (odi-ui) release that reads
+  `login=`, none exists, and the pinned confd still accepts `admin` /
+  `admin` on every safe-mode boot. Root over ssh and the timed exit do not
+  depend on it. Every safe-mode boot spawns `safe-mode.sh exit`, which
+  reboots it at 1800 s of uptime (`exit_at=`, `SAFE_EXIT_S`);
+  `safe-mode.sh ack`, the banner button, holds it (`exit=held`), also when
+  there is no record to remove (`cause=config`; with the pinned confd that
+  case has no button, only `safe-mode.sh ack` from a shell). The two run
+  under a `flock`, without which neither acts:
+  the exit claims the flag (`exit=exiting`) before it reboots, and an ack
+  after that fails and keeps the record. The exit waits for a running
+  firmware write (the evidence the web UI reboot refuses on), 1800 s more
+  at most, holds the writer lock of `fwu_starter.sh` from its claim through
+  the reboot so that none starts then (busybox `reboot` returns at once, so
+  the exit stays alive with the lock until init kills it, 120 s at most,
+  `REBOOT_HOLD_S`), and does not take a failed or early sleep for the
+  deadline. **The pinned confd shows no countdown**: its banner does not
+  read `exit_at=`, so nothing in the web UI says the boot reboots at 30
+  minutes, and its Acknowledge button, which reads as dismissing a record,
+  is what keeps the boot up. Press it, or run `safe-mode.sh ack`, before
+  you start fixing a password or a host port setting. The ssh login banner
+  (`slot-state.sh`) gets a `SAFE MODE` line that says when the boot
+  reboots and how to keep it up. The exit
+  boots what any reboot boots: an armed trial once, and with the config
+  partition still unusable a safe-mode boot again, the PON off throughout.
+  Acknowledge before flashing from a safe-mode boot (`docs/FLASHING.md`).
+  The flag is now written whole in one rename, the bind mount before it and
+  the record after it; when it cannot be written `count` and `no-config`
+  exit 1 and say what became of the default root account file.
+  New events `safe_mode_exit`, `safe_mode_exit_wait`,
+  `safe_mode_exit_failed`, `safe_mode_hold` and `safe_mode_failed`; `event=safe_mode` gains `prev=`, `login=` and
+  `exit_at=`, and says root apart when the account file could not be
+  replaced; the flag and the record gain `prev=` and `login=`. No new write
+  to the flash. Host-tested (`test/safe_mode_test.sh`, 287 checks, among them a
+  `reboot` stub that returns and then finds the writer lock still held;
+  `test/slot_state_test.sh` for the banner line); the
+  script alone also ran under stubs on a test stick, which is not a
+  safe-mode boot on hardware (`docs/QUALIFICATION.md`). `docs/SETTINGS.md`,
+  "Recovery: the safe mode", has the table and the reasoning.
+
+- omcid: a Create of ME 309 with a value G.988 does not define for the IGMP
+  version, function, immediate leave, upstream tag control or unauthorized
+  join behaviour now answers result 3, parameter error, with the attribute
+  in the execution mask, instead of result 9. G.988 has no result 9 for a
+  Create and reads the mask only with result 3. A Set still answers result
+  9, and the Create still makes no instance.
+
+- Diagnostics: the bundle adds `rss.txt`, the resident memory of each
+  process largest first, and `df.txt`, so a report shows which process grew
+  and whether `/var` or `/tmp` filled up (#465, #482). `rss.txt` is
+  collected as one step under `STEP_TIMEOUT_S`, with its exit status in
+  `MANIFEST.txt` like every other step.
+
+- OMCI: an attribute of a Set that the MIB store has no room for is
+  answered result 9 (attribute failed), with that attribute in the failed
+  mask and the other attributes of the Set stored, instead of success. That
+  is a new table row once the shared table pool (255 rows) is full, and an
+  attribute past byte 96 of a wide entity (a large string, the
+  authentication method) whose row was added while the wide-row pool (32)
+  was full. A Set that stores nothing, because every attribute it names
+  was refused (read-only, set-by-create only, or no room), also removes the
+  row it added for an instance the MIB did not hold. A Create whose
+  set-by-create attributes do not all fit still creates the entity with
+  the ones that do, as before, and logs the others; a later Set of one
+  answers result 9. A Set with no row left in the MIB answers result 1
+  rather than "unknown entity". The log says `no room for <mask>` (#482).
+
 - Host SerDes: a 2500BASE-X or HiSGMII lane out of sync is re-latched
   every 5 s (`HOLD_CLK_GLITCH` set, the lane parked, 20 ms, the mode word
   back, so a re-latch cut before its restore is undone by the next) during a
@@ -43,6 +307,7 @@ listed here.
   `apply.sh omci` reports a VLAN rebuild as `the ONU was not
   re-registered` instead of `stayed in O5`, which it does not know
   (`docs/SWITCH.md`, "GPON boot init").
+
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy

@@ -648,8 +648,9 @@ void ev_olt_command(uint8_t mt, uint16_t cls, uint16_t inst, const char *result)
 }
 
 /* The snapshot could not be written (full tmpfs, a failed write or rename).
- * The previous snapshot is still on disk, so a respawn resumes from an older
- * MIB than the one the OLT was told about. */
+ * The previous one is removed with it (snapshot.c), so a respawn registers
+ * afresh instead of resuming from an older MIB than the one the OLT was told
+ * about. */
 void ev_snapshot_fail(unsigned rows)
 {
 	struct evline e;

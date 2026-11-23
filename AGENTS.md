@@ -22,7 +22,7 @@ behind every rule here.
     test/                    host-side and qemu-based test harnesses
     tools/                   developer tooling: remote-build.sh, kernel-footprint.sh, objdiff.sh, fetch-refs.sh, memprobe, regdump, regtrace, lint helpers
       regtrace/tables/       the register replay tables as text, the source of /lib/firmware/odi/*.bin
-    docs/                    HACKING.md (contributor guide), BOOT.md, KERNEL.md, SWITCH.md, TOOLS.md, SETTINGS.md, BUILDING.md, FLASHING.md, ACCESS.md, CROSS-COMPILING.md, IMPROVEMENTS.md, LICENSING.md, REFERENCES.md; kb/ field notes
+    docs/                    HACKING.md (contributor guide), BOOT.md, KERNEL.md, SWITCH.md, TOOLS.md, SETTINGS.md, BUILDING.md, FLASHING.md, ACCESS.md, CROSS-COMPILING.md, COMPARISON.md, IMPROVEMENTS.md, LICENSING.md, REFERENCES.md; kb/ field notes
 
 ## Build and test commands
 
@@ -33,6 +33,7 @@ behind every rule here.
     make test-diag              # diag, including the exporter contract (byte-for-byte goldens)
     make test-rcs               # what rcS executes and writes to /proc, three flag sets, against goldens (needs out/busybox)
     make lint                   # shellcheck + repo-specific checks, see below
+    make cppcheck               # static analysis of the C code (CI runs it as its own job)
 
     kernel/build.sh              # the kernel alone (pulls the toolchain image itself)
     ODI_REMOTE=user@yourbuildhost tools/remote-build.sh 'make image-all'
@@ -63,10 +64,14 @@ behind every rule here.
   `tools/check-inline-quotes.sh` (run by `make lint`) enforces this inside
   inline `bash -c` blocks specifically, but the safest habit is to avoid
   apostrophes in shell comments everywhere.
-- **Every user-visible improvement goes into the README comparison table**
-  (`README.md`, "area / stock / this firmware") in the same change, with
-  a number where there is one, and only claims you can back: a
-  measurement, a test, or the code.
+- **Every user-visible improvement goes into the comparison table**
+  (`docs/COMPARISON.md`, "area / stock / this firmware") in the same
+  change, with a number where there is one, and only claims you can back:
+  a measurement, a test, or the code. `README.md` ("Compared with the
+  stock firmware") carries one short line per area with its headline
+  number: update that line when the headline changes, and add one only
+  for a new area. The full claim and its evidence stay in
+  `docs/COMPARISON.md`.
 - **Keep the mainline footprint minimal.** `kernel/618/patches/` holds only
   edits to files that exist in mainline; every new file lives in the
   `kernel/extra` overlay. Before adding a hunk to a mainline file, look for

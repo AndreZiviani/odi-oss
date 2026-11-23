@@ -80,7 +80,11 @@
  * and ACS addresses, and the authentication method with its second username
  * -- are the exception: a bounded side pool gives each such row its full
  * width (see class_wide() in mibstore.c). Only when the pool is full does a
- * row fall back to the 96 bytes and the `truncated` mark.
+ * row added then fall back to the 96 bytes and the `truncated` mark, for as
+ * long as it lives (a slot freed later does not widen it). A Set of an
+ * attribute past them answers result 9 with that attribute in the failed
+ * mask, the others of the Set stored; a Create that carries one creates
+ * the entity without it and logs it (mib_write, omcimsg.c).
  *
  * The counts are sized for a data service and two SIP lines at once. ISP1's
  * whole provisioning holds 185 rows; two phone lines add about sixty (per
@@ -129,7 +133,10 @@
  * (tone patterns, tone events, ringing patterns and events), commonly 20 to
  * 40 rows between them, and a dial plan and a SIP response table add tens
  * more, per profile -- past the 128 the pool held. It is now as large as a
- * one-byte index allows (MIB_TBL_NONE ends a list).
+ * one-byte index allows (MIB_TBL_NONE ends a list). A Set that would add a
+ * row to a full pool does not store that row and answers result 9, the
+ * table attribute in the failed mask; the other attributes of the Set are
+ * stored.
  */
 #define MIB_TBL_ENTRY 32                 /* the widest row: 65531's ACL, 30 */
 #define MIB_TBL_NODES 255
@@ -380,6 +387,7 @@ void us_qos_rebuild(void);
 /* The upstream state the driver holds as omcid programmed it, one block,
  * for the resume snapshot. */
 void *qos_prog_state(uint32_t *len);
+int qos_prog_state_ok(const void *state);
 uint16_t mib_write(struct mib_row *r, const struct omci_class *c, uint16_t mask, uint16_t skip, const uint8_t *src, uint16_t srclen);
 /* Whether attribute k differs from what the row held before this Set. */
 int mib_changed(const struct mib_row *r, const struct omci_class *c, unsigned k);
@@ -415,9 +423,15 @@ extern uint16_t alarm_snapshot;
  * can resume answering the OLT without re-registration. See snapshot.c and
  * docs/BOOT.md, "Resume without re-registration".
  */
-#define SNAPSHOT_PATH          "/var/run/omcid-mib.snap"
-#define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
-#define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
+/* OMCID_RUN_DIR is /var/run on the stick. Only a unit test that runs as an
+ * ordinary user (snapshot_check_test) builds snapshot.c with another one, as
+ * it may not write /var/run; the shipped strings are the same either way. */
+#ifndef OMCID_RUN_DIR
+#define OMCID_RUN_DIR          "/var/run"
+#endif
+#define SNAPSHOT_PATH          OMCID_RUN_DIR "/omcid-mib.snap"
+#define SNAPSHOT_TMP_PATH      OMCID_RUN_DIR "/omcid-mib.snap.tmp"
+#define RESUME_DECISION_PATH   OMCID_RUN_DIR "/omcid-resume-decision"
 #define RESUME_DECISION_PREV   RESUME_DECISION_PATH ".prev"
 int snapshot_save(void);
 /* Write `buf` to `tmp`, then rename it over `path`: a reader never sees a

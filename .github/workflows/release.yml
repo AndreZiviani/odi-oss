@@ -3,11 +3,13 @@
 
 name: release
 
-# Pushing a vX.Y.Z tag builds the full flashable image -- kernel, packages,
-# our own tools, confd and metricsd from their own public releases -- with
-# ROOT_PW=locked (docs/BUILDING.md): a public release image ships keys-only,
-# never a per-build password baked into a squashfs anyone can unpack. The
-# result is published as a GitHub release: the tarball, its SHA256SUMS, an
+# Pushing a vX.Y.Z tag publishes the full flashable image -- kernel, packages,
+# our own tools, confd and metricsd from their own public releases -- built
+# with ROOT_PW=locked (docs/BUILDING.md): a public release image ships
+# keys-only, never a per-build password baked into a squashfs anyone can
+# unpack. The image is the one ci.yml's `reproducible` job built twice and
+# found identical, not a third build. The result is published as a GitHub
+# release: the tarball, its SHA256SUMS, an
 # SBOM (tools/generate-sbom.sh, checked by tools/verify-sbom.sh), the
 # corresponding-source bundle (tools/bundle-sources.sh, docs/LICENSING.md),
 # release notes built from CHANGELOG.md by tools/release-notes.sh, and a
@@ -30,17 +32,18 @@ name: release
 #      still-running job there means nothing is published. ci.yml no longer
 #      starts on `v*` tags itself: calling it here runs it once per tag
 #      instead of twice, and makes the wait a plain `needs`.
-#   3. only then does `release` build the image and publish it.
+#   3. only then does `release` take the image `reproducible` compared (the
+#      release-image artifact of this run), check it against the SHA-256
+#      that job reported, and publish it.
 #
 # workflow_dispatch is a dry run: it runs 1 and 2 on the chosen ref and never
 # reaches the release job, so the gate can be exercised without a tag.
 #
-# This is the one workflow here that publishes what it builds. ci.yml
-# builds the full image only in its reproducible job (tags and manual runs),
-# and kernel.yml compiles the kernel alone for the pull requests that change
-# it; neither is called from here a second time. `make image-all` from a
-# clean checkout measured about five and a half minutes on a hosted runner
-# (2026-11-15), so expect this job to take several minutes.
+# The kernel and the image are built only in the `reproducible` job, on
+# tags and manual runs; kernel.yml compiles the kernel alone for the pull
+# requests that change it. `make image-all` from a clean checkout measured
+# about five and a half minutes on a hosted runner (2026-11-15). The
+# release job itself compiles nothing.
 #
 # concurrency: a tag push has landed here twice for the same ref before
 # (the tag itself pushed, then the branch it was cut from merged a moment
@@ -84,6 +87,8 @@ jobs:
   ci:
     needs: gate
     uses: ./.github/workflows/ci.yml
+    with:
+      keep-image: ${{ github.event_name == 'push' }}
 
   release:
     needs: [gate, ci]
@@ -94,7 +99,7 @@ jobs:
     # reviewer, deployments from v* tags only), so a pushed tag alone does
     # not publish a release.
     environment: release
-    timeout-minutes: 60
+    timeout-minutes: 30
     permissions:
       contents: write # gh release create/edit/upload
       id-token: write # keyless signing for the attestations
@@ -105,7 +110,7 @@ jobs:
           persist-credentials: false
 
       # Upstream tarballs (busybox, dropbear, iproute2, the Linux tree and its
-      # signature) and the confd/metricsd release assets land in dl/. The key
+      # signature) land in dl/ for the sources bundle below. The key
       # is the files that pin their versions and SHA-256s, so a bump misses the
       # cache and fetches anew. A hit only skips the download: every fetch
       # script still re-checks the pinned SHA-256 of the file it finds there.
@@ -119,13 +124,39 @@ jobs:
       - name: Version from the tag
         run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
 
-      - name: Build the release image (keys-only root)
-        run: VERSION="$VERSION" ROOT_PW=locked make image-all
+      # Build A of the reproducible job, with the build output the SBOM
+      # hashes, into out/ as if it had been built here. Every path the
+      # upload names is under build-a/out/, so the artifact is rooted
+      # there and unpacks into path: out.
+      - name: The image the reproducible job compared
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image
+          path: out
+
+      - name: It is the tarball both builds produced
+        env:
+          WANT: ${{ needs.ci.outputs.image-sha256 }}
+        run: |
+          tar="out/image/$VERSION.tar"
+          [ -s "$tar" ] || {
+            echo "release.yml: no $tar in the release-image artifact -- refusing to publish" >&2
+            exit 1
+          }
+          have=$(sha256sum "$tar" | cut -d' ' -f1)
+          echo "release.yml: $tar sha256 $have, reproducible reported ${WANT:-nothing}"
+          [ -n "$WANT" ] && [ "$have" = "$WANT" ] || {
+            echo "release.yml: $tar is not the tarball the reproducible job compared -- refusing to publish" >&2
+            exit 1
+          }
 
       - name: Checksums
         working-directory: out/image
         run: sha256sum "$VERSION.tar" > SHA256SUMS
 
+      # The reproducible job refuses to keep an image with a password file
+      # beside it and uploads only the tarball; this repeats the check on
+      # what arrived here.
       - name: No password file made it into the release
         working-directory: out/image
         run: |
@@ -149,17 +180,36 @@ jobs:
       # packages/*/build.sh, toolchain/images.env, src/release-sha256.txt) plus
       # the metricsd/confd tags make image-all actually fetched
       # (out/bin/releases.env), and hashes every file the image carries from
-      # the build output: tools/sbom.py header has the detail. SBOM_STRICT
+      # the build output: tools/sbom.py header has the detail. The kernel's
+      # hash comes from the uImage inside the checked tarball itself
+      # (KERNEL_IMAGE), not from a separate file. SBOM_STRICT
       # fails the job on a missing artifact rather than publish a SBOM with a
       # hole in it. The SBOM is checked (tools/verify-sbom.sh) before it is
       # published, and its sha256 joins SHA256SUMS, so the provenance
       # attestation below covers it as a subject of its own.
       - name: SBOM
         run: |
-          SBOM_STRICT=1 SBOM_IMAGE="out/image/$VERSION.tar" \
+          k="$RUNNER_TEMP/kernel"
+          mkdir -p "$k"
+          tar -xf "out/image/$VERSION.tar" -C "$k" uImage
+          SBOM_STRICT=1 SBOM_IMAGE="out/image/$VERSION.tar" KERNEL_IMAGE="$k/uImage" \
             tools/generate-sbom.sh "$VERSION" out/bin/releases.env > out/image/sbom.cdx.json
           (cd out/image && sha256sum sbom.cdx.json >> SHA256SUMS)
           tools/verify-sbom.sh out/image/sbom.cdx.json --sums out/image/SHA256SUMS
+
+      # The SBOM's file hashes come from the build output the artifact
+      # carried beside the tarball; re-hash them against the rootfs of the
+      # tarball itself, so the SBOM is shown to describe the image published
+      # and not only its build tree. unsquashfs as root: the rootfs has
+      # device nodes, which only root can recreate.
+      - name: The SBOM matches the rootfs of the published tarball
+        run: |
+          tools/ci-apt.sh squashfs-tools
+          w="$RUNNER_TEMP/rootfs-check"
+          mkdir -p "$w"
+          tar -xf "out/image/$VERSION.tar" -C "$w" rootfs
+          sudo unsquashfs -no-progress -d "$w/root" "$w/rootfs" >/dev/null
+          tools/verify-sbom.sh out/image/sbom.cdx.json --sums out/image/SHA256SUMS --rootfs "$w/root"
 
       - name: Release notes
         run: tools/release-notes.sh "$VERSION" > /tmp/release-notes.md
@@ -185,7 +235,7 @@ jobs:
 
       # Idempotent: a rerun for a VERSION whose release already exists (the
       # concurrency group above is about ordering, not about preventing
-      # this -- a manual workflow_dispatch retry or a second tag push still
+      # this -- a rerun of the tag-push run or a second tag push still
       # lands here) edits the existing release and re-uploads its assets
       # with --clobber instead of failing on "already exists".
       - name: Publish the GitHub release

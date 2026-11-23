@@ -270,7 +270,10 @@ each driver verb, and `event=reload_done ... result=... duration_s=...
 holds the same outcome for `apply.sh` (`id` pid.sequence, `state`, `changed`,
 `action`, `result`, `keys`, `retry`, `duration_ms`, `o5_ms`, `services`, and
 for an identity change `refusals`, `streak` and, with the clock set, `today`),
-replaced whole by a rename; omcid removes a stale one at start.
+replaced whole by a rename; omcid removes a stale one at start. A status it
+cannot write is removed, so the one before does not stand; when that fails
+too, omcid tries the removal again once a second until it works or a new
+status is written. The status it could not write is not published later.
 
 **Re-registrations are counted, and held back after refusals.** Some
 operators are said to block a line after a few refused registrations, and a
@@ -318,11 +321,15 @@ values: no operator's real limit is known here.
 
 The separate odi-ui project, fetched as a release. Serves the UI and its
 JSON API on the port given as its only argument (`confd 80` here), HTTP
-Basic with the credential in `/etc/config/confd.auth` (`user:password`;
-default `admin` / `admin` while that file is absent). It reads its pages and
-five `.tsv` tables (`keys`, `meta`, `consumers`, `features`, `settings`)
-from `/etc/confd/`, and any file of the same name in
-`/etc/config/confd/` overrides the shipped one; `settings.tsv` among them
+Basic with the credential in `/etc/config/confd.auth` (default `admin` /
+`admin` while that file is absent). The file holds
+`user:$pbkdf2-sha256$<iterations>$<salt>$<hash>` once a password was saved
+from the page or signed in with; a `user:password` line written by hand still
+works and is replaced by the hash at the first sign-in (not in safe mode or
+during a firmware trial). Releases up to odi-ui v1.19.0 keep the password as
+typed. It reads its pages and five `.tsv` tables (`keys`, `meta`,
+`consumers`, `features`, `settings`) from `/etc/confd/`, and any file of
+the same name in `/etc/config/confd/` overrides the shipped one; `settings.tsv` among them
 is the list of keys this image reads and what applying each costs. It runs
 `/etc/scripts/flash`, `/etc/scripts/apply.sh`, `/etc/scripts/fwu_starter.sh`,
 `/bin/diag`, `/bin/omcicli`, `/bin/nv`, `/bin/ping` and `/sbin/reboot` for
@@ -648,10 +655,12 @@ version when it sees no query, and the count shows as `above_version` in the
 state file and `igmpd -s`. The
 querier address (attribute 11) is stored and shown, nothing is sent from it.
 
-A Set or Create of ME 309 refuses, with result 9 and the attribute in the mask,
-a value G.988 does not define for the IGMP version (1, 2, 3, 16, 17), the IGMP
+A Set or Create of ME 309 refuses, with the attribute in the mask, a value
+G.988 does not define for the IGMP version (1, 2, 3, 16, 17), the IGMP
 function (0 to 2), immediate leave and unauthorized join behaviour (0, 1) and
-the upstream tag control (0 to 3). Every defined value is accepted whether or
+the upstream tag control (0 to 3). A Set answers result 9 and stores the
+other attributes; a Create answers result 3, parameter error, and creates
+nothing. Every defined value is accepted whether or
 not it is done: function 1 and 2 are stored and the multicast stays
 transparent.
 
@@ -1318,7 +1327,11 @@ interactive login) and in syslog (tag `slot-state`) -- `TRIAL BOOT`,
 STATE UNKNOWN`, each naming the copies and the command that clears it; when
 it is `0` the motd is empty. A failed check of the other slot adds an
 `OTHER SLOT BROKEN` line to both, an unreadable one `OTHER SLOT UNCHECKED` to
-the motd only. The file is first written with `other_slot_check=pending` and
+the motd only. On a safe-mode boot (`/var/run/safe-mode`) the motd also
+gets a `SAFE MODE` line, the first: the cause, the login, and while
+`exit=timed` the uptime at which the boot reboots by itself and the command
+that keeps it up (`safe-mode.sh ack`), or that it was acknowledged. It is
+written at boot and on the next run of the script, not on `ack`. The file is first written with `other_slot_check=pending` and
 replaced once the check has answered, so `trial-guard.sh` never waits on the
 flash read. The first nine keys keep their order: omcid reads `running` and
 `uncommitted` from the first 256 bytes.
@@ -1367,12 +1380,17 @@ to the U-Boot environment only with `FWU_RECORD_VERSION=1`. `docs/FLASHING.md` i
 What the Firmware tab's Write runs. Refuses a second write while one is
 running, and any slot but the inactive one (read the way `fwu.sh` reads it:
 `root=31:N` in `/proc/cmdline`, then `sw_active`), and either slot when
-`nv getenv sw_commit` gives neither 0 nor 1: `fwu.sh` only warns there,
-because the vendor nv of a first flash may not answer, but this script ships
-with ours. (`fwu.sh` refuses too when our nv says a copy of the environment
-could not be read in full.) Extracts `fwu.sh` and
-`md5.txt` from the tarball into `/tmp/fwu.d` and checks `fwu.sh` against its
-md5 line; then runs `fwu.sh <slot> <tar>` there, detached with `setsid`, its
+`nv getenv sw_commit` gives neither 0 nor 1, a key that is not set
+included, since this script ships with our nv. Both take a value only from
+an nv that exited 0. `fwu.sh`, which also runs the first flash from the
+vendor nv, refuses for exit 3 (a copy not read in full) and for no answer
+(exit 124 or more) under any nv; any other failed read refuses when the
+nv is ours and is a warning on the stock one. It asks the nv, not the image:
+run with no arguments, ours prints a usage that lists `fallback`, and a slot
+built on the stock base runs the stock `/bin/nv` despite `/etc/odi-build`.
+An unset `sw_commit` (exit 0, nothing printed) is a warning either way.
+Extracts `fwu.sh` and `md5.txt` from the tarball into `/tmp/fwu.d` and
+checks `fwu.sh` against its md5 line; then runs `fwu.sh <slot> <tar>` there, detached with `setsid`, its
 output in `/tmp/fwu.log` and its outcome in `/tmp/fwu.state` (`running`,
 `ok` or `failed <rc>`), which confd reports and the page polls. A state file
 it cannot write is a refusal, in both modes. After a background write, ok or
@@ -1391,7 +1409,9 @@ connection that asked for it, so the answer leaves first. It applies what the
 store holds, at once and with no way back; the web UI changes the management
 addresses through `mgmt-addr.sh` instead (below), and uses this only in a
 safe-mode boot. `omci [seconds]`
-sends SIGHUP to the running omcid (`pidof omcid`) and waits for its answer in
+sends SIGHUP to the running omcid (`pidof omcid`; with more than one it
+refuses, since init runs one and a confirmation can go to one only) and
+waits for its answer in
 `/var/run/omcid-reload`: first that omcid took the signal (5 s), then the
 outcome (20 s, `APPLY_WAIT` or the argument; the web UI gives the script 25).
 omcid decides what the change needs (the table under `omcid`): nothing, a
@@ -1435,9 +1455,13 @@ one-second sleeps), past the longest reload, so an omcid that could not
 write its status does not hold every later apply off. omcid removes the
 status file when it cannot write it, so a `running` from the start of a
 reload does not outlive it, unless that removal fails as well.
-omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`); a
-file that is empty, cut short or says anything else confirms nothing and
-counts as `live`. The outcome reported is this run's: when the next reload
+omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`),
+each followed by the pid of the omcid it signals (`confirm 412`); a file
+that is empty, cut short, names another pid (one left for an omcid that
+died before its reload) or says anything else confirms nothing and counts
+as `live`. A plain `omci` exits 1 without signalling when it cannot remove
+a confirmation left on disk, and one whose signal could not be sent is
+removed again. The outcome reported is this run's: when the next reload
 has started before it was read, apply.sh says so and exits 1.
 
 A re-registration still running at the bound is reported as still working and
@@ -1577,6 +1601,7 @@ diagnostics bundle (`host-link.txt`):
 | `link` (`status` only) | `1`, `0` or `unknown`, from `link_source` |
 | `link_source` (`status` only) | `host_link` (Fiber 1G: the kernel parameter), `serdes_sync` (2500BASE-X: bit 17 of 0x214) or `none` (HiSGMII: `link` is `unknown`) |
 | `safe_mode_boot` (`status` only) | `1` on a safe-mode boot (`safe-mode.sh`) |
+| `keeper` (`status` only) | the pid of the 2500BASE-X keeper (`serdes_lost` below), or `none`: nothing starts one again once it has ended |
 
 Every event is one line to the kernel log (`host-serdes: event=<name>
 setting=... running=... <text>`, so dmesg, the ramlog and syslog through
@@ -1586,6 +1611,7 @@ klogd), at notice:
 |---|---|
 | `applied` | a boot applied 2500basex (and started the boot watch) or hisgmii (no watch: no link signal) |
 | `serdes_link` | the boot watch saw the 2500BASE-X sync; no fallback |
+| `serdes_lost`, `serdes_back` | the keeper (after a sync of the boot watch or a confirmed `2500basex` trial): the 2500BASE-X sync was lost and the lane is re-latched every 5 s; the sync is back |
 | `watch_switch` | no link for 30 s; the watch switches mode |
 | `fallback` | the host linked only in Fiber 1G; the key stays 2500basex |
 | `fallback_nolink` | no link in either mode for 10 minutes; stays on Fiber 1G, the key unchanged |
@@ -1734,10 +1760,11 @@ See `docs/FLASHING.md`, "An erased config partition".
 ### `safe-mode.sh` -- the boot counter and the recovery boot
 
     /etc/scripts/safe-mode.sh status     this boot and the record, key=value
-    /etc/scripts/safe-mode.sh ack        acknowledge a safe-mode boot: removes its record
+    /etc/scripts/safe-mode.sh ack        acknowledge a safe-mode boot: removes its record, and keeps this boot up past the timed exit
     /etc/scripts/safe-mode.sh active     exit 0 on a safe-mode boot
     /etc/scripts/safe-mode.sh count      rcS only, right after the config partition is mounted
     /etc/scripts/safe-mode.sh no-config  rcS only, instead of count, when it is not: a safe-mode boot with no record
+    /etc/scripts/safe-mode.sh exit       spawned by a safe-mode boot: reboots at 1800 s of uptime unless acknowledged
 
 `count` adds one to `/etc/config/boot-count` and spawns `boot-ok`, which
 removes it once the uptime reaches 60 s. It also reads why the previous boot
@@ -1753,15 +1780,34 @@ before it (three with `HOST_AUTONEG=off`, or with `HOST_SERDES` at
 `2500basex` or `hisgmii`) is a safe-mode boot: it writes
 `/var/run/safe-mode` and the record `/etc/config/safe-mode`, removes
 `HOST_AUTONEG` when that was off and `HOST_SERDES` when it held another
-mode than `fiber1g`, and bind-mounts a RAM copy of
+mode than `fiber1g`, and, when a power cycle led into it (`login=default`),
+bind-mounts a RAM copy of
 `/etc/passwd` with root's password `admin` over the read-only one
 (`docs/SETTINGS.md`, "Recovery: the safe mode"). The flag in `/var/run` is
 what the rest reads: `host-serdes.sh` runs Fiber 1G, `host-autoneg.sh`
 applies nothing, the PON steps
-leave the laser off and skip `gponact` (`rcs-lib.sh`), `svc-dropbear.sh`
-offers passwords, and confd accepts `admin:admin`. `status` prints
+leave the laser off and skip `gponact` (`rcs-lib.sh`), and with
+`login=default` `svc-dropbear.sh`
+offers passwords and confd accepts `admin:admin`; with `login=stored` (the
+stick entered the safe mode by itself) both keep what is saved (confd
+needs a release that reads `login=`; `docs/SETTINGS.md`, "The login").
+Every safe-mode boot spawns `exit`, which reboots it at 1800 s
+of uptime unless `ack` changed `exit=timed` to `exit=held` in the flag
+first. The two are serialised by a lock (`flock` on
+`/var/run/safe-mode.lock`; an `ack` that does not get it in 5 s exits 1):
+the exit claims the flag
+(`exit=exiting`) before it reboots, and an `ack` after that exits 1 and
+keeps the record. The exit waits for a running firmware write, 1800 s more
+at most, and holds the writer lock of `fwu_starter.sh` from its claim
+through the reboot, so none starts then: busybox `reboot` returns at once,
+so the exit stays alive with the lock until init kills it, 120 s at most
+(`REBOOT_HOLD_S`). `status` prints
 `active=0|1` with the flag's fields as `now_*` (`now_cause=` is
-`short_boots`, `watchdog` or `config`), `record=0|1` with the record's as
+`short_boots`, `watchdog` or `config`; `now_prev=` the previous boot's
+reason, `now_login=default|stored`, `now_root_password=default|stored|failed`,
+`now_exit_at=` the uptime of the timed exit,
+`now_exit=timed|held|exiting|failed`),
+`record=0|1` with the record's as
 `record_*`, `boot_count` while there is one and `wdt_count` likewise.
 
 Its events, to the kernel log at notice: `safe-mode: event=boot_count
@@ -1770,8 +1816,19 @@ uptime=S` on every boot (the uptime is how early the count lands on a given
 stick; `prev` is the previous boot's `reason=`, `none` without a ramlog),
 `event=safe_mode cause=short_boots|watchdog|config short_boots=N
 wdt_resets=N cleared=HOST_AUTONEG|HOST_SERDES|HOST_AUTONEG,HOST_SERDES|none|failed
-root_password=default|failed`, and
-`event=safe_mode_ack`.
+root_password=default|stored|failed prev=REASON login=default|stored
+exit_at=S`, `event=safe_mode_ack` (the record removed),
+`event=safe_mode_hold` (an acknowledgement kept this boot up),
+`event=safe_mode_exit_wait state=postponed|gave_up` (the timed exit waits
+for a firmware write, or stopped waiting), `event=safe_mode_exit cause=...
+uptime=S` right before the reboot of the timed exit,
+`event=safe_mode_exit_failed` (the timed exit gave up without a reboot: a
+sleep failed, the uptime could not be read, the lock was never free, the
+reboot failed, or no reboot came 120 s after `reboot` answered; the flag then says `exit=failed`, except when the lock
+could not be taken to write it),
+and `event=safe_mode_failed` (the flag could not be written: not a
+safe-mode boot, `count` and `no-config` exit 1, and the line says what
+became of the default root account file).
 
 ### `diag-bundle.sh` -- the diagnostics bundle
 
@@ -1782,6 +1839,7 @@ prints OUT: the previous boot ramlog (`/proc/odi_ramlog_prev`), the tail of
 every `/var/log` file (256 KB each, 1 MB in all), `dmesg`, `/etc/odi-build`,
 `/etc/version`, `/proc/odi_wdt/{watchdog_flag,userland_ok,clients}`,
 `uptime`, `/proc/meminfo`, `/proc/mounts`, `/proc/cmdline`, `ps`,
+the resident memory of each process from `/proc/PID/status` (`rss.txt`), `df`,
 `sw_active`, `sw_commit`, `sw_tryactive` and `sw_version0/1` from both
 environment copies (`nv getenv` and `nv fallback`), one scrape of the
 exporter, and the config store. `MANIFEST.txt` lists every step with its
@@ -1862,12 +1920,12 @@ value stays empty, so "not set" still shows):
 - and any key whose name contains `PASS`, `PWD`, `PSK`, `SECRET`, `TOKEN`,
   `KEY`, `COMMUNITY` or `CRED`.
 
-Then every secret value found that way, plus the web UI password from
-`/etc/config/confd.auth`, is scrubbed from every file in the bundle, as text
-and as upper- and lowercase hex, run together and space-separated, in case a
-log quoted one; values shorter than three characters are redacted in the
-config copies only. `confd.auth`, the dropbear keys and `/etc/passwd` are
-never collected. A value the store keeps XML-escaped is scrubbed in its
+Then every secret value found that way, plus what `/etc/config/confd.auth`
+holds after the username (the web UI password, or its hash), is scrubbed
+from every file in the bundle, as text and as upper- and lowercase hex, run
+together and space-separated, in case a log quoted one; values shorter
+than three characters are redacted in the config copies only.
+`confd.auth`, the dropbear keys and `/etc/passwd` are never collected. A value the store keeps XML-escaped is scrubbed in its
 decoded spelling too, the one omcid and the logs use. Any step of the
 scrub that fails (a config copy, a value list, a sort, the hex of a value,
 a rule, the sed script, a file that cannot be rewritten) fails the bundle,
@@ -2114,7 +2172,7 @@ the same line goes to `/var/log/omcid.log` among the frames around it.
 | `gpon-hold: event=marker action=written` | notice | the marker file `/etc/config/gpon-hold` was written, `removed` or `failed what=write` (or `remove`) |
 | `omcid: event=olt_reboot class=256 inst=0 result=refused` | notice | the OLT asked for a reboot: `result=refused` (`OMCI_ACCEPT_REBOOT` off, answered "command not supported"), `accepted` (answered success, the stick reboots a second later), `acknowledged` (`OMCI_ACCEPT_REBOOT=2`, answered success, no reboot) or, for any class but ONU-G, `not_supported` (docs/SETTINGS.md) |
 | `omcid: event=uni_lock inst=257 port=0 action=applied effect=host_link_down_until_unlock` | warning (`applied`), notice | the OLT locked or unlocked an Ethernet UNI (ME 11 AdministrativeState), once per change of the port's state. `action=ignored`: a lock answered and stored, the port kept up (the default, `OMCI_UNI_LOCK` not `1`). `action=applied`: `OMCI_UNI_LOCK=1`, the host link goes down now and with it the web UI, ssh, syslog and metrics; sent before the port is touched, so it is the last line a host sees. `action=unlocked`: the OLT unlocked it. `action=cleared` (`inst=0`): a MIB reset or an omcid start unlocked a port a lock had taken down (docs/SETTINGS.md) |
-| `omcid: event=snapshot_fail rows=161` | notice | omcid could not write its MIB snapshot (`/var/run/omcid-mib.snap`: a full tmpfs, a failed write or rename); `rows` is the MIB rows held. The previous snapshot stays on disk, so a respawn resumes from an older MIB than the OLT was told about, or re-registers if there is none |
+| `omcid: event=snapshot_fail rows=161` | notice | omcid could not write its MIB snapshot (`/var/run/omcid-mib.snap`: a full tmpfs, a failed write or rename); `rows` is the MIB rows held. The previous snapshot is removed with it, so a respawn re-registers instead of resuming from an older MIB than the OLT was told about |
 | `omcid: event=sw_image op=download_start inst=1 size=2621440 window=32 result=ok` | notice | a software download step from the OLT: `op=download_start` (the image size and sections per window), `download_end` (`sections=N`, the sections accepted, and `crc=ok` or `bad`), `activate`, `commit`. `result` is `ok`; `not_supported` with `OLT_SW_DOWNLOAD=reject`; `refused_active` (a download to the image that is active or committed), `refused_invalid` (activate or commit of an image that is not valid), `crc_error`, `size_mismatch`, `short` or `no_download` otherwise. Accepted or not, the image is discarded and nothing is flashed (docs/SETTINGS.md, "Software download from the OLT") |
 | `omcid: event=unknown_me class=351 op=create mt=4` | notice | the first request this boot for a managed entity class omcid has no model for, per class and operation (`op` is `create`, `set`, `get`, `delete`, `get_next` or `test`; `mt` the message type); answered "unknown entity" unless `OMCI_UNKNOWN_ME_OK=1` (docs/SETTINGS.md) |
 | `omcid: event=rx_reject reason=crc count=1 total=1 action=dropped len=48` | notice | a received frame omcid flagged before it read or changed anything. `action=dropped`, no answer: `reason` is `length` (under the 48 bytes of a baseline frame), `devid` (device identifier not 0x0a; the extended format, 0x0b, is not implemented, so an OLT that sends it is left to fall back to baseline; the line adds `devid=11`. omcid reports the baseline set only (`0x80`) unless `OMCC_VER` is set with `omci-identity.on`, see `docs/SETTINGS.md`) or `crc` (the CRC-32 in bytes 44-47 does not match bytes 0-43). `reason=trailer action=accepted`: bytes 40-43 are not `00 00 00 28` (what our OLT sends) but the CRC is valid, so the frame is answered and only counted. At most one line per reason a minute, with `count` the frames since the last line and `total` since omcid started; `omcli state` shows the totals (`rx dropped`). The frames our OLT sends never trigger it |

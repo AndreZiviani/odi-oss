@@ -175,8 +175,11 @@ void snapshot_invalidate(void)
 	sys_unlink(SNAPSHOT_TMP_PATH);
 }
 
-/* 0 when the snapshot is on disk, -1 when it could not be written; the old
- * snapshot then stands, and event=snapshot_fail says so. */
+/* 0 when the snapshot is on disk, -1 when it could not be written. The old
+ * snapshot is removed then, and event=snapshot_fail says so: it holds a MIB
+ * older than the one the OLT was just answered for, and a respawn that
+ * resumed from it would answer for that older MIB. With no snapshot the
+ * respawn registers afresh, and the OLT provisions the MIB again. */
 int snapshot_save(void)
 {
 	uint8_t *p = snapbuf;
@@ -185,9 +188,10 @@ int snapshot_save(void)
 	uint32_t qlen;
 	void *qstate = qos_prog_state(&qlen);
 	/* Leave room for the fixed pools and the crc after the last row or
-	 * service entry is appended; a save that would not fit is skipped
-	 * rather than truncated silently -- the next MIB-changing message
-	 * tries again, and until then the last good snapshot on disk stands. */
+	 * service entry is appended. A save that would not fit fails as a
+	 * whole rather than writing a snapshot without the rows or services
+	 * past the end: SNAP_BUF_MAX holds the worst case, so this is a
+	 * backstop, not a path a session takes. */
 	const uint32_t fixed_tail = (uint32_t)sizeof(tblpool) +
 		(uint32_t)sizeof(flow_us) + (uint32_t)sizeof(flow_ds) +
 		4 /* bc_flow */ + (uint32_t)sizeof(tcont_map) + qlen +
@@ -215,7 +219,7 @@ int snapshot_save(void)
 		if (!mib[i].used)
 			continue;
 		if ((uint32_t)(p - snapbuf) + row_bytes + fixed_tail > SNAP_BUF_MAX)
-			break;
+			goto fail;
 		put_u16(&p, mib[i].classId);
 		put_u16(&p, mib[i].inst);
 		put_u16(&p, mib[i].written);
@@ -245,7 +249,7 @@ int snapshot_save(void)
 		if (!servtab[i].in_use)
 			continue;
 		if ((uint32_t)(p - snapbuf) + ent_bytes + 4 > SNAP_BUF_MAX)
-			break;
+			goto fail;
 		put_u16(&p, (uint16_t)i);
 		put_raw(&p, &servtab[i], sizeof(struct omci_bdgconn));
 		servs++;
@@ -262,11 +266,12 @@ int snapshot_save(void)
 	}
 
 	if (atomic_write(SNAPSHOT_PATH, SNAPSHOT_TMP_PATH, snapbuf,
-			 (uint32_t)(p - snapbuf)) < 0) {
-		ev_snapshot_fail(rows);
-		return -1;
-	}
-	return 0;
+			 (uint32_t)(p - snapbuf)) == 0)
+		return 0;
+fail:
+	snapshot_invalidate();
+	ev_snapshot_fail((unsigned)mib_count());
+	return -1;
 }
 
 /* Why a resume was refused, for omcid's event=start line (events.c). */
@@ -274,6 +279,116 @@ static int refuse(const char **why, const char *reason)
 {
 	*why = reason;
 	return 0;
+}
+
+/* The rest of a snapshot, walked before any of it is loaded: every count
+ * within its table, every part inside the bytes that were read and the file
+ * exactly as long as its parts, every row and every service once, and the
+ * table-attribute lists whole. The CRC says the file is what some omcid
+ * wrote, not that its memory was in order when it did. A count taken on
+ * trust becomes an index later (the queue count, in us_qos_rebuild()), and
+ * a list that runs into itself is walked for ever by the first thing that
+ * walks it (tbl_free() at a MIB reset, the Get of a table attribute that
+ * primes its Get Next): every walker stops at MIB_TBL_NONE and at nothing
+ * else. A node in use that no list reaches is never freed, since tbl_free()
+ * only walks lists, and a pool full of them refuses every table row until
+ * omcid starts afresh. Checked here and not where each part is loaded,
+ * because a refusal halfway through the load leaves half a MIB behind for
+ * the registration that follows. `p` is behind the device identity, `end`
+ * at the CRC. */
+static int snap_whole(const uint8_t *p, const uint8_t *end, uint32_t qlen)
+{
+	long fixed = (long)(sizeof(tblpool) + sizeof(flow_us) + sizeof(flow_ds) +
+			    4 + sizeof(tcont_map) + qlen + 2);
+	const struct mib_tblent *pool;           /* bytes only: no alignment */
+	static const uint8_t *row[MIB_ROWS];     /* static: 1280 bytes */
+	uint8_t seen[(MIB_TBL_NODES + 7) / 8];
+	uint8_t slot[SERV_MAX / 8];
+	uint16_t rows, servs;
+	unsigned wide = 0;
+
+	if (end - p < 6)
+		return 0;
+	p += 4;                                  /* sync, alarm, pending */
+	rows = get_u16(&p);
+	if (rows > MIB_ROWS)
+		return 0;
+	for (uint16_t i = 0; i < rows; i++) {
+		long data = MIB_ROW_MAX;
+
+		if (end - p < 10)
+			return 0;
+		row[i] = p;
+		/* One row per class and instance: mib_add() hands a second
+		 * one the row of the first, which it overwrites, and the
+		 * list of the first is in use with no row to reach it. */
+		for (uint16_t j = 0; j < i; j++)
+			if (row[j][0] == p[0] && row[j][1] == p[1] &&
+			    row[j][2] == p[2] && row[j][3] == p[3])
+				return 0;
+		p += 9;
+		if (get_u8(&p)) {                /* has_tail */
+			data = MIB_WIDE_MAX;
+			/* No more rows with a slot than the pool has:
+			 * the resume gives one to each that says so. */
+			if (++wide > MIB_WIDE_ROWS)
+				return 0;
+		}
+		if (end - p < data)
+			return 0;
+		p += data;
+	}
+	if (end - p < fixed)
+		return 0;
+	pool = (const struct mib_tblent *)p;
+	p += fixed - (long)qlen - 2;
+	if (!qos_prog_state_ok(p))
+		return 0;
+	p += qlen;
+	servs = get_u16(&p);
+	if (servs > SERV_MAX)
+		return 0;
+	if (end - p != (long)servs * (long)(2 + sizeof(struct omci_bdgconn)))
+		return 0;
+	/* Each service at a slot of its own within the table: the loader
+	 * skips one outside it and lets a second one overwrite the first, so
+	 * a service of the file would be lost without a word. */
+	for (unsigned i = 0; i < sizeof slot; i++)
+		slot[i] = 0;
+	for (uint16_t i = 0; i < servs; i++) {
+		uint16_t idx = get_u16(&p);
+
+		if (idx >= SERV_MAX || (slot[idx >> 3] & (1u << (idx & 7))))
+			return 0;
+		slot[idx >> 3] |= (uint8_t)(1u << (idx & 7));
+		p += sizeof(struct omci_bdgconn);
+	}
+
+	/* The list of each row: nodes in use, none of them twice, in this
+	 * list or in the list of another row, and as many as the row counts.
+	 * A node is marked when it is first met, so a walk ends after at most
+	 * MIB_TBL_NODES steps whatever the links say; an index is a byte and
+	 * 0xff is the end, so none is outside the pool. */
+	for (unsigned i = 0; i < sizeof seen; i++)
+		seen[i] = 0;
+	for (uint16_t i = 0; i < rows; i++) {
+		const uint8_t *q = row[i];
+		unsigned len = 0;
+
+		for (uint8_t t = q[7]; t != MIB_TBL_NONE; t = pool[t].next) {
+			if (!pool[t].used || (seen[t >> 3] & (1u << (t & 7))))
+				return 0;
+			seen[t >> 3] |= (uint8_t)(1u << (t & 7));
+			len++;
+		}
+		if (len != q[8])                 /* tbl_count */
+			return 0;
+	}
+	/* And every node in use on a list. */
+	for (unsigned t = 0; t < MIB_TBL_NODES; t++)
+		if (pool[t].used && !(seen[t >> 3] & (1u << (t & 7))))
+			return 0;
+	return 1;
 }
 
 int snapshot_try_resume(uint32_t onu_state, const char **why)
@@ -327,11 +442,16 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 				return refuse(why, "other_device");
 	}
 
+	if (!snap_whole(p, buf + n - 4, qlen))
+		return refuse(why, "bad_snapshot");
+
 	{
 		uint8_t sync = get_u8(&p);
 		uint16_t alarm = get_u16(&p);
 		uint8_t pending = get_u8(&p);
 
+		/* snap_whole() has refused a count past its table; the two
+		 * checks in this block are what it replaced and cost nothing. */
 		rows = get_u16(&p);
 		if (rows > MIB_ROWS)
 			return refuse(why, "bad_snapshot");
@@ -355,6 +475,16 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 					p += MIB_WIDE_MAX - MIB_ROW_MAX;
 				continue;
 			}
+			/* The slot goes back to the rows the file says had one.
+			 * mib_add() gave this row a slot if one was free,
+			 * whether or not it had one; a row that had none gives
+			 * it back at once, so it is free for a later row that
+			 * had one. Left in place, the first 32 wide rows in
+			 * index order took the slots, and a row created behind
+			 * one that never had a slot lost its own: its Sets
+			 * past byte 96 failed after the respawn. */
+			if (!has_tail)
+				r->tail = 0;
 			r->written = written;
 			r->truncated = truncated;
 			r->tbl_head = tbl_head;
@@ -362,8 +492,9 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 			get_raw(&p, r->data, MIB_ROW_MAX);
 			for (int j = 0; j < MIB_ROW_MAX; j++)
 				r->prev[j] = r->data[j];
-			/* Whether this row has a slot now is the pool's say, not
-			 * the file's: bytes saved for a row the pool cannot hold
+			/* A row the file says had a slot gets one: at most 32
+			 * rows say so, and every row without one gave its slot
+			 * back above. Should the pool still be full, the bytes
 			 * are dropped, as a Set of them would have been. */
 			if (has_tail) {
 				if (r->tail)

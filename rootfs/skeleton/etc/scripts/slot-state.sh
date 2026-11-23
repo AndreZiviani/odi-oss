@@ -56,6 +56,7 @@ DEV_LOG=${DEV_LOG:-/dev/log}
 RCS_DEV=${RCS_DEV:-/etc/init.d/rcS.dev}
 BREADCRUMBS_ON=${BREADCRUMBS_ON:-/etc/config/breadcrumbs.on}
 CONFIRM_ARP_FILE=${CONFIRM_ARP_FILE:-/etc/config/confirm-arp}
+SAFE_FLAG=${SAFE_FLAG:-/var/run/safe-mode}
 # nv reads two 8 KB partitions; 10 s is generous.
 NV_TIMEOUT_S=${NV_TIMEOUT_S:-10}
 # nv slotcheck reads at most the 1.3 MB kernel partition and 96 bytes of the
@@ -251,9 +252,29 @@ if [ -f "$BREADCRUMBS_ON" ]; then
 	aids="$aids*** DEV AID breadcrumbs.on: $BREADCRUMBS_ON is present (boot breadcrumbs and extra logging); remove it when you are not debugging.
 "
 fi
+# A safe-mode boot (safe-mode.sh, docs/SETTINGS.md "Recovery: the safe
+# mode"), from the flag rcS wrote before this runs. The timed exit reboots
+# such a boot unless someone acknowledges it, and the web UI of a confd that
+# does not read exit_at says nothing of that, so the ssh login does. Read
+# once per run: a later run (after nv commit) shows the state then.
+safe=
+if [ -f "$SAFE_FLAG" ]; then
+	sm() { sed -n "s/^$1=//p" "$SAFE_FLAG" 2>/dev/null | head -n 1; }
+	s_what="cause=$(sm cause), login=$(sm login)"
+	case $(sm exit) in
+	timed)
+		safe="SAFE MODE ($s_what): the PON is off, and this boot reboots by itself at $(sm exit_at) s of uptime unless someone acknowledges it. Keep it up with: /etc/scripts/safe-mode.sh ack (status shows exit=held once it is)." ;;
+	held)
+		safe="SAFE MODE ($s_what): the PON is off. Acknowledged: this boot stays up until a reboot." ;;
+	*)
+		safe="SAFE MODE ($s_what): the PON is off. See: /etc/scripts/safe-mode.sh status" ;;
+	esac
+fi
 write_motd() {
-	if [ -n "$notice" ] || [ -n "$other_notice" ] || [ -n "$aids" ]; then
+	if [ -n "$notice" ] || [ -n "$other_notice" ] || [ -n "$aids" ] || [ -n "$safe" ]; then
 		text="
+"
+		[ -z "$safe" ] || text="$text*** $safe
 "
 		[ -z "$notice" ] || text="$text*** $notice
 "

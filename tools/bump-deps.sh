@@ -76,7 +76,7 @@ if [ -n "$latest" ] && [ "$latest" != "$current" ]; then
 		rm -f kernel/618/fetch.sh.bak
 		# The docs name the pinned kernel too, and make lint checks they
 		# agree (tools/check-doc-pins.sh), so a bump moves them with it.
-		doc_pin "${current//./\\.}" "$latest" README.md docs/BUILDING.md
+		doc_pin "${current//./\\.}" "$latest" README.md docs/COMPARISON.md docs/BUILDING.md
 		note "linux $current -> $latest"
 	fi
 	rm -rf "$tmp"

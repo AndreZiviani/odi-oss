@@ -231,6 +231,16 @@ omci_lock_linger() {
 	) < /dev/null > /dev/null 2>&1 &
 }
 
+# one_omcid <pids>: init runs one omcid (svc-omcid.sh). With more, the
+# confirmation written below would go to whichever reloads first and the
+# other would run with none, and an answer of either would count for both:
+# refused, with nothing written or signalled.
+one_omcid() {
+	# shellcheck disable=SC2086 # one pid per word
+	set -- $1
+	[ "$#" -le 1 ] || die "more than one omcid runs ($*): a reload goes to one; stop the one init did not start (/etc/scripts/svc-omcid.sh)"
+}
+
 # omci <confirm> [option] [SECONDS]: confirm is empty for apply.sh omci,
 # which takes --confirm or --revert, and live for apply.sh omci-live,
 # which takes none.
@@ -256,11 +266,14 @@ omci() {
 	pids=$(pidof omcid 2>/dev/null)
 	[ -n "$pids" ] || die "no omcid is running: nothing to reload (init respawns it; see /var/log/omcid.log)"
 
+	one_omcid "$pids"
+
 	omci_lock
 	# The omcid to signal, named again under the lock: the answer counted
-	# below is a run of one of these.
+	# below is a run of it.
 	pids=$(pidof omcid 2>/dev/null)
 	[ -n "$pids" ] || die "no omcid is running: nothing to reload (init respawns it; see /var/log/omcid.log)"
+	one_omcid "$pids"
 	# omcid takes a signal only once the reload it runs is done, a
 	# re-registration up to 153 s after it began. A signal sent now would
 	# wait that long, past the bound here and past the lock, and the reload
@@ -275,14 +288,20 @@ omci() {
 	fi
 	before=$(snap_get id)
 	# The confirmation omcid takes away with this reload (and any other):
-	# written before the signal, so the reload it starts finds it.
+	# written before the signal, so the reload it starts finds it. It names
+	# the omcid it is for, so one left behind for an omcid that died is
+	# nothing to the next one, which takes it as omci-live. One that cannot
+	# be removed is not left for a plain reload to find.
 	if [ -n "$confirm" ]; then
-		echo "$confirm" > "$REREG_CONFIRM" || die "could not write $REREG_CONFIRM"
+		echo "$confirm $pids" > "$REREG_CONFIRM" || die "could not write $REREG_CONFIRM"
 	else
-		rm -f "$REREG_CONFIRM"
+		rm -f "$REREG_CONFIRM" || die "could not remove $REREG_CONFIRM, which a reload would take as a confirmation"
 	fi
-	# shellcheck disable=SC2086 # one pid per word
-	kill -HUP $pids 2>/dev/null || die "could not signal omcid $pids"
+	# A confirmation no reload will take is not left for a later one.
+	if ! kill -HUP "$pids" 2>/dev/null; then
+		rm -f "$REREG_CONFIRM"
+		die "could not signal omcid $pids"
+	fi
 	say "omcid $pids told to reload its configuration"
 
 	# The acknowledgement: a new run of an omcid signalled here appears in

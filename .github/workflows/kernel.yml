@@ -6,17 +6,17 @@ name: kernel
 # Compiles the kernel of this repository when a change can alter it, and only
 # then. The jobs of ci.yml that run on a pull request boot a stock kernel or
 # none; the kernel was compiled only by its reproducible job, on tags and
-# manual runs, and by release.yml. So a kernel patch that no longer applied,
+# manual runs. So a kernel patch that no longer applied,
 # a driver that no longer compiled or a uImage grown past its partition was
 # first seen on the machine of the author, or at the tag.
 #
 # A workflow of its own, not a job in ci.yml, for two reasons. `paths` is a
 # trigger filter, so a pull request that touches nothing below starts no
 # runner at all; a job in ci.yml would need a runner just to diff and
-# decide to skip. And release.yml calls ci.yml as
-# a reusable workflow and then builds the kernel itself in `make image-all`:
-# a kernel job inside ci.yml would compile it a second time on every tag.
-# Nothing calls this file.
+# decide to skip. And release.yml calls ci.yml as a reusable workflow on
+# every tag, where the reproducible job already builds the kernel twice: a
+# kernel job inside ci.yml would compile it a third time. Nothing calls this
+# file.
 #
 # The paths are what kernel/build.sh reads: the kernel directory (pin and
 # fetch, seed config, patches, overlay, the build scripts), the toolchain

@@ -208,8 +208,9 @@ command on stdin. The command is any shell line, so
 - **The root password** is generated per build and written to
   `out/image/root-password-<version>.txt`; `ROOT_PW=` chooses it,
   `ROOT_PW=none` leaves it empty, `ROOT_PW=locked` ships no password at all
-  and starts dropbear with `-s` (`.github/workflows/release.yml` builds
-  every release this way). It is baked into the read-only rootfs, so keep
+  and starts dropbear with `-s` (the `reproducible` job in
+  `.github/workflows/ci.yml` builds every release this way, and
+  `release.yml` publishes that build). It is baked into the read-only rootfs, so keep
   the file for as long as that image runs anywhere. All three shapes are
   `image/gen-root-account.sh`, tested by `test/root_pw_test.sh`.
 
@@ -252,7 +253,7 @@ in odi-ui `schema/settings.tsv` and `docs/SETTINGS.md` together.
 `.github/workflows/ci.yml`, on pull requests and pushes to `main`: a
 `changelog` check (a pull request has to touch `CHANGELOG.md`, unless it is
 docs or CI only, or labelled `no-changelog`), `make lint`, `make
-test-host`, `make test-diag` and `make test-omci`, each as its own parallel
+cppcheck`, `make test-host`, `make test-diag` and `make test-omci`, each as its own parallel
 job; `test-omci` is a matrix with one job per suite
 (`make test-omci-<suite>`, after `make test-omci-build`). Two more jobs
 run on every push: `clean-build` (`make kernel-tree` and `make src`, then
@@ -297,9 +298,10 @@ tag's commit is an ancestor of `origin/main` (`tools/check-release-ancestry.sh`;
 pre-release tags such as `v1.2.2-beta.1` are exempt, they test unmerged work), then calls `ci.yml` as a reusable
 workflow on that same commit and publishes nothing unless every job of it,
 `test-qemu`, the rcS goldens, `full` and `reproducible` included, succeeded.
-Only then does it build the full
-image (`VERSION=` from the tag, `ROOT_PW=locked`) and publishes it as a
-GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
+Only then does it publish the full image (`VERSION=` from the tag,
+`ROOT_PW=locked`) that `reproducible` built twice and compared, checked
+against the SHA-256 that job reported, rather than building a third one. It
+goes out as a GitHub release: the tarball, `SHA256SUMS`, an SBOM, build-provenance
 attestations, and notes from `tools/release-notes.sh` (the tag's own
 `CHANGELOG.md` section plus a flash-and-first-login paragraph).
 `.github/workflows/dependency-bump.yml` runs `tools/bump-deps.sh` every
@@ -544,6 +546,7 @@ In order:
 | gate | what it proves | needs |
 |---|---|---|
 | `make lint` | shellcheck over every script (on-device ones as POSIX `sh`, since busybox ash runs them), the inline-quote check, `reuse lint` (REUSE copyright and license information; skipped when the tool is absent, always run in CI), and the greps for private-workspace references, machine-local paths, trial history in comments, internal plan ids and vendor source citations | `shellcheck`, git, `reuse` (optional locally; `tools/reuse-requirements.txt`) |
+| `make cppcheck` | static analysis of every tracked C file (warnings and errors; a finding that is not a bug carries a `cppcheck-suppress` comment with the reason); not part of `make test` | `cppcheck` (CI: 2.13, ubuntu-24.04) |
 | `make test-host` | about 60 host tests: driver logic, the on-device scripts, the replay tables and their generators | cc, bash, Python 3 |
 | `make test-diag` | diag's parser and conversions natively, then under qemu: the conversion vectors, the L2 listing golden, **the exporter contract** | Docker |
 | `make test-omci` | builds `src/`, runs `omcid` under qemu-user (about 130 checks), its seven suites side by side | Docker |
@@ -998,8 +1001,8 @@ Each of these has cost real time. The pointer says where the evidence is.
 
 - **The config store is shared with the stock firmware.** The jffs2
   `config` partition is not part of a slot: both images read it, and a
-  reflash never touches it. Of its 184 keys this image acts on 23 (22 the UI
-  edits, and bit 256 of `OMCI_CUSTOM_ME`); the UI shows the rest read-only. **Never delete a key** this image does not use
+  reflash never touches it. Of its 184 keys this image acts on 24 (22 the UI
+  edits, bits of `OMCI_CUSTOM_ME` and one bit of `OMCI_CUSTOM_MCAST`); the UI shows the rest read-only. **Never delete a key** this image does not use
   (the stock slot still reads it), never erase the partition (it holds the
   serial number and MAC the line authenticates on), and keep backups whole.
   `flash set` and `flash default` install the new file by rename on the
