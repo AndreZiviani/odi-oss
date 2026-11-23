@@ -47,8 +47,16 @@ EOF
 # a failed read can be told from one that came with exit 0.
 # NV_FALLBACK_COMMIT is our nv answering for the fallback copy, and
 # NV_FALLBACK_NONE=1 is our nv with no valid second copy.
+# NV_OWN=1 is our nv as fwu.sh tells it: run with no arguments, it prints a
+# usage that lists fallback. Without it the stub is the stock nv, whose usage
+# (USAGE_RC, 1 by default; 22 on the stock base) has no fallback.
 cat > "$T/nv" <<'STUB'
 #!/bin/sh
+if [ $# = 0 ]; then
+	echo "Usage: nv getenv [parameter_name]"
+	[ "${NV_OWN:-0}" = 1 ] && echo "       nv fallback [parameter_name]"
+	exit 1
+fi
 [ -n "${NV_RC:-}" ] && exit "$NV_RC"
 [ "${NV_HANG:-0}" = 1 ] && exec sleep 30
 if [ "${NV_UNREAD:-0}" = 1 ]; then
@@ -72,7 +80,7 @@ if [ "$1" = fallback ] && [ -n "${NV_FALLBACK_COMMIT:-}" ]; then
 	exit "${NV_FALLBACK_VALUE_RC:-0}"
 fi
 # The vendor nv has no fallback verb and prints its usage.
-[ "$1" = getenv ] || { echo "Usage: nv getenv [parameter_name]"; exit 1; }
+[ "$1" = getenv ] || { echo "Usage: nv getenv [parameter_name]"; exit "${USAGE_RC:-1}"; }
 case "$2" in
 sw_commit) [ -n "${NV_COMMIT:-}" ] && echo "sw_commit=$NV_COMMIT" ;;
 sw_active) [ -n "${NV_ACTIVE:-}" ] && echo "sw_active=$NV_ACTIVE" ;;
@@ -81,14 +89,12 @@ exit "${NV_VALUE_RC:-0}"
 STUB
 chmod +x "$T/nv"
 
-# The nv is the vendor one unless a run says FWU_ODI_BUILD="$T/odi-build", the
-# file an image of this project carries.
-: > "$T/odi-build"
+# The nv is the stock one unless a run says NV_OWN=1.
 run() {   # run <cmdline> <slot> [env...]
 	cl=$1; slot=$2; shift 2
 	echo "$cl" > "$T/cmdline"
 	( cd "$T" && env PATH="$T:$PATH" PROC_MTD="$T/mtd" PROC_CMDLINE="$T/cmdline" \
-	    FWU_ODI_BUILD="$T/no-odi-build" "$@" \
+	    "$@" \
 	    sh "$OLDPWD/$FWU" "$slot" "$T/img.tar" 2>&1 )
 	echo $? > "$T/rc"
 }
@@ -213,7 +219,7 @@ check "and the fallback copy is checked" \
 # Any other failed read: no value either, whatever it printed. Our nv fails
 # only when it could not read, so there it refuses; how the vendor nv of a
 # first flash fails is not known, so there it stays a warning.
-OWN="FWU_ODI_BUILD=$T/odi-build"
+OWN="NV_OWN=1"
 check_stops "our nv: a failed getenv refuses" \
       "nv getenv failed (exit 1).*REFUSING" \
       "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_RC=1 | tr '\n' ' ')"
@@ -248,6 +254,12 @@ out=$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN"
 check "a fallback sw_commit that is no slot is named as such" "says sw_commit=2, not a slot" "$out"
 check_passes "our nv: values with exit 0 pass" \
       "$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 "$OWN" NV_COMMIT=0 NV_FALLBACK_COMMIT=0)"
+# A slot built on the stock base: it is an image of this project, with
+# /etc/odi-build, but the stock /bin/nv answers, and its fallback prints the
+# usage and exits 22. That is the warning of the vendor nv, not a refusal.
+out=$(run "console=ttyS0,115200 root=31:5 mtdparts=rtk_spi_nor_mtd:..." 1 NV_COMMIT=0 USAGE_RC=22)
+check_passes "the stock nv on an ODI build: fallback exit 22 is not refused" "$out"
+check "and the fallback is named as not checked" "was not readable -- NOT checked" "$out"
 
 # The bound itself, where the host has timeout (macOS has none).
 if command -v timeout >/dev/null 2>&1; then

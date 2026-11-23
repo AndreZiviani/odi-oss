@@ -1381,11 +1381,13 @@ running, and any slot but the inactive one (read the way `fwu.sh` reads it:
 included, since this script ships with our nv. Both take a value only from
 an nv that exited 0. `fwu.sh`, which also runs the first flash from the
 vendor nv, refuses for exit 3 (a copy not read in full) and for no answer
-(exit 124 or more) under any nv; any other failed read refuses on an image
-with `/etc/odi-build` and is a warning without it; an unset `sw_commit`
-(exit 0, nothing printed) is a warning either way. Extracts `fwu.sh` and
-`md5.txt` from the tarball into `/tmp/fwu.d` and checks `fwu.sh` against its
-md5 line; then runs `fwu.sh <slot> <tar>` there, detached with `setsid`, its
+(exit 124 or more) under any nv; any other failed read refuses when the
+nv is ours and is a warning on the stock one. It asks the nv, not the image:
+run with no arguments, ours prints a usage that lists `fallback`, and a slot
+built on the stock base runs the stock `/bin/nv` despite `/etc/odi-build`.
+An unset `sw_commit` (exit 0, nothing printed) is a warning either way.
+Extracts `fwu.sh` and `md5.txt` from the tarball into `/tmp/fwu.d` and
+checks `fwu.sh` against its md5 line; then runs `fwu.sh <slot> <tar>` there, detached with `setsid`, its
 output in `/tmp/fwu.log` and its outcome in `/tmp/fwu.state` (`running`,
 `ok` or `failed <rc>`), which confd reports and the page polls. A state file
 it cannot write is a refusal, in both modes. After a background write, ok or

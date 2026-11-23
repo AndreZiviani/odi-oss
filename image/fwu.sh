@@ -132,14 +132,19 @@ nv_read() {
 }
 
 # Whose nv answers. A value is taken only from a read that exited 0; what
-# a failed one printed is no answer, whatever it says. Ours ships with an
-# image of this project, which carries /etc/odi-build, and fails only when
-# it could not read: there a failed read refuses. The vendor nv that runs
-# the first flash is not ours, and how it fails is not known, so there a
-# failed read stays the warning it always was. FWU_ODI_BUILD is for the tests.
-odi_build=${FWU_ODI_BUILD:-/etc/odi-build}
+# a failed one printed is no answer, whatever it says. Ours fails only when
+# it could not read, so there a failed read refuses. The vendor nv, which
+# runs the first flash, is not ours, and how it fails is not known, so there
+# a failed read stays the warning it always was.
+#
+# The nv itself says which it is, not the image: a slot built on the stock
+# base carries /etc/odi-build and still runs the stock /bin/nv. Run with no
+# arguments, ours prints its usage, which lists fallback, and reads nothing
+# from the flash; the stock one's usage has no fallback.
 own_nv=0
-[ -f "$odi_build" ] && own_nv=1
+case "$(nv_read 2>&1)" in
+*"nv fallback ["*) own_nv=1 ;;
+esac
 
 # Find the partitions by NAME in /proc/mtd, never by a fixed number: this board
 # has fourteen and the numbering is not a promise.
@@ -281,7 +286,7 @@ esac
 # Exit 1 with its line is ours saying there is no valid second copy, which
 # leaves nothing to check. Any other failed read is as for sw_commit above:
 # no value, a refusal on our nv, a warning on the vendor one, whose usage
-# text exits 1 too.
+# text exits non-zero too (1, or 22 on the stock base).
 alt_out=$(nv_read fallback sw_commit 2>&1)
 alt_rc=$?
 alt=$(printf '%s\n' "$alt_out" | sed -n "s/^sw_commit=//p")
