@@ -22,7 +22,8 @@ A **release image is keys-only**: `ROOT_PW=locked` (`docs/BUILDING.md`)
 leaves root with no password at all (the `/etc/passwd` field is `!`, and
 dropbear runs with `-s`, refusing password logins outright — ssh does not
 even prompt for one). First access is through the web UI below, whose
-SSH-key admin page adds a key for root.
+System, Access page adds a key for root once a password of your own is set
+there.
 
 A **source build**, unless it also passes `ROOT_PW=locked`, generates its
 own password: `out/image/root-password-<version>.txt` beside the tarball.
@@ -40,14 +41,38 @@ key, as `ssh-keygen` prints it.
 
 Three ways to add one:
 
-- **The web UI**: Admin tab, "SSH keys", paste the public key, Add. The list
-  shows what is in the file and removes by line.
-- **The API** the UI uses (HTTP Basic with the UI credential):
+- **The web UI**: System, Access, "SSH keys", paste the public key, Add,
+  once a password of your own is set on the same page (a confd newer than
+  v1.19.0 refuses the key before that). The list shows what
+  is in the file and removes by line.
+- **The API** the UI uses (HTTP Basic with the UI credential). A confd
+  newer than v1.19.0 adds no key while no password is saved in
+  `confd.auth`, so set your own password first. `stty -echo` keeps it off the
+  screen, `read` keeps it out of the shell history, the second entry
+  catches a typo (a lost password means the safe mode to get back in), and
+  `curl -u admin` asks for it afterwards. This is plain POSIX sh, so it
+  runs in sh (dash included), bash and zsh:
 
-      curl -u admin:admin -X POST --data-urlencode "key=$(cat ~/.ssh/id_ed25519.pub)" \
+      stty -echo; printf 'Password: '; IFS= read -r PW
+      printf '\nAgain: '; IFS= read -r PW2; stty echo; echo
+      if [ "$PW" = "$PW2" ]; then
+          printf '%s' "$PW" | curl -f -u admin:admin \
+               --data-urlencode user=admin --data-urlencode password@- \
+               http://<stick>/api/password
+      else
+          echo 'the two entries differ; nothing was set' >&2
+      fi
+      unset PW PW2
+
+  Go on only once that printed `{"ok":true,...}`. `curl -f` prints
+  `The requested URL returned error` instead when confd refuses: 400 for a
+  password that is not 4 to 128 printable ASCII characters, 401 when
+  `admin` / `admin` is no longer the password. Then add the key:
+
+      curl -u admin -X POST --data-urlencode "key=$(cat ~/.ssh/id_ed25519.pub)" \
            http://<stick>/api/sshkeys
-      curl -u admin:admin http://<stick>/api/sshkeys        # list, with line numbers
-      curl -u admin:admin -X POST -d delete=0 http://<stick>/api/sshkeys
+      curl -u admin http://<stick>/api/sshkeys        # list, with line numbers
+      curl -u admin -X POST -d delete=0 http://<stick>/api/sshkeys
 
 - **By hand** over a password login:
 
