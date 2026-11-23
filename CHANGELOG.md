@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a snapshot save that fails removes the older snapshot. It stayed on
+  disk, so a respawn after a full `/var/run` resumed from a MIB older than
+  the one the OLT had been answered for. The respawn now registers afresh.
+  A save that would not fit the buffer fails the same way instead of
+  writing a snapshot without the rows past the end. `resume-test.sh` covers
+  the failed write (#482).
+
 **Automated dependency bump.**
 - linux 6.18.63 -> 6.18.65
 
