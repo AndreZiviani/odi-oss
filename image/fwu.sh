@@ -131,6 +131,21 @@ nv_read() {
 	$nv_bound nv "$@"
 }
 
+# Whose nv answers. A value is taken only from a read that exited 0; what
+# a failed one printed is no answer, whatever it says. Ours fails only when
+# it could not read, so there a failed read refuses. The vendor nv, which
+# runs the first flash, is not ours, and how it fails is not known, so there
+# a failed read stays the warning it always was.
+#
+# The nv itself says which it is, not the image: a slot built on the stock
+# base carries /etc/odi-build and still runs the stock /bin/nv. Run with no
+# arguments, ours prints its usage, which lists fallback, and reads nothing
+# from the flash; the stock one's usage has no fallback.
+own_nv=0
+case "$(nv_read 2>&1)" in
+*"nv fallback ["*) own_nv=1 ;;
+esac
+
 # Find the partitions by NAME in /proc/mtd, never by a fixed number: this board
 # has fourteen and the numbering is not a promise.
 mtd_of() {
@@ -159,11 +174,10 @@ fi
 if [ -z "$running" ]; then
 	# Second opinion, and the only other one on the device: U-Boot's own
 	# record of what it last booted.
-	# Not from a read that could not see a copy whole (exit 3) or gave no
-	# answer (124 or more), as for sw_commit below.
+	# Only from a read that exited 0, as for sw_commit below.
 	running=$(nv_read getenv sw_active 2>/dev/null)
 	nv_rc=$?
-	{ [ "$nv_rc" = 3 ] || [ "$nv_rc" -ge 124 ]; } && running=
+	[ "$nv_rc" = 0 ] || running=
 	running=$(printf '%s\n' "$running" | sed -n "s/^sw_active=//p")
 	case "$running" in 0|1) ;; *) running= ;; esac
 fi
@@ -203,15 +217,19 @@ fi
 # full, with exit 3: that copy may be the one U-Boot boots by, so neither the
 # value nor the revert target is known. That is a refusal here, as in
 # fwu_starter.sh, not the warning a missing sw_commit gets. So is a read that
-# gave no answer (exit 124 or more, above). A value either printed is not
-# taken.
+# gave no answer (exit 124 or more, above). Any other failed read refuses
+# on our nv and is warned about on the vendor one (own_nv, above). A value
+# a failed read printed is not taken.
 nv_out=$(nv_read getenv sw_commit 2>&1)
 nv_rc=$?
 commit=$(printf '%s\n' "$nv_out" | sed -n "s/^sw_commit=//p")
 nv_unread=0
 nv_silent=0
-[ "$nv_rc" = 3 ] && nv_unread=1 commit=
-[ "$nv_rc" -ge 124 ] && nv_silent=1 commit=
+nv_failed=0
+[ "$nv_rc" != 0 ] && commit=
+[ "$nv_rc" = 3 ] && nv_unread=1
+[ "$nv_rc" -ge 124 ] && nv_silent=1
+[ "$nv_rc" != 0 ] && [ "$nv_unread$nv_silent" = 00 ] && nv_failed=1
 case "$commit" in
 0|1)
 	if [ "$commit" = "$slot" ]; then
@@ -241,8 +259,15 @@ case "$commit" in
 		echo "     see docs/FLASHING.md, \"Restore\"." >&2
 		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
 		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown revert target" >&2
+	elif [ "$nv_failed" = 1 ] && [ "$own_nv" = 1 ]; then
+		echo "fwu: nv getenv failed (exit $nv_rc), so the revert target" >&2
+		echo "     is UNKNOWN. REFUSING. Check it with: nv getenv sw_commit" >&2
+		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
+		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown revert target" >&2
 	else
 		echo "fwu: cannot read sw_commit -- the revert target is UNKNOWN." >&2
+		[ "$nv_failed" = 1 ] &&
+			echo "     nv getenv exited $nv_rc; what it printed is not taken." >&2
 		echo "     Check it by hand before spending a trial boot." >&2
 	fi
 	;;
@@ -257,12 +282,22 @@ esac
 # Our nv answers for the loser with `fallback`. The VENDOR nv, which is what
 # runs the FIRST flash, has no such verb and prints its usage instead, so an
 # empty answer means NOT CHECKABLE and must not read as safe.
+#
+# Exit 1 with its line is ours saying there is no valid second copy, which
+# leaves nothing to check. Any other failed read is as for sw_commit above:
+# no value, a refusal on our nv, a warning on the vendor one, whose usage
+# text exits non-zero too (1, or 22 on the stock base).
 alt_out=$(nv_read fallback sw_commit 2>&1)
 alt_rc=$?
 alt=$(printf '%s\n' "$alt_out" | sed -n "s/^sw_commit=//p")
 alt_unread=0
-[ "$alt_rc" = 3 ] && alt_unread=1 alt=
-[ "$alt_rc" -ge 124 ] && alt_unread=1 alt=
+alt_none=0
+alt_failed=0
+[ "$alt_rc" != 0 ] && alt=
+[ "$alt_rc" = 3 ] && alt_unread=1
+[ "$alt_rc" -ge 124 ] && alt_unread=1
+[ "$alt_rc" = 1 ] && [ "$alt_out" = "nv: no valid second copy of the environment" ] && alt_none=1
+[ "$alt_rc" != 0 ] && [ "$alt_unread$alt_none" = 00 ] && alt_failed=1
 case "$alt" in
 0|1)
 	if [ "$alt" = "$slot" ]; then
@@ -295,12 +330,27 @@ case "$alt" in
 		echo "     unreadable, see docs/FLASHING.md, \"Restore\"." >&2
 		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
 		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown fallback" >&2
+	elif [ "$alt_none" = 1 ]; then
+		echo "fwu: no valid second env copy -- nothing to check"
+	elif [ "$alt_failed" = 1 ] && [ "$own_nv" = 1 ] &&
+	     [ "$nv_unread$nv_silent$nv_failed" = 000 ]; then
+		echo "fwu: nv fallback failed (exit $alt_rc), so where U-Boot goes" >&2
+		echo "     after an interrupted nv setenv is UNKNOWN. REFUSING." >&2
+		echo "     Check it with: nv fallback sw_commit" >&2
+		[ "${FWU_FORCE:-0}" = 1 ] || exit 1
+		echo "fwu: FWU_FORCE=1 -- writing anyway, with an unknown fallback" >&2
+	elif [ "$alt_rc" = 0 ] && [ -n "$alt" ]; then
+		echo "fwu: the fallback env copy says sw_commit=$alt, not a slot -- NOT checked." >&2
+	elif [ "$alt_rc" = 0 ]; then
+		echo "fwu: the fallback env copy sets no sw_commit -- NOT checked." >&2
 	else
 		echo "fwu: the fallback env copy was not readable -- NOT checked." >&2
 		if [ "$nv_unread" = 1 ]; then
 			echo "     A copy could not be read in full, as above." >&2
 		elif [ "$nv_silent" = 1 ]; then
 			echo "     nv gave no answer, as above." >&2
+		elif [ "$nv_failed" = 1 ]; then
+			echo "     nv getenv failed too, as above." >&2
 		else
 			echo "     Expected on the vendor nv, which has no fallback verb." >&2
 		fi

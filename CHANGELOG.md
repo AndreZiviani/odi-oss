@@ -5,6 +5,17 @@ listed here.
 
 ## Unreleased
 
+- Upgrades: `fwu.sh` and `fwu_starter.sh` take `sw_active` and `sw_commit`
+  only from an `nv` that exited 0; a value a failed read printed is no
+  answer. When the nv is this project's, `fwu.sh` now refuses any failed
+  `nv getenv` or `nv fallback` read, not only exit 3 or no answer. Exit 1
+  with the line for no valid second copy still passes and says so. It tells
+  the nv by its usage, which lists `fallback`, not by `/etc/odi-build`: a
+  slot built on the stock base carries that file and runs the stock nv. On
+  the stock nv those other failures stay a warning, while exit 3 and no
+  answer still refuse; an unset `sw_commit` stays a warning in `fwu.sh`
+  (#482).
+
 - CONTRIBUTING.md: a larger change starts with a discussion or an issue of
   its own; the roadmap section no longer points to one tracking issue.
 

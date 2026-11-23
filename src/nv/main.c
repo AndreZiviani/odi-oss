@@ -608,6 +608,8 @@ static void commit_warn_other(const char *arg)
 		(long)(1 - slot), STATE_PATH, detail, (long)(1 - slot));
 }
 
+/* image/fwu.sh tells this nv from the stock one by this text: run with no
+ * arguments, it looks for "nv fallback [". Keep that line. */
 static void usage(void)
 {
 	out("Usage: nv getenv [parameter_name]\n"
