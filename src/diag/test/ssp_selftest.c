@@ -48,6 +48,8 @@ static __attribute__((noinline)) int smash(int n)
 
 	for (int i = 0; i < n; i++)
 		p[i] = 'A';
+	/* p points at buf, which the loop has written. */
+	/* cppcheck-suppress uninitvar */
 	return p[0];
 }
 
