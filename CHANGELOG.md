@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Identity trial: each event line goes to the kernel log before the state
+  file records the step, so a reader that sees the trial end (`phase=steady`)
+  also finds its outcome in the log. Before, the line followed the state, and
+  `identity_trial_test.sh` failed now and then ("mixed store: the log names
+  the key") when it read the log in between.
+
 - Releases: the release job publishes the image the `reproducible` job built
   twice and found identical, instead of building a third one. It checks the
   tarball against the SHA-256 that job reported, takes the kernel hash of
