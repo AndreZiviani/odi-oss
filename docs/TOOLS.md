@@ -270,7 +270,10 @@ each driver verb, and `event=reload_done ... result=... duration_s=...
 holds the same outcome for `apply.sh` (`id` pid.sequence, `state`, `changed`,
 `action`, `result`, `keys`, `retry`, `duration_ms`, `o5_ms`, `services`, and
 for an identity change `refusals`, `streak` and, with the clock set, `today`),
-replaced whole by a rename; omcid removes a stale one at start.
+replaced whole by a rename; omcid removes a stale one at start. A status it
+cannot write is removed, so the one before does not stand; when that fails
+too, omcid tries the removal again once a second until it works or a new
+status is written. The status it could not write is not published later.
 
 **Re-registrations are counted, and held back after refusals.** Some
 operators are said to block a line after a few refused registrations, and a

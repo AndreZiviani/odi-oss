@@ -60,6 +60,9 @@ TRIALF=/var/run/identity-trial.conf
 
 mkdir -p /var/config /var/run
 clean_state() {
+	# The stuck-status case below makes the status immutable; a run cut
+	# short there must not leave it so for the next one.
+	chattr -i "$STATUS" 2>/dev/null
 	rm -f "$HS" "$ODI" "$SW" "$REREG" "$CONFIRM" "$TRIALF" "$HOLDF" /var/run/omcid-mib.snap /var/run/omcid-mib.snap.tmp \
 	      /var/run/omcid-resume-decision "$STATUS" "$INITLOG"
 	: > "$INITLOG"
@@ -1108,6 +1111,30 @@ store 1 22 0
 kill -HUP "$pid"
 wait_done "" 15 || bad "no status: the reload after did not write one"
 check "no status: once it can be written again, it is" "done ok" "$(st state) $(st result)"
+# Neither written nor removed: a status file that cannot be replaced or
+# unlinked (immutable, as good as a full /var that keeps the status of the
+# run before standing). omcid tries the removal again, without another
+# signal, and does not publish the status it could not write, since a run
+# id appearing later would read as the answer to a later signal. Needs
+# chattr and the right to use it; skipped otherwise.
+rm -f "$STATUS"
+printf 'id=%s.99\nstate=running\n' "$pid" > "$STATUS"
+if chattr +i "$STATUS" 2>/dev/null; then
+	n=$(grep -c 'event=reload_done' "$log")
+	store 1 23 0
+	kill -HUP "$pid"
+	wait_count "$log" 'event=reload_done' $((n + 1)) 15 || bad "stuck status: the reload did not finish"
+	check "stuck status: the old running stays while it cannot go" "running 99" \
+		"$(st state) $(st id | sed 's/.*\.//')"
+	chattr -i "$STATUS"
+	i=0
+	while [ -e "$STATUS" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+	check "stuck status: removed once it can be, with no new signal" "absent" \
+		"$([ -e "$STATUS" ] && echo present || echo absent)"
+else
+	rm -f "$STATUS"
+	echo "skip  stuck status: chattr +i not available here"
+fi
 stop_omcid
 
 echo

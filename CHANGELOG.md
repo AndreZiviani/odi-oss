@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- OMCI: when omcid can neither write its reload status nor remove the one
+  before, it tries the removal again once a second, without another
+  signal, until it works or a new status is written. Before, a
+  `state=running` left from the start of that reload stood until omcid
+  restarted, and `apply.sh omci` refused every later change as still
+  applying (#482).
+
 - omcid: a resume snapshot is checked as a whole before any of it is
   loaded. A snapshot with a valid CRC, the right version and the right
   device was taken at its word. The count of upstream queues in it was

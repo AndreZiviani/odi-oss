@@ -160,6 +160,50 @@ static unsigned services_in_use(void)
 	return n;
 }
 
+/* A status that could neither be written nor taken away: the one before
+ * stands, and a "running" there has apply.sh refuse every later reload as
+ * still applying, for as long as this omcid runs. So the removal is tried
+ * again once a second from reload_poll until it works or a new status is
+ * written. Only the removal: the status that could not be written is not
+ * published later, since a run id that appears after apply.sh took its
+ * snapshot would read as the answer to its signal. */
+static int st_unlink_pending;
+static long st_unlink_s;
+
+static int status_unlink(void)
+{
+	long rc = sys_unlink(RELOAD_STATUS_PATH);
+
+	return rc == 0 || rc == -2;      /* gone, or ENOENT: nothing stands */
+}
+
+static void status_put(const struct sbuf *s)
+{
+	/* A status that cannot be written (a full /var) must not leave the
+	 * one before standing: the "running" this reload wrote at its start
+	 * would have apply.sh refuse every later reload as still applying. No
+	 * file is no run, which apply.sh reads as such. */
+	st_unlink_pending =
+		atomic_write(RELOAD_STATUS_PATH, RELOAD_STATUS_TMP_PATH,
+			     (const uint8_t *)s->b, (uint32_t)s->n) < 0 &&
+		!status_unlink();
+}
+
+/* The removal that failed, once a second. */
+static void status_retry(void)
+{
+	long s, ms;
+
+	if (!st_unlink_pending)
+		return;
+	now_ms(&s, &ms);
+	if (s == st_unlink_s)
+		return;
+	st_unlink_s = s;
+	if (status_unlink())
+		st_unlink_pending = 0;
+}
+
 static void status_write(int done, const char *result, long o5_ms)
 {
 	struct sbuf s;
@@ -189,13 +233,7 @@ static void status_write(int done, const char *result, long o5_ms)
 		if (today >= 0)
 			sline_u(&s, "today", (unsigned long)today);
 	}
-	/* A status that cannot be written (a full /var) must not leave the
-	 * one before standing: the "running" this reload wrote at its start
-	 * would have apply.sh refuse every later reload as still applying. No
-	 * file is no run, which apply.sh reads as such. */
-	if (atomic_write(RELOAD_STATUS_PATH, RELOAD_STATUS_TMP_PATH,
-			 (const uint8_t *)s.b, (uint32_t)s.n) < 0)
-		sys_unlink(RELOAD_STATUS_PATH);
+	status_put(&s);
 }
 
 /* ------------------------------------------------------------ the driver */
@@ -553,6 +591,7 @@ void reload_poll(void)
 	long s, ms;
 	int st;
 
+	status_retry();
 	if (rl.phase == RL_IDLE) {
 		if (!reload_pending)
 			return;
