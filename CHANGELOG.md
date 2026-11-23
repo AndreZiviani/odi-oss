@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Apply: `apply.sh omci` refuses when more than one omcid runs, instead of
+  signalling all of them: init runs one, and the confirmation it writes for
+  `--confirm` or `--revert` can go to one only. The confirmation now names
+  the pid of that omcid, and omcid takes one that names another pid as
+  `live`, so one left for an omcid that died is not honoured by the next.
+  A confirmation whose signal could not be sent is removed again, and a
+  plain apply that cannot remove one left on disk refuses (#482).
+
 - OMCI: when omcid can neither write its reload status nor remove the one
   before, it tries the removal again once a second, without another
   signal, until it works or a new status is written. Before, a
