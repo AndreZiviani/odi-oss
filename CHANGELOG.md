@@ -5,6 +5,9 @@ listed here.
 
 ## Unreleased
 
+**Automated dependency bump.**
+- linux 6.18.63 -> 6.18.65
+
 - Upgrades: `fwu.sh` and `fwu_starter.sh` take `sw_active` and `sw_commit`
   only from an `nv` that exited 0; a value a failed read printed is no
   answer. When the nv is this project's, `fwu.sh` now refuses any failed
