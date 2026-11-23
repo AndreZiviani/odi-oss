@@ -27,7 +27,8 @@
 #      second instance must hold not one `drv ` line -- the switch was
 #      never touched.
 #
-# Then two more: a wide row comes back whole, and an omcid killed between
+# Then three more: a wide row comes back whole, the wide slots go back to
+# the rows that had them, and an omcid killed between
 # the answer to a Set and the rebuild that programs it leaves that rebuild
 # to the respawned one.
 #
@@ -220,6 +221,78 @@ if [ "$got" = "00$(amask 5)$(aval 5)" ]; then
 	echo "ok    wide rows: username 2 survives the resume"
 else
 	echo "FAIL  wide rows: username 2 after resume: $got"
+	fail=$((fail + 1))
+fi
+omcid_stop "$pid"
+
+# ------------------------------------- the wide slots come back where they were
+# The snapshot says which rows had a slot in the side pool. A respawn gives
+# the slots to those rows, not to the first 32 wide rows in index order:
+# with the pool full, a row created later can sit behind one that never had
+# a slot, and handing that one a slot on resume took it from the later row,
+# whose Sets past byte 96 then failed. 32 large strings fill the pool, a
+# 33rd gets none, the first is deleted and a non-wide row takes its index,
+# and a 34th, behind the 33rd, takes the freed slot.
+cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+rm -f /var/run/omcid-mib.snap /var/run/omcid-resume-decision
+slog1=/tmp/omcid-resume-slots-before.log
+slog2=/tmp/omcid-resume-slots-after.log
+: > "$slog1"
+$Q respond/build/omcid-drvtrace -a -d -c "$CAPS" -g /tmp/resume-gpon-isp2 > "$slog1" 2>&1 &
+pid=$!
+omcid_up "$slog1"
+k=0
+while [ "$k" -le 32 ]; do
+	inject_wait "$slog1" "$(frame "$(printf '1%03x' "$k")" 44 009d "$(printf '%04x' $((0x100 + k)))" "")"
+	k=$((k + 1))
+done
+inject_wait "$slog1" "$(frame 1100 46 009d 0100 "")"     # frees its index and slot
+inject_wait "$slog1" "$(frame 1101 44 0135 0007 "")"     # a 309 row takes the index
+inject_wait "$slog1" "$(frame 1102 44 009d 0121 "")"     # the 34th takes the slot
+inject_wait "$slog1" "$(frame 1103 48 009d 0121 "$(amask 5)$(aval 5)")"
+got=$(grep -- '^-> 1103' "$slog1" | tail -1 | cut -c20-21)
+if [ "$got" = "00" ]; then
+	echo "ok    wide slots: the 34th large string has the freed slot before the kill"
+else
+	echo "FAIL  wide slots: Part4 of the 34th before the kill answered $got"
+	fail=$((fail + 1))
+fi
+kill -9 "$pid" 2>/dev/null
+wait "$pid" 2>/dev/null
+
+: > "$slog2"
+$Q respond/build/omcid-drvtrace -a -w 20 -c "$CAPS" -s 5 -g /tmp/resume-gpon-isp2 > "$slog2" 2>&1 &
+pid=$!
+omcid_up "$slog2"
+if grep -q 'resume: onu state 5, snapshot loaded' "$slog2"; then
+	echo "ok    wide slots: the respawned instance took the resume path"
+else
+	echo "FAIL  wide slots: the respawned instance did not take the resume path"
+	sed -n '1,20p' "$slog2"
+	fail=$((fail + 1))
+fi
+inject_wait "$slog2" "$(frame 1110 49 009d 0121 "$(amask 5)")"
+got=$(grep -- '^-> 1110' "$slog2" | tail -1 | cut -c20-75)
+if [ "$got" = "00$(amask 5)$(aval 5)" ]; then
+	echo "ok    wide slots: Part4 of the 34th survives the resume"
+else
+	echo "FAIL  wide slots: Part4 of the 34th after resume: $got"
+	fail=$((fail + 1))
+fi
+inject_wait "$slog2" "$(frame 1111 48 009d 0121 "$(amask 5)$(aval 6)")"
+got=$(grep -- '^-> 1111' "$slog2" | tail -1 | cut -c20-21)
+if [ "$got" = "00" ]; then
+	echo "ok    wide slots: and a Set past byte 96 on it still succeeds"
+else
+	echo "FAIL  wide slots: a Set of Part4 on the 34th after resume answered $got"
+	fail=$((fail + 1))
+fi
+inject_wait "$slog2" "$(frame 1112 48 009d 0120 "$(amask 5)$(aval 5)")"
+got=$(grep -- '^-> 1112' "$slog2" | tail -1 | cut -c20-21)
+if [ "$got" = "09" ]; then
+	echo "ok    wide slots: the 33rd still has no slot: its Part4 answers result 9"
+else
+	echo "FAIL  wide slots: Part4 of the 33rd after resume answered $got"
 	fail=$((fail + 1))
 fi
 omcid_stop "$pid"
