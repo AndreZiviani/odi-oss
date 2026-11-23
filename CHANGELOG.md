@@ -5,6 +5,31 @@ listed here.
 
 ## Unreleased
 
+- Host SerDes: a 2500BASE-X link that loses the sync while the stick
+  keeps power is re-latched until it syncs again. With the host port set
+  to 1G and back to 2.5G-baseX, or disabled and enabled, the lane did not
+  sync again until the next boot. A keeper, spawned by the boot watch once
+  in sync and by a confirmed `2500basex` trial, reads bit 17 of 0x214
+  every 5 s in phase steady; clear twice a second apart, it re-latches the
+  lane every 5 s until the bit reads set twice a second apart, with one
+  event when the sync is lost (`serdes_lost`) and one when it is back
+  (`serdes_back`). A lane in sync is never touched and the mode never
+  changes: a host port left at 1G is for the next boot or a trial. It acts
+  under the lock and skips a busy tick, runs one at a time, and ends once
+  `HOST_SERDES` or the running mode is no longer `2500basex`. The
+  re-latch, in a trial and the boot watch too, now reads bit 17 again
+  under the lock and leaves a lane that synced since alone, with nothing
+  logged: the keeper logs `serdes_lost` only once that read is clear too.
+  `host-serdes.sh status` says whether a keeper runs (`keeper=<pid>` or
+  `keeper=none`), in the diag bundle as well. Reported on
+  HSGQ sticks with a downstream build of v1.18.1 carrying it: against a
+  MikroTik hEX S 2025 (E60iUGS), the router port set to 1G and back to
+  2.5G-baseX gave `serdes_back` "after 52 s" (most of it at 1G) and a
+  disabled and enabled port "after 10 s"; against a MikroTik RB5009, a
+  `fiber1g` trial that expired back to 2500BASE-X with the port still at
+  1G, set back to 2.5G-baseX by hand: "after 83 s", the time at 1G
+  included.
+
 - Docs: `ACCESS.md` sets a password before it adds an SSH key through the
   API, without putting it in the shell history, and `SETTINGS.md` no longer
   offers adding a key from the web UI during the safe mode. A confd newer
