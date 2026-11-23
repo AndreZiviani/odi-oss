@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- omcid: a respawn gives the wide-row slots back to the rows the snapshot
+  says had one. It gave them to the first 32 wide rows in index order, so
+  with the pool full a row created behind one that had no slot lost its own
+  on resume, and its Sets past byte 96 answered result 9 (#491).
+  `resume-test.sh` covers it.
+
 - Docs: QUALIFICATION.md and COMPARISON.md say that the safe-mode login
   after a power cycle and the timed exit have run on a test stick: the
   boot counter with a reboot kept the saved login, a power cut opened
