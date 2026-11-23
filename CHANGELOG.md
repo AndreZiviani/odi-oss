@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Releases: `tools/bundle-sources.sh` checks the GitHub tag archives it puts
+  in the source bundle (odi-toolchain, odi-ui, odi-sfp-exporter) against a
+  `source.tar.gz` line per repo and tag in `src/release-sha256.txt`, also
+  when the file is already in `dl/`. It fetched them by tag alone, and a
+  moved tag would have put other source in the bundle. `tools/bump-deps.sh`
+  writes the line when it moves a tag (#482).
+
 - Docs: the password recipe in `ACCESS.md` runs inside parentheses, so a
   shell reads all of it before the first prompt. Pasted into an
   interactive shell it read its own next line as the password, skipped the

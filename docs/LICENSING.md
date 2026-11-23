@@ -77,8 +77,10 @@ build downloaded and checked against its pinned SHA-256: the Linux kernel
 tarball and its signature, busybox, dropbear, iproute2 and uClibc-ng (the
 LGPL library linked statically into every binary); the odi-toolchain tag
 with the patches, configs and build scripts of the toolchain image;
-`confd` and `metricsd` at the tags the image has; and this repository at the
-release commit (our kernel patches, drivers, configs, rootfs and build
+`confd` and `metricsd` at the tags the image has (the odi-toolchain, odi-ui
+and odi-sfp-exporter archives are GitHub tag archives, checked against the
+`source.tar.gz` lines in `src/release-sha256.txt`, since a tag can be
+moved); and this repository at the release commit (our kernel patches, drivers, configs, rootfs and build
 scripts). gcc, binutils and the Linux headers the toolchain was built with
 are build tools that do not ship, so they are not included: `SOURCES.md`
 names them with upstream URL and pinned sha256 (gcc's runtime library parts
