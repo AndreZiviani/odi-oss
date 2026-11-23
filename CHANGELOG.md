@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- omcid: a snapshot save that fails removes the older snapshot. It stayed on
+  disk, so a respawn after a full `/var/run` resumed from a MIB older than
+  the one the OLT had been answered for. The respawn now registers afresh.
+  A save that would not fit the buffer fails the same way instead of
+  writing a snapshot without the rows past the end. `resume-test.sh` covers
+  the failed write (#482).
+
 - Identity trial: each event line goes to the kernel log before the state
   file records the step, so a reader that sees the trial end (`phase=steady`)
   also finds its outcome in the log. Before, the line followed the state, and
