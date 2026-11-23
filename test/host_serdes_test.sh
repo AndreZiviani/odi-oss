@@ -19,7 +19,8 @@
 # syncs only with a lane started (0x214 written in 2500BASE-X or HiSGMII
 # with HOLD_CLK_GLITCH clear) at or after it, as a MikroTik hEX S 2025
 # (E60iUGS) or RB5009 port switched to 2.5G-baseX after the stick does; it
-# syncs 2500BASE-X with auto-negotiation off, and HiSGMII; with no model
+# syncs 2500BASE-X with auto-negotiation off, and HiSGMII; "drop:<uptime>"
+# is "x2500" with bit 17 clear at that uptime only; with no model
 # the registers are left as they are. With "$T/failrestore" the next write
 # of 0x214 with HOLD_CLK_GLITCH clear fails and is not written, as a
 # re-latch cut before its restore. Bit 17 is set in sync in either mode
@@ -36,7 +37,8 @@
 # Fiber 1G, a host that comes up late, no host at all); the trial (expiry,
 # confirm, revert, a sequence that does not read back, a state file that
 # cannot be written after the switch, every refusal); the
-# auto-negotiation handed back to host-autoneg.sh in Fiber 1G; reapply;
+# auto-negotiation handed back to host-autoneg.sh in Fiber 1G; the keeper
+# of a 2500basex link (a lost sync re-latched, its limits); reapply;
 # status; host-autoneg.sh standing down while a mode other than
 # Fiber 1G runs. The safe-mode count is test/safe_mode_test.sh.
 set -u
@@ -103,6 +105,8 @@ latch:*)
 	[ "\$up" -ge "\$at" ] && [ "\$ls" -ge "\$at" ] &&
 		{ [ "\$mode" = 18 ] || { [ "\$mode" = 22 ] && { [ "\$an" = 0 ] || [ "\$an" = N ]; }; }; } && sync=1 ;;
 f1g)   [ "\$mode" = 4 ] && l=1 sync=1 ;;
+drop:*)
+	[ "\$up" != "\${m#drop:}" ] && [ "\$mode" = 22 ] && { [ "\$an" = 0 ] || [ "\$an" = N ]; } && sync=1 ;;
 esac
 { [ "\$fo" = 1 ] || [ "\$fo" = Y ]; } && l=1
 if [ "\$sync" = 1 ]; then r=\$(( r | 0x20000 )); else r=\$(( r & ~0x20000 )); fi
@@ -144,7 +148,7 @@ export FLASH=$F SELF=$S DIAG=$T/diag PARAM_DIR=$T/param STATE=$T/run/host-serdes
 export AN_STATE=$T/run/host-autoneg LOCKDIR=$T/run/lock SAFE_FLAG=$T/run/safe-mode SDS_OFF=$T/config/sds.off
 export UPTIME=$T/uptime KMSG=$T/kmsg LOG=$T/services.log SLEEP=$T/bin/sleep TIMEOUT=$T/bin/timeout
 export ODI_CONF=$T/config/odi.conf CS=$T/config/lastgood.xml HS=$T/config/lastgood_hs.xml TMPDIR_=$T
-export WATCH_S=5 WATCH_MAX_S=40 TRIAL_S=20
+export WATCH_S=5 WATCH_MAX_S=40 TRIAL_S=20 KEEP_PID=$T/run/host-serdes.keep
 
 st() { sed -n "s/^$1=//p" "$STATE" 2>/dev/null; }
 key() { sed -n 's/^HOST_SERDES=//p' "$ODI_CONF" 2>/dev/null; }
@@ -195,6 +199,12 @@ spawned() {
 	cat "$T/spawned" 2>/dev/null
 }
 spawned_none() { /bin/sleep 0.3; cat "$T/spawned" 2>/dev/null; }
+# spawned_with VERB: the spawn log once VERB is in it (or after 5 s).
+spawned_with() {
+	_i=0
+	while ! grep -qx "$1.*" "$T/spawned" 2>/dev/null && [ "$_i" -lt 100 ]; do /bin/sleep 0.05; _i=$((_i + 1)); done
+	cat "$T/spawned" 2>/dev/null
+}
 
 # The write sequences, computed from the Fiber 1G starting values by the
 # arithmetic of the read-modify-writes.
@@ -655,6 +665,215 @@ t "re-latch cut before its restore: the failed write reported" "SerDes write 0x2
 t "  ... the next re-latch syncs the lane, no fallback" "^serdes_link 0 2500basex$" "$(st event) $(st fallback) $(st running)"
 n "  ... within the first phase, no switch to Fiber 1G" "watch_switch" "$(cat "$T/kmsg")"
 t "  ... the lane in 2500BASE-X, the clock running" "^0x16$" "$(printf '0x%x' $(( $(reg 0x214) & 0xa11f )))"
+setkey ""
+rm -f "$T/model"
+
+# ---- the keeper: with HOST_SERDES=2500basex running and seen in sync, a
+# lane that loses the sync while the stick keeps power (the host port set
+# to 1G and back to 2.5G-baseX) is re-latched every RESYNC_S s until it
+# syncs again. The mode never changes. KEEP_TICKS bounds it here; on the
+# stick it runs until the key or the running mode is no longer 2500basex.
+setkey 2500basex
+newboot
+echo x2500 > "$T/model"
+sh "$S" boot > /dev/null 2>&1
+sh "$S" watch > /dev/null 2>&1
+t "keeper: spawned by the boot watch once in sync" "keep" "$(spawned_with keep)"
+: > "$T/sdsset"
+: > "$T/kmsg"
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+t "keeper, in sync: nothing written" "^$" "$(cat "$T/sdsset")"
+t "keeper, in sync: nothing logged, the event kept" "^serdes_link$" "$(st event)$(cat "$T/kmsg")"
+[ ! -f "$KEEP_PID" ] && ok "keeper: its pid file gone when it ends" || no "keeper: its pid file gone when it ends"
+# One read with bit 17 clear on a lane in sync: read again, not touched.
+up=$(cut -d. -f1 "$T/uptime")
+echo "drop:$((up + 5))" > "$T/model"
+KEEP_TICKS=2 sh "$S" keep > /dev/null 2>&1
+t "keeper, one read out of sync: nothing written, nothing logged" "^serdes_link $" \
+	"$(st event) $(cat "$T/sdsset")$(cat "$T/kmsg")"
+# The host port set to 1G (no 2.5G host) and back to 2.5G-baseX later: the
+# lane, started long before, is re-latched until it syncs.
+up=$(cut -d. -f1 "$T/uptime")
+echo "latch:$((up + 12))" > "$T/model"
+KEEP_TICKS=6 sh "$S" keep > /dev/null 2>&1
+t "keeper, host back later: in sync again, steady 2500basex, the key kept, no fallback" \
+	"^serdes_back 2500basex steady 2500basex 0$" "$(st event) $(st running) $(st phase) $(key) $(st fallback)"
+t "keeper: the loss and the return logged" \
+	"event=serdes_lost .*re-latching the lane every 5 s.*event=serdes_back .*in sync again in 2500BASE-X" \
+	"$(tr '\n' ' ' < "$T/kmsg")"
+[ "$(grep -c serdes_lost "$T/kmsg")" = 1 ] && ok "  ... one serdes_lost line, not one per re-latch" ||
+	no "  ... one serdes_lost line" "$(cat "$T/kmsg")"
+[ "$(grep -c 'set 0x214 0x2[46]201f' "$T/sdsset")" -ge 2 ] && ok "  ... re-latched more than once, every RESYNC_S" ||
+	no "  ... re-latched more than once" "$(cat "$T/sdsset")"
+n "  ... only 0x214 written" "set 0x(2[^1]|21[^4])" "$(cat "$T/sdsset")"
+t "  ... the port left forced, auto-negotiation off" "^1 0$" "$(p host_forced) $(p host_autoneg)"
+t "keeper: status says in sync" "link=1.*link_source=serdes_sync" "$(sh "$S" status | tr '\n' ' ')"
+# A busy lock: the tick is skipped, nothing written.
+echo none > "$T/model"
+: > "$T/sdsset"
+mkdir -p "$LOCKDIR"
+echo $$ > "$LOCKDIR/pid"
+LOCK_S=1 KEEP_TICKS=2 sh "$S" keep > /dev/null 2>&1
+t "keeper, lock busy: nothing written, no event" "^serdes_back $" "$(st event) $(cat "$T/sdsset")"
+rm -rf "$LOCKDIR"
+# Not phase steady (a trial runs): hands off.
+sed -i 's/^phase=.*/phase=trial/' "$STATE"
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+t "keeper, a trial running: nothing written" "^$" "$(cat "$T/sdsset")"
+sed -i 's/^phase=.*/phase=steady/' "$STATE"
+# A fiber1g trial applied (phase trial, running fiber1g): hands off, and
+# still there for the revert to 2500basex. Not in phase steady, the running
+# mode is not looked at.
+sed -i 's/^phase=.*/phase=trial/; s/^running=.*/running=fiber1g/' "$STATE"
+up=$(cut -d. -f1 "$T/uptime")
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+t "keeper, a fiber1g trial applied: nothing written, all its ticks run" "^$((up + 15)) $" \
+	"$(cut -d. -f1 "$T/uptime") $(cat "$T/sdsset")"
+sed -i 's/^phase=.*/phase=steady/; s/^running=.*/running=2500basex/' "$STATE"
+# iohook_at N CMD: CMD runs before the Nth command from now that goes
+# through the timeout stub (a register read or write, here).
+iohook_at() {
+	echo 0 > "$T/ion"
+	printf '#!/bin/sh\nn=$(( $(cat "%s/ion") + 1 )); echo $n > "%s/ion"\nif [ $n -lt %s ]; then cp "%s/iohook.at" "%s/iohook"; else %s; fi\n' \
+		"$T" "$T" "$1" "$T" "$T" "$2" > "$T/iohook.at"
+	chmod +x "$T/iohook.at"
+	cp "$T/iohook.at" "$T/iohook"
+}
+# Lost, then one read with bit 17 set (a lane out of sync reads it set now
+# and then): not back yet, read again, still out of sync, re-latched. The
+# keeper's first tick is 6 commands (two reads, the re-latch's read and
+# three writes); the 7th is the first read of the second.
+echo none > "$T/model"
+: > "$T/kmsg"
+: > "$T/sdsset"
+cat > "$T/bit17" <<EOF
+#!/bin/sh
+r=\$(sed -n 's/^0x214=//p' "$T/regs")
+sed -i "s/^0x214=.*/0x214=\$(printf '0x%x' \$(( r | 0x20000 )))/" "$T/regs"
+EOF
+chmod +x "$T/bit17"
+iohook_at 7 "$T/bit17"
+KEEP_TICKS=2 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/iohook" "$T/iohook.run"
+t "keeper, one read back in sync: no serdes_back, still lost" "^serdes_lost 1$" \
+	"$(st event) $(grep -c 'event=serdes' "$T/kmsg")"
+[ "$(grep -c 'set 0x214 0x2[46]201f' "$T/sdsset")" -ge 2 ] && ok "  ... and re-latched again" ||
+	no "  ... and re-latched again" "$(cat "$T/sdsset")"
+sed -i 's/^event=.*/event=serdes_back/' "$STATE"
+# Clear twice, then in sync by the re-latch's own read under the lock (the
+# host came back between the keeper's reads and the lock): nothing written.
+: > "$T/sdsset"
+: > "$T/kmsg"
+iohook_at 3 "echo x2500 > \"$T/model\"; \"$T/bin/model\""
+out=$(KEEP_TICKS=1 sh "$S" keep 2>&1)
+rm -f "$T/iohook" "$T/iohook.run"
+t "keeper, the lane in sync by the re-latch's read: nothing written" "^$" "$(cat "$T/sdsset")"
+t "  ... no serdes_lost, the event kept" "^serdes_back $" "$(st event) $(cat "$T/kmsg")"
+n "  ... and no failure said" "could not be re-latched" "$out"
+# A try that takes the lock between the keeper's load and its lock: under
+# the lock the keeper sees the trial and leaves the lane alone.
+echo none > "$T/model"
+: > "$T/sdsset"
+: > "$T/kmsg"
+iohook_at 1 "sh \"$S\" try fiber1g > /dev/null 2>&1"
+KEEP_TICKS=1 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/iohook" "$T/iohook.run"
+t "keeper, a try between its load and its lock: nothing written, no serdes_lost" "^trial_started trial $" \
+	"$(st event) $(st phase) $(cat "$T/sdsset")$(grep serdes_lost "$T/kmsg")"
+sed -i 's/^phase=.*/phase=steady/; s/^event=.*/event=serdes_back/; s/^trial_[a-z]*=.*//' "$STATE"
+# Fiber 1G running (a boot watch fallback): ends at once, no switch back.
+sed -i 's/^running=.*/running=fiber1g/' "$STATE"
+up=$(cut -d. -f1 "$T/uptime")
+KEEP_TICKS=5 sh "$S" keep > /dev/null 2>&1
+t "keeper, Fiber 1G running: ends after one tick, nothing written" "^$((up + 5)) $" \
+	"$(cut -d. -f1 "$T/uptime") $(cat "$T/sdsset")"
+sed -i 's/^running=.*/running=2500basex/' "$STATE"
+# The key no longer 2500basex (a confirmed fiber1g trial): ends at once.
+setkey ""
+sed -i 's/^setting=.*/setting=fiber1g/' "$STATE"
+KEEP_TICKS=5 sh "$S" keep > /dev/null 2>&1
+t "keeper, HOST_SERDES no longer 2500basex: nothing written" "^$" "$(cat "$T/sdsset")"
+[ ! -f "$KEEP_PID" ] && ok "  ... and its pid file gone" || no "  ... and its pid file gone"
+# One keeper at a time.
+setkey 2500basex
+sed -i 's/^setting=.*/setting=2500basex/' "$STATE"
+echo $$ > "$KEEP_PID"
+out=$(KEEP_TICKS=3 sh "$S" keep 2>&1)
+t "keeper: a second one leaves at once" "already" "$out"
+t "  ... and leaves the pid file of the first one" "^$$\$" "$(cat "$KEEP_PID")"
+# status says whether a keeper runs: nothing starts one again once gone.
+t "status: the keeper's pid while it runs" "keeper=$$" "$(sh "$S" status)"
+sh -c 'exit 0' &
+dead=$!
+wait "$dead"
+echo "$dead" > "$KEEP_PID"
+t "status: keeper=none with the pid file of a keeper gone" "keeper=none" "$(sh "$S" status)"
+rm -f "$KEEP_PID"
+t "status: keeper=none without a pid file" "keeper=none" "$(sh "$S" status)"
+# A boot watch that falls back to Fiber 1G spawns no keeper.
+newboot
+echo f1g > "$T/model"
+sh "$S" boot > /dev/null 2>&1
+spawned_with watch > /dev/null
+: > "$T/spawned"
+sh "$S" watch > /dev/null 2>&1
+t "keeper: none after a fallback to Fiber 1G" "^fallback $" "$(st event) $(spawned_none)"
+# A confirmed 2500basex trial spawns it; a confirmed hisgmii trial does not.
+for m in 2500basex hisgmii; do
+	setkey ""
+	newboot
+	sh "$S" boot > /dev/null
+	echo x2500 > "$T/model"
+	sh "$S" try "$m" > /dev/null
+	spawned_with trial-run > /dev/null
+	id=$(st trial_id)
+	printf '#!/bin/sh\nsh "%s" confirm >> "%s/confirm.out" 2>&1\n' "$S" "$T" > "$T/hook"
+	chmod +x "$T/hook"
+	: > "$T/spawned"
+	sh "$S" trial-run "$id" 20 > /dev/null 2>&1
+	if [ "$m" = 2500basex ]; then
+		t "keeper: spawned by the confirm of 2500basex" "^trial_confirmed keep$" "$(st event) $(spawned_with keep)"
+	else
+		t "keeper: not spawned by the confirm of hisgmii" "^trial_confirmed $" "$(st event) $(spawned_none)"
+	fi
+done
+# A trial window whose lane syncs between its read and the re-latch's own
+# read: nothing written, and neither a re-latch nor a failure said. The
+# window's first sleep arms an iohook: its read reads clear, the
+# re-latch's read finds the host in sync.
+setkey ""
+newboot
+sh "$S" boot > /dev/null
+echo none > "$T/model"
+: > "$T/spawned"
+sh "$S" try 2500basex > /dev/null
+id=$(st trial_id)
+iohook_at 2 "echo x2500 > \"$T/model\"; \"$T/bin/model\""
+mv "$T/iohook" "$T/iohook.armed"
+printf '#!/bin/sh\nmv "%s/iohook.armed" "%s/iohook"\n' "$T" "$T" > "$T/hook"
+chmod +x "$T/hook"
+: > "$T/sdsset"
+out=$(sh "$S" trial-run "$id" 20 2>&1)
+rm -f "$T/iohook" "$T/iohook.run" "$T/iohook.armed"
+t "trial window, in sync by the re-latch's read: the lane parked by the sequences only" "^2$" "$(grep -c 'set 0x214 0x[0-9a-f]*1f$' "$T/sdsset")"
+n "  ... no re-latch said" "re-latching" "$out"
+n "  ... no failure said" "could not be re-latched" "$out"
+# The same in the boot watch, at its first re-latch (RESYNC_S=2: the
+# second sleep arms the iohook).
+setkey 2500basex
+newboot
+sh "$S" boot > /dev/null 2>&1
+echo none > "$T/model"
+iohook_at 2 "echo x2500 > \"$T/model\"; \"$T/bin/model\""
+mv "$T/iohook" "$T/iohook.armed"
+echo 0 > "$T/sleeps"
+printf '#!/bin/sh\nn=$(( $(cat "%s/sleeps") + 1 )); echo $n > "%s/sleeps"\n[ $n != 2 ] || mv "%s/iohook.armed" "%s/iohook"\n' "$T" "$T" "$T" "$T" > "$T/everyhook"
+chmod +x "$T/everyhook"
+: > "$T/sdsset"
+out=$(RESYNC_S=2 sh "$S" watch 2>&1)
+rm -f "$T/iohook" "$T/iohook.run" "$T/iohook.armed" "$T/everyhook"
+t "boot watch, in sync by the re-latch's read: in sync, nothing written" "^serdes_link 0 $" "$(st event) $(st fallback) $(cat "$T/sdsset")"
+n "  ... no failure said" "could not be re-latched" "$out"
 setkey ""
 rm -f "$T/model"
 

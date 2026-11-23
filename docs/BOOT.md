@@ -379,7 +379,12 @@ nothing here calls `apply_entity()` or any driver function, so a resume
 issues not one switch-programming driver call. Anything else -- no
 snapshot, a mismatched device, a state below O5, or a snapshot whose CRC or
 version does not check out -- falls back to the ordinary re-registration
-path unchanged.
+path unchanged. So does a snapshot that passes all of that and still
+cannot be right: the file is walked once before any of it is loaded, and
+the whole of it is refused for a count past its table (rows, services,
+upstream queues), a length that is not the sum of its parts, or a
+table-attribute list that loops, shares a row with another list, runs
+through a free row or is not as long as its entity says.
 
 The snapshot also says which rebuild was still pending when it was written.
 A Create or Set is answered and saved at once, and the rebuild that programs

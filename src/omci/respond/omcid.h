@@ -387,6 +387,7 @@ void us_qos_rebuild(void);
 /* The upstream state the driver holds as omcid programmed it, one block,
  * for the resume snapshot. */
 void *qos_prog_state(uint32_t *len);
+int qos_prog_state_ok(const void *state);
 uint16_t mib_write(struct mib_row *r, const struct omci_class *c, uint16_t mask, uint16_t skip, const uint8_t *src, uint16_t srclen);
 /* Whether attribute k differs from what the row held before this Set. */
 int mib_changed(const struct mib_row *r, const struct omci_class *c, unsigned k);
@@ -422,9 +423,15 @@ extern uint16_t alarm_snapshot;
  * can resume answering the OLT without re-registration. See snapshot.c and
  * docs/BOOT.md, "Resume without re-registration".
  */
-#define SNAPSHOT_PATH          "/var/run/omcid-mib.snap"
-#define SNAPSHOT_TMP_PATH      "/var/run/omcid-mib.snap.tmp"
-#define RESUME_DECISION_PATH   "/var/run/omcid-resume-decision"
+/* OMCID_RUN_DIR is /var/run on the stick. Only a unit test that runs as an
+ * ordinary user (snapshot_check_test) builds snapshot.c with another one, as
+ * it may not write /var/run; the shipped strings are the same either way. */
+#ifndef OMCID_RUN_DIR
+#define OMCID_RUN_DIR          "/var/run"
+#endif
+#define SNAPSHOT_PATH          OMCID_RUN_DIR "/omcid-mib.snap"
+#define SNAPSHOT_TMP_PATH      OMCID_RUN_DIR "/omcid-mib.snap.tmp"
+#define RESUME_DECISION_PATH   OMCID_RUN_DIR "/omcid-resume-decision"
 #define RESUME_DECISION_PREV   RESUME_DECISION_PATH ".prev"
 int snapshot_save(void);
 /* Write `buf` to `tmp`, then rename it over `path`: a reader never sees a

@@ -46,6 +46,9 @@
 #     host-serdes.sh reapply       run the sequence of the running mode
 #                                  again, one second later; no trial, nothing
 #                                  stored
+#     host-serdes.sh keep          the keeper of a 2500basex link (below);
+#                                  spawned by the boot watch and by a
+#                                  confirm, not run by hand
 #     host-serdes.sh status        the state as key=value lines
 #
 # The link each mode can see. host_link (odi_switch) is the port link, and
@@ -60,6 +63,13 @@
 #                      UI), then 2500basex again, and so on until one links,
 #                      for at most WATCH_MAX_S; past that it stays on Fiber
 #                      1G. The watch never changes the key.
+#     keeper           2500basex only, once the boot watch saw the sync
+#                      or a 2500basex trial was confirmed: a lane that
+#                      loses the sync later (the host port set to 1G and
+#                      back, or disabled and enabled) is re-latched every
+#                      RESYNC_S seconds until it syncs again. It never
+#                      changes the mode: a host port left at 1G is for a
+#                      trial or the next boot.
 #     safe mode        safe-mode.sh: three short boots in a row with a mode
 #                      other than fiber1g make the next boot a recovery
 #                      boot, which runs fiber1g and removes the key, as it
@@ -103,6 +113,8 @@ TRIAL_MAX_S=${TRIAL_MAX_S:-600} # the longest trial a caller may ask for
 WATCH_S=${WATCH_S:-30}          # each phase of the boot watch
 WATCH_MAX_S=${WATCH_MAX_S:-600} # the whole boot watch
 RESYNC_S=${RESYNC_S:-5}         # re-latch a lane out of sync this often (2500BASE-X, and HiSGMII in a trial)
+KEEP_PID=${KEEP_PID:-/var/run/host-serdes.keep}
+KEEP_TICKS=${KEEP_TICKS:-0}     # keep: RESYNC_S ticks before it ends (0: no bound)
 DIAG_S=${DIAG_S:-10}            # one diag call
 IO_S=${IO_S:-5}                 # one sysfs or flash call
 LOCK_S=${LOCK_S:-10}            # waiting for the lock
@@ -309,12 +321,16 @@ sds_anf() {
 # starts later (a host port switched to 2.5G by hand after the stick, as a
 # trial asks), in 2500BASE-X and in HiSGMII alike; started again while the
 # host sends, it syncs within seconds. Run only on a lane in MODE whose bit
-# 17 reads clear: a lane in sync is never touched. Returns 1 when the read
+# 17 read clear, under the lock: its own read of 0x214 looks at bit 17
+# again, and a lane that synced since the caller read it is left alone,
+# so a lane in sync is never touched. Returns 0 once re-latched, 2 when
+# that read found the lane in sync (nothing written), and 1 when the read
 # or any write fails; the restore is written even after a failed park.
 sds_relatch() {
 	mode_vars "$1"
 	cur=$(sds_read 0x214)
 	[ -n "$cur" ] || return 1
+	[ $(( 0x$cur & 0x20000 )) -eq 0 ] || return 2
 	rl=0
 	sds_put 0x214 "$(printf '0x%x' $(( 0x$cur | 0x2000 )))" || rl=1
 	sds_put 0x214 "$(printf '0x%x' $(( ((0x$cur | 0x2000) & ~0x801f) | 0x1f )))" || rl=1
@@ -563,6 +579,7 @@ watch() {
 				fi
 				save
 				unlock
+				[ "$mode" != 2500basex ] || spawn keep
 				return 0
 			fi
 			[ "$i" -lt "$WATCH_S" ] || break
@@ -585,7 +602,8 @@ watch() {
 						unlock
 						return 0
 					fi
-					sds_relatch 2500basex || say "the lane could not be re-latched" >&2
+					sds_relatch 2500basex
+					[ $? != 1 ] || say "the lane could not be re-latched" >&2
 					unlock
 				fi
 			fi
@@ -702,8 +720,11 @@ trial_window() {
 			unlock
 			continue
 		fi
-		sds_relatch "$trial_mode" || say "the lane could not be re-latched" >&2
+		sds_relatch "$trial_mode"
+		w_rc=$?
 		unlock
+		[ "$w_rc" != 1 ] || say "the lane could not be re-latched" >&2
+		[ "$w_rc" != 2 ] || continue
 		w_n=$((w_n + 1))
 		[ "$w_n" != 1 ] || say "no sync in $(label "$trial_mode"): re-latching the lane every ${RESYNC_S} s until it syncs or the trial ends"
 	done
@@ -769,6 +790,97 @@ confirm() {
 	event trial_confirmed "$(label "$setting") confirmed and stored"
 	clear_trial
 	save
+	unlock
+	[ "$setting" != 2500basex ] || spawn keep
+	return 0
+}
+
+# keep: the keeper of a 2500basex link that was seen in sync. A lane that
+# loses the sync while the stick keeps power (the host port set to 1G and
+# back to 2.5G-baseX, or disabled and enabled) did not sync again, in the
+# runs, until it was re-latched, as in a trial (docs/SWITCH.md, "The
+# re-latch"). Every RESYNC_S s, in phase steady, it reads bit 17; clear,
+# and clear again a second later, it re-latches the lane, and again every
+# RESYNC_S s until the bit reads set, and set again a second later. One
+# event when the sync is lost and one when it is back. A lane in sync is
+# never touched and the mode never changes. It acts under the lock and
+# skips a tick when the lock is busy, and it ends once HOST_SERDES or the
+# running mode, in phase steady, is no longer 2500basex. One keeper at a
+# time, by a pid file (KEEP_PID) rather than a respawn entry: it starts
+# only once the boot watch saw the sync or a 2500basex trial was
+# confirmed, not with the boot, and it ends by itself.
+keep() {
+	if [ -f "$KEEP_PID" ]; then
+		k=$(cat "$KEEP_PID" 2>/dev/null)
+		if [ -n "$k" ] && [ "$k" != "$$" ] && kill -0 "$k" 2>/dev/null; then
+			say "a keeper runs already (pid $k)"
+			return 0
+		fi
+	fi
+	echo $$ > "$KEEP_PID" 2>/dev/null || say "could not write $KEEP_PID" >&2
+	k_lost='' k_n=0
+	while :; do
+		if [ "$KEEP_TICKS" -gt 0 ]; then
+			[ "$k_n" -lt "$KEEP_TICKS" ] || break
+			k_n=$((k_n + 1))
+		fi
+		"$SLEEP" "$RESYNC_S"
+		load
+		[ "$setting" = 2500basex ] || break
+		if [ "$phase" != steady ]; then
+			k_lost=''
+			continue
+		fi
+		[ "$running" = 2500basex ] || break
+		k_l=$(link 2500basex)
+		# One read is not a change yet, either way: a lane out of sync
+		# reads bit 17 set for one read in fifteen to fifty (docs/SWITCH.md,
+		# "The re-latch"). A lost sync, or one back, is read again a
+		# second later.
+		if { [ "$k_l" = 0 ] && [ -z "$k_lost" ]; } ||
+			{ [ "$k_l" = 1 ] && [ -n "$k_lost" ]; }; then
+			"$SLEEP" 1
+			k_l=$(link 2500basex)
+		fi
+		if [ "$k_l" = 1 ]; then
+			if [ -n "$k_lost" ]; then
+				keep_event serdes_back "the host SerDes is in sync again in 2500BASE-X after $(( $(uptime_s) - k_lost )) s" || continue
+			fi
+			k_lost=''
+			continue
+		fi
+		[ "$k_l" = 0 ] || continue
+		lock_try
+		[ $? != 1 ] || continue
+		load
+		if [ "$phase" = steady ] && [ "$setting" = 2500basex ] && [ "$running" = 2500basex ]; then
+			# serdes_lost once the re-latch read bit 17 clear as well: a
+			# lane in sync by then (2) is left alone, and no loss logged.
+			sds_relatch 2500basex
+			k_rc=$?
+			[ "$k_rc" != 1 ] || say "the lane could not be re-latched" >&2
+			if [ "$k_rc" != 2 ] && [ -z "$k_lost" ]; then
+				k_lost=$(uptime_s)
+				event serdes_lost "the host SerDes lost the sync in 2500BASE-X; re-latching the lane every ${RESYNC_S} s until it syncs"
+				save
+			fi
+		fi
+		unlock
+	done
+	[ "$(cat "$KEEP_PID" 2>/dev/null)" != "$$" ] || rm -f "$KEEP_PID"
+	return 0
+}
+
+# keep_event NAME TEXT: an event of the keeper, saved under the lock in
+# phase steady; 1 when the lock is busy, so the keeper tries again.
+keep_event() {
+	lock_try
+	[ $? != 1 ] || return 1
+	load
+	if [ "$phase" = steady ]; then
+		event "$1" "$2"
+		save
+	fi
 	unlock
 	return 0
 }
@@ -837,13 +949,21 @@ status() {
 	echo "event_uptime=$ev_up"
 	echo "message=$ev_msg"
 	[ -f "$SAFE_FLAG" ] && echo "safe_mode_boot=1" || echo "safe_mode_boot=0"
+	# Nothing starts a keeper again once it is gone: say whether one runs.
+	k=$(cat "$KEEP_PID" 2>/dev/null)
+	if [ -n "$k" ] && kill -0 "$k" 2>/dev/null; then
+		echo "keeper=$k"
+	else
+		echo "keeper=none"
+	fi
 	return 0
 }
 
 case "${1:-}" in
 boot)        boot ;;
 watch)       watch ;;
-try)         shift; try "$@" ;;
+keep)        keep ;;
+try)        shift; try "$@" ;;
 trial-run)   shift; trial_run "$@" ;;
 expire)      shift; expire "$@" ;;
 confirm)     confirm ;;

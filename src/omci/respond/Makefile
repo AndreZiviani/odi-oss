@@ -112,6 +112,18 @@ $(BUILD)/downstream_ownership_test: ../test/downstream_ownership_test.c $(filter
 $(BUILD)/service_ownership_test: ../test/service_ownership_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
 
+# snapshot_try_resume() against snapshots with a valid CRC and state out of
+# order: a queue count past its table, table-attribute lists that loop.
+# `make test` runs it as the calling user, who may not write /var/run, so
+# its snapshot.c writes under /tmp instead (OMCID_RUN_DIR in omcid.h).
+SNAP_TEST_DIR := -DOMCID_RUN_DIR='"/tmp"'
+$(BUILD)/snapshot_check_test: ../test/snapshot_check_test.c $(BUILD)/snapshot-tmp.o \
+                              $(filter-out $(BUILD)/main.o $(BUILD)/snapshot.o,$(OBJS))
+	$(CC) $(CFLAGS) $(SNAP_TEST_DIR) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
+
+$(BUILD)/snapshot-tmp.o: snapshot.c $(OMCID_HDRS) | $(BUILD)
+	$(CC) $(CFLAGS) $(SNAP_TEST_DIR) -c -o $@ $<
+
 # The MIB data sync counter across its wrap.
 $(BUILD)/mib_sync_test: ../test/mib_sync_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
@@ -160,7 +172,7 @@ size: cap
 	@$(RUN) sh -c 'ls -l $(BIN); $(CROSS)size $(BIN)'
 
 test: image
-	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/downstream_ownership_test $(BUILD)/service_ownership_test $(BUILD)/mib_sync_test $(BUILD)/qos_check_test $(BUILD)/io_sink_test
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/extvlan_test $(BUILD)/mcastvlan_test $(BUILD)/downstream_ownership_test $(BUILD)/service_ownership_test $(BUILD)/mib_sync_test $(BUILD)/qos_check_test $(BUILD)/io_sink_test $(BUILD)/snapshot_check_test
 	@$(RUN) qemu-mips-static $(BUILD)/extvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/mcastvlan_test
 	@$(RUN) qemu-mips-static $(BUILD)/downstream_ownership_test
@@ -168,6 +180,7 @@ test: image
 	@$(RUN) qemu-mips-static $(BUILD)/qos_check_test
 	@$(RUN) qemu-mips-static $(BUILD)/mib_sync_test
 	@$(RUN) qemu-mips-static $(BUILD)/io_sink_test
+	@$(RUN) qemu-mips-static $(BUILD)/snapshot_check_test
 
 clean:
 	rm -rf $(BUILD)
