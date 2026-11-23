@@ -380,7 +380,9 @@ jobs:
       # tables). The release job checks the tarball against image-sha256
       # above before it uses any of it, takes the kernel for the SBOM from
       # that tarball, and checks the file components against its rootfs.
-      # 30 days: the longest a deployment can wait for its approval.
+      # 30 days: the longest a deployment can wait for its approval. Every
+      # path is under build-a/out/: the artifact is rooted there, and the
+      # release job unpacks it into out/.
       - name: Keep the compared image for the release job
         if: inputs.keep-image
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
