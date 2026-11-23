@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- CI: the weekly dependency bump commits the docs `tools/bump-deps.sh`
+  rewrites. They were left out of its commit, so the 6.18.65 bump passed
+  `make lint` in its own job and failed it on main. `bump-deps.sh` also moves
+  the kernel version in `docs/HACKING.md` and `docs/KERNEL.md` now, and a
+  version followed by `.tar.xz`, which it skipped.
+
 - Releases: `tools/bundle-sources.sh` checks the GitHub tag archives it puts
   in the source bundle (odi-toolchain, odi-ui, odi-sfp-exporter) against a
   `source.tar.gz` line per repo and tag in `src/release-sha256.txt`, also

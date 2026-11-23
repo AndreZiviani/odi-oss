@@ -32,12 +32,13 @@ cd "$ROOT"
 changed=0
 note() { echo "bumped: $*"; changed=1; }
 # doc_pin <old, as an ERE> <new> <file>...: every mention of the old version
-# not followed by another digit or dot, rewritten.
+# not followed by another digit, or by a dot and a digit, rewritten: so
+# linux-6.18.1.tar.xz moves with it, but 6.18.10 and 6.18.1.2 do not.
 doc_pin() {
 	old=$1 new=$2
 	shift 2
 	for f in "$@"; do
-		sed -i.bak -E "s/${old}([^0-9.]|\$)/${new}\1/g" "$f"
+		sed -i.bak -E "s/${old}([^0-9.]|\.[^0-9]|\.\$|\$)/${new}\1/g" "$f"
 		rm -f "$f.bak"
 	done
 }
@@ -76,7 +77,8 @@ if [ -n "$latest" ] && [ "$latest" != "$current" ]; then
 		rm -f kernel/618/fetch.sh.bak
 		# The docs name the pinned kernel too, and make lint checks they
 		# agree (tools/check-doc-pins.sh), so a bump moves them with it.
-		doc_pin "${current//./\\.}" "$latest" README.md docs/COMPARISON.md docs/BUILDING.md
+		doc_pin "${current//./\\.}" "$latest" README.md docs/COMPARISON.md docs/BUILDING.md \
+			docs/HACKING.md docs/KERNEL.md
 		note "linux $current -> $latest"
 	fi
 	rm -rf "$tmp"
