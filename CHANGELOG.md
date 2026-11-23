@@ -13,6 +13,34 @@ listed here.
   A confirmation whose signal could not be sent is removed again, and a
   plain apply that cannot remove one left on disk refuses (#482).
 
+- Docs: `ACCESS.md` sets a password before it adds an SSH key through the
+  API, without putting it in the shell history, and `SETTINGS.md` no longer
+  offers adding a key from the web UI during the safe mode. A confd newer
+  than v1.19.0 adds no key while no password is saved in `confd.auth` or a
+  safe-mode boot opens `admin` / `admin` (#482). The recipe asks for the password twice, with a prompt, in plain
+  POSIX sh (`stty -echo`, so it runs in dash too). It says so when the two
+  entries differ, and `curl -f` shows a refused password before the key
+  step. The release notes, `README.md`, `BUILDING.md` and the SSH key and
+  backup rows of `SETTINGS.md` say the same: password first, then the key.
+  The README also says that `admin` / `admin` is what a stick with no
+  stored web UI credential answers to, not a freshly flashed one. The same
+  confd refuses `/api/backup` with the factory password, so "Backing up
+  from a host" says a password of its own is needed, and
+  `tools/config-backup.sh` prints the reason confd gives for a refusal
+  instead of the status alone.
+
+- omcid: a respawn gives the wide-row slots back to the rows the snapshot
+  says had one. It gave them to the first 32 wide rows in index order, so
+  with the pool full a row created behind one that had no slot lost its own
+  on resume, and its Sets past byte 96 answered result 9 (#491).
+  `resume-test.sh` covers it.
+
+- Docs: QUALIFICATION.md and COMPARISON.md say that the safe-mode login
+  after a power cycle and the timed exit have run on a test stick: the
+  boot counter with a reboot kept the saved login, a power cut opened
+  `admin`/`admin` on the web UI, and an unacknowledged safe mode rebooted
+  into a normal boot (#488).
+
 - Docs: `confd.auth` is described as odi-ui stores it from the release after
   v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
   the password, which confd writes at the first sign-in or password save,
