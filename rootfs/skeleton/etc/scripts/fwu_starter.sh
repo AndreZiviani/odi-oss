@@ -106,7 +106,10 @@ if [ -n "$root" ]; then
 	[ "$root" = "$(mtd_idx r1)" ] && running=1
 fi
 if [ -z "$running" ]; then
-	running=$(timeout 5 "$NV" getenv sw_active 2>/dev/null | sed -n "s/^sw_active=//p")
+	# Only from a read that exited 0: what a failed one printed is no
+	# answer, as for sw_commit below.
+	running=$(timeout 5 "$NV" getenv sw_active 2>/dev/null) || running=
+	running=$(printf '%s\n' "$running" | sed -n "s/^sw_active=//p")
 	case "$running" in 0|1) ;; *) running= ;; esac
 fi
 [ -n "$running" ] || die "cannot tell which slot is running; refusing to write either"
@@ -121,7 +124,8 @@ say "running slot $running; reading sw_commit"
 # with our nv, so an empty answer is a failed read, not an old tool. On an
 # uncommitted trial the slot not running IS the committed one, and writing
 # it on a guess would erase the only image a failed trial can go back to.
-commit=$(timeout 5 "$NV" getenv sw_commit 2>/dev/null | sed -n "s/^sw_commit=//p")
+commit=$(timeout 5 "$NV" getenv sw_commit 2>/dev/null) || commit=
+commit=$(printf '%s\n' "$commit" | sed -n "s/^sw_commit=//p")
 case "$commit" in
 0|1) ;;
 *) die "cannot read sw_commit, the slot a failed trial goes back to; refusing to write either slot. Check with: nv getenv sw_commit; nv fallback sw_commit" ;;

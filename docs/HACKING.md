@@ -253,7 +253,7 @@ in odi-ui `schema/settings.tsv` and `docs/SETTINGS.md` together.
 `.github/workflows/ci.yml`, on pull requests and pushes to `main`: a
 `changelog` check (a pull request has to touch `CHANGELOG.md`, unless it is
 docs or CI only, or labelled `no-changelog`), `make lint`, `make
-test-host`, `make test-diag` and `make test-omci`, each as its own parallel
+cppcheck`, `make test-host`, `make test-diag` and `make test-omci`, each as its own parallel
 job, and `fuzz-omci` (`make fuzz-omci` for four minutes, on pull requests
 and pushes to main only; see [Fuzzing omcid](#fuzzing-omcid)); `test-omci` is a matrix with one job per suite
 (`make test-omci-<suite>`, after `make test-omci-build`). Two more jobs
@@ -529,6 +529,7 @@ In order:
 | gate | what it proves | needs |
 |---|---|---|
 | `make lint` | shellcheck over every script (on-device ones as POSIX `sh`, since busybox ash runs them), the inline-quote check, `reuse lint` (REUSE copyright and license information; skipped when the tool is absent, always run in CI), and the greps for private-workspace references, machine-local paths, trial history in comments, internal plan ids and vendor source citations | `shellcheck`, git, `reuse` (optional locally; `tools/reuse-requirements.txt`) |
+| `make cppcheck` | static analysis of every tracked C file (warnings and errors; a finding that is not a bug carries a `cppcheck-suppress` comment with the reason); not part of `make test` | `cppcheck` (CI: 2.13, ubuntu-24.04) |
 | `make test-host` | about 60 host tests: driver logic, the on-device scripts, the replay tables and their generators | cc, bash, Python 3 |
 | `make fuzz-omci` | omcid, built for the host with ASan and UBSan, under libFuzzer for `FUZZ_SECONDS` (60) a target: nothing an OLT, a config store or a CLI client can send breaks it within that time. Not part of `make test`; its replay of the saved inputs is part of `make test-host` | clang with its libFuzzer runtime |
 | `make test-diag` | diag's parser and conversions natively, then under qemu: the conversion vectors, the L2 listing golden, **the exporter contract** | Docker |

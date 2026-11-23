@@ -175,8 +175,11 @@ void snapshot_invalidate(void)
 	sys_unlink(SNAPSHOT_TMP_PATH);
 }
 
-/* 0 when the snapshot is on disk, -1 when it could not be written; the old
- * snapshot then stands, and event=snapshot_fail says so. */
+/* 0 when the snapshot is on disk, -1 when it could not be written. The old
+ * snapshot is removed then, and event=snapshot_fail says so: it holds a MIB
+ * older than the one the OLT was just answered for, and a respawn that
+ * resumed from it would answer for that older MIB. With no snapshot the
+ * respawn registers afresh, and the OLT provisions the MIB again. */
 int snapshot_save(void)
 {
 	uint8_t *p = snapbuf;
@@ -185,9 +188,10 @@ int snapshot_save(void)
 	uint32_t qlen;
 	void *qstate = qos_prog_state(&qlen);
 	/* Leave room for the fixed pools and the crc after the last row or
-	 * service entry is appended; a save that would not fit is skipped
-	 * rather than truncated silently -- the next MIB-changing message
-	 * tries again, and until then the last good snapshot on disk stands. */
+	 * service entry is appended. A save that would not fit fails as a
+	 * whole rather than writing a snapshot without the rows or services
+	 * past the end: SNAP_BUF_MAX holds the worst case, so this is a
+	 * backstop, not a path a session takes. */
 	const uint32_t fixed_tail = (uint32_t)sizeof(tblpool) +
 		(uint32_t)sizeof(flow_us) + (uint32_t)sizeof(flow_ds) +
 		4 /* bc_flow */ + (uint32_t)sizeof(tcont_map) + qlen +
@@ -215,7 +219,7 @@ int snapshot_save(void)
 		if (!mib[i].used)
 			continue;
 		if ((uint32_t)(p - snapbuf) + row_bytes + fixed_tail > SNAP_BUF_MAX)
-			break;
+			goto fail;
 		put_u16(&p, mib[i].classId);
 		put_u16(&p, mib[i].inst);
 		put_u16(&p, mib[i].written);
@@ -245,7 +249,7 @@ int snapshot_save(void)
 		if (!servtab[i].in_use)
 			continue;
 		if ((uint32_t)(p - snapbuf) + ent_bytes + 4 > SNAP_BUF_MAX)
-			break;
+			goto fail;
 		put_u16(&p, (uint16_t)i);
 		put_raw(&p, &servtab[i], sizeof(struct omci_bdgconn));
 		servs++;
@@ -262,11 +266,12 @@ int snapshot_save(void)
 	}
 
 	if (atomic_write(SNAPSHOT_PATH, SNAPSHOT_TMP_PATH, snapbuf,
-			 (uint32_t)(p - snapbuf)) < 0) {
-		ev_snapshot_fail(rows);
-		return -1;
-	}
-	return 0;
+			 (uint32_t)(p - snapbuf)) == 0)
+		return 0;
+fail:
+	snapshot_invalidate();
+	ev_snapshot_fail((unsigned)mib_count());
+	return -1;
 }
 
 /* Why a resume was refused, for omcid's event=start line (events.c). */

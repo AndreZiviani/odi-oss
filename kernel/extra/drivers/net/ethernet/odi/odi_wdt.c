@@ -98,7 +98,10 @@ static int odi_wdt_streq(const char *a, const char *b)
 {
 	unsigned int i;
 
+	/* Ends at the NUL of the shorter name, so a short literal b is
+	 * never read past its end. */
 	for (i = 0; i < ODI_WDT_CLIENT_NAME_LEN; i++) {
+		/* cppcheck-suppress arrayIndexOutOfBounds */
 		if (a[i] != b[i])
 			return 0;
 		if (a[i] == '\0')

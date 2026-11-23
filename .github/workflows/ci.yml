@@ -113,6 +113,23 @@ jobs:
           }
           make lint
 
+  # Static analysis of the C code. The runner image is named, not latest:
+  # another cppcheck release reports other findings, and a new one should
+  # arrive in a change of its own, not in an unrelated pull request.
+  cppcheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: cppcheck
+        run: |
+          tools/ci-apt.sh cppcheck
+          cppcheck --version
+          make cppcheck
+
   host:
     runs-on: ubuntu-latest
     timeout-minutes: 15

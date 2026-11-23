@@ -19,6 +19,38 @@ listed here.
   and held to the line omcid has to print for it. Nothing in the image
   changes (#482).
 
+- CI: `make cppcheck` runs cppcheck over every tracked C file, and CI runs
+  it as its own job on ubuntu-24.04 (#482). Of the nine findings on main,
+  one was a test that read `rec.log[-1]` when the action it looked for was
+  missing (`test/odi_gpon_test.c`), and `qos_prog_state_ok()` now takes the
+  offset of the queue count with `__builtin_offsetof` instead of subtracting
+  two pointers; omcid builds byte-identical. The other seven are not bugs and
+  carry an inline suppression with the reason.
+
+- omcid: a snapshot save that fails removes the older snapshot. It stayed on
+  disk, so a respawn after a full `/var/run` resumed from a MIB older than
+  the one the OLT had been answered for. The respawn now registers afresh.
+  A save that would not fit the buffer fails the same way instead of
+  writing a snapshot without the rows past the end. `resume-test.sh` covers
+  the failed write (#482).
+
+**Automated dependency bump.**
+- linux 6.18.63 -> 6.18.65
+
+- Upgrades: `fwu.sh` and `fwu_starter.sh` take `sw_active` and `sw_commit`
+  only from an `nv` that exited 0; a value a failed read printed is no
+  answer. When the nv is this project's, `fwu.sh` now refuses any failed
+  `nv getenv` or `nv fallback` read, not only exit 3 or no answer. Exit 1
+  with the line for no valid second copy still passes and says so. It tells
+  the nv by its usage, which lists `fallback`, not by `/etc/odi-build`: a
+  slot built on the stock base carries that file and runs the stock nv. On
+  the stock nv those other failures stay a warning, while exit 3 and no
+  answer still refuse; an unset `sw_commit` stays a warning in `fwu.sh`
+  (#482).
+
+- CONTRIBUTING.md: a larger change starts with a discussion or an issue of
+  its own; the roadmap section no longer points to one tracking issue.
+
 - Identity trial: each event line goes to the kernel log before the state
   file records the step, so a reader that sees the trial end (`phase=steady`)
   also finds its outcome in the log. Before, the line followed the state, and

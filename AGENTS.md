@@ -35,6 +35,7 @@ behind every rule here.
     make fuzz-omci              # omcid on the host under libFuzzer + ASan/UBSan, FUZZ_SECONDS=60 a target (needs clang; src/omci/fuzz/README.md)
     make fuzz-omci-replay       # the fuzz seeds and every input that once broke omcid (part of test-host)
     make lint                   # shellcheck + repo-specific checks, see below
+    make cppcheck               # static analysis of the C code (CI runs it as its own job)
 
     kernel/build.sh              # the kernel alone (pulls the toolchain image itself)
     ODI_REMOTE=user@yourbuildhost tools/remote-build.sh 'make image-all'
