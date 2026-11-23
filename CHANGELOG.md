@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Docs: QUALIFICATION.md and COMPARISON.md say that the safe-mode login
+  after a power cycle and the timed exit have run on a test stick: the
+  boot counter with a reboot kept the saved login, a power cut opened
+  `admin`/`admin` on the web UI, and an unacknowledged safe mode rebooted
+  into a normal boot (#488).
+
 - Docs: `confd.auth` is described as odi-ui stores it from the release after
   v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
   the password, which confd writes at the first sign-in or password save,
