@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- omcid: a respawn gives the wide-row slots back to the rows the snapshot
+  says had one. It gave them to the first 32 wide rows in index order, so
+  with the pool full a row created behind one that had no slot lost its own
+  on resume, and its Sets past byte 96 answered result 9 (#491).
+  `resume-test.sh` covers it.
+
 - Docs: `confd.auth` is described as odi-ui stores it from the release after
   v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
   the password, which confd writes at the first sign-in or password save,
