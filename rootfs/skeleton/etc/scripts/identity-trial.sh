@@ -300,9 +300,9 @@ try() {
 	save
 	setsid sh "$SELF" _watch $confirm < /dev/null >> "$LOG" 2>&1 &
 	watcher=$!
+	event identity_trial "state=start before_onu=$before_onu before_services=$before_services"
 	save
 	unlock
-	event identity_trial "state=start before_onu=$before_onu before_services=$before_services"
 	say "omcid re-registers with the new values now; the line drops for a while. identity-trial.sh status shows the outcome"
 }
 
@@ -325,17 +325,17 @@ finish_revert() {
 	if [ "$reverted" = no ]; then
 		phase=revert_failed
 		outcome=revert_failed
+		event identity_trial "state=revert_failed reason=$reason after_onu=$after_onu after_services=$after_services"
 		save
 		unlock
-		event identity_trial "state=revert_failed reason=$reason after_onu=$after_onu after_services=$after_services"
 		say "the revert did not end well (apply.sh output above, /var/log/omcid.log): omcid may still run the trial values. identity-trial.sh revert tries again" >&2
 		return 1
 	fi
 	phase=steady
 	outcome=reverted
+	event identity_trial "state=reverted reason=$reason after_onu=$after_onu after_services=$after_services"
 	save
 	unlock
-	event identity_trial "state=reverted reason=$reason after_onu=$after_onu after_services=$after_services"
 }
 
 # store_put KEY VALUE: one flash set, bounded.
@@ -396,25 +396,25 @@ finish_keep() {
 	phase=steady
 	if [ -n "$mixed" ]; then
 		outcome=store_mixed
+		event identity_trial "state=store_mixed failed=$(echo $bad | tr ' ' ',') new=$(echo $mixed | tr ' ' ',')"
 		save
 		unlock
-		event identity_trial "state=store_mixed failed=$(echo $bad | tr ' ' ',') new=$(echo $mixed | tr ' ' ',')"
 		say "the OLT took the new identity but the store refused$bad, and$mixed could not go back: the store holds a mix of old and new values. Set them by hand before a reboot" >&2
 		return 1
 	fi
 	if [ -n "$bad" ]; then
 		outcome=store_failed
+		event identity_trial "state=store_failed failed=$(echo $bad | tr ' ' ',')"
 		save
 		unlock
-		event identity_trial "state=store_failed failed=$(echo $bad | tr ' ' ',')"
 		say "the OLT took the new identity but the store refused$bad: the store keeps the identity before the trial, and omcid keeps the trial values until a reboot, which reads the store. Set them by hand" >&2
 		return 1
 	fi
 	rm -f "$TRIAL"
 	outcome=kept
+	event identity_trial "state=kept after_onu=$after_onu after_services=$after_services"
 	save
 	unlock
-	event identity_trial "state=kept after_onu=$after_onu after_services=$after_services"
 }
 
 # take_req: a keep or revert asked for during the watch, or nothing.
@@ -455,9 +455,9 @@ watch() {
 		load
 		phase=steady
 		outcome=held
+		event identity_trial "state=held"
 		save
 		unlock
-		event identity_trial "state=held"
 		return ;;
 	identity:ok) ;;
 	*)
@@ -469,9 +469,9 @@ watch() {
 	lock
 	load
 	phase=watching
+	event identity_trial "state=watching window_s=$WATCH_S"
 	save
 	unlock
-	event identity_trial "state=watching window_s=$WATCH_S"
 	waited=0
 	while [ "$waited" -lt "$WATCH_S" ]; do
 		"$SLEEP" "$POLL_S"
