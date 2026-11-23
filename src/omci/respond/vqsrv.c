@@ -195,7 +195,9 @@ static void vq_dispatch(void)
 
 			if (mask) {
 				mask = 0;
+				/* attr_value() filled the w bytes read here. */
 				for (uint16_t b = 0; b < w; b++)
+					/* cppcheck-suppress legacyUninitvar */
 					mask |= val[b] != 0;
 			}
 			for (uint16_t b = 0; b < w && k < 40; b++) {

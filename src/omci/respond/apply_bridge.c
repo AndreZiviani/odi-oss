@@ -1923,7 +1923,9 @@ void bdgconn_rebuild(void)
 				olt_note(why);
 		}
 	}
+	/* The loop above set the first ning entries. */
 	for (int g = 0; g < ning; g++)
+		/* cppcheck-suppress uninitvar */
 		if (ingress_iphost[g])
 			lane_ev_build(&ev_tab[g], (uint16_t)ingress[g], (uint16_t)ingress_bport[g]);
 	{
@@ -2026,7 +2028,9 @@ void bdgconn_rebuild(void)
 
 						if (id == 0 || id == 0xffff)
 							continue;
+						/* The first ntgt entries are set. */
 						for (k = 0; k < ntgt; k++)
+							/* cppcheck-suppress uninitvar */
 							if (tgt_iw[k]->inst == id)
 								break;
 						if (k < ntgt) {

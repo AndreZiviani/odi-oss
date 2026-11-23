@@ -33,6 +33,7 @@ behind every rule here.
     make test-diag              # diag, including the exporter contract (byte-for-byte goldens)
     make test-rcs               # what rcS executes and writes to /proc, three flag sets, against goldens (needs out/busybox)
     make lint                   # shellcheck + repo-specific checks, see below
+    make cppcheck               # static analysis of the C code (CI runs it as its own job)
 
     kernel/build.sh              # the kernel alone (pulls the toolchain image itself)
     ODI_REMOTE=user@yourbuildhost tools/remote-build.sh 'make image-all'

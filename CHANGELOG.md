@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- CI: `make cppcheck` runs cppcheck over every tracked C file, and CI runs
+  it as its own job on ubuntu-24.04 (#482). Of the nine findings on main,
+  one was a test that read `rec.log[-1]` when the action it looked for was
+  missing (`test/odi_gpon_test.c`), and `qos_prog_state_ok()` now takes the
+  offset of the queue count with `__builtin_offsetof` instead of subtracting
+  two pointers; omcid builds byte-identical. The other seven are not bugs and
+  carry an inline suppression with the reason.
+
 - Identity trial: each event line goes to the kernel log before the state
   file records the step, so a reader that sees the trial end (`phase=steady`)
   also finds its outcome in the log. Before, the line followed the state, and
