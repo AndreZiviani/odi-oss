@@ -164,8 +164,9 @@ to start dropbear with `-s` (refuse password logins outright), so ssh does
 not even offer a password prompt. This is what the published releases build
 with — a per-build password baked into a squashfs anyone can unpack is not
 a secret. First access to a `ROOT_PW=locked` image is through the web UI
-(`confd`, port 80 — the built-in `admin`/`admin` until a password is set),
-whose SSH-key admin page can add a key for root; `docs/FLASHING.md` has the
+(`confd`, port 80 — the built-in `admin`/`admin` until a password is set).
+Its System, Access page sets that password and then adds a key for root;
+a confd newer than v1.19.0 adds no key before the password is set. `docs/ACCESS.md` has the
 exact steps. The three shapes (`locked`, `none`, the default password) are
 written by `image/gen-root-account.sh`, which `test/root_pw_test.sh`
 (`make test-host`) exercises directly — no kernel or busybox needed for
