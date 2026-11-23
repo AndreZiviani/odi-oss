@@ -106,13 +106,14 @@ note() {
 # pin <file> <VAR>: the first top-level VAR=value of a script, unquoted
 pin() { sed -n "s/^$2=//p" "$1" | head -n 1 | tr -d '"'; }
 
-# ---- the kernel: fetched and verified by its own script, cache shared
+# ---- the kernel: fetched and verified by its own script, cache shared.
+# Run every time, also when both files are already in dl/: fetch.sh then
+# downloads nothing, but still checks the SHA-256 and the GPG signature of
+# exactly the pair the bundle ships.
 kv=$(pin "$ROOT/kernel/618/fetch.sh" VERSION)
 ksum=$(pin "$ROOT/kernel/618/fetch.sh" SHA256_XZ)
 [ -n "$kv" ] && [ -n "$ksum" ] || die "no pinned kernel version in kernel/618/fetch.sh"
-if [ ! -s "$DL/linux-$kv.tar.xz" ] || [ ! -s "$DL/linux-$kv.tar.sign" ]; then
-	"$ROOT/kernel/618/fetch.sh" >&2
-fi
+"$ROOT/kernel/618/fetch.sh" >&2
 [ "$(sha256 "$DL/linux-$kv.tar.xz")" = "$ksum" ] || die "linux-$kv.tar.xz does not match the pin"
 add linux "$kv" GPL-2.0-only kernel "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$kv.tar.xz" "$DL/linux-$kv.tar.xz"
 add "linux (signature)" "$kv" - "detached .sign of the uncompressed tar" "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$kv.tar.sign" "$DL/linux-$kv.tar.sign"

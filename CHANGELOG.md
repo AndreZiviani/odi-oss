@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- Releases: the release job publishes the image the `reproducible` job built
+  twice and found identical, instead of building a third one. It checks the
+  tarball against the SHA-256 that job reported, takes the kernel hash of
+  the SBOM from that tarball and checks the SBOM against its rootfs before
+  anything is published (#482). `tools/bundle-sources.sh` checks the kernel
+  tarball's GPG signature also when both files are already in `dl/`.
+
 - Apply: `apply.sh omci` refuses when more than one omcid runs, instead of
   signalling all of them: init runs one, and the confirmation it writes for
   `--confirm` or `--revert` can go to one only. The confirmation now names

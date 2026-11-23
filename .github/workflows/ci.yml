@@ -12,8 +12,9 @@ name: ci
 # odi-toolchain, never this repository's own -- docs/HACKING.md). A release
 # tag runs the full suite: the tests, then the build of every freestanding
 # binary in src/ on its own. This repository's own kernel and the full
-# image are not built here: about an hour of compiling this runner would
-# spend, and nothing in either is exercised without a stick.
+# image are built only by the `reproducible` job, on tags and manual runs,
+# never on a push or pull request: nothing in either is exercised without a
+# stick.
 #
 # A `v*` tag does not trigger this workflow by itself: release.yml calls it
 # (workflow_call) as the job its release job needs, so the whole suite, the
@@ -28,6 +29,17 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      # release.yml sets it on a tag push: the reproducible job then keeps
+      # the image it compared, and the build output its SBOM is made from,
+      # as the artifact the release job publishes. A dry run leaves it off.
+      keep-image:
+        type: boolean
+        default: false
+    outputs:
+      image-sha256:
+        description: SHA-256 of the image tarball both reproducible builds produced
+        value: ${{ jobs.reproducible.outputs.image-sha256 }}
 
 permissions:
   contents: read
@@ -284,21 +296,21 @@ jobs:
   # diffs the two tarballs member by member (tools/compare-images.sh):
   # proof that the release build depends on the sources and the pinned
   # toolchain/kernel/package versions, and on nothing else -- wall-clock
-  # time and build-host identity included, once the documented stamps
-  # (etc/version, etc/odi-build, the banner busybox compiles into itself,
-  # the /etc/passwd ROOT_PW=locked writes) are set aside.
+  # time and build-host identity included. The two tarballs must match to
+  # the byte; nothing is set aside (docs/BUILDING.md, "Reproducible builds").
   #
   # Tags and workflow_dispatch only, not pull_request: this is `image-all`
   # run twice, about 25 minutes native each per the top-level Makefile
   # estimate, and a runner is slower than that. Twice that on every PR push
-  # would make the queue the bottleneck for everything else in this file;
-  # release.yml already pays for one full build on every tag, so a second
-  # one here to compare against costs the same order of time, not double
-  # the total cost of the workflow.
+  # would make the queue the bottleneck for everything else in this file.
+  # On a release tag these are the only image builds: release.yml publishes
+  # the tarball compared here (keep-image) instead of building a third one.
   reproducible:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    outputs:
+      image-sha256: ${{ steps.compare.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -344,6 +356,46 @@ jobs:
         run: VERSION="$VERSION" ROOT_PW=locked VOL=odi-kbuild-618-b make image-all
 
       - name: Compare the two tarballs
+        id: compare
         run: |
           build-a/tools/compare-images.sh \
             "build-a/out/image/$VERSION.tar" "build-b/out/image/$VERSION.tar"
+          echo "sha256=$(sha256sum "build-a/out/image/$VERSION.tar" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      # Before anything leaves this job: a ROOT_PW=locked build writes no
+      # password file, and none may reach the artifact below, which anyone
+      # with read access to the run can download before the release is
+      # approved.
+      - name: No password file next to the compared image
+        if: inputs.keep-image
+        run: |
+          if ls build-a/out/image/root-password*.txt >/dev/null 2>&1; then
+            echo "ci.yml: a root-password file exists for a ROOT_PW=locked build -- refusing to keep the image" >&2
+            exit 1
+          fi
+
+      # For release.yml only (keep-image): the compared tarball and the build
+      # output of A that tools/generate-sbom.sh hashes into the SBOM's file
+      # components (the binaries, the confd assets, the packages, the replay
+      # tables). The release job checks the tarball against image-sha256
+      # above before it uses any of it, takes the kernel for the SBOM from
+      # that tarball, and checks the file components against its rootfs.
+      # 30 days: the longest a deployment can wait for its approval. Every
+      # path is under build-a/out/: the artifact is rooted there, and the
+      # release job unpacks it into out/.
+      - name: Keep the compared image for the release job
+        if: inputs.keep-image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-image
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+          path: |
+            build-a/out/image/${{ env.VERSION }}.tar
+            build-a/out/bin/
+            build-a/out/confd-assets/
+            build-a/out/firmware/odi/
+            build-a/out/busybox
+            build-a/out/dropbearmulti
+            build-a/out/ip
