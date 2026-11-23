@@ -437,6 +437,16 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 					p += MIB_WIDE_MAX - MIB_ROW_MAX;
 				continue;
 			}
+			/* The slot goes back to the rows the file says had one.
+			 * mib_add() gave this row a slot if one was free,
+			 * whether or not it had one; a row that had none gives
+			 * it back at once, so it is free for a later row that
+			 * had one. Left in place, the first 32 wide rows in
+			 * index order took the slots, and a row created behind
+			 * one that never had a slot lost its own: its Sets
+			 * past byte 96 failed after the respawn. */
+			if (!has_tail)
+				r->tail = 0;
 			r->written = written;
 			r->truncated = truncated;
 			r->tbl_head = tbl_head;
@@ -444,8 +454,9 @@ int snapshot_try_resume(uint32_t onu_state, const char **why)
 			get_raw(&p, r->data, MIB_ROW_MAX);
 			for (int j = 0; j < MIB_ROW_MAX; j++)
 				r->prev[j] = r->data[j];
-			/* Whether this row has a slot now is the pool's say, not
-			 * the file's: bytes saved for a row the pool cannot hold
+			/* A row the file says had a slot gets one: at most 32
+			 * rows say so, and every row without one gave its slot
+			 * back above. Should the pool still be full, the bytes
 			 * are dropped, as a Set of them would have been. */
 			if (has_tail) {
 				if (r->tail)
