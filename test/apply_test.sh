@@ -29,8 +29,16 @@ trap cleanup EXIT
 
 # pidof: the stub daemon, while it lives. A plain shell cannot name its own
 # processes, so the stub keeps its pid in a file.
+# PIDOF_ONLY=N names that pid alone, PIDOF_EXTRA=N one more after the stub;
+# PIDOF_EXTRA_LATE=N the same from the second call on (each call counted in
+# pidof.calls).
 cat > "$T/bin/pidof" <<PIDOF
 #!/bin/sh
+echo x >> "$T/pidof.calls"
+[ -n "\${PIDOF_ONLY:-}" ] && { echo "\$PIDOF_ONLY"; exit 0; }
+[ -n "\${PIDOF_EXTRA:-}" ] && [ -f "$T/omcid.pid" ] && { echo "\$(cat "$T/omcid.pid") \$PIDOF_EXTRA"; exit 0; }
+[ -n "\${PIDOF_EXTRA_LATE:-}" ] && [ -f "$T/omcid.pid" ] && [ "\$(wc -l < "$T/pidof.calls")" -ge 2 ] &&
+	{ echo "\$(cat "$T/omcid.pid") \$PIDOF_EXTRA_LATE"; exit 0; }
 [ -f "$T/omcid.pid" ] && p=\$(cat "$T/omcid.pid") && kill -0 "\$p" 2>/dev/null && { echo "\$p"; exit 0; }
 exit 1
 PIDOF
@@ -137,10 +145,39 @@ echo "done none none ok - 12 - 6 0" > "$T/script"
 run omci > /dev/null
 t "no flag: no confirmation reaches omcid" "^no$" "$([ -e "$T/confirm.seen" ] && echo yes || echo no)"
 run omci --confirm > /dev/null
-t "--confirm: omcid finds it" "^confirm$" "$(cat "$T/confirm.seen" 2>/dev/null)"
+t "--confirm: omcid finds it, with its pid" "^confirm $first$" "$(cat "$T/confirm.seen" 2>/dev/null)"
 out=$(run omci --revert 2); rc=$?
-t "--revert: omcid finds it" "^revert$" "$(cat "$T/confirm.seen" 2>/dev/null)"
+t "--revert: omcid finds it, with its pid" "^revert $first$" "$(cat "$T/confirm.seen" 2>/dev/null)"
 t "--revert: the bound after it still counts" "^0$" "$rc"
+
+# One omcid runs under init. With two, a confirmation would go to whichever
+# reloads first: refused, with nothing written or signalled. The second
+# pid is above pid_max, so no process of the host is signalled.
+cp "$T/status" "$T/status.before"
+rm -f "$T/confirm" "$T/confirm.seen"
+out=$(PIDOF_EXTRA=99999998 run omci --confirm); rc=$?
+t "two omcid: refused" "^1 .*more than one omcid runs" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
+t "and no confirmation written" "^no$" "$([ -e "$T/confirm" ] && echo yes || echo no)"
+t "and omcid was not signalled" "^same$" "$(cmp -s "$T/status" "$T/status.before" && echo same)"
+# The same when the second omcid shows up only by the lookup under the lock.
+rm -f "$T/pidof.calls"
+out=$(PIDOF_EXTRA_LATE=99999998 run omci --confirm); rc=$?
+t "two omcid under the lock: refused" "^1 .*more than one omcid runs" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
+t "and no confirmation written" "^no$" "$([ -e "$T/confirm" ] && echo yes || echo no)"
+t "and omcid was not signalled" "^same$" "$(cmp -s "$T/status" "$T/status.before" && echo same)"
+# A confirmation that cannot be removed is not left for a plain reload:
+# refused, nothing signalled (the path a directory with a file in it).
+mkdir -p "$T/confirm/held"
+out=$(run omci); rc=$?
+t "unremovable confirmation: refused" "^1 .*could not remove" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
+t "and omcid was not signalled" "^same$" "$(cmp -s "$T/status" "$T/status.before" && echo same)"
+rm -rf "$T/confirm"
+# A signal that cannot be sent leaves no confirmation for a later reload.
+# A pid no process has (above pid_max, as the extra one above) cannot be
+# signalled.
+out=$(PIDOF_ONLY=99999999 run omci --confirm); rc=$?
+t "unsignalled: exit 1" "^1 .*could not signal omcid" "$rc $(printf '%s\n' "$out" | tr '\n' ' ')"
+t "and its confirmation is gone" "^no$" "$([ -e "$T/confirm" ] && echo yes || echo no)"
 echo "done identity held held GPON_SN 5 - 6 0 refusals=0;streak=2" > "$T/script"
 out=$(run omci); rc=$?
 t "held: exit 1" "^1$" "$rc"
@@ -149,7 +186,7 @@ t "held: says what to do" "NOT applied: the OLT refused the last 2 changes.*appl
 # identity change is a failure that says how to apply it.
 echo "done identity deferred deferred GPON_SN 5 - 6 0" > "$T/script"
 out=$(run omci-live); rc=$?
-t "omci-live: omcid finds it" "^live$" "$(cat "$T/confirm.seen" 2>/dev/null)"
+t "omci-live: omcid finds it, with its pid" "^live $first$" "$(cat "$T/confirm.seen" 2>/dev/null)"
 t "deferred: exit 3, not a failure's 1" "^3$" "$rc"
 t "deferred: names the keys and the plain apply" "identity changed (GPON_SN) and NOT applied, nor anything else.*Apply it with: apply.sh omci" "$out"
 # What is not understood is refused before anything is signalled. omci-live

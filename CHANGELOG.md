@@ -16,6 +16,70 @@ listed here.
   answer still refuse; an unset `sw_commit` stays a warning in `fwu.sh`
   (#482).
 
+- Releases: the release job publishes the image the `reproducible` job built
+  twice and found identical, instead of building a third one. It checks the
+  tarball against the SHA-256 that job reported, takes the kernel hash of
+  the SBOM from that tarball and checks the SBOM against its rootfs before
+  anything is published (#482). `tools/bundle-sources.sh` checks the kernel
+  tarball's GPG signature also when both files are already in `dl/`.
+
+- Apply: `apply.sh omci` refuses when more than one omcid runs, instead of
+  signalling all of them: init runs one, and the confirmation it writes for
+  `--confirm` or `--revert` can go to one only. The confirmation now names
+  the pid of that omcid, and omcid takes one that names another pid as
+  `live`, so one left for an omcid that died is not honoured by the next.
+  A confirmation whose signal could not be sent is removed again, and a
+  plain apply that cannot remove one left on disk refuses (#482).
+
+- OMCI: when omcid can neither write its reload status nor remove the one
+  before, it tries the removal again once a second, without another
+  signal, until it works or a new status is written. Before, a
+  `state=running` left from the start of that reload stood until omcid
+  restarted, and `apply.sh omci` refused every later change as still
+  applying (#482).
+
+- omcid: a resume snapshot is checked as a whole before any of it is
+  loaded. A snapshot with a valid CRC, the right version and the right
+  device was taken at its word. The count of upstream queues in it was
+  used as an index by the rebuild that follows a resume, and one past the
+  table (128) read and wrote outside it; a table-attribute list in it that
+  ran into itself was walked without end by the next MIB reset or Get of
+  the table, on every respawn until the file was replaced. Such a snapshot
+  is now refused (`reason=bad_snapshot`) and omcid re-registers: a count
+  past its table, a length that is not the sum of the parts, a list that
+  loops, shares a row, runs through a free row or is not as long as its
+  entity says, a table node in use on no list (never freed again, so a
+  pool of them refused every table row), a row or a service saved twice
+  or a service outside its table, and more rows with a wide-row slot than
+  the pool has. A refusal no longer comes after the MIB rows of the refused file
+  were loaded. omcid writes the snapshot itself, on tmpfs, so this took a
+  damaged file to reach (#482).
+
+- Host SerDes: a 2500BASE-X link that loses the sync while the stick
+  keeps power is re-latched until it syncs again. With the host port set
+  to 1G and back to 2.5G-baseX, or disabled and enabled, the lane did not
+  sync again until the next boot. A keeper, spawned by the boot watch once
+  in sync and by a confirmed `2500basex` trial, reads bit 17 of 0x214
+  every 5 s in phase steady; clear twice a second apart, it re-latches the
+  lane every 5 s until the bit reads set twice a second apart, with one
+  event when the sync is lost (`serdes_lost`) and one when it is back
+  (`serdes_back`). A lane in sync is never touched and the mode never
+  changes: a host port left at 1G is for the next boot or a trial. It acts
+  under the lock and skips a busy tick, runs one at a time, and ends once
+  `HOST_SERDES` or the running mode is no longer `2500basex`. The
+  re-latch, in a trial and the boot watch too, now reads bit 17 again
+  under the lock and leaves a lane that synced since alone, with nothing
+  logged: the keeper logs `serdes_lost` only once that read is clear too.
+  `host-serdes.sh status` says whether a keeper runs (`keeper=<pid>` or
+  `keeper=none`), in the diag bundle as well. Reported on
+  HSGQ sticks with a downstream build of v1.18.1 carrying it: against a
+  MikroTik hEX S 2025 (E60iUGS), the router port set to 1G and back to
+  2.5G-baseX gave `serdes_back` "after 52 s" (most of it at 1G) and a
+  disabled and enabled port "after 10 s"; against a MikroTik RB5009, a
+  `fiber1g` trial that expired back to 2500BASE-X with the port still at
+  1G, set back to 2.5G-baseX by hand: "after 83 s", the time at 1G
+  included.
+
 - Docs: `ACCESS.md` sets a password before it adds an SSH key through the
   API, without putting it in the shell history, and `SETTINGS.md` no longer
   offers adding a key from the web UI during the safe mode. A confd newer
@@ -216,6 +280,7 @@ listed here.
   `apply.sh omci` reports a VLAN rebuild as `the ONU was not
   re-registered` instead of `stayed in O5`, which it does not know
   (`docs/SWITCH.md`, "GPON boot init").
+
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy

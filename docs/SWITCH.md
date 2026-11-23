@@ -1416,7 +1416,12 @@ mode: 0x214 `HOLD_CLK_GLITCH` bit 13 := 1, `LINK_MODE` [4:0] := 0x1f
 that mode held. A re-latch cut before that last write leaves the lane
 parked; the next one starts it again. A `2500basex` or `hisgmii` trial and
 each 2500BASE-X phase of the boot watch run it every 5 s (`RESYNC_S`) while
-bit 17 reads clear, and never on a lane in sync. Measured against a
+bit 17 reads clear, and never on a lane in sync: the re-latch reads bit 17
+again under the lock and leaves a lane that synced since alone. The keeper
+of a 2500BASE-X link seen in sync runs it too, once bit 17 reads clear
+twice, a second apart, until it reads set twice, a second apart: with a
+host port set to 1G and back to 2.5G-baseX, the lane did not sync again in
+the runs until it was re-latched. Measured against a
 MikroTik hEX S 2025 (E60iUGS) on HSGQ sticks: a re-latch with the router
 port still at 1G gave one read in 25 with the bit set; the next, after the
 port was switched to 2.5G-baseX, 0x214 = 0x00260016 within 2 s and frames

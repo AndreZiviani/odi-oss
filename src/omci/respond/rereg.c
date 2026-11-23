@@ -34,9 +34,10 @@
  *
  * With a streak of REREG_HOLD or more, reload.c does not re-register for a
  * changed identity unless the reload was confirmed: apply.sh omci --confirm
- * (or --revert) writes REREG_CONFIRM_PATH before its signal, and every reload
- * takes the file away, used or not, so a confirmation never outlives the
- * reload it was given for. apply.sh warns from one refusal on, and when
+ * (or --revert) writes REREG_CONFIRM_PATH before its signal, naming the pid
+ * it signals, and every reload takes the file away, used or not, so a
+ * confirmation never outlives the reload it was given for. One that names
+ * another pid was given for another omcid and confirms nothing here. apply.sh warns from one refusal on, and when
  * today reaches REREG_DAY_WARN.
  *
  * Some operators are said to block a line after a few refused
@@ -280,24 +281,37 @@ int rereg_today(void)
 	return n;
 }
 
-/* b is the one word w, with or without the newline echo ends it with. */
+/* b is the word w, one space and the pid of this omcid, with or without
+ * the newline echo ends it with: "confirm 412". */
 static int confirm_is(const char *b, const char *w)
 {
+	unsigned long pid = 0;
+	int digits = 0;
+
 	while (*w)
 		if (*b++ != *w++)
 			return 0;
+	if (*b++ != ' ')
+		return 0;
+	while (*b >= '0' && *b <= '9' && digits < 10) {
+		pid = pid * 10 + (unsigned long)(*b++ - '0');
+		digits++;
+	}
+	if (!digits || pid != (unsigned long)sys_getpid())
+		return 0;
 	return !*b || (b[0] == '\n' && !b[1]);
 }
 
 /* The confirmation apply.sh leaves for this reload: 0 none, 1 --confirm, 2
  * --revert, 3 omci-live (no confirmation: change nothing that drops the line).
- * Only the words apply.sh writes count. A file that is empty, cut short,
- * unreadable or says anything else confirms nothing and is taken as 3: read
- * as --confirm, as it used to be, it would apply a pending identity change
- * that no one confirmed. Taken away whatever it said. */
+ * Only the words apply.sh writes count, with the pid of this omcid. A file
+ * that is empty, cut short, unreadable, names another pid (one left for an
+ * earlier omcid) or says anything else confirms nothing and is taken as 3:
+ * read as --confirm, as it used to be, it would apply a pending identity
+ * change that no one confirmed. Taken away whatever it said. */
 int rereg_take_confirm(void)
 {
-	char b[16];
+	char b[32];
 	long fd = sys_open(REREG_CONFIRM_PATH, O_RDONLY);
 	long n;
 
