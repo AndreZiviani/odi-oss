@@ -3,10 +3,12 @@
 
 /* snapshot_try_resume() against snapshots that carry a valid CRC and state
  * no omcid in order would have saved: a count of upstream queues past the
- * table, and table-attribute lists that loop, share a node, run through a
- * free node or are not as long as the row says. Each is made by putting
- * the memory in that state and letting snapshot_save() write it, so the
- * file is a real one and nothing here knows an offset in it. Every one has
+ * table, table-attribute lists that loop, share a node, run through a free
+ * node or are not as long as the row says, a node in use on no list, a row
+ * saved twice, and a file a byte short or long. Each is made by putting the
+ * memory in that state and letting snapshot_save() write it, so the file is
+ * a real one and nothing here knows an offset in it; only the length cases
+ * change the saved file, at its end, and make its CRC right. Every one has
  * to be refused as bad_snapshot before any of it is loaded; the same row
  * with its list in order has to resume.
  *
@@ -74,6 +76,52 @@ static int back(void)
 
 	if (snapshot_save() != 0)
 		sys_exit(91);
+	empty();
+	rc = snapshot_try_resume(5, &why);
+	if (rc)
+		return same(why, "resumed") ? 1 : -1;
+	return same(why, "bad_snapshot") ? 0 : -1;
+}
+
+/* The bitwise CRC32 of snapshot.c, for a file changed here by hand. */
+static uint32_t crc32(const uint8_t *p, uint32_t n)
+{
+	uint32_t crc = 0xfffffffful;
+
+	for (uint32_t i = 0; i < n; i++) {
+		crc ^= p[i];
+		for (int b = 0; b < 8; b++)
+			crc = (crc >> 1) ^ (0xEDB88320ul & (uint32_t)(-(int32_t)(crc & 1)));
+	}
+	return ~crc;
+}
+
+static uint8_t file[131072 + 1];
+
+/* Save, then rewrite the file `delta` bytes shorter or longer before its
+ * CRC, the CRC made right again, and ask for it back as back() does. */
+static int back_resized(int delta)
+{
+	const char *why = "";
+	long fd, n;
+	int rc;
+
+	if (snapshot_save() != 0)
+		sys_exit(91);
+	fd = sys_open(SNAPSHOT_PATH, O_RDONLY);
+	if (fd < 0)
+		sys_exit(92);
+	n = sys_read((int)fd, file, sizeof file - 1);
+	sys_close((int)fd);
+	if (n < 8)
+		sys_exit(93);
+	n -= 4;                                  /* the old CRC */
+	if (delta > 0)
+		file[n] = 0;
+	n += delta;
+	nl_put32(file + n, crc32(file, (uint32_t)n));
+	if (atomic_write(SNAPSHOT_PATH, SNAPSHOT_TMP_PATH, file, (uint32_t)n + 4) != 0)
+		sys_exit(94);
 	empty();
 	rc = snapshot_try_resume(5, &why);
 	if (rc)
@@ -149,7 +197,43 @@ int main(void)
 	if (back() != 0)
 		return 10;
 
+	/* A node in use that no list reaches. */
+	empty();
+	row_with_list(0, 3, 7);
+	tblpool[20].used = 1;
+	if (back() != 0)
+		return 11;
+
+	/* The same class and instance twice: the second row of the file
+	 * would overwrite the first and leave its list unreachable. */
+	empty();
+	row_with_list(0, 3, MIB_TBL_NONE);
+	for (int i = 0; i < MIB_ROWS; i++)
+		if (!mib[i].used) {
+			mib[i] = *mib_find(256, 0);
+			mib[i].tbl_head = MIB_TBL_NONE;
+			mib[i].tbl_count = 0;
+			break;
+		}
+	if (back() != 0)
+		return 12;
+
+	/* One byte short of, and one byte past, the sum of its parts. */
+	empty();
+	row_with_list(0, 3, 7);
+	if (back_resized(-1) != 0)
+		return 13;
+	empty();
+	row_with_list(0, 3, 7);
+	if (back_resized(1) != 0)
+		return 14;
+	/* And unchanged in size, so the rewrite itself is not the refusal. */
+	empty();
+	row_with_list(0, 3, 7);
+	if (back_resized(0) != 1)
+		return 15;
+
 	snapshot_invalidate();
-	out("ok    a snapshot with a queue count or a table list out of order is refused whole\n");
+	out("ok    a snapshot with a count, a list, a row or a length out of order is refused whole\n");
 	return 0;
 }

@@ -24,14 +24,45 @@ listed here.
   device was taken at its word. The count of upstream queues in it was
   used as an index by the rebuild that follows a resume, and one past the
   table (128) read and wrote outside it; a table-attribute list in it that
-  ran into itself was walked without end by the next MIB reset or Get
-  Next, on every respawn until the file was replaced. Such a snapshot is
-  now refused (`reason=bad_snapshot`) and omcid re-registers: a count past
-  its table, a length that is not the sum of the parts, a list that loops,
-  shares a row, runs through a free row or is not as long as its entity
-  says. A refusal no longer comes after the MIB rows of the refused file
+  ran into itself was walked without end by the next MIB reset or Get of
+  the table, on every respawn until the file was replaced. Such a snapshot
+  is now refused (`reason=bad_snapshot`) and omcid re-registers: a count
+  past its table, a length that is not the sum of the parts, a list that
+  loops, shares a row, runs through a free row or is not as long as its
+  entity says, a table node in use on no list (never freed again, so a
+  pool of them refused every table row), a row or a service saved twice
+  or a service outside its table, and more rows with a wide-row slot than
+  the pool has. A refusal no longer comes after the MIB rows of the refused file
   were loaded. omcid writes the snapshot itself, on tmpfs, so this took a
   damaged file to reach (#482).
+
+- Docs: `ACCESS.md` sets a password before it adds an SSH key through the
+  API, without putting it in the shell history, and `SETTINGS.md` no longer
+  offers adding a key from the web UI during the safe mode. A confd newer
+  than v1.19.0 adds no key while no password is saved in `confd.auth` or a
+  safe-mode boot opens `admin` / `admin` (#482). The recipe asks for the password twice, with a prompt, in plain
+  POSIX sh (`stty -echo`, so it runs in dash too). It says so when the two
+  entries differ, and `curl -f` shows a refused password before the key
+  step. The release notes, `README.md`, `BUILDING.md` and the SSH key and
+  backup rows of `SETTINGS.md` say the same: password first, then the key.
+  The README also says that `admin` / `admin` is what a stick with no
+  stored web UI credential answers to, not a freshly flashed one. The same
+  confd refuses `/api/backup` with the factory password, so "Backing up
+  from a host" says a password of its own is needed, and
+  `tools/config-backup.sh` prints the reason confd gives for a refusal
+  instead of the status alone.
+
+- omcid: a respawn gives the wide-row slots back to the rows the snapshot
+  says had one. It gave them to the first 32 wide rows in index order, so
+  with the pool full a row created behind one that had no slot lost its own
+  on resume, and its Sets past byte 96 answered result 9 (#491).
+  `resume-test.sh` covers it.
+
+- Docs: QUALIFICATION.md and COMPARISON.md say that the safe-mode login
+  after a power cycle and the timed exit have run on a test stick: the
+  boot counter with a reboot kept the saved login, a power cut opened
+  `admin`/`admin` on the web UI, and an unacknowledged safe mode rebooted
+  into a normal boot (#488).
 
 - Docs: `confd.auth` is described as odi-ui stores it from the release after
   v1.19.0 (AndreZiviani/odi-ui#134): `user:` and a salted PBKDF2 hash of
