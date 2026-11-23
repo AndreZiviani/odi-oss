@@ -260,6 +260,24 @@ void *qos_prog_state(uint32_t *len)
 	return &prog;
 }
 
+/* Whether `state`, as many bytes as qos_prog_state() says and not yet
+ * copied over prog, can be what a rebuild left. The queue count is the one
+ * field of it used as an index: us_qos_rebuild() walks usq_hw by it and
+ * moves the last entry down when one goes, so a count past USQ_MAX reads
+ * and writes outside the table. snapshot.c asks before it loads a
+ * snapshot; `state` is a place in its file buffer and need not be
+ * aligned. */
+int qos_prog_state_ok(const void *state)
+{
+	const uint8_t *s = (const uint8_t *)state +
+			   ((const uint8_t *)&prog.n - (const uint8_t *)&prog);
+	uint32_t n;
+
+	for (unsigned i = 0; i < sizeof n; i++)
+		((uint8_t *)&n)[i] = s[i];
+	return n <= USQ_MAX;
+}
+
 /* `omcicli dump qmap`, in the column shape of the stock dump: one row per
  * upstream queue programmed. QID is the dense ordinal, TCID the driver
  * T-CONT index; CIR/PIR are the rates of its GEM ports' upstream traffic

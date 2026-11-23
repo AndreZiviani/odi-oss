@@ -5,6 +5,23 @@ listed here.
 
 ## Unreleased
 
+- omcid: a resume snapshot is checked as a whole before any of it is
+  loaded. A snapshot with a valid CRC, the right version and the right
+  device was taken at its word. The count of upstream queues in it was
+  used as an index by the rebuild that follows a resume, and one past the
+  table (128) read and wrote outside it; a table-attribute list in it that
+  ran into itself was walked without end by the next MIB reset or Get of
+  the table, on every respawn until the file was replaced. Such a snapshot
+  is now refused (`reason=bad_snapshot`) and omcid re-registers: a count
+  past its table, a length that is not the sum of the parts, a list that
+  loops, shares a row, runs through a free row or is not as long as its
+  entity says, a table node in use on no list (never freed again, so a
+  pool of them refused every table row), a row or a service saved twice
+  or a service outside its table, and more rows with a wide-row slot than
+  the pool has. A refusal no longer comes after the MIB rows of the refused file
+  were loaded. omcid writes the snapshot itself, on tmpfs, so this took a
+  damaged file to reach (#482).
+
 - Host SerDes: a 2500BASE-X link that loses the sync while the stick
   keeps power is re-latched until it syncs again. With the host port set
   to 1G and back to 2.5G-baseX, or disabled and enabled, the lane did not
@@ -230,6 +247,7 @@ listed here.
   `apply.sh omci` reports a VLAN rebuild as `the ONU was not
   re-registered` instead of `stayed in O5`, which it does not know
   (`docs/SWITCH.md`, "GPON boot init").
+
 - Upgrade: `fwu_starter.sh` says in the page log what the fallback
   environment copy answered when it lets the write go on (its `sw_commit`,
   or no valid second copy), and warns, as `fwu.sh` does, when that copy
