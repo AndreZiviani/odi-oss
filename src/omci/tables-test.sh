@@ -11,7 +11,8 @@
 # clear, the row part masked under OMCC version 0xA0), class 281's IPv4
 # address table (add, replace by key, delete by zero addresses) and the
 # multicast flag of its CTP's downstream flow following it, class 310's
-# service package table, class 49's MAC filter table, and a respawn that
+# service package table, class 49's MAC filter table, a full table pool and
+# a full wide-row pool answering the Set with result 9, and a respawn that
 # resumes the rows from the snapshot.
 #
 # Run from src/omci, inside the toolchain image (make test-omci-tables):
@@ -291,6 +292,134 @@ send "$log" 7fff 48 0135 0001 "0200$(w 4001 "$R1B")"
 check "a true repeat of the Set under 7fff is the stored answer" \
       "$(grep -c -- '^-> 7fff280a0135' "$log")" "2"
 send "$log" 00b0 48 0135 0001 "0200c000"                    # clear, as it was
+
+# --------------------------------------------- a full pool fails the Set
+# The table pool holds MIB_TBL_NODES (255) rows for every table together; the
+# tables above are empty again. 309/2 takes all 255 rows of its dynamic ACL,
+# keys 1 to 255 (the key is 10 bits), sent as one batch.
+syncv() {        # syncv <log> <tci>: MIB data sync, as two hex digits
+	send "$1" "$2" 49 0002 0000 8000
+	answer "$1" "$2" | cut -c7-8
+}
+send "$log" 00c0 44 0135 0002 ""
+: > /tmp/tables-fill.txt
+k=1
+while [ "$k" -le 255 ]; do
+	frame "$(printf 'c%03x' "$k")" 48 0135 0002 \
+	      "0200$(pad "$(printf '%04x' $((0x4000 + k)))00fa0064e0000001e00000ff" 24)" \
+	      >> /tmp/tables-fill.txt
+	echo >> /tmp/tables-fill.txt
+	k=$((k + 1))
+done
+$Q cli/build/omcli --inject-file /tmp/tables-fill.txt > /dev/null 2>&1
+sync_send "$log"
+check "full pool: the 255 writes were all answered success" \
+      "$(grep -c -- '^-> c0[0-9a-f][0-9a-f]280a01350002 *00' "$log")" "255"
+send "$log" 00c1 49 0135 0002 0200
+check "full pool: the table holds 255 rows" \
+      "$(answer "$log" 00c1 | cut -c1-14)" "000200000017e8"
+s0=$(syncv "$log" 00c2)
+RX=$(pad 010000fa0064e0000001e00000ff 24)
+send "$log" 00c3 48 0135 0002 "0200$(w 4100 "$RX")"
+check "full pool: a new row is answered result 9, the table attribute failed" \
+      "$(answer "$log" 00c3 | cut -c1-10)" "0900000200"
+check "full pool: the refused row is not in the table" \
+      "$(send "$log" 00c4 49 0135 0002 0200; answer "$log" 00c4 | cut -c1-14)" \
+      "000200000017e8"
+check "full pool: the refused Set does not advance the MIB data sync" \
+      "$(syncv "$log" 00c5)" "$s0"
+check "full pool: the log names the attribute there was no room for" \
+      "$(grep -c 'no room for 0200' "$log")" "1"
+# A row with a key the table holds frees its node first: that still works.
+send "$log" 00c6 48 0135 0002 "0200$(w 4005 "$RX")"
+check "full pool: replacing the row of a held key is answered success" \
+      "$(answer "$log" 00c6 | cut -c1-2)" "00"
+# One Set, three attributes: IGMP function (attribute 2) before the new ACL
+# row and robustness (attribute 10) after it are stored, the row is not, and
+# the answer names only the table. The data sync moves by exactly one.
+s1=$(syncv "$log" 00cd)
+send "$log" 00c7 48 0135 0002 "4240$(printf '02')$(w 4101 "$RX")03"
+check "full pool: a Set with two more attributes fails only the table" \
+      "$(answer "$log" 00c7 | cut -c1-10)" "0900000200"
+send "$log" 00c8 49 0135 0002 4040
+check "full pool: the attributes before and after the failed row were stored" \
+      "$(answer "$log" 00c8 | cut -c7-10)" "0203"
+check "full pool: a partly stored Set advances the MIB data sync by one" \
+      "$(syncv "$log" 00c9)" "$(printf '%02x' $(( (0x$s1 % 255) + 1 )))"
+# A delete frees a node; the row that was refused fits now.
+send "$log" 00ca 48 0135 0002 "02008005"
+send "$log" 00cb 48 0135 0002 "0200$(w 4100 "$RX")"
+check "full pool: after a delete the new row is answered success" \
+      "$(answer "$log" 00cb | cut -c1-2)" "00"
+send "$log" 00cc 46 0135 0002 ""                        # Delete 309/2
+
+# The wide-row pool: MIB_WIDE_ROWS (32) large strings get their full 375
+# bytes; one past it keeps 96, so its Part4 (bytes 76-100) does not fit. A
+# Set of Part4 on the first is answered success, on the last result 9 with
+# Part4 (attribute 5) failed and the row marked truncated in the log.
+k=0
+while [ "$k" -le 32 ]; do
+	send "$log" "$(printf 'd%03x' "$k")" 44 009d "$(printf '%04x' $((0x100 + k)))" ""
+	k=$((k + 1))
+done
+check "wide pool: the log says the pool is full" \
+      "$(grep -c 'wide-row pool of 32 is full' "$log")" "1"
+P4=$(printf 'sip.example.org' | od -An -tx1 | tr -d ' \n')
+send "$log" 00d0 48 009d 0100 "0800$(pad "$P4" 25)"
+check "wide pool: Part4 of a row with its full width is answered success" \
+      "$(answer "$log" 00d0 | cut -c1-2)" "00"
+send "$log" 00d1 48 009d 0120 "0800$(pad "$P4" 25)"
+check "wide pool: Part4 of a row past the pool is answered result 9" \
+      "$(answer "$log" 00d1 | cut -c1-10)" "0900000800"
+check "wide pool: the log names the attribute there was no room for" \
+      "$(grep -c 'no room for 0800' "$log")" "1"
+send "$log" 00d2 48 009d 0120 "4000$(printf '03')"
+check "wide pool: an attribute in its first 96 bytes is still stored" \
+      "$(answer "$log" 00d2 | cut -c1-2)" "00"
+# A first Set of an instance not created yet adds its row; when nothing it
+# names is stored (Part4, no wide slot left) the row goes again, and a
+# Create of that instance is not answered "instance exists".
+send "$log" 00d7 48 009d 0130 "0800$(pad "$P4" 25)"
+check "wide pool: a first Set that stores nothing is answered result 9" \
+      "$(answer "$log" 00d7 | cut -c1-10)" "0900000800"
+send "$log" 00d8 44 009d 0130 ""
+check "wide pool: and leaves no row: the Create of that instance succeeds" \
+      "$(answer "$log" 00d8 | cut -c1-2)" "00"
+send "$log" 00d9 46 009d 0130 ""
+# A Create carries its attributes at once. The extended multicast profile
+# (65531) sets QueryInterval, QueryMaxResponseTime and the downstream IGMP
+# TCI (attributes 12, 13 and 16, past byte 96) at creation. With no wide
+# slot left it is created all the same with the attributes that fit; the
+# others are left out, logged, and a later Set of one answers result 9.
+XC=03000000000000000000020000007d00000064000000
+s2=$(syncv "$log" 00da)
+send "$log" 00d3 44 fffb 0001 "$XC"
+check "wide pool: a Create whose attributes do not all fit still succeeds, no mask on the wire" \
+      "$(answer "$log" 00d3 | cut -c1-6)" "000000"
+check "wide pool: and counts once in the MIB data sync" \
+      "$(syncv "$log" 00db)" "$(printf '%02x' $(( (0x$s2 % 255) + 1 )))"
+check "wide pool: the log names the attributes there was no room for" \
+      "$(grep -c 'no room in the MIB for 0019' "$log")" "1"
+send "$log" 00d4 49 fffb 0001 0040
+check "wide pool: an attribute of that Create that fits was stored" \
+      "$(answer "$log" 00d4 | cut -c7-8)" "02"
+send "$log" 00d5 48 fffb 0001 "00100000007d"
+check "wide pool: a Set of one left out answers result 9" \
+      "$(answer "$log" 00d5 | cut -c1-10)" "0900000010"
+send "$log" 00d6 46 fffb 0001 ""
+# With a wide slot free the same Create keeps every attribute: QueryInterval
+# reads back as sent (0x7d), so the loss above is the pool, not the class.
+send "$log" 00dc 46 009d 0100 ""                        # frees a wide slot
+send "$log" 00dd 44 fffb 0002 "$XC"
+send "$log" 00de 49 fffb 0002 0010
+check "wide pool: with a slot free a Create of 65531 keeps QueryInterval" \
+      "$(answer "$log" 00de | cut -c1-14)" "000010""0000007d"
+send "$log" 00df 46 fffb 0002 ""
+k=1
+while [ "$k" -le 32 ]; do
+	send "$log" "$(printf 'e%03x' "$k")" 46 009d "$(printf '%04x' $((0x100 + k)))" ""
+	k=$((k + 1))
+done
 
 # ------------------------------------------------------ respawn and resume
 # A 309 row and a 281 row survive a respawn through the snapshot.

@@ -18,7 +18,8 @@
 # (/proc/odi_ramlog_prev), /var/log/*, dmesg, the syslog ring (logread:
 # the event= lines omcid sends only to syslog), /etc/odi-build, /etc/version,
 # the readable /proc/odi_wdt files, the host-link state (host-link.txt),
-# uptime, /proc/meminfo, /proc/mounts, /proc/cmdline, ps, the U-Boot slot variables from both environment copies
+# uptime, /proc/meminfo, /proc/mounts, /proc/cmdline, ps, each process's resident
+# memory (rss.txt), df, the U-Boot slot variables from both environment copies
 # (nv getenv and nv fallback), a scrape of the exporter, the config store
 # (lastgood.xml, lastgood_hs.xml, odi.conf) with every secret value
 # replaced by REDACTED, and under pon/ the GPON and OMCI state: diag (ONU
@@ -149,6 +150,8 @@ SHORT_LEN=8
 # and subscriber config, VEIP, extended VLAN tagging operation.
 OMCI_CLASSES="256 257 11 45 47 84 130 262 263 266 268 277 278 280 281 309 310 329 171"
 GPON_PROC_DIR=${GPON_PROC_DIR:-/proc/odi_gpon}
+# Where rss.txt reads /proc/PID/status from; the test points it at a fixture.
+PROC_DIR=${PROC_DIR:-/proc}
 PONQ_BASE=0xf020a8	# PONQ_COUNT_MASK +0, through +239 (docs/SWITCH.md)
 PONQ_WORDS=240
 # The A2h pages whose upper half module/ dumps, in this order: 2 and 3 first,
@@ -236,6 +239,20 @@ grab meminfo.txt /proc/meminfo
 grab mounts.txt /proc/mounts
 grab cmdline.txt /proc/cmdline
 step ps.txt ps
+step df.txt df
+
+# rss.txt: the resident memory of each process, largest first, from
+# /proc/PID/status (busybox ps shows only VSZ). One RSS that grows between
+# two bundles is what /proc/meminfo alone cannot point at (#465). Kernel
+# threads have no VmRSS and are left out. The name is the rest of the Name:
+# line, so a name with a blank in it stays whole. The loop is one step, so
+# STEP_TIMEOUT_S bounds it and MANIFEST.txt has the status of the sort.
+RSS_AWK='$1 == "Name:" { sub(/^Name:[ \t]*/, ""); n = $0 } $1 == "VmRSS:" { r = $2 }
+	END { if (r != "") printf "%8s kB  %6s  %s\n", r, pid, n }'
+step rss.txt sh -c 'for d in "$1"/[0-9]*; do
+	[ -r "$d/status" ] || continue
+	awk -v pid="${d##*/}" "$2" "$d/status" 2>/dev/null
+done | sort -rn' sh "$PROC_DIR" "$RSS_AWK"
 
 : > "$b/nv.txt"
 for v in sw_active sw_commit sw_tryactive sw_version0 sw_version1; do
@@ -869,6 +886,7 @@ readme() {
 	| the host link to the router | host-link.txt |
 	| settings | config/ (redacted) |
 	| services and their logs | log/, ps.txt |
+	| memory: which process grew, a full /var | meminfo.txt, rss.txt, df.txt |
 
 	The event lines are documented in docs/TOOLS.md of odi-oss, in the
 	section "Link and provisioning events".

@@ -318,11 +318,15 @@ values: no operator's real limit is known here.
 
 The separate odi-ui project, fetched as a release. Serves the UI and its
 JSON API on the port given as its only argument (`confd 80` here), HTTP
-Basic with the credential in `/etc/config/confd.auth` (`user:password`;
-default `admin` / `admin` while that file is absent). It reads its pages and
-five `.tsv` tables (`keys`, `meta`, `consumers`, `features`, `settings`)
-from `/etc/confd/`, and any file of the same name in
-`/etc/config/confd/` overrides the shipped one; `settings.tsv` among them
+Basic with the credential in `/etc/config/confd.auth` (default `admin` /
+`admin` while that file is absent). The file holds
+`user:$pbkdf2-sha256$<iterations>$<salt>$<hash>` once a password was saved
+from the page or signed in with; a `user:password` line written by hand still
+works and is replaced by the hash at the first sign-in (not in safe mode or
+during a firmware trial). Releases up to odi-ui v1.19.0 keep the password as
+typed. It reads its pages and five `.tsv` tables (`keys`, `meta`,
+`consumers`, `features`, `settings`) from `/etc/confd/`, and any file of
+the same name in `/etc/config/confd/` overrides the shipped one; `settings.tsv` among them
 is the list of keys this image reads and what applying each costs. It runs
 `/etc/scripts/flash`, `/etc/scripts/apply.sh`, `/etc/scripts/fwu_starter.sh`,
 `/bin/diag`, `/bin/omcicli`, `/bin/nv`, `/bin/ping` and `/sbin/reboot` for
@@ -648,10 +652,12 @@ version when it sees no query, and the count shows as `above_version` in the
 state file and `igmpd -s`. The
 querier address (attribute 11) is stored and shown, nothing is sent from it.
 
-A Set or Create of ME 309 refuses, with result 9 and the attribute in the mask,
-a value G.988 does not define for the IGMP version (1, 2, 3, 16, 17), the IGMP
+A Set or Create of ME 309 refuses, with the attribute in the mask, a value
+G.988 does not define for the IGMP version (1, 2, 3, 16, 17), the IGMP
 function (0 to 2), immediate leave and unauthorized join behaviour (0, 1) and
-the upstream tag control (0 to 3). Every defined value is accepted whether or
+the upstream tag control (0 to 3). A Set answers result 9 and stores the
+other attributes; a Create answers result 3, parameter error, and creates
+nothing. Every defined value is accepted whether or
 not it is done: function 1 and 2 are stored and the multicast stays
 transparent.
 
@@ -1318,7 +1324,11 @@ interactive login) and in syslog (tag `slot-state`) -- `TRIAL BOOT`,
 STATE UNKNOWN`, each naming the copies and the command that clears it; when
 it is `0` the motd is empty. A failed check of the other slot adds an
 `OTHER SLOT BROKEN` line to both, an unreadable one `OTHER SLOT UNCHECKED` to
-the motd only. The file is first written with `other_slot_check=pending` and
+the motd only. On a safe-mode boot (`/var/run/safe-mode`) the motd also
+gets a `SAFE MODE` line, the first: the cause, the login, and while
+`exit=timed` the uptime at which the boot reboots by itself and the command
+that keeps it up (`safe-mode.sh ack`), or that it was acknowledged. It is
+written at boot and on the next run of the script, not on `ack`. The file is first written with `other_slot_check=pending` and
 replaced once the check has answered, so `trial-guard.sh` never waits on the
 flash read. The first nine keys keep their order: omcid reads `running` and
 `uncommitted` from the first 256 bytes.
@@ -1734,10 +1744,11 @@ See `docs/FLASHING.md`, "An erased config partition".
 ### `safe-mode.sh` -- the boot counter and the recovery boot
 
     /etc/scripts/safe-mode.sh status     this boot and the record, key=value
-    /etc/scripts/safe-mode.sh ack        acknowledge a safe-mode boot: removes its record
+    /etc/scripts/safe-mode.sh ack        acknowledge a safe-mode boot: removes its record, and keeps this boot up past the timed exit
     /etc/scripts/safe-mode.sh active     exit 0 on a safe-mode boot
     /etc/scripts/safe-mode.sh count      rcS only, right after the config partition is mounted
     /etc/scripts/safe-mode.sh no-config  rcS only, instead of count, when it is not: a safe-mode boot with no record
+    /etc/scripts/safe-mode.sh exit       spawned by a safe-mode boot: reboots at 1800 s of uptime unless acknowledged
 
 `count` adds one to `/etc/config/boot-count` and spawns `boot-ok`, which
 removes it once the uptime reaches 60 s. It also reads why the previous boot
@@ -1753,15 +1764,34 @@ before it (three with `HOST_AUTONEG=off`, or with `HOST_SERDES` at
 `2500basex` or `hisgmii`) is a safe-mode boot: it writes
 `/var/run/safe-mode` and the record `/etc/config/safe-mode`, removes
 `HOST_AUTONEG` when that was off and `HOST_SERDES` when it held another
-mode than `fiber1g`, and bind-mounts a RAM copy of
+mode than `fiber1g`, and, when a power cycle led into it (`login=default`),
+bind-mounts a RAM copy of
 `/etc/passwd` with root's password `admin` over the read-only one
 (`docs/SETTINGS.md`, "Recovery: the safe mode"). The flag in `/var/run` is
 what the rest reads: `host-serdes.sh` runs Fiber 1G, `host-autoneg.sh`
 applies nothing, the PON steps
-leave the laser off and skip `gponact` (`rcs-lib.sh`), `svc-dropbear.sh`
-offers passwords, and confd accepts `admin:admin`. `status` prints
+leave the laser off and skip `gponact` (`rcs-lib.sh`), and with
+`login=default` `svc-dropbear.sh`
+offers passwords and confd accepts `admin:admin`; with `login=stored` (the
+stick entered the safe mode by itself) both keep what is saved (confd
+needs a release that reads `login=`; `docs/SETTINGS.md`, "The login").
+Every safe-mode boot spawns `exit`, which reboots it at 1800 s
+of uptime unless `ack` changed `exit=timed` to `exit=held` in the flag
+first. The two are serialised by a lock (`flock` on
+`/var/run/safe-mode.lock`; an `ack` that does not get it in 5 s exits 1):
+the exit claims the flag
+(`exit=exiting`) before it reboots, and an `ack` after that exits 1 and
+keeps the record. The exit waits for a running firmware write, 1800 s more
+at most, and holds the writer lock of `fwu_starter.sh` from its claim
+through the reboot, so none starts then: busybox `reboot` returns at once,
+so the exit stays alive with the lock until init kills it, 120 s at most
+(`REBOOT_HOLD_S`). `status` prints
 `active=0|1` with the flag's fields as `now_*` (`now_cause=` is
-`short_boots`, `watchdog` or `config`), `record=0|1` with the record's as
+`short_boots`, `watchdog` or `config`; `now_prev=` the previous boot's
+reason, `now_login=default|stored`, `now_root_password=default|stored|failed`,
+`now_exit_at=` the uptime of the timed exit,
+`now_exit=timed|held|exiting|failed`),
+`record=0|1` with the record's as
 `record_*`, `boot_count` while there is one and `wdt_count` likewise.
 
 Its events, to the kernel log at notice: `safe-mode: event=boot_count
@@ -1770,8 +1800,19 @@ uptime=S` on every boot (the uptime is how early the count lands on a given
 stick; `prev` is the previous boot's `reason=`, `none` without a ramlog),
 `event=safe_mode cause=short_boots|watchdog|config short_boots=N
 wdt_resets=N cleared=HOST_AUTONEG|HOST_SERDES|HOST_AUTONEG,HOST_SERDES|none|failed
-root_password=default|failed`, and
-`event=safe_mode_ack`.
+root_password=default|stored|failed prev=REASON login=default|stored
+exit_at=S`, `event=safe_mode_ack` (the record removed),
+`event=safe_mode_hold` (an acknowledgement kept this boot up),
+`event=safe_mode_exit_wait state=postponed|gave_up` (the timed exit waits
+for a firmware write, or stopped waiting), `event=safe_mode_exit cause=...
+uptime=S` right before the reboot of the timed exit,
+`event=safe_mode_exit_failed` (the timed exit gave up without a reboot: a
+sleep failed, the uptime could not be read, the lock was never free, the
+reboot failed, or no reboot came 120 s after `reboot` answered; the flag then says `exit=failed`, except when the lock
+could not be taken to write it),
+and `event=safe_mode_failed` (the flag could not be written: not a
+safe-mode boot, `count` and `no-config` exit 1, and the line says what
+became of the default root account file).
 
 ### `diag-bundle.sh` -- the diagnostics bundle
 
@@ -1782,6 +1823,7 @@ prints OUT: the previous boot ramlog (`/proc/odi_ramlog_prev`), the tail of
 every `/var/log` file (256 KB each, 1 MB in all), `dmesg`, `/etc/odi-build`,
 `/etc/version`, `/proc/odi_wdt/{watchdog_flag,userland_ok,clients}`,
 `uptime`, `/proc/meminfo`, `/proc/mounts`, `/proc/cmdline`, `ps`,
+the resident memory of each process from `/proc/PID/status` (`rss.txt`), `df`,
 `sw_active`, `sw_commit`, `sw_tryactive` and `sw_version0/1` from both
 environment copies (`nv getenv` and `nv fallback`), one scrape of the
 exporter, and the config store. `MANIFEST.txt` lists every step with its
@@ -1862,12 +1904,12 @@ value stays empty, so "not set" still shows):
 - and any key whose name contains `PASS`, `PWD`, `PSK`, `SECRET`, `TOKEN`,
   `KEY`, `COMMUNITY` or `CRED`.
 
-Then every secret value found that way, plus the web UI password from
-`/etc/config/confd.auth`, is scrubbed from every file in the bundle, as text
-and as upper- and lowercase hex, run together and space-separated, in case a
-log quoted one; values shorter than three characters are redacted in the
-config copies only. `confd.auth`, the dropbear keys and `/etc/passwd` are
-never collected. A value the store keeps XML-escaped is scrubbed in its
+Then every secret value found that way, plus what `/etc/config/confd.auth`
+holds after the username (the web UI password, or its hash), is scrubbed
+from every file in the bundle, as text and as upper- and lowercase hex, run
+together and space-separated, in case a log quoted one; values shorter
+than three characters are redacted in the config copies only.
+`confd.auth`, the dropbear keys and `/etc/passwd` are never collected. A value the store keeps XML-escaped is scrubbed in its
 decoded spelling too, the one omcid and the logs use. Any step of the
 scrub that fails (a config copy, a value list, a sort, the hex of a value,
 a rule, the sed script, a file that cannot be rewritten) fails the bundle,

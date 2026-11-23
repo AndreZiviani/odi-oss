@@ -412,7 +412,8 @@ static uint8_t *wide_alloc(void)
 		}
 	}
 	/* Exhausted: the row keeps the 96 bytes it always had and says so
-	 * (`truncated`, once an attribute does not fit). */
+	 * (`truncated`, once an attribute does not fit, and that attribute
+	 * failed in the answer to the OLT). */
 	if (!warned) {
 		warned = 1;
 		out_fmt("   wide-row pool of %d is full; later wide rows are truncated\n",
@@ -740,8 +741,10 @@ static uint8_t omcc_version(void)
 }
 
 /* Add `e` as a new head row of attribute k, after removing the row with the
- * same `key` (none to remove when `key` is 0). */
-static void tbl_put(struct mib_row *r, unsigned k, const uint8_t *e, uint16_t w,
+ * same `key` (none to remove when `key` is 0). Returns -1, with the table as
+ * it was, when the pool has no free node: a row with the same key frees the
+ * node the new one takes, so only a row that adds to the table can fail. */
+static int tbl_put(struct mib_row *r, unsigned k, const uint8_t *e, uint16_t w,
 		    int (*key)(const uint8_t *, const uint8_t *, uint16_t))
 {
 	if (key)
@@ -756,14 +759,15 @@ static void tbl_put(struct mib_row *r, unsigned k, const uint8_t *e, uint16_t w,
 		tblpool[n].next = r->tbl_head;
 		r->tbl_head = n;
 		r->tbl_count++;
-		return;
+		return 0;
 	}
 	r->truncated = 1;                    /* pool exhausted; say so */
+	return -1;
 }
 
 /* One OLT Set of table attribute k: the row in `src`, applied by the rule of
- * tbl_defs[]. */
-static void tbl_set(struct mib_row *r, const struct omci_class *c, unsigned k,
+ * tbl_defs[]. Returns -1 when the row was not stored for lack of a node. */
+static int tbl_set(struct mib_row *r, const struct omci_class *c, unsigned k,
 		    const uint8_t *src)
 {
 	uint16_t w = attr_width(c, k);
@@ -782,7 +786,7 @@ static void tbl_set(struct mib_row *r, const struct omci_class *c, unsigned k,
 				del = 0;
 		if (del) {
 			tbl_remove(r, k, key_evtocd, e, w);
-			return;
+			return 0;
 		}
 		/* Replaced in place, not moved to the head: the vendor
 		 * reassigns words 1..3 of the node it found. */
@@ -790,10 +794,9 @@ static void tbl_set(struct mib_row *r, const struct omci_class *c, unsigned k,
 			if (tblpool[n].attr == k && key_evtocd(tblpool[n].data, e, w)) {
 				for (int i = 8; i < 16; i++)
 					tblpool[n].data[i] = e[i];
-				return;
+				return 0;
 			}
-		tbl_put(r, k, e, w, 0);
-		return;
+		return tbl_put(r, k, e, w, 0);
 	}
 	case TBL_CTRL:
 	case TBL_CTRL_PART: {
@@ -803,56 +806,52 @@ static void tbl_set(struct mib_row *r, const struct omci_class *c, unsigned k,
 		if (kind == TBL_CTRL || omcc_version() < 0xa1)
 			e[0] &= (uint8_t)~0x38;  /* no row part */
 		if (set == 1)
-			tbl_put(r, k, e, w, kind == TBL_CTRL ? key_ctrl : key_ctrl_part);
+			return tbl_put(r, k, e, w, kind == TBL_CTRL ? key_ctrl : key_ctrl_part);
 		else if (set == 2)
 			tbl_remove(r, k, key_ctrl, e, w);
 		else if (set == 3)
 			tbl_remove(r, k, 0, e, w);
-		return;
+		return 0;
 	}
 	case TBL_MCADDR:
 		for (uint16_t i = 4; i < w; i++)
 			if (e[i])
 				zero = 0;
-		if (zero)
-			tbl_remove(r, k, key_mcaddr, e, w);
-		else
-			tbl_put(r, k, e, w, key_mcaddr);
-		return;
+		if (!zero)
+			return tbl_put(r, k, e, w, key_mcaddr);
+		tbl_remove(r, k, key_mcaddr, e, w);
+		return 0;
 	case TBL_MACFILT:
 		switch (e[1] >> 6) {
 		case 2:
-			tbl_put(r, k, e, w, key_index);
-			return;
+			return tbl_put(r, k, e, w, key_index);
 		case 0:
 			tbl_remove(r, k, key_index, e, w);
-			return;
+			return 0;
 		case 1:
 			tbl_remove(r, k, 0, e, w);
-			return;
+			return 0;
 		default:
-			return;
+			return 0;
 		}
 	case TBL_INDEX:
 		if (e[0])
-			tbl_put(r, k, e, w, key_index);
-		else
-			tbl_remove(r, k, 0, e, w);
-		return;
+			return tbl_put(r, k, e, w, key_index);
+		tbl_remove(r, k, 0, e, w);
+		return 0;
 	case TBL_INDEX16:
 		if (e[0] || e[1])
-			tbl_put(r, k, e, w, key_index16);
-		else
-			tbl_remove(r, k, 0, e, w);
-		return;
+			return tbl_put(r, k, e, w, key_index16);
+		tbl_remove(r, k, 0, e, w);
+		return 0;
 	case TBL_DIALPLAN:
 		if (e[1] == 1)
-			tbl_put(r, k, e, w, key_index);
+			return tbl_put(r, k, e, w, key_index);
 		else if (e[1] == 0)
 			tbl_remove(r, k, key_index, e, w);
-		return;
+		return 0;
 	default:
-		return;
+		return 0;
 	}
 }
 
@@ -1016,13 +1015,15 @@ int mib_count(void)
 /* Write the attributes named by `mask` from `src` into the row, except the
  * ones also in `skip`: those still take their bytes from the frame (the
  * values of the attributes after them sit behind), but are not stored.
- * Returns the number of bytes consumed, so a caller can tell a short frame
- * from a full one. */
+ * Returns the mask of the attributes that were to be stored and were not
+ * for lack of room: one past the row's bytes (the wide-row pool was full
+ * when the row was added) or a table row with no free node in the pool. The
+ * OLT is told about those (result 9 for a Set). */
 uint16_t mib_write(struct mib_row *r, const struct omci_class *c,
 			  uint16_t mask, uint16_t skip, const uint8_t *src,
 			  uint16_t srclen)
 {
-	uint16_t used = 0;
+	uint16_t used = 0, lost = 0;
 
 	/* Snapshot first: the handlers that run after this need the row as it
 	 * was, and taking the copy per attribute would miss the ones this Set
@@ -1043,22 +1044,30 @@ uint16_t mib_write(struct mib_row *r, const struct omci_class *c,
 			used = (uint16_t)(used + w);
 			continue;
 		}
+		/* A table attribute also accumulates. The flat copy below is
+		 * still made, as the vendor's generic store keeps it beside
+		 * the plugin's list; a Get answers the list. A row the pool
+		 * has no node for changes neither. */
+		if (tbl_kind(c, k) && tbl_set(r, c, k, src + used) < 0) {
+			lost |= (uint16_t)(1u << (16 - k));
+			used = (uint16_t)(used + w);
+			continue;
+		}
 		off = attr_offset(c, k);
 		if (off < 0 || off + w > row_cap(r)) {
 			r->truncated = 1;
+			/* A table attribute is held in its list, which a Get
+			 * answers; only the flat copy is missing then. */
+			if (!tbl_kind(c, k))
+				lost |= (uint16_t)(1u << (16 - k));
 		} else {
 			for (uint16_t i = 0; i < w; i++)
 				row_put(r, (unsigned)off + i, src[used + i]);
 			r->written |= (uint16_t)(1u << (16 - k));
 		}
-		/* A table attribute also accumulates. The flat copy above is
-		 * still made, as the vendor's generic store keeps it beside
-		 * the plugin's list; a Get answers the list. */
-		if (tbl_kind(c, k))
-			tbl_set(r, c, k, src + used);
 		used = (uint16_t)(used + w);
 	}
-	return used;
+	return lost;
 }
 
 int mib_changed(const struct mib_row *r, const struct omci_class *c, unsigned k)

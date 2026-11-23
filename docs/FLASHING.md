@@ -281,6 +281,14 @@ at a time and verify each before the next:
 
     ./fwu.sh <slot> odi-oss-<version>.tar
 
+In a safe-mode boot, acknowledge it first (`/etc/scripts/safe-mode.sh ack`,
+or the banner button): a safe-mode boot nobody acknowledged reboots by
+itself at 1800 s of uptime (`docs/SETTINGS.md`, "The timed exit"). That
+exit waits for a write started from the Firmware page (`fwu_starter.sh`,
+through its writer lock), but `fwu.sh` run by hand takes no lock and is not
+seen, and a slot armed with
+`sw_tryactive` would be tried by that reboot with nobody watching.
+
 `fwu.sh` is ours, and it:
 
 - refuses to write the slot it is currently running from, cross-checked

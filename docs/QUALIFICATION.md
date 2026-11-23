@@ -7,9 +7,9 @@ It exists so that "works" and "supported" are never read into a row that
 only has a unit test behind it.
 
 The firmware is written for one board, the ODI DFP-34X-2C2 (see the README,
-"Supported hardware"). This page does not widen that list. It records the
-evidence for the cases that have come up, including boards the README does
-not list, so a reader can see what a green row stands on.
+"Supported hardware", which lists it and the boards users have reported
+on). This page records the evidence for every case that has come up, so a
+reader can see what a green row stands on.
 
 ## States
 
@@ -42,7 +42,7 @@ tagged), with the stock firmware kept in the other slot.
 | board | state | last checked / evidence | notes |
 |---|---|---|---|
 | DFP-34X-2C2, hardware v06 | Maintainer-tested | ISP2: `main` after v1.16.0-beta.3 (2026-11-10), v1.15.0 (2026-11-02). ISP1: v1.16.0-beta.3 content plus the PON-ID decoding (2026-11-10) | The reference board. |
-| DFP-34X-2C2 sold as the HSGQ XPON stick, hardware v08 | Community-reported | [#229](https://github.com/AndreZiviani/odi-oss/issues/229), [#231](https://github.com/AndreZiviani/odi-oss/issues/231): v1.13.0 and v1.14.0 pre-releases, then v1.15.0 held 2.5G for about 3 h with O5 and the router showing diagnostics. [#300](https://github.com/AndreZiviani/odi-oss/issues/300): v1.15.0 carrying the reporter's household, PPPoE, IPTV and voice, the router reading diagnostics (2026-11-07). [#369](https://github.com/AndreZiviani/odi-oss/issues/369): v1.16.0 at 2.5G with IPTV, a second reporter (2026-11-14) | Not in the README's supported list. Same U-Boot, environment and flash layout as the v06; nothing on the board tells the two apart, so the settings that differ are keys (`HOST_SERDES`, `SFP_HOST_DDM`). Never run by the maintainer. |
+| DFP-34X-2C2 sold as the HSGQ XPON stick, hardware v08 | Community-reported | [#229](https://github.com/AndreZiviani/odi-oss/issues/229), [#231](https://github.com/AndreZiviani/odi-oss/issues/231): v1.13.0 and v1.14.0 pre-releases, then v1.15.0 held 2.5G for about 3 h with O5 and the router showing diagnostics. [#300](https://github.com/AndreZiviani/odi-oss/issues/300): v1.15.0 carrying the reporter's household, PPPoE, IPTV and voice, the router reading diagnostics (2026-11-07). [#369](https://github.com/AndreZiviani/odi-oss/issues/369): v1.16.0 at 2.5G with IPTV, a second reporter (2026-11-14) | Listed in the README as Community-reported. Same U-Boot, environment and flash layout as the v06; nothing on the board tells the two apart, so the settings that differ are keys (`HOST_SERDES`, `SFP_HOST_DDM`). Never run by the maintainer. |
 | DFP-34X-2C3 (SC/APC) | Community-reported | [#241](https://github.com/AndreZiviani/odi-oss/issues/241): v1.14.0 unmodified, installed from stock `V1.1.4-250620`, trial, committed; O5, full OMCI provisioning, IPv4 and IPv6. [#42](https://github.com/AndreZiviani/odi-oss/issues/42): a 2C3 hardware v2.0 on v1.2.2-beta.1 and beta.2, committed. [#299](https://github.com/AndreZiviani/odi-oss/issues/299): v1.15.0 flashed from the stock web page | A diagnostics bundle from #241 compared with a 2C2's on the same release: same flash layout, memory and laser driver. That makes it a 2C2 with another connector; it is not a hardware run here. The image still calls it a 2C2. |
 | Luleey LL-XS2510 | Community-reported | [#302](https://github.com/AndreZiviani/odi-oss/issues/302), [#319](https://github.com/AndreZiviani/odi-oss/issues/319), [#321](https://github.com/AndreZiviani/odi-oss/issues/321): v1.15.0 and v1.16.0-beta.1 trial-booted from stock `V1.0.2-241026`; O5, full OMCI provisioning, PPPoE, with `HOST_SERDES=2500basex` set from the stock shell before the first boot | A rebrand on the same SoC (RTL9602C) and laser driver (id 0x6a); its host side runs at 2.5 Gb/s. The reporter's diagnostics bundles show the same flash layout. Never run by the maintainer. |
 | Other ODI models, other RTL9601/RTL9602C sticks, rebrands | Untested | none | Not supported. Open an issue with the model, the stock version and the `mtdparts` line (see "Adding a report"). |
@@ -119,6 +119,8 @@ a directory is given. A feature that is **off by default** says so.
 | Safe mode when the config partition is not mounted | Host-tested | `safe_mode_test.sh` | |
 | What safe mode clears: `HOST_AUTONEG=off`, a `HOST_SERDES` mode other than `fiber1g`, `OMCI_UNI_LOCK=1` | Host-tested | `safe_mode_test.sh`; only `HOST_AUTONEG` was seen on a stick | A safe-mode boot also keeps the PON off and accepts `admin`/`admin` for that boot only. |
 | Safe mode with `HOST_SERDES` set, or with `OMCI_UNI_LOCK=1` | Untested | none | |
+| Safe mode login: the default password only after a power cycle (`login=default`), the saved one otherwise (`login=stored`) | Host-tested | `safe_mode_test.sh`, every cause against every `reason=`; the confd half in the odi-ui smoke test. The script alone was also run under stubs on a test stick, from RAM (its busybox, its real `/proc/odi_ramlog_prev`, which read `reason=reboot`): five cases, all as expected | That run is the script under stubs on a stick, not a safe-mode boot. Not seen on a stick: that five real power cycles read `power` or `unknown` and never a recorded restart, what a short power cut leaves in the DRAM, and the web UI half, which needs a confd release this image does not pin yet. |
+| Safe mode timed exit (reboot at 1800 s unless acknowledged, waits for a firmware write) | Host-tested | `safe_mode_test.sh`, with a stub `reboot`, a stub `sleep` and a stand-in for the writer lock | Not seen on a stick: the reboot itself, `reason=reboot` after it, the wait behind a real `fwu.sh`, what it boots with a trial armed, and the cycle with a fault that persists. |
 
 ### Line and data path
 

@@ -955,7 +955,7 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 	}
 	if (mt == OMCI_MT_CREATE) {
 		struct mib_row *r;
-		uint16_t mask;
+		uint16_t mask, lost;
 
 		if (!c && fake_unknown(fd, tid, f, mt))
 			return;
@@ -970,13 +970,15 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 			return;
 		}
 		/* A multicast profile naming a value G.988 does not define for
-		 * a few-valued attribute is not created: result 9 and the
-		 * attributes at fault (mcast.c says which are judged). */
+		 * a few-valued attribute is not created: result 3, parameter
+		 * error, with the attributes at fault in the execution mask
+		 * (mcast.c says which are judged). A Create response has no
+		 * result 9: G.988 uses the mask only with result 3. */
 		if (c && cls == 309) {
 			uint16_t bad = mcast_value_reject(c, create_mask(c), f + 8, 32);
 
 			if (bad) {
-				body[0] = OMCI_ERR_ATTR_FAILED;
+				body[0] = OMCI_ERR_BAD_PARAM;
 				nl_put16(body + 1, bad);
 				send_resp(fd, tid, f, body, 3);
 				out_fmt("-> refused: undefined value in %04x\n", (long)bad);
@@ -984,8 +986,6 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 			}
 		}
 		r = c ? mib_add(cls, inst) : 0;
-		if (r)
-			pm_create(cls, inst);
 		if (!r) {
 			body[0] = c ? OMCI_ERR_CMD : OMCI_ERR_UNKNOWN_ME;
 			send_resp(fd, tid, f, body, 1);
@@ -999,7 +999,18 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * order shifts everything after it: the port id came out as
 		 * 4095 before this. */
 		mask = create_mask(c);
-		mib_write(r, c, mask, 0, f + 8, 32);
+		lost = mib_write(r, c, mask, 0, f + 8, 32);
+		/* An attribute the store had no room for (the wide-row or the
+		 * table pool full) is left out and the entity is created all
+		 * the same, as a Set stores the attributes that fit, so the
+		 * rest of the OLT's provisioning can refer to it. A Create
+		 * answer names no failed attribute next to result 0, so the
+		 * log does, and a later Set of one answers result 9. */
+		if (lost) {
+			mask &= (uint16_t)~lost;
+			out_fmt("   no room in the MIB for %04x\n", (long)lost);
+		}
+		pm_create(cls, inst);
 		if (cls == OMCI_ME_GEM_PORT_CTP || cls == OMCI_ME_TCONT) {
 			out_fmt("   create mask %04x raw", (long)mask);
 			for (int i = 8; i < 28; i++) {
@@ -1032,9 +1043,13 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		return;
 	}
 	if (mt == OMCI_MT_SET) {
+		/* Whether this Set adds the row (an autonomous entity's first
+		 * Set): one that then stores nothing takes it out again. */
+		int fresh = c && !mib_find(cls, inst);
 		struct mib_row *r = c ? mib_add(cls, inst) : 0;
 		uint16_t mask = nl_get16(f + 8);
 		uint16_t failed = r ? set_reject_mask(c, mask) : 0;
+		uint16_t lost = 0;
 		int done;
 
 		/* The same for a Set of a multicast profile: the attribute with
@@ -1048,12 +1063,18 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		 * only at Create) are skipped, not stored, and named in the
 		 * answer; the rest of the Set goes through. */
 		if (r)
-			mib_write(r, c, mask, failed, f + 10, 30);
+			lost = mib_write(r, c, mask, failed, f + 10, 30);
+		/* An attribute the store had no room for failed as well: the
+		 * OLT is told (result 9, the attribute in the failed mask)
+		 * instead of being answered success for a value that is not
+		 * kept. */
+		failed |= lost;
 		mask &= (uint16_t)~failed;
 		/* Everything but a Set that stored nothing because every
 		 * attribute it named was refused. */
 		done = r && (!failed || mask);
-		body[0] = !r ? OMCI_ERR_UNKNOWN_ME :
+		/* No row for a class the model knows: the MIB is full. */
+		body[0] = !r ? (c ? OMCI_ERR_CMD : OMCI_ERR_UNKNOWN_ME) :
 			  failed ? OMCI_ERR_ATTR_FAILED : OMCI_OK;
 		/* Result 9 carries the unsupported-optional mask (none: the
 		 * model has no verified notion of it) and the failed mask. */
@@ -1077,9 +1098,19 @@ void handle(int fd, uint32_t tid, const uint8_t *f)
 		}
 		out_fmt("-> set mask %04x%s", (long)mask,
 			r && r->truncated ? " (row truncated)" : "");
-		if (failed)
-			out_fmt(", refused %04x (read-only or unknown)", (long)failed);
+		if (failed & ~lost)
+			out_fmt(", refused %04x (read-only or unknown)",
+				(long)(failed & ~lost));
+		if (lost)
+			out_fmt(", no room for %04x", (long)lost);
+		if (!r && c)
+			out(", no room in the MIB");
 		out_char('\n');
+		/* A Set that stored nothing leaves the MIB as it was: a row it
+		 * added would be uploaded, snapshotted and make a later Create
+		 * of the instance answer "instance exists". */
+		if (r && !done && fresh)
+			mib_del(cls, inst);
 		return;
 	}
 	if (mt == OMCI_MT_DELETE) {
