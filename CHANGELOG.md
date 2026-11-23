@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- CI: `make cppcheck` runs cppcheck over every tracked C file, and CI runs
+  it as its own job on ubuntu-24.04 (#482). Of the nine findings on main,
+  one was a test that read `rec.log[-1]` when the action it looked for was
+  missing (`test/odi_gpon_test.c`), and `qos_prog_state_ok()` now takes the
+  offset of the queue count with `__builtin_offsetof` instead of subtracting
+  two pointers; omcid builds byte-identical. The other seven are not bugs and
+  carry an inline suppression with the reason.
+
 - omcid: a snapshot save that fails removes the older snapshot. It stayed on
   disk, so a respawn after a full `/var/run` resumed from a MIB older than
   the one the OLT had been answered for. The respawn now registers afresh.
