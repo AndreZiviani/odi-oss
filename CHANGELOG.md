@@ -10,12 +10,15 @@ listed here.
   device was taken at its word. The count of upstream queues in it was
   used as an index by the rebuild that follows a resume, and one past the
   table (128) read and wrote outside it; a table-attribute list in it that
-  ran into itself was walked without end by the next MIB reset or Get
-  Next, on every respawn until the file was replaced. Such a snapshot is
-  now refused (`reason=bad_snapshot`) and omcid re-registers: a count past
-  its table, a length that is not the sum of the parts, a list that loops,
-  shares a row, runs through a free row or is not as long as its entity
-  says. A refusal no longer comes after the MIB rows of the refused file
+  ran into itself was walked without end by the next MIB reset or Get of
+  the table, on every respawn until the file was replaced. Such a snapshot
+  is now refused (`reason=bad_snapshot`) and omcid re-registers: a count
+  past its table, a length that is not the sum of the parts, a list that
+  loops, shares a row, runs through a free row or is not as long as its
+  entity says, a table node in use on no list (never freed again, so a
+  pool of them refused every table row), a row or a service saved twice
+  or a service outside its table, and more rows with a wide-row slot than
+  the pool has. A refusal no longer comes after the MIB rows of the refused file
   were loaded. omcid writes the snapshot itself, on tmpfs, so this took a
   damaged file to reach (#482).
 
