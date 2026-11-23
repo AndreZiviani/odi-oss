@@ -68,7 +68,12 @@ static void bytes_zero(unsigned char *dst, size_t n)
 void state_restore(void)
 {
 	static unsigned char *pristine;
+	/* The linker puts __start_ and __stop_ at the two ends of one section,
+	 * so the difference is its size, whatever cppcheck sees in two
+	 * separate declarations. */
+	/* cppcheck-suppress comparePointers */
 	size_t dn = (size_t)(__stop_omcid_data - __start_omcid_data);
+	/* cppcheck-suppress comparePointers */
 	size_t bn = (size_t)(__stop_omcid_bss - __start_omcid_bss);
 
 	if (!pristine) {

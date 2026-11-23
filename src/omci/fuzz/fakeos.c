@@ -392,7 +392,7 @@ long sys_create(const char *path, int flags, int mode)
 		}
 		fd = fd_new(FD_DIR);
 		if (fd >= 0)
-			strcpy(fk.fds[fd - FK_FD_BASE].dir, path);
+			strcpy(fd_get((int)fd)->dir, path);
 		return fd;
 	}
 	if (!f)
@@ -403,9 +403,11 @@ long sys_create(const char *path, int flags, int mode)
 		f->len = 0;
 	fd = fd_new(FD_FILE);
 	if (fd >= 0) {
-		fk.fds[fd - FK_FD_BASE].file = (int)(f - fk.files);
-		fk.fds[fd - FK_FD_BASE].gen = f->gen;
-		fk.fds[fd - FK_FD_BASE].flags = flags;
+		struct fk_fd *d = fd_get((int)fd);
+
+		d->file = (int)(f - fk.files);
+		d->gen = f->gen;
+		d->flags = flags;
 	}
 	return fd;
 }
