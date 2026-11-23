@@ -698,7 +698,7 @@ check "failed activation, new LOID: the first one failed" "done failed" "$(st st
 store 1 11 0 "$(val LOID_OLD actfail4)
 $(val LOID actfail4)
 "
-echo live > "$CONFIRM"
+echo "live $pid" > "$CONFIRM"
 old_id=$(st id)
 kill -HUP "$pid"
 wait_done "$old_id" 15 || bad "failed activation, new LOID by omci-live: never finished"
@@ -1000,14 +1000,14 @@ check "held: still held on the next signal" "held" "$(st result)"
 
 # 4. Confirmed: the change goes through. O7 now, the OLT disabled it.
 gpon /tmp/rl-gpon-isp1 7 "0"
-echo confirm > "$CONFIRM"
+echo "confirm $pid" > "$CONFIRM"
 change ODIT00000004
 check "confirmed: re-registered, O7 is a refusal at once" "refused 0 3" "$(st result) $(st refusals) $(st streak)"
 [ ! -e "$CONFIRM" ] && ok "confirmed: the confirmation is used up" || bad "confirmed: the file is still there"
 
 # 5. A revert is recorded and skipped by the count; accepted resets it.
 gpon /tmp/rl-gpon-isp1 5 "0"
-echo revert > "$CONFIRM"
+echo "revert $pid" > "$CONFIRM"
 change ODIT00000001
 check "revert: recorded as one" "r no_services 0 GPON_SN" "$(rr_line 4)"
 check "revert: the count is unchanged" "3" "$(st streak)"
@@ -1018,13 +1018,13 @@ start_omcid "$log" -g /tmp/rl-gpon-isp1 -j 4
 check "restart: the record is read back" "4 recorded  refused in a row 3" \
 	"$(rr_state | sed 's/  accepted.*//')"
 check "restart: the hold file is written again" "streak 3" "$(cat "$HOLDF" 2>/dev/null)"
-echo confirm > "$CONFIRM"
+echo "confirm $pid" > "$CONFIRM"
 change ODIT00000005
 check "accepted: the run of refusals ends" "no_services 0" "$(st result) $(st streak)"
 check "accepted: five lines" "5" "$(wc -l < "$REREG" | tr -d ' ')"
 [ ! -e "$HOLDF" ] && ok "accepted: the hold file is gone" || bad "accepted: the hold file is still there"
 # A confirmation left for a reload that does not need one is taken anyway.
-echo confirm > "$CONFIRM"
+echo "confirm $pid" > "$CONFIRM"
 change ODIT00000005
 [ ! -e "$CONFIRM" ] && ok "unused confirmation: taken by the reload" || bad "unused confirmation: left behind"
 
@@ -1033,7 +1033,7 @@ change ODIT00000005
 # earlier is not applied with it, nor anything else, and nothing is
 # recorded. The next plain reload applies it.
 : > "$INITLOG"
-echo live > "$CONFIRM"
+echo "live $pid" > "$CONFIRM"
 change ODIT00000006
 check "live: deferred" "done deferred identity deferred" "$(st state) $(st result) $(st changed) $(st action)"
 check "live: no driver verb" "0" "$(wc -c < "$INITLOG" | tr -d ' ')"
@@ -1081,6 +1081,28 @@ kill -HUP "$pid"
 wait_done "$old_id" 15 || bad "trial file gone: the reload did not finish"
 check "trial file gone: back to the stored serial" "gpondeact gponsn ODIT00000001 gponact" \
 	"$(tr '\n' ' ' < "$INITLOG" | sed 's/ $//')"
+stop_omcid
+
+# ------------------------------------------------ 2c2. a confirmation for another omcid
+# apply.sh names the omcid it signals. A confirmation left for an omcid that
+# died before its reload names another pid: it confirms nothing here and
+# defers like omci-live, rather than re-registering for the changed serial
+# number as a confirmed reload would.
+clean_state
+store 1 11 0
+gpon /tmp/rl-gpon-isp1 5 "0"
+log=/tmp/rl-oldconfirm.log
+start_omcid "$log" -g /tmp/rl-gpon-isp1
+: > "$INITLOG"
+hs_sn ODIT00000009
+echo "confirm $((pid + 1))" > "$CONFIRM"
+old_id=$(st id)
+kill -HUP "$pid"
+wait_done "$old_id" 15 || bad "other pid: the reload did not finish"
+check "other pid: deferred, not confirmed" "deferred 0" \
+	"$(st result) $(wc -c < "$INITLOG" | tr -d ' ')"
+check "other pid: the file is taken away" "absent" \
+	"$([ -e "$CONFIRM" ] && echo present || echo absent)"
 stop_omcid
 
 # ------------------------------------------------ 2d. a status that cannot be written

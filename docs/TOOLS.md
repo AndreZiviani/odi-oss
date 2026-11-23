@@ -1401,7 +1401,9 @@ connection that asked for it, so the answer leaves first. It applies what the
 store holds, at once and with no way back; the web UI changes the management
 addresses through `mgmt-addr.sh` instead (below), and uses this only in a
 safe-mode boot. `omci [seconds]`
-sends SIGHUP to the running omcid (`pidof omcid`) and waits for its answer in
+sends SIGHUP to the running omcid (`pidof omcid`; with more than one it
+refuses, since init runs one and a confirmation can go to one only) and
+waits for its answer in
 `/var/run/omcid-reload`: first that omcid took the signal (5 s), then the
 outcome (20 s, `APPLY_WAIT` or the argument; the web UI gives the script 25).
 omcid decides what the change needs (the table under `omcid`): nothing, a
@@ -1445,9 +1447,13 @@ one-second sleeps), past the longest reload, so an omcid that could not
 write its status does not hold every later apply off. omcid removes the
 status file when it cannot write it, so a `running` from the start of a
 reload does not outlive it, unless that removal fails as well.
-omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`); a
-file that is empty, cut short or says anything else confirms nothing and
-counts as `live`. The outcome reported is this run's: when the next reload
+omcid takes only the words apply.sh writes (`confirm`, `revert`, `live`),
+each followed by the pid of the omcid it signals (`confirm 412`); a file
+that is empty, cut short, names another pid (one left for an omcid that
+died before its reload) or says anything else confirms nothing and counts
+as `live`. A plain `omci` exits 1 without signalling when it cannot remove
+a confirmation left on disk, and one whose signal could not be sent is
+removed again. The outcome reported is this run's: when the next reload
 has started before it was read, apply.sh says so and exits 1.
 
 A re-registration still running at the bound is reported as still working and
