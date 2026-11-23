@@ -208,8 +208,9 @@ command on stdin. The command is any shell line, so
 - **The root password** is generated per build and written to
   `out/image/root-password-<version>.txt`; `ROOT_PW=` chooses it,
   `ROOT_PW=none` leaves it empty, `ROOT_PW=locked` ships no password at all
-  and starts dropbear with `-s` (`.github/workflows/release.yml` builds
-  every release this way). It is baked into the read-only rootfs, so keep
+  and starts dropbear with `-s` (the `reproducible` job in
+  `.github/workflows/ci.yml` builds every release this way, and
+  `release.yml` publishes that build). It is baked into the read-only rootfs, so keep
   the file for as long as that image runs anywhere. All three shapes are
   `image/gen-root-account.sh`, tested by `test/root_pw_test.sh`.
 

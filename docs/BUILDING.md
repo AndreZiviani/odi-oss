@@ -112,7 +112,8 @@ CI (`.github/workflows/ci.yml`) runs `make lint`, `make test-host`,
 `make test-diag` and `make test-omci` (one job per suite) on every push to
 `main` and every pull request, plus `make test-qemu` (after `make busybox`,
 `packages`, `src` and `releases`), and adds `make src` on release tags and
-manual runs; the kernel and image are not built there. It pulls the public freestanding
+manual runs; the kernel and image are built there only by the
+`reproducible` job, on release tags and manual runs. It pulls the public freestanding
 toolchain image anonymously, no login needed.
 
 Every ELF that reaches the image — kernel, busybox, dropbear, iproute2, our

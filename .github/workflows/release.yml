@@ -124,7 +124,7 @@ jobs:
         run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
 
       # Build A of the reproducible job, with the build output the SBOM
-      # hashes, into out/ and build/ as if it had been built here.
+      # hashes, into out/ as if it had been built here.
       - name: The image the reproducible job compared
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -150,6 +150,9 @@ jobs:
         working-directory: out/image
         run: sha256sum "$VERSION.tar" > SHA256SUMS
 
+      # The reproducible job refuses to keep an image with a password file
+      # beside it and uploads only the tarball; this repeats the check on
+      # what arrived here.
       - name: No password file made it into the release
         working-directory: out/image
         run: |
@@ -173,14 +176,19 @@ jobs:
       # packages/*/build.sh, toolchain/images.env, src/release-sha256.txt) plus
       # the metricsd/confd tags make image-all actually fetched
       # (out/bin/releases.env), and hashes every file the image carries from
-      # the build output: tools/sbom.py header has the detail. SBOM_STRICT
+      # the build output: tools/sbom.py header has the detail. The kernel's
+      # hash comes from the uImage inside the checked tarball itself
+      # (KERNEL_IMAGE), not from a separate file. SBOM_STRICT
       # fails the job on a missing artifact rather than publish a SBOM with a
       # hole in it. The SBOM is checked (tools/verify-sbom.sh) before it is
       # published, and its sha256 joins SHA256SUMS, so the provenance
       # attestation below covers it as a subject of its own.
       - name: SBOM
         run: |
-          SBOM_STRICT=1 SBOM_IMAGE="out/image/$VERSION.tar" \
+          k="$RUNNER_TEMP/kernel"
+          mkdir -p "$k"
+          tar -xf "out/image/$VERSION.tar" -C "$k" uImage
+          SBOM_STRICT=1 SBOM_IMAGE="out/image/$VERSION.tar" KERNEL_IMAGE="$k/uImage" \
             tools/generate-sbom.sh "$VERSION" out/bin/releases.env > out/image/sbom.cdx.json
           (cd out/image && sha256sum sbom.cdx.json >> SHA256SUMS)
           tools/verify-sbom.sh out/image/sbom.cdx.json --sums out/image/SHA256SUMS
@@ -223,7 +231,7 @@ jobs:
 
       # Idempotent: a rerun for a VERSION whose release already exists (the
       # concurrency group above is about ordering, not about preventing
-      # this -- a manual workflow_dispatch retry or a second tag push still
+      # this -- a rerun of the tag-push run or a second tag push still
       # lands here) edits the existing release and re-uploads its assets
       # with --clobber instead of failing on "already exists".
       - name: Publish the GitHub release
