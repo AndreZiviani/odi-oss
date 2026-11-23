@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+**Automated dependency bump.**
+- linux 6.18.63 -> 6.18.65
+
+
 - Identity trial: each event line goes to the kernel log before the state
   file records the step, so a reader that sees the trial end (`phase=steady`)
   also finds its outcome in the log. Before, the line followed the state, and
