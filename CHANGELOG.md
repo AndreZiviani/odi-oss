@@ -5,6 +5,14 @@ listed here.
 
 ## Unreleased
 
+- Docs: the password recipe in `ACCESS.md` runs inside parentheses, so a
+  shell reads all of it before the first prompt. Pasted into an
+  interactive shell it read its own next line as the password, skipped the
+  second prompt and left the terminal echo off (dash and bash, checked in
+  a pseudo-terminal). A trap turns the echo back on after Ctrl-C. Removing
+  a key is its own example now: pasted whole, the key block deleted the
+  key it had just added on a stick with one key.
+
 - Docs: `ACCESS.md` sets a password before it adds an SSH key through the
   API, without putting it in the shell history, and `SETTINGS.md` no longer
   offers adding a key from the web UI during the safe mode. A confd newer

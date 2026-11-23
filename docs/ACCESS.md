@@ -51,18 +51,22 @@ Three ways to add one:
   screen, `read` keeps it out of the shell history, the second entry
   catches a typo (a lost password means the safe mode to get back in), and
   `curl -u admin` asks for it afterwards. This is plain POSIX sh, so it
-  runs in sh (dash included), bash and zsh:
+  runs in sh (dash included), bash and zsh. The parentheses make the shell
+  read the whole block before the first prompt, so a pasted block is not
+  read as the password, and the trap turns the echo back on after Ctrl-C:
 
-      stty -echo; printf 'Password: '; IFS= read -r PW
-      printf '\nAgain: '; IFS= read -r PW2; stty echo; echo
-      if [ "$PW" = "$PW2" ]; then
-          printf '%s' "$PW" | curl -f -u admin:admin \
-               --data-urlencode user=admin --data-urlencode password@- \
-               http://<stick>/api/password
-      else
-          echo 'the two entries differ; nothing was set' >&2
-      fi
-      unset PW PW2
+      (
+          trap 'stty echo' EXIT; trap 'exit 1' INT
+          stty -echo; printf 'Password: '; IFS= read -r PW
+          printf '\nAgain: '; IFS= read -r PW2; stty echo; echo
+          if [ "$PW" = "$PW2" ]; then
+              printf '%s' "$PW" | curl -f -u admin:admin \
+                   --data-urlencode user=admin --data-urlencode password@- \
+                   http://<stick>/api/password
+          else
+              echo 'the two entries differ; nothing was set' >&2
+          fi
+      )
 
   Go on only once that printed `{"ok":true,...}`. `curl -f` prints
   `The requested URL returned error` instead when confd refuses: 400 for a
@@ -72,6 +76,10 @@ Three ways to add one:
       curl -u admin -X POST --data-urlencode "key=$(cat ~/.ssh/id_ed25519.pub)" \
            http://<stick>/api/sshkeys
       curl -u admin http://<stick>/api/sshkeys        # list, with line numbers
+
+  To remove a key later, name its line number from that list (`0` is the
+  first key):
+
       curl -u admin -X POST -d delete=0 http://<stick>/api/sshkeys
 
 - **By hand** over a password login:
