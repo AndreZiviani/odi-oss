@@ -4,7 +4,8 @@
 name: ci
 
 # Pull requests and pushes to main run the tests, as parallel jobs: lint, the host-side
-# tests (plain, and again under ASan/UBSan), diag with the exporter contract, and the OMCI daemon under qemu
+# tests (plain, and again under ASan/UBSan), a bounded fuzz run of the OMCI
+# daemon built for the host, diag with the exporter contract, and the OMCI daemon under qemu
 # (which builds the binaries it runs), a clean-build check (fetch and
 # verify the pinned kernel tree, build src, then confirm `make image` fails
 # closed and names what it is missing -- nothing here is flashed or booted),
@@ -154,6 +155,86 @@ jobs:
 
       - name: Host C tests under ASan and UBSan
         run: make test-host-asan
+
+  # omcid built for the host and run under libFuzzer with AddressSanitizer
+  # and UndefinedBehaviorSanitizer (make fuzz-omci, src/omci/fuzz/README.md):
+  # four minutes, both targets side by side with two processes each (the
+  # runner has four cores), and the job fails on anything found. The input
+  # that broke omcid is printed as hex in the log, which is the form it is
+  # added to the tree in, so no artifact is uploaded. The four minutes
+  # include running the corpus once, which with a grown corpus is the first
+  # two of them: one input is a whole life of the daemon.
+  #
+  # The corpus the fuzzer grows is kept in a cache, so a run starts where
+  # the last one on main stopped and does not spend its time finding the
+  # first frames again. Every run restores the newest; only a run on main
+  # saves one, trimmed to the inputs that add coverage, after it passed. A
+  # cache key is written once, so each save is under its own run id. A pull
+  # request reads the cache of main and writes none. The cache holds fuzz
+  # inputs only, and an input can do no more than fail the job that reads
+  # it.
+  #
+  # The seeds and every input that once broke omcid are not this job: they
+  # run in host and host-asan (make test-host), with cc, every time.
+  #
+  # Only on a pull request and on a push to main. What a fuzz run finds
+  # depends on the run, so it is not part of what a release waits for:
+  # not on a tag, and not when release.yml calls this workflow, which is
+  # also how a release is rehearsed from a branch (the event is then that
+  # of the caller, workflow_dispatch or the tag push). A finding belongs
+  # to the pull request or the push to main that ran into it.
+  fuzz-omci:
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The runner has clang; its libFuzzer runtime is a package of its own
+      # that the image does not always carry. Build a one-line fuzz target
+      # to find out, and install the runtime of that clang only if it fails.
+      - name: clang with the libFuzzer runtime
+        run: |
+          command -v clang >/dev/null || tools/ci-apt.sh clang
+          probe="$RUNNER_TEMP/fuzz-probe"
+          echo 'int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long n) { (void)d; (void)n; return 0; }' > "$probe.c"
+          if ! clang -fsanitize=fuzzer,address,undefined -o "$probe" "$probe.c" 2>/dev/null; then
+            tools/ci-apt.sh "libclang-rt-$(clang -dumpversion | cut -d. -f1)-dev"
+            clang -fsanitize=fuzzer,address,undefined -o "$probe" "$probe.c"
+          fi
+
+      - name: Restore the fuzz corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            src/omci/fuzz/build/corpus
+          key: omci-fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            omci-fuzz-corpus-
+
+      - name: Fuzz omcid (4 minutes, both targets at once)
+        run: make fuzz-omci FUZZ_SECONDS=240 FUZZ_JOBS=2
+
+      # Only on main, and only after a clean run: a corpus is trimmed with
+      # the build that just passed on it. Bounded, since it runs every
+      # input once more.
+      # A trim that runs out of time leaves the corpus as it was (the
+      # trimmed set replaces it only on success), so main does not go red
+      # for it and the untrimmed corpus is saved instead.
+      - name: Trim the corpus to what adds coverage
+        if: ${{ github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        run: timeout 600 make -s -C src/omci/fuzz minimize
+
+      - name: Save the fuzz corpus
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            src/omci/fuzz/build/corpus
+          key: omci-fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
 
   diag:
     runs-on: ubuntu-latest
