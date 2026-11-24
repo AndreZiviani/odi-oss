@@ -1,0 +1,26 @@
+# A snapshot whose count of upstream queues is past the table, read back
+# by a respawned omcid. Found by fuzz_local.
+#
+# Five frames give omcid something to snapshot (each record: kind 3, a
+# length of 48, the frame). Then the respawn (kind 7): omcid is killed, the
+# patch behind the three offset bytes is written into the snapshot and its
+# CRC made right again (snap_patch() in stick.c), and the next omcid reads
+# it. The patch puts 0x000000ab where the queue count of the upstream QoS
+# state is. An omcid that resumed from it walked 171 entries of a table of
+# 128 in the rebuild that follows (us_qos_rebuild(); UBSan: index out of
+# bounds; without a sanitizer the write lands in the next variable and
+# nothing shows). snapshot_try_resume() walks the file before it loads any
+# of it and refuses this one, which is what is expected here:
+#
+# expect: mode=reregister reason=bad_snapshot
+#
+# The offset is where that count lies in a snapshot of this session as the
+# host build lays it out. If the layout moves, the patch lands elsewhere,
+# omcid resumes, and the expectation fails: find the count again (the
+# unit test src/omci/test/snapshot_check_test.c does not depend on it).
+033000 8004480a0100000002000000000000000000000000000000000000000000000000000000000000000000000000030000
+033000 8005440a002d00100001010000280008001e000000000000000000000000000000000000000000000000002800000000
+033000 8007440a00821002ffffffffffffffffffffffffffffffffffff00000000000000000000000000000000002800000000
+033000 8008440a002f1002001002031002001400c8000100000000000000000000000000000000000000000000002800000000
+033000 8009480a010680008000015c00000000000000000000000000000000000000000000000000000000000000d8f900ffff
+073600 0000085b00000000000000000000000000000000040000000000000003300000024e0a0002000000005a0000096900000000000000ab

@@ -11,6 +11,20 @@ listed here.
   commit and the two patches Debian ships in 1.38.0-3. The SBOM names the
   CVEs they fix, and `tools/cve-scan.sh` lists them apart instead of as
   open (#482).
+- Tests: omcid is fuzzed on the build host. `src/omci/fuzz` builds the
+  daemon from the shipped sources against a model of the kernel (files,
+  message queues, the netlink transport, a clock and signals, none of it
+  real) and runs it under libFuzzer with AddressSanitizer and
+  UndefinedBehaviorSanitizer: `make fuzz-omci`, and a CI job of the same
+  name on pull requests and pushes to main, four minutes with both targets
+  side by side. One target takes sessions
+  of OMCI frames as the OLT sends them, the other the config stores, both
+  CLI protocols and a damaged resume snapshot. The seeds and every input
+  that once broke omcid run in `make test-host` and `make test-host-asan`
+  (`make fuzz-omci-replay`), each twice with the same outcome required,
+  and held to the line omcid has to print for it. Nothing in the image
+  changes (#482).
+
 - CI: the SBOM is scanned for known CVEs, by the release job before it
   publishes and every Monday for the latest release (`cve-scan.yml`).
   `tools/cve-scan.sh` runs grype at a pinned version, checked by its
