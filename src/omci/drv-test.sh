@@ -760,8 +760,11 @@ fi
 # appended to the ISP2 session: descriptor 1 created with CIR 125000 and
 # PIR 250000 (meter type 2), the data CTP 0x0002 pointed at it, then the
 # descriptor's CIR raised to 250000, which alone must re-send the queue.
+# With OMCI_GEM_US_RATE=1: without it the descriptor is not applied
+# (check-test.sh covers that default).
 if [ "${UPDATE:-0}" != 1 ]; then
 	cp "$FIX/omci-store-isp2.xml" /var/config/lastgood.xml
+	printf 'OMCI_GEM_US_RATE=1\n' > /var/config/odi.conf
 	log=/tmp/omcid-drv-td.log
 	: > "$log"
 	$Q respond/build/omcid-drvtrace -a -w 6 -c "$CAPS" -g /tmp/gpon-isp2 > "$log" 2>&1 &
@@ -782,6 +785,7 @@ if [ "${UPDATE:-0}" != 1 ]; then
 	# for its queue call.
 	wait_for "$log" '^drv 23 ' 30 $((n + 1))
 	omcid_stop "$pid"
+	rm -f /var/config/odi.conf
 	second=$(grep '^drv 23 ' "$log" | tail -1)
 	case "$first" in
 	*0000007a000000f4*) echo "ok    traffic descriptor: CIR 122 and PIR 244 (x 8 kbit/s) on the queue" ;;

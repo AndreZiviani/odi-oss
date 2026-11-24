@@ -281,7 +281,8 @@ int qos_prog_state_ok(const void *state)
 /* `omcicli dump qmap`, in the column shape of the stock dump: one row per
  * upstream queue programmed. QID is the dense ordinal, TCID the driver
  * T-CONT index; CIR/PIR are the rates of its GEM ports' upstream traffic
- * descriptor (us_queue_rates()), 0 without one, as on ISP2. */
+ * descriptor (us_queue_rates()), 0 without one or with OMCI_GEM_US_RATE
+ * not 1, as on ISP2. */
 void qmap_dump(void)
 {
 	out("\n\n============= PQ ===============\n"
@@ -345,16 +346,33 @@ static int us_queue_decode(uint16_t meId, struct us_queue *q)
 	return q->tcontMe >= 0x8000;
 }
 
+/* OMCI_GEM_US_RATE in CFG_ODI_PATH: 1 applies the upstream traffic
+ * descriptors below; anything else, or absent, leaves every upstream queue
+ * unlimited, and the OLT still bounds the upstream through the bandwidth
+ * it grants each T-CONT. Off by default: one OLT names a descriptor of
+ * 10.7 Mbit/s on every GEM port of a 200 Mbit/s service; applied, it held
+ * the upload at 10 Mbit/s, where the stock firmware on the same line
+ * uploads at 200. Read at every rebuild of the upstream queues and by
+ * `omcli check`. */
+static int gem_us_rate_on(void)
+{
+	char v[4];
+
+	return cfg_odi_get(CFG_ODI_PATH, "OMCI_GEM_US_RATE", v, sizeof v) == 1 &&
+	       v[0] == '1';
+}
+
 /* The upstream rates of a queue: the traffic descriptor (class 280) its GEM
  * port CTPs name as their upstream one (class 268 attribute 5, G.988
- * 9.2.3), applied as the stock stack applies it: CIR and PIR in byte/s,
+ * 9.2.3), applied as the stock source applies it: CIR and PIR in byte/s,
  * PIR less CIR for a meter of type 1 (RFC 4115, where the second rate is
  * the excess), each divided by 1024 into the driver's 8 kbit/s units. Our
  * ONU-G reports traffic management option 2 (priority and rate
  * controlled), which tells the OLT it may provision these. A queue
  * without one keeps 0 and 0, which the driver takes as no limit; when
  * several CTPs on one queue name different descriptors, the last CTP of
- * the store wins, as the last flow set does in the stock stack. */
+ * the store wins, as the last flow set does in the stock stack. Returns 0
+ * for a CTP with no descriptor. */
 static int ctp_us_rates(uint16_t ctp, uint32_t *cir, uint32_t *pir)
 {
 	uint16_t td = (uint16_t)effective_u32(OMCI_ME_GEM_PORT_CTP, ctp, 5);
@@ -374,17 +392,26 @@ static int ctp_us_rates(uint16_t ctp, uint32_t *cir, uint32_t *pir)
 static void us_queue_rates(struct us_queue *q, unsigned nq,
 			   const struct us_flow_plan *flows, unsigned nf)
 {
+	int on = gem_us_rate_on(), ignored = 0;
+
 	for (unsigned i = 0; i < nf; i++) {
 		uint32_t cir, pir;
 
 		if (!ctp_us_rates(flows[i].ctp, &cir, &pir))
 			continue;
+		if (!on) {
+			ignored++;
+			continue;
+		}
 		for (unsigned j = 0; j < nq; j++)
 			if (q[j].meId == flows[i].pqMe) {
 				q[j].cir = cir;
 				q[j].pir = pir;
 			}
 	}
+	if (ignored)
+		out_fmt("   [hw] us traffic descriptors of %d GEM ports not applied "
+			"(OMCI_GEM_US_RATE not 1)\n", (long)ignored);
 }
 
 /* Does an upstream GEM port CTP name this class-277 queue? Only such a
@@ -1918,7 +1945,8 @@ static void chk_queues(void)
 			    (uint16_t)row_u32(r, ctp, 4) != h->meId)
 				continue;
 			dir = row_u32(r, ctp, 3);
-			if ((dir == 1 || dir == 3) && ctp_us_rates(r->inst, &c, &p)) {
+			if ((dir == 1 || dir == 3) && gem_us_rate_on() &&
+			    ctp_us_rates(r->inst, &c, &p)) {
 				wcir = c;
 				wpir = p;
 			}

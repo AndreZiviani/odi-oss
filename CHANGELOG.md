@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- omcid: the upload limit an OLT sets per GEM port (its upstream traffic
+  descriptor, class 280) is no longer applied by default. One OLT names
+  about 10 Mbit/s on every GEM port of a 200 Mbit/s service, and since
+  v1.6.0 that held the upload at 10 Mbit/s, where the stock firmware on the
+  same line uploads at 200. The OLT still bounds the upload through the
+  bandwidth it grants. `OMCI_GEM_US_RATE=1` (odi-only key) applies them as
+  before; while off, the omcid log names the descriptors it skipped and
+  `omcli check` expects the queues unlimited (#520).
+
 - Tests: omcid is fuzzed on the build host. `src/omci/fuzz` builds the
   daemon from the shipped sources against a model of the kernel (files,
   message queues, the netlink transport, a clock and signals, none of it
