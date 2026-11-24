@@ -210,6 +210,14 @@ jobs:
           sudo unsquashfs -no-progress -d "$w/root" "$w/rootfs" >/dev/null
           tools/verify-sbom.sh out/image/sbom.cdx.json --sums out/image/SHA256SUMS --rootfs "$w/root"
 
+      # Known CVEs in the SBOM about to be published, in this run's summary.
+      # A report, not a gate (tools/cve-scan.sh says why), and a scan that
+      # cannot run (no network, no database) does not hold the release
+      # either; the weekly cve-scan.yml scans it again.
+      - name: Known vulnerabilities in the SBOM
+        continue-on-error: true
+        run: tools/cve-scan.sh out/image/sbom.cdx.json >> "$GITHUB_STEP_SUMMARY"
+
       - name: Release notes
         run: tools/release-notes.sh "$VERSION" > /tmp/release-notes.md
 
