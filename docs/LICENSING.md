@@ -189,6 +189,8 @@ tables feed: the license of each component is the one in `tools/sbom.py`, so
 change it there when a license changes here. Runtime components (what is on
 the flashed rootfs, with its files, hashes, purls and dependency graph) are
 told apart from build tools (gcc, binutils: scope `excluded`).
+The kernel, uClibc-ng, busybox, dropbear and iproute2 also carry the CPE name
+the NVD lists them under, so a vulnerability scanner can match them.
 `tools/verify-sbom.sh` checks it; `docs/FLASHING.md`, "Verifying a release",
 says how.
 

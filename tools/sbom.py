@@ -148,7 +148,11 @@ def lic(spdx):
     return [{"license": {"id": spdx}}]
 
 
-def comp(name, ver, spdx, supplier, purl=None, ref=None, scope="required", role="runtime", ctype="library"):
+def cpe(vendor, product, ver, part="a"):
+    return "cpe:2.3:%s:%s:%s:%s:*:*:*:*:*:*:*" % (part, vendor, product, ver)
+
+
+def comp(name, ver, spdx, supplier, purl=None, ref=None, scope="required", role="runtime", ctype="library", cpe=None):
     c = {
         "type": ctype,
         "bom-ref": ref or ("%s@%s" % (name, ver)),
@@ -161,6 +165,8 @@ def comp(name, ver, spdx, supplier, purl=None, ref=None, scope="required", role=
     }
     if purl:
         c["purl"] = purl
+    if cpe:
+        c["cpe"] = cpe
     return c
 
 
@@ -197,7 +203,8 @@ def generate(args):
 
     # --- kernel and our drivers, the replay tables --------------------------
     kernel = comp("linux", kernel_ver, "GPL-2.0-only", "The Linux kernel community (kernel.org)",
-                  "pkg:generic/linux@" + kernel_ver, ref="linux")
+                  "pkg:generic/linux@" + kernel_ver, ref="linux",
+                  cpe=cpe("linux", "linux_kernel", kernel_ver, part="o"))
     kernel["externalReferences"] = [source_ref(kernel_url, kernel_sha)]
     kimage = os.environ.get("KERNEL_IMAGE", os.path.join(ROOT, "build/kernel-618/uImage"))
     if os.path.isfile(kimage):
@@ -227,23 +234,27 @@ def generate(args):
 
     # --- the libc and the upstream packages ---------------------------------
     uclibc = comp("uClibc-ng", uclibc_ver, "LGPL-2.1-only", "uClibc-ng project",
-                  "pkg:generic/uclibc-ng@" + uclibc_ver, ref="uClibc-ng")
+                  "pkg:generic/uclibc-ng@" + uclibc_ver, ref="uClibc-ng",
+                  cpe=cpe("uclibc-ng_project", "uclibc-ng", uclibc_ver))
     uclibc["properties"].append({"name": "odi:embedded", "value": "static-link"})
     uclibc["description"] = "linked statically into every target binary, so it has no file of its own"
 
     pkgs = []
     bb_ver, bb_url, bb_sha = package_pins("busybox")
-    bb = comp("busybox", bb_ver, "GPL-2.0-only", "busybox.net", "pkg:generic/busybox@" + bb_ver, ref="busybox")
+    bb = comp("busybox", bb_ver, "GPL-2.0-only", "busybox.net", "pkg:generic/busybox@" + bb_ver, ref="busybox",
+              cpe=cpe("busybox", "busybox", bb_ver))
     bb["externalReferences"] = [source_ref(bb_url, bb_sha)]
     bb["components"] = [b.file_comp(busybox, "/bin/busybox")]
     pkgs.append(bb)
     db_ver, db_url, db_sha = package_pins("dropbear")
-    db = comp("dropbear", db_ver, "MIT", "Matt Johnston", "pkg:generic/dropbear@" + db_ver, ref="dropbear")
+    db = comp("dropbear", db_ver, "MIT", "Matt Johnston", "pkg:generic/dropbear@" + db_ver, ref="dropbear",
+              cpe=cpe("dropbear_ssh_project", "dropbear_ssh", db_ver))
     db["externalReferences"] = [source_ref(db_url, db_sha)]
     db["components"] = [b.file_comp(os.path.join(pkg_dir, "dropbearmulti"), "/sbin/dropbearmulti")]
     pkgs.append(db)
     ip_ver, ip_url, ip_sha = package_pins("iproute2")
-    ip = comp("iproute2", ip_ver, "GPL-2.0-only", "kernel.org", "pkg:generic/iproute2@" + ip_ver, ref="iproute2")
+    ip = comp("iproute2", ip_ver, "GPL-2.0-only", "kernel.org", "pkg:generic/iproute2@" + ip_ver, ref="iproute2",
+              cpe=cpe("iproute2_project", "iproute2", ip_ver))
     ip["externalReferences"] = [source_ref(ip_url, ip_sha)]
     ip["components"] = [b.file_comp(os.path.join(pkg_dir, n), "/sbin/" + n) for n in ("ip",)]
     pkgs.append(ip)
@@ -356,6 +367,7 @@ def generate(args):
 
 # ------------------------------------------------------------------ verify
 
+CPE_RE = re.compile(r"cpe:2\.3:[aho]:[^:]+:[^:]+:[^:*]+(:[^:]+){7}$")
 REQUIRED = ["linux", "uClibc-ng", "busybox", "dropbear", "iproute2", "metricsd", "confd", "confd-assets",
             "odi-oss-kernel-drivers", "odi-register-replay-tables", "odi-oss-userland"]
 
@@ -455,6 +467,10 @@ def verify(args):
             bad("%s has no version" % n)
         if not c.get("purl"):
             bad("%s has no purl" % n)
+        # A pkg:generic purl names no ecosystem a vulnerability database
+        # knows, so these components carry the NVD CPE a scanner matches on.
+        if (c.get("purl") or "").startswith("pkg:generic/") and not CPE_RE.match(c.get("cpe") or ""):
+            bad("%s has a generic purl but no CPE 2.3 name" % n)
         ls = c.get("licenses") or []
         if not ls or "NOASSERTION" in json.dumps(ls):
             bad("%s has no license (or NOASSERTION)" % n)

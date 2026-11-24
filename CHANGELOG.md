@@ -5,6 +5,10 @@ listed here.
 
 ## Unreleased
 
+- SBOM: the kernel, uClibc-ng, busybox, dropbear and iproute2 carry their
+  NVD CPE name next to the `pkg:generic` purl, which no vulnerability
+  database knows, so a scanner can match them. `tools/verify-sbom.sh` refuses
+  a component with a generic purl and no CPE (#482).
 - CI: the weekly dependency bump commits the docs `tools/bump-deps.sh`
   rewrites. They were left out of its commit, so the 6.18.65 bump passed
   `make lint` in its own job and failed it on main. `bump-deps.sh` also moves
