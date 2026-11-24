@@ -19,6 +19,15 @@ listed here.
   and held to the line omcid has to print for it. Nothing in the image
   changes (#482).
 
+- CI: the SBOM is scanned for known CVEs, by the release job before it
+  publishes and every Monday for the latest release (`cve-scan.yml`).
+  `tools/cve-scan.sh` runs grype at a pinned version, checked by its
+  SHA-256, and writes a report per component and severity to the run's
+  summary. A match does not fail the run (#482).
+- SBOM: the kernel, uClibc-ng, busybox, dropbear and iproute2 carry their
+  NVD CPE name next to the `pkg:generic` purl, which no vulnerability
+  database knows, so a scanner can match them. `tools/verify-sbom.sh` refuses
+  a component with a generic purl and no CPE (#482).
 - CI: the weekly dependency bump commits the docs `tools/bump-deps.sh`
   rewrites. They were left out of its commit, so the 6.18.65 bump passed
   `make lint` in its own job and failed it on main. `bump-deps.sh` also moves
