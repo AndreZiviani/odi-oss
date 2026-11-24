@@ -71,6 +71,14 @@ files = {f["name"] for c in b["components"] for f in c.get("components", [])}
 for want in ("/bin/confd", "/bin/metricsd", "/etc/confd/index.html", "/lib/firmware/odi/sdkinit.bin"):
     assert want in files, want
 assert "NOASSERTION" not in json.dumps(b)'
+ok "upstream components carry their NVD CPE name" 0 py '
+import json, sys
+b = json.load(open(sys.argv[1]))
+c = {c["name"]: c.get("cpe", "") for c in b["components"]}
+for n, vp in (("linux", "o:linux:linux_kernel"), ("uClibc-ng", "a:uclibc-ng_project:uclibc-ng"),
+              ("busybox", "a:busybox:busybox"), ("dropbear", "a:dropbear_ssh_project:dropbear_ssh"),
+              ("iproute2", "a:iproute2_project:iproute2")):
+    assert c[n].startswith("cpe:2.3:" + vp + ":"), (n, c[n])'
 
 # mutate <name> <python statement on b>: a copy of the SBOM with one defect
 bad() {
@@ -98,6 +106,8 @@ bad "a missing required component fails" \
 	'b["components"] = [c for c in b["components"] if c["name"] != "confd-assets"]'
 bad "a missing build/runtime distinction fails" \
 	'[c.update(scope="required") for c in b["components"]]'
+bad "an upstream component without a CPE fails" \
+	'[c.pop("cpe") for c in b["components"] if c["name"] == "dropbear"]'
 bad "a duplicate bom-ref fails" \
 	'b["components"][1]["bom-ref"] = b["components"][0]["bom-ref"]'
 
