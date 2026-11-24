@@ -193,6 +193,8 @@ The kernel, uClibc-ng, busybox, dropbear and iproute2 also carry the CPE name
 the NVD lists them under, so a vulnerability scanner can match them.
 `tools/cve-scan.sh` does that with grype: the release job and the weekly
 `cve-scan.yml` put its report of known CVEs in the run's summary.
+A CVE fixed by a patch in `packages/busybox/patches/` is named in the busybox
+component's pedigree, and the report lists it apart.
 `tools/verify-sbom.sh` checks it; `docs/FLASHING.md`, "Verifying a release",
 says how.
 

@@ -46,6 +46,15 @@ precedence = "closest"
 SPDX-FileCopyrightText = "2026 Andre Ziviani"
 SPDX-License-Identifier = "GPL-2.0-only"
 
+# Fixes against busybox, taken unchanged from upstream and Debian (their
+# headers say which). Like the kernel patches, they keep the license of the
+# file they modify: busybox is GPL-2.0-only.
+[[annotations]]
+path = "packages/busybox/patches/*.patch"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Sanghyun Park"
+SPDX-License-Identifier = "GPL-2.0-only"
+
 # Generated from the MIB model by src/omci/tools/*.py; regenerate rather
 # than edit. Same license as the generators and the daemon they feed.
 [[annotations]]

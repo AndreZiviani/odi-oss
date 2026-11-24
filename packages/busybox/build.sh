@@ -30,15 +30,26 @@ tar=$(../fetch.sh "$URL" "$SHA256")
 # Incremental: unpacking again on every run turns each one-line config fix into
 # a full rebuild. FRESH=1 forces a clean tree.
 #
-# The stamp is version AND toolchain, because neither can be probed from the
-# tree. An object file built by the vendor toolchain looks exactly like one built by our
+# The stamp is version, patches AND toolchain, because none of them can be
+# probed from the tree. An object file built by the vendor toolchain looks exactly like one built by our
 # gcc until the link fails on a libc symbol -- or, worse, does not fail and
 # produces a binary linked against two libcs.
+#
+# patches/ holds fixes for known CVEs that no busybox release has yet, in
+# the order they apply; each file name carries the CVE it fixes, which
+# tools/sbom.py records. Drop a patch when VERSION moves past its fix: it
+# then no longer applies and the build stops here.
 work=$ROOT/build/busybox
-stamp="busybox-$VERSION oss"
+stamp="busybox-$VERSION oss patches $(cat patches/*.patch 2>/dev/null | cksum)"
 if [ "${FRESH:-0}" = 1 ] || [ "$(cat "$work/.built-with" 2>/dev/null || true)" != "$stamp" ]; then
 	rm -rf "$work"; mkdir -p "$work"
 	tar xf "$tar" -C "$work" --strip-components=1
+	for p in patches/*.patch; do
+		[ -f "$p" ] || continue
+		patch -d "$work" -p1 -N -s --no-backup-if-mismatch < "$p" ||
+			{ echo "busybox: $p does not apply to $VERSION" >&2; exit 1; }
+		echo "==> applied $p"
+	done
 	printf '%s\n' "$stamp" > "$work/.built-with"
 fi
 

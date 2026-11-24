@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- busybox: the image carries the fixes for CVE-2026-38754 and CVE-2026-38755
+  in `ash`, which is `/bin/sh`, and CVE-2026-38753 in `awk`. No busybox
+  release has them yet; `packages/busybox/patches/` holds the upstream
+  commit and the two patches Debian ships in 1.38.0-3. The SBOM names the
+  CVEs they fix, and `tools/cve-scan.sh` lists them apart instead of as
+  open (#482).
 - CI: the SBOM is scanned for known CVEs, by the release job before it
   publishes and every Monday for the latest release (`cve-scan.yml`).
   `tools/cve-scan.sh` runs grype at a pinned version, checked by its

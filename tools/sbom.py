@@ -79,6 +79,25 @@ def package_pins(name):
     return ver, url, pin(rel, "SHA256", r"[0-9a-f]{64}")
 
 
+def package_patches(name):
+    """The patches packages/<name>/build.sh applies, as CycloneDX pedigree
+    patches: a cherry-pick when the file is a git commit ("From <sha>"),
+    unofficial otherwise, each resolving the CVEs its file name carries."""
+    d = os.path.join(ROOT, "packages", name, "patches")
+    out = []
+    for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        if not n.endswith(".patch"):
+            continue
+        text = read(os.path.join("packages", name, "patches", n))
+        p = {"type": "cherry-pick" if re.match(r"From [0-9a-f]{40} ", text) else "unofficial",
+             "diff": {"url": "https://github.com/%s/blob/main/packages/%s/patches/%s" % (OWN, name, n)}}
+        cves = re.findall(r"CVE-\d{4}-\d{4,}", n)
+        if cves:
+            p["resolves"] = [{"type": "security", "id": c} for c in cves]
+        out.append(p)
+    return out
+
+
 def release_pins():
     """(repo, tag, asset) -> sha256 from src/release-sha256.txt."""
     pins = {}
@@ -244,6 +263,9 @@ def generate(args):
     bb = comp("busybox", bb_ver, "GPL-2.0-only", "busybox.net", "pkg:generic/busybox@" + bb_ver, ref="busybox",
               cpe=cpe("busybox", "busybox", bb_ver))
     bb["externalReferences"] = [source_ref(bb_url, bb_sha)]
+    bb_patches = package_patches("busybox")
+    if bb_patches:
+        bb["pedigree"] = {"patches": bb_patches}
     bb["components"] = [b.file_comp(busybox, "/bin/busybox")]
     pkgs.append(bb)
     db_ver, db_url, db_sha = package_pins("dropbear")

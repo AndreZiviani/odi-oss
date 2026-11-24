@@ -71,6 +71,14 @@ files = {f["name"] for c in b["components"] for f in c.get("components", [])}
 for want in ("/bin/confd", "/bin/metricsd", "/etc/confd/index.html", "/lib/firmware/odi/sdkinit.bin"):
     assert want in files, want
 assert "NOASSERTION" not in json.dumps(b)'
+ok "busybox names the CVEs its patches fix" 0 py '
+import json, os, re, sys
+b = json.load(open(sys.argv[1]))
+bb = [c for c in b["components"] if c["name"] == "busybox"][0]
+got = sorted(r["id"] for p in bb["pedigree"]["patches"] for r in p["resolves"])
+want = sorted(c for n in os.listdir("packages/busybox/patches") for c in re.findall(r"CVE-\d{4}-\d+", n))
+assert got == want and want, (got, want)
+assert {p["type"] for p in bb["pedigree"]["patches"]} <= {"cherry-pick", "unofficial"}'
 ok "upstream components carry their NVD CPE name" 0 py '
 import json, sys
 b = json.load(open(sys.argv[1]))
