@@ -20,10 +20,20 @@ listed here.
   changes (#482).
 
 - CI: the SBOM is scanned for known CVEs, by the release job before it
-  publishes and every Monday for the latest release (`cve-scan.yml`).
-  `tools/cve-scan.sh` runs grype at a pinned version, checked by its
-  SHA-256, and writes a report per component and severity to the run's
-  summary. A match does not fail the run (#482).
+  publishes and every Monday for the latest release (`cve-scan.yml`), and
+  the report per component and severity goes to the run's summary. A match
+  does not fail the run (#482). The kernel is checked against the kernel CVE
+  team feed (vulns.git): a CVE is listed when it affects the pinned version
+  on its stable branch and touches a .c or .S compiled into the kernel, or
+  only headers and one of them is. The
+  kernel build lists those files (the .c and .S of every object linked into
+  vmlinux, and the headers they include), and the SBOM carries the list
+  (`odi:kernel-sources`). The other components are checked against the NVD
+  by their CPE name; where a CVE has several scores, the NVD one, else the
+  worst. On the 6.18.65 build grype listed 287 kernel CVEs; this lists 14,
+  none fixed on 6.18 yet, and counts the 98 whose code is not compiled in. The feed is a cached shallow clone, about
+  1 MB a week after the first 75 MB, where grype fetched a 207 MB database
+  on every run.
 - SBOM: the kernel, uClibc-ng, busybox, dropbear and iproute2 carry their
   NVD CPE name next to the `pkg:generic` purl, which no vulnerability
   database knows, so a scanner can match them. `tools/verify-sbom.sh` refuses

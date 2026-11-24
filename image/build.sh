@@ -297,6 +297,16 @@ elif [ "${ALLOW_NO_KCONFIG:-0}" = 1 ]; then
 else
 	die "no kernel .config found beside the kernel -- pass KCONFIG=<file> (or build with KERNEL=\$PWD/build/kernel*/uImage so the config sits beside it); /etc/kernel-config records on the device what its kernel was built with -- set ALLOW_NO_KCONFIG=1 to ship without it"
 fi
+# The files compiled into the kernel (kernel/build.sh lists them beside it),
+# for the SBOM: tools/cve-scan.sh leaves out kernel CVEs in files this kernel
+# does not compile. Not part of the image; out/ carries it to the release job.
+mkdir -p "$ROOT/out"; rm -f "$ROOT/out/kernel-sources.txt"
+if [ -f "$(dirname "$KERNEL")/sources.txt" ]; then
+	cp "$(dirname "$KERNEL")/sources.txt" "$ROOT/out/kernel-sources.txt"
+	echo "  kernel sources list -> out/kernel-sources.txt ($(wc -l < "$ROOT/out/kernel-sources.txt") files)"
+else
+	echo "  no sources.txt beside the kernel: the SBOM will not list its sources" >&2
+fi
 
 # The root account. A shared default password baked into a public build is
 # worth less than nothing, so one is generated per build and printed; pass
