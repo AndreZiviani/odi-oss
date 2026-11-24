@@ -17,12 +17,17 @@ ok() { # name command...
 }
 g() { git -C "$T/src" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
 
-# rec ID STATE FILES VERSIONS [ADP-SEVERITY]: a record of the feed. FILES is
-# a JSON list, VERSIONS the version ranges of the Linux product.
+# rec ID STATE FILES VERSIONS [ADP-SEVERITIES]: a record of the feed. FILES
+# is a JSON list, VERSIONS the version ranges of the Linux product, and
+# ADP-SEVERITIES the scores CISA gives it, space-separated.
 rec() {
 	mkdir -p "$T/src/cve/published/2026"
 	adp=
-	[ -n "${5:-}" ] && adp=', "adp": [{"metrics": [{"cvssV3_1": {"baseSeverity": "'$5'"}}]}]'
+	if [ -n "${5:-}" ]; then
+		# shellcheck disable=SC2086 # one printf argument per score
+		adp=$(printf '{"cvssV3_1": {"baseSeverity": "%s"}},' $5)
+		adp=', "adp": [{"metrics": ['"${adp%,}"']}]'
+	fi
 	printf '{"cveMetadata": {"cveId": "%s", "state": "%s"}, "containers": {"cna": {"affected": [
 	  {"product": "Linux", "defaultStatus": "unaffected", "programFiles": %s,
 	   "versions": [{"version": "abc", "lessThan": "def", "status": "affected", "versionType": "git"}]},
@@ -39,10 +44,15 @@ rec CVE-2026-0001 PUBLISHED '["net/core/dev.c"]' "$intro, "'{"version": "6.18.57
 rec CVE-2026-0002 PUBLISHED '["net/core/dev.c"]' "$intro, "'{"version": "6.18.70", "lessThanOrEqual": "6.18.*", "status": "unaffected", "versionType": "semver"}'", $mainline" HIGH
 # only in a file this kernel does not build: left out, counted
 rec CVE-2026-0003 PUBLISHED '["drivers/net/x/unbuilt.c"]' "$intro, $mainline"
-# a header compiled in, with a .c that is not: listed
+# a .c that is not compiled, and a header that is: left out, counted (the fix
+# edits a struct the header shares, the code at fault is not built)
 rec CVE-2026-0004 PUBLISHED '["drivers/net/x/unbuilt.c", "include/linux/x.h"]' "$intro, $mainline"
 # a header and a .c, neither compiled in: left out, counted
 rec CVE-2026-0009 PUBLISHED '["drivers/net/x/unbuilt.c", "include/linux/unused.h"]' "$intro, $mainline"
+# headers only, one compiled in: listed
+rec CVE-2026-0010 PUBLISHED '["include/linux/x.h"]' "$intro, $mainline"
+# scored twice by CISA: the worse of the two
+rec CVE-2026-0011 PUBLISHED '["net/core/dev.c"]' "$intro, $mainline" "MEDIUM CRITICAL"
 # rejected: not listed
 rec CVE-2026-0005 REJECTED '["net/core/dev.c"]' "$intro, $mainline"
 # fixed on the 6.12 branch only (a number above 6.18.65 there): still listed
@@ -54,7 +64,8 @@ g add -A && g commit -q -m feed
 sbom() { # PROPERTIES
 	printf '{"metadata": {"component": {"version": "v9.9.9"}}, "components": [
 	  {"name": "linux", "version": "6.18.65", "cpe": "cpe:2.3:o:linux:linux_kernel:6.18.65:*:*:*:*:*:*:*", "properties": [%s]},
-	  {"name": "busybox", "version": "1.38.0", "cpe": "cpe:2.3:a:busybox:busybox:1.38.0:*:*:*:*:*:*:*", "properties": []}]}\n' "$1" > "$T/sbom.json"
+	  {"name": "busybox", "version": "1.38.0", "cpe": "cpe:2.3:a:busybox:busybox:1.38.0:*:*:*:*:*:*:*", "properties": []},
+	  {"name": "dropbear", "version": "2026.94", "cpe": "cpe:2.3:a:dropbear_ssh_project:dropbear_ssh:2026.94:*:*:*:*:*:*:*", "properties": []}]}\n' "$1" > "$T/sbom.json"
 }
 sbom '{"name": "odi:kernel-sources", "value": "include/linux/x.h init/main.c net/core/dev.c"}'
 mkdir -p "$T/nvd"
@@ -62,10 +73,16 @@ mkdir -p "$T/nvd"
 nvdf=$T/nvd/$(printf %s 'cpe:2.3:a:busybox:busybox:1.38.0:*:*:*:*:*:*:*' | sed 's/[^A-Za-z0-9._-]/_/g').json
 cat > "$nvdf" <<'EOF'
 {"vulnerabilities": [{"cve": {"id": "CVE-2026-0100",
-  "metrics": {"cvssMetricV31": [{"type": "Secondary", "cvssData": {"baseSeverity": "MEDIUM"}},
-                                {"type": "Primary", "cvssData": {"baseSeverity": "HIGH"}}]},
+  "metrics": {"cvssMetricV31": [{"type": "Secondary", "cvssData": {"baseSeverity": "HIGH"}},
+                                {"type": "Primary", "cvssData": {"baseSeverity": "MEDIUM"}}]},
   "configurations": [{"nodes": [{"cpeMatch": [{"vulnerable": true,
     "criteria": "cpe:2.3:a:busybox:busybox:*:*:*:*:*:*:*:*", "versionEndExcluding": "1.38.1"}]}]}]}}]}
+EOF
+nvdf=$T/nvd/$(printf %s 'cpe:2.3:a:dropbear_ssh_project:dropbear_ssh:2026.94:*:*:*:*:*:*:*' | sed 's/[^A-Za-z0-9._-]/_/g').json
+cat > "$nvdf" <<'EOF'
+{"vulnerabilities": [{"cve": {"id": "CVE-2026-0101",
+  "metrics": {"cvssMetricV31": [{"type": "Secondary", "cvssData": {"baseSeverity": "MEDIUM"}},
+                                {"type": "Secondary", "cvssData": {"baseSeverity": "HIGH"}}]}}}]}
 EOF
 export CVE_FEED_URL=$T/src CVE_FEED_DIR=$T/cache/vulns.git NVD_FILES=$T/nvd
 
@@ -76,15 +93,17 @@ ok "a CVE that affects a built file is listed, with the fix on its branch" \
 	grep -qx '| linux | 6.18.65 | CVE-2026-0002 | High | 6.18.70 |' "$T/out"
 ok "a fix on another stable branch does not count for this one" \
 	grep -qx '| linux | 6.18.65 | CVE-2026-0008 | Unknown | 7.1 |' "$T/out"
-ok "a CVE touching a header compiled in is listed" grep -q '| CVE-2026-0004 | Unknown | 7.1 |' "$T/out"
+ok "a CVE touching only headers, one compiled in, is listed" grep -q '| CVE-2026-0010 | Unknown | 7.1 |' "$T/out"
+ok "a kernel CVE scored twice gets the worse score" grep -q '| CVE-2026-0011 | Critical | 7.1 |' "$T/out"
 ok "fixed on the branch, rejected, or newer than the version: not listed" \
 	sh -c "! grep -q -e CVE-2026-0001 -e CVE-2026-0005 -e CVE-2026-0006 '$T/out'"
-ok "CVEs only in files not compiled in, headers included, are left out and counted" \
-	sh -c "! grep -q -e CVE-2026-0003 -e CVE-2026-0009 '$T/out' && grep -q '^2 more kernel CVEs affect 6.18.65 only in files this kernel does not compile (it compiles 3)' '$T/out'"
-ok "the NVD match of the other components, with its own score and fixed version" \
-	grep -qx '| busybox | 1.38.0 | CVE-2026-0100 | High | 1.38.1 |' "$T/out"
-ok "counts per component and severity" grep -qx '| linux | 0 | 1 | 0 | 0 | 0 | 2 |' "$T/out"
-ok "the worst severity comes first" sh -c "grep -n 'CVE-' '$T/out' | head -1 | grep -q -e CVE-2026-0002 -e CVE-2026-0100"
+ok "CVEs whose code is not compiled in are left out and counted, also with a header that is" \
+	sh -c "! grep -q -e CVE-2026-0003 -e CVE-2026-0004 -e CVE-2026-0009 '$T/out' && grep -q '^3 more kernel CVEs affect 6.18.65 only in files this kernel does not compile (it compiles 3)' '$T/out'"
+ok "the NVD match of the other components, with the NVD score over a CNA one, and the fixed version" \
+	grep -qx '| busybox | 1.38.0 | CVE-2026-0100 | Medium | 1.38.1 |' "$T/out"
+ok "with only CNA and CISA scores, the worse of them" grep -qx '| dropbear | 2026.94 | CVE-2026-0101 | High | - |' "$T/out"
+ok "counts per component and severity" grep -qx '| linux | 1 | 1 | 0 | 0 | 0 | 2 |' "$T/out"
+ok "the worst severity comes first" sh -c "grep -n 'CVE-' '$T/out' | head -1 | grep -q CVE-2026-0011"
 
 # A feed already there is fetched, not cloned again: a new record shows up.
 rec CVE-2026-0007 PUBLISHED '["init/main.c"]' "$intro, $mainline"
