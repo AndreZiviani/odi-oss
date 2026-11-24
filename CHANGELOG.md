@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- CI: the SBOM is scanned for known CVEs, by the release job before it
+  publishes and every Monday for the latest release (`cve-scan.yml`).
+  `tools/cve-scan.sh` runs grype at a pinned version, checked by its
+  SHA-256, and writes a report per component and severity to the run's
+  summary. A match does not fail the run (#482).
 - SBOM: the kernel, uClibc-ng, busybox, dropbear and iproute2 carry their
   NVD CPE name next to the `pkg:generic` purl, which no vulnerability
   database knows, so a scanner can match them. `tools/verify-sbom.sh` refuses
