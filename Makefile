@@ -414,7 +414,9 @@ lint:
 	@# build directory and the container paths of the test harnesses, the
 	@# backups/ of a stick and the private stick inventory. A script that
 	@# needs such a path takes it from a variable (STOCK_ROOTFS, ...).
-	@if git grep -n -I -E '~/[A-Za-z]|\$$\{?HOME\}?/|\$$\(HOME\)/|/Users/|/home/[a-z]|/root/|backups/|OUR-STICKS' -- ':!Makefile' | \
+	@# Upstream patches under packages/*/patches/ stay as published, commit
+	@# message included, so they are not ours to reword.
+	@if git grep -n -I -E '~/[A-Za-z]|\$$\{?HOME\}?/|\$$\(HOME\)/|/Users/|/home/[a-z]|/root/|backups/|OUR-STICKS' -- ':!Makefile' ':!packages/*/patches/*' | \
 		grep -vE '/root/(odi/odi-oss|fs|stick|p[0-9]+\.img)([^A-Za-z0-9_-]|$$)|/root/fs-'; then \
 		echo "lint: found a machine-local or private path above -- take it from a variable, or describe it instead" >&2; \
 		exit 1; \
