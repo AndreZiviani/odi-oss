@@ -212,6 +212,18 @@ def generate(args):
         kernel["properties"].append({"name": "odi:path", "value": "uImage (in the image tarball)"})
     else:
         b.missing("kernel image " + os.path.basename(kimage))
+    # The files compiled into the kernel, .c, .S and headers (kernel/build.sh
+    # lists them, image/build.sh copies the list to out/): tools/cve-scan.sh
+    # leaves out a kernel CVE whose fix touches none of them. A
+    # report aid, not a hash, so a missing list is a warning, also in strict
+    # mode: the scan then lists every CVE of the version.
+    ksrc = os.environ.get("KERNEL_SOURCES", os.path.join(ROOT, "out/kernel-sources.txt"))
+    if os.path.isfile(ksrc):
+        with open(ksrc) as f:
+            srcs = sorted(set(l.strip() for l in f if l.strip()))
+        kernel["properties"].append({"name": "odi:kernel-sources", "value": " ".join(srcs)})
+    else:
+        print("sbom.py: warning: no kernel source list at %s" % ksrc, file=sys.stderr)
     drivers = comp("odi-oss-kernel-drivers", version, "GPL-2.0-or-later", OWN,
                    "pkg:github/%s@%s" % (OWN, version), ref="odi-oss-kernel-drivers")
     drivers["description"] = "our own drivers and patches, built into the kernel (CONFIG_ODI_*=y); no modules"

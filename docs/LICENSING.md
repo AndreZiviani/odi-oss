@@ -191,8 +191,12 @@ the flashed rootfs, with its files, hashes, purls and dependency graph) are
 told apart from build tools (gcc, binutils: scope `excluded`).
 The kernel, uClibc-ng, busybox, dropbear and iproute2 also carry the CPE name
 the NVD lists them under, so a vulnerability scanner can match them.
-`tools/cve-scan.sh` does that with grype: the release job and the weekly
-`cve-scan.yml` put its report of known CVEs in the run's summary.
+`tools/cve-scan.sh` checks them: the kernel against the kernel CVE team
+feed (vulns.git), which gives the fixed version on each stable branch and the
+files each fix touches, and the rest against the NVD by CPE name. A kernel
+CVE is listed only when it affects the pinned version and touches a file
+compiled into the kernel (a .c, .S or header; the SBOM lists them). The release job and the
+weekly `cve-scan.yml` put the report in the run's summary.
 `tools/verify-sbom.sh` checks it; `docs/FLASHING.md`, "Verifying a release",
 says how.
 

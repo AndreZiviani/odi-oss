@@ -166,6 +166,19 @@ cp .config /out/config
 make ARCH=mips CROSS_COMPILE=$XC -j4 V=2 vmlinux > /out/build.log 2>&1 || {
 	echo "BUILD FAILED"; grep -n "Error [0-9]\|error:" /out/build.log | head -30; exit 1; }
 echo "BUILD OK: $(grep -c "warning:" /out/build.log) warnings"
+# The files compiled into vmlinux, for tools/cve-scan.sh: the kernel CVE
+# feed names the files each fix touches, and a CVE in files this config does
+# not build is not one of ours. vmlinux.a (a thin archive) names exactly the
+# objects linked (a scan of the build tree would also find objects of options
+# an earlier config had on); each object brings its .c or .S, and the headers
+# its .cmd file says it included.
+${XC}ar t vmlinux.a | while read -r o; do
+	for e in c S; do [ -f "${o%.o}.$e" ] && echo "${o%.o}.$e"; done
+	c="$(dirname "$o")/.$(basename "$o").cmd"
+	[ -f "$c" ] && sed -n "s/^ *\([A-Za-z0-9_./+-]*[.]h\) *\\\\\{0,1\}\$/\1/p" "$c"
+done | grep -v "^/" | LC_ALL=C sort -u > /out/sources.txt
+[ -s /out/sources.txt ] || { echo "BUILD FAILED: no sources listed from vmlinux.a"; exit 1; }
+echo "files compiled into vmlinux: $(wc -l < /out/sources.txt)"
 [ "$COMPILE_ONLY" = 1 ] && { cp vmlinux /out/vmlinux; cp System.map /out/System.map; cp .config /out/config; exit 0; }
 ${XC}objcopy -O binary -R .note -R .comment -S vmlinux linux.bin
 lzma -z -c -9 --format=lzma linux.bin > linux.bin.lzma 2>/dev/null || lzma -z -c -9 linux.bin > linux.bin.lzma

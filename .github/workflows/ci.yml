@@ -410,6 +410,7 @@ jobs:
           overwrite: true
           path: |
             build-a/out/image/${{ env.VERSION }}.tar
+            build-a/out/kernel-sources.txt
             build-a/out/bin/
             build-a/out/confd-assets/
             build-a/out/firmware/odi/
