@@ -46,5 +46,20 @@ make_dir bad ""
 echo tamper >> "$T/bad/v9-sources/busybox-1.tar.bz2"
 tar -cf "$T/bad.tar" -C "$T/bad" v9-sources
 ok "altered file fails" 1 $B --check "$T/bad.tar"
+
+# tag_archive, which the bundle build runs on every GitHub tag archive: the
+# committed source.tar.gz line decides, also for a file already in dl/. Taken
+# out of the script with its two helpers, so no network is needed.
+A=$T/archive; mkdir -p "$A/src"
+{ sed -n '/^sha256()/p; /^die()/p' tools/bundle-sources.sh
+  sed -n '/^curl_get()/,/^}/p; /^tag_archive()/,/^}/p' tools/bundle-sources.sh; } > "$A/fn.sh"
+printf 'the tag\n' > "$A/good.tar.gz"
+printf 'another tag\n' > "$A/moved.tar.gz"
+printf 'R/x v1 source.tar.gz %s\n' "$(sum "$A/good.tar.gz")" > "$A/src/release-sha256.txt"
+ta() { ROOT=$A bash -c '. "$1/fn.sh"; tag_archive "$2" "$3" http://127.0.0.1:9/none "$4"' _ "$A" "$@"; }
+ok "a tag archive that matches its committed line passes" 0 ta R/x v1 "$A/good.tar.gz"
+ok "a tag archive that differs from it fails" 1 ta R/x v1 "$A/moved.tar.gz"
+ok "a tag with no source.tar.gz line fails" 1 ta R/x v2 "$A/good.tar.gz"
+
 echo "$pass passed, $fail failed"
 [ "$fail" = 0 ]

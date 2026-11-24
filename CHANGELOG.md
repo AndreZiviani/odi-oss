@@ -19,6 +19,31 @@ listed here.
   and held to the line omcid has to print for it. Nothing in the image
   changes (#482).
 
+- CI: the weekly dependency bump commits the docs `tools/bump-deps.sh`
+  rewrites. They were left out of its commit, so the 6.18.65 bump passed
+  `make lint` in its own job and failed it on main. `bump-deps.sh` also moves
+  the kernel version in `docs/HACKING.md` and `docs/KERNEL.md` now, and a
+  version followed by `.tar.xz`, which it skipped.
+
+- Releases: `tools/bundle-sources.sh` checks the GitHub tag archives it puts
+  in the source bundle (odi-toolchain, odi-ui, odi-sfp-exporter) against a
+  `source.tar.gz` line per repo and tag in `src/release-sha256.txt`, also
+  when the file is already in `dl/`. It fetched them by tag alone, and a
+  moved tag would have put other source in the bundle. `tools/bump-deps.sh`
+  writes the line when it moves a tag (#482).
+
+- Docs: the password recipe in `ACCESS.md` runs inside parentheses, so a
+  shell reads all of it before the first prompt. Pasted into an
+  interactive shell it read its own next line as the password, skipped the
+  second prompt and left the terminal echo off (dash and bash, checked in
+  a pseudo-terminal). A trap turns the echo back on after Ctrl-C. Removing
+  a key is its own example now: pasted whole, the key block deleted the
+  key it had just added on a stick with one key.
+
+- Docs: COMPARISON.md, BUILDING.md, HACKING.md and KERNEL.md name the pinned
+  kernel, 6.18.65, again; the bump to it left them at 6.18.63, and `make lint`
+  failed on main for the first two.
+
 - CI: `make cppcheck` runs cppcheck over every tracked C file, and CI runs
   it as its own job on ubuntu-24.04 (#482). Of the nine findings on main,
   one was a test that read `rec.log[-1]` when the action it looked for was
