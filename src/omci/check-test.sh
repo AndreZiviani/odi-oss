@@ -35,7 +35,9 @@ check() {
 
 D=/tmp/omci-check
 rm -rf "$D"
-mkdir -p "$D"
+mkdir -p "$D" /var/config
+# OMCI_GEM_US_RATE absent until the traffic descriptor case below.
+rm -f /var/config/odi.conf
 # The kernel's PLOAM list: one Alloc-ID, 1024.
 printf 'state 5 (O5)\nalloc_ids 1 1024\n' > "$D/status"
 
@@ -171,12 +173,22 @@ check "downstream GEM CAM row empty" "$got" \
 cam 1024 1562 > "$D/cam"
 
 # Traffic descriptor 0x0001 (class 280): CIR 128000 and PIR 256000 byte/s,
-# then the CTP's upstream descriptor pointer (attribute 5) at it. The
-# chip, read before the rebuild could reach it, still holds no limit; the
-# MIB asks for 125 and 250 (byte/s / 1024), 124 and 249 in the register.
+# then the CTP's upstream descriptor pointer (attribute 5) at it. Without
+# OMCI_GEM_US_RATE=1 the rebuild leaves the queue unlimited and says so,
+# and check expects no limit either.
 inject_wait /tmp/omcid-check.log "0f40440a01180001$(printf '0001f4000003e800%064d' 0)"
 inject_wait /tmp/omcid-check.log "0f41480a010c0002$(printf '08000001%072d' 0)"
 settled /tmp/omcid-check.log
+got=$(grep -c 'us traffic descriptors of 1 GEM ports not applied (OMCI_GEM_US_RATE not 1)' /tmp/omcid-check.log)
+check "a traffic descriptor is not applied by default, and the log says so" "$got" "1"
+got=$($Q cli/build/omcli check 2>&1 | grep '^queue')
+check "and check expects the queue unlimited" "$got" \
+      "queue me 8006 tcont 0 ordinal 0 (queue 0): ok"
+# With OMCI_GEM_US_RATE=1 (read by check at once, by omcid at its next
+# rebuild): the chip, read before the rebuild could reach it, still holds
+# no limit; the MIB asks for 125 and 250 (byte/s / 1024), 124 and 249 in
+# the register.
+printf 'OMCI_GEM_US_RATE=1\n' > /var/config/odi.conf
 got=$($Q cli/build/omcli check 2>&1 | grep '^queue')
 check "a traffic descriptor the chip does not have yet" "$got" \
       "queue me 8006 tcont 0 ordinal 0 (queue 0): differs: mib cir 124 pir 249, chip cir 0 pir 262143 (register units)"
@@ -217,5 +229,5 @@ check "a flow bound to a stand-in queue is ok" "$got" \
       "us gem 1710 (ctp 0006) flow N: ok"
 
 omcid_stop "$pid"
-rm -rf "$D"
+rm -rf "$D" /var/config/odi.conf
 suite_exit
