@@ -112,6 +112,10 @@ $(BUILD)/downstream_ownership_test: ../test/downstream_ownership_test.c $(filter
 $(BUILD)/service_ownership_test: ../test/service_ownership_test.c $(filter-out $(BUILD)/main.o,$(OBJS))
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
 
+# Native CLI fixture: the real renderer and dispatcher, with synthetic slots.
+$(BUILD)/services_fixture: ../test/services_fixture.c $(filter-out $(BUILD)/main.o,$(OBJS))
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--wrap=omci_drv_call -I. -o $@ $^
+
 # snapshot_try_resume() against snapshots with a valid CRC and state out of
 # order: a queue count past its table, table-attribute lists that loop.
 # `make test` runs it as the calling user, who may not write /var/run, so
@@ -152,7 +156,7 @@ else
 
 RUN := docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/../../..:/src -w /src/src/omci/respond $(IMAGE)
 
-.PHONY: all image cap drvtrace run size test clean
+.PHONY: all image cap drvtrace services-fixture run size test clean
 all: cap
 
 image:
@@ -161,6 +165,9 @@ image:
 cap: image
 	$(RUN) make IN_CONTAINER=1 $(BIN)
 	@ls -l $(BIN)
+
+services-fixture: image
+	$(RUN) make IN_CONTAINER=1 $(BUILD)/services_fixture
 
 drvtrace: image
 	$(RUN) make IN_CONTAINER=1 $(BUILD)/omcid-drvtrace

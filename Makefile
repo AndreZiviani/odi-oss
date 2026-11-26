@@ -118,7 +118,7 @@ image-all:
 # any did. TEST_JOBS is the number of legs at once (default: the CPUs);
 # `make test TEST_JOBS=1` runs them one by one. `make test-<leg>` runs one leg
 # on its own, its output streaming.
-OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables getall alarms writes mcast pm enc voip frames check
+OMCI_SUITES := qemu drv resume events swdl vlan reload live keys tables getall alarms writes mcast pm enc voip frames check services
 TEST_LEGS := lint test-host test-diag test-omci-respond test-igmp $(OMCI_SUITES:%=test-omci-%)
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
@@ -327,7 +327,7 @@ test-igmp:
 
 test-omci-build:
 	$(MAKE) -C src/omci/cli
-	$(MAKE) -C src/omci/respond cap drvtrace
+	$(MAKE) -C src/omci/respond cap drvtrace services-fixture
 	$(MAKE) -C src/igmp igmpd
 
 $(OMCI_SUITES:%=test-omci-%): test-omci-%:
