@@ -477,7 +477,9 @@ sshx 'test -x /bin/nv' || fail "no /bin/nv in the initramfs (make src builds it)
 python3 - "$WORK/slotcheck" "$ROOT/image/rootfs-crc.py" <<'PY'
 import os, struct, subprocess, sys, zlib
 d = sys.argv[1]; os.makedirs(d, exist_ok=True)
-KPART, RPART = 0x14c000, 0x274000
+# The rootfs partitions are smaller than the real 2.5 MB ones: the guest's
+# /tmp holds every partition file and a spare copy.
+KPART, RPART = 0x14c000, 0x40000
 payload = bytes((i * 7 + 3) & 0xff for i in range(600000))
 h = bytearray(64)
 struct.pack_into('>IIIIIIIBBBB', h, 0, 0x27051956, 0, 0, len(payload), 0x80000000, 0x80000000,
@@ -492,16 +494,16 @@ sb[0:4] = b'hsqs'
 struct.pack_into('<I', sb, 12, 1 << 18)
 struct.pack_into('<HH', sb, 20, 4, 18)
 struct.pack_into('<H', sb, 28, 4)
-struct.pack_into('<Q', sb, 40, 2000000)
+struct.pack_into('<Q', sb, 40, 200000)
 # The filesystem padded to 4 KiB, with the CRC trailer image/build.sh
 # appends, written by the same tool; r0bad has one byte changed in it.
-fs = bytes(sb) + bytes((i * 13 + 1) & 0xff for i in range(96, 2000000))
+fs = bytes(sb) + bytes((i * 13 + 1) & 0xff for i in range(96, 200000))
 fs += b'\0' * (-len(fs) % 4096)
 open(f'{d}/fs', 'wb').write(fs)
 subprocess.run([sys.executable, '-I', sys.argv[2], f'{d}/fs'], check=True)
 fs = open(f'{d}/fs', 'rb').read()
 open(f'{d}/r0', 'wb').write(fs + b'\xff' * (RPART - len(fs)))
-bad = bytearray(fs); bad[1000000] ^= 1
+bad = bytearray(fs); bad[100000] ^= 1
 open(f'{d}/r0bad', 'wb').write(bytes(bad) + b'\xff' * (RPART - len(fs)))
 open(f'{d}/r1', 'wb').write(b'\xff' * RPART)
 # Both environment copies already commit slot 0 (sw_tryactive=2 too), so
@@ -525,13 +527,13 @@ done
 sshx 'sh -s' <<'GUEST' > "$WORK/slotcheck.out" 2>&1 || { cat "$WORK/slotcheck.out" >&2; fail "nv slotcheck did not give the expected answers"; }
 set -e
 R=/tmp/sc
-printf 'mtd1: 00002000 00001000 "env"\nmtd2: 00002000 00001000 "env2"\nmtd4: 0014c000 00001000 "k0"\nmtd5: 00274000 00001000 "r0"\nmtd6: 0014c000 00001000 "k1"\nmtd7: 00274000 00001000 "r1"\n' > $R/proc/mtd
+printf 'mtd1: 00002000 00001000 "env"\nmtd2: 00002000 00001000 "env2"\nmtd4: 0014c000 00001000 "k0"\nmtd5: 00040000 00001000 "r0"\nmtd6: 0014c000 00001000 "k1"\nmtd7: 00040000 00001000 "r1"\n' > $R/proc/mtd
 mv $R/env $R/dev/mtd1; mv $R/env2 $R/dev/mtd2
 mv $R/k0 $R/dev/mtd4; mv $R/r0 $R/dev/mtd5; mv $R/k1 $R/dev/mtd6; mv $R/r1 $R/dev/mtd7
 rc=0; out=$(chroot $R /bin/nv slotcheck 0) || rc=$?
 echo "slot 0: rc=$rc $out"
 [ "$rc" = 0 ]
-echo "$out" | grep -q "slot 0: passes the partial check (uImage 600064 bytes, header and data CRC match; squashfs superblock, 2000000 bytes, rootfs CRC matches); this is not proof that it boots"
+echo "$out" | grep -q "slot 0: passes the partial check (uImage 600064 bytes, header and data CRC match; squashfs superblock, 200000 bytes, rootfs CRC matches); this is not proof that it boots"
 # One byte of the rootfs changed: the CRC trailer no longer matches.
 cp $R/dev/mtd5 $R/r0good; cp $R/r0bad $R/dev/mtd5
 rc=0; out=$(chroot $R /bin/nv slotcheck 0) || rc=$?
