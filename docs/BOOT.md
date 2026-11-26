@@ -21,7 +21,7 @@ writes it), records the running slot and whether it is committed in
 `/var/run/odi-slot`, and puts a notice in `/var/run/motd` (`/etc/motd` is a
 link to it) when it is not (`docs/FLASHING.md`, "Committing"). The running
 slot is the last `root=31:N` on the kernel command line. After that first
-write it runs a partial check of the other slot (`nv slotcheck`, up to 1.3 MB
+write it runs a partial check of the other slot (`nv slotcheck`, up to 3.8 MB
 of flash read) and writes the state file again with the result, adding an
 `OTHER SLOT BROKEN` notice when that slot would not boot as it is
 (`docs/FLASHING.md`, "Checking the other slot"). Nothing in the boot

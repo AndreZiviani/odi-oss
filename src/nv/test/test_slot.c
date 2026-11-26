@@ -106,13 +106,37 @@ static int kcheck(uint32_t part, uint32_t stop_at, uint32_t chunk, uint32_t bufl
 	return slot_check_kernel(&s, buf, buflen, r);
 }
 
-static int rcheck(uint32_t part, uint32_t stop_at, struct slot_report *r)
+/* The filesystem bytes after the superblock, padded to 4 KiB, and the CRC
+ * trailer image/rootfs-crc.py appends; returns where the trailer starts. */
+static uint32_t add_trailer(uint32_t used)
 {
+	uint32_t end = (used + SQFS_PAD - 1) / SQFS_PAD * SQFS_PAD;
+	uint8_t *t = rpart + end;
+
+	for (uint32_t i = SQFS_SB_LEN; i < used; i++)
+		rpart[i] = (uint8_t)(i * 13 + 1);
+	memset(rpart + used, 0, end - used);
+	memcpy(t, "odrc", 4);
+	put_le32(t + 4, end);
+	put_le32(t + 8, env_crc32(rpart, end));
+	put_le32(t + 12, env_crc32(t, 12));
+	return end;
+}
+
+static int rcheck_buf(uint32_t part, uint32_t stop_at, uint32_t buflen,
+		      struct slot_report *r)
+{
+	static uint8_t buf[4096];
 	struct mem m = { rpart, part, 0, stop_at, 0 };
 	struct slot_src s = { &m, mem_read, part };
 
 	memset(r, 0, sizeof *r);
-	return slot_check_rootfs(&s, r);
+	return slot_check_rootfs(&s, buf, buflen, r);
+}
+
+static int rcheck(uint32_t part, uint32_t stop_at, struct slot_report *r)
+{
+	return rcheck_buf(part, stop_at, 4096, r);
 }
 
 int main(void)
@@ -176,8 +200,8 @@ int main(void)
 	/* Rootfs. */
 	build_rootfs(40000);
 	rc = rcheck(RPART, 0, &r);
-	ck(rc == SLOT_OK && r.rootfs_size == 40000,
-	   "a version 4 superblock passes and reports bytes_used");
+	ck(rc == SLOT_OK && r.rootfs_size == 40000 && !r.rootfs_crc,
+	   "a version 4 superblock passes and reports bytes_used, with no CRC trailer to check");
 	build_rootfs(RPART);
 	ck(rcheck(RPART, 0, &r) == SLOT_OK, "bytes_used equal to the partition passes");
 	build_rootfs(RPART + 1);
@@ -216,12 +240,49 @@ int main(void)
 	ck(rcheck(SQFS_SB_LEN - 1, 0, &r) == SLOT_R_SHORT,
 	   "a partition smaller than a superblock is refused");
 
+	/* Rootfs with the CRC trailer image/build.sh appends. */
+	{
+		uint32_t t;
+
+		build_rootfs(40000);
+		t = add_trailer(40000);
+		rc = rcheck(RPART, 0, &r);
+		ck(rc == SLOT_OK && r.rootfs_crc && r.rootfs_size == 40000,
+		   "a rootfs whose CRC trailer matches passes, and says the CRC was checked");
+		ck(rcheck_buf(RPART, 0, 1, &r) == SLOT_OK && r.rootfs_crc,
+		   "the same, one byte per read");
+		rpart[20000] ^= 0x10;
+		ck(rcheck(RPART, 0, &r) == SLOT_R_DCRC && slot_bad(SLOT_R_DCRC),
+		   "one changed bit in the filesystem fails, as a broken slot");
+		rpart[20000] ^= 0x10;
+		rpart[t - 1] = 0xff;
+		ck(rcheck(RPART, 0, &r) == SLOT_R_DCRC, "a changed byte in the padding fails too");
+		build_rootfs(40000);
+		add_trailer(40000);
+		rpart[t + 13] ^= 1;
+		ck(rcheck(RPART, 0, &r) == SLOT_OK && !r.rootfs_crc,
+		   "a trailer whose own CRC does not match is no trailer: superblock only");
+		build_rootfs(40000);
+		add_trailer(40000);
+		put_le32(rpart + 40, 36000);
+		ck(rcheck(RPART, 0, &r) == SLOT_OK && !r.rootfs_crc,
+		   "a trailer for another length (left from an older image) is no trailer");
+		build_rootfs(40000);
+		add_trailer(40000);
+		ck(rcheck(RPART, 30000, &r) == SLOT_R_READ,
+		   "a read that ends inside the filesystem is a read failure");
+		ck(rcheck(t + RFS_CRC_LEN, 0, &r) == SLOT_OK && r.rootfs_crc,
+		   "a trailer that ends at the end of the partition is read");
+		ck(rcheck(t + RFS_CRC_LEN - 1, 0, &r) == SLOT_OK && !r.rootfs_crc,
+		   "no room for a trailer: superblock only");
+	}
+
 	/* What counts as broken. */
 	ck(!slot_bad(SLOT_OK) && !slot_bad(SLOT_K_READ) && !slot_bad(SLOT_R_READ),
 	   "ok and read failures are not a broken slot");
 	ck(slot_bad(SLOT_K_DCRC) && slot_bad(SLOT_R_MAGIC) && slot_bad(SLOT_K_SHORT),
 	   "check failures are a broken slot");
-	for (rc = SLOT_OK; rc <= SLOT_R_SIZE; rc++)
+	for (rc = SLOT_OK; rc <= SLOT_R_DCRC; rc++)
 		if (!strcmp(slot_check_msg(rc), "unknown result"))
 			ck(0, "every result has a message");
 

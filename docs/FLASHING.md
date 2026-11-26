@@ -471,9 +471,8 @@ line first. The warning before you commit is the login banner (below).
 
     nv slotcheck <slot>       # exit 0 passes, 1 fails, 2 could not check
 
-reads that slot's kernel partition (`k0`/`k1`) and the first 96 bytes of
-its rootfs partition (`r0`/`r1`) and checks what can be checked without
-booting it:
+reads that slot's kernel partition (`k0`/`k1`) and its rootfs partition
+(`r0`/`r1`) and checks what can be checked without booting it:
 
 - the kernel passes the uImage checks `bootm` makes on the magic, the
   header CRC and the CRC of the data, and its data size fits the partition
@@ -482,14 +481,19 @@ booting it:
 - the rootfs starts with a version 4.0 squashfs superblock whose block size
   matches its `block_log` (at most 1 MiB) and whose `bytes_used` fits the
   partition. The compressor is not checked: the stock firmware's LZMA
-  rootfs passes as well as this image's xz one.
+  rootfs passes as well as this image's xz one;
+- when the rootfs carries the CRC the build appends after the filesystem
+  (images from this release on), the whole rootfs is read and has to match
+  it. A rootfs without one, the stock firmware's or an older image's, is
+  checked on its superblock only, and the result line says `no rootfs CRC
+  to check`.
 
 **This is a partial check, not proof that the slot boots.** It does not
-decompress the kernel or read the root filesystem past its superblock, and
-says nothing about what the image does once it runs. What it does catch is
-a slot that cannot boot at all: a kernel erased or half-written by an
-interrupted flash, kernel bytes that have changed, a rootfs partition with
-no filesystem on it. A slot that fails it would not boot as it is.
+decompress the kernel or the root filesystem, and says nothing about what
+the image does once it runs. What it does catch is a slot that cannot boot
+at all: a kernel erased or half-written by an interrupted flash, kernel or
+rootfs bytes that have changed, a rootfs partition with no filesystem on
+it. A slot that fails it would not boot as it is.
 
 ### The reminders
 

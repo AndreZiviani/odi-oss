@@ -80,10 +80,11 @@ int slot_check_kernel(const struct slot_src *k, uint8_t *buf, uint32_t buflen,
 	return SLOT_OK;
 }
 
-int slot_check_rootfs(const struct slot_src *rf, struct slot_report *r)
+int slot_check_rootfs(const struct slot_src *rf, uint8_t *buf, uint32_t buflen,
+		      struct slot_report *r)
 {
-	uint8_t sb[SQFS_SB_LEN];
-	uint32_t block, log, lo, hi;
+	uint8_t sb[SQFS_SB_LEN], t[RFS_CRC_LEN];
+	uint32_t block, log, lo, hi, end, left, crc;
 
 	if (rf->size < SQFS_SB_LEN)
 		return SLOT_R_SHORT;
@@ -104,6 +105,31 @@ int slot_check_rootfs(const struct slot_src *rf, struct slot_report *r)
 	if (hi || lo < SQFS_SB_LEN || lo > rf->size)
 		return SLOT_R_SIZE;
 	r->rootfs_size = lo;
+
+	/* The CRC trailer (slot.h), right after the padded filesystem. No room
+	 * for one: nothing more to check. */
+	end = lo + (SQFS_PAD - lo % SQFS_PAD) % SQFS_PAD;
+	if (end < lo || end > rf->size || rf->size - end < RFS_CRC_LEN)
+		return SLOT_OK;
+	crc = env_crc32(sb, SQFS_SB_LEN);
+	for (left = end - SQFS_SB_LEN; left; ) {
+		uint32_t n = left < buflen ? left : buflen;
+
+		if (!read_full(rf, buf, n))
+			return SLOT_R_READ;
+		crc = env_crc32_update(crc, buf, n);
+		left -= n;
+	}
+	if (!read_full(rf, t, RFS_CRC_LEN))
+		return SLOT_R_READ;
+	/* Erased flash, a stock rootfs, an image built before the trailer: no
+	 * trailer, which is not a failure. */
+	if (!(t[0] == 'o' && t[1] == 'd' && t[2] == 'r' && t[3] == 'c') ||
+	    le32(t + 4) != end || le32(t + 12) != env_crc32(t, 12))
+		return SLOT_OK;
+	r->rootfs_crc = 1;
+	if (le32(t + 8) != crc)
+		return SLOT_R_DCRC;
 	return SLOT_OK;
 }
 
@@ -123,6 +149,7 @@ const char *slot_check_msg(int rc)
 	case SLOT_R_VERSION: return "rootfs: squashfs superblock is not version 4.0";
 	case SLOT_R_BLOCK:   return "rootfs: squashfs block size does not match its block_log";
 	case SLOT_R_SIZE:    return "rootfs: squashfs bytes_used does not fit the partition";
+	case SLOT_R_DCRC:    return "rootfs: CRC does not match the one the build recorded (changed)";
 	}
 	return "unknown result";
 }

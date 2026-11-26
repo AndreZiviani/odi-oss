@@ -57,7 +57,7 @@ slotcheck)
 		sed 1d "$T/slotcheck" | sed "s/SLOT/\$2/"
 		exit "\$(head -n 1 "$T/slotcheck")"
 	fi
-	echo "nv: slot \$2: passes the partial check (uImage 1172619 bytes, header and data CRC match; squashfs superblock, 1542606 bytes); this is not proof that it boots"
+	echo "nv: slot \$2: passes the partial check (uImage 1172619 bytes, header and data CRC match; squashfs superblock, 1542606 bytes, rootfs CRC matches); this is not proof that it boots"
 	exit 0 ;;
 esac
 exit 1
@@ -273,7 +273,7 @@ run
 st "other_slot is the slot not running" "other_slot=0"
 if [ "$(cat "$T/slotcheck.asked" 2>/dev/null)" = 0 ]; then ok "nv slotcheck is asked about slot 0"; else no "nv slotcheck is asked about slot 0"; fi
 st "a pass is recorded" "other_slot_check=ok"
-st "with what nv said, partial check and all" "other_slot_detail=slot 0: passes the partial check (uImage 1172619 bytes, header and data CRC match; squashfs superblock, 1542606 bytes); this is not proof that it boots"
+st "with what nv said, partial check and all" "other_slot_detail=slot 0: passes the partial check (uImage 1172619 bytes, header and data CRC match; squashfs superblock, 1542606 bytes, rootfs CRC matches); this is not proof that it boots"
 quiet "a pass on a committed slot adds nothing to the banner"
 if [ "$(sed -n 9p "$T/state")" = "uncommitted=0" ] && [ "$(sed -n 10p "$T/state")" = "other_slot=0" ]; then
 	ok "the new keys come after uncommitted (swimage.c reads the first 256 bytes)"

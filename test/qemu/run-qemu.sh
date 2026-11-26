@@ -474,8 +474,8 @@ say "scenario: nv slotcheck, the nv commit warning and the setenv guard (real nv
 # middle on, the way an interrupted flash leaves it, and a rootfs partition
 # with nothing on it. src/nv/test/test_slot.c has every other shape.
 sshx 'test -x /bin/nv' || fail "no /bin/nv in the initramfs (make src builds it)"
-python3 - "$WORK/slotcheck" <<'PY'
-import os, struct, sys, zlib
+python3 - "$WORK/slotcheck" "$ROOT/image/rootfs-crc.py" <<'PY'
+import os, struct, subprocess, sys, zlib
 d = sys.argv[1]; os.makedirs(d, exist_ok=True)
 KPART, RPART = 0x14c000, 0x274000
 payload = bytes((i * 7 + 3) & 0xff for i in range(600000))
@@ -493,7 +493,16 @@ struct.pack_into('<I', sb, 12, 1 << 18)
 struct.pack_into('<HH', sb, 20, 4, 18)
 struct.pack_into('<H', sb, 28, 4)
 struct.pack_into('<Q', sb, 40, 2000000)
-open(f'{d}/r0', 'wb').write(bytes(sb) + b'\xff' * (RPART - 96))
+# The filesystem padded to 4 KiB, with the CRC trailer image/build.sh
+# appends, written by the same tool; r0bad has one byte changed in it.
+fs = bytes(sb) + bytes((i * 13 + 1) & 0xff for i in range(96, 2000000))
+fs += b'\0' * (-len(fs) % 4096)
+open(f'{d}/fs', 'wb').write(fs)
+subprocess.run([sys.executable, '-I', sys.argv[2], f'{d}/fs'], check=True)
+fs = open(f'{d}/fs', 'rb').read()
+open(f'{d}/r0', 'wb').write(fs + b'\xff' * (RPART - len(fs)))
+bad = bytearray(fs); bad[1000000] ^= 1
+open(f'{d}/r0bad', 'wb').write(bytes(bad) + b'\xff' * (RPART - len(fs)))
 open(f'{d}/r1', 'wb').write(b'\xff' * RPART)
 # Both environment copies already commit slot 0 (sw_tryactive=2 too), so
 # `nv commit 0` writes nothing and succeeds: the one success a chroot can
@@ -510,7 +519,7 @@ open(f'{d}/env2-one', 'wb').write(struct.pack('>I', zlib.crc32(body)) + b'\x01' 
 open(f'{d}/env2-bad', 'wb').write(struct.pack('>I', zlib.crc32(body) ^ 1) + b'\x01' + body)
 PY
 sshx 'rm -rf /tmp/sc; mkdir -p /tmp/sc/proc /tmp/sc/dev /tmp/sc/bin && cp /bin/nv /tmp/sc/bin/nv'
-for f in k0 r0 k1 r1 env env2 env2-one env2-bad; do
+for f in k0 r0 r0bad k1 r1 env env2 env2-one env2-bad; do
 	sshx "cat > /tmp/sc/$f" < "$WORK/slotcheck/$f" || fail "could not copy $f to the guest"
 done
 sshx 'sh -s' <<'GUEST' > "$WORK/slotcheck.out" 2>&1 || { cat "$WORK/slotcheck.out" >&2; fail "nv slotcheck did not give the expected answers"; }
@@ -522,7 +531,14 @@ mv $R/k0 $R/dev/mtd4; mv $R/r0 $R/dev/mtd5; mv $R/k1 $R/dev/mtd6; mv $R/r1 $R/de
 rc=0; out=$(chroot $R /bin/nv slotcheck 0) || rc=$?
 echo "slot 0: rc=$rc $out"
 [ "$rc" = 0 ]
-echo "$out" | grep -q "slot 0: passes the partial check (uImage 600064 bytes, header and data CRC match; squashfs superblock, 2000000 bytes); this is not proof that it boots"
+echo "$out" | grep -q "slot 0: passes the partial check (uImage 600064 bytes, header and data CRC match; squashfs superblock, 2000000 bytes, rootfs CRC matches); this is not proof that it boots"
+# One byte of the rootfs changed: the CRC trailer no longer matches.
+cp $R/dev/mtd5 $R/r0good; cp $R/r0bad $R/dev/mtd5
+rc=0; out=$(chroot $R /bin/nv slotcheck 0) || rc=$?
+echo "slot 0, rootfs changed: rc=$rc $out"
+[ "$rc" = 1 ]
+echo "$out" | grep -q "slot 0: FAILS the partial check: rootfs: CRC does not match the one the build recorded (changed)"
+mv $R/r0good $R/dev/mtd5
 rc=0; out=$(chroot $R /bin/nv slotcheck 1) || rc=$?
 echo "slot 1: rc=$rc $out"
 [ "$rc" = 1 ]

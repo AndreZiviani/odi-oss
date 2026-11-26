@@ -523,7 +523,7 @@ static int slot_part(const char *name, int is_kernel, struct slot_report *r)
 	src.read = mtd_fd_read;
 	src.size = m.size;
 	rc = is_kernel ? slot_check_kernel(&src, slot_buf, sizeof slot_buf, r)
-		       : slot_check_rootfs(&src, r);
+		       : slot_check_rootfs(&src, slot_buf, sizeof slot_buf, r);
 	sys_close(f.fd);
 	return rc;
 }
@@ -538,6 +538,7 @@ static int slot_check(int slot, int *rc_out, struct slot_report *r)
 	int rc;
 
 	r->kernel_size = r->rootfs_size = 0;
+	r->rootfs_crc = 0;
 	rc = slot_part(k, 1, r);
 	if (rc == SLOT_OK)
 		rc = slot_part(rf, 0, r);
@@ -560,8 +561,9 @@ static int slotcheck(const char *arg)
 	res = slot_check(slot, &rc, &r);
 	if (res == 0)
 		out_fmt("nv: slot %d: passes the partial check (uImage %d bytes, header and data CRC match;"
-			" squashfs superblock, %d bytes); this is not proof that it boots\n",
-			(long)slot, (long)r.kernel_size, (long)r.rootfs_size);
+			" squashfs superblock, %d bytes, %s); this is not proof that it boots\n",
+			(long)slot, (long)r.kernel_size, (long)r.rootfs_size,
+			r.rootfs_crc ? "rootfs CRC matches" : "no rootfs CRC to check");
 	else if (res == 1)
 		out_fmt("nv: slot %d: FAILS the partial check: %s\n", (long)slot, slot_check_msg(rc));
 	else

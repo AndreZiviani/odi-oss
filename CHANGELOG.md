@@ -5,6 +5,13 @@ listed here.
 
 ## Unreleased
 
+- `nv slotcheck` checks the whole rootfs of the other slot, not only its
+  squashfs superblock. squashfs has no checksum of its own, so the build
+  appends one: 16 bytes after the filesystem (`image/rootfs-crc.py`), which
+  the kernel does not read. A rootfs whose bytes changed since the build
+  now fails the check. A rootfs without them, the stock firmware's or one
+  built before this release, is checked on its superblock as before, and
+  the result says `no rootfs CRC to check` (#482).
 - omcid: the upload limit an OLT sets per GEM port (its upstream traffic
   descriptor, class 280) is no longer applied by default. One OLT names
   about 10 Mbit/s on every GEM port of a 200 Mbit/s service, and since

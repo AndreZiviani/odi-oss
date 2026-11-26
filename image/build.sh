@@ -387,6 +387,9 @@ run env -u SOURCE_DATE_EPOCH mksquashfs build/rootfs build/rootfs.img \
 	-pf rootfs/devices.pseudo \
 	-always-use-fragments -no-xattrs -noappend -no-sparse -all-root \
 	-processors 1 >/dev/null
+# The CRC `nv slotcheck` checks the rootfs of the other slot against: 16
+# bytes after the filesystem, which the kernel does not read (src/nv/slot.h).
+run python3 image/rootfs-crc.py build/rootfs.img
 
 RSIZE=$(size "$ROOT/build/rootfs.img")
 KSIZE=$(size "$KERNEL")

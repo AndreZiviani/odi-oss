@@ -1185,7 +1185,7 @@ in service.
                                   an invalid copy is repaired first); the boot keys need --force, below
     nv fallback [name]            read the OTHER copy, the one U-Boot falls back to
     nv commit [--force] slot      sw_commit=slot, mupgrade_en=0 and sw_tryactive=2 in BOTH copies, verified
-    nv slotcheck slot             a PARTIAL check of kN and rN: uImage magic, CRCs and size, squashfs superblock
+    nv slotcheck slot             a PARTIAL check of kN and rN: uImage magic, CRCs and size, squashfs superblock and CRC
 
 Reads and writes the redundant environment (mtd `env` and `env2`) with a
 CRC check and no vendor library. It is what arms and commits a trial boot:
@@ -1284,14 +1284,16 @@ After a successful commit, and after its own result line, it warns when
 `/var/run/odi-slot` records a failed check of the slot it left behind (the
 check below, run by `slot-state.sh`); it does not read that slot itself.
 
-`slotcheck` reads the kernel partition of a slot and the first 96 bytes of
-its rootfs partition, and answers with one line: exit 0, `passes the partial
+`slotcheck` reads the kernel and rootfs partitions of a slot, and answers with one line: exit 0, `passes the partial
 check`, exit 1, `FAILS the partial check: <reason>`, exit 2, `not checked:
 <reason>` (a partition missing or unreadable, which says nothing about the
 slot). It checks the uImage magic, header CRC and data CRC as U-Boot's
 `bootm` does, but not the other header fields, plus that the image fits the
 partition, and a version 4.0 squashfs
-superblock (block size, `bytes_used` within the partition). It is not proof
+superblock (block size, `bytes_used` within the partition). A rootfs built
+from this release on carries a CRC after the filesystem (`src/nv/slot.h`),
+and then the whole rootfs has to match it; without one the line says `no
+rootfs CRC to check`. It is not proof
 that the slot boots (`docs/FLASHING.md`, "Checking the other slot").
 `slot-state.sh` runs it on the other slot at every boot.
 

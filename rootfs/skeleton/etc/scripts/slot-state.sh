@@ -30,9 +30,10 @@
 # It also checks the OTHER slot, the one a reverted trial boots and the only
 # way back after a commit: `nv slotcheck`, a PARTIAL check (src/nv/slot.h)
 # that the kernel there still has a valid uImage header, data CRC and size
-# and the rootfs starts with a squashfs superblock. A slot that fails it
-# would not boot as it is, and the banner says so; one that passes is not
-# proven to boot. The check reads up to 1.3 MB of flash, so it runs AFTER
+# and the rootfs starts with a squashfs superblock, and matches the CRC the
+# build recorded when it has one. A slot that fails it would not boot as it
+# is, and the banner says so; one that passes is not proven to boot. The
+# check reads up to 3.8 MB of flash, so it runs AFTER
 # the state file is first written: trial-guard.sh waits only STATE_WAIT_S
 # for that file, and must not wait on the read. The file is then written
 # again with the result, still by rename.
@@ -59,7 +60,7 @@ CONFIRM_ARP_FILE=${CONFIRM_ARP_FILE:-/etc/config/confirm-arp}
 SAFE_FLAG=${SAFE_FLAG:-/var/run/safe-mode}
 # nv reads two 8 KB partitions; 10 s is generous.
 NV_TIMEOUT_S=${NV_TIMEOUT_S:-10}
-# nv slotcheck reads at most the 1.3 MB kernel partition and 96 bytes of the
+# nv slotcheck reads at most the 1.3 MB kernel partition and the 2.5 MB
 # rootfs one; NOR reads at well over 1 MB/s, so 30 s is a stuck read.
 SLOTCHECK_TIMEOUT_S=${SLOTCHECK_TIMEOUT_S:-30}
 LOG_WAIT_S=${LOG_WAIT_S:-30}
