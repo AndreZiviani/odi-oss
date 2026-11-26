@@ -1067,7 +1067,7 @@ says so and fails when the kernel does not publish the files.
 
 `bridge` and `cfgset` write; the rest read. A rule built with `bridge` lasts
 until omcid next rebuilds its bridge connections, which withdraws every
-service it holds. The file arguments of `vlan` and
+service the MIB does not call for. The file arguments of `vlan` and
 `ident` are for tests: omcid loads what they name in place of the store, and
 keeps using it until it restarts. The stock command shapes
 (`get sn|log|logfile|devmode|dmmode|cflag|version`, `mib get <class>

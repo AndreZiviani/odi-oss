@@ -5,6 +5,16 @@ listed here.
 
 ## Unreleased
 
+- omcid: a rebuild of the bridge connections no longer takes every
+  service down first. It derives the whole table as before, then withdraws
+  only the services the new table no longer has, sends the changed ones
+  again in place, and leaves the unchanged ones alone, so a VLAN change on
+  one service does not interrupt the others. A rebuild that changes
+  nothing sends no driver call. The omcid log says how many were sent,
+  left unchanged and withdrawn. The driver-call goldens lose the
+  intermediate sends of each service while its UNI mask was still being
+  merged (#482).
+
 - Tests: the fuzz job of omcid is a workflow of its own (`fuzz.yml`). It
   fuzzes every push to main, and a pull request only when it changes what
   the fuzz build reads, so a finding in code a pull request did not touch

@@ -436,7 +436,9 @@ bdg() {   # bdg <session> <odi.conf text> <log>: the bridge connections the sess
 	$Q cli/build/omcli --inject-file "$1" > /dev/null 2>&1
 	settled "$3"
 	omcid_stop "$pid"
-	grep -c '^drv 51 ' "$3"
+	# one line per ingress and GEM port a rebuild plans: the VEIP port is
+	# merged into the service of the UNI one, so it adds no cmd 51
+	grep -c '\] bdgconn ingress .* planned$' "$3"
 }
 whole=$(bdg "$FIX/omci-session-isp1.txt" "" /tmp/keys-b1.log)
 pptp=$(bdg /tmp/keys-session-pptp.txt "" /tmp/keys-b2.log)

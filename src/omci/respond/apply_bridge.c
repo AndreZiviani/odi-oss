@@ -33,6 +33,12 @@ int conn_dirty;
 
 struct omci_bdgconn servtab[SERV_MAX];
 
+/* What a rebuild started from, and whether it is planning: while serv_plan
+ * is set, bdgconn_add() fills servtab without sending, and serv_commit()
+ * then sends only what differs from serv_was (bdgconn_rebuild()). */
+static struct omci_bdgconn serv_was[SERV_MAX];
+static int serv_plan;
+
 
 static int serv_avail(void)
 {
@@ -291,6 +297,16 @@ int bdgconn_add(int ingress, uint16_t gemPort, uint32_t dir,
 		}
 		return service_id;
 	}
+	if (serv_plan) {
+		/* Planned: serv_commit() sends it once the plan is whole, and
+		 * only when the driver does not hold it already. */
+		out_fmt("   [hw] bdgconn ingress %04x gem %d dir %d serv %d "
+			"us %d ds %d unimask %d planned\n",
+			(long)ingress, (long)gemPort, (long)dir, (long)service_id,
+			(long)servtab[service_id].us_flow, (long)servtab[service_id].ds_flow,
+			(long)servtab[service_id].uni_mask);
+		return service_id;
+	}
 
 	rc = omci_activeBdgConn(&scratch);
 	out_fmt("   [hw] bdgconn ingress %04x gem %d dir %d serv %d "
@@ -397,10 +413,11 @@ void gen_manual_vlan_rule(struct omci_vlan_oper *vr, int vid, int pri, int isMc,
  * list entry, an untagged or a tagged rule, or with no filter entries
  * untagged in and the manual VLAN added (stock service 0: NO TAG, assign
  * VID 11).
- * Multicast (direction 2 CTPs) is left to bc_gem_update. Rebuilt whole --
- * tear down, derive, add -- OLT_QUIET_MS after the last OMCI frame, since
- * the OLT sends these entities in no reliable order. What is torn down is
- * every in_use entry of servtab (bdgconn_rebuild()). */
+ * Multicast (direction 2 CTPs) is left to bc_gem_update. Derived whole
+ * OLT_QUIET_MS after the last OMCI frame, since the OLT sends these
+ * entities in no reliable order, and then sent as a difference: services
+ * the new plan no longer has are withdrawn, changed ones are sent again
+ * in place, and unchanged ones are left alone (bdgconn_rebuild()). */
 
 static void gen_vid_filter_rule(struct omci_vlan_oper *vr, unsigned vid, int pbit)
 {
@@ -1833,7 +1850,117 @@ int bdgconn_retry_pending(void)
 	return left;
 }
 
+/* The planned table against the one the rebuild started from, sent: what
+ * the plan no longer has is withdrawn, then every planned service the
+ * driver does not hold byte for byte is sent, in service-id order. A
+ * service the plan left as it was is not touched, so a VLAN edit on one
+ * service does not interrupt the others. Sending to an id the driver holds
+ * replaces its rule, as a merge in bdgconn_add() always has. A withdraw
+ * that fails keeps the id as SERV_PENDING; a send that fails gives the id
+ * back, after withdrawing what the driver held there. */
+static void serv_commit(void)
+{
+	int kept = 0, sent = 0, gone = 0;
+
+	for (int i = 0; i < SERV_MAX; i++) {
+		int rc;
+
+		if (serv_was[i].in_use != 1 || servtab[i].in_use == 1)
+			continue;
+		rc = omci_deactiveBdgConn((uint32_t)i);
+		if (rc) {
+			out_fmt("   [hw] bridge connection %d deactivate -> %d, kept pending\n",
+				(long)i, (long)rc);
+			servtab[i].in_use = SERV_PENDING;
+			continue;
+		}
+		gone++;
+	}
+	for (int i = 0; i < SERV_MAX; i++) {
+		struct omci_bdgconn scratch;
+		const uint8_t *a = (const uint8_t *)&servtab[i];
+		const uint8_t *b = (const uint8_t *)&serv_was[i];
+		unsigned k = 0;
+		int rc;
+
+		if (servtab[i].in_use != 1)
+			continue;
+		if (serv_was[i].in_use == 1) {
+			while (k < OMCI_BDGCONN_LEN && a[k] == b[k])
+				k++;
+			if (k == OMCI_BDGCONN_LEN) {
+				kept++;
+				continue;
+			}
+		}
+		scratch = servtab[i];
+		rc = omci_activeBdgConn(&scratch);
+		out_fmt("   [hw] bdgconn serv %d us %d ds %d unimask %d -> %d\n",
+			(long)i, (long)servtab[i].us_flow, (long)servtab[i].ds_flow,
+			(long)servtab[i].uni_mask, (long)rc);
+		if (rc != 0) {
+			servtab[i].in_use = 0;
+			if (serv_was[i].in_use == 1 && omci_deactiveBdgConn((uint32_t)i))
+				servtab[i].in_use = SERV_PENDING;
+		} else {
+			sent++;
+		}
+		sys_nanosleep(0, 1000 * 1000);    /* 1 ms between sends, as the stock daemon paces them */
+	}
+	out_fmt("   [hw] bridge connections sent: %d, unchanged and not sent: %d, withdrawn: %d\n",
+		(long)sent, (long)kept, (long)gone);
+}
+
+static int plan_ning, plan_added;
+static int bdgconn_plan(void);
+
 void bdgconn_rebuild(void)
+{
+	int rc;
+
+	/* Every service in servtab, not a list this process kept beside it:
+	 * snapshot_load restores servtab, so a resumed omcid has the services
+	 * of the last one here and would have had an empty list. The plan
+	 * starts from a free table; serv_was keeps what the driver holds, for
+	 * serv_commit() to compare against. A slot left SERV_PENDING by a
+	 * deactivate that failed (a netlink send lost before the kernel ran
+	 * it) still has its rule in the switch: the deactivate is tried again
+	 * first, and while it fails the slot stays owned, so the plan does not
+	 * hand its id out. Freeing it would forget a rule that a shrunk plan
+	 * never replaces. No conn_dirty for a failure: bdgconn_retry_pending()
+	 * tries again on its own, paced by the main loop. A dry run sends
+	 * nothing and builds the whole table again. */
+	for (int i = 0; i < SERV_MAX; i++) {
+		serv_was[i] = servtab[i];
+		if (servtab[i].in_use == SERV_PENDING && apply_hw) {
+			int rc = omci_deactiveBdgConn((uint32_t)i);
+
+			if (rc) {
+				out_fmt("   [hw] bridge connection %d deactivate -> %d, kept pending\n",
+					(long)i, (long)rc);
+				serv_was[i].in_use = 0;
+				continue;
+			}
+		}
+		servtab[i].in_use = 0;
+		serv_was[i].in_use = serv_was[i].in_use == 1;
+	}
+	if (!apply_hw) {
+		if (bdgconn_plan() == 0)
+			out_fmt("   [dry] bridge connections rebuilt: %d ingress x gem = %d\n",
+				(long)plan_ning, (long)plan_added);
+		return;
+	}
+	serv_plan = 1;
+	rc = bdgconn_plan();
+	serv_plan = 0;
+	serv_commit();
+	if (rc == 0)
+		out_fmt("   [hw] bridge connections rebuilt: %d ingress x gem = %d\n",
+			(long)plan_ning, (long)plan_added);
+}
+
+static int bdgconn_plan(void)
 {
 	const struct omci_class *c47 = find_class(OMCI_ME_MAC_BRIDGE_PORT_CFG_DATA);
 	const struct omci_class *c266 = find_class(OMCI_ME_GEM_IW_TP);
@@ -1844,36 +1971,10 @@ void bdgconn_rebuild(void)
 	int ingress[8], ingress_bridge[8], ingress_bport[8], ingress_iphost[8];
 	int ning = 0, added = 0, mvid, nev = 0;
 
-	/* Every service in servtab, not a list this process kept beside it:
-	 * snapshot_load restores servtab, so a resumed omcid has the services
-	 * of the last one here and would have had an empty list. A deactivate
-	 * that fails (a netlink send lost before the kernel ran it) leaves the
-	 * rule in the switch, so the slot stays owned as SERV_PENDING: the plan
-	 * below does not hand its id out and it is not a live service. Freeing
-	 * it here would forget a rule that a shrunk plan never replaces. No
-	 * conn_dirty: a rebuild tears down and re-adds every live service, so
-	 * asking for another one per failure would loop. The next rebuild tries
-	 * the deactivate again first, and bdgconn_retry_pending() does it on
-	 * its own, paced by the main loop. */
-	for (int i = 0; i < SERV_MAX; i++) {
-		if (!servtab[i].in_use)
-			continue;
-		if (apply_hw) {
-			int rc = omci_deactiveBdgConn((uint32_t)i);
-
-			if (rc) {
-				out_fmt("   [hw] bridge connection %d deactivate -> %d, kept pending\n",
-					(long)i, (long)rc);
-				servtab[i].in_use = SERV_PENDING;
-				continue;
-			}
-		}
-		servtab[i].in_use = 0;
-	}
 	for (unsigned i = 0; i < sizeof uc_vids; i++)
 		uc_vids[i] = 0;
 	if (!c47 || !c266 || !c268 || !c281 || !c84)
-		return;
+		return -1;
 	for (int i = 0; i < MIB_ROWS && ning < 8; i++) {
 		struct mib_row *r = mib_row_at(i);
 		uint32_t tp;
@@ -2200,6 +2301,7 @@ void bdgconn_rebuild(void)
 			}                        /* targets of this bridge port */
 		}
 	}
-	out_fmt("   [%s] bridge connections rebuilt: %d ingress x gem = %d\n",
-		apply_hw ? "hw" : "dry", (long)ning, (long)added);
+	plan_ning = ning;
+	plan_added = added;
+	return 0;
 }

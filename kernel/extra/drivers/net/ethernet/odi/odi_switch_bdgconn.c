@@ -1145,8 +1145,9 @@ int odi_switch_bdgconn_activate(void *buf, uint32_t len)
 /* cmd 50 -- deactiveBdgConn, 4 bytes: the service id. Frees the slot,
  * invalidates its CF rows (all-zero rule and action rows; no capture has
  * a delete in it, see odi_sw_cf_del) and rewrites its VLAN
- * row from the services that remain. omcid rebuilds by deactivating every
- * service and activating them again, which refills the freed rows.
+ * row from the services that remain. A rebuild of omcid deactivates only
+ * the services its new plan no longer has; a changed one it activates
+ * again under its id, which replaces it above.
  */
 int odi_switch_bdgconn_deactivate(void *buf, uint32_t len)
 {

@@ -185,11 +185,43 @@ settle() {
 	wait_count "$1" 'bridge connections rebuilt' "$2" 15 || bad "$1: no bridge rebuild after the session"
 	sync_send "$1"     # whatever the rebuild queued behind it has been served
 }
-rules_in_place() {   # the bridge rules of the rebuild a reload made
-	awk '/event=reload changed=vlan/{on=1} on&&/^drv 51 /{print} on&&/bridge connections rebuilt/{exit}' "$1"
+# The bridge rules the driver holds, in service-id order: every cmd 51 of
+# the log sets its id (the third word), every cmd 50 frees one. A rebuild
+# sends only the services that changed, so the rules of a rebuild are the
+# table after it, not the calls it made.
+rules_table() {      # rules_table <log> last|inplace
+	awk -v mode="$2" '
+	function hex(s,   i, n) {
+		n = 0
+		for (i = 1; i <= length(s); i++)
+			n = n * 16 + index("0123456789abcdef", substr(s, i, 1)) - 1
+		return n
+	}
+	function dump(   i, o) {
+		o = ""
+		for (i = 0; i < 256; i++)
+			if (i in t)
+				o = o t[i] "\n"
+		return o
+	}
+	/^drv 51 / { t[hex(substr($4, 17, 8))] = $0 }
+	/^drv 50 / { delete t[hex($4)] }
+	/event=reload changed=vlan/ { on = 1 }
+	/bridge connections rebuilt/ {
+		if (mode == "last")
+			last = dump()
+		else if (on) {
+			printf "%s", dump()
+			exit
+		}
+	}
+	END { if (mode == "last") printf "%s", last }' "$1"
 }
-rules_last() {       # the bridge rules of the last rebuild of a run
-	awk '/^drv 51 /{b=b $0 "\n"} /bridge connections rebuilt/{last=b; b=""} END{printf "%s", last}' "$1"
+rules_in_place() {   # the bridge rules after the rebuild a reload made
+	rules_table "$1" inplace
+}
+rules_last() {       # the bridge rules after the last rebuild of a run
+	rules_table "$1" last
 }
 
 # ------------------------------------------------ 1. VLAN, in place vs fresh
@@ -240,8 +272,8 @@ for isp in isp1 isp2; do
 		check "$label: the status file says done, ok, vlan" "done ok vlan rebuild" \
 			"$(st state) $(st result) $(st changed) $(st action)"
 		check "$label: the MIB is untouched by the reload" "$mib_before" "$mib_after"
-		if [ -s /tmp/rl-rules-inplace.txt ]; then ok "$label: the reload sent bridge rules ($(wc -l < /tmp/rl-rules-inplace.txt))"
-		else bad "$label: the reload sent no bridge rules"; fi
+		if [ -s /tmp/rl-rules-inplace.txt ]; then ok "$label: the driver holds bridge rules after the reload ($(wc -l < /tmp/rl-rules-inplace.txt))"
+		else bad "$label: the driver holds no bridge rules after the reload"; fi
 		if cmp -s /tmp/rl-rules-before.txt /tmp/rl-rules-inplace.txt; then
 			bad "$label: the rules did not change with the setting"
 		else ok "$label: the rules differ from the ones before the reload"; fi
