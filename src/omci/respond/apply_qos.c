@@ -254,6 +254,15 @@ static struct {
 int qos_dirty;
 int qos_full;
 
+/* Only the last successfully programmed upstream flow, never the current
+ * MIB (which may already have changed). */
+int qos_service_tcont(unsigned flow, uint16_t gem)
+{
+	if (flow >= FLOW_MAX || !prog.f[flow].live || prog.f[flow].gem != gem)
+		return -1;
+	return prog.f[flow].tcontMe;
+}
+
 void *qos_prog_state(uint32_t *len)
 {
 	*len = (uint32_t)sizeof prog;

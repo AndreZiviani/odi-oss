@@ -1015,6 +1015,8 @@ omcli uses omcid's own queue and commands:
                                          GEM ports, VLANs, traffic descriptors
                                          (the format is under metricsd)
     omcli conn                           the bridge connections omcid built
+    omcli services                       installed VLAN rule status (read only;
+                                         see below)
     omcli flows                          the GEM flow tables, per direction
     omcli mib [all|classId] [entityId] [--secrets]
                                          every managed entity, the ONU's own
@@ -1147,6 +1149,40 @@ bytes exactly as given, of any length, to test that; `--inject-file F` every
 frame in F, one per line, back to back), `--vendor` talks to a stock
 daemon instead, `--id N [-f]` sends a raw command id (`-f` is needed for an
 id that writes, known or not, as for the named command).
+
+#### Installed VLAN rules
+
+`omcli services` emits one space-separated key=value line per occupied service
+slot, ordered by service id, followed by a summary. Unlike `provision`, it
+reads the service table, not the current MIB. It does not read or change the
+switch. Example (synthetic):
+
+```
+service id=1 state=live dir=3 kind=forward uni_mask=1 rule_gen=4 us_gem=20 ds_gem=20 tcont_me=? outer_action=pass inner_action=pass wan_outer=? wan_inner=37 pon_outer=? pon_inner=37 vlan_me=? gem_ctp_me=?
+summary live=1 pending=0 dry_run=0 rebuild_pending=0
+```
+
+- `state=live` means omcid accounts for an installed rule, not a hardware
+  readback or proof of traffic. `pending` means removal failed and the rule
+  may remain; `dry-run` means it was not sent. Free slots are omitted.
+- `dir` is 1 upstream, 2 downstream, 3 both; `kind` is forward or drop.
+  GEM ports are resolved through the direction-specific flow tables.
+  Actions are the descriptor operations (pass, push, pop, rewrite or ?),
+  for the stated direction or upstream in a bidirectional rule; the
+  downstream action of a bidirectional rule is derived by the driver.
+- WAN (router side) and PON (fibre side) tag fields are in outer S-tag,
+  inner C-tag order, not a list of all possible VLANs. A number is a VID,
+  `none` means explicitly absent, `tagged` means present with unknown VID,
+  and `?` means not established by the stored rule. A transparent all-pass
+  rule cannot reveal the VLANs or tag count of passing frames. An uninstalled
+  provisioned rule never supplies a VID here. A drop row has no output tag.
+- For live upstream flows, `tcont_me` is the T-CONT instance id from the
+  programmed QoS state, when available. The rule descriptor does not retain
+  source VLAN or GEM CTP ME IDs; those fields are `?`, not guesses from
+  potentially newer provisioning. All ME IDs are decimal.
+- `rebuild_pending=1` means the installed view may lag provisioning.
+  Rules are individual matches, not a simulation of precedence, traffic,
+  or the complete resulting switch configuration.
 
 ### `omciprobe` -- one raw driver command
 

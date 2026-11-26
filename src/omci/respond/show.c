@@ -646,6 +646,166 @@ uint32_t cli_conn(void)
 	return OMCLI_OK;
 }
 
+/* A diagnostic of the stored descriptor, not a prediction of traffic or a
+ * reconstruction from the MIB. Outer and inner are the S- and C-tag planes
+ * respectively. A VID-less transparent rule cannot tell us what tags arrive.
+ */
+enum { TAG_UNKNOWN = -1, TAG_ABSENT = -2, TAG_PRESENT = -3 };
+
+static int service_match_tag(uint32_t mode, const struct omci_vlan *tag,
+			     int compare_vid)
+{
+	if (mode & OMCI_TAGF_UNTAGGED)
+		return TAG_ABSENT;
+	if (compare_vid && (mode & (OMCI_TAGF_VID | OMCI_TAGF_TCI)) &&
+	    tag->vid < OMCI_VID_ANY)
+		return (int)tag->vid;
+	return mode & OMCI_TAGF_TAGGED ? TAG_PRESENT : TAG_UNKNOWN;
+}
+
+static int service_treat_tag(int input, const struct omci_vlan_act *act)
+{
+	switch (act->tag_op) {
+	case OMCI_TAGOP_PASS:
+		return input;
+	case OMCI_TAGOP_POP:
+		return TAG_ABSENT;
+	case OMCI_TAGOP_PUSH:
+	case OMCI_TAGOP_REWRITE:
+		if (act->vid_op == OMCI_VIDOP_SET && act->set_tag.vid < OMCI_VID_ANY)
+			return (int)act->set_tag.vid;
+		return TAG_PRESENT;
+	default:
+		return TAG_UNKNOWN;
+	}
+}
+
+static const char *service_tag_action(uint32_t op)
+{
+	switch (op) {
+	case OMCI_TAGOP_PASS:    return "pass";
+	case OMCI_TAGOP_PUSH:    return "push";
+	case OMCI_TAGOP_POP:     return "pop";
+	case OMCI_TAGOP_REWRITE: return "rewrite";
+	default:                 return "?";
+	}
+}
+
+static void service_print_value(const char *key, int val)
+{
+	out_fmt(" %s=", key);
+	if (val >= 0)
+		out_fmt("%u", (unsigned long)val);
+	else
+		out(val == TAG_ABSENT ? "none" : val == TAG_PRESENT ? "tagged" : "?");
+}
+
+static int service_gem(const struct flow_slot *table, uint32_t flow)
+{
+	return flow < FLOW_MAX && table[flow].used ? table[flow].port : -1;
+}
+
+uint32_t cli_services(void)
+{
+	unsigned live = 0, pending = 0, dry = 0;
+
+	if (cli_arg(1)) {
+		out("usage: services\n");
+		return OMCLI_EARGS;
+	}
+	for (int i = 0; i < SERV_MAX; i++) {
+		const struct omci_bdgconn *r = &servtab[i];
+		const struct omci_vlan_oper *v = &r->vlan_op;
+		int wi = TAG_UNKNOWN, wo = TAG_UNKNOWN, pi = TAG_UNKNOWN, po = TAG_UNKNOWN;
+		int ug = -1, dg = -1, tcont = -1, known;
+		const char *state, *kind = "forward";
+
+		if (!r->in_use)
+			continue;
+		if (r->in_use != 1) {
+			state = "pending";
+			pending++;
+		} else if (!apply_hw) {
+			state = "dry-run";
+			dry++;
+		} else {
+			state = "live";
+			live++;
+		}
+		known = r->in_use == 1;
+		if (v->rule_gen == OMCI_VLAN_OPER_EXTVLAN_DROP) {
+			kind = "drop";
+			if (known)
+				wi = service_match_tag(v->filter.inner_mode, &v->filter.inner, 1);
+		} else if (known) {
+			/* Legacy rules ignore S-tag VID comparisons. A BI rule has
+			 * an implicit inverse, so interpret only the known shapes.
+			 * General rules carry the explicit treatment for one leg. */
+			int general = v->rule_gen == OMCI_VLAN_OPER_EXTVLAN_GEN;
+			int in_o = service_match_tag(v->filter.outer_mode, &v->filter.outer, general);
+			int in_i = service_match_tag(v->filter.inner_mode, &v->filter.inner, 1);
+			int out_o = service_treat_tag(in_o, &v->outer_act);
+			int out_i = service_treat_tag(in_i, &v->inner_act);
+
+			if ((r->dir == OMCI_DIR_US || r->dir == OMCI_DIR_DS) &&
+			    (general || v->rule_gen <= OMCI_VLAN_OPER_VLANTAG_OPER)) {
+				if (r->dir == OMCI_DIR_US) {
+					wo = in_o; wi = in_i; po = out_o; pi = out_i;
+				} else {
+					po = in_o; pi = in_i; wo = out_o; wi = out_i;
+				}
+			} else if (r->dir == OMCI_DIR_BI && !general) {
+				if (v->inner_act.tag_op == OMCI_TAGOP_PASS &&
+				    v->outer_act.tag_op == OMCI_TAGOP_PASS &&
+				    (v->rule_gen <= OMCI_VLAN_OPER_FILTER_SINGLETAG)) {
+					wo = po = in_o;
+					wi = in_i;
+					pi = v->out.out_tag.vid < OMCI_VID_ANY ?
+						(int)v->out.out_tag.vid : in_i;
+					if (wi != pi)
+						wi = pi = TAG_UNKNOWN;
+				} else if (v->rule_gen == OMCI_VLAN_OPER_EXTVLAN &&
+					   in_o == TAG_ABSENT && in_i == TAG_ABSENT &&
+					   v->inner_act.tag_op == OMCI_TAGOP_PUSH &&
+					   v->outer_act.tag_op == OMCI_TAGOP_PASS &&
+					   out_i >= 0 && v->out.out_tag.vid == (uint32_t)out_i) {
+					wo = wi = po = TAG_ABSENT;
+					pi = out_i;
+				}
+			}
+			if (r->dir & OMCI_DIR_US) {
+				ug = service_gem(flow_us, r->us_flow);
+				if (ug >= 0 && apply_hw)
+					tcont = qos_service_tcont(r->us_flow, (uint16_t)ug);
+			}
+			if (r->dir & OMCI_DIR_DS)
+				dg = service_gem(flow_ds, r->ds_flow);
+		}
+		out_fmt("service id=%u state=%s dir=%u kind=%s uni_mask=%u rule_gen=%u",
+			(unsigned long)i, state, (unsigned long)r->dir, kind,
+			(unsigned long)r->uni_mask, (unsigned long)v->rule_gen);
+		service_print_value("us_gem", ug);
+		service_print_value("ds_gem", dg);
+		service_print_value("tcont_me", tcont);
+		out_fmt(" outer_action=%s inner_action=%s",
+			known && v->rule_gen <= OMCI_VLAN_OPER_EXTVLAN_GEN ?
+				service_tag_action(v->outer_act.tag_op) : "?",
+			known && v->rule_gen <= OMCI_VLAN_OPER_EXTVLAN_GEN ?
+				service_tag_action(v->inner_act.tag_op) : "?");
+		service_print_value("wan_outer", wo);
+		service_print_value("wan_inner", wi);
+		service_print_value("pon_outer", po);
+		service_print_value("pon_inner", pi);
+		/* servtab does not keep the ME(s) which generated a rule, and
+		 * several source rules can merge into one slot. */
+		out(" vlan_me=? gem_ctp_me=?\n");
+	}
+	out_fmt("summary live=%u pending=%u dry_run=%u rebuild_pending=%u\n",
+		(unsigned long)live, (unsigned long)pending, (unsigned long)dry,
+		(unsigned long)(conn_dirty != 0 || qos_dirty != 0));
+	return OMCLI_OK;
+}
+
 /* `bridge <ingressMeId> <gemPort> <dir>` -- build one N:1 all-pass rule.
  *
  * Explicit rather than automatic on purpose: the five-way choice of generator
@@ -971,6 +1131,7 @@ uint32_t cli_help(void)
 	    "  check                          the MIB against the chip: t-conts,\n"
 	    "                                 queues, rates, gem flows (read only)\n"
 	    "  conn                           the bridge connections we built\n"
+	    "  services                       installed VLAN rule status (read only)\n"
 	    "  bridge <ingress|any> <gem> <dir>  build one N:1 all-pass rule\n"
 	    "  state                          serial, device, onu state\n"
 	    "  provision                      what the OLT provisioned: T-CONTs,\n"

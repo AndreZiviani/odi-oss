@@ -5,6 +5,11 @@ listed here.
 
 ## Unreleased
 
+- omcid: read-only `omcli services` reports the stored service rules,
+  including direction, GEM ports and known WAN/PON tag positions. It
+  distinguishes pending and dry-run rules and leaves unknown VIDs and
+  unavailable source ME IDs unknown. The output is not a MIB reconstruction.
+
 - omcid: the upload limit an OLT sets per GEM port (its upstream traffic
   descriptor, class 280) is no longer applied by default. One OLT names
   about 10 Mbit/s on every GEM port of a 200 Mbit/s service, and since
