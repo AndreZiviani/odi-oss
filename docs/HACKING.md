@@ -254,8 +254,7 @@ in odi-ui `schema/settings.tsv` and `docs/SETTINGS.md` together.
 `changelog` check (a pull request has to touch `CHANGELOG.md`, unless it is
 docs or CI only, or labelled `no-changelog`), `make lint`, `make
 cppcheck`, `make test-host`, `make test-diag` and `make test-omci`, each as its own parallel
-job, and `fuzz-omci` (`make fuzz-omci` for four minutes, on pull requests
-and pushes to main only; see [Fuzzing omcid](#fuzzing-omcid)); `test-omci` is a matrix with one job per suite
+job; `test-omci` is a matrix with one job per suite
 (`make test-omci-<suite>`, after `make test-omci-build`). Two more jobs
 run on every push: `clean-build` (`make kernel-tree` and `make src`, then
 checks that `make image` on a partial tree fails closed and names what is
@@ -286,6 +285,13 @@ on the bump branch itself (`gh workflow run kernel.yml`, which the same
 token may do). `make image-all`
 from a clean checkout measured about five and a half minutes on a hosted
 runner (2026-11-15), the kernel being a part of that.
+
+`.github/workflows/fuzz.yml` runs `fuzz-omci` (`make fuzz-omci` for four
+minutes; see [Fuzzing omcid](#fuzzing-omcid)) on every push to `main`, and
+on a pull request only when it changes what the fuzz build reads
+(`src/omci/`, `src/diag/src/`, the driver's uapi headers,
+`test/fixtures/omci-*`, `tools/ci-apt.sh`, the workflow itself), so a
+finding in code a pull request did not touch does not turn it red.
 
 Every job that builds one of our binaries also checks its hardening: each
 Makefile in `src/` runs `tools/check-hardening.sh` on the binary it ships

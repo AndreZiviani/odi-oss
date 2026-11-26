@@ -3,6 +3,10 @@
 # The suite builds them in shell, so seeds.py cannot read them out of
 # the script; these were recorded from a run of it. One omcid gets here
 # what the suite spreads over several, which is fine for a seed.
+#
+# expect: event=sw_image op=download_end inst=1 sections=4 crc=ok result=ok
+# expect: event=sw_image op=download_end inst=0 sections=1 crc=bad result=crc_error
+# expect: event=sw_image op=commit inst=1 result=ok
 170a150a0100000000000000000000000000000000000000000000000000000000000000000000000000002800000000
 0a01490a0007000170000000000000000000000000000000000000000000000000000000000000000000002800000000
 0a02530a0007000101000000640100010000000000000000000000000000000000000000000000000000002800000000

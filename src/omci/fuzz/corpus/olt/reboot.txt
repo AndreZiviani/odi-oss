@@ -3,6 +3,10 @@
 # kernel model records that request and sends nothing (fakeos.c, sys_kill);
 # stick.c checks it is the only signal asked for. The first record is the
 # stick (device id 0xc0): 0x80 in byte 0 is OMCI_ACCEPT_REBOOT=1.
+#
+# expect: event=olt_reboot class=256 inst=0 result=accepted
+# expect: reboot from the OLT accepted
+# expect: event=olt_reboot class=257 inst=0 result=not_supported
 800000c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0001590a0100000000000000000000000000000000000000000000000000000000000000000000000000002800000000
 # Two seconds pass, then a Get to show omcid is still answering.

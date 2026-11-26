@@ -173,13 +173,16 @@ seeds:
 #
 # `timeout`: the model ends a run in which omcid waits for good, but not
 # one in which it loops without waiting, and a test that never comes back
-# is the one failure `make test-host` cannot report.
+# is the one failure `make test-host` cannot report. Each input runs in a
+# process of its own under REPLAY_TIMEOUT: the longest takes under half a
+# second, also with the sanitizers, so a loop fails within seconds and
+# names the input it is in.
 #
 # The state reset needs ELF: objcopy to rename sections, and the start and
 # stop symbols the GNU and LLVM linkers make for them. On any other host
 # the replay says so and `make test-host` goes on.
 IMPORTS := mem(cpy|move|set|cmp|chr)|str(len|n?cmp|n?cpy|r?chr|c?spn|str)|malloc|calloc|realloc|free|abort|exit|_?setjmp|longjmp|getenv|setenv|f(open|close|read|write|gets|putc|puts|printf|flush)|v?snprintf|put(c|s|char)|printf|perror|stderr|stdout|stat|scandir|__(asan|ubsan|sanitizer|sancov)_[a-z0-9_]*|__[a-z0-9_]*_chk|__isoc[0-9]+_[a-z]*|__stack_chk_(fail|guard)|__libc_start_main|__cxa_(finalize|atexit)|__gmon_start__|_ITM_[A-Za-z]*|__errno_location
-REPLAY_TIMEOUT ?= 300
+REPLAY_TIMEOUT ?= 10
 ifneq ($(shell uname -s),Linux)
 replay:
 	@echo "skip  fuzz replay: the host build of omcid needs an ELF host (objcopy, section start symbols)"
@@ -197,10 +200,21 @@ replay: check-srcs seeds $(TARGETS:%=$(BUILD)/$(REPLAY)/fuzz_%)
 		fi; \
 	done
 	@for t in $(TARGETS); do \
-		timeout $(REPLAY_TIMEOUT) $(BUILD)/$(REPLAY)/fuzz_$$t $(BUILD)/seeds/$$t 2>$(BUILD)/replay-$$t.log || { \
-			tail -n 60 $(BUILD)/replay-$$t.log; \
-			echo "FAIL  fuzz replay: $$t (the last input named above)"; exit 1; }; \
-		echo "ok    fuzz replay: $$t, $$(tail -n 1 $(BUILD)/replay-$$t.log)"; \
+		log=$(BUILD)/replay-$$t.log; printf '' > $$log; n=0; \
+		for f in $(BUILD)/seeds/$$t/*; do \
+			rc=0; timeout $(REPLAY_TIMEOUT) $(BUILD)/$(REPLAY)/fuzz_$$t $$f 2>>$$log || rc=$$?; \
+			if [ $$rc -ne 0 ]; then \
+				tail -n 60 $$log; \
+				if [ $$rc -eq 124 ]; then \
+					echo "FAIL  fuzz replay: $$t, $$f did not finish within $(REPLAY_TIMEOUT) s"; \
+				else \
+					echo "FAIL  fuzz replay: $$t, $$f"; \
+				fi; \
+				exit 1; \
+			fi; \
+			n=$$((n + 1)); \
+		done; \
+		echo "ok    fuzz replay: $$t, $$n input(s)"; \
 	done
 endif
 

@@ -3,6 +3,9 @@
 # The suite builds them in shell, so seeds.py cannot read them out of
 # the script; these were recorded from a run of it. One omcid gets here
 # what the suite spreads over several, which is fine for a seed.
+#
+# expect: event=rejected class=309 op=create mt=4 result=instance_exists
+# expect: event=provision_begin op=create class=310 inst=2
 00014f0a0002000000000000000000000000000000000000000000000000000000000000000000000000002800000000
 0008440a0136000200000200630000000000000000000000000000000000000000000000000000000000002800000000
 0009440a002f000100010101010100000001000101000000000000000000000000000000000000000000002800000000
