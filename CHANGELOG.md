@@ -11,6 +11,15 @@ listed here.
   commit and the two patches Debian ships in 1.38.0-3. The SBOM names the
   CVEs they fix, and `tools/cve-scan.sh` lists them apart instead of as
   open (#482).
+- omcid: the upload limit an OLT sets per GEM port (its upstream traffic
+  descriptor, class 280) is no longer applied by default. One OLT names
+  about 10 Mbit/s on every GEM port of a 200 Mbit/s service, and since
+  v1.6.0 that held the upload at 10 Mbit/s, where the stock firmware on the
+  same line uploads at 200. The OLT still bounds the upload through the
+  bandwidth it grants. `OMCI_GEM_US_RATE=1` (odi-only key) applies them as
+  before; while off, the omcid log names the descriptors it skipped and
+  `omcli check` expects the queues unlimited (#520).
+
 - Tests: omcid is fuzzed on the build host. `src/omci/fuzz` builds the
   daemon from the shipped sources against a model of the kernel (files,
   message queues, the netlink transport, a clock and signals, none of it
@@ -26,10 +35,20 @@ listed here.
   changes (#482).
 
 - CI: the SBOM is scanned for known CVEs, by the release job before it
-  publishes and every Monday for the latest release (`cve-scan.yml`).
-  `tools/cve-scan.sh` runs grype at a pinned version, checked by its
-  SHA-256, and writes a report per component and severity to the run's
-  summary. A match does not fail the run (#482).
+  publishes and every Monday for the latest release (`cve-scan.yml`), and
+  the report per component and severity goes to the run's summary. A match
+  does not fail the run (#482). The kernel is checked against the kernel CVE
+  team feed (vulns.git): a CVE is listed when it affects the pinned version
+  on its stable branch and touches a .c or .S compiled into the kernel, or
+  only headers and one of them is. The
+  kernel build lists those files (the .c and .S of every object linked into
+  vmlinux, and the headers they include), and the SBOM carries the list
+  (`odi:kernel-sources`). The other components are checked against the NVD
+  by their CPE name; where a CVE has several scores, the NVD one, else the
+  worst. On the 6.18.65 build grype listed 287 kernel CVEs; this lists 14,
+  none fixed on 6.18 yet, and counts the 98 whose code is not compiled in. The feed is a cached shallow clone, about
+  1 MB a week after the first 75 MB, where grype fetched a 207 MB database
+  on every run.
 - SBOM: the kernel, uClibc-ng, busybox, dropbear and iproute2 carry their
   NVD CPE name next to the `pkg:generic` purl, which no vulnerability
   database knows, so a scanner can match them. `tools/verify-sbom.sh` refuses
