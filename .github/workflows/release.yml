@@ -40,9 +40,10 @@ name: release
 # reaches the release job, so the gate can be exercised without a tag.
 #
 # The kernel and the image are built only in the `reproducible` job, on
-# tags and manual runs (ci.yml does not build them on a push: about an hour
-# of compiling a runner would spend every time). The release job itself
-# compiles nothing.
+# tags and manual runs; kernel.yml compiles the kernel alone for the pull
+# requests that change it. `make image-all` from a clean checkout measured
+# about five and a half minutes on a hosted runner (2026-11-15). The
+# release job itself compiles nothing.
 #
 # concurrency: a tag push has landed here twice for the same ref before
 # (the tag itself pushed, then the branch it was cut from merged a moment

@@ -264,10 +264,28 @@ rcS trace goldens (`make test-rcs`). On release tags (`v*` through
 `release.yml`, which calls this workflow; `odi-oss-*` directly) and manual
 runs it adds `make src` on its own and a
 `reproducible` job: `make image-all` twice in two checkouts, compared byte
-for byte with `tools/compare-images.sh`. The kernel and the full image are
-**not** built on a pull request: a kernel build is tens of minutes and
-nothing in it runs without a stick. Build the kernel yourself before you
-push a kernel change.
+for byte with `tools/compare-images.sh`. The full image is **not** built on
+a pull request.
+
+`.github/workflows/kernel.yml` builds this repository's own kernel, on pull
+requests and pushes to `main` that change what `kernel/build.sh` reads
+(`kernel/` except its `README.md` files, `toolchain/images.env`,
+`toolchain/image.sh`, `packages/oss-env.sh`, `packages/isa-audit.sh`,
+`tools/check-kernel-hardening.sh`, `tools/source-date-epoch.sh`,
+`image/build.sh`, the workflow itself) and on manual runs. Every run is a
+clean build (`kernel/build.sh`, hardening check included; only the tarball
+in `dl/` is cached), then fails if the uImage is over the k0/k1 partition
+(`KERNEL_PART` of `image/build.sh`) or `packages/isa-audit.sh` finds
+anything in `vmlinux`, and checks that the `CRUMBS_CORE=1` patches in
+`kernel/618/debug/` still apply (applied, not compiled). The job summary has the sizes, the spare bytes, the
+build time and the warnings. Nothing it builds is booted: a kernel change
+still needs a stick. A pull request `dependency-bump.yml` opens does not
+start it (a pull request created with `GITHUB_TOKEN` triggers no workflow),
+so when the kernel pin or the toolchain image pin moved, that job starts it
+on the bump branch itself (`gh workflow run kernel.yml`, which the same
+token may do). `make image-all`
+from a clean checkout measured about five and a half minutes on a hosted
+runner (2026-11-15), the kernel being a part of that.
 
 Every job that builds one of our binaries also checks its hardening: each
 Makefile in `src/` runs `tools/check-hardening.sh` on the binary it ships

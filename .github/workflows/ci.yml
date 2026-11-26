@@ -15,7 +15,8 @@ name: ci
 # binary in src/ on its own. This repository's own kernel and the full
 # image are built only by the `reproducible` job, on tags and manual runs,
 # never on a push or pull request: nothing in either is exercised without a
-# stick.
+# stick. kernel.yml compiles the kernel alone, for the pull requests and
+# pushes to main that change it.
 #
 # A `v*` tag does not trigger this workflow by itself: release.yml calls it
 # (workflow_call) as the job its release job needs, so the whole suite, the
@@ -309,8 +310,8 @@ jobs:
       # Fetches the pinned linux-6.18.x fresh (VERSION in kernel/618/fetch.sh) and re-checks its
       # pinned SHA-256 and the upstream GPG signature, against the signing
       # key pinned in that script (no keyserver is asked); packs it into
-      # build/kernel-618/tree.tar. Does not compile it -- that is the ~hour
-      # this job is not paying.
+      # build/kernel-618/tree.tar. Does not compile it: kernel.yml does, for
+      # the pull requests that change the kernel.
       - name: "Kernel tree: fetch and verify the pin"
         run: make kernel-tree
 
