@@ -77,8 +77,10 @@ build downloaded and checked against its pinned SHA-256: the Linux kernel
 tarball and its signature, busybox, dropbear, iproute2 and uClibc-ng (the
 LGPL library linked statically into every binary); the odi-toolchain tag
 with the patches, configs and build scripts of the toolchain image;
-`confd` and `metricsd` at the tags the image has; and this repository at the
-release commit (our kernel patches, drivers, configs, rootfs and build
+`confd` and `metricsd` at the tags the image has (the odi-toolchain, odi-ui
+and odi-sfp-exporter archives are GitHub tag archives, checked against the
+`source.tar.gz` lines in `src/release-sha256.txt`, since a tag can be
+moved); and this repository at the release commit (our kernel patches, drivers, configs, rootfs and build
 scripts). gcc, binutils and the Linux headers the toolchain was built with
 are build tools that do not ship, so they are not included: `SOURCES.md`
 names them with upstream URL and pinned sha256 (gcc's runtime library parts
@@ -187,6 +189,15 @@ tables feed: the license of each component is the one in `tools/sbom.py`, so
 change it there when a license changes here. Runtime components (what is on
 the flashed rootfs, with its files, hashes, purls and dependency graph) are
 told apart from build tools (gcc, binutils: scope `excluded`).
+The kernel, uClibc-ng, busybox, dropbear and iproute2 also carry the CPE name
+the NVD lists them under, so a vulnerability scanner can match them.
+`tools/cve-scan.sh` checks them: the kernel against the kernel CVE team
+feed (vulns.git), which gives the fixed version on each stable branch and the
+files each fix touches, and the rest against the NVD by CPE name. A kernel
+CVE is listed only when it affects the pinned version and touches a .c or .S
+compiled into the kernel, or only headers and one of them is (the SBOM lists
+the files compiled in). The release job and the
+weekly `cve-scan.yml` put the report in the run's summary.
 `tools/verify-sbom.sh` checks it; `docs/FLASHING.md`, "Verifying a release",
 says how.
 

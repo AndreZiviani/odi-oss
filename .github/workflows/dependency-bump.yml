@@ -104,8 +104,12 @@ jobs:
           git checkout -b "$branch"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # The docs tools/bump-deps.sh rewrites (doc_pin) go in too: make lint
+          # above checked them in this tree, and left out of the commit they
+          # fail make lint on main once the pull request is merged.
           git add kernel/618/fetch.sh packages/*/build.sh toolchain/images.env \
-            src/fetch-releases.sh src/release-sha256.txt CHANGELOG.md
+            src/fetch-releases.sh src/release-sha256.txt CHANGELOG.md \
+            README.md docs/COMPARISON.md docs/BUILDING.md docs/HACKING.md docs/KERNEL.md
           git commit -m "deps: weekly upstream version check
 
           $(cat /tmp/bump-summary.txt)"

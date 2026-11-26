@@ -5,6 +5,73 @@ listed here.
 
 ## Unreleased
 
+- omcid: the upload limit an OLT sets per GEM port (its upstream traffic
+  descriptor, class 280) is no longer applied by default. One OLT names
+  about 10 Mbit/s on every GEM port of a 200 Mbit/s service, and since
+  v1.6.0 that held the upload at 10 Mbit/s, where the stock firmware on the
+  same line uploads at 200. The OLT still bounds the upload through the
+  bandwidth it grants. `OMCI_GEM_US_RATE=1` (odi-only key) applies them as
+  before; while off, the omcid log names the descriptors it skipped and
+  `omcli check` expects the queues unlimited (#520).
+
+- Tests: omcid is fuzzed on the build host. `src/omci/fuzz` builds the
+  daemon from the shipped sources against a model of the kernel (files,
+  message queues, the netlink transport, a clock and signals, none of it
+  real) and runs it under libFuzzer with AddressSanitizer and
+  UndefinedBehaviorSanitizer: `make fuzz-omci`, and a CI job of the same
+  name on pull requests and pushes to main, four minutes with both targets
+  side by side. One target takes sessions
+  of OMCI frames as the OLT sends them, the other the config stores, both
+  CLI protocols and a damaged resume snapshot. The seeds and every input
+  that once broke omcid run in `make test-host` and `make test-host-asan`
+  (`make fuzz-omci-replay`), each twice with the same outcome required,
+  and held to the line omcid has to print for it. Nothing in the image
+  changes (#482).
+
+- CI: the SBOM is scanned for known CVEs, by the release job before it
+  publishes and every Monday for the latest release (`cve-scan.yml`), and
+  the report per component and severity goes to the run's summary. A match
+  does not fail the run (#482). The kernel is checked against the kernel CVE
+  team feed (vulns.git): a CVE is listed when it affects the pinned version
+  on its stable branch and touches a .c or .S compiled into the kernel, or
+  only headers and one of them is. The
+  kernel build lists those files (the .c and .S of every object linked into
+  vmlinux, and the headers they include), and the SBOM carries the list
+  (`odi:kernel-sources`). The other components are checked against the NVD
+  by their CPE name; where a CVE has several scores, the NVD one, else the
+  worst. On the 6.18.65 build grype listed 287 kernel CVEs; this lists 14,
+  none fixed on 6.18 yet, and counts the 98 whose code is not compiled in. The feed is a cached shallow clone, about
+  1 MB a week after the first 75 MB, where grype fetched a 207 MB database
+  on every run.
+- SBOM: the kernel, uClibc-ng, busybox, dropbear and iproute2 carry their
+  NVD CPE name next to the `pkg:generic` purl, which no vulnerability
+  database knows, so a scanner can match them. `tools/verify-sbom.sh` refuses
+  a component with a generic purl and no CPE (#482).
+- CI: the weekly dependency bump commits the docs `tools/bump-deps.sh`
+  rewrites. They were left out of its commit, so the 6.18.65 bump passed
+  `make lint` in its own job and failed it on main. `bump-deps.sh` also moves
+  the kernel version in `docs/HACKING.md` and `docs/KERNEL.md` now, and a
+  version followed by `.tar.xz`, which it skipped.
+
+- Releases: `tools/bundle-sources.sh` checks the GitHub tag archives it puts
+  in the source bundle (odi-toolchain, odi-ui, odi-sfp-exporter) against a
+  `source.tar.gz` line per repo and tag in `src/release-sha256.txt`, also
+  when the file is already in `dl/`. It fetched them by tag alone, and a
+  moved tag would have put other source in the bundle. `tools/bump-deps.sh`
+  writes the line when it moves a tag (#482).
+
+- Docs: the password recipe in `ACCESS.md` runs inside parentheses, so a
+  shell reads all of it before the first prompt. Pasted into an
+  interactive shell it read its own next line as the password, skipped the
+  second prompt and left the terminal echo off (dash and bash, checked in
+  a pseudo-terminal). A trap turns the echo back on after Ctrl-C. Removing
+  a key is its own example now: pasted whole, the key block deleted the
+  key it had just added on a stick with one key.
+
+- Docs: COMPARISON.md, BUILDING.md, HACKING.md and KERNEL.md name the pinned
+  kernel, 6.18.65, again; the bump to it left them at 6.18.63, and `make lint`
+  failed on main for the first two.
+
 - CI: `make cppcheck` runs cppcheck over every tracked C file, and CI runs
   it as its own job on ubuntu-24.04 (#482). Of the nine findings on main,
   one was a test that read `rec.log[-1]` when the action it looked for was

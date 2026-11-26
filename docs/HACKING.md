@@ -72,7 +72,7 @@ activates the GPON MAC once `omcid` has registered.
 |---|---|---|
 | `Makefile` | the whole build and the gates; `make help` | `lint:` and `test-host:` |
 | `toolchain/` | gcc 16.2.0, binutils 2.47, uClibc-ng 1.0.59 for this CPU, built in a container into a Docker volume | [`toolchain/README.md`](../toolchain/README.md) |
-| `kernel/618/fetch.sh`, `mainline/` | fetches and GPG-verifies linux-6.18.63; `mainline/` is the pristine tree (gitignored) | |
+| `kernel/618/fetch.sh`, `mainline/` | fetches and GPG-verifies linux-6.18.65; `mainline/` is the pristine tree (gitignored) | |
 | `kernel/618/patches/` | **only** edits to files mainline already has: 19 lines in 6 files today (`tools/kernel-footprint.sh`) | [`docs/KERNEL.md`](KERNEL.md) "Patches and the overlay" |
 | `kernel/618/debug/` | debug-only mainline edits, applied with `CRUMBS_CORE=1` | |
 | `kernel/618/config` | the seed config, completed by `olddefconfig`; every line has its reason | "The config" in KERNEL.md |
@@ -142,7 +142,7 @@ file by file against one built with the old pin.
 The toolchain images bring their own kernel headers, so `kernel-tree` no
 longer gates them; `image-all` still runs it first, since `kernel` needs
 it. `make image-all` runs, in order: `kernel-tree` (fetch and verify
-linux-6.18.63, pack it into `build/kernel-618/tree.tar`), `toolchain` (pull
+linux-6.18.65, pack it into `build/kernel-618/tree.tar`), `toolchain` (pull
 the two pinned images, under a minute), `toolchain-audit`, `kernel`
 (2 min), `packages`, `src`, `releases`, `image`. After the first build
 every target skips work it has already done; a second `make image-all`
@@ -254,7 +254,8 @@ in odi-ui `schema/settings.tsv` and `docs/SETTINGS.md` together.
 `changelog` check (a pull request has to touch `CHANGELOG.md`, unless it is
 docs or CI only, or labelled `no-changelog`), `make lint`, `make
 cppcheck`, `make test-host`, `make test-diag` and `make test-omci`, each as its own parallel
-job; `test-omci` is a matrix with one job per suite
+job, and `fuzz-omci` (`make fuzz-omci` for four minutes, on pull requests
+and pushes to main only; see [Fuzzing omcid](#fuzzing-omcid)); `test-omci` is a matrix with one job per suite
 (`make test-omci-<suite>`, after `make test-omci-build`). Two more jobs
 run on every push: `clean-build` (`make kernel-tree` and `make src`, then
 checks that `make image` on a partial tree fails closed and names what is
@@ -548,6 +549,7 @@ In order:
 | `make lint` | shellcheck over every script (on-device ones as POSIX `sh`, since busybox ash runs them), the inline-quote check, `reuse lint` (REUSE copyright and license information; skipped when the tool is absent, always run in CI), and the greps for private-workspace references, machine-local paths, trial history in comments, internal plan ids and vendor source citations | `shellcheck`, git, `reuse` (optional locally; `tools/reuse-requirements.txt`) |
 | `make cppcheck` | static analysis of every tracked C file (warnings and errors; a finding that is not a bug carries a `cppcheck-suppress` comment with the reason); not part of `make test` | `cppcheck` (CI: 2.13, ubuntu-24.04) |
 | `make test-host` | about 60 host tests: driver logic, the on-device scripts, the replay tables and their generators | cc, bash, Python 3 |
+| `make fuzz-omci` | omcid, built for the host with ASan and UBSan, under libFuzzer for `FUZZ_SECONDS` (60) a target: nothing an OLT, a config store or a CLI client can send breaks it within that time. Not part of `make test`; its replay of the saved inputs is part of `make test-host` | clang with its libFuzzer runtime |
 | `make test-diag` | diag's parser and conversions natively, then under qemu: the conversion vectors, the L2 listing golden, **the exporter contract** | Docker |
 | `make test-omci` | builds `src/`, runs `omcid` under qemu-user (about 130 checks), its seven suites side by side | Docker |
 | `make test-qemu` | boots the real rootfs (busybox, inittab, services, dropbear, confd, metricsd) full-system under `qemu-system-mips -M malta`; checks ssh/web UI/exporter and the resilience scenarios (see below) | Docker, `qemu-system-mips`, `busybox`/`packages`/`src`/`releases` already built |
@@ -841,6 +843,23 @@ The unit tests of omcid's class 171 decode (`src/omci/respond`, `make
 test-omci-respond`) and of igmpd (`src/igmp/test`, `make test-igmp`) are legs
 of `make test` and a CI job (`mips-units`).
 
+### Fuzzing omcid
+
+omcid answers whatever the OLT sends, so it is fuzzed on the build host:
+the daemon as shipped, against a model of the kernel, under libFuzzer with
+AddressSanitizer and UndefinedBehaviorSanitizer. `src/omci/fuzz/README.md`
+has the design, what the model covers and what it does not.
+
+    make fuzz-omci FUZZ_SECONDS=600 FUZZ_JOBS=4   # needs clang + libclang-rt
+    make fuzz-omci-replay                          # needs cc; in test-host
+
+When a run finds something, the fix goes into omcid, never into the
+harness, and the input goes into `src/omci/fuzz/corpus/<target>/` as text
+with a `# expect:` line, so that `make test-host` holds omcid to it from
+then on. A system call added to omcid needs a line in `sys_host.h` and a
+body in `fakeos.c`; a new translation unit needs adding to `SRCS` in the
+Makefile there (`make fuzz-omci-replay` says so).
+
 ### Pure refactors: prove the machine code did not change
 
 A change that should not change behaviour (a comment pass, a rename, a
@@ -1099,7 +1118,7 @@ read at boot unless stated. rcS paths are
 | `omci-identity.on` | `src/omci/respond/omcid.h:478` (`CFG_REPORT_SWITCH`), `cfgstore.c:882` | omcid reports the OLT identity keys (`OMCI_SW_VER1/2`, `GPON_ONU_MODEL`, ...); `apply.sh omci` | absent: built-in values | prod |
 | `breadcrumbs.on` | `rcS.dev:27`, `:53`, `:62`, `:76`, `:87`, `:106` | boot crumbs to `breadcrumbs`, `trial-diag.txt`, a 30 s heartbeat to the kernel log, soft-lockup 20 s and hung-task 30 s | absent | dev |
 | `confirm-arp` | `rcS.dev`, `dev_confirm_ok()`; `nv commit` (`src/nv/commit.c`); `slot-state.sh` | the file holds one IPv4 address: confirm the watchdog only after an ARP reply from it; **resets every 120 s if the host stops answering**; `nv commit` refuses while it exists (`--force`) and the login banner names it | absent, empty or not an IPv4 address: confirm unconditionally | dev |
-| `odi.conf` | `etc/scripts/flash` (`ODI_KEYS`), written by `flash set`; `ODI_LASER_UNVERIFIED` is read by `pon_step_laser()` | odi-only keys: `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_POTS_PORTS`, `OMCI_POTS_SLOT_ID`, `OMCI_VOIP_LINE_REPORT`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `VLAN_EAPOL_UNTAGGED`, `OMCI_TCONT_ALLOC_UNSET`, `HOST_AUTONEG`, `HOST_SERDES`, `LAN_ROUTES`, `ODI_LASER_UNVERIFIED` (`docs/SETTINGS.md`); `ODI_LASER_UNVERIFIED=1` lights the laser on an unvalidated laser driver | absent: none set | prod |
+| `odi.conf` | `etc/scripts/flash` (`ODI_KEYS`), written by `flash set`; `ODI_LASER_UNVERIFIED` is read by `pon_step_laser()` | odi-only keys: `SYSLOG_SERVER`, `NTP_SERVER`, `ONU_HW_VERSION`, `OMCI_UNKNOWN_ME_OK`, `OMCI_FIXED_ME`, `OMCI_PRIVATE_ME`, `OMCI_VEIP`, `OMCI_POTS_PORTS`, `OMCI_POTS_SLOT_ID`, `OMCI_VOIP_LINE_REPORT`, `OLT_SW_DOWNLOAD`, `OMCI_ACCEPT_REBOOT`, `OMCI_UNI_LOCK`, `VLAN_EAPOL_UNTAGGED`, `OMCI_TCONT_ALLOC_UNSET`, `OMCI_GEM_US_RATE`, `HOST_AUTONEG`, `HOST_SERDES`, `LAN_ROUTES`, `ODI_LASER_UNVERIFIED` (`docs/SETTINGS.md`); `ODI_LASER_UNVERIFIED=1` lights the laser on an unvalidated laser driver | absent: none set | prod |
 | `confd.auth`, `confd/`, `dropbear.d/authorized_keys` | confd (odi-ui); dropbear via `svc-dropbear.sh` (`-D`) | UI credential, UI overrides, root SSH keys | admin/admin; image assets; none | prod |
 
 State files, not switches: `seedrng/` (entropy seed, rcS `:97`),

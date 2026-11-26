@@ -211,6 +211,24 @@ jobs:
           sudo unsquashfs -no-progress -d "$w/root" "$w/rootfs" >/dev/null
           tools/verify-sbom.sh out/image/sbom.cdx.json --sums out/image/SHA256SUMS --rootfs "$w/root"
 
+      # The kernel CVE feed: a bare shallow clone tools/cve-scan.sh fetches
+      # into. Restored from the last run, so only what the feed added since
+      # is downloaded (about 1 MB a week, against 75 MB for a first clone).
+      - name: Kernel CVE feed (cache)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/vulns.git
+          key: kernel-cve-feed-${{ github.run_id }}
+          restore-keys: kernel-cve-feed-
+
+      # Known CVEs in the SBOM about to be published, in this run's summary.
+      # A report, not a gate (tools/cve-scan.sh says why), and a scan that
+      # cannot run (no network, a feed or the NVD down) does not hold the release
+      # either; the weekly cve-scan.yml scans it again.
+      - name: Known vulnerabilities in the SBOM
+        continue-on-error: true
+        run: tools/cve-scan.sh out/image/sbom.cdx.json >> "$GITHUB_STEP_SUMMARY"
+
       - name: Release notes
         run: tools/release-notes.sh "$VERSION" > /tmp/release-notes.md
 

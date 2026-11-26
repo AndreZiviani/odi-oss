@@ -32,12 +32,13 @@ cd "$ROOT"
 changed=0
 note() { echo "bumped: $*"; changed=1; }
 # doc_pin <old, as an ERE> <new> <file>...: every mention of the old version
-# not followed by another digit or dot, rewritten.
+# not followed by another digit, or by a dot and a digit, rewritten: so
+# linux-6.18.1.tar.xz moves with it, but 6.18.10 and 6.18.1.2 do not.
 doc_pin() {
 	old=$1 new=$2
 	shift 2
 	for f in "$@"; do
-		sed -i.bak -E "s/${old}([^0-9.]|\$)/${new}\1/g" "$f"
+		sed -i.bak -E "s/${old}([^0-9.]|\.[^0-9]|\.\$|\$)/${new}\1/g" "$f"
 		rm -f "$f.bak"
 	done
 }
@@ -76,7 +77,8 @@ if [ -n "$latest" ] && [ "$latest" != "$current" ]; then
 		rm -f kernel/618/fetch.sh.bak
 		# The docs name the pinned kernel too, and make lint checks they
 		# agree (tools/check-doc-pins.sh), so a bump moves them with it.
-		doc_pin "${current//./\\.}" "$latest" README.md docs/COMPARISON.md docs/BUILDING.md
+		doc_pin "${current//./\\.}" "$latest" README.md docs/COMPARISON.md docs/BUILDING.md \
+			docs/HACKING.md docs/KERNEL.md
 		note "linux $current -> $latest"
 	fi
 	rm -rf "$tmp"
@@ -126,6 +128,15 @@ bump_package iproute2 \
 # if that fails the script exits non-zero before touching any pin, so a bump
 # can never leave a new tag without its hashes. The PR a human reviews shows
 # the new hashes beside the new tag.
+# tag_archive_line <repo> <tag> <dir>: sets archive_line to the
+# release-sha256.txt line of that GitHub tag archive (source.tar.gz).
+tag_archive_line() {
+	timeout 600 curl -fsSL --retry 3 -o "$3/source.tar.gz" \
+		"https://github.com/$1/archive/refs/tags/$2.tar.gz" ||
+		{ echo "bump-deps.sh: cannot download the $2 tag archive of $1; pins left unchanged" >&2; return 1; }
+	archive_line="$1 $2 source.tar.gz $(sha256_of "$3/source.tar.gz")"
+}
+
 bump_release_tag() {
 	var=$1 repo=$2 assets=$3
 	current=$(grep -m1 -oE "${var}[:-]+v[0-9.]+" src/fetch-releases.sh | grep -oE 'v[0-9.]+' | tail -1)
@@ -144,6 +155,10 @@ bump_release_tag() {
 		new_lines="$new_lines$repo $latest $a $got
 "
 	done
+	# The tag archive tools/bundle-sources.sh puts in the source bundle.
+	tag_archive_line "$repo" "$latest" "$tmp" || { rm -rf "$tmp"; exit 1; }
+	new_lines="$new_lines$archive_line
+"
 	rm -rf "$tmp"
 	sed -i.bak -E "s/${var}:-$current/${var}:-$latest/; s/${var}-$current/${var}-$latest/" src/fetch-releases.sh
 	rm -f src/fetch-releases.sh.bak
@@ -175,6 +190,17 @@ bump_toolchain_image() {
 		return
 	fi
 	digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$image:$latest_tag" | sed -E 's/.*(@sha256:[0-9a-f]+)$/\1/')
+	# The uclibc image is the one whose tag tools/bundle-sources.sh puts
+	# in the source bundle: its tag archive gets the line it is checked by.
+	if [ "$var" = OSS_IMAGE_PINNED ]; then
+		tmp=$(mktemp -d)
+		tag_archive_line AndreZiviani/odi-toolchain "$tag_prefix$latest_tag" "$tmp" ||
+			{ rm -rf "$tmp"; return; }
+		rm -rf "$tmp"
+		{ grep -vE "^AndreZiviani/odi-toolchain " src/release-sha256.txt; printf '%s\n' "$archive_line"; } \
+			> src/release-sha256.txt.new
+		mv src/release-sha256.txt.new src/release-sha256.txt
+	fi
 	sed -i.bak -E "s#^${var}=.*#${var}=$image:$latest_tag$digest#" toolchain/images.env
 	rm -f toolchain/images.env.bak
 	note "$var $current_tag -> $latest_tag"
