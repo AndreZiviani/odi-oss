@@ -1,0 +1,211 @@
+# SPDX-FileCopyrightText: 2026 Andre Ziviani
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: kernel
+
+# Compiles the kernel of this repository when a change can alter it, and only
+# then. The jobs of ci.yml that run on a pull request boot a stock kernel or
+# none; the kernel was compiled only by its reproducible job, on tags and
+# manual runs. So a kernel patch that no longer applied,
+# a driver that no longer compiled or a uImage grown past its partition was
+# first seen on the machine of the author, or at the tag.
+#
+# A workflow of its own, not a job in ci.yml, for two reasons. `paths` is a
+# trigger filter, so a pull request that touches nothing below starts no
+# runner at all; a job in ci.yml would need a runner just to diff and
+# decide to skip. And release.yml calls ci.yml as a reusable workflow on
+# every tag, where the reproducible job already builds the kernel twice: a
+# kernel job inside ci.yml would compile it a third time. Nothing calls this
+# file.
+#
+# The paths are what kernel/build.sh reads: the kernel directory (pin and
+# fetch, seed config, patches, overlay, the build scripts), the toolchain
+# image pin and the two scripts that resolve it, the hardening check the
+# build runs on the completed .config, the script behind SOURCE_DATE_EPOCH,
+# and the two files the checks after the build read (the ISA audit, and
+# image/build.sh for the size of the kernel partition). The README.md files
+# under kernel/ are left out, as kernel/build.sh leaves them out of its own
+# stamp. The Makefile is not listed: the job runs kernel/build.sh directly,
+# which is all `make kernel` does after pulling a second toolchain image
+# the kernel does not use.
+#
+# The push to main runs under the same filter (the list is written out
+# twice, kept identical by hand). No pull request can stand in
+# for it: a cache saved by a pull request is readable by that pull request
+# only, one saved on main by every later pull request, so the kernel tarball
+# of a new pin is fetched once there and not once per pull request.
+#
+# Cost, measured on a hosted runner (ubuntu-latest, 2026-11-15): `make
+# image-all` from a clean checkout, toolchain image pulled by digest, took
+# 5 min 26 s and 4 min 56 s in the two builds of the reproducible job. The
+# kernel is a part of that; kernel, packages, src and image together are
+# not the hour the comments here used to name.
+on:
+  pull_request:
+    paths:
+      - 'kernel/**'
+      - '!kernel/**/README.md'
+      - 'toolchain/images.env'
+      - 'toolchain/image.sh'
+      - 'packages/oss-env.sh'
+      - 'packages/isa-audit.sh'
+      - 'tools/check-kernel-hardening.sh'
+      - 'tools/source-date-epoch.sh'
+      - 'image/build.sh'
+      - '.github/workflows/kernel.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'kernel/**'
+      - '!kernel/**/README.md'
+      - 'toolchain/images.env'
+      - 'toolchain/image.sh'
+      - 'packages/oss-env.sh'
+      - 'packages/isa-audit.sh'
+      - 'tools/check-kernel-hardening.sh'
+      - 'tools/source-date-epoch.sh'
+      - 'image/build.sh'
+      - '.github/workflows/kernel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request makes the build of the older one worthless,
+# so it is cancelled. Every other run gets a group of its own (the run id):
+# a group keeps only one waiting run, so a shared group for main would let a
+# third push replace the second while the first still builds, and that
+# commit would go unchecked.
+concurrency:
+  group: kernel-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # About four times the whole image build measured above: room for a cold
+    # cache (the tarball from cdn.kernel.org, three bounded pulls of the
+    # toolchain image) and a slow runner, and still short enough that a hung
+    # docker or download is cut off long before the 6 hour default.
+    timeout-minutes: 20
+    # bash -eo pipefail for every run step, not the sh -e default.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Only the downloads: the kernel tarball and its signature, about
+      # 150 MB, keyed on the script that pins the release and its SHA-256.
+      # A hit only skips the download: kernel/618/fetch.sh still re-checks
+      # the pinned SHA-256 and the GPG signature of the file it finds there.
+      #
+      # The object files are deliberately not cached. kernel/build.sh keeps
+      # them in a docker volume and decides between a rebuild and an
+      # incremental build from a stamp; a volume restored from a cache would
+      # put a check that exists to prove the tree builds from nothing at the
+      # mercy of that stamp, to save part of a build that takes minutes. A
+      # new runner has no such volume, so every run here is a clean build.
+      - name: Cache the pinned kernel tarball (dl/)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            dl
+          key: dl-kernel-${{ runner.os }}-${{ hashFiles('kernel/618/fetch.sh') }}
+
+      # Fetch and verify the tree, apply the patches and the overlay,
+      # olddefconfig, the hardening check on the completed .config, vmlinux,
+      # uImage. The time goes into the summary below, so the cost of this
+      # workflow stays a measured number.
+      - name: Build the kernel (clean)
+        run: |
+          start=$(date +%s)
+          ./kernel/build.sh
+          echo "BUILD_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+
+      # kernel/build.sh prints the errors gcc reported; a failure of the
+      # linker or of a host tool is only at the end of the log.
+      - name: End of the build log
+        if: failure()
+        run: |
+          for f in build/kernel-618/olddefconfig.log build/kernel-618/build.log; do
+            [ -f "$f" ] || continue
+            echo "--- tail of $f"
+            tail -n 60 "$f"
+          done
+
+      # kernel/build.sh prints the sizes and does not judge them; only
+      # image/build.sh refuses a uImage that does not fit k0/k1, and no job
+      # of a pull request gets that far. The limit is read from image/build.sh
+      # so this check and the image build share one statement of it; a limit that cannot be read
+      # fails the job instead of passing it.
+      - name: uImage fits the kernel partition; sizes and warnings
+        run: |
+          part=$(sed -n 's/^KERNEL_PART=//p' image/build.sh)
+          case $part in
+            ''|*[!0-9]*)
+              echo "kernel: no plain KERNEL_PART=<bytes> line in image/build.sh" >&2
+              exit 1
+              ;;
+          esac
+          out=build/kernel-618
+          usize=$(stat -c %s "$out/uImage")
+          vsize=$(stat -c %s "$out/vmlinux")
+          linux=$(cat "$out/tree.tar.version")
+          # grep -c exits 1 for no match, which is a count of 0; any other
+          # failure (2, a log that cannot be read) fails the step.
+          warnings=$(grep -c "warning:" "$out/build.log") || [ $? -eq 1 ]
+          {
+            echo "### Kernel build"
+            echo
+            echo "| | |"
+            echo "|---|---:|"
+            echo "| Linux | ${linux} |"
+            echo "| build time | ${BUILD_SECONDS} s |"
+            echo "| vmlinux | ${vsize} bytes |"
+            echo "| uImage | ${usize} bytes |"
+            echo "| k0/k1 partition | ${part} bytes |"
+            echo "| spare | $((part - usize)) bytes |"
+            echo "| compiler warnings | ${warnings} |"
+            if [ "$warnings" -gt 0 ]; then
+              echo
+              echo "<details><summary>Warnings, most frequent first (40 at most)</summary>"
+              echo
+              echo '```'
+              { grep -o "[^ ]*: warning:.*" "$out/build.log" || [ $? -eq 1 ]; } |
+                sort | uniq -c | sort -rn | sed -n "1,40p"
+              echo '```'
+              echo
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "uImage $usize / $part bytes ($((part - usize)) spare), $warnings warnings"
+          if [ "$usize" -gt "$part" ]; then
+            echo "kernel: uImage over the k0/k1 partition by $((usize - part)) bytes" >&2
+            exit 1
+          fi
+
+      # kernel/618/debug/*.patch go in only with CRUMBS_CORE=1, which the
+      # build above leaves off. They are early-boot breadcrumbs for a stick
+      # that hangs, so a stable bump that breaks them is found the night
+      # they are needed. This applies them, release patches first as
+      # kernel/build.sh does, to a scratch copy of the tree; it does not
+      # compile them.
+      - name: Debug patches (CRUMBS_CORE=1) still apply
+        run: |
+          t=$(mktemp -d)
+          tar xf build/kernel-618/tree.tar -C "$t"
+          for pat in kernel/618/patches/*.patch kernel/618/debug/*.patch; do
+            [ -f "$pat" ] || continue
+            echo "  patch: $pat"
+            patch -d "$t" -p1 --batch --forward --quiet < "$pat"
+          done
+          rm -rf "$t"
+
+      # An instruction this CPU lacks links clean and traps on the device
+      # (docs/HACKING.md lists this as a gate of every kernel change; it was
+      # run by hand until now). Seconds, in the image already pulled.
+      - name: ISA audit of vmlinux
+        run: packages/isa-audit.sh build/kernel-618/vmlinux

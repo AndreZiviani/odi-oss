@@ -29,6 +29,7 @@ jobs:
     permissions:
       contents: write # push the dep-bump branch
       pull-requests: write # open the PR
+      actions: write # start kernel.yml on the dep-bump branch
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -71,10 +72,13 @@ jobs:
         run: make test
 
       # Fetches and verifies whatever kernel/618/fetch.sh now points at
-      # (GPG included) without compiling it -- the same tradeoff the ci.yml
-      # clean-build job makes, for the same reason: a full kernel build is
-      # about an hour, which this weekly job does not need to spend to
-      # prove the new pin is genuine.
+      # (GPG included) without compiling it, as the ci.yml clean-build job
+      # does: this step proves the new pin is genuine, not that it builds.
+      # The compile is the job of kernel.yml. That workflow does not start by
+      # itself on the pull request opened below: a pull request created with
+      # GITHUB_TOKEN triggers no workflow. A workflow_dispatch is the
+      # exception, so the last step starts kernel.yml on the bump branch
+      # when the kernel pin or the toolchain image pin moved.
       - name: "Kernel pin: fetch and verify"
         if: steps.diff.outputs.changed == '1'
         run: make kernel-tree
@@ -115,3 +119,22 @@ jobs:
             --body "Automated (dependency-bump.yml): every pin tools/bump-deps.sh found behind, tested with \`make lint test kernel-tree busybox packages src releases\` before this PR was opened.
 
           $(cat /tmp/bump-summary.txt)"
+
+      # The pull request above starts no workflow (see "Kernel pin: fetch and
+      # verify"), but a workflow_dispatch sent with GITHUB_TOKEN does start
+      # one. kernel.yml then builds the bumped kernel on the bump branch, the
+      # build a pull request that changes kernel/ gets by itself. Only the
+      # two pins of its paths filter that tools/bump-deps.sh rewrites are
+      # looked at; a bump of busybox alone compiles no kernel.
+      - name: Start kernel.yml on the bump branch
+        if: steps.diff.outputs.changed == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch=$(git rev-parse --abbrev-ref HEAD)
+          if git diff --quiet HEAD~1 HEAD -- kernel/618/fetch.sh toolchain/images.env; then
+            echo "dependency-bump: kernel and toolchain pins unchanged, no kernel build"
+          else
+            gh workflow run kernel.yml --ref "$branch"
+            echo "dependency-bump: kernel.yml started on $branch"
+          fi

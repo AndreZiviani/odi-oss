@@ -114,7 +114,9 @@ CI (`.github/workflows/ci.yml`) runs `make lint`, `make test-host`,
 `packages`, `src` and `releases`), and adds `make src` on release tags and
 manual runs; the kernel and image are built there only by the
 `reproducible` job, on release tags and manual runs. It pulls the public freestanding
-toolchain image anonymously, no login needed.
+toolchain image anonymously, no login needed. The kernel alone is built by
+`.github/workflows/kernel.yml`, on the pull requests and pushes to `main`
+that change it (`docs/HACKING.md`, "What CI runs").
 
 Every ELF that reaches the image — kernel, busybox, dropbear, iproute2, our
 own tools — passes an instruction audit (`packages/isa-audit.sh`,
