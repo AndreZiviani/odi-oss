@@ -5,6 +5,15 @@ listed here.
 
 ## Unreleased
 
+- Tests: the fuzz job of omcid is a workflow of its own (`fuzz.yml`). It
+  fuzzes every push to main, and a pull request only when it changes what
+  the fuzz build reads, so a finding in code a pull request did not touch
+  no longer turns it red. The replay of the seeds runs each input in its
+  own process under a 10 s bound instead of one 300 s bound for all, so an
+  input that makes omcid loop fails within seconds and by name. The inputs
+  written by hand and the recorded ones carry `# expect:` lines, so the
+  replay shows they still reach the code they were written for (#501).
+
 - omcid: read-only `omcli services` reports the stored service rules,
   including direction, GEM ports and known WAN/PON tag positions. It
   distinguishes pending and dry-run rules and leaves unknown VIDs and

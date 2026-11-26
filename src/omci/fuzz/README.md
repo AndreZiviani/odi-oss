@@ -27,10 +27,11 @@ the Makefile here and none in the sources:
   functions and defines the include guard of `sys.h`, so the real one
   contributes nothing. `fakeos.c` has the bodies.
 - **`main` is `omcid_main`**, so the harness can call it.
-- **`memcpy`, `memset`, `memmove` of `io.c`** get other names: on the host
-  libc has them and the sanitizer checks the calls.
+- **`memcpy`, `memset`, `memmove`, `memcmp` of `io.c`** get other names: on
+  the host libc has them, the sanitizer checks the calls, and libFuzzer
+  sees the comparisons omcid makes with `memcmp`.
 
-A build for the stick sees none of this: the three are compiler flags of
+A build for the stick sees none of this: these are compiler flags of
 this Makefile, and `sys_host.h` refuses to compile for MIPS.
 
 ## The kernel model (`fakeos.c`)
@@ -113,7 +114,9 @@ input is and what it broke.
 A comment line `# expect: <text>` in such a file is something omcid has to
 print when the input runs, and the replay fails when it does not. A
 regression input should have one: the line omcid prints when it refuses or
-survives what the input does. Without it the input only fails where a
+survives what the input does. The inputs written by hand and the recorded
+ones have one or more too: a line only the code they were written for
+prints (an `event=` line where there is one). Without it the input only fails where a
 sanitizer sees the damage, which `make test-host` has none of, and it goes
 on passing when the layout it was aimed at has moved and it no longer
 reaches the code it was written for.
@@ -126,8 +129,10 @@ When the fuzzer finds something it saves the input under
 
 then say in a comment at the top what it is, fix omcid, and check with
 `make fuzz-omci-replay` (`build/replay*/fuzz_olt -v <file>` shows the run:
-what omcid printed and sent). The replay is under `timeout`, so an input
-that makes omcid loop fails the test instead of holding it. The working corpus the fuzzer grows
+what omcid printed and sent). Each input of the replay runs in its own
+process under `timeout` (`REPLAY_TIMEOUT`, 10 s; the longest takes under
+half a second), so an input that makes omcid loop fails the test within
+seconds, by name, instead of holding it. The working corpus the fuzzer grows
 (`build/corpus/`) is not kept in the tree; CI keeps it in a cache.
 
 ## What this does not cover
