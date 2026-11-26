@@ -484,7 +484,8 @@ int main(int argc, char **argv)
 		 * the QoS or the bridge connections, not from mcast_dirty,
 		 * which starts out set: from the start of omcid, a burst that
 		 * began inside the first REBUILD_MAX_S seconds would be rebuilt
-		 * half-way (bdgconn_rebuild() removes every service first). A
+		 * half-way (bdgconn_rebuild() withdraws every service the
+		 * half MIB has no rule for). A
 		 * change that sets only mcast_dirty (a Set of class 309 or 310
 		 * that leaves out the tag, the access lists and the profile
 		 * pointer) waits for the quiet second, as it always did. */
@@ -580,7 +581,7 @@ int main(int argc, char **argv)
 		}
 		/* A deactivate that failed is tried again every
 		 * PENDING_RETRY_S, on its own and not through a rebuild: that
-		 * one would tear down and re-add every live service. */
+		 * one would derive every live service again. */
 		if (now_s >= 0 && now_s - last_pending_s >= PENDING_RETRY_S) {
 			int had = 0;
 

@@ -801,7 +801,7 @@ fi
 
 # ------------------------------------------------ the upstream rebuild changes only what changed
 #
-# After the ISP1 provisioning, three Sets an OLT may send on a live line:
+# After the ISP1 provisioning, four Sets an OLT may send on a live line:
 #   A. a referenced queue (class 277) Set to the Weight it already has: the
 #      rebuild runs and sends nothing;
 #   B. the same queue Set to another Weight: one cmd 23 for that queue, in
@@ -870,16 +870,21 @@ fi
 
 # ------------------------------------------------ a bridge Set rebuilds only when it changes something
 #
-# After the ISP1 provisioning, three Sets an OLT may send on a live line:
+# After the ISP1 provisioning, four Sets an OLT may send on a live line:
 #   A. 802.1p mapper 1 Set to the IW TP pointers it already has (the
 #      session's own Set of them again): no rebuild;
 #   B. the same mapper's DSCP to P-bit map (attribute 11) Set to a new value:
 #      a rebuild;
 #   C. ext VLAN 1's received-frame table Set to the entry the session wrote
 #      last, which leaves the row's own copy of the attribute as it was: a
-#      rebuild all the same, a table attribute always counts as a change.
-# Before, any Set of a bridge class rebuilt, and a rebuild deactivates and
-# re-adds every service.
+#      rebuild all the same, a table attribute always counts as a change;
+#   D. the VLAN filter of class 84 0x0003 (the bridge port of GEM 1434)
+#      Set from VID 10 to 20: a rebuild.
+# Before, any Set of a bridge class rebuilt, and a rebuild deactivated and
+# re-added every service. A rebuild now sends only the services that
+# differ from what the driver holds. The DSCP map of B changes none of
+# the ISP1 rules, so B and C send nothing at all; D, a VLAN edit on one
+# service, sends that one service and leaves the others alone.
 if [ "${UPDATE:-0}" != 1 ]; then
 	cp "$FIX/omci-store-isp1.xml" /var/config/lastgood.xml
 	log=/tmp/omcid-drv-bdgset.log
@@ -904,15 +909,50 @@ if [ "${UPDATE:-0}" != 1 ]; then
 		fail=$((fail + 1))
 	fi
 
+	calls=$(grep -c '^drv 5[01] ' "$log")
 	inject_wait "$log" "$(printf '0e82480a008200010020%s%012d00000028%08d' \
 		"$(printf '%048d' 0 | tr 0 7)" 0 0)"
 	if wait_for "$log" 'bridge connections rebuilt' 30 $((n + 1)); then
 		echo "ok    a mapper Set that changes a value rebuilds the bridge connections"
+		if [ "$(grep -c '^drv 5[01] ' "$log")" = "$calls" ] &&
+		   grep 'bridge connections sent:' "$log" | tail -1 | grep -q 'sent: 0, unchanged and not sent: 6, withdrawn: 0'; then
+			echo "ok    and its rules are the ones the driver holds: none of the 6 is withdrawn or sent again"
+		else
+			echo "FAIL  a mapper Set: the rebuild sent bridge connection calls"
+			grep '^drv 5[01] ' "$log" | tail -n +$((calls + 1)) | cut -c1-40
+			fail=$((fail + 1))
+		fi
 	fi
 
+	calls=$(grep -c '^drv 5[01] ' "$log")
 	inject_wait "$log" "$(sed -n 's/^ed26\(480a00ab0001\)/0e83\1/p' "$FIX/omci-session-isp1.txt")"
 	if wait_for "$log" 'bridge connections rebuilt' 30 $((n + 2)); then
 		echo "ok    a Set of the class 171 table rebuilds, even with the entry it already holds"
+		if [ "$(grep -c '^drv 5[01] ' "$log")" = "$calls" ] &&
+		   grep 'bridge connections sent:' "$log" | tail -1 | grep -q 'sent: 0, .* withdrawn: 0'; then
+			echo "ok    and that rebuild leaves every service as the driver holds it"
+		else
+			echo "FAIL  an unchanged rebuild sent bridge connection calls"
+			grep 'bridge connections sent:' "$log" | tail -1
+			fail=$((fail + 1))
+		fi
+	fi
+
+	# D. a VLAN edit: the filter of class 84 0x0003 Set from VID 10 to 20.
+	calls=$(grep -c '^drv 5[01] ' "$log")
+	inject_wait "$log" "$(printf '0e84480a005400038000%s%056d00000028%08d' 0014 0 0)"
+	if wait_for "$log" 'bridge connections rebuilt' 30 $((n + 3)); then
+		new=$(grep '^drv 5[01] ' "$log" | tail -n +$((calls + 1)))
+		if [ "$(printf '%s\n' "$new" | grep -c .)" = 1 ] &&
+		   printf '%s\n' "$new" | grep -q '^drv 51 160 000000010000000000000004' &&
+		   grep 'bridge connections sent:' "$log" | tail -1 | grep -q 'sent: 1, unchanged and not sent: 5, withdrawn: 0'; then
+			echo "ok    a VLAN edit re-sends its one service (4) in place, the 5 others untouched"
+		else
+			echo "FAIL  a VLAN edit: the rebuild's driver calls were"
+			printf '%s\n' "$new" | cut -c1-40
+			grep 'bridge connections sent:' "$log" | tail -1
+			fail=$((fail + 1))
+		fi
 	fi
 	omcid_stop "$pid"
 fi
