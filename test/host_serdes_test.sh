@@ -814,33 +814,93 @@ t "status: keeper=none without a pid file" "keeper=none" "$(sh "$S" status)"
 # A boot watch that falls back to Fiber 1G spawns the keeper too: it
 # watches the Fiber 1G link. A host that ran its port at 1G while the stick
 # booted and moves it to 2.5G later drops that link; the keeper starts the
-# boot watch again from 2500BASE-X.
-newboot
-echo f1g > "$T/model"
-sh "$S" boot > /dev/null 2>&1
-spawned_with watch > /dev/null
-: > "$T/spawned"
-sh "$S" watch > /dev/null 2>&1
-t "keeper: spawned after a fallback to Fiber 1G" "^fallback keep" "$(st event) $(spawned_with keep)"
+# boot watch again from 2500BASE-X once it read down on FB_DOWN_TICKS (3)
+# ticks in a row.
+# fb_boot: a 2500basex boot whose watch falls back to Fiber 1G.
+fb_boot() {
+	newboot
+	echo f1g > "$T/model"
+	sh "$S" boot > /dev/null 2>&1
+	spawned_with watch > /dev/null
+	: > "$T/spawned"
+	sh "$S" watch > /dev/null 2>&1
+	fb_spawned=$(spawned_with keep)
+	: > "$T/spawned"
+}
+# model_from SECONDS MODEL [UNTIL BACK]: an everyhook that sets MODEL from
+# SECONDS from now on, and BACK from UNTIL on.
+model_from() {
+	up=$(cut -d. -f1 "$T/uptime")
+	{
+		echo '#!/bin/sh'
+		echo "u=\$(cut -d. -f1 \"$T/uptime\")"
+		echo "[ \$u -lt $((up + $1)) ] || echo $2 > \"$T/model\""
+		[ -z "${3:-}" ] || echo "[ \$u -lt $((up + $3)) ] || echo $4 > \"$T/model\""
+	} > "$T/everyhook"
+	chmod +x "$T/everyhook"
+}
+fb_boot
+t "keeper: spawned after a fallback to Fiber 1G" "^fallback keep" "$(st event) $fb_spawned"
+t "  ... the state: the watch saw the link" "^1$" "$(st fb_linked)"
 : > "$T/spawned"
 : > "$T/sdsset"
-KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+KEEP_TICKS=4 sh "$S" keep > /dev/null 2>&1
 t "keeper, fallback with its 1G link up: nothing written, nothing spawned" "^fallback fiber1g 1 $" \
 	"$(st event) $(st running) $(st fallback) $(cat "$T/sdsset")$(spawned_none)"
-# The same keeper sees the link up, then the host moves its port to 2.5G.
-up=$(cut -d. -f1 "$T/uptime")
-printf '#!/bin/sh\n[ "$(cut -d. -f1 "%s/uptime")" -lt %s ] || echo x2500 > "%s/model"\n' "$T" "$((up + 8))" "$T" > "$T/everyhook"
-chmod +x "$T/everyhook"
+# The host moves its port to 2.5G right after the watch saw the 1G link,
+# before the keeper's first read (the UniFi script loads its module once
+# the 1G carrier is up).
+fb_boot
+echo x2500 > "$T/model"
+: > "$T/spawned"
 : > "$T/kmsg"
+KEEP_TICKS=2 sh "$S" keep > /dev/null 2>&1
+t "keeper, fallback link down for two ticks: nothing yet" "^fallback fiber1g $" \
+	"$(st event) $(st running) $(spawned_none)"
 KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
-rm -f "$T/everyhook"
-t "keeper, fallback link lost: the boot watch again, from 2500BASE-X" "^fallback_lost watch 2500basex 0 watch" \
+t "keeper, link gone before its first read, down three ticks: the boot watch again, from 2500BASE-X" \
+	"^fallback_lost watch 2500basex 0 watch" \
 	"$(st event) $(st phase) $(st running) $(st fallback) $(spawned_with watch)"
 t "  ... logged" "event=fallback_lost .*watching the 2500BASE-X sync again" "$(cat "$T/kmsg")"
 t "  ... the port forced, auto-negotiation off" "^1 0$" "$(p host_forced) $(p host_autoneg)"
-t "  ... the key kept" "^2500basex$" "$(key)"
+t "  ... the key kept, fb_linked cleared" "^2500basex $" "$(key) $(st fb_linked)"
 sh "$S" watch > /dev/null 2>&1
 t "  ... and the watch syncs in 2500BASE-X" "^serdes_link 0 2500basex steady$" "$(st event) $(st fallback) $(st running) $(st phase)"
+# A 1G host whose link drops for less than three ticks: left alone.
+fb_boot
+: > "$T/spawned"
+: > "$T/sdsset"
+model_from 3 none 12 f1g
+KEEP_TICKS=6 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/everyhook"
+t "keeper, 1G link down for two ticks, then back: nothing written, no watch" "^fallback fiber1g $" \
+	"$(st event) $(st running) $(cat "$T/sdsset")$(spawned_none)"
+# The state file cannot be written: the port goes back to Fiber 1G and the
+# file keeps the fallback.
+fb_boot
+echo x2500 > "$T/model"
+: > "$T/spawned"
+: > "$T/nomv"
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/nomv"
+t "keeper, the switch not saved: back on Fiber 1G, no watch" "^fallback fiber1g 1 steady 0 $" \
+	"$(st event) $(st running) $(st fallback) $(st phase) $(p host_forced) $(spawned_none)"
+# After the watch started again and found nothing (fallback_nolink), the
+# keeper leaves the link alone, as after a boot that never linked.
+fb_boot
+echo x2500 > "$T/model"
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+echo none > "$T/model"
+sh "$S" watch > /dev/null 2>&1
+t "keeper, the watch again finds nothing: fallback_nolink, fb_linked empty" "^fallback_nolink fiber1g $" \
+	"$(st event) $(st running) $(st fb_linked)"
+: > "$T/spawned"
+: > "$T/sdsset"
+model_from 3 f1g 8 none
+KEEP_TICKS=6 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/everyhook"
+t "  ... a 1G link up and down after it: nothing written, no watch" "^fallback_nolink $" \
+	"$(st event) $(cat "$T/sdsset")$(spawned_none)"
 # A keeper that has not seen the 1G link up (a fallback_nolink, or a link
 # that never came back) leaves it alone.
 newboot
@@ -849,23 +909,25 @@ sh "$S" boot > /dev/null 2>&1; sh "$S" watch > /dev/null 2>&1
 spawned_with watch > /dev/null
 : > "$T/spawned"
 : > "$T/sdsset"
-KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+KEEP_TICKS=4 sh "$S" keep > /dev/null 2>&1
 t "keeper, fallback_nolink: nothing written, no watch" "^fallback_nolink fiber1g $" \
 	"$(st event) $(st running) $(cat "$T/sdsset")$(spawned_none)"
-# A host-autoneg.sh trial drops the 1G link on purpose: left alone.
-newboot
-echo f1g > "$T/model"
-sh "$S" boot > /dev/null 2>&1; sh "$S" watch > /dev/null 2>&1
-spawned_with keep > /dev/null
+# A host-autoneg.sh trial drops the 1G link on purpose: no tick of it
+# counts, also when the trial ends with the link still renegotiating.
+fb_boot
 : > "$T/spawned"
 : > "$T/sdsset"
+echo none > "$T/model"
 printf 'phase=trial\nrunning=on\n' > "$AN_STATE"
+KEEP_TICKS=4 sh "$S" keep > /dev/null 2>&1
+t "keeper, fallback link down during a host-autoneg trial: nothing written" "^fallback fiber1g $" \
+	"$(st event) $(st running) $(cat "$T/sdsset")$(spawned_none)"
 up=$(cut -d. -f1 "$T/uptime")
-printf '#!/bin/sh\n[ "$(cut -d. -f1 "%s/uptime")" -lt %s ] || echo none > "%s/model"\n' "$T" "$((up + 8))" "$T" > "$T/everyhook"
+printf '#!/bin/sh\n[ "$(cut -d. -f1 "%s/uptime")" -lt %s ] || printf "phase=steady\\nrunning=on\\n" > "%s"\n' "$T" "$((up + 8))" "$AN_STATE" > "$T/everyhook"
 chmod +x "$T/everyhook"
 KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
 rm -f "$T/everyhook"
-t "keeper, fallback link down during a host-autoneg trial: nothing written" "^fallback fiber1g $" \
+t "  ... the trial ends, two ticks down after it: nothing yet" "^fallback fiber1g $" \
 	"$(st event) $(st running) $(cat "$T/sdsset")$(spawned_none)"
 rm -f "$AN_STATE"
 # A confirmed 2500basex trial spawns it; a confirmed hisgmii trial does not.

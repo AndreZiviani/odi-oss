@@ -1637,7 +1637,7 @@ diagnostics bundle (`host-link.txt`):
 | `link` (`status` only) | `1`, `0` or `unknown`, from `link_source` |
 | `link_source` (`status` only) | `host_link` (Fiber 1G: the kernel parameter), `serdes_sync` (2500BASE-X: bit 17 of 0x214) or `none` (HiSGMII: `link` is `unknown`) |
 | `safe_mode_boot` (`status` only) | `1` on a safe-mode boot (`safe-mode.sh`) |
-| `keeper` (`status` only) | the pid of the 2500BASE-X keeper (`serdes_lost` and `fallback_lost` below), or `none`: nothing starts one again once it has ended |
+| `keeper` (`status` only) | the pid of the keeper (`serdes_lost` and `fallback_lost` below), or `none`: nothing starts one again once it has ended |
 
 Every event is one line to the kernel log (`host-serdes: event=<name>
 setting=... running=... <text>`, so dmesg, the ramlog and syslog through
@@ -1650,7 +1650,7 @@ klogd), at notice:
 | `serdes_lost`, `serdes_back` | the keeper (after a sync of the boot watch or a confirmed `2500basex` trial): the 2500BASE-X sync was lost and the lane is re-latched every 5 s; the sync is back |
 | `watch_switch` | no link for 30 s; the watch switches mode |
 | `fallback` | the host linked only in Fiber 1G; the key stays 2500basex |
-| `fallback_lost` | the Fiber 1G link of a fallback went down (the keeper); the boot watch starts again from 2500BASE-X |
+| `fallback_lost` | the Fiber 1G link of a fallback stayed down for three keeper ticks (the keeper); the boot watch starts again from 2500BASE-X |
 | `fallback_nolink` | no link in either mode for 10 minutes; stays on Fiber 1G, the key unchanged |
 | `safe_mode_boot` | a safe-mode boot: Fiber 1G, nothing applied, trials refused |
 | `trial_started`, `trial_expired`, `trial_reverted`, `trial_confirmed`, `trial_failed` | a trial and how it ended |

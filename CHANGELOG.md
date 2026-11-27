@@ -9,12 +9,15 @@ listed here.
   boot watch again, from 2500BASE-X, once that Fiber 1G link goes down
   (`event=fallback_lost`). A host that ran its port at 1G while the stick
   booted and moved it to 2.5G later left the stick on Fiber 1G with no
-  link until it rebooted. That is a UniFi Cloud Gateway Fiber whose SFP+
-  port a third-party tweak forces to 2.5G some time after the gateway's
-  own boot; it happened twice to an LL-XS2510, on v1.19.0 and
-  v1.20.0-beta.1. The keeper now runs after such a fallback too and reads
-  `host_link` every 5 s; a link seen up, then down twice a second apart,
-  is the trigger. A working 1G link, a `fallback_nolink` and a
+  link until it rebooted. That is a UniFi Cloud Gateway Fiber with the
+  public SGMII+ patch (Ozark-Connect/unifi-perf-tweaks, also deployed by
+  Network Optimizer): its boot script waits up to 90 s for a 1G carrier
+  and then switches the port to 2.5G. It happened twice to an LL-XS2510,
+  on v1.19.0 and v1.20.0-beta.1. The keeper now runs after such a
+  fallback too and reads `host_link` every 5 s; the link the watch saw
+  counts, and a read down on three ticks in a row (10 s and more), and
+  again under the lock, is the trigger. A working 1G link, a short drop,
+  a `fallback_nolink` (also after a watch started again) and a
   `host-autoneg.sh` trial or boot watch are left alone. Host-tested
   (`test/host_serdes_test.sh`).
 
