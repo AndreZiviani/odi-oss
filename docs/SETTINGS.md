@@ -877,7 +877,9 @@ rebooted. A working 1G link is not touched, nor a shorter drop, nor a
 counts while `host-autoneg.sh` runs a trial or its boot watch. The cost
 for a host that really runs 1G: a drop of 10 s or more (a host reboot, an
 OLT lock with `OMCI_UNI_LOCK=1`) runs one more watch of up to 10 minutes
-before the stick settles on Fiber 1G again.
+before the stick settles on Fiber 1G again. A 2500BASE-X sync ends the
+boot watch only when bit 17 reads set twice, a second apart: a lane out
+of sync can read it set once (docs/SWITCH.md, "The re-latch").
 
 **After the sync.** Once 2500BASE-X is in sync, by the boot watch or a
 confirmed `2500basex` trial, a keeper follows it while the stick keeps

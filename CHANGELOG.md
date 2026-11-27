@@ -18,8 +18,10 @@ listed here.
   counts, and a read down on three ticks in a row (10 s and more), and
   again under the lock, is the trigger. A working 1G link, a short drop,
   a `fallback_nolink` (also after a watch started again) and a
-  `host-autoneg.sh` trial or boot watch are left alone. Host-tested
-  (`test/host_serdes_test.sh`).
+  `host-autoneg.sh` trial or boot watch are left alone. The boot watch
+  also reads a 2500BASE-X sync again a second later, so one set read of
+  bit 17 from a lane out of sync no longer ends it in 2500BASE-X with
+  the host at 1G. Host-tested (`test/host_serdes_test.sh`).
 
 - omcid: a rebuild of the bridge connections no longer takes every
   service down first. It derives the whole table as before, then withdraws

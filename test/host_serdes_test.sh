@@ -866,6 +866,25 @@ t "  ... the port forced, auto-negotiation off" "^1 0$" "$(p host_forced) $(p ho
 t "  ... the key kept, fb_linked cleared" "^2500basex $" "$(key) $(st fb_linked)"
 sh "$S" watch > /dev/null 2>&1
 t "  ... and the watch syncs in 2500BASE-X" "^serdes_link 0 2500basex steady$" "$(st event) $(st fallback) $(st running) $(st phase)"
+# One keeper sees the 1G link up, then the host moves its port to 2.5G.
+fb_boot
+model_from 8 x2500
+KEEP_TICKS=5 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/everyhook"
+t "keeper, 1G link up, then gone three ticks: the boot watch again" "^fallback_lost watch 2500basex" \
+	"$(st event) $(st phase) $(st running)"
+# A boot watch that reads bit 17 set once, with the host at 1G: not a sync.
+newboot
+echo f1g > "$T/model"
+sh "$S" boot > /dev/null 2>&1
+spawned_with watch > /dev/null
+up=$(cut -d. -f1 "$T/uptime")
+printf '#!/bin/sh\nif [ "$(cut -d. -f1 "%s/uptime")" = %s ]; then echo x2500; else echo f1g; fi > "%s/model"\n' "$T" "$((up + 3))" "$T" > "$T/everyhook"
+chmod +x "$T/everyhook"
+sh "$S" watch > /dev/null 2>&1
+rm -f "$T/everyhook"
+t "watch, bit 17 set for one read with the host at 1G: no sync, the fallback" "^fallback 1 fiber1g$" \
+	"$(st event) $(st fallback) $(st running)"
 # A 1G host whose link drops for less than three ticks: left alone.
 fb_boot
 : > "$T/spawned"

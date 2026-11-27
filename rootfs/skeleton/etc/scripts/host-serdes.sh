@@ -475,7 +475,7 @@ link_source() {
 clear_trial() { trial_mode='' trial_prev='' trial_id='' trial_deadline=''; }
 
 load() {
-	setting=fiber1g running=fiber1g phase=steady fallback=0
+	setting=fiber1g running=fiber1g phase=steady fallback=0 fb_linked=''
 	clear_trial
 	watch_until='' ev='' ev_up='' ev_msg=''
 	state_load
@@ -565,7 +565,11 @@ watch() {
 	while :; do
 		i=0
 		while :; do
-			if [ "$(link "$mode")" = 1 ]; then
+			# Bit 17 of a lane out of sync can read set once (docs/SWITCH.md,
+			# "The re-latch"): in 2500BASE-X a sync is read again a second
+			# later.
+			if [ "$(link "$mode")" = 1 ] && { [ "$mode" != 2500basex ] ||
+				{ "$SLEEP" 1; i=$((i + 1)); [ "$(link 2500basex)" = 1 ]; }; }; then
 				lock
 				load
 				if [ "$phase" != watch ]; then
