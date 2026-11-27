@@ -5,6 +5,24 @@ listed here.
 
 ## Unreleased
 
+- Host SerDes: a `2500basex` boot that fell back to Fiber 1G starts its
+  boot watch again, from 2500BASE-X, once that Fiber 1G link goes down
+  (`event=fallback_lost`). A host that ran its port at 1G while the stick
+  booted and moved it to 2.5G later left the stick on Fiber 1G with no
+  link until it rebooted. That is a UniFi Cloud Gateway Fiber with the
+  public SGMII+ patch (Ozark-Connect/unifi-perf-tweaks, also deployed by
+  Network Optimizer): its boot script waits up to 90 s for a 1G carrier
+  and then switches the port to 2.5G. It happened twice to an LL-XS2510,
+  on v1.19.0 and v1.20.0-beta.1. The keeper now runs after such a
+  fallback too and reads `host_link` every 5 s; the link the watch saw
+  counts, and a read down on three ticks in a row (10 s and more), and
+  again under the lock, is the trigger. A working 1G link, a short drop,
+  a `fallback_nolink` (also after a watch started again) and a
+  `host-autoneg.sh` trial or boot watch are left alone. The boot watch
+  also reads a 2500BASE-X sync again a second later, so one set read of
+  bit 17 from a lane out of sync no longer ends it in 2500BASE-X with
+  the host at 1G. Host-tested (`test/host_serdes_test.sh`).
+
 - omcid: a rebuild of the bridge connections no longer takes every
   service down first. It derives the whole table as before, then withdraws
   only the services the new table no longer has, sends the changed ones
