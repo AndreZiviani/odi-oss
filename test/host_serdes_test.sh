@@ -34,7 +34,8 @@
 # sequence of each, value for value and in order; the default writes
 # nothing to the port side; a bad value, a safe-mode boot, no kernel
 # parameter, sds.off); the 2500basex boot watch (sync, the fallback to
-# Fiber 1G, a host that comes up late, no host at all); the trial (expiry,
+# Fiber 1G, a host that comes up late, no host at all, the watch again
+# once the fallback loses its link); the trial (expiry,
 # confirm, revert, a sequence that does not read back, a state file that
 # cannot be written after the switch, every refusal); the
 # auto-negotiation handed back to host-autoneg.sh in Fiber 1G; the keeper
@@ -810,14 +811,63 @@ echo "$dead" > "$KEEP_PID"
 t "status: keeper=none with the pid file of a keeper gone" "keeper=none" "$(sh "$S" status)"
 rm -f "$KEEP_PID"
 t "status: keeper=none without a pid file" "keeper=none" "$(sh "$S" status)"
-# A boot watch that falls back to Fiber 1G spawns no keeper.
+# A boot watch that falls back to Fiber 1G spawns the keeper too: it
+# watches the Fiber 1G link. A host that ran its port at 1G while the stick
+# booted and moves it to 2.5G later drops that link; the keeper starts the
+# boot watch again from 2500BASE-X.
 newboot
 echo f1g > "$T/model"
 sh "$S" boot > /dev/null 2>&1
 spawned_with watch > /dev/null
 : > "$T/spawned"
 sh "$S" watch > /dev/null 2>&1
-t "keeper: none after a fallback to Fiber 1G" "^fallback $" "$(st event) $(spawned_none)"
+t "keeper: spawned after a fallback to Fiber 1G" "^fallback keep" "$(st event) $(spawned_with keep)"
+: > "$T/spawned"
+: > "$T/sdsset"
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+t "keeper, fallback with its 1G link up: nothing written, nothing spawned" "^fallback fiber1g 1 $" \
+	"$(st event) $(st running) $(st fallback) $(cat "$T/sdsset")$(spawned_none)"
+# The same keeper sees the link up, then the host moves its port to 2.5G.
+up=$(cut -d. -f1 "$T/uptime")
+printf '#!/bin/sh\n[ "$(cut -d. -f1 "%s/uptime")" -lt %s ] || echo x2500 > "%s/model"\n' "$T" "$((up + 8))" "$T" > "$T/everyhook"
+chmod +x "$T/everyhook"
+: > "$T/kmsg"
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/everyhook"
+t "keeper, fallback link lost: the boot watch again, from 2500BASE-X" "^fallback_lost watch 2500basex 0 watch" \
+	"$(st event) $(st phase) $(st running) $(st fallback) $(spawned_with watch)"
+t "  ... logged" "event=fallback_lost .*watching the 2500BASE-X sync again" "$(cat "$T/kmsg")"
+t "  ... the port forced, auto-negotiation off" "^1 0$" "$(p host_forced) $(p host_autoneg)"
+t "  ... the key kept" "^2500basex$" "$(key)"
+sh "$S" watch > /dev/null 2>&1
+t "  ... and the watch syncs in 2500BASE-X" "^serdes_link 0 2500basex steady$" "$(st event) $(st fallback) $(st running) $(st phase)"
+# A keeper that has not seen the 1G link up (a fallback_nolink, or a link
+# that never came back) leaves it alone.
+newboot
+echo none > "$T/model"
+sh "$S" boot > /dev/null 2>&1; sh "$S" watch > /dev/null 2>&1
+spawned_with watch > /dev/null
+: > "$T/spawned"
+: > "$T/sdsset"
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+t "keeper, fallback_nolink: nothing written, no watch" "^fallback_nolink fiber1g $" \
+	"$(st event) $(st running) $(cat "$T/sdsset")$(spawned_none)"
+# A host-autoneg.sh trial drops the 1G link on purpose: left alone.
+newboot
+echo f1g > "$T/model"
+sh "$S" boot > /dev/null 2>&1; sh "$S" watch > /dev/null 2>&1
+spawned_with keep > /dev/null
+: > "$T/spawned"
+: > "$T/sdsset"
+printf 'phase=trial\nrunning=on\n' > "$AN_STATE"
+up=$(cut -d. -f1 "$T/uptime")
+printf '#!/bin/sh\n[ "$(cut -d. -f1 "%s/uptime")" -lt %s ] || echo none > "%s/model"\n' "$T" "$((up + 8))" "$T" > "$T/everyhook"
+chmod +x "$T/everyhook"
+KEEP_TICKS=3 sh "$S" keep > /dev/null 2>&1
+rm -f "$T/everyhook"
+t "keeper, fallback link down during a host-autoneg trial: nothing written" "^fallback fiber1g $" \
+	"$(st event) $(st running) $(cat "$T/sdsset")$(spawned_none)"
+rm -f "$AN_STATE"
 # A confirmed 2500basex trial spawns it; a confirmed hisgmii trial does not.
 for m in 2500basex hisgmii; do
 	setkey ""

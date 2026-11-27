@@ -69,7 +69,9 @@
 #                      back, or disabled and enabled) is re-latched every
 #                      RESYNC_S seconds until it syncs again. It never
 #                      changes the mode: a host port left at 1G is for a
-#                      trial or the next boot.
+#                      trial or the next boot. After a fallback that
+#                      linked in Fiber 1G it watches that link instead,
+#                      and once it goes down starts the boot watch again.
 #     safe mode        safe-mode.sh: three short boots in a row with a mode
 #                      other than fiber1g make the next boot a recovery
 #                      boot, which runs fiber1g and removes the key, as it
@@ -579,7 +581,7 @@ watch() {
 				fi
 				save
 				unlock
-				[ "$mode" != 2500basex ] || spawn keep
+				spawn keep
 				return 0
 			fi
 			[ "$i" -lt "$WATCH_S" ] || break
@@ -807,8 +809,18 @@ confirm() {
 # skips a tick when the lock is busy, and it ends once HOST_SERDES or the
 # running mode, in phase steady, is no longer 2500basex. One keeper at a
 # time, by a pid file (KEEP_PID) rather than a respawn entry: it starts
-# only once the boot watch saw the sync or a 2500basex trial was
+# only once the boot watch saw a link or a 2500basex trial was
 # confirmed, not with the boot, and it ends by itself.
+#
+# The fallback. A boot watch that linked in Fiber 1G (fallback=1) leaves
+# the keeper watching host_link instead. A host that ran its port at 1G
+# while the stick booted and moves it to 2.5G later (a UniFi gateway whose
+# SFP+ port a tweak forces to 2.5G some time after its own boot) drops
+# that link, and the stick stayed on Fiber 1G with no link until it
+# rebooted. A Fiber 1G link seen up, then read down twice a second apart,
+# starts the boot watch again from 2500BASE-X, with its own WATCH_MAX_S;
+# a working 1G link is never touched, and a fallback that never linked
+# (fallback_nolink) is left as it is.
 keep() {
 	if [ -f "$KEEP_PID" ]; then
 		k=$(cat "$KEEP_PID" 2>/dev/null)
@@ -818,7 +830,7 @@ keep() {
 		fi
 	fi
 	echo $$ > "$KEEP_PID" 2>/dev/null || say "could not write $KEEP_PID" >&2
-	k_lost='' k_n=0
+	k_lost='' k_n=0 k_fb=''
 	while :; do
 		if [ "$KEEP_TICKS" -gt 0 ]; then
 			[ "$k_n" -lt "$KEEP_TICKS" ] || break
@@ -828,9 +840,14 @@ keep() {
 		load
 		[ "$setting" = 2500basex ] || break
 		if [ "$phase" != steady ]; then
-			k_lost=''
+			k_lost='' k_fb=''
 			continue
 		fi
+		if [ "$running" = fiber1g ] && [ "$fallback" = 1 ]; then
+			keep_fallback
+			continue
+		fi
+		k_fb=''
 		[ "$running" = 2500basex ] || break
 		k_l=$(link 2500basex)
 		# One read is not a change yet, either way: a lane out of sync
@@ -869,6 +886,39 @@ keep() {
 	done
 	[ "$(cat "$KEEP_PID" 2>/dev/null)" != "$$" ] || rm -f "$KEEP_PID"
 	return 0
+}
+
+# keep_fallback: one tick of the keeper on a Fiber 1G fallback. k_fb is
+# set once the Fiber 1G link was read up; a link read down twice a second
+# apart after that starts the boot watch again, under the lock, from
+# 2500BASE-X. The keeper goes on: the watch spawns no second one.
+keep_fallback() {
+	f_l=$(link fiber1g)
+	if [ "$f_l" = 1 ]; then
+		k_fb=1
+		return 0
+	fi
+	[ "$f_l" = 0 ] && [ -n "$k_fb" ] || return 0
+	"$SLEEP" 1
+	[ "$(link fiber1g)" = 0 ] || return 0
+	lock_try
+	[ $? != 1 ] || return 0
+	load
+	# A host-autoneg.sh trial or boot watch drops the link on purpose.
+	if [ "$phase" = steady ] && [ "$setting" = 2500basex ] &&
+		[ "$running" = fiber1g ] && [ "$fallback" = 1 ] &&
+		{ case $(an_field phase steady) in watch|trial) false ;; esac; }; then
+		switch_to 2500basex || say "2500BASE-X: its $unverified" >&2
+		running=2500basex fallback=0 phase=watch
+		watch_until=$(( $(uptime_s) + WATCH_MAX_S ))
+		event fallback_lost "the Fiber 1G link of the fallback is down; watching the 2500BASE-X sync again for ${WATCH_S} s"
+		save
+		unlock
+		k_fb=''
+		spawn watch
+		return 0
+	fi
+	unlock
 }
 
 # keep_event NAME TEXT: an event of the keeper, saved under the lock in
