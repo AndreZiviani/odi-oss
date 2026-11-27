@@ -5,6 +5,12 @@ listed here.
 
 ## Unreleased
 
+- Docs: what the host reads from the module EEPROM depends on the board.
+  A v08 board serves the module's own A0h page (1200 MBd as the module of
+  an LL-XS2510 reads), the LL-XS2510's host reads a fixed board EEPROM
+  (`OEM` / `XPON-Stick`, 1300 MBd) that `SFP_HOST_DDM` cannot reach. SETTINGS.md
+  and QUALIFICATION.md said the module page reads 1300 MBd (#482).
+
 - omcid: a rebuild of the bridge connections no longer takes every
   service down first. It derives the whole table as before, then withdraws
   only the services the new table no longer has, sends the changed ones

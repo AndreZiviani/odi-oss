@@ -768,18 +768,26 @@ speaks. `HOST_SERDES` picks another:
   only with this sequence, a media converter of 2022 with it and without
   it (without the 3.125G page, the receive pulse and 0x21808 bit 8; which
   of the three the newer hosts need is not isolated). The RB5009 ran with
-  a module EEPROM whose A0h byte 12 read 0x1F (3100 MBd); this image
-  reports 1300 MBd ("What the host reads from the module", below), so on a
-  host that picks its rate from the EEPROM the result does not carry over.
+  a module EEPROM whose A0h byte 12 read 0x1F (3100 MBd); the EEPROMs of
+  these sticks report 1200 or 1300 MBd ("What the host reads from the
+  module", below), so on a host that picks its rate from the EEPROM the
+  result does not carry over.
   Before 0x21808 was written, on a Luleey LL-XS2510 against a
   2.5G router port (a UniFi gateway whose SFP+ port a third-party tweak
   runs at 2.5G) it synced but passed no frames, where `2500basex` linked,
   and an RB5009 had the link up and received nothing; the LL-XS2510 has
   not been run since.
 
-**What the host reads from the module.** The SFP's own EEPROM page the
-host reads (A0h, fixed memory) advertises the module as 1000BASE-LX at a
-nominal 1300 MBd, and this image cannot change it. A host that picks its
+**What the host reads from the module.** Which EEPROM the host reads
+depends on the board. On the boards that wire the SoC's SFP EEPROM
+emulation (v08, "Host-side diagnostics" below), it reads the module's
+own A0h page as `SFP_HOST_DDM` serves it; on the module of an LL-XS2510,
+read from the SoC, that page says `ODI` / `DFP-34X-2C2` at a nominal
+1200 MBd (byte 12 0x0c). On the other boards it reads a separate fixed
+EEPROM that the SoC cannot reach; on that LL-XS2510 the host reads `OEM`
+/ `XPON-Stick`, 1000BASE-LX at 1300 MBd (byte 12 0x0d), with A2h 123 to
+127 at `ff ff ff ff 02`, so `SFP_HOST_DDM` changes nothing there. This
+image changes neither page with `HOST_SERDES`. A host that picks its
 port mode from that page (Linux phylink and its SFP driver, for example)
 may run its port at 1000BASE-X whatever `HOST_SERDES` says; a host whose
 port mode is set by hand (a router SFP port forced to 2.5G, as in the
